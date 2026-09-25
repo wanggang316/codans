@@ -22,10 +22,12 @@ nonisolated struct ManifestLocation: Equatable, Sendable {
   }
 }
 
-/// Answers a `ManifestRequest` for one directory. The only place that touches
-/// a filesystem — parsers stay pure and never know which reader fed them.
+/// Answers a `ManifestRequest` for a directory tree: every requested file name
+/// found at the root or in a subdirectory `scope` allows, keyed by its path
+/// relative to `directory`. The only place that touches a filesystem — parsers
+/// stay pure and never know which reader fed them.
 nonisolated protocol ManifestReader: Sendable {
-  func read(_ request: ManifestRequest, in directory: String) async -> ManifestSnapshot
+  func read(_ request: ManifestRequest, in directory: String, scope: ManifestScope) async -> ManifestSnapshot
 }
 
 /// Manifests are small text files; anything bigger is generated or vendored
@@ -37,26 +39,46 @@ nonisolated enum ManifestReadLimits {
 // MARK: - Local
 
 nonisolated struct LocalManifestReader: ManifestReader {
-  func read(_ request: ManifestRequest, in directory: String) async -> ManifestSnapshot {
-    let base = URL(fileURLWithPath: directory, isDirectory: true)
+  func read(_ request: ManifestRequest, in directory: String, scope: ManifestScope) async -> ManifestSnapshot {
     let fileManager = FileManager.default
+    let contentNames = Set(request.contentPaths)
+    let presenceNames = Set(request.presencePaths)
     var contents: [String: String] = [:]
     var present = Set<String>()
 
-    for path in request.contentPaths {
-      let url = base.appendingPathComponent(path)
+    // Breadth-first to `scope.maxDepth`, listing each directory once rather
+    // than probing every requested name in every directory.
+    var queue: [(relative: String, depth: Int)] = [("", 0)]
+    while !queue.isEmpty {
+      let (relative, depth) = queue.removeFirst()
+      let url = relative.isEmpty
+        ? URL(fileURLWithPath: directory, isDirectory: true)
+        : URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent(relative, isDirectory: true)
       guard
-        let attributes = try? fileManager.attributesOfItem(atPath: url.path),
-        attributes[.type] as? FileAttributeType == .typeRegular
+        let entries = try? fileManager.contentsOfDirectory(
+          at: url, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
       else { continue }
-      present.insert(path)
-      let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
-      if size <= ManifestReadLimits.maxFileBytes, let text = try? String(contentsOf: url, encoding: .utf8) {
-        contents[path] = text
+      for entry in entries {
+        let name = entry.lastPathComponent
+        let path = relative.isEmpty ? name : relative + "/" + name
+        let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+        if values?.isDirectory == true {
+          // Symlinked directories are skipped: they can loop, and they point
+          // outside the checkout often enough to be noise.
+          if depth < scope.maxDepth, values?.isSymbolicLink != true, scope.shouldDescend(into: name) {
+            queue.append((path, depth + 1))
+          }
+        } else if contentNames.contains(name) {
+          present.insert(path)
+          if (values?.fileSize ?? 0) <= ManifestReadLimits.maxFileBytes,
+            let text = try? String(contentsOf: entry, encoding: .utf8)
+          {
+            contents[path] = text
+          }
+        } else if presenceNames.contains(name) {
+          present.insert(path)
+        }
       }
-    }
-    for path in request.presencePaths where fileManager.fileExists(atPath: base.appendingPathComponent(path).path) {
-      present.insert(path)
     }
     return ManifestSnapshot(contents: contents, presentPaths: present)
   }
@@ -77,36 +99,46 @@ nonisolated struct RemoteManifestReader: ManifestReader {
   static let fileMarker = "===CODANS-MANIFEST "
   static let presentMarker = "===CODANS-PRESENT "
   static let markerSuffix = "==="
-  /// Separates content paths from presence paths in the positional list.
-  static let presenceSeparator = "--presence--"
 
-  /// `$1` is the directory; then content paths, the separator, presence
-  /// paths. Paths travel as positionals so they never touch script parsing.
-  static let script = """
-    cd -- "$1" 2>/dev/null || exit 0
-    shift
-    mode=content
-    for f in "$@"; do
-      if [ "$f" = "\(presenceSeparator)" ]; then mode=presence; continue; fi
-      if [ "$mode" = content ]; then
-        # BSD `wc` pads its count with spaces; arithmetic expansion strips them.
-        if [ -f "$f" ] && [ "$(( $(wc -c < "$f") ))" -le \(ManifestReadLimits.maxFileBytes) ]; then
-          printf '\(fileMarker)%s\(markerSuffix)\\n' "$f"
-          cat -- "$f"
-          printf '\\n'
-        fi
-      elif [ -e "$f" ]; then
-        printf '\(presentMarker)%s\(markerSuffix)\\n' "$f"
-      fi
-    done
-    """
+  /// Host-side script: `find` walks the tree with the same pruning as the
+  /// local reader, then each hit is streamed as file contents or a presence
+  /// marker. Names come from our own request (fixed manifest file names), and
+  /// are single-quoted anyway; the directory travels as `$1`.
+  static func script(for request: ManifestRequest, scope: ManifestScope) -> String {
+    let quote = SSHCommand.shellQuote
+    let pruned = (["'.*'"] + scope.ignoredDirectoryNames.sorted().map(quote))
+      .map { "-name \($0)" }.joined(separator: " -o ")
+    let wanted = (request.contentPaths + request.presencePaths).map { "-name \(quote($0))" }
+      .joined(separator: " -o ")
+    let contentCase = request.contentPaths.map(quote).joined(separator: "|")
+    return """
+      cd -- "$1" 2>/dev/null || exit 0
+      find . -mindepth 1 -maxdepth \(scope.maxDepth + 1) \\( -type d \\( \(pruned) \\) -prune \\) \\
+        -o -type f \\( \(wanted) \\) -print 2>/dev/null |
+      while IFS= read -r f; do
+        f=${f#./}
+        case "${f##*/}" in
+          \(contentCase.isEmpty ? "''" : contentCase))
+            # BSD `wc` pads its count with spaces; arithmetic expansion strips them.
+            if [ "$(( $(wc -c < "$f") ))" -le \(ManifestReadLimits.maxFileBytes) ]; then
+              printf '\(fileMarker)%s\(markerSuffix)\\n' "$f"
+              cat -- "$f"
+              printf '\\n'
+            else
+              printf '\(presentMarker)%s\(markerSuffix)\\n' "$f"
+            fi
+            ;;
+          *) printf '\(presentMarker)%s\(markerSuffix)\\n' "$f" ;;
+        esac
+      done
+      """
+  }
 
-  func read(_ request: ManifestRequest, in directory: String) async -> ManifestSnapshot {
-    let positionals = [directory] + request.contentPaths + [Self.presenceSeparator] + request.presencePaths
+  func read(_ request: ManifestRequest, in directory: String, scope: ManifestScope) async -> ManifestSnapshot {
     let (executable, sshArguments) = SSHCommand.invocation(
       host: host,
       executable: "/bin/sh",
-      arguments: ["-c", Self.script, "sh"] + positionals,
+      arguments: ["-c", Self.script(for: request, scope: scope), "sh", directory],
       workingDirectory: nil,
       extraOptions: SSHCommand.backgroundProbeOptions
     )
@@ -116,7 +148,7 @@ nonisolated struct RemoteManifestReader: ManifestReader {
       env: ProcessInfo.processInfo.environment,
       cwd: URL(fileURLWithPath: NSHomeDirectory()),
       timeout: Self.timeout,
-      maxOutputBytes: ManifestReadLimits.maxFileBytes * 4
+      maxOutputBytes: ManifestReadLimits.maxFileBytes * 8
     )
     guard case .exited(let code, let stdout, _, let overflow) = outcome, code == 0, !overflow else {
       return ManifestSnapshot()

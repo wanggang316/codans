@@ -9,11 +9,14 @@ nonisolated struct CommandSuggestionClient: Sendable {
 }
 
 extension CommandSuggestionClient {
-  static func live(registry: CommandSuggestionRegistry = .standard) -> CommandSuggestionClient {
+  static func live(
+    registry: CommandSuggestionRegistry = .standard,
+    scope: ManifestScope = .standard
+  ) -> CommandSuggestionClient {
     CommandSuggestionClient(scan: { location in
       let reader: any ManifestReader =
         location.host.map { RemoteManifestReader(host: $0) } ?? LocalManifestReader()
-      let snapshot = await reader.read(registry.request, in: location.directory)
+      let snapshot = await reader.read(registry.request, in: location.directory, scope: scope)
       return registry.groups(in: snapshot)
     })
   }

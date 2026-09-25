@@ -43,14 +43,32 @@ public nonisolated struct CommandSuggestionRegistry: Sendable {
     parsers.reduce(ManifestRequest()) { $0.merged(with: $1.request) }
   }
 
-  /// Non-empty groups in registry order. Duplicate entry names within one
-  /// parser collapse to the first occurrence.
+  /// Non-empty groups: the root's in registry order, then each subdirectory's
+  /// (see `ManifestSnapshot.directories`). Duplicate entry names within one
+  /// group collapse to the first occurrence.
+  ///
+  /// A nested group is titled with the manifest's full relative path
+  /// (`packages/web/package.json`) and its commands `cd` into that directory
+  /// first, so they run from the worktree root like every other script.
   public func groups(in snapshot: ManifestSnapshot) -> [CommandSuggestionGroup] {
-    parsers.compactMap { parser in
-      var seen = Set<String>()
-      let suggestions = parser.suggestions(in: snapshot).filter { seen.insert($0.name).inserted }
-      guard !suggestions.isEmpty else { return nil }
-      return CommandSuggestionGroup(source: parser.source, suggestions: suggestions)
+    snapshot.directories.flatMap { directory in
+      let view = snapshot.scoped(to: directory)
+      return parsers.compactMap { parser -> CommandSuggestionGroup? in
+        var seen = Set<String>()
+        var suggestions = parser.suggestions(in: view).filter { seen.insert($0.name).inserted }
+        guard !suggestions.isEmpty else { return nil }
+        var source = parser.source
+        if !directory.isEmpty {
+          source = CommandSuggestionSource(
+            id: "\(directory)/\(source.id)", displayName: "\(directory)/\(source.displayName)")
+          let cd = "cd \(CommandSuggestionToken.render(directory)) && "
+          for index in suggestions.indices {
+            suggestions[index].source = source
+            suggestions[index].command = cd + suggestions[index].command
+          }
+        }
+        return CommandSuggestionGroup(source: source, suggestions: suggestions)
+      }
     }
   }
 }
