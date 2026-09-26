@@ -35,7 +35,7 @@ Phase 1 implementation and verification complete in the isolated HAN-167 worktre
   rebind invalidation, old-error suppression outside the activity window, recovery,
   IPC, command queues, cancellation, notifications and ordering.
 - 70 targeted Core tests passed: observation contracts, existing classifier fixtures,
-  runtime adapters and foreground-job classification.
+  settings compatibility and recovery policy.
 - Differential harness compared the original `03e269ca` classifier with the extracted
   parsers: 101 existing fixture strings expanded to 5,793 distinct texts across all
   13 Agent kinds, totaling 75,309 observations and 225,927 field comparisons with no
