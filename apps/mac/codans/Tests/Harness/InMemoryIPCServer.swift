@@ -58,6 +58,12 @@ public final class InMemoryIPCServer {
     finishAllWaiters()
   }
 
+  /// Ends the client's side of the connection, as a peer that hangs up
+  /// does, while the server keeps serving.
+  public func hangUp() {
+    inboundContinuation?.finish()
+  }
+
   /// Encode and feed a request into the server's read side.
   public func send(_ request: IPC.Request) throws {
     let body = try JSONEncoder().encode(request)

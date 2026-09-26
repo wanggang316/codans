@@ -127,6 +127,24 @@ struct PaneStreamSessionTests {
   }
 
   @Test(.timeLimit(.minutes(1)))
+  func framesBufferedAfterAProtocolErrorCannotDropTheExit() async throws {
+    var config = PaneStreamSession.Configuration()
+    config.queueLimit = 4
+    let fixture = Fixture(configuration: config)
+    fixture.connection.emitObserveState(cols: 80, rows: 24, "")
+    _ = await fixture.nextFrame()
+
+    // A resize payload too short to decode, then output the connection
+    // had already buffered: enough to overflow the queue if it were taken.
+    fixture.connection.emit(.observeResize, "x")
+    fixture.connection.emit(.output, "buffered")
+    fixture.connection.emit(.output, "behind it")
+    #expect(try #require(await fixture.nextFrame()).payload == .exited(reason: "protocolError", exitCode: nil))
+    #expect(await fixture.session.next() == nil)
+    #expect(fixture.connection.commands == ["observe:1000"])
+  }
+
+  @Test(.timeLimit(.minutes(1)))
   func cancellingTheConsumerClosesTheConnection() async throws {
     let fixture = Fixture()
     fixture.connection.emitObserveState(cols: 80, rows: 24, "")

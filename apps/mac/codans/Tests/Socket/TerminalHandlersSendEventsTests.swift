@@ -79,6 +79,20 @@ struct TerminalHandlersSendEventsTests {
   }
 
   @Test
+  func aKeysTextHasTheSameCapAsTypedText() async throws {
+    sink.registered.insert(pane.id.raw)
+    let oversized = String(repeating: "x", count: IPC.TerminalInputEvent.maxTextBytes + 1)
+    let events: [IPC.TerminalInputEvent] = [
+      .key(code: "KeyX", text: oversized, mods: .none),
+      .key(code: "KeyX", text: "x", mods: .none),
+    ]
+    let outcome = try result(await send(events, sink: sink))
+    #expect(outcome.delivered == 1)
+    #expect(outcome.rejected == [IPC.TerminalInputRejection(index: 0, reason: "tooLarge")])
+    #expect(sink.inputEvents == [events[1]])
+  }
+
+  @Test
   func delaysShareOneBudgetPerCall() async throws {
     sink.registered.insert(pane.id.raw)
     let events = Array(repeating: IPC.TerminalInputEvent.delay(millis: 500), count: 5)

@@ -328,7 +328,11 @@ public final class TerminalHandlers {
         return .rejected(reason: IPC.TerminalInputRejection.Reason.tooLarge)
       }
       return sink.sendInputEvent(paneID: paneID, event: event)
-    case .key:
+    case .key(_, let text, _):
+      // A key's text is typed like `text`, so it gets the same cap.
+      if let text, text.utf8.count > IPC.TerminalInputEvent.maxTextBytes {
+        return .rejected(reason: IPC.TerminalInputRejection.Reason.tooLarge)
+      }
       return sink.sendInputEvent(paneID: paneID, event: event)
     }
   }

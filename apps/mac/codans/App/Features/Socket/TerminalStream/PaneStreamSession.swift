@@ -85,6 +85,11 @@ actor PaneStreamSession {
   private var decoder = ZmxStreamDecoder()
   private var started = false
   private var finished = false
+  /// Set once `exited` is queued. The connection may still hand over
+  /// frames it had buffered (after a protocol error, say); taking them
+  /// could overflow the queue, which would drop the `exited` and leave the
+  /// stream waiting for a snapshot from a closed connection.
+  private var exitQueued = false
   private var seq = 0
   private(set) var epoch = 1
   private var lastSize: GridSize?
@@ -228,7 +233,7 @@ actor PaneStreamSession {
   }
 
   private func handle(_ event: ZmxStreamClient.Event) async {
-    guard !finished else { return }
+    guard !finished, !exitQueued else { return }
     switch event {
     case .frame(let frame):
       let decoded: ZmxStreamDecoder.Event?
@@ -279,7 +284,8 @@ actor PaneStreamSession {
   }
 
   private func enqueue(_ item: Item) {
-    guard !finished else { return }
+    guard !finished, !exitQueued else { return }
+    if case .exited = item { exitQueued = true }
     if case .output(let data, snapshot: false) = item {
       guard !data.isEmpty else { return }
       liveBytes += data.count

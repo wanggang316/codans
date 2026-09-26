@@ -173,11 +173,32 @@ public actor SocketConnection {
     switch outcome {
     case .streaming(let subscribe):
       let stream = subscribe()
-      for await frame in stream {
-        await sendResponse(IPC.Response(id: request.id, stream: true, result: frame))
+      let id = request.id
+      let producer = Task { [self] in
+        for await frame in stream {
+          await sendResponse(IPC.Response(id: id, stream: true, result: frame))
+        }
+        // Graceful server-initiated end: final frame with stream: false.
+        await sendResponse(IPC.Response(id: id, stream: false))
       }
-      // Graceful server-initiated end: final frame with stream: false.
-      await sendResponse(IPC.Response(id: request.id, stream: false))
+      // A streaming call is the connection's last request, so the reader
+      // is only watched for the peer hanging up. Without this a quiet
+      // stream would hold its resources (for `pane.attachStream`, a daemon
+      // connection and one of the caller's stream slots) until the next
+      // write fails, which can be a heartbeat interval away.
+      let reader = self.reader
+      let peerWatch = Task {
+        for await _ in reader {}
+        producer.cancel()
+      }
+      await withTaskCancellationHandler {
+        await producer.value
+      } onCancel: {
+        producer.cancel()
+      }
+      // Stopping the watch ends the reader, and with it the connection:
+      // nothing may follow a stream on it anyway.
+      peerWatch.cancel()
     case .unary(let result):
       // Caller sent stream: true on a non-streaming method.
       await sendResponse(IPC.Response(id: request.id, result: result))

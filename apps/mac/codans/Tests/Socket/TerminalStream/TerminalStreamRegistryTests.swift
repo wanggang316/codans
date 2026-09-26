@@ -111,6 +111,34 @@ struct TerminalStreamRegistryTests {
     #expect(fixture.registry.activeCount == 1)
   }
 
+  @Test(.timeLimit(.minutes(1)))
+  func peerHangingUpEndsAQuietStream() async throws {
+    let fixture = try Fixture.withLivePane()
+    let server = InMemoryIPCServer(router: fixture.router())
+    server.start()
+    defer { server.stop() }
+
+    let hello = try JSONValue.encoded(HelloRequest(clientVersion: "1", clientBinary: "test"))
+    try server.send(IPC.Request(id: "h", method: .systemHello, params: hello))
+    _ = try await server.awaitResponse()
+    try server.send(
+      IPC.Request(
+        id: "s", method: .paneAttachStream,
+        params: try JSONValue.encoded(IPC.PaneAttachStreamRequest(paneID: fixture.paneID)), stream: true))
+    for _ in 0..<100 where fixture.registry.activeCount == 0 {
+      await Task.megaYield()
+    }
+    #expect(fixture.registry.activeCount == 1)
+
+    // Nothing is written on a quiet stream, so only the hang-up can end it.
+    server.hangUp()
+    for _ in 0..<200 where fixture.registry.activeCount == 1 {
+      await Task.megaYield()
+    }
+    #expect(fixture.registry.activeCount == 0)
+    #expect(fixture.connections.value.first?.closeCount == 1)
+  }
+
   @Test
   func unaryAttachIsRefusedWithoutOpeningAConnection() async throws {
     let fixture = try Fixture.withLivePane()
