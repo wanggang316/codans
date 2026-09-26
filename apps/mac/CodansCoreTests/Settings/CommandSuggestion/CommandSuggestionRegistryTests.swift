@@ -222,3 +222,35 @@ struct TransientSuggestionScriptTests {
     #expect(first.target == .newTab)
   }
 }
+
+struct GlobalCommandSuggestionsTests {
+  @Test
+  func groupsAreGitAndGitHubWithUniqueIDs() {
+    let groups = GlobalCommandSuggestions.groups
+    #expect(groups.map(\.source.displayName) == ["Git", "GitHub CLI"])
+    let ids = groups.flatMap(\.suggestions).map(\.id)
+    #expect(Set(ids).count == ids.count)
+    #expect(groups.flatMap(\.suggestions).allSatisfy { $0.icon != nil && $0.kind == .custom })
+  }
+
+  @Test
+  func nothingDestructiveIsSuggested() {
+    let destructive = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D", "checkout -- ", "restore "]
+    for suggestion in GlobalCommandSuggestions.groups.flatMap(\.suggestions) {
+      #expect(!destructive.contains(where: suggestion.command.contains), "\(suggestion.command)")
+    }
+  }
+
+  @Test
+  func adoptingAppendsACustomCommandWithItsIcon() {
+    let status = GlobalCommandSuggestions.groups[0].suggestions[0]
+    let existing = [ScriptDefinition(kind: .run, command: "make")]
+    let result = CommandSuggestionAdoption.adoptGlobal(status, into: existing)
+    #expect(result.scripts.count == 2)
+    #expect(result.scripts.last?.kind == .custom)
+    #expect(result.scripts.last?.name == "Status")
+    #expect(result.scripts.last?.command == "git status -sb")
+    #expect(result.scripts.last?.systemImage == "list.bullet.rectangle")
+    #expect(result.scriptID == result.scripts.last?.id)
+  }
+}
