@@ -9,8 +9,8 @@ import SwiftUI
 /// The slot collapses to zero when `isDirty` is `false` so the label sits
 /// flush with the chip edge the rest of the time.
 ///
-/// Truncates in the middle so both ends of the title remain visible — a
-/// long path's filename stays readable even as it's clipped.
+/// Typography follows the system tab bar: 11-pt system font, semibold on
+/// the selected tab, truncated at the tail.
 struct TabChipLabel: View {
   let title: String
   var isActive: Bool = false
@@ -43,7 +43,7 @@ struct TabChipLabel: View {
           .accessibilityLabel("Has unread notifications")
       } else if let icon, !icon.isEmpty {
         glyph(for: icon)
-          .font(.system(size: 10))
+          .font(.system(size: 11))
           .foregroundStyle(
             iconTint ?? (isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
           )
@@ -51,8 +51,8 @@ struct TabChipLabel: View {
       }
       Text(title)
         .lineLimit(1)
-        .truncationMode(.middle)
-        .font(.caption)
+        .truncationMode(.tail)
+        .font(.system(size: TabBarMetrics.titleFontSize, weight: isActive ? .semibold : .regular))
         .foregroundStyle(isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
     }
   }

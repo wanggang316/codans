@@ -8,11 +8,11 @@ import CodansCore
 @testable import Codans
 
 /// Visual regression coverage for the Tab-bar chip visuals.
-/// Five cases exercise the chip background's state combinations plus one
+/// Four cases exercise the chip background's state combinations plus one
 /// row-level case proves the divider is suppressed adjacent to the active
 /// chip.
 ///
-/// The TabChipView itself owns hover/press as `@State`, which a plain render
+/// The TabChipView itself owns hover as `@State`, which a plain render
 /// cannot flip. These tests therefore snapshot `TabChipBackground` directly
 /// for the state matrix; label + close-button visuals are covered by the
 /// active-chip + row composites. A dirty-state case will be added once the
@@ -39,41 +39,36 @@ struct TabChipSnapshotTests {
     height: TabBarMetrics.chipHeight
   )
 
-  /// Bar row footprint — three chips plus an interior divider.
+  /// Row footprint — three min-width chips plus the two 1-pt gaps the
+  /// separators sit in.
   @MainActor static let rowSize = CGSize(
-    width: TabBarMetrics.chipMinWidth * 3 + TabBarMetrics.dividerWidth,
-    height: TabBarMetrics.barHeight
+    width: TabBarMetrics.chipMinWidth * 3 + TabBarMetrics.chipSpacing * 2,
+    height: TabBarMetrics.chipHeight
   )
 
   // MARK: - Background state matrix
 
   @Test(.enabled(if: TabChipSnapshotTests.snapshotsEnabled))
   func idleBackground() {
-    let host = Self.makeBackground(isActive: false, isHovering: false, isPressing: false)
+    let host = Self.makeBackground(isActive: false, isHovering: false)
     assertSnapshot(of: host, as: .image, record: Self.recordMode ? .all : nil)
   }
 
   @Test(.enabled(if: TabChipSnapshotTests.snapshotsEnabled))
   func hoverBackground() {
-    let host = Self.makeBackground(isActive: false, isHovering: true, isPressing: false)
-    assertSnapshot(of: host, as: .image, record: Self.recordMode ? .all : nil)
-  }
-
-  @Test(.enabled(if: TabChipSnapshotTests.snapshotsEnabled))
-  func pressBackground() {
-    let host = Self.makeBackground(isActive: false, isHovering: false, isPressing: true)
+    let host = Self.makeBackground(isActive: false, isHovering: true)
     assertSnapshot(of: host, as: .image, record: Self.recordMode ? .all : nil)
   }
 
   @Test(.enabled(if: TabChipSnapshotTests.snapshotsEnabled))
   func activeBackground() {
-    let host = Self.makeBackground(isActive: true, isHovering: false, isPressing: false)
+    let host = Self.makeBackground(isActive: true, isHovering: false)
     assertSnapshot(of: host, as: .image, record: Self.recordMode ? .all : nil)
   }
 
   @Test(.enabled(if: TabChipSnapshotTests.snapshotsEnabled))
   func activeHoverBackground() {
-    let host = Self.makeBackground(isActive: true, isHovering: true, isPressing: false)
+    let host = Self.makeBackground(isActive: true, isHovering: true)
     assertSnapshot(of: host, as: .image, record: Self.recordMode ? .all : nil)
   }
 
@@ -104,7 +99,7 @@ struct TabChipSnapshotTests {
       onCopyID: { _ in },
       onReorder: { _ in }
     )
-    .frame(width: Self.rowSize.width, height: Self.rowSize.height, alignment: .bottom)
+    .frame(width: Self.rowSize.width, height: Self.rowSize.height)
     .background(Color(nsColor: .windowBackgroundColor))
 
     let hosting = NSHostingView(rootView: view)
@@ -118,15 +113,13 @@ struct TabChipSnapshotTests {
   @MainActor
   static func makeBackground(
     isActive: Bool,
-    isHovering: Bool,
-    isPressing: Bool
+    isHovering: Bool
   ) -> NSHostingView<some View> {
     let view = TabChipBackground(
       isActive: isActive,
-      isHovering: isHovering,
-      isPressing: isPressing
+      isHovering: isHovering
     )
-    .frame(width: chipSize.width, height: chipSize.height, alignment: .bottom)
+    .frame(width: chipSize.width, height: chipSize.height)
     .background(Color(nsColor: .windowBackgroundColor))
 
     let hosting = NSHostingView(rootView: view)

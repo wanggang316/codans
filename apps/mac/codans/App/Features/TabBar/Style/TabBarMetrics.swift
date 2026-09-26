@@ -4,42 +4,51 @@ import Foundation
 /// Numeric design tokens for the Tab bar. Kept as an enum (no instances) so
 /// the values live in one grep-able place; any layout tweak is a one-file
 /// diff.
+///
+/// Values are measured from AppKit's own window-tabbing tab bar on macOS 26
+/// (`NSTabBar` / `NSTabButton`, the bar Finder uses): view frames read from
+/// the live view tree, colors and curves sampled from 2x captures.
 enum TabBarMetrics {
-  /// Height of the full Tab bar row.
-  static let barHeight: CGFloat = 32
+  /// Height of the full Tab bar row: the track plus `trackBottomInset`.
+  static let barHeight: CGFloat = trackHeight + trackBottomInset
 
-  /// Height of a single chip. Matches `barHeight` so the chip's bottom
-  /// edge is flush with the divider beneath the bar (otherwise a hover /
-  /// active background reveals a thin gap), and the 2-pt active
-  /// underline sitting at the chip's top edge ends up flush with the
-  /// bar's top edge.
-  static let chipHeight: CGFloat = 32
+  /// Recessed capsule track that hosts the chips.
+  static let trackHeight: CGFloat = 28
+  /// The system bar sits flush under the toolbar and leaves this gap to
+  /// the content below it.
+  static let trackBottomInset: CGFloat = 8
+  /// Gap between the bar's leading edge and the track.
+  static let trackLeadingInset: CGFloat = 8
+  /// Chips are inset from the track on every side by this much.
+  static let trackContentInset: CGFloat = 2
 
-  /// Chip width clamp — narrower than `chipMinWidth` and the title
-  /// truncates to a single glyph; wider than `chipMaxWidth` and one long
-  /// title starves its siblings.
+  /// Chip height inside the track. The hover / selected capsule fills the
+  /// whole chip.
+  static let chipHeight: CGFloat = trackHeight - trackContentInset * 2
+
+  /// Chips share the track width equally; below `chipMinWidth` they stop
+  /// shrinking and the row scrolls instead.
   static let chipMinWidth: CGFloat = 120
-  static let chipMaxWidth: CGFloat = 220
 
-  /// Symmetric horizontal inset for chip content (label + close button).
-  static let chipHorizontalPadding: CGFloat = 8
+  /// Chips are laid out with a 1-pt gap; the separator is drawn inside it.
+  static let chipSpacing: CGFloat = 1
 
-  /// Thickness of the accent-tinted underline on the active chip.
-  static let activeUnderlineHeight: CGFloat = 2
-
-  /// Circular close-button diameter. Visible only on chip hover / focus.
+  /// Close button (leading) and trailing accessory slot: a square this
+  /// size, inset `chipSlotInset` from the chip edge.
   static let closeButtonSize: CGFloat = 16
+  static let chipSlotInset: CGFloat = 5
+  /// Horizontal inset of the centered title on both sides — slot inset +
+  /// slot + 8-pt gap — so the title stays centered and never runs under
+  /// the close button or the trailing slot.
+  static let chipTitleInset: CGFloat = chipSlotInset + closeButtonSize + 8
 
-  /// Top corner radius on chip backgrounds. Square so the hover / active
-  /// fill meets the bar edges flush — the active 2-pt top accent is what
-  /// signals selection, no rounding needed.
-  static let chipCornerRadius: CGFloat = 0
+  /// Point size of the chip title and the close glyph.
+  static let titleFontSize: CGFloat = 11
+  static let closeGlyphSize: CGFloat = 9
 
-  /// Thin vertical separator drawn between adjacent non-active chips.
-  /// Spans the full bar height so the row reads as a table of cells
-  /// rather than centered tick marks.
-  static let dividerWidth: CGFloat = 1
-  static let dividerHeight: CGFloat = barHeight
+  /// Separator in the gap between two chips, vertically centered.
+  static let dividerWidth: CGFloat = chipSpacing
+  static let dividerHeight: CGFloat = 18
 
   /// Delay before the trailing split buttons show their pane-tree preview
   /// popover.

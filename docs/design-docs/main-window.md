@@ -76,7 +76,7 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 ## Tab Bar
 
-终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（标题 + hover 揭示的关闭按钮 + active 顶部下划线），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / rename / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
+终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（居中标题 + hover 时在左侧出现的关闭按钮 + active 浮起底板），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / rename / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
 
 ### 不变量
 
@@ -93,7 +93,10 @@ Header 是终端 Tab 条之上的一行，现仅承载两个控件：左侧只�
 
 - **重排用 snapshot-on-drop，不逐 tick 调 `moveTab`。** 拖拽重排在**落下**时一次性提交绝对顺序 `reorderTabs(orderedIDs:)`，而非每个指针 tick 调 `moveTab(offset:)`。后者每次触发一次持久化保存，且两个连续 tick 跨过同一中点时引入重排闪烁。snapshot-on-drop 更省、更易单测、且贴合 catalog 真正想要的变更形态。
 
-- **active 用顶部下划线，不用填充背景。** active tab 用 2pt 顶部下划线指示，而非填充背景。填充背景会与 per-chip hover 态竞争（hover 任意 chip 都近似"选中"），削弱选中信号；细色下划线让 hover 词汇保持干净、在密集 tab 条中一眼可辨。
+- **视觉与交互对齐 AppKit 的 macOS 26 window-tabbing tab 条（Finder / Safari 同款），用 SwiftUI 按实测复刻。** 原生 tab 条是私有 `NSTabBar` / `NSTabButton`，只服务 `NSWindowTabGroup`（每个 tab 是一个独立窗口、挂在标题栏下），无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 颜色 / 快捷键提示；公开 API 里也没有能在窗口内渲染它的控件。所有参数取自在进程内遍历原生 tab 条视图树（frame / 字体）与 2x 截图取色，集中在 `TabBarMetrics` / `TabBarColors`：胶囊轨道高 28pt、内容内缩 2pt、chip 高 24pt 且间隔 1pt（分隔线 1×18pt 画在间隔里）、最小宽 120pt、关闭按钮与右侧槽位 16pt 距边 5pt、标题两侧对称留 29pt、11pt 标题（选中 semibold）尾部截断。选中 tab 在原生里是私有 Liquid Glass variant，`.glassEffect(.regular/.clear)` 实测色值对不上，故用半透明填充 + 两道 0.5pt 亮边 + 浅色模式阴影落到同样的像素；hover 是扁平淡胶囊并隐藏两侧分隔线；与原生一致在**按下时即选中**（没有单独的 pressed 态）。
+  - **溢出堆叠（`TabStackLayout`，纯函数、以原生采样为测试基准）**：tab 放不下时滚动内容保持线性（滚动物理仍是原生 `NSScrollView`），每个 chip 只做视觉偏移并裁成窄条——两端堆叠区宽 `min(视口/8, 128)`，只在该侧还有内容可滚时生效，越界的 tab 按 `(Z/2)·ln(1+d/(Z/2))` 压成窄条；选中 tab 不压缩，进入堆叠区后按双曲线减速，所在侧没有其他 tab 时一直滑到边缘钉住；首尾 tab 作为整摞的「底」贴边。压扁的 chip 仍按全宽排版再裁切（同原生 `mainContentClippingContainer`），被选中 tab 盖住的部分裁掉（选中底板半透明，不能只靠重叠遮挡）。
+  - **交互**：切换选中**不滚动**；点击堆叠窄条不选中，而是用 AppKit clip view 动画（0.25s ease-out cubic）滚动一页 `V − 2.5Z − W`；新建 tab 立即滚到可见；垂直滚轮横向滚动 tab 条（每行 10pt，精确滚动 1:1）。滚动偏移从 clip view 的 bounds 通知读取——SwiftUI 几何感知不到 AppKit 发起的滚动；定位 `NSScrollView` 的探针放在滚动内容之外，放在内容里会让 SwiftUI 不再绘制 chip。
+  - **已知偏差**：帧位置与原生最多差 1pt（原生浮点舍入细节）；窄条内标题偏移是经验拟合，薄窄条里可能差几 pt；新建 / 关闭 tab 的布局动画用 spring 近似（原生曲线无法从采样唯一确定）。
 
 - **不建并行 `TabBarState`。** tab 是 hierarchy-scoped（每 Worktree）。另起一个 `@Observable TabBarState` 容器意味着同一数据两个事实来源，并在 create/close/select 周围引入同步危险。既有模式（视图读 `HierarchyManager`、reducer 经 `HierarchyClient` 转发）已可扩展；在 `HierarchyClient` 上多挂几个闭包的边际成本，低于长期协调两个 store 的成本。
 

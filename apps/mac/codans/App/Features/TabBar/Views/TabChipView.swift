@@ -1,5 +1,5 @@
-import SwiftUI
 import CodansCore
+import SwiftUI
 
 /// One tab chip. Composes label + close button on top of a state-aware
 /// background and owns the chip's local hover / press state. The chip
@@ -46,83 +46,43 @@ struct TabChipView: View {
   /// Script-tint colour for `icon` while the tab's run pane executes; see
   /// `TabChipLabel.iconTint`.
   var iconTint: Color?
+  /// Overflow stacking (`TabStackLayout`): the visible width of this chip
+  /// when it is compressed into a stack sliver. The chip still lays its
+  /// content out at full chip width — as the system bar does — shifts it by
+  /// `contentShift`, and clips it to the sliver. `nil` = not compressed.
+  var sliceWidth: CGFloat?
+  var contentShift: CGFloat = 0
+  /// A click on a stack sliver scrolls the row instead of selecting the
+  /// tab. `nil` for chips that are not part of a stack.
+  var onStackClick: (() -> Void)?
 
   @State private var isHovering = false
-  @State private var isPressing = false
 
   var body: some View {
-    // Hit layout: the select Button claims the whole chip rectangle so
-    // a click anywhere on the chip selects it; the close button is
-    // overlaid on the trailing edge inside the same ZStack so it
-    // intercepts its own taps without forwarding to the outer Button.
-    // Without this, an HStack-of-Button-plus-sibling layout leaves dead
-    // zones (between the label and the close glyph, and on either
-    // chip-padding strip) that swallow clicks.
-    ZStack(alignment: .trailing) {
-      Button(action: onSelect) {
-        TabChipLabel(
-          title: title,
-          isActive: isActive,
-          isDirty: isDirty,
-          hasUnreadNotification: hasUnreadNotification,
-          icon: icon,
-          iconTint: iconTint
-        )
-        // `maxHeight: .infinity` is the load-bearing piece — without
-        // it the label collapses to its intrinsic text height (~16pt)
-        // and the Button's hit region only covers that strip,
-        // leaving most of the chip dead. Pair with the explicit
-        // `contentShape` here so the styled Button uses the expanded
-        // rectangle as its hit shape, not the text glyph bounds.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .padding(.horizontal, TabBarMetrics.chipHorizontalPadding)
-        // Reserve space for the close glyph + its gap so long titles
-        // truncate before they slide under the overlay.
-        .padding(.trailing, TabBarMetrics.closeButtonSize + 4)
-      }
-      .buttonStyle(ChipPressTrackingStyle(isPressing: $isPressing))
-      .frame(
-        minWidth: TabBarMetrics.chipMinWidth,
-        maxWidth: TabBarMetrics.chipMaxWidth,
-        minHeight: TabBarMetrics.chipHeight,
-        maxHeight: TabBarMetrics.chipHeight
-      )
-
-      // Trailing slot: chord hint takes precedence while ⌘ is held;
-      // otherwise the color dot (when set) occupies the close-button slot —
-      // hover/active reveals the close button on top, hiding the dot.
-      if let chordHint {
-        Text(chordHint)
-          .font(.caption.monospaced())
-          .foregroundStyle(.secondary)
-          .padding(.trailing, TabBarMetrics.chipHorizontalPadding)
-          .accessibilityHidden(true)
-          .allowsHitTesting(false)
-      } else {
-        ZStack {
-          if let tabColor {
-            Circle()
-              .fill(tabColor.swiftUIColor)
-              .frame(width: 8, height: 8)
-              .opacity(isHovering ? 0 : 1)
-              .allowsHitTesting(false)
+    Group {
+      if let sliceWidth {
+        chipContent
+          // A sliver is not a click target of its own: the select button
+          // fires on mouse-down and would win over the stack click.
+          .allowsHitTesting(onStackClick == nil)
+          .offset(x: contentShift)
+          .frame(width: TabStackLayout.chipWidth, alignment: .leading)
+          .mask(alignment: .leading) { Rectangle().frame(width: sliceWidth) }
+          .background(alignment: .leading) { background.frame(width: sliceWidth) }
+          .overlay(alignment: .leading) {
+            if let onStackClick {
+              Color.clear
+                .frame(width: sliceWidth)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onStackClick)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Show Stacked Tabs")
+            }
           }
-          TabChipCloseButton(
-            isVisible: isHovering,
-            action: onClose
-          )
-        }
-        .padding(.trailing, TabBarMetrics.chipHorizontalPadding)
+      } else {
+        chipContent.background(background)
       }
     }
-    .background(
-      TabChipBackground(
-        isActive: isActive,
-        isHovering: isHovering,
-        isPressing: isPressing
-      )
-    )
     .overlay(TabChipMiddleClickView(onMiddleClick: onMiddleClick))
     .onHover { hovering in
       withAnimation(.easeInOut(duration: 0.10)) {
@@ -144,19 +104,89 @@ struct TabChipView: View {
       )
     }
   }
+
+  private var background: some View {
+    TabChipBackground(isActive: isActive, isHovering: isHovering)
+  }
+
+  private var chipContent: some View {
+    // Hit layout: the select Button claims the whole chip rectangle so
+    // a click anywhere on the chip selects it; the close button (leading)
+    // and the color dot / chord hint (trailing) are overlays on the same
+    // rectangle so the close button intercepts its own taps without
+    // forwarding to the outer Button. Without this, an HStack-of-Button-
+    // plus-sibling layout leaves dead zones that swallow clicks.
+    //
+    // Width is owned by the row (`TabBarRowView` splits the track equally),
+    // so the chip only fills whatever it is given.
+    // Selection happens on mouse-down (see `SelectOnPressStyle`), like the
+    // system tab bar. The Button action only fires for a chip that is still
+    // unselected on release — i.e. an accessibility / keyboard press — so a
+    // mouse click never dispatches select twice.
+    Button(action: selectIfInactive) {
+      TabChipLabel(
+        title: title,
+        isActive: isActive,
+        isDirty: isDirty,
+        hasUnreadNotification: hasUnreadNotification,
+        icon: icon,
+        iconTint: iconTint
+      )
+      // `maxHeight: .infinity` is the load-bearing piece — without
+      // it the label collapses to its intrinsic text height (~16pt)
+      // and the Button's hit region only covers that strip,
+      // leaving most of the chip dead. Pair with the explicit
+      // `contentShape` here so the styled Button uses the expanded
+      // rectangle as its hit shape, not the text glyph bounds.
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .contentShape(Rectangle())
+      // Reserve the side slots symmetrically so the centered title stays
+      // centered and truncates before it slides under either overlay.
+      .padding(.horizontal, TabBarMetrics.chipTitleInset)
+    }
+    .buttonStyle(SelectOnPressStyle(onPress: selectIfInactive))
+    .frame(maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight)
+    .overlay(alignment: .leading) {
+      TabChipCloseButton(isVisible: isHovering, action: onClose)
+        .padding(.leading, TabBarMetrics.chipSlotInset)
+    }
+    .overlay(alignment: .trailing) {
+      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
+      // tab's color dot (when set) sits there.
+      Group {
+        if let chordHint {
+          Text(chordHint)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        } else if let tabColor {
+          Circle()
+            .fill(tabColor.swiftUIColor)
+            .frame(width: 8, height: 8)
+            .frame(width: TabBarMetrics.closeButtonSize)
+        }
+      }
+      .padding(.trailing, TabBarMetrics.chipSlotInset)
+      .allowsHitTesting(false)
+    }
+  }
+
+  private func selectIfInactive() {
+    if !isActive { onSelect() }
+  }
 }
 
-/// Button style that exposes `isPressed` as a binding so the chip can
-/// recolor its background during a tap without capturing pointer events
-/// away from the surrounding hover handler.
-private struct ChipPressTrackingStyle: ButtonStyle {
-  @Binding var isPressing: Bool
+/// Button style that selects the chip as soon as the mouse goes down,
+/// matching the system tab bar, without capturing pointer events away from
+/// the surrounding hover handler or the reorder drag gesture.
+private struct SelectOnPressStyle: ButtonStyle {
+  let onPress: () -> Void
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .contentShape(Rectangle())
-      .onChange(of: configuration.isPressed) { _, newValue in
-        isPressing = newValue
+      .onChange(of: configuration.isPressed) { _, isPressed in
+        if isPressed { onPress() }
       }
   }
 }
