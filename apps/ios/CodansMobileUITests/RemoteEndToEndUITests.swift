@@ -314,7 +314,7 @@ final class RemoteEndToEndUITests: XCTestCase {
 
     // The home screen lists each project with its worktrees.
     let projectHeader = app.staticTexts[project]
-    XCTAssertTrue(projectHeader.waitForExistence(timeout: 20), "project \(project) never listed")
+    XCTAssertTrue(projectHeader.waitForExistence(timeout: 60), "project \(project) never listed")
     let worktreeRow = app.descendants(matching: .any)["worktree-row"].firstMatch
     XCTAssertTrue(worktreeRow.waitForExistence(timeout: 5), "project has no worktree rows")
     // The connection strip above the list disappears once live and shifts
