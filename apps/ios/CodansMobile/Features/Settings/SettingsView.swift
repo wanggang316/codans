@@ -2,15 +2,19 @@ import ComposableArchitecture
 import SwiftUI
 import VisionKit
 
-/// Paired Macs, connection status, and pairing, shown as a sheet from the
-/// workspace toolbar. Pairing accepts the QR
-/// code from the Mac's Remote Access pane, or the same code pasted as text
-/// (the only way on the simulator or a device without a camera).
+/// Paired Macs, the connection, and pairing, as a sheet from the home
+/// title menu. Pairing accepts the QR code from the Mac's Remote Access
+/// pane, or the same code pasted as text (the only way on the simulator or
+/// a device without a camera).
 struct SettingsView: View {
   @Bindable var store: StoreOf<ConnectionFeature>
+  /// Opened from "Pair New Mac…": straight to the scanner, or the code
+  /// field where there is no camera.
+  var startsPairing = false
 
   @State private var pairingCode = ""
   @State private var isScanning = false
+  @FocusState private var isCodeFocused: Bool
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
@@ -18,15 +22,18 @@ struct SettingsView: View {
       Form {
         if !store.gateways.isEmpty {
           macsSection
-          statusSection
+          connectionSection
         }
         pairingSection
       }
+      .scrollContentBackground(.hidden)
+      .background(Color.surfaceGrouped)
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
           Button("Done") { dismiss() }
+            .fontWeight(.semibold)
         }
       }
       .sheet(isPresented: $isScanning) {
@@ -35,27 +42,43 @@ struct SettingsView: View {
           store.send(.pairingCodeSubmitted(code))
         }
       }
+      .task {
+        guard startsPairing else { return }
+        if PairingScannerSheet.isAvailable {
+          isScanning = true
+        } else {
+          try? await Task.sleep(for: .milliseconds(400))
+          isCodeFocused = true
+        }
+      }
     }
   }
 
   private var macsSection: some View {
-    Section("Macs") {
+    Section {
       ForEach(store.gateways) { gateway in
         Button {
           store.send(.gatewaySelected(gateway.deviceID))
         } label: {
-          HStack {
+          HStack(spacing: Theme.Space.sm) {
+            Image(systemName: "laptopcomputer")
+              .font(.system(size: 17))
+              .foregroundStyle(Color.inkSecondary)
+              .frame(width: 28)
+              .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
               Text(gateway.displayName)
-                .foregroundStyle(.primary)
+                .font(.system(size: 17))
+                .foregroundStyle(Color.ink)
               Text("Paired \(gateway.pairedAt.formatted(date: .abbreviated, time: .omitted))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.rowDetail)
+                .foregroundStyle(Color.inkSecondary)
             }
             Spacer()
             if gateway.deviceID == store.activeID {
               Image(systemName: "checkmark")
-                .foregroundStyle(.tint)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.ink)
                 .accessibilityLabel("Active")
             }
           }
@@ -64,37 +87,25 @@ struct SettingsView: View {
           Button("Forget", role: .destructive) { store.send(.forgetTapped(gateway.deviceID)) }
         }
       }
+    } header: {
+      Text("Macs")
     }
   }
 
-  private var statusSection: some View {
-    let health = store.health
-    return Section {
-      ConnectionStatusView(health: health)
-      if let session = store.session {
-        LabeledContent("Access", value: session.permission == .interactive ? "Can send input" : "View only")
-        if !session.serverVersion.isEmpty {
-          LabeledContent("Codans on Mac", value: session.serverVersion)
+  private var connectionSection: some View {
+    Section {
+      NavigationLink {
+        ConnectionDetailsForm(store: store)
+          .navigationTitle("Connection")
+          .navigationBarTitleDisplayMode(.inline)
+      } label: {
+        HStack {
+          Text("Status")
+            .foregroundStyle(Color.ink)
+          Spacer()
+          ConnectionStatusLine(health: store.health)
+            .font(.system(size: 15))
         }
-      }
-      if let lastContact = health.lastContact {
-        LabeledContent("Last contact") {
-          Text(lastContact, format: .relative(presentation: .named))
-        }
-      }
-      if !health.isLive, let explanation = health.explanation {
-        Text(explanation)
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-      }
-      switch health.recovery {
-      case .retry?:
-        Button("Reconnect") { store.send(.connectTapped) }
-      case .openSettings?:
-        ConnectionRecoveryButton(recovery: .openSettings, retry: {}, pairAgain: {})
-      case .pairAgain?, nil:
-        // Pairing again happens in the section below.
-        EmptyView()
       }
     } header: {
       Text("Connection")
@@ -103,31 +114,48 @@ struct SettingsView: View {
     }
   }
 
+  private var canPair: Bool {
+    !pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
   private var pairingSection: some View {
     Section {
       if PairingScannerSheet.isAvailable {
-        Button("Scan Pairing Code", systemImage: "qrcode.viewfinder") { isScanning = true }
+        Button {
+          isScanning = true
+        } label: {
+          Label("Scan Pairing Code", systemImage: "qrcode.viewfinder")
+            .foregroundStyle(Color.ink)
+        }
       }
       TextField("codans-pair:…", text: $pairingCode, axis: .vertical)
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
-        .font(.system(.footnote, design: .monospaced))
+        .font(.system(size: 14, design: .monospaced))
         .lineLimit(1...4)
+        .focused($isCodeFocused)
+        .accessibilityIdentifier("pairing-code")
       HStack {
         PasteButton(payloadType: String.self) { strings in
           if let first = strings.first { pairingCode = first }
         }
+        .buttonBorderShape(.capsule)
+        .labelStyle(.titleAndIcon)
+        .tint(Color.surfaceMuted)
+        .foregroundStyle(Color.ink)
         Spacer()
         Button("Pair") {
           store.send(.pairingCodeSubmitted(pairingCode))
           pairingCode = ""
         }
-        .disabled(pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .buttonStyle(.inkCompact)
+        .disabled(!canPair)
+        .accessibilityIdentifier("pairing-submit")
       }
       if let error = store.pairingError {
-        Text(error)
-          .font(.footnote)
-          .foregroundStyle(.red)
+        Label(error, systemImage: "exclamationmark.circle")
+          .font(.system(size: 13))
+          .foregroundStyle(Color.failure)
       }
     } header: {
       Text("Pair a Mac")
@@ -136,5 +164,95 @@ struct SettingsView: View {
         "On your Mac, open Codans Settings › Remote Access, turn on Remote Access and choose Pair New Device. The code is a key to your Mac: don't share it."
       )
     }
+  }
+}
+
+/// The connection to the active Mac, as a sheet from the home title menu.
+struct ConnectionDetailsView: View {
+  let store: StoreOf<ConnectionFeature>
+
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    NavigationStack {
+      ConnectionDetailsForm(store: store)
+        .navigationTitle(store.activeGateway?.displayName ?? "Connection")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { dismiss() }
+              .fontWeight(.semibold)
+          }
+        }
+    }
+  }
+}
+
+/// What the connection is doing, what the Mac granted, and the fix when
+/// there is one.
+struct ConnectionDetailsForm: View {
+  let store: StoreOf<ConnectionFeature>
+
+  var body: some View {
+    let health = store.health
+    Form {
+      Section {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+          HStack(spacing: Theme.Space.xs) {
+            StatusDot(color: health.tone.color, pulses: health.tone == .working, size: 9)
+            Text(health.title)
+              .font(.system(size: 17, weight: .semibold))
+              .foregroundStyle(Color.ink)
+          }
+          if !health.isLive, let explanation = health.explanation {
+            Text(explanation)
+              .font(.system(size: 15))
+              .foregroundStyle(Color.inkSecondary)
+          }
+        }
+        .padding(.vertical, Theme.Space.xxs)
+        switch health.recovery {
+        case .some(let recovery):
+          ConnectionRecoveryButton(
+            recovery: recovery, retry: { store.send(.connectTapped) }, pairAgain: {}
+          )
+          .foregroundStyle(Color.ink)
+          .fontWeight(.medium)
+        case nil:
+          if health.isLive {
+            Button("Reconnect Now") { store.send(.connectTapped) }
+              .foregroundStyle(Color.ink)
+          }
+        }
+      }
+
+      if let session = store.session {
+        Section("Mac") {
+          LabeledContent("Access", value: session.permission == .interactive ? "Can send input" : "View only")
+          if !session.serverVersion.isEmpty {
+            LabeledContent("Codans on Mac", value: session.serverVersion)
+          }
+          LabeledContent("Live terminal", value: session.supportsLiveTerminal ? "Yes" : "Needs a Mac update")
+        }
+      }
+
+      if health.lastContact != nil || health.lastSyncedAt != nil {
+        Section("Activity") {
+          if let lastContact = health.lastContact {
+            LabeledContent("Last contact") {
+              Text(lastContact, format: .relative(presentation: .named))
+            }
+          }
+          if let syncedAt = health.lastSyncedAt {
+            LabeledContent("Data from") {
+              Text(syncedAt, format: .relative(presentation: .named))
+            }
+          }
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(Color.surfaceGrouped)
+    .accessibilityIdentifier("connection-details")
   }
 }

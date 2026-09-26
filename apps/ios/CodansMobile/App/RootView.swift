@@ -5,15 +5,17 @@ import SwiftUI
 enum RootSheet: String, Identifiable {
   case agents
   case settings
+  /// Settings, opened on pairing a new Mac.
+  case pairing
+  case connectionDetails
 
   var id: String { rawValue }
 }
 
-/// Root of every scene: the Project → Worktree workspace, with Agents and
-/// Settings as sheets from its toolbar. The workspace's split view adapts
-/// to size class (sidebar in regular width on iPad and the iPhone Duo inner
-/// display, a stack in compact width), with no size or orientation checks
-/// here.
+/// Root of every scene: the workspace, or a full-page connection state
+/// when there is nothing to show or nothing shown could refresh. Agents,
+/// Settings and connection details are sheets. Layout adapts to size
+/// class only, with no size or orientation checks here.
 struct RootView: View {
   let store: StoreOf<AppFeature>
 
@@ -21,39 +23,53 @@ struct RootView: View {
   /// own place.
   @SceneStorage("workspace.selectedWorktree") private var selectedWorktreeID: String?
   @SceneStorage("workspace.selectedPane") private var selectedPaneID: String?
+  @SceneStorage("workspace.paneMemory") private var paneMemoryStorage = ""
   @State private var sheet: RootSheet?
 
-  var body: some View {
-    WorkspaceView(
-      store: store,
+  private var actions: HomeActions {
+    HomeActions(
       openAgents: { sheet = .agents },
       openSettings: { sheet = .settings },
-      selectedWorktreeID: $selectedWorktreeID,
-      selectedPaneID: $selectedPaneID
+      openPairing: { sheet = .pairing },
+      openConnectionDetails: { sheet = .connectionDetails }
     )
-    .sheet(item: $sheet) { sheet in
-      switch sheet {
-      case .agents:
-        AgentsView(store: store) { entry in
-          self.sheet = nil
-          selectedWorktreeID = entry.worktreeID
-          selectedPaneID = entry.paneID
+  }
+
+  private var paneMemory: Binding<PaneMemory> {
+    Binding(
+      get: { PaneMemory(encoded: paneMemoryStorage) },
+      set: { paneMemoryStorage = $0.encoded }
+    )
+  }
+
+  var body: some View {
+    content
+      .tint(Color.ink)
+      .sheet(item: $sheet) { sheet in
+        Group {
+          switch sheet {
+          case .agents:
+            AgentsView(store: store) { entry in
+              self.sheet = nil
+              paneMemory.wrappedValue.remember(pane: entry.paneID, inWorktree: entry.worktreeID)
+              selectedPaneID = entry.paneID
+              selectedWorktreeID = entry.worktreeID
+            }
+          case .settings, .pairing:
+            SettingsView(
+              store: store.scope(state: \.connection, action: \.connection), startsPairing: sheet == .pairing)
+          case .connectionDetails:
+            ConnectionDetailsView(store: store.scope(state: \.connection, action: \.connection))
+          }
         }
-      case .settings:
-        SettingsView(store: store.scope(state: \.connection, action: \.connection))
+        .tint(Color.ink)
       }
-    }
-    .task {
-      if let demo = DemoMode.initialSelection {
-        selectedWorktreeID = demo.worktreeID
-        // The pane list must exist before a selection in it navigates.
-        Task {
-          try? await Task.sleep(for: .seconds(1))
-          selectedPaneID = demo.paneID
-        }
+      .task {
+        #if DEBUG
+          applyDemoSelection()
+        #endif
+        store.send(.connection(.task))
       }
-      store.send(.connection(.task))
-    }
     .onOpenURL { store.send(.connection(.pairingLinkOpened($0))) }
     .alert(linkPairingTitle, isPresented: isLinkPairingPresented) {
       if case .confirm = store.connection.linkPairing {
@@ -75,6 +91,59 @@ struct RootView: View {
       }
     }
   }
+
+  @ViewBuilder
+  private var content: some View {
+    let health = store.connection.health
+    if !store.connection.hasStarted {
+      Color.surface.ignoresSafeArea()
+    } else if let blocker = health.blocker(hasContent: store.browser.hierarchy != nil) {
+      NavigationStack {
+        ConnectionStateView(
+          blocker: blocker,
+          health: health,
+          retry: { store.send(.connection(.connectTapped)) },
+          pair: actions.openPairing
+        )
+        .background(Color.surface)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .principal) {
+            HomeTitleMenu(store: store, actions: actions)
+          }
+        }
+      }
+    } else {
+      WorkspaceView(
+        store: store,
+        actions: actions,
+        selectedWorktreeID: $selectedWorktreeID,
+        selectedPaneID: $selectedPaneID,
+        paneMemory: paneMemory
+      )
+    }
+  }
+
+  #if DEBUG
+    /// Demo screenshots start on a pane or a sheet named in the
+    /// environment.
+    private func applyDemoSelection() {
+      if let demo = DemoMode.initialSelection {
+        paneMemory.wrappedValue.remember(pane: demo.paneID, inWorktree: demo.worktreeID)
+        selectedPaneID = demo.paneID
+        selectedWorktreeID = demo.worktreeID
+      } else if DemoMode.isEnabled {
+        selectedWorktreeID = nil
+        selectedPaneID = nil
+      }
+      if let name = DemoMode.initialSheet, let demoSheet = RootSheet(rawValue: name) {
+        Task {
+          try? await Task.sleep(for: .seconds(1.5))
+          sheet = demoSheet
+        }
+      }
+    }
+  #endif
 
   private var linkPairingTitle: String {
     switch store.connection.linkPairing {

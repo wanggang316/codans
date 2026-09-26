@@ -96,6 +96,60 @@ struct ConnectionHealth: Equatable {
     ]
   }
 
+  /// The status line under the Mac's name: short, since the name is
+  /// already above it. The age of stale data is appended by the view,
+  /// which ticks it.
+  var shortStatus: String {
+    switch phase {
+    case .idle: return isPaired ? "Not connected" : "Not paired"
+    case .discovering where isMacMissing, .reconnecting where isMacMissing: return "Can't find Mac"
+    case .discovering: return "Looking for Mac…"
+    case .handshaking: return "Connecting…"
+    case .syncing: return "Syncing…"
+    case .live: return "Connected"
+    case .reconnecting(let attempt, _): return "Reconnecting (attempt \(attempt))"
+    case .offline: return "Offline"
+    case .failed(let failure):
+      switch failure.kind {
+      case .localNetworkDenied: return "Local Network off"
+      case .rejected: return "Removed from Mac"
+      case .incompatible: return "Update needed"
+      case .missingKey: return "Pairing key missing"
+      default: return "Can't connect"
+      }
+    }
+  }
+
+  /// A state that takes the whole page instead of the workspace: nothing
+  /// can be shown, or what is shown can never refresh until the user acts.
+  enum Blocker: Equatable {
+    case notPaired
+    case macNotFound
+    case localNetworkDenied
+    case rejected
+    case missingKey
+    case incompatible
+    case failed
+  }
+
+  /// Nil when the workspace (live, stale or loading) should show, with the
+  /// connection state in its status line and banner.
+  func blocker(hasContent: Bool) -> Blocker? {
+    guard isPaired else { return .notPaired }
+    if case .failed(let failure) = phase {
+      switch failure.kind {
+      case .localNetworkDenied: return .localNetworkDenied
+      case .rejected: return .rejected
+      case .missingKey: return .missingKey
+      case .incompatible: return .incompatible
+      default: return hasContent ? nil : .failed
+      }
+    }
+    // Cached content beats a checklist: the user can still look around
+    // while the Mac is being looked for.
+    return isMacMissing && !hasContent ? .macNotFound : nil
+  }
+
   enum Tone: Equatable {
     case good
     case working

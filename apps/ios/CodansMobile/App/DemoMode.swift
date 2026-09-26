@@ -18,6 +18,11 @@ import Foundation
 ///   `notFound` (no advertisement), `rejected` (every handshake refused),
 ///   `denied` (Local Network access off) or `offline` (never answers, with
 ///   a cached workspace from an hour ago shown as stale).
+///   Also `incompatible` (the Mac speaks another protocol major) and
+///   `slow` (the first connection never finishes, with no cache: the
+///   first-load skeleton).
+/// - `CODANS_DEMO_SHEET`: open `agents`, `settings`, `pairing`,
+///   `connectionDetails` or `composer` shortly after launch.
 /// - `CODANS_DEMO_OLD_MAC=1`: the Mac speaks protocol minor 1, so panes use
 ///   the text fallback and ask for a Mac update.
 enum DemoMode {
@@ -30,6 +35,11 @@ enum DemoMode {
   /// The simulator usually has the Mac's keyboard attached, which would
   /// hide the key bar in every screenshot.
   static var forcesKeyBar: Bool { isEnabled }
+
+  static var initialSheet: String? {
+    guard isEnabled else { return nil }
+    return ProcessInfo.processInfo.environment["CODANS_DEMO_SHEET"]
+  }
 
   static var initialSelection: (worktreeID: String, paneID: String)? {
     guard isEnabled else { return nil }
@@ -95,7 +105,9 @@ enum DemoMode {
             throw RemoteFailure.macNotFound(gateway.displayName)
           case "denied"?:
             throw RemoteFailure(.localNetworkDenied, "Local Network access is off for Codans.")
-          case "offline"?:
+          case "incompatible"?:
+            throw RemoteFailure(.incompatible, "This Mac speaks a newer protocol than this app.")
+          case "offline"?, "slow"?:
             // Never answers: the attempt runs into its deadline and retries.
             try await Task.sleep(for: .seconds(3600))
             return []

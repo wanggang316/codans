@@ -91,6 +91,9 @@ let project = Project(
           // the Swift module distinct from the Mac app's `Codans` module.
           "PRODUCT_MODULE_NAME": "CodansMobile",
           "TARGETED_DEVICE_FAMILY": "1,2",
+          // Ink (black / white), so system controls, menus and alerts
+          // never fall back to system blue.
+          "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
         ],
         defaultSettings: .essential
       )

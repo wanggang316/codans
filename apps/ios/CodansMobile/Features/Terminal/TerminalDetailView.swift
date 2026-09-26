@@ -47,7 +47,7 @@ struct TerminalDetailView: View {
       if let location {
         content(location)
       } else {
-        ContentUnavailableView("Select a Pane", systemImage: "terminal")
+        StateView(symbol: "terminal", title: "Choose a pane")
       }
     }
     .onChange(of: store.browser.hierarchy) { _, _ in resolvePending() }
@@ -103,6 +103,7 @@ struct TerminalDetailView: View {
         TabTitleMenu(
           location: location,
           agents: store.agents,
+          health: store.connection.health,
           canManage: permission == .interactive && isConnected,
           select: { selectedPaneID = $0 },
           newTab: { focused.send(.newTabTapped) },
@@ -283,6 +284,7 @@ private struct TabTitleMenu: View {
 
   let location: PaneLocation
   let agents: AgentsFeature.State
+  let health: ConnectionHealth
   let canManage: Bool
   let select: (String) -> Void
   let newTab: () -> Void
@@ -337,18 +339,24 @@ private struct TabTitleMenu: View {
       VStack(spacing: 3) {
         HStack(spacing: 4) {
           Text(tabTitle(location.tab))
-            .font(.headline)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(Color.ink)
             .lineLimit(1)
           Image(systemName: "chevron.down")
             .accessibilityHidden(true)
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.secondary)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Color.inkSecondary)
         }
-        if ordered.count > 1 {
+        // The connection's state wins over page dots: it is what decides
+        // whether anything on screen is current.
+        if !health.isLive {
+          ConnectionStatusLine(health: health)
+            .font(.system(size: 12))
+        } else if ordered.count > 1 {
           PageDots(count: ordered.count, current: ordered.firstIndex(of: location.pane.id) ?? 0)
         }
       }
-      .foregroundStyle(.primary)
+      .padding(.horizontal, Theme.Space.xs)
       .contentShape(.rect)
     }
     .accessibilityIdentifier("tab-menu")
@@ -404,7 +412,7 @@ private struct PageDots: View {
     HStack(spacing: 5) {
       ForEach(0..<count, id: \.self) { index in
         Circle()
-          .fill(index == current ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+          .fill(index == current ? Color.ink : Color.inkTertiary)
           .frame(width: 5, height: 5)
       }
     }
@@ -422,17 +430,24 @@ private struct PaneStrip: View {
 
   var body: some View {
     HStack(spacing: 8) {
-      Image(systemName: agent?.dotSymbol ?? "terminal")
-        .accessibilityHidden(true)
-        .font(.caption)
-        .foregroundStyle(agent?.tint ?? .secondary)
+      if let agent, agent != .idle {
+        StatusDot(color: agent.color, pulses: agent == .working, size: 7)
+          .frame(width: 14)
+      } else {
+        Image(systemName: "terminal")
+          .accessibilityHidden(true)
+          .font(.system(size: 12))
+          .foregroundStyle(Color.inkSecondary)
+          .frame(width: 14)
+      }
       Text(TerminalDetailView.title(location.pane))
-        .font(.footnote.weight(.semibold))
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(Color.ink)
         .lineLimit(1)
       if let cwd = TerminalLayout.displayPath(location.pane.cwd) {
         Text(cwd)
-          .font(.footnote.monospaced())
-          .foregroundStyle(.secondary)
+          .font(.system(size: 12, design: .monospaced))
+          .foregroundStyle(Color.inkSecondary)
           .lineLimit(1)
           .truncationMode(.head)
       }
@@ -440,17 +455,17 @@ private struct PaneStrip: View {
       if location.tab.panes.count > 1 {
         Image(systemName: "chevron.left.chevron.right")
           .accessibilityHidden(true)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(Color.inkTertiary)
       }
     }
-    .padding(.horizontal, 14)
+    .padding(.horizontal, Theme.Space.md)
     .padding(.vertical, 6)
     // A minimum, not a fixed height, so larger text sizes are not clipped.
     .frame(minHeight: 30)
     .frame(maxWidth: .infinity)
-    .background(.bar)
-    .overlay(alignment: .bottom) { Divider() }
+    .background(Color.surface)
+    .overlay(alignment: .bottom) { Rectangle().fill(Color.hairline).frame(height: 1) }
     .contentShape(.rect)
     .gesture(
       DragGesture(minimumDistance: 20).onEnded { value in

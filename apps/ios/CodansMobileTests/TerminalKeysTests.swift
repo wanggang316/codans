@@ -220,6 +220,43 @@ struct TerminalKeysTests {
   }
 
   @Test
+  func aWorktreeOpensOnTheRememberedPaneElseTheMacsChoice() {
+    let worktree = IPC.WorktreeSummary(
+      id: "W", name: "w", branch: nil, isPinned: false, selectedTabID: "T2",
+      tabs: [
+        tab(["A", "B"], layout: nil),
+        IPC.TabSummary(id: "T2", handle: nil, title: nil, focusedPaneID: "Z", panes: [pane("Y"), pane("Z")]),
+      ])
+    #expect(TerminalLayout.landingPane(in: worktree, remembered: "B") == "B")
+    // A remembered pane that has since closed falls back to the Mac.
+    #expect(TerminalLayout.landingPane(in: worktree, remembered: "gone") == "Z")
+    #expect(TerminalLayout.landingPane(in: worktree, remembered: nil) == "Z")
+    let noSelection = IPC.WorktreeSummary(
+      id: "W", name: "w", branch: nil, isPinned: false, selectedTabID: nil, tabs: worktree.tabs)
+    #expect(TerminalLayout.landingPane(in: noSelection, remembered: nil) == "A")
+  }
+
+  @Test
+  func paneMemoryRoundTripsAndForgetsTheOldest() {
+    var memory = PaneMemory()
+    memory.remember(pane: "P1", inWorktree: "W1")
+    memory.remember(pane: "P2", inWorktree: "W2")
+    memory.remember(pane: "P3", inWorktree: "W1")
+    let restored = PaneMemory(encoded: memory.encoded)
+    #expect(restored == memory)
+    #expect(restored.pane(inWorktree: "W1") == "P3")
+    #expect(PaneMemory(encoded: "not json") == PaneMemory())
+
+    var full = PaneMemory()
+    for index in 0...PaneMemory.limit {
+      full.remember(pane: "P\(index)", inWorktree: "W\(index)")
+    }
+    #expect(full.pane(inWorktree: "W0") == nil)
+    #expect(full.pane(inWorktree: "W\(PaneMemory.limit)") == "P\(PaneMemory.limit)")
+    #expect(full.panes.count == PaneMemory.limit)
+  }
+
+  @Test
   func homeIsShortened() {
     #expect(TerminalLayout.displayPath("/Users/gump/dev/codans") == "~/dev/codans")
     #expect(TerminalLayout.displayPath("/Users/gump") == "~")

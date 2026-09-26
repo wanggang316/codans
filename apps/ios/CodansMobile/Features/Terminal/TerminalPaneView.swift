@@ -85,13 +85,17 @@ struct TerminalPaneView: View {
             message: store.isConnected ? "Connecting to the terminal…" : connectionStatus ?? "Waiting for your Mac…")
         }
       case .reconnecting:
+        // While the Mac itself is unreachable the banner above the
+        // terminal says so; this is for a stream dropping on its own.
         StatusCapsule(symbol: "arrow.triangle.2.circlepath", text: "Reconnecting…", animates: true)
+          .opacity(store.isConnected ? 1 : 0)
           .accessibilityIdentifier("terminal-reconnecting")
       case .failed(let message):
         TerminalFailedView(message: message) { store.send(.retryAttach) }
       case .live, .exited:
         if store.isStale {
           StatusCapsule(symbol: "arrow.triangle.2.circlepath", text: "Reconnecting…", animates: true)
+            .opacity(store.isConnected ? 1 : 0)
             .accessibilityIdentifier("terminal-reconnecting")
         }
       }
@@ -376,9 +380,7 @@ private struct TerminalFailedView: View {
         .multilineTextAlignment(.center)
         .foregroundStyle(.white.opacity(0.7))
       Button("Try Again", action: retry)
-        .buttonStyle(.bordered)
-        .tint(.white)
-        .foregroundStyle(.white)
+        .buttonStyle(.terminal)
     }
     .foregroundStyle(.white)
     .padding(24)
@@ -431,8 +433,7 @@ private struct TerminalExitedBanner: View {
       Spacer(minLength: 8)
       if canClose {
         Button("Close Pane", role: .destructive, action: onClose)
-          .buttonStyle(.bordered)
-          .tint(.white)
+          .buttonStyle(.terminalQuiet)
       }
     }
     .foregroundStyle(.white)
@@ -466,10 +467,7 @@ struct TerminalNotice: View {
       }
       Spacer(minLength: 8)
       Button(actionTitle, action: action)
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .tint(.white)
-        .foregroundStyle(.black)
+        .buttonStyle(.terminal)
     }
     .padding(12)
     .background(.regularMaterial, in: .rect(cornerRadius: 14))

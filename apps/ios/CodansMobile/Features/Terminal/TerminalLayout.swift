@@ -34,6 +34,18 @@ nonisolated enum TerminalLayout {
     return orderedPaneIDs(in: tab).first
   }
 
+  /// The pane a worktree opens on: the one last viewed on this device,
+  /// else the Mac's selected tab's focused pane, else the first pane.
+  static func landingPane(in worktree: IPC.WorktreeSummary, remembered: String?) -> String? {
+    if let remembered, worktree.tabs.contains(where: { $0.panes.contains { $0.id == remembered } }) {
+      return remembered
+    }
+    if let tab = worktree.tabs.first(where: { $0.id == worktree.selectedTabID }), let pane = landingPane(in: tab) {
+      return pane
+    }
+    return worktree.tabs.lazy.compactMap(landingPane).first
+  }
+
   /// Panes that get a live stream on the iPad: the first `limit` in split
   /// order, always including the focused one.
   static func streamedPaneIDs(in tab: IPC.TabSummary, focused: String?, limit: Int = 4) -> Set<String> {

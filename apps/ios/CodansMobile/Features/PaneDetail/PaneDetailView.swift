@@ -95,11 +95,17 @@ struct PaneDetailView: View {
   private var output: some View {
     if !store.hasLoaded {
       if let message = store.errorMessage {
-        ContentUnavailableView(
-          "Couldn't Read Pane", systemImage: "exclamationmark.triangle", description: Text(message))
+        StateView(
+          symbol: "exclamationmark.triangle", tint: .failure, title: "Couldn't read this pane", message: message,
+          primary: .init("Try again") { store.send(.refresh) })
       } else {
-        ProgressView()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+          ForEach(0..<5, id: \.self) { index in
+            SkeletonRow(variant: Double(index) / 5)
+          }
+          Spacer()
+        }
+        .padding(Theme.Space.md)
       }
     } else {
       // Vertical outside, horizontal inside: a two-axis scroll view places
@@ -138,7 +144,7 @@ struct PaneDetailView: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.regularMaterial, in: .rect(cornerRadius: 14))
+            .background(.regularMaterial, in: .rect(cornerRadius: Theme.Radius.card))
             .padding(.top, 8)
             .accessibilityIdentifier("pane-stale")
           }
