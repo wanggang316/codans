@@ -32,7 +32,7 @@ Recognize terminal-level Agent failures and offer opt-in bounded recovery withou
 
 ## Status
 
-Implementation complete in the isolated worktree. Verified changes are committed on the feature branch; no push requested.
+Implementation complete in the isolated worktree. Verified changes are committed on the feature branch and published in PR #211.
 
 ## Verification results
 

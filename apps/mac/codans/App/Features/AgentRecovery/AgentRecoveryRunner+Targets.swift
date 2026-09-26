@@ -16,7 +16,7 @@ extension AgentRecoveryRunner {
         for tab in worktree.tabs {
           for pane in tab.panes {
             guard let entry = registry.entries[pane.id],
-              entry.kind == .codex || entry.kind == .claudeCode,
+              AgentObservationParsers.parser(for: entry.kind).supportsErrorRecovery,
               !entry.recoverySuppressed,
               pane.agentKind == entry.kind,
               pane.agentSessionID == entry.sessionID,

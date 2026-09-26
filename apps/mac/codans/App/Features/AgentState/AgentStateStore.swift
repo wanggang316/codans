@@ -97,6 +97,7 @@ final class AgentStateStore {
     var seen: Bool
     var userInputSeen: Bool
     var lastViewportText: String?
+    var observation: AgentObservation?
     var lastWorkingAt: Date?
     var suppressedErrorFingerprint: String?
     /// Latest OSC title the pane's terminal pushed. Display-only cache
@@ -153,7 +154,7 @@ final class AgentStateStore {
   // Reaction table:
   //
   //  - onTerminalEvent(.paneViewportChanged): classify the rendered
-  //    active region through `PaneAttentionInterpreter`'s agent-specific
+  //    active region through `AgentObservationParser`'s agent-specific
   //    rules. Process identity decides which agent this is; the rendered
   //    content decides whether it is working, blocked, or idle. This is
   //    the *only* source of `.blocked` / `.working`.
@@ -240,12 +241,12 @@ final class AgentStateStore {
   /// prompt, so drop the attention cue until the next snapshot re-derives it.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    if s.rawState == .error, let kind = entries[paneID]?.kind, let text = s.lastViewportText {
-      s.suppressedErrorFingerprint = PaneAttentionInterpreter.agentErrorFingerprint(
-        kind: kind, viewportText: text)
+    if s.rawState == .error {
+      s.suppressedErrorFingerprint = s.observation?.errorFingerprint
     }
     if s.rawState == .blocked || s.rawState == .error {
       s.lastViewportText = nil
+      s.observation = nil
       s.lastWorkingAt = nil
       s.rawState = .idle
     }
@@ -266,6 +267,7 @@ final class AgentStateStore {
     guard var s = scratch[paneID] else { return }
     if s.rawState == .blocked {
       s.lastViewportText = nil
+      s.observation = nil
       s.lastWorkingAt = nil
       s.rawState = .idle
     }
@@ -296,17 +298,19 @@ final class AgentStateStore {
       var previousScratch = scratch[paneID]
     {
       previousScratch.lastViewportText = nil
+      previousScratch.observation = nil
       previousScratch.lastWorkingAt = nil
       previousScratch.suppressedErrorFingerprint = nil
       previousScratch.rawState = .idle
       previousScratch.awaitingFirstClassification = true
       scratch[paneID] = previousScratch
     }
-    let viewportImpliesActive: Bool = {
-      guard let text = scratch[paneID]?.lastViewportText else { return false }
-      let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
-      return raw == .working || raw == .blocked
-    }()
+    if var existing = scratch[paneID], let text = existing.lastViewportText {
+      existing.observation = AgentObservationParsers.parser(for: kind).parse(text)
+      scratch[paneID] = existing
+    }
+    let activity = scratch[paneID]?.observation?.activity
+    let viewportImpliesActive = activity == .working || activity == .blocked
     let effectiveUserInputSeen = assumeUserInputSeen || viewportImpliesActive
 
     if var existing = scratch[paneID] {
@@ -416,12 +420,12 @@ final class AgentStateStore {
 
   /// Raw state derivation. Display-only finished is intentionally not
   /// represented here; it is derived later from `seen`.
-  private func deriveRawState(_ s: Scratch, kind: AgentKind?) -> AgentRawState {
-    guard let kind, let text = s.lastViewportText else { return .idle }
-    let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
+  private func deriveRawState(_ s: Scratch) -> AgentRawState {
+    guard let observation = s.observation else { return .idle }
+    let raw = observation.activity
     if raw == .error,
       let suppressed = s.suppressedErrorFingerprint,
-      PaneAttentionInterpreter.agentErrorFingerprint(kind: kind, viewportText: text) == suppressed
+      observation.errorFingerprint == suppressed
     {
       return .idle
     }
@@ -455,13 +459,12 @@ final class AgentStateStore {
   private func applyViewportText(_ text: String, paneID: PaneID) {
     var s = scratch[paneID] ?? .fresh()
     s.lastViewportText = text
-    if let kind = entries[paneID]?.kind, s.suppressedErrorFingerprint != nil {
-      let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
-      let oldErrorRemains = text.split(separator: "\n").contains { line in
-        PaneAttentionInterpreter.agentErrorFingerprint(kind: kind, viewportText: String(line))
-          == s.suppressedErrorFingerprint
-      }
-      if raw == .working || raw == .blocked || !oldErrorRemains {
+    s.observation = entries[paneID].map { entry in
+      AgentObservationParsers.parser(for: entry.kind).parse(text)
+    }
+    if let observation = s.observation, let suppressed = s.suppressedErrorFingerprint {
+      let oldErrorRemains = observation.visibleErrorFingerprints.contains(suppressed)
+      if observation.activity == .working || observation.activity == .blocked || !oldErrorRemains {
         s.suppressedErrorFingerprint = nil
       }
     }
@@ -526,7 +529,7 @@ final class AgentStateStore {
     guard var s = scratch[paneID] else { return }
     let kind = entries[paneID]?.kind
     let previousRaw = s.rawState
-    var newRaw = deriveRawState(s, kind: kind)
+    var newRaw = deriveRawState(s)
     if kind != nil {
       newRaw = PaneAttentionInterpreter.stabilizeAgentActivity(
         previous: previousRaw,

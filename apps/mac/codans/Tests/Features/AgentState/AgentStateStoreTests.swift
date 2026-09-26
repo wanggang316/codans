@@ -29,6 +29,40 @@ struct AgentStateStoreTests {
   }
 
   @Test
+  func errorObservationBeforeBindingIsReplacedOnRebind() {
+    let f = Fixture()
+    f.viewport("API Error: 401 unauthorized")
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: "first")
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "second")
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 30))
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    f.viewport("codex> ")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 30))
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  @Test
+  func suppressedErrorOutsideActivityRegionRemainsSuppressedWhenRepainted() {
+    let f = Fixture()
+    let error = "■ stream disconnected before completion: timeout"
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport(error)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    let padding = Array(repeating: "ordinary transcript line", count: 30).joined(separator: "\n")
+    f.viewport(error + "\n" + padding)
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 30))
+    f.viewport(error)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.recoveryEligible == false)
+    f.viewport("codex> ")
+    f.viewport(error)
+    #expect(f.registry.entries[f.paneID]?.state == .error)
+  }
+
+  @Test
   func cancellingRecoveryPersistsUntilKeyboardInput() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "session", assumeUserInputSeen: true)
