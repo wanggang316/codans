@@ -5,7 +5,13 @@
 # the CodansMobile UI test on a simulator. Never touches the default dev /
 # release sockets, config or zmx cache.
 #
-# Usage: harness.sh <Debug Codans.app path> [simulator UDID, on an iOS 26 runtime]
+# Usage: [CASES="<case> ..."] harness.sh <Debug Codans.app path> [simulator UDID, on an iOS 26 runtime]
+#
+# CASES (space or comma separated, default: all) runs only the named cases,
+# plus the pairing each one needs: the live cases reuse interactive's
+# pairing, readonly-live read-only's, and rejected composer's (or
+# interactive's when composer is not selected). revoke always runs last, to
+# leave no device record or Keychain key behind.
 #
 # Cases:
 #   interactive  pair "View and type", browse to the fixture pane, send a line,
@@ -53,6 +59,15 @@ SIM="${2:-$(xcrun simctl list devices available -j |
     select(.name == "iPhone 17 Pro")][0].udid')}"
 mkdir -p "$CONF" "$FIX" "$SHOTS" "$WTS" "$FAKEBIN"
 
+CASES="${CASES:-all}"
+# want <case>...: whether any of the cases was selected.
+want() {
+  [[ "$CASES" == all ]] && return 0
+  local c
+  for c in "$@"; do [[ " ${CASES//,/ } " == *" $c "* ]] && return 0; done
+  return 1
+}
+
 PASS=0; FAIL=0
 ok() { PASS=$((PASS+1)); echo "PASS  $*"; }
 bad() { FAIL=$((FAIL+1)); echo "FAIL  $*"; }
@@ -95,6 +110,11 @@ EOF
   CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" \
     nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
   MAC_PID=$!
+  # The gateway logs at info level, which the unified log does not keep.
+  log stream --level info --style compact \
+    --predicate "processID == $MAC_PID AND subsystem == \"com.gumpw.codans.remote\"" \
+    >"$SCRATCH/gateway.log" 2>&1 &
+  LOG_PID=$!
   for _ in $(seq 1 100); do cli status >/dev/null 2>&1 && break; sleep 0.2; done
   local up; up=$(cli status --json | jq -r '.data.uptimeSeconds')
   awk -v u="$up" 'BEGIN { exit !(u + 0 < 30) }' || { echo "REFUSING: socket answered by an older instance"; exit 1; }
@@ -115,6 +135,7 @@ EOF
 
 quit_mac() {
   [[ -n "${UI_PID:-}" ]] && kill "$UI_PID" 2>/dev/null
+  [[ -n "${LOG_PID:-}" ]] && kill "$LOG_PID" 2>/dev/null
   [[ -n "${MAC_PID:-}" ]] || return
   # A graceful quit withdraws the Bonjour advertisement. A killed app
   # leaves a stale record in mDNS for up to an hour, which the next run's
@@ -284,151 +305,172 @@ fi
 cli pane focus "$PANE" >/dev/null
 
 # --- "View and type": pairs, then the live cases run on the same pairing.
-MARKER="hi-from-phone-$$"
-reset_sim
-if run_pairing_test interactive testPairBrowseReadAndSend "View and type" INPUT="echo $MARKER"; then
-  ok "interactive: paired, browsed, sent a line"
-else
-  bad "interactive UI test (see $SCRATCH/interactive.log)"
-fi
-if cli pane read "$PANE" | grep -qx "$MARKER"; then
-  ok "interactive: the Mac pane printed the line sent from the phone"
-else
-  bad "interactive: '$MARKER' not in the pane output"
-fi
-
-# live-terminal: printed as two words so the typed command never contains
-# the marker itself; only the output does.
-start_ui_test live-terminal testShowsLiveOutput PAIRED=1 MARKER="live-$$"
-if await_phone attached; then
-  cli pane send "$PANE" "printf '%s-%s\n' live $$" >/dev/null
-  release attached
-fi
-if finish_ui_test; then
-  ok "live-terminal: the phone showed output printed on the Mac"
-else
-  bad "live-terminal (see $SCRATCH/live-terminal.log)"
-fi
-
-if run_ui_test live-input testTypesIntoTheMacPane PAIRED=1 MARKER="typed-$$" && wait_for_line "$PANE" "typed-$$"; then
-  ok "live-input: a line typed on the phone ran in the Mac pane"
-else
-  bad "live-input: 'typed-$$' not in the pane output (see $SCRATCH/live-input.log)"
-fi
-
-interrupted=0
-start_ui_test modifier-keys testCtrlLatchInterruptsAForegroundJob PAIRED=1
-if await_phone ready; then
-  cli pane send "$PANE" "sleep 30" >/dev/null
-  sleep 1
-  release ready
-  if await_phone interrupted 60; then
-    # A shell still in `sleep` only echoes the typed command; the output
-    # line appears once the prompt is back.
-    cli pane send "$PANE" "echo after-$$" >/dev/null
-    wait_for_line "$PANE" "after-$$" 8 && interrupted=1
-    release interrupted
-  fi
-fi
-if finish_ui_test && [[ $interrupted == 1 ]]; then
-  ok "modifier-keys: ctrl then c from the phone interrupted sleep"
-else
-  bad "modifier-keys: the shell did not answer after ctrl-c (see $SCRATCH/modifier-keys.log)"
-fi
-
-steal=""
-resize_mac 1400 900
-before=$(stty_size)
-start_ui_test no-leader-steal testLeavesTheSizeToTheMac PAIRED=1
-if await_phone typed; then
-  after_input=$(stty_size)
-  [[ -n "$before" && "$after_input" == "$before" ]] || steal="typing on the phone moved it: $before -> $after_input"
-  release typed
-  if await_phone resized; then
-    resize_mac 1000 800
-    narrow=$(stty_size)
-    resize_mac 1400 900
-    wide=$(stty_size)
-    # The narrower window must give fewer columns, still far more than
-    # a phone's portrait grid, and the wide one must restore the original.
-    if [[ -z "$steal" ]] && ! { (( ${narrow#* } < ${before#* } && ${narrow#* } >= 60 )) && [[ "$wide" == "$before" ]]; }; then
-      steal="did not follow the Mac: $before, narrow $narrow, wide again $wide"
-    fi
-    release resized
+LIVE_CASES=(live-terminal live-input modifier-keys no-leader-steal tab-ops)
+if want interactive "${LIVE_CASES[@]}" || { want rejected && ! want composer; }; then
+  MARKER="hi-from-phone-$$"
+  reset_sim
+  if run_pairing_test interactive testPairBrowseReadAndSend "View and type" INPUT="echo $MARKER"; then
+    ok "interactive: paired, browsed, sent a line"
   else
-    steal="the phone never got to the resize step"
+    bad "interactive UI test (see $SCRATCH/interactive.log)"
   fi
-else
-  steal="the phone never typed"
-fi
-if finish_ui_test && [[ -z "$steal" ]]; then
-  ok "no-leader-steal: stty size stayed the Mac's ($before, narrow $narrow)"
-else
-  bad "no-leader-steal: ${steal:-UI test failed} (see $SCRATCH/no-leader-steal.log)"
+  if cli pane read "$PANE" | grep -qx "$MARKER"; then
+    ok "interactive: the Mac pane printed the line sent from the phone"
+  else
+    bad "interactive: '$MARKER' not in the pane output"
+  fi
 fi
 
-tab_ops=""
-start=$(tree_counts)
-tabs=${start% *} panes=${start#* }
-start_ui_test tab-ops testManagesTabsAndPanes PAIRED=1
-if await_phone new-tab; then
-  # A new tab comes with one pane.
-  wait_for_counts "$((tabs + 1)) $((panes + 1))" || tab_ops+=" new-tab($(tree_counts))"
-  release new-tab
-  if await_phone split; then
-    wait_for_counts "$((tabs + 1)) $((panes + 2))" || tab_ops+=" split($(tree_counts))"
-    release split
-    if await_phone closed; then
-      wait_for_counts "$((tabs + 1)) $((panes + 1))" || tab_ops+=" close($(tree_counts))"
-      release closed
-    else tab_ops+=" never-closed"; fi
-  else tab_ops+=" never-split"; fi
-else tab_ops+=" never-new-tab"; fi
-if finish_ui_test && [[ -z "$tab_ops" ]]; then
-  ok "tab-ops: New Tab, Split Right and Close Pane reached the Mac"
-else
-  bad "tab-ops: from '$start':${tab_ops:- UI test failed} (see $SCRATCH/tab-ops.log)"
+if want live-terminal; then
+  # live-terminal: printed as two words so the typed command never contains
+  # the marker itself; only the output does.
+  start_ui_test live-terminal testShowsLiveOutput PAIRED=1 MARKER="live-$$"
+  if await_phone attached; then
+    cli pane send "$PANE" "printf '%s-%s\n' live $$" >/dev/null
+    release attached
+  fi
+  if finish_ui_test; then
+    ok "live-terminal: the phone showed output printed on the Mac"
+  else
+    bad "live-terminal (see $SCRATCH/live-terminal.log)"
+  fi
+fi
+
+if want live-input; then
+  if run_ui_test live-input testTypesIntoTheMacPane PAIRED=1 MARKER="typed-$$" && wait_for_line "$PANE" "typed-$$"; then
+    ok "live-input: a line typed on the phone ran in the Mac pane"
+  else
+    bad "live-input: 'typed-$$' not in the pane output (see $SCRATCH/live-input.log)"
+  fi
+fi
+
+if want modifier-keys; then
+  interrupted=0
+  start_ui_test modifier-keys testCtrlLatchInterruptsAForegroundJob PAIRED=1
+  if await_phone ready; then
+    cli pane send "$PANE" "sleep 30" >/dev/null
+    sleep 1
+    release ready
+    if await_phone interrupted 60; then
+      # A shell still in `sleep` only echoes the typed command; the output
+      # line appears once the prompt is back.
+      cli pane send "$PANE" "echo after-$$" >/dev/null
+      wait_for_line "$PANE" "after-$$" 8 && interrupted=1
+      release interrupted
+    fi
+  fi
+  if finish_ui_test && [[ $interrupted == 1 ]]; then
+    ok "modifier-keys: ctrl then c from the phone interrupted sleep"
+  else
+    bad "modifier-keys: the shell did not answer after ctrl-c (see $SCRATCH/modifier-keys.log)"
+  fi
+fi
+
+if want no-leader-steal; then
+  steal=""
+  resize_mac 1400 900
+  before=$(stty_size)
+  start_ui_test no-leader-steal testLeavesTheSizeToTheMac PAIRED=1
+  if await_phone typed; then
+    after_input=$(stty_size)
+    [[ -n "$before" && "$after_input" == "$before" ]] || steal="typing on the phone moved it: $before -> $after_input"
+    release typed
+    if await_phone resized; then
+      resize_mac 1000 800
+      narrow=$(stty_size)
+      resize_mac 1400 900
+      wide=$(stty_size)
+      # The narrower window must give fewer columns, still far more than
+      # a phone's portrait grid, and the wide one must restore the original.
+      if [[ -z "$steal" ]] && ! { (( ${narrow#* } < ${before#* } && ${narrow#* } >= 60 )) && [[ "$wide" == "$before" ]]; }; then
+        steal="did not follow the Mac: $before, narrow $narrow, wide again $wide"
+      fi
+      release resized
+    else
+      steal="the phone never got to the resize step"
+    fi
+  else
+    steal="the phone never typed"
+  fi
+  if finish_ui_test && [[ -z "$steal" ]]; then
+    ok "no-leader-steal: stty size stayed the Mac's ($before, narrow $narrow)"
+  else
+    bad "no-leader-steal: ${steal:-UI test failed} (see $SCRATCH/no-leader-steal.log)"
+  fi
+fi
+
+if want tab-ops; then
+  tab_ops=""
+  start=$(tree_counts)
+  tabs=${start% *} panes=${start#* }
+  start_ui_test tab-ops testManagesTabsAndPanes PAIRED=1
+  if await_phone new-tab; then
+    # A new tab comes with one pane.
+    wait_for_counts "$((tabs + 1)) $((panes + 1))" || tab_ops+=" new-tab($(tree_counts))"
+    release new-tab
+    if await_phone split; then
+      wait_for_counts "$((tabs + 1)) $((panes + 2))" || tab_ops+=" split($(tree_counts))"
+      release split
+      if await_phone closed; then
+        wait_for_counts "$((tabs + 1)) $((panes + 1))" || tab_ops+=" close($(tree_counts))"
+        release closed
+      else tab_ops+=" never-closed"; fi
+    else tab_ops+=" never-split"; fi
+  else tab_ops+=" never-new-tab"; fi
+  if finish_ui_test && [[ -z "$tab_ops" ]]; then
+    ok "tab-ops: New Tab, Split Right and Close Pane reached the Mac"
+  else
+    bad "tab-ops: from '$start':${tab_ops:- UI test failed} (see $SCRATCH/tab-ops.log)"
+  fi
 fi
 
 # --- "View only"
-cli pane focus "$PANE" >/dev/null
-reset_sim
-if run_pairing_test read-only testPairBrowseReadAndSend "View only"; then
-  ok "read-only: no input bar"
-else
-  bad "read-only UI test (see $SCRATCH/read-only.log)"
+if want read-only readonly-live; then
+  cli pane focus "$PANE" >/dev/null
+  reset_sim
+  if run_pairing_test read-only testPairBrowseReadAndSend "View only"; then
+    ok "read-only: no input bar"
+  else
+    bad "read-only UI test (see $SCRATCH/read-only.log)"
+  fi
 fi
 
-start_ui_test readonly-live testShowsLiveOutput PAIRED=1 READ_ONLY=1 MARKER="ro-$$"
-if await_phone attached; then
-  cli pane send "$PANE" "printf '%s-%s\n' ro $$" >/dev/null
-  release attached
-fi
-if finish_ui_test; then
-  ok "readonly-live: a view-only device streams the pane without a key bar"
-else
-  bad "readonly-live (see $SCRATCH/readonly-live.log)"
+if want readonly-live; then
+  start_ui_test readonly-live testShowsLiveOutput PAIRED=1 READ_ONLY=1 MARKER="ro-$$"
+  if await_phone attached; then
+    cli pane send "$PANE" "printf '%s-%s\n' ro $$" >/dev/null
+    release attached
+  fi
+  if finish_ui_test; then
+    ok "readonly-live: a view-only device streams the pane without a key bar"
+  else
+    bad "readonly-live (see $SCRATCH/readonly-live.log)"
+  fi
 fi
 
 # --- composer
-PROMPT="e2e composer run $$"
-BRANCH="agent/e2e-composer-run-$$"
-reset_sim
-if run_pairing_test composer testComposerStartsAnAgentInANewWorktree "View and type" COMPOSER_PROMPT="$PROMPT"; then
-  ok "composer: started an agent from the phone"
-else
-  bad "composer UI test (see $SCRATCH/composer.log)"
+if want composer; then
+  PROMPT="e2e composer run $$"
+  BRANCH="agent/e2e-composer-run-$$"
+  reset_sim
+  if run_pairing_test composer testComposerStartsAnAgentInANewWorktree "View and type" COMPOSER_PROMPT="$PROMPT"; then
+    ok "composer: started an agent from the phone"
+  else
+    bad "composer UI test (see $SCRATCH/composer.log)"
+  fi
+  new_wt=$(cli tree --json | jq -r --arg b "$BRANCH" '.data.projects[0].worktrees[] | select(.branch == $b) | .id')
+  if [[ -n "$new_wt" ]]; then ok "composer: the Mac created worktree $BRANCH"; else bad "composer: no worktree on branch $BRANCH"; fi
+  got_prompt=0
+  for pane in $(cli tree --json | jq -r --arg w "$new_wt" '.data.projects[0].worktrees[] | select(.id == $w) | .tabs[].panes[].id'); do
+    cli pane read "$pane" | grep -q "FAKE-AGENT claude ARGS: .*$PROMPT" && got_prompt=1
+  done
+  [[ $got_prompt == 1 ]] && ok "composer: the agent started with the prompt" || bad "composer: no pane shows the agent with the prompt"
 fi
-new_wt=$(cli tree --json | jq -r --arg b "$BRANCH" '.data.projects[0].worktrees[] | select(.branch == $b) | .id')
-if [[ -n "$new_wt" ]]; then ok "composer: the Mac created worktree $BRANCH"; else bad "composer: no worktree on branch $BRANCH"; fi
-got_prompt=0
-for pane in $(cli tree --json | jq -r --arg w "$new_wt" '.data.projects[0].worktrees[] | select(.id == $w) | .tabs[].panes[].id'); do
-  cli pane read "$pane" | grep -q "FAKE-AGENT claude ARGS: .*$PROMPT" && got_prompt=1
-done
-[[ $got_prompt == 1 ]] && ok "composer: the agent started with the prompt" || bad "composer: no pane shows the agent with the prompt"
 
-active=$(jq '[.devices[] | select(.state == "active")] | length' "$CONF/remote-devices.json")
-[[ "$active" == 3 ]] && ok "all three pairings became active" || bad "expected 3 active devices, got $active"
+if [[ "$CASES" == all ]]; then
+  active=$(jq '[.devices[] | select(.state == "active")] | length' "$CONF/remote-devices.json")
+  [[ "$active" == 3 ]] && ok "all three pairings became active" || bad "expected 3 active devices, got $active"
+fi
 
 # --- revoke, with the composer's phone connected (rejected)
 revoke_all() {
@@ -440,15 +482,18 @@ revoke_all() {
   done
 }
 ids=$(device_ids)
-start_ui_test rejected testShowsRemovedAfterRevocation PAIRED=1
-if await_phone live; then
-  revoke_all
-  release live
-fi
-if finish_ui_test; then
-  ok "rejected: the revoked phone asks to pair again"
-else
-  bad "rejected (see $SCRATCH/rejected.log)"
+if want rejected; then
+  start_ui_test rejected testShowsRemovedAfterRevocation PAIRED=1
+  if await_phone live; then
+    revoke_all
+    echo "rejected: $(device_ids | wc -l | tr -d ' ') device record(s) left after revoking"
+    release live
+  fi
+  if finish_ui_test; then
+    ok "rejected: the revoked phone asks to pair again"
+  else
+    bad "rejected (see $SCRATCH/rejected.log)"
+  fi
 fi
 revoke_all
 if [[ -z "$(device_ids)" ]]; then ok "revoke: no device records left"; else bad "revoke: records remain"; fi
