@@ -75,7 +75,7 @@ struct TerminalPaneView: View {
           keyboard?.raiseKeyboard()
         }
         .opacity(store.isStale ? 0.35 : 1)
-        .animation(.easeInOut(duration: 0.25), value: store.isStale)
+        .themeAnimation(store.isStale)
         .accessibilityIdentifier("terminal-screen")
       }
       switch store.phase {
@@ -113,9 +113,9 @@ struct TerminalPaneView: View {
         actionTitle: "Open on Mac",
         action: { store.send(.openOnMacTapped) }
       )
-      .padding(.horizontal, 12)
-      .padding(.top, 8)
-      .transition(.move(edge: .top).combined(with: .opacity))
+      .padding(.horizontal, Theme.Space.sm)
+      .padding(.top, Theme.Space.xs)
+      .transition(.opacity)
     } else if store.fidelity == .approximate, store.phase == .live {
       Text("Approximate — restart the pane on your Mac for an exact view")
         .font(.caption2)
@@ -176,8 +176,8 @@ struct TerminalPaneView: View {
       .padding(.trailing, 12)
     }
     .padding(.bottom, 10)
-    .animation(.easeInOut(duration: 0.25), value: store.toast)
-    .animation(.easeInOut(duration: 0.25), value: store.screen.isFollowingBottom)
+    .themeAnimation(store.toast)
+    .themeAnimation(store.screen.isFollowingBottom)
   }
 }
 
@@ -227,7 +227,7 @@ struct TerminalInputChrome: View {
       .frame(width: 1, height: 1)
       .accessibilityHidden(true)
     }
-    .animation(.easeInOut(duration: 0.25), value: keyboard.isComposing)
+    .themeAnimation(keyboard.isComposing)
     .onAppear { keyboard.isFocused = true }
     .onDisappear {
       keyboard.isFocused = false
@@ -272,8 +272,8 @@ struct TerminalInputChrome: View {
     .overlay {
       if let reason = store.inputDisabledReason {
         Text(reason)
-          .font(.footnote)
-          .foregroundStyle(.secondary)
+          .font(.rowDetail)
+          .foregroundStyle(Color.inkSecondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
           .background(.bar)
       }
@@ -419,29 +419,26 @@ private struct TerminalExitedBanner: View {
   let onClose: () -> Void
 
   var body: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 2) {
+    HStack(spacing: Theme.Space.sm) {
+      StatusDot(color: .offline)
+      VStack(alignment: .leading, spacing: 1) {
         Text("Process exited")
-          .font(.subheadline.weight(.semibold))
+          .font(.system(size: 14, weight: .semibold))
         if !reason.isEmpty {
           Text(reason)
-            .font(.caption)
+            .font(.system(size: 12))
             .foregroundStyle(.white.opacity(0.65))
             .lineLimit(1)
         }
       }
-      Spacer(minLength: 8)
+      Spacer(minLength: Theme.Space.xs)
       if canClose {
         Button("Close Pane", role: .destructive, action: onClose)
           .buttonStyle(.terminalQuiet)
       }
     }
-    .foregroundStyle(.white)
-    .padding(.horizontal, 14)
-    .padding(.vertical, 10)
-    .background(.black.opacity(0.75), in: .rect(cornerRadius: 14))
-    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.12)))
-    .padding(.horizontal, 12)
+    .terminalBanner()
+    .padding(.horizontal, Theme.Space.sm)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("terminal-exited")
   }
@@ -456,24 +453,44 @@ struct TerminalNotice: View {
   let action: () -> Void
 
   var body: some View {
-    HStack(alignment: .top, spacing: 10) {
+    HStack(spacing: Theme.Space.sm) {
       Image(systemName: symbol)
         .accessibilityHidden(true)
-        .font(.body)
-        .padding(.top, 1)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title).font(.subheadline.weight(.semibold))
-        Text(message).font(.caption).foregroundStyle(.secondary)
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(Color.needsInput)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(title).font(.system(size: 14, weight: .semibold))
+        Text(message)
+          .font(.system(size: 12))
+          .foregroundStyle(.white.opacity(0.65))
       }
-      Spacer(minLength: 8)
+      Spacer(minLength: Theme.Space.xs)
       Button(actionTitle, action: action)
         .buttonStyle(.terminal)
+        .fixedSize()
     }
-    .padding(12)
-    .background(.regularMaterial, in: .rect(cornerRadius: 14))
-    .environment(\.colorScheme, .dark)
+    .terminalBanner()
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("terminal-notice")
+  }
+}
+
+extension View {
+  /// The terminal's counterpart of `InlineBanner`'s card: the same shape
+  /// and padding, dark whatever the app's appearance, since it sits on the
+  /// always-dark screen.
+  func terminalBanner() -> some View {
+    foregroundStyle(.white)
+      .padding(.leading, Theme.Space.md)
+      .padding(.trailing, Theme.Space.sm)
+      .padding(.vertical, 10)
+      .background(
+        Color(white: 0.1).opacity(0.92), in: .rect(cornerRadius: Theme.Radius.card, style: .continuous)
+      )
+      .overlay {
+        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(.white.opacity(0.12))
+      }
+      .environment(\.colorScheme, .dark)
   }
 }
 

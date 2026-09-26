@@ -23,10 +23,12 @@ struct InkButtonStyle: ButtonStyle {
 struct QuietButtonStyle: ButtonStyle {
   var isCompact = false
 
+  @Environment(\.isEnabled) private var isEnabled
+
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .font(isCompact ? .system(size: 14, weight: .semibold) : .system(size: 16, weight: .medium))
-      .foregroundStyle(Color.ink)
+      .foregroundStyle(isEnabled ? Color.ink : Color.inkTertiary)
       .padding(.horizontal, isCompact ? 12 : 22)
       .frame(minHeight: isCompact ? 30 : 48)
       .background(Color.surfaceMuted, in: .capsule)

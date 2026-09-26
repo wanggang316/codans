@@ -16,6 +16,8 @@ import Network
 ///   each attempt at once instead, to show the countdown between attempts.
 /// - `CODANS_DEMO_READONLY=1`: the Mac grants read-only access.
 /// - `CODANS_DEMO_NOT_OPEN=1`: keys answer "pane not open on the Mac".
+/// - `CODANS_DEMO_EXITED=1`: the pane's process exits right after its
+///   first screen, to show the exited banner.
 /// - `CODANS_DEMO_FAILURE`: the Mac never connects, to show a failure state:
 ///   `notFound` (no advertisement), `rejected` (every handshake refused),
 ///   `denied` (Local Network access off) or `offline` (never answers, with
@@ -117,6 +119,7 @@ enum DemoMode {
       let failsFast = reconnect == "backoff"
       let readOnly = environment["CODANS_DEMO_READONLY"] == "1"
       let notOpen = environment["CODANS_DEMO_NOT_OPEN"] == "1"
+      let exits = environment["CODANS_DEMO_EXITED"] == "1"
       let protocolMinor = environment["CODANS_DEMO_OLD_MAC"] == "1" ? 1 : 2
       let failure = failure
       let connects = LockIsolated(0)
@@ -178,6 +181,10 @@ enum DemoMode {
               IPC.TerminalStreamFrame(
                 seq: 1, epoch: 1, payload: .reset(cols: sample.cols, rows: sample.rows, fidelity: .exact)))
             continuation.yield(IPC.TerminalStreamFrame(seq: 2, epoch: 1, payload: .output(sample.bytes)))
+            if exits {
+              continuation.yield(
+                IPC.TerminalStreamFrame(seq: 3, epoch: 1, payload: .exited(reason: "exit status 1", exitCode: 1)))
+            }
             let task = Task {
               var seq = 3
               while !Task.isCancelled {

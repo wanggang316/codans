@@ -175,32 +175,36 @@ private struct PaneInputBar: View {
         }
         .padding(.horizontal)
       }
-      HStack(spacing: 8) {
+      HStack(spacing: Theme.Space.xs) {
         TextField("Send to pane", text: $store.draft)
-          .textFieldStyle(.roundedBorder)
           .textInputAutocapitalization(.never)
           .autocorrectionDisabled()
-          .font(.system(.body, design: .monospaced))
+          .font(.system(size: 16))
+          .foregroundStyle(Color.ink)
           .focused(isInputFocused)
           .submitLabel(.send)
           .onSubmit { store.send(.sendTapped) }
-        Button("Send", systemImage: "arrow.up.circle.fill") { store.send(.sendTapped) }
-          .labelStyle(.iconOnly)
-          .font(.title2)
-          .disabled(!store.canSend || !isConnected)
-          // The software keyboard's return key is also labelled "Send".
-          .accessibilityIdentifier("pane-send")
+          .padding(.horizontal, Theme.Space.md)
+          .frame(minHeight: 40)
+          .background(Color.surfaceMuted, in: .capsule)
+        PrimaryCircleButton(isEnabled: store.canSend && isConnected, isBusy: store.isSending) {
+          store.send(.sendTapped)
+        }
+        .accessibilityLabel("Send")
+        // The software keyboard's return key is also labelled "Send".
+        .accessibilityIdentifier("pane-send")
       }
       .padding(.horizontal)
     }
     .padding(.vertical, 8)
-    .background(.bar)
+    .background(Color.surface)
+    .overlay(alignment: .top) { Rectangle().fill(Color.hairline).frame(height: 1) }
   }
 
   private func key(_ title: String, _ key: IPC.TerminalNamedKey, shortcut: KeyboardShortcut) -> some View {
     Button(title) { store.send(.keyTapped(key)) }
-      .buttonStyle(.bordered)
-      .font(.system(.callout, design: .monospaced))
+      .buttonStyle(.quietCompact)
+      .font(.system(size: 14, weight: .medium, design: .monospaced))
       .keyboardShortcut(shortcut)
       .disabled(store.isSending || !isConnected)
       .accessibilityLabel(Text("Send \(key.rawValue)"))
