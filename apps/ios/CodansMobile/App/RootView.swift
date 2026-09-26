@@ -153,10 +153,14 @@ struct RootView: View {
     }
   }
 
+  /// Only the alert's buttons end the request. SwiftUI also writes `false`
+  /// when `content` swaps branches under the alert (a revoked pairing
+  /// turning into "Removed from Mac" while a new link is being confirmed);
+  /// honouring that would drop the link, so the alert is shown again.
   private var isLinkPairingPresented: Binding<Bool> {
     Binding(
       get: { store.connection.linkPairing != nil },
-      set: { if !$0 { store.send(.connection(.linkPairingDismissed)) } }
+      set: { _ in }
     )
   }
 }
