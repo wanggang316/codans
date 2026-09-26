@@ -174,17 +174,56 @@ struct ScriptCommandTable: View {
   }
 
   /// `+` control. With kind presets (Project pane) it's a menu of preset kinds;
-  /// without them (Global pane) it's a plain button that appends one Custom
-  /// command — global commands have no Run/Test/… taxonomy.
+  /// without them (Global pane) global commands have no Run/Test/… taxonomy,
+  /// so it adds one Custom command — as a plain button, or as the first item of
+  /// a menu when there are suggestions to offer below it.
   @ViewBuilder
   private var addControl: some View {
     if allowsKindPresets {
       addMenu
+    } else if let onAddSuggestion {
+      Menu {
+        Button {
+          onAdd(.custom)
+        } label: {
+          Label {
+            Text("Custom Command")
+          } icon: {
+            ScriptTintColorPalette.menuIcon(
+              systemName: ScriptKind.custom.defaultSystemImage, tint: ScriptKind.custom.defaultTintColor)
+          }
+        }
+        Divider()
+        CommandSuggestionMenuSection(
+          title: "Suggested",
+          groups: suggestionGroups,
+          scripts: scripts,
+          isScanning: false,
+          onAdd: onAddSuggestion
+        )
+      } label: {
+        addMenuLabel
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .help("Add command")
     } else {
       barButton("plus", label: "Add command", disabled: false) {
         onAdd(.custom)
       }
     }
+  }
+
+  private var addMenuLabel: some View {
+    ZStack {
+      Image(systemName: "plus")
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
+    }
+    .frame(width: 28, height: 28)
+    .contentShape(Rectangle())
+    .accessibilityLabel("Add command")
   }
 
   /// `+` menu: offers each preset kind plus Custom. Predefined kinds already

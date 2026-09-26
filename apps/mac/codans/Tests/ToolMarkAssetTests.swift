@@ -24,3 +24,15 @@ struct ToolMarkAssetTests {
     #expect(CommandIconImage.tinted(.symbol("hammer.fill"), color: .systemGreen) != nil)
   }
 }
+
+@MainActor
+struct GlobalCommandSuggestionSymbolTests {
+  /// Curated suggestions name SF Symbols directly; a typo would draw nothing.
+  @Test
+  func everySuggestedSymbolExists() {
+    for suggestion in GlobalCommandSuggestions.groups.flatMap(\.suggestions) {
+      guard case .symbol(let name) = suggestion.icon else { continue }
+      #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")
+    }
+  }
+}

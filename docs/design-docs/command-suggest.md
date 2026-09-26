@@ -12,6 +12,8 @@ Command Suggest 按来源列出从项目清单识别出的命令。两个入口�
 - **Settings → Commands 表格的 `+` 菜单**（"From Project" 分节，SwiftUI `CommandSuggestionMenuSection`）：点击即把命令加入 Project。
 - **worktree header Run 按钮的下拉菜单**（"Config Files" 分节，AppKit `RunMenuBuilder`）：每个清单一个子菜单，**点击行 = 在新 tab 执行**，**点行尾 `+` = 加入 Project**，已加入的行尾显示 `✓`（此时点行执行已保存的那条脚本，共享 Run/Stop 状态）。
 
+另有 **Global Commands 的 `+` 菜单**："Custom Command" 之下是 "Suggested" 分节，列出 `GlobalCommandSuggestions` 这份维护好的常用命令表（Git、GitHub CLI 两组）。全局命令在当前选中的 worktree 里执行、不属于任何项目，所以这里不从文件识别，而是提供任何仓库都适用的工具级工作流。只收**非破坏性**命令（不含 `reset --hard`、`clean -f`、强推、`branch -D`，由测试守护）；每条指定语义明确的 SF Symbol。加入后为 `.custom` 类型并保留图标（`CommandSuggestionAdoption.adoptGlobal`，没有项目命令那套「每种预设类型一条 / 内置 Run」的约束）。以后加新的一组（如 Docker）只需在 `groups` 里追加。
+
 ## 目标与非目标
 
 **目标**
@@ -25,7 +27,7 @@ Command Suggest 按来源列出从项目清单识别出的命令。两个入口�
 - 不持久化建议、不与清单保持同步：采纳即复制，之后与清单无关。
 - 不执行任何外部工具来识别（如 `just --list`、`npm pkg get`）：只读文件，避免依赖安装状态与副作用。
 - 不无限递归：只扫到根目录下 3 层（`ManifestScope.standard`），跳过隐藏目录与依赖/构建产物目录。
-- 不接入 Global Commands（无 Project 上下文）；Command Palette 不列未保存的建议。
+- Global Commands 不做清单识别（没有项目上下文），只提供上述维护好的命令表；Command Palette 不列未保存的建议。
 
 ## 设计
 
