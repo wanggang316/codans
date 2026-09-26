@@ -95,6 +95,11 @@ final class GhosttyRuntime {
   /// process; init/deinit set and clear this.
   nonisolated(unsafe) static weak var shared: GhosttyRuntime?
 
+  /// Set while a remote key runs through one of libghostty's bindings;
+  /// see `RemoteKeyGuard`. Checked only by callbacks that arrive on the
+  /// main thread, where libghostty performs a key's binding.
+  var remoteKeyGuard: RemoteKeyGuard?
+
   /// Registered pane surfaces by PaneID. Referenced by engine code that
   /// needs to look up a surface from a Pane (e.g. lazy surface creation on
   /// tab activation). Surface-scoped callbacks do NOT use this table on the
@@ -567,6 +572,9 @@ final class GhosttyRuntime {
       let consumed = decoded.consumed
       if Thread.isMainThread {
         return MainActor.assumeIsolated {
+          if GhosttyRuntime.shared?.remoteKeyGuard?.shouldSuppress(action.tag, surfacePaneID: nil) == true {
+            return true
+          }
           _ = GhosttyRuntime.shared?.applyAppAction(decoded)
           return consumed
         }
@@ -584,6 +592,9 @@ final class GhosttyRuntime {
       let consumed = decoded.consumed
       if Thread.isMainThread {
         return MainActor.assumeIsolated {
+          if GhosttyRuntime.shared?.remoteKeyGuard?.shouldSuppress(action.tag, surfacePaneID: paneID) == true {
+            return true
+          }
           _ = GhosttyRuntime.shared?.applySurfaceAction(decoded, paneID: paneID)
           return consumed
         }
@@ -671,6 +682,7 @@ final class GhosttyRuntime {
       let paneID = paneID(fromRawUserdata: userdata)
       let stateBits = state.map { UInt(bitPattern: $0) }
       let complete: @MainActor () -> Bool = {
+        if GhosttyRuntime.shared?.remoteKeyGuard?.shouldRefuseClipboardRead(for: paneID) == true { return false }
         guard let pane = GhosttyRuntime.shared?.surface(for: paneID) else { return false }
         guard let pb = pasteboard(for: location),
           let text = pb.string(forType: .string)

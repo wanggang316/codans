@@ -1,3 +1,5 @@
+import CodansCore
+import GhosttyKit
 import Testing
 
 @testable import Codans
@@ -93,5 +95,63 @@ struct KeyEventSpecTests {
     #expect(KeyEventSpec.committedText("a\nb\rc").map(\.keycode) == [unidentified, 0x24, unidentified, 0x24, unidentified])
     #expect(KeyEventSpec.committedText("a\u{1B}[31mb") == [KeyEventSpec(keycode: unidentified, text: "a[31mb")])
     #expect(KeyEventSpec.committedText("").isEmpty)
+  }
+}
+
+/// The binding filter behind `terminal.sendEvents`: only ⌘ bindings are
+/// refused outright, other bindings run guarded, and the guard swallows
+/// only actions that would drive the Mac's app, windows, tabs or splits.
+@MainActor
+struct RemoteKeyBindingTests {
+  @Test
+  func onlySuperBindingsAreRefusedUpFront() {
+    #expect(RemoteKeyBinding.decide(isBinding: false, mods: [.super]) == .encode)
+    #expect(RemoteKeyBinding.decide(isBinding: false, mods: []) == .encode)
+    #expect(RemoteKeyBinding.decide(isBinding: true, mods: [.super]) == .reject)
+    #expect(RemoteKeyBinding.decide(isBinding: true, mods: [.super, .shift]) == .reject)
+    // alt+← (esc:b), ctrl+tab (next tab), shift+← (adjust selection).
+    #expect(RemoteKeyBinding.decide(isBinding: true, mods: [.alt]) == .performGuarded)
+    #expect(RemoteKeyBinding.decide(isBinding: true, mods: [.ctrl]) == .performGuarded)
+    #expect(RemoteKeyBinding.decide(isBinding: true, mods: [.shift]) == .performGuarded)
+    #expect(RemoteKeyBinding.decide(isBinding: true, mods: []) == .performGuarded)
+  }
+
+  @Test
+  func guardSwallowsChromeActionsForItsPane() {
+    let pane = PaneID()
+    let keyGuard = RemoteKeyGuard(paneID: pane)
+    #expect(!keyGuard.shouldSuppress(GHOSTTY_ACTION_RENDER, surfacePaneID: pane))
+    #expect(!keyGuard.shouldSuppress(GHOSTTY_ACTION_SET_TITLE, surfacePaneID: pane))
+    #expect(!keyGuard.shouldSuppress(GHOSTTY_ACTION_MOUSE_VISIBILITY, surfacePaneID: pane))
+    #expect(!keyGuard.suppressed)
+    // Another pane's surface action is not this key's doing.
+    #expect(!keyGuard.shouldSuppress(GHOSTTY_ACTION_GOTO_TAB, surfacePaneID: PaneID()))
+    #expect(!keyGuard.suppressed)
+    #expect(keyGuard.shouldSuppress(GHOSTTY_ACTION_GOTO_TAB, surfacePaneID: pane))
+    #expect(keyGuard.suppressed)
+  }
+
+  @Test
+  func guardSwallowsAppActionsAndClipboardReads() {
+    let pane = PaneID()
+    let appAction = RemoteKeyGuard(paneID: pane)
+    #expect(appAction.shouldSuppress(GHOSTTY_ACTION_QUIT, surfacePaneID: nil))
+    #expect(appAction.suppressed)
+
+    let clipboard = RemoteKeyGuard(paneID: pane)
+    #expect(!clipboard.shouldRefuseClipboardRead(for: PaneID()))
+    #expect(!clipboard.suppressed)
+    #expect(clipboard.shouldRefuseClipboardRead(for: pane))
+    #expect(clipboard.suppressed)
+  }
+
+  @Test(arguments: [
+    GHOSTTY_ACTION_NEW_TAB, GHOSTTY_ACTION_CLOSE_TAB, GHOSTTY_ACTION_GOTO_TAB, GHOSTTY_ACTION_NEW_SPLIT,
+    GHOSTTY_ACTION_GOTO_SPLIT, GHOSTTY_ACTION_RESIZE_SPLIT, GHOSTTY_ACTION_TOGGLE_SPLIT_ZOOM,
+    GHOSTTY_ACTION_NEW_WINDOW, GHOSTTY_ACTION_TOGGLE_FULLSCREEN, GHOSTTY_ACTION_START_SEARCH,
+    GHOSTTY_ACTION_INSPECTOR, GHOSTTY_ACTION_OPEN_CONFIG, GHOSTTY_ACTION_QUIT,
+  ])
+  func chromeActionsDoNotPassTheGuard(_ tag: ghostty_action_tag_e) {
+    #expect(!RemoteKeyBinding.passesGuard(tag))
   }
 }

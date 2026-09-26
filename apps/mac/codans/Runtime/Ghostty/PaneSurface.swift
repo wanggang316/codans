@@ -531,16 +531,19 @@ final class PaneSurface {
 
   enum KeyEventOutcome: Equatable {
     case delivered
-    /// The key is one of the Mac's bindings (⌘V, ⌘W, …); nothing was sent.
+    /// The key is a Mac shortcut (⌘V, ⌘W, …) or a binding that would have
+    /// driven the Mac's windows, tabs or splits; nothing reached the pane.
     case binding
     case noSurface
   }
 
   /// Press and release `spec` through libghostty's key encoder, so the
   /// bytes follow the pane's current modes the way a Mac keypress does.
-  /// A key that libghostty would run as a binding is refused instead:
   /// `ghostty_surface_key` performs bindings before encoding, and a remote
-  /// key must never trigger the Mac app's own shortcuts.
+  /// key must never trigger the Mac app's own shortcuts: a ⌘ binding is
+  /// refused without pressing it, and any other binding is pressed under a
+  /// `RemoteKeyGuard` that swallows app, window, tab and split actions (see
+  /// `RemoteKeyBinding`), reporting `.binding` when it had to.
   func sendKeyEvent(spec: KeyEventSpec) -> KeyEventOutcome {
     guard let surface else { return .noSurface }
     var key = Self.ghosttyKey(for: spec)
@@ -549,24 +552,40 @@ final class PaneSurface {
       var flags = ghostty_binding_flags_e(0)
       return ghostty_surface_key_is_binding(surface, key, &flags)
     }
-    if isBinding { return .binding }
-    if let meta = spec.escPrefixedText {
-      let action = "esc:\(meta)"
-      action.withCString { ptr in
-        _ = ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+    switch RemoteKeyBinding.decide(isBinding: isBinding, mods: spec.mods) {
+    case .reject:
+      return .binding
+    case .encode:
+      if let meta = spec.escPrefixedText {
+        let action = "esc:\(meta)"
+        action.withCString { ptr in
+          _ = ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+        }
+        return .delivered
       }
+      press(key, text: spec.text, on: surface)
       return .delivered
+    case .performGuarded:
+      guard let runtime = GhosttyRuntime.shared else { return .binding }
+      let keyGuard = RemoteKeyGuard(paneID: paneID)
+      runtime.remoteKeyGuard = keyGuard
+      defer { runtime.remoteKeyGuard = nil }
+      press(key, text: spec.text, on: surface)
+      return keyGuard.suppressed ? .binding : .delivered
     }
-    // `text` is a C string libghostty reads during the call, so the press
-    // must happen inside the pointer's lifetime.
-    Self.withOptionalCString(spec.text) { ptr in
+  }
+
+  /// Press, then release. `text` is a C string libghostty reads during the
+  /// call, so the press must happen inside the pointer's lifetime.
+  private func press(_ key: ghostty_input_key_s, text: String?, on surface: ghostty_surface_t) {
+    var key = key
+    Self.withOptionalCString(text) { ptr in
       key.text = ptr
       _ = ghostty_surface_key(surface, key)
     }
     key.action = GHOSTTY_ACTION_RELEASE
     key.text = nil
     _ = ghostty_surface_key(surface, key)
-    return .delivered
   }
 
   /// Type committed text (IME output, dictation) as key events rather
