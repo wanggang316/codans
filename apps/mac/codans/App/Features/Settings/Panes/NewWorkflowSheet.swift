@@ -77,54 +77,69 @@ struct NewWorkflowSheet: View {
     return nil
   }
 
+  /// A grouped `Form` like the Settings panes behind it: labels on the
+  /// leading edge, controls on the trailing edge, and the one long value —
+  /// the file path — stacked under its label instead of squeezed beside it.
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text("New Workflow")
-        .font(.headline)
+    VStack(spacing: 0) {
       Form {
-        TextField("Name", text: $name, prompt: Text("Second Opinion"))
-          .focused($nameFocused)
-          .onChange(of: name) { _, newValue in
-            guard !idEdited else { return }
-            id = WorkflowScaffold.suggestedID(forName: newValue) ?? ""
-          }
-        TextField(
-          "ID",
-          text: Binding(
-            get: { id },
-            set: {
-              id = $0
-              idEdited = true
-            }),
-          prompt: Text("second-opinion"))
-        Picker("Location", selection: $locationID) {
-          ForEach(locations) { location in
-            Text(location.title).tag(location.id)
-          }
+        Section {
+          TextField("Name", text: $name, prompt: Text("Second Opinion"))
+            .focused($nameFocused)
+            .onChange(of: name) { _, newValue in
+              guard !idEdited else { return }
+              id = WorkflowScaffold.suggestedID(forName: newValue) ?? ""
+            }
+          TextField(
+            "ID",
+            text: Binding(
+              get: { id },
+              set: {
+                id = $0
+                idEdited = true
+              }),
+            prompt: Text("second-opinion"))
+        } header: {
+          Text("New Workflow")
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .padding(.bottom, 4)
         }
-        Picker("Start from", selection: $starterID) {
-          ForEach(starters) { starter in
-            Text(starter.title).tag(starter.id)
+
+        Section {
+          Picker("Location", selection: $locationID) {
+            ForEach(locations) { location in
+              Text(location.title).tag(location.id)
+            }
           }
-        }
-        if let location {
-          LabeledContent("File") {
-            Text(filePath(in: location))
-              .font(.caption.monospaced())
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-              .truncationMode(.head)
-              .textSelection(.enabled)
+          Picker("Start from", selection: $starterID) {
+            ForEach(starters) { starter in
+              Text(starter.title).tag(starter.id)
+            }
+          }
+          if let location {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("File")
+              Text(filePath(in: location))
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+          }
+        } footer: {
+          if let message = failure ?? problem, !(failure == nil && trimmedName.isEmpty) {
+            Text(message)
+              .foregroundStyle(failure == nil ? Color.secondary : Color.orange)
+              .fixedSize(horizontal: false, vertical: true)
           }
         }
       }
-      .formStyle(.columns)
-      if let message = failure ?? problem, !(failure == nil && trimmedName.isEmpty) {
-        Text(message)
-          .font(.caption)
-          .foregroundStyle(failure == nil ? .secondary : Color.orange)
-          .fixedSize(horizontal: false, vertical: true)
-      }
+      .formStyle(.grouped)
+      .scrollDisabled(true)
+      .fixedSize(horizontal: false, vertical: true)
+
       HStack {
         Spacer()
         Button("Cancel", role: .cancel, action: onCancel)
@@ -133,9 +148,10 @@ struct NewWorkflowSheet: View {
           .keyboardShortcut(.defaultAction)
           .disabled(problem != nil)
       }
+      .padding(.horizontal, 20)
+      .padding(.bottom, 20)
     }
-    .padding(20)
-    .frame(width: 460)
+    .frame(width: 480)
     .onAppear { nameFocused = true }
     .onChange(of: id) { failure = nil }
     .onChange(of: locationID) { failure = nil }
