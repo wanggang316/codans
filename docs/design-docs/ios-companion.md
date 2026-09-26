@@ -373,24 +373,33 @@ kind: reset     { rows, cols, data(base64), fidelity? }   // replace the whole s
 `ConnectionFeature` becomes an explicit phase machine (D41):
 
 ```
-discovering ─▶ handshaking ─▶ syncing ─▶ live
-     ▲               │            │         │
-     └── reconnecting(attempt, nextAt) ◀────┘      offline(reason)   rejected   incompatible
+idle ─▶ discovering ─▶ handshaking ─▶ syncing ─▶ live
+             ▲               │            │         │
+             └── reconnecting(attempt, nextAttemptAt) ◀┘
+
+offline (background, grace over)      failed(rejected | localNetworkDenied | incompatible | missingKey)
 ```
 
-- **Live means data.** `syncing` waits for the first `events.subscribe` snapshot; the UI reports "connected" only in `live`. `lastContact` is refreshed by every frame, including heartbeats.
-- **Deadlines.** Each phase has its own timeout and a whole attempt has a 20 s deadline. Backoff has jitter and a 30 s cap. While in the foreground any network path change, including a change of interface, reconnects immediately. A control call that times out triggers one `system.ping`; if that fails too the session reconnects.
-- **Background grace.** Going to the background keeps the connections for 25 s under a background task, so a quick app switch resumes instantly; after that they close as before.
+- **Live means data.** `syncing` waits for the first `events.subscribe` snapshot; the UI reports "connected" only in `live`. `lastContact` is refreshed by every frame, including heartbeats; an events stream silent for 60 s (two missed heartbeats) is treated as half-open and reconnected.
+- **Deadlines.** Each phase has its own timeout — discovering 9 s (just past Bonjour's own not-found answer, which carries the better message), handshaking 12 s (room for two stale candidates at 5 s each), syncing 8 s — and a whole attempt has a 20 s deadline. Backoff starts at 0.5 s, doubles to a 30 s cap, and jitter only shortens it (by up to a quarter), so the cap holds. While in the foreground any network path change, including a change of interface with the path still satisfied, reconnects immediately; an unsatisfied path does not start an attempt.
+- **Control calls.** A control call that times out triggers one `system.ping` (3 s); if that fails too the session is closed, which ends the events stream and reconnects. Idempotent reads (`pane.read`, `agent.profiles`) retry once after a timeout whose ping succeeded; writes are never retried.
+- **Background grace.** Going to the background keeps the connections for 25 s under a UIKit background task (ended early if iOS takes the time back), so a quick app switch resumes instantly; after that they close and the phase is `offline` until a scene is active again. `.inactive` (app switcher, Control Center, a sheet) keeps everything. A backoff in progress when the app leaves becomes `offline` at once.
+- **One view model.** Views read a derived `ConnectionHealth` (phase, Mac name, `lastContact`, `lastSyncedAt`, failure, attempt, `nextAttemptAt`, `canRetryNow`, `needsMacUpdate`) with its title, explanation, checklist and recovery action, so the banner, placeholders and Settings tell the same story.
+- **Streams follow the session.** Terminal streams attach only while `live`; when the session drops they dim and show "Reconnecting…", and resync (a fresh `reset`) once it is live again.
 
 **Failure taxonomy** (D42), each with its own state and copy instead of one generic error:
 
 | Failure | Detection | Behaviour |
 |---|---|---|
-| `macNotFound` | No matching Bonjour service within the deadline | Explains the causes — the Mac is asleep, Remote Access is off, or the phone is on another network — with a checklist and Retry |
-| `localNetworkDenied` | Local-network privacy denial | No retry; links to iOS Settings |
-| `rejected` | 3 consecutive TLS handshake refusals from a resolved gateway | Stops retrying; "This device was removed" with **Pair Again**. Resolves the v1 risk of a revoked phone retrying forever |
-| `incompatible` | Protocol major mismatch | "Update codans on your Mac" (or the app) |
-| `timeout` | Phase deadline passed | Retries with backoff |
+| `macNotFound` | No matching Bonjour service within the discovery timeout | Explains the causes — the Mac is asleep, Remote Access is off, or the phone is on another network — with a checklist and Try Again; retries with backoff |
+| `localNetworkDenied` | Local-network privacy denial | `failed`, no retry; Open Settings. Retried when a scene becomes active again, since that is how a trip to Settings ends |
+| `rejected` | 3 TLS handshake refusals from a resolved gateway with no successful handshake in between (a refusal is kept over a later stale candidate's timeout) | `failed`, stops retrying; "This device was removed" with **Pair Again**. Resolves the v1 risk of a revoked phone retrying forever |
+| `incompatible` | Protocol **major** mismatch, or an app version the Mac refuses | `failed`: "Update Codans on your Mac" (or this app) |
+| older Mac (not a failure) | `system.hello` reports protocol minor < 2 | Stays `live`: browsing, agents and the composer work; panes use the text fallback (`pane.read` polling, one read in flight, stale text kept and marked) under an "Update Codans on your Mac" notice |
+| `timeout` | A phase timeout or the attempt deadline passed | Retries with backoff |
+| `missingKey` | The Keychain lost the pairing key | `failed`: Pair Again |
+
+**Offline cache** (D44). `AppFeature` writes the hierarchy, agent states and the Mac's protocol minor per gateway to `Application Support/WorkspaceCache/<gateway-id>.json` (versioned JSON, atomic write, 2 s after a burst of changes, only while `live` so reconnect-time data is never saved as fresh). Choosing or launching with a Mac loads its file; a file that fails to decode, or has another version, reads as no cache. The cached workspace is shown until the first snapshot replaces it, marked stale with "Updated N minutes ago"; a snapshot that beats the disk read wins. Forgetting a Mac deletes its file.
 
 **Input reliability** (D43). Terminal keys go through one ordered queue, batched about every 8 ms into a `terminal.sendEvents`. While disconnected, keys are **not** queued — replaying stale keystrokes into a shell that has moved on is dangerous — so the input is disabled with the reason shown. A failed send restores the draft. `RemoteClient` retries idempotent reads once.
 
@@ -498,7 +507,7 @@ Goal: reach the Mac from outside the LAN and notify the phone when an agent need
 | D37 | `hierarchy.renameTab`, `hierarchy.closeTab` and `hierarchy.closePane` become `.interactive`. `closePane` ends the shell, so the phone confirms both closes and says the process will end. | Managing tabs and panes is part of driving the Mac from the phone; none of these touches data outside the window. The confirmation carries the destructiveness the method name hides. |
 | D38 | `hierarchy.zoomPane` / `unzoomPane` are routed; the phone never calls `hierarchy.focusPane` when the user selects a pane on the phone. | Zoom was tiered but unrouted. `focusPane` moves the Mac's keyboard focus, and looking at a pane on the phone must not disturb someone at the desk. |
 | D39 | The hierarchy summary gains optional `TabSummary.layout`, `TabSummary.zoomedPaneID`, `PaneSummary.cwd`, `PaneSummary.isLive` and `HierarchySummary.activePaneID`. | Additive and optional, so neither side breaks on version skew; the phone needs the split tree, liveness and landing pane without extra calls. |
-| D40 | `system.hello` reports protocol minor 2; the phone uses the phase-2 methods only when `protocolMinor >= 2`. | A minor-1 Mac keeps working with v1 behaviour. |
+| D40 | `system.hello` reports protocol minor 2; the phone uses the phase-2 methods only when `protocolMinor >= 2`. A minor-1 Mac is not `incompatible`: it stays live with the text fallback and an update notice on panes. | A minor-1 Mac keeps working with v1 behaviour. |
 | D41 | The phone's connection is an explicit phase machine — discovering → handshaking → syncing → live, plus reconnecting(attempt, next) and offline — with per-phase timeouts, a 20 s overall deadline, jittered backoff capped at 30 s, reconnect on any foreground path change, ping after a control timeout, and a 25 s background grace. "Live" requires the first snapshot. | v1 reported connected before any data, never timed out as a whole, missed interface changes and dropped the connection on every app switch. |
 | D42 | Failures are classified as macNotFound, localNetworkDenied, rejected, incompatible and timeout; three consecutive handshake refusals end in `rejected` with Pair Again, and localNetworkDenied never retries. | Each cause has a different fix the user must be told; a revoked phone retrying forever was an open v1 risk. |
 | D43 | Terminal keys are batched in one ordered queue (~8 ms); while disconnected keys are not queued and input is disabled with a reason; failed sends restore the draft. | Replaying stale keystrokes into a shell that has moved on is dangerous; losing typed text is not acceptable. |
