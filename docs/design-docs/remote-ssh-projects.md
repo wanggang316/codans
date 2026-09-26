@@ -52,7 +52,7 @@ codans never collects or stores a password or key.
 
 - In-app credential management. Auth is `~/.ssh/config` + agent, full stop.
 - FSEvents-style *push* change detection for remote worktrees. Remote git
-  status (`+N −M` chip, dirty flag, PR badge, branch switcher, diff inspector)
+  status (`+N −M` chip, dirty flag, PR badge, branch switcher)
   runs over the SSH-routed `GitService` (see below), refreshed by polling and
   shell-integration markers rather than local file watchers.
 - The `wt` streaming-create extras (copy ignored / untracked, in-stream setup
@@ -145,9 +145,11 @@ path belongs to a Server project (resolved live against the catalog via
 symlink resolver), the invocation becomes `ssh <controlopts> host 'cd <repo> &&
 git …'` under the host's login shell (bare `git`, PATH-resolved); otherwise it
 is the unchanged local `/usr/bin/git`. The parsers never see the transport, so
-every `GitService` consumer — sidebar `+N −M` chip, dirty flag, the PR badge's
-`remote get-url` probe, branch switcher, diff inspector, commit log — works
-against remote worktrees with no per-feature changes. Freshness comes from the
+the current status consumers — sidebar `+N −M` chip, dirty flag, the PR
+badge's `remote get-url` probe, and branch switcher — use the same git
+transport for remote worktrees. In-app diff and history viewers have been
+removed; external git clients have no SSH integration (see
+[editor-integration.md](./editor-integration.md)). Freshness comes from the
 sidebar's per-row poll (~20 s while a remote row is visible, riding the shared
 ControlMaster) plus the shell-integration markers remote panes emit through the
 terminal (commit/push in a pane refreshes the chip immediately).
@@ -254,9 +256,11 @@ whenever one is installed; the header button hides when none is.
   parser/normalization are pure and unit-tested; `RemoteConnectionFeature`'s
   validation paths are covered by reducer tests. The live SSH path requires a
   reachable host and is verified manually.
-- **Guards.** Reveal-in-Finder, Open-in-editor, and worktree create/remove are
-  hidden *and* no-op'd at the reducer for remote projects, so keyboard chords
-  can't bypass the hidden menu items.
+- **Guards.** Reveal in Finder is hidden from remote worktree context menus,
+  and their Open in submenu lists only SSH-capable editors. External git
+  clients have no SSH integration. Open in Editor uses the SSH-capable editor
+  path described above. Worktree creation and removal are
+  enabled and route over SSH; local `wt` copy options remain hidden.
 
 ## Risks
 

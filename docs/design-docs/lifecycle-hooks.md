@@ -3,7 +3,7 @@
 **状态：** 已设计未实现
 **作者：** Gump（与 Claude）
 
-> **设计意图，尚未实现（读前须知）。** 本文是初始设计；截至目前无 `apps/mac/codans/Hooks/` 目录，`CodansIPC/Method.swift` 无任何 `hook.*` 方法，`CodansCore` 无 `HookEvent` 等类型。读者**不应**认为此能力已上线——下文记录的是已论证的耐久契约（API 形状、wire schema、决策），待实现时遵循，不代表现状能力。
+> **可用性：未实现。** `apps/mac/codans/Hooks/`、`HookEvent` 与 `hook.*` IPC 方法均不存在。本文定义拟议接口、wire schema 和设计约束。已实现的创建 / 归档 / 删除脚本属于 [Settings 生命周期脚本](settings.md#lifecycle-scripts-vs-hook-subscriptions)，不是事件订阅；CLI 创建缺失的本地 Git worktree 时也可执行 setup 脚本。
 
 ## 背景与范围
 
@@ -20,9 +20,9 @@ Hooks 是让后续能力可编程的基底：
 - `CodansCore`（领域类型：`Pane`、`Tab`、`Worktree`、各 ID）—— 叶子包，零内部依赖。
 - `Runtime`（应用内模块 `apps/mac/codans/Runtime/`）—— 拥有 `GhosttyRuntime`、`PaneSurface`、`TerminalEngine`、`HierarchyManager`、`CatalogStore`，暴露 per-Pane 的 `AsyncStream<TerminalEvent>`。
 
-本文要新增的应用内模块是 `apps/mac/codans/Hooks/`（**尚未创建**）。其唯一职责是把 `TerminalEvent`（加少量层级级信号）翻译成类型化 `HookEvent` 载荷，匹配用户加载的订阅集，并以定义好的 JSON 信封把命中订阅分发给 out-of-process shell handler。
+拟议的应用内模块是 `apps/mac/codans/Hooks/`（**尚未创建**）。其唯一职责是把 `TerminalEvent`（加少量层级级信号）翻译成类型化 `HookEvent` 载荷，匹配用户加载的订阅集，并以定义好的 JSON 信封把命中订阅分发给 out-of-process shell handler。
 
-Open question "in-process 脚本 vs out-of-process spawn，或两者皆要？"由本文解决：**v1 仅 out-of-process**，留一条通往日后 in-process 的窄路。见 [Decisions](#decisions) §D1。
+**脚本执行范围：v1 仅 out-of-process**；in-process 脚本引擎不在本设计范围。见 [Decisions](#decisions) §D1。
 
 相关但不在本文范围：
 
@@ -162,7 +162,7 @@ handler 收到的规范 stdin 信封：
 }
 ```
 
-> 顶层不再有 `space` 锚（Space 容器已被 per-Project `Tag` 取代）；wire 格式为前向兼容保留更高层应用级锚位。
+> 顶层没有 `space` 锚；层级为 Project → Worktree → Tab → Pane，Project 的横切分类由 Tag 表达。
 
 每事件 `data` schema：
 
@@ -387,7 +387,7 @@ sentinel-prefix 路由使 `hooks.json` 保持唯一用户可见注册表：一�
 
 > **耐久实现约束（首方内部消费者必读）。** `HookConfigStore.load()` 出于安全**静默剥除**保留前缀（`__codans/internal:`）订阅，因此 `HookDispatcher.fire()` 是 load-过滤的，且一次 load→save 往返会丢弃应用自身的 sentinel 行。首方内部 hook 消费者**不能**依赖把 sentinel 行往返持久化；必须自行在内存配置里播种该订阅，或直接读 `hooks.json` 并经显式的 `router.handle(envelope:ruleID:)` 缝驱动。
 
-`internalEventStream()` 与 sentinel-prefix 路由是**独立**路径。通知聚合两者皆用：事件流喂其全局通知流水线；sentinel-prefix 路由让它装一个 per-Pane "Stop" hook，经同一 dispatcher shell out，而不为一个本就在进程内的通知付 fork/exec 成本。
+`internalEventStream()` 与 sentinel-prefix 路由是拟议的**独立**路径：前者提供事件流，后者直接调用进程内订阅者并跳过 `ProcessHookExecutor`。两者均未实现；当前通知系统不依赖它们。
 
 ### IPC Wire 协议新增
 
@@ -403,9 +403,9 @@ sentinel-prefix 路由使 `hooks.json` 保持唯一用户可见注册表：一�
 | `hook.test` | `{ id, envelope }` | `{ result: HookExecutionResult }` |
 | `hook.fire` | `{ event, paneID?, data }` | `{ handlersRun }` |
 | `hook.recent` | `{ limit? }` | `{ fires: [HookFireRecord] }` |
-| `hook.events` | *(streaming)* `{}` | *(流 `HookEnvelope`；被通知聚合用)* |
+| `hook.events` | *(streaming)* `{}` | *(拟提供 `HookEnvelope` 流给外部消费者)* |
 
-`hook.events` 是 `hook.*` 里唯一的 server-streaming RPC，遵循 [CLI §Wire 协议](cli.md#wire-协议) 定义的统一流终止契约：请求带 `stream: true`，响应是一串 `{id, stream: true, result: <envelope>}` 帧，任一侧关其写半边时流结束。通知聚合订阅 `hook.events` 而非轮询；CLI 的 `codans hook tail` 同样。
+`hook.events` 是拟议的 server-streaming RPC，尚未实现。拟复用 [CLI §Wire 协议](cli.md#wire-协议)：请求带 `stream: true`，数据帧为 `{id, stream: true, result: <envelope>}`，正常结束发送 `{id, stream: false}`。当前 RPC 客户端收到终帧立即结束；未收到终帧的 EOF 映射为 timeout，不提供半关闭握手。`codans hook tail` 同样尚未实现。当前通知系统直接消费终端事件，不订阅 `hook.events`，见 [Notifications](notifications.md)。
 
 ### 数据模型变更（`CodansCore`）
 
@@ -443,7 +443,7 @@ sentinel-prefix 路由使 `hooks.json` 保持唯一用户可见注册表：一�
 
 每个判断附理由。"Supacode-parallel"指与 supacode/supaterm 同选；"divergent"指不同选及原因。
 
-- **D1 — v1 仅 out-of-process 执行。（解决 in-process-vs-out open question。）** *Supacode-parallel.* 语言无关、隔离、匹配每个可比项目、保持应用进程小，把 in-process 留作藏在同一 stdout 动作 DSL 之后的未来优化。
+- **D1 — v1 仅 out-of-process 执行。** *Supacode-parallel.* 语言无关、隔离、匹配每个可比项目、保持应用进程小，把 in-process 留作藏在同一 stdout 动作 DSL 之后的未来优化。
 - **D2 — spawn `/bin/sh -c` 而非自行解析命令。** *Supacode-parallel.* 用户期望写 `command: "~/bin/foo | tee ~/.log/foo.log"`。自行解析 argv 意味着重实现 shell 引号、env 展开、tilde 展开、管道组合。`sh -c` 在 macOS 普遍可用，且是 Ghostty 配置 / Claude 设置 / Claude Code hooks 的做法。
 - **D3 — `HookEvent` / `HookEnvelope` 住 `CodansCore` 而非 `Hooks`。** `codans` 需谈论词汇（`codans hook test/install`）而不 import `Runtime` 或 `Hooks`。`CodansCore` 是钦定的共享地，与 `Pane`/`Tab`/`Worktree` 同理。
 - **D4 — 递归守卫：handler 发出的动作不为该即时 mutation 触发 hook。** *新（supacode 无 stdout 动作）.* 一个对 `pane.output` 反应、向同 pane 发文本的 handler 会无限循环。dispatcher 给动作打 originating-envelope-id 标签；`pane.output`/`pane.input` 的发射器在可配窗口（`recursionWindowMs`，默认 250）内丢弃其即时上游成因带该标签的触发。Tab/Worktree 级事件仍触发（合法的"idle 时开 tab"handler 需要）。记为限制，非通用环破除器。
@@ -471,7 +471,7 @@ sentinel-prefix 路由使 `hooks.json` 保持唯一用户可见注册表：一�
 | 递归守卫基于时间故不完美 | per-envelope-chain 深度计数封顶 4；超出记录并丢后续动作 |
 | `pane.idle` 定时器泄漏 | `PaneSurface.close()` 调 `idleTimers.cancel(paneID:)`；单测覆盖快速开关 |
 | `pane.output` 订阅 stdin 巨大 | `allowRawOutput: true` 是显式门（D9）；订 `.paneOutputMatch` 的只收命中区域 + 短上下文 |
-| `hook.events` 流背压（慢消费者落后对话痨 pane） | per-connection 有界队列（默认 64）；溢出丢最旧并计数；通知聚合在观察到丢弃时降级为"摘要通知" |
+| `hook.events` 流背压（慢消费者落后高频输出） | 待实现：为事件订阅定义有界缓冲、溢出策略及可观测丢弃计数；当前 SocketConnection 的 64 在飞阈值不提供此保证 |
 
 ## 参考
 

@@ -1,6 +1,5 @@
 # Product Spec: codans
 
-**Last Updated:** 2026-09-17
 
 ## Product Overview
 
@@ -10,7 +9,7 @@ Developers who already live inside CLI coding agents (Claude Code, Codex CLI, ai
 
 ### Solution
 
-A native macOS application, built on libghostty, that treats **terminals as the primary surface** and orchestrates them into a four-level hierarchy: Project → Worktree → Tab → Pane (with cross-cutting Tag classification on Projects). It exposes terminal lifecycle hooks and a CLI so coding agents become first-class citizens — their output can be aggregated, their completion can trigger cross-pane actions, and their worktree-per-feature workflow takes zero ceremony. **codans is deliberately not an IDE** — an independent read-only window reviews current and outgoing code changes without resizing the terminal. Editing opens the user's preferred external editor; broader Git and history workflows remain available through the external Git Viewer command.
+A native macOS application, built on libghostty, that treats **terminals as the primary surface** and orchestrates them into a four-level hierarchy: Project → Worktree → Tab → Pane (with cross-cutting Tag classification on Projects). It provides CLI control, agent profiles and handoff, live agent state, and notification aggregation. Programmable lifecycle hooks are designed but not implemented. **codans is deliberately not an IDE** — an independent read-only window reviews current and outgoing code changes without resizing the terminal. Editing opens the user's preferred external editor; broader Git and history workflows remain available through the external Git Viewer command.
 
 ## Target Users
 
@@ -28,53 +27,43 @@ A native macOS application, built on libghostty, that treats **terminals as the 
 | # | Capability | Description | Status | Maturity |
 |---|---|---|---|---|
 | C1 | Terminal engine | libghostty-based multi-pane terminal rendering and lifecycle management | Shipped | Stable |
-| C2 | Project / Worktree / Tab / Pane hierarchy with Tag classification | Four-level organization: Project maps to a git repo; Worktree maps to a `git worktree`; a Worktree holds one or more Tabs; a Tab holds one or more Panes (split layouts); a Pane is a single libghostty-rendered terminal session. Projects carry zero or more **Tags** (name + Finder-style color) for cross-cutting classification. Switching at any level is instant and stateful. *(The Tag data model and persistence ship; the sidebar Tag-filter entry point is implemented but currently hidden — see Key Concepts.)* | Shipped | Stable |
+| C2 | Project / Worktree / Tab / Pane hierarchy with Tag classification | Four-level organization: Project maps to a local or SSH-hosted directory; git-backed Projects expose git worktrees, plain folders have one synthetic Worktree, and Workspaces group checkouts from multiple repositories; a Worktree holds one or more Tabs; a Tab holds one or more Panes (split layouts); a Pane is a single libghostty-rendered terminal session. Projects carry zero or more **Tags** (name + Finder-style color) for cross-cutting classification. Switching at any level is instant and stateful. *(The Tag data model and persistence ship; the sidebar Tag-filter entry point is implemented but currently hidden — see Key Concepts.)* | Shipped | Stable |
 | C3 | Lifecycle hooks | Programmable hooks at Pane create / ready / output / idle / exit, plus Tab and Worktree activation events; enables agent notifications, command injection, custom automation | Designed, not yet implemented | — |
-| C4 | CLI (`codans`) | A command-line interface for controlling Projects, Worktrees, Tabs, and Panes from inside any Pane — including cross-pane messaging. Core verbs ship and are callable; the `skill.*` and `hook.*` namespaces track their (not-yet-shipped) subsystems | Shipped (core verbs) | Beta |
-| C5 | Published Agent Skill | A standard-format Agent Skill (Claude Code / Codex / pi compatible — `SKILL.md` + `references/` + optional `agents/`) that teaches coding agents how to drive codans via its CLI and concepts. Distributed as an independent package; consumed by the coding agent, not by the app. Zero runtime coupling with the app. The app ships installation helpers (e.g. `codans skill install --claude-code`) that copy or symlink the bundled skill into the agent's skill directory | Planned | — |
-| C6 | Agent notification aggregation | Detect agent completion / blocking-on-input states; surface as OS notifications, badge counts, and an in-app active-agents inbox | Shipped | Beta |
-| C7 | Git viewer delegation (open in external git client) | Open the current Worktree in the user's external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge, etc.) via the "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette); default git client configurable globally (`general.defaultGitViewerID`). Shares the same registry, launcher, and open path as C8 — a separate global default pointed at the registry's git-client category. Built-in is the first and default Git Viewer option; selecting it opens the read-only diff window, while external choices use the shared launcher | Shipped | Beta |
+| C4 | CLI (`codans`) | A command-line interface for controlling Projects, Worktrees, Tabs, and Panes from inside any Pane — including cross-pane messaging. Hierarchy, Workspace, terminal automation, editor, and introspection commands are callable. Skill management is local filesystem work; programmable lifecycle hooks are not implemented | Shipped (core verbs) | Beta |
+| C5 | Agent Skill | Repository-maintained instructions at `skills/codans-cli/SKILL.md`, consumed by coding agents independently of the app runtime. `codans skill list/install/uninstall/path` manages bundled skill links for user or project scope without a running app | Available | — |
+| C6 | Agent state and notifications | Live Agents View identifies known agents and derives their state. Separately, runtime notifications feed the inbox, badges, and OS notifications; these do not require the planned lifecycle hook runtime | Shipped | Beta |
+| C7 | Git viewer selection | Open the built-in viewer or the current Worktree in the user's external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge, etc.) via the "Toggle Git Viewer" command (⌘G chord / menu / command palette); default git client configurable globally (`general.defaultGitViewerID`). Shares the same registry, launcher, and open path as C8 — a separate global default pointed at the registry's git-client category. Built-in is the first and default Git Viewer option; selecting it opens the read-only diff window, while external choices use the shared launcher | Shipped | Beta |
 | C9 | Agent profiles & handoff | Named launch presets per coding agent (Settings → Agents; toolbar Agents button, Command Palette, `codans agent launch`) and agent-to-agent task handoff over a worktree-local `.codans/handoff/` artifact: the live source agent writes its own briefing via `codans handoff`, the receiver starts in a background tab with a kickoff prompt; an in-app Hand Off panel triggers and observes that same transition | Shipped | Beta |
 | C8 | External editor integration | Open the current Worktree directory in an external editor or file manager (VSCode / Cursor / Zed / Xcode / Sublime Text / Finder, etc.) via CLI (`codans open`) or a button on the Worktree header; default editor configurable globally and per-Project. The read-only diff window also opens current files, with line navigation where supported | Shipped (directory); implemented (diff file navigation) | Beta |
 | C10 | Read-only diff viewer | Uncommitted shows aggregate current changes, including untracked files; Outgoing compares the merge base of the remote default branch (or an explicit base) to HEAD. Includes unified / split rendering, syntax highlighting, a native tree/list file sidebar, file filtering, and current-file editor handoff. See [Git diff viewer](design-docs/git-diff-viewer.md) | Implemented | Experimental |
 
-### Capability Dependencies
+### Capability Relationships
 
-```
-C1 Terminal engine (libghostty)
- ├── C2 Project / Worktree / Tab / Pane hierarchy with Tag classification
- │    ├── C7 Git viewer delegation        (opens the Worktree C2 selects in an external git client)
- │    ├── C8 External editor integration  (opens the current Worktree directory in an external editor)
- │    ├── C10 Read-only diff viewer       (reviews current and outgoing changes in the selected Worktree)
- │    └── C9 Agent profiles & handoff     (launches agents into C2 panes; handoff rides C4's `codans handoff`)
- └── C3 Lifecycle hooks
-      ├── C4 CLI (`codans`)                   (invokes hooks, dispatches across Panes; also exposes `codans open`)
-      └── C6 Agent notification aggregation   (consumer of hooks)
+The terminal runtime and hierarchy underpin CLI control, agent launch/handoff,
+and external-tool delegation. Agents View and notifications consume runtime
+signals independently; neither depends on the unimplemented lifecycle hook
+runtime. The Agent Skill documents the callable CLI and has no app runtime role.
 
-C5 Published Agent Skill   (standalone package; consumed by coding agents, not by the app;
-                            documents C4's CLI + C2's concepts; depends on the app only for
-                            CLI / concept stability, not for runtime loading)
-```
-
-**Reading the graph:** C1 is the foundation. C2 and C3 sit directly on it and are independent of each other — the hierarchy model doesn't need hooks, and hooks don't need the hierarchy. C4 is the programmable surface layer on top of C3, and C6 is the first built-in consumer of C3 (and validates the hook design) — these are design-level dependencies, not delivery order: C4's core verbs and C6 both ship today, while C3's hook surface remains designed but not yet implemented (C6 detects agent state without depending on the hook runtime landing first). C7 and C8 are two facets of the same Worktree-level handoff to an external tool: C8 opens the Worktree in an external editor or file manager, C7 opens it in an external git client for diff/history inspection. Both resolve through one shared registry and launcher (two separate global defaults). C10 provides the built-in read-only comparison surface and uses C8 for current-file editor handoff. **C5 is deliberately orthogonal to the app runtime** — it is a documentation/skill package that lives outside the app's process boundary, versioned against C4's CLI surface; the app can ship a helper command to install it into an agent's skill directory but does not load or invoke it.
+SSH Server Projects provide remote worktree discovery, creation/removal, and
+terminal sessions. Authentication stays with SSH config and the user's agent.
+See [Remote SSH Projects](design-docs/remote-ssh-projects.md) for supported
+operations and remote editor limitations.
 
 ## Product Boundaries
 
 ### In Scope
 
-- Native macOS application; universal binary (Apple Silicon + Intel)
+- Native macOS application; release artifacts target Apple Silicon (arm64)
 - libghostty-backed terminal rendering with full escape sequence support (inherits ghostty's capability)
 - Within a Worktree: multiple Tabs; within a Tab: multiple Panes via split layouts (tiling and stacking)
 - Persistent Project / Worktree / Tab / Pane state and Tag assignments across restarts (including split geometry)
 - Git worktree creation, listing, switching, and removal from within the app
-- Lifecycle hooks (Pane created / ready / output match / idle / exit; Tab activated; Worktree activated)
-- `codans` CLI auto-injected into every Pane's PATH
-- Cross-pane messaging via CLI (e.g. `codans send <pane-id> <cmd>`, `codans broadcast --tab <tab-id> ...`)
-- Published Agent Skill package (`SKILL.md` + `references/` + optional `agents/`) maintained alongside the app — kept in sync with the `codans` CLI surface of each release
-- Skill installation helpers: `codans skill install --claude-code | --codex | --pi` copies or symlinks the bundled skill into the corresponding agent's skill directory (e.g. `~/.claude/skills/codans/`)
+- Local panes receive the app-channel CLI in PATH (`codans` for Release, `codans-dev` for Debug); SSH shells do not automatically receive a remote CLI installation
+- Cross-pane messaging via CLI (e.g. `codans pane send <pane-id> <cmd>`, `codans broadcast --tab <tab-id> ...`)
+- Agent Skill source maintained alongside the CLI at `skills/codans-cli/SKILL.md`
 - OS notifications for agent completion / attention-required
 - In-app notification inbox with per-Pane provenance
-- Git viewer delegation at the Worktree level: open the current Worktree in an external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge and similar) for diff/history inspection; configurable default git client (`general.defaultGitViewerID`); "Toggle Git Viewer" command (⌘⌥G chord / menu / command palette). Shares the editor-integration registry and launcher; the default Built-in option opens the internal diff window, while selecting an external client delegates to that client
+- Git viewer delegation at the Worktree level: open the current Worktree in an external git client (Fork / Sourcetree / GitHub Desktop / GitKraken / Sublime Merge and similar) for diff/history inspection; configurable default git client (`general.defaultGitViewerID`); "Toggle Git Viewer" command (⌘G chord / menu / command palette). Shares the editor-integration registry and launcher; the default Built-in option opens the internal diff window, while selecting an external client delegates to that client
 - External editor / file manager integration at the Worktree level: open the current Worktree directory in VSCode / Cursor / Zed / Xcode / Sublime Text / Finder and similar; configurable default editor (global and per-Project); CLI entry point (`codans open [--in <editor>]`); UI button on the Worktree header. The diff window can open the current file; supported editors also receive a current-side line number
 
 - Built-in read-only Uncommitted / Outgoing window, opened from Worktree → Show Changes, the command palette, or the Git Viewer shortcut with Built-in selected. It retains per-worktree scope, base, and file selection for the app session and refreshes local Git state every two seconds while visible; it does not fetch remote refs automatically
@@ -88,10 +77,10 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
 | Text editor / LSP / syntax-aware editing / general source browser | Vim, Neovim, Helix, VSCode, Cursor, Zed, Xcode, Sublime Text already solve this. C8 integrates with them; we do not reimplement them |
 | In-app history browser or merge editor | The built-in viewer covers current and outgoing diffs only; C7 delegates broader Git workflows to external clients |
 | Self-built coding agent | Users already have Claude Code / Codex CLI / aider; we build the **environment** they run in, not another agent |
-| Git write operations (commit, merge, rebase, stash UI) | Terminal-first product; `git` CLI and `lazygit` already cover this; adding write UI dilutes focus |
+| General-purpose Git editing UI (stage, commit, rebase, stash) | Use terminal or external Git clients; worktree operations, branch switching, and GitHub PR actions remain supported orchestration workflows |
 | Team collaboration / shared sessions / co-editing | Individual power-user tool; collaboration is a different product with different architectural constraints |
 | Windows-native support (v1) | Author and primary target are macOS users; covering Windows natively before validating the concept is premature |
-| Web / remote / SSH / dev-container first-class support (v1) | Local-first product; remote workflows add IPC, auth, and latency concerns that would distort the v1 design |
+| Browser-hosted workspace / dev-container orchestration | The current app supports local directories and SSH Server Projects; these additional environments have no first-class implementation |
 | Building our own terminal emulator | libghostty exists and is excellent; reinventing tty/GPU rendering is a multi-year distraction |
 | Package manager / dependency management | Out of scope — users invoke `npm`, `cargo`, `uv`, etc. inside Panes like they always have |
 
@@ -99,7 +88,7 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
 
 - **Git write operations** — evaluate selective in-app write UI (stage/unstage, quick commit) only if the external-git-client delegation (C7) proves insufficient
 - **Linux support** — after macOS version validates the product; libghostty is cross-platform so porting cost is moderate
-- **Remote / SSH / dev-container workflows** — Projects whose Worktrees live on remote hosts, with local Panes that attach transparently
+- **Dev-container workflows** — evaluate container-specific project discovery and session lifecycle
 - **Windows support** — evaluate after macOS + Linux; depends on libghostty Windows maturity
 - **Team / shared sessions** — only if demand emerges from solo usage; would be a major architecture shift
 
@@ -109,14 +98,16 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
 |---|---|---|
 | Project | The top-level row in the sidebar. Usually a single git repository; may also be a plain folder, a remote (SSH) root, or a **Workspace** — a folder holding checkouts of several repositories for one task (`.codans/workspace.json` names them). See [Workspace](design-docs/workspace.md) | A VSCode "workspace" — a codans Workspace is a Project whose Worktree rows are checkouts of *other* repositories, not a saved window layout |
 | Tag | A user-assigned label (name + Finder-style color) attached to zero or more Projects. Used for cross-cutting classification (e.g. "client-acme", "urgent"). Designed to let the sidebar be filtered by an active Tag set with OR semantics — the data model and persistence ship, but the filter entry point is currently hidden (implemented yet dormant; the sidebar footer surfaces only sort + refresh) | A folder — Projects are not nested into Tags; a Project can carry multiple Tags simultaneously |
-| Worktree | A `git worktree` of a Project; each Worktree has its own directory, branch checkout, and Tab/Pane layout. Under a Workspace, each row is a checkout of one member repository instead | A "branch" — a Worktree is a concrete checkout on disk; switching Worktrees switches directories, not just HEAD |
+| Worktree | A checkout or synthetic directory root with its own Tab/Pane layout. Git-backed rows carry branch or detached-HEAD information. A Workspace has a synthetic root row and member checkouts from other repositories | A "branch" — a Worktree is a concrete checkout on disk; switching Worktrees switches directories, not just HEAD |
 | Tab | A named grouping of Panes inside a Worktree; one Tab is visible at a time per Worktree. Roughly "one Tab per concurrent task" (e.g. "dev server", "agent", "test watcher") | A browser tab — codans Tabs are scoped to a Worktree, not to the whole app |
 | Pane | A single terminal session rendered by libghostty; lives inside a Tab. Multiple Panes per Tab form split layouts | A tmux/iTerm "pane" — same idea, but codans uses the term "Pane" consistently; also not an OS window |
-| Hook | A programmable callback fired at defined Pane / Tab / Worktree lifecycle events | A shell hook (e.g. zsh `preexec`) — codans hooks are app-level and cross-Pane-aware |
+| Hook | A designed, unimplemented programmable callback at Pane / Tab / Worktree lifecycle events | A shell hook (e.g. zsh `preexec`) — codans hooks are app-level and cross-Pane-aware |
 | Skill | A Claude Code / Codex / pi Agent Skill: a directory with `SKILL.md` + optional `references/` and `agents/` that teaches a coding agent how to drive codans. Consumed by the agent, independent of the app runtime | A plugin or app extension — codans does not load or execute skills; skills live entirely on the agent's side |
-| CLI (`codans`) | The command-line interface injected into every Pane; controls the app from inside a shell | A system command like `tmux` — `codans` talks to the running codans app, not to a separate server |
+| CLI (`codans`) | The command-line interface injected into local panes; controls the app from inside a shell | A system command like `tmux` — `codans` talks to the running codans app, not to a separate server |
 
 ## Non-Functional Requirements
+
+Performance and reliability entries are targets, not measured guarantees. Benchmark results and crash-isolation evidence require separate validation.
 
 | Category | Requirement | Target |
 |---|---|---|
@@ -127,26 +118,37 @@ C5 Published Agent Skill   (standalone package; consumed by coding agents, not b
 | Resource | Memory per idle Pane | < 50MB |
 | Reliability | Pane crash isolation | A single Pane crash must not bring down other Panes, its Tab, or the app |
 | Reliability | State durability | App-level crash must not lose Project / Worktree / Tab / Pane configuration or Tag assignments |
-| Compatibility | macOS version floor | macOS 13 (Ventura) or higher, aligned with libghostty minimum |
-| Compatibility | Architecture | Universal binary (arm64 + x86_64) |
-| Security | Hook handler sandboxing | Hook handlers execute as user-privileged shell commands defined in user config; no elevated sandbox in v1. The published Agent Skill has no runtime side and therefore no sandboxing concern on the app side |
+| Compatibility | macOS version floor | macOS 14 (Sonoma) or higher, as configured in `apps/mac/Project.swift` |
+| Compatibility | Architecture | Apple Silicon (arm64); release archive uses `ARCHS=arm64` |
+| Security | Hook handler sandboxing | Planned hook handlers execute as user-privileged shell commands defined in user config; no elevated sandbox in v1. The published Agent Skill has no runtime side and therefore no sandboxing concern on the app side |
 
 ## Success Metrics
 
+These are proposed measurements. The table does not establish that telemetry
+collection is implemented or that any target has been met.
+
 | Metric | Target | Current | Measurement |
 |---|---|---|---|
-| Personal daily driver | Author (Gump) uses codans as primary terminal for ≥ 5 days/week, fully replacing prior terminal + IDE terminal usage | N/A (pre-build) | Self-report, weekly check-in during dogfooding phase |
-| Worktree workflow adoption | Avg. active Worktrees per Project ≥ 2 across the user's projects | N/A | App telemetry (local only, opt-in) |
-| Agent notification effectiveness | ≥ 80% of agent-completion notifications lead to the user returning to the correct Pane within 30s | N/A | Local telemetry correlating notification delivery with Pane focus events |
-| Agent integration coverage | Shipped Agent Skill supports Claude Code, Codex CLI, and pi with tested examples for each within 3 months of public release | N/A | Presence of `agents/<agent>/` subdirectories in the skill package and end-to-end smoke tests |
-| Retention (long-term) | DAU / MAU ≥ 0.7 among installed users | N/A | Opt-in anonymous telemetry |
+| Personal daily driver | Author (Gump) uses codans as primary terminal for ≥ 5 days/week, fully replacing prior terminal + IDE terminal usage | Not measured | Self-report, weekly check-in during dogfooding phase |
+| Worktree workflow adoption | Avg. active Worktrees per Project ≥ 2 across the user's projects | Not measured | App telemetry (local only, opt-in) |
+| Agent notification effectiveness | ≥ 80% of agent-completion notifications lead to the user returning to the correct Pane within 30s | Not measured | Local telemetry correlating notification delivery with Pane focus events |
+| Agent integration coverage | Shipped Agent Skill supports Claude Code, Codex CLI, and pi with tested examples for each within 3 months of public release | Not measured | Reviewed skill examples and end-to-end smoke tests for each supported agent |
+| Retention (long-term) | DAU / MAU ≥ 0.7 among installed users | Not measured | Opt-in anonymous telemetry |
 
-## Open Questions
+## Implementation References and Planned Work
 
-1. **CLI binary name** — *Resolved (C4 §D1):* `codans` with an install-time collision check (per architecture §Open-Q #3 — a Settings → Developer admin-auth symlink into `/usr/local/bin`, not a first-launch copy). See [CLI design doc §D1](design-docs/cli.md#decisions).
-2. **Agent Skill repo location** — Keep the skill in a `codans-skill/` subdirectory of this repo (co-versioned with the CLI) vs. a separate companion repo (`codans-skills`, publishable independently). **Blocks:** release process and skill installation UX. *Leaning: subdirectory of this repo in v1 to guarantee version alignment with `codans`; optionally publish a mirror repo later for people who want `npx skills add` without the app.*
-3. **Non-git Projects** — Do we allow a "Project" that isn't a git repo (e.g. a scratch folder)? If yes, what happens to Worktree-related UI? **Blocks:** Project model definition. *Leaning: allow, but Worktree features become inert.*
-4. **Hook execution model** — *Designed (C3 §D1), not yet implemented.* Out-of-process only in v1: each hook subscription runs a `/bin/sh -c <command>` with the JSON envelope on stdin. In-process JS scripting deferred indefinitely (not compatible with the language-agnostic contract we want for `codans`-shell composition). See [lifecycle-hooks design doc §D1](design-docs/lifecycle-hooks.md#decisions).
-5. **Agent detection heuristic** — *Resolved (C3 §D10 + C4 Pane labels):* no heuristic detection. Consumers rely on (a) user-configured hook rules + (b) Pane labels applied at spawn time via `codans pane label <pane> <label>`. Known-binary allowlists are out of scope — they collide with user-renamed binaries and shell aliases, and the wrapper-composition story is stronger without "magic." (The hook surface itself is designed but not yet implemented.) See [lifecycle-hooks design doc §D10](design-docs/lifecycle-hooks.md#decisions).
-6. **Worktree storage layout** — Where do new worktrees live on disk? Under the main repo's `.git/worktrees`? A sibling directory? User-configurable? **Blocks:** C2 implementation and user file-system expectations. *Leaning: sibling `<repo>-worktrees/<branch>` by default, configurable per Project.*
-7. **External editor discovery & invocation** — *Resolved by [docs/design-docs/editor-integration.md](design-docs/editor-integration.md) and [CLI design doc §D14](design-docs/cli.md#decisions).* Built-in allowlist of 34 entries (editors + terminals + git clients + Xcode + Finder + `$EDITOR`), each pinned to a bundle identifier; installation resolved via `NSWorkspace.urlForApplication(withBundleIdentifier:)` (no `$PATH`, no `Process`, no CLI shims, no user-defined templates); precedence cascades explicit `--in` → per-Project override → global default → priority auto-pick → Finder, split across a caller layer (strict/lenient) and the service layer. The `codans open [--in EDITOR] [<path>]` CLI wrapper (see [CLI design doc §D14](design-docs/cli.md#decisions)) maps onto the `editor.*` IPC surface (`.describe` / `.open` / `.setGlobalDefault` / `.setProjectDefault`); the service API is strictly `(directory: URL, preferred: EditorID?)`.
+- **Projects and worktrees:** `apps/mac/CodansCore/Project.swift` defines git-backed,
+  plain-folder, remote, and Workspace Projects. Storage resolution belongs to the worktree
+  implementation; see [Worktree](design-docs/worktree.md).
+- **Agent identification:** `AgentKind` and `AgentKindPatterns` define known-agent
+  recognition. See [Agents View](design-docs/active-agents-view.md) for runtime
+  signals and the boundary with notifications.
+- **CLI availability:** the registered subcommands in
+  `apps/mac/codans-cli/CodansCLI.swift` define the callable surface. A source file
+  alone does not establish a working command; see [CLI](design-docs/cli.md).
+- **Editor delegation:** [Editor integration](design-docs/editor-integration.md)
+  owns discovery and launch behavior, including SSH-specific limitations.
+- **Planned lifecycle hooks:** [Lifecycle hooks](design-docs/lifecycle-hooks.md)
+  describes an unimplemented subsystem, including the proposed execution policy.
+- **Skill installation:** `codans skill install` links bundled skills into detected
+  agent directories; `--target`, `--scope`, and `--project-root` select the destination.

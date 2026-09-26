@@ -1,6 +1,6 @@
 # Git Diff Viewer
 
-Status: implemented; local GUI validation is recorded in `../user-tests/git-diff-viewer.md`.
+Status: available for read-only Uncommitted and Outgoing comparisons.
 
 ## Scope
 
@@ -39,7 +39,15 @@ To update the package, change and test diff-view, run `npm run check:resources` 
 
 The renderer accepts two text snapshots and emits validated file/line intents. Its jsdiff presentation can group hunks differently from Git. Git remains the authority for status, rename detection, and file statistics. Web limits are stricter than the transport limit: 1M UTF-16 units / 10,000 lines per side, 10,000 characters per line, 4,000 rendered lines, and a bounded diff calculation. Unavailable previews are never silently truncated.
 
-The window uses the same `NavigationSplitView` container and 220/260/320 sidebar column sizing as the main window. SwiftUI owns the unified toolbar and system sidebar toggle; no opaque sidebar or whole-split background overrides the system material. The sidebar command targets the active Diff window instead of resizing the main terminal. The native sidebar owns Uncommitted/Outgoing at its top in a full-width capsule selector with equal-width text-only buttons, 12-point type, and accessible selection. Its 24-point control sits in a 32-point header band aligned with the code header, followed by file filtering and a tree/list presentation switch. The tree is the default, groups paths into expandable directories, and sorts folders before files. Directories initially expand; refresh preserves collapse state and selection reveals its ancestors. Flat rows show parent paths to distinguish duplicate filenames. File rows carry no icon, since a per-type icon repeats what the file name already says; directories in the tree keep a folder icon. A file's name starts where the name of the folder holding it starts, and a folder opens and closes from anywhere on its row, not only from its disclosure triangle. Presentation and selection are retained per Worktree for the app session. The unified window toolbar owns unified/split layout and refresh. The sidebar uses system text, compact rows, and status characters. File rows show names and status without per-file line counts. The list header totals all files in the current comparison, independent of filtering, and excludes unavailable counts as described in its tooltip. A 32-point native file header shows the selected path and line statistics. DiffViewKit receives `chrome: "none"` and renders only code, edge-to-edge: no Web toolbar, duplicate path, instruction strip, footer, or open-file button. Code rows carry no leading +/- marker either, since the row's tint already says added or removed. Appearance follows the window rather than a separate Web theme toggle. Syntax highlighting and text selection remain inside the component. The WebView stays mounted across loading, scope and file changes. Content updates preserve its presentation; closing the window or explicitly recovering a failed renderer restores host defaults. Search UI, context expansion and large-file virtualization are not implemented. Failed Web content can be recreated using Refresh.
+### Native window and file navigation
+
+The window uses the same `NavigationSplitView` container and 220/260/320 sidebar column sizing as the main window. SwiftUI owns the unified toolbar and system sidebar toggle; no opaque sidebar or whole-split background overrides the system material. The sidebar command targets the active Diff window instead of resizing the main terminal. The native sidebar owns Uncommitted/Outgoing at its top in a full-width capsule selector with equal-width text-only buttons, 12-point type, and accessible selection. Its 24-point control sits in a 32-point header band aligned with the code header, followed by file filtering and a tree/list presentation switch. The tree is the default, groups paths into expandable directories, and sorts folders before files. Directories initially expand; refresh preserves collapse state and selection reveals its ancestors. Flat rows show parent paths to distinguish duplicate filenames. File rows carry no icon, since a per-type icon repeats what the file name already says; directories in the tree keep a folder icon. A file's name starts where the name of the folder holding it starts, and a folder opens and closes from anywhere on its row, not only from its disclosure triangle. Presentation and selection are retained per Worktree for the app session.
+
+### Code presentation
+
+The unified window toolbar owns unified/split layout and refresh. The sidebar uses system text, compact rows, and status characters. File rows show names and status without per-file line counts. The list header totals all files in the current comparison, independent of filtering, and excludes unavailable counts as described in its tooltip. A 32-point native file header shows the selected path and line statistics. DiffViewKit receives `chrome: "none"` and renders only code, edge-to-edge: no Web toolbar, duplicate path, instruction strip, footer, or open-file button. Code rows carry no leading +/- marker either, since the row's tint already says added or removed. Appearance follows the window rather than a separate Web theme toggle. Syntax highlighting and text selection remain inside the component. The WebView stays mounted across loading, scope and file changes. Content updates preserve its presentation; closing the window or explicitly recovering a failed renderer restores host defaults.
+
+Search UI, context expansion and large-file virtualization are not implemented. Failed Web content can be recreated using Refresh.
 
 ## State and refresh
 
@@ -55,12 +63,14 @@ The main terminal view has no dependency on Diff visibility, width, or selection
 
 ## Editor handoff
 
+Workspace comparisons use the selected member checkout, not an aggregate of all member repositories. A workspace root or directory Project without a Git repository returns a Git error.
+
 The host validates the component's document ID and opens the selected current file through `DiffEditorClient`. Local/remote editor selection respects project/global preferences. Supported editors receive line arguments; others open the file without a guaranteed line position.
 
-Old-side/deleted targets are explicitly unavailable. Outgoing/Staged requests open the current file without a historical line. Changes requests re-read the selected content before forwarding a line; if content changed, open without a line. File rows provide an **Open in Editor** context-menu action, including binary/large-file notices. The header and footer do not expose open-file buttons. The component never starts an editor itself.
+Old-side/deleted targets are explicitly unavailable. Outgoing requests open the current file without a historical line. Uncommitted requests re-read the selected content before forwarding a line; if content changed, open without a line. File rows provide an **Open in Editor** context-menu action, including binary/large-file notices. The header and footer do not expose open-file buttons. The component never starts an editor itself.
 
-## Validation
+## Verification references
 
-See [execution plan](../exec-plans/git-diff-viewer.md) and [GUI case record](../user-tests/git-diff-viewer.md). Tests include real temporary Git repositories, reducer generation races, editor argument construction, PR-base decoding, independent WebKit rendering and native bridge validation. Remote transport tests must not be described as actual SSH GUI verification.
+[GUI cases](../user-tests/git-diff-viewer.md) define the interactive checks. `DiffFeatureTests`, `DiffWindowManagerTests`, `EditorFileOpenTests`, and Git comparison tests cover request generations, window ownership, editor arguments, and temporary-repository comparisons. Transport tests exercise the SSH execution boundary; they do not establish end-to-end remote GUI behavior.
 
 The file list and code area remain independently resizable inside the Diff window. Background polling does not flash a loading indicator over an existing snapshot.

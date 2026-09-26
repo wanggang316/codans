@@ -1,362 +1,173 @@
 # 设计文档：Editor Integration
 
-**状态：** 已上线（可见）
-**作者：** Gump（与 Claude）
+**状态：** 本地编辑器打开、SSH 编辑器打开和应用内 `$EDITOR` 入口可用；Diff 当前文件跳转和 `editor.*` IPC 可用；`codans open` 提供本地目录入口。
 
-## 背景与范围
+## 范围与入口
 
-codans 刻意不是 IDE。通用源码浏览与改码交给外部编辑器或文件管理器；内置只读 Diff 窗口可发起当前文件跳转。目录打开的可选目标包括 Cursor、Zed、VSCode、Xcode、Sublime、Finder，以及一众终端 / git 客户端。本文档描述那次交接：检测哪些应用已安装、把目录或当前文件在选定目标里打开、以及解析"用哪个"的默认值。落地代码在 `apps/mac/codans/App/Clients/Editor/`。
+Codans 将目录交给外部工具打开。应用内入口包括 Worktree 的 Open 下拉、默认编辑器命令和 Git Viewer 命令。调用方负责解析 Project、Worktree 和默认偏好；`EditorService` 负责发现应用、选择目标和启动。
 
-安装检测经 `NSWorkspace` / Launch Services 按 bundle identifier 走，不依赖 `$PATH`。目录打开使用 `NSWorkspace`；支持行定位的文件打开和 SSH 打开可通过应用 bundle 内的 CLI，经共享 `CommandRunner` 执行。macOS GUI 应用继承的是 `launchd` 的最小 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），凡是装进 `/usr/local/bin` 或 `/opt/homebrew/bin` 的编辑器 CLI shim（`code`/`cursor`/`subl`/…）——也就是每一个 Homebrew 风格安装、每一个跑过 "Install 'code' command in PATH" 的用户——都会被 `$PATH` 探测误报为**未安装**，哪怕 `.app` bundle 就躺在 `/Applications`。macOS 的应用发现走 Launch Services 而非调用方的 `PATH`，因此 bundle-id 检测无视那个可选 CLI shim 装没装，都能正确工作（承重理由见 `## 技术决策`）。
+目录与文件打开具有不同的契约：
 
-这个能力与 Worktree **解耦**："Open in X" 本质是一次 path-open 动作，而非 Worktree 专属动作。调用方（Worktree header、CLI、未来的 deeplink）各自把自身上下文解析成一个 `URL` 再交给服务；服务永远不知道 Worktree 是什么。
+| 路径 | 输入与机制 | 边界 |
+|---|---|---|
+| 本地应用 | 目录 URL，经 Launch Services 启动应用 | 校验本地目录存在；显式目标缺失时报错 |
+| SSH 编辑器 | `RemoteHost` 和远程路径，经应用内置 CLI 启动 | 只选择能表达该 SSH host 的编辑器；不做本地目录存在性校验 |
+| Diff 当前文件 | Worktree 路径、相对文件路径与可选行号，经 Launch Services 或 bundle 内 CLI 启动 | 只打开当前文件；行定位受比较来源与编辑器能力约束 |
+| `$EDITOR` | 应用 feature 提供 Pane/Tab 上下文，在终端中运行 | 由 Pane 的 shell 解析环境变量；不能通过纯目录服务启动 |
 
-## 目标与非目标
+`codans open [--in <editor>] [<path>]` 调用本地 `editor.open` IPC。省略路径时使用当前工作目录，相对路径由 CLI 转为绝对路径。此命令不承载 SSH host 或文件行号。应用提供[只读 Diff 窗口](git-diff-viewer.md)，不提供源码编辑、历史文件编辑或自定义编辑器命令模板。
 
-**目标**
+## 组件边界
 
-- 提供一份精选注册表，覆盖编辑器、终端、git 客户端、Xcode、Finder 与 `$EDITOR`，每条钉死一个 bundle identifier。
-- 无视 `$PATH`，用 `NSWorkspace.urlForApplication(withBundleIdentifier:)` 可靠检测每个已安装条目。
-- 接受任意目录 URL，经 `NSWorkspace` 在解析出的目标里打开它（`.editor` 这一特例除外，它 spawn 一个跑 `$EDITOR` 的 Pane），且每个 UI 表面都显示真实的 `.app` 图标。
-- 服务严格面向 path：目录 open API 是 `(directory: URL, preferred: EditorID?)`。签名里不出现 Worktree、Pane、Project 或任何其它域类型。
-- Settings UX 是一个**仅列已安装**条目的下拉（未安装的隐藏）；无安装引导、无下载 CTA、无 PATH 排障。
-- 默认解析级联：显式请求 → 全局默认 → 优先级自动挑选 → Finder。
-- NSWorkspace 和 bundle CLI 分别经 `AppLauncher`、`CommandRunner` 注入——单测里不真启动任何应用。
+| 组件 | 职责 |
+|---|---|
+| `EditorRegistry` | 内建应用 ID、bundle ID、启动类型、菜单序和自动选择优先级 |
+| `EditorDescriptor` | 已发现应用的描述，含 `appURL`、备用 bundle ID 和启动类型 |
+| `LiveEditorService` | 发现缓存、本地与远程目标解析、打开和错误映射 |
+| `AppLauncher` | Launch Services 查询和 `NSWorkspace` 启动的可替换边界 |
+| `RemoteEditorOpen` | SSH host 适用性、内置 CLI 相对路径和参数构造 |
+| `EditorFileOpen` | 当前文件的路径校验与文件/行号参数 |
+| `DiffEditorClient` | Diff 文件跳转的 Project 偏好与 SSH host 解析 |
+| `CommandRunner` | 文件与 SSH 编辑器 CLI 的执行、超时与输出限制 |
+| `EditorFeature` | Project 上下文、偏好与 UI 结果；`$EDITOR` delegate |
+| `EditorHandlers` | `editor.*` IPC 校验、DTO 转换和本地目录打开 |
 
-**非目标**
+实现入口：[EditorService.swift](../../apps/mac/codans/App/Clients/Editor/EditorService.swift)、[EditorService+Live.swift](../../apps/mac/codans/App/Clients/Editor/EditorService+Live.swift)、[EditorFeature.swift](../../apps/mac/codans/App/Features/Editor/EditorFeature.swift)。
 
-- 在 Codans 内编辑文件、打开历史侧临时文件或提供 merge editor。Diff 窗口仅打开当前文件。
-- 用户自定义命令模板（"Custom editors"）。新增条目是一次代码改动。若日后证明判断错了，再行修订。
-- 安装 / 下载 / quarantine 帮助。条目没装就不出现，这就是全部 UX。
-- 同一应用多版本（如 Xcode stable vs Xcode-beta）的消歧。Launch Services 的选择即结果，作为已知限制记录。
-- 按 codans 自身重叠能力裁剪注册表（如"我们已内置终端，跳过终端应用"）。尊重用户选择，不裁。
-- 把编辑器服务耦合到 Worktree / Project / Pane。服务是纯 path-opener；任何 per-Project 语义住在上一层——调用它的 feature / handler 里。
+## 应用发现与配置
+
+`describe()` 返回内建注册表中已安装的应用。每项先查主 bundle ID，再查 `alternateBundleIdentifiers`；查询使用 `NSWorkspace.urlForApplication(withBundleIdentifier:)`。`$EDITOR` 没有 bundle，始终作为可选择项返回。
+
+发现结果缓存在 `LiveEditorService` actor 中，`clearCache()` 使下一次发现重新查询。Settings 的编辑器入口和 IPC `editor.describe` 会刷新缓存；单纯再次 resolve 不保证发现新安装的应用。
+
+完整应用清单与排序由 [EditorRegistry.swift](../../apps/mac/codans/App/Clients/Editor/EditorRegistry.swift) 定义。`defaultPriority` 用于自动选择，Finder 位于末尾；`menuOrder` 控制显示顺序。两者职责不同。`.shellEditor` 的可选性不表示它能经 `EditorService.open` 启动。
+
+### 持久化
+
+所有默认值存放在 `settings.json`：
+
+| 字段 | 用途 |
+|---|---|
+| `general.defaultEditorID` | 全局默认编辑器 |
+| `general.defaultGitViewerID` | 全局 Git Viewer；`"built-in"` 表示内置 Diff 窗口，外部目标使用注册表 ID |
+| `projects[ProjectID].defaultEditor` | Project 编辑器覆盖；nil 使用全局解析链 |
+
+`Project` 域模型不保存默认编辑器。存储默认值可以指向未安装应用，打开时按解析规则处理。未知 JSON 字段的宽容解码不构成跨版本双向恢复保证；配置格式和读取策略见 [Settings](settings.md)。
+
+## 本地打开
+
+### 解析链
+
+调用方将用户显式选择直接作为 `preferred` 传入；没有显式选择时，读取 Project 覆盖，只有该目标已安装才传入。`EditorService.resolve` 接着执行：
+
+1. `preferred` 有值：必须命中已安装项，否则抛 `.notInstalled`。
+2. 全局默认已安装：选择该目标。
+3. 遍历 `EditorRegistry.defaultPriority`：选择第一个已安装项，Finder 位于链尾。
+4. 整条优先级链都无法解析：抛 `.launchFailed`。
+
+严格性属于本地服务的 `preferred` 参数。调用方必须先过滤存储的 Project 默认，才能保留“显式选择严格、存储偏好宽容”的行为。
+
+### 启动类型
+
+`open(directory:preferred:)` 先校验本地目录存在，然后按 `launchMode` 分流：
+
+- `.directory`：`NSWorkspace.open(urls:withApplicationAt:configuration:)`，URL 列表只有目标目录。
+- `.applicationWithArguments`：`NSWorkspace.openApplication(at:configuration:)`，`configuration.arguments` 为目录路径，`createsNewApplicationInstance = true`。此路径用于 JetBrains 家族。
+- `.shellEditor`：抛 `.launchFailed`，因为服务没有创建 Pane 所需的上下文。
+
+Launch Services 路径不通过 `CommandRunner`，没有应用自行设置的进程超时或退出码检查。完成回调表示系统打开请求的结果，不代表外部编辑器已完成项目加载。
+
+## SSH 打开
+
+`openRemote(host:remotePath:preferred:)` 使用同一份已安装应用列表，但对每个候选检查 `RemoteEditorOpen.invocation` 是否能表达该 host。
+
+解析顺序为 `preferred` → 全局默认 → `editorPriority`。每一级都宽容跳过未安装或不支持该 host 的应用，包括显式 `preferred`；没有可用目标时抛 `.launchFailed`。这条路径没有 Finder 兜底。
+
+| 编辑器类别 | 参数与限制 |
+|---|---|
+| Zed | 内置 `Contents/MacOS/cli` 接收 `ssh://[user@]host[:port]/path`；路径按 URI 规则编码 |
+| 支持的 VS Code 家族 | 内置 `Contents/Resources/app/bin/<cli>` 接收 `--remote ssh-remote+<destination>` 和远程路径 |
+| Finder、Xcode、JetBrains、终端、Git 客户端 | `RemoteEditorOpen` 不提供 SSH invocation |
+
+VS Code 家族不能在该 remote 参数中表达非默认端口。`RemoteHost.hasNonDefaultPort` 为 true 时，该类别不适用；端口可通过 SSH config 别名表达。支持的具体 ID 和 CLI 名称以 [RemoteEditorOpen.swift](../../apps/mac/codans/App/Clients/Editor/RemoteEditorOpen.swift) 为准。
+
+远程启动经共享 `CommandRunner`：
+
+- executable 位于发现到的应用 bundle 内，不通过 PATH 搜索。
+- 参数作为 argv 数组传入，不拼接 shell 命令。
+- 环境为 Codans 进程的环境，工作目录为本机用户 home。
+- 超时为 30 秒，捕获输出上限为 64 KiB。
+- 正常退出且 code 为 0 视为成功；其他结果映射为 `.launchFailed`。非零退出时，非空 stderr 可作为错误原因。
+
+远程路径属于 SSH host，不能作为本机文件 URL 去校验或揭示。应用负责发起编辑器的远程连接，SSH 编辑器自身负责认证和远程项目加载。
+
+## `$EDITOR`
+
+`EditorFeature` 对 `.shellEditor` 分流，经 delegate 请求父级创建带 `initialCommand: "$EDITOR"` 的 Pane。Project、Worktree 和 Tab 由应用层确定，shell 使用该 Pane 的环境解释命令。
+
+`EditorService.open` 和 `editor.open` IPC 都不提供这一 Pane 上下文，选择 `.shellEditor` 时会返回错误。SSH Project 的 `$EDITOR` 走终端路径，不走 `RemoteEditorOpen` 的本地应用 CLI 路径。
+
+## Diff 当前文件跳转
+
+`DiffEditorClient.openFile` 接收 Worktree 目录 URL、相对文件路径、可选行号和 Project ID。Client 读取 Project 覆盖、全局编辑器偏好及 SSH host，再调用 `LiveEditorService.openFile`；渲染组件只发送经过宿主校验的文件/行号意图。
+
+`EditorFileOpen.target` 拒绝绝对路径、空路径段、`.`、`..` 和 NUL。本地文件必须存在、不是目录，且解析符号链接后仍在 Worktree 内。远程路径只做相对路径结构校验，不查询本地文件系统。
+
+历史侧与已删除文件不能作为当前文件打开。Outgoing/Staged 比较打开当前文件时不传历史行号；Uncommitted 当前侧在内容复核一致后才传行号，内容变化或不可预览时省略行号。
+
+VS Code 家族、Zed 和 Sublime Text 使用 bundle 内 CLI；JetBrains 通过 Launch Services application arguments 传文件与行号；其他支持的应用按文件打开，不保证行定位。使用 `path:line` 的 CLI 对含冒号的文件路径省略行号。终端、Git 客户端和 `$EDITOR` 不支持这一文件入口。
+
+SSH 文件沿用远程编辑器的 host/端口能力约束。CLI 经 `CommandRunner` 执行，超时 30 秒，输出限制 64 KiB；本地工作目录为 Worktree，远程工作目录为本机 home。CLI 非零退出或执行失败返回 `.launchFailed`。
+
+## Git Viewer
+
+Settings → General 的 Default Git Viewer 默认为 **Built-in**，其后列出已安装的外部 Git 客户端。配置缺失、null 或未知注册表 ID 归一为 `GeneralSettings.builtInGitViewerID`（`"built-in"`）；已知但未安装的外部应用 ID 保留。
+
+Toggle Git Viewer 命令（默认 ⌘G）读取 `general.defaultGitViewerID`：Built-in 打开当前 Worktree 的独立只读 Diff 窗口；外部目标存在于 editor descriptors 时派发 `EditorFeature.openRequested`，否则不执行。快捷键设置使用 `CommandID.toggleDiffInspector`，持久化 raw value 为 `"toggleGitViewer"`。
+
+Worktree 右键菜单的 **Show Changes** 始终打开所点击 Worktree 的内置窗口，不受 Default Git Viewer 影响，也不改变主窗口选择。Worktree 菜单和命令面板的 Show Changes 面向当前 Worktree。主窗口 header 没有独立 Diff 按钮。
+
+默认编辑器与 Git Viewer 是两个独立的全局设置。外部 Git Viewer 复用目录打开服务；Built-in 由 `DiffWindowManager` 管理，不进入外部应用服务。SSH Project 的外部目标进入远程编辑器解析；Git 客户端不支持 SSH invocation 时可能回落到能处理该 host 的编辑器。
+
+## IPC
+
+| 方法 | 请求与响应 |
+|---|---|
+| `editor.describe` | 返回 `{ descriptors: [...] }`，含安装描述，不含执行 argv |
+| `editor.open` | `{ path, preferred? }` → `{ choice }`；path 为本地绝对目录路径 |
+| `editor.setGlobalDefault` | `{ editorID? }`，写全局默认；null 清除 |
+| `editor.setProjectDefault` | `{ projectID, editorID? }`，写 Project 设置；未知 Project 报错 |
+
+`editor.open` 校验并规范化本地路径。`preferred` 缺席时，handler 查找包含该路径的 Project，从 `settings.projects[pid].defaultEditor` 取已安装覆盖项，再调用本地服务。请求没有 `RemoteHost` 字段，不表达 SSH 打开。
+
+协议类型见 [EditorIPCTypes.swift](../../apps/mac/CodansIPC/Editor/EditorIPCTypes.swift)，边界校验见 [EditorHandlers.swift](../../apps/mac/codans/App/Features/Socket/EditorHandlers.swift)。
+
+## 错误与限制
+
+| 错误 | 条件 |
+|---|---|
+| `.notInstalled` | 本地显式 preferred 未安装或不在注册表中 |
+| `.notADirectory` | 本地路径不存在或不是目录 |
+| `.launchFailed` | Launch Services 失败、缺少 Pane 上下文、无可用 SSH 编辑器、文件路径校验失败或 bundle CLI 失败 |
+
+应用通过 `EditorFeature.lastOpenResult` 展示打开结果；IPC handler 将服务错误映射为 wire 错误。Swift 服务错误枚举不单列超时或非零退出码，不能据此推断 SSH 路径没有这些失败条件。
+
+同一 bundle ID 对应多个应用安装时，Launch Services 决定使用哪个安装。发现缓存只在明确失效后更新。内置 CLI 的路径或参数与应用版本不匹配时，远程打开可能失败；bundle 被发现不等于远程连接成功。
 
 ## 技术决策
 
-- **应用发现统一在 Launch Services。** 目录启动经 `AppLauncher`；文件行定位和 SSH 启动使用已发现 bundle 内的 CLI，执行经 `CommandRunner`，无需安装 `$PATH` 中的 CLI shim。
-- **JetBrains 家族走 `.applicationWithArguments` 而非 `.directory`。** JetBrains IDE 期望目录经 `configuration.arguments` 到达；走 `open(urls:…)` 它们会聚焦上一次打开的窗口、忽略参数，在错误的工程里打开。以空 URL 列表调 `open(urls:…)` 还是未定义行为，且不会把 `configuration.arguments` 转发给被启动应用。故 JetBrains 单列一支。
-- **严格性边界放在服务的 `preferred` 参数上，而非 ID 出处。** "已设即 strict"让服务对 ID 来自 project 还是 global 一无所知，同时仍兑现"显式点选缺失则响亮报错、存储默认缺失则静默穿透"的 UX（详见解析链小节）。
-
-## 设计
-
-### 总览
-
-三处机制加一个 UX 后果：
-
-1. **检测 = `NSWorkspace.urlForApplication(withBundleIdentifier:)`。** 每个内建条目钉死其 Apple 分配的 bundle identifier。"已安装" = 每个 bundle id 一次 LS 查询；结果按应用生命周期缓存，并在 Settings 窗口打开或 IPC `editor.describe` 到来时刷新。无 `$PATH`、无 `stat`、无 `which`。
-
-2. **启动 = 按类别分三支。**
-   - **`.directory` 模式** — `NSWorkspace.open(urls:withApplicationAt:configuration:)`，传单个目录 URL。覆盖编辑器（Cursor、Zed、VSCode、Windsurf、Antigravity、Sublime、Xcode、…）、终端（Ghostty、WezTerm、Alacritty、Kitty、Warp、Terminal.app）、git 客户端（GitHub Desktop、Sourcetree、Fork、GitKraken、Sublime Merge、SmartGit、GitUp）与 Finder。
-   - **`.applicationWithArguments` 模式** — `NSWorkspace.openApplication(at:configuration:)`，置 `configuration.arguments = [dir]` + `createsNewApplicationInstance = true`。**仅 JetBrains 家族**（IntelliJ、WebStorm、PyCharm、RubyMine、RustRover、Android Studio）。**为什么不用 `open(urls:…)`：** JetBrains IDE 期望目录经 `configuration.arguments` 到达；走 `open(urls:…)` 它们会聚焦上一次打开的窗口、忽略参数，在错误的工程里打开。这是承重的——以空 URL 列表调 `open(urls:…)` 是未定义行为，也不会把 `configuration.arguments` 转发给被启动应用。
-   - **`.shellEditor` 模式** — `.editor` 这一特例。在目标目录新建一个 Pane 并把 `$EDITOR` 作为输入发出；用户登录 shell 用自己的环境展开 `$EDITOR`。无 bundle id、无 LS 介入。它需要终端 / Pane 侧暴露"在某路径建 Pane 并带初始输入"原语——见下方"`.shellEditor` 的落地姿态"。
-
-   无 `Process` spawn、无 argv 替换、无 env 白名单、无 5 秒超时。干活的是内核（`.directory` / `.applicationWithArguments`）或 Pane 的 shell（`.shellEditor`）。
-
-3. **优先级自动解析。** 未设默认时，沿一条拼接的优先级链（`editorPriority + [xcode] + terminalPriority + gitClientPriority + [finder]`）走，挑第一个已安装的。**Finder 永远在链尾**——若它出现在中段，优先级游走会停在那里（Finder 永远已安装），把其后每个终端 / git 客户端条目都遮掉。每次 resolve 都重算，所以装一个更高优先级的编辑器在下一次打开即生效，无需重启。
-
-4. **UX 后果：一个下拉、仅已安装、固定菜单序。** Settings "Default editor" 面板是单个 `Picker`，按 `menuOrder` 列出已安装条目，每行经 `NSWorkspace.shared.icon(forFile:)` 显示真实 `.app` 图标（`.editor` 用通用终端字形）。无 tab、无 Custom 段、无安装状态列。Project Options sheet 里的 per-Project override 用同一 picker，外加一行"Use global default"。
-
-5. **Path 进，别无他物。** 服务 API 是 `(directory: URL, preferred: EditorID?)`。调用方在派发前把自身上下文化成 `URL`——没有域类型穿过服务边界。Per-Project 默认编辑器 override 作为特性**保留**，但在服务**外**解析：调用方（TCA `EditorFeature` reducer 或 IPC handler）查出所属 `Project`、读其 override、过滤到已安装、把结果作为 `preferred` 传给服务。服务只见 `EditorID?`，从不见 `ProjectID`。
-
-### Diff 当前文件跳转
-
-[内置 Diff 窗口](git-diff-viewer.md) 通过 `DiffEditorClient.openFile` 传递目录 URL、相对路径、可选行号和 Project ID。Client 读取 Project override / 全局默认，并复用编辑器注册表、安装检测和启动服务；组件本身不访问 Git 或启动编辑器。
-
-本地路径必须位于 Worktree 内，拒绝路径穿越、缺失文件和指向目录外的符号链接。历史侧和已删除文件不作为当前文件打开；Staged / Outgoing 打开当前文件时不沿用历史行号。当前侧行号在内容复核后才交给编辑器。
-
-VS Code 家族、Zed、Sublime Text 使用 bundle 内 CLI；JetBrains 使用 `NSWorkspace` 参数传递文件与行号。其他支持的应用按普通文件打开，不保证行定位。终端、Git 客户端和 `$EDITOR` 不支持该文件跳转入口，会显示错误。SSH 文件通过支持远程的编辑器启动，沿用远程目录打开的主机 / 端口能力约束；CLI 失败会返回明确错误。
-
-### Git Viewer（内置窗口或外部 git 客户端）
-
-Settings → General 的「Default Git Viewer」首项及默认值为 **Built-in**，其后仅列已安装的外部 git 客户端，不提供 None。「Toggle Git Viewer」命令（⌘⌥G / 菜单 / 命令面板，对应 `RootFeature.diffInspectorToggledForCurrentWorktree`）读取全局 `general.defaultGitViewerID`：Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立只读 Changes / Outgoing 窗口；已安装的外部 git 客户端派发 `.editor(.openRequested(editorID:, worktreePath:, projectID:))`，在 Fork、Sourcetree、GitHub Desktop 等应用中打开当前 Worktree。未知默认 ID 归一为 Built-in；注册表中已知但未安装的外部选择保留，命令在该目标不可用时不执行打开。
-
-它与默认编辑器是**两个独立的全局默认**（`defaultEditorID` 与 `defaultGitViewerID`），各有 Settings → General 下拉。外部目标复用编辑器注册表、`AppLauncher` 与目录 open 路径；Built-in 由 Diff 窗口路由处理，不进入外部应用启动服务。`CommandID.toggleDiffInspector` 的持久化 raw value 保持 `"toggleGitViewer"`，既有快捷键覆盖继续生效。
-
-主窗口 `windowHeader` 不提供 View Changes 入口。Worktree 右键菜单的 **Show Changes** 始终打开所点击 Worktree 的内置 Diff 窗口，不受 Default Git Viewer 选择影响，也不使用当前选中 Worktree 替代右键目标。
-
-### System Context Diagram
-
-```
- ┌──────────────────────────────────────────────────────────────────┐
- │  codans app                                                        │
- │                                                                    │
- │  Callers (resolve context → URL)     Settings · General pane       │
- │  ┌─────────────────────────┐         ┌──────────────────────┐      │
- │  │ Worktree header button  │         │ Default editor:      │      │
- │  │ External Git client     │◀── same │   🅲 Cursor      ▼   │      │
- │  │ CLI `codans open [path]`│   list  │ (installed only)     │      │
- │  │ Future deeplink handler │         └──────────────────────┘      │
- │  └──────────┬──────────────┘                                       │
- │             │ open(directory: URL, preferred: EditorID? = nil)     │
- │             ▼                                                      │
- │  ┌────────────────────────────────────────────────────────┐       │
- │  │  EditorService (in-app; @Dependency wired)             │       │
- │  │  ├── describe()  → [EditorDescriptor] (installed)      │       │
- │  │  ├── resolve(preferred) → EditorDescriptor             │       │
- │  │  └── open(directory, preferred) async throws           │       │
- │  └────────────┬──────────────────────┬──────────────────┬─┘       │
- │               │                      │                  │         │
- │        ┌──────▼──────────┐    ┌──────▼────────┐    ┌────▼─────┐   │
- │        │  AppLauncher    │    │ SettingsStore │    │  Pane    │   │
- │        │  (NSWorkspace)  │    │ defaultEditor │    │  spawner │   │
- │        │ urlForApp / open│    │ ID (read)     │    │ ($EDITOR)│   │
- │        └──────┬──────────┘    └───────────────┘    └──────────┘   │
- │               ▼                                                    │
- │       macOS Launch Services                                        │
- └──────────────────────────────────────────────────────────────────┘
-```
-
-运行时路径上不出现 `Foundation.Process`、`PathProber`、`EditorEnv`、`ProcessSpawner`、`SpawnContract`、`CommandTemplate`、`CustomEditor`——干活的只有 `AppLauncher` 这层对 `NSWorkspace` 的封装。
-
-### API 设计
-
-#### EditorService 协议
-
-```swift
-protocol EditorService: Sendable {
-  func describe() async -> [EditorDescriptor]                            // installed only
-  func resolve(preferred: EditorID?) async throws -> EditorDescriptor
-  @discardableResult
-  func open(directory: URL, preferred: EditorID?) async throws -> EditorChoice
-}
-```
-
-`describe()` 的契约：**只返回已安装**编辑器（与"未安装 → 不可见"的 UX 一致，服务自身过滤）。签名里没有 `projectID`、`worktreeID` 或任何 catalog 类型——服务收一个 URL、返回一个选择，这就是全部耦合。`EditorChoice` 带 `id / displayName / binaryPath?`，**不含** `argv: [String]`（经 LS 启动时没有 argv，外部也无消费方）。
-
-#### EditorDescriptor
-
-```swift
-struct EditorDescriptor: Identifiable, Equatable, Sendable {
-  let id: EditorID                    // "cursor" | "zed" | "editor" | ...
-  let displayName: String
-  let bundleIdentifier: String        // empty string for .shellEditor
-  let launchMode: LaunchMode
-  let appURL: URL?                    // nil for .shellEditor; otherwise resolved from LS
-  let alternateBundleIdentifiers: [String]
-  enum LaunchMode: Equatable, Sendable {
-    case directory                    // NSWorkspace.open(urls:withApplicationAt:configuration:)
-    case applicationWithArguments     // NSWorkspace.openApplication(at:configuration:) with args
-    case shellEditor                  // new Pane, send "$EDITOR" to stdin
-  }
-}
-```
-
-`EditorID` 是 `String`（开放 allowlist 用字符串而非枚举：`Project.defaultEditor` 已是 `String?`，无需让 `CodansCore` 知道 App 层概念）。从 `describe()` 中**缺席**即"未安装"信号——无需 `InstallationStatus` 枚举。`.shellEditor` 永远视为已安装（它回退到 shell 对 `$EDITOR` 的解析）。
-
-#### 内建注册表（34 条）
-
-| `id` | Display | Bundle ID | Launch mode | Category |
-|---|---|---|---|---|
-| `cursor` | Cursor | `com.todesktop.230313mzl4w4u92` | directory | editor |
-| `zed` | Zed | `dev.zed.Zed` | directory | editor |
-| `vscode` | Visual Studio Code | `com.microsoft.VSCode` | directory | editor |
-| `windsurf` | Windsurf | `com.exafunction.windsurf` | directory | editor |
-| `vscodeInsiders` | VSCode Insiders | `com.microsoft.VSCodeInsiders` | directory | editor |
-| `vscodium` | VSCodium | `com.vscodium` | directory | editor |
-| `sublimeText` | Sublime Text | `com.sublimetext.4`（alt `com.sublimetext.3`） | directory | editor |
-| `intellij` | IntelliJ IDEA | `com.jetbrains.intellij` | applicationWithArguments | editor |
-| `webstorm` | WebStorm | `com.jetbrains.WebStorm` | applicationWithArguments | editor |
-| `pycharm` | PyCharm | `com.jetbrains.pycharm` | applicationWithArguments | editor |
-| `rubymine` | RubyMine | `com.jetbrains.rubymine` | applicationWithArguments | editor |
-| `rustrover` | RustRover | `com.jetbrains.rustrover` | applicationWithArguments | editor |
-| `androidStudio` | Android Studio | `com.google.android.studio` | applicationWithArguments | editor |
-| `antigravity` | Antigravity | `com.google.antigravity` | directory | editor |
-| `trae` | Trae | `com.trae.app` | directory | editor |
-| `traeCN` | Trae CN | `cn.trae.app` | directory | editor |
-| `qoder` | Qoder | `com.qoder.ide` | directory | editor |
-| `codebuddy` | CodeBuddy | `com.tencent.codebuddy`（alt `com.tencent.codebuddycn`） | directory | editor |
-| `xcode` | Xcode | `com.apple.dt.Xcode` | directory | editor |
-| `finder` | Finder | `com.apple.finder` | directory | (always) |
-| `ghostty` | Ghostty | `com.mitchellh.ghostty` | directory | terminal |
-| `wezterm` | WezTerm | `com.github.wez.wezterm` | directory | terminal |
-| `alacritty` | Alacritty | `org.alacritty` | directory | terminal |
-| `kitty` | Kitty | `net.kovidgoyal.kitty` | directory | terminal |
-| `warp` | Warp | `dev.warp.Warp-Stable` | directory | terminal |
-| `terminal` | Terminal | `com.apple.Terminal` | directory | terminal |
-| `githubDesktop` | GitHub Desktop | `com.github.GitHubClient` | directory | git client |
-| `sourcetree` | Sourcetree | `com.torusknot.SourceTreeNotMAS` | directory | git client |
-| `fork` | Fork | `com.DanPristupov.Fork` | directory | git client |
-| `gitkraken` | GitKraken | `com.axosoft.gitkraken` | directory | git client |
-| `sublimeMerge` | Sublime Merge | `com.sublimemerge` | directory | git client |
-| `smartgit` | SmartGit | `com.syntevo.smartgit` | directory | git client |
-| `gitup` | GitUp | `co.gitup.mac` | directory | git client |
-| `editor` | `$EDITOR` | —（空串） | shellEditor | (always) |
-
-合计 34 条：18 编辑器 + Xcode + Finder + 6 终端 + 7 git 客户端 + `$EDITOR`。优先级列表：
-
-```swift
-static let editorPriority: [EditorID] = [
-  "cursor", "zed", "vscode", "windsurf", "vscodeInsiders", "vscodium", "sublimeText",
-  "intellij", "webstorm", "pycharm", "rubymine", "rustrover", "androidStudio",
-  "antigravity", "trae", "traeCN", "qoder", "codebuddy",
-]
-static let terminalPriority: [EditorID] = [
-  "ghostty", "wezterm", "alacritty", "kitty", "warp", "terminal",
-]
-static let gitClientPriority: [EditorID] = [
-  "githubDesktop", "sourcetree", "fork", "gitkraken", "sublimeMerge", "smartgit", "gitup",
-]
-// Finder 在链尾——若它出现在中段，优先级游走会停在那里并遮掉其后所有条目。
-static let defaultPriority: [EditorID] =
-  editorPriority + ["xcode"] + terminalPriority + gitClientPriority + ["finder"]
-static let menuOrder: [EditorID] =
-  editorPriority + ["xcode"] + ["finder"] + terminalPriority + gitClientPriority + ["editor"]
-```
-
-新增条目是两行代码改动（注册表一行 + 优先级插入一行）。
-
-#### 解析链——跨两层拆分
-
-**调用方层**（TCA `EditorFeature` 或 IPC handler）决定传什么作为 `preferred`：
-
-```
-userExplicitPick   (下拉点击、`codans open --in …`)
-  → 作为 `preferred` 严格传入（未安装则抛错：用户点名要的）
-否则若无用户点选：
-projectOverride    (经路径做 hierarchy lookup 得 project.defaultEditor)
-  → 已安装则作为 `preferred` 传入；未安装则传 nil（宽容：静默穿过）
-```
-
-**服务层**（`EditorService.open`）随后级联：
-
-```
-preferred (来自调用方)     → nil 则跳过；已设且未安装则抛 .notInstalled
- ↓
-Settings.defaultEditorID   → 已安装则用，否则跳过
- ↓
-priority 自动挑选          → defaultPriority 链里第一个已安装的
- ↓ 总是收尾于
-Finder
-```
-
-为何拆分级联：**strict vs lenient** 的区别关乎*一个缺失编辑器如何被处理*，而非*它来自哪个层级*。显式用户点选是 strict（响亮报错："Cursor is not installed"）；任何存储默认（project 或 global）是 lenient（静默穿过）。把严格性边界放在服务的 `preferred` 参数上——"已设即 strict"——让服务对 ID 的出处一无所知，同时仍兑现正确 UX。
-
-#### IPC
-
-- `editor.describe` → `[EditorDescriptor]`（载荷为 `EditorDescriptor` 字段，不含 `argv`）。
-- `editor.open { path: String, preferred?: EditorID }` → `EditorChoice`。
-  - `path` **必填**，须是绝对目录路径。调用方（含 CLI）各自把上下文解析成路径；`codans open` 无参时用 `$PWD`。
-  - `preferred` 可选；用户跑 `codans open --in <editor>` 时给。
-  - `preferred` 缺席时，IPC handler 做 `hierarchyClient.project(containing: path)?.defaultEditor`，若该 ID 已安装则作为服务 `preferred` 传入——让 CLI 调用与应用内"点 Open"行为一致，两者都静默尊重 per-Project override。这次 lookup 只发生在 handler 一处，服务自身从不 import `HierarchyClient`。
-  - 响应不含 `argv`。
-- `editor.setGlobalDefault { editorID? }` → `void`。写 `settings.general.defaultEditorID`；`null` 清除。per-Project 默认住在下面 `editor.setProjectDefault` 上，故全局默认单列此动作。对应方法枚举 case 是 `editorSetGlobalDefault`、字符串值 `"editor.setGlobalDefault"`。
-- `editor.setProjectDefault { projectID: UUID, editorID? }` → `void`。经 `HierarchyClient` 写 `Settings.projects[pid].defaultEditor`；由 Project Options sheet 调用，`null` 清除 override。
-
-不提供 `editor.customEditors.*`（custom editors 无 IPC 方法，亦无 settings 表面）。
-
-#### 图标访问
-
-```swift
-let icon: NSImage = NSWorkspace.shared.icon(forFile: descriptor.appURL.path)
-```
-
-SwiftUI 里 `Image(nsImage:)` 配 `.resizable().frame(...)`。无需缓存——LS 已缓存。
-
-### 数据存储
-
-无新文件，三个字段：
-
-| Owner | Key | 形态 |
-|---|---|---|
-| `settings.json` | `general.defaultEditorID: EditorID?` | 全局默认编辑器，仅内建注册表 ID |
-| `settings.json` | `general.defaultGitViewerID: EditorID?` | 全局默认 Git Viewer；`"built-in"` 表示内置 Diff 窗口，外部目标使用 git-client 注册表 ID，供 `⌘⌥G` 路由 |
-| `settings.json` / catalog | `Project.defaultEditor: EditorID?` | per-Project override；不在注册表的 ID 加载时归一为 `nil` |
-
-`general.customEditors`（旧版 custom-editor 模板）不再写出；若旧 `settings.json` 里存在则宽容解码并忽略（迁移语义见下）。
-
-`general.defaultGitViewerID` 缺省或为 `null` 时归一为 `GeneralSettings.builtInGitViewerID`（`"built-in"`）；既有注册表内的外部选择保留，包括已卸载的应用。未知 ID 归一为 Built-in；已知但未安装的外部目标不执行打开。
-
-**迁移**（启动 decode 后跑一次）：忽略任何旧 `general.customEditors`（`.info` 记录，不告警用户）；`general.defaultEditorID` 若不在新内建注册表则置 `nil`（下次解析穿透到优先级自动挑选）；任何 `Project.defaultEditor` 若不在注册表则置 `nil`。不升 schema 版本（codans 的 settings/catalog 读取器对未知键宽容）。**两个方向回滚都安全**——容忍式迁移。
-
-### 组件边界
-
-```
-apps/mac/codans/App/Clients/Editor/
-├── EditorService.swift          ─ protocol
-├── EditorService+Live.swift     ─ live：用 AppLauncher + NSWorkspace
-├── EditorService+Test.swift     ─ test double
-├── EditorRegistry.swift         ─ 内建 allowlist + bundle IDs + 优先级
-├── EditorModels.swift           ─ EditorDescriptor, EditorChoice, EditorID, LaunchMode
-├── EditorError.swift            ─ .notInstalled / .launchFailed / .notADirectory
-└── AppLauncher.swift            ─ protocol + LiveAppLauncher (NSWorkspace facade)
-```
-
-`AppLauncher` 是新的缝，暴露三个方法（probe + 两种启动）：
-
-```swift
-protocol AppLauncher: Sendable {
-  func urlForApplication(bundleIdentifier: String) async -> URL?
-  func open(urls: [URL], withApplicationAt appURL: URL,
-            configuration: NSWorkspace.OpenConfiguration) async throws
-  func openApplication(at appURL: URL,
-            configuration: NSWorkspace.OpenConfiguration) async throws
-}
-```
-
-Live 实现包 `NSWorkspace.shared`。测试用 `RecordingAppLauncher`，逐编辑器校验 `(appURL, urls, configuration.arguments, configuration.createsNewApplicationInstance)` 与预期一致。`LiveEditorService` 是个 `actor`，用以廉价地为 `describe()` 缓存加互斥锁；`clearCache()` 在 Settings 面板 appear 与 IPC `editor.describe` 时调用，使新装编辑器无需重启即可浮现。
-
-**职责：** `EditorService` 管解析逻辑、`describe()` 结果缓存、回退链；`AppLauncher` 是 `NSWorkspace` 抽象——**唯一**在测试代码外 import `NSWorkspace` 的地方；`EditorRegistry` 是静态条目模板表。**不负责：** 服务不管 UI、不管存选择、不管 IPC 传输、不管图标渲染；`AppLauncher` 不管业务逻辑或解析——它只打开被告知的东西。
-
-### `.shellEditor` 的落地姿态
-
-`.editor` 经 `describe()` 出现在 picker 里（永远已安装），但**经本服务实际启动 `$EDITOR` 当前会抛 `.launchFailed`**。原因是结构性的：`.shellEditor` 需要一个 `(spaceID, projectID, worktreeID, tabID)` 元组交给 `HierarchyManager.openPane`，而服务签名刻意排除域类型（见"Path 进，别无他物"）。Pane 侧原语本身已就绪——`TerminalEngine.ensureSurface` 已把 `pane.initialCommand` 转发给新 spawn 的 shell——缺的只是让这个 path-only 服务去寻址一个 Pane 的途径。
-
-落地选择：保留注册表条目的形状（让 picker 列出它），但经服务打开时抛一个描述性错误，把这个未解的设计问题浮现出来，而非静默 no-op。想让 `.shellEditor` 端到端工作的调用方应走 Pane/Tab 感知的代码路径（如 Worktree header "Open in ▾"，或未来一个接到 `hierarchy.openPane` 的 `codans open --in editor`，把 `initialCommand` 设为 `"$EDITOR"`）。
-
-### 错误处理
-
-| Error | Cause | UI |
-|---|---|---|
-| `.notInstalled(id, bundleID)` | 显式 preferred 编辑器在 LS 上找不到 | Toast："Cursor is not installed." |
-| `.launchFailed(reason)` | `NSWorkspace.open` 回调返回 `Error`，或 `.shellEditor` 无 Tab 上下文 | Toast："Could not open in Cursor: <reason>" |
-| `.notADirectory(path)` | 目标路径不存在或非目录（`open` 前以 `FileManager.fileExists(isDirectory:)` 校验） | Toast："Directory not found: <path>" |
-
-错误集合仅此三个。没有 `.nonZeroExit` / `.timedOut` / `.spawnFailed` / `.badTemplate` / `.unresolvedWorktree`：LS 路径无超时（内核异步打开 bundle，调用在 LS 派发后即返回）、无退出码，CLI 也总是发路径（默认 `$PWD`），不存在 CLI 专属失败模式。
-
-## 备选方案（Alternatives）
-
-- **A1 — `Process`+`PATH` 探测，加常见前缀回退**（`/opt/homebrew/bin`、`/usr/local/bin`、in-bundle shim 硬编码路径）。否决：只对跑过 "Install 'code' command" 的用户修好检测；新装 VSCode 没 shim；Cursor / Zed 有版本相关的自有 shim；路径硬编码会腐烂；对 JetBrains（无 CLI shim 模型）与 Xcode 毫无帮助。修了可见症状，留下结构问题。
-- **A2 — 混合：NSWorkspace 检测，Process 启动。** 否决：检测与启动走不同机制意味着一个编辑器可"被检测"（bundle 存在）却"不可启动"（用户从未装 shim）——正是当前 bug 的反转版。无消费方需要 `argv`。每编辑器两种失败模式。
-- **A3 — 注册表只留代码编辑器**，砍掉终端 / git 客户端（理由：codans 自带终端 Pane）。否决：抢先替用户做选择。有人就想要 Warp 的 AI、第二屏上的 Ghostty、或 GitHub Desktop 的 PR UI。保留它们的成本是 Swift 枚举里约 20 行，收益是"没人需要问 X 去哪了"。全部保留。
-- **A4 — 在 NSWorkspace 旁并存 CustomEditor 模板。** 当前否决：会引入一整套复杂度（custom 二进制的 PATH 探测、Process spawner、超时契约、env 白名单、模板校验器、"是不是 shell"启发式），服务对象尚未真正提出诉求。若日后需求浮现，作为单独的"Advanced"面板加回。
-- **A5 — 单下拉但无自动默认，用户必须先选。** 否决：每次全新安装都摩擦。优先级游走对约 99% 用户是对的（Cursor/Zed/VSCode 里装了哪个几乎就是他们会选的）；那 1% 选错只需一次下拉点击改正。
-
-## Cross-Cutting Concerns
-
-### 安全
-
-- **攻击面缩小。** 无 `Process`、无 argv 替换、无 env 白名单、无 shell 顾虑。剩下的面是"LS 在一个由字符串标识的 bundle 里打开一个目录"——一条踏实的 macOS 路径。
-- **Quarantine / Gatekeeper。** LS 代 codans 处理 quarantine 提示；bundle 被隔离时用户见到 OS 标准对话框而非 codans 错误。
-- **Deeplink 风险。** 若未来 `codans://` URL 请求 `editor.open` 带一个不在内建注册表的 `preferred` ID，服务拒绝它——没有用户提供的模板可被武器化。封闭 allowlist 本身即是这条边界。
-
-### 可观测性
-
-- `os.Logger` category `com.gumpw.codans.editor`。每次 resolve（编辑器 ID + 目录路径）与每次启动（成败）记 `.info`；迁移异常（未知 `defaultEditorID`、出现旧 `customEditors`）记 `.error`。
-- 无启动 wall-clock signpost——LS 近乎即时返回，有意义的延迟在编辑器自身冷启动，这里测不到。
-
-### 可测试性
-
-测试矩阵大幅收缩：`EditorRegistry` 表驱动（每 ID 唯一 bundle id、无冲突、`defaultPriority` 顺序符合预期）；`EditorService` 解析（fake `AppLauncher.urlForApplication` 返回受控子集，覆盖各层 + stale-default 穿透 + stale-explicit 抛错）；`EditorService` 启动（fake `open` / `openApplication`，校验 JetBrains 分支用 `configuration.arguments + createsNewApplicationInstance=true`，非 JetBrains 分支用 `open(urls:withApplicationAt:)` 传目录 URL）；迁移（解码带旧 `customEditors` + stale `defaultEditorID` 的 settings，校验归一）；集成冒烟（门控于 `TC_RUN_EDITOR_INTEGRATION_TESTS=1`，真问 LS `com.apple.finder` 并 `open` 一个临时目录）。
-
-## 风险
-
-- **R1 — ToDesktop 式 bundle id 漂移。** Cursor 的 bundle id 是 ToDesktop 哈希（`com.todesktop.230313mzl4w4u92`）；若未来 Cursor 改 ID 重新发布，检测会漏。**缓解：** 每条 descriptor 带 `alternateBundleIdentifiers: [String]`，先探主、再穿透备选；shim 移动时更新列表（代码改动）。
-- **R2 — JetBrains 特例漂移。** 若 JetBrains 改变其应用经 `configuration.arguments` 接收 folder-open 的方式，这一支会静默失效（应用启动、目录被忽略）。**缓解：** 每次发布在一个 JetBrains IDE 上手动冒烟；若实践中脆弱，改用 `ides-openFolder` URL scheme 作为逐编辑器 override。
-- **R3 — LS 挑错 Xcode 版本。** 用户同时装 Xcode 与 Xcode-beta，LS 挑"默认"那个。**缓解：** 记为已知限制；后续考虑单独的 `xcodeBeta` descriptor（bundle id `com.apple.dt.Xcode-beta`）。
-- **R4 — 首装竞态。** 用户在 codans 运行中装了 Cursor，缓存的 `describe()` 仍说它缺。**缓解：** `describe()` 在 Settings 面板可见与 IPC `editor.describe` 时重探（`clearCache()`），够用且避免轮询。
-- **R5 — niche 编辑器无逃生口。** 没有 custom-editor 模板，注册表外的编辑器（如 Helix）无法配置。**缓解：** 有诉求就把它加进内建注册表（两行改动）。`customEditors` 表面据日志无已知用户，缺失这条逃生口的影响半径近零。
-- **R6 — `NSWorkspace.open` 异步回调吞错。** 回调式 API 经 completion handler 返回错误，接线失误可能静默丢错。**缓解：** 用 `withCheckedThrowingContinuation` 包裹；单测断言成功与失败路径下 continuation 恰好 resume 一次。
-
-## 已锁定的不变量
-
-1. **机制。** Launch Services 用于应用发现；目录打开经 NSWorkspace，文件行定位与 SSH 可使用 bundle 内 CLI，经 CommandRunner 执行；不依赖 `$PATH` 中的 CLI shim。
-2. **发现。** 逐内建条目 `NSWorkspace.urlForApplication(withBundleIdentifier:)`，缓存；Settings-appear 与 IPC `editor.describe` 时刷新。
-3. **内建 allowlist。** 34 条——18 编辑器 + Xcode + Finder + 6 终端 + 7 git 客户端 + `$EDITOR`。新增是代码改动。
-4. **回退顺序（跨两层）。** 显式 → Project override → 全局默认 → Finder。
-5. **显式 preferred 不静默穿透。** 缺失的显式 preferred 抛错，UI 浮现错误而非打开另一个编辑器；任何存储默认（project/global）才宽容穿透。
-6. **解析级联——跨两层拆分。** 调用方把 `userExplicitPick ?? (projectOverride if installed)` 解析成单个 `preferred`；服务随后级联 `preferred`（strict）→ `Settings.defaultEditorID`（lenient）→ 优先级自动挑选 → Finder。
-7. **范围。** 支持目录打开与 Diff 当前文件跳转；可选行号取决于比较来源及编辑器能力，不提供历史文件编辑。
-8. **存储。** `settings.json` 的 `defaultEditorID` + `Project.defaultEditor` 的 per-Project override；无 `customEditors`。
-
-NSWorkspace 路径不使用 subprocess 超时；bundle CLI 路径经 CommandRunner，当前限制为 30 秒和 64 KiB 输出。
+- **本地应用以 bundle 为边界。** Launch Services 同时负责发现和本地启动，用户无需先安装编辑器的 PATH shim。
+- **远程启动使用编辑器自身协议。** `RemoteEditorOpen` 集中定义 host 适用性与 argv，执行由共享 `CommandRunner` 负责，避免 feature 自建子进程管理。
+- **Project 偏好属于调用方。** 服务不读 catalog；本地服务接收 URL，远程服务接收 host 与路径，Pane 创建留在应用层。
+- **JetBrains 使用 application arguments。** 目录通过 `OpenConfiguration.arguments` 传入，避免目录打开与应用启动 API 的参数语义混淆。
+- **本地与远程严格性不同。** 本地点名目标缺失时报错；远程会跳过不能表达该 host 的目标，以支持配置了本地默认的 SSH Project。
+
+## 验证入口
+
+- `EditorRegistryTests`：ID、bundle ID、菜单序和优先级。
+- `EditorServiceResolutionTests` / `EditorServiceLaunchTests`：本地解析、目录验证和 Launch Services 参数。
+- `EditorFileOpenTests`：文件边界、行号与 bundle CLI 参数。
+- `RemoteEditorOpenTests`：SSH URL、端口适用性和内置 CLI argv。
+- `EditorFeatureTests` / `EditorHandlersTests`：应用上下文、默认覆盖和 IPC 边界。
+
+测试替身使用 `AppLauncher` 与 `CommandRunner`，避免单元测试真实启动外部应用。

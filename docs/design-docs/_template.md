@@ -1,8 +1,8 @@
 # Design Doc: [Title]
 
-**Status:** Draft | Approved | Implemented | Deprecated
+**Availability:** Available | Hidden | Planned (specify scope for mixed features)
 **Author:** [name]
-**Date:** [date]
+**Implementation:** [relative links to entry points, or none for a planned feature]
 
 ## Context and Scope
 
