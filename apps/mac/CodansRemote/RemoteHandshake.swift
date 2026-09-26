@@ -27,14 +27,28 @@ public enum RemoteHandshake {
 
   /// Client side: connects to `endpoint` with `credential`, completes TLS,
   /// and sends the peer proof. The returned transport is ready for IPC.
+  /// A Bonjour `.service` endpoint is resolved first (see
+  /// `RemoteBonjour.resolve`), within the same `timeout`.
   public static func connect(
     to endpoint: NWEndpoint,
     credential: RemoteTLS.PSKCredential,
     timeout: Duration = defaultTimeout
   ) async throws -> NWFrameTransport {
-    let connection = NWConnection(to: endpoint, using: RemoteTLS.clientParameters(credential: credential))
+    let clock = ContinuousClock()
+    let deadline = clock.now + timeout
+    let target: NWEndpoint
+    do {
+      target = try await RemoteBonjour.resolve(endpoint, timeout: timeout)
+    } catch RemoteBonjour.ResolveError.timedOut {
+      throw HandshakeError.timedOut
+    } catch RemoteBonjour.ResolveError.failed(let code) {
+      throw HandshakeError.transport(.failed(.dns(code)))
+    }
+    let remaining = deadline - clock.now
+    guard remaining > .zero else { throw HandshakeError.timedOut }
+    let connection = NWConnection(to: target, using: RemoteTLS.clientParameters(credential: credential))
     let transport = NWFrameTransport(connection: connection)
-    try await withDeadline(timeout, cancelling: connection) {
+    try await withDeadline(remaining, cancelling: connection) {
       try await transport.start()
       guard let binding = transport.channelBinding else { throw HandshakeError.missingChannelBinding }
       let proof = RemotePeerProof.make(credential: credential, channelBinding: binding)

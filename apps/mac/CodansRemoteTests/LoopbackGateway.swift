@@ -19,16 +19,37 @@ final class LoopbackGateway: Sendable {
   let outcomes: AsyncStream<Outcome>
   private let outcomeSink: AsyncStream<Outcome>.Continuation
 
+  let serviceName: String?
+
   var endpoint: NWEndpoint { .hostPort(host: "127.0.0.1", port: port) }
 
+  /// The Bonjour endpoint a phone's browser would hand over; only for a
+  /// gateway started with `advertisedAs`.
+  var serviceEndpoint: NWEndpoint? {
+    serviceName.map { .service(name: $0, type: Self.testServiceType, domain: "local.", interface: nil) }
+  }
+
+  /// Bonjour type for `advertisedAs`, apart from the real gateway's so a
+  /// phone browsing for Macs never lists a test listener.
+  static let testServiceType = "_codans-test._tcp"
+
   /// Starts a listener holding `credentials` and waits until it is ready.
+  /// With `advertisedAs`, the listener accepts on every interface (the
+  /// advertised host name resolves to LAN addresses) and registers a
+  /// Bonjour service of that name, reachable at `serviceEndpoint`.
   static func start(
     credentials: [RemoteTLS.PSKCredential],
-    handshakeTimeout: Duration = .seconds(5)
+    handshakeTimeout: Duration = .seconds(5),
+    advertisedAs serviceName: String? = nil
   ) async throws -> LoopbackGateway {
     let parameters = RemoteTLS.serverParameters(credentials: credentials)
-    parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+    if serviceName == nil {
+      parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+    }
     let listener = try NWListener(using: parameters)
+    if let serviceName {
+      listener.service = NWListener.Service(name: serviceName, type: testServiceType)
+    }
     let keys = Dictionary(uniqueKeysWithValues: credentials.map { ($0.identity, $0.key) })
     let (outcomes, sink) = AsyncStream<Outcome>.makeStream()
 
@@ -66,17 +87,20 @@ final class LoopbackGateway: Sendable {
       }
       listener.start(queue: DispatchQueue(label: "loopback-gateway"))
     }
-    return LoopbackGateway(listener: listener, port: port, outcomes: outcomes, sink: sink)
+    return LoopbackGateway(
+      listener: listener, port: port, serviceName: serviceName, outcomes: outcomes, sink: sink)
   }
 
   private init(
     listener: NWListener,
     port: NWEndpoint.Port,
+    serviceName: String?,
     outcomes: AsyncStream<Outcome>,
     sink: AsyncStream<Outcome>.Continuation
   ) {
     self.listener = listener
     self.port = port
+    self.serviceName = serviceName
     self.outcomes = outcomes
     self.outcomeSink = sink
   }

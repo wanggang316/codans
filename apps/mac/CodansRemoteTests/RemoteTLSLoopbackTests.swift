@@ -94,6 +94,56 @@ struct RemoteTLSLoopbackTests {
     #expect(error.map(Self.isRefusal) == true)
   }
 
+  /// A phone connects to the Bonjour service its browser found. A refusal
+  /// there must surface as one too: a connection to the `.service`
+  /// endpoint itself stays `.preparing` after the TLS alert, which read as
+  /// a Mac that never answered and kept a revoked phone retrying.
+  @Test
+  func refusalOverBonjourIsReportedPromptly() async throws {
+    let paired = try TestKeys.credential("device-phone")
+    let gateway = try await LoopbackGateway.start(
+      credentials: [paired], advertisedAs: "codans-test-\(UUID().uuidString.prefix(8))")
+    defer { gateway.stop() }
+    let service = try #require(gateway.serviceEndpoint)
+
+    let revoked = try TestKeys.credential("device-revoked")
+    let clock = ContinuousClock()
+    let started = clock.now
+    let error = await #expect(throws: RemoteHandshake.HandshakeError.self) {
+      try await RemoteHandshake.connect(to: service, credential: revoked, timeout: .seconds(8))
+    }
+    #expect(error.map(Self.isRefusal) == true)
+    #expect(clock.now - started < .seconds(4))
+  }
+
+  @Test
+  func pairedDeviceHandshakesOverBonjour() async throws {
+    let paired = try TestKeys.credential("device-phone")
+    let gateway = try await LoopbackGateway.start(
+      credentials: [paired], advertisedAs: "codans-test-\(UUID().uuidString.prefix(8))")
+    defer { gateway.stop() }
+    let service = try #require(gateway.serviceEndpoint)
+
+    let client = try await RemoteHandshake.connect(to: service, credential: paired)
+    defer { client.close() }
+    guard case .accepted(let identity, let server) = await gateway.nextOutcome() else {
+      Issue.record("server did not accept the paired device over Bonjour")
+      return
+    }
+    server.close()
+    #expect(identity == "device-phone")
+  }
+
+  @Test
+  func resolvingAMissingServiceTimesOut() async throws {
+    let missing = NWEndpoint.service(
+      name: "codans-test-missing-\(UUID().uuidString.prefix(8))", type: LoopbackGateway.testServiceType,
+      domain: "local.", interface: nil)
+    await #expect(throws: RemoteBonjour.ResolveError.timedOut) {
+      try await RemoteBonjour.resolve(missing, timeout: .milliseconds(500))
+    }
+  }
+
   /// A device that handshakes with its own key cannot claim another
   /// device's identity: the proof is keyed by the claimed identity.
   @Test
