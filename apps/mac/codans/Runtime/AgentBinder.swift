@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import OSLog
-import CodansCore
 
 private let binderLogger = Logger(
   subsystem: "com.gumpw.codans.agentstate", category: "binder"
@@ -51,6 +51,12 @@ final class AgentBinder {
   private let agentUnboundHandler: @MainActor (PaneID) -> Void
   private var presenceByPane: [PaneID: Presence] = [:]
   private var materializedBindings: Set<PaneID> = []
+  private let surfaceGeneration: @MainActor (PaneID) -> UUID?
+  private let currentSessionID: @MainActor (PaneID) -> String?
+  private let verifiedBindingHandler: @MainActor (AgentBinding, Bool) -> Void
+  private let bindingValidityHandler: @MainActor (PaneID, Bool) -> Void
+  private var verifiedBindings: [PaneID: AgentBinding] = [:]
+  private var bindingValidity: [PaneID: Bool] = [:]
 
   init(
     client: HierarchyClient,
@@ -58,12 +64,20 @@ final class AgentBinder {
     agentBoundHandler: @escaping @MainActor (PaneID, AgentKind, String?, Bool) -> Void = {
       _, _, _, _ in
     },
-    agentUnboundHandler: @escaping @MainActor (PaneID) -> Void = { _ in }
+    agentUnboundHandler: @escaping @MainActor (PaneID) -> Void = { _ in },
+    surfaceGeneration: @escaping @MainActor (PaneID) -> UUID? = { _ in nil },
+    currentSessionID: @escaping @MainActor (PaneID) -> String? = { _ in nil },
+    verifiedBindingHandler: @escaping @MainActor (AgentBinding, Bool) -> Void = { _, _ in },
+    bindingValidityHandler: @escaping @MainActor (PaneID, Bool) -> Void = { _, _ in }
   ) {
     self.client = client
     self.currentAgentKind = currentAgentKind
     self.agentBoundHandler = agentBoundHandler
     self.agentUnboundHandler = agentUnboundHandler
+    self.surfaceGeneration = surfaceGeneration
+    self.currentSessionID = currentSessionID
+    self.verifiedBindingHandler = verifiedBindingHandler
+    self.bindingValidityHandler = bindingValidityHandler
   }
 
   /// Re-run classification for this pane in response to the given trigger
@@ -74,7 +88,13 @@ final class AgentBinder {
 
     switch trigger {
     case .foregroundJobChanged(let job):
+      // Verified ownership supersedes the legacy display-only path. An
+      // uncertain probe must retain the last instance and its recovery budget.
+      defer { updateVerifiedBinding(paneID: paneID, job: job, wasBound: existing != nil) }
       let classified = AgentKindPatterns.classify(foregroundJob: job)
+      // A failed/empty OS probe is not evidence that the instance ended.
+      // Releasing it would replenish attempts after repeated probe failures.
+      if job.isEmpty, verifiedBindings[paneID] != nil { return }
       if classified == nil, existing == nil {
         presenceByPane.removeValue(forKey: paneID)
         return
@@ -95,7 +115,7 @@ final class AgentBinder {
       if classified == existing {
         if let kind = classified, !materializedBindings.contains(paneID) {
           materializedBindings.insert(paneID)
-          agentBoundHandler(paneID, kind, nil, true)
+          publishDisplayBinding(paneID: paneID, kind: kind, job: job, assumeUserInputSeen: true)
           logTransition(
             action: "materialize", paneID: paneID, existing: existing,
             classified: classified, job: job, misses: presence.misses
@@ -123,6 +143,8 @@ final class AgentBinder {
     let existing = currentAgentKind(paneID)
     presenceByPane.removeValue(forKey: paneID)
     materializedBindings.remove(paneID)
+    verifiedBindings.removeValue(forKey: paneID)
+    setBindingValidity(false, paneID: paneID)
     client.setPaneAgentKind(paneID, nil)
     agentUnboundHandler(paneID)
     logTransition(
@@ -149,6 +171,67 @@ final class AgentBinder {
   func reconcileMembership(livePaneIDs: Set<PaneID>) {
     presenceByPane = presenceByPane.filter { livePaneIDs.contains($0.key) }
     materializedBindings.formIntersection(livePaneIDs)
+    for paneID in verifiedBindings.keys where !livePaneIDs.contains(paneID) {
+      setBindingValidity(false, paneID: paneID)
+    }
+    verifiedBindings = verifiedBindings.filter { livePaneIDs.contains($0.key) }
+    bindingValidity = bindingValidity.filter { livePaneIDs.contains($0.key) }
+  }
+
+  /// An uncertain sample retains the last instance so its retry budget survives.
+  /// Capturing code must freshly verify this value before attributing new text.
+  func binding(for paneID: PaneID) -> AgentBinding? {
+    verifiedBindings[paneID]
+  }
+
+  func isBindingValid(for paneID: PaneID) -> Bool {
+    bindingValidity[paneID] == true
+  }
+
+  private func updateVerifiedBinding(paneID: PaneID, job: ForegroundJob, wasBound: Bool) {
+    guard let generation = surfaceGeneration(paneID),
+      let match = ForegroundJobReader.agentIdentity(in: job)
+    else {
+      setBindingValidity(false, paneID: paneID)
+      return
+    }
+    let previous = verifiedBindings[paneID]
+    let currentSession = currentSessionID(paneID)
+    let sessionChanged =
+      previous?.sessionID != nil && currentSession != nil
+      && previous?.sessionID != currentSession
+    let sameInstance =
+      previous?.kind == match.kind && previous?.process == match.process
+      && previous?.surfaceGeneration == generation && !sessionChanged
+    let instanceID = sameInstance ? previous?.instanceID ?? AgentInstanceID() : AgentInstanceID()
+    let binding = AgentBinding(
+      instanceID: instanceID,
+      paneID: paneID, surfaceGeneration: generation, kind: match.kind,
+      process: match.process,
+      sessionID: currentSession ?? (sameInstance ? previous?.sessionID : nil))
+    verifiedBindings[paneID] = binding
+    if previous != binding {
+      verifiedBindingHandler(binding, wasBound)
+    }
+    setBindingValidity(true, paneID: paneID)
+  }
+
+  private func publishDisplayBinding(
+    paneID: PaneID, kind: AgentKind, job: ForegroundJob?, assumeUserInputSeen: Bool
+  ) {
+    guard verifiedBindings[paneID] == nil else { return }
+    if surfaceGeneration(paneID) != nil, let job,
+      ForegroundJobReader.agentIdentity(in: job) != nil
+    {
+      return
+    }
+    agentBoundHandler(paneID, kind, nil, assumeUserInputSeen)
+  }
+
+  private func setBindingValidity(_ valid: Bool, paneID: PaneID) {
+    guard bindingValidity[paneID] != valid else { return }
+    bindingValidity[paneID] = valid
+    bindingValidityHandler(paneID, valid)
   }
 
   // MARK: - Helpers
@@ -184,9 +267,12 @@ final class AgentBinder {
     // up, plumb a third channel down through this hook.
     if let kind = next {
       materializedBindings.insert(paneID)
-      agentBoundHandler(paneID, kind, nil, assumeUserInputSeen)
+      publishDisplayBinding(
+        paneID: paneID, kind: kind, job: job, assumeUserInputSeen: assumeUserInputSeen)
     } else {
       materializedBindings.remove(paneID)
+      verifiedBindings.removeValue(forKey: paneID)
+      setBindingValidity(false, paneID: paneID)
       agentUnboundHandler(paneID)
     }
   }

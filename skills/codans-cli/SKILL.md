@@ -430,18 +430,24 @@ recognises as running an agent, with the derived state it shows there.
 codans agent status                                  # p7  claude-code  working  3m12s  api/main  "dev server"
 codans agent status --json | jq '.data.agents[] | select(.state=="blocked") | .paneID'
 codans agent wait p7 --until idle --wait-timeout 300      # block until the agent is waiting for input
+codans agent wait p7 --until error                   # wait for a recognized terminal failure
 codans agent wait p7 --until changed                 # …or until anything about it changes
 codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent is bound to the pane
 ```
 
 States: `working` (producing output), `blocked` (asking the user
-something), `idle` (at its prompt), `finished` (went idle while in the
+something), `error` (a recognized Codex/Claude terminal failure), `idle` (at its prompt), `finished` (went idle while in the
 background). The state is derived from the pane's screen and foreground
 process, so it can lag a moment behind the agent; `wait` resolves
 server-side, so no polling loop is needed. Past `--wait-timeout` (1–600 s,
 default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
 `details.state` is the last state seen. `pane show` reports the bound
 agent without the state.
+
+Error detection is conservative terminal-text matching, not a structured provider
+event. Settings > Agents > Error Recovery optionally sends a delayed prompt or
+runs a bounded local script. It is off by default; avoid adding a second retry
+loop when it is enabled. The error row context menu can cancel automatic recovery.
 
 Profiles are the launch presets from Settings > Agents (agent, model, effort,
 execution mode, placement, extra args, env). Launching one opens a fresh tab

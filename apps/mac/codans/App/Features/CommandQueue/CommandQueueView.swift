@@ -50,6 +50,12 @@ struct CommandQueueView: View {
         queuedList
       }
       composer
+      if let error = store.submissionError {
+        Text(error)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .accessibilityLabel(error)
+      }
     }
     .padding(24)
     .frame(width: Self.width)

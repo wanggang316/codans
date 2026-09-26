@@ -717,6 +717,7 @@ struct RootFeatureTests {
     let rightPane = PaneID()
     let tab = Tab(
       id: tabID, name: "t",
+      // swiftlint:disable:next force_try
       splitTree: try! SplitTree(leaf: leftPane).inserting(
         rightPane, at: leftPane, direction: .right
       ),
@@ -1924,7 +1925,7 @@ struct RootFeatureTests {
       $0.handoffClient.completions = { completions }
       $0.handoffClient.sendInstruction = { pane, text in
         typed.withValue { $0.append((pane, text)) }
-        return true
+        return .submitted
       }
       // The toast the outcome pushes arms its own dismiss timer.
       $0.continuousClock = ImmediateClock()
@@ -1961,8 +1962,8 @@ struct RootFeatureTests {
 
   /// An undeliverable instruction retires the request and surfaces a warning
   /// instead of quietly downgrading to a context-only hand-off.
-  @Test
-  func undeliverableBriefRequestWarnsAndSupersedes() async {
+  @Test(arguments: [SubmissionResult.targetChanged, .rejectedDraftPresent])
+  func undeliverableBriefRequestWarnsAndSupersedes(result: SubmissionResult) async {
     let paneID = PaneID()
     let requestID = UUID()
     let superseded = LockIsolated<[UUID]>([])
@@ -1976,7 +1977,7 @@ struct RootFeatureTests {
       $0.uuid = .constant(requestID)
       $0.handoffClient.register = { _ in }
       $0.handoffClient.completions = { AsyncStream { $0.finish() } }
-      $0.handoffClient.sendInstruction = { _, _ in false }
+      $0.handoffClient.sendInstruction = { _, _ in result }
       $0.handoffClient.supersede = { id in
         superseded.withValue { $0.append(id) }
         return true
@@ -1990,8 +1991,9 @@ struct RootFeatureTests {
     await store.receive(\.handoff.presented.delegate.handOff) { state in
       state.handoff = nil
     }
-    await store.receive(\.handoffFailed)
-    await store.receive(\.statusBar.push)
+    let message = HandoffClient.instructionFailureMessage(result)!
+    await store.receive(.handoffFailed(message: message))
+    await store.receive(.statusBar(.push(.warning("Hand off failed: \(message)"))))
     #expect(superseded.value == [requestID])
   }
 

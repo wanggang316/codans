@@ -87,8 +87,8 @@ struct AgentWait: AsyncParsableCommand {
     commandName: "wait",
     abstract: "Block until a pane's agent reaches a state.",
     discussion: """
-      Waits server-side, so no polling loop is needed. Conditions: idle,
-      working, blocked, finished (the states `agent status` reports),
+      Waits server-side, so no polling loop is needed. Conditions: unknown,
+      idle, working, blocked, error, finished (the states `agent status` reports),
       changed (any transition from the state seen when the wait started,
       including the agent appearing or leaving), and exit (no agent bound to
       the pane any more). A wait that does not resolve before --wait-timeout
@@ -101,7 +101,7 @@ struct AgentWait: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
-  @Option(name: .long, help: "Condition: idle, working, blocked, finished, changed, or exit.")
+  @Option(name: .long, help: "Condition: unknown, idle, working, blocked, error, finished, changed, or exit.")
   var until: IPC.AgentWaitCondition
   @Option(name: .long, help: "Seconds to wait before giving up (1 through 600, default 60).")
   var waitTimeout: Double = 60

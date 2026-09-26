@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -112,16 +112,94 @@ struct AgentBinderTests {
     #expect(f.calls.value == [.init(paneID: f.paneID, kind: nil)])
   }
 
-  private static func job(argv0: String, commandLine: String) -> ForegroundJob {
+  @Test
+  func sameKindProcessReplacementCreatesANewInstance() throws {
+    let f = Fixture(verifiedIdentity: true)
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    let first = try #require(f.binder.binding(for: f.paneID))
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job(pid: 124)))
+    let replacement = try #require(f.binder.binding(for: f.paneID))
+    #expect(replacement.instanceID != first.instanceID)
+    #expect(replacement.process.processGroupID == first.process.processGroupID)
+    #expect(f.calls.value.count == 1)
+    #expect(f.verifiedCalls.value.count == 2)
+    #expect(f.boundCalls.value.isEmpty)
+  }
+
+  @Test
+  func recycledPIDOrSurfaceReplacementCreatesANewInstance() throws {
+    let f = Fixture(verifiedIdentity: true)
+    let initial = Self.job()
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(initial))
+    let first = try #require(f.binder.binding(for: f.paneID))
+    let recycled = Self.job(startedAt: Date(timeIntervalSinceReferenceDate: 20))
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(recycled))
+    let second = try #require(f.binder.binding(for: f.paneID))
+    #expect(second.instanceID != first.instanceID)
+    f.surfaceGeneration.setValue(UUID())
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(recycled))
+    #expect(f.binder.binding(for: f.paneID)?.instanceID != second.instanceID)
+  }
+
+  @Test
+  func sessionEnrichmentPreservesInstanceButConfirmedSwitchReplacesIt() throws {
+    let f = Fixture(verifiedIdentity: true)
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    let first = try #require(f.binder.binding(for: f.paneID))
+    f.sessionID.setValue("first-session")
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    #expect(f.binder.binding(for: f.paneID)?.instanceID == first.instanceID)
+    #expect(f.binder.binding(for: f.paneID)?.sessionID == "first-session")
+    f.sessionID.setValue("second-session")
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    #expect(f.binder.binding(for: f.paneID)?.instanceID != first.instanceID)
+  }
+
+  @Test
+  func uncertainIdentitySuspendsWithoutReplacingTheLastInstance() throws {
+    let f = Fixture(verifiedIdentity: true)
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    let binding = try #require(f.binder.binding(for: f.paneID))
+    #expect(f.binder.isBindingValid(for: f.paneID))
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job(startedAt: nil)))
+    #expect(!f.binder.isBindingValid(for: f.paneID))
+    #expect(f.binder.binding(for: f.paneID) == binding)
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    #expect(f.binder.isBindingValid(for: f.paneID))
+    #expect(f.binder.binding(for: f.paneID) == binding)
+    #expect(f.verifiedCalls.value.count == 1)
+    #expect(f.boundCalls.value.isEmpty)
+  }
+
+  @Test
+  func repeatedEmptyProbesDoNotRetireVerifiedInstance() throws {
+    let f = Fixture(verifiedIdentity: true)
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(Self.job()))
+    let binding = try #require(f.binder.binding(for: f.paneID))
+    for _ in 0..<10 {
+      f.binder.consider(
+        paneID: f.paneID,
+        trigger: .foregroundJobChanged(ForegroundJob(processGroupID: 123, processes: [])))
+    }
+    #expect(f.binder.binding(for: f.paneID) == binding)
+    #expect(!f.binder.isBindingValid(for: f.paneID))
+    #expect(f.calls.value.allSatisfy { $0.kind == .codex })
+  }
+
+  private static func job(
+    argv0: String = "codex", commandLine: String = "codex", pid: Int32 = 123,
+    startedAt: Date? = Date(timeIntervalSinceReferenceDate: 10)
+  ) -> ForegroundJob {
     ForegroundJob(
       processGroupID: 123,
       processes: [
         ForegroundProcess(
-          pid: 123,
+          pid: pid,
           parentPID: 122,
           processGroupID: 123,
           argv0: argv0,
-          commandLine: commandLine
+          commandLine: commandLine,
+          startedAt: startedAt
         )
       ]
     )
@@ -133,9 +211,12 @@ struct AgentBinderTests {
     let calls = LockIsolated<[RecordedCall]>([])
     let boundCalls = LockIsolated<[RecordedBoundCall]>([])
     let agentKind: LockIsolated<AgentKind?>
+    let surfaceGeneration = LockIsolated<UUID?>(UUID())
+    let sessionID = LockIsolated<String?>(nil)
+    let verifiedCalls = LockIsolated<[AgentBinding]>([])
     let binder: AgentBinder
 
-    init(initialAgentKind: AgentKind? = nil) {
+    init(initialAgentKind: AgentKind? = nil, verifiedIdentity: Bool = false) {
       self.agentKind = LockIsolated(initialAgentKind)
 
       var hierarchyClient = HierarchyClient.testValue
@@ -147,6 +228,9 @@ struct AgentBinderTests {
       }
 
       let boundCalls = self.boundCalls
+      let surfaceGeneration = self.surfaceGeneration
+      let sessionID = self.sessionID
+      let verifiedCalls = self.verifiedCalls
       self.binder = AgentBinder(
         client: hierarchyClient,
         currentAgentKind: { _ in agentKind.value },
@@ -160,6 +244,11 @@ struct AgentBinderTests {
               )
             )
           }
+        },
+        surfaceGeneration: { _ in verifiedIdentity ? surfaceGeneration.value : nil },
+        currentSessionID: { _ in sessionID.value },
+        verifiedBindingHandler: { binding, _ in
+          verifiedCalls.withValue { $0.append(binding) }
         }
       )
     }

@@ -29,6 +29,8 @@ public nonisolated enum TerminalEvent: Sendable {
   /// hook matchers) must buffer across batches per pane.
   case paneOutput(PaneID, Data)
   case paneViewportChanged(PaneID, text: String)
+  /// Verified captures also arrive for unchanged text to renew observation liveness.
+  case paneAgentSnapshot(AgentTerminalSnapshot)
   case paneIdle(PaneID, duration: TimeInterval)
   /// Clean child exit. `code` is the exit status; `signal` is non-nil when
   /// the child was terminated by a signal (SIGKILL / SIGTERM / etc.) and

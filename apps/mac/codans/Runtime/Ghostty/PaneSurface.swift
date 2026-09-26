@@ -1,8 +1,8 @@
 import AppKit
-import Foundation
-import GhosttyKit
 import CodansCore
 import CodansIPC
+import Foundation
+import GhosttyKit
 
 /// Owns one `ghostty_surface_t` and its hosting `GhosttySurfaceView`. One
 /// PaneSurface corresponds to one `Pane` while alive; when the surface
@@ -346,6 +346,7 @@ final class PaneSurface {
     text: String, state: UnsafeMutableRawPointer?, confirmed: Bool
   ) {
     guard let surface else { return }
+    PaneInputCoordinator.shared?.beforeNativeInput(in: paneID)
     text.withCString { ptr in
       ghostty_surface_complete_clipboard_request(surface, ptr, state, confirmed)
     }

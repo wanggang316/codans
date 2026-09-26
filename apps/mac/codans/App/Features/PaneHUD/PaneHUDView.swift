@@ -236,6 +236,20 @@ struct PaneHUDView: View {
       // queued for it.
       handOffButton(model)
       commandQueueButton(model)
+      if PaneInputCoordinator.shared?.hasResidualDraft(in: paneID) == true {
+        Button {
+          PaneInputCoordinator.shared?.resolveResidualDraft(in: paneID)
+          setExpanded(false)
+        } label: {
+          Label("I Cleared the Draft", systemImage: "pencil.slash")
+            .font(.system(size: 12))
+            .frame(maxWidth: .infinity, minHeight: Self.buttonSize, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("After clearing or submitting the interrupted draft, allow queued input again.")
+        .accessibilityIdentifier("pane_hud.resolve_draft")
+      }
       // Then everything the terminal surface offers, in the same order and
       // grouping as its right-click menu — the two are one list, so an
       // action is never in one menu and missing from the other.

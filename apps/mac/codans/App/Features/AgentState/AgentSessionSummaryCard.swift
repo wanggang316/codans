@@ -225,19 +225,22 @@ struct AgentSessionSummaryCard: View {
 
   private var stateGlyphName: String {
     switch entry.state {
+    case .error: return "exclamationmark.circle.fill"
     case .blocked: return "pause.fill"
     case .working: return "square.grid.3x3.fill"
     case .finished: return "checkmark.circle.fill"
     case .idle: return "circle.dashed"
+    case .unknown: return "questionmark.circle"
     }
   }
 
   private var stateColor: Color {
     switch entry.state {
+    case .error: return .red
     case .blocked: return .orange
     case .working: return .primary
     case .finished: return .green
-    case .idle: return .secondary
+    case .idle, .unknown: return .secondary
     }
   }
 
