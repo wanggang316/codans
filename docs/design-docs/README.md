@@ -22,7 +22,7 @@ Use [_template.md](_template.md) as a starting point.
 - [App Appearance & Terminal Theme](app-appearance.md) — Light/Dark/System 外观（单写者 `NSApp.appearance`）+ Ghostty 配置 managed-keys（theme/font/cursor）写入
 - [CLI (`codans`)](cli.md) — `codans` 动词集与 system/hierarchy/pane/terminal/editor RPC 契约；stateless RPC client、alias→UUID、`/usr/local/bin` 管理员授权安装（list/open/help-json 未接线，skill/hook 未实现）
 - [Command Palette](command-palette.md) — ⌘P 模糊搜索面板：分层评分 + recency 衰减 + 稳定 ID，按需从实时 Catalog 生成项
-- [Command Suggest](command-suggest.md) — Commands pane `+` 菜单列出从项目清单（package.json / Makefile / justfile / Taskfile / mise / Cargo …）识别的命令，一键加入；`CommandSuggestionParser` 纯解析器 + registry 扩展点，本地 / SSH 共用一次读取；`CommandIconCatalog` 命令→图标映射（动作 SF Symbol 优先、56 个单色工具 mark 兜底，`mark:` 前缀存储）
+- [Command Suggest](command-suggest.md) — 从项目清单（package.json / Makefile / justfile / Taskfile / mise / Cargo …，含 3 层内子目录）识别命令：Settings `+` 菜单一键加入；header Run 下拉（AppKit）点行执行、行尾 `+` 加入；`CommandSuggestionParser` 纯解析器 + registry 扩展点，本地 / SSH 共用一次读取；`CommandIconCatalog` 命令→图标映射（动作 SF Symbol 优先、56 个单色工具 mark 兜底，`mark:` 前缀存储）
 - [Editor Integration](editor-integration.md) — 在外部工具打开 Worktree：NSWorkspace/Launch Services 按 bundle id 检测+启动，34 条注册表（编辑器/终端/git 客户端/Finder）；含 Git Viewer（委托外部 git 客户端）
 - [Environment](environment.md) — 构建通道（Debug/Release）、路径与环境变量的单一来源：`BuildChannel` 一处 `#if DEBUG`、`CodansEnvironment.Key` 变量名目录、`HandoffLayout`、`PaneEnvironment` 两阶段 pane 环境；写明通道隔离了什么与没隔离什么、两个 socket resolver 的故意不对称
 - [Ghostty Action Routing](ghostty-action-routing.md) — libghostty `action_cb` 两遍解码 + Info/Effect/Intent/Config 四桶路由，保持 Runtime TCA-free

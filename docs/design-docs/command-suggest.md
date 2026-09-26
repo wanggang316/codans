@@ -7,12 +7,10 @@
 
 Project 的 Commands（Settings → 项目 → Commands）是用户自定义的 `ScriptDefinition` 列表，驱动 Header 的 Run 按钮、Command Palette 与快捷键。大多数项目已经在自己的清单里写好了入口——`package.json` 的 `scripts`、Makefile 目标、justfile recipe——手工再抄一遍是纯摩擦。
 
-Command Suggest 按来源列出从项目清单识别出的命令，点一下即落成一条普通 `ScriptDefinition`。两个入口共用同一个菜单分节（`CommandSuggestionMenuSection`）：
+Command Suggest 按来源列出从项目清单识别出的命令。两个入口：
 
-- Settings → Commands 表格的 `+` 菜单，位于预设类型（Run / Test / …）之下（"From Project"）；
-- worktree header Run 按钮的下拉菜单，位于 Project / Global 命令之下（"Add from Project"），扫描的是 header 当前显示的 worktree。
-
-两处点击都只**加入**命令、不运行——header 下拉里其它项点了就执行，但识别出的 `deploy` 不能因为一次误点就跑起来；加入后它出现在上方 Project 列表，再点才运行。
+- **Settings → Commands 表格的 `+` 菜单**（"From Project" 分节，SwiftUI `CommandSuggestionMenuSection`）：点击即把命令加入 Project。
+- **worktree header Run 按钮的下拉菜单**（"Config Files" 分节，AppKit `RunMenuBuilder`）：每个清单一个子菜单，**点击行 = 在新 tab 执行**，**点行尾 `+` = 加入 Project**，已加入的行尾显示 `✓`（此时点行执行已保存的那条脚本，共享 Run/Stop 状态）。
 
 ## 目标与非目标
 
@@ -26,8 +24,8 @@ Command Suggest 按来源列出从项目清单识别出的命令，点一下即�
 
 - 不持久化建议、不与清单保持同步：采纳即复制，之后与清单无关。
 - 不执行任何外部工具来识别（如 `just --list`、`npm pkg get`）：只读文件，避免依赖安装状态与副作用。
-- 不递归 monorepo 子包；只看扫描目录这一层。
-- 不接入 Global Commands（无 Project 上下文）；不在 Command Palette 直接运行未保存的建议。
+- 不无限递归：只扫到根目录下 3 层（`ManifestScope.standard`），跳过隐藏目录与依赖/构建产物目录。
+- 不接入 Global Commands（无 Project 上下文）；Command Palette 不列未保存的建议。
 
 ## 设计
 
@@ -47,9 +45,11 @@ codans/App/Features/CommandSuggestion/        IO
   CommandSuggestionClient (TCA dependency)    选 reader → 读一次 → registry 解析
 
 ProjectSettingsFeature                        scanCommandSuggestions / commandSuggestionsScanned
-CommandSuggestionMenuSection                  共享菜单分节：每来源一个子菜单，已采纳的打勾禁用
-ScriptCommandTable.addMenu                    Settings 入口（"From Project"）
-WorktreeHeaderFeature / HeaderRunScriptSplitButton  Header 入口（"Add from Project"），按 worktree 扫描
+CommandSuggestionMenuSection                  Settings `+` 菜单分节（点击 = 加入）
+RunMenu/ (RunSplitButton, RunMenuBuilder,     Header 下拉（AppKit）：行执行、行尾 + 加入
+  RunMenuRowView, RunMenuModel)
+WorktreeHeaderFeature                         按 worktree 扫描；add / run（已加入 → 保存的脚本，否则临时脚本）
+HierarchyClient.runCommand                    未保存脚本走与 runScript 相同的管线
 ```
 
 ### 解析器契约
@@ -82,11 +82,13 @@ protocol CommandSuggestionParser: Sendable {
 
 入口名只含 shell 惰性字符时原样拼接，否则用 `ShellQuoting` 单引号包裹。
 
+**子目录（monorepo）**：读取器返回整棵树的 snapshot（键为相对路径），registry 按目录拆成视图逐个解析。子目录的分组标题是清单的完整相对路径（`apps/web/package.json`），命令前缀 `cd <dir> && `，从 worktree 根目录执行；视图的 `ancestors` 暴露上层目录，workspace 成员没有自己的 `packageManager` / lockfile 时沿用最近的上层（先看本层声明，再看本层 lockfile，逐层向外）。工具链分组以文件名为标题（`Cargo.toml` / `go.mod` / `Package.swift`），拼路径后仍是真实路径。
+
 ### 读取
 
 - **位置**：Settings pane 的 `lastFocusedWorktreeID` → Project 的 `selectedWorktreeID` → `rootPath`。分支可能带不同的清单，所以优先用户正在用的 checkout。
-- **本地**：`FileManager` 读 request 中的固定文件名；单文件上限 1 MiB。
-- **Server 项目**：一次 SSH 调用（共享 ControlMaster，`BatchMode`）。远端 `/bin/sh` 脚本以位置参数接收目录与路径（路径不进入脚本解析），输出 `===CODANS-MANIFEST <path>===` / `===CODANS-PRESENT <path>===` 标记分隔的流；首个标记前的登录 shell 横幅被忽略。超时、非零退出或输出溢出都得到空 snapshot——表现为"无建议"，不报错。
+- **本地**：按 `ManifestScope` 广度优先遍历，每个目录只 `contentsOfDirectory` 一次，不跟随符号链接目录；单文件上限 1 MiB。
+- **Server 项目**：一次 SSH 调用（共享 ControlMaster，`BatchMode`）。远端 `/bin/sh` 以 `find -maxdepth … -prune` 按同样规则遍历（目录经 `$1` 传入，文件名为自有常量并单引号包裹），输出 `===CODANS-MANIFEST <path>===` / `===CODANS-PRESENT <path>===` 标记分隔的流；首个标记前的登录 shell 横幅被忽略。超时、非零退出或输出溢出都得到空 snapshot——表现为"无建议"，不报错。测试把远端脚本在本机 `/bin/sh` 上对真实目录树实跑，并与本地读取器结果逐项比对。
 - **时机**：Commands pane 每次出现时扫描（`.task(id: projectID)`）；header 在切换 worktree 时扫描（`.task(id: worktreeID)`，挂在 Menu 的 `.id` 之外，脚本编辑触发的 Menu 重建不会重扫）。两处菜单内都有 Refresh。无文件监听。新扫描取消在途扫描；header 的结果带上扫描时的 worktree，切走后迟到的结果直接丢弃。
 - 位置解析统一在 `ManifestLocation.resolve`：指定 worktree → Project 选中的 worktree → Project 根目录。
 
@@ -114,7 +116,14 @@ protocol CommandSuggestionParser: Sendable {
 
 ### 菜单呈现
 
-每项 = 图标（映射图标，按推断类型着色；已采纳为对勾）+ 入口名 + 副标题（`<命令> — <脚本体>`，整体截断到 44 字符避免 AppKit 折行）。副标题依赖按钮 label 为"Image + Text + Text"的平铺结构——用 `Label` 包裹两个 `Text` 时 AppKit 菜单会丢掉副标题。
+**Settings `+` 菜单**（SwiftUI）：每项 = 图标（映射图标，按推断类型着色；已采纳为对勾）+ 入口名 + 副标题（`<命令> — <脚本体>`，整体截断到 44 字符避免 AppKit 折行）。副标题依赖按钮 label 为"Image + Text + Text"的平铺结构——用 `Label` 包裹两个 `Text` 时 AppKit 菜单会丢掉副标题。
+
+**Header Run 下拉**（AppKit）：SwiftUI `Menu` 只能放标准菜单项，做不出更高的行和行内第二个点击区域，因此 Run split button 改为 `RunSplitButton`——一个与 SwiftUI 在 toolbar 里为 `Menu(primaryAction:)` 生成的控件同配置的 `NSSegmentedControl`（2 段、textured-rounded、momentary、第 1 段挂菜单），外观与相邻的 SwiftUI split button 一致；菜单在每次打开时（`menuNeedsUpdate`）按实时状态重建。
+
+- 命令行为 view-backed 菜单项（`RunMenuRowView`），行高 28pt，图标点数与按钮上的图标相同（`RunMenuMetrics`）；Config Files 子菜单的行 36pt（标题 + 副标题），行尾 `+` / `✓`，`+` 悬停有圆形底。
+- 选中高亮用 `.selection` 材质的 `NSVisualEffectView`（与标准菜单项同一材质，半透明背景下颜色一致），内容画在其上一层的 canvas。
+- AppKit 对 view-backed 菜单项的 Return 与 AXPress **都不会**发送 item 的 action：行视图自己处理——被高亮的行是菜单的 first responder，`keyDown` 收到 Return；`accessibilityPerformPress` 执行；"加入"以 `NSAccessibilityCustomAction` 暴露给 VoiceOver。键盘 / 辅助功能按下箭头段时（此时 AppKit 不弹菜单），由 action 在按钮下方弹出同一菜单。
+- 子菜单父项是标准菜单项（带相对路径标题与 runner 的工具图标），以保留原生的子菜单展开行为。
 
 ## 扩展一个新生态
 
@@ -130,6 +139,6 @@ protocol CommandSuggestionParser: Sendable {
 - `CodansCoreTests`：各解析器、registry 合并 / 分组、类型推断、采纳不变量；`CommandIconCatalogTests` / `CommandIconRefTests`（优先级、`mark:` 往返、未知 mark 回退、每个 `ToolMark` 都可由映射表到达）。
 - `CodansTests`：`ToolMarkAssetTests`（每个 mark 都随包带模板资源）、`WorktreeProcessIconTests`（进程列表走同一映射）。
 - `CodansTests`：`CommandSuggestionScanTests`（扫描位置解析、Server 项目走 host、项目缺失清空）、`RemoteManifestReaderTests`（流解析、远端脚本在本机 `/bin/sh` 实跑往返、失败得空）、`LocalManifestReaderTests`。
-- `CodansTests`：`WorktreeHeaderCommandSuggestionTests`（按 header 的 worktree 扫描、切换后丢弃迟到结果、加入只写 Project 命令不走运行路径、已加入的不重复写）。
-- 隔离实例上检查过 header 下拉：菜单结构、子菜单图标与已加入打勾、点 `build` 后进入 Project 列表且未产生任何 tab/pane（未运行）。
+- `CodansTests`：`WorktreeHeaderCommandSuggestionTests`（按 header 的 worktree 扫描、切换后丢弃迟到结果、加入只写 Project 命令、已加入的不重复写；执行时已加入的走保存的脚本、未加入的走 id 稳定的临时脚本）；`RunMenuRowViewTests`（点行执行、点 `+` 加入、`✓` 区域不加入、Return / AXPress 执行、加入的无障碍自定义动作）。
+- 隔离实例上检查过 header 下拉：按钮外观与相邻 SwiftUI split button 一致；行高与图标尺寸；高亮颜色与标准项像素一致；子目录清单的完整路径与 `cd` 前缀；点行（AXPress）在新 tab 执行且不加入；键盘 ↓/Return 执行；真实鼠标点 `+` 加入且不产生 tab；`+` 悬停反馈。
 - 隔离实例上检查过菜单外观（含映射图标）、"点 dev → 填入内置 Run"、采纳后写入 `mark:docker` / `mark:prisma`、图标弹窗 Tools 网格，以及打开弹窗不会冲掉已选 mark。
