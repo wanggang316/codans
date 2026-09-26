@@ -300,47 +300,49 @@ private actor LiveRemoteSessions {
     let worktreeID = WorktreeID(raw: try Self.uuid(location.worktreeID))
     let params = CreateTabParams(projectID: projectID, worktreeID: worktreeID)
     let tabID = try await withControl { control in
-      try await control.call(.hierarchyCreateTab, params: params, as: IDResult.self)
+      try await control.call(.hierarchyCreateTab, params: params, as: IDResult<TabID>.self)
     }.id
     // An empty directory asks the Mac for the worktree's root, which the
     // phone's hierarchy does not carry.
     let pane = OpenPaneParams(
-      projectID: projectID, worktreeID: worktreeID, tabID: TabID(raw: try Self.uuid(tabID)),
+      projectID: projectID, worktreeID: worktreeID, tabID: tabID,
       workingDirectory: workingDirectory ?? "", initialCommand: nil, labels: [])
     return try await withControl { control in
-      try await control.call(.hierarchyOpenPane, params: pane, as: IDResult.self)
-    }.id
+      try await control.call(.hierarchyOpenPane, params: pane, as: IDResult<PaneID>.self)
+    }.id.description
   }
 
   func splitPane(_ location: PaneLocator, direction: SplitDirection) async throws -> String {
     let params = SplitPaneParams(
-      paneID: try Self.uuid(location.paneID), tabID: try Self.uuid(location.tabID),
-      worktreeID: try Self.uuid(location.worktreeID), projectID: try Self.uuid(location.projectID),
+      paneID: try Self.paneID(location.paneID), tabID: TabID(raw: try Self.uuid(location.tabID)),
+      worktreeID: WorktreeID(raw: try Self.uuid(location.worktreeID)),
+      projectID: ProjectID(raw: try Self.uuid(location.projectID)),
       direction: direction.rawValue)
     return try await withControl { control in
-      try await control.call(.hierarchySplitPane, params: params, as: IDResult.self)
-    }.id
+      try await control.call(.hierarchySplitPane, params: params, as: IDResult<PaneID>.self)
+    }.id.description
   }
 
   func renameTab(_ location: PaneLocator, name: String) async throws {
     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
     let params = RenameTabParams(
-      id: try Self.uuid(location.tabID), worktreeID: try Self.uuid(location.worktreeID),
-      projectID: try Self.uuid(location.projectID), name: trimmed.isEmpty ? nil : trimmed)
+      id: TabID(raw: try Self.uuid(location.tabID)), worktreeID: WorktreeID(raw: try Self.uuid(location.worktreeID)),
+      projectID: ProjectID(raw: try Self.uuid(location.projectID)), name: trimmed.isEmpty ? nil : trimmed)
     _ = try await withControl { try await $0.callRaw(.hierarchyRenameTab, params: params) }
   }
 
   func closeTab(_ location: PaneLocator) async throws {
     let params = TabLocatorParams(
-      id: try Self.uuid(location.tabID), worktreeID: try Self.uuid(location.worktreeID),
-      projectID: try Self.uuid(location.projectID))
+      id: TabID(raw: try Self.uuid(location.tabID)), worktreeID: WorktreeID(raw: try Self.uuid(location.worktreeID)),
+      projectID: ProjectID(raw: try Self.uuid(location.projectID)))
     _ = try await withControl { try await $0.callRaw(.hierarchyCloseTab, params: params) }
   }
 
   func closePane(_ location: PaneLocator) async throws {
     let params = PaneLocatorParams(
-      id: try Self.uuid(location.paneID), tabID: try Self.uuid(location.tabID),
-      worktreeID: try Self.uuid(location.worktreeID), projectID: try Self.uuid(location.projectID))
+      id: try Self.paneID(location.paneID), tabID: TabID(raw: try Self.uuid(location.tabID)),
+      worktreeID: WorktreeID(raw: try Self.uuid(location.worktreeID)),
+      projectID: ProjectID(raw: try Self.uuid(location.projectID)))
     _ = try await withControl { try await $0.callRaw(.hierarchyClosePane, params: params) }
   }
 
@@ -413,14 +415,14 @@ private actor LiveRemoteSessions {
   /// Tab and pane management params, as the Mac's hierarchy handlers
   /// declare them. Like the terminal params below they live next to the
   /// handlers, not in CodansIPC; the shapes are the stable wire contract
-  /// the CLI also relies on.
+  /// the CLI also relies on. Every ID is one of the Mac's `HierarchyID`
+  /// types, which encode as `{"raw": "<uuid>"}`, not as a bare string; a
+  /// bare UUID fails to decode on the Mac.
   private struct CreateTabParams: Encodable, Sendable {
     let projectID: ProjectID
     let worktreeID: WorktreeID
   }
 
-  /// The Mac decodes these IDs as its `HierarchyID` types (`{"raw": …}`),
-  /// like `CreateTabParams`.
   private struct OpenPaneParams: Encodable, Sendable {
     let projectID: ProjectID
     let worktreeID: WorktreeID
@@ -431,40 +433,41 @@ private actor LiveRemoteSessions {
   }
 
   private struct SplitPaneParams: Encodable, Sendable {
-    let paneID: UUID
-    let tabID: UUID
-    let worktreeID: UUID
-    let projectID: UUID
+    let paneID: PaneID
+    let tabID: TabID
+    let worktreeID: WorktreeID
+    let projectID: ProjectID
     let direction: String
   }
 
   private struct RenameTabParams: Encodable, Sendable {
-    let id: UUID
-    let worktreeID: UUID
-    let projectID: UUID
+    let id: TabID
+    let worktreeID: WorktreeID
+    let projectID: ProjectID
     let name: String?
   }
 
   private struct TabLocatorParams: Encodable, Sendable {
-    let id: UUID
-    let worktreeID: UUID
-    let projectID: UUID
+    let id: TabID
+    let worktreeID: WorktreeID
+    let projectID: ProjectID
   }
 
   private struct PaneLocatorParams: Encodable, Sendable {
-    let id: UUID
-    let tabID: UUID
-    let worktreeID: UUID
-    let projectID: UUID
+    let id: PaneID
+    let tabID: TabID
+    let worktreeID: WorktreeID
+    let projectID: ProjectID
   }
 
+  /// `hierarchy.activateTab` alone takes a bare UUID.
   private struct IDParams: Encodable, Sendable {
     let id: UUID
   }
 
-  /// `{"id": "<uuid>"}`, the result of the create and split methods.
-  private struct IDResult: Decodable, Sendable {
-    let id: String
+  /// `{"id": {"raw": "<uuid>"}}`, the result of the create and split methods.
+  private struct IDResult<ID: HierarchyID>: Decodable, Sendable {
+    let id: ID
   }
 
   /// `terminal.sendInput` / `terminal.sendKey` params. The Mac declares
