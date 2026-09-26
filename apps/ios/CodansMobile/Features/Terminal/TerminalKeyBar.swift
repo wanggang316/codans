@@ -127,7 +127,10 @@ private struct KeyCapStyle: ViewModifier {
           .fill(isHighlighted ? Color.primary : Color(uiColor: .tertiarySystemFill))
       )
       .foregroundStyle(isHighlighted ? Color(uiColor: .systemBackground) : Color.primary)
-      .contentShape(.rect(cornerRadius: 8))
+      // A plain rectangle: on iPad a rounded-rect hit shape sat about 24
+      // points left of the drawn cap, so a tap on Ctrl latched Alt. The
+      // corners are too small to matter to a finger.
+      .contentShape(.rect)
   }
 }
 
@@ -285,7 +288,8 @@ private struct DPad: View {
       .background(
         RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(uiColor: .tertiarySystemFill))
       )
-      .contentShape(.rect(cornerRadius: 8))
+      // Rectangular for the reason in KeyCapStyle.
+      .contentShape(.rect)
       .gesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
           .updating($isDragging) { _, dragging, _ in dragging = true }

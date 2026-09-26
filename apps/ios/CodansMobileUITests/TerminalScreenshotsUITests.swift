@@ -40,11 +40,9 @@ final class TerminalScreenshotsUITests: XCTestCase {
       sleep(1)
     }
 
-    // Ctrl armed, then the shortcut panel. Not on the iPad simulator: in
-    // its windowed mode synthesized taps land a key-width off on the bar's
-    // small keys.
+    // Ctrl armed, then the shortcut panel.
     let ctrl = app.descendants(matching: .any)["key-ctrl"].firstMatch
-    if !isPad, ctrl.waitForExistence(timeout: 5) {
+    if ctrl.waitForExistence(timeout: 5) {
       ctrl.tap()
       sleep(1)
       shot("3-ctrl-armed")
