@@ -70,7 +70,8 @@ struct WorkspaceView: View {
     } detail: {
       detail
         .safeAreaInset(edge: .top, spacing: 0) {
-          if health.isPaired, !health.isLive {
+          // Without content the loading page already tells the story.
+          if health.isPaired, !health.isLive, store.browser.hierarchy != nil {
             ConnectionBanner(
               health: health,
               retry: { store.send(.connection(.connectTapped)) },
@@ -151,13 +152,16 @@ struct WorkspaceView: View {
       StateView(
         symbol: "terminal",
         title: "No terminals",
-        message: "\(found.worktree.name) has no open terminals on your Mac.")
-        .navigationTitle(found.worktree.name)
-    } else if selectedWorktreeID != nil {
-      // Restored before the hierarchy arrived: the terminal's own dark
-      // page, not a flash of "choose a worktree".
-      MirrorTerminalView.background.swiftUIColor
-        .ignoresSafeArea(edges: .bottom)
+        message: "\(found.worktree.name) has no open terminals on your Mac."
+      )
+      .navigationTitle(found.worktree.name)
+    } else if store.browser.hierarchy == nil {
+      // Nothing has arrived yet, so no selection can resolve: say what the
+      // connection is doing instead of an empty page that never fills.
+      WorkspaceLoadingView(
+        health: health,
+        retry: { store.send(.connection(.connectTapped)) }
+      )
     } else {
       StateView(
         symbol: "sidebar.leading",
@@ -494,6 +498,32 @@ struct AgentsToolbarButton: View {
     .accessibilityLabel("Agents")
     .accessibilityValue(needsInput > 0 ? "\(needsInput) need input" : "")
     .accessibilityIdentifier("open-agents")
+  }
+}
+
+/// The detail column before the first snapshot: the connection's progress,
+/// and Retry while it waits between attempts.
+private struct WorkspaceLoadingView: View {
+  let health: ConnectionHealth
+  let retry: () -> Void
+
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 1)) { context in
+      StateView(
+        symbol: "desktopcomputer",
+        title: health.title,
+        message: "Worktrees and terminals from \(health.macName ?? "your Mac") show up here once connected.",
+        status: status(now: context.date),
+        primary: health.recovery == .retry ? .init("Retry now", identifier: "connection-retry", perform: retry) : nil)
+    }
+    .background(Color.surface)
+    .accessibilityIdentifier("workspace-loading")
+  }
+
+  private func status(now: Date) -> String? {
+    guard case .reconnecting(let attempt, let at) = health.phase else { return nil }
+    let seconds = max(0, Int(at.timeIntervalSince(now).rounded(.up)))
+    return seconds > 0 ? "Attempt \(attempt) · next try in \(seconds)s" : "Trying now…"
   }
 }
 

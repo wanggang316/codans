@@ -107,7 +107,8 @@ struct ConnectionHealth: Equatable {
     case .handshaking: return "Connecting…"
     case .syncing: return "Syncing…"
     case .live: return "Connected"
-    case .reconnecting(let attempt, _): return "Reconnecting (attempt \(attempt))"
+    // The banner under the bar carries the attempt and countdown.
+    case .reconnecting: return "Reconnecting…"
     case .offline: return "Offline"
     case .failed(let failure):
       switch failure.kind {

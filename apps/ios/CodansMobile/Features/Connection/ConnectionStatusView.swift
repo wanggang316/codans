@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// The status line under the Mac's name: a dot and "Connected",
-/// "Syncing…", "Reconnecting (attempt 3)" or "Offline · 3 min ago".
+/// "Syncing…", "Reconnecting… · 2 min ago" or "Offline · 3 min ago".
 struct ConnectionStatusLine: View {
   let health: ConnectionHealth
 
@@ -57,7 +57,9 @@ struct ConnectionBanner: View {
     switch health.phase {
     case .discovering where health.isMacMissing, .reconnecting where health.isMacMissing:
       return "Can't find \(name)"
-    case .reconnecting, .discovering, .handshaking: return "Reconnecting to \(name)…"
+    case .reconnecting: return "Reconnecting to \(name)…"
+    case .discovering: return "Looking for \(name)…"
+    case .handshaking: return "Connecting to \(name)…"
     case .syncing: return "Syncing with \(name)…"
     case .offline: return "Offline"
     case .idle, .live, .failed: return health.title
@@ -67,8 +69,10 @@ struct ConnectionBanner: View {
   private func detail(now: Date) -> String {
     var parts: [String] = []
     if case .reconnecting(let attempt, let at) = health.phase {
+      // The data's age is on the status line above; one line here keeps
+      // the countdown from wrapping.
       let seconds = max(0, Int(at.timeIntervalSince(now).rounded(.up)))
-      parts.append(seconds > 0 ? "Attempt \(attempt) · retry in \(seconds)s" : "Attempt \(attempt) · retrying…")
+      return seconds > 0 ? "Attempt \(attempt) · retry in \(seconds)s" : "Attempt \(attempt) · retrying…"
     } else if case .failed = health.phase, let explanation = health.explanation {
       parts.append(explanation)
     }

@@ -2,6 +2,7 @@ import CodansIPC
 import CodansRemote
 import ComposableArchitecture
 import Foundation
+import Network
 
 /// A self-contained Mac for screenshots and design review: launched with
 /// `CODANS_DEMO=1`, the app talks to fixture dependencies instead of the
@@ -11,7 +12,8 @@ import Foundation
 /// - `CODANS_DEMO_PANE`: the pane to open (`claude`, `shell`, `server`,
 ///   `build`), or `none` to stay on the home screen.
 /// - `CODANS_DEMO_RECONNECT=1`: the connection drops two seconds in and
-///   never comes back, to show the reconnecting states.
+///   never comes back, to show the reconnecting states; `backoff` fails
+///   each attempt at once instead, to show the countdown between attempts.
 /// - `CODANS_DEMO_READONLY=1`: the Mac grants read-only access.
 /// - `CODANS_DEMO_NOT_OPEN=1`: keys answer "pane not open on the Mac".
 /// - `CODANS_DEMO_FAILURE`: the Mac never connects, to show a failure state:
@@ -90,36 +92,46 @@ enum DemoMode {
     /// take their dependencies from here too.
     private static let client = makeClient()
 
+    /// Discovery per failure scenario; without one the Mac is found at once.
+    nonisolated private static func discover(_ gateway: PairedGateway, failure: String?) async throws -> [NWEndpoint] {
+      switch failure {
+      case "notFound"?:
+        try await Task.sleep(for: .seconds(1))
+        throw RemoteFailure.macNotFound(gateway.displayName)
+      case "denied"?:
+        throw RemoteFailure(.localNetworkDenied, "Local Network access is off for Codans.")
+      case "incompatible"?:
+        throw RemoteFailure(.incompatible, "This Mac speaks a newer protocol than this app.")
+      case "offline"?, "slow"?:
+        // Never answers: the attempt runs into its deadline and retries.
+        try await Task.sleep(for: .seconds(3600))
+        return []
+      default:
+        return []
+      }
+    }
+
     private static func makeClient() -> RemoteClient {
-      let dropsConnection = environment["CODANS_DEMO_RECONNECT"] == "1"
+      let reconnect = environment["CODANS_DEMO_RECONNECT"]
+      let dropsConnection = reconnect == "1" || reconnect == "backoff"
+      let failsFast = reconnect == "backoff"
       let readOnly = environment["CODANS_DEMO_READONLY"] == "1"
       let notOpen = environment["CODANS_DEMO_NOT_OPEN"] == "1"
       let protocolMinor = environment["CODANS_DEMO_OLD_MAC"] == "1" ? 1 : 2
       let failure = failure
       let connects = LockIsolated(0)
       return RemoteClient(
-        discover: { gateway in
-          switch failure {
-          case "notFound"?:
-            try await Task.sleep(for: .seconds(1))
-            throw RemoteFailure.macNotFound(gateway.displayName)
-          case "denied"?:
-            throw RemoteFailure(.localNetworkDenied, "Local Network access is off for Codans.")
-          case "incompatible"?:
-            throw RemoteFailure(.incompatible, "This Mac speaks a newer protocol than this app.")
-          case "offline"?, "slow"?:
-            // Never answers: the attempt runs into its deadline and retries.
-            try await Task.sleep(for: .seconds(3600))
-            return []
-          default:
-            return []
-          }
-        },
+        discover: { try await discover($0, failure: failure) },
         connect: { _, _, _ in
           if failure == "rejected" { throw RemoteFailure.refused }
           let attempt = connects.withValue { value -> Int in
             value += 1
             return value
+          }
+          if failsFast, attempt > 1 {
+            // Refuses at once: the app waits out growing backoff delays.
+            try await Task.sleep(for: .milliseconds(300))
+            throw RemoteFailure.streamEnded
           }
           if dropsConnection, attempt > 1 {
             // Never answers: the app stays in its reconnecting state.
