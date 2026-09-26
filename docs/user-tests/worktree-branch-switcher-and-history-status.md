@@ -7,14 +7,13 @@ description: Source-review evidence and pending runtime verification for the act
 
 **Parent user-test set:** [worktree-branch-switcher-and-history.md](./worktree-branch-switcher-and-history.md)
 **Design:** [worktree.md](../design-docs/worktree.md)
-**Last source review:** 2026-09-08
-**Runtime result:** Not run in this documentation revision.
+**Runtime result:** Pending; no execution result is recorded here.
 
 ## Evidence Boundary
 
-This companion separates existing implementation and test-source evidence from user-visible verification. The earlier status inventory included the removed embedded Diff Viewer and named UI seams that are no longer mounted. It is superseded by this review; it must not be used as evidence that the current UI passed.
+This companion separates existing implementation and test-source evidence from user-visible verification. The current comparison window has a separate [test specification](git-diff-viewer.md).
 
-All 11 active cases are **RUNTIME-PENDING**. A cited unit test means that relevant assertions exist in the source tree, not that the test was executed or passed during this review. It also does not establish the complete user journey. Record an actual execution date, revision, build, environment, outcome, and artifacts before promoting a case to PASS.
+All 11 active cases are **RUNTIME-PENDING**. A cited unit test means that relevant assertions exist in the source tree, not that the test was executed or passed for the documented cases. It also does not establish the complete user journey. Record an actual execution date, revision, build, environment, outcome, and artifacts before promoting a case to PASS.
 
 ## Current Source Entry Points
 
@@ -36,7 +35,7 @@ All statuses below are **RUNTIME-PENDING**. Test names refer to source assertion
 |---|---|---|
 | UT-BSH-HD-001 | Header source renders branch title and context row; suppresses the worktree name when it repeats the branch. | Text, layout, and visual hierarchy with the prepared fixture. |
 | UT-BSH-HD-002 | Header source shows a decorative chevron only on hover when idle. | Pointer entry/exit and stable text placement; manual observation. |
-| UT-BSH-HD-003 | Header source uses `(detached)`; parser test `parseBranchInventoryDetachedHEADHasNilCurrent`. | Detached header text and a usable branch button. |
+| UT-BSH-HD-003 | Header uses `Worktree.detachedHeadTitle` (`Detached HEAD @<short-sha>`) with `(detached)` when the SHA is unavailable; model/reconcile test `reconcileAppendsDetachedWorktreeWithHeadSHA`. | Detached header text and a usable branch button. |
 | UT-BSH-BP-001 | Reducer test `popoverTappedKicksInventoryAndCommitsLoadsInParallel`; view renders only branches and search. Parser test `parseBranchInventoryFiltersOriginHEAD`. | Popover, filter, and expected branch rows visible after loading. |
 | UT-BSH-BP-002 | Parser tests `parseBranchInventoryMixedLocalAndRemoteSortedAndPinned` and `parseBranchInventorySingleLocalMarkedCurrent`. | Current row first with exactly one visible current marker. |
 | UT-BSH-BP-004 | View omits the remote divider and rows when the filtered remote list is empty. | Prepared no-remote fixture displays only local rows. Filtering `origin/HEAD` alone does not establish this case. |
@@ -56,7 +55,7 @@ Test-source locations:
 
 The shared fixture directory contains the multi-branch and detached bundles, catalog seeds, and matching restore scripts. Restore uses explicit refspecs to preserve the bundled remote-tracking refs. It does not configure `origin`; remote-switch cases require the disposable remote setup described in the parent specification. Catalog seeds require `__TMP__` substitution and must be checked against the current app's catalog format before a runtime run.
 
-Fixture files being present does not mean they were restored or exercised in this review. Follow the isolation and backup rules in [user-test patterns](../user-test-patterns.md), and never seed or drive the user's active app state as a shortcut.
+Fixture files being present does not mean they were restored or exercised for these cases. Follow the isolation and backup rules in [user-test patterns](../user-test-patterns.md), and never seed or drive the user's active app state as a shortcut.
 
 ## Next Verification Run
 

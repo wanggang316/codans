@@ -3,7 +3,7 @@
 **状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
-> **现状（读前须知）。** 动词集已全部接线、`codans --help` 可见可调用：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群（含 `agent status` / `agent wait`）、顶层 `open`、本地的 `skill` 群与隐藏的 `help-json`；`--json` 一律是 `{schemaVersion, data | error}` 信封。**完全未实现**：`skill.*` 与 `hook.*` IPC 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`；`codans skill` 是纯本地文件操作，不经 IPC）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的只剩 `hierarchy.zoomPane` / `unzoomPane`（应用没有 zoomed-pane 渲染，`SplitTree.zoomed` 仅被 `focusPane` 写入）与 `hierarchy.setProjectEditor`（被 `editor.setProjectDefault` 取代）。
+> **命令与接口范围。** 已注册的命令包括：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群（含 `agent status` / `agent wait`）、`workspace` 各群、顶层 `open`、本地的 `skill` 群与 `help-json`。`help-json` 可调用，但不显示在默认 `--help` 中；`--json` 一律是 `{schemaVersion, data | error}` 信封。**完全未实现**：`skill.*` 与 `hook.*` IPC 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`；`codans skill` 是纯本地文件操作，不经 IPC）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的只剩 `hierarchy.zoomPane` / `unzoomPane`（应用没有 zoomed-pane 渲染，`SplitTree.zoomed` 仅被 `focusPane` 写入）与 `hierarchy.setProjectEditor`（项目编辑器设置使用 `editor.setProjectDefault`）。
 
 ## 背景与范围
 
@@ -16,11 +16,11 @@
 - **HierarchyManager / CatalogStore** — CLI 触发的每个 mutation 的应用侧写入者。每个子命令锚定到一个 RPC 方法（极少数 `open` 走 `editor.*`）。
 - **CodansKit**（`apps/mac/CodansKit/`）— CLI 侧共享库：`RPCClient`、`SocketDiscovery`、`AliasResolver`、`Renderer`、`ExitCode`。`codans-cli` 与其测试共用它。
 
-本设计解决的 open question：
+主要契约：
 
-- **CLI 二进制名。** 解决为 `codans`，安装时做碰撞检查；早期"`tcode` 作为后备名"的方案已随 Codans 改名废弃（仅安装单一命令 `codans`）。见 [Decisions](#decisions) §D1。
-- **CLI 二进制分发。** 解决为：从 Settings → Developer 面板，经单次 macOS 管理员授权对话框，把 bundle 内嵌的已签名二进制 symlink 进 `/usr/local/bin`。见 [Decisions](#decisions) §D2 与 [CLI 安装](#cli-安装)。
-- **IPC 背压。** 解决为：每连接有界在飞队列（64），溢出等待 2s 后服务端返回 `IPCError.overloaded`（CLI 退出码 5）。见 [Decisions](#decisions) §D11。
+- **CLI 二进制名。** Release 为 `codans`，Debug 为 `codans-dev`；安装时做碰撞检查，不提供自动后备名。见 [Decisions](#decisions) §D1。
+- **CLI 二进制分发。** 从 Settings → Developer 面板，经单次 macOS 管理员授权对话框，把 bundle 内嵌的已签名二进制 symlink 进 `/usr/local/bin`。见 [Decisions](#decisions) §D2 与 [CLI 安装](#cli-安装)。
+- **IPC 请求调度。** 每连接串行处理请求。`inflightLimit` 默认为 64，但当前串行循环的在飞计数最多为 1；保留的溢出分支立即返回 `IPCError.overloaded`（CLI 退出码 5），没有 2 s 等待。见 [Decisions](#decisions) §D9。
 
 不在范围（归属别处）：
 
@@ -33,7 +33,7 @@
 
 - **覆盖产品所承诺的全部动词。** Project、Worktree、Tab、Pane、跨 Pane `pane send`、跨作用域 `broadcast`、外部编辑器 `open`。
 - **默认机器友好，TTY 上人类友好。** `--json` 发出与 RPC result schema 1:1 的 JSON，使 agent 永远不必去 scrape 文本。
-- **无状态的薄 RPC 客户端。** `codans` 不读、不写、不缓存任何属于它自己的持久文件。
+- **应用控制命令使用薄 RPC 客户端。** 层级、终端与 agent 状态由应用管理；`skill` 命令直接读取 bundle 并管理本地 Skill 链接。
 - **In-Pane 人体工学。** 每个命令默认作用于"当前 Pane / Tab / Worktree"，读取应用注入的环境变量；显式标志（`--pane`/`--tab`/`--worktree`/`--project`）覆盖。
 - **便利别名在任何 mutation 之前解析为 UUID。** 用户可用 `@label`、`current`、index 寻址；内部代码永远只见到 UUID。解析经 `hierarchy.resolveAlias` 一次只读往返完成。
 - **一套 wire 协议，两种传输。** CLI 走 socket 上的 JSON-RPC；深链 URL 在应用侧映射到相同方法。CLI 发起与深链发起的命令在下游不可区分。
@@ -41,9 +41,9 @@
 
 ### 非目标
 
-- **不带应用运行时的本地回退或只读模式。** `codans` 是控制器；应用没运行就报错。唯一例外是 `codans launch`（它显式负责把应用拉起）。
+- **RPC 命令不提供离线回退。** 应用未运行时，依赖 socket 的命令报错；`launch` 负责启动应用，`skill`、帮助与版本输出不需要应用运行。
 - **脚本语言内嵌。** 没有 `codans eval`。脚本化通过 hook handler 进行（见 [lifecycle-hooks](lifecycle-hooks.md)，该面**尚未实现**）。
-- **包管理。** `codans` 不安装 codans 本身（Sparkle / DMG 负责）。CLI 执行的唯一"安装"是把自身 symlink 进 `/usr/local/bin`。
+- **包管理。** `codans` 不安装 codans 本身（Sparkle / DMG 负责）。`skill install` 只管理 bundle 内 Skill 的本地链接；CLI 自身的安装由应用设置面板管理。
 - **远程控制。** 无 TCP、无 SSH；socket 是本地的。
 - **交互式 UI。** 无 TUI 菜单。缺少必需参数即报错。agent 不交互，人类写脚本。
 - **shell 函数 / alias 注入。** `codans` 是真实二进制；v1 不提供 `eval "$(codans init zsh)"` 这类 shell 集成层。
@@ -101,7 +101,7 @@
     CODANS_PROJECT_ID, CODANS_WORKTREE_ID, CODANS_TAB_ID, CODANS_TAG_ID
 ```
 
-> 顶层没有 `space` 命名空间，也没有 `CODANS_SPACE_ID`。最高层级是 Project；早期的 Space 容器已被 per-Project `Tag` 取代（见 [project-tags](project-tags.md)）。
+> 最高层级是 Project，`Tag` 提供跨 Project 分类（见 [project-tags](project-tags.md)）。
 
 ### 命令面（实际 shipped 动词集）
 
@@ -109,7 +109,7 @@
 
 #### 顶层命令
 
-`CodansCLI.configuration.subcommands` 显式挂载：`status`、`launch`、`doctor`、`tree`、`project`、`worktree`、`tab`、`pane`、`broadcast`、`agent`、`handoff`、`open`、`skill`、`help-json`（隐藏）。
+`CodansCLI.configuration.subcommands` 显式挂载：`status`、`launch`、`doctor`、`tree`、`project`、`worktree`、`tab`、`pane`、`broadcast`、`agent`、`handoff`、`workspace`、`open`、`skill`、`help-json`（隐藏）。
 
 | Subcommand | IPC method | 说明 |
 |---|---|---|
@@ -153,7 +153,7 @@
 
 #### `codans workspace …`
 
-`WorkspaceCommand.subcommands`：`create`、`add`、`show`。这是唯一会在服务端**写磁盘**的命令组（见 D21）。
+`WorkspaceCommand.subcommands`：`create`、`add`、`drop`、`remove`、`show`。成员检出、manifest 写入与删除由服务端 `WorkspaceClient` 编排（见 D21）。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
@@ -198,8 +198,8 @@
 | `codans pane send [PANE] TEXT` | `terminal.sendInput` / `terminal.sendRawBytes` | `TerminalEngine.sendInput` | 见下 |
 | `codans pane send-key [PANE] KEY` | `terminal.sendKey` | ghostty key event | 命名特殊键：`escape/up/down/left/right/tab/enter/backspace/delete/home/end/pgup/pgdn/f1..f12/ctrl_c/ctrl_d/ctrl_l/ctrl_z` |
 | `codans pane read [PANE]` | `pane.read` | zmx 守护 `serializeTerminalState` dump | `[--raw]`（vt 格式，保留 ANSI/cursor/modes/OSC 7）`[--tail N] [--range visible\|scrollback\|all]` |
-| `codans pane info [PANE]` | `pane.info` | 探测 zmx 守护 | 回带 shell pid + pwd（cursor/modes 在未来 tag 前为 null）；走守护而非 catalog，故陈旧 catalog 行不会冒充 live 真相 |
-| `codans pane capture [PANE]` | `terminal.readText` | libghostty 渲染文本 | 纯文本快照；`[--scope viewport\|screen] [--lines N]`。原始 ANSI 字节流捕获**当前不支持**（libghostty 只暴露解析后文本，非原始 PTY 字节流），是 follow-up |
+| `codans pane info [PANE]` | `pane.info` | 探测 zmx 守护 | 回带 shell pid + pwd（cursor/modes 当前为 null）；走守护而非 catalog，故陈旧 catalog 行不会冒充 live 真相 |
+| `codans pane capture [PANE]` | `terminal.readText` | libghostty 渲染文本 | 纯文本快照；`[--scope viewport\|screen] [--lines N]`。原始 ANSI 字节流捕获**当前不支持**（libghostty 只暴露解析后文本，非原始 PTY 字节流） |
 
 **`codans pane new`** 默认：`--cwd` 回退 `$PWD`；`CMD` 回退登录 shell；`--label` 用 `--label foo bar` 形式接收多个初始标签。
 
@@ -226,12 +226,12 @@
 
 #### `codans agent …`
 
-`AgentCommand.subcommands`：`list`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
+`AgentCommand.subcommands`：`list`、`status`、`wait`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans agent list` | `agent.listProfiles` | `AgentHandlers.listProfiles` | 无；每行回带 id、名字、agent、enabled、PATH 探测结果（未探测完为 null）、是否支持 prompt、完整启动命令 |
-| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。运行态是纯内存派生态，不持久化 |
+| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。实时状态来自 `AgentStateStore`；退出快照与重启恢复规则见 [Active Agents](active-agents-view.md) |
 | `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until idle\|working\|blocked\|finished\|changed\|exit`，`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
 | `codans agent launch [PROFILE]` | `agent.launch` | `HierarchyClient.launchAgent` | `[PROFILE]`（名字或 id）或 `--agent TOKEN`（该 agent 第一个启用的 profile，缺则临时裸预设），`[--project P] [--worktree W] [--prompt TEXT\|-] [--tab \| --split right\|left\|up\|down] [--background]` |
 
@@ -246,7 +246,7 @@
 | `codans handoff to AGENT` | `handoff.to` | `HandoffHandlers.to` | `AGENT`（raw value / 可执行名 / 显示名），`--brief TEXT\|-` 或 `--no-brief`（二选一，必填），`[--pane PANE] [--profile NAME\|ID] [--note TEXT] [--no-launch] [--tab \| --split right\|left\|up\|down]` |
 | `codans handoff save` | `handoff.save` | `HandoffHandlers.save` | `--brief TEXT\|-` 或 `--no-brief`，`[--pane PANE] [--note TEXT]` |
 
-- 任何 agent 都可作接收方。有 `promptStyle` 的（`claude-code` / `codex` / `gemini` / `cursor-agent` / `grok` / `pi` / `omp`）在命令行上带 kickoff prompt 启动；其它 agent 裸启动，由 app 在分类器认出该 agent 后把 prompt 键入其 pane，确认屏幕上输入框里出现了这段文字再发 Enter（`HandoffHandlers.typeKickoff`，与响应解耦）；启动即弹对话框的 TUI 会吞掉键入的文字，此时不发 Enter、只记日志。`--no-launch` 只归档 + 写 briefing，不启动。
+- 接收方按 `AgentCatalog` 的 `promptStyle` 决定 kickoff 方式：有则作为命令行参数，无则由 app 在 agent 出现后注入。注入路径使用画面稳定与文本回显启发式，并在匹配后自动发送 Enter；不能据此确认焦点一定处于输入框。具体等待时限与失败行为见 [Agent Profiles 与 Handoff](agent-handoff.md#agent-profile-数据模型)。`--no-launch` 只保存工件，不启动接收方。
 - 放置：默认在同一 worktree 的后台新 tab；`--split <方向>` 以**源 pane** 为锚分屏（不是当前聚焦的 pane），`--tab` 显式选新 tab。`.focused` 不可用——交接绝不覆盖源 agent 的 pane。
 - briefing 缺失 → `invalidParams` 并附可直接粘贴的 heredoc；不合格（缺 `## Objective` / `## Current State` / `## Next Steps`）→ `invalidParams` 且零副作用。
 - Server 项目 → `unsupported`（工件目录在远端）。
@@ -259,9 +259,9 @@
 |---|---|---|---|
 | `codans open [<path>] [--in EDITOR]` | `editor.open` | `EditorService` | `[<path>]`（默认 `$PWD`，相对路径相对 `$PWD` 解析），`[--in EDITOR]` |
 
-`EDITOR` 是编辑器 id（`cursor`/`zed`/`vscode`/`xcode`/`finder`/`ghostty`/…）。`path` 在 C8a Phase 4c 后是单一位置参数（早先的 `<worktree>` / `--path` 二分已合并）。编辑器优先级在服务端 `EditorService` 处理：(1) 显式 `--in`（strict，未安装即报错）→ (2) `Settings.projects[pid].defaultEditor`（路径落在已注册 Project 内时，lenient）→ (3) 全局 `Settings.defaultEditorID`（lenient）→ (4) 内建注册表优先级遍历 → (5) Finder 回退（永远可用）。
+`EDITOR` 是编辑器 id（`cursor`/`zed`/`vscode`/`xcode`/`finder`/`ghostty`/…）。`path` 是单一位置参数，必须指向本地现有目录。服务端按以下顺序选择编辑器：显式 `--in`（strict，未安装即报错）→ `Settings.projects[pid].defaultEditor`（路径位于已注册 Project 内且编辑器已安装时）→ `Settings.general.defaultEditorID`（lenient）→ 内建注册表优先级 → Finder。项目覆盖由 `EditorHandlers` 解析，其余选择与启动由 `EditorService` 完成。
 
-> editor 的 IPC 面是 `editor.*`（`editor.describe`/`editor.open`/`editor.setGlobalDefault`/`editor.setProjectDefault`），不是更早设想的 `system.openInEditor` / `hierarchy.setProjectEditor`。C8a Phase 4c 把 `editor.setDefault` 改名为 `editor.setGlobalDefault` 并新增 `editor.setProjectDefault`。
+> editor 的 IPC 面是 `editor.*`：`editor.describe` / `editor.open` / `editor.setGlobalDefault` / `editor.setProjectDefault`。
 
 #### `codans skill …`
 
@@ -305,7 +305,7 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 
 - `schemaVersion` = `codans.cli.<命令路径>.v1`，命令路径由 `CommandPaths` 从根 `CommandConfiguration` 树推出（不含可执行名，`codans` / `codans-dev` 相同），经 task-local `Renderer.context` 传给每次渲染；`CommandRunner.run(self, globals:)` 负责设置它并把失败也渲染成信封（JSON 模式下错误走 stdout，文本模式仍是 stderr 的 `error:` / `hint:` 行）。
 - `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED` 这类退出码分不清的情形；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
-- 形状由 `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`（JSON Schema 2020-12）描述：信封 + `error` 严格，`data` 按 `schemaVersion` 绑定到各命令的定义；回归 harness 末尾用 `docs/user-tests/cli-regression/validate-json.py`（无依赖的子集校验器）校验本轮每一份 JSON 输出。单测 `RendererEnvelopeTests` 钉住信封与退出码 → 错误码表。
+- 形状由 `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`（JSON Schema 2020-12）描述：信封 + `error` 严格，`data` 按 `schemaVersion` 绑定到各命令的定义；回归 harness 末尾用 `docs/user-tests/cli-regression/validate-json.py`（无依赖的子集校验器）校验命令的 JSON 输出。单测 `RendererEnvelopeTests` 钉住信封与退出码 → 错误码表。
 - 例外：`codans help-json` 裸打印命令树；ArgumentParser 拒绝的命令行（exit 64）打印解析器自己的文本。
 
 ### Wire 协议
@@ -314,9 +314,9 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 
 - **请求帧** 是 `UInt32` big-endian 长度前缀 + 恰好 N 个 UTF-8 JSON 字节（**无尾随换行**），每帧 16 MiB 硬上限（超限 → `IPCError.invalidFrame`，关连接）。
 - **方法枚举。** `IPC.Method`（`apps/mac/CodansIPC/Method.swift`）覆盖每个 RPC，raw value 是小写点分串（`hierarchy.createWorktree`、`terminal.sendInput`）。两端 switch 此枚举，绝不 switch raw 串。
-- **流终止契约。** server-streaming 方法在请求上设 `stream: true`，服务端发 `{id, stream: true, result: …}` 帧。流在**任一**侧关其写半边时结束：服务端优雅收尾发一个终帧 `{id, stream: false, error?: …}` 再关写半边；客户端读到 EOF 后干净退出。客户端发起收尾则 `shutdown(SHUT_WR)`，服务端 flush 在飞帧后发终帧。任一侧 abrupt 关闭被对端视为隐式 `.internal` 流终止。
+- **流终止契约。** 请求设 `stream: true`；数据帧为 `{id, stream: true, result: …}`。服务端订阅结束时发送 `{id, stream: false}`；`RPCClient` 收到终帧立即结束流，不等待 EOF；响应携带 `error` 时抛出该 IPC 错误。没有终帧的 EOF 在当前客户端中映射为 `RPCError.timeout`，与帧间等待超时相同。`UnixSocketTransport.close()` 使用 `SHUT_RDWR` 并关闭 fd；没有 `SHUT_WR` 半关闭握手或收到客户端半关闭后 flush 并回终帧的契约。
 - **错误码。** `IPCError` 含 `.unknownMethod` / `.invalidParams` / `.notFound` / `.conflict` / `.unsupported` / `.internal` / `.overloaded` / `.versionMismatch`。
-- **兼容性握手。** 握手是专用的首帧 RPC `system.hello`（**非**逐请求 header——逐请求 header 会对每次调用重复编码版本信息，并与"一连接一流"规则冲突）。连接打开 → 客户端发 `system.hello`（带 `clientVersion`/`clientBinary`）→ 服务端回 `serverVersion` / `appBundleVersion` / `protocolMajor` / `protocolMinor` / `deprecatedMethods`。major 偏斜浮现为 `.versionMismatch`；minor 偏斜浮现为每会话一次的 stderr 警告。
+- **兼容性握手。** 握手是专用的首帧 RPC `system.hello`（**非**逐请求 header——逐请求 header 会对每次调用重复编码版本信息，并与"一连接一流"规则冲突）。连接打开 → 客户端发 `system.hello`（带 `clientVersion`/`clientBinary`）→ 服务端回 `serverVersion` / `appBundleVersion` / `protocolMajor` / `protocolMinor` / `deprecatedMethods`。服务端按客户端与服务端版本的 major 检查兼容性，不兼容时返回 `.versionMismatch`。客户端检查握手错误，不读取成功响应中的 minor 或 `deprecatedMethods` 来生成警告。
 
   **`codans` 把 `system.hello` 与真实请求作为两个 pipelined 帧一次写出**（每次调用都开新连接），使热 socket 上不增加额外往返。版本偏斜时服务端对 hello 返回 `.versionMismatch` 并丢弃第二帧；响应 ID 按 hello vs real 配对，否则抛 `.misorderedResponse`。
 
@@ -364,7 +364,7 @@ Dependencies:
 
 ## CLI 安装
 
-> 取代早先"首次启动安装进 `~/.local/bin` + `codans install-cli` + PATH 提示"的方案。该方案的 PATH 提示在结构上有误导（它读 GUI 进程的 `PATH`，那来自 launchd，永不反映 shell rc），且 `~/.local/bin` 不在 macOS 默认 `PATH` 上。
+> CLI 安装由 Settings → Developer 管理。GUI 进程的 `PATH` 不能代表调用方 shell 的配置，因此安装器不据此判断 CLI 是否可从每个 shell 访问。
 
 CLI 二进制已由 `scripts/embed-codans.sh` 内嵌到应用 bundle 的 `Contents/Resources/bin/<名字>`——Debug 为 `codans-dev`，Release 为 `codans`，名字来自 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置并与 `BuildChannel.slug` 一致——release 构建随应用一起签名，故 symlink 目标已是稳定、已签名、已公证的产物。
 
@@ -372,10 +372,10 @@ CLI 二进制已由 `scripts/embed-codans.sh` 内嵌到应用 bundle 的 `Conten
 
 安装器对每次 install / uninstall 发出**一条管理员授权的 shell 命令**，经进程内 `NSAppleScript` 执行，使授权对话框以 codans 应用图标与 bundle 名渲染。
 
-- **安装路径：** Release 构建管理 `/usr/local/bin/codans`；Debug 构建管理 `/usr/local/bin/codans-dev`，以免本地开发夺走生产 `codans`。选 `/usr/local/bin` 正因它在默认 macOS PATH 上、位于 `/usr/bin` 之前（`/etc/paths` 如此排）；而 `/opt/homebrew/bin` 不在非 Homebrew shell 的 PATH 上。一个新用户（含读 Skill 的 agent）经单次对话框 + 一次回车即得到可用 `codans`。
-- **symlink 目标：** bundle 内 `Bundle.main.resourceURL/bin/<名字>`。应用移动与 Sparkle 升级保留该相对路径，故 symlink 无需重指。指向别的构建、或指向已不存在的内置二进制（旧 Debug 包内嵌的是 `bin/codans`）的软链判为 stale：卡片显示 Stale / Reinstall，Install 在同一次特权调用里替换，不当作外来文件。
+- **安装路径：** Release 构建管理 `/usr/local/bin/codans`；Debug 构建管理 `/usr/local/bin/codans-dev`，以免本地开发夺走生产 `codans`。选 `/usr/local/bin` 正因它在默认 macOS PATH 上、位于 `/usr/bin` 之前（`/etc/paths` 如此排）；而 `/opt/homebrew/bin` 不在非 Homebrew shell 的 PATH 上。调用方使用自己的 `PATH` 解析命令，或直接使用安装路径。
+- **symlink 目标：** bundle 内 `Bundle.main.resourceURL/bin/<名字>`。应用移动与 Sparkle 升级保留该相对路径，故 symlink 无需重指。指向别的构建、或指向已不存在的内置二进制的软链判为 stale：卡片显示 Stale / Reinstall，Install 在同一次特权调用里替换，不当作外来文件。
 - **特权模型：** 特权工作是一次 shell 脚本调用，做 (a) `mkdir -p /usr/local/bin`，(b) 仅对在先前非特权探测中已核实为缺失或我方自有 symlink 的项 `rm -f`，(c) 对缺失项 `ln -s`。探测是非特权的、每次 Settings 卡片出现都跑。
-- **PATH 提示：** 移除。`installed && !onPath` 这个状态空间不复存在。
+- **PATH 提示：** 安装器不展示基于 GUI 进程 `PATH` 的可用性判断。
 
 ### 碰撞检查
 
@@ -432,22 +432,22 @@ CLIFilesystem (probe only; real impl + test fakes)
 
 每个判断附理由。"Supacode-parallel"指与参考项目 supacode/supaterm 同选；"divergent"指不同选及原因。
 
-- **D1 — 主二进制名 `codans`。（解决 binary-name open question。）** ergonomic 收益太大不可让，碰撞检查安装器处理边角。*（2026-06-11 Codans 改名后废弃 `tcode` 后备名——CLI 仅安装单一命令 `codans`；碰撞检查仍对外来 `/usr/local/bin/codans` 中止，但不再提供自动后备名。）*
-- **D2 — Release 安装进 `/usr/local/bin/codans`，经单次管理员授权对话框。（解决 binary-distribution open question。）** `/usr/local/bin` 在默认 macOS PATH 上，故 `codans` 在每个 shell / GUI launcher / cron 上下文都可用、无须 rc 编辑。Debug 装 `/usr/local/bin/codans-dev`。特权写是每 install/uninstall 一次进程内 `NSAppleScript` 调用，对话框以应用图标与 bundle 名渲染。symlink 指向 bundle 内 `Contents/Resources/bin/codans`，故应用升级保留安装。完整安装设计见 [CLI 安装](#cli-安装)。*（早先方案为 `~/.local/bin` + PATH 提示，因提示结构性嘈杂、目录不在默认 PATH 上而被取代。）*
-- **D3 — `codans` 在应用未运行时报错，唯 `codans launch` 例外。** "`codans` 无状态"是这个 CLI 最有价值的属性；放松它意味着永远两套代码路径。
+- **D1 — Release 二进制名 `codans`，Debug 为 `codans-dev`。** 安装器对目标路径做碰撞检查，遇到外来文件中止，不提供自动后备名。
+- **D2 — Release 安装进 `/usr/local/bin/codans`，Debug 安装进 `/usr/local/bin/codans-dev`。** 每次 install/uninstall 经一次进程内 `NSAppleScript` 管理员授权调用，对话框使用应用图标与 bundle 名。软链指向 bundle 内的 CLI；调用方需将安装目录加入 `PATH`，或使用绝对路径。完整安装设计见 [CLI 安装](#cli-安装)。
+- **D3 — 应用状态只通过 RPC 访问。** RPC 命令不维护离线副本；`launch`、本地 `skill` 命令与帮助输出有各自独立的执行路径。
 - **D4 — 便利别名经服务端 `hierarchy.resolveAlias` 解析，不在 CLI 解析。** 保持名字解析为唯一真相来源；客户端只本地校验 UUID 格式。
 - **D5 — `pane send` / `broadcast` 在 wire 上分别走 `terminal.sendInput` / `terminal.broadcastInput`，broadcast 用 `scope` 区分服务端扇出。** 减小客户端复杂度，让单个观察者对单播与扇出一视同仁。
 - **D6 — `--json` 全局且逐动词，每个 result 类型与 RPC 1:1。** 这是 agent 保持可靠的方式；文本 renderer 是人类便利，非主契约。
 - **D7 — 退出码稳定且可枚举。** agent 与 shell 脚本必须能按码分支；预先定一组固定码避免"事事 exit 1"。请求超时（11）与 launch 超时（12）分开，使脚本判 `$? -eq 12` 明确表示"应用没起来"。
 - **D19 — socket 连接失败按"补救动作"分类，而非按 errno 逐一暴露。** 单一 "cannot connect" 桶迫使调用方 grep stderr 才能把"应用没起来"（重启即可）与"socket 属于另一个 uid"（需要人）区分开。类别数保持在能改变调用方行为的粒度上：起应用后重试 / 原样重试 / 停下找人。errno 本身只在 message 里作为佐证出现，不进入契约。
-- **D8 — 流式 RPC 用 `stream: true` + 双向 EOF 终止，无多路复用。** 一连接一流（在其 `system.hello` 之后）；需要两个流就开两个连接。
-- **D9 — 每连接有界在飞队列 64，溢出等 2s 后返回 `IPCError.overloaded`。（解决 backpressure open question。）** 防止陷入循环的 agent 把应用 OOM。
-- **D10 — `system.hello` 是专用首帧 RPC，非逐请求 header；与真实请求 pipelined 一次写。** 使"每次调用开新连接"属性干净存活——每个新连接恰付一次 `system.hello` 往返。
+- **D8 — 流式 RPC 用 `stream: true` 数据帧和 `stream: false` 终帧，无多路复用。** 一连接一流（在其 `system.hello` 之后）；需要两个流就开两个连接。终帧、EOF 与错误行为见 §Wire 协议。
+- **D9 — 每连接串行处理。** `SocketConnection.serve()` 等待当前请求完成后才处理下一帧。`inflightLimit = 64` 是保留的计数阈值，不是已实现的 64 深请求队列，也不提供缓冲内存上限；溢出分支直接返回 `IPCError.overloaded`。并行调度和有界入站缓冲尚未实现。
+- **D10 — `system.hello` 是专用首帧 RPC，非逐请求 header；与真实请求 pipelined 一次写。** 每个新连接执行一次握手，两个请求帧合并写出以减少等待。
 - **D11 — CLI 本地做 UUID 快路径，其余都是 mutation 前一次服务端往返。** 用延迟换一致性；本地 socket 往返成本（亚毫秒）可忽略。
-- **D14 — `codans open` 用 `EditorService` 的内建注册表 + 用户模板，走 `editor.*` IPC 面。** 服务端 4 级优先级（显式 `--in` → per-Project 覆盖 → 全局默认 → Finder 回退）比 CLI 侧 Launch Services 发现更简单，且把"哪个编辑器"的真相留在应用侧。
+- **D14 — `codans open` 走 `editor.*` IPC。** 项目覆盖由 `EditorHandlers` 按目录归属解析，`EditorService` 负责已安装编辑器的选择与本地 Launch Services 启动；CLI 不复制注册表和优先级规则。
 - **D20 — `handoff` 的源默认是调用方 pane，且 briefing 必须显式给出或显式放弃。** 让在线 agent 交接自己是主路径（它持有任何 transcript 都无法复原的工作上下文）；`--brief`/`--no-brief` 二选一避免 codans 替第三方调用方发起模型调用。接收方任何 agent 均可启动：有已验证 `promptStyle` 的走命令行参数，其余在 agent 出现后由 app 键入 kickoff；`--no-launch` 仍可只归档不启动。见 [agent-handoff.md](agent-handoff.md)。
-- **D21 — `workspace create` / `add` 是 CLI 里第一组在服务端产生磁盘副作用的动词，编排放在 app 层 `WorkspaceClient`，不放 handler。** `hierarchy.createWorktree` 只登记 catalog 行；workspace 成员必须真的落盘（`git worktree add`、写 manifest），否则行指向空目录。GUI sheet 与 IPC handler 共用同一个 `WorkspaceClient`，失败或取消按记账逆序回滚；handler 只做 wire → `WorkspacePlan` 的翻译与错误映射（校验类 → `invalidParams`，已存在类 → `conflict`，git 分支已存在 → `conflict`）。见 [workspace.md](workspace.md)。
-- **D22 — 成员来源在客户端只区分「已注册 Project」与「本地路径」，仓库根一律由服务端求。** `--project` 走 D4 的别名解析拿到 id；`--repo` 发绝对路径。这样 CLI 不需要本地 git，也不会把 CLI 机器上的路径解析结果与 app 的 catalog 对不上。
+- **D21 — workspace 磁盘操作由 app 层 `WorkspaceClient` 编排。** GUI 与 IPC 共用成员检出、manifest 写入及失败清理路径，handler 只负责 wire 转换与错误映射。`worktree new` / `rm --delete` 和 handoff 也有磁盘副作用，命令组不能作为只读边界。见 [workspace.md](workspace.md)。
+- **D22 — 成员来源在客户端区分「已注册 Project」「本地路径」与「远程 URL」，仓库根一律由服务端求。** `--project` 走 D4 的别名解析拿到 id；`--repo` 发绝对路径，`--remote` 发仓库 URL。这样 CLI 不需要本地 git，也不会把 CLI 机器上的路径解析结果与 app 的 catalog 对不上。
 - **D23 — workspace 成员数量校验放 `CodansKit`（`CLIWorkspaceMemberSource.resolve`），在拨号前抛 `userError`。** 与 `CLIBroadcastScopeSelection` 同型：纯参数逻辑放 kit 才能被 `CodansKitTests` 覆盖，且区分于服务端的 `notFound` / `conflict`。
 - **D24 — 检出模式三选一（`--existing` / `--track` / `--ref`）与 `--reset-local` 的搭配约束同样放 kit（`CLIWorkspaceCheckoutFlags.resolve`），服务端 `WorkspaceHandlers.checkout` 再守一次。** wire 上 `useExistingBranch` / `remoteRef` / `trackRemote` 是三个独立字段而非一个枚举：第三方客户端漏传其一时缺省仍是「新建分支」，永不落到会改写本地分支的 `-B` 路径；`resetLocalBranch` 缺省 nil，只有显式 `true` 才生效。
 - **D18 — `broadcast` 在顶层命名空间，而 `send` 在 `codans pane` 下。** `broadcast` 是显式的扇出动作、置于顶层减少键入；`send`/`send-key`/`read`/`capture` 作为 pane 级操作归在 `pane` 子命令树下（与 `codans pane send` 的 discussion 示例一致）。
@@ -458,12 +458,12 @@ CLIFilesystem (probe only; real impl + test fakes)
 
 - **Socket 认证。** Unix socket mode `0600` + 用户 uid；accept 时经 `SO_PEERCRED` / `LOCAL_PEERCRED`（macOS）验证 peer，其他 uid 立即关闭。给出进程级隔离，无须显式 token。
 - **`pane send` / `broadcast`** 向 Pane 注入文本（含 Enter）——若目标 pane 跑 shell 即可执行命令。这是*刻意*的（agent 正是这么干），但意味着这些命令绝不可被外来进程触达；同一 socket 认证保护它。
-- **`codans open`** 经 `editor.*` 走 `Process` argv 数组；编辑器名在服务端校验，路径绝不过 shell 解释器。
+- **`codans open`** 经 `editor.*` 校验本地目录与编辑器，再通过 Launch Services 打开；不把目录路径交给 shell 解释器。
 
 ### 版本与兼容
 
-- **应用上的 semver。** major 跳变信号 wire 破坏性变更。`codans` 与其出货的应用绑定，但 `codans --version` / `codans doctor` 同时显示两端版本。
-- **滚动兼容窗口。** 一个 major 内 CLI 优雅降级：未知方法返回友好错误；老服务端忽略新可选参数；`system.hello` 的 `deprecatedMethods` 使 CLI 每会话一次警告弃用方法。
+- **版本来源。** `codans --version` 与 `codans doctor` 显示 CLI 构建版本；服务端版本由 `system.hello` 返回。应用与 bundle 内 CLI 共同分发。
+- **握手兼容边界。** 服务端拒绝 major 不兼容的客户端；成功握手不保证每个方法都可用，调用方仍需处理未知方法、参数错误和响应解码失败。`deprecatedMethods` 是握手字段，CLI 没有弃用警告逻辑。
 
 ### 性能
 
@@ -475,8 +475,8 @@ CLIFilesystem (probe only; real impl + test fakes)
 | 风险 | 缓解 |
 |---|---|
 | `codans` 名字在 Linuxbrew / 重 TCP 配置用户上碰撞 | 安装碰撞检查对外来 `/usr/local/bin/codans` 中止，提示用户清理后重试 |
-| 用户 `codans` 与运行中应用版本偏斜 | `system.hello` 报告两端版本，偏斜触发明确 stderr 警告；`codans status` / `codans doctor` 是规范诊断 |
-| agent 发 wedge 工作流填满在飞队列 | 每连接 64 深队列 + `IPCError.overloaded`（exit 5） |
+| 用户 `codans` 与运行中应用版本偏斜 | `system.hello` 拒绝 major 不兼容；`codans doctor` 检查本地 CLI 与 socket 可达性，不查询服务端版本 |
+| 客户端持续发送而请求处理较慢 | 当前逐帧串行处理；64 在飞阈值不限制 reader / 解码缓冲积压，不能作为内存保护保证 |
 | 同用户的恶意/有缺陷本地进程发现 socket 驱动应用 | `SO_PEERCRED` 限同用户；记为已接受威胁模型 |
 | path-glob worktree 解析歧义 | list 形动词返回全部匹配；mutation 形动词报 `.conflict` 并印候选，用户用 UUID 重跑 |
 | UUID 快路径接受了不匹配任何实体的 UUID | 服务端方法发 `notFound`（exit 2）+ 建议；不做模糊匹配（静默纠正更糟） |

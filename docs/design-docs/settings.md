@@ -34,8 +34,7 @@ file owned by one writer is the load-bearing decision below.
   single home for every per-Project preference, with a nested
   `git: GitProjectSettings?` subtree for git-kind-only fields.
 - A notification policy whose four toggles compose orthogonally and whose
-  gating semantics are pinned (they were the original source of "persisted but
-  inert" bugs).
+  gating semantics are explicit.
 - Migrations that land automatically and are recoverable: v1/v2 → v3 in place,
   with the original file preserved aside.
 
@@ -50,8 +49,7 @@ file owned by one writer is the load-bearing decision below.
 ## The single-writer invariant
 
 A single `SettingsStore` owns the whole `Settings` tree and is the only writer
-of `settings.json`. This guards against the failure mode that motivated the
-design: **two** `@MainActor` stores writing the same file — an editor store
+of `settings.json`. This prevents **two** `@MainActor` stores writing the same file — an editor store
 owning `{version, defaultEditorID, customEditors}` and a notifications store
 owning `{version, notifications}` — both decoding through `AtomicFileStore`,
 both rewriting the file in full from a narrow schema, so the last writer
@@ -94,28 +92,18 @@ that probes raw JSON will desync the moment a migration runs.
 **Garbage collection before save.** `Settings.garbageCollect()` drops
 `projects[pid]` entries whose `ProjectSettings.isEffectivelyEmpty` is true and
 collapses an effectively-empty `git: GitProjectSettings()` to `nil`, so
-`settings.json` never accumulates useless `{}` objects. This is what lets
-follow-up waves add per-Project fields without a schema bump (an empty entry
-round-trips as absent).
+`settings.json` never accumulates useless `{}` objects. An empty entry
+round-trips as absent; additive optional fields use their decoding defaults.
 
 ## v3 per-Project schema
 
 The unit of per-Project preference is a **`Project`**, never a "Repository".
-The two kinds are `git_repo` (git-managed) and `dir` (a plain folder); the
-type that distinguishes them is:
-
-```swift
-public nonisolated enum ProjectKind: String, Codable, Hashable, Sendable {
-  case gitRepo = "git_repo"
-  case dir     = "dir"          // rawValue is "dir", not "plain_dir"
-}
-extension Project { public var kind: ProjectKind { gitRoot == nil ? .dir : .gitRepo } }
-```
-
-`kind` is **derived from `gitRoot`, never persisted** — a second stored field
-would drift the moment a user runs `git init` / `rm -rf .git`. The next catalog
-refresh flips `kind` for free. The UI reads it via `HierarchyClient.kind(of:)`
-so reducers need only a `ProjectID`, not a full `Project` snapshot.
+`ProjectKind` is derived from the catalog in this order: `remoteHost != nil`
+means `server`; `isWorkspace` means `workspace`; otherwise `gitRoot != nil`
+means `git_repo`, and the remainder are `dir`. The kind itself is not encoded.
+A local directory can become a Git project when catalog reconciliation finds
+its repository; a workspace remains a workspace even when its root contains
+Git metadata. See [Workspace](workspace.md) for member-repository ownership.
 
 ```swift
 public nonisolated struct Settings {            // currentVersion = 3
@@ -125,6 +113,7 @@ public nonisolated struct Settings {            // currentVersion = 3
   var worktree: WorktreeSettings
   var projects: [ProjectID: ProjectSettings]
   var notifications: NotificationsSettings
+  var agents: AgentSettings
 }
 
 public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {
@@ -147,76 +136,57 @@ Durable schema decisions:
   drops keys that fail to parse as `ProjectID` (logged, not fatal), so a
   hand-edit or a future ID-format change can't abort the whole load. Same
   policy applies to unparseable keys elsewhere in the file.
-- **Single home for per-Project preferences.** Every user-editable per-Project
-  field lives on `projects[pid]`; `Project` in `catalog.json` retains only
-  identity/structure. The earlier split (editor/worktree-dir on the catalog,
-  GitHub overrides on settings) forced two files to own two halves of one
-  mental slice — reversed here.
+- **Preference and catalog ownership.** Editor, environment, script, and Git
+  overrides live on `settings.projects[pid]`. Project display name, icon, color,
+  memberships, and hierarchy structure live on `Project` in `catalog.json`;
+  their controls write through `HierarchyManager`. The Settings window does
+  not imply that every value it displays belongs in `settings.json`.
 - **Git-only fields nest under `git: GitProjectSettings?`, not a sum type.**
   Nested-`Optional` makes a `git_repo ↔ dir` flip (the user runs `git init` or
   deletes `.git`) a **no-op**: the universal fields stay put and `git` is simply
   present or absent. A sum type (`enum { case git(...), case dir(...) }`) would
   turn that user-triggered transition into a data migration that re-keys JSON
   arms and hand-copies common fields. Rejected (Alternatives A2).
-- **Universal fields apply to both kinds.** `defaultEditor` and
+- **Universal preference fields.** `defaultEditor` and
   `worktreesDirectory` sit at the top level even though `worktreesDirectory` is
   a no-op for `dir`; carrying it universally keeps the data model uniform and a
   later `git init` upgrade picks it up at no cost.
 
-**Resolving per-Project fields (post-migration invariant).** The `catalog.json`
-encoder **does not write** `Project.defaultEditor` / `worktreesDirectory` (both
-are permanently `nil` in the snapshot). Every reader MUST resolve those two
-fields via `SettingsStore` / `settings.projects[pid]`, **never** off the
-`Project` struct — which silently yields `nil`, read by callers as "use global
-default". This is the most common drift trap in this subsystem.
+**Resolving per-Project fields.** `defaultEditor` and `worktreesDirectory`
+are fields of `ProjectSettings`, not `Project`. Readers resolve them through
+`SettingsStore` / `settings.projects[pid]`; the catalog owns identity and
+structure.
 
-## 技术决策 — schema 迁移记录
+## Schema migration
 
-The schema is **v3** today (`Settings.currentVersion = 3`). The records below
-pin the load-bearing *why* behind how the loader still ingests every historical
-shape; they are not part of the steady-state read/write path.
+`Settings.currentVersion` is 3. `SettingsMigration.load` owns versioned
+settings decoding and migration; `SettingsStore` owns the resulting live value.
 
-The migration entry point in code is **`SettingsMigration.load`** with
-`typealias SettingsMigration.CatalogOverrides`
-(`= [ProjectID: (defaultEditor:, worktreesDirectory:)]`) in `CodansCore`.
-[architecture.md](../architecture.md) narrates the same one-shot fold under the
-name **`HierarchyManager.drainLegacyOverrides`** — same mechanism, two names;
-the code-side authority is `SettingsMigration`.
+- **v3:** decode directly without rewriting the file.
+- **v1 → v3:** read `version` and `defaultEditorID` through the permissive
+  `LegacyV1Settings` decoder. Missing fields use defaults; `customEditors` is
+  ignored. Notification settings use defaults.
+- **v2 → v3:** convert `repositories[pid]` to `projects[pid]`, nesting the
+  GitHub overrides under `ProjectSettings.git`.
+- **Optional catalog overrides:** the loader accepts
+  `SettingsMigration.CatalogOverrides`, a map of per-Project editor and
+  worktrees-directory values, for the v1/v2 migration paths. `SettingsStore`
+  also accepts this map to seed a fresh file. Application bootstrap constructs
+  `SettingsStore()` without this argument, so it does not transfer overrides
+  from `catalog.json`. There is no cross-file migration transaction.
 
-- **Three accepted shapes; v3 is the fast path.** `SettingsMigration.load`
-  decodes v3 directly (`Settings.init(from:)` is strict v3-only; a no-op,
-  idempotent, no disk write) and catches `unsupportedVersion(2)` /
-  `unsupportedVersion(1)` to run the legacy folds out-of-band. v1 lifts
-  **straight to v3** (it skips v2 entirely — a v1 file never had a `repositories`
-  dict). The original file is renamed aside (`settings.json.v1-<ts>` /
-  `settings.json.v2-<ts>`) **before** the v3 write lands, so a botched migration
-  is always recoverable. The decoder itself stays pure (v3-only); the
-  legacy-shape handling and the catalog fold live in `SettingsMigration.load`.
-- **v1 carries forward only `defaultEditorID`.** The permissive `LegacyV1Settings`
-  decode reads `version` and `defaultEditorID`; missing fields map to defaults,
-  not failures. The retired C8 `customEditors` array is ignored on migration
-  (C8a). v1 had no notifications section, so nothing maps into
-  `NotificationsSettings` from the v1 path.
-- **v2 → v3 fold.** Map each `repositories[pid]` value into a `ProjectSettings`
-  whose `git` holds the three GitHub fields; then fold the per-Project
-  `defaultEditor` / `worktreesDirectory` read from `catalog.json` into the same
-  `projects[pid]`. This requires catalog access at settings-load time and so
-  runs after `HierarchyManager` has loaded. Vocabulary unification rides on the
-  same fold: the v2 `repositories` key (value `RepositorySettings`) becomes
-  `projects` (value `ProjectSettings`), retiring the `Repository*` naming that
-  had leaked into JSON keys, test names, and the sidebar.
-- **Migration crash window (ordering invariant).** Draining the catalog only
-  *schedules* a debounced save, while the settings v2→v3 commit is synchronous.
-  A crash between them would drop overrides permanently — `settings.json` is
-  already v3, so the migration never re-runs. **The catalog must be written
-  synchronously first** (`saveNow` before the settings commit) when legacy
-  overrides are non-empty: then a crash before the settings write re-runs the
-  fold next boot against an already-clean catalog (the two fields read `nil`),
-  producing no duplicates.
-- **Per-file, not atomic.** Each persisted file migrates independently on its
-  own load path, so one file's migration failing can't corrupt the others. An
-  unrecognised `version` routes the file aside as `*.broken-<ts>` and starts
-  from defaults (the architecture-wide escape hatch).
+For v1/v2, the migration writes the v3 value to a sibling temporary file,
+renames the original to `settings.json.v1-<ts>` or `settings.json.v2-<ts>`, then
+renames the temporary file to the canonical URL. If the final rename fails,
+it attempts to restore the original. A migration or backup failure puts
+`SettingsStore` in an in-memory-only mode: saves are disabled to avoid
+replacing the preserved source with defaults.
+
+Unsupported versions and corrupt files are moved to `settings.json.broken-<ts>`
+before defaults are used. A failure to preserve that source also disables
+persistence. Source data must remain recoverable until the destination has
+been persisted; clearing catalog fields before saving settings cannot provide
+that guarantee.
 
 ## Notification gating (`NotificationsSettings`)
 
@@ -230,9 +200,9 @@ policy chokepoint) enforces:
 - **`inAppEnabled`** gates `inbox.append` (the bell unread list, and the Dock
   badge that derives from the inbox's unread count) but is **decoupled from the
   OS-post path** — a system banner can still fire with in-app off.
-- **`systemEnabled`** is the **outer guard** on OS posts: false short-circuits
-  before mute evaluation, so a disabled-system-banner path never even evaluates
-  muting.
+- **`systemEnabled`** gates the OS-post path, independently of inbox delivery.
+  The coordinator also requires authorized system notifications; it does not
+  request authorization when processing a candidate.
 - **`soundEnabled`** is passed **per call** as `OSNotifier.post(playSound:)`,
   not stashed as adapter state — a stateful `playSound` property would race when
   a batch of posts straddles a settings flip.
@@ -242,10 +212,15 @@ policy chokepoint) enforces:
 
 The inbox **is** the only in-app surface; there is no separate transient toast,
 so gating it satisfies the "no in-app banner" requirement without building one.
-Two distinct mute-style switches are easy to confuse and must stay distinct: a
-top-level `enabled` short-circuits the whole pipeline (no inbox append at all),
-whereas `mute.enabled` still appends to the inbox but silences OS post + badge +
-sound. The full notification pipeline (detector → coordinator → sinks,
+The schema has no top-level `enabled` or `mute.enabled` switch. `mute`
+contains `mutedRuleIDs` and `mutedPaneIDs`; the Settings UI reports their
+counts. Runtime Pane muting uses the `notifications:muted` label and drops
+candidates in the detector before any delivery path. The stored mute sets
+are not consulted by the detector or coordinator.
+
+`statusBarBellEnabled`, `projectBellEnabled`, `worktreeBellEnabled`, and
+`tabBellEnabled` control indicator visibility without changing inbox collection.
+The full notification pipeline (detector → coordinator → sinks,
 roll-up badges, command-finished suppression) is its own subsystem — see
 [notifications.md](./notifications.md). This doc owns only the *settings* that
 gate it.
@@ -260,8 +235,8 @@ is held keyed by `ProjectID` and pruned when the catalog drops a Project.
 Durable shell decisions:
 
 - **Sidebar `selection` is transient, never persisted.** Closing the window
-  resets it; reopening defaults to General. Persisting it was rejected as a
-  product decision, not a technical one.
+  resets it; reopening defaults to General so each Settings session starts
+  from the global preferences.
 - **The sidebar group of Projects, and per-Project sub-rows, are driven by the
   live catalog**, not stored on the window — the catalog is the single source of
   truth for "what exists". `HierarchyClient.kind(of:)` returns `nil` for a gone
@@ -274,21 +249,37 @@ Durable shell decisions:
   `setProjectLifecycleScript`), whose live implementations chain into
   `SettingsStore.mutateProject(pid) { … }`. Per-Project writes do **not** route
   through `HierarchyClient` / the catalog (the storage-unification core).
-- **Per-Project sub-rows are kind-conditional, but kind is never surfaced.** No
-  icon, badge, or label distinguishes `git_repo` from `dir`; the only signal is
-  which sub-rows / Sections appear. Users infer the distinction implicitly. The
-  actual landed sidebar sub-rows under each Project are **General** and
-  **Commands** (`SettingsSection.projectGeneral` + `.projectScripts`); the
-  General pane renders editor/git-viewer/worktree/GitHub/environment as
-  kind-conditional *Sections* internally rather than as separate sidebar rows.
+- **Kind-specific content.** Project sidebar sub-rows are **General** and
+  **Commands**. General, Editor, and Environment sections apply to every kind.
+  Git projects and Servers also expose Worktree, GitHub, and Lifecycle sections;
+  Workspaces instead expose their member Projects. Default icons reflect the
+  Project kind and can be replaced by user-selected symbols, emoji, or images.
+
+## General defaults and agent launch preferences
+
+`general.defaultGitViewerID` defaults to `"built-in"`, including when the JSON
+key is missing or null. This value opens the app-owned diff window and is not
+an installed-editor registry entry. Registry cleanup preserves `"built-in"`
+and resets unknown external Git viewer IDs to it. Editor overrides continue
+to use `nil` for inheritance. See [Git Diff Viewer](git-diff-viewer.md).
+
+`quitConfirmation = auto` prompts only for busy live Panes: foreground
+commands, terminal progress, or agents in `working` / `blocked` state.
+`always` and `never` override that decision; `quitAction` independently chooses
+keep-running or snapshot behavior.
+
+`projects[pid].git.launchAgentProfileOnWorktreeCreate` remembers the Create
+Worktree sheet's agent selection. A missing, removed, or disabled profile
+resolves to None. The chosen profile launches after setup and catalog
+registration; a launch failure does not undo worktree creation. CLI creation
+uses the profile explicitly requested by that command, not this remembered
+sheet preference.
 
 ## Developer pane
 
-Two sections, both fed by `DeveloperPaneDependencies` (`@Environment`) so
-the T1-frozen detail switch never changes: the `codans` CLI symlink
-(`CLIInstallerClient`, privileged) and **Agent skills**. The former
-Diagnostics section (reveal `settings.json`, copy the app version) was
-dropped; the About pane carries the version.
+Two sections use `DeveloperPaneDependencies` (`@Environment`): the `codans`
+CLI symlink (`CLIInstallerClient`, privileged) and **Agent skills**. App version
+information belongs to the About pane.
 
 Both sections render through `InstallTargetRow`: the target's mark (24pt,
 `AgentLogoView` — brand SVG for Claude Code / Codex, an SF Symbol for the
@@ -314,28 +305,44 @@ path, so an app update updates the skill without the app doing anything.
 
 ## Lifecycle scripts vs hook subscriptions
 
-Per-Project worktree **lifecycle scripts** (`setup` / `archive` / `delete`
-shell commands on `GitProjectSettings`) run **inline and blocking** around the
-matching catalog action and can **abort** it: a non-zero `setupScript` blocks
-`createWorktree` (the on-disk dir is left, the catalog row is not added);
-`archive` / `delete` are fail-warn (the action proceeds, the failure is logged).
-This is deliberately distinct from the planned `worktree.*` **hook
-subscriptions**, designed to be async fire-and-forget and unable to block.
-Hook subscriptions and their dispatcher are not implemented; see
-[lifecycle-hooks.md](./lifecycle-hooks.md). The two designs are kept separate rather
-than overloading the hook dispatcher with a "block-and-fail-the-event" mode —
-the semantics (blocking-and-abortive vs fire-and-forget) are fundamentally
-different. Lifecycle scripts run headless via a direct `Process` (cwd = worktree
-path, env = the resolved Project env), not through a terminal surface.
+Per-Project `GitProjectSettings` holds `createScript`, `archiveScript`, and
+`deleteScript`. Their execution depends on the entry point:
+
+- **Local sidebar creation:** `createScript` runs as the setup phase inside
+  `GitWorktreeClient.createWorktreeStream`, in the new worktree, before the
+  stream emits `finished` and the sidebar adds the catalog row. It runs via
+  `/bin/bash -lc` with progress output in the pending row. A spawn failure or
+  non-zero exit adds a progress message and still completes creation; it does
+  not roll back the worktree. Stream cancellation terminates the tracked child.
+- **Remote sidebar creation:** plain SSH `git worktree add`; this path does
+  not execute `createScript`.
+- **Sidebar archive/delete:** the reducer stops running project scripts, opens
+  an Archive/Delete tab through `runWorktreeLifecycleScript`, and waits for its
+  pane to finish before changing the catalog or removing the worktree. A
+  non-zero script exit does not abort that action. The helper closes the script
+  tab on successful exit.
+- **CLI/RPC creation:** `HierarchyHandlers.createWorktree` materializes a
+  missing local Git worktree through the shared creation pipeline when a branch
+  is supplied. Effective copy/fetch preferences and `createScript` apply. An
+  existing path is registered without setup; remote and plain-directory paths
+  remain catalog-only. Workspace projects use the separate workspace API.
+- **Direct removal:** `removeWorktree` changes the catalog without lifecycle
+  scripts. `removeWorktreeWithGit`, including removal from the archived-worktree
+  list, also does not run the delete script.
+
+These scripts are distinct from the planned asynchronous `worktree.*` hook
+subscriptions. Hook subscriptions and their dispatcher are not implemented;
+see [lifecycle-hooks.md](./lifecycle-hooks.md). The worktree entry points and
+creation phases are documented in [worktree.md](./worktree.md).
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
 | A future feature re-opens the `settings.json` shared-file hazard. | `SettingsStore` is the only writer; flag any other `AtomicFileStore` write to `Settings`' URL in review. |
-| Reader resolves per-Project `defaultEditor` off the `Project` struct (always nil post-migration) → silent "use global default". | Documented above; resolve via `settings.projects[pid]` only. |
-| Mid-migration crash drops catalog overrides. | Synchronous catalog `saveNow` before the settings v2→v3 commit; idempotent re-fold next boot. |
-| Catalog/Settings load-order coupling (fold needs catalog loaded first). | Sequenced in bring-up; settings load asserts the catalog is not still loading. |
+| Reader bypasses per-Project preferences. | Resolve editor and worktrees-directory values via `settings.projects[pid]`. |
+| Migration failure leaves the original settings at risk of overwrite. | Preserve the source/backup and disable persistence on migration or backup failure. |
+| Catalog-only overrides are expected to appear in settings. | Bootstrap does not supply `catalogOverrides`; the loader parameter is not an automatic catalog migration. |
 | `kind` drift (stale `gitRoot` snapshot shows wrong sub-rows). | Re-derived on `.projectsChanged`; acceptable to show wrong rows for one catalog-refresh tick. |
 
 ## References

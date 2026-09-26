@@ -1,6 +1,6 @@
 # 设计文档：环境管理（构建通道、路径、环境变量）
 
-**状态：** 已实现（2026-09-05）
+**状态：** 已实现
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -24,7 +24,7 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 
 - 按分支或 worktree 隔离。所有 Debug 构建共用 `codans-dev`；需要时用 `CODANS_CONFIG_DIR` 手动隔离。
 - 给两个通道不同的 bundle id。这会拆开通知中心身份、Sparkle 状态和 URL scheme 注册，代价大于收益。
-- 子进程环境的白名单卫生（git、gh 的 env 转发）。它有自己的机制（`GitProcessEnv`），列在后续项里。
+- 子进程环境的白名单卫生（git、gh 的 env 转发）。它有自己的机制（`GitProcessEnv`），不属于 Pane 环境组装契约。
 
 ## 设计
 
@@ -34,8 +34,8 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 
 | 类型 | 负责 | 消费者 |
 |---|---|---|
-| `BuildChannel` | 全仓唯一的 `#if DEBUG`；`slug`（`codans-dev` / `codans`）和 `socketPath(uid:)` | `AppDirectories`、`CLIInvocation`、`SocketDiscovery`、`SocketPaths`、CLI 帮助文本 |
-| `CodansEnvironment.Key` | codans 读或写的每一个环境变量名，附写者、读者、生命周期 | 所有读写点；旧的类型化持有者（`BuiltinEnvVar`、`TermProgramEnv`、`CLIBundleLocator.EnvKey`、`HandoffKickoff.requestIDEnvironmentKey`）保留 API、从它取值 |
+| `BuildChannel` | 构建通道判定；`slug`（`codans-dev` / `codans`）和 `socketPath(uid:)` | `AppDirectories`、`CLIInvocation`、`SocketDiscovery`、`SocketPaths`、CLI 帮助文本 |
+| `CodansEnvironment.Key` | codans 读或写的每一个环境变量名，附写者、读者、生命周期 | 所有读写点；类型化持有者（`BuiltinEnvVar`、`TermProgramEnv`、`CLIBundleLocator.EnvKey`、`HandoffKickoff.requestIDEnvironmentKey`）保留 API、从它取值 |
 | `HandoffLayout` | `.codans/handoff/` 的文件与目录名 | `HandoffStore`（URL）、`HandoffKickoff`（给接收方的相对路径字符串） |
 
 app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，worktree pane 和 Master Terminal 共用。
@@ -86,7 +86,7 @@ app 侧的守卫处理「从 Release 的 pane 里 `make mac-run-app`」：子 ap
 
 CLI 侧的规则是**名字即通道**：`codans` 只驱动 release app，`codans-dev` 只驱动 dev app，`$CODANS_SOCKET_PATH` 只能在通道内细化目标。它等于对方通道的默认 socket，说明这个 pane 里敲了错的 CLI，两个方向处理不同：release 的 `codans` 出现在 dev pane 里**拒绝**（`CLIExitCode.wrongChannel` = 15，提示改用 `codans-dev`），因为 dev pane 里 agent 敲的任何东西都不允许误触生产 app；dev 的 `codans-dev` 出现在 release pane 里**忽略**继承值、拨 dev socket，因为开发者就是在生产 pane 里调 dev app 的。显式 `--socket` 永远生效，是有意跨通道的出口；其他任何值视为自定义 socket，两个通道都照用。`codans doctor` 把拒绝报成 `socketStatus wrong-channel` 而不退出。
 
-历史上 CLI 侧曾把 `$CODANS_SOCKET_PATH` 的读取写在默认参数里，调用方转发自己的可选标志时显式传入 nil、把默认参数顶掉，环境变量从未被读到——dev pane 里的每条命令都打到了生产 app。教训：**读环境变量不要放在 Swift 默认参数里**。
+可选 socket override 为 `nil` 时，解析器仍需在函数体内读取环境变量。环境读取不能仅依赖可被显式 `nil` 覆盖的默认参数，否则会跳过 `CODANS_SOCKET_PATH` 并落到构建默认值。
 
 ### Pane 环境的两个阶段
 
@@ -120,7 +120,7 @@ pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pan
 
 由 codans 自己生成的命令（handoff 的 kickoff 那行）由 `CLIInvocation.command` 拼写：`/usr/local/bin` 下没有该名字的条目、或该条目就指向本构建 → 写短名；条目指向别处（含失效软链）→ 写内置二进制的绝对路径。安装器把指向别的构建或已不存在的内置二进制的软链判为 stale，Install 直接替换。
 
-agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守一道（上一节）：release 的 `codans` 发现所在 pane 属于 dev 构建就拒绝并指出该用 `codans-dev`。这道守卫只对**带守卫的 CLI 版本**有效；已安装的旧 Release CLI 没有它，也忽略 `CODANS_SOCKET_PATH`，只有升级安装后才闭合。
+agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守一道（上一节）：release 的 `codans` 发现所在 pane 属于 dev 构建就拒绝并指出该用 `codans-dev`。需要确定二进制身份的脚本使用 `"$CODANS_CLI"`；裸命令的结果仍取决于调用方的 PATH。
 
 ### 覆盖点（隔离缝）
 
@@ -152,29 +152,18 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 ## Cross-Cutting
 
-- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把旧的类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
+- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
 - **可观测性**：`codans doctor` 打印它解析到的 socket 与 `socketFromEnvironment`；「命令跑到别的 app」先看这个。
-- **迁移**：无磁盘格式变化。pane 新增导出 `CODANS_PANE_ID`，仅对显式读它的调用方可见。
+- **调用方身份**：pane 导出 `CODANS_PANE_ID`；服务端由该 Pane 推导所属 Tab、Worktree 和 Project。
 
 ## 风险
 
 - **跨分支共享 `codans-dev`。** 一个分支的 Debug 构建写入新枚举值或新字段，老分支的构建读不出来或剥掉。本设计不解决（非目标）；缓解是 `CODANS_CONFIG_DIR`，以及让 catalog 解码对未知枚举值宽容（另行处理）。
 - **`ProcessInfo` 默认参数陷阱再次出现。** 缓解：`CodansEnvironment` 的注释与本文档明确禁止；code review 检查。
-- **已安装的旧 Release CLI。** 开发机上 `/usr/local/bin/codans` 指向的生产包若早于本设计，既无通道守卫又忽略 `CODANS_SOCKET_PATH`，dev pane 里裸敲 `codans` 仍会拨到生产 socket。只有发版并重新安装才消除；在此之前 codans 自己写出的命令全部走 `codans-dev`，剩余风险只在 agent 自发敲 `codans`。
-- **`/usr/local/bin` 之外的同名二进制。** `CLIInvocation.command` 只检查安装目录，`/opt/homebrew/bin/codans` 一类不会被察觉。对 dev 通道无影响（没有人往那里放 `codans-dev`），对本地构建、未安装的 Release app 有。
+
+- **`/usr/local/bin` 之外的同名二进制。** `CLIInvocation.command` 只检查安装目录，`/opt/homebrew/bin/codans` 一类不会被察觉。两个通道都可能遇到 PATH 中同名二进制遮蔽；需要确定身份时使用 `CODANS_CLI` 的绝对路径。
 - **`CODANS_CLI_NAME` 与 `BuildChannel.slug` 分叉。** 两处各写一份；`CLIBundleLocator` 在真实 bundle 上找不到二进制时安装器会报 bundleMissing，是最早的信号。
 - **第三方键的语义漂移。** `ZMX_*`、`GHOSTTY_*` 由外部工具定义；目录里登记的是 codans 对它们的用法，不是它们的规范。
-
-## 后续项
-
-不在本次范围、审计中看到的同类问题：
-
-- `GitWorktreeClient` 与 `LiveGitService` 有三处直接透传 `ProcessInfo` 环境给 git，而同目录的 `GitProcessEnv.build` 正是为此存在。
-- `LiveGitHubService` 为 `gh` 维护一份独立的转发白名单（`PATH`、`HOME`、`GH_CONFIG_DIR`、`XDG_CONFIG_HOME`）。
-- 工具二进制路径各自拼写：`/usr/bin/git` 四处、`/bin/sh` 三处。
-- `settings.json` 的文件名在迁移备份代码里拼了四次。
-- `WindowActionRouterFeature` 打开 Ghostty 配置时硬编码 `~/.config/ghostty/config`，未按 `GhosttyConfigFile.resolvedConfigURL()` 尊重 `XDG_CONFIG_HOME`。
-- 随包分发的补全脚本由 Release 构建生成、只描述 `codans`；Debug 包里 `codans-dev` 没有补全。
 
 ## 参考
 

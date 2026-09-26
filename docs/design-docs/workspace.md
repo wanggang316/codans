@@ -5,13 +5,13 @@
 
 ## 背景与范围
 
-一个任务经常横跨多个仓库（app + api + shared lib）。codans 今天一仓一 Project，用户要为每个仓库开 worktree、开 agent 会话，自己在中间传话。**Workspace** 让一个 agent 在一个终端里跨多仓库工作：一个普通文件夹作为根目录，里面放若干子仓库 checkout，元数据落在 `<root>/.codans/workspace.json`。
+**Workspace** 把同一任务涉及的多个仓库（如 app、api 和 shared library）组织到同一个 Project：一个普通文件夹作为根目录，里面放若干子仓库 checkout，元数据落在 `<root>/.codans/workspace.json`。
 
 建模上，**workspace 是一个 Project**：根目录是它的 main Worktree 行（agent 在这里跑），每个子仓库 checkout 是它下面一个**真正的 Worktree 行**。这样 tab / pane / 通知归属 / agent 状态 / `codans tree` 全部沿用四层层级，不需要平行的「子仓库行」通道。代价是 Worktree 的若干「本仓库 worktree」语义要按 kind 门控——本文逐条列出。
 
 ### 共同架构约束（不可违反）
 
-- **`Catalog.currentVersion` 不升版**。新字段 `Project.isWorkspace` / `Worktree.sourceGitRoot` 走 `decodeIfPresent` + 默认值省略 key，旧 catalog 往返字节一致（先例：`archived` / `isPinned` / `remoteHost`）。
+- **`Catalog.currentVersion` 为 3**。字段 `Project.isWorkspace` / `Worktree.sourceGitRoot` 走 `decodeIfPresent` + 默认值省略 key，缺失字段使用默认值（与 `archived` / `isPinned` / `remoteHost` 一致）。
 - **workspace 根永不被探测 git 根**。`HierarchyClient.reconcile` 在 `discoverGitRoot` 之前按 `project.isWorkspace` 分支到 `reconcileWorkspace`。否则一个恰好位于某仓库内的根目录会被自动升格为该仓库，随后的 stale sweep 会在一个焦点脉冲内把所有子行软归档。
 - **成员关系以 manifest 为准，活体事实以 git 为准**。manifest 只说「哪些仓库、什么角色、当初怎么建的」；分支与所属仓库每次 reconcile 从 git 读回（`git symbolic-ref --short HEAD`、`git rev-parse --git-common-dir`），手改或过期的 manifest 只能标错名字，不能让 app 对错误仓库动手。
 - **本地限定**。Server（SSH）Project 不能是 workspace，也不能作为成员来源。
@@ -21,12 +21,12 @@
 
 ### 目标
 
-- 把一个已有 manifest 的文件夹加进侧栏即成为 workspace：workspace 行（即根目录）+ 子行，分支实时刷新，`tree --json` 报 `kind: workspace`。（M1）
-- 从侧栏已注册的本地 Project 或任意本地仓库路径创建 workspace，CLI 优先（`codans workspace create/add`），GUI sheet 走同一条编排。（M2）
-- 成员可增删；移除 workspace 默认只删条目，显式选择才动磁盘与分支。（M2/M3）
-- 子仓库在其源 Project 中仍可见、带「in workspace X」标记，但所有破坏性批量操作绕开它。（M2）
-- 子仓库 PR 状态按仓库取数，workspace 行聚合显示。（M3）
-- 成员来源补齐：远程 URL（先 clone 到用户选定的本地位置，之后与本地仓库一致）；检出模式补「使用已有远程跟踪分支」（本地同名分支存在时显式选 Keep / Reset，默认 Keep）。（M4）
+- 把一个已有 manifest 的文件夹加进侧栏即成为 workspace：workspace 行（即根目录）+ 子行，分支实时刷新，`tree --json` 报 `kind: workspace`。
+- 从侧栏已注册的本地 Project 或任意本地仓库路径创建 workspace，CLI 优先（`codans workspace create/add`），GUI sheet 走同一条编排。
+- 成员可增删；移除 workspace 默认只删条目，显式选择才动磁盘与分支。
+- 子仓库在其源 Project 中仍可见、带「in workspace X」标记，但所有破坏性批量操作绕开它。
+- 子仓库 PR 状态按仓库取数，workspace 行聚合显示。
+- 成员来源包括：远程 URL（先 clone 到用户选定的本地位置，之后与本地仓库一致）；检出模式支持「使用已有远程跟踪分支」（本地同名分支存在时显式选 Keep / Reset，默认 Keep）。
 
 ### 非目标
 
@@ -47,16 +47,16 @@
 | D5 | `Project.workspace: WorkspaceManifest?` transient（同 `loadState`），reconcile 填充，仅供展示 | 首次 reconcile 前为 nil，reducer 逻辑不得依赖 |
 | D6 | `Worktree.sourceGitRoot: String?` 持久化，nil 省略；来源是 git 而非 manifest；经 `Project.repoRoot(for:)` 读取 | `blockedBranches` 与 GitHub 取数在启动恢复选择时同步读 catalog，早于任何 reconcile |
 | D7 | 子行 = 普通 `Worktree`：`name` = 子目录名（根下唯一），`branch` = 实时分支，`path` = `<root>/<name>` canonical | 无需 Worktree 种类字段；name 不随分支改名 |
-| D8 | 根行 = `addProject` 已有的 synthetic 行（`path == rootPath`），沿用 main-checkout 守卫；`HierarchyManager.removeWorktree` 对所有 kind 补上该守卫（IPC 路径此前无保护） | |
+| D8 | 根行 = `addProject` 已有的 synthetic 行（`path == rootPath`），沿用 main-checkout 守卫；`HierarchyManager.removeWorktree` 对所有 kind 使用该守卫 | |
 | D9 | 子目录消失 → 软归档（沿用 stale sweep 语义），前提是 manifest 可读；manifest entry 保留；manifest 不再点名的行原样保留并记日志 | reconcile 永不删行；keep-row 没有 UI 承载 |
-| D10 | 源 Project 中的镜像行保留并打标记，破坏性路径逐处守卫（见 M2） | Gump 的选择：信息不丢 |
+| D10 | 源 Project 中的镜像行保留并打标记，破坏性路径逐处守卫（见下文移除规则） | 保留分支占用信息，同时防止通用删除入口破坏成员关系 |
 | D11 | manifest 在 `<root>/.codans/workspace.json`，常量集中在 `WorkspaceLayout`（复用 `HandoffLayout.stateDirectoryName`）；默认根目录 `~/.codans/workspaces/<slug>` | 与 `~/.codans/repos/<project>` 对称 |
 | D12 | 创建校验：根目录不得位于任何 git 仓库内 | 旧构建仍会对 workspace 根跑 `discoverGitRoot`，这是唯一真正的防线；已知限制 |
-| D13 | 环境变量 `CODANS_WORKSPACE_ROOT` 只在 workspace Project 的 pane 注入（`CODANS_ROOT_PATH` 已等于根目录） | 显式信号，非 workspace 下不存在（M2） |
+| D13 | 环境变量 `CODANS_WORKSPACE_ROOT` 只在 workspace Project 的 pane 注入（`CODANS_ROOT_PATH` 已等于根目录） | 显式信号，非 workspace 下不存在 |
 | D14 | `WorkspacePlan.Member.source: Source = .local(gitRoot) \| .remote(url, cloneDestination)`；`sourceGitRoot` 是派生属性（远程 = clone 目标） | 远程只是「先 clone」的本地源；成员统一是 linked worktree，`sourceGitRoot` 永不等于成员自身路径，drop / remove / reconcile / PR 取数零特判 |
 | D15 | `WorkspaceCheckout.remoteTrackingRef(remoteRef, branch, resetLocal)`：本地无同名分支 → `worktree add --track -b`；有且 `resetLocal == false` → 降级为 `existingBranch`；有且 `resetLocal == true` → 先记 `resetBranch(previousTip)` 再 `--track -B` | `-B` 只在用户显式要求重置时出现；账本能把被重置的分支恢复到原 tip |
-| D16 | manifest `checkoutMode` 加 `remoteTrackingRef`（`baseRef` 存远程 ref）；`Entry.remoteURL` 只记 provenance | 最小 schema 变化；老构建重存会剥掉 `remoteURL`，只丢信息不改行为 |
-| D17 | 来源探测统一走 `GitWorktreeCLI.inspectRepository(at:)`（`--git-common-dir` + `--is-bare-repository`），替代 `discoverGitRoot`；裸仓库来源以 `bareRepository` 拒绝（远程 clone 目标若是裸仓库也不复用）；根目录的祖先探测同样换用 | 子目录与 linked worktree 能归一到仓库根；裸仓库给出明确原因，而不是笼统的「不是 git 仓库」；根不能建在裸仓库目录内 |
+| D16 | manifest `checkoutMode` 支持 `remoteTrackingRef`（`baseRef` 存远程 ref）；`Entry.remoteURL` 只记 provenance | 最小 schema 变化；老构建重存会剥掉 `remoteURL`，只丢信息不改行为 |
+| D17 | 来源探测统一走 `GitWorktreeCLI.inspectRepository(at:)`（`--git-common-dir` + `--is-bare-repository`）；裸仓库来源以 `bareRepository` 拒绝（远程 clone 目标若是裸仓库也不复用）；根目录的祖先探测使用同一入口 | 子目录与 linked worktree 能归一到仓库根；裸仓库给出明确原因，而不是笼统的「不是 git 仓库」；根不能建在裸仓库目录内 |
 | D18 | 来源为仓库子目录或 linked worktree 时接受并归一到仓库根 | 与 `--repo` 的服务端行为一致，少一个拒绝理由 |
 | D19 | 远程 clone 默认目标 `~/.codans/sources/<repoName>`（`WorkspaceLayout.defaultSourcesDirectory` / `uniquePath` / `repositoryName(fromRemoteURL:)`），用户可改；目标已存在且 `remote get-url origin` 与 URL 等价（忽略尾部 `/` 与 `.git`）→ 复用不 clone，否则 `cloneDestinationTaken` | 让用户选择 clone 到哪里；复用避免重复 clone；不覆盖别的仓库 |
 | D20 | clone 走 `GitWorktreeClient.cloneStream`（`git clone --progress`，`runStream` 按 `\r` 也切行，进程盒可终止，`GIT_TERMINAL_PROMPT=0`）；账本新步 `clonedRepository`，复用的仓库不记账 | 数分钟的 clone 必须可取消、有进度；回滚不能删用户已有仓库 |
@@ -116,9 +116,9 @@ ProjectReconciler.reconcile
 `reconcileWorkspace`：读 manifest → 写 transient `Project.workspace` → 每个 entry 解析 `<root>/<path>` 并 canonical 化、stat、`currentBranch`、`repositoryRoot(forCheckoutAt:)` → `HierarchyManager.reconcileWorkspaceChildren(projectID:observations:)`：
 
 - 有目录无行 → 追加子行；有行 → 原地刷新 `branch` / `sourceGitRoot`（保留 id、tabs、flags，不改 name）；目录消失且行未归档未 pin → 软归档；根行永不触碰；空观察集不归档。
-- 不调用 `sweepExpiredArchivedWorktrees`（它按 `project.gitRoot` 删 worktree，对 workspace 无意义；M3 改走 `repoRoot(for:)`）。
+- 不调用 `sweepExpiredArchivedWorktrees`；成员删除使用 `Project.repoRoot(for:)` 解析所属仓库。
 
-### UI 门控（M1）
+### UI 门控
 
 | 位置 | 规则 |
 |---|---|
@@ -164,7 +164,7 @@ App/Features/CreateWorkspace/
   WorkspaceRefPicker / WorkspaceCreationBar
 ```
 
-依赖方向不变：app → Runtime → CodansCore；`CodansCore` 不 import AppKit，不 spawn 进程。
+依赖方向：app → Runtime → CodansCore；`CodansCore` 不 import AppKit，不 spawn 进程。
 
 ### 创建与添加成员
 
@@ -217,7 +217,7 @@ WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
 
 ### GitHub：按成员仓库取数
 
-`GitHubFeature` 的所有按 Project 键控的状态（`snapshotsByProject`、in-flight / queued 集合、`projectGitRoots`、`projectWorktreePairs`、cancel id、磁盘缓存）**原封不动**。变化只在 `RootFeature` 的派发侧：
+`GitHubFeature` 的状态以 `ProjectID` 为键，包括 `snapshotsByProject`、in-flight / queued 集合、`projectGitRoots`、`projectWorktreePairs`、取消标识与磁盘缓存。`RootFeature` 将 Workspace 成员仓库映射到独立取数单元：
 
 - `RootFeature.gitHubFetchUnits(in:)` 把一个 Project 拆成若干「取数单元」`(projectID, gitRoot, pairs)`：git Project 一个单元、键为自身 id；workspace 按 `Project.repoRoot(for:)` 分组，每个成员仓库一个单元，键为 `workspaceFetchGroupID(workspace:gitRoot:)`——对 `"<workspaceID>|<canonical gitRoot>"` 取 SHA-256 前 16 字节做成 `ProjectID`，跨启动稳定，磁盘缓存能按同一键回填。
 - 激活 Project 时对每个单元各发一次 `projectActivated`；`pruneToCatalog` 的存活集合 = 全部 Project id ∪ 全部单元 id；`seedFromCache` 同样按单元回填。
@@ -225,17 +225,17 @@ WorkspaceHandlers (workspace.*) ─┘        │ 失败 / 取消
 - pane 内 `git` / `gh` 命令结束后的刷新只打该 pane 所在行的单元；「Open Project on GitHub」在 workspace 里打开选中成员的仓库。
 - 根行聚合徽标：`ProjectHeaderRow.workspacePullRequestSummary` 汇总子行 `snapshots[worktreeID]`，显示「N PRs · M merged」。
 
-取舍：把 `GitHubFeature` 改为复合键会同时改动 reducer、动作签名、磁盘缓存形状与约 160 处测试引用；派生 id 让 reducer 与其测试零改动，代价是 Settings → GitHub 的 per-Project 错误横幅对 workspace 显示的是单元 id 而非名字（当前无消费者读该字段）。
+派生 ID 保持 reducer、取消标识与磁盘缓存使用同一种键。错误状态也按取数单元保存；展示错误时需要把单元 ID 映射回 Workspace 与成员仓库。
 
 ## 备选方案
 
 - **子仓库作为元数据行而非 Worktree**：状态刷新要单开通道、diff / 通知 / agent 状态各需一层抽象、没有 tab 计数。放弃。
 - **manifest 为唯一真相、不持久化标记**：kind 在加载时需要 stat，根目录不可达时会读成 `.dir`，目录回来后下一脉冲即触发 discoverGitRoot + sweep。放弃。
-- **源 Project 中隐藏镜像行**（在 `reconcileDiscoveredWorktrees` 里按 workspace 根前缀跳过）：一条规则解决所有破坏性路径，但源 Project 看不到该分支已被 checkout。Gump 选择显示并打标记，代价是逐处守卫；本文 M2 列全。
+- **源 Project 中隐藏镜像行**（在 `reconcileDiscoveredWorktrees` 里按 workspace 根前缀跳过）：一条规则解决所有破坏性路径，但源 Project 看不到该分支已被 checkout。显示并打标记保留占用信息，代价是逐处守卫；每个删除与归档入口都必须检查成员归属。
 - **symlink link 模式**：见非目标。
 
 ## 横切关注点
 
-- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`；D12 要求根不在仓库内，D3 修复清掉误写的 gitRoot。老构建重存 manifest 会剥掉 `remoteURL`（D16）。裸仓库既不能作为成员来源，其目录内也不能建 workspace 根（D17）。远程来源的 clone 只在回滚时删除；drop / remove 成员不删 clone，它是普通本地仓库。
+- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`；D12 要求根不在仓库内，加载修复清除不适用于 Workspace 的 gitRoot。老构建重存 manifest 会剥掉 `remoteURL`（D16）。裸仓库既不能作为成员来源，其目录内也不能建 workspace 根（D17）。远程来源的 clone 只在回滚时删除；drop / remove 成员不删 clone，它是普通本地仓库。
 - **日志**：`com.gumpw.codans.hierarchy/reconcile` 记录追加 / 归档 / 「manifest 不再点名的行」/ 「子仓库所属仓库与 manifest 声明不符」。
 - **测试**：`WorkspaceManifestTests` / `WorkspaceCatalogTests`（CodansCoreTests，host-free）；`HierarchyManagerWorkspaceTests`、`CatalogStoreWorkspaceRepairTests`、`HierarchyHandlersWorkspaceTests`、`HierarchyClientWorkspaceReconcileTests`（后者用真实 git：嵌套在外层仓库内的根不获得 gitRoot、子行取到分支与源仓库）；`WorkspacePlanTests` / `RemoteHeadsTests`（来源、检出、账本、ls-remote 解析）；`WorkspaceClientTests`（真实 git：远程 clone 与复用、裸源被拒、preflight 文案与空分支、remoteTrackingRef 三种情形、回滚恢复被重置分支、fetch 失败、clone 中取消）；`CreateWorkspaceFeatureTests`（TestStore：预选成员、标题派生目录与未命名的新分支、Add Project 菜单打开弹窗、文件夹弹窗随选择器打开 / 拒绝原因 / 重新选择、远程弹窗的 URL 停顿生效 / 去重 / clone 父目录保留、编辑只在 Save 生效、弹窗允许跟随标题的空分支、ls-remote 超时、未填完与问题的分级、两种检出模式的校验（含同一列表里本地 / 远程两条路径）、行摘要、debounce preflight 覆盖弹窗草稿、创建事件流、失败后重试与编辑清除、取消回滚与运行中锁定、add 模式、URL 分类）；`CatalogResolutionTests`（显示中的选中 Project 回退）；`BranchNameSyntaxTests`。
