@@ -22,6 +22,9 @@ final class RunMenuRowView: NSView {
 
   struct Content {
     var icon: NSImage?
+    /// Drawn instead of `icon` while the row is highlighted: the tinted glyph
+    /// in the highlight's text colour, as a stock item's template image turns.
+    var highlightedIcon: NSImage?
     var title: String
     var subtitle: String?
     var trailingText: String?
@@ -130,7 +133,7 @@ final class RunMenuRowView: NSView {
     let secondary: NSColor =
       highlighted ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.8) : .secondaryLabelColor
 
-    if let icon = content.icon {
+    if let icon = highlighted ? (content.highlightedIcon ?? content.icon) : content.icon {
       let box = RunMenuMetrics.iconBox
       let size = Self.aspectFit(icon.size, in: box)
       let rect = NSRect(

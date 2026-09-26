@@ -46,10 +46,12 @@ struct CommandSuggestionMenuSection: View {
     } label: {
       // Icon + title + a second Text: the shape AppKit-backed menus render as
       // a subtitle. Wrapping the texts in a `Label` drops the subtitle.
+      // Template images: the menu colours them like the title, so a
+      // highlighted row inverts its icon too (a baked tint would not).
       if isAdopted {
         Image(systemName: "checkmark")
-      } else {
-        ScriptTintColorPalette.menuIcon(suggestion.resolvedIcon, tint: suggestion.kind.defaultTintColor)
+      } else if let icon = CommandIconImage.template(suggestion.resolvedIcon) {
+        Image(nsImage: icon)
       }
       Text(suggestion.name)
       Text(Self.subtitle(for: suggestion))
