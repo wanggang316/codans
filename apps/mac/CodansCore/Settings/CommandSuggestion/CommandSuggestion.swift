@@ -36,14 +36,17 @@ public nonisolated struct CommandSuggestion: Hashable, Sendable, Identifiable {
     name: String,
     command: String,
     detail: String? = nil,
-    kind: ScriptKind? = nil
+    kind: ScriptKind? = nil,
+    icon: CommandIconRef? = nil
   ) {
     self.source = source
     self.name = name
     self.command = command
     self.detail = detail.flatMap { $0.isEmpty ? nil : $0 }
     self.kind = kind ?? ScriptKindInference.kind(forEntryName: name)
-    self.icon = CommandIconCatalog.icon(forEntryName: name, command: command, body: self.detail)
+    // Curated suggestions pick their glyph; detected ones go through the
+    // shared mapping.
+    self.icon = icon ?? CommandIconCatalog.icon(forEntryName: name, command: command, body: self.detail)
   }
 
   /// Icon to draw for this suggestion before it is adopted.

@@ -52,6 +52,18 @@ public nonisolated enum CommandSuggestionAdoption {
     return Result(scripts: scripts + [script], scriptID: script.id)
   }
 
+  /// Global commands have no kind taxonomy (no built-in Run, no one-per-kind
+  /// rule): a suggestion is appended as a Custom command that keeps its icon.
+  public static func adoptGlobal(_ suggestion: CommandSuggestion, into scripts: [ScriptDefinition]) -> Result {
+    let script = ScriptDefinition(
+      kind: .custom,
+      name: suggestion.name,
+      command: suggestion.command,
+      systemImage: suggestion.icon.flatMap { $0 == .symbol(ScriptKind.custom.defaultSystemImage) ? nil : $0.storedValue }
+    )
+    return Result(scripts: scripts + [script], scriptID: script.id)
+  }
+
   /// The saved script that already runs this suggestion's command, if any.
   public static func adoptedScript(for suggestion: CommandSuggestion, in scripts: [ScriptDefinition])
     -> ScriptDefinition?
