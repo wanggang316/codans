@@ -9,7 +9,9 @@ IPHONE_DESTINATION ?= platform=iOS Simulator,name=iPhone 17 Pro,OS=latest
 IPAD_DESTINATION   ?= platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=latest
 TEST_DESTINATION   ?= $(IPHONE_DESTINATION)
 
-XCODEBUILD := xcodebuild -workspace CodansMobile.xcworkspace -configuration Debug
+# SwiftTerm ships a build-tool plugin; command-line builds cannot answer
+# Xcode's trust prompt for it.
+XCODEBUILD := xcodebuild -workspace CodansMobile.xcworkspace -configuration Debug -skipPackagePluginValidation
 
 help:
 	@echo "apps/ios Makefile targets (usually invoked via top-level 'make ios-*'):"

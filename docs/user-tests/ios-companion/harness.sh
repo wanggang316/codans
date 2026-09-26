@@ -159,7 +159,7 @@ run_ui_test() {
     TEST_RUNNER_CODANS_E2E_INPUT="$line" \
     TEST_RUNNER_CODANS_E2E_COMPOSER_PROMPT="$prompt" \
     TEST_RUNNER_CODANS_E2E_SHOTS="$SHOTS/$name" \
-    xcodebuild -workspace CodansMobile.xcworkspace -scheme CodansMobile \
+    xcodebuild -workspace CodansMobile.xcworkspace -scheme CodansMobile -skipPackagePluginValidation \
       -destination "platform=iOS Simulator,id=$SIM" \
       -resultBundlePath "$SCRATCH/$name.xcresult" \
       test -only-testing:"CodansMobileUITests/RemoteEndToEndUITests/$method" >"$SCRATCH/$name.log" 2>&1)

@@ -36,6 +36,13 @@ let infoPlist: [String: Plist.Value] = [
 
 let project = Project(
   name: "CodansMobile",
+  // SwiftTerm renders the live pane stream. An Xcode package rather than a
+  // Tuist external: Tuist's generated target for it does not build (its
+  // build-info plugin), and only this app needs it. The package's plugin
+  // makes every xcodebuild invocation pass -skipPackagePluginValidation.
+  packages: [
+    .remote(url: "https://github.com/migueldeicaza/SwiftTerm", requirement: .exact("1.20.0"))
+  ],
   settings: .settings(
     base: [
       "CODE_SIGN_STYLE": "Automatic",
@@ -69,12 +76,14 @@ let project = Project(
         "CodansMobile/Features/Connection",
         "CodansMobile/Features/PaneDetail",
         "CodansMobile/Features/Settings",
+        "CodansMobile/Features/Terminal",
       ],
       dependencies: [
         .project(target: "CodansCore", path: "../mac"),
         .project(target: "CodansIPC", path: "../mac"),
         .project(target: "CodansRemote", path: "../mac"),
         .external(name: "ComposableArchitecture"),
+        .package(product: "SwiftTerm"),
       ],
       settings: .settings(
         base: [
@@ -101,6 +110,7 @@ let project = Project(
         .project(target: "CodansCore", path: "../mac"),
         .project(target: "CodansIPC", path: "../mac"),
         .external(name: "ComposableArchitecture"),
+        .package(product: "SwiftTerm"),
       ],
       settings: .settings(
         base: [
