@@ -2,17 +2,17 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Native toolbar split button: primary action runs the Project's
-/// first script (whichever the user has dragged to index 0 in
-/// Settings → Project Scripts); the chevron half lists every script
-/// plus a "Manage Scripts…" footer. Empty-state: primary click and
-/// every menu item route to "Manage Scripts" so users land in a
-/// place where they can create one. Uses
-/// `Menu(content:label:primaryAction:)` so macOS renders the native
-/// split-button chrome.
+/// Toolbar split button: the primary half runs the Project's first script
+/// (whichever the user has dragged to index 0 in Settings → Project Commands);
+/// the chevron half opens the command dropdown — Project and Global commands,
+/// the Config Files section (commands detected in the worktree's manifests),
+/// and the two "Manage …" footers. Empty state: the primary click opens
+/// Manage Project Commands so users land where they can create one.
 ///
-/// Both halves dispatch through `WorktreeHeaderFeature.delegate` so
-/// `RootFeature` owns the `HierarchyClient.runScript` effect.
+/// Rendered by `RunSplitButton` (AppKit) rather than SwiftUI's `Menu`: the
+/// dropdown's taller rows and per-row add accessory need view-backed menu
+/// items. Every action dispatches through `WorktreeHeaderFeature.delegate`
+/// so `RootFeature` owns the run effects.
 struct HeaderRunScriptSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
   /// Project whose script list the dropdown enumerates. The active
@@ -33,24 +33,12 @@ struct HeaderRunScriptSplitButton: View {
   /// `body` re-render the button when a run pane starts/stops executing —
   /// same source the tab busy spinner reads.
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(CommandKeyObserver.self) private var commandKeyObserver
 
   var body: some View {
-    // Read scripts once, here, inside body. Two load-bearing reasons:
-    // 1. Swift Observation only tracks reads that happen during a
-    //    body re-evaluation. Reading via a computed-property getter
-    //    that is called from a `label:` closure CAN escape the
-    //    observation context inside a toolbar Menu — body would not
-    //    re-render when SettingsStore mutates.
-    // 2. .id(_:) below uses these values as the Menu's identity. The
-    //    scripts ARRAY and ORDER both contribute, so any add / edit /
-    //    delete / reorder forces SwiftUI to rebuild the Menu (and the
-    //    underlying NSMenu, which otherwise caches its items across
-    //    open / close cycles).
+    // Read in body so Observation re-renders the button when the primary
+    // script changes; the dropdown reads its own live state when it opens.
     let scripts = settingsStore.settings.projects[projectID]?.scripts ?? []
-    // Global commands (`general.globalScripts`) surface in the same dropdown
-    // under their own section, below the Project commands. Read here in body
-    // for the same Observation + `.id(_:)` reasons as the project list.
-    let globalScripts = settingsStore.settings.general.globalScripts
     // Primary is whichever script the user has placed at index 0
     // in the Settings → Project Scripts list. Drag-to-reorder is
     // the only knob the user has — preferring `.run` kind over
@@ -82,200 +70,96 @@ struct HeaderRunScriptSplitButton: View {
       : primary?.keyboardShortcut.flatMap {
         $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
       }
-    // Per-script running flags, read in body so Observation re-renders this
-    // view when a run pane starts/stops. Folded into the Menu `.id` below so
-    // the cached NSMenu's items flip Run⇄Stop instead of staying stale.
-    let runningSignature =
-      (scripts + globalScripts)
-      .map { hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id) ? "1" : "0" }
-      .joined()
-
-    Menu {
-      caretMenu(scripts: scripts, globalScripts: globalScripts)
-    } label: {
-      // Standalone Image, not `Label(_:systemImage:)` — the toolbar's
-      // default LabelStyle collapses a Label to a single-colour template,
-      // killing the script's tint colour. A bare Image lets
-      // `.foregroundStyle(primaryTint)` survive toolbar reduction, and
-      // `.symbolRenderingMode(.palette)` defends against SwiftUI fallbacks
-      // that would otherwise re-monochrome the glyph at render time. The
-      // script name (and Run/Stop verb) lives in the tooltip and
-      // accessibility label; the red stop square is the visible state.
-      Self.toolbarGlyph(primaryIcon, tint: primaryTint)
-        // play.fill (triangle) and stop.fill (square) have different glyph
-        // widths, so a bare swap made the button reflow on every toggle.
-        // A fixed square footprint keeps the icon column constant and the
-        // `.replace` transition cross-fades the swap instead of popping.
-        .contentTransition(.symbolEffect(.replace))
-        .frame(width: 16, height: 16)
-        .accessibilityHidden(true)
-        // Chord rides right after the icon (left of the chevron), matching
-        // the sibling Open button — anchoring on the trailing edge would let
-        // it merge with the system menu indicator.
-        .commandKeyHint(chord: primaryChord)
-    } primaryAction: {
-      if let script = primary {
-        if isRunning {
-          store.send(.stopScriptTapped(scriptID: script.id))
+    RunSplitButton(
+      image: CommandIconImage.tinted(primaryIcon, color: NSColor(primaryTint), pointSize: RunMenuMetrics.iconPointSize),
+      // Beside the glyph while ⌘ is held (the macOS menu convention): the
+      // primary script's shortcut, or the fixed ⌘. while it runs.
+      chordHint: commandKeyObserver.isCommandHeld ? primaryChord : nil,
+      toolTip: primaryHelp,
+      accessibilityLabel: isRunning ? "Stop \(primaryName)" : primaryName,
+      onPrimary: {
+        if let script = primary {
+          store.send(isRunning ? .stopScriptTapped(scriptID: script.id) : .runScriptTapped(scriptID: script.id))
         } else {
-          store.send(.runScriptTapped(scriptID: script.id))
+          store.send(.manageScriptsTapped(projectID: projectID))
         }
-      } else {
-        store.send(.manageScriptsTapped(projectID: projectID))
-      }
-    }
-    .menuIndicator(.visible)
-    .accessibilityLabel(isRunning ? "Stop \(primaryName)" : primaryName)
-    .help(primaryHelp)
-    // Force Menu rebuild when scripts mutate. The signature folds id +
-    // displayName + icon + tint + ORDER so add / edit / delete /
-    // reorder all invalidate, across BOTH the project and global lists.
-    // Without this, NSMenu caches its items across open cycles and
-    // Settings-side edits don't reflect here.
-    .id(
-      Self.identitySignature(of: scripts) + "##"
-        + Self.identitySignature(of: globalScripts) + "#" + runningSignature + "#"
-        + CommandSuggestionMenuSection.identitySignature(
-          of: store.commandSuggestionsWorktreeID == worktreeID ? store.commandSuggestions : [],
-          isScanning: store.isScanningCommandSuggestions))
-    // Outside the `.id` so a script edit (which rebuilds the Menu) does not
-    // restart the scan; only a worktree switch does.
+      },
+      makeMenu: { menuModel() }
+    )
+    // Only a worktree switch rescans; script edits just change what the next
+    // menu open shows.
     .task(id: worktreeID) {
       store.send(.scanCommandSuggestions(projectID: projectID, worktreeID: worktreeID))
     }
   }
 
-  // MARK: - Caret menu
+  // MARK: - Dropdown
 
-  /// Menu order, top to bottom: Project Commands section, Global Commands
-  /// section, divider, then the two "Manage …" footers. A section is omitted
-  /// when its list is empty so an empty group header never shows; the Manage
-  /// footers always render so the user can reach either pane from here.
-  @ViewBuilder
-  private func caretMenu(
-    scripts: [ScriptDefinition],
-    globalScripts: [ScriptDefinition]
-  ) -> some View {
-    if !scripts.isEmpty {
-      Section("Project") {
-        ForEach(scripts) { script in
-          menuButton(for: script)
-        }
+  /// Built when the dropdown opens, from live state: settings, run flags and
+  /// the latest scan for this worktree.
+  private func menuModel() -> RunMenuModel {
+    let scripts = settingsStore.settings.projects[projectID]?.scripts ?? []
+    let globalScripts = settingsStore.settings.general.globalScripts
+    var model = RunMenuModel()
+    model.projectCommands = scripts.map { command(for: $0, isGlobal: false) }
+    model.globalCommands = globalScripts.map { command(for: $0, isGlobal: true) }
+    if store.commandSuggestionsWorktreeID == worktreeID {
+      model.isScanning = store.isScanningCommandSuggestions && store.commandSuggestions.isEmpty
+      model.configFiles = store.commandSuggestions.map { configFile(for: $0, scripts: scripts) }
+      model.refresh = { [store, projectID, worktreeID] in
+        store.send(.scanCommandSuggestions(projectID: projectID, worktreeID: worktreeID))
       }
     }
-    if !globalScripts.isEmpty {
-      Section("Global") {
-        ForEach(globalScripts) { script in
-          menuButton(for: script, isGlobal: true)
-        }
-      }
-    }
-    if !scripts.isEmpty || !globalScripts.isEmpty {
-      Divider()
-    }
-    // Detected commands, adopted (not run) on click — see
-    // `CommandSuggestionMenuSection`. Hidden until a scan for this worktree
-    // finds something, so projects without manifests keep today's menu.
-    if store.commandSuggestionsWorktreeID == worktreeID, !store.commandSuggestions.isEmpty {
-      CommandSuggestionMenuSection(
-        title: "Add from Project",
-        groups: store.commandSuggestions,
-        scripts: scripts,
-        isScanning: store.isScanningCommandSuggestions,
-        onAdd: { suggestion in
-          store.send(.addCommandSuggestionTapped(projectID: projectID, suggestion))
-        },
-        onRefresh: {
-          store.send(.scanCommandSuggestions(projectID: projectID, worktreeID: worktreeID))
-        }
-      )
-      Divider()
-    }
-    Button("Manage Project Commands…") {
-      store.send(.manageScriptsTapped(projectID: projectID))
-    }
-    Button("Manage Global Commands…") {
-      store.send(.manageGlobalScriptsTapped)
-    }
+    model.manageProjectCommands = { [store, projectID] in store.send(.manageScriptsTapped(projectID: projectID)) }
+    model.manageGlobalCommands = { [store] in store.send(.manageGlobalScriptsTapped) }
+    return model
   }
 
-  /// One menu item. When the script carries an enabled chord it is attached
-  /// via `.keyboardShortcut(_:modifiers:)` so macOS renders it right-aligned
-  /// in the native trailing accelerator column — the standard menu look. The
-  /// in-menu keyEquivalent is *display-only*: live chord dispatch is owned by
-  /// the menu-bar Commands menu (`MainWindowCommands`), the only path that
-  /// fires while a terminal pane holds first-responder. Trade-off, accepted:
-  /// the accelerator column widens every row, so the chord-less "Manage …"
-  /// footers show a right gutter — same as any system menu.
-  ///
-  /// `isGlobal` switches the run dispatch between the project run path
-  /// (`runScriptTapped`) and the global run path (`runGlobalScriptTapped`).
-  /// Stop is shared (`stopScriptTapped`) because the run pane is keyed by
-  /// (worktree, scriptID), unique across both lists.
-  @ViewBuilder
-  private func menuButton(for script: ScriptDefinition, isGlobal: Bool = false) -> some View {
-    // Mirror the primary half: a running script's menu row becomes a red
-    // "Stop …" that interrupts it.
+  /// A running script's row becomes a red "Stop …" that interrupts it. Stop is
+  /// shared by both lists: the run pane is keyed by (worktree, scriptID).
+  private func command(for script: ScriptDefinition, isGlobal: Bool) -> RunMenuModel.Command {
     let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
-    let button = Button {
-      if isRunning {
-        store.send(.stopScriptTapped(scriptID: script.id))
-      } else if isGlobal {
-        store.send(.runGlobalScriptTapped(scriptID: script.id))
-      } else {
-        store.send(.runScriptTapped(scriptID: script.id))
+    let chord = script.keyboardShortcut.flatMap {
+      $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
+    }
+    return RunMenuModel.Command(
+      id: script.id,
+      title: isRunning ? "Stop \(script.displayName)" : script.displayName,
+      icon: isRunning ? .symbol("stop.fill") : script.resolvedIcon,
+      tint: NSColor(ScriptTintColorPalette.color(for: isRunning ? .red : script.resolvedTintColor)),
+      chord: chord,
+      perform: { [store] in
+        if isRunning {
+          store.send(.stopScriptTapped(scriptID: script.id))
+        } else if isGlobal {
+          store.send(.runGlobalScriptTapped(scriptID: script.id))
+        } else {
+          store.send(.runScriptTapped(scriptID: script.id))
+        }
       }
-    } label: {
-      // Native menu items render their icon as a monochrome template, so the
-      // tint must be baked into a non-template image (see `menuIcon`) — a
-      // plain `Label(_:systemImage:)` would drop the script's colour.
-      Label {
-        Text(isRunning ? "Stop \(script.displayName)" : script.displayName)
-      } icon: {
-        ScriptTintColorPalette.menuIcon(
-          isRunning ? .symbol("stop.fill") : script.resolvedIcon,
-          tint: isRunning ? .red : script.resolvedTintColor
+    )
+  }
+
+  private func configFile(for group: CommandSuggestionGroup, scripts: [ScriptDefinition]) -> RunMenuModel.ConfigFile {
+    RunMenuModel.ConfigFile(
+      title: group.source.displayName,
+      icon: group.suggestions.first.flatMap { CommandIconCatalog.runnerIcon(forCommand: $0.command) },
+      entries: group.suggestions.map { suggestion in
+        RunMenuModel.Entry(
+          id: suggestion.id,
+          title: suggestion.name,
+          subtitle: CommandSuggestionMenuSection.subtitle(for: suggestion),
+          icon: suggestion.resolvedIcon,
+          tint: NSColor(ScriptTintColorPalette.color(for: suggestion.kind.defaultTintColor)),
+          isAdded: CommandSuggestionAdoption.isAdopted(suggestion, in: scripts),
+          run: { [store, projectID] in
+            store.send(.runCommandSuggestionTapped(projectID: projectID, suggestion))
+          },
+          add: { [store, projectID] in
+            store.send(.addCommandSuggestionTapped(projectID: projectID, suggestion))
+          }
         )
       }
-    }
-    if let chord = script.keyboardShortcut, chord.isEnabled, chord.keyCode != 0,
-      let key = ShortcutDisplay.keyEquivalent(for: chord.keyCode)
-    {
-      button.keyboardShortcut(key, modifiers: ShortcutDisplay.eventModifiers(for: chord.modifiers))
-    } else {
-      button
-    }
-  }
-
-  /// Primary-button glyph. A tool mark gets its tint baked into a
-  /// non-template image: toolbar reduction re-templates asset images and
-  /// would drop the colour that `.foregroundStyle` keeps on SF Symbols.
-  @ViewBuilder
-  private static func toolbarGlyph(_ icon: CommandIconRef, tint: Color) -> some View {
-    switch icon {
-    case .symbol(let name):
-      Image(systemName: name)
-        .symbolRenderingMode(.palette)
-        .foregroundStyle(tint)
-    case .mark:
-      if let image = CommandIconImage.tinted(icon, color: NSColor(tint), pointSize: 15) {
-        Image(nsImage: image)
-      }
-    }
-  }
-
-  /// Stable identity for `.id(_:)`. Folds every field that affects the Menu's
-  /// rendered output — name + icon + tint + chord + the array's order. id alone
-  /// wouldn't change on a same-id edit; including the rendered fields (the chord
-  /// shows in each row's accelerator column) means an edit to any of them still
-  /// rebuilds the cached NSMenu.
-  private static func identitySignature(of scripts: [ScriptDefinition]) -> String {
-    scripts
-      .map { script -> String in
-        let chord = script.keyboardShortcut.map { ShortcutDisplay.chord(for: $0) } ?? ""
-        return
-          "\(script.id)|\(script.displayName)|\(script.resolvedSystemImage)|\(script.resolvedTintColor.rawValue)|\(chord)"
-      }
-      .joined(separator: "·")
+    )
   }
 }

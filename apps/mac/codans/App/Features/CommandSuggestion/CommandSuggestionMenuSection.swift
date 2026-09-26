@@ -2,11 +2,10 @@ import CodansCore
 import SwiftUI
 
 /// Menu section listing a Project's detected commands, one submenu per
-/// manifest. Shared by the Commands table's `+` menu and the worktree header's
-/// Run dropdown so both offer the same items with the same look.
-///
-/// Picking an item only *adopts* the command into the Project; it never runs
-/// it — a detected `deploy` must not fire from a single misclick.
+/// manifest, for the Commands table's `+` menu: picking an item adopts the
+/// command into the Project. (The worktree header's Run dropdown lists the
+/// same commands through `RunMenuBuilder`, where a row runs and its trailing
+/// accessory adds.) `subtitle(for:)` is shared by both.
 struct CommandSuggestionMenuSection: View {
   let title: String
   let groups: [CommandSuggestionGroup]
@@ -66,12 +65,5 @@ struct CommandSuggestionMenuSection: View {
       subtitle += " — " + detail.split(whereSeparator: \.isNewline).joined(separator: " ")
     }
     return subtitle.count > subtitleLimit ? String(subtitle.prefix(subtitleLimit)) + "…" : subtitle
-  }
-
-  /// Folds everything the section renders into a string, for the `.id(_:)`
-  /// that forces a cached NSMenu to rebuild when suggestions change.
-  static func identitySignature(of groups: [CommandSuggestionGroup], isScanning: Bool) -> String {
-    (isScanning ? "scanning|" : "")
-      + groups.map { group in group.suggestions.map(\.id).joined(separator: ",") }.joined(separator: ";")
   }
 }

@@ -32,6 +32,16 @@ public nonisolated enum CommandIconCatalog {
     toolIcon(forToken: normalizedExecutable(executable))
   }
 
+  /// The tool that executes a command line, looking past a leading
+  /// `cd <dir> &&` so a nested entry resolves to its runner, not its folder.
+  public static func runnerIcon(forCommand command: String) -> CommandIconRef? {
+    var line = Substring(command)
+    if line.hasPrefix("cd "), let separator = line.range(of: "&&") {
+      line = line[separator.upperBound...]
+    }
+    return firstToolIcon(inCommandLine: String(line))
+  }
+
   // MARK: - Tables
 
   /// Action words people name entries after → SF Symbol. Keys are lowercase
