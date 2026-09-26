@@ -106,7 +106,7 @@ struct TerminalDetailView: View {
           health: store.connection.health,
           canManage: permission == .interactive && isConnected,
           select: { selectedPaneID = $0 },
-          newTab: { focused.send(.newTabTapped) },
+          newTab: { focused.send(.newTabTapped(cwd: location.pane.cwd)) },
           split: { focused.send(.splitTapped($0)) },
           rename: {
             renameText = location.tab.title ?? ""
@@ -237,7 +237,7 @@ struct TerminalDetailView: View {
       let tabs = location.worktree.tabs
       guard tabs.indices.contains(number - 1) else { return }
       select(TerminalLayout.landingPane(in: tabs[number - 1]))
-    case .newTab: focused.send(.newTabTapped)
+    case .newTab: focused.send(.newTabTapped(cwd: location.pane.cwd))
     case .splitRight: focused.send(.splitTapped(.right))
     case .splitDown: focused.send(.splitTapped(.down))
     case .zoomIn, .zoomOut, .clear: break
@@ -248,7 +248,7 @@ struct TerminalDetailView: View {
     switch navigation {
     case .paneClosed:
       selectedPaneID = TerminalLayout.paneAfterClosing(location.pane.id, in: location.worktree)
-    case .showTab, .showPane:
+    case .showPane:
       pending = navigation
       resolvePending()
     }
@@ -257,11 +257,6 @@ struct TerminalDetailView: View {
   private func resolvePending() {
     guard let pending, let worktree = location?.worktree else { return }
     switch pending {
-    case .showTab(let tabID):
-      guard let tab = worktree.tabs.first(where: { $0.id == tabID }),
-        let paneID = TerminalLayout.landingPane(in: tab)
-      else { return }
-      selectedPaneID = paneID
     case .showPane(let paneID):
       guard worktree.tabs.contains(where: { $0.panes.contains { $0.id == paneID } }) else { return }
       selectedPaneID = paneID

@@ -53,4 +53,26 @@ struct HierarchyHandlersOpenPaneEnvTests {
     let call = try #require(runtime.ensureSurfaceCalls.last)
     #expect(call.env["CODANS_TEST_MARK"] == "from-provider")
   }
+
+  /// The phone's hierarchy carries no worktree paths, so it opens a new
+  /// tab's pane with an empty directory and gets the worktree root.
+  @Test
+  func emptyWorkingDirectoryMeansTheWorktreeRoot() {
+    let worktree = Worktree(name: "main", path: "/repo/wt", branch: "main", tabs: [])
+    let project = Project(name: "repo", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+    let manager = HierarchyManager(
+      catalog: Catalog(projects: [project]),
+      store: CatalogStore(
+        fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+          .appendingPathComponent("codans-open-pane-cwd-\(UUID().uuidString).json")
+      ),
+      runtime: FakeHierarchyRuntime()
+    )
+    let handlers = HierarchyHandlers(manager: manager)
+
+    #expect(handlers.effectiveWorkingDirectory("", projectID: project.id, worktreeID: worktree.id) == "/repo/wt")
+    #expect(
+      handlers.effectiveWorkingDirectory("/repo/wt/src", projectID: project.id, worktreeID: worktree.id)
+        == "/repo/wt/src")
+  }
 }

@@ -200,7 +200,7 @@ enum DemoMode {
           if notOpen { throw RemoteFailure(.unsupported, "pane not open on the Mac") }
           return IPC.TerminalSendEventsResult(delivered: events.count, rejected: [])
         },
-        createTab: { _ in DemoFixtures.paneID("build") },
+        createTab: { _, _ in DemoFixtures.paneID("build") },
         splitPane: { _, _ in DemoFixtures.paneID("server") },
         renameTab: { _, _ in },
         closeTab: { _ in },

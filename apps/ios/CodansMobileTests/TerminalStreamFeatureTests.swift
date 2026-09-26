@@ -309,7 +309,7 @@ struct TerminalStreamFeatureTests {
     await store.send(.textTyped("rm -rf"))
     await store.send(.keyPressed(code: "Enter", mods: .none))
     await store.send(.modifierTapped(.ctrl))
-    await store.send(.newTabTapped)
+    await store.send(.newTabTapped(cwd: nil))
   }
 
   @Test

@@ -118,8 +118,6 @@ struct TerminalStreamFeature {
   }
 
   enum Navigation: Equatable {
-    /// Show this tab (its focused pane) once the hierarchy lists it.
-    case showTab(String)
     /// Show this pane once the hierarchy lists it.
     case showPane(String)
     /// The pane on screen is gone; pick another.
@@ -127,7 +125,6 @@ struct TerminalStreamFeature {
   }
 
   enum Management: Equatable {
-    case tabCreated(tabID: String)
     case paneCreated(paneID: String)
     case tabRenamed
     case paneClosed
@@ -160,7 +157,8 @@ struct TerminalStreamFeature {
     case toastExpired
 
     case openOnMacTapped
-    case newTabTapped
+    /// New tab in the same worktree, starting in `cwd` (the current pane's).
+    case newTabTapped(cwd: String?)
     case splitTapped(SplitDirection)
     case renameTabSubmitted(String)
     case closePaneConfirmed
@@ -351,10 +349,10 @@ struct TerminalStreamFeature {
           return .openedOnMac
         }
 
-      case .newTabTapped:
+      case .newTabTapped(let cwd):
         guard let location = state.location else { return .none }
         let createTab = remoteClient.createTab
-        return manage(&state) { .tabCreated(tabID: try await createTab(location)) }
+        return manage(&state) { .paneCreated(paneID: try await createTab(location, cwd)) }
 
       case .splitTapped(let direction):
         guard let location = state.location else { return .none }
@@ -388,9 +386,6 @@ struct TerminalStreamFeature {
       case .managementFinished(.success(let outcome)):
         state.isManaging = false
         switch outcome {
-        case .tabCreated(let tabID):
-          state.navigation = .showTab(tabID)
-          return .none
         case .paneCreated(let paneID):
           state.navigation = .showPane(paneID)
           return .none

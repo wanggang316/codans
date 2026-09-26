@@ -811,17 +811,19 @@ final class HierarchyHandlers {
     }
   }
 
-  /// The cwd a new pane in (`projectID`, `worktreeID`) starts in. Local
-  /// projects take `requested` as-is; a remote project accepts it only when
-  /// it targets the worktree (or a subpath) on the host, else the worktree
-  /// root — see `openPane` for why.
+  /// The cwd a new pane in (`projectID`, `worktreeID`) starts in. An empty
+  /// `requested` means the worktree root: the phone's hierarchy carries no
+  /// worktree paths. Local projects otherwise take `requested` as-is; a
+  /// remote project accepts it only when it targets the worktree (or a
+  /// subpath) on the host, else the worktree root — see `openPane` for why.
   func effectiveWorkingDirectory(
     _ requested: String, projectID: ProjectID, worktreeID: WorktreeID
   ) -> String {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
-      project.isRemote,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return requested }
+    if requested.isEmpty { return worktree.path }
+    guard project.isRemote else { return requested }
     let normalized = HierarchyManager.normalizeRemotePath(requested)
     let root = HierarchyManager.normalizeRemotePath(worktree.path)
     if normalized != root, !normalized.hasPrefix(root + "/") {

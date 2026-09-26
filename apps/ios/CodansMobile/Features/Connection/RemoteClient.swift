@@ -63,8 +63,11 @@ nonisolated struct RemoteClient: Sendable {
   /// `terminal.sendEvents`: one ordered batch.
   var sendEvents:
     @Sendable (_ paneID: String, _ events: [IPC.TerminalInputEvent]) async throws -> IPC.TerminalSendEventsResult
-  /// `hierarchy.createTab`; returns the new tab's ID.
-  var createTab: @Sendable (_ location: PaneLocator) async throws -> String
+  /// `hierarchy.createTab` in `location`'s worktree, then
+  /// `hierarchy.openPane` in it: the Mac creates tabs empty. The pane starts
+  /// in `workingDirectory`, or the worktree's root when nil. Returns the new
+  /// pane's ID.
+  var createTab: @Sendable (_ location: PaneLocator, _ workingDirectory: String?) async throws -> String
   /// `hierarchy.splitPane` beside `location.paneID`; returns the new pane's ID.
   var splitPane: @Sendable (_ location: PaneLocator, _ direction: SplitDirection) async throws -> String
   /// `hierarchy.renameTab`; an empty name clears the user's name.
@@ -107,7 +110,7 @@ nonisolated extension RemoteClient: DependencyKey {
       launchAgent: { try await sessions.launchAgent(projectID: $0, worktreeID: $1, profile: $2, prompt: $3) },
       attachStream: { try await sessions.attachStream($0) },
       sendEvents: { try await sessions.sendEvents($0, events: $1) },
-      createTab: { try await sessions.createTab($0) },
+      createTab: { try await sessions.createTab($0, workingDirectory: $1) },
       splitPane: { try await sessions.splitPane($0, direction: $1) },
       renameTab: { try await sessions.renameTab($0, name: $1) },
       closeTab: { try await sessions.closeTab($0) },
@@ -292,12 +295,20 @@ private actor LiveRemoteSessions {
     }
   }
 
-  func createTab(_ location: PaneLocator) async throws -> String {
-    let params = CreateTabParams(
-      projectID: ProjectID(raw: try Self.uuid(location.projectID)),
-      worktreeID: WorktreeID(raw: try Self.uuid(location.worktreeID)))
-    return try await withControl { control in
+  func createTab(_ location: PaneLocator, workingDirectory: String?) async throws -> String {
+    let projectID = try Self.uuid(location.projectID)
+    let worktreeID = try Self.uuid(location.worktreeID)
+    let params = CreateTabParams(projectID: ProjectID(raw: projectID), worktreeID: WorktreeID(raw: worktreeID))
+    let tabID = try await withControl { control in
       try await control.call(.hierarchyCreateTab, params: params, as: IDResult.self)
+    }.id
+    // An empty directory asks the Mac for the worktree's root, which the
+    // phone's hierarchy does not carry.
+    let pane = OpenPaneParams(
+      projectID: projectID, worktreeID: worktreeID, tabID: try Self.uuid(tabID),
+      workingDirectory: workingDirectory ?? "", initialCommand: nil, labels: [])
+    return try await withControl { control in
+      try await control.call(.hierarchyOpenPane, params: pane, as: IDResult.self)
     }.id
   }
 
@@ -406,6 +417,15 @@ private actor LiveRemoteSessions {
   private struct CreateTabParams: Encodable, Sendable {
     let projectID: ProjectID
     let worktreeID: WorktreeID
+  }
+
+  private struct OpenPaneParams: Encodable, Sendable {
+    let projectID: UUID
+    let worktreeID: UUID
+    let tabID: UUID
+    let workingDirectory: String
+    let initialCommand: String?
+    let labels: [String]
   }
 
   private struct SplitPaneParams: Encodable, Sendable {
