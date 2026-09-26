@@ -441,7 +441,9 @@ private struct PaneStrip: View {
       }
     }
     .padding(.horizontal, 14)
-    .frame(height: 30)
+    .padding(.vertical, 6)
+    // A minimum, not a fixed height, so larger text sizes are not clipped.
+    .frame(minHeight: 30)
     .frame(maxWidth: .infinity)
     .background(.bar)
     .overlay(alignment: .bottom) { Divider() }

@@ -268,9 +268,31 @@ final class TerminalInputView: UIView, UITextInput {
 
   /// Stops any repeat and returns the presses the text system owns.
   private func release(_ presses: Set<UIPress>) -> Set<UIPress> {
+    stopRepeat()
+    return presses.filter { handledPresses.remove(ObjectIdentifier($0)) == nil }
+  }
+
+  /// A held key's release goes to whoever is first responder by then, so
+  /// losing focus or the window must end the repeat here; otherwise it
+  /// would keep typing into the pane.
+  override func resignFirstResponder() -> Bool {
+    stopRepeat()
+    handledPresses.removeAll()
+    return super.resignFirstResponder()
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    guard window == nil else { return }
+    stopRepeat()
+    handledPresses.removeAll()
+  }
+
+  var isRepeatingKey: Bool { repeatTimer != nil }
+
+  private func stopRepeat() {
     repeatTimer?.invalidate()
     repeatTimer = nil
-    return presses.filter { handledPresses.remove(ObjectIdentifier($0)) == nil }
   }
 
   /// A hardware key this view sends itself, or nil to leave it to the text
@@ -285,7 +307,7 @@ final class TerminalInputView: UIView, UITextInput {
     return (code, mods)
   }
 
-  private func startRepeat(_ code: String, _ mods: IPC.TerminalKeyModifiers) {
+  func startRepeat(_ code: String, _ mods: IPC.TerminalKeyModifiers) {
     repeatTimer?.invalidate()
     // Hardware presses do not repeat on iOS; do it like a Mac would.
     repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.42, repeats: false) { [weak self] _ in

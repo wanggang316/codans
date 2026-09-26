@@ -171,6 +171,11 @@ private struct KeyCap: View {
         }
       }
     }
+    .onDisappear {
+      // A key bar that goes away mid-press never reports the release.
+      repeatTask?.cancel()
+      repeatTask = nil
+    }
     .accessibilityLabel(Self.spokenName(title))
     .accessibilityIdentifier("key-\(title)")
   }
@@ -269,6 +274,9 @@ private struct DPad: View {
   let send: (String) -> Void
 
   @State private var driver = DPadDriver()
+  /// Resets when the drag ends or is cancelled; only a cancel leaves the
+  /// driver running by then.
+  @GestureState private var isDragging = false
 
   var body: some View {
     Image(systemName: driver.direction.map(Self.symbol) ?? "dpad")
@@ -280,9 +288,17 @@ private struct DPad: View {
       .contentShape(.rect(cornerRadius: 8))
       .gesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
+          .updating($isDragging) { _, dragging, _ in dragging = true }
           .onChanged { value in driver.update(translation: value.translation, send: send) }
           .onEnded { value in driver.end(at: value.location, in: CGSize(width: 44, height: 34), send: send) }
       )
+      .onChange(of: isDragging) { _, dragging in
+        guard !dragging else { return }
+        // Deferred past `onEnded`, which SwiftUI may call after the reset;
+        // after a normal end there is nothing left to cancel.
+        Task { @MainActor in driver.cancel() }
+      }
+      .onDisappear { driver.cancel() }
       .accessibilityElement()
       .accessibilityLabel("Arrow keys")
       .accessibilityAdjustableAction { direction in
@@ -354,6 +370,20 @@ final class DPadDriver {
     distance = 0
     didDrag = false
   }
+
+  /// Stops the drag without the tap `end` would send. SwiftUI does not
+  /// call a drag's `onEnded` when the gesture is cancelled (the key bar
+  /// goes away, the system takes the touch), and without this the repeat
+  /// would keep typing arrows into the pane.
+  func cancel() {
+    loop?.cancel()
+    loop = nil
+    direction = nil
+    distance = 0
+    didDrag = false
+  }
+
+  var isRepeating: Bool { loop != nil }
 
   /// Milliseconds between repeats: 160 near the key, down to 30 far out.
   nonisolated static func interval(forDistance distance: CGFloat) -> Int {

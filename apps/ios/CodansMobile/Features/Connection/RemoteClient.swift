@@ -147,6 +147,9 @@ private actor LiveRemoteSessions {
   /// connection's frames serially, so a busy pane would otherwise hold up
   /// every other call.
   private var streams: [UUID: RemoteRPCClient] = [:]
+  /// Bumped by every `disconnect`, so a stream connection that finishes
+  /// opening after its session was replaced is closed, not kept.
+  private var sessionGeneration = 0
 
   func connect(_ gateway: PairedGateway, credential: RemoteTLS.PSKCredential) async throws -> RemoteSession {
     await disconnect()
@@ -201,6 +204,7 @@ private actor LiveRemoteSessions {
     self.events = nil
     self.streamTarget = nil
     self.streams = [:]
+    sessionGeneration += 1
     await control?.close()
     await events?.close()
     for stream in streams { await stream.close() }
@@ -208,11 +212,13 @@ private actor LiveRemoteSessions {
 
   func attachStream(_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error> {
     guard let target = streamTarget else { throw RemoteRPCClient.ClientError.connectionClosed }
+    let generation = sessionGeneration
     let request = IPC.PaneAttachStreamRequest(paneID: try Self.paneID(paneID))
     let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
     let client = try await RemoteRPCClient.connect(to: target.endpoint, credential: target.credential, hello: hello)
-    // The session may have been torn down while this connection opened.
-    guard streamTarget != nil else {
+    // The session may have been torn down, or replaced by one to another
+    // Mac, while this connection opened.
+    guard sessionGeneration == generation else {
       await client.close()
       throw RemoteRPCClient.ClientError.connectionClosed
     }

@@ -143,6 +143,19 @@ struct TerminalKeysTests {
   }
 
   @Test
+  func aCancelledDPadDragStopsRepeatingWithoutATap() {
+    let driver = DPadDriver()
+    var sent: [String] = []
+    driver.update(translation: CGSize(width: 30, height: 0)) { sent.append($0) }
+    #expect(sent == ["ArrowRight"])
+    #expect(driver.isRepeating)
+    driver.cancel()
+    #expect(!driver.isRepeating)
+    #expect(driver.direction == nil)
+    #expect(sent == ["ArrowRight"])
+  }
+
+  @Test
   func dPadRepeatsFasterFurtherOut() {
     #expect(DPadDriver.interval(forDistance: DPadDriver.threshold) == 160)
     #expect(DPadDriver.interval(forDistance: 40) < 160)
@@ -269,6 +282,19 @@ struct TerminalInputViewTests {
     #expect(recorder.texts == ["l", "s"])
     #expect(recorder.keys == ["Backspace"])
     #expect(view.hasText)
+  }
+
+  @Test
+  func losingFocusOrTheWindowEndsAHeldKeysRepeat() {
+    let (view, _) = makeView()
+    view.startRepeat("ArrowLeft", .none)
+    #expect(view.isRepeatingKey)
+    _ = view.resignFirstResponder()
+    #expect(!view.isRepeatingKey)
+
+    view.startRepeat("ArrowLeft", .none)
+    view.didMoveToWindow()
+    #expect(!view.isRepeatingKey)
   }
 
   @Test

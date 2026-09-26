@@ -344,7 +344,7 @@ kind: reset     { rows, cols, data(base64), fidelity? }   // replace the whole s
 
 - `seq` increases by one per frame on a stream; `epoch` increases on every resync. The client drops its screen on `reset` and ignores any frame whose `epoch` is older than the last `reset` it applied, so resync is idempotent.
 - **Coalescing and backpressure** (D32), in the per-stream `PaneStreamSession` actor: output is merged into one frame per 16 ms window, or sooner when 64 KiB accumulate; a snapshot larger than 256 KiB is sent in chunks. The backlog waiting for the connection is capped at 1 MiB. On overflow the session discards it, bumps `epoch`, sends `Observe` again, and the phone receives a fresh `reset` — a slow or stalled phone loses intermediate frames, never correctness, and never stalls the daemon or the Mac.
-- **Limits and errors** (D33). `TerminalStreamRegistry` allows 4 streams per caller and 16 in total; a missing pane, or a pane without a zmx session, is a clear error rather than an empty stream. Each stream rides its **own** `RemoteRPCClient` connection because the server serves one connection's frames serially (D10). Revoking the device or turning the gateway off ends every stream like `events.subscribe`.
+- **Limits and errors** (D33). `TerminalStreamRegistry` allows 4 streams per caller and 16 in total; a missing pane, or a pane without a zmx session, is a clear error rather than an empty stream. Each stream rides its **own** `RemoteRPCClient` connection because the server serves one connection's frames serially (D10). Revoking the device or turning the gateway off ends every stream like `events.subscribe`. A stream is its connection's last request, so the Mac watches that connection's read side while streaming: the peer hanging up ends the session (and frees its slot and daemon connection) at once rather than at the next failed write, and a stream the Mac ends closes its connection after the final frame. Once `exited` is queued nothing more is taken from the daemon, so it cannot be dropped by an overflow.
 
 #### Input: `terminal.sendEvents`
 
@@ -353,7 +353,7 @@ kind: reset     { rows, cols, data(base64), fidelity? }   // replace the whole s
 | Event | Payload | Notes |
 |---|---|---|
 | `key` | `code` (W3C `KeyboardEvent.code`, e.g. `KeyC`, `ArrowUp`), optional `text`, `mods` (shift / ctrl / alt / super) | A key as a keyboard would press it |
-| `text` | committed text | IME output, dictation, typed characters |
+| `text` | committed text, ≤ 64 KiB | IME output, dictation, typed characters; a `key`'s own `text` has the same cap |
 | `paste` | text, ≤ 64 KiB | Goes through the pane's paste path, so bracketed paste applies |
 | `delay` | milliseconds, ≤ 500 | Lets a TUI settle between a paste and its Enter |
 | `unknown` | — | A newer phone's event; decoding it does not fail the batch |
@@ -407,7 +407,7 @@ discovering ─▶ handshaking ─▶ syncing ─▶ live
 - Layout: a fixed left group `Esc` `Ctrl` `Alt` `Tab`; a horizontally scrolling middle with a D-pad, `~ | / \ - _`, `Home` `End` `PgUp` `PgDn`, `⇧Tab`, `F1`–`F12`; a fixed right group with Paste, Compose and show/hide keyboard.
 - **Modifiers.** A tap arms the modifier for the next key only (one-shot); a double tap within 400 ms locks it, shown by a bar under the key; another tap unlocks.
 - **Context panel.** Long-pressing `Ctrl` opens a shortcut panel whose default page follows the pane's agent kind: Claude Code (`/clear` `/compact` `/resume` `/help`, `⇧Tab` to cycle modes, `Esc Esc`), Codex, a tmux prefix page, and a Ctrl-letter page (C D Z L A E R W).
-- **D-pad and repeat.** Dragging on the D-pad sends arrow keys continuously with acceleration; arrows and Backspace auto-repeat on long press. Light impact haptics on key presses.
+- **D-pad and repeat.** Dragging on the D-pad sends arrow keys continuously with acceleration; arrows and Backspace auto-repeat on long press. A repeat — the D-pad's, a held key bar key's or a held hardware key's — also stops when its gesture is cancelled, its view goes away or the input view loses focus, since none of those report a release. Light impact haptics on key presses.
 - **Hardware keyboard.** When a `GCKeyboard` is connected the bar hides. Hardware shortcuts: `⌘[` / `⌘]` switch pane, `⌘1…9` switch tab, `⌘T` new tab, `⌘D` / `⌘⇧D` split, `⌘K` clears the pane (sent to the pane as Ctrl+L, never as the Mac's ⌘K binding), `⌘+` / `⌘-` zoom the view (the scroll view's zoom, never the font, which would soft-reset the grid).
 
 **Compose card** (D50). Typing on the keyboard sends key by key, like a desktop terminal. The Compose button opens a multi-line card for what key-by-key input handles badly — long prompts, IME, dictation, pasting: it grows to six lines, sends `[paste, delay 30, key Enter]` (or inserts without Enter), and keeps the last 20 entries as history, reached by swiping up. This replaces v1's `sendInput` + `sendKey(enter)` pair (D25) on minor-2 Macs.

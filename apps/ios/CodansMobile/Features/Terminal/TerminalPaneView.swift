@@ -139,7 +139,7 @@ struct TerminalPaneView: View {
           .padding(.vertical, 6)
           .background(.thickMaterial, in: .rect(cornerRadius: 10))
           .overlay(alignment: .bottom) {
-            Rectangle().fill(.tint).frame(height: 1.5).padding(.horizontal, 10).padding(.bottom, 4)
+            Rectangle().fill(.primary).frame(height: 1.5).padding(.horizontal, 10).padding(.bottom, 4)
           }
           .accessibilityIdentifier("terminal-composition")
       }
