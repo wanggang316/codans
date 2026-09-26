@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct KimiObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectKimi(screen))
+nonisolated struct KimiObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["kimi>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectKimi(screen), text: screen, promptPrefixes: ["kimi>"])
   }
 
-  private static func detectKimi(_ content: String) -> AgentObservation.Activity {
+  private static func detectKimi(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     let blockedPatterns = [
       "allow?", "confirm?", "approve?", "proceed?", "[y/n]", "(y/n)",
@@ -29,7 +28,7 @@ nonisolated struct KimiObservationParser: AgentObservationParser {
     {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func hasKimiApprovalPanel(content: String, lower: String) -> Bool {

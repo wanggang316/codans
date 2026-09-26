@@ -2,45 +2,36 @@ import CodansCore
 import Foundation
 
 extension AgentRecoveryRunner {
-  /// A live local surface is necessary but not sufficient: the catalog binding
-  /// must still match the observed Agent. Remote worktree paths are never used
-  /// as local script directories.
+  /// Capture against an already established binding. A new process can never
+  /// acquire an old error merely by appearing in the current foreground group.
   static func liveTargets(
-    manager: HierarchyManager,
-    engine: TerminalEngine,
-    registry: AgentStateStore
+    manager: HierarchyManager, engine: TerminalEngine, registry: AgentStateStore,
+    inputCoordinator: PaneInputCoordinator
   ) -> [Target] {
     var result: [Target] = []
     for project in manager.catalog.projects where !project.isRemote {
       for worktree in project.worktrees where !worktree.archived {
         for tab in worktree.tabs {
           for pane in tab.panes {
-            guard let entry = registry.entries[pane.id],
-              AgentObservationParsers.parser(for: entry.kind).supportsErrorRecovery,
-              !entry.recoverySuppressed,
-              pane.agentKind == entry.kind,
-              pane.agentSessionID == entry.sessionID,
-              let surface = engine.ghosttyRuntime?.surface(for: pane.id)
-            else { continue }
-            let groupID = ForegroundJobReader().resolveProcessGroupID(
-              preferred: surface.foregroundProcessGroupID(), childPID: surface.childProcessID()
-            )
-            let job = groupID.flatMap { ForegroundJobReader.foregroundJob(processGroupID: $0) }
-            let startedAt = groupID.flatMap { ForegroundJobReader.processStartedAt(pid: $0) }
-            // An inconclusive probe pauses recovery; it must not grant a fresh
-            // attempt budget by removing and recreating an otherwise live target.
-            let matches =
-              job.map { AgentKindPatterns.classify(foregroundJob: $0) == entry.kind } == true
-              && startedAt != nil
+            guard let initial = registry.entries[pane.id], let binding = initial.binding else { continue }
+            // Catalog and verified binding updates can arrive on separate ticks.
+            // Keep the paused target so session enrichment cannot refill its budget.
+            let metadataMatches = pane.agentKind == binding.kind && pane.agentSessionID == binding.sessionID
+            if metadataMatches, let snapshot = engine.captureAgentSnapshot(binding: binding) {
+              registry.onTerminalEvent(.paneAgentSnapshot(snapshot))
+              if case .prompt(let content) = registry.entries[pane.id]?.observation?.inputAvailability {
+                inputCoordinator.observePrompt(content, in: pane.id)
+              }
+            } else {
+              registry.onBindingValidityChanged(paneID: pane.id, valid: false)
+            }
+            guard let entry = registry.entries[pane.id], entry.binding == binding else { continue }
             result.append(
               Target(
-                paneID: pane.id, generation: entry.recoveryGeneration,
-                kind: entry.kind, sessionID: entry.sessionID,
-                directory: URL(fileURLWithPath: worktree.path),
-                isError: matches && entry.state == .error && entry.recoveryEligible,
-                isBusy: !matches || entry.state == .working || entry.state == .blocked,
-                processGroupID: groupID, processStartedAt: startedAt
-              ))
+                binding: binding, externalInputRevision: entry.externalInputRevision,
+                directory: URL(fileURLWithPath: worktree.path), observation: entry.observation,
+                identityIsValid: entry.bindingIsValid, isSuppressed: entry.recoverySuppressed,
+                hasResidualDraft: inputCoordinator.hasResidualDraft(in: pane.id)))
           }
         }
       }

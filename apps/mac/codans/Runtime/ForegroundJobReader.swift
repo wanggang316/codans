@@ -27,6 +27,24 @@ nonisolated struct ForegroundJobReader: Sendable {
     return ForegroundJob(processGroupID: processGroupID, processes: processes)
   }
 
+  /// Missing birth time or ambiguous matches cannot authorize terminal input.
+  static func agentIdentity(
+    in job: ForegroundJob
+  ) -> (kind: AgentKind, process: AgentProcessIdentity)? {
+    guard job.processGroupID > 0,
+      let match = AgentKindPatterns.uniqueProcessMatch(foregroundJob: job),
+      match.process.pid > 0,
+      match.process.processGroupID == job.processGroupID,
+      let startedAt = match.process.startedAt
+    else { return nil }
+    return (
+      match.kind,
+      AgentProcessIdentity(
+        processID: match.process.pid, processStartedAt: startedAt,
+        processGroupID: job.processGroupID)
+    )
+  }
+
   static func foregroundProcessGroupID(childPID: Int32) -> Int32? {
     guard childPID > 0,
       let info = processBSDInfo(pid: childPID)

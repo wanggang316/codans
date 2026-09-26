@@ -47,6 +47,18 @@ struct AgentHandlersStateTests {
   }
 
   @Test
+  func unknownStateIsExposedAndWaitable() async throws {
+    let fixture = makeFixture()
+    fixture.store.onTerminalEvent(
+      .paneViewportChanged(fixture.pane.id, text: "Unrecognized terminal output"))
+    #expect(try fixture.handlers.listStates().agents.first?.state == "unknown")
+    let response = try await fixture.handlers.wait(
+      .init(paneID: fixture.pane.id, until: .unknown, timeoutMillis: 100))
+    #expect(response.satisfied)
+    #expect(response.state == "unknown")
+  }
+
+  @Test
   func errorStateIsExposedAndWaitable() async throws {
     let fixture = makeFixture()
     fixture.store.onTerminalEvent(

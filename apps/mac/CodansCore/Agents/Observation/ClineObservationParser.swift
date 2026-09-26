@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct ClineObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectCline(screen))
+nonisolated struct ClineObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["cline>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectCline(screen), text: screen, promptPrefixes: ["cline>"])
   }
 
-  private static func detectCline(_ content: String) -> AgentObservation.Activity {
+  private static func detectCline(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     if lower.contains("let cline use this tool")
       || ((lower.contains("[act mode]") || lower.contains("[plan mode]")) && lower.contains("yes"))
@@ -18,7 +17,7 @@ nonisolated struct ClineObservationParser: AgentObservationParser {
     if AgentObservationText.hasInterruptPattern(lower) {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func hasClineNumberedChoicePrompt(_ content: String) -> Bool {

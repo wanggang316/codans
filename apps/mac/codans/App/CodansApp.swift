@@ -534,6 +534,7 @@ final class AppState {
   /// command, so dropping it would silently strand every queue.
   @ObservationIgnored private(set) var commandQueueRunner: CommandQueueRunner?
   @ObservationIgnored private(set) var agentRecoveryRunner: AgentRecoveryRunner?
+  @ObservationIgnored private let paneInputCoordinator = PaneInputCoordinator()
   /// Long-running focus observer for AgentStateStore. Re-arms on every
   /// catalog mutation that could change the globally-focused pane and
   /// forwards new ids to `registry.onPaneFocused`. Same re-arming
@@ -685,6 +686,7 @@ final class AppState {
       ghosttyRuntime: ghostty
     )
     self.terminalEngine = engine
+    PaneInputCoordinator.shared = paneInputCoordinator
     hierarchyRuntime.attach(engine: engine)
     profiler.mark("ghostty+engine")
     bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)
@@ -711,7 +713,7 @@ final class AppState {
       manager: manager,
       settings: settings,
       gitWorktreeClient: worktreeClient,
-      terminalClient: .live(engine: engine)
+      terminalClient: .live(engine: engine, inputCoordinator: self.paneInputCoordinator)
     )
     self.editorClient = editor
     self.hierarchyClient = hierarchy
@@ -785,7 +787,7 @@ final class AppState {
       $0.editorClient = editor
       $0.hierarchyClient = hierarchy
       $0.settingsWriter = .live(settings)
-      $0.terminalClient = .live(engine: engine)
+      $0.terminalClient = .live(engine: engine, inputCoordinator: self.paneInputCoordinator)
     }
 
     // Sparkle bringup: push persisted Updates preferences to the live updater so
@@ -851,7 +853,7 @@ final class AppState {
             for: paneID, manager: manager, agentState: self?.agentStateStore)
         }
       )
-      $0.terminalClient = .live(engine: engine)
+      $0.terminalClient = .live(engine: engine, inputCoordinator: self.paneInputCoordinator)
       // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.
       $0.gitService = routedGitClient
@@ -1204,6 +1206,7 @@ final class AppState {
       ? nil
       : TerminalInputSink(
         engine: terminalEngine,
+        inputCoordinator: self.paneInputCoordinator,
         onPaneInput: { [weak hierarchy] paneID in
           guard let manager = hierarchy,
             let projectID = manager.catalog.projectID(forPane: paneID)
@@ -1297,7 +1300,8 @@ final class AppState {
       typeKickoff: { [weak self, weak engine] paneID, kind, prompt in
         guard let engine, let agentState = self?.agentStateStore else { return false }
         return await Self.typeKickoffOnceAgentIsUp(
-          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine)
+          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine,
+          inputCoordinator: self?.paneInputCoordinator)
       },
       cli: Self.cliInvocation()
     )
@@ -1322,12 +1326,16 @@ final class AppState {
     prompt: String,
     agentState: AgentStateStore,
     engine: TerminalEngine,
+    inputCoordinator: PaneInputCoordinator? = nil,
     timeout: Duration = .seconds(30),
     settle: Duration = .milliseconds(1500)
   ) async -> Bool {
     let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "handoff")
+    let coordinator = inputCoordinator ?? PaneInputCoordinator.shared ?? PaneInputCoordinator()
+    let inputRevision = coordinator.revision(for: paneID)
     let deadline = ContinuousClock.now + timeout
     while agentState.entries[paneID]?.kind != kind {
+      guard !Task.isCancelled, coordinator.revision(for: paneID) == inputRevision else { return false }
       guard ContinuousClock.now < deadline else {
         logger.error(
           "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)")
@@ -1345,6 +1353,7 @@ final class AppState {
     var stillSince = ContinuousClock.now
     let readyDeadline = ContinuousClock.now + .seconds(10)
     while ContinuousClock.now < readyDeadline {
+      guard !Task.isCancelled, coordinator.revision(for: paneID) == inputRevision else { return false }
       try? await Task.sleep(for: .milliseconds(250))
       let current = surface.readText(.active) ?? ""
       if current != previous {
@@ -1354,26 +1363,40 @@ final class AppState {
         break
       }
     }
-    surface.sendInput(prompt)
-    // Match the tail of the prompt, not its head: the active region is only
-    // the live rows, and in a short pane the start of a long prompt has
-    // already scrolled into history by the time the echo finishes. The
-    // cursor sits after the last character, so the tail is always on screen
-    // (an input box that truncates shows the end, too).
-    let marker = String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).suffix(19))
-    for _ in 0..<20 {
-      try? await Task.sleep(for: .milliseconds(250))
-      guard let screen = surface.readText(.active) else { continue }
-      if screen.contains(marker) || screen.contains("Pasted") {
-        // CR is what TUIs read as Enter; LF only breaks the line.
-        surface.sendInput("\r")
-        return true
-      }
+    guard !Task.isCancelled, coordinator.revision(for: paneID) == inputRevision else { return false }
+    let expectedInstance = agentState.entries[paneID]?.binding?.instanceID
+    let targetIsCurrent: @MainActor @Sendable () -> Bool = {
+      engine.ghosttyRuntime?.surface(for: paneID) === surface
+        && agentState.entries[paneID]?.kind == kind
+        && agentState.entries[paneID]?.binding?.instanceID == expectedInstance
     }
-    logger.error(
-      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted"
+    // Long prompts may scroll their beginning out of the live region. The
+    // tail, or the TUI's paste chip, proves that the composer received them.
+    let marker = String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).suffix(19))
+    var echoObserved = false
+    let result = await coordinator.submitCommand(
+      in: paneID, origin: .user,
+      validateBeforePaste: targetIsCurrent,
+      validateBeforeSubmit: { targetIsCurrent() && echoObserved },
+      waitBeforeSubmit: {
+        for _ in 0..<20 {
+          try await Task.sleep(for: .milliseconds(250))
+          guard targetIsCurrent() else { return }
+          guard let screen = surface.readText(.active) else { continue }
+          if screen.contains(marker) || screen.contains("Pasted") {
+            echoObserved = true
+            return
+          }
+        }
+      },
+      paste: { surface.sendInput(prompt) },
+      submit: { surface.sendInput("\r") }
     )
-    return false
+    guard result == .submitted else {
+      logger.error("kickoff: delivery was interrupted or the prompt echo was not observed; not submitted")
+      return false
+    }
+    return true
   }
 
   /// Resolves a pane to the outgoing side of a handoff. Agent identity
@@ -1967,21 +1990,46 @@ final class AppState {
           assumeUserInputSeen: assumeUserInputSeen
         )
       },
-      agentUnboundHandler: { [weak registry] paneID in
+      agentUnboundHandler: { [weak registry, weak inputCoordinator = paneInputCoordinator] paneID in
+        inputCoordinator?.invalidate(in: paneID)
         registry?.onAgentUnbound(paneID)
+      },
+      surfaceGeneration: { [weak engine] in engine?.surfaceGeneration(for: $0) },
+      currentSessionID: { [weak manager] in manager?.catalog.pane($0)?.agentSessionID },
+      verifiedBindingHandler: { [weak registry, weak inputCoordinator = paneInputCoordinator] binding, assumedInput in
+        if registry?.entries[binding.paneID]?.binding?.instanceID != binding.instanceID {
+          inputCoordinator?.invalidate(in: binding.paneID)
+        }
+        registry?.onAgentBound(binding, assumeUserInputSeen: assumedInput)
+        registry?.setResidualDraft(inputCoordinator?.hasResidualDraft(in: binding.paneID) == true, for: binding.paneID)
+      },
+      bindingValidityHandler: { [weak registry] paneID, valid in
+        registry?.onBindingValidityChanged(paneID: paneID, valid: valid)
       }
     )
     self.agentBinder = binder
-    // Wire 3: keystroke fan-out. The detector continues to read
-    // `snapshot()` per-event; the new `onActivity` callback fires on
-    // every recorded keystroke so the registry can clear waiting-for-
-    // input promptly. Both consumers stay decoupled from each other.
-    keystrokeTracker.onActivity = { [weak registry] paneID in
-      registry?.onPaneKeyboardActivity(paneID)
+    engine.agentBindingProvider = { [weak binder] in binder?.binding(for: $0) }
+    paneInputCoordinator.onExternalInput = { [weak registry, weak self] paneID, revision in
+      registry?.onExternalInput(paneID, revision: revision)
+      self?.agentRecoveryRunner?.invalidate(paneID)
     }
+    paneInputCoordinator.onResidualDraftChanged = { [weak registry] paneID, exists in
+      registry?.setResidualDraft(exists, for: paneID)
+    }
+    // Notifications retain physical-keystroke timing; input ownership uses the
+    // coordinator for native, CLI, queued and immediate sends alike.
+    keystrokeTracker.onActivity = nil
     let detectorEvents = engine.events()
     self.notificationDetectorTask = Task { @MainActor in
       for await event in detectorEvents {
+        switch event {
+        case .paneExited(let paneID, _, _), .paneCrashed(let paneID, _), .paneClosedByTab(let paneID, _):
+          self.paneInputCoordinator.removePane(paneID)
+        case .hierarchyMutated(let scope) where scope != .selection && scope != .tags:
+          self.paneInputCoordinator.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
+        default:
+          break
+        }
         await detector.handle(event)
         if case .hierarchyMutated(let scope) = event, scope != .selection, scope != .tags {
           // Same backstop, same reason as the binder and registry below —
@@ -2024,7 +2072,7 @@ final class AppState {
     guard commandQueueRunner == nil else { return }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
     // aimed at an agent pane needs its Return as a separate keypress.
-    let terminal = TerminalClient.live(engine: engine)
+    let terminal = TerminalClient.live(engine: engine, inputCoordinator: self.paneInputCoordinator)
     let runner = CommandQueueRunner(
       queuedPanes: { [weak manager] in manager?.panesWithQueuedCommands() ?? [] },
       setQueue: { [weak manager] paneID, queue in
@@ -2036,13 +2084,11 @@ final class AppState {
           terminalBusy: manager?.paneIsBusy(paneID) ?? false
         )
       },
-      hasLiveSurface: { [weak engine] paneID in
+      hasLiveSurface: { [weak engine, weak coordinator = paneInputCoordinator] paneID in
         engine?.ghosttyRuntime?.surface(for: paneID) != nil
+          && coordinator?.canSubmitProgrammaticInput(in: paneID) == true
       },
-      send: { [weak registry = self.agentStateStore] paneID, text in
-        registry?.onPaneKeyboardActivity(paneID)
-        terminal.sendCommand(paneID, text)
-      }
+      send: { paneID, text in terminal.sendCommand(paneID, text) }
     )
     self.commandQueueRunner = runner
     runner.start()
@@ -2052,23 +2098,31 @@ final class AppState {
     guard agentRecoveryRunner == nil else { return }
     let runner = AgentRecoveryRunner(
       policy: { [weak settingsStore] in settingsStore?.settings.agents.recovery ?? AgentRecoveryPolicy() },
-      targets: { [weak manager, weak engine, weak registry = self.agentStateStore] in
-        guard let manager, let engine, let registry else { return [] }
-        return AgentRecoveryRunner.liveTargets(manager: manager, engine: engine, registry: registry)
+      targets: {
+        [weak manager, weak engine, weak registry = self.agentStateStore, weak coordinator = paneInputCoordinator] in
+        guard let manager, let engine, let registry, let coordinator else { return [] }
+        return AgentRecoveryRunner.liveTargets(
+          manager: manager, engine: engine, registry: registry, inputCoordinator: coordinator)
       },
-      deliver: { [weak engine] target, policy, attempt, validate in
+      deliver: { [weak engine, weak coordinator = paneInputCoordinator] target, policy, attempt, validate, begin in
+        guard let coordinator else { return }
         switch policy.action {
         case .prompt:
-          guard validate(true), let surface = engine?.ghosttyRuntime?.surface(for: target.paneID) else { return }
-          surface.sendText(policy.prompt)
-          do { try await Task.sleep(for: TerminalClient.submitDelay) } catch { return }
-          guard validate(false), engine?.ghosttyRuntime?.surface(for: target.paneID) === surface else { return }
-          surface.sendNamedKey(.enter)
+          guard let surface = engine?.ghosttyRuntime?.surface(for: target.paneID) else { return }
+          _ = await coordinator.submitCommand(
+            in: target.paneID, origin: .recovery(operationID: UUID()),
+            validateBeforePaste: { validate(.beforeWrite) },
+            validateBeforeSubmit: {
+              validate(.beforeSubmit) && engine?.ghosttyRuntime?.surface(for: target.paneID) === surface
+            },
+            willPaste: begin,
+            paste: { surface.sendText(policy.prompt) },
+            submit: { surface.sendNamedKey(.enter) }
+          )
         case .script:
           await AgentRecoveryRunner.runScript(
             target: target, policy: policy, attempt: attempt,
-            runner: FoundationCommandRunner(), validate: validate
-          )
+            runner: FoundationCommandRunner(), validate: validate, begin: begin)
         }
       }
     )
@@ -2299,15 +2353,34 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
   /// project. Optional so previews / tests without a hierarchy manager
   /// wired can drop it.
   private let onPaneInput: (@MainActor (PaneID) -> Void)?
+  private let inputCoordinator: PaneInputCoordinator
 
-  init(engine: TerminalEngine, onPaneInput: (@MainActor (PaneID) -> Void)? = nil) {
+  init(
+    engine: TerminalEngine, inputCoordinator: PaneInputCoordinator? = nil,
+    onPaneInput: (@MainActor (PaneID) -> Void)? = nil
+  ) {
     self.engine = engine
+    self.inputCoordinator = inputCoordinator ?? PaneInputCoordinator.shared ?? PaneInputCoordinator()
     self.onPaneInput = onPaneInput
+  }
+
+  func inputRejectionReason(for paneID: PaneID) -> String? {
+    guard engine?.ghosttyRuntime?.surface(for: paneID) != nil,
+      inputCoordinator.hasResidualDraft(in: paneID)
+    else { return nil }
+    return "Resolve the interrupted recovery draft before sending more input."
   }
 
   func sendInput(paneID: PaneID, text: String) -> Bool {
     guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
-    surface.sendInput(text)
+    guard
+      text.isEmpty
+        || inputCoordinator.performExternalInput(
+          in: paneID, origin: .cli,
+          write: {
+            surface.sendInput(text)
+          }) == .submitted
+    else { return false }
     // Empty-string writes (focus probes, etc.) shouldn't count as
     // user activity for the sidebar's "active first" sort.
     if !text.isEmpty {
@@ -2318,14 +2391,27 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
 
   func sendKey(paneID: PaneID, key: IPC.TerminalNamedKey) -> Bool {
     guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
-    surface.sendNamedKey(key)
+    guard
+      inputCoordinator.performExternalInput(
+        in: paneID, origin: .cli,
+        write: {
+          surface.sendNamedKey(key)
+        }) == .submitted
+    else { return false }
     onPaneInput?(paneID)
     return true
   }
 
   func sendRawBytes(paneID: PaneID, bytes: [UInt8]) -> Bool {
     guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
-    surface.sendRawBytes(bytes)
+    guard
+      bytes.isEmpty
+        || inputCoordinator.performExternalInput(
+          in: paneID, origin: .cli,
+          write: {
+            surface.sendRawBytes(bytes)
+          }) == .submitted
+    else { return false }
     if !bytes.isEmpty {
       onPaneInput?(paneID)
     }

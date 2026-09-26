@@ -1,13 +1,13 @@
 import Foundation
 
-nonisolated struct OpenCodeObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectOpenCode(screen))
+nonisolated struct OpenCodeObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["opencode>"]).joined(separator: "\n")
+    return AgentObservationText.result(
+      activity: Self.detectOpenCode(screen), text: screen, promptPrefixes: ["opencode>"])
   }
 
-  private static func detectOpenCode(_ content: String) -> AgentObservation.Activity {
+  private static func detectOpenCode(_ content: String) -> AgentObservedActivity {
     if content.contains("△ Permission required")
       || hasOpenCodeQuestionPrompt(content)
     {
@@ -16,7 +16,7 @@ nonisolated struct OpenCodeObservationParser: AgentObservationParser {
     if AgentObservationText.hasInterruptPattern(content.lowercased()) {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func hasOpenCodeQuestionPrompt(_ content: String) -> Bool {

@@ -173,6 +173,7 @@ final class AgentHandlers {
       let paneExists = hierarchy.snapshot().pane(request.paneID) != nil
       let satisfied: Bool
       switch request.until {
+      case .unknown: satisfied = entry?.state == .unknown
       case .idle: satisfied = entry?.state == .idle
       case .working: satisfied = entry?.state == .working
       case .error: satisfied = entry?.state == .error

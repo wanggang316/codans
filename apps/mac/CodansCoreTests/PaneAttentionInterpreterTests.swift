@@ -597,7 +597,7 @@ struct PaneAttentionInterpreterTests {
     #expect(activity(.omp, "Still working… ⟦esc⟧") == .working)
     #expect(activity(.omp, "Working…") == .working)
     // A transcript line with esc BEFORE the ellipsis is not a hint.
-    #expect(activity(.omp, "press esc… done") == .idle)
+    #expect(activity(.omp, "press esc… done") == .unknown)
     // Approval selector: title cue alone, and the Approve/Deny option
     // rows with the default cursor symbol.
     #expect(activity(.omp, "Allow tool: bash\n❯ Approve\n  Deny") == .blocked)
@@ -725,13 +725,13 @@ struct PaneAttentionInterpreterTests {
     #expect(activity(.claudeCode, "API Error: 503\nRetrying in 3 seconds") != .error)
     #expect(activity(.claudeCode, "API Error: 503\nesc to interrupt") == .working)
     #expect(activity(.claudeCode, "API Error: 503\nDo you want to proceed? yes") == .blocked)
-    #expect(activity(.codex, "Tool failed with exit code 1") == .idle)
-    #expect(activity(.claudeCode, "Example: API Error: 503") == .idle)
-    #expect(activity(.claudeCode, "```\nAPI Error: 503") == .idle)
+    #expect(activity(.codex, "Tool failed with exit code 1") == .unknown)
+    #expect(activity(.claudeCode, "Example: API Error: 503") == .unknown)
+    #expect(activity(.claudeCode, "```\nAPI Error: 503") == .unknown)
     #expect(
       activity(.codex, "■ stream disconnected before completion: timeout\nCompleted successfully")
-        == .idle)
-    #expect(activity(.omp, "API Error: 503") == .idle)
+        == .unknown)
+    #expect(activity(.omp, "API Error: 503") == .unknown)
   }
 
   private func activity(

@@ -11,7 +11,7 @@ extension IPC {
     /// `AgentKind.rawValue` and its display name.
     public let agent: String
     public let agentName: String
-    /// `idle` / `working` / `blocked` / `error` / `finished`.
+    /// `unknown` / `idle` / `working` / `blocked` / `error` / `finished`.
     public let state: String
     /// ISO 8601 instant of the last state transition.
     public let since: String
@@ -71,11 +71,12 @@ extension IPC {
     }
   }
 
-  /// What `agent.wait` waits for. The five states match `AgentStateEntry
+  /// What `agent.wait` waits for. The six states match `AgentStateEntry
   /// .state`; `changed` resolves on any transition away from the state seen
   /// when the wait was armed (including an agent appearing or leaving);
   /// `exit` resolves once no agent is bound to the pane any more.
   public enum AgentWaitCondition: String, Codable, CaseIterable, Sendable {
+    case unknown
     case idle
     case working
     case blocked

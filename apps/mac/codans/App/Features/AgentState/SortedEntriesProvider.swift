@@ -49,6 +49,7 @@ nonisolated enum SortedEntriesProvider {
     case .finished: return 1
     case .working: return 2
     case .idle: return 3
+    case .unknown: return 4
     }
   }
 }

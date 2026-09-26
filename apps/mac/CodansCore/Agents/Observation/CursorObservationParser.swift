@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct CursorObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectCursor(screen))
+nonisolated struct CursorObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["cursor>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectCursor(screen), text: screen, promptPrefixes: ["cursor>"])
   }
 
-  private static func detectCursor(_ content: String) -> AgentObservation.Activity {
+  private static func detectCursor(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     if lower.contains("workspace trust required")
       || lower.contains("trust this workspace")
@@ -20,7 +19,7 @@ nonisolated struct CursorObservationParser: AgentObservationParser {
     {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func hasCursorPermissionPrompt(content: String, lower: String) -> Bool {

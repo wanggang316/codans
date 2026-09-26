@@ -15,9 +15,9 @@ nonisolated struct HandoffClient: Sendable {
   var supersede: @MainActor @Sendable (_ requestID: UUID) -> Bool
   /// Broadcast, no replay — subscribe before injecting the request.
   var completions: @MainActor @Sendable () -> AsyncStream<HandoffCompletion>
-  /// Types `text` (plus Enter) into the pane's live surface. `false` when
-  /// the pane has no surface to take input.
-  var sendInstruction: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Bool
+  /// Types `text` (plus Enter) through the shared input coordinator.
+  /// Rejection preserves any interrupted automatic draft.
+  var sendInstruction: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> SubmissionResult
   /// Runs a handoff transition in-process — the panel's fallback when the
   /// live agent cannot be asked. Same code path as the CLI verbs.
   var run: @MainActor @Sendable (_ request: IPC.HandoffRequest) async throws -> HandoffCompletion
@@ -38,6 +38,32 @@ nonisolated struct HandoffClient: Sendable {
 
 extension HandoffClient {
   @MainActor
+  static func deliverInstruction(
+    _ text: String,
+    to paneID: PaneID,
+    coordinator: PaneInputCoordinator,
+    write: @MainActor (String) -> Void
+  ) -> SubmissionResult {
+    coordinator.performExternalInput(in: paneID, origin: .user) {
+      // Preserve the existing Handoff instruction and submit convention.
+      write(text + "\n")
+    }
+  }
+
+  nonisolated static func instructionFailureMessage(_ result: SubmissionResult) -> String? {
+    switch result {
+    case .submitted: return nil
+    case .rejectedDraftPresent, .interruptedWithDraft:
+      return "An interrupted automatic draft remains in the pane. "
+        + "Submit or clear that draft before trying again. No handoff instruction was sent."
+    case .cancelledBeforeWrite:
+      return "The request was cancelled before it could be sent. No handoff instruction was sent."
+    case .targetChanged:
+      return "The pane is no longer available for input. No handoff instruction was sent."
+    }
+  }
+
+  @MainActor
   static func live(
     handlers: HandoffHandlers,
     registry: HandoffRequestRegistry,
@@ -52,11 +78,12 @@ extension HandoffClient {
       supersede: { registry.supersede($0) },
       completions: { registry.completions() },
       sendInstruction: { paneID, text in
-        guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return false }
-        // Same submit convention as script dispatch: the trailing newline is
-        // what makes a TUI input box accept the line.
-        surface.sendInput(text + "\n")
-        return true
+        guard let surface = engine.ghosttyRuntime?.surface(for: paneID),
+          let coordinator = PaneInputCoordinator.shared
+        else { return .targetChanged }
+        return deliverInstruction(text, to: paneID, coordinator: coordinator) {
+          surface.sendInput($0)
+        }
       },
       run: { request in
         let response =
@@ -96,7 +123,7 @@ extension HandoffClient: DependencyKey {
     register: unimplemented("HandoffClient.register"),
     supersede: unimplemented("HandoffClient.supersede", placeholder: false),
     completions: unimplemented("HandoffClient.completions", placeholder: AsyncStream { $0.finish() }),
-    sendInstruction: unimplemented("HandoffClient.sendInstruction", placeholder: false),
+    sendInstruction: unimplemented("HandoffClient.sendInstruction", placeholder: .targetChanged),
     run: unimplemented(
       "HandoffClient.run",
       placeholder: HandoffCompletion(

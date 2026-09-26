@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct AmpObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectAmp(screen))
+nonisolated struct AmpObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["amp>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectAmp(screen), text: screen, promptPrefixes: ["amp>"])
   }
 
-  private static func detectAmp(_ content: String) -> AgentObservation.Activity {
+  private static func detectAmp(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     let hasWaitingForApproval = lower.contains("waiting for approval")
     let hasApprovalHeader =
@@ -29,7 +28,7 @@ nonisolated struct AmpObservationParser: AgentObservationParser {
     if lower.contains("esc to cancel") {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
 }

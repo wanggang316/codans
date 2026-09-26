@@ -230,6 +230,7 @@ struct AgentSessionSummaryCard: View {
     case .working: return "square.grid.3x3.fill"
     case .finished: return "checkmark.circle.fill"
     case .idle: return "circle.dashed"
+    case .unknown: return "questionmark.circle"
     }
   }
 
@@ -239,7 +240,7 @@ struct AgentSessionSummaryCard: View {
     case .blocked: return .orange
     case .working: return .primary
     case .finished: return .green
-    case .idle: return .secondary
+    case .idle, .unknown: return .secondary
     }
   }
 

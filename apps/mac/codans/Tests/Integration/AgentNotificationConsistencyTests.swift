@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -26,8 +26,8 @@ struct AgentNotificationConsistencyTests {
     }
 
     // The inbox records the attention event; the live agent state is purely
-    // render-derived and stays idle until the rendered region shows activity.
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
+    // render-derived and stays unknown until a recognizable frame is observed.
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .unknown)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .waitingForInput)
     #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
@@ -48,7 +48,7 @@ struct AgentNotificationConsistencyTests {
     }
 
     // Same decoupling for the bell: inbox-worthy, but not a live signal.
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .unknown)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .waitingForInput)
     #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
@@ -72,7 +72,7 @@ struct AgentNotificationConsistencyTests {
       await fixture.detector.handle(event)
     }
 
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .unknown)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .taskFinished)
     #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)

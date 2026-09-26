@@ -81,6 +81,58 @@ struct ForegroundJobReaderTests {
     #expect(decoded == process)
   }
 
+  @Test
+  func wrappedAgentUsesActualChildIdentityInsteadOfGroupLeader() throws {
+    let startedAt = Date(timeIntervalSinceReferenceDate: 10)
+    let wrapper = ForegroundProcess(
+      pid: 120, parentPID: 100, processGroupID: 120, argv0: "/bin/sh",
+      commandLine: "sh -c codex", startedAt: startedAt)
+    let agent = ForegroundProcess(
+      pid: 121, parentPID: 120, processGroupID: 120, argv0: "/opt/bin/codex",
+      commandLine: "codex", startedAt: startedAt.addingTimeInterval(1))
+    let match = try #require(
+      ForegroundJobReader.agentIdentity(
+        in: ForegroundJob(processGroupID: 120, processes: [wrapper, agent])))
+    #expect(match.kind == .codex)
+    #expect(match.process.processID == 121)
+    #expect(match.process.processGroupID == 120)
+    #expect(match.process.processStartedAt == agent.startedAt)
+  }
+
+  @Test
+  func nodeEntrypointOwnsItsOwnVerifiedIdentity() throws {
+    let process = ForegroundProcess(
+      pid: 121, parentPID: 120, processGroupID: 120, argv0: "/usr/bin/node",
+      commandLine: "node /opt/bin/codex.js", startedAt: Date(timeIntervalSinceReferenceDate: 10))
+    let match = try #require(
+      ForegroundJobReader.agentIdentity(
+        in: ForegroundJob(processGroupID: 120, processes: [process])))
+    #expect(match.kind == .codex)
+    #expect(match.process.processID == 121)
+  }
+
+  @Test
+  func ambiguousAgentProcessesCannotAuthorizeInput() {
+    let startedAt = Date(timeIntervalSinceReferenceDate: 10)
+    let processes = [121, 122].map { pid in
+      ForegroundProcess(
+        pid: Int32(pid), parentPID: 120, processGroupID: 120, argv0: "codex",
+        commandLine: "codex", startedAt: startedAt)
+    }
+    let job = ForegroundJob(processGroupID: 120, processes: processes)
+    #expect(AgentKindPatterns.classify(foregroundJob: job) == .codex)
+    #expect(ForegroundJobReader.agentIdentity(in: job) == nil)
+  }
+
+  @Test
+  func missingBirthTimeCannotAuthorizeInput() {
+    let process = ForegroundProcess(
+      pid: 121, parentPID: 120, processGroupID: 120, argv0: "codex", commandLine: "codex")
+    #expect(
+      ForegroundJobReader.agentIdentity(
+        in: ForegroundJob(processGroupID: 120, processes: [process])) == nil)
+  }
+
   private static func procargsBuffer(execPath: String, argv: [String]) -> [UInt8] {
     var argc = Int32(argv.count)
     var buffer = withUnsafeBytes(of: &argc) { Array($0) }

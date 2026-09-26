@@ -1,22 +1,23 @@
 import Foundation
 
-/// One pure observation of rendered agent output. Error evidence remains
-/// separate from activity so callers can suppress old banners consistently.
+/// Accepted runtime facts. Terminal-specific evidence stays in the tracker.
 public nonisolated struct AgentObservation: Equatable, Sendable {
-  public typealias Activity = AgentObservedActivity
-  public let activity: Activity
-  public let errorFingerprint: String?
-  /// Error banners visible anywhere in the supplied region, including lines
-  /// outside the recent activity window. Used only to retain suppression.
-  public let visibleErrorFingerprints: Set<String>
+  public let instanceID: AgentInstanceID
+  public let stateRevision: UInt64
+  public let sequence: UInt64
+  public let observedAt: Date
+  public let state: AgentState
+  public let inputAvailability: AgentInputAvailability
 
   public init(
-    activity: Activity,
-    errorFingerprint: String? = nil,
-    visibleErrorFingerprints: Set<String> = []
+    instanceID: AgentInstanceID, stateRevision: UInt64, sequence: UInt64,
+    observedAt: Date, state: AgentState, inputAvailability: AgentInputAvailability
   ) {
-    self.activity = activity
-    self.errorFingerprint = errorFingerprint
-    self.visibleErrorFingerprints = visibleErrorFingerprints
+    self.instanceID = instanceID
+    self.stateRevision = stateRevision
+    self.sequence = sequence
+    self.observedAt = observedAt
+    self.state = state
+    self.inputAvailability = inputAvailability
   }
 }

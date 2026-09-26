@@ -180,3 +180,61 @@ struct HandoffFeatureTests {
     #expect(state.index(moving: .down) == 0)
   }
 }
+
+@MainActor
+struct HandoffInputRoutingTests {
+  @Test func instructionPreservesBytesAndRecordsExternalIntent() {
+    let paneID = PaneID()
+    let coordinator = PaneInputCoordinator()
+    var writes: [String] = []
+    let instruction = "Keep the existing prompt\nexactly as written."
+    let result = HandoffClient.deliverInstruction(
+      instruction, to: paneID, coordinator: coordinator, write: { writes.append($0) })
+    #expect(result == .submitted)
+    #expect(writes == [instruction + "\n"])
+    #expect(coordinator.revision(for: paneID) == 1)
+  }
+
+  @Test func instructionRevokesRecoveryBeforePaste() async {
+    let paneID = PaneID()
+    let coordinator = PaneInputCoordinator()
+    guard
+      case .reserved(let lease) = coordinator.reserve(
+        in: paneID, origin: .recovery(operationID: UUID()))
+    else {
+      Issue.record("Expected recovery lease")
+      return
+    }
+    var writes: [String] = []
+    let handoff = HandoffClient.deliverInstruction(
+      "handoff", to: paneID, coordinator: coordinator, write: { writes.append($0) })
+    let recovery = await coordinator.submitCommand(
+      lease, paste: { writes.append("recovery") }, submit: { writes.append("return") })
+    #expect(handoff == .submitted)
+    #expect(recovery == .cancelledBeforeWrite)
+    #expect(writes == ["handoff\n"])
+  }
+
+  @Test func instructionAfterRecoveryPastePreservesDraftAndRevokesReturn() async {
+    let paneID = PaneID()
+    var writes: [String] = []
+    var handoff: SubmissionResult?
+    var coordinator: PaneInputCoordinator!
+    coordinator = PaneInputCoordinator(pauseBeforeSubmit: {
+      handoff = HandoffClient.deliverInstruction(
+        "handoff", to: paneID, coordinator: coordinator, write: { writes.append($0) })
+    })
+    let recovery = await coordinator.submitCommand(
+      in: paneID, origin: .recovery(operationID: UUID()),
+      paste: { writes.append("recovery draft") }, submit: { writes.append("return") })
+    #expect(handoff == .rejectedDraftPresent)
+    #expect(recovery == .interruptedWithDraft)
+    #expect(writes == ["recovery draft"])
+    #expect(coordinator.hasResidualDraft(in: paneID))
+    let repeated = HandoffClient.deliverInstruction(
+      "handoff", to: paneID, coordinator: coordinator, write: { writes.append($0) })
+    #expect(repeated == .rejectedDraftPresent)
+    #expect(writes == ["recovery draft"])
+    #expect(HandoffClient.instructionFailureMessage(repeated)?.contains("draft remains") == true)
+  }
+}

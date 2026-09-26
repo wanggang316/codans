@@ -4,11 +4,11 @@ import Foundation
 /// the stable identifier persisted in `catalog.json` (see `Pane.agentKind`)
 /// and reported over the wire; everything else agent-specific (display
 /// name, classifier patterns, resume invocation) lives on the agent's
-/// `AgentRuntimeAdapter`.
+/// `AgentRegistry` definition.
 ///
-/// Adding a new case requires registering an adapter in
-/// `AgentRuntimeAdapters.adapter(for:)`; the exhaustive switch there makes
-/// a missing adapter a compile error.
+/// Adding a new case requires registering a definition in
+/// `AgentRegistry.definition(for:)`; the exhaustive switch there makes
+/// a missing registration a compile error.
 public nonisolated enum AgentKind: String, Codable, Sendable, CaseIterable, Equatable {
   case claudeCode = "claude-code"
   case codex

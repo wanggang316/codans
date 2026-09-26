@@ -54,6 +54,36 @@ struct AgentRecoveryPolicyTests {
   }
 
   @Test
+  func oldPolicyPayloadUsesConservativeFailureDefaults() throws {
+    let data = Data(
+      #"{"isEnabled":true,"action":"script","script":"./recover.sh","delaySeconds":30,"maxAttempts":3}"#.utf8)
+    let policy = try JSONDecoder().decode(AgentRecoveryPolicy.self, from: data)
+    #expect(policy.additionalScriptReasons.isEmpty)
+    #expect(policy.allows(.init(reason: .transient, message: "timeout")))
+    #expect(!policy.allows(.init(reason: .authentication, message: "401")))
+  }
+
+  @Test
+  func permanentFailuresRequireExplicitScriptConfiguration() {
+    var policy = AgentRecoveryPolicy(isEnabled: true, action: .script, script: "./repair.sh")
+    let failure = AgentFailure(reason: .authentication, message: "401")
+    #expect(!policy.allows(failure))
+    policy.additionalScriptReasons.insert(.authentication)
+    #expect(policy.allows(failure))
+    policy.action = .prompt
+    #expect(!policy.allows(failure))
+    policy.isEnabled = false
+    #expect(!policy.allows(.init(reason: .transient, message: "timeout")))
+  }
+
+  @Test
+  func providerRateLimitDelayCannotBeShortened() {
+    let policy = AgentRecoveryPolicy(isEnabled: true, delaySeconds: 30)
+    #expect(policy.delay(for: .init(reason: .rateLimited, message: "429", retryAfterSeconds: 120)) == 120)
+    #expect(policy.delay(for: .init(reason: .rateLimited, message: "429", retryAfterSeconds: -10)) == 30)
+  }
+
+  @Test
   func externallyEditedOutOfRangeSettingsRemainInvalid() throws {
     let policy = AgentRecoveryPolicy(isEnabled: true, delaySeconds: -1, maxAttempts: 100)
     let decoded = try JSONDecoder().decode(

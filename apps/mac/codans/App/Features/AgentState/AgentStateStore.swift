@@ -1,570 +1,271 @@
 import CodansCore
 import Foundation
-import OSLog
 import Observation
 
-private let storeLogger = Logger(
-  subsystem: "com.gumpw.codans.agentstate", category: "store"
-)
-
-/// Runtime-only state machine that derives each bound agent pane's
-/// runtime state (`idle` / `working` / `blocked` / `error` / `finished`) from the
-/// raw `working` / `blocked` / `error` / `idle` classifier plus an observed/
-/// unobserved attention bit. Raw state comes from the rendered active
-/// region; `finished` is the display form of an unobserved completion.
-/// Designed to be the single source of truth for the AgentState badge +
-/// view. Nothing is persisted: every entry is reconstructed from the
-/// live event flow at process start.
-///
-/// `entries` is keyed by `PaneID` and exposes one `AgentEntry` per
-/// pane that has been bound via `onAgentBound(_:kind:sessionID:)`. The
-/// dictionary is `@Observable`-tracked so SwiftUI consumers re-render
-/// on every transition; every mutation writes the full entry struct
-/// back to the subscript so change tracking fires reliably.
-///
-/// Sidebar priority is `error > blocked > finished > working > idle`.
-/// Live working and blocked cues take precedence over heuristic errors.
-/// Errors survive focus; keyboard input suppresses the same old error until
-/// it disappears or live activity resumes.
-/// A blocked raw state clears when the user observably interacts
-/// (keystroke / focus). Working fires only after the bound agent has
-/// observed user input and its rendered region matches an agent-specific
-/// working cue.
-/// Finished is not a raw state: it is the display form of a pane that
-/// moved from an active raw state back to idle while the user was not
-/// looking at it.
-///
-/// Lifecycle teardown (`paneExited` / `paneCrashed` / `paneClosedByTab`)
-/// drops both the entry and its scratch — the row disappears from the
-/// view when the user closes the pane. `onAgentUnbound` does the same
-/// explicitly for the user-driven unbind path. `reconcileMembership`
-/// is the catalog backstop for a pane that leaves the hierarchy without
-/// delivering one of those events. The store is silently inert for
-/// unbound panes: events arrive, scratch stays uninitialized, and
-/// `entries` never grows.
+/// Stores accepted Agent facts separately from attention and display hysteresis.
+/// Only instance-tagged live observations can authorize automatic recovery.
 @MainActor
 @Observable
 final class AgentStateStore {
-  /// One row in the store. Pane-keyed via `entries`. `state` and
-  /// `lastTransitionAt` are mutated in place; `kind` and `sessionID`
-  /// are immutable for the entry's lifetime (rebind requires
-  /// `onAgentUnbound` followed by `onAgentBound`).
   struct AgentEntry: Equatable {
     let kind: AgentKind
-    let sessionID: String?
+    var sessionID: String?
     var state: AgentRuntimeState
     var lastTransitionAt: Date
-    /// Recovery budgets span autonomous retries, but never manual interaction
-    /// or a new agent binding. This token is intentionally runtime-only.
-    var recoveryGeneration = UUID()
-    var recoveryEligible = false
-    var recoverySuppressed = false
-  }
-
-  /// Derived runtime state surfaced to UI. Shares its vocabulary with the
-  /// raw `AgentActivityState` classifier (`working` / `blocked` / `error` / `idle`)
-  /// and adds `finished` for an unobserved completion, so no state has to
-  /// be renamed as it flows from classifier to UI. Distinct from the
-  /// inbox-side `InboxEntry.Kind`, which tracks notification events rather
-  /// than live activity.
-  enum AgentRuntimeState: String, CaseIterable, Equatable, Sendable {
-    case idle
-    case working
-    case blocked
-    case error
-    case finished
-
-    /// True while the agent's turn is still open — working, or blocked on
-    /// the user mid-turn. An `error` is a stopped failure requiring recovery;
-    /// `idle` / `finished` mean the turn has ended.
-    var isMidTask: Bool {
-      self == .working || self == .blocked
-    }
-  }
-
-  /// Public, read-only view of bound agents. `@Observable` tracks
-  /// dictionary subscript writes so SwiftUI consumers re-render on
-  /// every state transition.
-  private(set) var entries: [PaneID: AgentEntry] = [:]
-
-  /// Per-pane derivation scratch. Kept around for all panes the
-  /// store has heard about (bound or not) so signals that arrive
-  /// before an agent is identified still leave the correct raw state
-  /// and observation state when `onAgentBound` lands. Dropped on
-  /// teardown / unbind.
-  private struct Scratch {
-    var rawState: AgentRawState
-    var seen: Bool
-    var userInputSeen: Bool
-    var lastViewportText: String?
+    var binding: AgentBinding?
+    var bindingIsValid = false
     var observation: AgentObservation?
-    var lastWorkingAt: Date?
-    var suppressedErrorFingerprint: String?
-    /// Latest OSC title the pane's terminal pushed. Display-only cache
-    /// for the hover summary card's "what is the agent doing" line —
-    /// never an input to state derivation (see the reaction table).
-    var lastTitle: String?
-    /// True only for a pane seeded from the persisted quit snapshot that
-    /// has not yet received a live viewport classification. While set,
-    /// `refresh` holds the restored display state instead of deriving a
-    /// synthetic `.idle` from the (still-absent) viewport text — otherwise
-    /// the `onAgentBound` rebind at launch would collapse a resumed
-    /// working/blocked badge. Cleared the instant a real viewport lands
-    /// (`applyViewportText`).
-    var awaitingFirstClassification: Bool
+    var externalInputRevision: UInt64 = 0
+    var recoverySuppressed = false
+    var hasResidualDraft = false
 
-    static func fresh(
-      userInputSeen: Bool = false,
-      awaitingFirstClassification: Bool = false
-    ) -> Self {
-      Self(
-        rawState: .idle,
-        seen: true,
-        userInputSeen: userInputSeen,
-        lastViewportText: nil,
-        lastWorkingAt: nil,
-        lastTitle: nil,
-        awaitingFirstClassification: awaitingFirstClassification
-      )
+    var recoveryEligible: Bool {
+      guard bindingIsValid, !recoverySuppressed, !hasResidualDraft,
+        let binding, let observation, observation.instanceID == binding.instanceID,
+        case .error = observation.state
+      else { return false }
+      return true
     }
   }
 
-  private typealias AgentRawState = PaneAttentionInterpreter.AgentActivityState
+  /// Wire/UI projection. Finished is unseen completion, not an execution state.
+  enum AgentRuntimeState: String, CaseIterable, Equatable, Sendable {
+    case unknown, idle, working, blocked, error, finished
 
+    var isMidTask: Bool { self == .working || self == .blocked }
+  }
+
+  private struct Scratch {
+    var tracker: TerminalObservationTracker
+    var text: String?
+    var parsed: TerminalParseResult?
+    var lastSnapshotSequence: UInt64 = 0
+    var lastWorkingAt: Date?
+    var displayActivity: PaneAttentionInterpreter.AgentActivityState = .unknown
+    var seen = true
+    var title: String?
+    var awaitingFirstClassification = false
+    // The predecessor may have painted a final banner after its last capture.
+    // The first replacement frame cannot claim ownership of any residual banner.
+    var needsReplacementBaseline = false
+
+    init(instanceID: AgentInstanceID = AgentInstanceID(), excluded: Set<ErrorBannerSignature> = []) {
+      tracker = TerminalObservationTracker(instanceID: instanceID, excludedErrorBanners: excluded)
+    }
+  }
+
+  private(set) var entries: [PaneID: AgentEntry] = [:]
   private var scratch: [PaneID: Scratch] = [:]
-
-  /// Globally focused pane, if any. Used to avoid surfacing
-  /// `.finished` for work the user is already looking at; focus
-  /// change events still clear a previously surfaced finished state.
   private let focusedPane: @MainActor () -> PaneID?
-  /// Time source. Injected so tests can assert on `lastTransitionAt`
-  /// without racing real `Date()`.
   private let now: () -> Date
 
-  init(
-    focusedPane: @escaping @MainActor () -> PaneID?,
-    now: @escaping () -> Date = Date.init
-  ) {
+  init(focusedPane: @escaping @MainActor () -> PaneID?, now: @escaping () -> Date = Date.init) {
     self.focusedPane = focusedPane
     self.now = now
   }
 
-  // MARK: - Inputs
-  //
-  // Reaction table:
-  //
-  //  - onTerminalEvent(.paneViewportChanged): classify the rendered
-  //    active region through `AgentObservationParser`'s agent-specific
-  //    rules. Process identity decides which agent this is; the rendered
-  //    content decides whether it is working, blocked, or idle. This is
-  //    the *only* source of `.blocked` / `.working`.
-  //  - onTerminalEvent(.paneIdle): recompute raw state; if this is the
-  //    first active → idle transition observed in the background, the
-  //    display state becomes `.finished`.
-  //  - onTerminalEvent(.paneExited | .paneCrashed | .paneClosedByTab):
-  //    teardown — drop entry and scratch.
-  //  - onPaneKeyboardActivity / onPaneFocused: mark the pane as seen and
-  //    optimistically clear a blocked state until the next snapshot
-  //    re-derives it.
-  //  - onTerminalEvent(.paneInfoChanged(.title)): cache the pane's
-  //    latest OSC title for the hover summary card's activity line.
-  //    Display-only — never an input to state derivation.
-  //  - onAgentBound: ensure scratch exists, derive current state,
-  //    materialise an entry.
-  //  - onAgentUnbound: drop entry and scratch.
-  //
-  // Deliberately NOT feeding state derivation: `paneOutput`, and
-  // `paneInfoChanged`'s desktopNotification / bellRang deltas. A bell or
-  // OS notification is an inbox-worthy *event* but not a live activity
-  // signal — the agent's current working/blocked/idle state is whatever
-  // the rendered region says right now, so the notifications detector
-  // consumes those deltas independently while this store stays purely
-  // render-derived (the title delta above is cached for display, never
-  // classified). Reading stable snapshots instead of raw byte output
-  // also keeps TUI repaint noise from pinning a pane on `.working`.
-
-  /// Single funnel for the runtime's typed event stream. The store
-  /// reacts only to a small subset (viewport / idle / teardown); other
-  /// cases are silent no-ops.
   func onTerminalEvent(_ event: TerminalEvent) {
-    storeLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
-    case .paneIdle(let paneID, _):
-      ensureScratch(paneID)
-      refresh(paneID)
-
-    case .paneExited(let paneID, _, _),
-      .paneCrashed(let paneID, _),
-      .paneClosedByTab(let paneID, _):
-      // Teardown — store forgets the pane entirely. Anything
-      // downstream that wants to remember the last state should
-      // snapshot before teardown.
-      //
-      // Dual-path contract: in production wiring, AgentBinder.unbind
-      // also fires on every teardown event (see
-      // `CodansApp.dispatchToAgentBinder`) and routes through
-      // `agentUnboundHandler → onAgentUnbound`, which already drops
-      // entry + scratch for bound panes. By the time this branch
-      // runs the entry is usually gone. This branch is still
-      // load-bearing for callers that drive the store directly
-      // (tests, future non-binder consumers) without going through
-      // AgentBinder. The redundant removeValue for an already-
-      // unbound pane is a single `@Observable` no-op write.
-      entries.removeValue(forKey: paneID)
-      scratch.removeValue(forKey: paneID)
-
+    case .paneAgentSnapshot(let snapshot):
+      accept(snapshot)
     case .paneViewportChanged(let paneID, let text):
-      applyViewportText(text, paneID: paneID)
-
+      // Untagged snapshots support display-only/remote bindings, never recovery.
+      guard entries[paneID]?.binding == nil else { return }
+      apply(text, paneID: paneID, observedAt: now())
+    case .paneIdle(let paneID, _):
+      refresh(paneID)
+    case .paneExited(let paneID, _, _), .paneCrashed(let paneID, _), .paneClosedByTab(let paneID, _):
+      onAgentUnbound(paneID)
     case .paneInfoChanged(let paneID, .title(let title)):
-      // Display-only title cache — no refresh: the title never feeds
-      // derivation (a "Working…" title must not flip state; see
-      // `titleChangesDoNotDriveWorkingAfterInput`). Scratch is created
-      // if absent so a title observed before the agent binds is already
-      // available when the card first opens.
-      var s = scratch[paneID] ?? .fresh()
-      s.lastTitle = title
-      scratch[paneID] = s
-
-    case .paneInfoChanged,
-      .paneOutput,
-      .foregroundJobChanged,
-      .paneCreated, .paneReady,
-      .tabActivated, .tabAutoClosed, .worktreeActivated, .hierarchyMutated,
-      .paneActionRequested, .windowActionRequested, .configChanged:
+      var value = scratch[paneID] ?? Scratch()
+      value.title = title
+      scratch[paneID] = value
+    default:
       break
     }
   }
 
-  /// The user typed into `paneID`. Marks the pane as observed and
-  /// optimistically clears a blocked state — the user is responding to the
-  /// prompt, so drop the attention cue until the next snapshot re-derives it.
-  func onPaneKeyboardActivity(_ paneID: PaneID) {
-    guard var s = scratch[paneID] else { return }
-    if s.rawState == .error {
-      s.suppressedErrorFingerprint = s.observation?.errorFingerprint
-    }
-    if s.rawState == .blocked || s.rawState == .error {
-      s.lastViewportText = nil
-      s.observation = nil
-      s.lastWorkingAt = nil
-      s.rawState = .idle
-    }
-    if var entry = entries[paneID] {
-      entry.recoveryGeneration = UUID()
-      entry.recoverySuppressed = false
-      entries[paneID] = entry
-    }
-    s.userInputSeen = true
-    s.seen = true
-    scratch[paneID] = s
-    refresh(paneID)
-  }
-
-  /// Focus clears display-only attention and blocked prompts, but preserves
-  /// errors and their recovery identity until actual input or new evidence.
-  func onPaneFocused(_ paneID: PaneID) {
-    guard var s = scratch[paneID] else { return }
-    if s.rawState == .blocked {
-      s.lastViewportText = nil
-      s.observation = nil
-      s.lastWorkingAt = nil
-      s.rawState = .idle
-    }
-    s.seen = true
-    scratch[paneID] = s
-    refresh(paneID)
-  }
-
-  /// `AgentBinder` identified an agent in `paneID`. Materialise an
-  /// entry and derive the initial state from any scratch already
-  /// accumulated before the foreground job is identified.
-  ///
-  /// If a viewport snapshot already classifies as `.working` or `.blocked`
-  /// for the bound kind, treat it as user-input observed. This catches
-  /// the "agent was already running when the binding formed" case (a fresh
-  /// pane that an external trigger spawned with an immediately-running
-  /// agent) so the badge surfaces the classifier output instead of staying
-  /// `.idle` until the user types. The app-restart case is handled
-  /// separately by the persisted seed (see `seedRestored`), preserved below.
+  /// Compatibility/display-only binding, including remote panes without local identity.
   func onAgentBound(
-    _ paneID: PaneID,
-    kind: AgentKind,
-    sessionID: String?,
-    assumeUserInputSeen: Bool = false
+    _ paneID: PaneID, kind: AgentKind, sessionID: String?, assumeUserInputSeen: Bool = false
   ) {
-    if let previous = entries[paneID],
-      previous.kind != kind || previous.sessionID != sessionID,
-      var previousScratch = scratch[paneID]
+    if let entry = entries[paneID], entry.kind == kind, entry.sessionID == sessionID,
+      entry.binding != nil
     {
-      previousScratch.lastViewportText = nil
-      previousScratch.observation = nil
-      previousScratch.lastWorkingAt = nil
-      previousScratch.suppressedErrorFingerprint = nil
-      previousScratch.rawState = .idle
-      previousScratch.awaitingFirstClassification = true
-      scratch[paneID] = previousScratch
+      return
     }
-    if var existing = scratch[paneID], let text = existing.lastViewportText {
-      existing.observation = AgentObservationParsers.parser(for: kind).parse(text)
-      scratch[paneID] = existing
+    let previous = entries[paneID]
+    if let previous, previous.kind != kind || previous.sessionID != sessionID {
+      let old = scratch[paneID]
+      var fresh = Scratch(excluded: old?.tracker.visibleErrorBanners ?? [])
+      fresh.title = old?.title
+      scratch[paneID] = fresh
     }
-    let activity = scratch[paneID]?.observation?.activity
-    let viewportImpliesActive = activity == .working || activity == .blocked
-    let effectiveUserInputSeen = assumeUserInputSeen || viewportImpliesActive
-
-    if var existing = scratch[paneID] {
-      existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
-      scratch[paneID] = existing
-    } else {
-      scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
-    }
-    // Preserve a state seeded from the persisted quit snapshot
-    // (`seedRestored`). The binder re-identifies the restored agent and
-    // calls this on launch; hardcoding `.idle` here dropped the resumed
-    // working/blocked badge before any live viewport arrived. Fresh
-    // bindings have no prior entry and correctly start `.idle`.
-    let seeded = entries[paneID]
+    if scratch[paneID] == nil { scratch[paneID] = Scratch() }
     entries[paneID] = AgentEntry(
-      kind: kind,
-      sessionID: sessionID,
-      state: seeded?.state ?? .idle,
-      lastTransitionAt: seeded?.lastTransitionAt ?? now()
-    )
-    refresh(paneID)
+      kind: kind, sessionID: sessionID, state: previous?.state ?? .unknown,
+      lastTransitionAt: previous?.lastTransitionAt ?? now())
+    if let text = scratch[paneID]?.text { apply(text, paneID: paneID, observedAt: now()) } else { refresh(paneID) }
   }
 
-  /// Keep the error visible while invalidating pending recovery work. Only
-  /// explicit keyboard input or a new binding permits automatic recovery again.
-  func cancelRecovery(for paneID: PaneID) {
+  func onAgentBound(_ binding: AgentBinding, assumeUserInputSeen: Bool = false) {
+    let paneID = binding.paneID
+    if var entry = entries[paneID], entry.binding?.instanceID == binding.instanceID {
+      entry.binding = binding
+      entry.sessionID = binding.sessionID
+      entry.bindingIsValid = true
+      entries[paneID] = entry
+      return
+    }
+    let old = scratch[paneID]
+    var fresh = Scratch(
+      instanceID: binding.instanceID, excluded: old?.tracker.visibleErrorBanners ?? [])
+    fresh.title = old?.title
+    fresh.needsReplacementBaseline = entries[paneID]?.binding != nil
+    scratch[paneID] = fresh
+    entries[paneID] = AgentEntry(
+      kind: binding.kind, sessionID: binding.sessionID, state: .unknown,
+      lastTransitionAt: now(), binding: binding, bindingIsValid: true)
+  }
+
+  func onBindingValidityChanged(paneID: PaneID, valid: Bool) {
     guard var entry = entries[paneID] else { return }
-    entry.recoverySuppressed = true
-    entry.recoveryGeneration = UUID()
+    entry.bindingIsValid = valid
     entries[paneID] = entry
   }
 
-  /// User-driven unbind path. Drops both the entry and its scratch so
-  /// the row disappears from the view and subsequent events for
-  /// this pane become silent no-ops until something rebinds.
+  func onExternalInput(_ paneID: PaneID, revision: UInt64) {
+    guard var entry = entries[paneID], var value = scratch[paneID] else { return }
+    entry.externalInputRevision = revision
+    entry.recoverySuppressed = false
+    value.tracker.recordInput()
+    value.seen = true
+    value.lastWorkingAt = nil
+    value.displayActivity = .unknown
+    value.awaitingFirstClassification = false
+    scratch[paneID] = value
+    entries[paneID] = entry
+    refresh(paneID)
+  }
+
+  /// Kept for callers/tests that directly model user interaction.
+  func onPaneKeyboardActivity(_ paneID: PaneID) {
+    onExternalInput(paneID, revision: (entries[paneID]?.externalInputRevision ?? 0) &+ 1)
+  }
+
+  func onPaneFocused(_ paneID: PaneID) {
+    guard var value = scratch[paneID] else { return }
+    value.seen = true
+    scratch[paneID] = value
+    refresh(paneID)
+  }
+
+  func cancelRecovery(for paneID: PaneID) {
+    guard var entry = entries[paneID] else { return }
+    entry.recoverySuppressed = true
+    entries[paneID] = entry
+  }
+
+  func setResidualDraft(_ exists: Bool, for paneID: PaneID) {
+    guard var entry = entries[paneID] else { return }
+    entry.hasResidualDraft = exists
+    entries[paneID] = entry
+  }
+
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
   }
 
-  /// Catalog-membership backstop. Drops every entry (and its scratch)
-  /// whose pane is no longer present in the live catalog.
-  ///
-  /// Bound entries are normally retired by the per-pane teardown events
-  /// (`paneExited` / `paneCrashed` / `paneClosedByTab`) or `onAgentUnbound`,
-  /// but a pane can leave the hierarchy without one reaching the store — a
-  /// worktree / project removal, or a launch seed for a pane the catalog no
-  /// longer hosts. Such an entry can never resolve to a project/worktree, so
-  /// `AgentStateView` renders it as an em-dash "ghost" row; left alone it is
-  /// re-persisted into the quit snapshot and liveness-seeded again next
-  /// launch. Reconciling against the live catalog on every structural
-  /// mutation breaks that loop. Driven by the app's event drain on
-  /// `hierarchyMutated` (see `AppState.dispatchToAgentStateStore`).
-  ///
-  /// Takes a flat `Set<PaneID>` rather than a `Catalog` so the store stays
-  /// free of hierarchy imports — the catalog walk lives in the wiring layer.
   func reconcileMembership(livePaneIDs: Set<PaneID>) {
-    let stale = entries.keys.filter { !livePaneIDs.contains($0) }
-    guard !stale.isEmpty else { return }
-    for paneID in stale {
-      storeLogger.info(
-        "reconcile-drop pane=\(paneID.raw.uuidString, privacy: .public) — absent from catalog"
-      )
-      entries.removeValue(forKey: paneID)
-      scratch.removeValue(forKey: paneID)
+    for paneID in Set(entries.keys).union(scratch.keys) where !livePaneIDs.contains(paneID) {
+      onAgentUnbound(paneID)
     }
   }
 
-  /// Pre-seed the registry from a persisted catalog at launch. Each
-  /// record contributes one `AgentEntry` so the ActiveAgents UI shows
-  /// the correct state immediately rather than starting empty and
-  /// catching up after the first viewport refresh. Unknown enum raws
-  /// (kind or state added in a future build) are skipped silently —
-  /// dropping a stale row is preferable to crashing the launch.
-  ///
-  /// Scratch is initialised with `userInputSeen = true` so the
-  /// restored state cannot be flipped to a synthetic "finished" cue
-  /// before any user interaction; the next real event refines it.
   func seedRestored(_ records: [(paneID: PaneID, kind: AgentKind, state: AgentRuntimeState)]) {
     for record in records {
       entries[record.paneID] = AgentEntry(
-        kind: record.kind,
-        sessionID: nil,
-        state: record.state,
-        lastTransitionAt: now()
-      )
-      scratch[record.paneID] = .fresh(
-        userInputSeen: true,
-        awaitingFirstClassification: true
-      )
+        kind: record.kind, sessionID: nil, state: record.state, lastTransitionAt: now())
+      var value = Scratch()
+      value.awaitingFirstClassification = true
+      scratch[record.paneID] = value
     }
   }
 
-  // MARK: - Reads
+  func title(for paneID: PaneID) -> String? { scratch[paneID]?.title }
 
-  /// Latest OSC title observed for `paneID` — the terminal title agents
-  /// push as they work, which doubles as a one-line "what is the agent
-  /// doing" cue — or nil when none has arrived (or the pane has been
-  /// torn down). Read by the hover summary card. Reading `scratch`
-  /// inside a SwiftUI body registers `@Observable` tracking, so an open
-  /// card re-renders as the agent retitles the pane.
-  func title(for paneID: PaneID) -> String? {
-    scratch[paneID]?.lastTitle
+  private func accept(_ snapshot: AgentTerminalSnapshot) {
+    let paneID = snapshot.binding.paneID
+    guard let entry = entries[paneID], entry.binding == snapshot.binding,
+      var value = scratch[paneID], snapshot.sequence > value.lastSnapshotSequence
+    else { return }
+    value.lastSnapshotSequence = snapshot.sequence
+    scratch[paneID] = value
+    onBindingValidityChanged(paneID: paneID, valid: true)
+    apply(snapshot.text, paneID: paneID, observedAt: snapshot.observedAt)
   }
 
-  // MARK: - Derivation
-
-  /// Raw state derivation. Display-only finished is intentionally not
-  /// represented here; it is derived later from `seen`.
-  private func deriveRawState(_ s: Scratch) -> AgentRawState {
-    guard let observation = s.observation else { return .idle }
-    let raw = observation.activity
-    if raw == .error,
-      let suppressed = s.suppressedErrorFingerprint,
-      observation.errorFingerprint == suppressed
-    {
-      return .idle
-    }
-    if raw == .blocked || raw == .error { return raw }
-    return s.userInputSeen ? raw : .idle
-  }
-
-  private func displayState(for s: Scratch) -> AgentRuntimeState {
-    switch s.rawState {
-    case .blocked:
-      return .blocked
-    case .error:
-      return .error
-    case .working:
-      return .working
-    case .idle:
-      return s.seen ? .idle : .finished
-    }
-  }
-
-  private func isFocused(_ paneID: PaneID) -> Bool {
-    focusedPane() == paneID
-  }
-
-  private func ensureScratch(_ paneID: PaneID) {
-    if scratch[paneID] == nil {
-      scratch[paneID] = .fresh()
-    }
-  }
-
-  private func applyViewportText(_ text: String, paneID: PaneID) {
-    var s = scratch[paneID] ?? .fresh()
-    s.lastViewportText = text
-    s.observation = entries[paneID].map { entry in
-      AgentObservationParsers.parser(for: entry.kind).parse(text)
-    }
-    if let observation = s.observation, let suppressed = s.suppressedErrorFingerprint {
-      let oldErrorRemains = observation.visibleErrorFingerprints.contains(suppressed)
-      if observation.activity == .working || observation.activity == .blocked || !oldErrorRemains {
-        s.suppressedErrorFingerprint = nil
+  private func apply(_ text: String, paneID: PaneID, observedAt: Date) {
+    var value = scratch[paneID] ?? Scratch()
+    let changed = value.text != text
+    value.text = text
+    if let entry = entries[paneID] {
+      let parsed =
+        (!changed ? value.parsed : nil)
+        ?? AgentRegistry.definition(for: entry.kind).terminalParser.parse(text)
+      value.parsed = parsed
+      if value.needsReplacementBaseline {
+        value.tracker = TerminalObservationTracker(
+          instanceID: value.tracker.instanceID,
+          excludedErrorBanners: parsed.evidence.visibleErrorBanners)
+        value.needsReplacementBaseline = false
       }
+      _ = value.tracker.accept(parsed, observedAt: observedAt)
+      value.awaitingFirstClassification = false
     }
-    // A real viewport classification now governs; release the restored
-    // seed so normal derivation takes over (see `seedRestored`).
-    s.awaitingFirstClassification = false
-    scratch[paneID] = s
+    scratch[paneID] = value
     refresh(paneID)
   }
 
-  /// Diagnostic tag — short shape-only string for the active log
-  /// subsystem so we can see at a glance which event variants flow
-  /// through onTerminalEvent without dragging the full enum payload
-  /// (Data blobs, embedded structs) into the log stream.
-  private static func eventTag(_ event: TerminalEvent) -> String {
-    switch event {
-    case .paneOutput(let id, _): return "paneOutput(\(id.raw.uuidString.prefix(8)))"
-    case .paneViewportChanged(let id, _):
-      return "paneViewportChanged(\(id.raw.uuidString.prefix(8)))"
-    case .paneIdle(let id, _): return "paneIdle(\(id.raw.uuidString.prefix(8)))"
-    case .paneExited(let id, _, _): return "paneExited(\(id.raw.uuidString.prefix(8)))"
-    case .paneCrashed(let id, _): return "paneCrashed(\(id.raw.uuidString.prefix(8)))"
-    case .paneClosedByTab(let id, _): return "paneClosedByTab(\(id.raw.uuidString.prefix(8)))"
-    case .paneInfoChanged(let id, let delta):
-      return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
-    case .foregroundJobChanged(let id, _):
-      return "foregroundJobChanged(\(id.raw.uuidString.prefix(8)))"
-    case .paneCreated(let id, _): return "paneCreated(\(id.raw.uuidString.prefix(8)))"
-    case .paneReady(let id): return "paneReady(\(id.raw.uuidString.prefix(8)))"
-    default: return hierarchyEventTag(event)
-    }
-  }
-
-  private static func hierarchyEventTag(_ event: TerminalEvent) -> String {
-    switch event {
-    case .tabActivated: return "tabActivated"
-    case .tabAutoClosed: return "tabAutoClosed"
-    case .worktreeActivated: return "worktreeActivated"
-    case .hierarchyMutated: return "hierarchyMutated"
-    case .paneActionRequested: return "paneActionRequested"
-    case .windowActionRequested: return "windowActionRequested"
-    case .configChanged: return "configChanged"
-    default: return "paneEvent"
-    }
-  }
-
-  private static func deltaTag(_ delta: PaneInfoDelta) -> String {
-    switch delta {
-    case .title: return "title"
-    case .tabTitle: return "tabTitle"
-    case .desktopNotification: return "desktopNotification"
-    case .bellRang: return "bellRang"
-    case .progress: return "progress"
-    default: return "other"
-    }
-  }
-
-  /// Apply the latest raw + display derivation. Scratch is updated even
-  /// when the pane is not bound yet so pre-bind signals still influence
-  /// `onAgentBound`.
   private func refresh(_ paneID: PaneID) {
-    guard var s = scratch[paneID] else { return }
-    let kind = entries[paneID]?.kind
-    let previousRaw = s.rawState
-    var newRaw = deriveRawState(s)
-    if kind != nil {
-      newRaw = PaneAttentionInterpreter.stabilizeAgentActivity(
-        previous: previousRaw,
-        raw: newRaw,
-        now: now(),
-        lastWorkingAt: &s.lastWorkingAt
-      )
+    guard var value = scratch[paneID], var entry = entries[paneID] else { return }
+    entry.observation = value.tracker.lastObservation
+    guard !value.awaitingFirstClassification else { return }
+    let raw = Self.activity(entry.observation?.state ?? .unknown)
+    let previous = value.displayActivity
+    let displayed = PaneAttentionInterpreter.stabilizeAgentActivity(
+      previous: previous, raw: raw, now: now(), lastWorkingAt: &value.lastWorkingAt)
+    if displayed == .error || displayed == .unknown || displayed == .blocked { value.seen = true }
+    if focusedPane() == paneID {
+      value.seen = true
+    } else if previous == .working, displayed == .idle {
+      value.seen = false
     }
-    if isFocused(paneID) {
-      s.seen = true
-    } else if previousRaw.isActive, newRaw == .idle {
-      s.seen = false
+    value.displayActivity = displayed
+    let next: AgentRuntimeState
+    switch displayed {
+    case .unknown: next = .unknown
+    case .idle: next = value.seen ? .idle : .finished
+    case .working: next = .working
+    case .blocked: next = .blocked
+    case .error: next = .error
     }
-    s.rawState = newRaw
-    scratch[paneID] = s
-
-    // A pane seeded from the quit snapshot holds its restored display
-    // state until the first live viewport classification — deriving from
-    // absent viewport text would collapse a resumed working/blocked badge
-    // to idle. `applyViewportText` clears the flag the moment real output
-    // lands, handing control back to normal derivation.
-    if s.awaitingFirstClassification { return }
-
-    guard var entry = entries[paneID] else { return }
-    let newState = displayState(for: s)
-    entry.recoveryEligible = newState == .error
-    guard entry.state != newState else {
-      if entries[paneID] != entry { entries[paneID] = entry }
-      return
+    if entry.state != next {
+      entry.state = next
+      entry.lastTransitionAt = now()
     }
-    storeLogger.info(
-      "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public)"
-    )
-    entry.state = newState
-    entry.lastTransitionAt = now()
+    scratch[paneID] = value
     entries[paneID] = entry
+  }
+
+  private static func activity(_ state: AgentState) -> PaneAttentionInterpreter.AgentActivityState {
+    switch state {
+    case .unknown: return .unknown
+    case .idle: return .idle
+    case .working: return .working
+    case .blocked: return .blocked
+    case .error: return .error
+    }
   }
 }

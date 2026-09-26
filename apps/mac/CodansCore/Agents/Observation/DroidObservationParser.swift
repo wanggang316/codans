@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct DroidObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectDroid(screen))
+nonisolated struct DroidObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["droid>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectDroid(screen), text: screen, promptPrefixes: ["droid>"])
   }
 
-  private static func detectDroid(_ content: String) -> AgentObservation.Activity {
+  private static func detectDroid(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     let hasExecute = content.contains("EXECUTE")
     let hasSelectionChrome =
@@ -27,7 +26,7 @@ nonisolated struct DroidObservationParser: AgentObservationParser {
     if hasDroidSpinner(content) || lower.contains("esc to stop") {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func hasDroidSpinner(_ content: String) -> Bool {

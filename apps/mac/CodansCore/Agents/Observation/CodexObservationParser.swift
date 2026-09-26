@@ -1,22 +1,13 @@
 import Foundation
 
-nonisolated struct CodexObservationParser: AgentObservationParser {
-  let supportsErrorRecovery = true
-
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    let activity = Self.detectCodex(screen)
-    let fingerprint = Self.errorFingerprint(screen)
-    let visible = Set(text.split(separator: "\n").compactMap { Self.errorFingerprint(String($0)) })
-    return AgentObservation(
-      activity: activity == .idle && fingerprint != nil ? .error : activity,
-      errorFingerprint: fingerprint,
-      visibleErrorFingerprints: visible)
+nonisolated struct CodexObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    AgentTerminalErrorParsing.parse(
+      text, promptPrefixes: ["codex>", "›"], activity: Self.detectCodex, banner: Self.errorFingerprint)
   }
 
   private static func errorFingerprint(_ text: String) -> String? {
-    guard let line = AgentObservationText.trailingErrorLine(text) else { return nil }
+    let line = text.trimmingCharacters(in: .whitespaces)
     guard line.hasPrefix("■ ") else { return nil }
     let message = String(line.dropFirst(2))
     let prefixes = [
@@ -27,7 +18,7 @@ nonisolated struct CodexObservationParser: AgentObservationParser {
     return message
   }
 
-  private static func detectCodex(_ content: String) -> AgentObservation.Activity {
+  private static func detectCodex(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     if lower.contains("press enter to confirm or esc to cancel")
       || lower.contains("enter to submit answer")
@@ -38,13 +29,11 @@ nonisolated struct CodexObservationParser: AgentObservationParser {
     {
       return .blocked
     }
-    if hasTrailingIdlePrompt(content, prefixes: ["codex>"]) {
-      return .idle
-    }
+    if hasTrailingIdlePrompt(content, prefixes: ["codex>"]) { return .idle }
     if AgentObservationText.hasInterruptPattern(lower) || hasCodexWorkingHeader(content) {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func hasTrailingIdlePrompt(_ content: String, prefixes: [String]) -> Bool {

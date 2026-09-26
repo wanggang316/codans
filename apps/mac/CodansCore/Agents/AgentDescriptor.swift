@@ -164,21 +164,7 @@ public nonisolated enum AgentCatalog {
   /// it declares how it launches. The bodies live in the constants below —
   /// the switch stays a dispatcher.
   public static func descriptor(for kind: AgentKind) -> AgentDescriptor {
-    switch kind {
-    case .claudeCode: return claudeCode
-    case .codex: return codex
-    case .gemini: return gemini
-    case .cursorAgent: return cursorAgent
-    case .opencode: return opencode
-    case .copilot: return copilot
-    case .droid: return droid
-    case .amp: return amp
-    case .grok: return grok
-    case .pi: return pi
-    case .omp: return omp
-    case .cline: return cline
-    case .kimi: return kimi
-    }
+    AgentRegistry.definition(for: kind).launch
   }
 
   /// Every descriptor in `AgentKind.allCases` order.
@@ -193,9 +179,10 @@ public nonisolated enum AgentCatalog {
     all.filter(\.supportsInitialPrompt).map(\.kind)
   }
 
-  // MARK: - Per-agent catalogues
+}
 
-  private static let claudeCode = AgentDescriptor(
+nonisolated enum AgentLaunchDescriptors {
+  static let claudeCode = AgentDescriptor(
     kind: .claudeCode,
     executable: "claude",
     iconAssetName: "claude-code",
@@ -221,7 +208,7 @@ public nonisolated enum AgentCatalog {
     promptStyle: .positional
   )
 
-  private static let codex = AgentDescriptor(
+  static let codex = AgentDescriptor(
     kind: .codex,
     executable: "codex",
     iconAssetName: "codex",
@@ -249,7 +236,7 @@ public nonisolated enum AgentCatalog {
     promptStyle: .positional
   )
 
-  private static let gemini = AgentDescriptor(
+  static let gemini = AgentDescriptor(
     kind: .gemini,
     executable: "gemini",
     iconAssetName: "gemini",
@@ -267,7 +254,7 @@ public nonisolated enum AgentCatalog {
     promptStyle: .flag("-i")
   )
 
-  private static let cursorAgent = AgentDescriptor(
+  static let cursorAgent = AgentDescriptor(
     kind: .cursorAgent,
     executable: "cursor-agent",
     iconAssetName: "cursor-agent",
@@ -277,35 +264,35 @@ public nonisolated enum AgentCatalog {
     promptStyle: .positional
   )
 
-  private static let opencode = AgentDescriptor(
+  static let opencode = AgentDescriptor(
     kind: .opencode,
     executable: "opencode",
     iconAssetName: "opencode",
     iconSummary: "OpenCode brand icon"
   )
 
-  private static let copilot = AgentDescriptor(
+  static let copilot = AgentDescriptor(
     kind: .copilot,
     executable: "copilot",
     iconAssetName: "github-copilot",
     iconSummary: "GitHub Copilot brand icon"
   )
 
-  private static let droid = AgentDescriptor(
+  static let droid = AgentDescriptor(
     kind: .droid,
     executable: "droid",
     iconAssetName: "droid",
     iconSummary: "Droid brand icon"
   )
 
-  private static let amp = AgentDescriptor(
+  static let amp = AgentDescriptor(
     kind: .amp,
     executable: "amp",
     iconAssetName: "amp",
     iconSummary: "Amp brand icon"
   )
 
-  private static let grok = AgentDescriptor(
+  static let grok = AgentDescriptor(
     kind: .grok,
     executable: "grok",
     iconAssetName: "grok",
@@ -315,7 +302,7 @@ public nonisolated enum AgentCatalog {
     promptStyle: .positional
   )
 
-  private static let pi = AgentDescriptor(
+  static let pi = AgentDescriptor(
     kind: .pi,
     executable: "pi",
     iconAssetName: "pi",
@@ -325,7 +312,7 @@ public nonisolated enum AgentCatalog {
     promptStyle: .positional
   )
 
-  private static let omp = AgentDescriptor(
+  static let omp = AgentDescriptor(
     kind: .omp,
     executable: "omp",
     iconAssetName: "omp",
@@ -335,14 +322,14 @@ public nonisolated enum AgentCatalog {
     promptStyle: .positional
   )
 
-  private static let cline = AgentDescriptor(
+  static let cline = AgentDescriptor(
     kind: .cline,
     executable: "cline",
     iconAssetName: "cline",
     iconSummary: "Cline brand icon"
   )
 
-  private static let kimi = AgentDescriptor(
+  static let kimi = AgentDescriptor(
     kind: .kimi,
     executable: "kimi",
     iconAssetName: "kimi",

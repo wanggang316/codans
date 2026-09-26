@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct GeminiObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectGemini(screen))
+nonisolated struct GeminiObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["gemini>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectGemini(screen), text: screen, promptPrefixes: ["gemini>"])
   }
 
-  private static func detectGemini(_ content: String) -> AgentObservation.Activity {
+  private static func detectGemini(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     if lower.contains("waiting for user confirmation")
       || content.contains("│ Apply this change")
@@ -20,7 +19,7 @@ nonisolated struct GeminiObservationParser: AgentObservationParser {
     if lower.contains("esc to cancel") {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
 }

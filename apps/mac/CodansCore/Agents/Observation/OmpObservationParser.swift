@@ -1,13 +1,12 @@
 import Foundation
 
-nonisolated struct OmpObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectOmp(screen))
+nonisolated struct OmpObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["omp>", "❯"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectOmp(screen), text: screen, promptPrefixes: ["omp>", "❯"])
   }
 
-  private static func detectOmp(_ content: String) -> AgentObservation.Activity {
+  private static func detectOmp(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     // Approval selector: omp's tool-approval prompt titles the dialog
     // `Allow tool: <name>` and renders Approve/Deny as select-list rows
@@ -36,7 +35,7 @@ nonisolated struct OmpObservationParser: AgentObservationParser {
     if hasOmpTurnTimer(content) || hasOmpActivityLine(content) {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   /// The bracket pair is theme-configurable (`[esc]`, `⟦esc⟧`, …), so

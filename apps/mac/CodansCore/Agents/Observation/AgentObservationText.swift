@@ -39,23 +39,61 @@ nonisolated enum AgentObservationText {
       || (lower.contains("esc") && lower.contains("interrupt"))
   }
 
-  static func trailingErrorLine(_ text: String) -> String? {
-    let lines = recentAgentLines(text, limit: AgentObservationText.recentLineLimit)
-      .split(separator: "\n")
-      .map { $0.trimmingCharacters(in: .whitespaces) }
-      .filter { !$0.isEmpty }
-    let lower = lines.joined(separator: "\n").lowercased()
-    // Provider-owned retries must finish before an external recovery intervenes.
-    if lower.contains("```") || lower.contains("retrying") || lower.contains("reconnecting")
-      || lower.contains("attempting to reconnect") || lower.contains("retry in ")
-    {
-      return nil
+  /// Strip quoted/code content before matching provider chrome. This reduces
+  /// accidental transcript matches; exact forged chrome is not authenticatable.
+  static func unquotedLines(_ text: String) -> [String] {
+    var inFence = false
+    return text.split(separator: "\n", omittingEmptySubsequences: false).map { raw in
+      let line = raw.trimmingCharacters(in: .whitespaces)
+      if line.hasPrefix("```") || line.hasPrefix("~~~") {
+        inFence.toggle()
+        return ""
+      }
+      let selector = ["> yes, allow", "> no, cancel"].contains { line.lowercased().hasPrefix($0) }
+      if inFence || (line.hasPrefix("> ") && !selector) || line.hasPrefix("│ > ") { return "" }
+      return line
     }
-    let trailing = lines.reversed().drop { line in
-      line == "❯" || line == "›" || line == "codex>"
-        || (line.count >= 3 && line.allSatisfy { $0 == "─" || $0 == "━" })
+  }
+
+  static func isBorder(_ line: String) -> Bool {
+    !line.isEmpty && line.allSatisfy { "─━-╭╮╰╯│┌┐└┘".contains($0) }
+  }
+
+  static func promptContent(_ line: String, prefixes: [String]) -> AgentPromptContent? {
+    for prefix in prefixes where line == prefix || line.hasPrefix(prefix + " ") {
+      let content = line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+      return content.isEmpty ? .empty : .occupied
     }
-    guard let line = trailing.first else { return nil }
-    return line
+    return nil
+  }
+
+  static func inputAvailability(_ lines: [String], prefixes: [String]) -> AgentInputAvailability {
+    guard let last = lines.last(where: { !$0.isEmpty && !isBorder($0) }),
+      let content = promptContent(last, prefixes: prefixes)
+    else { return .unknown }
+    return .prompt(content)
+  }
+
+  /// A submitted prompt before the current composer establishes an interaction
+  /// boundary. With no such boundary, matching remains deliberately conservative.
+  static func interactionLines(_ text: String, promptPrefixes: [String]) -> [String] {
+    let lines = unquotedLines(text)
+    let prompts = lines.indices.filter { promptContent(lines[$0], prefixes: promptPrefixes) != nil }
+    let start: Int
+    if prompts.count >= 2 { start = prompts[prompts.count - 2] + 1 } else { start = lines.startIndex }
+    let region = lines[start...].joined(separator: "\n")
+    return recentAgentLines(region, limit: recentLineLimit).split(separator: "\n", omittingEmptySubsequences: false)
+      .map(String.init)
+  }
+
+  static func result(activity: AgentObservedActivity, text: String, promptPrefixes: [String]) -> TerminalParseResult {
+    let input = inputAvailability(unquotedLines(text), prefixes: promptPrefixes)
+    switch activity {
+    case .working: return .working()
+    case .blocked: return .blocked()
+    default:
+      if case .prompt = input { return .idle(inputAvailability: input) }
+      return .unknown()
+    }
   }
 }

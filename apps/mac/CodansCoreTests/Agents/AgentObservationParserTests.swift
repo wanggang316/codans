@@ -48,128 +48,208 @@ struct AgentObservationParserTests {
   ]
 
   @Test
-  func registryCoversEveryAgentAndRestrictsRecoverySupport() {
+  func everyParserRequiresPositiveEvidenceAndReportsInputSeparately() {
     #expect(Set(Self.fixtures.map(\.kind)) == Set(AgentKind.allCases))
-    for kind in AgentKind.allCases {
-      let parser = AgentObservationParsers.parser(for: kind)
-      #expect(parser.supportsErrorRecovery == (kind == .claudeCode || kind == .codex))
-      let empty = parser.parse("")
-      #expect(empty.activity == .idle)
-      #expect(empty.errorFingerprint == nil)
-      #expect(empty.visibleErrorFingerprints.isEmpty)
-    }
-  }
-
-  @Test
-  func existingActivityFixturesRetainExpectedStatesAndFacadeCompatibility() {
     for fixture in Self.fixtures {
-      check(fixture.kind, fixture.working, expected: .working)
+      let parser = AgentObservationParsers.parser(for: fixture.kind)
+      let empty = parser.parse("")
+      #expect(empty.state == .unknown)
+      #expect(empty.inputAvailability == .unknown)
+      #expect(empty.evidence.currentErrorBanner == nil)
+      #expect(parser.parse("Ordinary response text").state == .unknown)
+      #expect(parser.parse(fixture.working).state == .working)
+      #expect(parser.parse(fixture.working).inputAvailability == .unavailable)
       if let blocked = fixture.blocked {
-        check(fixture.kind, blocked, expected: .blocked)
+        #expect(parser.parse(blocked).state == .blocked)
+        #expect(parser.parse(blocked).inputAvailability == .choice)
       }
-      check(fixture.kind, fixture.idle, expected: .idle)
+      let idle = parser.parse(fixture.idle)
+      #expect(idle.state == .idle)
+      #expect(idle.inputAvailability == (fixture.kind == .omp ? .prompt(.occupied) : .prompt(.empty)))
     }
   }
 
   @Test
-  func terminalErrorFixturesRemainNarrowAndCompatible() {
-    check(.codex, "■ stream disconnected before completion: timeout", expected: .error)
-    check(.codex, "■ unexpected status 503: unavailable", expected: .error)
-    check(.claudeCode, "⎿ API Error: 503 unavailable\n❯", expected: .error)
-    check(.claudeCode, "API Error: 401 unauthorized", expected: .error)
-    check(.codex, "Tool failed with exit code 1", expected: .idle)
-    check(.claudeCode, "Example: API Error: 503", expected: .idle)
-    check(.claudeCode, "```\nAPI Error: 503", expected: .idle)
-    check(.codex, "■ stream disconnected before completion: timeout\nCompleted successfully", expected: .idle)
-    check(.claudeCode, "API Error: 503\nesc to interrupt", expected: .working)
-    check(.claudeCode, "API Error: 503\nDo you want to proceed? yes", expected: .blocked)
+  func droidSelectionRowsAreLiveChromeRatherThanQuotedOutput() {
+    let parsed = AgentObservationParsers.parser(for: .droid).parse(
+      "> yes, allow\n> no, cancel\nenter to select")
+    #expect(parsed.state == .blocked)
+    #expect(parsed.inputAvailability == .choice)
   }
 
   @Test
-  func providerRetriesSuppressActionableErrorsButRetainVisibleEvidence() {
-    for (kind, banner, retry, fingerprint) in [
-      (
-        AgentKind.codex, "■ stream disconnected before completion: timeout", "Reconnecting... 1/5",
-        "stream disconnected before completion: timeout"
-      ),
-      (.claudeCode, "API Error: 503", "Retrying in 3 seconds", "API Error: 503"),
+  func finalErrorsOutrankHistoricalRetryAndWorkingCues() {
+    for (kind, previous, banner, prompt) in [
+      (AgentKind.codex, "Reconnecting... 5/5", "■ stream disconnected before completion: timeout", "›"),
+      (.claudeCode, "Retrying in 3 seconds", "API Error: 503 unavailable", "❯"),
+      (.codex, "• Working (12s)", "■ unexpected status 503: unavailable", "codex>"),
+      (.claudeCode, "✢ Editing…", "⎿ API Error: 503 unavailable", "❯"),
     ] {
-      let text = banner + "\n" + retry
-      let observation = AgentObservationParsers.parser(for: kind).parse(text)
-      #expect(observation.activity != .error)
-      #expect(observation.errorFingerprint == nil)
-      #expect(observation.visibleErrorFingerprints == [fingerprint])
-      check(kind, text, expected: observation.activity)
+      let result = AgentObservationParsers.parser(for: kind).parse(previous + "\n" + banner + "\n" + prompt)
+      guard case .error(let failure) = result.state else {
+        Issue.record("Final error not selected: \(result)")
+        continue
+      }
+      #expect(failure.reason == .transient)
+      #expect(result.inputAvailability == .prompt(.empty))
+      #expect(result.evidence.currentErrorBanner != nil)
+      #expect(result.evidence.currentErrorBanner.map { result.evidence.visibleErrorBanners.contains($0) } == true)
     }
   }
 
   @Test
-  func workingAndBlockedStatesDoNotDiscardErrorEvidence() {
-    for (kind, cue, banner, fingerprint, expected) in [
+  func currentRetryAndPermissionCuesReplaceErrorsWithoutParallelCurrentFailure() {
+    for (kind, banner, suffix, state, input) in [
       (
-        AgentKind.codex, "• Working (12s)", "■ stream disconnected before completion: timeout",
-        "stream disconnected before completion: timeout", PaneAttentionInterpreter.AgentActivityState.working
+        AgentKind.codex, "■ unexpected status 503: unavailable", "Reconnecting... 1/5", AgentState.working,
+        AgentInputAvailability.unavailable
       ),
-      (.claudeCode, "✢ Editing…", "⎿ API Error: 503 unavailable", "API Error: 503 unavailable", .working),
-      (
-        .codex, "Allow command?\n[y/n]", "■ unexpected status 503: unavailable",
-        "unexpected status 503: unavailable", .blocked
-      ),
-      (
-        .claudeCode, "Do you want to proceed? yes", "API Error: 401 unauthorized",
-        "API Error: 401 unauthorized", .blocked
-      ),
+      (.claudeCode, "API Error: 503", "Retrying in 3 seconds", .working, .unavailable),
+      (.claudeCode, "API Error: 503", "Do you want to proceed? yes", .blocked, .choice),
     ] {
-      let text = cue + "\n" + banner
-      let observation = AgentObservationParsers.parser(for: kind).parse(text)
-      #expect(observation.activity == expected)
-      #expect(observation.errorFingerprint == fingerprint)
-      #expect(observation.visibleErrorFingerprints == [fingerprint])
-      check(kind, text, expected: expected)
+      let result = AgentObservationParsers.parser(for: kind).parse(banner + "\n" + suffix)
+      #expect(result.state == state)
+      #expect(result.inputAvailability == input)
+      #expect(result.evidence.currentErrorBanner == nil)
+      #expect(!result.evidence.visibleErrorBanners.isEmpty)
     }
   }
 
   @Test
-  func visibleEvidenceIncludesMultipleBannersOutsideTheActivityWindow() {
-    for (kind, first, second, firstFingerprint, secondFingerprint) in [
-      (
-        AgentKind.codex, "■ stream disconnected before completion: timeout", "■ unexpected status 503: unavailable",
-        "stream disconnected before completion: timeout", "unexpected status 503: unavailable"
-      ),
-      (
-        .claudeCode, "⎿ API Error: 503 unavailable", "API Error: 401 unauthorized",
-        "API Error: 503 unavailable", "API Error: 401 unauthorized"
-      ),
+  func promptAvailabilityNeverAssumesAnEmptyDraft() {
+    let parser = AgentObservationParsers.parser(for: .claudeCode)
+    for (suffix, input) in [
+      ("", AgentInputAvailability.unknown), ("\n❯", .prompt(.empty)),
+      ("\n❯ my unfinished draft", .prompt(.occupied)),
+      ("\n❯ first line\ncontinued draft", .unknown),
     ] {
-      let filler = Array(repeating: "Older transcript content", count: 30).joined(separator: "\n")
-      let text = first + "\n" + filler + "\n" + second + "\n" + second
-      let observation = AgentObservationParsers.parser(for: kind).parse(text)
-      #expect(observation.activity == .error)
-      #expect(observation.errorFingerprint == secondFingerprint)
-      #expect(observation.visibleErrorFingerprints == [firstFingerprint, secondFingerprint])
-      check(kind, text, expected: .error)
+      let result = parser.parse("API Error: 503" + suffix)
+      #expect(result.inputAvailability == input)
+    }
+    #expect(parser.parse("❯ my unfinished draft").state == .idle)
+  }
+
+  @Test
+  func quotedAndOlderInteractionErrorsCannotBecomeCurrentFailures() {
+    let parser = AgentObservationParsers.parser(for: .claudeCode)
+    for text in ["Example: API Error: 503", "```\nAPI Error: 503", "> API Error: 503"] {
+      #expect(parser.parse(text).state == .unknown)
+      #expect(parser.parse(text).evidence.currentErrorBanner == nil)
+    }
+    let old = parser.parse("API Error: 503\n❯ next task\nresponse text\n❯")
+    #expect(old.state == .idle)
+    #expect(old.evidence.currentErrorBanner == nil)
+    #expect(old.evidence.visibleErrorBanners == [.init(value: "API Error: 503")])
+    #expect(parser.parse("```\nAPI Error: 503\n```\n❯").state == .idle)
+  }
+
+  @Test
+  func errorsCarryPolicyMeaningAndCodableDetails() throws {
+    let parser = AgentObservationParsers.parser(for: .claudeCode)
+    for (message, reason, code, retryAfter) in [
+      ("API Error: 503 unavailable", AgentFailure.Reason.transient, "503", nil as Int?),
+      ("API Error: 429 rate limited Retry-After: 30", .rateLimited, "429", 30),
+      ("API Error: 401 unauthorized", .authentication, "401", nil),
+      ("API Error: 429 insufficient_quota", .quotaExceeded, "429", nil),
+      ("API Error: 400 invalid model", .configuration, "400", nil),
+      ("API Error: unexplained failure", .unknown, nil, nil),
+    ] {
+      let result = parser.parse(message)
+      guard case .error(let failure) = result.state else {
+        Issue.record("Missing failure for \(message)")
+        continue
+      }
+      #expect(failure.reason == reason)
+      #expect(failure.providerCode == code)
+      #expect(failure.retryAfterSeconds == retryAfter)
+      #expect(try JSONDecoder().decode(AgentFailure.self, from: JSONEncoder().encode(failure)) == failure)
     }
   }
 
   @Test
-  func unsupportedAgentsDoNotAcquireErrorEvidenceFromAnotherAgentsBanner() {
-    for kind in AgentKind.allCases where kind != .codex && kind != .claudeCode {
-      let observation = AgentObservationParsers.parser(for: kind).parse(
-        "API Error: 503 unavailable\n■ stream disconnected before completion: timeout")
-      #expect(observation.activity == .idle)
-      #expect(observation.errorFingerprint == nil)
-      #expect(observation.visibleErrorFingerprints.isEmpty)
+  func evidenceIsTerminalScopedAndControlledConstructionEnforcesErrorInvariant() {
+    let banner = ErrorBannerSignature(value: "API Error: 503")
+    let failure = AgentFailure(reason: .transient, message: banner.value)
+    let error = TerminalParseResult.error(failure: failure, banner: banner)
+    #expect(error.evidence.currentErrorBanner == banner)
+    #expect(error.evidence.visibleErrorBanners == [banner])
+    for value in [
+      TerminalParseResult.unknown(visibleErrorBanners: [banner]), .idle(visibleErrorBanners: [banner]),
+      .working(visibleErrorBanners: [banner]), .blocked(visibleErrorBanners: [banner]),
+    ] {
+      #expect(value.evidence.currentErrorBanner == nil)
+      #expect(value.evidence.visibleErrorBanners == [banner])
     }
+    let filler = Array(repeating: "Older transcript content", count: 30).joined(separator: "\n")
+    let result = AgentObservationParsers.parser(for: .claudeCode).parse(
+      "API Error: 401\n" + filler + "\nAPI Error: 503")
+    #expect(result.evidence.visibleErrorBanners.count == 2)
+    #expect(result.evidence.currentErrorBanner == banner)
   }
 
-  private func check(
-    _ kind: AgentKind, _ text: String, expected: PaneAttentionInterpreter.AgentActivityState
-  ) {
-    let observation = AgentObservationParsers.parser(for: kind).parse(text)
-    #expect(observation.activity == expected)
-    #expect(PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text) == expected)
-    #expect(
-      observation.errorFingerprint
-        == PaneAttentionInterpreter.agentErrorFingerprint(kind: kind, viewportText: text))
+  @Test
+  func trackerSeparatesCaptureSequenceFromStateOccurrenceAndExternalInput() {
+    let instance = AgentInstanceID()
+    var tracker = TerminalObservationTracker(instanceID: instance)
+    let error = AgentObservationParsers.parser(for: .claudeCode).parse("API Error: 503\n❯")
+    let time = Date(timeIntervalSince1970: 100)
+    let first = tracker.accept(error, observedAt: time)
+    let duplicate = tracker.accept(error, observedAt: time.addingTimeInterval(1))
+    #expect(first.instanceID == instance)
+    #expect(first.stateRevision == duplicate.stateRevision)
+    #expect(duplicate.sequence == first.sequence + 1)
+    #expect(duplicate.observedAt > first.observedAt)
+    tracker.recordInput()
+    #expect(tracker.lastObservation?.state == .unknown)
+    #expect(tracker.lastObservation?.stateRevision != first.stateRevision)
+    let dismissed = tracker.accept(error, observedAt: time.addingTimeInterval(2))
+    #expect(dismissed.state == .idle)
+    let duplicateDismissed = tracker.accept(error, observedAt: time.addingTimeInterval(3))
+    #expect(dismissed.stateRevision == duplicateDismissed.stateRevision)
+    _ = tracker.accept(
+      .working(visibleErrorBanners: error.evidence.visibleErrorBanners), observedAt: time.addingTimeInterval(4))
+    let repeated = tracker.accept(error, observedAt: time.addingTimeInterval(5))
+    #expect(repeated.state == first.state)
+    #expect(repeated.stateRevision > first.stateRevision)
+  }
+
+  @Test
+  func suppressionWithoutPromptRemainsUnknownUntilNewEvidence() {
+    let parser = AgentObservationParsers.parser(for: .claudeCode)
+    let error = parser.parse("API Error: 503")
+    var tracker = TerminalObservationTracker(instanceID: .init())
+    _ = tracker.accept(error, observedAt: .distantPast)
+    tracker.recordInput()
+    #expect(tracker.accept(error, observedAt: .distantPast).state == .unknown)
+    let draft = parser.parse("API Error: 503\n❯ typing draft")
+    #expect(tracker.accept(draft, observedAt: .distantPast).state == .idle)
+    #expect(tracker.accept(error, observedAt: .distantPast).state == .unknown)
+    let newError = parser.parse("API Error: 504")
+    #expect(tracker.accept(newError, observedAt: .distantPast).state == newError.state)
+  }
+
+  @Test
+  func replacementCannotClaimOldErrorButDisappearanceEstablishesNewOccurrence() {
+    let parser = AgentObservationParsers.parser(for: .claudeCode)
+    let error = parser.parse("API Error: 503\n❯")
+    var old = TerminalObservationTracker(instanceID: .init())
+    let previous = old.accept(error, observedAt: .distantPast)
+    var replacement = TerminalObservationTracker(instanceID: .init(), excludedErrorBanners: old.visibleErrorBanners)
+    let residual = replacement.accept(error, observedAt: .distantFuture)
+    #expect(residual.instanceID != previous.instanceID)
+    #expect(residual.state == .idle)
+    #expect(replacement.accept(error, observedAt: .distantFuture).stateRevision == residual.stateRevision)
+    _ = replacement.accept(.unknown(), observedAt: .distantFuture)
+    #expect(replacement.accept(error, observedAt: .distantFuture).state == error.state)
+  }
+
+  @Test
+  func changedBannerCreatesOccurrenceEvenWhenFailureDetailsAreEqual() {
+    var tracker = TerminalObservationTracker(instanceID: .init())
+    let failure = AgentFailure(reason: .unknown, message: "Failure")
+    let first = tracker.accept(.error(failure: failure, banner: .init(value: "one")), observedAt: .distantPast)
+    let second = tracker.accept(.error(failure: failure, banner: .init(value: "two")), observedAt: .distantPast)
+    #expect(first.state == second.state)
+    #expect(first.stateRevision != second.stateRevision)
   }
 }

@@ -147,6 +147,7 @@ struct RootFeature {
     case paneReady
     case paneOutput
     case paneViewportChanged
+    case paneAgentSnapshot
     case paneExited
     case paneCrashed
     case paneClosedByTab
@@ -161,12 +162,15 @@ struct RootFeature {
     case windowActionRequested
     case configChanged
 
+    // Exhaustive event-to-marker mapping has no branching behavior.
+    // swiftlint:disable:next cyclomatic_complexity
     init(_ event: TerminalEvent) {
       switch event {
       case .paneCreated: self = .paneCreated
       case .paneReady: self = .paneReady
       case .paneOutput: self = .paneOutput
       case .paneViewportChanged: self = .paneViewportChanged
+      case .paneAgentSnapshot: self = .paneAgentSnapshot
       case .paneIdle: self = .paneIdle
       case .paneExited: self = .paneExited
       case .paneCrashed: self = .paneCrashed
@@ -2859,21 +2863,15 @@ struct RootFeature {
       client.register(requestID)
       let instruction = HandoffKickoff.sourceInstruction(
         for: request, requestID: requestID, cli: client.cli, placement: placement)
-      let agent = source.agentName
       return .run { send in
         // Subscribe before typing: the stream does not replay, and a fast
         // agent could answer before a later subscription lands.
         let stream = await client.completions()
-        guard await client.sendInstruction(paneID, instruction) else {
-          // The pane is gone or wedged. Retire the request the agent will
-          // never see; starting the receiver without a briefing is the
-          // user's call (Hand Off with Context), not a silent downgrade.
+        let result = await client.sendInstruction(paneID, instruction)
+        if let message = HandoffClient.instructionFailureMessage(result) {
+          // Retire requests that never reached the agent; preserve its draft.
           _ = await client.supersede(requestID)
-          await send(
-            .handoffFailed(
-              message:
-                "\(agent)'s pane could not take the request. Nothing was changed; "
-                + "Hand Off with Context starts \(title) without a briefing."))
+          await send(.handoffFailed(message: message))
           return
         }
         for await completion in stream

@@ -1,14 +1,13 @@
 import Foundation
 
-nonisolated struct PiObservationParser: AgentObservationParser {
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    return AgentObservation(activity: Self.detectPi(screen))
+nonisolated struct PiObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let screen = AgentObservationText.interactionLines(text, promptPrefixes: ["pi>"]).joined(separator: "\n")
+    return AgentObservationText.result(activity: Self.detectPi(screen), text: screen, promptPrefixes: ["pi>"])
   }
 
-  private static func detectPi(_ content: String) -> AgentObservation.Activity {
-    content.contains("Working...") ? .working : .idle
+  private static func detectPi(_ content: String) -> AgentObservedActivity {
+    content.contains("Working...") ? .working : .unknown
   }
 
 }

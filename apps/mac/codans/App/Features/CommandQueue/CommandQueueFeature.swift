@@ -20,6 +20,7 @@ struct CommandQueueFeature {
     /// re-opening on another pane replaces the whole state.
     let paneID: PaneID
     var draft: String = ""
+    var submissionError: String?
     var mode: Mode = .afterCurrentTask
     /// First (or only) fire time for `.scheduled`. Seeded a few minutes out
     /// so the date picker opens on a plausible value rather than "now",
@@ -122,10 +123,12 @@ struct CommandQueueFeature {
       switch action {
       case .draftChanged(let text):
         state.draft = text
+        state.submissionError = nil
         return .none
 
       case .modeChanged(let mode):
         state.mode = mode
+        state.submissionError = nil
         // Re-seed the picker each time the user lands on Schedule: a panel
         // left open for an hour would otherwise offer a time already past.
         if mode == .scheduled, state.scheduledAt <= date.now {
@@ -155,6 +158,10 @@ struct CommandQueueFeature {
         let paneID = state.paneID
         switch state.mode {
         case .now:
+          guard terminalClient.canSubmitCommand(paneID) else {
+            state.submissionError = "The terminal is not ready for another command. Your draft is preserved."
+            return .none
+          }
           // Never enters the queue — it is already delivered. The panel is
           // always opened on a pane the user is looking at, so a live
           // surface is a given here. `sendCommand` (not `sendInput`) so the
@@ -174,6 +181,7 @@ struct CommandQueueFeature {
           )
         }
         state.draft = ""
+        state.submissionError = nil
         return .none
 
       case .removeTapped(let id):

@@ -1,32 +1,28 @@
 import Foundation
 
-nonisolated struct ClaudeCodeObservationParser: AgentObservationParser {
-  let supportsErrorRecovery = true
-
-  func parse(_ text: String) -> AgentObservation {
-    let screen = AgentObservationText.recentAgentLines(
-      text, limit: AgentObservationText.recentLineLimit)
-    let activity = Self.detectClaude(screen)
-    let fingerprint = Self.errorFingerprint(screen)
-    let visible = Set(text.split(separator: "\n").compactMap { Self.errorFingerprint(String($0)) })
-    return AgentObservation(
-      activity: activity == .idle && fingerprint != nil ? .error : activity,
-      errorFingerprint: fingerprint,
-      visibleErrorFingerprints: visible)
+nonisolated struct ClaudeCodeObservationParser: AgentTerminalParser {
+  func parse(_ text: String) -> TerminalParseResult {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    let withoutFooter = lines.reversed().drop { line in
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      return trimmed.isEmpty || ["[Opus ", "[Sonnet ", "[Haiku "].contains(where: trimmed.hasPrefix)
+    }.reversed().joined(separator: "\n")
+    return AgentTerminalErrorParsing.parse(
+      withoutFooter, promptPrefixes: ["❯"], activity: Self.detectClaude, banner: Self.errorFingerprint)
   }
 
   private static func errorFingerprint(_ text: String) -> String? {
-    guard let line = AgentObservationText.trailingErrorLine(text) else { return nil }
+    let line = text.trimmingCharacters(in: .whitespaces)
     let banner =
       line.hasPrefix("⎿ ") ? String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces) : line
     guard banner.hasPrefix("API Error: ") else { return nil }
     return banner
   }
 
-  private static func detectClaude(_ content: String) -> AgentObservation.Activity {
+  private static func detectClaude(_ content: String) -> AgentObservedActivity {
     let lower = content.lowercased()
     if content.contains("⌕ Search…") || lower.contains("ctrl+r to toggle") {
-      return .idle
+      return .unknown
     }
     let currentInteraction = claudeCurrentInteractionRegion(content)
     if hasClaudeBlockedPrompt(content: currentInteraction, lower: currentInteraction.lowercased()) {
@@ -41,7 +37,7 @@ nonisolated struct ClaudeCodeObservationParser: AgentObservationParser {
     if hasSpinnerActivity(above) {
       return .working
     }
-    return .idle
+    return .unknown
   }
 
   private static func contentAbovePromptBox(_ content: String) -> String {

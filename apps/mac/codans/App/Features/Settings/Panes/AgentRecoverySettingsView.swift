@@ -37,6 +37,25 @@ struct AgentRecoverySettingsView: View {
             .foregroundStyle(.secondary)
           }
         }
+        if policy.action == .script {
+          ForEach([AgentFailure.Reason.authentication, .quotaExceeded, .configuration, .unknown], id: \.self) {
+            reason in
+            Toggle(
+              "Also Handle \(reasonLabel(reason))",
+              isOn: Binding(
+                get: { policy.additionalScriptReasons.contains(reason) },
+                set: { enabled in
+                  settingsStore.mutateAgents {
+                    if enabled {
+                      $0.recovery.additionalScriptReasons.insert(reason)
+                    } else {
+                      $0.recovery.additionalScriptReasons.remove(reason)
+                    }
+                  }
+                }
+              ))
+          }
+        }
         Stepper("Retry Delay: \(policy.delaySeconds) seconds", value: binding(\.delaySeconds), in: 5...3600)
         Stepper("Maximum Attempts: \(policy.maxAttempts)", value: binding(\.maxAttempts), in: 1...10)
         if !policy.isValid {
@@ -49,11 +68,22 @@ struct AgentRecoverySettingsView: View {
       Text("Error Recovery")
     } footer: {
       Text(
-        "Off by default. Applies to all supported local agents when a terminal error is detected. "
+        "Off by default. Retries recognized temporary failures and rate limits in local agents. "
           + "Recovery stops when the agent resumes work, you interact with the session, "
           + "or the attempt limit is reached. Typing starts a new attempt budget. "
           + "Use the error row’s context menu to cancel recovery. Remote sessions are excluded."
       )
+    }
+  }
+
+  private func reasonLabel(_ reason: AgentFailure.Reason) -> String {
+    switch reason {
+    case .authentication: return "Authentication Errors"
+    case .quotaExceeded: return "Quota Errors"
+    case .configuration: return "Configuration Errors"
+    case .unknown: return "Unknown Errors"
+    case .transient: return "Temporary Errors"
+    case .rateLimited: return "Rate Limits"
     }
   }
 

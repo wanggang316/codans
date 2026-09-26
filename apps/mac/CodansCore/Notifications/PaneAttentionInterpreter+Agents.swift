@@ -15,11 +15,17 @@ extension PaneAttentionInterpreter {
     kind: AgentKind,
     viewportText: String
   ) -> AgentActivityState {
-    AgentObservationParsers.parser(for: kind).parse(viewportText).activity
+    switch AgentObservationParsers.parser(for: kind).parse(viewportText).state {
+    case .unknown: return .unknown
+    case .idle: return .idle
+    case .working: return .working
+    case .blocked: return .blocked
+    case .error: return .error
+    }
   }
 
   public static func agentErrorFingerprint(kind: AgentKind, viewportText: String) -> String? {
-    AgentObservationParsers.parser(for: kind).parse(viewportText).errorFingerprint
+    AgentObservationParsers.parser(for: kind).parse(viewportText).evidence.currentErrorBanner?.value
   }
 
   /// Hysteresis on the `working → idle` trailing edge, applied uniformly to
@@ -43,6 +49,8 @@ extension PaneAttentionInterpreter {
     lastWorkingAt: inout Date?
   ) -> AgentActivityState {
     switch raw {
+    case .unknown:
+      return .unknown
     case .working:
       lastWorkingAt = now
       return .working

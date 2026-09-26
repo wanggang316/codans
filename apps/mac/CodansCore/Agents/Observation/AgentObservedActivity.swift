@@ -1,5 +1,6 @@
 /// Raw activity inferred from one rendered agent observation.
 public nonisolated enum AgentObservedActivity: Equatable, Sendable {
+  case unknown
   case working
   case blocked
   case error
