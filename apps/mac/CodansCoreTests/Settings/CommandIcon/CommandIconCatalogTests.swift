@@ -35,6 +35,13 @@ struct CommandIconCatalogTests {
   }
 
   @Test
+  func runnerIconLooksPastANestedCd() {
+    #expect(CommandIconCatalog.runnerIcon(forCommand: "cd docker && pnpm run up") == .mark(.pnpm))
+    #expect(CommandIconCatalog.runnerIcon(forCommand: "make build") == .mark(.make))
+    #expect(CommandIconCatalog.runnerIcon(forCommand: "cd x && ./run.sh") == nil)
+  }
+
+  @Test
   func playwrightMapsToTheatreMasksSymbol() {
     #expect(icon("pw", "npm run pw", body: "playwright test --ui") == .symbol("theatermasks.fill"))
   }
