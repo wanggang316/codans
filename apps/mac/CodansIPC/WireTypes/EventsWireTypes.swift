@@ -35,10 +35,15 @@ extension IPC {
   public struct HierarchySummary: Codable, Equatable, Sendable {
     public let projects: [ProjectSummary]
     public let selectedProjectID: String?
+    /// The pane the Mac user is focused on: the selected tab's focused
+    /// pane in the selected worktree. A phone lands here when it has no
+    /// pane of its own to return to. Absent from older servers.
+    public let activePaneID: String?
 
-    public init(projects: [ProjectSummary], selectedProjectID: String?) {
+    public init(projects: [ProjectSummary], selectedProjectID: String?, activePaneID: String? = nil) {
       self.projects = projects
       self.selectedProjectID = selectedProjectID
+      self.activePaneID = activePaneID
     }
   }
 
@@ -97,20 +102,105 @@ extension IPC {
     public let title: String?
     public let focusedPaneID: String?
     public let panes: [PaneSummary]
+    /// The tab's split tree, so a client can order `panes` the way they
+    /// sit on screen and mirror the layout. Absent from older servers, and
+    /// nil when the tree uses a node shape this build does not know.
+    public let layout: SplitLayoutNode?
+    /// The pane zoomed to fill the tab on the Mac, if any.
+    public let zoomedPaneID: String?
 
     public init(
       id: String,
       handle: String?,
       title: String?,
       focusedPaneID: String?,
-      panes: [PaneSummary]
+      panes: [PaneSummary],
+      layout: SplitLayoutNode? = nil,
+      zoomedPaneID: String? = nil
     ) {
       self.id = id
       self.handle = handle
       self.title = title
       self.focusedPaneID = focusedPaneID
       self.panes = panes
+      self.layout = layout
+      self.zoomedPaneID = zoomedPaneID
     }
+
+    private enum CodingKeys: String, CodingKey {
+      case id, handle, title, focusedPaneID, panes, layout, zoomedPaneID
+    }
+
+    public init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      id = try c.decode(String.self, forKey: .id)
+      handle = try c.decodeIfPresent(String.self, forKey: .handle)
+      title = try c.decodeIfPresent(String.self, forKey: .title)
+      focusedPaneID = try c.decodeIfPresent(String.self, forKey: .focusedPaneID)
+      panes = try c.decode([PaneSummary].self, forKey: .panes)
+      // A layout from a newer server must not cost the client the whole
+      // summary; the flat pane list still works without it.
+      layout = (try? c.decodeIfPresent(SplitLayoutNode.self, forKey: .layout)) ?? nil
+      zoomedPaneID = try c.decodeIfPresent(String.self, forKey: .zoomedPaneID)
+    }
+  }
+
+  /// One node of a tab's split tree on the wire:
+  /// `{"leaf": "<paneID>"}` or
+  /// `{"split": {"direction": "horizontal", "ratio": 0.5, "left": …, "right": …}}`.
+  /// A `horizontal` split puts `left` beside `right`; a `vertical` one puts
+  /// `left` above `right`. `ratio` is the share `left` takes.
+  public indirect enum SplitLayoutNode: Codable, Equatable, Sendable {
+    case leaf(paneID: String)
+    case split(direction: SplitLayoutDirection, ratio: Double, left: SplitLayoutNode, right: SplitLayoutNode)
+
+    /// Pane ids in on-screen order: left to right, top to bottom.
+    public var paneIDs: [String] {
+      switch self {
+      case .leaf(let paneID): return [paneID]
+      case .split(_, _, let left, let right): return left.paneIDs + right.paneIDs
+      }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+      case leaf, split
+    }
+
+    private struct SplitBody: Codable {
+      let direction: SplitLayoutDirection
+      let ratio: Double
+      let left: SplitLayoutNode
+      let right: SplitLayoutNode
+    }
+
+    public init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      if let paneID = try c.decodeIfPresent(String.self, forKey: .leaf) {
+        self = .leaf(paneID: paneID)
+      } else if let body = try c.decodeIfPresent(SplitBody.self, forKey: .split) {
+        self = .split(direction: body.direction, ratio: body.ratio, left: body.left, right: body.right)
+      } else {
+        throw DecodingError.dataCorrupted(
+          .init(codingPath: decoder.codingPath, debugDescription: "layout node is neither leaf nor split"))
+      }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+      var c = encoder.container(keyedBy: CodingKeys.self)
+      switch self {
+      case .leaf(let paneID):
+        try c.encode(paneID, forKey: .leaf)
+      case .split(let direction, let ratio, let left, let right):
+        try c.encode(SplitBody(direction: direction, ratio: ratio, left: left, right: right), forKey: .split)
+      }
+    }
+  }
+
+  public enum SplitLayoutDirection: String, Codable, Equatable, Sendable {
+    /// Children side by side.
+    case horizontal
+    /// Children stacked.
+    case vertical
   }
 
   public struct PaneSummary: Codable, Equatable, Sendable {
@@ -123,13 +213,30 @@ extension IPC {
     /// string so an agent kind newer than the client still decodes.
     public let agent: String?
     public let labels: [String]
+    /// The shell's working directory as it last reported it, else the
+    /// directory the pane was opened in.
+    public let cwd: String?
+    /// Whether the pane has a live terminal on the Mac. Input needs one;
+    /// without it `terminal.sendEvents` answers `unsupported`. Absent from
+    /// older servers.
+    public let isLive: Bool?
 
-    public init(id: String, handle: String?, title: String?, agent: String?, labels: [String]) {
+    public init(
+      id: String,
+      handle: String?,
+      title: String?,
+      agent: String?,
+      labels: [String],
+      cwd: String? = nil,
+      isLive: Bool? = nil
+    ) {
       self.id = id
       self.handle = handle
       self.title = title
       self.agent = agent
       self.labels = labels
+      self.cwd = cwd
+      self.isLive = isLive
     }
   }
 

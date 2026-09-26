@@ -3,8 +3,8 @@ import CodansIPC
 import Foundation
 
 /// Renames, `git worktree prune`, and the split-tree verbs (`splitPane`,
-/// `resizePane`) — the sidebar and context-menu actions the CLI had no
-/// spelling for. Each goes through the same manager call the UI uses.
+/// `resizePane`, `zoomPane` / `unzoomPane`) — the sidebar and context-menu
+/// actions the CLI had no spelling for. Each goes through the same manager call the UI uses.
 extension HierarchyHandlers {
   // MARK: - Renames
 
@@ -217,6 +217,45 @@ extension HierarchyHandlers {
       return .unary(.object([:]))
     } catch {
       return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.description)
+    }
+  }
+
+  // MARK: - Zoom
+
+  /// `hierarchy.zoomPane` — marks `id` as its tab's zoomed pane, the flag
+  /// the split-zoom toggle sets. Unlike `hierarchy.focusPane` it neither
+  /// selects the tab nor moves the Mac's keyboard focus.
+  public func zoomPane(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    guard let req = try? params.decoded(as: PaneLocatorParams.self) else {
+      return .failed(
+        .invalidParams(message: "zoomPane requires {id, tabID, worktreeID, projectID}", path: nil))
+    }
+    do {
+      try manager.focusPane(req.id, in: req.tabID, in: req.worktreeID, in: req.projectID)
+      return .unary(.object([:]))
+    } catch {
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.id.description)
+    }
+  }
+
+  public struct UnzoomPaneParams: Codable, Sendable {
+    public let tabID: TabID
+    public let worktreeID: WorktreeID
+    public let projectID: ProjectID
+  }
+  /// `hierarchy.unzoomPane` — clears the tab's zoomed pane. A tab with no
+  /// zoomed pane is left as it is.
+  public func unzoomPane(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    guard let req = try? params.decoded(as: UnzoomPaneParams.self) else {
+      return .failed(.invalidParams(message: "unzoomPane requires {tabID, worktreeID, projectID}", path: nil))
+    }
+    do {
+      try manager.unfocusPane(in: req.tabID, in: req.worktreeID, in: req.projectID)
+      return .unary(.object([:]))
+    } catch {
+      return failure(for: error, fallbackKind: "tab", fallbackID: req.tabID.description)
     }
   }
 }

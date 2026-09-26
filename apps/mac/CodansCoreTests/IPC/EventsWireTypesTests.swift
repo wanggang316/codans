@@ -131,4 +131,95 @@ struct EventsWireTypesTests {
       try JSONDecoder().decode(IPC.EventsSubscribeRequest.self, from: data)
     }
   }
+
+  // MARK: - Phase 2 summary fields
+
+  private static let splitLayout = IPC.SplitLayoutNode.split(
+    direction: .horizontal, ratio: 0.4,
+    left: .leaf(paneID: "p-1"),
+    right: .split(direction: .vertical, ratio: 0.5, left: .leaf(paneID: "p-2"), right: .leaf(paneID: "p-3")))
+
+  @Test
+  func phaseTwoFieldsRoundTrip() throws {
+    let tab = IPC.TabSummary(
+      id: "tab-1", handle: "t1", title: "dev", focusedPaneID: "p-2",
+      panes: [
+        IPC.PaneSummary(
+          id: "p-1", handle: "p1", title: nil, agent: nil, labels: [], cwd: "/repo", isLive: true),
+        IPC.PaneSummary(
+          id: "p-2", handle: "p2", title: nil, agent: nil, labels: [], cwd: nil, isLive: false),
+      ],
+      layout: Self.splitLayout, zoomedPaneID: "p-2")
+    let summary = IPC.HierarchySummary(
+      projects: [
+        IPC.ProjectSummary(
+          id: "proj-1", name: "codans", isRemote: false, selectedWorktreeID: "wt-1",
+          worktrees: [
+            IPC.WorktreeSummary(
+              id: "wt-1", name: "main", branch: "main", isPinned: false, selectedTabID: "tab-1", tabs: [tab])
+          ])
+      ],
+      selectedProjectID: "proj-1", activePaneID: "p-2")
+    let frame = IPC.EventFrame(seq: 0, payload: .hierarchyChanged(summary))
+    #expect(try roundTrip(frame) == frame)
+  }
+
+  @Test
+  func layoutUsesLeafAndSplitObjects() throws {
+    let data = try JSONEncoder().encode(Self.splitLayout)
+    let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let split = try #require(json["split"] as? [String: Any])
+    #expect(split["direction"] as? String == "horizontal")
+    #expect(split["ratio"] as? Double == 0.4)
+    #expect((split["left"] as? [String: Any])?["leaf"] as? String == "p-1")
+    #expect(Self.splitLayout.paneIDs == ["p-1", "p-2", "p-3"])
+  }
+
+  @Test
+  func summaryWithoutPhaseTwoFieldsStillDecodes() throws {
+    let data = Data(
+      #"""
+      {"projects": [{"id": "proj-1", "name": "codans", "isRemote": false, "worktrees": [
+        {"id": "wt-1", "name": "main", "isPinned": false, "tabs": [
+          {"id": "tab-1", "panes": [{"id": "p-1", "labels": []}]}
+        ]}
+      ]}]}
+      """#.utf8)
+    let summary = try JSONDecoder().decode(IPC.HierarchySummary.self, from: data)
+    #expect(summary.activePaneID == nil)
+    let tab = try #require(summary.projects.first?.worktrees.first?.tabs.first)
+    #expect(tab.layout == nil)
+    #expect(tab.zoomedPaneID == nil)
+    #expect(tab.panes.first?.cwd == nil)
+    #expect(tab.panes.first?.isLive == nil)
+  }
+
+  @Test
+  func unknownLayoutShapeDropsOnlyTheLayout() throws {
+    let data = Data(
+      #"""
+      {"id": "tab-1", "focusedPaneID": "p-1", "panes": [{"id": "p-1", "labels": []}],
+       "layout": {"grid": {"rows": 2}}, "zoomedPaneID": "p-1"}
+      """#.utf8)
+    let tab = try JSONDecoder().decode(IPC.TabSummary.self, from: data)
+    #expect(tab.layout == nil)
+    #expect(tab.zoomedPaneID == "p-1")
+    #expect(tab.panes.count == 1)
+
+    let newerDirection = Data(
+      #"""
+      {"id": "tab-1", "panes": [], "layout": {"split": {"direction": "diagonal", "ratio": 0.5,
+        "left": {"leaf": "a"}, "right": {"leaf": "b"}}}}
+      """#.utf8)
+    #expect(try JSONDecoder().decode(IPC.TabSummary.self, from: newerDirection).layout == nil)
+  }
+
+  @Test
+  func nilPhaseTwoFieldsAreOmittedOnTheWire() throws {
+    let pane = IPC.PaneSummary(id: "p-1", handle: nil, title: nil, agent: nil, labels: [])
+    let json = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(pane)) as? [String: Any])
+    #expect(json["cwd"] == nil)
+    #expect(json["isLive"] == nil)
+  }
 }

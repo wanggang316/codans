@@ -1254,7 +1254,9 @@ final class AppState {
         workspace: workspaceClient,
         gitCLI: GitWorktreeCLI()
       ),
-      eventHub: makeEventHub(hierarchy: hierarchy, handles: targetHandles, agentHandlers: agentHandlers),
+      eventHub: makeEventHub(
+        hierarchy: hierarchy, runtime: terminalEngine.ghosttyRuntime, handles: targetHandles,
+        agentHandlers: agentHandlers),
       terminalStreams: makeTerminalStreams(hierarchy: hierarchy, terminalEngine: terminalEngine)
     )
     let resolvedSocketPath = SocketPaths.resolve()
@@ -1302,21 +1304,29 @@ final class AppState {
   /// rows `agent.listStates` returns, so the stream and the CLI agree.
   private func makeEventHub(
     hierarchy: HierarchyManager,
+    runtime: GhosttyRuntime?,
     handles: TargetHandleRegistry,
     agentHandlers: AgentHandlers
   ) -> EventHub {
     EventHub(
       sources: EventHub.Sources(
-        hierarchy: { [weak self, weak hierarchy] in
+        hierarchy: { [weak self, weak hierarchy, weak runtime] in
           guard let hierarchy else { return IPC.HierarchySummary(projects: [], selectedProjectID: nil) }
           let catalog = hierarchy.catalog
           handles.sync(with: catalog)
           let agentStates = self?.agentStateStore
+          // Read so the hub re-projects when a surface comes or goes live;
+          // the registry behind `surface(for:)` is not observable itself.
+          _ = runtime?.surfaceRevision.value
+          let lastFocusedPane: @MainActor (TabID) -> PaneID? = { hierarchy.lastFocusedPane(in: $0) }
           return EventProjection.hierarchySummary(
             catalog: catalog,
             handles: handles.snapshot(),
-            focusedPane: { hierarchy.lastFocusedPane(in: $0) },
-            paneTitle: { agentStates?.title(for: $0) }
+            focusedPane: lastFocusedPane,
+            paneTitle: { agentStates?.title(for: $0) },
+            activePaneID: Self.currentlyFocusedPane(catalog: catalog, lastFocusedPane: lastFocusedPane),
+            liveDirectory: { runtime?.surface(for: $0)?.info.pwd },
+            paneIsLive: runtime.map { runtime in { runtime.surface(for: $0)?.isLive ?? false } }
           )
         },
         agents: { (try? agentHandlers.listStates().agents) ?? [] }
@@ -2394,6 +2404,38 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
     guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
     surface.resetTerminal()
     return true
+  }
+
+  func hasLiveSurface(paneID: PaneID) -> Bool {
+    engine?.ghosttyRuntime?.surface(for: paneID)?.isLive ?? false
+  }
+
+  func sendInputEvent(paneID: PaneID, event: IPC.TerminalInputEvent) -> TerminalHandlers.InputEventOutcome {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID), surface.isLive else { return .paneGone }
+    let outcome: PaneSurface.KeyEventOutcome
+    switch event {
+    case .key(let code, let text, let mods):
+      guard let spec = KeyEventSpec.key(code: code, text: text, mods: mods) else {
+        return .rejected(reason: IPC.TerminalInputRejection.Reason.unknownKey)
+      }
+      outcome = surface.sendKeyEvent(spec: spec)
+    case .text(let text):
+      outcome = surface.sendCommittedText(text)
+    case .paste(let text):
+      surface.sendText(text)
+      outcome = .delivered
+    case .delay, .unknown:
+      return .rejected(reason: IPC.TerminalInputRejection.Reason.unknownEvent)
+    }
+    switch outcome {
+    case .delivered:
+      onPaneInput?(paneID)
+      return .delivered
+    case .binding:
+      return .rejected(reason: IPC.TerminalInputRejection.Reason.binding)
+    case .noSurface:
+      return .paneGone
+    }
   }
 
   private func paneIDs(matching scope: IPC.BroadcastScope, in catalog: Catalog) -> [PaneID] {

@@ -101,6 +101,12 @@ final class GhosttyRuntime {
   /// hot path — they cast the per-surface userdata directly to `PaneSurface`.
   private var surfacesByPaneID: [PaneID: PaneSurface] = [:]
 
+  /// Changes whenever a surface registers, unregisters or first goes live.
+  /// The registry itself is not observable; reading this inside an
+  /// observation scope is how a projection of per-pane liveness (the
+  /// events summary's `isLive`) learns to recompute.
+  let surfaceRevision = SurfaceRevision()
+
   init() throws {
     _ = GhosttyBootstrap.initialize
 
@@ -263,6 +269,7 @@ final class GhosttyRuntime {
 
   func register(pane: PaneSurface) {
     surfacesByPaneID[pane.paneID] = pane
+    surfaceRevision.bump()
     // A surface registered mid-session inherits the most recently applied scheme so
     // the palette matches the app's current appearance from its first frame.
     if let lastColorScheme {
@@ -271,7 +278,9 @@ final class GhosttyRuntime {
   }
 
   func unregister(paneID: PaneID) {
-    surfacesByPaneID.removeValue(forKey: paneID)
+    if surfacesByPaneID.removeValue(forKey: paneID) != nil {
+      surfaceRevision.bump()
+    }
   }
 
   func surface(for paneID: PaneID) -> PaneSurface? {
@@ -945,4 +954,19 @@ extension NSColor {
       alpha: 1
     )
   }
+}
+
+/// Observable change counter for `GhosttyRuntime`'s surface registry.
+@MainActor
+@Observable
+final class SurfaceRevision {
+  private(set) var value: UInt64 = 0
+
+  func bump() {
+    value &+= 1
+  }
+
+  // Explicit so the class does not get a synthesized isolated deinit,
+  // which has aborted in the executor hop on teardown.
+  deinit {}
 }

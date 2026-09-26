@@ -61,11 +61,15 @@ extension IPC.Method {
     // Creating a worktree runs git on the Mac but only ever adds: the
     // router further limits a remote caller to a branch name, so it cannot
     // choose where on disk the worktree lands.
-    case .terminalSendInput, .terminalSendKey, .terminalRetryPane,
+    // Renaming and closing tabs and panes is managing what the device can
+    // already type into; closing ends the pane's shell, so the phone
+    // confirms first.
+    case .terminalSendInput, .terminalSendKey, .terminalSendEvents,
       .agentLaunch, .hierarchyCreateWorktree,
       .hierarchyActivateWorktree, .hierarchyActivateTab, .hierarchyFocusPane,
       .hierarchyCreateTab, .hierarchyOpenPane, .hierarchySplitPane,
-      .hierarchyZoomPane, .hierarchyUnzoomPane:
+      .hierarchyZoomPane, .hierarchyUnzoomPane,
+      .hierarchyRenameTab, .hierarchyCloseTab, .hierarchyClosePane:
       return .interactive
 
     // Never remote: destroys data, persists commands that later run as the
@@ -81,15 +85,16 @@ extension IPC.Method {
 
     // Not remote in v1; promoting any of these needs a design change.
     // `agent.wait` blocks its connection and the event stream answers the
-    // same question.
+    // same question. `terminal.retryPane` has no handler: the runtime's
+    // retry only clears crash-loop bookkeeping and does not restart an
+    // exited shell, so there is nothing useful to expose yet.
     case .hierarchyAddProject, .hierarchyRenameProject, .hierarchySetProjectEditor,
       .hierarchyRenameWorktree,
-      .hierarchyCloseTab, .hierarchyRenameTab,
-      .hierarchyClosePane, .hierarchyResizePane, .hierarchySetPaneLabels,
+      .hierarchyResizePane, .hierarchySetPaneLabels,
       .hierarchyCreateTag, .hierarchyRenameTag, .hierarchyRecolorTag, .hierarchyRemoveTag,
       .hierarchySetProjectTags, .hierarchySetActiveTagFilter,
       .paneClose,
-      .terminalResetPane,
+      .terminalResetPane, .terminalRetryPane,
       .workspaceCreate, .workspaceAdd, .workspaceDrop,
       .handoffSave, .handoffTo,
       .agentWait:

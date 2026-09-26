@@ -964,6 +964,9 @@ final class HierarchyHandlers {
     public let worktreeID: WorktreeID
     public let projectID: ProjectID
   }
+  /// `hierarchy.closePane` — removes the pane from its tab and ends its
+  /// shell: the surface teardown kills the pane's zmx daemon. It is not a
+  /// detach; nothing can reattach afterwards.
   public func closePane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: PaneLocatorParams
@@ -992,9 +995,10 @@ final class HierarchyHandlers {
   /// control socket to vanish), drops the persisted session-catalog
   /// entry, and removes the pane from the in-memory hierarchy.
   ///
-  /// Distinct from `hierarchy.closePane`: the latter detaches the
-  /// libghostty surface so a future attach can resume the same daemon;
-  /// this verb guarantees the daemon is gone before returning.
+  /// Distinct from `hierarchy.closePane`, which also ends the pane's
+  /// shell (its surface teardown sends the daemon `.kill`) but neither
+  /// waits for the daemon to go nor reaps sessions.json; this verb
+  /// guarantees the daemon is gone before returning.
   ///
   /// Returns `closed == false` (without raising) when the pane is not
   /// present in the catalog — the CLI maps that to a non-zero exit so

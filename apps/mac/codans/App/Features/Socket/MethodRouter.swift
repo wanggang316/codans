@@ -224,9 +224,9 @@ public final class MethodRouter {
     }
   }
 
-  /// Renames, prune, and split-tree verbs — the sidebar / context-menu
-  /// actions, kept out of `routeHierarchyMutations` for the same reason
-  /// the tag verbs are.
+  /// Renames, prune, and split-tree verbs (split, resize, zoom) — the
+  /// sidebar / context-menu actions, kept out of `routeHierarchyMutations`
+  /// for the same reason the tag verbs are.
   private func routeHierarchyLayout(
     _ request: IPC.Request,
     handlers h: HierarchyHandlers
@@ -238,6 +238,8 @@ public final class MethodRouter {
     case .hierarchyPruneWorktrees: return await h.pruneWorktrees(request.params)
     case .hierarchySplitPane: return await h.splitPane(request.params)
     case .hierarchyResizePane: return await h.resizePane(request.params)
+    case .hierarchyZoomPane: return await h.zoomPane(request.params)
+    case .hierarchyUnzoomPane: return await h.unzoomPane(request.params)
     default: return nil
     }
   }
@@ -434,6 +436,7 @@ public final class MethodRouter {
     switch request.method {
     case .terminalSendInput: return await t.sendInput(request.params)
     case .terminalSendKey: return await t.sendKey(request.params)
+    case .terminalSendEvents: return await t.sendEvents(request.params)
     case .terminalSendRawBytes: return await t.sendRawBytes(request.params)
     case .terminalBroadcastInput: return await t.broadcastInput(request.params)
     case .terminalReadText: return await t.readText(request.params)

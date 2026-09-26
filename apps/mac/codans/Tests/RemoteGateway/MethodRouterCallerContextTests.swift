@@ -78,6 +78,60 @@ struct MethodRouterCallerContextTests {
   }
 
   @Test
+  func readOnlyDeviceCanWatchAPaneButNotTypeIntoIt() async {
+    let router = Self.makeRouter()
+    let viewer = CallerContext.remote(deviceID: Self.device, permission: .readOnly)
+    let typing = await router.route(IPC.Request(id: "r", method: .terminalSendEvents), context: viewer)
+    #expect(Self.isForbidden(typing))
+    let watching = await router.route(IPC.Request(id: "r", method: .paneAttachStream, stream: true), context: viewer)
+    #expect(!Self.isForbidden(watching))
+  }
+
+  @Test
+  func zoomIsRoutedForAnInteractiveDevice() async throws {
+    let pane1 = Pane(workingDirectory: "/repo")
+    let pane2 = Pane(workingDirectory: "/repo")
+    let tree = try SplitTree(leaf: pane1.id).inserting(pane2.id, at: pane1.id, direction: .right)
+    let tab = Tab(splitTree: tree, panes: [pane1, pane2])
+    let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab])
+    let project = Project(name: "repo", rootPath: "/repo", worktrees: [worktree])
+    let manager = HierarchyManager(
+      catalog: Catalog(projects: [project]),
+      store: CatalogStore(
+        fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+          .appendingPathComponent("codans-zoom-\(UUID().uuidString).json")),
+      runtime: FakeHierarchyRuntime())
+    let router = MethodRouter(
+      systemHandlers: SystemHandlers(versions: .init(server: "1", appBundle: "1")),
+      hierarchyHandlers: HierarchyHandlers(manager: manager))
+    let phone = CallerContext.remote(deviceID: Self.device, permission: .interactive)
+    let zoom = await router.route(
+      IPC.Request(
+        id: "z", method: .hierarchyZoomPane,
+        params: try JSONValue.encoded(
+          HierarchyHandlers.PaneLocatorParams(
+            id: pane2.id, tabID: tab.id, worktreeID: worktree.id, projectID: project.id))),
+      context: phone)
+    guard case .unary = zoom else {
+      Issue.record("expected zoom to succeed, got \(zoom)")
+      return
+    }
+    #expect(manager.catalog.projects[0].worktrees[0].tabs[0].splitTree.zoomed == pane2.id)
+
+    let unzoom = await router.route(
+      IPC.Request(
+        id: "u", method: .hierarchyUnzoomPane,
+        params: try JSONValue.encoded(
+          HierarchyHandlers.UnzoomPaneParams(tabID: tab.id, worktreeID: worktree.id, projectID: project.id))),
+      context: phone)
+    guard case .unary = unzoom else {
+      Issue.record("expected unzoom to succeed, got \(unzoom)")
+      return
+    }
+    #expect(manager.catalog.projects[0].worktrees[0].tabs[0].splitTree.zoomed == nil)
+  }
+
+  @Test
   func pingAnswersForAReadOnlyDevice() async {
     let outcome = await Self.makeRouter().route(
       IPC.Request(id: "r", method: .systemPing),

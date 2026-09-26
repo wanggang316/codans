@@ -46,9 +46,9 @@ struct RemoteTierTests {
     .hierarchySetProjectEditor: .localOnly,
     .hierarchyCreateWorktree: .interactive,
     .hierarchyRenameWorktree: .localOnly,
-    .hierarchyCloseTab: .localOnly,
-    .hierarchyRenameTab: .localOnly,
-    .hierarchyClosePane: .localOnly,
+    .hierarchyCloseTab: .interactive,
+    .hierarchyRenameTab: .interactive,
+    .hierarchyClosePane: .interactive,
     .hierarchyResizePane: .localOnly,
     .hierarchySetPaneLabels: .localOnly,
     .hierarchyCreateTag: .localOnly,
@@ -68,7 +68,8 @@ struct RemoteTierTests {
     .terminalReadText: .readOnly,
     .terminalSendInput: .interactive,
     .terminalSendKey: .interactive,
-    .terminalRetryPane: .interactive,
+    .terminalSendEvents: .interactive,
+    .terminalRetryPane: .localOnly,
     .terminalBroadcastInput: .localOnly,
     .terminalSendRawBytes: .localOnly,
     .terminalResetPane: .localOnly,
@@ -141,5 +142,18 @@ struct RemoteTierTests {
     #expect(!IPC.RemotePermission.readOnly.allows(.terminalSendInput))
     #expect(IPC.RemotePermission.interactive.allows(.terminalSendInput))
     #expect(IPC.RemotePermission.readOnly.allows(.eventsSubscribe))
+    #expect(!IPC.RemotePermission.readOnly.allows(.terminalSendEvents))
+    #expect(IPC.RemotePermission.interactive.allows(.terminalSendEvents))
+    #expect(IPC.RemotePermission.readOnly.allows(.paneAttachStream))
+  }
+
+  /// Closing a pane from the phone ends its shell, the same as the Mac's
+  /// close; the daemon-reaping `pane.close` stays a local verb.
+  @Test
+  func phoneCanManageTabsButPaneCloseStaysLocal() {
+    for method in [IPC.Method.hierarchyRenameTab, .hierarchyCloseTab, .hierarchyClosePane] {
+      #expect(method.remoteTier == .interactive, "\(method.rawValue)")
+    }
+    #expect(IPC.Method.paneClose.remoteTier == .localOnly)
   }
 }
