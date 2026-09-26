@@ -157,9 +157,20 @@ trap quit_mac EXIT
 pairing_code() {
   local permission="$1" saved log="$SCRATCH/pairing.log"
   echo "--- $(date +%T) $UI_CASE: $permission" >>"$log"
-  "$AX" press "$MAC_PID" "Done" >>"$log" 2>&1   # dismiss a finished pairing
-  "$AX" press "$MAC_PID" "Pair New Device…" >>"$log" 2>&1
-  "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >>"$log" 2>&1 || { "$AX" tree "$MAC_PID" >>"$log" 2>&1; return 1; }
+  # The previous pairing's sheet (with its "Done") can still be closing, or
+  # refuse the first press while another window is key; retry until the
+  # new pairing sheet is up.
+  local attempt opened=0
+  for attempt in 1 2 3 4 5; do
+    "$AX" press "$MAC_PID" "Done" >>"$log" 2>&1   # dismiss a finished pairing
+    if "$AX" wait "$MAC_PID" "Pair New Device…" 3 >>"$log" 2>&1 &&
+      "$AX" press "$MAC_PID" "Pair New Device…" >>"$log" 2>&1 &&
+      "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >>"$log" 2>&1; then
+      opened=1; break
+    fi
+    sleep 1
+  done
+  ((opened)) || { "$AX" tree "$MAC_PID" >>"$log" 2>&1; return 1; }
   if [[ "$permission" != "View only" ]]; then
     # The first "View only" pop-up is the new pairing's own picker.
     "$AX" press "$MAC_PID" "View only" >>"$log" 2>&1
