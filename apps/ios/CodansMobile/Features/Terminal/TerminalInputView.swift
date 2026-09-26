@@ -283,6 +283,11 @@ final class TerminalInputView: UIView, UITextInput {
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
+    // With a hardware keyboard an iPad floats the system's shortcuts bar
+    // (undo, redo, paste) over the bottom of the terminal; a shell has no
+    // use for undo, and paste is on the key bar and ⌘V.
+    inputAssistantItem.leadingBarButtonGroups = []
+    inputAssistantItem.trailingBarButtonGroups = []
     guard window == nil else { return }
     stopRepeat()
     handledPresses.removeAll()

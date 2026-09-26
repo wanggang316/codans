@@ -124,26 +124,26 @@ struct TerminalDetailView: View {
     } message: {
       Text("Leave it empty to show the terminal's own title.")
     }
+    // An action sheet on iPhone. In regular width it would be a popover
+    // with nothing to point at (it comes from a menu item), so an alert.
     .confirmationDialog(
-      closeConfirmation == .tab ? "Close this tab?" : "Close this pane?",
-      isPresented: Binding(get: { closeConfirmation != nil }, set: { if !$0 { closeConfirmation = nil } }),
+      closeTitle,
+      isPresented: closeBinding(when: !isSplitLayout),
       titleVisibility: .visible,
       presenting: closeConfirmation
     ) { target in
-      switch target {
-      case .pane:
-        Button("Close Pane", role: .destructive) { focused.send(.closePaneConfirmed) }
-      case .tab:
-        Button("Close Tab", role: .destructive) { focused.send(.closeTabConfirmed) }
-      }
-      Button("Cancel", role: .cancel) {}
+      closeActions(target, focused: focused)
     } message: { target in
-      switch target {
-      case .pane:
-        Text("This ends the process running in the pane on your Mac.")
-      case .tab:
-        Text("This ends the processes in all \(location.tab.panes.count) panes of the tab on your Mac.")
-      }
+      closeMessage(target, location: location)
+    }
+    .alert(
+      closeTitle,
+      isPresented: closeBinding(when: isSplitLayout),
+      presenting: closeConfirmation
+    ) { target in
+      closeActions(target, focused: focused)
+    } message: { target in
+      closeMessage(target, location: location)
     }
     .onChange(of: focused.navigation) { _, navigation in
       guard let navigation else { return }
@@ -152,6 +152,39 @@ struct TerminalDetailView: View {
     }
     .onChange(of: streamedPaneIDs(location)) { _, ids in cache.retain(only: ids) }
     .onAppear { cache.retain(only: streamedPaneIDs(location)) }
+  }
+
+  // MARK: - Close confirmation
+
+  private var closeTitle: String {
+    closeConfirmation == .tab ? "Close this tab?" : "Close this pane?"
+  }
+
+  private func closeBinding(when shown: Bool) -> Binding<Bool> {
+    Binding(
+      get: { shown && closeConfirmation != nil },
+      set: { if !$0 { closeConfirmation = nil } }
+    )
+  }
+
+  @ViewBuilder
+  private func closeActions(_ target: CloseTarget, focused: StoreOf<TerminalStreamFeature>) -> some View {
+    switch target {
+    case .pane:
+      Button("Close Pane", role: .destructive) { focused.send(.closePaneConfirmed) }
+    case .tab:
+      Button("Close Tab", role: .destructive) { focused.send(.closeTabConfirmed) }
+    }
+    Button("Cancel", role: .cancel) {}
+  }
+
+  private func closeMessage(_ target: CloseTarget, location: PaneLocation) -> Text {
+    switch target {
+    case .pane:
+      Text("This ends the process running in the pane on your Mac.")
+    case .tab:
+      Text("This ends the processes in all \(location.tab.panes.count) panes of the tab on your Mac.")
+    }
   }
 
   // MARK: - iPad split layout
