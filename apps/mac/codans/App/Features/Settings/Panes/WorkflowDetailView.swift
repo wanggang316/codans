@@ -13,9 +13,6 @@ import SwiftUI
 struct WorkflowDetailView: View {
   /// `nil` once the file is gone (moved, deleted, renamed on disk).
   let entry: WorkflowCatalogEntry?
-  /// Set when a higher-precedence scope has a file with the same id, so a
-  /// run would not use this one.
-  let overriddenBy: WorkflowScope?
   let projectID: ProjectID?
   let onBack: () -> Void
   let onOpen: () -> Void
@@ -92,10 +89,8 @@ struct WorkflowDetailView: View {
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
-          WorkflowStatusLabel(
-            entry: entry, isDisabled: workflows.isDisabled(entry.id), isOverridden: overriddenBy != nil
-          )
-          .font(.callout)
+          WorkflowStatusLabel(entry: entry, isDisabled: workflows.isDisabled(entry.id))
+            .font(.callout)
         }
       }
       .padding(.vertical, 2)
@@ -106,13 +101,6 @@ struct WorkflowDetailView: View {
       }
       LabeledContent("Scope") {
         Text(Self.scopeTitle(entry.scope, projectName: projectName(projectID)))
-      }
-      if let overriddenBy {
-        Label(
-          "A \(Self.scopeTitle(overriddenBy, projectName: nil).lowercased()) workflow with the same ID is used instead.",
-          systemImage: "arrow.triangle.merge"
-        )
-        .foregroundStyle(.secondary)
       }
       Toggle("Enabled", isOn: enabledBinding(entry))
     }
@@ -162,12 +150,11 @@ struct WorkflowDetailView: View {
     guard !workflows.isDisabled(entry.id) else { return "This workflow is disabled." }
     guard let selected = selectedWorktree else { return "Select a worktree in the main window first." }
     guard selected.project.remoteHost == nil else { return "Workflows run in local worktrees only." }
-    // Run resolves by id in the selected worktree; make sure that lands on
-    // this very file, not a shadowing copy or nothing at all.
+    // A run starts by id in the selected worktree; make sure that is this
+    // file, so the button never starts something other than what it shows.
     let resolved = catalog.catalog(forWorktreePath: selected.worktree.path).first { $0.id == entry.id }
-    guard let resolved else { return "\(selected.worktree.name) does not have this workflow." }
-    guard resolved.path == entry.path else {
-      return "\(selected.worktree.name) uses another workflow with this ID."
+    guard resolved?.path == entry.path else {
+      return "Not available in \(selected.worktree.name). Select the worktree this file belongs to."
     }
     return nil
   }
@@ -419,13 +406,11 @@ struct WorkflowDetailView: View {
   }
 }
 
-/// "Ready", "Ready · 2 warnings", "Invalid · 1 error", "Disabled",
-/// "Overridden" — the status the list row and the detail header both show.
+/// "Ready", "Ready · 2 warnings", "Invalid · 1 error", "Disabled" — the
+/// status the list row and the detail header both show.
 struct WorkflowStatusLabel: View {
   let entry: WorkflowCatalogEntry
   let isDisabled: Bool
-  /// A higher-precedence file with the same id is the one runs use.
-  var isOverridden = false
 
   var body: some View {
     let (text, symbol, color) = presentation
@@ -435,9 +420,6 @@ struct WorkflowStatusLabel: View {
   }
 
   private var presentation: (String, String, Color) {
-    if isOverridden, !isDisabled {
-      return ("Overridden", "arrow.triangle.merge", .secondary)
-    }
     switch WorkflowsSettingsLogic.RowStatus(diagnostics: entry.diagnostics) {
     case .errors(let count):
       return ("Invalid · \(count) error\(count == 1 ? "" : "s")", "xmark.octagon.fill", .red)

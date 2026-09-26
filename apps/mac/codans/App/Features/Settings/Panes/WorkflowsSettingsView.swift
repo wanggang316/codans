@@ -114,7 +114,6 @@ struct WorkflowsSettingsView: View {
     let entry = allEntries.first { $0.path == path }
     return WorkflowDetailView(
       entry: entry,
-      overriddenBy: entry.flatMap(overridingScope),
       projectID: entry.flatMap(projectID(of:)),
       onBack: { detailPath = nil },
       onOpen: {
@@ -125,12 +124,6 @@ struct WorkflowsSettingsView: View {
       onTrash: { trashCandidate = entry },
       onTrust: { if let entry { trustPrompt = TrustPromptTarget(entry: entry) } }
     )
-  }
-
-  /// The higher-precedence scope that also defines this id, if any — a
-  /// repository file shadows a user one, which shadows a built-in.
-  private func overridingScope(_ entry: WorkflowCatalogEntry) -> WorkflowScope? {
-    allEntries.filter { $0.id == entry.id && $0.scope > entry.scope }.map(\.scope).max()
   }
 
   // MARK: - List
@@ -321,14 +314,8 @@ struct WorkflowsSettingsView: View {
               .lineLimit(1)
           }
           Spacer(minLength: 12)
-          WorkflowStatusLabel(
-            entry: entry, isDisabled: workflows.isDisabled(entry.id), isOverridden: overridingScope(entry) != nil
-          )
-          .font(.caption)
-          .help(
-            overridingScope(entry).map {
-              "A \(WorkflowDetailView.scopeTitle($0, projectName: nil)) file with this ID is used instead"
-            } ?? "")
+          WorkflowStatusLabel(entry: entry, isDisabled: workflows.isDisabled(entry.id))
+            .font(.caption)
           Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
