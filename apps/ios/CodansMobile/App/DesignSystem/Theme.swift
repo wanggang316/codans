@@ -58,8 +58,12 @@ extension Color {
   static let failure = Color(light: UIColor(rgb: 0xD93025), dark: UIColor(rgb: 0xFF6259))
   static let offline = Color(light: UIColor(white: 0.62, alpha: 1), dark: UIColor(white: 0.45, alpha: 1))
 
-  init(light: UIColor, dark: UIColor) {
-    self.init(uiColor: UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+  /// The provider is resolved on SwiftUI's render thread (sheets resolve
+  /// materials asynchronously), so it must not inherit the main actor: a
+  /// main-actor closure traps there on the isolation check.
+  nonisolated init(light: UIColor, dark: UIColor) {
+    let provider: @Sendable (UITraitCollection) -> UIColor = { $0.userInterfaceStyle == .dark ? dark : light }
+    self.init(uiColor: UIColor(dynamicProvider: provider))
   }
 }
 
