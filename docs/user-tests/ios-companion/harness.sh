@@ -251,8 +251,10 @@ stty_size() {
   cli pane send "$PANE" "stty size" --capture 2>/dev/null | grep -Eo '^[0-9]+ [0-9]+$' | tail -1
 }
 
-# Resizes the main window (the one without the Settings pane's button).
-resize_mac() { "$AX" resize "$MAC_PID" "$1" "$2" "Pair New Device…" >/dev/null; sleep 1.5; }
+# Resizes the main window: the one without the Settings sidebar's Remote
+# Access row. (The Pair New Device button is no marker: after a pairing
+# the pane shows Done in its place until the next code is issued.)
+resize_mac() { "$AX" resize "$MAC_PID" "$1" "$2" "Remote Access" >/dev/null; sleep 1.5; }
 
 # Tab and pane counts of the fixture worktree, as "tabs panes".
 tree_counts() {
