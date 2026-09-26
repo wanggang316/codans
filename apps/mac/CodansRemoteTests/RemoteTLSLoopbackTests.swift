@@ -46,9 +46,10 @@ struct RemoteTLSLoopbackTests {
     defer { gateway.stop() }
 
     let forged = RemoteTLS.PSKCredential(identity: paired.identity, key: try PairingPayload.generateKey())
-    await #expect(throws: RemoteHandshake.HandshakeError.self) {
+    let error = await #expect(throws: RemoteHandshake.HandshakeError.self) {
       try await RemoteHandshake.connect(to: gateway.endpoint, credential: forged)
     }
+    #expect(error.map(Self.isRefusal) == true)
     guard case .rejected = await gateway.nextOutcome() else {
       Issue.record("server accepted a wrong key")
       return
@@ -62,9 +63,10 @@ struct RemoteTLSLoopbackTests {
     defer { gateway.stop() }
 
     let stranger = try TestKeys.credential("device-stranger")
-    await #expect(throws: RemoteHandshake.HandshakeError.self) {
+    let error = await #expect(throws: RemoteHandshake.HandshakeError.self) {
       try await RemoteHandshake.connect(to: gateway.endpoint, credential: stranger)
     }
+    #expect(error.map(Self.isRefusal) == true)
     guard case .rejected = await gateway.nextOutcome() else {
       Issue.record("server accepted an unknown identity")
       return
@@ -85,9 +87,11 @@ struct RemoteTLSLoopbackTests {
 
     let after = try await LoopbackGateway.start(credentials: [tablet])
     defer { after.stop() }
-    await #expect(throws: RemoteHandshake.HandshakeError.self) {
+    // A refusal, not a timeout: the phone counts these to stop retrying.
+    let error = await #expect(throws: RemoteHandshake.HandshakeError.self) {
       try await RemoteHandshake.connect(to: after.endpoint, credential: phone)
     }
+    #expect(error.map(Self.isRefusal) == true)
   }
 
   /// A device that handshakes with its own key cannot claim another
@@ -159,5 +163,54 @@ struct RemoteTLSLoopbackTests {
       return
     }
     #expect(error as? RemoteHandshake.HandshakeError == .timedOut)
+  }
+
+  /// A peer that accepts TCP but never answers TLS reads as a timeout,
+  /// never as a refusal.
+  @Test
+  func silentServerTimesOutInsteadOfRefusing() async throws {
+    let listener = try NWListener(using: .tcp, on: .any)
+    let accepted = LockIsolatedConnections()
+    listener.newConnectionHandler = { connection in
+      accepted.append(connection)
+      connection.start(queue: .global())
+    }
+    let ready = AsyncStream<NWEndpoint.Port> { continuation in
+      listener.stateUpdateHandler = { state in
+        if case .ready = state, let port = listener.port { continuation.yield(port) }
+      }
+    }
+    listener.start(queue: .global())
+    defer {
+      listener.cancel()
+      accepted.cancelAll()
+    }
+    var ports = ready.makeAsyncIterator()
+    let port = try #require(await ports.next())
+
+    let phone = try TestKeys.credential("device-phone")
+    await #expect(throws: RemoteHandshake.HandshakeError.timedOut) {
+      try await RemoteHandshake.connect(
+        to: .hostPort(host: "127.0.0.1", port: port), credential: phone, timeout: .milliseconds(500))
+    }
+  }
+
+  private static func isRefusal(_ error: RemoteHandshake.HandshakeError) -> Bool {
+    if case .refused = error { return true }
+    return false
+  }
+}
+
+/// Keeps the silent server's accepted connections alive for the test.
+private final class LockIsolatedConnections: @unchecked Sendable {
+  private let lock = NSLock()
+  private var connections: [NWConnection] = []
+
+  func append(_ connection: NWConnection) {
+    lock.withLock { connections.append(connection) }
+  }
+
+  func cancelAll() {
+    lock.withLock { connections.forEach { $0.cancel() } }
   }
 }

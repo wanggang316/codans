@@ -9,6 +9,11 @@ import os
 public enum RemoteHandshake {
   public enum HandshakeError: Error, Equatable, Sendable {
     case timedOut
+    /// TCP connected but the peer failed the TLS handshake (unknown PSK
+    /// identity, wrong key). Unlike a timeout this is an answer: the Mac
+    /// is there and does not accept this credential, which is what a
+    /// revoked or expired pairing looks like. Carries the TLS `OSStatus`.
+    case refused(status: Int32)
     case transport(NWFrameTransport.TransportError)
     case missingChannelBinding
     case malformedProof
@@ -75,7 +80,9 @@ public enum RemoteHandshake {
   /// Runs `body`, cancelling `connection` if it has not finished within
   /// `timeout`. Cancelling the connection is what unblocks a pending
   /// Network.framework callback; the cancellation is then reported as
-  /// `.timedOut` rather than as a transport error.
+  /// `.timedOut` rather than as a transport error. A TLS-layer failure is
+  /// reported as `.refused`, so a client can tell "the Mac said no" from
+  /// "nothing answered".
   private static func withDeadline<T: Sendable>(
     _ timeout: Duration,
     cancelling connection: NWConnection,
@@ -92,6 +99,7 @@ public enum RemoteHandshake {
       return try await body()
     } catch let error as NWFrameTransport.TransportError {
       if fired.withLock({ $0 }) { throw HandshakeError.timedOut }
+      if case .failed(.tls(let status)) = error { throw HandshakeError.refused(status: status) }
       throw HandshakeError.transport(error)
     }
   }
