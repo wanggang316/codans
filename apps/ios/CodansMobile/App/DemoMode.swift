@@ -29,6 +29,9 @@ import Network
 ///   `connectionDetails` or `composer` shortly after launch.
 /// - `CODANS_DEMO_OLD_MAC=1`: the Mac speaks protocol minor 1, so panes use
 ///   the text fallback and ask for a Mac update.
+///
+/// Outside demo mode, `CODANS_FORCE_KEY_BAR=1` keeps the key bar up while a
+/// hardware keyboard is attached (see `forcesKeyBar`).
 enum DemoMode {
   #if DEBUG
     static let isEnabled = ProcessInfo.processInfo.environment["CODANS_DEMO"] == "1"
@@ -37,8 +40,15 @@ enum DemoMode {
   #endif
 
   /// The simulator usually has the Mac's keyboard attached, which would
-  /// hide the key bar in every screenshot.
-  static var forcesKeyBar: Bool { isEnabled }
+  /// hide the key bar in every screenshot, and from UI tests against a real
+  /// Mac, which launch with `CODANS_FORCE_KEY_BAR=1` to reach it.
+  static var forcesKeyBar: Bool {
+    #if DEBUG
+      isEnabled || ProcessInfo.processInfo.environment["CODANS_FORCE_KEY_BAR"] == "1"
+    #else
+      false
+    #endif
+  }
 
   static var initialSheet: String? {
     guard isEnabled else { return nil }

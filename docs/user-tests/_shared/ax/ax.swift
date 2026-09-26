@@ -8,6 +8,8 @@ import ApplicationServices
 //   ax menu <pid> <menuBarItem> <menuItem>
 //   ax select-row <pid> <text>        select the outline/table row containing static text == text
 //   ax wait <pid> <label> [seconds]   exit 0 once an element with label exists
+//   ax resize <pid> <width> <height> [skip-label]
+//                                     resize the first window with no element == skip-label
 
 func attr(_ e: AXUIElement, _ name: String) -> AnyObject? {
   var value: AnyObject?
@@ -42,7 +44,7 @@ func find(_ root: AXUIElement, _ label: String) -> AXUIElement? {
 
 let args = CommandLine.arguments
 guard args.count >= 3, let pid = pid_t(args[2]) else {
-  FileHandle.standardError.write("usage: ax tree|press|menu|select-row|wait <pid> ...\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: ax tree|press|menu|select-row|wait|resize <pid> ...\n".data(using: .utf8)!)
   exit(2)
 }
 let app = AXUIElementCreateApplication(pid)
@@ -92,6 +94,20 @@ case "wait":
   }
   print("timeout waiting for \(args[3])")
   exit(1)
+case "resize":
+  guard args.count >= 5, let width = Double(args[3]), let height = Double(args[4]) else {
+    print("usage: ax resize <pid> <width> <height> [skip-label]"); exit(2)
+  }
+  let skip = args.count > 5 ? args[5] : nil
+  let windows = (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+  guard let window = windows.first(where: { w in skip.map { find(w, $0) == nil } ?? true }) else {
+    print("no window to resize"); exit(1)
+  }
+  var size = CGSize(width: width, height: height)
+  let value = AXValueCreate(.cgSize, &size)!
+  let r = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+  print(r == .success ? "resized to \(Int(width))x\(Int(height))" : "resize failed \(r.rawValue)")
+  exit(r == .success ? 0 : 1)
 default:
   print("unknown command \(args[1])")
   exit(2)

@@ -13,6 +13,15 @@
 #   read-only    pair "View only"; the phone must not offer an input bar
 #   composer     pair "View and type", start the fake agent from the composer in
 #                a new worktree; the Mac has the branch and the agent got the prompt
+#   live-terminal   the Mac prints a marker in the pane; the phone's terminal shows it
+#   live-input      the phone types `echo <marker>` + Return; the Mac pane has the output
+#   modifier-keys   `sleep 30` in the pane; the phone taps ctrl then c; the shell answers
+#   no-leader-steal the phone types, then the Mac window is resized; `stty size`
+#                   follows the Mac and never the phone
+#   tab-ops         New Tab, Split Right, Close Pane (confirmed) from the phone;
+#                   checked in `codans tree --json`
+#   readonly-live   a "View only" device streams the pane but shows no key bar
+#   rejected        revoke the connected phone; it ends on "Pair again"
 #   revoke       revoke every device; their records and Keychain keys are gone
 #
 # Needs: a Debug build (`make mac-build`), the iOS project generated
@@ -91,10 +100,10 @@ EOF
   awk -v u="$up" 'BEGIN { exit !(u + 0 < 30) }' || { echo "REFUSING: socket answered by an older instance"; exit 1; }
   echo "mac instance pid=$MAC_PID"
 
-  local wt tab
+  local tab
   cli project add "$FIX" --json >/dev/null
-  wt=$(cli tree --json | jq -r '.data.projects[0].worktrees[0].id')
-  tab=$(cli tab new e2e --worktree "$wt" --json | jq -r '.data.id')
+  WT=$(cli tree --json | jq -r '.data.projects[0].worktrees[0].id')
+  tab=$(cli tab new e2e --worktree "$WT" --json | jq -r '.data.id')
   PANE=$(cli pane new --tab "$tab" --cwd "$FIX" --json | jq -r '.data.id')
   [[ -n "$PANE" && "$PANE" != null ]] || { echo "could not create the fixture pane"; exit 1; }
 
@@ -105,6 +114,7 @@ EOF
 }
 
 quit_mac() {
+  [[ -n "${UI_PID:-}" ]] && kill "$UI_PID" 2>/dev/null
   [[ -n "${MAC_PID:-}" ]] || return
   # A graceful quit withdraws the Bonjour advertisement. A killed app
   # leaves a stale record in mDNS for up to an hour, which the next run's
@@ -149,35 +159,132 @@ reset_sim() {
   xcrun simctl boot "$SIM" && xcrun simctl bootstatus "$SIM" -b >/dev/null
 }
 
-# run_ui_test <case> <test method> <pairing code> [line to send] [composer prompt]
-run_ui_test() {
-  local name="$1" method="$2" code="$3" line="${4:-}" prompt="${5:-}"
-  mkdir -p "$SHOTS/$name"
+# The UI test target is built once; every case then runs it without
+# building, which saves a minute or so per case.
+build_ui_tests() {
   (cd "$IOS_DIR" &&
-    TEST_RUNNER_CODANS_E2E_PAIRING_CODE="$code" \
-    TEST_RUNNER_CODANS_E2E_PROJECT="$(basename "$FIX")" \
-    TEST_RUNNER_CODANS_E2E_INPUT="$line" \
-    TEST_RUNNER_CODANS_E2E_COMPOSER_PROMPT="$prompt" \
-    TEST_RUNNER_CODANS_E2E_SHOTS="$SHOTS/$name" \
     xcodebuild -workspace CodansMobile.xcworkspace -scheme CodansMobile -skipPackagePluginValidation \
-      -destination "platform=iOS Simulator,id=$SIM" \
-      -resultBundlePath "$SCRATCH/$name.xcresult" \
-      test -only-testing:"CodansMobileUITests/RemoteEndToEndUITests/$method" >"$SCRATCH/$name.log" 2>&1)
+      -destination "platform=iOS Simulator,id=$SIM" build-for-testing >"$SCRATCH/build-for-testing.log" 2>&1)
+}
+
+# start_ui_test <case> <test method> [NAME=value ...]
+# Runs one RemoteEndToEndUITests method in the background. Each NAME=value
+# reaches the test as CODANS_E2E_NAME. The test and the harness hand off
+# through files in $SYNC (see await_phone / release).
+start_ui_test() {
+  local name="$1" method="$2"; shift 2
+  local vars=() pair
+  for pair in "$@"; do vars+=("TEST_RUNNER_CODANS_E2E_$pair"); done
+  SYNC="$SCRATCH/sync/$name"
+  UI_CASE="$name"
+  rm -rf "$SYNC" && mkdir -p "$SYNC" "$SHOTS/$name"
+  (cd "$IOS_DIR" &&
+    env "${vars[@]}" \
+      TEST_RUNNER_CODANS_E2E_PROJECT="$(basename "$FIX")" \
+      TEST_RUNNER_CODANS_E2E_SYNC="$SYNC" \
+      TEST_RUNNER_CODANS_E2E_SHOTS="$SHOTS/$name" \
+      xcodebuild -workspace CodansMobile.xcworkspace -scheme CodansMobile -skipPackagePluginValidation \
+        -destination "platform=iOS Simulator,id=$SIM" \
+        -resultBundlePath "$SCRATCH/$name.xcresult" \
+        test-without-building -only-testing:"CodansMobileUITests/RemoteEndToEndUITests/$method" \
+        >"$SCRATCH/$name.log" 2>&1) &
+  UI_PID=$!
+}
+
+# Waits for the running test and returns its status.
+finish_ui_test() {
+  wait "$UI_PID"
   local status=$?
   # Result bundles carry a screen recording; keep them only for failures.
-  [[ $status == 0 ]] && rm -rf "$SCRATCH/$name.xcresult"
+  [[ $status == 0 ]] && rm -rf "$SCRATCH/$UI_CASE.xcresult"
   return $status
+}
+
+# run_ui_test <case> <test method> [NAME=value ...]: start and wait.
+run_ui_test() {
+  start_ui_test "$@"
+  finish_ui_test
+}
+
+# run_pairing_test <case> <test method> <permission> [NAME=value ...]: like
+# run_ui_test, but the test pairs first. The code is issued only once the
+# app is up and asks for it: a code expires ten minutes after the Mac
+# issues it, and the test runner can take that long to start.
+run_pairing_test() {
+  local name="$1" method="$2" permission="$3"; shift 3
+  start_ui_test "$name" "$method" PAIR=1 "$@"
+  if await_phone pair 900; then
+    pairing_code "$permission" >"$SYNC/pairing-code"
+    release pair
+  fi
+  finish_ui_test
+}
+
+# await_phone <step> [seconds]: waits until the test reaches <step>. Fails
+# when the test ends first (it failed before the step) or on timeout.
+await_phone() {
+  local step="$1" deadline=$((SECONDS + ${2:-180}))
+  while [[ ! -e "$SYNC/$step.phone" ]]; do
+    kill -0 "$UI_PID" 2>/dev/null || return 1
+    ((SECONDS < deadline)) || return 1
+    sleep 0.3
+  done
+}
+
+# release <step>: lets the test continue past <step>.
+release() { touch "$SYNC/$1.mac"; }
+
+# Lines of the pane's screen, one per line.
+pane_lines() { cli pane read "$1" 2>/dev/null; }
+
+# wait_for_line <pane> <exact line> [seconds]
+wait_for_line() {
+  local deadline=$((SECONDS + ${3:-10}))
+  until pane_lines "$1" | grep -qx -- "$2"; do
+    ((SECONDS < deadline)) || return 1
+    sleep 0.5
+  done
+}
+
+# The pane's PTY size as "rows cols", from `stty size` run in it.
+stty_size() {
+  cli pane send "$PANE" "stty size" --capture 2>/dev/null | grep -Eo '^[0-9]+ [0-9]+$' | tail -1
+}
+
+# Resizes the main window (the one without the Settings pane's button).
+resize_mac() { "$AX" resize "$MAC_PID" "$1" "$2" "Pair New Device…" >/dev/null; sleep 1.5; }
+
+# Tab and pane counts of the fixture worktree, as "tabs panes".
+tree_counts() {
+  cli tree --json | jq -r --arg w "$WT" \
+    '.data.projects[0].worktrees[] | select(.id == $w) | "\(.tabs | length) \([.tabs[].panes[]] | length)"'
+}
+
+# wait_for_counts <"tabs panes"> [seconds]
+wait_for_counts() {
+  local deadline=$((SECONDS + ${2:-10}))
+  until [[ "$(tree_counts)" == "$1" ]]; do
+    ((SECONDS < deadline)) || return 1
+    sleep 0.5
+  done
 }
 
 device_ids() { jq -r '.devices[].id' "$CONF/remote-devices.json" 2>/dev/null; }
 
 # ---------- cases ----------
 launch_mac
+if ! build_ui_tests; then
+  echo "cannot build the UI tests (see $SCRATCH/build-for-testing.log)"; exit 1
+fi
 
+# The phone opens a worktree on the pane it last viewed there, else on the
+# Mac's focused pane; focus keeps a fresh install on the fixture pane.
+cli pane focus "$PANE" >/dev/null
+
+# --- "View and type": pairs, then the live cases run on the same pairing.
 MARKER="hi-from-phone-$$"
-code=$(pairing_code "View and type")
 reset_sim
-if run_ui_test interactive testPairBrowseReadAndSend "$code" "echo $MARKER"; then
+if run_pairing_test interactive testPairBrowseReadAndSend "View and type" INPUT="echo $MARKER"; then
   ok "interactive: paired, browsed, sent a line"
 else
   bad "interactive UI test (see $SCRATCH/interactive.log)"
@@ -188,19 +295,124 @@ else
   bad "interactive: '$MARKER' not in the pane output"
 fi
 
-code=$(pairing_code "View only")
+# live-terminal: printed as two words so the typed command never contains
+# the marker itself; only the output does.
+start_ui_test live-terminal testShowsLiveOutput PAIRED=1 MARKER="live-$$"
+if await_phone attached; then
+  cli pane send "$PANE" "printf '%s-%s\n' live $$" >/dev/null
+  release attached
+fi
+if finish_ui_test; then
+  ok "live-terminal: the phone showed output printed on the Mac"
+else
+  bad "live-terminal (see $SCRATCH/live-terminal.log)"
+fi
+
+if run_ui_test live-input testTypesIntoTheMacPane PAIRED=1 MARKER="typed-$$" && wait_for_line "$PANE" "typed-$$"; then
+  ok "live-input: a line typed on the phone ran in the Mac pane"
+else
+  bad "live-input: 'typed-$$' not in the pane output (see $SCRATCH/live-input.log)"
+fi
+
+interrupted=0
+start_ui_test modifier-keys testCtrlLatchInterruptsAForegroundJob PAIRED=1
+if await_phone ready; then
+  cli pane send "$PANE" "sleep 30" >/dev/null
+  sleep 1
+  release ready
+  if await_phone interrupted 60; then
+    # A shell still in `sleep` only echoes the typed command; the output
+    # line appears once the prompt is back.
+    cli pane send "$PANE" "echo after-$$" >/dev/null
+    wait_for_line "$PANE" "after-$$" 8 && interrupted=1
+    release interrupted
+  fi
+fi
+if finish_ui_test && [[ $interrupted == 1 ]]; then
+  ok "modifier-keys: ctrl then c from the phone interrupted sleep"
+else
+  bad "modifier-keys: the shell did not answer after ctrl-c (see $SCRATCH/modifier-keys.log)"
+fi
+
+steal=""
+resize_mac 1400 900
+before=$(stty_size)
+start_ui_test no-leader-steal testLeavesTheSizeToTheMac PAIRED=1
+if await_phone typed; then
+  after_input=$(stty_size)
+  [[ -n "$before" && "$after_input" == "$before" ]] || steal="typing on the phone moved it: $before -> $after_input"
+  release typed
+  if await_phone resized; then
+    resize_mac 1000 800
+    narrow=$(stty_size)
+    resize_mac 1400 900
+    wide=$(stty_size)
+    # The narrower window must give fewer columns, still far more than
+    # a phone's portrait grid, and the wide one must restore the original.
+    if [[ -z "$steal" ]] && ! { (( ${narrow#* } < ${before#* } && ${narrow#* } >= 60 )) && [[ "$wide" == "$before" ]]; }; then
+      steal="did not follow the Mac: $before, narrow $narrow, wide again $wide"
+    fi
+    release resized
+  else
+    steal="the phone never got to the resize step"
+  fi
+else
+  steal="the phone never typed"
+fi
+if finish_ui_test && [[ -z "$steal" ]]; then
+  ok "no-leader-steal: stty size stayed the Mac's ($before, narrow $narrow)"
+else
+  bad "no-leader-steal: ${steal:-UI test failed} (see $SCRATCH/no-leader-steal.log)"
+fi
+
+tab_ops=""
+start=$(tree_counts)
+tabs=${start% *} panes=${start#* }
+start_ui_test tab-ops testManagesTabsAndPanes PAIRED=1
+if await_phone new-tab; then
+  # A new tab comes with one pane.
+  wait_for_counts "$((tabs + 1)) $((panes + 1))" || tab_ops+=" new-tab($(tree_counts))"
+  release new-tab
+  if await_phone split; then
+    wait_for_counts "$((tabs + 1)) $((panes + 2))" || tab_ops+=" split($(tree_counts))"
+    release split
+    if await_phone closed; then
+      wait_for_counts "$((tabs + 1)) $((panes + 1))" || tab_ops+=" close($(tree_counts))"
+      release closed
+    else tab_ops+=" never-closed"; fi
+  else tab_ops+=" never-split"; fi
+else tab_ops+=" never-new-tab"; fi
+if finish_ui_test && [[ -z "$tab_ops" ]]; then
+  ok "tab-ops: New Tab, Split Right and Close Pane reached the Mac"
+else
+  bad "tab-ops: from '$start':${tab_ops:- UI test failed} (see $SCRATCH/tab-ops.log)"
+fi
+
+# --- "View only"
+cli pane focus "$PANE" >/dev/null
 reset_sim
-if run_ui_test read-only testPairBrowseReadAndSend "$code"; then
+if run_pairing_test read-only testPairBrowseReadAndSend "View only"; then
   ok "read-only: no input bar"
 else
   bad "read-only UI test (see $SCRATCH/read-only.log)"
 fi
 
+start_ui_test readonly-live testShowsLiveOutput PAIRED=1 READ_ONLY=1 MARKER="ro-$$"
+if await_phone attached; then
+  cli pane send "$PANE" "printf '%s-%s\n' ro $$" >/dev/null
+  release attached
+fi
+if finish_ui_test; then
+  ok "readonly-live: a view-only device streams the pane without a key bar"
+else
+  bad "readonly-live (see $SCRATCH/readonly-live.log)"
+fi
+
+# --- composer
 PROMPT="e2e composer run $$"
 BRANCH="agent/e2e-composer-run-$$"
-code=$(pairing_code "View and type")
 reset_sim
-if run_ui_test composer testComposerStartsAnAgentInANewWorktree "$code" "" "$PROMPT"; then
+if run_pairing_test composer testComposerStartsAnAgentInANewWorktree "View and type" COMPOSER_PROMPT="$PROMPT"; then
   ok "composer: started an agent from the phone"
 else
   bad "composer UI test (see $SCRATCH/composer.log)"
@@ -216,12 +428,27 @@ done
 active=$(jq '[.devices[] | select(.state == "active")] | length' "$CONF/remote-devices.json")
 [[ "$active" == 3 ]] && ok "all three pairings became active" || bad "expected 3 active devices, got $active"
 
+# --- revoke, with the composer's phone connected (rejected)
+revoke_all() {
+  local _
+  for _ in $(device_ids); do
+    "$AX" press "$MAC_PID" "Revoke…" >/dev/null && "$AX" wait "$MAC_PID" "Revoke" 3 >/dev/null &&
+      "$AX" press "$MAC_PID" "Revoke" >/dev/null
+    sleep 0.5
+  done
+}
 ids=$(device_ids)
-for _ in $ids; do
-  "$AX" press "$MAC_PID" "Revoke…" >/dev/null && "$AX" wait "$MAC_PID" "Revoke" 3 >/dev/null &&
-    "$AX" press "$MAC_PID" "Revoke" >/dev/null
-  sleep 0.5
-done
+start_ui_test rejected testShowsRemovedAfterRevocation PAIRED=1
+if await_phone live; then
+  revoke_all
+  release live
+fi
+if finish_ui_test; then
+  ok "rejected: the revoked phone asks to pair again"
+else
+  bad "rejected (see $SCRATCH/rejected.log)"
+fi
+revoke_all
 if [[ -z "$(device_ids)" ]]; then ok "revoke: no device records left"; else bad "revoke: records remain"; fi
 leftover=0
 for id in $ids; do
