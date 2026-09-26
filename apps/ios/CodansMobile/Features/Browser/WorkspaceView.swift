@@ -338,6 +338,8 @@ private struct HomeList: View {
 enum HomeMetrics {
   /// Worktree rows start under the project's name, past its folder glyph.
   static let rowIndent: CGFloat = 34
+  /// Room for the title between the iPad sidebar's toolbar buttons.
+  static let titleMaxWidth: CGFloat = 200
 }
 
 private struct ProjectHeaderRow: View {
@@ -454,15 +456,20 @@ struct HomeTitleMenu: View {
     } label: {
       VStack(spacing: 1) {
         HStack(spacing: 4) {
+          // A principal toolbar item never truncates on its own: a long Mac
+          // name spills over the sidebar's leading edge instead. The middle
+          // keeps a "(2)" suffix that tells same-named Macs apart.
           Text(connection.activeGateway?.displayName ?? "Codans")
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(Color.ink)
             .lineLimit(1)
+            .truncationMode(.middle)
           Image(systemName: "chevron.down")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(Color.inkSecondary)
             .accessibilityHidden(true)
         }
+        .frame(maxWidth: HomeMetrics.titleMaxWidth)
         if connection.health.isPaired {
           ConnectionStatusLine(health: connection.health)
             .font(.system(size: 12))
