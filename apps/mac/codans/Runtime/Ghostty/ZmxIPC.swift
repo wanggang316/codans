@@ -21,6 +21,16 @@ public nonisolated enum ZmxTag: UInt8, Sendable {
   case write = 12
   case taskComplete = 13
   case snapshot = 14
+  /// Client → daemon: become a read-only observer. Payload is
+  /// ``ZmxObservePayload``. Observers never become leader, so their
+  /// presence never changes the PTY size.
+  case observe = 15
+  /// Daemon → observer: the terminal state an observer starts from.
+  /// Payload is ``ZmxObserveStatePayload``.
+  case observeState = 16
+  /// Daemon → observer: the PTY was resized, at this point in the byte
+  /// stream. Payload has the ``ZmxResizePayload`` layout.
+  case observeResize = 17
 }
 
 /// Format byte sent in the payload of a `.history` request. Mirrors
@@ -114,6 +124,97 @@ public nonisolated enum ZmxFraming {
     let payload = Data(buffer[payloadStart..<payloadEnd])
     buffer.removeSubrange(buffer.startIndex..<payloadEnd)
     return ZmxFrame(tag: tag, payload: payload)
+  }
+}
+
+nonisolated extension ZmxFraming {
+  /// ``decode(buffer:)`` for long-lived connections: a complete frame with
+  /// a tag this build does not know is dropped instead of failing the
+  /// stream, so a newer daemon can add frames without breaking older
+  /// clients. A malformed length still throws.
+  public static func decodeSkippingUnknown(buffer: inout Data) throws -> ZmxFrame? {
+    while buffer.count >= headerSize {
+      let tagByte = buffer[buffer.startIndex]
+      if ZmxTag(rawValue: tagByte) != nil {
+        return try decode(buffer: &buffer)
+      }
+      let lenStart = buffer.index(buffer.startIndex, offsetBy: 1)
+      let payloadLen32 = buffer[lenStart..<buffer.index(lenStart, offsetBy: 4)].withUnsafeBytes {
+        $0.loadUnaligned(as: UInt32.self)
+      }
+      let payloadLen = Int(UInt32(littleEndian: payloadLen32))
+      if payloadLen > maxPayloadSize {
+        throw ZmxIPCError.payloadTooLarge(payloadLen)
+      }
+      let total = headerSize + payloadLen
+      guard buffer.count >= total else { return nil }
+      buffer.removeSubrange(buffer.startIndex..<buffer.index(buffer.startIndex, offsetBy: total))
+    }
+    return nil
+  }
+}
+
+/// Payload for ``ZmxTag/observe``: `scrollback_rows u32` little-endian.
+/// Zero asks for the visible screen only.
+public nonisolated struct ZmxObservePayload: Sendable, Equatable {
+  public let scrollbackRows: UInt32
+
+  public init(scrollbackRows: UInt32) {
+    self.scrollbackRows = scrollbackRows
+  }
+
+  public func encode() -> Data {
+    var out = Data(capacity: 4)
+    var rowsLE = scrollbackRows.littleEndian
+    withUnsafeBytes(of: &rowsLE) { out.append(contentsOf: $0) }
+    return out
+  }
+}
+
+/// Payload of ``ZmxTag/observeState``: an 8-byte header
+/// (`rows u16, cols u16, flags u16, reserved u16`, little-endian) followed
+/// by VT bytes that repaint the terminal from a cleared screen.
+public nonisolated struct ZmxObserveStatePayload: Sendable, Equatable {
+  public static let headerSize = 8
+  static let alternateScreenFlag: UInt16 = 1 << 0
+  static let scrollbackTruncatedFlag: UInt16 = 1 << 1
+
+  public let rows: UInt16
+  public let cols: UInt16
+  public let flags: UInt16
+  public let state: Data
+
+  public init(rows: UInt16, cols: UInt16, flags: UInt16 = 0, state: Data) {
+    self.rows = rows
+    self.cols = cols
+    self.flags = flags
+    self.state = state
+  }
+
+  public var isAlternateScreen: Bool { flags & Self.alternateScreenFlag != 0 }
+  public var isScrollbackTruncated: Bool { flags & Self.scrollbackTruncatedFlag != 0 }
+
+  public static func decode(_ data: Data) throws -> ZmxObserveStatePayload {
+    guard data.count >= headerSize else { throw ZmxIPCError.malformedLength }
+    func u16(_ offset: Int) -> UInt16 {
+      UInt16(littleEndian: data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self) })
+    }
+    return ZmxObserveStatePayload(
+      rows: u16(0),
+      cols: u16(2),
+      flags: u16(4),
+      state: Data(data.dropFirst(headerSize))
+    )
+  }
+
+  public func encode() -> Data {
+    var out = Data(capacity: Self.headerSize + state.count)
+    for value in [rows, cols, flags, UInt16(0)] {
+      var le = value.littleEndian
+      withUnsafeBytes(of: &le) { out.append(contentsOf: $0) }
+    }
+    out.append(state)
+    return out
   }
 }
 

@@ -84,6 +84,11 @@ final class PaneSurface {
   /// close.
   var onClose: (@MainActor (_ processAlive: Bool) -> Void)?
 
+  /// Grid-size listeners (`observeGridSize`), keyed by registration token.
+  private var gridSizeObservers: [UUID: @MainActor (_ cols: UInt16, _ rows: UInt16) -> Void] = [:]
+  /// Last grid size reported to `gridSizeObservers`, to report changes only.
+  private var lastReportedGridSize: (cols: UInt16, rows: UInt16)?
+
   /// Engine-provided output callback. Currently unused — surface output
   /// reaches the engine via ghostty's own rendering layer.
   var onOutput: (@MainActor (Data) -> Void)?
@@ -178,6 +183,7 @@ final class PaneSurface {
     }
     self.surface = surface
     self.view.attach(surface: surface)
+    self.view.onGeometryPushed = { [weak self] in self?.geometryPushed() }
     // libghostty defaults new surfaces to focused; in a multi-pane layout
     // that makes every fresh surface draw the filled blinking cursor until
     // something explicitly resigns it. Force-false here — the one pane that
@@ -295,6 +301,37 @@ final class PaneSurface {
     // foreground — the basis for agent detection and the worktree "working"
     // indicator. nil until the post-attach `.info` probe lands.
     return daemonShellPID > 0 ? daemonShellPID : nil
+  }
+
+  /// The terminal grid libghostty lays this surface out at. Nil after
+  /// `close()` or before the first layout.
+  func gridSize() -> (cols: UInt16, rows: UInt16)? {
+    guard let surface else { return nil }
+    let size = ghostty_surface_size(surface)
+    guard size.columns > 0, size.rows > 0 else { return nil }
+    return (size.columns, size.rows)
+  }
+
+  /// Calls `handler` whenever the grid size changes. Returns a token for
+  /// `removeGridSizeObserver(_:)`.
+  func observeGridSize(_ handler: @escaping @MainActor (_ cols: UInt16, _ rows: UInt16) -> Void) -> UUID {
+    let token = UUID()
+    gridSizeObservers[token] = handler
+    if lastReportedGridSize == nil { lastReportedGridSize = gridSize() }
+    return token
+  }
+
+  func removeGridSizeObserver(_ token: UUID) {
+    gridSizeObservers[token] = nil
+  }
+
+  private func geometryPushed() {
+    guard !gridSizeObservers.isEmpty, let size = gridSize() else { return }
+    if let last = lastReportedGridSize, last == size { return }
+    lastReportedGridSize = size
+    for handler in gridSizeObservers.values {
+      handler(size.cols, size.rows)
+    }
   }
 
   /// Forward a post-wake / post-reconfiguration geometry resync to the host

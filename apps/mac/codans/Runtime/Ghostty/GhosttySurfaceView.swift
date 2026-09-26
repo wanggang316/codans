@@ -59,6 +59,9 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   }
 
   let paneID: PaneID
+  /// Runs after every geometry push to libghostty, which may or may not
+  /// have changed the grid; the owner compares sizes.
+  var onGeometryPushed: (@MainActor () -> Void)?
   private var surface: ghostty_surface_t?
   private var markedText = NSMutableAttributedString()
   private var trackingArea: NSTrackingArea?
@@ -414,6 +417,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     if px.width > 0, px.height > 0 {
       ghostty_surface_set_size(surface, UInt32(px.width), UInt32(px.height))
     }
+    onGeometryPushed?()
   }
 
   /// Recover rendering after the surface was hidden and shown again (display
