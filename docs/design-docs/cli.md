@@ -226,14 +226,16 @@
 
 #### `codans agent …`
 
-`AgentCommand.subcommands`：`list`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
+`AgentCommand.subcommands`：`list`、`status`、`wait`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans agent list` | `agent.listProfiles` | `AgentHandlers.listProfiles` | 无；每行回带 id、名字、agent、enabled、PATH 探测结果（未探测完为 null）、是否支持 prompt、完整启动命令 |
-| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/error/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。运行态是纯内存派生态，不持久化 |
-| `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until idle\|working\|blocked\|error\|finished\|changed\|exit`，`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
+| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（unknown/idle/working/blocked/error/finished）、`since`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。运行态是纯内存派生态，不持久化 |
+| `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until unknown\|idle\|working\|blocked\|error\|finished\|changed\|exit`，`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
 | `codans agent launch [PROFILE]` | `agent.launch` | `HierarchyClient.launchAgent` | `[PROFILE]`（名字或 id）或 `--agent TOKEN`（该 agent 第一个启用的 profile，缺则临时裸预设），`[--project P] [--worktree W] [--prompt TEXT\|-] [--tab \| --split right\|left\|up\|down] [--background]` |
+
+HAN-167 分支新增 `unknown` 状态与 `--until unknown`，最终集成验证仍在进行，不能从本文推断已发布。`unknown` 表示当前证据不足以确认 Agent 状态，不等于 `idle`，也不授权自动输入。`error` 是统一状态模型中的错误状态；错误详情供恢复策略判断，终端中残留的旧错误文本不一定代表当前错误。`finished` 仍是未被用户查看的完成提示，不是任务成功的证明。现有状态字符串和持久化显示值保持兼容，读取新版本 `agent status` 的客户端需接受新增的 `unknown` 值。
 
 `launch` 走与 toolbar 相同的管线（渲染 profile → 合成 `ScriptDefinition` → 新 tab / 分屏 / 当前 pane），永不复用 run pane。禁用的 profile 以 `conflict` 拒绝；不支持初始 prompt 的 agent 带 `--prompt` 以 `unsupported` 拒绝；重名 profile 以 `conflict` 要求传 id。
 
