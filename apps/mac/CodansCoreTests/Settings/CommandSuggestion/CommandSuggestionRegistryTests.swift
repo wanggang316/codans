@@ -227,7 +227,7 @@ struct GlobalCommandSuggestionsTests {
   @Test
   func groupsAreGitAndGitHubWithUniqueIDs() {
     let groups = GlobalCommandSuggestions.groups
-    #expect(groups.map(\.source.displayName) == ["Git", "GitHub CLI"])
+    #expect(groups.map(\.source.displayName) == ["Git", "GitHub CLI", "Docker", "System", "Homebrew"])
     let ids = groups.flatMap(\.suggestions).map(\.id)
     #expect(Set(ids).count == ids.count)
     #expect(groups.flatMap(\.suggestions).allSatisfy { $0.icon != nil && $0.kind == .custom })
@@ -235,7 +235,11 @@ struct GlobalCommandSuggestionsTests {
 
   @Test
   func nothingDestructiveIsSuggested() {
-    let destructive = ["reset --hard", "clean -f", "push --force", "push -f", "branch -D", "checkout -- ", "restore "]
+    let destructive = [
+      "reset --hard", "clean -f", "push --force", "push -f", "branch -D", "checkout -- ", "restore ",
+      "system prune", "image prune", "volume prune",
+      "brew upgrade", "rm -", "docker rm", "down -v", "--volumes",
+    ]
     for suggestion in GlobalCommandSuggestions.groups.flatMap(\.suggestions) {
       #expect(!destructive.contains(where: suggestion.command.contains), "\(suggestion.command)")
     }
@@ -252,5 +256,85 @@ struct GlobalCommandSuggestionsTests {
     #expect(result.scripts.last?.command == "git status -sb")
     #expect(result.scripts.last?.systemImage == "list.bullet.rectangle")
     #expect(result.scriptID == result.scripts.last?.id)
+  }
+}
+
+struct PyprojectParserTests {
+  private func suggest(_ text: String, present: Set<String> = []) -> [CommandSuggestion] {
+    PyprojectParser().suggestions(in: ManifestSnapshot(contents: ["pyproject.toml": text], presentPaths: present))
+  }
+
+  @Test
+  func uvProjectRunsEntryPointsAndVerbsThroughUv() {
+    let result = suggest(
+      """
+      [project]
+      name = "app"
+      dependencies = ["fastapi"]
+
+      [project.scripts]
+      serve = "app.main:run"
+      "seed-db" = "app.db:seed"
+
+      [dependency-groups]
+      dev = ["pytest>=8"]
+      """, present: ["uv.lock"])
+    #expect(result.map(\.name) == ["serve", "seed-db", "sync", "pytest"])
+    #expect(result.map(\.command) == ["uv run serve", "uv run seed-db", "uv sync", "uv run pytest"])
+    #expect(result.first?.detail == "app.main:run")
+  }
+
+  @Test
+  func poetryAndPdmTablesUseTheirOwnRunner() {
+    let result = suggest(
+      """
+      [tool.poetry]
+      name = "x"
+
+      [tool.poetry.scripts]
+      cli = "x.cli:main"
+
+      [tool.pdm.scripts]
+      lint = "ruff check ."
+      start = { cmd = "flask run", help = "Dev server" }
+      """)
+    #expect(result.map(\.command) == ["poetry run cli", "pdm run lint", "pdm run start", "poetry install"])
+    #expect(result[2].detail == "flask run")
+  }
+
+  @Test
+  func entryPointsWithoutAToolRunBare() {
+    #expect(suggest("[project.scripts]\nhello = \"pkg:main\"\n").map(\.command) == ["hello"])
+  }
+}
+
+struct ComposeParserTests {
+  @Test
+  func stackVerbsThenOneUpPerService() {
+    let text = """
+      name: shop
+      services:
+        web:
+          image: nginx
+          ports:
+            - "8080:80"
+        "db":
+          image: postgres
+      volumes:
+        data: {}
+      """
+    let result = ComposeParser().suggestions(in: ManifestSnapshot(contents: ["docker-compose.yml": text]))
+    #expect(result.map(\.name) == ["up", "down", "logs", "ps", "web", "db"])
+    #expect(result.map(\.command).suffix(2) == ["docker compose up web", "docker compose up db"])
+    #expect(result.last?.icon == .mark(.docker))
+    #expect(result.first?.icon == .symbol("play.fill"))
+  }
+
+  @Test
+  func composeYamlWinsOverLegacyName() {
+    let snapshot = ManifestSnapshot(contents: [
+      "compose.yaml": "services:\n  api:\n    build: .\n", "docker-compose.yml": "services:\n  old:\n    image: x\n",
+    ])
+    #expect(ComposeParser().suggestions(in: snapshot).last?.name == "api")
   }
 }

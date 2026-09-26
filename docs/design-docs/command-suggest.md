@@ -12,7 +12,7 @@ Command Suggest 按来源列出从项目清单识别出的命令。两个入口�
 - **Settings → Commands 表格的 `+` 菜单**（"From Project" 分节，SwiftUI `CommandSuggestionMenuSection`）：点击即把命令加入 Project。
 - **worktree header Run 按钮的下拉菜单**（"Config Files" 分节，AppKit `RunMenuBuilder`）：每个清单一个子菜单，**点击行 = 在新 tab 执行**，**点行尾 `+` = 加入 Project**，已加入的行尾显示 `✓`（此时点行执行已保存的那条脚本，共享 Run/Stop 状态）。
 
-另有 **Global Commands 的 `+` 菜单**："Custom Command" 之下是 "Suggested" 分节，列出 `GlobalCommandSuggestions` 这份维护好的常用命令表（Git、GitHub CLI 两组）。全局命令在当前选中的 worktree 里执行、不属于任何项目，所以这里不从文件识别，而是提供任何仓库都适用的工具级工作流。只收**非破坏性**命令（不含 `reset --hard`、`clean -f`、强推、`branch -D`，由测试守护）；每条指定语义明确的 SF Symbol。加入后为 `.custom` 类型并保留图标（`CommandSuggestionAdoption.adoptGlobal`，没有项目命令那套「每种预设类型一条 / 内置 Run」的约束）。以后加新的一组（如 Docker）只需在 `groups` 里追加。
+另有 **Global Commands 的 `+` 菜单**："Custom Command" 之下是 "Suggested" 分节，列出 `GlobalCommandSuggestions` 这份维护好的常用命令表（Git、GitHub CLI、Docker、System、Homebrew 五组）。全局命令在当前选中的 worktree 里执行、不属于任何项目，所以这里不从文件识别，而是提供任何仓库都适用的工具级工作流。只收**非破坏性**命令（不含 `reset --hard`、`clean -f`、强推、`branch -D`、docker `prune` / `rm` / `down -v`、`brew upgrade`，由测试守护；清理已合并分支只用 `branch -d`）；每条指定语义明确的 SF Symbol。加入后为 `.custom` 类型并保留图标（`CommandSuggestionAdoption.adoptGlobal`，没有项目命令那套「每种预设类型一条 / 内置 Run」的约束）。以后加新的一组（如 Docker）只需在 `groups` 里追加。
 
 ## 目标与非目标
 
@@ -80,6 +80,8 @@ protocol CommandSuggestionParser: Sendable {
 | justfile | 公开 recipe（排除 `_name` 与 `[private]`），上方注释作 detail | `just <recipe>` |
 | Taskfile | 顶层 `tasks:` 下一级 key，`desc:` 作 detail，隐藏 `internal: true` | `task <name>` |
 | mise.toml | `[tasks.<name>]` 与 `[tasks]` 内联两种写法；`description` 优先于 `run` | `mise run <name>` |
+| `pyproject.toml` | `[project.scripts]`（经检测到的工具运行）、`[tool.poetry.scripts]`、`[tool.pdm.scripts]`、`[tool.hatch.envs.default.scripts]`；工具按 lockfile（uv.lock / poetry.lock / pdm.lock）再按 `[tool.*]` 表判定；另给 `uv sync` / `poetry install` / `pdm install`，提到 pytest 时给 `pytest` | `uv run <x>` 等 |
+| Compose 文件 | `compose.yaml` 等 compose 自己会找的文件名；`up -d` / `down` / `logs -f` / `ps`，每个 service 一条前台 `up` | `docker compose up web` |
 | Cargo / Go / SwiftPM | 仅凭清单存在给出固定动词（Go 不给 `go run`：模块根常不是 main 包） | `cargo test` 等 |
 
 入口名只含 shell 惰性字符时原样拼接，否则用 `ShellQuoting` 单引号包裹。
@@ -126,6 +128,7 @@ protocol CommandSuggestionParser: Sendable {
 - 选中高亮用 `.selection` 材质的 `NSVisualEffectView`（与标准菜单项同一材质，半透明背景下颜色一致），内容画在其上一层的 canvas。
 - AppKit 对 view-backed 菜单项的 Return 与 AXPress **都不会**发送 item 的 action：行视图自己处理——被高亮的行是菜单的 first responder，`keyDown` 收到 Return；`accessibilityPerformPress` 执行；"加入"以 `NSAccessibilityCustomAction` 暴露给 VoiceOver。键盘 / 辅助功能按下箭头段时（此时 AppKit 不弹菜单），由 action 在按钮下方弹出同一菜单。
 - 子菜单父项是标准菜单项（带相对路径标题与 runner 的工具图标），以保留原生的子菜单展开行为。
+- 选中时图标随文字反白：自绘行在高亮时改画 `selectedMenuItemTextColor` 着色的同形图标；文件项与 Settings 建议子菜单用模板图（菜单按标题颜色着色）。菜单里烘焙颜色的非模板图不会随高亮变色，选中行会显得像被禁用。
 
 ## 扩展一个新生态
 
