@@ -36,6 +36,7 @@ struct ContentView: View {
   /// Defaulted so previews and tests that build `ContentView` without the
   /// engine keep compiling.
   var workflowEngine: WorkflowEngine?
+  @Environment(WorkflowCatalogStore.self) private var workflowCatalog
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
@@ -174,6 +175,12 @@ struct ContentView: View {
       // remote Open button (and the context menu's editor list) could never
       // appear.
       store.send(.editor(.onAppear))
+    }
+    // A workflow's Run button in Settings: open the start panel here, for
+    // the selected worktree, through the toolbar menu's own route.
+    .onChange(of: workflowCatalog.pendingRunWorkflowID, initial: true) {
+      guard let workflowID = workflowCatalog.consumeRunRequest() else { return }
+      store.send(.worktreeHeader(.delegate(.runWorkflowRequested(workflowID: workflowID))))
     }
     .onChange(of: store.editor.lastOpenResult) { _, new in
       guard let new else { return }

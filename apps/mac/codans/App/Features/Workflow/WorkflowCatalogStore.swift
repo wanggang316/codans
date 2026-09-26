@@ -69,6 +69,20 @@ final class WorkflowCatalogStore {
     return isNewWorkflowRequested
   }
 
+  /// Set by a workflow's Run button in Settings and consumed by the main
+  /// window, which opens the start panel for the worktree it has selected —
+  /// the same route as the toolbar's Run Workflow menu.
+  private(set) var pendingRunWorkflowID: String?
+
+  func requestRun(workflowID: String) {
+    pendingRunWorkflowID = workflowID
+  }
+
+  func consumeRunRequest() -> String? {
+    defer { pendingRunWorkflowID = nil }
+    return pendingRunWorkflowID
+  }
+
   /// Rescans every watched scope now — the Settings refresh button.
   func rescanAll() {
     markDirty(Set(trackedRoots.map { Key.repository(root: $0) }).union([.user]))

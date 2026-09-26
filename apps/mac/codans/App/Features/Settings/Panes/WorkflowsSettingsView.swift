@@ -21,6 +21,9 @@ struct WorkflowsSettingsView: View {
   @State private var newWorkflow: NewWorkflowRequest?
   @State private var trashCandidate: WorkflowCatalogEntry?
   @State private var isAskingAgent = false
+  /// Non-nil = the detail screen for the file at this path is showing.
+  /// Keyed by path, not id: the same id can exist in several scopes.
+  @State private var detailPath: String?
 
   /// What the New Workflow sheet opens with: blank, or a duplicate.
   private struct NewWorkflowRequest: Identifiable {
@@ -35,7 +38,6 @@ struct WorkflowsSettingsView: View {
   }
 
   private var workflows: WorkflowSettings { settingsStore.settings.workflows }
-  private var agents: AgentSettings { settingsStore.settings.agents }
 
   private var eligibleProjects: [Project] {
     WorkflowsSettingsLogic.eligibleRepositoryProjects(hierarchyManager.catalog.projects)
@@ -52,17 +54,18 @@ struct WorkflowsSettingsView: View {
   }
 
   var body: some View {
-    Form {
-      masterSection
-      scopeSection(title: "Built-in", entries: catalog.bundle, emptyText: "No built-in workflows.")
-      userScopeSection
-      ForEach(repositoryGroups) { group in
-        scopeSection(title: "Repository — \(group.projectName)", entries: group.entries, emptyText: "")
+    Group {
+      if let detailPath {
+        detail(path: detailPath)
+      } else {
+        list
       }
     }
-    .formStyle(.grouped)
     .onChange(of: catalog.isNewWorkflowRequested, initial: true) {
-      if catalog.consumeNewWorkflowRequest() { newWorkflow = NewWorkflowRequest() }
+      if catalog.consumeNewWorkflowRequest() {
+        detailPath = nil
+        newWorkflow = NewWorkflowRequest()
+      }
     }
     .sheet(item: $newWorkflow) { request in
       NewWorkflowSheet(
@@ -73,6 +76,7 @@ struct WorkflowsSettingsView: View {
         onCreated: { url, location in
           newWorkflow = nil
           catalog.rescanAll()
+          detailPath = url.path(percentEncoded: false)
           Task { await open(url, projectID: location.projectID) }
         },
         onCancel: { newWorkflow = nil }
@@ -97,6 +101,50 @@ struct WorkflowsSettingsView: View {
         onCancel: { trustPrompt = nil }
       )
     }
+  }
+
+  // MARK: - Detail
+
+  /// Every listed file, in list order.
+  private var allEntries: [WorkflowCatalogEntry] {
+    catalog.bundle + catalog.user + repositoryGroups.flatMap(\.entries)
+  }
+
+  private func detail(path: String) -> some View {
+    let entry = allEntries.first { $0.path == path }
+    return WorkflowDetailView(
+      entry: entry,
+      overriddenBy: entry.flatMap(overridingScope),
+      projectID: entry.flatMap(projectID(of:)),
+      onBack: { detailPath = nil },
+      onOpen: {
+        if let entry { Task { await open(URL(fileURLWithPath: entry.path), projectID: projectID(of: entry)) } }
+      },
+      onReveal: { if let entry { reveal(entry) } },
+      onDuplicate: { if let entry { duplicate(entry) } },
+      onTrash: { trashCandidate = entry },
+      onTrust: { if let entry { trustPrompt = TrustPromptTarget(entry: entry) } }
+    )
+  }
+
+  /// The higher-precedence scope that also defines this id, if any — a
+  /// repository file shadows a user one, which shadows a built-in.
+  private func overridingScope(_ entry: WorkflowCatalogEntry) -> WorkflowScope? {
+    allEntries.filter { $0.id == entry.id && $0.scope > entry.scope }.map(\.scope).max()
+  }
+
+  // MARK: - List
+
+  private var list: some View {
+    Form {
+      masterSection
+      scopeSection(title: "Built-in", entries: catalog.bundle, emptyText: "No built-in workflows.")
+      userScopeSection
+      ForEach(repositoryGroups) { group in
+        scopeSection(title: "Repository — \(group.projectName)", entries: group.entries, emptyText: "")
+      }
+    }
+    .formStyle(.grouped)
   }
 
   // MARK: - Master
@@ -187,6 +235,7 @@ struct WorkflowsSettingsView: View {
 
   private func moveToTrash(_ entry: WorkflowCatalogEntry) {
     try? FileManager.default.trashItem(at: URL(fileURLWithPath: entry.path), resultingItemURL: nil)
+    if detailPath == entry.path { detailPath = nil }
     catalog.rescanAll()
   }
 
@@ -247,36 +296,55 @@ struct WorkflowsSettingsView: View {
 
   // MARK: - Row
 
-  @ViewBuilder
+  /// Enable checkbox beside — not inside — a button into the detail screen,
+  /// the Agents pane's row shape: a Toggle nested in the Button would be
+  /// uncheckable.
   private func workflowRow(_ entry: WorkflowCatalogEntry) -> some View {
-    DisclosureGroup {
-      workflowDetail(entry)
-    } label: {
-      HStack(spacing: 8) {
-        Toggle(isOn: rowEnabledBinding(for: entry)) {
-          EmptyView()
-        }
-        .labelsHidden()
-        .toggleStyle(.checkbox)
-        .accessibilityLabel("Enable \(entry.name)")
-
-        VStack(alignment: .leading, spacing: 2) {
-          Text(entry.name)
-            .lineLimit(1)
-          Text("\(entry.id) · \((entry.path as NSString).lastPathComponent)")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        Spacer()
-        statusGlyph(for: entry)
+    HStack(spacing: 8) {
+      Toggle(isOn: rowEnabledBinding(for: entry)) {
+        EmptyView()
       }
-      .padding(.vertical, 2)
-      .contextMenu { workflowActions(entry) }
+      .labelsHidden()
+      .toggleStyle(.checkbox)
+      .accessibilityLabel("Enable \(entry.name)")
+
+      Button {
+        detailPath = entry.path
+      } label: {
+        HStack(spacing: 8) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(entry.name)
+              .lineLimit(1)
+            Text(entry.definition?.description ?? entry.id)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+          Spacer(minLength: 12)
+          WorkflowStatusLabel(
+            entry: entry, isDisabled: workflows.isDisabled(entry.id), isOverridden: overridingScope(entry) != nil
+          )
+          .font(.caption)
+          .help(
+            overridingScope(entry).map {
+              "A \(WorkflowDetailView.scopeTitle($0, projectName: nil)) file with this ID is used instead"
+            } ?? "")
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("settings.workflows.row.\(entry.id)")
+      .accessibilityHint("Show details")
     }
+    .padding(.vertical, 2)
+    .contextMenu { workflowActions(entry) }
   }
 
-  /// The same actions in the row's context menu and its expanded detail.
+  /// The row's context menu; the detail screen offers the same actions.
   @ViewBuilder
   private func workflowActions(_ entry: WorkflowCatalogEntry) -> some View {
     Button {
@@ -320,161 +388,13 @@ struct WorkflowsSettingsView: View {
     )
   }
 
-  @ViewBuilder
-  private func statusGlyph(for entry: WorkflowCatalogEntry) -> some View {
-    switch WorkflowsSettingsLogic.RowStatus(diagnostics: entry.diagnostics) {
-    case .ok:
-      Image(systemName: "checkmark.circle.fill")
-        .foregroundStyle(.green)
-        .help("No diagnostics")
-    case .warnings(let count):
-      Label("\(count)", systemImage: "exclamationmark.triangle.fill")
-        .foregroundStyle(.orange)
-        .help("\(count) warning(s)")
-    case .errors(let count):
-      Label("\(count)", systemImage: "exclamationmark.octagon.fill")
-        .foregroundStyle(.red)
-        .help("\(count) error(s) — this workflow cannot start")
-    }
-  }
-
-  // MARK: - Detail
-
-  @ViewBuilder
-  private func workflowDetail(_ entry: WorkflowCatalogEntry) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if !entry.diagnostics.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          ForEach(Array(entry.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
-            diagnosticRow(diagnostic)
-          }
-        }
-      }
-
-      let bindings = WorkflowsSettingsLogic.roleBindings(for: entry, workflows: workflows, agents: agents)
-      if !bindings.isEmpty {
-        VStack(alignment: .leading, spacing: 4) {
-          ForEach(bindings) { binding in
-            roleBindingRow(entry: entry, binding: binding)
-          }
-        }
-      }
-
-      if entry.requiresTrust {
-        trustRow(entry)
-      }
-
-      HStack(spacing: 12) {
-        if entry.scope == .bundle {
-          Text("Built-in · read only — duplicate it to customize.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-        workflowActions(entry)
-          .buttonStyle(.borderless)
-          .labelStyle(.titleAndIcon)
-      }
-    }
-    .padding(.leading, 24)
-    .padding(.vertical, 4)
-  }
-
-  private func diagnosticRow(_ diagnostic: WorkflowDiagnostic) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 6) {
-      Image(systemName: diagnostic.isError ? "xmark.circle.fill" : "exclamationmark.triangle.fill")
-        .foregroundStyle(diagnostic.isError ? .red : .orange)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 1) {
-        Text("\(diagnostic.severity.rawValue) \(diagnostic.code): \(diagnostic.message)")
-          .font(.callout)
-        if let path = diagnostic.path {
-          Text(path)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      }
-    }
-  }
-
-  private func roleBindingRow(entry: WorkflowCatalogEntry, binding: WorkflowsSettingsLogic.RoleBinding) -> some View {
-    HStack {
-      Text(binding.role.name)
-        .font(.callout.weight(.medium))
-      Text(binding.profileName ?? "not remembered")
-        .font(.callout)
-        .foregroundStyle(binding.isRemembered ? .primary : .secondary)
-      Spacer()
-      if binding.isRemembered {
-        Button("Forget") {
-          forget(entry: entry, role: binding.role.name)
-        }
-        .buttonStyle(.borderless)
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func trustRow(_ entry: WorkflowCatalogEntry) -> some View {
-    switch WorkflowsSettingsLogic.TrustState.resolve(entry: entry, workflows: workflows) {
-    case .notRequired:
-      EmptyView()
-    case .trusted(let grantedAt):
-      HStack {
-        Label(
-          "Trusted \(grantedAt.formatted(date: .abbreviated, time: .omitted))",
-          systemImage: "checkmark.shield.fill"
-        )
-        .foregroundStyle(.green)
-        Spacer()
-        Button("Revoke") {
-          revokeTrust(entry)
-        }
-        .buttonStyle(.borderless)
-      }
-    case .outdated(let grantedAt):
-      HStack {
-        Label("Trust outdated — file changed", systemImage: "exclamationmark.shield.fill")
-          .foregroundStyle(.orange)
-          .help("Granted \(grantedAt.formatted(date: .abbreviated, time: .omitted))")
-        Spacer()
-        Button("Trust…") {
-          trustPrompt = TrustPromptTarget(entry: entry)
-        }
-        .buttonStyle(.borderless)
-      }
-    case .notTrusted:
-      HStack {
-        Label("Not trusted", systemImage: "shield.slash")
-          .foregroundStyle(.secondary)
-        Spacer()
-        Button("Trust…") {
-          trustPrompt = TrustPromptTarget(entry: entry)
-        }
-        .buttonStyle(.borderless)
-      }
-    }
-  }
-
   // MARK: - Actions
-
-  private func forget(entry: WorkflowCatalogEntry, role: String) {
-    settingsStore.mutateWorkflows { workflows in
-      workflows.forgetBinding(scope: entry.scope, workflowID: entry.id, role: role)
-    }
-  }
 
   private func trust(_ entry: WorkflowCatalogEntry) {
     settingsStore.mutateWorkflows { workflows in
       workflows.trust(path: entry.path, sha256: entry.sha256, at: Date())
     }
     trustPrompt = nil
-  }
-
-  private func revokeTrust(_ entry: WorkflowCatalogEntry) {
-    settingsStore.mutateWorkflows { workflows in
-      workflows.revokeTrust(path: entry.path)
-    }
   }
 
   private func reveal(_ entry: WorkflowCatalogEntry) {
