@@ -57,21 +57,11 @@ struct TabChipLabel: View {
     }
   }
 
-  /// Brand mark for an `agent:<kind>` reference, SF Symbol otherwise. The
-  /// brand asset is template-rendered and boxed to the SF Symbol's optical
-  /// size so both paths sit on the same baseline and inherit the same tint.
-  @ViewBuilder
+  /// Agent brand mark, tool mark or SF Symbol. Marks are template-rendered
+  /// and boxed to the SF Symbol's optical size so every path sits on the same
+  /// baseline and inherits the same tint.
   private func glyph(for icon: String) -> some View {
-    if let kind = TabIconRef.agentKind(from: icon) {
-      Image(AgentCatalog.descriptor(for: kind).iconAssetName)
-        .renderingMode(.template)
-        .resizable()
-        .scaledToFit()
-        .frame(width: 11, height: 11)
-        .accessibilityHidden(true)
-    } else {
-      Image(systemName: icon)
-        .accessibilityHidden(true)
-    }
+    StoredIconGlyph(icon: icon, markSize: 11)
+      .accessibilityHidden(true)
   }
 }

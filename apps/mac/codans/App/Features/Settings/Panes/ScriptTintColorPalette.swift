@@ -19,19 +19,18 @@ enum ScriptTintColorPalette {
     }
   }
 
-  /// Symbol image with the tint colour baked in as a *non-template* `NSImage`.
+  /// Icon image with the tint colour baked in as a *non-template* `NSImage`.
   /// Native `Menu` items render their icon as a monochrome template and strip
   /// SwiftUI's `.foregroundStyle`, so baking the colour into the image (and
   /// clearing `isTemplate`) is the only way to show a coloured glyph in a menu.
-  static func menuIcon(systemName: String, tint: ScriptTintColor) -> Image {
-    let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-      .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(color(for: tint))]))
-    if let base = NSImage(systemSymbolName: systemName, accessibilityDescription: nil),
-      let tinted = base.withSymbolConfiguration(configuration)
-    {
-      tinted.isTemplate = false
+  static func menuIcon(_ icon: CommandIconRef, tint: ScriptTintColor) -> Image {
+    if let tinted = CommandIconImage.tinted(icon, color: NSColor(color(for: tint))) {
       return Image(nsImage: tinted)
     }
-    return Image(systemName: systemName)
+    return Image(systemName: ScriptKind.custom.defaultSystemImage)
+  }
+
+  static func menuIcon(systemName: String, tint: ScriptTintColor) -> Image {
+    menuIcon(.symbol(systemName), tint: tint)
   }
 }

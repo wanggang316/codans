@@ -20,6 +20,10 @@ struct ProjectSettingsFeature {
     /// the pane falls back to the catalog's first worktree, and disables
     /// Run when neither resolves.
     var lastFocusedWorktreeID: WorktreeID?
+    /// Commands detected in the Project's manifests, offered by the Commands
+    /// pane's `+` menu. Derived on every scan, never persisted.
+    var commandSuggestions: [CommandSuggestionGroup] = []
+    var isScanningCommandSuggestions = false
 
     var id: ProjectID { projectID }
   }
@@ -38,11 +42,18 @@ struct ProjectSettingsFeature {
     /// reducer surfaces the message via `.writeFailed` so the pane's
     /// existing failure banner displays it.
     case runScriptTapped(scriptID: UUID, worktreeID: WorktreeID)
+    /// (Re)scan the Project's manifests for command suggestions. Sent when
+    /// the Commands pane appears and from the menu's Refresh item.
+    case scanCommandSuggestions
+    case commandSuggestionsScanned([CommandSuggestionGroup])
   }
+
+  nonisolated enum CancelID: Sendable { case commandSuggestionScan }
 
   @Dependency(HierarchyClient.self) var hierarchyClient
   @Dependency(FinderClient.self) var finderClient
   @Dependency(SettingsWriter.self) var settingsWriter
+  @Dependency(CommandSuggestionClient.self) var commandSuggestionClient
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
@@ -90,8 +101,31 @@ struct ProjectSettingsFeature {
             await send(.writeFailed("Run script failed: \(error.localizedDescription)"))
           }
         }
+
+      case .scanCommandSuggestions:
+        guard let location = manifestLocation(for: state) else {
+          state.commandSuggestions = []
+          state.isScanningCommandSuggestions = false
+          return .cancel(id: CancelID.commandSuggestionScan)
+        }
+        state.isScanningCommandSuggestions = true
+        let scan = commandSuggestionClient.scan
+        return .run { send in
+          await send(.commandSuggestionsScanned(await scan(location)))
+        }
+        .cancellable(id: CancelID.commandSuggestionScan, cancelInFlight: true)
+
+      case .commandSuggestionsScanned(let groups):
+        state.commandSuggestions = groups
+        state.isScanningCommandSuggestions = false
+        return .none
       }
     }
+  }
+
+  private func manifestLocation(for state: State) -> ManifestLocation? {
+    ManifestLocation.resolve(
+      projectID: state.projectID, worktreeID: state.lastFocusedWorktreeID, in: hierarchyClient.snapshot())
   }
 
   /// Human-friendly mapping for the failure banner. Mirrors

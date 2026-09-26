@@ -50,7 +50,9 @@ struct GlobalCommandsSettingsView: View {
         validateChord: { binding, excluding in
           chordValidator(binding, excludingScriptID: excluding)
         },
-        allowsKindPresets: false
+        allowsKindPresets: false,
+        suggestionGroups: GlobalCommandSuggestions.groups,
+        onAddSuggestion: addSuggestion
       )
     }
     .padding(20)
@@ -107,6 +109,13 @@ struct GlobalCommandsSettingsView: View {
 
   /// Move a command up (`offset == -1`) or down (`offset == 1`) by swapping it
   /// with its neighbour. Out-of-range moves are ignored.
+  /// Adopt a curated suggestion (Git, GitHub CLI, …) and select its row.
+  private func addSuggestion(_ suggestion: CommandSuggestion) {
+    let result = CommandSuggestionAdoption.adoptGlobal(suggestion, into: scripts)
+    store.send(.setGlobalScripts(result.scripts))
+    selectedScriptID = result.scriptID
+  }
+
   private func moveScript(id: UUID, offset: Int) {
     guard let index = scripts.firstIndex(where: { $0.id == id }) else { return }
     let target = index + offset
