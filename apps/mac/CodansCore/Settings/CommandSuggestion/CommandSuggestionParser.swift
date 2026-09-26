@@ -33,6 +33,8 @@ public nonisolated struct CommandSuggestionRegistry: Sendable {
     JustfileParser(),
     TaskfileParser(),
     MiseTaskParser(),
+    PyprojectParser(),
+    ComposeParser(),
     CargoParser(),
     GoModuleParser(),
     SwiftPackageParser(),
