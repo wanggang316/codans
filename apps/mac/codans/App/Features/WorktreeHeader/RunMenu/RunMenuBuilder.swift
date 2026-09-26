@@ -56,7 +56,8 @@ enum RunMenuBuilder {
       }
       for file in model.configFiles {
         let parent = NSMenuItem(title: file.title, action: nil, keyEquivalent: "")
-        parent.image = file.icon.flatMap { CommandIconImage.tinted($0, color: .secondaryLabelColor, pointSize: RunMenuMetrics.iconPointSize) }
+        // Template, so a highlighted file item inverts its icon with its title.
+        parent.image = file.icon.flatMap { CommandIconImage.template($0, pointSize: RunMenuMetrics.iconPointSize) }
         let submenu = NSMenu(title: file.title)
         submenu.autoenablesItems = false
         submenu.delegate = delegate
@@ -80,6 +81,7 @@ enum RunMenuBuilder {
     let row = RunMenuRowView(
       content: .init(
         icon: CommandIconImage.tinted(command.icon, color: command.tint, pointSize: RunMenuMetrics.iconPointSize),
+        highlightedIcon: highlightedIcon(command.icon),
         title: command.title,
         trailingText: command.chord
       ),
@@ -98,6 +100,7 @@ enum RunMenuBuilder {
     let row = RunMenuRowView(
       content: .init(
         icon: CommandIconImage.tinted(entry.icon, color: entry.tint, pointSize: RunMenuMetrics.iconPointSize),
+        highlightedIcon: highlightedIcon(entry.icon),
         title: entry.title,
         subtitle: entry.subtitle,
         accessory: entry.isAdded ? .added : .add
@@ -108,5 +111,9 @@ enum RunMenuBuilder {
     row.onAdd = entry.add
     item.view = row
     return item
+  }
+
+  private static func highlightedIcon(_ icon: CommandIconRef) -> NSImage? {
+    CommandIconImage.tinted(icon, color: .selectedMenuItemTextColor, pointSize: RunMenuMetrics.iconPointSize)
   }
 }
