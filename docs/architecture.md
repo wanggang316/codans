@@ -1,6 +1,5 @@
 # Architecture
 
-**Last reviewed:** 2026-09-08 against source at `2e70ce9a` (target graph, editor integration, persistence policies, and build/test entry points; source inspection, not runtime certification).
 
 ## Overview
 
@@ -30,16 +29,16 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | Subfolder | Purpose |
 |---|---|
 | `codans/App/` | `@main CodansApp.swift`, root SwiftUI scene, TCA store construction |
-| `codans/Runtime/` | libghostty integration: GhosttyKit Swift bindings, Pane lifecycle, Surface rendering adapter, `@Observable` runtime state |
+| `codans/Runtime/` | libghostty integration: GhosttyKit Swift bindings, Pane lifecycle, Surface rendering adapter, `@Observable` runtime state, and the live foreground [process registry](design-docs/worktree-processes.md) |
 | `codans/Hooks/` *(planned, not yet implemented)* | **Design intent, no code yet** — the `Hooks/` subfolder does not exist and `CodansIPC/Method.swift` has no `hook.*` methods. The intended subsystem: lifecycle event taxonomy (Pane created / ready / output match / idle / exit; Tab activated; Worktree activated), hook registration, out-of-process shell handler dispatch. See [Lifecycle hooks](design-docs/lifecycle-hooks.md). |
-| `codans/Process/` | Shared subprocess primitive — `CommandRunner` protocol + `FoundationCommandRunner` / `RecordingCommandRunner`. Extracted from `Git/` during the GitHub integration (0012 DEC-5) so `Git/` and `GitHub/` can depend on a common runner without taking a sibling-module import. Timeout + SIGTERM→SIGKILL ladder + pipe-drain backpressure live here; translation from `CommandOutcome` to a domain error type is each caller's responsibility. |
+| `codans/Process/` | Shared subprocess primitive — `CommandRunner` protocol + `FoundationCommandRunner` / `RecordingCommandRunner`. `Git/` and `GitHub/` depend on this common runner without taking a sibling-module import. Timeout + SIGTERM→SIGKILL ladder + pipe-drain backpressure live here; translation from `CommandOutcome` to a domain error type is each caller's responsibility. |
 | `codans/Git/` | Git queries and mutations: status/diff/log parsing, branch switching, and worktree creation/removal. Subprocess execution uses the shared `CommandRunner`; see [Worktree](design-docs/worktree.md). |
 | `codans/GitHub/` | gh-delegated GitHub integration data layer (0012). `GitHubService` protocol + `LiveGitHubService` wrapping `gh` via `CommandRunner`, `GhCommand` argv builder, `GhExecutableResolver` actor, `JSONOutputParsers` translating gh stdout → `CodansCore` DTOs, `GitHubError` taxonomy. Zero HTTP in-app; auth/tokens live entirely in gh's own config store. App-layer TCA bits live in `App/Clients/GitHubClient.swift` + `App/Features/GitHub/`. |
-| `codans/App/Features/GitHub/` | 0012/0013 GitHub integration TCA feature. `GitHubFeature` owns the fetch lifecycle as a **repository-batched** model: one `gh api graphql` per Project (per-branch GraphQL aliases, chunked ≤25 branches × 3 concurrent) returns every Worktree's PR data in a single round-trip, keyed by `ProjectID` with **no TTL** — invalidation is event-driven (Worktree added/removed, branch change, post-write mutation, Project activated, manual refresh). The 30 s freshness window applies only to the `gh` *availability* probe (`availabilityFreshness`), not to PR data. `GitHubRootBindings` stacks under the Scope to fan delegate actions out to `NSWorkspace.open` / `SettingsWindowPresenter`. Data layer in `codans/GitHub/` (`BatchedPullRequestQuery`, `LiveGitHubService`). Views: `PullRequestBadge` (sidebar-row capsule), `PullRequestPopover` with split-button merge + checks list, `CheckRow`, `MergeSplitButton`, colour tokens in `Theme/`. See [GitHub integration](design-docs/github-integration.md). |
+| `codans/App/Features/GitHub/` | 0012/0013 GitHub integration TCA feature. `GitHubFeature` owns the fetch lifecycle as a **repository-batched** model: per-branch GraphQL aliases are grouped by repository and chunked at ≤25 branches with up to three concurrent requests. Workspace members use a stable fetch-group ID per source repository; ordinary Projects use their Project ID. PR data has **no TTL** — invalidation is event-driven (Worktree added/removed, branch change, post-write mutation, Project activated, manual refresh). The 30 s freshness window applies only to the `gh` *availability* probe (`availabilityFreshness`), not to PR data. `GitHubRootBindings` stacks under the Scope to fan delegate actions out to `NSWorkspace.open` / `SettingsWindowPresenter`. Data layer in `codans/GitHub/` (`BatchedPullRequestQuery`, `LiveGitHubService`). Views: `PullRequestBadge` (sidebar-row capsule), `PullRequestPopover` with split-button merge + checks list, `CheckRow`, `MergeSplitButton`, colour tokens in `Theme/`. See [GitHub integration](design-docs/github-integration.md). |
 | `codans/App/Clients/Editor/` | `EditorService`, built-in `EditorRegistry`, and `AppLauncher`. `LiveEditorService` discovers installed apps by bundle identifier through Launch Services and opens them through `NSWorkspace`; remote editor support has an explicit `RemoteEditorOpen` path. `$EDITOR` is a special terminal-pane launch. See [Editor integration](design-docs/editor-integration.md) for resolution and launch contracts. |
-| `codans/App/Clients/Editor/` (external git viewing) | The external Git Viewer command is separate from the built-in diff window. "Toggle Git Viewer" (⌘ chord / menu / palette → `RootFeature.diffInspectorToggledForCurrentWorktree`) resolves `general.defaultGitViewerID` (an `EditorID?` into the registry's git-client category) and opens the current Worktree in an external client (Fork / Sourcetree / GitHub Desktop / …) through the same `EditorService` open path as the default editor; `nil` or an uninstalled target is a no-op. See [Editor integration § Git Viewer](design-docs/editor-integration.md). |
-| `codans/App/Features/Diff/` | `DiffFeature` owns worktree-scoped Changes / Outgoing selection, comparison loading, stale-result rejection, and a two-second refresh timer while visible. `DiffPanelView` hosts the independent `DiffViewKit` WKWebView renderer in a normal per-worktree NSWindow owned by DiffWindowManager. Git reads use `GitServiceClient`; current-file editor handoff uses `DiffEditorClient`. Scope/base/file preferences are session-local. No editing or Git write actions. See [Git diff viewer](design-docs/git-diff-viewer.md). |
-| `codans/App/Features/WorktreeHeader/` | T2 Header row above the terminal Tab bar. `WorktreeHeaderFeature` owns the split-button state. Views: `WorktreeHeaderView` (row container, left = read-only branch label gated by `supportsWorktrees`) + `WorktreeHeaderInfoLabel` + `AppIconImage` + `HeaderOpenSplitButton` (primary open + editor picker + "Set default for this Project" sub-menu + "+ Custom editors…" deeplink) + `HeaderRunScriptSplitButton`. The external Git Viewer uses the ⌘⌥G chord / menu and `general.defaultGitViewerID`; the Worktree detail toolbar separately opens the built-in Changes / Outgoing window. Editor opens flow as `.delegate(.openEditor…)` actions consumed by `RootFeature`. |
+| `codans/App/Clients/Editor/` (external git viewing) | The external Git Viewer command is separate from the built-in diff window. "Toggle Git Viewer" (⌘ chord / menu / palette → `RootFeature.diffInspectorToggledForCurrentWorktree`) resolves `general.defaultGitViewerID` (an `EditorID?` into the registry's git-client category) and opens the current Worktree in an external client (Fork / Sourcetree / GitHub Desktop / …) through the same `EditorService` open path as the default editor; `nil` or the Built-in ID opens the built-in diff window; an external ID absent from the editor descriptors is a no-op. SSH targets follow remote editor resolution. See [Editor integration § Git Viewer](design-docs/editor-integration.md). |
+| `codans/App/Features/Diff/` | `DiffFeature` owns worktree-scoped Uncommitted / Outgoing selection, comparison loading, stale-result rejection, and a two-second refresh timer while visible. `DiffPanelView` hosts the independent `DiffViewKit` WKWebView renderer in a normal per-worktree NSWindow owned by DiffWindowManager. Git reads use `GitServiceClient`; current-file editor handoff uses `DiffEditorClient`. Scope/base/file preferences are session-local. No editing or Git write actions. See [Git diff viewer](design-docs/git-diff-viewer.md). |
+| `codans/App/Features/WorktreeHeader/` | Branch identity and editor, Run, and Agent controls. Editor intents delegate to `RootFeature`. The surrounding Worktree detail toolbar also presents status, live processes and notifications. Git Viewer uses the configurable ⌘G command; Worktree → Show Changes opens the independent read-only comparison window. See [Main window](design-docs/main-window.md). |
 | `codans/App/Features/Socket/` | Socket server + `MethodRouter` + per-namespace handlers (`SystemHandlers`, `HierarchyHandlers`, `TerminalHandlers`, `EditorHandlers`). `EditorHandlers` serves `editor.describe` / `editor.open` / `editor.setGlobalDefault` / `editor.setProjectDefault`, bridging `EditorClient` + `HierarchyClient` to the `CodansIPC/Editor/` wire types. |
 
 Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by **folder convention + code review**, not by Tuist target edges. This matches supacode/supaterm's idiom. Promote a subfolder to its own target only when it gains a test bundle, becomes consumed by another app (e.g. iOS), or needs to restrict its public API surface.
@@ -65,9 +64,18 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 | `apps/mac/ThirdParty/ghostty/` | Git submodule pointing at `ghostty-org/ghostty`. Built into `apps/mac/.build/ghostty/GhosttyKit.xcframework`. |
 | `apps/mac/.swift-format.json`, `.swiftlint.yml` | Lint + format configs, scoped to mac sources |
 
+### Workspace orchestration
+
+A Workspace is a local Project with a synthetic root Worktree and member
+checkouts from multiple repositories. Membership comes from
+`.codans/workspace.json`; Git supplies branch and repository identity.
+`WorkspaceClient` owns creation, addition, removal and rollback for both GUI
+and CLI. Reconcile handles Workspace before Git-root discovery, and destructive
+operations resolve each member's source repository. See [Workspace](design-docs/workspace.md).
+
 ### Agent Skill
 
-`skills/codans-cli/SKILL.md` is the published text-only skill source. It is not a Swift target. The `codans skill install` command remains unimplemented; see [CLI design](design-docs/cli.md).
+`skills/codans-cli/SKILL.md` is the published text-only skill source. It is not a Swift target. `codans skill list/install/uninstall/path` manages links to app-bundled skill directories without a running app; see [CLI design](design-docs/cli.md).
 
 ## Dependency Direction
 
@@ -76,7 +84,7 @@ CodansCore                  (no internal dependencies)
 CodansIPC                   -> CodansCore
 CodansKit                   -> CodansCore, CodansIPC, ArgumentParser
 codans-cli                  -> CodansKit, CodansCore, CodansIPC, ArgumentParser
-Codans (app)                -> CodansCore, CodansIPC, CodansKit, GhosttyKit,
+Codans (app)                -> CodansCore, CodansIPC, CodansKit, GhosttyKit, DiffViewKit,
                                codans-cli (embedded tool), external dependencies
   in-app modules            codans/{App,Runtime,Process,Git,GitHub}
                                (folder boundaries, not separate targets)
@@ -139,9 +147,9 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
   - Request: `{"id": "uuid", "method": "terminal.sendInput", "params": {...}}`
   - Success: `{"id": "uuid", "result": {...}}`
   - Error: `{"id": "uuid", "error": {"code": Int, "message": "…"}}`
-- **Methods:** namespaced — `system.*`, `editor.*`, `project.*`, `agent.*`, `handoff.*`, `hierarchy.*`, `pane.*`, `terminal.*` (enumerated in `CodansIPC/Method.swift`). `git.*` and `skill.*` are reserved namespaces with no live methods yet.
+- **Methods:** namespaced — `system.*`, `editor.*`, `project.*`, `workspace.*`, `agent.*`, `handoff.*`, `hierarchy.*`, `pane.*`, `terminal.*` (enumerated in `CodansIPC/Method.swift`). Skill installation is local CLI filesystem work and has no `skill.*` RPC; lifecycle hooks have no live RPC methods.
 - **Discovery in `apps/mac/codans-cli/`:** `--socket` flag → env var `CODANS_SOCKET_PATH` → build-channel default (`BuildChannel.current.socketPath`). An inherited *other-channel* default is never followed: the app discards it before binding, the release CLI refuses to act on a development pane (exit 15), and the development CLI dials its own socket — see [Environment](design-docs/environment.md)
-- **Context pane id:** the app sets `CODANS_PANE_ID` in each Pane's environment so `codans` commands run inside a Pane can default to that Pane's UUID without an explicit flag; tab / worktree / project ids are *not* injected (they go stale when a pane moves) and resolve server-side from process ancestry. The full injected set is built by `PaneEnvironment` and catalogued in `CodansEnvironment.Key`
+- **Context pane id:** the app sets `CODANS_PANE_ID` in each local Pane's environment so `codans` commands run inside a Pane can default to that Pane's UUID without an explicit flag; tab / worktree / project ids are *not* injected (they go stale when a pane moves) and resolve server-side from process ancestry. The full injected set is built by `PaneEnvironment` and catalogued in `CodansEnvironment.Key`
 
 ### URL scheme
 
@@ -155,8 +163,8 @@ Files under `~/.config/codans/` — `~/.config/codans-dev/` for Debug builds, se
 
 | File | Version | Contents |
 |---|---|---|
-| `catalog.json` (`CodansCore/Catalog.swift`) | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. v3 is the rm-space shape (no `spaces` / `CatalogWindow`). Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
-| `settings.json` (`CodansCore/Settings/`) | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). v3 renamed `repositories` → `projects` and widened the value type to `ProjectSettings` with an optional `git: GitProjectSettings?` subtree for `git_repo`-kind overrides. |
+| `catalog.json` (`CodansCore/Catalog.swift`) | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
+| `settings.json` (`CodansCore/Settings/`) | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). `ProjectSettings` carries shared fields and an optional `git: GitProjectSettings?` subtree for Git settings; applicability is determined by Project kind. |
 | `sessions.json` (`CodansCore/Session.swift`) | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
 | `notifications.json`, `shortcuts.json` | v1 | Inbox entries and keybinding overrides (`AppDirectories.configDirectory`). Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
 
@@ -304,17 +312,17 @@ Hard-won constraints that are invisible in the code but break the build or crash
 - mise — <https://mise.jdx.dev>
 - Tuist — <https://tuist.dev>
 
-## Open Architectural Questions
+## Architectural Decisions
 
-1. **Internal Tuist target granularity in `apps/mac`.** *Resolved as shipped:* the app is a single Tuist target with folder-level module organization (`App` / `Runtime` / `Process` / `Git` / `GitHub`); in-app boundaries are folder convention + code review, not target edges. Promote a subfolder to its own framework target only when it gains a test bundle, is consumed by another app, or needs to restrict its public API.
+1. **Internal Tuist target granularity in `apps/mac`.** the app is a single Tuist target with folder-level module organization (`App` / `Runtime` / `Process` / `Git` / `GitHub`); in-app boundaries are folder convention + code review, not target edges. Promote a subfolder to its own framework target only when it gains a test bundle, is consumed by another app, or needs to restrict its public API.
 
-2. **Multi-window semantics.** *Resolved by docs/design-docs/project-tags.md (M3):* the app is single main window. The prior `WindowGroup` allowed multiple instances but was never wired into application state. M3 collapses the scene to `Window(id: "main")`, suppresses the default ⌘N "New Window" command, and gates ⌘Q with a confirmation alert when running terminal sessions exist. Settings is a separate `Window(id: "settings")`, unchanged. If multi-window demand emerges later it would re-introduce a `windows: [CatalogWindow]` array on `Catalog`.
+2. **Single main window.** A single `Window(id:)` owns the main workspace; Settings has its own window. Close Tab and application quit have different effects. Confirmation and daemon disposition follow `quitConfirmation` and `quitAction`; see [Project Tags and Single Main Window](design-docs/project-tags.md).
 
-3. **CLI binary distribution.** *Resolved (C4 §D2):* from Settings → Developer, one macOS administrator-authorization dialog symlinks the bundle-embedded signed binary (`Contents/Resources/bin/codans`) into `/usr/local/bin/codans` (Debug: `/usr/local/bin/codans-dev`). Callers must have the installation directory on their `PATH` or invoke the binary by absolute path; an unprivileged probe classifies the destination as absent / our-symlink / foreign and aborts on a foreign file before opening the dialog. See [CLI design doc §D2 and §CLI 安装](design-docs/cli.md#cli-安装).
+3. **CLI binary distribution.** from Settings → Developer, one macOS administrator-authorization dialog symlinks the bundle-embedded signed binary (`Contents/Resources/bin/codans`) into `/usr/local/bin/codans` (Debug: `/usr/local/bin/codans-dev`). Callers must have the installation directory on their `PATH` or invoke the binary by absolute path; an unprivileged probe classifies the destination as absent / our-symlink / foreign and aborts on a foreign file before opening the dialog. See [CLI design doc §D2 and §CLI 安装](design-docs/cli.md#cli-安装).
 
-4. **Hook handler execution policy.** Serial per event vs. concurrent with a cap. **Pending** the unbuilt Hooks subsystem (see [Lifecycle hooks](design-docs/lifecycle-hooks.md)). *Leaning:* concurrent with a global cap (default 8); single-handler-at-a-time flag per hook subscription as opt-in.
+4. **Hook handler execution policy.** Serial per event vs. concurrent with a cap. **Unimplemented** in the Hooks subsystem (see [Lifecycle hooks](design-docs/lifecycle-hooks.md)). *Leaning:* concurrent with a global cap (default 8); single-handler-at-a-time flag per hook subscription as opt-in.
 
-5. **IPC backpressure.** *Resolved (C4 §D9):* per-connection bounded queue, **64 in-flight**, 2-second overflow wait before the server returns `IPCError.overloaded` (CLI exit 5). Global queue rejected — slow clients would starve healthy ones. See [CLI design doc §D9](design-docs/cli.md#decisions).
+5. **IPC request handling.** `SocketConnection` awaits each request serially. Its in-flight limit guard does not implement a queued 64-request workload or a two-second overflow wait. See [CLI request processing](design-docs/cli.md#decisions) for the current connection contract.
 
 6. **Runtime failure recovery.** See the reported-pane-failure policy under "Architectural Invariants"; this is not isolation from native process crashes.
 

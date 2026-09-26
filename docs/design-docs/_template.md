@@ -1,10 +1,7 @@
 # Design Doc: [Title]
 
 **Availability:** Available | Hidden | Planned (specify scope for mixed features)
-**Document Status:** Draft | Approved
 **Author:** [name]
-**Date:** [date]
-**Last Reviewed:** [date; source wiring, runtime, or both]
 **Implementation:** [relative links to entry points, or none for a planned feature]
 
 ## Context and Scope

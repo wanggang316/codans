@@ -33,11 +33,10 @@ used to". A reader wants today's truth, not the changelog. If a transition's
 record it in a dedicated `## 技术决策 / Decisions` section as a decision entry —
 never woven into the descriptive prose.
 
-### Feature availability and document review
+### Feature availability and implementation references
 
 A symbol existing in code does **not** mean the feature is live: it may be
-hidden, unwired, or a stub. Feature documents must distinguish availability
-from document approval. Use the document's language:
+hidden, unwired, or a stub. Feature documents describe availability by user entry point. Use the document's language:
 
 | Availability / 状态 | Meaning |
 |---|---|
@@ -47,13 +46,16 @@ from document approval. Use the document's language:
 
 For a mixed subsystem, state which operations are available, hidden, or planned.
 An existing `Status: Implemented` field must describe that scope explicitly.
-`Document Status: Draft / Approved` is optional and never proves availability.
 
-When changing a feature's status, add a `Last Reviewed` date (or `最近核验`)
-and link to its implementation entry points. State whether the review checked
-source wiring, runtime behavior, or both; a source review is not a runtime test.
-Keep index summaries focused on responsibilities and link to the owning document
-for detailed capability limits.
+Link feature contracts to their implementation entry points. Keep index summaries
+focused on responsibilities and link to the owning document for capability
+limits. Describe implemented behavior in the present tense and separate
+unimplemented capabilities explicitly.
+
+Review dates, inspection notes, implementation milestones, and change narratives
+belong in review reports or change history, not feature explanations. Runtime
+sequences and schema-conversion rules belong in the knowledge base when they
+explain actual system behavior.
 
 Removed behavior must not remain in current feature descriptions or acceptance
 cases. Git history retains superseded designs. Dated test results and incident

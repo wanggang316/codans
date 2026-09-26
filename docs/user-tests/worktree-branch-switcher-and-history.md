@@ -12,7 +12,7 @@ description: Current user-test specification for worktree header identity and br
 
 ## Scope
 
-This specification covers the current header and branch popover. The popover renders branches and a filter field; it no longer renders recent commits or an entry to an embedded history viewer. Diff and history inspection is delegated to external Git clients. The filename and surviving case IDs remain stable for existing links.
+This specification covers the current header and branch popover. The popover renders branches and a filter field; it does not render recent commits or a history-browser entry. The independent read-only comparison window has its own [Git diff viewer tests](git-diff-viewer.md); history exploration uses external Git clients.
 
 The [status companion](./worktree-branch-switcher-and-history-status.md) records evidence separately from the steps here. Source review is not a successful runtime test.
 
@@ -286,7 +286,7 @@ Use bounded polling and report a timeout with evidence; do not rely on fixed sle
 The following IDs are retired and must not be reported as current failures or passing tests:
 
 - `UT-BSH-BP-003`: the popover no longer displays recent commits.
-- `UT-BSH-BP-009`, `UT-BSH-DV-001` through `UT-BSH-DV-005`, and `UT-BSH-VS-003`: the embedded Diff Viewer and its History tab were removed.
+- `UT-BSH-BP-009`, `UT-BSH-DV-001` through `UT-BSH-DV-005`, and `UT-BSH-VS-003`: these cases assume a History tab and branch-popover history entry that are not part of the current UI. The independent Uncommitted / Outgoing viewer is covered by [Git diff viewer tests](git-diff-viewer.md).
 - `UT-BSH-VS-001`: material introspection and pixel-comparison assertions are outside the current [user-test conventions](../user-test-patterns.md#范围之外deferred).
 
 External Git-client launching has its own product behavior and should receive a separate user-test set. Retired IDs are not reused.
@@ -295,4 +295,4 @@ External Git-client launching has its own product behavior and should receive a 
 
 The 11 active cases cover header identity, hover and accessibility, populated branch inventory, current-branch ordering, absent remote refs, local switching, remote tracking, existing-local fast paths, and conflicting dirty changes.
 
-Search, blocked branches, rename, create-from-branch, empty inventory, and the context-row suppression variant remain candidates for a follow-up user-test expansion. Their presence in the seam inventory does not imply tested coverage. No fixtures or personas were added by this revision.
+Search, blocked branches, rename, create-from-branch, empty inventory, and the context-row suppression variant remain candidates for a follow-up user-test expansion. Their presence in the seam inventory does not imply tested coverage.
