@@ -16,7 +16,7 @@ struct PaneDetailContainer: View {
       title: location?.paneTitle ?? agent?.title ?? "Pane",
       subtitle: location?.breadcrumb,
       permission: store.connection.permission,
-      isConnected: store.connection.status == .connected,
+      isConnected: store.connection.isLive,
       changeSignal: agent.map { "\($0.state)|\($0.since)|\($0.title ?? "")" } ?? location?.paneTitle ?? ""
     )
     // A new pane gets a fresh feature store instead of inheriting the
@@ -51,6 +51,12 @@ struct PaneDetailView: View {
     _store = State(
       initialValue: Store(initialState: PaneDetailFeature.State(paneID: paneID, permission: permission)) {
         PaneDetailFeature()
+      } withDependencies: {
+        #if DEBUG
+          // Like terminal stores, this one starts from the live
+          // dependencies; the demo Mac has to reach it too.
+          if DemoMode.isEnabled { DemoMode.apply(to: &$0) }
+        #endif
       })
   }
 
@@ -81,6 +87,10 @@ struct PaneDetailView: View {
       }
   }
 
+  private var isShowingStaleText: Bool {
+    store.hasLoaded && (store.isStale || !isConnected)
+  }
+
   @ViewBuilder
   private var output: some View {
     if !store.hasLoaded {
@@ -109,13 +119,29 @@ struct PaneDetailView: View {
       // Terminals grow at the bottom; start there and stay there. Also
       // aligns a short pane to the bottom, just above the input bar.
       .defaultScrollAnchor(.bottom)
+      // Old text stays readable but is marked as old: the last read
+      // failed, or the connection is down so nothing is refreshing it.
+      .opacity(isShowingStaleText ? 0.55 : 1)
       .overlay(alignment: .top) {
-        if let message = store.errorMessage {
-          Text(message)
+        if isShowingStaleText || store.errorMessage != nil {
+          TimelineView(.everyMinute) { context in
+            VStack(spacing: 2) {
+              if let message = store.errorMessage {
+                Text(message)
+              }
+              if isShowingStaleText, let loadedAt = store.loadedAt {
+                Text(ConnectionBanner.updated(loadedAt, now: context.date))
+                  .foregroundStyle(.secondary)
+              }
+            }
             .font(.footnote)
-            .padding(8)
-            .background(.regularMaterial, in: .capsule)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: .rect(cornerRadius: 14))
             .padding(.top, 8)
+            .accessibilityIdentifier("pane-stale")
+          }
         }
       }
     }

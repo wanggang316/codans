@@ -16,7 +16,9 @@ nonisolated struct RemoteSessionInfo: Equatable, Sendable {
   var protocolMinor: Int = 1
 
   /// Whether the Mac serves the live terminal and typed key events.
-  var supportsLiveTerminal: Bool { protocolMinor >= 2 }
+  var supportsLiveTerminal: Bool { Self.supportsLiveTerminal(protocolMinor: protocolMinor) }
+
+  static func supportsLiveTerminal(protocolMinor: Int) -> Bool { protocolMinor >= 2 }
 }
 
 /// An open session: handshake facts plus the `events.subscribe` stream,
@@ -31,9 +33,15 @@ nonisolated struct RemoteSession: Sendable {
 /// without a gateway. The live value keeps one session (a control and an
 /// events connection) per process, shared by every scene.
 nonisolated struct RemoteClient: Sendable {
-  /// Discovers the gateway, opens both connections and subscribes to
-  /// events. Replaces any previous session.
-  var connect: @Sendable (_ gateway: PairedGateway, _ credential: RemoteTLS.PSKCredential) async throws -> RemoteSession
+  /// Browses for the gateway: the endpoints it may be at, best first.
+  /// Throws `macNotFound` when none advertises, `localNetworkDenied` when
+  /// iOS forbids browsing.
+  var discover: @Sendable (_ gateway: PairedGateway) async throws -> [NWEndpoint]
+  /// Handshakes with the first endpoint that answers, opens both
+  /// connections and subscribes to events. Replaces any previous session.
+  var connect:
+    @Sendable (_ gateway: PairedGateway, _ endpoints: [NWEndpoint], _ credential: RemoteTLS.PSKCredential)
+      async throws -> RemoteSession
   /// Closes both connections. Idempotent.
   var disconnect: @Sendable () async -> Void
   /// `pane.read` with `tail` lines of plain text.
@@ -88,12 +96,13 @@ nonisolated extension RemoteClient: DependencyKey {
   static let liveValue: RemoteClient = {
     let sessions = LiveRemoteSessions()
     return RemoteClient(
-      connect: { try await sessions.connect($0, credential: $1) },
+      discover: { try await GatewayDiscovery.resolve($0) },
+      connect: { try await sessions.connect($0, endpoints: $1, credential: $2) },
       disconnect: { await sessions.disconnect() },
-      readPane: { try await sessions.readPane($0, tail: $1) },
+      readPane: { paneID, tail in try await retryingOnce { try await sessions.readPane(paneID, tail: tail) } },
       sendInput: { try await sessions.sendInput($0, text: $1) },
       sendKey: { try await sessions.sendKey($0, key: $1) },
-      listProfiles: { try await sessions.listProfiles() },
+      listProfiles: { try await retryingOnce { try await sessions.listProfiles() } },
       createWorktree: { try await sessions.createWorktree(projectID: $0, branch: $1) },
       launchAgent: { try await sessions.launchAgent(projectID: $0, worktreeID: $1, profile: $2, prompt: $3) },
       attachStream: { try await sessions.attachStream($0) },
@@ -108,6 +117,7 @@ nonisolated extension RemoteClient: DependencyKey {
   }()
 
   static let testValue = RemoteClient(
+    discover: unimplemented("RemoteClient.discover"),
     connect: unimplemented("RemoteClient.connect"),
     disconnect: unimplemented("RemoteClient.disconnect"),
     readPane: unimplemented("RemoteClient.readPane"),
@@ -125,6 +135,21 @@ nonisolated extension RemoteClient: DependencyKey {
     closePane: unimplemented("RemoteClient.closePane"),
     activateTab: unimplemented("RemoteClient.activateTab")
   )
+}
+
+nonisolated extension RemoteClient {
+  /// Runs an idempotent read, and once more if it timed out. A timed-out
+  /// call whose connection still answers a ping keeps the session (see
+  /// `withControl`), so the second try usually lands; a dead connection
+  /// fails it fast. Writes are never retried: a repeated `sendInput` would
+  /// type twice.
+  static func retryingOnce<T: Sendable>(_ read: @Sendable () async throws -> T) async throws -> T {
+    do {
+      return try await read()
+    } catch RemoteRPCClient.ClientError.timeout {
+      return try await read()
+    }
+  }
 }
 
 nonisolated extension DependencyValues {
@@ -151,16 +176,18 @@ private actor LiveRemoteSessions {
   /// opening after its session was replaced is closed, not kept.
   private var sessionGeneration = 0
 
-  func connect(_ gateway: PairedGateway, credential: RemoteTLS.PSKCredential) async throws -> RemoteSession {
+  func connect(
+    _ gateway: PairedGateway, endpoints candidates: [NWEndpoint], credential: RemoteTLS.PSKCredential
+  ) async throws -> RemoteSession {
     await disconnect()
-    let candidates = try await GatewayDiscovery.resolve(gateway)
     let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
     // A stale advertisement never answers, so with several candidates each
     // gets a shorter handshake budget before moving on to the next.
     let budget: Duration = candidates.count > 1 ? .seconds(5) : RemoteHandshake.defaultTimeout
     var control: RemoteRPCClient?
     var endpoint: NWEndpoint?
-    var lastError: Error = RemoteFailure(.notFound, "Couldn't reach \(gateway.displayName).")
+    var lastError: Error = RemoteFailure.macNotFound(gateway.displayName)
+    var refusal: Error?
     for candidate in candidates {
       do {
         control = try await RemoteRPCClient.connect(
@@ -168,10 +195,14 @@ private actor LiveRemoteSessions {
         endpoint = candidate
         break
       } catch {
+        try Task.checkCancellation()
         lastError = error
+        // A refusal is an answer from a live gateway; a stale candidate
+        // tried after it only times out, which must not hide it.
+        if case RemoteHandshake.HandshakeError.refused = error { refusal = error }
       }
     }
-    guard let control, let endpoint else { throw lastError }
+    guard let control, let endpoint else { throw refusal ?? lastError }
     let events: RemoteRPCClient
     do {
       events = try await RemoteRPCClient.connect(to: endpoint, credential: credential, hello: hello)
@@ -440,12 +471,31 @@ private actor LiveRemoteSessions {
       case .connectionClosed, .writeFailed:
         // A newer session may have replaced this one while the call ran.
         if self.control === control { await disconnect() }
+      case .timeout:
+        // A slow call and a dead connection look the same from here; one
+        // cheap ping tells them apart. Only a dead one takes the session
+        // down, so a slow `pane.read` does not cost a reconnect.
+        if self.control === control, await !Self.answersPing(control), self.control === control {
+          await disconnect()
+        }
       default:
         break
       }
       throw error
     }
   }
+
+  private static func answersPing(_ control: RemoteRPCClient) async -> Bool {
+    do {
+      _ = try await control.callRaw(.systemPing, params: [String: String](), timeout: pingTimeout)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /// How long the liveness probe after a timed-out call may take.
+  private static let pingTimeout: Duration = .seconds(3)
 
   private static func paneID(_ string: String) throws -> PaneID {
     PaneID(raw: try uuid(string))

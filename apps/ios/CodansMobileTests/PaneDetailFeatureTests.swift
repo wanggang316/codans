@@ -1,10 +1,13 @@
 import CodansIPC
 import ComposableArchitecture
+import Foundation
 import Testing
 
 @testable import CodansMobile
 
-/// Pane detail: snapshot reads while visible, input only for interactive
+/// Pane detail, the text fallback for a Mac without live terminals:
+/// snapshot reads while visible (one at a time, never cancelled by a newer
+/// request), stale text kept on a failed read, input only for interactive
 /// devices, and a permission downgrade when the Mac refuses input.
 @MainActor
 struct PaneDetailFeatureTests {
@@ -32,6 +35,7 @@ struct PaneDetailFeatureTests {
       PaneDetailFeature()
     } withDependencies: {
       $0.continuousClock = clock
+      $0.date.now = Fixtures.pairedAt
       $0.remoteClient.readPane = { paneID, tail in
         #expect(paneID == "A")
         #expect(tail == PaneDetailFeature.tailLines)
@@ -49,6 +53,7 @@ struct PaneDetailFeatureTests {
       $0.isLoading = false
       $0.hasLoaded = true
       $0.content = "output 1"
+      $0.loadedAt = Fixtures.pairedAt
     }
 
     await clock.advance(by: PaneDetailFeature.pollInterval)
@@ -70,6 +75,7 @@ struct PaneDetailFeatureTests {
       PaneDetailFeature()
     } withDependencies: {
       $0.continuousClock = clock
+      $0.date.now = Fixtures.pairedAt
       $0.remoteClient.sendInput = { _, text in sent.withValue { $0.append("text:\(text)") } }
       $0.remoteClient.sendKey = { _, key in sent.withValue { $0.append("key:\(key.rawValue)") } }
       $0.remoteClient.readPane = { _, _ in "$ echo hi\nhi" }
@@ -88,6 +94,7 @@ struct PaneDetailFeatureTests {
       $0.isLoading = false
       $0.hasLoaded = true
       $0.content = "$ echo hi\nhi"
+      $0.loadedAt = Fixtures.pairedAt
     }
   }
 
@@ -107,5 +114,77 @@ struct PaneDetailFeatureTests {
       $0.permission = .readOnly
     }
     #expect(!store.state.showsInput)
+  }
+
+  /// Change signals arrive faster than reads finish; each used to cancel
+  /// the read in flight, so none ever completed.
+  @Test
+  func refreshDuringAReadWaitsForItInsteadOfCancellingIt() async {
+    let gate = AsyncStream<Void>.makeStream()
+    let reads = LockIsolated(0)
+    let store = TestStore(initialState: PaneDetailFeature.State(paneID: "A", permission: .readOnly)) {
+      PaneDetailFeature()
+    } withDependencies: {
+      $0.date.now = Fixtures.pairedAt
+      $0.remoteClient.readPane = { _, _ in
+        let count = reads.withValue { value -> Int in
+          value += 1
+          return value
+        }
+        if count == 1 {
+          for await _ in gate.stream { break }
+        }
+        return "read \(count)"
+      }
+    }
+
+    await store.send(.refresh) { $0.isLoading = true }
+    await store.send(.paneChanged) { $0.needsRefresh = true }
+    await store.send(.paneChanged)
+    gate.continuation.yield()
+    await store.receive(\.contentLoaded) {
+      $0.hasLoaded = true
+      $0.content = "read 1"
+      $0.loadedAt = Fixtures.pairedAt
+      $0.needsRefresh = false
+    }
+    await store.receive(\.contentLoaded) {
+      $0.isLoading = false
+      $0.content = "read 2"
+    }
+    #expect(reads.value == 2)
+  }
+
+  @Test
+  func failedReadKeepsTheLastTextMarkedStale() async {
+    let fail = LockIsolated(false)
+    let store = TestStore(initialState: PaneDetailFeature.State(paneID: "A", permission: .readOnly)) {
+      PaneDetailFeature()
+    } withDependencies: {
+      $0.date.now = Fixtures.pairedAt
+      $0.remoteClient.readPane = { _, _ in
+        if fail.value { throw RemoteFailure(.timeout, "Your Mac did not answer in time.") }
+        return "hello"
+      }
+    }
+
+    await store.send(.refresh) { $0.isLoading = true }
+    await store.receive(\.contentLoaded) {
+      $0.isLoading = false
+      $0.hasLoaded = true
+      $0.content = "hello"
+      $0.loadedAt = Fixtures.pairedAt
+    }
+    #expect(!store.state.isStale)
+
+    fail.setValue(true)
+    await store.send(.refresh) { $0.isLoading = true }
+    await store.receive(\.loadFailed) {
+      $0.isLoading = false
+      $0.readFailed = true
+      $0.errorMessage = "Your Mac did not answer in time."
+    }
+    #expect(store.state.isStale)
+    #expect(store.state.content == "hello")
   }
 }

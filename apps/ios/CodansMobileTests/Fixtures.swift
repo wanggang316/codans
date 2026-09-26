@@ -31,7 +31,10 @@ enum Fixtures {
       isInstalled: installed, supportsPrompt: prompt, command: "claude")
   }
 
+  /// A protocol-minor-1 Mac: no live terminal.
   static let info = RemoteSessionInfo(serverVersion: "0.7.4", permission: .interactive)
+  /// A Mac that streams live terminals.
+  static let liveInfo = RemoteSessionInfo(serverVersion: "0.9.0", permission: .interactive, protocolMinor: 2)
 
   static func agent(
     _ paneID: String,

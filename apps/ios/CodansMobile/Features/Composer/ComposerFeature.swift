@@ -21,8 +21,12 @@ struct ComposerFeature {
     var isSending = false
     var errorMessage: String?
     /// Where the last launch landed, for the scene that sent it to
-    /// navigate to.
+    /// navigate to. Cleared when a send starts and once handled, so a
+    /// later send that fails never navigates to an earlier result.
     var lastLaunch: Launch?
+    /// Mirrors `ConnectionFeature.State.isLive`: a send while the session
+    /// is down or still syncing would fail, or act on a stale target.
+    var isConnectionLive = false
 
     var profile: IPC.AgentProfileSummary? {
       profiles.first { $0.id == profileID } ?? profiles.first
@@ -33,7 +37,7 @@ struct ComposerFeature {
     }
 
     var canSend: Bool {
-      !isSending && target != nil && profile != nil
+      isConnectionLive && !isSending && target != nil && profile != nil
     }
 
     /// The branch a new worktree gets: the typed one, else a slug of the
@@ -77,7 +81,11 @@ struct ComposerFeature {
     case profileSelected(UUID)
     case targetSelected(Target)
     case sendTapped
+    /// The Mac created the new worktree; the launch into it may still fail.
+    case worktreeCreated(projectID: String, worktreeID: String)
     case launched(Launch)
+    /// The scene that sent navigated to `lastLaunch`.
+    case launchHandled
     case sendFailed(RemoteFailure)
     case reset
   }
@@ -122,6 +130,7 @@ struct ComposerFeature {
         return .none
 
       case .sendTapped:
+        state.lastLaunch = nil
         guard state.canSend, let target = state.target, let profile = state.profile else { return .none }
         state.isSending = true
         state.errorMessage = nil
@@ -144,6 +153,7 @@ struct ComposerFeature {
             worktreeID = id
           case .create(let projectID, let branch):
             worktreeID = try await remote.createWorktree(projectID, branch)
+            await send(.worktreeCreated(projectID: projectID, worktreeID: worktreeID))
           }
           let paneID = try await remote.launchAgent(target.projectID, worktreeID, profile.id.uuidString, prompt)
           await send(.launched(Launch(worktreeID: worktreeID, paneID: paneID)))
@@ -151,15 +161,25 @@ struct ComposerFeature {
           await send(.sendFailed(RemoteFailure(error)))
         }
 
+      case .worktreeCreated(let projectID, let worktreeID):
+        // From here on the send targets the worktree that now exists, so a
+        // retry after a failed launch does not create a second one. It is
+        // also the natural target for a follow-up.
+        if state.target == .newWorktree(projectID: projectID) {
+          state.target = .worktree(projectID: projectID, worktreeID: worktreeID)
+          state.branch = ""
+        }
+        return .none
+
       case .launched(let launch):
         state.isSending = false
         state.prompt = ""
         state.branch = ""
         state.lastLaunch = launch
-        // The new worktree is the natural target for a follow-up.
-        if case .newWorktree(let projectID) = state.target {
-          state.target = .worktree(projectID: projectID, worktreeID: launch.worktreeID)
-        }
+        return .none
+
+      case .launchHandled:
+        state.lastLaunch = nil
         return .none
 
       case .sendFailed(let failure):
@@ -168,7 +188,10 @@ struct ComposerFeature {
         return .none
 
       case .reset:
+        // The connection's liveness is not the previous Mac's to reset.
+        let isConnectionLive = state.isConnectionLive
         state = State()
+        state.isConnectionLive = isConnectionLive
         return .none
       }
     }

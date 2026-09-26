@@ -37,7 +37,7 @@ struct WorkspaceView: View {
       } else if let paneID = selectedPaneID {
         PaneDetailContainer(store: store, paneID: paneID)
           .safeAreaInset(edge: .top, spacing: 0) {
-            if store.connection.session != nil {
+            if store.connection.health.needsMacUpdate {
               LiveTerminalUnavailableNotice()
             }
           }
@@ -59,7 +59,11 @@ struct WorkspaceView: View {
   @ViewBuilder
   private var sidebar: some View {
     if store.browser.hierarchy == nil {
-      ConnectionPlaceholderView(connection: store.connection, openSettings: openSettings)
+      ConnectionPlaceholderView(
+        health: store.connection.health,
+        retry: { store.send(.connection(.connectTapped)) },
+        openSettings: openSettings
+      )
     } else if store.browser.projects.isEmpty {
       ContentUnavailableView(
         "No Projects",
@@ -67,6 +71,18 @@ struct WorkspaceView: View {
         description: Text("Projects added in Codans on your Mac appear here."))
     } else {
       List(selection: $selectedWorktreeID) {
+        // A row, not a top inset: an inset sits under the large title's
+        // scroll-edge blur and hides it.
+        if store.connection.health.isPaired, !store.connection.health.isLive {
+          Section {
+            ConnectionBanner(
+              health: store.connection.health,
+              retry: { store.send(.connection(.connectTapped)) },
+              pairAgain: openSettings
+            )
+            .listRowInsets(EdgeInsets())
+          }
+        }
         ForEach(store.browser.projects, id: \.id) { project in
           Section(project.name) {
             ForEach(project.worktrees, id: \.id) { worktree in
@@ -76,11 +92,10 @@ struct WorkspaceView: View {
           }
         }
       }
-      .safeAreaInset(edge: .top, spacing: 0) {
-        ConnectionBanner(connection: store.connection)
-      }
       .safeAreaInset(edge: .bottom, spacing: 0) {
-        if store.connection.permission == .interactive {
+        // The last session's permission: the composer stays through a
+        // reconnect (its Send waits for live) instead of flickering away.
+        if store.connection.terminalPermission == .interactive {
           ComposerView(
             store: store.scope(state: \.composer, action: \.composer),
             projects: store.browser.projects,

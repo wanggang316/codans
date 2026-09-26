@@ -36,7 +36,9 @@ struct TerminalDetailView: View {
     selectedPaneID.flatMap(store.browser.location(ofPane:))
   }
 
-  private var isConnected: Bool { store.connection.status == .connected }
+  /// Streams attach only once the session is live (the snapshot arrived),
+  /// and drop to their reconnecting state as soon as it is not.
+  private var isConnected: Bool { store.connection.isLive }
   private var permission: IPC.RemotePermission { store.connection.terminalPermission }
   private var isSplitLayout: Bool { sizeClass == .regular }
 
@@ -88,7 +90,8 @@ struct TerminalDetailView: View {
             agent: location.pane.agent,
             keyboard: keyboard,
             onShortcut: { handle($0, location: location, focused: focused) },
-            onCloseRequested: { closeConfirmation = .pane }
+            onCloseRequested: { closeConfirmation = .pane },
+            connectionStatus: store.connection.health.title
           )
           .id(location.pane.id)
         }
@@ -173,7 +176,8 @@ struct TerminalDetailView: View {
             onCloseRequested: {
               selectedPaneID = paneID
               closeConfirmation = .pane
-            }
+            },
+            connectionStatus: store.connection.health.title
           )
         } else {
           PanePlaceholder(title: pane.map(Self.title) ?? "Pane")

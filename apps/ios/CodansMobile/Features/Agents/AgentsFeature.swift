@@ -42,6 +42,8 @@ struct AgentsFeature {
 
   enum Action: Equatable {
     case eventReceived(IPC.EventFrame)
+    /// The cached states of the active Mac, shown until the first snapshot.
+    case restored([IPC.AgentStateEntry])
     case reset
   }
 
@@ -64,6 +66,11 @@ struct AgentsFeature {
         case .hierarchyChanged, .heartbeat, .unknown:
           break
         }
+        return .none
+
+      case .restored(let agents):
+        state.entries = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { _, last in last })
+        state.hasSnapshot = true
         return .none
 
       case .reset:

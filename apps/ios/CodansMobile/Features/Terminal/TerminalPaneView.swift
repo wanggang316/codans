@@ -41,6 +41,9 @@ struct TerminalPaneView: View {
   var showsInputChrome = true
   var onShortcut: (TerminalHardwareShortcut) -> Void = { _ in }
   var onCloseRequested: () -> Void = {}
+  /// What the connection to the Mac is doing, shown instead of "Connecting
+  /// to the terminal" while the session itself is not live yet.
+  var connectionStatus: String?
 
   private var hasKeyboard: Bool { keyboard != nil && store.isInteractive }
 
@@ -77,7 +80,10 @@ struct TerminalPaneView: View {
       }
       switch store.phase {
       case .connecting:
-        if store.grid == nil { TerminalConnectingView() }
+        if store.grid == nil {
+          TerminalConnectingView(
+            message: store.isConnected ? "Connecting to the terminal…" : connectionStatus ?? "Waiting for your Mac…")
+        }
       case .reconnecting:
         StatusCapsule(symbol: "arrow.triangle.2.circlepath", text: "Reconnecting…", animates: true)
           .accessibilityIdentifier("terminal-reconnecting")
@@ -333,6 +339,8 @@ struct TerminalInputBridge: UIViewRepresentable {
 // MARK: - States
 
 private struct TerminalConnectingView: View {
+  let message: String
+
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       ForEach(0..<6, id: \.self) { row in
@@ -340,7 +348,7 @@ private struct TerminalConnectingView: View {
           .fill(.white.opacity(0.08))
           .frame(width: [220, 160, 250, 120, 190, 90][row], height: 10)
       }
-      Text("Connecting to the terminal…")
+      Text(message)
         .font(.footnote)
         .foregroundStyle(.white.opacity(0.6))
         .padding(.top, 6)

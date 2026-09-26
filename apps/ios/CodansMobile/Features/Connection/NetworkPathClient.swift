@@ -2,26 +2,42 @@ import ComposableArchitecture
 import Foundation
 import Network
 
-/// Reports when the device regains a usable network path, so a connection
-/// waiting out its backoff can retry immediately instead of sleeping on.
+/// Reports changes of the device's network path, so the connection can
+/// reconnect at once instead of waiting out a backoff or a dead socket: a
+/// Wi-Fi hand-off or a switch of interface leaves the old connection
+/// half-open, and TCP alone takes minutes to notice.
 nonisolated struct NetworkPathClient: Sendable {
-  /// Yields each time the path becomes satisfied after not being so.
-  var becameAvailable: @Sendable () -> AsyncStream<Void>
+  /// What the connection cares about in an `NWPath`.
+  struct Path: Equatable, Sendable {
+    var isSatisfied: Bool
+    /// The available interfaces, as "type:name", in path order. A change
+    /// here with the path still satisfied is a hand-off.
+    var interfaces: [String]
+  }
+
+  /// Yields each path that differs from the one before it. The path
+  /// current when iteration starts is the baseline and is not yielded.
+  var changes: @Sendable () -> AsyncStream<Path>
 }
 
 nonisolated extension NetworkPathClient: DependencyKey {
   static let liveValue = NetworkPathClient(
-    becameAvailable: {
+    changes: {
       AsyncStream { continuation in
         let monitor = NWPathMonitor()
-        let wasSatisfied = LockIsolated<Bool?>(nil)
-        monitor.pathUpdateHandler = { path in
-          let satisfied = path.status == .satisfied
-          let previous = wasSatisfied.withValue { value -> Bool? in
-            defer { value = satisfied }
+        let previous = LockIsolated<Path?>(nil)
+        monitor.pathUpdateHandler = { nwPath in
+          let path = Path(
+            isSatisfied: nwPath.status == .satisfied,
+            interfaces: nwPath.availableInterfaces.map { "\($0.type):\($0.name)" }
+          )
+          // NWPathMonitor repeats unchanged paths; only a real change is
+          // worth a reconnect.
+          let last = previous.withValue { value -> Path? in
+            defer { value = path }
             return value
           }
-          if satisfied, previous == false { continuation.yield() }
+          if let last, last != path { continuation.yield(path) }
         }
         continuation.onTermination = { _ in monitor.cancel() }
         monitor.start(queue: DispatchQueue(label: "com.gumpw.codans.mobile.path"))
@@ -30,7 +46,7 @@ nonisolated extension NetworkPathClient: DependencyKey {
   )
 
   static let testValue = NetworkPathClient(
-    becameAvailable: unimplemented("NetworkPathClient.becameAvailable", placeholder: .finished)
+    changes: unimplemented("NetworkPathClient.changes", placeholder: .finished)
   )
 }
 

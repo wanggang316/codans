@@ -68,21 +68,33 @@ struct SettingsView: View {
   }
 
   private var statusSection: some View {
-    Section {
-      ConnectionStatusView(connection: store.state)
+    let health = store.health
+    return Section {
+      ConnectionStatusView(health: health)
       if let session = store.session {
         LabeledContent("Access", value: session.permission == .interactive ? "Can send input" : "View only")
         if !session.serverVersion.isEmpty {
           LabeledContent("Codans on Mac", value: session.serverVersion)
         }
       }
-      if let failure = store.lastFailure, store.status != .connected {
-        Text(failure.message)
+      if let lastContact = health.lastContact {
+        LabeledContent("Last contact") {
+          Text(lastContact, format: .relative(presentation: .named))
+        }
+      }
+      if !health.isLive, let explanation = health.explanation {
+        Text(explanation)
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
-      if store.status != .connected, store.status != .connecting {
+      switch health.recovery {
+      case .retry?:
         Button("Reconnect") { store.send(.connectTapped) }
+      case .openSettings?:
+        ConnectionRecoveryButton(recovery: .openSettings, retry: {}, pairAgain: {})
+      case .pairAgain?, nil:
+        // Pairing again happens in the section below.
+        EmptyView()
       }
     } header: {
       Text("Connection")

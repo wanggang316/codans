@@ -29,7 +29,7 @@ struct AgentsView: View {
     let agents = store.agents
     if !agents.hasSnapshot {
       ContentUnavailableView {
-        Label(ConnectionStatusView.title(for: store.connection), systemImage: "sparkles")
+        Label(store.connection.health.title, systemImage: "sparkles")
       }
     } else if agents.entries.isEmpty {
       ContentUnavailableView(

@@ -34,50 +34,61 @@ nonisolated enum GatewayDiscovery {
     let queue = DispatchQueue(label: "com.gumpw.codans.mobile.discovery")
     defer { browser.cancel() }
 
-    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[NWEndpoint], Error>) in
-      let pending = OSAllocatedUnfairLock<CheckedContinuation<[NWEndpoint], Error>?>(initialState: continuation)
-      let settling = OSAllocatedUnfairLock(initialState: false)
-      let finish: @Sendable (Result<[NWEndpoint], Error>) -> Void = { result in
-        pending.withLock { slot -> CheckedContinuation<[NWEndpoint], Error>? in
-          defer { slot = nil }
-          return slot
-        }?.resume(with: result)
-      }
+    let pending = OSAllocatedUnfairLock<CheckedContinuation<[NWEndpoint], Error>?>(initialState: nil)
+    let settling = OSAllocatedUnfairLock(initialState: false)
+    let finish: @Sendable (Result<[NWEndpoint], Error>) -> Void = { result in
+      pending.withLock { slot -> CheckedContinuation<[NWEndpoint], Error>? in
+        defer { slot = nil }
+        return slot
+      }?.resume(with: result)
+    }
+    // A cancelled connect attempt (a newer one replaced it, the app went to
+    // the background) stops browsing now instead of at the timeout.
+    return try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[NWEndpoint], Error>) in
+        pending.withLock { $0 = continuation }
+        if Task.isCancelled {
+          finish(.failure(CancellationError()))
+          return
+        }
 
-      browser.browseResultsChangedHandler = { results, _ in
-        guard !candidates(for: gateway, in: offers(results)).isEmpty else { return }
-        // Keep collecting briefly, then answer with whatever is known.
-        let isFirst = settling.withLock { started in
-          let first = !started
-          started = true
-          return first
+        browser.browseResultsChangedHandler = { results, _ in
+          guard !candidates(for: gateway, in: offers(results)).isEmpty else { return }
+          // Keep collecting briefly, then answer with whatever is known.
+          let isFirst = settling.withLock { started in
+            let first = !started
+            started = true
+            return first
+          }
+          guard isFirst else { return }
+          queue.asyncAfter(deadline: .now() + settleDelay) {
+            finish(.success(candidates(for: gateway, in: offers(browser.browseResults))))
+          }
         }
-        guard isFirst else { return }
-        queue.asyncAfter(deadline: .now() + settleDelay) {
-          finish(.success(candidates(for: gateway, in: offers(browser.browseResults))))
+        browser.stateUpdateHandler = { state in
+          switch state {
+          case .failed(let error):
+            finish(.failure(failure(for: error)))
+          case .waiting(let error) where isPolicyDenied(error):
+            finish(.failure(failure(for: error)))
+          default:
+            break
+          }
         }
-      }
-      browser.stateUpdateHandler = { state in
-        switch state {
-        case .failed(let error):
-          finish(.failure(failure(for: error)))
-        case .waiting(let error) where isPolicyDenied(error):
-          finish(.failure(failure(for: error)))
-        default:
-          break
-        }
-      }
-      browser.start(queue: queue)
+        browser.start(queue: queue)
 
-      Task {
-        try? await Task.sleep(for: timeout)
-        finish(
-          .failure(
-            RemoteFailure(
-              .notFound,
-              "Couldn't find \(gateway.displayName) on this network. Check that Remote Access is on and both devices share a network."
-            )))
+        Task {
+          try? await Task.sleep(for: timeout)
+          finish(
+            .failure(
+              RemoteFailure(
+                .macNotFound,
+                "Couldn't find \(gateway.displayName) on this network. Check that Remote Access is on and both devices share a network."
+              )))
+        }
       }
+    } onCancel: {
+      finish(.failure(CancellationError()))
     }
   }
 

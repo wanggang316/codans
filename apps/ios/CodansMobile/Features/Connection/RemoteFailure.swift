@@ -8,13 +8,23 @@ import Network
 /// it in state and tests can assert on it.
 nonisolated struct RemoteFailure: Error, Equatable, Sendable {
   enum Kind: Equatable, Sendable {
-    /// No gateway with the paired channel is advertising on this network.
-    case notFound
-    /// iOS denied local-network access; retrying cannot help until the user
-    /// allows it in Settings, but it is cheap, so the policy still retries.
+    /// No gateway with the paired channel is advertising on this network:
+    /// the Mac is asleep, Remote Access is off, or the phone is on another
+    /// network.
+    case macNotFound
+    /// iOS denied local-network access. Retrying cannot help until the
+    /// user allows it in Settings.
     case localNetworkDenied
+    /// One TLS handshake refusal from a resolved gateway. Retried, but
+    /// counted: repeated refusals become `rejected`.
+    case refused
+    /// The Mac keeps refusing this device's key: it was removed there, or
+    /// its pairing expired. Only pairing again helps.
+    case rejected
     /// The Mac and this app speak incompatible protocol or app versions.
     case incompatible
+    /// A phase, the whole attempt or a call ran past its deadline.
+    case timeout
     /// The Mac refused the call for this device's permission.
     case forbidden
     /// The Mac cannot do this right now, e.g. type into a pane that is not
@@ -36,12 +46,12 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
     self.message = message
   }
 
-  /// Whether reconnecting with backoff can plausibly succeed. A version
-  /// mismatch needs an update and a missing key needs re-pairing.
+  /// Whether reconnecting with backoff can plausibly succeed. The others
+  /// wait for the user: an update, a Settings change or pairing again.
   var isRetryable: Bool {
     switch kind {
-    case .incompatible, .missingKey: return false
-    case .notFound, .localNetworkDenied, .forbidden, .unsupported, .streamEnded, .other: return true
+    case .incompatible, .missingKey, .rejected, .localNetworkDenied: return false
+    case .macNotFound, .refused, .timeout, .forbidden, .unsupported, .streamEnded, .other: return true
     }
   }
 
@@ -51,6 +61,16 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
   static let stalled = RemoteFailure(.streamEnded, "Your Mac stopped responding.")
   static let missingKey = RemoteFailure(
     .missingKey, "This pairing's key is missing on this device. Pair with your Mac again.")
+  static let refused = RemoteFailure(.refused, "Your Mac refused this device.")
+  static let rejected = RemoteFailure(
+    .rejected, "Your Mac no longer accepts this device. It was removed or its pairing expired.")
+  static let handshakeTimeout = RemoteFailure(.timeout, "Your Mac did not answer in time.")
+  static let syncTimeout = RemoteFailure(.timeout, "Your Mac connected but sent nothing.")
+  static let deadlinePassed = RemoteFailure(.timeout, "Connecting to your Mac took too long.")
+
+  static func macNotFound(_ name: String) -> RemoteFailure {
+    RemoteFailure(.macNotFound, "Couldn't find \(name) on this network.")
+  }
 
   /// Classifies any error thrown by the remote stack.
   init(_ error: Error) {
@@ -60,7 +80,9 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
     case let client as RemoteRPCClient.ClientError:
       self = Self.classify(client)
     case RemoteHandshake.HandshakeError.timedOut:
-      self.init(.other, "Your Mac did not answer in time.")
+      self = .handshakeTimeout
+    case RemoteHandshake.HandshakeError.refused:
+      self = .refused
     case is RemoteHandshake.HandshakeError:
       self.init(.other, "Your Mac refused the connection. If it keeps failing, pair again.")
     default:
@@ -86,7 +108,7 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
     case .ipc(let ipc):
       return RemoteFailure(.other, ipc.displayMessage)
     case .timeout:
-      return RemoteFailure(.other, "Your Mac did not answer in time.")
+      return .handshakeTimeout
     case .connectionClosed:
       return .streamEnded
     case .noResult, .decodeFailed:

@@ -5,8 +5,12 @@ import Foundation
 /// One pane's recent output as a text snapshot (`pane.read`), refreshed
 /// while visible — on a fallback timer and whenever the event stream
 /// touches the pane — plus text and named-key input for interactive
-/// devices. A live terminal is future work; pane text never rides the
-/// event stream because only the pane on screen needs it.
+/// devices. This is the fallback for a Mac too old to stream terminals
+/// (protocol minor 1); newer Macs get `TerminalStreamFeature`.
+///
+/// One read is in flight at a time. A refresh asked for meanwhile is
+/// remembered and runs when it finishes, instead of cancelling it: under a
+/// steady stream of change signals a cancelled read would never complete.
 @Reducer
 struct PaneDetailFeature {
   @ObservableState
@@ -16,6 +20,12 @@ struct PaneDetailFeature {
     var content = ""
     var hasLoaded = false
     var isLoading = false
+    /// A refresh arrived while a read was in flight.
+    var needsRefresh = false
+    /// When `content` was read.
+    var loadedAt: Date?
+    /// The last read failed; `content` is from an earlier one.
+    var readFailed = false
     var draft = ""
     var isSending = false
     var errorMessage: String?
@@ -32,6 +42,9 @@ struct PaneDetailFeature {
     var canSend: Bool {
       showsInput && !isSending && !draft.isEmpty
     }
+
+    /// The text on screen is older than the last attempt to read it.
+    var isStale: Bool { hasLoaded && readFailed }
   }
 
   enum Action: BindableAction, Equatable {
@@ -51,7 +64,6 @@ struct PaneDetailFeature {
   }
 
   nonisolated enum CancelID: Hashable, Sendable {
-    case read
     case send
   }
 
@@ -66,6 +78,7 @@ struct PaneDetailFeature {
 
   @Dependency(\.remoteClient) var remoteClient
   @Dependency(\.continuousClock) var clock
+  @Dependency(\.date.now) var now
 
   var body: some Reducer<State, Action> {
     BindingReducer()
@@ -84,27 +97,27 @@ struct PaneDetailFeature {
         }
 
       case .refresh, .paneChanged:
-        state.isLoading = true
-        let read = remoteClient.readPane
-        let paneID = state.paneID
-        return .run { send in
-          await send(.contentLoaded(try await read(paneID, Self.tailLines)))
-        } catch: { error, send in
-          await send(.loadFailed(RemoteFailure(error)))
+        guard !state.isLoading else {
+          state.needsRefresh = true
+          return .none
         }
-        .cancellable(id: CancelID.read, cancelInFlight: true)
+        return read(&state)
 
       case .contentLoaded(let content):
         state.isLoading = false
         state.hasLoaded = true
         state.content = content
+        state.loadedAt = now
+        state.readFailed = false
         state.errorMessage = nil
-        return .none
+        return readAgainIfAsked(&state)
 
       case .loadFailed(let failure):
         state.isLoading = false
+        // The last text stays on screen, marked stale.
+        state.readFailed = true
         state.errorMessage = failure.message
-        return .none
+        return readAgainIfAsked(&state)
 
       case .permissionChanged(let permission):
         state.permission = permission
@@ -148,6 +161,23 @@ struct PaneDetailFeature {
         return .none
       }
     }
+  }
+
+  private func read(_ state: inout State) -> Effect<Action> {
+    state.isLoading = true
+    state.needsRefresh = false
+    let read = remoteClient.readPane
+    let paneID = state.paneID
+    return .run { send in
+      await send(.contentLoaded(try await read(paneID, Self.tailLines)))
+    } catch: { error, send in
+      await send(.loadFailed(RemoteFailure(error)))
+    }
+  }
+
+  private func readAgainIfAsked(_ state: inout State) -> Effect<Action> {
+    guard state.needsRefresh else { return .none }
+    return read(&state)
   }
 
   private func deliver(_ operation: @escaping @Sendable () async throws -> Void) -> Effect<Action> {

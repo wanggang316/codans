@@ -2,15 +2,19 @@ import CodansIPC
 import CodansRemote
 import ComposableArchitecture
 import Foundation
+import Network
 import Testing
 
 @testable import CodansMobile
 
-/// The connection state machine: pairing, connect, event delivery, backoff
-/// after failures, immediate retry on network recovery, and suspension in
-/// the background.
+/// The connection phase machine: discovering → handshaking → syncing →
+/// live, per-phase timeouts and the attempt deadline, backoff, the failure
+/// taxonomy (refusals becoming `rejected`, Local Network denial), network
+/// path changes, the background grace, and pairing.
 @MainActor
 struct ConnectionFeatureTests {
+  // MARK: - Backoff
+
   @Test
   func backoffStartsAtHalfASecondDoublesAndCapsAtThirtySeconds() {
     #expect(ConnectionFeature.backoff(afterFailures: 1) == .milliseconds(500))
@@ -21,12 +25,21 @@ struct ConnectionFeatureTests {
   }
 
   @Test
+  func jitterOnlyShortensTheDelayAndNeverPassesTheCap() {
+    #expect(ConnectionFeature.backoff(afterFailures: 2, jitter: 1) == .milliseconds(750))
+    #expect(ConnectionFeature.backoff(afterFailures: 50, jitter: 0.5) < .seconds(30))
+    #expect(ConnectionFeature.backoff(afterFailures: 50, jitter: 7) >= .milliseconds(22_500))
+  }
+
+  // MARK: - Phases
+
+  @Test
   func startWithoutPairingStaysIdle() async {
     let store = TestStore(initialState: ConnectionFeature.State()) {
       ConnectionFeature()
     } withDependencies: {
       $0.pairingStore = .inMemory()
-      $0.networkPath.becameAvailable = { .finished }
+      $0.networkPath.changes = { .finished }
     }
 
     await store.send(.task) {
@@ -34,167 +47,474 @@ struct ConnectionFeatureTests {
     }
     // A second scene appearing does not restart anything.
     await store.send(.task)
+    #expect(store.state.health.title == "Not paired")
+    #expect(store.state.health.recovery == nil)
   }
 
   @Test
-  func pairingConnectsStreamsEventsAndRetriesWhenTheStreamEnds() async {
+  func attemptRunsThroughEveryPhaseAndIsLiveOnlyAfterTheSnapshot() async {
     let clock = TestClock()
+    let now = LockIsolated(Fixtures.pairedAt)
     let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
-    let connects = LockIsolated(0)
-    let disconnects = LockIsolated(0)
-    let store = TestStore(initialState: ConnectionFeature.State()) {
-      ConnectionFeature()
-    } withDependencies: {
-      $0.pairingStore = .inMemory()
-      $0.continuousClock = clock
-      $0.date.now = Fixtures.pairedAt
-      $0.remoteClient.disconnect = { disconnects.withValue { $0 += 1 } }
-      $0.remoteClient.connect = { gateway, credential in
+    let store = Self.store(clock: clock, now: now) {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { gateway, _, credential in
         #expect(gateway == Fixtures.gateway)
         #expect(credential == Fixtures.payload.credential)
-        let attempt = connects.withValue { value -> Int in
-          value += 1
-          return value
-        }
-        guard attempt == 1 else { throw RemoteFailure(.notFound, "gone") }
-        return RemoteSession(info: Fixtures.info, events: events)
+        return RemoteSession(info: Fixtures.liveInfo, events: events)
       }
     }
 
-    await store.send(.pairingCodeSubmitted(Fixtures.pairingCode)) {
-      $0.gateways = [Fixtures.gateway]
-      $0.activeID = Fixtures.deviceID
-      $0.status = .connecting
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
     }
-    await store.receive(\.delegate.activeGatewayChanged)
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
     await store.receive(\.sessionOpened) {
-      $0.status = .connected
-      $0.session = Fixtures.info
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
       $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
     }
-    #expect(store.state.permission == .interactive)
+    #expect(store.state.health.title == "Syncing with Studio…")
 
-    let frame = Fixtures.snapshot(agents: [])
-    feed.yield(frame)
+    // A heartbeat proves the Mac is there, but is not data: still syncing.
+    now.setValue(Fixtures.pairedAt.addingTimeInterval(1))
+    feed.yield(IPC.EventFrame(seq: 0, payload: .heartbeat))
+    await store.receive(\.eventReceived) {
+      $0.lastContact = Fixtures.pairedAt.addingTimeInterval(1)
+    }
+    await store.receive(\.delegate.eventReceived)
+    #expect(!store.state.isLive)
+
+    now.setValue(Fixtures.pairedAt.addingTimeInterval(2))
+    feed.yield(Fixtures.snapshot(agents: []))
+    await store.receive(\.eventReceived) {
+      $0.phase = .live
+      $0.lastContact = Fixtures.pairedAt.addingTimeInterval(2)
+      $0.lastSyncedAt = Fixtures.pairedAt.addingTimeInterval(2)
+    }
+    await store.receive(\.delegate.eventReceived)
+    #expect(store.state.health.title == "Connected to Studio")
+    #expect(store.state.health.failure == nil)
+    #expect(!store.state.health.isStale)
+
+    // Past every phase timeout and the deadline: live has none.
+    await clock.advance(by: .seconds(14))
+    feed.yield(IPC.EventFrame(seq: 1, payload: .heartbeat))
     await store.receive(\.eventReceived)
     await store.receive(\.delegate.eventReceived)
+    await clock.advance(by: .seconds(14))
+    #expect(store.state.phase == .live)
 
     feed.finish()
     await store.receive(\.sessionEnded) {
-      $0.status = .retrying(after: .milliseconds(500))
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(2.5))
       $0.failedAttempts = 1
       $0.session = nil
       $0.lastFailure = .streamEnded
     }
+    #expect(store.state.health.isStale)
+    #expect(store.state.health.canRetryNow)
+    #expect(store.state.health.attempt == 1)
+    await Self.endSession(store)
+  }
+
+  @Test
+  func discoveryThatFindsNothingReportsTheMacNotFoundAndBacksOff() async {
+    let clock = TestClock()
+    let store = Self.store(clock: clock) {
+      $0.remoteClient.discover = { _ in try await Task<[NWEndpoint], Never>.never() }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await clock.advance(by: ConnectionFeature.discoveryTimeout)
+    await store.receive(\.phaseTimedOut) {
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
+      $0.failedAttempts = 1
+      $0.lastFailure = .macNotFound("Studio")
+    }
+    #expect(store.state.health.checklist.count == 3)
+    #expect(store.state.health.title == "Can't find Studio")
 
     await clock.advance(by: .milliseconds(500))
     await store.receive(\.retryTimerFired) {
-      $0.status = .connecting
+      $0.phase = .discovering
+    }
+    // Looking again keeps the cause on screen instead of flickering.
+    #expect(store.state.health.title == "Can't find Studio")
+    #expect(store.state.health.explanation == "Couldn't find Studio on this network. Trying again…")
+    await store.send(.scenePhaseChanged(.background)) {
+      $0.isAppActive = false
+    }
+    await Self.endSession(store)
+  }
+
+  /// Each phase stays within its own timeout, but together they pass the
+  /// attempt deadline.
+  @Test
+  func attemptDeadlineEndsASlowAttempt() async {
+    let clock = TestClock()
+    let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    let store = Self.store(clock: clock) {
+      $0.remoteClient.discover = { _ in
+        try await clock.sleep(for: .seconds(8))
+        return []
+      }
+      $0.remoteClient.connect = { _, _, _ in
+        try await clock.sleep(for: .seconds(10))
+        return RemoteSession(info: Fixtures.liveInfo, events: events)
+      }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await clock.advance(by: .seconds(8))
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
+    await clock.advance(by: .seconds(10))
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+    }
+    // 20 s after the start; the sync timeout alone would wait until 26 s.
+    await clock.advance(by: .seconds(2))
+    await store.receive(\.attemptDeadlinePassed) {
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
+      $0.failedAttempts = 1
+      $0.session = nil
+      $0.lastFailure = .deadlinePassed
+    }
+    await Self.endSession(store)
+  }
+
+  // MARK: - Failure taxonomy
+
+  @Test
+  func threeRefusalsEndInRejectedAndStopRetrying() async {
+    let clock = TestClock()
+    let connects = LockIsolated(0)
+    let store = Self.store(clock: clock) {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in
+        connects.withValue { $0 += 1 }
+        throw RemoteFailure.refused
+      }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
     }
     await store.receive(\.sessionEnded) {
-      $0.status = .retrying(after: .seconds(1))
-      $0.failedAttempts = 2
-      $0.lastFailure = RemoteFailure(.notFound, "gone")
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
+      $0.failedAttempts = 1
+      $0.refusals = 1
+      $0.lastFailure = .refused
     }
-    #expect(connects.value == 2)
+    await clock.advance(by: .milliseconds(500))
+    await store.receive(\.retryTimerFired) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .reconnecting(attempt: 2, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(1))
+      $0.failedAttempts = 2
+      $0.refusals = 2
+    }
+    await clock.advance(by: .seconds(1))
+    await store.receive(\.retryTimerFired) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .failed(.rejected)
+      $0.refusals = 3
+      $0.lastFailure = .rejected
+    }
+    #expect(store.state.health.recovery == .pairAgain)
+    #expect(store.state.health.title == "This device was removed")
 
+    // Neither time nor a trip through the background retries it. A phase
+    // timer that started just before the refusal may still fire; the
+    // reducer ignores it once the phase has moved on.
+    await clock.run()
+    await Self.dropStaleTimers(store)
     await store.send(.scenePhaseChanged(.background)) {
       $0.isAppActive = false
-      $0.status = .suspended
     }
-    // Nothing fires once suspended, however long the backoff was.
-    await clock.advance(by: .seconds(60))
-    #expect(connects.value == 2)
-    #expect(disconnects.value >= 3)
-  }
-
-  @Test
-  func returningToTheForegroundReconnectsImmediately() async {
-    let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
-    let store = TestStore(initialState: Self.pairedState(status: .suspended, isAppActive: false)) {
-      ConnectionFeature()
-    } withDependencies: {
-      $0.pairingStore = .inMemory(.init(gateways: [Fixtures.gateway], activeID: Fixtures.deviceID))
-      $0.pairingStore.credential = { _ in Fixtures.payload.credential }
-      $0.continuousClock = TestClock()
-      $0.remoteClient.disconnect = {}
-      $0.remoteClient.connect = { _, _ in RemoteSession(info: Fixtures.info, events: events) }
-    }
-
-    await store.send(.scenePhaseChanged(.inactive))
     await store.send(.scenePhaseChanged(.active)) {
       $0.isAppActive = true
-      $0.status = .connecting
     }
-    await store.receive(\.sessionOpened) {
-      $0.status = .connected
-      $0.session = Fixtures.info
-      $0.lastSessionPermission = .interactive
-    }
-
-    await store.send(.scenePhaseChanged(.background)) {
-      $0.isAppActive = false
-      $0.status = .suspended
-    }
-    feed.finish()
+    #expect(connects.value == 3)
   }
 
   @Test
-  func networkRecoveryCutsTheBackoffShort() async {
+  func aSuccessfulHandshakeClearsTheRefusalCount() async {
+    let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    var initial = Self.pairedState()
+    initial.phase = .reconnecting(attempt: 2, nextAttemptAt: Fixtures.pairedAt)
+    initial.failedAttempts = 2
+    initial.refusals = 2
+    initial.lastFailure = .refused
+    let store = Self.store(initial) {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in RemoteSession(info: Fixtures.liveInfo, events: events) }
+    }
+
+    await store.send(.retryTimerFired) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+      $0.refusals = 0
+    }
+    // Ending before the snapshot is still a failed attempt.
+    feed.finish()
+    await store.receive(\.sessionEnded) {
+      $0.phase = .reconnecting(attempt: 3, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(2))
+      $0.failedAttempts = 3
+      $0.session = nil
+      $0.lastFailure = .streamEnded
+    }
+    await Self.endSession(store)
+  }
+
+  @Test
+  func localNetworkDenialWaitsForSettingsThenRetriesOnReturn() async {
+    let denied = RemoteFailure(.localNetworkDenied, "Local Network access is off.")
+    let discovers = LockIsolated(0)
+    let store = Self.store {
+      $0.remoteClient.discover = { _ in
+        discovers.withValue { $0 += 1 }
+        throw denied
+      }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .failed(denied)
+      $0.lastFailure = denied
+    }
+    #expect(store.state.health.recovery == .openSettings)
+    #expect(discovers.value == 1)
+
+    // Coming back from Settings (the scene turns active again) retries.
+    await store.send(.scenePhaseChanged(.active)) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .failed(denied)
+    }
+    #expect(discovers.value == 2)
+  }
+
+  @Test
+  func incompatibleMacIsNotRetried() async {
     let clock = TestClock()
-    let (paths, pathFeed) = AsyncStream<Void>.makeStream()
-    let (events, eventFeed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
-    let attempts = LockIsolated(0)
-    var initial = Self.pairedState(status: .idle, isAppActive: true)
+    let failure = RemoteFailure(.incompatible, "update")
+    let store = Self.store(clock: clock) {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in throw failure }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .failed(failure)
+      $0.lastFailure = failure
+    }
+    await clock.run()
+    await Self.dropStaleTimers(store)
+    #expect(store.state.phase == .failed(failure))
+    #expect(store.state.health.title == "Update needed")
+  }
+
+  /// A minor-1 Mac is not a failure: browsing works, only the live
+  /// terminal asks for an update, and keeps asking while reconnecting.
+  @Test
+  func olderMacConnectsButAsksForAnUpdateForTheTerminal() async {
+    let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    let store = Self.store {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in RemoteSession(info: Fixtures.info, events: events) }
+    }
+
+    await store.send(.connectTapped) { $0.phase = .discovering }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.info
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+    }
+    feed.yield(Fixtures.snapshot(agents: []))
+    await store.receive(\.eventReceived) {
+      $0.phase = .live
+      $0.lastSyncedAt = Fixtures.pairedAt
+    }
+    await store.receive(\.delegate.eventReceived)
+    #expect(store.state.health.needsMacUpdate)
+
+    feed.finish()
+    await store.receive(\.sessionEnded) {
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
+      $0.failedAttempts = 1
+      $0.session = nil
+      $0.lastFailure = .streamEnded
+    }
+    #expect(store.state.health.needsMacUpdate)
+    await Self.endSession(store)
+  }
+
+  @Test
+  func missingKeyAsksForRepairingWithoutConnecting() async {
+    let store = Self.store {
+      $0.pairingStore.credential = { _ in nil }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .failed(.missingKey)
+      $0.lastFailure = .missingKey
+    }
+    #expect(store.state.health.recovery == .pairAgain)
+  }
+
+  // MARK: - Network path and liveness
+
+  @Test
+  func pathChangeWhileLiveReconnectsAtOnce() async {
+    let clock = TestClock()
+    let (paths, pathFeed) = AsyncStream<NetworkPathClient.Path>.makeStream()
+    let streams = LockIsolated<[AsyncThrowingStream<IPC.EventFrame, Error>.Continuation]>([])
+    let connects = LockIsolated(0)
+    var initial = Self.pairedState()
     initial.hasStarted = false
-    let store = TestStore(initialState: initial) {
-      ConnectionFeature()
-    } withDependencies: {
+    let store = Self.store(initial, clock: clock) {
       $0.pairingStore = .inMemory(.init(gateways: [Fixtures.gateway], activeID: Fixtures.deviceID))
       $0.pairingStore.credential = { _ in Fixtures.payload.credential }
-      $0.networkPath.becameAvailable = { paths }
-      $0.continuousClock = clock
-      $0.remoteClient.disconnect = {}
-      $0.remoteClient.connect = { _, _ in
+      $0.networkPath.changes = { paths }
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in
+        connects.withValue { $0 += 1 }
+        let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+        streams.withValue { $0.append(feed) }
+        return RemoteSession(info: Fixtures.liveInfo, events: events)
+      }
+    }
+
+    await store.send(.task) {
+      $0.hasStarted = true
+      $0.phase = .discovering
+    }
+    await store.receive(\.delegate.activeGatewayChanged)
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+    }
+    streams.value[0].yield(Fixtures.snapshot(agents: []))
+    await store.receive(\.eventReceived) {
+      $0.phase = .live
+      $0.lastSyncedAt = Fixtures.pairedAt
+    }
+    await store.receive(\.delegate.eventReceived)
+
+    // Wi-Fi → cellular: still satisfied, but the old socket is bound to an
+    // interface that is gone.
+    pathFeed.yield(.init(isSatisfied: true, interfaces: ["cellular:pdp_ip0"]))
+    await store.receive(\.networkPathChanged) {
+      $0.phase = .discovering
+      $0.session = nil
+    }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+    }
+    streams.value[1].yield(Fixtures.snapshot(agents: []))
+    await store.receive(\.eventReceived) { $0.phase = .live }
+    await store.receive(\.delegate.eventReceived)
+    #expect(connects.value == 2)
+
+    // An unusable path is not worth an attempt.
+    pathFeed.yield(.init(isSatisfied: false, interfaces: []))
+    await store.receive(\.networkPathChanged)
+    #expect(connects.value == 2)
+
+    await Self.endSession(store)
+  }
+
+  @Test
+  func pathChangeCutsABackoffShort() async {
+    let clock = TestClock()
+    let (paths, pathFeed) = AsyncStream<NetworkPathClient.Path>.makeStream()
+    let attempts = LockIsolated(0)
+    var initial = Self.pairedState()
+    initial.hasStarted = false
+    let store = Self.store(initial, clock: clock) {
+      $0.pairingStore = .inMemory(.init(gateways: [Fixtures.gateway], activeID: Fixtures.deviceID))
+      $0.pairingStore.credential = { _ in Fixtures.payload.credential }
+      $0.networkPath.changes = { paths }
+      $0.remoteClient.discover = { _ in
         let attempt = attempts.withValue { value -> Int in
           value += 1
           return value
         }
-        guard attempt > 1 else { throw RemoteFailure(.other, "offline") }
-        return RemoteSession(info: Fixtures.info, events: events)
+        guard attempt > 1 else { throw RemoteFailure.macNotFound("Studio") }
+        return try await Task<[NWEndpoint], Never>.never()
       }
     }
     await store.send(.task) {
       $0.hasStarted = true
-      $0.status = .connecting
+      $0.phase = .discovering
     }
+    await store.receive(\.delegate.activeGatewayChanged)
     await store.receive(\.sessionEnded) {
-      $0.status = .retrying(after: .milliseconds(500))
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
       $0.failedAttempts = 1
-      $0.lastFailure = RemoteFailure(.other, "offline")
+      $0.lastFailure = .macNotFound("Studio")
     }
 
-    pathFeed.yield()
-    await store.receive(\.networkBecameAvailable) {
-      $0.status = .connecting
-    }
-    await store.receive(\.sessionOpened) {
-      $0.status = .connected
-      $0.session = Fixtures.info
-      $0.lastSessionPermission = .interactive
+    pathFeed.yield(.init(isSatisfied: true, interfaces: ["wifi:en0"]))
+    await store.receive(\.networkPathChanged) {
+      $0.phase = .discovering
       $0.failedAttempts = 0
-      $0.lastFailure = nil
     }
     // The cancelled backoff timer never fires.
     await clock.advance(by: .seconds(1))
-
-    await store.send(.scenePhaseChanged(.background)) {
-      $0.isAppActive = false
-      $0.status = .suspended
-    }
-    pathFeed.finish()
-    eventFeed.finish()
-    await store.finish()
+    #expect(attempts.value == 2)
+    await Self.endSession(store)
   }
 
   /// A half-open connection never ends the stream; only the missing
@@ -204,23 +524,27 @@ struct ConnectionFeatureTests {
     let clock = TestClock()
     let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
     let disconnects = LockIsolated(0)
-    let store = TestStore(initialState: Self.pairedState(status: .idle, isAppActive: true)) {
-      ConnectionFeature()
-    } withDependencies: {
-      $0.pairingStore.credential = { _ in Fixtures.payload.credential }
-      $0.continuousClock = clock
+    let store = Self.store(clock: clock) {
       $0.remoteClient.disconnect = { disconnects.withValue { $0 += 1 } }
-      $0.remoteClient.connect = { _, _ in RemoteSession(info: Fixtures.info, events: events) }
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in RemoteSession(info: Fixtures.liveInfo, events: events) }
     }
 
-    await store.send(.connectTapped) {
-      $0.status = .connecting
-    }
+    await store.send(.connectTapped) { $0.phase = .discovering }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
     await store.receive(\.sessionOpened) {
-      $0.status = .connected
-      $0.session = Fixtures.info
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
       $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
     }
+    feed.yield(Fixtures.snapshot(agents: []))
+    await store.receive(\.eventReceived) {
+      $0.phase = .live
+      $0.lastSyncedAt = Fixtures.pairedAt
+    }
+    await store.receive(\.delegate.eventReceived)
 
     // Heartbeats keep the watchdog quiet well past the idle timeout.
     for seq in 0..<4 {
@@ -229,66 +553,119 @@ struct ConnectionFeatureTests {
       await store.receive(\.eventReceived)
       await store.receive(\.delegate.eventReceived)
     }
-    #expect(store.state.status == .connected)
+    #expect(store.state.phase == .live)
 
     await clock.advance(by: ConnectionFeature.streamIdleTimeout + ConnectionFeature.watchdogTick)
     await store.receive(\.sessionEnded) {
-      $0.status = .retrying(after: .milliseconds(500))
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
       $0.failedAttempts = 1
       $0.session = nil
       $0.lastFailure = .stalled
     }
     #expect(disconnects.value == 1)
+    await Self.endSession(store)
+  }
+
+  // MARK: - Background
+
+  @Test
+  func quickAppSwitchKeepsTheSessionAndALongOneGoesOffline() async {
+    let clock = TestClock()
+    let streams = LockIsolated<[AsyncThrowingStream<IPC.EventFrame, Error>.Continuation]>([])
+    let tasks = LockIsolated<[String]>([])
+    let store = Self.store(clock: clock) {
+      $0.backgroundTask = BackgroundTaskClient(
+        begin: { name, _ in
+          tasks.withValue { $0.append("begin \(name)") }
+          return 7
+        },
+        end: { token in tasks.withValue { $0.append("end \(token)") } }
+      )
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in
+        let (events, feed) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+        streams.withValue { $0.append(feed) }
+        return RemoteSession(info: Fixtures.liveInfo, events: events)
+      }
+    }
+
+    await store.send(.connectTapped) { $0.phase = .discovering }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+    }
+    streams.value[0].yield(Fixtures.snapshot(agents: []))
+    await store.receive(\.eventReceived) {
+      $0.phase = .live
+      $0.lastSyncedAt = Fixtures.pairedAt
+    }
+    await store.receive(\.delegate.eventReceived)
+
+    // A quick switch: back within the grace, still live, no new attempt.
+    await store.send(.scenePhaseChanged(.background)) { $0.isAppActive = false }
+    await clock.advance(by: .seconds(10))
+    await store.send(.scenePhaseChanged(.active)) { $0.isAppActive = true }
+    #expect(store.state.phase == .live)
+    #expect(streams.value.count == 1)
+
+    // A long one: the grace ends and the session closes.
+    await store.send(.scenePhaseChanged(.background)) { $0.isAppActive = false }
+    await clock.advance(by: ConnectionFeature.backgroundGrace)
+    await store.receive(\.backgroundGraceEnded) {
+      $0.phase = .offline
+      $0.session = nil
+    }
+    #expect(tasks.value == ["begin Codans connection", "end 7", "begin Codans connection", "end 7"])
+
+    await store.send(.scenePhaseChanged(.active)) {
+      $0.isAppActive = true
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) { $0.phase = .handshaking }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+    }
+    #expect(streams.value.count == 2)
+    await Self.endSession(store)
+  }
+
+  @Test
+  func backoffInTheBackgroundWaitsForTheForeground() async {
+    let clock = TestClock()
+    var initial = Self.pairedState()
+    initial.phase = .reconnecting(attempt: 2, nextAttemptAt: Fixtures.pairedAt)
+    let store = Self.store(initial, clock: clock) { _ in }
 
     await store.send(.scenePhaseChanged(.background)) {
       $0.isAppActive = false
-      $0.status = .suspended
+      $0.phase = .offline
     }
-    feed.finish()
-    await store.finish()
+    await clock.advance(by: .seconds(60))
+    #expect(store.state.health.title == "Offline")
   }
+
+  // MARK: - Cache
 
   @Test
-  func incompatibleMacIsNotRetried() async {
-    let clock = TestClock()
-    let failure = RemoteFailure(.incompatible, "update")
-    let store = TestStore(initialState: Self.pairedState(status: .idle, isAppActive: true)) {
-      ConnectionFeature()
-    } withDependencies: {
-      $0.pairingStore = .inMemory(.init(gateways: [Fixtures.gateway], activeID: Fixtures.deviceID))
-      $0.pairingStore.credential = { _ in Fixtures.payload.credential }
-      $0.continuousClock = clock
-      $0.remoteClient.disconnect = {}
-      $0.remoteClient.connect = { _, _ in throw failure }
-    }
+  func cachedWorkspaceMarksDataStaleAndPicksTheTerminal() async {
+    let store = Self.store { _ in }
+    let workspace = CachedWorkspace(
+      savedAt: Fixtures.pairedAt.addingTimeInterval(-300), protocolMinor: 2, hierarchy: Fixtures.hierarchy,
+      agents: [])
 
-    await store.send(.connectTapped) {
-      $0.status = .connecting
+    await store.send(.cacheRestored(workspace)) {
+      $0.lastSyncedAt = Fixtures.pairedAt.addingTimeInterval(-300)
+      $0.supportsLiveTerminal = true
     }
-    await store.receive(\.sessionEnded) {
-      $0.status = .idle
-      $0.lastFailure = failure
-    }
-    await clock.run()
+    #expect(store.state.health.isStale)
   }
 
-  @Test
-  func missingKeyAsksForRepairingWithoutConnecting() async {
-    let store = TestStore(initialState: Self.pairedState(status: .idle, isAppActive: true)) {
-      ConnectionFeature()
-    } withDependencies: {
-      $0.pairingStore.credential = { _ in nil }
-      $0.remoteClient.disconnect = {}
-    }
-
-    await store.send(.connectTapped) {
-      $0.status = .connecting
-    }
-    await store.receive(\.sessionEnded) {
-      $0.status = .idle
-      $0.lastFailure = .missingKey
-    }
-  }
+  // MARK: - Pairing
 
   @Test
   func invalidPairingCodeReportsAnErrorAndStoresNothing() async {
@@ -304,14 +681,9 @@ struct ConnectionFeatureTests {
   @Test
   func pairingLinkPairsOnlyAfterConfirmation() async {
     let clock = TestClock()
-    let store = TestStore(initialState: ConnectionFeature.State()) {
-      ConnectionFeature()
-    } withDependencies: {
+    let store = Self.store(ConnectionFeature.State(), clock: clock) {
       $0.pairingStore = .inMemory()
-      $0.continuousClock = clock
-      $0.date.now = Fixtures.pairedAt
-      $0.remoteClient.disconnect = {}
-      $0.remoteClient.connect = { _, _ in throw RemoteFailure(.notFound, "gone") }
+      $0.remoteClient.discover = { _ in throw RemoteFailure.macNotFound("Studio") }
     }
     let link = URL(string: Fixtures.pairingCode)!
 
@@ -322,17 +694,17 @@ struct ConnectionFeatureTests {
       $0.linkPairing = nil
       $0.gateways = [Fixtures.gateway]
       $0.activeID = Fixtures.deviceID
-      $0.status = .connecting
+      $0.phase = .discovering
     }
     await store.receive(\.delegate.activeGatewayChanged)
     await store.receive(\.sessionEnded) {
-      $0.status = .retrying(after: .milliseconds(500))
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
       $0.failedAttempts = 1
-      $0.lastFailure = RemoteFailure(.notFound, "gone")
+      $0.lastFailure = .macNotFound("Studio")
     }
     await store.send(.scenePhaseChanged(.background)) {
       $0.isAppActive = false
-      $0.status = .suspended
+      $0.phase = .offline
     }
   }
 
@@ -361,7 +733,7 @@ struct ConnectionFeatureTests {
 
   @Test
   func reopeningAnAlreadyPairedLinkAsksNothing() async {
-    let store = TestStore(initialState: Self.pairedState(status: .connected, isAppActive: true)) {
+    let store = TestStore(initialState: Self.pairedState()) {
       ConnectionFeature()
     }
     await store.send(.pairingLinkOpened(URL(string: Fixtures.pairingCode)!))
@@ -380,35 +752,85 @@ struct ConnectionFeatureTests {
   }
 
   @Test
-  func forgettingTheActiveMacDisconnectsAndClearsModels() async {
-    var initial = Self.pairedState(status: .connected, isAppActive: true)
-    initial.session = Fixtures.info
+  func forgettingTheActiveMacDisconnectsClearsModelsAndItsCache() async {
+    var initial = Self.pairedState()
+    initial.phase = .live
+    initial.session = Fixtures.liveInfo
+    initial.supportsLiveTerminal = true
+    initial.lastSyncedAt = Fixtures.pairedAt
     let removed = LockIsolated<UUID?>(nil)
-    let store = TestStore(initialState: initial) {
-      ConnectionFeature()
-    } withDependencies: {
+    let uncached = LockIsolated<UUID?>(nil)
+    let store = Self.store(initial) {
       $0.pairingStore.remove = { removed.setValue($0) }
       $0.pairingStore.setActive = { _ in }
-      $0.remoteClient.disconnect = {}
+      $0.workspaceCache.remove = { uncached.setValue($0) }
     }
 
     await store.send(.forgetTapped(Fixtures.deviceID)) {
       $0.gateways = []
       $0.activeID = nil
       $0.session = nil
-      $0.status = .idle
+      $0.supportsLiveTerminal = false
+      $0.lastSyncedAt = nil
+      $0.phase = .idle
     }
     await store.receive(\.delegate.activeGatewayChanged)
+    await store.finish()
     #expect(removed.value == Fixtures.deviceID)
+    #expect(uncached.value == Fixtures.deviceID)
   }
 
-  private static func pairedState(status: ConnectionFeature.Status, isAppActive: Bool) -> ConnectionFeature.State {
+  // MARK: - Helpers
+
+  /// A phase timer armed just before a failure may still fire, since TCA
+  /// registers a cancellable only once its task starts; the reducer ignores
+  /// it because the phase moved on. Its arrival order is not deterministic.
+  private static func dropStaleTimers(_ store: TestStoreOf<ConnectionFeature>) async {
+    let exhaustivity = store.exhaustivity
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    await store.skipReceivedActions(strict: false)
+    store.exhaustivity = exhaustivity
+  }
+
+  /// Ends a test whose session, timers or path observer still run: they
+  /// are long-lived by design, so they are dropped rather than asserted.
+  private static func endSession(_ store: TestStoreOf<ConnectionFeature>) async {
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    await store.skipInFlightEffects()
+  }
+
+  private static func pairedState() -> ConnectionFeature.State {
     var state = ConnectionFeature.State()
     state.gateways = [Fixtures.gateway]
     state.activeID = Fixtures.deviceID
-    state.status = status
-    state.isAppActive = isAppActive
+    state.isAppActive = true
     state.hasStarted = true
     return state
   }
+
+  /// A store for a paired, foreground connection with deterministic time,
+  /// no jitter and a working key; `configure` supplies the remote.
+  private static func store(
+    _ initial: ConnectionFeature.State = pairedState(),
+    clock: TestClock<Duration> = TestClock(),
+    now: LockIsolated<Date> = LockIsolated(Fixtures.pairedAt),
+    configure: (inout DependencyValues) -> Void
+  ) -> TestStoreOf<ConnectionFeature> {
+    TestStore(initialState: initial) {
+      ConnectionFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.date = DateGenerator { now.value }
+      $0.withRandomNumberGenerator = WithRandomNumberGenerator(NoJitter())
+      $0.pairingStore.credential = { _ in Fixtures.payload.credential }
+      $0.remoteClient.disconnect = {}
+      configure(&$0)
+    }
+  }
+}
+
+/// Always draws 0, so backoff has no jitter and the next attempt times are
+/// exact.
+private struct NoJitter: RandomNumberGenerator {
+  mutating func next() -> UInt64 { 0 }
 }

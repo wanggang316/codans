@@ -38,6 +38,7 @@ struct ComposerFeatureTests {
     let claude = Fixtures.profile("Claude")
     let launches = LockIsolated<[[String?]]>([])
     var initial = ComposerFeature.State()
+    initial.isConnectionLive = true
     initial.profiles = [claude]
     initial.target = .worktree(projectID: "P", worktreeID: "W")
     initial.prompt = "  fix the login bug  "
@@ -66,6 +67,7 @@ struct ComposerFeatureTests {
     let claude = Fixtures.profile("Claude")
     let created = LockIsolated<[String]>([])
     var initial = ComposerFeature.State()
+    initial.isConnectionLive = true
     initial.profiles = [claude]
     initial.target = .newWorktree(projectID: "P")
     initial.prompt = "Add dark mode to Settings!"
@@ -86,18 +88,125 @@ struct ComposerFeatureTests {
     await store.send(.sendTapped) {
       $0.isSending = true
     }
+    await store.receive(\.worktreeCreated) {
+      $0.target = .worktree(projectID: "P", worktreeID: "NEW")
+    }
     await store.receive(\.launched) {
       $0.isSending = false
       $0.prompt = ""
       $0.lastLaunch = ComposerFeature.Launch(worktreeID: "NEW", paneID: nil)
-      $0.target = .worktree(projectID: "P", worktreeID: "NEW")
     }
     #expect(created.value == ["P:agent/add-dark-mode-to"])
+  }
+
+  /// The worktree exists once the Mac created it; retrying after a failed
+  /// launch must launch into it, not create a second one.
+  @Test
+  func retryAfterAFailedLaunchReusesTheCreatedWorktree() async {
+    let claude = Fixtures.profile("Claude")
+    let created = LockIsolated(0)
+    let launches = LockIsolated<[String]>([])
+    var initial = ComposerFeature.State()
+    initial.isConnectionLive = true
+    initial.profiles = [claude]
+    initial.target = .newWorktree(projectID: "P")
+    initial.branch = "feature/x"
+    initial.prompt = "go"
+    let store = TestStore(initialState: initial) {
+      ComposerFeature()
+    } withDependencies: {
+      $0.date.now = Date(timeIntervalSince1970: 0)
+      $0.remoteClient.createWorktree = { _, _ in
+        created.withValue { $0 += 1 }
+        return "NEW"
+      }
+      $0.remoteClient.launchAgent = { _, worktree, _, _ in
+        let count = launches.withValue { value -> Int in
+          value.append(worktree)
+          return value.count
+        }
+        guard count > 1 else { throw RemoteFailure(.other, "The agent failed to start.") }
+        return "PANE"
+      }
+    }
+
+    await store.send(.sendTapped) {
+      $0.isSending = true
+    }
+    await store.receive(\.worktreeCreated) {
+      $0.target = .worktree(projectID: "P", worktreeID: "NEW")
+      $0.branch = ""
+    }
+    await store.receive(\.sendFailed) {
+      $0.isSending = false
+      $0.errorMessage = "The agent failed to start."
+    }
+    #expect(store.state.lastLaunch == nil)
+
+    await store.send(.sendTapped) {
+      $0.isSending = true
+      $0.errorMessage = nil
+    }
+    await store.receive(\.launched) {
+      $0.isSending = false
+      $0.prompt = ""
+      $0.lastLaunch = ComposerFeature.Launch(worktreeID: "NEW", paneID: "PANE")
+    }
+    #expect(created.value == 1)
+    #expect(launches.value == ["NEW", "NEW"])
+  }
+
+  @Test
+  func sendingNeedsALiveConnection() async {
+    var initial = ComposerFeature.State()
+    initial.profiles = [Fixtures.profile("Claude")]
+    initial.target = .worktree(projectID: "P", worktreeID: "W")
+    initial.prompt = "hello"
+    #expect(!initial.canSend)
+    let store = TestStore(initialState: initial) { ComposerFeature() }
+    // Nothing is called: the remote client is unimplemented here.
+    await store.send(.sendTapped)
+  }
+
+  /// A send that fails must not navigate to the previous send's result.
+  @Test
+  func aFailedSendLeavesNoEarlierResultToNavigateTo() async {
+    var initial = ComposerFeature.State()
+    initial.isConnectionLive = true
+    initial.profiles = [Fixtures.profile("Claude")]
+    initial.target = .worktree(projectID: "P", worktreeID: "W")
+    initial.prompt = "again"
+    initial.lastLaunch = ComposerFeature.Launch(worktreeID: "W", paneID: "OLD")
+    let store = TestStore(initialState: initial) {
+      ComposerFeature()
+    } withDependencies: {
+      $0.remoteClient.launchAgent = { _, _, _, _ in throw RemoteFailure(.forbidden, "Not allowed") }
+    }
+
+    await store.send(.sendTapped) {
+      $0.lastLaunch = nil
+      $0.isSending = true
+    }
+    await store.receive(\.sendFailed) {
+      $0.isSending = false
+      $0.errorMessage = "Not allowed"
+    }
+  }
+
+  @Test
+  func handlingALaunchClearsIt() async {
+    var initial = ComposerFeature.State()
+    initial.lastLaunch = ComposerFeature.Launch(worktreeID: "W", paneID: "P")
+    let store = TestStore(initialState: initial) { ComposerFeature() }
+    await store.send(.launchHandled) {
+      $0.lastLaunch = nil
+    }
   }
 
   @Test
   func failureKeepsTheDraftAndShowsWhy() async {
     var initial = ComposerFeature.State()
+    initial.isConnectionLive = true
     initial.profiles = [Fixtures.profile("Claude")]
     initial.target = .worktree(projectID: "P", worktreeID: "W")
     initial.prompt = "hello"
@@ -122,6 +231,7 @@ struct ComposerFeatureTests {
     let bare = Fixtures.profile("Shell agent", prompt: false)
     let prompts = LockIsolated<[String?]>([])
     var initial = ComposerFeature.State()
+    initial.isConnectionLive = true
     initial.profiles = [bare]
     initial.target = .worktree(projectID: "P", worktreeID: "W")
     initial.prompt = "ignored"

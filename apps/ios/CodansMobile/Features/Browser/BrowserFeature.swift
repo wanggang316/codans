@@ -46,6 +46,8 @@ struct BrowserFeature {
 
   enum Action: Equatable {
     case eventReceived(IPC.EventFrame)
+    /// The cached tree of the active Mac, shown until the first snapshot.
+    case restored(IPC.HierarchySummary?)
     case reset
   }
 
@@ -61,6 +63,10 @@ struct BrowserFeature {
         case .agentStatesChanged, .heartbeat, .unknown:
           break
         }
+        return .none
+
+      case .restored(let hierarchy):
+        state.hierarchy = hierarchy
         return .none
 
       case .reset:

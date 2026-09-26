@@ -8,11 +8,18 @@ import Foundation
 /// network — a paired gateway, a hierarchy with a split tab, agent states
 /// and terminal streams fed with canned TUI bytes. Debug builds only.
 ///
-/// - `CODANS_DEMO_PANE`: the pane to open (`claude`, `shell`, `server`, `build`).
+/// - `CODANS_DEMO_PANE`: the pane to open (`claude`, `shell`, `server`,
+///   `build`), or `none` to stay on the home screen.
 /// - `CODANS_DEMO_RECONNECT=1`: the connection drops two seconds in and
 ///   never comes back, to show the reconnecting states.
 /// - `CODANS_DEMO_READONLY=1`: the Mac grants read-only access.
 /// - `CODANS_DEMO_NOT_OPEN=1`: keys answer "pane not open on the Mac".
+/// - `CODANS_DEMO_FAILURE`: the Mac never connects, to show a failure state:
+///   `notFound` (no advertisement), `rejected` (every handshake refused),
+///   `denied` (Local Network access off) or `offline` (never answers, with
+///   a cached workspace from an hour ago shown as stale).
+/// - `CODANS_DEMO_OLD_MAC=1`: the Mac speaks protocol minor 1, so panes use
+///   the text fallback and ask for a Mac update.
 enum DemoMode {
   #if DEBUG
     static let isEnabled = ProcessInfo.processInfo.environment["CODANS_DEMO"] == "1"
@@ -27,6 +34,7 @@ enum DemoMode {
   static var initialSelection: (worktreeID: String, paneID: String)? {
     guard isEnabled else { return nil }
     let pane = ProcessInfo.processInfo.environment["CODANS_DEMO_PANE"] ?? "claude"
+    guard pane != "none" else { return nil }
     return (DemoFixtures.worktreeID, DemoFixtures.paneID(pane))
   }
 }
@@ -46,8 +54,26 @@ enum DemoMode {
         setActive: { _ in },
         credential: { _ in RemoteTLS.PSKCredential(identity: "demo", key: Data(repeating: 1, count: 32)) }
       )
-      dependencies.networkPath = NetworkPathClient(becameAvailable: { AsyncStream { _ in } })
+      dependencies.networkPath = NetworkPathClient(changes: { AsyncStream { _ in } })
       dependencies.remoteClient = client
+      dependencies.workspaceCache = cache
+    }
+
+    private static var failure: String? { environment["CODANS_DEMO_FAILURE"] }
+
+    /// Only the `offline` scenario has a cache; the others start empty so
+    /// their placeholders show.
+    private static var cache: WorkspaceCacheClient {
+      guard failure == "offline" else { return .empty }
+      return WorkspaceCacheClient(
+        load: { _ in
+          CachedWorkspace(
+            savedAt: Date().addingTimeInterval(-3600), protocolMinor: 2, hierarchy: DemoFixtures.hierarchy,
+            agents: DemoFixtures.agents)
+        },
+        save: { _, _ in },
+        remove: { _ in }
+      )
     }
 
     /// One instance for every store: pane stores are created by views and
@@ -58,9 +84,27 @@ enum DemoMode {
       let dropsConnection = environment["CODANS_DEMO_RECONNECT"] == "1"
       let readOnly = environment["CODANS_DEMO_READONLY"] == "1"
       let notOpen = environment["CODANS_DEMO_NOT_OPEN"] == "1"
+      let protocolMinor = environment["CODANS_DEMO_OLD_MAC"] == "1" ? 1 : 2
+      let failure = failure
       let connects = LockIsolated(0)
       return RemoteClient(
-        connect: { _, _ in
+        discover: { gateway in
+          switch failure {
+          case "notFound"?:
+            try await Task.sleep(for: .seconds(1))
+            throw RemoteFailure.macNotFound(gateway.displayName)
+          case "denied"?:
+            throw RemoteFailure(.localNetworkDenied, "Local Network access is off for Codans.")
+          case "offline"?:
+            // Never answers: the attempt runs into its deadline and retries.
+            try await Task.sleep(for: .seconds(3600))
+            return []
+          default:
+            return []
+          }
+        },
+        connect: { _, _, _ in
+          if failure == "rejected" { throw RemoteFailure.refused }
           let attempt = connects.withValue { value -> Int in
             value += 1
             return value
@@ -92,11 +136,12 @@ enum DemoMode {
           }
           return RemoteSession(
             info: RemoteSessionInfo(
-              serverVersion: "0.9.0", permission: readOnly ? .readOnly : .interactive, protocolMinor: 2),
+              serverVersion: "0.9.0", permission: readOnly ? .readOnly : .interactive,
+              protocolMinor: protocolMinor),
             events: events)
         },
         disconnect: {},
-        readPane: { _, _ in "" },
+        readPane: { paneID, _ in DemoFixtures.text(for: paneID) },
         sendInput: { _, _ in },
         sendKey: { _, _ in },
         listProfiles: { DemoFixtures.profiles },
@@ -246,6 +291,14 @@ nonisolated enum DemoFixtures {
     default:
       return Sample(cols: 96, rows: 34, bytes: Data(DemoTerminalSamples.claudeCode(cols: 96).utf8))
     }
+  }
+
+  /// The same sample as `pane.read` would return it: plain text, escape
+  /// sequences stripped.
+  static func text(for paneID: String) -> String {
+    let raw = String(bytes: stream(for: paneID).bytes, encoding: .utf8) ?? ""
+    return raw.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[A-Za-z]", with: "", options: .regularExpression)
+      .replacingOccurrences(of: "\r", with: "")
   }
 }
 

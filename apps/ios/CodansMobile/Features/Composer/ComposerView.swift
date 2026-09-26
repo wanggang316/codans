@@ -152,7 +152,9 @@ struct ComposerView: View {
   private func send() {
     Task {
       await store.send(.sendTapped).finish()
-      if let launch = store.lastLaunch, store.errorMessage == nil {
+      // `sendTapped` cleared any earlier result, so this is this send's.
+      if let launch = store.lastLaunch {
+        store.send(.launchHandled)
         isFocused = false
         onLaunched(launch)
       }
