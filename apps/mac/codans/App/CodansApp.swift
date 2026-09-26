@@ -1254,7 +1254,8 @@ final class AppState {
         workspace: workspaceClient,
         gitCLI: GitWorktreeCLI()
       ),
-      eventHub: makeEventHub(hierarchy: hierarchy, handles: targetHandles, agentHandlers: agentHandlers)
+      eventHub: makeEventHub(hierarchy: hierarchy, handles: targetHandles, agentHandlers: agentHandlers),
+      terminalStreams: makeTerminalStreams(hierarchy: hierarchy, terminalEngine: terminalEngine)
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
@@ -1271,6 +1272,30 @@ final class AppState {
         "SocketServer bind failed at \(resolvedSocketPath, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
+  }
+
+  /// `pane.attachStream` sessions observe a pane's zmx daemon directly, so
+  /// a stream works whether or not the pane's tab has a surface this
+  /// session; the surface is consulted only for an old daemon's fallback.
+  private func makeTerminalStreams(
+    hierarchy: HierarchyManager,
+    terminalEngine: TerminalEngine
+  ) -> TerminalStreamRegistry {
+    TerminalStreamRegistry(
+      dependencies: TerminalStreamRegistry.Dependencies(
+        paneExists: { [weak hierarchy] paneID in hierarchy?.catalog.pane(paneID) != nil },
+        socketPath: { paneID in ZmxControlClient.socketPath(for: paneID) },
+        gridSize: { [weak terminalEngine] paneID in
+          guard let size = terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.gridSize() else { return nil }
+          return PaneStreamSession.GridSize(cols: size.cols, rows: size.rows)
+        },
+        observeGeometry: { [weak terminalEngine] paneID, handler in
+          guard let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) else { return nil }
+          let token = surface.observeGridSize { _, _ in handler() }
+          return { [weak surface] in surface?.removeGridSizeObserver(token) }
+        }
+      )
+    )
   }
 
   /// `events.subscribe` sources: the hierarchy summary and the agent-state

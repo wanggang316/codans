@@ -60,6 +60,7 @@ struct RemoteTierTests {
 
     .paneRead: .readOnly,
     .paneInfo: .readOnly,
+    .paneAttachStream: .readOnly,
     .paneClose: .localOnly,
 
     .eventsSubscribe: .readOnly,

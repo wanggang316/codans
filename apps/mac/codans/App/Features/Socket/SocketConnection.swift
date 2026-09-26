@@ -92,7 +92,14 @@ public actor SocketConnection {
     do {
       request = try JSONDecoder().decode(IPC.Request.self, from: frame)
     } catch {
-      await sendError(id: "<malformed>", .invalidFrame(reason: "request decode failed: \(error)"))
+      // Answer under the caller's id when it can be read, so a client
+      // calling a method this build lacks gets an error, not a timeout.
+      let head = try? JSONDecoder().decode(IPC.RequestHead.self, from: frame)
+      if let head, let unknown = head.unknownMethodError {
+        await sendError(id: head.id, unknown)
+      } else {
+        await sendError(id: head?.id ?? "<malformed>", .invalidFrame(reason: "request decode failed: \(error)"))
+      }
       return
     }
 

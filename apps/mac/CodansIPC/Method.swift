@@ -110,6 +110,9 @@ extension IPC {
     case paneClose = "pane.close"
     case paneInfo = "pane.info"
     case paneRead = "pane.read"
+    // Streaming: a live, read-only mirror of the pane's terminal as
+    // `TerminalStreamFrame`s (wire types in `TerminalStreamWireTypes.swift`).
+    case paneAttachStream = "pane.attachStream"
 
     // events — server-push subscription. `subscribe` is a streaming call:
     // a snapshot frame first, then debounced change frames until either

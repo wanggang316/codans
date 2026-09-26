@@ -36,6 +36,36 @@ extension IPC {
     }
   }
 
+  /// The parts of a request frame a server needs to answer it even when
+  /// the frame does not decode as a `Request` — most often because it
+  /// names a method this build does not have. Answering with the caller's
+  /// `id` lets it fail that call instead of waiting out a timeout.
+  public struct RequestHead: Decodable, Equatable, Sendable {
+    public let id: String
+    /// The method as sent; nil when missing or not a string.
+    public let method: String?
+
+    private enum CodingKeys: String, CodingKey { case id, method }
+
+    public init(id: String, method: String?) {
+      self.id = id
+      self.method = method
+    }
+
+    public init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      id = try c.decode(String.self, forKey: .id)
+      method = try? c.decodeIfPresent(String.self, forKey: .method)
+    }
+
+    /// The error that answers a frame with this head: `unknownMethod` for a
+    /// method this build does not know, nil otherwise.
+    public var unknownMethodError: IPCError? {
+      guard let method, Method(rawValue: method) == nil else { return nil }
+      return .unknownMethod(method)
+    }
+  }
+
   /// Response envelope. `stream` is `true` for intermediate streaming frames,
   /// `false` for unary results and for the final terminator of a stream.
   /// Exactly one of `result` / `error` is non-nil; both may be nil on the

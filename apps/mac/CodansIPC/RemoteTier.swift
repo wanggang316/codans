@@ -49,7 +49,7 @@ extension IPC.Method {
       .hierarchyDescribePane,
       .hierarchyResolveAlias, .hierarchyResolvePaneLabel, .hierarchyResolveWorktreeGlob,
       .agentListStates, .agentListProfiles,
-      .paneRead, .paneInfo,
+      .paneRead, .paneInfo, .paneAttachStream,
       .terminalReadText,
       .workspaceDescribe,
       .projectListScripts,
