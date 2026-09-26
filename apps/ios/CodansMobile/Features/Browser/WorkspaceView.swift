@@ -42,6 +42,7 @@ struct WorkspaceView: View {
       HomeList(
         store: store,
         selectedWorktreeID: $selectedWorktreeID,
+        showsSelection: sizeClass == .regular,
         actions: actions,
         newAgent: { projectID in
           store.send(.composer(.targetSelected(.newWorktree(projectID: projectID))))
@@ -220,10 +221,11 @@ struct WorkspaceView: View {
 private struct HomeList: View {
   let store: StoreOf<AppFeature>
   @Binding var selectedWorktreeID: String?
+  /// Whether the list sits beside its detail. Decided by the split view's
+  /// size class: the sidebar column itself always reports compact.
+  let showsSelection: Bool
   let actions: HomeActions
   let newAgent: (String) -> Void
-
-  @Environment(\.horizontalSizeClass) private var sizeClass
 
   private var health: ConnectionHealth { store.connection.health }
 
@@ -288,7 +290,7 @@ private struct HomeList: View {
   /// system's solid accent bar; compact width has no persistent selection.
   @ViewBuilder
   private func rowBackground(_ id: String) -> some View {
-    if sizeClass == .regular, selectedWorktreeID == id {
+    if showsSelection, selectedWorktreeID == id {
       RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
         .fill(Color.surfaceMuted)
         .padding(.horizontal, Theme.Space.xs)

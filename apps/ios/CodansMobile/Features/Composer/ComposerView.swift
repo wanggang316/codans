@@ -153,7 +153,9 @@ struct ComposerSheet: View {
             .accessibilityIdentifier("composer-branch")
         }
         .frame(minHeight: 48)
-      } else if let branch = worktree?.branch {
+      } else if let branch = worktree?.branch, branch != worktree?.name {
+        // Most worktrees are named after their branch; repeating it adds
+        // a row that says nothing.
         ContextRow(symbol: "arrow.triangle.branch", title: branch)
       }
 
