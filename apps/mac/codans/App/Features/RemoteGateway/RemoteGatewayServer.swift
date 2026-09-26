@@ -41,6 +41,13 @@ final class RemoteGatewayServer {
   /// Unauthenticated handshakes in flight at once; more are refused.
   static let maxPendingHandshakes = 8
 
+  /// How long the listener outlives the last paired key when a connected
+  /// device was just revoked. A phone learns it was removed only from
+  /// handshake refusals; with the listener gone it would see a Mac that
+  /// vanished from the network and keep looking for it instead of asking
+  /// to pair again.
+  static let defaultRevokedGracePeriod: Duration = .seconds(90)
+
   private(set) var status: Status = .off
   /// Devices with at least one live connection, for the device list.
   private(set) var connectedDeviceIDs: Set<UUID> = []
@@ -58,6 +65,12 @@ final class RemoteGatewayServer {
   @ObservationIgnored private var connections: [UUID: LiveConnection] = [:]
   @ObservationIgnored private var pendingHandshakes = 0
   @ObservationIgnored private var expiryTask: Task<Void, Never>?
+  @ObservationIgnored private let revokedGracePeriod: Duration
+  /// Set while a revoked device may still be reconnecting; see
+  /// `defaultRevokedGracePeriod`.
+  @ObservationIgnored private var revokedGraceTask: Task<Void, Never>?
+  /// The listener holds no paired key, only refuses handshakes.
+  @ObservationIgnored private var isRefusingOnly = false
   @ObservationIgnored private let queue = DispatchQueue(label: "com.gumpw.codans.remote.gateway")
   @ObservationIgnored private let logger = Logger(subsystem: "com.gumpw.codans.remote", category: "gateway")
 
@@ -73,18 +86,24 @@ final class RemoteGatewayServer {
     channel: BuildChannel = .current,
     environment: [String: String] = ProcessInfo.processInfo.environment,
     hostName: String = RemoteGatewayServer.defaultHostName(),
-    scope: Scope = .lan
+    scope: Scope = .lan,
+    revokedGracePeriod: Duration = RemoteGatewayServer.defaultRevokedGracePeriod
   ) {
     self.router = router
     self.scope = scope
+    self.revokedGracePeriod = revokedGracePeriod
     self.devices = devices
     self.channel = channel
     self.isForcedOff = environment[CodansEnvironment.Key.remoteDisabled.rawValue] == "1"
     self.serviceName = RemoteBonjour.serviceName(
       hostName: hostName, channel: channel.slug, releaseChannel: BuildChannel.release.slug)
     devices.onCredentialsChanged = { [weak self] in self?.reconcileListener() }
-    devices.onRevoked = { [weak self] id in self?.dropConnections(of: id) }
+    devices.onRevoked = { [weak self] id in self?.deviceRevoked(id) }
   }
+
+  /// The port the listener is bound to, also while it only refuses; nil
+  /// until it is ready.
+  var listenerPort: NWEndpoint.Port? { listener?.port.flatMap { $0.rawValue == 0 ? nil : $0 } }
 
   static func defaultHostName() -> String {
     Host.current().localizedName ?? ProcessInfo.processInfo.hostName
@@ -134,16 +153,31 @@ final class RemoteGatewayServer {
     }
     let credentials = Set(devices.credentials())
     guard !credentials.isEmpty else {
-      stopListener()
+      if revokedGraceTask != nil {
+        // Keep answering, with a key no device holds, so every handshake
+        // is refused the way a revoked phone expects.
+        if listener == nil || !isRefusingOnly {
+          stopListener()
+          startListener([Self.unheldCredential()], refusingOnly: true)
+        }
+      } else {
+        stopListener()
+      }
       status = .noDevices
       return
     }
-    if listener != nil, credentials == listenerCredentials { return }
+    if listener != nil, !isRefusingOnly, credentials == listenerCredentials { return }
     stopListener()
     startListener(credentials)
   }
 
-  private func startListener(_ credentials: Set<RemoteTLS.PSKCredential>) {
+  /// A random key that was never handed to any device.
+  private static func unheldCredential() -> RemoteTLS.PSKCredential {
+    RemoteTLS.PSKCredential(
+      identity: UUID().uuidString, key: Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }))
+  }
+
+  private func startListener(_ credentials: Set<RemoteTLS.PSKCredential>, refusingOnly: Bool = false) {
     let parameters = RemoteTLS.serverParameters(credentials: Array(credentials))
     if scope == .loopback {
       parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
@@ -188,7 +222,8 @@ final class RemoteGatewayServer {
     }
     self.listener = listener
     listenerCredentials = credentials
-    status = .starting
+    isRefusingOnly = refusingOnly
+    if !refusingOnly { status = .starting }
     listener.start(queue: queue)
     logger.info("listener starting with \(credentials.count, privacy: .public) paired key(s)")
   }
@@ -196,7 +231,7 @@ final class RemoteGatewayServer {
   private func listenerStateChanged(_ state: NWListener.State, port: NWEndpoint.Port?) {
     switch state {
     case .ready:
-      status = .listening(port: port?.rawValue ?? 0)
+      if !isRefusingOnly { status = .listening(port: port?.rawValue ?? 0) }
       logger.info("listening on port \(port?.rawValue ?? 0, privacy: .public) as \(self.serviceName, privacy: .public)")
     case .waiting(let error):
       status = .unavailable(error.localizedDescription)
@@ -218,6 +253,7 @@ final class RemoteGatewayServer {
     listener?.cancel()
     listener = nil
     listenerCredentials = []
+    isRefusingOnly = false
   }
 
   // MARK: - Connections
@@ -303,6 +339,21 @@ final class RemoteGatewayServer {
     guard let ended = connections.removeValue(forKey: connectionID) else { return }
     refreshConnectedDevices()
     logger.info("device \(ended.deviceID.uuidString, privacy: .public) disconnected")
+  }
+
+  /// Runs before the store reconciles the listener, so a connected
+  /// device's grace is in place when its key goes away.
+  private func deviceRevoked(_ deviceID: UUID) {
+    if connectedDeviceIDs.contains(deviceID) {
+      revokedGraceTask?.cancel()
+      revokedGraceTask = Task { [weak self, revokedGracePeriod] in
+        try? await Task.sleep(for: revokedGracePeriod)
+        guard !Task.isCancelled, let self else { return }
+        self.revokedGraceTask = nil
+        self.reconcileListener()
+      }
+    }
+    dropConnections(of: deviceID)
   }
 
   private func dropConnections(of deviceID: UUID) {

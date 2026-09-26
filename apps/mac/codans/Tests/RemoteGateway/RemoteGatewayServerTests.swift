@@ -49,6 +49,52 @@ struct RemoteGatewayServerTests {
     #expect(gateway.status == .noDevices)
   }
 
+  /// A phone learns it was removed only from handshake refusals, so after
+  /// a connected device is revoked the listener outlives the last key for
+  /// a while, refusing every handshake, instead of vanishing at once.
+  @Test(.timeLimit(.minutes(1)))
+  func revokedConnectedDeviceIsRefusedUntilTheGraceEnds() async throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    let gateway = RemoteGatewayServer(
+      router: Self.makeRouter(), devices: store, environment: [:], hostName: "Test", scope: .loopback,
+      revokedGracePeriod: .seconds(2))
+    defer { gateway.setEnabled(false) }
+
+    gateway.setEnabled(true)
+    let payload = try gateway.pairNewDevice()
+    let port = try await Self.waitUntilListening(gateway)
+    let client = try await RemoteRPCClient.connect(
+      to: .hostPort(host: "127.0.0.1", port: port),
+      credential: payload.credential,
+      hello: HelloRequest(clientVersion: "1", clientBinary: "test")
+    )
+    defer { Task { await client.close() } }
+
+    store.revoke(payload.deviceID)
+    #expect(gateway.status == .noDevices)
+    for _ in 0..<250 where gateway.listenerPort == nil {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    let refusingPort = try #require(gateway.listenerPort)
+    do {
+      let transport = try await RemoteHandshake.connect(
+        to: .hostPort(host: "127.0.0.1", port: refusingPort), credential: payload.credential, timeout: .seconds(5))
+      transport.close()
+      Issue.record("a revoked device completed a handshake")
+    } catch RemoteHandshake.HandshakeError.refused {
+    } catch {
+      Issue.record("expected a handshake refusal, got \(error)")
+    }
+
+    for _ in 0..<250 where gateway.listenerPort != nil {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(gateway.listenerPort == nil)
+    #expect(gateway.status == .noDevices)
+  }
+
   /// The listener keeps an expired code's key until its next rebuild, so
   /// the post-handshake check must reject the code on its own.
   @Test(.timeLimit(.minutes(1)))
