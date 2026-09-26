@@ -424,6 +424,7 @@ private struct TerminalExitedBanner: View {
       VStack(alignment: .leading, spacing: 1) {
         Text("Process exited")
           .font(.system(size: 14, weight: .semibold))
+          .lineLimit(1)
         if !reason.isEmpty {
           Text(reason)
             .font(.system(size: 12))
@@ -435,6 +436,8 @@ private struct TerminalExitedBanner: View {
       if canClose {
         Button("Close Pane", role: .destructive, action: onClose)
           .buttonStyle(.terminalQuiet)
+          // A narrow split pane squeezes the text, never the button.
+          .fixedSize()
       }
     }
     .terminalBanner()

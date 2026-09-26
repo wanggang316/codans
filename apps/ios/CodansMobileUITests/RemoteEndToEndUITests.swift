@@ -25,39 +25,37 @@ final class RemoteEndToEndUITests: XCTestCase {
     let worktreeRow = try pairAndOpenWorkspace(app)
     worktreeRow.tap()
 
-    // By identifier: in compact width the collapsed worktree list stays in
-    // the accessibility tree, so "first cell" would hit a worktree row.
-    let paneRow = app.descendants(matching: .any)["pane-row"].firstMatch
-    if !paneRow.waitForExistence(timeout: 5), worktreeRow.isHittable {
+    // A worktree opens straight onto its terminal: the pane last viewed
+    // there, else the Mac's focused pane.
+    let screen = app.descendants(matching: .any)["terminal-screen"].firstMatch
+    if !screen.waitForExistence(timeout: 5), worktreeRow.isHittable {
       worktreeRow.tap()  // a late hierarchy update can still swallow the first tap
     }
-    XCTAssertTrue(paneRow.waitForExistence(timeout: 10), "worktree has no pane rows")
-    shot("3-panes")
-    paneRow.tap()
+    XCTAssertTrue(screen.waitForExistence(timeout: 10), "worktree never opened a terminal")
 
-    // The pane's text arrives from `pane.read`; an empty dump means the
-    // phone shows a blank page.
-    let output = app.staticTexts["pane-output"]
-    XCTAssertTrue(output.waitForExistence(timeout: 10), "pane text never loaded")
-    shot("4-pane-open")
-    XCTAssertFalse(output.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "pane text is empty")
+    // The screen fills from the pane's stream; an empty screen means the
+    // phone shows a blank terminal.
+    let text = app.descendants(matching: .any)["terminal-text"].firstMatch
+    XCTAssertTrue(text.waitForExistence(timeout: 10), "terminal never rendered")
+    expectation(for: NSPredicate(format: "value MATCHES %@", "(?s).*\\S.*"), evaluatedWith: text)
+    waitForExpectations(timeout: 10)
+    shot("3-terminal-open")
 
-    let input = app.textFields["Send to pane"]
+    let keyBar = app.descendants(matching: .any)["terminal-key-bar"].firstMatch
     guard let line = env["CODANS_E2E_INPUT"], !line.isEmpty else {
-      // View-only device: the input bar must never appear.
-      XCTAssertFalse(input.waitForExistence(timeout: 3), "view-only device shows the input bar")
-      shot("5-pane-readonly")
+      // View-only device: the key bar must never appear.
+      XCTAssertFalse(keyBar.waitForExistence(timeout: 3), "view-only device shows the key bar")
+      shot("4-terminal-readonly")
       return
     }
-    XCTAssertTrue(input.waitForExistence(timeout: 10), "interactive device has no input bar")
-    input.tap()
-    input.typeText(line)
-    app.buttons["pane-send"].tap()
+    XCTAssertTrue(keyBar.waitForExistence(timeout: 10), "interactive device has no key bar")
+    screen.tap()
+    app.typeText(line + "\n")
 
-    // The pane refreshes while visible; the echoed line comes back.
-    let echoed = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", line)).firstMatch
-    XCTAssertTrue(echoed.waitForExistence(timeout: 15), "sent line never showed up in the pane")
-    shot("5-pane-sent")
+    // The Mac's pane echoes the line back over the stream.
+    expectation(for: NSPredicate(format: "value CONTAINS %@", line), evaluatedWith: text)
+    waitForExpectations(timeout: 15)
+    shot("4-terminal-sent")
   }
 
   /// Starts an agent from the composer in a new worktree. The harness
@@ -72,24 +70,29 @@ final class RemoteEndToEndUITests: XCTestCase {
     _ = try pairAndOpenWorkspace(app)
     shot("1-home")
 
+    let pill = app.descendants(matching: .any)["composer-pill"].firstMatch
+    XCTAssertTrue(pill.waitForExistence(timeout: 10), "no composer for an interactive device")
+    pill.tap()
     let field = app.descendants(matching: .any)["composer-prompt"].firstMatch
-    XCTAssertTrue(field.waitForExistence(timeout: 10), "no composer for an interactive device")
-    field.tap()
-    let newWorktree = app.buttons["composer-new-worktree"]
-    XCTAssertTrue(newWorktree.waitForExistence(timeout: 5), "composer context rows never opened")
+    XCTAssertTrue(field.waitForExistence(timeout: 5), "composer never opened")
     shot("2-composer-open")
+    // The worktree row is a menu: existing worktrees, then "New Worktree".
+    let target = app.descendants(matching: .any)["composer-target"].firstMatch
+    XCTAssertTrue(target.waitForExistence(timeout: 5), "composer has no worktree row")
+    target.tap()
+    let newWorktree = app.buttons["composer-new-worktree"]
+    XCTAssertTrue(newWorktree.waitForExistence(timeout: 5), "worktree menu has no New Worktree")
     newWorktree.tap()
     field.tap()
     field.typeText(prompt)
     shot("3-composer-typed")
     app.buttons["composer-send"].tap()
 
-    // The launch navigates to the agent's pane, whose output carries the
-    // prompt (the fake agent echoes its arguments).
-    let output = app.staticTexts["pane-output"]
-    XCTAssertTrue(output.waitForExistence(timeout: 30), "never navigated to the new agent's pane")
-    let echoed = NSPredicate(format: "label CONTAINS %@", prompt)
-    expectation(for: echoed, evaluatedWith: output)
+    // The launch opens the agent's terminal, which shows the prompt (the
+    // fake agent echoes its arguments).
+    let text = app.descendants(matching: .any)["terminal-text"].firstMatch
+    XCTAssertTrue(text.waitForExistence(timeout: 30), "never navigated to the new agent's pane")
+    expectation(for: NSPredicate(format: "value CONTAINS %@", prompt), evaluatedWith: text)
     waitForExpectations(timeout: 20)
     shot("4-agent-pane")
   }
@@ -122,12 +125,10 @@ final class RemoteEndToEndUITests: XCTestCase {
     XCTAssertTrue(projectHeader.waitForExistence(timeout: 20), "project \(project) never listed")
     let worktreeRow = app.descendants(matching: .any)["worktree-row"].firstMatch
     XCTAssertTrue(worktreeRow.waitForExistence(timeout: 5), "project has no worktree rows")
-    // The "Connecting…" banner above the list disappears once connected and
-    // shifts the rows up; a tap during that shift lands on empty space.
-    let connecting = app.staticTexts.containing(
-      NSPredicate(format: "label BEGINSWITH 'Connecting' OR label BEGINSWITH 'Reconnecting'")
-    ).firstMatch
-    _ = connecting.waitForNonExistence(timeout: 20)
+    // The connection strip above the list disappears once live and shifts
+    // the rows up; a tap during that shift lands on empty space.
+    let banner = app.descendants(matching: .any)["connection-banner"].firstMatch
+    _ = banner.waitForNonExistence(timeout: 20)
     shot("1-worktrees")
     return worktreeRow
   }

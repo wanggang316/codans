@@ -44,12 +44,20 @@ final class MirrorTerminalView: TerminalView {
     isScrollEnabled = true
     showsHorizontalScrollIndicator = false
     applyPalette()
+    accessibilityIdentifier = "terminal-text"
     isReady = true
     setGrid(cols: cols, rows: rows)
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  /// The visible screen as text, so VoiceOver and UI tests can read what
+  /// the pane shows.
+  override var accessibilityValue: String? {
+    get { accessibilityPageContent() }
+    set {}
+  }
 
   // MARK: - Render only
 

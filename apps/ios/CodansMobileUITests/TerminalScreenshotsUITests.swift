@@ -116,6 +116,14 @@ final class TerminalScreenshotsUITests: XCTestCase {
     XCTAssertTrue(readOnly.descendants(matching: .any)["terminal-screen"].firstMatch.waitForExistence(timeout: 15))
     sleep(1)
     shot("10-read-only")
+
+    readOnly.terminate()
+    let exited = launch(["CODANS_DEMO_PANE": "shell", "CODANS_DEMO_EXITED": "1"])
+    XCTAssertTrue(
+      exited.descendants(matching: .any)["terminal-exited"].firstMatch.waitForExistence(timeout: 15),
+      "exited banner never appeared")
+    sleep(1)
+    shot("11-exited")
   }
 
   @MainActor

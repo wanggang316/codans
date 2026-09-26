@@ -34,6 +34,7 @@ struct AgentsView: View {
         ForEach(0..<4, id: \.self) { index in
           SkeletonRow(variant: [0.2, 0.7, 0.45, 0.9][index])
             .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
       }
       .listStyle(.plain)
@@ -57,6 +58,9 @@ struct AgentsView: View {
               .buttonStyle(.plain)
               .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 16))
               .listRowSeparator(.hidden)
+              // A sheet's plain list tints rows grey in dark mode; rows sit
+              // on the page like the home list's.
+              .listRowBackground(Color.clear)
             }
           } header: {
             HStack(spacing: 6) {

@@ -236,8 +236,9 @@ private struct HomeList: View {
   var body: some View {
     List(selection: $selectedWorktreeID) {
       // A row, not a top inset: an inset sits under the bar's scroll-edge
-      // effect and is hard to read there.
-      if health.isPaired, !health.isLive, store.browser.hierarchy != nil {
+      // effect and is hard to read there. Beside a detail column the strip
+      // sits over the detail instead, so it shows once.
+      if !showsSelection, health.isPaired, !health.isLive, store.browser.hierarchy != nil {
         ConnectionBanner(
           health: health,
           retry: { store.send(.connection(.connectTapped)) },
