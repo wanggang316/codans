@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Acceptance screenshots of the iOS companion against a real, isolated Mac
-# instance: two projects with a real shell, a split, and a Claude Code-like
-# agent session; then home, terminal, key bar, title menu, reconnecting
-# after the Mac quits, and the removed state after the Mac revokes the phone.
+# instance: two projects, a real shell and a Claude Code-like agent
+# session; then home, terminal, key bar, title menu, the shell tab,
+# reconnecting after the Mac quits, and the removed state after the Mac
+# revokes the phone.
 # Uses the same isolation as harness.sh (private socket, config, zmx cache)
 # and never touches the default dev / release instances.
 #
@@ -163,6 +164,8 @@ revoke_all() {
 # ---------- phone ----------
 reset_sim() {
   xcrun simctl uninstall "$SIM" com.gumpw.codans.mobile >/dev/null 2>&1
+  # The simulator can keep running an older test runner after a rebuild.
+  xcrun simctl uninstall "$SIM" com.gumpw.codans.mobile-uitests.xctrunner >/dev/null 2>&1
   xcrun simctl shutdown "$SIM" >/dev/null 2>&1
   xcrun simctl boot "$SIM" && xcrun simctl bootstatus "$SIM" -b >/dev/null
   xcrun simctl ui "$SIM" appearance "$APPEARANCE"

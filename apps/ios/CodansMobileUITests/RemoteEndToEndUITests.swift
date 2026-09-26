@@ -156,10 +156,10 @@ final class RemoteEndToEndUITests: XCTestCase {
 
   /// Acceptance screenshots against a real Mac, driven by
   /// `docs/user-tests/ios-companion/tour.sh`: home, an agent's terminal, the
-  /// key bar, the title menu, reconnecting while the Mac is gone, and the
-  /// removed state after the Mac revokes the device. Screenshot names start
-  /// with `CODANS_E2E_TOUR_PREFIX`; `CODANS_E2E_WORKTREE` picks the worktree
-  /// row whose label contains it.
+  /// key bar, the title menu, a shell tab picked from it, reconnecting while
+  /// the Mac is gone, and the removed state after the Mac revokes the
+  /// device. Screenshot names start with `CODANS_E2E_TOUR_PREFIX`;
+  /// `CODANS_E2E_WORKTREE` picks the worktree row whose label contains it.
   @MainActor
   func testAcceptanceTour() throws {
     let prefix = try required("CODANS_E2E_TOUR_PREFIX")
@@ -169,7 +169,8 @@ final class RemoteEndToEndUITests: XCTestCase {
 
     let label = env["CODANS_E2E_WORKTREE"] ?? ""
     let rows = app.descendants(matching: .any).matching(identifier: "worktree-row")
-    let row = label.isEmpty ? rows.firstMatch : rows.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
+    let row =
+      label.isEmpty ? rows.firstMatch : rows.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
     XCTAssertTrue(row.waitForExistence(timeout: 5), "no worktree row for \(label)")
     row.tap()
     let text = app.descendants(matching: .any)["terminal-text"].firstMatch
@@ -190,26 +191,31 @@ final class RemoteEndToEndUITests: XCTestCase {
     XCTAssertTrue(app.buttons["New Tab"].waitForExistence(timeout: 5), "title menu never opened")
     sleep(1)
     shot("\(prefix)-4-tab-menu")
-    // A tap outside the menu closes it without picking anything.
-    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
-    _ = app.buttons["New Tab"].waitForNonExistence(timeout: 5)
+    // The menu lists the worktree's tabs; the shell tab has the real shell.
+    let shellTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "shell")).firstMatch
+    XCTAssertTrue(shellTab.exists, "title menu has no shell tab")
+    shellTab.tap()
+    expectation(for: NSPredicate(format: "value CONTAINS %@", "client.test.ts"), evaluatedWith: text)
+    waitForExpectations(timeout: 15)
+    sleep(1)
+    shot("\(prefix)-5-shell")
 
     handOff("quit", timeout: 90)  // the harness quits the Mac instance
     let reconnecting = app.descendants(matching: .any)["terminal-reconnecting"].firstMatch
     XCTAssertTrue(reconnecting.waitForExistence(timeout: 30), "the terminal never showed it was reconnecting")
     sleep(3)
-    shot("\(prefix)-5-reconnecting")
+    shot("\(prefix)-6-reconnecting")
 
     handOff("relaunched", timeout: 120)  // the harness starts the Mac again
     XCTAssertTrue(reconnecting.waitForNonExistence(timeout: 60), "the terminal never reconnected")
     sleep(2)
-    shot("\(prefix)-6-reconnected")
+    shot("\(prefix)-7-reconnected")
 
     handOff("live", timeout: 120)  // the harness revokes the device
     let pairAgain = app.descendants(matching: .any)["connection-pair-again"].firstMatch
     XCTAssertTrue(pairAgain.waitForExistence(timeout: 90), "a revoked device never asked to pair again")
     sleep(1)
-    shot("\(prefix)-7-rejected")
+    shot("\(prefix)-8-rejected")
   }
 
   /// Starts an agent from the composer in a new worktree. The harness
