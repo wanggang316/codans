@@ -11,6 +11,12 @@ nonisolated struct RemoteSessionInfo: Equatable, Sendable {
   /// The permission the Mac reported at handshake. Nil from a Mac that
   /// predates the field; the UI then treats the device as read-only.
   var permission: IPC.RemotePermission?
+  /// `system.hello`'s protocol minor. Minor 2 brings the live terminal
+  /// (`pane.attachStream`, `terminal.sendEvents`) and tab/pane management.
+  var protocolMinor: Int = 1
+
+  /// Whether the Mac serves the live terminal and typed key events.
+  var supportsLiveTerminal: Bool { protocolMinor >= 2 }
 }
 
 /// An open session: handshake facts plus the `events.subscribe` stream,
@@ -43,6 +49,39 @@ nonisolated struct RemoteClient: Sendable {
   /// message; returns the new pane's ID when the Mac created one.
   var launchAgent:
     @Sendable (_ projectID: String, _ worktreeID: String, _ profile: String, _ prompt: String?) async throws -> String?
+  /// `pane.attachStream` on a connection of its own, closed when the
+  /// stream ends or its consumer stops iterating.
+  var attachStream: @Sendable (_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error>
+  /// `terminal.sendEvents`: one ordered batch.
+  var sendEvents:
+    @Sendable (_ paneID: String, _ events: [IPC.TerminalInputEvent]) async throws -> IPC.TerminalSendEventsResult
+  /// `hierarchy.createTab`; returns the new tab's ID.
+  var createTab: @Sendable (_ location: PaneLocator) async throws -> String
+  /// `hierarchy.splitPane` beside `location.paneID`; returns the new pane's ID.
+  var splitPane: @Sendable (_ location: PaneLocator, _ direction: SplitDirection) async throws -> String
+  /// `hierarchy.renameTab`; an empty name clears the user's name.
+  var renameTab: @Sendable (_ location: PaneLocator, _ name: String) async throws -> Void
+  /// `hierarchy.closeTab`: ends every pane's process in the tab.
+  var closeTab: @Sendable (_ location: PaneLocator) async throws -> Void
+  /// `hierarchy.closePane`: ends the pane's process.
+  var closePane: @Sendable (_ location: PaneLocator) async throws -> Void
+  /// `hierarchy.activateTab`: shows the tab on the Mac, which opens its
+  /// panes' terminals there.
+  var activateTab: @Sendable (_ tabID: String) async throws -> Void
+}
+
+/// Where a pane sits, as the hierarchy methods address it.
+nonisolated struct PaneLocator: Equatable, Sendable {
+  var projectID: String
+  var worktreeID: String
+  var tabID: String
+  var paneID: String
+}
+
+/// A split direction as `hierarchy.splitPane` names it.
+nonisolated enum SplitDirection: String, Equatable, Sendable {
+  case right
+  case down
 }
 
 nonisolated extension RemoteClient: DependencyKey {
@@ -56,7 +95,15 @@ nonisolated extension RemoteClient: DependencyKey {
       sendKey: { try await sessions.sendKey($0, key: $1) },
       listProfiles: { try await sessions.listProfiles() },
       createWorktree: { try await sessions.createWorktree(projectID: $0, branch: $1) },
-      launchAgent: { try await sessions.launchAgent(projectID: $0, worktreeID: $1, profile: $2, prompt: $3) }
+      launchAgent: { try await sessions.launchAgent(projectID: $0, worktreeID: $1, profile: $2, prompt: $3) },
+      attachStream: { try await sessions.attachStream($0) },
+      sendEvents: { try await sessions.sendEvents($0, events: $1) },
+      createTab: { try await sessions.createTab($0) },
+      splitPane: { try await sessions.splitPane($0, direction: $1) },
+      renameTab: { try await sessions.renameTab($0, name: $1) },
+      closeTab: { try await sessions.closeTab($0) },
+      closePane: { try await sessions.closePane($0) },
+      activateTab: { try await sessions.activateTab($0) }
     )
   }()
 
@@ -68,7 +115,15 @@ nonisolated extension RemoteClient: DependencyKey {
     sendKey: unimplemented("RemoteClient.sendKey"),
     listProfiles: unimplemented("RemoteClient.listProfiles"),
     createWorktree: unimplemented("RemoteClient.createWorktree"),
-    launchAgent: unimplemented("RemoteClient.launchAgent")
+    launchAgent: unimplemented("RemoteClient.launchAgent"),
+    attachStream: unimplemented("RemoteClient.attachStream"),
+    sendEvents: unimplemented("RemoteClient.sendEvents"),
+    createTab: unimplemented("RemoteClient.createTab"),
+    splitPane: unimplemented("RemoteClient.splitPane"),
+    renameTab: unimplemented("RemoteClient.renameTab"),
+    closeTab: unimplemented("RemoteClient.closeTab"),
+    closePane: unimplemented("RemoteClient.closePane"),
+    activateTab: unimplemented("RemoteClient.activateTab")
   )
 }
 
@@ -85,6 +140,13 @@ private actor LiveRemoteSessions {
   /// one connection's frames serially.
   private var control: RemoteRPCClient?
   private var events: RemoteRPCClient?
+  /// Where and how the current session connected, so each terminal stream
+  /// can open its own connection to the same gateway.
+  private var streamTarget: (endpoint: NWEndpoint, credential: RemoteTLS.PSKCredential)?
+  /// One connection per live terminal stream: the Mac serves a
+  /// connection's frames serially, so a busy pane would otherwise hold up
+  /// every other call.
+  private var streams: [UUID: RemoteRPCClient] = [:]
 
   func connect(_ gateway: PairedGateway, credential: RemoteTLS.PSKCredential) async throws -> RemoteSession {
     await disconnect()
@@ -98,7 +160,8 @@ private actor LiveRemoteSessions {
     var lastError: Error = RemoteFailure(.notFound, "Couldn't reach \(gateway.displayName).")
     for candidate in candidates {
       do {
-        control = try await RemoteRPCClient.connect(to: candidate, credential: credential, hello: hello, timeout: budget)
+        control = try await RemoteRPCClient.connect(
+          to: candidate, credential: credential, hello: hello, timeout: budget)
         endpoint = candidate
         break
       } catch {
@@ -115,6 +178,7 @@ private actor LiveRemoteSessions {
     }
     self.control = control
     self.events = events
+    self.streamTarget = (endpoint, credential)
 
     let stream = try await events.subscribe(
       .eventsSubscribe, params: IPC.EventsSubscribeRequest(), as: IPC.EventFrame.self)
@@ -122,7 +186,8 @@ private actor LiveRemoteSessions {
     return RemoteSession(
       info: RemoteSessionInfo(
         serverVersion: serverHello?.serverVersion ?? "",
-        permission: serverHello?.remotePermission
+        permission: serverHello?.remotePermission,
+        protocolMinor: serverHello?.protocolMinor ?? 1
       ),
       events: stream
     )
@@ -131,10 +196,109 @@ private actor LiveRemoteSessions {
   func disconnect() async {
     let control = self.control
     let events = self.events
+    let streams = self.streams.values
     self.control = nil
     self.events = nil
+    self.streamTarget = nil
+    self.streams = [:]
     await control?.close()
     await events?.close()
+    for stream in streams { await stream.close() }
+  }
+
+  func attachStream(_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error> {
+    guard let target = streamTarget else { throw RemoteRPCClient.ClientError.connectionClosed }
+    let request = IPC.PaneAttachStreamRequest(paneID: try Self.paneID(paneID))
+    let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
+    let client = try await RemoteRPCClient.connect(to: target.endpoint, credential: target.credential, hello: hello)
+    // The session may have been torn down while this connection opened.
+    guard streamTarget != nil else {
+      await client.close()
+      throw RemoteRPCClient.ClientError.connectionClosed
+    }
+    let id = UUID()
+    streams[id] = client
+    let frames: AsyncThrowingStream<IPC.TerminalStreamFrame, Error>
+    do {
+      frames = try await client.subscribe(.paneAttachStream, params: request, as: IPC.TerminalStreamFrame.self)
+    } catch {
+      await closeStream(id)
+      throw error
+    }
+    // Relay so the connection closes with the stream, whichever side ends it.
+    let (relay, continuation) = AsyncThrowingStream<IPC.TerminalStreamFrame, Error>.makeStream()
+    let pump = Task {
+      do {
+        for try await frame in frames { continuation.yield(frame) }
+        continuation.finish()
+      } catch {
+        continuation.finish(throwing: error)
+      }
+      await self.closeStream(id)
+    }
+    continuation.onTermination = { _ in
+      pump.cancel()
+      Task { await self.closeStream(id) }
+    }
+    return relay
+  }
+
+  private func closeStream(_ id: UUID) async {
+    guard let client = streams.removeValue(forKey: id) else { return }
+    await client.close()
+  }
+
+  func sendEvents(_ paneID: String, events: [IPC.TerminalInputEvent]) async throws -> IPC.TerminalSendEventsResult {
+    let request = IPC.TerminalSendEventsRequest(paneID: try Self.paneID(paneID), events: events)
+    return try await withControl { control in
+      try await control.call(.terminalSendEvents, params: request, as: IPC.TerminalSendEventsResult.self)
+    }
+  }
+
+  func createTab(_ location: PaneLocator) async throws -> String {
+    let params = CreateTabParams(
+      projectID: ProjectID(raw: try Self.uuid(location.projectID)),
+      worktreeID: WorktreeID(raw: try Self.uuid(location.worktreeID)))
+    return try await withControl { control in
+      try await control.call(.hierarchyCreateTab, params: params, as: IDResult.self)
+    }.id
+  }
+
+  func splitPane(_ location: PaneLocator, direction: SplitDirection) async throws -> String {
+    let params = SplitPaneParams(
+      paneID: try Self.uuid(location.paneID), tabID: try Self.uuid(location.tabID),
+      worktreeID: try Self.uuid(location.worktreeID), projectID: try Self.uuid(location.projectID),
+      direction: direction.rawValue)
+    return try await withControl { control in
+      try await control.call(.hierarchySplitPane, params: params, as: IDResult.self)
+    }.id
+  }
+
+  func renameTab(_ location: PaneLocator, name: String) async throws {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let params = RenameTabParams(
+      id: try Self.uuid(location.tabID), worktreeID: try Self.uuid(location.worktreeID),
+      projectID: try Self.uuid(location.projectID), name: trimmed.isEmpty ? nil : trimmed)
+    _ = try await withControl { try await $0.callRaw(.hierarchyRenameTab, params: params) }
+  }
+
+  func closeTab(_ location: PaneLocator) async throws {
+    let params = TabLocatorParams(
+      id: try Self.uuid(location.tabID), worktreeID: try Self.uuid(location.worktreeID),
+      projectID: try Self.uuid(location.projectID))
+    _ = try await withControl { try await $0.callRaw(.hierarchyCloseTab, params: params) }
+  }
+
+  func closePane(_ location: PaneLocator) async throws {
+    let params = PaneLocatorParams(
+      id: try Self.uuid(location.paneID), tabID: try Self.uuid(location.tabID),
+      worktreeID: try Self.uuid(location.worktreeID), projectID: try Self.uuid(location.projectID))
+    _ = try await withControl { try await $0.callRaw(.hierarchyClosePane, params: params) }
+  }
+
+  func activateTab(_ tabID: String) async throws {
+    let params = IDParams(id: try Self.uuid(tabID))
+    _ = try await withControl { try await $0.callRaw(.hierarchyActivateTab, params: params) }
   }
 
   func readPane(_ paneID: String, tail: Int) async throws -> String {
@@ -196,6 +360,52 @@ private actor LiveRemoteSessions {
 
   private struct CreateWorktreeResult: Decodable, Sendable {
     let id: WorktreeID
+  }
+
+  /// Tab and pane management params, as the Mac's hierarchy handlers
+  /// declare them. Like the terminal params below they live next to the
+  /// handlers, not in CodansIPC; the shapes are the stable wire contract
+  /// the CLI also relies on.
+  private struct CreateTabParams: Encodable, Sendable {
+    let projectID: ProjectID
+    let worktreeID: WorktreeID
+  }
+
+  private struct SplitPaneParams: Encodable, Sendable {
+    let paneID: UUID
+    let tabID: UUID
+    let worktreeID: UUID
+    let projectID: UUID
+    let direction: String
+  }
+
+  private struct RenameTabParams: Encodable, Sendable {
+    let id: UUID
+    let worktreeID: UUID
+    let projectID: UUID
+    let name: String?
+  }
+
+  private struct TabLocatorParams: Encodable, Sendable {
+    let id: UUID
+    let worktreeID: UUID
+    let projectID: UUID
+  }
+
+  private struct PaneLocatorParams: Encodable, Sendable {
+    let id: UUID
+    let tabID: UUID
+    let worktreeID: UUID
+    let projectID: UUID
+  }
+
+  private struct IDParams: Encodable, Sendable {
+    let id: UUID
+  }
+
+  /// `{"id": "<uuid>"}`, the result of the create and split methods.
+  private struct IDResult: Decodable, Sendable {
+    let id: String
   }
 
   /// `terminal.sendInput` / `terminal.sendKey` params. The Mac declares

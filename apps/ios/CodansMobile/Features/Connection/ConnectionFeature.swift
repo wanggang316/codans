@@ -27,6 +27,14 @@ struct ConnectionFeature {
     /// Consecutive failed attempts since the last success; drives backoff.
     var failedAttempts = 0
     var session: RemoteSessionInfo?
+    /// Whether the active Mac streams live terminals, remembered across
+    /// reconnects so a dropped connection keeps the terminal on screen
+    /// (dimmed) instead of falling back to the text view.
+    var supportsLiveTerminal = false
+    /// The permission of the last session with the active Mac, kept while
+    /// reconnecting so the terminal keeps its (disabled) keyboard instead
+    /// of flickering to read-only.
+    var lastSessionPermission: IPC.RemotePermission?
     var lastFailure: RemoteFailure?
     var pairingError: String?
     /// A `codans-pair:` link opened from outside the app (Camera, Safari,
@@ -46,6 +54,12 @@ struct ConnectionFeature {
     /// otherwise, so input controls never flash for a read-only device.
     var permission: IPC.RemotePermission {
       session?.permission ?? .readOnly
+    }
+
+    /// The permission a live terminal renders with: the last session's
+    /// while reconnecting. Input stays off until the connection is back.
+    var terminalPermission: IPC.RemotePermission {
+      session?.permission ?? lastSessionPermission ?? .readOnly
     }
   }
 
@@ -167,6 +181,8 @@ struct ConnectionFeature {
       case .sessionOpened(let info):
         state.status = .connected
         state.session = info
+        state.supportsLiveTerminal = info.supportsLiveTerminal
+        state.lastSessionPermission = info.permission
         state.failedAttempts = 0
         state.lastFailure = nil
         Self.logger.info("connected (server \(info.serverVersion, privacy: .public))")
@@ -352,6 +368,8 @@ struct ConnectionFeature {
   private func switchActive(to id: UUID?, state: inout State) -> Effect<Action> {
     state.activeID = id
     state.session = nil
+    state.supportsLiveTerminal = false
+    state.lastSessionPermission = nil
     state.lastFailure = nil
     state.failedAttempts = 0
     state.status = .idle

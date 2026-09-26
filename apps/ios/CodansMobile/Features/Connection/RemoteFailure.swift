@@ -17,6 +17,9 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
     case incompatible
     /// The Mac refused the call for this device's permission.
     case forbidden
+    /// The Mac cannot do this right now, e.g. type into a pane that is not
+    /// open in its window.
+    case unsupported
     /// The Keychain no longer holds this pairing's key.
     case missingKey
     /// The events stream ended (gateway turned off, device revoked, Mac
@@ -38,7 +41,7 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
   var isRetryable: Bool {
     switch kind {
     case .incompatible, .missingKey: return false
-    case .notFound, .localNetworkDenied, .forbidden, .streamEnded, .other: return true
+    case .notFound, .localNetworkDenied, .forbidden, .unsupported, .streamEnded, .other: return true
     }
   }
 
@@ -78,6 +81,8 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
         .incompatible, "Codans \(client) on this device cannot talk to Codans \(server) on your Mac.")
     case .ipc(.forbidden(let reason)):
       return RemoteFailure(.forbidden, reason)
+    case .ipc(.unsupported(let reason)):
+      return RemoteFailure(.unsupported, reason)
     case .ipc(let ipc):
       return RemoteFailure(.other, ipc.displayMessage)
     case .timeout:

@@ -70,6 +70,7 @@ struct ConnectionFeatureTests {
     await store.receive(\.sessionOpened) {
       $0.status = .connected
       $0.session = Fixtures.info
+      $0.lastSessionPermission = .interactive
     }
     #expect(store.state.permission == .interactive)
 
@@ -128,6 +129,7 @@ struct ConnectionFeatureTests {
     await store.receive(\.sessionOpened) {
       $0.status = .connected
       $0.session = Fixtures.info
+      $0.lastSessionPermission = .interactive
     }
 
     await store.send(.scenePhaseChanged(.background)) {
@@ -179,6 +181,7 @@ struct ConnectionFeatureTests {
     await store.receive(\.sessionOpened) {
       $0.status = .connected
       $0.session = Fixtures.info
+      $0.lastSessionPermission = .interactive
       $0.failedAttempts = 0
       $0.lastFailure = nil
     }
@@ -216,6 +219,7 @@ struct ConnectionFeatureTests {
     await store.receive(\.sessionOpened) {
       $0.status = .connected
       $0.session = Fixtures.info
+      $0.lastSessionPermission = .interactive
     }
 
     // Heartbeats keep the watchdog quiet well past the idle timeout.
