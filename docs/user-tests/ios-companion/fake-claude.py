@@ -52,6 +52,8 @@ def draw(typed=""):
   sys.stdout.flush()
 
 typed = ""
+# Claude Code names the terminal itself; the pane shows that title.
+sys.stdout.write(f"{ESC}]0;\u2733 Claude Code\a")
 signal.signal(signal.SIGWINCH, lambda *_: draw(typed))
 draw()
 for line in sys.stdin:

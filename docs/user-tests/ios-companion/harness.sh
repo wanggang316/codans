@@ -155,17 +155,18 @@ trap quit_mac EXIT
 # Issues a pairing code with the given permission ("View only" or "View and
 # type") and prints it. The clipboard is restored afterwards.
 pairing_code() {
-  local permission="$1" saved
-  "$AX" press "$MAC_PID" "Done" >/dev/null 2>&1   # dismiss a finished pairing
-  "$AX" press "$MAC_PID" "Pair New Device…" >/dev/null
-  "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >/dev/null || return 1
+  local permission="$1" saved log="$SCRATCH/pairing.log"
+  echo "--- $(date +%T) $UI_CASE: $permission" >>"$log"
+  "$AX" press "$MAC_PID" "Done" >>"$log" 2>&1   # dismiss a finished pairing
+  "$AX" press "$MAC_PID" "Pair New Device…" >>"$log" 2>&1
+  "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >>"$log" 2>&1 || { "$AX" tree "$MAC_PID" >>"$log" 2>&1; return 1; }
   if [[ "$permission" != "View only" ]]; then
     # The first "View only" pop-up is the new pairing's own picker.
-    "$AX" press "$MAC_PID" "View only" >/dev/null
-    "$AX" wait "$MAC_PID" "$permission" 3 >/dev/null && "$AX" press "$MAC_PID" "$permission" >/dev/null
+    "$AX" press "$MAC_PID" "View only" >>"$log" 2>&1
+    "$AX" wait "$MAC_PID" "$permission" 3 >>"$log" 2>&1 && "$AX" press "$MAC_PID" "$permission" >>"$log" 2>&1
   fi
   saved="$(pbpaste)"
-  "$AX" press "$MAC_PID" "Copy Pairing Code" >/dev/null
+  "$AX" press "$MAC_PID" "Copy Pairing Code" >>"$log" 2>&1
   sleep 0.5
   pbpaste
   printf '%s' "$saved" | pbcopy
@@ -175,7 +176,14 @@ pairing_code() {
 # A fresh app with no pairing, and no SpringBoard prompt left over from an
 # earlier `openurl`, which would otherwise answer the next one.
 reset_sim() {
+  # uninstall is a silent no-op on a shut-down simulator, which would keep
+  # the last run's pairing (UserDefaults and Keychain) and have the app
+  # connect with a revoked key while the test pairs. Boot first.
+  xcrun simctl bootstatus "$SIM" -b >/dev/null
   xcrun simctl uninstall "$SIM" com.gumpw.codans.mobile >/dev/null 2>&1
+  if xcrun simctl get_app_container "$SIM" com.gumpw.codans.mobile >/dev/null 2>&1; then
+    echo "cannot uninstall the app from $SIM"; exit 1
+  fi
   xcrun simctl shutdown "$SIM" >/dev/null 2>&1
   xcrun simctl boot "$SIM" && xcrun simctl bootstatus "$SIM" -b >/dev/null
 }

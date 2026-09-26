@@ -121,17 +121,24 @@ populate() {
   [[ -n "$wt" ]] || die "no feat/checkout-retry worktree"
   WT_PATH=$(cli tree --json | jq -r --arg w "$wt" '.data.projects[].worktrees[] | select(.id == $w) | .path')
 
-  tab=$(cli tab new shell --worktree "$wt" --json | jq -r '.data.id')
-  shell=$(cli pane new --tab "$tab" --cwd "$WT_PATH" --json | jq -r '.data.id')
+  # The new worktree opens with a shell tab; naming it keeps the host name
+  # the shell puts in its title out of the tab menu.
+  tab=$(cli tree --json | jq -r --arg w "$wt" '.data.projects[].worktrees[] | select(.id == $w) | .tabs[0].id')
+  shell=$(cli tree --json | jq -r --arg w "$wt" '.data.projects[].worktrees[] | select(.id == $w) | .tabs[0].panes[0].id')
+  [[ -n "$shell" && "$shell" != null ]] || die "the new worktree has no shell pane"
+  cli tab rename "$tab" shell --project storefront --worktree "$wt" >/dev/null || die "tab rename failed"
+  echo "export const MAX_ATTEMPTS = 3" >>"$WT_PATH/src/checkout/client.ts"
   sleep 1.5
-  cli pane send "$shell" "git log --oneline -3 && ls src/checkout" >/dev/null
+  # No pager: git would otherwise leave the pane in less.
+  cli pane send "$shell" "git --no-pager log --oneline -3 && ls src/checkout" >/dev/null
+  sleep 1
   cli pane send "$shell" "git status --short" >/dev/null
 
-  cli agent launch "Claude Code" --worktree "$wt" --tab --json >/dev/null || die "agent launch failed"
+  AGENT=$(cli agent launch "Claude Code" --worktree "$wt" --tab --json | jq -r '.data.paneID')
+  [[ -n "$AGENT" && "$AGENT" != null ]] || die "agent launch failed"
   local _
   for _ in $(seq 1 40); do
-    AGENT=$(cli tree --json | jq -r --arg w "$wt" '.data.projects[].worktrees[] | select(.id == $w) | .tabs[].panes[] | select(.agentKind != null) | .id' | head -1)
-    [[ -n "$AGENT" ]] && cli pane read "$AGENT" 2>/dev/null | grep -q "Welcome to" && break
+    cli pane read "$AGENT" 2>/dev/null | grep -q "Welcome to" && break
     sleep 0.5
   done
   cli pane read "$AGENT" 2>/dev/null | grep -q "Welcome to" || die "the agent pane never drew"
@@ -163,7 +170,14 @@ revoke_all() {
 
 # ---------- phone ----------
 reset_sim() {
+  # uninstall is a silent no-op on a shut-down simulator, which would keep
+  # the last run's pairing (UserDefaults and Keychain) and have the app
+  # connect with a revoked key while the test pairs. Boot first.
+  xcrun simctl bootstatus "$SIM" -b >/dev/null
   xcrun simctl uninstall "$SIM" com.gumpw.codans.mobile >/dev/null 2>&1
+  if xcrun simctl get_app_container "$SIM" com.gumpw.codans.mobile >/dev/null 2>&1; then
+    echo "cannot uninstall the app from $SIM"; exit 1
+  fi
   # The simulator can keep running an older test runner after a rebuild.
   xcrun simctl uninstall "$SIM" com.gumpw.codans.mobile-uitests.xctrunner >/dev/null 2>&1
   xcrun simctl shutdown "$SIM" >/dev/null 2>&1
