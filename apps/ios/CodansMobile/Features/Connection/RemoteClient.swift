@@ -296,16 +296,16 @@ private actor LiveRemoteSessions {
   }
 
   func createTab(_ location: PaneLocator, workingDirectory: String?) async throws -> String {
-    let projectID = try Self.uuid(location.projectID)
-    let worktreeID = try Self.uuid(location.worktreeID)
-    let params = CreateTabParams(projectID: ProjectID(raw: projectID), worktreeID: WorktreeID(raw: worktreeID))
+    let projectID = ProjectID(raw: try Self.uuid(location.projectID))
+    let worktreeID = WorktreeID(raw: try Self.uuid(location.worktreeID))
+    let params = CreateTabParams(projectID: projectID, worktreeID: worktreeID)
     let tabID = try await withControl { control in
       try await control.call(.hierarchyCreateTab, params: params, as: IDResult.self)
     }.id
     // An empty directory asks the Mac for the worktree's root, which the
     // phone's hierarchy does not carry.
     let pane = OpenPaneParams(
-      projectID: projectID, worktreeID: worktreeID, tabID: try Self.uuid(tabID),
+      projectID: projectID, worktreeID: worktreeID, tabID: TabID(raw: try Self.uuid(tabID)),
       workingDirectory: workingDirectory ?? "", initialCommand: nil, labels: [])
     return try await withControl { control in
       try await control.call(.hierarchyOpenPane, params: pane, as: IDResult.self)
@@ -419,10 +419,12 @@ private actor LiveRemoteSessions {
     let worktreeID: WorktreeID
   }
 
+  /// The Mac decodes these IDs as its `HierarchyID` types (`{"raw": …}`),
+  /// like `CreateTabParams`.
   private struct OpenPaneParams: Encodable, Sendable {
-    let projectID: UUID
-    let worktreeID: UUID
-    let tabID: UUID
+    let projectID: ProjectID
+    let worktreeID: WorktreeID
+    let tabID: TabID
     let workingDirectory: String
     let initialCommand: String?
     let labels: [String]
