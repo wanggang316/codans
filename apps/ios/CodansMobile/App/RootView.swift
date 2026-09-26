@@ -43,7 +43,17 @@ struct RootView: View {
         SettingsView(store: store.scope(state: \.connection, action: \.connection))
       }
     }
-    .task { store.send(.connection(.task)) }
+    .task {
+      if let demo = DemoMode.initialSelection {
+        selectedWorktreeID = demo.worktreeID
+        // The pane list must exist before a selection in it navigates.
+        Task {
+          try? await Task.sleep(for: .seconds(1))
+          selectedPaneID = demo.paneID
+        }
+      }
+      store.send(.connection(.task))
+    }
     .onOpenURL { store.send(.connection(.pairingLinkOpened($0))) }
     .alert(linkPairingTitle, isPresented: isLinkPairingPresented) {
       if case .confirm = store.connection.linkPairing {

@@ -1,0 +1,347 @@
+import CodansIPC
+import CodansRemote
+import ComposableArchitecture
+import Foundation
+
+/// A self-contained Mac for screenshots and design review: launched with
+/// `CODANS_DEMO=1`, the app talks to fixture dependencies instead of the
+/// network — a paired gateway, a hierarchy with a split tab, agent states
+/// and terminal streams fed with canned TUI bytes. Debug builds only.
+///
+/// - `CODANS_DEMO_PANE`: the pane to open (`claude`, `shell`, `server`, `build`).
+/// - `CODANS_DEMO_RECONNECT=1`: the connection drops two seconds in and
+///   never comes back, to show the reconnecting states.
+/// - `CODANS_DEMO_READONLY=1`: the Mac grants read-only access.
+/// - `CODANS_DEMO_NOT_OPEN=1`: keys answer "pane not open on the Mac".
+enum DemoMode {
+  #if DEBUG
+    static let isEnabled = ProcessInfo.processInfo.environment["CODANS_DEMO"] == "1"
+  #else
+    static let isEnabled = false
+  #endif
+
+  /// The simulator usually has the Mac's keyboard attached, which would
+  /// hide the key bar in every screenshot.
+  static var forcesKeyBar: Bool { isEnabled }
+
+  static var initialSelection: (worktreeID: String, paneID: String)? {
+    guard isEnabled else { return nil }
+    let pane = ProcessInfo.processInfo.environment["CODANS_DEMO_PANE"] ?? "claude"
+    return (DemoFixtures.worktreeID, DemoFixtures.paneID(pane))
+  }
+}
+
+#if DEBUG
+  extension DemoMode {
+    private static var environment: [String: String] { ProcessInfo.processInfo.environment }
+
+    /// Overrides every dependency that would reach the network or the
+    /// Keychain.
+    static func apply(to dependencies: inout DependencyValues) {
+      let gateway = DemoFixtures.gateway
+      dependencies.pairingStore = PairingStore(
+        load: { PairingStore.Snapshot(gateways: [gateway], activeID: gateway.deviceID) },
+        save: { payload, date in PairedGateway(payload: payload, pairedAt: date) },
+        remove: { _ in },
+        setActive: { _ in },
+        credential: { _ in RemoteTLS.PSKCredential(identity: "demo", key: Data(repeating: 1, count: 32)) }
+      )
+      dependencies.networkPath = NetworkPathClient(becameAvailable: { AsyncStream { _ in } })
+      dependencies.remoteClient = client
+    }
+
+    /// One instance for every store: pane stores are created by views and
+    /// take their dependencies from here too.
+    private static let client = makeClient()
+
+    private static func makeClient() -> RemoteClient {
+      let dropsConnection = environment["CODANS_DEMO_RECONNECT"] == "1"
+      let readOnly = environment["CODANS_DEMO_READONLY"] == "1"
+      let notOpen = environment["CODANS_DEMO_NOT_OPEN"] == "1"
+      let connects = LockIsolated(0)
+      return RemoteClient(
+        connect: { _, _ in
+          let attempt = connects.withValue { value -> Int in
+            value += 1
+            return value
+          }
+          if dropsConnection, attempt > 1 {
+            // Never answers: the app stays in its reconnecting state.
+            try await Task.sleep(for: .seconds(3600))
+          }
+          let events = AsyncThrowingStream<IPC.EventFrame, Error> { continuation in
+            continuation.yield(
+              IPC.EventFrame(
+                seq: 1,
+                payload: .snapshot(
+                  IPC.EventsSnapshot(hierarchy: DemoFixtures.hierarchy, agents: DemoFixtures.agents))))
+            let task = Task {
+              if dropsConnection {
+                try? await Task.sleep(for: .seconds(2))
+                continuation.finish(throwing: RemoteFailure.streamEnded)
+                return
+              }
+              var seq = 2
+              while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                continuation.yield(IPC.EventFrame(seq: seq, payload: .heartbeat))
+                seq += 1
+              }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+          }
+          return RemoteSession(
+            info: RemoteSessionInfo(
+              serverVersion: "0.9.0", permission: readOnly ? .readOnly : .interactive, protocolMinor: 2),
+            events: events)
+        },
+        disconnect: {},
+        readPane: { _, _ in "" },
+        sendInput: { _, _ in },
+        sendKey: { _, _ in },
+        listProfiles: { DemoFixtures.profiles },
+        createWorktree: { _, _ in DemoFixtures.worktreeID },
+        launchAgent: { _, _, _, _ in nil },
+        attachStream: { paneID in
+          AsyncThrowingStream { continuation in
+            let sample = DemoFixtures.stream(for: paneID)
+            continuation.yield(
+              IPC.TerminalStreamFrame(
+                seq: 1, epoch: 1, payload: .reset(cols: sample.cols, rows: sample.rows, fidelity: .exact)))
+            continuation.yield(IPC.TerminalStreamFrame(seq: 2, epoch: 1, payload: .output(sample.bytes)))
+            let task = Task {
+              var seq = 3
+              while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                continuation.yield(IPC.TerminalStreamFrame(seq: seq, epoch: 1, payload: .heartbeat))
+                seq += 1
+              }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+          }
+        },
+        sendEvents: { _, events in
+          if notOpen { throw RemoteFailure(.unsupported, "pane not open on the Mac") }
+          return IPC.TerminalSendEventsResult(delivered: events.count, rejected: [])
+        },
+        createTab: { _ in DemoFixtures.paneID("build") },
+        splitPane: { _, _ in DemoFixtures.paneID("server") },
+        renameTab: { _, _ in },
+        closeTab: { _ in },
+        closePane: { _ in },
+        activateTab: { _ in }
+      )
+    }
+  }
+#endif
+
+/// The demo Mac's contents.
+nonisolated enum DemoFixtures {
+  static let projectID = "D0000000-0000-0000-0000-000000000001"
+  static let worktreeID = "D0000000-0000-0000-0000-000000000002"
+  static let mainWorktreeID = "D0000000-0000-0000-0000-000000000003"
+  static let agentTabID = "D0000000-0000-0000-0000-000000000010"
+  static let buildTabID = "D0000000-0000-0000-0000-000000000011"
+
+  static func paneID(_ name: String) -> String {
+    switch name {
+    case "shell": return "D0000000-0000-0000-0000-000000000102"
+    case "server": return "D0000000-0000-0000-0000-000000000103"
+    case "build": return "D0000000-0000-0000-0000-000000000104"
+    case "main": return "D0000000-0000-0000-0000-000000000105"
+    default: return "D0000000-0000-0000-0000-000000000101"
+    }
+  }
+
+  static let gateway = PairedGateway(
+    deviceID: UUID(uuidString: "D0000000-0000-0000-0000-0000000000FF")!,
+    serviceName: "Studio Mac (codans-dev)",
+    channel: "codans-dev",
+    pskIdentity: "demo",
+    pairedAt: Date(timeIntervalSince1970: 1_790_000_000))
+
+  static let profiles = [
+    IPC.AgentProfileSummary(
+      id: UUID(), name: "Claude Code", agent: "claude-code", agentName: "Claude Code", isEnabled: true,
+      isInstalled: true, supportsPrompt: true, command: "claude")
+  ]
+
+  static var hierarchy: IPC.HierarchySummary {
+    let cwd = "/Users/gump/dev/codans"
+    let agentTab = IPC.TabSummary(
+      id: agentTabID, handle: "t1", title: "agent", focusedPaneID: paneID("claude"),
+      panes: [
+        IPC.PaneSummary(
+          id: paneID("claude"), handle: "p1", title: "Claude Code", agent: "claude-code", labels: [], cwd: cwd,
+          isLive: true),
+        IPC.PaneSummary(
+          id: paneID("shell"), handle: "p2", title: "zsh", agent: nil, labels: [], cwd: cwd, isLive: true),
+        IPC.PaneSummary(
+          id: paneID("server"), handle: "p3", title: "vite", agent: nil, labels: [], cwd: cwd + "/web", isLive: true),
+      ],
+      layout: .split(
+        direction: .horizontal, ratio: 0.58,
+        left: .leaf(paneID: paneID("claude")),
+        right: .split(
+          direction: .vertical, ratio: 0.5, left: .leaf(paneID: paneID("shell")),
+          right: .leaf(paneID: paneID("server")))))
+    let buildTab = IPC.TabSummary(
+      id: buildTabID, handle: "t2", title: "build", focusedPaneID: paneID("build"),
+      panes: [
+        IPC.PaneSummary(
+          id: paneID("build"), handle: "p4", title: "make ios-build", agent: nil, labels: [], cwd: cwd, isLive: true)
+      ],
+      layout: .leaf(paneID: paneID("build")))
+    let mainTab = IPC.TabSummary(
+      id: "D0000000-0000-0000-0000-000000000012", handle: "t3", title: "codex", focusedPaneID: paneID("main"),
+      panes: [
+        IPC.PaneSummary(
+          id: paneID("main"), handle: "p5", title: "Codex", agent: "codex", labels: [], cwd: cwd, isLive: true)
+      ])
+    return IPC.HierarchySummary(
+      projects: [
+        IPC.ProjectSummary(
+          id: projectID, name: "codans", isRemote: false, selectedWorktreeID: worktreeID,
+          worktrees: [
+            IPC.WorktreeSummary(
+              id: worktreeID, name: "feat/ios", branch: "feat/ios", isPinned: false, selectedTabID: agentTabID,
+              tabs: [agentTab, buildTab]),
+            IPC.WorktreeSummary(
+              id: mainWorktreeID, name: "main", branch: "main", isPinned: true, selectedTabID: mainTab.id,
+              tabs: [mainTab]),
+          ])
+      ],
+      selectedProjectID: projectID,
+      activePaneID: paneID("claude"))
+  }
+
+  static var agents: [IPC.AgentStateEntry] {
+    [
+      entry(paneID("claude"), agent: "claude-code", name: "Claude Code", state: "working", worktree: worktreeID),
+      entry(paneID("main"), agent: "codex", name: "Codex", state: "blocked", worktree: mainWorktreeID),
+    ]
+  }
+
+  private static func entry(
+    _ paneID: String, agent: String, name: String, state: String, worktree: String
+  ) -> IPC.AgentStateEntry {
+    IPC.AgentStateEntry(
+      paneID: paneID, handle: nil, agent: agent, agentName: name, state: state, since: "2026-09-26T08:00:00Z",
+      sessionID: nil, title: nil, projectID: projectID, projectName: "codans", worktreeID: worktree,
+      worktreeName: worktree == worktreeID ? "feat/ios" : "main", tabID: agentTabID, tabTitle: nil,
+      isFocused: false)
+  }
+
+  struct Sample {
+    let cols: Int
+    let rows: Int
+    let bytes: Data
+  }
+
+  static func stream(for paneID: String) -> Sample {
+    switch paneID {
+    case self.paneID("shell"): return Sample(cols: 64, rows: 20, bytes: Data(DemoTerminalSamples.shell.utf8))
+    case self.paneID("server"): return Sample(cols: 64, rows: 20, bytes: Data(DemoTerminalSamples.server.utf8))
+    case self.paneID("build"): return Sample(cols: 96, rows: 34, bytes: Data(DemoTerminalSamples.build.utf8))
+    default:
+      return Sample(cols: 96, rows: 34, bytes: Data(DemoTerminalSamples.claudeCode(cols: 96).utf8))
+    }
+  }
+}
+
+/// Canned terminal output: what an agent TUI, a shell and a dev server
+/// look like on the Mac.
+nonisolated enum DemoTerminalSamples {
+  private static let esc = "\u{1B}"
+
+  private static func sgr(_ codes: String, _ text: String) -> String {
+    "\(esc)[\(codes)m\(text)\(esc)[0m"
+  }
+
+  static func claudeCode(cols: Int) -> String {
+    let accent = "38;2;215;119;87"
+    let dim = "38;5;245"
+    let rule = String(repeating: "─", count: cols - 2)
+    var lines: [String] = []
+    // Pads by visible characters so the right border lines up.
+    func boxed(_ plain: String, _ styled: String) -> String {
+      sgr(accent, "│") + styled + String(repeating: " ", count: max(0, 48 - plain.count)) + sgr(accent, "│")
+    }
+    lines.append(sgr(accent, "╭" + String(repeating: "─", count: 48) + "╮"))
+    lines.append(
+      boxed(" ✻ Welcome to Claude Code!", " " + sgr(accent, "✻") + " Welcome to " + sgr("1", "Claude Code") + "!"))
+    lines.append(boxed("", ""))
+    lines.append(
+      boxed("   /help for help, /status for your setup", sgr(dim, "   /help for help, /status for your setup")))
+    lines.append(boxed("   cwd: ~/dev/codans", sgr(dim, "   cwd: ~/dev/codans")))
+    lines.append(sgr(accent, "╰" + String(repeating: "─", count: 48) + "╯"))
+    lines.append("")
+    lines.append(sgr(dim, "> ") + "Add a live terminal to the iOS app that mirrors the Mac pane")
+    lines.append("")
+    lines.append(sgr(accent, "⏺") + " I'll start with the stream reducer, then the key bar.")
+    lines.append("")
+    lines.append(
+      sgr(accent, "⏺") + " " + sgr("1", "Read")
+        + "(apps/ios/CodansMobile/Features/Terminal/TerminalStreamFeature.swift)")
+    lines.append("  " + sgr(dim, "⎿  Read 412 lines"))
+    lines.append("")
+    lines.append(sgr(accent, "⏺") + " " + sgr("1", "Update") + "(TerminalStreamFeature.swift)")
+    lines.append("  " + sgr(dim, "⎿  Updated with 6 additions and 2 removals"))
+    lines.append("     " + sgr(dim, "212") + "        case .output(let data):")
+    lines.append(
+      "     " + sgr(dim, "213")
+        + sgr("48;2;40;64;40", "+         guard frame.epoch == state.epoch else { return .none }"))
+    lines.append(
+      "     " + sgr(dim, "214")
+        + sgr("48;2;40;64;40", "+         state.screen.feed(data)                              "))
+    lines.append(
+      "     " + sgr(dim, "215")
+        + sgr("48;2;72;36;36", "-         state.buffer.append(data)                            "))
+    lines.append("")
+    lines.append(sgr(accent, "⏺") + " " + sgr("1", "Bash") + "(make ios-build)")
+    lines.append("  " + sgr(dim, "⎿  ** BUILD SUCCEEDED **"))
+    lines.append("")
+    lines.append(sgr(accent, "✢ Wiring the key bar… ") + sgr(dim, "(38s · ↑ 2.4k tokens · esc to interrupt)"))
+    lines.append("")
+    lines.append(sgr("38;5;240", "╭" + rule + "╮"))
+    lines.append(sgr("38;5;240", "│") + " > " + String(repeating: " ", count: cols - 5) + sgr("38;5;240", "│"))
+    lines.append(sgr("38;5;240", "╰" + rule + "╯"))
+    lines.append(sgr(dim, "  ⏵⏵ accept edits on (shift+tab to cycle)"))
+    return "\(esc)[?1049h\(esc)[?25l\(esc)[2J\(esc)[H" + lines.joined(separator: "\r\n")
+  }
+
+  static let shell: String = {
+    let prompt = sgr("38;5;110", "~/dev/codans") + " " + sgr("38;5;245", "feat/ios") + " " + sgr("38;5;150", "❯") + " "
+    return [
+      prompt + "git status --short",
+      sgr("32", " M") + " apps/ios/Project.swift",
+      sgr("31", "??") + " apps/ios/CodansMobile/Features/Terminal/",
+      prompt + "ls apps/ios/CodansMobile/Features",
+      sgr("1;34", "Agents") + "  " + sgr("1;34", "Browser") + "  " + sgr("1;34", "Composer") + "  "
+        + sgr("1;34", "Connection") + "  " + sgr("1;34", "Terminal"),
+      prompt,
+    ].joined(separator: "\r\n")
+  }()
+
+  static let server: String = [
+    sgr("1;32", "  VITE v7.1.4") + "  ready in 412 ms",
+    "",
+    "  " + sgr("32", "➜") + "  " + sgr("1", "Local:") + "   " + sgr("36", "http://localhost:5173/"),
+    "  " + sgr("2", "➜  Network: use --host to expose"),
+    "",
+    sgr("2", "10:42:07") + " " + sgr("36", "[vite]") + " hmr update " + sgr("2", "/src/App.tsx"),
+    sgr("2", "10:42:31") + " " + sgr("36", "[vite]") + " page reload " + sgr("2", "index.html"),
+  ].joined(separator: "\r\n")
+
+  static let build: String = [
+    sgr("38;5;150", "❯") + " make ios-build",
+    "tuist generate --no-open",
+    sgr("32", "✔ Success"),
+    "  Project generated.",
+    "xcodebuild -workspace CodansMobile.xcworkspace -scheme CodansMobile build",
+    sgr("2", "CompileSwift normal arm64 TerminalStreamFeature.swift"),
+    sgr("2", "CompileSwift normal arm64 TerminalKeyBar.swift"),
+    sgr("2", "Ld Codans.app/Codans normal"),
+    sgr("1;32", "** BUILD SUCCEEDED **"),
+  ].joined(separator: "\r\n")
+}

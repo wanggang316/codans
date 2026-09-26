@@ -11,6 +11,10 @@ struct CodansMobileApp: App {
   /// iPhone Duo Split View) renders from it and shares its connection.
   @State private var store = Store(initialState: AppFeature.State()) {
     AppFeature()
+  } withDependencies: {
+    #if DEBUG
+      if DemoMode.isEnabled { DemoMode.apply(to: &$0) }
+    #endif
   }
 
   var body: some Scene {

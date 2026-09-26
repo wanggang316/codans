@@ -32,8 +32,15 @@ struct WorkspaceView: View {
         ContentUnavailableView("Select a Worktree", systemImage: "arrow.triangle.branch")
       }
     } detail: {
-      if let paneID = selectedPaneID {
+      if selectedPaneID != nil, store.connection.supportsLiveTerminal {
+        TerminalDetailView(store: store, selectedPaneID: $selectedPaneID)
+      } else if let paneID = selectedPaneID {
         PaneDetailContainer(store: store, paneID: paneID)
+          .safeAreaInset(edge: .top, spacing: 0) {
+            if store.connection.session != nil {
+              LiveTerminalUnavailableNotice()
+            }
+          }
       } else {
         ContentUnavailableView("Select a Pane", systemImage: "terminal")
       }
@@ -275,5 +282,24 @@ extension AgentGroup.Kind {
     case .working: return .blue
     case .idle: return .secondary
     }
+  }
+}
+
+/// Shown over the text snapshot for a Mac too old to stream terminals.
+private struct LiveTerminalUnavailableNotice: View {
+  var body: some View {
+    Label {
+      Text("Update Codans on your Mac for a live terminal. Showing text snapshots.")
+    } icon: {
+      Image(systemName: "info.circle")
+        .accessibilityHidden(true)
+    }
+    .font(.footnote)
+    .foregroundStyle(.secondary)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .background(.bar)
+    .accessibilityIdentifier("live-terminal-unavailable")
   }
 }
