@@ -2,8 +2,9 @@
 
 ## Objective
 
-Implement phase 1 of [the design](../design-docs/agent-integration-protocols.md)
-in the HAN-167 isolated worktree. Preserve existing state and retry behavior.
+This plan records the completed phase-1 extraction in the HAN-167 isolated
+worktree. The [revised design](../design-docs/agent-integration-protocols.md)
+supersedes its proposed next steps; that design is not yet implemented.
 
 ## Sequence
 
@@ -22,12 +23,18 @@ in the HAN-167 isolated worktree. Preserve existing state and retry behavior.
 
 ## Deferred
 
-Unknown state, input readiness, process/session identity semantics, history IO
-contracts and launch/resume consolidation require separate changes.
+The initial plan deferred unknown state, input readiness, instance identity,
+history IO and launch/resume consolidation. Review showed that instance ownership
+and input invalidation are prerequisites for correct automatic recovery; the
+revised design moves them into the required correctness scope.
 
 ## Status
 
-Phase 1 implementation and verification complete in the isolated HAN-167 worktree.
+Phase 1 extraction and its recorded checks are complete. Subsequent review found
+correctness gaps in final-error recognition, instance replacement during the
+waiting period, and external input invalidation. The passing checks below do not
+validate those scenarios. The revised design is proposed; no corresponding
+runtime changes have been made yet.
 
 ## Verification results
 
