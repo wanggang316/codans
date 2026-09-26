@@ -25,9 +25,9 @@ extension CommandSuggestionClient {
 extension CommandSuggestionClient: DependencyKey {
   static let liveValue = CommandSuggestionClient.live()
 
-  static let testValue = CommandSuggestionClient(
-    scan: unimplemented("CommandSuggestionClient.scan", placeholder: [])
-  )
+  /// Inert rather than `unimplemented`: the worktree header scans on
+  /// appear, so any app-hosted test that renders it would otherwise fail.
+  static let testValue = CommandSuggestionClient(scan: { _ in [] })
 }
 
 extension DependencyValues {
