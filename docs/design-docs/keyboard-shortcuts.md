@@ -5,7 +5,7 @@
 
 ## 背景与范围
 
-codans 的应用内快捷键由一个单一 registry 统一管理。它取代的旧形态是三处各自硬编码的绑定：window-scope 的 SwiftUI 绑定（`MainWindowCommands`：`⌘P` Quick Action、`⌘E` Open in Editor、Toggle Git Viewer、`⌘T` New Tab、`⌘W` Close Tab、Prev/Next Tab、Switch-to-Tab N 等）、侧栏行热键（`HierarchySidebarView` 给每个可见 Worktree 行挂零帧隐形 Button 的 `⌃⌘1`–`⌃⌘9`）、app-scope 的 `⌘,`（Settings 窗口）。另有两个消费者只**显示**和弦提示而不绑定键：Command Palette 的行内提示，与状态栏的激励视图。（"Filter Tags" 此前亦在此列；其侧栏 Tag 过滤 UI 当前隐藏，故和弦不再作为现状暴露。）
+codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。
 
 本设计以一个**单一 registry** 统管全部应用内快捷键：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
 
@@ -82,9 +82,9 @@ case openInEditor = "openInDefaultEditor"
 
 编号 case（`switchToTab1`…、`selectWorktreeAt1`…）逐个拼出而非参数化，使它们成为一等 JSON 键、参与 `CaseIterable`、并在路由 switch 里保持编译期穷尽。
 
-「Toggle Git Viewer」的默认和弦为 **⌘⌥G**，继续使用 `CommandID.toggleDiffInspector` / `"toggleGitViewer"`。它通过 `RootFeature.diffInspectorToggledForCurrentWorktree` 读取 Settings → General 的 Default Git Viewer：默认首项 Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立 Changes / Outgoing 窗口；已安装的外部选择打开对应 git 客户端。下拉不提供 None；旧设置缺省或 `null` 归一为 Built-in，未知 ID 归一为 Built-in。既有注册表内的外部选择保留；已知但未安装的外部目标不执行打开。
+「Toggle Git Viewer」的默认和弦为 **⌘G**，使用 `CommandID.toggleDiffInspector` / `"toggleGitViewer"`。它通过 `RootFeature.diffInspectorToggledForCurrentWorktree` 读取 Settings → General 的 Default Git Viewer：默认首项 Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立 Changes / Outgoing 窗口；已安装的外部选择打开对应 git 客户端。下拉不提供 None；设置缺省或 `null` 归一为 Built-in，未知 ID 归一为 Built-in。既有注册表内的外部选择保留；已知但未安装的外部目标不执行打开。
 
-主窗口 `windowHeader` 不提供 View Changes 入口；Worktree 右键菜单的 **Show Changes** 直接打开所点击 Worktree 的内置 Diff 窗口，不读取 Default Git Viewer，也不改变此快捷键的持久化标识。
+主窗口工具栏 不提供 View Changes 入口；Worktree 右键菜单的 **Show Changes** 直接打开所点击 Worktree 的内置 Diff 窗口，不读取 Default Git Viewer，也不改变此快捷键的持久化标识。
 
 ### `ShortcutBinding` 与三态模型
 
@@ -130,7 +130,7 @@ public enum ShortcutScope: Sendable {
 }
 ```
 
-> 注意上例的键 `"toggleGitViewer"` 正是 `CommandID.toggleDiffInspector` 的钉死 raw value——磁盘上看到的是历史字符串，不是当前 Swift 标识符。
+> 注意上例的键 `"toggleGitViewer"` 正是 `CommandID.toggleDiffInspector` 的钉死 raw value——磁盘键与 Swift 标识符分别具有稳定命名。
 
 `ShortcutResolver` 是纯函数：给定 schema 与覆盖存储，产出每条命令的有效绑定，带供 UI 显示的来源标签（`schemaDefault` / `userOverride`），并把 disabled 态从 `nil` 中独立出来（`binding == nil` ⇒ 无和弦；`isEnabled == false` ⇒ 和弦存在但被抑制）。
 
@@ -190,7 +190,7 @@ resolved map 经 `@Environment(\.resolvedShortcuts)` 注入到视图树顶端（
 - 录制中的本地监视器对任何 keyDown 返回 `nil`（吞掉事件），使用户在录制 `⌘W` 时不会意外触发 `⌘W` 关掉当前 tab；监视器在 field 失去 first responder 时移除。
 - 成功捕获经 `ShortcutsStore.update(_:to:)` 写穿，触发防抖保存并重算 resolved map，UI 经 `@Observable` 更新。
 
-Settings → Shortcuts 面板取代占位 `ComingSoonPane`：按 `ShortcutSchema` 分类分组、可搜索（按渲染标题与渲染和弦串过滤）；和弦格是可点的 recorder field；`.systemFixed` 行标 `(System)` 徽标且 recorder 不可交互；重置字形仅在行被实际覆盖（`source == .userOverride`）时显示，点击弹含级联重置计划的确认；disabled 命令的和弦显删除线 + "Disabled" 标，由 recorder 上下文菜单 "Disable shortcut" 置 `isEnabled = false` 而不清和弦。
+Settings → Shortcuts 面板：按 `ShortcutSchema` 分类分组、可搜索（按渲染标题与渲染和弦串过滤）；和弦格是可点的 recorder field；`.systemFixed` 行标 `(System)` 徽标且 recorder 不可交互；重置字形仅在行被实际覆盖（`source == .userOverride`）时显示，点击弹含级联重置计划的确认；disabled 命令的和弦显删除线 + "Disabled" 标，由 recorder 上下文菜单 "Disable shortcut" 置 `isEnabled = false` 而不清和弦。
 
 ## 与既有系统的交互（耐久不变量）
 

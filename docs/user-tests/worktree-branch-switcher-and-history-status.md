@@ -1,156 +1,65 @@
 ---
 name: worktree-branch-switcher-and-history-status
-description: Verification status for every UT-BSH-* case in docs/user-tests/worktree-branch-switcher-and-history.md. Produced as the M5 / T16 closing artifact when an XCUITest runner is not yet available. Each case is bucketed UNIT-COVERED, MANUAL-PENDING, or DEFERRED with a real test citation or a one-line note on what unblocks a status promotion.
+description: Source-review evidence and pending runtime verification for the active worktree branch-switcher user tests. This is not a test execution report.
 ---
 
-# UT Status: Worktree Branch Switcher & Diff History
+# UT Status: Worktree Branch Switcher
 
 **Parent user-test set:** [worktree-branch-switcher-and-history.md](./worktree-branch-switcher-and-history.md)
-**Design:** [docs/design-docs/worktree.md](../design-docs/worktree.md)
-**Status author:** Gump (with Claude)
-**Date:** 2026-05-24
+**Design:** [worktree.md](../design-docs/worktree.md)
+**Runtime result:** Pending; no execution result is recorded here.
 
-## Why this doc exists
+## Evidence Boundary
 
-The original M5 / T16 exit gate expected `/hs-user-test` to drive every UT-BSH-* case against a running app via accessibility-identifier queries. The repo has the seams in place (17 required identifiers + 2 bonus, see [Seam inventory](#seam-inventory)) and the fixtures landed in T15 (3 git bundles + 3 catalog seeds + restore scripts under `docs/user-tests/_shared/fixtures/`). What is missing is the **runtime probe itself**: there is no XCUITest target in `apps/mac/Project.swift` and no `XCUIApplication`-driven harness anywhere in `apps/mac/codans/Tests/`. (`AppearancePreferenceUITests.swift` is misleadingly named — it is a pure unit test of a view-state mapping, not a UI probe.)
+This companion separates existing implementation and test-source evidence from user-visible verification. The current comparison window has a separate [test specification](git-diff-viewer.md).
 
-This document is the honest accounting that replaces the missing runtime pass: every case ID is classified UNIT-COVERED, MANUAL-PENDING, or DEFERRED, citing the real Swift Testing `@Test` function that exercises the behavior (where one exists) and what would have to land to promote a case to AUTOMATED.
+All 11 active cases are **RUNTIME-PENDING**. A cited unit test means that relevant assertions exist in the source tree, not that the test was executed or passed for the documented cases. It also does not establish the complete user journey. Record an actual execution date, revision, build, environment, outcome, and artifacts before promoting a case to PASS.
 
-## Vocabulary
+## Current Source Entry Points
 
-| Status | Meaning |
+| Source | Evidence available through static inspection |
 |---|---|
-| **UNIT-COVERED** | The case's load-bearing behavior is exercised by a passing TCA TestStore test or a service unit test. The UI assertions specific to the case (text rendered, hover affordance, selection highlight) are NOT verified here — only the reducer / service contract underneath them is. The case is promoted to AUTOMATED only when an XCUITest probe also asserts the visible side. |
-| **MANUAL-PENDING** | The case asserts something that is only observable through the running UI (popover render, hover affordance, selection trait, segmented-control visual state, animation smoothness). No XCUITest runner exists yet; case stays on the manual-probe shelf. |
-| **DEFERRED** | The case depends on a specific future infrastructure (e.g. SwiftUI material introspection for VS-001) or a system condition not yet automatable. |
-| **MANUAL** | The case was authored as manual-only in the parent doc (only VS-003). |
+| [WorktreeHeaderInfoLabel.swift](../../apps/mac/codans/App/Features/WorktreeHeader/WorktreeHeaderInfoLabel.swift) | Two-row identity, `(detached)` fallback, hover-only chevron, branch button accessibility label. |
+| [BranchSwitcherView.swift](../../apps/mac/codans/App/Features/BranchSwitcher/BranchSwitcherView.swift) | Branch-only popover, search, local/remote rendering, remote-to-existing-local target resolution. No recent-commit section is rendered. |
+| [BranchRowView.swift](../../apps/mac/codans/App/Features/BranchSwitcher/BranchRowView.swift) | Row IDs use `branch_switcher.branch_row.<local-or-remote>.<short-name>`; current and blocked markers, row menu, rename controls. |
+| [BranchSwitcherErrorBannerView.swift](../../apps/mac/codans/App/Features/BranchSwitcher/BranchSwitcherErrorBannerView.swift) | Error banner and dismiss identifiers. |
+| [BranchSwitcherFeature.swift](../../apps/mac/codans/App/Features/BranchSwitcher/BranchSwitcherFeature.swift) | Switch, error, and HEAD-change state transitions. Cached recent-commit data is not evidence of a rendered history surface. |
 
-## Seam inventory
+The active seam inventory is maintained in the parent specification. Source declarations still require a running UI probe to confirm accessibility visibility and interaction.
 
-17 of 17 required `accessibilityIdentifier` strings declared in the source tree, plus 2 bonus identifiers added during implementation. Verified by `grep -rn accessibilityIdentifier apps/mac/codans` against the seams listed in the parent doc:
+## Per-case Evidence
 
-```
-branch_switcher.branch_row.<short-name>     branch_switcher.popover
-branch_switcher.commit_row.<short-sha>      branch_switcher.search          [bonus]
-branch_switcher.current_marker              branch_switcher.view_all_button
-branch_switcher.error_banner                diff_panel.title_text
-branch_switcher.error_dismiss_button        diff_inspector.changes_list
-diff_inspector.history_empty_state          diff_inspector.history_error    [bonus]
-diff_inspector.history_list                 diff_inspector.history_row.<short-sha>
-diff_inspector.tab_picker                   worktree_header.branch_button
-worktree_header.branch_text                 worktree_header.context_text
-worktree_header.switching_spinner
-```
+All statuses below are **RUNTIME-PENDING**. Test names refer to source assertions only.
 
-The two bonus identifiers (`branch_switcher.search` from T7 and `diff_inspector.history_error` from T13) were added in passing while wiring the seams; they are not required by the parent doc but are kept because the XCUITest harness will benefit from them.
+| Case | Existing evidence | Remaining runtime check |
+|---|---|---|
+| UT-BSH-HD-001 | Header source renders branch title and context row; suppresses the worktree name when it repeats the branch. | Text, layout, and visual hierarchy with the prepared fixture. |
+| UT-BSH-HD-002 | Header source shows a decorative chevron only on hover when idle. | Pointer entry/exit and stable text placement; manual observation. |
+| UT-BSH-HD-003 | Header uses `Worktree.detachedHeadTitle` (`Detached HEAD @<short-sha>`) with `(detached)` when the SHA is unavailable; model/reconcile test `reconcileAppendsDetachedWorktreeWithHeadSHA`. | Detached header text and a usable branch button. |
+| UT-BSH-BP-001 | Reducer test `popoverTappedKicksInventoryAndCommitsLoadsInParallel`; view renders only branches and search. Parser test `parseBranchInventoryFiltersOriginHEAD`. | Popover, filter, and expected branch rows visible after loading. |
+| UT-BSH-BP-002 | Parser tests `parseBranchInventoryMixedLocalAndRemoteSortedAndPinned` and `parseBranchInventorySingleLocalMarkedCurrent`. | Current row first with exactly one visible current marker. |
+| UT-BSH-BP-004 | View omits the remote divider and rows when the filtered remote list is empty. | Prepared no-remote fixture displays only local rows. Filtering `origin/HEAD` alone does not establish this case. |
+| UT-BSH-BP-005 | Reducer test `branchTappedSetsSwitchingAndClosesPopoverThenSwitchSucceeds`; service test `switchBranchLocalIssuesPlainSwitch`. | Popover dismissal, final header state, no banner, and actual repository HEAD. |
+| UT-BSH-BP-006 | Service test `switchBranchRemoteTrackingIssuesTrackFlag`. | Local tracking branch creation, upstream configuration, and displayed local name. |
+| UT-BSH-BP-007 | Target resolution is in the view, which prefers a matching local branch. | Selecting `origin/main` switches to existing `main` without changing its SHA or creating a duplicate local branch. |
+| UT-BSH-BP-008 | Reducer test `branchTappedSurfacesFirstLineOfGitErrorAsBanner`; service test `switchBranchPropagatesDirtyTreeError`. | Rendered failure and dismissal, unchanged HEAD, and preserved dirty file. |
+| UT-BSH-VS-002 | Header declares the accessibility label `Branch <branch-title>`. | Actual VoiceOver announcement and button role. |
 
-## Per-case status
+Test-source locations:
 
-### Journey HD — Header reflects identity
+- [BranchSwitcherFeatureTests.swift](../../apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift)
+- [GitOutputParserTests.swift](../../apps/mac/codans/Tests/GitTests/GitOutputParserTests.swift)
+- [LiveGitServiceBranchTests.swift](../../apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift)
 
-| ID | Status | Evidence | Notes |
-|---|---|---|---|
-| UT-BSH-HD-001 | MANUAL-PENDING | manual probe required | Layout invariant (two-row, secondary-font row 2). The reducer/view wiring at `WorktreeHeaderInfoLabel` is exercised indirectly by `RootFeatureTests.onLaunchExhaustivelyPropagatesSelectionFromStream` (verifies `.selectionChanged` → `.branchSwitcher.worktreeChanged`), but text content + font hierarchy are only observable from the rendered view. |
-| UT-BSH-HD-002 | MANUAL-PENDING | manual probe required | Hover affordance is a SwiftUI `.onHover` side-effect. No unit test exercises it; XCUITest probe over `worktree_header.branch_button` would assert hover background / underline trait. |
-| UT-BSH-HD-003 | MANUAL-PENDING | manual probe required | `branchTitle` returns `Worktree.detachedHeadTitle` (`"Detached HEAD @<short-sha>"`, falling back to `"(detached)"` when `headSHA` is unknown) when `worktree.branch == nil`; the SHA lands via launch reconcile. The title helper itself is unit-covered (`HierarchyManagerWorktreeMgmtTests.reconcileAppendsDetachedWorktreeWithHeadSHA`). The detached-HEAD repo fixture (`docs/user-tests/_shared/fixtures/repo-detached.bundle`) is in place; promotion requires either a SwiftUI snapshot test or an XCUITest probe. |
+## Fixture Readiness
 
-### Journey BP-Open — Popover contents
+The shared fixture directory contains the multi-branch and detached bundles, catalog seeds, and matching restore scripts. Restore uses explicit refspecs to preserve the bundled remote-tracking refs. It does not configure `origin`; remote-switch cases require the disposable remote setup described in the parent specification. Catalog seeds require `__TMP__` substitution and must be checked against the current app's catalog format before a runtime run.
 
-| ID | Status | Evidence | Notes |
-|---|---|---|---|
-| UT-BSH-BP-001 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::popoverTappedKicksInventoryAndCommitsLoadsInParallel` | Reducer kicks both loads in parallel on `.popoverTapped`; both arrive as separate actions and populate `state.inventory` / `state.recentCommits`. The visible "popover opened with both groups" assertion stays MANUAL-PENDING for the rendered side. |
-| UT-BSH-BP-002 | UNIT-COVERED | `apps/mac/codans/Tests/GitTests/GitOutputParserTests.swift::parseBranchInventoryMixedLocalAndRemoteSortedAndPinned` + `parseBranchInventorySingleLocalMarkedCurrent` | Parser pins current branch to position 0 and sorts the rest. Visible "first row is current + checkmark" still MANUAL-PENDING for the rendered marker. |
-| UT-BSH-BP-003 | MANUAL-PENDING | manual probe required | Cap-of-10 enforcement in `BranchSwitcherFeature` (commits load uses `LogPage.Cursor(offset: 0, limit: 10)` per reducer source). No unit test asserts the `limit: 10` arg explicitly; promotion would add an arg-assert in the existing `popoverTappedKicksInventoryAndCommitsLoadsInParallel` test (cheap follow-up, not done in T16). Visible row count + ordering is MANUAL-PENDING. |
-| UT-BSH-BP-004 | UNIT-COVERED | `apps/mac/codans/Tests/GitTests/GitOutputParserTests.swift::parseBranchInventoryFiltersOriginHEAD` | Parser drops `origin/HEAD`. Visible "no Remote subsection" rendering is MANUAL-PENDING. |
+Fixture files being present does not mean they were restored or exercised for these cases. Follow the isolation and backup rules in [user-test patterns](../user-test-patterns.md), and never seed or drive the user's active app state as a shortcut.
 
-### Journey BP-Switch — Switching via the popover
+## Next Verification Run
 
-| ID | Status | Evidence | Notes |
-|---|---|---|---|
-| UT-BSH-BP-005 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::branchTappedSetsSwitchingAndClosesPopoverThenSwitchSucceeds` + `apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchLocalIssuesPlainSwitch` + `RootFeatureTests.swift::onLaunchExhaustivelyPropagatesSelectionFromStream` (wire-up half) | Reducer closes popover, sets spinner, runs `switchBranch(.local)`, and on `.headChangedForCurrentWorktree` clears the spinner. Live service issues `["switch", "main"]`. Visible "header text updates within 3 s" timing assertion is MANUAL-PENDING. |
-| UT-BSH-BP-006 | UNIT-COVERED | `apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchRemoteTrackingIssuesTrackFlag` | Service emits `["switch", "--track", "origin/feat/x"]`. The reducer-side mapping of `BranchSwitchTarget.remoteTracking` → local short-name display is not unit-asserted; visible "header shows `feat/new-shell`, not `origin/feat/new-shell`" stays MANUAL-PENDING. |
-| UT-BSH-BP-007 | MANUAL-PENDING | manual probe required | Fast-path that maps `origin/main` → `.local(name: "main")` when a local `main` exists is in `BranchSwitcherFeature`'s row-tap mapping (per design doc); no dedicated unit test exercises the mapping decision separately from the happy-path tests above. Promotion would add a `branchTappedFastPathsRemoteWhenLocalExists` TestStore test. |
-| UT-BSH-BP-008 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::branchTappedSurfacesFirstLineOfGitErrorAsBanner` + `apps/mac/codans/Tests/GitTests/LiveGitServiceBranchTests.swift::switchBranchPropagatesDirtyTreeError` | Service throws `GitError.exec(code:1, stderr:)` verbatim; reducer extracts first line into the banner. Visible banner dismiss + spinner clear is asserted at reducer level; rendered banner is MANUAL-PENDING. |
-| UT-BSH-BP-009 | UNIT-COVERED | `apps/mac/codans/Tests/BranchSwitcherFeatureTests.swift::viewAllCommitsTappedEmitsDelegateAndClosesPopover` | Reducer closes popover and emits `.delegate(.openDiffViewerOnHistoryTab(worktreeID:, projectID:))`. The root-side handler that turns this delegate into "Diff Viewer opens on History tab" is not exercised by a focused TestStore test (the wire-up is verified indirectly via `RootFeatureTests`). Visible "tab picker selected = History + ≥ 1 commit row" stays MANUAL-PENDING. |
-
-### Journey DV — Diff Viewer History tab
-
-| ID | Status | Evidence | Notes |
-|---|---|---|---|
-| UT-BSH-DV-001 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyAppearedTriggersFirstPageLoad` (+ `historyAppearedIsIdempotentWhenLoaded`, `historyAppearedIsIdempotentWhileLoading`) | Reducer kicks first-page load with `cursor.offset == 0, limit == 50` on first `.historyAppeared`; idempotent on repeat. Visible "progress indicator visible within 500 ms" + ">= 10 rows" rendering stays MANUAL-PENDING. |
-| UT-BSH-DV-002 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyCommitTappedSetsSelectionAndLoads` + `historyCommitTappedReusesCacheOnRepeat` + `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureTests.historyCommitTappedRetriesAfterError` | Reducer sets `presentedCommitSha`, caches `diffsByCommit[sha]`, builds title `String(sha.prefix(7))`. Visible "`<sha> · <subject>` title format + ≥ 1 hunk rendered" stays MANUAL-PENDING. |
-| UT-BSH-DV-003 | UNIT-COVERED (reducer half) | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.tabSelectedChangesActiveTab` (tab routing) + `historyCommitTappedReusesCacheOnRepeat` (cache survives) + `worktreeSelectedResetsHistorySide` (selectedTab preserved across worktree switch) | Reducer toggles `selectedTab` and preserves `diffsByCommit`. The "row remains selected + title unchanged after toggle" visible assertion stays MANUAL-PENDING. |
-| UT-BSH-DV-004 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyLoadNextPageRequestedAppendsAndAdvances` + `historyLoadNextPageRequestedGatedOnHasMore` | Reducer appends second-page commits at the tail, advances `nextOffset`, gates on `hasMore`. Visible "scroll triggers next page + no duplicates" stays MANUAL-PENDING. |
-| UT-BSH-DV-005 | UNIT-COVERED | `apps/mac/codans/Tests/DiffFeatureTests.swift::DiffFeatureHistoryTests.historyPageFailedCapturesError` (error path; empty path inferred from the `.empty` state in `DiffHistoryListView`) | Reducer surfaces `historyPageFailed` into `historyState.error`. No unit test exercises the empty-success path (empty repo returns `commits: []` with `hasMore: false`); promotion would add a `historyAppearedSucceedsWithEmptyPage` TestStore test. Visible empty-state copy "No commits" stays MANUAL-PENDING. |
-
-### Journey VS — Visual & system integration
-
-| ID | Status | Evidence | Notes |
-|---|---|---|---|
-| UT-BSH-VS-001 | DEFERRED | no infra | Requires SwiftUI material introspection or pixel-sample comparison. macOS 26+ gating is environmental. Per the parent doc's OQ-UT2, downgrade to MANUAL if introspection is unavailable in the harness. |
-| UT-BSH-VS-002 | MANUAL-PENDING | manual probe required | Requires a VoiceOver-enabled runner. `worktree_header.branch_button` has its accessibility label set (`Text(branchTitle)` content drives VoiceOver readout). Promotion would add an XCUITest with `XCUIApplication().launchEnvironment["VOICEOVER"]` or equivalent. |
-| UT-BSH-VS-003 | MANUAL | screen recording (`tab_switch.mov`) | Designed as manual-only in the parent doc — animation smoothness review. No unit-test substitute possible. |
-
-## Summary
-
-- **22 cases total** in the parent doc.
-- **12 UNIT-COVERED** (reducer / service / parser layers exercised by existing Swift Testing tests).
-- **8 MANUAL-PENDING** (no XCUITest runner; UI side stays on manual probe).
-- **1 DEFERRED** (UT-BSH-VS-001 — material introspection infrastructure).
-- **1 MANUAL by design** (UT-BSH-VS-003 — animation review).
-
-The UNIT-COVERED count is intentionally conservative: a case is UNIT-COVERED only when its load-bearing data-flow contract (parser shape, service argv, reducer state transition) is asserted by a passing test. Visual assertions (text content, hover, segmented-control selection, render order) are not promoted to UNIT-COVERED — they belong on the XCUITest probe.
-
-## Fixtures already in place
-
-T15 landed all preconditions for a future XCUITest probe under `docs/user-tests/_shared/fixtures/`:
-
-| Artifact | Path |
-|---|---|
-| Multi-branch git bundle | `_shared/fixtures/repo-multi-branch.bundle` |
-| Empty git bundle | `_shared/fixtures/repo-empty.bundle` |
-| Detached-HEAD git bundle | `_shared/fixtures/repo-detached.bundle` |
-| Catalog seed (multi-branch) | `_shared/fixtures/catalog/branch-switcher.json` |
-| Catalog seed (empty) | `_shared/fixtures/catalog/branch-switcher-empty.json` |
-| Catalog seed (detached) | `_shared/fixtures/catalog/branch-switcher-detached.json` |
-| Restore scripts | `_shared/fixtures/setup/restore-repo-multi-branch.sh` (+ empty + detached variants) |
-| Build scripts (regeneration) | `_shared/fixtures/setup/build-repo-multi-branch.sh` (+ empty + detached variants) |
-
-Catalog seeds contain a `__TMP__` placeholder the runner must replace with the per-test tmpdir before launch.
-
-## Test infrastructure follow-up
-
-To convert MANUAL-PENDING cases to AUTOMATED:
-
-1. **Add an XCUITest target** to `apps/mac/Project.swift`:
-   ```swift
-   .target(
-     name: "codans-ui-tests",
-     destinations: .macOS,
-     product: .uiTests,
-     bundleId: "com.gumpw.codans.ui-tests",
-     deploymentTargets: .macOS("26.0"),
-     sources: ["codans/UITests/**"],
-     dependencies: [.target(name: "codans")]
-   )
-   ```
-
-2. **Write a base test class** (`BranchSwitcherUITestCase`) that:
-   - Generates a tmpdir, runs the relevant `restore-repo-*.sh` script, and seeds `~/.config/codans/catalog.json` from the matching `branch-switcher*.json` (with `__TMP__` substitution).
-   - Launches the app via `XCUIApplication()`, waits for the "App launched" ready signal.
-   - Tears down by quitting the app and `rm -rf`ing the tmpdir.
-   - Exposes query helpers keyed by the `accessibilityIdentifier` strings declared in [Seam inventory](#seam-inventory).
-
-3. **Replay each MANUAL-PENDING case** as an XCUITest method using the ready-signal contracts already specified in the parent doc (`branch_switcher.popover` + first row visible, `worktree_header.switching_spinner` absent + `branch_text` matches target, etc.).
-
-4. **For UT-BSH-VS-001 (DEFERRED):** investigate SwiftUI `MaterialIntrospector` (or pixel-sample fallback per OQ-UT2). If neither is feasible, downgrade to MANUAL like VS-003.
-
-5. **For UT-BSH-VS-002 (VoiceOver):** investigate `XCUIElement.accessibilityValue` / `accessibilityLabel` queries — these should be sufficient without enabling VoiceOver itself.
-
-The two pending unit-test promotions are cheap and could be folded into the next branch-switcher polish PR:
-
-- `BranchSwitcherFeatureTests.popoverTappedAssertsTenCommitLimit` — assert `cursor.limit == 10` in the `gitService.log` stub for UT-BSH-BP-003.
-- `BranchSwitcherFeatureTests.branchTappedFastPathsRemoteWhenLocalExists` — assert that tapping `origin/main` with local `main` present issues `.local(name: "main")` not `.remoteTracking(...)` for UT-BSH-BP-007.
-- `DiffFeatureHistoryTests.historyAppearedSucceedsWithEmptyPage` — assert that an empty `LogPage` lands the state in the empty-but-not-loading shape for UT-BSH-DV-005.
-
-None block the current M5 close; they are queued as follow-ups in the exec plan's Retrospective.
+1. Prepare an isolated app session and disposable fixtures, including remote configuration where required.
+2. Use the available CLI and accessibility tooling under the project conventions; the absence of XCUITest alone does not rule out a human or accessibility-driven run.
+3. Run the 11 active cases and record per-case outcomes and failure artifacts. Do not infer UI PASS from unit-test success.
+4. Keep the retired IDs listed in the parent specification excluded from active totals. Add separate tests for external Git-client launching when that workflow is validated.

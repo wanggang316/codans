@@ -5,9 +5,9 @@
 
 ## 背景与范围
 
-codans 的用户同时驱动多个编码 agent（Claude Code、Codex、Gemini CLI、…）。在本设计之前，"在这个 worktree 里起一个 agent"只能靠手敲命令，而"把手头任务从 A agent 交给 B agent"根本没有通道——两个 agent 是独立进程，各自的会话上下文互不可见，用户只能自己复述。
+codans 的用户同时驱动多个编码 agent（Claude Code、Codex、Gemini CLI、…）。这些 agent 是独立进程，各自的会话上下文互不可见。Agent Profiles 提供启动预设，Handoff 通过 worktree 内的文档传递任务上下文。
 
-本设计交付两件事：
+功能分为两部分：
 
 1. **Agent Profiles**——命名的启动预设（agent、模型、推理强度、执行模式、放置位置、额外参数、launch-scoped 环境变量、独立 HOME），从 Settings → Agents 编辑，从 worktree toolbar 的 Agents 菜单、Command Palette、`codans agent launch` 一键启动。
 2. **Handoff**——agent 到 agent 的任务交接：以 worktree 下的 `.codans/handoff/` 为唯一持久通道，由**在线的源 agent 自己**写 briefing 并通过 `codans handoff` 完成迁移，接收方在同一 worktree 里带着 kickoff prompt 启动——默认后台新 tab，也可分屏到源 pane 旁。应用内的 Hand Off 面板只是这条 CLI 迁移的触发器与观察者。
@@ -56,7 +56,13 @@ toolbar / palette   agent.launch (CLI)   codans handoff   HandoffFeature (面板
 
 `AgentProfile`（`CodansCore/Agents/AgentProfile.swift`）：`id`、`kind`、`name`、`isEnabled`、`systemImage`、`modelID` / `reasoningEffortID` / `executionModeID`、`target` + `direction`（复用 `ScriptTarget` / `ScriptSplitDirection`）、`extraArguments`、`envVars`、`usesDedicatedHome`。覆盖字段为 `nil` 即"Runtime default"——codans 不贡献 flag，由 agent CLI 自己决定。
 
-`AgentDescriptor`（`AgentCatalog`）是每个 agent 的静态事实：可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——该 CLI 如何在保持交互式的同时接受初始 prompt（Claude Code / Codex / Cursor Agent / Grok Build / Pi / omp 位置参数，Gemini `-i`，均据各自 `--help` 核实）。没有 `promptStyle` 的 agent 仍可作为 handoff 的接收方：裸启动后，app 等分类器在新 pane 里认出该 agent、再留 1.5 s 让 TUI 画出输入框，然后把 kickoff prompt 键入（`HandoffHandlers.typeKickoff` → `CodansApp.typeKickoffOnceAgentIsUp`），**不带回车**：TUI 可能开在一个对话框上（更新提示、首次运行设置，GUI 测试里 OpenCode 正是如此），回车会被当作对它的回答，字母则无害；由用户在输入框里确认后发送。提前键入会把文字交给 shell，所以 30 s 内没出现的 agent 什么都收不到，只记一条日志。
+`AgentDescriptor`（`AgentCatalog`）定义 agent 的可执行名、品牌图标、模型 / 推理强度 / 执行模式目录，以及 **`promptStyle`**——CLI 在交互模式下接收初始 prompt 的参数形状。没有 `promptStyle` 的接收方由 `CodansApp.typeKickoffOnceAgentIsUp` 裸启动后注入 kickoff：
+
+1. 最多等待 30 s，直到 `AgentStateStore` 在目标 pane 识别出指定 agent；超时或 surface 不存在时不输入，记录错误并返回失败。
+2. 每 250 ms 读取活动视口，等待非空画面连续稳定至少 1.5 s；本阶段最多等待 10 s，达到上限后仍继续输入 prompt。
+3. 输入后最多检查 20 次（每次间隔 250 ms）。视口包含 prompt 去掉首尾空白后的末 19 个字符或 `Pasted` 时，自动发送 CR 提交并返回成功；未检测到则不发送 CR，记录错误并返回失败。
+
+这些屏幕条件是启发式，不能确认当前一定处于 agent 输入框；流程没有单独的用户确认步骤。
 
 渲染形状：
 
@@ -76,7 +82,7 @@ toolbar / palette   agent.launch (CLI)   codans handoff   HandoffFeature (面板
 
 ```
 <worktree>/.codans/
-  .gitignore            "*"——整个状态目录自我忽略（早期构建把它放在 handoff/ 里，新布局建立时顺手移除）
+  .gitignore            "*"——整个状态目录自我忽略
 <worktree>/.codans/handoff/
   current.md            源 agent 写的 briefing（无则不存在）
   context.md            codans 生成的仓库 + 会话状态；每次 save 重写
@@ -139,9 +145,9 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 
 ## 技术决策
 
-- **D1 — profile 是确定性 argv，不是 shell 片段。** 预览即真相；`extraArguments` 是唯一原样拼接的逃生口。
+- **D1 — profile 渲染为确定性 shell 命令。** 预览与启动使用同一渲染器；结构化选项按 descriptor 转换，`extraArguments` 则作为原始 shell 片段拼接。
 - **D2 — 环境变量用 `env` 前缀，不进 spawn env。** launch-scoped：agent 退出后 pane 回到用户环境；同一 pane 里手动再起的 agent 不继承 profile 的账号。
-- **D3 — 任何 agent 都可作接收方；kickoff 的送达方式按 `promptStyle` 分两路。** 有 `promptStyle` 的在命令行上带 prompt；没有的裸启动后由 app 键入并在输入框显示出文字后发 Enter（见上文），代价是 30 s 等待、1.5 s 稳定期和「文字已上屏」这三个启发式。只对能从 `--help` 核实的 CLI 登记 `promptStyle`，不猜。`--no-launch` 仍接受任何 agent token。
+- **D3 — kickoff 按 `promptStyle` 分两路。** 有 `promptStyle` 的接收方在命令行上带 prompt；没有的由 app 按上述识别、画面稳定和文本出现条件注入并自动提交。`--no-launch` 只保存交接，不启动接收方。
 - **D4 — briefing 必须显式给出或显式放弃。** codans 不替第三方调用方发起模型调用；`--brief`/`--no-brief` 缺失时返回可直接粘贴的 heredoc 指引。
 - **D5 — 领域层不 shell out。** git 事实由 app 层采集为值传入，`HandoffStore` 保持 `nonisolated` + `Sendable`，可在 `Task.detached` 里跑且可用临时目录单测。
 - **D6 — 面板与 CLI 共用一个 `HandoffHandlers` 实例。** 回退路径不复制迁移逻辑；registry 的 claim/supersede 使两条路径互斥。
@@ -150,7 +156,7 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 
 ## 备选方案（Alternatives）
 
-- **由 codans 读取 agent 的本地会话记录合成 briefing。** 否决：当前各 CLI 的 transcript 把推理保存为空壳，且这需要 codans 发起隐藏模型调用，成本与安全边界都不可接受。
+- **由 codans 读取 agent 的本地会话记录合成 briefing。** 否决：transcript 不等于源 agent 显式确认的交接内容；自动合成还需要额外模型调用，不属于 codans 的职责。
 - **profile 存到 `catalog.json`。** 否决：profile 是用户偏好不是层级状态，`settings.json` 已是单写者模型且可手编。
 - **面板自己实现迁移。** 否决：两份序列必然漂移；见 D6。
 - **handoff 工件放在 `~/.config/codans/` 而非 worktree 内。** 否决：接收方 agent 需要在自己的 cwd 下读到它，且工件与 worktree 生命周期一致。
@@ -164,9 +170,9 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 ## 风险
 
 - 注入源 pane 的一行请求依赖 agent 把它当指令执行；agent 忙时请求排队，Cancel 只关面板、交接仍在后台完成；不想等 agent 写 briefing 就在确认时选 Hand Off with Context。
-- Codex 默认的 workspace-write 沙箱禁止 Unix socket，`codans handoff` 第一次会以 permission denied 失败、Codex 再请求跳出沙箱执行；CLI 对"socket 是自己的却 EACCES"给出沙箱提示，用户也可在 Codex 配置里给 workspace-write 开 `network_access`。
+- 调用方沙箱可能禁止连接 Unix socket；此时 CLI 返回权限错误和沙箱提示，交接请求尚未到达应用。调用方需要允许 socket 访问的执行环境。
 - `promptStyle` 对应各 CLI 当前版本的拼法，CLI 改 flag 时需要更新 `AgentCatalog`。
-- `AgentInstallationStore` 的 PATH 探测可能误报"未安装"，因此只用于置灰，从不阻止启动。
+- `AgentInstallationStore` 的 PATH 探测可能误报"未安装"。启动菜单和 Hand Off 面板据此过滤 profile；尚未完成探测或过滤后为空时显示全部启用项。探测结果不作为服务端启动授权条件。
 
 ## 参考
 
