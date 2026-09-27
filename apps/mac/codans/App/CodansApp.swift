@@ -89,6 +89,8 @@ struct CodansApp: App {
           .frame(minWidth: 800, minHeight: 600)
           .environment(appState.agentInstallation)
           .environment(appState.workflowCatalog)
+          .environment(appState.workflowRunsNavigator)
+          .environment(\.workflowEngine, appState.workflowEngine)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
@@ -216,6 +218,24 @@ struct CodansApp: App {
     }
     .defaultSize(width: 750, height: 500)
     .windowResizability(.contentMinSize)
+
+    Window("Workflow Runs", id: CodansApp.workflowRunsWindowID) {
+      AppAppearanceView(settingsStore: appState.settingsStore) {
+        // `workflowEngine` is not observed; gate on the observed `store`,
+        // which lands in the same `bringUp`, so the body re-evaluates once
+        // the engine exists.
+        if appState.store != nil {
+          WorkflowRunsWindowView()
+            .frame(minWidth: 720, minHeight: 420)
+            .environment(appState.hierarchyManager)
+            .environment(appState.workflowRunsNavigator)
+            .environment(\.workflowEngine, appState.workflowEngine)
+        } else {
+          ProgressView().frame(minWidth: 720, minHeight: 420)
+        }
+      }
+    }
+    .defaultSize(width: 980, height: 640)
   }
 
   /// Scene id for the Settings `Window`. Referenced from the app-menu Settings… command and
@@ -224,6 +244,9 @@ struct CodansApp: App {
 
   /// Scene id for the single main window.
   static let mainWindowID = "main"
+
+  /// Scene id for the Workflow Runs window (runs list + log).
+  static let workflowRunsWindowID = "workflow-runs"
 }
 
 /// AppKit delegate that flushes debounced writes on graceful termination
@@ -495,6 +518,8 @@ final class AppState {
   /// Agents View row menu, Settings → Workflows). Follows the hierarchy
   /// from `bringUp`.
   let workflowCatalog = WorkflowCatalogStore(discovery: AppState.makeWorkflowDiscovery())
+  /// Which run the Workflow Runs window should select when it opens.
+  let workflowRunsNavigator = WorkflowRunsNavigator()
   /// Owns the active workflow runs. Built in `bringUp` once the live
   /// clients exist; the AgentState panel reads `activeRuns` from it.
   @ObservationIgnored private(set) var workflowEngine: WorkflowEngine?

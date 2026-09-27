@@ -258,6 +258,14 @@ phase_advisor() {
 case "$PHASE" in
   setup) setup; launch_app; phase_setup ;;
   quit) quit_app ;;
+  # Same runs as `all`, but the instance stays up so the GUI (Workflow Runs
+  # window, Agents View rows) can be inspected against real run records.
+  runs)
+    setup; launch_app; start_watcher
+    phase_setup; phase_review_loop; phase_handoff; phase_advisor
+    stop_watcher
+    echo; echo "PASS=$PASS FAIL=$FAIL  (instance kept; quit with: $0 <app> quit)"
+    ;;
   all)
     setup; launch_app; start_watcher
     phase_setup; phase_review_loop; phase_handoff; phase_advisor
