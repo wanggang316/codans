@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The toolbar's workflow capsule, beside the Agents / Run / Open chips:
 /// a menu that starts a workflow in the selected worktree, and a button
-/// that opens the Workflow Runs window. The second one carries the runs'
+/// that pops Workflow Runs open under it. The second one carries the runs'
 /// state — a small spinner while any run is going, an orange dot while one
 /// is waiting on the user — so a run in the background is never invisible.
 ///
@@ -19,9 +19,8 @@ struct HeaderWorkflowGroup: View {
 
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorkflowCatalogStore.self) private var workflowCatalog
-  @Environment(WorkflowRunsNavigator.self) private var navigator
   @Environment(\.workflowEngine) private var engine
-  @Environment(\.openWindow) private var openWindow
+  @State private var isShowingRuns = false
 
   var body: some View {
     HStack(spacing: 2) {
@@ -40,10 +39,13 @@ struct HeaderWorkflowGroup: View {
       .id(menuSignature)
 
       Button {
-        navigator.show(worktreePath: worktreePath)
-        openWindow(id: CodansApp.workflowRunsWindowID)
+        isShowingRuns.toggle()
       } label: {
         runsGlyph
+      }
+      .popover(isPresented: $isShowingRuns, arrowEdge: .bottom) {
+        WorkflowRunsPanel(worktreePath: worktreePath)
+          .frame(width: 860, height: 560)
       }
       .help(runsHelp)
       .accessibilityLabel("Workflow Runs")

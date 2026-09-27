@@ -2,15 +2,18 @@ import AppKit
 import CodansCore
 import SwiftUI
 
-/// The Workflow Runs window: every run — the engine's live ones first, then
-/// the history each local worktree keeps on disk — on the left, and the
-/// selected run's steps, attention actions, log and deliveries on the right.
-/// Opened from the toolbar's workflow group; it stays open beside the main
-/// window and follows a live run as it goes.
-struct WorkflowRunsWindowView: View {
+/// Workflow Runs, shown as a popover from the toolbar's workflow group:
+/// every run — the engine's live ones first, then the history each local
+/// worktree keeps on disk — on the left, and the selected run's attention
+/// actions, steps, deliveries and log on the right. A live run is followed
+/// while the panel is open.
+struct WorkflowRunsPanel: View {
+  /// The worktree the toolbar belongs to; its live or newest run is
+  /// selected when the panel opens.
+  let worktreePath: String?
+
   @Environment(\.workflowEngine) private var engine
   @Environment(HierarchyManager.self) private var hierarchy
-  @Environment(WorkflowRunsNavigator.self) private var navigator
 
   @State private var history: [WorkflowRunSummary] = []
   @State private var selection: UUID?
@@ -26,55 +29,61 @@ struct WorkflowRunsWindowView: View {
   }
 
   var body: some View {
-    NavigationSplitView {
-      List(selection: $selection) {
-        if !liveRuns.isEmpty {
-          Section("Running") {
-            ForEach(liveRuns, id: \.id) { session in
-              runRow(
-                name: session.name, worktree: session.run.configuration.source.worktreeName,
-                status: session.attention == nil ? "running" : "needs attention",
-                needsAttention: session.attention != nil, isLive: true, date: session.run.configuration.startedAt
-              )
-              .tag(session.id)
-            }
-          }
-        }
-        Section("History") {
-          if pastRuns.isEmpty {
-            Text("No finished runs yet.")
-              .foregroundStyle(.secondary)
-          }
-          ForEach(pastRuns) { summary in
-            runRow(
-              name: summary.name, worktree: summary.worktreeName,
-              status: summary.status.replacingOccurrences(of: "_", with: " "),
-              needsAttention: false, isLive: false, date: summary.startedAt
-            )
-            .tag(summary.id)
-          }
-        }
-      }
-      .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
-      .toolbar {
-        ToolbarItem {
+    HStack(spacing: 0) {
+      VStack(spacing: 0) {
+        HStack {
+          Text("Workflow Runs")
+            .font(.headline)
+          Spacer()
           Button {
             reloadHistory()
           } label: {
-            Label("Refresh", systemImage: "arrow.clockwise")
+            Image(systemName: "arrow.clockwise")
           }
+          .buttonStyle(.borderless)
           .help("Reload run history from disk")
+          .accessibilityLabel("Refresh")
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        List(selection: $selection) {
+          if !liveRuns.isEmpty {
+            Section("Running") {
+              ForEach(liveRuns, id: \.id) { session in
+                runRow(
+                  name: session.name, worktree: session.run.configuration.source.worktreeName,
+                  status: session.attention == nil ? "running" : "needs attention",
+                  needsAttention: session.attention != nil, isLive: true, date: session.run.configuration.startedAt
+                )
+                .tag(session.id)
+              }
+            }
+          }
+          Section("History") {
+            if pastRuns.isEmpty {
+              Text("No finished runs yet.")
+                .foregroundStyle(.secondary)
+            }
+            ForEach(pastRuns) { summary in
+              runRow(
+                name: summary.name, worktree: summary.worktreeName,
+                status: summary.status.replacingOccurrences(of: "_", with: " "),
+                needsAttention: false, isLive: false, date: summary.startedAt
+              )
+              .tag(summary.id)
+            }
+          }
+        }
+        .listStyle(.sidebar)
       }
-    } detail: {
+      .frame(width: 260)
+      Divider()
       detail
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    .navigationTitle("Workflow Runs")
     .onAppear {
       reloadHistory()
-      applyRequest()
     }
-    .onChange(of: navigator.requestedWorktreePath) { applyRequest() }
     // A run that finishes moves from Running to History; re-read the index.
     .onChange(of: liveIDs) { reloadHistory() }
   }
@@ -140,18 +149,17 @@ struct WorkflowRunsWindowView: View {
         WorkflowRunHistory.load(worktrees: worktrees)
       }.value
       history = loaded
-      if selection == nil { selection = liveRuns.first?.id ?? loaded.first?.id }
+      if selection == nil { selection = initialSelection(history: loaded) }
     }
   }
 
-  /// Opened for a worktree: its live run if there is one, else its newest.
-  private func applyRequest() {
-    guard let path = navigator.consumeRequest() else { return }
-    if let live = liveRuns.first(where: { $0.run.configuration.source.worktreePath == path }) {
-      selection = live.id
-    } else if let past = history.first(where: { $0.worktreePath == path }) {
-      selection = past.id
-    }
+  /// This worktree's live run, else its newest, else whatever is newest.
+  private func initialSelection(history: [WorkflowRunSummary]) -> UUID? {
+    let here = { (path: String) in path == worktreePath }
+    return liveRuns.first { here($0.run.configuration.source.worktreePath) }?.id
+      ?? history.first { here($0.worktreePath) }?.id
+      ?? liveRuns.first?.id
+      ?? history.first?.id
   }
 }
 

@@ -1,8 +1,7 @@
 import CodansCore
 import Foundation
-import Observation
 
-/// One row of the Workflow Runs window: a live run from the engine or a
+/// One row of the Workflow Runs panel: a live run from the engine or a
 /// past one read back from a worktree's `.codans/workflow-runs` index.
 nonisolated struct WorkflowRunSummary: Identifiable, Equatable, Sendable {
   let id: UUID
@@ -78,23 +77,5 @@ nonisolated enum WorkflowRunHistory {
       .filter { $0.split(separator: ".").count >= 3 }
       .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
       .map { directory.appendingPathComponent($0) }
-  }
-}
-
-/// Which run the Workflow Runs window should show next — set by whoever
-/// opens it (the toolbar's workflow group), read once by the window.
-@MainActor
-@Observable
-final class WorkflowRunsNavigator {
-  /// Prefer this worktree's newest run when the window opens.
-  private(set) var requestedWorktreePath: String?
-
-  func show(worktreePath: String?) {
-    requestedWorktreePath = worktreePath
-  }
-
-  func consumeRequest() -> String? {
-    defer { requestedWorktreePath = nil }
-    return requestedWorktreePath
   }
 }
