@@ -35,6 +35,8 @@ export CODANS_SOCKET_PATH="$SOCK"
 cli() { "$CLI" "$@"; }
 die() { echo "FAIL  $*"; exit 1; }
 
+# shellcheck source=../_shared/zmx-cleanup.sh
+source "$REPO_ROOT/docs/user-tests/_shared/zmx-cleanup.sh"
 AX="$SCRATCH/ax"
 xcrun swiftc -O -o "$AX" "$REPO_ROOT/docs/user-tests/_shared/ax/ax.swift" || die "cannot build ax"
 
@@ -64,6 +66,7 @@ make_fixtures() {
   ] }
 }
 EOF
+  kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE" && mkdir -p "$CACHE"
 }
 
@@ -106,7 +109,7 @@ cleanup() {
     security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$id" >/dev/null 2>&1
   done
   # zmx daemons outlive the app on purpose; the tour's own must not.
-  pkill -f "$CACHE" 2>/dev/null
+  kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE"
 }
 trap cleanup EXIT

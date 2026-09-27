@@ -41,6 +41,11 @@ harness borrows the clipboard to copy the pairing code, then restores it.
 - The socket and the cache are short `/tmp` paths. zmx puts one socket per
   pane in the cache dir, and AF_UNIX paths are capped near 104 bytes. A long
   cache path makes every pane exit at spawn.
+- zmx session daemons outlive the app on purpose, so quitting the instance
+  leaves them running. On exit (and before a run reuses the cache dir) the
+  harness and `tour.sh` kill every daemon whose socket is in their own cache
+  dir (`docs/user-tests/_shared/zmx-cleanup.sh`) and warn if any survive.
+  Deleting the cache dir without this leaves daemons nothing can reach.
 - Pairing keys go into the login Keychain under
   `com.gumpw.codans.remote.codans-dev`, the same service the dev app uses.
   On exit the harness deletes the keys of every device it paired and no

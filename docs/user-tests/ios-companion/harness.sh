@@ -76,6 +76,8 @@ unset CODANS_PANE_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH ZMX_DIR ZM
 export CODANS_SOCKET_PATH="$SOCK"
 cli() { "$CLI" "$@"; }
 
+# shellcheck source=../_shared/zmx-cleanup.sh
+source "$REPO_ROOT/docs/user-tests/_shared/zmx-cleanup.sh"
 AX="$SCRATCH/ax"
 xcrun swiftc -O -o "$AX" "$REPO_ROOT/docs/user-tests/_shared/ax/ax.swift" || { echo "cannot build ax"; exit 1; }
 
@@ -105,6 +107,7 @@ AGENT
   ] }
 }
 EOF
+  kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE" && mkdir -p "$CACHE"
   rm -f "$SOCK"
   CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" \
@@ -147,6 +150,8 @@ quit_mac() {
   for id in $(jq -r '.devices[].id' "$CONF/remote-devices.json" 2>/dev/null); do
     security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$id" >/dev/null 2>&1
   done
+  # zmx daemons outlive the app on purpose; the instance's own must not.
+  kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE"
   echo "quit mac instance"
 }
