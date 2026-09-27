@@ -155,7 +155,8 @@ quit_mac() {
   rm -rf "$CACHE"
   echo "quit mac instance"
 }
-trap quit_mac EXIT
+# The simulator is booted by reset_sim; leave nothing of the run behind.
+trap 'quit_mac; xcrun simctl shutdown "$SIM" >/dev/null 2>&1' EXIT
 
 # Issues a pairing code with the given permission ("View only" or "View and
 # type") and prints it. The clipboard is restored afterwards.
@@ -268,7 +269,12 @@ run_pairing_test() {
 # await_phone <step> [seconds]: waits until the test reaches <step>. Fails
 # when the test ends first (it failed before the step) or on timeout.
 await_phone() {
-  local step="$1" deadline=$((SECONDS + ${2:-180}))
+  local step="$1" budget="${2:-180}" deadline
+  # Until the phone reaches its first step the test runner may still be
+  # starting, which takes many minutes on a loaded machine; the runner's
+  # liveness below is the real guard then.
+  compgen -G "$SYNC/*.phone" >/dev/null || budget=3600
+  deadline=$((SECONDS + budget))
   while [[ ! -e "$SYNC/$step.phone" ]]; do
     kill -0 "$UI_PID" 2>/dev/null || return 1
     ((SECONDS < deadline)) || return 1

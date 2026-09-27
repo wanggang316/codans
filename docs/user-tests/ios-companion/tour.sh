@@ -111,6 +111,7 @@ cleanup() {
   # zmx daemons outlive the app on purpose; the tour's own must not.
   kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE"
+  xcrun simctl shutdown "$SIM" >/dev/null 2>&1
 }
 trap cleanup EXIT
 
@@ -191,7 +192,12 @@ reset_sim() {
 }
 
 await_phone() {
-  local step="$1" deadline=$((SECONDS + ${2:-240}))
+  local step="$1" budget="${2:-240}" deadline
+  # Until the phone reaches its first step the test runner may still be
+  # starting, which takes many minutes on a loaded machine; the runner's
+  # liveness below is the real guard then.
+  compgen -G "$SYNC/*.phone" >/dev/null || budget=3600
+  deadline=$((SECONDS + budget))
   while [[ ! -e "$SYNC/$step.phone" ]]; do
     kill -0 "$UI_PID" 2>/dev/null || return 1
     ((SECONDS < deadline)) || return 1
