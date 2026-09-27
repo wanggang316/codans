@@ -64,6 +64,10 @@ struct TabChipLabel: View {
         .lineLimit(1)
         .truncationMode(.tail)
         .font(.system(size: TabBarMetrics.titleFontSize))
+        // A chip resizing in an add / close reflow re-truncates its title;
+        // swap the truncation outright instead of cross-fading the two
+        // strings, which leaves a ghost ellipsis behind the text.
+        .contentTransition(.identity)
         .foregroundStyle(TabBarColors.activeText)
         .opacity(textOpacity)
     }

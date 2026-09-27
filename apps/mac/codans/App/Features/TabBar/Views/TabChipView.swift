@@ -139,6 +139,9 @@ struct TabChipView: View {
       // `contentShape` here so the styled Button uses the expanded
       // rectangle as its hit shape, not the text glyph bounds.
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // A widening chip lays its title out at the final width at once;
+      // keep it inside the chip until the chip catches up.
+      .clipped()
       .contentShape(Rectangle())
       // Reserve the side slots symmetrically so the centered title stays
       // centered and truncates before it slides under either overlay.
