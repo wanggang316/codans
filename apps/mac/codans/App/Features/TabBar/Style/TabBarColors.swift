@@ -31,6 +31,13 @@ enum TabBarColors {
     dark: .white.withAlphaComponent(0.14)
   )
 
+  /// Selected capsule while the pointer is over it — a codans addition (the
+  /// system bar keeps the selected tab unchanged on hover).
+  static let activeHoverBackground: Color = adaptive(
+    light: NSColor(srgbRed: 240 / 255, green: 240 / 255, blue: 240 / 255, alpha: 1),
+    dark: .white.withAlphaComponent(0.18)
+  )
+
   /// Two stacked 0.5-pt rims (outer, inner) that give the selected capsule
   /// its glass edge highlight.
   static let activeRimOuter: Color = adaptive(
@@ -80,8 +87,13 @@ enum TabBarColors {
   /// Title color for the active chip.
   static let activeText: Color = Color.primary
 
-  /// Title color for idle / hovered chips.
-  static let inactiveText: Color = Color.secondary
+  /// Idle / hovered chip titles: `activeText` at this opacity. `labelColor`
+  /// and `secondaryLabelColor` share their RGB and differ only in alpha
+  /// (0.847 vs 0.498 light / 0.549 dark), so this lands exactly on the
+  /// secondary label color.
+  static func inactiveTextOpacity(for colorScheme: ColorScheme) -> Double {
+    (colorScheme == .dark ? 0.549 : 0.498) / 0.847
+  }
 
   private static func adaptive(light: NSColor, dark: NSColor) -> Color {
     Color(

@@ -9,8 +9,9 @@ import SwiftUI
 /// The slot collapses to zero when `isDirty` is `false` so the label sits
 /// flush with the chip edge the rest of the time.
 ///
-/// Typography follows the system tab bar: 11-pt system font, semibold on
-/// the selected tab, truncated at the tail.
+/// Typography follows the system tab bar: 11-pt system font truncated at
+/// the tail. The selected tab keeps the regular weight (the system bar sets
+/// it semibold) and is told apart by its capsule and primary text color.
 struct TabChipLabel: View {
   let title: String
   var isActive: Bool = false
@@ -30,6 +31,17 @@ struct TabChipLabel: View {
   /// what reads as "running". `nil` = idle, monochrome icon.
   var iconTint: Color?
 
+  @Environment(\.colorScheme) private var colorScheme
+
+  /// An idle chip's title is the selected title dimmed, not recolored: a
+  /// style change makes SwiftUI replace the text at its final frame, so in
+  /// an add / close reflow the title would jump ahead of its chip, while an
+  /// opacity change animates in place. Pixel-identical to the secondary
+  /// label color (see `TabBarColors.inactiveTextOpacity`).
+  private var textOpacity: Double {
+    isActive ? 1 : TabBarColors.inactiveTextOpacity(for: colorScheme)
+  }
+
   var body: some View {
     HStack(spacing: 4) {
       if isDirty {
@@ -44,16 +56,16 @@ struct TabChipLabel: View {
       } else if let icon, !icon.isEmpty {
         glyph(for: icon)
           .font(.system(size: 11))
-          .foregroundStyle(
-            iconTint ?? (isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
-          )
+          .foregroundStyle(iconTint ?? TabBarColors.activeText)
+          .opacity(iconTint == nil ? textOpacity : 1)
           .accessibilityHidden(true)
       }
       Text(title)
         .lineLimit(1)
         .truncationMode(.tail)
-        .font(.system(size: TabBarMetrics.titleFontSize, weight: isActive ? .semibold : .regular))
-        .foregroundStyle(isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
+        .font(.system(size: TabBarMetrics.titleFontSize))
+        .foregroundStyle(TabBarColors.activeText)
+        .opacity(textOpacity)
     }
   }
 

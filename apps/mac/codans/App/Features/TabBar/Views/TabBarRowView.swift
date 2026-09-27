@@ -23,11 +23,16 @@ import SwiftUI
 /// Clicking a sliver scrolls the stack into view; adding a tab reveals it.
 /// Selecting a tab never scrolls.
 ///
+/// Adding and closing tabs animate as in the system bar (measured): a new
+/// chip grows out of its own center from zero width while its siblings
+/// narrow, a closed chip disappears at once while its siblings widen, both
+/// on a critically damped spring (`addRemoveAnimation`). In a stacked row
+/// the new chip appears in place — its slot is decided by the stack.
+///
 /// Reorder: an in-app `DragGesture` drives a live preview. While dragging,
 /// a local `orderIDs` snapshot is mutated once the dragged chip overlaps a
-/// neighbor by 50% (the slot boundary), so siblings reflow under a
-/// `spring(response: 0.3, dampingFraction: 0.85)` (macOS Safari-style) —
-/// the dragged chip leaves a transparent gap in the row while a lifted
+/// neighbor by 50% (the slot boundary), so siblings reflow on the same
+/// spring as add / close — the dragged chip leaves a transparent gap in the row while a lifted
 /// copy follows the cursor in an overlay. The final permutation is
 /// dispatched once via `onReorder` on drop — the catalog mutation stays a
 /// single absolute-order commit.
@@ -75,6 +80,10 @@ struct TabBarRowView: View {
   /// one origin (and scroll together inside `TabBarOverflowScroll`).
   private static let rowSpace = "TabBarReorderRow"
 
+  /// Add / close reflow, fitted to the system bar: no overshoot, settled in
+  /// about half a second.
+  private static let addRemoveAnimation: Animation = .spring(response: 0.32, dampingFraction: 1)
+
   // MARK: Drag-reorder state
 
   /// Working order during a drag. Mutated locally as the dragged chip
@@ -92,6 +101,21 @@ struct TabBarRowView: View {
   @State private var chipFrames: [TabID: CGRect] = [:]
   /// Chip under the pointer; its flanking separators are hidden.
   @State private var hoveredID: TabID?
+  /// Last selection that was present in `tabs`; see `selectedID`.
+  @State private var heldSelectionID: TabID?
+
+  /// Selection as drawn. A new tab's selection (navigation state) can land a
+  /// frame or two before the catalog delivers the tab itself; until it is in
+  /// `tabs` the previous selection stays drawn, so the bar never flashes with
+  /// no tab selected.
+  private var selectedID: TabID? {
+    presentActiveID ?? (activeTabID == nil ? nil : heldSelectionID)
+  }
+
+  /// `activeTabID` when that tab is already in `tabs`.
+  private var presentActiveID: TabID? {
+    tabs.contains { $0.id == activeTabID } ? activeTabID : nil
+  }
 
   /// Render order: during a drag the locally-mutated `orderIDs`; otherwise
   /// the `tabs` prop verbatim. Content is always resolved from the current
@@ -113,7 +137,7 @@ struct TabBarRowView: View {
       ForEach(Array(rendered.enumerated()), id: \.element.id) { index, tab in
         chipView(for: tab, index: index, count: rendered.count, stack: stack)
           .frame(width: widths[index])
-          .modifier(StackPlacement(index: index, stack: stack, isActive: tab.id == activeTabID))
+          .modifier(StackPlacement(index: index, stack: stack, isActive: tab.id == selectedID))
           .onHover { hovering in
             if hovering {
               hoveredID = tab.id
@@ -142,17 +166,25 @@ struct TabBarRowView: View {
           // The dragged chip goes transparent in-flow, leaving a gap that
           // the spring reflows; a lifted copy follows the cursor (overlay).
           .opacity(draggingID == tab.id ? 0 : 1)
-          .zIndex(zOrder(index: index, isActive: tab.id == activeTabID, isDragging: draggingID == tab.id, stack: stack))
+          .zIndex(
+            zOrder(
+              index: index, isActive: tab.id == selectedID, isDragging: draggingID == tab.id,
+              stack: stack)
+          )
           .simultaneousGesture(reorderGesture(for: tab))
+          .transition(Self.chipTransition(isStacked: stack != nil))
       }
     }
     .coordinateSpace(name: Self.rowSpace)
     .onPreferenceChange(ChipFrameKey.self) { chipFrames = $0 }
     .overlay(alignment: .topLeading) { floatingChip(in: rendered) }
-    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: rendered.map(\.id))
+    .animation(Self.addRemoveAnimation, value: rendered.map(\.id))
     .onAppear {
       orderIDs = tabs.map(\.id)
       revealIfStacked(activeTabID)
+    }
+    .onChange(of: presentActiveID, initial: true) { _, id in
+      if let id { heldSelectionID = id }
     }
     .onChange(of: tabs.map(\.id)) { previous, latest in
       // Resync the local order whenever the catalog changes while idle —
@@ -166,16 +198,25 @@ struct TabBarRowView: View {
     }
   }
 
+  /// A new chip grows out of its slot (`ChipGrowTransition`); a closed chip
+  /// leaves at once — the siblings' reflow is the animation.
+  private static func chipTransition(isStacked: Bool) -> AnyTransition {
+    .asymmetric(
+      insertion: AnyTransition(ChipGrowTransition(isEnabled: !isStacked)), removal: .identity)
+  }
+
   /// One chip with its full callback set. Shared by the in-flow row and the
   /// floating drag copy so both stay pixel-identical.
   @ViewBuilder
   private func chipView(
     for tab: CodansCore.Tab, index: Int, count: Int, stack: StackState? = nil
   ) -> some View {
-    let slice = stack.flatMap { sliceInfo(index: index, isActive: tab.id == activeTabID, stack: $0) }
+    let slice = stack.flatMap {
+      sliceInfo(index: index, isActive: tab.id == selectedID, stack: $0)
+    }
     ResolvingTabChipView(
       tab: tab,
-      isActive: activeTabID == tab.id,
+      isActive: selectedID == tab.id,
       terminalBusy: isTerminalBusy(tab.id),
       agentWorking: isAgentWorking(tab.id),
       isOnlyTab: count <= 1,
@@ -271,7 +312,7 @@ struct TabBarRowView: View {
   }
 
   /// Steps the dragged chip past an adjacent neighbor once it overlaps that
-  /// neighbor by 50%, animating the sibling reflow (macOS Safari timing).
+  /// neighbor by 50%, animating the sibling reflow.
   ///
   /// The threshold is the midpoint between the dragged chip's own slot
   /// center and the neighbor's slot center — i.e. the boundary between the
@@ -300,7 +341,7 @@ struct TabBarRowView: View {
       target = current - 1
     }
     guard target != current else { return }
-    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+    withAnimation(Self.addRemoveAnimation) {
       let moved = orderIDs.remove(at: current)
       orderIDs.insert(moved, at: target)
     }
@@ -325,11 +366,13 @@ struct TabBarRowView: View {
   /// or hovered chip (their capsules are the boundary), next to a hidden
   /// stacked chip, and around the drag gap (so the empty slot reads clean
   /// while the dragged chip floats).
-  private func showsDivider(at index: Int, in rendered: [CodansCore.Tab], stack: StackState?) -> Bool {
+  private func showsDivider(at index: Int, in rendered: [CodansCore.Tab], stack: StackState?)
+    -> Bool
+  {
     guard index < rendered.count - 1 else { return false }
     if let stack, stack.frames[index].isHidden || stack.frames[index + 1].isHidden { return false }
     let pair = [rendered[index].id, rendered[index + 1].id]
-    return !pair.contains { $0 == draggingID || $0 == activeTabID || $0 == hoveredID }
+    return !pair.contains { $0 == draggingID || $0 == selectedID || $0 == hoveredID }
   }
 
   // MARK: Overflow stacking
@@ -338,9 +381,10 @@ struct TabBarRowView: View {
   /// chip fits at `chipMinWidth` (plain equal-width layout).
   private func stackedFrames(for rendered: [CodansCore.Tab]) -> StackState? {
     let count = rendered.count
-    guard viewport.width > 0, TabStackLayout.maxScrollOffset(count: count, viewportWidth: viewport.width) > 0
+    guard viewport.width > 0,
+      TabStackLayout.maxScrollOffset(count: count, viewportWidth: viewport.width) > 0
     else { return nil }
-    let selected = rendered.firstIndex { $0.id == activeTabID } ?? 0
+    let selected = rendered.firstIndex { $0.id == selectedID } ?? 0
     return StackState(
       layout: TabStackLayout.frames(
         count: count, selectedIndex: selected,
@@ -362,7 +406,8 @@ struct TabBarRowView: View {
       frameWidth: full.width, isLeadingSide: isLeading, viewportWidth: stack.viewportWidth)
     // Center the full-width content on the layout sliver and apply the
     // system bar's title offset; a leading cut must not move the content.
-    let shift = full.width / 2 + titleOffset - TabStackLayout.chipWidth / 2 - stack.leadingTrim[index]
+    let shift =
+      full.width / 2 + titleOffset - TabStackLayout.chipWidth / 2 - stack.leadingTrim[index]
     let region = TabStackLayout.stackingRegion(
       atX: full.x + full.width / 2, frames: stack.layout, selectedIndex: stack.selectedIndex)
     let scroller = viewport.scroller
@@ -391,7 +436,8 @@ struct TabBarRowView: View {
   private func revealIfStacked(_ id: TabID?) {
     guard let id, let index = tabs.firstIndex(where: { $0.id == id }), viewport.width > 0,
       let target = TabStackLayout.revealOffset(
-        forTabAt: index, scrollOffset: viewport.scrollOffset, count: tabs.count, viewportWidth: viewport.width)
+        forTabAt: index, scrollOffset: viewport.scrollOffset, count: tabs.count,
+        viewportWidth: viewport.width)
     else { return }
     // Let the new chip land in the scroll content before moving to it.
     let scroller = viewport.scroller
@@ -429,7 +475,10 @@ struct TabBarRowView: View {
 /// 5. `tab.cachedDisplayTitle` (last live value persisted to the catalog).
 /// 6. focused (or first) pane's `workingDirectory` basename — always
 ///    present on the persisted catalog, so even cold-launched chips
-///    have a meaningful label before the surface respawns.
+///    have a meaningful label before the surface respawns. Held back for
+///    `directoryFallbackDelay` on the selected tab: a freshly added tab
+///    reports its shell title within moments, and flashing the directory
+///    name first reads as a stray label.
 /// 7. Empty string as a last-resort defensive default.
 ///
 /// The cache exists because surfaces are spawned lazily — on cold launch
@@ -472,6 +521,11 @@ private struct ResolvingTabChipView: View {
   var onStackClick: (() -> Void)?
   let onCacheLiveTitle: (String) -> Void
 
+  private static let directoryFallbackDelay: Duration = .seconds(1)
+
+  /// Whether the working-directory title may show yet; see the type doc.
+  @State private var allowsDirectoryFallback = false
+
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
@@ -512,6 +566,10 @@ private struct ResolvingTabChipView: View {
       // would clobber its own cache before the shell pushes anything.
       guard let newLive, newLive != tab.cachedDisplayTitle else { return }
       onCacheLiveTitle(newLive)
+    }
+    .task {
+      try? await Task.sleep(for: Self.directoryFallbackDelay)
+      allowsDirectoryFallback = true
     }
   }
 
@@ -580,6 +638,7 @@ private struct ResolvingTabChipView: View {
     if let name = tab.name, !name.isEmpty { return name }
     if let live { return live }
     if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
+    guard allowsDirectoryFallback || !isActive else { return "" }
     let pane =
       tab.panes.first { $0.id == hierarchyManager.lastFocusedPane(in: tab.id) }
       ?? tab.panes.first
@@ -605,7 +664,10 @@ private struct StackState {
   let scrollOffset: CGFloat
   let viewportWidth: CGFloat
 
-  init(layout: [TabStackLayout.Frame], selectedIndex: Int, scrollOffset: CGFloat, viewportWidth: CGFloat) {
+  init(
+    layout: [TabStackLayout.Frame], selectedIndex: Int, scrollOffset: CGFloat,
+    viewportWidth: CGFloat
+  ) {
     self.layout = layout
     self.selectedIndex = selectedIndex
     self.scrollOffset = scrollOffset
@@ -651,7 +713,8 @@ private struct StackPlacement: ViewModifier {
   func body(content: Content) -> some View {
     if let stack {
       let frame = stack.frames[index]
-      let linearX = CGFloat(index) * (TabStackLayout.chipWidth + TabBarMetrics.chipSpacing) - stack.scrollOffset
+      let linearX =
+        CGFloat(index) * (TabStackLayout.chipWidth + TabBarMetrics.chipSpacing) - stack.scrollOffset
       content
         .offset(x: frame.x - linearX)
         .opacity(frame.isHidden ? 0 : 1)
@@ -659,6 +722,38 @@ private struct StackPlacement: ViewModifier {
     } else {
       content
     }
+  }
+}
+
+/// Insertion of a newly added chip, as in the system bar: the chip grows out
+/// of the center of its final slot from zero width. Drawn as a centered
+/// capsule clip rather than an animated layout width — SwiftUI places an
+/// inserted view at its final origin at once, so a width animation would
+/// grow it from the leading edge instead. Disabled in a stacked row, where
+/// the stack decides the new chip's slot.
+private struct ChipGrowTransition: Transition {
+  let isEnabled: Bool
+
+  func body(content: Content, phase: TransitionPhase) -> some View {
+    content.clipShape(RevealCapsule(fraction: phase.isIdentity || !isEnabled ? 1 : 0))
+  }
+}
+
+/// A capsule `fraction` of the rect's width, centered; the full fraction
+/// clips nothing, so the settled chip keeps its shadow and rims.
+private struct RevealCapsule: Shape {
+  var fraction: CGFloat
+
+  var animatableData: CGFloat {
+    get { fraction }
+    set { fraction = newValue }
+  }
+
+  func path(in rect: CGRect) -> Path {
+    guard fraction < 1 else { return Path(rect.insetBy(dx: -rect.height, dy: -rect.height)) }
+    let width = rect.width * max(fraction, 0)
+    return Capsule().path(
+      in: CGRect(x: rect.midX - width / 2, y: rect.minY, width: width, height: rect.height))
   }
 }
 
