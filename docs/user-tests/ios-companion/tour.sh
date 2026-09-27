@@ -161,9 +161,11 @@ pairing_code() {
   # On a loaded machine Settings can be slow to show the pane, or refuse the
   # first press; retry as harness.sh does.
   for attempt in 1 2 3 4 5; do
-    if "$AX" wait "$MAC_PID" "Pair New Device…" 5 >/dev/null &&
-      "$AX" press "$MAC_PID" "Pair New Device…" >/dev/null &&
-      "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >/dev/null; then
+    # The sheet can open after the previous attempt stopped waiting.
+    if "$AX" wait "$MAC_PID" "Copy Pairing Code" 1 >/dev/null ||
+      { "$AX" wait "$MAC_PID" "Pair New Device…" 5 >/dev/null &&
+        "$AX" press "$MAC_PID" "Pair New Device…" >/dev/null &&
+        "$AX" wait "$MAC_PID" "Copy Pairing Code" 15 >/dev/null; }; then
       opened=1; break
     fi
     # A press on a SwiftUI button in a window that is not frontmost can be

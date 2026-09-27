@@ -168,10 +168,16 @@ pairing_code() {
   # new pairing sheet is up.
   local attempt opened=0
   for attempt in 1 2 3 4 5; do
+    # The new sheet can open after the previous attempt stopped waiting; a
+    # finished pairing's sheet shows "Done" instead.
+    if ((attempt > 1)) && ! "$AX" wait "$MAC_PID" "Done" 0.3 >/dev/null 2>&1 &&
+      "$AX" wait "$MAC_PID" "Copy Pairing Code" 1 >>"$log" 2>&1; then
+      opened=1; break
+    fi
     "$AX" press "$MAC_PID" "Done" >>"$log" 2>&1   # dismiss a finished pairing
     if "$AX" wait "$MAC_PID" "Pair New Device…" 3 >>"$log" 2>&1 &&
       "$AX" press "$MAC_PID" "Pair New Device…" >>"$log" 2>&1 &&
-      "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >>"$log" 2>&1; then
+      "$AX" wait "$MAC_PID" "Copy Pairing Code" 15 >>"$log" 2>&1; then
       opened=1; break
     fi
     # A press on a SwiftUI button in a window that is not frontmost can be
