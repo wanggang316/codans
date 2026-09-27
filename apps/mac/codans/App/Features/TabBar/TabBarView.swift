@@ -245,6 +245,7 @@ struct TabBarView: View {
             inWorktree: worktreeID, inProject: projectID
           ))
       },
+      emptyTabTitle: (worktree.path as NSString).lastPathComponent,
       onCacheLiveTitle: { tabID, title in
         // Direct manager call rather than a TCA action: the cache is a
         // persistence side-effect of rendering, not a user intent, so

@@ -57,4 +57,10 @@ enum TabBarMetrics {
   /// Drag-reorder kicks in only after the pointer moves this far — keeps
   /// plain taps from being interpreted as drags.
   static let reorderMovementThreshold: CGFloat = 3
+
+  /// How long a tab added from the UI waits before its first pane opens. A
+  /// terminal surface entering the window stalls compositing for a few
+  /// frames; opened once the tab bar's insertion animation (~0.15 s) has
+  /// played, the stall lands on a still frame instead of freezing it.
+  static let firstPaneDelay: Duration = .milliseconds(160)
 }

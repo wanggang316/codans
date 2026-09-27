@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -81,9 +81,12 @@ struct PaneActionRouterFeatureTests {
         return TabID()
       }
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
+      $0.continuousClock = ImmediateClock()
     }
 
     await store.send(.requested(f.paneID, .newTab))
+    // The first pane opens after `TabBarMetrics.firstPaneDelay`.
+    await store.finish()
     #expect(recorded.value?.0 == f.worktreeID)
     #expect(recorded.value?.1 == f.projectID)
     #expect(recorded.value?.2 == nil)

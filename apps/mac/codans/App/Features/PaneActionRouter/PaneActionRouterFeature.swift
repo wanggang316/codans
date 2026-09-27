@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 import os.log
 
 /// Pure router reducer for `TerminalEvent.paneActionRequested`. Maps each
@@ -44,6 +44,7 @@ struct PaneActionRouterFeature {
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
+  @Dependency(\.continuousClock) private var clock
 
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.router", category: "pane"
@@ -92,7 +93,10 @@ struct PaneActionRouterFeature {
       let cwdForTab = cwd
       let worktreeID = address.worktreeID
       let projectID = address.projectID
-      return .run { [client = hierarchyClient] _ in
+      return .run { [client = hierarchyClient, clock] _ in
+        // Let the tab bar's insertion animation play first; see
+        // `TabBarMetrics.firstPaneDelay`.
+        try? await clock.sleep(for: TabBarMetrics.firstPaneDelay)
         _ = try? await client.openPane(
           newTabID, worktreeID, projectID, cwdForTab, nil
         )

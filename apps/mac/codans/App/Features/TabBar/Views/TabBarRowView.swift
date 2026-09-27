@@ -23,11 +23,11 @@ import SwiftUI
 /// Clicking a sliver scrolls the stack into view; adding a tab reveals it.
 /// Selecting a tab never scrolls.
 ///
-/// Adding and closing tabs animate as in the system bar (measured): a new
-/// chip grows out of its own center from zero width while its siblings
-/// narrow, a closed chip disappears at once while its siblings widen, both
-/// on a critically damped spring (`addRemoveAnimation`). In a stacked row
-/// the new chip appears in place — its slot is decided by the stack.
+/// Adding and closing tabs animate as in Safari (measured): a new chip grows
+/// in from its trailing edge while its siblings narrow, a closed chip
+/// disappears at once while its siblings widen, both in about a tenth of a
+/// second (`addRemoveAnimation`). In a stacked row the new chip appears in
+/// place — its slot is decided by the stack.
 ///
 /// Reorder: an in-app `DragGesture` drives a live preview. While dragging,
 /// a local `orderIDs` snapshot is mutated once the dragged chip overlaps a
@@ -65,6 +65,9 @@ struct TabBarRowView: View {
   let onChangeIconRequested: (TabID) -> Void
   let onCopyID: (TabID) -> Void
   let onReorder: @MainActor @Sendable ([TabID]) -> Void
+  /// Title for a tab that has no pane yet — the worktree directory's name,
+  /// which is where its first pane will start.
+  var emptyTabTitle: String = ""
   /// Fires whenever a chip resolves a non-empty live title (OSC tabTitle
   /// / title / pwd basename). The parent persists this onto the tab so
   /// the chip can fall back to it across app launches before the
@@ -80,9 +83,9 @@ struct TabBarRowView: View {
   /// one origin (and scroll together inside `TabBarOverflowScroll`).
   private static let rowSpace = "TabBarReorderRow"
 
-  /// Add / close reflow, fitted to the system bar: no overshoot, settled in
-  /// about half a second.
-  private static let addRemoveAnimation: Animation = .spring(response: 0.32, dampingFraction: 1)
+  /// Add / close reflow, fitted to Safari's tab bar: no overshoot, 90% of
+  /// the way in under 0.1 s.
+  private static let addRemoveAnimation: Animation = .spring(response: 0.15, dampingFraction: 1)
 
   // MARK: Drag-reorder state
 
@@ -237,6 +240,7 @@ struct TabBarRowView: View {
       sliceWidth: slice?.width,
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
+      emptyTabTitle: emptyTabTitle,
       onCacheLiveTitle: { title in onCacheLiveTitle(tab.id, title) }
     )
     .id(tab.id)
@@ -475,11 +479,11 @@ struct TabBarRowView: View {
 /// 5. `tab.cachedDisplayTitle` (last live value persisted to the catalog).
 /// 6. focused (or first) pane's `workingDirectory` basename — always
 ///    present on the persisted catalog, so even cold-launched chips
-///    have a meaningful label before the surface respawns. Held back for
-///    `directoryFallbackDelay` on the selected tab: a freshly added tab
-///    reports its shell title within moments, and flashing the directory
-///    name first reads as a stray label.
-/// 7. Empty string as a last-resort defensive default.
+///    have a meaningful label before the surface respawns.
+/// 7. `emptyTabTitle` (the worktree directory's name) for a tab whose first
+///    pane is not open yet — a tab added from the UI opens it only after
+///    its insertion animation, and must not show up untitled meanwhile.
+/// 8. Empty string as a last-resort defensive default.
 ///
 /// The cache exists because surfaces are spawned lazily — on cold launch
 /// inactive tabs have no live `SurfaceInfo` yet, so without the cache
@@ -519,12 +523,8 @@ private struct ResolvingTabChipView: View {
   var sliceWidth: CGFloat?
   var contentShift: CGFloat = 0
   var onStackClick: (() -> Void)?
+  let emptyTabTitle: String
   let onCacheLiveTitle: (String) -> Void
-
-  private static let directoryFallbackDelay: Duration = .seconds(1)
-
-  /// Whether the working-directory title may show yet; see the type doc.
-  @State private var allowsDirectoryFallback = false
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
@@ -566,10 +566,6 @@ private struct ResolvingTabChipView: View {
       // would clobber its own cache before the shell pushes anything.
       guard let newLive, newLive != tab.cachedDisplayTitle else { return }
       onCacheLiveTitle(newLive)
-    }
-    .task {
-      try? await Task.sleep(for: Self.directoryFallbackDelay)
-      allowsDirectoryFallback = true
     }
   }
 
@@ -638,7 +634,6 @@ private struct ResolvingTabChipView: View {
     if let name = tab.name, !name.isEmpty { return name }
     if let live { return live }
     if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
-    guard allowsDirectoryFallback || !isActive else { return "" }
     let pane =
       tab.panes.first { $0.id == hierarchyManager.lastFocusedPane(in: tab.id) }
       ?? tab.panes.first
@@ -646,7 +641,7 @@ private struct ResolvingTabChipView: View {
       let basename = (pane.workingDirectory as NSString).lastPathComponent
       if !basename.isEmpty { return basename }
     }
-    return ""
+    return emptyTabTitle
   }
 }
 
@@ -725,23 +720,42 @@ private struct StackPlacement: ViewModifier {
   }
 }
 
-/// Insertion of a newly added chip, as in the system bar: the chip grows out
-/// of the center of its final slot from zero width. Drawn as a centered
-/// capsule clip rather than an animated layout width — SwiftUI places an
-/// inserted view at its final origin at once, so a width animation would
-/// grow it from the leading edge instead. Disabled in a stacked row, where
-/// the stack decides the new chip's slot.
+/// Insertion of a newly added chip, as in Safari: the chip grows in from
+/// the trailing edge of its final slot, its title centered in the part
+/// already shown. Drawn as a clip plus a content shift rather than an
+/// animated layout width — SwiftUI places an inserted view at its final
+/// frame at once, so a width animation would grow it from the leading edge
+/// instead. Disabled in a stacked row, where the stack decides the new
+/// chip's slot.
 private struct ChipGrowTransition: Transition {
   let isEnabled: Bool
 
   func body(content: Content, phase: TransitionPhase) -> some View {
-    content.clipShape(RevealCapsule(fraction: phase.isIdentity || !isEnabled ? 1 : 0))
+    content.modifier(ChipReveal(fraction: phase.isIdentity || !isEnabled ? 1 : 0))
   }
 }
 
-/// A capsule `fraction` of the rect's width, centered; the full fraction
-/// clips nothing, so the settled chip keeps its shadow and rims.
-private struct RevealCapsule: Shape {
+/// Shows the trailing `fraction` of a chip as a capsule, with the chip's
+/// content recentered in it.
+private struct ChipReveal: ViewModifier, Animatable {
+  var fraction: CGFloat
+
+  var animatableData: CGFloat {
+    get { fraction }
+    set { fraction = newValue }
+  }
+
+  func body(content: Content) -> some View {
+    let hidden = 1 - fraction
+    content
+      .visualEffect { effect, proxy in effect.offset(x: hidden * proxy.size.width / 2) }
+      .clipShape(TrailingCapsule(fraction: fraction))
+  }
+}
+
+/// A capsule over the trailing `fraction` of the rect's width; the full
+/// fraction clips nothing, so the settled chip keeps its shadow and rims.
+private struct TrailingCapsule: Shape {
   var fraction: CGFloat
 
   var animatableData: CGFloat {
@@ -753,7 +767,7 @@ private struct RevealCapsule: Shape {
     guard fraction < 1 else { return Path(rect.insetBy(dx: -rect.height, dy: -rect.height)) }
     let width = rect.width * max(fraction, 0)
     return Capsule().path(
-      in: CGRect(x: rect.midX - width / 2, y: rect.minY, width: width, height: rect.height))
+      in: CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height))
   }
 }
 
