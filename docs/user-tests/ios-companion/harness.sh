@@ -174,6 +174,9 @@ pairing_code() {
       "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >>"$log" 2>&1; then
       opened=1; break
     fi
+    # A press on a SwiftUI button in a window that is not frontmost can be
+    # dropped (the main window was just resized); bring Settings forward.
+    "$AX" menu "$MAC_PID" Codans "Settings…" >/dev/null 2>&1
     sleep 1
   done
   ((opened)) || { "$AX" tree "$MAC_PID" >>"$log" 2>&1; return 1; }

@@ -77,6 +77,11 @@ launch_mac() {
   CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" \
     nohup "$APP/Contents/MacOS/Codans" >>"$SCRATCH/app.log" 2>&1 &
   MAC_PID=$!
+  # The gateway logs at info level, which the unified log does not keep.
+  log stream --level info --style compact \
+    --predicate "processID == $MAC_PID AND subsystem == \"com.gumpw.codans.remote\"" \
+    >>"$SCRATCH/gateway.log" 2>&1 &
+  LOG_PID=$!
   local _ up
   for _ in $(seq 1 100); do cli status >/dev/null 2>&1 && break; sleep 0.2; done
   up=$(cli status --json | jq -r '.data.uptimeSeconds')
@@ -98,7 +103,8 @@ quit_mac() {
   kill -TERM "$MAC_PID" 2>/dev/null
   for _ in $(seq 1 30); do kill -0 "$MAC_PID" 2>/dev/null || break; sleep 0.5; done
   kill -KILL "$MAC_PID" 2>/dev/null
-  MAC_PID=""
+  [[ -n "${LOG_PID:-}" ]] && kill "$LOG_PID" 2>/dev/null
+  MAC_PID="" LOG_PID=""
 }
 
 cleanup() {
@@ -151,9 +157,21 @@ populate() {
 
 # Issues a "View and type" pairing code; the clipboard is restored.
 pairing_code() {
-  local saved
-  "$AX" press "$MAC_PID" "Pair New Device…" >/dev/null
-  "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >/dev/null || return 1
+  local saved attempt opened=0
+  # On a loaded machine Settings can be slow to show the pane, or refuse the
+  # first press; retry as harness.sh does.
+  for attempt in 1 2 3 4 5; do
+    if "$AX" wait "$MAC_PID" "Pair New Device…" 5 >/dev/null &&
+      "$AX" press "$MAC_PID" "Pair New Device…" >/dev/null &&
+      "$AX" wait "$MAC_PID" "Copy Pairing Code" 5 >/dev/null; then
+      opened=1; break
+    fi
+    # A press on a SwiftUI button in a window that is not frontmost can be
+    # dropped (the main window was just resized); bring Settings forward.
+    "$AX" menu "$MAC_PID" Codans "Settings…" >/dev/null 2>&1
+    sleep 1
+  done
+  ((opened)) || { "$AX" tree "$MAC_PID" >"$SCRATCH/ax-tree.txt" 2>&1; return 1; }
   "$AX" press "$MAC_PID" "View only" >/dev/null
   "$AX" wait "$MAC_PID" "View and type" 3 >/dev/null && "$AX" press "$MAC_PID" "View and type" >/dev/null
   saved="$(pbpaste)"
