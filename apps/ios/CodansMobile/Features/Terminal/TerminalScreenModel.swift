@@ -44,7 +44,11 @@ final class TerminalScreenModel {
 
   /// The font the grid is drawn with. Size only sets the unzoomed cell;
   /// what the user sees comes from the zoom.
-  static let font = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+  /// It is the Mac's terminal font, bundled with the app; the system
+  /// monospaced font is only a fallback and has no Nerd Font glyphs.
+  static let font =
+    UIFont(name: "JetBrainsMonoNF-Regular", size: 13)
+    ?? UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
   var view: MirrorTerminalView {
     if let terminalView { return terminalView }

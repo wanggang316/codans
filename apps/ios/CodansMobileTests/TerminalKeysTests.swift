@@ -1,4 +1,5 @@
 import CodansIPC
+import CoreText
 import Foundation
 import Testing
 import UIKit
@@ -362,6 +363,19 @@ struct MirrorTerminalViewTests {
     view.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
     view.layoutIfNeeded()
     #expect(terminal.cols == 100 && terminal.rows == 30)
+  }
+
+  @Test
+  func drawsWithTheMacsNerdFont() throws {
+    #expect(TerminalScreenModel.font.fontName == "JetBrainsMonoNF-Regular")
+    // Bold comes from the same bundled family, not a synthesized system font.
+    let bold = try #require(
+      TerminalScreenModel.font.fontDescriptor.withSymbolicTraits(.traitBold))
+    #expect(UIFont(descriptor: bold, size: 13).fontName == "JetBrainsMonoNF-Bold")
+    // A private-use Nerd Font glyph (the git branch icon) has a glyph.
+    var glyph: CGGlyph = 0
+    let branch: [UniChar] = [0xE0A0]
+    #expect(CTFontGetGlyphsForCharacters(TerminalScreenModel.font as CTFont, branch, &glyph, 1))
   }
 
   @Test

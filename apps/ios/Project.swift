@@ -26,6 +26,15 @@ let infoPlist: [String: Plist.Value] = [
   "NSCameraUsageDescription": "Codans uses the camera to scan the pairing code shown on your Mac.",
   // The pairing QR code is a `codans-pair:` URL, so the system Camera can
   // hand it to the app; the app confirms before pairing.
+  // The Mac's terminal font (ghostty's embedded JetBrainsMono Nerd Font), so
+  // prompt and agent glyphs in the Nerd Font private-use range render the
+  // same on the phone instead of as missing-glyph boxes.
+  "UIAppFonts": [
+    "JetBrainsMonoNerdFont-Regular.ttf",
+    "JetBrainsMonoNerdFont-Bold.ttf",
+    "JetBrainsMonoNerdFont-Italic.ttf",
+    "JetBrainsMonoNerdFont-BoldItalic.ttf",
+  ],
   "CFBundleURLTypes": [
     [
       "CFBundleURLName": "com.gumpw.codans.mobile.pairing",
@@ -68,6 +77,11 @@ let project = Project(
       bundleId: "com.gumpw.codans.mobile",
       deploymentTargets: .iOS("26.0"),
       infoPlist: .extendingDefault(with: infoPlist),
+      resources: [
+        // OFL-1.1; the license ships with the fonts.
+        "../mac/ThirdParty/ghostty/src/font/res/JetBrainsMonoNerdFont-*.ttf",
+        "../mac/ThirdParty/ghostty/src/font/res/OFL.txt",
+      ],
       buildableFolders: [
         "CodansMobile/App",
         "CodansMobile/Features/Agents",
