@@ -22,8 +22,8 @@ struct RunSplitButton: NSViewRepresentable {
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
-  func makeNSView(context: Context) -> NSSegmentedControl {
-    let control = NSSegmentedControl()
+  func makeNSView(context: Context) -> RunSegmentedControl {
+    let control = RunSegmentedControl()
     control.segmentCount = 2
     control.segmentStyle = .texturedRounded
     control.trackingMode = .momentary
@@ -36,10 +36,11 @@ struct RunSplitButton: NSViewRepresentable {
     control.setMenu(menu, forSegment: 1)
     control.target = context.coordinator
     control.action = #selector(Coordinator.segmentClicked(_:))
+    control.onPrimaryClick = { [coordinator = context.coordinator] in coordinator.onPrimary() }
     return control
   }
 
-  func updateNSView(_ control: NSSegmentedControl, context: Context) {
+  func updateNSView(_ control: RunSegmentedControl, context: Context) {
     context.coordinator.onPrimary = onPrimary
     context.coordinator.makeMenu = makeMenu
     control.setImage(image, forSegment: 0)
@@ -53,7 +54,9 @@ struct RunSplitButton: NSViewRepresentable {
     control.invalidateIntrinsicContentSize()
   }
 
-  func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
+  func sizeThatFits(_ proposal: ProposedViewSize, nsView: RunSegmentedControl, context: Context)
+    -> CGSize?
+  {
     nsView.intrinsicContentSize
   }
 
@@ -72,15 +75,14 @@ struct RunSplitButton: NSViewRepresentable {
         onPrimary()
         return
       }
-      // A mouse press on segment 1 has AppKit open its menu. A press from
-      // the keyboard or an accessibility client (VoiceOver) only reaches
-      // this action, so open the same menu under the control ourselves.
-      let mouseTypes: Set<NSEvent.EventType> = [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp]
-      guard let menu = sender.menu(forSegment: 1),
-        NSApp.currentEvent.map({ !mouseTypes.contains($0.type) }) ?? true
-      else { return }
-      let origin = NSPoint(x: sender.bounds.maxX - sender.width(forSegment: 1), y: sender.bounds.maxY + 4)
-      menu.popUp(positioning: nil, at: sender.isFlipped ? origin : NSPoint(x: origin.x, y: -4), in: sender)
+      // Mouse presses never get here (see `RunSegmentedControl`); a press
+      // from the keyboard or an accessibility client (VoiceOver) does, so
+      // open the same menu under the control ourselves.
+      guard let menu = sender.menu(forSegment: 1) else { return }
+      let origin = NSPoint(
+        x: sender.bounds.maxX - sender.width(forSegment: 1), y: sender.bounds.maxY + 4)
+      menu.popUp(
+        positioning: nil, at: sender.isFlipped ? origin : NSPoint(x: origin.x, y: -4), in: sender)
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -97,5 +99,42 @@ struct RunSplitButton: NSViewRepresentable {
       }
       item?.view?.needsDisplay = true
     }
+  }
+}
+
+/// A segment's menu opens on mouse-down only while the control has no action;
+/// with one, AppKit sends the action on a click and shows the menu only after
+/// a press-and-hold. So mouse tracking runs action-less, which opens the
+/// dropdown immediately like SwiftUI's split button, and a tracking pass that
+/// ends inside the control without opening the menu was a primary click.
+/// Keyboard and accessibility presses keep going through the action.
+final class RunSegmentedControl: NSSegmentedControl {
+  var onPrimaryClick: () -> Void = {}
+  private var menuOpenedDuringTracking = false
+
+  override func mouseDown(with event: NSEvent) {
+    guard isEnabled, let menu = menu(forSegment: 1) else {
+      super.mouseDown(with: event)
+      return
+    }
+    menuOpenedDuringTracking = false
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(menuBeganTracking(_:)), name: NSMenu.didBeginTrackingNotification,
+      object: menu)
+    let savedAction = action
+    action = nil
+    super.mouseDown(with: event)
+    action = savedAction
+    NotificationCenter.default.removeObserver(
+      self, name: NSMenu.didBeginTrackingNotification, object: menu)
+
+    guard !menuOpenedDuringTracking, let release = NSApp.currentEvent, release.type == .leftMouseUp,
+      bounds.contains(convert(release.locationInWindow, from: nil))
+    else { return }
+    onPrimaryClick()
+  }
+
+  @objc private func menuBeganTracking(_ notification: Notification) {
+    menuOpenedDuringTracking = true
   }
 }
