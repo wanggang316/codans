@@ -8,6 +8,20 @@ import Testing
 @MainActor
 struct AgentStateStoreTests {
   @Test
+  func piBorderLoaderTransitionsFromIdleThroughWorkingToFinished() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .pi, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("── ⠋ Working ─────────\n\n─────────────────────")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+    f.viewport("─────────────────────\n\n─────────────────────")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+    f.advancePastWorkingHold()
+    f.viewport("─────────────────────\n\n─────────────────────")
+    #expect(f.registry.entries[f.paneID]?.state == .finished)
+  }
+
+  @Test
   func boundOnlyYieldsIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)

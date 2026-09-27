@@ -127,7 +127,18 @@ extension PaneAttentionInterpreter {
   }
 
   private static func detectPi(_ content: String) -> AgentActivityState {
-    content.contains("Working...") ? .working : .idle
+    if content.contains("Working...") { return .working }
+    // Pi embeds its live loader in the editor's top border. The message
+    // is customizable and can disappear at narrow widths; the border and
+    // spinner remain, unlike ordinary transcript text or startup help.
+    let hasBorderLoader = content.split(separator: "\n").contains { line in
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      guard trimmed.hasPrefix("─") else { return false }
+      let status = trimmed.drop(while: { $0 == "─" || $0.isWhitespace })
+      guard let first = status.unicodeScalars.first else { return false }
+      return (0x2801...0x28FF).contains(first.value) && status.hasSuffix("─")
+    }
+    return hasBorderLoader ? .working : .idle
   }
 
   private static func detectClaude(_ content: String) -> AgentActivityState {

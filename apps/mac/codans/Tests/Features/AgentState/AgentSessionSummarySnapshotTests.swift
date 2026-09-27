@@ -4,9 +4,9 @@ import Testing
 
 @testable import Codans
 
-/// The hover card renders from a snapshot captured before the popover
-/// opens, so its size can never change while presented (see
-/// `AgentSessionSummarySnapshot` for the crash that invariant prevents).
+/// Session metadata and initial activity are captured before presentation.
+/// Live activity subsequently occupies a fixed-height slot; session scans
+/// must never resize an already-open popover.
 /// These cases pin the derivations that happen at capture time; the scan
 /// itself (`make`) is I/O and stays out of unit tests.
 @MainActor

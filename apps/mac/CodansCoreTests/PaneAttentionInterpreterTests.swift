@@ -4,6 +4,23 @@ import Testing
 @testable import CodansCore
 
 struct PaneAttentionInterpreterTests {
+  @Test(arguments: [
+    "── ⠋ Working ─────────", "── ⠙ Running tests ─────",
+    "──⠹────", "  ── ⠸ Working ── ↑ 3 more ─────  ", "⠼ Working...",
+  ])
+  func piWorkingLoader(_ screen: String) {
+    #expect(PaneAttentionInterpreter.classifyAgentActivity(kind: .pi, viewportText: screen) == .working)
+  }
+
+  @Test(arguments: [
+    "────────────\n\n────────────", "Working", "The agent is Working on tests.",
+    "escape interrupt · ctrl+c/ctrl+d clear/exit", "⠋ Working",
+    "Example: ── ⠋ Working ───", "── Working ───",
+  ])
+  func piIdleTextDoesNotMatchBorderLoader(_ screen: String) {
+    #expect(PaneAttentionInterpreter.classifyAgentActivity(kind: .pi, viewportText: screen) == .idle)
+  }
+
   // MARK: - paneOutput
 
   @Test
