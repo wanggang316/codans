@@ -16,6 +16,18 @@ the GitHub Actions release workflows depend on.
 `releases/latest/...` redirect skips prereleases, so it always serves whatever the most
 recent non-prerelease GitHub Release attached as `appcast.xml`.
 
+### Build-channel boundary
+
+Only `BuildChannel.release` starts the Sparkle updater. Development builds
+leave it stopped, make `UpdatesClient.applyPreferences` and `checkNow` no-ops,
+and disable channel, cadence, automatic-update, and manual-check controls.
+This also prevents a development build from writing Sparkle's shared
+UserDefaults. The Stable / Tip preference selects a release feed channel; it
+does not enable updates for a development build.
+
+Source: [UpdatesEnvironment.swift](../../apps/mac/codans/App/Clients/UpdatesEnvironment.swift)
+and [UpdatesClient.swift](../../apps/mac/codans/App/Clients/UpdatesClient.swift).
+
 ## Goals and Non-Goals
 
 **Goals**
@@ -33,9 +45,7 @@ recent non-prerelease GitHub Release attached as `appcast.xml`.
 - Delta updates (`.delta` patches). Full DMG-per-update is fine; deltas can land later.
 - `.app.zip` distribution unit. Sparkle accepts DMG enclosures; we keep the existing
   artifact and avoid double-building.
-- Auto tip on every `main` push (supacode does this; codans is single-developer and
-  too noisy). Tip is `workflow_dispatch` only.
-- Per-architecture appcasts. universal binary today, Sparkle handles arch matching.
+- Per-architecture appcasts. The release build targets arm64.
 
 ## Design
 
@@ -71,7 +81,7 @@ would add a second source of truth and break the single-feed invariant.
 | Pattern | Channel | GitHub Release flag | Created by |
 |---|---|---|---|
 | `vX.Y.Z` | stable | default (becomes `latest`) | human-driven `release` skill |
-| `tip` (floating, force-moved every tip cut) | tip | `--prerelease` | `release-tip.yml` workflow_dispatch |
+| `tip` (floating, force-moved every tip cut) | tip | `--prerelease` | `release-tip.yml`: push to `main` or `workflow_dispatch` |
 
 Tip never gets a versioned tag (no `vX.Y.Z-tip.N`). The `tip` tag is force-moved to the
 HEAD commit of the workflow run on every successful tip cut, identical to ghostty's tip
@@ -81,31 +91,32 @@ release model.
 
 | Channel | `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` |
 |---|---|---|
-| Stable | `X.Y.Z` (manually bumped) | `YYYYMMDDN` (date-based) |
-| Tip | inherited from current stable | `BASE * 1000 + github.run_number`, where `BASE` is the date-based build of the latest stable |
+| Stable | `X.Y.Z` in `Project.xcconfig`, matched by the release tag | Assigned by `bump-version.sh` from the shared date/sequence scheme |
+| Tip | Read from the workflow checkout's `Project.xcconfig` | Assigned by the workflow from the shared date/sequence scheme |
 
-The tip build number formula is `int(stable_build) * 1000 + run_number`. With the
-date-based stable scheme that means a tip after stable build `20260506` would be e.g.
-`20260506000` for `run_number=0`, `20260506001` for run 1. This keeps tip builds strictly
-greater than the stable they were cut from, while any subsequent stable bump (next day or
-sequence-suffixed) is still greater than every tip in between. **tip-follows-stable**: the
-tip version inherits `MARKETING_VERSION` from the current stable, so a tip is always
-anchored to a real stable release.
+Both channels use `YYYYMMDD` followed by a sequence starting at `001`. The
+published appcast supplies the highest build across both channels. If that
+build is at least today's `YYYYMMDD000`, the next Tip build is that value + 1;
+otherwise it starts at today's `YYYYMMDD001`. The stable bump script applies
+the same rule and also uses the local configured build as a floor.
 
-`run_number` is bounded above by GitHub Actions' run sequence; the formula **errors out
-if it exceeds 999, forcing a stable bump** (matches supacode's guard).
+The shared sequence keeps a stable release above preceding Tip builds when
+assigned through the bump script. Tip numbers do not depend on
+`github.run_number` or multiplication of a stable build. If the appcast lookup
+fails, Tip falls back to today's `001`; the stable script retains its local
+build floor. A successful lookup is therefore needed to preserve ordering
+against published builds that are not reflected locally.
 
-`CURRENT_PROJECT_VERSION` must **increment by 1 on every release even when
-`MARKETING_VERSION` is unchanged** — Sparkle / macOS update plumbing keys on
-strictly-increasing per-bundle build numbers. A reused build number is invisible to the
-updater.
+Sparkle compares build numbers, so each published build must be greater than
+its predecessor even when `MARKETING_VERSION` is unchanged.
 
 ### Tip workflow flow (`.github/workflows/release-tip.yml`)
 
-`workflow_dispatch` trigger only; same secrets as stable.
+Triggered by a push to `main` or `workflow_dispatch`; same secrets as stable.
+A preliminary job attempts to skip a commit already targeted by the `tip` tag.
 
-1. Build the app with the elevated `CURRENT_PROJECT_VERSION` baked into a release
-   xcconfig override.
+1. Assign the next shared build number to `CURRENT_PROJECT_VERSION` in the
+   checkout's `Project.xcconfig`, then build the app.
 2. Sign + notarize + staple (same path as stable — see Signing below).
 3. Generate `appcast.xml` for THIS tip build only via
    `generate_appcast --channel tip --maximum-versions 1`. Sparkle stamps each item with
@@ -172,8 +183,8 @@ append when a secret is pasted. After notarization, staple the ticket to the `.a
 
 ### CI — Xcode pin & arch lock (reproducibility)
 
-CI pins Xcode by writing `DEVELOPER_DIR=/Applications/Xcode_26.0.app/Contents/Developer`
-to `$GITHUB_ENV` (**not** `xcode-select`, which is racy and global), and locks
+CI selects `/Applications/Xcode_26.0.app/Contents/Developer` with `xcode-select`
+and writes the same path as `DEVELOPER_DIR` to `$GITHUB_ENV`, and locks
 `ARCHS=arm64`. Both are about **reproducibility — the same Xcode and arch locally and in
 CI**:
 
