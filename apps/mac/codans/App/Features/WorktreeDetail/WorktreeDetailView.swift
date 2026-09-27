@@ -342,7 +342,7 @@ struct WorktreeDetailView: View {
         // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
         // them visually distinct without collapsing the gap. No
         // `.buttonStyle` / no manual padding: each item gets the toolbar's
-        // native glass capsule + hover state. Order: Agents, RunScript,
+        // native glass capsule + hover state. Order: Agents, Workflows, RunScript,
         // Open — agents first because starting one is the more frequent
         // entry point for this app's audience.
         trailingToolbarItems(mode)
@@ -353,9 +353,10 @@ struct WorktreeDetailView: View {
         // The inbox stays outside the principal status/process item.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
+          // Order: Agents, Workflows, RunScript, Open. `ToolbarItemGroup` renders
           // children leading-to-trailing in declaration order.
           agentSlot(mode).buttonStyle(.plain)
+          workflowSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
         }
@@ -386,6 +387,8 @@ struct WorktreeDetailView: View {
   @ToolbarContentBuilder
   private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
     ToolbarItem { agentSlot(mode) }
+    ToolbarSpacer(.fixed)
+    ToolbarItem { workflowSlot(mode) }
     ToolbarSpacer(.fixed)
     ToolbarItem { runSlot(mode) }
     ToolbarSpacer(.fixed)
@@ -480,8 +483,21 @@ struct WorktreeDetailView: View {
     case .creating:
       SkeletonActionChipView()
     case .worktree(_, let info):
+      if info != nil {
+        HeaderAgentSplitButton(store: headerStore)
+      }
+    }
+  }
+
+  /// The workflow capsule: start a workflow here, and open Workflow Runs.
+  @ViewBuilder
+  private func workflowSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonActionChipView()
+    case .worktree(_, let info):
       if let info {
-        HeaderAgentSplitButton(
+        HeaderWorkflowGroup(
           store: headerStore,
           worktreePath: info.project.remoteHost == nil ? info.worktree.path : nil)
       }

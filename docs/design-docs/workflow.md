@@ -4,7 +4,7 @@
 **作者：** Gump（与 Claude）
 **日期：** 2026-09-18
 
-> **现状（读前须知）。** Core（`CodansCore/Workflow/`）、IPC `workflow.*`、CLI `codans workflow`、app 侧 `WorkflowEngine` / `WorkflowAdmission` / `WorkflowHandlers`、三个内建工作流与 `codans-workflow` skill 均已落地；`docs/user-tests/workflow/harness.sh` 用 fake 参与者在隔离实例上端到端跑通 review-loop / handoff / advisor。GUI 启动面板（`WorkflowStartFeature` / `WorkflowStartOverlayView`，宿主与外观同 Handoff 面板）与 Command Palette 的 `Run Workflow: <name>` 入口已落地，与 CLI 共用同一个 `WorkflowAdmission`；仓库作用域的信任（D8）可在这个面板或 Settings → Workflows 中授予。Settings → Workflows 面板（三作用域列表、启用开关、诊断、记忆绑定、仓库信任）已落地。attention 的处理 CLI（`codans workflow resolve`）与 AgentState 面板都能做：点击 Workflows 行弹出 popover（步骤列表、角色 pane、attention 动作按钮按 `attention.actions` 原样渲染、log 与 run 目录链接），面板同时列出最近完成的几个 run（灰显，无动作）；Command Palette 提供 `Cancel Workflow: <name>`。
+> **现状（读前须知）。** Core（`CodansCore/Workflow/`）、IPC `workflow.*`、CLI `codans workflow`、app 侧 `WorkflowEngine` / `WorkflowAdmission` / `WorkflowHandlers`、三个内建工作流与 `codans-workflow` skill 均已落地；`docs/user-tests/workflow/harness.sh` 用 fake 参与者在隔离实例上端到端跑通 review-loop / handoff / advisor。GUI 侧：启动面板（`WorkflowStartFeature` / `WorkflowStartOverlayView`，宿主与外观同 Handoff 面板）与 Command Palette 的 `Run Workflow: <name>` / `Cancel Workflow: <name>` 入口，与 CLI 共用同一个 `WorkflowAdmission`；Workflow Runs 窗口（`WorkflowRunsWindowView`）：左栏为进行中的 run 与各 worktree 磁盘索引里的历史，右侧为选中 run 的 attention 操作、步骤（历史 run 由冻结的定义加记录中的结果还原）、交付物与实时跟随的 log.md；AgentState 面板的 run 行点开 `WorkflowRunPopoverView`（步骤、角色 pane、按 `attention.actions` 原样渲染的动作按钮、log 与 run 目录链接、已结束的 run 变暗列出）；Settings → Workflows 面板（三作用域列表、启用开关、诊断、记忆绑定、仓库信任）。仓库作用域的信任（D8）只能在启动面板或 Settings 里授予。
 
 ## 背景与范围
 
@@ -251,7 +251,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 6. 角色绑定（上节）；`current` / `pick` pane 被占用 → `PANE_BUSY`；
 7. 冻结 profile + 渲染好的 `AgentLaunchSpec`，分配 run 目录，写初始 `run.json`，**然后**才回复 CLI。
 
-GUI 启动面板（`WorkflowStartFeature`，与 Handoff 面板同宿主同外观）只做三件事：角色选择器（launch 角色预填解析结果，pick 角色列出 worktree 内的 agent pane）、输入表单、可跳过 step 的勾选（旁边即时显示 Skip 后果；只列出真能跳过的 step——其 delivery 的每个消费者自身也可跳过，否则不出现）。确认即调用与 CLI 相同的 admission；面板不持有任何运行态。入口三处：Command Palette 的 `Run Workflow: <name>`；工具栏 agent 按钮下拉菜单的 "Run Workflow" 子菜单（直接列出当前 worktree 可用的定义，有错误的置灰并注明，末尾是 New Workflow… / Manage Workflows…）；Agents View 行的右键菜单 "Run Workflow"，以该行的 pane 作 `current` 角色，不看当前焦点。菜单的数据来自 `WorkflowCatalogStore`：它监视用户目录与每个本地 worktree 的 `.codans/workflows`（目录尚不存在时监视最近的已存在祖先，直到 worktree 根）及其中每个文件，事件合并后只重扫变动的作用域——agent 在 pane 里写出的文件、编辑器里保存的修改，都无需刷新即出现并重新校验。
+GUI 启动面板（`WorkflowStartFeature`，与 Handoff 面板同宿主同外观）只做三件事：角色选择器（launch 角色预填解析结果，pick 角色列出 worktree 内的 agent pane）、输入表单、可跳过 step 的勾选（旁边即时显示 Skip 后果；只列出真能跳过的 step——其 delivery 的每个消费者自身也可跳过，否则不出现）。确认即调用与 CLI 相同的 admission；面板不持有任何运行态。入口三处：Command Palette 的 `Run Workflow: <name>`；工具栏里独立的 workflow 胶囊组（在 Agents 之后）：左侧菜单直接列出当前 worktree 可用的定义（有错误的置灰并注明，末尾是 New Workflow… / Manage Workflows…），右侧按钮打开 Workflow Runs 窗口，有 run 进行时带标记、需要处理时显示橙点；Agents View 行的右键菜单 "Run Workflow"，以该行的 pane 作 `current` 角色，不看当前焦点。菜单的数据来自 `WorkflowCatalogStore`：它监视用户目录与每个本地 worktree 的 `.codans/workflows`（目录尚不存在时监视最近的已存在祖先，直到 worktree 根）及其中每个文件，事件合并后只重扫变动的作用域——agent 在 pane 里写出的文件、编辑器里保存的修改，都无需刷新即出现并重新校验。
 
 **自发起。** 当 `run` 从将成为 `current` 角色的 pane 里调用、且第一步就是给该角色的 `message`，响应里直接带上渲染好的指令与完成命令（`self_initiated`），engine **不**再往调用方 pane 键入——调用它的 agent 手里已经有任务了。这让 agent 的自我交接变成两条命令：`codans workflow run handoff`，然后照返回的命令 `deliver`。
 

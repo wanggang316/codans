@@ -24,11 +24,7 @@ import SwiftUI
 /// resolves the target Worktree at handle-time.
 struct HeaderAgentSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
-  /// The selected local worktree; `nil` for a remote one, which has no
-  /// workflow catalog to offer.
-  var worktreePath: String?
   @Environment(SettingsStore.self) private var settingsStore
-  @Environment(WorkflowCatalogStore.self) private var workflowCatalog
   @Environment(AgentInstallationStore.self) private var installation
 
   var body: some View {
@@ -69,7 +65,7 @@ struct HeaderAgentSplitButton: View {
     .menuIndicator(.visible)
     .accessibilityLabel(primary == nil ? "Manage agents" : "Start \(primaryName)")
     .help(primary == nil ? "Manage Agents…" : "Start \(primaryName)")
-    .id(Self.identitySignature(of: profiles) + workflowSignature)
+    .id(Self.identitySignature(of: profiles))
   }
 
   // MARK: - Caret menu
@@ -93,59 +89,9 @@ struct HeaderAgentSplitButton: View {
       }
       Divider()
     }
-    if workflowsEnabled {
-      Menu {
-        workflowMenu
-      } label: {
-        Label("Run Workflow", systemImage: "arrow.triangle.branch")
-      }
-      Divider()
-    }
     Button("Manage Agents…") {
       store.send(.manageAgentsTapped)
     }
-  }
-
-  private var workflowsEnabled: Bool { settingsStore.settings.workflows.isEnabled }
-
-  /// The workflows a run here would resolve against, minus the ones the user
-  /// switched off. Invalid files stay listed but disabled, so a workflow
-  /// that "went missing" after an edit explains itself instead of vanishing.
-  private var workflowRows: [WorkflowCatalogEntry] {
-    let settings = settingsStore.settings.workflows
-    return workflowCatalog.catalog(forWorktreePath: worktreePath)
-      .filter { !settings.isDisabled($0.id) }
-      .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-  }
-
-  @ViewBuilder
-  private var workflowMenu: some View {
-    let rows = workflowRows
-    if worktreePath == nil {
-      Text("Workflows run in local worktrees only")
-    } else if rows.isEmpty {
-      Text("No workflows yet")
-    } else {
-      ForEach(rows, id: \.id) { entry in
-        Button {
-          store.send(.runWorkflowTapped(workflowID: entry.id))
-        } label: {
-          Text(entry.isValid ? entry.name : "\(entry.name) — has errors")
-        }
-        .disabled(!entry.isValid)
-        .help(entry.definition?.description ?? "Fix the file's errors in Settings → Workflows.")
-      }
-    }
-    Divider()
-    Button("New Workflow…") { store.send(.newWorkflowTapped) }
-    Button("Manage Workflows…") { store.send(.manageWorkflowsTapped) }
-  }
-
-  /// Folds the workflow rows into the menu identity: the cached NSMenu is
-  /// rebuilt when a watched file appears, changes validity, or is renamed.
-  private var workflowSignature: String {
-    guard workflowsEnabled else { return "" }
-    return "|workflows:" + workflowRows.map { "\($0.id)=\($0.name)=\($0.isValid)" }.joined(separator: ",")
   }
 
   /// Stable identity for `.id(_:)`. Folds every field the menu renders plus
