@@ -1,31 +1,10 @@
 import CodansCore
 import SwiftUI
 
-/// Immutable payload behind one presentation of the hover summary card —
-/// resolved *before* the popover opens, including the session scan.
-///
-/// The card must not change size once it is up, and that is a crash
-/// constraint rather than a style preference. It is hosted in an
-/// `NSPopover`; when its SwiftUI content reports a new size, SwiftUI's
-/// `PopoverHostingView.updateAnimatedWindowSize` calls
-/// `-[NSWindow setFrame:display:animate:]` from inside the window's
-/// display-cycle flush (`NSDisplayCycleFlush` → `layoutIfNeeded` →
-/// `NSHostingView.windowDidLayout`). The animated variant spins a nested
-/// run loop (`-[NSMoveHelper _doAnimation]`) *inside* the CoreAnimation
-/// commit handler, and re-entering AppKit's update cycle that way calls
-/// an already-freed `UC::LoopTapCFRunLoop` observer — EXC_BAD_ACCESS at
-/// 0x0, seen as "click a row in Agents View → instant crash". A card
-/// whose size cannot change never enters that path.
-///
-/// So everything the card renders is pre-derived here: the featured
-/// session (scanned in `make`, off the main actor / over SSH), the
-/// activity line already filtered for redundancy, and both ages already
-/// formatted — a ticking `TimelineView` is the same hazard on a slower
-/// clock.
-///
-/// The trade-off is deliberate: hovering a Server-project row waits for
-/// the SSH scan before the card appears, rather than opening an empty
-/// card that grows when the scan lands.
+/// Session metadata resolved before presentation, so asynchronous scans cannot
+/// resize an open popover. Activity is captured for the initial frame, then
+/// updated independently inside a permanently reserved single-line slot.
+/// See docs/lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md.
 struct AgentSessionSummarySnapshot: Identifiable, Equatable {
   /// The row's pane. Doubles as the popover item identity, so a card
   /// captured for one row can never be reused for another.
@@ -71,7 +50,7 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
     self.worktreeName = worktreeName
     self.projectColor = projectColor
     self.session = session
-    self.activity = Self.activityLine(from: paneTitle, kind: entry.kind)
+    self.activity = AgentSummaryCardFormat.activityLine(from: paneTitle, kind: entry.kind)
     self.ageText = AgentSummaryCardFormat.durationText(from: entry.lastTransitionAt, to: now)
     self.sessionAgeText = session.map {
       Self.relativeFormatter.localizedString(for: $0.updatedAt, relativeTo: now)
@@ -119,17 +98,6 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
       paneTitle: paneTitle
     )
   }
-
-  /// Pane title worth showing: trimmed, non-empty, and saying more than
-  /// the agent's own name (idle agents set the title to themselves).
-  private static func activityLine(from title: String?, kind: AgentKind) -> String? {
-    guard
-      let raw = title?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !raw.isEmpty,
-      !AgentSummaryCardFormat.isRedundantActivityTitle(raw, agentDisplayName: kind.displayName)
-    else { return nil }
-    return raw
-  }
 }
 
 /// Hover summary card for one Agents View row — a quick, self-contained
@@ -149,7 +117,7 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
 ///   with the elapsed time since the last state transition pinned to the
 ///   trailing edge.
 /// - Session block (hidden when the worktree has no session for this
-///   agent kind): session title, optional activity line, then
+///   agent kind): session title, reserved activity line, then
 ///   `<short id> · <relative age>`.
 ///
 /// Until the pane carries a real `agentSessionID` the session block is a
@@ -158,12 +126,13 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
 /// exact-match preference in `AgentSummaryCardFormat.latestSession`
 /// takes over automatically.
 ///
-/// The card is a still frame of the session at hover time, not a live
-/// view — see `AgentSessionSummarySnapshot` for why it must stay one.
+/// Session metadata stays frozen at hover time. Only the activity slot observes
+/// live titles; its fixed height prevents animated popover-window resizing.
 /// Presentation (hover-in delay, popover anchoring, dismissal) is owned
 /// by `AgentStateRowView`; this view is pure content.
 struct AgentSessionSummaryCard: View {
   let snapshot: AgentSessionSummarySnapshot
+  let paneTitle: () -> String?
 
   private var entry: AgentStateStore.AgentEntry { snapshot.entry }
 
@@ -171,9 +140,7 @@ struct AgentSessionSummaryCard: View {
     VStack(alignment: .leading, spacing: 8) {
       header
       breadcrumb
-      if snapshot.session != nil || snapshot.activity != nil {
-        Divider()
-      }
+      Divider()
       if let session = snapshot.session {
         Text(session.title)
           .font(.caption)
@@ -182,9 +149,10 @@ struct AgentSessionSummaryCard: View {
           .truncationMode(.tail)
           .accessibilityIdentifier("agentState.summaryCard.sessionTitle")
       }
-      if let activity = snapshot.activity {
-        activityLine(activity)
-      }
+      AgentSessionActivityLine(
+        paneTitle: paneTitle,
+        activity: AgentActivityPresentation(title: snapshot.activity, kind: entry.kind)
+      )
       if let session = snapshot.session {
         sessionFooter(session)
       }
@@ -268,15 +236,6 @@ struct AgentSessionSummaryCard: View {
     }
   }
 
-  private func activityLine(_ title: String) -> some View {
-    Text(title)
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .lineLimit(1)
-      .truncationMode(.tail)
-      .accessibilityIdentifier("agentState.summaryCard.activity")
-  }
-
   /// `<short id> · <relative age>` — same vocabulary as the tab bar's
   /// session rows so the two surfaces cross-reference naturally.
   private func sessionFooter(_ session: AgentSessionSummary) -> some View {
@@ -292,9 +251,44 @@ struct AgentSessionSummaryCard: View {
   }
 }
 
+/// Read the observable title cache here, rather than in the row or the whole
+/// card. The slot remains present even when the title is empty or redundant.
+struct AgentSessionActivityLine: View {
+  let paneTitle: () -> String?
+  @State var activity: AgentActivityPresentation
+
+  var body: some View {
+    Text(activity.text ?? " ")
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(height: 16)
+      .clipped()
+      .accessibilityHidden(activity.text == nil)
+      .accessibilityIdentifier("agentState.summaryCard.activity")
+      .onChange(of: paneTitle(), initial: true) { _, title in
+        activity.update(title: title)
+      }
+      .onDisappear { activity.cancel() }
+  }
+}
+
 /// Pure formatting helpers for the summary card, kept off the view so
 /// they stay unit-testable without rendering.
 nonisolated enum AgentSummaryCardFormat {
+  /// Pane title worth showing: trimmed, non-empty, and saying more than
+  /// the agent's own name (idle agents set the title to themselves).
+  static func activityLine(from title: String?, kind: AgentKind) -> String? {
+    guard
+      let raw = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !raw.isEmpty,
+      !AgentSummaryCardFormat.isRedundantActivityTitle(raw, agentDisplayName: kind.displayName)
+    else { return nil }
+    return raw
+  }
+
   /// Compact elapsed-time label: "42s", "12m", "1h 3m", "2d". Clamped
   /// at zero so a clock skew between `lastTransitionAt` and the render
   /// date can't produce a negative age.

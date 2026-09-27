@@ -199,9 +199,13 @@ derive(pane) =
 - 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.finished` → 绿勾；`.idle` → 次级灰圈。
 - 行密度（两行 `normal` / 一行 `compact`）与 auto-sort 由 `Settings → General → Agents View` 控制。
 
-**行 hover 摘要卡** `AgentSessionSummaryCard`：指针在一行上停留 500ms 后，以 popover（`arrowEdge: .trailing`）弹出该会话的速览——agent logo + 名称、状态 chip、`<project> / <worktree>` 面包屑 + 状态停留时长、session 任务标题（该 worktree 内该 agent 最近一次会话的首条用户 prompt）、可选 activity 行（Pane 的 OSC 标题，仅在其信息量超过 agent 自身名字时显示）、以及 `<short id> · <相对时间>` 页脚。
+**无项目与空状态**：完整 catalog 没有项目时，隐藏面板、底部入口及列表占位，不修改已保存的开关偏好。按标签筛选后没有匹配项目不影响面板可用性。有项目但没有 agent 时，面板只显示居中的提示文字，不显示装饰图标。
 
-卡片内容是**开卡前解析好的快照**（`AgentSessionSummarySnapshot`），session 扫描（本地 detached / Server 项目走 SSH）在 hover dwell 之后、popover 弹出之前完成，而非弹出后异步填充：popover 在 presented 状态下改变内容尺寸，会让 SwiftUI 在显示周期内发起带动画的窗口 resize，从而在 CATransaction commit handler 里再嵌套一个 run loop，踩到已释放的 run-loop observer 而崩溃（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。代价是远程项目的卡片要等 SSH 扫描才出现。点击行会先撤下卡片，再把聚焦级联交给下一个 main-loop turn。
+**行 hover 摘要卡** `AgentSessionSummaryCard`：指针在一行上停留 500ms 后，以 popover（`arrowEdge: .trailing`）弹出该会话的速览——agent logo + 名称、状态 chip、`<project> / <worktree>` 面包屑 + 状态停留时长、session 任务标题、实时 activity 行，以及 `<short id> · <相对时间>` 页脚。
+
+session 资料、状态 chip 与时间仍来自**开卡前解析好的快照**（`AgentSessionSummarySnapshot`）。session 扫描（本地 detached / Server 项目走 SSH）在 hover dwell 之后、popover 弹出之前完成，远程项目仍需等待 SSH 扫描。只有 activity 行订阅 `AgentStateStore.title(for:)` 缓存的当前 Pane OSC 标题；`AgentActivityPresentation` 合并一秒内的标题变化并交付最新值，不增加终端轮询，也不改变运行态、状态时间或行排序。没有标题或标题仅为 agent 名称时不显示文字；未主动更新终端标题的 agent 不会因此产生详细活动描述。
+
+活动行始终保留固定高度的单行空间，分隔线始终存在，长标题截断。**popover 在展示期间不能改变尺寸**：动态插入内容曾导致 SwiftUI 在显示周期内发起带动画的窗口 resize，嵌套 run loop 后访问已释放的 observer 而崩溃（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。关闭卡片时取消待交付的标题更新；点击行仍先撤下卡片，再把聚焦级联交给下一个 main-loop turn。
 
 排序由 `SortedEntriesProvider` 给出：先按状态优先级桶（triage 顺序），桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
 
