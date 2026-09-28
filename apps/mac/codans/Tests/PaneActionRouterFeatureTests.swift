@@ -482,6 +482,20 @@ struct PaneActionRouterFeatureTests {
     await store.receive(.delegate(.commandPaletteToggleRequested(f.paneID)))
   }
 
+  @Test
+  func openLinkEmitsDelegate() async {
+    let f = Fixture()
+    let store = TestStore(initialState: PaneActionRouterFeature.State()) {
+      PaneActionRouterFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.testValue
+    }
+
+    await store.send(.requested(f.paneID, .openLink(raw: "src/a.swift:3", workingDirectory: "/repo")))
+    await store.receive(
+      .delegate(.openLinkRequested(f.paneID, raw: "src/a.swift:3", workingDirectory: "/repo")))
+  }
+
   // MARK: - addressOf nil (teardown race)
 
   /// Reducer must never crash when `addressOf` returns `nil` — the router

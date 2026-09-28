@@ -27,7 +27,7 @@ action 集合按宿主侧分发语义分成四类（外加一个 app 级 config 
 - **Bucket 1 — Tab / Split intent**（→ `PaneActionRouterFeature` → `HierarchyClient`）：`NEW_TAB` / `CLOSE_TAB` / `MOVE_TAB` / `GOTO_TAB` / `NEW_SPLIT` / `GOTO_SPLIT` / `RESIZE_SPLIT` / `EQUALIZE_SPLITS` / `TOGGLE_SPLIT_ZOOM` / `PRESENT_TERMINAL` / `TOGGLE_COMMAND_PALETTE` 一类。
 - **Bucket 2 — Window / App intent**（→ `WindowActionRouterFeature` → `NSWindow` + app 服务）：`NEW_WINDOW` / `CLOSE_WINDOW` / `CLOSE_ALL_WINDOWS` / `GOTO_WINDOW` / `TOGGLE_FULLSCREEN` / `TOGGLE_MAXIMIZE` / `TOGGLE_TAB_OVERVIEW` / `TOGGLE_VISIBILITY` / `TOGGLE_BACKGROUND_OPACITY` / `QUIT` / `CHECK_FOR_UPDATES` / `OPEN_CONFIG` 一类。其中 `TOGGLE_WINDOW_DECORATIONS`（macOS 无逐窗装饰开关）与 `TOGGLE_QUICK_TERMINAL`（codans UX 当前不提供 quick-terminal HUD）是**显式有意 no-op**。
 - **Bucket 3 — Surface info**（→ `PaneSurface.SurfaceInfo` + `paneInfoChanged` 事件）：title 族（`SET_TITLE` / `SET_TAB_TITLE` / `PROMPT_TITLE` / `PWD`）、mouse 族（`MOUSE_SHAPE` / `MOUSE_VISIBILITY` / `MOUSE_OVER_LINK`）、geometry 族（`CELL_SIZE` / `SIZE_LIMIT` / `INITIAL_SIZE` / `RESET_WINDOW_SIZE`）、`COLOR_CHANGE` / `RENDERER_HEALTH` / `SCROLLBAR`、secure-input / key 族（`SECURE_INPUT` / `KEY_SEQUENCE` / `KEY_TABLE`）、`READONLY` / `QUIT_TIMER` / `FLOAT_WINDOW`、search 族（`START_SEARCH` / `END_SEARCH` / `SEARCH_TOTAL` / `SEARCH_SELECTED`）、`PROGRESS_REPORT`。
-- **Bucket 4 — Effectful**（→ Runtime 内直接副作用 + 一个可观测事件）：`OPEN_URL`（`NSWorkspace.open`）、`DESKTOP_NOTIFICATION`（扇出到 `NotificationCoordinator`）、`RING_BELL`（计数 + 事件 → Notifications / Dock）、`COMMAND_FINISHED`、`SHOW_CHILD_EXITED`、`UNDO` / `REDO`（`NSApp.sendAction`）、`COPY_TITLE_TO_CLIPBOARD`（直接走 `NSPasteboard`）。
+- **Bucket 4 — Effectful**（→ Runtime 内直接副作用 + 一个可观测事件）：`OPEN_URL`（提升为 `PaneActionRequest.openLink` → `TerminalLinkClient`，见下文安全段）、`DESKTOP_NOTIFICATION`（扇出到 `NotificationCoordinator`）、`RING_BELL`（计数 + 事件 → Notifications / Dock）、`COMMAND_FINISHED`、`SHOW_CHILD_EXITED`、`UNDO` / `REDO`（`NSApp.sendAction`）、`COPY_TITLE_TO_CLIPBOARD`（直接走 `NSPasteboard`）。
 - **App 级 config**（→ `GhosttyRuntime` 本地 + 事件）：`CONFIG_CHANGE` / `RELOAD_CONFIG`，以及 target 为 `GHOSTTY_TARGET_APP` 时的 `QUIT`。这些在 `GHOSTTY_TARGET_APP` 而非 `GHOSTTY_TARGET_SURFACE` 上触发，直接碰 runtime 的 config 对象，故在解码器里单独成路。
 
 少数 libghostty 内部 / 非 macOS 的 action（`RENDER`、`INSPECTOR`、`SHOW_GTK_INSPECTOR`、`RENDER_INSPECTOR`、`SHOW_ON_SCREEN_KEYBOARD`）是显式不支持：`.debug` 日志 + 返回 `false`。
@@ -160,7 +160,7 @@ Source: [PaneSurfaceAction.swift](../../apps/mac/codans/Runtime/Ghostty/PaneSurf
 
 **错误处理。** `ghostty_surface_userdata` 为 nil 或 PaneID 不在注册表 → 返回 `false`、不发事件（拆除竞态期的预期情况）；畸形 payload（如越界 `GOTO_TAB`，见上文 clamp 规则）→ `.info` 日志；router 侧失败（如 worktree 中途归档导致 `splitPanel` 抛错）→ 经既有错误面弹 toast，绝不崩溃、绝不重试；`CONFIG_CHANGE` 克隆失败（`ghostty_config_clone` 返回 nil）→ `.error` 日志 + 返回 `false`，Runtime 保留旧 config。
 
-**安全 / 隐私。** `OPEN_URL` 经 URL scheme 检查 + 文件路径 tilde 展开后走 `NSWorkspace.open`（无裸 shell，受 LaunchServices gatekeeper 约束）；`COPY_TITLE_TO_CLIPBOARD` 只复制已渲染到屏的 title，无信息升级；`DESKTOP_NOTIFICATION` 经 `NotificationCoordinator`，复用其权限与 mute 规则。
+**安全 / 隐私。** `OPEN_URL` 携带 libghostty 匹配到的原文（URL，或带 `:line:col` 的相对/绝对路径），连同 pane 的 OSC 7 pwd 提升为 `PaneActionRequest.openLink`，由 `TerminalLinkClient` 用 `TerminalLink.parse`（CodansCore）分类：带 scheme 的 URL 走 `NSWorkspace.open`；文件在项目编辑器中按行号打开（Server 项目经 SSH），目录走 Finder，图片 / PDF / HTML 走默认 app，bundle 或编辑器拒绝的文件只在 Finder 中定位——点击永不启动 `.app` 或执行脚本；本地不存在的文件给出 toast。`COPY_TITLE_TO_CLIPBOARD` 只复制已渲染到屏的 title，无信息升级；`DESKTOP_NOTIFICATION` 经 `NotificationCoordinator`，复用其权限与 mute 规则。
 
 ## 风险
 

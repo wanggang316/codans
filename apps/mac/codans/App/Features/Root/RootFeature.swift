@@ -470,6 +470,7 @@ struct RootFeature {
   @Dependency(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
   @Dependency(HandoffClient.self) private var handoffClient
+  @Dependency(TerminalLinkClient.self) private var terminalLinkClient
   @Dependency(\.uuid) private var uuid
   @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
   @Dependency(GitServiceClient.self) private var gitServiceClient
@@ -1660,6 +1661,15 @@ struct RootFeature {
         return .send(.commandPaletteToggle(paneID))
       case .paneActionRouter(.delegate(.presentTerminalRequested)):
         return .none
+      case .paneActionRouter(
+        .delegate(.openLinkRequested(let paneID, let raw, let workingDirectory))):
+        return .run { [terminalLinkClient] send in
+          do {
+            try await terminalLinkClient.open(paneID, raw, workingDirectory)
+          } catch {
+            await send(.statusBar(.push(.warning(Self.shortToastMessage(error.localizedDescription)))))
+          }
+        }
 
       case .paneActionRouter:
         return .none

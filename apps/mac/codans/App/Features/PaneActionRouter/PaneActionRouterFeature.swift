@@ -39,6 +39,7 @@ struct PaneActionRouterFeature {
     enum Delegate: Equatable {
       case presentTerminalRequested(PaneID)
       case commandPaletteToggleRequested(PaneID)
+      case openLinkRequested(PaneID, raw: String, workingDirectory: String?)
     }
   }
 
@@ -218,6 +219,9 @@ struct PaneActionRouterFeature {
 
     case .toggleCommandPalette:
       return .send(.delegate(.commandPaletteToggleRequested(paneID)))
+
+    case .openLink(let raw, let workingDirectory):
+      return .send(.delegate(.openLinkRequested(paneID, raw: raw, workingDirectory: workingDirectory)))
     }
   }
 
