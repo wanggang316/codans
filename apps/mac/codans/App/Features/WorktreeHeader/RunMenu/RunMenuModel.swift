@@ -8,9 +8,9 @@ struct RunMenuModel {
   struct Command {
     let id: UUID
     let title: String
-    /// Set only when another command in the menu has the same title, to
-    /// tell them apart (the command line).
-    var subtitle: String?
+    /// Second line: the command it runs, so same-named commands (and every
+    /// row) read at the same two-line height.
+    let subtitle: String
     let icon: CommandIconRef
     let tint: NSColor
     /// Display-only accelerator (`⌘R`); live dispatch belongs to the menu bar.
@@ -52,8 +52,7 @@ struct RunMenuModel {
 enum RunMenuMetrics {
   static let iconPointSize: CGFloat = 13
   static let iconBox: CGFloat = 16
-  /// Taller than a stock 22pt menu row: commands are the primary targets
-  /// here and get room to breathe at the larger icon size.
-  static let commandRowHeight: CGFloat = 28
-  static let entryRowHeight: CGFloat = 36
+  /// Two-line rows (name, then command), for saved commands and detected
+  /// entries alike.
+  static let rowHeight: CGFloat = 36
 }

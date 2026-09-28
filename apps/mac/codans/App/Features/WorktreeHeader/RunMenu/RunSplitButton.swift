@@ -83,63 +83,86 @@ struct RunSplitButton: NSViewRepresentable {
 
     /// The root menu while it is on screen.
     private weak var openMenu: NSMenu?
-    /// Config Files submenus currently open under it.
-    private var openSubmenuCount = 0
-    private var hasPendingRefresh = false
+    /// Set by an add in a Config Files submenu: close that submenu once the
+    /// root shows the new command.
+    private var closesSubmenuAfterRefresh = false
+    private var submenuCloseFallback: Task<Void, Never>?
 
     func menuNeedsUpdate(_ menu: NSMenu) {
       // Only the root menu is rebuilt; submenus arrive already populated.
       guard menu.supermenu == nil else { return }
-      RunMenuBuilder.populate(menu, with: trackedModel(), delegate: self)
+      RunMenuBuilder.populate(menu, with: trackedModel(), delegate: self) { [weak self] in
+        self?.entryAdded()
+      }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-      if menu.supermenu == nil {
-        openMenu = menu
-        openSubmenuCount = 0
-        hasPendingRefresh = false
-      } else {
-        openSubmenuCount += 1
-      }
+      if menu.supermenu == nil { openMenu = menu }
     }
 
     func menuDidClose(_ menu: NSMenu) {
-      if menu.supermenu == nil {
-        openMenu = nil
-        return
-      }
-      openSubmenuCount = max(0, openSubmenuCount - 1)
-      if openSubmenuCount == 0, hasPendingRefresh { refreshOpenMenu() }
+      guard menu.supermenu == nil else { return }
+      openMenu = nil
+      closesSubmenuAfterRefresh = false
+      submenuCloseFallback?.cancel()
     }
 
     /// Builds the model while recording what it read, so a change while the
     /// menu is open — a command added from a Config Files submenu — refreshes
-    /// the Project/Global rows without closing the menu. Observation fires on the write
-    /// itself, independent of SwiftUI rendering during menu tracking.
+    /// the Project/Global rows without closing the menu. Observation fires on
+    /// the write itself, independent of SwiftUI rendering during tracking.
     private func trackedModel() -> RunMenuModel {
       withObservationTracking(makeMenu) {
         Task { @MainActor [weak self] in self?.modelChanged() }
       }
     }
 
-    /// AppKit tracks the root menu's highlight by index, so rows inserted
-    /// above an open submenu's parent would move the highlight off it. The
-    /// refresh therefore waits until the pointer is back in the root menu.
     private func modelChanged() {
-      guard openMenu != nil else { return }
-      if openSubmenuCount > 0 {
-        hasPendingRefresh = true
-        // Keep observing, so a change after the pending one is not missed.
-        _ = trackedModel()
-      } else {
-        refreshOpenMenu()
+      guard let openMenu else { return }
+      RunMenuBuilder.refreshCommands(in: openMenu, with: trackedModel())
+      closeSubmenuIfPending()
+    }
+
+    /// The submenu closes after the refresh, not before: closing hands the
+    /// root menu to keyboard navigation, and rows inserted in that state
+    /// leave a stale highlight behind. The fallback covers an add that
+    /// changes nothing (already saved elsewhere).
+    private func entryAdded() {
+      closesSubmenuAfterRefresh = true
+      submenuCloseFallback?.cancel()
+      submenuCloseFallback = Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .milliseconds(400))
+        guard !Task.isCancelled else { return }
+        self?.closeSubmenuIfPending()
       }
     }
 
-    private func refreshOpenMenu() {
-      hasPendingRefresh = false
-      guard let openMenu else { return }
-      RunMenuBuilder.refreshCommands(in: openMenu, with: trackedModel())
+    /// `cancelTracking()` on a submenu closes every level, so the submenu is
+    /// dismissed the way the keyboard does it, with a Left Arrow. A mouse
+    /// move at the pointer's position follows: the refreshed rows leave the
+    /// root menu's selection drawn on a stale row until the pointer moves,
+    /// and this makes AppKit re-highlight whatever is under it.
+    private func closeSubmenuIfPending() {
+      guard closesSubmenuAfterRefresh, openMenu != nil else { return }
+      closesSubmenuAfterRefresh = false
+      submenuCloseFallback?.cancel()
+      let leftArrow = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
+      for type in [NSEvent.EventType.keyDown, .keyUp] {
+        guard
+          let event = NSEvent.keyEvent(
+            with: type, location: .zero, modifierFlags: [.numericPad, .function],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, characters: leftArrow,
+            charactersIgnoringModifiers: leftArrow, isARepeat: false, keyCode: 123)
+        else { continue }
+        NSApp.postEvent(event, atStart: false)
+      }
+      if let move = NSEvent.mouseEvent(
+        with: .mouseMoved, location: NSEvent.mouseLocation, modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 0,
+        pressure: 0)
+      {
+        NSApp.postEvent(move, atStart: false)
+      }
     }
 
     /// View-backed rows draw their own highlight, so repaint the rows

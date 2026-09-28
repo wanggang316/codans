@@ -285,9 +285,9 @@ final class RunMenuRowView: NSView {
     }
   }
 
-  /// Adding keeps the menu open, so several entries can be added in one
-  /// visit; the accessory turns into the added mark in place, since the menu
-  /// is only rebuilt the next time it opens.
+  /// Adding does not close the menu; the menu delegate refreshes the root
+  /// and then closes just this submenu. The accessory flips to the added
+  /// mark in place.
   private func add() {
     guard content.accessory == .add, let onAdd else { return }
     isAccessoryHovered = false
