@@ -81,10 +81,65 @@ struct RunSplitButton: NSViewRepresentable {
       menu.popUp(positioning: nil, at: sender.isFlipped ? origin : NSPoint(x: origin.x, y: -4), in: sender)
     }
 
+    /// The root menu while it is on screen.
+    private weak var openMenu: NSMenu?
+    /// Config Files submenus currently open under it.
+    private var openSubmenuCount = 0
+    private var hasPendingRefresh = false
+
     func menuNeedsUpdate(_ menu: NSMenu) {
       // Only the root menu is rebuilt; submenus arrive already populated.
       guard menu.supermenu == nil else { return }
-      RunMenuBuilder.populate(menu, with: makeMenu(), delegate: self)
+      RunMenuBuilder.populate(menu, with: trackedModel(), delegate: self)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+      if menu.supermenu == nil {
+        openMenu = menu
+        openSubmenuCount = 0
+        hasPendingRefresh = false
+      } else {
+        openSubmenuCount += 1
+      }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+      if menu.supermenu == nil {
+        openMenu = nil
+        return
+      }
+      openSubmenuCount = max(0, openSubmenuCount - 1)
+      if openSubmenuCount == 0, hasPendingRefresh { refreshOpenMenu() }
+    }
+
+    /// Builds the model while recording what it read, so a change while the
+    /// menu is open — a command added from a Config Files submenu — refreshes
+    /// the Project/Global rows without closing the menu. Observation fires on the write
+    /// itself, independent of SwiftUI rendering during menu tracking.
+    private func trackedModel() -> RunMenuModel {
+      withObservationTracking(makeMenu) {
+        Task { @MainActor [weak self] in self?.modelChanged() }
+      }
+    }
+
+    /// AppKit tracks the root menu's highlight by index, so rows inserted
+    /// above an open submenu's parent would move the highlight off it. The
+    /// refresh therefore waits until the pointer is back in the root menu.
+    private func modelChanged() {
+      guard openMenu != nil else { return }
+      if openSubmenuCount > 0 {
+        hasPendingRefresh = true
+        // Keep observing, so a change after the pending one is not missed.
+        _ = trackedModel()
+      } else {
+        refreshOpenMenu()
+      }
+    }
+
+    private func refreshOpenMenu() {
+      hasPendingRefresh = false
+      guard let openMenu else { return }
+      RunMenuBuilder.refreshCommands(in: openMenu, with: trackedModel())
     }
 
     /// View-backed rows draw their own highlight, so repaint the rows
