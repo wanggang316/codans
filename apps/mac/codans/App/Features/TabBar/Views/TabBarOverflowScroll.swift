@@ -30,19 +30,21 @@ final class TabBarScroller: NSObject {
     didSet {
       guard scrollView !== oldValue else { return }
       if let old = oldValue?.contentView {
-        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: old)
+        NotificationCenter.default.removeObserver(
+          self, name: NSView.boundsDidChangeNotification, object: old)
       }
       guard let clip = scrollView?.contentView else { return }
       clip.postsBoundsChangedNotifications = true
       NotificationCenter.default.addObserver(
-        self, selector: #selector(clipBoundsChanged), name: NSView.boundsDidChangeNotification, object: clip)
+        self, selector: #selector(clipBoundsChanged), name: NSView.boundsDidChangeNotification,
+        object: clip)
       offset = clip.bounds.origin.x
       installWheelMonitor()
     }
   }
 
-  /// Local monitor that turns a vertical wheel over the bar into horizontal
-  /// scrolling, as the system tab bar does.
+  /// Local monitor that handles every wheel / trackpad scroll over the bar;
+  /// see `redirectWheel`.
   @ObservationIgnored
   private nonisolated(unsafe) var wheelMonitor: Any?
 
@@ -61,23 +63,27 @@ final class TabBarScroller: NSObject {
       nonisolated(unsafe) var result: NSEvent? = event
       MainActor.assumeIsolated {
         guard let self, let event = result else { return }
-        result = self.redirectVerticalWheel(event)
+        result = self.redirectWheel(event)
       }
       return result
     }
   }
 
-  /// Scrolls the bar horizontally for a mostly-vertical wheel over it and
-  /// consumes the event, as the system tab bar does. Line-based wheels move
-  /// 10 pt per line (measured on the system bar); precise deltas (trackpad,
-  /// including its momentum phase) move 1:1.
-  private func redirectVerticalWheel(_ event: NSEvent) -> NSEvent? {
+  /// Scrolls the bar for a wheel or trackpad scroll over it and consumes the
+  /// event: the dominant axis moves the row horizontally, so a vertical wheel
+  /// scrolls it as in the system tab bar. Line-based wheels move 10 pt per
+  /// line (measured on the system bar); precise deltas (trackpad, including
+  /// its momentum phase) move 1:1. Handled here rather than by the scroll
+  /// view because the chips are drawn over it, not inside it — and it keeps
+  /// a bar whose tabs all fit from rubber-banding.
+  private func redirectWheel(_ event: NSEvent) -> NSEvent? {
     guard let scrollView, event.window === scrollView.window,
-      abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
       scrollView.bounds.contains(scrollView.convert(event.locationInWindow, from: nil))
     else { return event }
     let clip = scrollView.contentView
-    let delta = event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 1 : 10)
+    let isHorizontal = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+    let raw = isHorizontal ? event.scrollingDeltaX : event.scrollingDeltaY
+    let delta = raw * (event.hasPreciseScrollingDeltas ? 1 : 10)
     let maxX = max(0, (scrollView.documentView?.frame.width ?? 0) - clip.bounds.width)
     let x = min(max(clip.bounds.origin.x - delta, 0), maxX)
     clip.scroll(to: NSPoint(x: x, y: clip.bounds.origin.y))
@@ -117,6 +123,13 @@ final class TabBarScroller: NSObject {
 /// row owns chip layout (including the overflow stacking, which replaces
 /// edge fades — the system bar has none).
 ///
+/// The scroll view only holds an empty strip as wide as the scroll range;
+/// the row is drawn over it in viewport coordinates. A stacked chip is
+/// drawn far from its linear slot, and a SwiftUI scroll view skips content
+/// whose layout slot lies outside what it considers visible — after a
+/// window resize the selected tab would vanish. The scroll view still
+/// supplies the offset and AppKit's scroll animation.
+///
 /// - Scrollbar hidden so the bar reads as a continuous ribbon.
 /// - Draws the recessed capsule track behind the row, with the scrolling
 ///   content inset `trackContentInset` on every side as in the system tab
@@ -124,24 +137,29 @@ final class TabBarScroller: NSObject {
 /// - Selecting a tab never scrolls (system behaviour); the row asks the
 ///   scroller to move only for stack clicks and newly added tabs.
 struct TabBarOverflowScroll<Content: View>: View {
+  /// Number of chips in the row; sets the scroll range.
+  let itemCount: Int
   @ViewBuilder let content: (_ viewport: TabBarViewport) -> Content
 
   @State private var scroller = TabBarScroller()
 
   var body: some View {
     GeometryReader { container in
-      ScrollView(.horizontal, showsIndicators: false) {
-        content(
-          TabBarViewport(width: container.size.width, scrollOffset: scroller.offset, scroller: scroller)
-        )
+      let width = container.size.width
+      // The row sits on top of the scroll view, not inside it. Clipped at
+      // the track's outer capsule rather than the inset bounds, so the
+      // selected capsule's drop shadow shows in the inset margin as it
+      // does in the system bar.
+      ZStack(alignment: .leading) {
+        ScrollView(.horizontal, showsIndicators: false) {
+          Color.clear.frame(
+            width: width + TabStackLayout.maxScrollOffset(count: itemCount, viewportWidth: width),
+            height: container.size.height)
+        }
+        .background(ScrollViewLocator(scroller: scroller))
+        content(TabBarViewport(width: width, scrollOffset: scroller.offset, scroller: scroller))
+          .frame(width: width, alignment: .leading)
       }
-      // Outside the scroll content on purpose: an AppKit view inside the
-      // content stops SwiftUI from drawing the chips.
-      .background(ScrollViewLocator(scroller: scroller))
-      // Clip at the track's outer capsule instead of the inset scroll
-      // bounds, so the selected capsule's drop shadow shows in the inset
-      // margin as it does in the system bar.
-      .scrollClipDisabled()
     }
     .padding(TabBarMetrics.trackContentInset)
     .background(Capsule().fill(TabBarColors.trackBackground))

@@ -16,9 +16,10 @@ import SwiftUI
 /// Overflow: once chips no longer fit at `chipMinWidth` the row scrolls and
 /// is drawn by `TabStackLayout` — tabs near the edges compress into stacked
 /// slivers and the selected tab slows / pins — exactly as the system tab
-/// bar does. The scroll content keeps its plain linear layout (so scrolling
-/// stays native); each chip is only visually offset to its stacked frame
-/// and clipped to its sliver. Z-order rises with the index and the selected
+/// bar does. The row is not itself scrolled: it sits over the scroll view
+/// (see `TabBarOverflowScroll`) and each chip is offset from its linear slot
+/// to its stacked frame for the current scroll offset, then clipped to its
+/// sliver. Z-order rises with the index and the selected
 /// chip is on top, so overlapping chips hit-test like the system bar's.
 /// Clicking a sliver scrolls the stack into view; adding a tab reveals it.
 /// Selecting a tab never scrolls.
@@ -443,7 +444,7 @@ struct TabBarRowView: View {
         forTabAt: index, scrollOffset: viewport.scrollOffset, count: tabs.count,
         viewportWidth: viewport.width)
     else { return }
-    // Let the new chip land in the scroll content before moving to it.
+    // Let the scroll range grow to include the new chip before moving to it.
     let scroller = viewport.scroller
     DispatchQueue.main.async { scroller?.scroll(to: target, animated: false) }
   }
@@ -697,7 +698,7 @@ private struct StackState {
   }
 }
 
-/// Moves a chip from its linear slot in the scroll content to its stacked
+/// Moves a chip from its linear slot in the (unscrolled) row to its stacked
 /// frame, hides chips the stack collapses, and orders them the way the
 /// system bar does (later tabs above earlier ones, selected on top).
 private struct StackPlacement: ViewModifier {
@@ -708,8 +709,7 @@ private struct StackPlacement: ViewModifier {
   func body(content: Content) -> some View {
     if let stack {
       let frame = stack.frames[index]
-      let linearX =
-        CGFloat(index) * (TabStackLayout.chipWidth + TabBarMetrics.chipSpacing) - stack.scrollOffset
+      let linearX = CGFloat(index) * (TabStackLayout.chipWidth + TabBarMetrics.chipSpacing)
       content
         .offset(x: frame.x - linearX)
         .opacity(frame.isHidden ? 0 : 1)
@@ -764,7 +764,10 @@ private struct TrailingCapsule: Shape {
   }
 
   func path(in rect: CGRect) -> Path {
-    guard fraction < 1 else { return Path(rect.insetBy(dx: -rect.height, dy: -rect.height)) }
+    // Settled: clip nothing. The shape is laid out on the chip's linear
+    // slot while a stacked chip is drawn far from it, so any finite margin
+    // around the slot would cut the stacked chip away.
+    guard fraction < 1 else { return Path(rect.insetBy(dx: -100_000, dy: -100_000)) }
     let width = rect.width * max(fraction, 0)
     return Capsule().path(
       in: CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height))
