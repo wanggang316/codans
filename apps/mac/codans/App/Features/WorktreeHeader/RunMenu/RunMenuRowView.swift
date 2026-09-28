@@ -240,7 +240,7 @@ final class RunMenuRowView: NSView {
     guard content.accessory == .add, onAdd != nil else { return nil }
     return [
       NSAccessibilityCustomAction(name: "Add to Project Commands") { [weak self] in
-        self?.perform(self?.onAdd)
+        self?.add()
         return true
       }
     ]
@@ -278,7 +278,21 @@ final class RunMenuRowView: NSView {
   override func mouseUp(with event: NSEvent) {
     guard enclosingMenuItem?.isEnabled ?? true else { return }
     let point = convert(event.locationInWindow, from: nil)
-    perform((content.accessory == .add && accessoryRect.contains(point)) ? onAdd : onRun)
+    if content.accessory == .add, accessoryRect.contains(point) {
+      add()
+    } else {
+      perform(onRun)
+    }
+  }
+
+  /// Adding keeps the menu open, so several entries can be added in one
+  /// visit; the accessory turns into the added mark in place, since the menu
+  /// is only rebuilt the next time it opens.
+  private func add() {
+    guard content.accessory == .add, let onAdd else { return }
+    isAccessoryHovered = false
+    content.accessory = .added
+    onAdd()
   }
 
   /// Closes the whole menu (submenus included), then acts — after the menu
