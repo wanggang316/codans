@@ -101,8 +101,14 @@ struct HeaderRunScriptSplitButton: View {
     let scripts = settingsStore.settings.projects[projectID]?.scripts ?? []
     let globalScripts = settingsStore.settings.general.globalScripts
     var model = RunMenuModel()
-    model.projectCommands = scripts.map { command(for: $0, isGlobal: false) }
-    model.globalCommands = globalScripts.map { command(for: $0, isGlobal: true) }
+    // Rows sharing a name across both lists show their command line.
+    let duplicateNames = Dictionary(grouping: scripts + globalScripts, by: { $0.displayName.lowercased() })
+      .filter { $0.value.count > 1 }.keys
+    func subtitle(for script: ScriptDefinition) -> String? {
+      duplicateNames.contains(script.displayName.lowercased()) ? script.command : nil
+    }
+    model.projectCommands = scripts.map { command(for: $0, isGlobal: false, subtitle: subtitle(for: $0)) }
+    model.globalCommands = globalScripts.map { command(for: $0, isGlobal: true, subtitle: subtitle(for: $0)) }
     if store.commandSuggestionsWorktreeID == worktreeID {
       model.isScanning = store.isScanningCommandSuggestions && store.commandSuggestions.isEmpty
       model.configFiles = store.commandSuggestions.map { configFile(for: $0, scripts: scripts) }
@@ -117,7 +123,7 @@ struct HeaderRunScriptSplitButton: View {
 
   /// A running script's row becomes a red "Stop …" that interrupts it. Stop is
   /// shared by both lists: the run pane is keyed by (worktree, scriptID).
-  private func command(for script: ScriptDefinition, isGlobal: Bool) -> RunMenuModel.Command {
+  private func command(for script: ScriptDefinition, isGlobal: Bool, subtitle: String?) -> RunMenuModel.Command {
     let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
     let chord = script.keyboardShortcut.flatMap {
       $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
@@ -125,6 +131,7 @@ struct HeaderRunScriptSplitButton: View {
     return RunMenuModel.Command(
       id: script.id,
       title: isRunning ? "Stop \(script.displayName)" : script.displayName,
+      subtitle: subtitle,
       icon: isRunning ? .symbol("stop.fill") : script.resolvedIcon,
       tint: NSColor(ScriptTintColorPalette.color(for: isRunning ? .red : script.resolvedTintColor)),
       chord: chord,

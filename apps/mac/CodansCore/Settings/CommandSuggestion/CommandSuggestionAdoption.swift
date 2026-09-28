@@ -23,7 +23,7 @@ public nonisolated enum CommandSuggestionAdoption {
         if normalized(scripts[index].command).isEmpty {
           var updated = scripts
           updated[index].command = suggestion.command
-          updated[index].name = suggestion.name
+          updated[index].name = uniqueName(for: suggestion, among: scripts.filter { $0.id != scripts[index].id })
           // Keep an icon the user already chose for the blank Run.
           if let icon = iconOverride(for: suggestion, kind: .run) {
             updated[index].systemImage = icon
@@ -35,7 +35,7 @@ public nonisolated enum CommandSuggestionAdoption {
         // where the table was already showing it, keeping its ⌘R default.
         var run = ScriptDefinition.builtinRun
         run.command = suggestion.command
-        run.name = suggestion.name
+        run.name = uniqueName(for: suggestion, among: scripts)
         run.systemImage = iconOverride(for: suggestion, kind: .run)
         return Result(scripts: [run] + scripts, scriptID: run.id)
       }
@@ -45,7 +45,7 @@ public nonisolated enum CommandSuggestionAdoption {
     let kind = kindTaken ? .custom : suggestion.kind
     let script = ScriptDefinition(
       kind: kind,
-      name: suggestion.name,
+      name: uniqueName(for: suggestion, among: scripts),
       command: suggestion.command,
       systemImage: iconOverride(for: suggestion, kind: kind)
     )
@@ -57,11 +57,28 @@ public nonisolated enum CommandSuggestionAdoption {
   public static func adoptGlobal(_ suggestion: CommandSuggestion, into scripts: [ScriptDefinition]) -> Result {
     let script = ScriptDefinition(
       kind: .custom,
-      name: suggestion.name,
+      name: uniqueName(for: suggestion, among: scripts),
       command: suggestion.command,
       systemImage: suggestion.icon.flatMap { $0 == .symbol(ScriptKind.custom.defaultSystemImage) ? nil : $0.storedValue }
     )
     return Result(scripts: scripts + [script], scriptID: script.id)
+  }
+
+  /// The entry name, or — when a script already shows that name — the name
+  /// qualified by where it came from (`dev (apps/web/package.json)`), so
+  /// same-named entries from different manifests stay distinguishable in
+  /// the Run menu and the Commands table.
+  static func uniqueName(for suggestion: CommandSuggestion, among scripts: [ScriptDefinition]) -> String {
+    let taken = Set(scripts.map { $0.displayName.lowercased() })
+    guard taken.contains(suggestion.name.lowercased()) else { return suggestion.name }
+    let qualified = "\(suggestion.name) (\(suggestion.source.displayName))"
+    var candidate = qualified
+    var counter = 2
+    while taken.contains(candidate.lowercased()) {
+      candidate = "\(qualified) \(counter)"
+      counter += 1
+    }
+    return candidate
   }
 
   /// The saved script that already runs this suggestion's command, if any.

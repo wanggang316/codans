@@ -8,6 +8,9 @@ struct RunMenuModel {
   struct Command {
     let id: UUID
     let title: String
+    /// Set only when another command in the menu has the same title, to
+    /// tell them apart (the command line).
+    var subtitle: String?
     let icon: CommandIconRef
     let tint: NSColor
     /// Display-only accelerator (`⌘R`); live dispatch belongs to the menu bar.

@@ -148,6 +148,36 @@ struct CommandSuggestionAdoptionTests {
     #expect(CommandSuggestionAdoption.isAdopted(suggestion("dev", "npm run dev"), in: scripts))
     #expect(!CommandSuggestionAdoption.isAdopted(suggestion("build", "npm run build"), in: scripts))
   }
+
+  @Test
+  func sameNamedEntryIsQualifiedBySource() {
+    let existing = [ScriptDefinition(kind: .custom, name: "Build", command: "make build")]
+    let nested = CommandSuggestion(
+      source: CommandSuggestionSource(id: "apps/web/package-json", displayName: "apps/web/package.json"),
+      name: "build", command: "cd apps/web && npm run build")
+    var result = CommandSuggestionAdoption.adopt(nested, into: existing)
+    #expect(result.scripts.last?.name == "build (apps/web/package.json)")
+
+    // A second collision on the qualified name falls back to a counter.
+    var again = nested
+    again.command = "cd apps/web && npm run build -- --prod"
+    result = CommandSuggestionAdoption.adopt(again, into: result.scripts)
+    #expect(result.scripts.last?.name == "build (apps/web/package.json) 2")
+  }
+
+  @Test
+  func fillingTheBlankRunIgnoresItsOwnDefaultName() {
+    let blank = ScriptDefinition(kind: .run, name: "dev")
+    let result = CommandSuggestionAdoption.adopt(suggestion("dev", "npm run dev"), into: [blank])
+    #expect(result.scripts[0].name == "dev")
+  }
+
+  @Test
+  func globalAdoptionQualifiesDuplicatesToo() {
+    let existing = [ScriptDefinition(kind: .custom, name: "dev", command: "echo")]
+    let result = CommandSuggestionAdoption.adoptGlobal(suggestion("dev", "npm run dev"), into: existing)
+    #expect(result.scripts.last?.name == "dev (package.json)")
+  }
 }
 
 struct NestedManifestTests {
