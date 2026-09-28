@@ -98,7 +98,7 @@ struct TabBarView: View {
   private func barContent() -> some View {
     Group {
       if let worktree = currentWorktree() {
-        TabBarOverflowScroll { viewport in
+        TabBarOverflowScroll(itemCount: worktree.tabs.count) { viewport in
           rowView(for: worktree, viewport: viewport)
         }
         .frame(height: TabBarMetrics.trackHeight)
