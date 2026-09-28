@@ -20,6 +20,35 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.7.5] - 2026-09-28
+
+### Added
+
+- **Commands suggested from your project's files.** The Commands pane's +
+  menu and the Run dropdown list what package.json, Makefile, pyproject.toml,
+  Compose files and friends define — nested manifests included.
+- **Run a detected command without saving it.** Pick it from the Run
+  dropdown to run it once; add it to the Project when you want to keep it.
+- **Suggested Global Commands.** The Global Commands pane's + offers everyday
+  Git, GitHub CLI, Docker, Homebrew and system commands — never destructive
+  ones.
+- **Commands show their tool's icon.** npm, cargo, docker, git and dozens
+  more get their mark in the Commands list, Run menu, Command Palette and
+  tab chips.
+
+### Changed
+
+- **The Run dropdown opens on a plain click** and stays open after you add a
+  command. Commands sharing a name are told apart by their source file or
+  command line.
+
+### Fixed
+
+- **Relaunching no longer freezes for up to a minute.** With many worktrees
+  and a busy system, starting their file watchers used to stall the window.
+- **Pi agents show as working while they work.** The Agents View used to
+  read a busy Pi agent as idle; its activity line also updates more calmly.
+
 ## [0.7.4] - 2026-09-24
 
 ### Added
