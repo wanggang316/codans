@@ -54,6 +54,23 @@ struct RunMenuRowViewTests {
     #expect((calls.runs, calls.adds) == (1, 1))
   }
 
+  /// Adding stays inside the open menu: the handler runs at once (no close
+  /// first) and the accessory becomes the added mark, so a second click on
+  /// it no longer adds.
+  @Test
+  func addingFlipsTheAccessoryToAddedInPlace() async {
+    let calls = Calls()
+    let row = makeRow(accessory: .add, calls: calls)
+    mouseUp(in: row, at: trailingAccessoryPoint(row))
+    #expect(calls.adds == 1)
+    #expect(row.content.accessory == .added)
+    #expect(row.accessibilityCustomActions() == nil)
+
+    mouseUp(in: row, at: trailingAccessoryPoint(row))
+    await drainMain()
+    #expect((calls.runs, calls.adds) == (1, 1))
+  }
+
   @Test
   func anAddedRowsCheckmarkIsNotAnAddButton() async {
     let calls = Calls()
