@@ -169,6 +169,14 @@ final actor LiveEditorService: EditorService {
     let file = try EditorFileOpen.target(
       worktree: worktree, relativePath: relativePath, local: host == nil
     )
+    try await openFile(file, line: line, preferred: preferred, host: host, cwd: worktree)
+  }
+
+  /// Opens an already-validated file (absolute local path, or a path on
+  /// `host`). `cwd` is the working directory for a local editor CLI.
+  func openFile(
+    _ file: URL, line: Int?, preferred: EditorID?, host: RemoteHost?, cwd: URL
+  ) async throws {
     let descriptor: EditorDescriptor
     if let host {
       descriptor = try await resolveRemote(host: host, preferred: preferred)
@@ -181,7 +189,7 @@ final actor LiveEditorService: EditorService {
     else {
       throw EditorError.launchFailed(
         reason:
-          "\(descriptor.displayName) does not support diff file navigation. Choose an application editor in Settings."
+          "\(descriptor.displayName) does not support file navigation. Choose an application editor in Settings."
       )
     }
     guard let appURL = descriptor.appURL else {
@@ -196,7 +204,7 @@ final actor LiveEditorService: EditorService {
         executable: appURL.appendingPathComponent(invocation.executableRelativePath),
         arguments: invocation.arguments,
         env: ProcessInfo.processInfo.environment,
-        cwd: host == nil ? worktree : URL(fileURLWithPath: NSHomeDirectory()),
+        cwd: host == nil ? cwd : URL(fileURLWithPath: NSHomeDirectory()),
         timeout: .seconds(30), maxOutputBytes: 64 * 1024
       )
       guard case .exited(let code, _, _, _) = outcome, code == 0 else {
