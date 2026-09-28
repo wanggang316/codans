@@ -29,25 +29,16 @@ extension NSMenuItem {
 /// commands, Global commands, Config Files (one submenu per manifest, plus
 /// Refresh), then the two Manage footers. Empty sections are omitted.
 enum RunMenuBuilder {
+  /// Marks the Project/Global block, so it can be swapped while the menu
+  /// stays open.
+  private static let commandBlockTag = 0x52_554E  // "RUN"
+
   static func populate(_ menu: NSMenu, with model: RunMenuModel, delegate: NSMenuDelegate?) {
     menu.removeAllItems()
     menu.autoenablesItems = false
-
-    var needsSeparator = false
-    func separateIfNeeded() {
-      if needsSeparator { menu.addItem(.separator()) }
-      needsSeparator = false
-    }
-
-    for (title, commands) in [("Project", model.projectCommands), ("Global", model.globalCommands)]
-    where !commands.isEmpty {
-      menu.addItem(.sectionHeader(title: title))
-      for command in commands { menu.addItem(commandItem(command)) }
-      needsSeparator = true
-    }
+    for item in commandBlock(model) { menu.addItem(item) }
 
     if !model.configFiles.isEmpty || model.isScanning {
-      separateIfNeeded()
       menu.addItem(.sectionHeader(title: "Config Files"))
       if model.configFiles.isEmpty {
         let scanning = NSMenuItem(title: "Scanning…", action: nil, keyEquivalent: "")
@@ -68,12 +59,37 @@ enum RunMenuBuilder {
       if let refresh = model.refresh {
         menu.addItem(NSMenuItem.closure(title: "Refresh", handler: refresh))
       }
-      needsSeparator = true
+      menu.addItem(.separator())
     }
 
-    separateIfNeeded()
     menu.addItem(NSMenuItem.closure(title: "Manage Project Commands…", handler: model.manageProjectCommands))
     menu.addItem(NSMenuItem.closure(title: "Manage Global Commands…", handler: model.manageGlobalCommands))
+  }
+
+  /// Replaces only the Project/Global block of an open menu. The Config
+  /// Files items are left in place, so a submenu open under one of them
+  /// (where the add that triggered this happened) stays open.
+  static func refreshCommands(in menu: NSMenu, with model: RunMenuModel) {
+    for item in menu.items where item.tag == commandBlockTag {
+      menu.removeItem(item)
+    }
+    for (offset, item) in commandBlock(model).enumerated() {
+      menu.insertItem(item, at: offset)
+    }
+  }
+
+  /// Section header and rows per non-empty list, closed by a separator
+  /// (the Manage footers always follow).
+  private static func commandBlock(_ model: RunMenuModel) -> [NSMenuItem] {
+    var items: [NSMenuItem] = []
+    for (title, commands) in [("Project", model.projectCommands), ("Global", model.globalCommands)]
+    where !commands.isEmpty {
+      items.append(.sectionHeader(title: title))
+      items += commands.map(commandItem)
+    }
+    if !items.isEmpty { items.append(.separator()) }
+    for item in items { item.tag = commandBlockTag }
+    return items
   }
 
   private static func commandItem(_ command: RunMenuModel.Command) -> NSMenuItem {

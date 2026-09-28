@@ -100,3 +100,36 @@ struct RunMenuRowViewTests {
     #expect(row.accessibilityLabel() == "lint, pnpm run lint")
   }
 }
+
+@MainActor
+struct RunMenuBuilderRefreshTests {
+  private func command(_ title: String) -> RunMenuModel.Command {
+    RunMenuModel.Command(id: UUID(), title: title, icon: .symbol("play.fill"), tint: .systemGreen, chord: nil) {}
+  }
+
+  private var configFile: RunMenuModel.ConfigFile {
+    RunMenuModel.ConfigFile(title: "package.json", icon: nil, entries: [])
+  }
+
+  @Test
+  func refreshSwapsOnlyTheCommandBlock() {
+    let menu = NSMenu()
+    var model = RunMenuModel()
+    model.configFiles = [configFile]
+    RunMenuBuilder.populate(menu, with: model, delegate: nil)
+    let fileItem = menu.items.first { $0.title == "package.json" }
+    #expect(menu.items.first?.title == "Config Files")
+
+    // The first added command brings the Project section (and its separator)
+    // in above the untouched Config Files items.
+    model.projectCommands = [command("dev")]
+    RunMenuBuilder.refreshCommands(in: menu, with: model)
+    #expect(menu.items.prefix(4).map(\.title) == ["Project", "dev", "", "Config Files"])
+    #expect(menu.items.first { $0.title == "package.json" } === fileItem)
+
+    model.projectCommands = [command("dev"), command("build")]
+    RunMenuBuilder.refreshCommands(in: menu, with: model)
+    #expect(menu.items.prefix(5).map(\.title) == ["Project", "dev", "build", "", "Config Files"])
+    #expect(menu.items.filter { $0.title == "Project" }.count == 1)
+  }
+}
