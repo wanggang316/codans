@@ -13,7 +13,7 @@ struct RunMenuRowViewTests {
   private func makeRow(accessory: RunMenuRowView.Accessory?, calls: Calls) -> RunMenuRowView {
     let row = RunMenuRowView(
       content: .init(icon: nil, title: "lint", subtitle: "pnpm run lint", accessory: accessory),
-      height: RunMenuMetrics.entryRowHeight
+      height: RunMenuMetrics.rowHeight
     )
     row.frame.size.width = 320
     row.onRun = { calls.runs += 1 }
@@ -104,11 +104,23 @@ struct RunMenuRowViewTests {
 @MainActor
 struct RunMenuBuilderRefreshTests {
   private func command(_ title: String) -> RunMenuModel.Command {
-    RunMenuModel.Command(id: UUID(), title: title, icon: .symbol("play.fill"), tint: .systemGreen, chord: nil) {}
+    RunMenuModel.Command(
+      id: UUID(), title: title, subtitle: "npm run \(title)", icon: .symbol("play.fill"), tint: .systemGreen,
+      chord: nil) {}
   }
 
   private var configFile: RunMenuModel.ConfigFile {
     RunMenuModel.ConfigFile(title: "package.json", icon: nil, entries: [])
+  }
+
+  @Test
+  func manageItemsCloseTheirGroupsWhichAlwaysShow() {
+    let menu = NSMenu()
+    RunMenuBuilder.populate(menu, with: RunMenuModel(), delegate: nil)
+    #expect(
+      menu.items.map(\.title) == [
+        "Project", "Manage Project Commands…", "", "Global", "Manage Global Commands…",
+      ])
   }
 
   @Test
@@ -118,18 +130,16 @@ struct RunMenuBuilderRefreshTests {
     model.configFiles = [configFile]
     RunMenuBuilder.populate(menu, with: model, delegate: nil)
     let fileItem = menu.items.first { $0.title == "package.json" }
-    #expect(menu.items.first?.title == "Config Files")
-
-    // The first added command brings the Project section (and its separator)
-    // in above the untouched Config Files items.
-    model.projectCommands = [command("dev")]
-    RunMenuBuilder.refreshCommands(in: menu, with: model)
-    #expect(menu.items.prefix(4).map(\.title) == ["Project", "dev", "", "Config Files"])
-    #expect(menu.items.first { $0.title == "package.json" } === fileItem)
+    let configStart = ["", "Config Files", "package.json"]
+    #expect(Array(menu.items.map(\.title).suffix(3)) == configStart)
 
     model.projectCommands = [command("dev"), command("build")]
+    model.globalCommands = [command("status")]
     RunMenuBuilder.refreshCommands(in: menu, with: model)
-    #expect(menu.items.prefix(5).map(\.title) == ["Project", "dev", "build", "", "Config Files"])
-    #expect(menu.items.filter { $0.title == "Project" }.count == 1)
+    #expect(
+      menu.items.map(\.title) == [
+        "Project", "dev", "build", "Manage Project Commands…", "", "Global", "status", "Manage Global Commands…",
+      ] + configStart)
+    #expect(menu.items.first { $0.title == "package.json" } === fileItem)
   }
 }

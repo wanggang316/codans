@@ -101,14 +101,8 @@ struct HeaderRunScriptSplitButton: View {
     let scripts = settingsStore.settings.projects[projectID]?.scripts ?? []
     let globalScripts = settingsStore.settings.general.globalScripts
     var model = RunMenuModel()
-    // Rows sharing a name across both lists show their command line.
-    let duplicateNames = Dictionary(grouping: scripts + globalScripts, by: { $0.displayName.lowercased() })
-      .filter { $0.value.count > 1 }.keys
-    func subtitle(for script: ScriptDefinition) -> String? {
-      duplicateNames.contains(script.displayName.lowercased()) ? script.command : nil
-    }
-    model.projectCommands = scripts.map { command(for: $0, isGlobal: false, subtitle: subtitle(for: $0)) }
-    model.globalCommands = globalScripts.map { command(for: $0, isGlobal: true, subtitle: subtitle(for: $0)) }
+    model.projectCommands = scripts.map { command(for: $0, isGlobal: false) }
+    model.globalCommands = globalScripts.map { command(for: $0, isGlobal: true) }
     if store.commandSuggestionsWorktreeID == worktreeID {
       model.isScanning = store.isScanningCommandSuggestions && store.commandSuggestions.isEmpty
       model.configFiles = store.commandSuggestions.map { configFile(for: $0, scripts: scripts) }
@@ -123,7 +117,7 @@ struct HeaderRunScriptSplitButton: View {
 
   /// A running script's row becomes a red "Stop …" that interrupts it. Stop is
   /// shared by both lists: the run pane is keyed by (worktree, scriptID).
-  private func command(for script: ScriptDefinition, isGlobal: Bool, subtitle: String?) -> RunMenuModel.Command {
+  private func command(for script: ScriptDefinition, isGlobal: Bool) -> RunMenuModel.Command {
     let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
     let chord = script.keyboardShortcut.flatMap {
       $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
@@ -131,7 +125,7 @@ struct HeaderRunScriptSplitButton: View {
     return RunMenuModel.Command(
       id: script.id,
       title: isRunning ? "Stop \(script.displayName)" : script.displayName,
-      subtitle: subtitle,
+      subtitle: Self.commandLine(script.command),
       icon: isRunning ? .symbol("stop.fill") : script.resolvedIcon,
       tint: NSColor(ScriptTintColorPalette.color(for: isRunning ? .red : script.resolvedTintColor)),
       chord: chord,
@@ -145,6 +139,15 @@ struct HeaderRunScriptSplitButton: View {
         }
       }
     )
+  }
+
+  /// A script body as one line: its first non-blank line, with an ellipsis
+  /// when more follow.
+  static func commandLine(_ command: String) -> String {
+    let lines = command.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty }
+    guard let first = lines.first else { return "No command" }
+    return lines.count > 1 ? first + " …" : first
   }
 
   private func configFile(for group: CommandSuggestionGroup, scripts: [ScriptDefinition]) -> RunMenuModel.ConfigFile {

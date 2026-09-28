@@ -124,7 +124,10 @@ protocol CommandSuggestionParser: Sendable {
 
 **Header Run 下拉**（AppKit）：SwiftUI `Menu` 只能放标准菜单项，做不出更高的行和行内第二个点击区域，因此 Run split button 改为 `RunSplitButton`——一个与 SwiftUI 在 toolbar 里为 `Menu(primaryAction:)` 生成的控件同配置的 `NSSegmentedControl`（2 段、textured-rounded、momentary、第 1 段挂菜单），外观与相邻的 SwiftUI split button 一致；菜单在每次打开时（`menuNeedsUpdate`）按实时状态重建。
 
-- 命令行为 view-backed 菜单项（`RunMenuRowView`），行高 28pt，图标点数与按钮上的图标相同（`RunMenuMetrics`）；Config Files 子菜单的行 36pt（标题 + 副标题），行尾 `+` / `✓`，`+` 悬停有圆形底。
+- 布局：Project 组（命令 + 末行 Manage Project Commands…）、Global 组（命令 + 末行 Manage Global Commands…）、Config Files。Project / Global 两组始终显示，组为空时 Manage 项仍可达。
+- 命令行为 view-backed 菜单项（`RunMenuRowView`），一律两行（名称 + 命令行，多行脚本取首个非空行加 `…`），行高 36pt，图标点数与按钮上的图标相同（`RunMenuMetrics`）；Config Files 子菜单的行同高（标题 + 副标题），行尾 `+` / `✓`，`+` 悬停有圆形底。
+- 同名命令：采纳时名称已被占用则以来源限定（`dev (apps/web/package.json)`，再冲突加序号），配合两行的命令行即可区分。
+- 点 `+` 不关菜单：该行变为 `✓`，coordinator 在菜单打开期间以 Observation 跟踪模型读取，设置写入后原地替换 Project / Global 块（Config Files 项不动），然后只关闭该子菜单。`cancelTracking()` 会关掉所有层级，因此用一个 Left Arrow 键事件关闭子菜单，再补一个指针位置的 mouseMoved，让 AppKit 按指针位置重算高亮（否则会残留在错误的行上）。AppKit 以索引记录打开菜单的高亮，所以命令块预留与可添加条目数相等的隐藏占位项，刷新时补齐到原条目数，Config Files 项的索引保持不变。
 - 选中高亮用 `.selection` 材质的 `NSVisualEffectView`（与标准菜单项同一材质，半透明背景下颜色一致），内容画在其上一层的 canvas。
 - AppKit 对 view-backed 菜单项的 Return 与 AXPress **都不会**发送 item 的 action：行视图自己处理——被高亮的行是菜单的 first responder，`keyDown` 收到 Return；`accessibilityPerformPress` 执行；"加入"以 `NSAccessibilityCustomAction` 暴露给 VoiceOver。键盘 / 辅助功能按下箭头段时（此时 AppKit 不弹菜单），由 action 在按钮下方弹出同一菜单。
 - 子菜单父项是标准菜单项（带相对路径标题与 runner 的工具图标），以保留原生的子菜单展开行为。
