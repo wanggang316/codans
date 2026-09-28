@@ -54,9 +54,7 @@ struct RunSplitButton: NSViewRepresentable {
     control.invalidateIntrinsicContentSize()
   }
 
-  func sizeThatFits(_ proposal: ProposedViewSize, nsView: RunSegmentedControl, context: Context)
-    -> CGSize?
-  {
+  func sizeThatFits(_ proposal: ProposedViewSize, nsView: RunSegmentedControl, context: Context) -> CGSize? {
     nsView.intrinsicContentSize
   }
 
@@ -79,10 +77,8 @@ struct RunSplitButton: NSViewRepresentable {
       // from the keyboard or an accessibility client (VoiceOver) does, so
       // open the same menu under the control ourselves.
       guard let menu = sender.menu(forSegment: 1) else { return }
-      let origin = NSPoint(
-        x: sender.bounds.maxX - sender.width(forSegment: 1), y: sender.bounds.maxY + 4)
-      menu.popUp(
-        positioning: nil, at: sender.isFlipped ? origin : NSPoint(x: origin.x, y: -4), in: sender)
+      let origin = NSPoint(x: sender.bounds.maxX - sender.width(forSegment: 1), y: sender.bounds.maxY + 4)
+      menu.popUp(positioning: nil, at: sender.isFlipped ? origin : NSPoint(x: origin.x, y: -4), in: sender)
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -119,14 +115,12 @@ final class RunSegmentedControl: NSSegmentedControl {
     }
     menuOpenedDuringTracking = false
     NotificationCenter.default.addObserver(
-      self, selector: #selector(menuBeganTracking(_:)), name: NSMenu.didBeginTrackingNotification,
-      object: menu)
+      self, selector: #selector(menuBeganTracking(_:)), name: NSMenu.didBeginTrackingNotification, object: menu)
     let savedAction = action
     action = nil
     super.mouseDown(with: event)
     action = savedAction
-    NotificationCenter.default.removeObserver(
-      self, name: NSMenu.didBeginTrackingNotification, object: menu)
+    NotificationCenter.default.removeObserver(self, name: NSMenu.didBeginTrackingNotification, object: menu)
 
     guard !menuOpenedDuringTracking, let release = NSApp.currentEvent, release.type == .leftMouseUp,
       bounds.contains(convert(release.locationInWindow, from: nil))
