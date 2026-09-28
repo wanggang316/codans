@@ -160,7 +160,7 @@ Source: [PaneSurfaceAction.swift](../../apps/mac/codans/Runtime/Ghostty/PaneSurf
 
 **错误处理。** `ghostty_surface_userdata` 为 nil 或 PaneID 不在注册表 → 返回 `false`、不发事件（拆除竞态期的预期情况）；畸形 payload（如越界 `GOTO_TAB`，见上文 clamp 规则）→ `.info` 日志；router 侧失败（如 worktree 中途归档导致 `splitPanel` 抛错）→ 经既有错误面弹 toast，绝不崩溃、绝不重试；`CONFIG_CHANGE` 克隆失败（`ghostty_config_clone` 返回 nil）→ `.error` 日志 + 返回 `false`，Runtime 保留旧 config。
 
-**安全 / 隐私。** `OPEN_URL` 携带 libghostty 匹配到的原文（URL，或带 `:line:col` 的相对/绝对路径），连同 pane 的 OSC 7 pwd 提升为 `PaneActionRequest.openLink`，由 `TerminalLinkClient` 用 `TerminalLink.parse`（CodansCore）分类：带 scheme 的 URL 走 `NSWorkspace.open`；文件在项目编辑器中按行号打开（Server 项目经 SSH），目录走 Finder，图片 / PDF / HTML 走默认 app，bundle 或编辑器拒绝的文件只在 Finder 中定位——点击永不启动 `.app` 或执行脚本；本地不存在的文件给出 toast。`COPY_TITLE_TO_CLIPBOARD` 只复制已渲染到屏的 title，无信息升级；`DESKTOP_NOTIFICATION` 经 `NotificationCoordinator`，复用其权限与 mute 规则。
+**安全 / 隐私。** `OPEN_URL` 携带 libghostty 匹配到的原文（URL，或带 `:line:col` 的相对/绝对路径），连同 pane 的 OSC 7 pwd 提升为 `PaneActionRequest.openLink`，由 `TerminalLinkClient` 用 `TerminalLink.parse`（CodansCore）分类：带 scheme 的 URL 走 `NSWorkspace.open`；文件在项目编辑器中按行号打开（Server 项目经 SSH），目录走 Finder，图片 / PDF / HTML 走默认 app，bundle 或编辑器拒绝的文件只在 Finder 中定位——点击永不启动 `.app` 或执行脚本；本地不存在的文件给出 toast。悬停链接由 `MOUSE_OVER_LINK` 驱动 pane 左下角的横幅（`PaneLinkHoverBanner`）。`COPY_TITLE_TO_CLIPBOARD` 只复制已渲染到屏的 title，无信息升级；`DESKTOP_NOTIFICATION` 经 `NotificationCoordinator`，复用其权限与 mute 规则。
 
 ## 风险
 

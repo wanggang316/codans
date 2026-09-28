@@ -61,6 +61,10 @@ struct LazyPaneHost: View {
           .overlay(alignment: .top) {
             PaneSurfaceProgressOverlay(surface: surface)
           }
+          // Where a ⌘-click would go, before the click.
+          .overlay {
+            PaneLinkHoverBanner(surface: surface)
+          }
           // Top-right actions menu: collapsed to a single button, expanded
           // to the actions scoped to this pane — the pane's own (hand off,
           // command queue, mute) plus everything its surface offers on
