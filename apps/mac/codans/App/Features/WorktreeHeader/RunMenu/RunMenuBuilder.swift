@@ -83,9 +83,10 @@ enum RunMenuBuilder {
         icon: CommandIconImage.tinted(command.icon, color: command.tint, pointSize: RunMenuMetrics.iconPointSize),
         highlightedIcon: highlightedIcon(command.icon),
         title: command.title,
+        subtitle: command.subtitle,
         trailingText: command.chord
       ),
-      height: RunMenuMetrics.commandRowHeight
+      height: command.subtitle == nil ? RunMenuMetrics.commandRowHeight : RunMenuMetrics.entryRowHeight
     )
     row.onRun = command.perform
     item.view = row
