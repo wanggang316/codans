@@ -27,11 +27,10 @@ struct TabBarTrailingAccessories: View {
   let onSplitDown: () -> Void
 
   var body: some View {
-    // 6pt rather than 4: while ⌘ is held each button grows a chord on its
-    // trailing side, and the wider gap keeps that chord from crowding the
-    // next button. The tight `commandKeyHint(spacing:)` on each accessory
-    // is the other half of the same grouping.
-    HStack(spacing: 6) {
+    // No ⌘-held chord hints here: they would widen the accessories and
+    // squeeze the tab row while the key is down. The tooltips still carry
+    // each button's shortcut.
+    HStack(spacing: 4) {
       NewTabAccessoryButton(
         action: onNewTab, onLaunchAgent: onLaunchAgent, onManageAgents: onManageAgents)
 
@@ -101,9 +100,6 @@ private struct NewTabAccessoryButton: View {
       Image(systemName: "plus")
         .accessibilityLabel("New Tab")
         .modifier(AccessoryIconChrome(isHovering: isHovering))
-        // The 22pt chrome already pads the glyph; a tight gap keeps the
-        // chord attached to this icon instead of drifting toward the next.
-        .commandKeyHint(.newTab, spacing: 2)
     }
     .buttonStyle(.plain)
     .overlay(NewTabMenuOverlay(onClick: action, menuItems: agentMenuItems))
@@ -128,8 +124,7 @@ private struct NewTabAccessoryButton: View {
 }
 
 /// Trailing split button. Mirrors a registry chord (`.splitRight` /
-/// `.splitDown`) so the chord glyph appears inline while ⌘ is held and
-/// the tooltip resolves the same binding.
+/// `.splitDown`) so the tooltip resolves the same binding.
 private struct SplitAccessoryButton: View {
   let systemImage: String
   let accessibilityLabel: String
@@ -144,7 +139,6 @@ private struct SplitAccessoryButton: View {
       Image(systemName: systemImage)
         .accessibilityLabel(accessibilityLabel)
         .modifier(AccessoryIconChrome(isHovering: isHovering))
-        .commandKeyHint(chordCommandID, spacing: 2)
     }
     .buttonStyle(.plain)
     .disabled(splitTree?.root == nil)
