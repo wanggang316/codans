@@ -1,6 +1,6 @@
 # Design Doc: iOS Companion (Codans Mobile)
 
-**Status:** Draft — approved for implementation. M0 (multiplatform shared layer), M1 (Mac LAN gateway) and M2 (iOS MVP) are built. Phase 2 — the live terminal (M3), a rebuilt connection layer, the terminal keyboard, and the new information architecture and visual system — is being implemented (see [Phase 2](#phase-2-live-terminal-robust-connection-real-design), D29–D54). The relay/push path is design-only.
+**Status:** Draft — approved for implementation. M0 (multiplatform shared layer), M1 (Mac LAN gateway) and M2 (iOS MVP) are built. Phase 2 — the live terminal (M3), a rebuilt connection layer, the terminal keyboard, and the new information architecture and visual system — is being implemented (see [Phase 2](#phase-2-live-terminal-robust-connection-real-design), D29–D54). Phase 3 — internet access through a relay (D55–D60) — is being implemented; push notifications are design-only.
 **Author:** Gump (with Claude)
 **Date:** 2026-09-25 (phase 2: 2026-09-26)
 
@@ -34,7 +34,7 @@ Scope: the shared-layer changes in `apps/mac/`, the Mac-side gateway, the new `a
 **Non-Goals**
 
 - **Running anything on iOS.** No local shells, no local git, no on-device agents.
-- **Access from outside the LAN in v1.** No relay, no port forwarding guidance, no cloud account. The relay is designed below as future work.
+- **Access from outside the LAN in v1.** No relay, no port forwarding guidance, no cloud account in v1; Phase 3 adds an end-to-end encrypted relay ([Phase 3](#phase-3-internet-access-through-a-relay)), still with no port forwarding or account.
 - **Push notifications in v1.** They require an always-reachable sender, which v1 does not have; the iOS app surfaces "needs input" only while connected.
 - **A live, interactive terminal in v1.** v1's pane detail is a monospaced text snapshot refreshed on events. Phase 2 adds the byte-level live terminal ([Live Terminal](#live-terminal-m3)); the phone still never owns the PTY size.
 - **Administrative or destructive remote operations.** Removing projects/worktrees, pruning, editing project scripts, quitting the app and opening editors on the Mac are never exposed remotely (see [Permission tiers](#permission-tiers)).
@@ -433,17 +433,52 @@ offline (background, grace over)      failed(rejected | localNetworkDenied | inc
 
 **Visual system** (D53), in `App/DesignSystem/`: monochrome. The accent is **ink** (black in light mode, white in dark), set as the AccentColor asset and a global `.tint`, so no system blue remains. Surfaces are surface / elevated with hairline separators; colour is reserved for meaning — amber *needs input*, green *working* (pulsing), red *error*, grey *offline*. Type: large title, 17 pt semibold row titles, 13 pt secondary, monospaced terminal. Spacing 4 / 8 / 12 / 16 / 24; radii 12 / 20 / pill. Shared components: `StatusDot`, `AgentChip`, `InlineBanner`, `SkeletonRow`, `StateView` (full-page empty / error states), `PrimaryCircleButton` and the ink / quiet / terminal button styles. Stale data is shown dimmed under the status line's "updated … ago" rather than with a separate badge.
 
-## Future Work (design only, not built in this track)
+## Phase 3: Internet Access Through a Relay
 
-### Relay and push notifications
+Goal: reach the Mac from outside the LAN — cellular, another Wi-Fi — without port forwarding, a VPN or an account, and without trusting the relay with anything but routing.
 
-> **Future.** Nothing in this section is implemented.
+### Shape
 
-Goal: reach the Mac from outside the LAN and notify the phone when an agent needs input while the app is closed.
+```
+iPhone                                  relay.codans.dev                          Mac
+NWConnection TLS-PSK ─▶ loopback bridge ─wss─▶ Cloudflare ─▶ Caddy ─▶ relay ◀─wss─ loopback bridge ─▶ gateway NWListener
+                     └──────────────────── one TLS-PSK session, end to end ─────────────────────────┘
+```
 
-- **End-to-end encrypted relay.** Mac and phone each hold an outbound connection to a relay; the relay forwards opaque frames between them. The session is authenticated and encrypted end to end with keys established at pairing (the same per-device key, or a Noise-style handshake keyed from it), so the relay sees only ciphertext and routing IDs and cannot issue commands.
-- **APNs.** The Mac notices "needs input" (the same agent-state transitions `Notifications` already uses), and asks the relay to send a push. The push body carries no pane content — only an opaque reference the app resolves after connecting — so neither Apple nor the relay learns what the agent asked.
-- **Open questions.** Who operates the relay and what it costs; account-less device registration; rate limits; whether the permission tiers should be stricter off-LAN.
+The relay is a dumb pipe. The phone's TLS-PSK session (D3) runs end to end *inside* the relayed byte stream and terminates at the Mac's existing gateway listener, so the gateway's security model, peer proof, permission tiers and every method are unchanged, and the relay (and Cloudflare in front of it) only ever sees TLS ciphertext and routing IDs. Each end bridges the relay to a loopback TCP socket rather than running TLS over the WebSocket itself, because Network.framework cannot layer the PSK handshake over a custom byte stream, and a loopback hop lets both ends keep using the unchanged `NWConnection` code.
+
+### Relay protocol (v1)
+
+All endpoints are WebSocket upgrades on `wss://relay.codans.dev` (Caddy on the nanops VM, proxied by Cloudflare on 443). Credentials travel in `Authorization: Bearer <token>`; failures are plain HTTP statuses before the upgrade.
+
+| Endpoint | Who | Purpose |
+|---|---|---|
+| `GET /v1/mac/{macID}/control` | Mac | Registers the Mac and receives `incoming` notices. One per `macID`; a new one replaces the old. |
+| `GET /v1/mac/{macID}/session/{sessionID}` | Mac | The Mac's side of one phone session. |
+| `GET /v1/connect/{macID}` | Phone | Opens a session to a Mac. |
+| `GET /healthz` | Anyone | Liveness. |
+
+- **Identifiers.** `macID` is 16 random bytes, base64url without padding, generated once per Mac and channel. The Mac authenticates with a 32-byte `macSecret` (Keychain). The relay stores only `SHA-256(macSecret)`, registered on first use (trust on first use): a later control connection for the same `macID` with another secret gets `403`.
+- **Phone tokens.** A phone's token is `HMAC-SHA256(psk, "codans-relay-token-v1")`, base64url, so a paired phone can derive it from the key it already holds and needs no new secret. The Mac sends the relay the SHA-256 of every paired device's token over the control connection (`{"type":"tokens","hashes":[…]}` text frames), and again whenever a device is paired or revoked. The relay admits a phone only if the hash of its bearer token is in the Mac's current list. A leaked token lets someone open sessions but never complete the TLS-PSK handshake.
+- **Session.** On `GET /v1/connect/{macID}` the relay checks the token (`403`), that the Mac's control connection is up (`404`, "Mac offline"), and rate limits (`429`); it upgrades, sends `{"type":"incoming","session":"<id>"}` on the control connection, and waits up to 10 s for the Mac's session connection (`504`-equivalent close otherwise). Once both halves are up it forwards binary messages verbatim both ways; either side closing closes the other.
+- **Keepalive.** WebSocket pings every 25 s on every connection, under Cloudflare's 100 s idle cut-off.
+- **Limits.** 32 concurrent sessions per Mac, 1 MiB per message, 60 phone connects per minute per Mac and per client IP. Registrations and token lists are persisted so a relay restart does not lock out Macs.
+
+### Mac
+
+- **Setting.** Remote Access gains "Allow access from outside this network", off by default and only available while Remote Access is on. `CODANS_RELAY_URL` overrides the relay for tests; `CODANS_REMOTE_DISABLED` still forces everything off.
+- **Connector.** While allowed, a `RelayConnector` keeps the control connection (jittered backoff reconnect) and publishes the paired devices' token hashes. For each `incoming` it opens the session WebSocket and a plain TCP connection to `127.0.0.1:<gateway port>` and pumps bytes both ways. The gateway sees an ordinary TLS-PSK client.
+- **Telling the phone.** `HelloResponse` gains an optional `relay` (`url`, `macID`) while the relay is allowed, and new pairing codes carry it too, so a phone paired earlier learns it on its next LAN connection without pairing again.
+
+### Phone
+
+- **Where to connect.** Bonjour first; if no same-channel gateway appears within 1.5 s and the pairing knows a relay, connect through it. A path change re-runs the choice, so walking back into the house returns to the LAN on the next reconnect.
+- **Bridge.** A loopback `NWListener` whose accepted connections each open one `URLSessionWebSocketTask` to `/v1/connect/{macID}`; the connection layer is handed `127.0.0.1:<port>` as the endpoint. Control, events and every terminal stream are separate relay sessions, exactly as they are separate TCP connections on the LAN.
+- **Failures.** `404` maps to "Mac offline" (not "not found on this network"), `403` to "not allowed" (the Mac turned outside access off or removed the device), network errors to the existing retry path. The status line says "via relay".
+
+### Push notifications (not built)
+
+The Mac notices "needs input" (the same agent-state transitions `Notifications` already uses) and asks the relay to send an APNs push. The push body carries no pane content — only an opaque reference the app resolves after connecting — so neither Apple nor the relay learns what the agent asked. It needs an APNs key and device-token registration; it is the next step after the relay.
 
 ## Alternatives Considered
 
@@ -522,6 +557,12 @@ Goal: reach the Mac from outside the LAN and notify the phone when an agent need
 | D52 | Tabs and split panes are reached from the tab-name menu (split panes in split order as a dropdown) with page dots and swipe; iPad mirrors the split layout with one stream per visible pane. | A phone cannot show splits side by side; a menu keeps them one tap away, while the iPad has room for the real layout. |
 | D53 | A monochrome visual system: ink accent (black / white), colour only for agent and connection state, fixed type, spacing and radius scales, shared components. | The system blue made the app look like a demo; state colours stand out only when nothing else is coloured. |
 | D54 | The composer remembers the worktree it created, requires `live` to send, and no longer navigates to a previous result. | A retried send created a second worktree. |
+| D55 | Internet access goes through a dumb WebSocket relay on `relay.codans.dev`; TLS-PSK runs end to end inside it and terminates at the unchanged gateway. | No port forwarding, VPN or account; the relay and Cloudflare see only ciphertext, and no second security model exists. |
+| D56 | Both ends bridge the relay through a loopback TCP socket. | Network.framework cannot run the PSK handshake over a custom byte stream; the bridge keeps every `NWConnection` path unchanged. |
+| D57 | A phone's relay token is `HMAC-SHA256(psk, "codans-relay-token-v1")`; the relay holds only SHA-256 hashes of tokens and of the Mac's secret (trust on first use). | Paired phones need no new secret; revoking a device removes its hash; a relay compromise yields nothing that opens a session to the Mac. |
+| D58 | The relay runs on the nanops VM behind Caddy and Cloudflare on 443, WebSocket pings every 25 s. | 443 passes every network; Cloudflare cuts idle connections at 100 s. |
+| D59 | Outside access is one Mac-wide switch, off by default; a device's permission is the same on and off the LAN. | Gump's call: the tier already bounds what a device can do. |
+| D60 | The phone tries Bonjour for 1.5 s, then the relay; `HelloResponse.relay` and new pairing codes carry the relay coordinates. | The LAN stays the fast path; phones paired before the relay existed learn it without pairing again. |
 
 ## Cross-Cutting Concerns
 
