@@ -42,6 +42,21 @@ enum TabStackLayout {
     case afterSelected
   }
 
+  /// How a chip's full-width content sits in its (possibly narrower) frame.
+  /// The system bar aligns the content to the frame's leading edge for tabs
+  /// before the selected one and to the trailing edge for tabs after it, so
+  /// a narrowed tab reads as partly covered. A compressed tab's content is
+  /// pushed a further `contentOffset` inwards — fitted per side it was
+  /// squeezed from — which keeps the title out of thin slivers.
+  struct ContentAnchor: Equatable {
+    enum Squeeze: Equatable { case none, leading, trailing }
+
+    var alignsLeading: Bool
+    /// The zone boundary the chip is compressed against, if any (a chip
+    /// merely cut by the selected tab is not compressed).
+    var squeeze: Squeeze
+  }
+
   static let chipWidth: CGFloat = TabBarMetrics.chipMinWidth
 
   /// Width of each edge stacking zone; the other curve factors scale with it.
@@ -51,15 +66,42 @@ enum TabStackLayout {
 
   /// Scroll range of a row of `count` chips laid out 1 pt apart.
   static func maxScrollOffset(count: Int, viewportWidth: CGFloat) -> CGFloat {
-    max(0, CGFloat(count) * chipWidth + CGFloat(max(count - 1, 0)) * TabBarMetrics.chipSpacing - viewportWidth)
+    max(
+      0,
+      CGFloat(count) * chipWidth + CGFloat(max(count - 1, 0)) * TabBarMetrics.chipSpacing
+        - viewportWidth)
   }
 
   static func frames(
     count: Int,
     selectedIndex: Int,
+    scrollOffset: CGFloat,
+    viewportWidth: CGFloat
+  ) -> [Frame] {
+    solve(
+      count: count, selectedIndex: selectedIndex, scrollOffset: scrollOffset,
+      viewportWidth: viewportWidth
+    ).map(\.frame)
+  }
+
+  /// `frames` together with each chip's `ContentAnchor`.
+  static func placements(
+    count: Int,
+    selectedIndex: Int,
+    scrollOffset: CGFloat,
+    viewportWidth: CGFloat
+  ) -> [(frame: Frame, anchor: ContentAnchor)] {
+    solve(
+      count: count, selectedIndex: selectedIndex, scrollOffset: scrollOffset,
+      viewportWidth: viewportWidth)
+  }
+
+  private static func solve(
+    count: Int,
+    selectedIndex: Int,
     scrollOffset rawOffset: CGFloat,
     viewportWidth width: CGFloat
-  ) -> [Frame] {
+  ) -> [(frame: Frame, anchor: ContentAnchor)] {
     guard count > 0 else { return [] }
     let chip = chipWidth
     let maxOffset = maxScrollOffset(count: count, viewportWidth: width)
@@ -90,11 +132,15 @@ enum TabStackLayout {
     selectedX = min(max(selectedX, 0), width - chip)
     let displacement = selectedX - linearSelected
 
-    var result: [Frame] = []
+    var result: [(frame: Frame, anchor: ContentAnchor)] = []
     result.reserveCapacity(count)
     for index in 0..<count {
       if index == sel {
-        result.append(Frame(x: selectedX.rounded(.down), width: chip, isHidden: false))
+        result.append(
+          (
+            Frame(x: selectedX.rounded(.down), width: chip, isHidden: false),
+            ContentAnchor(alignsLeading: true, squeeze: .none)
+          ))
         continue
       }
       var left = CGFloat(index) * chip - offset
@@ -110,7 +156,8 @@ enum TabStackLayout {
           right += displacement
         }
         leadingBound = leadingZone
-        trailingBound = displacement < 0 ? min(width - trailingZone, selectedX - zone) : width - trailingZone
+        trailingBound =
+          displacement < 0 ? min(width - trailingZone, selectedX - zone) : width - trailingZone
       } else {
         if displacement < 0 {
           left += displacement
@@ -146,20 +193,27 @@ enum TabStackLayout {
         frameWidth = max(0, end.rounded(.down) - x)
       }
       let hidden = frameWidth <= 0 || x >= width || x + frameWidth <= 0
-      result.append(Frame(x: x, width: frameWidth, isHidden: hidden))
+      let squeeze: ContentAnchor.Squeeze =
+        left < leadingBound ? .leading : right > trailingBound ? .trailing : .none
+      let anchor = ContentAnchor(alignsLeading: index < sel, squeeze: squeeze)
+      result.append((Frame(x: x, width: frameWidth, isHidden: hidden), anchor))
     }
     return result
   }
 
-  /// Horizontal shift of a compressed chip's content (laid out at full chip
-  /// width, then clipped to the sliver), as in the system bar's
-  /// `mainContentContainerCenterOffset`. Empirical fit per stack side; the
-  /// system value can differ by a few points in thin slivers.
-  static func contentOffset(frameWidth: CGFloat, isLeadingSide: Bool, viewportWidth: CGFloat) -> CGFloat {
+  /// How far a compressed chip's content (laid out at full chip width, then
+  /// clipped to the sliver) is pushed inwards from the frame's outer edge —
+  /// see `ContentAnchor`. Empirical fit per stack side of the system bar's
+  /// content container position; it can differ by a few points in thin
+  /// slivers.
+  static func contentOffset(frameWidth: CGFloat, isLeadingSide: Bool, viewportWidth: CGFloat)
+    -> CGFloat
+  {
     guard frameWidth > 0, frameWidth < chipWidth else { return 0 }
     let zone = zone(viewportWidth: viewportWidth)
     let scaled = log(frameWidth / zone)
-    let offset = isLeadingSide ? zone * (0.00491 - 0.0605 * scaled) : zone * (-0.04699 - 0.07313 * scaled)
+    let offset =
+      isLeadingSide ? zone * (0.00491 - 0.0605 * scaled) : zone * (-0.04699 - 0.07313 * scaled)
     return max(0, offset.rounded())
   }
 
@@ -199,7 +253,8 @@ enum TabStackLayout {
     switch region {
     case .leading: target = scrollOffset - page
     case .trailing: target = scrollOffset + page
-    case .beforeSelected: target = min(scrollOffset + page, selectedLeft - (width - chipWidth - zone))
+    case .beforeSelected:
+      target = min(scrollOffset + page, selectedLeft - (width - chipWidth - zone))
     case .afterSelected: target = max(scrollOffset - page, selectedLeft - zone)
     }
     return min(max(target, 0), maxScrollOffset(count: count, viewportWidth: width))
