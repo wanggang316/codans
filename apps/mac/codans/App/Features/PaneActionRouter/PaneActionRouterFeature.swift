@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 import os.log
 
 /// Pure router reducer for `TerminalEvent.paneActionRequested`. Maps each
@@ -39,10 +39,12 @@ struct PaneActionRouterFeature {
     enum Delegate: Equatable {
       case presentTerminalRequested(PaneID)
       case commandPaletteToggleRequested(PaneID)
+      case openLinkRequested(PaneID, raw: String, workingDirectory: String?)
     }
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
+  @Dependency(\.continuousClock) private var clock
 
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.router", category: "pane"
@@ -91,7 +93,10 @@ struct PaneActionRouterFeature {
       let cwdForTab = cwd
       let worktreeID = address.worktreeID
       let projectID = address.projectID
-      return .run { [client = hierarchyClient] _ in
+      return .run { [client = hierarchyClient, clock] _ in
+        // Let the tab bar's insertion animation play first; see
+        // `TabBarMetrics.firstPaneDelay`.
+        try? await clock.sleep(for: TabBarMetrics.firstPaneDelay)
         _ = try? await client.openPane(
           newTabID, worktreeID, projectID, cwdForTab, nil
         )
@@ -218,6 +223,9 @@ struct PaneActionRouterFeature {
 
     case .toggleCommandPalette:
       return .send(.delegate(.commandPaletteToggleRequested(paneID)))
+
+    case .openLink(let raw, let workingDirectory):
+      return .send(.delegate(.openLinkRequested(paneID, raw: raw, workingDirectory: workingDirectory)))
     }
   }
 

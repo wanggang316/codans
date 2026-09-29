@@ -248,17 +248,21 @@ struct WorktreeDetailView: View {
     // sidebar — turns any repaint into a visible flash.
   }
 
-  @ViewBuilder
   private func terminalRegion(address: Address) -> some View {
-    if let tabID = address.activeTab {
-      SplitViewportView(
-        store: store.scope(state: \.splitViewport, action: \.splitViewport),
-        projectID: address.project,
-        worktreeID: address.worktree,
-        tabID: tabID
-      )
-    } else {
-      emptyTab
+    TerminalMountDeferral(
+      activeTabID: address.activeTab,
+      tabIDs: worktreeInfo(for: address)?.worktree.tabs.map(\.id) ?? []
+    ) {
+      if let tabID = address.activeTab {
+        SplitViewportView(
+          store: store.scope(state: \.splitViewport, action: \.splitViewport),
+          projectID: address.project,
+          worktreeID: address.worktree,
+          tabID: tabID
+        )
+      } else {
+        emptyTab
+      }
     }
   }
 
@@ -566,6 +570,43 @@ struct WorktreeDetailView: View {
 /// `.navigationTitle("")` fallback for macOS 14. Both suppress the
 /// bundle-name title; only the modern API also frees the leading slot
 /// so default-placement items + ToolbarSpacers lay out predictably.
+/// Holds back the terminal of the tab selected because the shown tab was
+/// just closed, until the tab bar's close animation has played. A terminal
+/// surface entering the window stalls compositing for a few frames; landing
+/// mid-animation it freezes the tab bar, landing after it the stall is
+/// invisible. Plain tab switches mount at once — nothing animates then.
+private struct TerminalMountDeferral<Content: View>: View {
+  let activeTabID: TabID?
+  let tabIDs: [TabID]
+  @ViewBuilder let content: Content
+
+  /// Tab whose terminal is mounted.
+  @State private var mountedTabID: TabID?
+
+  var body: some View {
+    Group {
+      if isDeferring {
+        Color.clear
+      } else {
+        content
+      }
+    }
+    .task(id: activeTabID) {
+      if isDeferring {
+        try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
+        guard !Task.isCancelled else { return }
+      }
+      mountedTabID = activeTabID
+    }
+  }
+
+  /// The mounted tab is gone and another one took over the selection.
+  private var isDeferring: Bool {
+    guard let mountedTabID, mountedTabID != activeTabID else { return false }
+    return !tabIDs.contains(mountedTabID)
+  }
+}
+
 private struct SuppressTitleModifier: ViewModifier {
   func body(content: Content) -> some View {
     if #available(macOS 15.0, *) {

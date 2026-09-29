@@ -198,6 +198,10 @@ struct HierarchySidebarView: View {
 
   var body: some View {
     let catalog = hierarchyManager.catalog
+    // Use the full catalog so a tag filter with no matches does not hide
+    // the panel. Availability never changes the persisted open preference.
+    let agentStatePanelAvailable = !catalog.projects.isEmpty && agentStateStore != nil
+    let agentStatePanelVisible = agentStatePanelAvailable && agentStatePanelOpen
     // Force `@Observable` subscription to `agentStateStore.entries` even
     // while the panel is closed and `registry` is never unwrapped in
     // the conditional below. Without this top-level read the body
@@ -239,7 +243,7 @@ struct HierarchySidebarView: View {
         treeBody(
           projects: displayedProjects,
           isReordering: isReordering,
-          bottomInsetHeight: agentStatePanelOpen ? clampedAgentStatePanelHeight : 0
+          bottomInsetHeight: agentStatePanelVisible ? clampedAgentStatePanelHeight : 0
         )
         .background(
           GeometryReader { proxy in
@@ -253,7 +257,7 @@ struct HierarchySidebarView: View {
           sidebarHeightObservation = newHeight
         }
 
-        if agentStatePanelOpen, let registry = agentStateStore {
+        if agentStatePanelVisible, let registry = agentStateStore {
           AgentStateSidebarPanel(
             registry: registry,
             resolveSourcePath: { paneID in
@@ -290,7 +294,7 @@ struct HierarchySidebarView: View {
       // `withAnimation { ... }` at the mutation site. Attaching an
       // explicit `.animation(_:value:)` here re-establishes the
       // transition so the panel slides in/out instead of popping.
-      .animation(.easeOut(duration: 0.18), value: agentStatePanelOpen)
+      .animation(.easeOut(duration: 0.18), value: agentStatePanelVisible)
 
       TagFilterPopoverFooter(
         tags: catalog.tags,
@@ -305,14 +309,14 @@ struct HierarchySidebarView: View {
           store.send(store.isReorderingProjects ? .endProjectReorder : .beginProjectReorder)
         },
         isReordering: isReordering,
-        onAgentStateTapped: agentStateStore == nil
+        onAgentStateTapped: !agentStatePanelAvailable
           ? nil
           : {
             withAnimation(.easeOut(duration: 0.18)) {
               agentStatePanelOpen.toggle()
             }
           },
-        agentStatePanelOpen: agentStatePanelOpen
+        agentStatePanelOpen: agentStatePanelVisible
       )
       .zIndex(2)
     }
@@ -327,7 +331,7 @@ struct HierarchySidebarView: View {
     // until they explicitly close it via the footer toggle. The
     // observed value is a Bool so SwiftUI's `.onChange` fires only
     // on real transitions (not every dict mutation).
-    .onChange(of: anyAgentNeedsAttention) { oldValue, newValue in
+    .onChange(of: agentStatePanelAvailable && anyAgentNeedsAttention) { oldValue, newValue in
       autoOpenLogger.debug(
         "anyAgentNeedsAttention transition \(oldValue, privacy: .public)->\(newValue, privacy: .public) autoOpen=\(self.settingsStore.settings.general.agentsViewAutoOpen, privacy: .public) panelOpen=\(self.agentStatePanelOpen, privacy: .public)"
       )

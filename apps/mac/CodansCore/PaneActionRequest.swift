@@ -23,6 +23,11 @@ public nonisolated enum PaneActionRequest: Sendable, Equatable {
   case toggleSplitZoom
   case presentTerminal
   case toggleCommandPalette
+  /// ⌘-click on a link in terminal output. `raw` is the matched text as
+  /// libghostty reports it (URL or path, possibly with a `:line:col`
+  /// suffix); `workingDirectory` is the pane's OSC 7 pwd at click time,
+  /// the base for relative paths. Parsed by `TerminalLink`.
+  case openLink(raw: String, workingDirectory: String?)
 }
 
 public nonisolated enum CloseTabMode: Sendable, Equatable {
