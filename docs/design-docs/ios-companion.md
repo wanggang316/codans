@@ -441,15 +441,15 @@ Goal: reach the Mac from outside the LAN — cellular, another Wi-Fi — without
 
 ```
 iPhone                                  relay.codans.dev                          Mac
-NWConnection TLS-PSK ─▶ loopback bridge ─wss─▶ Cloudflare ─▶ Caddy ─▶ relay ◀─wss─ loopback bridge ─▶ gateway NWListener
+NWConnection TLS-PSK ─▶ loopback bridge ─wss─▶ Caddy ─▶ relay ◀─wss─ loopback bridge ─▶ gateway NWListener
                      └──────────────────── one TLS-PSK session, end to end ─────────────────────────┘
 ```
 
-The relay is a dumb pipe. The phone's TLS-PSK session (D3) runs end to end *inside* the relayed byte stream and terminates at the Mac's existing gateway listener, so the gateway's security model, peer proof, permission tiers and every method are unchanged, and the relay (and Cloudflare in front of it) only ever sees TLS ciphertext and routing IDs. Each end bridges the relay to a loopback TCP socket rather than running TLS over the WebSocket itself, because Network.framework cannot layer the PSK handshake over a custom byte stream, and a loopback hop lets both ends keep using the unchanged `NWConnection` code.
+The relay is a dumb pipe. The phone's TLS-PSK session (D3) runs end to end *inside* the relayed byte stream and terminates at the Mac's existing gateway listener, so the gateway's security model, peer proof, permission tiers and every method are unchanged, and the relay (and Caddy in front of it) only ever sees TLS ciphertext and routing IDs. Each end bridges the relay to a loopback TCP socket rather than running TLS over the WebSocket itself, because Network.framework cannot layer the PSK handshake over a custom byte stream, and a loopback hop lets both ends keep using the unchanged `NWConnection` code.
 
 ### Relay protocol (v1)
 
-All endpoints are WebSocket upgrades on `wss://relay.codans.dev` (Caddy on the nanops VM, proxied by Cloudflare on 443). Credentials travel in `Authorization: Bearer <token>`; failures are plain HTTP statuses before the upgrade.
+All endpoints are WebSocket upgrades on `wss://relay.codans.dev` (Caddy on the nanops VM on 443, with a Let's Encrypt certificate; the Cloudflare record is DNS only). Credentials travel in `Authorization: Bearer <token>`; failures are plain HTTP statuses before the upgrade.
 
 | Endpoint | Who | Purpose |
 |---|---|---|
@@ -461,7 +461,7 @@ All endpoints are WebSocket upgrades on `wss://relay.codans.dev` (Caddy on the n
 - **Identifiers.** The Mac holds a 32-byte random `macSecret` per channel (Keychain) and authenticates with it as a base64url bearer. Its `macID` is derived from the secret — the first 16 bytes of `SHA-256("codans-relay-mac-id-v1" ‖ secret)`, base64url — so only the secret is stored, and the ID reveals nothing about it. The relay stores only `SHA-256(macSecret)`, registered on first use (trust on first use): a later control connection for the same `macID` with another secret gets `403`.
 - **Phone tokens.** A phone's token is `HMAC-SHA256(psk, "codans-relay-token-v1")`, base64url, so a paired phone can derive it from the key it already holds and needs no new secret. The Mac sends the relay the SHA-256 of every paired device's token over the control connection (`{"type":"tokens","hashes":[…]}` text frames), and again whenever a device is paired or revoked. The relay admits a phone only if the hash of its bearer token is in the Mac's current list. A leaked token lets someone open sessions but never complete the TLS-PSK handshake.
 - **Session.** On `GET /v1/connect/{macID}` the relay checks the token (`403`), that the Mac's control connection is up (`404`, "Mac offline"), and rate limits (`429`); it upgrades, sends `{"type":"incoming","session":"<id>"}` on the control connection, and waits up to 10 s for the Mac's session connection (`504`-equivalent close otherwise). Once both halves are up it forwards binary messages verbatim both ways; either side closing closes the other.
-- **Keepalive.** WebSocket pings every 25 s on every connection, under Cloudflare's 100 s idle cut-off.
+- **Keepalive.** WebSocket pings every 25 s on every connection, well inside the idle cut-offs of mobile carriers' NATs and of Cloudflare's proxy (100 s), should the record ever be proxied.
 - **Limits.** 32 concurrent sessions per Mac, 1 MiB per message, 60 phone connects per minute per Mac and per client IP, 10 new Mac registrations per client IP per hour and 10 000 registrations in total (registering costs nothing, so it is bounded). Registrations and token lists are persisted so a relay restart does not lock out Macs. Status codes: `400` malformed ID, `401` no bearer, `403` wrong secret or unknown token, `404` Mac offline or unknown session, `429` rate or session limit, `503` registrations full; close codes `4000` control replaced, `4502` Mac unreachable, `4504` Mac did not answer in time.
 
 ### Mac
@@ -557,10 +557,10 @@ The Mac notices "needs input" (the same agent-state transitions `Notifications` 
 | D52 | Tabs and split panes are reached from the tab-name menu (split panes in split order as a dropdown) with page dots and swipe; iPad mirrors the split layout with one stream per visible pane. | A phone cannot show splits side by side; a menu keeps them one tap away, while the iPad has room for the real layout. |
 | D53 | A monochrome visual system: ink accent (black / white), colour only for agent and connection state, fixed type, spacing and radius scales, shared components. | The system blue made the app look like a demo; state colours stand out only when nothing else is coloured. |
 | D54 | The composer remembers the worktree it created, requires `live` to send, and no longer navigates to a previous result. | A retried send created a second worktree. |
-| D55 | Internet access goes through a dumb WebSocket relay on `relay.codans.dev`; TLS-PSK runs end to end inside it and terminates at the unchanged gateway. | No port forwarding, VPN or account; the relay and Cloudflare see only ciphertext, and no second security model exists. |
+| D55 | Internet access goes through a dumb WebSocket relay on `relay.codans.dev`; TLS-PSK runs end to end inside it and terminates at the unchanged gateway. | No port forwarding, VPN or account; the relay sees only ciphertext, and no second security model exists. |
 | D56 | Both ends bridge the relay through a loopback TCP socket. | Network.framework cannot run the PSK handshake over a custom byte stream; the bridge keeps every `NWConnection` path unchanged. |
 | D57 | A phone's relay token is `HMAC-SHA256(psk, "codans-relay-token-v1")`; the relay holds only SHA-256 hashes of tokens and of the Mac's secret (trust on first use). | Paired phones need no new secret; revoking a device removes its hash; a relay compromise yields nothing that opens a session to the Mac. |
-| D58 | The relay runs on the nanops VM behind Caddy and Cloudflare on 443, WebSocket pings every 25 s. | 443 passes every network; Cloudflare cuts idle connections at 100 s. |
+| D58 | The relay runs on the nanops VM behind Caddy on 443 (Cloudflare record DNS only), WebSocket pings every 25 s. | 443 passes every network; a DNS-only record keeps Caddy's certificate issuance and renewal direct; pings stay under NAT and proxy idle cut-offs. |
 | D59 | Outside access is one Mac-wide switch, off by default; a device's permission is the same on and off the LAN. | Gump's call: the tier already bounds what a device can do. |
 | D60 | The phone tries Bonjour for 1.5 s, then the relay; `HelloResponse.relay` and new pairing codes carry the relay coordinates. | The LAN stays the fast path; phones paired before the relay existed learn it without pairing again. |
 
