@@ -106,7 +106,7 @@ struct TabChipView: View {
   }
 
   private var background: some View {
-    TabChipBackground(isActive: isActive, isHovering: isHovering)
+    TabChipBackground(isActive: isActive, isHovering: showsHover)
   }
 
   private var chipContent: some View {
@@ -148,9 +148,11 @@ struct TabChipView: View {
       .padding(.horizontal, TabBarMetrics.chipTitleInset)
     }
     .buttonStyle(SelectOnPressStyle(onPress: selectIfInactive))
-    .frame(maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight)
+    .frame(
+      maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight
+    )
     .overlay(alignment: .leading) {
-      TabChipCloseButton(isVisible: isHovering, action: onClose)
+      TabChipCloseButton(isVisible: showsHover, action: onClose)
         .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
@@ -173,6 +175,10 @@ struct TabChipView: View {
       .allowsHitTesting(false)
     }
   }
+
+  /// A narrowed chip (stack sliver, or partly covered) gets no hover
+  /// highlight or close button, as in the system tab bar.
+  private var showsHover: Bool { isHovering && sliceWidth == nil }
 
   private func selectIfInactive() {
     if !isActive { onSelect() }
