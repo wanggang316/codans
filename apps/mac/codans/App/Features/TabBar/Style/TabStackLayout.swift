@@ -229,12 +229,13 @@ enum TabStackLayout {
         !frames[$0].isHidden && x >= frames[$0].x && x < frames[$0].x + frames[$0].width
       }), index != selectedIndex, frames[index].width < chipWidth
     else { return nil }
+    // Measured: this holds with the selected tab pinned to either edge too —
+    // the stack squeezed against it opens towards it.
     let selectedX = frames.indices.contains(selectedIndex) ? frames[selectedIndex].x : 0
-    let selectedIsAtEdge = selectedIndex == 0 || selectedIndex == frames.count - 1
     if index < selectedIndex {
-      return (selectedIsAtEdge || x < selectedX - chipWidth) ? .leading : .beforeSelected
+      return x < selectedX - chipWidth ? .leading : .beforeSelected
     }
-    return (selectedIsAtEdge || x > selectedX + 2 * chipWidth) ? .trailing : .afterSelected
+    return x > selectedX + 2 * chipWidth ? .trailing : .afterSelected
   }
 
   /// Scroll offset the system bar animates to after a click on `region`.
