@@ -87,7 +87,7 @@ struct WorktreeWorkingTreeWatcherTests {
   }
 
   private static func waitUntil(
-    _ condition: @autoclosure @escaping () -> Bool,
+    _ condition: @escaping () -> Bool,
     timeout: Duration = .seconds(15)
   ) async throws {
     let box = ConditionBox(condition)
@@ -125,7 +125,7 @@ struct WorktreeWorkingTreeWatcherTests {
     }
 
     var start: @Sendable (FSEventStreamRef) -> Bool {
-      { stream in
+      { [self] stream in
         state.lock(); enteredFlag = true; state.unlock()
         semaphore.wait()
         let ok = FSEventStreamStart(stream)
