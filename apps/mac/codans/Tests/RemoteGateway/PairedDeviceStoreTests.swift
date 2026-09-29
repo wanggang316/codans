@@ -70,9 +70,15 @@ struct PairedDeviceStoreTests {
     let dir = try Self.makeTempDir()
     defer { try? FileManager.default.removeItem(at: dir) }
     let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    var changed: [UUID] = []
+    store.onPermissionChanged = { changed.append($0) }
     let device = try store.beginPairing(permission: .interactive)
     store.setPermission(device.id, to: .readOnly)
     #expect(store.permission(for: device.id) == .readOnly)
+    #expect(changed == [device.id])
+
+    store.setPermission(device.id, to: .readOnly)
+    #expect(changed == [device.id])
   }
 
   @Test

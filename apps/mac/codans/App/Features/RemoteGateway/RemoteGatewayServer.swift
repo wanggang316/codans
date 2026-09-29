@@ -99,6 +99,9 @@ final class RemoteGatewayServer {
       hostName: hostName, channel: channel.slug, releaseChannel: BuildChannel.release.slug)
     devices.onCredentialsChanged = { [weak self] in self?.reconcileListener() }
     devices.onRevoked = { [weak self] id in self?.deviceRevoked(id) }
+    // The phone shows its input controls from the permission in its
+    // handshake, so it reconnects to pick up a new one.
+    devices.onPermissionChanged = { [weak self] id in self?.dropConnections(of: id) }
   }
 
   /// The port the listener is bound to, also while it only refuses; nil

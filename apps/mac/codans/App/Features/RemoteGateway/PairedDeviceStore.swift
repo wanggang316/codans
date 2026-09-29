@@ -32,6 +32,9 @@ final class PairedDeviceStore {
   @ObservationIgnored var onCredentialsChanged: (() -> Void)?
   /// Fired after a device is revoked, so its live connections are closed.
   @ObservationIgnored var onRevoked: ((UUID) -> Void)?
+  /// Fired after a device's permission changes. The router already applies
+  /// it to the next request; the device only learns it at its handshake.
+  @ObservationIgnored var onPermissionChanged: ((UUID) -> Void)?
 
   init(
     fileURL: URL = PairedDeviceStore.defaultURL(),
@@ -114,13 +117,15 @@ final class PairedDeviceStore {
     save()
   }
 
-  /// Takes effect on the device's next request; no reconnect needed.
+  /// Takes effect on the device's next request.
   func setPermission(_ id: UUID, to permission: IPC.RemotePermission) {
-    guard let index = devices.firstIndex(where: { $0.id == id }) else { return }
+    guard let index = devices.firstIndex(where: { $0.id == id }), devices[index].permission != permission
+    else { return }
     devices[index].permission = permission
     save()
     logger.info(
       "device \(id.uuidString, privacy: .public) permission → \(permission.rawValue, privacy: .public)")
+    onPermissionChanged?(id)
   }
 
   func revoke(_ id: UUID) {

@@ -36,16 +36,26 @@ struct RemoteGatewayServerTests {
     _ = try await client.callRaw(.systemPing, params: [String: String]())
     #expect(await Self.errorCode(client, .terminalSendInput) == "forbidden")
 
-    // A permission change applies to the next request, no reconnect.
+    // A permission change closes the device's connections: the phone
+    // shows its controls from the handshake, so it reconnects to learn it.
     store.setPermission(payload.deviceID, to: .interactive)
-    #expect(await Self.errorCode(client, .terminalSendInput) == "unsupported")
-    #expect(await Self.errorCode(client, .systemQuit) == "forbidden")
-
-    store.revoke(payload.deviceID)
     for _ in 0..<250 where await client.isConnected {
       try await Task.sleep(for: .milliseconds(20))
     }
     #expect(await !client.isConnected)
+    let upgraded = try await RemoteRPCClient.connect(
+      to: .hostPort(host: "127.0.0.1", port: port),
+      credential: payload.credential,
+      hello: HelloRequest(clientVersion: "1", clientBinary: "test")
+    )
+    #expect(await Self.errorCode(upgraded, .terminalSendInput) == "unsupported")
+    #expect(await Self.errorCode(upgraded, .systemQuit) == "forbidden")
+
+    store.revoke(payload.deviceID)
+    for _ in 0..<250 where await upgraded.isConnected {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(await !upgraded.isConnected)
     #expect(gateway.status == .noDevices)
   }
 
