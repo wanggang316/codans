@@ -18,7 +18,7 @@ enum TabBarMetrics {
   /// the content below it.
   static let trackBottomInset: CGFloat = 8
   /// Gap between the bar's leading edge and the track.
-  static let trackLeadingInset: CGFloat = 8
+  static let trackLeadingInset: CGFloat = 4
   /// Chips are inset from the track on every side by this much.
   static let trackContentInset: CGFloat = 2
 
