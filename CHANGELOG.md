@@ -20,6 +20,22 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.7.6] - 2026-09-29
+
+### Added
+
+- **⌘-click a file path in terminal output to open it.** Paths like
+  `src/App.swift:42` open in the project's editor at that line; Server
+  projects open over SSH.
+- **See where a link goes before you click it.** Hovering a link in a pane
+  shows its target in a banner at the pane's bottom corner.
+
+### Changed
+
+- **The tab bar looks and moves like the macOS system tab bar.** Tabs share
+  the width equally, the selected tab is a raised plate, adding and closing
+  animate smoothly, and tabs that don't fit stack at the edges.
+
 ## [0.7.5] - 2026-09-28
 
 ### Added
