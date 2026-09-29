@@ -46,24 +46,6 @@ struct StatusBarFeatureTests {
   }
 
   @Test
-  func pushInProgressNeverAutoClears() async {
-    let clock = TestClock()
-    let store = TestStore(initialState: StatusBarFeature.State()) {
-      StatusBarFeature()
-    } withDependencies: {
-      $0.continuousClock = clock
-    }
-    await store.send(.push(.inProgress("Running tests"))) {
-      $0.toast = .inProgress("Running tests")
-      $0.sequence = 1
-    }
-    // Advance well beyond both success + warning windows; no `.cleared`
-    // should arrive. TestStore asserts unhandled effects on `finish`.
-    await clock.advance(by: .seconds(60))
-    await store.finish()
-  }
-
-  @Test
   func newPushCancelsPendingTimer() async {
     let clock = TestClock()
     let store = TestStore(initialState: StatusBarFeature.State()) {
@@ -133,23 +115,89 @@ struct StatusBarFeatureTests {
   }
 
   @Test
-  func inProgressThenSuccessSwapsAndSchedulesAutoClear() async {
+  func activityNeverAutoClears() async {
     let clock = TestClock()
     let store = TestStore(initialState: StatusBarFeature.State()) {
       StatusBarFeature()
     } withDependencies: {
       $0.continuousClock = clock
     }
-    await store.send(.push(.inProgress("Merging"))) {
-      $0.toast = .inProgress("Merging")
+    let activity = StatusActivity(id: .init("test"), title: "Running tests")
+    await store.send(.begin(activity)) {
+      $0.activities = [activity]
+    }
+    // Advance well beyond both toast windows; nothing may end the activity
+    // but its emitter. TestStore asserts unhandled effects on `finish`.
+    await clock.advance(by: .seconds(60))
+    await store.finish()
+  }
+
+  @Test
+  func beginSameIDReplacesAndMovesToFront() async {
+    let store = TestStore(initialState: StatusBarFeature.State()) {
+      StatusBarFeature()
+    }
+    let merge = StatusActivity(id: .init("pr.merge", 1), title: "Merging PR #1")
+    let handoff = StatusActivity(id: .init("handoff"), title: "Handing off")
+    let retried = StatusActivity(id: .init("pr.merge", 1), title: "Merging PR #1", detail: "Retry")
+    await store.send(.begin(merge)) { $0.activities = [merge] }
+    await store.send(.begin(handoff)) { $0.activities = [merge, handoff] }
+    #expect(store.state.primaryActivity == handoff)
+    await store.send(.begin(retried)) { $0.activities = [handoff, retried] }
+    #expect(store.state.primaryActivity == retried)
+  }
+
+  @Test
+  func updateChangesProgressAndIgnoresEndedActivity() async {
+    let store = TestStore(initialState: StatusBarFeature.State()) {
+      StatusBarFeature()
+    }
+    let id = StatusActivityID("build")
+    let activity = StatusActivity(id: id, title: "Building")
+    await store.send(.begin(activity)) { $0.activities = [activity] }
+    await store.send(.update(id: id, detail: nil, progress: .determinate(completed: 3, total: 8))) {
+      $0.activities[id: id]?.progress = .determinate(completed: 3, total: 8)
+    }
+    await store.send(.end(id: id, outcome: nil)) { $0.activities = [] }
+    await store.send(.update(id: id, detail: "late", progress: .indeterminate))
+  }
+
+  @Test
+  func endWithOutcomeRemovesActivityAndSchedulesAutoClear() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: StatusBarFeature.State()) {
+      StatusBarFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
+    let id = StatusActivityID("pr.merge", 7)
+    let activity = StatusActivity(id: id, title: "Merging PR #7")
+    await store.send(.begin(activity)) { $0.activities = [activity] }
+    await store.send(.end(id: id, outcome: .success("PR #7 merged"))) {
+      $0.activities = []
+      $0.toast = .success("PR #7 merged")
       $0.sequence = 1
     }
-    await store.send(.push(.success("PR merged"))) {
-      $0.toast = .success("PR merged")
-      $0.sequence = 2
-    }
     await clock.advance(by: StatusBarFeature.successDuration)
-    await store.receive(.cleared(sequence: 2)) {
+    await store.receive(.cleared(sequence: 1)) {
+      $0.toast = nil
+    }
+  }
+
+  @Test
+  func endUnknownIDStillPushesOutcome() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: StatusBarFeature.State()) {
+      StatusBarFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
+    await store.send(.end(id: .init("never-begun"), outcome: .warning("Late failure"))) {
+      $0.toast = .warning("Late failure")
+      $0.sequence = 1
+    }
+    await clock.advance(by: StatusBarFeature.warningDuration)
+    await store.receive(.cleared(sequence: 1)) {
       $0.toast = nil
     }
   }

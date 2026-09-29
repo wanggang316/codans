@@ -3,8 +3,8 @@ import SwiftUI
 import CodansCore
 
 /// Root SwiftUI view for the Worktree Status Bar's center slot. Picks a
-/// form by priority: toast (reducer-owned) → PR (derived from
-/// GitHubFeature.snapshots) → motivational / empty.
+/// form by priority: toast → activity (both reducer-owned) → PR (derived from
+/// GitHubFeature.snapshots) → motivational.
 struct StatusBarView: View {
   @Bindable var store: StoreOf<StatusBarFeature>
   let gitHubStore: StoreOf<GitHubFeature>
@@ -45,6 +45,11 @@ struct StatusBarView: View {
     case .toast(let toast):
       StatusToastView(toast: toast, compact: compact)
         .transition(.opacity)
+    case .activity:
+      StatusActivityView(activities: Array(store.activities), compact: compact) { id in
+        store.send(.cancelTapped(id))
+      }
+      .transition(.opacity)
     case .pullRequest(let snapshot):
       StatusPullRequestView(
         snapshot: snapshot,
@@ -61,16 +66,19 @@ struct StatusBarView: View {
     }
   }
 
-  /// Priority resolution. Toast always wins; otherwise a non-closed
-  /// `PullRequestSnapshot` for the active Worktree takes the slot; else empty.
+  /// Priority resolution. A just-landed outcome wins for its few seconds;
+  /// then running work; then a non-closed `PullRequestSnapshot` for the
+  /// active Worktree; else the motivational line.
   enum Form: Equatable {
     case toast(StatusToast)
+    case activity(StatusActivity)
     case pullRequest(PullRequestSnapshot)
     case motivational
   }
 
   private var form: Form {
     if let toast = store.toast { return .toast(toast) }
+    if let activity = store.primaryActivity { return .activity(activity) }
     if let wt = worktreeID,
       let snapshot = gitHubStore.snapshots[wt],
       snapshot.state != .closed
@@ -93,6 +101,10 @@ struct StatusBarView: View {
     switch form {
     case .toast(let t):
       return "toast-\(t.message)"
+    case .activity:
+      // One identity for the whole form: activities replacing each other
+      // update the text in place instead of cross-fading the slot.
+      return "activity"
     case .pullRequest(let pr):
       let breakdown = ChecksRollupRing.Breakdown(checks: pr.checkRollup)
       return [
