@@ -41,7 +41,7 @@ deploy: build-linux
 	stage="$(BUILD_DIR)/stage"; \
 	rm -rf "$$stage" && mkdir -p "$$stage"; \
 	cp $(BIN) deploy/codans-relay.service deploy/codans-relay.caddy deploy/activate.sh "$$stage/"; \
-	tar -czf "$$tarball" -C "$$stage" .; \
+	COPYFILE_DISABLE=1 tar --no-xattrs -czf "$$tarball" -C "$$stage" .; \
 	echo "==> uploading release $$release"; \
 	$(SSH) $(DEPLOY_HOST) "mkdir -p $(DEPLOY_ROOT)/releases/$$release"; \
 	$(SCP) "$$tarball" $(DEPLOY_HOST):$(DEPLOY_ROOT)/releases/$$release/release.tar.gz; \

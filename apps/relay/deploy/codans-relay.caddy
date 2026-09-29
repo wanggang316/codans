@@ -7,5 +7,10 @@ relay.codans.dev {
         # (triggered by any project's snippet change) instead of cutting them.
         stream_close_delay 5m
     }
-    log { output file /var/log/caddy/codans-relay.log { roll_size 50mb roll_keep 5 } }
+    log {
+        output file /var/log/caddy/codans-relay.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+    }
 }

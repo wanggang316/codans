@@ -34,8 +34,9 @@ make test          # go vet + go test -race ./...
 
 ## Deploy
 
-Runs on the nanops VM under systemd, behind Caddy and Cloudflare
-(`relay.codans.dev`).
+Runs on the nanops VM under systemd, behind Caddy (`relay.codans.dev`; the
+Cloudflare record is DNS only, so Caddy's Let's Encrypt certificate is what
+clients see).
 
 ```bash
 make deploy        # build linux/amd64, upload to /opt/codans-relay/releases/<sha-ts>/, activate
@@ -47,5 +48,8 @@ The Caddy snippet is installed once by hand:
 
 ```bash
 scp deploy/codans-relay.caddy root@<vm>:/etc/caddy/conf.d/codans-relay.caddy
-ssh root@<vm> 'caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy'
+# `caddy validate` runs as root and creates the log file root-owned; hand it
+# to caddy before reloading, or the reload fails with "permission denied".
+ssh root@<vm> 'touch /var/log/caddy/codans-relay.log && chown caddy:caddy /var/log/caddy/codans-relay.log \
+  && caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy'
 ```
