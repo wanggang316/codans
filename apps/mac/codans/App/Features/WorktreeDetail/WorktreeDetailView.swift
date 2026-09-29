@@ -250,6 +250,7 @@ struct WorktreeDetailView: View {
 
   private func terminalRegion(address: Address) -> some View {
     TerminalMountDeferral(
+      worktreeID: address.worktree,
       activeTabID: address.activeTab,
       tabIDs: worktreeInfo(for: address)?.worktree.tabs.map(\.id) ?? []
     ) {
@@ -574,13 +575,17 @@ struct WorktreeDetailView: View {
 /// just closed, until the tab bar's close animation has played. A terminal
 /// surface entering the window stalls compositing for a few frames; landing
 /// mid-animation it freezes the tab bar, landing after it the stall is
-/// invisible. Plain tab switches mount at once — nothing animates then.
+/// invisible. Plain tab and worktree switches mount at once — nothing
+/// animates then.
 private struct TerminalMountDeferral<Content: View>: View {
+  let worktreeID: WorktreeID
   let activeTabID: TabID?
+  /// Tabs of `worktreeID`.
   let tabIDs: [TabID]
   @ViewBuilder let content: Content
 
-  /// Tab whose terminal is mounted.
+  /// Worktree and tab whose terminal is mounted.
+  @State private var mountedWorktreeID: WorktreeID?
   @State private var mountedTabID: TabID?
 
   var body: some View {
@@ -596,13 +601,17 @@ private struct TerminalMountDeferral<Content: View>: View {
         try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
         guard !Task.isCancelled else { return }
       }
+      mountedWorktreeID = worktreeID
       mountedTabID = activeTabID
     }
   }
 
-  /// The mounted tab is gone and another one took over the selection.
+  /// The mounted tab is gone and another one took over the selection. A
+  /// worktree switch never counts: the mounted tab is only missing from
+  /// `tabIDs` because they list the other worktree's tabs.
   private var isDeferring: Bool {
-    guard let mountedTabID, mountedTabID != activeTabID else { return false }
+    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID
+    else { return false }
     return !tabIDs.contains(mountedTabID)
   }
 }

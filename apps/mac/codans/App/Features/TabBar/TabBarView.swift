@@ -260,6 +260,9 @@ struct TabBarView: View {
         )
       }
     )
+    // A worktree switch swaps in a whole other tab list; a fresh row per
+    // worktree keeps its chips from playing the add-tab insertion.
+    .id(worktreeID)
   }
 
   private func currentWorktree() -> Worktree? {
