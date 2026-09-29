@@ -81,6 +81,9 @@ let project = Project(
         // OFL-1.1; the license ships with the fonts.
         "../mac/ThirdParty/ghostty/src/font/res/JetBrainsMonoNerdFont-*.ttf",
         "../mac/ThirdParty/ghostty/src/font/res/OFL.txt",
+        // The Mac's Icon Composer icon; it declares its squares shared
+        // across platforms, so both apps draw the same mark.
+        "../mac/codans/App/AppIcon.icon",
       ],
       buildableFolders: [
         "CodansMobile/App",
@@ -108,6 +111,7 @@ let project = Project(
           // Ink (black / white), so system controls, menus and alerts
           // never fall back to system blue.
           "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
+          "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         ],
         defaultSettings: .essential
       )
