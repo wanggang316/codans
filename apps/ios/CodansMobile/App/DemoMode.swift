@@ -52,6 +52,16 @@ enum DemoMode {
     #endif
   }
 
+  /// UI tests against a real Mac on the same network launch with
+  /// `CODANS_FORCE_RELAY=1` to skip Bonjour and take the relay route.
+  nonisolated static var forcesRelay: Bool {
+    #if DEBUG
+      ProcessInfo.processInfo.environment["CODANS_FORCE_RELAY"] == "1"
+    #else
+      false
+    #endif
+  }
+
   static var initialSheet: String? {
     guard isEnabled else { return nil }
     return ProcessInfo.processInfo.environment["CODANS_DEMO_SHEET"]

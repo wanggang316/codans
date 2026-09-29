@@ -32,6 +32,28 @@ iOS 26 runtime. The default is the iPhone 17 Pro on iOS 26.
 The terminal running the harness needs Accessibility permission. The
 harness borrows the clipboard to copy the pairing code, then restores it.
 
+### Through the relay
+
+```bash
+RELAY=1 CASES="interactive live-terminal live-input" docs/user-tests/ios-companion/harness.sh <Codans.app>
+```
+
+`RELAY=1` builds `apps/relay`, runs it on `127.0.0.1:3952` with a data dir
+in the work files, allows the instance outside access and points it there
+(`CODANS_RELAY_URL`), and launches the phone with `CODANS_FORCE_RELAY=1`
+so it skips Bonjour. Every phone connection then runs simulator → relay →
+Mac with TLS-PSK end to end, and the run checks that the relay paired
+sessions. It needs Go. The relay secret the instance creates in the dev
+channel's Keychain item is deleted afterwards, unless it existed before.
+
+The Mac side alone, without a simulator:
+
+```bash
+make -C apps/relay run &      # 127.0.0.1:3050
+TEST_RUNNER_CODANS_RELAY_TEST_URL=ws://127.0.0.1:3050 xcodebuild test -workspace apps/mac/codans.xcworkspace \
+  -scheme Codans -destination 'platform=macOS' -only-testing:CodansTests/RelayEndToEndTests
+```
+
 ## Isolation
 
 - The instance gets a private config dir, zmx cache, socket and worktrees

@@ -117,7 +117,9 @@ nonisolated extension RemoteClient: DependencyKey {
     return RemoteClient(
       // With a relay to fall back on, Bonjour gets a short look first.
       discover: { gateway in
-        try await GatewayDiscovery.resolve(gateway, timeout: gateway.relay == nil ? .seconds(8) : .milliseconds(1500))
+        if DemoMode.forcesRelay, gateway.relay != nil { throw RemoteFailure.macNotFound(gateway.displayName) }
+        return try await GatewayDiscovery.resolve(
+          gateway, timeout: gateway.relay == nil ? .seconds(8) : .milliseconds(1500))
       },
       connect: { try await sessions.connect($0, endpoints: $1, credential: $2) },
       connectRelay: { try await sessions.connectRelay($0, credential: $1) },

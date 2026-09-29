@@ -30,6 +30,12 @@
 #   rejected        revoke the connected phone; it ends on "Pair again"
 #   revoke       revoke every device; their records and Keychain keys are gone
 #
+# RELAY=1 runs the selected cases through a relay instead of the LAN: a
+# local relay (apps/relay) on 127.0.0.1, the instance allowed outside
+# access and pointed at it, and the phone told to skip Bonjour. Every
+# connection of the phone then goes simulator → relay → Mac, end to end
+# TLS-PSK; the run also checks the relay paired sessions.
+#
 # Needs: a Debug build (`make mac-build`), the iOS project generated
 # (`make ios-generate`), jq, and Accessibility permission for the terminal
 # running this script (to press buttons in the test instance's Settings).
@@ -51,6 +57,9 @@ WTS="$SCRATCH/wts"
 FAKEBIN="$SCRATCH/fakebin"
 SHOTS="$SCRATCH/shots"
 KEYCHAIN_SERVICE="com.gumpw.codans.remote.codans-dev"
+RELAY="${RELAY:-0}"
+RELAY_PORT=3952
+RELAY_KEYCHAIN_SERVICE="com.gumpw.codans.relay.codans-dev"
 IOS_DIR="$REPO_ROOT/apps/ios"
 # The app needs iOS 26, and an older runtime can carry a device of the same
 # name, so the default is picked from iOS 26 runtimes only.
@@ -99,7 +108,7 @@ AGENT
   cat >"$CONF/settings.json" <<EOF
 {
   "version": 3,
-  "remoteAccess": { "enabled": true },
+  "remoteAccess": { "enabled": true, "allowsRelay": $([[ $RELAY == 1 ]] && echo true || echo false) },
   "worktree": { "defaultWorktreesDirectory": "$WTS", "fetchRemoteOnCreate": false },
   "agents": { "profiles": [
     { "id": "11111111-1111-1111-1111-111111111111", "kind": "claude-code", "name": "Fake Claude",
@@ -110,7 +119,12 @@ EOF
   kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE" && mkdir -p "$CACHE"
   rm -f "$SOCK"
-  CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" \
+  local relay_env=()
+  if [[ $RELAY == 1 ]]; then
+    start_relay
+    relay_env=(CODANS_RELAY_URL="ws://127.0.0.1:$RELAY_PORT")
+  fi
+  env CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" ${relay_env[@]+"${relay_env[@]}"} \
     nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
   MAC_PID=$!
   # The gateway logs at info level, which the unified log does not keep.
@@ -136,6 +150,31 @@ EOF
   "$AX" wait "$MAC_PID" "Pair New Device…" 10 >/dev/null || { echo "Remote Access pane did not open"; exit 1; }
 }
 
+# ---------- Local relay (RELAY=1) ----------
+start_relay() {
+  if lsof -nP -iTCP:"$RELAY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "REFUSING: something already listens on 127.0.0.1:$RELAY_PORT"; exit 1
+  fi
+  # The instance shares the dev channel's relay secret with the developer's
+  # own dev build; remove it afterwards only if this run created it.
+  security find-generic-password -s "$RELAY_KEYCHAIN_SERVICE" >/dev/null 2>&1 && RELAY_SECRET_EXISTED=1
+  (cd "$REPO_ROOT/apps/relay" && go build -o "$SCRATCH/codans-relay" ./cmd/codans-relay) ||
+    { echo "cannot build the relay"; exit 1; }
+  "$SCRATCH/codans-relay" -listen "127.0.0.1:$RELAY_PORT" -data "$SCRATCH/relay-data" >"$SCRATCH/relay.log" 2>&1 &
+  RELAY_PID=$!
+  for _ in $(seq 1 50); do curl -fs "http://127.0.0.1:$RELAY_PORT/healthz" >/dev/null && break; sleep 0.1; done
+  echo "local relay pid=$RELAY_PID"
+}
+
+quit_relay() {
+  [[ -n "${RELAY_PID:-}" ]] || return
+  kill -TERM "$RELAY_PID" 2>/dev/null
+  wait "$RELAY_PID" 2>/dev/null
+  [[ -n "${RELAY_SECRET_EXISTED:-}" ]] ||
+    security delete-generic-password -s "$RELAY_KEYCHAIN_SERVICE" >/dev/null 2>&1
+  echo "quit local relay"
+}
+
 quit_mac() {
   [[ -n "${UI_PID:-}" ]] && kill "$UI_PID" 2>/dev/null
   [[ -n "${LOG_PID:-}" ]] && kill "$LOG_PID" 2>/dev/null
@@ -154,6 +193,7 @@ quit_mac() {
   kill_zmx_sessions "$CACHE"
   rm -rf "$CACHE"
   echo "quit mac instance"
+  quit_relay
 }
 # The simulator is booted by reset_sim; leave nothing of the run behind.
 trap 'quit_mac; xcrun simctl shutdown "$SIM" >/dev/null 2>&1' EXIT
@@ -230,6 +270,7 @@ start_ui_test() {
   local name="$1" method="$2"; shift 2
   local vars=() pair
   for pair in "$@"; do vars+=("TEST_RUNNER_CODANS_E2E_$pair"); done
+  [[ $RELAY == 1 ]] && vars+=("TEST_RUNNER_CODANS_E2E_FORCE_RELAY=1")
   SYNC="$SCRATCH/sync/$name"
   UI_CASE="$name"
   rm -rf "$SYNC" && mkdir -p "$SYNC" "$SHOTS/$name"
@@ -543,5 +584,14 @@ done
 [[ $leftover == 0 ]] && ok "revoke: Keychain keys deleted" || bad "revoke: $leftover Keychain key(s) remain"
 
 echo
+if [[ $RELAY == 1 ]]; then
+  sessions=$(grep -c '"session started"' "$SCRATCH/relay.log" 2>/dev/null || true)
+  if [[ ${sessions:-0} -gt 0 ]]; then
+    ok "relay: the phone's connections went through the relay ($sessions sessions)"
+  else
+    bad "relay: no session went through the relay (see $SCRATCH/relay.log)"
+  fi
+fi
+
 echo "passed $PASS, failed $FAIL — work files in $SCRATCH (screenshots in $SHOTS)"
 [[ $FAIL == 0 ]]

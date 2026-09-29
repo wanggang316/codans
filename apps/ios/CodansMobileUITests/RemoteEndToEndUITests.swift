@@ -299,6 +299,9 @@ final class RemoteEndToEndUITests: XCTestCase {
     // The simulator shares the Mac's keyboard, which hides the key bar
     // these tests drive.
     app.launchEnvironment["CODANS_FORCE_KEY_BAR"] = "1"
+    // The harness's relay run: the Mac is on this network, so Bonjour
+    // would win; skip it and go through the relay.
+    if env["CODANS_E2E_FORCE_RELAY"] == "1" { app.launchEnvironment["CODANS_FORCE_RELAY"] = "1" }
     app.launch()
     if pairs {
       // The code comes from the harness only now: a code expires ten
