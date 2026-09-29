@@ -1,3 +1,4 @@
+import CodansIPC
 import Foundation
 import Security
 
@@ -21,6 +22,9 @@ public struct PairingPayload: Codable, Equatable, Sendable {
   public let psk: Data
   /// `BuildChannel.slug` of the Mac build that issued the payload.
   public let channel: String
+  /// The Mac's relay address when it allows access from outside the LAN.
+  /// Optional and additive, so the payload version stays 1.
+  public let relay: RemoteRelayCoordinates?
 
   public init(
     serviceName: String,
@@ -28,6 +32,7 @@ public struct PairingPayload: Codable, Equatable, Sendable {
     pskIdentity: String,
     psk: Data,
     channel: String,
+    relay: RemoteRelayCoordinates? = nil,
     version: Int = PairingPayload.currentVersion
   ) {
     self.version = version
@@ -36,6 +41,7 @@ public struct PairingPayload: Codable, Equatable, Sendable {
     self.pskIdentity = pskIdentity
     self.psk = psk
     self.channel = channel
+    self.relay = relay
   }
 
   public var credential: RemoteTLS.PSKCredential {
@@ -54,7 +60,7 @@ public struct PairingPayload: Codable, Equatable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case version = "v"
-    case serviceName, deviceID, pskIdentity, psk, channel
+    case serviceName, deviceID, pskIdentity, psk, channel, relay
   }
 
   public init(from decoder: Decoder) throws {
@@ -70,6 +76,7 @@ public struct PairingPayload: Codable, Equatable, Sendable {
     }
     psk = key
     channel = try c.decode(String.self, forKey: .channel)
+    relay = try c.decodeIfPresent(RemoteRelayCoordinates.self, forKey: .relay)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -80,6 +87,7 @@ public struct PairingPayload: Codable, Equatable, Sendable {
     try c.encode(pskIdentity, forKey: .pskIdentity)
     try c.encode(psk.base64URLEncodedString(), forKey: .psk)
     try c.encode(channel, forKey: .channel)
+    try c.encodeIfPresent(relay, forKey: .relay)
   }
 
   /// `codans-pair:<base64url(JSON)>`.
