@@ -101,6 +101,22 @@ struct TabStackLayoutTests {
         for: .afterSelected, selectedIndex: 8, scrollOffset: 900, count: 17, viewportWidth: 880) == 850)
   }
 
+  /// Measured: with the last tab selected and pinned, clicking the stack
+  /// squeezed against it scrolls forward to open it (705.6 → 1176).
+  @Test func stackAgainstAPinnedSelectedTabOpensTowardsIt() {
+    let max = TabStackLayout.maxScrollOffset(count: 17, viewportWidth: 880)
+    let offset = max * 0.6
+    let frames = TabStackLayout.frames(
+      count: 17, selectedIndex: 16, scrollOffset: offset, viewportWidth: 880)
+    let region = TabStackLayout.stackingRegion(
+      atX: frames[12].x + frames[12].width / 2, frames: frames, selectedIndex: 16)
+    #expect(region == .beforeSelected)
+    #expect(
+      TabStackLayout.scrollTarget(
+        for: .beforeSelected, selectedIndex: 16, scrollOffset: offset, count: 17,
+        viewportWidth: 880) == max)
+  }
+
   @Test func revealsAnAddedTabAtTheTrailingBoundary() {
     // Measured: 18 tabs, new tab at index 13 while scrolled to 300 → 910.
     #expect(TabStackLayout.revealOffset(forTabAt: 13, scrollOffset: 300, count: 18, viewportWidth: 880) == 910)
