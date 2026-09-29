@@ -558,6 +558,7 @@ struct RootFeatureTests {
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
+      $0.continuousClock = ImmediateClock()
       $0.hierarchyClient.snapshot = { catalog }
       $0.hierarchyClient.createTab = { _, _, _ in TabID() }
       // The new-tab reducer auto-spawns a pane in the worktree cwd;

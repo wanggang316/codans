@@ -91,6 +91,7 @@ struct TabBarFeature {
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
+  @Dependency(\.continuousClock) private var clock
   @Dependency(SettingsWriter.self) private var settingsWriter
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
 
@@ -123,7 +124,10 @@ struct TabBarFeature {
         // `makeFirstResponder` runs — `focusSurfaceView` retries with
         // backoff if the window isn't ready yet. Mirrors the focus flow
         // in `PaneActionRouterFeature.newSplit`.
-        return .run { [client = hierarchyClient] _ in
+        return .run { [client = hierarchyClient, clock] _ in
+          // Let the tab bar's insertion animation play first; see
+          // `TabBarMetrics.firstPaneDelay`.
+          try? await clock.sleep(for: TabBarMetrics.firstPaneDelay)
           guard
             let newPaneID = try? await client.openPane(
               tabID, worktreeID, projectID, cwd, nil

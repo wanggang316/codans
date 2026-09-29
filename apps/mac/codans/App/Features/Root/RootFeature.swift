@@ -474,6 +474,7 @@ struct RootFeature {
   @Dependency(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
   @Dependency(HandoffClient.self) private var handoffClient
+  @Dependency(TerminalLinkClient.self) private var terminalLinkClient
   @Dependency(\.uuid) private var uuid
   @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
   @Dependency(GitServiceClient.self) private var gitServiceClient
@@ -1513,6 +1514,24 @@ struct RootFeature {
             }
           }
 
+        case .runCommandRequested(let script):
+          // Same selection-resolution + staleness rationale as
+          // `runScriptRequested`; the script is unsaved, so it travels whole.
+          guard
+            let projectID = state.selection.projectID,
+            let worktreeID = state.selection.worktreeID
+          else { return .none }
+          let client = hierarchyClient
+          return .run { send in
+            do {
+              try await client.runCommand(script, projectID, worktreeID)
+            } catch let error as RunScriptError {
+              await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
+            } catch {
+              await send(.statusBar(.push(.warning("Run command failed: \(error.localizedDescription)"))))
+            }
+          }
+
         case .runGlobalScriptRequested(let scriptID):
           // Same selection-resolution + staleness rationale as
           // `runScriptRequested`, routed through the global run path which
@@ -1646,6 +1665,15 @@ struct RootFeature {
         return .send(.commandPaletteToggle(paneID))
       case .paneActionRouter(.delegate(.presentTerminalRequested)):
         return .none
+      case .paneActionRouter(
+        .delegate(.openLinkRequested(let paneID, let raw, let workingDirectory))):
+        return .run { [terminalLinkClient] send in
+          do {
+            try await terminalLinkClient.open(paneID, raw, workingDirectory)
+          } catch {
+            await send(.statusBar(.push(.warning(Self.shortToastMessage(error.localizedDescription)))))
+          }
+        }
 
       case .paneActionRouter:
         return .none

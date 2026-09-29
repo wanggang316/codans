@@ -1,3 +1,4 @@
+import CodansCore
 import Testing
 
 @testable import Codans
@@ -9,9 +10,11 @@ struct WorktreeProcessIconTests {
     ("node", "nodejs"), ("nodejs", "nodejs"), ("python", "python"),
     ("python3.13", "python"), ("go", "go"), ("cargo", "rust"), ("rustc", "rust"),
     ("docker-compose", "docker"), ("docker", "docker"), ("git", "git"),
+    ("/opt/homebrew/bin/vite", "vite"), ("bun", "bun"), ("terraform", "terraform"),
   ])
-  func recognizesExecutableAndProcessTitles(input: String, asset: String) {
-    #expect(WorktreeProcessIcon.resolve(processName: input, agentKind: nil) == .asset("process-\(asset)"))
+  func recognizesExecutableAndProcessTitles(input: String, mark: String) {
+    #expect(
+      WorktreeProcessIcon.resolve(processName: input, agentKind: nil) == .command(.mark(ToolMark(rawValue: mark)!)))
   }
 
   @Test(arguments: ["", "handbox", "python-server", "git-helper", "my-npm", "echo npm"])

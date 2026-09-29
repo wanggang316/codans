@@ -37,6 +37,13 @@ struct ScriptCommandTable: View {
   /// pane) there are no kind presets — `+` adds a single plain Custom command
   /// and every row is freely removable.
   var allowsKindPresets: Bool = true
+  /// Commands detected in the Project's manifests, listed under the preset
+  /// kinds in the `+` menu. Only consulted when `onAddSuggestion` is set.
+  var suggestionGroups: [CommandSuggestionGroup] = []
+  var isScanningSuggestions = false
+  /// Adopt a detected command. nil hides the suggestion section entirely.
+  var onAddSuggestion: ((CommandSuggestion) -> Void)?
+  var onRefreshSuggestions: (() -> Void)?
 
   private let iconColumnWidth: CGFloat = 48
   private let nameColumnWidth: CGFloat = 130
@@ -167,12 +174,40 @@ struct ScriptCommandTable: View {
   }
 
   /// `+` control. With kind presets (Project pane) it's a menu of preset kinds;
-  /// without them (Global pane) it's a plain button that appends one Custom
-  /// command — global commands have no Run/Test/… taxonomy.
+  /// without them (Global pane) global commands have no Run/Test/… taxonomy,
+  /// so it adds one Custom command — as a plain button, or as the first item of
+  /// a menu when there are suggestions to offer below it.
   @ViewBuilder
   private var addControl: some View {
     if allowsKindPresets {
       addMenu
+    } else if let onAddSuggestion {
+      Menu {
+        Button {
+          onAdd(.custom)
+        } label: {
+          Label {
+            Text("Custom Command")
+          } icon: {
+            ScriptTintColorPalette.menuIcon(
+              systemName: ScriptKind.custom.defaultSystemImage, tint: ScriptKind.custom.defaultTintColor)
+          }
+        }
+        Divider()
+        CommandSuggestionMenuSection(
+          title: "Suggested",
+          groups: suggestionGroups,
+          scripts: scripts,
+          isScanning: false,
+          onAdd: onAddSuggestion
+        )
+      } label: {
+        addMenuLabel
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .help("Add command")
     } else {
       barButton("plus", label: "Add command", disabled: false) {
         onAdd(.custom)
@@ -180,8 +215,20 @@ struct ScriptCommandTable: View {
     }
   }
 
+  private var addMenuLabel: some View {
+    ZStack {
+      Image(systemName: "plus")
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
+    }
+    .frame(width: 28, height: 28)
+    .contentShape(Rectangle())
+    .accessibilityLabel("Add command")
+  }
+
   /// `+` menu: offers each preset kind plus Custom. Predefined kinds already
-  /// present are excluded so a Project can't hold two `Run` commands.
+  /// present are excluded so a Project can't hold two `Run` commands. Below
+  /// them, one submenu per manifest lists the Project's detected commands.
   private var addMenu: some View {
     let usedKinds = Set(scripts.map(\.kind))
     return Menu {
@@ -200,6 +247,17 @@ struct ScriptCommandTable: View {
             }
           }
         }
+      }
+      if let onAddSuggestion {
+        Divider()
+        CommandSuggestionMenuSection(
+          title: "From Project",
+          groups: suggestionGroups,
+          scripts: scripts,
+          isScanning: isScanningSuggestions,
+          onAdd: onAddSuggestion,
+          onRefresh: onRefreshSuggestions
+        )
       }
     } label: {
       ZStack {
@@ -283,11 +341,12 @@ private struct ScriptCommandRow: View {
       commandPopover = false
       iconPopover.toggle()
     } label: {
-      Image(systemName: script.resolvedSystemImage)
+      CommandIconGlyph(icon: script.resolvedIcon)
         .foregroundStyle(ScriptTintColorPalette.color(for: script.resolvedTintColor))
         .frame(width: 16, alignment: .center)
         .accessibilityHidden(true)
     }
+    .accessibilityLabel("Icon for \(script.displayName)")
     .popover(isPresented: $iconPopover, arrowEdge: .bottom) {
       ScriptIconPopover(script: script, onUpdate: onUpdate)
     }
@@ -448,13 +507,39 @@ private struct ScriptIconPopover: View {
   let script: ScriptDefinition
   let onUpdate: (ScriptDefinition) -> Void
 
+  /// SF Symbol name for the text field and grid; empty while a tool mark is
+  /// selected so the field never shows the `mark:` wire format.
   private var symbolBinding: Binding<String> {
     Binding(
-      get: { script.systemImage ?? script.resolvedSystemImage },
+      get: { displayedSymbol },
       set: {
-        var updated = script
         let trimmed = $0.trimmingCharacters(in: .whitespaces)
+        // The field writes its text back when it takes focus as the popover
+        // opens. With a tool mark selected that text is "", which must not
+        // read as "clear the icon" — only a real edit may change it.
+        guard trimmed != displayedSymbol else { return }
+        var updated = script
         updated.systemImage = trimmed.isEmpty ? nil : trimmed
+        onUpdate(updated)
+      }
+    )
+  }
+
+  private var displayedSymbol: String {
+    if case .symbol(let name) = script.resolvedIcon { return name }
+    return ""
+  }
+
+  private var markBinding: Binding<ToolMark?> {
+    Binding(
+      get: {
+        if case .mark(let mark) = script.resolvedIcon { return mark }
+        return nil
+      },
+      set: { mark in
+        guard let mark else { return }
+        var updated = script
+        updated.systemImage = CommandIconRef.mark(mark).storedValue
         onUpdate(updated)
       }
     )
@@ -482,6 +567,14 @@ private struct ScriptIconPopover: View {
 
       SFSymbolPicker(
         selection: symbolBinding,
+        highlight: ScriptTintColorPalette.color(for: script.resolvedTintColor)
+      )
+
+      Text("Tools")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      ToolMarkPicker(
+        selection: markBinding,
         highlight: ScriptTintColorPalette.color(for: script.resolvedTintColor)
       )
 

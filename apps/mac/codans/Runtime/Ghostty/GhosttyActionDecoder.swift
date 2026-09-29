@@ -503,7 +503,10 @@ extension GhosttyActionDecoder {
 
     // Bucket 4 — Effectful
     case .openURL(let url):
-      return handleOpenURL(url)
+      // Parsing and opening need catalog context (project host, editor
+      // preference), so the App layer owns it; see `TerminalLinkClient`.
+      return emitPaneIntent(
+        .openLink(raw: url, workingDirectory: pane.info.pwd), paneID: paneID, runtime: runtime)
     case .desktopNotification(let title, let body):
       return emitInfo(
         .desktopNotification(title: title, body: body),
@@ -734,25 +737,6 @@ extension GhosttyActionDecoder {
       hasher.combine(bytes: buffer)
     }
     return UInt32(truncatingIfNeeded: hasher.finalize())
-  }
-}
-
-// MARK: - Effectful helpers
-
-extension GhosttyActionDecoder {
-
-  /// OPEN_URL: validate the scheme and hand off to LaunchServices. The
-  /// decoded string has already been copied to Swift-owned memory, so this
-  /// runs entirely on the Swift side.
-  @MainActor
-  fileprivate static func handleOpenURL(_ url: String) -> Bool {
-    guard let parsed = URL(string: url), parsed.scheme?.isEmpty == false else {
-      logger.info("open_url: rejected (missing scheme: \(url))")
-      return false
-    }
-    NSWorkspace.shared.open(parsed)
-    logger.debug("surface action: open_url scheme=\(parsed.scheme ?? "?")")
-    return true
   }
 }
 

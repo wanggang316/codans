@@ -9,8 +9,9 @@ import SwiftUI
 /// The slot collapses to zero when `isDirty` is `false` so the label sits
 /// flush with the chip edge the rest of the time.
 ///
-/// Truncates in the middle so both ends of the title remain visible — a
-/// long path's filename stays readable even as it's clipped.
+/// Typography follows the system tab bar: 11-pt system font truncated at
+/// the tail. The selected tab keeps the regular weight (the system bar sets
+/// it semibold) and is told apart by its capsule and primary text color.
 struct TabChipLabel: View {
   let title: String
   var isActive: Bool = false
@@ -30,6 +31,17 @@ struct TabChipLabel: View {
   /// what reads as "running". `nil` = idle, monochrome icon.
   var iconTint: Color?
 
+  @Environment(\.colorScheme) private var colorScheme
+
+  /// An idle chip's title is the selected title dimmed, not recolored: a
+  /// style change makes SwiftUI replace the text at its final frame, so in
+  /// an add / close reflow the title would jump ahead of its chip, while an
+  /// opacity change animates in place. Pixel-identical to the secondary
+  /// label color (see `TabBarColors.inactiveTextOpacity`).
+  private var textOpacity: Double {
+    isActive ? 1 : TabBarColors.inactiveTextOpacity(for: colorScheme)
+  }
+
   var body: some View {
     HStack(spacing: 4) {
       if isDirty {
@@ -43,35 +55,29 @@ struct TabChipLabel: View {
           .accessibilityLabel("Has unread notifications")
       } else if let icon, !icon.isEmpty {
         glyph(for: icon)
-          .font(.system(size: 10))
-          .foregroundStyle(
-            iconTint ?? (isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
-          )
+          .font(.system(size: 11))
+          .foregroundStyle(iconTint ?? TabBarColors.activeText)
+          .opacity(iconTint == nil ? textOpacity : 1)
           .accessibilityHidden(true)
       }
       Text(title)
         .lineLimit(1)
-        .truncationMode(.middle)
-        .font(.caption)
-        .foregroundStyle(isActive ? TabBarColors.activeText : TabBarColors.inactiveText)
+        .truncationMode(.tail)
+        .font(.system(size: TabBarMetrics.titleFontSize))
+        // A chip resizing in an add / close reflow re-truncates its title;
+        // swap the truncation outright instead of cross-fading the two
+        // strings, which leaves a ghost ellipsis behind the text.
+        .contentTransition(.identity)
+        .foregroundStyle(TabBarColors.activeText)
+        .opacity(textOpacity)
     }
   }
 
-  /// Brand mark for an `agent:<kind>` reference, SF Symbol otherwise. The
-  /// brand asset is template-rendered and boxed to the SF Symbol's optical
-  /// size so both paths sit on the same baseline and inherit the same tint.
-  @ViewBuilder
+  /// Agent brand mark, tool mark or SF Symbol. Marks are template-rendered
+  /// and boxed to the SF Symbol's optical size so every path sits on the same
+  /// baseline and inherits the same tint.
   private func glyph(for icon: String) -> some View {
-    if let kind = TabIconRef.agentKind(from: icon) {
-      Image(AgentCatalog.descriptor(for: kind).iconAssetName)
-        .renderingMode(.template)
-        .resizable()
-        .scaledToFit()
-        .frame(width: 11, height: 11)
-        .accessibilityHidden(true)
-    } else {
-      Image(systemName: icon)
-        .accessibilityHidden(true)
-    }
+    StoredIconGlyph(icon: icon, markSize: 11)
+      .accessibilityHidden(true)
   }
 }

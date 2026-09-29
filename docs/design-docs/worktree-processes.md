@@ -86,9 +86,11 @@ liveness. Launch provenance enriches names but never gates process visibility.
 ## Process icons
 
 Rows retain their status dot and add a 14-point template icon before the name.
-Observed agent identities reuse the bundled agent marks. Common executable names
-map to bundled Node.js, npm, pnpm, Python, Go, Rust, Docker, and Git marks; unknown
-commands use the terminal symbol. Matching uses live process identity, never a
+Observed agent identities reuse the bundled agent marks. Other executable names
+resolve through `CommandIconCatalog`, the same tool-mark table command icons use
+(Node.js, npm, pnpm, Python, Go, Rust, Docker, Git and the rest of the `tool-*`
+marks — see [Command Suggest](command-suggest.md)); unknown commands use the
+terminal symbol. Matching uses live process identity, never a
 user-defined Run task name. Icon selection does not alter process detection.
 
 

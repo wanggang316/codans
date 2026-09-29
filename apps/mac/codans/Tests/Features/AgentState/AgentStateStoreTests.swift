@@ -7,6 +7,37 @@ import Testing
 @MainActor
 struct AgentStateStoreTests {
   @Test
+  func piBorderLoaderTransitionsFromIdleThroughWorkingToFinished() {
+    let f = Fixture(kind: .pi)
+    f.bind()
+    f.snapshot("─────────────────────\n\n─────────────────────")
+    #expect(f.entry?.state == .idle)
+    #expect(f.entry?.observation?.inputAvailability == .unknown)
+    f.snapshot("── ⠋ Working ─────────\n\n─────────────────────")
+    #expect(f.entry?.state == .working)
+    f.snapshot("─────────────────────\n\n─────────────────────")
+    #expect(f.entry?.observation?.state == .idle)
+    #expect(f.entry?.state == .working)
+    f.finishHold()
+    #expect(f.entry?.state == .finished)
+    #expect(f.entry?.observation?.state == .idle)
+    #expect(f.entry?.observation?.inputAvailability == .unknown)
+    #expect(f.entry?.recoveryEligible == false)
+  }
+
+  @Test
+  func piSingleBorderDoesNotInventCompletion() {
+    let f = Fixture(kind: .pi)
+    f.bind()
+    f.snapshot("── ⠋ Working ─────────\n\n─────────────────────")
+    #expect(f.entry?.state == .working)
+    f.snapshot("─────────────────────")
+    f.finishHold()
+    #expect(f.entry?.state == .unknown)
+    #expect(f.entry?.observation?.state == .unknown)
+  }
+
+  @Test
   func verifiedBindingStartsUnknownWithoutRecoveryEvidence() {
     let f = Fixture()
     f.bind()
@@ -381,6 +412,30 @@ struct AgentStateStoreTests {
   }
 
   @Test
+  func liveTitlesUpdateAndClearWithoutChangingAcceptedState() {
+    for text in ["✢ Editing…", "API Error: 503\n❯"] {
+      let f = Fixture()
+      f.bind()
+      f.snapshot(text)
+      let accepted = f.entry
+      #expect(f.store.title(for: f.paneID) == nil)
+      f.context.now.addTimeInterval(1)
+      f.store.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests…")))
+      #expect(f.store.title(for: f.paneID) == "✳ Running tests…")
+      #expect(f.entry == accepted)
+      f.store.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Committing…")))
+      #expect(f.store.title(for: f.paneID) == "✳ Committing…")
+      #expect(f.entry == accepted)
+      f.store.onTerminalEvent(.paneInfoChanged(f.paneID, .title(nil)))
+      #expect(f.store.title(for: f.paneID) == nil)
+      #expect(f.entry == accepted)
+      f.store.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Latest activity")))
+      f.store.onTerminalEvent(.paneExited(f.paneID, code: 0, signal: nil))
+      #expect(f.store.title(for: f.paneID) == nil)
+    }
+  }
+
+  @Test
   func titleObservedBeforeBindingSurvivesAndTeardownClearsIt() {
     let f = Fixture()
     f.store.onTerminalEvent(.paneInfoChanged(f.paneID, .title("prebind")))
@@ -403,11 +458,11 @@ struct AgentStateStoreTests {
     private var sequence: UInt64 = 0
     var entry: AgentStateStore.AgentEntry? { store.entries[paneID] }
 
-    init() {
+    init(kind: AgentKind = .claudeCode) {
       let context = self.context
       store = AgentStateStore(focusedPane: { context.focused }, now: { context.now })
       binding = AgentBinding(
-        paneID: paneID, surfaceGeneration: UUID(), kind: .claudeCode,
+        paneID: paneID, surfaceGeneration: UUID(), kind: kind,
         process: .init(processID: 101, processStartedAt: .distantPast, processGroupID: 100), sessionID: nil)
     }
 
@@ -417,7 +472,7 @@ struct AgentStateStoreTests {
     ) -> AgentBinding {
       AgentBinding(
         instanceID: instanceID, paneID: paneID, surfaceGeneration: surfaceGeneration,
-        kind: .claudeCode, process: .init(processID: processID, processStartedAt: .distantPast, processGroupID: 100),
+        kind: binding.kind, process: .init(processID: processID, processStartedAt: .distantPast, processGroupID: 100),
         sessionID: sessionID)
     }
 

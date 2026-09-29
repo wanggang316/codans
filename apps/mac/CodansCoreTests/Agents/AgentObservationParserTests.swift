@@ -69,6 +69,58 @@ struct AgentObservationParserTests {
     }
   }
 
+  @Test(arguments: [
+    "── ⠋ Working ─────────", "── ⠙ Running tests ─────",
+    "──⠹────", "  ── ⠸ Working ── ↑ 3 more ─────  ", "⠼ Working...",
+  ])
+  func piLoaderReportsWorkingWithoutInputAvailability(_ screen: String) {
+    let result = AgentRegistry.definition(for: .pi).terminalParser.parse(screen)
+    #expect(result.state == .working)
+    #expect(result.inputAvailability == .unavailable)
+    #expect(result.evidence.currentErrorBanner == nil)
+  }
+
+  @Test
+  func piLoaderHonorsQuotedTextAndCurrentInteractionBoundaries() {
+    let parser = AgentRegistry.definition(for: .pi).terminalParser
+    for text in ["> ── ⠋ Working ───", "```\n── ⠋ Working ───\n```"] {
+      let result = parser.parse(text)
+      #expect(result.state == .unknown)
+      #expect(result.inputAvailability == .unknown)
+    }
+    let oldInteraction = parser.parse("── ⠋ Working ───\npi> next task\nResponse text\npi>")
+    #expect(oldInteraction.state == .idle)
+    #expect(oldInteraction.inputAvailability == .prompt(.empty))
+    let composer = parser.parse("────────────\npi> an unfinished draft\n────────────")
+    #expect(composer.state == .idle)
+    #expect(composer.inputAvailability == .prompt(.occupied))
+  }
+
+  @Test(arguments: [
+    "─────────────────────\n\n─────────────────────",
+    "Response text\n  ────────────  \n \t \n  ────────────  \n",
+  ])
+  func piEmptyEditorEstablishesIdleWithoutAuthorizingInput(_ screen: String) {
+    let result = AgentRegistry.definition(for: .pi).terminalParser.parse(screen)
+    #expect(result.state == .idle)
+    #expect(result.inputAvailability == .unknown)
+  }
+
+  @Test(arguments: [
+    "────────────", "────────────\n────────────", "──\n\n──",
+    "────────────\nAn unfinished draft\n────────────",
+    "> ────────────\n> \n> ────────────",
+    "```\n────────────\n\n────────────", "~~~\n────────────\n\n────────────\n~~~",
+    "────────────\n```\nquoted text\n```\n────────────",
+    "────────────\n> quoted text\n────────────",
+    "────────────\n\n────────────\nCurrent output",
+  ])
+  func piUnprovenOrQuotedEditorRemainsUnknown(_ screen: String) {
+    let result = AgentRegistry.definition(for: .pi).terminalParser.parse(screen)
+    #expect(result.state == .unknown)
+    #expect(result.inputAvailability == .unknown)
+  }
+
   @Test
   func droidSelectionRowsAreLiveChromeRatherThanQuotedOutput() {
     let parsed = AgentObservationParsers.parser(for: .droid).parse(

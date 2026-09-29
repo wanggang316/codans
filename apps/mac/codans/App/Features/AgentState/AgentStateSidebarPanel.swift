@@ -252,23 +252,14 @@ struct AgentStateSidebarPanel: View {
     }
   }
 
-  /// Empty-state placeholder when no agents are bound — minimal: a
-  /// single icon stacked over a one-line invitation.
+  /// Empty-state invitation when no agents are bound.
   private var emptyState: some View {
-    VStack(spacing: 8) {
-      Image(systemName: "sparkles")
-        .font(.system(size: 14, weight: .regular))
-        .foregroundStyle(.tertiary)
-        // Decorative icon — the adjacent Text carries the meaning, so hide
-        // it from assistive tech (and satisfy `accessibility_label_for_image`).
-        .accessibilityHidden(true)
-      Text("Run an agent and it'll show up here.")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 16)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .accessibilityIdentifier("agentState.sidebarPanel.emptyState")
+    Text("Run an agent and it'll show up here.")
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      .padding(.horizontal, 16)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .accessibilityIdentifier("agentState.sidebarPanel.emptyState")
   }
 }

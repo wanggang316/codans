@@ -1,103 +1,230 @@
-import SwiftUI
+import AppKit
 import CodansCore
+import SwiftUI
+
+/// What the chip row needs to know about the scroll viewport it lives in.
+struct TabBarViewport {
+  /// Width available to the chips inside the track.
+  var width: CGFloat
+  /// Current horizontal content offset of the scroll view.
+  var scrollOffset: CGFloat
+  /// Programmatic scrolling (stack clicks, revealing an added tab).
+  var scroller: TabBarScroller?
+
+  static let unbounded = TabBarViewport(width: 0, scrollOffset: 0, scroller: nil)
+}
+
+/// Binds to the row's underlying `NSScrollView`: publishes its live offset
+/// and scrolls it directly, so programmatic scrolls use AppKit's own
+/// clip-view animation — the mechanism the system tab bar uses. SwiftUI's
+/// `ScrollViewReader` can only scroll to a view id, and SwiftUI geometry
+/// does not observe scrolls AppKit performs, so the offset is read from the
+/// clip view's bounds notifications instead.
+@MainActor
+@Observable
+final class TabBarScroller: NSObject {
+  private(set) var offset: CGFloat = 0
+
+  @ObservationIgnored
+  weak var scrollView: NSScrollView? {
+    didSet {
+      guard scrollView !== oldValue else { return }
+      if let old = oldValue?.contentView {
+        NotificationCenter.default.removeObserver(
+          self, name: NSView.boundsDidChangeNotification, object: old)
+      }
+      guard let clip = scrollView?.contentView else { return }
+      clip.postsBoundsChangedNotifications = true
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(clipBoundsChanged), name: NSView.boundsDidChangeNotification,
+        object: clip)
+      offset = clip.bounds.origin.x
+      installWheelMonitor()
+    }
+  }
+
+  /// Local monitor that handles every wheel / trackpad scroll over the bar;
+  /// see `redirectWheel`.
+  @ObservationIgnored
+  private nonisolated(unsafe) var wheelMonitor: Any?
+
+  // Explicit deinit: this object is `@State`-owned inside a subtree that a
+  // catalog mutation can tear down; the synthesized isolated deinit crashes
+  // there. Selector-based observers unregister themselves on dealloc.
+  deinit {
+    if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+  }
+
+  private func installWheelMonitor() {
+    guard wheelMonitor == nil else { return }
+    // Local monitors are called on the main thread; NSEvent is not
+    // Sendable, so it crosses the isolation assertion through a local.
+    wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+      nonisolated(unsafe) var result: NSEvent? = event
+      MainActor.assumeIsolated {
+        guard let self, let event = result else { return }
+        result = self.redirectWheel(event)
+      }
+      return result
+    }
+  }
+
+  /// Scrolls the bar for a wheel or trackpad scroll over it and consumes the
+  /// event: the dominant axis moves the row horizontally, so a vertical wheel
+  /// scrolls it as in the system tab bar. Line-based wheels move 10 pt per
+  /// line (measured on the system bar); precise deltas (trackpad, including
+  /// its momentum phase) move 1:1. Handled here rather than by the scroll
+  /// view because the chips are drawn over it, not inside it — and it keeps
+  /// a bar whose tabs all fit from rubber-banding.
+  private func redirectWheel(_ event: NSEvent) -> NSEvent? {
+    guard let scrollView, event.window === scrollView.window,
+      scrollView.bounds.contains(scrollView.convert(event.locationInWindow, from: nil))
+    else { return event }
+    let clip = scrollView.contentView
+    let isHorizontal = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+    let raw = isHorizontal ? event.scrollingDeltaX : event.scrollingDeltaY
+    let delta = raw * (event.hasPreciseScrollingDeltas ? 1 : 10)
+    let maxX = max(0, (scrollView.documentView?.frame.width ?? 0) - clip.bounds.width)
+    let x = min(max(clip.bounds.origin.x - delta, 0), maxX)
+    clip.scroll(to: NSPoint(x: x, y: clip.bounds.origin.y))
+    scrollView.reflectScrolledClipView(clip)
+    return nil
+  }
+
+  @objc private func clipBoundsChanged(_ note: Notification) {
+    guard let clip = note.object as? NSClipView else { return }
+    let x = clip.bounds.origin.x
+    if x != offset { offset = x }
+  }
+
+  func scroll(to offset: CGFloat, animated: Bool) {
+    guard let scrollView else { return }
+    let clip = scrollView.contentView
+    let target = NSPoint(x: offset, y: clip.bounds.origin.y)
+    guard abs(target.x - clip.bounds.origin.x) > 0.5 else { return }
+    if animated {
+      // Measured on the system bar: 0.25 s, ease-out cubic.
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.25
+        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.215, 0.61, 0.355, 1)
+        clip.animator().setBoundsOrigin(target)
+      } completionHandler: {
+        MainActor.assumeIsolated { scrollView.reflectScrolledClipView(clip) }
+      }
+    } else {
+      clip.scroll(to: target)
+      scrollView.reflectScrolledClipView(clip)
+    }
+  }
+}
 
 /// Horizontal scroll host for the chip row. Sits between `TabBarView` and
-/// `TabBarRowView` so the container owns the scroll / overflow-shadow
-/// logic while the row keeps its drag-and-divider concerns tight.
+/// `TabBarRowView`: the container owns the track and the scroll view, the
+/// row owns chip layout (including the overflow stacking, which replaces
+/// edge fades — the system bar has none).
+///
+/// The scroll view only holds an empty strip as wide as the scroll range;
+/// the row is drawn over it in viewport coordinates. A stacked chip is
+/// drawn far from its linear slot, and a SwiftUI scroll view skips content
+/// whose layout slot lies outside what it considers visible — after a
+/// window resize the selected tab would vanish. The scroll view still
+/// supplies the offset and AppKit's scroll animation.
 ///
 /// - Scrollbar hidden so the bar reads as a continuous ribbon.
-/// - 16-pt gradient shadows mask content that bleeds off either edge;
-///   they hide once the row is flush with the matching edge so empty
-///   space never fades.
-/// - Selected-tab auto-scrolls into view (center anchor) with a short
-///   easeInOut on `activeTabID` changes, matching the plan.
+/// - Draws the recessed capsule track behind the row, with the scrolling
+///   content inset `trackContentInset` on every side as in the system tab
+///   bar.
+/// - Selecting a tab never scrolls (system behaviour); the row asks the
+///   scroller to move only for stack clicks and newly added tabs.
 struct TabBarOverflowScroll<Content: View>: View {
-  let activeTabID: TabID?
-  @ViewBuilder let content: () -> Content
+  /// Number of chips in the row; sets the scroll range.
+  let itemCount: Int
+  @ViewBuilder let content: (_ viewport: TabBarViewport) -> Content
 
-  @State private var atLeadingEdge: Bool = true
-  @State private var atTrailingEdge: Bool = true
+  @State private var scroller = TabBarScroller()
 
   var body: some View {
-    ScrollViewReader { proxy in
-      GeometryReader { container in
+    GeometryReader { container in
+      let width = container.size.width
+      // The row sits on top of the scroll view, not inside it. Clipped at
+      // the track's outer capsule rather than the inset bounds, so the
+      // selected capsule's drop shadow shows in the inset margin as it
+      // does in the system bar.
+      ZStack(alignment: .leading) {
         ScrollView(.horizontal, showsIndicators: false) {
-          content()
-            .background(
-              GeometryReader { contentGeo in
-                Color.clear
-                  .preference(
-                    key: TabBarOverflowGeometryKey.self,
-                    value: TabBarOverflowGeometry(
-                      contentWidth: contentGeo.size.width,
-                      offset: -contentGeo.frame(in: .named(tabBarOverflowCoordinateSpace)).origin.x
-                    )
-                  )
-              }
-            )
+          Color.clear.frame(
+            width: width + TabStackLayout.maxScrollOffset(count: itemCount, viewportWidth: width),
+            height: container.size.height)
         }
-        .coordinateSpace(name: tabBarOverflowCoordinateSpace)
-        .onPreferenceChange(TabBarOverflowGeometryKey.self) { geo in
-          let maxOffset = max(0, geo.contentWidth - container.size.width)
-          atLeadingEdge = geo.offset <= 0.5
-          atTrailingEdge = geo.offset >= maxOffset - 0.5
-        }
-        .overlay(alignment: .leading) { leadingShadow }
-        .overlay(alignment: .trailing) { trailingShadow }
-        .onChange(of: activeTabID) { _, newID in
-          guard let newID else { return }
-          withAnimation(.easeInOut(duration: 0.15)) {
-            proxy.scrollTo(newID, anchor: .center)
-          }
-        }
+        .background(ScrollViewLocator(scroller: scroller))
+        content(TabBarViewport(width: width, scrollOffset: scroller.offset, scroller: scroller))
+          .frame(width: width, alignment: .leading)
       }
     }
+    .padding(TabBarMetrics.trackContentInset)
+    .background(Capsule().fill(TabBarColors.trackBackground))
+    .clipShape(Capsule())
   }
-
-  @ViewBuilder
-  private var leadingShadow: some View {
-    if !atLeadingEdge {
-      LinearGradient(
-        colors: [Color.black.opacity(0.15), .clear],
-        startPoint: .leading,
-        endPoint: .trailing
-      )
-      .frame(width: 16)
-      .allowsHitTesting(false)
-    }
-  }
-
-  @ViewBuilder
-  private var trailingShadow: some View {
-    if !atTrailingEdge {
-      LinearGradient(
-        colors: [.clear, Color.black.opacity(0.15)],
-        startPoint: .leading,
-        endPoint: .trailing
-      )
-      .frame(width: 16)
-      .allowsHitTesting(false)
-    }
-  }
-
 }
 
-// File-private so the coordinate-space sentinel does not leak into the
-// rest of the module. Lives at top level rather than `static let` because
-// generic types cannot host static stored properties.
-private let tabBarOverflowCoordinateSpace = "TabBarOverflowScroll"
+/// Transparent probe laid out behind the `ScrollView`; finds the AppKit
+/// `NSScrollView` backing it (the one occupying the same rect) and hands it
+/// to the scroller.
+private struct ScrollViewLocator: NSViewRepresentable {
+  let scroller: TabBarScroller
 
-/// Preference payload carrying the chip-row content width + its current
-/// horizontal offset inside the scroll. Combined with the outer container
-/// width, these drive the leading / trailing shadow visibility.
-private struct TabBarOverflowGeometry: Equatable {
-  var contentWidth: CGFloat
-  var offset: CGFloat
-}
+  func makeNSView(context: Context) -> Probe { Probe(scroller: scroller) }
+  func updateNSView(_ nsView: Probe, context: Context) {
+    nsView.scroller = scroller
+    nsView.locate()
+  }
 
-private struct TabBarOverflowGeometryKey: PreferenceKey {
-  static let defaultValue = TabBarOverflowGeometry(contentWidth: 0, offset: 0)
-  static func reduce(value: inout TabBarOverflowGeometry, nextValue: () -> TabBarOverflowGeometry) {
-    value = nextValue()
+  final class Probe: NSView {
+    var scroller: TabBarScroller
+
+    init(scroller: TabBarScroller) {
+      self.scroller = scroller
+      super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    deinit {}
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      locate()
+    }
+
+    override func layout() {
+      super.layout()
+      locate()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func locate() {
+      guard let root = window?.contentView, bounds.width > 0,
+        scroller.scrollView?.window !== window || scroller.scrollView == nil
+      else { return }
+      let target = convert(bounds, to: nil)
+      scroller.scrollView = Self.scrollView(in: root, matching: target)
+    }
+
+    private static func scrollView(in view: NSView, matching rect: NSRect) -> NSScrollView? {
+      if let scroll = view as? NSScrollView {
+        let frame = scroll.convert(scroll.bounds, to: nil)
+        if abs(frame.minX - rect.minX) <= 1, abs(frame.minY - rect.minY) <= 1,
+          abs(frame.width - rect.width) <= 1, abs(frame.height - rect.height) <= 1
+        {
+          return scroll
+        }
+      }
+      for sub in view.subviews {
+        if let found = scrollView(in: sub, matching: rect) { return found }
+      }
+      return nil
+    }
   }
 }

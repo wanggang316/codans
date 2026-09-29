@@ -100,3 +100,47 @@ readers. Extract it only when all existing Agent formats and both transport path
 can share tested IO, budgets, cancellation and effective-profile HOME handling.
 Structured provider events and session-addressed submission require separate
 transport/session integration; no unused source protocol or plugin loader is added.
+
+## Main synchronization: 2026-09-29
+
+Integrate `origin/main` at `b044569b` while preserving the HAN-167 contracts.
+The merge overlaps with HAN-162's Pi loader detection and Agents View activity
+presentation. The working checkout is the isolated HAN-167 worktree.
+
+1. Keep Agent-specific parsing in `AgentTerminalParser` implementations; migrate
+   main's Pi editor-border loader recognition into `PiObservationParser`.
+2. Reconcile state fixtures with verified observation ownership and explicit
+   unknown semantics. Retain main's OSC-title display coverage.
+3. Preserve main's live, fixed-height activity card and unrelated feature updates.
+4. Run focused Core/App integration checks, formatting/lint and conflict-marker
+   checks, then commit the merge and verify the pushed PR's mergeability.
+
+Pi's current empty editor establishes idle execution with unknown input
+availability; it does not grant permission for automatic input. Store fixtures
+retain the real border-loader to empty-editor completion transition, while single
+borders, quoted examples and occupied editors remain unknown.
+
+Integration also fixes two test-only issues introduced by main: the filesystem
+watcher fixture accepts its existing explicit condition closures and captures
+`self` explicitly, and the root new-tab routing test injects the clock required
+by main's insertion-animation delay.
+
+Validation:
+
+- 64 Core tests in two suites passed against the complete merged Core sources.
+- 296 App tests in 27 suites passed, covering state/recovery, input ownership,
+  Handoff, Root routing, activity presentation, command suggestions, terminal
+  links and filesystem watcher registration.
+- The Mac app/test targets and CLI built successfully with Xcode 26.0. CLI
+  `agent wait --help` retains `unknown` and `error` states.
+- Scoped SwiftLint, rename-residue and staged whitespace checks passed.
+- Full `make mac-check` still reports 65 lint violations in files byte-identical
+  to a merge parent: 53 in both parents and 12 in incoming main. Unrelated
+  formatter changes in 212 files were restored before building.
+- No live provider-error retry or GUI interaction was exercised during this
+  synchronization.
+
+Logs: `/private/tmp/han167-pi-merge-core-tests.log`,
+`/private/tmp/han167-main-sync-20260929-app-tests-verified.log`,
+`/private/tmp/han167-main-sync-20260929-cli-build.log`, and
+`/private/tmp/han167-main-sync-20260929-mac-check.log`.

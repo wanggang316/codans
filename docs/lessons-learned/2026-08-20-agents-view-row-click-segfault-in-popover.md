@@ -88,11 +88,16 @@ Two changes, both in the AgentState feature:
 
 ## Rule for the codebase
 
-**A SwiftUI `.popover` must not change size while presented.** If its content
-comes from live state or from an async load, resolve it *before* presenting and
-render from that snapshot. The Agents View card was the only one doing this,
-but any popover that opens on a spinner and then fills in — PR checks, GitHub
-badges, session history — is one async completion away from the same shape.
+**A SwiftUI `.popover` must not change size while presented.** Resolve
+asynchronous session metadata before presentation and render it from a snapshot.
+Live text is safe only within a permanently reserved, bounded slot: it must not
+insert/remove sections or change the window's fitting size.
+
+HAN-162 keeps the session snapshot and deferred focus cascade, while allowing
+OSC activity titles to update in a fixed-height, single-line slot. The divider
+and slot remain present for empty titles, long titles are truncated, and pending
+title delivery is cancelled on dismissal. This replaces the original fully
+frozen activity text without relaxing the no-resize invariant.
 
 ## Verification
 

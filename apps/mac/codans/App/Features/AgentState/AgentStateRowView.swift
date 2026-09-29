@@ -47,8 +47,7 @@ struct AgentStateRowView: View {
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
   /// Latest OSC title of this row's pane, consumed by the hover summary
-  /// card as its "what is the agent doing" activity line. Read once, when
-  /// the card opens, and frozen into that card's snapshot. Defaults to
+  /// card as its live "what is the agent doing" activity line. Defaults to
   /// nil-returning so legacy call sites (popover variant, tests) compile
   /// unchanged and simply show the card without an activity line.
   var paneTitle: () -> String? = { nil }
@@ -73,7 +72,8 @@ struct AgentStateRowView: View {
   /// cleared on hover exit, row tap, and row teardown.
   ///
   /// The card is presented from a *snapshot* (session scan included) so
-  /// its rendered size can never change while the popover is open; see
+  /// session metadata cannot resize the popover. Live activity uses a
+  /// permanently reserved single-line slot; see
   /// `AgentSessionSummarySnapshot` for the crash a resizing popover
   /// causes.
   @State private var cardSnapshot: AgentSessionSummarySnapshot?
@@ -144,7 +144,7 @@ struct AgentStateRowView: View {
     // (the panel lives in the sidebar) and the pointer stays on the row,
     // keeping hover state stable while the card is up.
     .popover(item: $cardSnapshot, arrowEdge: .trailing) { snapshot in
-      AgentSessionSummaryCard(snapshot: snapshot)
+      AgentSessionSummaryCard(snapshot: snapshot, paneTitle: paneTitle)
         // Presentation is exclusively hover-owned (dwell opens, hover
         // exit / row tap dismisses). Without this, AppKit's transient
         // popover machinery consumes the outside click that dismisses
