@@ -14,8 +14,9 @@ final class TerminalScreenshotsUITests: XCTestCase {
 
   @MainActor
   func testTerminalStates() throws {
-    let directory = try XCTUnwrap(
-      env["CODANS_SHOTS"].flatMap { $0.isEmpty ? nil : $0 }, "set TEST_RUNNER_CODANS_SHOTS to record")
+    guard let directory = env["CODANS_SHOTS"], !directory.isEmpty else {
+      throw XCTSkip("set TEST_RUNNER_CODANS_SHOTS to record")
+    }
     let prefix = env["CODANS_SHOTS_PREFIX"] ?? "shot"
     func shot(_ name: String) {
       let png = XCUIScreen.main.screenshot().pngRepresentation
