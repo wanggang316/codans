@@ -17,9 +17,9 @@ import SwiftUI
 /// is drawn by `TabStackLayout` — tabs near the edges compress into stacked
 /// slivers and the selected tab slows / pins — exactly as the system tab
 /// bar does. The row is not itself scrolled: it sits over the scroll view
-/// (see `TabBarOverflowScroll`) and each chip is offset from its linear slot
-/// to its stacked frame for the current scroll offset, then clipped to its
-/// sliver. Z-order rises with the index and the selected
+/// (see `TabBarOverflowScroll`) and `ChipRowLayout` lays each chip out at its
+/// stacked frame for the current scroll offset, clipped to its sliver.
+/// Z-order rises with the index and the selected
 /// chip is on top, so overlapping chips hit-test like the system bar's.
 /// Clicking a sliver scrolls the stack into view; adding a tab reveals it.
 /// Selecting a tab never scrolls.
@@ -137,11 +137,15 @@ struct TabBarRowView: View {
     let rendered = renderedTabs
     let widths = chipWidths(count: rendered.count)
     let stack = stackedFrames(for: rendered)
-    HStack(spacing: TabBarMetrics.chipSpacing) {
+    let slots = chipSlots(widths: widths, stack: stack)
+    ChipRowLayout(slots: slots) {
       ForEach(Array(rendered.enumerated()), id: \.element.id) { index, tab in
         chipView(for: tab, index: index, count: rendered.count, stack: stack)
           .frame(width: widths[index])
-          .modifier(StackPlacement(index: index, stack: stack, isActive: tab.id == selectedID))
+          // A sliver's layout frame is the sliver, so hover and hit testing
+          // stop where the next chip starts; the chip draws past it.
+          .frame(width: slots[index].width, alignment: .leading)
+          .modifier(StackVisibility(isHidden: stack?.frames[index].isHidden ?? false))
           .onHover { hovering in
             if hovering {
               hoveredID = tab.id
@@ -150,9 +154,9 @@ struct TabBarRowView: View {
             }
           }
           // Overlaid and pushed into the inter-chip gap rather than
-          // inserted into the HStack, so the gap stays exactly
+          // laid out as a chip of its own, so the gap stays exactly
           // `chipSpacing` whether or not the separator shows.
-          .overlay(alignment: stack == nil ? .trailing : .leading) {
+          .overlay(alignment: .trailing) {
             if showsDivider(at: index, in: rendered, stack: stack) {
               Rectangle()
                 .fill(TabBarColors.divider)
@@ -160,9 +164,9 @@ struct TabBarRowView: View {
                   width: TabBarMetrics.dividerWidth,
                   height: TabBarMetrics.dividerHeight
                 )
-                // Linear layout: inside the 1-pt gap. Stacked: on the
-                // sliver's trailing edge, where the next chip starts.
-                .offset(x: stack?.frames[index].width ?? TabBarMetrics.chipSpacing)
+                // Just past the chip's trailing edge: inside the 1-pt gap,
+                // or where the next sliver starts in a stack.
+                .offset(x: TabBarMetrics.chipSpacing)
                 .allowsHitTesting(false)
             }
           }
@@ -365,6 +369,19 @@ struct TabBarRowView: View {
     }
     let remainder = available - base * count
     return (0..<count).map { CGFloat(base + ($0 < remainder ? 1 : 0)) }
+  }
+
+  /// Where each chip sits in the row: side by side `chipSpacing` apart, or
+  /// at its stacked frame.
+  private func chipSlots(widths: [CGFloat], stack: StackState?) -> [ChipRowLayout.Slot] {
+    if let stack {
+      return stack.frames.map { .init(x: $0.x, width: $0.isHidden ? 0 : $0.width) }
+    }
+    var x: CGFloat = 0
+    return widths.map { width in
+      defer { x += width + TabBarMetrics.chipSpacing }
+      return .init(x: x, width: width)
+    }
   }
 
   /// Draws a separator between adjacent chips, except next to the selected
@@ -698,24 +715,42 @@ private struct StackState {
   }
 }
 
-/// Moves a chip from its linear slot in the (unscrolled) row to its stacked
-/// frame, hides chips the stack collapses, and orders them the way the
-/// system bar does (later tabs above earlier ones, selected on top).
-private struct StackPlacement: ViewModifier {
-  let index: Int
-  let stack: StackState?
-  let isActive: Bool
+/// Hides chips the stack collapses; ordering is `zOrder`'s job.
+private struct StackVisibility: ViewModifier {
+  let isHidden: Bool
 
   func body(content: Content) -> some View {
-    if let stack {
-      let frame = stack.frames[index]
-      let linearX = CGFloat(index) * (TabStackLayout.chipWidth + TabBarMetrics.chipSpacing)
-      content
-        .offset(x: frame.x - linearX)
-        .opacity(frame.isHidden ? 0 : 1)
-        .allowsHitTesting(!frame.isHidden)
-    } else {
-      content
+    content
+      .opacity(isHidden ? 0 : 1)
+      .allowsHitTesting(!isHidden)
+  }
+}
+
+/// Places each chip at an explicit x. Chips are laid out where they are
+/// drawn — not offset there — so hover, hit testing, the separators and the
+/// drag math all follow the stacked frames.
+private struct ChipRowLayout: Layout {
+  struct Slot: Equatable {
+    var x: CGFloat
+    var width: CGFloat
+  }
+
+  var slots: [Slot]
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let extent = slots.map { $0.x + $0.width }.max() ?? 0
+    return CGSize(
+      width: proposal.width ?? extent, height: proposal.height ?? 0)
+  }
+
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    for (index, subview) in subviews.enumerated() where slots.indices.contains(index) {
+      let slot = slots[index]
+      subview.place(
+        at: CGPoint(x: bounds.minX + slot.x, y: bounds.midY), anchor: .leading,
+        proposal: ProposedViewSize(width: slot.width, height: bounds.height))
     }
   }
 }
@@ -764,9 +799,8 @@ private struct TrailingCapsule: Shape {
   }
 
   func path(in rect: CGRect) -> Path {
-    // Settled: clip nothing. The shape is laid out on the chip's linear
-    // slot while a stacked chip is drawn far from it, so any finite margin
-    // around the slot would cut the stacked chip away.
+    // Settled: clip nothing. A stacked sliver draws its chip past its own
+    // (sliver-wide) frame, so a clip to the frame would cut it away.
     guard fraction < 1 else { return Path(rect.insetBy(dx: -100_000, dy: -100_000)) }
     let width = rect.width * max(fraction, 0)
     return Capsule().path(
