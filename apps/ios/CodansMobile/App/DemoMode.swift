@@ -78,6 +78,7 @@ enum DemoMode {
         save: { payload, date in PairedGateway(payload: payload, pairedAt: date) },
         remove: { _ in },
         setActive: { _ in },
+        setRelay: { _, _ in },
         credential: { _ in RemoteTLS.PSKCredential(identity: "demo", key: Data(repeating: 1, count: 32)) }
       )
       dependencies.networkPath = NetworkPathClient(changes: { AsyncStream { _ in } })
@@ -181,6 +182,8 @@ enum DemoMode {
               protocolMinor: protocolMinor),
             events: events)
         },
+        // The demo gateway has no relay.
+        connectRelay: { gateway, _ in throw RemoteFailure.macNotFound(gateway.displayName) },
         disconnect: {},
         readPane: { paneID, _ in DemoFixtures.text(for: paneID) },
         sendInput: { _, _ in },

@@ -29,6 +29,11 @@ struct ConnectionHealth: Equatable {
   /// Connected to a Mac too old for the live terminal (protocol minor 1):
   /// browsing and the text fallback work, the terminal asks for an update.
   var needsMacUpdate: Bool
+  /// The live session runs through the relay rather than the LAN.
+  var isRelayed = false
+  /// The pairing knows the Mac's relay, so "not found on this network" is
+  /// not the end of the search.
+  var hasRelay = false
 
   var isPaired: Bool { macName != nil }
   var isLive: Bool { phase == .live }
@@ -62,7 +67,7 @@ struct ConnectionHealth: Equatable {
     case .discovering: return "Looking for \(name)…"
     case .handshaking: return "Connecting to \(name)…"
     case .syncing: return "Syncing with \(name)…"
-    case .live: return "Connected to \(name)"
+    case .live: return isRelayed ? "Connected to \(name) via relay" : "Connected to \(name)"
     case .reconnecting(let attempt, _): return "Reconnecting (attempt \(attempt))"
     case .offline: return "Offline"
     case .failed(let failure):
@@ -89,6 +94,13 @@ struct ConnectionHealth: Equatable {
   /// The usual reasons a paired Mac cannot be found, as a checklist.
   var checklist: [String] {
     guard failure?.kind == .macNotFound else { return [] }
+    if hasRelay {
+      return [
+        "\(macName ?? "Your Mac") is awake and online",
+        "Codans is running with Remote Access on",
+        "Access from outside this network is allowed in Remote Access",
+      ]
+    }
     return [
       "\(macName ?? "Your Mac") is awake",
       "Codans is running with Remote Access on",
@@ -106,7 +118,7 @@ struct ConnectionHealth: Equatable {
     case .discovering: return "Looking for Mac…"
     case .handshaking: return "Connecting…"
     case .syncing: return "Syncing…"
-    case .live: return "Connected"
+    case .live: return isRelayed ? "Connected via relay" : "Connected"
     // The banner under the bar carries the attempt and countdown.
     case .reconnecting: return "Reconnecting…"
     case .offline: return "Offline"

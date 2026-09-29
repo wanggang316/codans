@@ -72,6 +72,28 @@ nonisolated struct RemoteFailure: Error, Equatable, Sendable {
     RemoteFailure(.macNotFound, "Couldn't find \(name) on this network.")
   }
 
+  /// What a relay refusal means, from the HTTP status it answered with;
+  /// nil when the relay refused nothing (the failure lies elsewhere).
+  static func relayRefusal(_ status: Int?, gateway: PairedGateway) -> RemoteFailure? {
+    switch status {
+    case nil:
+      return nil
+    case 404:
+      return RemoteFailure(
+        .macNotFound,
+        "\(gateway.displayName) is offline, or it doesn't allow access from outside its network.")
+    case 403:
+      // The relay no longer lists this device's token: removed on the Mac,
+      // or outside access was turned off and on before it re-registered.
+      // Counted like a TLS refusal.
+      return .refused
+    case 429:
+      return RemoteFailure(.other, "The relay is busy. Trying again shortly.")
+    default:
+      return RemoteFailure(.other, "The relay could not connect to \(gateway.displayName).")
+    }
+  }
+
   /// Classifies any error thrown by the remote stack.
   init(_ error: Error) {
     switch error {

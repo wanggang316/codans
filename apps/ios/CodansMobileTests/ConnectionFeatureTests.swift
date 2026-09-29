@@ -154,6 +154,98 @@ struct ConnectionFeatureTests {
     await Self.endSession(store)
   }
 
+  // MARK: - Relay
+
+  @Test
+  func notFoundOnTheLANFallsBackToTheRelay() async {
+    let relay = RemoteRelayCoordinates(url: "wss://relay.example.dev", macID: "mac")
+    var state = Self.pairedState()
+    state.gateways[0].relay = relay
+    let (events, _) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    var relayedInfo = Fixtures.liveInfo
+    relayedInfo.route = .relay
+    relayedInfo.relay = relay
+    let relayed = relayedInfo
+    let store = Self.store(state) {
+      $0.remoteClient.discover = { _ in throw RemoteFailure.macNotFound("Studio") }
+      $0.remoteClient.connectRelay = { gateway, credential in
+        #expect(gateway.relay == relay)
+        #expect(credential == Fixtures.payload.credential)
+        return RemoteSession(info: relayed, events: events)
+      }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = relayed
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+    }
+    #expect(store.state.health.isRelayed)
+    await Self.endSession(store)
+  }
+
+  @Test
+  func withoutARelayNotFoundStaysNotFound() async {
+    let store = Self.store {
+      $0.remoteClient.discover = { _ in throw RemoteFailure.macNotFound("Studio") }
+    }
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.sessionEnded) {
+      $0.phase = .reconnecting(attempt: 1, nextAttemptAt: Fixtures.pairedAt.addingTimeInterval(0.5))
+      $0.failedAttempts = 1
+      $0.lastFailure = .macNotFound("Studio")
+    }
+    await Self.endSession(store)
+  }
+
+  @Test
+  func aLANHandshakeRecordsTheRelayTheMacReports() async {
+    let relay = RemoteRelayCoordinates(url: "wss://relay.example.dev", macID: "mac")
+    let (events, _) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    var info = Fixtures.liveInfo
+    info.relay = relay
+    let reported = info
+    let saved = LockIsolated<[RemoteRelayCoordinates?]>([])
+    let store = Self.store {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in RemoteSession(info: reported, events: events) }
+      $0.pairingStore.setRelay = { id, relay in
+        #expect(id == Fixtures.deviceID)
+        saved.withValue { $0.append(relay) }
+      }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = reported
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+      $0.gateways[0].relay = relay
+    }
+    // The store write is a fire-and-forget effect.
+    for _ in 0..<100 where saved.value.isEmpty { await Task.yield() }
+    #expect(saved.value == [relay])
+    #expect(store.state.health.hasRelay)
+    await Self.endSession(store)
+  }
+
   /// Each phase stays within its own timeout, but together they pass the
   /// attempt deadline.
   @Test

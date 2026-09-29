@@ -14,6 +14,16 @@ nonisolated struct RemoteSessionInfo: Equatable, Sendable {
   /// `system.hello`'s protocol minor. Minor 2 brings the live terminal
   /// (`pane.attachStream`, `terminal.sendEvents`) and tab/pane management.
   var protocolMinor: Int = 1
+  /// How this session reached the Mac.
+  var route: Route = .lan
+  /// Where the Mac says it can be reached from outside the LAN; nil when
+  /// it does not allow that (or predates the relay).
+  var relay: RemoteRelayCoordinates?
+
+  enum Route: Equatable, Sendable {
+    case lan
+    case relay
+  }
 
   /// Whether the Mac serves the live terminal and typed key events.
   var supportsLiveTerminal: Bool { Self.supportsLiveTerminal(protocolMinor: protocolMinor) }
@@ -42,6 +52,12 @@ nonisolated struct RemoteClient: Sendable {
   var connect:
     @Sendable (_ gateway: PairedGateway, _ endpoints: [NWEndpoint], _ credential: RemoteTLS.PSKCredential)
       async throws -> RemoteSession
+  /// Like `connect`, but through the relay in `gateway.relay`: for when
+  /// Bonjour finds nothing. Refusals the relay answers with are mapped to
+  /// what they mean ("Mac offline", "not allowed") rather than surfacing as
+  /// a failed TLS handshake.
+  var connectRelay:
+    @Sendable (_ gateway: PairedGateway, _ credential: RemoteTLS.PSKCredential) async throws -> RemoteSession
   /// Closes both connections. Idempotent.
   var disconnect: @Sendable () async -> Void
   /// `pane.read` with `tail` lines of plain text.
@@ -99,8 +115,12 @@ nonisolated extension RemoteClient: DependencyKey {
   static let liveValue: RemoteClient = {
     let sessions = LiveRemoteSessions()
     return RemoteClient(
-      discover: { try await GatewayDiscovery.resolve($0) },
+      // With a relay to fall back on, Bonjour gets a short look first.
+      discover: { gateway in
+        try await GatewayDiscovery.resolve(gateway, timeout: gateway.relay == nil ? .seconds(8) : .milliseconds(1500))
+      },
       connect: { try await sessions.connect($0, endpoints: $1, credential: $2) },
+      connectRelay: { try await sessions.connectRelay($0, credential: $1) },
       disconnect: { await sessions.disconnect() },
       readPane: { paneID, tail in try await retryingOnce { try await sessions.readPane(paneID, tail: tail) } },
       sendInput: { try await sessions.sendInput($0, text: $1) },
@@ -122,6 +142,7 @@ nonisolated extension RemoteClient: DependencyKey {
   static let testValue = RemoteClient(
     discover: unimplemented("RemoteClient.discover"),
     connect: unimplemented("RemoteClient.connect"),
+    connectRelay: unimplemented("RemoteClient.connectRelay"),
     disconnect: unimplemented("RemoteClient.disconnect"),
     readPane: unimplemented("RemoteClient.readPane"),
     sendInput: unimplemented("RemoteClient.sendInput"),
@@ -178,11 +199,37 @@ private actor LiveRemoteSessions {
   /// Bumped by every `disconnect`, so a stream connection that finishes
   /// opening after its session was replaced is closed, not kept.
   private var sessionGeneration = 0
+  /// The loopback bridge while the session runs through the relay; every
+  /// connection of the session (control, events, streams) dials it.
+  private var relayBridge: RelayLoopbackBridge?
 
   func connect(
     _ gateway: PairedGateway, endpoints candidates: [NWEndpoint], credential: RemoteTLS.PSKCredential
   ) async throws -> RemoteSession {
     await disconnect()
+    return try await open(gateway, endpoints: candidates, credential: credential, route: .lan)
+  }
+
+  func connectRelay(_ gateway: PairedGateway, credential: RemoteTLS.PSKCredential) async throws -> RemoteSession {
+    await disconnect()
+    guard let relay = gateway.relay else { throw RemoteFailure.macNotFound(gateway.displayName) }
+    let bridge = RelayLoopbackBridge(relay: relay, token: RemoteRelay.phoneToken(psk: credential.key))
+    do {
+      let endpoint = try await bridge.start()
+      relayBridge = bridge
+      return try await open(gateway, endpoints: [endpoint], credential: credential, route: .relay)
+    } catch {
+      let refusal = bridge.lastRefusal
+      bridge.stop()
+      if relayBridge === bridge { relayBridge = nil }
+      throw RemoteFailure.relayRefusal(refusal, gateway: gateway) ?? error
+    }
+  }
+
+  private func open(
+    _ gateway: PairedGateway, endpoints candidates: [NWEndpoint], credential: RemoteTLS.PSKCredential,
+    route: RemoteSessionInfo.Route
+  ) async throws -> RemoteSession {
     let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
     // A stale advertisement never answers, so with several candidates each
     // gets a shorter handshake budget before moving on to the next.
@@ -224,7 +271,9 @@ private actor LiveRemoteSessions {
       info: RemoteSessionInfo(
         serverVersion: serverHello?.serverVersion ?? "",
         permission: serverHello?.remotePermission,
-        protocolMinor: serverHello?.protocolMinor ?? 1
+        protocolMinor: serverHello?.protocolMinor ?? 1,
+        route: route,
+        relay: serverHello?.relay
       ),
       events: stream
     )
@@ -238,10 +287,13 @@ private actor LiveRemoteSessions {
     self.events = nil
     self.streamTarget = nil
     self.streams = [:]
+    let bridge = relayBridge
+    relayBridge = nil
     sessionGeneration += 1
     await control?.close()
     await events?.close()
     for stream in streams { await stream.close() }
+    bridge?.stop()
   }
 
   func attachStream(_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error> {

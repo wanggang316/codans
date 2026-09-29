@@ -1,3 +1,4 @@
+import CodansIPC
 import CodansRemote
 import Foundation
 
@@ -14,15 +15,23 @@ nonisolated struct PairedGateway: Codable, Equatable, Hashable, Identifiable, Se
   let channel: String
   let pskIdentity: String
   let pairedAt: Date
+  /// Where to reach the Mac from outside the LAN, when it allows that:
+  /// from the pairing code, or learned at a later handshake. Absent in
+  /// records stored before the relay existed.
+  var relay: RemoteRelayCoordinates?
 
   var id: UUID { deviceID }
 
-  init(deviceID: UUID, serviceName: String, channel: String, pskIdentity: String, pairedAt: Date) {
+  init(
+    deviceID: UUID, serviceName: String, channel: String, pskIdentity: String, pairedAt: Date,
+    relay: RemoteRelayCoordinates? = nil
+  ) {
     self.deviceID = deviceID
     self.serviceName = serviceName
     self.channel = channel
     self.pskIdentity = pskIdentity
     self.pairedAt = pairedAt
+    self.relay = relay
   }
 
   init(payload: PairingPayload, pairedAt: Date) {
@@ -31,7 +40,8 @@ nonisolated struct PairedGateway: Codable, Equatable, Hashable, Identifiable, Se
       serviceName: payload.serviceName,
       channel: payload.channel,
       pskIdentity: payload.pskIdentity,
-      pairedAt: pairedAt
+      pairedAt: pairedAt,
+      relay: payload.relay
     )
   }
 

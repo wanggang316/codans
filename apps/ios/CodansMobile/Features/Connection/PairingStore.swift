@@ -1,3 +1,4 @@
+import CodansIPC
 import CodansRemote
 import ComposableArchitecture
 import Foundation
@@ -19,6 +20,9 @@ nonisolated struct PairingStore: Sendable {
   /// Deletes the key first, then the record.
   var remove: @Sendable (_ deviceID: UUID) -> Void
   var setActive: @Sendable (_ deviceID: UUID?) -> Void
+  /// Records where the Mac can be reached from outside the LAN, or that it
+  /// no longer can (nil). A no-op for an unknown pairing.
+  var setRelay: @Sendable (_ deviceID: UUID, _ relay: RemoteRelayCoordinates?) -> Void
   /// The stored key for `gateway`, or nil when the Keychain no longer has it.
   var credential: @Sendable (_ gateway: PairedGateway) -> RemoteTLS.PSKCredential?
 }
@@ -31,6 +35,7 @@ nonisolated extension PairingStore: DependencyKey {
       save: { try live.save($0, at: $1) },
       remove: { live.remove($0) },
       setActive: { live.setActive($0) },
+      setRelay: { live.setRelay($0, $1) },
       credential: { live.credential(for: $0) }
     )
   }()
@@ -40,6 +45,7 @@ nonisolated extension PairingStore: DependencyKey {
     save: unimplemented("PairingStore.save"),
     remove: unimplemented("PairingStore.remove"),
     setActive: unimplemented("PairingStore.setActive"),
+    setRelay: unimplemented("PairingStore.setRelay"),
     credential: unimplemented("PairingStore.credential", placeholder: nil)
   )
 
@@ -67,6 +73,12 @@ nonisolated extension PairingStore: DependencyKey {
         }
       },
       setActive: { id in state.withValue { $0.snapshot.activeID = id } },
+      setRelay: { id, relay in
+        state.withValue {
+          guard let index = $0.snapshot.gateways.firstIndex(where: { $0.deviceID == id }) else { return }
+          $0.snapshot.gateways[index].relay = relay
+        }
+      },
       credential: { gateway in state.value.keys[gateway.deviceID] }
     )
   }
@@ -135,6 +147,15 @@ private nonisolated final class LivePairingStore: Sendable {
       } else {
         defaults.removeObject(forKey: Self.activeKey)
       }
+    }
+  }
+
+  func setRelay(_ deviceID: UUID, _ relay: RemoteRelayCoordinates?) {
+    lock.withLock {
+      var gateways = storedGateways()
+      guard let index = gateways.firstIndex(where: { $0.deviceID == deviceID }) else { return }
+      gateways[index].relay = relay
+      store(gateways)
     }
   }
 

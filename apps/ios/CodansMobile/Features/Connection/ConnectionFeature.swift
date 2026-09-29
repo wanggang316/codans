@@ -108,7 +108,9 @@ struct ConnectionFeature {
         // Kept while reconnecting to an old Mac, so the notice does not
         // flicker away with every dropped connection.
         needsMacUpdate: session.map { !$0.supportsLiveTerminal }
-          ?? (lastSessionPermission != nil && !supportsLiveTerminal)
+          ?? (lastSessionPermission != nil && !supportsLiveTerminal),
+        isRelayed: session?.route == .relay,
+        hasRelay: activeGateway?.relay != nil
       )
     }
   }
@@ -295,8 +297,19 @@ struct ConnectionFeature {
         state.lastSessionPermission = info.permission
         state.refusals = 0
         state.lastContact = now
-        Self.logger.info("handshake done (server \(info.serverVersion, privacy: .public))")
-        return enter(.syncing, &state)
+        Self.logger.info(
+          "handshake done (server \(info.serverVersion, privacy: .public), via \(info.route == .relay ? "relay" : "LAN", privacy: .public))"
+        )
+        let syncing = enter(.syncing, &state)
+        // The Mac tells the phone where its relay is (or that there is none
+        // any more) at every handshake; a LAN session is the authority,
+        // since a relay session only exists because the phone knew it.
+        guard let id = state.activeGateway?.id, info.route == .lan,
+          let index = state.gateways.firstIndex(where: { $0.id == id }), state.gateways[index].relay != info.relay
+        else { return syncing }
+        state.gateways[index].relay = info.relay
+        let relay = info.relay
+        return .merge(syncing, .run { [pairingStore] _ in pairingStore.setRelay(id, relay) })
 
       case .eventReceived(let frame):
         state.lastContact = now
@@ -442,9 +455,17 @@ struct ConnectionFeature {
         await send(.sessionEnded(.missingKey))
         return
       }
-      let endpoints = try await remote.discover(gateway)
-      await send(.gatewayResolved)
-      let session = try await remote.connect(gateway, endpoints, key)
+      let session: RemoteSession
+      do {
+        let endpoints = try await remote.discover(gateway)
+        await send(.gatewayResolved)
+        session = try await remote.connect(gateway, endpoints, key)
+      } catch let failure as RemoteFailure where Self.fallsBackToRelay(failure, gateway: gateway) {
+        // Not on the Mac's network (or no Local Network access): go
+        // through the relay instead. The TLS-PSK session is the same.
+        await send(.gatewayResolved)
+        session = try await remote.connectRelay(gateway, key)
+      }
       await send(.sessionOpened(session.info))
       try await Self.relay(session.events, clock: clock, send: send)
       await send(.sessionEnded(.streamEnded))
@@ -458,6 +479,12 @@ struct ConnectionFeature {
     }
     .cancellable(id: CancelID.deadline, cancelInFlight: true)
     return .merge(.cancel(id: CancelID.retry), enter(.discovering, &state), deadline, attempt)
+  }
+
+  /// Bonjour found nothing (or may not look): the relay can still reach
+  /// the Mac when the pairing knows it.
+  nonisolated static func fallsBackToRelay(_ failure: RemoteFailure, gateway: PairedGateway) -> Bool {
+    gateway.relay != nil && (failure.kind == .macNotFound || failure.kind == .localNetworkDenied)
   }
 
   /// Moves to a connecting phase and arms its timeout.
