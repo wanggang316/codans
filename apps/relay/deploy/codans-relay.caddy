@@ -1,0 +1,11 @@
+# /etc/caddy/conf.d/codans-relay.caddy
+# WebSocket upgrades pass through reverse_proxy as-is. Caddy's access log
+# redacts the Authorization header by default, so bearer tokens stay out of it.
+relay.codans.dev {
+    reverse_proxy 127.0.0.1:3050 {
+        # Keep live relay sessions open across `systemctl reload caddy`
+        # (triggered by any project's snippet change) instead of cutting them.
+        stream_close_delay 5m
+    }
+    log { output file /var/log/caddy/codans-relay.log { roll_size 50mb roll_keep 5 } }
+}
