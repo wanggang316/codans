@@ -13,7 +13,7 @@
 
 1. **生命周期**——创建（流式 file-copy）、发现 CLI 创建的 worktree、archive/unarchive 软隐藏、安全/强制删除、prune、删除前终端安全检查。
 2. **侧边栏排序**——每个 Project 下 worktree 行的四段排序模型。
-3. **状态栏**——titlebar 中段按优先级切换形态的状态槽。
+3. **状态栏**——titlebar 中段按优先级切换形态的状态槽，已拆为独立文档 [状态栏](status-bar.md)。
 4. **分支切换器与 Git 查看入口**——header popover 提供分支列表、搜索与应用内 `git switch`；Git Viewer 可打开内置 Diff 窗口或配置的外部客户端。
 
 四块在代码里落在不同 feature 目录，但都围绕 `Worktree`/`Project` 模型与 `HierarchyManager`/`HierarchyClient` 这条单一写入面展开，故合并为一份设计。
@@ -202,65 +202,7 @@ main → pinned → pending → unpinned
 
 ## 状态栏
 
-### 概览
-
-独立 TCA feature **`StatusBarFeature`**，作 `RootFeature` 直接子 scope。它只持一个字段 `toast: StatusToast?`（承载 inProgress / success / warning 三种瞬态）。**PR 形态与 motivational 形态是视图层派生**（从 `selection` + `gitHub.snapshots[wt]` + `TimelineView` 直接读），不进 feature state——它们是已有数据的纯函数，进 state 只会多一条必须手动维护同步的冗余轴。
-
-中段 SwiftUI 组件 `StatusBarView` 用优先级选择当前形态：
-
-```
-toast != nil                  →  toast 形态 (P0 inProgress / P1 success|warning)
-toast == nil && 有活跃 PR     →  PR 形态 (P2)
-否则                          →  motivational (P3)
-```
-
-**关键 trade-off：只把 toast 做成 reducer-managed state，派生态做成 view-level projection**，换取最小状态面。否则把五种形态全 codegen 进一个大 enum、由 reducer 每次 `gitHub.snapshots` 变动 dispatch action，会让 RootFeature 与 TestStore 爆炸式膨胀。
-
-状态栏负责 titlebar 中段，分支选择与编辑器入口由各自 feature 管理。
-
-### 不变量与契约
-
-- **toast 槽是唯一的 reducer 状态**；其生命周期（push / auto-clear / 覆盖）在 reducer，PR/motivational 不走 action。
-- **`StatusToast`（`CodansCore/StatusBar/`）= `enum { inProgress(String); success(String); warning(String) }`**，由 `RootFeature` 构造并发送给状态栏。**无 `error` case**：致命错误走 sheet/banner，不占这块槽。
-- **auto-clear 窗口**：`success` 3s、`warning` 8s、`inProgress` 不自动清（由发射方显式结束）。
-- **sequence 令牌**：`State.sequence: UInt64` 单调递增。push 时 `&+= 1` 并取消在飞定时器；定时器 fire `.cleared(seq)` 时仅当 `seq == state.sequence` 才清。这比 `.cancellable(id:)` 更稳——`Task.sleep` 已 resume 之后 `cancelInFlight` 的竞态窗口仍在，sequence 比对能丢弃陈旧 timer。
-- **toast 发射经 RootFeature 路由既有 child action**（`coreReducer` 里 pattern-match `.editor(.openSucceeded/.openFailed)`、`.gitHub(.mergeCompleted/.markReadyCompleted/…Completed)` 等 → `.send(.statusBar(.push(...)))`）。脚本与 agent 启动失败也经 RootFeature 映射为 warning。**不**走 `StatusBusClient` 侧信道（出了 reducer 系统、TestStore 看不见、与"delegate up, action down"风格矛盾），也**不**让 child 直发 sibling action。
-- **PR 数据与 sidebar 同源**：PR 形态读 `gitHub.snapshots[currentWorktreeID]`，与 sidebar 的 `WorktreeGitHubBadge` 是**同一字段**，保证 titlebar 与 sidebar 永远同步——没有第二条 status-bar 专属 PR 通路。**不**读 `GitHubSnapshotCache` 文件流（缓存只反映上次成功批量 fetch，落后于会话内乐观刷新）。"活跃 PR"= snapshot 存在、`state != CLOSED`、`number` 非空。
-- **scope 投影是纯函数** `(RootState) -> StatusBarViewModel`，`StatusBarViewModel` 只含渲染所需小 value type 字段（`toast` / `pr` / `isLoadingPR`），明确 Equatable 所有字段（避免比较过宽导致不刷新），让 view 不 import RootFeature 完整 state 面。
-
-### 形态细节
-
-**toast 形态**：inProgress（spinner）/ success（✓）/ warning（▲）+ 次级色文本。
-
-**PR 形态**：`#编号` 徽章（颜色复用 `PullRequestStateColors`：open 绿/draft 灰/merged 紫）+ checks 色环 + 简述。简述优先级：merge-ready 阻塞原因 > checks 汇总 > `(Drafted)` > PR 标题。点击复用既有 `PullRequestPopover`（不重写）。按住 ⌘ 时简述临时换成 `Open on GitHub ⌘↵`，`⌘+click` 直接开 `gh` URL（构造时断言 `scheme == "https"`，失败降级不响应）。
-- **checks 色环** `ChecksRollupRing`（14×14pt 四色环图）：复用既有 `PullRequestBadge.CheckRollup.from(checks:)` 汇总成 `{passing, failing, pending, neutral}`（neutral 吸收 skipped），颜色取自既有 `CheckRollupColor`。`total == 0` 不渲染，merged PR 不渲染。不引入任何新颜色/数据模型；sidebar 日后想换 ring 可直接复用（意外 bonus，非设计目标）。
-- **⌘ 监听** `CommandKeyObserver`（`@Observable`，`NSEvent.addLocalMonitorForEvents(.flagsChanged)`）：只监听 local events（本进程 focus 时），无需 Accessibility 权限；`CodansApp` 启动时实例化一次经 `.environment` 注入。
-
-**motivational 形态**：按本地时间显示时段图标（6–12 日出、12–17 日间、17–21 日落、其余夜间）、本地化短时间和 Command Palette 提示，`TimelineView(.everyMinute)` 每分钟刷新。快捷键文案读取 `resolvedShortcuts[.commandPaletteToggle]`，无有效绑定时使用 `ShortcutSchema` 默认值；菜单通过共享快捷键解析器绑定。
-
-### 优先级状态机
-
-```
-                    Reducer-managed (toast 槽)
-     toast=nil ──push(inProgress m)──►  .inProgress(m)
-         ▲                                 │   ▲ push(inProgress m') 替换
-         │       push(success/warning m)   │
-         │                                 ▼
-         │              .success(m) / .warning(m)
-         │   .cleared(seq) after 3s/8s     │
-         └─────────────────────────────────┘
-
-                    View-level 派生（无 reducer 状态）
-       toast == nil
-          ├── snapshots[wt] is .open|.merged（非 closed）──► PR 形态
-          └── 否则                                       ──► motivational
-```
-
-### 窄窗口与 toolbar 集成
-
-中段用 `ViewThatFits(in: .horizontal)` 按 Full → Compact → `Color.clear` 选择可容纳的内容；不足以容纳 compact 时折叠为零尺寸。形态切换使用 `easeInOut(0.2)` 与 `.opacity`。
-
-状态栏展示状态仅驻留内存，不写入 catalog 或 settings。
+titlebar 中段的状态槽（Toast / Activity / PR / motivational）及各模块接入规则见 [状态栏](status-bar.md)。
 
 ---
 
@@ -310,7 +252,8 @@ Show Changes 打开目标 Worktree 的[内置 Diff 窗口](git-diff-viewer.md)�
 CodansCore/
   Worktree.swift                    archived / archivedAt / isPinned；无 sortIndex
   Git/GitModels.swift               BranchRef(shortName) / BranchInventory / BranchSwitchTarget
-  StatusBar/StatusToast.swift       inProgress / success / warning
+  StatusBar/StatusToast.swift       success / warning（结果）
+  StatusBar/StatusActivity.swift    运行中的工作（id / title / detail / progress）
   Shortcuts/ShortcutSchema.swift     命令与默认快捷键
   Settings/GitProjectSettings.swift create/archive/deleteScript
 
@@ -345,10 +288,11 @@ codans/App/Features/WorktreeHeader/
   WorktreeHeaderInfoLabel.swift     2 行布局 + popover host
 
 codans/App/Features/StatusBar/
-  StatusBarFeature / StatusBarView
-  Views/{StatusToastView, StatusPullRequestView, StatusMotivationalView, ChecksRollupRing}
+  StatusBarFeature / StatusBarView / StatusBarRootBindings / StatusActivityIDs
+  Views/{StatusToastView, StatusActivityView, StatusActivityRing, StatusPullRequestView,
+         StatusMotivationalView, ChecksRollupRing, WorktreeProcessesView}
 
-codans/App/Features/Root/RootFeature.swift   statusBar scope + toast 路由分支；
+codans/App/Features/Root/RootFeature.swift   statusBar scope（StatusBarRootBindings 挂在 body 最前）；
                                              WorktreeHeadWatcher events → BranchSwitcher
 codans/App/Commands/MainWindowCommands.swift 使用共享快捷键解析器
 
@@ -368,8 +312,7 @@ apps/mac/scripts/{verify,embed}-git-wt.sh
 - **段内顺序载体：`sortIndex` 字段 / settings.json sidebar-order 表。** 均否决：`sortIndex` 要 schema 变更且 pin/unpin 跨段时需重算；独立 order 表产生第二事实来源、需要 catalog↔order 偏差补偿函数（正是 Context 想消除的复杂度）。catalog 数组下标承担，与 `reorderProjects` 对称。
 - **pending 态归属：catalog ghost row / `HierarchyManager` `@Observable` 字段。** 均否决：ghost row 破坏 catalog↔disk 不变量、逼每个 catalog 消费方学会跳过 pending 行、并要求 `WorktreeID` 提前分配；`HierarchyManager` 字段违反"manager 是 TCA-free Runtime"且 pending 由 action 驱动（Retry/Discard/Cancel）。sidebar reducer 内存最简。
 - **跨段拖拽即触发 isPinned 变更。** 否决：意图歧义（拖到 pinned 第三位是想 pin 后落第三、还是测试落点？）+ `onMove` 跨段计算复杂度跳升。先用 Pin/Unpin 菜单项把意图显式化。
-- **状态栏挂 `WorktreeHeaderFeature` / `RootFeature` 顶层。** 均否决：Header mixing toast 让两件事 action enum 混杂、bell 测试被迫断言无 toast；RootFeature 顶层加字段使 toast 的 timer effect 更难测、牵动大量类型推断。独立 `StatusBarFeature` 迁移点单一。
-- **PR 数据读 `GitHubSnapshotCache` 文件流。** 否决：缓存只反映上次成功批量 fetch，落后于会话内乐观刷新，会让 titlebar 滞后于 sidebar。直接读 feature state 同源。
+- 状态栏的备选方案见 [状态栏](status-bar.md#备选方案)。
 - **分支 popover 状态塞 `WorktreeHeaderFeature`；`git branch -a`；两遍 `for-each-ref`。** 均否决，见 §分支切换器 各节。
 
 ## 风险
@@ -386,8 +329,6 @@ apps/mac/scripts/{verify,embed}-git-wt.sh
 | pending 行堆叠失控。 | 每 project 软上限 8 条；第 9 次提交 sheet banner 拒绝。 |
 | `for-each-ref` 格式漂移 / `--track` 歧义。 | 钉文档化 `%(…)` token；caller 传全限定 `origin/x`，UI 永不传歧义输入。 |
 | `WorktreeHeadWatcher` 200ms debounce 让 spinner 多停 ~200ms。 | 可接受；更快 reset 需双重事实来源。 |
-| 窄窗口无法容纳完整状态。 | `ViewThatFits` 依次选择 compact 与零尺寸内容。 |
-| `EditorFeature.openFailed(reason:)` 未脱敏可能带路径。 | toast 路由的 `shortMessage` 只取第一行 + 截断 80 字符。 |
 | `CommandKeyObserver` 未停止泄漏 monitor。 | `start()`/`stop()` 绑 `CodansApp` onAppear/onDisappear，weak-self capture。 |
 
 ## 参考

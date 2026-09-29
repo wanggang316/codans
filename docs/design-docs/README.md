@@ -38,5 +38,6 @@ Use [_template.md](_template.md) as a starting point.
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、版本读取与恢复、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
 - [Workspace](workspace.md) — 跨多仓库的 Project：根目录即侧栏上的 workspace 行、子仓库 checkout 为真正的 Worktree 行；`.codans/workspace.json` 定成员、git 定活体事实；reconcile 在 git 探测前短路；创建 / 添加 / 移除经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚）；PR 按成员仓库取数、workspace 行聚合
-- [Worktree](worktree.md) — Worktree 全生命周期（`git-wt` 创建/发现/archive/remove/prune）+ 四段侧边栏排序 + titlebar 状态栏 + header 分支切换器
+- [Status Bar](status-bar.md) — titlebar 中段状态槽：Toast（结果）/ Activity（可并发、可取消的运行中工作）/ PR / motivational 优先级；各模块接入规则与 `StatusBarRootBindings` 集中映射
+- [Worktree](worktree.md) — Worktree 全生命周期（`git-wt` 创建/发现/archive/remove/prune）+ 四段侧边栏排序 + header 分支切换器
 - [Worktree Processes](worktree-processes.md) — 当前 Worktree 的实时前台任务、启动名称归属、采样失效规则与 Pane 跳转
