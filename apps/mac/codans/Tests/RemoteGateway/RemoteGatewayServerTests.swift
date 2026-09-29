@@ -247,6 +247,29 @@ struct RemoteGatewayServerTests {
     #expect(release.serviceName == "Mac")
   }
 
+  /// The relay runs only while the gateway is on and outside access is
+  /// allowed; pairing codes carry its address only then.
+  @Test(.timeLimit(.minutes(1)))
+  func relayFollowsBothSwitchesAndRidesInPairingCodes() throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    // Nothing listens on the discard port: the connector just retries.
+    let gateway = Self.makeGateway(store: store, environment: ["CODANS_RELAY_URL": "ws://127.0.0.1:9"])
+    defer { gateway.setEnabled(false) }
+
+    gateway.setRelayAllowed(true)
+    #expect(gateway.relay == nil, "the relay must wait for the gateway switch")
+    gateway.setEnabled(true)
+    let expected = RemoteRelayCoordinates(url: "ws://127.0.0.1:9", macID: "wIBdABfYTK7_2kk2YvL52g")
+    #expect(gateway.relayCoordinates == expected)
+    #expect(try gateway.pairNewDevice().relay == expected)
+
+    gateway.setRelayAllowed(false)
+    #expect(gateway.relay == nil)
+    #expect(try gateway.pairNewDevice().relay == nil)
+  }
+
   // MARK: - Helpers
 
   private static func makeRouter() -> MethodRouter {
@@ -258,7 +281,8 @@ struct RemoteGatewayServerTests {
     environment: [String: String] = [:]
   ) -> RemoteGatewayServer {
     RemoteGatewayServer(
-      router: makeRouter(), devices: store, environment: environment, hostName: "Test", scope: .loopback)
+      router: makeRouter(), devices: store, environment: environment, hostName: "Test", scope: .loopback,
+      relaySecrets: InMemoryRelaySecretStore(secret: Data(repeating: 7, count: 32)))
   }
 
   private static func waitUntilListening(_ gateway: RemoteGatewayServer) async throws -> NWEndpoint.Port {

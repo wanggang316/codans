@@ -56,10 +56,15 @@ final class RemoteGatewayServer {
   let serviceName: String
   let channel: BuildChannel
   let isForcedOff: Bool
+  /// The relay connection while access from outside the LAN is allowed.
+  private(set) var relay: RelayConnector?
 
   @ObservationIgnored private let router: MethodRouter
   @ObservationIgnored private let scope: Scope
   @ObservationIgnored private var isEnabled = false
+  @ObservationIgnored private var isRelayAllowed = false
+  @ObservationIgnored private let relaySecrets: RelaySecretStore
+  @ObservationIgnored private let relayBaseURL: String
   @ObservationIgnored private var listener: NWListener?
   @ObservationIgnored private var listenerCredentials: Set<RemoteTLS.PSKCredential> = []
   @ObservationIgnored private var connections: [UUID: LiveConnection] = [:]
@@ -87,7 +92,8 @@ final class RemoteGatewayServer {
     environment: [String: String] = ProcessInfo.processInfo.environment,
     hostName: String = RemoteGatewayServer.defaultHostName(),
     scope: Scope = .lan,
-    revokedGracePeriod: Duration = RemoteGatewayServer.defaultRevokedGracePeriod
+    revokedGracePeriod: Duration = RemoteGatewayServer.defaultRevokedGracePeriod,
+    relaySecrets: RelaySecretStore = KeychainRelaySecretStore()
   ) {
     self.router = router
     self.scope = scope
@@ -95,9 +101,15 @@ final class RemoteGatewayServer {
     self.devices = devices
     self.channel = channel
     self.isForcedOff = environment[CodansEnvironment.Key.remoteDisabled.rawValue] == "1"
+    self.relaySecrets = relaySecrets
+    self.relayBaseURL =
+      environment[CodansEnvironment.Key.relayURL.rawValue].flatMap { $0.isEmpty ? nil : $0 } ?? RemoteRelay.defaultURL
     self.serviceName = RemoteBonjour.serviceName(
       hostName: hostName, channel: channel.slug, releaseChannel: BuildChannel.release.slug)
-    devices.onCredentialsChanged = { [weak self] in self?.reconcileListener() }
+    devices.onCredentialsChanged = { [weak self] in
+      self?.reconcileListener()
+      self?.reconcileRelay()
+    }
     devices.onRevoked = { [weak self] id in self?.deviceRevoked(id) }
     // The phone shows its input controls from the permission in its
     // handshake, so it reconnects to pick up a new one.
@@ -122,6 +134,42 @@ final class RemoteGatewayServer {
     if !enabled || isForcedOff {
       for id in Array(connections.keys) { closeConnection(id) }
     }
+    reconcileRelay()
+  }
+
+  /// Follows the "access from outside this network" switch. Only in effect
+  /// while the gateway itself is enabled.
+  func setRelayAllowed(_ allowed: Bool) {
+    isRelayAllowed = allowed
+    reconcileRelay()
+  }
+
+  /// Where a phone can reach this Mac through the relay; nil unless the
+  /// relay is allowed and running.
+  var relayCoordinates: RemoteRelayCoordinates? { relay?.coordinates }
+
+  private func reconcileRelay() {
+    guard isEnabled, isRelayAllowed, !isForcedOff else {
+      relay?.stop()
+      relay = nil
+      return
+    }
+    if relay == nil {
+      let secret: Data
+      do {
+        secret = try relaySecrets.secretCreatingIfNeeded()
+      } catch {
+        logger.error("relay secret unavailable: \(String(describing: error), privacy: .public)")
+        return
+      }
+      let connector = RelayConnector(
+        baseURL: relayBaseURL, secret: secret, gatewayPort: { [weak self] in self?.listenerPort?.rawValue })
+      relay = connector
+      connector.start()
+    }
+    // Pending devices too: a phone may pair from outside the LAN.
+    relay?.setTokenHashes(
+      devices.credentials().map { RemoteRelay.hash(ofBearer: RemoteRelay.phoneToken(psk: $0.key)) })
   }
 
   // MARK: - Pairing
@@ -142,7 +190,8 @@ final class RemoteGatewayServer {
   func payload(for id: UUID) -> PairingPayload? {
     guard let key = devices.key(for: id) else { return nil }
     return PairingPayload(
-      serviceName: serviceName, deviceID: id, pskIdentity: id.uuidString, psk: key, channel: channel.slug)
+      serviceName: serviceName, deviceID: id, pskIdentity: id.uuidString, psk: key, channel: channel.slug,
+      relay: relayCoordinates)
   }
 
   // MARK: - Listener

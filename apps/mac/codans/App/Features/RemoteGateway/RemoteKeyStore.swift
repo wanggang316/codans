@@ -1,4 +1,5 @@
 import CodansCore
+import CodansRemote
 import Foundation
 import Security
 
@@ -66,4 +67,68 @@ final class InMemoryRemoteKeyStore: RemoteKeyStore {
   func key(for deviceID: UUID) -> Data? { keys[deviceID] }
   func setKey(_ key: Data, for deviceID: UUID) throws { keys[deviceID] = key }
   func deleteKey(for deviceID: UUID) { keys[deviceID] = nil }
+}
+
+/// The Mac's relay secret (the relay ID is derived from it). One
+/// generic-password item: service `com.gumpw.codans.relay.<channel slug>`,
+/// account `mac-secret`.
+protocol RelaySecretStore: AnyObject {
+  func secret() -> Data?
+  func setSecret(_ secret: Data) throws
+}
+
+extension RelaySecretStore {
+  /// The stored secret, created on first use.
+  func secretCreatingIfNeeded() throws -> Data {
+    if let secret = secret() { return secret }
+    let secret = RemoteRelay.newMacSecret()
+    try setSecret(secret)
+    return secret
+  }
+}
+
+final class KeychainRelaySecretStore: RelaySecretStore {
+  let service: String
+
+  init(channel: BuildChannel = .current) {
+    self.service = "com.gumpw.codans.relay.\(channel.slug)"
+  }
+
+  func secret() -> Data? {
+    var query = baseQuery
+    query[kSecReturnData as String] = true
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+    return result as? Data
+  }
+
+  func setSecret(_ secret: Data) throws {
+    SecItemDelete(baseQuery as CFDictionary)
+    var item = baseQuery
+    item[kSecValueData as String] = secret
+    item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+    item[kSecAttrLabel as String] = "codans relay secret"
+    let status = SecItemAdd(item as CFDictionary, nil)
+    guard status == errSecSuccess else { throw KeychainRemoteKeyStore.KeychainError(status: status) }
+  }
+
+  private var baseQuery: [String: Any] {
+    [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: "mac-secret",
+      kSecAttrSynchronizable as String: false,
+    ]
+  }
+}
+
+/// In-memory relay secret for tests.
+final class InMemoryRelaySecretStore: RelaySecretStore {
+  private var stored: Data?
+
+  init(secret: Data? = nil) { stored = secret }
+
+  func secret() -> Data? { stored }
+  func setSecret(_ secret: Data) throws { stored = secret }
 }

@@ -1262,6 +1262,7 @@ final class AppState {
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
     startRemoteGateway(router: router, settingsStore: settingsStore)
+    systemHandlers.relayCoordinates = { [weak self] in self?.remoteGateway?.relayCoordinates }
     do {
       try server.start()
       self.socketServer = server
@@ -1342,6 +1343,7 @@ final class AppState {
       router: router,
       devices: PairedDeviceStore(keys: KeychainRemoteKeyStore())
     )
+    gateway.setRelayAllowed(settingsStore.settings.remoteAccess.allowsRelay)
     gateway.setEnabled(settingsStore.settings.remoteAccess.enabled)
     self.remoteGateway = gateway
   }

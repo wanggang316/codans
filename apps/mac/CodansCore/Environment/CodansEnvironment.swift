@@ -86,6 +86,10 @@ public nonisolated enum CodansEnvironment {
     /// says, so an isolated test instance never listens or advertises on
     /// the network.
     case remoteDisabled = "CODANS_REMOTE_DISABLED"
+    /// Points the gateway's relay connector at another relay (`ws://` or
+    /// `wss://` base URL) — a local relay in tests. Unset means the
+    /// production relay.
+    case relayURL = "CODANS_RELAY_URL"
 
     // MARK: One-shot, per request
 

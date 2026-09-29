@@ -35,6 +35,9 @@ public final class SystemHandlers {
   private let clock: @Sendable () -> Date
   private let connectionCount: @MainActor () -> Int
   private let quitHandler: @MainActor () -> Void
+  /// The relay address `system.hello` hands gateway callers; set once the
+  /// gateway exists.
+  public var relayCoordinates: @MainActor () -> RemoteRelayCoordinates? = { nil }
 
   public init(
     versions: Versions,
@@ -78,7 +81,9 @@ public final class SystemHandlers {
       protocolMajor: versions.protocolMajor,
       protocolMinor: versions.protocolMinor,
       deprecatedMethods: versions.deprecatedMethods,
-      remotePermission: remotePermission
+      remotePermission: remotePermission,
+      // Only gateway callers need it; local CLI callers never do.
+      relay: remotePermission == nil ? nil : relayCoordinates()
     )
     do {
       return .unary(try JSONValue.encoded(response))

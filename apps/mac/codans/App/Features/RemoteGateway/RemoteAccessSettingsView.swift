@@ -40,6 +40,20 @@ struct RemoteAccessSettingsView: View {
         .foregroundStyle(.secondary)
       }
 
+      Section {
+        Toggle("Allow access from outside this network", isOn: relayBinding)
+          .disabled(!settingsStore.settings.remoteAccess.enabled || (gateway?.isForcedOff ?? false))
+        if let gateway, settingsStore.settings.remoteAccess.enabled, settingsStore.settings.remoteAccess.allowsRelay {
+          LabeledContent("Relay", value: relayStatusText(gateway))
+        }
+      } footer: {
+        Text(
+          "Paired devices can also connect over cellular or another network through relay.codans.dev. "
+            + "The relay only forwards encrypted traffic: it cannot read it or send commands."
+        )
+        .foregroundStyle(.secondary)
+      }
+
       if let gateway {
         Section("Pair a Device") {
           pairingSection(gateway)
@@ -167,6 +181,25 @@ struct RemoteAccessSettingsView: View {
         gateway?.setEnabled(enabled)
       }
     )
+  }
+
+  private var relayBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.remoteAccess.allowsRelay },
+      set: { allowed in
+        settingsStore.setRemoteRelayAllowed(allowed)
+        gateway?.setRelayAllowed(allowed)
+      }
+    )
+  }
+
+  private func relayStatusText(_ gateway: RemoteGatewayServer) -> String {
+    switch gateway.relay?.status {
+    case .none, .off: return "Off"
+    case .connecting: return "Connecting…"
+    case .online: return "Connected"
+    case .failed(let reason): return reason
+    }
   }
 
   private func statusText(_ gateway: RemoteGatewayServer) -> String {
