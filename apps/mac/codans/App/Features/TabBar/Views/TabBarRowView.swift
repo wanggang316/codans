@@ -147,7 +147,8 @@ struct TabBarRowView: View {
           .frame(width: slots[index].width, alignment: .leading)
           .modifier(StackVisibility(isHidden: stack?.frames[index].isHidden ?? false))
           .onHover { hovering in
-            if hovering {
+            // A narrowed chip shows no hover, so its separators stay.
+            if hovering, !isNarrowed(index: index, isActive: tab.id == selectedID, stack: stack) {
               hoveredID = tab.id
             } else if hoveredID == tab.id {
               hoveredID = nil
@@ -451,6 +452,12 @@ struct TabBarRowView: View {
         scroller?.scroll(to: target, animated: true)
       }
     )
+  }
+
+  /// Drawn narrower than a chip — a stack sliver or partly covered.
+  private func isNarrowed(index: Int, isActive: Bool, stack: StackState?) -> Bool {
+    guard let stack, !isActive else { return false }
+    return stack.frames[index].width < TabStackLayout.chipWidth
   }
 
   /// Stacked chips overlap: later tabs sit above earlier ones and the
