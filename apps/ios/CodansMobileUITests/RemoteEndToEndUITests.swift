@@ -64,6 +64,9 @@ final class RemoteEndToEndUITests: XCTestCase {
     if env["CODANS_E2E_READ_ONLY"] == "1" {
       let keyBar = app.descendants(matching: .any)["terminal-key-bar"].firstMatch
       XCTAssertFalse(keyBar.exists, "view-only device shows the key bar")
+      XCTAssertTrue(
+        app.descendants(matching: .any)["terminal-view-only"].firstMatch.exists,
+        "a view-only device must say why it has no key bar")
       screenOf(app).tap()
       XCTAssertFalse(keyBar.waitForExistence(timeout: 3), "a tap on a view-only terminal raised the key bar")
       XCTAssertFalse(app.keyboards.firstMatch.exists, "a tap on a view-only terminal raised the keyboard")

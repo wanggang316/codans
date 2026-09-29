@@ -76,6 +76,8 @@ struct TerminalDetailView: View {
               onShortcut: { handle($0, location: location, focused: focused) }
             )
             .id(location.pane.id)
+          } else {
+            TerminalViewOnlyBar()
           }
         }
       } else {
@@ -321,6 +323,12 @@ private struct TabTitleMenu: View {
   let openOnMac: () -> Void
   let close: (CloseKind) -> Void
 
+  @Environment(\.horizontalSizeClass) private var sizeClass
+
+  /// The principal toolbar item is offered unlimited width, so a shell's
+  /// long `user@host:path` title would run under the back button.
+  private var titleMaxWidth: CGFloat { sizeClass == .regular ? 420 : 220 }
+
   var body: some View {
     let ordered = TerminalLayout.orderedPaneIDs(in: location.tab)
     Menu {
@@ -370,6 +378,9 @@ private struct TabTitleMenu: View {
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(Color.ink)
             .lineLimit(1)
+            // The middle: a shell title keeps its user@host and the end
+            // of its path.
+            .truncationMode(.middle)
           Image(systemName: "chevron.down")
             .accessibilityHidden(true)
             .font(.system(size: 11, weight: .bold))
@@ -384,6 +395,7 @@ private struct TabTitleMenu: View {
           PageDots(count: ordered.count, current: ordered.firstIndex(of: location.pane.id) ?? 0)
         }
       }
+      .frame(maxWidth: titleMaxWidth)
       .padding(.horizontal, Theme.Space.xs)
       .contentShape(.rect)
     }

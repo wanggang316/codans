@@ -47,13 +47,19 @@ struct TerminalPaneView: View {
 
   private var hasKeyboard: Bool { keyboard != nil && store.isInteractive }
 
+  @State private var isApproximateHintShown = false
+
   var body: some View {
     VStack(spacing: 0) {
       screen
-        .overlay(alignment: .top) { topNotices }
+        .overlay(alignment: .top) { topNotices.themeAnimation(isApproximateHintShown) }
         .overlay(alignment: .bottom) { bottomOverlays }
-      if showsInputChrome, let keyboard, store.isInteractive {
-        TerminalInputChrome(store: store, agent: agent, keyboard: keyboard, onShortcut: onShortcut)
+      if showsInputChrome, let keyboard {
+        if store.isInteractive {
+          TerminalInputChrome(store: store, agent: agent, keyboard: keyboard, onShortcut: onShortcut)
+        } else {
+          TerminalViewOnlyBar()
+        }
       }
     }
     // Down into the home indicator area when nothing sits below the
@@ -61,6 +67,7 @@ struct TerminalPaneView: View {
     // app's appearance.
     .background(MirrorTerminalView.background.swiftUIColor, ignoresSafeAreaEdges: .bottom)
     .task { store.send(.task) }
+    .task(id: store.fidelity == .approximate && store.phase == .live) { await hideApproximateHintLater() }
   }
 
   // MARK: - Screen
@@ -116,15 +123,34 @@ struct TerminalPaneView: View {
       .padding(.horizontal, Theme.Space.sm)
       .padding(.top, Theme.Space.xs)
       .transition(.opacity)
-    } else if store.fidelity == .approximate, store.phase == .live {
-      Text("Approximate — restart the pane on your Mac for an exact view")
-        .font(.caption2)
-        .foregroundStyle(.white.opacity(0.7))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(.black.opacity(0.5), in: .capsule)
-        .padding(.top, 6)
+    } else if isApproximateHintShown, store.fidelity == .approximate, store.phase == .live {
+      HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
+        Image(systemName: "info.circle")
+          .accessibilityHidden(true)
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(.white.opacity(0.65))
+        Text("Started before this Codans version, so the first screen may be off. Restart the pane on your Mac to fix.")
+          .font(.system(size: 12))
+          .foregroundStyle(.white.opacity(0.8))
+          .fixedSize(horizontal: false, vertical: true)
+        Spacer(minLength: 0)
+      }
+      .terminalBanner()
+      .padding(.horizontal, Theme.Space.sm)
+      .padding(.top, Theme.Space.xs)
+      .transition(.opacity)
+      .accessibilityElement(children: .combine)
+      .accessibilityIdentifier("terminal-approximate")
     }
+  }
+
+  /// The hint sits over the first rows of the screen, so it steps aside
+  /// once read; the pane stays approximate until restarted on the Mac.
+  private func hideApproximateHintLater() async {
+    guard store.fidelity == .approximate, store.phase == .live else { return }
+    isApproximateHintShown = true
+    try? await Task.sleep(for: .seconds(6))
+    isApproximateHintShown = false
   }
 
   @ViewBuilder
@@ -295,6 +321,38 @@ struct TerminalInputChrome: View {
         }
       }
     )
+  }
+}
+
+// MARK: - View only
+
+/// Where the key bar would be for a device the Mac paired as view only:
+/// without it a tap on the screen does nothing and nothing says why.
+struct TerminalViewOnlyBar: View {
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+      Image(systemName: "eye")
+        .accessibilityHidden(true)
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(Color.inkSecondary)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("View only")
+          .font(.caption13)
+          .foregroundStyle(Color.ink)
+        Text("To type here, set this device to “View and type” in Codans Settings › Remote Access on your Mac.")
+          .font(.rowDetail)
+          .foregroundStyle(Color.inkSecondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, Theme.Space.md)
+    .padding(.vertical, Theme.Space.sm)
+    .frame(maxWidth: .infinity)
+    .background(.bar)
+    .overlay(alignment: .top) { Divider() }
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("terminal-view-only")
   }
 }
 

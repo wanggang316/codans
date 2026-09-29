@@ -26,7 +26,7 @@
 #                   follows the Mac and never the phone
 #   tab-ops         New Tab, Split Right, Close Pane (confirmed) from the phone;
 #                   checked in `codans tree --json`
-#   readonly-live   a "View only" device streams the pane but shows no key bar
+#   readonly-live   a "View only" device streams the pane, shows no key bar and says why
 #   rejected        revoke the connected phone; it ends on "Pair again"
 #   revoke       revoke every device; their records and Keychain keys are gone
 #

@@ -27,6 +27,8 @@ import Network
 ///   first-load skeleton).
 /// - `CODANS_DEMO_SHEET`: open `agents`, `settings`, `pairing`,
 ///   `connectionDetails` or `composer` shortly after launch.
+/// - `CODANS_DEMO_APPROXIMATE=1`: streams arrive as from a pane started
+///   before the observer protocol, marked approximate.
 /// - `CODANS_DEMO_OLD_MAC=1`: the Mac speaks protocol minor 1, so panes use
 ///   the text fallback and ask for a Mac update.
 ///
@@ -130,6 +132,8 @@ enum DemoMode {
       let readOnly = environment["CODANS_DEMO_READONLY"] == "1"
       let notOpen = environment["CODANS_DEMO_NOT_OPEN"] == "1"
       let exits = environment["CODANS_DEMO_EXITED"] == "1"
+      let fidelity: IPC.TerminalStreamFidelity =
+        environment["CODANS_DEMO_APPROXIMATE"] == "1" ? .approximate : .exact
       let protocolMinor = environment["CODANS_DEMO_OLD_MAC"] == "1" ? 1 : 2
       let failure = failure
       let connects = LockIsolated(0)
@@ -189,7 +193,7 @@ enum DemoMode {
             let sample = DemoFixtures.stream(for: paneID)
             continuation.yield(
               IPC.TerminalStreamFrame(
-                seq: 1, epoch: 1, payload: .reset(cols: sample.cols, rows: sample.rows, fidelity: .exact)))
+                seq: 1, epoch: 1, payload: .reset(cols: sample.cols, rows: sample.rows, fidelity: fidelity)))
             continuation.yield(IPC.TerminalStreamFrame(seq: 2, epoch: 1, payload: .output(sample.bytes)))
             if exits {
               continuation.yield(
@@ -272,7 +276,9 @@ nonisolated enum DemoFixtures {
           direction: .vertical, ratio: 0.5, left: .leaf(paneID: paneID("shell")),
           right: .leaf(paneID: paneID("server")))))
     let buildTab = IPC.TabSummary(
-      id: buildTabID, handle: "t2", title: "build", focusedPaneID: paneID("build"),
+      // A shell's own title, as long as they come.
+      id: buildTabID, handle: "t2", title: "gump@Gumps-MacBook-Pro:~/dev/codans/apps/ios",
+      focusedPaneID: paneID("build"),
       panes: [
         IPC.PaneSummary(
           id: paneID("build"), handle: "p4", title: "make ios-build", agent: nil, labels: [], cwd: cwd, isLive: true)

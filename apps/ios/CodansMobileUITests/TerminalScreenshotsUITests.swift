@@ -113,6 +113,9 @@ final class TerminalScreenshotsUITests: XCTestCase {
     notOpen.terminate()
     let readOnly = launch(["CODANS_DEMO_PANE": "build", "CODANS_DEMO_READONLY": "1"])
     XCTAssertTrue(readOnly.descendants(matching: .any)["terminal-screen"].firstMatch.waitForExistence(timeout: 15))
+    XCTAssertTrue(
+      readOnly.descendants(matching: .any)["terminal-view-only"].firstMatch.waitForExistence(timeout: 5),
+      "a view-only device must say why it has no key bar")
     sleep(1)
     shot("10-read-only")
 
