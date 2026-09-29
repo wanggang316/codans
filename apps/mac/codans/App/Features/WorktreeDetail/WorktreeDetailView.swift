@@ -15,8 +15,8 @@ struct WorktreeDetailView: View {
   let selection: HierarchySelection
   /// Scoped editor-feature store; passed in by `ContentView` so the Worktree-header
   /// dropdown shares a single editor-state source of truth with the Settings sheet.
-  /// Open-result toasts are driven by `editorStore.state.lastOpenResult` directly from
-  /// `ContentView`, so this view does not accept a callback.
+  /// Open results surface in the status bar via `StatusBarRootBindings`, so this view
+  /// does not accept a callback.
   let editorStore: StoreOf<EditorFeature>
   /// AgentState registry (optional). Threaded down to `TabBarView` so a tab
   /// chip lights while a bound agent in that tab is `.working` — the same

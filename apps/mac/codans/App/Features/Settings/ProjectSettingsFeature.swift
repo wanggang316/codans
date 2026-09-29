@@ -128,9 +128,8 @@ struct ProjectSettingsFeature {
       projectID: state.projectID, worktreeID: state.lastFocusedWorktreeID, in: hierarchyClient.snapshot())
   }
 
-  /// Human-friendly mapping for the failure banner. Mirrors
-  /// `RootFeature.runScriptErrorMessage` so both surfaces phrase
-  /// identical errors identically.
+  /// Human-friendly mapping for the failure banner. The status bar phrases
+  /// the same errors through `RootFeature.launchFailureToast`.
   static func runScriptErrorMessage(_ error: RunScriptError) -> String {
     switch error {
     case .unknownScript:

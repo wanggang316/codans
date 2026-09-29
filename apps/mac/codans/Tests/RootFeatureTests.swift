@@ -494,27 +494,6 @@ struct RootFeatureTests {
     }
   }
 
-  // MARK: - status-bar toast routing
-
-  /// The multi-line / over-80-char scrubber that the `.editor(.openFailed)`
-  /// and `.gitHub(...Completed)` branches pipe through before constructing a
-  /// warning toast. Kept as a pure function so the message-shape invariants
-  /// are locked in without spinning up a `RootFeature` TestStore — a full
-  /// multi-scope TestStore interacts badly with the StatusBarFeature suite's
-  /// TestClock-driven sleeps when they share the host-app process, so we
-  /// exercise the forwarding itself through the app-run smoke tests
-  /// instead.
-  @Test
-  func shortToastMessageTakesFirstLineAndCapsAt80Characters() {
-    #expect(RootFeature.shortToastMessage("one") == "one")
-    #expect(RootFeature.shortToastMessage("first\nsecond") == "first")
-    #expect(RootFeature.shortToastMessage("  padded\n ") == "padded")
-    let long = String(repeating: "x", count: 120)
-    let clipped = RootFeature.shortToastMessage(long)
-    #expect(clipped.count == 80)
-    #expect(clipped.hasSuffix("…"))
-  }
-
   // MARK: - Tab-bar shortcut resolvers
 
   /// Builds a catalog with a single worktree carrying `tabCount` tabs;
@@ -1163,7 +1142,7 @@ struct RootFeatureTests {
             agentProfileID: profileID))))
     await store.receive(
       .worktreeAgentLaunchFinished(
-        worktreeID, failure: "Launch agent failed: profile no longer exists"))
+        worktreeID, failure: .warning("Launch agent failed: profile no longer exists")))
     await store.receive(
       .statusBar(.push(.warning("Launch agent failed: profile no longer exists"))))
     #expect(store.state.agentLaunchWorktreeIDs.isEmpty)
@@ -1902,8 +1881,9 @@ struct RootFeatureTests {
   }
 
   /// A brief order closes the panel at once, registers a one-shot request,
-  /// types the instruction into the source pane, and reports the matching
-  /// CLI completion as a toast. Nothing waits on screen.
+  /// types the instruction into the source pane, shows a cancellable
+  /// status-bar activity while the agent writes the briefing, and ends it
+  /// with the matching CLI completion.
   @Test
   func briefHandOffClosesThePanelAndFinishesOnTheMatchingCompletion() async {
     let paneID = PaneID()
@@ -1935,6 +1915,9 @@ struct RootFeatureTests {
     await store.receive(\.handoff.presented.delegate.handOff) { state in
       state.handoff = nil
     }
+    await store.receive(\.statusBar.begin)
+    #expect(store.state.statusBar.primaryActivity?.id == .handoff(requestID))
+    #expect(store.state.statusBar.primaryActivity?.isCancellable == true)
     #expect(registered.value == [requestID])
     #expect(typed.value.first?.0 == paneID)
     #expect(
@@ -1955,7 +1938,8 @@ struct RootFeatureTests {
       requestID: requestID)
     continuation.yield(mine)
     await store.receive(.handoffFinished(mine, targetTitle: "Codex"))
-    await store.receive(.statusBar(.push(.success("Handed off to Codex"))))
+    await store.receive(
+      .statusBar(.end(id: .handoff(requestID), outcome: .success("Handed off to Codex"))))
     continuation.finish()
   }
 
@@ -1991,7 +1975,8 @@ struct RootFeatureTests {
       state.handoff = nil
     }
     await store.receive(\.handoffFailed)
-    await store.receive(\.statusBar.push)
+    await store.receive(\.statusBar.end)
+    #expect(store.state.statusBar.activities.isEmpty)
     #expect(superseded.value == [requestID])
   }
 
@@ -2025,7 +2010,7 @@ struct RootFeatureTests {
       state.handoff = nil
     }
     await store.receive(.handoffFinished(completion, targetTitle: "Build"))
-    await store.receive(.statusBar(.push(.success("Handed off to Build"))))
+    await store.receive(.statusBar(.end(id: .handoff(nil), outcome: .success("Handed off to Build"))))
     let request = ran.value.first
     #expect(request?.contextOnly == true)
     #expect(request?.receiver == "codex")
@@ -2033,5 +2018,42 @@ struct RootFeatureTests {
     #expect(request?.target == .split)
     #expect(request?.direction == .right)
     #expect(request?.requestID == nil)
+  }
+
+  /// Stop on the hand-off activity supersedes the request, so the agent's
+  /// late CLI call is refused, and stops waiting for its completion.
+  @Test
+  func stoppingTheHandOffActivitySupersedesTheRequest() async {
+    let paneID = PaneID()
+    let requestID = UUID()
+    let (completions, continuation) = AsyncStream<HandoffCompletion>.makeStream()
+    let superseded = LockIsolated<[UUID]>([])
+    var initial = RootFeature.State()
+    initial.handoff = HandoffFeature.State.make(
+      source: Self.handoffSource(paneID: paneID), profiles: [AgentProfile(kind: .codex)])
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.uuid = .constant(requestID)
+      $0.handoffClient.register = { _ in }
+      $0.handoffClient.completions = { completions }
+      $0.handoffClient.sendInstruction = { _, _ in true }
+      $0.handoffClient.supersede = { id in
+        superseded.withValue { $0.append(id) }
+        return true
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.handoff(.presented(.confirmSelection)))
+    await store.receive(\.statusBar.begin)
+    await store.send(.statusBar(.cancelTapped(.handoff(requestID)))) {
+      $0.statusBar.activities = []
+    }
+    await store.receive(.statusBar(.delegate(.cancelRequested(.handoff(requestID)))))
+    await store.finish()
+    #expect(superseded.value == [requestID])
+    continuation.finish()
   }
 }

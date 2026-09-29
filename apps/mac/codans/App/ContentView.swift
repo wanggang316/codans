@@ -32,10 +32,6 @@ struct ContentView: View {
   /// Registry that backs the worktree-toolbar badge + popover. Optional
   /// because `AppState.bringUp` constructs it lazily; nil renders no badge.
   let agentStateStore: AgentStateStore?
-  /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
-  /// auto-clears after a short window via `.task(id:)`.
-  @State private var lastEditorToast: EditorToast?
-
   /// Live Sparkle seam (the global value, shared with the Updates pane) so an
   /// in-process settings change can re-sync the running `SPUUpdater`.
   @Dependency(UpdatesClient.self) private var updatesClient
@@ -60,11 +56,6 @@ struct ContentView: View {
         }
       }
     )
-  }
-
-  enum EditorToast: Equatable {
-    case opened(String)
-    case failed(String)
   }
 
   var body: some View {
@@ -123,7 +114,6 @@ struct ContentView: View {
         activePendingWorktree: resolveActivePendingWorktree()
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .overlay(alignment: .bottom) { editorToastOverlay }
       .sheet(
         item: $store.scope(state: \.tagManagerSheet, action: \.tagManagerSheet)
       ) { tagStore in
@@ -157,20 +147,6 @@ struct ContentView: View {
       // remote Open button (and the context menu's editor list) could never
       // appear.
       store.send(.editor(.onAppear))
-    }
-    .onChange(of: store.editor.lastOpenResult) { _, new in
-      guard let new else { return }
-      switch new {
-      case .opened(_, let displayName):
-        lastEditorToast = .opened(displayName)
-      case .failed(let reason):
-        lastEditorToast = .failed(reason)
-      }
-    }
-    .onChange(of: store.editor.lastProjectOverrideFailure) { _, new in
-      if let reason = new {
-        lastEditorToast = .failed("Override failed: \(reason)")
-      }
     }
     // When the Settings window writes `defaultEditorID`, refresh the main-window
     // EditorFeature so the Header split-button dropdown rebuilds its cached
@@ -243,53 +219,4 @@ extension ContentView {
       repositoryName: repositoryName
     )
   }
-
-  @ViewBuilder
-  fileprivate var editorToastOverlay: some View {
-    if let toast = lastEditorToast {
-      toastPill(toast)
-        .padding(.bottom, 20)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-        .task(id: lastEditorToast) {
-          // Auto-dismiss after 2.5 s. `.task(id:)` cancels on re-entry so a second open
-          // (or navigation away) doesn't get clobbered.
-          try? await Task.sleep(for: .seconds(2.5))
-          if !Task.isCancelled {
-            await MainActor.run { lastEditorToast = nil }
-          }
-        }
-    }
-  }
-
-  @ViewBuilder
-  fileprivate func toastPill(_ toast: EditorToast) -> some View {
-    switch toast {
-    case .opened(let displayName):
-      HStack(spacing: 6) {
-        Image(systemName: "checkmark.circle.fill")
-          .accessibilityHidden(true)
-          .foregroundStyle(.tint)
-        Text("Opened in \(displayName)").font(.callout)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(.ultraThickMaterial, in: .rect(cornerRadius: 8))
-      .shadow(radius: 4, y: 2)
-    case .failed(let message):
-      HStack(spacing: 6) {
-        Image(systemName: "exclamationmark.triangle.fill")
-          .accessibilityHidden(true)
-          .foregroundStyle(.orange)
-        Text(message).font(.callout)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(.ultraThickMaterial, in: .rect(cornerRadius: 8))
-      .shadow(radius: 4, y: 2)
-    }
-  }
-
-  // EditorError → user-facing reason mapping now lives in
-  // `EditorFeature.editorErrorDescription` so TestStore observes the same string the UI
-  // sees. ContentView just reads `store.editor.lastOpenResult` and renders.
 }

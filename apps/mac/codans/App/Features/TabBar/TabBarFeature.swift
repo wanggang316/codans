@@ -88,6 +88,9 @@ struct TabBarFeature {
       profileID: UUID, inWorktree: WorktreeID, inProject: ProjectID)
     /// "Manage Agents…" footer of the same menu.
     case manageAgentsTapped
+    /// An agent launch or session resume from the tab bar did not start.
+    /// The status bar renders it; this reducer keeps no state for it.
+    case agentLaunchFailed(message: String)
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
@@ -241,16 +244,19 @@ struct TabBarFeature {
             .worktrees.first(where: { $0.id == worktreeID })
         else { return .none }
         let cwd = worktree.path
-        return .run { [client = hierarchyClient] _ in
-          guard
-            let tabID = try? await client.createTab(worktreeID, projectID, agent.displayName),
-            let paneID = try? await client.openPane(
-              tabID, worktreeID, projectID, cwd, command)
-          else { return }
-          // Same post-spawn focus dispatch as `newTabButtonTapped`: the
-          // surface view must attach to the hosting window before
-          // `makeFirstResponder` takes.
-          await MainActor.run { client.focusSurfaceView(paneID) }
+        return .run { [client = hierarchyClient] send in
+          do {
+            let tabID = try await client.createTab(worktreeID, projectID, agent.displayName)
+            let paneID = try await client.openPane(tabID, worktreeID, projectID, cwd, command)
+            // Same post-spawn focus dispatch as `newTabButtonTapped`: the
+            // surface view must attach to the hosting window before
+            // `makeFirstResponder` takes.
+            await MainActor.run { client.focusSurfaceView(paneID) }
+          } catch {
+            await send(
+              .agentLaunchFailed(
+                message: StatusToast.failure("Resume \(agent.displayName)", error: error).message))
+          }
         }
 
       case .launchAgentInNewTabTapped(let profileID, let worktreeID, let projectID):
@@ -260,8 +266,14 @@ struct TabBarFeature {
         else { return .none }
         let spec = AgentLaunchSpec(
           profile: profile, projectID: projectID, worktreeID: worktreeID, target: .newTab)
-        return .run { [client = hierarchyClient] _ in
-          _ = try? await client.launchAgent(spec)
+        return .run { [client = hierarchyClient] send in
+          do {
+            _ = try await client.launchAgent(spec)
+          } catch {
+            await send(
+              .agentLaunchFailed(
+                message: StatusToast.failure("Launch \(profile.displayName)", error: error).message))
+          }
         }
 
       case .manageAgentsTapped:
@@ -269,6 +281,9 @@ struct TabBarFeature {
         return .run { _ in
           await MainActor.run { presenter.openAt(.agents) }
         }
+
+      case .agentLaunchFailed:
+        return .none
       }
     }
   }

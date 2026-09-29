@@ -189,8 +189,8 @@ struct RootFeature {
     case onQuit
     case selectionChanged(HierarchySelection)
     /// The Create-sheet agent launch for a new worktree settled. `failure`
-    /// is the status-bar message when it did not start.
-    case worktreeAgentLaunchFinished(WorktreeID, failure: String?)
+    /// is the status-bar warning when it did not start.
+    case worktreeAgentLaunchFinished(WorktreeID, failure: StatusToast?)
     /// A structural hierarchy mutation landed (Project / Worktree removal,
     /// archive, auto-archive). Re-derives GitHub state from the live catalog.
     case catalogMembershipChanged
@@ -386,8 +386,11 @@ struct RootFeature {
     case handoffRequested(PaneID?)
     case handoff(PresentationAction<HandoffFeature.Action>)
     /// A hand-off ordered from the panel finished; the panel is long gone.
+    /// Ends the status-bar activity of a briefed request.
     case handoffFinished(HandoffCompletion, targetTitle: String)
-    case handoffFailed(message: String)
+    /// `requestID` is the briefed request whose activity this ends; nil for
+    /// a context-only hand-off, which never begins one.
+    case handoffFailed(requestID: UUID?, message: String)
     /// Toggle the Command Queue panel. `nil` resolves the target pane the
     /// same way `commandPaletteToggle` does (the active tab's last-focused
     /// leaf), which is what the ⌘⌥L menu binding sends; the pane badge sends
@@ -456,7 +459,8 @@ struct RootFeature {
     /// would never age out archived worktrees past their retention period.
     case periodicCleanup
     /// Waits for the CLI completion of one panel-issued hand-off request.
-    /// Ends on its own when the completion lands; cancelled at quit.
+    /// Ends on its own when the completion lands; cancelled by the status
+    /// bar's Stop, which also supersedes the request.
     case handoffCompletion(UUID)
   }
 
@@ -504,6 +508,8 @@ struct RootFeature {
   }
 
   var body: some Reducer<State, Action> {
+    // First, so status-bar begins see child state from before the request.
+    StatusBarRootBindings()
     sidebarAndDetailScopes
     headerAndEditorScopes
     routerScopes
@@ -1262,7 +1268,9 @@ struct RootFeature {
         // with a GitHub refresh so out-of-band branch changes propagate
         // to the PR badges without waiting for the next selection event.
         return .run { [client = hierarchyClient] send in
+          await send(.statusBar(.begin(StatusActivity(id: .projectRefresh, title: "Refreshing projects"))))
           await projectReconciler.reconcileAll(force: true)
+          await send(.statusBar(.end(id: .projectRefresh, outcome: nil)))
           for action in await MainActor.run(body: {
             Self.makeActiveProjectGitHubRefresh(client: client)
           }) {
@@ -1389,7 +1397,7 @@ struct RootFeature {
         if state.selection.worktreeID == worktreeID {
           autoSeedTabAndPaneIfNeeded(for: state.selection)
         }
-        return .send(.statusBar(.push(.warning(failure))))
+        return .send(.statusBar(.push(failure)))
 
       case .sidebar:
         return .none
@@ -1403,16 +1411,6 @@ struct RootFeature {
 
       case .detail:
         return .none
-
-      // Surface editor-open outcomes in the titlebar status bar. The child
-      // `Scope(state: \.editor, ...)` has already mutated `lastOpenResult`;
-      // we only fan a toast out. Success shows the chosen editor's display
-      // name; failure shows a scrubbed one-line reason.
-      case .editor(.openSucceeded(_, let displayName)):
-        return .send(.statusBar(.push(.success("Opened in \(displayName)"))))
-
-      case .editor(.openFailed(let reason)):
-        return .send(.statusBar(.push(.warning(Self.shortToastMessage(reason)))))
 
       case .editor(.delegate(.openShellEditorRequested(let worktreePath, let projectID))):
         return .send(
@@ -1498,16 +1496,8 @@ struct RootFeature {
             let worktreeID = state.selection.worktreeID
           else { return .none }
           let client = hierarchyClient
-          let presenter = settingsWindowPresenter
-          return .run { send in
-            do {
-              try await client.runScript(scriptID, projectID, worktreeID)
-            } catch let error as RunScriptError {
-              await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
-              _ = presenter  // Settings is not auto-opened on failure; user can navigate themselves.
-            } catch {
-              await send(.statusBar(.push(.warning("Run script failed: \(error.localizedDescription)"))))
-            }
+          return Self.reportingLaunchFailure(.script) {
+            try await client.runScript(scriptID, projectID, worktreeID)
           }
 
         case .runCommandRequested(let script):
@@ -1518,14 +1508,8 @@ struct RootFeature {
             let worktreeID = state.selection.worktreeID
           else { return .none }
           let client = hierarchyClient
-          return .run { send in
-            do {
-              try await client.runCommand(script, projectID, worktreeID)
-            } catch let error as RunScriptError {
-              await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
-            } catch {
-              await send(.statusBar(.push(.warning("Run command failed: \(error.localizedDescription)"))))
-            }
+          return Self.reportingLaunchFailure(.command) {
+            try await client.runCommand(script, projectID, worktreeID)
           }
 
         case .runGlobalScriptRequested(let scriptID):
@@ -1537,14 +1521,8 @@ struct RootFeature {
             let worktreeID = state.selection.worktreeID
           else { return .none }
           let client = hierarchyClient
-          return .run { send in
-            do {
-              try await client.runGlobalScript(scriptID, projectID, worktreeID)
-            } catch let error as RunScriptError {
-              await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
-            } catch {
-              await send(.statusBar(.push(.warning("Run script failed: \(error.localizedDescription)"))))
-            }
+          return Self.reportingLaunchFailure(.script) {
+            try await client.runGlobalScript(scriptID, projectID, worktreeID)
           }
 
         case .stopScriptRequested(let scriptID):
@@ -1585,15 +1563,8 @@ struct RootFeature {
             let worktreeID = state.selection.worktreeID
           else { return .none }
           let client = hierarchyClient
-          return .run { send in
-            do {
-              try await client.launchAgentProfile(profileID, projectID, worktreeID)
-            } catch let error as RunScriptError {
-              await send(.statusBar(.push(.warning(Self.launchAgentErrorMessage(error)))))
-            } catch {
-              await send(
-                .statusBar(.push(.warning("Launch agent failed: \(error.localizedDescription)"))))
-            }
+          return Self.reportingLaunchFailure(.agent) {
+            try await client.launchAgentProfile(profileID, projectID, worktreeID)
           }
 
         case .manageAgentsRequested:
@@ -1609,34 +1580,6 @@ struct RootFeature {
       case .worktreeHeader:
         return .none
 
-      // Surface gh mutation outcomes in the status bar. The child
-      // `Scope(state: \.gitHub, ...)` has already updated `mutating` / `lastError`;
-      // we only fan a toast out. Message format mirrors the sidebar popover's
-      // verb so cross-surface language stays consistent.
-      case .gitHub(.mergeCompleted(_, let prNumber, .success)):
-        return .send(.statusBar(.push(.success("PR #\(prNumber) merged"))))
-      case .gitHub(.closeCompleted(_, .success)):
-        return .send(.statusBar(.push(.success("PR closed"))))
-      case .gitHub(.markReadyCompleted(_, .success)):
-        return .send(.statusBar(.push(.success("PR marked ready"))))
-      case .gitHub(.rerunFailedJobsCompleted(_, .success)):
-        return .send(.statusBar(.push(.success("Re-ran failed jobs"))))
-
-      // Failure cases keep the verb prefix so the user can tell merge / close /
-      // mark-ready / rerun-failed-jobs apart in the warning toast.
-      case .gitHub(.mergeCompleted(_, _, .failure(let error))):
-        let reason = Self.shortToastMessage(String(describing: error))
-        return .send(.statusBar(.push(.warning("Merge failed: \(reason)"))))
-      case .gitHub(.closeCompleted(_, .failure(let error))):
-        let reason = Self.shortToastMessage(String(describing: error))
-        return .send(.statusBar(.push(.warning("Close failed: \(reason)"))))
-      case .gitHub(.markReadyCompleted(_, .failure(let error))):
-        let reason = Self.shortToastMessage(String(describing: error))
-        return .send(.statusBar(.push(.warning("Mark ready failed: \(reason)"))))
-      case .gitHub(.rerunFailedJobsCompleted(_, .failure(let error))):
-        let reason = Self.shortToastMessage(String(describing: error))
-        return .send(.statusBar(.push(.warning("Rerun failed: \(reason)"))))
-
       // GitHub integration delegate actions. Detailed handling (openURL →
       // NSWorkspace.open, showSettingsGitHub → SettingsWindowPresenter,
       // pullRequestMerged → post-merge Worktree action) lives in
@@ -1646,9 +1589,16 @@ struct RootFeature {
       case .gitHub:
         return .none
 
-      // Status-bar child scope is self-contained (toast slot + timers).
-      // Cross-feature toast emission (editor open, gh mutation completion)
-      // is handled by additional cases BEFORE this catch-all.
+      // Child outcomes reach the status bar through `StatusBarRootBindings`;
+      // Root only answers the cancel requests for activities it began.
+      case .statusBar(.delegate(.cancelRequested(let id))):
+        guard let requestID = id.handoffRequestID else { return .none }
+        let client = handoffClient
+        return .merge(
+          .cancel(id: CancelID.handoffCompletion(requestID)),
+          .run { _ in _ = await client.supersede(requestID) }
+        )
+
       case .statusBar:
         return .none
 
@@ -1667,7 +1617,8 @@ struct RootFeature {
           do {
             try await terminalLinkClient.open(paneID, raw, workingDirectory)
           } catch {
-            await send(.statusBar(.push(.warning(Self.shortToastMessage(error.localizedDescription)))))
+            // `TerminalLinkError` already reads as a sentence ("File not found: …").
+            await send(.statusBar(.push(.warning(StatusToast.oneLine(error.localizedDescription)))))
           }
         }
 
@@ -1840,24 +1791,23 @@ struct RootFeature {
         return .none
 
       case .handoffFinished(let completion, let title):
+        let activityID = StatusActivityID.handoff(completion.requestID)
         switch completion.action {
         case .save:
-          return .send(.statusBar(.push(.success("Progress saved for a later hand-off"))))
+          return .send(
+            .statusBar(.end(id: activityID, outcome: .success("Progress saved for a later hand-off"))))
         case .to:
+          let ended = Action.statusBar(.end(id: activityID, outcome: .success("Handed off to \(title)")))
           // The user asked for this hand-off — land on the receiver, with the
           // same focus walk an AgentState row tap performs. The transition
           // itself never focuses anything.
-          guard let launched = completion.launched else {
-            return .send(.statusBar(.push(.success("Handed off to \(title)"))))
-          }
-          return .merge(
-            .send(.agentState(.rowTapped(launched.paneID))),
-            .send(.statusBar(.push(.success("Handed off to \(title)"))))
-          )
+          guard let launched = completion.launched else { return .send(ended) }
+          return .merge(.send(.agentState(.rowTapped(launched.paneID))), .send(ended))
         }
 
-      case .handoffFailed(let message):
-        return .send(.statusBar(.push(.warning("Hand off failed: \(message)"))))
+      case .handoffFailed(let requestID, let message):
+        return .send(
+          .statusBar(.end(id: .handoff(requestID), outcome: .failure("Hand off", reason: message))))
 
       case .commandPalette:
         return .none
@@ -1928,10 +1878,10 @@ struct RootFeature {
             )))
 
       case .openCurrentPRRequested:
-        guard
-          let worktreeID = state.selection.worktreeID,
-          let snapshot = state.gitHub.snapshots[worktreeID]
-        else { return .none }
+        guard let worktreeID = state.selection.worktreeID else { return .none }
+        guard let snapshot = state.gitHub.snapshots[worktreeID] else {
+          return .send(.statusBar(.push(.warning("No pull request for this branch"))))
+        }
         return .send(.gitHub(.delegate(.openURL(snapshot.url))))
 
       case .openCurrentProjectOnGitHubRequested:
@@ -1952,10 +1902,13 @@ struct RootFeature {
         }
         let gitRoot = unit.gitRoot
         return .run { [gitService = gitServiceClient] send in
-          guard let info = try? await gitService.remoteInfo(gitRoot) else { return }
           guard
+            let info = try? await gitService.remoteInfo(gitRoot),
             let url = URL(string: "https://\(info.host)/\(info.owner)/\(info.repo)")
-          else { return }
+          else {
+            await send(.statusBar(.push(.warning("No GitHub remote for this repository"))))
+            return
+          }
           await send(.gitHub(.delegate(.openURL(url))))
         }
 
@@ -2297,11 +2250,13 @@ struct RootFeature {
             .projects.first(where: { $0.id == projectID })?
             .worktrees.first(where: { $0.id == worktreeID })?.path
         else { return .none }
-        return .run { _ in
+        return .run { send in
           await MainActor.run {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
           }
+          // A shortcut or palette copy has nothing else to show it worked.
+          await send(.statusBar(.push(.success("Copied worktree path"))))
         }
 
       case .toggleSidebarRequested:
@@ -2461,7 +2416,9 @@ struct RootFeature {
     case .refreshCurrentWorktree:
       guard let projectID = state.selection.projectID else { return .none }
       return .run { [projectReconciler, client = hierarchyClient] send in
+        await send(.statusBar(.begin(StatusActivity(id: .projectRefresh, title: "Refreshing worktree"))))
         await projectReconciler.reconcile(projectID: projectID)
+        await send(.statusBar(.end(id: .projectRefresh, outcome: nil)))
         for action in await MainActor.run(body: {
           Self.makeActiveProjectGitHubRefresh(client: client)
         }) {
@@ -2565,14 +2522,8 @@ struct RootFeature {
     // failure handling stays in one place.
     case .runProjectScript(let projectID, let worktreeID, let scriptID):
       let client = hierarchyClient
-      return .run { send in
-        do {
-          try await client.runScript(scriptID, projectID, worktreeID)
-        } catch let error as RunScriptError {
-          await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
-        } catch {
-          await send(.statusBar(.push(.warning("Run script failed: \(error.localizedDescription)"))))
-        }
+      return Self.reportingLaunchFailure(.script) {
+        try await client.runScript(scriptID, projectID, worktreeID)
       }
 
     // Global commands — palette item carries the (projectID, worktreeID,
@@ -2580,28 +2531,15 @@ struct RootFeature {
     // WorktreeHeader split-button uses, so failure handling stays in one place.
     case .runGlobalScript(let projectID, let worktreeID, let scriptID):
       let client = hierarchyClient
-      return .run { send in
-        do {
-          try await client.runGlobalScript(scriptID, projectID, worktreeID)
-        } catch let error as RunScriptError {
-          await send(.statusBar(.push(.warning(Self.runScriptErrorMessage(error)))))
-        } catch {
-          await send(.statusBar(.push(.warning("Run script failed: \(error.localizedDescription)"))))
-        }
+      return Self.reportingLaunchFailure(.script) {
+        try await client.runGlobalScript(scriptID, projectID, worktreeID)
       }
 
     // Agent profiles — same effect the toolbar Agents menu dispatches.
     case .launchAgentProfile(let projectID, let worktreeID, let profileID):
       let client = hierarchyClient
-      return .run { send in
-        do {
-          try await client.launchAgentProfile(profileID, projectID, worktreeID)
-        } catch let error as RunScriptError {
-          await send(.statusBar(.push(.warning(Self.launchAgentErrorMessage(error)))))
-        } catch {
-          await send(
-            .statusBar(.push(.warning("Launch agent failed: \(error.localizedDescription)"))))
-        }
+      return Self.reportingLaunchFailure(.agent) {
+        try await client.launchAgentProfile(profileID, projectID, worktreeID)
       }
 
     case .handOff:
@@ -2821,31 +2759,51 @@ struct RootFeature {
     )
   }
 
-  /// Collapses a potentially multi-line error / warning string into a single
-  /// status-bar-sized line. Keeps the first line (trimmed) and caps at 80
-  /// characters so paths, tokens, and shell noise inside an `EditorError`
-  /// don't bleed into the titlebar.
-  ///
-  /// The 80-char limit is not PII scrubbing per se — it's UX width. Upstream
-  /// callers are responsible for not stuffing secrets into error messages;
-  /// `EditorFeature.editorErrorDescription` already emits short friendly
-  /// strings, so the truncation here is usually a no-op.
-  static func shortToastMessage(_ raw: String) -> String {
-    let firstLine = raw.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? raw
-    let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmed.count > 80 else { return trimmed }
-    let cutoff = trimmed.index(trimmed.startIndex, offsetBy: 79)
-    return String(trimmed[..<cutoff]) + "…"
+  /// A script / command / agent launch that Root starts on the user's behalf.
+  nonisolated enum LaunchKind: Sendable {
+    case script, command, agent
+
+    /// Verb the failure toast leads with.
+    var action: String {
+      switch self {
+      case .script: "Run script"
+      case .command: "Run command"
+      case .agent: "Launch agent"
+      }
+    }
+
+    /// What `RunScriptError.unknownScript` means in the user's vocabulary.
+    var missingItem: String {
+      switch self {
+      case .script, .command: "script"
+      case .agent: "profile"
+      }
+    }
   }
 
-  static func runScriptErrorMessage(_ error: RunScriptError) -> String {
-    switch error {
-    case .unknownScript:
-      return "Run script failed: script no longer exists"
-    case .missingWorktree:
-      return "Run script failed: worktree not available"
-    case .missingProject:
-      return "Run script failed: project not available"
+  /// Status-bar warning for a launch that did not start.
+  nonisolated static func launchFailureToast(_ kind: LaunchKind, error: any Error) -> StatusToast {
+    let reason =
+      switch error as? RunScriptError {
+      case .unknownScript: "\(kind.missingItem) no longer exists"
+      case .missingWorktree: "worktree not available"
+      case .missingProject: "project not available"
+      case nil: error.localizedDescription
+      }
+    return .failure(kind.action, reason: reason)
+  }
+
+  /// Runs a launch and reports a failure to the status bar. Success needs no
+  /// toast: the launch opens a pane the user is looking at.
+  static func reportingLaunchFailure(
+    _ kind: LaunchKind, _ operation: @escaping @Sendable () async throws -> Void
+  ) -> Effect<Action> {
+    .run { send in
+      do {
+        try await operation()
+      } catch {
+        await send(.statusBar(.push(launchFailureToast(kind, error: error))))
+      }
     }
   }
 
@@ -2888,7 +2846,15 @@ struct RootFeature {
       let instruction = HandoffKickoff.sourceInstruction(
         for: request, requestID: requestID, cli: client.cli, placement: placement)
       let agent = source.agentName
-      return .run { send in
+      // The briefing can take the source agent minutes to write, and the
+      // panel is already closed; the activity is the only sign it is running.
+      let activity = StatusActivity(
+        id: .handoff(requestID),
+        title: "Handing off to \(title)",
+        detail: "Waiting for \(agent)",
+        isCancellable: true
+      )
+      let wait = Effect<Action>.run { send in
         // Subscribe before typing: the stream does not replay, and a fast
         // agent could answer before a later subscription lands.
         let stream = await client.completions()
@@ -2899,6 +2865,7 @@ struct RootFeature {
           _ = await client.supersede(requestID)
           await send(
             .handoffFailed(
+              requestID: requestID,
               message:
                 "\(agent)'s pane could not take the request. Nothing was changed; "
                 + "Hand Off with Context starts \(title) without a briefing."))
@@ -2911,6 +2878,7 @@ struct RootFeature {
         }
       }
       .cancellable(id: CancelID.handoffCompletion(requestID))
+      return .merge(.send(.statusBar(.begin(activity))), wait)
 
     case .contextOnly(let profile, let title):
       let request = IPC.HandoffRequest(
@@ -2927,7 +2895,7 @@ struct RootFeature {
         await send(.handoffFinished(completion, targetTitle: title))
       } catch: { error, send in
         let message = (error as? IPCError)?.displayMessage ?? error.localizedDescription
-        await send(.handoffFailed(message: message))
+        await send(.handoffFailed(requestID: nil, message: message))
       }
     }
   }
@@ -2941,29 +2909,13 @@ struct RootFeature {
     state.agentLaunchWorktreeIDs.insert(worktreeID)
     let client = hierarchyClient
     return .run { send in
-      var failure: String?
+      var failure: StatusToast?
       do {
         try await client.launchAgentProfile(profileID, projectID, worktreeID)
-      } catch let error as RunScriptError {
-        failure = await Self.launchAgentErrorMessage(error)
       } catch {
-        failure = "Launch agent failed: \(error.localizedDescription)"
+        failure = Self.launchFailureToast(.agent, error: error)
       }
       await send(.worktreeAgentLaunchFinished(worktreeID, failure: failure))
-    }
-  }
-
-  /// Agent-launch sibling of `runScriptErrorMessage`. Same failure set (the
-  /// launch reuses the script pipeline) with the vocabulary the user was
-  /// working in — "profile", not "script".
-  static func launchAgentErrorMessage(_ error: RunScriptError) -> String {
-    switch error {
-    case .unknownScript:
-      return "Launch agent failed: profile no longer exists"
-    case .missingWorktree:
-      return "Launch agent failed: worktree not available"
-    case .missingProject:
-      return "Launch agent failed: project not available"
     }
   }
 

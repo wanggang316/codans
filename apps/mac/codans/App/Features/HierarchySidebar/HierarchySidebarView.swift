@@ -442,30 +442,6 @@ struct HierarchySidebarView: View {
         "Closes all panes and deletes each Worktree directory, including any uncommitted changes. This cannot be undone."
       )
     }
-    // Prune toast.
-    .alert(
-      "Prune complete",
-      isPresented: Binding(
-        get: { store.pruneToast != nil },
-        set: { if !$0 { store.send(.pruneToastDismissed) } }
-      )
-    ) {
-      Button("OK") { store.send(.pruneToastDismissed) }
-    } message: {
-      Text(store.pruneToast ?? "")
-    }
-    // Lifecycle wrapper failure (archive flag flip / delete teardown).
-    .alert(
-      "Worktree action failed",
-      isPresented: Binding(
-        get: { store.lifecycleErrorToast != nil },
-        set: { if !$0 { store.send(.lifecycleErrorToastDismissed) } }
-      )
-    ) {
-      Button("OK") { store.send(.lifecycleErrorToastDismissed) }
-    } message: {
-      Text(store.lifecycleErrorToast ?? "")
-    }
   }
 
   // MARK: - Toolbar

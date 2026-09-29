@@ -142,14 +142,6 @@ struct HierarchySidebarFeature {
     var hasShownArchiveExplainer: Bool = false
     /// Pending archive awaiting the first-archive explainer dialog.
     var pendingArchiveExplainer: PendingArchiveExplainer?
-    /// Transient toast after Prune completes.
-    var pruneToast: String?
-    /// Transient toast surfacing an archive / delete lifecycle failure.
-    /// The wrapper effects swallow the script's own pane output (it lives
-    /// in the spawned tab); this toast covers the catalog / git step that
-    /// fires after the script finishes — e.g. `removeWorktreeWithGit`
-    /// failing on a dirty index. `nil` = hidden.
-    var lifecycleErrorToast: String?
     /// Worktrees currently mid-archive / mid-delete, with the phase each
     /// lifecycle is in. Lifecycle scripts run in a real pane and the
     /// effect waits for the pane's child to exit before mutating the
@@ -290,8 +282,8 @@ struct HierarchySidebarFeature {
     case archivedWorktreesSheet(ArchivedWorktreesFeature.Action)
     case archivedWorktreesSheetDismissed
     case projectPruneTapped(projectID: ProjectID)
+    /// Result of Prune. The status bar renders it.
     case projectPruneCompleted(pruned: Int, error: String?)
-    case pruneToastDismissed
     /// Project ⋯ menu: batch archive every merged Worktree. The view
     /// resolves the merged set from GitHub PR snapshots and passes the IDs.
     case projectArchiveAllMergedTapped(projectID: ProjectID, worktreeIDs: [WorktreeID])
@@ -302,11 +294,11 @@ struct HierarchySidebarFeature {
     case projectRemoveAllMergedTapped(projectID: ProjectID, worktreeIDs: [WorktreeID])
     case projectRemoveAllMergedConfirmed
     case projectRemoveAllMergedCancelled
-    /// Surfaces a lifecycle wrapper failure (archive flag flip rejected,
-    /// delete-time `removeWorktreeWithGit` failed, etc.). Sent from the
-    /// wrapper effect's catch arm; renders via `lifecycleErrorToast`.
-    case lifecycleFailed(message: String)
-    case lifecycleErrorToastDismissed
+    /// A lifecycle step the user should hear about: a failure (archive flag
+    /// flip rejected, `removeWorktreeWithGit` failed) or a non-fatal note
+    /// (branch kept because it is checked out elsewhere). The status bar
+    /// renders it; this reducer keeps no state for it.
+    case lifecycleNotice(message: String)
     /// Lifecycle-effect bookends plus the phase advance in between — the
     /// row's in-progress presentation is driven by the `lifecycleProgress`
     /// entry that lives between `started` and `ended`. Always paired:
@@ -404,13 +396,16 @@ struct HierarchySidebarFeature {
     case workspaceMemberRemoveTapped(worktreeID: WorktreeID, inProject: ProjectID, name: String)
     case workspaceMemberRemoveConfirmed
     case workspaceMemberRemoveCancelled
-    case workspaceMemberRemoveFinished(message: String?)
+    /// `message` is nil on a clean removal, else a failure or kept-branch
+    /// note. The status bar renders it.
+    case workspaceMemberRemoveFinished(worktreeID: WorktreeID, message: String?)
     /// Project ⋯ menu on a workspace: entry-only, or delete every checkout
     /// and the folder.
     case workspaceRemoveTapped(projectID: ProjectID, name: String)
     case workspaceRemoveConfirmed(deleteFiles: Bool)
     case workspaceRemoveCancelled
-    case workspaceRemoveFinished(message: String?)
+    /// Same contract as `workspaceMemberRemoveFinished`.
+    case workspaceRemoveFinished(projectID: ProjectID, message: String?)
     /// Child-feature actions for the Connect to Server sheet.
     case remoteConnectionSheet(RemoteConnectionFeature.Action)
 
@@ -706,9 +701,11 @@ struct HierarchySidebarFeature {
       return .run { [client = workspaceClient] send in
         do {
           let warning = try await client.drop(pending.projectID, pending.worktreeID, true)
-          await send(.workspaceMemberRemoveFinished(message: warning))
+          await send(.workspaceMemberRemoveFinished(worktreeID: pending.worktreeID, message: warning))
         } catch {
-          await send(.workspaceMemberRemoveFinished(message: error.localizedDescription))
+          await send(
+            .workspaceMemberRemoveFinished(
+              worktreeID: pending.worktreeID, message: error.localizedDescription))
         }
       }
 
@@ -716,8 +713,7 @@ struct HierarchySidebarFeature {
       state.pendingWorkspaceMemberRemoval = nil
       return .none
 
-    case .workspaceMemberRemoveFinished(let message):
-      if let message { state.lifecycleErrorToast = message }
+    case .workspaceMemberRemoveFinished:
       return .none
 
     case .workspaceRemoveTapped(let projectID, let name):
@@ -738,9 +734,14 @@ struct HierarchySidebarFeature {
               "Could not unregister \(outcome.failures.joined(separator: ", ")); the folder was kept.")
           }
           notes.append(contentsOf: outcome.keptBranches)
-          await send(.workspaceRemoveFinished(message: notes.isEmpty ? nil : notes.joined(separator: " ")))
+          await send(
+            .workspaceRemoveFinished(
+              projectID: pending.projectID,
+              message: notes.isEmpty ? nil : notes.joined(separator: " ")))
         } catch {
-          await send(.workspaceRemoveFinished(message: error.localizedDescription))
+          await send(
+            .workspaceRemoveFinished(
+              projectID: pending.projectID, message: error.localizedDescription))
         }
       }
 
@@ -748,8 +749,7 @@ struct HierarchySidebarFeature {
       state.pendingWorkspaceRemoval = nil
       return .none
 
-    case .workspaceRemoveFinished(let message):
-      if let message { state.lifecycleErrorToast = message }
+    case .workspaceRemoveFinished:
       return .none
 
     case .connectServerTapped:
@@ -1082,19 +1082,7 @@ struct HierarchySidebarFeature {
         }
       }
 
-    case .projectPruneCompleted(let pruned, let error):
-      if let error {
-        state.pruneToast = "Prune failed: \(error)"
-      } else {
-        state.pruneToast =
-          pruned == 1
-          ? "Pruned 1 stale worktree"
-          : "Pruned \(pruned) stale worktrees"
-      }
-      return .none
-
-    case .pruneToastDismissed:
-      state.pruneToast = nil
+    case .projectPruneCompleted:
       return .none
 
     case .projectArchiveAllMergedTapped(let projectID, let worktreeIDs):
@@ -1150,12 +1138,7 @@ struct HierarchySidebarFeature {
       state.pendingRemoveAllMerged = nil
       return .none
 
-    case .lifecycleFailed(let message):
-      state.lifecycleErrorToast = message
-      return .none
-
-    case .lifecycleErrorToastDismissed:
-      state.lifecycleErrorToast = nil
+    case .lifecycleNotice:
       return .none
 
     case .lifecycleStarted(let wid, let progress):
@@ -1512,7 +1495,7 @@ struct HierarchySidebarFeature {
   /// archive script (if any) runs first in a transient tab on the
   /// worktree, then `Worktree.archived` flips. The script's own output
   /// lives in the spawned pane; only failures of the catalog flag flip
-  /// surface here, via `lifecycleErrorToast`.
+  /// surface here, via `lifecycleNotice`.
   private func runArchiveWithLifecycle(
     wid: WorktreeID, pid: ProjectID
   ) -> Effect<Action> {
@@ -1541,7 +1524,7 @@ struct HierarchySidebarFeature {
         try await client.setWorktreeArchived(wid, true)
       } catch {
         let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
-        await send(.lifecycleFailed(message: "Archive failed: \(detail)"))
+        await send(.lifecycleNotice(message: "Archive failed: \(detail)"))
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }
@@ -1555,7 +1538,7 @@ struct HierarchySidebarFeature {
   /// directly (skipping the script) — that path is owned by
   /// `ArchivedWorktreesFeature`. The script's own output lives in the
   /// spawned pane; only `removeWorktreeWithGit` failures surface here,
-  /// via `lifecycleErrorToast`.
+  /// via `lifecycleNotice`.
   private func runRemoveWithDeleteScript(
     client: HierarchyClient,
     wid: WorktreeID, pid: ProjectID
@@ -1582,13 +1565,13 @@ struct HierarchySidebarFeature {
       do {
         // A non-nil return means removal succeeded but the branch was
         // intentionally kept (checked out elsewhere) — surface it as a
-        // non-fatal note via the same toast channel.
+        // non-fatal note via the same notice channel.
         if let warning = try await client.removeWorktreeWithGit(wid, pid) {
-          await send(.lifecycleFailed(message: warning))
+          await send(.lifecycleNotice(message: warning))
         }
       } catch {
         let detail = (error as? GitWorktreeError).map(humanReadable) ?? error.localizedDescription
-        await send(.lifecycleFailed(message: "Delete failed: \(detail)"))
+        await send(.lifecycleNotice(message: "Delete failed: \(detail)"))
       }
       await send(.lifecycleEnded(worktreeID: wid))
     }
