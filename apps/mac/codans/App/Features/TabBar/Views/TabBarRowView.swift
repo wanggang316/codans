@@ -229,7 +229,8 @@ struct TabBarRowView: View {
       agentWorking: isAgentWorking(tab.id),
       isOnlyTab: count <= 1,
       isLastTab: index == count - 1,
-      chordHint: chordHint(for: index + 1),
+      // A narrowed chip shows only its edge, which the hint would cover.
+      chordHint: slice == nil ? chordHint(for: index + 1) : nil,
       onSelect: { onSelect(tab.id) },
       onClose: { onClose(tab.id) },
       onMiddleClick: { onMiddleClick(tab.id) },
@@ -407,10 +408,12 @@ struct TabBarRowView: View {
       TabStackLayout.maxScrollOffset(count: count, viewportWidth: viewport.width) > 0
     else { return nil }
     let selected = rendered.firstIndex { $0.id == selectedID } ?? 0
+    let placements = TabStackLayout.placements(
+      count: count, selectedIndex: selected,
+      scrollOffset: viewport.scrollOffset, viewportWidth: viewport.width)
     return StackState(
-      layout: TabStackLayout.frames(
-        count: count, selectedIndex: selected,
-        scrollOffset: viewport.scrollOffset, viewportWidth: viewport.width),
+      layout: placements.map(\.frame),
+      anchors: placements.map(\.anchor),
       selectedIndex: selected,
       scrollOffset: viewport.scrollOffset,
       viewportWidth: viewport.width)
@@ -423,13 +426,17 @@ struct TabBarRowView: View {
     let frame = stack.frames[index]
     let full = stack.layout[index]
     guard !isActive, frame.width < TabStackLayout.chipWidth else { return nil }
-    let isLeading = full.x + full.width / 2 < stack.viewportWidth / 2
-    let titleOffset = TabStackLayout.contentOffset(
-      frameWidth: full.width, isLeadingSide: isLeading, viewportWidth: stack.viewportWidth)
-    // Center the full-width content on the layout sliver and apply the
-    // system bar's title offset; a leading cut must not move the content.
-    let shift =
-      full.width / 2 + titleOffset - TabStackLayout.chipWidth / 2 - stack.leadingTrim[index]
+    let anchor = stack.anchors[index]
+    let inset =
+      anchor.squeeze == .none
+      ? 0
+      : TabStackLayout.contentOffset(
+        frameWidth: full.width, isLeadingSide: anchor.squeeze == .leading,
+        viewportWidth: stack.viewportWidth)
+    // Pin the full-width content to the frame's outer edge, pushed `inset`
+    // inwards, as the system bar does; a leading cut must not move it.
+    let edgeAligned = anchor.alignsLeading ? inset : full.width - TabStackLayout.chipWidth - inset
+    let shift = edgeAligned - stack.leadingTrim[index]
     let region = TabStackLayout.stackingRegion(
       atX: full.x + full.width / 2, frames: stack.layout, selectedIndex: stack.selectedIndex)
     let scroller = viewport.scroller
@@ -667,6 +674,7 @@ private struct ResolvingTabChipView: View {
 private struct StackState {
   /// Frames as the layout computes them.
   let layout: [TabStackLayout.Frame]
+  let anchors: [TabStackLayout.ContentAnchor]
   /// What is actually drawn: layout frames minus the part the selected tab
   /// covers. The selected capsule is translucent, so tabs stacked beneath
   /// it must be cut away rather than merely overlapped.
@@ -678,10 +686,11 @@ private struct StackState {
   let viewportWidth: CGFloat
 
   init(
-    layout: [TabStackLayout.Frame], selectedIndex: Int, scrollOffset: CGFloat,
-    viewportWidth: CGFloat
+    layout: [TabStackLayout.Frame], anchors: [TabStackLayout.ContentAnchor], selectedIndex: Int,
+    scrollOffset: CGFloat, viewportWidth: CGFloat
   ) {
     self.layout = layout
+    self.anchors = anchors
     self.selectedIndex = selectedIndex
     self.scrollOffset = scrollOffset
     self.viewportWidth = viewportWidth

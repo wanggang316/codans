@@ -63,6 +63,27 @@ struct TabStackLayoutTests {
     #expect(frames[16] == .init(x: 760, width: 120, isHidden: false))
   }
 
+  /// Measured on the system bar: content is pinned to the outer edge of a
+  /// narrowed tab — leading before the selected tab, trailing after it — so
+  /// thin slivers never show a slice of the title.
+  @Test func stackedContentHugsTheOuterEdge() {
+    let max = TabStackLayout.maxScrollOffset(count: 17, viewportWidth: 880)
+    let placements = TabStackLayout.placements(
+      count: 17, selectedIndex: 8, scrollOffset: max / 2, viewportWidth: 880)
+    let anchors = placements.map(\.anchor)
+    #expect(anchors[1] == .init(alignsLeading: true, squeeze: .leading))
+    #expect(anchors[8] == .init(alignsLeading: true, squeeze: .none))
+    #expect(anchors[15] == .init(alignsLeading: false, squeeze: .trailing))
+    #expect(
+      placements.map(\.frame)
+        == TabStackLayout.frames(
+          count: 17, selectedIndex: 8, scrollOffset: max / 2, viewportWidth: 880))
+    // A local stack against the selected tab keeps leading content.
+    let pinned = TabStackLayout.placements(
+      count: 17, selectedIndex: 12, scrollOffset: 0, viewportWidth: 880)
+    #expect(pinned[10].anchor == .init(alignsLeading: true, squeeze: .trailing))
+  }
+
   @Test func stackClickScrollsByOnePage() {
     // Measured: 880-pt bar, click the leading stack at offset 600 → 115.
     #expect(
