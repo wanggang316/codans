@@ -120,11 +120,13 @@ final class RemoteEndToEndUITests: XCTestCase {
     let app = XCUIApplication()
     _ = try openTerminal(app)
     type("true\n", in: app)
-    handOff("typed")  // the harness checks the phone's size, then types on the Mac
+    handOff("typed")  // the harness checks the phone's size, then takes it back from the Mac's notice
     handOff("mac-typed")  // the harness checked the Mac's size again
     type("true\n", in: app)
-    handOff("typed-again")
     shot("size-follows")
+    handOff("typed-again")  // the harness checks the phone's size, then types on the Mac
+    type("true\n", in: app)
+    handOff("typed-last")
   }
 
   /// Tab operations from the terminal's title menu. The harness checks the

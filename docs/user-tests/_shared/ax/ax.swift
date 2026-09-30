@@ -8,6 +8,9 @@ import ApplicationServices
 //   ax menu <pid> <menuBarItem> <menuItem>
 //   ax select-row <pid> <text>        select the outline/table row containing static text == text
 //   ax wait <pid> <label> [seconds]   exit 0 once an element with label exists
+//   ax gone <pid> <label> [seconds]   exit 0 once no element has label
+//   ax window-id <pid> [skip-label]   print the first window's CGWindowID (for screencapture -l,
+//                                     which captures the window even when others cover it)
 //   ax resize <pid> <width> <height> [skip-label]
 //                                     resize the first window with no element == skip-label
 
@@ -44,7 +47,7 @@ func find(_ root: AXUIElement, _ label: String) -> AXUIElement? {
 
 let args = CommandLine.arguments
 guard args.count >= 3, let pid = pid_t(args[2]) else {
-  FileHandle.standardError.write("usage: ax tree|press|menu|select-row|wait|resize <pid> ...\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: ax tree|press|menu|select-row|wait|gone|window-id|resize <pid> ...\n".data(using: .utf8)!)
   exit(2)
 }
 let app = AXUIElementCreateApplication(pid)
@@ -94,6 +97,35 @@ case "wait":
   }
   print("timeout waiting for \(args[3])")
   exit(1)
+case "gone":
+  let deadline = Date().addingTimeInterval(args.count > 4 ? Double(args[4]) ?? 10 : 10)
+  while Date() < deadline {
+    if find(app, args[3]) == nil { print("gone \(args[3])"); exit(0) }
+    usleep(250_000)
+  }
+  print("still there: \(args[3])")
+  exit(1)
+case "window-id":
+  let skip = args.count > 3 ? args[3] : nil
+  let windows = (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+  guard let window = windows.first(where: { w in skip.map { find(w, $0) == nil } ?? true }),
+    let position = attr(window, kAXPositionAttribute), let size = attr(window, kAXSizeAttribute)
+  else { print("no window"); exit(1) }
+  var origin = CGPoint.zero
+  var extent = CGSize.zero
+  AXValueGetValue(position as! AXValue, .cgPoint, &origin)
+  AXValueGetValue(size as! AXValue, .cgSize, &extent)
+  // AX has no window number; match the pid's on-screen windows by frame.
+  let infos = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]) ?? []
+  let match = infos.first { info in
+    guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
+      let bounds = info[kCGWindowBounds as String] as? [String: CGFloat]
+    else { return false }
+    return abs((bounds["X"] ?? -1) - origin.x) < 1 && abs((bounds["Y"] ?? -1) - origin.y) < 1
+      && abs((bounds["Width"] ?? -1) - extent.width) < 1 && abs((bounds["Height"] ?? -1) - extent.height) < 1
+  }
+  guard let number = match?[kCGWindowNumber as String] as? Int else { print("no window"); exit(1) }
+  print(number)
 case "resize":
   guard args.count >= 5, let width = Double(args[3]), let height = Double(args[4]) else {
     print("usage: ax resize <pid> <width> <height> [skip-label]"); exit(2)

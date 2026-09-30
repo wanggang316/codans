@@ -22,9 +22,11 @@
 #   live-terminal   the Mac prints a marker in the pane; the phone's terminal shows it
 #   live-input      the phone types `echo <marker>` + Return; the Mac pane has the output
 #   modifier-keys   `sleep 30` in the pane; the phone taps ctrl then c; the shell answers
-#   size-follows    the phone types: the pane takes the phone's size; the Mac
-#                   types: it takes the Mac's back; the phone leaves: the lead
-#                   and the size go back to the Mac (sizes read by a zmx observer)
+#   size-follows    the phone types: the pane takes the phone's size and the Mac
+#                   shows its notice, whose Use Mac Size takes the size back; the
+#                   phone types again, then the Mac types: it takes it back; the
+#                   phone types once more and leaves: the lead and the size go
+#                   back to the Mac (sizes read by a zmx observer)
 #   tab-ops         New Tab, Split Right, Close Pane (confirmed) from the phone;
 #                   checked in `codans tree --json`
 #   readonly-live   a "View only" device streams the pane, shows no key bar and says why
@@ -468,17 +470,39 @@ if want size-follows; then
   if await_phone typed; then
     phone=$(observed_size)
     (( ${phone#* } < ${mac#* } )) || follows="typing on the phone did not fit the pane to it: $mac -> $phone"
-    cli pane send "$PANE" "true" >/dev/null
-    sleep 1
-    back=$(observed_size)
-    [[ -n "$follows" || "$back" == "$mac" ]] || follows="typing on the Mac did not take it back: $back"
+    # The Mac says so over the pane, and its button takes the size back.
+    if [[ -z "$follows" ]]; then
+      if "$AX" wait "$MAC_PID" remote-sizing-notice 10 >/dev/null; then
+        window=$("$AX" window-id "$MAC_PID" "Remote Access")
+        [[ "$window" =~ ^[0-9]+$ ]] && screencapture -x -o -l "$window" "$SCRATCH/shots/mac-sized-for-phone.png"
+        "$AX" press "$MAC_PID" "Use Mac Size" >/dev/null
+        for _ in $(seq 1 20); do [[ "$(observed_size)" == "$mac" ]] && break; sleep 0.5; done
+        back=$(observed_size)
+        [[ "$back" == "$mac" ]] || follows="Use Mac Size did not take it back: $back"
+        [[ -n "$follows" ]] || "$AX" gone "$MAC_PID" remote-sizing-notice 10 >/dev/null ||
+          follows="the notice stayed after the Mac took the size back"
+      else
+        follows="the Mac showed no notice while the phone had the pane"
+      fi
+    fi
     release typed
     if await_phone mac-typed; then
       release mac-typed
       if await_phone typed-again; then
         again=$(observed_size)
         [[ -n "$follows" || "$again" == "$phone" ]] || follows="typing on the phone again did not fit it: $again"
+        cli pane send "$PANE" "true" >/dev/null
+        sleep 1
+        back=$(observed_size)
+        [[ -n "$follows" || "$back" == "$mac" ]] || follows="typing on the Mac did not take it back: $back"
         release typed-again
+        if await_phone typed-last; then
+          last=$(observed_size)
+          [[ -n "$follows" || "$last" == "$phone" ]] || follows="typing on the phone a third time did not fit it: $last"
+          release typed-last
+        else
+          follows="${follows:-the phone never typed a third time}"
+        fi
       else
         follows="${follows:-the phone never typed again}"
       fi
@@ -495,7 +519,7 @@ if want size-follows; then
     follows="${follows:-UI test failed}"
   fi
   if [[ -z "$follows" ]]; then
-    ok "size-follows: phone $phone, Mac $mac; typing moves it and leaving hands it back"
+    ok "size-follows: phone $phone, Mac $mac; the Mac's notice and button, typing on either side and leaving all move it"
   else
     bad "size-follows: $follows (see $SCRATCH/size-follows.log)"
   fi

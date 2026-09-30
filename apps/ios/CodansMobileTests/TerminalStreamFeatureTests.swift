@@ -523,6 +523,31 @@ struct TerminalStreamFeatureTests {
     #expect(store.state.isFittedToDevice)
   }
 
+  @Test
+  func leavingTheAppGivesAFittedPaneBackAndOnlyThen() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let calls = LockIsolated<[String]>([])
+    var state = seatState(screen: screen)
+    state.phase = .live
+    state.isAttached = true
+    state.isAttachedWithSeat = true
+    state.seat = .init(cols: 58, rows: 36)
+    state.grid = .init(cols: 135, rows: 53)
+    let store = TestStore(initialState: state) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.remoteClient.claimSize = { _, claim in calls.withValue { $0.append(claim ? "claim" : "release") } }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    // At the Mac's size: nothing to give back.
+    await store.send(.movedToBackground)
+    await store.send(.frameReceived(frame(1, epoch: 1, .reset(cols: 58, rows: 36, fidelity: .exact))))
+    await store.send(.movedToBackground)
+    await store.receive(\.giveSizeBackTapped)
+    for _ in 0..<100 where calls.value.isEmpty { await Task.yield() }
+    #expect(calls.value == ["release"])
+  }
 }
 
 /// Errors as the remote stack throws them.
