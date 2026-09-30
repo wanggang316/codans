@@ -306,7 +306,9 @@ private actor LiveRemoteSessions {
   func attachStream(_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error> {
     guard let target = streamTarget else { throw RemoteRPCClient.ClientError.connectionClosed }
     let generation = sessionGeneration
-    let request = IPC.PaneAttachStreamRequest(paneID: try Self.paneID(paneID))
+    // 33 ms rather than the Mac's 16 ms: half the frames, redraws and
+    // radio wake-ups, and still smooth for a terminal.
+    let request = IPC.PaneAttachStreamRequest(paneID: try Self.paneID(paneID), coalesceMillis: 33)
     let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
     let client = try await RemoteRPCClient.connect(to: target.endpoint, credential: target.credential, hello: hello)
     // The session may have been torn down, or replaced by one to another

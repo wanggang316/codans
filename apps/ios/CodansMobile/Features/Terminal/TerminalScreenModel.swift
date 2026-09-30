@@ -74,6 +74,7 @@ final class TerminalScreenModel {
       return
     }
     view.feed(byteArray: [UInt8](data)[...])
+    host?.outputDidArrive()
   }
 
   func resize(cols: Int, rows: Int) {

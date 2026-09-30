@@ -1,3 +1,4 @@
+import MetalKit
 import SwiftTerm
 import UIKit
 
@@ -57,6 +58,28 @@ final class MirrorTerminalView: TerminalView {
   override var accessibilityValue: String? {
     get { accessibilityPageContent() }
     set {}
+  }
+
+  // MARK: - Rendering
+
+  /// SwiftTerm's Metal renderer draws cells as GPU quads from a glyph
+  /// atlas: a busy agent redraws the screen many times a second, and the
+  /// CoreGraphics path rebuilds and rasterizes every changed row on the
+  /// CPU. SwiftTerm falls back to CoreGraphics on its own if Metal fails.
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    guard window != nil, !isUsingMetalRenderer else { return }
+    try? setUseMetal(true)
+  }
+
+  /// The raster scale for the current zoom, applied to the Metal view too:
+  /// its drawable follows its own scale factor, not this view's.
+  func setRasterScale(_ scale: CGFloat) {
+    contentScaleFactor = scale
+    for case let metal as MTKView in subviews {
+      metal.contentScaleFactor = scale
+    }
+    setNeedsDisplay()
   }
 
   // MARK: - Render only
