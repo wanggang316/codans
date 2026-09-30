@@ -120,7 +120,10 @@ struct ContentView: View {
         // leaves `pendingWorktrees` (cancel / discard), this resolves to nil
         // and the detail pane falls back to the regular selection-driven
         // render without a dedicated reducer transition.
-        activePendingWorktree: resolveActivePendingWorktree()
+        activePendingWorktree: resolveActivePendingWorktree(),
+        historyBack: store.navigationHistoryBack,
+        historyForward: store.navigationHistoryForward,
+        onHistoryJump: { jump in store.send(.worktreeHistoryJumpRequested(jump)) }
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .overlay(alignment: .bottom) { editorToastOverlay }

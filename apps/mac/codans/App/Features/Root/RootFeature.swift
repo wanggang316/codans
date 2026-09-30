@@ -8,7 +8,7 @@ import GhosttyKit
 
 /// A direct jump into the worktree visit history: which stack to walk and
 /// how deep. `offset` is 0-based from the top of that stack, so
-/// `.back(offset: 0)` is the single step the Back button / ⌘⌃[ take.
+/// `.back(offset: 0)` is the single step the Back button / its menu chord take.
 nonisolated enum WorktreeHistoryJump: Equatable, Sendable {
   case back(offset: Int)
   case forward(offset: Int)
@@ -3095,7 +3095,7 @@ struct RootFeature {
     return .pollTargetChanged(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
   }
 
-  /// Shared implementation behind Back, Forward, and the sidebar buttons'
+  /// Shared implementation behind Back, Forward, and the header control's
   /// press-and-hold jump. Takes `offset + 1` entries off the requested
   /// stack; the entries it skipped over, plus the selection being left,
   /// move to the opposite stack so a following single step retraces the
@@ -3147,9 +3147,9 @@ struct RootFeature {
       state.navigationHistoryBack = destination
     }
     state.suppressHistoryPush = true
-    // After navigating, reveal the new selection in the sidebar so users
-    // see where Back / Forward landed instead of having to scroll for it.
-    state.sidebarVisible = true
+    // Scroll the landing row into view when the sidebar is showing. A hidden
+    // sidebar stays hidden: Back / Forward live in the header and change
+    // what the detail shows; they are not a request to open the column.
     state.revealSelectionTrigger = UUID()
     return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
   }

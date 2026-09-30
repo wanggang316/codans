@@ -59,6 +59,14 @@ struct WorktreeDetailView: View {
   /// transitions itself. Failure mode keeps the row in the array with
   /// `.failed` status and is surfaced as the `failed(message:)` kind.
   let activePendingWorktree: PendingWorktreeBinding?
+  /// Worktree visit history, mirrored from `RootFeature.State` so the
+  /// toolbar's Back / Forward control can grey out a direction with nowhere
+  /// to go and fill its press-and-hold menus. Oldest entry first, matching
+  /// the reducer's stacks.
+  var historyBack: [HierarchySelection] = []
+  var historyForward: [HierarchySelection] = []
+  /// Routes to `RootFeature.worktreeHistoryJumpRequested`.
+  var onHistoryJump: (WorktreeHistoryJump) -> Void = { _ in }
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   /// Window-toolbar chrome is hidden window-wide (see the
@@ -317,6 +325,10 @@ struct WorktreeDetailView: View {
         // out of the toolbar's glass capsule so the icon + name + branch +
         // PR stats read as plain content alongside the trailing action
         // chips, matching the sidebar row.
+        // Back / Forward leads the header, the way Finder and Safari put
+        // theirs, in its own glass capsule ahead of the identity cluster.
+        ToolbarItem { historyControls }
+        ToolbarSpacer(.fixed)
         ToolbarItem { identitySlot(mode) }
           .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
@@ -335,6 +347,7 @@ struct WorktreeDetailView: View {
         // entry point for this app's audience.
         trailingToolbarItems(mode)
       } else {
+        ToolbarItem(placement: .navigation) { historyControls }
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         ToolbarItem(placement: .principal) { statusSlot(mode) }
         // The inbox stays outside the principal status/process item.
@@ -348,6 +361,25 @@ struct WorktreeDetailView: View {
         }
       }
     }
+  }
+
+  /// Back / Forward over the worktree visit history. Rows resolve against
+  /// the live catalog so the press-and-hold menus name what they jump to.
+  private var historyControls: some View {
+    WorktreeHistoryControls(
+      back: historyEntries(from: historyBack),
+      forward: historyEntries(from: historyForward),
+      onJump: onHistoryJump
+    )
+  }
+
+  private func historyEntries(from stack: [HierarchySelection]) -> [WorktreeHistoryEntry] {
+    guard !stack.isEmpty else { return [] }
+    return WorktreeHistoryEntry.resolve(
+      stack: stack,
+      catalog: hierarchyManager.catalog,
+      pullRequests: gitHubStore.snapshots
+    )
   }
 
   @available(macOS 26.0, *)
