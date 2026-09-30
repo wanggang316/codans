@@ -48,6 +48,7 @@ struct TerminalPaneView: View {
   private var hasKeyboard: Bool { keyboard != nil && store.isInteractive }
 
   @State private var isApproximateHintShown = false
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     VStack(spacing: 0) {
@@ -71,6 +72,9 @@ struct TerminalPaneView: View {
       store.send(.task)
     }
     .task(id: store.fidelity == .approximate && store.phase == .live) { await hideApproximateHintLater() }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .background { store.send(.movedToBackground) }
+    }
   }
 
   // MARK: - Screen

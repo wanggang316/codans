@@ -182,6 +182,8 @@ struct TerminalStreamFeature {
     /// Take the pane's size now, or give it back to the Mac.
     case fitToDeviceTapped
     case giveSizeBackTapped
+    /// The app left the screen; nobody is using this device's size.
+    case movedToBackground
     case seatCallFailed(RemoteFailure)
     case seatInputFailed([IPC.TerminalInputEvent], RemoteFailure)
 
@@ -302,6 +304,12 @@ struct TerminalStreamFeature {
         } catch: { error, send in
           await send(.seatCallFailed(RemoteFailure(error)))
         }
+
+      case .movedToBackground:
+        // Hand the pane back at once rather than when the connection
+        // finally drops; typing again takes it back.
+        guard state.isFittedToDevice, state.isAttachedWithSeat, state.isConnected else { return .none }
+        return .send(.giveSizeBackTapped)
 
       case .seatCallFailed(let failure):
         if failure.kind == .unsupported { state.isSeatUnavailable = true }
