@@ -414,6 +414,30 @@ struct TerminalStreamFeatureTests {
   }
 
   @Test
+  func aGridThatArrivesAfterAMirrorOpenedReopensTheStreamWithASeat() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let opened = LockIsolated<[IPC.TerminalGridSize?]>([])
+    var state = seatState(screen: screen)
+    state.isAttached = true
+    let store = TestStore(initialState: state) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.continuousClock = TestClock()
+      $0.remoteClient.attachStream = { _, seat, _ in
+        opened.withValue { $0.append(seat) }
+        return AsyncThrowingStream { _ in }
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.seatSizeChanged(.init(cols: 58, rows: 36)))
+    for _ in 0..<100 where opened.value.isEmpty { await Task.yield() }
+    #expect(opened.value == [IPC.TerminalGridSize(cols: 58, rows: 36)])
+    #expect(store.state.isAttachedWithSeat)
+    await store.skipInFlightEffects()
+  }
+
+  @Test
   func keysGoThroughTheSeatAsEncodedBytes() async {
     let screen = TerminalScreenModel(isRecording: true)
     let clock = TestClock()
@@ -475,6 +499,7 @@ struct TerminalStreamFeatureTests {
     var state = seatState(screen: screen)
     state.phase = .live
     state.isAttached = true
+    state.isAttachedWithSeat = true
     state.seat = .init(cols: 58, rows: 36)
     let store = TestStore(initialState: state) {
       TerminalStreamFeature()

@@ -133,6 +133,9 @@ final class TerminalStreamRegistry {
       )
       return nil
     }
+    logger.info(
+      "seat opened for pane \(request.paneID.description, privacy: .public) at \(size.cols, privacy: .public)x\(size.rows, privacy: .public), claim \((request.claim ?? .never).rawValue, privacy: .public)"
+    )
     switch request.claim ?? .never {
     case .now:
       seat.claim()

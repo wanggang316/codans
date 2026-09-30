@@ -82,15 +82,17 @@ struct TerminalPaneView: View {
   private var screen: some View {
     ZStack {
       MirrorTerminalView.background.swiftUIColor
-      if store.grid != nil {
-        TerminalScreen(model: store.screen) {
-          guard hasKeyboard else { return }
-          keyboard?.raiseKeyboard()
-        }
-        .opacity(store.isStale ? 0.35 : 1)
-        .themeAnimation(store.isStale)
-        .accessibilityIdentifier("terminal-screen")
+      // Laid out before the first frame, hidden, so the device's grid is
+      // known when the stream opens and the Mac can give it a seat.
+      TerminalScreen(model: store.screen) {
+        guard hasKeyboard else { return }
+        keyboard?.raiseKeyboard()
       }
+      .opacity(store.grid == nil ? 0 : store.isStale ? 0.35 : 1)
+      .allowsHitTesting(store.grid != nil)
+      .accessibilityHidden(store.grid == nil)
+      .themeAnimation(store.isStale)
+      .accessibilityIdentifier(store.grid == nil ? "terminal-screen-pending" : "terminal-screen")
       switch store.phase {
       case .connecting:
         if store.grid == nil {

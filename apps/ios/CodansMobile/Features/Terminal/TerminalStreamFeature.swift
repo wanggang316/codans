@@ -47,6 +47,8 @@ struct TerminalStreamFeature {
     var seat: Grid?
     /// Attaching waits briefly for `seat`, so the stream opens with one.
     var isWaitingForSeat = false
+    /// Whether the open stream asked for a seat.
+    var isAttachedWithSeat = false
     /// The Mac could not give this pane a seat; keys go through the Mac's
     /// surface as before.
     var isSeatUnavailable = false
@@ -271,6 +273,9 @@ struct TerminalStreamFeature {
           return .merge(.cancel(id: CancelID.seatWait(state.instance)), attach(&state))
         }
         guard state.isAttached, state.typesThroughSeat else { return .none }
+        // The grid came after the stream opened without a seat: open it
+        // again with one.
+        if !state.isAttachedWithSeat, state.isConnected { return attach(&state) }
         return .run { [clock] send in
           try await clock.sleep(for: Self.seatSizeSettle)
           await send(.seatSizeSettled)
@@ -540,6 +545,7 @@ struct TerminalStreamFeature {
     let attachStream = remoteClient.attachStream
     let paneID = state.paneID
     let seat = state.typesThroughSeat ? state.seat.map { IPC.TerminalGridSize(cols: $0.cols, rows: $0.rows) } : nil
+    state.isAttachedWithSeat = seat != nil
     return .run { send in
       // `.auto`: the pane takes this device's size at once only when nobody
       // is at the Mac; otherwise once this device types.
