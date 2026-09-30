@@ -22,8 +22,9 @@
 #   live-terminal   the Mac prints a marker in the pane; the phone's terminal shows it
 #   live-input      the phone types `echo <marker>` + Return; the Mac pane has the output
 #   modifier-keys   `sleep 30` in the pane; the phone taps ctrl then c; the shell answers
-#   no-leader-steal the phone types, then the Mac window is resized; `stty size`
-#                   follows the Mac and never the phone
+#   size-follows    the phone types: the pane takes the phone's size; the Mac
+#                   types: it takes the Mac's back; the phone leaves: the lead
+#                   and the size go back to the Mac (sizes read by a zmx observer)
 #   tab-ops         New Tab, Split Right, Close Pane (confirmed) from the phone;
 #                   checked in `codans tree --json`
 #   readonly-live   a "View only" device streams the pane, shows no key bar and says why
@@ -352,6 +353,15 @@ stty_size() {
   cli pane send "$PANE" "stty size" --capture 2>/dev/null | grep -Eo '^[0-9]+ [0-9]+$' | tail -1
 }
 
+# The pane's PTY size ("rows cols") as a zmx observer sees it: no input.
+observed_size() {
+  local sock
+  sock=$(find "$CACHE" -type s -iname "$PANE" 2>/dev/null | head -1)
+  [[ -n "$sock" ]] || return 1
+  python3 "$REPO_ROOT/apps/mac/ThirdParty/zmx/test/observer_client.py" state "$sock" 0 2>/dev/null |
+    awk '/^state /{ print $2" "$3; exit }'
+}
+
 # Resizes the main window: the one without the Settings sidebar's Remote
 # Access row. (The Pair New Device button is no marker: after a pairing
 # the pane shows Done in its place until the next code is issued.)
@@ -385,7 +395,7 @@ fi
 cli pane focus "$PANE" >/dev/null
 
 # --- "View and type": pairs, then the live cases run on the same pairing.
-LIVE_CASES=(live-terminal live-input modifier-keys no-leader-steal tab-ops)
+LIVE_CASES=(live-terminal live-input modifier-keys size-follows tab-ops)
 if want interactive "${LIVE_CASES[@]}" || { want rejected && ! want composer; }; then
   MARKER="hi-from-phone-$$"
   reset_sim
@@ -446,36 +456,46 @@ if want modifier-keys; then
   fi
 fi
 
-if want no-leader-steal; then
-  steal=""
+if want size-follows; then
+  follows=""
   resize_mac 1400 900
-  before=$(stty_size)
-  start_ui_test no-leader-steal testLeavesTheSizeToTheMac PAIRED=1
+  # Reads the size without typing: `stty size` in the pane would itself be
+  # input from the Mac and take the lead back.
+  mac=$(observed_size)
+  start_ui_test size-follows testSizeFollowsTheDeviceInUse PAIRED=1
   if await_phone typed; then
-    after_input=$(stty_size)
-    [[ -n "$before" && "$after_input" == "$before" ]] || steal="typing on the phone moved it: $before -> $after_input"
+    phone=$(observed_size)
+    (( ${phone#* } < ${mac#* } )) || follows="typing on the phone did not fit the pane to it: $mac -> $phone"
+    cli pane send "$PANE" "true" >/dev/null
+    sleep 1
+    back=$(observed_size)
+    [[ -n "$follows" || "$back" == "$mac" ]] || follows="typing on the Mac did not take it back: $back"
     release typed
-    if await_phone resized; then
-      resize_mac 1000 800
-      narrow=$(stty_size)
-      resize_mac 1400 900
-      wide=$(stty_size)
-      # The narrower window must give fewer columns, still far more than
-      # a phone's portrait grid, and the wide one must restore the original.
-      if [[ -z "$steal" ]] && ! { (( ${narrow#* } < ${before#* } && ${narrow#* } >= 60 )) && [[ "$wide" == "$before" ]]; }; then
-        steal="did not follow the Mac: $before, narrow $narrow, wide again $wide"
+    if await_phone mac-typed; then
+      release mac-typed
+      if await_phone typed-again; then
+        again=$(observed_size)
+        [[ -n "$follows" || "$again" == "$phone" ]] || follows="typing on the phone again did not fit it: $again"
+        release typed-again
+      else
+        follows="${follows:-the phone never typed again}"
       fi
-      release resized
-    else
-      steal="the phone never got to the resize step"
     fi
   else
-    steal="the phone never typed"
+    follows="the phone never typed"
   fi
-  if finish_ui_test && [[ -z "$steal" ]]; then
-    ok "no-leader-steal: stty size stayed the Mac's ($before, narrow $narrow)"
+  if finish_ui_test; then
+    # The seat closed with the app: the daemon hands the lead back.
+    for _ in $(seq 1 20); do [[ "$(observed_size)" == "$mac" ]] && break; sleep 0.5; done
+    left=$(observed_size)
+    [[ -n "$follows" || "$left" == "$mac" ]] || follows="leaving did not hand the size back: $left"
   else
-    bad "no-leader-steal: ${steal:-UI test failed} (see $SCRATCH/no-leader-steal.log)"
+    follows="${follows:-UI test failed}"
+  fi
+  if [[ -z "$follows" ]]; then
+    ok "size-follows: phone $phone, Mac $mac; typing moves it and leaving hands it back"
+  else
+    bad "size-follows: $follows (see $SCRATCH/size-follows.log)"
   fi
 fi
 

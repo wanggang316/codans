@@ -12,6 +12,7 @@ UI test (`apps/ios/CodansMobileUITests`) on a simulator.
 | interactive | A "View and type" code opened as a `codans-pair:` link is confirmed, then pairs over Bonjour + TLS-PSK. The fixture project and its pane are listed. A line typed on the phone runs in the Mac pane, and the Mac reads the output back. |
 | read-only | A "View only" pairing never shows the input bar. |
 | composer | A "View and type" pairing opens the composer at the bottom of the home screen, picks Create New Worktree, and sends a message. The Mac creates the worktree on `agent/<first words of the message>` and starts the fake `claude` profile with the message as its prompt. The phone navigates to the new agent's pane. |
+| size-follows | The pane's size follows the device in use. Typing on the phone lays the pane out for the phone's screen; typing on the Mac takes it back; closing the phone app hands it back. The PTY size is read through a zmx observer, which never types. |
 | revoke | Revoking every device in Settings removes their records and their Keychain keys. |
 
 The UI test skips itself unless the harness passes a pairing code through a

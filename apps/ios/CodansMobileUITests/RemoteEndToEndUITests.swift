@@ -111,17 +111,20 @@ final class RemoteEndToEndUITests: XCTestCase {
     shot("modifier-sent")
   }
 
-  /// The phone watches without owning the PTY size: after it types into
-  /// the pane, the harness checks `stty size` did not move, then resizes
-  /// the Mac window and checks the size follows the Mac.
+  /// The pane's size follows the device in use: typing here lays it out
+  /// for this screen, typing on the Mac takes it back, and leaving hands it
+  /// back. The harness reads the PTY size through a zmx observer, which
+  /// never types.
   @MainActor
-  func testLeavesTheSizeToTheMac() throws {
+  func testSizeFollowsTheDeviceInUse() throws {
     let app = XCUIApplication()
     _ = try openTerminal(app)
     type("true\n", in: app)
-    handOff("typed")
-    handOff("resized", timeout: 90)
-    shot("no-leader-steal")
+    handOff("typed")  // the harness checks the phone's size, then types on the Mac
+    handOff("mac-typed")  // the harness checked the Mac's size again
+    type("true\n", in: app)
+    handOff("typed-again")
+    shot("size-follows")
   }
 
   /// Tab operations from the terminal's title menu. The harness checks the
