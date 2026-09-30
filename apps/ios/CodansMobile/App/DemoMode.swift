@@ -27,6 +27,9 @@ import Network
 ///   first-load skeleton).
 /// - `CODANS_DEMO_SHEET`: open `agents`, `settings`, `pairing`,
 ///   `connectionDetails` or `composer` shortly after launch.
+/// - `CODANS_DEMO_BUSY=1`: the claude pane is a wide Mac pane (170 × 48)
+///   under a busy agent — a spinner redrawn every 60 ms and a new line of
+///   output every 300 ms — for measuring the terminal's rendering cost.
 /// - `CODANS_DEMO_APPROXIMATE=1`: streams arrive as from a pane started
 ///   before the observer protocol, marked approximate.
 /// - `CODANS_DEMO_OLD_MAC=1`: the Mac speaks protocol minor 1, so panes use
@@ -143,6 +146,7 @@ enum DemoMode {
       let readOnly = environment["CODANS_DEMO_READONLY"] == "1"
       let notOpen = environment["CODANS_DEMO_NOT_OPEN"] == "1"
       let exits = environment["CODANS_DEMO_EXITED"] == "1"
+      let busy = environment["CODANS_DEMO_BUSY"] == "1"
       let fidelity: IPC.TerminalStreamFidelity =
         environment["CODANS_DEMO_APPROXIMATE"] == "1" ? .approximate : .exact
       let protocolMinor = environment["CODANS_DEMO_OLD_MAC"] == "1" ? 1 : 2
@@ -203,7 +207,9 @@ enum DemoMode {
         launchAgent: { _, _, _, _ in nil },
         attachStream: { paneID in
           AsyncThrowingStream { continuation in
-            let sample = DemoFixtures.stream(for: paneID)
+            var sample = DemoFixtures.stream(for: paneID)
+            let isBusy = busy && paneID == DemoFixtures.paneID("claude")
+            if isBusy { sample = DemoFixtures.Sample(cols: 170, rows: 48, bytes: sample.bytes) }
             continuation.yield(
               IPC.TerminalStreamFrame(
                 seq: 1, epoch: 1, payload: .reset(cols: sample.cols, rows: sample.rows, fidelity: fidelity)))
@@ -213,11 +219,10 @@ enum DemoMode {
                 IPC.TerminalStreamFrame(seq: 3, epoch: 1, payload: .exited(reason: "exit status 1", exitCode: 1)))
             }
             let task = Task {
-              var seq = 3
-              while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
-                continuation.yield(IPC.TerminalStreamFrame(seq: seq, epoch: 1, payload: .heartbeat))
-                seq += 1
+              if isBusy {
+                await DemoFixtures.streamBusyAgent(from: 3, into: continuation)
+              } else {
+                await DemoFixtures.streamHeartbeats(from: 3, into: continuation)
               }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -335,6 +340,41 @@ nonisolated enum DemoFixtures {
       sessionID: nil, title: nil, projectID: projectID, projectName: "codans", worktreeID: worktree,
       worktreeName: worktree == worktreeID ? "feat/ios" : "main", tabID: agentTabID, tabTitle: nil,
       isFocused: false)
+  }
+
+  /// A quiet pane: a heartbeat every 30 s, until cancelled.
+  static func streamHeartbeats(
+    from firstSeq: Int, into continuation: AsyncThrowingStream<IPC.TerminalStreamFrame, Error>.Continuation
+  ) async {
+    var seq = firstSeq
+    while !Task.isCancelled {
+      try? await Task.sleep(for: .seconds(30))
+      continuation.yield(IPC.TerminalStreamFrame(seq: seq, epoch: 1, payload: .heartbeat))
+      seq += 1
+    }
+  }
+
+  /// A busy agent's output: a spinner redrawn every 60 ms, a new line
+  /// every 300 ms, until cancelled.
+  static func streamBusyAgent(
+    from firstSeq: Int, into continuation: AsyncThrowingStream<IPC.TerminalStreamFrame, Error>.Continuation
+  ) async {
+    let spinner = ["✻", "✶", "✳", "✢", "·", "✢", "✳", "✶"]
+    var seq = firstSeq
+    var tick = 0
+    while !Task.isCancelled {
+      try? await Task.sleep(for: .milliseconds(60))
+      var chunk = ""
+      if tick % 5 == 0 {
+        chunk += "\r\u{1B}[2K  ⎿  Read apps/ios/CodansMobile/Features/Terminal/File\(tick).swift "
+        chunk += String(repeating: "lorem ipsum ", count: 10) + "\r\n"
+      }
+      chunk += "\r\u{1B}[2K\u{1B}[38;5;208m\(spinner[tick % spinner.count]) Working… "
+      chunk += "(\(tick * 60 / 1000)s · esc to interrupt)\u{1B}[0m"
+      continuation.yield(IPC.TerminalStreamFrame(seq: seq, epoch: 1, payload: .output(Data(chunk.utf8))))
+      seq += 1
+      tick += 1
+    }
   }
 
   struct Sample {
