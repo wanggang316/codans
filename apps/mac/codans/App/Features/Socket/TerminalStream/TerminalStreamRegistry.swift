@@ -31,10 +31,14 @@ final class TerminalStreamRegistry {
     var connectSeat: @MainActor (String, IPC.TerminalGridSize) throws -> any ZmxSeatConnection = { path, size in
       try ZmxParticipantClient(socketPath: path, cols: UInt16(size.cols), rows: UInt16(size.rows))
     }
-    /// Whether nobody is at the Mac for this pane — it is not open there,
-    /// the screen is locked, or the Mac has been idle for a while — so a
-    /// seat asking to claim `.auto` takes the pane's size at once.
-    var isMacAway: @MainActor (PaneID) -> Bool = { _ in false }
+    /// Whether nobody can see the pane on the Mac — it is not open in a
+    /// visible window — so a seat asking to claim `.auto` takes the pane's
+    /// size at once. Where the pane is on screen, resizing it for a device
+    /// would disturb what the Mac shows; the device waits until its user
+    /// types.
+    var isHiddenOnMac: @MainActor (PaneID) -> Bool = { _ in false }
+    /// The paired device's name for a caller key, for the Mac's notice.
+    var deviceName: @MainActor (String) -> String? = { _ in nil }
     var clock: any Clock<Duration> = ContinuousClock()
   }
 
@@ -42,8 +46,12 @@ final class TerminalStreamRegistry {
   static let totalLimit = 16
 
   private let dependencies: Dependencies
+  /// Panes sized for a device, for the Mac's panes to show.
+  let sizing: RemotePaneSizing
   private let logger = Logger(subsystem: "com.gumpw.codans.remote", category: "terminal-stream")
   private var active: [UUID: Entry] = [:]
+  /// Each observed pane's PTY grid, as its daemon last reported it.
+  private var ptyGrids: [PaneID: PaneStreamSession.GridSize] = [:]
 
   private struct Entry {
     let caller: String
@@ -51,11 +59,15 @@ final class TerminalStreamRegistry {
     let stopObservingGeometry: (@MainActor () -> Void)?
     /// The caller's terminal seat, when it may type and sent its grid.
     let seat: (any ZmxSeatConnection)?
+    /// The grid the seat asks for.
+    var seatSize: IPC.TerminalGridSize?
     let openedAt: UInt64
   }
 
-  init(dependencies: Dependencies) {
+  init(dependencies: Dependencies, sizing: RemotePaneSizing = RemotePaneSizing()) {
     self.dependencies = dependencies
+    self.sizing = sizing
+    sizing.takeBack = { [weak self] paneID in self?.giveSizeBack(paneID) }
   }
 
   var activeCount: Int { active.count }
@@ -93,16 +105,21 @@ final class TerminalStreamRegistry {
       configuration: .clamped(scrollbackRows: request.scrollbackRows, coalesceMillis: request.coalesceMillis),
       clock: dependencies.clock,
       gridSize: { [weak self] in await self?.gridSize(paneID) },
+      onGrid: { [weak self] grid in
+        Task { @MainActor [weak self] in self?.ptyGridChanged(paneID, to: grid) }
+      },
       onEnd: { [weak self] in
         Task { @MainActor [weak self] in self?.release(sessionID) }
       }
     )
-    let stopObserving = dependencies.observeGeometry(paneID) {
+    let stopObserving = dependencies.observeGeometry(paneID) { [weak self] in
       Task { await session.geometryChanged() }
+      self?.refreshSizing(paneID)
     }
     let seat = canType ? openSeat(request, path: path) : nil
     active[sessionID] = Entry(
       caller: caller, paneID: paneID, stopObservingGeometry: stopObserving, seat: seat,
+      seatSize: seat == nil ? nil : request.seat,
       openedAt: DispatchTime.now().uptimeNanoseconds)
     logger.info("stream opened for pane \(paneID.description, privacy: .public) (\(self.active.count, privacy: .public) active)")
     return .success(session)
@@ -117,7 +134,45 @@ final class TerminalStreamRegistry {
     entry.stopObservingGeometry?()
     // The daemon hands the lead, and the pane's size, back to the Mac.
     entry.seat?.close()
+    if !active.values.contains(where: { $0.paneID == entry.paneID }) { ptyGrids[entry.paneID] = nil }
+    refreshSizing(entry.paneID)
     logger.info("stream closed (\(self.active.count, privacy: .public) active)")
+  }
+
+  // MARK: - Sizing
+
+  private func ptyGridChanged(_ paneID: PaneID, to grid: PaneStreamSession.GridSize) {
+    guard active.values.contains(where: { $0.paneID == paneID }) else { return }
+    ptyGrids[paneID] = grid
+    refreshSizing(paneID)
+  }
+
+  /// Records whether a device has the pane at its size: the PTY is at a
+  /// seat's grid and not at the Mac's. Matching a seat's grid keeps a
+  /// moment of the Mac's own resizing (a split drag, say) from reading as
+  /// a device's.
+  private func refreshSizing(_ paneID: PaneID) {
+    let atSeatGrid: (Entry, PaneStreamSession.GridSize) -> Bool = { entry, pty in
+      entry.paneID == paneID && entry.seatSize.map { Int(pty.cols) == $0.cols && Int(pty.rows) == $0.rows } == true
+    }
+    guard let pty = ptyGrids[paneID], let mac = dependencies.gridSize(paneID), pty != mac,
+      let leader = active.values.filter({ atSeatGrid($0, pty) }).max(by: { $0.openedAt < $1.openedAt })
+    else {
+      sizing.set(nil, for: paneID)
+      return
+    }
+    sizing.set(
+      RemotePaneSizing.Sizing(
+        deviceName: dependencies.deviceName(leader.caller), cols: Int(pty.cols), rows: Int(pty.rows),
+        macCols: Int(mac.cols), macRows: Int(mac.rows)),
+      for: paneID)
+  }
+
+  /// The Mac asked for the pane's size back: every seat at it lets go of
+  /// the lead, which the daemon hands to its most recently active client.
+  func giveSizeBack(_ paneID: PaneID) {
+    for entry in active.values where entry.paneID == paneID { entry.seat?.release() }
+    logger.info("size given back to the Mac for pane \(paneID.description, privacy: .public)")
   }
 
   // MARK: - Seats
@@ -139,7 +194,7 @@ final class TerminalStreamRegistry {
     switch request.claim ?? .never {
     case .now:
       seat.claim()
-    case .auto where dependencies.isMacAway(request.paneID):
+    case .auto where dependencies.isHiddenOnMac(request.paneID):
       seat.claim()
     case .auto, .never:
       break
@@ -149,18 +204,26 @@ final class TerminalStreamRegistry {
 
   /// The caller's seat at the pane: its newest stream's, when several.
   private func seat(caller: String, paneID: PaneID) -> (any ZmxSeatConnection)? {
-    active.values
-      .filter { $0.caller == caller && $0.paneID == paneID && $0.seat != nil }
-      .max { $0.openedAt < $1.openedAt }?
-      .seat
+    seatEntryID(caller: caller, paneID: paneID).flatMap { active[$0]?.seat }
+  }
+
+  private func seatEntryID(caller: String, paneID: PaneID) -> UUID? {
+    active
+      .filter { $0.value.caller == caller && $0.value.paneID == paneID && $0.value.seat != nil }
+      .max { $0.value.openedAt < $1.value.openedAt }?
+      .key
   }
 
   func setSeatSize(_ request: IPC.PaneSetStreamSizeRequest, caller: String) -> Result<Void, IPCError> {
     guard request.size.isValid else {
       return .failure(.invalidParams(message: "size out of range", path: ["size"]))
     }
-    guard let seat = seat(caller: caller, paneID: request.paneID) else { return .failure(Self.noSeat) }
+    guard let id = seatEntryID(caller: caller, paneID: request.paneID), let seat = active[id]?.seat else {
+      return .failure(Self.noSeat)
+    }
+    active[id]?.seatSize = request.size
     seat.setSize(cols: UInt16(request.size.cols), rows: UInt16(request.size.rows))
+    refreshSizing(request.paneID)
     return .success(())
   }
 
@@ -203,5 +266,11 @@ extension CallerContext {
     case .remote(let deviceID, _): return "remote:\(deviceID.uuidString)"
     case .local(let pid): return "local:\(pid.map(String.init) ?? "unknown")"
     }
+  }
+
+  /// The paired device behind a `streamCallerKey`, if it names one.
+  static func deviceID(fromStreamCallerKey key: String) -> UUID? {
+    guard key.hasPrefix("remote:") else { return nil }
+    return UUID(uuidString: String(key.dropFirst("remote:".count)))
   }
 }

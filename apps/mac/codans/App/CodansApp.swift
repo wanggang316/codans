@@ -87,6 +87,7 @@ struct CodansApp: App {
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(appState.agentInstallation)
+          .environment(appState.remotePaneSizing)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
@@ -478,6 +479,9 @@ final class AppState {
   /// greys out missing agents, and the worktree toolbar's Agents menu hides
   /// them — and they must not disagree.
   let agentInstallation = AgentInstallationStore()
+  /// Panes a paired device has sized for itself; the pane views cover
+  /// the cells the device's grid leaves unused.
+  let remotePaneSizing = RemotePaneSizing()
   /// One-shot authorization + completion fan-out for panel-injected handoff
   /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
   /// and the in-app Hand Off panel (registers / observes).
@@ -1297,12 +1301,18 @@ final class AppState {
           let token = surface.observeGridSize { _, _ in handler() }
           return { [weak surface] in surface?.removeGridSizeObserver(token) }
         },
-        // Nobody sees the pane on the Mac: it is not open here, or nobody
-        // is at the Mac.
-        isMacAway: { [weak terminalEngine] paneID in
-          terminalEngine?.ghosttyRuntime?.surface(for: paneID) == nil || MacPresence.isAway()
+        // Not on screen: no surface, a surface outside any window (another
+        // tab), or a window that is hidden, covered, or behind a locked or
+        // sleeping display.
+        isHiddenOnMac: { [weak terminalEngine] paneID in
+          guard let window = terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.view.window else { return true }
+          return !window.occlusionState.contains(.visible)
+        },
+        deviceName: { [weak self] caller in
+          CallerContext.deviceID(fromStreamCallerKey: caller).flatMap { self?.remoteGateway?.devices.device($0)?.name }
         }
-      )
+      ),
+      sizing: remotePaneSizing
     )
   }
 

@@ -210,11 +210,11 @@ struct TerminalStreamRegistryTests {
   }
 
   @Test
-  func claimNowTakesTheLeadAndAutoOnlyWhenNobodyIsAtTheMac() throws {
+  func claimNowTakesTheLeadAndAutoOnlyWhenThePaneIsNotOnScreen() throws {
     let fixture = try Fixture.withLivePane()
     _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .now), caller: "a", canType: true).get()
     _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .auto), caller: "b", canType: true).get()
-    fixture.macIsAway = true
+    fixture.macHidesPane = true
     _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .auto), caller: "c", canType: true).get()
     _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .never), caller: "d", canType: true).get()
     #expect(fixture.seats.value.map(\.log.value) == [["claim"], [], ["claim"], []])
@@ -254,15 +254,83 @@ struct TerminalStreamRegistryTests {
     #expect(seat.log.value == ["close"])
   }
 
+  @Test(.timeLimit(.minutes(1)))
+  func aPaneAtADevicesGridShowsAsSizedForItUntilTheMacTakesItBack() async throws {
+    let fixture = try Fixture.withLivePane()
+    fixture.macGrid = .init(cols: 135, rows: 53)
+    let phone = "remote:\(Fixture.deviceID.uuidString)"
+    let session = try fixture.registry.attach(seatRequest(fixture.paneID), caller: phone, canType: true).get()
+    let connection = try #require(fixture.connections.value.first)
+    let seat = try #require(fixture.seats.value.first)
+    let consumer = Task { _ = await session.next() }
+    defer { consumer.cancel() }
+    let sizing = fixture.registry.sizing
+    let paneID = fixture.paneID
+
+    connection.emitObserveState(cols: 135, rows: 53, "")
+    connection.emitObserveResize(cols: 58, rows: 36)
+    await waitUntil { sizing.panes[paneID] != nil }
+    #expect(
+      sizing.panes[paneID]
+        == .init(deviceName: "Gump's iPhone", cols: 58, rows: 36, macCols: 135, macRows: 53))
+
+    // The Mac's own resizing, at a grid no seat asked for, is not a
+    // device's.
+    connection.emitObserveResize(cols: 100, rows: 40)
+    await waitUntil { sizing.panes[paneID] == nil }
+
+    connection.emitObserveResize(cols: 58, rows: 36)
+    await waitUntil { sizing.panes[paneID] != nil }
+    // The Mac's pane grew to the device's grid: nothing left to cover.
+    fixture.macGrid = .init(cols: 58, rows: 36)
+    fixture.geometryHandler?()
+    #expect(sizing.panes[paneID] == nil)
+
+    fixture.macGrid = .init(cols: 135, rows: 53)
+    fixture.geometryHandler?()
+    #expect(sizing.panes[paneID] != nil)
+    sizing.takeBack(paneID)
+    #expect(seat.log.value == ["release"])
+    connection.emitObserveResize(cols: 135, rows: 53)
+    await waitUntil { sizing.panes[paneID] == nil }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func endingTheLastStreamClearsThePanesSizing() async throws {
+    let fixture = try Fixture.withLivePane()
+    fixture.macGrid = .init(cols: 135, rows: 53)
+    let session = try fixture.registry.attach(seatRequest(fixture.paneID), caller: "phone", canType: true).get()
+    let connection = try #require(fixture.connections.value.first)
+    let consumer = Task { _ = await session.next() }
+    defer { consumer.cancel() }
+    let sizing = fixture.registry.sizing
+    let paneID = fixture.paneID
+    connection.emitObserveState(cols: 58, rows: 36, "")
+    await waitUntil { sizing.panes[paneID] != nil }
+    #expect(sizing.panes[paneID]?.deviceName == nil)
+    await session.end()
+    await waitUntil { sizing.panes[paneID] == nil }
+  }
+
+  private func waitUntil(_ condition: @MainActor () -> Bool) async {
+    for _ in 0..<500 where !condition() {
+      await Task.megaYield()
+    }
+    #expect(condition())
+  }
+
   @MainActor
   private final class Fixture {
+    static let deviceID = UUID()
     let paneID = PaneID()
     let socketPath = NSTemporaryDirectory() + "stream-registry-\(UUID().uuidString)"
     var knownPanes: Set<PaneID> = []
     var geometryObservers = 0
     let connections = LockIsolated<[FakeObserverConnection]>([])
     let seats = LockIsolated<[FakeSeat]>([])
-    var macIsAway = false
+    var macHidesPane = false
+    var macGrid: PaneStreamSession.GridSize?
+    var geometryHandler: (@MainActor () -> Void)?
     private(set) var registry: TerminalStreamRegistry!
 
     init() {
@@ -272,9 +340,10 @@ struct TerminalStreamRegistryTests {
         dependencies: .init(
           paneExists: { [weak self] in self?.knownPanes.contains($0) ?? false },
           socketPath: { [socketPath] _ in socketPath },
-          gridSize: { _ in nil },
-          observeGeometry: { [weak self] _, _ in
+          gridSize: { [weak self] _ in self?.macGrid },
+          observeGeometry: { [weak self] _, handler in
             self?.geometryObservers += 1
+            self?.geometryHandler = handler
             return { [weak self] in self?.geometryObservers -= 1 }
           },
           connect: { _ in
@@ -287,7 +356,8 @@ struct TerminalStreamRegistryTests {
             seats.withValue { $0.append(seat) }
             return seat
           },
-          isMacAway: { [weak self] _ in self?.macIsAway ?? false },
+          isHiddenOnMac: { [weak self] _ in self?.macHidesPane ?? false },
+          deviceName: { $0 == "remote:\(Self.deviceID.uuidString)" ? "Gump's iPhone" : nil },
           clock: TestClock<Duration>()
         ))
     }

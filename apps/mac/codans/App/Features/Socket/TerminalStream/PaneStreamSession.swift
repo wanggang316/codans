@@ -80,6 +80,9 @@ actor PaneStreamSession {
   private let clock: any Clock<Duration>
   private let gridSize: @Sendable () async -> GridSize?
   private let onEnd: @Sendable () -> Void
+  /// Told the PTY's grid whenever the daemon reports it: an exact
+  /// snapshot or a resize. A history snapshot's size is only a guess.
+  private let onGrid: @Sendable (GridSize) -> Void
   private let logger = Logger(subsystem: "com.gumpw.codans.remote", category: "terminal-stream")
 
   private var decoder = ZmxStreamDecoder()
@@ -118,6 +121,7 @@ actor PaneStreamSession {
     configuration: Configuration = Configuration(),
     clock: any Clock<Duration> = ContinuousClock(),
     gridSize: @escaping @Sendable () async -> GridSize? = { nil },
+    onGrid: @escaping @Sendable (GridSize) -> Void = { _ in },
     onEnd: @escaping @Sendable () -> Void = {}
   ) {
     self.connection = connection
@@ -125,6 +129,7 @@ actor PaneStreamSession {
     self.clock = clock
     self.gridSize = gridSize
     self.onEnd = onEnd
+    self.onGrid = onGrid
   }
 
   /// The next frame, or nil once the stream is over (the pane exited and
@@ -267,12 +272,14 @@ actor PaneStreamSession {
     case .resized(let cols, let rows):
       let size = GridSize(cols: cols, rows: rows)
       lastSize = size
+      onGrid(size)
       enqueue(.resized(size))
     }
   }
 
   private func enqueueSnapshot(size: GridSize, fidelity: IPC.TerminalStreamFidelity, state: Data) {
     lastSize = size
+    if fidelity == .exact { onGrid(size) }
     enqueue(.reset(size, fidelity))
     var offset = state.startIndex
     while offset < state.endIndex {
