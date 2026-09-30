@@ -6,7 +6,7 @@ import Testing
 @testable import Codans
 
 /// Browser-style Worktree visit history: the single Back / Forward steps the
-/// menu chords take, and the deeper jumps the sidebar buttons' press-and-hold
+/// menu chords take, and the deeper jumps the header control's press-and-hold
 /// menu issues.
 @MainActor
 struct WorktreeHistoryTests {
@@ -82,7 +82,22 @@ struct WorktreeHistoryTests {
     // The step must not re-record itself as a fresh visit when the
     // selection stream echoes it back.
     #expect(store.state.suppressHistoryPush)
-    #expect(store.state.sidebarVisible)
+  }
+
+  @Test
+  func navigatingLeavesAHiddenSidebarHidden() async {
+    let fixture = Fixture()
+    let (store, selected) = Self.makeStore(fixture, forward: [0])
+    await store.send(.toggleSidebarRequested)
+    #expect(!store.state.sidebarVisible)
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+    await store.send(.worktreeHistoryJumpRequested(.forward(offset: 0)))
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[3])
+    #expect(!store.state.sidebarVisible)
   }
 
   @Test
@@ -173,5 +188,92 @@ struct WorktreeHistoryTests {
     #expect(selected.value == nil)
     #expect(store.state.navigationHistoryBack.isEmpty)
     #expect(store.state.navigationHistoryForward.isEmpty)
+  }
+
+  // MARK: - Menu rows
+
+  @Test
+  func entriesResolveNearestFirstWithTrueOffsets() {
+    let fixture = Fixture()
+    let stack = [fixture.selection(0), fixture.selection(1), fixture.selection(2)]
+
+    let entries = WorktreeHistoryEntry.resolve(stack: stack, catalog: fixture.catalog)
+
+    #expect(entries.map(\.branchTitle) == ["c", "b", "a"])
+    #expect(entries.map(\.offset) == [0, 1, 2])
+    // Worktree names restate their branches, so the caption is just the
+    // Project — the header's suppression rule.
+    #expect(entries.allSatisfy { $0.worktreeName == nil && $0.projectName == "p" })
+  }
+
+  @Test
+  func entriesMirrorTheHeaderIdentity() {
+    let feature = Worktree(name: "Menu work", path: "/tmp/codans-menu", branch: "feat/menu")
+    let reviewed = Worktree(name: "review", path: "/tmp/codans-review", branch: "review")
+    let main = Worktree(name: "main", path: "/tmp/codans", branch: "main")
+    let project = Project(
+      name: "codans", rootPath: "/tmp/codans", gitRoot: "/tmp/codans",
+      worktrees: [feature, reviewed, main], color: .orange
+    )
+    let folder = Project(
+      name: "notes", rootPath: "/tmp/notes",
+      worktrees: [Worktree(name: "notes", path: "/tmp/notes")]
+    )
+    let catalog = Catalog(projects: [project, folder])
+    let stack = [
+      HierarchySelection(projectID: folder.id, worktreeID: folder.worktrees[0].id),
+      HierarchySelection(projectID: project.id, worktreeID: main.id),
+      HierarchySelection(projectID: project.id, worktreeID: reviewed.id),
+      HierarchySelection(projectID: project.id, worktreeID: feature.id),
+    ]
+    let pullRequest = PullRequestSnapshot(
+      number: 7, title: "Review", state: .merged, isDraft: false, headRefName: "review",
+      author: "me", additions: 1, deletions: 0, commitCount: 1, mergeable: .unknown,
+      url: URL(string: "https://example.com/pr/7")!, updatedAt: Date()
+    )
+
+    let entries = WorktreeHistoryEntry.resolve(
+      stack: stack, catalog: catalog, pullRequests: [reviewed.id: pullRequest]
+    )
+
+    #expect(
+      entries.map(\.glyph) == [
+        .branch, .pullRequest(.merged, isDraft: false), .defaultBranch, .folder,
+      ])
+    #expect(entries.map(\.branchTitle) == ["feat/menu", "review", "main", "(detached)"])
+    #expect(entries.map(\.worktreeName) == ["Menu work", nil, nil, "notes"])
+    #expect(entries.map(\.projectName) == ["codans", "codans", "codans", "notes"])
+    #expect(entries.first?.projectColor == .orange)
+  }
+
+  @Test
+  func entriesDropWorktreesThatLeftTheCatalogAndKeepStackOffsets() {
+    let fixture = Fixture()
+    let deleted = HierarchySelection(projectID: fixture.projectID, worktreeID: WorktreeID())
+    // Stack, oldest first: a, <deleted>, c.
+    let stack = [fixture.selection(0), deleted, fixture.selection(2)]
+
+    let entries = WorktreeHistoryEntry.resolve(
+      stack: stack, catalog: fixture.catalog
+    )
+
+    #expect(entries.map(\.branchTitle) == ["c", "a"])
+    // `a` keeps offset 2 — the stack still holds the dead entry, so a jump
+    // has to count past it.
+    #expect(entries.map(\.offset) == [0, 2])
+  }
+
+  @Test
+  func entriesStopAtTheMenuLimit() {
+    let fixture = Fixture()
+    let stack = (0..<40).map { fixture.selection($0 % 4) }
+
+    let entries = WorktreeHistoryEntry.resolve(
+      stack: stack, catalog: fixture.catalog
+    )
+
+    #expect(entries.count == WorktreeHistoryEntry.menuLimit)
+    #expect(entries.first?.offset == 0)
+    #expect(entries.last?.offset == WorktreeHistoryEntry.menuLimit - 1)
   }
 }
