@@ -80,8 +80,8 @@ struct ShortcutSchemaAuditTests {
     (.revealCurrentWorktreeInSidebar, (0x26, [.command, .shift])),  // ⌘⇧J
     (.selectPreviousWorktree, (0x7E, [.command, .control])),  // ⌘⌃↑
     (.selectNextWorktree, (0x7D, [.command, .control])),  // ⌘⌃↓
-    (.worktreeHistoryBack, (0x21, [.command, .control])),  // ⌘⌃[
-    (.worktreeHistoryForward, (0x1E, [.command, .control])),  // ⌘⌃]
+    (.worktreeHistoryBack, (0x21, [.command])),  // ⌘[
+    (.worktreeHistoryForward, (0x1E, [.command])),  // ⌘]
     (.newTab, (0x11, [.command])),  // t
     (.closeTab, (0x0D, [.command])),  // w
     (.renameActiveTab, (0x0F, [.command, .shift])),  // ⌘⇧R
