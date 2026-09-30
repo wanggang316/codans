@@ -213,6 +213,7 @@ struct ConnectionFeatureTests {
     let relay = RemoteRelayCoordinates(url: "wss://relay.example.dev", macID: "mac")
     let (events, _) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
     var info = Fixtures.liveInfo
+    info.protocolMinor = 3
     info.relay = relay
     let reported = info
     let saved = LockIsolated<[RemoteRelayCoordinates?]>([])
@@ -243,6 +244,36 @@ struct ConnectionFeatureTests {
     for _ in 0..<100 where saved.value.isEmpty { await Task.yield() }
     #expect(saved.value == [relay])
     #expect(store.state.health.hasRelay)
+    await Self.endSession(store)
+  }
+
+  /// A Mac build from before the relay reports no relay at all; that must
+  /// not erase the one the phone learned from a newer build.
+  @Test
+  func anOlderMacLeavesTheKnownRelayAlone() async {
+    let relay = RemoteRelayCoordinates(url: "wss://relay.example.dev", macID: "mac")
+    var state = Self.pairedState()
+    state.gateways[0].relay = relay
+    let (events, _) = AsyncThrowingStream<IPC.EventFrame, Error>.makeStream()
+    let store = Self.store(state) {
+      $0.remoteClient.discover = { _ in [] }
+      $0.remoteClient.connect = { _, _, _ in RemoteSession(info: Fixtures.liveInfo, events: events) }
+    }
+
+    await store.send(.connectTapped) {
+      $0.phase = .discovering
+    }
+    await store.receive(\.gatewayResolved) {
+      $0.phase = .handshaking
+    }
+    await store.receive(\.sessionOpened) {
+      $0.phase = .syncing
+      $0.session = Fixtures.liveInfo
+      $0.supportsLiveTerminal = true
+      $0.lastSessionPermission = .interactive
+      $0.lastContact = Fixtures.pairedAt
+    }
+    #expect(store.state.gateways[0].relay == relay)
     await Self.endSession(store)
   }
 

@@ -178,7 +178,7 @@ struct TerminalStreamRegistryTests {
 
   @Test
   func handshakeAdvertisesProtocolMinorTwo() {
-    #expect(SystemHandlers.Versions(server: "1", appBundle: "1").protocolMinor == 2)
+    #expect(SystemHandlers.Versions(server: "1", appBundle: "1").protocolMinor == 3)
   }
 
   // MARK: - Fixture

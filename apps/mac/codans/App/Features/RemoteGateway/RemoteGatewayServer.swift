@@ -140,8 +140,15 @@ final class RemoteGatewayServer {
   /// Follows the "access from outside this network" switch. Only in effect
   /// while the gateway itself is enabled.
   func setRelayAllowed(_ allowed: Bool) {
+    let hadRelay = relayCoordinates
     isRelayAllowed = allowed
     reconcileRelay()
+    // A phone learns the relay (or that it is gone) only at its handshake:
+    // reconnect everyone, as for a permission change, so a phone connected
+    // now leaves the house knowing the way back.
+    if relayCoordinates != hadRelay {
+      for id in Array(connections.keys) { closeConnection(id) }
+    }
   }
 
   /// Where a phone can reach this Mac through the relay; nil unless the

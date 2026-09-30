@@ -468,7 +468,7 @@ All endpoints are WebSocket upgrades on `wss://relay.codans.dev` (Caddy on the n
 
 - **Setting.** Remote Access gains "Allow access from outside this network", off by default and only available while Remote Access is on. `CODANS_RELAY_URL` overrides the relay for tests; `CODANS_REMOTE_DISABLED` still forces everything off.
 - **Connector.** While allowed, a `RelayConnector` keeps the control connection (jittered backoff reconnect) and publishes the paired devices' token hashes. For each `incoming` it opens the session WebSocket and a plain TCP connection to `127.0.0.1:<gateway port>` and pumps bytes both ways. The gateway sees an ordinary TLS-PSK client.
-- **Telling the phone.** `HelloResponse` gains an optional `relay` (`url`, `macID`) while the relay is allowed, and new pairing codes carry it too, so a phone paired earlier learns it on its next LAN connection without pairing again.
+- **Telling the phone.** `HelloResponse` gains an optional `relay` (`url`, `macID`) while the relay is allowed (protocol minor 3), and new pairing codes carry it too, so a phone paired earlier learns it on its next LAN connection without pairing again. Turning outside access on or off drops the gateway's connections, as a permission change does, so a phone that is connected when the switch flips re-handshakes and learns it at once. A phone updates what it knows only from a minor-3 Mac on the LAN: an older build has no answer, and must not erase a relay learned from a newer one.
 
 ### Phone
 

@@ -304,7 +304,7 @@ struct ConnectionFeature {
         // The Mac tells the phone where its relay is (or that there is none
         // any more) at every handshake; a LAN session is the authority,
         // since a relay session only exists because the phone knew it.
-        guard let id = state.activeGateway?.id, info.route == .lan,
+        guard let id = state.activeGateway?.id, info.route == .lan, info.reportsRelay,
           let index = state.gateways.firstIndex(where: { $0.id == id }), state.gateways[index].relay != info.relay
         else { return syncing }
         state.gateways[index].relay = info.relay

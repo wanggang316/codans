@@ -193,6 +193,11 @@ struct ConnectionDetailsView: View {
 struct ConnectionDetailsForm: View {
   let store: StoreOf<ConnectionFeature>
 
+  private func outsideAccess(session: RemoteSessionInfo?) -> String {
+    if session?.route == .relay { return "Connected via relay" }
+    return store.activeGateway?.relay == nil ? "Not set up" : "Ready"
+  }
+
   var body: some View {
     let health = store.health
     Form {
@@ -234,6 +239,14 @@ struct ConnectionDetailsForm: View {
           }
           LabeledContent("Live terminal", value: session.supportsLiveTerminal ? "Yes" : "Needs a Mac update")
         }
+      }
+
+      Section {
+        LabeledContent("Outside this network", value: outsideAccess(session: store.session))
+      } footer: {
+        Text(
+          "To reach your Mac over cellular or another network, turn on “Allow access from outside this network” in Codans Settings › Remote Access, then connect here once on the same network."
+        )
       }
 
       if health.lastContact != nil || health.lastSyncedAt != nil {

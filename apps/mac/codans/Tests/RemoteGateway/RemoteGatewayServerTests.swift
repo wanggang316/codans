@@ -270,6 +270,29 @@ struct RemoteGatewayServerTests {
     #expect(try gateway.pairNewDevice().relay == nil)
   }
 
+  /// Turning outside access on or off reconnects every device: a phone
+  /// learns the relay only at its handshake.
+  @Test(.timeLimit(.minutes(1)))
+  func togglingOutsideAccessReconnectsDevices() async throws {
+    let dir = try Self.makeTempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = PairedDeviceStore(fileURL: dir.appendingPathComponent("d.json"), keys: InMemoryRemoteKeyStore())
+    let gateway = Self.makeGateway(store: store, environment: ["CODANS_RELAY_URL": "ws://127.0.0.1:9"])
+    defer { gateway.setEnabled(false) }
+    gateway.setEnabled(true)
+    let payload = try gateway.pairNewDevice()
+    let port = try await Self.waitUntilListening(gateway)
+    let client = try await RemoteRPCClient.connect(
+      to: .hostPort(host: "127.0.0.1", port: port), credential: payload.credential,
+      hello: HelloRequest(clientVersion: "1", clientBinary: "test"))
+
+    gateway.setRelayAllowed(true)
+    for _ in 0..<250 where await client.isConnected {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(await !client.isConnected)
+  }
+
   // MARK: - Helpers
 
   private static func makeRouter() -> MethodRouter {

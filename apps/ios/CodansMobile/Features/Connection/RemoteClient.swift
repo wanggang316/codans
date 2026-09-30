@@ -29,6 +29,11 @@ nonisolated struct RemoteSessionInfo: Equatable, Sendable {
   var supportsLiveTerminal: Bool { Self.supportsLiveTerminal(protocolMinor: protocolMinor) }
 
   static func supportsLiveTerminal(protocolMinor: Int) -> Bool { protocolMinor >= 2 }
+
+  /// Whether `relay` is the Mac's answer: from minor 3 a nil relay means
+  /// outside access is off. An older Mac has no answer at all, and must not
+  /// erase a relay the phone learned from another build.
+  var reportsRelay: Bool { protocolMinor >= 3 }
 }
 
 /// An open session: handshake facts plus the `events.subscribe` stream,
