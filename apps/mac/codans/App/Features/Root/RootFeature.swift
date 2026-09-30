@@ -6,6 +6,14 @@ import CryptoKit
 import Foundation
 import GhosttyKit
 
+/// A direct jump into the worktree visit history: which stack to walk and
+/// how deep. `offset` is 0-based from the top of that stack, so
+/// `.back(offset: 0)` is the single step the Back button / its menu chord take.
+nonisolated enum WorktreeHistoryJump: Equatable, Sendable {
+  case back(offset: Int)
+  case forward(offset: Int)
+}
+
 /// Root reducer for the TCA shell. Composes sub-features for the sidebar,
 /// the worktree detail column, and top-level presentations. Also owns the
 /// two long-running subscriptions that every feature depends on:
@@ -366,6 +374,11 @@ struct RootFeature {
     case worktreeHistoryBackRequested
     /// Mirror of `worktreeHistoryBackRequested` in the opposite direction.
     case worktreeHistoryForwardRequested
+    /// Jumps straight to an entry further down one of the history stacks,
+    /// the way a browser's press-and-hold Back/Forward menu does. The
+    /// skipped entries move to the opposite stack so a following Back /
+    /// Forward retraces the jump one step at a time.
+    case worktreeHistoryJumpRequested(WorktreeHistoryJump)
     /// $EDITOR routing. Dispatched from `EditorFeature.delegate.openShellEditorRequested`
     /// when any editor-open path resolves the preferred id to `EditorRegistry.shellEditorID`.
     /// Locates the target Worktree by path, creates a fresh Tab, and spawns a Pane with
@@ -2333,32 +2346,13 @@ struct RootFeature {
         )
 
       case .worktreeHistoryBackRequested:
-        guard let target = state.navigationHistoryBack.popLast() else { return .none }
-        state.navigationHistoryForward.append(state.selection)
-        state.suppressHistoryPush = true
-        guard
-          let projectID = target.projectID,
-          let worktreeID = target.worktreeID
-        else { return .none }
-        // After navigating, reveal the new selection in the sidebar so users
-        // see where ⌘⌃[ landed instead of having to scroll for it.
-        state.sidebarVisible = true
-        state.revealSelectionTrigger = UUID()
-        return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
+        return Self.navigateHistory(&state, jump: .back(offset: 0))
 
       case .worktreeHistoryForwardRequested:
-        guard let target = state.navigationHistoryForward.popLast() else { return .none }
-        state.navigationHistoryBack.append(state.selection)
-        state.suppressHistoryPush = true
-        guard
-          let projectID = target.projectID,
-          let worktreeID = target.worktreeID
-        else { return .none }
-        // After navigating, reveal the new selection in the sidebar so users
-        // see where ⌘⌃] landed instead of having to scroll for it.
-        state.sidebarVisible = true
-        state.revealSelectionTrigger = UUID()
-        return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
+        return Self.navigateHistory(&state, jump: .forward(offset: 0))
+
+      case .worktreeHistoryJumpRequested(let jump):
+        return Self.navigateHistory(&state, jump: jump)
       }
     }
     .ifLet(\.$commandPalette, action: \.commandPalette) {
@@ -3099,6 +3093,65 @@ struct RootFeature {
         fallback: gitHubFetchUnits(in: project).first)
     else { return paused }
     return .pollTargetChanged(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
+  }
+
+  /// Shared implementation behind Back, Forward, and the header control's
+  /// press-and-hold jump. Takes `offset + 1` entries off the requested
+  /// stack; the entries it skipped over, plus the selection being left,
+  /// move to the opposite stack so a following single step retraces the
+  /// jump one entry at a time. A single step is just `offset == 0`.
+  ///
+  /// Nothing is mutated unless the target resolves to a real
+  /// Project/Worktree pair — a half-applied jump would desync the two
+  /// stacks from the selection they describe.
+  static func navigateHistory(
+    _ state: inout State,
+    jump: WorktreeHistoryJump
+  ) -> Effect<Action> {
+    let offset: Int
+    let goingBack: Bool
+    switch jump {
+    case .back(let value):
+      offset = value
+      goingBack = true
+    case .forward(let value):
+      offset = value
+      goingBack = false
+    }
+    var source = goingBack ? state.navigationHistoryBack : state.navigationHistoryForward
+    var destination = goingBack ? state.navigationHistoryForward : state.navigationHistoryBack
+    guard offset >= 0, offset < source.count else { return .none }
+
+    // Stacks are oldest-first, so the requested entry sits `offset` below
+    // the top and everything above it was visited more recently.
+    let targetIndex = source.count - 1 - offset
+    let target = source[targetIndex]
+    guard
+      let projectID = target.projectID,
+      let worktreeID = target.worktreeID
+    else { return .none }
+
+    let skipped = Array(source[(targetIndex + 1)...])
+    source.removeSubrange(targetIndex...)
+    // Nearest entry last: the selection we are leaving is the farthest one
+    // in the opposite direction, the entries we skipped over come back in
+    // reverse visit order.
+    destination.append(state.selection)
+    destination.append(contentsOf: skipped.reversed())
+
+    if goingBack {
+      state.navigationHistoryBack = source
+      state.navigationHistoryForward = destination
+    } else {
+      state.navigationHistoryForward = source
+      state.navigationHistoryBack = destination
+    }
+    state.suppressHistoryPush = true
+    // Scroll the landing row into view when the sidebar is showing. A hidden
+    // sidebar stays hidden: Back / Forward live in the header and change
+    // what the detail shows; they are not a request to open the column.
+    state.revealSelectionTrigger = UUID()
+    return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
   }
 
 }
