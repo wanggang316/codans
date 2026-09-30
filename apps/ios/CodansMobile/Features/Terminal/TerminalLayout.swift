@@ -92,12 +92,12 @@ final class TerminalStoreCache {
   private var stores: [String: StoreOf<TerminalStreamFeature>] = [:]
 
   func store(
-    for paneID: String, permission: IPC.RemotePermission, isConnected: Bool
+    for paneID: String, permission: IPC.RemotePermission, isConnected: Bool, supportsSeats: Bool
   ) -> StoreOf<TerminalStreamFeature> {
     if let store = stores[paneID] { return store }
-    let store = Store(
-      initialState: TerminalStreamFeature.State(paneID: paneID, permission: permission, isConnected: isConnected)
-    ) {
+    var state = TerminalStreamFeature.State(paneID: paneID, permission: permission, isConnected: isConnected)
+    state.supportsSeats = supportsSeats
+    let store = Store(initialState: state) {
       TerminalStreamFeature()
     } withDependencies: {
       #if DEBUG

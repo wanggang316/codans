@@ -40,6 +40,8 @@ struct TerminalDetailView: View {
   /// and drop to their reconnecting state as soon as it is not.
   private var isConnected: Bool { store.connection.isLive }
   private var permission: IPC.RemotePermission { store.connection.terminalPermission }
+  /// Whether the Mac gives this device terminal seats (protocol minor 4).
+  private var supportsSeats: Bool { store.connection.session?.supportsSeats ?? false }
   private var isSplitLayout: Bool { sizeClass == .regular }
 
   var body: some View {
@@ -56,6 +58,9 @@ struct TerminalDetailView: View {
     }
     .onChange(of: permission) { _, permission in
       for pane in cache.all { pane.send(.permissionChanged(permission)) }
+    }
+    .onChange(of: supportsSeats) { _, supports in
+      for pane in cache.all { pane.send(.seatSupportChanged(supports)) }
     }
   }
 
@@ -85,6 +90,7 @@ struct TerminalDetailView: View {
           PaneStrip(
             location: location,
             agent: store.agents.kind(ofPane: location.pane.id),
+            isFitted: focused.isFittedToDevice,
             onSwipe: { offset in select(TerminalLayout.pane(offset, from: location.pane.id, in: location.tab)) }
           )
           TerminalPaneView(
@@ -115,6 +121,9 @@ struct TerminalDetailView: View {
             isRenaming = true
           },
           openOnMac: { focused.send(.openOnMacTapped) },
+          sizing: focused.typesThroughSeat ? (focused.isFittedToDevice ? .fitted : .mac) : nil,
+          fitToDevice: { focused.send(.fitToDeviceTapped) },
+          giveSizeBack: { focused.send(.giveSizeBackTapped) },
           close: { closeConfirmation = $0 == .tab ? .tab : .pane }
         )
       }
@@ -237,7 +246,8 @@ struct TerminalDetailView: View {
   // MARK: - Stores
 
   private func paneStore(_ paneID: String, location: PaneLocation) -> StoreOf<TerminalStreamFeature> {
-    let paneStore = cache.store(for: paneID, permission: permission, isConnected: isConnected)
+    let paneStore = cache.store(
+      for: paneID, permission: permission, isConnected: isConnected, supportsSeats: supportsSeats)
     let locator = PaneLocator(
       projectID: location.project.id, worktreeID: location.worktree.id, tabID: location.tab.id, paneID: paneID)
     if paneStore.location != locator {
@@ -321,7 +331,13 @@ private struct TabTitleMenu: View {
   let split: (SplitDirection) -> Void
   let rename: () -> Void
   let openOnMac: () -> Void
+  /// Who the pane is laid out for, when this device has a seat.
+  let sizing: Sizing?
+  let fitToDevice: () -> Void
+  let giveSizeBack: () -> Void
   let close: (CloseKind) -> Void
+
+  enum Sizing { case fitted, mac }
 
   @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -363,6 +379,16 @@ private struct TabTitleMenu: View {
           Button("New Tab", systemImage: "plus.square.on.square", action: newTab)
           Button("Split Right", systemImage: "rectangle.split.2x1") { split(.right) }
           Button("Split Down", systemImage: "rectangle.split.1x2") { split(.down) }
+          switch sizing {
+          case .mac:
+            Button(
+              "Fit to This \(UIDevice.current.localizedModel)", systemImage: "arrow.down.right.and.arrow.up.left",
+              action: fitToDevice)
+          case .fitted:
+            Button("Give Size Back to Mac", systemImage: "macwindow", action: giveSizeBack)
+          case nil:
+            EmptyView()
+          }
           Button("Rename Tab…", systemImage: "pencil", action: rename)
           Button("Open on Mac", systemImage: "macwindow", action: openOnMac)
         }
@@ -466,6 +492,8 @@ private struct PageDots: View {
 private struct PaneStrip: View {
   let location: PaneLocation
   let agent: AgentGroup.Kind?
+  /// The pane is laid out for this device's screen.
+  var isFitted = false
   let onSwipe: (Int) -> Void
 
   var body: some View {
@@ -492,6 +520,12 @@ private struct PaneStrip: View {
           .truncationMode(.head)
       }
       Spacer(minLength: 0)
+      if isFitted {
+        Image(systemName: UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone")
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(Color.inkSecondary)
+          .accessibilityLabel("Sized for this device")
+      }
       if location.tab.panes.count > 1 {
         Image(systemName: "chevron.left.chevron.right")
           .accessibilityHidden(true)

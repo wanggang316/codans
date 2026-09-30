@@ -40,7 +40,7 @@ struct TerminalStreamFeatureTests {
     let store = TestStore(initialState: makeState(screen: screen)) {
       TerminalStreamFeature()
     } withDependencies: {
-      $0.remoteClient.attachStream = { paneID in
+      $0.remoteClient.attachStream = { paneID, _, _ in
         #expect(paneID == "A")
         return frames
       }
@@ -96,7 +96,7 @@ struct TerminalStreamFeatureTests {
       TerminalStreamFeature()
     } withDependencies: {
       $0.continuousClock = TestClock()
-      $0.remoteClient.attachStream = { _ in
+      $0.remoteClient.attachStream = { _, _, _ in
         attaches.withValue { $0 += 1 }
         return AsyncThrowingStream { continuation in
           continuation.yield(
@@ -143,7 +143,7 @@ struct TerminalStreamFeatureTests {
       TerminalStreamFeature()
     } withDependencies: {
       $0.continuousClock = clock
-      $0.remoteClient.attachStream = { _ in throw RemoteFailure(.other, "no session") }
+      $0.remoteClient.attachStream = { _, _, _ in throw RemoteFailure(.other, "no session") }
     }
 
     await store.send(.task) { $0.isAttached = true }
@@ -351,6 +351,153 @@ struct TerminalStreamFeatureTests {
       $0.navigation = .paneClosed
     }
   }
+
+  // MARK: - Seats
+
+  private func seatState(screen: TerminalScreenModel) -> TerminalStreamFeature.State {
+    var state = makeState(screen: screen)
+    state.supportsSeats = true
+    return state
+  }
+
+  @Test
+  func attachingWaitsForTheScreenGridAndOpensASeatThatClaimsAuto() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let clock = TestClock()
+    let opened = LockIsolated<[(IPC.TerminalGridSize?, IPC.TerminalSizeClaim?)]>([])
+    let store = TestStore(initialState: seatState(screen: screen)) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.remoteClient.attachStream = { _, seat, claim in
+        opened.withValue { $0.append((seat, claim)) }
+        return AsyncThrowingStream { _ in }
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.task) { $0.isWaitingForSeat = true }
+    await store.send(.seatSizeChanged(.init(cols: 58, rows: 36))) {
+      $0.seat = .init(cols: 58, rows: 36)
+      $0.isWaitingForSeat = false
+      $0.isAttached = true
+    }
+    for _ in 0..<100 where opened.value.isEmpty { await Task.yield() }
+    #expect(opened.value.count == 1)
+    #expect(opened.value.first?.0 == IPC.TerminalGridSize(cols: 58, rows: 36))
+    #expect(opened.value.first?.1 == .auto)
+    await store.skipInFlightEffects()
+  }
+
+  @Test
+  func withoutAGridInTimeItAttachesAsAMirror() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let clock = TestClock()
+    let opened = LockIsolated<[IPC.TerminalGridSize?]>([])
+    let store = TestStore(initialState: seatState(screen: screen)) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.remoteClient.attachStream = { _, seat, _ in
+        opened.withValue { $0.append(seat) }
+        return AsyncThrowingStream { _ in }
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.task)
+    await clock.advance(by: TerminalStreamFeature.seatWait)
+    await store.receive(\.seatWaitExpired)
+    for _ in 0..<100 where opened.value.isEmpty { await Task.yield() }
+    #expect(opened.value == [nil])
+    await store.skipInFlightEffects()
+  }
+
+  @Test
+  func keysGoThroughTheSeatAsEncodedBytes() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let clock = TestClock()
+    let typed = LockIsolated<[Data]>([])
+    var state = seatState(screen: screen)
+    state.phase = .live
+    state.isAttached = true
+    state.seat = .init(cols: 58, rows: 36)
+    let store = TestStore(initialState: state) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.remoteClient.typeBytes = { _, bytes in typed.withValue { $0.append(bytes) } }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.textTyped("ls"))
+    await store.send(.keyPressed(code: "ArrowUp", mods: .none))
+    await store.send(.eventsRequested([.ctrl("c")]))
+    await clock.advance(by: TerminalStreamFeature.flushDelay)
+    await store.receive(\.sendFinished)
+    #expect(typed.value == [Data("ls\u{1B}[A\u{03}".utf8)])
+  }
+
+  @Test
+  func aMacWithoutASeatGetsTheSameKeysTheOldWay() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let clock = TestClock()
+    let sent = LockIsolated<[[IPC.TerminalInputEvent]]>([])
+    var state = seatState(screen: screen)
+    state.phase = .live
+    state.isAttached = true
+    let store = TestStore(initialState: state) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.remoteClient.typeBytes = { _, _ in throw RemoteFailure(.unsupported, "no terminal seat") }
+      $0.remoteClient.sendEvents = { _, events in
+        sent.withValue { $0.append(events) }
+        return IPC.TerminalSendEventsResult(delivered: events.count, rejected: [])
+      }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.textTyped("x"))
+    await clock.advance(by: TerminalStreamFeature.flushDelay)
+    await store.receive(\.seatInputFailed)
+    await store.receive(\.flush)
+    await store.receive(\.sendFinished)
+    #expect(store.state.isSeatUnavailable)
+    #expect(sent.value == [[.text("x")]])
+  }
+
+  @Test
+  func aNewGridSettlesBeforeTheSeatResizesAndFitAndGiveBackReachTheMac() async {
+    let screen = TerminalScreenModel(isRecording: true)
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    var state = seatState(screen: screen)
+    state.phase = .live
+    state.isAttached = true
+    state.seat = .init(cols: 58, rows: 36)
+    let store = TestStore(initialState: state) {
+      TerminalStreamFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.remoteClient.setSeatSize = { _, size in calls.withValue { $0.append("size \(size.cols)x\(size.rows)") } }
+      $0.remoteClient.claimSize = { _, claim in calls.withValue { $0.append(claim ? "claim" : "release") } }
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.seatSizeChanged(.init(cols: 58, rows: 20)))
+    await store.send(.seatSizeChanged(.init(cols: 58, rows: 36)))
+    await clock.advance(by: TerminalStreamFeature.seatSizeSettle)
+    await store.receive(\.seatSizeSettled)
+    await store.send(.fitToDeviceTapped)
+    await store.send(.giveSizeBackTapped)
+    for _ in 0..<100 where calls.value.count < 3 { await Task.yield() }
+    #expect(calls.value == ["size 58x36", "claim", "release"])
+    #expect(!store.state.isFittedToDevice)
+    await store.send(.frameReceived(frame(1, epoch: 1, .reset(cols: 58, rows: 36, fidelity: .exact))))
+    #expect(store.state.isFittedToDevice)
+  }
+
 }
 
 /// Errors as the remote stack throws them.

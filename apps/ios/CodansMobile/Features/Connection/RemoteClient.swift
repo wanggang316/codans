@@ -12,7 +12,8 @@ nonisolated struct RemoteSessionInfo: Equatable, Sendable {
   /// predates the field; the UI then treats the device as read-only.
   var permission: IPC.RemotePermission?
   /// `system.hello`'s protocol minor. Minor 2 brings the live terminal
-  /// (`pane.attachStream`, `terminal.sendEvents`) and tab/pane management.
+  /// (`pane.attachStream`, `terminal.sendEvents`) and tab/pane management;
+  /// minor 4 terminal seats, which size the pane for this device.
   var protocolMinor: Int = 1
   /// How this session reached the Mac.
   var route: Route = .lan
@@ -29,6 +30,9 @@ nonisolated struct RemoteSessionInfo: Equatable, Sendable {
   var supportsLiveTerminal: Bool { Self.supportsLiveTerminal(protocolMinor: protocolMinor) }
 
   static func supportsLiveTerminal(protocolMinor: Int) -> Bool { protocolMinor >= 2 }
+
+  /// Whether the Mac gives this device a terminal seat of its own.
+  var supportsSeats: Bool { protocolMinor >= 4 }
 
   /// Whether `relay` is the Mac's answer: from minor 3 a nil relay means
   /// outside access is off. An older Mac has no answer at all, and must not
@@ -79,8 +83,18 @@ nonisolated struct RemoteClient: Sendable {
   var launchAgent:
     @Sendable (_ projectID: String, _ worktreeID: String, _ profile: String, _ prompt: String?) async throws -> String?
   /// `pane.attachStream` on a connection of its own, closed when the
-  /// stream ends or its consumer stops iterating.
-  var attachStream: @Sendable (_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error>
+  /// stream ends or its consumer stops iterating. With a `seat` grid the
+  /// Mac also opens a terminal seat for this device (protocol minor 4),
+  /// taking the lead as `claim` says.
+  var attachStream:
+    @Sendable (_ paneID: String, _ seat: IPC.TerminalGridSize?, _ claim: IPC.TerminalSizeClaim?) async throws ->
+      AsyncThrowingStream<IPC.TerminalStreamFrame, Error>
+  /// `pane.setStreamSize`: this device's seat grid changed.
+  var setSeatSize: @Sendable (_ paneID: String, _ size: IPC.TerminalGridSize) async throws -> Void
+  /// `pane.claimSize`: take the pane's size now (true) or give it back (false).
+  var claimSize: @Sendable (_ paneID: String, _ claim: Bool) async throws -> Void
+  /// `pane.input`: bytes typed through the seat.
+  var typeBytes: @Sendable (_ paneID: String, _ bytes: Data) async throws -> Void
   /// `terminal.sendEvents`: one ordered batch.
   var sendEvents:
     @Sendable (_ paneID: String, _ events: [IPC.TerminalInputEvent]) async throws -> IPC.TerminalSendEventsResult
@@ -135,7 +149,10 @@ nonisolated extension RemoteClient: DependencyKey {
       listProfiles: { try await retryingOnce { try await sessions.listProfiles() } },
       createWorktree: { try await sessions.createWorktree(projectID: $0, branch: $1) },
       launchAgent: { try await sessions.launchAgent(projectID: $0, worktreeID: $1, profile: $2, prompt: $3) },
-      attachStream: { try await sessions.attachStream($0) },
+      attachStream: { try await sessions.attachStream($0, seat: $1, claim: $2) },
+      setSeatSize: { try await sessions.setSeatSize($0, size: $1) },
+      claimSize: { try await sessions.claimSize($0, claim: $1) },
+      typeBytes: { try await sessions.typeBytes($0, bytes: $1) },
       sendEvents: { try await sessions.sendEvents($0, events: $1) },
       createTab: { try await sessions.createTab($0, workingDirectory: $1) },
       splitPane: { try await sessions.splitPane($0, direction: $1) },
@@ -158,6 +175,9 @@ nonisolated extension RemoteClient: DependencyKey {
     createWorktree: unimplemented("RemoteClient.createWorktree"),
     launchAgent: unimplemented("RemoteClient.launchAgent"),
     attachStream: unimplemented("RemoteClient.attachStream"),
+    setSeatSize: unimplemented("RemoteClient.setSeatSize"),
+    claimSize: unimplemented("RemoteClient.claimSize"),
+    typeBytes: unimplemented("RemoteClient.typeBytes"),
     sendEvents: unimplemented("RemoteClient.sendEvents"),
     createTab: unimplemented("RemoteClient.createTab"),
     splitPane: unimplemented("RemoteClient.splitPane"),
@@ -303,12 +323,15 @@ private actor LiveRemoteSessions {
     bridge?.stop()
   }
 
-  func attachStream(_ paneID: String) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error> {
+  func attachStream(
+    _ paneID: String, seat: IPC.TerminalGridSize?, claim: IPC.TerminalSizeClaim?
+  ) async throws -> AsyncThrowingStream<IPC.TerminalStreamFrame, Error> {
     guard let target = streamTarget else { throw RemoteRPCClient.ClientError.connectionClosed }
     let generation = sessionGeneration
     // 33 ms rather than the Mac's 16 ms: half the frames, redraws and
     // radio wake-ups, and still smooth for a terminal.
-    let request = IPC.PaneAttachStreamRequest(paneID: try Self.paneID(paneID), coalesceMillis: 33)
+    let request = IPC.PaneAttachStreamRequest(
+      paneID: try Self.paneID(paneID), coalesceMillis: 33, seat: seat, claim: claim)
     let hello = HelloRequest(clientVersion: Self.clientVersion, clientBinary: "codans-mobile")
     let client = try await RemoteRPCClient.connect(to: target.endpoint, credential: target.credential, hello: hello)
     // The session may have been torn down, or replaced by one to another
@@ -347,6 +370,21 @@ private actor LiveRemoteSessions {
   private func closeStream(_ id: UUID) async {
     guard let client = streams.removeValue(forKey: id) else { return }
     await client.close()
+  }
+
+  func setSeatSize(_ paneID: String, size: IPC.TerminalGridSize) async throws {
+    let params = IPC.PaneSetStreamSizeRequest(paneID: try Self.paneID(paneID), size: size)
+    _ = try await withControl { try await $0.callRaw(.paneSetStreamSize, params: params) }
+  }
+
+  func claimSize(_ paneID: String, claim: Bool) async throws {
+    let params = IPC.PaneClaimSizeRequest(paneID: try Self.paneID(paneID), claim: claim)
+    _ = try await withControl { try await $0.callRaw(.paneClaimSize, params: params) }
+  }
+
+  func typeBytes(_ paneID: String, bytes: Data) async throws {
+    let params = IPC.PaneInputRequest(paneID: try Self.paneID(paneID), bytes: bytes)
+    _ = try await withControl { try await $0.callRaw(.paneInput, params: params) }
   }
 
   func sendEvents(_ paneID: String, events: [IPC.TerminalInputEvent]) async throws -> IPC.TerminalSendEventsResult {

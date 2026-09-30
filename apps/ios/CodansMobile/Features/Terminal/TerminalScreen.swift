@@ -127,6 +127,7 @@ final class TerminalHostView: UIView, UIScrollViewDelegate, UIGestureRecognizerD
 
   private func refit() {
     guard bounds.width > 0 else { return }
+    reportSeatSize()
     let target = defaultScale
     scrollView.minimumZoomScale = min(overviewScale, target)
     scrollView.maximumZoomScale = TerminalTextSize.maximum / TerminalTextSize.base
@@ -137,6 +138,17 @@ final class TerminalHostView: UIView, UIScrollViewDelegate, UIGestureRecognizerD
     alignToBottom()
     if viewportFollowsBottom { scrollViewportToBottom(animated: false) }
     followCursor()
+  }
+
+  /// The grid that fills this view at the device's text size: the size a
+  /// terminal seat asks the pane to take.
+  private func reportSeatSize() {
+    let cell = model.view.cellSize
+    let scale = readableScale
+    guard cell.width > 0, cell.height > 0, scale > 0 else { return }
+    let cols = Int((bounds.width / (cell.width * scale)).rounded(.down))
+    let rows = Int((bounds.height / (cell.height * scale)).rounded(.down))
+    model.reportSeatSize(cols: cols, rows: rows)
   }
 
   /// A grid shorter than the screen sits at its bottom, so the prompt and
@@ -217,6 +229,7 @@ final class TerminalHostView: UIView, UIScrollViewDelegate, UIGestureRecognizerD
     let target = min(max(scrollView.zoomScale * factor, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
     scrollView.setZoomScale(target, animated: true)
     rememberTextSize(for: target)
+    reportSeatSize()
   }
 
   func jumpToBottom() {
@@ -253,6 +266,8 @@ final class TerminalHostView: UIView, UIScrollViewDelegate, UIGestureRecognizerD
     alignToBottom()
     updateContentScale()
     rememberTextSize(for: scale)
+    // A new text size is a new seat grid.
+    reportSeatSize()
     followCursor()
   }
 

@@ -205,7 +205,7 @@ enum DemoMode {
         listProfiles: { DemoFixtures.profiles },
         createWorktree: { _, _ in DemoFixtures.worktreeID },
         launchAgent: { _, _, _, _ in nil },
-        attachStream: { paneID in
+        attachStream: { paneID, _, _ in
           AsyncThrowingStream { continuation in
             var sample = DemoFixtures.stream(for: paneID)
             let isBusy = busy && paneID == DemoFixtures.paneID("claude")
@@ -228,6 +228,9 @@ enum DemoMode {
             continuation.onTermination = { _ in task.cancel() }
           }
         },
+        setSeatSize: { _, _ in },
+        claimSize: { _, _ in },
+        typeBytes: { _, _ in },
         sendEvents: { _, events in
           if notOpen { throw RemoteFailure(.unsupported, "pane not open on the Mac") }
           return IPC.TerminalSendEventsResult(delivered: events.count, rejected: [])

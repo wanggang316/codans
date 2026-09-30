@@ -92,6 +92,25 @@ nonisolated enum TerminalKeyMap {
     return .key(code: key.code, text: nil, mods: mods)
   }
 
+  /// The character a US key types, with or without shift: the inverse of
+  /// `key(for:)`, for encoding a key event into bytes on this device.
+  static func character(for code: String, shift: Bool) -> Character? {
+    codeTable[CodeKey(code: code, shift: shift)]
+  }
+
+  private struct CodeKey: Hashable {
+    let code: String
+    let shift: Bool
+  }
+
+  private static let codeTable: [CodeKey: Character] = {
+    var table: [CodeKey: Character] = [:]
+    for (character, entry) in characterTable {
+      table[CodeKey(code: entry.code, shift: entry.shift)] = character
+    }
+    return table
+  }()
+
   /// A hardware key's W3C code from its HID usage.
   static func code(for usage: UIKeyboardHIDUsage) -> String? {
     hidTable[usage.rawValue]

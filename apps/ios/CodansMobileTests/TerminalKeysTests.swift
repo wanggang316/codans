@@ -395,3 +395,58 @@ struct MirrorTerminalViewTests {
     #expect(model.view.getTerminal().isCurrentBufferAlternate)
   }
 }
+
+/// Keys typed through a terminal seat are encoded on the device, the way
+/// xterm encodes them, following the pane's modes.
+struct TerminalKeyEncoderTests {
+  private typealias Encoder = TerminalKeyEncoder
+  private let normal = TerminalKeyEncoder.Modes()
+
+  private func bytes(_ event: IPC.TerminalInputEvent, _ modes: TerminalKeyEncoder.Modes = .init()) -> String? {
+    Encoder.encode(event, modes: modes).flatMap { String(bytes: $0, encoding: .utf8) }
+  }
+
+  @Test
+  func namedKeysFollowTheCursorMode() {
+    #expect(bytes(.press("ArrowUp")) == "\u{1B}[A")
+    #expect(bytes(.press("ArrowUp"), .init(applicationCursor: true)) == "\u{1B}OA")
+    #expect(bytes(.press("ArrowLeft", .init(ctrl: true))) == "\u{1B}[1;5D")
+    #expect(bytes(.press("End", .init(shift: true))) == "\u{1B}[1;2F")
+    #expect(bytes(.press("Enter")) == "\r")
+    #expect(bytes(.press("Tab", .init(shift: true))) == "\u{1B}[Z")
+    #expect(bytes(.press("Escape")) == "\u{1B}")
+    #expect(bytes(.press("Backspace")) == "\u{7F}")
+    #expect(bytes(.press("Delete")) == "\u{1B}[3~")
+    #expect(bytes(.press("PageDown", .init(alt: true))) == "\u{1B}[6;3~")
+    #expect(bytes(.press("F1")) == "\u{1B}OP")
+    #expect(bytes(.press("F5")) == "\u{1B}[15~")
+  }
+
+  @Test
+  func chordsBecomeControlBytesAndEscapePrefixes() {
+    #expect(bytes(.ctrl("c")) == "\u{03}")
+    #expect(bytes(.press("KeyA", .init(ctrl: true))) == "\u{01}")
+    #expect(bytes(.press("BracketLeft", .init(ctrl: true))) == "\u{1B}")
+    #expect(bytes(.press("KeyX", .init(alt: true))) == "\u{1B}x")
+    #expect(bytes(.press("KeyX", .init(shift: true))) == "X")
+    #expect(bytes(.press("Enter", .init(alt: true))) == "\u{1B}\r")
+    #expect(bytes(.press("KeyV", .init(super: true))) == nil)
+  }
+
+  @Test
+  func pastesAreBracketedOnlyWhenThePaneAsks() {
+    #expect(bytes(.paste("a\nb")) == "a\nb")
+    #expect(bytes(.paste("a\nb"), .init(bracketedPaste: true)) == "\u{1B}[200~a\nb\u{1B}[201~")
+    #expect(bytes(.paste("x\u{1B}[201~y"), .init(bracketedPaste: true)) == "\u{1B}[200~xy\u{1B}[201~")
+    #expect(bytes(.text("héllo")) == "héllo")
+  }
+
+  @Test
+  func aBatchKeepsItsPausesAndMergesTheRest() {
+    let (chunks, dropped) = Encoder.encode(
+      [.paste("hi"), .delay(millis: 30), .press("Enter"), .press("KeyQ", .init(super: true)), .text("!")],
+      modes: normal)
+    #expect(chunks == [.bytes(Data("hi".utf8)), .delay(millis: 30), .bytes(Data("\r!".utf8))])
+    #expect(dropped == 1)
+  }
+}

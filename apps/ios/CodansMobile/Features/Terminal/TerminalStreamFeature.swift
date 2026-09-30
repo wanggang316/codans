@@ -15,6 +15,14 @@ import Foundation
 /// Nothing is queued while disconnected and a failed batch is dropped, not
 /// replayed — keys typed at a shell that has since moved on could run the
 /// wrong command.
+///
+/// Seat: from a Mac that supports it (protocol minor 4) an interactive
+/// device attaches with its own grid, so the Mac opens a terminal seat for
+/// it at the pane's session. The pane takes the device's size while the
+/// device leads — once it types, or at once when nobody is at the Mac —
+/// and the Mac takes it back when someone types there. Keys then go
+/// through the seat as bytes this device encodes from its own emulator's
+/// modes, which also works for a pane not open on the Mac.
 @Reducer
 struct TerminalStreamFeature {
   @ObservableState
@@ -32,6 +40,16 @@ struct TerminalStreamFeature {
     var attachFailures = 0
     /// Whether a stream is open or opening, so reappearing does not resync.
     var isAttached = false
+
+    /// Whether the Mac gives this device a terminal seat (protocol minor 4).
+    var supportsSeats = false
+    /// This device's grid at its text size, from the screen's layout.
+    var seat: Grid?
+    /// Attaching waits briefly for `seat`, so the stream opens with one.
+    var isWaitingForSeat = false
+    /// The Mac could not give this pane a seat; keys go through the Mac's
+    /// surface as before.
+    var isSeatUnavailable = false
 
     var outbox: [IPC.TerminalInputEvent] = []
     var isFlushScheduled = false
@@ -72,6 +90,18 @@ struct TerminalStreamFeature {
     }
 
     var isInteractive: Bool { permission == .interactive }
+
+    /// Whether this device may have a seat at the pane.
+    var wantsSeat: Bool { supportsSeats && isInteractive }
+
+    /// Keys go through the seat rather than the Mac's surface.
+    var typesThroughSeat: Bool { wantsSeat && !isSeatUnavailable }
+
+    /// The pane is laid out for this device's screen right now.
+    var isFittedToDevice: Bool {
+      guard let seat, let grid else { return false }
+      return typesThroughSeat && grid == seat
+    }
 
     /// Keys go out only over a live connection to a pane still running.
     var canSendInput: Bool {
@@ -142,6 +172,16 @@ struct TerminalStreamFeature {
     case frameReceived(IPC.TerminalStreamFrame)
     case streamEnded(RemoteFailure?)
     case retryAttach
+    case seatSupportChanged(Bool)
+    /// The screen's grid at the device's text size.
+    case seatSizeChanged(Grid)
+    case seatWaitExpired
+    case seatSizeSettled
+    /// Take the pane's size now, or give it back to the Mac.
+    case fitToDeviceTapped
+    case giveSizeBackTapped
+    case seatCallFailed(RemoteFailure)
+    case seatInputFailed([IPC.TerminalInputEvent], RemoteFailure)
 
     /// Text from the keyboard or the key bar's symbol keys.
     case textTyped(String)
@@ -173,6 +213,8 @@ struct TerminalStreamFeature {
     case flush(UUID)
     case send(UUID)
     case toast(UUID)
+    case seatWait(UUID)
+    case seatSize(UUID)
   }
 
   /// How long typed keys wait to share one `terminal.sendEvents` call.
@@ -182,6 +224,10 @@ struct TerminalStreamFeature {
   nonisolated static let maxAttachRetries = 3
   /// Lets a TUI take a pasted block before its Enter.
   nonisolated static let pasteSettleMillis = 30
+  /// How long attaching waits for the screen to report its grid.
+  nonisolated static let seatWait: Duration = .milliseconds(500)
+  /// A grid change (rotation, keyboard) settles before the pane resizes.
+  nonisolated static let seatSizeSettle: Duration = .milliseconds(250)
 
   nonisolated static func retryDelay(afterFailures failures: Int) -> Duration {
     .milliseconds(500) * (1 << min(max(failures - 1, 0), 4))
@@ -199,8 +245,73 @@ struct TerminalStreamFeature {
         return .none
 
       case .task:
-        guard !state.isAttached else { return .none }
+        guard !state.isAttached, !state.isWaitingForSeat else { return .none }
+        guard state.wantsSeat, state.seat == nil, state.isConnected else { return attach(&state) }
+        state.isWaitingForSeat = true
+        return .run { [clock] send in
+          try await clock.sleep(for: Self.seatWait)
+          await send(.seatWaitExpired)
+        }
+        .cancellable(id: CancelID.seatWait(state.instance), cancelInFlight: true)
+
+      case .seatWaitExpired:
+        guard state.isWaitingForSeat else { return .none }
+        state.isWaitingForSeat = false
         return attach(&state)
+
+      case .seatSupportChanged(let supports):
+        state.supportsSeats = supports
+        return .none
+
+      case .seatSizeChanged(let size):
+        guard size != state.seat else { return .none }
+        state.seat = size
+        if state.isWaitingForSeat {
+          state.isWaitingForSeat = false
+          return .merge(.cancel(id: CancelID.seatWait(state.instance)), attach(&state))
+        }
+        guard state.isAttached, state.typesThroughSeat else { return .none }
+        return .run { [clock] send in
+          try await clock.sleep(for: Self.seatSizeSettle)
+          await send(.seatSizeSettled)
+        }
+        .cancellable(id: CancelID.seatSize(state.instance), cancelInFlight: true)
+
+      case .seatSizeSettled:
+        guard let seat = state.seat, state.isAttached, state.typesThroughSeat, state.isConnected else { return .none }
+        let setSeatSize = remoteClient.setSeatSize
+        let paneID = state.paneID
+        return .run { _ in
+          try await setSeatSize(paneID, IPC.TerminalGridSize(cols: seat.cols, rows: seat.rows))
+        } catch: { error, send in
+          await send(.seatCallFailed(RemoteFailure(error)))
+        }
+
+      case .fitToDeviceTapped, .giveSizeBackTapped:
+        guard state.typesThroughSeat, state.isConnected else { return .none }
+        let claim = action == .fitToDeviceTapped
+        let claimSize = remoteClient.claimSize
+        let paneID = state.paneID
+        return .run { _ in
+          try await claimSize(paneID, claim)
+        } catch: { error, send in
+          await send(.seatCallFailed(RemoteFailure(error)))
+        }
+
+      case .seatCallFailed(let failure):
+        if failure.kind == .unsupported { state.isSeatUnavailable = true }
+        return .none
+
+      case .seatInputFailed(let batch, let failure):
+        state.isSending = false
+        guard failure.kind == .unsupported, !state.isSeatUnavailable else {
+          return .send(.sendFinished(.failure(failure)))
+        }
+        // The Mac had no seat for this pane (an older daemon, say): send the
+        // same keys the old way, once, at once.
+        state.isSeatUnavailable = true
+        state.outbox.insert(contentsOf: batch, at: 0)
+        return .send(.flush)
 
       case .connectionChanged(let isConnected):
         guard isConnected != state.isConnected else { return .none }
@@ -299,8 +410,11 @@ struct TerminalStreamFeature {
         guard !state.isSending, !state.outbox.isEmpty, state.canSendInput else { return .none }
         let batch = Self.takeBatch(from: &state.outbox)
         state.isSending = true
-        let sendEvents = remoteClient.sendEvents
         let paneID = state.paneID
+        if state.typesThroughSeat {
+          return typeThroughSeat(batch, paneID: paneID, modes: state.screen.keyModes, instance: state.instance)
+        }
+        let sendEvents = remoteClient.sendEvents
         return .run { send in
           let result = try await sendEvents(paneID, batch)
           await send(.sendFinished(.success(result)))
@@ -425,8 +539,11 @@ struct TerminalStreamFeature {
     }
     let attachStream = remoteClient.attachStream
     let paneID = state.paneID
+    let seat = state.typesThroughSeat ? state.seat.map { IPC.TerminalGridSize(cols: $0.cols, rows: $0.rows) } : nil
     return .run { send in
-      let frames = try await attachStream(paneID)
+      // `.auto`: the pane takes this device's size at once only when nobody
+      // is at the Mac; otherwise once this device types.
+      let frames = try await attachStream(paneID, seat, seat == nil ? nil : .auto)
       for try await frame in frames {
         await send(.frameReceived(frame))
       }
@@ -465,6 +582,31 @@ struct TerminalStreamFeature {
   }
 
   // MARK: - Input
+
+  /// A batch typed through the seat: encoded here, pauses kept, one call
+  /// per run of bytes.
+  private func typeThroughSeat(
+    _ batch: [IPC.TerminalInputEvent], paneID: String, modes: TerminalKeyEncoder.Modes, instance: UUID
+  ) -> Effect<Action> {
+    let (chunks, dropped) = TerminalKeyEncoder.encode(batch, modes: modes)
+    let typeBytes = remoteClient.typeBytes
+    return .run { [clock] send in
+      for chunk in chunks {
+        switch chunk {
+        case .bytes(let bytes): try await typeBytes(paneID, bytes)
+        case .delay(let millis): try await clock.sleep(for: .milliseconds(millis))
+        }
+      }
+      let rejected = Array(
+        repeating: IPC.TerminalInputRejection(index: 0, reason: IPC.TerminalInputRejection.Reason.unknownKey),
+        count: dropped)
+      let result = IPC.TerminalSendEventsResult(delivered: batch.count - dropped, rejected: rejected)
+      await send(.sendFinished(.success(result)))
+    } catch: { error, send in
+      await send(.seatInputFailed(batch, RemoteFailure(error)))
+    }
+    .cancellable(id: CancelID.send(instance))
+  }
 
   private func enqueue(_ events: [IPC.TerminalInputEvent], _ state: inout State) -> Effect<Action> {
     state.outbox.append(contentsOf: events)

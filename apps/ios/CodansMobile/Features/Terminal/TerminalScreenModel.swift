@@ -59,6 +59,32 @@ final class TerminalScreenModel {
 
   var hasView: Bool { terminalView != nil }
 
+  /// The pane's key modes as this device's emulator tracks them, for
+  /// encoding keys typed through a terminal seat.
+  var keyModes: TerminalKeyEncoder.Modes {
+    guard let terminalView else { return TerminalKeyEncoder.Modes() }
+    let terminal = terminalView.getTerminal()
+    return TerminalKeyEncoder.Modes(
+      applicationCursor: terminal.applicationCursor, bracketedPaste: terminal.bracketedPasteMode)
+  }
+
+  /// Told the grid that fills the screen at the device's text size, when
+  /// it changes: the size of this device's terminal seat.
+  @ObservationIgnored var onSeatSizeChange: ((Int, Int) -> Void)?
+  @ObservationIgnored private var lastSeatSize: (cols: Int, rows: Int)?
+
+  func reportSeatSize(cols: Int, rows: Int) {
+    guard cols > 0, rows > 0, lastSeatSize.map({ $0 != (cols, rows) }) ?? true else { return }
+    lastSeatSize = (cols, rows)
+    onSeatSizeChange?(cols, rows)
+  }
+
+  /// Sends the last reported seat size again, to a handler set after it.
+  func replaySeatSize() {
+    guard let lastSeatSize else { return }
+    onSeatSizeChange?(lastSeatSize.cols, lastSeatSize.rows)
+  }
+
   func reset(cols: Int, rows: Int) {
     if isRecording { commands.append(.reset(cols: cols, rows: rows)) }
     self.cols = cols
