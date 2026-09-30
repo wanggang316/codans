@@ -75,7 +75,7 @@ launch_mac() {
   pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null && die "a Codans instance from $APP is already running"
   rm -f "$SOCK"
   CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" \
-    nohup "$APP/Contents/MacOS/Codans" >>"$SCRATCH/app.log" 2>&1 &
+    nohup "$APP/Contents/MacOS/Codans" -ApplePersistenceIgnoreState YES >>"$SCRATCH/app.log" 2>&1 &
   MAC_PID=$!
   # The gateway logs at info level, which the unified log does not keep.
   log stream --level info --style compact \
@@ -85,6 +85,7 @@ launch_mac() {
   local _ up
   for _ in $(seq 1 100); do cli status >/dev/null 2>&1 && break; sleep 0.2; done
   up=$(cli status --json | jq -r '.data.uptimeSeconds')
+  [[ "$up" =~ ^[0-9.]+$ ]] || die "the instance never answered on its socket"
   awk -v u="$up" 'BEGIN { exit !(u + 0 < 30) }' || die "socket answered by an older instance"
   # About 100 columns: the phone fits the Mac's grid to its width.
   "$AX" resize "$MAC_PID" 1000 760 >/dev/null

@@ -126,7 +126,7 @@ EOF
     relay_env=(CODANS_RELAY_URL="ws://127.0.0.1:$RELAY_PORT")
   fi
   env CODANS_CONFIG_DIR="$CONF" CODANS_CACHE_DIR="$CACHE" ${relay_env[@]+"${relay_env[@]}"} \
-    nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
+    nohup "$APP/Contents/MacOS/Codans" -ApplePersistenceIgnoreState YES >"$SCRATCH/app.log" 2>&1 &
   MAC_PID=$!
   # The gateway logs at info level, which the unified log does not keep.
   log stream --level info --style compact \
@@ -135,6 +135,8 @@ EOF
   LOG_PID=$!
   for _ in $(seq 1 100); do cli status >/dev/null 2>&1 && break; sleep 0.2; done
   local up; up=$(cli status --json | jq -r '.data.uptimeSeconds')
+  # A number, and a small one: "null" means the socket never came up.
+  [[ "$up" =~ ^[0-9.]+$ ]] || { echo "REFUSING: the instance never answered on its socket"; exit 1; }
   awk -v u="$up" 'BEGIN { exit !(u + 0 < 30) }' || { echo "REFUSING: socket answered by an older instance"; exit 1; }
   echo "mac instance pid=$MAC_PID"
 
