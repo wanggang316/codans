@@ -10,12 +10,6 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **Back / Forward in the header.** The window header now opens with a
-  browser-style history control: click to step through the Worktrees you
-  visited, press and hold either arrow for the list itself and jump
-  straight to any entry. An arrow greys out when there is nowhere to go
-  that way. ⌘[ / ⌘] (Go ▸ Back / Forward) drive the same history.
-
 ### Changed
 
 ### Deprecated
@@ -25,6 +19,24 @@ and the project does not yet follow semantic versioning — every release until
 ### Fixed
 
 ### Security
+
+## [0.7.7] - 2026-09-30
+
+### Added
+
+- **Back / Forward through the worktrees you visited.** The window header
+  gains browser-style arrows: click to step, press and hold to jump straight
+  to any entry in the history.
+
+### Changed
+
+- **⌘[ and ⌘] now go Back / Forward.** In a focused pane they no longer cycle
+  splits; move between splits with ⌘⌥-arrows. Custom bindings are kept.
+
+### Fixed
+
+- **Switching worktrees no longer flickers.** The tabs used to animate in as
+  if newly added and the terminal briefly went blank.
 
 ## [0.7.6] - 2026-09-29
 
