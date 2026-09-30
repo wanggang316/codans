@@ -31,6 +31,14 @@ public nonisolated enum ZmxTag: UInt8, Sendable {
   /// Daemon → observer: the PTY was resized, at this point in the byte
   /// stream. Payload has the ``ZmxResizePayload`` layout.
   case observeResize = 17
+  /// Client → daemon, empty: a client that sent `.init` becomes the
+  /// leader now, without typing; the daemon then asks it for its size.
+  /// Only daemons whose `.observeState` carries the leader-handoff flag
+  /// know it; older ones ignore it.
+  case claim = 18
+  /// Client → daemon, empty: the leader gives the lead back to the most
+  /// recently active other terminal client, whose size the PTY takes.
+  case release = 19
 }
 
 /// Format byte sent in the payload of a `.history` request. Mirrors
@@ -178,6 +186,7 @@ public nonisolated struct ZmxObserveStatePayload: Sendable, Equatable {
   public static let headerSize = 8
   static let alternateScreenFlag: UInt16 = 1 << 0
   static let scrollbackTruncatedFlag: UInt16 = 1 << 1
+  static let leaderHandoffFlag: UInt16 = 1 << 2
 
   public let rows: UInt16
   public let cols: UInt16
@@ -193,6 +202,9 @@ public nonisolated struct ZmxObserveStatePayload: Sendable, Equatable {
 
   public var isAlternateScreen: Bool { flags & Self.alternateScreenFlag != 0 }
   public var isScrollbackTruncated: Bool { flags & Self.scrollbackTruncatedFlag != 0 }
+  /// The daemon knows `.claim` / `.release` and hands the lead back to the
+  /// remaining terminal client when the leader leaves.
+  public var supportsLeaderHandoff: Bool { flags & Self.leaderHandoffFlag != 0 }
 
   public static func decode(_ data: Data) throws -> ZmxObserveStatePayload {
     guard data.count >= headerSize else { throw ZmxIPCError.malformedLength }

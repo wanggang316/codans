@@ -19,8 +19,10 @@ public final class SystemHandlers {
       appBundle: String,
       protocolMajor: Int = 1,
       // Minor 1 added `events.subscribe`; minor 2 added `pane.attachStream`;
-      // minor 3 added the relay coordinates in `system.hello`.
-      protocolMinor: Int = 3,
+      // minor 3 added the relay coordinates in `system.hello`; minor 4
+      // added terminal seats (`pane.setStreamSize`, `pane.claimSize`,
+      // `pane.input`).
+      protocolMinor: Int = 4,
       deprecatedMethods: [String] = []
     ) {
       self.server = server

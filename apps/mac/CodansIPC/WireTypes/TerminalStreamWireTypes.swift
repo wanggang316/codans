@@ -13,12 +13,97 @@ extension IPC {
     /// How long the server may hold output to batch it into one frame.
     /// Nil takes the server default; the server clamps it.
     public let coalesceMillis: Int?
+    /// The caller's own grid, for a caller that may type: the Mac opens a
+    /// terminal seat for it at the pane's session, so the pane can be laid
+    /// out for the caller's screen while it leads (protocol minor 4). Nil
+    /// keeps the stream a pure mirror of the Mac's grid.
+    public let seat: TerminalGridSize?
+    /// Whether that seat takes the lead as it opens.
+    public let claim: TerminalSizeClaim?
 
-    public init(paneID: PaneID, scrollbackRows: Int? = nil, coalesceMillis: Int? = nil) {
+    public init(
+      paneID: PaneID, scrollbackRows: Int? = nil, coalesceMillis: Int? = nil,
+      seat: TerminalGridSize? = nil, claim: TerminalSizeClaim? = nil
+    ) {
       self.paneID = paneID
       self.scrollbackRows = scrollbackRows
       self.coalesceMillis = coalesceMillis
+      self.seat = seat
+      self.claim = claim
     }
+  }
+
+  /// A terminal grid in cells.
+  public struct TerminalGridSize: Codable, Equatable, Hashable, Sendable {
+    public let cols: Int
+    public let rows: Int
+
+    public init(cols: Int, rows: Int) {
+      self.cols = cols
+      self.rows = rows
+    }
+
+    /// The range a seat may ask for; outside it the request is invalid.
+    public static let colsRange = 10...500
+    public static let rowsRange = 4...300
+
+    public var isValid: Bool { Self.colsRange.contains(cols) && Self.rowsRange.contains(rows) }
+  }
+
+  /// When a terminal seat takes the lead, and with it the pane's size.
+  public enum TerminalSizeClaim: String, Codable, Equatable, Sendable {
+    /// Only once the caller types.
+    case never
+    /// At once when nobody is at the Mac (idle, locked, or the pane is not
+    /// open there); otherwise once the caller types.
+    case auto
+    /// At once.
+    case now
+
+    public init(from decoder: Decoder) throws {
+      let raw = try decoder.singleValueContainer().decode(String.self)
+      // A kind from a newer caller takes the lead no sooner than typing.
+      self = TerminalSizeClaim(rawValue: raw) ?? .never
+    }
+  }
+
+  /// `pane.setStreamSize` params: the caller's seat grid changed.
+  public struct PaneSetStreamSizeRequest: Codable, Equatable, Sendable {
+    public let paneID: PaneID
+    public let size: TerminalGridSize
+
+    public init(paneID: PaneID, size: TerminalGridSize) {
+      self.paneID = paneID
+      self.size = size
+    }
+  }
+
+  /// `pane.claimSize` params: take the lead (and the pane's size) now, or
+  /// give it back to the Mac.
+  public struct PaneClaimSizeRequest: Codable, Equatable, Sendable {
+    public let paneID: PaneID
+    public let claim: Bool
+
+    public init(paneID: PaneID, claim: Bool) {
+      self.paneID = paneID
+      self.claim = claim
+    }
+  }
+
+  /// `pane.input` params: bytes the caller encoded for the terminal, typed
+  /// through its seat. `data` is base64; at most 64 KiB decoded.
+  public struct PaneInputRequest: Codable, Equatable, Sendable {
+    public let paneID: PaneID
+    public let data: String
+
+    public static let maxBytes = 64 * 1024
+
+    public init(paneID: PaneID, bytes: Data) {
+      self.paneID = paneID
+      self.data = bytes.base64EncodedString()
+    }
+
+    public var bytes: Data? { Data(base64Encoded: data) }
   }
 
   /// How faithfully a `reset` snapshot reproduces the Mac's terminal.

@@ -1296,6 +1296,11 @@ final class AppState {
           guard let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) else { return nil }
           let token = surface.observeGridSize { _, _ in handler() }
           return { [weak surface] in surface?.removeGridSizeObserver(token) }
+        },
+        // Nobody sees the pane on the Mac: it is not open here, or nobody
+        // is at the Mac.
+        isMacAway: { [weak terminalEngine] paneID in
+          terminalEngine?.ghosttyRuntime?.surface(for: paneID) == nil || MacPresence.isAway()
         }
       )
     )

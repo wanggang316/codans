@@ -108,6 +108,7 @@ public final class MethodRouter {
   /// a caller over its stream limit gets an error instead of an empty
   /// stream.
   private func routeTerminalStream(_ request: IPC.Request, context: CallerContext) -> RouterOutcome? {
+    if let outcome = routeTerminalSeat(request, context: context) { return outcome }
     guard request.method == .paneAttachStream, let registry = terminalStreams else { return nil }
     // A unary call would open a daemon connection nobody drains.
     guard request.stream else {
@@ -120,11 +121,41 @@ public final class MethodRouter {
     } catch {
       return .failed(.invalidParams(message: String(describing: error), path: ["paneID"]))
     }
-    switch registry.attach(params, caller: context.streamCallerKey) {
+    // Only a caller that may type gets a seat: a seat that leads resizes
+    // the pane and carries input.
+    let canType = context.remotePermission.map { $0 == .interactive } ?? true
+    switch registry.attach(params, caller: context.streamCallerKey, canType: canType) {
     case .success(let session):
       return .streaming { session.jsonFrames() }
     case .failure(let error):
       return .failed(error)
+    }
+  }
+
+  /// `pane.setStreamSize` / `pane.claimSize` / `pane.input`: the caller's
+  /// terminal seat, opened with its stream. The remote tier already limits
+  /// these to devices that may type.
+  private func routeTerminalSeat(_ request: IPC.Request, context: CallerContext) -> RouterOutcome? {
+    guard let registry = terminalStreams else { return nil }
+    let caller = context.streamCallerKey
+    let result: Result<Void, IPCError>
+    do {
+      switch request.method {
+      case .paneSetStreamSize:
+        result = registry.setSeatSize(try request.params.decoded(as: IPC.PaneSetStreamSizeRequest.self), caller: caller)
+      case .paneClaimSize:
+        result = registry.claimSize(try request.params.decoded(as: IPC.PaneClaimSizeRequest.self), caller: caller)
+      case .paneInput:
+        result = registry.input(try request.params.decoded(as: IPC.PaneInputRequest.self), caller: caller)
+      default:
+        return nil
+      }
+    } catch {
+      return .failed(.invalidParams(message: String(describing: error), path: nil))
+    }
+    switch result {
+    case .success: return .unary(.object([:]))
+    case .failure(let error): return .failed(error)
     }
   }
 

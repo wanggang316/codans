@@ -64,7 +64,10 @@ extension IPC.Method {
     // Renaming and closing tabs and panes is managing what the device can
     // already type into; closing ends the pane's shell, so the phone
     // confirms first.
+    // A seat's size and lead lay the pane out for the device's screen,
+    // which only a device that may type needs.
     case .terminalSendInput, .terminalSendKey, .terminalSendEvents,
+      .paneSetStreamSize, .paneClaimSize, .paneInput,
       .agentLaunch, .hierarchyCreateWorktree,
       .hierarchyActivateWorktree, .hierarchyActivateTab, .hierarchyFocusPane,
       .hierarchyCreateTab, .hierarchyOpenPane, .hierarchySplitPane,

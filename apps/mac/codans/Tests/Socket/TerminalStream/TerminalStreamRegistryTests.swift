@@ -178,10 +178,81 @@ struct TerminalStreamRegistryTests {
 
   @Test
   func handshakeAdvertisesProtocolMinorTwo() {
-    #expect(SystemHandlers.Versions(server: "1", appBundle: "1").protocolMinor == 3)
+    #expect(SystemHandlers.Versions(server: "1", appBundle: "1").protocolMinor == 4)
   }
 
   // MARK: - Fixture
+
+  @MainActor
+  // MARK: - Seats
+
+  private func seatRequest(_ paneID: PaneID, claim: IPC.TerminalSizeClaim? = nil) -> IPC.PaneAttachStreamRequest {
+    .init(paneID: paneID, seat: IPC.TerminalGridSize(cols: 58, rows: 36), claim: claim)
+  }
+
+  @Test
+  func aCallerThatMayTypeGetsASeatWithItsGrid() throws {
+    let fixture = try Fixture.withLivePane()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID), caller: "phone", canType: true).get()
+    let seat = try #require(fixture.seats.value.first)
+    #expect(seat.size == IPC.TerminalGridSize(cols: 58, rows: 36))
+    #expect(seat.log.value.isEmpty, "a seat must not take the lead just by opening")
+  }
+
+  @Test
+  func aViewOnlyCallerOrOneWithoutAGridGetsNoSeat() throws {
+    let fixture = try Fixture.withLivePane()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID), caller: "viewer", canType: false).get()
+    _ = try fixture.registry.attach(.init(paneID: fixture.paneID), caller: "phone", canType: true).get()
+    let absurd = IPC.PaneAttachStreamRequest(paneID: fixture.paneID, seat: IPC.TerminalGridSize(cols: 2, rows: 1))
+    _ = try fixture.registry.attach(absurd, caller: "phone", canType: true).get()
+    #expect(fixture.seats.value.isEmpty)
+  }
+
+  @Test
+  func claimNowTakesTheLeadAndAutoOnlyWhenNobodyIsAtTheMac() throws {
+    let fixture = try Fixture.withLivePane()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .now), caller: "a", canType: true).get()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .auto), caller: "b", canType: true).get()
+    fixture.macIsAway = true
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .auto), caller: "c", canType: true).get()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID, claim: .never), caller: "d", canType: true).get()
+    #expect(fixture.seats.value.map(\.log.value) == [["claim"], [], ["claim"], []])
+  }
+
+  @Test
+  func seatCallsReachTheCallersNewestSeat() throws {
+    let fixture = try Fixture.withLivePane()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID), caller: "phone", canType: true).get()
+    _ = try fixture.registry.attach(seatRequest(fixture.paneID), caller: "phone", canType: true).get()
+    let caller = "phone"
+    _ = try fixture.registry.setSeatSize(
+      .init(paneID: fixture.paneID, size: .init(cols: 90, rows: 30)), caller: caller
+    ).get()
+    _ = try fixture.registry.claimSize(.init(paneID: fixture.paneID, claim: true), caller: caller).get()
+    _ = try fixture.registry.claimSize(.init(paneID: fixture.paneID, claim: false), caller: caller).get()
+    _ = try fixture.registry.input(.init(paneID: fixture.paneID, bytes: Data("ls\r".utf8)), caller: caller).get()
+    #expect(fixture.seats.value[0].log.value.isEmpty)
+    #expect(fixture.seats.value[1].log.value == ["size 90x30", "claim", "release", "input ls\r"])
+
+    let stranger = fixture.registry.input(.init(paneID: fixture.paneID, bytes: Data("x".utf8)), caller: "other")
+    guard case .failure(.unsupported) = stranger else {
+      Issue.record("expected unsupported, got \(stranger)")
+      return
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func endingTheStreamClosesItsSeat() async throws {
+    let fixture = try Fixture.withLivePane()
+    let session = try fixture.registry.attach(seatRequest(fixture.paneID), caller: "phone", canType: true).get()
+    await session.end()
+    let seat = try #require(fixture.seats.value.first)
+    for _ in 0..<100 where !seat.log.value.contains("close") {
+      await Task.megaYield()
+    }
+    #expect(seat.log.value == ["close"])
+  }
 
   @MainActor
   private final class Fixture {
@@ -190,10 +261,13 @@ struct TerminalStreamRegistryTests {
     var knownPanes: Set<PaneID> = []
     var geometryObservers = 0
     let connections = LockIsolated<[FakeObserverConnection]>([])
+    let seats = LockIsolated<[FakeSeat]>([])
+    var macIsAway = false
     private(set) var registry: TerminalStreamRegistry!
 
     init() {
       let connections = connections
+      let seats = seats
       registry = TerminalStreamRegistry(
         dependencies: .init(
           paneExists: { [weak self] in self?.knownPanes.contains($0) ?? false },
@@ -208,6 +282,12 @@ struct TerminalStreamRegistryTests {
             connections.withValue { $0.append(connection) }
             return connection
           },
+          connectSeat: { _, size in
+            let seat = FakeSeat(size: size)
+            seats.withValue { $0.append(seat) }
+            return seat
+          },
+          isMacAway: { [weak self] _ in self?.macIsAway ?? false },
           clock: TestClock<Duration>()
         ))
     }
@@ -230,4 +310,21 @@ struct TerminalStreamRegistryTests {
       try? FileManager.default.removeItem(atPath: socketPath)
     }
   }
+}
+
+/// Records what the registry asks of a terminal seat.
+private final class FakeSeat: ZmxSeatConnection, @unchecked Sendable {
+  let size: IPC.TerminalGridSize
+  let log = LockIsolated<[String]>([])
+
+  init(size: IPC.TerminalGridSize) { self.size = size }
+
+  func setSize(cols: UInt16, rows: UInt16) { log.withValue { $0.append("size \(cols)x\(rows)") } }
+  func sendInput(_ bytes: Data) {
+    let text = String(bytes: bytes, encoding: .utf8) ?? "?"
+    log.withValue { $0.append("input \(text)") }
+  }
+  func claim() { log.withValue { $0.append("claim") } }
+  func release() { log.withValue { $0.append("release") } }
+  func close() { log.withValue { $0.append("close") } }
 }
