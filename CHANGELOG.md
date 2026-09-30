@@ -14,7 +14,7 @@ and the project does not yet follow semantic versioning — every release until
   browser-style history control: click to step through the Worktrees you
   visited, press and hold either arrow for the list itself and jump
   straight to any entry. An arrow greys out when there is nowhere to go
-  that way. The menu chords (Go ▸ Back / Forward) drive the same history.
+  that way. ⌘[ / ⌘] (Go ▸ Back / Forward) drive the same history.
 
 ### Changed
 
