@@ -67,9 +67,6 @@ struct TerminalPaneView: View {
     // app's appearance.
     .background(MirrorTerminalView.background.swiftUIColor, ignoresSafeAreaEdges: .bottom)
     .task {
-      store.screen.onSeatSizeChange = { [store] cols, rows in
-        store.send(.seatSizeChanged(TerminalStreamFeature.Grid(cols: cols, rows: rows)))
-      }
       store.screen.replaySeatSize()
       store.send(.task)
     }

@@ -106,6 +106,11 @@ final class TerminalStoreCache {
         if DemoMode.isEnabled { DemoMode.apply(to: &$0) }
       #endif
     }
+    // Weak: the screen model lives in the store's state, so a strong
+    // capture would keep a dropped store, and its stream, alive for good.
+    store.screen.onSeatSizeChange = { [weak store] cols, rows in
+      store?.send(.seatSizeChanged(TerminalStreamFeature.Grid(cols: cols, rows: rows)))
+    }
     stores[paneID] = store
     return store
   }
