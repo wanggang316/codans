@@ -5,7 +5,7 @@
 # the CodansMobile UI test on a simulator. Never touches the default dev /
 # release sockets, config or zmx cache.
 #
-# Usage: [CASES="<case> ..."] harness.sh <Debug Codans.app path> [simulator UDID, on an iOS 26 runtime]
+# Usage: [CASES="<case> ..."] harness.sh <Debug Codans.app path> [simulator UDID, on an iOS 26 or later runtime]
 #
 # CASES (space or comma separated, default: all) runs only the named cases,
 # plus the pairing each one needs: the live cases reuse interactive's
@@ -65,10 +65,13 @@ RELAY_PORT=3952
 RELAY_KEYCHAIN_SERVICE="com.gumpw.codans.relay.codans-dev"
 IOS_DIR="$REPO_ROOT/apps/ios"
 # The app needs iOS 26, and an older runtime can carry a device of the same
-# name, so the default is picked from iOS 26 runtimes only.
+# name, so the default comes from iOS 26 or later, newest runtime first: an
+# older runtime than the selected Xcode's can hang `xcodebuild test` with no
+# output (Xcode 27 against an iOS 26.0 simulator did).
 SIM="${2:-$(xcrun simctl list devices available -j |
-  jq -r '[.devices | to_entries[] | select(.key | test("iOS-26")) | .value[] |
-    select(.name == "iPhone 17 Pro")][0].udid')}"
+  jq -r '[.devices | to_entries[] | select(.key | test("iOS-(2[6-9]|[3-9][0-9])-")) |
+    (.key | capture("iOS-(?<major>[0-9]+)-(?<minor>[0-9]+)") | (.major | tonumber) * 100 + (.minor | tonumber)) as $v |
+    .value[] | select(.name == "iPhone 17 Pro") | {udid, $v}] | sort_by(-.v)[0].udid')}"
 mkdir -p "$CONF" "$FIX" "$SHOTS" "$WTS" "$FAKEBIN"
 
 CASES="${CASES:-all}"
