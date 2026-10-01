@@ -200,14 +200,14 @@ extension ShortcutSchema {
       title: "Back in Worktree History",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_LeftBracket), modifiers: [.command, .control])
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_LeftBracket), modifiers: [.command])
     ),
     .init(
       id: .worktreeHistoryForward,
       title: "Forward in Worktree History",
       category: .projectAndWorktree,
       scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_RightBracket), modifiers: [.command, .control])
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_RightBracket), modifiers: [.command])
     ),
     .init(
       id: .selectWorktreeAt1,

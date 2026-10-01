@@ -144,3 +144,44 @@ Logs: `/private/tmp/han167-pi-merge-core-tests.log`,
 `/private/tmp/han167-main-sync-20260929-app-tests-verified.log`,
 `/private/tmp/han167-main-sync-20260929-cli-build.log`, and
 `/private/tmp/han167-main-sync-20260929-mac-check.log`.
+
+## Main synchronization: 2026-10-01
+
+Integrate `origin/main` at `61d1f162` in the isolated HAN-167 worktree.
+The six incoming commits add worktree history controls and shortcuts, improve
+tab switching, and bump the release to 0.7.7.
+
+1. Merge without rewriting the published branch history.
+2. Review RootFeature integration and preserve Agent observation/input ownership.
+3. Run navigation, Root, Agent and recovery regressions, Core shortcut checks,
+   app/CLI builds and lint before committing and pushing the existing PR.
+
+The merge completed without text conflicts. RootFeature retains HAN-167's
+Agent snapshot mapping and typed Handoff submission results alongside main's
+history navigation. The shortcut audit exposed two stale modifier expectations
+and a missing color-command entry; the test table now reflects existing product
+bindings without changing shortcut behavior.
+
+Validation:
+
+- 77 Core tests in four suites passed: shortcut schema, Agent parsers, attention
+  interpretation and recovery policy.
+- CLI build and `agent wait --help` passed; unknown/error conditions remain.
+- Scoped SwiftLint for the corrected audit, rename-residue and whitespace checks
+  passed. Full lint still reports 65 violations, all in files byte-identical to a
+  merge parent. Unrelated formatter changes in 577 files were restored.
+- The host has upgraded from Xcode 26.0 to 27.0. Core/CLI validation used the
+  command-line `MACOSX_DEPLOYMENT_TARGET=14.0` override, matching the app's existing
+  minimum; repository project configuration was not changed.
+- App regression tests did not run. Xcode 27 rejects dependency deployment
+  targets below macOS 12. Temporary per-target overrides progressed past this
+  gate, but TCA compilation still used macOS 12 despite its declared macOS 13
+  setting and failed availability checks. Direct project build-settings output
+  and workspace compiler arguments disagreed; the cause remains unverified.
+  This synchronization does not claim an App test pass under Xcode 27.
+
+Logs: `/private/tmp/han167-main-sync-20261001-core-tests-verified.log`,
+`/private/tmp/han167-main-sync-20261001-cli-build.log`,
+`/private/tmp/han167-main-sync-20261001-lint-restored.log`,
+`/private/tmp/han167-main-sync-20261001-app-tests-verified.log`, and
+`/private/tmp/han167-tca-readonly-settings.log`.
