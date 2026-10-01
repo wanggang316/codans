@@ -84,6 +84,17 @@ final class PaneSurface {
   /// close.
   var onClose: (@MainActor (_ processAlive: Bool) -> Void)?
 
+  /// Grid-size listeners (`observeGridSize`), keyed by registration token.
+  private var gridSizeObservers: [UUID: @MainActor (_ cols: UInt16, _ rows: UInt16) -> Void] = [:]
+  /// Last grid size reported to `gridSizeObservers`, to report changes only.
+  private var lastReportedGridSize: (cols: UInt16, rows: UInt16)?
+
+  /// True once the view has been laid out on screen at a real size, so
+  /// libghostty has a grid to encode input against; false again after
+  /// teardown. `terminal.sendEvents` needs it, and the events summary
+  /// reports it (changes bump `GhosttyRuntime.surfaceRevision`).
+  private(set) var isLive = false
+
   /// Engine-provided output callback. Currently unused — surface output
   /// reaches the engine via ghostty's own rendering layer.
   var onOutput: (@MainActor (Data) -> Void)?
@@ -178,6 +189,7 @@ final class PaneSurface {
     }
     self.surface = surface
     self.view.attach(surface: surface)
+    self.view.onGeometryPushed = { [weak self] sized in self?.geometryPushed(sized: sized) }
     // libghostty defaults new surfaces to focused; in a multi-pane layout
     // that makes every fresh surface draw the filled blinking cursor until
     // something explicitly resigns it. Force-false here — the one pane that
@@ -258,6 +270,7 @@ final class PaneSurface {
     shellPIDProbeTask?.cancel()
     shellPIDProbeTask = nil
     guard let surface else { return }
+    isLive = false
     // Freeing the surface terminates libghostty's `zmx attach` child, which
     // the daemon reads as a client detach and keeps its PTY child alive
     // (the resume path). When the pane is being destroyed for good, also
@@ -295,6 +308,41 @@ final class PaneSurface {
     // foreground — the basis for agent detection and the worktree "working"
     // indicator. nil until the post-attach `.info` probe lands.
     return daemonShellPID > 0 ? daemonShellPID : nil
+  }
+
+  /// The terminal grid libghostty lays this surface out at. Nil after
+  /// `close()` or before the first layout.
+  func gridSize() -> (cols: UInt16, rows: UInt16)? {
+    guard let surface else { return nil }
+    let size = ghostty_surface_size(surface)
+    guard size.columns > 0, size.rows > 0 else { return nil }
+    return (size.columns, size.rows)
+  }
+
+  /// Calls `handler` whenever the grid size changes. Returns a token for
+  /// `removeGridSizeObserver(_:)`.
+  func observeGridSize(_ handler: @escaping @MainActor (_ cols: UInt16, _ rows: UInt16) -> Void) -> UUID {
+    let token = UUID()
+    gridSizeObservers[token] = handler
+    if lastReportedGridSize == nil { lastReportedGridSize = gridSize() }
+    return token
+  }
+
+  func removeGridSizeObserver(_ token: UUID) {
+    gridSizeObservers[token] = nil
+  }
+
+  private func geometryPushed(sized: Bool) {
+    if sized, !isLive, surface != nil {
+      isLive = true
+      runtime.surfaceRevision.bump()
+    }
+    guard !gridSizeObservers.isEmpty, let size = gridSize() else { return }
+    if let last = lastReportedGridSize, last == size { return }
+    lastReportedGridSize = size
+    for handler in gridSizeObservers.values {
+      handler(size.cols, size.rows)
+    }
   }
 
   /// Forward a post-wake / post-reconfiguration geometry resync to the host
@@ -479,6 +527,103 @@ final class PaneSurface {
     guard let surface else { return }
     let (keycode, mods) = Self.keycodeAndMods(for: key)
     sendKeyEvent(keycode: keycode, mods: mods, to: surface)
+  }
+
+  enum KeyEventOutcome: Equatable {
+    case delivered
+    /// The key is a Mac shortcut (⌘V, ⌘W, …) or a binding that would have
+    /// driven the Mac's windows, tabs or splits; nothing reached the pane.
+    case binding
+    case noSurface
+  }
+
+  /// Press and release `spec` through libghostty's key encoder, so the
+  /// bytes follow the pane's current modes the way a Mac keypress does.
+  /// `ghostty_surface_key` performs bindings before encoding, and a remote
+  /// key must never trigger the Mac app's own shortcuts: a ⌘ binding is
+  /// refused without pressing it, and any other binding is pressed under a
+  /// `RemoteKeyGuard` that swallows app, window, tab and split actions (see
+  /// `RemoteKeyBinding`), reporting `.binding` when it had to.
+  func sendKeyEvent(spec: KeyEventSpec) -> KeyEventOutcome {
+    guard let surface else { return .noSurface }
+    var key = Self.ghosttyKey(for: spec)
+    let isBinding = Self.withOptionalCString(spec.text) { ptr in
+      key.text = ptr
+      var flags = ghostty_binding_flags_e(0)
+      return ghostty_surface_key_is_binding(surface, key, &flags)
+    }
+    switch RemoteKeyBinding.decide(isBinding: isBinding, mods: spec.mods) {
+    case .reject:
+      return .binding
+    case .encode:
+      if let meta = spec.escPrefixedText {
+        let action = "esc:\(meta)"
+        action.withCString { ptr in
+          _ = ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+        }
+        return .delivered
+      }
+      press(key, text: spec.text, on: surface)
+      return .delivered
+    case .performGuarded:
+      guard let runtime = GhosttyRuntime.shared else { return .binding }
+      let keyGuard = RemoteKeyGuard(paneID: paneID)
+      runtime.remoteKeyGuard = keyGuard
+      defer { runtime.remoteKeyGuard = nil }
+      press(key, text: spec.text, on: surface)
+      return keyGuard.suppressed ? .binding : .delivered
+    }
+  }
+
+  /// Press, then release. `text` is a C string libghostty reads during the
+  /// call, so the press must happen inside the pointer's lifetime.
+  private func press(_ key: ghostty_input_key_s, text: String?, on surface: ghostty_surface_t) {
+    var key = key
+    Self.withOptionalCString(text) { ptr in
+      key.text = ptr
+      _ = ghostty_surface_key(surface, key)
+    }
+    key.action = GHOSTTY_ACTION_RELEASE
+    key.text = nil
+    _ = ghostty_surface_key(surface, key)
+  }
+
+  /// Type committed text (IME output, dictation) as key events rather
+  /// than through `sendText`, whose paste path would wrap it in
+  /// bracketed-paste markers. Pieces that hit a Mac binding are skipped.
+  func sendCommittedText(_ text: String) -> KeyEventOutcome {
+    guard surface != nil else { return .noSurface }
+    for spec in KeyEventSpec.committedText(text) {
+      _ = sendKeyEvent(spec: spec)
+    }
+    return .delivered
+  }
+
+  private static func ghosttyKey(for spec: KeyEventSpec) -> ghostty_input_key_s {
+    var key = ghostty_input_key_s()
+    key.action = GHOSTTY_ACTION_PRESS
+    key.keycode = spec.keycode
+    key.mods = ghosttyMods(spec.mods)
+    key.consumed_mods = ghosttyMods(spec.consumedMods)
+    key.composing = false
+    key.unshifted_codepoint = spec.unshiftedCodepoint
+    return key
+  }
+
+  private static func ghosttyMods(_ mods: KeyEventSpec.Mods) -> ghostty_input_mods_e {
+    var raw: UInt32 = 0
+    if mods.contains(.shift) { raw |= GHOSTTY_MODS_SHIFT.rawValue }
+    if mods.contains(.ctrl) { raw |= GHOSTTY_MODS_CTRL.rawValue }
+    if mods.contains(.alt) { raw |= GHOSTTY_MODS_ALT.rawValue }
+    if mods.contains(.super) { raw |= GHOSTTY_MODS_SUPER.rawValue }
+    return ghostty_input_mods_e(rawValue: raw)
+  }
+
+  private static func withOptionalCString<R>(
+    _ string: String?, _ body: (UnsafePointer<CChar>?) -> R
+  ) -> R {
+    guard let string else { return body(nil) }
+    return string.withCString { body($0) }
   }
 
   /// Interrupt the foreground process group (Ctrl-C → SIGINT). Routed through

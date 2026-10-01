@@ -23,13 +23,13 @@ make mac-check                                  # swift-format in-place + lint
 
 Multi-worktree tip: `ln -s <main>/apps/mac/.build/ghostty apps/mac/.build/ghostty` avoids re-compiling Ghostty (~3.9 GB, ~20 min first time) in every new worktree. `build-ghostty.sh` primes Zig's cache via curl automatically (Zig 0.15.2's TLS handshake is rejected by Cloudflare on `deps.files.ghostty.org`; the prime step is idempotent and a no-op on cache hits).
 
-Requires Xcode **26.0+** (pinned via `apps/mac/Tuist.swift: compatibleXcodeVersions: .upToNextMajor("26.0")`).
+Requires Xcode **26 or 27** (pinned via `apps/mac/Tuist.swift: compatibleXcodeVersions`; builds are checked on Xcode 27). Xcode 27 needs Tuist 4.210+, which floors package deployment targets at what the SDK accepts.
 
-On Xcode 26.4+, zig 0.15.2 cannot link against the stock macOS SDK; `build-ghostty.sh` / `build-zmx.sh` detect this and point zig at an older installed SDK via `apps/mac/scripts/xcode-compat/`. That needs an SDK whose `libSystem.tbd` still lists `arm64-macos` (e.g. the Command Line Tools' `MacOSX15.4.sdk`). Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-4-and-later.md).
+On Xcode 26.4+ (27 included), zig 0.15.2 cannot link against the stock macOS SDK; `build-ghostty.sh` / `build-zmx.sh` detect this and point zig at an older installed SDK via `apps/mac/scripts/xcode-compat/`. That needs an SDK whose `libSystem.tbd` still lists `arm64-macos` (e.g. the Command Line Tools' `MacOSX15.4.sdk`). Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-4-and-later.md).
 
 ## Architecture Overview
 
-codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI. Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
+codans is a native macOS app that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane) for CLI-agent power users. It ships three co-versioned artifacts — the Mac app, the `codans` CLI, and a published Agent Skill — out of a Tuist-managed monorepo. The runtime is Swift 6 with hybrid TCA + `@Observable`, libghostty embedded via submodule, and JSON-RPC over a Unix socket between app and CLI (the same protocol also serves a paired iOS companion over a default-off LAN TLS-PSK gateway). Architecture is adapted from the user's reference projects **supacode** and **supaterm**.
 
 See [Architecture](docs/architecture.md) for domains, layers, and dependency rules.
 
@@ -42,15 +42,17 @@ codans/
 │   ├── codans-cli/             # `codans` CLI binary (RPC client to the running app)
 │   ├── CodansKit/              # CLI-side library shared by codans-cli + tests
 │   ├── CodansCore/          # Pure domain models (Project / Worktree / Tab / Pane / Tag)
-│   ├── CodansIPC/           # JSON-RPC wire protocol shared by app + CLI
+│   ├── CodansIPC/           # JSON-RPC wire protocol shared by app + CLI + iOS app
+│   ├── CodansRemote/           # LAN remote access (TLS-PSK, Bonjour, pairing) shared by Mac gateway + iOS app
 │   ├── ThirdParty/ghostty/     # libghostty submodule (built into GhosttyKit.xcframework)
 │   ├── Project.swift           # Tuist project definition
 │   └── Makefile                # Mac-platform build targets
+├── apps/ios/                   # iOS companion app (CodansMobile): Tuist project reusing apps/mac shared targets
 ├── docs/                       # Project documentation (architecture, specs, design, plans)
 ├── skills/                     # Published Agent Skill content (text-only, no engineering coupling)
 ├── scripts/                    # Repo-wide scripts
 ├── mise.toml                   # Pinned tool versions (tuist / zig / swiftlint / xcbeautify)
-├── Makefile                    # Top-level delegator → apps/mac/Makefile
+├── Makefile                    # Top-level delegator → apps/mac/Makefile, apps/ios/Makefile
 └── .github/workflows/          # CI workflows
 ```
 

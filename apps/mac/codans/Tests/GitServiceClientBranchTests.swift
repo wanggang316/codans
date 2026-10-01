@@ -4,6 +4,7 @@ import Testing
 
 @testable import Codans
 
+@MainActor
 struct GitServiceClientBranchTests {
   /// `live(service:)` must forward the new closures to the underlying service
   /// 1:1, in argument order. Recorded calls double as a regression guard against

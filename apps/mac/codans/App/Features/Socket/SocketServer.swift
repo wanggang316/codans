@@ -1,8 +1,8 @@
+import CodansCore
+import CodansIPC
 import Darwin
 import Dispatch
 import Foundation
-import CodansCore
-import CodansIPC
 import os
 
 /// Unix-domain-socket listener. Binds the configured path, accepts
@@ -191,13 +191,19 @@ public final class SocketServer {
       await Self.pumpSocketReads(fd: clientFD, into: continuation)
     }
 
+    // A streaming response never reads again, so a peer that hangs up
+    // mid-stream is only noticed when a write fails; cancelling the serve
+    // task then ends the stream instead of producing into a dead socket.
+    let serveTaskBox = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
     let conn = SocketConnection(
       id: connectionID,
       peerPID: peerPID,
       router: router,
       reader: stream,
       write: { data in
-        Self.writeAll(fd: clientFD, data: data)
+        if !Self.writeAll(fd: clientFD, data: data) {
+          serveTaskBox.withLock { $0 }?.cancel()
+        }
       },
       close: {
         Self.shutdownAndClose(fd: clientFD)
@@ -211,6 +217,7 @@ public final class SocketServer {
         await self.removeConnection(id: connectionID)
       }
     }
+    serveTaskBox.withLock { $0 = serveTask }
     activeConnections[connectionID] = serveTask
   }
 
@@ -234,11 +241,14 @@ public final class SocketServer {
   /// `send(2)` on the same fd is well-behaved. Short writes still happen,
   /// so we keep the loop. Retries on `EINTR` and waits out `EAGAIN` /
   /// `EWOULDBLOCK`; bails and closes the peer's fd on hard errors.
-  nonisolated private static func writeAll(fd: Int32, data: Data) {
-    var offset = 0
-    data.withUnsafeBytes { ptr in
+  /// Returns false when the peer is gone (hard error or zero-length
+  /// send), so the caller can stop producing for it.
+  @discardableResult
+  nonisolated private static func writeAll(fd: Int32, data: Data) -> Bool {
+    data.withUnsafeBytes { ptr -> Bool in
+      var offset = 0
       while offset < data.count {
-        guard let baseAddress = ptr.baseAddress else { return }
+        guard let baseAddress = ptr.baseAddress else { return false }
         let written = Darwin.send(
           fd,
           baseAddress.advanced(by: offset),
@@ -250,7 +260,7 @@ public final class SocketServer {
           continue
         }
         if written == 0 {
-          return
+          return false
         }
         if errno == EINTR {
           continue
@@ -259,8 +269,9 @@ public final class SocketServer {
           waitUntilWritable(fd: fd)
           continue
         }
-        return
+        return false
       }
+      return true
     }
   }
 

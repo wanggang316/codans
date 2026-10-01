@@ -101,19 +101,37 @@ extension IPC {
     case hierarchySetProjectTags = "hierarchy.setProjectTags"
     case hierarchySetActiveTagFilter = "hierarchy.setActiveTagFilter"
 
-    // pane — explicit-termination verbs that own the zmx daemon
-    // lifecycle (kill + sessions.json reap), distinct from the
-    // detach-only `hierarchy.closePane` mutation above. `pane.info`
+    // pane — `pane.close` is the explicit-termination verb that owns the
+    // zmx daemon lifecycle: it waits for the daemon to go and reaps its
+    // sessions.json entry. `hierarchy.closePane` above also ends the
+    // pane's shell (it kills the daemon too) but does neither of those
+    // extra steps. `pane.info`
     // and `pane.read` probe the daemon directly so VT-fidelity tests
     // can assert byte-level state (cursor, modes, serialized history)
     // that libghostty's parsed-text surface does not expose.
     case paneClose = "pane.close"
     case paneInfo = "pane.info"
     case paneRead = "pane.read"
+    // Streaming: a live, read-only mirror of the pane's terminal as
+    // `TerminalStreamFrame`s (wire types in `TerminalStreamWireTypes.swift`).
+    case paneAttachStream = "pane.attachStream"
+    // A stream caller's terminal seat: its grid, the lead (and so the
+    // pane's size), and input typed through it (protocol minor 4).
+    case paneSetStreamSize = "pane.setStreamSize"
+    case paneClaimSize = "pane.claimSize"
+    case paneInput = "pane.input"
+
+    // events — server-push subscription. `subscribe` is a streaming call:
+    // a snapshot frame first, then debounced change frames until either
+    // side closes (wire types in `EventsWireTypes.swift`).
+    case eventsSubscribe = "events.subscribe"
 
     // terminal
     case terminalSendInput = "terminal.sendInput"
     case terminalSendKey = "terminal.sendKey"
+    // An ordered batch of keys (W3C codes with modifiers), typed text,
+    // pastes and delays (wire types in `TerminalInputEvent.swift`).
+    case terminalSendEvents = "terminal.sendEvents"
     case terminalSendRawBytes = "terminal.sendRawBytes"
     case terminalBroadcastInput = "terminal.broadcastInput"
     case terminalReadText = "terminal.readText"

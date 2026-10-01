@@ -5,6 +5,7 @@ import CodansCore
 
 @testable import Codans
 
+@MainActor
 struct AppearancePreferenceUITests {
   @Test
   func colorSchemeMapping() {

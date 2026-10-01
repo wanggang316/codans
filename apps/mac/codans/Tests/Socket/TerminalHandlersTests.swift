@@ -405,4 +405,30 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
     resets.append(paneID.raw)
     return true
   }
+
+  /// Panes registered but not laid out on the Mac.
+  var notLive: Set<UUID> = []
+  /// Key codes the fake treats as Mac bindings.
+  var bindingCodes: Set<String> = []
+  /// After this many delivered input events the pane's surface "closes".
+  var closesAfter: Int?
+  private(set) var inputEvents: [IPC.TerminalInputEvent] = []
+
+  func hasLiveSurface(paneID: PaneID) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return registered.contains(paneID.raw) && !notLive.contains(paneID.raw)
+  }
+
+  func sendInputEvent(paneID: PaneID, event: IPC.TerminalInputEvent) -> TerminalHandlers.InputEventOutcome {
+    lock.lock()
+    defer { lock.unlock() }
+    guard registered.contains(paneID.raw) else { return .paneGone }
+    if let closesAfter, inputEvents.count >= closesAfter { return .paneGone }
+    if case .key(let code, _, _) = event, bindingCodes.contains(code) {
+      return .rejected(reason: IPC.TerminalInputRejection.Reason.binding)
+    }
+    inputEvents.append(event)
+    return .delivered
+  }
 }

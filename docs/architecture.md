@@ -5,24 +5,27 @@
 
 codans is a native macOS application that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane), with cross-cutting Tag classification on Projects, for CLI-agent power users. See [Product Spec](product-spec.md) for capabilities and boundaries.
 
+An iOS companion app (iPhone / iPad / iPhone Duo) observes and drives a running Mac app over a paired, default-off LAN gateway; it runs no processes itself. See [iOS Companion](design-docs/ios-companion.md).
+
 The system is a **Tuist-managed monorepo** because the product ships three co-versioned artifacts — the Mac app, the `codans` CLI, and the published Agent Skill — whose development benefits from atomic cross-cutting changes (protocol edits, CLI contract changes, domain-model evolution) and shared tooling.
 
 Architecture is adapted from two reference projects the user maintains and encourages borrowing from: **supacode** and **supaterm**. See [References](#references) for file anchors. The structural shape — Swift 6, Tuist, libghostty-via-submodule, hybrid TCA + `@Observable`, JSON-RPC over Unix socket — is lifted from these projects because they have already validated the pattern on the same workload codans targets.
 
 ## Codemap
 
-The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/mac/`. The top level holds monorepo-wide concerns (docs, root Makefile that delegates, `mise.toml`). This mirrors supaterm's multi-platform-ready layout.
+The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/mac/`. The iOS companion app lives under `apps/ios/` as a separate Tuist project that references the shared targets in `apps/mac/` (see [iOS Companion](design-docs/ios-companion.md)). The top level holds monorepo-wide concerns (docs, root Makefile that delegates, `mise.toml`). This mirrors supaterm's multi-platform-ready layout.
 
 ### Tuist targets under `apps/mac/`
 
 | Target | Kind | Source path | Purpose |
 |---|---|---|---|
-| `CodansCore` | static framework | `apps/mac/CodansCore/` | Pure domain types: Project/Worktree/Tab/Pane models, `Tag`/`TagFilter`, `SplitTree`, stable UUID identifiers. Zero internal deps. Consumed by app + CLI. |
-| `CodansIPC` | static framework | `apps/mac/CodansIPC/` | JSON-RPC wire protocol: Request/Response envelopes, Method constants, payload types and framing. Socket discovery lives in `CodansKit`. Shared between app and CLI. |
+| `CodansCore` | static framework | `apps/mac/CodansCore/` | Pure domain types: Project/Worktree/Tab/Pane models, `Tag`/`TagFilter`, `SplitTree`, stable UUID identifiers. Zero internal deps. Consumed by app + CLI + iOS app, so it builds for macOS and iOS and must stay free of AppKit/Carbon. |
+| `CodansIPC` | static framework | `apps/mac/CodansIPC/` | JSON-RPC wire protocol: Request/Response envelopes, Method constants, payload types and framing. Socket discovery lives in `CodansKit`. Shared between app, CLI and iOS app; builds for macOS and iOS. |
+| `CodansRemote` | static framework | `apps/mac/CodansRemote/` | LAN remote-access plumbing shared by the Mac gateway and the iOS app: pairing payload, TLS-PSK `NWParameters`, `NWConnection` ⇄ frame-transport adapter, long-lived multiplexed `RemoteRPCClient`, Bonjour constants. Depends on `CodansCore` + `CodansIPC`; no UI framework. Builds for macOS and iOS. |
 | `CodansKit` | static framework | `apps/mac/CodansKit/` | Shared CLI transport, `RPCClient`, `SocketDiscovery`, alias resolution, rendering, and exit codes. Depends on `CodansCore`, `CodansIPC`, and `ArgumentParser`; consumed by the CLI, app, and tests. |
 | `GhosttyKit` | static framework | `apps/mac/.build/ghostty/GhosttyKit.xcframework` | Tuist wrapper around the locally built libghostty XCFramework. |
 | `codans-cli` | command-line tool | `apps/mac/codans-cli/` | CLI binary (`PRODUCT_NAME=codans`). Depends on `CodansKit`, `CodansCore`, `CodansIPC`, and `ArgumentParser`. Runtime / Hooks / Git are intentionally off-limits — CLI is a thin RPC client. |
-| `Codans` | macOS app | `apps/mac/codans/{App,Runtime,Process,Git,GitHub}/` | Single app target. Internal dependencies: `CodansCore`, `CodansIPC`, `CodansKit`, `GhosttyKit`, `DiffViewKit`, and `codans-cli`; external dependencies are declared in `Project.swift`. `embed-codans.sh` embeds the CLI under `Codans.app/Contents/Resources/bin/` as `codans` (Release) or `codans-dev` (Debug). |
+| `Codans` | macOS app | `apps/mac/codans/{App,Runtime,Process,Git,GitHub}/` | Single app target. Internal dependencies: `CodansCore`, `CodansIPC`, `CodansKit`, `CodansRemote`, `GhosttyKit`, `DiffViewKit`, and `codans-cli`; external dependencies are declared in `Project.swift`. `embed-codans.sh` embeds the CLI under `Codans.app/Contents/Resources/bin/` as `codans` (Release) or `codans-dev` (Debug). |
 
 ### In-app modules (subfolders of the `codans` target, not separate Tuist targets)
 
@@ -39,6 +42,7 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | `codans/App/Clients/Editor/` (external git viewing) | The external Git Viewer command is separate from the built-in diff window. "Toggle Git Viewer" (⌘ chord / menu / palette → `RootFeature.diffInspectorToggledForCurrentWorktree`) resolves `general.defaultGitViewerID` (an `EditorID?` into the registry's git-client category) and opens the current Worktree in an external client (Fork / Sourcetree / GitHub Desktop / …) through the same `EditorService` open path as the default editor; `nil` or the Built-in ID opens the built-in diff window; an external ID absent from the editor descriptors is a no-op. SSH targets follow remote editor resolution. See [Editor integration § Git Viewer](design-docs/editor-integration.md). |
 | `codans/App/Features/Diff/` | `DiffFeature` owns worktree-scoped Uncommitted / Outgoing selection, comparison loading, stale-result rejection, and a two-second refresh timer while visible. `DiffPanelView` hosts the independent `DiffViewKit` WKWebView renderer in a normal per-worktree NSWindow owned by DiffWindowManager. Git reads use `GitServiceClient`; current-file editor handoff uses `DiffEditorClient`. Scope/base/file preferences are session-local. No editing or Git write actions. See [Git diff viewer](design-docs/git-diff-viewer.md). |
 | `codans/App/Features/WorktreeHeader/` | Branch identity and editor, Run, and Agent controls. Editor intents delegate to `RootFeature`. The surrounding Worktree detail toolbar also presents status, live processes and notifications. Git Viewer uses the configurable ⌘G command; Worktree → Show Changes opens the independent read-only comparison window. See [Main window](design-docs/main-window.md). |
+| `codans/App/Features/RemoteGateway/` | Default-off LAN gateway for the iOS companion: `RemoteGatewayServer` (`NWListener`, Bonjour `_codans._tcp`, per-device PSK selection) feeds accepted connections into the same `SocketConnection` / `MethodRouter` as the Unix socket with a `.remote` caller context; `PairedDeviceStore` (`remote-devices.json` metadata, PSKs in the Keychain); Settings → Remote Access panel. See [iOS Companion](design-docs/ios-companion.md). |
 | `codans/App/Features/Socket/` | Socket server + `MethodRouter` + per-namespace handlers (`SystemHandlers`, `HierarchyHandlers`, `TerminalHandlers`, `EditorHandlers`). `EditorHandlers` serves `editor.describe` / `editor.open` / `editor.setGlobalDefault` / `editor.setProjectDefault`, bridging `EditorClient` + `HierarchyClient` to the `CodansIPC/Editor/` wire types. |
 
 Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by **folder convention + code review**, not by Tuist target edges. This matches supacode/supaterm's idiom. Promote a subfolder to its own target only when it gains a test bundle, becomes consumed by another app (e.g. iOS), or needs to restrict its public API surface.
@@ -48,9 +52,10 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 | Path | Purpose |
 |---|---|
 | `apps/mac/` | The mac platform: Tuist project, sources, ghostty submodule, per-app Makefile |
+| `apps/ios/` | The iOS companion app (`CodansMobile`, product name "Codans", iPhone + iPad): its own Tuist project, sources under `apps/ios/CodansMobile/`, per-app Makefile. Depends on `CodansCore` / `CodansIPC` / `CodansRemote` from `apps/mac/` via Tuist cross-project references; never links GhosttyKit, `CodansKit` or ArgumentParser |
 | `docs/` | Project documentation: this file, `product-spec.md`, plus `design-docs/`, `references/`, `generated/`, `user-tests/` |
 | `mise.toml` | Pinned versions for `tuist`, `zig`, `swiftlint`, `xcbeautify` — shared across any future apps |
-| `Makefile` | Top-level delegator: `make mac-build` → `$(MAKE) -C apps/mac build` |
+| `Makefile` | Top-level delegator: `make mac-build` → `$(MAKE) -C apps/mac build`, `make ios-build` → `$(MAKE) -C apps/ios build` |
 
 ### Directories inside `apps/mac/`
 
@@ -83,8 +88,10 @@ operations resolve each member's source repository. See [Workspace](design-docs/
 CodansCore                  (no internal dependencies)
 CodansIPC                   -> CodansCore
 CodansKit                   -> CodansCore, CodansIPC, ArgumentParser
+CodansRemote                -> CodansCore, CodansIPC                (macOS + iOS)
+CodansMobile (apps/ios)     -> CodansCore, CodansIPC, CodansRemote, TCA
 codans-cli                  -> CodansKit, CodansCore, CodansIPC, ArgumentParser
-Codans (app)                -> CodansCore, CodansIPC, CodansKit, GhosttyKit, DiffViewKit,
+Codans (app)                -> CodansCore, CodansIPC, CodansKit, CodansRemote, GhosttyKit, DiffViewKit,
                                codans-cli (embedded tool), external dependencies
   in-app modules            codans/{App,Runtime,Process,Git,GitHub}
                                (folder boundaries, not separate targets)
@@ -93,7 +100,8 @@ skills/codans-cli/          (text-only, no Swift dependencies)
 
 **Rules:**
 - `codans-cli` must NEVER `import` any in-app-module symbol (no `Runtime`, `Hooks`, `Git` usage) — it is a thin RPC client. This is enforced at file organization: those subfolders are inside the `codans` app target and not shipped as separate modules.
-- `Codans` (app) and `codans-cli` must communicate only through IPC (`CodansIPC` wire types + Unix socket), never via shared state or file-based IPC.
+- `Codans` (app) and `codans-cli` must communicate only through IPC (`CodansIPC` wire types + Unix socket), never via shared state or file-based IPC. The iOS app talks to the Mac app only through the paired LAN gateway, with the same wire types.
+- `CodansCore`, `CodansIPC` and `CodansRemote` build for iOS as well as macOS: no AppKit, Carbon, or other macOS-only imports in them.
 - `CodansCore` must have zero imports from any other internal package — it is the universal leaf.
 - No circular dependencies between frameworks.
 - **In-app module boundaries** (`Runtime` ↔ `Hooks` ↔ `Git` ↔ `App`) are enforced by folder convention + code review only. No Tuist target edge exists between them because they compile into the same app binary. See "Architectural Invariants" for the rules that must not be violated (e.g., "Pane state mutability is localized to `Runtime`").
@@ -109,7 +117,7 @@ skills/codans-cli/          (text-only, no Swift dependencies)
 Rules not visible in code. Violating any of these will not fail tests immediately but will rot the system.
 
 - **Pane state mutability is localized to `Runtime`.** Pane scrollback, cursor, and selection are mutable only inside `codans/Runtime (in-app module)`. Other layers read via `@Observable` bindings or event streams; they must not call mutators directly.
-- **App-control requests from the CLI go through `CodansIPC`.** The CLI uses the app Unix socket rather than file-based queues or shared mutable state. Terminal sessions and subprocesses have their own transport boundaries.
+- **App-control requests from the CLI go through `CodansIPC`.** The CLI uses the app Unix socket rather than file-based queues or shared mutable state. Terminal sessions and subprocesses have their own transport boundaries. The paired iOS companion reaches the app only through the default-off LAN gateway (TLS-PSK with a per-device key), which carries the same framing, envelopes and methods into the same `MethodRouter`; a remote caller is additionally limited by `IPC.Method.remoteTier`, and methods marked never-remote are unreachable over the network at any permission. A new transport requires a design doc.
 - **Hooks are out-of-process only in v1.** *(Design intent — the Hooks subsystem is not yet implemented; see [Lifecycle hooks](design-docs/lifecycle-hooks.md).)* When built, hook handlers execute as shell commands fork-exec'd by the app, receiving JSON on stdin and returning JSON on stdout. In-process handlers (embedded JS, WASM) are explicitly deferred.
 - **State management is hybrid by design, with a clear boundary.** High-frequency terminal state uses `@Observable`; app flow state uses TCA. Mixing the two patterns within a single feature is a red flag. See [State Management](#state-management-hybrid-tca--observable).
 - **Persistence has explicit owners and file-specific schema policies.** `AtomicFileStore` provides atomic-rename JSON I/O; callers own version validation and recovery. Do not assume all config-directory files share one schema or unsupported-version policy; see [Persistence](#persistence).
@@ -143,6 +151,8 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
 ### IPC
 
 - **Transport:** Unix domain socket, one per running app instance. Release builds default to `/tmp/codans-$UID.sock`; Debug builds default to `/tmp/codans-dev-$UID.sock`; both are overridable via `CODANS_SOCKET_PATH`
+- **Remote transport (iOS companion):** an optional LAN gateway (`NWListener`, Bonjour `_codans._tcp` with TXT `channel=<BuildChannel.slug>`), TLS 1.2 PSK with one key per paired device. Off by default; `CODANS_REMOTE_DISABLED` forces it off. Connections enter the same `SocketConnection` with a `CallerContext.remote(deviceID, permission)`; the router rejects methods outside the device's tier before any handler runs. The iOS client keeps two long-lived connections — control (unary) and events (one `events.subscribe` stream: snapshot, then debounced deltas) — plus one connection per open terminal stream. See [iOS Companion](design-docs/ios-companion.md)
+- **Terminal stream (protocol minor 2):** `pane.attachStream` streams a pane's live output as `TerminalStreamFrame`s (`reset` / `output` / `resized` / `heartbeat` / `exited`, with `seq` and a resync `epoch`), coalesced per 16 ms with a 1 MiB backlog cap that forces a resync. The Mac reads it by attaching to the pane's zmx daemon as a read-only **observer** (zmx fork tags `Observe` / `ObserveState` / `ObserveResize`): an observer can never become leader, so a viewer never resizes the PTY; daemons without the tags fall back to `History vt`. Input returns through `terminal.sendEvents` (W3C key codes + modifiers, text, paste, delay), encoded by libghostty on the pane's live surface. Mac side: `Runtime/Ghostty/ZmxStreamClient` + `ZmxStreamDecoder` and `App/Features/Socket/TerminalStream/`. Limits: 4 streams per caller, 16 in total
 - **Wire protocol:** length-prefixed JSON envelopes. Framing is a `UInt32` **big-endian** length prefix followed by exactly N bytes of UTF-8 JSON — **no trailing newline**. Each frame is capped at **16 MiB**; an oversized length prefix raises `IPCError.invalidFrame` and the connection is closed (0003 DEC-3). Envelope shapes defined in `CodansIPC/Protocol.swift`:
   - Request: `{"id": "uuid", "method": "terminal.sendInput", "params": {...}}`
   - Success: `{"id": "uuid", "result": {...}}`
@@ -166,6 +176,7 @@ Files under `~/.config/codans/` — `~/.config/codans-dev/` for Debug builds, se
 | `catalog.json` (`CodansCore/Catalog.swift`) | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
 | `settings.json` (`CodansCore/Settings/`) | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). `ProjectSettings` carries shared fields and an optional `git: GitProjectSettings?` subtree for Git settings; applicability is determined by Project kind. |
 | `sessions.json` (`CodansCore/Session.swift`) | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
+| `remote-devices.json` | v1 | Paired iOS devices for the LAN gateway: device ID, name, permission tier, pending/active, `createdAt`, `lastSeenAt`. Keys are **not** here — each device's PSK lives in the Keychain. See [iOS Companion](design-docs/ios-companion.md). |
 | `notifications.json`, `shortcuts.json` | v1 | Inbox entries and keybinding overrides (`AppDirectories.configDirectory`). Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
 
 The shared JSON write primitive is atomic-rename persistence (`CodansCore/AtomicFileStore.swift`):
@@ -266,6 +277,7 @@ Hard-won constraints that are invisible in the code but break the build or crash
 | The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitHub); proven in both reference projects |
 | Swift Observation (`@Observable`) | `codans/Runtime (in-app module)`, parts of `apps/mac` | Runtime state | Hybrid complement to TCA for high-frequency terminal state; native Swift 6 feature; proven in supacode |
 | ArgumentParser | `apps/mac/codans-cli/` | CLI parsing | Apple's official CLI framework; same as both reference projects |
+| Network.framework (`NWListener` / `NWConnection` / `NWBrowser`) | `CodansRemote`, `RemoteGateway`, `apps/ios` | LAN transport + Bonjour | First-party TLS-PSK support and Bonjour advertising/browsing in one API on both platforms; no third-party networking stack |
 | Sparkle | `apps/mac` | Auto-update | De facto standard for macOS app updates; same as supacode |
 | SwiftLint + swift-format | workspace | Lint + format | Style consistency; enforced in CI; configured via `.swiftlint.yml` and `.swift-format.json` |
 
@@ -276,6 +288,8 @@ Hard-won constraints that are invisible in the code but break the build or crash
 | App launch | `apps/mac/codans/App/CodansApp.swift` | `@main`, root TCA store construction, window lifecycle |
 | CLI launch | `apps/mac/codans-cli/CodansCLI.swift` | `ArgumentParser` root; dispatches to subcommand |
 | Socket server | `apps/mac/codans/App/Features/Socket/SocketServer.swift` | Accepts Unix socket connections; `MethodRouter` routes JSON-RPC to per-namespace handlers |
+| Remote gateway | `apps/mac/codans/App/Features/RemoteGateway/` | Default-off LAN listener for paired iOS devices; TLS-PSK handshake, then the same `SocketConnection` / `MethodRouter` path with a remote caller context |
+| iOS app launch | `apps/ios/CodansMobile/App/CodansMobileApp.swift` | `@main` iOS companion: multi-scene `WindowGroup`, shared `ConnectionStore` |
 | libghostty bootstrap | `apps/mac/codans/Runtime/Ghostty/GhosttyRuntime.swift` | Initializes `ghostty_app_t`, registers callbacks (`ghostty_init(argc,argv)` must be the first libghostty call — see Build & concurrency invariants) |
 | Hook dispatcher | *(planned)* | Fan-out of lifecycle events to configured handlers — not yet implemented (see [Lifecycle hooks](design-docs/lifecycle-hooks.md)) |
 | Deeplink handler | `apps/mac/codans/App/CodansApp.swift` (`parseDeeplink`) | Receives `codans://` URLs via `onOpenURL`; current shipping surface is `codans://focus?project=…&worktree=…&tab=…&pane=…` |

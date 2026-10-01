@@ -811,17 +811,19 @@ final class HierarchyHandlers {
     }
   }
 
-  /// The cwd a new pane in (`projectID`, `worktreeID`) starts in. Local
-  /// projects take `requested` as-is; a remote project accepts it only when
-  /// it targets the worktree (or a subpath) on the host, else the worktree
-  /// root — see `openPane` for why.
+  /// The cwd a new pane in (`projectID`, `worktreeID`) starts in. An empty
+  /// `requested` means the worktree root: the phone's hierarchy carries no
+  /// worktree paths. Local projects otherwise take `requested` as-is; a
+  /// remote project accepts it only when it targets the worktree (or a
+  /// subpath) on the host, else the worktree root — see `openPane` for why.
   func effectiveWorkingDirectory(
     _ requested: String, projectID: ProjectID, worktreeID: WorktreeID
   ) -> String {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
-      project.isRemote,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return requested }
+    if requested.isEmpty { return worktree.path }
+    guard project.isRemote else { return requested }
     let normalized = HierarchyManager.normalizeRemotePath(requested)
     let root = HierarchyManager.normalizeRemotePath(worktree.path)
     if normalized != root, !normalized.hasPrefix(root + "/") {
@@ -964,6 +966,9 @@ final class HierarchyHandlers {
     public let worktreeID: WorktreeID
     public let projectID: ProjectID
   }
+  /// `hierarchy.closePane` — removes the pane from its tab and ends its
+  /// shell: the surface teardown kills the pane's zmx daemon. It is not a
+  /// detach; nothing can reattach afterwards.
   public func closePane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: PaneLocatorParams
@@ -992,9 +997,10 @@ final class HierarchyHandlers {
   /// control socket to vanish), drops the persisted session-catalog
   /// entry, and removes the pane from the in-memory hierarchy.
   ///
-  /// Distinct from `hierarchy.closePane`: the latter detaches the
-  /// libghostty surface so a future attach can resume the same daemon;
-  /// this verb guarantees the daemon is gone before returning.
+  /// Distinct from `hierarchy.closePane`, which also ends the pane's
+  /// shell (its surface teardown sends the daemon `.kill`) but neither
+  /// waits for the daemon to go nor reaps sessions.json; this verb
+  /// guarantees the daemon is gone before returning.
   ///
   /// Returns `closed == false` (without raising) when the pane is not
   /// present in the catalog — the CLI maps that to a non-zero exit so

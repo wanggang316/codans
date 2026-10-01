@@ -65,6 +65,10 @@ struct LazyPaneHost: View {
           .overlay {
             PaneLinkHoverBanner(surface: surface)
           }
+          // A paired device has the pane at its size.
+          .overlay {
+            RemoteSizingOverlay(paneID: store.paneID)
+          }
           // Top-right actions menu: collapsed to a single button, expanded
           // to the actions scoped to this pane — the pane's own (hand off,
           // command queue, mute) plus everything its surface offers on
