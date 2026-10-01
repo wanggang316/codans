@@ -1,6 +1,6 @@
 # 设计文档：AgentState View
 
-**状态：** 已上线（可见）
+**状态：** Agents 面板已上线；HAN-167 的 unknown / error、协议与恢复扩展已在本分支实现，尚未发布。
 **作者：** Gump（与 Claude）
 
 ## 背景与范围
@@ -18,8 +18,8 @@ codans 把编码 agent（Claude Code、Codex CLI、pi、…）作为 Pane 运行
 - 侧栏底部的 AgentState 面板列出所有 worktree 中每个 agent-bearing Pane：agent logo、project + worktree 标签、派生运行态（`working` 带动画指示），以及最近一次状态变化时间。
 - 面板顶部有一句话标题（"Agents View"）；超过 4 条时附带 `(N)` 计数 chip。
 - 点击行聚焦那个 Pane，按需切换 project / worktree / tab。
-- 识别范围由 `AgentKind` 与 `AgentRuntimeAdapters` 注册表定义；每种 agent 的显示名、进程模式和恢复命令由 adapter 提供。未匹配注册表的 Pane 不出现在 AgentState 中。
-- `AgentStateStore` 拥有每个 Pane 的运行态状态机，由前台进程组快照、`TerminalEvent` 流（视口文本 / idle / teardown）和 `PaneKeyboardActivityTracker` 驱动。高频更新留在内存，退出时保存恢复所需的最近状态快照。
+- 识别范围由 `AgentKind` 与唯一的 `AgentRegistry` 注册表定义；每项组合身份元数据、启动描述、终端解析器和可选会话恢复器。`AgentRuntimeAdapters` 是兼容入口。未匹配注册表的 Pane 不出现在 AgentState 中。
+- `AgentStateStore` 保存每个 Pane 的已接受观测并派生显示状态，由前台进程绑定、`TerminalEvent` 流和 `PaneInputCoordinator` 的外部输入修订驱动。高频更新留在内存，退出时保存恢复所需的最近状态快照。
 - `Pane` 上两个可选字段（`agentKind`、`agentSessionID`）持久化 Pane 绑定到*哪个* agent。绑定字段写入 `catalog.json`；运行态的退出快照由 `sessions.json` 单独保存。
 
 **非目标**
@@ -49,7 +49,7 @@ codans 把编码 agent（Claude Code、Codex CLI、pi、…）作为 Pane 运行
         │                       │              focusPane via
         foregroundJob     runningPanes,        HierarchyClient
         snapshots         viewport text,
-                          keyboard tracker
+                          external input revisions
 ```
 
 **职责划分。** 身份、运行态和通知分别承担不同的数据与更新契约。
@@ -104,11 +104,11 @@ raw value 是持久进 `catalog.json` 的稳定标识符；`displayName` 是面�
 
 **Codable 向前兼容。** 两字段都可选、仅非 nil 时写出——旧 `catalog.json` 原样解码（`decodeIfPresent`），降级到旧 codans build 静默丢弃这两个字段。无需迁移脚本。
 
-**运行态退出快照。** `AgentStateStore` 在内存里维护最近的 idle / working / blocked / finished 状态，不保存跃迁历史。退出时，`AppState` 的 `agentSnapshotProvider` 从 registry 生成 `PersistedAgentRecord`（pane ID、kind/state 的 raw value、PID、采集时间），交给 `SessionLifecycle` 写入 `sessions.json` 的 `SessionCatalog.agents`。`catalog.json` 中的 Pane 绑定字段不承担运行态快照存储。
+**运行态退出快照。** `AgentStateStore` 在内存里维护最近的 unknown / idle / working / blocked / error / finished 显示状态，不保存跃迁历史。退出时，`AppState` 的 `agentSnapshotProvider` 从 registry 生成 `PersistedAgentRecord`（pane ID、kind/state 的 raw value、PID、采集时间），交给 `SessionLifecycle` 写入 `sessions.json` 的 `SessionCatalog.agents`。`catalog.json` 中的 Pane 绑定字段不承担运行态快照存储。
 
 启动恢复由 `SessionCoordinator.restoredAgents` 提供记录。`selectAgentSeeds` 只保留 **daemon 存活且 kind/state raw value 均可解码**的记录：优先复用启动扫描的 liveness 结果，未覆盖的 Pane 直接探测 daemon socket；`.dead` 和仅有磁盘快照的 `.snapshot` 都不播种 agent 状态。存活检测以 daemon 为单位，不以退出快照中的 PID 为准；daemon 存活也不替代后续前台进程组对 agent 身份的确认。
 
-满足条件的记录交给 `seedRestored` 预填，scratch 的 `userInputSeen` 初始化为 `true`。后续真实视口事件接管状态派生；未通过恢复门槛的 Pane 等待实时识别，不显示由退出快照推断的 agent badge。
+满足条件的记录交给 `seedRestored` 预填，并等待首次真实分类接管显示。退出快照不包含有效的实例绑定或已接受观测，不能授权自动恢复；未通过恢复门槛的 Pane 等待实时识别，不显示由退出快照推断的 agent badge。
 
 ### Agent 识别
 
@@ -127,73 +127,42 @@ raw value 是持久进 `catalog.json` 的稳定标识符；`displayName` 是面�
 **绑定与解绑——前台 job 是权威信号：**
 - 匹配的 job → 绑定 / 重绑到该 `AgentKind`；
 - `paneExited` / `paneCrashed` / `paneClosedByTab` → 清字段；
-- 不匹配的 job → **不立即清**，而走一个迟滞计数器：`Presence.releaseMissThreshold = 6`，连续 6 次未命中才释放绑定。任意一次命中把计数清零。这避免了 agent 短暂把前台让给子进程（git、build、pager）时绑定被反复抖掉。
+- 不匹配的 job → **不立即清**，而走一个迟滞计数器：`Presence.releaseMissThreshold = 6`，连续 6 次有效采样未命中才释放绑定。已有验证实例时，空 OS 探测只暂停绑定有效性，不累计为实例退出。任意一次命中把计数清零。这避免了 agent 短暂把前台让给子进程（git、build、pager）时绑定被反复抖掉。
 
-这意味着重绑由前台进程组变化驱动，**不依赖** OSC 133 prompt-return。一个仍在跑的 agent 始终是其 Pane 的前台进程，因此「Claude 退到 shell、再启动 Codex」会被自然观察到——shell 提示符下前台组只剩 shell（不匹配，开始累计 miss），新 agent 出现则立即重绑。
+重绑由前台进程组变化驱动，**不依赖** OSC 133 prompt-return。本地自动恢复还要求 `AgentBinding`：实际 Agent PID、进程启动时间、PGID、surface generation 和实例 ID。即使 `AgentKind` 不变，进程或 surface 替换也会创建新实例并隔离旧观测；暂时无法确认身份时暂停自动恢复。完整身份与替换约束见 [Agent integration contracts](agent-integration-protocols.md#instance-ownership-precedes-observation)。
 
 ### 运行态派生
 
-`AgentStateStore`（`App/Features/AgentState/AgentStateStore.swift`，`@MainActor @Observable`）持有：
+`AgentStateStore`（`App/Features/AgentState/AgentStateStore.swift`，`@MainActor @Observable`）保存 `entries: [PaneID: AgentEntry]`。每项包含显示状态、最近变化时间、可选实例绑定和已接受观测；逐 Pane scratch 保存 `TerminalObservationTracker`、文本与解析缓存、采样序号、working 迟滞和 `seen` 标记。
+
+纯 `AgentTerminalParser` 返回 `TerminalParseResult`，状态为 `unknown`、`idle`、`working`、`blocked` 或 `error(AgentFailure)`；tracker 处理证据归属及旧错误抑制后形成 `AgentObservation`。`unknown` 表示证据不足，不等于 idle 或可输入。UI / IPC 投影保留错误状态名称，并额外提供注意力状态 `finished`：
 
 ```swift
-struct AgentEntry {
-    let kind: AgentKind
-    let sessionID: String?
-    var state: AgentRuntimeState
-    var lastTransitionAt: Date
-}
-
 enum AgentRuntimeState: String, CaseIterable, Equatable, Sendable {
-    case idle
-    case working
-    case blocked
-    case finished
+    case unknown, idle, working, blocked, error, finished
 }
 ```
 
-`entries: [PaneID: AgentEntry]` 是 `@Observable`-tracked 的；每次变更写回完整 struct 以可靠触发变更追踪。每个 Pane 另有一份 scratch（`rawState`、`seen`、`userInputSeen`、`lastViewportText`、`lastWorkingAt`），即便在 agent 被识别前也保留，使先到的信号在 `onAgentBound` 落地时仍能给出正确初态。
-
-**raw 分类只有三态。** `PaneAttentionInterpreter.classifyAgentActivity(kind:viewportText:) -> AgentActivityState` 返回 `working` / `blocked` / `idle`，对每个 `AgentKind` 跑各自的渲染区启发式（如 Claude 的 spinner / "esc to interrupt"、Codex 的 "• Working ("、各家的批准提示）。`finished` **不是** raw 态——它是 display 派生：一个 Pane 从活动态退回 idle、且用户当时没在看它（`seen == false`）。其含义是：`finished` 恰是「这个 Pane 曾在工作、由此产生的跃迁尚未被确认」。
-
-输入与反应（一处——系统里唯一的状态机）：
+主要输入与显示行为：
 
 | 信号 | 效果 |
 |---|---|
-| `paneViewportChanged`：渲染区分类为 `working`（在观察到用户输入后） | raw 态变 `working` |
-| `paneViewportChanged`：渲染区分类为 `blocked`（agent 专属启发式） | raw 态变 `blocked` |
-| `paneIdle`：活动→idle 且该 Pane 当时未被观察 | display 态变 `finished` |
-| `paneExited` / `paneCrashed` / `paneClosedByTab` | 丢弃 entry 与 scratch（teardown） |
-| `PaneKeyboardActivityTracker` 在该 Pane 记到按键 | 标 seen；乐观清除 `blocked` 态 |
-| Pane 获得焦点（selection 链指向它且 app 在前台） | 标 seen；乐观清除 `blocked` 态 |
-| `agentKind` 变 nil / `onAgentUnbound` | 从注册表丢弃 entry |
+| `paneAgentSnapshot` | 仅接受匹配当前绑定且采样序号递增的观测 |
+| `paneViewportChanged` | 只供没有验证绑定的显示路径使用，不能授权本地自动恢复 |
+| 外部输入修订 | 当前观测失效为 unknown、抑制旧错误证据并标 seen；下一次采样重新分类 |
+| Pane 获得焦点 | 标 seen，清除 finished 注意力；不撤销 error 或 blocked 事实 |
+| `paneIdle` | 按已有观测刷新显示迟滞，不凭空证明任务完成 |
+| `paneExited` / `paneCrashed` / `paneClosedByTab` / `onAgentUnbound` | 丢弃 entry 与 scratch |
 
-Desktop notification（OSC 9）与终端 bell **不**在此表。bell 或 OS 通知是 inbox 值当的*事件*，而非实时活动信号——bell 为完成提示音、错误音、命令结束响起的频率，和为真正提示响起的频率一样高。通知检测器独立消费那些 delta；实时 agent 态以渲染区此刻所说为准。这让 `blocked` 不会在屏幕上没有真正提示时粘住。
+`stabilizeAgentActivity` 对 working→idle 应用 `agentWorkingHold = 1.2s` 的迟滞；unknown、blocked 和 error 不经过该保持。只有未被观察的 working→idle 跃迁产生 `finished`。error→idle 不表示成功，unknown / blocked / error 也会清除先前的 finished 注意力。Title 仅用于展示；OSC 9、bell、OSC 9;4 进度和 `paneOutput` 不作为此处的 Agent 执行状态证据。
 
-`paneOutput` 也**刻意**不在表中。libghostty bridge 当前不把子进程字节转发到引擎的 output 流（见 `PaneSurface.onOutput`），故该事件在生产中实际是死的，绑在它上面会是虚假依赖。读稳定的视口快照而非原始字节，也让 TUI 重绘噪音不会把 Pane 钉在 `.working`。
-
-`working` 仅在绑定的 agent 已观察到用户输入、且其渲染区匹配 agent 专属 working cue 后才触发。Title 变化在运行态派生中被忽略。`stabilizeAgentActivity` 对所有 agent 使用 `agentWorkingHold = 1.2s` 的迟滞：working→idle 在最后一次 working 帧后的 1.2 秒内仍按 working 计。`blocked` 不经过延时保持，避免确认提示被隐藏。
-
-最终态是 scratch 字段的纯函数：
-
-```
-derive(pane) =
-    .blocked     if rendered region classifies as blocked
-    .working     if rendered region classifies as working (after user input)
-    .finished    if first active → idle transition is unobserved (seen == false)
-    .idle        otherwise
-```
-
-`AgentStateStore` 在本地拥有这个 observed/acknowledged 标志——它**不读** `NotificationStore.readAt`，使两个子系统保持独立。
-
-一道防御性的 15s auto-reset 在更低一层的 `PaneSurface`：任何非 REMOVE 的 OSC 9;4 状态会安排一个 per-surface 任务，若无新的 progress 事件抵达就合成一个 REMOVE，使崩溃或卡死的发射器无法把 badge 整个会话钉在 `.working`。
-
-显示优先级为 `blocked > working > finished > idle`。
+`AgentStateStore` 自己保存 `seen`，不读取通知 inbox。自动恢复消费已接受的观测和验证绑定，不读取显示迟滞或 finished。解析、证据生命周期、实例替换和输入协调契约统一记录在 [Agent integration contracts](agent-integration-protocols.md)；策略与用户操作见 [Agent Error Recovery](agent-error-recovery.md)。
 
 ### IPC 与 CLI
 
 `agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、派生状态、最近变化时间、层级 ID、临时 Pane handle 与焦点标记。`codans agent list` 列出启动配置，与运行态列表不同。
 
-`agent.wait` 对应 `codans agent wait <pane> --until <condition>`，在服务端按 200 ms 间隔读取同一状态源。条件为 `idle`、`working`、`blocked`、`finished`、`changed` 或 `exit`：`changed` 比较起始条目的 state 与 kind，`exit` 在 entry 消失或 Pane 移除时满足。开始等待时 Pane 必须存在；已存在但无 agent 的 Pane 可立即满足 `exit`。CLI 默认等待 60 秒，允许 1–600 秒；超时返回 `WAIT_TIMEOUT`（exit 11）。这些结果是屏幕与前台进程的派生状态，不是 agent 协议提供的任务完成确认。
+`agent.wait` 对应 `codans agent wait <pane> --until <condition>`，在服务端按 200 ms 间隔读取同一状态源。条件为 `unknown`、`idle`、`working`、`blocked`、`error`、`finished`、`changed` 或 `exit`：`changed` 比较起始条目的 state 与 kind，`exit` 在 entry 消失或 Pane 移除时满足。开始等待时 Pane 必须存在；已存在但无 agent 的 Pane 可立即满足 `exit`。CLI 默认等待 60 秒，允许 1–600 秒；超时返回 `WAIT_TIMEOUT`（exit 11）。这些结果是屏幕与前台进程的派生状态，不是 agent 协议提供的任务完成确认。
 
 退出确认同样读取该状态：`working` 与 `blocked` 视为任务未结束，与终端命令 / progress 的忙碌信号共同决定 `quitConfirmation = auto` 是否弹窗。
 
@@ -209,7 +178,7 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 - 左侧 16pt agent logo（资源缺失回落到 SF Symbol）。
 - 标题行 `<ProjectName> / <WorktreeName>`（中段截断）；解析不到来源时显示 em-dash `—`（catalog 已移除该 Pane 的「ghost」行）。
 - 副标题：状态图标 + 状态标签 + 相对时间（"working · 12s" / "blocked · 4m" / "finished · just now" / "idle · 1h"）。
-- 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.finished` → 绿勾；`.idle` → 次级灰圈。
+- 状态图标集：`.error` → 红色感叹号；`.blocked` → 琥珀暂停；`.working` → 动画活动指示；`.finished` → 绿勾；`.idle` → 次级灰圈；`.unknown` → 次级问号。
 - 行密度（两行 `normal` / 一行 `compact`）与 auto-sort 由 `Settings → General → Agents View` 控制。
 
 **无项目与空状态**：完整 catalog 没有项目时，隐藏面板、底部入口及列表占位，不修改已保存的开关偏好。按标签筛选后没有匹配项目不影响面板可用性。有项目但没有 agent 时，面板只显示居中的提示文字，不显示装饰图标。
@@ -220,7 +189,7 @@ session 资料、状态 chip 与时间仍来自**开卡前解析好的快照**�
 
 活动行始终保留固定高度的单行空间，分隔线始终存在，长标题截断。**popover 在展示期间不能改变尺寸**：动态插入内容曾导致 SwiftUI 在显示周期内发起带动画的窗口 resize，嵌套 run loop 后访问已释放的 observer 而崩溃（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。关闭卡片时取消待交付的标题更新；点击行仍先撤下卡片，再把聚焦级联交给下一个 main-loop turn。
 
-排序由 `SortedEntriesProvider` 给出：先按状态优先级桶（triage 顺序），桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
+排序由 `SortedEntriesProvider` 给出：先按 `error > blocked > finished > working > idle > unknown` 分桶，桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
 
 > **附注：** 另有一个 `AgentStateView`（width 320 的 popover 变体，标题 "Active Agents (N)"）保留在 feature 目录中，但当前装配的宿主是侧栏面板，不是 popover。
 
@@ -230,12 +199,12 @@ session 资料、状态 chip 与时间仍来自**开卡前解析好的快照**�
 
 | 层 | 模块 | 职责 | 禁止 import |
 |---|---|---|---|
-| `CodansCore` | `Agents/{AgentKind, AgentKindPatterns, ForegroundJob, ForegroundJobClassifier}`、`Pane.agentKind/agentSessionID`、`Notifications/PaneAttentionInterpreter+Agents`（raw 分类器） | 值类型、模式表、渲染区分类 | 无 |
-| `apps/mac/codans/Runtime` | `AgentBinder.swift` | 识别 agent kind、经 `HierarchyClient` 写 Pane 字段 | App features 层 |
+| `CodansCore` | `Agents/{AgentRegistry, AgentKindPatterns, ForegroundJob, ForegroundJobClassifier}`、`Agents/Observation/`、`Pane.agentKind/agentSessionID` | 注册、值类型、渲染区解析与证据接受 | 无 |
+| `apps/mac/codans/Runtime` | `AgentBinder.swift`、`TerminalEngine`、`PaneInputCoordinator` | 验证实例身份、采集绑定快照、协调输入及写 Pane 绑定字段 | App features 层 |
 | `apps/mac/codans/App/Features/AgentState` | `AgentStateStore`、`AgentStateSidebarPanel`、`AgentStateRowView`、`AgentStateOrderCoordinator`、`SortedEntriesProvider`、`AgentLogoView` | 派生态、UI | Runtime internals；**不 import** `NotificationStore` |
 | `apps/mac/codans/App/Features/HierarchySidebar` | 更新的 `HierarchySidebarView` | 宿主 `AgentStateSidebarPanel` | — |
 
-**依赖方向。** `AgentState → CodansCore`、`AgentState → HierarchyClient`（读 + 聚焦）、`AgentState → catalog`（只读）、`AgentState → PaneKeyboardActivityTracker`（读）。AgentState **不** import `Notifications/*`。
+**依赖方向。** `AgentState → CodansCore`、`AgentState → HierarchyClient`（读 + 聚焦）、`AgentState → catalog`（只读）；外部输入修订由装配层转发。AgentState 不依赖通知存储；`PaneAttentionInterpreter` 仅保留兼容分类入口和共享显示迟滞。
 
 `HierarchyClient` 提供两个绑定写入方法，背后是走标准防抖保存管线的 `HierarchyManager` writer：
 
@@ -269,7 +238,7 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 
 **测试。**
 - `AgentKindPatterns` 是纯表 → `CodansCoreTests` 对每个模式跑穷举单测（fixture 前台 job）。
-- `PaneAttentionInterpreter+Agents` 的渲染区分类 → `PaneAttentionInterpreterTests` 对每个 `AgentKind` 跑视口文本 fixture。
+- 各 Agent 终端解析器、证据 tracker 与兼容入口 → `AgentObservationParserTests`、`PaneAttentionInterpreterTests` 对视口文本与状态契约跑 fixture。
 - `AgentStateStore` 派生 → `Tests/Features/AgentState/AgentStateStoreTests` 用手搓信号序列（无实时运行时）驱动 (scratch, signal) → new state → derived state。
 - `AgentBinder` → 对一个记录 `setPaneAgentKind` 调用的 in-memory `HierarchyClient` spy 测：bind / rebind / no-op / release（含 miss-threshold 迟滞）。
 - 排序：`SortedEntriesProviderTests`、`AgentRowOrderingTests`、`AgentStateOrderCoordinatorTests`。

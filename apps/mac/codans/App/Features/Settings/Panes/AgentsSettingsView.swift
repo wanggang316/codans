@@ -59,6 +59,7 @@ struct AgentsSettingsView: View {
             + "row means codans could not find that agent on your shell's PATH."
         )
       }
+      AgentRecoverySettingsView()
     }
     .formStyle(.grouped)
   }

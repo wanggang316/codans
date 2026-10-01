@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// TCA dependency-injection bridge over `TerminalEngine`. Features depend on
 /// this struct's closures, not on the engine directly; the `liveValue` binds
@@ -23,6 +23,7 @@ nonisolated struct TerminalClient: Sendable {
   /// the composer. Anything aimed at a pane that may be running an agent
   /// must go through here.
   var sendCommand: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
+  var canSubmitCommand: @MainActor @Sendable (_ paneID: PaneID) -> Bool = { _ in true }
   /// Interrupt the pane's foreground process (Ctrl-C → SIGINT). Goes through
   /// the key-event path rather than `sendInput`, whose text path filters
   /// control bytes. No-op when the pane has no live surface.
@@ -81,24 +82,42 @@ nonisolated struct TerminalClient: Sendable {
 
 extension TerminalClient {
   @MainActor
-  static func live(engine: TerminalEngine) -> TerminalClient {
-    TerminalClient(
+  static func live(
+    engine: TerminalEngine,
+    inputCoordinator: PaneInputCoordinator? = nil
+  ) -> TerminalClient {
+    let coordinator = inputCoordinator ?? PaneInputCoordinator.shared ?? PaneInputCoordinator()
+    return TerminalClient(
       sendInput: { paneID, text in
-        engine.ghosttyRuntime?.surface(for: paneID)?.sendInput(text)
+        guard !text.isEmpty else { return }
+        guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return }
+        coordinator.performExternalInput(in: paneID, origin: .user) {
+          surface.sendInput(text)
+        }
       },
       sendCommand: { paneID, text in
         guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return }
-        surface.sendText(text)
+        guard case .reserved(let lease) = coordinator.reserve(in: paneID, origin: .commandQueue) else { return }
         Task { @MainActor in
-          try? await Task.sleep(for: TerminalClient.submitDelay)
-          // Re-resolve rather than capturing `surface`: the pane can be
-          // closed inside the gap, and submitting into a dead surface is
-          // a no-op we'd rather express as "the pane is gone".
-          engine.ghosttyRuntime?.surface(for: paneID)?.sendNamedKey(.enter)
+          _ = await coordinator.submitCommand(
+            lease,
+            validateBeforePaste: { engine.ghosttyRuntime?.surface(for: paneID) === surface },
+            validateBeforeSubmit: { engine.ghosttyRuntime?.surface(for: paneID) === surface },
+            paste: { surface.sendText(text) },
+            submit: { surface.sendNamedKey(.enter) }
+          )
         }
       },
+      canSubmitCommand: { paneID in
+        engine.ghosttyRuntime?.surface(for: paneID) != nil
+          && coordinator.canSubmitProgrammaticInput(in: paneID)
+      },
       interrupt: { paneID in
-        engine.ghosttyRuntime?.surface(for: paneID)?.sendInterrupt()
+        guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return }
+        // An explicit interrupt must remain available while the user is
+        // resolving a draft; it does not append another prompt to it.
+        coordinator.beforeNativeInput(in: paneID)
+        surface.sendInterrupt()
       },
       setFocus: { paneID, focused in
         engine.ghosttyRuntime?.surface(for: paneID)?.setFocus(focused)
@@ -116,7 +135,10 @@ extension TerminalClient {
         }
         _ = try await engine.ensureSurface(for: pane, in: worktree)
       },
-      closeSurface: { paneID in engine.closeSurface(for: paneID) },
+      closeSurface: { paneID in
+        coordinator.removePane(paneID)
+        engine.closeSurface(for: paneID)
+      },
       surface: { paneID in engine.ghosttyRuntime?.surface(for: paneID) },
       events: { engine.events() }
     )

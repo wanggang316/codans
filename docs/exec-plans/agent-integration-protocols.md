@@ -1,0 +1,187 @@
+# Agent integration contracts implementation
+
+## Objective and status
+
+The revised [design](../design-docs/agent-integration-protocols.md) is implemented
+in the HAN-167 isolated worktree. App/CLI integration validation is complete;
+this is not a release or a claim of real provider recovery. The primary checkout
+is outside the implementation scope and remains untouched.
+
+The first protocol extraction preserved the original behavior. Subsequent review
+showed that final-error ordering, instance ownership and coordinated input were
+required for correct recovery. This plan records the replacement implementation;
+the first extraction's differential results are not acceptance evidence for the
+new state semantics.
+
+## Implemented sequence
+
+1. Replace split current-error fields with `AgentState.error(AgentFailure)` and
+   add explicit unknown and input-availability values. Keep terminal signatures
+   in controlled parser results and a per-instance observation tracker.
+2. Order Codex/Claude failure and retry cues within the current interaction.
+   Preserve pure Agent-specific parser ownership and conservatively report unknown
+   without a recognized current cue.
+3. Bind observations to actual Agent PID/birth time/PGID, surface generation and
+   session identity. Reject stale instances/sequences and exclude error banners
+   in the replacement's first frame.
+4. Introduce input revisions, per-pane submission leases and residual-draft
+   handling across native, CLI, Send Now, queued and recovery input.
+5. Schedule recovery with occurrence tickets and scope-level attempt budgets.
+   Policy edits cancel tickets without replenishing attempts; explicit cancellation
+   persists for the scope. Gate prompt recovery on an empty verified composer.
+6. Consolidate identity, launch data, terminal parser and optional resume behavior
+   in AgentRegistry with compatibility facades. Add unknown to UI/IPC/CLI state
+   handling and retain existing settings/display-value compatibility.
+7. Integrate, validate, review, commit and update PR #211 after the final checks.
+
+## Acceptance coverage
+
+- Error is one state carrying failure detail; no parser recovery-support flag or
+  duplicate Agent-name allowlist remains.
+- Parser candidate, accepted observation and presentation are separate. Finished
+  attention and hysteresis cannot authorize recovery.
+- Historical retry text cannot hide a later terminal failure. Unknown and unreadable
+  composers cannot authorize automatic input.
+- Same-kind PID/birth/surface/session replacement cannot inherit an old ticket or
+  an old terminal banner, including output missed by the predecessor's last sample.
+- Static captures refresh liveness; identical frames do not invent state occurrences.
+- Input invalidates pending operations before writes. An interrupted paste retains
+  a marker; programmatic appends are rejected until explicit resolution or an
+  observed occupied-to-empty composer transition.
+- Native editing remains available. CLI rejection distinguishes a draft conflict
+  from an absent pane. Teardown and membership reconciliation clear coordinator
+  state without allowing late completions to recreate it.
+- Autonomous state changes, policy edits and identity uncertainty do not replenish
+  attempts. New external input or a verified instance starts a new scope.
+- Existing launch/resume commands, quoting, profile behavior and stored display
+  values remain compatible; clients must accept the added unknown state.
+
+## Verification
+
+- App build and **248 tests across 20 suites passed**. Coverage includes recovery
+  timing and budgets, accepted observation versus presentation, identity/binding,
+  capture ownership, all submission stages, CLI conflicts, command queues,
+  Handoff routing, Root integration, notifications and process cancellation.
+- **149 tests across 11 suites passed** in the independent SwiftPM Core/Store
+  harness, including all parser fixtures, registry/launch/resume compatibility,
+  policy/settings decoding and replacement-instance first-frame baselines.
+- A separate temporary App test using a real GhosttyRuntime, PaneSurface and
+  `/bin/cat` passed. Input reached the terminal; interrupted paste blocked later
+  programmatic appends; explicit draft resolution restored delivery. The fixture
+  was removed afterward and did not use a provider session or the production app.
+- The CLI builds; built `agent wait --help` exposes unknown/error. All three
+  bundled Agent wait completion state lists match the built generator after
+  normalizing the Debug command name. The output schema parses as JSON.
+- All **75 changed/new Swift files pass scoped SwiftLint**; `git diff --check`
+  passes. Full `make mac-check` reported existing lint diagnostics; its 205
+  unrelated formatting changes were restored. This is not a clean full-tree audit.
+- The earlier complete Core run had baseline failures recorded in the
+  [original recovery plan](agent-error-recovery.md); the current focused run does
+  not claim those unrelated failures are resolved.
+
+Logs: `/private/tmp/han167-contract-app-tests-final.log`,
+`/private/tmp/han167-unified-core-tests/final-run.log`,
+`/private/tmp/han167-native-transport-validation.log`,
+`/private/tmp/han167-contract-cli-build.log`,
+`/private/tmp/han167-contract-scoped-lint.log`,
+`/private/tmp/han167-contract-mac-check.log`.
+
+## Known boundaries
+
+No live provider outage, end-to-end automatic retry against a real Agent,
+terminal-version matrix or visual GUI verification was performed. The real PTY
+check verifies the input transport boundary; fixture tests verify parsing and
+recovery decisions. PTY writes cannot be atomic with kernel process replacement.
+
+## Deferred architecture work
+
+Session-history format/layout decoding remains in its current local and SSH
+readers. Extract it only when all existing Agent formats and both transport paths
+can share tested IO, budgets, cancellation and effective-profile HOME handling.
+Structured provider events and session-addressed submission require separate
+transport/session integration; no unused source protocol or plugin loader is added.
+
+## Main synchronization: 2026-09-29
+
+Integrate `origin/main` at `b044569b` while preserving the HAN-167 contracts.
+The merge overlaps with HAN-162's Pi loader detection and Agents View activity
+presentation. The working checkout is the isolated HAN-167 worktree.
+
+1. Keep Agent-specific parsing in `AgentTerminalParser` implementations; migrate
+   main's Pi editor-border loader recognition into `PiObservationParser`.
+2. Reconcile state fixtures with verified observation ownership and explicit
+   unknown semantics. Retain main's OSC-title display coverage.
+3. Preserve main's live, fixed-height activity card and unrelated feature updates.
+4. Run focused Core/App integration checks, formatting/lint and conflict-marker
+   checks, then commit the merge and verify the pushed PR's mergeability.
+
+Pi's current empty editor establishes idle execution with unknown input
+availability; it does not grant permission for automatic input. Store fixtures
+retain the real border-loader to empty-editor completion transition, while single
+borders, quoted examples and occupied editors remain unknown.
+
+Integration also fixes two test-only issues introduced by main: the filesystem
+watcher fixture accepts its existing explicit condition closures and captures
+`self` explicitly, and the root new-tab routing test injects the clock required
+by main's insertion-animation delay.
+
+Validation:
+
+- 64 Core tests in two suites passed against the complete merged Core sources.
+- 296 App tests in 27 suites passed, covering state/recovery, input ownership,
+  Handoff, Root routing, activity presentation, command suggestions, terminal
+  links and filesystem watcher registration.
+- The Mac app/test targets and CLI built successfully with Xcode 26.0. CLI
+  `agent wait --help` retains `unknown` and `error` states.
+- Scoped SwiftLint, rename-residue and staged whitespace checks passed.
+- Full `make mac-check` still reports 65 lint violations in files byte-identical
+  to a merge parent: 53 in both parents and 12 in incoming main. Unrelated
+  formatter changes in 212 files were restored before building.
+- No live provider-error retry or GUI interaction was exercised during this
+  synchronization.
+
+Logs: `/private/tmp/han167-pi-merge-core-tests.log`,
+`/private/tmp/han167-main-sync-20260929-app-tests-verified.log`,
+`/private/tmp/han167-main-sync-20260929-cli-build.log`, and
+`/private/tmp/han167-main-sync-20260929-mac-check.log`.
+
+## Main synchronization: 2026-10-01
+
+Integrate `origin/main` at `61d1f162` in the isolated HAN-167 worktree.
+The six incoming commits add worktree history controls and shortcuts, improve
+tab switching, and bump the release to 0.7.7.
+
+1. Merge without rewriting the published branch history.
+2. Review RootFeature integration and preserve Agent observation/input ownership.
+3. Run navigation, Root, Agent and recovery regressions, Core shortcut checks,
+   app/CLI builds and lint before committing and pushing the existing PR.
+
+The merge completed without text conflicts. RootFeature retains HAN-167's
+Agent snapshot mapping and typed Handoff submission results alongside main's
+history navigation. The shortcut audit exposed two stale modifier expectations
+and a missing color-command entry; the test table now reflects existing product
+bindings without changing shortcut behavior.
+
+Validation:
+
+- 77 Core tests in four suites passed: shortcut schema, Agent parsers, attention
+  interpretation and recovery policy.
+- CLI build and `agent wait --help` passed; unknown/error conditions remain.
+- Scoped SwiftLint for the corrected audit, rename-residue and whitespace checks
+  passed. Full lint still reports 65 violations, all in files byte-identical to a
+  merge parent. Unrelated formatter changes in 577 files were restored.
+- The host has upgraded from Xcode 26.0 to 27.0. Core/CLI validation used the
+  command-line `MACOSX_DEPLOYMENT_TARGET=14.0` override, matching the app's existing
+  minimum; repository project configuration was not changed.
+- App regression tests did not run. Xcode 27 rejects dependency deployment
+  targets below macOS 12. Temporary per-target overrides progressed past this
+  gate, but TCA compilation still used macOS 12 despite its declared macOS 13
+  setting and failed availability checks. Direct project build-settings output
+  and workspace compiler arguments disagreed; the cause remains unverified.
+  This synchronization does not claim an App test pass under Xcode 27.
+
+Logs: `/private/tmp/han167-main-sync-20261001-core-tests-verified.log`,
+`/private/tmp/han167-main-sync-20261001-cli-build.log`,
+`/private/tmp/han167-main-sync-20261001-lint-restored.log`,
+`/private/tmp/han167-main-sync-20261001-app-tests-verified.log`, and
+`/private/tmp/han167-tca-readonly-settings.log`.

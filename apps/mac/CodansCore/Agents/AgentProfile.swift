@@ -194,9 +194,14 @@ public nonisolated struct AgentProfile: Equatable, Codable, Sendable, Identifiab
 /// the built-in presets.
 public nonisolated struct AgentSettings: Equatable, Codable, Sendable {
   public var profiles: [AgentProfile]
+  public var recovery: AgentRecoveryPolicy
 
-  public init(profiles: [AgentProfile] = AgentProfile.defaults) {
+  public init(
+    profiles: [AgentProfile] = AgentProfile.defaults,
+    recovery: AgentRecoveryPolicy = AgentRecoveryPolicy()
+  ) {
     self.profiles = profiles
+    self.recovery = recovery
   }
 
   public static let `default` = AgentSettings()
@@ -211,7 +216,7 @@ public nonisolated struct AgentSettings: Equatable, Codable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case profiles
+    case profiles, recovery
   }
 
   public init(from decoder: Decoder) throws {
@@ -222,6 +227,9 @@ public nonisolated struct AgentSettings: Equatable, Codable, Sendable {
       try container.decodeIfPresent([RecognisedAgentProfile].self, forKey: .profiles)?
       .compactMap(\.profile)
       ?? AgentProfile.defaults
+    self.recovery =
+      try container.decodeIfPresent(AgentRecoveryPolicy.self, forKey: .recovery)
+      ?? AgentRecoveryPolicy()
   }
 }
 

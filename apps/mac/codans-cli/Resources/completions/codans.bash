@@ -1340,7 +1340,7 @@ _codans_agent_wait() {
         return
         ;;
     '--until')
-        __codans_add_completions -W 'idle'$'\n''working'$'\n''blocked'$'\n''finished'$'\n''changed'$'\n''exit'
+        __codans_add_completions -W 'unknown'$'\n''idle'$'\n''working'$'\n''blocked'$'\n''error'$'\n''finished'$'\n''changed'$'\n''exit'
         return
         ;;
     '--wait-timeout')

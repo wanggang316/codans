@@ -87,7 +87,7 @@ struct WorktreeWorkingTreeWatcherTests {
   }
 
   private static func waitUntil(
-    _ condition: @autoclosure @escaping () -> Bool,
+    _ condition: @escaping () -> Bool,
     timeout: Duration = .seconds(15)
   ) async throws {
     let box = ConditionBox(condition)
@@ -111,12 +111,14 @@ struct WorktreeWorkingTreeWatcherTests {
     private var finishedFlag = false
 
     var isEntered: Bool {
-      state.lock(); defer { state.unlock() }
+      state.lock()
+      defer { state.unlock() }
       return enteredFlag
     }
 
     var hasFinished: Bool {
-      state.lock(); defer { state.unlock() }
+      state.lock()
+      defer { state.unlock() }
       return finishedFlag
     }
 
@@ -126,10 +128,14 @@ struct WorktreeWorkingTreeWatcherTests {
 
     var start: @Sendable (FSEventStreamRef) -> Bool {
       { stream in
-        state.lock(); enteredFlag = true; state.unlock()
-        semaphore.wait()
+        self.state.lock()
+        self.enteredFlag = true
+        self.state.unlock()
+        self.semaphore.wait()
         let ok = FSEventStreamStart(stream)
-        state.lock(); finishedFlag = true; state.unlock()
+        self.state.lock()
+        self.finishedFlag = true
+        self.state.unlock()
         return ok
       }
     }
@@ -147,7 +153,8 @@ struct WorktreeWorkingTreeWatcherTests {
     }
 
     func check() -> Bool {
-      lock.lock(); defer { lock.unlock() }
+      lock.lock()
+      defer { lock.unlock() }
       return condition()
     }
   }

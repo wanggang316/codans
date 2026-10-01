@@ -65,7 +65,7 @@ public nonisolated enum PaneAttentionInterpreter {
     case .paneOutput(let paneID, _):
       return Step(cue: nil, outputFlag: .markProduced(paneID))
 
-    case .paneViewportChanged:
+    case .paneViewportChanged, .paneAgentSnapshot:
       return Step(cue: nil, outputFlag: .unchanged)
 
     case .paneInfoChanged(let paneID, let delta):

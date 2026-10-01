@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// Handlers for `terminal.*` — send input into a pane, broadcast across
@@ -17,6 +17,8 @@ public final class TerminalHandlers {
     func sendInput(paneID: PaneID, text: String) -> Bool
     func sendKey(paneID: PaneID, key: IPC.TerminalNamedKey) -> Bool
     func sendRawBytes(paneID: PaneID, bytes: [UInt8]) -> Bool
+    /// A live pane may reject input while an interrupted recovery draft remains.
+    func inputRejectionReason(for paneID: PaneID) -> String?
     func fanOut(scope: IPC.BroadcastScope, text: String, catalog: Catalog) -> Int
     func readText(paneID: PaneID, extent: ReadExtent) -> String?
     func resetPane(paneID: PaneID) -> Bool
@@ -115,13 +117,12 @@ public final class TerminalHandlers {
     }
     let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
-    if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
-    }
+    if !ok { return inputFailure(for: req.paneID, sink: sink) }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
       let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
-      let output = req.capture == true
+      let output =
+        req.capture == true
         ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
       result = SendInputResult(
         delivered: true, completed: outcome.completed, waitedMillis: outcome.waitedMillis,
@@ -132,6 +133,13 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.internal("encode sendInput result: \(error)"))
     }
+  }
+
+  private func inputFailure(for paneID: PaneID, sink: InputSink) -> RouterOutcome {
+    if let reason = sink.inputRejectionReason(for: paneID) {
+      return .failed(.conflict(reason: reason))
+    }
+    return .failed(.notFound(kind: "pane", id: paneID.description))
   }
 
   struct CompletionOutcome {
@@ -199,7 +207,8 @@ public final class TerminalHandlers {
       common += 1
     }
     afterLines.removeFirst(common)
-    let firstSentLine = sent.split(separator: "\n").first.map(String.init)?
+    let firstSentLine =
+      sent.split(separator: "\n").first.map(String.init)?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if let first = afterLines.first, !firstSentLine.isEmpty, first.contains(firstSentLine) {
       afterLines.removeFirst()
@@ -227,9 +236,7 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
     }
     let ok = sink.sendKey(paneID: req.paneID, key: req.key)
-    if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
-    }
+    if !ok { return inputFailure(for: req.paneID, sink: sink) }
     return .unary(.object(["delivered": .bool(true)]))
   }
 
@@ -255,9 +262,7 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
     let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
-    if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
-    }
+    if !ok { return inputFailure(for: req.paneID, sink: sink) }
     return .unary(
       .object([
         "delivered": .bool(true),
@@ -400,4 +405,8 @@ public final class TerminalHandlers {
     }
     return .unary(.object(["reset": .bool(true)]))
   }
+}
+
+extension TerminalHandlers.InputSink {
+  public func inputRejectionReason(for paneID: PaneID) -> String? { nil }
 }

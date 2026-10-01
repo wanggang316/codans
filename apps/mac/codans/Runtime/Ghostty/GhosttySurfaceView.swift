@@ -1,9 +1,9 @@
 import AppKit
 import Carbon.HIToolbox
+import CodansCore
 import Foundation
 import GhosttyKit
 import OSLog
-import CodansCore
 
 private let ghosttyViewLogger = Logger(
   subsystem: "com.gumpw.codans.runtime", category: "surface-view"
@@ -574,6 +574,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     // `codans pane send` and friends bypasses AppKit entirely and reaches
     // libghostty via `ghostty_surface_text`, so it can never surface as a
     // synthetic keyDown that would falsely arm the suppression window.
+    PaneInputCoordinator.shared?.beforeNativeInput(in: paneID)
     PaneKeyboardActivityTracker.shared?.recordKey(in: paneID)
 
     // Capture marked-text state BEFORE interpretKeyEvents — IME may consume
@@ -610,6 +611,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 
   override func keyUp(with event: NSEvent) {
     guard let surface else { return }
+    PaneInputCoordinator.shared?.beforeNativeInput(in: paneID)
     sendKeyEvent(event: event, action: GHOSTTY_ACTION_RELEASE, surface: surface, text: "")
   }
 
@@ -624,6 +626,9 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 
     let added = newFlags.subtracting(oldFlags)
     let removed = oldFlags.subtracting(newFlags)
+    if !added.isEmpty || !removed.isEmpty {
+      PaneInputCoordinator.shared?.beforeNativeInput(in: paneID)
+    }
 
     if !added.isEmpty {
       sendKeyEvent(event: event, action: GHOSTTY_ACTION_PRESS, surface: surface, text: "")
@@ -920,6 +925,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     if keyTextAccumulator != nil {
       keyTextAccumulator?.append(text)
     } else if let surface {
+      PaneInputCoordinator.shared?.beforeNativeInput(in: paneID)
       // Clear any in-flight preedit and commit the text.
       forwardPreedit("", to: surface)
       forwardText(text, to: surface)

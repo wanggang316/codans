@@ -111,6 +111,37 @@ struct TerminalHandlersTests {
   }
 
   @Test
+  func interruptedDraftReturnsConflictForAllInputMethods() async throws {
+    let sink = FakeSink()
+    let paneID = PaneID()
+    let reason = "Resolve the interrupted recovery draft before sending more input."
+    sink.registered.insert(paneID.raw)
+    sink.rejectionReasons[paneID.raw] = reason
+    let handlers = TerminalHandlers(sink: sink, catalog: { Catalog() })
+    let results = [
+      await handlers.sendInput(
+        try JSONValue.encoded(
+          TerminalHandlers.SendInputParams(paneID: paneID, text: "retry"))),
+      await handlers.sendKey(
+        try JSONValue.encoded(
+          TerminalHandlers.SendKeyParams(paneID: paneID, key: .enter))),
+      await handlers.sendRawBytes(
+        try JSONValue.encoded(
+          TerminalHandlers.SendRawBytesParams(paneID: paneID, hex: "0d"))),
+    ]
+    for result in results {
+      guard case .failed(let error) = result else {
+        Issue.record("Expected an input conflict for the interrupted draft")
+        continue
+      }
+      #expect(error == .conflict(reason: reason))
+    }
+    #expect(sink.delivered.isEmpty)
+    #expect(sink.keys.isEmpty)
+    #expect(sink.rawBytes.isEmpty)
+  }
+
+  @Test
   func resetPaneReturnsUnsupportedWhenNoSink() async throws {
     let server = Self.makeHarness(sink: nil)
     defer { server.stop() }
@@ -342,6 +373,7 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   }
 
   var registered: Set<UUID> = []
+  var rejectionReasons: [UUID: String] = [:]
   private(set) var delivered: [Delivery] = []
   private(set) var broadcasts: [(scope: IPC.BroadcastScope, text: String)] = []
   private(set) var resets: [UUID] = []
@@ -358,7 +390,7 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   func sendInput(paneID: PaneID, text: String) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
+    guard registered.contains(paneID.raw), rejectionReasons[paneID.raw] == nil else { return false }
     delivered.append(Delivery(paneID: paneID.raw, text: text))
     return true
   }
@@ -366,7 +398,7 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   func sendKey(paneID: PaneID, key: IPC.TerminalNamedKey) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
+    guard registered.contains(paneID.raw), rejectionReasons[paneID.raw] == nil else { return false }
     keys.append((paneID.raw, key))
     return true
   }
@@ -374,9 +406,15 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   func sendRawBytes(paneID: PaneID, bytes: [UInt8]) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
+    guard registered.contains(paneID.raw), rejectionReasons[paneID.raw] == nil else { return false }
     rawBytes.append((paneID.raw, bytes))
     return true
+  }
+
+  func inputRejectionReason(for paneID: PaneID) -> String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return registered.contains(paneID.raw) ? rejectionReasons[paneID.raw] : nil
   }
 
   func fanOut(scope: IPC.BroadcastScope, text: String, catalog: Catalog) -> Int {

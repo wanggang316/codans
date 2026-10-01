@@ -64,7 +64,7 @@ struct AgentRuntimeAdapterTests {
 
   @Test
   func shellQuotedEscapesEmbeddedSingleQuotes() {
-    #expect(AgentRuntimeAdapters.shellQuoted("a'b") == #"'a'\''b'"#)
+    #expect(ShellQuoting.quoted("a'b") == #"'a'\''b'"#)
   }
 
   // MARK: - session-id display

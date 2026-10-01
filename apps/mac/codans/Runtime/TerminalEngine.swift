@@ -54,6 +54,11 @@ final class TerminalEngine {
   let store: CatalogStore
   let ghosttyRuntime: GhosttyRuntime?
   var crashPolicy: CrashPolicy = .default
+  /// Bound by App to the identity owner. It may return a suspended binding;
+  /// every capture independently verifies that the same process is still live.
+  var agentBindingProvider: @MainActor (PaneID) -> AgentBinding? = { _ in nil }
+  private var surfaceGenerations: [PaneID: UUID] = [:]
+  private var agentCaptureSequences: [PaneID: UInt64] = [:]
 
   /// Continuous write-through to `sessions.json`. Set during
   /// `bootstrapSessionStack` once the coordinator is alive; nil for
@@ -274,6 +279,8 @@ final class TerminalEngine {
       )
     }
     runtime.register(pane: surface)
+    surfaceGenerations[pane.id] = UUID()
+    agentCaptureSequences[pane.id] = 0
     // Continuous catalog write-through: record the live session so a crash
     // between launches still surfaces this pane to the next launch's reaper.
     // The socket path is derivable from the pane id + canonical ZMX_DIR; the
@@ -483,6 +490,8 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    surfaceGenerations.removeValue(forKey: paneID)
+    agentCaptureSequences.removeValue(forKey: paneID)
     foregroundJobPaneIDs.remove(paneID)
     remoteForegroundPanes.removeValue(forKey: paneID)
     remoteProcessGenerations.removeValue(forKey: paneID)
@@ -532,6 +541,57 @@ final class TerminalEngine {
   /// turnover within the same agent invocation.
   func foregroundProcessGroupID(for paneID: PaneID) -> Int32? {
     foregroundJobSnapshots[paneID]?.processGroupID
+  }
+
+  func surfaceGeneration(for paneID: PaneID) -> UUID? {
+    surfaceGenerations[paneID]
+  }
+
+  /// Fresh process ownership, never the display/busy probe's short-lived cache.
+  func isAgentBindingCurrent(_ binding: AgentBinding) -> Bool {
+    if let sessionID = binding.sessionID,
+      let currentSessionID = hierarchy.catalog.pane(binding.paneID)?.agentSessionID,
+      currentSessionID != sessionID
+    {
+      return false
+    }
+    guard agentBindingProvider(binding.paneID)?.instanceID == binding.instanceID,
+      remoteForegroundPanes[binding.paneID] == nil,
+      surfaceGenerations[binding.paneID] == binding.surfaceGeneration,
+      let surface = ghosttyRuntime?.surface(for: binding.paneID),
+      let groupID = foregroundJobReader.resolveProcessGroupID(
+        preferred: surface.foregroundProcessGroupID(), childPID: surface.childProcessID()),
+      let job = ForegroundJobReader.foregroundJob(processGroupID: groupID),
+      let identity = ForegroundJobReader.agentIdentity(in: job)
+    else { return false }
+    return identity.kind == binding.kind && identity.process == binding.process
+  }
+
+  /// Callers may request a fresh capture at an action deadline. Returning it
+  /// does not emit an event, so synchronous consumers can accept it exactly once.
+  func captureAgentSnapshot(binding: AgentBinding) -> AgentTerminalSnapshot? {
+    guard let surface = ghosttyRuntime?.surface(for: binding.paneID) else { return nil }
+    let nextSequence = (agentCaptureSequences[binding.paneID] ?? 0) &+ 1
+    let snapshot = Self.captureAgentSnapshot(
+      binding: binding, sequence: nextSequence, observedAt: clock(),
+      isCurrent: {
+        self.ghosttyRuntime?.surface(for: binding.paneID) === surface
+          && self.isAgentBindingCurrent(binding)
+      },
+      readText: { surface.readText(.active) })
+    if snapshot != nil { agentCaptureSequences[binding.paneID] = nextSequence }
+    return snapshot
+  }
+
+  /// Check both sides of the terminal read: a process replacement during
+  /// capture must not give text from one instance the identity of another.
+  static func captureAgentSnapshot(
+    binding: AgentBinding, sequence: UInt64, observedAt: Date,
+    isCurrent: () -> Bool, readText: () -> String?
+  ) -> AgentTerminalSnapshot? {
+    guard isCurrent(), let text = readText(), isCurrent() else { return nil }
+    return AgentTerminalSnapshot(
+      binding: binding, sequence: sequence, observedAt: observedAt, text: text)
   }
 
   /// Return a fresh event stream for a new subscriber. Multi-consumer safe:
@@ -857,7 +917,7 @@ final class TerminalEngine {
       changed: changed,
       paneIsBound: paneIsBound,
       foregroundIsStaleNonAgent: foregroundIsStaleNonAgent
-    ) {
+    ) || agentBindingProvider(paneID) != nil {
       emit(.foregroundJobChanged(paneID, next))
     }
     if let surface = ghosttyRuntime?.surface(for: paneID) {
@@ -968,6 +1028,11 @@ final class TerminalEngine {
     foregroundJob: ForegroundJob,
     now: Date
   ) {
+    if let binding = agentBindingProvider(paneID),
+      let snapshot = captureAgentSnapshot(binding: binding)
+    {
+      emit(.paneAgentSnapshot(snapshot))
+    }
     let hasAgentSignal =
       hierarchy.catalog.pane(paneID)?.agentKind != nil
       || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
@@ -1058,7 +1123,7 @@ extension TerminalEvent {
   /// because scrollback retains history.
   fileprivate var isLifecycle: Bool {
     switch self {
-    case .paneOutput, .paneViewportChanged, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
+    case .paneOutput, .paneViewportChanged, .paneAgentSnapshot, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
       return false
     case .paneCreated, .paneReady, .paneExited, .paneCrashed,
       .paneClosedByTab, .tabActivated, .tabAutoClosed,

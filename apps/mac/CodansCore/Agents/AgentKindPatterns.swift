@@ -30,6 +30,27 @@ public nonisolated enum AgentKindPatterns {
     bestForegroundJobMatch(job)?.kind
   }
 
+  /// Return one unambiguous highest-scoring process. Classification may still
+  /// identify a kind when this returns nil; automation requires actual ownership.
+  public static func uniqueProcessMatch(
+    foregroundJob job: ForegroundJob
+  ) -> (kind: AgentKind, process: ForegroundProcess)? {
+    var matches: [(kind: AgentKind, process: ForegroundProcess, score: Int)] = []
+    for process in job.processes {
+      let candidates = processCandidates(process).compactMap { candidate in
+        matchProcessCandidate(candidate.value).map { (kind: $0, score: candidate.score) }
+      }
+      guard let maximum = candidates.map(\.score).max() else { continue }
+      let kinds = Set(candidates.filter { $0.score == maximum }.map(\.kind))
+      guard kinds.count == 1, let kind = kinds.first else { return nil }
+      matches.append((kind, process, maximum))
+    }
+    guard let maximum = matches.map(\.score).max() else { return nil }
+    let strongest = matches.filter { $0.score == maximum }
+    guard strongest.count == 1, let match = strongest.first else { return nil }
+    return (match.kind, match.process)
+  }
+
   private static func bestForegroundJobMatch(
     _ job: ForegroundJob
   ) -> (kind: AgentKind, score: Int)? {

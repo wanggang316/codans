@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -19,6 +19,7 @@ struct CommandQueueFeatureTests {
   final class Recorder {
     var queue: [QueuedCommand] = []
     var sent: [String] = []
+    var canSubmit = true
   }
 
   private static func makeStore(
@@ -35,6 +36,7 @@ struct CommandQueueFeatureTests {
       $0[HierarchyClient.self].commandQueue = { _ in recorder.queue }
       $0[HierarchyClient.self].setCommandQueue = { _, queue in recorder.queue = queue }
       $0[TerminalClient.self].sendCommand = { _, text in recorder.sent.append(text) }
+      $0[TerminalClient.self].canSubmitCommand = { _ in recorder.canSubmit }
     }
   }
 
@@ -48,6 +50,26 @@ struct CommandQueueFeatureTests {
     // No trailing newline — `sendCommand` owns the Return keypress.
     #expect(recorder.sent == ["ls -la"])
     #expect(recorder.queue.isEmpty)
+  }
+
+  @Test
+  func rejectedSendNowPreservesDraftAndReportsWhy() async {
+    let recorder = Recorder()
+    recorder.canSubmit = false
+    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.mode = .now }
+    await store.send(.draftChanged("continue")) { $0.draft = "continue" }
+    await store.send(.submitted) {
+      $0.submissionError = "The terminal is not ready for another command. Your draft is preserved."
+    }
+    #expect(store.state.draft == "continue")
+    #expect(recorder.sent.isEmpty)
+    #expect(recorder.queue.isEmpty)
+    recorder.canSubmit = true
+    await store.send(.submitted) {
+      $0.draft = ""
+      $0.submissionError = nil
+    }
+    #expect(recorder.sent == ["continue"])
   }
 
   @Test

@@ -1,5 +1,5 @@
-import Foundation
 import CodansCore
+import Foundation
 
 /// Pure helper that orders `AgentStateStore.entries` for the agent-state view.
 ///
@@ -44,10 +44,12 @@ nonisolated enum SortedEntriesProvider {
   /// Lower number = higher priority (sorts earlier in the list).
   private static func priority(_ state: AgentStateStore.AgentRuntimeState) -> Int {
     switch state {
+    case .error: return -1
     case .blocked: return 0
     case .finished: return 1
     case .working: return 2
     case .idle: return 3
+    case .unknown: return 4
     }
   }
 }

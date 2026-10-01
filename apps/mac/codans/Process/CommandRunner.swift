@@ -85,10 +85,12 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     timeout: Duration,
     maxOutputBytes: Int
   ) async -> CommandOutcome {
+    guard !Task.isCancelled else { return .spawnFailed(reason: "Command cancelled before launch") }
     await Self.gate.acquire()
     // `defer` can't await, so release on a detached task — this still runs if
     // the surrounding task is cancelled or `launch` returns early.
     defer { Task { await Self.gate.release() } }
+    guard !Task.isCancelled else { return .spawnFailed(reason: "Command cancelled before launch") }
     return await launch(
       executable: executable,
       arguments: arguments,
@@ -107,6 +109,7 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     timeout: Duration,
     maxOutputBytes: Int
   ) async -> CommandOutcome {
+    guard !Task.isCancelled else { return .spawnFailed(reason: "Command cancelled before launch") }
     let process = Process()
     process.executableURL = executable
     process.arguments = arguments
@@ -184,7 +187,9 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     await withTaskGroup(of: ExitOrTimeout.self) { group in
       group.addTask {
         for await code in exitStream { return .exited(code) }
-        return .exited(Int32(-1))  // stream finished without value — shouldn't happen
+        // Cancellation ends AsyncStream iteration without an exit status.
+        // Treat it as a timeout so the child is terminated before pipe drains.
+        return .timedOut
       }
       group.addTask {
         try? await Task.sleep(for: timeout)
