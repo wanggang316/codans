@@ -61,6 +61,10 @@ struct RemoteTierTests {
     .paneRead: .readOnly,
     .paneInfo: .readOnly,
     .paneAttachStream: .readOnly,
+    // A terminal seat sizes the pane and types into it.
+    .paneSetStreamSize: .interactive,
+    .paneClaimSize: .interactive,
+    .paneInput: .interactive,
     .paneClose: .localOnly,
 
     .eventsSubscribe: .readOnly,
