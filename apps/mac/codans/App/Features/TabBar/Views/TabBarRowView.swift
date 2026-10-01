@@ -806,7 +806,7 @@ private struct ChipReveal: ViewModifier, Animatable {
 
 /// A capsule over the trailing `fraction` of the rect's width; the full
 /// fraction clips nothing, so the settled chip keeps its shadow and rims.
-private struct TrailingCapsule: Shape {
+nonisolated private struct TrailingCapsule: Shape {
   var fraction: CGFloat
 
   var animatableData: CGFloat {

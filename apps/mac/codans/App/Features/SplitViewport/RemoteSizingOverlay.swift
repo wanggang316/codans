@@ -73,7 +73,7 @@ struct RemoteSizingOverlay: View {
 }
 
 /// The pane minus the device's cells.
-private struct UnusedCells: Shape {
+nonisolated private struct UnusedCells: Shape {
   let used: CGRect
 
   func path(in rect: CGRect) -> Path {
