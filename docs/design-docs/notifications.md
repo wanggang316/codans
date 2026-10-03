@@ -122,11 +122,11 @@ Settings → Notifications 面板采用**直接视图 + `SettingsStore`**（无 
 
 ## 存储（`NotificationStore` + `InboxFile`）
 
-inbox 在内存中是 `[InboxEntry]`，持久化到 `~/.config/codans/notifications.json`。记录类型是 **`InboxEntry`**，不是 `Notification`——后者在同时 import Foundation 与 CodansCore 的调用点会与 `Foundation.Notification` 冲突。纯 inbox 变更（去重/老化/容量）放在 `CodansCore.InboxStorage`（一个 `nonisolated` enum），从而可独立于 `@MainActor` store 测试。`InboxEntry.source` 存原始 ID（`projectID/worktreeID/tabID/paneID`），不存弱引用——catalog 会独立变更，导航在点击时重新解析。
+inbox 在内存中是 `[InboxEntry]`，持久化到 `~/.codans/state/notifications.json`。记录类型是 **`InboxEntry`**，不是 `Notification`——后者在同时 import Foundation 与 CodansCore 的调用点会与 `Foundation.Notification` 冲突。纯 inbox 变更（去重/老化/容量）放在 `CodansCore.InboxStorage`（一个 `nonisolated` enum），从而可独立于 `@MainActor` store 测试。`InboxEntry.source` 存原始 ID（`projectID/worktreeID/tabID/paneID`），不存弱引用——catalog 会独立变更，导航在点击时重新解析。
 
 加载时（在 inbox 暴露前）执行过期清理，且每次 append 都强制容量上限：**老化**（丢弃 > 7 天）、**容量**（> 500 → 先逐出最旧的已读，再逐出最旧的未读）。**去重窗口**：30 秒内同 `(paneID, kind)` 更新既有行的 body/时间戳，而非新增。保存在 MainActor 之外防抖 250 ms。
 
-**版本化信封（`InboxFile`）。** 文件形如 `{ version: 1, entries: [...] }`。加载器：文件缺失 → `nil`；解码 `Envelope` → 若 `version > current`，重命名为 `notifications.json.bak-<ISO>` 并返回 `[]`，否则返回 entries；信封解码失败则尝试**遗留裸数组**；两者都失败则返回 `[]` 且不重命名（可能是部分写入，下一次保存会覆盖）。为什么用版本键而非改文件名：改名会让每个老用户的 inbox 成为孤儿；版本键在 happy path 上是一次解码尝试、零文件操作。为什么不并入 settings 版本：inbox 是独立文件、有自己的写入节奏——耦合会导致每次 inbox 保存都触发一次 settings 保存。
+**版本化信封（`InboxFile`）。** 文件形如 `{ version: 1, entries: [...] }`。加载器：文件缺失 → `nil`；解码 `Envelope` → 若 `version > current`，移到 `backups/notifications.unsupported-v<N>-<ts>.json` 并返回 `[]`，否则返回 entries；信封解码失败则尝试**遗留裸数组**；两者都失败则同样备份到 `backups/notifications.corrupt-<ts>.json` 并返回 `[]`。备份无法完成时 store 停止保存，避免覆盖不可恢复的源文件。每个文件 + 原因保留最新 5 份备份。为什么用版本键而非改文件名：改名会让每个老用户的 inbox 成为孤儿；版本键在 happy path 上是一次解码尝试、零文件操作。为什么不并入 settings 版本：inbox 是独立文件、有自己的写入节奏——耦合会导致每次 inbox 保存都触发一次 settings 保存。
 
 ## 上卷（`RollupIndex`）
 

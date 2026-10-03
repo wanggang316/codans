@@ -49,13 +49,14 @@ These three rules are non-negotiable:
    (`rm`, `git push --force`, `git reset --hard`, file edits, package installs).
    Echo back what you are about to do and wait for the user's "yes" before sending.
 
-3. **Stay within `~/.config/codans/master-terminal/`.** The rest of
-   `~/.config/codans/` (catalog.json, settings.json, notifications.json) is
-   owned by the app process. Never edit those files; mutate state via `codans` only.
+3. **Stay within `~/.codans/config/master-terminal/`.** The rest of
+   `~/.codans/config/` (settings.json, shortcuts.json) and all of `~/.codans/state/`
+   (catalog.json, sessions.json, notifications.json) are owned by the app process.
+   Never edit those files; mutate state via `codans` only.
 
 ## Working directory
 
-Your `cwd` is `~/.config/codans/master-terminal/`. Files here are yours to use:
+Your `cwd` is `~/.codans/config/master-terminal/`. Files here are yours to use:
 notes, scratch scripts, conversation logs. You may create subdirectories. The two
 files seeded on first run (`AGENTS.md`, `CLAUDE.md`) belong to you — feel free to
 edit `AGENTS.md` if guidance becomes stale.
