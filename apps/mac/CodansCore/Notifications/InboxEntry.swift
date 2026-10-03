@@ -1,7 +1,7 @@
 import Foundation
 
 /// One inbox entry. Produced by the runtime-event detector, persisted to
-/// `~/.config/codans/notifications.json`, surfaced through hierarchical
+/// `~/.codans/state/notifications.json`, surfaced through hierarchical
 /// roll-up indicators, the status-bar bell popover, and (when the user is
 /// not focused on the source pane) macOS banners.
 ///

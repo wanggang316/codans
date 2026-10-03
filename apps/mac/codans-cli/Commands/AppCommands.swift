@@ -118,14 +118,14 @@ struct LaunchCommand: AsyncParsableCommand {
   /// installed release app, which a development CLI must never start.
   ///
   /// `open` starts the app from launchd, not from this shell, so the socket
-  /// and config-directory overrides the CLI itself runs under are forwarded
+  /// and config/state-directory overrides the CLI itself runs under are forwarded
   /// with `--env`: otherwise `launch` would wait on a socket the app was
   /// never told to bind.
   private static func launchArguments(
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) throws -> (arguments: [String], description: String) {
     var arguments: [String] = []
-    for key in [CodansEnvironment.Key.socketPath, .configDirectory] {
+    for key in [CodansEnvironment.Key.socketPath, .configDirectory, .stateDirectory] {
       if let value = environment[key.rawValue], !value.isEmpty {
         arguments += ["--env", "\(key.rawValue)=\(value)"]
       }

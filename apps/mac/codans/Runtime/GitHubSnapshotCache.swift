@@ -8,8 +8,10 @@ import os.log
 /// cache on `GitHubFeature.Action.seedFromCache`, and written back on every
 /// `projectBatchLoaded(.success)`.
 ///
-/// On-disk shape: one JSON file at `~/.config/codans/github-snapshots.json`
-/// encoding `[ProjectID: BatchedPullRequests]`. Stale Projects (no longer in the
+/// On-disk shape: one JSON file at `~/Library/Caches/codans/github-snapshots.json`,
+/// a `VersionedEnvelope` whose entries map project-id UUID strings to
+/// `BatchedPullRequests`. An unreadable or older-shape file is deleted — the next
+/// fetch refills it. Stale Projects (no longer in the
 /// catalog) are harmless — they sit unused in the map and get garbage-collected on
 /// the next app launch by `GitHubFeature` if it prunes by current Worktree list.
 ///
@@ -25,33 +27,39 @@ nonisolated final class GitHubSnapshotCache: Sendable {
     subsystem: "com.gumpw.codans.github", category: "snapshot-cache"
   )
 
+  /// Envelope version. The unversioned file (v0) keyed by `ProjectID` objects and
+  /// is simply dropped.
+  static let currentVersion = 1
+
   init(fileURL: URL = GitHubSnapshotCache.defaultURL()) {
     self.fileURL = fileURL
   }
 
-  /// Standard on-disk location: sibling of `catalog.json` under
-  /// `AppDirectories.configDirectory` (`~/.config/codans[-dev]/`). Parent
-  /// directory creation is `AtomicFileStore`'s job.
-  static func defaultURL(
-    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-  ) -> URL {
-    AppDirectories.configDirectory(home: home)
+  /// Standard on-disk location: `AppDirectories.cacheDirectory`
+  /// (`~/Library/Caches/codans[-dev]/`) — the file is a refetchable cache, so
+  /// it lives where the system may purge it. Parent directory creation is
+  /// `AtomicFileStore`'s job.
+  static func defaultURL() -> URL {
+    AppDirectories.cacheDirectory()
       .appendingPathComponent("github-snapshots.json", isDirectory: false)
   }
 
-  /// Returns the cached snapshot map, or `[:]` on missing / corrupt file. Never throws.
+  /// Returns the cached snapshot map, or `[:]` on missing / unreadable file. Never throws.
   func load() -> [ProjectID: BatchedPullRequests] {
-    do {
-      if let map = try AtomicFileStore.read([ProjectID: BatchedPullRequests].self, at: fileURL) {
-        return map
-      }
-      return [:]
-    } catch {
-      Self.logger.error(
-        "snapshot-cache load failed: \(String(describing: error), privacy: .public)"
-      )
+    let result = VersionedFile.load(
+      [String: BatchedPullRequests].self, at: fileURL, currentVersion: Self.currentVersion,
+      empty: [:], unreadable: .discard
+    )
+    guard case .loaded(let entries) = result else {
+      Self.logger.error("snapshot-cache load failed: unreadable file could not be removed")
       return [:]
     }
+    var map: [ProjectID: BatchedPullRequests] = [:]
+    for (key, value) in entries {
+      guard let uuid = UUID(uuidString: key) else { continue }
+      map[ProjectID(raw: uuid)] = value
+    }
+    return map
   }
 
   /// Writes atomically. Swallows errors with a log line — the cache is best-effort.
@@ -73,7 +81,8 @@ nonisolated final class GitHubSnapshotCache: Sendable {
       return
     }
     do {
-      try AtomicFileStore.write(snapshots, to: fileURL)
+      let entries = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.key.raw.uuidString, $0.value) })
+      try VersionedFile.write(entries, to: fileURL, version: Self.currentVersion)
       lastWrittenSequence = sequence
     } catch {
       Self.logger.error(

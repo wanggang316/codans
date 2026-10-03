@@ -1,6 +1,6 @@
 import Foundation
 
-/// User overrides for the schema defaults. Persisted as `~/.config/codans/shortcuts.json`
+/// User overrides for the schema defaults. Persisted as `~/.codans/config/shortcuts.json`
 /// by `ShortcutsStore`. Sparse — only commands the user has touched appear in `overrides`;
 /// commands not present resolve to their schema default.
 ///

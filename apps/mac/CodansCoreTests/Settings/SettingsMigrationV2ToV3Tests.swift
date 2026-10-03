@@ -40,7 +40,7 @@ struct SettingsMigrationV2ToV3Tests {
     #expect(entry.defaultEditor == nil)
     #expect(entry.worktreesDirectory == nil)
     #expect(settings.version == 3)
-    #expect(backupURL.lastPathComponent.hasPrefix("settings.json.v2-"))
+    #expect(backupURL.lastPathComponent.hasPrefix("settings.migrated-v2-"))
     #expect(FileManager.default.fileExists(atPath: backupURL.path))
     // Atomic migration committed the v3 file too.
     let readBack = try #require(try AtomicFileStore.read(Settings.self, at: harness.fileURL))

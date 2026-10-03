@@ -14,16 +14,16 @@ import Foundation
 /// the shell the user is left with after the agent exits keeps their normal
 /// environment.
 public nonisolated enum AgentLaunchCommand {
-  /// Directory name under the config root that holds per-profile HOMEs.
+  /// Directory name under the state root that holds per-profile HOMEs.
   public static let dedicatedHomeDirectoryName = "agent-homes"
 
   /// `HOME` codans points a dedicated-home profile at:
-  /// `<config>/agent-homes/<profile id>`.
+  /// `<state>/agent-homes/<profile id>`.
   public static func dedicatedHomeURL(
     for profile: AgentProfile,
-    configDirectory: URL = AppDirectories.configDirectory()
+    stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> URL {
-    configDirectory
+    stateDirectory
       .appendingPathComponent(dedicatedHomeDirectoryName, isDirectory: true)
       .appendingPathComponent(profile.id.uuidString, isDirectory: true)
   }
@@ -34,17 +34,17 @@ public nonisolated enum AgentLaunchCommand {
   /// can never be mistaken for a flag value; an agent without a prompt style
   /// ignores the prompt rather than emitting an argument it cannot parse.
   ///
-  /// `configDirectory` is injected so tests can render a dedicated-home
-  /// command without touching the user's real config root.
+  /// `stateDirectory` is injected so tests can render a dedicated-home
+  /// command without touching the user's real state root.
   public static func render(
     profile: AgentProfile,
     prompt: String? = nil,
-    configDirectory: URL = AppDirectories.configDirectory()
+    stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> String {
     let descriptor = profile.descriptor
     var tokens: [String] = []
 
-    let prefix = envPrefix(profile: profile, configDirectory: configDirectory)
+    let prefix = envPrefix(profile: profile, stateDirectory: stateDirectory)
     if !prefix.isEmpty {
       tokens.append("env")
       tokens.append(contentsOf: prefix)
@@ -83,13 +83,13 @@ public nonisolated enum AgentLaunchCommand {
   /// wins over a hand-set `HOME` in the profile's own variables.
   private static func envPrefix(
     profile: AgentProfile,
-    configDirectory: URL
+    stateDirectory: URL
   ) -> [String] {
     var assignments = profile.envVars
       .sorted { $0.key < $1.key }
       .map { "\($0.key)=\(ShellQuoting.quoted($0.value))" }
     if profile.usesDedicatedHome {
-      let home = dedicatedHomeURL(for: profile, configDirectory: configDirectory)
+      let home = dedicatedHomeURL(for: profile, stateDirectory: stateDirectory)
       assignments.append("HOME=\(ShellQuoting.quoted(home.path(percentEncoded: false)))")
     }
     return assignments

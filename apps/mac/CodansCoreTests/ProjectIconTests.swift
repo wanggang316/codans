@@ -116,11 +116,11 @@ struct ProjectIconStoreTests {
     defer { try? FileManager.default.removeItem(at: config) }
     let source = try writeSource("logo.svg", in: config)
 
-    let fileName = try ProjectIconStore.importIcon(from: source, configDirectory: config)
+    let fileName = try ProjectIconStore.importIcon(from: source, stateDirectory: config)
 
     #expect(ProjectIcon.normalizedExtension(of: fileName) == "svg")
     #expect(UUID(uuidString: (fileName as NSString).deletingPathExtension) != nil)
-    let stored = ProjectIconStore.fileURL(for: fileName, configDirectory: config)
+    let stored = ProjectIconStore.fileURL(for: fileName, stateDirectory: config)
     #expect(FileManager.default.fileExists(atPath: stored.path))
   }
 
@@ -132,10 +132,10 @@ struct ProjectIconStoreTests {
     defer { try? FileManager.default.removeItem(at: config) }
     let source = try writeSource("logo.svg", in: config)
 
-    let fileName = try ProjectIconStore.importIcon(from: source, configDirectory: config)
+    let fileName = try ProjectIconStore.importIcon(from: source, stateDirectory: config)
     try FileManager.default.removeItem(at: source)
 
-    let stored = ProjectIconStore.fileURL(for: fileName, configDirectory: config)
+    let stored = ProjectIconStore.fileURL(for: fileName, stateDirectory: config)
     #expect(FileManager.default.fileExists(atPath: stored.path))
   }
 
@@ -146,7 +146,7 @@ struct ProjectIconStoreTests {
     let source = try writeSource("notes.txt", in: config)
 
     #expect(throws: ProjectIconStore.ImportError.unsupportedFormat("txt")) {
-      try ProjectIconStore.importIcon(from: source, configDirectory: config)
+      try ProjectIconStore.importIcon(from: source, stateDirectory: config)
     }
   }
 
@@ -156,8 +156,8 @@ struct ProjectIconStoreTests {
     defer { try? FileManager.default.removeItem(at: config) }
     let source = try writeSource("logo.svg", in: config)
 
-    let first = try ProjectIconStore.importIcon(from: source, configDirectory: config)
-    let second = try ProjectIconStore.importIcon(from: source, configDirectory: config)
+    let first = try ProjectIconStore.importIcon(from: source, stateDirectory: config)
+    let second = try ProjectIconStore.importIcon(from: source, stateDirectory: config)
 
     // Distinct names are what make caching decoded images by name sound.
     #expect(first != second)
@@ -168,11 +168,11 @@ struct ProjectIconStoreTests {
     let config = try makeTempConfigDirectory()
     defer { try? FileManager.default.removeItem(at: config) }
     let source = try writeSource("logo.svg", in: config)
-    let fileName = try ProjectIconStore.importIcon(from: source, configDirectory: config)
+    let fileName = try ProjectIconStore.importIcon(from: source, stateDirectory: config)
 
-    ProjectIconStore.removeIcon(named: fileName, configDirectory: config)
+    ProjectIconStore.removeIcon(named: fileName, stateDirectory: config)
 
-    let stored = ProjectIconStore.fileURL(for: fileName, configDirectory: config)
+    let stored = ProjectIconStore.fileURL(for: fileName, stateDirectory: config)
     #expect(!FileManager.default.fileExists(atPath: stored.path))
   }
 
@@ -181,6 +181,6 @@ struct ProjectIconStoreTests {
     let config = try makeTempConfigDirectory()
     defer { try? FileManager.default.removeItem(at: config) }
     // No throw, no crash — orphan cleanup must never fail a catalog write.
-    ProjectIconStore.removeIcon(named: "does-not-exist.svg", configDirectory: config)
+    ProjectIconStore.removeIcon(named: "does-not-exist.svg", stateDirectory: config)
   }
 }

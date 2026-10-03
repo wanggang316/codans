@@ -4,7 +4,7 @@ import os
 
 /// Owns the single Master Terminal panel — the slide-in NSPanel that hosts
 /// a `claude remote-control` session running in
-/// `~/.config/codans/master-terminal/`. The Ghostty surface is built
+/// `~/.codans/config/master-terminal/`. The Ghostty surface is built
 /// lazily on first summon and lives for the rest of the app lifetime so
 /// successive summons resume the same Claude session.
 @MainActor

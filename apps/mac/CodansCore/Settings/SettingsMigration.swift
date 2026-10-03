@@ -15,10 +15,10 @@ import os.log
 /// 1. Encode the migrated v2 tree and write it through `AtomicFileStore.write` to a
 ///    sibling temp URL (`<settings>.new-<uuid>`) — fsync inside AtomicFileStore means
 ///    the temp is durable before the next step runs.
-/// 2. `rename(2)` the original v1 file to `settings.json.v1-<yyyyMMdd-HHmmss>`. After this
+/// 2. `rename(2)` the original v1 file to `backups/settings.migrated-v1-<ts>.json`. After this
 ///    returns the backup has committed; the original path is empty.
 /// 3. `rename(2)` the temp into the original path. The v2 file is durable at the
-///    canonical URL, the backup at `.v1-<ts>`.
+///    canonical URL, the backup under `backups/`.
 ///
 /// Failure handling per step:
 /// - Step 1 fails → no changes on disk; `.migrationBackupFailed` returned.
@@ -28,7 +28,7 @@ import os.log
 ///
 /// The brief interval between step 2 and step 3 is the only window where the canonical
 /// path is missing. A crash there leaves the durable backup — the next launch sees a
-/// fresh file and the user can recover from `.v1-<ts>` manually.
+/// fresh file and the user can recover from `backups/` manually.
 public nonisolated enum SettingsMigration {
   public enum LoadOutcome: Equatable {
     /// File did not exist on disk; caller starts from defaults.
@@ -47,10 +47,10 @@ public nonisolated enum SettingsMigration {
     /// already sees the v3 tree on disk; the original v2 content is at `backupURL`.
     case migratedFromV2(Settings, backupURL: URL)
     /// File carried an unrecognised `version` number. Original renamed to
-    /// `settings.json.broken-<yyyyMMdd-HHmmss>`; caller starts from defaults.
+    /// `backups/settings.<reason>-<ts>.json`; caller starts from defaults.
     case unsupported(Int, backupURL: URL)
     /// File was present but unparseable (not v3 shape, not legacy v1/v2 shape). Original
-    /// renamed to `settings.json.broken-<yyyyMMdd-HHmmss>`; caller starts from defaults.
+    /// renamed to `backups/settings.<reason>-<ts>.json`; caller starts from defaults.
     case corrupt(backupURL: URL)
     /// Migration attempted but the atomic sequence could not complete. The user's original
     /// v1 or v2 file is still at the canonical URL (or restored there) — no data was
@@ -102,7 +102,7 @@ public nonisolated enum SettingsMigration {
         fileManager: fileManager
       )
     } catch Settings.DecodingIssue.unsupportedVersion(let version) where version != 1 {
-      switch moveAside(url: url, prefix: "settings.json.broken-", at: clock(), fileManager: fileManager) {
+      switch moveAside(url: url, reason: .unsupported(version: version), at: clock(), fileManager: fileManager) {
       case .success(let backup):
         logger.error(
           "Unsupported settings.json version \(version, privacy: .public); backed up to \(backup.lastPathComponent, privacy: .public)"
@@ -137,7 +137,7 @@ public nonisolated enum SettingsMigration {
         fileManager: fileManager
       )
     } catch {
-      switch moveAside(url: url, prefix: "settings.json.broken-", at: clock(), fileManager: fileManager) {
+      switch moveAside(url: url, reason: .corrupt, at: clock(), fileManager: fileManager) {
       case .success(let backup):
         logger.error(
           "Could not parse settings.json at all; backed up to \(backup.lastPathComponent, privacy: .public). Error: \(String(describing: error), privacy: .public)"
@@ -188,7 +188,7 @@ public nonisolated enum SettingsMigration {
     } catch {
       // A malformed v2 body (declared version:2 but shape is broken) is treated as
       // corrupt — back aside and start from defaults. Matches the v1 corrupt branch.
-      switch moveAside(url: url, prefix: "settings.json.broken-", at: now, fileManager: fileManager) {
+      switch moveAside(url: url, reason: .corrupt, at: now, fileManager: fileManager) {
       case .success(let backup):
         logger.error(
           "Declared version:2 settings.json was unparseable under the v2 shape; backed up to \(backup.lastPathComponent, privacy: .public). Error: \(String(describing: error), privacy: .public)"
@@ -243,7 +243,7 @@ public nonisolated enum SettingsMigration {
     return performAtomicMigration(
       url: url,
       migrated: migrated,
-      backupPrefix: "settings.json.v2-",
+      fromVersion: 2,
       outcome: { .migratedFromV2(migrated, backupURL: $0) },
       now: now,
       fileManager: fileManager
@@ -263,7 +263,7 @@ public nonisolated enum SettingsMigration {
     performAtomicMigration(
       url: url,
       migrated: migrated,
-      backupPrefix: "settings.json.v1-",
+      fromVersion: 1,
       outcome: { .migratedFromV1(migrated, backupURL: $0) },
       now: now,
       fileManager: fileManager
@@ -271,8 +271,8 @@ public nonisolated enum SettingsMigration {
   }
 
   /// Shared 3-step rename dance for every "original shape detected, v3 ready" migration.
-  /// Parameterised on `backupPrefix` so v1 backups land at `settings.json.v1-<ts>` and
-  /// v2 backups at `settings.json.v2-<ts>`, and on `outcome` so each caller can return
+  /// Parameterised on `fromVersion` so the original lands at
+  /// `backups/settings.migrated-v<N>-<ts>.json` (see `StoreBackup`), and on `outcome` so each caller can return
   /// its own `LoadOutcome` variant on success. Returns `.migrationBackupFailed` on any
   /// step error; the user's original file is preserved (restored to the canonical URL
   /// on step 3 failure, still at the canonical URL on step 1/2 failure). Callers on the
@@ -280,14 +280,19 @@ public nonisolated enum SettingsMigration {
   private static func performAtomicMigration(
     url: URL,
     migrated: Settings,
-    backupPrefix: String,
+    fromVersion: Int,
     outcome: (URL) -> LoadOutcome,
     now: Date,
     fileManager: FileManager
   ) -> LoadOutcome {
-    let timestamp = filesystemSafeTimestamp(now)
-    let backupURL = url.deletingLastPathComponent()
-      .appendingPathComponent("\(backupPrefix)\(timestamp)", isDirectory: false)
+    let reason = StoreBackup.Reason.migrated(fromVersion: fromVersion)
+    let backupURL: URL
+    do {
+      backupURL = try StoreBackup.prepareURL(for: url, reason: reason, at: now, fileManager: fileManager)
+    } catch {
+      logger.error("Migration backup directory unavailable: \(String(describing: error), privacy: .public)")
+      return .migrationBackupFailed(description: "backup directory unavailable: \(error)")
+    }
     let tempURL = url.deletingLastPathComponent()
       .appendingPathComponent(".settings.json.new-\(UUID().uuidString)", isDirectory: false)
 
@@ -323,37 +328,21 @@ public nonisolated enum SettingsMigration {
       return .migrationBackupFailed(description: "rename temp to canonical failed: \(error)")
     }
 
+    StoreBackup.prune(for: url, reason: reason, fileManager: fileManager)
     logger.info("Migrated settings.json to v3; backup at \(backupURL.lastPathComponent, privacy: .public)")
     return outcome(backupURL)
   }
 
-  /// Non-atomic move of a file to a backup filename. Used for the `unsupported` and
-  /// `corrupt` branches where the file is unparseable and the caller wants to clear the
-  /// canonical path before starting fresh. Returns `.failure` if the rename fails — the
-  /// caller is expected to fall back to `.migrationBackupFailed` rather than clobber the
-  /// file on disk.
+  /// Moves an unreadable file into `backups/` for the `unsupported` and `corrupt`
+  /// branches, so the canonical path is clear before starting fresh. Returns `.failure` if
+  /// the move fails — the caller is expected to fall back to `.migrationBackupFailed`
+  /// rather than clobber the file on disk.
   private static func moveAside(
     url: URL,
-    prefix: String,
+    reason: StoreBackup.Reason,
     at now: Date,
     fileManager: FileManager
   ) -> Result<URL, Error> {
-    let backup = url.deletingLastPathComponent()
-      .appendingPathComponent("\(prefix)\(filesystemSafeTimestamp(now))", isDirectory: false)
-    do {
-      try fileManager.moveItem(at: url, to: backup)
-      return .success(backup)
-    } catch {
-      return .failure(error)
-    }
-  }
-
-  /// `yyyyMMdd-HHmmss` UTC. Filesystem-safe across case-insensitive and ':'-averse tooling.
-  private static func filesystemSafeTimestamp(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: "UTC")
-    formatter.dateFormat = "yyyyMMdd-HHmmss"
-    return formatter.string(from: date)
+    Result { try StoreBackup.moveAside(url, reason: reason, at: now, fileManager: fileManager) }
   }
 }

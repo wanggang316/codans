@@ -9,13 +9,31 @@ class CatalogStore {
 
   private var pendingSaveTask: Task<Void, Never>?
   private var latestCatalog: Catalog?
+  /// False once `load` met a file it could neither read nor back up. Every
+  /// save is then dropped: an empty in-memory catalog must never replace a
+  /// user's project list that is merely unreadable to this build.
+  private(set) var persistenceEnabled = true
 
   init(fileURL: URL = Catalog.defaultURL()) {
     self.fileURL = fileURL
   }
 
+  /// A corrupt file, or one from a newer (or retired) catalog version, is
+  /// moved into `backups/` and an empty catalog is returned. Any failure
+  /// that leaves the unreadable file in place throws and disables saving.
   func load() throws -> Catalog {
-    if var existing = try AtomicFileStore.read(Catalog.self, at: fileURL) {
+    let decoded: Catalog?
+    do {
+      decoded = try AtomicFileStore.read(Catalog.self, at: fileURL)
+    } catch Catalog.DecodingIssue.unsupportedVersion(let version) {
+      return try setAside(reason: .unsupported(version: version))
+    } catch is DecodingError {
+      return try setAside(reason: .corrupt)
+    } catch {
+      persistenceEnabled = false
+      throw error
+    }
+    if var existing = decoded {
       // Self-heal Server projects whose `remoteHost` was stripped by an older
       // build sharing this catalog (tolerant decode + full re-encode drops
       // unknown keys). The sidecar is invisible to those builds, so it
@@ -39,6 +57,18 @@ class CatalogStore {
       return existing
     }
     return .default
+  }
+
+  private func setAside(reason: StoreBackup.Reason) throws -> Catalog {
+    do {
+      let backup = try StoreBackup.moveAside(fileURL, reason: reason)
+      logger.error("catalog.json unreadable; backed up to \(backup.lastPathComponent, privacy: .public), starting empty")
+      return .default
+    } catch {
+      persistenceEnabled = false
+      logger.error("catalog.json unreadable and backup failed; saving disabled: \(error)")
+      throw error
+    }
   }
 
   private var sidecarURL: URL {
@@ -71,6 +101,7 @@ class CatalogStore {
   }
 
   func saveNow(_ catalog: Catalog) throws {
+    guard persistenceEnabled else { return }
     try AtomicFileStore.write(catalog, to: fileURL)
     // Mirror Server-project connections into the sidecar on every save, so
     // the repair source stays current without a separate write path.

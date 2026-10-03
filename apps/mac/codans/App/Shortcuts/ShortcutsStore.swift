@@ -3,7 +3,7 @@ import Observation
 import CodansCore
 import os.log
 
-/// `@MainActor @Observable` owner of `~/.config/codans/shortcuts.json`. Single writer
+/// `@MainActor @Observable` owner of `~/.codans/config/shortcuts.json`. Single writer
 /// for the file. Mirrors `SettingsStore`'s lifecycle — atomic-rename writes through
 /// `AtomicFileStore`, 500 ms trailing debounce on mutations, broken-file backup on decode
 /// failure.
@@ -12,11 +12,12 @@ import os.log
 /// recompute together: every mutation re-runs `ShortcutResolver.resolve` so SwiftUI's
 /// `@Observable` change-tracking publishes both views in a single tick.
 ///
-/// On version mismatch or unparseable JSON the broken file is moved aside as
-/// `shortcuts.json.broken-<yyyyMMdd-HHmmss>` and the in-memory store starts empty. The
-/// store still persists subsequently — unlike `SettingsStore`'s strict versioned migration the
-/// shortcuts file has no data to preserve across an unsupported version: a fresh user
-/// override layer is the safest recovery.
+/// On version mismatch or unparseable JSON the file is moved aside through `StoreBackup`
+/// (`backups/shortcuts.<reason>-<ts>.json`) and the in-memory store starts empty. Once the
+/// backup has landed the store persists normally — the shortcuts file has no data worth
+/// migrating across an unsupported version, so a fresh override layer is the safest
+/// recovery. If the backup fails the store never writes, so the unreadable original
+/// survives for a newer build or a manual fix.
 @MainActor
 @Observable
 final class ShortcutsStore {
@@ -24,6 +25,8 @@ final class ShortcutsStore {
   private(set) var resolved: ResolvedShortcutMap
 
   private let fileURL: URL
+  /// False when an unreadable file could not be backed up; saves are then dropped.
+  @ObservationIgnored private let persistenceEnabled: Bool
   private let logger = Logger(subsystem: "com.gumpw.codans.persistence", category: "shortcuts")
   @ObservationIgnored private var pendingSaveTask: Task<Void, Never>?
   @ObservationIgnored private let debounceWindow: Duration
@@ -39,7 +42,8 @@ final class ShortcutsStore {
     self.fileURL = fileURL
     self.debounceWindow = debounceWindow
 
-    let loaded = Self.loadOrRecover(fileURL: fileURL, logger: logger)
+    let (loaded, writable) = Self.loadOrRecover(fileURL: fileURL, logger: logger)
+    self.persistenceEnabled = writable
     self.overrides = loaded
     self.resolved = ShortcutResolver.resolve(overrides: loaded)
   }
@@ -161,11 +165,13 @@ final class ShortcutsStore {
   func saveNow() throws {
     pendingSaveTask?.cancel()
     pendingSaveTask = nil
+    guard persistenceEnabled else { return }
     try AtomicFileStore.write(overrides, to: fileURL)
   }
 
   private func scheduleSave() {
     pendingSaveTask?.cancel()
+    guard persistenceEnabled else { return }
     let snapshot = overrides
     pendingSaveTask = Task { [weak self] in
       let window = self?.debounceWindow ?? Self.debounceWindow
@@ -190,63 +196,40 @@ final class ShortcutsStore {
 
   // MARK: - Load / recovery
 
+  /// Returns the overrides to start from and whether the store may write.
   private static func loadOrRecover(
     fileURL: URL,
     logger: Logger
-  ) -> ShortcutOverrideStore {
+  ) -> (ShortcutOverrideStore, writable: Bool) {
     let fileManager = FileManager.default
-    guard fileManager.fileExists(atPath: fileURL.path) else { return .empty }
+    guard fileManager.fileExists(atPath: fileURL.path) else { return (.empty, true) }
 
     do {
       let decoded = try AtomicFileStore.read(ShortcutOverrideStore.self, at: fileURL)
-      guard let store = decoded else { return .empty }
+      guard let store = decoded else { return (.empty, true) }
       if store.version != ShortcutOverrideStore.currentVersion {
-        moveAside(
-          fileURL,
-          reason: "unsupported version \(store.version)",
-          fileManager: fileManager,
-          logger: logger
-        )
-        return .empty
+        let writable = moveAside(fileURL, reason: .unsupported(version: store.version), logger: logger)
+        return (.empty, writable)
       }
-      return store
+      return (store, true)
     } catch {
       logger.error(
         "shortcuts.json was unparseable: \(String(describing: error), privacy: .public); starting empty"
       )
-      moveAside(fileURL, reason: "decode failed", fileManager: fileManager, logger: logger)
-      return .empty
+      return (.empty, moveAside(fileURL, reason: .corrupt, logger: logger))
     }
   }
 
-  private static func moveAside(
-    _ url: URL,
-    reason: String,
-    fileManager: FileManager,
-    logger: Logger
-  ) {
-    let backup = url.deletingLastPathComponent()
-      .appendingPathComponent(
-        "\(url.lastPathComponent).broken-\(filesystemSafeTimestamp(.now))",
-        isDirectory: false
-      )
+  private static func moveAside(_ url: URL, reason: StoreBackup.Reason, logger: Logger) -> Bool {
     do {
-      try fileManager.moveItem(at: url, to: backup)
-      logger.info(
-        "Backed up unreadable shortcuts.json (\(reason, privacy: .public)) to \(backup.lastPathComponent, privacy: .public)"
-      )
+      let backup = try StoreBackup.moveAside(url, reason: reason)
+      logger.info("Backed up unreadable shortcuts.json to \(backup.lastPathComponent, privacy: .public)")
+      return true
     } catch {
       logger.error(
-        "Failed to back up unreadable shortcuts.json (\(reason, privacy: .public)): \(String(describing: error), privacy: .public)"
+        "Failed to back up unreadable shortcuts.json; persistence disabled: \(String(describing: error), privacy: .public)"
       )
+      return false
     }
-  }
-
-  private static func filesystemSafeTimestamp(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: "UTC")
-    formatter.dateFormat = "yyyyMMdd-HHmmss"
-    return formatter.string(from: date)
   }
 }
