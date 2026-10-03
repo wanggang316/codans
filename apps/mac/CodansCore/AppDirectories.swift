@@ -28,7 +28,7 @@ public nonisolated enum AppDirectories {
   }
 
   /// `~/.codans/config[-dev]` — files the user may edit by hand:
-  /// `settings.json`, `shortcuts.json`, and the `master-terminal/` subtree.
+  /// `settings.json` and `shortcuts.json`.
   public static func configDirectory(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
     override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.configDirectory.rawValue]

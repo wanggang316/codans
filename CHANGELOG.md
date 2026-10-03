@@ -13,7 +13,7 @@ and the project does not yet follow semantic versioning — every release until
 ### Changed
 
 - **Config and state moved to `~/.codans`.** Hand-editable files
-  (`settings.json`, `shortcuts.json`, `master-terminal/`) now live in
+  (`settings.json`, `shortcuts.json`) now live in
   `~/.codans/config/`, app-owned state (catalog, sessions, inbox, project
   icons, agent homes) in `~/.codans/state/`, and the GitHub PR snapshot
   cache in `~/Library/Caches/codans/`. Debug builds use `config-dev` /
@@ -30,6 +30,11 @@ and the project does not yet follow semantic versioning — every release until
 ### Deprecated
 
 ### Removed
+
+- **Master Terminal.** The ⌥⌘` slide-in panel running `claude remote-control`
+  is gone, along with its `master-terminal/` working directory; the
+  migration archives an existing one under
+  `~/.codans/state/backups/legacy-config-<timestamp>/`.
 
 ### Fixed
 

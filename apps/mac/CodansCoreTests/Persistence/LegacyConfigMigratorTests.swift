@@ -41,7 +41,6 @@ struct LegacyConfigMigratorTests {
     defer { try? FileManager.default.removeItem(at: roots.base) }
     try roots.write("settings.json")
     try roots.write("shortcuts.json")
-    try roots.write("master-terminal/AGENTS.md", "brief")
     try roots.write("catalog.json")
     try roots.write("sessions.json")
     try roots.write("notifications.json")
@@ -52,7 +51,6 @@ struct LegacyConfigMigratorTests {
 
     #expect(roots.exists("settings.json", in: roots.config))
     #expect(roots.exists("shortcuts.json", in: roots.config))
-    #expect(roots.exists("master-terminal/AGENTS.md", in: roots.config))
     #expect(roots.exists("catalog.json", in: roots.state))
     #expect(roots.exists("sessions.json", in: roots.state))
     #expect(roots.exists("notifications.json", in: roots.state))
@@ -75,6 +73,7 @@ struct LegacyConfigMigratorTests {
     try roots.write("hooks.json")
     try roots.write("catalog.json.bak")
     try roots.write("plugin-linear/state.json")
+    try roots.write("master-terminal/AGENTS.md", "brief")
 
     let report = try roots.migrate().get()
 
@@ -82,7 +81,7 @@ struct LegacyConfigMigratorTests {
       ".DS_Store", ".catalog.json.tmp-1234", "sessions.json.corrupt-2026.bak", "sessions.json.lock",
       "github-snapshots.json",
     ])
-    #expect(Set(report.archived) == ["hooks.json", "catalog.json.bak", "plugin-linear"])
+    #expect(Set(report.archived) == ["hooks.json", "catalog.json.bak", "plugin-linear", "master-terminal"])
     let archive = try #require(report.archiveDirectory)
     #expect(archive.lastPathComponent == "legacy-config-19700101T000000Z")
     #expect(archive.deletingLastPathComponent() == StoreBackup.directory(for: roots.state.appendingPathComponent("x")))

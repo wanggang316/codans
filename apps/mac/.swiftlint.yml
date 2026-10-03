@@ -29,10 +29,9 @@ opt_in_rules:
   - async_without_await
 
 inclusive_language:
-  # "master" is allowed: it appears in the Master Terminal feature
-  # (the privileged summon-by-hotkey panel that drives the pane fleet
-  # via the codans CLI). The term is product-naming, not a git-branch / DB
-  # source-of-truth metaphor.
+  # "master" is allowed: git integration must name `origin/master` when
+  # probing a repository's default branch, and settings copy uses "master
+  # toggle".
   override_allowed_terms:
     - master
 

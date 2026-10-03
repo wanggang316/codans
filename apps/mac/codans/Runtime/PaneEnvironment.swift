@@ -1,10 +1,9 @@
 import CodansCore
 import Foundation
 
-/// Assembles the environment a pane's shell starts with. Every surface —
-/// worktree panes and the Master Terminal alike — goes through here, so the
-/// set of variables codans injects is decided once and cannot diverge
-/// between spawn paths. The names come from `CodansEnvironment.Key`.
+/// Assembles the environment a pane's shell starts with. Every surface goes
+/// through here, so the set of variables codans injects is decided once and
+/// cannot diverge between spawn paths. The names come from `CodansEnvironment.Key`.
 ///
 /// Two stages, because the callers know different things:
 ///

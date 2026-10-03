@@ -627,13 +627,6 @@ final class AppState {
   private var editorClient: EditorClient?
   private var hierarchyClient: HierarchyClient?
 
-  /// Master Terminal: app-level summon-by-hotkey panel that hosts a
-  /// `claude remote-control` session. Wired in `bringUp()`. The controller
-  /// + hotkey live for the app lifetime; the controller itself is lazy
-  /// internally (no NSPanel constructed until first toggle).
-  private var masterTerminalController: MasterTerminalController?
-  private var masterTerminalHotkey: MasterTerminalHotkey?
-
   init() {
     // Before any store opens a file: move a pre-split `~/.config/<slug>/` into
     // `~/.codans/{config,state}` and sweep crash-orphaned temp files. Skipped
@@ -916,31 +909,6 @@ final class AppState {
       settingsURL: Settings.defaultURL()
     )
 
-    // Master Terminal: idempotent filesystem seed for ~/.codans/config/master-terminal/.
-    // Failure to seed must not block app bring-up — the Master Terminal feature
-    // simply won't have a working directory until the next launch.
-    do {
-      try MasterTerminalBootstrap.ensureUserDirectory()
-    } catch {
-      Logger.masterTerminal.error(
-        "bootstrap failed: \(String(describing: error), privacy: .public)"
-      )
-    }
-
-    // Master Terminal hotkey: ⌥⌘` toggles the slide-in panel. Hard-coded
-    // for now; promotion to ShortcutsStore is deferred until that store
-    // grows a "global hotkey" scope.
-    //
-    // Skipped if GhosttyRuntime failed to initialise — without it the panel
-    // would slide in empty, with no path to recover. The same guard already
-    // gates the rest of the terminal stack.
-    if let ghostty {
-      let controller = MasterTerminalController(runtime: ghostty)
-      self.masterTerminalController = controller
-      self.masterTerminalHotkey = MasterTerminalHotkey(onTrigger: { [weak controller] in
-        controller?.toggle()
-      })
-    }
     profiler.mark("finish")
   }
 
