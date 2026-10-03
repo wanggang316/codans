@@ -12,11 +12,30 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **Config and state moved to `~/.codans`.** Hand-editable files
+  (`settings.json`, `shortcuts.json`, `master-terminal/`) now live in
+  `~/.codans/config/`, app-owned state (catalog, sessions, inbox, project
+  icons, agent homes) in `~/.codans/state/`, and the GitHub PR snapshot
+  cache in `~/Library/Caches/codans/`. Debug builds use `config-dev` /
+  `state-dev`. The first launch moves an existing `~/.config/codans/`
+  automatically and archives leftovers (old backups, files no build reads)
+  under `~/.codans/state/backups/legacy-config-<timestamp>/`. To go back to
+  an older build, quit codans and move the files back to `~/.config/codans/`.
+- **Backups have one home and one name.** A corrupt, newer-version or
+  migrated file is moved to `backups/<name>.<reason>-<timestamp>.json` next
+  to it, keeping the five newest per file and reason. `CODANS_STATE_DIR`
+  relocates the state root on its own; `CODANS_CONFIG_DIR` alone still moves
+  everything.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- An unreadable `catalog.json` (corrupt, or written by a newer build) no
+  longer gets overwritten with an empty project list; it is backed up
+  first. The same now holds for sessions, the inbox and shortcuts.
 
 ### Security
 

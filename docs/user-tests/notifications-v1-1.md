@@ -34,7 +34,7 @@ All three personas were added to `docs/user-tests/_shared/personas.yaml` as part
 - App started; ready signal "App launched" per patterns doc
 - A pane exists in worktree W1 of project P1 that is **not** the user's current focus (focus is on a different worktree's pane)
 - `notifications.inAppEnabled = true`, `notifications.systemEnabled = true`, `authStatus = authorized`
-- The inbox file `~/.config/codans/notifications.json` exists with `entries: []`
+- The inbox file `~/.codans/state/notifications.json` exists with `entries: []`
 - A way to drive a single OSC 9 desktop-notification event on the unfocused pane (e.g., a script the persona can paste into that pane via the `codans` CLI's pane-input verb, or a shell command on the pane that runs `printf '\033]9;hello\007'`)
 
 **Steps:**
@@ -226,9 +226,11 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 
 **Covers AC:** AC-V11-S8
 
+> (obsolete: `detection-rules.json` is no longer read by any code; skip this case.)
+
 **Preconditions:**
 - Settings → Notifications open
-- `~/.config/codans/detection-rules.json` may or may not exist beforehand
+- `detection-rules.json` may or may not exist beforehand
 
 **Steps:**
 1. Click "Reveal rules.json in Finder…" in the Mute rules section.
@@ -237,9 +239,9 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 **Assertions:**
 1. (UI) Finder is the frontmost application.
 2. (UI) Finder's active window shows `detection-rules.json` selected (highlighted).
-3. (File) `~/.config/codans/detection-rules.json` exists on disk after the click (was created with defaults if previously absent).
+3. (File, obsolete: `detection-rules.json` is no longer read) `detection-rules.json` exists on disk after the click (was created with defaults if previously absent).
 
-**Artifacts on FAIL:** screenshot of Finder; output of `ls -la ~/.config/codans/detection-rules.json`.
+**Artifacts on FAIL:** screenshot of Finder; output of `ls -la` on the revealed file.
 
 ### Journey P: Denied permission surfaces an actionable alert
 
@@ -320,7 +322,7 @@ For every case below, "trigger one notification-worthy event" means: drive one O
 
 **Assertions:**
 1. (UI) The context menu's "Mute notifications" row now displays a checkmark.
-2. (File) `~/.config/codans/catalog.json` — within a 1-second observation window after the menu close — the pane P's `labels` array contains the string `notifications:muted`. (Catalog persistence is debounced; the in-memory state changes immediately but disk write follows within the project's standard catalog debounce window.)
+2. (File) `~/.codans/state/catalog.json` — within a 1-second observation window after the menu close — the pane P's `labels` array contains the string `notifications:muted`. (Catalog persistence is debounced; the in-memory state changes immediately but disk write follows within the project's standard catalog debounce window.)
 
 **Artifacts on FAIL:** screenshot of the context menu re-opened; `catalog.json.snapshot.json` captured shortly after the click.
 
@@ -533,7 +535,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 
 **Assertions:**
 1. (UI) After the wait, the sidebar shows W3 as the first row under P1's worktree group.
-2. (File) `~/.config/codans/catalog.json` — within the catalog's standard debounce window — shows W3 as the first element of P1's `worktrees` array.
+2. (File) `~/.codans/state/catalog.json` — within the catalog's standard debounce window — shows W3 as the first element of P1's `worktrees` array.
 
 **Artifacts on FAIL:** screenshot of the sidebar before and after; `catalog.json.snapshot.json`.
 
@@ -644,7 +646,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 **Covers AC:** AC-V11-J1
 
 **Preconditions:**
-- No `~/.config/codans/notifications.json` file on disk
+- No `~/.codans/state/notifications.json` file on disk
 - App launched fresh
 
 **Steps:**
@@ -653,7 +655,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 3. Wait ≥ 1 second beyond the inbox debounce window so the file has been written.
 
 **Assertions:**
-1. (File) `~/.config/codans/notifications.json` exists.
+1. (File) `~/.codans/state/notifications.json` exists.
 2. (File) `jq 'has("version") and has("entries")' notifications.json` returns `true`.
 3. (File) `jq '.version' notifications.json` returns `1`.
 4. (File) `jq '.entries | type' notifications.json` returns `"array"` and `.entries | length` returns `1`.
@@ -665,7 +667,7 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 **Covers AC:** AC-V11-J2
 
 **Preconditions:**
-- `~/.config/codans/notifications.json` seeded with a top-level JSON array containing exactly 3 inbox entries in the v1.0 shape (no `version` key wrapping the array). Two entries are unread, one is read.
+- `~/.codans/state/notifications.json` seeded with a top-level JSON array containing exactly 3 inbox entries in the v1.0 shape (no `version` key wrapping the array). Two entries are unread, one is read.
 - App not running
 
 **Steps:**
@@ -688,9 +690,9 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 **Covers AC:** AC-V11-J3, D-OQ1 (Inbox reset toast)
 
 **Preconditions:**
-- `~/.config/codans/notifications.json` seeded with envelope `{ "version": 99, "entries": [ /* 2 entries */ ] }` — a version greater than any the current build understands
+- `~/.codans/state/notifications.json` seeded with envelope `{ "version": 99, "entries": [ /* 2 entries */ ] }` — a version greater than any the current build understands
 - App not running
-- No file matching `notifications.json.bak-*` exists in `~/.config/codans/`
+- No file matching `notifications.unsupported-v99-*.json` exists in `~/.codans/state/backups/`
 
 **Steps:**
 1. Launch the app fresh.
@@ -698,13 +700,13 @@ Note: this case explicitly involves focusing the pane to deliver Ctrl-C. The "no
 3. Open the status-bar bell popover.
 
 **Assertions:**
-1. (File) A new file matching `~/.config/codans/notifications.json.bak-*` exists, with content equal to the seeded forward-version JSON.
-2. (File) `~/.config/codans/notifications.json` either does not exist yet (no save fired) **or** exists in envelope shape with `.version == 1`.
+1. (File) A new file matching `~/.codans/state/backups/notifications.unsupported-v99-*.json` exists, with content equal to the seeded forward-version JSON.
+2. (File) `~/.codans/state/notifications.json` either does not exist yet (no save fired) **or** exists in envelope shape with `.version == 1`.
 3. (UI) The bell popover lists exactly 1 row: the "Inbox reset" entry. Its title reads "Inbox reset" (or equivalent wording established by the implementation, observable in the popover row's title text); its body references the backup file's basename.
 4. (UI) Clicking the "Inbox reset" row marks it read and lands the user somewhere safe (the inbox popover stays open, or the focus does not jump to a missing pane). The case PASSES as long as no crash occurs.
 5. (Negative) Relaunching the app a second time (without seeding a new forward-version file) does **not** add a second "Inbox reset" row.
 
-**Artifacts on FAIL:** `ls -la ~/.config/codans/notifications.json*`; bell popover screenshot.
+**Artifacts on FAIL:** `ls -la ~/.codans/state/notifications.json ~/.codans/state/backups/`; bell popover screenshot.
 
 ### Journey L: Coordinator drop logging is unobtrusive at default
 
@@ -813,7 +815,7 @@ Every spec Acceptance Criterion appears here with ≥ 1 covering case. The three
 - Added persona `quiet_user` to `docs/user-tests/_shared/personas.yaml`
 - Bootstrapped `docs/user-test-patterns.md` (no prior project-wide testing-conventions doc existed; the file documents surfaces, allowed selectors, ready signals, fixture seeding, time / clock conventions, and artifacts-on-FAIL defaults).
 
-No feature-local fixtures were introduced; every case seeds its own state from inline file paths under `~/.config/codans/`. If the cases prove burdensome to replay, a future revision can extract `_shared/fixtures/notifications/`.
+No feature-local fixtures were introduced; every case seeds its own state from inline file paths under `~/.codans/state/` and `~/.codans/config/`. If the cases prove burdensome to replay, a future revision can extract `_shared/fixtures/notifications/`.
 
 ## Open Questions
 

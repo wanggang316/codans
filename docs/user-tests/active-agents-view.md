@@ -27,7 +27,7 @@ Per [user-test-patterns.md](../user-test-patterns.md), this set probes three sur
   - `agentState.row.<paneID>` — one identifier per popover row
   - `agentState.row.<paneID>.state` — the state icon in that row, with `accessibilityLabel` ∈ {`waitingForInput`, `loading`, `finished`, `idle`}
   - `agentState.row.<paneID>.headline` — the `<Project> / <Worktree>` line
-- **Persisted state** — `~/.config/codans/catalog.json` queried with `jq` to verify the `agentKind` / `agentSessionID` fields on a Pane survive a relaunch.
+- **Persisted state** — `~/.codans/state/catalog.json` queried with `jq` to verify the `agentKind` / `agentSessionID` fields on a Pane survive a relaunch.
 - **Log stream** — `log stream --predicate 'subsystem == "com.gumpw.codans.agentstate"' …` for identification / state-transition trace lines, used as a ready signal where the UI alone is ambiguous.
 
 A "trigger an OSC 9;4 busy report on pane P" step means: drive `printf '\e]9;4;3\a'` into pane P (via the `codans` CLI's pane-input verb or by typing it into the pane chrome); the matching "clear" step drives `printf '\e]9;4;0\a'`. These exact escape sequences have a manual test recipe verified by Gump on 2026-05-03.
@@ -351,13 +351,13 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Steps:**
 1. Create a new Pane via `codans tab new --command claude` (the binary need not resolve; binder uses the recorded `initialCommand` string).
 2. Wait for ready signal "Pane attached" on the new pane.
-3. Wait until either (a) a row appears in `agentState.view` after a hover, OR (b) `~/.config/codans/catalog.json`'s pane entry contains `agentKind=claude-code` — whichever first.
+3. Wait until either (a) a row appears in `agentState.view` after a hover, OR (b) `~/.codans/state/catalog.json`'s pane entry contains `agentKind=claude-code` — whichever first.
 4. Quit the app cleanly.
 5. Relaunch the app.
 6. Wait for ready signal "App launched".
 
 **Assertions:**
-1. (File) After step 3: `jq '.. | objects | select(.id? and .initialCommand?) | select(.agentKind?)' ~/.config/codans/catalog.json` returns at least one row whose `agentKind == "claude-code"` and whose pane ID matches the new pane.
+1. (File) After step 3: `jq '.. | objects | select(.id? and .initialCommand?) | select(.agentKind?)' ~/.codans/state/catalog.json` returns at least one row whose `agentKind == "claude-code"` and whose pane ID matches the new pane.
 2. (UI) After step 6: hovering `agentState.badge` opens the popover with at least one row, and that row's content names "Claude Code".
 
 **Artifacts on FAIL:** `catalog.json.snapshot.json` taken before quit and after relaunch; console log filtered to `com.gumpw.codans.agentstate`.
@@ -375,7 +375,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Assertions:**
 1. (UI) The previously bound row no longer exists in `agentState.view`. If this was the only bound Pane, `agentState.badge` itself is no longer in the accessibility tree.
-2. (File) `jq '.. | objects | select(.id? and .initialCommand?) | .agentKind? // empty' ~/.config/codans/catalog.json` returns no rows naming that pane's ID with a non-null `agentKind`.
+2. (File) `jq '.. | objects | select(.id? and .initialCommand?) | .agentKind? // empty' ~/.codans/state/catalog.json` returns no rows naming that pane's ID with a non-null `agentKind`.
 
 **Artifacts on FAIL:** `catalog.json.snapshot.json`, console log.
 
@@ -452,7 +452,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 **Preconditions:**
 - App started.
 - One bound Pane P1=`claude-code` currently in `finished` (after a recent loading→finished transition via UT-AA-B-002/003).
-- `~/.config/codans/notifications.json` contains a corresponding `taskFinished` entry for P1 with `readAt: null` (unread).
+- `~/.codans/state/notifications.json` contains a corresponding `taskFinished` entry for P1 with `readAt: null` (unread).
 - Current focus is on a different Pane (not P1).
 
 **Steps:**
@@ -472,7 +472,7 @@ A "make pane P appear to be running agent A" precondition means: at pane creatio
 
 **Preconditions:**
 - App started.
-- `~/.config/codans/settings.json` has `notifications.inAppEnabled=false`, `notifications.systemEnabled=false`, `notifications.dockBadgeEnabled=false`, `notifications.soundEnabled=false`.
+- `~/.codans/config/settings.json` has `notifications.inAppEnabled=false`, `notifications.systemEnabled=false`, `notifications.dockBadgeEnabled=false`, `notifications.soundEnabled=false`.
 - One bound Pane P1=`claude-code` in `idle`.
 
 **Steps:**

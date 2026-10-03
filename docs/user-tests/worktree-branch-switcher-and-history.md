@@ -83,7 +83,7 @@ Use bounded polling and report a timeout with evidence; do not rely on fixed sle
 #### Case `UT-BSH-HD-001`: Two-row header on a git worktree
 
 **Preconditions:**
-- Catalog seed `_shared/fixtures/catalog/branch-switcher.json` placed at `~/.config/codans/catalog.json` (Worktree HEAD = `feat/header-redesign`).
+- Catalog seed `_shared/fixtures/catalog/branch-switcher.json` placed at `~/.codans/state/catalog.json` (Worktree HEAD = `feat/header-redesign`).
 - Multi-branch repo bundle restored to `<tmp>/repo-multi-branch`.
 - App started; "App launched" ready signal observed.
 

@@ -31,7 +31,7 @@ No new personas added.
 
 **Preconditions:**
 - App started; ready signal per `docs/user-test-patterns.md` ("App launched")
-- `~/.config/codans/settings.json` seeded so `general.resumePanesOnLaunch` is `true` (default)
+- `~/.codans/config/settings.json` seeded so `general.resumePanesOnLaunch` is `true` (default)
 - Catalog seeded with `docs/user-tests/pane-resume/fixtures/single-pane-catalog.json` (one Project, one Worktree, one Tab, one Pane); pane is attached (ready signal "Pane attached")
 - A test log file `/tmp/codans-test-001.log` exists, empty (mode 0644)
 
@@ -39,7 +39,7 @@ No new personas added.
 1. In the open pane, run `tail -f /tmp/codans-test-001.log` followed by Enter (via `codans pane send <paneID> $'tail -f /tmp/codans-test-001.log\r'`)
 2. Wait until `log stream --predicate 'subsystem == "com.gumpw.codans.runtime"' --info` emits a line matching `pane=<paneID> .*foreground_command=tail` (signals the daemon recognised the foreground process)
 3. Capture the pane's shell PID: `PID_PRE=$(codans pane info <paneID> --json | jq -r '.shellPid')`
-4. Capture the daemon's socket path: `SOCK=$(jq -r '.sessions["<paneID>"].socketPath' ~/.config/codans/sessions.json)`
+4. Capture the daemon's socket path: `SOCK=$(jq -r '.sessions["<paneID>"].socketPath' ~/.codans/state/sessions.json)`
 5. Quit the app via the Quit menu item (or AppleScript `tell application "Codans" to quit`)
 6. Wait until `pgrep -x Codans` returns empty
 7. From a shell outside the app: `echo "marker-after-quit" >> /tmp/codans-test-001.log`
@@ -52,7 +52,7 @@ No new personas added.
 2. (File) After step 6, `"$SOCK"` exists and is a socket file (`test -S "$SOCK"`)
 3. (CLI) After relaunch, `codans pane info <paneID> --json | jq -r '.shellPid'` equals `"$PID_PRE"`
 4. (File) `codans pane read <paneID> --tail 20` output contains the literal string `marker-after-quit`
-5. (File) `~/.config/codans/sessions.json` `.sessions["<paneID>"].pid` equals `"$PID_PRE"` and `.sessions["<paneID>"].lastAttachedAt` is within the last 60s
+5. (File) `~/.codans/state/sessions.json` `.sessions["<paneID>"].pid` equals `"$PID_PRE"` and `.sessions["<paneID>"].lastAttachedAt` is within the last 60s
 
 **Artifacts on FAIL:**
 - `sessions.json.snapshot.json` — copy of the sessions catalog at failure time
@@ -95,7 +95,7 @@ No new personas added.
 2. (Process) After step 8, `$PID_PRE` is no longer a live process
 3. (String compare) `BUFFER_PRE` matches the first N rows of `BUFFER_POST` (where N = rows visible at quit) — visual content is preserved byte-for-byte. (The case runner is responsible for trimming the new shell's fresh prompt line.)
 4. (CLI) `$PID_POST` is a valid PID (`kill -0 "$PID_POST"` returns 0) AND `$PID_POST` != `$PID_PRE`
-5. (File) `~/.config/codans/sessions.json` `.sessions["<paneID>"].pid` equals `$PID_POST` (new daemon adopted the same paneID)
+5. (File) `~/.codans/state/sessions.json` `.sessions["<paneID>"].pid` equals `$PID_POST` (new daemon adopted the same paneID)
 
 **Artifacts on FAIL:**
 - Copy of `<paneID>.snap` to artifacts
@@ -177,7 +177,7 @@ No new personas added.
 - App started; `resumePanesOnLaunch=true`
 - Single-pane fixture; pane attached
 - `PID=$(codans pane info <paneID> --json | jq -r '.shellPid')`
-- `SOCK=$(jq -r '.sessions["<paneID>"].socketPath' ~/.config/codans/sessions.json)`
+- `SOCK=$(jq -r '.sessions["<paneID>"].socketPath' ~/.codans/state/sessions.json)`
 
 **Steps:**
 1. `codans pane close <paneID>`
@@ -187,7 +187,7 @@ No new personas added.
 **Assertions:**
 1. (Process) Within 2s of step 1, `kill -0 "$PID"` returns nonzero (daemon child + daemon process gone)
 2. (File) After step 2, `test -S "$SOCK"` is false (socket file unlinked)
-3. (File) `jq -e '.sessions["<paneID>"] == null' ~/.config/codans/sessions.json` succeeds (entry removed)
+3. (File) `jq -e '.sessions["<paneID>"] == null' ~/.codans/state/sessions.json` succeeds (entry removed)
 4. (File) No matching snapshot file at `~/Library/Caches/codans/snapshots/<paneID>.snap` (explicit close should NOT leave a snapshot)
 
 **Artifacts on FAIL:**
@@ -209,7 +209,7 @@ No new personas added.
 **Preconditions:**
 - App is NOT running (`pgrep -x Codans` returns empty)
 - A daemon for a fake pane is running with `lastAttachedAt` 8 days in the past:
-  - Seed `~/.config/codans/catalog.json` with a single pane `STALE-PANE-ID` at cwd `/tmp`
+  - Seed `~/.codans/state/catalog.json` with a single pane `STALE-PANE-ID` at cwd `/tmp`
   - Spawn a daemon manually: `ZMX_DIR=~/Library/Caches/codans/zmx-sessions ./Codans.app/Contents/Resources/bin/zmx serve STALE-PANE-ID --cwd /tmp`
   - `STALE_PID=$(jq -r '.sessions["STALE-PANE-ID"].pid' ...)` — wait, no, this is pre-launch; the case-runner constructs `sessions.json` by hand with `lastAttachedAt = now - 8d`
   - Capture `STALE_PID=$(pgrep -f 'zmx serve STALE-PANE-ID')`
@@ -223,7 +223,7 @@ No new personas added.
 
 **Assertions:**
 1. (Process) After step 2, `kill -0 "$STALE_PID"` returns nonzero (old daemon killed)
-2. (File) `jq -r '.sessions["STALE-PANE-ID"]' ~/.config/codans/sessions.json` is `null` initially (then re-populated by the cold start in step 3 with a new pid)
+2. (File) `jq -r '.sessions["STALE-PANE-ID"]' ~/.codans/state/sessions.json` is `null` initially (then re-populated by the cold start in step 3 with a new pid)
 3. (File) No snapshot left for STALE-PANE-ID: `test ! -f ~/Library/Caches/codans/snapshots/STALE-PANE-ID.snap`
 4. (CLI) After step 5, `jq -r '.shellPid' /tmp/info-after-reap.json` is a valid live PID and is NOT equal to `$STALE_PID`
 5. (CLI) `jq -r '.pwd' /tmp/info-after-reap.json` equals `/tmp` (last cwd from catalog preserved as cold-start cwd)
@@ -260,7 +260,7 @@ No new personas added.
    - The second instance reports the pane as `state: "rejected"` (preferred) — `jq -r '.state' /tmp/second-info.json` equals `rejected`
    - OR the second instance cold-started a separate pane with a different PID — `jq -r '.shellPid' /tmp/second-info.json` is NOT equal to `$PID`
    The runner picks whichever branch applies based on what the second instance actually does; both are acceptable per spec, but ONE must hold.
-4. (File) `~/.config/codans/sessions.json` `.sessions["<paneID>"].pid` is still `$PID` (was not corrupted by the second instance)
+4. (File) `~/.codans/state/sessions.json` `.sessions["<paneID>"].pid` is still `$PID` (was not corrupted by the second instance)
 
 **Artifacts on FAIL:**
 - `first-info.json`, `second-info.json`
@@ -284,7 +284,7 @@ No new personas added.
 - Wait until `codans pane read <paneID> --tail 1` includes `tick` (signals the daemon is forwarding output)
 
 **Steps:**
-1. Capture state: `PID=$(codans pane info <paneID> --json | jq -r '.shellPid')`; `SOCK=$(jq -r '.sessions["<paneID>"].socketPath' ~/.config/codans/sessions.json)`
+1. Capture state: `PID=$(codans pane info <paneID> --json | jq -r '.shellPid')`; `SOCK=$(jq -r '.sessions["<paneID>"].socketPath' ~/.codans/state/sessions.json)`
 2. Force-kill the app: `kill -9 $(pgrep -x Codans)`
 3. Wait until `pgrep -x Codans` is empty
 4. Confirm daemon survival: `kill -0 "$PID"` returns 0 (within 2s of step 2)

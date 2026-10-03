@@ -159,21 +159,38 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
 
 ### Persistence
 
-Files under `~/.config/codans/` — `~/.config/codans-dev/` for Debug builds, see [Environment](design-docs/environment.md) — (JSON, UTF-8, pretty-printed with sorted keys for determinism):
+Three roots, all channel-scoped (`-dev` for Debug builds; see [Environment](design-docs/environment.md)). JSON is UTF-8, pretty-printed with sorted keys for determinism.
 
-| File | Version | Contents |
-|---|---|---|
-| `catalog.json` (`CodansCore/Catalog.swift`) | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
-| `settings.json` (`CodansCore/Settings/`) | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). `ProjectSettings` carries shared fields and an optional `git: GitProjectSettings?` subtree for Git settings; applicability is determined by Project kind. |
-| `sessions.json` (`CodansCore/Session.swift`) | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
-| `notifications.json`, `shortcuts.json` | v1 | Inbox entries and keybinding overrides (`AppDirectories.configDirectory`). Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
+- **Config** — `~/.codans/config/`: files a user may edit by hand.
+- **State** — `~/.codans/state/`: files only the app writes.
+- **Cache** — `~/Library/Caches/codans/`: refetchable data, plus the zmx `ZMX_DIR`.
+
+| File | Root | Version | Contents |
+|---|---|---|---|
+| `settings.json` (`CodansCore/Settings/`) | config | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). `ProjectSettings` carries shared fields and an optional `git: GitProjectSettings?` subtree for Git settings; applicability is determined by Project kind. |
+| `shortcuts.json` | config | v1 | Keybinding overrides. Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
+| `master-terminal/` | config | — | Master Terminal working directory (`AGENTS.md`, `CLAUDE.md` symlink), seeded once and then user-owned. |
+| `catalog.json` (`CodansCore/Catalog.swift`) | state | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
+| `sessions.json` (`CodansCore/Session.swift`) | state | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
+| `notifications.json` (`CodansCore/Notifications/InboxFile.swift`) | state | v1 | Inbox entries; `notifications.quarantine-shown` marks the last forward-version backup already announced. |
+| `remote-hosts.json` | state | v1 | Server projects' connection info, used to restore a `remoteHost` an older build stripped from the catalog. |
+| `saved-server-hosts.json` | state | v1 | Most-recently-used server hosts for the Connect to Server sheet. |
+| `project-icons/`, `agent-homes/` | state | — | Copied custom project icons; per-profile `HOME`s for dedicated-home agent profiles. |
+| `backups/` | state, config | — | Files set aside by `StoreBackup` (see below), plus `legacy-config-<ts>/` from the one-time migration. |
+| `github-snapshots.json` | cache | v1 | Per-Project PR snapshots for the first sidebar paint; deleted if unreadable. |
+
+The three small stores without a version field of their own (`remote-hosts`, `saved-server-hosts`, `github-snapshots`) use a `{ version, entries }` envelope (`CodansCore/Persistence/VersionedFile.swift`).
 
 The shared JSON write primitive is atomic-rename persistence (`CodansCore/AtomicFileStore.swift`):
 1. Encode to temp file in the same directory
 2. `fsync` temp file
 3. `rename(2)` over original
 
-Version handling belongs to each store, not `AtomicFileStore`. `catalog.json` requires `Catalog.currentVersion` (currently 3); `settings.json` migrates v1/v2 to v3 with backups (see [Settings](design-docs/settings.md)). `SessionStore` accepts versions up to its current version, quarantines corrupt JSON, and leaves a newer-version file in place while returning an empty catalog. `InboxFile` accepts legacy arrays and versioned envelopes, and quarantines forward-version envelopes. Consult each loader before changing recovery behavior; there is no universal "rename every unsupported file" rule. The planned Hooks subsystem would add `hooks.json`; it is not implemented. This table covers the main stores, not every config file or sidecar (see [Environment](design-docs/environment.md)).
+Temp files a crash leaves behind are swept at launch once they are an hour old (`AtomicFileStore.sweepOrphanedTemporaries`).
+
+Version handling belongs to each store, not `AtomicFileStore`, but every store follows one rule: **a file this build cannot read is never overwritten.** A corrupt file, a newer-version file, and the original of a migration are moved by `StoreBackup` (`CodansCore/Persistence/StoreBackup.swift`) to `<root>/backups/<stem>.<reason>-<yyyyMMdd'T'HHmmss'Z'>.json` (`reason` = `corrupt`, `unsupported-v<N>`, `migrated-v<N>`; newest five kept per file and reason) before the store starts empty. If that move fails the store disables saving for the session instead. `settings.json` migrates v1/v2 to v3 (see [Settings](design-docs/settings.md)); `InboxFile` also reads the legacy bare-array shape; `SessionStore` accepts any version up to its own. The planned Hooks subsystem would add `config/hooks.json`; it is not implemented.
+
+Before any store opens a file, `PersistenceLaunch.prepare` migrates a pre-split `~/.config/codans[-dev]/` into the two roots once: live files move, litter is deleted, everything else is archived under `state/backups/legacy-config-<ts>/` (`CodansCore/Persistence/LegacyConfigMigrator.swift`). It is skipped when a root is overridden, as an XCTest host, when the state root already has a catalog, and while another process holds the legacy session lock.
 
 ### Session lifecycle: quit snapshot + launch restore
 
