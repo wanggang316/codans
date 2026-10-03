@@ -46,14 +46,17 @@ app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane
 
 ```
                      Debug                               Release
-config root          ~/.config/codans-dev/               ~/.config/codans/
-ZMX_DIR              ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
+config root          ~/.codans/config-dev/               ~/.codans/config/
+state root           ~/.codans/state-dev/                ~/.codans/state/
+cache root (ZMX_DIR) ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
 IPC socket           /tmp/codans-dev-<uid>.sock          /tmp/codans-<uid>.sock
 CLI 名               codans-dev                          codans
   包内文件           Contents/Resources/bin/codans-dev   Contents/Resources/bin/codans
   安装软链           /usr/local/bin/codans-dev           /usr/local/bin/codans
   自称               --help / 报错提示 / 握手 clientBinary 都用本名
 ```
+
+config 根放用户会手改的文件，state 根放只有 app 写的文件，cache 根放可重建的数据。0.7.7 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。
 
 两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 
@@ -126,7 +129,8 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 | 变量 | 作用 | 典型用法 |
 |---|---|---|
-| `CODANS_CONFIG_DIR` | 整体搬走配置根，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
+| `CODANS_CONFIG_DIR` | 搬走配置根；未设 `CODANS_STATE_DIR` 时状态根也平铺进同一目录，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
+| `CODANS_STATE_DIR` | 单独搬走状态根（catalog、sessions、inbox 等），优先于 `CODANS_CONFIG_DIR` | 只隔离状态、共用配置 |
 | `CODANS_CACHE_DIR` | 独立的终端缓存根目录，包含 zmx socket、快照与日志 | 配合配置目录和 RPC socket 隔离 GUI / 集成测试 |
 | `CODANS_SOCKET_PATH` | 指定 IPC socket | pane 内由 app 注入；手动指定实例 |
 | `CODANS_CLI` | 生成该 pane 的 app 自带 CLI 的绝对路径 | pane 内由 app 注入；`PATH` 被 rc 重建时用 `"$CODANS_CLI"` |

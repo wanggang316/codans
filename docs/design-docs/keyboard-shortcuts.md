@@ -14,7 +14,7 @@ codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`Shortc
 **目标**
 
 - 每条用户可绑定的应用内快捷键都在 registry 里，以稳定 `CommandID` 为键，默认和弦编码一次。
-- 用户覆盖持久化到**独立文件** `~/.config/codans/shortcuts.json`，与 `settings.json` 分离。
+- 用户覆盖持久化到**独立文件** `~/.codans/config/shortcuts.json`，与 `settings.json` 分离。
 - Settings → Shortcuts 面板：搜索、按分类分组、录制新和弦、禁用、逐行重置、全部重置。
 - 三级冲突检测：macOS system-reserved、AppKit-reserved 菜单集、应用内其他用户可配置命令。
 - 以用户**活跃键盘布局**显示和弦（AZERTY 上 `⌘[` 渲染物理产出 `[` 的键帽，而非 U.S. 字面量）。
@@ -174,7 +174,7 @@ Owner 是 `App/Shortcuts/` 里新的 `ShortcutsStore`（`@MainActor @Observable`
 - **避免 schema 耦合。** `settings.json` 已在 v3 且带严格 migrator；加一个 `shortcuts` 字段会为一份生命周期可干净剥离的数据强推一次 v4 bump 与防御性迁移步。
 - **契合推迟的导出特性。** 独立文件是导出特性的天然形态——用户已能直接查看 / 拷贝 `shortcuts.json`，无需后加抽取器。
 
-**版本 / 备份策略：** 文档根有显式 `version: 1` 字段。读时版本不匹配触发 side-aside 备份（`shortcuts.json.v{N}-<ts>`）+ 全新默认加载；手编成畸形态导致解码失败则把坏文件备到一旁（`shortcuts.json.broken-<ts>`）+ 空覆盖起步——与 `SettingsStore` 同一套保守策略。路径经 `Settings.defaultURL()` 同款的 `NSHomeDirectory()` + `.config/codans/` 约定发现。
+**版本 / 备份策略：** 文档根有显式 `version: 1` 字段。读时版本不匹配触发 side-aside 备份（`backups/shortcuts.unsupported-v{N}-<ts>.json`）+ 全新默认加载；手编成畸形态导致解码失败则把坏文件备到一旁（`backups/shortcuts.corrupt-<ts>.json`）+ 空覆盖起步——与 `SettingsStore` 同一套保守策略。路径与 `settings.json` 同在配置根 `~/.codans/config/`（Debug 为 `~/.codans/config-dev/`）。
 
 ## SwiftUI 集成（要点）
 
@@ -206,7 +206,7 @@ Settings → Shortcuts 面板：按 `ShortcutSchema` 分类分组、可搜索（
 | 用户录入一个与我们漏注册的内部命令冲突的和弦 | 审计单测在编译期抓已声明命令的缺项；对未声明 / 未发现的和弦，AppKit-reserved 的硬编码列表是 catch-all，随发现漏洞扩列。 |
 | 运行时输入源切换未刷新菜单显示串 | `ShortcutsStore` 暴露随 kTIS 通知 bump 的失效 token；environment 注入的 map 携它，`appKeyboardShortcut` 重渲染；菜单项参与同一 environment。 |
 | recorder 的本地监视器在 field 聚焦时干扰 `.keyboardShortcut` 绑定 | 监视器在聚焦期间对 keyDown 返回 `nil`，在事件抵达 responder chain 前吞掉；resign-first-responder 时移除。 |
-| `shortcuts.json` 被手编成畸形态、用户下次启动丢覆盖 | 解码失败把坏文件备到 `shortcuts.json.broken-<ts>`（同 `SettingsStore` 策略）+ 空覆盖起步。 |
+| `shortcuts.json` 被手编成畸形态、用户下次启动丢覆盖 | 解码失败把坏文件备到 `backups/shortcuts.corrupt-<ts>.json`（同 `SettingsStore` 策略）+ 空覆盖起步。 |
 | 用户录入 `⇧A` 遮蔽到处的键入文本 | recorder 拒绝仅以 `⇧` 为唯一修饰符的绑定，在冲突 detector 前强制。 |
 
 ## 参考

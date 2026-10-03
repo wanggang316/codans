@@ -20,7 +20,7 @@ codans 有三个面向用户的表面。每个表面有首选工具和允许的�
 |---|---|---|
 | **SwiftUI 窗口 UI**(主窗口、Settings、sheet、alert、右键菜单、toolbar) | **Peekaboo**(`see`/`inspect_ui` → 按 element id 或 label `click`/`type`)→ `XCUITest` → 人工视觉探测 | Accessibility identifier(`accessibilityIdentifier(_:)`),或可见的 role + label(如 `Toggle("Sound", isOn:)` → role=switch, name="Sound"),或无歧义的屏幕文本 |
 | **`codans` CLI**(JSON-RPC 客户端 → App) | shell `codans …` 配合 stdout / 退出码断言 | 子命令 + flag;支持处用 `--json` 输出 |
-| **持久化状态文件**(`~/.config/codans/{settings,catalog,notifications,detection-rules}.json`,以及日志) | `jq` 查询文件内容;`log stream` / Console 过滤 `subsystem:"com.gumpw.codans.*"` | 文件路径 + JSON key path;日志过滤表达式 |
+| **持久化状态文件**(`~/.codans/config/settings.json`、`~/.codans/state/{catalog,notifications,sessions}.json`,以及日志) | `jq` 查询文件内容;`log stream` / Console 过滤 `subsystem:"com.gumpw.codans.*"` | 文件路径 + JSON key path;日志过滤表达式 |
 
 若一条用例无法用上述任一探测语言表达,说明它的范围划错了 —— 要么断言是实现内部的(移到单元测试),要么该表面需要一个稳定的 accessibility identifier(作为前置条件 / spec 修订提出,不要用脆弱选择器绕过)。
 
@@ -97,7 +97,7 @@ screencapture -x -R x,y,w,h -o /tmp/fail.png           # 矩形(仅在你掌控 
 
 ```bash
 # App 启动前播种状态(见 Fixture Seeding)
-cp fixture.json ~/.config/codans/settings.json
+cp fixture.json ~/.codans/config/settings.json
 
 # 通过 NSUserDefaults 驱动 Sparkle / 偏好场景
 defaults write com.gumpw.codans SUSkippedVersion <build>   # 模拟"Skip This Version"
@@ -163,15 +163,20 @@ defaults delete com.gumpw.codans SUSkippedVersion          # 用完清理
 
 ## Fixture 播种(Fixture Seeding)
 
-文件在 App 启动前放入 `~/.config/codans/`。每条用例指明它播种的确切文件;runner 负责在用例前后备份并还原用户的真实文件。
+文件在 App 启动前放入 `~/.codans/config/`(可手编配置)或 `~/.codans/state/`(App 自有状态)。每条用例指明它播种的确切文件;runner 负责在用例前后备份并还原用户的真实文件。
 
 ```
-~/.config/codans/
+~/.codans/config/
   settings.json            — 归 SettingsStore 所有;可在启动前播种
+  shortcuts.json           — 用户快捷键覆盖
+~/.codans/state/
   catalog.json             — 归 CatalogStore 所有;可在启动前播种
   notifications.json       — 归 NotificationStore 所有;可在启动前播种
-  detection-rules.json     — 归 mute-rules 表面所有
+  sessions.json            — pane 会话登记
+  backups/                 — 迁移 / 损坏文件的备份
 ```
+
+`detection-rules.json` 已不再被任何代码读取,不再播种。
 
 跨用例共享的 fixture 放在 `docs/user-tests/_shared/fixtures/`;用例本地 fixture 放在 `docs/user-tests/<feature>/fixtures/`。基于 NSUserDefaults 的场景(Sparkle skip 状态等)用 `defaults write` 播种(见 P4)而非文件,并同样还原。
 
@@ -212,7 +217,7 @@ Operational facts discovered during validation runs (append fact, not test asser
 - **No interactive-GUI automation surface exists in the agent environment** (no computer-use / screenshot / XCUITest scheme). SwiftUI-window assertions (rendered a11y values, on-screen placement, live row updates, context-menu contents) are therefore **deferred to a human dogfooder** in automated validation — record them `blocked` with the underlying logic verified by the reducer/integration/Codable suites, never a faked PASS.
 - **`wt` and `/bin/bash` are bundled in the Codans test host**, so `WorktreeLifecycleIntegrationTests` run for real (real `git worktree add` + setup-script subprocess; ~0.5–1.4 s each) — the strongest black-box evidence tier for worktree-lifecycle assertions.
 - **Swift Testing prints a spurious `Executed 0 tests` line** under `xcodebuild test`; the authoritative count is the `Test run with N tests passed` line. Do not read "Executed 0 tests" as a skipped suite. **Function-level `-only-testing 'CodansTests/<Suite>/<func>'` silently matches 0 tests** under this Xcode 26 / Swift Testing setup (a vacuous `Executed 0 tests` → `TEST SUCCEEDED` false-green) — filter at **suite level** (`CodansTests/<Suite>`) and read the `Test run with N tests passed` count to confirm the suite actually ran. Also prefer the **streaming per-test markers** (`✔`/`✖` lines) over `xcresulttool ... summary`: the summary view has been observed to falsely list a passing test (e.g. `DiffParserTests/diffTooLargeThrowsAfterCap`) as failed — when the two disagree, the streaming log is authoritative.
-- **Do not drive the live `codans` CLI / installed `Codans.app` for validation**: the running instance is typically built from a different worktree and owns the `~/.config/codans/{settings,catalog}.json` socket; driving it mutates the user's real state with no reset boundary. The CLI is a thin RPC client to the socket-owning app, so it cannot probe an arbitrary build in isolation.
+- **Do not drive the live `codans` CLI / installed `Codans.app` for validation**: the running instance is typically built from a different worktree and owns the `~/.codans/config/settings.json` / `~/.codans/state/catalog.json` files and the socket; driving it mutates the user's real state with no reset boundary. The CLI is a thin RPC client to the socket-owning app, so it cannot probe an arbitrary build in isolation.
 - **Build is heavy + stale-Tuist-path hazard**: a stale `apps/mac/Tuist/.build` pointing at an old worktree path breaks `xcodebuild`; fix with `rm -rf apps/mac/Tuist/.build && make mac-generate` then rebuild.
 - **Worktree-creation in-progress UI exposes a stable, unit-pinned accessibility vocabulary** that a SwiftUI-window probe (human dogfooder or XCUITest) keys on — assert observable STATE via these, never the decorative shimmer/skeleton sweep (which is Reduce-Motion-fragile and carries no meaning). The strings are a fixed contract (renaming one breaks a unit test):
   - Sidebar in-progress row — name in-progress-vs-settled accessibility **value**: `in-progress` (creating, either leg) / `settled` (failed; a successful creation removes the row entirely, so a surviving pending row only ever reports `settled` on failure). Per-leg stage **value** rides the **status / second-line leaf** (the caption-font `Text` below the display name): `creating` (git-add) / `setupScript` / `failed`. Both the name leaf (in-progress/settled) and the status leaf (stage) are probeable children under the row's `.contain` container. Both the setup-phase glyph and the creating-leg `ProgressView()` spinner are `accessibilityHidden` (decorative); the stage value on the status leaf is the authoritative signal.

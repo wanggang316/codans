@@ -159,7 +159,7 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 - **由 codans 读取 agent 的本地会话记录合成 briefing。** 否决：transcript 不等于源 agent 显式确认的交接内容；自动合成还需要额外模型调用，不属于 codans 的职责。
 - **profile 存到 `catalog.json`。** 否决：profile 是用户偏好不是层级状态，`settings.json` 已是单写者模型且可手编。
 - **面板自己实现迁移。** 否决：两份序列必然漂移；见 D6。
-- **handoff 工件放在 `~/.config/codans/` 而非 worktree 内。** 否决：接收方 agent 需要在自己的 cwd 下读到它，且工件与 worktree 生命周期一致。
+- **handoff 工件放在 `~/.codans/state/` 而非 worktree 内。** 否决：接收方 agent 需要在自己的 cwd 下读到它，且工件与 worktree 生命周期一致。
 
 ## Cross-Cutting
 
