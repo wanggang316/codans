@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-/// Root Codable of `~/.config/codans/settings.json` (v3). Replaces the v2 shape whose
+/// Root Codable of `~/.codans/config/settings.json` (v3). Replaces the v2 shape whose
 /// `repositories` dict held `RepositorySettings` with three GitHub-only fields — v3 widens
 /// the per-Project slot to `ProjectSettings`, absorbing the editor / worktree-dir overrides
 /// that used to live on `Project` in `catalog.json`. Single writer — `SettingsStore` — owns

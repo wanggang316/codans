@@ -176,7 +176,7 @@ final class NotificationCoordinator {
   /// Emit a one-shot synthetic "Inbox reset" entry when the inbox file
   /// was quarantined on load (forward-version `notifications.json` renamed
   /// to `notifications.json.bak-<ISO>`). Idempotent across launches: the
-  /// idempotency marker (`~/.config/codans/notifications.quarantine-shown`)
+  /// idempotency marker (`~/.codans/state/notifications.quarantine-shown`)
   /// records the backup-file basename of the last quarantine we showed; if
   /// the current backup matches, return without emitting.
   ///
@@ -193,7 +193,7 @@ final class NotificationCoordinator {
   /// to keep retrying on every relaunch.
   func emitQuarantineNotice(
     backupURL: URL,
-    markerURL: URL = AppDirectories.configDirectory()
+    markerURL: URL = AppDirectories.stateDirectory()
       .appendingPathComponent("notifications.quarantine-shown")
   ) async {
     let backupBasename = backupURL.lastPathComponent

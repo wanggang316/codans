@@ -66,9 +66,12 @@ public nonisolated enum CodansEnvironment {
 
     // MARK: Overrides and seams read at startup
 
-    /// Relocates the whole config root — every JSON store — so a smoke or
-    /// integration run never touches the user's real `~/.config/<slug>/`.
+    /// Relocates the config root. When `stateDirectory` is unset it relocates
+    /// the state root too, so a smoke or integration run that sets only this
+    /// never touches the user's real `~/.codans/`.
     case configDirectory = "CODANS_CONFIG_DIR"
+    /// Relocates the state root (catalog, sessions, inbox, …) on its own.
+    case stateDirectory = "CODANS_STATE_DIR"
     /// Isolates terminal sockets and snapshots for independent application instances.
     case cacheDirectory = "CODANS_CACHE_DIR"
     /// Points the CLI installer at a freshly built `codans` outside the

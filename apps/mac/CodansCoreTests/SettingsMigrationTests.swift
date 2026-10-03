@@ -39,7 +39,7 @@ struct SettingsMigrationTests {
     // C8a dropped `customEditors`; any legacy entries in the v1 file are ignored on migrate.
     #expect(settings.developer == .default)
     #expect(settings.projects.isEmpty)
-    #expect(backupURL.lastPathComponent.hasPrefix("settings.json.v1-"))
+    #expect(backupURL.lastPathComponent.hasPrefix("settings.migrated-v1-"))
     #expect(FileManager.default.fileExists(atPath: backupURL.path))
     // Migration now commits the v2 tree atomically, so the canonical
     // URL must already hold the migrated content when `.migratedFromV1` returns.
@@ -99,7 +99,8 @@ struct SettingsMigrationTests {
       return
     }
     #expect(version == 99)
-    #expect(backupURL.lastPathComponent.hasPrefix("settings.json.broken-"))
+    #expect(backupURL.lastPathComponent.hasPrefix("settings.unsupported-v99-"))
+    #expect(backupURL.deletingLastPathComponent().lastPathComponent == StoreBackup.directoryName)
     #expect(FileManager.default.fileExists(atPath: backupURL.path))
   }
 
@@ -115,7 +116,7 @@ struct SettingsMigrationTests {
       Issue.record("Expected .corrupt, got \(outcome)")
       return
     }
-    #expect(backupURL.lastPathComponent.hasPrefix("settings.json.broken-"))
+    #expect(backupURL.lastPathComponent.hasPrefix("settings.corrupt-"))
     #expect(FileManager.default.fileExists(atPath: backupURL.path))
   }
 

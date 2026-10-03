@@ -16,13 +16,29 @@ nonisolated enum RemoteHostSidecar {
   /// codable shape trivial.
   typealias Entries = [String: RemoteHost]
 
+  /// Envelope version. v0 was the bare `Entries` map, still read.
+  static let currentVersion = 1
+
   static func url(alongsideCatalogAt catalogURL: URL) -> URL {
     catalogURL.deletingLastPathComponent()
       .appendingPathComponent("remote-hosts.json", isDirectory: false)
   }
 
+  /// `nil` when the file is unreadable and could not be backed up — callers
+  /// must then leave it alone.
+  static func load(at url: URL) -> Entries? {
+    let result = VersionedFile.load(
+      Entries.self, at: url, currentVersion: currentVersion, empty: [:], unreadable: .backUp,
+      legacy: { try JSONDecoder.touchCodeDefault.decode(Entries.self, from: $0) }
+    )
+    switch result {
+    case .loaded(let entries): return entries
+    case .locked: return nil
+    }
+  }
+
   static func read(at url: URL) -> Entries {
-    (try? AtomicFileStore.read(Entries.self, at: url)) ?? [:]
+    load(at: url) ?? [:]
   }
 
   /// Restore stripped `remoteHost`s from the sidecar. Only fills projects
@@ -48,7 +64,7 @@ nonisolated enum RemoteHostSidecar {
   /// nil `remoteHost` KEEPS its entry — that state is exactly the stripping
   /// this sidecar exists to absorb, and must never propagate into it.
   static func sync(from catalog: Catalog, to url: URL) {
-    var entries = read(at: url)
+    guard var entries = load(at: url) else { return }
     let liveIDs = Set(catalog.projects.map { $0.id.raw.uuidString })
     entries = entries.filter { liveIDs.contains($0.key) }
     for project in catalog.projects {
@@ -60,6 +76,6 @@ nonisolated enum RemoteHostSidecar {
       try? FileManager.default.removeItem(at: url)
       return
     }
-    try? AtomicFileStore.write(entries, to: url)
+    try? VersionedFile.write(entries, to: url, version: currentVersion)
   }
 }

@@ -482,7 +482,7 @@ final class AppState {
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
   /// Notifications inbox owner; survives the full app lifetime so the
-  /// debounced JSON write to `~/.config/codans/notifications.json` and
+  /// debounced JSON write to `~/.codans/state/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
   let notificationStore: NotificationStore
   /// Per-level roll-up derivation; views read `notificationRollup.current`
@@ -635,8 +635,19 @@ final class AppState {
   private var masterTerminalHotkey: MasterTerminalHotkey?
 
   init() {
+    // Before any store opens a file: move a pre-split `~/.config/<slug>/` into
+    // `~/.codans/{config,state}` and sweep crash-orphaned temp files. Skipped
+    // as an XCTest host so a test run never relocates the developer's data.
+    let environment = ProcessInfo.processInfo.environment
+    if environment["XCTestBundlePath"] == nil, environment["XCTestConfigurationFilePath"] == nil {
+      PersistenceLaunch.prepare(environment: environment)
+    }
+
     let catalogStore = CatalogStore()
     let runtime = GhosttyBackedHierarchyRuntime()
+    // An unreadable catalog is either backed up (and reads as empty) or
+    // leaves the store with saving disabled, so `.empty` here can never
+    // overwrite the user's project list.
     let catalog = (try? catalogStore.load()) ?? .empty
 
     let manager = HierarchyManager(
@@ -905,7 +916,7 @@ final class AppState {
       settingsURL: Settings.defaultURL()
     )
 
-    // Master Terminal: idempotent filesystem seed for ~/.config/codans/master-terminal/.
+    // Master Terminal: idempotent filesystem seed for ~/.codans/config/master-terminal/.
     // Failure to seed must not block app bring-up — the Master Terminal feature
     // simply won't have a working directory until the next launch.
     do {
@@ -1474,16 +1485,21 @@ final class AppState {
     self.sessionStore = sessionStore
     guard let sessionStore else { return }
     // Seed the coordinator's in-memory catalog from disk once at bootstrap.
-    // A read error (corrupt file, EIO under sandbox revoke) degrades to an
-    // empty catalog rather than blocking the launch — same failure mode as
-    // the previous direct-load path inside `SessionReaper.sweep`.
+    // A corrupt or newer file is already backed up and reads as empty. A
+    // load that still throws (EIO under sandbox revoke, or a backup that
+    // could not be made) means the file is unreadable *and* still in place,
+    // so degrade to no-resume mode rather than let the coordinator's first
+    // save overwrite it.
     let initialCatalog: SessionCatalog
     do {
       initialCatalog = try sessionStore.load()
     } catch {
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session")
-        .error("SessionStore.load failed at bootstrap: \(String(describing: error), privacy: .public)")
-      initialCatalog = .empty
+        .error(
+          "SessionStore.load failed at bootstrap; entering no-resume mode: \(String(describing: error), privacy: .public)"
+        )
+      self.sessionStore = nil
+      return
     }
     let coordinator = SessionCoordinator(store: sessionStore, initial: initialCatalog)
     self.sessionCoordinator = coordinator

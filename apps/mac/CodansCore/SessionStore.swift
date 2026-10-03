@@ -46,7 +46,7 @@ public final class SessionStore {
   /// save, instead of treating the placeholder as a corrupt file.
   ///
   /// The parent directory is created if missing so a fresh install
-  /// (where `~/.config/codans` does not exist yet) does not fall
+  /// (where `~/.codans/state` does not exist yet) does not fall
   /// straight into no-resume mode on the `open` ENOENT.
   ///
   /// A successful lock keeps the descriptor open for the lifetime of the
@@ -57,7 +57,7 @@ public final class SessionStore {
     self.fileURL = fileURL
 
     // Ensure the parent directory exists before opening the lock file.
-    // On a fresh install `~/.config/codans` may not have been created
+    // On a fresh install `~/.codans/state` may not have been created
     // yet; without this the O_CREAT open below fails with ENOENT and the
     // app drops into no-resume mode for no good reason.
     let directory = fileURL.deletingLastPathComponent()
@@ -164,23 +164,24 @@ public final class SessionStore {
     do {
       decoded = try JSONDecoder().decode(SessionCatalog.self, from: data)
     } catch {
-      // The corrupt file is renamed rather than deleted so the user can
+      // The corrupt file is moved aside rather than deleted so the user can
       // inspect what went wrong and so this code stays crash-free even
       // when on-disk state is hostile.
       logger.error(
         "Failed to decode sessions.json (\(error.localizedDescription, privacy: .public)); backing up corrupt file."
       )
-      backupCorruptFile()
+      try moveAside(reason: .corrupt)
       return .empty
     }
 
     guard decoded.version <= SessionCatalog.currentVersion else {
-      // Forward-compat: a future codans build wrote a newer schema.
-      // Refuse to interpret the payload but leave it on disk so that
-      // future build remains the source of truth.
+      // Forward-compat: a future codans build wrote a newer schema. The
+      // first save from this build would overwrite it, so it is backed up
+      // first and stays recoverable for that future build.
       logger.notice(
-        "sessions.json version \(decoded.version) is newer than supported \(SessionCatalog.currentVersion); ignoring."
+        "sessions.json version \(decoded.version) is newer than supported \(SessionCatalog.currentVersion); backing up."
       )
+      try moveAside(reason: .unsupported(version: decoded.version))
       return .empty
     }
 
@@ -253,11 +254,14 @@ public final class SessionStore {
     }
   }
 
-  private func backupCorruptFile() {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let backupURL = fileURL.deletingLastPathComponent()
-      .appendingPathComponent("\(fileURL.lastPathComponent).corrupt-\(timestamp).bak")
-    try? FileManager.default.moveItem(at: fileURL, to: backupURL)
+  /// Throws when the backup cannot be made: the caller must then not save
+  /// over the unreadable file.
+  private func moveAside(reason: StoreBackup.Reason) throws {
+    do {
+      try StoreBackup.moveAside(fileURL, reason: reason)
+    } catch {
+      throw SessionStoreError.decode("backup of unreadable sessions.json failed: \(error.localizedDescription)")
+    }
   }
 }
 

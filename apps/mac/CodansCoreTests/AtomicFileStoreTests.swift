@@ -5,6 +5,30 @@ import Testing
 
 struct AtomicFileStoreTests {
   @Test
+  func sweepRemovesOnlyStaleTemporaries() throws {
+    let directory = Self.temporaryDirectory()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let now = Date()
+    func make(_ name: String, age: TimeInterval) throws -> URL {
+      let url = directory.appendingPathComponent(name)
+      try Data("x".utf8).write(to: url)
+      try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-age)], ofItemAtPath: url.path)
+      return url
+    }
+    let staleTemp = try make(".catalog.json.tmp-AAAA", age: 7200)
+    let staleNew = try make(".settings.json.new-BBBB", age: 7200)
+    let freshTemp = try make(".catalog.json.tmp-CCCC", age: 10)
+    let live = try make("catalog.json", age: 7200)
+
+    let removed = AtomicFileStore.sweepOrphanedTemporaries(in: directory, olderThan: 3600, now: now)
+
+    #expect(Set(removed.map(\.lastPathComponent)) == [staleTemp.lastPathComponent, staleNew.lastPathComponent])
+    #expect(FileManager.default.fileExists(atPath: freshTemp.path))
+    #expect(FileManager.default.fileExists(atPath: live.path))
+  }
+
+  @Test
   func readReturnsNilForMissingFile() throws {
     let url = Self.temporaryURL()
     let decoded = try AtomicFileStore.read(Payload.self, at: url)

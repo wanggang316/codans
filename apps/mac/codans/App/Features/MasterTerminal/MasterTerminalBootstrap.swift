@@ -4,7 +4,7 @@ import os
 
 /// Idempotent first-run setup for the Master Terminal user directory.
 ///
-/// On first call: creates `~/.config/codans/master-terminal/`, writes
+/// On first call: creates `~/.codans/config/master-terminal/`, writes
 /// `AGENTS.md` from the bundled template, creates `CLAUDE.md` as a symlink
 /// to `AGENTS.md`. Subsequent calls are no-ops if `AGENTS.md` already
 /// exists — user edits are preserved.
@@ -15,7 +15,7 @@ import os
 /// disk I/O onto the main thread for no reason and block nonisolated tests
 /// from calling these helpers synchronously.
 public enum MasterTerminalBootstrap {
-  /// `~/.config/codans/master-terminal/`. Stable across calls; depends only on `$HOME`.
+  /// `~/.codans/config/master-terminal/`. Stable across calls; depends only on `$HOME`.
   public nonisolated static var userDirectory: URL {
     userDirectory(homeDirectory: FileManager.default.homeDirectoryForCurrentUser)
   }

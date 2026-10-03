@@ -3,7 +3,7 @@ import Observation
 import CodansCore
 import os.log
 
-/// `@MainActor @Observable` owner of `~/.config/codans/notifications.json`.
+/// `@MainActor @Observable` owner of `~/.codans/state/notifications.json`.
 /// Single writer for the file; mirrors the `SettingsStore` and `CatalogStore`
 /// pattern: atomic-rename writes via `AtomicFileStore`, trailing debounce on
 /// mutations, age + cap sweeps applied on every load and after every append.
@@ -29,6 +29,9 @@ public final class NotificationStore {
   public private(set) var loadedQuarantineBackupURL: URL?
 
   @ObservationIgnored private let fileURL: URL
+  /// False when the inbox file was unreadable and could not be backed up;
+  /// saves are then dropped so the original survives.
+  @ObservationIgnored private var persistenceEnabled = true
   @ObservationIgnored private let logger = Logger(
     subsystem: "com.gumpw.codans.persistence",
     category: "notifications"
@@ -42,12 +45,12 @@ public final class NotificationStore {
   /// long-running command finishes.
   public static let debounceWindow: Duration = .milliseconds(250)
 
-  /// On-disk location: `<AppDirectories.configDirectory>/notifications.json`
+  /// On-disk location: `<AppDirectories.stateDirectory>/notifications.json`
   /// (`-dev` suffixed for Debug builds — see `AppDirectories`).
   public static func defaultURL(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {
-    AppDirectories.configDirectory(home: home)
+    AppDirectories.stateDirectory(home: home)
       .appendingPathComponent("notifications.json", isDirectory: false)
   }
 
@@ -70,9 +73,10 @@ public final class NotificationStore {
       }
     } catch {
       logger.error(
-        "Failed to load notifications.json: \(String(describing: error), privacy: .public); starting empty inbox"
+        "Failed to load notifications.json: \(String(describing: error), privacy: .public); starting empty inbox, persistence disabled"
       )
       loaded = []
+      persistenceEnabled = false
     }
     self.loadedQuarantineBackupURL = quarantineBackupURL
 
@@ -157,6 +161,7 @@ public final class NotificationStore {
     do {
       pendingSaveTask?.cancel()
       pendingSaveTask = nil
+      guard persistenceEnabled else { return }
       try InboxFile.save(entries, to: fileURL)
     } catch {
       logger.error("Failed to flush notifications: \(String(describing: error), privacy: .public)")
@@ -171,6 +176,7 @@ public final class NotificationStore {
     // any captured snapshot — that's the right call on app
     // termination, where the latest state must reach disk.
     pendingSaveTask?.cancel()
+    guard persistenceEnabled else { return }
     let snapshot = entries
     pendingSaveTask = Task { [weak self] in
       let window = self?.debounceWindow ?? Self.debounceWindow
