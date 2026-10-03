@@ -38,7 +38,7 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 | `CodansEnvironment.Key` | codans 读或写的每一个环境变量名，附写者、读者、生命周期 | 所有读写点；类型化持有者（`BuiltinEnvVar`、`TermProgramEnv`、`CLIBundleLocator.EnvKey`、`HandoffKickoff.requestIDEnvironmentKey`）保留 API、从它取值 |
 | `HandoffLayout` | `.codans/handoff/` 的文件与目录名 | `HandoffStore`（URL）、`HandoffKickoff`（给接收方的相对路径字符串） |
 
-app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，worktree pane 和 Master Terminal 共用。
+app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，所有 surface 共用。
 
 ### 通道隔离了什么
 
@@ -111,7 +111,7 @@ forSurface(base, paneID:, zmxDirectory:)
   7. CODANS_PANE_ID  pane 自己的 id
 ```
 
-worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。Master Terminal 没有项目，走同样两个阶段、overrides 为空。
+worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。
 
 只注入 `CODANS_PANE_ID` 而不注入 tab / worktree / project id 是有意的：pane id 终生不变，烘进环境是安全的；其余三个会随 pane 被移动而过期，所以由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认这五个键，是为了让调用方手动导出时能就地短路，但 app 只写 pane 那一个。
 
