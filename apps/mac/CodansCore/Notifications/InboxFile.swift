@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-/// On-disk envelope format for `~/.config/codans/notifications.json`.
+/// On-disk envelope format for `~/.codans/state/notifications.json`.
 ///
 /// Owns load/save and the legacy → envelope upgrade. The v1.0 shape was a
 /// bare top-level JSON array of `InboxEntry`; v1.1 wraps that array in a
@@ -12,8 +12,8 @@ import os.log
 ///
 /// Forward-version files (a file whose `version` exceeds what this build
 /// understands, e.g. user downgraded after a v1.2 build wrote v2) are
-/// quarantined to a deterministic sibling path and the inbox starts empty
-/// for that launch. The quarantine path is surfaced through `LoadResult`
+/// quarantined through `StoreBackup` and the inbox starts empty for that
+/// launch. The quarantine path is surfaced through `LoadResult`
 /// so the "Inbox reset" toast can name the backup file.
 public nonisolated enum InboxFile {
   /// Current envelope version this build writes and the maximum it can read.
@@ -53,13 +53,14 @@ public nonisolated enum InboxFile {
   ///
   /// - Returns `nil` when the file is absent (fresh install).
   /// - Returns `LoadResult(entries: [], quarantineBackupURL: <path>)` and
-  ///   renames the file aside when its envelope `version` exceeds
-  ///   `currentVersion`. The rename target is `quarantinePath(for:at:)`.
+  ///   moves the file into `backups/` when its envelope `version` exceeds
+  ///   `currentVersion`.
   /// - Reads both envelope and legacy bare-array shapes. A legacy file is
   ///   returned as-is; the next `save(_:to:)` rewrites it in envelope form.
-  /// - Returns `LoadResult(entries: [])` (no rename) when the bytes are
-  ///   neither a valid envelope nor a valid bare array. The next save will
-  ///   overwrite the corrupt bytes.
+  /// - Returns `LoadResult(entries: [])` when the bytes are neither a valid
+  ///   envelope nor a valid bare array, after moving them into `backups/`.
+  /// - Throws when an unreadable file could not be backed up; the caller must
+  ///   then not save over it.
   public static func load(from url: URL, now: Date = Date()) throws -> LoadResult? {
     let fileManager = FileManager.default
     guard fileManager.fileExists(atPath: url.path) else { return nil }
@@ -72,25 +73,19 @@ public nonisolated enum InboxFile {
         return LoadResult(entries: envelope.entries)
       }
 
-      // Forward-version file: rename aside, start empty. A rename failure
-      // is logged but non-fatal — the file is unreadable to us either way.
-      let target = quarantinePath(for: url, at: now)
-      do {
-        try fileManager.moveItem(at: url, to: target)
-        return LoadResult(entries: [], quarantineBackupURL: target)
-      } catch {
-        logger.error(
-          "Failed to quarantine forward-version inbox file: \(String(describing: error), privacy: .public)"
-        )
-        return LoadResult(entries: [])
-      }
+      // Forward-version file: move aside, start empty.
+      let backup = try StoreBackup.moveAside(url, reason: .unsupported(version: envelope.version), at: now)
+      return LoadResult(entries: [], quarantineBackupURL: backup)
     }
 
     if let legacy = try? decoder.decode([InboxEntry].self, from: data) {
       return LoadResult(entries: legacy)
     }
 
-    logger.warning("Inbox file at \(url.path, privacy: .public) is unparseable; starting empty")
+    let backup = try StoreBackup.moveAside(url, reason: .corrupt, at: now)
+    logger.warning(
+      "Inbox file at \(url.path, privacy: .public) is unparseable; backed up to \(backup.lastPathComponent, privacy: .public)"
+    )
     return LoadResult(entries: [])
   }
 
@@ -101,31 +96,4 @@ public nonisolated enum InboxFile {
     let envelope = Envelope(version: currentVersion, entries: entries)
     try AtomicFileStore.write(envelope, to: url)
   }
-
-  /// Deterministic quarantine path for a forward-version file. The format
-  /// is `<original-path>.bak-<yyyyMMdd'T'HHmmss'Z'>` in UTC; the basic
-  /// ISO 8601 form keeps the path filesystem-safe across platforms and
-  /// sorts lexicographically by time.
-  ///
-  /// Pure — `at:` is injected so tests can pin the timestamp and the
-  /// loader can pass through its own `now` parameter.
-  public static func quarantinePath(for url: URL, at: Date) -> URL {
-    let timestamp = quarantineFormatter.string(from: at)
-    let directory = url.deletingLastPathComponent()
-    let renamed = "\(url.lastPathComponent).bak-\(timestamp)"
-    return directory.appendingPathComponent(renamed)
-  }
-
-  // ISO 8601 basic profile (`yyyyMMdd'T'HHmmss'Z'`) in UTC. We avoid
-  // `ISO8601DateFormatter` because its options for emitting the basic
-  // form without separators are awkward; a one-shot `DateFormatter` with
-  // a fixed `en_US_POSIX` locale is shorter and more obvious.
-  private static let quarantineFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.calendar = Calendar(identifier: .gregorian)
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: "UTC")
-    formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
-    return formatter
-  }()
 }

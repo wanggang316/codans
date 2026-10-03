@@ -4,7 +4,7 @@ import Foundation
 /// directory, `fsync`s it, then `rename(2)`s over the original — so a crash mid-write leaves the
 /// previous file intact. `read` returns nil on missing file; other I/O and decode errors throw.
 ///
-/// When the destination is a symlink (users commonly link `~/.config/codans/*.json` into a
+/// When the destination is a symlink (users commonly link `~/.codans/config/*.json` into a
 /// dotfiles repository), `write` resolves the link chain first and renames over the *target*,
 /// so the link survives instead of being replaced by a regular file.
 ///
@@ -59,6 +59,36 @@ public nonisolated enum AtomicFileStore {
       _ = try? FileManager.default.removeItem(at: tempURL)
       throw Failure.renameFailed(from: tempURL.path, to: destination.path, code: errno)
     }
+  }
+
+  /// Deletes temp files a crash left behind in `directory` (non-recursive):
+  /// `write`'s `.<name>.tmp-<uuid>` and the settings migration's
+  /// `.<name>.new-<uuid>`. Only files older than `age` go, so a write in
+  /// flight in another process is never pulled out from under it. Returns
+  /// what was removed; best effort.
+  @discardableResult
+  public static func sweepOrphanedTemporaries(
+    in directory: URL,
+    olderThan age: TimeInterval = 3600,
+    now: Date = Date(),
+    fileManager: FileManager = .default
+  ) -> [URL] {
+    guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return [] }
+    var removed: [URL] = []
+    for name in names where isTemporaryName(name) {
+      let url = directory.appendingPathComponent(name, isDirectory: false)
+      guard
+        let modified = (try? fileManager.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+        now.timeIntervalSince(modified) >= age,
+        (try? fileManager.removeItem(at: url)) != nil
+      else { continue }
+      removed.append(url)
+    }
+    return removed
+  }
+
+  static func isTemporaryName(_ name: String) -> Bool {
+    name.hasPrefix(".") && (name.contains(".tmp-") || name.contains(".new-"))
   }
 
   /// Follows the symlink chain at `url`'s final path component. Unlike `resolvingSymlinksInPath()`

@@ -6,10 +6,10 @@ import Testing
 /// The Launch Preview shown in Settings and the string typed into the pane
 /// come from the same renderer, so these assertions pin both at once.
 struct AgentLaunchCommandTests {
-  private static let configRoot = URL(fileURLWithPath: "/tmp/codans-tests", isDirectory: true)
+  private static let stateRoot = URL(fileURLWithPath: "/tmp/codans-tests", isDirectory: true)
 
   private static func render(_ profile: AgentProfile) -> String {
-    AgentLaunchCommand.render(profile: profile, configDirectory: configRoot)
+    AgentLaunchCommand.render(profile: profile, stateDirectory: stateRoot)
   }
 
   @Test
@@ -68,7 +68,7 @@ struct AgentLaunchCommandTests {
       envVars: ["HOME": "/somewhere/else"],
       usesDedicatedHome: true
     )
-    let expectedHome = Self.configRoot
+    let expectedHome = Self.stateRoot
       .appendingPathComponent("agent-homes", isDirectory: true)
       .appendingPathComponent("00000000-0000-0000-0000-0000000000AB", isDirectory: true)
       .path(percentEncoded: false)
@@ -110,25 +110,25 @@ struct AgentLaunchCommandTests {
 /// A handoff seeds the receiver with a kickoff prompt; the descriptor decides
 /// how (and whether) the CLI can take one.
 struct AgentLaunchCommandPromptTests {
-  private static let configRoot = URL(fileURLWithPath: "/tmp/codans-tests", isDirectory: true)
+  private static let stateRoot = URL(fileURLWithPath: "/tmp/codans-tests", isDirectory: true)
 
   @Test
   func promptTrailsEveryOtherArgumentInTheAgentsOwnSpelling() {
     let claude = AgentProfile(kind: .claudeCode, executionModeID: "plan", extraArguments: "--verbose")
     #expect(
-      AgentLaunchCommand.render(profile: claude, prompt: "take over", configDirectory: Self.configRoot)
+      AgentLaunchCommand.render(profile: claude, prompt: "take over", stateDirectory: Self.stateRoot)
         == "claude --permission-mode plan --verbose 'take over'")
 
     let gemini = AgentProfile(kind: .gemini, modelID: "gemini-2.5-pro")
     #expect(
-      AgentLaunchCommand.render(profile: gemini, prompt: "it's go", configDirectory: Self.configRoot)
+      AgentLaunchCommand.render(profile: gemini, prompt: "it's go", stateDirectory: Self.stateRoot)
         == "gemini --model 'gemini-2.5-pro' -i 'it'\\''s go'")
   }
 
   @Test
   func agentsWithoutAPromptStyleIgnoreThePrompt() {
     let amp = AgentProfile(kind: .amp)
-    #expect(AgentLaunchCommand.render(profile: amp, prompt: "x", configDirectory: Self.configRoot) == "amp")
+    #expect(AgentLaunchCommand.render(profile: amp, prompt: "x", stateDirectory: Self.stateRoot) == "amp")
     #expect(!AgentCatalog.descriptor(for: .amp).supportsInitialPrompt)
     #expect(AgentCatalog.handoffReceivers == [.claudeCode, .codex, .pi, .gemini, .cursorAgent, .grok, .omp])
   }
@@ -136,7 +136,7 @@ struct AgentLaunchCommandPromptTests {
   @Test
   func emptyPromptRendersNothing() {
     let codex = AgentProfile(kind: .codex)
-    #expect(AgentLaunchCommand.render(profile: codex, prompt: "", configDirectory: Self.configRoot) == "codex")
+    #expect(AgentLaunchCommand.render(profile: codex, prompt: "", stateDirectory: Self.stateRoot) == "codex")
   }
 }
 

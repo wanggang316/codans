@@ -1,6 +1,6 @@
 import Foundation
 
-/// On-disk home for custom Project icons: `<config>/project-icons/`.
+/// On-disk home for custom Project icons: `<state>/project-icons/`.
 ///
 /// Picking a custom icon **copies** the artwork here under a fresh UUID name
 /// rather than remembering where the user found it. Two reasons: the Project
@@ -17,20 +17,20 @@ public nonisolated enum ProjectIconStore {
     case unsupportedFormat(String)
   }
 
-  /// `<config>/project-icons/`. Not created here — `importIcon` creates it on
+  /// `<state>/project-icons/`. Not created here — `importIcon` creates it on
   /// the first write so a user who never picks a custom icon gets no directory.
   public static func directory(
-    configDirectory: URL = AppDirectories.configDirectory()
+    stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> URL {
-    configDirectory.appendingPathComponent("project-icons", isDirectory: true)
+    stateDirectory.appendingPathComponent("project-icons", isDirectory: true)
   }
 
   /// Resolves the stored file name of a `.custom` icon back to a URL.
   public static func fileURL(
     for fileName: String,
-    configDirectory: URL = AppDirectories.configDirectory()
+    stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> URL {
-    directory(configDirectory: configDirectory).appendingPathComponent(fileName)
+    directory(stateDirectory: stateDirectory).appendingPathComponent(fileName)
   }
 
   /// Copies `sourceURL` into the icon directory and returns the stored file
@@ -40,14 +40,14 @@ public nonisolated enum ProjectIconStore {
   @discardableResult
   public static func importIcon(
     from sourceURL: URL,
-    configDirectory: URL = AppDirectories.configDirectory(),
+    stateDirectory: URL = AppDirectories.stateDirectory(),
     fileManager: FileManager = .default
   ) throws -> String {
     let ext = ProjectIcon.normalizedExtension(of: sourceURL.lastPathComponent)
     guard ProjectIcon.supportedExtensions.contains(ext) else {
       throw ImportError.unsupportedFormat(ext)
     }
-    let directory = directory(configDirectory: configDirectory)
+    let directory = directory(stateDirectory: stateDirectory)
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     let fileName = "\(UUID().uuidString).\(ext)"
     try fileManager.copyItem(at: sourceURL, to: directory.appendingPathComponent(fileName))
@@ -59,11 +59,11 @@ public nonisolated enum ProjectIconStore {
   /// throwing here would fail the catalog write that already succeeded.
   public static func removeIcon(
     named fileName: String,
-    configDirectory: URL = AppDirectories.configDirectory(),
+    stateDirectory: URL = AppDirectories.stateDirectory(),
     fileManager: FileManager = .default
   ) {
     try? fileManager.removeItem(
-      at: fileURL(for: fileName, configDirectory: configDirectory)
+      at: fileURL(for: fileName, stateDirectory: stateDirectory)
     )
   }
 }

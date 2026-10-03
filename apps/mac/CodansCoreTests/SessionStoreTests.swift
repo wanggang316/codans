@@ -63,11 +63,9 @@ struct SessionStoreTests {
     let loaded = try store.load()
     #expect(loaded == .empty)
 
-    let directory = ctx.fileURL.deletingLastPathComponent().path
+    let directory = StoreBackup.directory(for: ctx.fileURL).path
     let entries = try FileManager.default.contentsOfDirectory(atPath: directory)
-    let backups = entries.filter {
-      $0.hasPrefix("\(ctx.fileURL.lastPathComponent).corrupt-") && $0.hasSuffix(".bak")
-    }
+    let backups = entries.filter { $0.hasPrefix("sessions.corrupt-") && $0.hasSuffix(".json") }
     #expect(backups.count == 1)
     #expect(FileManager.default.fileExists(atPath: ctx.fileURL.path) == false)
   }
@@ -98,7 +96,7 @@ struct SessionStoreTests {
   }
 
   @Test
-  func forwardCompatibleVersionReturnsEmpty() throws {
+  func forwardCompatibleVersionIsBackedUpAndReturnsEmpty() throws {
     let ctx = TempContext()
     defer { ctx.cleanup() }
 
@@ -108,9 +106,11 @@ struct SessionStoreTests {
     let store = try SessionStore(fileURL: ctx.fileURL)
     let loaded = try store.load()
     #expect(loaded == .empty)
-    // The forward-compat file is intentionally left in place so a newer
-    // codans build can still own it.
-    #expect(FileManager.default.fileExists(atPath: ctx.fileURL.path))
+    // The forward-compat file is backed up before this build can save over
+    // it, so a newer codans build can still recover it.
+    #expect(!FileManager.default.fileExists(atPath: ctx.fileURL.path))
+    let backups = try FileManager.default.contentsOfDirectory(atPath: StoreBackup.directory(for: ctx.fileURL).path)
+    #expect(backups.contains { $0.hasPrefix("sessions.unsupported-v999-") })
   }
 
   // MARK: - Helpers
