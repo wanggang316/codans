@@ -43,7 +43,6 @@ public nonisolated enum LegacyConfigMigrator {
   public static let knownEntries: [String: Destination] = [
     "settings.json": .config,
     "shortcuts.json": .config,
-    "master-terminal": .config,
     "catalog.json": .state,
     "sessions.json": .state,
     "notifications.json": .state,

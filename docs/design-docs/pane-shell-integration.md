@@ -1,6 +1,6 @@
 # 设计文档：Pane Shell 集成（command-wrapper）
 
-**状态：** 已实现（本地 pane、Master Terminal、远端 pane 的 TERM 回退）
+**状态：** 已实现（本地 pane、远端 pane 的 TERM 回退）
 **作者：** Gump（与 Claude）
 **实现：** Ghostty fork 补丁（`apps/mac/ThirdParty/ghostty`，见其 `README.tc.md`）、[`SurfaceLaunch`](../../apps/mac/codans/Runtime/Ghostty/SurfaceLaunch.swift)、[`PaneSurface`](../../apps/mac/codans/Runtime/Ghostty/PaneSurface.swift)、[`ZmxAttachCommand.wrapperArgv`](../../apps/mac/codans/Runtime/Ghostty/ZmxAttachCommand.swift)、[`TerminalEngine.ensureSurface`](../../apps/mac/codans/Runtime/TerminalEngine.swift)、[`MasterTerminalController`](../../apps/mac/codans/App/Features/MasterTerminal/MasterTerminalController.swift)、[`RemoteSurfaceCommand.terminfoFallback`](../../apps/mac/codans/Runtime/Ghostty/RemoteSurfaceCommand.swift)、[`ForegroundJobReader.foregroundProcessGroupID`](../../apps/mac/codans/Runtime/ForegroundJobReader.swift)
 
@@ -27,7 +27,7 @@ codans 自己维护 Ghostty fork（`wanggang316/ghostty`，分支 `v1.3.1-tc`，
 
 **目标**
 
-- 本地交互式 pane（含 Master Terminal）由 libghostty 按用户真实的 shell 完成解析、集成和 `login(1)` 包装，zmx 作为最外层监管进程保留会话持久化。
+- 本地交互式 pane 由 libghostty 按用户真实的 shell 完成解析、集成和 `login(1)` 包装，zmx 作为最外层监管进程保留会话持久化。
 - 默认情况下，在任一受支持 shell（zsh、bash、fish、elvish、nushell）里 `ssh` 到缺少 `xterm-ghostty` terminfo 的主机，行编辑和全屏程序都正常。
 - 所有用户默认获得 OSC 7、OSC 133，codans 依赖这些序列的功能不取决于用户的 rc 文件。
 - 尊重用户 Ghostty 配置里的 `command`、`shell-integration`、`shell-integration-features`。
@@ -98,7 +98,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 **codans：**
 
 - `PaneSurface.init` 接收一个启动描述 `SurfaceLaunch`，两种形态：
-  - `interactive(wrapper:)`：本地 pane、Master Terminal。`command` 留空，传 wrapper，并**显式设置 `wait_after_command = true`**。embedded 模式只在设置了 `command` 时才自动打开它；codans 依赖"子进程退出后 surface 不自动关闭"，以 `paneInfoChanged(.childExited)` 作为结束信号。
+  - `interactive(wrapper:)`：本地 pane。`command` 留空，传 wrapper，并**显式设置 `wait_after_command = true`**。embedded 模式只在设置了 `command` 时才自动打开它；codans 依赖"子进程退出后 surface 不自动关闭"，以 `paneInfoChanged(.childExited)` 作为结束信号。
   - `command(_:)`：远端 pane。沿用现有命令字符串，并设置 `disable_shell_integration = true`，让这条本地 SSH 循环的启动方式不受全局集成配置影响。
 - `ZmxAttachCommand.wrapperArgv` 生成 wrapper argv，`--restore-from` 在其中；字符串形态的 `build` 只给远端 pane 用。
 - `ForegroundJobReader.foregroundProcessGroupID` 用 `sysctl(KERN_PROC_PID)` 读守护进程子进程的 `e_tpgid`。这个子进程是 `login(1)`，它保持 setuid root，`proc_pidinfo(PROC_PIDTBSDINFO)` 对它返回 EPERM；用 `proc_pidinfo` 读会让前台任务检测（tab 的忙碌指示、`pane send --wait`）始终判定为空闲。
@@ -133,7 +133,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 - **Ghostty fork**：负责 shell 解析、集成注入、`login(1)`、wrapper 拼接、选项默认值。不了解 zmx，也不了解 pane。
 - **zmx**：执行 `attach` 收到的 argv，负责会话持久化和快照恢复。不了解 shell 集成，本设计不改 zmx。
 - **`PaneSurface`**：把启动描述翻译成 `ghostty_surface_config_s`，是 app 内唯一构造 surface 配置的地方。
-- **`TerminalEngine` / `MasterTerminalController`**：决定每个 pane 用哪种启动形态：本地或 Master Terminal 用 `interactive`，远端用 `command`。
+- **`TerminalEngine`**：决定每个 pane 用哪种启动形态：本地用 `interactive`，远端用 `command`。
 - **`PaneEnvironment`**：只写 codans 自己的变量，见 [environment.md](environment.md)。集成相关变量（`ZDOTDIR`、`GHOSTTY_*`）由 libghostty 在启动时写入，`PaneEnvironment` 不碰它们。
 
 ## 技术决策
