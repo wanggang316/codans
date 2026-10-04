@@ -13,6 +13,14 @@ let packageSettings = PackageSettings(
     // Sentry must be a dynamic framework so its crash handler can be
     // installed before main() and its dSYM is uploaded for symbolication.
     "Sentry": .framework,
+  ],
+  targetSettings: [
+    // Xcode 27's `@State` is a macro, and a Debug (incremental) build of
+    // Sharing never emits the initializer of `Shared`'s private `@State`
+    // that another of its files references: the link fails with an
+    // undefined `__generation` symbol. Whole-module compilation emits it
+    // (pointfreeco/swift-sharing#240).
+    "Sharing": .settings(base: ["SWIFT_COMPILATION_MODE": "wholemodule"])
   ]
 )
 #endif

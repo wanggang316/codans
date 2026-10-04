@@ -54,7 +54,7 @@ For CLI usage, see the [Agent Skill](skills/codans-cli/SKILL.md).
 
 ### Development requirements
 
-- Xcode **26.0+** (pinned via `apps/mac/Tuist.swift`)
+- Xcode **26 or 27** (pinned via `apps/mac/Tuist.swift`)
 - [`mise`](https://mise.jdx.dev/) for tool version pinning (`tuist`, `zig`, `swiftlint`, `xcbeautify`, `xcsift`)
 
 ### Generate, build, and run
