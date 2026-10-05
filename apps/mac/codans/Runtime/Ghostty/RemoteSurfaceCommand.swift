@@ -91,6 +91,29 @@ nonisolated enum RemoteSurfaceCommand {
     "exec \"$SHELL\" -l -c " + SSHCommand.shellQuote(command)
   }
 
+  /// ssh forwards the pane's `TERM=xterm-ghostty`, which few hosts have a
+  /// terminfo entry for; without one the host's line editors fall back to a
+  /// dumb terminal (zsh stops erasing on Backspace) and `tput` / full-screen
+  /// programs fail. Only that one name is replaced — a TERM the user set on
+  /// purpose, or none at all, passes through — and only when the host lacks
+  /// its entry, before anything (the host-side `zmx` session included)
+  /// inherits it. A missing `infocmp` counts as a missing entry. The probe
+  /// also looks in `toolDirectories`, inside a subshell, so an `infocmp`
+  /// that only a login profile puts on PATH still resolves without that PATH
+  /// leaking into the session.
+  static let terminfoFallback =
+    #"if [ "${TERM:-}" = xterm-ghostty ] && ! ( PATH="$PATH:"#
+    + toolDirectories.joined(separator: ":")
+    + #""; infocmp "$TERM" >/dev/null 2>&1 ); then export TERM=xterm-256color; fi; "#
+
+  /// Package-manager bin directories a non-login remote shell's PATH misses.
+  static let toolDirectories = [
+    "/opt/homebrew/bin",  // macOS Apple Silicon Homebrew
+    "/usr/local/bin",  // macOS Intel Homebrew, common install prefix
+    "/opt/local/bin",  // MacPorts
+    "/home/linuxbrew/.linuxbrew/bin",  // Linuxbrew
+  ]
+
   /// Printed before the shell when the host is macOS and its default keychain
   /// is locked for this SSH session (SSH sessions never inherit the GUI
   /// console's unlock). Keychain-backed CLIs — Claude Code's OAuth token
@@ -127,11 +150,12 @@ nonisolated enum RemoteSurfaceCommand {
   ) -> String {
     let worktreeShell = worktreeShellCommand(paneUUID: paneUUID, remotePath: remotePath)
     guard hostPersistence else {
-      return loginShellRun(worktreeShell)
+      return terminfoFallback + loginShellRun(worktreeShell)
     }
     let sessionCommand = "\"$SHELL\" -l -c " + SSHCommand.shellQuote(worktreeShell)
     return
-      "if command -v zmx >/dev/null 2>&1; then "
+      terminfoFallback
+      + "if command -v zmx >/dev/null 2>&1; then "
       + "zmx attach \(hostSession) \(sessionCommand)\n"
       + "codans_rc=$?\n"
       + "[ \"$codans_rc\" -eq 0 ] && exit 0\n"
@@ -150,10 +174,11 @@ nonisolated enum RemoteSurfaceCommand {
   ) -> String {
     let worktreeShell = worktreeShellCommand(paneUUID: paneUUID, remotePath: remotePath)
     guard hostPersistence else {
-      return reconnectShellNotice + loginShellRun(worktreeShell)
+      return terminfoFallback + reconnectShellNotice + loginShellRun(worktreeShell)
     }
     return
-      "if command -v zmx >/dev/null 2>&1; then "
+      terminfoFallback
+      + "if command -v zmx >/dev/null 2>&1; then "
       + "if zmx list --short 2>/dev/null | grep -q '\(hostSession)$'; then "
       + "exec zmx attach \(hostSession)\n"
       + "fi\n"

@@ -27,12 +27,23 @@ nonisolated struct ForegroundJobReader: Sendable {
     return ForegroundJob(processGroupID: processGroupID, processes: processes)
   }
 
+  /// The foreground process group of `childPID`'s controlling terminal.
+  /// Read through `sysctl(KERN_PROC_PID)`, not `proc_pidinfo`: on macOS an
+  /// interactive pane's daemon child is login(1), which stays setuid root,
+  /// and `proc_pidinfo` refuses a root-owned process with EPERM while the
+  /// sysctl still reports its `e_tpgid`.
   static func foregroundProcessGroupID(childPID: Int32) -> Int32? {
-    guard childPID > 0,
-      let info = processBSDInfo(pid: childPID)
-    else { return nil }
-
-    let processGroupID = Int32(info.e_tpgid)
+    guard childPID > 0 else { return nil }
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, childPID]
+    let rc = mib.withUnsafeMutableBufferPointer { buffer in
+      sysctl(buffer.baseAddress, u_int(buffer.count), &info, &size, nil, 0)
+    }
+    // A vanished pid reports success with an empty buffer; the pid echo
+    // catches it.
+    guard rc == 0, size > 0, info.kp_proc.p_pid == childPID else { return nil }
+    let processGroupID = info.kp_eproc.e_tpgid
     guard processGroupID > 0 else { return nil }
     return processGroupID
   }

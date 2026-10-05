@@ -114,14 +114,16 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
       defer { self?.surfaceBringupInFlight = false }
       guard let self else { return }
       do {
-        // Exec backend: libghostty forks `zmx attach <session>` and owns the
-        // local PTY + sizing; the shell lives in the daemon. Same path as a
-        // regular pane (see TerminalEngine.ensureSurface).
+        // Exec backend: libghostty resolves and integrates the user's shell
+        // under `zmx attach <session>` and owns the local PTY + sizing; the
+        // shell lives in the daemon. Same path as a regular pane (see
+        // TerminalEngine.ensureSurface).
         let session = ZmxAttachCommand.session(for: paneID)
-        let command = ZmxAttachCommand.build(
-          zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
-          session: session,
-          userCommand: nil
+        let launch = SurfaceLaunch.interactive(
+          wrapper: ZmxAttachCommand.wrapperArgv(
+            zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+            session: session
+          )
         )
         let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
         try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
@@ -129,7 +131,7 @@ final class MasterTerminalController: NSObject, NSWindowDelegate {
           runtime: self.runtime,
           paneID: paneID,
           session: session,
-          command: command,
+          launch: launch,
           workingDirectory: MasterTerminalBootstrap.userDirectory.path,
           // Same two stages as a worktree pane, minus a project to take
           // overrides from — so this shell also sees the socket, the

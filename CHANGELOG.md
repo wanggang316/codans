@@ -12,11 +12,26 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **Pane shells load Ghostty's shell integration.** "Command finished"
+  notifications and remembering a pane's directory across restarts work
+  without any setup in your shell config, `sudo` keeps the terminal type, and
+  the cursor turns into a bar at the prompt. A `command` set in your Ghostty
+  config now applies to codans panes too. Tune it with
+  `shell-integration-features` in the Ghostty config (`title` and `path` are
+  off by default). Applies to panes opened after the update.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **Backspace works again after `ssh`.** Hosts without Ghostty's terminfo
+  fell back to a dumb terminal, so Backspace and the arrow keys redrew wrong
+  and full-screen programs failed. Panes now load Ghostty's shell
+  integration (zsh, bash, fish, elvish, nushell), whose `ssh` connects as
+  `xterm-256color`; Server-project panes switch to it on hosts that lack the
+  entry. Applies to panes opened after the update.
 
 ### Security
 
