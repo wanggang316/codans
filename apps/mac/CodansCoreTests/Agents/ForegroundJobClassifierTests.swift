@@ -54,6 +54,84 @@ struct ForegroundJobClassifierTests {
     #expect(ForegroundJobClassifier.indicatesRunningCommand(job))
   }
 
+  // MARK: - indicatesBusyCommand
+
+  @Test
+  func interactiveSSHLoginIsRunningButNotBusy() {
+    for line in [
+      "ssh macmini", "/usr/bin/ssh -p 2222 user@host", "ssh -p2222 host", "ssh -i key -J jump host",
+      "ssh host -v", "ssh -t host htop", "ssh -tt host tmux attach", "ssh -N -L 8080:localhost:80 host",
+    ] {
+      let job = Self.job("ssh", commandLine: line)
+      #expect(ForegroundJobClassifier.indicatesRunningCommand(job), "\(line)")
+      #expect(!ForegroundJobClassifier.indicatesBusyCommand(job), "\(line)")
+    }
+  }
+
+  @Test
+  func sshOptionValuesWithSpacesUseTheRealArgv() {
+    // What the shell-integration `ssh` wrapper actually execs.
+    let argv = [
+      "ssh", "-o", "SetEnv COLORTERM=truecolor", "-o", "SendEnv TERM_PROGRAM TERM_PROGRAM_VERSION",
+      "-o", "BatchMode=yes", "nanops-do",
+    ]
+    let process = ForegroundProcess(
+      pid: 600, parentPID: 1, processGroupID: 600, argv0: "ssh",
+      commandLine: argv.joined(separator: " "), arguments: argv)
+    #expect(!ForegroundJobClassifier.indicatesBusyCommand(ForegroundJob(processGroupID: 600, processes: [process])))
+
+    var withCommand = process
+    withCommand.arguments = argv + ["uptime"]
+    #expect(ForegroundJobClassifier.indicatesBusyCommand(ForegroundJob(processGroupID: 600, processes: [withCommand])))
+  }
+
+  @Test
+  func sshRunningARemoteCommandIsBusy() {
+    for line in [
+      "ssh host make build", "ssh -p 22 host ls -la", "ssh host -- uptime", "ssh -o BatchMode=yes host true",
+    ] {
+      #expect(ForegroundJobClassifier.indicatesBusyCommand(Self.job("ssh", commandLine: line)), "\(line)")
+    }
+  }
+
+  @Test
+  func moshAndEtSessionsAreNotBusy() {
+    #expect(!ForegroundJobClassifier.indicatesBusyCommand(Self.job("mosh-client", commandLine: "mosh-client -# host")))
+    #expect(!ForegroundJobClassifier.indicatesBusyCommand(Self.job("et", commandLine: "et host")))
+  }
+
+  @Test
+  func sshHelpersInItsGroupStillCountAsTheSession() {
+    // ProxyCommand / ProxyJump helpers run in ssh's process group as its children.
+    let job = ForegroundJob(
+      processGroupID: 400,
+      processes: [
+        ForegroundProcess(pid: 400, parentPID: 1, processGroupID: 400, argv0: "ssh", commandLine: "ssh prod"),
+        ForegroundProcess(
+          pid: 401, parentPID: 400, processGroupID: 400, argv0: "ssh", commandLine: "ssh -W prod:22 bastion"),
+        ForegroundProcess(pid: 402, parentPID: 400, processGroupID: 400, argv0: "nc", commandLine: "nc prod 22"),
+      ])
+    #expect(!ForegroundJobClassifier.indicatesBusyCommand(job))
+  }
+
+  @Test
+  func sshInsideAPipelineIsBusy() {
+    let job = ForegroundJob(
+      processGroupID: 500,
+      processes: [
+        ForegroundProcess(pid: 500, parentPID: 1, processGroupID: 500, argv0: "ssh", commandLine: "ssh host"),
+        ForegroundProcess(pid: 501, parentPID: 1, processGroupID: 500, argv0: "tee", commandLine: "tee log"),
+      ])
+    #expect(ForegroundJobClassifier.indicatesBusyCommand(job))
+  }
+
+  @Test
+  func plainCommandsStayBusy() {
+    #expect(ForegroundJobClassifier.indicatesBusyCommand(Self.job("make")))
+    #expect(!ForegroundJobClassifier.indicatesBusyCommand(Self.job("zsh")))
+    #expect(!ForegroundJobClassifier.indicatesBusyCommand(Self.job("claude")))
+  }
+
   // MARK: - indicatesGitCommand
 
   @Test

@@ -85,6 +85,7 @@ Header 由 `WorktreeDetailView.worktreeToolbarContent` 组装到窗口工具栏�
 - **`Tab.icon` / `Tab.isDirty` 是持久字段。** 它们与 `HierarchyManager` 上记录前台运行状态的非持久集合分属不同层；运行状态不能以持久字段替代。
 
 - **per-pane running/dirty 是 `HierarchyManager` 上的 runtime-only `Set<PaneID>`，永不持久化，各 teardown 路径清它。** chip 的"忙"指示源于该 wall-clock-live 的运行态集合；持久化它会泄漏陈旧的 spinner（重启后仍转）。每条拆除路径——`closePane` / `closeTab` / `tearDownWorktreeSurfaces`——都必须清理对应条目。同类的 `lastFocusedPaneByTab: [TabID: PaneID]`（`selectTab` 时据此恢复焦点，落到 split 树最左叶兜底）也是 runtime-only。
+- **"忙"只表示有一条会结束的命令在跑。** 两个来源取并集：OSC 9;4 进度上报，和前台进程组里的非 shell、非 agent 命令（`ForegroundJobClassifier.indicatesBusyCommand`）。交互式远程会话被排除——`ssh host`（无远程命令或带 `-t`）、`mosh`、`et` 会一直占着前台直到登出，转圈不传达任何信息；它们仍算作 worktree 进程列表里的运行中命令。判断 ssh 是否带远程命令要用真实 argv（`ForegroundProcess.arguments`），因为 shell 集成的 `ssh` 包装会传带空格的 `-o` 值。
 
 - **SwiftUI `@Observable` 不穿透 TCA client 闭包 → chip dirty 须经 `@Environment` 直读 `HierarchyManager`；休眠读用安全默认。** `@Observable` 的追踪不会穿过一个 TCA client 闭包，因此 chip 的 dirty 态必须直接经 `@Environment(HierarchyManager.self)` 读，而非经 client 返回值。配套地，`HierarchyClient.liveValue` 对休眠态的 `tabIsDirty` / `lastFocusedPane` 读取返回**安全默认 false/nil**（而非 `fatalError`），使关停期间渲染的 chip 保持惰性、不崩。
 

@@ -955,7 +955,7 @@ final class TerminalEngine {
         if AgentKindPatterns.classify(foregroundJob: job) != nil {
           return .milliseconds(300)
         }
-        if ForegroundJobClassifier.indicatesRunningCommand(job) {
+        if ForegroundJobClassifier.indicatesBusyCommand(job) {
           sawRunningCommand = true
         }
       }

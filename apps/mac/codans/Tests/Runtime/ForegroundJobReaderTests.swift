@@ -71,6 +71,8 @@ struct ForegroundJobReaderTests {
     )
     let process = try JSONDecoder().decode(ForegroundProcess.self, from: data)
     #expect(process.startedAt == nil)
+    #expect(process.arguments == nil)
+    #expect(process.argumentsOrTokens == ["node", "server.js"])
     #expect(process.pid == 12)
   }
 

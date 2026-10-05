@@ -625,9 +625,11 @@ struct RootFeature {
                 // A non-shell, non-agent command lights the tab-chip /
                 // sidebar spinner even when the program never emits OSC 9;4.
                 // Agents are excluded here; their activity is render-derived.
+                // So are interactive remote sessions (`ssh host`), which hold
+                // the foreground until logout.
                 await send(
                   .paneCommandBusyChanged(
-                    paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
+                    paneID, ForegroundJobClassifier.indicatesBusyCommand(job)))
                 // Same source, narrower predicate: track `git` / `gh` commands
                 // so a finishing `gh pr create` / `git push` triggers an
                 // immediate PR + diff refresh.

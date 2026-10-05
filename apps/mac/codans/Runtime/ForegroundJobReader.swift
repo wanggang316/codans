@@ -90,7 +90,8 @@ nonisolated struct ForegroundJobReader: Sendable {
       commandLine: commandLine,
       startedAt: Date(
         timeIntervalSince1970:
-          TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
+          TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000),
+      arguments: arguments
     )
   }
 
