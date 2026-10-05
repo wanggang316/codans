@@ -221,13 +221,13 @@ final class TerminalEngine {
     // SSH reconnect loop that lands in the remote worktree. The remote `cd`
     // owns the directory, so libghostty's local `working_directory` (which it
     // chdirs the ssh process into) must be a real *local* path — the remote
-    // worktree path is meaningless locally. Local panes keep the unchanged
-    // `zmx attach <session>` command anchored at the pane's own directory.
+    // worktree path is meaningless locally. Local panes run the user's shell
+    // under `zmx attach <session>`, anchored at the pane's own directory.
     let remoteHost = remoteHost(forPane: pane.id)
-    let command: String
+    let launch: SurfaceLaunch
     let surfaceWorkingDirectory: String
     if let remoteHost {
-      command = RemoteSurfaceCommand.build(
+      let command = RemoteSurfaceCommand.build(
         host: remoteHost,
         paneID: pane.id,
         remotePath: pane.workingDirectory,
@@ -236,13 +236,17 @@ final class TerminalEngine {
         localZmxPath: try? PaneDaemonBringup.zmxBinaryURL().path,
         hostPersistence: true
       )
+      launch = .command(command)
       surfaceWorkingDirectory = NSHomeDirectory()
     } else {
-      command = ZmxAttachCommand.build(
-        zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
-        session: session,
-        userCommand: nil,
-        restoreFrom: restorePath
+      // libghostty resolves and integrates the user's shell and runs it
+      // under this wrapper (docs/design-docs/pane-shell-integration.md).
+      launch = .interactive(
+        wrapper: ZmxAttachCommand.wrapperArgv(
+          zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+          session: session,
+          restoreFrom: restorePath
+        )
       )
       surfaceWorkingDirectory = pane.workingDirectory
     }
@@ -264,13 +268,13 @@ final class TerminalEngine {
     do {
       surface = try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session,
-        command: command, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
+        launch: launch, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
       )
     } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
       runtime.tick()
       surface = try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session,
-        command: command, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
+        launch: launch, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
       )
     }
     runtime.register(pane: surface)

@@ -3,10 +3,10 @@ import CodansCore
 
 @testable import Codans
 
-/// `ZmxAttachCommand` composes the exec-backend surface command. These guard
-/// the wire shape libghostty hands to `/bin/sh -c`: a stable session name (so
-/// re-attach reuses the same daemon across launches) and correct single-quote
-/// escaping (so paths / scripts with spaces or quotes survive the wrapping).
+/// `ZmxAttachCommand` composes how a surface launches under zmx. These guard
+/// a stable session name (so re-attach reuses the same daemon across
+/// launches), the wrapper argv libghostty prepends to the resolved shell, and
+/// correct single-quote escaping of the `/bin/sh -c` command string.
 struct ZmxAttachCommandTests {
   @Test
   func sessionIsThePaneUUID() {
@@ -44,37 +44,22 @@ struct ZmxAttachCommandTests {
   }
 
   @Test
-  func nilRestoreFromIsByteIdenticalToBareAttach() {
-    let cmd = ZmxAttachCommand.build(
-      zmxPath: "/Apps/zmx", session: "abc", userCommand: nil, restoreFrom: nil)
-    #expect(cmd == "'/Apps/zmx' attach 'abc'")
+  func wrapperArgvIsSplitAttachWithoutQuoting() {
+    let argv = ZmxAttachCommand.wrapperArgv(zmxPath: "/Users/a b/zmx", session: "abc")
+    #expect(argv == ["/Users/a b/zmx", "attach", "abc"])
   }
 
   @Test
-  func blankRestoreFromIsIgnored() {
-    let cmd = ZmxAttachCommand.build(
-      zmxPath: "/Apps/zmx", session: "abc", userCommand: nil, restoreFrom: "   ")
-    #expect(cmd == "'/Apps/zmx' attach 'abc'")
+  func wrapperArgvCarriesRestoreFromAfterSession() {
+    let argv = ZmxAttachCommand.wrapperArgv(
+      zmxPath: "/Apps/zmx", session: "abc", restoreFrom: "/a b/it's.snap")
+    #expect(argv == ["/Apps/zmx", "attach", "abc", "--restore-from", "/a b/it's.snap"])
   }
 
   @Test
-  func restoreFromEmitsFlagAfterSession() {
-    let cmd = ZmxAttachCommand.build(
-      zmxPath: "/Apps/zmx", session: "abc", userCommand: nil, restoreFrom: "/p")
-    #expect(cmd == "'/Apps/zmx' attach 'abc' --restore-from '/p'")
-  }
-
-  @Test
-  func restoreFromPrecedesUserCommandWrapper() {
-    let cmd = ZmxAttachCommand.build(
-      zmxPath: "/Apps/zmx", session: "abc", userCommand: "cmd", restoreFrom: "/p")
-    #expect(cmd == "'/Apps/zmx' attach 'abc' --restore-from '/p' /bin/sh -c 'cmd'")
-  }
-
-  @Test
-  func restoreFromPathWithSpaceAndQuoteSurvivesQuoting() {
-    let cmd = ZmxAttachCommand.build(
-      zmxPath: "/Apps/zmx", session: "abc", userCommand: "cmd", restoreFrom: "/a b/it's.snap")
-    #expect(cmd == #"'/Apps/zmx' attach 'abc' --restore-from '/a b/it'\''s.snap' /bin/sh -c 'cmd'"#)
+  func wrapperArgvIgnoresBlankRestoreFrom() {
+    let bare = ["/Apps/zmx", "attach", "abc"]
+    #expect(ZmxAttachCommand.wrapperArgv(zmxPath: "/Apps/zmx", session: "abc", restoreFrom: "  ") == bare)
+    #expect(ZmxAttachCommand.wrapperArgv(zmxPath: "/Apps/zmx", session: "abc", restoreFrom: nil) == bare)
   }
 }

@@ -1,20 +1,22 @@
 import Foundation
 import CodansCore
 
-/// Builds the shell command string handed to libghostty's exec backend as
-/// `ghostty_surface_config_s.command`. The pane's shell runs *inside* a
-/// `zmx attach <session>` client so the underlying process survives app
-/// quit: libghostty owns and sizes a normal local PTY (its exec backend
-/// only forks the child once a real post-layout size is known), and the
-/// `zmx attach` client proxies that PTY's bytes to/from the per-Pane
-/// daemon. On next launch the same session name re-attaches to the live
-/// daemon (zmx `attach` upserts: it reuses a running session or creates a
-/// fresh one).
+/// Builds how a pane's surface launches under zmx, so the underlying
+/// process survives app quit: libghostty owns and sizes a normal local PTY
+/// (its exec backend only forks the child once a real post-layout size is
+/// known), and the `zmx attach` client proxies that PTY's bytes to/from the
+/// per-Pane daemon. On next launch the same session name re-attaches to the
+/// live daemon (zmx `attach` upserts: it reuses a running session or creates
+/// a fresh one).
 ///
-/// libghostty wraps `config.command` as `/bin/sh -c "<value>"` on macOS,
-/// so the value is a single shell string. Any user command runs *under*
-/// the attached session via a trailing `/bin/sh -c <command>` so it shares
-/// the same resume semantics as the default shell.
+/// Two shapes, see docs/design-docs/pane-shell-integration.md:
+///
+/// - `wrapperArgv` for an interactive pane: libghostty resolves the user's
+///   shell, injects its shell integration and applies the macOS login(1)
+///   wrapping, then prepends this argv, so `zmx attach` runs that resolved
+///   command as the new session's program.
+/// - `build` for a pane that runs a fixed command (a Server project's SSH
+///   loop): one shell string libghostty wraps as `/bin/sh -c "<value>"`.
 nonisolated enum ZmxAttachCommand {
   /// The zmx session name for a Pane. zmx names its control socket
   /// `<ZMX_DIR>/<ZMX_SESSION_PREFIX><session>`; codans sets no prefix
@@ -24,26 +26,24 @@ nonisolated enum ZmxAttachCommand {
     paneID.raw.uuidString
   }
 
-  /// Compose `<zmx> attach <session> [--restore-from <path>] [/bin/sh -c <userCommand>]`.
-  /// `userCommand` is the Pane's `initialCommand` (e.g. a worktree setup
-  /// script); when nil/empty the attached session runs the login shell.
-  /// `restoreFrom`, when a non-empty path, instructs zmx to seed a freshly
-  /// created session from that snapshot; the flag goes right after the
-  /// session and before any `/bin/sh -c <userCommand>` so it binds to the
-  /// `attach` itself rather than the wrapped user command. Defaults to nil so
-  /// the existing call sites compile unchanged until a later feature wires it.
-  static func build(
-    zmxPath: String,
-    session: String,
-    userCommand: String?,
-    restoreFrom: String? = nil
-  ) -> String {
-    var attach = "\(shellQuote(zmxPath)) attach \(shellQuote(session))"
-    if let snapshot = restoreFrom?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !snapshot.isEmpty
-    {
-      attach += " --restore-from \(shellQuote(snapshot))"
+  /// `[<zmx>, attach, <session>, (--restore-from <path>)]`, prepended by
+  /// libghostty to the resolved shell command. Already-split arguments, so
+  /// no quoting. `restoreFrom`, when a non-empty path, makes zmx seed a
+  /// freshly created session from that snapshot; zmx consumes the flag
+  /// wherever it appears, so it never reaches the shell command after it.
+  static func wrapperArgv(zmxPath: String, session: String, restoreFrom: String? = nil) -> [String] {
+    var argv = [zmxPath, "attach", session]
+    if let snapshot = restoreFrom?.trimmingCharacters(in: .whitespacesAndNewlines), !snapshot.isEmpty {
+      argv += ["--restore-from", snapshot]
     }
+    return argv
+  }
+
+  /// Compose `<zmx> attach <session> [/bin/sh -c <userCommand>]`. When
+  /// `userCommand` is nil/empty the attached session runs zmx's own login
+  /// shell.
+  static func build(zmxPath: String, session: String, userCommand: String?) -> String {
+    let attach = "\(shellQuote(zmxPath)) attach \(shellQuote(session))"
     guard let trimmed = userCommand?.trimmingCharacters(in: .whitespacesAndNewlines),
       !trimmed.isEmpty
     else {
