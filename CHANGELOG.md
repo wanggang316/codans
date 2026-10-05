@@ -12,31 +12,31 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Pane shells load Ghostty's shell integration.** "Command finished"
-  notifications and remembering a pane's directory across restarts work
-  without any setup in your shell config, `sudo` keeps the terminal type, and
-  the cursor turns into a bar at the prompt. A `command` set in your Ghostty
-  config now applies to codans panes too. Tune it with
-  `shell-integration-features` in the Ghostty config (`title` and `path` are
-  off by default). Applies to panes opened after the update.
-
 ### Deprecated
 
 ### Removed
 
 ### Fixed
 
-- **Backspace works again after `ssh`.** Hosts without Ghostty's terminfo
-  fell back to a dumb terminal, so Backspace and the arrow keys redrew wrong
-  and full-screen programs failed. Panes now load Ghostty's shell
-  integration (zsh, bash, fish, elvish, nushell), whose `ssh` connects as
-  `xterm-256color`; Server-project panes switch to it on hosts that lack the
-  entry. Applies to panes opened after the update.
-- **No spinner for an open `ssh` session.** An interactive `ssh host` (or
-  `ssh -t`, `mosh`, `et`) kept the tab and worktree spinning until logout;
-  only `ssh host <command>` counts as busy now.
-
 ### Security
+
+## [0.7.8] - 2026-10-05
+
+### Changed
+
+- **Pane shells load Ghostty's shell integration.** "Command finished"
+  notifications and remembering a pane's directory across restarts work
+  without any setup in your shell config, and `sudo` keeps the terminal
+  type. Applies to panes opened after the update.
+
+### Fixed
+
+- **Backspace and arrow keys work again after `ssh`.** Hosts without
+  Ghostty's terminfo fell back to a dumb terminal and redrew wrong; `ssh`
+  now connects as `xterm-256color`. Applies to panes opened after the update.
+- **No spinner for an open `ssh` session.** An interactive `ssh host` (or
+  `mosh`, `et`) kept the tab and worktree spinning until logout; only
+  `ssh host <command>` counts as busy now.
 
 ## [0.7.7] - 2026-09-30
 
