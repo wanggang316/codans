@@ -32,6 +32,9 @@ and the project does not yet follow semantic versioning — every release until
   integration (zsh, bash, fish, elvish, nushell), whose `ssh` connects as
   `xterm-256color`; Server-project panes switch to it on hosts that lack the
   entry. Applies to panes opened after the update.
+- **No spinner for an open `ssh` session.** An interactive `ssh host` (or
+  `ssh -t`, `mosh`, `et`) kept the tab and worktree spinning until logout;
+  only `ssh host <command>` counts as busy now.
 
 ### Security
 

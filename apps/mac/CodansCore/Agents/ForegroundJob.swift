@@ -7,6 +7,11 @@ public nonisolated struct ForegroundProcess: Sendable, Equatable, Codable {
   public var argv0: String
   public var startedAt: Date?
   public var commandLine: String
+  /// The kernel's argv, when it was readable. `commandLine` is this joined
+  /// with spaces, which loses the boundaries of arguments that contain
+  /// spaces (`ssh -o "SetEnv A=b"`); nil for samples without it (a remote
+  /// probe reports only the joined line).
+  public var arguments: [String]?
 
   public init(
     pid: Int32,
@@ -14,9 +19,11 @@ public nonisolated struct ForegroundProcess: Sendable, Equatable, Codable {
     processGroupID: Int32,
     argv0: String,
     commandLine: String,
-    startedAt: Date? = nil
+    startedAt: Date? = nil,
+    arguments: [String]? = nil
   ) {
     self.startedAt = startedAt
+    self.arguments = arguments
     self.pid = pid
     self.parentPID = parentPID
     self.processGroupID = processGroupID
@@ -30,6 +37,11 @@ public nonisolated struct ForegroundProcess: Sendable, Equatable, Codable {
 
   public var commandTokens: [String] {
     commandLine.split(whereSeparator: \.isWhitespace).map(String.init)
+  }
+
+  /// argv when known, else the whitespace-split command line.
+  public var argumentsOrTokens: [String] {
+    arguments ?? commandTokens
   }
 }
 
