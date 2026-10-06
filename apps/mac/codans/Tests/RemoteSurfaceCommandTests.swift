@@ -198,6 +198,101 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
+  func connectScriptSpawnsHostSessionBeforeAttaching() throws {
+    let script = RemoteSurfaceCommand.connectScript(
+      hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+      hostPersistence: true
+    )
+    let spawn = try #require(script.range(of: "launchctl submit"))
+    let attach = try #require(script.range(of: "zmx attach codans-x"))
+    #expect(spawn.lowerBound < attach.lowerBound)
+  }
+
+  @Test
+  func guiSessionSpawnServesTheSessionThroughLaunchdWhenKeychainIsLocked() throws {
+    let run = try Self.runGUISessionSpawn(uname: "Darwin", keychainLocked: true)
+    #expect(run.log.contains("submit -l com.codans.zmx-serve.codans-x --"))
+    #expect(run.log.contains("serve codans-x --command /bin/sh -l -c cd -- /srv/app"))
+    #expect(run.log.contains("TMPDIR=/tmp/codans-test-tmp"))
+    #expect(run.log.hasSuffix("remove com.codans.zmx-serve.codans-x\n"))
+    #expect(run.sessions == "codans-x\n")
+  }
+
+  @Test
+  func guiSessionSpawnIsSkippedWhenLaunchdIsNotNeeded() throws {
+    // Unlocked keychain, non-macOS host, or a session that already exists:
+    // the attach that follows handles it, launchd is never involved.
+    for (uname, locked, existing) in [
+      ("Darwin", false, false), ("Linux", true, false), ("Darwin", true, true),
+    ] {
+      let run = try Self.runGUISessionSpawn(uname: uname, keychainLocked: locked, sessionExists: existing)
+      #expect(!run.log.contains("submit"), "uname=\(uname) locked=\(locked) existing=\(existing)")
+    }
+  }
+
+  @Test
+  func guiSessionSpawnFallsThroughWhenSubmitFails() throws {
+    let run = try Self.runGUISessionSpawn(uname: "Darwin", keychainLocked: true, submitFails: true)
+    #expect(run.log.contains("submit"))
+    #expect(run.sessions.isEmpty)
+    #expect(run.exitStatus == 0)
+  }
+
+  /// Run `guiSessionSpawn` under `/bin/sh` with fake `uname` / `security` /
+  /// `launchctl` / `zmx`. The fake `launchctl submit` runs its command at
+  /// once, as launchd would in the GUI session; the fake `zmx serve` records
+  /// the session so `zmx list --short` reports it.
+  private static func runGUISessionSpawn(
+    uname: String, keychainLocked: Bool, sessionExists: Bool = false, submitFails: Bool = false
+  ) throws -> (log: String, sessions: String, exitStatus: Int32) {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-gui-spawn-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let log = dir.appendingPathComponent("log")
+    let sessions = dir.appendingPathComponent("sessions")
+    try (sessionExists ? "codans-x\n" : "").write(to: sessions, atomically: true, encoding: .utf8)
+    let tools = [
+      "uname": "echo \(uname)",
+      "security": "exit \(keychainLocked ? 1 : 0)",
+      "launchctl": """
+      echo "$*" >> '\(log.path)'
+      [ "$1" = submit ] || exit 0
+      \(submitFails ? "exit 1" : "")
+      shift 4; "$@"
+      """,
+      "zmx": """
+      case "$1" in
+      list) cat '\(sessions.path)' ;;
+      serve) echo "$2" >> '\(sessions.path)' ;;
+      esac
+      """,
+    ]
+    for (name, body) in tools {
+      let tool = dir.appendingPathComponent(name)
+      try "#!/bin/sh\n\(body)\n".write(to: tool, atomically: true, encoding: .utf8)
+      try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+    }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+    proc.arguments = [
+      "-c",
+      RemoteSurfaceCommand.guiSessionSpawn(
+        hostSession: "codans-x", sessionCommand: "\"$SHELL\" -l -c 'cd -- /srv/app'"),
+    ]
+    proc.environment = [
+      "PATH": dir.path + ":/usr/bin:/bin", "SHELL": "/bin/sh", "TMPDIR": "/tmp/codans-test-tmp",
+    ]
+    try proc.run()
+    proc.waitUntilExit()
+    return (
+      (try? String(contentsOf: log, encoding: .utf8)) ?? "",
+      try String(contentsOf: sessions, encoding: .utf8),
+      proc.terminationStatus
+    )
+  }
+
+  @Test
   func everyRemoteScriptRunsTheTerminfoFallbackFirst() {
     for persistence in [true, false] {
       for script in [

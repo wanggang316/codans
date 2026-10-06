@@ -119,11 +119,13 @@ nonisolated enum RemoteSurfaceCommand {
   /// console's unlock). Keychain-backed CLIs — Claude Code's OAuth token
   /// lives there — would otherwise report "Not logged in" with no context.
   /// The check is a single local `security` call on the host; non-Darwin
-  /// hosts skip it entirely. No apostrophes in the text — it crosses several
-  /// single-quoting layers.
+  /// hosts skip it entirely. A shell that `guiSessionSpawn` started in the
+  /// GUI session sees the unlocked keychain, so the notice only shows when
+  /// that path was not available. No apostrophes in the text — it crosses
+  /// several single-quoting layers.
   static let lockedKeychainNotice =
     #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1; then "#
-    + #"printf '\033[2m── Keychain is locked in this SSH session; keychain-backed CLIs (e.g. claude) may ask to log in. Fix: security unlock-keychain ──\033[0m\r\n'; fi; "#
+    + #"printf '\033[2m── Keychain is locked in this SSH session; keychain-backed CLIs (e.g. claude) may ask to log in. Fix: security unlock-keychain, or install zmx on the host ──\033[0m\r\n'; fi; "#
 
   /// The default shell for the worktree: cd into the remote path (best-effort),
   /// record this pane's controlling tty for the host-side foreground probe
@@ -156,6 +158,7 @@ nonisolated enum RemoteSurfaceCommand {
     return
       terminfoFallback
       + "if command -v zmx >/dev/null 2>&1; then "
+      + guiSessionSpawn(hostSession: hostSession, sessionCommand: sessionCommand)
       + "zmx attach \(hostSession) \(sessionCommand)\n"
       + "codans_rc=$?\n"
       + "[ \"$codans_rc\" -eq 0 ] && exit 0\n"
@@ -163,6 +166,38 @@ nonisolated enum RemoteSurfaceCommand {
       + "\n"
       + "fi\n"
       + loginShellRun(worktreeShell)
+  }
+
+  /// On a macOS host whose keychain is locked for this SSH session, start the
+  /// host-side `zmx` daemon in the user's GUI login session instead of under
+  /// sshd. A process inherits its login session from its parent, and only the
+  /// GUI session sees the unlocked login keychain, so a daemon spawned by the
+  /// `zmx attach` below would give the shell no keychain access: git's
+  /// `osxkeychain` helper fails with -25308 and `gh` / `claude` lose their
+  /// tokens. `launchctl submit` from an SSH session runs the job in the GUI
+  /// session when the user is logged in at the console; `zmx serve` forks the
+  /// daemon and exits, so the job is removed once the session is listed. The
+  /// `attach` that follows then joins that daemon. With no console login, a
+  /// failed submit, or a timeout, the `attach` creates the daemon as before.
+  /// `TMPDIR` / `XDG_RUNTIME_DIR` / `ZMX_DIR` are forwarded only when set,
+  /// because they select the socket directory both sides must agree on.
+  static func guiSessionSpawn(hostSession: String, sessionCommand: String) -> String {
+    let listed = "zmx list --short 2>/dev/null | grep -qx \(hostSession)"
+    let label = "com.codans.zmx-serve.\(hostSession)"
+    let forwardedEnvironment = ["TMPDIR", "XDG_RUNTIME_DIR", "ZMX_DIR", "LANG", "TERM"]
+      .map { "${\($0)+\"\($0)=$\($0)\"}" }
+      .joined(separator: " ")
+    return
+      #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1 && ! "#
+      + listed + "; then\n"
+      + "launchctl remove \(label) 2>/dev/null\n"
+      + "if launchctl submit -l \(label) -- /usr/bin/env \(forwardedEnvironment) PATH=\"$PATH\" "
+      + "\"$(command -v zmx)\" serve \(hostSession) --command \(sessionCommand) 2>/dev/null; then\n"
+      + "codans_n=0\n"
+      + "while [ \"$codans_n\" -lt 30 ] && ! \(listed); do sleep 0.1; codans_n=$((codans_n + 1)); done\n"
+      + "launchctl remove \(label) 2>/dev/null\n"
+      + "fi\n"
+      + "fi\n"
   }
 
   /// Reconnect script, used by the loop after a dropped connection: reattach the
