@@ -3,12 +3,13 @@ import Testing
 import CodansCore
 
 /// `$CODANS_CONFIG_DIR` / `$CODANS_STATE_DIR` isolation seams and the
-/// `~/.codans/{config,state}[-dev]` defaults (`AppDirectories`).
+/// `~/.codans[-dev]/{config,state}` defaults (`AppDirectories`).
 /// Relocating the roots is what lets an end-to-end smoke run drive a real
 /// Debug app + CLI without mutating the user's real `~/.codans/`.
 struct AppDirectoriesConfigOverrideTests {
   private static let home = URL(fileURLWithPath: "/tmp/fake-home")
-  private static let devSuffix = BuildChannel.current == .development ? "-dev" : ""
+  /// `~/.codans` for Release test runs, `~/.codans-dev` for Debug.
+  private static let root = "/tmp/fake-home/.\(AppDirectories.name)"
 
   @Test
   func overrideRelocatesConfigRootEntirely() {
@@ -17,21 +18,21 @@ struct AppDirectoriesConfigOverrideTests {
   }
 
   @Test
-  func nilOverrideFallsBackToChannelScopedConfigDefault() {
+  func nilOverrideFallsBackToTheChannelRoot() {
     let url = AppDirectories.configDirectory(home: Self.home, override: nil)
-    #expect(url.path == "/tmp/fake-home/.codans/config\(Self.devSuffix)")
+    #expect(url.path == "\(Self.root)/config")
   }
 
   @Test
-  func emptyOverrideFallsBackToChannelScopedConfigDefault() {
+  func emptyOverrideFallsBackToTheChannelRoot() {
     let url = AppDirectories.configDirectory(home: Self.home, override: "")
-    #expect(url.path == "/tmp/fake-home/.codans/config\(Self.devSuffix)")
+    #expect(url.path == "\(Self.root)/config")
   }
 
   @Test
-  func stateDefaultsToChannelScopedSiblingOfConfig() {
+  func stateDefaultsToASiblingOfConfigUnderTheChannelRoot() {
     let url = AppDirectories.stateDirectory(home: Self.home, override: nil, configOverride: nil)
-    #expect(url.path == "/tmp/fake-home/.codans/state\(Self.devSuffix)")
+    #expect(url.path == "\(Self.root)/state")
   }
 
   @Test
@@ -50,6 +51,11 @@ struct AppDirectoriesConfigOverrideTests {
     let state = AppDirectories.stateDirectory(
       home: Self.home, override: "/tmp/codans-state", configOverride: "/tmp/codans-config")
     #expect(state.path == "/tmp/codans-state")
+  }
+
+  @Test
+  func channelsAreIsolatedAtTheTopLevel() {
+    #expect(AppDirectories.channelDirectory(home: Self.home).path == Self.root)
   }
 
   @Test

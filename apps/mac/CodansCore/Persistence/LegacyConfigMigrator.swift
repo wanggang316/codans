@@ -3,7 +3,7 @@ import Foundation
 import os.log
 
 /// One-time move from the pre-split `~/.config/<slug>/` into
-/// `~/.codans/config[-dev]/` + `~/.codans/state[-dev]/`.
+/// `~/.codans[-dev]/config/` + `~/.codans[-dev]/state/`.
 ///
 /// - Known live files move to their new home (never over an existing file —
 ///   a collision archives the legacy copy instead).

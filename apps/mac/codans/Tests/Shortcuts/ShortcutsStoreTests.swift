@@ -186,10 +186,10 @@ struct ShortcutsStoreTests {
   func defaultURLPointsAtConfigDirectory() {
     let home = URL(fileURLWithPath: "/tmp/fake-home", isDirectory: true)
     let url = ShortcutsStore.defaultURL(home: home)
-    // Build-type aware: Debug test runs resolve to `config-dev`, Release to
-    // `config` — assert against the same source of truth.
+    // Build-type aware: Debug test runs resolve to `~/.codans-dev`, Release
+    // to `~/.codans` — assert against the same source of truth.
     #expect(url.path == AppDirectories.configDirectory(home: home, override: nil).path + "/shortcuts.json")
-    #expect(url.path.hasPrefix("/tmp/fake-home/.codans/config"))
+    #expect(url.path == "/tmp/fake-home/.\(AppDirectories.name)/config/shortcuts.json")
   }
 
   // MARK: - Test helpers

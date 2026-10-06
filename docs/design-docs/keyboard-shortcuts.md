@@ -174,7 +174,7 @@ Owner 是 `App/Shortcuts/` 里新的 `ShortcutsStore`（`@MainActor @Observable`
 - **避免 schema 耦合。** `settings.json` 已在 v3 且带严格 migrator；加一个 `shortcuts` 字段会为一份生命周期可干净剥离的数据强推一次 v4 bump 与防御性迁移步。
 - **契合推迟的导出特性。** 独立文件是导出特性的天然形态——用户已能直接查看 / 拷贝 `shortcuts.json`，无需后加抽取器。
 
-**版本 / 备份策略：** 文档根有显式 `version: 1` 字段。读时版本不匹配触发 side-aside 备份（`backups/shortcuts.unsupported-v{N}-<ts>.json`）+ 全新默认加载；手编成畸形态导致解码失败则把坏文件备到一旁（`backups/shortcuts.corrupt-<ts>.json`）+ 空覆盖起步——与 `SettingsStore` 同一套保守策略。路径与 `settings.json` 同在配置根 `~/.codans/config/`（Debug 为 `~/.codans/config-dev/`）。
+**版本 / 备份策略：** 文档根有显式 `version: 1` 字段。读时版本不匹配触发 side-aside 备份（`backups/shortcuts.unsupported-v{N}-<ts>.json`）+ 全新默认加载；手编成畸形态导致解码失败则把坏文件备到一旁（`backups/shortcuts.corrupt-<ts>.json`）+ 空覆盖起步——与 `SettingsStore` 同一套保守策略。路径与 `settings.json` 同在配置根 `~/.codans/config/`（Debug 为 `~/.codans-dev/config/`）。
 
 ## SwiftUI 集成（要点）
 

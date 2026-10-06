@@ -19,15 +19,16 @@ public nonisolated enum AppDirectories {
   /// the cache root and the legacy `~/.config/<name>` directory.
   public static let name: String = BuildChannel.current.slug
 
-  /// `~/.codans` — the user-level root shared by both channels. Channel
-  /// isolation happens one level down (`config` vs `config-dev`, …).
-  public static func userDirectory(
+  /// `~/.<name>` — the channel's root: `~/.codans` for Release,
+  /// `~/.codans-dev` for Debug. Config and state live under it, so the two
+  /// channels are isolated at the top level.
+  public static func channelDirectory(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {
-    home.appendingPathComponent(".codans", isDirectory: true)
+    home.appendingPathComponent(".\(name)", isDirectory: true)
   }
 
-  /// `~/.codans/config[-dev]` — files the user may edit by hand:
+  /// `~/.codans[-dev]/config` — files the user may edit by hand:
   /// `settings.json` and `shortcuts.json`.
   public static func configDirectory(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
@@ -36,11 +37,10 @@ public nonisolated enum AppDirectories {
     if let override, !override.isEmpty {
       return URL(fileURLWithPath: override, isDirectory: true)
     }
-    return userDirectory(home: home)
-      .appendingPathComponent(channelScoped("config"), isDirectory: true)
+    return channelDirectory(home: home).appendingPathComponent("config", isDirectory: true)
   }
 
-  /// `~/.codans/state[-dev]` — files only the app writes: `catalog.json`,
+  /// `~/.codans[-dev]/state` — files only the app writes: `catalog.json`,
   /// `sessions.json`, `notifications.json`, the remote-host sidecars,
   /// `project-icons/`, `agent-homes/`, and `backups/`.
   ///
@@ -59,8 +59,7 @@ public nonisolated enum AppDirectories {
     if let configOverride, !configOverride.isEmpty {
       return URL(fileURLWithPath: configOverride, isDirectory: true)
     }
-    return userDirectory(home: home)
-      .appendingPathComponent(channelScoped("state"), isDirectory: true)
+    return channelDirectory(home: home).appendingPathComponent("state", isDirectory: true)
   }
 
   /// `~/.config/<name>` — where every store lived before the config/state
@@ -71,14 +70,6 @@ public nonisolated enum AppDirectories {
     home
       .appendingPathComponent(".config", isDirectory: true)
       .appendingPathComponent(name, isDirectory: true)
-  }
-
-  /// `base` for Release, `base-dev` for Debug.
-  static func channelScoped(_ base: String, channel: BuildChannel = .current) -> String {
-    switch channel {
-    case .release: return base
-    case .development: return "\(base)-dev"
-    }
   }
 
   /// `~/Library/Caches/<name>` — the zmx `ZMX_DIR` (per-pane daemon control

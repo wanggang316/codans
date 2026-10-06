@@ -37,7 +37,7 @@ public nonisolated struct Catalog: Equatable, Sendable {
   public static let empty = Catalog()
 
   /// On-disk location: `<AppDirectories.stateDirectory>/catalog.json`
-  /// (`~/.codans/state/catalog.json` for Release, `…/state-dev/…`
+  /// (`~/.codans/state/catalog.json` for Release, `~/.codans-dev/state/…`
   /// for Debug — see `AppDirectories`).
   public static func defaultURL(home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)) -> URL {
     AppDirectories.stateDirectory(home: home)
