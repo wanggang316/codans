@@ -12,8 +12,8 @@ import SwiftUI
 /// is always visible regardless of chip count.
 struct TabBarView: View {
   let store: StoreOf<TabBarFeature>
-  /// Resolved address of the active worktree whose tabs we render. If any
-  /// of the IDs is nil, the view shows a thin empty bar.
+  /// Resolved address of the active worktree whose tabs we render. When the
+  /// worktree is unresolved or has no tabs, only the trailing accessories show.
   let projectID: ProjectID
   let worktreeID: WorktreeID
   let activeTabID: TabID?
@@ -97,11 +97,15 @@ struct TabBarView: View {
   @ViewBuilder
   private func barContent() -> some View {
     Group {
-      if let worktree = currentWorktree() {
+      // No tabs → no track: an empty capsule reads as a blank tab. The
+      // spacer keeps the accessories pinned trailing in its place.
+      if let worktree = currentWorktree(), !worktree.tabs.isEmpty {
         TabBarOverflowScroll(itemCount: worktree.tabs.count) { viewport in
           rowView(for: worktree, viewport: viewport)
         }
         .frame(height: TabBarMetrics.trackHeight)
+      } else {
+        Spacer(minLength: 0)
       }
       TabBarTrailingAccessories(
         activeTabSplitTree: activeSplitTree(),
