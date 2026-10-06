@@ -46,8 +46,8 @@ app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane
 
 ```
                      Debug                               Release
-config root          ~/.codans/config-dev/               ~/.codans/config/
-state root           ~/.codans/state-dev/                ~/.codans/state/
+config root          ~/.codans-dev/config/               ~/.codans/config/
+state root           ~/.codans-dev/state/                ~/.codans/state/
 cache root (ZMX_DIR) ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
 IPC socket           /tmp/codans-dev-<uid>.sock          /tmp/codans-<uid>.sock
 CLI 名               codans-dev                          codans
@@ -56,7 +56,7 @@ CLI 名               codans-dev                          codans
   自称               --help / 报错提示 / 握手 clientBinary 都用本名
 ```
 
-config 根放用户会手改的文件，state 根放只有 app 写的文件，cache 根放可重建的数据。0.7.7 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。
+config 根放用户会手改的文件，state 根放只有 app 写的文件，cache 根放可重建的数据。0.7.8 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。`~/.codans/` 下的 `repos/`、`workspaces/`、`sources/` 是用户的 git 工作区，不按通道区分，两个构建共用。
 
 两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 

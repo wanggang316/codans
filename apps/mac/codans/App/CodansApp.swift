@@ -629,7 +629,7 @@ final class AppState {
 
   init() {
     // Before any store opens a file: move a pre-split `~/.config/<slug>/` into
-    // `~/.codans/{config,state}` and sweep crash-orphaned temp files. Skipped
+    // `~/.codans[-dev]/{config,state}` and sweep crash-orphaned temp files. Skipped
     // as an XCTest host so a test run never relocates the developer's data.
     let environment = ProcessInfo.processInfo.environment
     if environment["XCTestBundlePath"] == nil, environment["XCTestConfigurationFilePath"] == nil {

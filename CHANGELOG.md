@@ -16,8 +16,8 @@ and the project does not yet follow semantic versioning — every release until
   (`settings.json`, `shortcuts.json`) now live in
   `~/.codans/config/`, app-owned state (catalog, sessions, inbox, project
   icons, agent homes) in `~/.codans/state/`, and the GitHub PR snapshot
-  cache in `~/Library/Caches/codans/`. Debug builds use `config-dev` /
-  `state-dev`. The first launch moves an existing `~/.config/codans/`
+  cache in `~/Library/Caches/codans/`. Debug builds use `~/.codans-dev/`
+  instead. The first launch moves an existing `~/.config/codans/`
   automatically and archives leftovers (old backups, files no build reads)
   under `~/.codans/state/backups/legacy-config-<timestamp>/`. To go back to
   an older build, quit codans and move the files back to `~/.config/codans/`.
