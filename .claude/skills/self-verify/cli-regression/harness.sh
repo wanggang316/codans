@@ -126,6 +126,7 @@ quit_app() {
   local holders; holders=$(lsof -t +D "$CACHE" 2>/dev/null | sort -u)
   [[ -n "$holders" ]] && kill -TERM $holders 2>/dev/null
   rm -rf "$CACHE"
+  rm -f "$SOCK"
   echo "quit test app"
 }
 
@@ -188,7 +189,10 @@ phase_project() {
   t P04 0 "tree --project <id>" -- cli tree --project "$PID"
   t P05 2 "tree --project <random uuid> -> 2" -- cli tree --project "$(uuidgen)"
   t P06 0 "tree --project <name> resolves by name" -- cli tree --project FIXTURE
-  t P06b 0 "project add detected the git root" -- bash -c "jq -e '.data | .gitRoot==\"$FIX\"' '$LOGS/P01.out'"
+  # The git root is what git reports for the fixture: under $TMPDIR that is
+  # the /private/var form, while rootPath keeps the /var form.
+  FIXROOT=$(git -C "$FIX" rev-parse --show-toplevel)
+  t P06b 0 "project add detected the git root" -- bash -c "jq -e '.data | .gitRoot==\"$FIXROOT\"' '$LOGS/P01.out'"
   t P06c 0 "tree shows the real branch, not (no branch)" -- bash -c "$CLI tree --project $PID | grep -q '\[feat/header-redesign\]'"
   t P07 2 "tree --project current outside a pane -> 2 with hint" -- cli tree --project current
   t P08 3 "project add same path again -> 3 conflict" -- cli project add "$FIX"
@@ -203,7 +207,7 @@ phase_project() {
   t P14 0 "project list --json has 1 project" -- bash -c "$CLI project list --json | jq -e '.data | .projects|length==1'"
   t P15 2 "tree --project unknown-name -> 2" -- cli tree --project no-such-project
   t P16 0 "project show <id>" -- cli project show "$PID"
-  t P16b 0 "project show --json carries gitRoot + worktreeCount" -- bash -c "$CLI project show $PID --json | jq -e '.data | .gitRoot==\"$FIX\" and .worktreeCount>=1 and (.id|type==\"string\")'"
+  t P16b 0 "project show --json carries gitRoot + worktreeCount" -- bash -c "$CLI project show $PID --json | jq -e '.data | .gitRoot==\"$FIXROOT\" and .worktreeCount>=1 and (.id|type==\"string\")'"
   t P16c 2 "project show random uuid -> 2" -- cli project show "$(uuidgen)"
   t P17 0 "project rename <id> Renamed" -- cli project rename "$PID" Renamed --json
   t P17b 0 "tree --project Renamed resolves the new name" -- cli tree --project Renamed
