@@ -162,6 +162,34 @@ struct HierarchyManagerProcessTests {
     #expect(restored.processEntries(in: f.worktree.id).first?.name == "npm")
   }
 
+  @Test func tabProcessPrefersTheFocusedPane() throws {
+    let f = fixture()
+    let second = Pane(workingDirectory: "/repo/wt")
+    var tab = f.tab
+    tab.panes.append(second)
+    let worktree = Worktree(name: "feature", path: "/repo/wt", tabs: [tab])
+    let project = Project(name: "repo", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+    let manager = HierarchyManager(
+      catalog: Catalog(projects: [project]), store: f.store, runtime: FakeHierarchyRuntime())
+    #expect(manager.processEntry(inTab: tab.id) == nil)
+    sample(manager, paneID: f.pane.id, name: "codex")
+    sample(manager, paneID: second.id, name: "node", now: time.addingTimeInterval(1))
+    #expect(manager.processEntry(inTab: tab.id)?.paneID == f.pane.id)
+    manager.setLastFocusedPane(second.id, in: tab.id)
+    let focused = try #require(manager.processEntry(inTab: tab.id))
+    #expect(focused.paneID == second.id)
+    #expect(focused.name == "node")
+    #expect(manager.processEntry(inTab: TabID()) == nil)
+  }
+
+  @Test func tabProcessIsGoneOnceTheWorktreeIsArchived() throws {
+    let f = fixture()
+    sample(f, name: "codex")
+    #expect(f.manager.processEntry(inTab: f.tab.id)?.agentKind == .codex)
+    try f.manager.setWorktreeArchived(worktreeID: f.worktree.id, archived: true)
+    #expect(f.manager.processEntry(inTab: f.tab.id) == nil)
+  }
+
   private let time = Date(timeIntervalSince1970: 1_000)
   private typealias Fixture = (
     manager: HierarchyManager, store: RecordingCatalogStore, pane: Pane, tab: Tab,
@@ -169,11 +197,18 @@ struct HierarchyManagerProcessTests {
   )
 
   private func sample(_ f: Fixture, name: String, birth: Date? = nil) {
+    sample(f.manager, paneID: f.pane.id, name: name, birth: birth)
+  }
+
+  private func sample(
+    _ manager: HierarchyManager, paneID: PaneID, name: String, birth: Date? = nil,
+    now: Date? = nil
+  ) {
     let process = ForegroundProcess(
       pid: 100, parentPID: 1, processGroupID: 100, argv0: name, commandLine: name,
       startedAt: birth ?? time)
-    f.manager.updateProcessSample(
-      paneID: f.pane.id, job: .init(processGroupID: 100, processes: [process]), now: time)
+    manager.updateProcessSample(
+      paneID: paneID, job: .init(processGroupID: 100, processes: [process]), now: now ?? time)
   }
 
   private func fixture() -> Fixture {
