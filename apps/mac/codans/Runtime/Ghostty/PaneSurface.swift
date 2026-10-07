@@ -285,6 +285,14 @@ final class PaneSurface {
     view.detachSurface()
   }
 
+  /// Whether the surface view sits in a window and no ancestor hides it.
+  /// A deselected tab's host is torn down, which detaches the view from its
+  /// window; a minimised or covered window still counts as displayed so a
+  /// returning user never meets a re-attach.
+  var isDisplayed: Bool {
+    view.window != nil && !view.isHiddenOrHasHiddenAncestor
+  }
+
   func setFocus(_ focused: Bool) {
     guard let surface else { return }
     ghostty_surface_set_focus(surface, focused)
