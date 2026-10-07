@@ -18,7 +18,8 @@ struct HandoffKickoffTests {
     #expect(text.hasPrefix("[codans] Please hand this task off to Codex: run "))
     #expect(
       text.contains(
-        "`CODANS_HANDOFF_REQUEST_ID=\(Self.requestID.uuidString) codans handoff to codex --pane \(Self.paneID.description) --brief -`"
+        "`CODANS_HANDOFF_REQUEST_ID=\(Self.requestID.uuidString) codans handoff to codex "
+          + "--pane \(Self.paneID.description) --brief -`"
       ))
     #expect(text.contains("## Suggested Prompt For Next Agent"))
 
@@ -30,7 +31,8 @@ struct HandoffKickoffTests {
   @Test
   func sourceInstructionCarriesASplitPlacementAsCLIFlags() {
     let split = HandoffKickoff.sourceInstruction(
-      for: .handOff(to: .codex), requestID: Self.requestID, sourcePaneID: Self.paneID, cli: "codans", placement: .split(.down))
+      for: .handOff(to: .codex), requestID: Self.requestID, sourcePaneID: Self.paneID, cli: "codans",
+      placement: .split(.down))
     #expect(split.contains(" codans handoff to codex --pane \(Self.paneID.description) --split down --brief -`"))
     // A checkpoint has no receiver to place.
     let checkpoint = HandoffKickoff.sourceInstruction(
