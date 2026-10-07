@@ -12,37 +12,42 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Config and state moved to `~/.codans`.** Hand-editable files
-  (`settings.json`, `shortcuts.json`) now live in
-  `~/.codans/config/`, app-owned state (catalog, sessions, inbox, project
-  icons, agent homes) in `~/.codans/state/`, and the GitHub PR snapshot
-  cache in `~/Library/Caches/codans/`. Debug builds use `~/.codans-dev/`
-  instead. The first launch moves an existing `~/.config/codans/`
-  automatically and archives leftovers (old backups, files no build reads)
-  under `~/.codans/state/backups/legacy-config-<timestamp>/`. To go back to
-  an older build, quit codans and move the files back to `~/.config/codans/`.
-- **Backups have one home and one name.** A corrupt, newer-version or
-  migrated file is moved to `backups/<name>.<reason>-<timestamp>.json` next
-  to it, keeping the five newest per file and reason. `CODANS_STATE_DIR`
-  relocates the state root on its own; `CODANS_CONFIG_DIR` alone still moves
-  everything.
-
 ### Deprecated
 
 ### Removed
 
-- **Master Terminal.** The ⌥⌘` slide-in panel running `claude remote-control`
-  is gone, along with its `master-terminal/` working directory; the
-  migration archives an existing one under
-  `~/.codans/state/backups/legacy-config-<timestamp>/`.
+### Fixed
+
+### Security
+
+## [0.7.9] - 2026-10-08
+
+### Changed
+
+- **Settings and app data now live in `~/.codans`.** Settings and shortcuts
+  move to `~/.codans/config/`, everything codans manages to
+  `~/.codans/state/`; the first launch migrates `~/.config/codans/` for you.
+  To go back to an older build, quit codans and move the files back.
+- **Long-hidden tabs use far less memory.** A tab out of sight for 20
+  minutes with nothing running releases its GPU memory and threads; its
+  shell keeps running and reappears when you open the tab again.
+- **The diff window opens 30% wider.**
+
+### Removed
+
+- **Master Terminal.** The ⌥⌘` slide-in panel is gone; the first launch
+  archives its working directory under `~/.codans/state/backups/`.
 
 ### Fixed
 
-- An unreadable `catalog.json` (corrupt, or written by a newer build) no
-  longer gets overwritten with an empty project list; it is backed up
-  first. The same now holds for sessions, the inbox and shortcuts.
-
-### Security
+- **Unreadable data files are backed up, not wiped.** A corrupt or
+  newer-version catalog, session list, inbox or shortcuts file is moved to
+  a `backups/` folder beside it instead of being replaced with an empty one.
+- **Typing in the command palette stays in the palette.** A terminal
+  behind it could take keyboard focus, so keystrokes and IME input went
+  to that pane.
+- **Handoffs stay tied to the pane that started them.** A claim from
+  another pane is rejected with a message that names the expected pane.
 
 ## [0.7.8] - 2026-10-05
 
