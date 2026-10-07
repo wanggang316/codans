@@ -50,6 +50,20 @@ struct HandoffKickoffTests {
   }
 
   @Test
+  func commandOmitsTheRequestIDOnlyForAnOrdinaryCLICall() {
+    let ordinary = HandoffKickoff.command(
+      for: .checkpoint, requestID: nil, sourcePaneID: Self.paneID, cli: "codans")
+    #expect(ordinary == "codans handoff save --pane \(Self.paneID) --brief -")
+    let bound = HandoffKickoff.command(
+      for: .handOff(to: .codex), requestID: Self.requestID, sourcePaneID: Self.paneID, cli: "codans",
+      placement: .split(.down))
+    #expect(
+      bound
+        == "CODANS_HANDOFF_REQUEST_ID=\(Self.requestID.uuidString) codans handoff to codex "
+        + "--pane \(Self.paneID) --split down --brief -")
+  }
+
+  @Test
   func briefRequiredMessageEmbedsACopyPasteableHeredoc() {
     let message = HandoffKickoff.briefRequiredMessage(command: "codans handoff to codex --brief -")
     #expect(message.contains("codans handoff to codex --brief - <<'EOF'"))
