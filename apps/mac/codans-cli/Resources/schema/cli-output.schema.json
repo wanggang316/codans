@@ -1018,6 +1018,14 @@
             "null"
           ]
         },
+        "kind": {
+          "enum": [
+            "git_repo",
+            "dir",
+            "server",
+            "workspace"
+          ]
+        },
         "selectedWorktreeID": {
           "type": [
             "string",
@@ -1035,6 +1043,7 @@
         "id",
         "name",
         "rootPath",
+        "kind",
         "worktrees"
       ],
       "additionalProperties": false
