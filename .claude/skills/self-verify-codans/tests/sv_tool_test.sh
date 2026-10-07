@@ -3,13 +3,13 @@
 # command must produce its effect, observed through AX, and no semantic
 # command may take focus from the frontmost app.
 #
-# Usage: bash .claude/skills/self-verify-codans/scripts/sv_tool_test.sh
+# Usage: bash .claude/skills/self-verify-codans/tests/sv_tool_test.sh
 #   SV_TEST_PHYSICAL=1 also runs the guarded click and hover cases. They
 #   activate the fixture for a moment and then give focus back.
 
 set -u
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
+tests_dir="$(cd "$(dirname "$0")" && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/sv-tool-test.XXXXXX")"
 failures=0
 fixture_pid=""
@@ -48,8 +48,8 @@ check_exit() { # check_exit <name> <wanted exit> <command...>
 }
 
 printf 'compiling sv-tool and the fixture app...\n'
-swiftc -O "$script_dir/sv-tool.swift" -o "$scratch/sv-tool" || exit 1
-swiftc -O "$script_dir/test-fixture/FixtureApp.swift" -o "$scratch/SvFixture" || exit 1
+swiftc -O "$tests_dir/../scripts/sv-tool.swift" -o "$scratch/sv-tool" || exit 1
+swiftc -O "$tests_dir/fixture-app/FixtureApp.swift" -o "$scratch/SvFixture" || exit 1
 tool="$scratch/sv-tool"
 
 if ! "$tool" preflight >"$scratch/preflight"; then
