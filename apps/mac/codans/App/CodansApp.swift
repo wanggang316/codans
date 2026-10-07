@@ -688,6 +688,12 @@ final class AppState {
       ghosttyRuntime: ghostty
     )
     self.terminalEngine = engine
+    if let policy = SurfaceReclaimPolicy(
+      overrideSeconds: ProcessInfo.processInfo.environment[
+        CodansEnvironment.Key.surfaceReclaimSeconds.rawValue])
+    {
+      engine.reclaimPolicy = policy
+    }
     hierarchyRuntime.attach(engine: engine)
     profiler.mark("ghostty+engine")
     bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)

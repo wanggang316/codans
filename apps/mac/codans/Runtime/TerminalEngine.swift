@@ -130,7 +130,6 @@ final class TerminalEngine {
   /// it must not replay `initialCommand` into the live shell.
   private(set) var reclaimedPanes: Set<PaneID> = []
   private var reclaimSweepTask: Task<Void, Never>?
-  private static let reclaimSweepInterval: Duration = .seconds(60)
 
   /// Inject a `GhosttyRuntime` for real pane surfaces, or pass `nil` for
   /// headless tests. When nil, `ensureSurface` throws.
@@ -982,7 +981,8 @@ final class TerminalEngine {
     guard reclaimSweepTask == nil, !finished else { return }
     reclaimSweepTask = Task { @MainActor [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: Self.reclaimSweepInterval)
+        guard let interval = self?.reclaimPolicy.sweepInterval else { return }
+        try? await Task.sleep(for: .seconds(interval))
         guard let self, !Task.isCancelled else { return }
         self.reclaimIdleSurfaces()
       }
