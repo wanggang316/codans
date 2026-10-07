@@ -91,6 +91,21 @@ struct DiffFileOutlineTests {
     #expect(harness.outline.selectedRow == -1)
   }
 
+  @Test func anUpdateDuringAClickKeepsTheClickedRow() throws {
+    let harness = try Harness()
+    harness.show([one, two, top], selection: one.id)
+    // Mouse-down selects the clicked row; the store hears of it only on mouse-up.
+    harness.outline.isTrackingClick = true
+    harness.outline.selectRowIndexes(IndexSet(integer: harness.row(named: "two.swift")), byExtendingSelection: false)
+    // A refresh lands before mouse-up, still with the previous selection.
+    harness.show([one, two, top], selection: one.id)
+    #expect(harness.selectedName == "two.swift")
+
+    harness.outline.isTrackingClick = false
+    harness.show([one, two, top], selection: two.id)
+    #expect(harness.selectedName == "two.swift")
+  }
+
   @Test func switchingPresentationKeepsTheFileTheUserIsLookingAt() throws {
     let harness = try Harness()
     let many = (0..<60).map { GitComparisonFile(path: "d/f\(String(format: "%02d", $0)).swift", status: "M") }
@@ -136,7 +151,7 @@ struct DiffFileOutlineTests {
 @MainActor
 private final class Harness {
   let coordinator = DiffFileOutline.Coordinator()
-  let outline: NSOutlineView
+  let outline: DiffOutlineView
   private let window: NSWindow
   var collapsed: Set<String> = []
   var selected: [String] = []
@@ -144,7 +159,7 @@ private final class Harness {
 
   init() throws {
     let scrollView = DiffFileOutline.makeScrollView(coordinator: coordinator)
-    outline = try #require(scrollView.documentView as? NSOutlineView)
+    outline = try #require(scrollView.documentView as? DiffOutlineView)
     window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 320, height: 600), styleMask: [.titled], backing: .buffered,
       defer: false)

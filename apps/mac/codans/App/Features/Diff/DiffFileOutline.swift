@@ -31,7 +31,7 @@ struct DiffFileOutline: NSViewRepresentable {
   }
 
   static func makeScrollView(coordinator: Coordinator) -> NSScrollView {
-    let outline = NSOutlineView()
+    let outline = DiffOutlineView()
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("file"))
     column.resizingMask = .autoresizingMask
     outline.addTableColumn(column)
@@ -72,7 +72,7 @@ struct DiffFileOutline: NSViewRepresentable {
     private static let rowHeight: CGFloat = 28
     private static let twoLineRowHeight: CGFloat = 36
 
-    weak var outline: NSOutlineView?
+    weak var outline: DiffOutlineView?
     private var config: DiffFileOutline?
     private var roots: [DiffOutlineItem] = []
     private var itemsByFileID: [String: DiffOutlineItem] = [:]
@@ -159,7 +159,9 @@ struct DiffFileOutline: NSViewRepresentable {
     /// Switching scopes carries the selected file over, and scrolling to it threw away the
     /// position the user had in the scope they arrived at.
     private func syncSelection(_ id: String?) {
-      guard let outline else { return }
+      // The store learns of a click only on mouse-up. An update before that (a refresh tick, a
+      // file load) would put the old row back, and the click would then report no change.
+      guard let outline, !outline.isTrackingClick else { return }
       let row = id.flatMap { itemsByFileID[$0] }.map { outline.row(forItem: $0) } ?? -1
       guard row >= 0 else {
         if outline.selectedRow >= 0 { outline.deselectAll(nil) }
@@ -302,6 +304,19 @@ struct DiffFileOutline: NSViewRepresentable {
       guard let id = sender.representedObject as? String else { return }
       config?.onOpenInEditor(id)
     }
+  }
+}
+
+/// The outline, marking the time between a click's mouse-down and mouse-up.
+final class DiffOutlineView: NSOutlineView {
+  /// True while `mouseDown` tracks the click: the clicked row shows as selected, but the
+  /// selection change is not reported until the button is released.
+  var isTrackingClick = false
+
+  override func mouseDown(with event: NSEvent) {
+    isTrackingClick = true
+    defer { isTrackingClick = false }
+    super.mouseDown(with: event)
   }
 }
 
