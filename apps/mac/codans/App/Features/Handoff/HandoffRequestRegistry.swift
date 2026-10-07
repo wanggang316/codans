@@ -37,15 +37,22 @@ final class HandoffRequestRegistry {
     states[requestID] = .pending(sourcePaneID)
   }
 
+  enum ClaimOutcome: Equatable {
+    case claimed
+    /// The request is still pending for another pane and stays pending.
+    case wrongSource(expected: PaneID)
+    /// Unknown, already claimed, or superseded.
+    case unavailable
+  }
+
   /// Claims a pending request for its CLI transition. A request is claimed
   /// at most once and only by its source pane. A mismatch leaves it pending.
   @discardableResult
-  func claim(_ requestID: UUID, sourcePaneID: PaneID) -> Bool {
-    guard case .pending(let expectedPaneID) = states[requestID], expectedPaneID == sourcePaneID else {
-      return false
-    }
+  func claim(_ requestID: UUID, sourcePaneID: PaneID) -> ClaimOutcome {
+    guard case .pending(let expectedPaneID) = states[requestID] else { return .unavailable }
+    guard expectedPaneID == sourcePaneID else { return .wrongSource(expected: expectedPaneID) }
     states[requestID] = .claimed
-    return true
+    return .claimed
   }
 
   /// Supersedes a still-pending request before the panel starts its own

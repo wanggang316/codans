@@ -428,13 +428,16 @@ struct HandoffHandlersTests {
       case .to: try await harness.handlers.to(request)
       }
     }
-    guard case .conflict = error else {
+    guard case .conflict(let reason) = error else {
       Issue.record("expected conflict, got \(String(describing: error))")
       return
     }
+    #expect(reason.contains("rerun with --pane \(expectedPaneID)"))
     #expect(!FileManager.default.fileExists(atPath: harness.store.stateDirectory.path))
     #expect(harness.launches.specs.isEmpty)
-    #expect(!harness.registry.claim(requestID, sourcePaneID: harness.source.paneID))
+    #expect(
+      harness.registry.claim(requestID, sourcePaneID: harness.source.paneID)
+        == .wrongSource(expected: expectedPaneID))
     let retry = Self.request(
       action, correct, receiver: "codex", brief: Self.briefing, requestID: requestID)
     let response: IPC.HandoffResponse
@@ -444,7 +447,7 @@ struct HandoffHandlersTests {
     }
     #expect(response.hasBriefing)
     #expect(FileManager.default.fileExists(atPath: correct.store.currentURL.path))
-    #expect(!harness.registry.claim(requestID, sourcePaneID: expectedPaneID))
+    #expect(harness.registry.claim(requestID, sourcePaneID: expectedPaneID) == .unavailable)
   }
 
   @Test
@@ -465,7 +468,7 @@ struct HandoffHandlersTests {
     }
     #expect(!FileManager.default.fileExists(atPath: harness.store.stateDirectory.path))
     #expect(harness.launches.specs.isEmpty)
-    #expect(harness.registry.claim(requestID, sourcePaneID: sourcePaneID))
+    #expect(harness.registry.claim(requestID, sourcePaneID: sourcePaneID) == .claimed)
   }
 
   @Test
