@@ -18,7 +18,7 @@ make mac-build
 APP=$(cd apps/mac && xcodebuild -workspace codans.xcworkspace -scheme Codans \
   -configuration Debug -showBuildSettings 2>/dev/null \
   | awk '$1=="BUILT_PRODUCTS_DIR"{d=$3} $1=="FULL_PRODUCT_NAME"{p=$3} END{print d "/" p}')
-bash .claude/skills/self-verify-codans/cli-regression/harness.sh "$APP" all
+bash .claude/skills/self-verify/cli-regression/harness.sh "$APP" all
 ```
 
 ## Isolation

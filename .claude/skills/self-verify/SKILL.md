@@ -1,10 +1,10 @@
 ---
-name: self-verify-codans
-description: Explicitly verify a codans change end to end in an isolated Debug instance (private config, cache, and socket) through the bundled codans-dev CLI, PID-scoped Accessibility, and window screenshots. Use only when the user asks for self-verify-codans, end-to-end verification against a running Debug build, or to drive and check codans UI behavior (Settings, popovers, menus, toolbar, sidebar). Do not invoke after ordinary implementation work, and do not use it in place of unit tests, make mac-check, or make mac-build.
+name: self-verify
+description: Explicitly verify a codans change end to end in an isolated Debug instance (private config, cache, and socket) through the bundled codans-dev CLI, PID-scoped Accessibility, and window screenshots. Use only when the user asks for self-verify, end-to-end verification against a running Debug build, or to drive and check codans UI behavior (Settings, popovers, menus, toolbar, sidebar). Do not invoke after ordinary implementation work, and do not use it in place of unit tests, make mac-check, or make mac-build.
 disable-model-invocation: true
 ---
 
-# Self Verify Codans
+# Self Verify
 
 ## Invocation Contract
 
@@ -54,7 +54,7 @@ Gump works in the release app and in dev builds while you test. These rules prot
 From the repository root, after `make mac-build`:
 
 ```bash
-. .claude/skills/self-verify-codans/scripts/helpers.sh
+. .claude/skills/self-verify/scripts/helpers.sh
 sv_seed_settings                 # scratch settings: worktrees in scratch, no fetch, no update checks
 fixture="$(sv_fixture_repo)"     # fixtures/repo-multi-branch.bundle: main, feat/header-redesign (HEAD),
                                  # bugfix/menu, origin/* refs without a URL
@@ -148,10 +148,10 @@ from end-to-end outcomes.
 When you change the scripts, run their tests:
 
 ```bash
-bash .claude/skills/self-verify-codans/tests/helpers_test.sh    # lifecycle, fake app and CLI, ~5 s
-bash .claude/skills/self-verify-codans/tests/sv_tool_test.sh    # every sv-tool command on a SwiftUI fixture
-SV_TEST_PHYSICAL=1 bash .claude/skills/self-verify-codans/tests/sv_tool_test.sh   # adds click and hover
-bash .claude/skills/self-verify-codans/tests/smoke_test.sh      # real Debug build, end to end, ~25 s
+bash .claude/skills/self-verify/tests/helpers_test.sh    # lifecycle, fake app and CLI, ~5 s
+bash .claude/skills/self-verify/tests/sv_tool_test.sh    # every sv-tool command on a SwiftUI fixture
+SV_TEST_PHYSICAL=1 bash .claude/skills/self-verify/tests/sv_tool_test.sh   # adds click and hover
+bash .claude/skills/self-verify/tests/smoke_test.sh      # real Debug build, end to end, ~25 s
 ```
 
 Edit the relevant rule in place when a run teaches something durable; do not append a dated field note.

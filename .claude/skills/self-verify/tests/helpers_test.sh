@@ -2,7 +2,7 @@
 # Tests for helpers.sh. Runs a fake app (a C program that binds the private
 # socket) and a fake CLI, so it needs no Debug build and never starts Codans.
 #
-# Usage: bash|zsh .claude/skills/self-verify-codans/tests/helpers_test.sh
+# Usage: bash|zsh .claude/skills/self-verify/tests/helpers_test.sh
 
 set -u
 

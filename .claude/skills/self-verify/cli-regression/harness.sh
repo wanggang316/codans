@@ -71,7 +71,7 @@ export CODANS_CACHE_DIR="$CACHE"
 setup() {
   : >"$RESULTS"
   rm -rf "$CONF" "$RUN"; mkdir -p "$CONF" "$RUN" "$WTS" "$FAKEBIN" "$LOGS"
-  bash "$REPO_ROOT/.claude/skills/self-verify-codans/fixtures/restore-repo.sh" "$FIX" >/dev/null
+  bash "$REPO_ROOT/.claude/skills/self-verify/fixtures/restore-repo.sh" "$FIX" >/dev/null
   git -C "$FIX" checkout -q -b test/base 2>/dev/null || true
   git -C "$FIX" checkout -q feat/header-redesign
   for name in claude amp; do
