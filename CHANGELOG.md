@@ -12,6 +12,8 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **The diff window's file sidebar drags wider**, up to 600 pt (was 320 pt).
+
 ### Deprecated
 
 ### Removed
