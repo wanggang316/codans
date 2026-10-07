@@ -188,8 +188,19 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
     session does not exist yet, the connect script creates it with
     `launchctl submit … zmx serve`, so the daemon and its shell run in the
     user's GUI login session, which has the unlocked keychain. This needs
-    host-side `zmx` and a console login on the host; otherwise the shell
-    starts under sshd and prints a locked-keychain notice.
+    host-side `zmx` and a console login on the host (checked with
+    `launchctl print gui/<uid>`); otherwise the shell starts under sshd and
+    prints a locked-keychain notice.
+  - Consequences of the GUI-session shell:
+    - A keychain item whose access list does not trust the calling binary
+      shows its permission dialog on the host's display, not in the pane.
+      The command waits until someone answers it at the host. Under sshd the
+      same read fails at once with -25308.
+    - The remote pane reads the user's keychain items without the login
+      password. This gives no new capability, because any SSH login of that
+      user can run `launchctl submit` itself, but codans now does it by
+      default. To keep the SSH-session boundary, do not install `zmx` on the
+      host.
 
 Git-over-SSH runs through `RemoteGitService` (built on `SSHCommand.invocation` +
 `FoundationCommandRunner`): `discoverGitRoot`, `listWorktrees` (porcelain),

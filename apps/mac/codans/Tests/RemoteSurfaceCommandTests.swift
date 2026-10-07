@@ -220,13 +220,18 @@ struct RemoteSurfaceCommandTests {
 
   @Test
   func guiSessionSpawnIsSkippedWhenLaunchdIsNotNeeded() throws {
-    // Unlocked keychain, non-macOS host, or a session that already exists:
-    // the attach that follows handles it, launchd is never involved.
-    for (uname, locked, existing) in [
-      ("Darwin", false, false), ("Linux", true, false), ("Darwin", true, true),
+    // Unlocked keychain, non-macOS host, no console login, or a session that
+    // already exists: the attach that follows handles it, launchd never runs
+    // the daemon.
+    for (uname, locked, guiDomain, existing) in [
+      ("Darwin", false, true, false), ("Linux", true, true, false),
+      ("Darwin", true, false, false), ("Darwin", true, true, true),
     ] {
-      let run = try Self.runGUISessionSpawn(uname: uname, keychainLocked: locked, sessionExists: existing)
-      #expect(!run.log.contains("submit"), "uname=\(uname) locked=\(locked) existing=\(existing)")
+      let run = try Self.runGUISessionSpawn(
+        uname: uname, keychainLocked: locked, guiDomain: guiDomain, sessionExists: existing)
+      #expect(
+        !run.log.contains("submit"),
+        "uname=\(uname) locked=\(locked) guiDomain=\(guiDomain) existing=\(existing)")
     }
   }
 
@@ -243,7 +248,8 @@ struct RemoteSurfaceCommandTests {
   /// once, as launchd would in the GUI session; the fake `zmx serve` records
   /// the session so `zmx list --short` reports it.
   private static func runGUISessionSpawn(
-    uname: String, keychainLocked: Bool, sessionExists: Bool = false, submitFails: Bool = false
+    uname: String, keychainLocked: Bool, guiDomain: Bool = true, sessionExists: Bool = false,
+    submitFails: Bool = false
   ) throws -> (log: String, sessions: String, exitStatus: Int32) {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent("codans-gui-spawn-\(UUID().uuidString)", isDirectory: true)
@@ -257,6 +263,7 @@ struct RemoteSurfaceCommandTests {
       "security": "exit \(keychainLocked ? 1 : 0)",
       "launchctl": """
       echo "$*" >> '\(log.path)'
+      [ "$1" = print ] && exit \(guiDomain ? 0 : 113)
       [ "$1" = submit ] || exit 0
       \(submitFails ? "exit 1" : "")
       shift 4; "$@"
