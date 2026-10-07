@@ -14,12 +14,17 @@ set -uo pipefail
 
 APP="$1"
 PHASE="${2:-all}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$HERE" rev-parse --show-toplevel)"
 SCRATCH="${CODANS_CLI_REGRESSION_DIR:-$(mktemp -d -t codans-cli-regression)}"
 mkdir -p "$SCRATCH"
 CLI="$APP/Contents/Resources/bin/codans-dev"
 # AF_UNIX paths are capped near 104 bytes, so the socket stays out of $SCRATCH.
 SOCK="/tmp/codans-t-$(id -u).sock"
+# The cache dir holds one zmx socket per pane, so it stays short too. Without
+# it the instance shares the dev cache and its launch sweep kills the dev
+# app's pane sessions.
+CACHE="/tmp/codans-t-cache-$(id -u)"
 CONF="$SCRATCH/conf"
 RUN="$SCRATCH/run"
 FIX="$RUN/fixture"
@@ -61,11 +66,12 @@ cli() { "$CLI" "$@"; }
 unset CODANS_PANE_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH ZMX_DIR ZMX_SESSION TERM_PROGRAM TERM_PROGRAM_VERSION
 export CODANS_SOCKET_PATH="$SOCK"
 export CODANS_CONFIG_DIR="$CONF"
+export CODANS_CACHE_DIR="$CACHE"
 
 setup() {
   : >"$RESULTS"
   rm -rf "$CONF" "$RUN"; mkdir -p "$CONF" "$RUN" "$WTS" "$FAKEBIN" "$LOGS"
-  bash "$REPO_ROOT/docs/user-tests/_shared/fixtures/setup/restore-repo-multi-branch.sh" "$FIX" >/dev/null
+  bash "$REPO_ROOT/.claude/skills/self-verify-codans/fixtures/restore-repo.sh" "$FIX" >/dev/null
   git -C "$FIX" checkout -q -b test/base 2>/dev/null || true
   git -C "$FIX" checkout -q feat/header-redesign
   for name in claude amp; do
@@ -114,6 +120,10 @@ quit_app() {
   local pid; pid=$(pgrep -f "$APP/Contents/MacOS/Codans" | head -1)
   [[ -n "$pid" ]] && kill -TERM "$pid" && sleep 2
   pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null && kill -KILL "$pid"
+  # zmx daemons of panes the run did not close hold files in the cache dir.
+  local holders; holders=$(lsof -t +D "$CACHE" 2>/dev/null | sort -u)
+  [[ -n "$holders" ]] && kill -TERM $holders 2>/dev/null
+  rm -rf "$CACHE"
   echo "quit test app"
 }
 
@@ -564,6 +574,6 @@ case "$PHASE" in
 esac
 if [[ "$PHASE" == all ]]; then
   echo "== json contract"
-  t J01 0 "every --json output matches the CLI output schema" -- python3 "$REPO_ROOT/docs/user-tests/cli-regression/validate-json.py" "$REPO_ROOT/apps/mac/codans-cli/Resources/schema/cli-output.schema.json" "$LOGS"/*.out
+  t J01 0 "every --json output matches the CLI output schema" -- python3 "$HERE/validate-json.py" "$REPO_ROOT/apps/mac/codans-cli/Resources/schema/cli-output.schema.json" "$LOGS"/*.out
 fi
 echo "PASS=$PASS FAIL=$FAIL  (results: $RESULTS)"

@@ -8,7 +8,7 @@
 ## Summary
 
 The first black-box regression of every `codans` verb against a Debug build
-(`docs/user-tests/cli-regression/harness.sh`) surfaced two defects that unit
+(`.claude/skills/self-verify-codans/cli-regression/harness.sh`) surfaced two defects that unit
 tests had never seen, plus a set of skill / CLI drifts:
 
 1. A pane opened with `codans pane new` started with the **bare app
@@ -54,7 +54,7 @@ the CLI was only ever tried by hand from a pane the GUI had created.
 
 ## Recurrence checks
 
-- Run `docs/user-tests/cli-regression/harness.sh <Debug Codans.app> all`
+- Run `.claude/skills/self-verify-codans/cli-regression/harness.sh <Debug Codans.app> all`
   after any change under `apps/mac/codans-cli`, `CodansKit`, or
   `Features/Socket`. It drives an isolated instance (private socket, scratch
   config, fixture repo, fake agents) and asserts exit codes for every verb,

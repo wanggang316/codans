@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Generator for the multi-branch fixture bundle used by UT-BSH-* runtime
-# probes. Produces a `repo-multi-branch.bundle` git-bundle file with:
+# Generator for the multi-branch fixture bundle used by self-verify-codans
+# and the CLI regression harness. Produces `repo-multi-branch.bundle` with:
 #   - local branches: main, feat/header-redesign, bugfix/menu
 #   - a synthetic "origin" remote with origin/main, origin/feat/new-shell,
 #     and origin/HEAD -> origin/main
-#   - 60 commits on main (so the History tab's 50-per-page first page fills
+#   - 60 commits on main (the History tab's 50-per-page first page fills
 #     and a second page exists)
 #   - HEAD checked out on feat/header-redesign
 #   - README.md is committed differently on main vs feat/header-redesign
-#     (UT-BSH-BP-008 dirty-tree switch-blocking conflict)
+#     (editing it on the worktree blocks a branch switch)
 #
 # Determinism: all author/committer name+email+date env vars are fixed,
 # and every commit gets a synthetic monotonic timestamp derived from
@@ -16,14 +16,13 @@
 # (verified by running the script twice and diffing the output).
 #
 # Usage:
-#   bash build-repo-multi-branch.sh [<output-dir>]
-# Default output-dir is the parent fixtures/ directory.
+#   bash build-repo.sh [<output-dir>]
+# Default output-dir is this script's directory.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIXTURES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-OUT_DIR="${1:-${FIXTURES_DIR}}"
+OUT_DIR="${1:-${SCRIPT_DIR}}"
 mkdir -p "${OUT_DIR}"
 
 BUNDLE_PATH="${OUT_DIR}/repo-multi-branch.bundle"
@@ -126,7 +125,7 @@ commit_in_repo "src/menu.txt" "menu fix\n" "bugfix: fix menu" 400
 
 # Branch: feat/header-redesign off main, with a diverging README.md so a
 # switch back to main while README is dirty triggers the
-# "would be overwritten" git error consumed by UT-BSH-BP-008.
+# "would be overwritten" git error.
 git -C "${REPO_DIR}" checkout -q -b feat/header-redesign main
 commit_in_repo "README.md" "feat/header-redesign version\n" \
   "feat/header-redesign: rewrite README" 500

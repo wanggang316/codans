@@ -118,7 +118,7 @@ sv_fixture_repo() {
   local root dest="${1:-$SELF_VERIFY_DIR/fixture}"
   root="$(git rev-parse --show-toplevel)" || return 1
   rm -rf "$dest"
-  bash "$root/docs/user-tests/_shared/fixtures/setup/restore-repo-multi-branch.sh" "$dest" >/dev/null || return 1
+  bash "$root/.claude/skills/self-verify-codans/fixtures/restore-repo.sh" "$dest" >/dev/null || return 1
   printf '%s\n' "$dest"
 }
 
