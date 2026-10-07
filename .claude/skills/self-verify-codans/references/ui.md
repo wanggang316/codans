@@ -111,10 +111,10 @@ codans_debug tree --json | jq -r '.data.projects[0].worktrees[0].branch'   # ass
 
 - Navigate with `sv_select_row <pane name>` (it sets `AXSelectedRows`; a press on the row text does nothing).
   Assert the window title, then a heading in the detail (`sv_find AXHeading "In-app"`).
-- Switches are `AXCheckBox (AXSwitch)` with no label (their value is "0" or "1"); the label is the
-  `AXStaticText` before them in the tree, so no label addresses one switch. Prefer the metadata repair below
-  (give the switch its row label). Until then, read the switch frame from `sv_tree`, confirm the pairing by
-  tree order, and use `sv_click` on that frame's center; assert the new value in the tree and `settings.json`.
+- Switches are `AXCheckBox (AXSwitch)` with no label of their own (their value is "0" or "1"); the row text is
+  the `AXStaticText` before them. Pair them with `--after`:
+  `sv_press AXCheckBox "*" --after "Show Dock badge"`, then assert `sv_get AXCheckBox "*" --after "Show Dock
+  badge"` and `settings.json`. The metadata repair below (give the switch its row label) removes the need.
 - Popups are `AXPopUpButton` labelled only by their current value: `sv_press AXPopUpButton Auto`, then
   `sv_press AXMenuItem Always`. Assert the new value and the scratch `settings.json` (`$SELF_VERIFY_DIR/conf`).
 - Settings controls nest deeply; `sv-tool` walks 80 levels, so deep popup items are found.
@@ -147,7 +147,7 @@ Fix these with the evolution rules below when a scenario needs them; until then 
 | Branch popover row | label says "Switch to branch X" but the row has no action; actions are hover-only | hover sequence above |
 | Branch popover field | carries the popover's `#branch_switcher.popover`, not `#branch_switcher.search` | address by label "Filter branches" |
 | Branch button | label is "Default branch" on the default branch, without the name | use the identifier; read the branch from the CLI |
-| Settings switches | no accessible label | guarded click on the frame paired by tree order |
+| Settings switches | no accessible label | `--after "<row text>"` with label `"*"` |
 
 ## Evolve the Verification Surface
 

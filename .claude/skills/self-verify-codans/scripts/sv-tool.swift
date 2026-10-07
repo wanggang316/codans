@@ -7,26 +7,28 @@
 //
 // An element is addressed by AX role plus an exact label. The label matches
 // the title, description, value, placeholder, or identifier; "" matches an
-// element with no label. `--within <label>` limits the search to the subtree
-// of the first element with that label; `--near <label>` to the subtree of
-// its parent (siblings, such as the segments of a split button).
+// element with no label and "*" any label. `--within <label>` limits the
+// search to the subtree of the first element with that label; `--near
+// <label>` to the subtree of its parent (siblings, such as the segments of a
+// split button); `--after <label>` takes the first match after that element
+// in tree order (a switch after its row text).
 //
 //   preflight                          JSON readiness; exit 0 READY, 2 SKIPPED
 //   front                              PID of the frontmost app
 //   activate <pid>                     activate an app (give focus back after a test)
 //   windows <pid> [title]              on-screen windows: "<id> <x> <y> <w> <h> <title>"
 //   tree <pid> [--window T] [--depth N]  indented AX tree of the app's windows
-//   find <pid> <role|any> <label> [--within|--near L]   matching elements, one per line
-//   get <pid> <role> <label> [--within|--near L]        one element as JSON
-//   wait <pid> <role> <label> [--within|--near L] [--gone] [--timeout MS]
-//   press <pid> <role> <label> [--within|--near L]      AXPress; refused without an AXPress action
-//   set-value <pid> <role> <label> <value> [--within|--near L]  focus, then set AXValue
+//   find <pid> <role|any> <label> [scope]   matching elements, one per line
+//   get <pid> <role> <label> [scope]        one element as JSON
+//   wait <pid> <role> <label> [scope] [--gone] [--timeout MS]
+//   press <pid> <role> <label> [scope]      AXPress; refused without an AXPress action
+//   set-value <pid> <role> <label> <value> [scope]  focus, then set AXValue
 //   select-row <pid> <label>           select the outline/table row whose text is <label>
 //   menu <pid> [<bar item> <item>...]  press a menu-bar item by title path; no path lists bar items
 //   main-window <pid> <title>          make the window whose title contains <title> main
 //   close-window <pid> <title>         press that window's close button
 //   cancel-menu <pid>                  dismiss open menus with AXCancel
-//   center <pid> <role> <label> [--within|--near L]     "<x> <y>" center of the element frame
+//   center <pid> <role> <label> [scope]     "<x> <y>" center of the element frame
 //   click <pid> <x> <y> [--stay]       guarded physical click; focus and cursor return unless --stay
 //   hover <pid> <x> <y>                guarded cursor move; focus and cursor stay
 //   cursor                             cursor position "<x> <y>"
@@ -54,7 +56,7 @@ struct Arguments {
   var flags: Set<String> = []
 
   init(_ raw: ArraySlice<String>) {
-    let valued: Set<String> = ["--within", "--near", "--window", "--depth", "--timeout"]
+    let valued: Set<String> = ["--within", "--near", "--after", "--window", "--depth", "--timeout"]
     var iterator = raw.makeIterator()
     while let token = iterator.next() {
       if valued.contains(token) {
@@ -147,16 +149,26 @@ func find(pid: pid_t, role wanted: String, label: String, scope options: [String
     if option == "--near", let parent = attribute(element, kAXParentAttribute) { scope = parent as! AXUIElement }
     roots = [scope]
   }
-  // An empty label matches unlabelled elements, such as a split button's
-  // chevron segment; pair it with --within or --near to make it unique.
+  var ordered = roots.flatMap { descendants($0) }
+  // --after pairs a control with the label text before it, as in a Settings
+  // row whose switch has no label of its own: the first match wins.
+  if let anchor = options["--after"] {
+    guard let index = ordered.firstIndex(where: { labels($0).contains(anchor) }) else {
+      fail("no element labelled \"\(anchor)\" for --after")
+    }
+    ordered = Array(ordered[(index + 1)...])
+  }
+  // "" matches unlabelled elements, such as a split button's chevron; "*"
+  // matches any label.
   var matches: [AXUIElement] = []
-  for element in roots.flatMap({ descendants($0) })
+  for element in ordered
   where (wanted == "any" || role(element) == wanted)
-    && (label.isEmpty ? labels(element).isEmpty : labels(element).contains(label))
+    && (label == "*" || (label.isEmpty ? labels(element).isEmpty : labels(element).contains(label)))
   {
     // An open menu is reachable from its button and from its menu window.
     if !matches.contains(where: { CFEqual($0, element) }) { matches.append(element) }
   }
+  if options["--after"] != nil { return Array(matches.prefix(1)) }
   return matches
 }
 
@@ -166,7 +178,7 @@ func findOne(_ args: Arguments, usage: String) -> AXUIElement {
   let label = args.string(at: 2, usage: usage)
   let matches = find(pid: pid, role: wanted, label: label, scope: args.options)
   guard matches.count == 1 else {
-    fail("expected one \(wanted) labelled \"\(label)\", found \(matches.count); add --within, --near, or a narrower role")
+    fail("expected one \(wanted) labelled \"\(label)\", found \(matches.count); add --within, --near, --after, or a narrower role")
   }
   return matches[0]
 }
@@ -368,7 +380,7 @@ case "tree":
   roots.forEach { dump($0, 0) }
 
 case "find":
-  let usage = "find <pid> <role|any> <label> [--within|--near L]"
+  let usage = "find <pid> <role|any> <label> [scope]"
   let matches = find(
     pid: args.pid(at: 0, usage: usage), role: args.string(at: 1, usage: usage), label: args.string(at: 2, usage: usage),
     scope: args.options)
@@ -376,7 +388,7 @@ case "find":
   exit(matches.isEmpty ? 1 : 0)
 
 case "get":
-  let element = findOne(args, usage: "get <pid> <role> <label> [--within|--near L]")
+  let element = findOne(args, usage: "get <pid> <role> <label> [scope]")
   var json: [String: Any] = ["role": role(element), "labels": labels(element), "actions": actions(element)]
   json["value"] = string(element, kAXValueAttribute)
   json["enabled"] = bool(element, kAXEnabledAttribute)
@@ -390,7 +402,7 @@ case "get":
   print(String(decoding: data, as: UTF8.self))
 
 case "wait":
-  let usage = "wait <pid> <role> <label> [--within|--near L] [--gone] [--timeout MS]"
+  let usage = "wait <pid> <role> <label> [scope] [--gone] [--timeout MS]"
   let pid = args.pid(at: 0, usage: usage)
   let wanted = args.string(at: 1, usage: usage)
   let label = args.string(at: 2, usage: usage)
@@ -408,7 +420,7 @@ case "wait":
   fail("timed out after \(Int(timeout))ms waiting for \(wanted) \"\(label)\" to be \(gone ? "gone" : "present")", code: 2)
 
 case "press":
-  let element = findOne(args, usage: "press <pid> <role> <label> [--within|--near L]")
+  let element = findOne(args, usage: "press <pid> <role> <label> [scope]")
   guard actions(element).contains(kAXPressAction) else {
     fail("\(describe(element)) has no AXPress action; a press would only report success")
   }
@@ -424,7 +436,7 @@ case "press":
   print("ok press \(label)")
 
 case "set-value":
-  let usage = "set-value <pid> <role> <label> <value> [--within|--near L]"
+  let usage = "set-value <pid> <role> <label> <value> [scope]"
   let element = findOne(args, usage: usage)
   let value = args.string(at: 3, usage: usage)
   AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
@@ -495,7 +507,7 @@ case "cancel-menu":
   print("ok cancel-menu \(open.count)")
 
 case "center":
-  let element = findOne(args, usage: "center <pid> <role> <label> [--within|--near L]")
+  let element = findOne(args, usage: "center <pid> <role> <label> [scope]")
   guard let rect = frame(element), rect.width > 0, rect.height > 0 else { fail("element has no frame") }
   print(Int(rect.midX), Int(rect.midY))
 

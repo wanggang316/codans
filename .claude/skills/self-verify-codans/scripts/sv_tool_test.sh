@@ -110,6 +110,9 @@ check "an empty label with --near finds the split chevron" ax find AXMenuButton 
 check "press opens the split menu from the chevron" ax press AXMenuButton "" --near Split
 check "press picks the split menu item" sh -c '"$1" wait "$2" AXMenuItem "Split item" --timeout 2000 && "$1" press "$2" AXMenuItem "Split item"' _ "$tool" "$p"
 check "the split item ran, not the primary action" ax wait AXStaticText "split: item" --timeout 2000
+check_exit "a bare switch label is ambiguous" 1 ax press AXCheckBox "*"
+check "--after pairs a switch with its row text" ax press AXCheckBox "*" --after "Beta option"
+check "only the paired switch changed" ax wait AXStaticText "switches: 01" --timeout 2000
 check "select-row selects a list row" ax select-row "Row 2"
 check "the row selection changed" ax wait AXStaticText "row: Row 2" --timeout 2000
 check "menu presses a menu-bar item" ax menu Fixture Bump
