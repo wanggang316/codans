@@ -55,8 +55,11 @@ struct TabChipView: View {
   /// A click on a stack sliver scrolls the row instead of selecting the
   /// tab. `nil` for chips that are not part of a stack.
   var onStackClick: (() -> Void)?
+  /// The process the tab runs, read live by the hover card while it shows.
+  var hoverCardProcess: () -> WorktreeProcessEntry? = { nil }
 
   @State private var isHovering = false
+  @State private var hoverCardAnchor = TabHoverCardAnchor()
 
   var body: some View {
     Group {
@@ -84,11 +87,24 @@ struct TabChipView: View {
       }
     }
     .overlay(TabChipMiddleClickView(onMiddleClick: onMiddleClick))
+    .background(TabHoverCardAnchorView(anchor: hoverCardAnchor))
     .onHover { hovering in
       withAnimation(.easeInOut(duration: 0.10)) {
         isHovering = hovering
       }
+      // The chip truncates its title; the card shows it in full. A sliver
+      // gets no card, as it gets no hover highlight.
+      if hovering && sliceWidth == nil {
+        TabHoverCardPresenter.shared.hoverBegan(
+          hoverCardAnchor, title: title, process: hoverCardProcess)
+      } else {
+        TabHoverCardPresenter.shared.hoverEnded(hoverCardAnchor)
+      }
     }
+    .onChange(of: title) { _, newTitle in
+      TabHoverCardPresenter.shared.titleChanged(hoverCardAnchor, to: newTitle)
+    }
+    .onDisappear { TabHoverCardPresenter.shared.hoverEnded(hoverCardAnchor) }
     .contextMenu {
       TabChipContextMenu(
         isOnlyTab: isOnlyTab,
@@ -147,7 +163,7 @@ struct TabChipView: View {
       // centered and truncates before it slides under either overlay.
       .padding(.horizontal, TabBarMetrics.chipTitleInset)
     }
-    .buttonStyle(SelectOnPressStyle(onPress: selectIfInactive))
+    .buttonStyle(SelectOnPressStyle(onPress: pressed))
     .frame(
       maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight
     )
@@ -179,6 +195,11 @@ struct TabChipView: View {
   /// A narrowed chip (stack sliver, or partly covered) gets no hover
   /// highlight or close button, as in the system tab bar.
   private var showsHover: Bool { isHovering && sliceWidth == nil }
+
+  private func pressed() {
+    TabHoverCardPresenter.shared.pressed(hoverCardAnchor)
+    selectIfInactive()
+  }
 
   private func selectIfInactive() {
     if !isActive { onSelect() }
