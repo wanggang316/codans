@@ -27,6 +27,18 @@ struct AliasResolverTests {
   }
 
   @Test
+  func explicitPaneUUIDIgnoresStaleEnvironment() async throws {
+    let sourceID = UUID()
+    let resolved = try await AliasResolver.resolve(
+      sourceID.uuidString,
+      kind: .pane,
+      env: ["CODANS_PANE_ID": UUID().uuidString],
+      client: Self.failingClient()
+    )
+    #expect(resolved == sourceID)
+  }
+
+  @Test
   func currentPronounReadsEnv() async throws {
     let uuid = UUID()
     let resolved = try await AliasResolver.resolve(

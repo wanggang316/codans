@@ -2880,9 +2880,9 @@ struct RootFeature {
     switch order {
     case .brief(let request, let title):
       let requestID = uuid()
-      client.register(requestID)
+      client.register(requestID, paneID)
       let instruction = HandoffKickoff.sourceInstruction(
-        for: request, requestID: requestID, cli: client.cli, placement: placement)
+        for: request, requestID: requestID, sourcePaneID: paneID, cli: client.cli, placement: placement)
       let agent = source.agentName
       return .run { send in
         // Subscribe before typing: the stream does not replay, and a fast
