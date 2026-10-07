@@ -1943,7 +1943,8 @@ struct RootFeatureTests {
       typed.value.first?.1
         == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
         || typed.value.first?.1
-          == HandoffKickoff.sourceInstruction(for: .handOff(to: .codex), requestID: requestID, sourcePaneID: paneID, cli: "codans")
+          == HandoffKickoff.sourceInstruction(
+            for: .handOff(to: .codex), requestID: requestID, sourcePaneID: paneID, cli: "codans")
     )
 
     // A completion for another request is not ours.
