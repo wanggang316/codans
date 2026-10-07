@@ -589,7 +589,10 @@ private struct ResolvingTabChipView: View {
       iconTint: runningScriptIconTint,
       sliceWidth: sliceWidth,
       contentShift: contentShift,
-      onStackClick: onStackClick
+      onStackClick: onStackClick,
+      hoverCardProcess: { [hierarchyManager, tabID = tab.id] in
+        hierarchyManager.processEntry(inTab: tabID)
+      }
     )
     .onChange(of: live, initial: true) { _, newLive in
       // Only persist once the surface has actually produced a live
