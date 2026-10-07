@@ -103,6 +103,10 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// Outstanding next-tick focus reclaim. `nonisolated(unsafe)` so the
   /// nonisolated deinit can cancel it; only touched on the main actor.
   nonisolated(unsafe) private var pendingFocusClaim: Task<Void, Never>?
+  /// Set while one of our own paths makes this view first responder, so
+  /// `becomeFirstResponder` can tell those apart from a claim made by AppKit
+  /// or SwiftUI focus handling.
+  private var isClaimingFocus = false
   /// Outstanding deferred geometry resync raised by a display sleep→wake or
   /// reconfiguration. `nonisolated(unsafe)` so the nonisolated deinit can
   /// cancel it; only touched on the main actor.
@@ -201,10 +205,28 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
 
   override func becomeFirstResponder() -> Bool {
     let accepted = super.becomeFirstResponder()
+    if accepted, !isClaimingFocus {
+      FocusTrace.record("surface(\(paneID)) became first responder outside codans", responder: nil)
+    }
     if accepted, let surface { ghostty_surface_set_focus(surface, true) }
     if accepted { onBecomeFirstResponder?() }
     if accepted { postAccessibilityFocusChanged() }
     return accepted
+  }
+
+  /// Makes this view the first responder of `window`. Every codans path that
+  /// moves focus into a terminal goes through here. A `reason` records the
+  /// claim in `FocusTrace`; a click passes nil because it is the user's own
+  /// intent.
+  @discardableResult
+  func claimFirstResponder(in window: NSWindow, reason: String?) -> Bool {
+    if let reason {
+      FocusTrace.record(
+        "surface(\(paneID)) claim reason=\(reason)", responder: window.firstResponder)
+    }
+    isClaimingFocus = true
+    defer { isClaimingFocus = false }
+    return window.makeFirstResponder(self)
   }
 
   override func resignFirstResponder() -> Bool {
@@ -365,7 +387,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
         // content view, a sibling terminal) — but never from a live text
         // editor (inline rename, command-palette field editor).
         if responder is NSText || responder is NSTextView { return }
-        _ = window.makeFirstResponder(self)
+        self.claimFirstResponder(in: window, reason: "reattach")
       }
     }
     hasBeenInWindow = true
@@ -707,8 +729,8 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     // Claim focus on click. NSView does not do this automatically for
     // subclasses with custom mouseDown, so without this the surface stays
     // unfocused (no cursor, keyDown not dispatched).
-    if window?.firstResponder !== self {
-      window?.makeFirstResponder(self)
+    if let window, window.firstResponder !== self {
+      claimFirstResponder(in: window, reason: nil)
     }
     _ = sendMouseButton(event: event, button: GHOSTTY_MOUSE_LEFT, action: GHOSTTY_MOUSE_PRESS)
   }

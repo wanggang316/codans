@@ -56,7 +56,9 @@ struct CommandPaletteView: View {
     // layout rebuild, `codans pane focus`); without this, the user's typing
     // and IME composition go to that pane instead of the query field.
     .onChange(of: queryFocused) { _, focused in
-      if !focused { queryFocused = true }
+      guard !focused else { return }
+      FocusTrace.record("command palette lost focus", responder: NSApp.keyWindow?.firstResponder)
+      queryFocused = true
     }
   }
 

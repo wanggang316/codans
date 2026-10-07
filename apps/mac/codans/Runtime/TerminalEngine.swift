@@ -449,7 +449,7 @@ final class TerminalEngine {
       // so repeats on the normal path are harmless.
       runtime.defocusAllSurfaces(except: paneID)
       if window.firstResponder !== surface.view {
-        window.makeFirstResponder(surface.view)
+        surface.view.claimFirstResponder(in: window, reason: "focusSurfaceView")
       }
       return
     }
