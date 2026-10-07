@@ -18,6 +18,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- **Long diffs scroll smoothly.** Scrolling code in the Changes window
+  stuttered on larger files; it now keeps up with the trackpad in both
+  unified and split layouts.
+
 ### Security
 
 ## [0.7.9] - 2026-10-08
