@@ -14,6 +14,8 @@ final class Model: ObservableObject {
   @Published var bumps = 0
   @Published var hoverPresses = 0
   @Published var split = "none"
+  @Published var alpha = false
+  @Published var beta = false
 }
 
 struct FixtureView: View {
@@ -56,6 +58,10 @@ struct FixtureView: View {
       }
       .fixedSize()
       Text("split: \(model.split)")
+      // Settings-style rows: the switch has no label of its own.
+      HStack { Text("Alpha option"); Toggle("", isOn: $model.alpha).labelsHidden().toggleStyle(.switch) }
+      HStack { Text("Beta option"); Toggle("", isOn: $model.beta).labelsHidden().toggleStyle(.switch) }
+      Text("switches: \(model.alpha ? 1 : 0)\(model.beta ? 1 : 0)")
       HStack {
         Text("Hover row")
         if hovering {

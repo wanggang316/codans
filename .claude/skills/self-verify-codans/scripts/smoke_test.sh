@@ -107,6 +107,12 @@ check "the menu bar opens Settings" sv_menu Codans "Settings…"
 check "the Settings window appears" poll sv_windows General
 check "select-row navigates the sidebar" sv_select_row Notifications
 check "the window title follows the selection" poll sv_windows Notifications
+dock_badge_is() { test "$(jq -r '.notifications.dockBadgeEnabled' "$SELF_VERIFY_DIR/conf/settings.json")" = "$1"; }
+check "the unlabelled Dock badge switch is found by its row text" sv_get AXCheckBox "*" --after "Show Dock badge"
+check "press turns the Dock badge switch off" sv_press AXCheckBox "*" --after "Show Dock badge"
+check "settings.json records the change" poll dock_badge_is false
+check "press turns it back on" sv_press AXCheckBox "*" --after "Show Dock badge"
+check "settings.json is restored" poll dock_badge_is true
 check "a Settings screenshot is captured by window id" sv_screenshot "$SELF_VERIFY_DIR/settings.png" Notifications
 check "the screenshot is a PNG" sh -c "file '$SELF_VERIFY_DIR/settings.png' | grep -q PNG"
 check "close-window closes Settings" sv_close_window Notifications
