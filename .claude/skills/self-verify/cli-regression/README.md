@@ -28,6 +28,8 @@ bash .claude/skills/self-verify/cli-regression/harness.sh "$APP" all
   `CODANS_SOCKET_PATH=/tmp/codans-t-<uid>.sock`; the
   calling pane's own `CODANS_*` / `ZMX_*` / `TERM_PROGRAM` variables are
   unset first, so neither the instance nor the CLI can reach a real app.
+  `CODANS_STATE_DIR` is unset too: it would win over `CODANS_CONFIG_DIR`,
+  and without it the state root follows the scratch config dir.
 - `status` uptime is asserted right after launch; a socket answered by an
   older instance aborts the run.
 - Every id comes from the harness's own `project add` / `tab new` /
