@@ -177,8 +177,11 @@ nonisolated enum RemoteSurfaceCommand {
   /// tokens. `launchctl submit` from an SSH session runs the job in the GUI
   /// session when the user is logged in at the console; `zmx serve` forks the
   /// daemon and exits, so the job is removed once the session is listed. The
-  /// `attach` that follows then joins that daemon. With no console login, a
-  /// failed submit, or a timeout, the `attach` creates the daemon as before.
+  /// `attach` that follows then joins that daemon. The `gui/<uid>` domain
+  /// check skips launchd when nobody is logged in at the console: the legacy
+  /// `submit` would then pick a background domain, which has no keychain
+  /// either. Without that domain, a failed submit, or a timeout, the `attach`
+  /// creates the daemon as before.
   /// `TMPDIR` / `XDG_RUNTIME_DIR` / `ZMX_DIR` are forwarded only when set,
   /// because they select the socket directory both sides must agree on.
   static func guiSessionSpawn(hostSession: String, sessionCommand: String) -> String {
@@ -188,8 +191,8 @@ nonisolated enum RemoteSurfaceCommand {
       .map { "${\($0)+\"\($0)=$\($0)\"}" }
       .joined(separator: " ")
     return
-      #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1 && ! "#
-      + listed + "; then\n"
+      #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1 "#
+      + #"&& launchctl print "gui/$(id -u)" >/dev/null 2>&1 && ! "# + listed + "; then\n"
       + "launchctl remove \(label) 2>/dev/null\n"
       + "if launchctl submit -l \(label) -- /usr/bin/env \(forwardedEnvironment) PATH=\"$PATH\" "
       + "\"$(command -v zmx)\" serve \(hostSession) --command \(sessionCommand) 2>/dev/null; then\n"
