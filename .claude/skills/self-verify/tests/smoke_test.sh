@@ -5,7 +5,7 @@
 # No semantic step may take focus from the frontmost app.
 #
 # Usage (repository root, after `make mac-build`):
-#   bash .claude/skills/self-verify-codans/tests/smoke_test.sh
+#   bash .claude/skills/self-verify/tests/smoke_test.sh
 #   SV_TEST_PHYSICAL=1 adds the hover-revealed branch switch; it activates
 #   the instance for about a second and then gives focus back.
 
@@ -15,7 +15,7 @@ export SELF_VERIFY_DIR="${TMPDIR%/}/codans-self-verify-smoke-$(id -u)"
 export SELF_VERIFY_SOCKET="/tmp/cdv-smoke-$(id -u).sock"
 export SELF_VERIFY_CACHE="/tmp/cdv-smoke-cache-$(id -u)"
 # shellcheck source=helpers.sh
-. .claude/skills/self-verify-codans/scripts/helpers.sh
+. .claude/skills/self-verify/scripts/helpers.sh
 
 failures=0
 out="$(mktemp "${TMPDIR:-/tmp}/sv-smoke.XXXXXX")"

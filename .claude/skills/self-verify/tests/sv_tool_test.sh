@@ -3,7 +3,7 @@
 # command must produce its effect, observed through AX, and no semantic
 # command may take focus from the frontmost app.
 #
-# Usage: bash .claude/skills/self-verify-codans/tests/sv_tool_test.sh
+# Usage: bash .claude/skills/self-verify/tests/sv_tool_test.sh
 #   SV_TEST_PHYSICAL=1 also runs the guarded click and hover cases. They
 #   activate the fixture for a moment and then give focus back.
 

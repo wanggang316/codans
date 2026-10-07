@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Helpers for the self-verify-codans skill. Source this file from the
+# Helpers for the self-verify skill. Source this file from the
 # repository root in bash or zsh. Sourcing defines functions only; it does
 # not launch anything.
 #
@@ -118,7 +118,7 @@ sv_fixture_repo() {
   local root dest="${1:-$SELF_VERIFY_DIR/fixture}"
   root="$(git rev-parse --show-toplevel)" || return 1
   rm -rf "$dest"
-  bash "$root/.claude/skills/self-verify-codans/fixtures/restore-repo.sh" "$dest" >/dev/null || return 1
+  bash "$root/.claude/skills/self-verify/fixtures/restore-repo.sh" "$dest" >/dev/null || return 1
   printf '%s\n' "$dest"
 }
 
@@ -249,7 +249,7 @@ sv_wait_ready() {
 sv_tool() {
   local root src tool="$SELF_VERIFY_DIR/sv-tool"
   root="$(git rev-parse --show-toplevel)" || return 1
-  src="$root/.claude/skills/self-verify-codans/scripts/sv-tool.swift"
+  src="$root/.claude/skills/self-verify/scripts/sv-tool.swift"
   mkdir -p "$SELF_VERIFY_DIR"
   if [ ! -x "$tool" ] || [ "$src" -nt "$tool" ]; then
     swiftc -O "$src" -o "$tool" >/dev/null || return 1

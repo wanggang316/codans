@@ -1,4 +1,4 @@
-// PID-scoped Accessibility, window, and input driver for self-verify-codans.
+// PID-scoped Accessibility, window, and input driver for self-verify.
 //
 // Every command takes the target PID explicitly. Release, dev, and test
 // instances share the process name "Codans", so names and window titles are

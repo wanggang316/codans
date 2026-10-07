@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generator for the multi-branch fixture bundle used by self-verify-codans
+# Generator for the multi-branch fixture bundle used by self-verify
 # and the CLI regression harness. Produces `repo-multi-branch.bundle` with:
 #   - local branches: main, feat/header-redesign, bugfix/menu
 #   - a synthetic "origin" remote with origin/main, origin/feat/new-shell,
