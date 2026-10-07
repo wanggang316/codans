@@ -64,6 +64,8 @@ cli() { "$CLI" "$@"; }
 # Scrub the release pane's own context so the dev CLI and the test app
 # never see Gump's socket / pane id.
 unset CODANS_PANE_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH ZMX_DIR ZMX_SESSION TERM_PROGRAM TERM_PROGRAM_VERSION
+# A state root would win over CODANS_CONFIG_DIR; unset, state follows it.
+unset CODANS_STATE_DIR
 export CODANS_SOCKET_PATH="$SOCK"
 export CODANS_CONFIG_DIR="$CONF"
 export CODANS_CACHE_DIR="$CACHE"

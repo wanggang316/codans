@@ -100,11 +100,13 @@ check_not "rejects an empty executable" sv_is_instance_executable "" /a/Codans.a
 
 # ---------- environment scrubbing ----------
 CODANS_PANE_ID=leak CODANS_SOCKET_PATH=/tmp/codans-$uid.sock ZMX_SESSION=leak TERM_PROGRAM=codans \
-  codans_debug tree --json >/dev/null
+  CODANS_STATE_DIR="$HOME/.codans-dev/state" codans_debug tree --json >/dev/null
 envfile="$scratch/Fake.app/Contents/Resources/bin/last-env"
 check_not "CLI does not see CODANS_PANE_ID" grep -q '^CODANS_PANE_ID=' "$envfile"
 check_not "CLI does not see ZMX_SESSION" grep -q '^ZMX_SESSION=' "$envfile"
 check_not "CLI does not see TERM_PROGRAM" grep -q '^TERM_PROGRAM=' "$envfile"
+# A caller's state root would win over CODANS_CONFIG_DIR and reach real data.
+check_not "CLI does not see CODANS_STATE_DIR" grep -q '^CODANS_STATE_DIR=' "$envfile"
 check "CLI gets the private socket" grep -qx "CODANS_SOCKET_PATH=$SELF_VERIFY_SOCKET" "$envfile"
 check "CLI gets the private cache dir" grep -qx "CODANS_CACHE_DIR=$SELF_VERIFY_CACHE" "$envfile"
 check "CLI gets the private config dir" grep -qx "CODANS_CONFIG_DIR=$SELF_VERIFY_DIR/conf" "$envfile"

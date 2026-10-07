@@ -74,12 +74,13 @@ sv_validate_paths() {
 }
 
 # Run a command with the calling pane's codans context removed and the
-# private instance paths set. Used for the app and the CLI alike.
+# private instance paths set. Used for the app and the CLI alike. With
+# CODANS_STATE_DIR unset, the state root follows CODANS_CONFIG_DIR.
 sv_env() {
   env -u CODANS_PANE_ID -u CODANS_CLI -u CODANS_WORKTREE_PATH -u CODANS_ROOT_PATH \
     -u CODANS_WORKSPACE_ROOT -u CODANS_PROJECT_ID -u CODANS_WORKTREE_ID -u CODANS_TAB_ID \
     -u CODANS_TAG_ID -u CODANS_HANDOFF_REQUEST_ID -u ZMX_DIR -u ZMX_SESSION \
-    -u TERM_PROGRAM -u TERM_PROGRAM_VERSION \
+    -u TERM_PROGRAM -u TERM_PROGRAM_VERSION -u CODANS_STATE_DIR \
     CODANS_SOCKET_PATH="$SELF_VERIFY_SOCKET" \
     CODANS_CONFIG_DIR="$(sv_conf_dir)" \
     CODANS_CACHE_DIR="$SELF_VERIFY_CACHE" \
