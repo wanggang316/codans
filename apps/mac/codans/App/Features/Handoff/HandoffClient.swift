@@ -11,7 +11,7 @@ nonisolated struct HandoffClient: Sendable {
   /// The outgoing side of a handoff for a pane, or nil when the pane is not
   /// in the catalog. `agentKind == nil` means no agent is detected there.
   var source: @MainActor @Sendable (_ paneID: PaneID) -> HandoffSource?
-  var register: @MainActor @Sendable (_ requestID: UUID) -> Void
+  var register: @MainActor @Sendable (_ requestID: UUID, _ sourcePaneID: PaneID) -> Void
   var supersede: @MainActor @Sendable (_ requestID: UUID) -> Bool
   /// Broadcast, no replay — subscribe before injecting the request.
   var completions: @MainActor @Sendable () -> AsyncStream<HandoffCompletion>
@@ -48,7 +48,7 @@ extension HandoffClient {
   ) -> HandoffClient {
     HandoffClient(
       source: source,
-      register: { registry.register($0) },
+      register: { registry.register($0, sourcePaneID: $1) },
       supersede: { registry.supersede($0) },
       completions: { registry.completions() },
       sendInstruction: { paneID, text in
@@ -84,7 +84,7 @@ extension HandoffClient {
 extension HandoffClient: DependencyKey {
   static let liveValue = HandoffClient(
     source: { _ in fatalError("HandoffClient.liveValue not configured") },
-    register: { _ in fatalError("HandoffClient.liveValue not configured") },
+    register: { _, _ in fatalError("HandoffClient.liveValue not configured") },
     supersede: { _ in fatalError("HandoffClient.liveValue not configured") },
     completions: { fatalError("HandoffClient.liveValue not configured") },
     sendInstruction: { _, _ in fatalError("HandoffClient.liveValue not configured") },

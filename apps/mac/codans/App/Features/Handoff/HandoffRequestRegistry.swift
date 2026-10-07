@@ -23,7 +23,7 @@ nonisolated struct HandoffCompletion: Equatable, Sendable {
 @MainActor
 final class HandoffRequestRegistry {
   private enum State {
-    case pending
+    case pending(PaneID)
     case claimed
     case superseded
   }
@@ -33,15 +33,17 @@ final class HandoffRequestRegistry {
 
   init() {}
 
-  func register(_ requestID: UUID) {
-    states[requestID] = .pending
+  func register(_ requestID: UUID, sourcePaneID: PaneID) {
+    states[requestID] = .pending(sourcePaneID)
   }
 
   /// Claims a pending request for its CLI transition. A request is claimed
-  /// at most once and cannot run after a fallback superseded it.
+  /// at most once and only by its source pane. A mismatch leaves it pending.
   @discardableResult
-  func claim(_ requestID: UUID) -> Bool {
-    guard states[requestID] == .pending else { return false }
+  func claim(_ requestID: UUID, sourcePaneID: PaneID) -> Bool {
+    guard case .pending(let expectedPaneID) = states[requestID], expectedPaneID == sourcePaneID else {
+      return false
+    }
     states[requestID] = .claimed
     return true
   }
@@ -51,7 +53,7 @@ final class HandoffRequestRegistry {
   /// transition and must be allowed to finish instead.
   @discardableResult
   func supersede(_ requestID: UUID) -> Bool {
-    guard states[requestID] == .pending else { return false }
+    guard case .pending = states[requestID] else { return false }
     states[requestID] = .superseded
     return true
   }

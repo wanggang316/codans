@@ -33,6 +33,7 @@ public nonisolated enum HandoffKickoff {
   public static func sourceInstruction(
     for request: Request,
     requestID: UUID,
+    sourcePaneID: PaneID,
     cli: String = CLIInvocation.commandName,
     placement: HandoffPlacement = .default
   ) -> String {
@@ -47,11 +48,11 @@ public nonisolated enum HandoffKickoff {
       let placementFlags = placement.cliArguments.map { " \($0)" }.joined()
       ask =
         "Please hand this task off to \(receiver.displayName): run "
-        + "`\(env)\(cli) handoff to \(receiver.rawValue)\(placementFlags) --brief -`"
+        + "`\(env)\(cli) handoff to \(receiver.rawValue) --pane \(sourcePaneID.description)\(placementFlags) --brief -`"
     case .checkpoint:
       ask =
         "Please checkpoint your progress for a later handoff: run "
-        + "`\(env)\(cli) handoff save --brief -`"
+        + "`\(env)\(cli) handoff save --pane \(sourcePaneID.description) --brief -`"
     }
     return "[codans] \(ask) with your briefing on stdin as a heredoc — a markdown document "
       + "with the sections \(sections), written from your current working knowledge. "

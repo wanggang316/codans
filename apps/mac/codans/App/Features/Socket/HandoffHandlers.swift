@@ -266,9 +266,9 @@ final class HandoffHandlers {
   /// gave up on it and took the context-only path itself.
   private func authorize(_ request: IPC.HandoffRequest) throws {
     guard let requestID = request.requestID else { return }
-    guard registry.claim(requestID) else {
+    guard registry.claim(requestID, sourcePaneID: request.paneID) else {
       throw IPCError.conflict(
-        reason: "this handoff request was already handled or superseded; nothing was changed")
+        reason: "this handoff request belongs to another pane, was already handled, or was superseded; nothing was changed")
     }
   }
 
