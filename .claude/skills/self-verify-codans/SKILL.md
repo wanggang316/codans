@@ -56,7 +56,8 @@ From the repository root, after `make mac-build`:
 ```bash
 . .claude/skills/self-verify-codans/scripts/helpers.sh
 sv_seed_settings                 # scratch settings: worktrees in scratch, no fetch, no update checks
-fixture="$(sv_fixture_repo)"     # multi-branch repo, HEAD on feat/header-redesign
+fixture="$(sv_fixture_repo)"     # fixtures/repo-multi-branch.bundle: main, feat/header-redesign (HEAD),
+                                 # bugfix/menu, origin/* refs without a URL
 sv_launch                        # private paths; refuses a busy socket; checks uptime and socket owner
 ```
 
@@ -103,6 +104,13 @@ codans_debug pane focus "$pane"  # brings the worktree and tab into view for AX 
   before and after.
 - Parse JSON with pipes or `printf '%s\n' "$json" | jq`, not `echo` (zsh rewrites escapes).
 - A pane dies at spawn when the cache path is too long: `tree` shows it, then `pane read` says not found.
+
+## Full CLI Regression
+
+`cli-regression/harness.sh <Debug Codans.app> all` drives every `codans-dev` verb on its own isolated instance
+and checks exit codes, output, and the JSON schema. Run it when the CLI, the RPC protocol, or the published
+`codans-cli` skill changes; see `cli-regression/README.md`. Do not run it while another instance from this
+skill uses the same build.
 
 ## Screenshots and Logs
 

@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Restore the multi-branch fixture into <dest>. The test runner invokes this
-# before each UT-BSH-* multi-branch case.
+# Restore the multi-branch fixture repository into <dest>.
 #
 # Usage:
-#   bash restore-repo-multi-branch.sh <dest>
+#   bash restore-repo.sh <dest>
 #
 # Post-conditions:
 #   - <dest> is a freshly-cloned working tree of repo-multi-branch.bundle.
@@ -20,13 +19,12 @@ if [[ $# -ne 1 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIXTURES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BUNDLE_PATH="${FIXTURES_DIR}/repo-multi-branch.bundle"
+BUNDLE_PATH="${SCRIPT_DIR}/repo-multi-branch.bundle"
 DEST="$1"
 
 if [[ ! -f "${BUNDLE_PATH}" ]]; then
   echo "missing bundle: ${BUNDLE_PATH}" >&2
-  echo "regenerate via: bash ${SCRIPT_DIR}/build-repo-multi-branch.sh" >&2
+  echo "regenerate via: bash ${SCRIPT_DIR}/build-repo.sh" >&2
   exit 1
 fi
 

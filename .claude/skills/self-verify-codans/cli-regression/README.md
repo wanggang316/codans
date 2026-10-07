@@ -18,13 +18,14 @@ make mac-build
 APP=$(cd apps/mac && xcodebuild -workspace codans.xcworkspace -scheme Codans \
   -configuration Debug -showBuildSettings 2>/dev/null \
   | awk '$1=="BUILT_PRODUCTS_DIR"{d=$3} $1=="FULL_PRODUCT_NAME"{p=$3} END{print d "/" p}')
-bash docs/user-tests/cli-regression/harness.sh "$APP" all
+bash .claude/skills/self-verify-codans/cli-regression/harness.sh "$APP" all
 ```
 
 ## Isolation
 
 - The app is launched from its binary with `CODANS_CONFIG_DIR` set to a
-  scratch directory and `CODANS_SOCKET_PATH=/tmp/codans-t-<uid>.sock`; the
+  scratch directory, `CODANS_CACHE_DIR=/tmp/codans-t-cache-<uid>`, and
+  `CODANS_SOCKET_PATH=/tmp/codans-t-<uid>.sock`; the
   calling pane's own `CODANS_*` / `ZMX_*` / `TERM_PROGRAM` variables are
   unset first, so neither the instance nor the CLI can reach a real app.
 - `status` uptime is asserted right after launch; a socket answered by an
@@ -55,4 +56,5 @@ under `.data` (the `jf` helper does), and expect `.error.code` on failures.
 - Do not run `xcodebuild test` while the harness is up — it rewrites the
   Debug bundle under the running instance.
 - A pane that is not `pane close`d leaves a zmx daemon behind after the
-  app quits (`pgrep -f '<Codans.app>.*zmx'`).
+  app quits. `quit` stops every process that holds a file in the private
+  cache dir, then removes the dir.
