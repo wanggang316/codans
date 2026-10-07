@@ -64,6 +64,31 @@ struct SurfaceReclaimPolicyTests {
   }
 
   @Test
+  func environmentOverrideScalesThresholdsDown() throws {
+    let fast = try #require(SurfaceReclaimPolicy(overrideSeconds: "6"))
+    #expect(fast.hiddenThreshold == 6)
+    #expect(fast.quietThreshold == 6)
+    #expect(fast.sweepInterval == 3)
+  }
+
+  @Test
+  func environmentOverrideNeverRaisesBuiltInLimits() throws {
+    let slow = try #require(SurfaceReclaimPolicy(overrideSeconds: "7200"))
+    #expect(slow.hiddenThreshold == 7200)
+    #expect(slow.quietThreshold == 60)
+    #expect(slow.sweepInterval == 60)
+  }
+
+  @Test
+  func environmentOverrideRejectsGarbage() {
+    #expect(SurfaceReclaimPolicy(overrideSeconds: nil) == nil)
+    #expect(SurfaceReclaimPolicy(overrideSeconds: "") == nil)
+    #expect(SurfaceReclaimPolicy(overrideSeconds: "abc") == nil)
+    #expect(SurfaceReclaimPolicy(overrideSeconds: "0") == nil)
+    #expect(SurfaceReclaimPolicy(overrideSeconds: "-5") == nil)
+  }
+
+  @Test
   func remoteNotReadyAndVetoedPanesAreKept() {
     #expect(!policy.shouldReclaim(candidate(isRemote: true)))
     #expect(!policy.shouldReclaim(candidate(isReady: false)))

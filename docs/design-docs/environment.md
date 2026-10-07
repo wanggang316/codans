@@ -137,6 +137,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 | `CODANS_CLI_BINARY` | 安装器指向 `.app` 外新编的 CLI | dev |
 | `CODANS_GHOSTTY_RESOURCES` | libghostty 资源树的替代根 | 未打包的 `xcodebuild run` |
 | `CODANS_DISABLE_ACTION_ROUTING` / `CODANS_DISABLE_THEME_DEV_FALLBACK` | 诊断与测试开关 | 值为 `"1"` 生效 |
+| `CODANS_SURFACE_RECLAIM_SECONDS` | 空闲 surface 回收的隐藏时长（秒，默认 1200） | 仅冒烟测试用；非正数或无法解析时保持默认 |
 
 完整清单、写者与读者见 `CodansEnvironment.Key` 的逐条注释；那里是唯一真相来源，本表只列覆盖用途的。
 

@@ -82,6 +82,10 @@ public nonisolated enum CodansEnvironment {
     case ghosttyResources = "CODANS_GHOSTTY_RESOURCES"
     /// `"1"` bypasses libghostty action routing. Diagnostic only.
     case disableActionRouting = "CODANS_DISABLE_ACTION_ROUTING"
+    /// Seconds a pane must stay out of every window before the idle-surface
+    /// reclaim may detach it (default 1200). Lets a smoke run observe the
+    /// reclaim in seconds; unset or non-positive keeps the default.
+    case surfaceReclaimSeconds = "CODANS_SURFACE_RECLAIM_SECONDS"
     /// `"1"` stops the theme catalog falling back to the developer
     /// worktree's `.build/ghostty` tree, so "empty catalog" tests hold.
     case disableThemeDevFallback = "CODANS_DISABLE_THEME_DEV_FALLBACK"

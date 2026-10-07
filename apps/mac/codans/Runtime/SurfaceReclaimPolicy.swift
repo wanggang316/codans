@@ -16,6 +16,23 @@ nonisolated struct SurfaceReclaimPolicy: Equatable, Sendable {
   /// still repaints is doing work the user may be waiting on.
   var quietThreshold: TimeInterval = 60
 
+  /// Gap between sweeps; half the hidden threshold when that is short, so a
+  /// scaled-down run still reclaims promptly.
+  var sweepInterval: TimeInterval { min(60, max(0.5, hiddenThreshold / 2)) }
+
+  init(hiddenThreshold: TimeInterval = 20 * 60, quietThreshold: TimeInterval = 60) {
+    self.hiddenThreshold = hiddenThreshold
+    self.quietThreshold = quietThreshold
+  }
+
+  /// Policy from `CODANS_SURFACE_RECLAIM_SECONDS`: the hidden threshold in
+  /// seconds. The quiet threshold only shrinks with it, never grows. Nil for
+  /// an unset or non-positive value, which keeps the built-in defaults.
+  init?(overrideSeconds raw: String?) {
+    guard let raw, let seconds = TimeInterval(raw), seconds > 0 else { return nil }
+    self.init(hiddenThreshold: seconds, quietThreshold: min(60, seconds))
+  }
+
   struct Candidate: Equatable, Sendable {
     var hiddenFor: TimeInterval
     var quietFor: TimeInterval
