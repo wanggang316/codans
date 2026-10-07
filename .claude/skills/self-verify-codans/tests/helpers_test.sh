@@ -2,11 +2,11 @@
 # Tests for helpers.sh. Runs a fake app (a C program that binds the private
 # socket) and a fake CLI, so it needs no Debug build and never starts Codans.
 #
-# Usage: bash|zsh .claude/skills/self-verify-codans/scripts/helpers_test.sh
+# Usage: bash|zsh .claude/skills/self-verify-codans/tests/helpers_test.sh
 
 set -u
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
+scripts_dir="$(cd "$(dirname "$0")/../scripts" && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/sv-helpers-test.XXXXXX")"
 test_domain="com.gumpw.codans.self-verify-test.$$"
 failures=0
@@ -84,7 +84,7 @@ export SELF_VERIFY_CACHE="/tmp/cdv-t$$-c"
 export SELF_VERIFY_DEFAULTS_DOMAIN="$test_domain"
 export SELF_VERIFY_KEEP_DIR=1
 # shellcheck source=helpers.sh
-. "$script_dir/helpers.sh"
+. "$scripts_dir/helpers.sh"
 
 # ---------- pure checks ----------
 uid="$(id -u)"

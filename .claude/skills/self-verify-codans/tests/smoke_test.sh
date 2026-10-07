@@ -5,7 +5,7 @@
 # No semantic step may take focus from the frontmost app.
 #
 # Usage (repository root, after `make mac-build`):
-#   bash .claude/skills/self-verify-codans/scripts/smoke_test.sh
+#   bash .claude/skills/self-verify-codans/tests/smoke_test.sh
 #   SV_TEST_PHYSICAL=1 adds the hover-revealed branch switch; it activates
 #   the instance for about a second and then gives focus back.
 

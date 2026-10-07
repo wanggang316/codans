@@ -148,10 +148,10 @@ from end-to-end outcomes.
 When you change the scripts, run their tests:
 
 ```bash
-bash .claude/skills/self-verify-codans/scripts/helpers_test.sh    # lifecycle, fake app and CLI, ~5 s
-bash .claude/skills/self-verify-codans/scripts/sv_tool_test.sh    # every sv-tool command on a SwiftUI fixture
-SV_TEST_PHYSICAL=1 bash .claude/skills/self-verify-codans/scripts/sv_tool_test.sh   # adds click and hover
-bash .claude/skills/self-verify-codans/scripts/smoke_test.sh      # real Debug build, end to end, ~25 s
+bash .claude/skills/self-verify-codans/tests/helpers_test.sh    # lifecycle, fake app and CLI, ~5 s
+bash .claude/skills/self-verify-codans/tests/sv_tool_test.sh    # every sv-tool command on a SwiftUI fixture
+SV_TEST_PHYSICAL=1 bash .claude/skills/self-verify-codans/tests/sv_tool_test.sh   # adds click and hover
+bash .claude/skills/self-verify-codans/tests/smoke_test.sh      # real Debug build, end to end, ~25 s
 ```
 
 Edit the relevant rule in place when a run teaches something durable; do not append a dated field note.
