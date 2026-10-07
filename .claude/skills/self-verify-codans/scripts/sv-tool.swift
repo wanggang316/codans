@@ -6,25 +6,27 @@
 // hover) never activate the app or move the cursor.
 //
 // An element is addressed by AX role plus an exact label. The label matches
-// the title, description, value, placeholder, or identifier. `--within <label>`
-// limits the search to the subtree of the first element with that label.
+// the title, description, value, placeholder, or identifier; "" matches an
+// element with no label. `--within <label>` limits the search to the subtree
+// of the first element with that label; `--near <label>` to the subtree of
+// its parent (siblings, such as the segments of a split button).
 //
 //   preflight                          JSON readiness; exit 0 READY, 2 SKIPPED
 //   front                              PID of the frontmost app
 //   activate <pid>                     activate an app (give focus back after a test)
 //   windows <pid> [title]              on-screen windows: "<id> <x> <y> <w> <h> <title>"
 //   tree <pid> [--window T] [--depth N]  indented AX tree of the app's windows
-//   find <pid> <role|any> <label> [--within L]   matching elements, one per line
-//   get <pid> <role> <label> [--within L]        one element as JSON
-//   wait <pid> <role> <label> [--within L] [--gone] [--timeout MS]
-//   press <pid> <role> <label> [--within L]      AXPress; refused without an AXPress action
-//   set-value <pid> <role> <label> <value> [--within L]  focus, then set AXValue
+//   find <pid> <role|any> <label> [--within|--near L]   matching elements, one per line
+//   get <pid> <role> <label> [--within|--near L]        one element as JSON
+//   wait <pid> <role> <label> [--within|--near L] [--gone] [--timeout MS]
+//   press <pid> <role> <label> [--within|--near L]      AXPress; refused without an AXPress action
+//   set-value <pid> <role> <label> <value> [--within|--near L]  focus, then set AXValue
 //   select-row <pid> <label>           select the outline/table row whose text is <label>
 //   menu <pid> [<bar item> <item>...]  press a menu-bar item by title path; no path lists bar items
 //   main-window <pid> <title>          make the window whose title contains <title> main
 //   close-window <pid> <title>         press that window's close button
 //   cancel-menu <pid>                  dismiss open menus with AXCancel
-//   center <pid> <role> <label> [--within L]     "<x> <y>" center of the element frame
+//   center <pid> <role> <label> [--within|--near L]     "<x> <y>" center of the element frame
 //   click <pid> <x> <y> [--stay]       guarded physical click; focus and cursor return unless --stay
 //   hover <pid> <x> <y>                guarded cursor move; focus and cursor stay
 //   cursor                             cursor position "<x> <y>"
@@ -32,7 +34,7 @@
 //
 // Positions are global with a top-left origin (AX, CGEvent, and CGWindowList
 // agree). Exit codes: 0 ok, 1 not found or refused, 2 preflight skipped or
-// wait timeout, 64 usage.
+// wait timeout, 3 press delivery uncertain (AX timed out), 64 usage.
 
 import AppKit
 import ApplicationServices
@@ -52,7 +54,7 @@ struct Arguments {
   var flags: Set<String> = []
 
   init(_ raw: ArraySlice<String>) {
-    let valued: Set<String> = ["--within", "--window", "--depth", "--timeout"]
+    let valued: Set<String> = ["--within", "--near", "--window", "--depth", "--timeout"]
     var iterator = raw.makeIterator()
     while let token = iterator.next() {
       if valued.contains(token) {
@@ -134,26 +136,37 @@ func descendants(_ element: AXUIElement, depth: Int = 0, limit: Int = 80) -> [AX
   return [element] + children(element).flatMap { descendants($0, depth: depth + 1, limit: limit) }
 }
 
-func find(pid: pid_t, role wanted: String, label: String, within: String?) -> [AXUIElement] {
+func find(pid: pid_t, role wanted: String, label: String, scope options: [String: String]) -> [AXUIElement] {
   var roots = windows(of: pid)
-  if let within {
-    guard let scope = roots.flatMap({ descendants($0) }).first(where: { labels($0).contains(within) }) else {
-      fail("no element labelled \"\(within)\" for --within")
+  for option in ["--within", "--near"] {
+    guard let anchor = options[option] else { continue }
+    guard let element = roots.flatMap({ descendants($0) }).first(where: { labels($0).contains(anchor) }) else {
+      fail("no element labelled \"\(anchor)\" for \(option)")
     }
+    var scope = element
+    if option == "--near", let parent = attribute(element, kAXParentAttribute) { scope = parent as! AXUIElement }
     roots = [scope]
   }
-  return roots.flatMap { descendants($0) }.filter {
-    (wanted == "any" || role($0) == wanted) && labels($0).contains(label)
+  // An empty label matches unlabelled elements, such as a split button's
+  // chevron segment; pair it with --within or --near to make it unique.
+  var matches: [AXUIElement] = []
+  for element in roots.flatMap({ descendants($0) })
+  where (wanted == "any" || role(element) == wanted)
+    && (label.isEmpty ? labels(element).isEmpty : labels(element).contains(label))
+  {
+    // An open menu is reachable from its button and from its menu window.
+    if !matches.contains(where: { CFEqual($0, element) }) { matches.append(element) }
   }
+  return matches
 }
 
 func findOne(_ args: Arguments, usage: String) -> AXUIElement {
   let pid = args.pid(at: 0, usage: usage)
   let wanted = args.string(at: 1, usage: usage)
   let label = args.string(at: 2, usage: usage)
-  let matches = find(pid: pid, role: wanted, label: label, within: args.options["--within"])
+  let matches = find(pid: pid, role: wanted, label: label, scope: args.options)
   guard matches.count == 1 else {
-    fail("expected one \(wanted) labelled \"\(label)\", found \(matches.count); add --within or a narrower role")
+    fail("expected one \(wanted) labelled \"\(label)\", found \(matches.count); add --within, --near, or a narrower role")
   }
   return matches[0]
 }
@@ -284,7 +297,12 @@ func physical(_ args: Arguments, hover: Bool) {
   }
   guard frontPID() == pid else { fail("focus moved away; nothing sent") }
   if hover {
-    postMouse(.mouseMoved, at: point)
+    // Tracking areas react to movement, and a just-activated app can drop
+    // the first event: approach the point in small steps.
+    for dx in [-6.0, -3.0, 0.0] {
+      postMouse(.mouseMoved, at: CGPoint(x: point.x + dx, y: point.y))
+      usleep(80_000)
+    }
   } else {
     for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] { postMouse(type, at: point) }
     usleep(150_000)
@@ -301,6 +319,9 @@ func physical(_ args: Arguments, hover: Bool) {
 let all = CommandLine.arguments
 guard all.count >= 2 else { fail("usage: sv-tool <command> ...; see the header of sv-tool.swift", code: 64) }
 let args = Arguments(all.dropFirst(2))
+// The default AX messaging timeout is about 6 s; a press that opens a menu
+// blocks for all of it.
+AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 2.0)
 
 switch all[1] {
 case "preflight":
@@ -347,15 +368,15 @@ case "tree":
   roots.forEach { dump($0, 0) }
 
 case "find":
-  let usage = "find <pid> <role|any> <label> [--within L]"
+  let usage = "find <pid> <role|any> <label> [--within|--near L]"
   let matches = find(
     pid: args.pid(at: 0, usage: usage), role: args.string(at: 1, usage: usage), label: args.string(at: 2, usage: usage),
-    within: args.options["--within"])
+    scope: args.options)
   matches.forEach { print(describe($0)) }
   exit(matches.isEmpty ? 1 : 0)
 
 case "get":
-  let element = findOne(args, usage: "get <pid> <role> <label> [--within L]")
+  let element = findOne(args, usage: "get <pid> <role> <label> [--within|--near L]")
   var json: [String: Any] = ["role": role(element), "labels": labels(element), "actions": actions(element)]
   json["value"] = string(element, kAXValueAttribute)
   json["enabled"] = bool(element, kAXEnabledAttribute)
@@ -369,7 +390,7 @@ case "get":
   print(String(decoding: data, as: UTF8.self))
 
 case "wait":
-  let usage = "wait <pid> <role> <label> [--within L] [--gone] [--timeout MS]"
+  let usage = "wait <pid> <role> <label> [--within|--near L] [--gone] [--timeout MS]"
   let pid = args.pid(at: 0, usage: usage)
   let wanted = args.string(at: 1, usage: usage)
   let label = args.string(at: 2, usage: usage)
@@ -377,7 +398,7 @@ case "wait":
   let timeout = Double(args.options["--timeout"] ?? "") ?? 5000
   let started = Date()
   while Date().timeIntervalSince(started) * 1000 < timeout {
-    let present = !find(pid: pid, role: wanted, label: label, within: args.options["--within"]).isEmpty
+    let present = !find(pid: pid, role: wanted, label: label, scope: args.options).isEmpty
     if present != gone {
       print("ok \(gone ? "gone" : "present") after \(Int(Date().timeIntervalSince(started) * 1000))ms")
       exit(0)
@@ -387,16 +408,23 @@ case "wait":
   fail("timed out after \(Int(timeout))ms waiting for \(wanted) \"\(label)\" to be \(gone ? "gone" : "present")", code: 2)
 
 case "press":
-  let element = findOne(args, usage: "press <pid> <role> <label> [--within L]")
+  let element = findOne(args, usage: "press <pid> <role> <label> [--within|--near L]")
   guard actions(element).contains(kAXPressAction) else {
     fail("\(describe(element)) has no AXPress action; a press would only report success")
   }
+  let label = describe(element)
   let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+  if result == .cannotComplete {
+    // A press that opens a menu returns only after the menu closes, so AX
+    // times out while the menu is open. Delivery is uncertain: observe.
+    print("uncertain press \(label): AX timed out (-25204); observe the result before you act again")
+    exit(3)
+  }
   guard result == .success else { fail("AXPress failed: \(result.rawValue)") }
-  print("ok press \(describe(element))")
+  print("ok press \(label)")
 
 case "set-value":
-  let usage = "set-value <pid> <role> <label> <value> [--within L]"
+  let usage = "set-value <pid> <role> <label> <value> [--within|--near L]"
   let element = findOne(args, usage: usage)
   let value = args.string(at: 3, usage: usage)
   AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
@@ -467,7 +495,7 @@ case "cancel-menu":
   print("ok cancel-menu \(open.count)")
 
 case "center":
-  let element = findOne(args, usage: "center <pid> <role> <label> [--within L]")
+  let element = findOne(args, usage: "center <pid> <role> <label> [--within|--near L]")
   guard let rect = frame(element), rect.width > 0, rect.height > 0 else { fail("element has no frame") }
   print(Int(rect.midX), Int(rect.midY))
 

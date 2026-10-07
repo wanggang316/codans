@@ -13,6 +13,7 @@ final class Model: ObservableObject {
   @Published var row: String?
   @Published var bumps = 0
   @Published var hoverPresses = 0
+  @Published var split = "none"
 }
 
 struct FixtureView: View {
@@ -47,6 +48,14 @@ struct FixtureView: View {
         Button("Dup") {}
         Button("Dup") {}
       }
+      // A split button: the chevron segment has no label.
+      Menu("Split") {
+        Button("Split item") { model.split = "item" }
+      } primaryAction: {
+        model.split = "primary"
+      }
+      .fixedSize()
+      Text("split: \(model.split)")
       HStack {
         Text("Hover row")
         if hovering {
