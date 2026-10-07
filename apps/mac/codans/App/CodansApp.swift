@@ -1076,9 +1076,13 @@ final class AppState {
       },
       runtimeProbe: { [weak terminalEngine] paneID in
         // `pane.info` / `pane.read` probe the daemon out-of-band via its
-        // control socket. Gate on a live surface so we don't hand back a
-        // probe for a pane whose daemon isn't running this session.
-        guard terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil else {
+        // control socket. Gate on a live surface (or an idle-reclaimed one,
+        // whose daemon still runs) so we don't hand back a probe for a pane
+        // whose daemon isn't running this session.
+        guard
+          terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil
+            || terminalEngine?.isReclaimed(paneID) == true
+        else {
           return nil
         }
         return ZmxControlProbe(paneID: paneID)
@@ -2004,6 +2008,12 @@ final class AppState {
   /// signal for an agent pane.
   private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
     guard commandQueueRunner == nil else { return }
+    // A pane mid-turn or holding queued commands must keep its surface: the
+    // idle-surface reclaim would otherwise detach it while work is pending.
+    engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] paneID in
+      registry?.entries[paneID]?.state.isMidTask == true
+        || manager?.catalog.pane(paneID)?.commandQueue.isEmpty == false
+    }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
     // aimed at an agent pane needs its Return as a separate keypress.
     let terminal = TerminalClient.live(engine: engine)
