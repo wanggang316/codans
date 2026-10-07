@@ -1,5 +1,5 @@
 {
-  "originHash" : "a945a2775566dfe2fbf1b3a91c2ad16d1d3a0431a97aae5ec75572c1208f90d2",
+  "originHash" : "aed867c022ad85b9834305c2bc32bc6629d154215a1d35492a8c6a84f0bb801e",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/wanggang316/diff-view",
       "state" : {
-        "revision" : "1d692a8174abad7fa7df7a05ab159bc1fa33eb2b",
-        "version" : "0.1.2"
+        "revision" : "d37a74d2fa4ab8cedd51755aca37bba57e213cdc",
+        "version" : "0.1.3"
       }
     },
     {
