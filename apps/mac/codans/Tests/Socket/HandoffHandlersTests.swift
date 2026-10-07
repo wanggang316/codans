@@ -158,9 +158,31 @@ struct HandoffHandlersTests {
       return
     }
     #expect(path == ["brief"])
-    #expect(message.contains("codans handoff to codex --brief - <<'EOF'"))
+    #expect(message.contains("codans handoff to codex --pane \(harness.source.paneID) --brief - <<'EOF'"))
     #expect(!FileManager.default.fileExists(atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
     #expect(harness.launches.specs.isEmpty)
+  }
+
+  @Test
+  func retryGuidanceKeepsThePanelRequestBound() async throws {
+    let harness = try Self.makeHarness()
+    let requestID = UUID()
+    harness.registry.register(requestID, sourcePaneID: harness.source.paneID)
+    let error = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(.to, harness, receiver: "codex", requestID: requestID, target: .split, direction: .down))
+    }
+    guard case .invalidParams(let message, _) = error else {
+      Issue.record("expected invalidParams, got \(String(describing: error))")
+      return
+    }
+    // Without the request id and pane, a retry would bypass the registry and
+    // resolve the source from the agent's inherited environment.
+    let retry = HandoffKickoff.command(
+      for: .handOff(to: .codex), requestID: requestID, sourcePaneID: harness.source.paneID,
+      cli: "codans", placement: .split(.down))
+    #expect(message.contains("\(retry) <<'EOF'"))
+    #expect(harness.registry.claim(requestID, sourcePaneID: harness.source.paneID) == .claimed)
   }
 
   @Test
