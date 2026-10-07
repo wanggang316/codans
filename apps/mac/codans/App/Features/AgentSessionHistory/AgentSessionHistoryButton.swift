@@ -43,15 +43,35 @@ struct AgentSessionHistoryButton: View {
     .onHover { isHovering = $0 }
     .help("Agent Session History")
     .accessibilityLabel("Agent session history")
-    .popover(isPresented: $popoverShown, arrowEdge: .bottom) {
+    .agentSessionHistoryPopover(
+      isPresented: $popoverShown,
+      worktreePath: worktreePath,
+      remoteHost: remoteHost,
+      onResume: onResume
+    )
+  }
+}
+
+extension View {
+  /// Anchors the Agent Session History popover to this view. Shared by the
+  /// tab-bar clock accessory and the empty-terminal "Resume Session" button
+  /// so both list the same sessions and resume the same way. The popover
+  /// dismisses itself before it calls `onResume`.
+  func agentSessionHistoryPopover(
+    isPresented: Binding<Bool>,
+    worktreePath: String,
+    remoteHost: RemoteHost?,
+    onResume: @escaping (AgentSessionSummary) -> Void
+  ) -> some View {
+    popover(isPresented: isPresented, arrowEdge: .bottom) {
       AgentSessionHistoryPopover(
         worktreePath: worktreePath,
         remoteHost: remoteHost,
         onResume: { session in
-          popoverShown = false
+          isPresented.wrappedValue = false
           onResume(session)
         },
-        onClose: { popoverShown = false }
+        onClose: { isPresented.wrappedValue = false }
       )
       .frame(minWidth: 340, idealWidth: 400, maxWidth: 520, minHeight: 180, idealHeight: 420)
     }
