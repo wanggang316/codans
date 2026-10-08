@@ -6,9 +6,9 @@ import Observation
 import os
 
 /// Single writer of `remote-devices.json` and of the devices' Keychain
-/// keys. The file sits in `AppDirectories.configDirectory`, so Debug and
-/// Release builds keep separate device lists, like every other codans
-/// store.
+/// keys. The file sits in `AppDirectories.stateDirectory` (only the app
+/// writes it), so Debug and Release builds keep separate device lists, like
+/// every other codans store.
 ///
 /// Revocation deletes the key first, then the record: a crash in between
 /// leaves a record whose device can no longer authenticate, never a live
@@ -48,7 +48,7 @@ final class PairedDeviceStore {
   }
 
   static func defaultURL(home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)) -> URL {
-    AppDirectories.configDirectory(home: home).appendingPathComponent(fileName, isDirectory: false)
+    AppDirectories.stateDirectory(home: home).appendingPathComponent(fileName, isDirectory: false)
   }
 
   func device(_ id: UUID) -> PairedDevice? {

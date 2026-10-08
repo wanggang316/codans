@@ -260,7 +260,7 @@ Pane text is deliberately *not* on the event stream: it is large, high-frequency
 
 ### Data Storage
 
-- **Mac, `remote-devices.json`** under `AppDirectories.configDirectory` (so Debug and Release have separate device lists), written through `AtomicFileStore` with `version: 1`: per device `deviceID`, `name`, `permission`, `state` (pending/active), `createdAt`, `lastSeenAt`. Unknown versions are routed aside like every other codans file. `lastSeenAt` writes are throttled (once per connection, not per request).
+- **Mac, `remote-devices.json`** under `AppDirectories.stateDirectory` (only the app writes it; Debug and Release have separate device lists), written through `AtomicFileStore` with `version: 1`: per device `deviceID`, `name`, `permission`, `state` (pending/active), `createdAt`, `lastSeenAt`. Unknown versions are routed aside like every other codans file. `lastSeenAt` writes are throttled (once per connection, not per request).
 - **Mac Keychain:** one PSK per device (above). Revocation deletes the Keychain item first, then the record, then closes live connections.
 - **Mac settings:** the gateway on/off switch lives in `settings.json` (`remoteAccess.enabled`, default `false`), tolerant-decoded like other settings.
 - **iOS:** paired gateways (service name, channel, device ID) in the app's `UserDefaults`; keys in the Keychain. Per-scene navigation state in `@SceneStorage`. From phase 2, an **offline cache** per gateway (D44): the last hierarchy summary and agent states as versioned JSON in Application Support, shown as stale on cold start until the first snapshot replaces it. The snapshot on connect stays authoritative; the cache is never written back to the Mac and an unknown cache version is discarded.
