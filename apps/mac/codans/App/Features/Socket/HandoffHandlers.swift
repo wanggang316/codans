@@ -92,7 +92,7 @@ final class HandoffHandlers {
   /// it replaces) and refresh generated context. No receiver, no launch.
   func save(_ request: IPC.HandoffRequest) async throws -> IPC.HandoffResponse {
     let source = try resolvedSource(request)
-    let briefing = try preparedBriefing(request, command: "\(cli) handoff save --brief -")
+    let briefing = try preparedBriefing(request, retry: .checkpoint)
     try authorize(request)
 
     let coordinator = HandoffCoordinator(
@@ -154,8 +154,7 @@ final class HandoffHandlers {
         path: ["target"])
     }
     let source = try resolvedSource(request)
-    let briefing = try preparedBriefing(
-      request, command: "\(cli) handoff to \(receiver.rawValue) --brief -")
+    let briefing = try preparedBriefing(request, retry: .handOff(to: receiver), placement: placement)
     // Resolve the profile before any side effect so a bad `--profile` is a
     // clean error rather than an archived-but-unlaunched handoff.
     let profile = try AgentProfileSelector.resolve(
@@ -239,10 +238,12 @@ final class HandoffHandlers {
 
   /// Every caller must either provide the source-authored briefing or choose
   /// context-only explicitly. A missing choice, or an invalid briefing, is
-  /// rejected here — before any filesystem side effect.
+  /// rejected here — before any filesystem side effect. The retry command
+  /// keeps the source pane and request id of the rejected call.
   private func preparedBriefing(
     _ request: IPC.HandoffRequest,
-    command: String
+    retry: HandoffKickoff.Request,
+    placement: HandoffPlacement = .default
   ) throws -> HandoffPreparedBriefing {
     if request.brief != nil, request.contextOnly {
       throw IPCError.invalidParams(
@@ -259,14 +260,25 @@ final class HandoffHandlers {
       return .contextOnly
     }
     throw IPCError.invalidParams(
-      message: HandoffKickoff.briefRequiredMessage(command: command), path: ["brief"])
+      message: HandoffKickoff.briefRequiredMessage(
+        command: HandoffKickoff.command(
+          for: retry, requestID: request.requestID, sourcePaneID: request.paneID, cli: cli,
+          placement: placement)),
+      path: ["brief"])
   }
 
   /// A panel-injected request may run at most once, and not after the panel
   /// gave up on it and took the context-only path itself.
   private func authorize(_ request: IPC.HandoffRequest) throws {
     guard let requestID = request.requestID else { return }
-    guard registry.claim(requestID) else {
+    switch registry.claim(requestID, sourcePaneID: request.paneID) {
+    case .claimed:
+      return
+    case .wrongSource(let expected):
+      throw IPCError.conflict(
+        reason: "this handoff request belongs to pane \(expected); rerun with --pane \(expected). "
+          + "Nothing was changed")
+    case .unavailable:
       throw IPCError.conflict(
         reason: "this handoff request was already handled or superseded; nothing was changed")
     }

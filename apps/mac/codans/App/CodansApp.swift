@@ -487,7 +487,7 @@ final class AppState {
   /// and the in-app Hand Off panel (registers / observes).
   let handoffRegistry = HandoffRequestRegistry()
   /// Notifications inbox owner; survives the full app lifetime so the
-  /// debounced JSON write to `~/.config/codans/notifications.json` and
+  /// debounced JSON write to `~/.codans/state/notifications.json` and
   /// the in-memory unread state outlive any individual scene transition.
   let notificationStore: NotificationStore
   /// Per-level roll-up derivation; views read `notificationRollup.current`
@@ -635,16 +635,20 @@ final class AppState {
   private var editorClient: EditorClient?
   private var hierarchyClient: HierarchyClient?
 
-  /// Master Terminal: app-level summon-by-hotkey panel that hosts a
-  /// `claude remote-control` session. Wired in `bringUp()`. The controller
-  /// + hotkey live for the app lifetime; the controller itself is lazy
-  /// internally (no NSPanel constructed until first toggle).
-  private var masterTerminalController: MasterTerminalController?
-  private var masterTerminalHotkey: MasterTerminalHotkey?
-
   init() {
+    // Before any store opens a file: move a pre-split `~/.config/<slug>/` into
+    // `~/.codans[-dev]/{config,state}` and sweep crash-orphaned temp files. Skipped
+    // as an XCTest host so a test run never relocates the developer's data.
+    let environment = ProcessInfo.processInfo.environment
+    if environment["XCTestBundlePath"] == nil, environment["XCTestConfigurationFilePath"] == nil {
+      PersistenceLaunch.prepare(environment: environment)
+    }
+
     let catalogStore = CatalogStore()
     let runtime = GhosttyBackedHierarchyRuntime()
+    // An unreadable catalog is either backed up (and reads as empty) or
+    // leaves the store with saving disabled, so `.empty` here can never
+    // overwrite the user's project list.
     let catalog = (try? catalogStore.load()) ?? .empty
 
     let manager = HierarchyManager(
@@ -692,6 +696,12 @@ final class AppState {
       ghosttyRuntime: ghostty
     )
     self.terminalEngine = engine
+    if let policy = SurfaceReclaimPolicy(
+      overrideSeconds: ProcessInfo.processInfo.environment[
+        CodansEnvironment.Key.surfaceReclaimSeconds.rawValue])
+    {
+      engine.reclaimPolicy = policy
+    }
     hierarchyRuntime.attach(engine: engine)
     profiler.mark("ghostty+engine")
     bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)
@@ -913,31 +923,6 @@ final class AppState {
       settingsURL: Settings.defaultURL()
     )
 
-    // Master Terminal: idempotent filesystem seed for ~/.config/codans/master-terminal/.
-    // Failure to seed must not block app bring-up — the Master Terminal feature
-    // simply won't have a working directory until the next launch.
-    do {
-      try MasterTerminalBootstrap.ensureUserDirectory()
-    } catch {
-      Logger.masterTerminal.error(
-        "bootstrap failed: \(String(describing: error), privacy: .public)"
-      )
-    }
-
-    // Master Terminal hotkey: ⌥⌘` toggles the slide-in panel. Hard-coded
-    // for now; promotion to ShortcutsStore is deferred until that store
-    // grows a "global hotkey" scope.
-    //
-    // Skipped if GhosttyRuntime failed to initialise — without it the panel
-    // would slide in empty, with no path to recover. The same guard already
-    // gates the rest of the terminal stack.
-    if let ghostty {
-      let controller = MasterTerminalController(runtime: ghostty)
-      self.masterTerminalController = controller
-      self.masterTerminalHotkey = MasterTerminalHotkey(onTrigger: { [weak controller] in
-        controller?.toggle()
-      })
-    }
     profiler.mark("finish")
   }
 
@@ -1105,9 +1090,13 @@ final class AppState {
       },
       runtimeProbe: { [weak terminalEngine] paneID in
         // `pane.info` / `pane.read` probe the daemon out-of-band via its
-        // control socket. Gate on a live surface so we don't hand back a
-        // probe for a pane whose daemon isn't running this session.
-        guard terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil else {
+        // control socket. Gate on a live surface (or an idle-reclaimed one,
+        // whose daemon still runs) so we don't hand back a probe for a pane
+        // whose daemon isn't running this session.
+        guard
+          terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil
+            || terminalEngine?.isReclaimed(paneID) == true
+        else {
           return nil
         }
         return ZmxControlProbe(paneID: paneID)
@@ -1571,16 +1560,21 @@ final class AppState {
     self.sessionStore = sessionStore
     guard let sessionStore else { return }
     // Seed the coordinator's in-memory catalog from disk once at bootstrap.
-    // A read error (corrupt file, EIO under sandbox revoke) degrades to an
-    // empty catalog rather than blocking the launch — same failure mode as
-    // the previous direct-load path inside `SessionReaper.sweep`.
+    // A corrupt or newer file is already backed up and reads as empty. A
+    // load that still throws (EIO under sandbox revoke, or a backup that
+    // could not be made) means the file is unreadable *and* still in place,
+    // so degrade to no-resume mode rather than let the coordinator's first
+    // save overwrite it.
     let initialCatalog: SessionCatalog
     do {
       initialCatalog = try sessionStore.load()
     } catch {
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session")
-        .error("SessionStore.load failed at bootstrap: \(String(describing: error), privacy: .public)")
-      initialCatalog = .empty
+        .error(
+          "SessionStore.load failed at bootstrap; entering no-resume mode: \(String(describing: error), privacy: .public)"
+        )
+      self.sessionStore = nil
+      return
     }
     let coordinator = SessionCoordinator(store: sessionStore, initial: initialCatalog)
     self.sessionCoordinator = coordinator
@@ -2117,6 +2111,12 @@ final class AppState {
   /// signal for an agent pane.
   private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
     guard commandQueueRunner == nil else { return }
+    // A pane mid-turn or holding queued commands must keep its surface: the
+    // idle-surface reclaim would otherwise detach it while work is pending.
+    engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] paneID in
+      registry?.entries[paneID]?.state.isMidTask == true
+        || manager?.catalog.pane(paneID)?.commandQueue.isEmpty == false
+    }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
     // aimed at an agent pane needs its Return as a separate keypress.
     let terminal = TerminalClient.live(engine: engine)

@@ -1909,7 +1909,7 @@ struct RootFeatureTests {
     let paneID = PaneID()
     let requestID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
     let (completions, continuation) = AsyncStream<HandoffCompletion>.makeStream()
-    let registered = LockIsolated<[UUID]>([])
+    let registered = LockIsolated<[(UUID, PaneID)]>([])
     let typed = LockIsolated<[(PaneID, String)]>([])
     var initial = RootFeature.State()
     let source = Self.handoffSource(paneID: paneID)
@@ -1920,7 +1920,7 @@ struct RootFeatureTests {
     } withDependencies: {
       $0.uuid = .constant(requestID)
       $0.handoffClient.cli = "codans"
-      $0.handoffClient.register = { id in registered.withValue { $0.append(id) } }
+      $0.handoffClient.register = { id, pane in registered.withValue { $0.append((id, pane)) } }
       $0.handoffClient.completions = { completions }
       $0.handoffClient.sendInstruction = { pane, text in
         typed.withValue { $0.append((pane, text)) }
@@ -1935,13 +1935,16 @@ struct RootFeatureTests {
     await store.receive(\.handoff.presented.delegate.handOff) { state in
       state.handoff = nil
     }
-    #expect(registered.value == [requestID])
+    #expect(registered.value.count == 1)
+    #expect(registered.value.first?.0 == requestID)
+    #expect(registered.value.first?.1 == paneID)
     #expect(typed.value.first?.0 == paneID)
     #expect(
       typed.value.first?.1
-        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, cli: "codans")
+        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
         || typed.value.first?.1
-          == HandoffKickoff.sourceInstruction(for: .handOff(to: .codex), requestID: requestID, cli: "codans")
+          == HandoffKickoff.sourceInstruction(
+            for: .handOff(to: .codex), requestID: requestID, sourcePaneID: paneID, cli: "codans")
     )
 
     // A completion for another request is not ours.
@@ -1974,7 +1977,7 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.uuid = .constant(requestID)
-      $0.handoffClient.register = { _ in }
+      $0.handoffClient.register = { _, _ in }
       $0.handoffClient.completions = { AsyncStream { $0.finish() } }
       $0.handoffClient.sendInstruction = { _, _ in false }
       $0.handoffClient.supersede = { id in

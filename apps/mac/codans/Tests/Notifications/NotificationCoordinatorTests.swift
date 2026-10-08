@@ -531,13 +531,13 @@ struct NotificationCoordinatorTests {
 
   /// Synthesize an arbitrary backup URL with a controlled basename so the
   /// test can assert idempotency-marker content without depending on
-  /// `InboxFile.quarantinePath()`.
+  /// `StoreBackup.moveAside`.
   private func makeBackupURL(basename: String = "notifications.json.bak-20260520T120000Z") -> URL {
     FileManager.default.temporaryDirectory.appending(component: basename)
   }
 
   /// Build a sandboxed marker URL inside the temp dir so tests never touch
-  /// the user's real `~/.config/codans/notifications.quarantine-shown`.
+  /// the user's real `~/.codans/state/notifications.quarantine-shown`.
   private func makeMarkerURL() -> URL {
     FileManager.default.temporaryDirectory
       .appending(component: "notif-quarantine-\(UUID().uuidString).marker")

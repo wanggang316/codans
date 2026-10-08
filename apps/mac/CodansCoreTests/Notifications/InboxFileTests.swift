@@ -119,11 +119,12 @@ struct InboxFileTests {
     try bytes.write(to: url)
 
     let pinnedNow = Date(timeIntervalSince1970: 0)
-    let expectedBackup = InboxFile.quarantinePath(for: url, at: pinnedNow)
+    let expectedBackup = StoreBackup.directory(for: url)
+      .appendingPathComponent("notifications.unsupported-v99-19700101T000000Z.json")
 
     let loaded = try #require(try InboxFile.load(from: url, now: pinnedNow))
     #expect(loaded.entries.isEmpty)
-    #expect(loaded.quarantineBackupURL == expectedBackup)
+    #expect(loaded.quarantineBackupURL?.standardizedFileURL == expectedBackup.standardizedFileURL)
     #expect(FileManager.default.fileExists(atPath: url.path) == false)
     #expect(FileManager.default.fileExists(atPath: expectedBackup.path))
 
@@ -131,20 +132,10 @@ struct InboxFileTests {
     #expect(preservedBytes == bytes)
   }
 
-  /// (5) Quarantine path format: deterministic basic-ISO-8601 timestamp
-  /// in UTC, appended after `.bak-` to the original filename.
+  /// (6) Corrupt file returns empty after moving the bytes into `backups/`,
+  /// so the next save cannot destroy them.
   @Test
-  func quarantinePathFormat() {
-    let url = URL(fileURLWithPath: "/tmp/notifications.json")
-    let path = InboxFile.quarantinePath(for: url, at: Date(timeIntervalSince1970: 0))
-    #expect(path.lastPathComponent == "notifications.json.bak-19700101T000000Z")
-    #expect(path.deletingLastPathComponent().path == "/tmp")
-  }
-
-  /// (6) Corrupt file returns empty without renaming. The bytes stay put
-  /// so `AtomicFileStore`'s next write can overwrite them in place.
-  @Test
-  func corruptFileReturnsEmptyWithoutRename() throws {
+  func corruptFileIsBackedUpAndReturnsEmpty() throws {
     let directory = Self.temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = Self.temporaryURL(in: directory)
@@ -155,9 +146,10 @@ struct InboxFileTests {
     let loaded = try #require(try InboxFile.load(from: url))
     #expect(loaded.entries.isEmpty)
     #expect(loaded.quarantineBackupURL == nil)
-    #expect(FileManager.default.fileExists(atPath: url.path))
-    let preserved = try Data(contentsOf: url)
-    #expect(preserved == garbage)
+    #expect(FileManager.default.fileExists(atPath: url.path) == false)
+    let backups = try FileManager.default.contentsOfDirectory(at: StoreBackup.directory(for: url), includingPropertiesForKeys: nil)
+    #expect(backups.count == 1)
+    #expect(try Data(contentsOf: backups[0]) == garbage)
   }
 
   /// (7) Absent file returns nil — the sentinel for "fresh install".

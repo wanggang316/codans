@@ -38,7 +38,7 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 | `CodansEnvironment.Key` | codans 读或写的每一个环境变量名，附写者、读者、生命周期 | 所有读写点；类型化持有者（`BuiltinEnvVar`、`TermProgramEnv`、`CLIBundleLocator.EnvKey`、`HandoffKickoff.requestIDEnvironmentKey`）保留 API、从它取值 |
 | `HandoffLayout` | `.codans/handoff/` 的文件与目录名 | `HandoffStore`（URL）、`HandoffKickoff`（给接收方的相对路径字符串） |
 
-app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，worktree pane 和 Master Terminal 共用。
+app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，所有 surface 共用。
 
 ### 通道隔离了什么
 
@@ -46,14 +46,17 @@ app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane
 
 ```
                      Debug                               Release
-config root          ~/.config/codans-dev/               ~/.config/codans/
-ZMX_DIR              ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
+config root          ~/.codans-dev/config/               ~/.codans/config/
+state root           ~/.codans-dev/state/                ~/.codans/state/
+cache root (ZMX_DIR) ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
 IPC socket           /tmp/codans-dev-<uid>.sock          /tmp/codans-<uid>.sock
 CLI 名               codans-dev                          codans
   包内文件           Contents/Resources/bin/codans-dev   Contents/Resources/bin/codans
   安装软链           /usr/local/bin/codans-dev           /usr/local/bin/codans
   自称               --help / 报错提示 / 握手 clientBinary 都用本名
 ```
+
+config 根放用户会手改的文件，state 根放只有 app 写的文件，cache 根放可重建的数据。0.7.8 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。`~/.codans/` 下的 `repos/`、`workspaces/`、`sources/` 是用户的 git 工作区，不按通道区分，两个构建共用。
 
 两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 
@@ -108,7 +111,7 @@ forSurface(base, paneID:, zmxDirectory:)
   7. CODANS_PANE_ID  pane 自己的 id
 ```
 
-worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。Master Terminal 没有项目，走同样两个阶段、overrides 为空。
+worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。
 
 只注入 `CODANS_PANE_ID` 而不注入 tab / worktree / project id 是有意的：pane id 终生不变，烘进环境是安全的；其余三个会随 pane 被移动而过期，所以由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认这五个键，是为了让调用方手动导出时能就地短路，但 app 只写 pane 那一个。
 
@@ -126,13 +129,15 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 | 变量 | 作用 | 典型用法 |
 |---|---|---|
-| `CODANS_CONFIG_DIR` | 整体搬走配置根，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
+| `CODANS_CONFIG_DIR` | 搬走配置根；未设 `CODANS_STATE_DIR` 时状态根也平铺进同一目录，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
+| `CODANS_STATE_DIR` | 单独搬走状态根（catalog、sessions、inbox 等），优先于 `CODANS_CONFIG_DIR` | 只隔离状态、共用配置 |
 | `CODANS_CACHE_DIR` | 独立的终端缓存根目录，包含 zmx socket、快照与日志 | 配合配置目录和 RPC socket 隔离 GUI / 集成测试 |
 | `CODANS_SOCKET_PATH` | 指定 IPC socket | pane 内由 app 注入；手动指定实例 |
 | `CODANS_CLI` | 生成该 pane 的 app 自带 CLI 的绝对路径 | pane 内由 app 注入；`PATH` 被 rc 重建时用 `"$CODANS_CLI"` |
 | `CODANS_CLI_BINARY` | 安装器指向 `.app` 外新编的 CLI | dev |
 | `CODANS_GHOSTTY_RESOURCES` | libghostty 资源树的替代根 | 未打包的 `xcodebuild run` |
 | `CODANS_DISABLE_ACTION_ROUTING` / `CODANS_DISABLE_THEME_DEV_FALLBACK` | 诊断与测试开关 | 值为 `"1"` 生效 |
+| `CODANS_SURFACE_RECLAIM_SECONDS` | 空闲 surface 回收的隐藏时长（秒，默认 1200） | 仅冒烟测试用；非正数或无法解析时保持默认 |
 | `CODANS_REMOTE_DISABLED` | 无视设置，强制关闭 iOS 伴侣的局域网网关（不监听、不广播 Bonjour） | 隔离测试实例，值为 `"1"` 生效 |
 | `CODANS_RELAY_URL` | 覆盖外网访问所用的中继地址（`ws://` 或 `wss://` 基础 URL），未设置时使用 `wss://relay.codans.dev` | 端到端测试指向本地中继 |
 

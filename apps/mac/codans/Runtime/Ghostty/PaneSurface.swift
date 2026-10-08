@@ -26,17 +26,20 @@ final class PaneSurface {
   private(set) var state: State = .initialising
   let view: GhosttySurfaceView
   /// zmx session name this surface's shell runs under. libghostty's exec
-  /// backend runs `zmx attach <session>` as the surface command, so the
-  /// real shell lives in a resume-friendly daemon while libghostty owns
-  /// and sizes a normal local PTY. Used to address the daemon's control
+  /// backend runs the shell under `zmx attach <session>`, so the real
+  /// shell lives in a resume-friendly daemon while libghostty owns and
+  /// sizes a normal local PTY. Used to address the daemon's control
   /// socket for out-of-band queries (`.info` shell PID) and teardown
   /// (`.kill`).
   let session: String
-  /// Daemon's shell child PID, learned from a `.info` control query once
+  /// PID of the daemon's child, learned from a `.info` control query once
   /// the daemon is up. libghostty's child is the `zmx attach` client, not
   /// the shell, so `childProcessID()` hands this daemon-side PID to
   /// `ForegroundJobReader`, which resolves the live foreground process
-  /// group from the shell's `e_tpgid`. 0 until the probe lands.
+  /// group from its `e_tpgid`. For an interactive pane on macOS that child
+  /// is login(1) in front of the shell: it shares the shell's controlling
+  /// tty (same `e_tpgid`) and sits on the ancestry of everything run in the
+  /// pane, which is all both readers need. 0 until the probe lands.
   private var daemonShellPID: Int32 = 0
   /// Retrying probe that fills `daemonShellPID`. The daemon socket appears
   /// shortly after libghostty forks the `zmx attach` child, so the probe
@@ -103,7 +106,7 @@ final class PaneSurface {
     runtime: GhosttyRuntime,
     paneID: PaneID,
     session: String,
-    command: String,
+    launch: SurfaceLaunch,
     workingDirectory: String,
     env: [String: String],
     fontSize: Float32 = 13.0
@@ -142,20 +145,26 @@ final class PaneSurface {
     // UUID so the callback survives the C→main-queue hop even if the
     // PaneSurface object is freed in-between.
     config.userdata = UnsafeMutableRawPointer(paneIDUserdata)
-    // Exec backend: libghostty forks `command` (a `zmx attach <session>`
-    // invocation) and owns the local PTY plus its sizing — it spawns the
-    // child only once a real post-layout size is known, so the shell never
-    // renders at a placeholder width. The attached shell itself lives in
-    // the resume-friendly daemon. ghostty injects TERM/COLORTERM for the
-    // exec child, so only project env + ZMX_DIR need threading through `env`.
-    let commandC = command.withCString { strdup($0)! }
+    // Exec backend: libghostty forks the child under `zmx attach <session>`
+    // (as the wrapper of the shell it resolves, or inside a fixed command —
+    // see `SurfaceLaunch`) and owns the local PTY plus its sizing — it
+    // spawns the child only once a real post-layout size is known, so the
+    // shell never renders at a placeholder width. The attached shell itself
+    // lives in the resume-friendly daemon. ghostty injects TERM/COLORTERM
+    // and its shell-integration variables for the exec child, so only
+    // project env + ZMX_DIR need threading through `env`.
+    let commandC = launch.command.map { $0.withCString { strdup($0)! } }
     let cwdC = workingDirectory.withCString { strdup($0)! }
+    let wrapperC: [UnsafePointer<CChar>?] = launch.wrapper.map { UnsafePointer($0.withCString { strdup($0)! }) }
     defer {
       free(commandC)
       free(cwdC)
+      for arg in wrapperC { free(UnsafeMutablePointer(mutating: arg)) }
     }
-    config.command = UnsafePointer(commandC)
+    config.command = commandC.map { UnsafePointer($0) }
     config.working_directory = UnsafePointer(cwdC)
+    config.wait_after_command = launch.waitsAfterCommand
+    config.disable_shell_integration = launch.disablesShellIntegration
     // ghostty copies env vars into its own arena during `ghostty_surface_new`,
     // so the strdup'd C strings only need to outlive that call.
     var envVars = env.map { key, value in
@@ -176,7 +185,13 @@ final class PaneSurface {
         config.env_vars = base
         config.env_var_count = buffer.count
       }
-      return ghostty_surface_new(app, &config)
+      return wrapperC.withUnsafeBufferPointer { wrapper in
+        if let base = wrapper.baseAddress, !wrapper.isEmpty {
+          config.command_wrapper = base
+          config.command_wrapper_count = wrapper.count
+        }
+        return ghostty_surface_new(app, &config)
+      }
     }
     guard let surface = created else {
       // Surface the diagnostic context libghostty doesn't return through
@@ -281,6 +296,14 @@ final class PaneSurface {
     ghostty_surface_free(surface)
     self.surface = nil
     view.detachSurface()
+  }
+
+  /// Whether the surface view sits in a window and no ancestor hides it.
+  /// A deselected tab's host is torn down, which detaches the view from its
+  /// window; a minimised or covered window still counts as displayed so a
+  /// returning user never meets a re-attach.
+  var isDisplayed: Bool {
+    view.window != nil && !view.isHiddenOrHasHiddenAncestor
   }
 
   func setFocus(_ focused: Bool) {

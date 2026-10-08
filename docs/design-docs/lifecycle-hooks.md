@@ -41,7 +41,7 @@ Hooks 是让后续能力可编程的基底：
 - **低成本的 idle 与 output-match 路径。** idle 定时器是 per-Pane 单发任务、I/O 时重置；output-match 对每个 `pane.output` 事件做编译正则批量评估，非逐字节扫描。无 output-match 订阅时 idle 成本近零。
 - **Per-Pane 崩溃隔离。** 一个崩溃、挂起或写垃圾的 handler 绝不影响 Pane、其 Tab 或任何其他 handler。超时杀的是 handler 进程，不是应用。
 - **可无头测试。** `HookDispatcher` 单测不依赖 GhosttyKit / AppKit / Process——经可插拔的 `HookExecutor` 协议传 JSON 进、断言 JSON 出。
-- **配置热重载。** `codans hook reload`（与对 `~/.config/codans/hooks.json` 的文件系统监听）无须重启即拾取编辑；在飞 handler 用旧配置跑完。
+- **配置热重载。** `codans hook reload`（与对 `~/.codans/config/hooks.json` 的文件系统监听）无须重启即拾取编辑；在飞 handler 用旧配置跑完。
 
 ### 非目标
 
@@ -113,7 +113,7 @@ TerminalEvent  ──►  HookEvent  ──►  match subscriptions  ──►  
                                               HierarchyManager + TerminalEngine
                                               (existing writers)
 
-     ~/.config/codans/hooks.json   ──► HookConfigStore ──► HookDispatcher
+     ~/.codans/config/hooks.json   ──► HookConfigStore ──► HookDispatcher
         (atomic-rename; FSEventStream watch)
 ```
 
@@ -263,7 +263,7 @@ public nonisolated struct HookSubscription: Codable, Equatable, Sendable, Identi
 }
 ```
 
-#### `HookConfig` 文件 schema（`~/.config/codans/hooks.json`）
+#### `HookConfig` 文件 schema（`~/.codans/config/hooks.json`）
 
 `{ version: 1, recursionWindowMs: 250, subscriptions: [HookSubscription…] }`。与 `catalog.json` 同样的 atomic-rename + version-gated 解码器。loader 是 `Hooks.HookConfigStore.load()`，writer 是 `HookConfigStore.save(_:)`。
 
@@ -419,7 +419,7 @@ sentinel-prefix 路由使 `hooks.json` 保持唯一用户可见注册表：一�
 
 | 失败模式 | 处理 |
 |---|---|
-| `hooks.json` 解析错 | 备份到 `hooks.json.broken-<ISO>`，记 `.error`，加载零订阅（不崩） |
+| `hooks.json` 解析错 | 备份到 `backups/hooks.corrupt-<ts>.json`，记 `.error`，加载零订阅（不崩） |
 | 订阅里坏正则 | load 时以 `HookConfigError.invalidRegex` 拒绝该订阅，加载其余 |
 | `env` 里保留键冲突 | load 时以 `HookConfigError.reservedEnv` 拒绝该订阅 |
 | handler 二进制缺失 | `Process.run()` 抛错；记为 `exitCode = -1`，警告 |

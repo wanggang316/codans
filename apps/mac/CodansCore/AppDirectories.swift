@@ -15,28 +15,59 @@ import Foundation
 /// The suffix comes from `BuildChannel`, which is where the build-type
 /// decision is made and why.
 public nonisolated enum AppDirectories {
-  /// Base directory name used under both `~/.config` and `~/Library/Caches`.
-  /// `codans-dev` for Debug builds, `codans` for Release.
+  /// Channel slug: `codans-dev` for Debug builds, `codans` for Release. Names
+  /// the cache root and the legacy `~/.config/<name>` directory.
   public static let name: String = BuildChannel.current.slug
 
-  /// `~/.config/<name>` — user-facing config root holding `catalog.json`,
-  /// `sessions.json`, `settings.json`, `notifications.json`, `shortcuts.json`,
-  /// `github-snapshots.json`, and the `master-terminal/` subtree.
+  /// `~/.<name>` — the channel's root: `~/.codans` for Release,
+  /// `~/.codans-dev` for Debug. Config and state live under it, so the two
+  /// channels are isolated at the top level.
+  public static func channelDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    home.appendingPathComponent(".\(name)", isDirectory: true)
+  }
+
+  /// `~/.codans[-dev]/config` — files the user may edit by hand:
+  /// `settings.json` and `shortcuts.json`.
   public static func configDirectory(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
     override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.configDirectory.rawValue]
   ) -> URL {
-    // `$CODANS_CONFIG_DIR`, when set and non-empty, fully relocates the config
-    // root — every config file (`settings.json`, `catalog.json`, `sessions.json`,
-    // `notifications.json`, …) lands under it. This is the isolation seam for a
-    // dev / smoke / integration run that must not touch the user's real
-    // `~/.config/codans[-dev]/`. When unset, the build-type-suffixed default
-    // applies (Release `codans`, Debug `codans-dev`) — unchanged.
     if let override, !override.isEmpty {
       return URL(fileURLWithPath: override, isDirectory: true)
     }
-    return
-      home
+    return channelDirectory(home: home).appendingPathComponent("config", isDirectory: true)
+  }
+
+  /// `~/.codans[-dev]/state` — files only the app writes: `catalog.json`,
+  /// `sessions.json`, `notifications.json`, the remote-host sidecars,
+  /// `project-icons/`, `agent-homes/`, and `backups/`.
+  ///
+  /// `$CODANS_CONFIG_DIR` alone still relocates *every* store (config and
+  /// state land flat in that one directory), so an isolated smoke run that
+  /// predates the config/state split keeps all its data private.
+  /// `$CODANS_STATE_DIR` relocates state on its own and wins over it.
+  public static func stateDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.stateDirectory.rawValue],
+    configOverride: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.configDirectory.rawValue]
+  ) -> URL {
+    if let override, !override.isEmpty {
+      return URL(fileURLWithPath: override, isDirectory: true)
+    }
+    if let configOverride, !configOverride.isEmpty {
+      return URL(fileURLWithPath: configOverride, isDirectory: true)
+    }
+    return channelDirectory(home: home).appendingPathComponent("state", isDirectory: true)
+  }
+
+  /// `~/.config/<name>` — where every store lived before the config/state
+  /// split. Read only by `LegacyConfigMigrator`.
+  public static func legacyConfigDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    home
       .appendingPathComponent(".config", isDirectory: true)
       .appendingPathComponent(name, isDirectory: true)
   }

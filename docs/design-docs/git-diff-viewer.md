@@ -71,6 +71,6 @@ Old-side/deleted targets are explicitly unavailable. Outgoing requests open the 
 
 ## Verification references
 
-[GUI cases](../user-tests/git-diff-viewer.md) define the interactive checks. `DiffFeatureTests`, `DiffWindowManagerTests`, `EditorFileOpenTests`, and Git comparison tests cover request generations, window ownership, editor arguments, and temporary-repository comparisons. Transport tests exercise the SSH execution boundary; they do not establish end-to-end remote GUI behavior.
+`DiffFeatureTests`, `DiffWindowManagerTests`, `EditorFileOpenTests`, and Git comparison tests cover request generations, window ownership, editor arguments, and temporary-repository comparisons. Transport tests exercise the SSH execution boundary; they do not establish end-to-end remote GUI behavior.
 
 The file list and code area remain independently resizable inside the Diff window. Background polling does not flash a loading indicator over an existing snapshot.

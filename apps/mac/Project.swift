@@ -271,8 +271,6 @@ let project = Project(
         "codans/App/Features/GitHub",
         "codans/App/Features/GitHub/Theme",
         "codans/App/Features/GitHub/Views",
-        "codans/App/Features/MasterTerminal",
-        "codans/App/Features/MasterTerminal/Resources",
         "codans/Runtime",
         "codans/Process",
         "codans/Git",
@@ -415,7 +413,6 @@ let project = Project(
         "codans/Tests/GitHubTests",
         "codans/Tests/StatusBarTests",
         "codans/Tests/Shortcuts",
-        "codans/Tests/MasterTerminal",
       ],
       dependencies: [
         .target(name: "Codans"),

@@ -130,7 +130,7 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 - **Hand Off with Brief**（主按钮；选中 "Only save progress" 时是普通的 **Save Progress**）——生成一次性 `requestID`、在 `HandoffRequestRegistry` 登记，把一行请求键入源 pane：`[codans] Please hand this task off to <Agent>: run \`CODANS_HANDOFF_REQUEST_ID=<id> codans handoff to <agent> [--split right] --brief -\` with your briefing on stdin as a heredoc …`。放置选择以 CLI flag 的形式随命令走，CLI 路径与面板不需要第二条通道。agent 写好 briefing、执行命令后，`HandoffHandlers` 经 registry 广播 `HandoffCompletion`，`RootFeature` 按 `requestID` + 源 pane 匹配，弹 toast 并跳到接收方 pane。请求可能触发 agent 的权限审批，用户在 agent 的 pane 里批准即可；等待期间 UI 上没有任何东西可点。
 - **Hand Off with Context**（下拉菜单）——直接在进程内经同一个 `HandoffHandlers` 跑 context-only 迁移，不登记 `requestID`、不询问 agent，完成后同样弹 toast 并跳到接收方。
 
-pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把请求标记 superseded 并弹警告，提示改用 Hand Off with Context；不再静默降级为 context-only。registry 的 claim / supersede 在 main actor 上串行，保证同一个请求最多执行一次。两条路径只在确认按钮上相遇，agent 不会被要求写一份注定被拒收的 briefing。
+pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把请求标记 superseded 并弹警告，提示改用 Hand Off with Context；不再静默降级为 context-only。注入命令显式携带源 pane 的 `--pane <UUID>`，不依赖 agent 工具进程继承的环境变量。registry 将 requestID 绑定到源 pane；源 pane 不匹配时，在写入和启动之前拒绝，且不消费请求。registry 的 claim / supersede 在 main actor 上串行，保证同一个请求最多执行一次。两条路径只在确认按钮上相遇，agent 不会被要求写一份注定被拒收的 briefing。
 
 ### 组件边界
 
@@ -159,7 +159,7 @@ pane 无法接收注入的请求时（surface 不存在），`RootFeature` 把�
 - **由 codans 读取 agent 的本地会话记录合成 briefing。** 否决：transcript 不等于源 agent 显式确认的交接内容；自动合成还需要额外模型调用，不属于 codans 的职责。
 - **profile 存到 `catalog.json`。** 否决：profile 是用户偏好不是层级状态，`settings.json` 已是单写者模型且可手编。
 - **面板自己实现迁移。** 否决：两份序列必然漂移；见 D6。
-- **handoff 工件放在 `~/.config/codans/` 而非 worktree 内。** 否决：接收方 agent 需要在自己的 cwd 下读到它，且工件与 worktree 生命周期一致。
+- **handoff 工件放在 `~/.codans/state/` 而非 worktree 内。** 否决：接收方 agent 需要在自己的 cwd 下读到它，且工件与 worktree 生命周期一致。
 
 ## Cross-Cutting
 

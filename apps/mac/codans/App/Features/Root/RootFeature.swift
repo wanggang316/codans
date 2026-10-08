@@ -625,9 +625,11 @@ struct RootFeature {
                 // A non-shell, non-agent command lights the tab-chip /
                 // sidebar spinner even when the program never emits OSC 9;4.
                 // Agents are excluded here; their activity is render-derived.
+                // So are interactive remote sessions (`ssh host`), which hold
+                // the foreground until logout.
                 await send(
                   .paneCommandBusyChanged(
-                    paneID, ForegroundJobClassifier.indicatesRunningCommand(job)))
+                    paneID, ForegroundJobClassifier.indicatesBusyCommand(job)))
                 // Same source, narrower predicate: track `git` / `gh` commands
                 // so a finishing `gh pr create` / `git push` triggers an
                 // immediate PR + diff refresh.
@@ -2878,9 +2880,9 @@ struct RootFeature {
     switch order {
     case .brief(let request, let title):
       let requestID = uuid()
-      client.register(requestID)
+      client.register(requestID, paneID)
       let instruction = HandoffKickoff.sourceInstruction(
-        for: request, requestID: requestID, cli: client.cli, placement: placement)
+        for: request, requestID: requestID, sourcePaneID: paneID, cli: client.cli, placement: placement)
       let agent = source.agentName
       return .run { send in
         // Subscribe before typing: the stream does not replay, and a fast

@@ -32,8 +32,8 @@ Use [_template.md](_template.md) as a starting point.
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — 统一快捷键注册表：物理键持久化、三态模型、三级冲突 + 级联重置、独立 `shortcuts.json`
 - [Lifecycle Hooks](lifecycle-hooks.md) — **已设计未实现**：Pane/Tab/Worktree 生命周期 hook 的 out-of-process 执行模型 + 事件 wire schema + stdout DSL
 - [Main Window](main-window.md) — 主窗口三子系统（Sidebar / Header / Tab 条）的不变量与边界：env 直读 catalog、intent 侧选择编排、单一来源默认编辑器解析、runtime-only dirty 态
-- [Master Terminal](master-terminal.md) — 系统级热键唤起的 slide-in NSPanel，承载跑 `claude remote-control` 的 Ghostty surface，app 级、在 Catalog/RPC 之外
 - [Notifications](notifications.md) — 运行时事件 → 持久 inbox + 四级上卷徽标 + 状态栏铃铛；策略闸 `NotificationCoordinator` 统一门控设置与授权
+- [Pane Shell Integration](pane-shell-integration.md) — Ghostty fork 增加 command-wrapper，本地 pane 由 libghostty 解析并集成真实 shell、zmx 作外层监管；默认开 `ssh-env`/`sudo`、关 `title`/`path`（默认值落在 fork）；远端 pane 只对 `xterm-ghostty` 做 terminfo 回退
 - [Project Tags + Single-Window](project-tags.md) — 单窗口强制（已上线）+ Project `Tag` 分类模型与持久化（过滤与分配 UI 隐藏，Tag CLI 未提供）
 - [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；已接线远程 worktree 创建/删除与连接编辑
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、版本读取与恢复、四正交通知开关）

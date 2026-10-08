@@ -115,6 +115,22 @@ final class TerminalEngine {
   private let clock: @Sendable () -> Date
   private var finished = false
 
+  // MARK: Idle-surface reclaim
+
+  /// Thresholds for detaching long-hidden pane surfaces; see
+  /// `SurfaceReclaimPolicy`.
+  var reclaimPolicy = SurfaceReclaimPolicy()
+  /// App-level veto, consulted per candidate: the agent store and command
+  /// queue live above the Runtime layer, so the app injects what it knows.
+  var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
+  /// Last time each registered surface was seen inside a window.
+  private var lastDisplayedAt: [PaneID: Date] = [:]
+  /// Panes whose surface was detached by the reclaim sweep. Their zmx daemon
+  /// still runs, so a later `ensureSurface` is a re-attach, not a spawn:
+  /// it must not replay `initialCommand` into the live shell.
+  private(set) var reclaimedPanes: Set<PaneID> = []
+  private var reclaimSweepTask: Task<Void, Never>?
+
   /// Inject a `GhosttyRuntime` for real pane surfaces, or pass `nil` for
   /// headless tests. When nil, `ensureSurface` throws.
   init(
@@ -147,6 +163,7 @@ final class TerminalEngine {
   deinit {
     foregroundJobPollTask?.cancel()
     remoteProbeTask?.cancel()
+    reclaimSweepTask?.cancel()
   }
 
   // MARK: - Pane surface lifecycle
@@ -221,13 +238,13 @@ final class TerminalEngine {
     // SSH reconnect loop that lands in the remote worktree. The remote `cd`
     // owns the directory, so libghostty's local `working_directory` (which it
     // chdirs the ssh process into) must be a real *local* path — the remote
-    // worktree path is meaningless locally. Local panes keep the unchanged
-    // `zmx attach <session>` command anchored at the pane's own directory.
+    // worktree path is meaningless locally. Local panes run the user's shell
+    // under `zmx attach <session>`, anchored at the pane's own directory.
     let remoteHost = remoteHost(forPane: pane.id)
-    let command: String
+    let launch: SurfaceLaunch
     let surfaceWorkingDirectory: String
     if let remoteHost {
-      command = RemoteSurfaceCommand.build(
+      let command = RemoteSurfaceCommand.build(
         host: remoteHost,
         paneID: pane.id,
         remotePath: pane.workingDirectory,
@@ -236,13 +253,17 @@ final class TerminalEngine {
         localZmxPath: try? PaneDaemonBringup.zmxBinaryURL().path,
         hostPersistence: true
       )
+      launch = .command(command)
       surfaceWorkingDirectory = NSHomeDirectory()
     } else {
-      command = ZmxAttachCommand.build(
-        zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
-        session: session,
-        userCommand: nil,
-        restoreFrom: restorePath
+      // libghostty resolves and integrates the user's shell and runs it
+      // under this wrapper (docs/design-docs/pane-shell-integration.md).
+      launch = .interactive(
+        wrapper: ZmxAttachCommand.wrapperArgv(
+          zmxPath: try PaneDaemonBringup.zmxBinaryURL().path,
+          session: session,
+          restoreFrom: restorePath
+        )
       )
       surfaceWorkingDirectory = pane.workingDirectory
     }
@@ -264,16 +285,17 @@ final class TerminalEngine {
     do {
       surface = try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session,
-        command: command, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
+        launch: launch, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
       )
     } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
       runtime.tick()
       surface = try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session,
-        command: command, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
+        launch: launch, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
       )
     }
     runtime.register(pane: surface)
+    let isReattach = noteSurfaceRegistered(pane.id)
     // Continuous catalog write-through: record the live session so a crash
     // between launches still surfaces this pane to the next launch's reaper.
     // The socket path is derivable from the pane id + canonical ZMX_DIR; the
@@ -342,6 +364,10 @@ final class TerminalEngine {
     // `.shellEditor` launches ("$EDITOR\n") actually run. HierarchyManager.openPane stores
     // the command on the Pane; this is the one place it gets replayed when the surface
     // comes up.
+    // A re-attach after an idle reclaim reaches a shell that already ran it
+    // (or a TUI that would take the text as typed input), and the pane never
+    // stopped existing, so no lifecycle event either.
+    if isReattach { return surface }
     if let initialCommand = pane.initialCommand, !initialCommand.isEmpty {
       surface.sendInput(initialCommand + "\n")
     }
@@ -371,6 +397,12 @@ final class TerminalEngine {
       // silent no-op. No `.paneExited` is emitted: there was no surface to
       // close, and the event's consumers all key off surface teardown.
       ZmxControlClient.kill(for: paneID)
+      // A reclaimed pane did have a live surface this session, so its
+      // per-pane state (polling, snapshots, process row) is still held and
+      // its consumers expect the normal close event.
+      if reclaimedPanes.contains(paneID) {
+        handleSurfaceClose(paneID: paneID, processAlive: true)
+      }
       return
     }
     surface.closeKillingDaemon()
@@ -391,6 +423,9 @@ final class TerminalEngine {
       // No live surface — kill the still-running daemon directly via its
       // control socket (a missing socket is a silent no-op).
       ZmxControlClient.kill(for: paneID)
+      if reclaimedPanes.contains(paneID) {
+        handleSurfaceClose(paneID: paneID, processAlive: true, announce: false)
+      }
       return
     }
     surface.closeKillingDaemon()
@@ -445,7 +480,7 @@ final class TerminalEngine {
       // so repeats on the normal path are harmless.
       runtime.defocusAllSurfaces(except: paneID)
       if window.firstResponder !== surface.view {
-        window.makeFirstResponder(surface.view)
+        surface.view.claimFirstResponder(in: window, reason: "focusSurfaceView")
       }
       return
     }
@@ -483,6 +518,8 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    reclaimedPanes.remove(paneID)
+    lastDisplayedAt.removeValue(forKey: paneID)
     foregroundJobPaneIDs.remove(paneID)
     remoteForegroundPanes.removeValue(forKey: paneID)
     remoteProcessGenerations.removeValue(forKey: paneID)
@@ -604,6 +641,8 @@ final class TerminalEngine {
     finished = true
     foregroundJobPollTask?.cancel()
     foregroundJobPollTask = nil
+    reclaimSweepTask?.cancel()
+    reclaimSweepTask = nil
     // Drain any pending output into the lifecycle-bound path before finishing.
     for (_, buffer) in outputBuffers {
       buffer.flush()
@@ -865,6 +904,91 @@ final class TerminalEngine {
     }
   }
 
+  // MARK: - Idle-surface reclaim
+
+  /// Whether the pane's surface was detached by the reclaim sweep while its
+  /// daemon keeps running. Out-of-band probes (`pane.read`, `pane.info`)
+  /// use this: the daemon answers them with no surface attached.
+  func isReclaimed(_ paneID: PaneID) -> Bool {
+    reclaimedPanes.contains(paneID)
+  }
+
+  /// Bookkeeping for a freshly registered surface. Returns whether it is a
+  /// re-attach of a reclaimed pane.
+  private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
+    lastDisplayedAt[paneID] = clock()
+    startReclaimSweepIfNeeded()
+    return reclaimedPanes.remove(paneID) != nil
+  }
+
+  /// Detach a pane's surface but keep its zmx daemon. Frees the surface's
+  /// Metal buffers and its four libghostty threads. Unlike `closeSurface`,
+  /// no lifecycle event is emitted and the sampling state (foreground
+  /// snapshot, process row) is kept, so the pane still looks alive to its
+  /// observers; only the live poll stops until `ensureSurface` re-attaches.
+  func reclaimSurface(for paneID: PaneID) {
+    guard let surface = ghosttyRuntime?.surface(for: paneID) else { return }
+    // Detaching ends the `zmx attach` child; make sure that cannot surface
+    // as a pane exit.
+    surface.onClose = nil
+    disposeOutputBuffer(for: paneID)
+    surface.close()
+    ghosttyRuntime?.unregister(paneID: paneID)
+    foregroundJobPaneIDs.remove(paneID)
+    lastDisplayedAt.removeValue(forKey: paneID)
+    reclaimedPanes.insert(paneID)
+    stopForegroundJobPollingIfIdle()
+    Self.logger.info(
+      "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
+    )
+  }
+
+  /// One sweep: note which surfaces are on screen, then reclaim the ones the
+  /// policy accepts. Returns the reclaimed panes.
+  @discardableResult
+  func reclaimIdleSurfaces() -> [PaneID] {
+    guard let runtime = ghosttyRuntime else { return [] }
+    let now = clock()
+    var reclaimed: [PaneID] = []
+    for surface in runtime.allLiveSurfaces() {
+      let paneID = surface.paneID
+      // Surfaces outside the catalog (the master terminal) are not ours to
+      // manage.
+      guard hierarchy.catalog.pane(paneID) != nil else { continue }
+      if surface.isDisplayed {
+        lastDisplayedAt[paneID] = now
+        continue
+      }
+      let hiddenSince = lastDisplayedAt[paneID] ?? now
+      lastDisplayedAt[paneID] = hiddenSince
+      let candidate = SurfaceReclaimPolicy.Candidate(
+        hiddenFor: now.timeIntervalSince(hiddenSince),
+        quietFor: now.timeIntervalSince(viewportChangedAt[paneID] ?? .distantPast),
+        foregroundJob: foregroundJobSnapshots[paneID],
+        isRemote: remoteForegroundPanes[paneID] != nil,
+        isSurfaceReady: surface.state == .ready,
+        isVetoed: reclaimVeto(paneID)
+      )
+      if reclaimPolicy.shouldReclaim(candidate) {
+        reclaimSurface(for: paneID)
+        reclaimed.append(paneID)
+      }
+    }
+    return reclaimed
+  }
+
+  private func startReclaimSweepIfNeeded() {
+    guard reclaimSweepTask == nil, !finished else { return }
+    reclaimSweepTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        guard let interval = self?.reclaimPolicy.sweepInterval else { return }
+        try? await Task.sleep(for: .seconds(interval))
+        guard let self, !Task.isCancelled else { return }
+        self.reclaimIdleSurfaces()
+      }
+    }
+  }
+
   // MARK: - Remote foreground probe
 
   private func startRemoteForegroundProbingIfNeeded() {
@@ -951,7 +1075,7 @@ final class TerminalEngine {
         if AgentKindPatterns.classify(foregroundJob: job) != nil {
           return .milliseconds(300)
         }
-        if ForegroundJobClassifier.indicatesRunningCommand(job) {
+        if ForegroundJobClassifier.indicatesBusyCommand(job) {
           sawRunningCommand = true
         }
       }

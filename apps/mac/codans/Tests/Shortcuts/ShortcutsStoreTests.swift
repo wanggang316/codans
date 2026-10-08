@@ -140,7 +140,7 @@ struct ShortcutsStoreTests {
     #expect(store.overrides.overrides.isEmpty)
 
     let backups = Self.findBackups(siblingOf: url)
-    #expect(!backups.isEmpty, "Expected a `shortcuts.json.broken-*` backup beside the canonical URL.")
+    #expect(!backups.isEmpty, "Expected a `backups/shortcuts.*` backup next to the canonical URL.")
   }
 
   @Test
@@ -186,10 +186,10 @@ struct ShortcutsStoreTests {
   func defaultURLPointsAtConfigDirectory() {
     let home = URL(fileURLWithPath: "/tmp/fake-home", isDirectory: true)
     let url = ShortcutsStore.defaultURL(home: home)
-    // Build-type aware: Debug test runs resolve `AppDirectories.name` to
-    // `codans-dev`, Release to `codans` — assert against the same
-    // source of truth rather than a hardcoded segment.
-    #expect(url.path == "/tmp/fake-home/.config/\(AppDirectories.name)/shortcuts.json")
+    // Build-type aware: Debug test runs resolve to `~/.codans-dev`, Release
+    // to `~/.codans` — assert against the same source of truth.
+    #expect(url.path == AppDirectories.configDirectory(home: home, override: nil).path + "/shortcuts.json")
+    #expect(url.path == "/tmp/fake-home/.\(AppDirectories.name)/config/shortcuts.json")
   }
 
   // MARK: - Test helpers
@@ -202,8 +202,8 @@ struct ShortcutsStoreTests {
   }
 
   private static func findBackups(siblingOf url: URL) -> [URL] {
-    let directory = url.deletingLastPathComponent()
-    let prefix = "\(url.lastPathComponent).broken-"
+    let directory = StoreBackup.directory(for: url)
+    let prefix = "\(url.deletingPathExtension().lastPathComponent)."
     let entries = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
     return
       entries

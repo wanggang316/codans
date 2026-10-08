@@ -52,7 +52,8 @@ struct HandoffHandlersTests {
     agent: AgentKind? = .claudeCode,
     isRemote: Bool = false,
     profiles: [AgentProfile]? = nil,
-    screen: String? = "last screen"
+    screen: String? = "last screen",
+    registry: HandoffRequestRegistry = HandoffRequestRegistry()
   ) throws -> Harness {
     let root = FileManager.default.temporaryDirectory
       .appending(path: "HandoffHandlersTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -74,7 +75,6 @@ struct HandoffHandlersTests {
       sessionID: agent == nil ? nil : "sess-1",
       paneTitle: "source"
     )
-    let registry = HandoffRequestRegistry()
     let launches = LaunchRecorder()
     let handlers = HandoffHandlers(
       settings: settings,
@@ -158,9 +158,31 @@ struct HandoffHandlersTests {
       return
     }
     #expect(path == ["brief"])
-    #expect(message.contains("codans handoff to codex --brief - <<'EOF'"))
+    #expect(message.contains("codans handoff to codex --pane \(harness.source.paneID) --brief - <<'EOF'"))
     #expect(!FileManager.default.fileExists(atPath: harness.store.handoffDirectory.path(percentEncoded: false)))
     #expect(harness.launches.specs.isEmpty)
+  }
+
+  @Test
+  func retryGuidanceKeepsThePanelRequestBound() async throws {
+    let harness = try Self.makeHarness()
+    let requestID = UUID()
+    harness.registry.register(requestID, sourcePaneID: harness.source.paneID)
+    let error = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(.to, harness, receiver: "codex", requestID: requestID, target: .split, direction: .down))
+    }
+    guard case .invalidParams(let message, _) = error else {
+      Issue.record("expected invalidParams, got \(String(describing: error))")
+      return
+    }
+    // Without the request id and pane, a retry would bypass the registry and
+    // resolve the source from the agent's inherited environment.
+    let retry = HandoffKickoff.command(
+      for: .handOff(to: .codex), requestID: requestID, sourcePaneID: harness.source.paneID,
+      cli: "codans", placement: .split(.down))
+    #expect(message.contains("\(retry) <<'EOF'"))
+    #expect(harness.registry.claim(requestID, sourcePaneID: harness.source.paneID) == .claimed)
   }
 
   @Test
@@ -412,11 +434,70 @@ struct HandoffHandlersTests {
 
   // MARK: - Request authorization
 
+  @Test(arguments: [IPC.HandoffAction.save, .to])
+  func wrongSourceCannotConsumePanelRequest(action: IPC.HandoffAction) async throws {
+    let harness = try Self.makeHarness()
+    let requestID = UUID()
+    let correct = try Self.makeHarness(registry: harness.registry)
+    let expectedPaneID = correct.source.paneID
+    harness.registry.register(requestID, sourcePaneID: expectedPaneID)
+    let request = Self.request(
+      action, harness, receiver: "codex", brief: Self.briefing, requestID: requestID)
+
+    let error = await Self.ipcError {
+      switch action {
+      case .save: try await harness.handlers.save(request)
+      case .to: try await harness.handlers.to(request)
+      }
+    }
+    guard case .conflict(let reason) = error else {
+      Issue.record("expected conflict, got \(String(describing: error))")
+      return
+    }
+    #expect(reason.contains("rerun with --pane \(expectedPaneID)"))
+    #expect(!FileManager.default.fileExists(atPath: harness.store.stateDirectory.path))
+    #expect(harness.launches.specs.isEmpty)
+    #expect(
+      harness.registry.claim(requestID, sourcePaneID: harness.source.paneID)
+        == .wrongSource(expected: expectedPaneID))
+    let retry = Self.request(
+      action, correct, receiver: "codex", brief: Self.briefing, requestID: requestID)
+    let response: IPC.HandoffResponse
+    switch action {
+    case .save: response = try await correct.handlers.save(retry)
+    case .to: response = try await correct.handlers.to(retry)
+    }
+    #expect(response.hasBriefing)
+    #expect(FileManager.default.fileExists(atPath: correct.store.currentURL.path))
+    #expect(harness.registry.claim(requestID, sourcePaneID: expectedPaneID) == .unavailable)
+  }
+
+  @Test
+  func closedSourceDoesNotConsumePanelRequest() async throws {
+    let harness = try Self.makeHarness()
+    let sourcePaneID = PaneID()
+    let requestID = UUID()
+    harness.registry.register(requestID, sourcePaneID: sourcePaneID)
+    let error = await Self.ipcError {
+      try await harness.handlers.to(
+        Self.request(
+          .to, harness, receiver: "codex", brief: Self.briefing,
+          requestID: requestID, paneID: sourcePaneID))
+    }
+    guard case .notFound(let kind, _) = error, kind == "pane" else {
+      Issue.record("expected notFound(pane), got \(String(describing: error))")
+      return
+    }
+    #expect(!FileManager.default.fileExists(atPath: harness.store.stateDirectory.path))
+    #expect(harness.launches.specs.isEmpty)
+    #expect(harness.registry.claim(requestID, sourcePaneID: sourcePaneID) == .claimed)
+  }
+
   @Test
   func panelRequestRunsOnceAndNotAfterBeingSuperseded() async throws {
     let harness = try Self.makeHarness()
     let requestID = UUID()
-    harness.registry.register(requestID)
+    harness.registry.register(requestID, sourcePaneID: harness.source.paneID)
 
     var received: [HandoffCompletion] = []
     let stream = harness.registry.completions()
@@ -440,7 +521,7 @@ struct HandoffHandlersTests {
     }
 
     let superseded = UUID()
-    harness.registry.register(superseded)
+    harness.registry.register(superseded, sourcePaneID: harness.source.paneID)
     #expect(harness.registry.supersede(superseded))
     let afterFallback = await Self.ipcError {
       try await harness.handlers.save(

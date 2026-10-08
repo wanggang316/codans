@@ -66,9 +66,12 @@ public nonisolated enum CodansEnvironment {
 
     // MARK: Overrides and seams read at startup
 
-    /// Relocates the whole config root — every JSON store — so a smoke or
-    /// integration run never touches the user's real `~/.config/<slug>/`.
+    /// Relocates the config root. When `stateDirectory` is unset it relocates
+    /// the state root too, so a smoke or integration run that sets only this
+    /// never touches the user's real `~/.codans/`.
     case configDirectory = "CODANS_CONFIG_DIR"
+    /// Relocates the state root (catalog, sessions, inbox, …) on its own.
+    case stateDirectory = "CODANS_STATE_DIR"
     /// Isolates terminal sockets and snapshots for independent application instances.
     case cacheDirectory = "CODANS_CACHE_DIR"
     /// Points the CLI installer at a freshly built `codans` outside the
@@ -79,6 +82,10 @@ public nonisolated enum CodansEnvironment {
     case ghosttyResources = "CODANS_GHOSTTY_RESOURCES"
     /// `"1"` bypasses libghostty action routing. Diagnostic only.
     case disableActionRouting = "CODANS_DISABLE_ACTION_ROUTING"
+    /// Seconds a pane must stay out of every window before the idle-surface
+    /// reclaim may detach it (default 1200). Lets a smoke run observe the
+    /// reclaim in seconds; unset or non-positive keeps the default.
+    case surfaceReclaimSeconds = "CODANS_SURFACE_RECLAIM_SECONDS"
     /// `"1"` stops the theme catalog falling back to the developer
     /// worktree's `.build/ghostty` tree, so "empty catalog" tests hold.
     case disableThemeDevFallback = "CODANS_DISABLE_THEME_DEV_FALLBACK"

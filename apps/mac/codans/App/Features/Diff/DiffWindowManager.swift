@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class DiffWindowManager: NSObject, NSWindowDelegate {
   static let shared = DiffWindowManager()
+  static let defaultContentSize = NSSize(width: 1300, height: 700)
 
   private struct Session {
     let window: NSWindow
@@ -40,7 +41,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     store.send(.prBaseChanged(worktreeID, prBase, prRepository))
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+      contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),
       styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
       backing: .buffered,
       defer: false
@@ -58,7 +59,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     window.contentViewController = controller
     let frameName = "DiffWindow-\(worktreeID)"
     if !window.setFrameUsingName(frameName) {
-      window.setContentSize(NSSize(width: 1000, height: 700))
+      window.setContentSize(Self.defaultContentSize)
       window.center()
     }
     window.setFrameAutosaveName(frameName)

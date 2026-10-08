@@ -7,10 +7,22 @@ import CodansCore
 /// the hint stays correct even after the user rebinds it; resolves against
 /// the shortcut registry and falls back to the schema default before the
 /// registry has finished loading.
+///
+/// The "New Tab" and "Resume Session" buttons mirror the tab-bar `+` and
+/// session-history accessories, so the empty page offers the same two ways
+/// to get a terminal back without a trip to the tab bar.
 struct EmptyTerminalPaneView: View {
   let message: String
+  /// Path of the active worktree, scanned by the session-history popover.
+  /// `nil` hides "Resume Session" — there is nothing to scan against.
+  var worktreePath: String?
+  /// SSH host of the worktree's project for Server projects, `nil` for local.
+  var remoteHost: RemoteHost?
+  let onNewTab: () -> Void
+  let onResumeSession: (AgentSessionSummary) -> Void
 
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+  @State private var sessionHistoryShown = false
 
   var body: some View {
     VStack(spacing: 12) {
@@ -26,10 +38,37 @@ struct EmptyTerminalPaneView: View {
           .font(.subheadline)
           .foregroundStyle(.secondary)
       }
+      actions
+        .padding(.top, 4)
     }
     .multilineTextAlignment(.center)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(nsColor: .windowBackgroundColor))
+  }
+
+  private var actions: some View {
+    HStack(spacing: 8) {
+      Button(action: onNewTab) {
+        Label("New Tab", systemImage: "plus")
+      }
+      .helpWithShortcut("New Tab", .newTab)
+
+      if let worktreePath {
+        Button {
+          sessionHistoryShown.toggle()
+        } label: {
+          Label("Resume Session", systemImage: "clock.arrow.circlepath")
+        }
+        .help("Agent Session History")
+        .agentSessionHistoryPopover(
+          isPresented: $sessionHistoryShown,
+          worktreePath: worktreePath,
+          remoteHost: remoteHost,
+          onResume: onResumeSession
+        )
+      }
+    }
+    .controlSize(.large)
   }
 
   @ViewBuilder
@@ -56,6 +95,11 @@ struct EmptyTerminalPaneView: View {
 }
 
 #Preview {
-  EmptyTerminalPaneView(message: "No terminals open")
-    .frame(width: 600, height: 400)
+  EmptyTerminalPaneView(
+    message: "No terminals open",
+    worktreePath: "/tmp",
+    onNewTab: {},
+    onResumeSession: { _ in }
+  )
+  .frame(width: 600, height: 400)
 }

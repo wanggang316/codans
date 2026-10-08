@@ -65,10 +65,10 @@ struct PaneEnvironmentTests {
   }
 
   @Test
-  func masterTerminalParityWithAWorktreePane() {
-    // The Master Terminal has no project, but its shell must see the same
-    // injected set a worktree pane does, minus the worktree built-ins.
-    let master = PaneEnvironment.forSurface(
+  func projectlessSurfaceGetsTheProductKeys() {
+    // A surface with no project still sees the same injected set a worktree
+    // pane does, minus the worktree built-ins.
+    let surface = PaneEnvironment.forSurface(
       PaneEnvironment.processBase(
         inheriting: [:], overrides: [:], socketPath: "/tmp/s.sock", cliBinary: nil, marketingVersion: nil),
       paneID: Self.paneID,
@@ -81,7 +81,7 @@ struct PaneEnvironmentTests {
       CodansEnvironment.Key.zmxSession.rawValue,
       CodansEnvironment.Key.paneID.rawValue,
     ]
-    #expect(Set(master.keys) == expected)
+    #expect(Set(surface.keys) == expected)
   }
 
   @Test

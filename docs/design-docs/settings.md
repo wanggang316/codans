@@ -9,7 +9,7 @@ Settings is one durable subsystem with two faces:
 
 - a standalone macOS **Settings window** (`Window(id: "settings")`, opened with
   `⌘,`) carrying global preferences plus a per-Project subtree;
-- a single on-disk document `~/.config/codans/settings.json` owned by one
+- a single on-disk document `~/.codans/config/settings.json` owned by one
   writer, `SettingsStore`.
 
 This doc records
@@ -17,9 +17,9 @@ the durable invariants and the non-obvious *why* behind the persistence model,
 the v3 per-Project schema, and the notification-gating semantics — not the
 SwiftUI layout, which is free to change.
 
-The implemented settings and catalog stores use separate versioned documents
-under `~/.config/codans/`: `settings.json` (this doc) and `catalog.json` (the
-Project→Worktree→Tab→Pane tree), each with atomic-rename writes. A separate
+The implemented settings and catalog stores use separate versioned documents:
+`~/.codans/config/settings.json` (this doc, hand-editable config) and
+`~/.codans/state/catalog.json` (the app-owned Project→Worktree→Tab→Pane tree), each with atomic-rename writes. A separate
 `hooks.json` for event subscriptions is **planned, not implemented**; see
 [lifecycle-hooks.md](./lifecycle-hooks.md). This is not an exhaustive inventory
 of persisted files — see [architecture.md](../architecture.md). Keeping each
@@ -177,13 +177,15 @@ settings decoding and migration; `SettingsStore` owns the resulting live value.
   from `catalog.json`. There is no cross-file migration transaction.
 
 For v1/v2, the migration writes the v3 value to a sibling temporary file,
-renames the original to `settings.json.v1-<ts>` or `settings.json.v2-<ts>`, then
+moves the original to `backups/settings.migrated-v1-<ts>.json` or
+`backups/settings.migrated-v2-<ts>.json` (newest 5 kept per reason), then
 renames the temporary file to the canonical URL. If the final rename fails,
 it attempts to restore the original. A migration or backup failure puts
 `SettingsStore` in an in-memory-only mode: saves are disabled to avoid
 replacing the preserved source with defaults.
 
-Unsupported versions and corrupt files are moved to `settings.json.broken-<ts>`
+Unsupported versions and corrupt files are moved to
+`backups/settings.unsupported-v<N>-<ts>.json` / `backups/settings.corrupt-<ts>.json`
 before defaults are used. A failure to preserve that source also disables
 persistence. Source data must remain recoverable until the destination has
 been persisted; clearing catalog fields before saving settings cannot provide

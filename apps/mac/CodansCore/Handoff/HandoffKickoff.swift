@@ -33,30 +33,49 @@ public nonisolated enum HandoffKickoff {
   public static func sourceInstruction(
     for request: Request,
     requestID: UUID,
+    sourcePaneID: PaneID,
     cli: String = CLIInvocation.commandName,
     placement: HandoffPlacement = .default
   ) -> String {
-    let env = "\(requestIDEnvironmentKey)=\(requestID.uuidString) "
+    let command = Self.command(
+      for: request, requestID: requestID, sourcePaneID: sourcePaneID, cli: cli, placement: placement)
     let sections = HandoffBriefing.sectionSkeleton.joined(separator: ", ")
     let ask: String
     switch request {
     case .handOff(let receiver):
-      // The placement rides on the command the agent runs, so the CLI path
-      // and the panel agree without a second channel; the default adds
-      // nothing to the line.
-      let placementFlags = placement.cliArguments.map { " \($0)" }.joined()
-      ask =
-        "Please hand this task off to \(receiver.displayName): run "
-        + "`\(env)\(cli) handoff to \(receiver.rawValue)\(placementFlags) --brief -`"
+      ask = "Please hand this task off to \(receiver.displayName): run `\(command)`"
     case .checkpoint:
-      ask =
-        "Please checkpoint your progress for a later handoff: run "
-        + "`\(env)\(cli) handoff save --brief -`"
+      ask = "Please checkpoint your progress for a later handoff: run `\(command)`"
     }
     return "[codans] \(ask) with your briefing on stdin as a heredoc — a markdown document "
       + "with the sections \(sections), written from your current working knowledge. "
       + "Keep Next Steps ordered and concrete. The command replies with guidance if the "
       + "briefing is incomplete."
+  }
+
+  /// The shell command the source agent runs. The injected request and the
+  /// handler's retry guidance share it, so a retry keeps the explicit source
+  /// pane and the request id. Without them, the CLI falls back to the pane
+  /// inherited from the agent's environment, which can be stale.
+  ///
+  /// The placement rides on the command, so the CLI path and the panel agree
+  /// without a second channel; the default adds nothing to the line.
+  public static func command(
+    for request: Request,
+    requestID: UUID?,
+    sourcePaneID: PaneID,
+    cli: String = CLIInvocation.commandName,
+    placement: HandoffPlacement = .default
+  ) -> String {
+    let env = requestID.map { "\(requestIDEnvironmentKey)=\($0.uuidString) " } ?? ""
+    let pane = "--pane \(sourcePaneID.description)"
+    switch request {
+    case .handOff(let receiver):
+      let placementFlags = placement.cliArguments.map { " \($0)" }.joined()
+      return "\(env)\(cli) handoff to \(receiver.rawValue) \(pane)\(placementFlags) --brief -"
+    case .checkpoint:
+      return "\(env)\(cli) handoff save \(pane) --brief -"
+    }
   }
 
   /// What the receiving agent is started with. Adapts to whether a fresh

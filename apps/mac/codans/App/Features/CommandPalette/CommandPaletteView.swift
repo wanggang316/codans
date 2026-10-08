@@ -51,6 +51,15 @@ struct CommandPaletteView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .onAppear { queryFocused = true }
+    // The palette owns the keyboard while it is open. A terminal surface can
+    // still claim first responder behind the overlay (focus restore after a
+    // layout rebuild, `codans pane focus`); without this, the user's typing
+    // and IME composition go to that pane instead of the query field.
+    .onChange(of: queryFocused) { _, focused in
+      guard !focused else { return }
+      FocusTrace.record("command palette lost focus", responder: NSApp.keyWindow?.firstResponder)
+      queryFocused = true
+    }
   }
 
   private var queryField: some View {

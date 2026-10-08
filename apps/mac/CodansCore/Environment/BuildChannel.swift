@@ -35,8 +35,8 @@ public nonisolated enum BuildChannel: String, Sendable, CaseIterable {
   }
 
   /// Product slug every channel-scoped resource is named after:
-  /// `~/.config/<slug>`, `~/Library/Caches/<slug>`, `/tmp/<slug>-<uid>.sock`,
-  /// `/usr/local/bin/<slug>`.
+  /// `~/.<slug>` (config + state), `~/Library/Caches/<slug>`,
+  /// `/tmp/<slug>-<uid>.sock`, `/usr/local/bin/<slug>`.
   public var slug: String {
     switch self {
     case .development: return "codans-dev"

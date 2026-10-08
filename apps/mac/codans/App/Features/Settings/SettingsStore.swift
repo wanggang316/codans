@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import os.log
 
-/// `@MainActor @Observable` owner of `~/.config/codans/settings.json` (v3). Single writer
+/// `@MainActor @Observable` owner of `~/.codans/config/settings.json` (v3). Single writer
 /// for the file. Mirrors the `CatalogStore` pattern: atomic-rename writes via
 /// `AtomicFileStore`, 500 ms trailing debounce on structural mutations, broken-file backup
 /// on decode failure. On first launch after a schema transition, the pre-current

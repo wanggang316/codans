@@ -2,7 +2,7 @@ import XCTest
 
 /// End to end against a live Mac gateway: open a pairing link, confirm,
 /// browse to a pane, read it, and send a line into it. Driven by
-/// `docs/user-tests/ios-companion/harness.sh`, which starts an isolated Mac
+/// `.claude/skills/self-verify/ios-companion/harness.sh`, which starts an isolated Mac
 /// instance and passes its values through `TEST_RUNNER_`-prefixed
 /// environment variables; without them the test is skipped, so a plain
 /// `make test` never needs a Mac.
@@ -163,7 +163,7 @@ final class RemoteEndToEndUITests: XCTestCase {
   }
 
   /// Acceptance screenshots against a real Mac, driven by
-  /// `docs/user-tests/ios-companion/tour.sh`: home, an agent's terminal, the
+  /// `.claude/skills/self-verify/ios-companion/tour.sh`: home, an agent's terminal, the
   /// key bar, the title menu, a shell tab picked from it, reconnecting while
   /// the Mac is gone, and the removed state after the Mac revokes the
   /// device. Screenshot names start with `CODANS_E2E_TOUR_PREFIX`;
@@ -298,7 +298,7 @@ final class RemoteEndToEndUITests: XCTestCase {
   private func openWorkspace(_ app: XCUIApplication) throws -> XCUIElement {
     let pairs = env["CODANS_E2E_PAIR"] == "1"
     guard pairs || env["CODANS_E2E_PAIRED"] == "1" else {
-      throw XCTSkip("CODANS_E2E_PAIR is not set; run docs/user-tests/ios-companion/harness.sh")
+      throw XCTSkip("CODANS_E2E_PAIR is not set; run .claude/skills/self-verify/ios-companion/harness.sh")
     }
     let project = env["CODANS_E2E_PROJECT"] ?? "fixture"
     // The simulator shares the Mac's keyboard, which hides the key bar
@@ -378,7 +378,7 @@ final class RemoteEndToEndUITests: XCTestCase {
   @MainActor
   private func required(_ name: String) throws -> String {
     guard let value = env[name], !value.isEmpty else {
-      throw XCTSkip("\(name) is not set; run docs/user-tests/ios-companion/harness.sh")
+      throw XCTSkip("\(name) is not set; run .claude/skills/self-verify/ios-companion/harness.sh")
     }
     return value
   }
@@ -408,7 +408,7 @@ final class RemoteEndToEndUITests: XCTestCase {
   @MainActor
   private func syncPath(_ name: String) throws -> String {
     guard let dir = env["CODANS_E2E_SYNC"], !dir.isEmpty else {
-      throw XCTSkip("CODANS_E2E_SYNC is not set; run docs/user-tests/ios-companion/harness.sh")
+      throw XCTSkip("CODANS_E2E_SYNC is not set; run .claude/skills/self-verify/ios-companion/harness.sh")
     }
     return URL(fileURLWithPath: dir).appendingPathComponent(name).path
   }

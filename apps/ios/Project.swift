@@ -149,7 +149,7 @@ let project = Project(
     ),
 
     // End-to-end UI test against a live Mac gateway. Skipped unless
-    // docs/user-tests/ios-companion/harness.sh passes a pairing code.
+    // .claude/skills/self-verify/ios-companion/harness.sh passes a pairing code.
     .target(
       name: "CodansMobileUITests",
       destinations: [.iPhone, .iPad],

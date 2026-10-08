@@ -121,6 +121,16 @@ extension HierarchyManager {
     }
   }
 
+  /// The process a tab shows in its hover card: the tab's focused pane's
+  /// process when it has one, else the tab's longest-running one.
+  func processEntry(inTab tabID: TabID) -> WorktreeProcessEntry? {
+    guard let worktreeID = processRegistry.entries.values.first(where: { $0.tabID == tabID })?.worktreeID
+    else { return nil }
+    let entries = processEntries(in: worktreeID).filter { addressOf(paneID: $0.paneID)?.2 == tabID }
+    let focused = lastFocusedPane(in: tabID)
+    return entries.first { $0.paneID == focused } ?? entries.first
+  }
+
   func isCurrentProcess(_ entry: WorktreeProcessEntry) -> Bool {
     processEntries(in: entry.worktreeID).contains(entry)
   }

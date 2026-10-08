@@ -137,6 +137,96 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
+  func everyRemoteScriptRunsTheTerminfoFallbackFirst() {
+    for persistence in [true, false] {
+      for script in [
+        RemoteSurfaceCommand.connectScript(
+          hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+          hostPersistence: persistence),
+        RemoteSurfaceCommand.reconnectScript(
+          hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",
+          hostPersistence: persistence),
+      ] {
+        // First, so the host-side zmx session and the shell both inherit it.
+        #expect(script.hasPrefix(RemoteSurfaceCommand.terminfoFallback))
+      }
+    }
+  }
+
+  @Test
+  func terminfoFallbackReplacesOnlyAnUnresolvableXtermGhostty() throws {
+    let noInfocmp = try Self.binDirectory(infocmpExit: nil)
+    let hasEntry = try Self.binDirectory(infocmpExit: 0)
+    let lacksEntry = try Self.binDirectory(infocmpExit: 1)
+    defer {
+      for dir in [noInfocmp, hasEntry, lacksEntry] { try? FileManager.default.removeItem(at: dir) }
+    }
+
+    #expect(try Self.termAfterFallback(from: "xterm-ghostty", path: lacksEntry) == "xterm-256color")
+    #expect(try Self.termAfterFallback(from: "xterm-ghostty", path: hasEntry) == "xterm-ghostty")
+    // No infocmp on PATH (system directories left out) counts as a missing entry.
+    #expect(
+      try Self.termAfterFallback(from: "xterm-ghostty", path: noInfocmp, withSystemDirectories: false)
+        == "xterm-256color")
+    // Any other value, or none, is the user's and passes through.
+    #expect(try Self.termAfterFallback(from: "screen-256color", path: lacksEntry) == "screen-256color")
+    #expect(try Self.termAfterFallback(from: "", path: lacksEntry) == "")
+    // Unset: the local /bin/sh fills in its own `dumb`; it must not become xterm-256color.
+    #expect(try Self.termAfterFallback(from: nil, path: lacksEntry) != "xterm-256color")
+  }
+
+  @Test
+  func terminfoFallbackProbesToolDirectoriesWithoutLeakingThem() throws {
+    let lacksEntry = try Self.binDirectory(infocmpExit: 1)
+    defer { try? FileManager.default.removeItem(at: lacksEntry) }
+    let script = RemoteSurfaceCommand.terminfoFallback + #"printf %s "$PATH""#
+    #expect(script.contains("/opt/homebrew/bin"))
+    #expect(try Self.runSh(script, term: "xterm-ghostty", path: lacksEntry) == lacksEntry.path + ":/usr/bin:/bin")
+  }
+
+  /// A PATH directory holding `sh`'s helpers plus, unless `infocmpExit` is
+  /// nil, a fake `infocmp` that exits with that status.
+  private static func binDirectory(infocmpExit: Int?) throws -> URL {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-infocmp-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    if let infocmpExit {
+      let tool = dir.appendingPathComponent("infocmp")
+      try "#!/bin/sh\nexit \(infocmpExit)\n".write(to: tool, atomically: true, encoding: .utf8)
+      try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+    }
+    return dir
+  }
+
+  /// `TERM` after the fallback. `path` goes first, so its fake `infocmp`
+  /// shadows the system one, which cannot resolve `xterm-ghostty` here
+  /// anyway (the app's terminfo directories are not exported).
+  private static func termAfterFallback(
+    from term: String?, path: URL, withSystemDirectories: Bool = true
+  ) throws -> String {
+    try runSh(
+      RemoteSurfaceCommand.terminfoFallback + #"printf %s "${TERM:-}""#, term: term, path: path,
+      withSystemDirectories: withSystemDirectories)
+  }
+
+  private static func runSh(
+    _ script: String, term: String?, path: URL, withSystemDirectories: Bool = true
+  ) throws -> String {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+    proc.arguments = ["-c", script]
+    var env = ["PATH": path.path + (withSystemDirectories ? ":/usr/bin:/bin" : "")]
+    env["TERM"] = term
+    proc.environment = env
+    let out = Pipe()
+    proc.standardOutput = out
+    try proc.run()
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    proc.waitUntilExit()
+    return String(data: data, encoding: .utf8) ?? ""
+  }
+
+  @Test
   func reconnectScriptNeverRecreatesButReattaches() {
     let script = RemoteSurfaceCommand.reconnectScript(
       hostSession: "codans-x", paneUUID: paneID.raw.uuidString, remotePath: "/srv/app",

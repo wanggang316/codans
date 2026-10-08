@@ -270,7 +270,7 @@ struct WorktreeDetailView: View {
           tabID: tabID
         )
       } else {
-        emptyTab
+        emptyTab(address: address)
       }
     }
   }
@@ -551,8 +551,27 @@ struct WorktreeDetailView: View {
     )
   }
 
-  private var emptyTab: some View {
-    EmptyTerminalPaneView(message: "No terminals open")
+  /// Routes the empty-page buttons through the same `TabBarFeature` actions
+  /// as the tab-bar `+` and session-history accessories.
+  private func emptyTab(address: Address) -> some View {
+    let info = worktreeInfo(for: address)
+    return EmptyTerminalPaneView(
+      message: "No terminals open",
+      worktreePath: info?.worktree.path,
+      remoteHost: info?.project.remoteHost,
+      onNewTab: {
+        store.send(
+          .tabBar(.newTabButtonTapped(inWorktree: address.worktree, inProject: address.project)))
+      },
+      onResumeSession: { session in
+        store.send(
+          .tabBar(
+            .resumeAgentSessionTapped(
+              agent: session.agent, sessionID: session.sessionID,
+              inWorktree: address.worktree, inProject: address.project
+            )))
+      }
+    )
   }
 
   /// Keep the empty-project state visually blank. Suppress the window

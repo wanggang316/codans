@@ -35,7 +35,7 @@ struct DiffPanelView: View {
       )
     ) {
       DiffFileSidebar(store: store)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 600)
     } detail: {
       VStack(spacing: 0) {
         fileHeader

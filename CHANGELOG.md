@@ -12,13 +12,66 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **The diff window's file sidebar drags wider**, up to 600 pt (was 320 pt).
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
 
+- **Long diffs scroll smoothly.** Scrolling code in the Changes window
+  stuttered on larger files; it now keeps up with the trackpad in both
+  unified and split layouts.
+
 ### Security
+
+## [0.7.9] - 2026-10-08
+
+### Changed
+
+- **Settings and app data now live in `~/.codans`.** Settings and shortcuts
+  move to `~/.codans/config/`, everything codans manages to
+  `~/.codans/state/`; the first launch migrates `~/.config/codans/` for you.
+  To go back to an older build, quit codans and move the files back.
+- **Long-hidden tabs use far less memory.** A tab out of sight for 20
+  minutes with nothing running releases its GPU memory and threads; its
+  shell keeps running and reappears when you open the tab again.
+- **The diff window opens 30% wider.**
+
+### Removed
+
+- **Master Terminal.** The ⌥⌘` slide-in panel is gone; the first launch
+  archives its working directory under `~/.codans/state/backups/`.
+
+### Fixed
+
+- **Unreadable data files are backed up, not wiped.** A corrupt or
+  newer-version catalog, session list, inbox or shortcuts file is moved to
+  a `backups/` folder beside it instead of being replaced with an empty one.
+- **Typing in the command palette stays in the palette.** A terminal
+  behind it could take keyboard focus, so keystrokes and IME input went
+  to that pane.
+- **Handoffs stay tied to the pane that started them.** A claim from
+  another pane is rejected with a message that names the expected pane.
+
+## [0.7.8] - 2026-10-05
+
+### Changed
+
+- **Pane shells load Ghostty's shell integration.** "Command finished"
+  notifications and remembering a pane's directory across restarts work
+  without any setup in your shell config, and `sudo` keeps the terminal
+  type. Applies to panes opened after the update.
+
+### Fixed
+
+- **Backspace and arrow keys work again after `ssh`.** Hosts without
+  Ghostty's terminfo fell back to a dumb terminal and redrew wrong; `ssh`
+  now connects as `xterm-256color`. Applies to panes opened after the update.
+- **No spinner for an open `ssh` session.** An interactive `ssh host` (or
+  `mosh`, `et`) kept the tab and worktree spinning until logout; only
+  `ssh host <command>` counts as busy now.
 
 ## [0.7.7] - 2026-09-30
 
