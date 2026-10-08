@@ -12,19 +12,38 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **The diff window's file sidebar drags wider**, up to 600 pt (was 320 pt).
-
 ### Deprecated
 
 ### Removed
 
 ### Fixed
 
+### Security
+
+## [0.7.10] - 2026-10-09
+
+### Added
+
+- **Hovering a tab shows its full title and running process.** A hover
+  card appears over the tab bar, so a truncated title no longer hides
+  which tab is which.
+- **The empty terminal page offers New Tab and Resume Session.** A
+  worktree with no tabs shows the same two actions as the tab bar's `+`
+  and session-history buttons.
+
+### Changed
+
+- **The diff window's file sidebar drags wider**, up to 600 pt (was 320 pt).
+
+### Fixed
+
 - **Long diffs scroll smoothly.** Scrolling code in the Changes window
   stuttered on larger files; it now keeps up with the trackpad in both
   unified and split layouts.
-
-### Security
+- **Clicking a file in the diff sidebar always opens it.** A click that
+  arrived during a background refresh used to snap back to the old file.
+- **No blank tab in an empty worktree.** The tab bar no longer draws an
+  empty tab shape when the worktree has no tabs.
 
 ## [0.7.9] - 2026-10-08
 
