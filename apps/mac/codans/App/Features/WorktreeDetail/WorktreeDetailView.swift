@@ -446,30 +446,13 @@ struct WorktreeDetailView: View {
         .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
     case .worktree(let address, let info):
       if let info {
-        HStack(spacing: 0) {
-          StatusBarView(
-            store: statusBarStore,
-            gitHubStore: gitHubStore,
-            worktreeID: address.worktree,
-            worktreePath: URL(fileURLWithPath: info.worktree.path),
-            branch: info.worktree.branch
-          )
-          Divider().frame(height: 14)
-          WorktreeProcessesView(entries: hierarchyManager.processEntries(in: address.worktree)) { entry in
-            guard hierarchyManager.isCurrentProcess(entry) else { return }
-            onFocusHierarchyPath(
-              InboxEntry.SourcePath(
-                projectID: entry.projectID,
-                worktreeID: entry.worktreeID,
-                tabID: entry.tabID,
-                paneID: entry.paneID
-              )
-            )
-          }
-          .id(address.worktree)
-          .fixedSize()
-          .layoutPriority(1)
-        }
+        StatusBarView(
+          store: statusBarStore,
+          gitHubStore: gitHubStore,
+          worktreeID: address.worktree,
+          worktreePath: URL(fileURLWithPath: info.worktree.path),
+          branch: info.worktree.branch
+        )
       }
     }
   }

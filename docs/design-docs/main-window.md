@@ -40,11 +40,11 @@
 
 ## Header
 
-Header 由 `WorktreeDetailView.worktreeToolbarContent` 组装到窗口工具栏：左侧 `WorktreeHeaderInfoLabel` 显示 Worktree 身份、分支与 GitHub 信息；中部组合状态、当前 Worktree 的前台进程计数及独立通知铃铛；右侧依次为 Agents、Run Script、Open。创建 Worktree 时使用相同工具栏槽位显示占位内容，避免控件身份随模式切换而重建。
+Header 由 `WorktreeDetailView.worktreeToolbarContent` 组装到窗口工具栏：左侧 `WorktreeHeaderInfoLabel` 显示 Worktree 身份、分支与 GitHub 信息；中部组合状态及独立通知铃铛；右侧依次为 Agents、Run Script、Open。创建 Worktree 时使用相同工具栏槽位显示占位内容，避免控件身份随模式切换而重建。
 
-`WorktreeProcessesView` 支持悬停展开和点击固定进程列表，打开时固定可见行数（最多 8 行）。点击行先关闭 popover，再异步请求聚焦；聚焦前通过 `HierarchyManager.isCurrentProcess` 验证条目仍有效，避免退出或被替换的进程触发陈旧跳转。进程列表来自 `HierarchyManager.processEntries(in:)`，并非已启动脚本或 agent 的历史记录。
+Header 不显示前台进程计数与进程列表 popover（已移除）。`HierarchyManager.processEntries(in:)` 等进程追踪仍保留，Tab 悬停卡片用它显示当前运行的进程（[worktree-processes.md](worktree-processes.md)）。
 
-> **入口边界。** 通知铃铛是工具栏中独立于状态 / 进程组的控件，承载通知 popover（[notifications.md](notifications.md)）。Worktree 右键菜单的 “Show Changes” 打开该 Worktree 的独立只读窗口，不切换主窗口选择；主窗口工具栏不单独放置 Diff 入口。菜单和命令面板也提供 “Show Changes”。⌘G / “Toggle Git Viewer” 解析 `general.defaultGitViewerID`：默认 Built-in 打开内置窗口，选择外部客户端则打开该客户端。缺省、`null` 和未知 ID 回退 Built-in。
+> **入口边界。** 通知铃铛是工具栏中独立于状态组的控件，承载通知 popover（[notifications.md](notifications.md)）。Worktree 右键菜单的 “Show Changes” 打开该 Worktree 的独立只读窗口，不切换主窗口选择；主窗口工具栏不单独放置 Diff 入口。菜单和命令面板也提供 “Show Changes”。⌘G / “Toggle Git Viewer” 解析 `general.defaultGitViewerID`：默认 Built-in 打开内置窗口，选择外部客户端则打开该客户端。缺省、`null` 和未知 ID 回退 Built-in。
 
 ### 不变量
 
