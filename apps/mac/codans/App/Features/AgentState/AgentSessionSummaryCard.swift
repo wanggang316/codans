@@ -193,7 +193,7 @@ struct AgentSessionSummaryCard: View {
 
   private var stateGlyphName: String {
     switch entry.state {
-    case .blocked: return "pause.fill"
+    case .blocked: return "hand.raised.fill"
     case .working: return "square.grid.3x3.fill"
     case .finished: return "checkmark.circle.fill"
     case .idle: return "circle.dashed"

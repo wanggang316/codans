@@ -328,13 +328,13 @@ struct AgentStateRowView: View {
   private var stateIcon: some View {
     switch entry.state {
     case .blocked:
-      // Pause-fill glyph — terminal-style "agent has paused for you".
+      // Raised-hand glyph — "agent is waiting for your input".
       // Static (no pulse) per design feedback; the orange tint alone
       // carries the "needs your attention" signal. `.imageScale(.large)`
       // bumps the SF Symbol up roughly one tier above the surrounding
       // caption2 font so the icon reads at the same visual weight as
       // the 16pt LoadingGridIcon used for the working state.
-      Image(systemName: "pause.fill")
+      Image(systemName: "hand.raised.fill")
         .imageScale(.large)
         .foregroundStyle(Color.orange)
         .accessibilityHidden(true)
