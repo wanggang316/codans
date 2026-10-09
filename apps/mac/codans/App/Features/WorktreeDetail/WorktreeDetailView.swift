@@ -342,7 +342,7 @@ struct WorktreeDetailView: View {
         // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
         // them visually distinct without collapsing the gap. No
         // `.buttonStyle` / no manual padding: each item gets the toolbar's
-        // native glass capsule + hover state. Order: Agents, RunScript,
+        // native glass capsule + hover state. Order: Agents, Workflows, RunScript,
         // Open — agents first because starting one is the more frequent
         // entry point for this app's audience.
         trailingToolbarItems(mode)
@@ -354,7 +354,10 @@ struct WorktreeDetailView: View {
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
           // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
-          // children leading-to-trailing in declaration order.
+          // children leading-to-trailing in declaration order. The workflow
+          // capsule is intentionally hidden — `workflowSlot` and
+          // `HeaderWorkflowGroup` stay so it can be re-mounted here
+          // without rewiring; workflows start from the Command Palette.
           agentSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
@@ -387,6 +390,7 @@ struct WorktreeDetailView: View {
   private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
     ToolbarItem { agentSlot(mode) }
     ToolbarSpacer(.fixed)
+    // Workflow capsule intentionally hidden; see the legacy layout below.
     ToolbarItem { runSlot(mode) }
     ToolbarSpacer(.fixed)
     ToolbarItem { openSlot(mode) }
@@ -482,6 +486,21 @@ struct WorktreeDetailView: View {
     case .worktree(_, let info):
       if info != nil {
         HeaderAgentSplitButton(store: headerStore)
+      }
+    }
+  }
+
+  /// The workflow capsule: start a workflow here, and open Workflow Runs.
+  @ViewBuilder
+  private func workflowSlot(_ mode: DetailMode) -> some View {
+    switch mode {
+    case .creating:
+      SkeletonActionChipView()
+    case .worktree(_, let info):
+      if let info {
+        HeaderWorkflowGroup(
+          store: headerStore,
+          worktreePath: info.project.remoteHost == nil ? info.worktree.path : nil)
       }
     }
   }

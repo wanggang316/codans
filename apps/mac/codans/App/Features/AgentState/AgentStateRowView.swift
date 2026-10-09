@@ -60,6 +60,10 @@ struct AgentStateRowView: View {
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
   /// sites and tests render the row without a menu.
   var onHandOff: (() -> Void)?
+  /// Workflows this row's pane could start as the `current` role, for the
+  /// context menu's "Run Workflow" submenu. Empty hides the submenu.
+  var workflows: [(id: String, name: String, isValid: Bool)] = []
+  var onRunWorkflow: ((String) -> Void)?
 
   /// Delay before the hover summary card opens. Long enough that a
   /// pointer sweeping the list to click a row never flashes cards,
@@ -113,6 +117,18 @@ struct AgentStateRowView: View {
           onHandOff()
         } label: {
           Label("Hand Off…", systemImage: "arrow.right.arrow.left")
+        }
+      }
+      if let onRunWorkflow, !workflows.isEmpty {
+        Menu {
+          ForEach(workflows, id: \.id) { workflow in
+            Button(workflow.isValid ? workflow.name : "\(workflow.name) — has errors") {
+              onRunWorkflow(workflow.id)
+            }
+            .disabled(!workflow.isValid)
+          }
+        } label: {
+          Label("Run Workflow", systemImage: "arrow.triangle.branch")
         }
       }
     }

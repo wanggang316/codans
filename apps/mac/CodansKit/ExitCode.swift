@@ -33,6 +33,9 @@ public enum CLIExitCode: Int32, Sendable {
     case .versionMismatch: return .versionMismatch
     case .invalidFrame: return .internal
     case .internal: return .internal
+    // A domain code this build knows carries its own exit code; an unknown
+    // one is a contract drift, reported as internal rather than guessed.
+    case .domain(let code, _, _): return CLIErrorCode(domainCode: code)?.domainExitCode ?? .internal
     }
   }
 

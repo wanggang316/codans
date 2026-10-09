@@ -119,6 +119,13 @@ struct CLIError: Error, CustomStringConvertible {
     case .ipc(.notFound(let kind, let id)):
       return CLIError(
         code: .notFound, message: "\(kind) not found: \(id)", details: ["kind": kind, "id": id])
+    case .ipc(.domain(let domainCode, let message, let hint)):
+      // The server's code is the envelope's code verbatim so scripts branch
+      // on it; one this build does not know is surfaced, not swallowed.
+      guard let known = CLIErrorCode(domainCode: domainCode), let exit = known.domainExitCode else {
+        return CLIError(code: .internal, message: message, hint: hint, details: ["domainCode": domainCode])
+      }
+      return CLIError(code: exit, message: message, hint: hint, errorCode: known)
     case .ipc(let ipc):
       return CLIError(code: CLIExitCode.from(ipc), message: ipc.displayMessage)
     case .timeout:

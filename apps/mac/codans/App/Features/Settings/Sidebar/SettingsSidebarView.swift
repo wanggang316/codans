@@ -188,6 +188,9 @@ struct SettingsSidebarView: View {
     case .general: return "gearshape"
     case .globalCommands: return "terminal"
     case .agents: return "sparkles"
+    // Matches the AgentState panel's "Workflows" run rows (`WorkflowRunsSection`)
+    // so the glyph reads the same wherever a run shows up.
+    case .workflows: return "arrow.triangle.branch"
     case .github: return "arrow.triangle.pull"
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"

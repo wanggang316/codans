@@ -1,0 +1,78 @@
+name: Review Loop
+description: Launch a reviewer beside the author and iterate until the review is clean.
+
+inputs:
+  max-rounds:
+    description: Stop after this many fix / re-review rounds.
+    type: number
+    default: 3
+    min: 1
+    max: 10
+  focus:
+    description: Anything the reviewer should pay special attention to.
+    type: string
+    default: ""
+
+roles:
+  author:
+    source: current
+  reviewer:
+    source: launch
+    placement: split
+    direction: right
+    background: true
+
+state:
+  round: 0
+  verdict: issues
+
+steps:
+  - name: Launch the reviewer
+    id: kickoff
+    launch: reviewer
+    prompt: |
+      You are reviewing the uncommitted changes in this worktree (run `git status` and `git diff`
+      to see them). ${{ inputs.focus }}
+      Report under a "## Findings" heading: one bullet per finding with file and line, severity,
+      and what to change. Finish with the verdict `clean` when nothing needs to change, otherwise
+      `issues`.
+    expect:
+      delivery: review
+      sections: ["## Findings"]
+      verdicts: [clean, issues]
+
+  - set:
+      verdict: ${{ deliveries.review.verdict }}
+
+  - name: Fix and re-review
+    id: loop
+    while: state.verdict == 'issues' && state.round < inputs.max-rounds
+    max-iterations: 10
+    steps:
+      - set:
+          round: ${{ state.round + 1 }}
+      - name: Address the review
+        id: fix
+        message: author
+        instruction: |
+          A reviewer looked at your changes. Read the findings at ${{ deliveries.review.path }}
+          and address each one (or explain why not). When you are done, deliver a short summary
+          of what you changed under a "## Changes" heading.
+        expect:
+          delivery: fixes
+          sections: ["## Changes"]
+      - name: Re-review
+        id: recheck
+        message: reviewer
+        text: Round ${{ state.round }} — the author addressed your findings (summary at ${{ deliveries.fixes.path }}); review the changes again the same way.
+        expect:
+          delivery: review
+          sections: ["## Findings"]
+          verdicts: [clean, issues]
+      - set:
+          verdict: ${{ deliveries.review.verdict }}
+
+  - if: state.verdict == 'clean'
+    notify: Review clean after ${{ state.round }} round(s).
+  - if: state.verdict != 'clean'
+    notify: Still has issues after ${{ state.round }} round(s); see ${{ deliveries.review.path }}.

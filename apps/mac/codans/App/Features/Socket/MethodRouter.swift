@@ -25,6 +25,7 @@ public final class MethodRouter {
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
   private let workspaceHandlers: WorkspaceHandlers?
+  private let workflowHandlers: WorkflowHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -35,7 +36,8 @@ public final class MethodRouter {
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
     handoffHandlers: HandoffHandlers? = nil,
-    workspaceHandlers: WorkspaceHandlers? = nil
+    workspaceHandlers: WorkspaceHandlers? = nil,
+    workflowHandlers: WorkflowHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -45,6 +47,7 @@ public final class MethodRouter {
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
     self.workspaceHandlers = workspaceHandlers
+    self.workflowHandlers = workflowHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -65,6 +68,7 @@ public final class MethodRouter {
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
     if let outcome = await routeWorkspace(request) { return outcome }
+    if let outcome = await routeWorkflow(request, peerPID: peerPID) { return outcome }
     return notWired(request.method)
   }
 
@@ -307,6 +311,43 @@ public final class MethodRouter {
     case .handoffTo:
       return await Self.asyncOutcome {
         try await h.to(request.params.decoded(as: IPC.HandoffRequest.self))
+      }
+    default: return nil
+    }
+  }
+
+  /// `workflow.*` adapter. `peerPID` reaches every verb: the caller's pane
+  /// is attributed from it when the CLI ran without `CODANS_PANE_ID`.
+  private func routeWorkflow(_ request: IPC.Request, peerPID: pid_t?) async -> RouterOutcome? {
+    guard let h = workflowHandlers else { return nil }
+    switch request.method {
+    case .workflowList:
+      return Self.projectOutcome {
+        try h.list(request.params.decoded(as: IPC.WorkflowListRequest.self), peerPID: peerPID)
+      }
+    case .workflowRun:
+      return await Self.asyncOutcome {
+        try await h.run(request.params.decoded(as: IPC.WorkflowRunRequest.self), peerPID: peerPID)
+      }
+    case .workflowStatus:
+      return Self.projectOutcome {
+        try h.status(request.params.decoded(as: IPC.WorkflowStatusRequest.self), peerPID: peerPID)
+      }
+    case .workflowDeliver:
+      return await Self.asyncOutcome {
+        try await h.deliver(request.params.decoded(as: IPC.WorkflowDeliverRequest.self), peerPID: peerPID)
+      }
+    case .workflowResolve:
+      return Self.projectOutcome {
+        try h.resolve(request.params.decoded(as: IPC.WorkflowResolveRequest.self), peerPID: peerPID)
+      }
+    case .workflowCancel:
+      return Self.projectOutcome {
+        try h.cancel(request.params.decoded(as: IPC.WorkflowCancelRequest.self), peerPID: peerPID)
+      }
+    case .workflowListRuns:
+      return Self.projectOutcome {
+        try h.listRuns(request.params.decoded(as: IPC.WorkflowListRunsRequest.self), peerPID: peerPID)
       }
     default: return nil
     }

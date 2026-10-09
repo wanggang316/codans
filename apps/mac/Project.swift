@@ -51,7 +51,9 @@ let project = Project(
         "CodansCore/Shortcuts",
         "CodansCore/Shortcuts/ConflictDetectors",
         "CodansCore/StatusBar",
+        "CodansCore/Workflow",
       ],
+      dependencies: [.external(name: "Yams")],
       settings: .settings(
         base: ["SWIFT_DEFAULT_ACTOR_ISOLATION": "nonisolated"],
         defaultSettings: .essential
@@ -245,9 +247,29 @@ let project = Project(
           name: "Embed skills",
           inputPaths: [
             "$(SRCROOT)/../../skills/codans-cli/SKILL.md",
+            "$(SRCROOT)/../../skills/codans-workflow/SKILL.md",
           ],
           outputPaths: [
             "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/skills/codans-cli/SKILL.md",
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/skills/codans-workflow/SKILL.md",
+          ],
+          basedOnDependencyAnalysis: false
+        ),
+        // Built-in workflows (`workflows/<id>.workflow.yaml` at the repo
+        // root) ride along under Resources/workflows as the bundle scope
+        // of workflow discovery.
+        .post(
+          script: "\"${SRCROOT}/scripts/embed-workflows.sh\"",
+          name: "Embed workflows",
+          inputPaths: [
+            "$(SRCROOT)/../../workflows/review-loop.workflow.yaml",
+            "$(SRCROOT)/../../workflows/handoff.workflow.yaml",
+            "$(SRCROOT)/../../workflows/advisor.workflow.yaml",
+          ],
+          outputPaths: [
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/workflows/review-loop.workflow.yaml",
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/workflows/handoff.workflow.yaml",
+            "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/workflows/advisor.workflow.yaml",
           ],
           basedOnDependencyAnalysis: false
         ),
