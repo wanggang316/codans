@@ -1229,13 +1229,9 @@ struct HierarchySidebarView: View {
     }
 
     Divider()
-    Button {
-      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id)))
-    } label: {
-      Label("Show Changes", systemImage: "doc.text.magnifyingglass")
-    }
+    worktreeGitHubAndChangesItems(worktree: worktree, project: project)
 
-    // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
+    // Group 3 — Copy. Pathname + branch name onto the general pasteboard.
     // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
     // worktrees, detached HEAD) so the menu never offers an empty copy.
     Divider()
@@ -1254,7 +1250,7 @@ struct HierarchySidebarView: View {
       }
     }
 
-    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
+    // Group 4 — Worktree lifecycle. Hidden for the main checkout (W-Q3
     // guard: cannot pin / archive / remove the project's root worktree).
     // Workspace children keep Pin but not Archive / Remove: those act on a
     // worktree of *this* repository, and a child's repository is elsewhere —
@@ -1316,6 +1312,43 @@ struct HierarchySidebarView: View {
         Label("Remove Worktree", systemImage: "trash")
       }
       .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
+    }
+  }
+
+  /// Group 2 — GitHub + Changes. Every entry acts on the right-clicked row,
+  /// not the selection; the shortcut hints mirror the selection-scoped
+  /// Worktree-menu commands. "Open Pull Request" shows only once a PR
+  /// snapshot exists for the row.
+  @ViewBuilder
+  private func worktreeGitHubAndChangesItems(
+    worktree: Worktree, project: Project
+  ) -> some View {
+    if project.repoRoot(for: worktree) != nil {
+      Button {
+        store.send(.delegate(.openOnGitHub(projectID: project.id, worktreeID: worktree.id)))
+      } label: {
+        Label("Open in GitHub", systemImage: "arrow.up.right.square")
+      }
+      .appKeyboardShortcut(.openProjectOnGitHub, in: resolvedShortcuts)
+    }
+    if let gitHubStore, let pullRequest = gitHubStore.snapshots[worktree.id] {
+      Button {
+        gitHubStore.send(.delegate(.openURL(pullRequest.url)))
+      } label: {
+        Label("Open Pull Request", systemImage: "arrow.triangle.pull")
+      }
+      .appKeyboardShortcut(.openCurrentPR, in: resolvedShortcuts)
+    }
+    Button {
+      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .all)))
+    } label: {
+      Label("Show Uncommitted", systemImage: "doc.text.magnifyingglass")
+    }
+    Button {
+      store.send(
+        .delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .outgoing)))
+    } label: {
+      Label("Show Outgoing", systemImage: "arrow.up.doc")
     }
   }
 

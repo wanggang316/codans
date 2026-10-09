@@ -557,9 +557,9 @@ struct RootFeature {
       case .openDiffRequested:
         guard let projectID = state.selection.projectID, let worktreeID = state.selection.worktreeID
         else { return .none }
-        return openDiff(projectID: projectID, worktreeID: worktreeID, state: state)
-      case .sidebar(.delegate(.showChanges(let projectID, let worktreeID))):
-        return openDiff(projectID: projectID, worktreeID: worktreeID, state: state)
+        return openDiff(projectID: projectID, worktreeID: worktreeID, scope: nil, state: state)
+      case .sidebar(.delegate(.showChanges(let projectID, let worktreeID, let scope))):
+        return openDiff(projectID: projectID, worktreeID: worktreeID, scope: scope, state: state)
       default:
         return .none
 
@@ -567,7 +567,9 @@ struct RootFeature {
     }
   }
 
-  private func openDiff(projectID: ProjectID, worktreeID: WorktreeID, state: State) -> Effect<Action> {
+  private func openDiff(
+    projectID: ProjectID, worktreeID: WorktreeID, scope: GitComparisonScope?, state: State
+  ) -> Effect<Action> {
     guard let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return .none }
@@ -576,7 +578,7 @@ struct RootFeature {
       await DiffWindowManager.shared.open(
         projectID: projectID, worktreeID: worktreeID, path: worktree.path,
         title: "\(project.name) — \(worktree.branch ?? worktree.name)",
-        prBase: snapshot?.baseRefName, prRepository: snapshot?.baseRepositoryURL)
+        prBase: snapshot?.baseRefName, prRepository: snapshot?.baseRepositoryURL, scope: scope)
     }
   }
 
@@ -1267,6 +1269,9 @@ struct RootFeature {
               worktreePath: path,
               projectID: projectID
             )))
+
+      case .sidebar(.delegate(.openOnGitHub(let projectID, let worktreeID))):
+        return openProjectOnGitHub(projectID: projectID, worktreeID: worktreeID, state: state)
 
       case .sidebar(.delegate(.revealInFinder(let path))):
         let client = finderClient
@@ -2010,29 +2015,9 @@ struct RootFeature {
         return .send(.gitHub(.delegate(.openURL(snapshot.url))))
 
       case .openCurrentProjectOnGitHubRequested:
-        guard let projectID = state.selection.projectID,
-          let project = lookupProject(projectID: projectID),
-          // In a workspace "the project's repository" is the selected
-          // member's repository; a git Project has exactly one unit.
-          let unit = Self.gitHubFetchUnit(
-            in: project, worktreeID: state.selection.worktreeID,
-            fallback: Self.gitHubFetchUnits(in: project).first)
-        else { return .none }
-        // Prefer the cached batched-PR snapshot when present — it already holds
-        // a parsed `(host, owner, repo)` triple, so we skip the subprocess.
-        if let cached = state.gitHub.snapshotsByProject[unit.projectID],
-          let url = URL(string: "https://\(cached.host)/\(cached.owner)/\(cached.repo)")
-        {
-          return .send(.gitHub(.delegate(.openURL(url))))
-        }
-        let gitRoot = unit.gitRoot
-        return .run { [gitService = gitServiceClient] send in
-          guard let info = try? await gitService.remoteInfo(gitRoot) else { return }
-          guard
-            let url = URL(string: "https://\(info.host)/\(info.owner)/\(info.repo)")
-          else { return }
-          await send(.gitHub(.delegate(.openURL(url))))
-        }
+        guard let projectID = state.selection.projectID else { return .none }
+        return openProjectOnGitHub(
+          projectID: projectID, worktreeID: state.selection.worktreeID, state: state)
 
       case .newWorktreeForCurrentProjectRequested:
         guard let projectID = state.selection.projectID else { return .none }
@@ -3105,6 +3090,37 @@ struct RootFeature {
   private func lookupProject(projectID: ProjectID) -> Project? {
     let catalog = hierarchyClient.snapshot()
     return catalog.projects.first(where: { $0.id == projectID })
+  }
+
+  /// Opens `https://<host>/<owner>/<repo>` for the repository behind
+  /// `worktreeID` (or the Project's first repository) through the GitHub
+  /// delegate's `openURL` hop. Silent no-op for a plain directory Project or
+  /// an unparseable origin remote.
+  private func openProjectOnGitHub(
+    projectID: ProjectID, worktreeID: WorktreeID?, state: State
+  ) -> Effect<Action> {
+    guard let project = lookupProject(projectID: projectID),
+      // In a workspace "the project's repository" is the member's
+      // repository; a git Project has exactly one unit.
+      let unit = Self.gitHubFetchUnit(
+        in: project, worktreeID: worktreeID,
+        fallback: Self.gitHubFetchUnits(in: project).first)
+    else { return .none }
+    // Prefer the cached batched-PR snapshot when present — it already holds
+    // a parsed `(host, owner, repo)` triple, so we skip the subprocess.
+    if let cached = state.gitHub.snapshotsByProject[unit.projectID],
+      let url = URL(string: "https://\(cached.host)/\(cached.owner)/\(cached.repo)")
+    {
+      return .send(.gitHub(.delegate(.openURL(url))))
+    }
+    let gitRoot = unit.gitRoot
+    return .run { [gitService = gitServiceClient] send in
+      guard let info = try? await gitService.remoteInfo(gitRoot) else { return }
+      guard
+        let url = URL(string: "https://\(info.host)/\(info.owner)/\(info.repo)")
+      else { return }
+      await send(.gitHub(.delegate(.openURL(url))))
+    }
   }
 
   /// Builds the `.gitHub(.projectActivated)` follow-up that runs after a
