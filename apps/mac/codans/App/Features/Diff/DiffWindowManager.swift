@@ -23,11 +23,13 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     path: String,
     title: String,
     prBase: String?,
-    prRepository: URL?
+    prRepository: URL?,
+    scope: GitComparisonScope? = nil
   ) {
     if let session = sessions[worktreeID] {
       session.window.title = title
       session.store.send(.prBaseChanged(worktreeID, prBase, prRepository))
+      if let scope { session.store.send(.scopeChanged(scope)) }
       present(session.window)
       return
     }
@@ -39,6 +41,8 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     let store = Store(initialState: state) { DiffFeature() }
     store.send(.contextChanged(projectID, worktreeID, path))
     store.send(.prBaseChanged(worktreeID, prBase, prRepository))
+    // An explicit scope (sidebar "Show Uncommitted" / "Show Outgoing") wins over the remembered one.
+    if let scope { store.send(.scopeChanged(scope)) }
 
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),

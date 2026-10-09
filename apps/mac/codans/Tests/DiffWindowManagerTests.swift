@@ -103,6 +103,49 @@ struct DiffWindowManagerTests {
     }
   }
 
+  @Test func explicitScopeOverridesRememberedScope() async throws {
+    let project = ProjectID()
+    let worktree = WorktreeID()
+    let manager = DiffWindowManager()
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0[GitServiceClient.self].comparisonListing = { url, scope, _ in
+        GitComparisonSnapshot(scope: scope, baseLabel: "main", files: [], repositoryPath: url.path)
+      }
+    } operation: {
+      defer { window(for: worktree)?.close() }
+      manager.open(
+        projectID: project, worktreeID: worktree, path: "/tmp/diff-window-scope", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .outgoing)
+      let diffWindow = try #require(window(for: worktree))
+      let diffStore = try store(in: diffWindow)
+      #expect(diffStore.state.scope == .outgoing)
+      try await waitUntil { diffStore.snapshot?.scope == .outgoing }
+
+      // An open window switches scope in place.
+      manager.open(
+        projectID: project, worktreeID: worktree, path: "/tmp/diff-window-scope", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .all)
+      #expect(window(for: worktree) === diffWindow)
+      #expect(diffStore.state.scope == .all)
+
+      // No scope keeps the current one.
+      manager.open(
+        projectID: project, worktreeID: worktree, path: "/tmp/diff-window-scope", title: "Scope",
+        prBase: nil, prRepository: nil)
+      #expect(diffStore.state.scope == .all)
+
+      // A reopened window still honors an explicit scope over the saved preference.
+      diffWindow.close()
+      manager.open(
+        projectID: project, worktreeID: worktree, path: "/tmp/diff-window-scope", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .outgoing)
+      let reopened = try store(in: try #require(window(for: worktree)))
+      #expect(reopened.state.scope == .outgoing)
+    }
+  }
+
   private func window(for worktree: WorktreeID) -> NSWindow? {
     NSApp.windows.first { $0.identifier?.rawValue == "diff-\(worktree)" && $0.contentView != nil }
   }
