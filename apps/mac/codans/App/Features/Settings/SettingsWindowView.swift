@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import CodansCore
 
 /// Root view for the Settings window scene. Two-column `NavigationSplitView` with the
 /// sidebar (global sections + Repositories disclosure) on the left and a per-section detail
@@ -123,6 +123,8 @@ struct SettingsWindowView: View {
       SettingsTerminalView(store: store.scope(state: \.terminal, action: \.terminal))
     case .notifications:
       NotificationsSettingsView()
+    case .remoteAccess:
+      RemoteAccessSettingsView(settingsStore: settingsStore)
     case .developer:
       DeveloperSettingsView()
     case .shortcuts:
@@ -131,6 +133,16 @@ struct SettingsWindowView: View {
       UpdatesSettingsView()
     case .about:
       AboutSettingsView()
+    case .projectGeneral, .projectScripts:
+      projectDetailView(for: section)
+    }
+  }
+
+  /// Project-scoped panes, split out of `detailView` to keep that switch a
+  /// flat list of global panes.
+  @ViewBuilder
+  private func projectDetailView(for section: SettingsSection) -> some View {
+    switch section {
     case .projectGeneral(let projectID):
       if let paneStore = store.scope(
         state: \.projectPanes[id: projectID],
@@ -156,6 +168,8 @@ struct SettingsWindowView: View {
       } else {
         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
       }
+    default:
+      EmptyView()
     }
   }
 }

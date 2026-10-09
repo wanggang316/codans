@@ -25,6 +25,8 @@ public final class MethodRouter {
   private let agentHandlers: AgentHandlers?
   private let handoffHandlers: HandoffHandlers?
   private let workspaceHandlers: WorkspaceHandlers?
+  private let eventHub: EventHub?
+  private let terminalStreams: TerminalStreamRegistry?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -35,7 +37,9 @@ public final class MethodRouter {
     projectHandlers: ProjectHandlers? = nil,
     agentHandlers: AgentHandlers? = nil,
     handoffHandlers: HandoffHandlers? = nil,
-    workspaceHandlers: WorkspaceHandlers? = nil
+    workspaceHandlers: WorkspaceHandlers? = nil,
+    eventHub: EventHub? = nil,
+    terminalStreams: TerminalStreamRegistry? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -45,19 +49,29 @@ public final class MethodRouter {
     self.agentHandlers = agentHandlers
     self.handoffHandlers = handoffHandlers
     self.workspaceHandlers = workspaceHandlers
+    self.eventHub = eventHub
+    self.terminalStreams = terminalStreams
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
   /// verb `system.hello` is routed here alongside other `system.*` calls.
   /// Unknown methods produce `RouterOutcome.failed(.unknownMethod)`.
   ///
-  /// `peerPID` is the connection's kernel-reported peer PID (nil on
-  /// transports without one); only `hierarchy.resolveAlias` consumes it,
-  /// for caller-pane attribution.
-  public func route(_ request: IPC.Request, peerPID: pid_t? = nil) async -> RouterOutcome {
+  /// `context` says who is calling. A remote caller outside the method's
+  /// tier is refused here, before any handler runs, so authorization lives
+  /// at exactly one choke point.
+  public func route(_ request: IPC.Request, context: CallerContext = .local(peerPID: nil)) async -> RouterOutcome {
     logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
-    if let outcome = await routeSystem(request) { return outcome }
-    if let outcome = await routeHierarchy(request, peerPID: peerPID) { return outcome }
+    if let refusal = context.refusal(for: request) {
+      if case .remote(let deviceID, let permission) = context {
+        logger.notice(
+          "refused \(request.method.rawValue, privacy: .public) for device \(deviceID.uuidString, privacy: .public) (\(permission.rawValue, privacy: .public))"
+        )
+      }
+      return .failed(refusal)
+    }
+    if let outcome = await routeSystem(request, context: context) { return outcome }
+    if let outcome = await routeHierarchy(request, peerPID: context.peerPID) { return outcome }
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
@@ -65,7 +79,84 @@ public final class MethodRouter {
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
     if let outcome = await routeWorkspace(request) { return outcome }
+    if let outcome = routeEvents(request) { return outcome }
+    if let outcome = routeTerminalStream(request, context: context) { return outcome }
     return notWired(request.method)
+  }
+
+  /// `events.subscribe` — a streaming method. The subscription is
+  /// registered here, on the main actor, so its snapshot reflects the state
+  /// at the moment the request was served.
+  private func routeEvents(_ request: IPC.Request) -> RouterOutcome? {
+    guard request.method == .eventsSubscribe, let hub = eventHub else { return nil }
+    let params: IPC.EventsSubscribeRequest
+    do {
+      params = try request.params.decoded(as: IPC.EventsSubscribeRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: String(describing: error), path: ["topics"]))
+    }
+    let topics = params.resolvedTopics
+    guard !topics.isEmpty else {
+      return .failed(.invalidParams(message: "topics must not be empty", path: ["topics"]))
+    }
+    let subscription = hub.subscribe(topics: topics)
+    return .streaming { subscription.jsonFrames() }
+  }
+
+  /// `pane.attachStream` — a live, read-only mirror of one pane. The
+  /// session is opened here, on the main actor, so a pane that is gone or
+  /// a caller over its stream limit gets an error instead of an empty
+  /// stream.
+  private func routeTerminalStream(_ request: IPC.Request, context: CallerContext) -> RouterOutcome? {
+    if let outcome = routeTerminalSeat(request, context: context) { return outcome }
+    guard request.method == .paneAttachStream, let registry = terminalStreams else { return nil }
+    // A unary call would open a daemon connection nobody drains.
+    guard request.stream else {
+      return .failed(
+        .invalidParams(message: "\(request.method.rawValue) requires stream: true on the request", path: nil))
+    }
+    let params: IPC.PaneAttachStreamRequest
+    do {
+      params = try request.params.decoded(as: IPC.PaneAttachStreamRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: String(describing: error), path: ["paneID"]))
+    }
+    // Only a caller that may type gets a seat: a seat that leads resizes
+    // the pane and carries input.
+    let canType = context.remotePermission.map { $0 == .interactive } ?? true
+    switch registry.attach(params, caller: context.streamCallerKey, canType: canType) {
+    case .success(let session):
+      return .streaming { session.jsonFrames() }
+    case .failure(let error):
+      return .failed(error)
+    }
+  }
+
+  /// `pane.setStreamSize` / `pane.claimSize` / `pane.input`: the caller's
+  /// terminal seat, opened with its stream. The remote tier already limits
+  /// these to devices that may type.
+  private func routeTerminalSeat(_ request: IPC.Request, context: CallerContext) -> RouterOutcome? {
+    guard let registry = terminalStreams else { return nil }
+    let caller = context.streamCallerKey
+    let result: Result<Void, IPCError>
+    do {
+      switch request.method {
+      case .paneSetStreamSize:
+        result = registry.setSeatSize(try request.params.decoded(as: IPC.PaneSetStreamSizeRequest.self), caller: caller)
+      case .paneClaimSize:
+        result = registry.claimSize(try request.params.decoded(as: IPC.PaneClaimSizeRequest.self), caller: caller)
+      case .paneInput:
+        result = registry.input(try request.params.decoded(as: IPC.PaneInputRequest.self), caller: caller)
+      default:
+        return nil
+      }
+    } catch {
+      return .failed(.invalidParams(message: String(describing: error), path: nil))
+    }
+    switch result {
+    case .success: return .unary(.object([:]))
+    case .failure(let error): return .failed(error)
+    }
   }
 
   /// `workspace.*` adapter — typed handlers; `asyncOutcome` for the two
@@ -164,9 +255,9 @@ public final class MethodRouter {
     }
   }
 
-  /// Renames, prune, and split-tree verbs — the sidebar / context-menu
-  /// actions, kept out of `routeHierarchyMutations` for the same reason
-  /// the tag verbs are.
+  /// Renames, prune, and split-tree verbs (split, resize, zoom) — the
+  /// sidebar / context-menu actions, kept out of `routeHierarchyMutations`
+  /// for the same reason the tag verbs are.
   private func routeHierarchyLayout(
     _ request: IPC.Request,
     handlers h: HierarchyHandlers
@@ -178,6 +269,8 @@ public final class MethodRouter {
     case .hierarchyPruneWorktrees: return await h.pruneWorktrees(request.params)
     case .hierarchySplitPane: return await h.splitPane(request.params)
     case .hierarchyResizePane: return await h.resizePane(request.params)
+    case .hierarchyZoomPane: return await h.zoomPane(request.params)
+    case .hierarchyUnzoomPane: return await h.unzoomPane(request.params)
     default: return nil
     }
   }
@@ -374,6 +467,7 @@ public final class MethodRouter {
     switch request.method {
     case .terminalSendInput: return await t.sendInput(request.params)
     case .terminalSendKey: return await t.sendKey(request.params)
+    case .terminalSendEvents: return await t.sendEvents(request.params)
     case .terminalSendRawBytes: return await t.sendRawBytes(request.params)
     case .terminalBroadcastInput: return await t.broadcastInput(request.params)
     case .terminalReadText: return await t.readText(request.params)
@@ -382,9 +476,10 @@ public final class MethodRouter {
     }
   }
 
-  private func routeSystem(_ request: IPC.Request) async -> RouterOutcome? {
+  private func routeSystem(_ request: IPC.Request, context: CallerContext) async -> RouterOutcome? {
     switch request.method {
-    case .systemHello: return await systemHandlers.hello(request.params)
+    case .systemHello:
+      return await systemHandlers.hello(request.params, remotePermission: context.remotePermission)
     case .systemPing: return await systemHandlers.ping(request.params)
     case .systemVersion: return await systemHandlers.version(request.params)
     case .systemStatus: return await systemHandlers.status(request.params)

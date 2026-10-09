@@ -16,6 +16,7 @@ struct IPCErrorCodableTests {
       .overloaded,
       .versionMismatch(client: "0.1.0", server: "0.2.0"),
       .invalidFrame(reason: "frame too large"),
+      .forbidden(reason: "terminal.sendInput is not available to this device"),
     ]
     for variant in variants {
       let data = try JSONEncoder().encode(variant)
@@ -31,6 +32,7 @@ struct IPCErrorCodableTests {
     #expect(IPCError.overloaded.code == "overloaded")
     #expect(IPCError.versionMismatch(client: "", server: "").code == "versionMismatch")
     #expect(IPCError.invalidFrame(reason: "").code == "invalidFrame")
+    #expect(IPCError.forbidden(reason: "").code == "forbidden")
   }
 
   @Test

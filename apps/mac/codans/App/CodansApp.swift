@@ -87,6 +87,7 @@ struct CodansApp: App {
           )
           .frame(minWidth: 800, minHeight: 600)
           .environment(appState.agentInstallation)
+          .environment(appState.remotePaneSizing)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
           // Redirect ⌘W (claimed by AppKit's File ▸ Close) away from tearing
@@ -198,6 +199,7 @@ struct CodansApp: App {
           .environment(appState.developerPaneDependencies)
           .environment(appState.osNotifier)
           .environment(appState.agentInstallation)
+          .environment(appState.remoteGateway)
           .environment(commandKeyObserver)
           .environment(\.resolvedShortcuts, appState.shortcutsStore.resolved)
         } else {
@@ -477,6 +479,9 @@ final class AppState {
   /// greys out missing agents, and the worktree toolbar's Agents menu hides
   /// them — and they must not disagree.
   let agentInstallation = AgentInstallationStore()
+  /// Panes a paired device has sized for itself; the pane views cover
+  /// the cells the device's grid leaves unused.
+  let remotePaneSizing = RemotePaneSizing()
   /// One-shot authorization + completion fan-out for panel-injected handoff
   /// requests. Shared by the `handoff.*` IPC handler (claims / publishes)
   /// and the in-app Hand Off panel (registers / observes).
@@ -621,6 +626,9 @@ final class AppState {
   private var worktreeWorkingTreeWatcherSyncTask: Task<Void, Never>?
 
   private var socketServer: SocketServer?
+  /// LAN gateway for the iOS companion; nil until IPC bring-up (and under
+  /// tests). Observed so the Settings pane appears once it lands.
+  private(set) var remoteGateway: RemoteGatewayServer?
   // EditorClient is built inside bringUp() alongside the TCA dependency
   // wiring and then threaded into startIPC() so EditorHandlers and the
   // in-app reducer stack share a single service instance.
@@ -1212,35 +1220,42 @@ final class AppState {
       settings: settingsStore,
       hierarchy: hierarchyClient
     )
+    let agentHandlers = AgentHandlers(
+      settings: settingsStore,
+      hierarchy: hierarchyClient,
+      installation: agentInstallation,
+      stateStore: { [weak self] in self?.agentStateStore },
+      handleRegistry: targetHandles,
+      focusedPane: { [weak hierarchy] in
+        guard let hierarchy else { return nil }
+        return Self.currentlyFocusedPane(
+          catalog: hierarchy.catalog,
+          lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
+        )
+      }
+    )
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,
       terminalHandlers: terminalHandlers,
       editorHandlers: editorHandlers,
       projectHandlers: projectHandlers,
-      agentHandlers: AgentHandlers(
-        settings: settingsStore,
-        hierarchy: hierarchyClient,
-        installation: agentInstallation,
-        stateStore: { [weak self] in self?.agentStateStore },
-        handleRegistry: targetHandles,
-        focusedPane: { [weak hierarchy] in
-          guard let hierarchy else { return nil }
-          return Self.currentlyFocusedPane(
-            catalog: hierarchy.catalog,
-            lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
-          )
-        }
-      ),
+      agentHandlers: agentHandlers,
       handoffHandlers: handoffHandlers,
       workspaceHandlers: WorkspaceHandlers(
         hierarchy: hierarchyClient,
         workspace: workspaceClient,
         gitCLI: GitWorktreeCLI()
-      )
+      ),
+      eventHub: makeEventHub(
+        hierarchy: hierarchy, runtime: terminalEngine.ghosttyRuntime, handles: targetHandles,
+        agentHandlers: agentHandlers),
+      terminalStreams: makeTerminalStreams(hierarchy: hierarchy, terminalEngine: terminalEngine)
     )
     let resolvedSocketPath = SocketPaths.resolve()
     let server = SocketServer(path: resolvedSocketPath, router: router)
+    startRemoteGateway(router: router, settingsStore: settingsStore)
+    systemHandlers.relayCoordinates = { [weak self] in self?.remoteGateway?.relayCoordinates }
     do {
       try server.start()
       self.socketServer = server
@@ -1253,6 +1268,88 @@ final class AppState {
         "SocketServer bind failed at \(resolvedSocketPath, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
+  }
+
+  /// `pane.attachStream` sessions observe a pane's zmx daemon directly, so
+  /// a stream works whether or not the pane's tab has a surface this
+  /// session; the surface is consulted only for an old daemon's fallback.
+  private func makeTerminalStreams(
+    hierarchy: HierarchyManager,
+    terminalEngine: TerminalEngine
+  ) -> TerminalStreamRegistry {
+    TerminalStreamRegistry(
+      dependencies: TerminalStreamRegistry.Dependencies(
+        paneExists: { [weak hierarchy] paneID in hierarchy?.catalog.pane(paneID) != nil },
+        socketPath: { paneID in ZmxControlClient.socketPath(for: paneID) },
+        gridSize: { [weak terminalEngine] paneID in
+          guard let size = terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.gridSize() else { return nil }
+          return PaneStreamSession.GridSize(cols: size.cols, rows: size.rows)
+        },
+        observeGeometry: { [weak terminalEngine] paneID, handler in
+          guard let surface = terminalEngine?.ghosttyRuntime?.surface(for: paneID) else { return nil }
+          let token = surface.observeGridSize { _, _ in handler() }
+          return { [weak surface] in surface?.removeGridSizeObserver(token) }
+        },
+        // Not on screen: no surface, a surface outside any window (another
+        // tab), or a window that is hidden, covered, or behind a locked or
+        // sleeping display.
+        isHiddenOnMac: { [weak terminalEngine] paneID in
+          guard let window = terminalEngine?.ghosttyRuntime?.surface(for: paneID)?.view.window else { return true }
+          return !window.occlusionState.contains(.visible)
+        },
+        deviceName: { [weak self] caller in
+          CallerContext.deviceID(fromStreamCallerKey: caller).flatMap { self?.remoteGateway?.devices.device($0)?.name }
+        }
+      ),
+      sizing: remotePaneSizing
+    )
+  }
+
+  /// `events.subscribe` sources: the hierarchy summary and the agent-state
+  /// rows `agent.listStates` returns, so the stream and the CLI agree.
+  private func makeEventHub(
+    hierarchy: HierarchyManager,
+    runtime: GhosttyRuntime?,
+    handles: TargetHandleRegistry,
+    agentHandlers: AgentHandlers
+  ) -> EventHub {
+    EventHub(
+      sources: EventHub.Sources(
+        hierarchy: { [weak self, weak hierarchy, weak runtime] in
+          guard let hierarchy else { return IPC.HierarchySummary(projects: [], selectedProjectID: nil) }
+          let catalog = hierarchy.catalog
+          handles.sync(with: catalog)
+          let agentStates = self?.agentStateStore
+          // Read so the hub re-projects when a surface comes or goes live;
+          // the registry behind `surface(for:)` is not observable itself.
+          _ = runtime?.surfaceRevision.value
+          let lastFocusedPane: @MainActor (TabID) -> PaneID? = { hierarchy.lastFocusedPane(in: $0) }
+          return EventProjection.hierarchySummary(
+            catalog: catalog,
+            handles: handles.snapshot(),
+            focusedPane: lastFocusedPane,
+            paneTitle: { agentStates?.title(for: $0) },
+            activePaneID: Self.currentlyFocusedPane(catalog: catalog, lastFocusedPane: lastFocusedPane),
+            liveDirectory: { runtime?.surface(for: $0)?.info.pwd },
+            paneIsLive: runtime.map { runtime in { runtime.surface(for: $0)?.isLive ?? false } }
+          )
+        },
+        agents: { (try? agentHandlers.listStates().agents) ?? [] }
+      )
+    )
+  }
+
+  /// The LAN gateway for the iOS companion. Built even when the setting is
+  /// off so Settings can manage paired devices; it listens only while
+  /// enabled.
+  private func startRemoteGateway(router: MethodRouter, settingsStore: SettingsStore) {
+    let gateway = RemoteGatewayServer(
+      router: router,
+      devices: PairedDeviceStore(keys: KeychainRemoteKeyStore())
+    )
+    gateway.setRelayAllowed(settingsStore.settings.remoteAccess.allowsRelay)
+    gateway.setEnabled(settingsStore.settings.remoteAccess.enabled)
+    self.remoteGateway = gateway
   }
 
   /// Handoff transition core wired to the live runtime: pane → source
@@ -2324,6 +2421,38 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
     guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
     surface.resetTerminal()
     return true
+  }
+
+  func hasLiveSurface(paneID: PaneID) -> Bool {
+    engine?.ghosttyRuntime?.surface(for: paneID)?.isLive ?? false
+  }
+
+  func sendInputEvent(paneID: PaneID, event: IPC.TerminalInputEvent) -> TerminalHandlers.InputEventOutcome {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID), surface.isLive else { return .paneGone }
+    let outcome: PaneSurface.KeyEventOutcome
+    switch event {
+    case .key(let code, let text, let mods):
+      guard let spec = KeyEventSpec.key(code: code, text: text, mods: mods) else {
+        return .rejected(reason: IPC.TerminalInputRejection.Reason.unknownKey)
+      }
+      outcome = surface.sendKeyEvent(spec: spec)
+    case .text(let text):
+      outcome = surface.sendCommittedText(text)
+    case .paste(let text):
+      surface.sendText(text)
+      outcome = .delivered
+    case .delay, .unknown:
+      return .rejected(reason: IPC.TerminalInputRejection.Reason.unknownEvent)
+    }
+    switch outcome {
+    case .delivered:
+      onPaneInput?(paneID)
+      return .delivered
+    case .binding:
+      return .rejected(reason: IPC.TerminalInputRejection.Reason.binding)
+    case .noSurface:
+      return .paneGone
+    }
   }
 
   private func paneIDs(matching scope: IPC.BroadcastScope, in catalog: Catalog) -> [PaneID] {

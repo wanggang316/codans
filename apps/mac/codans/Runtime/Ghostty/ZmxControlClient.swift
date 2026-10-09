@@ -19,8 +19,6 @@ nonisolated enum ZmxControlClient {
   )
 
   enum ControlError: Error, Equatable, Sendable {
-    case socketCreateFailed(errno: Int32)
-    case pathTooLong(String)
     case connectFailed(errno: Int32)
     case timedOut
     case closedWithoutReply
@@ -118,9 +116,9 @@ nonisolated enum ZmxControlClient {
   static func kill(for paneID: PaneID) {
     let path = socketPath(for: paneID)
     DispatchQueue.global(qos: .utility).async {
-      guard let fd = try? openConnection(socketPath: path) else { return }
+      guard let fd = try? ZmxSocket.openConnection(socketPath: path) else { return }
       defer { Darwin.close(fd) }
-      try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .kill)))
+      try? ZmxSocket.sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .kill)))
     }
   }
 
@@ -128,7 +126,7 @@ nonisolated enum ZmxControlClient {
   /// `<paneID>.snap` now, then wait (bounded) for the daemon to close the
   /// socket — its EOF is the acknowledgement that the snapshot landed.
   ///
-  /// Mirrors `kill(for:)`'s transport (same `openConnection`/`sendAll`) and
+  /// Mirrors `kill(for:)`'s transport (same `ZmxSocket` helpers) and
   /// `SessionReaper.sendOneShotKill`'s EOF-wait (`poll` on `POLLIN`, a
   /// zero-length read = EOF = ack). The blocking connect/send/poll runs on a
   /// background queue and is bridged back through a continuation, so callers
@@ -157,9 +155,9 @@ nonisolated enum ZmxControlClient {
   /// collapse to `.noSocket`; the daemon's EOF is `.acknowledged`; a hit
   /// deadline is `.timedOut`.
   private static func runSnapshot(socketPath: String, deadlineMs: Int) -> SnapshotResult {
-    guard let fd = try? openConnection(socketPath: socketPath) else { return .noSocket }
+    guard let fd = try? ZmxSocket.openConnection(socketPath: socketPath) else { return .noSocket }
     defer { Darwin.close(fd) }
-    guard (try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .snapshot)))) != nil else {
+    guard (try? ZmxSocket.sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .snapshot)))) != nil else {
       return .noSocket
     }
 
@@ -192,46 +190,13 @@ nonisolated enum ZmxControlClient {
     }
   }
 
-  private static func openConnection(socketPath: String) throws -> Int32 {
-    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-    if fd < 0 { throw ControlError.socketCreateFailed(errno: errno) }
-    var noSigPipe: Int32 = 1
-    _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(socketPath.utf8CString)
-    guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
-      Darwin.close(fd)
-      throw ControlError.pathTooLong(socketPath)
-    }
-    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-      ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
-        pathBytes.withUnsafeBufferPointer { src in
-          _ = memcpy(dst, src.baseAddress, pathBytes.count)
-        }
-      }
-    }
-    let connected = withUnsafePointer(to: &addr) { addrPtr in
-      addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-        Darwin.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-      }
-    }
-    if connected < 0 {
-      let err = errno
-      Darwin.close(fd)
-      throw ControlError.connectFailed(errno: err)
-    }
-    return fd
-  }
-
   private static func runQuery(
     socketPath: String, request: ZmxFrame, expect: ZmxTag, deadlineMs: Int
   ) throws -> ZmxFrame {
-    let fd = try openConnection(socketPath: socketPath)
+    let fd = try ZmxSocket.openConnection(socketPath: socketPath)
     defer { Darwin.close(fd) }
 
-    try sendAll(fd: fd, data: ZmxFraming.encode(request))
+    try ZmxSocket.sendAll(fd: fd, data: ZmxFraming.encode(request))
 
     var pending = Data()
     var buf = [UInt8](repeating: 0, count: 8192)
@@ -254,24 +219,9 @@ nonisolated enum ZmxControlClient {
       }
       if n == 0 { throw ControlError.closedWithoutReply }
       pending.append(contentsOf: buf.prefix(n))
-      while let frame = try ZmxFraming.decode(buffer: &pending) {
+      while let frame = try ZmxFraming.decodeSkippingUnknown(buffer: &pending) {
         if frame.tag == expect { return frame }
         // Ignore unsolicited frames (e.g. .output) until our reply lands.
-      }
-    }
-  }
-
-  private static func sendAll(fd: Int32, data: Data) throws {
-    try data.withUnsafeBytes { raw in
-      guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-      var off = 0
-      while off < raw.count {
-        let n = Darwin.send(fd, base + off, raw.count - off, 0)
-        if n < 0 {
-          if errno == EINTR { continue }
-          throw ControlError.connectFailed(errno: errno)
-        }
-        off += n
       }
     }
   }

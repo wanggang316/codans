@@ -28,6 +28,7 @@ Use [_template.md](_template.md) as a starting point.
 - [Ghostty Action Routing](ghostty-action-routing.md) — libghostty `action_cb` 两遍解码 + Info/Effect/Intent/Config 四桶路由，保持 Runtime TCA-free
 - [Git Diff Viewer](git-diff-viewer.md) — 独立只读 Uncommitted / Outgoing 窗口、DiffViewKit 渲染与当前文件编辑器跳转
 - [GitHub Integration](github-integration.md) — repository-batched `gh api graphql` PR 取数（成本 O(Repositories)）、事件驱动失效、fork-PR 过滤；零应用内 HTTP / 零 Keychain
+- [iOS Companion (Codans Mobile)](ios-companion.md) — **设计中（M0–M2 实施，M3/中继仅设计）**：iPhone / iPad / iPhone Duo 远程伴侣；Mac 端默认关闭的 LAN 网关（Bonjour `_codans._tcp` + 每设备 TLS-PSK，密钥存 Keychain）复用同一 IPC 协议，按方法分级权限（readOnly / interactive / 永不远程），`events.subscribe` 快照 + 去抖增量，control + events 双连接，只按 size class 适配（完整 Duo 体验待 Xcode 27.1）
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — 统一快捷键注册表：物理键持久化、三态模型、三级冲突 + 级联重置、独立 `shortcuts.json`
 - [Lifecycle Hooks](lifecycle-hooks.md) — **已设计未实现**：Pane/Tab/Worktree 生命周期 hook 的 out-of-process 执行模型 + 事件 wire schema + stdout DSL
 - [Main Window](main-window.md) — 主窗口三子系统（Sidebar / Header / Tab 条）的不变量与边界：env 直读 catalog、intent 侧选择编排、单一来源默认编辑器解析、runtime-only dirty 态

@@ -104,7 +104,7 @@ launch_app() {
     echo "test app already running"; return
   fi
   rm -f "$SOCK"
-  nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
+  nohup "$APP/Contents/MacOS/Codans" -ApplePersistenceIgnoreState YES >"$SCRATCH/app.log" 2>&1 &
   APP_PID=$!
   echo "launched test app pid=$APP_PID"
   for _ in $(seq 1 100); do

@@ -95,11 +95,22 @@ final class GhosttyRuntime {
   /// process; init/deinit set and clear this.
   nonisolated(unsafe) static weak var shared: GhosttyRuntime?
 
+  /// Set while a remote key runs through one of libghostty's bindings;
+  /// see `RemoteKeyGuard`. Checked only by callbacks that arrive on the
+  /// main thread, where libghostty performs a key's binding.
+  var remoteKeyGuard: RemoteKeyGuard?
+
   /// Registered pane surfaces by PaneID. Referenced by engine code that
   /// needs to look up a surface from a Pane (e.g. lazy surface creation on
   /// tab activation). Surface-scoped callbacks do NOT use this table on the
   /// hot path — they cast the per-surface userdata directly to `PaneSurface`.
   private var surfacesByPaneID: [PaneID: PaneSurface] = [:]
+
+  /// Changes whenever a surface registers, unregisters or first goes live.
+  /// The registry itself is not observable; reading this inside an
+  /// observation scope is how a projection of per-pane liveness (the
+  /// events summary's `isLive`) learns to recompute.
+  let surfaceRevision = SurfaceRevision()
 
   init() throws {
     _ = GhosttyBootstrap.initialize
@@ -263,6 +274,7 @@ final class GhosttyRuntime {
 
   func register(pane: PaneSurface) {
     surfacesByPaneID[pane.paneID] = pane
+    surfaceRevision.bump()
     // A surface registered mid-session inherits the most recently applied scheme so
     // the palette matches the app's current appearance from its first frame.
     if let lastColorScheme {
@@ -271,7 +283,9 @@ final class GhosttyRuntime {
   }
 
   func unregister(paneID: PaneID) {
-    surfacesByPaneID.removeValue(forKey: paneID)
+    if surfacesByPaneID.removeValue(forKey: paneID) != nil {
+      surfaceRevision.bump()
+    }
   }
 
   func surface(for paneID: PaneID) -> PaneSurface? {
@@ -558,6 +572,9 @@ final class GhosttyRuntime {
       let consumed = decoded.consumed
       if Thread.isMainThread {
         return MainActor.assumeIsolated {
+          if GhosttyRuntime.shared?.remoteKeyGuard?.shouldSuppress(action.tag, surfacePaneID: nil) == true {
+            return true
+          }
           _ = GhosttyRuntime.shared?.applyAppAction(decoded)
           return consumed
         }
@@ -575,6 +592,9 @@ final class GhosttyRuntime {
       let consumed = decoded.consumed
       if Thread.isMainThread {
         return MainActor.assumeIsolated {
+          if GhosttyRuntime.shared?.remoteKeyGuard?.shouldSuppress(action.tag, surfacePaneID: paneID) == true {
+            return true
+          }
           _ = GhosttyRuntime.shared?.applySurfaceAction(decoded, paneID: paneID)
           return consumed
         }
@@ -662,6 +682,7 @@ final class GhosttyRuntime {
       let paneID = paneID(fromRawUserdata: userdata)
       let stateBits = state.map { UInt(bitPattern: $0) }
       let complete: @MainActor () -> Bool = {
+        if GhosttyRuntime.shared?.remoteKeyGuard?.shouldRefuseClipboardRead(for: paneID) == true { return false }
         guard let pane = GhosttyRuntime.shared?.surface(for: paneID) else { return false }
         guard let pb = pasteboard(for: location),
           let text = pb.string(forType: .string)
@@ -945,4 +966,19 @@ extension NSColor {
       alpha: 1
     )
   }
+}
+
+/// Observable change counter for `GhosttyRuntime`'s surface registry.
+@MainActor
+@Observable
+final class SurfaceRevision {
+  private(set) var value: UInt64 = 0
+
+  func bump() {
+    value &+= 1
+  }
+
+  // Explicit so the class does not get a synthesized isolated deinit,
+  // which has aborted in the executor hop on teardown.
+  deinit {}
 }
