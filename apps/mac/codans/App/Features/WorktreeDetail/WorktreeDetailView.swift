@@ -353,10 +353,12 @@ struct WorktreeDetailView: View {
         // The inbox stays outside the principal status/process item.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Order: Agents, Workflows, RunScript, Open. `ToolbarItemGroup` renders
-          // children leading-to-trailing in declaration order.
+          // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
+          // children leading-to-trailing in declaration order. The workflow
+          // capsule is intentionally hidden — `workflowSlot` and
+          // `HeaderWorkflowGroup` stay so it can be re-mounted here
+          // without rewiring; workflows start from the Command Palette.
           agentSlot(mode).buttonStyle(.plain)
-          workflowSlot(mode).buttonStyle(.plain)
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
         }
@@ -388,8 +390,7 @@ struct WorktreeDetailView: View {
   private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
     ToolbarItem { agentSlot(mode) }
     ToolbarSpacer(.fixed)
-    ToolbarItem { workflowSlot(mode) }
-    ToolbarSpacer(.fixed)
+    // Workflow capsule intentionally hidden; see the legacy layout below.
     ToolbarItem { runSlot(mode) }
     ToolbarSpacer(.fixed)
     ToolbarItem { openSlot(mode) }
