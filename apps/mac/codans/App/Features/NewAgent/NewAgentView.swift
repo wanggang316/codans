@@ -27,12 +27,12 @@ struct NewAgentView: View {
   var body: some View {
     let profiles = offeredProfiles
     VStack(spacing: 0) {
-      header
-        // Same 24 pt top inset and 16 pt rhythm as the Command Queue sheet;
-        // the grouped form adds its own inset above the first section.
+      Text("New Agent")
+        .font(.headline)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Same 24 pt top inset as the Command Queue sheet.
         .padding(.horizontal, 20)
         .padding(.top, 24)
-        .padding(.bottom, 8)
       Form {
         if store.isCreatingWorktree, let form = store.scope(state: \.worktree, action: \.worktree) {
           worktreeSections(form)
@@ -64,34 +64,36 @@ struct NewAgentView: View {
 
   // MARK: - Header
 
-  /// Title, then the project and worktree selectors with the worktree
-  /// options switch at the trailing edge.
-  private var header: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("New Agent")
-        .font(.headline)
-      HStack(spacing: 14) {
-        projectControl
-        if store.selectedProject?.isGit == true, let form = store.worktree {
-          targetMenu(loading: form.loadingOptions)
+  /// The project and worktree selectors, with the worktree options switch
+  /// at the trailing edge. It is the first section's header, so it sits
+  /// close to the rows it drives and the form's top inset separates it from
+  /// the title. The grouped form ignores `contentMargins`, so that inset
+  /// cannot be tuned from outside.
+  private var selectorRow: some View {
+    HStack(spacing: 14) {
+      projectControl
+      if store.selectedProject?.isGit == true, let form = store.worktree {
+        targetMenu(loading: form.loadingOptions)
+      }
+      Spacer(minLength: 12)
+      if store.isCreatingWorktree {
+        Toggle(
+          isOn: Binding(
+            get: { store.showsWorktreeOptions },
+            set: { _ in store.send(.worktreeOptionsToggled) }
+          )
+        ) {
+          Image(systemName: "switch.2")
         }
-        Spacer(minLength: 12)
-        if store.isCreatingWorktree {
-          Toggle(
-            isOn: Binding(
-              get: { store.showsWorktreeOptions },
-              set: { _ in store.send(.worktreeOptionsToggled) }
-            )
-          ) {
-            Image(systemName: "switch.2")
-          }
-          .toggleStyle(.button)
-          .buttonStyle(.borderless)
-          .help(store.showsWorktreeOptions ? "Hide Worktree Options" : "Show Worktree Options")
-          .accessibilityLabel("Worktree Options")
-        }
+        .toggleStyle(.button)
+        .buttonStyle(.borderless)
+        .help(store.showsWorktreeOptions ? "Hide Worktree Options" : "Show Worktree Options")
+        .accessibilityLabel("Worktree Options")
       }
     }
+    // A section header is inset to the row text; the selectors line up
+    // with the title and the card edges instead.
+    .padding(.horizontal, -10)
   }
 
   /// A selector drawn as its title and a chevron, with no bezel — the same
@@ -223,6 +225,8 @@ struct NewAgentView: View {
       )
       .focused($focus, equals: .branchName)
       .onSubmit { focus = .prompt }
+    } header: {
+      selectorRow
     } footer: {
       if let note = Self.branchNote(form) {
         Text(note.text)
@@ -305,6 +309,11 @@ struct NewAgentView: View {
           agentMenu
           sendButton
         }
+      }
+    } header: {
+      // Without the worktree rows, the composer is the first section.
+      if !store.isCreatingWorktree {
+        selectorRow
       }
     } footer: {
       if let error = store.submitError {
