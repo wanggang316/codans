@@ -12,10 +12,10 @@ struct HeaderNewAgentButton: View {
   let action: () -> Void
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
-  /// A full spectrum from top-left to bottom-right, sampled once — a static
-  /// fill, not an animation, so it never animates late toolbar layout.
+  /// Warm top-left to cool bottom-right, sampled once — a static fill, not
+  /// an animation, so it never animates late toolbar layout.
   private static let gradient = LinearGradient(
-    colors: [.red, .orange, .yellow, .green, .mint, .blue, .indigo, .purple],
+    colors: [.orange, .pink, .purple, .blue],
     startPoint: .topLeading,
     endPoint: .bottomTrailing
   )
