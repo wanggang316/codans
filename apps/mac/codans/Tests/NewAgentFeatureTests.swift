@@ -35,12 +35,13 @@ struct NewAgentFeatureTests {
   }
 
   private func makeStore(
-    preferredProjectID: ProjectID?, pendingCounts: [ProjectID: Int] = [:]
+    preferredProjectID: ProjectID?, pendingCounts: [ProjectID: Int] = [:],
+    restoring draft: NewAgentFeature.Draft? = nil
   ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
     let catalog = catalog
     let store = TestStore(
       initialState: NewAgentFeature.State(
-        preferredProjectID: preferredProjectID, pendingCounts: pendingCounts)
+        preferredProjectID: preferredProjectID, pendingCounts: pendingCounts, restoring: draft)
     ) {
       NewAgentFeature()
     } withDependencies: {
@@ -216,6 +217,41 @@ struct NewAgentFeatureTests {
       $0.target = .newWorktree
       $0.worktree = nil
     }
+  }
+
+  @Test
+  func reopeningRestoresTheDraft() async {
+    let first = await openOnGitProject()
+    await first.send(.worktreeOptionsToggled)
+    await first.send(.worktree(.baseRefSelected("origin/remote-only")))
+    await first.send(.worktree(.fetchOriginToggled(false)))
+    await first.send(.worktree(.branchDraftChanged("feature/agent")))
+    await first.send(.promptChanged("Fix the login bug"))
+
+    let reopened = makeStore(preferredProjectID: folderProjectID, restoring: first.state.draft)
+    await reopened.send(.onAppear)
+    await reopened.receive(\.worktree.optionsLoaded)
+    await reopened.receive(\.worktree.branchDraftChanged)
+    await reopened.send(.agentProfilesChanged([profile]))
+    #expect(reopened.state.projectID == gitProjectID)
+    #expect(reopened.state.showsWorktreeOptions)
+    #expect(reopened.state.prompt == "Fix the login bug")
+    #expect(reopened.state.worktree?.branchNameDraft == "feature/agent")
+    #expect(reopened.state.worktree?.selectedBaseRef == "origin/remote-only")
+    #expect(reopened.state.worktree?.fetchOrigin == false)
+    #expect(reopened.state.restoring == nil)
+    #expect(reopened.state.canSend)
+  }
+
+  @Test
+  func restoredBranchThatIsGoneFallsBackToNewWorktree() async {
+    let first = await openOnGitProject()
+    await first.send(.targetSelected(.branch("feature/gone")))
+    let reopened = makeStore(preferredProjectID: nil, restoring: first.state.draft)
+    await reopened.send(.onAppear)
+    #expect(reopened.state.target == .branch("feature/gone"))
+    await reopened.receive(\.worktree.optionsLoaded)
+    #expect(reopened.state.target == .newWorktree)
   }
 
   @Test

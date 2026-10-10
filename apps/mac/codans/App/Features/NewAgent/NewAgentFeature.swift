@@ -56,6 +56,22 @@ struct NewAgentFeature {
     case newWorkspace
   }
 
+  /// What the user set in a dialog they closed without sending. The next
+  /// open restores it, so a half-written prompt is not lost. Kept in memory
+  /// only, for the app session.
+  struct Draft: Equatable {
+    var projectID: ProjectID
+    var target: Target
+    var showsWorktreeOptions: Bool
+    var branchName: String
+    var baseRef: String?
+    var fetchOrigin: Bool
+    var copyIgnored: Bool
+    var copyUntracked: Bool
+    var agentProfileID: UUID?
+    var prompt: String
+  }
+
   @ObservableState
   struct State: Equatable {
     /// Project selected when the dialog opened; the dialog starts on it.
@@ -77,10 +93,36 @@ struct NewAgentFeature {
     var agentProfileID: UUID?
     var prompt = ""
     var submitError: String?
+    /// Draft to restore on appear. The worktree part waits until the form's
+    /// options load: the base ref, the branch-name checks, and the branch
+    /// list all need them.
+    var restoring: Draft?
 
-    init(preferredProjectID: ProjectID?, pendingCounts: [ProjectID: Int] = [:]) {
+    init(
+      preferredProjectID: ProjectID?, pendingCounts: [ProjectID: Int] = [:],
+      restoring draft: Draft? = nil
+    ) {
       self.preferredProjectID = preferredProjectID
       self.pendingCounts = pendingCounts
+      self.restoring = draft
+    }
+
+    /// The current choices, for the next open. `nil` before a project is
+    /// chosen.
+    var draft: Draft? {
+      guard let projectID else { return nil }
+      return Draft(
+        projectID: projectID,
+        target: target,
+        showsWorktreeOptions: showsWorktreeOptions,
+        branchName: worktree?.branchNameDraft ?? "",
+        baseRef: worktree?.selectedBaseRef,
+        fetchOrigin: worktree?.fetchOrigin ?? true,
+        copyIgnored: worktree?.copyIgnored ?? false,
+        copyUntracked: worktree?.copyUntracked ?? false,
+        agentProfileID: agentProfileID,
+        prompt: prompt
+      )
     }
 
     var selectedProject: ProjectOption? {
@@ -169,6 +211,12 @@ struct NewAgentFeature {
       case .onAppear:
         let catalog = hierarchyClient.snapshot()
         state.projects = catalog.sorted(catalog.projects).map(ProjectOption.init)
+        if let draft = state.restoring,
+          state.projects.contains(where: { $0.id == draft.projectID })
+        {
+          return restore(draft, state: &state)
+        }
+        state.restoring = nil
         let initial =
           state.projects.first { $0.id == state.preferredProjectID } ?? state.projects.first
         guard let initial else { return .none }
@@ -222,6 +270,11 @@ struct NewAgentFeature {
         pending.launchAgentPrompt = Self.normalizedPrompt(state.prompt)
         return .send(.delegate(.createWorktree(pending)))
 
+      case .worktree(.optionsLoaded):
+        guard let draft = state.restoring else { return .none }
+        state.restoring = nil
+        return restoreWorktree(draft, state: &state)
+
       case .worktree:
         return .none
 
@@ -253,6 +306,41 @@ struct NewAgentFeature {
     form?.launchAgentProfileID = nil
     state.worktree = form
     return form == nil ? .none : .send(.worktree(.onAppear))
+  }
+
+  /// Puts back what `onAppear` can set at once. The form is seeded fresh, so
+  /// the pending count and the branch lists are current.
+  private func restore(_ draft: Draft, state: inout State) -> Effect<Action> {
+    let load = selectProject(draft.projectID, state: &state)
+    state.showsWorktreeOptions = draft.showsWorktreeOptions
+    state.agentProfileID = draft.agentProfileID
+    state.prompt = draft.prompt
+    guard state.worktree != nil else {
+      state.restoring = nil
+      return load
+    }
+    state.target = draft.target
+    state.worktree?.branchNameDraft = draft.branchName
+    state.worktree?.fetchOrigin = draft.fetchOrigin
+    state.worktree?.copyIgnored = draft.copyIgnored
+    state.worktree?.copyUntracked = draft.copyUntracked
+    return load
+  }
+
+  /// Puts back the parts that need the loaded options. A base ref or a
+  /// branch that is gone falls back to the default.
+  private func restoreWorktree(_ draft: Draft, state: inout State) -> Effect<Action> {
+    guard let form = state.worktree else { return .none }
+    if let ref = draft.baseRef, form.baseRefOptions.contains(ref) {
+      state.worktree?.selectedBaseRef = ref
+    }
+    if case .branch(let ref) = state.target,
+      !state.localBranches.contains(ref) && !state.remoteBranches.contains(ref)
+    {
+      state.target = .newWorktree
+    }
+    // Runs the name checks the restored text skipped.
+    return .send(.worktree(.branchDraftChanged(form.branchNameDraft)))
   }
 
   private func send(state: inout State) -> Effect<Action> {
