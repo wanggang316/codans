@@ -28,8 +28,11 @@ struct NewAgentView: View {
     let profiles = offeredProfiles
     VStack(spacing: 0) {
       header
+        // Same 24 pt top inset and 16 pt rhythm as the Command Queue sheet;
+        // the grouped form adds its own inset above the first section.
         .padding(.horizontal, 20)
-        .padding(.top, 18)
+        .padding(.top, 24)
+        .padding(.bottom, 8)
       Form {
         if store.isCreatingWorktree, let form = store.scope(state: \.worktree, action: \.worktree) {
           worktreeSections(form)
@@ -64,7 +67,7 @@ struct NewAgentView: View {
   /// Title, then the project and worktree selectors with the worktree
   /// options switch at the trailing edge.
   private var header: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 16) {
       Text("New Agent")
         .font(.headline)
       HStack(spacing: 14) {
