@@ -83,10 +83,10 @@ struct TabIconTests {
     let pane = Pane(workingDirectory: "/tmp")
     let json = """
       {
-        "id": "\(TabID().raw.uuidString)",
-        "splitTree": { "root": { "leaf": "\(pane.id.raw.uuidString)" } },
+        "id": { "raw": "\(TabID().raw.uuidString)" },
+        "splitTree": { "root": { "leaf": { "_0": { "raw": "\(pane.id.raw.uuidString)" } } } },
         "panes": [{
-          "id": "\(pane.id.raw.uuidString)",
+          "id": { "raw": "\(pane.id.raw.uuidString)" },
           "workingDirectory": "/tmp"
         }]
       }
