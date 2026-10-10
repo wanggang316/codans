@@ -61,32 +61,51 @@ struct NewAgentView: View {
 
   // MARK: - Header
 
+  /// Title, then the project and worktree selectors with the worktree
+  /// options switch at the trailing edge.
   private var header: some View {
-    HStack(spacing: 6) {
-      projectControl
-      if store.selectedProject?.isGit == true, let form = store.worktree {
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tertiary)
-          .accessibilityHidden(true)
-        targetPicker(loading: form.loadingOptions)
-      }
-      Spacer(minLength: 12)
-      if store.isCreatingWorktree {
-        Toggle(
-          isOn: Binding(
-            get: { store.showsWorktreeOptions },
-            set: { _ in store.send(.worktreeOptionsToggled) }
-          )
-        ) {
-          Image(systemName: "switch.2")
+    VStack(alignment: .leading, spacing: 10) {
+      Text("New Agent")
+        .font(.headline)
+      HStack(spacing: 14) {
+        projectControl
+        if store.selectedProject?.isGit == true, let form = store.worktree {
+          targetMenu(loading: form.loadingOptions)
         }
-        .toggleStyle(.button)
-        .buttonStyle(.borderless)
-        .help(store.showsWorktreeOptions ? "Hide Worktree Options" : "Show Worktree Options")
-        .accessibilityLabel("Worktree Options")
+        Spacer(minLength: 12)
+        if store.isCreatingWorktree {
+          Toggle(
+            isOn: Binding(
+              get: { store.showsWorktreeOptions },
+              set: { _ in store.send(.worktreeOptionsToggled) }
+            )
+          ) {
+            Image(systemName: "switch.2")
+          }
+          .toggleStyle(.button)
+          .buttonStyle(.borderless)
+          .help(store.showsWorktreeOptions ? "Hide Worktree Options" : "Show Worktree Options")
+          .accessibilityLabel("Worktree Options")
+        }
       }
     }
+  }
+
+  /// A selector drawn as its title and a chevron, with no bezel — the same
+  /// borderless menu as the agent menu beside the send button. The inline
+  /// picker gives the rows their checkmarks.
+  private func selectorMenu<Content: View>(
+    _ title: String, systemImage: String, accessibilityLabel: String,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    Menu {
+      content()
+    } label: {
+      Label(title, systemImage: systemImage)
+    }
+    .menuStyle(.borderlessButton)
+    .fixedSize()
+    .accessibilityLabel(accessibilityLabel)
   }
 
   @ViewBuilder
@@ -94,7 +113,7 @@ struct NewAgentView: View {
     if store.projects.isEmpty {
       // Nothing to start an agent in yet: offer the sidebar's Add Project
       // menu in the project's place.
-      Menu {
+      selectorMenu("Add Project", systemImage: "plus", accessibilityLabel: "Add Project") {
         Button {
           store.send(.addProjectTapped(.openFolder))
         } label: {
@@ -115,61 +134,75 @@ struct NewAgentView: View {
         } label: {
           Label("New Workspace…", systemImage: "square.stack.3d.up")
         }
-      } label: {
-        Label("Add Project", systemImage: "plus")
       }
-      .fixedSize()
     } else {
-      Picker(
-        "Project",
-        selection: Binding(
-          get: { store.projectID },
-          set: { if let id = $0 { store.send(.projectSelected(id)) } }
-        )
+      let selected = store.selectedProject
+      selectorMenu(
+        selected?.name ?? "Project",
+        systemImage: selected?.symbol ?? ProjectIconView.folderSymbol,
+        accessibilityLabel: "Project"
       ) {
-        ForEach(store.projects) { project in
-          Label(project.name, systemImage: project.symbol)
-            .tag(ProjectID?.some(project.id))
+        Picker(
+          "Project",
+          selection: Binding(
+            get: { store.projectID },
+            set: { if let id = $0 { store.send(.projectSelected(id)) } }
+          )
+        ) {
+          ForEach(store.projects) { project in
+            Label(project.name, systemImage: project.symbol)
+              .tag(ProjectID?.some(project.id))
+          }
         }
+        .pickerStyle(.inline)
+        .labelsHidden()
       }
-      .labelsHidden()
-      .fixedSize()
-      .accessibilityLabel("Project")
     }
   }
 
   /// "New Worktree", then the project's local and remote branches.
-  private func targetPicker(loading: Bool) -> some View {
-    Picker(
-      "Worktree",
-      selection: Binding(
-        get: { store.target },
-        set: { store.send(.targetSelected($0)) }
-      )
-    ) {
-      Label("New Worktree", systemImage: "plus.square.on.square")
-        .tag(NewAgentFeature.Target.newWorktree)
-      let locals = store.localBranches
-      let remotes = store.remoteBranches
-      if !locals.isEmpty {
-        Section("Local Branches") {
-          ForEach(locals, id: \.self) { branch in
-            Text(branch).tag(NewAgentFeature.Target.branch(branch))
-          }
-        }
-      }
-      if !remotes.isEmpty {
-        Section("Remote Branches") {
-          ForEach(remotes, id: \.self) { ref in
-            Text(ref).tag(NewAgentFeature.Target.branch(ref))
-          }
-        }
-      }
+  private func targetMenu(loading: Bool) -> some View {
+    let title: String
+    let symbol: String
+    switch store.target {
+    case .newWorktree:
+      title = "New Worktree"
+      symbol = "plus.square.on.square"
+    case .branch(let ref):
+      title = ref
+      symbol = "point.3.connected.trianglepath.dotted"
     }
-    .labelsHidden()
-    .fixedSize()
+    return selectorMenu(title, systemImage: symbol, accessibilityLabel: "Worktree") {
+      Picker(
+        "Worktree",
+        selection: Binding(
+          get: { store.target },
+          set: { store.send(.targetSelected($0)) }
+        )
+      ) {
+        Label("New Worktree", systemImage: "plus.square.on.square")
+          .tag(NewAgentFeature.Target.newWorktree)
+        let locals = store.localBranches
+        let remotes = store.remoteBranches
+        if !locals.isEmpty {
+          Section("Local Branches") {
+            ForEach(locals, id: \.self) { branch in
+              Text(branch).tag(NewAgentFeature.Target.branch(branch))
+            }
+          }
+        }
+        if !remotes.isEmpty {
+          Section("Remote Branches") {
+            ForEach(remotes, id: \.self) { ref in
+              Text(ref).tag(NewAgentFeature.Target.branch(ref))
+            }
+          }
+        }
+      }
+      .pickerStyle(.inline)
+      .labelsHidden()
+    }
     .disabled(loading)
-    .accessibilityLabel("Worktree")
   }
 
   // MARK: - Worktree
