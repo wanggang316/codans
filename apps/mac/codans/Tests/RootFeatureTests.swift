@@ -1229,6 +1229,45 @@ struct RootFeatureTests {
     #expect(launched.value.first?.2 == "Review the diff")
   }
 
+  /// Closing the dialog without sending keeps its choices for the next
+  /// open; sending drops them.
+  @Test
+  func newAgentDraftSurvivesCloseAndClearsOnSend() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var dialog = NewAgentFeature.State(preferredProjectID: projectID)
+    dialog.projectID = projectID
+    var initial = RootFeature.State()
+    initial.newAgent = dialog
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      $0.hierarchyClient.setProjectExpanded = { _, _ in }
+      $0.hierarchyClient.launchAgentProfile = { _, _, _, _ in }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.newAgent(.presented(.promptChanged("Half a thought"))))
+    #expect(store.state.newAgentDraft?.prompt == "Half a thought")
+    await store.send(.newAgentRequested) { $0.newAgent = nil }
+    await store.send(.newAgentRequested)
+    #expect(store.state.newAgent?.restoring?.prompt == "Half a thought")
+
+    await store.send(
+      .newAgent(
+        .presented(
+          .delegate(
+            .launchAgent(
+              profileID: UUID(), prompt: "Half a thought", projectID: projectID,
+              worktreeID: worktreeID))))
+    )
+    #expect(store.state.newAgentDraft == nil)
+  }
+
   @Test
   func materializedAgentLaunchFailureWarns() async {
     let worktreeID = WorktreeID()

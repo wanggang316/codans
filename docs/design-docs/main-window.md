@@ -66,6 +66,8 @@ New Agent 按钮（`HeaderNewAgentButton`，`plus.bubble` 加彩色渐变，无�
 
 prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 agent。
 
+未发送就关闭时，`RootFeature.newAgentDraft` 保留对话框的选择（项目、目标、分支名、选项、agent、prompt），下次打开时恢复；发送后清空。草稿只在内存中，App 重启即丢弃。依赖已加载分支信息的部分（base ref、分支名校验、已选分支）在选项加载完成后恢复，已不存在的 base ref 或分支回落到默认值。
+
 ### 不变量
 
 - **`EditorFeature.resolveDefault` 是默认编辑器解析的单一来源。** 把 "project override → 全局默认 → Finder 兜底" 的解析链收到一个 `EditorFeature` 上的纯静态 helper：

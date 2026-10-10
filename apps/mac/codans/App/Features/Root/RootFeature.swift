@@ -122,6 +122,9 @@ struct RootFeature {
     /// New Agent dialog (⌘⇧N, or the header's New Agent button). `nil` =
     /// hidden.
     @Presents var newAgent: NewAgentFeature.State?
+    /// The New Agent dialog's choices, kept while it is closed without
+    /// sending and restored on the next open.
+    var newAgentDraft: NewAgentFeature.Draft?
 
     /// Whether the Hierarchy sidebar column is visible. Bound into
     /// `NavigationSplitView`'s `columnVisibility` from `ContentView` so the
@@ -557,7 +560,15 @@ struct RootFeature {
         toggleNewAgent(&state)
         return .none
       case .newAgent(.presented(.delegate(let delegate))):
+        switch delegate {
+        case .launchAgent, .createWorktree: state.newAgentDraft = nil
+        case .addProject, .manageAgents: break
+        }
         return handleNewAgentDelegate(delegate, state: &state)
+      case .newAgent(.presented):
+        // The child reducer has run, so this is the edited state.
+        state.newAgentDraft = state.newAgent?.draft ?? state.newAgentDraft
+        return .none
       default:
         return .none
       }
@@ -3095,7 +3106,8 @@ struct RootFeature {
     // One sheet at a time on the main window.
     state.commandQueue = nil
     state.newAgent = NewAgentFeature.State(
-      preferredProjectID: state.selection.projectID, pendingCounts: pendingCounts)
+      preferredProjectID: state.selection.projectID, pendingCounts: pendingCounts,
+      restoring: state.newAgentDraft)
   }
 
   /// Carries out what the New Agent dialog decided. Every outcome but
