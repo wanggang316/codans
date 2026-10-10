@@ -21,6 +21,13 @@ private struct HelpWithShortcutModifier: ViewModifier {
   @Environment(\.resolvedShortcuts) private var shortcuts
 
   func body(content: Content) -> some View {
-    content.help(ShortcutDisplay.tooltip(description, for: id, in: shortcuts))
+    content.help(tooltip)
+  }
+
+  private var tooltip: String {
+    guard let resolved = shortcuts[id], resolved.isEnabled,
+      let binding = resolved.binding
+    else { return description }
+    return "\(description) (\(ShortcutDisplay.chord(for: binding)))"
   }
 }
