@@ -8,7 +8,7 @@ import Testing
 
 @MainActor
 struct DiffWindowManagerTests {
-  @Test func windowsAreIndependentAndReopeningRestoresPreferences() async throws {
+  @Test func oneWindowIsRetargetedAcrossWorktreesAndRestoresPreferences() async throws {
     let project = ProjectID()
     let first = WorktreeID()
     let second = WorktreeID()
@@ -20,83 +20,79 @@ struct DiffWindowManagerTests {
 
     try await withDependencies {
       $0.continuousClock = clock
-      let comparison: @Sendable (URL, GitComparisonScope, String?) async throws -> GitComparisonSnapshot = {
-        url, scope, _ in
+      $0[GitServiceClient.self].comparison = { url, scope, _ in
         GitComparisonSnapshot(scope: scope, baseLabel: "main", files: files, repositoryPath: url.path)
       }
-      // A scope with nothing on screen lists its files first; a reload swaps in the full comparison.
-      $0[GitServiceClient.self].comparisonListing = comparison
-      $0[GitServiceClient.self].comparison = comparison
+      $0[GitServiceClient.self].comparisonListing = { url, scope, _ in
+        GitComparisonSnapshot(scope: scope, baseLabel: "main", files: files, repositoryPath: url.path)
+      }
       $0[GitServiceClient.self].comparisonContent = { _, _, _ in
         GitComparisonContent(oldText: "before", newText: "after")
       }
     } operation: {
-      defer {
-        window(for: first)?.close()
-        window(for: second)?.close()
-      }
+      defer { diffWindow()?.close() }
       manager.open(
         projectID: project, worktreeID: first, path: "/tmp/diff-window-first", title: "First Diff",
         prBase: nil, prRepository: nil)
-      let firstWindow = try #require(window(for: first))
-      let firstStore = try store(in: firstWindow)
-      try await waitUntil { firstStore.snapshot != nil && !firstStore.contentLoading }
+      let window = try #require(diffWindow())
+      let store = try store(in: window)
+      try await waitUntil { store.snapshot != nil && !store.contentLoading }
 
       manager.open(
         projectID: project, worktreeID: first, path: "/tmp/diff-window-first", title: "First Diff Updated",
         prBase: nil, prRepository: nil)
-      #expect(window(for: first) === firstWindow)
-      #expect(firstWindow.title == "First Diff Updated")
-      #expect(NSApp.windows.filter { $0.identifier?.rawValue == "diff-\(first)" && $0.contentView != nil }.count == 1)
+      #expect(diffWindow() === window)
+      #expect(window.title == "First Diff Updated")
+      #expect(diffWindowCount() == 1)
+      #expect(window.frame.width >= DiffWindowManager.defaultContentSize.width)
+      #expect(window.frame.height >= DiffWindowManager.defaultContentSize.height)
+      #expect(window.parent == nil)
+      #expect(window.level == .normal)
+      #expect(window.toolbarStyle == .unified)
+      #expect(window.styleMask.contains([.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView]))
+
+      store.send(.baseChanged("release"))
+      store.send(.scopeChanged(.outgoing))
+      store.send(.filePresentationChanged(.list))
+      store.send(.layoutChanged("split"))
+      try await waitUntil { store.snapshot?.scope == .outgoing && !store.contentLoading }
+      store.send(.selectFile(files[1].id))
+      try await waitUntil { store.selectedFileID == files[1].id && !store.contentLoading }
 
       manager.open(
         projectID: project, worktreeID: second, path: "/tmp/diff-window-second", title: "Second Diff",
-        prBase: nil, prRepository: nil)
-      let secondWindow = try #require(window(for: second))
-      let secondStore = try store(in: secondWindow)
-      #expect(secondWindow !== firstWindow)
-      #expect(firstStore.worktreeID == first)
-      #expect(secondStore.worktreeID == second)
-      #expect(manager.toggleSidebar(in: secondWindow))
-      #expect(!secondStore.sidebarVisible)
-      #expect(firstStore.sidebarVisible)
-      #expect(manager.toggleSidebar(in: secondWindow))
-      #expect(secondStore.sidebarVisible)
-      #expect(firstWindow.frame.width >= DiffWindowManager.defaultContentSize.width)
-      #expect(firstWindow.frame.height >= DiffWindowManager.defaultContentSize.height)
-      #expect(firstWindow.parent == nil)
-      #expect(firstWindow.level == .normal)
-      #expect(firstWindow.styleMask.contains([.titled, .closable, .resizable, .miniaturizable]))
+        prBase: "develop", prRepository: nil)
+      #expect(diffWindow() === window)
+      #expect(diffWindowCount() == 1)
+      #expect(window.title == "Second Diff")
+      #expect(try self.store(in: window) === store)
+      #expect(store.worktreeID == second)
+      #expect(store.path == "/tmp/diff-window-second")
+      #expect(store.prBase == "develop")
+      #expect(store.state.scope == .all)
+      #expect(store.base.isEmpty)
+      #expect(store.filePresentation == .tree)
+      #expect(store.layout == "unified")
+      #expect(manager.toggleSidebar(in: window))
+      #expect(!store.sidebarVisible)
+      #expect(manager.toggleSidebar(in: window))
+      #expect(store.sidebarVisible)
+      store.send(.layoutChanged("split"))
+      try await waitUntil { store.snapshot != nil && !store.contentLoading }
 
-      firstStore.send(.baseChanged("release"))
-      #expect(firstWindow.toolbarStyle == .unified)
-      #expect(firstWindow.styleMask.contains(.fullSizeContentView))
-      firstStore.send(.scopeChanged(.outgoing))
-      #expect(firstStore.filePresentation == .tree)
-      firstStore.send(.filePresentationChanged(.list))
-      #expect(secondStore.filePresentation == .tree)
-      firstStore.send(.layoutChanged("split"))
-      #expect(firstStore.layout == "split")
-      #expect(secondStore.layout == "unified")
-      try await waitUntil { firstStore.snapshot?.scope == .outgoing && !firstStore.contentLoading }
-      firstStore.send(.selectFile(files[1].id))
-      try await waitUntil { firstStore.selectedFileID == files[1].id && !firstStore.contentLoading }
-      #expect(secondStore.state.scope == .all)
-      #expect(secondStore.base.isEmpty)
-
-      firstWindow.close()
-      #expect(firstWindow.contentView == nil)
-      #expect(!firstStore.isVisible)
-      #expect(window(for: first) == nil)
-      #expect(secondWindow.contentView != nil)
-      #expect(secondStore.isVisible)
+      window.close()
+      #expect(window.contentView == nil)
+      #expect(!store.isVisible)
+      #expect(diffWindow() == nil)
+      #expect(!manager.toggleSidebar(in: window))
 
       manager.open(
         projectID: project, worktreeID: first, path: "/tmp/diff-window-first", title: "First Diff Reopened",
         prBase: nil, prRepository: nil)
-      let reopenedWindow = try #require(window(for: first))
-      let reopenedStore = try store(in: reopenedWindow)
-      #expect(reopenedWindow !== firstWindow)
+      let reopenedWindow = try #require(diffWindow())
+      let reopenedStore = try self.store(in: reopenedWindow)
+      #expect(reopenedWindow !== window)
+      #expect(diffWindowCount() == 1)
       #expect(reopenedStore.state.scope == .outgoing)
       #expect(reopenedStore.base == "release")
       #expect(reopenedStore.layout == "split")
@@ -104,11 +100,22 @@ struct DiffWindowManagerTests {
       #expect(reopenedStore.selectedFileID == files[1].id)
       try await waitUntil { reopenedStore.snapshot != nil && !reopenedStore.contentLoading }
       #expect(reopenedStore.selectedFileID == files[1].id)
+
+      manager.open(
+        projectID: project, worktreeID: second, path: "/tmp/diff-window-second", title: "Second Diff Reopened",
+        prBase: nil, prRepository: nil)
+      #expect(diffWindow() === reopenedWindow)
+      #expect(reopenedStore.worktreeID == second)
+      #expect(reopenedStore.layout == "split")
     }
   }
 
-  private func window(for worktree: WorktreeID) -> NSWindow? {
-    NSApp.windows.first { $0.identifier?.rawValue == "diff-\(worktree)" && $0.contentView != nil }
+  private func diffWindow() -> NSWindow? {
+    NSApp.windows.first { $0.identifier == DiffWindowManager.windowIdentifier && $0.contentView != nil }
+  }
+
+  private func diffWindowCount() -> Int {
+    NSApp.windows.filter { $0.identifier == DiffWindowManager.windowIdentifier && $0.contentView != nil }.count
   }
 
   private func store(in window: NSWindow) throws -> StoreOf<DiffFeature> {
