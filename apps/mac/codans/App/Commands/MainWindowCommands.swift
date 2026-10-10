@@ -7,8 +7,9 @@ import SwiftUI
 /// piling everything into File:
 ///
 /// - **Codans** (app menu): Check for Updates…, next to About / Settings.
-/// - **File**: project / worktree creation (Open Project…, Clone Repository…,
-///   New Worktree…) — mirroring the sidebar's "Add Project" menu.
+/// - **File**: project / worktree / agent creation (Open Project…, Clone
+///   Repository…, New Worktree…, New Agent…) — mirroring the sidebar's "Add
+///   Project" menu.
 /// - **View**: sidebar chrome (Toggle Sidebar, Reveal in Sidebar) plus the
 ///   **Command Palette**.
 /// - **Window**: the auto-populated window list ("Codans" / "Settings" window
@@ -108,6 +109,13 @@ struct MainWindowCommands: Commands {
       }
       .appKeyboardShortcut(.newWorktree, in: shortcuts)
       .disabled(!hasCurrentProject)
+
+      // Enabled without a project: the dialog then offers Add Project.
+      Button("New Agent…") {
+        store()?.send(.newAgentRequested)
+      }
+      .appKeyboardShortcut(.newAgent, in: shortcuts)
+      .disabled(store() == nil)
     }
 
     // MARK: View — show / hide chrome + Command Palette

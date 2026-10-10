@@ -1122,7 +1122,7 @@ struct RootFeatureTests {
     let launched = LockIsolated<[(UUID, ProjectID, WorktreeID)]>([])
     let store = makeGateStore(
       autoSwitch: true, activePendingWorktreeID: pendingID, recorder: SelectRecorder())
-    store.dependencies.hierarchyClient.launchAgentProfile = { pid, proj, wt in
+    store.dependencies.hierarchyClient.launchAgentProfile = { pid, proj, wt, _ in
       launched.withValue { $0.append((pid, proj, wt)) }
     }
 
@@ -1144,13 +1144,137 @@ struct RootFeatureTests {
     #expect(launched.value.first?.2 == worktreeID)
   }
 
+  /// The New Agent dialog's prompt rides the pending creation and reaches
+  /// the agent launch once the worktree materializes.
+  @Test
+  func materializedPassesTheAgentPrompt() async {
+    let worktreeID = WorktreeID()
+    let prompts = LockIsolated<[String?]>([])
+    let store = makeGateStore(
+      autoSwitch: true, activePendingWorktreeID: nil, recorder: SelectRecorder())
+    store.dependencies.hierarchyClient.launchAgentProfile = { _, _, _, prompt in
+      prompts.withValue { $0.append(prompt) }
+    }
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: ProjectID(), pendingID: PendingWorktreeID(),
+            agentProfileID: UUID(), agentPrompt: "Fix the login bug"))))
+    await store.receive(\.worktreeAgentLaunchFinished)
+    #expect(prompts.value == ["Fix the login bug"])
+  }
+
+  @Test
+  func newAgentRequestedTogglesTheDialogOnTheSelectedProject() async {
+    let projectID = ProjectID()
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: projectID, worktreeID: nil)
+    let store = TestStore(initialState: initial) { RootFeature() }
+    store.exhaustivity = .off
+    await store.send(.newAgentRequested) {
+      $0.newAgent = NewAgentFeature.State(preferredProjectID: projectID)
+    }
+    await store.send(.newAgentRequested) {
+      $0.newAgent = nil
+    }
+  }
+
+  /// Sending to an existing worktree closes the dialog, takes the user
+  /// there, and launches the agent with the prompt — parked so the
+  /// selection's auto-seed leaves the first tab to the agent.
+  @Test
+  func newAgentLaunchInExistingWorktreeSelectsAndLaunches() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let profileID = UUID()
+    let rec = SelectRecorder()
+    let launched = LockIsolated<[(UUID, WorktreeID, String?)]>([])
+    var initial = RootFeature.State()
+    initial.newAgent = NewAgentFeature.State(preferredProjectID: projectID)
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.selectProject = { pid in rec.project.withValue { $0 = pid } }
+      $0.hierarchyClient.selectWorktree = { wt, _ in rec.worktree.withValue { $0 = wt } }
+      $0.hierarchyClient.setProjectExpanded = { _, _ in }
+      $0.continuousClock = ImmediateClock()
+      $0.hierarchyClient.launchAgentProfile = { id, _, wt, prompt in
+        launched.withValue { $0.append((id, wt, prompt)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .newAgent(
+        .presented(
+          .delegate(
+            .launchAgent(
+              profileID: profileID, prompt: "Review the diff", projectID: projectID,
+              worktreeID: worktreeID))))
+    ) {
+      $0.newAgent = nil
+      $0.agentLaunchWorktreeIDs = [worktreeID]
+    }
+    await store.receive(\.worktreeAgentLaunchFinished) {
+      $0.agentLaunchWorktreeIDs = []
+    }
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
+    #expect(launched.value.count == 1)
+    #expect(launched.value.first?.0 == profileID)
+    #expect(launched.value.first?.1 == worktreeID)
+    #expect(launched.value.first?.2 == "Review the diff")
+  }
+
+  /// Closing the dialog without sending keeps its choices for the next
+  /// open; sending drops them.
+  @Test
+  func newAgentDraftSurvivesCloseAndClearsOnSend() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var dialog = NewAgentFeature.State(preferredProjectID: projectID)
+    dialog.projectID = projectID
+    var initial = RootFeature.State()
+    initial.newAgent = dialog
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      $0.hierarchyClient.setProjectExpanded = { _, _ in }
+      $0.hierarchyClient.launchAgentProfile = { _, _, _, _ in }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.newAgent(.presented(.promptChanged("Half a thought"))))
+    #expect(store.state.newAgentDraft?.prompt == "Half a thought")
+    await store.send(.newAgentRequested) { $0.newAgent = nil }
+    await store.send(.newAgentRequested)
+    #expect(store.state.newAgent?.restoring?.prompt == "Half a thought")
+
+    await store.send(
+      .newAgent(
+        .presented(
+          .delegate(
+            .launchAgent(
+              profileID: UUID(), prompt: "Half a thought", projectID: projectID,
+              worktreeID: worktreeID))))
+    )
+    #expect(store.state.newAgentDraft == nil)
+  }
+
   @Test
   func materializedAgentLaunchFailureWarns() async {
     let worktreeID = WorktreeID()
     let profileID = UUID()
     let store = makeGateStore(
       autoSwitch: false, activePendingWorktreeID: nil, recorder: SelectRecorder())
-    store.dependencies.hierarchyClient.launchAgentProfile = { id, _, _ in
+    store.dependencies.hierarchyClient.launchAgentProfile = { id, _, _, _ in
       throw RunScriptError.unknownScript(id)
     }
     store.dependencies.continuousClock = ImmediateClock()

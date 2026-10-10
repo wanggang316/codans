@@ -68,14 +68,12 @@ struct WorktreeHeaderFeature {
     /// "Manage Global Commands…" menu footer. Deep-links into the Settings
     /// window's Global Commands pane (no project context needed).
     case manageGlobalScriptsTapped
-    /// Agents split button — primary or menu activation. Carries only the
-    /// profile id; RootFeature resolves the target Project + Worktree from
-    /// `state.selection` at handle-time, same staleness rationale as
-    /// `runScriptTapped`.
-    case launchAgentTapped(profileID: UUID)
-    /// "Manage Agents…" menu footer, and the primary half's fallback when no
-    /// profile is enabled. Deep-links into the Settings window's Agents pane.
-    case manageAgentsTapped
+    /// A row of the "Run Workflow" submenu. RootFeature resolves the
+    /// selected worktree at handle-time and opens the start panel.
+    case runWorkflowTapped(workflowID: String)
+    /// "New Workflow…" / "Manage Workflows…" footer rows.
+    case newWorkflowTapped
+    case manageWorkflowsTapped
     /// "Hand Off…" menu row. RootFeature resolves the source pane (the
     /// selected worktree's focused pane) and opens the Hand Off panel.
     /// Scan the worktree's manifests for command suggestions. Sent when the
@@ -130,14 +128,10 @@ struct WorktreeHeaderFeature {
       /// User asked to manage global commands — open the Settings window AND
       /// deep-link into the Global Commands pane.
       case manageGlobalScriptsRequested
-      /// Launch a configured agent profile. RootFeature resolves the target
-      /// Project + Worktree from `state.selection` at handle-time (see
-      /// `runScriptRequested`) and dispatches to
-      /// `HierarchyClient.launchAgentProfile`.
-      case launchAgentRequested(profileID: UUID)
-      /// User asked to manage agents — open the Settings window AND deep-link
-      /// into the Agents pane.
-      case manageAgentsRequested
+      /// Open the start panel for `workflowID` in the selected worktree.
+      case runWorkflowRequested(workflowID: String)
+      /// Open Settings → Workflows, optionally straight into New Workflow.
+      case manageWorkflowsRequested(createNew: Bool)
     }
   }
 
@@ -188,11 +182,14 @@ struct WorktreeHeaderFeature {
       case .manageGlobalScriptsTapped:
         return .send(.delegate(.manageGlobalScriptsRequested))
 
-      case .launchAgentTapped(let profileID):
-        return .send(.delegate(.launchAgentRequested(profileID: profileID)))
+      case .runWorkflowTapped(let workflowID):
+        return .send(.delegate(.runWorkflowRequested(workflowID: workflowID)))
 
-      case .manageAgentsTapped:
-        return .send(.delegate(.manageAgentsRequested))
+      case .newWorkflowTapped:
+        return .send(.delegate(.manageWorkflowsRequested(createNew: true)))
+
+      case .manageWorkflowsTapped:
+        return .send(.delegate(.manageWorkflowsRequested(createNew: false)))
 
       case .scanCommandSuggestions(let projectID, let worktreeID):
         if state.commandSuggestionsWorktreeID != worktreeID {

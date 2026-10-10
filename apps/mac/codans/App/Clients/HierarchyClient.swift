@@ -486,12 +486,13 @@ nonisolated struct HierarchyClient: Sendable {
   /// same way a script is dispatched (new tab / split / focused pane), with
   /// one deliberate difference: agent launches are *not* tracked as run panes,
   /// so invoking the same profile twice opens a second session rather than
-  /// re-typing into the first. Throws `RunScriptError.unknownScript` when the
+  /// re-typing into the first. `prompt` is the agent's first prompt; `nil`
+  /// starts it without one. Throws `RunScriptError.unknownScript` when the
   /// profile id is gone (removed between click and dispatch);
   /// `.missingWorktree` when the worktree is.
   var launchAgentProfile:
     @MainActor @Sendable (
-      _ profileID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
+      _ profileID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID, _ prompt: String?
     ) async throws -> Void
 
   /// Lower-level sibling of `launchAgentProfile` for callers that already
@@ -1081,13 +1082,14 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
-      launchAgentProfile: { [weak settings] profileID, projectID, worktreeID in
+      launchAgentProfile: { [weak settings] profileID, projectID, worktreeID, prompt in
         let snapshot = settings?.settings ?? .default
         guard let profile = snapshot.agents.profile(id: profileID) else {
           throw RunScriptError.unknownScript(profileID)
         }
         _ = try await launchAgent(
-          spec: AgentLaunchSpec(profile: profile, projectID: projectID, worktreeID: worktreeID),
+          spec: AgentLaunchSpec(
+            profile: profile, projectID: projectID, worktreeID: worktreeID, prompt: prompt),
           manager: manager,
           snapshot: snapshot,
           terminalClient: terminalClient
@@ -2304,7 +2306,7 @@ extension HierarchyClient: DependencyKey {
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runCommand: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    launchAgentProfile: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    launchAgentProfile: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     launchAgent: { _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopAllScripts: { _ in fatalError("HierarchyClient.liveValue not configured") },

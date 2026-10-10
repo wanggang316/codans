@@ -5,7 +5,7 @@ import Testing
 
 /// The install probe is advisory and is wrong in the "missing" direction more
 /// often than the other, so these pin both the filter and the two ways it
-/// refuses to hide everything. The toolbar Agents menu and the Hand Off panel
+/// refuses to hide everything. The New Agent dialog and the Hand Off panel
 /// share this rule.
 @MainActor
 struct AgentInstallationStoreTests {

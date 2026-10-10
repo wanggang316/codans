@@ -32,6 +32,11 @@ struct ContentView: View {
   /// Registry that backs the worktree-toolbar badge + popover. Optional
   /// because `AppState.bringUp` constructs it lazily; nil renders no badge.
   let agentStateStore: AgentStateStore?
+  /// Active workflow runs for the AgentState panel's "Workflows" group.
+  /// Defaulted so previews and tests that build `ContentView` without the
+  /// engine keep compiling.
+  var workflowEngine: WorkflowEngine?
+  @Environment(WorkflowCatalogStore.self) private var workflowCatalog
   /// Transient toast for editor-open outcomes (success + failure). Non-nil = visible;
   /// auto-clears after a short window via `.task(id:)`.
   @State private var lastEditorToast: EditorToast?
@@ -84,6 +89,12 @@ struct ContentView: View {
           HandoffOverlayView(store: handoffStore)
             .zIndex(100)
         }
+        if let workflowStartStore = store.scope(
+          state: \.workflowStart, action: \.workflowStart.presented
+        ) {
+          WorkflowStartOverlayView(store: workflowStartStore)
+            .zIndex(100)
+        }
       }
     }
   }
@@ -98,8 +109,12 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
+        workflowEngine: workflowEngine,
         onAgentStateRowTapped: { paneID in store.send(.agentState(.rowTapped(paneID))) },
-        onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) }
+        onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) },
+        onAgentStateRowRunWorkflow: { paneID, workflowID in
+          store.send(.agentState(.runWorkflowTapped(paneID, workflowID: workflowID)))
+        }
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
@@ -114,6 +129,7 @@ struct ContentView: View {
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
+        onNewAgent: { store.send(.newAgentRequested) },
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it
@@ -160,6 +176,12 @@ struct ContentView: View {
       // remote Open button (and the context menu's editor list) could never
       // appear.
       store.send(.editor(.onAppear))
+    }
+    // A workflow's Run button in Settings: open the start panel here, for
+    // the selected worktree, through the toolbar menu's own route.
+    .onChange(of: workflowCatalog.pendingRunWorkflowID, initial: true) {
+      guard let workflowID = workflowCatalog.consumeRunRequest() else { return }
+      store.send(.worktreeHeader(.delegate(.runWorkflowRequested(workflowID: workflowID))))
     }
     .onChange(of: store.editor.lastOpenResult) { _, new in
       guard let new else { return }
@@ -218,6 +240,12 @@ struct ContentView: View {
         onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
       )
       .environment(hierarchyManager)
+    }
+    .sheet(
+      item: $store.scope(state: \.newAgent, action: \.newAgent)
+    ) { newAgentStore in
+      NewAgentView(store: newAgentStore)
+        .environment(settingsStore)
     }
     .onDisappear {
       store.send(.onQuit)

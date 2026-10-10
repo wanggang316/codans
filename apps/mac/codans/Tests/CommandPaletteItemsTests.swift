@@ -1,7 +1,7 @@
+import CodansCore
 import Dependencies
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -28,9 +28,10 @@ struct CommandPaletteItemsTests {
 
   @Test
   func emptyCatalogEmitsOnlyAppItems() {
-    let items = CommandPaletteItems.build(
-      selection: Self.emptySelection, catalog: Self.emptyCatalog
-    )
+    // App-scope items now consult settings too (the workflow master switch).
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(selection: Self.emptySelection, catalog: Self.emptyCatalog)
+    }
     let ids = Set(items.map(\.id))
     #expect(ids.contains("app.open-settings"))
     #expect(ids.contains("app.check-for-updates"))

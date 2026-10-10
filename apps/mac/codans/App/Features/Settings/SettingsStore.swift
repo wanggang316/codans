@@ -159,6 +159,13 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  /// Workflow bindings / trust / enablement. Written by the workflow
+  /// engine (remembered bindings), the Settings pane, and the trust prompt.
+  func mutateWorkflows(_ transform: (inout WorkflowSettings) -> Void) {
+    transform(&settings.workflows)
+    scheduleSave()
+  }
+
   /// Mutates the `ProjectSettings` for `projectID`, creating an empty entry if none
   /// exists. The pre-save garbage collection in `scheduleSave` drops any entry that ends up
   /// effectively empty so `settings.json` never accumulates useless `{}` objects, and also

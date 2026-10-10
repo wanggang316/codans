@@ -53,7 +53,7 @@ struct HandoffFeatureTests {
     #expect(same.targets.first?.isSameAgent == true)
   }
 
-  /// Same rule as the toolbar Agents menu: agents the shell could not resolve
+  /// Same rule as the New Agent dialog: agents the shell could not resolve
   /// are hidden, unless that would hide every one of them.
   @Test
   func agentsTheMachineCannotRunAreHiddenUnlessThatWouldHideAll() {
