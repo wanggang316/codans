@@ -110,6 +110,14 @@ struct WorktreeHistoryControls: NSViewRepresentable {
       }
     }
 
+    /// The Go menu command this segment mirrors; its chord joins the tooltip.
+    var commandID: CommandID {
+      switch self {
+      case .back: return .worktreeHistoryBack
+      case .forward: return .worktreeHistoryForward
+      }
+    }
+
     var symbol: String {
       switch self {
       case .back: return "chevron.backward"
@@ -145,15 +153,19 @@ struct WorktreeHistoryControls: NSViewRepresentable {
     control.segmentStyle = .automatic
     control.segmentDistribution = .fillEqually
     control.setAccessibilityIdentifier("header.history")
-    for direction in Direction.allCases {
-      control.setToolTip(direction.title, forSegment: direction.rawValue)
-    }
     return control
   }
 
   func updateNSView(_ control: NSSegmentedControl, context: Context) {
     context.coordinator.onJump = onJump
+    // Set on every update, not once in `makeNSView`, so a rebind in
+    // Settings shows up without rebuilding the control.
+    let shortcuts = context.environment.resolvedShortcuts
     for direction in Direction.allCases {
+      control.setToolTip(
+        ShortcutDisplay.tooltip(direction.title, for: direction.commandID, in: shortcuts),
+        forSegment: direction.rawValue
+      )
       let entries = entries(for: direction)
       control.setEnabled(!entries.isEmpty, forSegment: direction.rawValue)
       control.setMenu(
