@@ -16,7 +16,7 @@ import SwiftUI
 struct AgentsSettingsView: View {
   @Environment(SettingsStore.self) private var settingsStore
   /// Which agent CLIs are actually on disk. App-scoped so this pane and the
-  /// worktree toolbar's Agents menu never disagree about what is runnable.
+  /// New Agent dialog never disagree about what is runnable.
   @Environment(AgentInstallationStore.self) private var installation
   /// Non-nil = the detail screen for that profile is showing.
   @State private var editingProfileID: UUID?
@@ -55,7 +55,7 @@ struct AgentsSettingsView: View {
         addRow
       } footer: {
         Text(
-          "Named launch presets available from the worktree toolbar's Agents menu. A dimmed "
+          "Named launch presets available from the New Agent dialog. A dimmed "
             + "row means codans could not find that agent on your shell's PATH."
         )
       }

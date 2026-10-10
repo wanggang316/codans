@@ -74,7 +74,7 @@ struct AgentProfileDetailView: View {
       Button("Remove Profile", role: .destructive, action: onRemove)
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("The profile disappears from the toolbar Agents menu. The agent itself is untouched.")
+      Text("The profile disappears from the New Agent dialog. The agent itself is untouched.")
     }
   }
 

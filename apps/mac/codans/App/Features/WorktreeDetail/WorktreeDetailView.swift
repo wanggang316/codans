@@ -45,6 +45,9 @@ struct WorktreeDetailView: View {
   /// the InboxBellView's row-tap. Wired by `ContentView` so this view
   /// doesn't need to hold the root TCA scope just to fire one action.
   let onFocusHierarchyPath: (InboxEntry.SourcePath) -> Void
+  /// Opens the New Agent dialog from the header's New Agent button. Wired by
+  /// `ContentView` to `RootFeature.newAgentRequested`, the action ⌘⇧N sends.
+  var onNewAgent: () -> Void = {}
   /// Bumped by `RootFeature` when the user invokes ⌘U / the "Show Unread
   /// Notifications" menu item. Threaded down to `InboxBellView` whose
   /// `.onChange` opens the popover — same UUID-trigger pattern as
@@ -277,7 +280,7 @@ struct WorktreeDetailView: View {
 
   /// Window-titlebar toolbar content — ONE declaration serving both the
   /// creating and the settled state. Branch label on the leading edge,
-  /// status pill + bell at the optical center, Agents / Run / Open on the
+  /// New Agent + status pill + bell at the optical center, Run / Open on the
   /// trailing edge. Mirrors the layout that used to live as the right cluster of the
   /// content-region header; moving it into `.toolbar {}` reclaims vertical
   /// pixels above the tab bar and matches macOS native chrome.
@@ -305,7 +308,7 @@ struct WorktreeDetailView: View {
   ///   - MIDDLE: `SkeletonStatusPillView` carrying the motivational form's
   ///     footprint. The bell beside it stays LIVE and interactive — it is
   ///     window-level chrome (global unread count), not worktree data.
-  ///   - RIGHT: ghost Agents / Run / Open chips holding the real buttons' footprint,
+  ///   - RIGHT: ghost Run / Open chips holding the real buttons' footprint,
   ///     so the trailing flexible spacer weighs the same in both modes.
   /// The left / middle stand-ins carry the `skeleton-left` /
   /// `skeleton-middle` accessibility ids (VAL-DETAIL-001 / VAL-DETAIL-003).
@@ -342,23 +345,21 @@ struct WorktreeDetailView: View {
         // of one shared cluster background. `ToolbarSpacer(.fixed)` keeps
         // them visually distinct without collapsing the gap. No
         // `.buttonStyle` / no manual padding: each item gets the toolbar's
-        // native glass capsule + hover state. Order: Agents, Workflows, RunScript,
-        // Open — agents first because starting one is the more frequent
-        // entry point for this app's audience.
+        // native glass capsule + hover state. Order: RunScript, Open.
         trailingToolbarItems(mode)
       } else {
         ToolbarItem(placement: .navigation) { historyControls }
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
+        newAgentToolbarItem()
         ToolbarItem(placement: .principal) { statusSlot(mode) }
         // The inbox stays outside the principal status/process item.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
-          // Order: Agents, RunScript, Open. `ToolbarItemGroup` renders
-          // children leading-to-trailing in declaration order. The workflow
-          // capsule is intentionally hidden — `workflowSlot` and
-          // `HeaderWorkflowGroup` stay so it can be re-mounted here
-          // without rewiring; workflows start from the Command Palette.
-          agentSlot(mode).buttonStyle(.plain)
+          // Order: RunScript, Open. `ToolbarItemGroup` renders children
+          // leading-to-trailing in declaration order. The workflow capsule
+          // is intentionally hidden — `workflowSlot` and
+          // `HeaderWorkflowGroup` stay so it can be re-mounted here without
+          // rewiring; workflows start from the Command Palette.
           runSlot(mode).buttonStyle(.plain)
           openSlot(mode).buttonStyle(.plain)
         }
@@ -388,8 +389,6 @@ struct WorktreeDetailView: View {
   @available(macOS 26.0, *)
   @ToolbarContentBuilder
   private func trailingToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
-    ToolbarItem { agentSlot(mode) }
-    ToolbarSpacer(.fixed)
     // Workflow capsule intentionally hidden; see the legacy layout below.
     ToolbarItem { runSlot(mode) }
     ToolbarSpacer(.fixed)
@@ -399,6 +398,9 @@ struct WorktreeDetailView: View {
   @available(macOS 26.0, *)
   @ToolbarContentBuilder
   private func centerToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
+    // New Agent | status | inbox: starting an agent leads the center group.
+    newAgentToolbarItem()
+    ToolbarSpacer(.fixed)
     ToolbarItem { statusSlot(mode) }
     // Keep the inbox in a separate group after the status/process capsule.
     ToolbarSpacer(.fixed)
@@ -478,18 +480,6 @@ struct WorktreeDetailView: View {
     }
   }
 
-  @ViewBuilder
-  private func agentSlot(_ mode: DetailMode) -> some View {
-    switch mode {
-    case .creating:
-      SkeletonActionChipView()
-    case .worktree(_, let info):
-      if info != nil {
-        HeaderAgentSplitButton(store: headerStore)
-      }
-    }
-  }
-
   /// The workflow capsule: start a workflow here, and open Workflow Runs.
   @ViewBuilder
   private func workflowSlot(_ mode: DetailMode) -> some View {
@@ -535,6 +525,15 @@ struct WorktreeDetailView: View {
           worktreePath: info.worktree.path
         )
       }
+    }
+  }
+
+  /// Live in both modes, like the bell: the dialog chooses its own project
+  /// and worktree, so nothing about it waits on the selected worktree.
+  @ToolbarContentBuilder
+  private func newAgentToolbarItem() -> some ToolbarContent {
+    ToolbarItem {
+      HeaderNewAgentButton(action: onNewAgent)
     }
   }
 

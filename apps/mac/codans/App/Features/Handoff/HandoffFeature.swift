@@ -91,7 +91,7 @@ struct HandoffFeature {
 
     /// Receivers are the enabled profiles the machine can run, in Settings
     /// order, followed by the checkpoint row. "Can run" is the same advisory
-    /// filter as the toolbar Agents menu (`AgentInstallationStore
+    /// filter as the New Agent dialog (`AgentInstallationStore
     /// .offeredProfiles`), fail-open included. An agent whose CLI takes no
     /// kickoff argument is still a receiver: the prompt is typed into its
     /// pane and submitted once it is up, and the row's tooltip says so.

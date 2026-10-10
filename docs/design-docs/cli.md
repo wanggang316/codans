@@ -226,7 +226,7 @@
 
 #### `codans agent …`
 
-`AgentCommand.subcommands`：`list`、`status`、`wait`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
+`AgentCommand.subcommands`：`list`、`status`、`wait`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 New Agent 对话框的 Agent 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|

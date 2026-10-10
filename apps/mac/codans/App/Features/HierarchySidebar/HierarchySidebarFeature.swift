@@ -447,12 +447,13 @@ struct HierarchySidebarFeature {
       /// creation (`activePendingWorktreeID`, which only RootFeature owns).
       /// The sidebar no longer selects or seeds panes itself.
       ///
-      /// `agentProfileID` is the sheet's "Launch agent" pick, carried up so
-      /// RootFeature launches it now that the setup script (run in-stream)
-      /// has finished.
+      /// `agentProfileID` is the sheet's "Launch agent" pick (or the New
+      /// Agent dialog's agent, with `agentPrompt` as its first prompt),
+      /// carried up so RootFeature launches it now that the setup script
+      /// (run in-stream) has finished.
       case worktreeMaterialized(
         worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID,
-        agentProfileID: UUID? = nil)
+        agentProfileID: UUID? = nil, agentPrompt: String? = nil)
     }
   }
 
@@ -867,79 +868,17 @@ struct HierarchySidebarFeature {
       return .none
 
     case .projectAddWorktreeTapped(let projectID):
-      // Resolve the Project from the catalog to feed repoRoot + worktreesDirectory
-      // into CreateWorktreeFeature. v3 moved worktreesDirectory off catalog into
-      // settings.json.projects[pid]. If the Project has no gitRoot the sheet wouldn't
-      // be useful — silently no-op (the Add-Worktree "+" row is hidden for non-git).
+      // The Add-Worktree "+" row is hidden for non-git Projects, so a
+      // Project without a gitRoot silently no-ops here.
       let snapshot = hierarchyClient.snapshot()
-      guard let project = snapshot.projects.first(where: { $0.id == projectID }),
-        let gitRoot = project.gitRoot
-      else { return .none }
-      let settingsSnapshot = settingsWriter.readSnapshotSync()
-      let projectSettings = settingsSnapshot.projects[projectID]
-      let globalWorktree = settingsSnapshot.worktree
-      // Server (remote) projects: the sheet's option loading rides the
-      // SSH-routed worktree client, and the new worktree lands beside the
-      // repo root ON THE HOST — the local worktrees-directory setting names a
-      // local path that means nothing there.
-      let defaultWtDir =
-        project.isRemote
-        ? URL(fileURLWithPath: (gitRoot as NSString).deletingLastPathComponent)
-        : globalWorktree.resolveBaseDirectory(
-          // Use the path-derived canonical name so renaming a project in
-          // Settings → General never relocates the suggested worktree folder.
-          forProjectName: project.canonicalName,
-          projectOverride: projectSettings?.worktreesDirectory
-        )
+      guard let project = snapshot.projects.first(where: { $0.id == projectID }) else {
+        return .none
+      }
       let pendingCount = state.pendingWorktrees.filter { $0.projectID == projectID }.count
-      // "Launch agent" offers every enabled profile; a remembered pick whose
-      // profile was since removed or disabled falls back to None.
-      let agentProfiles = settingsSnapshot.agents.enabledProfiles
-      let rememberedAgentID = projectSettings?.git?.launchAgentProfileOnWorktreeCreate
-      let launchAgentDefault = agentProfiles.contains { $0.id == rememberedAgentID }
-        ? rememberedAgentID : nil
-      // Seed the sheet toggles from the effective settings so the
-      // checkboxes match what the user pinned in Project Settings → Worktree
-      // (with the global Worktree pane as the fallback). Each per-project
-      // override is `nil` = inherit; if both are unset the value falls back
-      // to the global default.
-      let projectGit = projectSettings?.git
-      let copyIgnoredDefault =
-        projectGit?.copyIgnoredOnWorktreeCreate ?? globalWorktree.copyIgnoredOnCreate
-      let copyUntrackedDefault =
-        projectGit?.copyUntrackedOnWorktreeCreate ?? globalWorktree.copyUntrackedOnCreate
-      let fetchOriginDefault =
-        projectGit?.fetchRemoteOnWorktreeCreate ?? globalWorktree.fetchRemoteOnCreate
-      // Branches held by ARCHIVED rows, so the sheet can explain a name
-      // collision the user can't see in the sidebar (archiving keeps the
-      // git worktree + branch; only the catalog knows the row is hidden).
-      let archivedOwners = Dictionary(
-        project.worktrees
-          .filter(\.archived)
-          .compactMap { worktree -> (String, LiveBranchOwner)? in
-            let branch = (worktree.branch ?? worktree.name)
-              .trimmingCharacters(in: .whitespaces)
-            guard !branch.isEmpty else { return nil }
-            return (
-              branch.lowercased(),
-              LiveBranchOwner(branch: branch, worktreeName: worktree.name)
-            )
-          },
-        uniquingKeysWith: { first, _ in first }
-      )
-      state.createWorktreeSheet = CreateWorktreeFeature.State(
-        projectID: projectID,
-        repoRoot: URL(fileURLWithPath: gitRoot),
-        worktreesDirectory: defaultWtDir,
-        currentPendingCountForProject: pendingCount,
-        remoteHost: project.remoteHost,
-        baseRefOverride: projectGit?.worktreeBaseRef,
-        archivedBranchOwnersByLower: archivedOwners,
-        fetchOrigin: fetchOriginDefault,
-        copyIgnored: project.isRemote ? false : copyIgnoredDefault,
-        copyUntracked: project.isRemote ? false : copyUntrackedDefault,
-        agentProfiles: agentProfiles,
-        launchAgentProfileID: launchAgentDefault
+      state.createWorktreeSheet = CreateWorktreeFeature.State.seeded(
+        for: project,
+        settings: settingsWriter.readSnapshotSync(),
+        pendingCount: pendingCount
       )
       return .none
 
@@ -1279,7 +1218,8 @@ struct HierarchySidebarFeature {
         .delegate(
           .worktreeMaterialized(
             worktreeID: worktreeID, projectID: pid, pendingID: id,
-            agentProfileID: pending.launchAgentProfileID)))
+            agentProfileID: pending.launchAgentProfileID,
+            agentPrompt: pending.launchAgentPrompt)))
 
     case .pendingWorktreeFailed(let id, let err):
       // Race guard symmetric with progress / finished arms: a Cancel
