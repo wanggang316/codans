@@ -15,11 +15,11 @@ struct StatusBarView: View {
   /// it can dispatch merge / close / refresh actions that take a CWD.
   /// Nil when `worktreeID` is nil; the PR form is gated on `worktreeID`
   /// so the popover anchor never mounts without this.
-  var worktreePath: URL? = nil
+  var worktreePath: URL?
   /// Branch name for the popover's `.noPullRequest` fallback and the
   /// retry-refresh dispatch. The PR form is only selected when a
   /// snapshot exists, so this is mostly carried for the retry path.
-  var branch: String? = nil
+  var branch: String?
 
   var body: some View {
     HStack(spacing: 10) {

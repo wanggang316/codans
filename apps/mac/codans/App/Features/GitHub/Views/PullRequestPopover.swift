@@ -201,6 +201,7 @@ struct PullRequestPopover: View {
         onOpenOnWeb()
       } label: {
         Image(systemName: "arrow.up.right.square")
+          .accessibilityLabel("Open on GitHub")
       }
       .buttonStyle(.borderless)
       .help("Open on GitHub")
@@ -242,6 +243,7 @@ struct PullRequestPopover: View {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.yellow)
         .font(.title2)
+        .accessibilityHidden(true)
       Text(error.userFacingMessage)
         .font(.callout)
         .multilineTextAlignment(.center)

@@ -68,7 +68,7 @@ struct WorktreeRowIcon: View {
       if hasUnreadNotification {
         Image(systemName: "bell.fill")
           .resizable()
-          .aspectRatio(contentMode: .fit)
+          .scaledToFit()
           .frame(width: 12, height: 12)
           .foregroundStyle(Color.orange)
       } else if glyph == .folder {
@@ -78,9 +78,11 @@ struct WorktreeRowIcon: View {
         // 12pt inside a 14pt slot mirrors
         // the `circlebadge` sizing so the label column stays aligned with
         // sibling git rows.
+        // The enclosing Group carries the label.
+        // swiftlint:disable:next accessibility_label_for_image
         Image(systemName: "folder")
           .resizable()
-          .aspectRatio(contentMode: .fit)
+          .scaledToFit()
           .frame(width: 12, height: 12)
           .foregroundStyle(tint)
           .frame(width: 14, height: 14)
@@ -89,17 +91,19 @@ struct WorktreeRowIcon: View {
         // git-branch for the main checkout). PR snapshot still trumps
         // this — falls through to the `Image(assetName)` branch below
         // and renders the PR-state octicon instead.
+        // swiftlint:disable:next accessibility_label_for_image
         Image(systemName: "star.fill")
           .resizable()
-          .aspectRatio(contentMode: .fit)
+          .scaledToFit()
           .frame(width: 12, height: 12)
           .foregroundStyle(tint)
           .frame(width: 14, height: 14)
       } else {
+        // swiftlint:disable:next accessibility_label_for_image
         Image(assetName)
           .renderingMode(.template)
           .resizable()
-          .aspectRatio(contentMode: .fit)
+          .scaledToFit()
           .frame(width: 14, height: 14)
           .foregroundStyle(tint)
       }

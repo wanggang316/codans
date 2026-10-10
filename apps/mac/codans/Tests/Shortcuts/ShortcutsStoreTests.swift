@@ -31,7 +31,7 @@ struct ShortcutsStoreTests {
   }
 
   @Test
-  func roundTripAcrossInstances() async throws {
+  func roundTripAcrossInstances() throws {
     let url = Self.temporaryURL()
     defer { try? FileManager.default.removeItem(at: url) }
 

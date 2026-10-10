@@ -50,8 +50,10 @@ struct CommandSuggestionMenuSection: View {
       // highlighted row inverts its icon too (a baked tint would not).
       if isAdopted {
         Image(systemName: "checkmark")
+          .accessibilityLabel("Added")
       } else if let icon = CommandIconImage.template(suggestion.resolvedIcon) {
         Image(nsImage: icon)
+          .accessibilityHidden(true)
       }
       Text(suggestion.name)
       Text(Self.subtitle(for: suggestion))

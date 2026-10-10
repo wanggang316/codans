@@ -82,6 +82,7 @@ public enum ShortcutDisplay {
 
   // MARK: - Fixed glyphs (non-character keys)
 
+  // swiftlint:disable:next cyclomatic_complexity
   private static func fixedGlyph(for keyCode: UInt16) -> String? {
     switch Int(keyCode) {
     case kVK_Return: return "\u{21A9}"  // ↩

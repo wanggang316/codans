@@ -180,6 +180,7 @@ struct RootFeature {
     case windowActionRequested
     case configChanged
 
+    // swiftlint:disable:next cyclomatic_complexity
     init(_ event: TerminalEvent) {
       switch event {
       case .paneCreated: self = .paneCreated

@@ -24,7 +24,7 @@ struct PaneSurfaceApplyTests {
   /// Mirrors `PaneSurface.apply(_:)` byte-for-byte. Exhaustive switch —
   /// adding a new `PaneInfoDelta` case without updating this helper will
   /// fail to compile, forcing the test suite to stay in sync.
-  private func applyForTest(_ delta: PaneInfoDelta, to info: SurfaceInfo) {
+  private func applyForTest(_ delta: PaneInfoDelta, to info: SurfaceInfo) {  // swiftlint:disable:this cyclomatic_complexity
     switch delta {
     case .title(let t):
       info.title = t

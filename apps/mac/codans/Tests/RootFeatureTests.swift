@@ -708,7 +708,7 @@ struct RootFeatureTests {
   }
 
   @Test
-  func paneLifecycleExitedClosesOnlyPaneWhenTabHasSiblings() async {
+  func paneLifecycleExitedClosesOnlyPaneWhenTabHasSiblings() async throws {
     // Multi-pane tab: keep the tab, drop the pane, transfer focus.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
@@ -717,7 +717,7 @@ struct RootFeatureTests {
     let rightPane = PaneID()
     let tab = Tab(
       id: tabID, name: "t",
-      splitTree: try! SplitTree(leaf: leftPane).inserting(
+      splitTree: try SplitTree(leaf: leftPane).inserting(
         rightPane, at: leftPane, direction: .right
       ),
       panes: [

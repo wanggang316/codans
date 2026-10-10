@@ -56,7 +56,7 @@ struct ProjectIconView: View {
           .resizable()
           .interpolation(.high)
           .renderingMode(followsProjectColor ? .template : .original)
-          .aspectRatio(contentMode: .fit)
+          .scaledToFit()
           .foregroundStyle(tint)
           .accessibilityHidden(true)
       } else {
@@ -71,7 +71,7 @@ struct ProjectIconView: View {
   private func symbolImage(named name: String) -> some View {
     Image(systemName: name)
       .resizable()
-      .aspectRatio(contentMode: .fit)
+      .scaledToFit()
       .foregroundStyle(tint)
       .accessibilityHidden(true)
   }

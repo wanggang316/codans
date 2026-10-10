@@ -57,14 +57,16 @@ struct ShortcutOverrideStoreCodableTests {
 
   @Test
   func unknownModifierTokenFailsDecoding() throws {
-    let bad = """
-    {
-      "version": 1,
-      "overrides": {
-        "newTab": { "keyCode": 17, "modifiers": ["meta"], "isEnabled": true }
+    let bad = Data(
+      """
+      {
+        "version": 1,
+        "overrides": {
+          "newTab": { "keyCode": 17, "modifiers": ["meta"], "isEnabled": true }
+        }
       }
-    }
-    """.data(using: .utf8)!
+      """.utf8
+    )
 
     #expect(throws: DecodingError.self) {
       _ = try JSONDecoder.touchCodeDefault.decode(ShortcutOverrideStore.self, from: bad)
@@ -76,14 +78,16 @@ struct ShortcutOverrideStoreCodableTests {
     // JSON key remains `toggleGitViewer` even after the Swift identifier
     // was renamed to `toggleDiffInspector` — pinned via `CommandID`'s raw
     // value so existing user overrides of the ⌘⇧G binding aren't orphaned.
-    let json = """
-    {
-      "version": 1,
-      "overrides": {
-        "toggleGitViewer": { "keyCode": 5, "modifiers": ["shift", "command"], "isEnabled": true }
+    let json = Data(
+      """
+      {
+        "version": 1,
+        "overrides": {
+          "toggleGitViewer": { "keyCode": 5, "modifiers": ["shift", "command"], "isEnabled": true }
+        }
       }
-    }
-    """.data(using: .utf8)!
+      """.utf8
+    )
 
     let decoded = try JSONDecoder.touchCodeDefault.decode(ShortcutOverrideStore.self, from: json)
     #expect(decoded.overrides[.toggleDiffInspector]?.modifiers == [.command, .shift])

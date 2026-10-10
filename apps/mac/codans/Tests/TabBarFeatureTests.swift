@@ -236,7 +236,7 @@ struct TabBarFeatureTests {
   }
 
   @Test
-  func trailingSplitRequestedAnchorsOnLastFocusedPane() async {
+  func trailingSplitRequestedAnchorsOnLastFocusedPane() async throws {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let tabID = TabID()
@@ -247,7 +247,7 @@ struct TabBarFeatureTests {
     // `focusedPaneID`. The split must anchor on the focused pane.
     let firstPane = Pane(id: firstPaneID, workingDirectory: "/tmp/a", initialCommand: nil)
     let focusedPane = Pane(id: focusedPaneID, workingDirectory: "/tmp/b", initialCommand: nil)
-    let splitTree = try! SplitTree(leaf: firstPaneID)
+    let splitTree = try SplitTree(leaf: firstPaneID)
       .inserting(focusedPaneID, at: firstPaneID, direction: .right)
     let tab = Tab(
       id: tabID, name: "two",

@@ -117,7 +117,7 @@ struct TabIconTests {
     let pane = Pane(workingDirectory: "/tmp")
     let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
     let data = try JSONEncoder().encode(tab)
-    let body = String(decoding: data, as: UTF8.self)
+    let body = try #require(String(bytes: data, encoding: .utf8))
     #expect(!body.contains("\"iconLock\""))
     #expect(!body.contains("\"icon\""))
   }
