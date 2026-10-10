@@ -20,9 +20,13 @@ struct DiffWindowManagerTests {
 
     try await withDependencies {
       $0.continuousClock = clock
-      $0[GitServiceClient.self].comparison = { url, scope, _ in
+      let comparison: @Sendable (URL, GitComparisonScope, String?) async throws -> GitComparisonSnapshot = {
+        url, scope, _ in
         GitComparisonSnapshot(scope: scope, baseLabel: "main", files: files, repositoryPath: url.path)
       }
+      // A scope with nothing on screen lists its files first; a reload swaps in the full comparison.
+      $0[GitServiceClient.self].comparisonListing = comparison
+      $0[GitServiceClient.self].comparison = comparison
       $0[GitServiceClient.self].comparisonContent = { _, _, _ in
         GitComparisonContent(oldText: "before", newText: "after")
       }

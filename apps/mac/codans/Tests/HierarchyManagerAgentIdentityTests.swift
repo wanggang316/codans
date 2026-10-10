@@ -14,6 +14,8 @@ import Testing
 ///      `scheduleSave`), so identical re-classifications don't drive the
 ///      debounce.
 ///   3. Setting back to `nil` clears the field and schedules one save.
+///   4. Bindings in the loaded catalog are dropped at launch: the agent
+///      process they describe died with the previous session.
 ///
 /// Tests instantiate `HierarchyManager` with a `RecordingCatalogStore`
 /// that counts `scheduleSave` invocations — this is the only assertion
@@ -46,7 +48,8 @@ struct HierarchyManagerAgentIdentityTests {
 
   @Test
   func clearAgentKindLeavesNil() throws {
-    let (manager, paneID, store) = Self.makeManager(initialAgentKind: .claudeCode)
+    let (manager, paneID, store) = Self.makeManager()
+    manager.setPaneAgentKind(paneID, kind: .claudeCode)
     let baseline = store.scheduleSaveCallCount
 
     manager.setPaneAgentKind(paneID, kind: nil)
@@ -91,7 +94,8 @@ struct HierarchyManagerAgentIdentityTests {
 
   @Test
   func clearAgentSessionIDLeavesNil() throws {
-    let (manager, paneID, store) = Self.makeManager(initialSessionID: "session-abc")
+    let (manager, paneID, store) = Self.makeManager()
+    manager.setPaneAgentSessionID(paneID, sessionID: "session-abc")
     let baseline = store.scheduleSaveCallCount
 
     manager.setPaneAgentSessionID(paneID, sessionID: nil)
@@ -108,6 +112,21 @@ struct HierarchyManagerAgentIdentityTests {
     manager.setPaneAgentSessionID(PaneID(), sessionID: "session-abc")
 
     #expect(store.scheduleSaveCallCount == baseline)
+  }
+
+  // MARK: - Launch
+
+  @Test
+  func loadedBindingsAreClearedAndSaved() throws {
+    let (manager, paneID, store) = Self.makeManager(
+      initialAgentKind: .claudeCode,
+      initialSessionID: "session-abc"
+    )
+
+    let pane = Self.readPane(manager, paneID: paneID)
+    #expect(pane?.agentKind == nil)
+    #expect(pane?.agentSessionID == nil)
+    #expect(store.scheduleSaveCallCount == 1)
   }
 
   // MARK: - Helpers
