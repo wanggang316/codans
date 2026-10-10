@@ -1327,7 +1327,7 @@ struct HierarchySidebarView: View {
       Button {
         store.send(.delegate(.openOnGitHub(projectID: project.id, worktreeID: worktree.id)))
       } label: {
-        Label("Open in GitHub", systemImage: "arrow.up.right.square")
+        Label("Open in GitHub", image: "github")
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: resolvedShortcuts)
     }
@@ -1335,20 +1335,23 @@ struct HierarchySidebarView: View {
       Button {
         gitHubStore.send(.delegate(.openURL(pullRequest.url)))
       } label: {
-        Label("Open Pull Request", systemImage: "arrow.triangle.pull")
+        // Same PR-state octicon the row leads with (WorktreeRowIcon).
+        Label(
+          "Open Pull Request",
+          image: pullRequest.state.rowIconName(isDraft: pullRequest.isDraft))
       }
       .appKeyboardShortcut(.openCurrentPR, in: resolvedShortcuts)
     }
     Button {
       store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .all)))
     } label: {
-      Label("Show Uncommitted", systemImage: "doc.text.magnifyingglass")
+      Label("Show Uncommitted", systemImage: "plusminus")
     }
     Button {
       store.send(
         .delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .outgoing)))
     } label: {
-      Label("Show Outgoing", systemImage: "arrow.up.doc")
+      Label("Show Outgoing", systemImage: "plusminus")
     }
   }
 
