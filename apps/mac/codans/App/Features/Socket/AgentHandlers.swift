@@ -4,7 +4,7 @@ import Foundation
 
 /// Server-side handler for the `agent.*` IPC surface — the launch presets
 /// in `Settings.agents`, exposed so a script or an agent can list and start
-/// profiles the same way the toolbar Agents menu does.
+/// profiles the same way the New Agent dialog does.
 ///
 /// Holds the `SettingsStore` (persisted truth), the `HierarchyClient` (to
 /// validate the target Project and to run the launch), and the app-scoped

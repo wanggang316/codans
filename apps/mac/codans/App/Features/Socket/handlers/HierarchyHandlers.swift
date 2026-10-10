@@ -99,7 +99,7 @@ final class HierarchyHandlers {
   /// registrations went away — the sidebar's Prune Worktrees. `nil` makes
   /// `hierarchy.pruneWorktrees` unsupported (tests, harness).
   let worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)?
-  /// Starts an agent profile in a worktree — the toolbar Agents pipeline —
+  /// Starts an agent profile in a worktree — the New Agent dialog's pipeline —
   /// for `hierarchy.createWorktree`'s `agentProfile` / `agent`. `nil` makes
   /// those params unsupported (tests, harness).
   private let agentLauncher: (@MainActor @Sendable (AgentLaunchSpec) async throws -> AgentLaunchOutcome)?

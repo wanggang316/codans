@@ -85,7 +85,7 @@ private struct AccessoryIconChrome: ViewModifier {
 /// doesn't redraw siblings on every pointer crossing.
 ///
 /// Press-and-hold or right-click opens a menu of the offered agent profiles
-/// (the toolbar Agents menu's list) that each start in a new tab, plus a
+/// (the New Agent dialog's list) that each start in a new tab, plus a
 /// "Manage Agents…" footer.
 private struct NewTabAccessoryButton: View {
   let action: () -> Void

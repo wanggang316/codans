@@ -65,6 +65,7 @@ struct ShortcutSchemaAuditTests {
     (.openProjectOnGitHub, (0x05, [.command, .shift])),  // ⌘⇧G
     (.newWorktree, (0x2D, [.command])),  // n
     (.newWorkspace, nil),
+    (.newAgent, (0x2D, [.command, .shift])),  // ⌘⇧N
     (.splitRight, (0x02, [.command])),  // d
     (.splitDown, (0x02, [.command, .shift])),  // ⇧d
     (.focusSplitLeft, (0x7B, [.command, .option])),  // ⌘⌥←

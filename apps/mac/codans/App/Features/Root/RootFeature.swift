@@ -119,6 +119,9 @@ struct RootFeature {
     /// than re-targeting it, so a half-typed draft can never land in a pane
     /// the user did not mean.
     @Presents var commandQueue: CommandQueueFeature.State?
+    /// New Agent dialog (⌘⇧N, or the header's New Agent button). `nil` =
+    /// hidden.
+    @Presents var newAgent: NewAgentFeature.State?
 
     /// Whether the Hierarchy sidebar column is visible. Bound into
     /// `NavigationSplitView`'s `columnVisibility` from `ContentView` so the
@@ -419,6 +422,9 @@ struct RootFeature {
     /// re-targets rather than closing — the user asked for that pane.
     case commandQueueToggle(PaneID?)
     case commandQueue(PresentationAction<CommandQueueFeature.Action>)
+    /// Toggle the New Agent dialog. Opens on the selected project.
+    case newAgentRequested
+    case newAgent(PresentationAction<NewAgentFeature.Action>)
     /// Tag CRUD sheet presentation. `tagManagerSheetShown` kicks the sheet
     /// visible, the `PresentationAction` carries child actions and dismiss.
     case tagManagerSheet(PresentationAction<TagManagerFeature.Action>)
@@ -538,7 +544,27 @@ struct RootFeature {
     headerAndEditorScopes
     routerScopes
     diffBindings
+    newAgentReducer
     coreReducer
+  }
+
+  /// The New Agent dialog's presentation and outcomes. A reducer of its own
+  /// because `coreReducer`'s expression is at the type-inference budget.
+  private var newAgentReducer: some Reducer<State, Action> {
+    Reduce { state, action in
+      switch action {
+      case .newAgentRequested:
+        toggleNewAgent(&state)
+        return .none
+      case .newAgent(.presented(.delegate(let delegate))):
+        return handleNewAgentDelegate(delegate, state: &state)
+      default:
+        return .none
+      }
+    }
+    .ifLet(\.$newAgent, action: \.newAgent) {
+      NewAgentFeature()
+    }
   }
 
   private var diffBindings: some Reducer<State, Action> {
@@ -1379,13 +1405,15 @@ struct RootFeature {
       // mints a marker.
       case .sidebar(
         .delegate(
-          .worktreeMaterialized(let worktreeID, let projectID, let pendingID, let agentProfileID))):
+          .worktreeMaterialized(
+            let worktreeID, let projectID, let pendingID, let agentProfileID, let agentPrompt))):
         // The setup script already ran inside the creation stream, so the
         // Create sheet's agent starts now — whether or not focus switches.
         let launch =
           agentProfileID.map {
-            launchAgentAfterCreate(
-              profileID: $0, projectID: projectID, worktreeID: worktreeID, state: &state)
+            launchAgentInWorktree(
+              profileID: $0, prompt: agentPrompt, projectID: projectID, worktreeID: worktreeID,
+              state: &state)
           } ?? .none
         let autoSwitch =
           settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
@@ -1609,35 +1637,8 @@ struct RootFeature {
             }
           }
 
-        case .launchAgentRequested(let profileID):
-          // Same selection-resolution + staleness rationale as
-          // `runScriptRequested`.
-          guard
-            let projectID = state.selection.projectID,
-            let worktreeID = state.selection.worktreeID
-          else { return .none }
-          let client = hierarchyClient
-          return .run { send in
-            do {
-              try await client.launchAgentProfile(profileID, projectID, worktreeID)
-            } catch let error as RunScriptError {
-              await send(.statusBar(.push(.warning(Self.launchAgentErrorMessage(error)))))
-            } catch {
-              await send(
-                .statusBar(.push(.warning("Launch agent failed: \(error.localizedDescription)"))))
-            }
-          }
-
-        case .manageAgentsRequested:
-          let presenter = settingsWindowPresenter
-          return .run { _ in
-            await MainActor.run {
-              presenter.openAt(.agents)
-            }
-          }
-
         case .runWorkflowRequested(let workflowID):
-          // Same handle-time selection resolution as `launchAgentRequested`.
+          // Same handle-time selection resolution as `runScriptRequested`.
           guard
             let projectID = state.selection.projectID,
             let worktreeID = state.selection.worktreeID
@@ -1955,6 +1956,10 @@ struct RootFeature {
         return .none
 
       case .commandQueue:
+        return .none
+
+      case .newAgentRequested, .newAgent:
+        // Handled by `newAgentReducer`.
         return .none
 
       case .diffInspectorToggledForCurrentWorktree:
@@ -2499,6 +2504,8 @@ struct RootFeature {
       return .send(.sidebar(.cloneRepoTapped))
     case .newWorkspace:
       return .send(.sidebar(.newWorkspaceTapped))
+    case .newAgent:
+      return .send(.newAgentRequested)
     case .showUnreadNotifications:
       return .send(.showUnreadRequested)
     case .toggleSidebar:
@@ -2649,12 +2656,12 @@ struct RootFeature {
         }
       }
 
-    // Agent profiles — same effect the toolbar Agents menu dispatches.
+    // Agent profiles — the same launch the New Agent dialog ends in.
     case .launchAgentProfile(let projectID, let worktreeID, let profileID):
       let client = hierarchyClient
       return .run { send in
         do {
-          try await client.launchAgentProfile(profileID, projectID, worktreeID)
+          try await client.launchAgentProfile(profileID, projectID, worktreeID, nil)
         } catch let error as RunScriptError {
           await send(.statusBar(.push(.warning(Self.launchAgentErrorMessage(error)))))
         } catch {
@@ -3051,24 +3058,83 @@ struct RootFeature {
     }
   }
 
-  /// Launches the Create sheet's agent in a just-materialized worktree. The
-  /// worktree is parked in `agentLaunchWorktreeIDs` until the launch settles
-  /// so selection auto-seed leaves the first tab to the agent.
-  private func launchAgentAfterCreate(
-    profileID: UUID, projectID: ProjectID, worktreeID: WorktreeID, state: inout State
+  /// Launches an agent in a worktree the user is being taken to: the Create
+  /// sheet's agent in a just-materialized worktree, or the New Agent
+  /// dialog's agent. The worktree is parked in `agentLaunchWorktreeIDs`
+  /// until the launch settles so selection auto-seed leaves the first tab to
+  /// the agent.
+  private func launchAgentInWorktree(
+    profileID: UUID, prompt: String?, projectID: ProjectID, worktreeID: WorktreeID,
+    state: inout State
   ) -> Effect<Action> {
     state.agentLaunchWorktreeIDs.insert(worktreeID)
     let client = hierarchyClient
     return .run { send in
       var failure: String?
       do {
-        try await client.launchAgentProfile(profileID, projectID, worktreeID)
+        try await client.launchAgentProfile(profileID, projectID, worktreeID, prompt)
       } catch let error as RunScriptError {
         failure = await Self.launchAgentErrorMessage(error)
       } catch {
         failure = "Launch agent failed: \(error.localizedDescription)"
       }
       await send(.worktreeAgentLaunchFinished(worktreeID, failure: failure))
+    }
+  }
+
+  /// Opens the New Agent dialog on the selected project, or closes it.
+  private func toggleNewAgent(_ state: inout State) {
+    guard state.newAgent == nil else {
+      state.newAgent = nil
+      return
+    }
+    var pendingCounts: [ProjectID: Int] = [:]
+    for pending in state.sidebar.pendingWorktrees {
+      pendingCounts[pending.projectID, default: 0] += 1
+    }
+    // One sheet at a time on the main window.
+    state.commandQueue = nil
+    state.newAgent = NewAgentFeature.State(
+      preferredProjectID: state.selection.projectID, pendingCounts: pendingCounts)
+  }
+
+  /// Carries out what the New Agent dialog decided. Every outcome but
+  /// Manage Agents closes the dialog: the user is taken to the agent, or to
+  /// the Add Project flow.
+  private func handleNewAgentDelegate(
+    _ delegate: NewAgentFeature.Action.Delegate, state: inout State
+  ) -> Effect<Action> {
+    switch delegate {
+    case .launchAgent(let profileID, let prompt, let projectID, let worktreeID):
+      state.newAgent = nil
+      // Park the worktree before selecting it, so the selection's auto-seed
+      // leaves its first tab to the agent.
+      let launch = launchAgentInWorktree(
+        profileID: profileID, prompt: prompt, projectID: projectID, worktreeID: worktreeID,
+        state: &state)
+      hierarchyClient.selectProject(projectID)
+      try? hierarchyClient.selectWorktree(worktreeID, projectID)
+      revealWorktreeInSidebar(worktreeID, in: projectID, state: &state)
+      return launch
+    case .createWorktree(let pending):
+      state.newAgent = nil
+      // The sidebar's pending lifecycle runs it like a Create Worktree sheet
+      // submit: the user follows the creation, and the agent launches once
+      // the worktree exists (`worktreeMaterialized`).
+      return .send(.sidebar(.beginPendingWorktreeCreation(pending)))
+    case .addProject(let kind):
+      state.newAgent = nil
+      switch kind {
+      case .openFolder: return .send(.sidebar(.toolbarAddProjectTapped))
+      case .cloneRepository: return .send(.sidebar(.cloneRepoTapped))
+      case .connectServer: return .send(.sidebar(.connectServerTapped))
+      case .newWorkspace: return .send(.sidebar(.newWorkspaceTapped))
+      }
+    case .manageAgents:
+      let presenter = settingsWindowPresenter
+      return .run { _ in
+        await MainActor.run { presenter.openAt(.agents) }
+      }
     }
   }
 

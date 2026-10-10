@@ -168,26 +168,29 @@ struct CreateWorktreeSheet: View {
   /// unavailable, naming the EXISTING ref's real casing (the draft may
   /// differ only by case) so the user's follow-up targets the branch git
   /// actually has.
-  private var collisionNote: String {
-    switch store.branchCollisionKind {
+  private var collisionNote: String { Self.collisionNote(for: store.state) }
+
+  /// Shared with the New Agent dialog, which embeds the same form.
+  static func collisionNote(for state: CreateWorktreeFeature.State) -> String {
+    switch state.branchCollisionKind {
     case .checkedOut:
-      let branch = store.checkedOutOwner?.branch ?? store.sanitizedBranchDraft
+      let branch = state.checkedOutOwner?.branch ?? state.sanitizedBranchDraft
       let holder =
-        store.checkedOutOwner.map { "the worktree \"\($0.worktreeName)\"" }
+        state.checkedOutOwner.map { "the worktree \"\($0.worktreeName)\"" }
         ?? "another worktree"
       return
         "\"\(branch)\" is already checked out by \(holder) — git allows a branch to be "
         + "checked out by only one worktree at a time. Choose a different name, or work "
         + "in that worktree instead."
     case .dangling:
-      let real = store.danglingRealName ?? store.sanitizedBranchDraft
+      let real = state.danglingRealName ?? state.sanitizedBranchDraft
       return
         "A local branch named \"\(real)\" already exists without a worktree — it was "
         + "likely kept when its worktree was removed. Choose a different name, or delete "
         + "the branch (git branch -D \"\(real)\") and reopen this dialog."
     case .archivedWorktree:
-      let branch = store.archivedOwner?.branch ?? store.sanitizedBranchDraft
-      let name = store.archivedOwner?.worktreeName ?? branch
+      let branch = state.archivedOwner?.branch ?? state.sanitizedBranchDraft
+      let name = state.archivedOwner?.worktreeName ?? branch
       return
         "\"\(branch)\" belongs to the archived worktree \"\(name)\" — it's hidden from "
         + "the sidebar, but its branch and files still exist. Unarchive or remove it via "

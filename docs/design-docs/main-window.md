@@ -40,11 +40,31 @@
 
 ## Header
 
-Header 由 `WorktreeDetailView.worktreeToolbarContent` 组装到窗口工具栏：左侧 `WorktreeHeaderInfoLabel` 显示 Worktree 身份、分支与 GitHub 信息；中部组合状态、当前 Worktree 的前台进程计数及独立通知铃铛；右侧依次为 Agents、Run Script、Open。创建 Worktree 时使用相同工具栏槽位显示占位内容，避免控件身份随模式切换而重建。
+Header 由 `WorktreeDetailView.worktreeToolbarContent` 组装到窗口工具栏：左侧 `WorktreeHeaderInfoLabel` 显示 Worktree 身份、分支与 GitHub 信息；中部依次为 New Agent 按钮、状态与当前 Worktree 的前台进程计数、独立通知铃铛；右侧依次为 Run Script、Open。创建 Worktree 时使用相同工具栏槽位显示占位内容，避免控件身份随模式切换而重建；New Agent 按钮与铃铛不依赖 Worktree 数据，两种模式下都保持可用。
 
 `WorktreeProcessesView` 支持悬停展开和点击固定进程列表，打开时固定可见行数（最多 8 行）。点击行先关闭 popover，再异步请求聚焦；聚焦前通过 `HierarchyManager.isCurrentProcess` 验证条目仍有效，避免退出或被替换的进程触发陈旧跳转。进程列表来自 `HierarchyManager.processEntries(in:)`，并非已启动脚本或 agent 的历史记录。
 
 > **入口边界。** 通知铃铛是工具栏中独立于状态 / 进程组的控件，承载通知 popover（[notifications.md](notifications.md)）。Worktree 右键菜单的 “Show Changes” 打开该 Worktree 的独立只读窗口，不切换主窗口选择；主窗口工具栏不单独放置 Diff 入口。菜单和命令面板也提供 “Show Changes”。⌘G / “Toggle Git Viewer” 解析 `general.defaultGitViewerID`：默认 Built-in 打开内置窗口，选择外部客户端则打开该客户端。缺省、`null` 和未知 ID 回退 Built-in。
+
+### New Agent 对话框
+
+New Agent 按钮（`HeaderNewAgentButton`，`plus.bubble` 加彩色渐变，无下拉）、⌘⇧N（`CommandID.newAgent`，File 菜单 “New Agent…”）和命令面板的 “New Agent…” 都发送 `RootFeature.newAgentRequested`，以 sheet 打开 `NewAgentView`（`NewAgentFeature`，`@Presents` 于 `RootFeature.newAgent`，由独立的 `newAgentReducer` 处理）。布局自上而下：
+
+- **Project › Worktree** 选择器与右侧的 Worktree Options 开关（`switch.2`）。Project 默认为当前选中项目；没有项目时换成与侧栏 `+` 相同的 Add Project 菜单。文件夹和 workspace 项目只有一个工作位置，不显示 Worktree 选择器。Git 项目的 Worktree 选择器默认 “New Worktree”，也可选本地或远程分支。
+- **Branch name** 与 **Worktree Options**（Base ref、Fetch origin、Copy ignored / untracked），只在 “New Worktree” 时出现，Options 默认收起。这部分就是内嵌的 `CreateWorktreeFeature`，默认值（`CreateWorktreeFeature.State.seeded`）、校验和分支冲突提示与 Create Worktree sheet 共用一份实现。
+- **Prompt** 输入框，底部为 Agent 菜单（默认第一个可用 profile，过滤规则同 `AgentInstallationStore.offeredProfiles`）和发送按钮（Return / ⌘↩）。
+
+发送的结果由 `RootFeature` 执行：
+
+| 目标 | 结果 |
+|---|---|
+| New Worktree | 走侧栏 pending 创建流程；`PendingWorktree.launchAgentProfileID` / `launchAgentPrompt` 在 Worktree 落地（setup 脚本跑完）后经 `worktreeMaterialized` 启动 agent |
+| 已被某个可见 Worktree 检出的分支（本地或对应的远程分支） | 选中该 Worktree，直接以 prompt 启动 agent |
+| 没有 Worktree 的本地分支 | 以 `pathOverride` 检出到新 Worktree 后启动 agent；SSH 项目不提供 |
+| 本地不存在的远程分支（`origin/x`） | 从该远程分支新建本地分支 `x` 的 Worktree 后启动 agent |
+| 文件夹 / workspace 项目 | 在其唯一 Worktree 中启动 agent |
+
+prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 agent。
 
 ### 不变量
 
@@ -116,7 +136,7 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 |---|---|---|
 | `HierarchySidebarFeature` | 展开集合、filter/popover/sheet 瞬态状态、上下文菜单派发、选择/filter 编排、delegate 上抛 | 编辑器打开副作用（delegate 给 EditorFeature）、Finder 揭示（经 FinderClient）、catalog 变更（经 HierarchyClient） |
 | `HierarchySidebarView` | 视觉树、hover chrome、行点、底部 footer（排序/刷新；Tag 过滤已实现但当前隐藏） | 选择逻辑、catalog 状态（直读 `hierarchyManager.catalog`）、inbox 状态（直读 `inboxStore`） |
-| `WorktreeDetailView` / Header feature | 工具栏布局、Worktree 身份、状态与进程入口、Agents / Run / Open 操作及 delegate | 默认编辑器解析（`EditorFeature.resolveDefault`）、通知数据（InboxStore）、Git diff 状态（DiffFeature） |
+| `WorktreeDetailView` / Header feature | 工具栏布局、Worktree 身份、New Agent 入口、状态与进程入口、Run / Open 操作及 delegate | 默认编辑器解析（`EditorFeature.resolveDefault`）、通知数据（InboxStore）、Git diff 状态（DiffFeature） |
 | `DiffFeature` / `DiffPanelView` | 只读比较范围、文件选择、请求生命周期、可见期刷新及独立窗口 | Git 命令执行（GitServiceClient）、编辑器启动（DiffEditorClient）、终端会话所有权 |
 | `TabBarFeature` | 把每个 tab 操作一行转发经 client；无状态 reducer | catalog 状态、运行态/焦点 map（在 HierarchyManager 上） |
 | `HierarchyManager` | catalog 变更、`paneRunning` / `lastFocusedPaneByTab` runtime-only map、Tag CRUD | 各 feature 的 UI 状态 |

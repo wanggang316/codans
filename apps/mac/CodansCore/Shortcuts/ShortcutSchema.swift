@@ -126,6 +126,13 @@ extension ShortcutSchema {
       defaultBinding: nil
     ),
     .init(
+      id: .newAgent,
+      title: "New Agent…",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_N), modifiers: [.command, .shift])
+    ),
+    .init(
       id: .toggleDiffInspector,
       title: "Toggle Git Viewer",
       category: .projectAndWorktree,
