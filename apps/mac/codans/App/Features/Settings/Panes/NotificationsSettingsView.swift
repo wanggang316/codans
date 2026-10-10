@@ -257,6 +257,7 @@ struct NotificationsSettingsView: View {
     HStack(spacing: 8) {
       Image(systemName: status == .denied ? "exclamationmark.triangle.fill" : "questionmark.circle.fill")
         .foregroundStyle(status == .denied ? Color.orange : Color.yellow)
+        .accessibilityHidden(true)
       Text(
         status == .denied
           ? "macOS is blocking notifications for Codans."

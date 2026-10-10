@@ -64,7 +64,7 @@ public final class MethodRouter {
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
-    if let outcome = await routeProject(request) { return outcome }
+    if let outcome = routeProject(request) { return outcome }
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
     if let outcome = await routeWorkspace(request) { return outcome }
@@ -255,7 +255,7 @@ public final class MethodRouter {
   /// the only wire-error type these methods produce), so the catch chain is
   /// flatter than `routeEditor`'s — no app-tier error translation, just a
   /// `DecodingError` → `invalidParams` rescue and a programmer-error backstop.
-  private func routeProject(_ request: IPC.Request) async -> RouterOutcome? {
+  private func routeProject(_ request: IPC.Request) -> RouterOutcome? {
     guard let h = projectHandlers else { return nil }
     switch request.method {
     case .projectListScripts:

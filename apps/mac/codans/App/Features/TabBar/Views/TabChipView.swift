@@ -27,7 +27,7 @@ struct TabChipView: View {
   /// temporarily takes the close-button slot so the hint sits inside the chip's rounded
   /// rectangle rather than crowding the inter-chip gap. Resolved at the row level so
   /// `TabChipView` stays free of environment-key dependencies.
-  var chordHint: String? = nil
+  var chordHint: String?
   let onSelect: () -> Void
   let onClose: () -> Void
   let onMiddleClick: () -> Void
@@ -42,7 +42,7 @@ struct TabChipView: View {
   /// SF Symbol resolved by `Tab.resolvedIcon(autoFallback:)` — `nil`
   /// hides the leading slot so unlocked tabs without a runtime fallback
   /// keep the chip clean.
-  var icon: String? = nil
+  var icon: String?
   /// Script-tint colour for `icon` while the tab's run pane executes; see
   /// `TabChipLabel.iconTint`.
   var iconTint: Color?

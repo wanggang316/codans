@@ -151,6 +151,7 @@ struct TagManagerSheet: View {
           .font(.system(size: 14))
           .foregroundStyle(.secondary)
           .symbolRenderingMode(.hierarchical)
+          .accessibilityLabel("Remove Tag")
       }
       .buttonStyle(.plain)
       .help("Remove Tag")
@@ -182,6 +183,7 @@ struct TagManagerSheet: View {
         .onTapGesture {
           store.send(.renameRowTapped(tag.id, currentName: tag.name))
         }
+        .accessibilityAddTraits(.isButton)
     }
   }
 
@@ -359,6 +361,7 @@ private struct ColorSwatchPicker: View {
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(.white)
           .shadow(color: .black.opacity(0.25), radius: 0.5, y: 0.5)
+          .accessibilityHidden(true)
       }
     }
     .frame(width: 28, height: 28)

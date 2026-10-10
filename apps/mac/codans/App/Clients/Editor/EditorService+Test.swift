@@ -145,7 +145,7 @@ final class RecordingAppLauncher: AppLauncher, @unchecked Sendable {
     urls: [URL],
     withApplicationAt appURL: URL,
     configuration: NSWorkspace.OpenConfiguration
-  ) async throws {
+  ) async throws {  // swiftlint:disable:this async_without_await
     openCalls.append(
       OpenCall(
         mode: .openURLs,
@@ -161,7 +161,7 @@ final class RecordingAppLauncher: AppLauncher, @unchecked Sendable {
   func openApplication(
     at appURL: URL,
     configuration: NSWorkspace.OpenConfiguration
-  ) async throws {
+  ) async throws {  // swiftlint:disable:this async_without_await
     openCalls.append(
       OpenCall(
         mode: .openApplication,

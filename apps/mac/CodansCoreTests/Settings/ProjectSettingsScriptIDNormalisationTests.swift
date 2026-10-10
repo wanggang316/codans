@@ -3,6 +3,7 @@ import Testing
 
 @testable import CodansCore
 
+// swiftlint:disable:next type_name
 struct ProjectSettingsScriptIDNormalisationTests {
   @Test
   func normalizeScriptIDsLeavesUniqueIDsAlone() {

@@ -21,11 +21,6 @@ struct OptionalOverridePicker<Value: Hashable & Sendable>: View {
   struct Option {
     let value: Value
     let label: String
-
-    init(value: Value, label: String) {
-      self.value = value
-      self.label = label
-    }
   }
 
   var body: some View {

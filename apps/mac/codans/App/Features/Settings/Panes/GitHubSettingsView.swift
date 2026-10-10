@@ -76,11 +76,13 @@ struct GitHubSettingsView: View {
     case .available(let host, let user):
       HStack {
         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+          .accessibilityHidden(true)
         Text("Connected to \(host) as @\(user)")
       }
     case .unavailable(let reason):
       HStack(alignment: .top) {
         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+          .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 4) {
           Text(reason)
             .multilineTextAlignment(.leading)

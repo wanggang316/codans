@@ -63,11 +63,13 @@ struct AboutSettingsView: View {
       Image(nsImage: icon)
         .resizable()
         .interpolation(.high)
-        .aspectRatio(contentMode: .fit)
+        .scaledToFit()
+        .accessibilityHidden(true)
     } else {
       Image(systemName: "terminal")
         .font(.system(size: 48))
         .foregroundStyle(.tint)
+        .accessibilityHidden(true)
     }
   }
 }

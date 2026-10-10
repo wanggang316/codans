@@ -103,10 +103,9 @@ actor GhExecutableResolver {
       }
 
       // 2. Hardcoded Homebrew paths — GUI-launched apps rarely inherit these in $PATH.
-      for hardcoded in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] {
-        if fileManager.isExecutableFile(atPath: hardcoded) {
-          return URL(fileURLWithPath: hardcoded)
-        }
+      for hardcoded in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+      where fileManager.isExecutableFile(atPath: hardcoded) {
+        return URL(fileURLWithPath: hardcoded)
       }
 
       // 3. Login-shell fallback. Final catch-all for non-standard installs.

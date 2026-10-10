@@ -899,13 +899,14 @@ private struct ProjectColorSwatchRow: View {
     ColorChip(
       isSelected: selection == nil,
       action: { selection = nil },
-      accessibilityName: "No Color"
-    ) {
-      Image(systemName: "nosign")
-        .font(.system(size: 12, weight: .regular))
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
-    }
+      accessibilityName: "No Color",
+      content: {
+        Image(systemName: "nosign")
+          .font(.system(size: 12, weight: .regular))
+          .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
+      }
+    )
   }
 
   @ViewBuilder
@@ -913,15 +914,16 @@ private struct ProjectColorSwatchRow: View {
     ColorChip(
       isSelected: selection == color,
       action: { selection = color },
-      accessibilityName: color.displayName
-    ) {
-      Circle()
-        .fill(color.swiftUIColor)
-        .frame(width: 16, height: 16)
-        .overlay(
-          Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
-        )
-    }
+      accessibilityName: color.displayName,
+      content: {
+        Circle()
+          .fill(color.swiftUIColor)
+          .frame(width: 16, height: 16)
+          .overlay(
+            Circle().strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+          )
+      }
+    )
   }
 
   /// Custom-color trigger. Renders either a multicolor disc (no custom
@@ -937,10 +939,9 @@ private struct ProjectColorSwatchRow: View {
     ColorChip(
       isSelected: isSelected,
       action: { openColorPanel() },
-      accessibilityName: "Custom Color"
-    ) {
-      customCircleContent
-    }
+      accessibilityName: "Custom Color",
+      content: { customCircleContent }
+    )
     .help("Custom Color…")
   }
 
