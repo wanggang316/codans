@@ -130,7 +130,7 @@ struct RemoteManifestReaderTests {
     process.waitUntilExit()
     #expect(process.terminationStatus == 0)
 
-    let remote = RemoteManifestReader.parse(String(decoding: data, as: UTF8.self))
+    let remote = RemoteManifestReader.parse(try #require(String(bytes: data, encoding: .utf8)))
     let local = await LocalManifestReader().read(request, in: root.path, scope: .standard)
     #expect(remote == local)
     #expect(remote.presentPaths == ManifestFixtureTree.expectedPaths)

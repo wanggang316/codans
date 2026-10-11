@@ -36,6 +36,7 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case openProjectOnGitHub
   case newWorktree
   case newWorkspace
+  case newAgent
   case splitRight
   case splitDown
   case focusSplitLeft

@@ -88,7 +88,7 @@ struct WorktreeHeaderInfoLabel: View {
     if hasUnread {
       Image(systemName: "bell.fill")
         .resizable()
-        .aspectRatio(contentMode: .fit)
+        .scaledToFit()
         .frame(width: 12, height: 12)
         .foregroundStyle(Color.orange)
         .frame(width: 14, height: 14)

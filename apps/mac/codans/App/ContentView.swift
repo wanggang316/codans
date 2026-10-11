@@ -129,6 +129,7 @@ struct ContentView: View {
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
+        onNewAgent: { store.send(.newAgentRequested) },
         inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it
@@ -239,6 +240,12 @@ struct ContentView: View {
         onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
       )
       .environment(hierarchyManager)
+    }
+    .sheet(
+      item: $store.scope(state: \.newAgent, action: \.newAgent)
+    ) { newAgentStore in
+      NewAgentView(store: newAgentStore)
+        .environment(settingsStore)
     }
     .onDisappear {
       store.send(.onQuit)

@@ -105,6 +105,34 @@ struct WorktreeLifecycleIntegrationTests {
     #expect(afterRemove.count == 1)
   }
 
+  /// A repository without an `origin` remote has nothing to fetch. "Fetch
+  /// origin" defaults on, so the create must skip the fetch rather than
+  /// fail on `git fetch origin`.
+  @Test(.enabled(if: WorktreeLifecycleIntegrationTests.wtBundled))
+  func fetchOriginIsSkippedWithoutAnOriginRemote() async throws {
+    let repo = try makeTempRepo()
+    defer { try? fm.removeItem(at: repo) }
+
+    let client = GitWorktreeClient.makeLive()
+    let baseDir = repo.appending(path: ".worktrees", directoryHint: .isDirectory)
+    try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
+    let spec = CreateWorktreeSpec(
+      repoRoot: repo,
+      baseDirectory: baseDir,
+      name: "no-remote",
+      baseRef: "main",
+      fetchOrigin: true,
+      copyIgnored: false,
+      copyUntracked: false
+    )
+    var createdPath: URL?
+    for try await event in client.createWorktreeStream(spec) {
+      if case .finished(let path) = event { createdPath = path }
+    }
+    let worktreePath = try #require(createdPath)
+    #expect(fm.fileExists(atPath: worktreePath.path(percentEncoded: false)))
+  }
+
   /// `GitWorktreeClient.removeWorktree` uses a relocate-then-prune
   /// strategy: the working directory is moved into a per-process trash
   /// folder before `git worktree prune --expire=now` cleans the metadata,

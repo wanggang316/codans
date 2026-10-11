@@ -205,6 +205,8 @@ struct CreateWorktreeFeature {
 
   @Dependency(GitWorktreeClient.self) private var gitWorktreeClient
 
+  nonisolated enum CancelID: Sendable { case loadOptions }
+
   // MARK: - Local-branch ingestion
 
   /// Derives the two collision-classification structures from a single
@@ -276,6 +278,10 @@ struct CreateWorktreeFeature {
               automaticBaseRef: loadedAuto
             ))
         }
+        // The New Agent dialog reseeds this state when its project changes;
+        // a load still running for the previous project must not land on
+        // the new one.
+        .cancellable(id: CancelID.loadOptions, cancelInFlight: true)
 
       case .optionsLoaded(let baseRefs, let locals, let live, let auto):
         state.loadingOptions = false
@@ -471,5 +477,79 @@ struct CreateWorktreeFeature {
         return .none
       }
     }
+  }
+}
+
+extension CreateWorktreeFeature.State {
+  /// Form state for creating a worktree in `project`, seeded from the
+  /// effective settings (per-project override chained to the global default)
+  /// so the form matches what Settings shows for this Project. `nil` when
+  /// the Project has no git root to create a worktree in.
+  ///
+  /// Shared by the sidebar's Create Worktree sheet and the New Agent
+  /// dialog, so both start from the same defaults.
+  static func seeded(for project: Project, settings: Settings, pendingCount: Int) -> Self? {
+    guard let gitRoot = project.gitRoot else { return nil }
+    let projectSettings = settings.projects[project.id]
+    let globalWorktree = settings.worktree
+    // Server (remote) projects: option loading rides the SSH-routed worktree
+    // client, and the new worktree lands beside the repo root ON THE HOST —
+    // the local worktrees-directory setting names a local path that means
+    // nothing there.
+    let worktreesDirectory =
+      project.isRemote
+      ? URL(fileURLWithPath: (gitRoot as NSString).deletingLastPathComponent)
+      : globalWorktree.resolveBaseDirectory(
+        // Use the path-derived canonical name so renaming a project in
+        // Settings → General never relocates the suggested worktree folder.
+        forProjectName: project.canonicalName,
+        projectOverride: projectSettings?.worktreesDirectory
+      )
+    // "Launch agent" offers every enabled profile; a remembered pick whose
+    // profile was since removed or disabled falls back to None.
+    let agentProfiles = settings.agents.enabledProfiles
+    let rememberedAgentID = projectSettings?.git?.launchAgentProfileOnWorktreeCreate
+    let launchAgentDefault =
+      agentProfiles.contains { $0.id == rememberedAgentID } ? rememberedAgentID : nil
+    // Each per-project override is `nil` = inherit; if both are unset the
+    // value falls back to the global default.
+    let projectGit = projectSettings?.git
+    let copyIgnoredDefault =
+      projectGit?.copyIgnoredOnWorktreeCreate ?? globalWorktree.copyIgnoredOnCreate
+    let copyUntrackedDefault =
+      projectGit?.copyUntrackedOnWorktreeCreate ?? globalWorktree.copyUntrackedOnCreate
+    let fetchOriginDefault =
+      projectGit?.fetchRemoteOnWorktreeCreate ?? globalWorktree.fetchRemoteOnCreate
+    // Branches held by ARCHIVED rows, so the form can explain a name
+    // collision the user can't see in the sidebar (archiving keeps the git
+    // worktree + branch; only the catalog knows the row is hidden).
+    let archivedOwners = Dictionary(
+      project.worktrees
+        .filter(\.archived)
+        .compactMap { worktree -> (String, LiveBranchOwner)? in
+          let branch = (worktree.branch ?? worktree.name)
+            .trimmingCharacters(in: .whitespaces)
+          guard !branch.isEmpty else { return nil }
+          return (
+            branch.lowercased(),
+            LiveBranchOwner(branch: branch, worktreeName: worktree.name)
+          )
+        },
+      uniquingKeysWith: { first, _ in first }
+    )
+    return Self(
+      projectID: project.id,
+      repoRoot: URL(fileURLWithPath: gitRoot),
+      worktreesDirectory: worktreesDirectory,
+      currentPendingCountForProject: pendingCount,
+      remoteHost: project.remoteHost,
+      baseRefOverride: projectGit?.worktreeBaseRef,
+      archivedBranchOwnersByLower: archivedOwners,
+      fetchOrigin: fetchOriginDefault,
+      copyIgnored: project.isRemote ? false : copyIgnoredDefault,
+      copyUntracked: project.isRemote ? false : copyUntrackedDefault,
+      agentProfiles: agentProfiles,
+      launchAgentProfileID: launchAgentDefault
+    )
   }
 }

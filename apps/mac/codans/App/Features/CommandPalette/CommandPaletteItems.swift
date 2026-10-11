@@ -151,6 +151,14 @@ enum CommandPaletteItems {
         kind: .newWorkspace
       ),
       CommandPaletteItem(
+        id: "app.new-agent",
+        title: "New Agent…",
+        searchText: "app agent new start prompt worktree",
+        icon: "plus.bubble",
+        commandID: .newAgent,
+        kind: .newAgent
+      ),
+      CommandPaletteItem(
         id: "app.open-settings",
         title: "Open Settings",
         searchText: "app",
@@ -558,7 +566,7 @@ enum CommandPaletteItems {
   }
 
   /// One "Launch Agent: <profile>" item per enabled `AgentProfile`, in
-  /// Settings order — the same rows the toolbar Agents menu lists. Reads the
+  /// Settings order — the same rows the New Agent dialog lists. Reads the
   /// live settings snapshot like the script builders so a profile added in
   /// Settings appears on the next palette open.
   private static func agentProfileItems(

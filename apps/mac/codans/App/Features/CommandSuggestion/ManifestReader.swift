@@ -39,6 +39,8 @@ nonisolated enum ManifestReadLimits {
 // MARK: - Local
 
 nonisolated struct LocalManifestReader: ManifestReader {
+  // `async` matches the protocol: the remote reader awaits SSH.
+  // swiftlint:disable:next async_without_await
   func read(_ request: ManifestRequest, in directory: String, scope: ManifestScope) async -> ManifestSnapshot {
     let fileManager = FileManager.default
     let contentNames = Set(request.contentPaths)
@@ -153,6 +155,8 @@ nonisolated struct RemoteManifestReader: ManifestReader {
     guard case .exited(let code, let stdout, _, let overflow) = outcome, code == 0, !overflow else {
       return ManifestSnapshot()
     }
+    // Lossy decoding keeps a manifest with stray non-UTF-8 bytes readable.
+    // swiftlint:disable:next optional_data_string_conversion
     return Self.parse(String(decoding: stdout, as: UTF8.self))
   }
 

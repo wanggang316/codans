@@ -2,11 +2,11 @@
 
 ## Scope
 
-Show the selected worktree's live foreground tasks in the header, with one
-entry per terminal pane. The process badge sits beside the center status item;
-the notification bell follows in a separate toolbar group. Hover or click opens
-a compact list of task names, process IDs, and elapsed times. Selecting a row
-closes the popover and focuses its owning tab and pane.
+Track the selected worktree's live foreground tasks, with one entry per
+terminal pane. The tab hover card shows the entry of its tab.
+
+The header no longer shows a process badge or a process list popover (removed
+in HAN-210). The registry and its query API stay in place for other surfaces.
 
 This includes manually typed commands such as `npm run tauri dev`, as well as
 Agent and Run launches in internal terminal panes. Detached
@@ -31,25 +31,13 @@ Hierarchy removal and delayed samples both check current catalog membership.
 The registry and launch attribution are session-only: application startup
 rebuilds the list from fresh samples.
 
-## Presentation and navigation
-
-Hovering or clicking the header badge opens the process list. Hover transitions
-use a 200 ms delay so the pointer can reach the popover; clicking pins it open.
-Escape dismisses it. Opening fixes the visible row capacity to between one and
-eight rows, so entry updates do not resize the window.
-
-Selecting an entry dismisses the popover before dispatching navigation. The
-navigation path checks that the entry is still current before focusing its
-Tab and Pane. Process icons use observed executable or agent identity rather
-than a user-defined Run task name.
-
 ## Verification contracts
 
 The source tests cover lifecycle retirement, PID replacement, stale samples,
-worktree isolation, duration rendering, process icons, and popover sizing.
+worktree isolation, and process icons.
 Runtime checks should cover ordinary typed commands, Agent and Run launches,
-external termination, hierarchy deletion, restart, and navigation from another
-tab. A source test or documented command is not a recorded runtime result.
+external termination, hierarchy deletion, and restart. A source test or
+documented command is not a recorded runtime result.
 
 To rerun the focused native tests:
 
@@ -58,13 +46,10 @@ cd apps/mac
 xcodebuild test -workspace codans.xcworkspace -scheme Codans \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -only-testing:CodansTests/HierarchyManagerProcessTests \
-  -only-testing:CodansTests/WorktreeProcessDurationTests \
-  -only-testing:CodansTests/WorktreeProcessPresentationTests \
   -only-testing:CodansTests/ForegroundJobReaderTests
 ```
 
-Use `TEST_RUNNER_CODANS_CONFIG_DIR` to isolate app-hosted tests and
-`TEST_RUNNER_HAN130_RENDER_DIR` to export presentation PNGs through xcodebuild.
+Use `TEST_RUNNER_CODANS_CONFIG_DIR` to isolate app-hosted tests.
 
 ## Evidence and recovery boundaries
 
@@ -85,7 +70,7 @@ liveness. Launch provenance enriches names but never gates process visibility.
 
 ## Process icons
 
-Rows retain their status dot and add a 14-point template icon before the name.
+The tab hover card shows a 14-point template icon before the process name.
 Observed agent identities reuse the bundled agent marks. Other executable names
 resolve through `CommandIconCatalog`, the same tool-mark table command icons use
 (Node.js, npm, pnpm, Python, Go, Rust, Docker, Git and the rest of the `tool-*`
@@ -98,5 +83,4 @@ user-defined Run task name. Icon selection does not alter process detection.
 
 - [WorktreeProcessRegistry.swift](../../apps/mac/codans/Runtime/WorktreeProcessRegistry.swift): entries, launch attribution and recovery bounds.
 - [ForegroundJobReader.swift](../../apps/mac/codans/Runtime/ForegroundJobReader.swift): local foreground evidence and process start times.
-- [WorktreeProcessesView.swift](../../apps/mac/codans/App/Features/StatusBar/Views/WorktreeProcessesView.swift): badge, popover and deferred selection.
 - [WorktreeProcessIconView.swift](../../apps/mac/codans/App/Features/StatusBar/Views/WorktreeProcessIconView.swift): process identity icons.

@@ -59,12 +59,13 @@ struct ShortcutSchemaAuditTests {
     (.showUnread, (0x20, [.command])),  // ⌘U
     (.checkForUpdates, (0x20, [.command, .shift])),  // ⌘⇧U
     (.openInEditor, (0x1F, [.command])),  // o
-    (.toggleDiffInspector, (0x05, [.command, .option])),  // g
+    (.toggleDiffInspector, (0x05, [.command])),  // g (HAN-51)
     (.addProject, (0x1F, [.command, .shift])),  // ⇧O
     (.openCurrentPR, (0x05, [.command, .control])),  // ⌃g
     (.openProjectOnGitHub, (0x05, [.command, .shift])),  // ⌘⇧G
     (.newWorktree, (0x2D, [.command])),  // n
     (.newWorkspace, nil),
+    (.newAgent, (0x2D, [.command, .shift])),  // ⌘⇧N
     (.splitRight, (0x02, [.command])),  // d
     (.splitDown, (0x02, [.command, .shift])),  // ⇧d
     (.focusSplitLeft, (0x7B, [.command, .option])),  // ⌘⌥←
@@ -84,7 +85,8 @@ struct ShortcutSchemaAuditTests {
     (.worktreeHistoryForward, (0x1E, [.command])),  // ⌘]
     (.newTab, (0x11, [.command])),  // t
     (.closeTab, (0x0D, [.command])),  // w
-    (.renameActiveTab, (0x0F, [.command, .shift])),  // ⌘⇧R
+    (.renameActiveTab, (0x0F, [.command, .option])),  // ⌘⌥R
+    (.changeActiveTabColor, (0x08, [.command, .option])),  // ⌘⌥C
     (.previousTab, (0x21, [.command, .shift])),  // [
     (.nextTab, (0x1E, [.command, .shift])),  // ]
     (.switchToTab1, (0x12, [.command])),

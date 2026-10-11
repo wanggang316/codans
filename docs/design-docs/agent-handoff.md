@@ -9,7 +9,7 @@ codans 的用户同时驱动多个编码 agent（Claude Code、Codex、Gemini CL
 
 功能分为两部分：
 
-1. **Agent Profiles**——命名的启动预设（agent、模型、推理强度、执行模式、放置位置、额外参数、launch-scoped 环境变量、独立 HOME），从 Settings → Agents 编辑，从 worktree toolbar 的 Agents 菜单、Command Palette、`codans agent launch` 一键启动。
+1. **Agent Profiles**——命名的启动预设（agent、模型、推理强度、执行模式、放置位置、额外参数、launch-scoped 环境变量、独立 HOME），从 Settings → Agents 编辑，从 New Agent 对话框（⌘⇧N 或 header 的 New Agent 按钮，见 [main-window.md](main-window.md) §New Agent 对话框）、Command Palette、`codans agent launch` 启动。
 2. **Handoff**——agent 到 agent 的任务交接：以 worktree 下的 `.codans/handoff/` 为唯一持久通道，由**在线的源 agent 自己**写 briefing 并通过 `codans handoff` 完成迁移，接收方在同一 worktree 里带着 kickoff prompt 启动——默认后台新 tab，也可分屏到源 pane 旁。应用内的 Hand Off 面板只是这条 CLI 迁移的触发器与观察者。
 
 不在范围：agent 内部会话的 fork / 续写（codans 永远不替 agent 起隐藏的模型调用）；Server（SSH）项目的 handoff（工件目录在远端）；跨 worktree 的交接。
@@ -117,13 +117,13 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 - `codans handoff` 默认源是**调用方 pane**：`AliasResolver` 先看 `CODANS_PANE_ID`，缺失则由服务端按进程祖先链归属（见 [cli.md](cli.md#寻址与别名解析)）。因此在自己 pane 里执行 `codans handoff to …` 的 agent 交接的就是它自己，与用户当前聚焦无关。
 - `--pane` 显式覆盖。
 - 键入源 pane 的那一行命令写的是**调用方自己这套构建的 CLI**：Debug 的 CLI 叫 `codans-dev`（包内文件名、安装名、自称一致），写裸 `codans` 会解析到已安装的 Release 二进制。命令名在 wire-up 时由 `CLIInvocation.command` 解析一次：`/usr/local/bin` 下没有同名条目、或条目指向本构建就写短名，否则写 app 内置二进制的绝对路径。见 [environment.md](environment.md)。
-- 应用内入口：pane 右上角的操作菜单与 AgentState 行右键，取该 pane / 该行自己的 pane id；Command Palette 取选中 worktree 的聚焦 pane。pane 菜单是最贴近语义的入口——交接是这个 pane 里那个 agent 的属性——菜单只放 pane 级操作，不重复 header / 侧栏已有的 path、branch、diff、agent 信息。worktree toolbar 的 Agents 菜单**不**提供交接：它只知道「聚焦的 pane」这个猜测，而交接必须指向一个确定的 agent。
+- 应用内入口：pane 右上角的操作菜单与 AgentState 行右键，取该 pane / 该行自己的 pane id；Command Palette 取选中 worktree 的聚焦 pane。pane 菜单是最贴近语义的入口——交接是这个 pane 里那个 agent 的属性——菜单只放 pane 级操作，不重复 header / 侧栏已有的 path、branch、diff、agent 信息。New Agent 对话框**不**提供交接：它启动新 agent，不知道要接替哪一个，而交接必须指向一个确定的 agent。
 
 源 agent 身份优先取 `AgentStateStore` 的实时条目（分类器此刻看到的），回退到 pane 持久化绑定（`Pane.agentKind` / `agentSessionID`），因此重启后恢复的 pane 仍能报出 agent。
 
 ### 应用内 Hand Off 面板
 
-`HandoffFeature`（TCA，`@Presents` 于 `RootFeature.handoff`，与 Command Palette 同宿主同外观）只有**一步**：两列网格列出已启用且本机能运行的 profile（过滤规则与 toolbar Agents 菜单同源：`AgentInstallationStore.offeredProfiles`，探测失败时全部显示），下方一行 "Only save progress"。行内只有名字，说明放在 tooltip 里；没有 `promptStyle` 的行 tooltip 注明 kickoff 会在启动后键入。方向键在网格内移动。底部两个下拉框：New Tab / Split，选 Split 后右侧再出现 Right / Down / Left / Up（默认 Right）；默认 New Tab，上次的选择（含方向）记在 `UserDefaults`（`HandoffPlacementPersistence`），下次打开即恢复。
+`HandoffFeature`（TCA，`@Presents` 于 `RootFeature.handoff`，与 Command Palette 同宿主同外观）只有**一步**：两列网格列出已启用且本机能运行的 profile（过滤规则与 New Agent 对话框的 Agent 菜单同源：`AgentInstallationStore.offeredProfiles`，探测失败时全部显示），下方一行 "Only save progress"。行内只有名字，说明放在 tooltip 里；没有 `promptStyle` 的行 tooltip 注明 kickoff 会在启动后键入。方向键在网格内移动。底部两个下拉框：New Tab / Split，选 Split 后右侧再出现 Right / Down / Left / Up（默认 Right）；默认 New Tab，上次的选择（含方向）记在 `UserDefaults`（`HandoffPlacementPersistence`），下次打开即恢复。
 
 确认按钮是分裂按钮。面板本身不执行任何事：确认即以 `delegate(.handOff(source, order, placement))` 把订单交给 `RootFeature`，面板随即关闭，没有等待页，也没有中途切换的机会。`RootFeature` 在后台执行订单：
 

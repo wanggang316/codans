@@ -68,14 +68,6 @@ struct WorktreeHeaderFeature {
     /// "Manage Global Commands…" menu footer. Deep-links into the Settings
     /// window's Global Commands pane (no project context needed).
     case manageGlobalScriptsTapped
-    /// Agents split button — primary or menu activation. Carries only the
-    /// profile id; RootFeature resolves the target Project + Worktree from
-    /// `state.selection` at handle-time, same staleness rationale as
-    /// `runScriptTapped`.
-    case launchAgentTapped(profileID: UUID)
-    /// "Manage Agents…" menu footer, and the primary half's fallback when no
-    /// profile is enabled. Deep-links into the Settings window's Agents pane.
-    case manageAgentsTapped
     /// A row of the "Run Workflow" submenu. RootFeature resolves the
     /// selected worktree at handle-time and opens the start panel.
     case runWorkflowTapped(workflowID: String)
@@ -136,14 +128,6 @@ struct WorktreeHeaderFeature {
       /// User asked to manage global commands — open the Settings window AND
       /// deep-link into the Global Commands pane.
       case manageGlobalScriptsRequested
-      /// Launch a configured agent profile. RootFeature resolves the target
-      /// Project + Worktree from `state.selection` at handle-time (see
-      /// `runScriptRequested`) and dispatches to
-      /// `HierarchyClient.launchAgentProfile`.
-      case launchAgentRequested(profileID: UUID)
-      /// User asked to manage agents — open the Settings window AND deep-link
-      /// into the Agents pane.
-      case manageAgentsRequested
       /// Open the start panel for `workflowID` in the selected worktree.
       case runWorkflowRequested(workflowID: String)
       /// Open Settings → Workflows, optionally straight into New Workflow.
@@ -197,12 +181,6 @@ struct WorktreeHeaderFeature {
 
       case .manageGlobalScriptsTapped:
         return .send(.delegate(.manageGlobalScriptsRequested))
-
-      case .launchAgentTapped(let profileID):
-        return .send(.delegate(.launchAgentRequested(profileID: profileID)))
-
-      case .manageAgentsTapped:
-        return .send(.delegate(.manageAgentsRequested))
 
       case .runWorkflowTapped(let workflowID):
         return .send(.delegate(.runWorkflowRequested(workflowID: workflowID)))

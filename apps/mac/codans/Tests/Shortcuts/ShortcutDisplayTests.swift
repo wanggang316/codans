@@ -117,4 +117,58 @@ struct ShortcutDisplayTests {
     )
     #expect(ShortcutDisplay.eventModifiers(for: []) == [])
   }
+
+  // MARK: - tooltip(_:for:in:)
+
+  @Test
+  func spacedChordSeparatesEveryGlyph() {
+    let binding = ShortcutBinding(keyCode: UInt16(kVK_F12), modifiers: [.command, .shift])
+    #expect(ShortcutDisplay.spacedChord(for: binding) == "\u{21E7} \u{2318} F12")
+  }
+
+  @Test
+  func tooltipAppendsTheDefaultChord() {
+    let shortcuts = ShortcutResolver.resolve(overrides: .empty)
+    #expect(
+      ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: shortcuts)
+        == "Back \u{2318} ["
+    )
+    #expect(
+      ShortcutDisplay.tooltip("Forward", for: .worktreeHistoryForward, in: shortcuts)
+        == "Forward \u{2318} ]"
+    )
+  }
+
+  @Test
+  func tooltipFollowsTheResolvedBinding() {
+    let rebound = ResolvedShortcut(
+      id: .worktreeHistoryBack,
+      binding: ShortcutBinding(keyCode: UInt16(kVK_LeftArrow), modifiers: [.command]),
+      isEnabled: true,
+      source: .userOverride
+    )
+    let shortcuts: ResolvedShortcutMap = [.worktreeHistoryBack: rebound]
+    #expect(
+      ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: shortcuts)
+        == "Back \u{2318} \u{2190}"
+    )
+  }
+
+  @Test
+  func tooltipDropsTheChordWhenDisabledOrUnbound() {
+    let binding = ShortcutBinding(keyCode: UInt16(kVK_ANSI_LeftBracket), modifiers: [.command])
+    let disabled: ResolvedShortcutMap = [
+      .worktreeHistoryBack: ResolvedShortcut(
+        id: .worktreeHistoryBack, binding: binding, isEnabled: false, source: .userOverride
+      )
+    ]
+    let unbound: ResolvedShortcutMap = [
+      .worktreeHistoryBack: ResolvedShortcut(
+        id: .worktreeHistoryBack, binding: nil, isEnabled: true, source: .userOverride
+      )
+    ]
+    #expect(ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: disabled) == "Back")
+    #expect(ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: unbound) == "Back")
+    #expect(ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: [:]) == "Back")
+  }
 }

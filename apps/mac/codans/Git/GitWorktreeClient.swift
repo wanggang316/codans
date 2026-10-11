@@ -261,6 +261,17 @@ nonisolated extension GitWorktreeClient {
     return collapsed
   }
 
+  /// Whether `repoRoot` has an `origin` remote to fetch.
+  private static func hasOriginRemote(_ repoRoot: URL) async -> Bool {
+    let outcome = await GitWorktreeShell.run(
+      executable: GitWorktreeShell.gitURL,
+      arguments: ["-C", repoRoot.path(percentEncoded: false), "remote", "get-url", "origin"],
+      cwd: repoRoot
+    )
+    if case .exited(let code, _, _, _) = outcome { return code == 0 }
+    return false
+  }
+
   /// Constructs the `wt` argv for a streaming `sw` (switch-and-create)
   /// invocation. Argument order matters for the helper's own parsing.
   static func makeCreateArguments(for spec: CreateWorktreeSpec) -> [String] {
@@ -1104,8 +1115,10 @@ nonisolated extension GitWorktreeClient {
       let task = Task {
         do {
           let wt = try wtScriptURL()
-          // Optional pre-fetch.
-          if spec.fetchOrigin {
+          // Optional pre-fetch. "Fetch origin" defaults on, so a repository
+          // with no `origin` remote (local-only) skips it instead of failing
+          // the create on a fetch that has nothing to reach.
+          if spec.fetchOrigin, await hasOriginRemote(spec.repoRoot) {
             let fetch = await GitWorktreeShell.run(
               executable: GitWorktreeShell.gitURL,
               arguments: [

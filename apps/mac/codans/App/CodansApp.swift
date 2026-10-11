@@ -478,7 +478,7 @@ final class AppState {
   let shortcutsStore: ShortcutsStore
   /// Which coding-agent CLIs are present on this Mac. App-scoped (not owned
   /// by the Settings pane) because two surfaces read it — the Agents pane
-  /// greys out missing agents, and the worktree toolbar's Agents menu hides
+  /// greys out missing agents, and the New Agent dialog's agent menu hides
   /// them — and they must not disagree.
   let agentInstallation = AgentInstallationStore()
   /// One-shot authorization + completion fan-out for panel-injected handoff
