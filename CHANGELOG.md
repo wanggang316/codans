@@ -16,6 +16,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Removed
 
+- **The header no longer shows the worktree processes badge.** The
+  terminal-count button and its process list popover are gone. A tab's
+  running process still shows on tab hover.
+
 ### Fixed
 
 ### Security

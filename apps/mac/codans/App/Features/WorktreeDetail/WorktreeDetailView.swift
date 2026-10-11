@@ -352,7 +352,7 @@ struct WorktreeDetailView: View {
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         newAgentToolbarItem()
         ToolbarItem(placement: .principal) { statusSlot(mode) }
-        // The inbox stays outside the principal status/process item.
+        // The inbox stays outside the principal status item.
         inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
           // Order: RunScript, Open. `ToolbarItemGroup` renders children
@@ -402,7 +402,7 @@ struct WorktreeDetailView: View {
     newAgentToolbarItem()
     ToolbarSpacer(.fixed)
     ToolbarItem { statusSlot(mode) }
-    // Keep the inbox in a separate group after the status/process capsule.
+    // Keep the inbox in a separate group after the status capsule.
     ToolbarSpacer(.fixed)
     inboxBellToolbarItem()
   }
@@ -452,30 +452,13 @@ struct WorktreeDetailView: View {
         .accessibilityIdentifier(WorktreeLoadingView.AccessibilityID.skeletonMiddle)
     case .worktree(let address, let info):
       if let info {
-        HStack(spacing: 0) {
-          StatusBarView(
-            store: statusBarStore,
-            gitHubStore: gitHubStore,
-            worktreeID: address.worktree,
-            worktreePath: URL(fileURLWithPath: info.worktree.path),
-            branch: info.worktree.branch
-          )
-          Divider().frame(height: 14)
-          WorktreeProcessesView(entries: hierarchyManager.processEntries(in: address.worktree)) { entry in
-            guard hierarchyManager.isCurrentProcess(entry) else { return }
-            onFocusHierarchyPath(
-              InboxEntry.SourcePath(
-                projectID: entry.projectID,
-                worktreeID: entry.worktreeID,
-                tabID: entry.tabID,
-                paneID: entry.paneID
-              )
-            )
-          }
-          .id(address.worktree)
-          .fixedSize()
-          .layoutPriority(1)
-        }
+        StatusBarView(
+          store: statusBarStore,
+          gitHubStore: gitHubStore,
+          worktreeID: address.worktree,
+          worktreePath: URL(fileURLWithPath: info.worktree.path),
+          branch: info.worktree.branch
+        )
       }
     }
   }
