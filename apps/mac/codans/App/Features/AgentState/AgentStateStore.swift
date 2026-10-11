@@ -418,7 +418,7 @@ final class AgentStateStore {
   /// subsystem so we can see at a glance which event variants flow
   /// through onTerminalEvent without dragging the full enum payload
   /// (Data blobs, embedded structs) into the log stream.
-  private static func eventTag(_ event: TerminalEvent) -> String {
+  private static func eventTag(_ event: TerminalEvent) -> String {  // swiftlint:disable:this cyclomatic_complexity
     switch event {
     case .paneOutput(let id, _): return "paneOutput(\(id.raw.uuidString.prefix(8)))"
     case .paneViewportChanged(let id, _):

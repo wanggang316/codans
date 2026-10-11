@@ -28,7 +28,7 @@ struct AppIconImage: View {
     } else {
       Image(systemName: fallbackSystemName)
         .resizable()
-        .aspectRatio(contentMode: .fit)
+        .scaledToFit()
         .frame(width: size, height: size)
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)

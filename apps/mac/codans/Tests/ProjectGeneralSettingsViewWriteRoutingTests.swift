@@ -11,6 +11,7 @@ import CodansCore
 /// (projectID, payload) pairs they receive, then exercise each route and
 /// assert the right closure fired with the right arguments.
 @MainActor
+// swiftlint:disable:next type_name
 struct ProjectGeneralSettingsViewWriteRoutingTests {
   // MARK: - Editor
 

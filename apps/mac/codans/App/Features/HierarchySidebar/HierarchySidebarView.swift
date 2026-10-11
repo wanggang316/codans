@@ -1973,7 +1973,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         } else if hasUnread {
           Image(systemName: "bell.fill")
             .resizable()
-            .aspectRatio(contentMode: .fit)
+            .scaledToFit()
             .frame(width: 11, height: 11)
             .foregroundStyle(Color.orange)
             .accessibilityLabel("Has unread notifications")
@@ -2028,8 +2028,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           Button {
             store.send(.projectAddWorktreeTapped(projectID: project.id))
           } label: {
-            iconLabel(systemName: "plus", isHovering: isPlusHovering)
-              .accessibilityLabel("Add Worktree under this Project")
+            iconLabel(systemName: "plus", label: "Add Worktree under this Project", isHovering: isPlusHovering)
           }
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
@@ -2039,8 +2038,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           Button {
             store.send(.workspaceAddRepositoryTapped(projectID: project.id))
           } label: {
-            iconLabel(systemName: "plus", isHovering: isPlusHovering)
-              .accessibilityLabel("Add Repository to this Workspace")
+            iconLabel(systemName: "plus", label: "Add Repository to this Workspace", isHovering: isPlusHovering)
           }
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
@@ -2137,8 +2135,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
             }
           }
         } label: {
-          iconLabel(systemName: "ellipsis", isHovering: isMenuHovering)
-            .accessibilityLabel("Project options")
+          iconLabel(systemName: "ellipsis", label: "Project options", isHovering: isMenuHovering)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -2149,9 +2146,12 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         // on a row that stands for a folder, where a click selects instead.
         if project.hasChildRows {
           Button(action: onToggleExpansion) {
-            iconLabel(systemName: "chevron.right", isHovering: isChevronHovering)
-              .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
-              .accessibilityLabel(project.isExpanded ? "Collapse" : "Expand")
+            iconLabel(
+              systemName: "chevron.right",
+              label: project.isExpanded ? "Collapse" : "Expand",
+              isHovering: isChevronHovering
+            )
+            .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
           }
           .buttonStyle(.plain)
           .onHover { isChevronHovering = $0 }
@@ -2172,8 +2172,9 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// and so the click target is comfortably larger than the underlying SF
   /// Symbol glyph.
   @ViewBuilder
-  private func iconLabel(systemName: String, isHovering: Bool) -> some View {
+  private func iconLabel(systemName: String, label: String, isHovering: Bool) -> some View {
     Image(systemName: systemName)
+      .accessibilityLabel(label)
       .font(.system(size: 11, weight: .medium))
       .foregroundStyle(isHovering ? .primary : .secondary)
       .frame(width: 22, height: 22)

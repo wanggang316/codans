@@ -21,9 +21,9 @@ struct StatusPullRequestView: View {
   /// Active Worktree, needed by the hover popover for dispatch CWDs.
   /// When nil (e.g. a hypothetical preview path with no real selection)
   /// the popover is suppressed but click-to-open still works.
-  var worktreeID: WorktreeID? = nil
-  var worktreePath: URL? = nil
-  var branch: String? = nil
+  var worktreeID: WorktreeID?
+  var worktreePath: URL?
+  var branch: String?
   /// Collapses the trailing detail text when true. Ring + badge stay so
   /// the slot still carries the CI health signal at a glance.
   var compact: Bool = false

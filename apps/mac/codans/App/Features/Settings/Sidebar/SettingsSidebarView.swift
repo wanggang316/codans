@@ -165,7 +165,7 @@ struct SettingsSidebarView: View {
         Image(assetName)
           .renderingMode(.template)
           .resizable()
-          .aspectRatio(contentMode: .fit)
+          .scaledToFit()
           .frame(width: 16, height: 16)
       }
     } else {

@@ -107,6 +107,8 @@ struct RootFeatureTests {
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
+      // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
+      $0.continuousClock = ImmediateClock()
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
@@ -558,6 +560,8 @@ struct RootFeatureTests {
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
+      // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
+      $0.continuousClock = ImmediateClock()
       $0.hierarchyClient.snapshot = { catalog }
       $0.hierarchyClient.createTab = { _, _, _ in TabID() }
       // The new-tab reducer auto-spawns a pane in the worktree cwd;
@@ -708,7 +712,7 @@ struct RootFeatureTests {
   }
 
   @Test
-  func paneLifecycleExitedClosesOnlyPaneWhenTabHasSiblings() async {
+  func paneLifecycleExitedClosesOnlyPaneWhenTabHasSiblings() async throws {
     // Multi-pane tab: keep the tab, drop the pane, transfer focus.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
@@ -717,7 +721,7 @@ struct RootFeatureTests {
     let rightPane = PaneID()
     let tab = Tab(
       id: tabID, name: "t",
-      splitTree: try! SplitTree(leaf: leftPane).inserting(
+      splitTree: try SplitTree(leaf: leftPane).inserting(
         rightPane, at: leftPane, direction: .right
       ),
       panes: [
@@ -1702,6 +1706,8 @@ struct RootFeatureTests {
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
+      // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
+      $0.continuousClock = ImmediateClock()
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
@@ -1947,6 +1953,8 @@ struct RootFeatureTests {
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
+      // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
+      $0.continuousClock = ImmediateClock()
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
@@ -1995,6 +2003,8 @@ struct RootFeatureTests {
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
+      // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
+      $0.continuousClock = ImmediateClock()
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }

@@ -40,7 +40,7 @@ struct SkeletonBranchClusterView: View {
       Image("git-branch")
         .renderingMode(.template)
         .resizable()
-        .aspectRatio(contentMode: .fit)
+        .scaledToFit()
         .frame(width: 14, height: 14)
         .foregroundStyle(.secondary.opacity(0.45))
         .shimmer(isActive: !reduceMotion)

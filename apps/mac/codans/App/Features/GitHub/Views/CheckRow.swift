@@ -38,21 +38,29 @@ struct CheckRow: View {
     switch (check.status, check.conclusion) {
     case (.completed, .success):
       Image(systemName: "checkmark.circle.fill").foregroundStyle(CheckRollupColor.passing)
+        .accessibilityLabel("Passed")
     case (.completed, .failure):
       Image(systemName: "xmark.circle.fill").foregroundStyle(CheckRollupColor.failing)
+        .accessibilityLabel("Failed")
     case (.completed, .cancelled), (.completed, .timedOut):
       Image(systemName: "minus.circle.fill").foregroundStyle(CheckRollupColor.neutral)
+        .accessibilityLabel("Cancelled")
     case (.completed, .skipped), (.completed, .neutral):
       Image(systemName: "circle.dashed").foregroundStyle(CheckRollupColor.neutral)
+        .accessibilityLabel("Skipped")
     case (.completed, .actionRequired):
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(CheckRollupColor.failing)
+        .accessibilityLabel("Action required")
     case (.completed, nil):
       Image(systemName: "questionmark.circle").foregroundStyle(.secondary)
+        .accessibilityLabel("Unknown result")
     case (.inProgress, _), (.queued, _), (.waiting, _), (.pending, _):
       Image(systemName: "circle.dotted").foregroundStyle(CheckRollupColor.pending)
+        .accessibilityLabel("Pending")
     case (.completed, .stale), (.completed, .startupFailure):
       Image(systemName: "exclamationmark.triangle").foregroundStyle(CheckRollupColor.failing)
+        .accessibilityLabel("Stale or failed to start")
     }
   }
 
