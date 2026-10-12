@@ -878,14 +878,22 @@ extension HierarchyClient {
         // Skipped for Server projects: `cwd` is a remote path that never
         // exists locally, and libghostty is handed a real local cwd — the
         // remote `cd` (inside the SSH command) owns the directory instead.
-        let isRemote =
-          manager.catalog.projects.first(where: { $0.id == projectID })?.isRemote ?? false
-        if !isRemote {
+        let project = manager.catalog.projects.first(where: { $0.id == projectID })
+        if project?.isRemote != true {
           var isDir: ObjCBool = false
           guard
             FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
             isDir.boolValue
           else {
+            // Reconcile runs on focus changes only, so a root folder that
+            // was moved from inside a pane stays "healthy" in the sidebar.
+            // Flag it here, so the row shows the failure and its Remove
+            // action instead of the app silently leaving an empty Tab.
+            if let project, !FileManager.default.fileExists(atPath: project.rootPath) {
+              manager.setProjectLoadState(
+                ProjectReconciler.missingFolderState(rootPath: project.rootPath),
+                projectID: projectID)
+            }
             throw HierarchyError.notFound("Worktree path missing: \(cwd)")
           }
         }
