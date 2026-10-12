@@ -93,22 +93,62 @@ struct SplitViewportView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
+  @ViewBuilder
   private var emptyPlaceholder: some View {
-    VStack(spacing: 12) {
-      Text("No panes in this Tab")
+    if let missingPath = missingWorktreeFolder() {
+      missingFolderPlaceholder(path: missingPath)
+    } else {
+      VStack(spacing: 12) {
+        Text("No panes in this Tab")
+          .font(.title3)
+          .foregroundStyle(.secondary)
+        Button("New Pane") {
+          store.send(
+            .newPaneButtonTapped(
+              inTab: tabID, inWorktree: worktreeID,
+              inProject: projectID,
+              workingDirectory: currentWorktreePath() ?? NSHomeDirectory()
+            ))
+        }
+        .buttonStyle(.borderedProminent)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  /// Shown instead of "New Pane" when the Worktree folder is gone: a pane
+  /// cannot start there, so the button would silently do nothing.
+  private func missingFolderPlaceholder(path: String) -> some View {
+    VStack(spacing: 8) {
+      Label("Folder not found", systemImage: "exclamationmark.triangle.fill")
         .font(.title3)
         .foregroundStyle(.secondary)
-      Button("New Pane") {
-        store.send(
-          .newPaneButtonTapped(
-            inTab: tabID, inWorktree: worktreeID,
-            inProject: projectID,
-            workingDirectory: currentWorktreePath() ?? NSHomeDirectory()
-          ))
-      }
-      .buttonStyle(.borderedProminent)
+      Text((path as NSString).abbreviatingWithTildeInPath)
+        .font(.callout)
+        .foregroundStyle(.tertiary)
+        .textSelection(.enabled)
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Text("The folder was moved or deleted. Remove it from codans and add it again.")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
     }
+    .padding(.horizontal, 24)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  /// The Worktree path when its folder no longer exists locally, else `nil`.
+  /// Server projects never qualify: their paths are remote.
+  private func missingWorktreeFolder() -> String? {
+    guard
+      let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),
+      !project.isRemote,
+      let path = project.worktrees.first(where: { $0.id == worktreeID })?.path
+    else { return nil }
+    var isDir: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+    return exists && isDir.boolValue ? nil : path
   }
 
   /// Looks up the current Worktree's absolute path from the catalog so the

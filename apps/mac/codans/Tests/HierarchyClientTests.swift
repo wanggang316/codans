@@ -481,4 +481,39 @@ struct HierarchyClientTests {
     #expect(probe.asked == [QueuedCommandDiscard(subject: .tabs(before), queuedCount: 1)])
     #expect(tabIDs(manager, seed.worktreeID).count == before)
   }
+
+  // MARK: - openPane in a missing folder
+
+  @Test
+  func openPaneInMissingProjectRootMarksProjectFailed() async throws {
+    let (client, manager) = makeLiveClient()
+    let root = "/tmp/codans-missing-\(UUID().uuidString)"
+    let projectID = client.addProject("p", root, root)
+    let worktreeID = try client.createWorktree(projectID, "main", root, "main")
+    let tabID = try client.createTab(worktreeID, projectID, nil)
+
+    await #expect(throws: HierarchyError.self) {
+      _ = try await client.openPane(tabID, worktreeID, projectID, root, nil)
+    }
+
+    #expect(
+      manager.catalog.projects[0].loadState
+        == ProjectReconciler.missingFolderState(rootPath: root))
+  }
+
+  @Test
+  func openPaneInMissingWorktreeKeepsProjectLoadState() async throws {
+    let (client, manager) = makeLiveClient()
+    let projectID = client.addProject("p", "/tmp", "/tmp")
+    let missing = "/tmp/codans-missing-\(UUID().uuidString)"
+    let worktreeID = try client.createWorktree(projectID, "w", missing, "main")
+    let tabID = try client.createTab(worktreeID, projectID, nil)
+    let before = manager.catalog.projects[0].loadState
+
+    await #expect(throws: HierarchyError.self) {
+      _ = try await client.openPane(tabID, worktreeID, projectID, missing, nil)
+    }
+
+    #expect(manager.catalog.projects[0].loadState == before)
+  }
 }
