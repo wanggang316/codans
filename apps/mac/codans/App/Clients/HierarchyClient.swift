@@ -810,7 +810,14 @@ extension HierarchyClient {
         try manager.selectWorktree(worktreeID, in: projectID)
       },
       createTab: { worktreeID, projectID, name in
-        try manager.createTab(in: worktreeID, in: projectID, name: name)
+        // A Tab in a missing folder could never start its first Pane: refuse
+        // it rather than leave an empty Tab behind.
+        if let path = manager.catalog.projects.first(where: { $0.id == projectID })?
+          .worktrees.first(where: { $0.id == worktreeID })?.path
+        {
+          try manager.requireLocalDirectory(path, in: projectID)
+        }
+        return try manager.createTab(in: worktreeID, in: projectID, name: name)
       },
       closeTab: { tabID, worktreeID, projectID in
         let doomed = tabs(in: worktreeID, projectID).filter { $0.id == tabID }
@@ -870,33 +877,11 @@ extension HierarchyClient {
       markPaneIdle: { paneID in manager.markPaneIdle(paneID) },
       setPaneCommandBusy: { paneID, busy in manager.setPaneCommandBusy(paneID, busy) },
       openPane: { [weak settings] tabID, worktreeID, projectID, cwd, initial in
-        // Defensive guard against stale catalog state: when a worktree
-        // is deleted outside the app (`git worktree remove`) before
-        // reconcile catches up, libghostty crashes if it tries to spawn
-        // a shell in a non-existent cwd. Reject here so callers'
-        // `try?` swallows the error instead of bringing down the app.
-        // Skipped for Server projects: `cwd` is a remote path that never
-        // exists locally, and libghostty is handed a real local cwd — the
-        // remote `cd` (inside the SSH command) owns the directory instead.
-        let project = manager.catalog.projects.first(where: { $0.id == projectID })
-        if project?.isRemote != true {
-          var isDir: ObjCBool = false
-          guard
-            FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
-            isDir.boolValue
-          else {
-            // Reconcile runs on focus changes only, so a root folder that
-            // was moved from inside a pane stays "healthy" in the sidebar.
-            // Flag it here, so the row shows the failure and its Remove
-            // action instead of the app silently leaving an empty Tab.
-            if let project, !FileManager.default.fileExists(atPath: project.rootPath) {
-              manager.setProjectLoadState(
-                ProjectReconciler.missingFolderState(rootPath: project.rootPath),
-                projectID: projectID)
-            }
-            throw HierarchyError.notFound("Worktree path missing: \(cwd)")
-          }
-        }
+        // Stale catalog state: libghostty crashes when it spawns a shell in
+        // a cwd that is gone (the folder was moved, or `git worktree remove`
+        // ran outside the app before reconcile caught up). Reject here so
+        // callers' `try?` swallows the error instead of bringing down the app.
+        try manager.requireLocalDirectory(cwd, in: projectID)
         // Resolve project envVars from the SettingsStore so every
         // user-flow openPane (TabBar new-tab, SplitViewport new-tab,
         // CreateWorktree, IPC openPane) inherits Project-defined env. When
@@ -915,6 +900,7 @@ extension HierarchyClient {
         // Splits inherit the same Project envVars as the parent pane —
         // the new pty is forked from a fresh shell, not the existing one,
         // so the env hook still has to run.
+        try manager.requireLocalDirectory(cwd, in: projectID)
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
@@ -1576,6 +1562,7 @@ extension HierarchyClient {
     )
 
     func openInNewTab() async throws -> PaneID {
+      try manager.requireLocalDirectory(cwd, in: projectID)
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID,
         name: script.displayName,
@@ -1620,6 +1607,7 @@ extension HierarchyClient {
       if let anchor = explicitAnchor(anchorPaneID, worktreeID: worktreeID, in: manager)
         ?? focusedAnchor(worktreeID: worktreeID, in: manager)
       {
+        try manager.requireLocalDirectory(cwd, in: projectID)
         return try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
@@ -1812,7 +1800,11 @@ extension HierarchyClient {
         break outer
       }
     }
-    guard let cwd = foundWorktreePath else { return }
+    // A missing folder cannot run the script: skip it, so the archive or
+    // delete that awaits it goes on.
+    guard let cwd = foundWorktreePath,
+      (try? manager.requireLocalDirectory(cwd, in: projectID)) != nil
+    else { return }
     guard let terminalClient else { return }
     let env = HierarchyManager.resolvedEnv(for: projectID, in: settings)
 
