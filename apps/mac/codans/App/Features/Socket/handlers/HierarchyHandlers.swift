@@ -157,6 +157,8 @@ final class HierarchyHandlers {
         return .failed(.internal("zmx serve failed: \(detail)"))
       case .zmxBinaryMissing:
         return .failed(.internal("zmx binary missing from app bundle"))
+      case .directoryMissing(let path):
+        return .failed(.notFound(kind: "directory", id: path))
       }
     }
     return .failed(.internal("\(error)"))
@@ -743,6 +745,11 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "createTab requires {projectID, worktreeID}", path: nil))
     }
     do {
+      if let path = manager.catalog.projects.first(where: { $0.id == req.projectID })?
+        .worktrees.first(where: { $0.id == req.worktreeID })?.path
+      {
+        try manager.requireLocalDirectory(path, in: req.projectID)
+      }
       let id = try manager.createTab(
         in: req.worktreeID,
         in: req.projectID,
@@ -786,6 +793,7 @@ final class HierarchyHandlers {
       // `TERM_PROGRAM` marker). Without it a CLI-spawned pane inherited the
       // bare app environment, so `codans-dev` was off its PATH and the
       // product marker read `ghostty`.
+      try manager.requireLocalDirectory(workingDirectory, in: req.projectID)
       let id = try await manager.openPane(
         in: req.tabID,
         in: req.worktreeID,

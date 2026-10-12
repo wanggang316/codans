@@ -419,7 +419,8 @@ struct HierarchyClientTests {
     _ client: HierarchyClient, _ manager: HierarchyManager
   ) throws -> (projectID: ProjectID, worktreeID: WorktreeID, queuedTab: TabID) {
     let projectID = client.addProject("p", "/tmp", "/tmp")
-    let worktreeID = try client.createWorktree(projectID, "w", "/tmp/w", "main")
+    // A real folder: `createTab` refuses a Tab in a missing one.
+    let worktreeID = try client.createWorktree(projectID, "w", "/tmp", "main")
     // `createTab` seeds no pane; the pane row is a separate insert.
     let queuedTab = try client.createTab(worktreeID, projectID, nil)
     let queuedPane = try client.createPaneRow(queuedTab, worktreeID, projectID, "/tmp/w", nil)
@@ -490,9 +491,10 @@ struct HierarchyClientTests {
     let root = "/tmp/codans-missing-\(UUID().uuidString)"
     let projectID = client.addProject("p", root, root)
     let worktreeID = try client.createWorktree(projectID, "main", root, "main")
-    let tabID = try client.createTab(worktreeID, projectID, nil)
+    // Through the manager: the client refuses a Tab in a missing folder.
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
 
-    await #expect(throws: HierarchyError.self) {
+    await #expect(throws: HierarchyError.directoryMissing(root)) {
       _ = try await client.openPane(tabID, worktreeID, projectID, root, nil)
     }
 
@@ -507,7 +509,8 @@ struct HierarchyClientTests {
     let projectID = client.addProject("p", "/tmp", "/tmp")
     let missing = "/tmp/codans-missing-\(UUID().uuidString)"
     let worktreeID = try client.createWorktree(projectID, "w", missing, "main")
-    let tabID = try client.createTab(worktreeID, projectID, nil)
+    // Through the manager: the client refuses a Tab in a missing folder.
+    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
     let before = manager.catalog.projects[0].loadState
 
     await #expect(throws: HierarchyError.self) {
@@ -515,5 +518,22 @@ struct HierarchyClientTests {
     }
 
     #expect(manager.catalog.projects[0].loadState == before)
+  }
+
+  @Test
+  func createTabInMissingFolderThrowsWithoutAddingTab() throws {
+    let (client, manager) = makeLiveClient()
+    let root = "/tmp/codans-missing-\(UUID().uuidString)"
+    let projectID = client.addProject("p", root, root)
+    let worktreeID = try client.createWorktree(projectID, "main", root, "main")
+
+    #expect(throws: HierarchyError.directoryMissing(root)) {
+      _ = try client.createTab(worktreeID, projectID, nil)
+    }
+
+    #expect(manager.catalog.projects[0].worktrees[0].tabs.isEmpty)
+    #expect(
+      manager.catalog.projects[0].loadState
+        == ProjectReconciler.missingFolderState(rootPath: root))
   }
 }
