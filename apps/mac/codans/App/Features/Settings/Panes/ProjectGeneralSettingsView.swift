@@ -421,9 +421,13 @@ struct ProjectGeneralSettingsView: View {
             .lineLimit(1)
             .truncationMode(.middle)
             .frame(maxWidth: .infinity, alignment: .trailing)
-          // No folder picker: it read as "change the project's location",
-          // which codans cannot do. A moved project is removed and re-added.
-          // An existing override can still be reset.
+          Button {
+            chooseWorktreeDirectory()
+          } label: {
+            Image(systemName: "folder")
+          }
+          .buttonStyle(.borderless)
+          .help("Choose a different directory…")
           if entry?.worktreesDirectory != nil {
             Button {
               store.send(.setWorktreeBaseDirectory(nil))
@@ -742,6 +746,21 @@ struct ProjectGeneralSettingsView: View {
       .labelStyle(.lifecycleSectionHeader)
     } footer: {
       Text("e.g., `\(example)`")
+    }
+  }
+
+  // MARK: - Helpers
+
+  private func chooseWorktreeDirectory() {
+    let pane = NSOpenPanel()
+    pane.canChooseDirectories = true
+    pane.canChooseFiles = false
+    pane.allowsMultipleSelection = false
+    pane.message = "Choose a directory for worktree storage"
+    pane.begin { response in
+      if response == .OK, let url = pane.urls.first {
+        store.send(.setWorktreeBaseDirectory(url.path))
+      }
     }
   }
 }
