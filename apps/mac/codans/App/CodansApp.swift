@@ -989,7 +989,10 @@ final class AppState {
       settingsReader: settingsReader,
       catalogSnapshot: { manager.catalog },
       lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
-      isPaneFocused: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
+      isPaneObserved: { [weak self, weak engine] paneID in
+        engine?.isSurfaceFocused(paneID) == true
+          || self?.agentStateStore?.hasObservedAttention(paneID) == true
+      },
       onProjectActivity: { [weak manager] projectID in
         manager?.bumpProjectActivity(projectID)
       }
@@ -1042,8 +1045,16 @@ final class AppState {
     }
     self.didBecomeActiveObserverToken = NotificationCenter.default
       .publisher(for: NSApplication.didBecomeActiveNotification)
-      .sink { [weak coordinator] _ in
-        Task { @MainActor [weak coordinator] in
+      .sink { [weak self, weak coordinator, weak manager] _ in
+        Task { @MainActor [weak self, weak coordinator, weak manager] in
+          // Coming back to the app with an agent pane focused is a look at
+          // it, even though no focus change fires.
+          if let manager,
+            let paneID = Self.currentlyFocusedPane(
+              catalog: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
+          {
+            self?.agentStateStore?.markObserved(paneID)
+          }
           await coordinator?.refreshAuthorizationStatus()
         }
       }
@@ -2193,7 +2204,8 @@ final class AppState {
           catalog: manager.catalog,
           lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }
         )
-      }
+      },
+      isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true }
     )
     self.agentStateStore = registry
     // Pre-seed the registry from the last quit's agent snapshot so a

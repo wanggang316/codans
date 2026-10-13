@@ -10,11 +10,11 @@ import Testing
 @MainActor
 struct NotificationDetectorFocusTests {
   @Test
-  func dropsWhenTheSourceSurfaceHasKeyboardFocus() async {
+  func dropsWhenTheUserHasObservedTheSource() async {
     // The catalog-level focus map knows nothing about the pane (it is
-    // runtime-only and can lag behind AppKit), but the pane's surface is
-    // the first responder of the key window.
-    let f = Fixture(isPaneFocused: { _ in true }, lastFocusedPane: { _ in nil })
+    // runtime-only and can lag behind AppKit), but the pane has keyboard
+    // focus, or the user looked at it after its agent stopped.
+    let f = Fixture(isPaneObserved: { _ in true }, lastFocusedPane: { _ in nil })
 
     await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
 
@@ -26,7 +26,7 @@ struct NotificationDetectorFocusTests {
   func dropsWhenTheDisplayedSelectionFocusesTheSource() async {
     // No explicit `selectedProjectID`: the window shows the first project
     // that remembers a selected worktree, so its focused pane counts.
-    let f = Fixture(isPaneFocused: { _ in false }, lastFocusedPane: nil, selectsProject: false)
+    let f = Fixture(isPaneObserved: { _ in false }, lastFocusedPane: nil, selectsProject: false)
 
     await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
 
@@ -36,7 +36,7 @@ struct NotificationDetectorFocusTests {
 
   @Test
   func postsWhenTheSourceIsNotFocused() async {
-    let f = Fixture(isPaneFocused: { _ in false }, lastFocusedPane: { _ in nil })
+    let f = Fixture(isPaneObserved: { _ in false }, lastFocusedPane: { _ in nil })
 
     await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
 
@@ -53,7 +53,7 @@ struct NotificationDetectorFocusTests {
 
     /// `lastFocusedPane == nil` means "the tab remembers the source pane".
     init(
-      isPaneFocused: @escaping @MainActor (PaneID) -> Bool,
+      isPaneObserved: @escaping @MainActor (PaneID) -> Bool,
       lastFocusedPane: (@MainActor (TabID) -> PaneID?)?,
       selectsProject: Bool = true
     ) {
@@ -98,7 +98,7 @@ struct NotificationDetectorFocusTests {
         catalogSnapshot: { catalog },
         lastFocusedPane: lastFocusedPane ?? { _ in paneID },
         isAppFrontmost: { true },
-        isPaneFocused: isPaneFocused,
+        isPaneObserved: isPaneObserved,
         onProjectActivity: nil
       )
     }
