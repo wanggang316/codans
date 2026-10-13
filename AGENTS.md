@@ -97,3 +97,17 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 - **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/codans/Process/`. Do not spawn `Process` directly inside feature modules.
 - **Naming:** Swift API Design Guidelines. Filenames match the primary type. TCA reducers end with `Feature`, views with `View`.
 - **Comments:** explain *why*, not *what*. Cite design-doc IDs when a non-obvious decision is encoded in code.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `wanggang316/codans`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.
