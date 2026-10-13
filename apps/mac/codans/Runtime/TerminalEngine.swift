@@ -1,3 +1,4 @@
+import AppKit
 import CodansCore
 import Foundation
 import os.log
@@ -460,6 +461,16 @@ final class TerminalEngine {
   /// retries stop on their own.
   func focusSurfaceView(for paneID: PaneID) {
     focusSurfaceView(for: paneID, attempt: 0)
+  }
+
+  /// True when keystrokes would go to `paneID` right now: the app is active
+  /// and the pane's surface is the first responder of the key window.
+  func isSurfaceFocused(_ paneID: PaneID) -> Bool {
+    guard NSApp.isActive,
+      let view = ghosttyRuntime?.surface(for: paneID)?.view,
+      let window = view.window, window.isKeyWindow
+    else { return false }
+    return window.firstResponder === view
   }
 
   private func focusSurfaceView(for paneID: PaneID, attempt: Int) {
