@@ -27,6 +27,11 @@ public final class NotificationDetector {
   private let catalogSnapshot: @MainActor () -> Catalog
   private let lastFocusedPane: @MainActor (TabID) -> PaneID?
   private let isAppFrontmost: @MainActor () -> Bool
+  /// AppKit ground truth: the pane's surface is the first responder of the
+  /// key window of the active app. The catalog-level focus map is
+  /// runtime-only and only moves on `onBecomeFirstResponder`, so it can lag
+  /// behind what the user actually types into.
+  private let isPaneFocused: @MainActor (PaneID) -> Bool
   /// Side-channel keystroke tracker. Snapshotted once per event into the
   /// interpreter's `Context.lastUserKeystrokeAt` so the 1-second
   /// `userTypingRecently` suppression can actually fire on real input.
@@ -63,6 +68,7 @@ public final class NotificationDetector {
     catalogSnapshot: @escaping @MainActor () -> Catalog,
     lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
     isAppFrontmost: @escaping @MainActor () -> Bool = { NSApp.isActive },
+    isPaneFocused: @escaping @MainActor (PaneID) -> Bool = { _ in false },
     onProjectActivity: (@MainActor (ProjectID) -> Void)? = nil
   ) {
     self.store = store
@@ -72,6 +78,7 @@ public final class NotificationDetector {
     self.catalogSnapshot = catalogSnapshot
     self.lastFocusedPane = lastFocusedPane
     self.isAppFrontmost = isAppFrontmost
+    self.isPaneFocused = isPaneFocused
     self.onProjectActivity = onProjectActivity
   }
 
@@ -88,7 +95,7 @@ public final class NotificationDetector {
   private func globallyFocusedPane() -> PaneID? {
     guard isAppFrontmost() else { return nil }
     let catalog = catalogSnapshot()
-    guard let activeProjectID = catalog.selectedProjectID,
+    guard let activeProjectID = catalog.displayedSelectedProjectID,
       let project = catalog.projects.first(where: { $0.id == activeProjectID }),
       let worktreeID = project.selectedWorktreeID,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
@@ -190,7 +197,8 @@ public final class NotificationDetector {
     // per-tab last-focused behaviour: a notification fired from a
     // non-active tab's last-focused split *will* notify, because by
     // definition the user isn't looking at it.
-    let sourceIsFocused = resolved.source.paneID == globallyFocusedPane()
+    let sourceIsFocused =
+      isPaneFocused(resolved.source.paneID) || resolved.source.paneID == globallyFocusedPane()
 
     // Title stays clean; the source breadcrumb (`<project> · <worktree>`)
     // is attached as `bannerSourceLabel` and appended to the OS banner

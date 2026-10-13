@@ -989,6 +989,7 @@ final class AppState {
       settingsReader: settingsReader,
       catalogSnapshot: { manager.catalog },
       lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
+      isPaneFocused: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
       onProjectActivity: { [weak manager] projectID in
         manager?.bumpProjectActivity(projectID)
       }
@@ -1381,9 +1382,10 @@ final class AppState {
     }
     let focused = Self.currentlyFocusedPane(
       catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
+    let sourceIsFocused = focused == sourcePane || terminalEngine?.isSurfaceFocused(sourcePane) == true
     Task { @MainActor in
       _ = await coordinator.handle(
-        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: focused == sourcePane))
+        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: sourceIsFocused))
     }
   }
 
@@ -1977,7 +1979,7 @@ final class AppState {
     catalog: Catalog,
     lastFocusedPane: @MainActor (TabID) -> PaneID?
   ) -> PaneID? {
-    guard let activeProjectID = catalog.selectedProjectID,
+    guard let activeProjectID = catalog.displayedSelectedProjectID,
       let project = catalog.projects.first(where: { $0.id == activeProjectID }),
       let worktreeID = project.selectedWorktreeID,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
