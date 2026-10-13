@@ -121,13 +121,21 @@ final class AgentStateStore {
 
   private var scratch: [PaneID: Scratch] = [:]
 
-  /// Per-pane attention stop: present once the agent stops for the user
-  /// (blocked, or done after working), `true` once the user has looked at
-  /// the pane since then. Cleared when the agent starts working again.
-  /// Separate from `Scratch.seen`, which also covers focus *before* the
-  /// stop and drives only the badge. Read by notification delivery: a stop
-  /// the user already looked at does not need a banner.
-  @ObservationIgnored private var attentionObserved: [PaneID: Bool] = [:]
+  /// One attention stop: the agent stopped for the user (blocked, or its
+  /// turn ended). Read by notification delivery: a stop the user already
+  /// looked at does not need a banner. Separate from `Scratch.seen`, which
+  /// also covers focus *before* the stop and drives only the badge.
+  private struct AttentionStop {
+    /// The user looked at the pane during this stop.
+    var observed: Bool
+    /// Focus or a keystroke cleared the blocked prompt optimistically. If the
+    /// next snapshot shows the prompt again, it is the same stop, not a new one.
+    var blockedPromptCleared = false
+  }
+
+  /// The pane's current attention stop. Replaced on every new stop, removed
+  /// when the agent works again.
+  @ObservationIgnored private var attentionStops: [PaneID: AttentionStop] = [:]
 
   /// Globally focused pane, if any. Used to avoid surfacing
   /// `.finished` for work the user is already looking at; focus
@@ -215,7 +223,7 @@ final class AgentStateStore {
       // unbound pane is a single `@Observable` no-op write.
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
-      attentionObserved.removeValue(forKey: paneID)
+      attentionStops.removeValue(forKey: paneID)
 
     case .paneViewportChanged(let paneID, let text):
       applyViewportText(text, paneID: paneID)
@@ -245,7 +253,8 @@ final class AgentStateStore {
   /// prompt, so drop the attention cue until the next snapshot re-derives it.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    if s.rawState == .blocked {
+    let clearsBlocked = s.rawState == .blocked
+    if clearsBlocked {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
       s.rawState = .idle
@@ -255,13 +264,15 @@ final class AgentStateStore {
     scratch[paneID] = s
     markObserved(paneID)
     refresh(paneID)
+    if clearsBlocked { attentionStops[paneID]?.blockedPromptCleared = true }
   }
 
   /// `paneID` was focused. Same semantics as `onPaneKeyboardActivity`:
   /// the user has observed the pane, so clear display-only attention.
   func onPaneFocused(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    if s.rawState == .blocked {
+    let clearsBlocked = s.rawState == .blocked
+    if clearsBlocked {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
       s.rawState = .idle
@@ -270,6 +281,7 @@ final class AgentStateStore {
     scratch[paneID] = s
     markObserved(paneID)
     refresh(paneID)
+    if clearsBlocked { attentionStops[paneID]?.blockedPromptCleared = true }
   }
 
   /// The user is looking at `paneID` without a focus change — for example
@@ -277,9 +289,7 @@ final class AgentStateStore {
   /// only that the current attention stop was observed; badges are left
   /// to the regular focus path.
   func markObserved(_ paneID: PaneID) {
-    if attentionObserved[paneID] != nil {
-      attentionObserved[paneID] = true
-    }
+    attentionStops[paneID]?.observed = true
   }
 
   /// `AgentBinder` identified an agent in `paneID`. Materialise an
@@ -333,7 +343,7 @@ final class AgentStateStore {
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
-    attentionObserved.removeValue(forKey: paneID)
+    attentionStops.removeValue(forKey: paneID)
   }
 
   /// Catalog-membership backstop. Drops every entry (and its scratch)
@@ -361,7 +371,7 @@ final class AgentStateStore {
       )
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
-      attentionObserved.removeValue(forKey: paneID)
+      attentionStops.removeValue(forKey: paneID)
     }
   }
 
@@ -405,7 +415,7 @@ final class AgentStateStore {
   /// True when the agent in `paneID` has stopped for the user (blocked or
   /// done) and the user has looked at the pane since that stop.
   func hasObservedAttention(_ paneID: PaneID) -> Bool {
-    attentionObserved[paneID] == true
+    attentionStops[paneID]?.observed == true
   }
 
   // MARK: - Derivation
@@ -430,17 +440,33 @@ final class AgentStateStore {
     }
   }
 
-  /// Opens an attention stop on blocked or on done-after-working, and
-  /// closes it when the agent works again. A blocked prompt that re-renders
-  /// after the optimistic clear in `onPaneFocused` stays in the same stop,
-  /// so a look at the prompt is not lost.
-  private func trackAttentionStop(_ paneID: PaneID, previous: AgentRawState, current: AgentRawState) {
-    if current == .working {
-      attentionObserved.removeValue(forKey: paneID)
-    } else if current == .blocked || (previous.isActive && current == .idle) {
-      if attentionObserved[paneID] != true {
-        attentionObserved[paneID] = isPaneInView(paneID)
+  /// Opens a new attention stop when the agent blocks or its turn ends, and
+  /// closes it when the agent works again. Input sent through the CLI is no
+  /// keystroke, so `working` is often never derived for such a turn; every
+  /// derived stop therefore replaces the previous one instead of waiting for
+  /// `working`. One exception: a blocked prompt that re-renders after the
+  /// optimistic clear in `onPaneFocused` / `onPaneKeyboardActivity` is the
+  /// same stop, so a look at the prompt is not lost.
+  private func trackAttentionStop(
+    _ paneID: PaneID, previous: AgentRawState, current: AgentRawState, hasViewport: Bool
+  ) {
+    switch current {
+    case .working:
+      attentionStops.removeValue(forKey: paneID)
+    case .blocked where previous != .blocked:
+      if attentionStops[paneID]?.blockedPromptCleared == true {
+        attentionStops[paneID]?.blockedPromptCleared = false
+      } else {
+        attentionStops[paneID] = AttentionStop(observed: isPaneInView(paneID))
       }
+    case .idle where previous.isActive:
+      attentionStops[paneID] = AttentionStop(observed: isPaneInView(paneID))
+    case .idle where hasViewport:
+      // A fresh snapshot without the prompt: the cleared prompt was resolved,
+      // so a prompt that shows up later is a new stop.
+      attentionStops[paneID]?.blockedPromptCleared = false
+    default:
+      break
     }
   }
 
@@ -526,7 +552,8 @@ final class AgentStateStore {
     }
     s.rawState = newRaw
     scratch[paneID] = s
-    trackAttentionStop(paneID, previous: previousRaw, current: newRaw)
+    trackAttentionStop(
+      paneID, previous: previousRaw, current: newRaw, hasViewport: s.lastViewportText != nil)
 
     // A pane seeded from the quit snapshot holds its restored display
     // state until the first live viewport classification — deriving from

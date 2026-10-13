@@ -462,6 +462,7 @@ struct AgentStateStoreTests {
     #expect(f.registry.hasObservedAttention(f.paneID))
 
     // The prompt re-renders after the optimistic clear. Still the same stop.
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
     f.viewport("Allow command?\n[y/n]")
     #expect(f.registry.hasObservedAttention(f.paneID))
   }
@@ -514,6 +515,36 @@ struct AgentStateStoreTests {
     #expect(!f.registry.hasObservedAttention(f.paneID))
     f.advancePastWorkingHold()
     f.viewport("codex> ")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func resolvedPromptEndsTheStop() {
+    // The user looked at a prompt; it was then answered through the CLI (no
+    // keystroke, so no `working`). The next prompt is a new stop.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    f.registry.markObserved(f.paneID)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.viewport("codex> ")
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func promptAfterClearedAndResolvedPromptIsANewStop() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    f.registry.onPaneFocused(f.paneID)
+    // Idle ticks before the next snapshot keep the same stop.
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
+    f.viewport("codex> ")
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.viewport("Allow command?\n[y/n]")
     #expect(!f.registry.hasObservedAttention(f.paneID))
   }
 
