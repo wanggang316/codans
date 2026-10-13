@@ -110,6 +110,58 @@ struct DiffWindowManagerTests {
     }
   }
 
+  @Test func explicitScopeOverridesRememberedScope() async throws {
+    let project = ProjectID()
+    let first = WorktreeID()
+    let second = WorktreeID()
+    let manager = DiffWindowManager()
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0[GitServiceClient.self].comparisonListing = { url, scope, _ in
+        GitComparisonSnapshot(scope: scope, baseLabel: "main", files: [], repositoryPath: url.path)
+      }
+    } operation: {
+      defer { diffWindow()?.close() }
+      manager.open(
+        projectID: project, worktreeID: first, path: "/tmp/diff-window-scope-first", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .outgoing)
+      let window = try #require(diffWindow())
+      let store = try store(in: window)
+      #expect(store.state.scope == .outgoing)
+      try await waitUntil { store.snapshot?.scope == .outgoing }
+
+      // The open window switches scope in place.
+      manager.open(
+        projectID: project, worktreeID: first, path: "/tmp/diff-window-scope-first", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .all)
+      #expect(diffWindow() === window)
+      #expect(store.state.scope == .all)
+
+      // No scope keeps the current one.
+      manager.open(
+        projectID: project, worktreeID: first, path: "/tmp/diff-window-scope-first", title: "Scope",
+        prBase: nil, prRepository: nil)
+      #expect(store.state.scope == .all)
+
+      // Retargeting to another worktree applies the explicit scope after its restored preference.
+      manager.open(
+        projectID: project, worktreeID: second, path: "/tmp/diff-window-scope-second", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .outgoing)
+      #expect(diffWindow() === window)
+      #expect(store.worktreeID == second)
+      #expect(store.state.scope == .outgoing)
+
+      // A reopened window still honors an explicit scope over the saved preference.
+      window.close()
+      manager.open(
+        projectID: project, worktreeID: second, path: "/tmp/diff-window-scope-second", title: "Scope",
+        prBase: nil, prRepository: nil, scope: .all)
+      let reopened = try self.store(in: try #require(diffWindow()))
+      #expect(reopened.state.scope == .all)
+    }
+  }
+
   private func diffWindow() -> NSWindow? {
     NSApp.windows.first { $0.identifier == DiffWindowManager.windowIdentifier && $0.contentView != nil }
   }

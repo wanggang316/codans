@@ -418,7 +418,11 @@ struct HierarchySidebarFeature {
     case delegate(Delegate)
     @CasePathable
     enum Delegate: Equatable {
-      case showChanges(projectID: ProjectID, worktreeID: WorktreeID)
+      case showChanges(projectID: ProjectID, worktreeID: WorktreeID, scope: GitComparisonScope)
+      /// Context-menu "Open in GitHub" — RootFeature resolves the row's
+      /// repository the same way as the ⌘⇧G command, but for the
+      /// right-clicked row instead of the selection.
+      case openOnGitHub(projectID: ProjectID, worktreeID: WorktreeID)
       case openInDefaultEditor(worktreePath: String, projectID: ProjectID?)
       /// Sidebar's "Open in <Editor>" submenu — RootFeature dispatches
       /// `.editor(.openRequested)` directly with the explicit editor ID
