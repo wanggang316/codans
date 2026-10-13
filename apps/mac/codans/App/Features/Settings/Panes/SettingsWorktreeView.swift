@@ -29,6 +29,7 @@ struct SettingsWorktreeView: View {
               chooseWorktreeDirectory()
             } label: {
               Image(systemName: "folder")
+                .accessibilityLabel("Choose a different directory")
             }
             .buttonStyle(.borderless)
             .help("Choose a different directory…")

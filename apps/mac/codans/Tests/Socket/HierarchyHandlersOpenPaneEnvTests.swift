@@ -15,9 +15,11 @@ struct HierarchyHandlersOpenPaneEnvTests {
   @Test
   func openPaneHandsTheResolvedProjectEnvToTheSurface() async throws {
     let runtime = FakeHierarchyRuntime()
+    // A real folder: the handler refuses a Pane in a missing one.
+    let repo = NSTemporaryDirectory()
     let tab = Tab(name: "dev")
-    let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab])
-    let project = Project(name: "repo", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+    let worktree = Worktree(name: "main", path: repo, branch: "main", tabs: [tab])
+    let project = Project(name: "repo", rootPath: repo, gitRoot: repo, worktrees: [worktree])
     let manager = HierarchyManager(
       catalog: Catalog(projects: [project]),
       store: CatalogStore(
@@ -38,7 +40,7 @@ struct HierarchyHandlersOpenPaneEnvTests {
         projectID: project.id,
         worktreeID: worktree.id,
         tabID: tab.id,
-        workingDirectory: "/repo",
+        workingDirectory: repo,
         initialCommand: nil,
         labels: []
       )

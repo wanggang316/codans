@@ -38,7 +38,7 @@ final class HotkeyRecorderNSView: NSView {
     }
     let mask = ModifierMask(eventFlags: flags)
     let primary: ModifierMask = [.command, .option, .control]
-    if mask.intersection(primary).isEmpty {
+    if mask.isDisjoint(with: primary) {
       return .failure(.missingPrimaryModifier)
     }
     return .success(ShortcutBinding(keyCode: keyCode, modifiers: mask, isEnabled: true))

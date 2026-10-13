@@ -27,10 +27,10 @@ struct InternalConflictDetectorTests {
   }
 
   @Test
-  func detectsClashWithAnotherConfigurableCommand() {
+  func detectsClashWithAnotherConfigurableCommand() throws {
     // Candidate matches the schema default for `.toggleDiffInspector` (⌘⇧G).
     let toggleDiffInspectorDefault = ShortcutSchema.app.entry(for: .toggleDiffInspector)?.defaultBinding
-    let candidate = try! #require(toggleDiffInspectorDefault)
+    let candidate = try #require(toggleDiffInspectorDefault)
 
     let map = ShortcutResolver.resolve(overrides: .empty)
     let result = InternalConflictDetector.conflicts(
@@ -75,11 +75,11 @@ struct InternalConflictDetectorTests {
   }
 
   @Test
-  func excludingCommandIsSkippedEvenWhenChordsMatch() {
+  func excludingCommandIsSkippedEvenWhenChordsMatch() throws {
     // The candidate exactly equals `.toggleDiffInspector`'s own default; passing it as `excluding`
     // means we are asking "would this chord clash with anyone *other than* myself?".
     let toggleDiffInspectorDefault = ShortcutSchema.app.entry(for: .toggleDiffInspector)?.defaultBinding
-    let candidate = try! #require(toggleDiffInspectorDefault)
+    let candidate = try #require(toggleDiffInspectorDefault)
 
     let map = ShortcutResolver.resolve(overrides: .empty)
     let result = InternalConflictDetector.conflicts(
@@ -91,11 +91,11 @@ struct InternalConflictDetectorTests {
   }
 
   @Test
-  func disabledOverrideCedesItsSlot() {
+  func disabledOverrideCedesItsSlot() throws {
     // Disable `.toggleDiffInspector` but keep its chord. The candidate using that same chord must
     // no longer be reported as conflicting with it (disabled rows cede their slot).
     let toggleDiffInspectorDefault = ShortcutSchema.app.entry(for: .toggleDiffInspector)?.defaultBinding
-    let chord = try! #require(toggleDiffInspectorDefault)
+    let chord = try #require(toggleDiffInspectorDefault)
     let disabled = ShortcutBinding(
       keyCode: chord.keyCode,
       modifiers: chord.modifiers,

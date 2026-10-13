@@ -9,13 +9,16 @@ struct TabHoverCardContent: Equatable {
 }
 
 /// The card's content. Title in the chip's own typography, not bold; the
-/// optional second row is the running process's logo and name.
+/// optional second row is the running process's logo and name. The glass
+/// behind it belongs to the panel, see `TabHoverCardPanel`.
 struct TabHoverCardView: View {
   let content: TabHoverCardContent
 
   /// Widest the card grows before the title wraps. Applied as the size
   /// proposal when the presenter measures the card.
   static let maxWidth: CGFloat = 320
+  /// The chip's capsule radius, so the card reads as the chip's sibling.
+  static let cornerRadius: CGFloat = TabBarMetrics.chipHeight / 2
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -34,13 +37,8 @@ struct TabHoverCardView: View {
         }
       }
     }
-    .padding(.horizontal, 10)
+    .padding(.horizontal, 12)
     .padding(.vertical, 7)
-    .background(.regularMaterial, in: .rect(cornerRadius: 8))
-    .overlay {
-      RoundedRectangle(cornerRadius: 8)
-        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-    }
   }
 }
 
@@ -178,7 +176,7 @@ final class TabHoverCardPresenter {
   }
 
   /// Fills the card, sizes it to its content and puts it under the owning
-  /// chip, leading edges aligned, kept on the chip's screen. The process
+  /// chip, centered on it, kept on the chip's screen. The process
   /// read is tracked, so the card follows the process registry while up.
   private func render() {
     guard let panel, let hosting, let view = owner?.view, let window = view.window else { return }
@@ -194,12 +192,15 @@ final class TabHoverCardPresenter {
     let size = hosting.sizeThatFits(
       in: CGSize(width: TabHoverCardView.maxWidth, height: .greatestFiniteMagnitude))
     let chip = window.convertToScreen(view.convert(view.bounds, to: nil))
-    var origin = CGPoint(x: chip.minX, y: chip.minY - Self.verticalGap - size.height)
+    var origin = CGPoint(
+      x: (chip.midX - size.width / 2).rounded(), y: chip.minY - Self.verticalGap - size.height)
     if let visible = window.screen?.visibleFrame {
       origin.x = min(max(origin.x, visible.minX), visible.maxX - size.width)
       origin.y = max(origin.y, visible.minY)
     }
     panel.setFrame(CGRect(origin: origin, size: size), display: true)
+    // The shadow is cut from the mask once; recut it for the new size.
+    panel.invalidateShadow()
   }
 
   private func makePanel() -> TabHoverCardPanel {
@@ -209,10 +210,8 @@ final class TabHoverCardPresenter {
     hosting.sizingOptions = []
     // A hosting view that is the window's content view sizes the window
     // itself, inside its own layout pass; nested, it only fills the panel.
-    let container = NSView()
     hosting.view.autoresizingMask = [.width, .height]
-    container.addSubview(hosting.view)
-    panel.contentView = container
+    panel.contentView?.addSubview(hosting.view)
     self.panel = panel
     self.hosting = hosting
     return panel
@@ -220,12 +219,21 @@ final class TabHoverCardPresenter {
 }
 
 /// Borderless, transparent, click-through panel that can never become key
-/// or main.
+/// or main. Its content view is the card's glass: an `NSVisualEffectView`
+/// masked to the card's rounded shape. The window server cuts the shadow
+/// from that mask, so glass and shadow share one outline. A SwiftUI
+/// material plus stroke drew a second edge inside the system shadow's rim.
 private final class TabHoverCardPanel: NSPanel {
   init() {
     super.init(
       contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
       defer: true)
+    let glass = NSVisualEffectView()
+    glass.material = .popover
+    glass.blendingMode = .behindWindow
+    glass.state = .active
+    glass.maskImage = Self.mask(cornerRadius: TabHoverCardView.cornerRadius)
+    contentView = glass
     isOpaque = false
     backgroundColor = .clear
     hasShadow = true
@@ -234,6 +242,19 @@ private final class TabHoverCardPanel: NSPanel {
     isReleasedWhenClosed = false
     animationBehavior = .none
     collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
+  }
+
+  /// Stretchable rounded-rect mask: only the corners keep their shape.
+  private static func mask(cornerRadius radius: CGFloat) -> NSImage {
+    let edge = radius * 2 + 1
+    let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+      NSColor.black.setFill()
+      NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+      return true
+    }
+    image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+    image.resizingMode = .stretch
+    return image
   }
 
   override var canBecomeKey: Bool { false }

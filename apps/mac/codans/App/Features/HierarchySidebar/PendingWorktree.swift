@@ -51,6 +51,9 @@ struct PendingWorktree: Equatable, Identifiable {
   /// i.e. after the setup script, which runs inside the creation stream.
   /// `nil` launches nothing.
   var launchAgentProfileID: UUID?
+  /// First prompt handed to that agent — the New Agent dialog's message.
+  /// `nil` starts the agent without one.
+  var launchAgentPrompt: String?
 
   /// Soft cap on the streaming tail. Five lines is enough to read git's
   /// "Resolving deltas: 100% (842/842), done." without the loading

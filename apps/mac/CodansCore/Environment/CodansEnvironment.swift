@@ -97,6 +97,9 @@ public nonisolated enum CodansEnvironment {
     /// `wss://` base URL) — a local relay in tests. Unset means the
     /// production relay.
     case relayURL = "CODANS_RELAY_URL"
+    /// Relocates the user-scoped workflow definitions (`~/.codans/workflows`)
+    /// so a test instance never sees, or writes into, the user's own.
+    case workflowsDirectory = "CODANS_WORKFLOWS_DIR"
 
     // MARK: One-shot, per request
 
@@ -104,6 +107,16 @@ public nonisolated enum CodansEnvironment {
     /// agent to run, so the handler can prove the transition is the one the
     /// panel is waiting on. Interactive use never sets it.
     case handoffRequestID = "CODANS_HANDOFF_REQUEST_ID"
+    /// Correlates a `codans workflow deliver` with the activation that is
+    /// waiting for it. Carried on the typed completion command for a
+    /// `message` step and in the launch environment of a `launch` role;
+    /// minted per activation and revoked when the step moves on.
+    case workflowToken = "CODANS_WORKFLOW_TOKEN"
+    /// Cross-check hints beside `workflowToken` for a launched role. The
+    /// activation registry is the authority; these only make `workflow
+    /// status` inside the pane cheaper to answer.
+    case workflowRun = "CODANS_WORKFLOW_RUN"
+    case workflowRole = "CODANS_WORKFLOW_ROLE"
 
     // MARK: Third-party keys codans sets process-wide or reads
 

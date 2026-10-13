@@ -9,7 +9,7 @@ import Testing
 /// the testable surface for the kind-conditional render rule. SwiftUI's
 /// view tree itself is not introspected here (snapshot tests are out of
 /// scope); the visibility set is the observable contract.
-struct ProjectGeneralSettingsViewKindRenderTests {
+struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this type_name
   @Test
   func dirHidesGitOnlySections() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .dir)

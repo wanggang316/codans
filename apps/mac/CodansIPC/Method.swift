@@ -58,6 +58,19 @@ extension IPC {
     case workspaceRemove = "workspace.remove"
     case workspaceDescribe = "workspace.describe"
 
+    // workflow — multi-agent runs driven by `<id>.workflow.yaml` files.
+    // `list` / `run` / `listRuns` scope by worktree (or the caller's pane);
+    // `status` / `deliver` attribute an argument-less call to the caller's
+    // pane the way `handoff` does. `validate` never touches IPC — the CLI
+    // parses offline. Handlers live in `WorkflowHandlers`.
+    case workflowList = "workflow.list"
+    case workflowRun = "workflow.run"
+    case workflowStatus = "workflow.status"
+    case workflowDeliver = "workflow.deliver"
+    case workflowResolve = "workflow.resolve"
+    case workflowCancel = "workflow.cancel"
+    case workflowListRuns = "workflow.listRuns"
+
     // hierarchy — reads
     case hierarchyListProjects = "hierarchy.listProjects"
     case hierarchyListWorktrees = "hierarchy.listWorktrees"

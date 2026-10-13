@@ -60,6 +60,10 @@ struct AgentStateRowView: View {
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
   /// sites and tests render the row without a menu.
   var onHandOff: (() -> Void)?
+  /// Workflows this row's pane could start as the `current` role, for the
+  /// context menu's "Run Workflow" submenu. Empty hides the submenu.
+  var workflows: [(id: String, name: String, isValid: Bool)] = []
+  var onRunWorkflow: ((String) -> Void)?
 
   /// Delay before the hover summary card opens. Long enough that a
   /// pointer sweeping the list to click a row never flashes cards,
@@ -113,6 +117,18 @@ struct AgentStateRowView: View {
           onHandOff()
         } label: {
           Label("Hand Off…", systemImage: "arrow.right.arrow.left")
+        }
+      }
+      if let onRunWorkflow, !workflows.isEmpty {
+        Menu {
+          ForEach(workflows, id: \.id) { workflow in
+            Button(workflow.isValid ? workflow.name : "\(workflow.name) — has errors") {
+              onRunWorkflow(workflow.id)
+            }
+            .disabled(!workflow.isValid)
+          }
+        } label: {
+          Label("Run Workflow", systemImage: "arrow.triangle.branch")
         }
       }
     }
@@ -328,13 +344,13 @@ struct AgentStateRowView: View {
   private var stateIcon: some View {
     switch entry.state {
     case .blocked:
-      // Pause-fill glyph — terminal-style "agent has paused for you".
+      // Raised-hand glyph — "agent is waiting for your input".
       // Static (no pulse) per design feedback; the orange tint alone
       // carries the "needs your attention" signal. `.imageScale(.large)`
       // bumps the SF Symbol up roughly one tier above the surrounding
       // caption2 font so the icon reads at the same visual weight as
       // the 16pt LoadingGridIcon used for the working state.
-      Image(systemName: "pause.fill")
+      Image(systemName: "hand.raised.fill")
         .imageScale(.large)
         .foregroundStyle(Color.orange)
         .accessibilityHidden(true)

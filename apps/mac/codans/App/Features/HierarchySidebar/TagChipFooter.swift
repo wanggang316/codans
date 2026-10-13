@@ -187,6 +187,7 @@ private struct TagFilterList: View {
               .font(.system(size: 11))
               .frame(width: 12)
               .foregroundStyle(isHovered ? Color.primary : .secondary)
+              .accessibilityHidden(true)
             Text("Edit Tags…")
               .font(.callout)
               .foregroundStyle(.primary)
@@ -234,6 +235,7 @@ private struct TagFilterList: View {
           Image(systemName: "checkmark")
             .font(.caption.weight(.semibold))
             .foregroundStyle(Color.white)
+            .accessibilityLabel("Selected")
         }
       }
       .padding(.horizontal, 8)

@@ -14,7 +14,7 @@ struct TabHoverCardPresenterTests {
     try await Task.sleep(for: .milliseconds(200))
     let card = try #require(f.presenter.visibleFrame)
     let chip = f.screenFrame(of: f.first)
-    #expect(card.minX == chip.minX)
+    #expect(abs(card.midX - chip.midX) <= 0.5)
     #expect(card.maxY == chip.minY - TabHoverCardPresenter.verticalGap)
     #expect(card.width <= TabHoverCardView.maxWidth)
   }
@@ -35,7 +35,7 @@ struct TabHoverCardPresenterTests {
     f.presenter.hoverEnded(f.first)
     f.presenter.hoverBegan(f.second, title: "Second", process: { nil })
     let card = try #require(f.presenter.visibleFrame)
-    #expect(card.minX == f.screenFrame(of: f.second).minX)
+    #expect(abs(card.midX - f.screenFrame(of: f.second).midX) <= 0.5)
     #expect(f.presenter.title == "Second")
   }
 

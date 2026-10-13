@@ -50,6 +50,9 @@ struct HierarchySidebarView: View {
   /// 🤖-style toggle button in the footer. Optional so previews / tests
   /// without `AppState.bringUp` wiring omit the panel and the button.
   var agentStateStore: AgentStateStore?
+  /// Active workflow runs for the panel's "Workflows" group. Optional for
+  /// the same reason as `agentStateStore`.
+  var workflowEngine: WorkflowEngine?
   /// Row-tap dispatcher for the AgentState panel — routes to
   /// `RootFeature.agentState(.rowTapped)`. Closure (rather than direct
   /// store write) keeps Sidebar decoupled from Root.
@@ -57,6 +60,9 @@ struct HierarchySidebarView: View {
   /// Row context-menu "Hand Off…" dispatcher — routes to
   /// `RootFeature.agentState(.handOffTapped)`.
   var onAgentStateRowHandOff: (PaneID) -> Void = { _ in }
+  /// Row context-menu "Run Workflow" dispatcher — routes to
+  /// `RootFeature.agentState(.runWorkflowTapped)`.
+  var onAgentStateRowRunWorkflow: (PaneID, String) -> Void = { _, _ in }
   /// Whether the AgentState bottom panel is currently expanded.
   /// Persisted so the footer toggle's last state survives a relaunch —
   /// users who keep the panel open during long sessions should not
@@ -279,6 +285,8 @@ struct HierarchySidebarView: View {
               }
             },
             onHandOffRow: { paneID in onAgentStateRowHandOff(paneID) },
+            onRunWorkflowRow: { paneID, workflowID in onAgentStateRowRunWorkflow(paneID, workflowID) },
+            workflowEngine: workflowEngine,
             height: $agentStatePanelHeight,
             minHeight: Self.agentStatePanelMinHeight,
             maxHeight: max(Self.agentStatePanelMinHeight, sidebarHeightObservation * 0.5)
@@ -1221,13 +1229,9 @@ struct HierarchySidebarView: View {
     }
 
     Divider()
-    Button {
-      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id)))
-    } label: {
-      Label("Show Changes", systemImage: "doc.text.magnifyingglass")
-    }
+    worktreeGitHubAndChangesItems(worktree: worktree, project: project)
 
-    // Group 2 — Copy. Pathname + branch name onto the general pasteboard.
+    // Group 3 — Copy. Pathname + branch name onto the general pasteboard.
     // Branch entry hides when `worktree.branch` is nil (synthetic dir-kind
     // worktrees, detached HEAD) so the menu never offers an empty copy.
     Divider()
@@ -1246,7 +1250,7 @@ struct HierarchySidebarView: View {
       }
     }
 
-    // Group 3 — Worktree lifecycle. Hidden for the main checkout (W-Q3
+    // Group 4 — Worktree lifecycle. Hidden for the main checkout (W-Q3
     // guard: cannot pin / archive / remove the project's root worktree).
     // Workspace children keep Pin but not Archive / Remove: those act on a
     // worktree of *this* repository, and a child's repository is elsewhere —
@@ -1308,6 +1312,46 @@ struct HierarchySidebarView: View {
         Label("Remove Worktree", systemImage: "trash")
       }
       .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
+    }
+  }
+
+  /// Group 2 — GitHub + Changes. Every entry acts on the right-clicked row,
+  /// not the selection; the shortcut hints mirror the selection-scoped
+  /// Worktree-menu commands. "Open Pull Request" shows only once a PR
+  /// snapshot exists for the row.
+  @ViewBuilder
+  private func worktreeGitHubAndChangesItems(
+    worktree: Worktree, project: Project
+  ) -> some View {
+    if project.repoRoot(for: worktree) != nil {
+      Button {
+        store.send(.delegate(.openOnGitHub(projectID: project.id, worktreeID: worktree.id)))
+      } label: {
+        Label("Open in GitHub", image: "github")
+      }
+      .appKeyboardShortcut(.openProjectOnGitHub, in: resolvedShortcuts)
+    }
+    if let gitHubStore, let pullRequest = gitHubStore.snapshots[worktree.id] {
+      Button {
+        gitHubStore.send(.delegate(.openURL(pullRequest.url)))
+      } label: {
+        // Same PR-state octicon the row leads with (WorktreeRowIcon).
+        Label(
+          "Open Pull Request",
+          image: pullRequest.state.rowIconName(isDraft: pullRequest.isDraft))
+      }
+      .appKeyboardShortcut(.openCurrentPR, in: resolvedShortcuts)
+    }
+    Button {
+      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .all)))
+    } label: {
+      Label("Show Uncommitted", systemImage: "plusminus")
+    }
+    Button {
+      store.send(
+        .delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .outgoing)))
+    } label: {
+      Label("Show Outgoing", systemImage: "plusminus")
     }
   }
 
@@ -1965,7 +2009,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         } else if hasUnread {
           Image(systemName: "bell.fill")
             .resizable()
-            .aspectRatio(contentMode: .fit)
+            .scaledToFit()
             .frame(width: 11, height: 11)
             .foregroundStyle(Color.orange)
             .accessibilityLabel("Has unread notifications")
@@ -2020,8 +2064,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           Button {
             store.send(.projectAddWorktreeTapped(projectID: project.id))
           } label: {
-            iconLabel(systemName: "plus", isHovering: isPlusHovering)
-              .accessibilityLabel("Add Worktree under this Project")
+            iconLabel(systemName: "plus", label: "Add Worktree under this Project", isHovering: isPlusHovering)
           }
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
@@ -2031,8 +2074,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           Button {
             store.send(.workspaceAddRepositoryTapped(projectID: project.id))
           } label: {
-            iconLabel(systemName: "plus", isHovering: isPlusHovering)
-              .accessibilityLabel("Add Repository to this Workspace")
+            iconLabel(systemName: "plus", label: "Add Repository to this Workspace", isHovering: isPlusHovering)
           }
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
@@ -2129,8 +2171,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
             }
           }
         } label: {
-          iconLabel(systemName: "ellipsis", isHovering: isMenuHovering)
-            .accessibilityLabel("Project options")
+          iconLabel(systemName: "ellipsis", label: "Project options", isHovering: isMenuHovering)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -2141,9 +2182,12 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         // on a row that stands for a folder, where a click selects instead.
         if project.hasChildRows {
           Button(action: onToggleExpansion) {
-            iconLabel(systemName: "chevron.right", isHovering: isChevronHovering)
-              .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
-              .accessibilityLabel(project.isExpanded ? "Collapse" : "Expand")
+            iconLabel(
+              systemName: "chevron.right",
+              label: project.isExpanded ? "Collapse" : "Expand",
+              isHovering: isChevronHovering
+            )
+            .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
           }
           .buttonStyle(.plain)
           .onHover { isChevronHovering = $0 }
@@ -2164,8 +2208,9 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// and so the click target is comfortably larger than the underlying SF
   /// Symbol glyph.
   @ViewBuilder
-  private func iconLabel(systemName: String, isHovering: Bool) -> some View {
+  private func iconLabel(systemName: String, label: String, isHovering: Bool) -> some View {
     Image(systemName: systemName)
+      .accessibilityLabel(label)
       .font(.system(size: 11, weight: .medium))
       .foregroundStyle(isHovering ? .primary : .secondary)
       .frame(width: 22, height: 22)

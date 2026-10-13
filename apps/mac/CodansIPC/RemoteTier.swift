@@ -100,7 +100,9 @@ extension IPC.Method {
       .terminalResetPane, .terminalRetryPane,
       .workspaceCreate, .workspaceAdd, .workspaceDrop,
       .handoffSave, .handoffTo,
-      .agentWait:
+      .agentWait,
+      .workflowList, .workflowRun, .workflowStatus, .workflowDeliver, .workflowResolve,
+      .workflowCancel, .workflowListRuns:
       return .localOnly
     }
   }

@@ -31,6 +31,9 @@ public nonisolated struct Settings: Equatable, Sendable {
   /// LAN gateway for the iOS companion. Additive: older files decode to
   /// `.default`, which keeps the gateway off.
   public var remoteAccess: RemoteAccessSettings
+  /// Agent Workflows: master switch, disabled ids, remembered role
+  /// bindings, trusted repository files. Additive like `agents`.
+  public var workflows: WorkflowSettings
 
   public init(
     version: Int = Settings.currentVersion,
@@ -40,7 +43,8 @@ public nonisolated struct Settings: Equatable, Sendable {
     projects: [ProjectID: ProjectSettings] = [:],
     notifications: NotificationsSettings = .default,
     agents: AgentSettings = .default,
-    remoteAccess: RemoteAccessSettings = .default
+    remoteAccess: RemoteAccessSettings = .default,
+    workflows: WorkflowSettings = .default
   ) {
     self.version = version
     self.general = general
@@ -50,6 +54,7 @@ public nonisolated struct Settings: Equatable, Sendable {
     self.notifications = notifications
     self.agents = agents
     self.remoteAccess = remoteAccess
+    self.workflows = workflows
   }
 
   public static let `default` = Settings()
@@ -125,7 +130,7 @@ extension Settings: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, general, developer, worktree, projects, notifications, agents, remoteAccess
+    case version, general, developer, worktree, projects, notifications, agents, remoteAccess, workflows
   }
 
   public init(from decoder: Decoder) throws {
@@ -145,6 +150,7 @@ extension Settings: Codable {
     self.agents = try container.decodeIfPresent(AgentSettings.self, forKey: .agents) ?? .default
     self.remoteAccess =
       try container.decodeIfPresent(RemoteAccessSettings.self, forKey: .remoteAccess) ?? .default
+    self.workflows = try container.decodeIfPresent(WorkflowSettings.self, forKey: .workflows) ?? .default
 
     // `projects` is encoded as a JSON object keyed by the ProjectID UUID string so the file
     // is human-diffable and hand-editable. ProjectID itself is a Codable struct (encoded as
@@ -184,6 +190,9 @@ extension Settings: Codable {
     try container.encode(notifications, forKey: .notifications)
     try container.encode(agents, forKey: .agents)
     try container.encode(remoteAccess, forKey: .remoteAccess)
+    if !workflows.isDefault {
+      try container.encode(workflows, forKey: .workflows)
+    }
     var stringKeyed: [String: ProjectSettings] = [:]
     stringKeyed.reserveCapacity(projects.count)
     for (projectID, value) in projects {

@@ -24,6 +24,8 @@ nonisolated enum HierarchyError: LocalizedError, Equatable, Sendable {
   case zmxServeFailed(detail: String)
   /// The shipped app bundle is missing the embedded `bin/zmx` resource.
   case zmxBinaryMissing
+  /// A local Tab or Pane was asked to start in a folder that is gone.
+  case directoryMissing(String)
 
   var errorDescription: String? {
     switch self {
@@ -35,6 +37,8 @@ nonisolated enum HierarchyError: LocalizedError, Equatable, Sendable {
       return "The zmx session daemon failed to start: \(detail)"
     case .zmxBinaryMissing:
       return "This Codans build is missing its bundled zmx helper. Rebuild or reinstall the app."
+    case .directoryMissing(let path):
+      return "Folder no longer exists at \(path)"
     }
   }
 }
@@ -596,6 +600,25 @@ final class HierarchyManager {
   /// Transient Project-level health state owned by `ProjectReconciler`. Never
   /// persisted (`Project.loadState` is a transient field); equal-value writes
   /// are dropped so repeated reconciliations don't churn the catalog graph.
+  /// Throws `.directoryMissing` when `path` is not a local directory, so no
+  /// Tab or Pane is created that cannot start. A missing project root also
+  /// flags the Project failed: reconcile runs on focus changes only, so a
+  /// root folder moved from inside a pane would otherwise stay "ready".
+  /// Server projects always pass: their paths are remote.
+  func requireLocalDirectory(_ path: String, in projectID: ProjectID) throws {
+    let project = catalog.projects.first(where: { $0.id == projectID })
+    guard project?.isRemote != true else { return }
+    var isDir: ObjCBool = false
+    if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+      return
+    }
+    if let project, !FileManager.default.fileExists(atPath: project.rootPath) {
+      setProjectLoadState(
+        ProjectReconciler.missingFolderState(rootPath: project.rootPath), projectID: projectID)
+    }
+    throw HierarchyError.directoryMissing(path)
+  }
+
   func setProjectLoadState(
     _ state: ProjectLoadState,
     projectID: ProjectID

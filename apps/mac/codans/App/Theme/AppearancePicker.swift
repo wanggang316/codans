@@ -35,7 +35,7 @@ struct AppearancePicker: View {
       VStack(spacing: 8) {
         Image(imageName)
           .resizable()
-          .aspectRatio(contentMode: .fill)
+          .scaledToFill()
           .frame(width: 92, height: 60)
           .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
           .overlay(

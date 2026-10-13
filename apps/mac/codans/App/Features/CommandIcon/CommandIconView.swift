@@ -18,6 +18,8 @@ struct CommandIconGlyph: View {
   var body: some View {
     switch icon {
     case .symbol(let name):
+      // A symbol name is not a label: callers that show the glyph alone label it.
+      // swiftlint:disable:next accessibility_label_for_image
       Image(systemName: name)
     case .mark(let mark):
       Image(mark.assetName)
@@ -38,11 +40,13 @@ struct StoredIconGlyph: View {
 
   var body: some View {
     if let kind = TabIconRef.agentKind(from: icon) {
-      Image(AgentCatalog.descriptor(for: kind).iconAssetName)
+      let descriptor = AgentCatalog.descriptor(for: kind)
+      Image(descriptor.iconAssetName)
         .renderingMode(.template)
         .resizable()
         .scaledToFit()
         .frame(width: markSize, height: markSize)
+        .accessibilityLabel(descriptor.displayName)
     } else if let ref = CommandIconRef(storedValue: icon) {
       CommandIconGlyph(icon: ref, markSize: markSize)
     }

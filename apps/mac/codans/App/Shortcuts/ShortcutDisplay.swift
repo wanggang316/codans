@@ -43,6 +43,24 @@ public enum ShortcutDisplay {
     modifiersDisplay(binding.modifiers) + keycap(for: binding.keyCode)
   }
 
+  /// Tooltip text for a control that triggers `id`: `description` followed by the resolved
+  /// chord with a space between its glyphs, e.g. `Back ⌘ [`. Plain `description` when the
+  /// command has no binding or the user disabled it.
+  public static func tooltip(
+    _ description: String, for id: CommandID, in shortcuts: ResolvedShortcutMap
+  ) -> String {
+    guard let resolved = shortcuts[id], resolved.isEnabled, let binding = resolved.binding
+    else { return description }
+    return "\(description) \(spacedChord(for: binding))"
+  }
+
+  /// `chord(for:)` with a space between each modifier glyph and the keycap (`⇧ ⌘ O`). A
+  /// tooltip's small font runs the glyphs together; the menu bar keeps the packed form.
+  public static func spacedChord(for binding: ShortcutBinding) -> String {
+    let modifiers = modifiersDisplay(binding.modifiers).map(String.init)
+    return (modifiers + [keycap(for: binding.keyCode)]).joined(separator: " ")
+  }
+
   /// Modifier-only glyph string in canonical macOS order.
   public static func modifiersDisplay(_ mask: ModifierMask) -> String {
     var result = ""
@@ -82,6 +100,7 @@ public enum ShortcutDisplay {
 
   // MARK: - Fixed glyphs (non-character keys)
 
+  // swiftlint:disable:next cyclomatic_complexity
   private static func fixedGlyph(for keyCode: UInt16) -> String? {
     switch Int(keyCode) {
     case kVK_Return: return "\u{21A9}"  // ↩

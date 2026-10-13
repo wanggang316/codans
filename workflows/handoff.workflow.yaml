@@ -1,0 +1,48 @@
+name: Handoff
+description: Ask the current agent for a briefing, save it as the worktree's handoff packet, and optionally launch a receiver that continues the task.
+
+inputs:
+  next:
+    description: What happens once the briefing is saved.
+    type: choice
+    options: [launch, save]
+    default: launch
+
+roles:
+  author:
+    source: current
+  receiver:
+    source: launch
+    placement: tab
+    background: false
+
+steps:
+  - name: Write the briefing
+    id: brief
+    message: author
+    instruction: |
+      Write a handoff briefing for the task you are working on so another agent can continue it
+      without you. Markdown with exactly these sections: "## Objective", "## Current State",
+      "## Next Steps". Be concrete — files, commands, decisions taken, open questions.
+    expect:
+      delivery: briefing
+      sections: ["## Objective", "## Current State", "## Next Steps"]
+
+  - name: Save the handoff packet
+    id: save
+    run: ${{ codans.cli }} handoff save --pane ${{ roles.author.pane-id }} --brief - < "${{ deliveries.briefing.path }}"
+
+  - name: Launch the receiver
+    id: receive
+    if: inputs.next == 'launch'
+    launch: receiver
+    prompt: |
+      You are taking over a task from another agent in this worktree. Read
+      .codans/handoff/current.md (the briefing) and .codans/handoff/context.md (repository state),
+      then continue from "Next Steps". Ask before committing, pushing, or any destructive git
+      operation.
+
+  - if: inputs.next == 'launch'
+    notify: Handoff packet saved and the receiver launched.
+  - if: inputs.next == 'save'
+    notify: Handoff packet saved.

@@ -5,6 +5,7 @@ public enum CLIArgumentError: Error, Equatable, Sendable, CustomStringConvertibl
   case conflictingTextSources
   case invalidArgumentCount(message: String)
   case invalidScopeCount(expected: Int, actual: Int)
+  case invalidKeyValue(message: String)
 
   public var description: String {
     switch self {
@@ -16,6 +17,8 @@ public enum CLIArgumentError: Error, Equatable, Sendable, CustomStringConvertibl
       return message
     case .invalidScopeCount(let expected, let actual):
       return "expected \(expected) scope selection, got \(actual)"
+    case .invalidKeyValue(let message):
+      return message
     }
   }
 }
@@ -203,5 +206,27 @@ public enum CLIBroadcastScopeSelection: Equatable, Sendable {
       throw CLIArgumentError.invalidScopeCount(expected: 1, actual: selections.count)
     }
     return selections[0]
+  }
+}
+
+/// Repeated `--option name=value` arguments (`--role reviewer=auto`,
+/// `--input branch=main`) folded into a map. A value may contain `=`; a
+/// key may not be empty, and a key given twice is rejected rather than
+/// silently letting the last one win, because both spellings look
+/// deliberate on a command line.
+public enum CLIKeyValuePairs {
+  public static func parse(_ pairs: [String], option: String) throws -> [String: String] {
+    var result: [String: String] = [:]
+    for pair in pairs {
+      guard let separator = pair.firstIndex(of: "="), separator != pair.startIndex else {
+        throw CLIArgumentError.invalidKeyValue(message: "\(option) expects name=value, got \"\(pair)\"")
+      }
+      let key = String(pair[..<separator])
+      guard result[key] == nil else {
+        throw CLIArgumentError.invalidKeyValue(message: "\(option) \(key) given more than once")
+      }
+      result[key] = String(pair[pair.index(after: separator)...])
+    }
+    return result
   }
 }

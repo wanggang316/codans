@@ -26,6 +26,7 @@ enum CommandPaletteItems {
     paneFocusPrecise: Bool = false
   ) -> [CommandPaletteItem] {
     var items = appItems()
+    items.append(contentsOf: cancelWorkflowItems())
     items.append(contentsOf: worktreeSwitchItems(selection: selection, catalog: catalog))
     // Project-level maintenance commands surface whenever a Project is
     // selected, independent of whether a Worktree is also selected.
@@ -62,6 +63,14 @@ enum CommandPaletteItems {
           contentsOf: agentProfileItems(projectID: projectID, worktreeID: worktreeID)
         )
         items.append(handOffItem(worktreeName: worktree.name))
+        // Workflows are scoped to a local worktree (the run directory lives
+        // under it), so a Server project offers none.
+        if !project.isRemote {
+          items.append(
+            contentsOf: workflowItems(
+              projectID: projectID, worktreeID: worktreeID, worktreePath: worktree.path)
+          )
+        }
       }
     }
     if let focusedPaneID {
@@ -142,6 +151,14 @@ enum CommandPaletteItems {
         kind: .newWorkspace
       ),
       CommandPaletteItem(
+        id: "app.new-agent",
+        title: "New Agent…",
+        searchText: "app agent new start prompt worktree",
+        icon: "plus.bubble",
+        commandID: .newAgent,
+        kind: .newAgent
+      ),
+      CommandPaletteItem(
         id: "app.open-settings",
         title: "Open Settings",
         searchText: "app",
@@ -193,6 +210,30 @@ enum CommandPaletteItems {
     ]
   }
 
+  /// One "Cancel Workflow: <name>" item per active run, across every
+  /// worktree the engine is tracking — the Command Palette bullet in the
+  /// workflow design doc. Hidden entirely when the feature is off so a
+  /// user who never turned on Workflows never sees it.
+  private static func cancelWorkflowItems() -> [CommandPaletteItem] {
+    // Runs first, settings second: most palette openings have no run, and
+    // then there is nothing to gate and no settings read at all.
+    @Dependency(WorkflowClient.self) var workflowClient
+    let runs = workflowClient.activeRuns()
+    guard !runs.isEmpty else { return [] }
+    @Dependency(SettingsWriter.self) var settingsWriter
+    guard settingsWriter.readSnapshotSync().workflows.isEnabled else { return [] }
+    return runs.map { run in
+      CommandPaletteItem(
+        id: "workflow.cancel.\(run.id.uuidString)",
+        title: "Cancel Workflow: \(run.name)",
+        searchText: "workflow cancel run",
+        icon: "xmark.circle",
+        hiddenWhenQueryEmpty: true,
+        kind: .cancelWorkflow(run.id)
+      )
+    }
+  }
+
   private static func resolveWorktree(
     selection: HierarchySelection,
     catalog: Catalog
@@ -232,7 +273,7 @@ enum CommandPaletteItems {
         shortcut: .command("G", shift: true),
         commandID: .toggleDiffInspector,
         kind: .toggleDiffInspector
-      )
+      ),
     ]
     // `git worktree add` needs a repository root the Project owns; a dir or
     // workspace Project has none, and the reducer would no-op anyway.
@@ -525,7 +566,7 @@ enum CommandPaletteItems {
   }
 
   /// One "Launch Agent: <profile>" item per enabled `AgentProfile`, in
-  /// Settings order — the same rows the toolbar Agents menu lists. Reads the
+  /// Settings order — the same rows the New Agent dialog lists. Reads the
   /// live settings snapshot like the script builders so a profile added in
   /// Settings appears on the next palette open.
   private static func agentProfileItems(
@@ -546,6 +587,34 @@ enum CommandPaletteItems {
         kind: .launchAgentProfile(projectID, worktreeID, profile.id)
       )
     }
+  }
+
+  /// One "Run Workflow: <name>" row per definition the selected Worktree can
+  /// see — bundle, user, and that Worktree's own repository scope, shadowing
+  /// already resolved by `WorkflowDiscovery`. A definition the user switched
+  /// off, or one whose file has error diagnostics, is not offered: it could
+  /// not start anyway. The whole group disappears while workflows are off.
+  private static func workflowItems(
+    projectID: ProjectID,
+    worktreeID: WorktreeID,
+    worktreePath: String
+  ) -> [CommandPaletteItem] {
+    @Dependency(SettingsWriter.self) var settingsWriter
+    @Dependency(WorkflowStartClient.self) var workflowClient
+    let settings = settingsWriter.readSnapshotSync().workflows
+    guard settings.isEnabled else { return [] }
+    return workflowClient.catalog(worktreePath)
+      .filter { $0.isValid && !settings.isDisabled($0.id) }
+      .map { entry in
+        CommandPaletteItem(
+          id: "workflow.run.\(entry.id)",
+          title: "Run Workflow: \(entry.name)",
+          subtitle: entry.definition?.description,
+          searchText: "workflow run \(entry.id) \(entry.name)",
+          icon: "arrow.triangle.branch",
+          kind: .runWorkflow(projectID, worktreeID, entry.id)
+        )
+      }
   }
 
   /// Single "Hand Off…" row. Always offered while a Worktree is selected;

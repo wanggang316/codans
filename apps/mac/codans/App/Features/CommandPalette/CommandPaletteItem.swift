@@ -65,6 +65,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case openProject
     case cloneRepository
     case newWorkspace
+    case newAgent
     case showUnreadNotifications
     case toggleSidebar
     case openGhosttyConfig
@@ -124,6 +125,16 @@ struct CommandPaletteItem: Equatable, Identifiable {
     // Hand the focused pane's task to another agent. The source pane is
     // resolved at activation from the palette's focused pane.
     case handOff
+
+    // Agent Workflows — one Kind per definition visible to the selected
+    // Worktree, identified by workflow id (stable across launches, unlike
+    // the file path, which shadowing can move between scopes). Carries the
+    // selection for the same staleness reason as scripts.
+    case runWorkflow(ProjectID, WorktreeID, String)
+
+    // Cancels an active workflow run, wherever its worktree is. The run
+    // id is captured when the item is built (`WorkflowClient.activeRuns`).
+    case cancelWorkflow(UUID)
 
     // Pane / Window (thin wrappers over the existing request enums)
     case paneAction(PaneActionRequest)

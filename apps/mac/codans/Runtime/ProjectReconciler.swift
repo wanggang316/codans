@@ -79,9 +79,7 @@ actor ProjectReconciler {
     } else {
       guard FileManager.default.fileExists(atPath: project.rootPath) else {
         await client.setProjectLoadState(
-          projectID,
-          .failed(reason: "Folder no longer exists at \(project.rootPath)")
-        )
+          projectID, Self.missingFolderState(rootPath: project.rootPath))
         return
       }
       // A workspace whose manifest is gone or unreadable stays a workspace
@@ -108,6 +106,13 @@ actor ProjectReconciler {
     // lands in `.ready` unconditionally after the call returns.
     await client.reconcileDiscoveredWorktrees(projectID)
     await client.setProjectLoadState(projectID, .ready)
+  }
+
+  /// Load state of a local Project whose root folder is gone. Shared with
+  /// `HierarchyClient.openPane`, which finds the missing folder first when
+  /// the folder is moved while the app is in focus.
+  nonisolated static func missingFolderState(rootPath: String) -> ProjectLoadState {
+    .failed(reason: "Folder no longer exists at \(rootPath)")
   }
 
   /// Fan out across all Projects in the current snapshot. Debounced by

@@ -72,6 +72,29 @@ public nonisolated enum AppDirectories {
       .appendingPathComponent(name, isDirectory: true)
   }
 
+  /// `~/.codans` — the user-level root every *new* persistent directory
+  /// goes under (`repos/` for worktrees already lives here). The
+  /// `~/.config/<name>` config root is legacy and is not extended further.
+  /// Not channel-suffixed: what lives here is user content, not instance
+  /// state, and a Debug build should see the same workflows as Release.
+  public static func userDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+  ) -> URL {
+    home.appendingPathComponent(".codans", isDirectory: true)
+  }
+
+  /// `~/.codans/workflows` — user-scoped `*.workflow.yaml` definitions.
+  /// `$CODANS_WORKFLOWS_DIR` relocates it for isolated test instances.
+  public static func workflowsDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.workflowsDirectory.rawValue]
+  ) -> URL {
+    if let override, !override.isEmpty {
+      return URL(fileURLWithPath: override, isDirectory: true)
+    }
+    return userDirectory(home: home).appendingPathComponent("workflows", isDirectory: true)
+  }
+
   /// `~/Library/Caches/<name>` — the zmx `ZMX_DIR` (per-pane daemon control
   /// sockets, `snapshots/`, and `logs/`). Falls back to `~/Library/Caches`
   /// when the system cache directory can't be resolved, matching the prior

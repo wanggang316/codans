@@ -30,6 +30,53 @@ public enum CLIErrorCode: String, Codable, Sendable, CaseIterable {
   /// command-completion tracking is unavailable (exit 4).
   case captureUnsupported = "CAPTURE_UNSUPPORTED"
 
+  // Workflow codes. The server raises them as `IPCError.domain` and the CLI
+  // passes them through unchanged; each names a situation a script can
+  // branch on, not just a message.
+  case workflowNotFound = "WORKFLOW_NOT_FOUND"
+  case workflowInvalid = "WORKFLOW_INVALID"
+  case workflowDisabled = "WORKFLOW_DISABLED"
+  case workflowTrustRequired = "WORKFLOW_TRUST_REQUIRED"
+  case runNotFound = "RUN_NOT_FOUND"
+  case sourceRequired = "SOURCE_REQUIRED"
+  case inputRequired = "INPUT_REQUIRED"
+  case profileRequired = "PROFILE_REQUIRED"
+  case paneBusy = "PANE_BUSY"
+  case roleMismatch = "ROLE_MISMATCH"
+  case stepNotExpecting = "STEP_NOT_EXPECTING"
+  case tokenRequired = "TOKEN_REQUIRED"
+  case tokenInvalid = "TOKEN_INVALID"
+  case outputInvalid = "OUTPUT_INVALID"
+  case outputTooLarge = "OUTPUT_TOO_LARGE"
+  case verdictRequired = "VERDICT_REQUIRED"
+  case renderedTextInvalid = "RENDERED_TEXT_INVALID"
+
+  /// A server-defined code carried in `IPCError.domain`, or nil when this
+  /// build does not know it (the CLI then reports `INTERNAL` with the raw
+  /// code in `details` rather than guessing an exit code).
+  public init?(domainCode: String) {
+    guard let code = CLIErrorCode(rawValue: domainCode), code.domainExitCode != nil else { return nil }
+    self = code
+  }
+
+  /// Exit code for a domain code, grouped by what a script should do:
+  /// look elsewhere (2), wait or resolve the run first (3), or fix the
+  /// arguments (1). Nil for codes that are not domain codes.
+  public var domainExitCode: CLIExitCode? {
+    switch self {
+    case .workflowNotFound, .runNotFound:
+      return .notFound
+    case .paneBusy, .stepNotExpecting, .roleMismatch, .tokenRequired, .tokenInvalid,
+      .workflowDisabled, .workflowTrustRequired:
+      return .conflict
+    case .inputRequired, .profileRequired, .sourceRequired, .outputInvalid, .verdictRequired,
+      .renderedTextInvalid, .workflowInvalid, .outputTooLarge:
+      return .userError
+    default:
+      return nil
+    }
+  }
+
   /// The code every exit code maps to when nothing more specific applies.
   public static func `default`(for exit: CLIExitCode) -> CLIErrorCode {
     switch exit {

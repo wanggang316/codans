@@ -115,6 +115,8 @@ struct SettingsWindowView: View {
       )
     case .agents:
       AgentsSettingsView()
+    case .workflows:
+      WorkflowsSettingsView()
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)
     case .worktree:
@@ -134,12 +136,12 @@ struct SettingsWindowView: View {
     case .about:
       AboutSettingsView()
     case .projectGeneral, .projectScripts:
+      // Split out so `detailView` itself stays under the complexity cap —
+      // these two cases are the only ones with a nested store-scope branch.
       projectDetailView(for: section)
     }
   }
 
-  /// Project-scoped panes, split out of `detailView` to keep that switch a
-  /// flat list of global panes.
   @ViewBuilder
   private func projectDetailView(for section: SettingsSection) -> some View {
     switch section {

@@ -12,8 +12,8 @@ import SwiftUI
 /// Geometry sources — keep in sync when the mirrored views change:
 ///   - `SkeletonBranchClusterView` ← `WorktreeHeaderInfoLabel`
 ///   - `SkeletonStatusPillView`    ← `StatusBarView` (motivational form)
-///   - `SkeletonActionChipView`    ← `HeaderAgentSplitButton` /
-///     `HeaderRunScriptSplitButton` / `HeaderOpenSplitButton`
+///   - `SkeletonActionChipView`    ← `HeaderRunScriptSplitButton` /
+///     `HeaderOpenSplitButton`
 
 /// Leading branch-identity placeholder. Mirrors `WorktreeHeaderInfoLabel`:
 /// a 14pt leading glyph, then a two-row stack — row 1 is the branch
@@ -40,7 +40,7 @@ struct SkeletonBranchClusterView: View {
       Image("git-branch")
         .renderingMode(.template)
         .resizable()
-        .aspectRatio(contentMode: .fit)
+        .scaledToFit()
         .frame(width: 14, height: 14)
         .foregroundStyle(.secondary.opacity(0.45))
         .shimmer(isActive: !reduceMotion)

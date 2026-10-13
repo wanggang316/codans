@@ -3,7 +3,7 @@
 **状态：** 已上线（可见）
 **作者：** Gump（与 Claude）
 
-> **命令与接口范围。** 已注册的命令包括：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群（含 `agent status` / `agent wait`）、`workspace` 各群、顶层 `open`、本地的 `skill` 群与 `help-json`。`help-json` 可调用，但不显示在默认 `--help` 中；`--json` 一律是 `{schemaVersion, data | error}` 信封。**完全未实现**：`skill.*` 与 `hook.*` IPC 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`；`codans skill` 是纯本地文件操作，不经 IPC）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的只剩 `hierarchy.zoomPane` / `unzoomPane`（应用没有 zoomed-pane 渲染，`SplitTree.zoomed` 仅被 `focusPane` 写入）与 `hierarchy.setProjectEditor`（项目编辑器设置使用 `editor.setProjectDefault`）。
+> **命令与接口范围。** 已注册的命令包括：`status` / `launch` / `doctor`、`tree`、`project` / `worktree` / `tab` / `pane` 各群（含各级 `list`）、`pane send` / `broadcast`、`agent` / `handoff` 各群（含 `agent status` / `agent wait`）、`workspace` 各群、`workflow` 群（`list` / `validate` / `run` / `status` / `deliver` / `resolve` / `cancel` / `runs`，见 [workflow.md](workflow.md)）、顶层 `open`、本地的 `skill` 群与 `help-json`。`help-json` 可调用，但不显示在默认 `--help` 中；`--json` 一律是 `{schemaVersion, data | error}` 信封。**完全未实现**：`skill.*` 与 `hook.*` IPC 命名空间（`CodansIPC/Method.swift` 无相应 case，`MethodRouter` 兜底 `not wired in this build`；`codans skill` 是纯本地文件操作，不经 IPC）；`IPC.Method` 里已声明但 `MethodRouter` 未路由的只剩 `hierarchy.zoomPane` / `unzoomPane`（应用没有 zoomed-pane 渲染，`SplitTree.zoomed` 仅被 `focusPane` 写入）与 `hierarchy.setProjectEditor`（项目编辑器设置使用 `editor.setProjectDefault`）。
 
 ## 背景与范围
 
@@ -226,7 +226,7 @@
 
 #### `codans agent …`
 
-`AgentCommand.subcommands`：`list`、`status`、`wait`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 worktree toolbar 的 Agents 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
+`AgentCommand.subcommands`：`list`、`status`、`wait`、`launch`。profile 是 Settings → Agents 里的启动预设（`Settings.agents.profiles`），与 New Agent 对话框的 Agent 菜单同一份数据；设计见 [agent-handoff.md](agent-handoff.md)。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|

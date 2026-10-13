@@ -27,6 +27,7 @@ public final class MethodRouter {
   private let workspaceHandlers: WorkspaceHandlers?
   private let eventHub: EventHub?
   private let terminalStreams: TerminalStreamRegistry?
+  private let workflowHandlers: WorkflowHandlers?
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "router")
 
   init(
@@ -39,7 +40,8 @@ public final class MethodRouter {
     handoffHandlers: HandoffHandlers? = nil,
     workspaceHandlers: WorkspaceHandlers? = nil,
     eventHub: EventHub? = nil,
-    terminalStreams: TerminalStreamRegistry? = nil
+    terminalStreams: TerminalStreamRegistry? = nil,
+    workflowHandlers: WorkflowHandlers? = nil
   ) {
     self.systemHandlers = systemHandlers
     self.hierarchyHandlers = hierarchyHandlers
@@ -51,6 +53,7 @@ public final class MethodRouter {
     self.workspaceHandlers = workspaceHandlers
     self.eventHub = eventHub
     self.terminalStreams = terminalStreams
+    self.workflowHandlers = workflowHandlers
   }
 
   /// Route one decoded request to the appropriate handler. The handshake
@@ -75,12 +78,13 @@ public final class MethodRouter {
     if let outcome = await routePane(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
-    if let outcome = await routeProject(request) { return outcome }
+    if let outcome = routeProject(request) { return outcome }
     if let outcome = await routeAgent(request) { return outcome }
     if let outcome = await routeHandoff(request) { return outcome }
     if let outcome = await routeWorkspace(request) { return outcome }
     if let outcome = routeEvents(request) { return outcome }
     if let outcome = routeTerminalStream(request, context: context) { return outcome }
+    if let outcome = await routeWorkflow(request, context: context) { return outcome }
     return notWired(request.method)
   }
 
@@ -344,7 +348,7 @@ public final class MethodRouter {
   /// the only wire-error type these methods produce), so the catch chain is
   /// flatter than `routeEditor`'s — no app-tier error translation, just a
   /// `DecodingError` → `invalidParams` rescue and a programmer-error backstop.
-  private func routeProject(_ request: IPC.Request) async -> RouterOutcome? {
+  private func routeProject(_ request: IPC.Request) -> RouterOutcome? {
     guard let h = projectHandlers else { return nil }
     switch request.method {
     case .projectListScripts:
@@ -400,6 +404,45 @@ public final class MethodRouter {
     case .handoffTo:
       return await Self.asyncOutcome {
         try await h.to(request.params.decoded(as: IPC.HandoffRequest.self))
+      }
+    default: return nil
+    }
+  }
+
+  /// `workflow.*` adapter. The caller's pid reaches every verb: the
+  /// caller's pane is attributed from it when the CLI ran without
+  /// `CODANS_PANE_ID`. Remote callers never get here (`localOnly` tier).
+  private func routeWorkflow(_ request: IPC.Request, context: CallerContext) async -> RouterOutcome? {
+    guard let h = workflowHandlers else { return nil }
+    let peerPID = context.peerPID
+    switch request.method {
+    case .workflowList:
+      return Self.projectOutcome {
+        try h.list(request.params.decoded(as: IPC.WorkflowListRequest.self), peerPID: peerPID)
+      }
+    case .workflowRun:
+      return await Self.asyncOutcome {
+        try await h.run(request.params.decoded(as: IPC.WorkflowRunRequest.self), peerPID: peerPID)
+      }
+    case .workflowStatus:
+      return Self.projectOutcome {
+        try h.status(request.params.decoded(as: IPC.WorkflowStatusRequest.self), peerPID: peerPID)
+      }
+    case .workflowDeliver:
+      return await Self.asyncOutcome {
+        try await h.deliver(request.params.decoded(as: IPC.WorkflowDeliverRequest.self), peerPID: peerPID)
+      }
+    case .workflowResolve:
+      return Self.projectOutcome {
+        try h.resolve(request.params.decoded(as: IPC.WorkflowResolveRequest.self), peerPID: peerPID)
+      }
+    case .workflowCancel:
+      return Self.projectOutcome {
+        try h.cancel(request.params.decoded(as: IPC.WorkflowCancelRequest.self), peerPID: peerPID)
+      }
+    case .workflowListRuns:
+      return Self.projectOutcome {
+        try h.listRuns(request.params.decoded(as: IPC.WorkflowListRunsRequest.self), peerPID: peerPID)
       }
     default: return nil
     }

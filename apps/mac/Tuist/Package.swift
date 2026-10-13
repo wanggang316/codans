@@ -38,5 +38,8 @@ let package = Package(
     .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.1"),
     .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.14.0"),
+    // YAML parser for `*.workflow.yaml` definitions (CodansCore/Workflow).
+    // Pinned exactly: a floated transitive bump has broken the CI archive before.
+    .package(url: "https://github.com/jpsim/Yams", exact: "6.2.2"),
   ]
 )

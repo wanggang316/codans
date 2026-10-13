@@ -96,6 +96,15 @@ struct RemoteTierTests {
     .workspaceAdd: .localOnly,
     .workspaceDrop: .localOnly,
     .workspaceRemove: .localOnly,
+
+    // Workflows run agents and inject text on the Mac; not remote in v1.
+    .workflowList: .localOnly,
+    .workflowRun: .localOnly,
+    .workflowStatus: .localOnly,
+    .workflowDeliver: .localOnly,
+    .workflowResolve: .localOnly,
+    .workflowCancel: .localOnly,
+    .workflowListRuns: .localOnly,
   ]
 
   /// Security position, not backlog: these must stay unreachable remotely

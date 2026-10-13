@@ -486,12 +486,13 @@ nonisolated struct HierarchyClient: Sendable {
   /// same way a script is dispatched (new tab / split / focused pane), with
   /// one deliberate difference: agent launches are *not* tracked as run panes,
   /// so invoking the same profile twice opens a second session rather than
-  /// re-typing into the first. Throws `RunScriptError.unknownScript` when the
+  /// re-typing into the first. `prompt` is the agent's first prompt; `nil`
+  /// starts it without one. Throws `RunScriptError.unknownScript` when the
   /// profile id is gone (removed between click and dispatch);
   /// `.missingWorktree` when the worktree is.
   var launchAgentProfile:
     @MainActor @Sendable (
-      _ profileID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID
+      _ profileID: UUID, _ projectID: ProjectID, _ worktreeID: WorktreeID, _ prompt: String?
     ) async throws -> Void
 
   /// Lower-level sibling of `launchAgentProfile` for callers that already
@@ -809,7 +810,14 @@ extension HierarchyClient {
         try manager.selectWorktree(worktreeID, in: projectID)
       },
       createTab: { worktreeID, projectID, name in
-        try manager.createTab(in: worktreeID, in: projectID, name: name)
+        // A Tab in a missing folder could never start its first Pane: refuse
+        // it rather than leave an empty Tab behind.
+        if let path = manager.catalog.projects.first(where: { $0.id == projectID })?
+          .worktrees.first(where: { $0.id == worktreeID })?.path
+        {
+          try manager.requireLocalDirectory(path, in: projectID)
+        }
+        return try manager.createTab(in: worktreeID, in: projectID, name: name)
       },
       closeTab: { tabID, worktreeID, projectID in
         let doomed = tabs(in: worktreeID, projectID).filter { $0.id == tabID }
@@ -869,25 +877,11 @@ extension HierarchyClient {
       markPaneIdle: { paneID in manager.markPaneIdle(paneID) },
       setPaneCommandBusy: { paneID, busy in manager.setPaneCommandBusy(paneID, busy) },
       openPane: { [weak settings] tabID, worktreeID, projectID, cwd, initial in
-        // Defensive guard against stale catalog state: when a worktree
-        // is deleted outside the app (`git worktree remove`) before
-        // reconcile catches up, libghostty crashes if it tries to spawn
-        // a shell in a non-existent cwd. Reject here so callers'
-        // `try?` swallows the error instead of bringing down the app.
-        // Skipped for Server projects: `cwd` is a remote path that never
-        // exists locally, and libghostty is handed a real local cwd — the
-        // remote `cd` (inside the SSH command) owns the directory instead.
-        let isRemote =
-          manager.catalog.projects.first(where: { $0.id == projectID })?.isRemote ?? false
-        if !isRemote {
-          var isDir: ObjCBool = false
-          guard
-            FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir),
-            isDir.boolValue
-          else {
-            throw HierarchyError.notFound("Worktree path missing: \(cwd)")
-          }
-        }
+        // Stale catalog state: libghostty crashes when it spawns a shell in
+        // a cwd that is gone (the folder was moved, or `git worktree remove`
+        // ran outside the app before reconcile caught up). Reject here so
+        // callers' `try?` swallows the error instead of bringing down the app.
+        try manager.requireLocalDirectory(cwd, in: projectID)
         // Resolve project envVars from the SettingsStore so every
         // user-flow openPane (TabBar new-tab, SplitViewport new-tab,
         // CreateWorktree, IPC openPane) inherits Project-defined env. When
@@ -906,6 +900,7 @@ extension HierarchyClient {
         // Splits inherit the same Project envVars as the parent pane —
         // the new pty is forked from a fresh shell, not the existing one,
         // so the env hook still has to run.
+        try manager.requireLocalDirectory(cwd, in: projectID)
         let env: [String: String] =
           settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
           ?? [:]
@@ -1081,13 +1076,14 @@ extension HierarchyClient {
           terminalClient: terminalClient
         )
       },
-      launchAgentProfile: { [weak settings] profileID, projectID, worktreeID in
+      launchAgentProfile: { [weak settings] profileID, projectID, worktreeID, prompt in
         let snapshot = settings?.settings ?? .default
         guard let profile = snapshot.agents.profile(id: profileID) else {
           throw RunScriptError.unknownScript(profileID)
         }
         _ = try await launchAgent(
-          spec: AgentLaunchSpec(profile: profile, projectID: projectID, worktreeID: worktreeID),
+          spec: AgentLaunchSpec(
+            profile: profile, projectID: projectID, worktreeID: worktreeID, prompt: prompt),
           manager: manager,
           snapshot: snapshot,
           terminalClient: terminalClient
@@ -1566,6 +1562,7 @@ extension HierarchyClient {
     )
 
     func openInNewTab() async throws -> PaneID {
+      try manager.requireLocalDirectory(cwd, in: projectID)
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID,
         name: script.displayName,
@@ -1610,6 +1607,7 @@ extension HierarchyClient {
       if let anchor = explicitAnchor(anchorPaneID, worktreeID: worktreeID, in: manager)
         ?? focusedAnchor(worktreeID: worktreeID, in: manager)
       {
+        try manager.requireLocalDirectory(cwd, in: projectID)
         return try await manager.splitPane(
           anchor.paneID,
           direction: mapSplitDirection(script.direction),
@@ -1802,7 +1800,11 @@ extension HierarchyClient {
         break outer
       }
     }
-    guard let cwd = foundWorktreePath else { return }
+    // A missing folder cannot run the script: skip it, so the archive or
+    // delete that awaits it goes on.
+    guard let cwd = foundWorktreePath,
+      (try? manager.requireLocalDirectory(cwd, in: projectID)) != nil
+    else { return }
     guard let terminalClient else { return }
     let env = HierarchyManager.resolvedEnv(for: projectID, in: settings)
 
@@ -2304,7 +2306,7 @@ extension HierarchyClient: DependencyKey {
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runCommand: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    launchAgentProfile: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    launchAgentProfile: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     launchAgent: { _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     stopAllScripts: { _ in fatalError("HierarchyClient.liveValue not configured") },

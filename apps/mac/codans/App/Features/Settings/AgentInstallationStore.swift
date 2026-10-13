@@ -96,7 +96,7 @@ final class AgentInstallationStore {
   }
 
   /// What a launch surface offers: the enabled profiles, minus any whose CLI
-  /// the shell could not resolve. The toolbar Agents menu and the Hand Off
+  /// the shell could not resolve. The New Agent dialog and the Hand Off
   /// panel both go through here, so one rule decides what "installed" hides.
   ///
   /// It fails open, because the probe is advisory and is wrong in the

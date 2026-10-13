@@ -47,7 +47,9 @@ struct InboxBellView: View {
   @ViewBuilder
   private var bellButton: some View {
     let count = rollup?.current.globalUnreadCount ?? 0
-    Button(action: { popoverShown.toggle() }) {
+    Button {
+      popoverShown.toggle()
+    } label: {
       HStack(spacing: 4) {
         Image(systemName: count > 0 ? "bell.fill" : "bell")
           .font(.title3)
@@ -244,6 +246,7 @@ private struct InboxPopoverContent: View {
       Image(systemName: "tray")
         .font(.title)
         .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
       Text(unreadOnly ? "No unread notifications" : "No notifications yet")
         .font(.callout)
         .foregroundStyle(.secondary)
