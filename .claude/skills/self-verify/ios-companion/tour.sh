@@ -16,7 +16,7 @@ SIM="${2:?simulator UDID}"
 APPEARANCE="${3:?light or dark}"
 OUT="${4:?out dir}"
 PREFIX="${5:-tour-$APPEARANCE}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 SCRATCH="${CODANS_IOS_E2E_DIR:-$(mktemp -d -t codans-ios-tour)}"
 CLI="$APP/Contents/Resources/bin/codans-dev"
 # Short on purpose: AF_UNIX paths are capped near 104 bytes (see harness.sh).
@@ -100,7 +100,10 @@ open_remote_settings() {
 
 quit_mac() {
   [[ -n "${MAC_PID:-}" ]] || return 0
-  # A graceful quit withdraws the Bonjour advertisement (see harness.sh).
+  # Quit through the menu so the gateway withdraws its Bonjour record;
+  # a signalled app leaves a stale one behind (see harness.sh).
+  "$AX" menu "$MAC_PID" Codans "Quit Codans" >/dev/null 2>&1
+  for _ in $(seq 1 20); do kill -0 "$MAC_PID" 2>/dev/null || break; sleep 0.5; done
   kill -TERM "$MAC_PID" 2>/dev/null
   for _ in $(seq 1 30); do kill -0 "$MAC_PID" 2>/dev/null || break; sleep 0.5; done
   kill -KILL "$MAC_PID" 2>/dev/null

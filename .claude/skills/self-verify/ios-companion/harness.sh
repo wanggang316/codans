@@ -46,7 +46,7 @@
 set -uo pipefail
 
 APP="${1:?usage: harness.sh <Debug Codans.app path> [simulator UDID]}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 SCRATCH="${CODANS_IOS_E2E_DIR:-$(mktemp -d -t codans-ios-e2e)}"
 CLI="$APP/Contents/Resources/bin/codans-dev"
 # AF_UNIX paths are capped near 104 bytes. The socket and the zmx cache
@@ -187,9 +187,12 @@ quit_mac() {
   [[ -n "${UI_PID:-}" ]] && kill "$UI_PID" 2>/dev/null
   [[ -n "${LOG_PID:-}" ]] && kill "$LOG_PID" 2>/dev/null
   [[ -n "${MAC_PID:-}" ]] || return
-  # A graceful quit withdraws the Bonjour advertisement. A killed app
-  # leaves a stale record in mDNS for up to an hour, which the next run's
-  # phone then finds first.
+  # Quit through the menu: AppKit runs the termination path (the gateway
+  # stops and withdraws its Bonjour advertisement) only for a real quit,
+  # not for SIGTERM. A killed app leaves a stale record in mDNS for up to
+  # an hour, which the next run's phone then tries first.
+  "$AX" menu "$MAC_PID" Codans "Quit Codans" >/dev/null 2>&1
+  for _ in $(seq 1 20); do kill -0 "$MAC_PID" 2>/dev/null || break; sleep 0.5; done
   kill -TERM "$MAC_PID" 2>/dev/null
   for _ in $(seq 1 30); do kill -0 "$MAC_PID" 2>/dev/null || break; sleep 0.5; done
   kill -KILL "$MAC_PID" 2>/dev/null
@@ -235,9 +238,15 @@ pairing_code() {
   done
   ((opened)) || { "$AX" tree "$MAC_PID" >>"$log" 2>&1; return 1; }
   if [[ "$permission" != "View only" ]]; then
-    # The first "View only" pop-up is the new pairing's own picker.
-    "$AX" press "$MAC_PID" "View only" >>"$log" 2>&1
-    "$AX" wait "$MAC_PID" "$permission" 3 >>"$log" 2>&1 && "$AX" press "$MAC_PID" "$permission" >>"$log" 2>&1
+    # The first "View only" pop-up is the new pairing's own picker. Its
+    # menu sometimes does not open on the first press; try again.
+    for attempt in 1 2 3; do
+      "$AX" press "$MAC_PID" "View only" >>"$log" 2>&1
+      if "$AX" wait "$MAC_PID" "$permission" 3 >>"$log" 2>&1; then
+        "$AX" press "$MAC_PID" "$permission" >>"$log" 2>&1
+        break
+      fi
+    done
   fi
   saved="$(pbpaste)"
   "$AX" press "$MAC_PID" "Copy Pairing Code" >>"$log" 2>&1
@@ -603,12 +612,24 @@ fi
 
 # --- revoke, with the composer's phone connected (rejected)
 revoke_all() {
-  local _
+  local _ attempt log="$SCRATCH/revoke.log"
+  # Presses in a Settings window that is not frontmost are dropped (the
+  # main window was resized or focused since); bring it forward first and
+  # retry each revocation until its confirmation shows.
+  "$AX" menu "$MAC_PID" Codans "Settings…" >>"$log" 2>&1
+  "$AX" wait "$MAC_PID" "Pair New Device…" 5 >>"$log" 2>&1
   for _ in $(device_ids); do
-    "$AX" press "$MAC_PID" "Revoke…" >/dev/null && "$AX" wait "$MAC_PID" "Revoke" 3 >/dev/null &&
-      "$AX" press "$MAC_PID" "Revoke" >/dev/null
+    for attempt in 1 2 3; do
+      if "$AX" press "$MAC_PID" "Revoke…" >>"$log" 2>&1 && "$AX" wait "$MAC_PID" "Revoke" 3 >>"$log" 2>&1; then
+        "$AX" press "$MAC_PID" "Revoke" >>"$log" 2>&1
+        break
+      fi
+      "$AX" menu "$MAC_PID" Codans "Settings…" >>"$log" 2>&1
+      sleep 1
+    done
     sleep 0.5
   done
+  [[ -z "$(device_ids)" ]] || "$AX" tree "$MAC_PID" >>"$log" 2>&1
 }
 ids=$(device_ids)
 if want rejected; then
