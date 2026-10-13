@@ -29,6 +29,11 @@
 #                   back to the Mac (sizes read by a zmx observer)
 #   tab-ops         New Tab, Split Right, Close Pane (confirmed) from the phone;
 #                   checked in `codans tree --json`
+#   continuity      the phone keeps the same pane through a rotation (which
+#                   flips the width class on a Max iPhone or an iPad: the
+#                   stand-in for folding an iPhone Duo), a trip to the
+#                   background, and a relaunch that restores it from scene
+#                   storage with no tap
 #   readonly-live   a "View only" device streams the pane, shows no key bar and says why
 #   rejected        revoke the connected phone; it ends on "Pair again"
 #   revoke       revoke every device; their records and Keychain keys are gone
@@ -73,6 +78,9 @@ SIM="${2:-$(xcrun simctl list devices available -j |
     (.key | capture("iOS-(?<major>[0-9]+)-(?<minor>[0-9]+)") | (.major | tonumber) * 100 + (.minor | tonumber)) as $v |
     .value[] | select(.name == "iPhone 17 Pro") | {udid, $v}] | sort_by(-.v)[0].udid')}"
 mkdir -p "$CONF" "$FIX" "$SHOTS" "$WTS" "$FAKEBIN"
+SIM_NAME="$(xcrun simctl list devices -j | jq -r --arg u "$SIM" '.devices[][] | select(.udid == $u) | .name')"
+# Regular width in landscape: iPads, and the Max / Plus iPhones.
+WIDE=0; [[ "$SIM_NAME" == iPad* || "$SIM_NAME" == *" Max" || "$SIM_NAME" == *" Plus" ]] && WIDE=1
 
 CASES="${CASES:-all}"
 # want <case>...: whether any of the cases was selected.
@@ -411,7 +419,7 @@ fi
 cli pane focus "$PANE" >/dev/null
 
 # --- "View and type": pairs, then the live cases run on the same pairing.
-LIVE_CASES=(live-terminal live-input modifier-keys size-follows tab-ops)
+LIVE_CASES=(live-terminal live-input modifier-keys size-follows tab-ops continuity)
 if want interactive "${LIVE_CASES[@]}" || { want rejected && ! want composer; }; then
   MARKER="hi-from-phone-$$"
   reset_sim
@@ -439,6 +447,24 @@ if want live-terminal; then
     ok "live-terminal: the phone showed output printed on the Mac"
   else
     bad "live-terminal (see $SCRATCH/live-terminal.log)"
+  fi
+fi
+
+if want continuity; then
+  # The Mac leads (nobody typed on the phone), so the phone mirrors the
+  # Mac's grid and keeps to its bottom rows. A small Mac window keeps that
+  # grid shorter than the phone's screen, so the screenshots show the
+  # prompt instead of the empty rows under it.
+  resize_mac 900 480
+  start_ui_test continuity testKeepsItsPlaceAcrossLayoutChanges PAIRED=1 MARKER="place-$$" WIDE="$WIDE"
+  if await_phone attached; then
+    cli pane send "$PANE" "printf '%s-%s\n' place $$" >/dev/null
+    release attached
+  fi
+  if finish_ui_test; then
+    ok "continuity: $SIM_NAME kept its pane through rotation, background and relaunch"
+  else
+    bad "continuity on $SIM_NAME (see $SCRATCH/continuity.log)"
   fi
 fi
 

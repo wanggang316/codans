@@ -16,6 +16,7 @@ import XCTest
 /// - `CODANS_E2E_MARKER`: text the Mac prints (live output) or the phone
 ///   types (live input).
 /// - `CODANS_E2E_COMPOSER_PROMPT`: first message for the composer test.
+/// - `CODANS_E2E_WIDE=1`: the device is regular width in landscape.
 /// - `CODANS_E2E_SYNC`: host directory for hand-offs with the harness (see
 ///   `handOff(_:)`).
 /// - `CODANS_E2E_SHOTS`: host directory for step screenshots (optional).
@@ -147,6 +148,65 @@ final class RemoteEndToEndUITests: XCTestCase {
     shot("tab-ops-confirm")
     confirm.tap()
     handOff("closed")
+  }
+
+  /// The place survives layout changes: a rotation (on a Max iPhone or an
+  /// iPad that flips the width class, the proxy for folding an iPhone Duo
+  /// until the Duo simulator is available), a trip to the background, and
+  /// a relaunch, which must restore the pane from `@SceneStorage` with no
+  /// tap. The harness prints `CODANS_E2E_MARKER` on the pane first, so
+  /// "the same pane" is checked by its screen. `CODANS_E2E_WIDE=1` says
+  /// the device is regular width in landscape, where the sidebar must stay
+  /// beside the terminal.
+  @MainActor
+  func testKeepsItsPlaceAcrossLayoutChanges() throws {
+    let marker = try required("CODANS_E2E_MARKER")
+    let wide = env["CODANS_E2E_WIDE"] == "1"
+    let app = XCUIApplication()
+    let device = XCUIDevice.shared
+    device.orientation = .portrait
+    var text = try openTerminal(app)
+    handOff("attached")
+    expectation(for: NSPredicate(format: "value CONTAINS %@", marker), evaluatedWith: text)
+    waitForExpectations(timeout: 15)
+    shot("1-portrait")
+
+    device.orientation = .landscapeLeft
+    assertSamePane(app, marker: marker, step: "after rotating to landscape")
+    if wide {
+      XCTAssertTrue(
+        app.descendants(matching: .any)["worktree-row"].firstMatch.isHittable,
+        "regular width in landscape must keep the sidebar beside the terminal")
+    }
+    shot("2-landscape")
+
+    device.orientation = .portrait
+    assertSamePane(app, marker: marker, step: "after rotating back to portrait")
+    shot("3-portrait-again")
+
+    device.press(.home)
+    RunLoop.current.run(until: Date().addingTimeInterval(2))
+    app.activate()
+    assertSamePane(app, marker: marker, step: "after coming back from the background")
+    shot("4-foreground")
+
+    // A relaunch restores the scene: the terminal must come back on its own.
+    app.terminate()
+    app.launch()
+    text = app.descendants(matching: .any)["terminal-text"].firstMatch
+    XCTAssertTrue(text.waitForExistence(timeout: 30), "a relaunch did not restore the terminal from scene storage")
+    expectation(for: NSPredicate(format: "value CONTAINS %@", marker), evaluatedWith: text)
+    waitForExpectations(timeout: 30)
+    shot("5-relaunched")
+  }
+
+  /// The terminal is still on screen and still shows `marker`.
+  @MainActor
+  private func assertSamePane(_ app: XCUIApplication, marker: String, step: String) {
+    let text = app.descendants(matching: .any)["terminal-text"].firstMatch
+    XCTAssertTrue(text.waitForExistence(timeout: 10), "terminal gone \(step)")
+    expectation(for: NSPredicate(format: "value CONTAINS %@", marker), evaluatedWith: text)
+    waitForExpectations(timeout: 15)
   }
 
   /// Revocation while connected: the harness revokes every device on the

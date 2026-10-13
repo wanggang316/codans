@@ -13,6 +13,7 @@ UI test (`apps/ios/CodansMobileUITests`) on a simulator.
 | read-only | A "View only" pairing never shows the input bar. |
 | composer | A "View and type" pairing opens the composer at the bottom of the home screen, picks Create New Worktree, and sends a message. The Mac creates the worktree on `agent/<first words of the message>` and starts the fake `claude` profile with the message as its prompt. The phone navigates to the new agent's pane. |
 | size-follows | The pane's size follows the device in use. Typing on the phone lays the pane out for the phone's screen; typing on the Mac takes it back; closing the phone app hands it back. The PTY size is read through a zmx observer, which never types. |
+| continuity | The phone keeps the same pane through a rotation, a trip to the background, and a relaunch that restores it from `@SceneStorage` with no tap. On an iPad or a Max iPhone the rotation flips the width class, and the sidebar must stay beside the terminal in landscape: the stand-in for folding an iPhone Duo until the Duo simulator (Xcode 27.1) is available. |
 | revoke | Revoking every device in Settings removes their records and their Keychain keys. |
 
 The UI test skips itself unless the harness passes a pairing code through a
