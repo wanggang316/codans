@@ -121,19 +121,34 @@ final class AgentStateStore {
 
   private var scratch: [PaneID: Scratch] = [:]
 
+  /// Per-pane attention stop: present once the agent stops for the user
+  /// (blocked, or done after working), `true` once the user has looked at
+  /// the pane since then. Cleared when the agent starts working again.
+  /// Separate from `Scratch.seen`, which also covers focus *before* the
+  /// stop and drives only the badge. Read by notification delivery: a stop
+  /// the user already looked at does not need a banner.
+  @ObservationIgnored private var attentionObserved: [PaneID: Bool] = [:]
+
   /// Globally focused pane, if any. Used to avoid surfacing
   /// `.finished` for work the user is already looking at; focus
   /// change events still clear a previously surfaced finished state.
   private let focusedPane: @MainActor () -> PaneID?
+  /// True when the user can see `paneID` right now (app active, pane has
+  /// keyboard focus). Unlike `focusedPane`, this is gated on the app being
+  /// frontmost, so an agent that stops while the user is in another app is
+  /// not recorded as observed.
+  private let isPaneInView: @MainActor (PaneID) -> Bool
   /// Time source. Injected so tests can assert on `lastTransitionAt`
   /// without racing real `Date()`.
   private let now: () -> Date
 
   init(
     focusedPane: @escaping @MainActor () -> PaneID?,
+    isPaneInView: @escaping @MainActor (PaneID) -> Bool = { _ in false },
     now: @escaping () -> Date = Date.init
   ) {
     self.focusedPane = focusedPane
+    self.isPaneInView = isPaneInView
     self.now = now
   }
 
@@ -200,6 +215,7 @@ final class AgentStateStore {
       // unbound pane is a single `@Observable` no-op write.
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
+      attentionObserved.removeValue(forKey: paneID)
 
     case .paneViewportChanged(let paneID, let text):
       applyViewportText(text, paneID: paneID)
@@ -237,6 +253,7 @@ final class AgentStateStore {
     s.userInputSeen = true
     s.seen = true
     scratch[paneID] = s
+    markObserved(paneID)
     refresh(paneID)
   }
 
@@ -251,7 +268,18 @@ final class AgentStateStore {
     }
     s.seen = true
     scratch[paneID] = s
+    markObserved(paneID)
     refresh(paneID)
+  }
+
+  /// The user is looking at `paneID` without a focus change — for example
+  /// the app became active again with the pane already focused. Records
+  /// only that the current attention stop was observed; badges are left
+  /// to the regular focus path.
+  func markObserved(_ paneID: PaneID) {
+    if attentionObserved[paneID] != nil {
+      attentionObserved[paneID] = true
+    }
   }
 
   /// `AgentBinder` identified an agent in `paneID`. Materialise an
@@ -305,6 +333,7 @@ final class AgentStateStore {
   func onAgentUnbound(_ paneID: PaneID) {
     entries.removeValue(forKey: paneID)
     scratch.removeValue(forKey: paneID)
+    attentionObserved.removeValue(forKey: paneID)
   }
 
   /// Catalog-membership backstop. Drops every entry (and its scratch)
@@ -332,6 +361,7 @@ final class AgentStateStore {
       )
       entries.removeValue(forKey: paneID)
       scratch.removeValue(forKey: paneID)
+      attentionObserved.removeValue(forKey: paneID)
     }
   }
 
@@ -372,6 +402,12 @@ final class AgentStateStore {
     scratch[paneID]?.lastTitle
   }
 
+  /// True when the agent in `paneID` has stopped for the user (blocked or
+  /// done) and the user has looked at the pane since that stop.
+  func hasObservedAttention(_ paneID: PaneID) -> Bool {
+    attentionObserved[paneID] == true
+  }
+
   // MARK: - Derivation
 
   /// Raw state derivation. Display-only finished is intentionally not
@@ -391,6 +427,20 @@ final class AgentStateStore {
       return .working
     case .idle:
       return s.seen ? .idle : .finished
+    }
+  }
+
+  /// Opens an attention stop on blocked or on done-after-working, and
+  /// closes it when the agent works again. A blocked prompt that re-renders
+  /// after the optimistic clear in `onPaneFocused` stays in the same stop,
+  /// so a look at the prompt is not lost.
+  private func trackAttentionStop(_ paneID: PaneID, previous: AgentRawState, current: AgentRawState) {
+    if current == .working {
+      attentionObserved.removeValue(forKey: paneID)
+    } else if current == .blocked || (previous.isActive && current == .idle) {
+      if attentionObserved[paneID] != true {
+        attentionObserved[paneID] = isPaneInView(paneID)
+      }
     }
   }
 
@@ -476,6 +526,7 @@ final class AgentStateStore {
     }
     s.rawState = newRaw
     scratch[paneID] = s
+    trackAttentionStop(paneID, previous: previousRaw, current: newRaw)
 
     // A pane seeded from the quit snapshot holds its restored display
     // state until the first live viewport classification — deriving from
