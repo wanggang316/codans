@@ -1318,7 +1318,9 @@ struct HierarchySidebarView: View {
   /// Group 2 — GitHub + Changes. Every entry acts on the right-clicked row,
   /// not the selection; the shortcut hints mirror the selection-scoped
   /// Worktree-menu commands. "Open Pull Request" shows only once a PR
-  /// snapshot exists for the row.
+  /// snapshot exists for the row. Both Changes entries open the Git Viewer
+  /// chosen in Settings; "Show Uncommitted" carries the Toggle Git Viewer
+  /// hint because a fresh diff window opens on that scope.
   @ViewBuilder
   private func worktreeGitHubAndChangesItems(
     worktree: Worktree, project: Project
@@ -1347,6 +1349,7 @@ struct HierarchySidebarView: View {
     } label: {
       Label("Show Uncommitted", systemImage: "plusminus")
     }
+    .appKeyboardShortcut(.toggleDiffInspector, in: resolvedShortcuts)
     Button {
       store.send(
         .delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .outgoing)))
