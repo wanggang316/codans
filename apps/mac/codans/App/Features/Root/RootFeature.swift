@@ -612,9 +612,8 @@ struct RootFeature {
   private func openInExternalGitViewer(
     projectID: ProjectID, worktreeID: WorktreeID, state: State
   ) -> Effect<Action>? {
-    let snapshot = settingsWriter.readSnapshotSync()
-    let resolvedID = snapshot.general.defaultGitViewerID ?? GeneralSettings.builtInGitViewerID
-    if resolvedID == GeneralSettings.builtInGitViewerID { return nil }
+    guard let resolvedID = settingsWriter.readSnapshotSync().general.externalGitViewerID
+    else { return nil }
     guard
       state.editor.descriptors.contains(where: { $0.id == resolvedID }),
       let path = hierarchyClient.snapshot()

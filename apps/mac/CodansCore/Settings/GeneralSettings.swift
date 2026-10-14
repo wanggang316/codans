@@ -54,6 +54,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   public static let builtInGitViewerID: EditorID = "built-in"
   /// Missing and legacy null values resolve to the built-in diff window.
   public var defaultGitViewerID: EditorID?
+  /// The configured external Git Viewer, or `nil` when the built-in diff window is used.
+  public var externalGitViewerID: EditorID? {
+    guard let id = defaultGitViewerID, id != Self.builtInGitViewerID else { return nil }
+    return id
+  }
   /// Global default merge strategy used by the GitHub popover's Merge split-button when no
   /// per-Project `RepositorySettings.defaultMergeStrategy` is set. `nil` means "no global
   /// default" — the picker falls back to `.squash` for its initial value.
