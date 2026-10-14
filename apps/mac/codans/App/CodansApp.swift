@@ -989,9 +989,9 @@ final class AppState {
       settingsReader: settingsReader,
       catalogSnapshot: { manager.catalog },
       lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
-      isPaneObserved: { [weak self, weak engine] paneID in
-        engine?.isSurfaceFocused(paneID) == true
-          || self?.agentStateStore?.hasObservedAttention(paneID) == true
+      isPaneFocused: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
+      hasObservedAttention: { [weak self] paneID in
+        self?.agentStateStore?.hasObservedAttention(paneID) == true
       },
       onProjectActivity: { [weak manager] projectID in
         manager?.bumpProjectActivity(projectID)

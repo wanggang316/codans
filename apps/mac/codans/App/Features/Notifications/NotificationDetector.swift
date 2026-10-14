@@ -27,14 +27,16 @@ public final class NotificationDetector {
   private let catalogSnapshot: @MainActor () -> Catalog
   private let lastFocusedPane: @MainActor (TabID) -> PaneID?
   private let isAppFrontmost: @MainActor () -> Bool
-  /// True when the user has already seen what the pane wants to say: the
-  /// pane has keyboard focus in the active app right now (AppKit ground
-  /// truth — the catalog-level focus map is runtime-only and can lag), or
-  /// its agent stopped for the user and the user looked at the pane after
-  /// that stop. Agents often notify some time after the stop (Claude's
-  /// "waiting for input" fires after a minute idle), so focus at post time
-  /// alone misses a look that already happened.
-  private let isPaneObserved: @MainActor (PaneID) -> Bool
+  /// True when the pane has keyboard focus in the active app right now
+  /// (AppKit ground truth — the catalog-level focus map is runtime-only and
+  /// can lag).
+  private let isPaneFocused: @MainActor (PaneID) -> Bool
+  /// True when the pane's agent stopped for the user and the user looked at
+  /// the pane after that stop. Agents often notify some time after the stop
+  /// (Claude's "waiting for input" fires after a minute idle), so focus at
+  /// post time alone misses a look that already happened. Applies only to
+  /// the agent's own cues: a crash is a new event the user has not seen.
+  private let hasObservedAttention: @MainActor (PaneID) -> Bool
   /// Side-channel keystroke tracker. Snapshotted once per event into the
   /// interpreter's `Context.lastUserKeystrokeAt` so the 1-second
   /// `userTypingRecently` suppression can actually fire on real input.
@@ -71,7 +73,8 @@ public final class NotificationDetector {
     catalogSnapshot: @escaping @MainActor () -> Catalog,
     lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
     isAppFrontmost: @escaping @MainActor () -> Bool = { NSApp.isActive },
-    isPaneObserved: @escaping @MainActor (PaneID) -> Bool = { _ in false },
+    isPaneFocused: @escaping @MainActor (PaneID) -> Bool = { _ in false },
+    hasObservedAttention: @escaping @MainActor (PaneID) -> Bool = { _ in false },
     onProjectActivity: (@MainActor (ProjectID) -> Void)? = nil
   ) {
     self.store = store
@@ -81,7 +84,8 @@ public final class NotificationDetector {
     self.catalogSnapshot = catalogSnapshot
     self.lastFocusedPane = lastFocusedPane
     self.isAppFrontmost = isAppFrontmost
-    self.isPaneObserved = isPaneObserved
+    self.isPaneFocused = isPaneFocused
+    self.hasObservedAttention = hasObservedAttention
     self.onProjectActivity = onProjectActivity
   }
 
@@ -200,8 +204,10 @@ public final class NotificationDetector {
     // per-tab last-focused behaviour: a notification fired from a
     // non-active tab's last-focused split *will* notify, because by
     // definition the user isn't looking at it.
+    let paneID = resolved.source.paneID
     let sourceIsFocused =
-      isPaneObserved(resolved.source.paneID) || resolved.source.paneID == globallyFocusedPane()
+      isPaneFocused(paneID) || paneID == globallyFocusedPane()
+      || (!isTeardown && hasObservedAttention(paneID))
 
     // Title stays clean; the source breadcrumb (`<project> · <worktree>`)
     // is attached as `bannerSourceLabel` and appended to the OS banner

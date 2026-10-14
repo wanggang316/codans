@@ -58,6 +58,13 @@ codans 把编码 agent（Claude Code、Codex CLI、pi、…）作为 Pane 运行
 
 第二是**与 notifications 独立**。通知检测器与 AgentState 消费同一运行时事件源的不同信号，但回答不同问题。强迫一方消费另一方的输出（例如「AgentState 读 InboxStore 来定 `finished` 态」）会把 mute 策略、去重窗口和规则语法耦合进一个本不该关心它们的层。两者都订阅原始信号；输出永不交叉。
 
+唯一例外是**「停下点是否已被看过」**。Agent 进入 blocked 或一轮结束后，常常隔一段时间才发自己的提醒（Claude 约 60 秒后发 "waiting for your input"）。用户在这段时间里看过 Pane，提醒就不该再弹。「停下点」只有 AgentState 能识别，所以由 `AgentStateStore` 记录每个停下点的 `observed`，通知检测器只读 `hasObservedAttention(paneID)` 这一个布尔值。约束：
+
+- 只读、单向：AgentState 不读通知层的任何状态，mute、去重和规则仍只在通知层。
+- `observed` 只在 Pane 真的在眼前时置位（app 在前台、窗口是 key、surface 是 first responder），或用户在该 Pane 打字。CLI `pane focus` 等只改 catalog 选中的路径只清角标，不算看过。
+- 只压 agent 自己的提醒。崩溃等生命周期事件（teardown cue）不受影响。
+- 每个新停下点（新 blocked、新一轮结束）重新从「未看过」开始，进入 working 时清除。
+
 第三个、较轻的压力：`Pane.labels` 这个 `Set<String>` 已经携带 `notifications:muted`，它故意是字符串——通知层把 labels 当作正交的用户可见标签。复用它来塞 `agent:claude` 会让两个无关子系统通过同一个无类型集合耦合。我们宁可付出两个显式 `Pane.agentKind` / `Pane.agentSessionID` 字段的小迁移成本（见 Alternative A）。
 
 ### 数据存储
