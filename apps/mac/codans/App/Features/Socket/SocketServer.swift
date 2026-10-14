@@ -37,6 +37,10 @@ public final class SocketServer {
     if fd < 0 {
       throw SocketError.socketCreateFailed(errno: errno)
     }
+    // Pane processes (zmx daemons) are forked from this app and outlive it.
+    // An inherited listen fd keeps a dead app's socket accepting connections
+    // into a backlog nobody drains, which makes the path look busy forever.
+    Self.setCloseOnExec(fd: fd)
 
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
@@ -123,6 +127,7 @@ public final class SocketServer {
     while true {
       let client = Darwin.accept(fd, nil, nil)
       if client >= 0 {
+        Self.setCloseOnExec(fd: client)
         Task { @MainActor [weak self] in
           self?.startConnection(clientFD: client)
         }
@@ -274,6 +279,13 @@ public final class SocketServer {
     }
   }
 
+  nonisolated private static func setCloseOnExec(fd: Int32) {
+    let flags = fcntl(fd, F_GETFD)
+    if flags >= 0 {
+      _ = fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
+    }
+  }
+
   nonisolated private static func shutdownAndClose(fd: Int32) {
     _ = Darwin.shutdown(fd, SHUT_RDWR)
     _ = Darwin.close(fd)
@@ -310,10 +322,14 @@ public final class SocketServer {
   // MARK: - Stale-socket cleanup
 
   /// Unlink a stale socket at `path`, but only after proving no live
-  /// server is currently accepting on it. Probes via `connect(2)`:
+  /// server is currently serving on it. Probes via `connect(2)`:
   /// `ECONNREFUSED` from a same-UID-readable path means the inode exists
   /// but nothing is accepting, so it's safe to unlink. A successful
-  /// connect proves another instance is running; we refuse to start.
+  /// connect is not enough: a process that inherited a dead instance's
+  /// listen fd keeps the backlog open but never accepts. So the probe also
+  /// sends one request. We refuse to start when the peer answers (or hangs
+  /// up) in time, or when the instance that created the listener is still
+  /// alive, because a busy main thread can delay its reply.
   private func cleanupStaleSocket() throws {
     var s = stat()
     guard lstat(path, &s) == 0 else { return }
@@ -342,7 +358,12 @@ public final class SocketServer {
       }
     }
     if connectResult == 0 {
-      throw SocketError.alreadyInUse(path: path)
+      if Self.peerAnswers(fd: probeFD) || Self.listenerCreatorIsAnotherInstance(fd: probeFD) {
+        throw SocketError.alreadyInUse(path: path)
+      }
+      logger.warning("socket at \(self.path, privacy: .public) accepts connections but never answers; replacing it")
+      unlink(path)
+      return
     }
     if errno == ECONNREFUSED || errno == ENOENT {
       unlink(path)
@@ -350,6 +371,52 @@ public final class SocketServer {
     }
     // Unknown errno; leave the file in place so the caller gets a clean
     // EADDRINUSE from bind rather than stomping on something unexpected.
+  }
+
+  /// How long a peer on an existing socket path has to answer the probe
+  /// request before the path can count as stale.
+  nonisolated private static let probeReplyTimeoutMilliseconds: Int32 = 1_000
+
+  /// Send one framed request on a connected probe fd and wait for any
+  /// reply. A live server answers even a pre-hello frame (with a handshake
+  /// error), so the request content does not matter. A hang-up or a poll
+  /// error also counts as an answer: when in doubt, refuse to start.
+  nonisolated private static func peerAnswers(fd: Int32) -> Bool {
+    guard
+      let body = try? JSONEncoder().encode(IPC.Request(id: "socket-probe", method: .systemPing)),
+      let frame = try? Framing.encode(body)
+    else {
+      // No probe to send, so no proof that the path is stale.
+      return true
+    }
+    var one: Int32 = 1
+    _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+    let sent = frame.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, frame.count, 0) }
+    // A peer that drops the connection is a peer, not an orphan backlog.
+    guard sent == frame.count else { return true }
+    var pollFD = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+    while true {
+      let ready = Darwin.poll(&pollFD, 1, probeReplyTimeoutMilliseconds)
+      if ready < 0 && errno == EINTR { continue }
+      return ready != 0
+    }
+  }
+
+  /// `LOCAL_PEERPID` on a client fd reports the process that called
+  /// `listen(2)`, not the process that holds the fd now. For an orphan
+  /// backlog that is the dead instance, so a live process with our own name
+  /// means a running instance that is only slow to answer. A recycled pid
+  /// with another name does not count.
+  nonisolated private static func listenerCreatorIsAnotherInstance(fd: Int32) -> Bool {
+    guard let pid = SocketPeerAuth.peerPID(fd: fd), pid != getpid() else { return false }
+    guard let name = processName(pid) else { return false }
+    return name == processName(getpid())
+  }
+
+  nonisolated private static func processName(_ pid: pid_t) -> String? {
+    var buffer = [CChar](repeating: 0, count: Int(MAXCOMLEN) * 2 + 1)
+    guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return String(cString: buffer)
   }
 }
 
