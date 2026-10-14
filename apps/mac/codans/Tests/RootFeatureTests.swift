@@ -228,6 +228,51 @@ struct RootFeatureTests {
     await store.finish()
   }
 
+  @Test(arguments: [GitComparisonScope.all, .outgoing])
+  func sidebarShowChangesOpensConfiguredExternalClientForTheRow(scope: GitComparisonScope) async {
+    // The sidebar row's "Show Uncommitted" / "Show Outgoing" honor the Git
+    // Viewer setting like the chord does, and act on the clicked row (B),
+    // not the selection (A).
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    let catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB
+    )
+    let descriptor = EditorDescriptor(
+      id: "fork",
+      displayName: "Fork",
+      bundleIdentifier: "com.DanPristupov.Fork",
+      launchMode: .directory,
+      appURL: URL(fileURLWithPath: "/Applications/Fork.app"),
+      alternateBundleIdentifiers: []
+    )
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: projectID, worktreeID: worktreeA)
+    initial.editor.descriptors = [descriptor]
+    let settings = Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0.editorClient = EditorClient.testValue
+      $0.editorClient.open = { _, id in
+        EditorChoice(id: id ?? "finder", displayName: "x", binaryPath: nil)
+      }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .sidebar(.delegate(.showChanges(projectID: projectID, worktreeID: worktreeB, scope: scope))))
+    await store.receive(
+      .editor(.openRequested(editorID: "fork", worktreePath: "/b", projectID: projectID)))
+    await store.finish()
+  }
+
   @Test
   func gitViewerChordWithoutSelectionIsNoOp() async {
     // When no Worktree is selected, the chord is a no-op.
