@@ -282,16 +282,23 @@ extension WorkflowEngine {
 
   /// While a delivery is awaited the role's pane is watched for the
   /// machine: working → idle for the grace period, the deadline, a pane
-  /// stuck on a prompt, or a pane that vanished. Re-arming replaces.
+  /// stuck on a prompt, a pane that vanished, or a pane whose agent is
+  /// gone (exited, or a launched agent that never came up — a pane left
+  /// on a bare shell would otherwise wait forever). Re-arming replaces.
   private func armWatchdog(_ session: WorkflowRunSession, ordinal: Int, idleGraceSeconds: Int, deadline: Date?) {
     session.watchdogs[ordinal]?.cancel()
     guard let activation = session.machine.run.activations[ordinal], let paneID = activation.paneID else { return }
     let role = activation.role
+    // A person may deliver from a bare shell, so only a launched role is
+    // expected to host an agent before one was seen.
+    let expectsAgent = session.machine.run.bindings[role]?.isLaunch == true
+    let agentDeadline = dependencies.now().addingTimeInterval(dependencies.agentStartupGraceSeconds)
     // After a nudge the agent may never start working again; the second
     // grace must count from idle as it is.
     let alreadyNudged = activation.nudged
     session.watchdogs[ordinal] = Task { @MainActor [weak self] in
       var seenWorking = alreadyNudged
+      var seenAgent = false
       var idleSince: Date?
       var blockedSince: Date?
       while let self, !Task.isCancelled {
@@ -304,6 +311,12 @@ extension WorkflowEngine {
         session.machine.observe(role: role, state: state?.rawValue ?? "gone")
         if let deadline, now >= deadline {
           apply(.watchdog(ordinal: ordinal, .deadlineReached), to: session)
+          return
+        }
+        if state != nil {
+          seenAgent = true
+        } else if seenAgent || (expectsAgent && now >= agentDeadline) {
+          apply(.watchdog(ordinal: ordinal, .agentExited), to: session)
           return
         }
         if state == .working { seenWorking = true }
