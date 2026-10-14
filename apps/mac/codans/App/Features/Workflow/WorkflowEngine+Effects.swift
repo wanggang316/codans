@@ -298,7 +298,8 @@ extension WorkflowEngine {
     let alreadyNudged = activation.nudged
     session.watchdogs[ordinal] = Task { @MainActor [weak self] in
       var seenWorking = alreadyNudged
-      var seenAgent = false
+      // A nudge follows working → idle, so the agent was there before.
+      var seenAgent = alreadyNudged
       var idleSince: Date?
       var blockedSince: Date?
       while let self, !Task.isCancelled {

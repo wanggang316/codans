@@ -90,6 +90,7 @@ struct SocketServerStaleSocketTests {
 
   static func listen(at path: String) throws -> Int32 {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    try #require(fd >= 0)
     var addr = address(path)
     let bound = withUnsafePointer(to: &addr) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -103,6 +104,7 @@ struct SocketServerStaleSocketTests {
 
   static func connect(to path: String) throws -> Int32 {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    try #require(fd >= 0)
     var addr = address(path)
     let connected = withUnsafePointer(to: &addr) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {

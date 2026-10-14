@@ -275,6 +275,25 @@ struct WorkflowEngineTests {
   }
 
   @Test
+  func watchdogRaisesAttentionWhenTheAgentExitsAfterANudge() async throws {
+    let harness = try Self.makeHarness()
+    let entry = try Self.entry(yaml: Self.yaml)
+    let configuration = try Self.configuration(harness, entry: entry, selfInitiated: true)
+    let started = try await harness.engine.start(configuration: configuration, entry: entry)
+    harness.world.states[harness.paneID] = .working
+    try await Task.sleep(for: .milliseconds(30))
+    harness.world.states[harness.paneID] = .idle
+    try await Task.sleep(for: .milliseconds(30))
+    harness.world.advance(11)
+    await Self.settle { harness.engine.run(for: started.runID)?.activations[1]?.nudged == true }
+
+    // The re-armed watchdog still knows an agent was there.
+    harness.world.states[harness.paneID] = nil
+    await Self.settle { harness.engine.run(for: started.runID)?.status.attention != nil }
+    #expect(harness.engine.run(for: started.runID)?.status.attention?.reason == .roleGone)
+  }
+
+  @Test
   func watchdogRaisesAttentionWhenTheLaunchedAgentNeverStarts() async throws {
     let harness = try Self.makeHarness()
     let entry = try Self.entry(yaml: Self.launchYAML, id: "launch")
