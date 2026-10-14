@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// Handlers for `terminal.*` — send input into a pane, broadcast across
@@ -20,6 +20,20 @@ public final class TerminalHandlers {
     func fanOut(scope: IPC.BroadcastScope, text: String, catalog: Catalog) -> Int
     func readText(paneID: PaneID, extent: ReadExtent) -> String?
     func resetPane(paneID: PaneID) -> Bool
+    /// Whether the pane has a surface laid out on the Mac — what key
+    /// encoding needs.
+    func hasLiveSurface(paneID: PaneID) -> Bool
+    /// Deliver one `key`, `text` or `paste` event. Limits are already
+    /// checked; `delay` and `unknown` never reach the sink.
+    func sendInputEvent(paneID: PaneID, event: IPC.TerminalInputEvent) -> InputEventOutcome
+  }
+
+  public enum InputEventOutcome: Equatable, Sendable {
+    case delivered
+    /// Not delivered, for a `TerminalInputRejection.Reason`.
+    case rejected(reason: String)
+    /// The pane's surface is gone; the rest of the batch cannot land.
+    case paneGone
   }
 
   public enum ReadExtent: String, Codable, Sendable {
@@ -121,7 +135,8 @@ public final class TerminalHandlers {
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
       let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
-      let output = req.capture == true
+      let output =
+        req.capture == true
         ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
       result = SendInputResult(
         delivered: true, completed: outcome.completed, waitedMillis: outcome.waitedMillis,
@@ -199,7 +214,8 @@ public final class TerminalHandlers {
       common += 1
     }
     afterLines.removeFirst(common)
-    let firstSentLine = sent.split(separator: "\n").first.map(String.init)?
+    let firstSentLine =
+      sent.split(separator: "\n").first.map(String.init)?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if let first = afterLines.first, !firstSentLine.isEmpty, first.contains(firstSentLine) {
       afterLines.removeFirst()
@@ -231,6 +247,94 @@ public final class TerminalHandlers {
       return .failed(.notFound(kind: "pane", id: req.paneID.description))
     }
     return .unary(.object(["delivered": .bool(true)]))
+  }
+
+  /// `terminal.sendEvents` — an ordered batch of keys, typed text, pastes
+  /// and delays for one pane. Events are applied in order; one that cannot
+  /// be delivered is reported in `rejected` and the rest still run, so a
+  /// newer client's unknown event never costs the keys around it.
+  public func sendEvents(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    guard let sink else {
+      return .failed(
+        .unsupported(reason: "no GhosttyRuntime bound — terminal.sendEvents requires the app with panes live"))
+    }
+    let req: IPC.TerminalSendEventsRequest
+    do {
+      req = try params.decoded(as: IPC.TerminalSendEventsRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "sendEvents requires {paneID, events}: \(error)", path: nil))
+    }
+    guard req.events.count <= IPC.TerminalSendEventsRequest.maxEvents else {
+      return .failed(
+        .invalidParams(
+          message: "at most \(IPC.TerminalSendEventsRequest.maxEvents) events per call", path: ["events"]))
+    }
+    guard catalog().pane(req.paneID) != nil else {
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    }
+    guard sink.hasLiveSurface(paneID: req.paneID) else {
+      return .failed(.unsupported(reason: "pane not open on the Mac"))
+    }
+    var delivered = 0
+    var rejected: [IPC.TerminalInputRejection] = []
+    var delayBudget = IPC.TerminalSendEventsRequest.maxTotalDelayMillis
+    var paneGone = false
+    for (index, event) in req.events.enumerated() {
+      let outcome: InputEventOutcome =
+        paneGone
+        ? .paneGone
+        : await apply(event, paneID: req.paneID, sink: sink, delayBudget: &delayBudget)
+      switch outcome {
+      case .delivered:
+        delivered += 1
+      case .rejected(let reason):
+        rejected.append(IPC.TerminalInputRejection(index: index, reason: reason))
+      case .paneGone:
+        paneGone = true
+        rejected.append(
+          IPC.TerminalInputRejection(index: index, reason: IPC.TerminalInputRejection.Reason.paneGone))
+      }
+    }
+    do {
+      return .unary(try JSONValue.encoded(IPC.TerminalSendEventsResult(delivered: delivered, rejected: rejected)))
+    } catch {
+      return .failed(.internal("encode sendEvents result: \(error)"))
+    }
+  }
+
+  /// One event of a `sendEvents` batch: limits first, then the sink. A
+  /// cancelled delay means the caller is gone, so it ends the batch like a
+  /// closed surface does.
+  private func apply(
+    _ event: IPC.TerminalInputEvent, paneID: PaneID, sink: InputSink, delayBudget: inout Int
+  ) async -> InputEventOutcome {
+    switch event {
+    case .unknown:
+      return .rejected(reason: IPC.TerminalInputRejection.Reason.unknownEvent)
+    case .delay(let millis):
+      guard (0...IPC.TerminalInputEvent.maxDelayMillis).contains(millis), millis <= delayBudget else {
+        return .rejected(reason: IPC.TerminalInputRejection.Reason.outOfRange)
+      }
+      delayBudget -= millis
+      do {
+        try await clock.sleep(millis: millis)
+        return .delivered
+      } catch {
+        return .paneGone
+      }
+    case .text(let text), .paste(let text):
+      guard text.utf8.count <= IPC.TerminalInputEvent.maxTextBytes else {
+        return .rejected(reason: IPC.TerminalInputRejection.Reason.tooLarge)
+      }
+      return sink.sendInputEvent(paneID: paneID, event: event)
+    case .key(_, let text, _):
+      // A key's text is typed like `text`, so it gets the same cap.
+      if let text, text.utf8.count > IPC.TerminalInputEvent.maxTextBytes {
+        return .rejected(reason: IPC.TerminalInputRejection.Reason.tooLarge)
+      }
+      return sink.sendInputEvent(paneID: paneID, event: event)
+    }
   }
 
   public struct SendRawBytesParams: Codable, Sendable {

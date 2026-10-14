@@ -114,6 +114,7 @@ public nonisolated struct Settings {            // currentVersion = 3
   var projects: [ProjectID: ProjectSettings]
   var notifications: NotificationsSettings
   var agents: AgentSettings
+  var remoteAccess: RemoteAccessSettings    // LAN gateway switch, default off
 }
 
 public nonisolated struct ProjectSettings: Equatable, Codable, Sendable {

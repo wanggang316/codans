@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// One accepted connection's request/response loop. Shared by the real
@@ -17,6 +17,12 @@ public actor SocketConnection {
   /// peer (the in-memory test harness). Forwarded to the router with
   /// every request so handlers can attribute the call to a live pane.
   public let peerPID: pid_t?
+  /// Resolves the caller for each request. Nil for Unix-socket
+  /// connections, which are always `.local(peerPID:)`. The gateway passes
+  /// a closure that reads the device's current permission, so a downgrade
+  /// applies to the next request without reconnecting; a nil answer means
+  /// the device was revoked mid-connection.
+  private let resolveContext: (@MainActor @Sendable () -> CallerContext?)?
   public let inflightLimit: Int
   private let router: MethodRouter
   private let reader: AsyncStream<Data>
@@ -39,10 +45,12 @@ public actor SocketConnection {
     reader: AsyncStream<Data>,
     write: @escaping @Sendable (Data) async -> Void,
     close: @escaping @Sendable () async -> Void,
+    context: (@MainActor @Sendable () -> CallerContext?)? = nil,
     inflightLimit: Int = 64
   ) {
     self.id = id
     self.peerPID = peerPID
+    self.resolveContext = context
     self.router = router
     self.reader = reader
     self.write = write
@@ -84,7 +92,14 @@ public actor SocketConnection {
     do {
       request = try JSONDecoder().decode(IPC.Request.self, from: frame)
     } catch {
-      await sendError(id: "<malformed>", .invalidFrame(reason: "request decode failed: \(error)"))
+      // Answer under the caller's id when it can be read, so a client
+      // calling a method this build lacks gets an error, not a timeout.
+      let head = try? JSONDecoder().decode(IPC.RequestHead.self, from: frame)
+      if let head, let unknown = head.unknownMethodError {
+        await sendError(id: head.id, unknown)
+      } else {
+        await sendError(id: head?.id ?? "<malformed>", .invalidFrame(reason: "request decode failed: \(error)"))
+      }
       return
     }
 
@@ -121,8 +136,22 @@ public actor SocketConnection {
     }
   }
 
+  /// The caller for one request; nil when a remote device has been
+  /// revoked since it connected.
+  private func callerContext() async -> CallerContext? {
+    guard let resolveContext else { return .local(peerPID: peerPID) }
+    return await resolveContext()
+  }
+
+  private func route(_ request: IPC.Request) async -> RouterOutcome {
+    guard let context = await callerContext() else {
+      return .failed(.forbidden(reason: "this device is no longer paired"))
+    }
+    return await router.route(request, context: context)
+  }
+
   private func handleUnary(_ request: IPC.Request) async {
-    let outcome = await router.route(request, peerPID: peerPID)
+    let outcome = await route(request)
     switch outcome {
     case .unary(let result):
       if request.method == .systemHello { helloCompleted = true }
@@ -140,15 +169,36 @@ public actor SocketConnection {
   }
 
   private func handleStreaming(_ request: IPC.Request) async {
-    let outcome = await router.route(request, peerPID: peerPID)
+    let outcome = await route(request)
     switch outcome {
     case .streaming(let subscribe):
       let stream = subscribe()
-      for await frame in stream {
-        await sendResponse(IPC.Response(id: request.id, stream: true, result: frame))
+      let id = request.id
+      let producer = Task { [self] in
+        for await frame in stream {
+          await sendResponse(IPC.Response(id: id, stream: true, result: frame))
+        }
+        // Graceful server-initiated end: final frame with stream: false.
+        await sendResponse(IPC.Response(id: id, stream: false))
       }
-      // Graceful server-initiated end: final frame with stream: false.
-      await sendResponse(IPC.Response(id: request.id, stream: false))
+      // A streaming call is the connection's last request, so the reader
+      // is only watched for the peer hanging up. Without this a quiet
+      // stream would hold its resources (for `pane.attachStream`, a daemon
+      // connection and one of the caller's stream slots) until the next
+      // write fails, which can be a heartbeat interval away.
+      let reader = self.reader
+      let peerWatch = Task {
+        for await _ in reader {}
+        producer.cancel()
+      }
+      await withTaskCancellationHandler {
+        await producer.value
+      } onCancel: {
+        producer.cancel()
+      }
+      // Stopping the watch ends the reader, and with it the connection:
+      // nothing may follow a stream on it anyway.
+      peerWatch.cancel()
     case .unary(let result):
       // Caller sent stream: true on a non-streaming method.
       await sendResponse(IPC.Response(id: request.id, result: result))

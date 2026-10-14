@@ -125,6 +125,8 @@ struct SettingsWindowView: View {
       SettingsTerminalView(store: store.scope(state: \.terminal, action: \.terminal))
     case .notifications:
       NotificationsSettingsView()
+    case .remoteAccess:
+      RemoteAccessSettingsView(settingsStore: settingsStore)
     case .developer:
       DeveloperSettingsView()
     case .shortcuts:

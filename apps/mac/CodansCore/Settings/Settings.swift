@@ -28,6 +28,9 @@ public nonisolated struct Settings: Equatable, Sendable {
   /// pane shipped carry no `agents` key and decode to `.default`, which seeds
   /// one profile per built-in agent.
   public var agents: AgentSettings
+  /// LAN gateway for the iOS companion. Additive: older files decode to
+  /// `.default`, which keeps the gateway off.
+  public var remoteAccess: RemoteAccessSettings
   /// Agent Workflows: master switch, disabled ids, remembered role
   /// bindings, trusted repository files. Additive like `agents`.
   public var workflows: WorkflowSettings
@@ -40,6 +43,7 @@ public nonisolated struct Settings: Equatable, Sendable {
     projects: [ProjectID: ProjectSettings] = [:],
     notifications: NotificationsSettings = .default,
     agents: AgentSettings = .default,
+    remoteAccess: RemoteAccessSettings = .default,
     workflows: WorkflowSettings = .default
   ) {
     self.version = version
@@ -49,6 +53,7 @@ public nonisolated struct Settings: Equatable, Sendable {
     self.projects = projects
     self.notifications = notifications
     self.agents = agents
+    self.remoteAccess = remoteAccess
     self.workflows = workflows
   }
 
@@ -125,7 +130,7 @@ extension Settings: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, general, developer, worktree, projects, notifications, agents, workflows
+    case version, general, developer, worktree, projects, notifications, agents, remoteAccess, workflows
   }
 
   public init(from decoder: Decoder) throws {
@@ -143,6 +148,8 @@ extension Settings: Codable {
     self.notifications =
       try container.decodeIfPresent(NotificationsSettings.self, forKey: .notifications) ?? .default
     self.agents = try container.decodeIfPresent(AgentSettings.self, forKey: .agents) ?? .default
+    self.remoteAccess =
+      try container.decodeIfPresent(RemoteAccessSettings.self, forKey: .remoteAccess) ?? .default
     self.workflows = try container.decodeIfPresent(WorkflowSettings.self, forKey: .workflows) ?? .default
 
     // `projects` is encoded as a JSON object keyed by the ProjectID UUID string so the file
@@ -182,6 +189,7 @@ extension Settings: Codable {
     try container.encode(worktree, forKey: .worktree)
     try container.encode(notifications, forKey: .notifications)
     try container.encode(agents, forKey: .agents)
+    try container.encode(remoteAccess, forKey: .remoteAccess)
     if !workflows.isDefault {
       try container.encode(workflows, forKey: .workflows)
     }

@@ -1,0 +1,28 @@
+[Unit]
+Description=codans relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/codans-relay/current
+ExecStart=/opt/codans-relay/current/codans-relay -listen 127.0.0.1:3050 -data /opt/codans-relay/shared/data
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/codans-relay/shared/data
+
+[Install]
+WantedBy=multi-user.target

@@ -19,6 +19,10 @@ public enum IPCError: Error, Equatable, Sendable {
   case overloaded
   case versionMismatch(client: String, server: String)
   case invalidFrame(reason: String)
+  /// The caller is authenticated but not allowed to call this method — a
+  /// paired remote device outside its permission tier. Local callers never
+  /// see it.
+  case forbidden(reason: String)
   case domain(code: String, message: String, hint: String?)
 
   public var code: String {
@@ -32,6 +36,7 @@ public enum IPCError: Error, Equatable, Sendable {
     case .overloaded: return "overloaded"
     case .versionMismatch: return "versionMismatch"
     case .invalidFrame: return "invalidFrame"
+    case .forbidden: return "forbidden"
     case .domain: return "domain"
     }
   }
@@ -56,6 +61,7 @@ public enum IPCError: Error, Equatable, Sendable {
     case .overloaded: return "overloaded"
     case .versionMismatch: return "version mismatch"
     case .invalidFrame(let r): return r
+    case .forbidden(let r): return r
     case .domain(_, let m, _): return m
     }
   }
@@ -73,6 +79,7 @@ public enum IPCError: Error, Equatable, Sendable {
     case .versionMismatch(let c, let s):
       return "client v\(c) incompatible with server v\(s)"
     case .invalidFrame(let r): return r
+    case .forbidden(let r): return r
     case .domain(_, let m, _): return m
     }
   }
@@ -115,6 +122,8 @@ extension IPCError: Codable {
       self = .versionMismatch(client: client, server: server)
     case "invalidFrame":
       self = .invalidFrame(reason: message)
+    case "forbidden":
+      self = .forbidden(reason: message)
     case "domain":
       let domainCode = try c.decodeIfPresent(String.self, forKey: .domainCode) ?? ""
       let hint = try c.decodeIfPresent(String.self, forKey: .hint)
