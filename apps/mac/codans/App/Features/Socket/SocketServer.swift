@@ -20,17 +20,13 @@ public final class SocketServer {
   private let acceptQueue = DispatchQueue(label: "com.gumpw.codans.ipc.accept", qos: .userInitiated)
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "server")
 
-  /// How long a server already bound at `path` has to answer the
-  /// handshake before the path counts as stale.
-  private let probeTimeout: Duration
-  private(set) var listenFD: Int32 = -1
+  private var listenFD: Int32 = -1
   private var acceptSource: DispatchSourceRead?
   private var activeConnections: [UUID: Task<Void, Never>] = [:]
 
-  public init(path: String, router: MethodRouter, probeTimeout: Duration = .seconds(2)) {
+  public init(path: String, router: MethodRouter) {
     self.path = path
     self.router = router
-    self.probeTimeout = probeTimeout
   }
 
   /// Bind + listen. Throws on bind failure.
@@ -41,7 +37,6 @@ public final class SocketServer {
     if fd < 0 {
       throw SocketError.socketCreateFailed(errno: errno)
     }
-    Self.setCloseOnExec(fd)
 
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
@@ -126,7 +121,7 @@ public final class SocketServer {
 
   nonisolated private func drainAccepts(fd: Int32) {
     while true {
-      let client = Self.acceptCloseOnExec(fd)
+      let client = Darwin.accept(fd, nil, nil)
       if client >= 0 {
         Task { @MainActor [weak self] in
           self?.startConnection(clientFD: client)
@@ -145,20 +140,6 @@ public final class SocketServer {
       // errors: leave and let the cancel handler clean up.
       return
     }
-  }
-
-  /// `accept(2)` plus `FD_CLOEXEC`. Every pane spawn forks the app; a
-  /// descriptor without the flag leaks into the pane's zmx daemon, which
-  /// outlives the app.
-  nonisolated static func acceptCloseOnExec(_ fd: Int32) -> Int32 {
-    let client = Darwin.accept(fd, nil, nil)
-    if client >= 0 { setCloseOnExec(client) }
-    return client
-  }
-
-  nonisolated private static func setCloseOnExec(_ fd: Int32) {
-    let flags = fcntl(fd, F_GETFD)
-    if flags >= 0 { _ = fcntl(fd, F_SETFD, flags | FD_CLOEXEC) }
   }
 
   @MainActor
@@ -329,11 +310,10 @@ public final class SocketServer {
   // MARK: - Stale-socket cleanup
 
   /// Unlink a stale socket at `path`, but only after proving no live
-  /// server is answering on it. `ECONNREFUSED` means the inode exists but
-  /// nothing listens. A successful `connect(2)` is not enough: a pane's
-  /// zmx daemon that inherited an earlier app's listen fd keeps the path
-  /// connectable with nobody accepting. Only a reply to `system.hello`
-  /// proves another instance runs; then we refuse to start.
+  /// server is currently accepting on it. Probes via `connect(2)`:
+  /// `ECONNREFUSED` from a same-UID-readable path means the inode exists
+  /// but nothing is accepting, so it's safe to unlink. A successful
+  /// connect proves another instance is running; we refuse to start.
   private func cleanupStaleSocket() throws {
     var s = stat()
     guard lstat(path, &s) == 0 else { return }
@@ -341,7 +321,6 @@ public final class SocketServer {
     let probeFD = socket(AF_UNIX, SOCK_STREAM, 0)
     if probeFD < 0 { return }
     defer { Darwin.close(probeFD) }
-    Self.setCloseOnExec(probeFD)
 
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
@@ -363,13 +342,7 @@ public final class SocketServer {
       }
     }
     if connectResult == 0 {
-      if Self.answersHandshake(fd: probeFD, timeout: probeTimeout) {
-        throw SocketError.alreadyInUse(path: path)
-      }
-      logger.warning(
-        "socket \(self.path, privacy: .public) accepts connections but never answers; replacing it")
-      unlink(path)
-      return
+      throw SocketError.alreadyInUse(path: path)
     }
     if errno == ECONNREFUSED || errno == ENOENT {
       unlink(path)
@@ -377,32 +350,6 @@ public final class SocketServer {
     }
     // Unknown errno; leave the file in place so the caller gets a clean
     // EADDRINUSE from bind rather than stomping on something unexpected.
-  }
-
-  /// Sends `system.hello` and waits up to `timeout` for any reply byte.
-  /// Any server answers the first frame, even with an error.
-  nonisolated private static func answersHandshake(fd: Int32, timeout: Duration) -> Bool {
-    let (seconds, attoseconds) = timeout.components
-    var interval = timeval(tv_sec: Int(seconds), tv_usec: Int32(attoseconds / 1_000_000_000_000))
-    let size = socklen_t(MemoryLayout<timeval>.size)
-    _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &interval, size)
-    _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &interval, size)
-    var one: Int32 = 1
-    _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-
-    let hello = IPC.Request(
-      id: "stale-socket-probe",
-      method: .systemHello,
-      params: .object(["clientVersion": .string("0"), "clientBinary": .string("codans-stale-socket-probe")]))
-    guard let body = try? JSONEncoder().encode(hello), let frame = try? Framing.encode(body) else { return false }
-    let sent = frame.withUnsafeBytes { Darwin.send(fd, $0.baseAddress, frame.count, 0) }
-    guard sent == frame.count else { return false }
-    var byte: UInt8 = 0
-    while true {
-      let received = Darwin.read(fd, &byte, 1)
-      if received < 0, errno == EINTR { continue }
-      return received > 0
-    }
   }
 }
 
