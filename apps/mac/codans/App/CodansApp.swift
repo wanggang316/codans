@@ -2208,6 +2208,7 @@ final class AppState {
       isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true }
     )
     self.agentStateStore = registry
+    engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
     // Pre-seed the registry from the last quit's agent snapshot so a
     // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on
