@@ -262,13 +262,15 @@ final class AgentStateStore {
     s.userInputSeen = true
     s.seen = true
     scratch[paneID] = s
-    markObserved(paneID)
+    // Keystrokes reach only the key surface, so typing is a look at the pane.
+    attentionStops[paneID]?.observed = true
     refresh(paneID)
     if clearsBlocked { attentionStops[paneID]?.blockedPromptCleared = true }
   }
 
-  /// `paneID` was focused. Same semantics as `onPaneKeyboardActivity`:
-  /// the user has observed the pane, so clear display-only attention.
+  /// `paneID` was focused in the catalog. Clears display-only attention
+  /// like `onPaneKeyboardActivity`, but counts as a look at the current
+  /// attention stop only when the pane is in view (see `markObserved`).
   func onPaneFocused(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
     let clearsBlocked = s.rawState == .blocked
@@ -284,11 +286,14 @@ final class AgentStateStore {
     if clearsBlocked { attentionStops[paneID]?.blockedPromptCleared = true }
   }
 
-  /// The user is looking at `paneID` without a focus change — for example
-  /// the app became active again with the pane already focused. Records
-  /// only that the current attention stop was observed; badges are left
-  /// to the regular focus path.
+  /// The user may be looking at `paneID` without a focus change — for
+  /// example the app became active again with the pane already focused.
+  /// Records that the current attention stop was observed only when the
+  /// pane is really in view: catalog focus also moves for a CLI focus
+  /// call while another app is in front. Badges are left to the regular
+  /// focus path.
   func markObserved(_ paneID: PaneID) {
+    guard isPaneInView(paneID) else { return }
     attentionStops[paneID]?.observed = true
   }
 

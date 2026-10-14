@@ -458,7 +458,9 @@ struct AgentStateStoreTests {
     f.viewport("Allow command?\n[y/n]")
     #expect(!f.registry.hasObservedAttention(f.paneID))
 
+    f.inView.setValue(true)
     f.registry.onPaneFocused(f.paneID)
+    f.inView.setValue(false)
     #expect(f.registry.hasObservedAttention(f.paneID))
 
     // The prompt re-renders after the optimistic clear. Still the same stop.
@@ -485,8 +487,23 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID]?.state == .finished)
     #expect(!f.registry.hasObservedAttention(f.paneID))
 
+    f.inView.setValue(true)
     f.registry.markObserved(f.paneID)
     #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func focusWhileThePaneIsNotInViewIsNotObserved() {
+    // A CLI `pane focus` selects the pane while another app is in front.
+    // The badge clears, but the user has not seen the prompt.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+
+    f.registry.onPaneFocused(f.paneID)
+    f.registry.markObserved(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state != .blocked)
+    #expect(!f.registry.hasObservedAttention(f.paneID))
   }
 
   @Test
@@ -525,7 +542,9 @@ struct AgentStateStoreTests {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.viewport("Allow command?\n[y/n]")
+    f.inView.setValue(true)
     f.registry.markObserved(f.paneID)
+    f.inView.setValue(false)
     #expect(f.registry.hasObservedAttention(f.paneID))
 
     f.viewport("codex> ")
@@ -538,7 +557,9 @@ struct AgentStateStoreTests {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.viewport("Allow command?\n[y/n]")
+    f.inView.setValue(true)
     f.registry.onPaneFocused(f.paneID)
+    f.inView.setValue(false)
     // Idle ticks before the next snapshot keep the same stop.
     f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
     f.viewport("codex> ")
