@@ -1318,7 +1318,9 @@ struct HierarchySidebarView: View {
   /// Group 2 — GitHub + Changes. Every entry acts on the right-clicked row,
   /// not the selection; the shortcut hints mirror the selection-scoped
   /// Worktree-menu commands. "Open Pull Request" shows only once a PR
-  /// snapshot exists for the row.
+  /// snapshot exists for the row. The built-in diff window offers one entry
+  /// per comparison scope; an external Git Viewer cannot take a scope, so it
+  /// gets a single "Show Changes" entry.
   @ViewBuilder
   private func worktreeGitHubAndChangesItems(
     worktree: Worktree, project: Project
@@ -1342,16 +1344,25 @@ struct HierarchySidebarView: View {
       }
       .appKeyboardShortcut(.openCurrentPR, in: resolvedShortcuts)
     }
-    Button {
-      store.send(.delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .all)))
-    } label: {
-      Label("Show Uncommitted", systemImage: "plusminus")
+    if settingsStore.settings.general.externalGitViewerID != nil {
+      showChangesButton("Show Changes", worktree: worktree, project: project, scope: .all)
+        .appKeyboardShortcut(.toggleDiffInspector, in: resolvedShortcuts)
+    } else {
+      // A fresh diff window opens on the uncommitted scope, so the hint sits there.
+      showChangesButton("Show Uncommitted", worktree: worktree, project: project, scope: .all)
+        .appKeyboardShortcut(.toggleDiffInspector, in: resolvedShortcuts)
+      showChangesButton("Show Outgoing", worktree: worktree, project: project, scope: .outgoing)
     }
+  }
+
+  private func showChangesButton(
+    _ title: String, worktree: Worktree, project: Project, scope: GitComparisonScope
+  ) -> some View {
     Button {
       store.send(
-        .delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: .outgoing)))
+        .delegate(.showChanges(projectID: project.id, worktreeID: worktree.id, scope: scope)))
     } label: {
-      Label("Show Outgoing", systemImage: "plusminus")
+      Label(title, systemImage: "plusminus")
     }
   }
 

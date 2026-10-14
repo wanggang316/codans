@@ -1,3 +1,4 @@
+import AppKit
 import CodansCore
 import Foundation
 import os.log
@@ -345,7 +346,7 @@ final class TerminalEngine {
     // catalog-level map never moves and consumers like the tab-bar
     // chip's title resolver keep reading from the wrong pane.
     surface.view.onBecomeFirstResponder = { [weak self] in
-      self?.hierarchy.setLastFocusedPane(pane.id, in: tabID)
+      self?.surfaceBecameFirstResponder(pane.id, in: tabID)
     }
     // Lets the view RESTORE firstResponder after a SwiftUI split/zoom rebuild
     // re-attaches it — only the tab's last-focused pane reclaims, so a freshly
@@ -460,6 +461,28 @@ final class TerminalEngine {
   /// retries stop on their own.
   func focusSurfaceView(for paneID: PaneID) {
     focusSurfaceView(for: paneID, attempt: 0)
+  }
+
+  /// Called after a pane's surface becomes the first responder. The app
+  /// injects what it does with it: focus can land on the surface after the
+  /// catalog selection already moved (a sidebar click that switches tabs).
+  var onSurfaceFocused: @MainActor (PaneID) -> Void = { _ in }
+
+  private func surfaceBecameFirstResponder(_ paneID: PaneID, in tabID: TabID) {
+    hierarchy.setLastFocusedPane(paneID, in: tabID)
+    // The window records the new first responder only after
+    // `becomeFirstResponder` returns, so report on the next turn.
+    Task { @MainActor [weak self] in self?.onSurfaceFocused(paneID) }
+  }
+
+  /// True when keystrokes would go to `paneID` right now: the app is active
+  /// and the pane's surface is the first responder of the key window.
+  func isSurfaceFocused(_ paneID: PaneID) -> Bool {
+    guard NSApp.isActive,
+      let view = ghosttyRuntime?.surface(for: paneID)?.view,
+      let window = view.window, window.isKeyWindow
+    else { return false }
+    return window.firstResponder === view
   }
 
   private func focusSurfaceView(for paneID: PaneID, attempt: Int) {

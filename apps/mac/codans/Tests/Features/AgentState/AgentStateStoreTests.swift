@@ -449,20 +449,151 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
+  // MARK: - Attention observation (notification suppression)
+
+  @Test
+  func focusAfterBlockedCountsAsObserved() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+
+    f.inView.setValue(true)
+    f.registry.onPaneFocused(f.paneID)
+    f.inView.setValue(false)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    // The prompt re-renders after the optimistic clear. Still the same stop.
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
+    f.viewport("Allow command?\n[y/n]")
+    #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func finishWhileInViewCountsAsObserved() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.inView.setValue(true)
+    f.finishTurn()
+    f.inView.setValue(false)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func finishInBackgroundIsNotObservedUntilFocused() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.finishTurn()
+    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+
+    f.inView.setValue(true)
+    f.registry.markObserved(f.paneID)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func focusWhileThePaneIsNotInViewIsNotObserved() {
+    // A CLI `pane focus` selects the pane while another app is in front.
+    // The badge clears, but the user has not seen the prompt.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+
+    f.registry.onPaneFocused(f.paneID)
+    f.registry.markObserved(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state != .blocked)
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func focusBeforeTheStopDoesNotCount() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (10s)")
+    f.registry.onPaneFocused(f.paneID)
+    f.advancePastWorkingHold()
+    f.viewport("codex> ")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func newTurnResetsObservation() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.inView.setValue(true)
+    f.finishTurn()
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.inView.setValue(false)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (10s)")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+    f.advancePastWorkingHold()
+    f.viewport("codex> ")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func resolvedPromptEndsTheStop() {
+    // The user looked at a prompt; it was then answered through the CLI (no
+    // keystroke, so no `working`). The next prompt is a new stop.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    f.inView.setValue(true)
+    f.registry.markObserved(f.paneID)
+    f.inView.setValue(false)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.viewport("codex> ")
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func promptAfterClearedAndResolvedPromptIsANewStop() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    f.inView.setValue(true)
+    f.registry.onPaneFocused(f.paneID)
+    f.inView.setValue(false)
+    // Idle ticks before the next snapshot keep the same stop.
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
+    f.viewport("codex> ")
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
   @MainActor
   final class Fixture {
     let paneID = PaneID()
     let focused = LockIsolated<PaneID?>(nil)
+    let inView = LockIsolated(false)
     let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 0))
     let registry: AgentStateStore
 
     init() {
       let focused = self.focused
       let nowBox = self.nowBox
+      let inView = self.inView
       self.registry = AgentStateStore(
         focusedPane: { focused.value },
+        isPaneInView: { _ in inView.value },
         now: { nowBox.value }
       )
+    }
+
+    /// One user turn that the agent finishes: input, working, then idle.
+    func finishTurn() {
+      registry.onPaneKeyboardActivity(paneID)
+      viewport("• Working (10s)")
+      advancePastWorkingHold()
+      viewport("codex> ")
     }
 
     func viewport(_ text: String) {

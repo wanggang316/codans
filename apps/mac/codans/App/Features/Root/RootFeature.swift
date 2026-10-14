@@ -597,12 +597,36 @@ struct RootFeature {
         else { return .none }
         return openDiff(projectID: projectID, worktreeID: worktreeID, scope: nil, state: state)
       case .sidebar(.delegate(.showChanges(let projectID, let worktreeID, let scope))):
-        return openDiff(projectID: projectID, worktreeID: worktreeID, scope: scope, state: state)
+        return openInExternalGitViewer(projectID: projectID, worktreeID: worktreeID, state: state)
+          ?? openDiff(projectID: projectID, worktreeID: worktreeID, scope: scope, state: state)
       default:
         return .none
 
       }
     }
+  }
+
+  /// Opens the worktree in the Git Viewer chosen in Settings when it is not the
+  /// built-in diff window. Returns nil for the built-in viewer so the caller
+  /// opens the diff window. An external client cannot take a comparison scope.
+  private func openInExternalGitViewer(
+    projectID: ProjectID, worktreeID: WorktreeID, state: State
+  ) -> Effect<Action>? {
+    guard let resolvedID = settingsWriter.readSnapshotSync().general.externalGitViewerID
+    else { return nil }
+    guard
+      state.editor.descriptors.contains(where: { $0.id == resolvedID }),
+      let path = hierarchyClient.snapshot()
+        .projects.first(where: { $0.id == projectID })?
+        .worktrees.first(where: { $0.id == worktreeID })?.path
+    else { return Effect.none }
+    return .send(
+      .editor(
+        .openRequested(
+          editorID: resolvedID,
+          worktreePath: path,
+          projectID: projectID
+        )))
   }
 
   private func openDiff(
@@ -1984,26 +2008,8 @@ struct RootFeature {
           let projectID = state.selection.projectID,
           let worktreeID = state.selection.worktreeID
         else { return .none }
-        let snapshot = settingsWriter.readSnapshotSync()
-        let resolvedID = snapshot.general.defaultGitViewerID ?? GeneralSettings.builtInGitViewerID
-        if resolvedID == GeneralSettings.builtInGitViewerID { return .send(.openDiffRequested) }
-        let externalChoice = resolvedID
-        guard
-          state.editor.descriptors.contains(where: { $0.id == externalChoice })
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let path = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID })?.path
-        else { return .none }
-        return .send(
-          .editor(
-            .openRequested(
-              editorID: externalChoice,
-              worktreePath: path,
-              projectID: projectID
-            )))
+        return openInExternalGitViewer(projectID: projectID, worktreeID: worktreeID, state: state)
+          ?? .send(.openDiffRequested)
 
       case .openDefaultForCurrentWorktreeRequested:
         guard

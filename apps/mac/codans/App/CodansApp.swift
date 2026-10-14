@@ -989,6 +989,10 @@ final class AppState {
       settingsReader: settingsReader,
       catalogSnapshot: { manager.catalog },
       lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
+      isPaneFocused: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
+      hasObservedAttention: { [weak self] paneID in
+        self?.agentStateStore?.hasObservedAttention(paneID) == true
+      },
       onProjectActivity: { [weak manager] projectID in
         manager?.bumpProjectActivity(projectID)
       }
@@ -1041,8 +1045,16 @@ final class AppState {
     }
     self.didBecomeActiveObserverToken = NotificationCenter.default
       .publisher(for: NSApplication.didBecomeActiveNotification)
-      .sink { [weak coordinator] _ in
-        Task { @MainActor [weak coordinator] in
+      .sink { [weak self, weak coordinator, weak manager] _ in
+        Task { @MainActor [weak self, weak coordinator, weak manager] in
+          // Coming back to the app with an agent pane focused is a look at
+          // it, even though no focus change fires.
+          if let manager,
+            let paneID = Self.currentlyFocusedPane(
+              catalog: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
+          {
+            self?.agentStateStore?.markObserved(paneID)
+          }
           await coordinator?.refreshAuthorizationStatus()
         }
       }
@@ -1381,9 +1393,10 @@ final class AppState {
     }
     let focused = Self.currentlyFocusedPane(
       catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
+    let sourceIsFocused = focused == sourcePane || terminalEngine?.isSurfaceFocused(sourcePane) == true
     Task { @MainActor in
       _ = await coordinator.handle(
-        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: focused == sourcePane))
+        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: sourceIsFocused))
     }
   }
 
@@ -1977,7 +1990,7 @@ final class AppState {
     catalog: Catalog,
     lastFocusedPane: @MainActor (TabID) -> PaneID?
   ) -> PaneID? {
-    guard let activeProjectID = catalog.selectedProjectID,
+    guard let activeProjectID = catalog.displayedSelectedProjectID,
       let project = catalog.projects.first(where: { $0.id == activeProjectID }),
       let worktreeID = project.selectedWorktreeID,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
@@ -2191,9 +2204,11 @@ final class AppState {
           catalog: manager.catalog,
           lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }
         )
-      }
+      },
+      isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true }
     )
     self.agentStateStore = registry
+    engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
     // Pre-seed the registry from the last quit's agent snapshot so a
     // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on
