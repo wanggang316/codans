@@ -16,13 +16,47 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Removed
 
+### Fixed
+
+### Security
+
+## [0.7.11] - 2026-10-15
+
+### Added
+
+- **Workflows run multi-agent routines.** Built-in review loop, handoff,
+  and advisor workflows start from the Command Palette or `codans
+  workflow`; create and manage your own in Settings → Workflows.
+- **A New Agent dialog replaces the header's agent menu.** The header
+  button or ⌘⇧N picks a project, a new worktree or branch, a prompt, and
+  an agent; an unsent draft is kept for the next open.
+- **The worktree context menu reaches GitHub and scoped changes.** Open
+  in GitHub, Open Pull Request, Show Uncommitted, and Show Outgoing act
+  on the right-clicked worktree.
+
+### Changed
+
+- **One diff window serves every worktree.** Opening another worktree's
+  changes retargets the open window instead of adding one; each
+  worktree's view settings still come back.
+
+### Removed
+
 - **The header no longer shows the worktree processes badge.** The
   terminal-count button and its process list popover are gone. A tab's
   running process still shows on tab hover.
 
 ### Fixed
 
-### Security
+- **Notifications skip what you already saw.** No banner comes from the
+  pane you are typing into or for an agent stop you already looked at;
+  a crash still notifies.
+- **Missing folders and remote-less repos no longer break creation.** A
+  moved project folder shows "Folder not found" instead of an empty tab,
+  and a new worktree in a repo without `origin` skips the fetch.
+- **Long sessions stay healthy.** Panes re-attach at their real size, the
+  sidebar no longer keeps an old branch after a checkout, and CLI calls
+  no longer time out after the app quits unexpectedly.
 
 ## [0.7.10] - 2026-10-09
 
