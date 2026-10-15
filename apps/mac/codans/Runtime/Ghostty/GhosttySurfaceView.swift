@@ -112,18 +112,24 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// cancel it; only touched on the main actor.
   nonisolated(unsafe) private var pendingGeometryResync: Task<Void, Never>?
 
-  init(paneID: PaneID) {
+  /// Frame used when the pane's size is not known yet (≈100×40 cells).
+  static let placeholderSize = CGSize(width: 800, height: 600)
+
+  /// `initialSize` is the pane's expected size in points, when known (a
+  /// re-attach after an idle reclaim). `PaneSurface.init` hands the same
+  /// size to libghostty as the surface's initial size, and libghostty forks
+  /// the `zmx attach` child at it during `ghostty_surface_new` — before any
+  /// layout pass. The child's first size is what it sends to the daemon, so
+  /// a placeholder here resizes a live session's TUI through that width
+  /// before the real one arrives; a TUI that misses the final redraw then
+  /// stays narrow. Without a known size, the placeholder still beats
+  /// `.zero`: `pushGeometry` skips an empty size, which would leave the
+  /// child at libghostty's smaller 800×600 px default. The
+  /// `autoresizingMask` snaps the view to the pane on layout either way.
+  init(paneID: PaneID, initialSize: CGSize? = nil) {
     self.paneID = paneID
-    // Seed a sensible non-zero frame (≈100×40 cells) rather than `.zero`.
-    // `PaneSurface.init` binds the surface (→ `attach` → `pushGeometry`)
-    // before the view is in a window, and `pushGeometry` only pushes a
-    // size when `bounds` is non-zero. With a `.zero` frame the surface —
-    // and the shell libghostty's exec backend forks at the surface's grid
-    // size — would start at a placeholder size and only reach the real
-    // size on the first layout pass, producing a visible reflow. A real
-    // initial size lets the shell start close to its final width; the
-    // `autoresizingMask` still snaps the view to the pane on layout.
-    super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let size = initialSize.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil } ?? Self.placeholderSize
+    super.init(frame: NSRect(origin: .zero, size: size))
     self.wantsLayer = true
     self.autoresizingMask = [.width, .height]
     registerForDraggedTypes(Array(Self.dropTypes))
@@ -425,6 +431,14 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     super.layout()
     pushGeometry()
     installTrackingArea()
+  }
+
+  /// The current bounds in device pixels, converted the same way
+  /// `pushGeometry` converts them, so the surface's initial size and its
+  /// first geometry push agree and libghostty dedupes the push.
+  var initialPixelSize: (width: UInt32, height: UInt32) {
+    let px = convertToBacking(bounds.size)
+    return (UInt32(max(px.width, 0)), UInt32(max(px.height, 0)))
   }
 
   private func pushGeometry() {
