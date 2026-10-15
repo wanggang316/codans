@@ -130,6 +130,9 @@ final class TerminalEngine {
   /// still runs, so a later `ensureSurface` is a re-attach, not a spawn:
   /// it must not replay `initialCommand` into the live shell.
   private(set) var reclaimedPanes: Set<PaneID> = []
+  /// Size in points of each reclaimed pane's surface view when it was
+  /// detached; the re-attach starts at it.
+  private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
 
   /// Inject a `GhosttyRuntime` for real pane surfaces, or pass `nil` for
@@ -212,10 +215,10 @@ final class TerminalEngine {
     }
 
     // Exec-backend bringup: libghostty forks `zmx attach <session>` and owns
-    // the local PTY plus its sizing (it spawns the child only once a real
-    // post-layout size is known, so the shell never renders at a placeholder
-    // width). zmx `attach` upserts — it reattaches to a surviving daemon
-    // (resume) or creates a fresh one — so cold start and relaunch are the
+    // the local PTY plus its sizing (it spawns the child at the surface's
+    // initial size; see `GhosttySurfaceView.init`). zmx `attach` upserts —
+    // it reattaches to a surviving daemon (resume) or creates a fresh one —
+    // so cold start and relaunch are the
     // same invocation; there is no spawn/reattach/restore branching here.
     // `ZMX_DIR` is pinned, and its directory pre-created (zmx's own mkdir is
     // non-recursive), so the daemon socket lands where `ZmxControlClient`
@@ -275,24 +278,14 @@ final class TerminalEngine {
     // stamps the pane's id. See `PaneEnvironment.forSurface` for why each.
     let surfaceEnv = PaneEnvironment.forSurface(env, paneID: pane.id, zmxDirectory: zmxDir)
 
-    // `ghostty_surface_new` is observed to fail transiently — ~10
-    // consecutive failures followed by a clean success with no input
-    // change, suggesting an internal race that resolves once libghostty
-    // has ticked. One ticked retry covers the race without busy-looping;
-    // if it still fails the original `GhosttyError` (carrying a reason and
-    // a `retryable` flag) is re-thrown so external callers see actionable
-    // diagnostics.
-    let surface: PaneSurface
-    do {
-      surface = try PaneSurface(
-        runtime: runtime, paneID: pane.id, session: session,
-        launch: launch, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
-      )
-    } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
-      runtime.tick()
-      surface = try PaneSurface(
-        runtime: runtime, paneID: pane.id, session: session,
-        launch: launch, workingDirectory: surfaceWorkingDirectory, env: surfaceEnv
+    // A re-attach after an idle reclaim starts at the size the pane had
+    // when it was reclaimed, so the live session is not resized through a
+    // placeholder width (see `GhosttySurfaceView.init`).
+    let initialSize = reclaimedSurfaceSizes[pane.id]
+    let surface = try Self.withSurfaceInitRetry(runtime: runtime) {
+      try PaneSurface(
+        runtime: runtime, paneID: pane.id, session: session, launch: launch,
+        workingDirectory: surfaceWorkingDirectory, env: surfaceEnv, initialSize: initialSize
       )
     }
     runtime.register(pane: surface)
@@ -542,6 +535,7 @@ final class TerminalEngine {
 
     ghosttyRuntime?.unregister(paneID: paneID)
     reclaimedPanes.remove(paneID)
+    reclaimedSurfaceSizes.removeValue(forKey: paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
     foregroundJobPaneIDs.remove(paneID)
     remoteForegroundPanes.removeValue(forKey: paneID)
@@ -927,6 +921,25 @@ final class TerminalEngine {
     }
   }
 
+  /// `ghostty_surface_new` is observed to fail transiently — ~10
+  /// consecutive failures followed by a clean success with no input
+  /// change, suggesting an internal race that resolves once libghostty
+  /// has ticked. One ticked retry covers the race without busy-looping;
+  /// if it still fails the original `GhosttyError` (carrying a reason and
+  /// a `retryable` flag) is re-thrown so external callers see actionable
+  /// diagnostics.
+  private static func withSurfaceInitRetry(
+    runtime: GhosttyRuntime,
+    _ makeSurface: () throws -> PaneSurface
+  ) throws -> PaneSurface {
+    do {
+      return try makeSurface()
+    } catch GhosttyError.surfaceInitFailed(_, let retryable) where retryable {
+      runtime.tick()
+      return try makeSurface()
+    }
+  }
+
   // MARK: - Idle-surface reclaim
 
   /// Whether the pane's surface was detached by the reclaim sweep while its
@@ -941,6 +954,7 @@ final class TerminalEngine {
   private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
     lastDisplayedAt[paneID] = clock()
     startReclaimSweepIfNeeded()
+    reclaimedSurfaceSizes.removeValue(forKey: paneID)
     return reclaimedPanes.remove(paneID) != nil
   }
 
@@ -954,6 +968,7 @@ final class TerminalEngine {
     // Detaching ends the `zmx attach` child; make sure that cannot surface
     // as a pane exit.
     surface.onClose = nil
+    reclaimedSurfaceSizes[paneID] = surface.view.bounds.size
     disposeOutputBuffer(for: paneID)
     surface.close()
     ghosttyRuntime?.unregister(paneID: paneID)
