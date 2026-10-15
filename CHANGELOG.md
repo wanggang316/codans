@@ -18,6 +18,8 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- Starting a workflow run no longer makes `.codans/` show as untracked in repositories without workflow definitions. `.codans/.gitignore` permits `workflows/` only once the repository has workflows, and the permitting form now lets the definition files through.
+
 ### Security
 
 ## [0.7.11] - 2026-10-15
