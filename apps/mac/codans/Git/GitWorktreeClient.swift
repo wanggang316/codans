@@ -576,8 +576,8 @@ nonisolated enum GitWorktreeShell {
       process.environment = environment
       process.standardInput = FileHandle.nullDevice
 
-      let stdoutPipe = Pipe()
-      let stderrPipe = Pipe()
+      let stdoutPipe = Pipe.closeOnExec()
+      let stderrPipe = Pipe.closeOnExec()
       process.standardOutput = stdoutPipe
       process.standardError = stderrPipe
 
@@ -586,46 +586,45 @@ nonisolated enum GitWorktreeShell {
       let stdoutLock = NSLock()
       let stderrLock = NSLock()
 
-      stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-        let lines = stdoutState.consume(
-          handle.availableData, lock: stdoutLock, splitOnCarriageReturn: splitOnCarriageReturn,
-          trackLastNonEmpty: true)
-        for line in lines { onStdout(line) }
-      }
-      stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-        let lines = stderrState.consume(
-          handle.availableData, lock: stderrLock, splitOnCarriageReturn: splitOnCarriageReturn,
-          trackLastNonEmpty: false, keepAll: true)
-        for line in lines { onStderr(line) }
-      }
+      let stdoutCollector = PipeCollector(
+        pipe: stdoutPipe,
+        maxBytes: 0,
+        onChunk: { chunk in
+          let lines = stdoutState.consume(
+            chunk, lock: stdoutLock, splitOnCarriageReturn: splitOnCarriageReturn,
+            trackLastNonEmpty: true)
+          for line in lines { onStdout(line) }
+        })
+      let stderrCollector = PipeCollector(
+        pipe: stderrPipe,
+        maxBytes: 0,
+        onChunk: { chunk in
+          let lines = stderrState.consume(
+            chunk, lock: stderrLock, splitOnCarriageReturn: splitOnCarriageReturn,
+            trackLastNonEmpty: false, keepAll: true)
+          for line in lines { onStderr(line) }
+        })
 
       process.terminationHandler = { proc in
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-        // Drain any trailing bytes that did not end in a newline.
-        let tailOut = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        if !tailOut.isEmpty, let str = String(data: tailOut, encoding: .utf8) {
-          stdoutLock.lock()
-          let combined = stdoutState.buffer + str
-          stdoutState.buffer = ""
-          let trimmed = combined.trimmingCharacters(in: .whitespacesAndNewlines)
-          if !trimmed.isEmpty { stdoutState.lastNonEmpty = trimmed }
-          stdoutLock.unlock()
-          onStdout(combined)
-        }
-        let tailErr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        if !tailErr.isEmpty, let str = String(data: tailErr, encoding: .utf8) {
-          stderrLock.lock()
-          stderrState.collected += str
-          stderrLock.unlock()
-          onStderr(str)
-        }
+        // Bounded wait for the remaining output: a forked process elsewhere
+        // can hold a write end, and EOF then never arrives.
+        _ = stdoutCollector.finishBlocking()
+        _ = stderrCollector.finishBlocking()
+        // Flush trailing bytes that did not end in a newline.
         stdoutLock.lock()
+        let tailOut = stdoutState.buffer
+        stdoutState.buffer = ""
+        let trimmed = tailOut.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { stdoutState.lastNonEmpty = trimmed }
         let finalLastNonEmpty = stdoutState.lastNonEmpty
         stdoutLock.unlock()
+        if !tailOut.isEmpty { onStdout(tailOut) }
         stderrLock.lock()
+        let tailErr = stderrState.buffer
+        stderrState.buffer = ""
         let finalStderr = stderrState.collected
         stderrLock.unlock()
+        if !tailErr.isEmpty { onStderr(tailErr) }
         cont.resume(
           returning: (
             exitCode: proc.terminationStatus,
@@ -643,6 +642,10 @@ nonisolated enum GitWorktreeShell {
       do {
         try process.run()
       } catch {
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        _ = stdoutCollector.finishBlocking()
+        _ = stderrCollector.finishBlocking()
         cont.resume(
           returning: (
             exitCode: -1,
