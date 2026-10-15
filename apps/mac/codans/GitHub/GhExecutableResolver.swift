@@ -133,19 +133,23 @@ actor GhExecutableResolver {
         let process = Process()
         process.executableURL = shellURL
         process.arguments = ["-l", "-c", exec, "--", "/usr/bin/which", command]
-        let stdoutPipe = Pipe()
+        let stdoutPipe = Pipe.closeOnExec()
         process.standardOutput = stdoutPipe
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
+        // A login shell's rc files can start daemons that inherit stdout.
+        let stdoutCollector = PipeCollector(pipe: stdoutPipe)
 
         do {
           try process.run()
         } catch {
+          try? stdoutPipe.fileHandleForWriting.close()
+          _ = stdoutCollector.finishBlocking()
           cont.resume(returning: nil)
           return
         }
-        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        let data = stdoutCollector.finishBlocking().data
         guard process.terminationStatus == 0,
           let text = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines),

@@ -66,8 +66,9 @@ private actor SubprocessGate {
 ///   that lands between `run()` returning and our await arriving still resumes our
 ///   continuation. Previously a `Task.detached { withCheckedContinuation { … } }` introduced
 ///   a race window.
-/// - Pipe drains run on `DispatchQueue.global(qos: .utility)`, not on the Swift cooperative
-///   pool. Blocking reads from `FileHandle.availableData` won't starve other tasks.
+/// - Output is read by `PipeCollector` through dispatch sources, so no thread blocks in
+///   `read`. After the child exits, reading stops at EOF or after `eofGrace`: a process
+///   forked elsewhere in the app can hold a write end and keep EOF from ever arriving.
 nonisolated struct FoundationCommandRunner: CommandRunner {
   /// Caps concurrent child-process launches across every caller. Foundation's
   /// `Process` / `Pipe` machinery races under heavy concurrent spawning, and
@@ -76,6 +77,9 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
   /// (an `EXC_BAD_ACCESS` that surfaced later in unrelated task allocation).
   /// A modest cap keeps the fan-out fast while staying clear of that contention.
   private static let gate = SubprocessGate(limit: 6)
+
+  /// How long to keep reading output after the child exits.
+  var eofGrace: Duration = PipeCollector.defaultGrace
 
   func run(
     executable: URL,
@@ -114,8 +118,8 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     process.environment = env
     process.standardInput = FileHandle.nullDevice
 
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
+    let stdoutPipe = Pipe.closeOnExec()
+    let stderrPipe = Pipe.closeOnExec()
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
 
@@ -127,14 +131,9 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       exitCont.finish()
     }
 
-    // Drain pipes on a background queue (NOT the cooperative pool — blocking reads here are
-    // expected). `async let` bridges back into the concurrency world without tying up a task.
-    async let stdoutResult: (data: Data, overflow: Bool) = Self.drain(
-      pipe: stdoutPipe, maxBytes: maxOutputBytes
-    )
-    async let stderrResult: (data: Data, overflow: Bool) = Self.drain(
-      pipe: stderrPipe, maxBytes: maxOutputBytes
-    )
+    let stdoutCollector = PipeCollector(pipe: stdoutPipe, maxBytes: maxOutputBytes)
+    let stderrCollector = PipeCollector(pipe: stderrPipe, maxBytes: maxOutputBytes)
+    let grace = eofGrace
 
     // Now start the child.
     do {
@@ -145,8 +144,8 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
       // Pipe.deinit to close implicitly is fragile under the task-group lifetimes here.
       try? stdoutPipe.fileHandleForWriting.close()
       try? stderrPipe.fileHandleForWriting.close()
-      _ = await stdoutResult
-      _ = await stderrResult
+      _ = await stdoutCollector.finish(grace: grace)
+      _ = await stderrCollector.finish(grace: grace)
       if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
         return .spawnFailed(reason: "binary not found: \(executable.path)")
       }
@@ -157,14 +156,14 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     let outcome = await Self.awaitExitOrTimeout(
       exitStream: exitStream, process: process, timeout: timeout
     )
+    async let stdoutResult = stdoutCollector.finish(grace: grace)
+    async let stderrResult = stderrCollector.finish(grace: grace)
+    let (stdoutData, stdoutOverflow) = await stdoutResult
+    let (stderrData, _) = await stderrResult
     switch outcome {
     case .exited(let code):
-      let (stdoutData, stdoutOverflow) = await stdoutResult
-      let (stderrData, _) = await stderrResult
       return .exited(code: code, stdout: stdoutData, stderr: stderrData, stdoutOverflow: stdoutOverflow)
     case .timedOut:
-      _ = await stdoutResult
-      _ = await stderrResult
       return .timedOut
     }
   }
@@ -202,33 +201,6 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
           kill(process.processIdentifier, SIGKILL)
         }
         return .timedOut
-      }
-    }
-  }
-
-  /// Drains a pipe to EOF on a dedicated background queue. Past `maxBytes`, further bytes are
-  /// discarded but the loop continues so the child never blocks on a full pipe.
-  private static func drain(pipe: Pipe, maxBytes: Int) async -> (data: Data, overflow: Bool) {
-    await withCheckedContinuation { (cont: CheckedContinuation<(Data, Bool), Never>) in
-      DispatchQueue.global(qos: .utility).async {
-        var buffer = Data()
-        buffer.reserveCapacity(min(maxBytes, 64 * 1024))
-        var overflow = false
-        let handle = pipe.fileHandleForReading
-        while true {
-          let chunk = handle.availableData
-          if chunk.isEmpty { break }
-          if buffer.count + chunk.count > maxBytes {
-            let remaining = maxBytes - buffer.count
-            if remaining > 0 { buffer.append(chunk.prefix(remaining)) }
-            overflow = true
-            // Drain-past-cap contract: keep reading to EOF so the child doesn't block on a
-            // full pipe, but discard the excess bytes to bound memory.
-          } else {
-            buffer.append(chunk)
-          }
-        }
-        cont.resume(returning: (buffer, overflow))
       }
     }
   }
