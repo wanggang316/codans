@@ -10,7 +10,19 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Agents report their own state.** Claude Code, Pi, and omp send OSC
+  7501 program status, and codans now answers and uses it: the Agents
+  View shows working the moment a prompt is sent, blocked with what the
+  agent needs, and a new error state when the agent reports a failure.
+  `codans agent status` adds `source`, `blockedKind`, and `message`.
+  Other agents still read from the screen.
+
 ### Changed
+
+- **The finished agent state is now called done.** `codans agent status`
+  reports `done`, and `codans agent wait --until done` (or `error`) waits
+  for it; `--until finished` still works. An agent's progress bar no
+  longer shows its tab as busy while it reports its own state.
 
 ### Deprecated
 

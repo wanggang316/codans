@@ -18,7 +18,7 @@ Use [_template.md](_template.md) as a starting point.
 <!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Feature availability belongs in each doc; see ../README.md for metadata conventions. -->
 
 - [Agent Profiles 与 Handoff](agent-handoff.md) — 命名 agent 启动预设（Settings → Agents / toolbar / palette / `codans agent`）+ agent 到 agent 的任务交接：worktree 内 `.codans/handoff/` 工件、archive-first 迁移、源 agent 自写 briefing 的 `codans handoff`、应用内 Hand Off 面板
-- [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 派生运行态（idle/working/blocked/finished），独立于通知系统
+- [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 运行态（idle/working/blocked/done/error，agent 自报的 OSC 7501 程序状态优先、视口启发式兜底），独立于通知系统
 - [App Appearance & Terminal Theme](app-appearance.md) — Light/Dark/System 外观（单写者 `NSApp.appearance`）+ Ghostty 配置 managed-keys（theme/font/cursor）写入
 - [CLI (`codans`)](cli.md) — `codans` 动词集与 system/hierarchy/pane/terminal/editor RPC 契约；stateless RPC client、alias→UUID、`/usr/local/bin` 管理员授权安装；`open` / `help-json` / `workspace` 可用，`skill` 本地管理安装，hook 未实现
 - [Command Palette](command-palette.md) — ⌘P 模糊搜索面板：分层评分 + recency 衰减 + 稳定 ID，按需从实时 Catalog 生成项
