@@ -56,7 +56,7 @@ struct AgentRowOrderingTests {
   }
 
   /// With an empty prior order, every entry is a newcomer and the batch is
-  /// seeded in triage order (`blocked > finished > working > idle`). This is
+  /// seeded in triage order (`blocked > error > done > working > idle`). This is
   /// the panel's first-appear path.
   @Test
   func emptyOrderSeedsNewcomersInTriageOrder() {
@@ -77,7 +77,7 @@ struct AgentRowOrderingTests {
   /// Any decay into idle is suppressed — the row keeps its place.
   @Test
   func decayIntoIdleIsNotSignificant() {
-    #expect(AgentRowOrdering.isOrderSignificant(from: .finished, to: .idle) == false)
+    #expect(AgentRowOrdering.isOrderSignificant(from: .done, to: .idle) == false)
     #expect(AgentRowOrdering.isOrderSignificant(from: .working, to: .idle) == false)
     #expect(AgentRowOrdering.isOrderSignificant(from: .blocked, to: .idle) == false)
   }
@@ -89,14 +89,14 @@ struct AgentRowOrderingTests {
     #expect(AgentRowOrdering.isOrderSignificant(from: .idle, to: .idle) == false)
   }
 
-  /// Rises into active / finished and lateral moves between them reorder.
+  /// Rises into active / done and lateral moves between them reorder.
   @Test
   func risesAndLateralMovesAreSignificant() {
     #expect(AgentRowOrdering.isOrderSignificant(from: .idle, to: .blocked))
     #expect(AgentRowOrdering.isOrderSignificant(from: .idle, to: .working))
-    #expect(AgentRowOrdering.isOrderSignificant(from: .idle, to: .finished))
+    #expect(AgentRowOrdering.isOrderSignificant(from: .idle, to: .done))
     #expect(AgentRowOrdering.isOrderSignificant(from: .working, to: .blocked))
-    #expect(AgentRowOrdering.isOrderSignificant(from: .working, to: .finished))
-    #expect(AgentRowOrdering.isOrderSignificant(from: .finished, to: .working))
+    #expect(AgentRowOrdering.isOrderSignificant(from: .working, to: .done))
+    #expect(AgentRowOrdering.isOrderSignificant(from: .done, to: .working))
   }
 }

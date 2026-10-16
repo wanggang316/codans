@@ -34,10 +34,12 @@ struct AgentStatus: AsyncParsableCommand {
     abstract: "List every pane running an agent with its runtime state.",
     discussion: """
       What the sidebar's Agents View shows: for each pane the app recognises
-      as running an agent, the agent, its derived state (idle, working,
-      blocked, finished), when it last changed, and where the pane lives.
-      The state is derived from the pane's screen and foreground process, so
-      it can lag a moment behind the agent; `agent wait` blocks on it.
+      as running an agent, the agent, its state (idle, working, blocked,
+      done, error), when it last changed, and where the pane lives. An agent
+      that reports OSC 7501 program status (source: programStatus) decides
+      its own state; for the others the state is derived from the pane's
+      screen (source: screen), so it can lag a moment behind the agent.
+      `agent wait` blocks on it.
       """
   )
 
@@ -69,8 +71,9 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
       let since = formatter.date(from: row.since).map { Self.age(from: $0, to: now) } ?? "-"
       let focus = row.isFocused ? "*" : " "
       let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
+      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "")
       return
-        "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(row.state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
+        "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
     }.joined(separator: "\n")
   }
 
@@ -88,7 +91,7 @@ struct AgentWait: AsyncParsableCommand {
     abstract: "Block until a pane's agent reaches a state.",
     discussion: """
       Waits server-side, so no polling loop is needed. Conditions: idle,
-      working, blocked, finished (the states `agent status` reports),
+      working, blocked, done, error (the states `agent status` reports),
       changed (any transition from the state seen when the wait started,
       including the agent appearing or leaving), and exit (no agent bound to
       the pane any more). A wait that does not resolve before --wait-timeout
@@ -101,7 +104,7 @@ struct AgentWait: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
-  @Option(name: .long, help: "Condition: idle, working, blocked, finished, changed, or exit.")
+  @Option(name: .long, help: "Condition: idle, working, blocked, done, error, changed, or exit.")
   var until: IPC.AgentWaitCondition
   @Option(name: .long, help: "Seconds to wait before giving up (1 through 600, default 60).")
   var waitTimeout: Double = 60

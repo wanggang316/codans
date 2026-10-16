@@ -16,6 +16,57 @@ import CodansCore
 @MainActor
 struct GhosttyActionDecoderTests {
 
+  // MARK: - decodeProgramStatus
+
+  @Test
+  func programStatusCopiesEveryField() {
+    let report = "agent-1".withCString { id in
+      "claude-code".withCString { app in
+        "Explore".withCString { title in
+          "approve Bash".withCString { message in
+            GhosttyActionDecoder.decodeProgramStatus(
+              ghostty_action_program_status_s(
+                state: GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED,
+                kind: GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION,
+                progress: 40,
+                id: id, app: app, title: title, message: message))
+          }
+        }
+      }
+    }
+    #expect(
+      report
+        == ProgramStatusReport(
+          state: .blocked, kind: .permission, progress: 40, id: "agent-1",
+          app: "claude-code", title: "Explore", message: "approve Bash"))
+  }
+
+  @Test
+  func programStatusTreatsEmptyStringsAndNoProgressAsAbsent() {
+    let report = "".withCString { empty in
+      GhosttyActionDecoder.decodeProgramStatus(
+        ghostty_action_program_status_s(
+          state: GHOSTTY_PROGRAM_STATUS_STATE_DONE,
+          kind: GHOSTTY_PROGRAM_STATUS_KIND_NONE,
+          progress: -1,
+          id: empty, app: empty, title: empty, message: empty))
+    }
+    #expect(report == ProgramStatusReport(state: .done))
+  }
+
+  @Test
+  func programStatusRejectsAnUnknownState() {
+    let report = "".withCString { empty in
+      GhosttyActionDecoder.decodeProgramStatus(
+        ghostty_action_program_status_s(
+          state: ghostty_action_program_status_state_e(rawValue: 99),
+          kind: GHOSTTY_PROGRAM_STATUS_KIND_NONE,
+          progress: -1,
+          id: empty, app: empty, title: empty, message: empty))
+    }
+    #expect(report == nil)
+  }
+
   // MARK: - decodeCloseTabMode
 
   @Test

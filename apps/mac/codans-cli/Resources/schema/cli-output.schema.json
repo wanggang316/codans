@@ -1818,10 +1818,27 @@
             "idle",
             "working",
             "blocked",
-            "finished"
+            "done",
+            "error"
           ]
         },
         "since": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "programStatus",
+            "screen"
+          ]
+        },
+        "blockedKind": {
+          "enum": [
+            "permission",
+            "question",
+            "auth"
+          ]
+        },
+        "message": {
           "type": "string"
         },
         "sessionID": {

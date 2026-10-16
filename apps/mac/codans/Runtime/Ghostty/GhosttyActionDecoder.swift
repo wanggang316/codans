@@ -90,6 +90,7 @@ enum DecodedSurfaceAction: Sendable, Equatable {
   case searchTotal(Int)
   case searchSelected(Int)
   case progress(state: UInt32, value: Int?)
+  case programStatus(ProgramStatusReport)
 
   // Bucket 4 — Effectful
   case openURL(String)
@@ -295,6 +296,16 @@ extension GhosttyActionDecoder {
       let value: Int? = r.progress == -1 ? nil : Int(r.progress)
       return .progress(state: UInt32(r.state.rawValue), value: value)
 
+    // Bucket 3 — Program status (OSC 7501). The report and its strings live
+    // only for this callback, so copy them now.
+    case GHOSTTY_ACTION_PROGRAM_STATUS:
+      guard let report = action.action.program_status.map({ decodeProgramStatus($0.pointee) })
+      else {
+        return .unsupported(rawTag: action.tag.rawValue, reason: "program_status: null report")
+      }
+      return report.map(DecodedSurfaceAction.programStatus)
+        ?? .unsupported(rawTag: action.tag.rawValue, reason: "program_status: unknown state")
+
     // Bucket 4 — Effectful (C strings — copy now)
     case GHOSTTY_ACTION_OPEN_URL:
       let u = action.action.open_url
@@ -497,9 +508,17 @@ extension GhosttyActionDecoder {
     case .searchSelected(let s):
       return emitInfo(.searchSelected(s), pane: pane, paneID: paneID, runtime: runtime)
     case .progress(let state, let value):
+      // An agent whose program status governs its pane reports its own
+      // activity; its OSC 9;4 progress must not also light the pane as busy.
+      let governed = runtime.terminalEngine?.programStatusGoverns(paneID) == true
       return emitInfo(
-        .progress(state: state, value: value),
+        .progress(
+          state: governed ? GHOSTTY_PROGRESS_STATE_REMOVE.rawValue : state,
+          value: governed ? nil : value),
         pane: pane, paneID: paneID, runtime: runtime)
+    case .programStatus(let report):
+      runtime.terminalEngine?.ingestProgramStatus(report, for: paneID)
+      return true
 
     // Bucket 4 — Effectful
     case .openURL(let url):
@@ -632,6 +651,38 @@ extension GhosttyActionDecoder {
 // MARK: - C enum decoders (pure, any thread)
 
 extension GhosttyActionDecoder {
+  /// Copy an OSC 7501 report out of libghostty. Nil for a state this build
+  /// does not know, so a future state is never mistaken for another.
+  nonisolated static func decodeProgramStatus(
+    _ report: ghostty_action_program_status_s
+  ) -> ProgramStatusReport? {
+    let state: ProgramStatusState
+    switch report.state {
+    case GHOSTTY_PROGRAM_STATUS_STATE_IDLE: state = .idle
+    case GHOSTTY_PROGRAM_STATUS_STATE_WORKING: state = .working
+    case GHOSTTY_PROGRAM_STATUS_STATE_DONE: state = .done
+    case GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED: state = .blocked
+    case GHOSTTY_PROGRAM_STATUS_STATE_ERROR: state = .error
+    case GHOSTTY_PROGRAM_STATUS_STATE_CLEAR: state = .clear
+    default: return nil
+    }
+    let kind: ProgramStatusKind?
+    switch report.kind {
+    case GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION: kind = .permission
+    case GHOSTTY_PROGRAM_STATUS_KIND_QUESTION: kind = .question
+    case GHOSTTY_PROGRAM_STATUS_KIND_AUTH: kind = .auth
+    default: kind = nil
+    }
+    return ProgramStatusReport(
+      state: state,
+      kind: kind,
+      progress: report.progress < 0 ? nil : Int(report.progress),
+      id: String.decode(cstring: report.id) ?? "",
+      app: String.decode(cstring: report.app),
+      title: String.decode(cstring: report.title),
+      message: String.decode(cstring: report.message)
+    )
+  }
 
   // Note: these six decoders are `internal static` so
   // `@testable import Codans` can reach them from

@@ -144,7 +144,7 @@ extension CommandQueueRunner {
     terminalBusy: Bool
   ) -> Bool {
     if let agentState {
-      return agentState == .idle || agentState == .finished
+      return agentState == .idle || agentState == .done || agentState == .error
     }
     return !terminalBusy
   }

@@ -8,7 +8,7 @@ import Testing
 @MainActor
 struct AgentStateStoreTests {
   @Test
-  func piBorderLoaderTransitionsFromIdleThroughWorkingToFinished() {
+  func piBorderLoaderTransitionsFromIdleThroughWorkingToDone() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .pi, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
@@ -18,7 +18,7 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID]?.state == .working)
     f.advancePastWorkingHold()
     f.viewport("─────────────────────\n\n─────────────────────")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
@@ -118,7 +118,7 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func activeToIdleInBackgroundDrivesFinished() {
+  func activeToIdleInBackgroundDrivesDone() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
@@ -129,7 +129,7 @@ struct AgentStateStoreTests {
     // only settles once the hold window has lapsed.
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
@@ -148,21 +148,21 @@ struct AgentStateStoreTests {
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
-    // Past the hold, a follow-up idle derivation settles it to finished.
+    // Past the hold, a follow-up idle derivation settles it to done.
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
-  func claudePaneIdleFlushesHeldWorkingToFinished() {
+  func claudePaneIdleFlushesHeldWorkingToDone() {
     // Regression (fix/agents-view-done-wrong): the `agentWorkingHold`
     // debounces the finishing `working`→`idle` transition. The trailing edge
     // only flips on a follow-up derivation, but once the rendered region
     // settles no further `paneViewportChanged` fires — so the held `working`
     // was getting pinned forever. The engine's quiet `.paneIdle` nudge now
     // supplies that post-hold derivation; here it must flip a backgrounded,
-    // finished Claude agent to `.finished`.
+    // finished Claude agent to `.done`.
     let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
     let paneID = PaneID()
     let registry = AgentStateStore(focusedPane: { nil }, now: { clock.value })
@@ -177,10 +177,10 @@ struct AgentStateStoreTests {
     registry.onTerminalEvent(.paneViewportChanged(paneID, text: "❯ "))
     #expect(registry.entries[paneID]?.state == .working)
 
-    // Screen settled; the quiet nudge arrives past the hold window → finished.
+    // Screen settled; the quiet nudge arrives past the hold window → done.
     clock.setValue(Date(timeIntervalSince1970: 1_002))
     registry.onTerminalEvent(.paneIdle(paneID, duration: 1.7))
-    #expect(registry.entries[paneID]?.state == .finished)
+    #expect(registry.entries[paneID]?.state == .done)
   }
 
   @Test
@@ -198,45 +198,45 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func keyboardActivityClearsFinishedBackToIdle() {
+  func keyboardActivityClearsDoneBackToIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
 
     f.registry.onPaneKeyboardActivity(f.paneID)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @Test
-  func focusClearsFinishedBackToIdle() {
+  func focusClearsDoneBackToIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
 
     f.registry.onPaneFocused(f.paneID)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @Test
-  func paneOutputDoesNotChangeFinishedState() {
+  func paneOutputDoesNotChangeDoneState() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
 
     f.registry.onTerminalEvent(.paneOutput(f.paneID, Data()))
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
@@ -484,7 +484,7 @@ struct AgentStateStoreTests {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.finishTurn()
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
     #expect(!f.registry.hasObservedAttention(f.paneID))
 
     f.inView.setValue(true)

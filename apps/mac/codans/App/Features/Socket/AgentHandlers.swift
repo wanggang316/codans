@@ -134,6 +134,9 @@ final class AgentHandlers {
                 agentName: entry.kind.displayName,
                 state: entry.state.rawValue,
                 since: formatter.string(from: entry.lastTransitionAt),
+                source: entry.source.rawValue,
+                blockedKind: entry.blockedKind?.rawValue,
+                message: entry.message,
                 sessionID: entry.sessionID ?? pane.agentSessionID,
                 title: stateStore.title(for: pane.id),
                 projectID: project.id.description,
@@ -176,7 +179,8 @@ final class AgentHandlers {
       case .idle: satisfied = entry?.state == .idle
       case .working: satisfied = entry?.state == .working
       case .blocked: satisfied = entry?.state == .blocked
-      case .finished: satisfied = entry?.state == .finished
+      case .done: satisfied = entry?.state == .done
+      case .error: satisfied = entry?.state == .error
       case .changed: satisfied = entry?.state != baseline?.state || entry?.kind != baseline?.kind
       case .exit: satisfied = entry == nil || !paneExists
       }

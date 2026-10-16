@@ -11,10 +11,20 @@ extension IPC {
     /// `AgentKind.rawValue` and its display name.
     public let agent: String
     public let agentName: String
-    /// `idle` / `working` / `blocked` / `finished`.
+    /// `idle` / `working` / `blocked` / `done` / `error`.
     public let state: String
     /// ISO 8601 instant of the last state transition.
     public let since: String
+    /// The signal that decided `state`: `programStatus` (the agent's own
+    /// OSC 7501 report) or `screen` (the rendered terminal). Absent from
+    /// older apps.
+    public let source: String?
+    /// What a blocked agent needs (`permission` / `question` / `auth`),
+    /// when its program status report says so.
+    public let blockedKind: String?
+    /// The agent's own one-line description of its state, from its program
+    /// status report. Untrusted program text.
+    public let message: String?
     public let sessionID: String?
     /// The pane's latest terminal title, when one was observed.
     public let title: String?
@@ -33,6 +43,9 @@ extension IPC {
       agentName: String,
       state: String,
       since: String,
+      source: String? = nil,
+      blockedKind: String? = nil,
+      message: String? = nil,
       sessionID: String?,
       title: String?,
       projectID: String,
@@ -49,6 +62,9 @@ extension IPC {
       self.agentName = agentName
       self.state = state
       self.since = since
+      self.source = source
+      self.blockedKind = blockedKind
+      self.message = message
       self.sessionID = sessionID
       self.title = title
       self.projectID = projectID
@@ -71,7 +87,7 @@ extension IPC {
     }
   }
 
-  /// What `agent.wait` waits for. The four states match `AgentStateEntry
+  /// What `agent.wait` waits for. The five states match `AgentStateEntry
   /// .state`; `changed` resolves on any transition away from the state seen
   /// when the wait was armed (including an agent appearing or leaving);
   /// `exit` resolves once no agent is bound to the pane any more.
@@ -79,9 +95,25 @@ extension IPC {
     case idle
     case working
     case blocked
-    case finished
+    case done
+    case error
     case changed
     case exit
+
+    /// Parses a condition, accepting `finished`, the name `done` had before
+    /// it followed the program status vocabulary.
+    public init?(rawValue: String) {
+      switch rawValue {
+      case "idle": self = .idle
+      case "working": self = .working
+      case "blocked": self = .blocked
+      case "done", "finished": self = .done
+      case "error": self = .error
+      case "changed": self = .changed
+      case "exit": self = .exit
+      default: return nil
+      }
+    }
   }
 
   public struct AgentWaitRequest: Codable, Equatable, Sendable {

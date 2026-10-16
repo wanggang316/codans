@@ -52,7 +52,7 @@ nonisolated enum WorkflowRunDisplay {
     var name: String
     var paneID: PaneID?
     /// Last agent state the engine observed for this role
-    /// (`idle`/`working`/`blocked`/`finished`/`gone`), `nil` before the
+    /// (`idle`/`working`/`blocked`/`done`/`error`/`gone`), `nil` before the
     /// first observation.
     var state: String?
   }
