@@ -35,6 +35,38 @@ struct TerminalEngineTests {
     return (engine, manager, clock, temp)
   }
 
+  // MARK: - Program status
+
+  @Test
+  func programStatusPublishesOnlyChangedSummaries() async {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    let stream = engine.events()
+    let working = ProgramStatusReport(state: .working, app: "claude-code")
+    engine.ingestProgramStatus(working, for: paneID)
+    engine.ingestProgramStatus(working, for: paneID)
+    engine.ingestProgramStatus(ProgramStatusReport(state: .clear), for: paneID)
+    engine.finishEventStream()
+
+    var summaries: [ProgramStatusSummary?] = []
+    for await event in stream {
+      if case .paneProgramStatusChanged(let id, let summary) = event, id == paneID {
+        summaries.append(summary)
+      }
+    }
+    #expect(summaries.count == 2)
+    #expect(summaries.first??.root?.state == .working)
+    #expect(summaries.last! == nil)
+  }
+
+  @Test
+  func programStatusOfAnUnboundPaneGovernsNothing() {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    engine.ingestProgramStatus(ProgramStatusReport(state: .working, app: "claude-code"), for: paneID)
+    #expect(!engine.programStatusGoverns(paneID))
+  }
+
   // MARK: - Fan-out
 
   @Test

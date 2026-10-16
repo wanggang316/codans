@@ -35,6 +35,12 @@ public nonisolated protocol AgentRuntimeAdapter: Sendable {
 
   /// Compact display form of a session id for row layouts.
   func shortSessionID(_ sessionID: String) -> String
+
+  /// The `app` value this agent sends in OSC 7501 program status reports,
+  /// or nil when its reports have not been verified. Only a root record
+  /// with this `app` decides the agent's state (see
+  /// `ProgramStatusSummary.governs`).
+  var programStatusApp: String? { get }
 }
 
 nonisolated extension AgentRuntimeAdapter {
@@ -43,6 +49,8 @@ nonisolated extension AgentRuntimeAdapter {
   public func shortSessionID(_ sessionID: String) -> String {
     String(sessionID.prefix(8))
   }
+
+  public var programStatusApp: String? { nil }
 }
 
 /// Total registry of runtime adapters. The factory switches exhaustively
@@ -56,7 +64,8 @@ public nonisolated enum AgentRuntimeAdapters {
     case .codex:
       return CodexAdapter()
     case .pi:
-      return ObservedAgentAdapter(kind: .pi, displayName: "Pi", processNames: ["pi"])
+      return ObservedAgentAdapter(
+        kind: .pi, displayName: "Pi", processNames: ["pi"], programStatusApp: "pi")
     case .opencode:
       return ObservedAgentAdapter(
         kind: .opencode, displayName: "OpenCode", processNames: ["opencode", "open-code"])
@@ -107,6 +116,7 @@ nonisolated struct ClaudeCodeAdapter: AgentRuntimeAdapter {
   let kind: AgentKind = .claudeCode
   let displayName = "Claude Code"
   let processNames = ["claude", "claude-code"]
+  let programStatusApp: String? = "claude-code"
 
   func resumeCommand(sessionID: String) -> String? {
     "claude --resume \(AgentRuntimeAdapters.shellQuoted(sessionID))"
@@ -137,6 +147,7 @@ nonisolated struct ObservedAgentAdapter: AgentRuntimeAdapter {
   let kind: AgentKind
   let displayName: String
   let processNames: [String]
+  var programStatusApp: String?
 }
 
 /// omp (oh-my-pi): sessions live under `~/.omp/agent/sessions/` and
@@ -146,6 +157,7 @@ nonisolated struct OmpAdapter: AgentRuntimeAdapter {
   let kind: AgentKind = .omp
   let displayName = "omp"
   let processNames = ["omp"]
+  let programStatusApp: String? = "omp"
 
   func resumeCommand(sessionID: String) -> String? {
     "omp --resume \(AgentRuntimeAdapters.shellQuoted(sessionID))"

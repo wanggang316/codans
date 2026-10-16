@@ -101,6 +101,9 @@ final class TerminalEngine {
   /// bounded `.paneIdle` settle nudges emitted while an agent pane is quiet
   /// (see `viewportPollOutcome`).
   private var viewportChangedAt: [PaneID: Date] = [:]
+  /// OSC 7501 program status records per pane. Keyed by pane, not surface:
+  /// they survive a surface reclaim and re-attach, like the session does.
+  private var programStatusRecords: [PaneID: ProgramStatusRecords] = [:]
   /// Process-group → resolved foreground job cache. The poll loop hits
   /// every PGID at ≤300 ms when an agent is bound; the underlying
   /// `proc_listpids` + `proc_pidinfo` + `KERN_PROCARGS2` triad costs a
@@ -552,6 +555,7 @@ final class TerminalEngine {
     foregroundJobMisses.removeValue(forKey: paneID)
     viewportSnapshots.removeValue(forKey: paneID)
     viewportChangedAt.removeValue(forKey: paneID)
+    programStatusRecords.removeValue(forKey: paneID)
     // The crash ring is the one per-pane map `recordPaneCrash` owns: it
     // appends here and clears on the auto-close / retry branches, so it must
     // survive a crash close. Every other close ends the pane for good and
@@ -893,6 +897,7 @@ final class TerminalEngine {
       foregroundJobMisses[paneID] = 0
     }
     hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
+    dropLiveProgramStatusIfAgentGone(paneID: paneID, foregroundJob: next)
     let changed = foregroundJobSnapshots[paneID] != next
     if changed {
       foregroundJobSnapshots[paneID] = next
@@ -1135,8 +1140,11 @@ final class TerminalEngine {
       || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
     // Classify against the active interaction region, not the whole viewport:
     // scrollback that happens to still be visible must not pin the agent on a
-    // stale prompt/spinner.
-    guard hasAgentSignal, let text = surface.readText(.active) else { return }
+    // stale prompt/spinner. Skip the read while the agent's own program
+    // status decides its state: nothing would consume the text.
+    guard hasAgentSignal, !programStatusGoverns(paneID),
+      let text = surface.readText(.active)
+    else { return }
     switch Self.viewportPollOutcome(
       text: text,
       previous: viewportSnapshots[paneID],
@@ -1151,6 +1159,52 @@ final class TerminalEngine {
       emit(.paneIdle(paneID, duration: duration))
     case .quiet:
       break
+    }
+  }
+
+  // MARK: Program status (OSC 7501)
+
+  /// Apply one OSC 7501 report to `paneID`'s records and publish the new
+  /// summary when it changed. Report text is untrusted and never logged.
+  func ingestProgramStatus(_ report: ProgramStatusReport, for paneID: PaneID) {
+    var records = programStatusRecords[paneID] ?? ProgramStatusRecords()
+    let before = records.summary
+    guard records.apply(report) else { return }
+    Self.logger.debug(
+      "program-status pane=\(paneID.raw.uuidString, privacy: .public) state=\(report.state.rawValue, privacy: .public) kind=\(report.kind?.rawValue ?? "-", privacy: .public) app=\(report.app ?? "-", privacy: .public) child=\(!report.id.isEmpty, privacy: .public)"
+    )
+    storeProgramStatus(records, for: paneID, before: before)
+  }
+
+  /// Whether `paneID`'s program status decides the state of the agent
+  /// bound to it. While true the screen is not read and the agent's
+  /// OSC 9;4 progress is not shown as terminal activity.
+  func programStatusGoverns(_ paneID: PaneID) -> Bool {
+    guard let summary = programStatusRecords[paneID]?.summary else { return false }
+    return summary.governs(hierarchy.catalog.pane(paneID)?.agentKind)
+  }
+
+  /// The protocol drops `working` / `blocked` records when the reporting
+  /// process exits. codans keeps records only for agent panes: once the
+  /// pane is unbound and its foreground is no agent, the reporting agent
+  /// is gone.
+  private func dropLiveProgramStatusIfAgentGone(paneID: PaneID, foregroundJob: ForegroundJob) {
+    guard var records = programStatusRecords[paneID],
+      hierarchy.catalog.pane(paneID)?.agentKind == nil,
+      foregroundJob.isEmpty || AgentKindPatterns.classify(foregroundJob: foregroundJob) == nil
+    else { return }
+    let before = records.summary
+    guard records.dropLiveRecords() else { return }
+    storeProgramStatus(records, for: paneID, before: before)
+  }
+
+  private func storeProgramStatus(
+    _ records: ProgramStatusRecords, for paneID: PaneID, before: ProgramStatusSummary?
+  ) {
+    programStatusRecords[paneID] = records.isEmpty ? nil : records
+    let after = records.summary
+    if after != before {
+      emit(.paneProgramStatusChanged(paneID, after))
     }
   }
 
@@ -1220,7 +1274,8 @@ extension TerminalEvent {
   /// because scrollback retains history.
   fileprivate var isLifecycle: Bool {
     switch self {
-    case .paneOutput, .paneViewportChanged, .paneIdle, .paneInfoChanged, .foregroundJobChanged:
+    case .paneOutput, .paneViewportChanged, .paneIdle, .paneInfoChanged,
+      .paneProgramStatusChanged, .foregroundJobChanged:
       return false
     case .paneCreated, .paneReady, .paneExited, .paneCrashed,
       .paneClosedByTab, .tabActivated, .tabAutoClosed,

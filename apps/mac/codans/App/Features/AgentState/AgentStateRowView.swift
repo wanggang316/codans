@@ -363,9 +363,13 @@ struct AgentStateRowView: View {
       // orange "blocked" icon without competing visually for attention.
       LoadingGridIcon(size: 16, isAnimating: !reduceMotion)
         .foregroundStyle(.primary)
-    case .finished:
+    case .done:
       Image(systemName: "checkmark.circle.fill")
         .foregroundStyle(.green)
+        .accessibilityHidden(true)
+    case .error:
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
         .accessibilityHidden(true)
     case .idle:
       Image(systemName: "circle.dashed")
@@ -375,14 +379,15 @@ struct AgentStateRowView: View {
   }
 
   /// Human-readable verb for the visible inline state label
-  /// ("idle" / "working" / "blocked" / "finished"). The short form
+  /// ("idle" / "working" / "blocked" / "done" / "error"). The short form
   /// keeps the trailing column compact — the spoken VoiceOver label
   /// uses the long form via `sentenceVerb`.
   private var stateVerb: String {
     switch entry.state {
     case .blocked: return "blocked"
     case .working: return "working"
-    case .finished: return "finished"
+    case .done: return "done"
+    case .error: return "error"
     case .idle: return "idle"
     }
   }
@@ -393,7 +398,8 @@ struct AgentStateRowView: View {
     switch entry.state {
     case .blocked: return "blocked"
     case .working: return "working"
-    case .finished: return "finished"
+    case .done: return "done"
+    case .error: return "failed"
     case .idle: return "idle"
     }
   }

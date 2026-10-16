@@ -55,7 +55,7 @@ extension WorkflowMachine {
   private mutating func handleRoleState(
     _ role: String, observed: WorkflowWaitCondition, _ transition: inout Transition
   ) {
-    run.roleStates[role] = observed == .exit ? "finished" : observed.rawValue
+    run.roleStates[role] = observed == .exit ? "gone" : observed.rawValue
     guard run.status == .running, isWaiting(on: role), let step = run.currentStep else { return }
     switch run.phase {
     case .waitingForRole(_, let ordinal):

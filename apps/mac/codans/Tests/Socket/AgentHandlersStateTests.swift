@@ -110,11 +110,20 @@ struct AgentHandlersStateTests {
   }
 
   @Test
+  func waitConditionAcceptsTheFormerFinishedName() throws {
+    #expect(IPC.AgentWaitCondition(rawValue: "finished") == .done)
+    let decoded = try JSONDecoder().decode(
+      IPC.AgentWaitCondition.self, from: Data(#""finished""#.utf8))
+    #expect(decoded == .done)
+    #expect(IPC.AgentWaitCondition(rawValue: "bogus") == nil)
+  }
+
+  @Test
   func waitReportsTheDeadlineWithTheLastState() async throws {
     let fixture = makeFixture()
 
     let response = try await fixture.handlers.wait(
-      IPC.AgentWaitRequest(paneID: fixture.pane.id, until: .finished, timeoutMillis: 120))
+      IPC.AgentWaitRequest(paneID: fixture.pane.id, until: .done, timeoutMillis: 120))
 
     #expect(!response.satisfied)
     #expect(response.state == "working")

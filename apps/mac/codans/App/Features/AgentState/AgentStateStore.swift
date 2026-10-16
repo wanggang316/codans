@@ -8,10 +8,15 @@ private let storeLogger = Logger(
 )
 
 /// Runtime-only state machine that derives each bound agent pane's
-/// runtime state (`idle` / `working` / `blocked` / `finished`) from the
-/// raw `working` / `blocked` / `idle` classifier plus an observed/
-/// unobserved attention bit. Raw state comes from the rendered active
-/// region; `finished` is the display form of an unobserved completion.
+/// runtime state (`idle` / `working` / `blocked` / `done` / `error`).
+///
+/// Two sources, in priority order:
+/// - OSC 7501 program status: when the pane's root record comes from the
+///   bound agent (`ProgramStatusSummary.governs`), the agent's own report
+///   decides the state and the screen is not read.
+/// - The rendered active region, through the agent-specific
+///   `working` / `blocked` / `idle` classifier, plus an observed/unobserved
+///   attention bit. `done` is the display form of an unobserved completion.
 /// Designed to be the single source of truth for the AgentState badge +
 /// view. Nothing is persisted: every entry is reconstructed from the
 /// live event flow at process start.
@@ -22,14 +27,16 @@ private let storeLogger = Logger(
 /// on every transition; every mutation writes the full entry struct
 /// back to the subscript so change tracking fires reliably.
 ///
-/// Display priority is `blocked > working > finished > idle`.
+/// Display priority is `blocked > error > done > working > idle`.
 /// A blocked raw state clears when the user observably interacts
 /// (keystroke / focus). Working fires only after the bound agent has
 /// observed user input and its rendered region matches an agent-specific
 /// working cue.
-/// Finished is not a raw state: it is the display form of a pane that
-/// moved from an active raw state back to idle while the user was not
-/// looking at it.
+/// On the screen path, done is not a raw state: it is the display form of
+/// a pane that moved from an active raw state back to idle while the user
+/// was not looking at it. On the program status path, `done` comes from the
+/// agent and also ends once the user looks; an `idle` report (interrupt,
+/// startup, `/clear`) never shows as done.
 ///
 /// Lifecycle teardown (`paneExited` / `paneCrashed` / `paneClosedByTab`)
 /// drops both the entry and its scratch — the row disappears from the
@@ -51,25 +58,53 @@ final class AgentStateStore {
     let sessionID: String?
     var state: AgentRuntimeState
     var lastTransitionAt: Date
+    /// Which signal decided `state`.
+    var source: AgentStateSource = .screen
+    /// What a blocked agent needs, when its program status report says so.
+    var blockedKind: ProgramStatusKind?
+    /// The agent's own one-line description of the current state, from its
+    /// program status report. Untrusted program text: display it, never
+    /// interpret it, keep it out of logs.
+    var message: String?
   }
 
-  /// Derived runtime state surfaced to UI. Shares its vocabulary with the
-  /// raw `AgentActivityState` classifier (`working` / `blocked` / `idle`)
-  /// and adds `finished` for an unobserved completion, so no state has to
-  /// be renamed as it flows from classifier to UI. Distinct from the
-  /// inbox-side `InboxEntry.Kind`, which tracks notification events rather
-  /// than live activity.
+  /// Derived runtime state surfaced to UI. The vocabulary follows the
+  /// OSC 7501 program status states, so no state is renamed on its way from
+  /// an agent's report to the UI. Distinct from the inbox-side
+  /// `InboxEntry.Kind`, which tracks notification events rather than live
+  /// activity.
   enum AgentRuntimeState: String, CaseIterable, Equatable, Sendable {
     case idle
     case working
     case blocked
-    case finished
+    /// The turn ended while the user was not looking.
+    case done
+    /// The agent reported that it failed and stopped.
+    case error
+
+    /// Decodes a raw value persisted by any build. Snapshots written before
+    /// the rename say `finished` for `done`.
+    init?(persistedRaw raw: String) {
+      if raw == "finished" {
+        self = .done
+      } else {
+        self.init(rawValue: raw)
+      }
+    }
 
     /// True while the agent's turn is still open — working, or blocked on
-    /// the user mid-turn. `idle` / `finished` mean the turn has ended.
+    /// the user mid-turn. `idle` / `done` / `error` mean the turn has ended.
     var isMidTask: Bool {
       self == .working || self == .blocked
     }
+  }
+
+  /// The signal that decided an entry's state.
+  enum AgentStateSource: String, Equatable, Sendable {
+    /// The agent's own OSC 7501 program status report.
+    case programStatus
+    /// The rendered active region (agent-specific classifier).
+    case screen
   }
 
   /// Public, read-only view of bound agents. `@Observable` tracks
@@ -100,6 +135,11 @@ final class AgentStateStore {
     /// working/blocked badge. Cleared the instant a real viewport lands
     /// (`applyViewportText`).
     var awaitingFirstClassification: Bool
+    /// Latest OSC 7501 summary for the pane, nil when it has no records.
+    var programStatus: ProgramStatusSummary?
+    /// The program status state the last refresh applied, so a new `done`
+    /// can be told apart from one the user already saw.
+    var appliedProgramStatusState: ProgramStatusState?
 
     static func fresh(
       userInputSeen: Bool = false,
@@ -138,7 +178,7 @@ final class AgentStateStore {
   @ObservationIgnored private var attentionStops: [PaneID: AttentionStop] = [:]
 
   /// Globally focused pane, if any. Used to avoid surfacing
-  /// `.finished` for work the user is already looking at; focus
+  /// `.done` for work the user is already looking at; focus
   /// change events still clear a previously surfaced finished state.
   private let focusedPane: @MainActor () -> PaneID?
   /// True when the user can see `paneID` right now (app active, pane has
@@ -167,16 +207,20 @@ final class AgentStateStore {
   //  - onTerminalEvent(.paneViewportChanged): classify the rendered
   //    active region through `PaneAttentionInterpreter`'s agent-specific
   //    rules. Process identity decides which agent this is; the rendered
-  //    content decides whether it is working, blocked, or idle. This is
-  //    the *only* source of `.blocked` / `.working`.
+  //    content decides whether it is working, blocked, or idle, unless the
+  //    agent's program status governs the pane.
+  //  - onTerminalEvent(.paneProgramStatusChanged): store the pane's
+  //    OSC 7501 summary. While it governs the bound agent it decides the
+  //    state ahead of the screen (see `refreshFromProgramStatus`).
   //  - onTerminalEvent(.paneIdle): recompute raw state; if this is the
   //    first active → idle transition observed in the background, the
-  //    display state becomes `.finished`.
+  //    display state becomes `.done`.
   //  - onTerminalEvent(.paneExited | .paneCrashed | .paneClosedByTab):
   //    teardown — drop entry and scratch.
-  //  - onPaneKeyboardActivity / onPaneFocused: mark the pane as seen and
-  //    optimistically clear a blocked state until the next snapshot
-  //    re-derives it.
+  //  - onPaneKeyboardActivity / onPaneFocused: mark the pane as seen and,
+  //    on the screen path, optimistically clear a blocked state until the
+  //    next snapshot re-derives it. A program status report is not
+  //    second-guessed: the agent reports the end of its own prompt.
   //  - onTerminalEvent(.paneInfoChanged(.title)): cache the pane's
   //    latest OSC title for the hover summary card's activity line.
   //    Display-only — never an input to state derivation.
@@ -228,6 +272,9 @@ final class AgentStateStore {
     case .paneViewportChanged(let paneID, let text):
       applyViewportText(text, paneID: paneID)
 
+    case .paneProgramStatusChanged(let paneID, let summary):
+      applyProgramStatus(summary, paneID: paneID)
+
     case .paneInfoChanged(let paneID, .title(let title)):
       // Display-only title cache — no refresh: the title never feeds
       // derivation (a "Working…" title must not flip state; see
@@ -253,7 +300,7 @@ final class AgentStateStore {
   /// prompt, so drop the attention cue until the next snapshot re-derives it.
   func onPaneKeyboardActivity(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    let clearsBlocked = s.rawState == .blocked
+    let clearsBlocked = s.rawState == .blocked && !isGoverned(s, paneID: paneID)
     if clearsBlocked {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
@@ -273,7 +320,7 @@ final class AgentStateStore {
   /// attention stop only when the pane is in view (see `markObserved`).
   func onPaneFocused(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
-    let clearsBlocked = s.rawState == .blocked
+    let clearsBlocked = s.rawState == .blocked && !isGoverned(s, paneID: paneID)
     if clearsBlocked {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
@@ -388,7 +435,7 @@ final class AgentStateStore {
   /// dropping a stale row is preferable to crashing the launch.
   ///
   /// Scratch is initialised with `userInputSeen = true` so the
-  /// restored state cannot be flipped to a synthetic "finished" cue
+  /// restored state cannot be flipped to a synthetic "done" cue
   /// before any user interaction; the next real event refines it.
   func seedRestored(_ records: [(paneID: PaneID, kind: AgentKind, state: AgentRuntimeState)]) {
     for record in records {
@@ -417,6 +464,12 @@ final class AgentStateStore {
     scratch[paneID]?.lastTitle
   }
 
+  /// One line on what the agent in `paneID` is doing: its own program
+  /// status message when it sent one, otherwise the pane's OSC title.
+  func activityText(for paneID: PaneID) -> String? {
+    entries[paneID]?.message ?? title(for: paneID)
+  }
+
   /// True when the agent in `paneID` has stopped for the user (blocked or
   /// done) and the user has looked at the pane since that stop.
   func hasObservedAttention(_ paneID: PaneID) -> Bool {
@@ -425,7 +478,7 @@ final class AgentStateStore {
 
   // MARK: - Derivation
 
-  /// Raw state derivation. Display-only finished is intentionally not
+  /// Raw state derivation. Display-only done is intentionally not
   /// represented here; it is derived later from `seen`.
   private func deriveRawState(_ s: Scratch, kind: AgentKind?) -> AgentRawState {
     guard let kind, let text = s.lastViewportText else { return .idle }
@@ -441,8 +494,39 @@ final class AgentStateStore {
     case .working:
       return .working
     case .idle:
-      return s.seen ? .idle : .finished
+      return s.seen ? .idle : .done
     }
+  }
+
+  /// The program status record that decides `paneID`'s state, or nil when
+  /// the pane falls back to the screen.
+  private func governingActivity(_ s: Scratch, paneID: PaneID) -> ProgramStatusSummary.Record? {
+    guard let summary = s.programStatus, summary.governs(entries[paneID]?.kind) else {
+      return nil
+    }
+    return summary.activity
+  }
+
+  private func isGoverned(_ s: Scratch, paneID: PaneID) -> Bool {
+    governingActivity(s, paneID: paneID) != nil
+  }
+
+  private func applyProgramStatus(_ summary: ProgramStatusSummary?, paneID: PaneID) {
+    var s = scratch[paneID] ?? .fresh()
+    let wasGoverned = isGoverned(s, paneID: paneID)
+    s.programStatus = summary
+    if wasGoverned, !isGoverned(s, paneID: paneID) {
+      // The screen was not read while the report governed, so the cached
+      // text is stale. Derive from the next live snapshot instead, and do
+      // not read the end of the report as a finished screen turn.
+      s.lastViewportText = nil
+      s.lastWorkingAt = nil
+      s.appliedProgramStatusState = nil
+      s.rawState = .idle
+      s.seen = true
+    }
+    scratch[paneID] = s
+    refresh(paneID)
   }
 
   /// Opens a new attention stop when the agent blocks or its turn ends, and
@@ -510,6 +594,9 @@ final class AgentStateStore {
     case .paneClosedByTab(let id, _): return "paneClosedByTab(\(id.raw.uuidString.prefix(8)))"
     case .paneInfoChanged(let id, let delta):
       return "paneInfoChanged(\(id.raw.uuidString.prefix(8)),\(deltaTag(delta)))"
+    case .paneProgramStatusChanged(let id, let summary):
+      return
+        "paneProgramStatusChanged(\(id.raw.uuidString.prefix(8)),\(summary?.activity?.state.rawValue ?? "none"))"
     case .foregroundJobChanged(let id, _): return "foregroundJobChanged(\(id.raw.uuidString.prefix(8)))"
     case .paneCreated(let id, _): return "paneCreated(\(id.raw.uuidString.prefix(8)))"
     case .paneReady(let id): return "paneReady(\(id.raw.uuidString.prefix(8)))"
@@ -539,6 +626,10 @@ final class AgentStateStore {
   /// `onAgentBound`.
   private func refresh(_ paneID: PaneID) {
     guard var s = scratch[paneID] else { return }
+    if let activity = governingActivity(s, paneID: paneID) {
+      refreshFromProgramStatus(paneID, scratch: s, activity: activity)
+      return
+    }
     let kind = entries[paneID]?.kind
     let previousRaw = s.rawState
     var newRaw = deriveRawState(s, kind: kind)
@@ -567,14 +658,71 @@ final class AgentStateStore {
     // lands, handing control back to normal derivation.
     if s.awaitingFirstClassification { return }
 
+    commit(paneID, state: displayState(for: s), source: .screen, blockedKind: nil, message: nil)
+  }
+
+  /// The program status path of `refresh`: the agent's report decides the
+  /// state. No working hold, no "user input first" gate, and no screen read.
+  private func refreshFromProgramStatus(
+    _ paneID: PaneID, scratch current: Scratch, activity: ProgramStatusSummary.Record
+  ) {
+    var s = current
+    let previousRaw = s.rawState
+    let newRaw: AgentRawState
+    switch activity.state {
+    case .working: newRaw = .working
+    case .blocked: newRaw = .blocked
+    case .idle, .done, .error, .clear: newRaw = .idle
+    }
+    let isNewDone = activity.state == .done && s.appliedProgramStatusState != .done
+    if isFocused(paneID) {
+      s.seen = true
+    } else if isNewDone {
+      s.seen = false
+    }
+    s.rawState = newRaw
+    s.lastWorkingAt = nil
+    s.appliedProgramStatusState = activity.state
+    s.awaitingFirstClassification = false
+    scratch[paneID] = s
+    trackAttentionStop(paneID, previous: previousRaw, current: newRaw, hasViewport: false)
+
+    let state: AgentRuntimeState
+    switch activity.state {
+    case .working: state = .working
+    case .blocked: state = .blocked
+    case .done: state = s.seen ? .idle : .done
+    case .error: state = .error
+    case .idle, .clear: state = .idle
+    }
+    commit(
+      paneID, state: state, source: .programStatus,
+      blockedKind: activity.kind, message: activity.message)
+  }
+
+  /// Write the derived state to the entry. The transition time moves only
+  /// when the state itself changes.
+  private func commit(
+    _ paneID: PaneID,
+    state newState: AgentRuntimeState,
+    source: AgentStateSource,
+    blockedKind: ProgramStatusKind?,
+    message: String?
+  ) {
     guard var entry = entries[paneID] else { return }
-    let newState = displayState(for: s)
-    guard entry.state != newState else { return }
-    storeLogger.info(
-      "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public)"
-    )
-    entry.state = newState
-    entry.lastTransitionAt = now()
+    var updated = entry
+    updated.state = newState
+    updated.source = source
+    updated.blockedKind = blockedKind
+    updated.message = message
+    guard updated != entry else { return }
+    if entry.state != newState {
+      storeLogger.info(
+        "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public) source=\(source.rawValue, privacy: .public)"
+      )
+      updated.lastTransitionAt = now()
+    }
+    entry = updated
     entries[paneID] = entry
   }
 }

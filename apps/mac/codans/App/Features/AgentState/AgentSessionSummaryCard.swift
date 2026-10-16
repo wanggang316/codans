@@ -175,7 +175,8 @@ struct AgentSessionSummaryCard: View {
   }
 
   /// State glyph + verb, mirroring the row's color language: orange for
-  /// blocked, primary for working, green for finished, secondary for idle.
+  /// blocked, primary for working, green for done, red for error, secondary
+  /// for idle.
   private var stateChip: some View {
     HStack(spacing: 4) {
       Image(systemName: stateGlyphName)
@@ -195,7 +196,8 @@ struct AgentSessionSummaryCard: View {
     switch entry.state {
     case .blocked: return "hand.raised.fill"
     case .working: return "square.grid.3x3.fill"
-    case .finished: return "checkmark.circle.fill"
+    case .done: return "checkmark.circle.fill"
+    case .error: return "exclamationmark.triangle.fill"
     case .idle: return "circle.dashed"
     }
   }
@@ -204,7 +206,8 @@ struct AgentSessionSummaryCard: View {
     switch entry.state {
     case .blocked: return .orange
     case .working: return .primary
-    case .finished: return .green
+    case .done: return .green
+    case .error: return .red
     case .idle: return .secondary
     }
   }

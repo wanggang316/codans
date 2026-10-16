@@ -89,6 +89,18 @@ struct RestoredAgentSeedSelectionTests {
     #expect(seeds.isEmpty)
   }
 
+  /// A snapshot written before `finished` was renamed restores as `done`.
+  @Test
+  func legacyFinishedStateRawRestoresAsDone() {
+    let pane = PaneID()
+    let seeds = AppState.selectAgentSeeds(
+      restored: [pane: Self.record(pane, state: "finished")],
+      isDaemonAlive: { _ in true }
+    )
+
+    #expect(seeds.map(\.state) == [.done])
+  }
+
   /// An unknown `stateRaw` from a future build is dropped, not crashed on.
   @Test
   func unknownStateRawIsSkipped() {

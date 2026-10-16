@@ -259,7 +259,7 @@ extension WorkflowEngine {
     idleSince: inout Date?,
     blockedSince: inout Date?
   ) -> WorkflowRunEvent? {
-    let isIdle = state == .idle || state == .finished
+    let isIdle = state == .idle || state == .done || state == .error
     idleSince = isIdle ? (idleSince ?? now) : nil
     blockedSince = state == .blocked ? (blockedSince ?? now) : nil
     switch until {
@@ -307,7 +307,7 @@ extension WorkflowEngine {
           return
         }
         if state == .working { seenWorking = true }
-        let isIdle = seenWorking && (state == .idle || state == .finished)
+        let isIdle = seenWorking && (state == .idle || state == .done || state == .error)
         idleSince = isIdle ? (idleSince ?? now) : nil
         blockedSince = state == .blocked ? (blockedSince ?? now) : nil
         if let since = idleSince, now.timeIntervalSince(since) >= TimeInterval(idleGraceSeconds) {

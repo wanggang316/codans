@@ -266,7 +266,7 @@ struct AgentStateSidebarPanel: View {
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
-              paneTitle: { registry.title(for: item.paneID) },
+              paneTitle: { registry.activityText(for: item.paneID) },
               worktreePath: resolved?.worktreePath,
               remoteHost: resolved?.remoteHost,
               onTap: { onTapRow(item.paneID) },

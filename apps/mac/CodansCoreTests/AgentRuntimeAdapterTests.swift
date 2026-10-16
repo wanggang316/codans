@@ -21,6 +21,16 @@ struct AgentRuntimeAdapterTests {
     #expect(AgentRuntimeAdapters.all.map(\.kind) == AgentKind.allCases)
   }
 
+  // MARK: - program status
+
+  @Test
+  func programStatusAppCoversVerifiedProducersOnly() {
+    let verified: [AgentKind: String] = [.claudeCode: "claude-code", .pi: "pi", .omp: "omp"]
+    for kind in AgentKind.allCases {
+      #expect(AgentRuntimeAdapters.adapter(for: kind).programStatusApp == verified[kind])
+    }
+  }
+
   // MARK: - resume invocation
 
   @Test

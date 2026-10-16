@@ -2418,7 +2418,7 @@ final class AppState {
       guard alive else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
-        let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
+        let state = AgentStateStore.AgentRuntimeState(persistedRaw: record.stateRaw)
       else { continue }
       seeds.append((paneID: paneID, kind: kind, state: state))
     }

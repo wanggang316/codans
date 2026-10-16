@@ -8,9 +8,8 @@ import CodansCore
 /// no SwiftUI, no live registry. We build `AgentEntry` values directly
 /// and assert on the output order.
 ///
-/// The triage priority surfaced by the popover is `blocked >
-/// finished > working > idle` (deliberately distinct from the registry's
-/// derive priority — see the helper's doc comment for why).
+/// The triage priority surfaced by the popover is `blocked > error >
+/// done > working > idle`.
 @MainActor
 struct SortedEntriesProviderTests {
   /// Empty input → empty output. Sanity case; protects against
@@ -21,26 +20,28 @@ struct SortedEntriesProviderTests {
     #expect(result.isEmpty)
   }
 
-  /// All four states present → output is ordered `blocked,
-  /// finished, working, idle`. Each entry shares the same
+  /// All five states present → output is ordered `blocked, error,
+  /// done, working, idle`. Each entry shares the same
   /// `lastTransitionAt` so only the primary sort key matters here.
   @Test
-  func primaryStateOrderIsBlockedFinishedWorkingIdle() {
+  func primaryStateOrderIsBlockedErrorDoneWorkingIdle() {
     let now = Date(timeIntervalSince1970: 1_000)
     let pBlocked = PaneID()
     let pWorking = PaneID()
     let pFin = PaneID()
+    let pError = PaneID()
     let pIdle = PaneID()
 
     let entries: [PaneID: AgentStateStore.AgentEntry] = [
       pIdle: .init(kind: .claudeCode, sessionID: nil, state: .idle, lastTransitionAt: now),
       pWorking: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: now),
       pBlocked: .init(kind: .pi, sessionID: nil, state: .blocked, lastTransitionAt: now),
-      pFin: .init(kind: .claudeCode, sessionID: nil, state: .finished, lastTransitionAt: now),
+      pFin: .init(kind: .claudeCode, sessionID: nil, state: .done, lastTransitionAt: now),
+      pError: .init(kind: .pi, sessionID: nil, state: .error, lastTransitionAt: now),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
-    #expect(result.map(\.entry.state) == [.blocked, .finished, .working, .idle])
+    #expect(result.map(\.entry.state) == [.blocked, .error, .done, .working, .idle])
   }
 
   /// Same state, different `lastTransitionAt` — most-recent first.
