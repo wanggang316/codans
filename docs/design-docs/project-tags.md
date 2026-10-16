@@ -133,7 +133,7 @@ Quit confirmation and terminal disposition are independent settings:
 
 - `quitConfirmation`: `never`, `always`, or `auto`; `auto` asks only when a
   live Pane is busy: a foreground command, OSC 9;4 progress, or an agent in
-  `working` / `blocked` state. Idle shells and idle / finished agents do not
+  `working` / `blocked` state. Idle shells and idle / done / error agents do not
   trigger the dialog.
 - `quitAction`: keep sessions running or snapshot them on exit. The confirmation
   dialog also offers cancellation.

@@ -8,7 +8,7 @@
 
 ## 背景与范围
 
-codans 已经具备"一个 agent 编排其它 agent"所需的全部**原语**：Agent Profiles 与统一的启动管线（`HierarchyClient.launchAgent`）、`AgentStateStore` 的逐 pane 运行态（`idle` / `working` / `blocked` / `finished`）、`codans agent wait --until`、`codans pane send --wait --capture`、`codans handoff` 与 worktree 内的 `.codans/handoff/` 工件、以及 `{schemaVersion, data | error}` 的 JSON 信封（见 [cli.md](cli.md)、[agent-handoff.md](agent-handoff.md)、[active-agents-view.md](active-agents-view.md)、[lessons-learned 2026-09-14](../lessons-learned/2026-09-14-cli-agent-orchestration-gaps.md)）。
+codans 已经具备"一个 agent 编排其它 agent"所需的全部**原语**：Agent Profiles 与统一的启动管线（`HierarchyClient.launchAgent`）、`AgentStateStore` 的逐 pane 运行态（`idle` / `working` / `blocked` / `done` / `error`）、`codans agent wait --until`、`codans pane send --wait --capture`、`codans handoff` 与 worktree 内的 `.codans/handoff/` 工件、以及 `{schemaVersion, data | error}` 的 JSON 信封（见 [cli.md](cli.md)、[agent-handoff.md](agent-handoff.md)、[active-agents-view.md](active-agents-view.md)、[lessons-learned 2026-09-14](../lessons-learned/2026-09-14-cli-agent-orchestration-gaps.md)）。
 
 但用户每天真正在跑的编排——"在旁边分屏起一个 reviewer，把 diff 交给它审，读它的结论，修，再让它复审，直到 clean"——今天只存在于手敲的 CLI 序列或 agent 自己临场拼出的 bash 循环里。它不可复现、不可分享、没有可观测的进度，出了问题（agent 卡在权限提示、忘了汇报、回答得不合格式）也没有一个地方能停下来问用户。Handoff 是这类编排里唯一被固化的一条，而它是写死的状态机：目标列表、briefing 章节、kickoff 文案都是字面量，第二条编排就得再写一遍。
 
@@ -202,7 +202,7 @@ Provisional 使 run 进入 `needs_attention`，动作表：**Accept** / **Accept
 | `workflow` | `id`、`name` |
 | `run` | `id`、`path` |
 | `worktree` | `id`、`path`、`name`、`branch`（每步前刷新） |
-| `roles.<role>` | `pane-id`、`agent`、`name`、`state`（该步的快照，`idle` / `working` / `blocked` / `finished` / `gone`） |
+| `roles.<role>` | `pane-id`、`agent`、`name`、`state`（该步的快照，`idle` / `working` / `blocked` / `done` / `error` / `gone`；角色的 agent 退出记为 `gone`） |
 | `inputs.<name>` | 启动时的类型化输入 |
 | `state.<name>` | 声明过的可变状态 |
 | `steps.<id>` | `outcome`（`success` / `failure` / `skipped`）、`outputs.*`（`run` 步骤：`exit-code`、`stdout`、`stdout-path`） |

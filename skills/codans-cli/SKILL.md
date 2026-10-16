@@ -435,9 +435,14 @@ codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent
 ```
 
 States: `working` (producing output), `blocked` (asking the user
-something), `idle` (at its prompt), `finished` (went idle while in the
-background). The state is derived from the pane's screen and foreground
-process, so it can lag a moment behind the agent; `wait` resolves
+something; `blockedKind` says permission, question, or auth when known),
+`idle` (at its prompt), `done` (finished a turn you have not looked at),
+`error` (the agent reported a failure). An agent that reports OSC 7501
+program status (Claude Code, Pi, omp) sets its own state (`source:
+programStatus`, often with a `message`); for other agents the state is
+derived from the pane's screen (`source: screen`), so it can lag a moment
+behind the agent. `--until finished` still works as the old name of
+`done`. `wait` resolves
 server-side, so no polling loop is needed. Past `--wait-timeout` (1–600 s,
 default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
 `details.state` is the last state seen. `pane show` reports the bound
