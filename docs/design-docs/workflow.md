@@ -235,7 +235,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 
 **Idle 门控。** `message` 只在角色 idle 时注入。idle 的判定来自 `AgentStateStore`：`.idle` 需持续 2 s（分类器有 1.2 s 的 working→idle 迟滞，再叠一层稳定期避免在两个 tool call 之间注入）；`.blocked` 持续超过 30 s 升级为 attention（动作：Focus pane / Keep waiting / Skip / Cancel）；pane 消失是 `roleGone` → attention（Relaunch 仅对 `launch` 角色可用）。永远不往 `working` 的 pane 键入任何东西。
 
-**Watchdog。** 等待交付时不用墙钟而用角色状态：注入后角色曾 `working` 又回到 `idle` 且 `idle_grace`（默认 180 s）内没有交付 → 自动 nudge 一次（重键入完成命令，token 不变）→ 再等一个 `idle_grace` → attention。角色一直 `working` 就一直等——`expect.timeout-minutes` 是唯一会打断工作中 agent 的东西，而它没有默认值。
+**Watchdog。** 等待交付时不用墙钟而用角色状态：注入后角色曾 `working` 又回到 `idle` 且 `idle_grace`（默认 180 s）内没有交付 → 自动 nudge 一次（重键入完成命令，token 不变）→ 再等一个 `idle_grace` → attention。角色一直 `working` 就一直等——`expect.timeout-minutes` 是唯一会打断工作中 agent 的东西，而它没有默认值。例外是 agent 本身不在了：pane 还开着，但曾绑定的 agent 已退出，或 `launch` 角色在 60 s 启动宽限内一直没绑定上 agent（例如 agent CLI 启动即报错，只剩一个空 shell）→ 直接按 `roleGone` 升级为 attention（Relaunch / Skip / Cancel），不再无限等待。`current` / `pick` 角色从未出现 agent 时不触发——人可以在裸 shell 里手动交付。
 
 **取消 / 中断。** Cancel 吊销当前 activation、把活动步记 `failed`、结束 run；不关闭任何 pane、不终止 agent 的工作、不撤销副作用；正在跑的 `run:` 命令走 `CommandRunner` 的 SIGTERM→SIGKILL 阶梯。app 启动时把记录里仍是 `running` / `needs_attention` 的 run 标为 `interrupted`——只供查看，不恢复。
 

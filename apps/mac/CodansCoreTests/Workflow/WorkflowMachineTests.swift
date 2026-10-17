@@ -763,6 +763,23 @@ struct WorkflowMachineTests {
   }
 
   @Test
+  func agentExitWhileAwaitingDeliveryOffersRelaunch() throws {
+    let driver = Driver(Self.configuration(try Self.reviewLoop()))
+    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    let effects = driver.apply(.watchdog(ordinal: 1, .agentExited))
+    #expect(effects == [.disarmWatchdog(ordinal: 1), .persistRecord])
+    let attention = try #require(driver.run.status.attention)
+    #expect(attention.reason == .roleGone)
+    #expect(attention.message == "the agent for reviewer exited without delivering review")
+    #expect(attention.actions == [.relaunch, .skip, .cancel])
+    // Relaunch revokes the dead activation and starts the step over.
+    let relaunch = driver.user(.relaunch)
+    #expect(relaunch.contains(.revokeActivation(ordinal: 1)))
+    #expect(relaunch.contains { if case .launch = $0 { true } else { false } })
+    #expect(driver.run.status == .running)
+  }
+
+  @Test
   func staleOrdinalsAreIgnored() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
     driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
