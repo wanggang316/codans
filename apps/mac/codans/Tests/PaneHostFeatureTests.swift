@@ -40,6 +40,71 @@ struct PaneHostFeatureTests {
   private static let surfaceNotRegistered = PaneHostFeature.Failure(
     reason: "Surface not registered after creation."
   )
+  private static let slotSize = CGSize(width: 1_640, height: 1_020)
+
+  @Test
+  func taskStartsTheSurfaceAtTheSlotSize() async {
+    let sizes = LockIsolated<[CGSize?]>([])
+    let store = TestStore(initialState: Self.makeState()) {
+      PaneHostFeature()
+    } withDependencies: {
+      $0.terminalClient.surface = { _ in nil }
+      $0.terminalClient.ensureSurface = { _, _, _, _, initialSize in
+        sizes.withValue { $0.append(initialSize) }
+      }
+    }
+
+    await store.send(.task(slotSize: Self.slotSize)) {
+      $0.slotSize = Self.slotSize
+    }
+    await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
+      $0.phase = .failed(Self.surfaceNotRegistered)
+    }
+    #expect(sizes.value == [Self.slotSize])
+  }
+
+  @Test
+  func taskWithAnEmptySlotLeavesTheInitialSizeUnknown() async {
+    let sizes = LockIsolated<[CGSize?]>([])
+    let store = TestStore(initialState: Self.makeState()) {
+      PaneHostFeature()
+    } withDependencies: {
+      $0.terminalClient.surface = { _ in nil }
+      $0.terminalClient.ensureSurface = { _, _, _, _, initialSize in
+        sizes.withValue { $0.append(initialSize) }
+      }
+    }
+
+    await store.send(.task(slotSize: .zero))
+    await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
+      $0.phase = .failed(Self.surfaceNotRegistered)
+    }
+    #expect(sizes.value == [nil])
+  }
+
+  @Test
+  func retryStartsTheSurfaceAtTheLastSlotSize() async {
+    let sizes = LockIsolated<[CGSize?]>([])
+    var initial = Self.makeState()
+    initial.phase = .failed(.init(reason: "prior"))
+    initial.slotSize = Self.slotSize
+    let store = TestStore(initialState: initial) {
+      PaneHostFeature()
+    } withDependencies: {
+      $0.terminalClient.surface = { _ in nil }
+      $0.terminalClient.ensureSurface = { _, _, _, _, initialSize in
+        sizes.withValue { $0.append(initialSize) }
+      }
+    }
+
+    await store.send(.retryButtonTapped) {
+      $0.phase = .loading
+    }
+    await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
+      $0.phase = .failed(Self.surfaceNotRegistered)
+    }
+    #expect(sizes.value == [Self.slotSize])
+  }
 
   @Test
   func taskWithEnsureThrowLandsInFailed() async {
@@ -48,13 +113,15 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
         ensureCalls.withValue { $0 += 1 }
         throw TerminalClient.Error.worktreeNotFound(Self.fixedErrorWorktreeID)
       }
     }
 
-    await store.send(.task)
+    await store.send(.task(slotSize: Self.slotSize)) {
+      $0.slotSize = Self.slotSize
+    }
     await store.receive(.resolveFailed(Self.failureForFixedError)) {
       $0.phase = .failed(Self.failureForFixedError)
     }
@@ -68,12 +135,14 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
         ensureCalls.withValue { $0 += 1 }
       }
     }
 
-    await store.send(.task)
+    await store.send(.task(slotSize: Self.slotSize)) {
+      $0.slotSize = Self.slotSize
+    }
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
     }
@@ -89,7 +158,7 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
         ensureCalls.withValue { $0 += 1 }
         throw TerminalClient.Error.worktreeNotFound(Self.fixedErrorWorktreeID)
       }
@@ -119,12 +188,14 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
         ensureCalls.withValue { $0 += 1 }
       }
     }
 
-    await store.send(.task)
+    await store.send(.task(slotSize: Self.slotSize)) {
+      $0.slotSize = Self.slotSize
+    }
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
     }

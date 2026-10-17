@@ -46,7 +46,7 @@ struct TerminalClientTests {
     let (client, _) = makeLiveEngine()
     do {
       try await client.ensureSurface(
-        PaneID(), TabID(), WorktreeID(), ProjectID()
+        PaneID(), TabID(), WorktreeID(), ProjectID(), nil
       )
       Issue.record("ensureSurface should throw for unknown address")
     } catch TerminalClient.Error.worktreeNotFound {

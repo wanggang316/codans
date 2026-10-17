@@ -336,7 +336,7 @@ private struct LeafView: View {
     // when `clear()` runs on drop — the stuck-highlight bug.
     let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
     return GeometryReader { geo in
-      paneContent
+      paneContent(slotSize: geo.size)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Grab affordance — only meaningful when there is somewhere to move to.
         .overlay(alignment: .top) {
@@ -383,7 +383,7 @@ private struct LeafView: View {
   }
 
   @ViewBuilder
-  private var paneContent: some View {
+  private func paneContent(slotSize: CGSize) -> some View {
     if let childStore = store.scope(
       state: \.paneHosts[id: paneID],
       action: \.paneHosts[id: paneID]
@@ -406,7 +406,7 @@ private struct LeafView: View {
         // at send time (both run on MainActor, so no gap in between).
         .task(id: paneID) {
           guard store.paneHosts[id: paneID] != nil else { return }
-          store.send(.paneHosts(.element(id: paneID, action: .task)))
+          store.send(.paneHosts(.element(id: paneID, action: .task(slotSize: slotSize))))
         }
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
