@@ -536,4 +536,25 @@ struct HierarchyClientTests {
       manager.catalog.projects[0].loadState
         == ProjectReconciler.missingFolderState(rootPath: root))
   }
+
+  // MARK: - Command-spawned tab titles
+
+  /// A tab spawned by a script or agent launch shows the command's name only
+  /// until the pane reports a live title. The name must not land in
+  /// `tab.name`: that field is the sticky manual rename, which would freeze
+  /// the chip and ignore every OSC title the command emits.
+  @Test
+  func commandSpawnedTabSeedsTitleWithoutStickyName() async throws {
+    let (client, manager) = makeLiveClient()
+    let root = FileManager.default.temporaryDirectory.path
+    let projectID = client.addProject("p", root, root)
+    let worktreeID = try client.createWorktree(projectID, "main", root, "main")
+    let script = ScriptDefinition(kind: .run, name: "Dev", command: "npm run dev")
+
+    try await client.runCommand(script, projectID, worktreeID)
+
+    let tab = try #require(manager.catalog.projects[0].worktrees[0].tabs.last)
+    #expect(tab.name == nil)
+    #expect(tab.cachedDisplayTitle == "Dev")
+  }
 }

@@ -1597,6 +1597,7 @@ final class HierarchyManager {
     in worktreeID: WorktreeID,
     in projectID: ProjectID,
     name: String?,
+    initialTitle: String? = nil,
     select: Bool = true
   ) throws -> TabID {
     guard
@@ -1609,7 +1610,11 @@ final class HierarchyManager {
     }
 
     let tabID = TabID()
-    let tab = Tab(id: tabID, name: name, splitTree: SplitTree(), panes: [])
+    // `initialTitle` seeds the cached title, not `name`: `name` is the
+    // sticky manual rename, and a command-spawned tab must keep following
+    // the live title its pane reports.
+    let tab = Tab(
+      id: tabID, name: name, cachedDisplayTitle: initialTitle, splitTree: SplitTree(), panes: [])
     catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.append(tab)
     // Background-script support: when `select == false` the new tab is
     // appended without stealing the worktree's selectedTabID, so a script

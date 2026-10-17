@@ -241,9 +241,11 @@ struct TabBarFeature {
             .worktrees.first(where: { $0.id == worktreeID })
         else { return .none }
         let cwd = worktree.path
+        // No tab name: a name is a sticky rename, and the chip must follow
+        // the agent's live title like a command typed in a pane.
         return .run { [client = hierarchyClient] _ in
           guard
-            let tabID = try? await client.createTab(worktreeID, projectID, agent.displayName),
+            let tabID = try? await client.createTab(worktreeID, projectID, nil),
             let paneID = try? await client.openPane(
               tabID, worktreeID, projectID, cwd, command)
           else { return }
