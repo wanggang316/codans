@@ -1565,7 +1565,8 @@ extension HierarchyClient {
       try manager.requireLocalDirectory(cwd, in: projectID)
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID,
-        name: script.displayName,
+        name: nil,
+        initialTitle: script.displayName,
         select: script.focus
       )
       // Carry the script's resolved SF Symbol onto the spawned tab under
@@ -1821,7 +1822,7 @@ extension HierarchyClient {
     let tabID: TabID
     do {
       tabID = try manager.createTab(
-        in: worktreeID, in: projectID, name: tabName
+        in: worktreeID, in: projectID, name: nil, initialTitle: tabName
       )
       paneID = try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
