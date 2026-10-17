@@ -206,7 +206,8 @@ final class TerminalEngine {
   func ensureSurface(
     for pane: Pane,
     in worktree: Worktree,
-    env: [String: String] = [:]
+    env: [String: String] = [:],
+    initialSize: CGSize? = nil
   ) async throws -> PaneSurface {
     // swiftlint:enable async_without_await
     guard let runtime = ghosttyRuntime else { throw SurfaceError.runtimeUnavailable }
@@ -281,10 +282,11 @@ final class TerminalEngine {
     // stamps the pane's id. See `PaneEnvironment.forSurface` for why each.
     let surfaceEnv = PaneEnvironment.forSurface(env, paneID: pane.id, zmxDirectory: zmxDir)
 
-    // A re-attach after an idle reclaim starts at the size the pane had
-    // when it was reclaimed, so the live session is not resized through a
-    // placeholder width (see `GhosttySurfaceView.init`).
-    let initialSize = reclaimedSurfaceSizes[pane.id]
+    // Start at the size of the slot that will show the pane, so a live
+    // session is not resized through a placeholder width (see
+    // `GhosttySurfaceView.init`). Without a slot size, a re-attach after an
+    // idle reclaim falls back to the size the pane had when it was reclaimed.
+    let initialSize = initialSize ?? reclaimedSurfaceSizes[pane.id]
     let surface = try Self.withSurfaceInitRetry(runtime: runtime) {
       try PaneSurface(
         runtime: runtime, paneID: pane.id, session: session, launch: launch,
