@@ -16,6 +16,24 @@ struct AgentStateStoreProgramStatusTests {
   }
 
   @Test
+  func codexReportsOverrideScreenAndClearRestoresFallback() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.apply([ProgramStatusReport(state: .working, app: "codex")])
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    f.apply([ProgramStatusReport(state: .idle, app: "codex")])
+    f.viewport("• Working (12s)")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    f.apply([ProgramStatusReport(state: .clear)])
+    #expect(f.registry.entries[f.paneID]?.source == .screen)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (12s)")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+  }
+
+  @Test
   func workingReportNeedsNoKeystroke() {
     let f = Fixture()
     bindClaude(f)

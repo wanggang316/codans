@@ -173,6 +173,18 @@ struct ProgramStatusRecordsTests {
   }
 
   @Test
+  func codexReportsGovernOnlyCodex() {
+    var records = ProgramStatusRecords()
+    records.apply(report(.working, app: "codex"))
+    #expect(records.summary?.governs(.codex) == true)
+    #expect(records.summary?.governs(.claudeCode) == false)
+    records.apply(report(.idle, app: "codex"))
+    #expect(records.summary?.activity?.state == .idle)
+    records.apply(report(.clear))
+    #expect(records.summary == nil)
+  }
+
+  @Test
   func rootWithoutAppGovernsNothing() {
     var records = ProgramStatusRecords()
     records.apply(report(.working, app: nil))

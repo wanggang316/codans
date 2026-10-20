@@ -129,6 +129,7 @@ nonisolated struct CodexAdapter: AgentRuntimeAdapter {
   let kind: AgentKind = .codex
   let displayName = "Codex"
   let processNames = ["codex"]
+  let programStatusApp: String? = "codex"
 
   func resumeCommand(sessionID: String) -> String? {
     "codex resume \(AgentRuntimeAdapters.shellQuoted(sessionID))"
