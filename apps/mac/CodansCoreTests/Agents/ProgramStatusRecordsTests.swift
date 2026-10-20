@@ -172,13 +172,13 @@ struct ProgramStatusRecordsTests {
     #expect(summary?.governs(nil) == false)
   }
 
-  @Test
-  func codexReportsGovernOnlyCodex() {
+  @Test(arguments: [AgentKind.codex, .droid, .opencode])
+  func reportsGovernOnlyTheirAgent(_ kind: AgentKind) {
     var records = ProgramStatusRecords()
-    records.apply(report(.working, app: "codex"))
-    #expect(records.summary?.governs(.codex) == true)
+    records.apply(report(.working, app: kind.rawValue))
+    #expect(records.summary?.governs(kind) == true)
     #expect(records.summary?.governs(.claudeCode) == false)
-    records.apply(report(.idle, app: "codex"))
+    records.apply(report(.idle, app: kind.rawValue))
     #expect(records.summary?.activity?.state == .idle)
     records.apply(report(.clear))
     #expect(records.summary == nil)
