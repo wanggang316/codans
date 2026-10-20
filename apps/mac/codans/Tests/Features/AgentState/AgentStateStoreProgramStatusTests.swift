@@ -16,6 +16,60 @@ struct AgentStateStoreProgramStatusTests {
   }
 
   @Test
+  func codexReportsOverrideScreenAndClearRestoresFallback() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.apply([ProgramStatusReport(state: .working, app: "codex")])
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    f.apply([ProgramStatusReport(state: .idle, app: "codex")])
+    f.viewport("• Working (12s)")
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    f.apply([ProgramStatusReport(state: .clear)])
+    #expect(f.registry.entries[f.paneID]?.source == .screen)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (12s)")
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+  }
+
+  @Test
+  func openCodeReportsPendingSessionSummary() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .opencode, sessionID: nil)
+    f.apply([
+      ProgramStatusReport(state: .working, app: "opencode"),
+      ProgramStatusReport(state: .blocked, kind: .question, id: "ses_1", app: "opencode"),
+    ])
+    #expect(f.registry.entries[f.paneID]?.state == .blocked)
+    #expect(f.registry.entries[f.paneID]?.blockedKind == .question)
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    f.apply([ProgramStatusReport(state: .idle, app: "opencode")])
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+  }
+
+  @Test(arguments: [AgentKind.droid, .opencode])
+  func reportsOverrideScreenAndMissingReportsUseFallback(_ kind: AgentKind) {
+    let f = Fixture()
+    let screen = kind == .droid ? "⠋ Running (esc to stop)" : "Esc to interrupt"
+    f.registry.onAgentBound(f.paneID, kind: kind, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport(screen)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+    #expect(f.registry.entries[f.paneID]?.source == .screen)
+    f.apply([ProgramStatusReport(state: .blocked, kind: .permission, app: kind.rawValue)])
+    #expect(f.registry.entries[f.paneID]?.state == .blocked)
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    f.apply([ProgramStatusReport(state: .idle, app: kind.rawValue)])
+    f.viewport(screen)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    f.apply([ProgramStatusReport(state: .clear)])
+    f.viewport(screen)
+    #expect(f.registry.entries[f.paneID]?.state == .working)
+    #expect(f.registry.entries[f.paneID]?.source == .screen)
+  }
+
+  @Test
   func workingReportNeedsNoKeystroke() {
     let f = Fixture()
     bindClaude(f)

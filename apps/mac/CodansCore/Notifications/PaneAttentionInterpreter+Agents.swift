@@ -176,7 +176,11 @@ extension PaneAttentionInterpreter {
     if hasTrailingIdlePrompt(content, prefixes: ["codex>"]) {
       return .idle
     }
-    if hasInterruptPattern(lower) || hasCodexWorkingHeader(content) {
+    // Transcript words such as "desc" and "interrupted" are not a live
+    // interrupt hint, even when both remain in the viewport.
+    if lower.contains("esc to interrupt") || lower.contains("ctrl+c to interrupt")
+      || hasCodexWorkingHeader(content)
+    {
       return .working
     }
     return .idle

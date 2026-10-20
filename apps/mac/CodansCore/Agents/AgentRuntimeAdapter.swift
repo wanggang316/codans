@@ -68,7 +68,8 @@ public nonisolated enum AgentRuntimeAdapters {
         kind: .pi, displayName: "Pi", processNames: ["pi"], programStatusApp: "pi")
     case .opencode:
       return ObservedAgentAdapter(
-        kind: .opencode, displayName: "OpenCode", processNames: ["opencode", "open-code"])
+        kind: .opencode, displayName: "OpenCode", processNames: ["opencode", "open-code"],
+        programStatusApp: "opencode")
     case .gemini:
       return ObservedAgentAdapter(
         kind: .gemini, displayName: "Gemini CLI", processNames: ["gemini"])
@@ -85,7 +86,8 @@ public nonisolated enum AgentRuntimeAdapters {
       return ObservedAgentAdapter(
         kind: .kimi, displayName: "Kimi", processNames: ["kimi", "kimi-code"])
     case .droid:
-      return ObservedAgentAdapter(kind: .droid, displayName: "Droid", processNames: ["droid"])
+      return ObservedAgentAdapter(
+        kind: .droid, displayName: "Droid", processNames: ["droid"], programStatusApp: "droid")
     case .amp:
       return ObservedAgentAdapter(
         kind: .amp, displayName: "Amp", processNames: ["amp", "amp-local"])
@@ -129,6 +131,7 @@ nonisolated struct CodexAdapter: AgentRuntimeAdapter {
   let kind: AgentKind = .codex
   let displayName = "Codex"
   let processNames = ["codex"]
+  let programStatusApp: String? = "codex"
 
   func resumeCommand(sessionID: String) -> String? {
     "codex resume \(AgentRuntimeAdapters.shellQuoted(sessionID))"

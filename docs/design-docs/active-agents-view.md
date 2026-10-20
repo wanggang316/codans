@@ -205,7 +205,9 @@ derive(pane) =
 
 ### 程序状态（OSC 7501）
 
-[Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status)（OSC 7501，草案）让程序自报 `idle` / `working` / `done` / `blocked`（带 `kind`：`permission` / `question` / `auth`）/ `error`，`clear` 删除记录。每份报告整条替换一条记录；无 `id` 是 root 记录，`id` 用 `/` 分层表示子记录。已验证的生产者：Claude Code ≥ 2.1.295（先发 `OSC 7501 ; ?` 探测，**无回复就不上报**；后台子 agent 用子记录）、Pi ≥ 1.1.0、omp ≥ 18.8.7（不探测直接报告）。
+[Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status)（OSC 7501，草案）让程序自报 `idle` / `working` / `done` / `blocked`（带 `kind`：`permission` / `question` / `auth`）/ `error`，`clear` 删除记录。每份报告整条替换一条记录；无 `id` 是 root 记录，`id` 用 `/` 分层表示子记录。已验证的生产者：Claude Code ≥ 2.1.295（先发 `OSC 7501 ; ?` 探测，**无回复就不上报**；后台子 agent 用子记录）、Pi ≥ 1.1.0、omp ≥ 18.8.7（不探测直接报告）；Codex CLI 0.163.0（stdout 为终端时直接报告 `idle` / `working` / `blocked`，退出时清除）。
+
+Droid 已核实官方 0.245.0 发布包：终端探测成功后以 `app=droid` 报告状态，取消回到 `idle`，结束与失败分别报告 `done` / `error`。OpenCode 已核实上游 2026-10-19 合入的实现：`app=opencode`，root 汇总 pending sessions，并为每个 pending session 发送子记录；截至 2026-10-20，稳定版 1.19.3 尚未包含此实现。两者只有收到匹配报告后才接管状态，旧版本继续使用视口兜底。
 
 **链路。**
 
@@ -225,7 +227,7 @@ agent ──OSC 7501──▶ zmx daemon ──bytes──▶ libghostty (fork)
 - **fork 补丁。** 上游 libghostty 只在 libghostty-vt 解析 7501，完整终端路径直接丢弃，`ghostty.h` 也没有对应 action。fork 回移植上游解析器，并新增 app 路径：回复探测（`?:states=…:kinds=…`，沿用查询的终止符）、把报告转成 `GHOSTTY_ACTION_PROGRAM_STATUS`、`RIS` 发一条空 `id` 的 `clear`。终端不保存记录，记录由嵌入方保存（与上游 vt API 相同的分工）。补丁清单见 fork 的 `README.tc.md`。
 - **zmx。** daemon 原样转发字节，挂接时由外层 ghostty 回复探测。daemon 在没有终端客户端挂接时会代答 DA1；Claude 看到 DA1 先回就判定不支持，所以 daemon 在同一处代答 `OSC 7501 ; ?`。
 - **记录归属。** 记录按 PaneID 存在 `TerminalEngine`，不随 surface：surface 回收再挂接时记录保留。Pane 关闭时删除。协议要求进程退出或出现新提示符（OSC 133;A）时丢弃 `working` / `blocked`；133;A 不上报到 Swift，所以 codans 在「Pane 已解绑、且前台不是 agent」时丢弃 `working` / `blocked` / `idle`，`done` / `error` 保留到被新报告替换。
-- **归属判定（governs）。** 只有 root 记录（`app` 沿父链继承后）等于绑定 agent 的 `AgentRuntimeAdapter.programStatusApp`（`claude-code` / `pi` / `omp`；其余 agent 为 nil，验证后再开）时，程序状态才决定该 Pane 的状态。同一终端里其他程序（如 `brew`）的报告不会影响 agent 状态。
+- **归属判定（governs）。** 只有 root 记录（`app` 沿父链继承后）等于绑定 agent 的 `AgentRuntimeAdapter.programStatusApp`（`claude-code` / `codex` / `pi` / `omp` / `droid` / `opencode`；其余 agent 为 nil，验证后再开）时，程序状态才决定该 Pane 的状态。同一终端里其他程序（如 `brew`）的报告不会影响 agent 状态。
 - **pane 只跟随 root。** 子记录 `blocked` 让 Pane 显示 `blocked`（带子记录的 kind / message）；子记录 `working` 不算，后台工作不把 Pane 钉在 `working`。
 
 **派生（归属成立时）。**
