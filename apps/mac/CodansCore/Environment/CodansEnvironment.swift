@@ -34,9 +34,9 @@ public nonisolated enum CodansEnvironment {
     /// checkout — and absent everywhere else, so a script can test for it.
     /// User-facing, like `worktreePath`.
     case workspaceRoot = "CODANS_WORKSPACE_ROOT"
-    /// Where zmx keeps its per-pane daemon sockets — this channel's cache
-    /// directory, pinned so the reaper and the control client look in the
-    /// same place zmx writes to.
+    /// Where zmx keeps its per-pane daemon sockets — this channel's runtime
+    /// directory (`AppDirectories.runtimeDirectory`), pinned so the reaper
+    /// and the control client look in the same place zmx writes to.
     case zmxDirectory = "ZMX_DIR"
     /// Cleared (set to empty) for every pane. An app launched from inside a
     /// zmx pane inherits the parent's session name, and `zmx attach` would
@@ -72,8 +72,12 @@ public nonisolated enum CodansEnvironment {
     case configDirectory = "CODANS_CONFIG_DIR"
     /// Relocates the state root (catalog, sessions, inbox, …) on its own.
     case stateDirectory = "CODANS_STATE_DIR"
-    /// Isolates terminal sockets and snapshots for independent application instances.
+    /// Relocates the refetchable cache root. With `runtimeDirectory` unset it
+    /// also places the runtime root at `<cache>/run`, so a harness that
+    /// isolates only the cache still gets private daemons.
     case cacheDirectory = "CODANS_CACHE_DIR"
+    /// Relocates the runtime root (zmx sockets, snapshots, logs) on its own.
+    case runtimeDirectory = "CODANS_RUNTIME_DIR"
     /// Points the CLI installer at a freshly built `codans` outside the
     /// `.app`, for dev.
     case cliBinary = "CODANS_CLI_BINARY"

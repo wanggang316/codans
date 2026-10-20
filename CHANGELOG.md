@@ -30,6 +30,15 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- **Panes no longer lose their shell and agent after a cache clean.** The
+  zmx daemon sockets lived in `~/Library/Caches/codans`, which cache
+  cleaners delete wholesale; the daemons kept running but could not be
+  reached, so the next attach started a fresh shell in the pane. The
+  sockets, snapshots, and zmx logs now live in `~/.codans/run`, and the
+  first launch moves the sockets of daemons that survived the old location.
+  `CODANS_RUNTIME_DIR` relocates the directory; `CODANS_CACHE_DIR` alone
+  places it at `<cache>/run`.
+
 ### Security
 
 ## [0.7.11] - 2026-10-15
