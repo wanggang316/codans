@@ -1778,6 +1778,11 @@ final class AppState {
     )
 
     let reaper = SessionReaper(coordinator: coordinator)
+    // Earlier builds kept `ZMX_DIR` under `~/Library/Caches`, which cache
+    // cleaners wipe wholesale. Adopt any daemon that survived there before
+    // the sweep probes and bring-up attaches (see
+    // `AppDirectories.runtimeDirectory`).
+    reaper.migrateLegacySocketDirectory(from: PaneDaemonBringup.legacySocketDirectory())
     let livePaneIDs = hierarchyManager.catalog.allPaneIDs()
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any

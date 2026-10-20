@@ -79,13 +79,13 @@ nonisolated enum ZmxControlClient {
 
   // MARK: - Transport
 
-  /// Canonical `ZMX_DIR`. Delegates to `AppDirectories.cacheDirectory()` —
+  /// Canonical `ZMX_DIR`. Delegates to `AppDirectories.runtimeDirectory()` —
   /// a `nonisolated` Core helper that is the single source of truth shared
   /// with `PaneDaemonBringup.canonicalSocketDirectory()`, so the two stay
   /// byte-identical (including the Debug `-dev` suffix) while this type stays
   /// `nonisolated` and off the main actor.
   private static func canonicalSocketDirectory() -> URL {
-    AppDirectories.cacheDirectory()
+    AppDirectories.runtimeDirectory()
   }
 
   /// Run the blocking connect/send/read on a background queue and bridge

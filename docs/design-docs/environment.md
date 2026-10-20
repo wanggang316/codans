@@ -48,7 +48,8 @@ app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane
                      Debug                               Release
 config root          ~/.codans-dev/config/               ~/.codans/config/
 state root           ~/.codans-dev/state/                ~/.codans/state/
-cache root (ZMX_DIR) ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
+runtime root (ZMX_DIR) ~/.codans-dev/run/                ~/.codans/run/
+cache root           ~/Library/Caches/codans-dev/        ~/Library/Caches/codans/
 IPC socket           /tmp/codans-dev-<uid>.sock          /tmp/codans-<uid>.sock
 CLI 名               codans-dev                          codans
   包内文件           Contents/Resources/bin/codans-dev   Contents/Resources/bin/codans
@@ -56,7 +57,7 @@ CLI 名               codans-dev                          codans
   自称               --help / 报错提示 / 握手 clientBinary 都用本名
 ```
 
-config 根放用户会手改的文件，state 根放只有 app 写的文件，cache 根放可重建的数据。0.7.8 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。`~/.codans/` 下的 `repos/`、`workspaces/`、`sources/` 是用户的 git 工作区，不按通道区分，两个构建共用。
+config 根放用户会手改的文件，state 根放只有 app 写的文件，runtime 根放 zmx 的 daemon socket、快照与日志，cache 根放可重建的数据。socket 不能放在 cache 根下：清理工具会整目录删掉 `~/Library/Caches/<slug>`，daemon 还活着却再也连不上，下一次 `zmx attach` 会在原地新建会话，pane 里的 shell 和 agent 就"消失"了（见 [lessons-learned](../lessons-learned/2026-10-20-cache-cleaner-wiped-zmx-sockets.md)）。0.7.11 及更早版本把 socket 放在 cache 根下，启动时 `SessionReaper.migrateLegacySocketDirectory` 把还活着的 daemon 的 socket 挪进 runtime 根（已绑定的 AF_UNIX socket 改名后仍可连接）。0.7.8 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。`~/.codans/` 下的 `repos/`、`workspaces/`、`sources/` 是用户的 git 工作区，不按通道区分，两个构建共用。
 
 两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 
@@ -131,7 +132,8 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 |---|---|---|
 | `CODANS_CONFIG_DIR` | 搬走配置根；未设 `CODANS_STATE_DIR` 时状态根也平铺进同一目录，所有 JSON store 跟着走 | 冒烟 / 集成测试，或给某个 worktree 的 dev 构建单独一套数据 |
 | `CODANS_STATE_DIR` | 单独搬走状态根（catalog、sessions、inbox 等），优先于 `CODANS_CONFIG_DIR` | 只隔离状态、共用配置 |
-| `CODANS_CACHE_DIR` | 独立的终端缓存根目录，包含 zmx socket、快照与日志 | 配合配置目录和 RPC socket 隔离 GUI / 集成测试 |
+| `CODANS_RUNTIME_DIR` | 单独搬走 runtime 根（zmx socket、快照与日志） | 只隔离 daemon |
+| `CODANS_CACHE_DIR` | 搬走缓存根；未设 `CODANS_RUNTIME_DIR` 时 runtime 根为 `<cache>/run`，老的隔离脚本不用改就拿到私有 daemon | 配合配置目录和 RPC socket 隔离 GUI / 集成测试 |
 | `CODANS_SOCKET_PATH` | 指定 IPC socket | pane 内由 app 注入；手动指定实例 |
 | `CODANS_CLI` | 生成该 pane 的 app 自带 CLI 的绝对路径 | pane 内由 app 注入；`PATH` 被 rc 重建时用 `"$CODANS_CLI"` |
 | `CODANS_CLI_BINARY` | 安装器指向 `.app` 外新编的 CLI | dev |

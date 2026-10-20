@@ -159,11 +159,12 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
 
 ### Persistence
 
-Three roots per channel. Debug builds use `~/.codans-dev/` and `~/Library/Caches/codans-dev/` in place of the Release paths below (see [Environment](design-docs/environment.md)). JSON is UTF-8, pretty-printed with sorted keys for determinism.
+Four roots per channel. Debug builds use `~/.codans-dev/` and `~/Library/Caches/codans-dev/` in place of the Release paths below (see [Environment](design-docs/environment.md)). JSON is UTF-8, pretty-printed with sorted keys for determinism.
 
 - **Config** — `~/.codans/config/`: files a user may edit by hand.
 - **State** — `~/.codans/state/`: files only the app writes.
-- **Cache** — `~/Library/Caches/codans/`: refetchable data, plus the zmx `ZMX_DIR`.
+- **Runtime** — `~/.codans/run/`: the zmx `ZMX_DIR` — per-pane daemon sockets, quit-time snapshots, zmx logs. Kept out of `~/Library/Caches` because cache cleaners wipe that tree wholesale and a daemon whose socket file is gone can never be reached again.
+- **Cache** — `~/Library/Caches/codans/`: refetchable data.
 
 | File | Root | Version | Contents |
 |---|---|---|---|

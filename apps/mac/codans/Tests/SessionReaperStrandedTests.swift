@@ -14,43 +14,12 @@ import CodansCore
 /// fix the stamp would have been overwritten with the live epoch and this
 /// branch could never fire.
 ///
-/// Uses a real listening Unix socket so `SessionReaper.probe`'s `connect(2)`
-/// reports the daemon as alive — the reaper only recycles daemons that are
-/// alive on the wire but stranded by epoch.
+/// Uses a real listening Unix socket (`ListeningUnixSocket`) so
+/// `SessionReaper.probe`'s `connect(2)` reports the daemon as alive — the
+/// reaper only recycles daemons that are alive on the wire but stranded by
+/// epoch.
 @MainActor
 struct SessionReaperStrandedTests {
-  /// Bind + listen a throwaway AF_UNIX socket so the reaper's probe sees a
-  /// live daemon. Returns the fd (caller closes) — the path is unlinked by
-  /// the temp-dir cleanup.
-  private func makeListeningSocket(at path: String) -> Int32 {
-    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-    precondition(fd >= 0, "socket() failed")
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    // Copy the path into a local buffer first, then memcpy into sun_path —
-    // mirrors `SessionReaper.probe` and avoids overlapping exclusive access
-    // to `addr` that a nested `withCString` + `withUnsafeMutablePointer`
-    // would trigger under Swift's exclusivity checker.
-    let pathBytes = Array(path.utf8CString)
-    precondition(pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path), "socket path too long")
-    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-      ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
-        pathBytes.withUnsafeBufferPointer { src in
-          _ = memcpy(dst, src.baseAddress, pathBytes.count)
-        }
-      }
-    }
-    _ = Darwin.unlink(path)
-    let bound = withUnsafePointer(to: &addr) {
-      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-        Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-      }
-    }
-    precondition(bound == 0, "bind() failed errno=\(errno)")
-    precondition(Darwin.listen(fd, 1) == 0, "listen() failed")
-    return fd
-  }
-
   private func makeStack() throws -> (SessionCoordinator, URL, () -> Void) {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
       .appendingPathComponent("codans-reaper-\(UUID().uuidString)", isDirectory: true)
@@ -79,7 +48,7 @@ struct SessionReaperStrandedTests {
     // Short path: AF_UNIX `sun_path` caps at ~104 bytes, far under a deep
     // NSTemporaryDirectory()-based path, so bind the listener directly in /tmp.
     let socketPath = "/tmp/cdr-\(UUID().uuidString.prefix(8)).sock"
-    let fd = makeListeningSocket(at: socketPath)
+    let fd = ListeningUnixSocket.bind(at: socketPath)
     defer { _ = Darwin.close(fd); _ = Darwin.unlink(socketPath) }
 
     let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -110,7 +79,7 @@ struct SessionReaperStrandedTests {
     // Short path: AF_UNIX `sun_path` caps at ~104 bytes, far under a deep
     // NSTemporaryDirectory()-based path, so bind the listener directly in /tmp.
     let socketPath = "/tmp/cdr-\(UUID().uuidString.prefix(8)).sock"
-    let fd = makeListeningSocket(at: socketPath)
+    let fd = ListeningUnixSocket.bind(at: socketPath)
     defer { _ = Darwin.close(fd); _ = Darwin.unlink(socketPath) }
 
     let now = Date(timeIntervalSince1970: 1_700_000_000)
