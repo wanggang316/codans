@@ -12,7 +12,7 @@ public nonisolated struct WorkflowRunRecord: Equatable, Sendable, Codable {
     public var ordinal: Int
     public var stepID: String
     public var role: String
-    public var paneID: PaneID?
+    public var contentID: ContentID?
     public var delivery: String
     public var state: WorkflowActivationState
     public var issues: [String]
@@ -25,7 +25,7 @@ public nonisolated struct WorkflowRunRecord: Equatable, Sendable, Codable {
       ordinal = activation.ordinal
       stepID = activation.stepID
       role = activation.role
-      paneID = activation.paneID
+      contentID = activation.contentID
       delivery = activation.delivery
       state = activation.state
       issues = activation.issues
@@ -39,7 +39,7 @@ public nonisolated struct WorkflowRunRecord: Equatable, Sendable, Codable {
       case ordinal
       case stepID = "step_id"
       case role
-      case paneID = "pane_id"
+      case contentID = "pane_id"
       case delivery
       case state
       case issues
@@ -70,7 +70,7 @@ public nonisolated struct WorkflowRunRecord: Equatable, Sendable, Codable {
   public var nextOrdinal: Int
   public var currentStepID: String?
   public var loopIteration: Int?
-  public var initiatorPaneID: PaneID?
+  public var initiatorContentID: ContentID?
   public var runDirectory: String
   public var cliCommand: String
   public var startedAt: Date
@@ -96,7 +96,7 @@ public nonisolated struct WorkflowRunRecord: Equatable, Sendable, Codable {
     case nextOrdinal = "next_ordinal"
     case currentStepID = "current_step_id"
     case loopIteration = "loop_iteration"
-    case initiatorPaneID = "initiator_pane_id"
+    case initiatorContentID = "initiator_pane_id"
     case runDirectory = "run_directory"
     case cliCommand = "cli_command"
     case startedAt = "started_at"
@@ -124,7 +124,7 @@ public nonisolated struct WorkflowRunRecord: Equatable, Sendable, Codable {
     nextOrdinal = run.nextOrdinal
     currentStepID = run.currentStepID
     loopIteration = run.loopIteration
-    initiatorPaneID = configuration.initiatorPaneID
+    initiatorContentID = configuration.initiatorContentID
     runDirectory = configuration.runDirectory
     cliCommand = configuration.cliCommand
     startedAt = configuration.startedAt

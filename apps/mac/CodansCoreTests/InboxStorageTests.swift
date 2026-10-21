@@ -7,7 +7,7 @@ struct InboxStorageTests {
   // MARK: - Fixtures
 
   private func entry(
-    paneID: PaneID = PaneID(),
+    contentID: ContentID = ContentID(),
     kind: InboxEntry.Kind = .taskFinished,
     title: String = "t",
     body: String = "b",
@@ -23,8 +23,7 @@ struct InboxStorageTests {
       source: InboxEntry.SourcePath(
         projectID: ProjectID(),
         worktreeID: WorktreeID(),
-        tabID: TabID(),
-        paneID: paneID
+        contentID: contentID
       )
     )
   }
@@ -48,10 +47,10 @@ struct InboxStorageTests {
 
   @Test
   func dedupWithinWindowMergesOnSamePaneAndKind() {
-    let pane = PaneID()
+    let pane = ContentID()
     let now = Date()
-    let prior = entry(paneID: pane, kind: .taskFinished, title: "old", createdAt: now.addingTimeInterval(-10))
-    let updated = entry(paneID: pane, kind: .taskFinished, title: "new", createdAt: now)
+    let prior = entry(contentID: pane, kind: .taskFinished, title: "old", createdAt: now.addingTimeInterval(-10))
+    let updated = entry(contentID: pane, kind: .taskFinished, title: "new", createdAt: now)
 
     let result = InboxStorage.appending(updated, to: [prior])
 
@@ -63,20 +62,20 @@ struct InboxStorageTests {
 
   @Test
   func dedupOutsideWindowAppends() {
-    let pane = PaneID()
+    let pane = ContentID()
     let now = Date()
-    let prior = entry(paneID: pane, kind: .taskFinished, createdAt: now.addingTimeInterval(-60))
-    let later = entry(paneID: pane, kind: .taskFinished, createdAt: now)
+    let prior = entry(contentID: pane, kind: .taskFinished, createdAt: now.addingTimeInterval(-60))
+    let later = entry(contentID: pane, kind: .taskFinished, createdAt: now)
     let result = InboxStorage.appending(later, to: [prior])
     #expect(result.count == 2)
   }
 
   @Test
   func dedupRespectsKindBoundary() {
-    let pane = PaneID()
+    let pane = ContentID()
     let now = Date()
-    let waiting = entry(paneID: pane, kind: .waitingForInput, createdAt: now.addingTimeInterval(-5))
-    let finished = entry(paneID: pane, kind: .taskFinished, createdAt: now)
+    let waiting = entry(contentID: pane, kind: .waitingForInput, createdAt: now.addingTimeInterval(-5))
+    let finished = entry(contentID: pane, kind: .taskFinished, createdAt: now)
     let result = InboxStorage.appending(finished, to: [waiting])
     #expect(result.count == 2)
   }
@@ -84,19 +83,19 @@ struct InboxStorageTests {
   @Test
   func dedupRespectsPaneBoundary() {
     let now = Date()
-    let onA = entry(paneID: PaneID(), kind: .taskFinished, createdAt: now.addingTimeInterval(-5))
-    let onB = entry(paneID: PaneID(), kind: .taskFinished, createdAt: now)
+    let onA = entry(contentID: ContentID(), kind: .taskFinished, createdAt: now.addingTimeInterval(-5))
+    let onB = entry(contentID: ContentID(), kind: .taskFinished, createdAt: now)
     let result = InboxStorage.appending(onB, to: [onA])
     #expect(result.count == 2)
   }
 
   @Test
   func dedupPreservesReadAtFromPriorEntry() {
-    let pane = PaneID()
+    let pane = ContentID()
     let now = Date()
     let priorReadAt = now.addingTimeInterval(-2)
-    let prior = entry(paneID: pane, createdAt: now.addingTimeInterval(-10), readAt: priorReadAt)
-    let updated = entry(paneID: pane, createdAt: now)
+    let prior = entry(contentID: pane, createdAt: now.addingTimeInterval(-10), readAt: priorReadAt)
+    let updated = entry(contentID: pane, createdAt: now)
     let result = InboxStorage.appending(updated, to: [prior])
     #expect(result.count == 1)
     #expect(result[0].readAt == priorReadAt)
@@ -165,9 +164,9 @@ struct InboxStorageTests {
 
   @Test
   func markingReadFlipsTargetEntry() {
-    let pane = PaneID()
-    let target = entry(paneID: pane)
-    let other = entry(paneID: PaneID())
+    let pane = ContentID()
+    let target = entry(contentID: pane)
+    let other = entry(contentID: ContentID())
     let now = Date()
     let result = InboxStorage.markingRead(id: target.id, in: [target, other], at: now)
     #expect(result.first(where: { $0.id == target.id })?.readAt == now)
@@ -209,16 +208,16 @@ struct InboxStorageTests {
   @Test
   func markingReadForOrphanPanesFlipsOnlyOrphanUnreads() {
     let now = Date()
-    let liveA = PaneID()
-    let liveB = PaneID()
-    let orphan = PaneID()
+    let liveA = ContentID()
+    let liveB = ContentID()
+    let orphan = ContentID()
 
-    let liveUnread = entry(paneID: liveA)
-    let orphanUnread = entry(paneID: orphan)
-    let orphanAlreadyRead = entry(paneID: orphan, readAt: now.addingTimeInterval(-100))
+    let liveUnread = entry(contentID: liveA)
+    let orphanUnread = entry(contentID: orphan)
+    let orphanAlreadyRead = entry(contentID: orphan, readAt: now.addingTimeInterval(-100))
 
-    let result = InboxStorage.markingReadForOrphanPanes(
-      livePaneIDs: [liveA, liveB],
+    let result = InboxStorage.markingReadForOrphanContents(
+      liveContentIDs: [liveA, liveB],
       in: [liveUnread, orphanUnread, orphanAlreadyRead],
       at: now
     )
@@ -236,15 +235,15 @@ struct InboxStorageTests {
     let now = Date()
     let a = entry()
     let b = entry()
-    let result = InboxStorage.markingReadForOrphanPanes(livePaneIDs: [], in: [a, b], at: now)
+    let result = InboxStorage.markingReadForOrphanContents(liveContentIDs: [], in: [a, b], at: now)
     #expect(result.allSatisfy { $0.readAt == now })
   }
 
   @Test
   func markingReadForOrphanPanesIsNoOpWhenAllPanesAreLive() {
-    let pane = PaneID()
-    let unread = entry(paneID: pane)
-    let result = InboxStorage.markingReadForOrphanPanes(livePaneIDs: [pane], in: [unread])
+    let pane = ContentID()
+    let unread = entry(contentID: pane)
+    let result = InboxStorage.markingReadForOrphanContents(liveContentIDs: [pane], in: [unread])
     #expect(result == [unread])
   }
 }

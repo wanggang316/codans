@@ -37,14 +37,14 @@ public nonisolated struct WorkflowRunSource: Equatable, Sendable, Codable {
 /// How a role resolved on this machine. A `launch` binding carries the
 /// frozen profile and gains its pane only once the launch succeeded.
 public nonisolated enum WorkflowRoleBinding: Equatable, Sendable, Codable {
-  case current(paneID: PaneID)
-  case pick(paneID: PaneID)
-  case launch(profileID: UUID, profileName: String, agent: AgentKind, paneID: PaneID?)
+  case current(contentID: ContentID)
+  case pick(contentID: ContentID)
+  case launch(profileID: UUID, profileName: String, agent: AgentKind, contentID: ContentID?)
 
-  public var paneID: PaneID? {
+  public var contentID: ContentID? {
     switch self {
-    case .current(let paneID), .pick(let paneID): return paneID
-    case .launch(_, _, _, let paneID): return paneID
+    case .current(let contentID), .pick(let contentID): return contentID
+    case .launch(_, _, _, let contentID): return contentID
     }
   }
 
@@ -64,7 +64,7 @@ public nonisolated enum WorkflowRoleBinding: Equatable, Sendable, Codable {
 
   enum CodingKeys: String, CodingKey {
     case source
-    case paneID = "pane_id"
+    case contentID = "pane_id"
     case profileID = "profile_id"
     case profileName = "profile_name"
     case agent
@@ -75,15 +75,15 @@ public nonisolated enum WorkflowRoleBinding: Equatable, Sendable, Codable {
     let source = try container.decode(String.self, forKey: .source)
     switch source {
     case "current":
-      self = .current(paneID: try container.decode(PaneID.self, forKey: .paneID))
+      self = .current(contentID: try container.decode(ContentID.self, forKey: .contentID))
     case "pick":
-      self = .pick(paneID: try container.decode(PaneID.self, forKey: .paneID))
+      self = .pick(contentID: try container.decode(ContentID.self, forKey: .contentID))
     case "launch":
       self = .launch(
         profileID: try container.decode(UUID.self, forKey: .profileID),
         profileName: try container.decode(String.self, forKey: .profileName),
         agent: try container.decode(AgentKind.self, forKey: .agent),
-        paneID: try container.decodeIfPresent(PaneID.self, forKey: .paneID)
+        contentID: try container.decodeIfPresent(ContentID.self, forKey: .contentID)
       )
     default:
       throw DecodingError.dataCorruptedError(
@@ -95,13 +95,13 @@ public nonisolated enum WorkflowRoleBinding: Equatable, Sendable, Codable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(source.rawValue, forKey: .source)
     switch self {
-    case .current(let paneID), .pick(let paneID):
-      try container.encode(paneID, forKey: .paneID)
-    case .launch(let profileID, let profileName, let agent, let paneID):
+    case .current(let contentID), .pick(let contentID):
+      try container.encode(contentID, forKey: .contentID)
+    case .launch(let profileID, let profileName, let agent, let contentID):
       try container.encode(profileID, forKey: .profileID)
       try container.encode(profileName, forKey: .profileName)
       try container.encode(agent, forKey: .agent)
-      try container.encodeIfPresent(paneID, forKey: .paneID)
+      try container.encodeIfPresent(contentID, forKey: .contentID)
     }
   }
 }
@@ -124,7 +124,7 @@ public nonisolated struct WorkflowRunConfiguration: Equatable, Sendable {
   /// completion command and `codans.cli`.
   public var cliCommand: String
   /// The pane `codans workflow run` was invoked from, when any.
-  public var initiatorPaneID: PaneID?
+  public var initiatorContentID: ContentID?
   public var startedAt: Date
   public var idleGraceSeconds: Int
 
@@ -137,7 +137,7 @@ public nonisolated struct WorkflowRunConfiguration: Equatable, Sendable {
     skippedSteps: Set<String> = [],
     runDirectory: String,
     cliCommand: String,
-    initiatorPaneID: PaneID? = nil,
+    initiatorContentID: ContentID? = nil,
     startedAt: Date,
     idleGraceSeconds: Int = WorkflowRunConfiguration.defaultIdleGraceSeconds
   ) {
@@ -149,7 +149,7 @@ public nonisolated struct WorkflowRunConfiguration: Equatable, Sendable {
     self.skippedSteps = skippedSteps
     self.runDirectory = runDirectory
     self.cliCommand = cliCommand
-    self.initiatorPaneID = initiatorPaneID
+    self.initiatorContentID = initiatorContentID
     self.startedAt = startedAt
     self.idleGraceSeconds = idleGraceSeconds
   }
@@ -258,7 +258,7 @@ public nonisolated struct WorkflowActivation: Equatable, Sendable {
   public var stepID: String
   public var role: String
   /// `nil` for a `launch` role until the pane exists.
-  public var paneID: PaneID?
+  public var contentID: ContentID?
   public var delivery: String
   public var expectation: WorkflowExpectation
   public var token: String
@@ -279,7 +279,7 @@ public nonisolated struct WorkflowActivation: Equatable, Sendable {
     ordinal: Int,
     stepID: String,
     role: String,
-    paneID: PaneID?,
+    contentID: ContentID?,
     delivery: String,
     expectation: WorkflowExpectation,
     token: String,
@@ -294,7 +294,7 @@ public nonisolated struct WorkflowActivation: Equatable, Sendable {
     self.ordinal = ordinal
     self.stepID = stepID
     self.role = role
-    self.paneID = paneID
+    self.contentID = contentID
     self.delivery = delivery
     self.expectation = expectation
     self.token = token
@@ -564,7 +564,7 @@ public nonisolated struct WorkflowRunState: Equatable, Sendable {
     return definition.step(id: currentStepID)
   }
 
-  public func paneID(for role: String) -> PaneID? {
-    bindings[role]?.paneID
+  public func contentID(for role: String) -> ContentID? {
+    bindings[role]?.contentID
   }
 }
