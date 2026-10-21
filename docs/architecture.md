@@ -3,7 +3,7 @@
 
 ## Overview
 
-codans is a native macOS application that orchestrates terminals into a four-level hierarchy (Project → Worktree → Tab → Pane), with cross-cutting Tag classification on Projects, for CLI-agent power users. See [Product Spec](product-spec.md) for capabilities and boundaries.
+codans is a native macOS application that orchestrates terminals into a four-level hierarchy (Project → Worktree → Pane → Tab; each Tab carries one Content), with cross-cutting Tag classification on Projects, for CLI-agent power users. See [Product Spec](product-spec.md) for capabilities and boundaries, [Pane Layout](design-docs/pane-layout.md) for the layout model, and the repository [CONTEXT.md](../CONTEXT.md) for the vocabulary.
 
 The system is a **Tuist-managed monorepo** because the product ships three co-versioned artifacts — the Mac app, the `codans` CLI, and the published Agent Skill — whose development benefits from atomic cross-cutting changes (protocol edits, CLI contract changes, domain-model evolution) and shared tooling.
 
@@ -17,7 +17,7 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 
 | Target | Kind | Source path | Purpose |
 |---|---|---|---|
-| `CodansCore` | static framework | `apps/mac/CodansCore/` | Pure domain types: Project/Worktree/Tab/Pane models, `Tag`/`TagFilter`, `SplitTree`, stable UUID identifiers. Zero internal deps. Consumed by app + CLI. |
+| `CodansCore` | static framework | `apps/mac/CodansCore/` | Pure domain types: Project / Worktree / Pane / Tab models, `ContentSnapshot` with its kind-keyed `ContentState`, `Tag`/`TagFilter`, `SplitTree`, the `PaneID` / `TabID` / `ContentID` identifiers, the layout invariants (`isConsistent`), and the catalog v3 → v4 migrator. Zero internal deps. Consumed by app + CLI. |
 | `CodansIPC` | static framework | `apps/mac/CodansIPC/` | JSON-RPC wire protocol: Request/Response envelopes, Method constants, payload types and framing. Socket discovery lives in `CodansKit`. Shared between app and CLI. |
 | `CodansKit` | static framework | `apps/mac/CodansKit/` | Shared CLI transport, `RPCClient`, `SocketDiscovery`, alias resolution, rendering, and exit codes. Depends on `CodansCore`, `CodansIPC`, and `ArgumentParser`; consumed by the CLI, app, and tests. |
 | `GhosttyKit` | static framework | `apps/mac/.build/ghostty/GhosttyKit.xcframework` | Tuist wrapper around the locally built libghostty XCFramework. |
@@ -29,8 +29,9 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | Subfolder | Purpose |
 |---|---|
 | `codans/App/` | `@main CodansApp.swift`, root SwiftUI scene, TCA store construction |
-| `codans/Runtime/` | libghostty integration: GhosttyKit Swift bindings, Pane lifecycle, Surface rendering adapter, `@Observable` runtime state, and the live foreground [process registry](design-docs/worktree-processes.md) |
-| `codans/Hooks/` *(planned, not yet implemented)* | **Design intent, no code yet** — the `Hooks/` subfolder does not exist and `CodansIPC/Method.swift` has no `hook.*` methods. The intended subsystem: lifecycle event taxonomy (Pane created / ready / output match / idle / exit; Tab activated; Worktree activated), hook registration, out-of-process shell handler dispatch. See [Lifecycle hooks](design-docs/lifecycle-hooks.md). |
+| `codans/Runtime/` | libghostty integration: GhosttyKit Swift bindings, Surface rendering adapter, `@Observable` runtime state, the live foreground [process registry](design-docs/worktree-processes.md), and the content runtime below |
+| `codans/Runtime/Content/` | The content runtime (ADR-0002): `TabContent` is the protocol one content kind implements (create, mount, unmount, close, accept focus); `ContentRuntime` is the live registry keyed by `ContentID` that owns instance lifecycle and hands views a renderer by id; `TabChrome` is the per-content observable that exposes busy, progress, badge, read-only, and live title to the tab strip; `ContentGeometry` carries the mount size and scale so a surface starts at its slot size. `TerminalContent` is the terminal kind and wraps the `TerminalEngine` surface lifecycle. Adding a content kind is one `TabContent` implementation plus registration; the layout layer does not change. |
+| `codans/Hooks/` *(planned, not yet implemented)* | **Design intent, no code yet** — the `Hooks/` subfolder does not exist and `CodansIPC/Method.swift` has no `hook.*` methods. The intended subsystem: lifecycle event taxonomy (Content created / ready / output match / idle / exit; Tab selected; Pane focused; Worktree activated), hook registration, out-of-process shell handler dispatch. See [Lifecycle hooks](design-docs/lifecycle-hooks.md). |
 | `codans/Process/` | Shared subprocess primitive — `CommandRunner` protocol + `FoundationCommandRunner` / `RecordingCommandRunner`. `Git/` and `GitHub/` depend on this common runner without taking a sibling-module import. Timeout + SIGTERM→SIGKILL ladder + pipe-drain backpressure live here; translation from `CommandOutcome` to a domain error type is each caller's responsibility. |
 | `codans/Git/` | Git queries and mutations: status/diff/log parsing, branch switching, and worktree creation/removal. Subprocess execution uses the shared `CommandRunner`; see [Worktree](design-docs/worktree.md). |
 | `codans/GitHub/` | gh-delegated GitHub integration data layer (0012). `GitHubService` protocol + `LiveGitHubService` wrapping `gh` via `CommandRunner`, `GhCommand` argv builder, `GhExecutableResolver` actor, `JSONOutputParsers` translating gh stdout → `CodansCore` DTOs, `GitHubError` taxonomy. Zero HTTP in-app; auth/tokens live entirely in gh's own config store. App-layer TCA bits live in `App/Clients/GitHubClient.swift` + `App/Features/GitHub/`. |
@@ -99,7 +100,7 @@ skills/codans-cli/          (text-only, no Swift dependencies)
 - `Codans` (app) and `codans-cli` must communicate only through IPC (`CodansIPC` wire types + Unix socket), never via shared state or file-based IPC.
 - `CodansCore` must have zero imports from any other internal package — it is the universal leaf.
 - No circular dependencies between frameworks.
-- **In-app module boundaries** (`Runtime` ↔ `Hooks` ↔ `Git` ↔ `App`) are enforced by folder convention + code review only. No Tuist target edge exists between them because they compile into the same app binary. See "Architectural Invariants" for the rules that must not be violated (e.g., "Pane state mutability is localized to `Runtime`").
+- **In-app module boundaries** (`Runtime` ↔ `Hooks` ↔ `Git` ↔ `App`) are enforced by folder convention + code review only. No Tuist target edge exists between them because they compile into the same app binary. See "Architectural Invariants" for the rules that must not be violated (e.g., "Terminal state mutability is localized to `Runtime`").
 - `skills/codans-cli/` must not import or reference any Swift target — it is pure markdown + reference content.
 
 **Enforcement:**
@@ -111,17 +112,18 @@ skills/codans-cli/          (text-only, no Swift dependencies)
 
 Rules not visible in code. Violating any of these will not fail tests immediately but will rot the system.
 
-- **Pane state mutability is localized to `Runtime`.** Pane scrollback, cursor, and selection are mutable only inside `codans/Runtime (in-app module)`. Other layers read via `@Observable` bindings or event streams; they must not call mutators directly.
+- **Terminal state mutability is localized to `Runtime`.** A terminal Content's scrollback, cursor, and selection are mutable only inside `codans/Runtime (in-app module)`. Other layers read via `@Observable` bindings or event streams; they must not call mutators directly.
+- **Live content state lives in `ContentRuntime`, not in `HierarchyManager`.** `HierarchyManager` owns catalog mutation and structural runtime state (focused Pane, selected Tab) only. Busy / progress / badge flags, surfaces, and renderers belong to the content runtime (`TabChrome`, `TabContent` instances) keyed by `ContentID`; the agent state store, the surface reclaim policy, and the notification inbox key on `ContentID` and stay separate stores (ADR-0002).
 - **App-control requests from the CLI go through `CodansIPC`.** The CLI uses the app Unix socket rather than file-based queues or shared mutable state. Terminal sessions and subprocesses have their own transport boundaries.
 - **Hooks are out-of-process only in v1.** *(Design intent — the Hooks subsystem is not yet implemented; see [Lifecycle hooks](design-docs/lifecycle-hooks.md).)* When built, hook handlers execute as shell commands fork-exec'd by the app, receiving JSON on stdin and returning JSON on stdout. In-process handlers (embedded JS, WASM) are explicitly deferred.
 - **State management is hybrid by design, with a clear boundary.** High-frequency terminal state uses `@Observable`; app flow state uses TCA. Mixing the two patterns within a single feature is a red flag. See [State Management](#state-management-hybrid-tca--observable).
 - **Persistence has explicit owners and file-specific schema policies.** `AtomicFileStore` provides atomic-rename JSON I/O; callers own version validation and recovery. Do not assume all config-directory files share one schema or unsupported-version policy; see [Persistence](#persistence).
 - **`codans` is stateless.** The CLI has no persistent state of its own. All truth lives in the running app; `codans` is a thin RPC client. Adding file reads/writes in `apps/mac/codans-cli/` requires a design doc.
-- **Identifiers are UUIDs.** Every Project, Worktree, Tab, Pane, Tag has a stable UUID. Index-based addressing (`codans pane focus 1/2/3`) and the app-session short handles (`t3` / `p7`, printed by `codans tree` and backed by `TargetHandleRegistry`) are convenience sugar resolved to a UUID via `hierarchy.resolveAlias` before any state mutation. JSON output carries UUIDs only. Internal code must use UUIDs.
+- **Identifiers are UUIDs, and each level has its own.** Every Project, Worktree, Pane, Tab, Content, and Tag has a stable UUID. `PaneID` identifies a split-tree leaf (layout, focus); `TabID` identifies a strip slot and its chip attributes; `ContentID` is the session identity that zmx session names, agent state, notifications, command queues, run-script bindings, and `CODANS_CONTENT_ID` key on (ADR-0001). The app-session short handles (`p<n>` for a Pane, `t<n>` for a Tab, printed by `codans tree` and backed by `TargetHandleRegistry`), labels, and names are convenience sugar resolved to a UUID via `hierarchy.resolveAlias` before any state mutation; any CLI id position accepts a Pane, Tab, or Content id and resolves it to the level the verb needs. JSON output carries UUIDs only. Internal code must use UUIDs.
 - **Agent Skill is consumed, never loaded.** The app must not parse, index, or invoke `SKILL.md`. `codans skill install` is a planned command, not shipped runtime code.
 - **`codans/Runtime (in-app module)` is TCA-free.** Runtime exposes `@Observable` classes and AsyncStream events. TCA bridging lives in `apps/mac` (the `*Client` types). This keeps Runtime independently testable and portable.
-- **`SplitTree<PaneID>` stores only Pane IDs, never surface objects.** Per-Tab split layout (`CodansCore.SplitTree<PaneID>`, see `CodansCore/Tab.swift`) is a recursive value type keyed on `PaneID`; view composition resolves each leaf ID to its Pane and live `ghostty_surface_t` at render time. This is what makes split state Codable/persistable (a live surface pointer cannot survive restart) and makes every split operation (grow/shrink, focus nav, swap) a pure value-type transform that is unit-testable without any libghostty bring-up. Invariant: the set of leaf IDs in a Tab's `splitTree` equals the set of `panes[*].id` on that Tab.
-- **Reported pane failures have a bounded recovery policy.** `TerminalEngine.recordPaneCrash` tracks failures per pane and closes the owning Tab after the configured threshold (default: 3 within 30 seconds). The UI can retry a failed surface. This handles reported runtime failures; libghostty is in-process, so it does not provide process-level isolation from native crashes.
+- **`SplitTree<PaneID>` stores only Pane IDs, never views or surfaces.** A Worktree's layout (`CodansCore.SplitTree<PaneID>`) is a recursive value type keyed on `PaneID`; view composition resolves each leaf ID to its Pane, the Pane's selected Tab, and that Tab's live content renderer (through `ContentRuntime`) at render time. This is what makes split state Codable/persistable (a live surface pointer cannot survive restart) and makes every split operation (grow/shrink, focus nav, swap, zoom) a pure value-type transform that is unit-testable without any libghostty bring-up. Invariants: the set of leaf IDs in a Worktree's `splitTree` equals the set of `panes[*].id`; a Pane is never empty; every `selectedTabID` resolves; `focusedPaneID` exists iff Panes exist; Tab ids and Content ids are unique per Worktree. Decoding repairs dangling selection and focus only; loaders and the migrator reject an inconsistent layout as a whole.
+- **Reported surface failures have a bounded recovery policy.** `TerminalEngine` tracks reported failures per terminal Content and closes the owning Tab after the configured threshold (default: 3 within 30 seconds). The UI can retry a failed surface. This handles reported runtime failures; libghostty is in-process, so it does not provide process-level isolation from native crashes.
 
 ## Cross-Cutting Concerns
 
@@ -134,14 +136,15 @@ Rules not visible in code. Violating any of these will not fail tests immediatel
 - Deeplink dispatch
 
 **Swift Observation (`@Observable`)** is used for:
-- `Runtime.TerminalEngine` — manages N panes
-- `HierarchyManager` — mutable Catalog of Projects/Worktrees/Tabs/Panes plus Tags and the active Tag filter
+- `Runtime.TerminalEngine` — manages the N libghostty surfaces behind terminal Contents
+- `Runtime/Content/ContentRuntime` — the live content instances keyed by `ContentID`, with one `TabChrome` observable per content for the strip (busy, progress, badge, read-only, live title)
+- `HierarchyManager` — mutable Catalog of Projects / Worktrees / Panes / Tabs plus Tags and the active Tag filter, and the structural runtime state (focused Pane, selected Tab)
 
 **Bridge:** `apps/mac/codans/App/Clients/*Client.swift` exposes:
-- **Commands** (TCA → runtime): `terminalClient.ensureSurface(...)`, `terminalClient.sendInput(pane, text)`
+- **Commands** (TCA → runtime): `terminalClient.ensureSurface(...)`, `terminalClient.sendInput(content, text)`
 - **Events** (runtime → TCA): `terminalClient.events()` returns an `AsyncStream<TerminalEvent>` the root reducer subscribes to and maps to `Action.terminal(...)`
 
-Rationale: agent-heavy panes produce thousands of output events per second; routing every byte through a TCA reducer is a known anti-pattern (value-type state diffs, Effect allocation, Equatable checks). Both reference projects ended at this split — supacode explicitly; supaterm implicitly via reference-type state within TCA.
+Rationale: agent-heavy terminals produce thousands of output events per second; routing every byte through a TCA reducer is a known anti-pattern (value-type state diffs, Effect allocation, Equatable checks). Both reference projects ended at this split — supacode explicitly; supaterm implicitly via reference-type state within TCA.
 
 ### IPC
 
@@ -152,7 +155,8 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
   - Error: `{"id": "uuid", "error": {"code": Int, "message": "…"}}`
 - **Methods:** namespaced — `system.*`, `editor.*`, `project.*`, `workspace.*`, `agent.*`, `handoff.*`, `hierarchy.*`, `pane.*`, `terminal.*` (enumerated in `CodansIPC/Method.swift`). Skill installation is local CLI filesystem work and has no `skill.*` RPC; lifecycle hooks have no live RPC methods.
 - **Discovery in `apps/mac/codans-cli/`:** `--socket` flag → env var `CODANS_SOCKET_PATH` → build-channel default (`BuildChannel.current.socketPath`). An inherited *other-channel* default is never followed: the app discards it before binding, the release CLI refuses to act on a development pane (exit 15), and the development CLI dials its own socket — see [Environment](design-docs/environment.md)
-- **Context pane id:** the app sets `CODANS_PANE_ID` in each local Pane's environment so `codans` commands run inside a Pane can default to that Pane's UUID without an explicit flag; tab / worktree / project ids are *not* injected (they go stale when a pane moves) and resolve server-side from process ancestry. The full injected set is built by `PaneEnvironment` and catalogued in `CodansEnvironment.Key`
+- **Context ids:** the app sets `CODANS_PANE_ID` (the Pane), `CODANS_TAB_ID` (the Tab), and `CODANS_CONTENT_ID` (the session identity) in each local terminal Tab's environment, so `codans` commands run inside a Tab default to their own session without an explicit flag and an agent can act on the strip or the layout around it; each variable has exactly one meaning and no alias. Worktree / project ids are *not* injected and resolve server-side from process ancestry. The full injected set is built by `PaneEnvironment` and catalogued in `CodansEnvironment.Key`
+- **Hierarchy description shapes:** `hierarchy.describe*` returns `WorktreeDescription { focusedPaneID, paneCount }`, `PaneDescription { id, handle, worktreeID, selectedTabID, tabIDs, isFocused }`, and `TabDescription { id, handle, paneID, contentID, title, name, icon, color, isSelected, workingDirectory, labels, agent, agentSessionID, isLive }`; `TargetHandles` carries `panes` and `tabs`. The `system.hello` protocol version pins these shapes; the CLI ships with the app and there is no wire compatibility with other CLI binaries
 
 ### URL scheme
 
@@ -166,15 +170,15 @@ Four roots per channel. Debug builds use `~/.codans-dev/` and `~/Library/Caches/
 
 - **Config** — `~/.codans/config/`: files a user may edit by hand.
 - **State** — `~/.codans/state/`: files only the app writes.
-- **Runtime** — `~/.codans/run/`: the zmx `ZMX_DIR` — per-pane daemon sockets, quit-time snapshots, zmx logs. Kept out of `~/Library/Caches` because cache cleaners wipe that tree wholesale and a daemon whose socket file is gone can never be reached again.
+- **Runtime** — `~/.codans/run/`: the zmx `ZMX_DIR` — per-session daemon sockets, quit-time snapshots, zmx logs. Kept out of `~/Library/Caches` because cache cleaners wipe that tree wholesale and a daemon whose socket file is gone can never be reached again.
 - **Cache** — `~/Library/Caches/codans/`: refetchable data.
 
 | File | Root | Version | Contents |
 |---|---|---|---|
 | `settings.json` (`CodansCore/Settings/`) | config | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). `ProjectSettings` carries shared fields and an optional `git: GitProjectSettings?` subtree for Git settings; applicability is determined by Project kind. |
 | `shortcuts.json` | config | v1 | Keybinding overrides. Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
-| `catalog.json` (`CodansCore/Catalog.swift`) | state | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
-| `sessions.json` (`CodansCore/Session.swift`) | state | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
+| `catalog.json` (`CodansCore/Catalog.swift`) | state | v4 | Project → Worktree → Pane → Tab tree with UUIDs; per Worktree the `splitTree`, `panes`, and `focusedPaneID`; per Pane the ordered `tabs` and `selectedTabID`; per Tab the chip attributes (`name`, `cachedDisplayTitle`, `color`, `icon`, `iconLock`) and one `content` snapshot (`id` + kind-keyed `state`, `kind: terminal` today); `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. Tabs decode element-wise: an unreadable Tab is dropped and counted, and a non-zero loss count disables the session reaper and the unread sweep for that launch. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
+| `sessions.json` (`CodansCore/Session.swift`) | state | v1 | Live zmx daemon registry — per-Content session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
 | `<worktree>/.codans/workflow-runs/<run>/run.json`, `index.json` (`CodansCore/Workflow/WorkflowRunStore.swift`) | worktree | v1 | One directory per Agent Workflow run: the record (status, bindings, inputs, state, steps, deliveries — never tokens), `log.md`, the definition copy, materialized instructions, deliveries, and `run:` step output; `index.json` lists the worktree's runs and keeps the last 20. Definitions themselves are `*.workflow.yaml` files discovered from the app bundle, `~/.codans/workflows/` (shared by both channels), and `<repo>/.codans/workflows/` — see [Workflow](design-docs/workflow.md). |
 | `notifications.json` (`CodansCore/Notifications/InboxFile.swift`) | state | v1 | Inbox entries; `notifications.quarantine-shown` marks the last forward-version backup already announced. |
 | `remote-hosts.json` | state | v1 | Server projects' connection info, used to restore a `remoteHost` an older build stripped from the catalog. |
@@ -192,7 +196,7 @@ The shared JSON write primitive is atomic-rename persistence (`CodansCore/Atomic
 
 Temp files a crash leaves behind are swept at launch once they are an hour old (`AtomicFileStore.sweepOrphanedTemporaries`).
 
-Version handling belongs to each store, not `AtomicFileStore`, but every store follows one rule: **a file this build cannot read is never overwritten.** A corrupt file, a newer-version file, and the original of a migration are moved by `StoreBackup` (`CodansCore/Persistence/StoreBackup.swift`) to `<root>/backups/<stem>.<reason>-<yyyyMMdd'T'HHmmss'Z'>.json` (`reason` = `corrupt`, `unsupported-v<N>`, `migrated-v<N>`; newest five kept per file and reason) before the store starts empty. If that move fails the store disables saving for the session instead. `settings.json` migrates v1/v2 to v3 (see [Settings](design-docs/settings.md)); `InboxFile` also reads the legacy bare-array shape; `SessionStore` accepts any version up to its own. The planned Hooks subsystem would add `config/hooks.json`; it is not implemented.
+Version handling belongs to each store, not `AtomicFileStore`, but every store follows one rule: **a file this build cannot read is never overwritten.** A corrupt file, a newer-version file, and the original of a migration are moved by `StoreBackup` (`CodansCore/Persistence/StoreBackup.swift`) to `<root>/backups/<stem>.<reason>-<yyyyMMdd'T'HHmmss'Z'>.json` (`reason` = `corrupt`, `unsupported-v<N>`, `migrated-v<N>`; newest five kept per file and reason) before the store starts empty. If that move fails the store disables saving for the session instead. `settings.json` migrates v1/v2 to v3 (see [Settings](design-docs/settings.md)); `catalog.json` migrates v3 to v4 in memory, keeps the v3 original through `StoreBackup`, and writes v4 immediately — each session UUID becomes its ContentID unchanged, so zmx sessions reattach (rules in [Pane Layout](design-docs/pane-layout.md)); a catalog stamped with a version above the build opens a read-only "update required" screen with the file untouched, nothing saved, and no reaper or unread sweep. `InboxFile` also reads the legacy bare-array shape; `SessionStore` accepts any version up to its own. The planned Hooks subsystem would add `config/hooks.json`; it is not implemented.
 
 Before any store opens a file, `PersistenceLaunch.prepare` migrates a pre-split `~/.config/codans[-dev]/` into the two roots once: live files move, litter is deleted, everything else is archived under `state/backups/legacy-config-<ts>/` (`CodansCore/Persistence/LegacyConfigMigrator.swift`). It is skipped when a root is overridden, as an XCTest host, when the state root already has a catalog, and while another process holds the legacy session lock.
 
@@ -205,12 +209,12 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 
 - **Producer (quit).** `SessionLifecycle.detachAllForQuit(action:)` is `async`.
   On `.snapshot` it calls `ZmxControlClient.snapshot(for:)` per live surface with
-  bounded concurrency (sliding window of 8) and a per-pane timeout (`.seconds(2)`);
-  the daemon answers by writing `<paneID>.snap` and closing its control socket
-  (socket EOF = acknowledgement). A pane that times out falls back to
+  bounded concurrency (sliding window of 8) and a per-session timeout (`.seconds(2)`);
+  the daemon answers by writing `<contentID>.snap` and closing its control socket
+  (socket EOF = acknowledgement). A session that times out falls back to
   `ZmxControlClient.kill(for:)` so a wedged daemon can never strand quit. The
   snapshotted set and the kill-fallback set are provably disjoint (fallback is
-  signalled by a *log line*, not by `.snap` absence — a clean empty-buffer pane
+  signalled by a *log line*, not by `.snap` absence — a clean empty-buffer session
   also writes no file). `applicationShouldTerminate` drives this via a
   `.terminateLater` reply bounded by an outer 20 s watchdog, and a one-way
   `dispositionInProgress` latch makes a re-entrant terminate (rapid double ⌘Q)
@@ -219,20 +223,20 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
   `SessionReaper.sweep()` result and reduces its `.snapshot(url)` states (only
   those — `.alive`/`.dead` are ignored) into `TerminalEngine.pendingRestores`
   via `AppState.derivePendingRestores`, *before* bring-up. `ensureSurface`
-  consumes each pane's path exactly once (`removeValue`, stable across the
+  consumes each Content's path exactly once (`removeValue`, stable across the
   HAN-82 surface-init retry) and passes it to `ZmxAttachCommand.build(restoreFrom:)`.
   Restore is keyed on snapshot *file presence*, never on the current
   `quitAction` setting.
 - **cwd by inheritance (no `--cwd`).** The restored shell's working directory is
   the daemon's cwd, which libghostty sets on the forked child from
-  `pane.workingDirectory` — so each pane restores in its own directory with no
+  the terminal Content's `workingDirectory` — so each session restores in its own directory with no
   `--cwd` flag (empirically confirmed by `ThirdParty/zmx/test/restore.bats`).
-- **Files.** `.snap` files live at `${ZMX_DIR}/snapshots/<paneID-UUID>.snap`
+- **Files.** `.snap` files live at `${ZMX_DIR}/snapshots/<contentID>.snap`
   (`ZMX_DIR` is pinned by the app so producer, consumer, and reaper agree on the
-  path); the reaper deletes a snap once its paneID is `.alive` again and ages
+  path); the reaper deletes a snap once its ContentID is `.alive` again and ages
   out snaps older than 7 days. `.snap` files are plaintext, user-readable only.
 - **Observability.** `os.Logger` under `com.gumpw.codans.runtime`:
-  `zmx.snapshot send pane=<uuid>` (category `runtime.zmx.control`, per pane at
+  `zmx.snapshot send pane=<uuid>` (category `runtime.zmx.control`, per session at
   request time), `zmx.snapshot kill-fallback pane=<uuid>` and
   `zmx.restore applied pane=<uuid>` (category `runtime.session.lifecycle`).
 
@@ -345,7 +349,7 @@ Hard-won constraints that are invisible in the code but break the build or crash
 
 5. **IPC request handling.** `SocketConnection` awaits each request serially. Its in-flight limit guard does not implement a queued 64-request workload or a two-second overflow wait. See [CLI request processing](design-docs/cli.md#decisions) for the current connection contract.
 
-6. **Runtime failure recovery.** See the reported-pane-failure policy under "Architectural Invariants"; this is not isolation from native process crashes.
+6. **Runtime failure recovery.** See the reported-surface-failure policy under "Architectural Invariants"; this is not isolation from native process crashes.
 
 7. **Worktree storage layout defaults.** Local creation resolves its base through `WorktreeSettings.resolveBaseDirectory`: per-Project `worktreesDirectory` verbatim → global `defaultWorktreesDirectory/<canonicalProjectName>` → `~/.codans/repos/<canonicalProjectName>`. The new worktree name is appended to that base. `HierarchySidebarFeature` uses the path-derived canonical project name, so renaming the display name does not change the suggested directory. Remote creation instead uses the parent of the remote git root. See [Worktree](design-docs/worktree.md) and [Remote SSH projects](design-docs/remote-ssh-projects.md).
 
