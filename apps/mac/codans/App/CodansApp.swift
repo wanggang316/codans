@@ -84,6 +84,7 @@ struct CodansApp: App {
             notificationStore: appState.notificationStore,
             osNotifier: appState.osNotifier,
             agentStateStore: appState.agentStateStore,
+            contentRuntime: appState.contentRuntime,
             workflowEngine: appState.workflowEngine
           )
           .frame(minWidth: 800, minHeight: 600)
@@ -115,8 +116,7 @@ struct CodansApp: App {
                   let worktreeID = selection.worktreeID,
                   let worktree = catalog.projects.first(where: { $0.id == projectID })?
                     .worktrees.first(where: { $0.id == worktreeID }),
-                  let activeTabID = worktree.selectedTabID,
-                  worktree.tabs.contains(where: { $0.id == activeTabID })
+                  worktree.focusedPane?.selectedTab != nil
                 else {
                   return false  // nothing to close → let ⌘W close the window
                 }
@@ -172,7 +172,8 @@ struct CodansApp: App {
         shortcuts: appState.shortcutsStore.resolved,
         sidebarFocus: sidebarFocusObserver,
         settingsStore: appState.settingsStore,
-        hierarchyManager: appState.hierarchyManager
+        hierarchyManager: appState.hierarchyManager,
+        contentRuntime: { appState.contentRuntime }
       )
       CommandGroup(replacing: .appSettings) {
         // Chord routes through the registry so a user override in Settings → Shortcuts
@@ -429,8 +430,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     completionHandler([.banner, .list, .sound])
   }
 
-  /// `codans://focus?project=...&worktree=...&tab=...&pane=...`
-  /// → `(projectID, worktreeID, tabID, paneID)`.
+  /// `codans://focus?project=...&worktree=...&content=...` (the session id;
+  /// `pane=` is accepted as the same value for links minted before the
+  /// Content vocabulary) → `(projectID, worktreeID, contentID)`.
   nonisolated static func parseDeeplink(_ url: URL) -> InboxEntry.SourcePath? {
     guard url.scheme == "codans", url.host == "focus" else { return nil }
     let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -442,14 +444,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     )
     guard let projectStr = items["project"], let projectUUID = UUID(uuidString: projectStr),
       let worktreeStr = items["worktree"], let worktreeUUID = UUID(uuidString: worktreeStr),
-      let tabStr = items["tab"], let tabUUID = UUID(uuidString: tabStr),
-      let paneStr = items["pane"], let paneUUID = UUID(uuidString: paneStr)
+      let contentStr = items["content"] ?? items["pane"], let contentUUID = UUID(uuidString: contentStr)
     else { return nil }
     return InboxEntry.SourcePath(
       projectID: ProjectID(raw: projectUUID),
       worktreeID: WorktreeID(raw: worktreeUUID),
-      tabID: TabID(raw: tabUUID),
-      paneID: PaneID(raw: paneUUID)
+      contentID: ContentID(raw: contentUUID)
     )
   }
 
@@ -587,7 +587,10 @@ final class AppState {
   private(set) var developerPaneDependencies: DeveloperPaneDependencies?
 
   private let catalogStore: CatalogStore
-  private let hierarchyRuntime: GhosttyBackedHierarchyRuntime
+  private let hierarchyRuntime: LiveHierarchyRuntime
+  /// Registry of live Content (surfaces, chrome). Built in `bringUp`
+  /// alongside the engine; nil before then.
+  private(set) var contentRuntime: ContentRuntime?
   private var ghosttyRuntime: GhosttyRuntime?
   /// Shared `sessions.json` store. Built lazily in `bringUp` (nil if the
   /// canonical URL cannot be opened — same fallback the IPC handlers use).
@@ -606,12 +609,12 @@ final class AppState {
   /// then, which keeps the `willTerminate` observer safe to fire early.
   @ObservationIgnored private(set) var sessionLifecycle: SessionLifecycle?
   /// Per-pane daemon liveness the launch `SessionReaper.sweep` already
-  /// determined, keyed by `PaneID` (`true` == socket reachable). Consumed by
+  /// determined, keyed by `ContentID` (`true` == socket reachable). Consumed by
   /// `seedRestoredAgents` so the agent-state seed reuses the sweep's verdict
   /// instead of re-`connect(2)`-probing the same panes. Empty until the
   /// sweep runs (and on the no-resume / keepRunning paths), where the seed
   /// falls back to a direct per-pane probe.
-  @ObservationIgnored private var sessionSweepLiveness: [PaneID: Bool] = [:]
+  @ObservationIgnored private var sessionSweepLiveness: [ContentID: Bool] = [:]
   /// Per-Worktree "git status is non-clean" cache. The sidebar row's `.task(id:)`
   /// refreshes this lazily; a small dot is drawn next to the row name when dirty.
   let worktreeStatusMonitor: WorktreeStatusMonitor
@@ -655,7 +658,7 @@ final class AppState {
     }
 
     let catalogStore = CatalogStore()
-    let runtime = GhosttyBackedHierarchyRuntime()
+    let runtime = LiveHierarchyRuntime()
     // An unreadable catalog is either backed up (and reads as empty) or
     // leaves the store with saving disabled, so `.empty` here can never
     // overwrite the user's project list.
@@ -712,7 +715,21 @@ final class AppState {
     {
       engine.reclaimPolicy = policy
     }
-    hierarchyRuntime.attach(engine: engine)
+    // The content registry is the manager's runtime seam: every surface the
+    // manager brings up registers a `TerminalContent` here, so the strips
+    // find a `TabChrome` for it. The reaper / unread gates read the load
+    // report through it.
+    let contents = ContentRuntime(
+      hierarchy: hierarchyManager,
+      loadReport: catalogStore.loadReport,
+      makeContent: { snapshot in TerminalContent(id: snapshot.id, engine: engine) }
+    )
+    self.contentRuntime = contents
+    hierarchyRuntime.attach(engine: engine, contents: contents)
+    hierarchyManager.contentActivity = { [weak contents, weak self] contentID in
+      contents?.isTerminalBusy(contentID) == true
+        || self?.agentStateStore?.entries[contentID]?.state.isMidTask == true
+    }
     profiler.mark("ghostty+engine")
     bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)
 
@@ -734,11 +751,17 @@ final class AppState {
         await MainActor.run { manager?.remoteHost(forPath: path) }
       }
     )
+    let terminalClient = TerminalClient.live(
+      engine: engine, contents: contents,
+      envProvider: { [weak settings] projectID in
+        settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) } ?? [:]
+      })
     let hierarchy = HierarchyClient.live(
       manager: manager,
       settings: settings,
       gitWorktreeClient: worktreeClient,
-      terminalClient: .live(engine: engine)
+      terminalClient: terminalClient,
+      contents: contents
     )
     self.editorClient = editor
     self.hierarchyClient = hierarchy
@@ -779,18 +802,18 @@ final class AppState {
       lifecycle.agentSnapshotProvider = { [weak engine, weak registry] in
         guard let registry else { return [] }
         let now = Date()
-        return registry.entries.map { paneID, entry in
+        return registry.entries.map { contentID, entry in
           PersistedAgentRecord(
-            paneID: paneID,
+            contentID: contentID,
             kindRaw: entry.kind.rawValue,
             stateRaw: entry.state.rawValue,
-            pid: engine?.foregroundProcessGroupID(for: paneID) ?? 0,
+            pid: engine?.foregroundProcessGroupID(for: contentID) ?? 0,
             capturedAt: now
           )
         }
       }
-      lifecycle.agentBusyProvider = { [weak registry] paneID in
-        registry?.entries[paneID]?.state.isMidTask ?? false
+      lifecycle.agentBusyProvider = { [weak registry] contentID in
+        registry?.entries[contentID]?.state.isMidTask ?? false
       }
     }
     startCommandQueueRunner(manager: manager, engine: engine)
@@ -875,10 +898,10 @@ final class AppState {
         engine: engine,
         cli: Self.cliInvocation(),
         installation: self.agentInstallation,
-        source: { [weak self, weak manager] paneID in
+        source: { [weak self, weak manager] contentID in
           guard let manager else { return nil }
           return Self.handoffSource(
-            for: paneID, manager: manager, agentState: self?.agentStateStore)
+            for: contentID, manager: manager, agentState: self?.agentStateStore)
         }
       )
       // The workflow start panel goes through the same discovery and the
@@ -988,10 +1011,9 @@ final class AppState {
       tracker: keystrokeTracker,
       settingsReader: settingsReader,
       catalogSnapshot: { manager.catalog },
-      lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
-      isPaneFocused: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
-      hasObservedAttention: { [weak self] paneID in
-        self?.agentStateStore?.hasObservedAttention(paneID) == true
+      isPaneFocused: { [weak engine] contentID in engine?.isSurfaceFocused(contentID) == true },
+      hasObservedAttention: { [weak self] contentID in
+        self?.agentStateStore?.hasObservedAttention(contentID) == true
       },
       onProjectActivity: { [weak manager] projectID in
         manager?.bumpProjectActivity(projectID)
@@ -1049,28 +1071,28 @@ final class AppState {
         Task { @MainActor [weak self, weak coordinator, weak manager] in
           // Coming back to the app with an agent pane focused is a look at
           // it, even though no focus change fires.
-          if let manager,
-            let paneID = Self.currentlyFocusedPane(
-              catalog: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
-          {
-            self?.agentStateStore?.markObserved(paneID)
+          if let manager, let contentID = Self.currentlyFocusedContent(catalog: manager.catalog) {
+            self?.agentStateStore?.markObserved(contentID)
           }
           await coordinator?.refreshAuthorizationStatus()
         }
       }
 
     self.focusReadMarkerTask = Task { @MainActor in
-      await Self.observeFocusedPaneForRead(
-        catalog: { manager.catalog }, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }, store: inbox)
+      await Self.observeFocusedPaneForRead(catalog: { manager.catalog }, store: inbox)
     }
-    self.orphanSweepTask = Task { @MainActor in
-      await Self.observeOrphanUnreadsSweep(catalog: { manager.catalog }, store: inbox)
+    // Off when the catalog loaded with losses or read-only: an unread entry
+    // of a dropped Tab must not be swept as an orphan.
+    if catalogStore.loadReport.allowsSessionSweeps {
+      self.orphanSweepTask = Task { @MainActor in
+        await Self.observeOrphanUnreadsSweep(catalog: { manager.catalog }, store: inbox)
+      }
     }
     self.notificationRollup = RollupIndexProvider(
       store: inbox,
       focus: { [weak manager] in
         guard let manager else { return RollupFocusState() }
-        return Self.focusState(from: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
+        return Self.focusState(from: manager.catalog)
       },
       observe: { [weak manager] in
         guard let manager else { return }
@@ -1079,7 +1101,10 @@ final class AppState {
           _ = project.selectedWorktreeID
           _ = project.isExpanded
           for worktree in project.worktrees {
-            _ = worktree.selectedTabID
+            _ = worktree.focusedPaneID
+            for pane in worktree.panes {
+              _ = pane.selectedTabID
+            }
           }
         }
       }
@@ -1112,26 +1137,26 @@ final class AppState {
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
       settingsProvider: { settingsStore.settings },
-      daemonKiller: { paneID in
+      daemonKiller: { contentID in
         // Killing a pane's daemon is an out-of-band control `.kill`,
-        // addressable by PaneID alone, so it works whether or not a surface
+        // addressable by ContentID alone, so it works whether or not a surface
         // is live this session (the live byte stream runs through the
         // in-surface `zmx attach` client, not a held handle). The daemon
         // removes its own socket on shutdown, so no manual unlink is needed.
-        ZmxControlClient.kill(for: paneID)
+        ZmxControlClient.kill(for: contentID)
       },
-      runtimeProbe: { [weak terminalEngine] paneID in
+      runtimeProbe: { [weak terminalEngine] contentID in
         // `pane.info` / `pane.read` probe the daemon out-of-band via its
         // control socket. Gate on a live surface (or an idle-reclaimed one,
         // whose daemon still runs) so we don't hand back a probe for a pane
         // whose daemon isn't running this session.
         guard
-          terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil
-            || terminalEngine?.isReclaimed(paneID) == true
+          terminalEngine?.surface(for: contentID) != nil
+            || terminalEngine?.isReclaimed(contentID) == true
         else {
           return nil
         }
-        return ZmxControlProbe(paneID: paneID)
+        return ZmxControlProbe(contentID: contentID)
       },
       sessionCoordinator: sessionCoordinator,
       callerPaneResolver: { [weak terminalEngine] callerPID in
@@ -1143,10 +1168,10 @@ final class AppState {
         // small (one entry per live pane) and shell PIDs can change
         // across pane restarts, so caching would risk staleness.
         guard let runtime = terminalEngine?.ghosttyRuntime else { return nil }
-        var paneByShellPID: [pid_t: PaneID] = [:]
+        var paneByShellPID: [pid_t: ContentID] = [:]
         for surface in runtime.allLiveSurfaces() {
           guard let shellPID = surface.childProcessID() else { continue }
-          paneByShellPID[shellPID] = surface.paneID
+          paneByShellPID[shellPID] = surface.contentID
         }
         return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
       },
@@ -1230,9 +1255,9 @@ final class AppState {
       ? nil
       : TerminalInputSink(
         engine: terminalEngine,
-        onPaneInput: { [weak hierarchy] paneID in
+        onPaneInput: { [weak hierarchy] contentID in
           guard let manager = hierarchy,
-            let projectID = manager.catalog.projectID(forPane: paneID)
+            let projectID = manager.catalog.projectID(forContent: contentID)
           else { return }
           manager.bumpProjectActivity(projectID)
         }
@@ -1240,7 +1265,7 @@ final class AppState {
     let terminalHandlers = TerminalHandlers(
       sink: inputSink,
       catalog: { hierarchy.catalog },
-      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false }
+      paneIsBusy: { [weak contents = contentRuntime] contentID in contents?.isTerminalBusy(contentID) ?? false }
     )
     let editorHandlers = EditorHandlers(
       editor: editor,
@@ -1265,10 +1290,7 @@ final class AppState {
         handleRegistry: targetHandles,
         focusedPane: { [weak hierarchy] in
           guard let hierarchy else { return nil }
-          return Self.currentlyFocusedPane(
-            catalog: hierarchy.catalog,
-            lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
-          )
+          return Self.currentlyFocusedContent(catalog: hierarchy.catalog)
         }
       ),
       handoffHandlers: handoffHandlers,
@@ -1307,12 +1329,12 @@ final class AppState {
     settingsStore: SettingsStore,
     engine: TerminalEngine
   ) -> WorkflowEngine {
-    let terminal = TerminalClient.live(engine: engine)
+    let terminal = TerminalClient.live(engine: engine, contents: contentRuntime)
     let socketPath = SocketPaths.resolve()
     let dependencies = WorkflowEngineDependencies(
-      sendLine: { paneID, line in
-        guard terminal.surface(paneID) != nil else { return false }
-        terminal.sendCommand(paneID, line)
+      sendLine: { contentID, line in
+        guard terminal.surface(contentID) != nil else { return false }
+        terminal.sendCommand(contentID, line)
         return true
       },
       launch: { request, source, profile in
@@ -1325,14 +1347,15 @@ final class AppState {
           prompt: request.prompt,
           target: request.placement == .split ? .split : .newTab,
           direction: request.direction,
-          anchorPaneID: request.anchorPaneID,
+          // The machine anchors on a session; the split needs its Pane.
+          anchorPaneID: request.anchorContentID.flatMap { hierarchy.catalog.paneID(forContent: $0) },
           focus: !request.background
         )
         let outcome = try await hierarchyClient.launchAgent(spec)
-        guard let paneID = outcome.paneID else {
-          throw IPCError.internal("\(profile.displayName) launched without a pane")
+        guard let contentID = outcome.contentID else {
+          throw IPCError.internal("\(profile.displayName) launched without a session")
         }
-        return paneID
+        return contentID
       },
       runCommand: { command, workingDirectory, environment, timeoutSeconds in
         await FoundationCommandRunner().run(
@@ -1344,19 +1367,20 @@ final class AppState {
           maxOutputBytes: WorkflowRunStore.maximumStdoutBytes
         )
       },
-      closePane: { paneID in
-        guard let address = hierarchyClient.addressOf(paneID) else { return }
-        try? hierarchyClient.closePane(paneID, address.tabID, address.worktreeID, address.projectID)
+      closeTab: { contentID in
+        guard let address = hierarchyClient.addressOf(contentID) else { return }
+        try? hierarchyClient.closeTab(address.tabID)
       },
-      focusPane: { paneID in
-        guard let address = hierarchyClient.addressOf(paneID) else { return }
-        try? hierarchyClient.focusPane(paneID, address.tabID, address.worktreeID, address.projectID)
+      focusContent: { contentID in
+        guard let address = hierarchyClient.addressOf(contentID) else { return }
+        try? hierarchyClient.focusPane(address.paneID)
+        try? hierarchyClient.selectTab(address.tabID)
       },
-      paneExists: { paneID in hierarchyClient.addressOf(paneID) != nil },
-      agentState: { [weak self] paneID in self?.agentStateStore?.entries[paneID]?.state },
-      notify: { [weak self, weak hierarchy] title, body, paneID in
+      contentExists: { contentID in hierarchyClient.addressOf(contentID) != nil },
+      agentState: { [weak self] contentID in self?.agentStateStore?.entries[contentID]?.state },
+      notify: { [weak self, weak hierarchy] title, body, contentID in
         guard let self, let hierarchy else { return }
-        self.postWorkflowNotification(title: title, body: body, paneID: paneID, hierarchy: hierarchy)
+        self.postWorkflowNotification(title: title, body: body, contentID: contentID, hierarchy: hierarchy)
       },
       profile: { settingsStore.settings.agents.profile(id: $0) },
       rememberBinding: { memory in settingsStore.mutateWorkflows { $0.remember(memory) } }
@@ -1371,29 +1395,26 @@ final class AppState {
   /// whose pane the user is already looking at is dropped. Before the
   /// coordinator exists the entry lands in the inbox directly.
   private func postWorkflowNotification(
-    title: String, body: String, paneID: PaneID?, hierarchy: HierarchyManager
+    title: String, body: String, contentID: ContentID?, hierarchy: HierarchyManager
   ) {
     let catalog = hierarchy.catalog
-    let sourcePane =
-      paneID
-      ?? Self.currentlyFocusedPane(
-        catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
-    guard let sourcePane, let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: sourcePane) else {
+    let source = contentID ?? Self.currentlyFocusedContent(catalog: catalog)
+    guard let source, let address = catalog.address(forContent: source) else {
       return
     }
     let entry = InboxEntry(
       kind: title.hasSuffix("completed") || body == "completed" ? .taskFinished : .waitingForInput,
       title: title,
       body: body,
-      source: InboxEntry.SourcePath(projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: sourcePane)
+      source: InboxEntry.SourcePath(
+        projectID: address.projectID, worktreeID: address.worktreeID, contentID: source)
     )
     guard let coordinator = notificationCoordinator else {
       notificationStore.append(entry)
       return
     }
-    let focused = Self.currentlyFocusedPane(
-      catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
-    let sourceIsFocused = focused == sourcePane || terminalEngine?.isSurfaceFocused(sourcePane) == true
+    let focused = Self.currentlyFocusedContent(catalog: catalog)
+    let sourceIsFocused = focused == source || terminalEngine?.isSurfaceFocused(source) == true
     Task { @MainActor in
       _ = await coordinator.handle(
         NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: sourceIsFocused))
@@ -1425,12 +1446,12 @@ final class AppState {
         addressOf: { hierarchyClient.addressOf($0) },
         resolvePane: { [weak hierarchy] reference in
           guard let hierarchy else { return nil }
-          return Self.resolvePaneReference(reference, catalog: hierarchy.catalog, handles: handleRegistry)
+          return Self.resolveContentReference(reference, catalog: hierarchy.catalog, handles: handleRegistry)
         },
-        agentKind: { [weak self, weak hierarchy] paneID in
-          self?.agentStateStore?.entries[paneID]?.kind ?? hierarchy?.catalog.pane(paneID)?.agentKind
+        agentKind: { [weak self, weak hierarchy] contentID in
+          self?.agentStateStore?.entries[contentID]?.kind ?? hierarchy?.catalog.content(contentID)?.terminal?.agentKind
         },
-        runID: { registry.runID(forPane: $0) },
+        runID: { registry.runID(forContent: $0) },
         cliCommand: Self.cliInvocation()
       ))
   }
@@ -1458,14 +1479,10 @@ final class AppState {
       paneHandles: { [weak hierarchy] in
         guard let hierarchy else { return [:] }
         handleRegistry.sync(with: hierarchy.catalog)
-        var handles: [PaneID: Int] = [:]
-        for (raw, handle) in handleRegistry.snapshot().panes {
-          if let uuid = UUID(uuidString: raw) { handles[PaneID(raw: uuid)] = handle }
-        }
-        return handles
+        return Self.contentHandles(in: hierarchy.catalog, registry: handleRegistry)
       },
-      agentKind: { [weak self, weak hierarchy] paneID in
-        self?.agentStateStore?.entries[paneID]?.kind ?? hierarchy?.catalog.pane(paneID)?.agentKind
+      agentKind: { [weak self, weak hierarchy] contentID in
+        self?.agentStateStore?.entries[contentID]?.kind ?? hierarchy?.catalog.content(contentID)?.terminal?.agentKind
       }
     )
   }
@@ -1495,48 +1512,61 @@ final class AppState {
       addressOf: { hierarchyClient.addressOf($0) },
       callerPaneResolver: { [weak terminalEngine] callerPID in
         guard let runtime = terminalEngine?.ghosttyRuntime else { return nil }
-        var paneByShellPID: [pid_t: PaneID] = [:]
+        var paneByShellPID: [pid_t: ContentID] = [:]
         for surface in runtime.allLiveSurfaces() {
           guard let shellPID = surface.childProcessID() else { continue }
-          paneByShellPID[shellPID] = surface.paneID
+          paneByShellPID[shellPID] = surface.contentID
         }
         return CallerPaneResolver.resolve(callerPID: callerPID, paneByShellPID: paneByShellPID)
       },
       paneHandles: { [weak hierarchy] in
         guard let hierarchy else { return [:] }
         handleRegistry.sync(with: hierarchy.catalog)
-        var handles: [PaneID: Int] = [:]
-        for (raw, handle) in handleRegistry.snapshot().panes {
-          if let uuid = UUID(uuidString: raw) { handles[PaneID(raw: uuid)] = handle }
-        }
-        return handles
+        return Self.contentHandles(in: hierarchy.catalog, registry: handleRegistry)
       }
     )
   }
 
-  /// `p<n>`, a pane UUID, or `@label` → pane, for `--role r=<pane>`.
-  static func resolvePaneReference(
+  /// `t<n>`, `p<n>` (its selected Tab), a Content / Tab / Pane UUID, or
+  /// `@label` → the session, for `--role r=<id>`.
+  static func resolveContentReference(
     _ reference: String, catalog: Catalog, handles: TargetHandleRegistry
-  ) -> PaneID? {
+  ) -> ContentID? {
     if let uuid = UUID(uuidString: reference) {
-      let paneID = PaneID(raw: uuid)
-      return catalog.pane(paneID) != nil ? paneID : nil
+      if catalog.content(ContentID(raw: uuid)) != nil { return ContentID(raw: uuid) }
+      if let tab = catalog.tab(TabID(raw: uuid)) { return tab.contentID }
+      return catalog.pane(PaneID(raw: uuid))?.selectedTab?.contentID
+    }
+    if let handle = TargetHandleRegistry.parse(reference, prefix: "t") {
+      handles.sync(with: catalog)
+      return handles.tab(forHandle: handle).flatMap { catalog.tab($0)?.contentID }
     }
     if let handle = TargetHandleRegistry.parse(reference, prefix: "p") {
       handles.sync(with: catalog)
-      return handles.pane(forHandle: handle)
+      return handles.pane(forHandle: handle).flatMap { catalog.pane($0)?.selectedTab?.contentID }
     }
     guard reference.hasPrefix("@") else { return nil }
     let label = String(reference.dropFirst())
-    var matches: [PaneID] = []
+    var matches: [ContentID] = []
     for project in catalog.projects {
       for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          matches += tab.panes.filter { $0.labels.contains(label) }.map(\.id)
+        for tab in worktree.allTabs where tab.content.terminal?.labels.contains(label) == true {
+          matches.append(tab.contentID)
         }
       }
     }
     return matches.count == 1 ? matches[0] : nil
+  }
+
+  /// The CLI's `t<n>` handles keyed by the session each Tab holds.
+  static func contentHandles(in catalog: Catalog, registry: TargetHandleRegistry) -> [ContentID: Int] {
+    registry.sync(with: catalog)
+    var handles: [ContentID: Int] = [:]
+    for (raw, handle) in registry.snapshot().tabs {
+      guard let uuid = UUID(uuidString: raw), let tab = catalog.tab(TabID(raw: uuid)) else { continue }
+      handles[tab.contentID] = handle
+    }
+    return handles
   }
 
   /// Handoff transition core wired to the live runtime: pane → source
@@ -1553,22 +1583,22 @@ final class AppState {
     HandoffHandlers(
       settings: settingsStore,
       registry: handoffRegistry,
-      resolveSource: { [weak hierarchy, weak self] paneID in
+      resolveSource: { [weak hierarchy, weak self] contentID in
         guard let manager = hierarchy else { return nil }
         return Self.handoffSource(
-          for: paneID, manager: manager, agentState: self?.agentStateStore)
+          for: contentID, manager: manager, agentState: self?.agentStateStore)
       },
-      readScreen: { [weak engine] paneID in
-        engine?.ghosttyRuntime?.surface(for: paneID)?.readText(.viewport)
+      readScreen: { [weak engine] contentID in
+        engine?.ghosttyRuntime?.surface(for: contentID)?.readText(.viewport)
       },
       collectRepoState: { root in
         await Self.handoffRepoState(at: root, git: gitClient)
       },
       launch: { spec in try await hierarchyClient.launchAgent(spec) },
-      typeKickoff: { [weak self, weak engine] paneID, kind, prompt in
+      typeKickoff: { [weak self, weak engine] contentID, kind, prompt in
         guard let engine, let agentState = self?.agentStateStore else { return false }
         return await Self.typeKickoffOnceAgentIsUp(
-          paneID: paneID, kind: kind, prompt: prompt, agentState: agentState, engine: engine)
+          contentID: contentID, kind: kind, prompt: prompt, agentState: agentState, engine: engine)
       },
       cli: Self.cliInvocation()
     )
@@ -1588,7 +1618,7 @@ final class AppState {
   /// OpenCode folds a typed burst into a "[Pasted ~N lines]" chip, which counts
   /// as "on screen".
   static func typeKickoffOnceAgentIsUp(
-    paneID: PaneID,
+    contentID: ContentID,
     kind: AgentKind,
     prompt: String,
     agentState: AgentStateStore,
@@ -1598,16 +1628,16 @@ final class AppState {
   ) async -> Bool {
     let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "handoff")
     let deadline = ContinuousClock.now + timeout
-    while agentState.entries[paneID]?.kind != kind {
+    while agentState.entries[contentID]?.kind != kind {
       guard ContinuousClock.now < deadline else {
         logger.error(
-          "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public)")
+          "kickoff: \(kind.rawValue, privacy: .public) never appeared in pane \(contentID.description, privacy: .public)")
         return false
       }
       try? await Task.sleep(for: .milliseconds(250))
     }
-    guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else {
-      logger.error("kickoff: pane \(paneID.description, privacy: .public) has no surface to type into")
+    guard let surface = engine.ghosttyRuntime?.surface(for: contentID) else {
+      logger.error("kickoff: pane \(contentID.description, privacy: .public) has no surface to type into")
       return false
     }
     // Ready = the screen held still for `settle` (at least one full read
@@ -1642,7 +1672,7 @@ final class AppState {
       }
     }
     logger.error(
-      "kickoff: typed into pane \(paneID.description, privacy: .public) but the text never showed on screen; not submitted"
+      "kickoff: typed into pane \(contentID.description, privacy: .public) but the text never showed on screen; not submitted"
     )
     return false
   }
@@ -1652,26 +1682,27 @@ final class AppState {
   /// now) and falls back to the persisted pane binding, so a pane restored
   /// after relaunch still names its agent.
   static func handoffSource(
-    for paneID: PaneID,
+    for contentID: ContentID,
     manager: HierarchyManager,
     agentState: AgentStateStore?
   ) -> HandoffSource? {
-    guard let (projectID, worktreeID, tabID) = manager.addressOf(paneID: paneID),
-      let project = manager.catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let tab = worktree.tabs.first(where: { $0.id == tabID })
+    guard let address = manager.catalog.address(forContent: contentID),
+      let project = manager.catalog.projects.first(where: { $0.id == address.projectID }),
+      let worktree = project.worktrees.first(where: { $0.id == address.worktreeID }),
+      let tab = worktree.tab(address.tabID)
     else { return nil }
-    let pane = tab.panes.first { $0.id == paneID }
-    let entry = agentState?.entries[paneID]
+    let terminal = tab.content.terminal
+    let entry = agentState?.entries[contentID]
     return HandoffSource(
-      paneID: paneID,
-      projectID: projectID,
-      worktreeID: worktreeID,
-      tabID: tabID,
+      contentID: contentID,
+      projectID: address.projectID,
+      worktreeID: address.worktreeID,
+      paneID: address.paneID,
+      tabID: address.tabID,
       worktreePath: worktree.path,
       isRemote: project.isRemote,
-      agentKind: entry?.kind ?? pane?.agentKind,
-      sessionID: entry?.sessionID ?? pane?.agentSessionID,
+      agentKind: entry?.kind ?? terminal?.agentKind,
+      sessionID: entry?.sessionID ?? terminal?.agentSessionID,
       paneTitle: tab.cachedDisplayTitle ?? tab.name
     )
   }
@@ -1713,7 +1744,7 @@ final class AppState {
   ///
   /// Also drives the launch-time reaper: every catalog row whose daemon
   /// socket still answers `connect(2)` is seeded into the engine so the
-  /// next `ensureSurface` for that paneID reattaches instead of spawning
+  /// next `ensureSurface` for that contentID reattaches instead of spawning
   /// a fresh daemon. Dead rows are pruned from the catalog as part of
   /// the sweep.
   private func bootstrapSessionStack(
@@ -1783,21 +1814,30 @@ final class AppState {
     // the sweep probes and bring-up attaches (see
     // `AppDirectories.runtimeDirectory`).
     reaper.migrateLegacySocketDirectory(from: PaneDaemonBringup.legacySocketDirectory())
-    let livePaneIDs = hierarchyManager.catalog.allPaneIDs()
+    let liveContentIDs = hierarchyManager.catalog.allContentIDs()
+    // A catalog that loaded with losses or read-only keeps every daemon: a
+    // dropped Tab's session would otherwise be reaped as an orphan, and a
+    // file this build cannot write must not have its sessions touched.
+    guard catalogStore.loadReport.allowsSessionSweeps else {
+      Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session.reaper")
+        .notice("session sweeps skipped: catalog loaded read-only or with losses")
+      profiler.mark("session sweep")
+      return
+    }
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any
-      // alive daemon whose paneID no longer maps to a surface — without
+      // alive daemon whose contentID no longer maps to a surface — without
       // this, an out-of-sync sessions.json vs hierarchy.json would leak
       // daemons until the 7-day stale window catches them.
       //
       // The sweep's `.snapshot(url)` states name panes whose daemon is
-      // gone but a quit-time `<paneID>.snap` survives on disk. Thread
+      // gone but a quit-time `<contentID>.snap` survives on disk. Thread
       // those into the engine BEFORE bring-up so the next `ensureSurface`
-      // for each paneID spawns `zmx attach … --restore-from <url>` exactly
+      // for each contentID spawns `zmx attach … --restore-from <url>` exactly
       // once. `.alive`/`.dead` states are not restores and are ignored
       // here — restore is driven purely by snapshot presence, never by the
       // current on-quit resume setting.
-      let states = try reaper.sweep(livePaneIDs: livePaneIDs)
+      let states = try reaper.sweep(liveContentIDs: liveContentIDs)
       engine.pendingRestores = Self.derivePendingRestores(from: states)
       // The sweep already probed every session socket; reuse its verdict so
       // the agent-state seed doesn't re-`connect(2)` the same panes a second
@@ -1828,11 +1868,11 @@ final class AppState {
     // `pendingRestores` (only `sweep` above does), so it has no bearing on
     // the first frame or on session restore. Running it in a follow-up task
     // keeps its filesystem + socket work from stalling the launch while
-    // still reaping orphans moments later. `livePaneIDs` is captured by
+    // still reaping orphans moments later. `liveContentIDs` is captured by
     // value — the pruned set from this sweep is exactly what the orphan pass
     // needs.
     Task { @MainActor in
-      reaper.sweepFilesystemOrphans(livePaneIDs: livePaneIDs)
+      reaper.sweepFilesystemOrphans(liveContentIDs: liveContentIDs)
     }
   }
 
@@ -1903,27 +1943,21 @@ final class AppState {
     sessionCoordinator?.flushPending()
   }
 
-  /// Project the live `Catalog` plus `lastFocusedPane` lookup into a
-  /// `FocusState` for `RollupIndex.compute`. Reads:
+  /// Project the live `Catalog` into a `FocusState` for
+  /// `RollupIndex.compute`. Reads:
   /// - active project = `selectedProjectID`
   /// - active worktree = the active project's `selectedWorktreeID`
-  /// - active tab = the active worktree's `selectedTabID`
-  /// - focused pane = `lastFocusedPane(activeTabID)`
+  /// - visible contents = the selected Tab of every Pane of that worktree
   /// - expanded projects = `Project.isExpanded` filtered to true
   /// - row worktrees = each Project's `rowWorktree`, visible even collapsed
-  static func focusState(
-    from catalog: Catalog,
-    lastFocusedPane: @MainActor (TabID) -> PaneID?
-  ) -> RollupFocusState {
+  static func focusState(from catalog: Catalog) -> RollupFocusState {
     let activeProject = catalog.projects.first(where: { $0.id == catalog.selectedProjectID })
     let activeWorktree = activeProject?.worktrees.first(where: { $0.id == activeProject?.selectedWorktreeID })
-    let activeTab = activeWorktree?.tabs.first(where: { $0.id == activeWorktree?.selectedTabID })
-    let focusedPane = activeTab.map { lastFocusedPane($0.id) } ?? nil
+    let visible = Set(activeWorktree?.panes.compactMap { $0.selectedTab?.contentID } ?? [])
     let expanded = Set(catalog.projects.filter(\.isExpanded).map(\.id))
 
     return RollupFocusState(
-      focusedPaneID: focusedPane,
-      activeTabID: activeTab?.id,
+      visibleContentIDs: visible,
       activeWorktreeID: activeWorktree?.id,
       activeProjectID: activeProject?.id,
       expandedProjectIDs: expanded,
@@ -1940,12 +1974,11 @@ final class AppState {
   @MainActor
   private static func observeFocusedPaneForRead(
     catalog: @escaping @MainActor () -> Catalog,
-    lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
     store: NotificationStore
   ) async {
     while !Task.isCancelled {
-      if let paneID = currentlyFocusedPane(catalog: catalog(), lastFocusedPane: lastFocusedPane) {
-        store.markReadForPane(paneID)
+      if let contentID = currentlyFocusedContent(catalog: catalog()) {
+        store.markReadForPane(contentID)
       }
       let stream = AsyncStream<Void> { continuation in
         withObservationTracking {
@@ -1956,19 +1989,11 @@ final class AppState {
           for project in snap.projects {
             _ = project.selectedWorktreeID
             for worktree in project.worktrees {
-              _ = worktree.selectedTabID
+              _ = worktree.focusedPaneID
+              for pane in worktree.panes {
+                _ = pane.selectedTabID
+              }
             }
-          }
-          // lastFocusedPane is read off HierarchyManager, which is
-          // @Observable upstream — touching the resolved id here keeps
-          // its observation registered alongside the catalog reads.
-          if let activeProjectID = snap.selectedProjectID,
-            let project = snap.projects.first(where: { $0.id == activeProjectID }),
-            let worktreeID = project.selectedWorktreeID,
-            let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-            let tabID = worktree.selectedTabID
-          {
-            _ = lastFocusedPane(tabID)
           }
         } onChange: {
           Task { @MainActor [continuation] in
@@ -1991,17 +2016,13 @@ final class AppState {
   /// frontmost state, and we want a worktree-switch to clear unreads on
   /// the newly-focused pane even if the user did it via a global hotkey
   /// while another app held foreground.
-  static func currentlyFocusedPane(
-    catalog: Catalog,
-    lastFocusedPane: @MainActor (TabID) -> PaneID?
-  ) -> PaneID? {
+  static func currentlyFocusedContent(catalog: Catalog) -> ContentID? {
     guard let activeProjectID = catalog.displayedSelectedProjectID,
       let project = catalog.projects.first(where: { $0.id == activeProjectID }),
       let worktreeID = project.selectedWorktreeID,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let tabID = worktree.selectedTabID
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return nil }
-    return lastFocusedPane(tabID)
+    return worktree.focusedPane?.selectedTab?.contentID
   }
 
   /// Long-running sweep: marks unread entries pointing at panes that no
@@ -2014,7 +2035,7 @@ final class AppState {
   /// Observation tracker on every pane / tab / worktree / project field
   /// whose mutation could remove a pane id.
   ///
-  /// Keyed on `visiblePaneIDs()`, not `allPaneIDs()`, so an archived
+  /// Keyed on `visibleContentIDs()`, not `allContentIDs()`, so an archived
   /// Worktree's panes count as gone — the same choice the AgentState
   /// reconcile makes. Archive is soft-hide: the Panes stay in the catalog,
   /// so an unread entry from one used to survive here and keep the
@@ -2027,18 +2048,16 @@ final class AppState {
     store: NotificationStore
   ) async {
     while !Task.isCancelled {
-      store.sweepOrphanUnreads(livePaneIDs: catalog().visiblePaneIDs())
+      store.sweepOrphanUnreads(liveContentIDs: catalog().visibleContentIDs())
       let stream = AsyncStream<Void> { continuation in
         withObservationTracking {
           let snap = catalog()
-          // Touch every level whose mutation can remove a pane id from
+          // Touch every level whose mutation can remove a session from
           // the catalog so any close / remove path fires onChange.
           for project in snap.projects {
             for worktree in project.worktrees {
-              for tab in worktree.tabs {
-                for pane in tab.panes {
-                  _ = pane.id
-                }
+              for tab in worktree.allTabs {
+                _ = tab.content.id
               }
             }
           }
@@ -2057,14 +2076,14 @@ final class AppState {
 
   /// Reduce a launch-time sweep's per-pane state map to the restore queue
   /// the engine consumes during bring-up. Only `.snapshot(url)` states
-  /// represent a pane to restore (a `<paneID>.snap` survives on disk with
+  /// represent a pane to restore (a `<contentID>.snap` survives on disk with
   /// no live daemon); `.alive`/`.dead` states are not restores and are
   /// dropped. `internal` (not `private`) so `@testable` tests can exercise
   /// the derivation directly. See `bootstrapSessionStack`.
   static func derivePendingRestores(
-    from states: [PaneID: SessionState]
-  ) -> [PaneID: URL] {
-    states.reduce(into: [PaneID: URL]()) { result, entry in
+    from states: [ContentID: SessionState]
+  ) -> [ContentID: URL] {
+    states.reduce(into: [ContentID: URL]()) { result, entry in
       if case .snapshot(let url) = entry.value {
         result[entry.key] = url
       }
@@ -2205,15 +2224,12 @@ final class AppState {
     let registry = AgentStateStore(
       focusedPane: { [weak manager] in
         guard let manager else { return nil }
-        return Self.currentlyFocusedPane(
-          catalog: manager.catalog,
-          lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }
-        )
+        return Self.currentlyFocusedContent(catalog: manager.catalog)
       },
-      isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true }
+      isPaneInView: { [weak engine] contentID in engine?.isSurfaceFocused(contentID) == true }
     )
     self.agentStateStore = registry
-    engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
+    engine.onSurfaceFocused = { [weak registry] contentID in registry?.markObserved(contentID) }
     // Pre-seed the registry from the last quit's agent snapshot so a
     // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on
@@ -2230,7 +2246,7 @@ final class AppState {
     // an em-dash ghost row. The drain loop only reconciles on the next
     // structural mutation, which may never come in a quiet session — sweep
     // the seed against the catalog immediately.
-    registry.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
+    registry.reconcileMembership(liveContentIDs: manager.catalog.visibleContentIDs())
     // Agent bindings are runtime-only: HierarchyManager.clearAgentBindings
     // wipes `Pane.agentKind` / `Pane.agentSessionID` at launch so a dead
     // pty child from the previous session can't haunt the panel. The
@@ -2239,19 +2255,19 @@ final class AppState {
     // initial state until the next event lands.
     let binder = AgentBinder(
       client: hierarchy,
-      currentAgentKind: { [weak manager] paneID in
-        manager?.catalog.pane(paneID)?.agentKind
+      currentAgentKind: { [weak manager] contentID in
+        manager?.catalog.content(contentID)?.terminal?.agentKind
       },
-      agentBoundHandler: { [weak registry] paneID, kind, sessionID, assumeUserInputSeen in
+      agentBoundHandler: { [weak registry] contentID, kind, sessionID, assumeUserInputSeen in
         registry?.onAgentBound(
-          paneID,
+          contentID,
           kind: kind,
           sessionID: sessionID,
           assumeUserInputSeen: assumeUserInputSeen
         )
       },
-      agentUnboundHandler: { [weak registry] paneID in
-        registry?.onAgentUnbound(paneID)
+      agentUnboundHandler: { [weak registry] contentID in
+        registry?.onAgentUnbound(contentID)
       }
     )
     self.agentBinder = binder
@@ -2259,8 +2275,8 @@ final class AppState {
     // `snapshot()` per-event; the new `onActivity` callback fires on
     // every recorded keystroke so the registry can clear waiting-for-
     // input promptly. Both consumers stay decoupled from each other.
-    keystrokeTracker.onActivity = { [weak registry] paneID in
-      registry?.onPaneKeyboardActivity(paneID)
+    keystrokeTracker.onActivity = { [weak registry] contentID in
+      registry?.onPaneKeyboardActivity(contentID)
     }
     let detectorEvents = engine.events()
     self.notificationDetectorTask = Task { @MainActor in
@@ -2270,7 +2286,7 @@ final class AppState {
           // Same backstop, same reason as the binder and registry below —
           // the detector's caches are cleared only by `.paneExited` and its
           // siblings, which the suspend-based teardown paths never emit.
-          detector.reconcileMembership(livePaneIDs: manager.catalog.visiblePaneIDs())
+          detector.reconcileMembership(liveContentIDs: manager.catalog.visibleContentIDs())
         }
         Self.dispatchToAgentBinder(
           event: event,
@@ -2290,7 +2306,6 @@ final class AppState {
     self.agentStateFocusTask = Task { @MainActor in
       await Self.observeFocusedPaneForRegistry(
         catalog: { manager.catalog },
-        lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
         registry: registry
       )
     }
@@ -2307,28 +2322,28 @@ final class AppState {
     guard commandQueueRunner == nil else { return }
     // A pane mid-turn or holding queued commands must keep its surface: the
     // idle-surface reclaim would otherwise detach it while work is pending.
-    engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] paneID in
-      registry?.entries[paneID]?.state.isMidTask == true
-        || manager?.catalog.pane(paneID)?.commandQueue.isEmpty == false
+    engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] contentID in
+      registry?.entries[contentID]?.state.isMidTask == true
+        || manager?.catalog.content(contentID)?.terminal?.commandQueue.isEmpty == false
     }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
-    // aimed at an agent pane needs its Return as a separate keypress.
-    let terminal = TerminalClient.live(engine: engine)
+    // aimed at an agent session needs its Return as a separate keypress.
+    let terminal = TerminalClient.live(engine: engine, contents: contentRuntime)
     let runner = CommandQueueRunner(
-      queuedPanes: { [weak manager] in manager?.panesWithQueuedCommands() ?? [] },
-      setQueue: { [weak manager] paneID, queue in
-        manager?.setCommandQueue(queue, for: paneID)
+      queuedPanes: { [weak manager] in manager?.contentsWithQueuedCommands() ?? [] },
+      setQueue: { [weak manager] contentID, queue in
+        manager?.setCommandQueue(queue, for: contentID)
       },
-      isPaneReady: { [weak manager, weak registry = self.agentStateStore] paneID in
+      isPaneReady: { [weak contents = contentRuntime, weak registry = self.agentStateStore] contentID in
         CommandQueueRunner.isReady(
-          agentState: registry?.entries[paneID]?.state,
-          terminalBusy: manager?.paneIsBusy(paneID) ?? false
+          agentState: registry?.entries[contentID]?.state,
+          terminalBusy: contents?.isTerminalBusy(contentID) ?? false
         )
       },
-      hasLiveSurface: { [weak engine] paneID in
-        engine?.ghosttyRuntime?.surface(for: paneID) != nil
+      hasLiveSurface: { [weak engine] contentID in
+        engine?.surface(for: contentID) != nil
       },
-      send: { paneID, text in terminal.sendCommand(paneID, text) }
+      send: { contentID, text in terminal.sendCommand(contentID, text) }
     )
     self.commandQueueRunner = runner
     runner.start()
@@ -2343,7 +2358,7 @@ final class AppState {
   /// Panes in the catalog — both leave a bound entry that resolves to nothing
   /// (or to a hidden worktree) and renders an em-dash ghost row (and is
   /// re-persisted / re-seeded across launches). Reconciling against
-  /// `visiblePaneIDs()` — not `allPaneIDs()` — is what retires an archived
+  /// `visibleContentIDs()` — not `allContentIDs()` — is what retires an archived
   /// worktree's agent rows, since archived panes still live in the catalog.
   /// `selection` and `tags` scopes never change pane membership, so they skip
   /// the catalog walk to keep the hot selection path cheap.
@@ -2355,7 +2370,7 @@ final class AppState {
   ) {
     registry.onTerminalEvent(event)
     if case .hierarchyMutated(let scope) = event, scope != .selection, scope != .tags {
-      registry.reconcileMembership(livePaneIDs: catalog().visiblePaneIDs())
+      registry.reconcileMembership(liveContentIDs: catalog().visibleContentIDs())
     }
   }
 
@@ -2378,7 +2393,7 @@ final class AppState {
   private static func seedRestoredAgents(
     coordinator: SessionCoordinator?,
     registry: AgentStateStore,
-    knownLiveness: [PaneID: Bool] = [:]
+    knownLiveness: [ContentID: Bool] = [:]
   ) {
     guard let coordinator else { return }
     let restored = coordinator.restoredAgents
@@ -2386,7 +2401,7 @@ final class AppState {
     let seeds = selectAgentSeeds(
       restored: restored,
       knownLiveness: knownLiveness,
-      isDaemonAlive: { SessionReaper.isDaemonAlive(paneID: $0) }
+      isDaemonAlive: { SessionReaper.isDaemonAlive(contentID: $0) }
     )
     registry.seedRestored(seeds)
   }
@@ -2397,7 +2412,7 @@ final class AppState {
   /// and `.snapshot` panes have no running daemon (they cold-restore from a
   /// `.snap` on next attach), so an agent badge must not be seeded for
   /// either — matching a direct `isDaemonAlive` probe of the same socket.
-  static func deriveLiveness(from states: [PaneID: SessionState]) -> [PaneID: Bool] {
+  static func deriveLiveness(from states: [ContentID: SessionState]) -> [ContentID: Bool] {
     states.mapValues { state in
       if case .alive = state { return true }
       return false
@@ -2409,23 +2424,23 @@ final class AppState {
   /// Keeps a restored record only when its daemon answers `isDaemonAlive`
   /// and both enum raws still decode in this build.
   static func selectAgentSeeds(
-    restored: [PaneID: PersistedAgentRecord],
-    knownLiveness: [PaneID: Bool] = [:],
-    isDaemonAlive: (PaneID) -> Bool
-  ) -> [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] {
-    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
+    restored: [ContentID: PersistedAgentRecord],
+    knownLiveness: [ContentID: Bool] = [:],
+    isDaemonAlive: (ContentID) -> Bool
+  ) -> [(contentID: ContentID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] {
+    var seeds: [(contentID: ContentID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
     seeds.reserveCapacity(restored.count)
-    for (paneID, record) in restored {
+    for (contentID, record) in restored {
       // Reuse the launch sweep's verdict when it covered this pane; only
       // probe the socket directly for panes the sweep never saw (empty
       // `knownLiveness` on the keepRunning / no-resume paths).
-      let alive = knownLiveness[paneID] ?? isDaemonAlive(paneID)
+      let alive = knownLiveness[contentID] ?? isDaemonAlive(contentID)
       guard alive else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
         let state = AgentStateStore.AgentRuntimeState(persistedRaw: record.stateRaw)
       else { continue }
-      seeds.append((paneID: paneID, kind: kind, state: state))
+      seeds.append((contentID: contentID, kind: kind, state: state))
     }
     return seeds
   }
@@ -2439,12 +2454,11 @@ final class AppState {
   @MainActor
   private static func observeFocusedPaneForRegistry(
     catalog: @escaping @MainActor () -> Catalog,
-    lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
     registry: AgentStateStore
   ) async {
-    var last: PaneID?
+    var last: ContentID?
     while !Task.isCancelled {
-      let current = currentlyFocusedPane(catalog: catalog(), lastFocusedPane: lastFocusedPane)
+      let current = currentlyFocusedContent(catalog: catalog())
       if current != last, let current {
         registry.onPaneFocused(current)
       }
@@ -2456,16 +2470,11 @@ final class AppState {
           for project in snap.projects {
             _ = project.selectedWorktreeID
             for worktree in project.worktrees {
-              _ = worktree.selectedTabID
+              _ = worktree.focusedPaneID
+              for pane in worktree.panes {
+                _ = pane.selectedTabID
+              }
             }
-          }
-          if let activeProjectID = snap.selectedProjectID,
-            let project = snap.projects.first(where: { $0.id == activeProjectID }),
-            let worktreeID = project.selectedWorktreeID,
-            let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-            let tabID = worktree.selectedTabID
-          {
-            _ = lastFocusedPane(tabID)
           }
         } onChange: {
           Task { @MainActor [continuation] in
@@ -2491,61 +2500,74 @@ final class AppState {
     catalog: @MainActor () -> Catalog
   ) {
     switch event {
-    case .foregroundJobChanged(let paneID, let job):
-      binder.consider(paneID: paneID, trigger: .foregroundJobChanged(job))
-    case .paneExited(let paneID, _, _),
-      .paneCrashed(let paneID, _),
-      .paneClosedByTab(let paneID, _):
-      binder.unbind(paneID)
+    case .foregroundJobChanged(let contentID, let job):
+      binder.consider(contentID: contentID, trigger: .foregroundJobChanged(job))
+    case .paneExited(let contentID, _, _),
+      .paneCrashed(let contentID, _),
+      .paneClosedByTab(let contentID, _):
+      binder.unbind(contentID)
     case .hierarchyMutated(let scope) where scope != .selection && scope != .tags:
       // Same reconcile the AgentState registry runs, for the same reason —
-      // see `AgentBinder.reconcileMembership`. Keyed on `visiblePaneIDs()`
+      // see `AgentBinder.reconcileMembership`. Keyed on `visibleContentIDs()`
       // so an archived worktree's panes count as gone: that is what lets a
       // later unarchive re-materialize the binding.
-      binder.reconcileMembership(livePaneIDs: catalog().visiblePaneIDs())
+      binder.reconcileMembership(liveContentIDs: catalog().visibleContentIDs())
     default:
       break
     }
   }
 }
 
-/// Adapter: lets `HierarchyManager` call back into the engine for
-/// lazy surface creation / teardown. `engine` is attached after the
-/// manager is constructed to break the circular dependency.
+/// Adapter: lets `HierarchyManager` drive live Content through the
+/// content registry (instances, chrome) and the engine (surfaces,
+/// daemons). Both are attached after the manager is constructed to break
+/// the circular dependency.
 @MainActor
-final class GhosttyBackedHierarchyRuntime: HierarchyRuntime {
+final class LiveHierarchyRuntime: HierarchyRuntime {
   private weak var engine: TerminalEngine?
+  private weak var contents: ContentRuntime?
 
-  func attach(engine: TerminalEngine) {
+  func attach(engine: TerminalEngine, contents: ContentRuntime) {
     self.engine = engine
+    self.contents = contents
   }
 
-  func ensureSurface(for pane: Pane, in worktree: Worktree, env: [String: String]) async throws {
-    _ = try await engine?.ensureSurface(for: pane, in: worktree, env: env)
+  func ensureSurface(
+    for content: ContentSnapshot, at address: TabAddress, in worktree: Worktree, env: [String: String]
+  ) async throws {
+    if let contents {
+      _ = try await contents.ensure(content, in: address, worktree: worktree, env: env)
+    } else {
+      _ = try await engine?.ensureSurface(for: content, at: address, in: worktree, env: env)
+    }
   }
 
-  func closeSurface(for paneID: PaneID) {
-    engine?.closeSurface(for: paneID)
+  /// The registry drops the instance; the engine kills the daemon even
+  /// when no instance was ever created this launch (surfaces are lazy).
+  func closeSurface(for contentID: ContentID) {
+    contents?.release(contentID)
+    engine?.closeSurface(for: contentID)
   }
 
-  func suspendSurface(for paneID: PaneID) {
-    engine?.suspendSurface(for: paneID)
+  func suspendSurface(for contentID: ContentID) {
+    contents?.release(contentID)
+    engine?.suspendSurface(for: contentID)
   }
 
   func announceHierarchyMutated() {
     engine?.emit(.hierarchyMutated(.catalog))
   }
 
-  func hasSurface(for paneID: PaneID) -> Bool {
-    engine?.hasSurface(for: paneID) ?? false
+  func hasSurface(for contentID: ContentID) -> Bool {
+    engine?.hasSurface(for: contentID) ?? false
   }
 
-  func currentWorkingDirectory(for paneID: PaneID) -> String? {
-    engine?.currentWorkingDirectory(for: paneID)
+  func currentWorkingDirectory(for contentID: ContentID) -> String? {
+    engine?.currentWorkingDirectory(for: contentID)
   }
 
-  func focusSurfaceView(for paneID: PaneID) {
-    engine?.focusSurfaceView(for: paneID)
+  func focusSurfaceView(for contentID: ContentID) {
+    engine?.focusSurfaceView(for: contentID)
   }
 }
 
@@ -2556,51 +2578,51 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
   /// first" sort can bump `Project.lastActiveAt` on the pane's host
   /// project. Optional so previews / tests without a hierarchy manager
   /// wired can drop it.
-  private let onPaneInput: (@MainActor (PaneID) -> Void)?
+  private let onPaneInput: (@MainActor (ContentID) -> Void)?
 
-  init(engine: TerminalEngine, onPaneInput: (@MainActor (PaneID) -> Void)? = nil) {
+  init(engine: TerminalEngine, onPaneInput: (@MainActor (ContentID) -> Void)? = nil) {
     self.engine = engine
     self.onPaneInput = onPaneInput
   }
 
-  func sendInput(paneID: PaneID, text: String) -> Bool {
-    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
+  func sendInput(contentID: ContentID, text: String) -> Bool {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: contentID) else { return false }
     surface.sendInput(text)
     // Empty-string writes (focus probes, etc.) shouldn't count as
     // user activity for the sidebar's "active first" sort.
     if !text.isEmpty {
-      onPaneInput?(paneID)
+      onPaneInput?(contentID)
     }
     return true
   }
 
-  func sendKey(paneID: PaneID, key: IPC.TerminalNamedKey) -> Bool {
-    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
+  func sendKey(contentID: ContentID, key: IPC.TerminalNamedKey) -> Bool {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: contentID) else { return false }
     surface.sendNamedKey(key)
-    onPaneInput?(paneID)
+    onPaneInput?(contentID)
     return true
   }
 
-  func sendRawBytes(paneID: PaneID, bytes: [UInt8]) -> Bool {
-    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
+  func sendRawBytes(contentID: ContentID, bytes: [UInt8]) -> Bool {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: contentID) else { return false }
     surface.sendRawBytes(bytes)
     if !bytes.isEmpty {
-      onPaneInput?(paneID)
+      onPaneInput?(contentID)
     }
     return true
   }
 
   func fanOut(scope: IPC.BroadcastScope, text: String, catalog: Catalog) -> Int {
-    paneIDs(matching: scope, in: catalog)
-      .reduce(into: 0) { count, paneID in
-        if sendInput(paneID: paneID, text: text) {
+    contentIDs(matching: scope, in: catalog)
+      .reduce(into: 0) { count, contentID in
+        if sendInput(contentID: contentID, text: text) {
           count += 1
         }
       }
   }
 
-  func readText(paneID: PaneID, extent: TerminalHandlers.ReadExtent) -> String? {
-    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return nil }
+  func readText(contentID: ContentID, extent: TerminalHandlers.ReadExtent) -> String? {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: contentID) else { return nil }
     switch extent {
     case .viewport:
       return surface.readText(.viewport)
@@ -2611,32 +2633,29 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
     }
   }
 
-  func resetPane(paneID: PaneID) -> Bool {
-    guard let surface = engine?.ghosttyRuntime?.surface(for: paneID) else { return false }
+  func resetPane(contentID: ContentID) -> Bool {
+    guard let surface = engine?.ghosttyRuntime?.surface(for: contentID) else { return false }
     surface.resetTerminal()
     return true
   }
 
-  private func paneIDs(matching scope: IPC.BroadcastScope, in catalog: Catalog) -> [PaneID] {
+  private func contentIDs(matching scope: IPC.BroadcastScope, in catalog: Catalog) -> [ContentID] {
     switch scope.kind {
     case .tab:
-      guard let id = UUID(uuidString: scope.target).map(TabID.init(raw:)) else { return [] }
-      return catalog.projects
-        .flatMap(\.worktrees)
-        .flatMap(\.tabs)
-        .first(where: { $0.id == id })?
-        .panes
-        .map(\.id) ?? []
+      // A Tab id names its one session; a Pane id fans out to every Tab of
+      // the Pane.
+      guard let uuid = UUID(uuidString: scope.target) else { return [] }
+      if let tab = catalog.tab(TabID(raw: uuid)) { return [tab.contentID] }
+      return catalog.pane(PaneID(raw: uuid))?.contentIDs ?? []
     case .worktree:
       guard let id = UUID(uuidString: scope.target).map(WorktreeID.init(raw:)) else { return [] }
-      return Array(catalog.paneIDs(inWorktree: id))
+      return Array(catalog.contentIDs(inWorktree: id))
     case .label:
       return catalog.projects
         .flatMap(\.worktrees)
-        .flatMap(\.tabs)
-        .flatMap(\.panes)
-        .filter { $0.labels.contains(scope.target) }
-        .map(\.id)
+        .flatMap(\.allTabs)
+        .filter { $0.content.terminal?.labels.contains(scope.target) == true }
+        .map(\.contentID)
     }
   }
 }

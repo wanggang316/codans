@@ -572,7 +572,7 @@ private struct ResolvingTabChipView: View {
       isDirty: showsSpinner(live: live),
       isOnlyTab: isOnlyTab,
       isLastTab: isLastTab,
-      hasUnreadNotification: notificationRollup?.current.unreadTabs.contains(tab.id) == true
+      hasUnreadNotification: notificationRollup?.current.unreadContents.contains(tab.contentID) == true
         && settingsStore?.settings.notifications.tabBellEnabled != false,
       chordHint: chordHint,
       onSelect: onSelect,

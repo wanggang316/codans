@@ -12,41 +12,45 @@ import CodansCore
 struct WorktreeDetailFeatureTests {
   @Test
   func tabBarActionRoutesViaScope() async {
-    let received = LockIsolated<TabID?>(nil)
+    let received = LockIsolated<WorktreeID?>(nil)
     let worktreeID = WorktreeID()
     let projectID = ProjectID()
-    let newTabID = TabID()
+    let worktree = Worktree(id: worktreeID, name: "w", path: "/tmp/w")
+    let catalog = Catalog(projects: [
+      Project(id: projectID, name: "p", rootPath: "/tmp/w", worktrees: [worktree])
+    ])
 
     let store = TestStore(initialState: WorktreeDetailFeature.State()) {
       WorktreeDetailFeature()
     } withDependencies: {
-      $0.hierarchyClient.createTab = { _, _, _ in
-        received.withValue { $0 = newTabID }
-        return newTabID
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.newTab = { pane, wid, pid, _, _, _, _ in
+        received.withValue { $0 = wid }
+        return TabAddress(
+          projectID: pid, worktreeID: wid, paneID: pane ?? PaneID(),
+          tabID: TabID(), contentID: ContentID())
       }
-      // newTabButtonTapped follows up createTab with a snapshot lookup to
-      // resolve the worktree path. The worktree won't be in the catalog so
-      // the reducer short-circuits before openPane — we just need a quiet
-      // snapshot so the unimplemented testValue doesn't fire an issue.
-      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.ensureSurface = { _ in }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
     }
 
     await store.send(
       .tabBar(
         .newTabButtonTapped(
-          inWorktree: worktreeID, inProject: projectID
+          inPane: nil, inWorktree: worktreeID, inProject: projectID
         )))
-    #expect(received.value == newTabID)
+    await store.finish()
+    #expect(received.value == worktreeID)
   }
 
   @Test
   func splitViewportActionRoutesViaScope() async {
-    let tabID = TabID()
+    let worktreeID = WorktreeID()
     let store = TestStore(initialState: WorktreeDetailFeature.State()) {
       WorktreeDetailFeature()
     }
-    await store.send(.splitViewport(.activeTabChanged(tabID))) { state in
-      state.splitViewport.activeTabID = tabID
+    await store.send(.splitViewport(.worktreeChanged(worktreeID))) { state in
+      state.splitViewport.worktreeID = worktreeID
     }
   }
 }

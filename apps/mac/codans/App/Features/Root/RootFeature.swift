@@ -1441,7 +1441,7 @@ struct RootFeature {
         // No agent tab landed: give the worktree the shell tab its selection
         // skipped while the launch was in flight.
         if state.selection.worktreeID == worktreeID {
-          autoSeedTabAndPaneIfNeeded(for: state.selection)
+          autoSeedFirstTabIfNeeded(for: state.selection)
         }
         return .send(.statusBar(.push(.warning(failure))))
 
@@ -1850,7 +1850,7 @@ struct RootFeature {
             return .send(.statusBar(.push(.success("Handed off to \(title)"))))
           }
           return .merge(
-            .send(.agentState(.rowTapped(launched.contentID))),
+            .send(.agentState(.rowTapped(launched.paneID))),
             .send(.statusBar(.push(.success("Handed off to \(title)"))))
           )
         }
@@ -2780,7 +2780,7 @@ struct RootFeature {
           worktreeID: worktreeID,
           worktreeName: worktree.name,
           worktreePath: worktree.path,
-          paneID: sourcePane?.id,
+          contentID: sourcePane?.id,
           paneLabel: sourcePane.map { "\($0.label) · \($0.agent.displayName)" },
           agent: sourcePane?.agent),
         agents: settings.agents,
@@ -2831,7 +2831,7 @@ struct RootFeature {
           return
         }
         for await completion in stream
-        where completion.requestID == requestID && completion.sourcePaneID == contentID {
+        where completion.requestID == requestID && completion.sourceContentID == contentID {
           await send(.handoffFinished(completion, targetTitle: title))
           return
         }

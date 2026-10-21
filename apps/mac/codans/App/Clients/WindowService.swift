@@ -19,12 +19,12 @@ import os.log
 /// contract first lets the decoder + router land without blocking on the
 /// multi-window architectural decision.
 nonisolated struct WindowService: Sendable {
-  var openNewWindow: @MainActor @Sendable (_ inheriting: PaneID) -> Void
-  var closeWindow: @MainActor @Sendable (_ from: PaneID) -> Void
+  var openNewWindow: @MainActor @Sendable (_ inheriting: ContentID) -> Void
+  var closeWindow: @MainActor @Sendable (_ from: ContentID) -> Void
   var activateWindow: @MainActor @Sendable (_ target: GotoWindowTarget) -> Void
-  var toggleFullscreen: @MainActor @Sendable (_ from: PaneID) -> Void
-  var toggleMaximize: @MainActor @Sendable (_ from: PaneID) -> Void
-  var toggleTabOverview: @MainActor @Sendable (_ from: PaneID) -> Void
+  var toggleFullscreen: @MainActor @Sendable (_ from: ContentID) -> Void
+  var toggleMaximize: @MainActor @Sendable (_ from: ContentID) -> Void
+  var toggleTabOverview: @MainActor @Sendable (_ from: ContentID) -> Void
   var toggleAppVisibility: @MainActor @Sendable () -> Void
   var keyWindow: @MainActor @Sendable () -> NSWindow?
 }
@@ -45,23 +45,23 @@ extension WindowService: DependencyKey {
   }
 
   static let liveValue = WindowService(
-    openNewWindow: { paneID in
+    openNewWindow: { contentID in
       // CodansApp today uses a single `WindowGroup` without a per-pane
       // window registry. `NSDocumentController.newDocument(_:)` would route
       // through `File → New`, but there's no document type registered.
       // Until a multi-window model lands, log and no-op.
       logger.info(
-        "openNewWindow(from: \(String(describing: paneID), privacy: .public)) requested — multi-window not yet implemented"
+        "openNewWindow(from: \(String(describing: contentID), privacy: .public)) requested — multi-window not yet implemented"
       )
     },
-    closeWindow: { paneID in
-      // Without a PaneID → NSWindow registry we fall back to the key
+    closeWindow: { contentID in
+      // Without a ContentID → NSWindow registry we fall back to the key
       // window. This is the right behavior for the common case (user
       // pressed a bound key inside the focused window) even though it
-      // ignores `paneID`; once the registry exists we resolve precisely.
+      // ignores `contentID`; once the registry exists we resolve precisely.
       guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
         logger.info(
-          "closeWindow(from: \(String(describing: paneID), privacy: .public)) — no key/main window"
+          "closeWindow(from: \(String(describing: contentID), privacy: .public)) — no key/main window"
         )
         return
       }

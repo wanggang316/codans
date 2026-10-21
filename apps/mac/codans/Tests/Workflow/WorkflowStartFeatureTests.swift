@@ -295,7 +295,7 @@ struct WorkflowStartFeatureTests {
 
     await store.send(.worktreeHeader(.delegate(.runWorkflowRequested(workflowID: "advisor"))))
     await store.receive(
-      .workflowStartRequested(projectID, worktreeID, workflowID: "advisor", sourcePaneID: nil))
+      .workflowStartRequested(projectID, worktreeID, workflowID: "advisor", sourceContentID: nil))
   }
 
   /// A pick from an Agents View row's menu pins that row's pane as the
@@ -310,7 +310,7 @@ struct WorkflowStartFeatureTests {
     await store.send(.agentState(.runWorkflowTapped(address.contentID, workflowID: "advisor")))
     await store.receive(
       .workflowStartRequested(
-        address.projectID, address.worktreeID, workflowID: "advisor", sourcePaneID: address.contentID))
+        address.projectID, address.worktreeID, workflowID: "advisor", sourceContentID: address.contentID))
   }
 
   // MARK: - Admission

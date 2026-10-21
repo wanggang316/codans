@@ -21,8 +21,11 @@ struct HierarchyHandlersMissingFolderTests {
 
   private func makeFixture(rootPath: String) -> Fixture {
     let runtime = FakeHierarchyRuntime()
-    let tab = Tab(name: "dev")
-    let worktree = Worktree(name: "main", path: rootPath, branch: "main", tabs: [tab])
+    let tab = Tab(name: "dev", content: .terminal(workingDirectory: rootPath))
+    let pane = Pane(tabs: [tab])
+    let worktree = Worktree(
+      name: "main", path: rootPath, branch: "main",
+      splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
     let project = Project(
       name: "repo", rootPath: rootPath, gitRoot: rootPath, worktrees: [worktree])
     let manager = HierarchyManager(
@@ -49,7 +52,7 @@ struct HierarchyHandlersMissingFolderTests {
     let params = try JSONValue.encoded(
       HierarchyHandlers.OpenPaneParams(
         projectID: fixture.project.id, worktreeID: fixture.worktree.id,
-        tabID: fixture.tab.id, workingDirectory: root, initialCommand: nil, labels: []))
+        tabID: fixture.tab.id.raw, workingDirectory: root, initialCommand: nil, labels: []))
 
     let outcome = await fixture.handlers.openPane(params)
 
@@ -79,6 +82,6 @@ struct HierarchyHandlersMissingFolderTests {
       return
     }
     #expect(error == .notFound(kind: "directory", id: root))
-    #expect(fixture.manager.catalog.projects[0].worktrees[0].tabs.count == 1)
+    #expect(fixture.manager.catalog.projects[0].worktrees[0].allTabs.count == 1)
   }
 }

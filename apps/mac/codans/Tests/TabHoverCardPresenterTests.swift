@@ -82,7 +82,7 @@ struct TabHoverCardPresenterTests {
   }
 
   private static let claude = WorktreeProcessEntry(
-    paneID: PaneID(), projectID: ProjectID(), worktreeID: WorktreeID(), tabID: TabID(),
+    contentID: ContentID(), projectID: ProjectID(), worktreeID: WorktreeID(), paneID: PaneID(), tabID: TabID(),
     name: "Claude Code", kind: .agent, pid: 100, startedAt: nil, observedAt: .now,
     workingDirectory: "/repo", processName: "claude", agentKind: .claudeCode)
 

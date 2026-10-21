@@ -12,21 +12,21 @@ struct HierarchyHandlersDescribeTests {
   @Test
   func describePaneCarriesContainersHandleLabelsAndLiveDirectory() async throws {
     let fixture = Fixture()
-    fixture.runtime.currentWorkingDirectories[fixture.pane2.id] = "/live/dir"
+    fixture.runtime.currentWorkingDirectories[fixture.content2] = "/live/dir"
     // Agent bindings are session state: the manager clears persisted ones
     // on load, so bind through its writer like the classifier does.
-    fixture.manager.setPaneAgentKind(fixture.pane2.id, kind: .amp)
-    try fixture.manager.focusPane(
-      fixture.pane2.id, in: fixture.tab.id, in: fixture.worktree.id, in: fixture.project.id)
+    fixture.manager.setAgentKind(fixture.content2, kind: .amp)
+    try fixture.manager.focusPane(fixture.pane2.id)
 
-    let outcome = await fixture.handlers.describePane(try Self.request(fixture.pane2.id.raw))
+    let outcome = await fixture.handlers.describePane(try Self.request(fixture.content2.raw))
     let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
 
-    #expect(description.id == fixture.pane2.id.description)
-    #expect(description.handle == "p2")
+    #expect(description.id == fixture.content2.description)
+    #expect(description.contentID == fixture.content2.description)
+    #expect(description.handle == "t2")
     #expect(description.projectID == fixture.project.id.description)
     #expect(description.worktreeID == fixture.worktree.id.description)
-    #expect(description.tabID == fixture.tab.id.description)
+    #expect(description.tabID == fixture.tab2.id.description)
     #expect(description.workingDirectory == "/live/dir")
     #expect(description.labels == ["agent", "worker"])
     #expect(description.agent == "amp")
@@ -35,10 +35,22 @@ struct HierarchyHandlersDescribeTests {
   }
 
   @Test
+  func describePaneAcceptsTabAndPaneIds() async throws {
+    let fixture = Fixture()
+
+    for id in [fixture.tab2.id.raw, fixture.pane2.id.raw] {
+      let outcome = await fixture.handlers.describePane(try Self.request(id))
+      let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
+      #expect(description.id == fixture.content2.description)
+    }
+  }
+
+  @Test
   func describePaneReportsLiveWhenAProbeIsBound() async throws {
     let fixture = Fixture(probeIsBound: true)
+    try fixture.manager.focusPane(fixture.pane2.id)
 
-    let outcome = await fixture.handlers.describePane(try Self.request(fixture.pane1.id.raw))
+    let outcome = await fixture.handlers.describePane(try Self.request(fixture.content1.raw))
     let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
 
     #expect(description.isLive)
@@ -47,18 +59,30 @@ struct HierarchyHandlersDescribeTests {
   }
 
   @Test
-  func describeTabFallsBackToTheCachedTitleAndListsPanes() async throws {
+  func describeTabFallsBackToTheCachedTitleAndNamesItsPane() async throws {
     let fixture = Fixture()
 
-    let outcome = await fixture.handlers.describeTab(try Self.request(fixture.tab.id.raw))
+    let outcome = await fixture.handlers.describeTab(try Self.request(fixture.tab1.id.raw))
     let description: IPC.TabDescription = try Self.decodeUnary(outcome)
 
     #expect(description.handle == "t1")
     #expect(description.title == "zsh — repo")
     #expect(description.name == nil)
     #expect(description.isSelected)
-    #expect(description.paneIDs == [fixture.pane1.id.description, fixture.pane2.id.description])
-    #expect(description.focusedPaneID == nil)
+    #expect(description.paneID == fixture.pane1.id.description)
+    #expect(description.contentID == fixture.content1.description)
+    #expect(description.paneIDs == [fixture.pane1.id.description])
+    #expect(description.focusedPaneID == fixture.pane1.id.description)
+  }
+
+  @Test
+  func describeTabAcceptsASessionId() async throws {
+    let fixture = Fixture()
+
+    let outcome = await fixture.handlers.describeTab(try Self.request(fixture.content2.raw))
+    let description: IPC.TabDescription = try Self.decodeUnary(outcome)
+
+    #expect(description.id == fixture.tab2.id.description)
   }
 
   @Test
@@ -71,8 +95,10 @@ struct HierarchyHandlersDescribeTests {
     #expect(worktree.projectName == "repo")
     #expect(worktree.branch == "main")
     #expect(worktree.isSelected)
-    #expect(worktree.tabCount == 1)
-    #expect(worktree.selectedTabID == fixture.tab.id.description)
+    #expect(worktree.tabCount == 2)
+    #expect(worktree.paneCount == 2)
+    #expect(worktree.selectedTabID == fixture.tab1.id.description)
+    #expect(worktree.focusedPaneID == fixture.pane1.id.description)
 
     let projectOutcome = await fixture.handlers.describeProject(
       try Self.request(fixture.project.id.raw))
@@ -116,8 +142,9 @@ struct HierarchyHandlersDescribeTests {
     return try value.decoded(as: T.self)
   }
 
-  /// One project, one live worktree (plus an archived one), one tab with two
-  /// panes side by side; the whole chain is selected.
+  /// One project, one live worktree (plus an archived one), two Panes side
+  /// by side with one Tab each; the whole chain is selected and the left
+  /// Pane is focused.
   @MainActor
   private struct Fixture {
     let runtime = FakeHierarchyRuntime()
@@ -125,18 +152,23 @@ struct HierarchyHandlersDescribeTests {
     let handlers: HierarchyHandlers
     let project: Project
     let worktree: Worktree
-    let tab: Tab
+    let tab1: Tab
+    let tab2: Tab
     let pane1: Pane
     let pane2: Pane
+    var content1: ContentID { tab1.contentID }
+    var content2: ContentID { tab2.contentID }
 
     init(probeIsBound: Bool = false) {
-      let pane1 = Pane(workingDirectory: "/repo")
-      let pane2 = Pane(workingDirectory: "/repo/src", labels: ["worker", "agent"])
+      let tab1 = Tab(cachedDisplayTitle: "zsh — repo", content: .terminal(workingDirectory: "/repo"))
+      let tab2 = Tab(content: .terminal(workingDirectory: "/repo/src", labels: ["worker", "agent"]))
+      let pane1 = Pane(tabs: [tab1])
+      let pane2 = Pane(tabs: [tab2])
       // swiftlint:disable:next force_try
       let splitTree = try! SplitTree(leaf: pane1.id).inserting(pane2.id, at: pane1.id, direction: .right)
-      let tab = Tab(cachedDisplayTitle: "zsh — repo", splitTree: splitTree, panes: [pane1, pane2])
       let worktree = Worktree(
-        name: "main", path: "/repo", branch: "main", tabs: [tab], selectedTabID: tab.id)
+        name: "main", path: "/repo", branch: "main",
+        splitTree: splitTree, panes: [pane1, pane2], focusedPaneID: pane1.id)
       let archived = Worktree(name: "old", path: "/repo-old", branch: "old", archived: true)
       let project = Project(
         name: "repo", rootPath: "/repo", gitRoot: "/repo",
@@ -156,7 +188,8 @@ struct HierarchyHandlersDescribeTests {
       )
       self.project = project
       self.worktree = worktree
-      self.tab = tab
+      self.tab1 = tab1
+      self.tab2 = tab2
       self.pane1 = pane1
       self.pane2 = pane2
     }

@@ -84,7 +84,6 @@ struct RootFeatureCommandPaletteRoutingTests {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { Catalog() }
-      $0.hierarchyClient.lastFocusedPane = { _ in nil }
       $0.hierarchyClient.setProjectExpanded = { pid, expanded in
         expandCalls.withValue { $0.append((pid, expanded)) }
       }
@@ -123,7 +122,6 @@ struct RootFeatureCommandPaletteRoutingTests {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
-      $0.hierarchyClient.lastFocusedPane = { _ in nil }
       $0.hierarchyClient.setProjectExpanded = { pid, expanded in
         expandCalls.withValue { $0.append((pid, expanded)) }
       }

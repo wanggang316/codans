@@ -14,12 +14,12 @@ public final class TerminalHandlers {
   /// by a small adapter around `GhosttyRuntime.surface(for:).sendInput`;
   /// tests stub it.
   public protocol InputSink: AnyObject, Sendable {
-    func sendInput(paneID: PaneID, text: String) -> Bool
-    func sendKey(paneID: PaneID, key: IPC.TerminalNamedKey) -> Bool
-    func sendRawBytes(paneID: PaneID, bytes: [UInt8]) -> Bool
+    func sendInput(contentID: ContentID, text: String) -> Bool
+    func sendKey(contentID: ContentID, key: IPC.TerminalNamedKey) -> Bool
+    func sendRawBytes(contentID: ContentID, bytes: [UInt8]) -> Bool
     func fanOut(scope: IPC.BroadcastScope, text: String, catalog: Catalog) -> Int
-    func readText(paneID: PaneID, extent: ReadExtent) -> String?
-    func resetPane(paneID: PaneID) -> Bool
+    func readText(contentID: ContentID, extent: ReadExtent) -> String?
+    func resetPane(contentID: ContentID) -> Bool
   }
 
   public enum ReadExtent: String, Codable, Sendable {
@@ -37,14 +37,14 @@ public final class TerminalHandlers {
   /// foreground-job poller's view, the same bit the tab spinner reads.
   /// `sendInput`'s wait uses it to tell "the command is still running"
   /// from "the screen just stopped changing".
-  private let paneIsBusy: @MainActor (PaneID) -> Bool
+  private let paneIsBusy: @MainActor (ContentID) -> Bool
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
     sink: InputSink?,
     catalog: @escaping @MainActor () -> Catalog,
     clock: StabilityClock = SystemStabilityClock(),
-    paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false }
+    paneIsBusy: @escaping @MainActor (ContentID) -> Bool = { _ in false }
   ) {
     self.sink = sink
     self.catalog = catalog
@@ -68,14 +68,14 @@ public final class TerminalHandlers {
     }
   }
   public struct SendInputParams: Codable, Sendable {
-    public let paneID: PaneID
+    public let contentID: ContentID
     public let text: String
     public let wait: SendWaitParams?
     /// With `wait`, also return the screen lines the command produced.
     public let capture: Bool?
 
-    public init(paneID: PaneID, text: String, wait: SendWaitParams? = nil, capture: Bool? = nil) {
-      self.paneID = paneID
+    public init(contentID: ContentID, text: String, wait: SendWaitParams? = nil, capture: Bool? = nil) {
+      self.contentID = contentID
       self.text = text
       self.wait = wait
       self.capture = capture
@@ -111,16 +111,16 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: SendInputParams.self)
     } catch {
-      return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
+      return .failed(.invalidParams(message: "sendInput requires {contentID, text}", path: nil))
     }
-    let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
-    let ok = sink.sendInput(paneID: req.paneID, text: req.text)
+    let before = req.capture == true ? sink.readText(contentID: req.contentID, extent: .screen) : nil
+    let ok = sink.sendInput(contentID: req.contentID, text: req.text)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(.notFound(kind: "pane", id: req.contentID.description))
     }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
-      let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
+      let outcome = await waitForCompletion(contentID: req.contentID, wait: wait, sink: sink)
       let output = req.capture == true
         ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
       result = SendInputResult(
@@ -142,7 +142,7 @@ public final class TerminalHandlers {
   }
 
   private func waitForCompletion(
-    paneID: PaneID, wait: SendWaitParams, sink: InputSink
+    contentID: ContentID, wait: SendWaitParams, sink: InputSink
   ) async -> CompletionOutcome {
     let timeout = max(wait.timeoutMillis, 1)
     let stable = max(wait.stableMillis ?? 500, 1)
@@ -150,13 +150,13 @@ public final class TerminalHandlers {
     let interval = 100
     let start = clock.nowMillis()
     var busyObserved = false
-    var lastText = sink.readText(paneID: paneID, extent: .screen) ?? ""
+    var lastText = sink.readText(contentID: contentID, extent: .screen) ?? ""
     var stableSince = start
     while true {
       let now = clock.nowMillis()
-      let busy = paneIsBusy(paneID)
+      let busy = paneIsBusy(contentID)
       if busy { busyObserved = true }
-      let text = sink.readText(paneID: paneID, extent: .screen) ?? ""
+      let text = sink.readText(contentID: contentID, extent: .screen) ?? ""
       if text != lastText {
         lastText = text
         stableSince = now
@@ -211,7 +211,7 @@ public final class TerminalHandlers {
   }
 
   public struct SendKeyParams: Codable, Sendable {
-    public let paneID: PaneID
+    public let contentID: ContentID
     public let key: IPC.TerminalNamedKey
   }
   public func sendKey(_ params: JSONValue) async -> RouterOutcome {
@@ -224,17 +224,17 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: SendKeyParams.self)
     } catch {
-      return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
+      return .failed(.invalidParams(message: "sendKey requires {contentID, key}", path: nil))
     }
-    let ok = sink.sendKey(paneID: req.paneID, key: req.key)
+    let ok = sink.sendKey(contentID: req.contentID, key: req.key)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(.notFound(kind: "pane", id: req.contentID.description))
     }
     return .unary(.object(["delivered": .bool(true)]))
   }
 
   public struct SendRawBytesParams: Codable, Sendable {
-    public let paneID: PaneID
+    public let contentID: ContentID
     /// Hex-encoded bytes, e.g. "1b5b41" for ESC [ A (up arrow CSI).
     /// Whitespace and an optional "0x" prefix are tolerated by the decoder.
     public let hex: String
@@ -249,14 +249,14 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: SendRawBytesParams.self)
     } catch {
-      return .failed(.invalidParams(message: "sendRawBytes requires {paneID, hex}", path: nil))
+      return .failed(.invalidParams(message: "sendRawBytes requires {contentID, hex}", path: nil))
     }
     guard let bytes = Self.decodeHex(req.hex) else {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
-    let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
+    let ok = sink.sendRawBytes(contentID: req.contentID, bytes: bytes)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(.notFound(kind: "pane", id: req.contentID.description))
     }
     return .unary(
       .object([
@@ -315,7 +315,7 @@ public final class TerminalHandlers {
     public let timeoutMillis: Int
   }
   public struct ReadTextParams: Codable, Sendable {
-    public let paneID: PaneID
+    public let contentID: ContentID
     public let extent: ReadExtent?
     /// When present, poll until stable instead of reading once.
     public let waitStable: WaitStableParams?
@@ -345,7 +345,7 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: ReadTextParams.self)
     } catch {
-      return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
+      return .failed(.invalidParams(message: "readText requires {contentID}", path: nil))
     }
     let extent = req.extent ?? .viewport
     let result: ReadTextResult
@@ -355,10 +355,10 @@ public final class TerminalHandlers {
         stableMillis: ws.stableMillis,
         intervalMillis: ws.intervalMillis,
         timeoutMillis: ws.timeoutMillis,
-        read: { [sink] in sink.readText(paneID: req.paneID, extent: extent) }
+        read: { [sink] in sink.readText(contentID: req.contentID, extent: extent) }
       )
       guard let outcome = await waiter.run() else {
-        return .failed(.notFound(kind: "pane", id: req.paneID.description))
+        return .failed(.notFound(kind: "pane", id: req.contentID.description))
       }
       result = ReadTextResult(
         text: outcome.text,
@@ -367,8 +367,8 @@ public final class TerminalHandlers {
         samples: outcome.samples
       )
     } else {
-      guard let text = sink.readText(paneID: req.paneID, extent: extent) else {
-        return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      guard let text = sink.readText(contentID: req.contentID, extent: extent) else {
+        return .failed(.notFound(kind: "pane", id: req.contentID.description))
       }
       result = ReadTextResult(text: text)
     }
@@ -380,7 +380,7 @@ public final class TerminalHandlers {
   }
 
   public struct ResetPaneParams: Codable, Sendable {
-    public let paneID: PaneID
+    public let contentID: ContentID
   }
   public func resetPane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -392,11 +392,11 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: ResetPaneParams.self)
     } catch {
-      return .failed(.invalidParams(message: "resetPane requires {paneID}", path: nil))
+      return .failed(.invalidParams(message: "resetPane requires {contentID}", path: nil))
     }
-    let ok = sink.resetPane(paneID: req.paneID)
+    let ok = sink.resetPane(contentID: req.contentID)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(.notFound(kind: "pane", id: req.contentID.description))
     }
     return .unary(.object(["reset": .bool(true)]))
   }

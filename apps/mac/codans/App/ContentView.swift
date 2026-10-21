@@ -32,6 +32,9 @@ struct ContentView: View {
   /// Registry that backs the worktree-toolbar badge + popover. Optional
   /// because `AppState.bringUp` constructs it lazily; nil renders no badge.
   let agentStateStore: AgentStateStore?
+  /// Live Content registry: the strips read each Tab's `TabChrome` through
+  /// it. Defaulted so previews and tests keep compiling without one.
+  var contentRuntime: ContentRuntime?
   /// Active workflow runs for the AgentState panel's "Workflows" group.
   /// Defaulted so previews and tests that build `ContentView` without the
   /// engine keep compiling.
@@ -151,6 +154,7 @@ struct ContentView: View {
     }
     .environment(hierarchyManager)
     .environment(agentStateStore)
+    .environment(contentRuntime)
     .environment(
       \.paneHUDActions,
       PaneHUDActions(
@@ -237,7 +241,7 @@ struct ContentView: View {
         // Pass the pane explicitly: `.commandQueueToggle(nil)` would
         // re-resolve the focused pane, and if focus moved while the sheet
         // was open the toggle would re-target instead of close.
-        onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
+        onDismiss: { store.send(.commandQueueToggle(queueStore.contentID)) }
       )
       .environment(hierarchyManager)
     }

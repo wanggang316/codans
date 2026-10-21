@@ -76,6 +76,9 @@ struct MainWindowCommands: Commands {
   /// "Stop …" and gates the ⌘. stop item so it doesn't swallow the terminal's
   /// ⌘. while idle. `@Observable`, same source as the tab busy spinner.
   let hierarchyManager: HierarchyManager
+  /// The live Content registry, read per render: it is built after the
+  /// scene, so the menu asks for it each time instead of capturing nil.
+  var contentRuntime: () -> ContentRuntime? = { nil }
 
   var body: some Commands {
     // MARK: Codans (app menu) — Check for Updates
@@ -393,7 +396,7 @@ struct MainWindowCommands: Commands {
     // Either list can hold the command currently running in this worktree; ⌘.
     // targets whichever it is.
     let runningScriptID = worktreeID.flatMap { wid in
-      allScripts.first { hierarchyManager.isScriptRunning(worktreeID: wid, scriptID: $0.id) }?.id
+      allScripts.first { contentRuntime()?.isScriptRunning(worktreeID: wid, scriptID: $0.id) == true }?.id
     }
 
     return Group {
@@ -448,7 +451,7 @@ struct MainWindowCommands: Commands {
   ) -> some View {
     let isRunning =
       worktreeID.map {
-        hierarchyManager.isScriptRunning(worktreeID: $0, scriptID: script.id)
+        contentRuntime()?.isScriptRunning(worktreeID: $0, scriptID: script.id) ?? false
       } ?? false
     Button(isRunning ? "Stop \(script.displayName)" : "Run \(script.displayName)") {
       if isRunning {
