@@ -115,9 +115,9 @@ extension IPC {
   /// the connection's peer PID; outside a pane, list every scope".
   public struct WorkflowListRequest: Codable, Equatable, Sendable {
     public let worktreeID: WorktreeID?
-    public let paneID: PaneID?
+    public let paneID: ContentID?
 
-    public init(worktreeID: WorktreeID? = nil, paneID: PaneID? = nil) {
+    public init(worktreeID: WorktreeID? = nil, paneID: ContentID? = nil) {
       self.worktreeID = worktreeID
       self.paneID = paneID
     }
@@ -136,13 +136,13 @@ extension IPC {
   public struct WorkflowRunRequest: Codable, Equatable, Sendable {
     /// Definition id, or its unique display name.
     public let workflow: String
-    public let sourcePaneID: PaneID?
+    public let sourcePaneID: ContentID?
     public let worktreeID: WorktreeID?
     /// The pane the CLI ran in (`CODANS_PANE_ID`), independent of the
     /// explicit source. Only a run started from the `current` role's own
     /// pane is self-initiated; the server falls back to peer-PID
     /// attribution when this is nil.
-    public let callerPaneID: PaneID?
+    public let callerPaneID: ContentID?
     /// Role name → binding (`auto`, a profile name or id, or a pane
     /// reference for `pick` roles).
     public let roles: [String: String]
@@ -154,9 +154,9 @@ extension IPC {
 
     public init(
       workflow: String,
-      sourcePaneID: PaneID? = nil,
+      sourcePaneID: ContentID? = nil,
       worktreeID: WorktreeID? = nil,
-      callerPaneID: PaneID? = nil,
+      callerPaneID: ContentID? = nil,
       roles: [String: String] = [:],
       inputs: [String: String] = [:],
       skip: [String] = [],
@@ -179,7 +179,7 @@ extension IPC {
     public let role: String
     /// `current` | `launch` | `pick`.
     public let source: String
-    public let paneID: PaneID?
+    public let paneID: ContentID?
     /// `p<n>` handle for display, when the pane is known.
     public let handle: String?
     public let profileID: UUID?
@@ -189,7 +189,7 @@ extension IPC {
     public init(
       role: String,
       source: String,
-      paneID: PaneID? = nil,
+      paneID: ContentID? = nil,
       handle: String? = nil,
       profileID: UUID? = nil,
       profileName: String? = nil,
@@ -423,9 +423,9 @@ extension IPC {
   /// registry and returns that run plus the caller's `participant` row.
   public struct WorkflowStatusRequest: Codable, Equatable, Sendable {
     public let runID: UUID?
-    public let callerPaneID: PaneID?
+    public let callerPaneID: ContentID?
 
-    public init(runID: UUID? = nil, callerPaneID: PaneID? = nil) {
+    public init(runID: UUID? = nil, callerPaneID: ContentID? = nil) {
       self.runID = runID
       self.callerPaneID = callerPaneID
     }
@@ -433,9 +433,9 @@ extension IPC {
 
   public struct WorkflowParticipantSummary: Codable, Equatable, Sendable {
     public let role: String
-    public let paneID: PaneID
+    public let paneID: ContentID
 
-    public init(role: String, paneID: PaneID) {
+    public init(role: String, paneID: ContentID) {
       self.role = role
       self.paneID = paneID
     }
@@ -457,7 +457,7 @@ extension IPC {
   /// delivery). `force` accepts a body the validator would otherwise
   /// reject under `strict`.
   public struct WorkflowDeliverRequest: Codable, Equatable, Sendable {
-    public let callerPaneID: PaneID?
+    public let callerPaneID: ContentID?
     public let token: String?
     public let runID: UUID?
     public let stepID: String?
@@ -466,7 +466,7 @@ extension IPC {
     public let force: Bool
 
     public init(
-      callerPaneID: PaneID? = nil,
+      callerPaneID: ContentID? = nil,
       token: String? = nil,
       runID: UUID? = nil,
       stepID: String? = nil,
@@ -539,10 +539,10 @@ extension IPC {
   /// Params for `workflow.listRuns`; scoping follows `WorkflowListRequest`.
   public struct WorkflowListRunsRequest: Codable, Equatable, Sendable {
     public let worktreeID: WorktreeID?
-    public let paneID: PaneID?
+    public let paneID: ContentID?
     public let limit: Int?
 
-    public init(worktreeID: WorktreeID? = nil, paneID: PaneID? = nil, limit: Int? = nil) {
+    public init(worktreeID: WorktreeID? = nil, paneID: ContentID? = nil, limit: Int? = nil) {
       self.worktreeID = worktreeID
       self.paneID = paneID
       self.limit = limit

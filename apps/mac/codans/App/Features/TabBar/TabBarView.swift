@@ -2,9 +2,10 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Horizontal tab bar for the active Worktree. Reads `Worktree.tabs` from
-/// the environment `HierarchyManager`; dispatches create / select / close
-/// / rename / reorder / bulk-close actions through `TabBarFeature`.
+/// Horizontal tab bar of one Pane. Reads the Pane's Tabs from the
+/// environment `HierarchyManager`; dispatches new / select / close / rename
+/// / reorder / bulk-close actions through `TabBarFeature`. Every Pane of
+/// the Worktree renders its own strip on the same store.
 ///
 /// The chip row lives inside `TabBarOverflowScroll`, which owns horizontal
 /// scrolling, edge-gradient shadows, and auto-scroll-to-selected; the
@@ -12,16 +13,20 @@ import SwiftUI
 /// is always visible regardless of chip count.
 struct TabBarView: View {
   let store: StoreOf<TabBarFeature>
-  /// Resolved address of the active worktree whose tabs we render. When the
-  /// worktree is unresolved or has no tabs, only the trailing accessories show.
+  /// Resolved address of the Pane whose strip we render. When the Pane is
+  /// unresolved or has no Tabs, only the trailing accessories show.
   let projectID: ProjectID
   let worktreeID: WorktreeID
-  let activeTabID: TabID?
+  let paneID: PaneID
+  /// Whether this Pane is the Worktree's focused one. The focused strip
+  /// renders active; the others inactive (styling is the UI ticket's).
+  var isFocused: Bool = true
   /// AgentState registry (optional — previews / tests omit it). OR'd into the
   /// per-tab busy spinner so a chip lights while a bound agent in that tab is
   /// `.working`, complementing the terminal signal from `tabIsDirty`.
   var agentStateStore: AgentStateStore?
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
 
   var body: some View {
     HStack(spacing: 4, content: barContent)
@@ -43,11 +48,7 @@ struct TabBarView: View {
         TabRenameSheetView(
           initialName: target.currentName,
           onCommit: { newName in
-            store.send(
-              .renameSubmitted(
-                target.id, name: newName,
-                inWorktree: worktreeID, inProject: projectID
-              ))
+            store.send(.renameSubmitted(target.id, name: newName))
           },
           onCancel: { store.send(.renameDismissed) }
         )
@@ -63,11 +64,7 @@ struct TabBarView: View {
         TabColorSheetView(
           initialColor: target.currentColor,
           onCommit: { color in
-            store.send(
-              .colorSubmitted(
-                target.id, color: color,
-                inWorktree: worktreeID, inProject: projectID
-              ))
+            store.send(.colorSubmitted(target.id, color: color))
           },
           onCancel: { store.send(.colorDismissed) }
         )
@@ -83,11 +80,7 @@ struct TabBarView: View {
         TabIconPickerSheet(
           initialIcon: target.currentIcon,
           onCommit: { icon in
-            store.send(
-              .iconSubmitted(
-                target.id, icon: icon,
-                inWorktree: worktreeID, inProject: projectID
-              ))
+            store.send(.iconSubmitted(target.id, icon: icon))
           },
           onCancel: { store.send(.iconDismissed) }
         )
@@ -99,143 +92,102 @@ struct TabBarView: View {
     Group {
       // No tabs → no track: an empty capsule reads as a blank tab. The
       // spacer keeps the accessories pinned trailing in its place.
-      if let worktree = currentWorktree(), !worktree.tabs.isEmpty {
-        TabBarOverflowScroll(itemCount: worktree.tabs.count) { viewport in
-          rowView(for: worktree, viewport: viewport)
+      if let worktree = currentWorktree(), let pane = worktree.pane(paneID), !pane.tabs.isEmpty {
+        TabBarOverflowScroll(itemCount: pane.tabs.count) { viewport in
+          rowView(for: pane, in: worktree, viewport: viewport)
         }
         .frame(height: TabBarMetrics.trackHeight)
       } else {
         Spacer(minLength: 0)
       }
       TabBarTrailingAccessories(
-        activeTabSplitTree: activeSplitTree(),
+        activeTabSplitTree: currentSplitTree(),
         worktreePath: currentWorktree()?.path,
         remoteHost: hierarchyManager.catalog.projects
           .first(where: { $0.id == projectID })?.remoteHost,
         onNewTab: {
-          store.send(
-            .newTabButtonTapped(
-              inWorktree: worktreeID, inProject: projectID
-            ))
+          store.send(.newTabButtonTapped(inPane: paneID, inWorktree: worktreeID, inProject: projectID))
         },
         onLaunchAgent: { profileID in
           store.send(
             .launchAgentInNewTabTapped(
-              profileID: profileID, inWorktree: worktreeID, inProject: projectID))
+              profileID: profileID, inPane: paneID, inWorktree: worktreeID, inProject: projectID))
         },
         onManageAgents: { store.send(.manageAgentsTapped) },
         onResumeSession: { session in
           store.send(
             .resumeAgentSessionTapped(
               agent: session.agent, sessionID: session.sessionID,
-              inWorktree: worktreeID, inProject: projectID
+              inPane: paneID, inWorktree: worktreeID, inProject: projectID
             ))
         },
         onSplitRight: {
           store.send(
             .trailingSplitRequested(
-              direction: .right,
-              inWorktree: worktreeID, inProject: projectID
-            ))
+              direction: .right, fromPane: paneID, inWorktree: worktreeID, inProject: projectID))
         },
         onSplitDown: {
           store.send(
             .trailingSplitRequested(
-              direction: .down,
-              inWorktree: worktreeID, inProject: projectID
-            ))
+              direction: .down, fromPane: paneID, inWorktree: worktreeID, inProject: projectID))
         }
       )
     }
   }
 
-  /// Splits the active tab's tree for the trailing hover-preview popover.
-  /// Returns `nil` when there is no active tab or the tab has no panes.
-  private func activeSplitTree() -> SplitTree<PaneID>? {
-    guard
-      let worktree = currentWorktree(),
-      let activeTabID,
-      let tab = worktree.tabs.first(where: { $0.id == activeTabID })
-    else { return nil }
-    return tab.splitTree.isEmpty ? nil : tab.splitTree
+  /// The Worktree's tree for the trailing hover-preview popover. `nil`
+  /// when the Worktree has no Panes.
+  private func currentSplitTree() -> SplitTree<PaneID>? {
+    guard let worktree = currentWorktree(), !worktree.splitTree.isEmpty else { return nil }
+    return worktree.splitTree
   }
 
-  /// True iff tab `tabID` has a pane hosting a bound agent currently `.working`.
-  /// Static so the `isDirty` closure stays a light value-capture; only `.working`
-  /// counts (`.blocked` is "waiting on the user", not busy).
+  /// True iff the Tab's Content hosts a bound agent currently `.working`.
+  /// Static so the `isDirty` closure stays a light value-capture; only
+  /// `.working` counts (`.blocked` is "waiting on the user", not busy).
   private static func tabHasWorkingAgent(
-    _ tabID: TabID, in worktree: Worktree, store: AgentStateStore?
+    _ tabID: TabID, in pane: Pane, store: AgentStateStore?
   ) -> Bool {
     guard let entries = store?.entries, !entries.isEmpty,
-      let tab = worktree.tabs.first(where: { $0.id == tabID })
+      let tab = pane.tab(tabID)
     else { return false }
-    return tab.panes.contains { entries[$0.id]?.state == .working }
+    return entries[tab.contentID]?.state == .working
   }
 
   @ViewBuilder
-  private func rowView(for worktree: Worktree, viewport: TabBarViewport) -> some View {
+  private func rowView(for pane: Pane, in worktree: Worktree, viewport: TabBarViewport) -> some View {
     TabBarRowView(
-      tabs: worktree.tabs,
-      activeTabID: activeTabID,
+      tabs: pane.tabs,
+      activeTabID: pane.selectedTabID,
       viewport: viewport,
       // Two busy signals, kept apart so the chip can treat them differently.
       // Terminal (OSC 9;4 progress ∪ running foreground command): reading the
-      // @Observable HierarchyManager re-renders the chip on a flip. Agent (the
+      // @Observable ContentRuntime re-renders the chip on a flip. Agent (the
       // render-derived `.working` state): reading `agentStateStore.entries`
       // registers the @Observable dependency that re-renders on a flip. A
       // working agent animates its own spinner into the tab title, so the chip
       // suppresses its spinner there (see `ResolvingTabChipView`) while the
       // terminal signal always shows it.
-      isTerminalBusy: { tabID in hierarchyManager.tabIsDirty(tabID) },
+      isTerminalBusy: { tabID in contentRuntime?.tabIsDirty(tabID) ?? false },
       isAgentWorking: { tabID in
-        Self.tabHasWorkingAgent(tabID, in: worktree, store: agentStateStore)
+        Self.tabHasWorkingAgent(tabID, in: pane, store: agentStateStore)
       },
-      onSelect: { tabID in
-        store.send(
-          .tabButtonTapped(
-            tabID, inWorktree: worktreeID, inProject: projectID
-          ))
-      },
-      onClose: { tabID in
-        store.send(
-          .closeButtonTapped(
-            tabID, inWorktree: worktreeID, inProject: projectID
-          ))
-      },
-      onMiddleClick: { tabID in
-        store.send(
-          .middleClicked(
-            tabID, inWorktree: worktreeID, inProject: projectID
-          ))
-      },
-      onCloseOthers: { tabID in
-        store.send(
-          .contextMenuCloseOthers(
-            tabID, inWorktree: worktreeID, inProject: projectID
-          ))
-      },
-      onCloseToRight: { tabID in
-        store.send(
-          .contextMenuCloseToRight(
-            tabID, inWorktree: worktreeID, inProject: projectID
-          ))
-      },
-      onCloseAll: {
-        store.send(
-          .contextMenuCloseAll(
-            inWorktree: worktreeID, inProject: projectID
-          ))
-      },
+      onSelect: { tabID in store.send(.tabButtonTapped(tabID)) },
+      onClose: { tabID in store.send(.closeButtonTapped(tabID)) },
+      onMiddleClick: { tabID in store.send(.middleClicked(tabID)) },
+      onCloseOthers: { tabID in store.send(.contextMenuCloseOthers(tabID)) },
+      onCloseToRight: { tabID in store.send(.contextMenuCloseToRight(tabID)) },
+      onCloseAll: { store.send(.contextMenuCloseAll(inPane: paneID)) },
       onRenameRequested: { tabID in
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
+        guard let tab = pane.tab(tabID) else { return }
         store.send(.renameRequested(tabID, currentName: tab.name ?? ""))
       },
       onChangeColorRequested: { tabID in
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
+        guard let tab = pane.tab(tabID) else { return }
         store.send(.colorRequested(tabID, currentColor: tab.color))
       },
       onChangeIconRequested: { tabID in
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
+        guard let tab = pane.tab(tabID) else { return }
         store.send(.iconRequested(tabID, currentIcon: tab.icon))
       },
       onCopyID: { tabID in
@@ -243,11 +195,7 @@ struct TabBarView: View {
         NSPasteboard.general.setString(tabID.description, forType: .string)
       },
       onReorder: { orderedIDs in
-        store.send(
-          .dragReorderEnded(
-            orderedIDs: orderedIDs,
-            inWorktree: worktreeID, inProject: projectID
-          ))
+        store.send(.dragReorderEnded(orderedIDs: orderedIDs, inPane: paneID))
       },
       emptyTabTitle: (worktree.path as NSString).lastPathComponent,
       onCacheLiveTitle: { tabID, title in
@@ -256,17 +204,12 @@ struct TabBarView: View {
         // routing through reducer + effect would add noise without
         // benefit. `setCachedTabTitle` debounces internally and no-ops
         // on identical values, so a hot OSC stream is cheap.
-        hierarchyManager.setCachedTabTitle(
-          title,
-          for: tabID,
-          in: worktreeID,
-          in: projectID
-        )
+        hierarchyManager.setCachedTabTitle(title, for: tabID)
       }
     )
-    // A worktree switch swaps in a whole other tab list; a fresh row per
-    // worktree keeps its chips from playing the add-tab insertion.
-    .id(worktreeID)
+    // A Pane swap brings a whole other tab list; a fresh row per Pane
+    // keeps its chips from playing the add-tab insertion.
+    .id(paneID)
   }
 
   private func currentWorktree() -> Worktree? {

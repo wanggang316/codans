@@ -7,7 +7,7 @@ import Foundation
 /// source pane and finish.
 nonisolated struct HandoffCompletion: Equatable, Sendable {
   let action: IPC.HandoffAction
-  let sourcePaneID: PaneID
+  let sourceContentID: ContentID
   let receiver: AgentKind?
   let briefing: HandoffBriefingOutcome
   let launched: IPC.HandoffLaunchedPane?
@@ -23,7 +23,7 @@ nonisolated struct HandoffCompletion: Equatable, Sendable {
 @MainActor
 final class HandoffRequestRegistry {
   private enum State {
-    case pending(PaneID)
+    case pending(ContentID)
     case claimed
     case superseded
   }
@@ -33,14 +33,14 @@ final class HandoffRequestRegistry {
 
   init() {}
 
-  func register(_ requestID: UUID, sourcePaneID: PaneID) {
-    states[requestID] = .pending(sourcePaneID)
+  func register(_ requestID: UUID, sourceContentID: ContentID) {
+    states[requestID] = .pending(sourceContentID)
   }
 
   enum ClaimOutcome: Equatable {
     case claimed
     /// The request is still pending for another pane and stays pending.
-    case wrongSource(expected: PaneID)
+    case wrongSource(expected: ContentID)
     /// Unknown, already claimed, or superseded.
     case unavailable
   }
@@ -48,9 +48,9 @@ final class HandoffRequestRegistry {
   /// Claims a pending request for its CLI transition. A request is claimed
   /// at most once and only by its source pane. A mismatch leaves it pending.
   @discardableResult
-  func claim(_ requestID: UUID, sourcePaneID: PaneID) -> ClaimOutcome {
-    guard case .pending(let expectedPaneID) = states[requestID] else { return .unavailable }
-    guard expectedPaneID == sourcePaneID else { return .wrongSource(expected: expectedPaneID) }
+  func claim(_ requestID: UUID, sourceContentID: ContentID) -> ClaimOutcome {
+    guard case .pending(let expectedContentID) = states[requestID] else { return .unavailable }
+    guard expectedContentID == sourceContentID else { return .wrongSource(expected: expectedContentID) }
     states[requestID] = .claimed
     return .claimed
   }

@@ -16,7 +16,7 @@ extension IPC {
   /// with guidance and zero side effects.
   public struct HandoffRequest: Codable, Equatable, Sendable {
     public let action: HandoffAction
-    public let paneID: PaneID
+    public let paneID: ContentID
     /// Receiving agent token for `to` (raw value, executable, or display
     /// name). Ignored by `save`.
     public let receiver: String?
@@ -38,7 +38,7 @@ extension IPC {
 
     public init(
       action: HandoffAction,
-      paneID: PaneID,
+      paneID: ContentID,
       receiver: String? = nil,
       profile: String? = nil,
       brief: String? = nil,
@@ -68,14 +68,14 @@ extension IPC {
     public let projectID: ProjectID
     public let worktreeID: WorktreeID
     public let tabID: TabID
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let profileName: String
 
     public init(
       projectID: ProjectID,
       worktreeID: WorktreeID,
       tabID: TabID,
-      paneID: PaneID,
+      paneID: ContentID,
       profileName: String
     ) {
       self.projectID = projectID

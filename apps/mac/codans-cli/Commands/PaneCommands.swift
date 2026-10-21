@@ -297,13 +297,13 @@ struct PaneClose: AsyncParsableCommand {
           client: client
         )
         request = IPC.PaneCloseRequest(
-          paneID: path.paneID,
+          paneID: path.contentID,
           tabID: path.tabID,
           worktreeID: path.worktreeID,
           projectID: path.projectID
         )
       } else {
-        request = IPC.PaneCloseRequest(paneID: PaneID(raw: paneUUID))
+        request = IPC.PaneCloseRequest(paneID: ContentID(raw: paneUUID))
       }
       let response: IPC.PaneCloseResponse = try await client.call(.paneClose, params: request)
       if response.closed {
@@ -346,11 +346,11 @@ struct PaneReset: AsyncParsableCommand {
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: ContentID
       }
       _ = try await client.callRaw(
         .terminalResetPane,
-        params: Params(paneID: PaneID(raw: uuid))
+        params: Params(paneID: ContentID(raw: uuid))
       )
       try Renderer.emit(
         IDMessage(id: uuid.uuidString, message: "reset pane \(uuid.uuidString)"),
@@ -383,13 +383,13 @@ struct PaneLabel: AsyncParsableCommand {
       defer { Task { await client.shutdown() } }
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
       struct Params: Codable {
-        let id: PaneID
+        let id: ContentID
         let labels: [String]
         let replace: Bool
       }
       _ = try await client.callRaw(
         .hierarchySetPaneLabels,
-        params: Params(id: PaneID(raw: uuid), labels: labels, replace: replace)
+        params: Params(id: ContentID(raw: uuid), labels: labels, replace: replace)
       )
       try Renderer.emitObject(
         ["id": uuid.uuidString, "labels": labels],
@@ -401,8 +401,9 @@ struct PaneLabel: AsyncParsableCommand {
   }
 }
 
+/// Locator for a session verb: `id` is the session, the rest its containers.
 struct PaneLocatorBody: Codable, Sendable {
-  let id: PaneID
+  let id: ContentID
   let tabID: TabID
   let worktreeID: WorktreeID
   let projectID: ProjectID
@@ -428,7 +429,7 @@ enum PaneLocatorFlow {
       _ = try await client.callRaw(
         method,
         params: PaneLocatorBody(
-          id: path.paneID,
+          id: path.contentID,
           tabID: path.tabID,
           worktreeID: path.worktreeID,
           projectID: path.projectID
@@ -445,7 +446,7 @@ enum PaneLocatorFlow {
     paneUUID: UUID,
     args: PaneLocatorArgs,
     client: RPCClient
-  ) async throws -> PanePath {
+  ) async throws -> TabPath {
     try await resolvePanePath(
       paneUUID: paneUUID,
       project: args.project,
@@ -455,33 +456,35 @@ enum PaneLocatorFlow {
     )
   }
 
+  /// `paneUUID` may name a Content, a Tab or a Pane (a Pane stands for its
+  /// selected Tab); the tree settles which and fills in the rest of the
+  /// path. Explicit containers override what the tree found.
   static func resolvePanePath(
     paneUUID: UUID,
     project: String,
     worktree: String,
     tab: String,
     client: RPCClient
-  ) async throws -> PanePath {
-    if project != "current" || worktree != "current" || tab != "current" {
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
-      let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
-      return PanePath(
-        projectID: ProjectID(raw: projectUUID),
-        worktreeID: WorktreeID(raw: worktreeUUID),
-        tabID: TabID(raw: tabUUID),
-        paneID: PaneID(raw: paneUUID)
-      )
-    }
-
-    let paneID = PaneID(raw: paneUUID)
+  ) async throws -> TabPath {
     let tree = try await HierarchyTree.load(client: client)
-    guard let path = tree.locatePane(paneID) else {
+    guard let located = tree.locateSession(paneUUID) else {
       throw CLIError(
         code: .notFound, message: "pane \(paneUUID.uuidString) not found",
         details: ["kind": "pane", "id": paneUUID.uuidString])
     }
-    return path
+    if project == "current", worktree == "current", tab == "current" {
+      return located
+    }
+    let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+    let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
+    let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
+    return TabPath(
+      projectID: ProjectID(raw: projectUUID),
+      worktreeID: WorktreeID(raw: worktreeUUID),
+      paneID: located.paneID,
+      tabID: TabID(raw: tabUUID),
+      contentID: located.contentID
+    )
   }
 }
 
@@ -510,7 +513,7 @@ struct PaneInfo: AsyncParsableCommand {
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
       let response: IPC.PaneInfoResponse = try await client.call(
         .paneInfo,
-        params: IPC.PaneInfoRequest(paneID: PaneID(raw: uuid))
+        params: IPC.PaneInfoRequest(paneID: ContentID(raw: uuid))
       )
       try Renderer.emit(PaneInfoRenderable(response: response), mode: globals.renderMode)
     }
@@ -597,7 +600,7 @@ struct PaneRead: AsyncParsableCommand {
       let response: IPC.PaneReadResponse = try await client.call(
         .paneRead,
         params: IPC.PaneReadRequest(
-          paneID: PaneID(raw: uuid),
+          paneID: ContentID(raw: uuid),
           range: wireRange,
           tail: tail,
           raw: raw
@@ -636,21 +639,22 @@ struct PaneListRenderable: Encodable, CustomStringConvertible {
     panes.isEmpty
       ? "(no panes)"
       : panes.map { pane in
-        let labels = pane.labels.sorted().joined(separator: ",")
-        let suffix = labels.isEmpty ? "" : " [\(labels)]"
-        return "\(pane.id)  \(pane.workingDirectory)\(suffix)"
+        let selected = pane.selectedTab.map { "  selected \($0.id)" } ?? ""
+        return "\(pane.id)  (\(pane.tabs.count) tabs)\(selected)"
       }.joined(separator: "\n")
   }
 }
 
 struct PaneDTO: Encodable {
   let id: String
-  let workingDirectory: String
-  let labels: [String]
+  let selectedTabID: String?
+  let tabIDs: [String]
+  let contentIDs: [String]
 
   init(pane: Pane) {
     self.id = pane.id.description
-    self.workingDirectory = pane.workingDirectory
-    self.labels = pane.labels.sorted()
+    self.selectedTabID = pane.selectedTabID?.description
+    self.tabIDs = pane.tabIDs.map(\.description)
+    self.contentIDs = pane.contentIDs.map(\.description)
   }
 }

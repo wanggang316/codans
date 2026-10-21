@@ -40,7 +40,7 @@ final actor LiveEditorService: EditorService {
       case .shellEditor:
         // Always-installed pseudo-editor (no bundle to probe). Surfacing the row lets the
         // Settings + Worktree-header pickers list it; actually opening $EDITOR throws here
-        // and must route through `hierarchyClient.openPane(... initialCommand: "$EDITOR")`
+        // and must route through `hierarchyClient.newTab(... initialCommand: "$EDITOR")`
         // (see the `.shellEditor` branch of `open(directory:preferred:)` below).
         resolved.append(
           EditorDescriptor(
@@ -142,9 +142,9 @@ final actor LiveEditorService: EditorService {
       try await launcher.openApplication(at: appURL, configuration: config)
 
     case .shellEditor:
-      // The Pane primitive exists (`TerminalEngine.ensureSurface` forwards
-      // `pane.initialCommand`), but this service can't address a Pane: `.shellEditor` needs a
-      // `(projectID, worktreeID, tabID)` tuple to hand `HierarchyManager.openPane`, and the
+      // The Tab primitive exists (`TerminalEngine.ensureSurface` forwards the content's
+      // `initialCommand`), but this service can't address a Pane: `.shellEditor` needs a
+      // `(projectID, worktreeID, paneID)` tuple to hand `HierarchyManager.newTab`, and the
       // `(directory: URL, preferred: EditorID?)` signature intentionally excludes domain
       // types. So fail with a descriptive error rather than silently no-op'ing — the registry
       // entry keeps its shape in `describe()`, and callers that want `.shellEditor` end to end

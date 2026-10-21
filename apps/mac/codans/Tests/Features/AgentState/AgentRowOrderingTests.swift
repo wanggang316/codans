@@ -26,10 +26,10 @@ struct AgentRowOrderingTests {
   /// Departed panes drop out; surviving panes keep their relative order.
   @Test
   func reconcileDropsDepartedKeepsSurvivorOrder() {
-    let a = PaneID()
-    let b = PaneID()
-    let c = PaneID()
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [a: entry(.working), c: entry(.idle)]
+    let a = ContentID()
+    let b = ContentID()
+    let c = ContentID()
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [a: entry(.working), c: entry(.idle)]
     let next = AgentRowOrdering.reconcileMembership(order: [a, b, c], entries: entries)
     #expect(next == [a, c])
   }
@@ -37,9 +37,9 @@ struct AgentRowOrderingTests {
   /// Newcomers append at the end; existing rows do not move.
   @Test
   func reconcileAppendsNewcomersAtEnd() {
-    let a = PaneID()
-    let b = PaneID()
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [a: entry(.idle), b: entry(.idle)]
+    let a = ContentID()
+    let b = ContentID()
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [a: entry(.idle), b: entry(.idle)]
     let next = AgentRowOrdering.reconcileMembership(order: [a], entries: entries)
     #expect(next == [a, b])
   }
@@ -48,9 +48,9 @@ struct AgentRowOrderingTests {
   /// with triage priority — survivors are never re-sorted here.
   @Test
   func reconcileIsIdempotentWhenMembershipUnchanged() {
-    let a = PaneID()
-    let b = PaneID()
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [a: entry(.blocked), b: entry(.working)]
+    let a = ContentID()
+    let b = ContentID()
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [a: entry(.blocked), b: entry(.working)]
     let next = AgentRowOrdering.reconcileMembership(order: [b, a], entries: entries)
     #expect(next == [b, a])
   }
@@ -60,10 +60,10 @@ struct AgentRowOrderingTests {
   /// the panel's first-appear path.
   @Test
   func emptyOrderSeedsNewcomersInTriageOrder() {
-    let blocked = PaneID()
-    let working = PaneID()
-    let idle = PaneID()
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [
+    let blocked = ContentID()
+    let working = ContentID()
+    let idle = ContentID()
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [
       idle: entry(.idle),
       working: entry(.working),
       blocked: entry(.blocked),

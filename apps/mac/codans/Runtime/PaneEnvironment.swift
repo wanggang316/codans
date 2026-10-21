@@ -11,9 +11,9 @@ import Foundation
 ///    environment, a project's own `envVars`, and the always-wins product
 ///    keys. `HierarchyManager.resolvedEnv` is this with the project's
 ///    overrides looked up from Settings.
-/// 2. `forSurface` needs the *pane*: its id and the zmx socket directory.
-///    `TerminalEngine.ensureSurface` applies it last, after the worktree
-///    built-ins.
+/// 2. `forSurface` needs the *Tab*: the three ids of its address and the
+///    zmx socket directory. `TerminalEngine.ensureSurface` applies it last,
+///    after the worktree built-ins.
 nonisolated enum PaneEnvironment {
   /// `CFBundleShortVersionString` of the running app; nil under a bare
   /// `xctest` host, in which case the version key is simply omitted.
@@ -75,7 +75,7 @@ nonisolated enum PaneEnvironment {
     return ([directory] + rest).joined(separator: ":")
   }
 
-  /// Stage 2. Adds what only the pane knows.
+  /// Stage 2. Adds what only the Tab knows.
   ///
   /// - `ZMX_DIR` is pinned so the daemon socket lands where the control
   ///   client and the reaper look; the caller has already created it.
@@ -84,17 +84,22 @@ nonisolated enum PaneEnvironment {
   ///   value as "switch to that session from within it" — which fails,
   ///   because the parent lives in another `ZMX_DIR`. That surfaced as a
   ///   tab that flashed and vanished.
-  /// - `CODANS_PANE_ID` is the pane's own id, safe to bake in because it
-  ///   never changes; the CLI's `current` reads it before asking the server.
+  /// - `CODANS_CONTENT_ID` is the session's own id, stable for its whole
+  ///   life; the CLI's `current` reads it before asking the server.
+  ///   `CODANS_TAB_ID` and `CODANS_PANE_ID` name the Tab and the Pane the
+  ///   session was spawned into. A Tab can move to another Pane later, so
+  ///   the Pane value describes the spawn-time layout.
   static func forSurface(
     _ base: [String: String],
-    paneID: PaneID,
+    address: TabAddress,
     zmxDirectory: URL
   ) -> [String: String] {
     var env = base
     env[CodansEnvironment.Key.zmxDirectory.rawValue] = zmxDirectory.path
     env[CodansEnvironment.Key.zmxSession.rawValue] = ""
-    env[CodansEnvironment.Key.paneID.rawValue] = paneID.raw.uuidString
+    env[CodansEnvironment.Key.contentID.rawValue] = address.contentID.raw.uuidString
+    env[CodansEnvironment.Key.tabID.rawValue] = address.tabID.raw.uuidString
+    env[CodansEnvironment.Key.paneID.rawValue] = address.paneID.raw.uuidString
     return env
   }
 }

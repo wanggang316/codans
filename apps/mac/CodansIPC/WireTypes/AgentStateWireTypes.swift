@@ -117,12 +117,12 @@ extension IPC {
   }
 
   public struct AgentWaitRequest: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let until: AgentWaitCondition
     /// 1 through 600 000; the server clamps.
     public let timeoutMillis: Int
 
-    public init(paneID: PaneID, until: AgentWaitCondition, timeoutMillis: Int) {
+    public init(paneID: ContentID, until: AgentWaitCondition, timeoutMillis: Int) {
       self.paneID = paneID
       self.until = until
       self.timeoutMillis = timeoutMillis

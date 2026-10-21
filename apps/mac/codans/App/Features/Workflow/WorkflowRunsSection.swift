@@ -14,7 +14,7 @@ struct WorkflowRunsSection: View {
   static let maxFinishedRowsShown = 5
 
   let engine: WorkflowEngine
-  let onTapRun: (PaneID) -> Void
+  let onTapRun: (ContentID) -> Void
 
   var body: some View {
     let runs = engine.activeRuns
@@ -46,7 +46,7 @@ struct WorkflowRunsSection: View {
 struct WorkflowRunRowView: View {
   let session: WorkflowRunSession
   let engine: WorkflowEngine
-  let onTapRun: (PaneID) -> Void
+  let onTapRun: (ContentID) -> Void
   /// Dims the row and opens the popover without any action affordances —
   /// its `session.attention` is always nil and its status terminal, so
   /// the popover's own sections gate those off; this only drives the row's

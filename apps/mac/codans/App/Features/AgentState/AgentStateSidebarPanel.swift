@@ -34,7 +34,7 @@ import SwiftUI
 struct AgentStateSidebarPanel: View {
   let registry: AgentStateStore
   let resolveSourcePath:
-    (PaneID) -> (
+    (ContentID) -> (
       project: String, worktree: String, projectColor: ProjectColor?,
       worktreePath: String, remoteHost: RemoteHost?
     )?
@@ -42,8 +42,8 @@ struct AgentStateSidebarPanel: View {
   /// Drives the selected-row highlight inside the panel so the user can see
   /// at a glance which row corresponds to the pane they're already looking
   /// at. nil = no pane currently focused (sidebar focus, no selection, etc.)
-  let focusedPaneID: PaneID?
-  let onTapRow: (PaneID) -> Void
+  let focusedContentID: ContentID?
+  let onTapRow: (ContentID) -> Void
   /// Kept on the API even though the header no longer carries a close
   /// button — the host (sidebar) still uses this to collapse the panel
   /// from the keyboard / programmatic paths if it ever needs to.
@@ -51,10 +51,10 @@ struct AgentStateSidebarPanel: View {
   /// Row context-menu "Hand Off…" — routes to
   /// `RootFeature.agentState(.handOffTapped)`. Defaulted so previews and
   /// tests that don't wire it still render rows.
-  var onHandOffRow: (PaneID) -> Void = { _ in }
+  var onHandOffRow: (ContentID) -> Void = { _ in }
   /// Row context-menu "Run Workflow" pick — starts `workflowID` with the
   /// row's pane as the `current` role.
-  var onRunWorkflowRow: (PaneID, String) -> Void = { _, _ in }
+  var onRunWorkflowRow: (ContentID, String) -> Void = { _, _ in }
   /// Active workflow runs, rendered as a read-only group under the agent
   /// rows. Defaulted so previews and tests without the engine render the
   /// agent list alone.
@@ -213,12 +213,12 @@ struct AgentStateSidebarPanel: View {
   /// while it was closed). Fall back to a triage-sorted snapshot for that one
   /// frame so the list renders populated immediately instead of flashing the
   /// empty state.
-  private var orderedRows: [(paneID: PaneID, entry: AgentStateStore.AgentEntry)] {
+  private var orderedRows: [(contentID: ContentID, entry: AgentStateStore.AgentEntry)] {
     if order.orderedIDs.isEmpty, !registry.entries.isEmpty {
       return SortedEntriesProvider.sorted(registry.entries)
     }
     return order.orderedIDs.compactMap { id in
-      registry.entries[id].map { (paneID: id, entry: $0) }
+      registry.entries[id].map { (contentID: id, entry: $0) }
     }
   }
 
@@ -255,24 +255,24 @@ struct AgentStateSidebarPanel: View {
     if !rows.isEmpty {
       Group {
         LazyVStack(spacing: 0) {
-          ForEach(rows, id: \.paneID) { item in
-            let resolved = resolveSourcePath(item.paneID)
+          ForEach(rows, id: \.contentID) { item in
+            let resolved = resolveSourcePath(item.contentID)
             AgentStateRowView(
-              paneID: item.paneID,
+              contentID: item.contentID,
               entry: item.entry,
               projectName: resolved?.project ?? "—",
               worktreeName: resolved?.worktree ?? "—",
               projectColor: resolved?.projectColor,
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
-              isSelected: item.paneID == focusedPaneID,
+              isSelected: item.contentID == focusedContentID,
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
-              paneTitle: { registry.activityText(for: item.paneID) },
+              paneTitle: { registry.activityText(for: item.contentID) },
               worktreePath: resolved?.worktreePath,
               remoteHost: resolved?.remoteHost,
-              onTap: { onTapRow(item.paneID) },
-              onHandOff: { onHandOffRow(item.paneID) },
+              onTap: { onTapRow(item.contentID) },
+              onHandOff: { onHandOffRow(item.contentID) },
               workflows: workflowRows(worktreePath: resolved?.remoteHost == nil ? resolved?.worktreePath : nil),
-              onRunWorkflow: { onRunWorkflowRow(item.paneID, $0) }
+              onRunWorkflow: { onRunWorkflowRow(item.contentID, $0) }
             )
           }
         }

@@ -14,9 +14,9 @@ struct NotificationDetectorFocusTests {
     // The catalog-level focus map knows nothing about the pane (it is
     // runtime-only and can lag behind AppKit), but the pane has keyboard
     // focus.
-    let f = Fixture(isPaneFocused: { _ in true }, lastFocusedPane: { _ in nil })
+    let f = Fixture(isPaneFocused: { _ in true }, focusesSource: false)
 
-    await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
+    await f.detector.handle(.paneInfoChanged(f.contentID, .desktopNotification(title: "Claude", body: "done")))
 
     #expect(f.store.entries.isEmpty)
     #expect(f.osNotifier.posts.isEmpty)
@@ -24,9 +24,9 @@ struct NotificationDetectorFocusTests {
 
   @Test
   func dropsWhenTheUserHasObservedTheAgentStop() async {
-    let f = Fixture(hasObservedAttention: { _ in true }, lastFocusedPane: { _ in nil })
+    let f = Fixture(hasObservedAttention: { _ in true }, focusesSource: false)
 
-    await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
+    await f.detector.handle(.paneInfoChanged(f.contentID, .desktopNotification(title: "Claude", body: "done")))
 
     #expect(f.store.entries.isEmpty)
     #expect(f.osNotifier.posts.isEmpty)
@@ -36,9 +36,9 @@ struct NotificationDetectorFocusTests {
   func postsACrashAfterAnObservedAgentStop() async {
     // An observed stop only covers the agent's own reminders. A crash is a
     // new lifecycle event and must still notify.
-    let f = Fixture(hasObservedAttention: { _ in true }, lastFocusedPane: { _ in nil })
+    let f = Fixture(hasObservedAttention: { _ in true }, focusesSource: false)
 
-    await f.detector.handle(.paneCrashed(f.paneID, reason: "signal 11"))
+    await f.detector.handle(.paneCrashed(f.contentID, reason: "signal 11"))
 
     #expect(f.store.entries.count == 1)
     #expect(f.osNotifier.posts.count == 1)
@@ -48,9 +48,9 @@ struct NotificationDetectorFocusTests {
   func dropsWhenTheDisplayedSelectionFocusesTheSource() async {
     // No explicit `selectedProjectID`: the window shows the first project
     // that remembers a selected worktree, so its focused pane counts.
-    let f = Fixture(lastFocusedPane: nil, selectsProject: false)
+    let f = Fixture(focusesSource: true, selectsProject: false)
 
-    await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
+    await f.detector.handle(.paneInfoChanged(f.contentID, .desktopNotification(title: "Claude", body: "done")))
 
     #expect(f.store.entries.isEmpty)
     #expect(f.osNotifier.posts.isEmpty)
@@ -58,9 +58,9 @@ struct NotificationDetectorFocusTests {
 
   @Test
   func postsWhenTheSourceIsNotFocused() async {
-    let f = Fixture(lastFocusedPane: { _ in nil })
+    let f = Fixture(focusesSource: false)
 
-    await f.detector.handle(.paneInfoChanged(f.paneID, .desktopNotification(title: "Claude", body: "done")))
+    await f.detector.handle(.paneInfoChanged(f.contentID, .desktopNotification(title: "Claude", body: "done")))
 
     #expect(f.store.entries.count == 1)
     #expect(f.osNotifier.posts.count == 1)
@@ -71,20 +71,21 @@ struct NotificationDetectorFocusTests {
     let store: NotificationStore
     let osNotifier: MockOSNotifier
     let detector: NotificationDetector
-    let paneID: PaneID
+    let contentID: ContentID
 
-    /// `lastFocusedPane == nil` means "the tab remembers the source pane".
+    /// `focusesSource` selects the source Tab in the worktree's focused
+    /// Pane; otherwise a second Tab is selected and the source sits behind it.
     init(
-      isPaneFocused: @escaping @MainActor (PaneID) -> Bool = { _ in false },
-      hasObservedAttention: @escaping @MainActor (PaneID) -> Bool = { _ in false },
-      lastFocusedPane: (@MainActor (TabID) -> PaneID?)?,
+      isPaneFocused: @escaping @MainActor (ContentID) -> Bool = { _ in false },
+      hasObservedAttention: @escaping @MainActor (ContentID) -> Bool = { _ in false },
+      focusesSource: Bool,
       selectsProject: Bool = true
     ) {
-      let paneID = PaneID()
+      let contentID = ContentID()
       let tabID = TabID()
       let worktreeID = WorktreeID()
       let projectID = ProjectID()
-      self.paneID = paneID
+      self.contentID = contentID
 
       let storeURL = FileManager.default.temporaryDirectory.appending(
         component: "notif-detector-focus-\(UUID().uuidString).json"
@@ -105,10 +106,12 @@ struct NotificationDetectorFocusTests {
         now: { Date() }
       )
 
-      let pane = Pane(id: paneID, workingDirectory: "/tmp")
-      let tab = Tab(id: tabID, panes: [pane])
+      let sourceTab = Tab(id: tabID, content: .terminal(id: contentID, workingDirectory: "/tmp"))
+      let otherTab = Tab(content: .terminal(workingDirectory: "/tmp"))
+      let pane = Pane(tabs: [sourceTab, otherTab], selectedTabID: focusesSource ? sourceTab.id : otherTab.id)
       let worktree = Worktree(
-        id: worktreeID, name: "main", path: "/tmp", tabs: [tab], selectedTabID: tabID)
+        id: worktreeID, name: "main", path: "/tmp",
+        splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
       let project = Project(
         id: projectID, name: "p", rootPath: "/tmp", worktrees: [worktree], selectedWorktreeID: worktreeID)
       let catalog = Catalog(projects: [project], selectedProjectID: selectsProject ? projectID : nil)
@@ -119,7 +122,6 @@ struct NotificationDetectorFocusTests {
         tracker: PaneKeyboardActivityTracker(),
         settingsReader: reader,
         catalogSnapshot: { catalog },
-        lastFocusedPane: lastFocusedPane ?? { _ in paneID },
         isAppFrontmost: { true },
         isPaneFocused: isPaneFocused,
         hasObservedAttention: hasObservedAttention,

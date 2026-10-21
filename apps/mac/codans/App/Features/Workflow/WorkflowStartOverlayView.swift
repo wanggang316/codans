@@ -205,12 +205,12 @@ struct WorkflowStartOverlayView: View {
       Picker(
         "Pane",
         selection: Binding(
-          get: { role.paneID },
-          set: { store.send(.setPane(role: role.name, paneID: $0)) })
+          get: { role.contentID },
+          set: { store.send(.setPane(role: role.name, contentID: $0)) })
       ) {
-        Text("Choose…").tag(PaneID?.none)
+        Text("Choose…").tag(ContentID?.none)
         ForEach(role.panes) { pane in
-          Text("\(pane.label) · \(pane.agent.displayName)").tag(PaneID?.some(pane.id))
+          Text("\(pane.label) · \(pane.agent.displayName)").tag(ContentID?.some(pane.id))
         }
       }
       .pickerStyle(.menu)

@@ -9,14 +9,14 @@ import Foundation
 /// - **UUID** — a literal `UUID().uuidString` is passed through without
 ///   a round trip. Fast path for scripted agents that already know IDs.
 /// - **`current` / `.`** — resolves to the relevant `$CODANS_*_ID`
-///   env var (`SPACE_ID`, `PROJECT_ID`, `WORKTREE_ID`, `TAB_ID`, or
-///   `PANE_ID` depending on `kind`). Used by commands that default to
-///   the current context. For panes, a missing env var falls through to
-///   the server, which attributes the caller to its pane from the
+///   env var (`PROJECT_ID`, `WORKTREE_ID`, `PANE_ID`, `TAB_ID`,
+///   `CONTENT_ID` or `TAG_ID` depending on `kind`). Used by commands that
+///   default to the current context. A missing env var falls through to
+///   the server, which attributes the caller to its session from the
 ///   connection's kernel peer PID plus a process-ancestry walk.
-/// - **`@label`** — pane-only. Routed through `hierarchy.resolveAlias`
-///   via the supplied `RPCClient` so the server can match against
-///   `Pane.labels`.
+/// - **`@label`** — session-only. Routed through `hierarchy.resolveAlias`
+///   via the supplied `RPCClient` so the server can match against the
+///   session's labels.
 /// - **everything else** — sent to `hierarchy.resolveAlias` as a generic
 ///   string; the server decides whether it's an index, path glob, or
 ///   unrecognised.
@@ -41,12 +41,12 @@ public enum AliasResolver {
       return uuid
     }
 
-    // 2. `current` / `.` pronoun via env vars. A pane only exports its own
-    // id, so for every other kind this is a hand-exported override; the
-    // server derives project / worktree / tab from the calling pane
-    // (kernel peer PID plus an ancestor walk, or `contextPaneID`) when the
-    // variable is absent, which also covers a subshell or wrapper that
-    // dropped `CODANS_PANE_ID`.
+    // 2. `current` / `.` pronoun via env vars. A session exports its own
+    // pane / tab / content ids, so for every other kind this is a
+    // hand-exported override; the server derives project / worktree from
+    // the calling session (kernel peer PID plus an ancestor walk, or
+    // `contextPaneID`) when the variable is absent, which also covers a
+    // subshell or wrapper that dropped the `CODANS_*_ID` variables.
     if value == "current" || value == ".",
       let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue)
     {
@@ -57,7 +57,7 @@ public enum AliasResolver {
     // absolute here (the server has no idea what the CLI's cwd is); only
     // path-shaped values qualify, since branch names contain slashes too.
     let rpc = try client()
-    let contextPaneID: PaneID? = env[Self.envKey(for: .pane)].flatMap(UUID.init(uuidString:)).map(PaneID.init(raw:))
+    let contextPaneID = Self.callerContentID(env: env)
     let request = IPC.AliasResolveRequest(
       kind: kind,
       value: kind == .worktree ? Self.absolutePathIfPathShaped(value) : value,
@@ -93,9 +93,22 @@ public enum AliasResolver {
     return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
   }
 
-  /// Only `.pane` is ever injected by the app; the others resolve a
-  /// `current` pronoun locally only when a caller exported them by hand.
-  /// See `CodansEnvironment.Key`.
+  /// The caller's own session, sent as the server-side context for
+  /// `hierarchy.resolveAlias`. `CODANS_CONTENT_ID` is authoritative; the
+  /// pane variable is read as a fallback for a shell whose environment
+  /// predates the content variable.
+  static func callerContentID(env: [String: String]) -> ContentID? {
+    for key in [CodansEnvironment.Key.contentID, .paneID] {
+      if let uuid = env[key.rawValue].flatMap(UUID.init(uuidString:)) {
+        return ContentID(raw: uuid)
+      }
+    }
+    return nil
+  }
+
+  /// `.pane`, `.tab` and `.content` are injected by the app; the others
+  /// resolve a `current` pronoun locally only when a caller exported them
+  /// by hand. See `CodansEnvironment.Key`.
   public static func envKey(for kind: IPC.AliasResolveRequest.Kind) -> String {
     let key: CodansEnvironment.Key =
       switch kind {
@@ -103,6 +116,7 @@ public enum AliasResolver {
       case .worktree: .worktreeID
       case .tab: .tabID
       case .pane: .paneID
+      case .content: .contentID
       case .tag: .tagID
       }
     return key.rawValue

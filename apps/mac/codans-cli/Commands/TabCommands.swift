@@ -208,7 +208,7 @@ struct TabListRenderable: Encodable, CustomStringConvertible {
     tabs.isEmpty
       ? "(no tabs)"
       : tabs.map {
-        "\($0.id)  \($0.name ?? $0.cachedDisplayTitle ?? "(untitled)")  (\($0.panes.count) panes)"
+        "\($0.id)  \($0.name ?? $0.cachedDisplayTitle ?? "(untitled)")  content \($0.content.id)"
       }
       .joined(separator: "\n")
   }
@@ -218,12 +218,21 @@ struct TabDTO: Encodable {
   let id: String
   let name: String?
   let cachedDisplayTitle: String?
-  let paneIDs: [String]
+  let color: String?
+  let contentID: String
+  let workingDirectory: String?
+  let labels: [String]
+  let agent: String?
 
   init(tab: Tab) {
     self.id = tab.id.description
     self.name = tab.name
     self.cachedDisplayTitle = tab.cachedDisplayTitle
-    self.paneIDs = tab.panes.map { $0.id.description }
+    self.color = tab.color?.rawValue
+    self.contentID = tab.content.id.description
+    let terminal = tab.content.terminal
+    self.workingDirectory = terminal?.workingDirectory
+    self.labels = terminal?.labels.sorted() ?? []
+    self.agent = terminal?.agentKind?.rawValue
   }
 }

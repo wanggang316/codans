@@ -58,7 +58,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     }
   }
 
-  let paneID: PaneID
+  let contentID: ContentID
   private var surface: ghostty_surface_t?
   private var markedText = NSMutableAttributedString()
   private var trackingArea: NSTrackingArea?
@@ -87,7 +87,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   var onBecomeFirstResponder: (() -> Void)?
   /// Out-of-band intent the view raises on behalf of the user — currently
   /// only the right-click menu's split items. TerminalEngine wires this to
-  /// `runtime.emit(.paneActionRequested(paneID, …))` so menu-driven splits
+  /// `runtime.emit(.paneActionRequested(contentID, …))` so menu-driven splits
   /// flow through the same `PaneActionRouterFeature` that handles libghostty
   /// keybinding-driven splits.
   var onPaneAction: ((PaneActionRequest) -> Void)?
@@ -126,8 +126,8 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   /// `.zero`: `pushGeometry` skips an empty size, which would leave the
   /// child at libghostty's smaller 800×600 px default. The
   /// `autoresizingMask` snaps the view to the pane on layout either way.
-  init(paneID: PaneID, initialSize: CGSize? = nil) {
-    self.paneID = paneID
+  init(contentID: ContentID, initialSize: CGSize? = nil) {
+    self.contentID = contentID
     let size = initialSize.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil } ?? Self.placeholderSize
     super.init(frame: NSRect(origin: .zero, size: size))
     self.wantsLayer = true
@@ -212,7 +212,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   override func becomeFirstResponder() -> Bool {
     let accepted = super.becomeFirstResponder()
     if accepted, !isClaimingFocus {
-      FocusTrace.record("surface(\(paneID)) became first responder outside codans", responder: nil)
+      FocusTrace.record("surface(\(contentID)) became first responder outside codans", responder: nil)
     }
     if accepted, let surface { ghostty_surface_set_focus(surface, true) }
     if accepted { onBecomeFirstResponder?() }
@@ -228,7 +228,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
   func claimFirstResponder(in window: NSWindow, reason: String?) -> Bool {
     if let reason {
       FocusTrace.record(
-        "surface(\(paneID)) claim reason=\(reason)", responder: window.firstResponder)
+        "surface(\(contentID)) claim reason=\(reason)", responder: window.firstResponder)
     }
     isClaimingFocus = true
     defer { isClaimingFocus = false }
@@ -610,7 +610,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     // `codans pane send` and friends bypasses AppKit entirely and reaches
     // libghostty via `ghostty_surface_text`, so it can never surface as a
     // synthetic keyDown that would falsely arm the suppression window.
-    PaneKeyboardActivityTracker.shared?.recordKey(in: paneID)
+    PaneKeyboardActivityTracker.shared?.recordKey(in: contentID)
 
     // Capture marked-text state BEFORE interpretKeyEvents — IME may consume
     // the event purely to mutate composition (e.g. Backspace shrinking or
@@ -912,7 +912,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     case .resetTerminal: performBindingAction("reset")
     case .copyPaneID:
       NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(paneID.description, forType: .string)
+      NSPasteboard.general.setString(contentID.description, forType: .string)
     case .close: onPaneAction?(.closePane)
     case .splitRight: onPaneAction?(.newSplit(direction: .right))
     case .splitLeft: onPaneAction?(.newSplit(direction: .left))

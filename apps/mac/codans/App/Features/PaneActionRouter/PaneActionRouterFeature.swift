@@ -8,43 +8,37 @@ import os.log
 /// the single place where libghostty-sourced tab/split intents meet the
 /// catalog mutation layer.
 ///
+/// The request carries the source Content (the surface the keybind fired
+/// in); the router resolves its Tab and Pane live, so a Tab that moved
+/// since the surface was created still routes to where it is now.
+///
 /// State is empty by design: the router is a fan-out table, not a state
-/// machine. Every error path (missing pane address, stale catalog, invalid
+/// machine. Every error path (missing address, stale catalog, invalid
 /// resize direction) is swallowed and logged; a race with teardown must
 /// never crash the runtime callback thread.
-///
-/// Two simplifications worth noting:
-/// - `PaneActionRequest.gotoSplit` currently collapses spatial directions
-///   (up/down/left/right) onto the tree's previous/next neighbor order
-///   (`SplitTree.focusTarget`). A real spatial walk needs frame geometry
-///   the reducer does not own; upgrade later if users ask.
-/// - `PaneActionRequest.toggleSplitZoom` reads the live catalog snapshot
-///   to decide between `focusPane` (zoom) and `unzoomTab` (unzoom). This
-///   is a read-then-write pair — benign at user-keystroke cadence.
 @Reducer
 struct PaneActionRouterFeature {
   @ObservableState
   struct State: Equatable {}
 
   enum Action: Equatable {
-    case requested(PaneID, PaneActionRequest)
+    case requested(ContentID, PaneActionRequest)
     case delegate(Delegate)
 
     /// Parent-consumed delegate. `PresentTerminal` and
     /// `ToggleCommandPalette` are UI-level intents the root reducer owns;
     /// the router only lifts them onto a typed action so the parent can
     /// service them without re-decoding the ghostty action. Both carry
-    /// the source pane so the parent can resolve per-pane context
-    /// (e.g. which pane is focused when the palette opens).
+    /// the source Content so the parent can resolve per-session context
+    /// (e.g. which session is focused when the palette opens).
     enum Delegate: Equatable {
-      case presentTerminalRequested(PaneID)
-      case commandPaletteToggleRequested(PaneID)
-      case openLinkRequested(PaneID, raw: String, workingDirectory: String?)
+      case presentTerminalRequested(ContentID)
+      case commandPaletteToggleRequested(ContentID)
+      case openLinkRequested(ContentID, raw: String, workingDirectory: String?)
     }
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
-  @Dependency(\.continuousClock) private var clock
 
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.router", category: "pane"
@@ -53,8 +47,8 @@ struct PaneActionRouterFeature {
   var body: some Reducer<State, Action> {
     Reduce { _, action in
       switch action {
-      case .requested(let paneID, let request):
-        return dispatch(paneID, request)
+      case .requested(let contentID, let request):
+        return dispatch(contentID, request)
       case .delegate:
         return .none
       }
@@ -62,223 +56,139 @@ struct PaneActionRouterFeature {
   }
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length
-  private func dispatch(_ paneID: PaneID, _ request: PaneActionRequest) -> Effect<Action> {
+  private func dispatch(_ contentID: ContentID, _ request: PaneActionRequest) -> Effect<Action> {
     switch request {
     case .newTab:
-      guard let address = hierarchyClient.addressOf(paneID) else {
-        Self.logger.info("newTab: no address for pane \(paneID.raw.uuidString, privacy: .public)")
+      guard let address = hierarchyClient.addressOf(contentID) else {
+        Self.logger.info("newTab: no address for content \(contentID.raw.uuidString, privacy: .public)")
         return .none
       }
-      // Inherit the source pane's cwd so the new tab opens in the same
-      // directory. Missing source (already closed?) falls back to the
-      // worktree root via `findWorktreePath`.
+      // Inherit the source session's cwd so the new Tab opens in the same
+      // directory; a Tab lands in the Pane the keybind fired in, not the
+      // focused one.
       let catalog = hierarchyClient.snapshot()
       let cwd =
-        findPane(
-          paneID: paneID, tabID: address.tabID,
-          worktreeID: address.worktreeID, projectID: address.projectID,
-          in: catalog
-        )?.workingDirectory ?? findWorktree(
-          worktreeID: address.worktreeID, projectID: address.projectID,
-          in: catalog
-        )?.path ?? NSHomeDirectory()
+        catalog.content(contentID)?.terminal?.workingDirectory
+        ?? findWorktree(worktreeID: address.worktreeID, projectID: address.projectID, in: catalog)?.path
+        ?? NSHomeDirectory()
       guard
-        let newTabID = try? hierarchyClient.createTab(
-          address.worktreeID, address.projectID, nil
+        let created = try? hierarchyClient.newTab(
+          address.paneID, address.worktreeID, address.projectID,
+          .terminal(workingDirectory: cwd), nil, nil, true
         )
       else { return .none }
-      // Without this, HierarchyManager.createTab initialises an empty Tab
-      // and the UI shows "No panes" until the user opens one manually —
-      // a surprise for a keybind that asked for a working tab.
-      let cwdForTab = cwd
-      let worktreeID = address.worktreeID
-      let projectID = address.projectID
-      return .run { [client = hierarchyClient, clock] _ in
-        // Let the tab bar's insertion animation play first; see
-        // `TabBarMetrics.firstPaneDelay`.
-        try? await clock.sleep(for: TabBarMetrics.firstPaneDelay)
-        _ = try? await client.openPane(
-          newTabID, worktreeID, projectID, cwdForTab, nil
-        )
-      }
+      return bringUpAndFocus(created.contentID)
 
     case .closeTab(.this):
-      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
-      try? hierarchyClient.closeTab(
-        address.tabID, address.worktreeID, address.projectID
-      )
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.closeTab(address.tabID)
       return .none
 
     case .closeTab(.other):
-      closeSiblingTabs(from: paneID, mode: .other)
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.closeOtherTabs(address.tabID)
       return .none
 
     case .closeTab(.right):
-      closeSiblingTabs(from: paneID, mode: .right)
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.closeTabsToRight(address.tabID)
       return .none
 
     case .moveTab(let offset):
-      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
-      try? hierarchyClient.moveTab(
-        address.tabID, address.worktreeID, address.projectID, offset
-      )
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.moveTab(address.tabID, offset)
       return .none
 
     case .gotoTab(let target):
-      gotoTab(from: paneID, target: target)
+      gotoTab(from: contentID, target: target)
       return .none
 
     case .newSplit(let direction):
       Self.logger.info(
-        "newSplit received: paneID=\(paneID.raw.uuidString, privacy: .public) dir=\(String(describing: direction), privacy: .public)"
+        "newSplit received: content=\(contentID.raw.uuidString, privacy: .public) dir=\(String(describing: direction), privacy: .public)"
       )
-      guard let address = hierarchyClient.addressOf(paneID) else {
+      guard let address = hierarchyClient.addressOf(contentID) else {
         Self.logger.info(
-          "newSplit aborted: no address for paneID=\(paneID.raw.uuidString, privacy: .public)"
+          "newSplit aborted: no address for content=\(contentID.raw.uuidString, privacy: .public)"
         )
         return .none
       }
       let catalog = hierarchyClient.snapshot()
+      let cwd =
+        catalog.content(contentID)?.terminal?.workingDirectory
+        ?? findWorktree(worktreeID: address.worktreeID, projectID: address.projectID, in: catalog)?.path
+        ?? NSHomeDirectory()
       guard
-        let sourcePane = findPane(
-          paneID: paneID, tabID: address.tabID,
-          worktreeID: address.worktreeID, projectID: address.projectID,
-          in: catalog
+        let created = try? hierarchyClient.splitPane(
+          address.paneID, Self.splitDirection(for: direction),
+          .terminal(workingDirectory: cwd), nil, nil
         )
       else { return .none }
-      let newDir = Self.splitDirection(for: direction)
-      let tabID = address.tabID
-      let worktreeID = address.worktreeID
-      let projectID = address.projectID
-      let cwd = sourcePane.workingDirectory
-      // Match ghostty macOS controller: focus the new pane. Dispatched
-      // async so the surface view has been attached to the hosting
-      // window by the time `makeFirstResponder` runs — at this moment
-      // the NSViewRepresentable update cycle hasn't finished yet.
-      return .run { [client = hierarchyClient] _ in
-        guard
-          let newPaneID = try? await client.splitPane(
-            paneID, newDir,
-            tabID, worktreeID, projectID,
-            cwd, nil
-          )
-        else { return }
-        await MainActor.run {
-          client.focusSurfaceView(newPaneID)
-        }
-      }
+      return bringUpAndFocus(created.contentID)
 
     case .closePane:
-      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
-      let catalog = hierarchyClient.snapshot()
-      guard
-        let tab = findTab(
-          tabID: address.tabID, worktreeID: address.worktreeID,
-          projectID: address.projectID, in: catalog
-        )
-      else { return .none }
-      // Single-pane tab: closing the last pane should also retire the
-      // now-empty tab, mirroring the ⌘W `close_surface` path in
-      // RootFeature. A zombie tab with no panes shows a blank pane area.
-      if tab.panes.count <= 1 {
-        try? hierarchyClient.closeTab(
-          address.tabID, address.worktreeID, address.projectID
-        )
-        return .none
-      }
-      // Multi-pane tab: resolve the survivor BEFORE mutating the tree so
-      // the leaf identity is still valid, drop the pane, then promote the
-      // survivor's surface to first responder so input follows the close.
-      let focusTarget = tab.splitTree.focusTargetAfterClosing(paneID)
-      try? hierarchyClient.closePane(
-        paneID, address.tabID, address.worktreeID, address.projectID
-      )
-      guard let focusTarget else { return .none }
-      return .run { [client = hierarchyClient] _ in
-        await MainActor.run {
-          client.focusSurfaceView(focusTarget)
-        }
-      }
+      // ghostty's `close_surface`: close the session the keybind fired in.
+      // The manager retires the Pane when it was the last Tab and hands
+      // focus to the neighbour.
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.closeTab(address.tabID)
+      return .none
 
     case .gotoSplit(let direction):
-      return gotoSplit(from: paneID, direction: direction)
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      _ = try? hierarchyClient.focusNeighbour(address.paneID, direction)
+      return .none
 
     case .resizeSplit(let direction, let amount):
-      try? hierarchyClient.resizePane(paneID, direction, amount)
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.resizePane(address.paneID, direction, amount)
       return .none
 
     case .equalizeSplits:
-      guard let address = hierarchyClient.addressOf(paneID) else { return .none }
-      try? hierarchyClient.equalizeTabSplits(
-        address.tabID, address.worktreeID, address.projectID
-      )
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      try? hierarchyClient.equalizeSplits(address.worktreeID, address.projectID)
       return .none
 
     case .toggleSplitZoom:
-      toggleSplitZoom(paneID: paneID)
+      guard let address = hierarchyClient.addressOf(contentID) else { return .none }
+      _ = try? hierarchyClient.toggleZoom(address.paneID)
       return .none
 
     case .presentTerminal:
-      return .send(.delegate(.presentTerminalRequested(paneID)))
+      return .send(.delegate(.presentTerminalRequested(contentID)))
 
     case .toggleCommandPalette:
-      return .send(.delegate(.commandPaletteToggleRequested(paneID)))
+      return .send(.delegate(.commandPaletteToggleRequested(contentID)))
 
     case .openLink(let raw, let workingDirectory):
-      return .send(.delegate(.openLinkRequested(paneID, raw: raw, workingDirectory: workingDirectory)))
+      return .send(.delegate(.openLinkRequested(contentID, raw: raw, workingDirectory: workingDirectory)))
+    }
+  }
+
+  /// Spawns the session of a Tab the router just created and, once it is
+  /// up, makes it the first responder. Matches ghostty's macOS controller
+  /// (focus the new split). Dispatched async so the surface view has been
+  /// attached to the hosting window by the time `makeFirstResponder` runs
+  /// — at this moment the NSViewRepresentable update cycle hasn't finished.
+  private func bringUpAndFocus(_ contentID: ContentID) -> Effect<Action> {
+    .run { [client = hierarchyClient] _ in
+      guard (try? await client.ensureSurface(contentID)) != nil else { return }
+      await MainActor.run {
+        client.focusSurfaceView(contentID)
+      }
     }
   }
 
   // MARK: - Tab helpers
 
-  /// Closes every tab in the source pane's Worktree that matches `mode`
-  /// relative to the source's own tab. `.other` keeps only the current tab;
-  /// `.right` keeps the current tab plus every tab to its left. Ordering is
-  /// the catalog's natural tab-array order. Snapshots the catalog once so
-  /// closes don't chase indexes as the array shrinks.
-  private func closeSiblingTabs(from paneID: PaneID, mode: CloseTabMode) {
-    guard let address = hierarchyClient.addressOf(paneID) else { return }
+  private func gotoTab(from contentID: ContentID, target: GotoTabTarget) {
+    guard let address = hierarchyClient.addressOf(contentID) else { return }
     let catalog = hierarchyClient.snapshot()
-    guard
-      let worktree = findWorktree(
-        worktreeID: address.worktreeID, projectID: address.projectID,
-        in: catalog
-      )
-    else { return }
-    guard let currentIndex = worktree.tabs.firstIndex(where: { $0.id == address.tabID })
+    guard let pane = catalog.pane(address.paneID), !pane.tabs.isEmpty,
+      let currentIndex = pane.tabs.firstIndex(where: { $0.id == address.tabID })
     else { return }
 
-    let doomed: [TabID]
-    switch mode {
-    case .other:
-      doomed = worktree.tabs.enumerated()
-        .filter { $0.offset != currentIndex }
-        .map { $0.element.id }
-    case .right:
-      doomed = worktree.tabs.suffix(from: currentIndex + 1).map(\.id)
-    case .this:
-      return  // handled in dispatch.
-    }
-    for tabID in doomed {
-      try? hierarchyClient.closeTab(
-        tabID, address.worktreeID, address.projectID
-      )
-    }
-  }
-
-  private func gotoTab(from paneID: PaneID, target: GotoTabTarget) {
-    guard let address = hierarchyClient.addressOf(paneID) else { return }
-    let catalog = hierarchyClient.snapshot()
-    guard
-      let worktree = findWorktree(
-        worktreeID: address.worktreeID, projectID: address.projectID,
-        in: catalog
-      ),
-      !worktree.tabs.isEmpty,
-      let currentIndex = worktree.tabs.firstIndex(where: { $0.id == address.tabID })
-    else { return }
-
-    let count = worktree.tabs.count
+    let count = pane.tabs.count
     let targetIndex: Int
     switch target {
     case .previous:
@@ -295,10 +205,7 @@ struct PaneActionRouterFeature {
       targetIndex = min(n - 1, count - 1)
     }
     guard targetIndex != currentIndex else { return }
-    let targetTabID = worktree.tabs[targetIndex].id
-    try? hierarchyClient.selectTab(
-      targetTabID, address.worktreeID, address.projectID
-    )
+    try? hierarchyClient.selectTab(pane.tabs[targetIndex].id)
   }
 
   // MARK: - Split helpers
@@ -317,80 +224,6 @@ struct PaneActionRouterFeature {
     }
   }
 
-  /// Resolves the target pane for `gotoSplit`, updates the catalog via
-  /// `focusPane`, and then asynchronously promotes the neighbor's surface
-  /// view to first responder so the cursor (and keyboard input) actually
-  /// follows the focus change. Without the `focusSurfaceView` step the
-  /// catalog flips `lastFocusedPane` and the dim overlay swaps, but the
-  /// underlying `NSView` still holds the system caret.
-  ///
-  /// `previous`/`next` walk the tree's leaf order (used by
-  /// `focusTargetAfterClosing` and any "tab through panes" flow). The
-  /// four spatial directions resolve through `SplitTree`'s virtual
-  /// layout — the split tree's own `direction`/`ratio` is enough to
-  /// derive relative geometry, no live frame data needed. Returns nil
-  /// (no-op) when the source pane is on the edge in the requested
-  /// direction so "up means up" stays predictable.
-  private func gotoSplit(from paneID: PaneID, direction: FocusDirection) -> Effect<Action> {
-    guard let address = hierarchyClient.addressOf(paneID) else { return .none }
-    let catalog = hierarchyClient.snapshot()
-    guard
-      let tab = findTab(
-        tabID: address.tabID, worktreeID: address.worktreeID,
-        projectID: address.projectID, in: catalog
-      )
-    else { return .none }
-
-    let neighborID: PaneID?
-    switch direction {
-    case .previous:
-      neighborID = tab.splitTree.focusTarget(for: .previous, from: paneID)
-    case .next:
-      neighborID = tab.splitTree.focusTarget(for: .next, from: paneID)
-    case .up:
-      neighborID = tab.splitTree.focusTarget(spatial: .up, from: paneID)
-    case .down:
-      neighborID = tab.splitTree.focusTarget(spatial: .down, from: paneID)
-    case .left:
-      neighborID = tab.splitTree.focusTarget(spatial: .left, from: paneID)
-    case .right:
-      neighborID = tab.splitTree.focusTarget(spatial: .right, from: paneID)
-    }
-    guard let neighborID else { return .none }
-    try? hierarchyClient.focusPane(
-      neighborID, address.tabID, address.worktreeID, address.projectID
-    )
-    // Mirror `newSplit`'s pattern: dispatch makeFirstResponder async so
-    // the view tree has settled (zoom toggle / dim overlay diff) before
-    // we steal first-responder status.
-    return .run { [client = hierarchyClient] _ in
-      await MainActor.run {
-        client.focusSurfaceView(neighborID)
-      }
-    }
-  }
-
-  private func toggleSplitZoom(paneID: PaneID) {
-    guard let address = hierarchyClient.addressOf(paneID) else { return }
-    let catalog = hierarchyClient.snapshot()
-    guard
-      let tab = findTab(
-        tabID: address.tabID, worktreeID: address.worktreeID,
-        projectID: address.projectID, in: catalog
-      )
-    else { return }
-
-    if tab.splitTree.zoomed == paneID {
-      try? hierarchyClient.unzoomTab(
-        address.tabID, address.worktreeID, address.projectID
-      )
-    } else {
-      try? hierarchyClient.focusPane(
-        paneID, address.tabID, address.worktreeID, address.projectID
-      )
-    }
-  }
-
   // MARK: - Catalog lookups
 
   private func findWorktree(
@@ -400,29 +233,5 @@ struct PaneActionRouterFeature {
   ) -> Worktree? {
     catalog.projects.first(where: { $0.id == projectID })?
       .worktrees.first(where: { $0.id == worktreeID })
-  }
-
-  private func findTab(
-    tabID: TabID,
-    worktreeID: WorktreeID,
-    projectID: ProjectID,
-    in catalog: Catalog
-  ) -> Tab? {
-    findWorktree(
-      worktreeID: worktreeID, projectID: projectID, in: catalog
-    )?.tabs.first(where: { $0.id == tabID })
-  }
-
-  private func findPane(
-    paneID: PaneID,
-    tabID: TabID,
-    worktreeID: WorktreeID,
-    projectID: ProjectID,
-    in catalog: Catalog
-  ) -> Pane? {
-    findTab(
-      tabID: tabID, worktreeID: worktreeID, projectID: projectID,
-      in: catalog
-    )?.panes.first(where: { $0.id == paneID })
   }
 }

@@ -146,7 +146,7 @@ extension GhosttyActionDecoder {
   /// copied before return.
   nonisolated static func decodeSurfaceAction(  // swiftlint:disable:this cyclomatic_complexity function_body_length
     _ action: ghostty_action_s,
-    paneID: PaneID
+    contentID: ContentID
   ) -> DecodedSurfaceAction {
     switch action.tag {
 
@@ -350,7 +350,7 @@ extension GhosttyActionDecoder {
       return .unsupported(rawTag: action.tag.rawValue, reason: "app-scoped on surface target")
 
     default:
-      _ = paneID  // silence unused warning for exhaustive builds
+      _ = contentID  // silence unused warning for exhaustive builds
       return .unsupported(rawTag: action.tag.rawValue, reason: "unknown tag")
     }
   }
@@ -386,7 +386,7 @@ extension GhosttyActionDecoder {
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func apply(
     _ decoded: DecodedSurfaceAction,
-    paneID: PaneID,
+    contentID: ContentID,
     pane: PaneSurface,
     runtime: GhosttyRuntime
   ) -> Bool {
@@ -394,44 +394,44 @@ extension GhosttyActionDecoder {
 
     // Bucket 1 — Tab / split intent
     case .newTab:
-      return emitPaneIntent(.newTab, paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.newTab, contentID: contentID, runtime: runtime)
     case .closeTab(let mode):
-      return emitPaneIntent(.closeTab(mode: mode), paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.closeTab(mode: mode), contentID: contentID, runtime: runtime)
     case .moveTab(let offset):
-      return emitPaneIntent(.moveTab(offset: offset), paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.moveTab(offset: offset), contentID: contentID, runtime: runtime)
     case .gotoTab(let target):
-      return emitPaneIntent(.gotoTab(target: target), paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.gotoTab(target: target), contentID: contentID, runtime: runtime)
     case .newSplit(let dir):
-      return emitPaneIntent(.newSplit(direction: dir), paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.newSplit(direction: dir), contentID: contentID, runtime: runtime)
     case .gotoSplit(let dir):
-      return emitPaneIntent(.gotoSplit(direction: dir), paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.gotoSplit(direction: dir), contentID: contentID, runtime: runtime)
     case .resizeSplit(let dir, let amount):
       return emitPaneIntent(
-        .resizeSplit(direction: dir, amount: amount), paneID: paneID, runtime: runtime)
+        .resizeSplit(direction: dir, amount: amount), contentID: contentID, runtime: runtime)
     case .equalizeSplits:
-      return emitPaneIntent(.equalizeSplits, paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.equalizeSplits, contentID: contentID, runtime: runtime)
     case .toggleSplitZoom:
-      return emitPaneIntent(.toggleSplitZoom, paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.toggleSplitZoom, contentID: contentID, runtime: runtime)
     case .presentTerminal:
-      return emitPaneIntent(.presentTerminal, paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.presentTerminal, contentID: contentID, runtime: runtime)
     case .toggleCommandPalette:
-      return emitPaneIntent(.toggleCommandPalette, paneID: paneID, runtime: runtime)
+      return emitPaneIntent(.toggleCommandPalette, contentID: contentID, runtime: runtime)
 
     // Bucket 2 — Window intent
     case .newWindow:
-      return emitWindowIntent(.new(from: paneID), runtime: runtime)
+      return emitWindowIntent(.new(from: contentID), runtime: runtime)
     case .closeWindow:
-      return emitWindowIntent(.close(from: paneID), runtime: runtime)
+      return emitWindowIntent(.close(from: contentID), runtime: runtime)
     case .closeAllWindows:
       return emitWindowIntent(.closeAll, runtime: runtime)
     case .gotoWindow(let target):
       return emitWindowIntent(.goto(target: target), runtime: runtime)
     case .toggleFullscreen:
-      return emitWindowIntent(.toggleFullscreen(from: paneID), runtime: runtime)
+      return emitWindowIntent(.toggleFullscreen(from: contentID), runtime: runtime)
     case .toggleMaximize:
-      return emitWindowIntent(.toggleMaximize(from: paneID), runtime: runtime)
+      return emitWindowIntent(.toggleMaximize(from: contentID), runtime: runtime)
     case .toggleTabOverview:
-      return emitWindowIntent(.toggleTabOverview(from: paneID), runtime: runtime)
+      return emitWindowIntent(.toggleTabOverview(from: contentID), runtime: runtime)
     case .toggleVisibility:
       return emitWindowIntent(.toggleAppVisibility, runtime: runtime)
     case .toggleBackgroundOpacity:
@@ -447,77 +447,77 @@ extension GhosttyActionDecoder {
 
     // Bucket 3 — Surface info
     case .setTitle(let title):
-      return emitInfo(.title(title), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.title(title), pane: pane, contentID: contentID, runtime: runtime)
     case .setTabTitle(let title):
-      return emitInfo(.tabTitle(title), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.tabTitle(title), pane: pane, contentID: contentID, runtime: runtime)
     case .promptTitle(let raw):
-      return emitInfo(.promptTitle(raw), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.promptTitle(raw), pane: pane, contentID: contentID, runtime: runtime)
     case .pwd(let pwd):
-      return emitInfo(.pwd(pwd), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.pwd(pwd), pane: pane, contentID: contentID, runtime: runtime)
     case .mouseShape(let raw):
-      return emitInfo(.mouseShape(raw), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.mouseShape(raw), pane: pane, contentID: contentID, runtime: runtime)
     case .mouseVisible(let visible):
-      return emitInfo(.mouseVisible(visible), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.mouseVisible(visible), pane: pane, contentID: contentID, runtime: runtime)
     case .mouseOverLink(let link):
-      return emitInfo(.mouseOverLink(link), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.mouseOverLink(link), pane: pane, contentID: contentID, runtime: runtime)
     case .colorChange(let kind, let r, let g, let b):
       return emitInfo(
         .colorChange(kind: kind, r: r, g: g, b: b),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .rendererHealthy(let healthy):
-      return emitInfo(.rendererHealthy(healthy), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.rendererHealthy(healthy), pane: pane, contentID: contentID, runtime: runtime)
     case .cellSize(let w, let h):
       return emitInfo(
-        .cellSize(width: w, height: h), pane: pane, paneID: paneID, runtime: runtime)
+        .cellSize(width: w, height: h), pane: pane, contentID: contentID, runtime: runtime)
     case .sizeLimit(let mnw, let mnh, let mxw, let mxh):
       return emitInfo(
         .sizeLimit(minWidth: mnw, minHeight: mnh, maxWidth: mxw, maxHeight: mxh),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .initialSize(let w, let h):
       return emitInfo(
-        .initialSize(width: w, height: h), pane: pane, paneID: paneID, runtime: runtime)
+        .initialSize(width: w, height: h), pane: pane, contentID: contentID, runtime: runtime)
     case .resetWindowSize:
-      return emitInfo(.resetWindowSize, pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.resetWindowSize, pane: pane, contentID: contentID, runtime: runtime)
     case .scrollbar(let total, let offset, let length):
       return emitInfo(
         .scrollbar(total: total, offset: offset, length: length),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .secureInput(let raw):
-      return emitInfo(.secureInput(raw), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.secureInput(raw), pane: pane, contentID: contentID, runtime: runtime)
     case .keySequence(let active, let trigger):
       return emitInfo(
         .keySequence(active: active, trigger: trigger),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .keyTable(let name, let depth):
       return emitInfo(
         .keyTable(name: name, depth: depth),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .readonly(let on):
-      return emitInfo(.readonly(on), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.readonly(on), pane: pane, contentID: contentID, runtime: runtime)
     case .quitTimer(let raw):
-      return emitInfo(.quitTimer(raw), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.quitTimer(raw), pane: pane, contentID: contentID, runtime: runtime)
     case .floatWindow(let floating):
-      return emitInfo(.floatWindow(floating), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.floatWindow(floating), pane: pane, contentID: contentID, runtime: runtime)
     case .searchStarted(let needle):
       return emitInfo(
-        .searchStarted(needle: needle), pane: pane, paneID: paneID, runtime: runtime)
+        .searchStarted(needle: needle), pane: pane, contentID: contentID, runtime: runtime)
     case .searchEnded:
-      return emitInfo(.searchEnded, pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.searchEnded, pane: pane, contentID: contentID, runtime: runtime)
     case .searchTotal(let t):
-      return emitInfo(.searchTotal(t), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.searchTotal(t), pane: pane, contentID: contentID, runtime: runtime)
     case .searchSelected(let s):
-      return emitInfo(.searchSelected(s), pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.searchSelected(s), pane: pane, contentID: contentID, runtime: runtime)
     case .progress(let state, let value):
       // An agent whose program status governs its pane reports its own
       // activity; its OSC 9;4 progress must not also light the pane as busy.
-      let governed = runtime.terminalEngine?.programStatusGoverns(paneID) == true
+      let governed = runtime.terminalEngine?.programStatusGoverns(contentID) == true
       return emitInfo(
         .progress(
           state: governed ? GHOSTTY_PROGRESS_STATE_REMOVE.rawValue : state,
           value: governed ? nil : value),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .programStatus(let report):
-      runtime.terminalEngine?.ingestProgramStatus(report, for: paneID)
+      runtime.terminalEngine?.ingestProgramStatus(report, for: contentID)
       return true
 
     // Bucket 4 — Effectful
@@ -525,20 +525,20 @@ extension GhosttyActionDecoder {
       // Parsing and opening need catalog context (project host, editor
       // preference), so the App layer owns it; see `TerminalLinkClient`.
       return emitPaneIntent(
-        .openLink(raw: url, workingDirectory: pane.info.pwd), paneID: paneID, runtime: runtime)
+        .openLink(raw: url, workingDirectory: pane.info.pwd), contentID: contentID, runtime: runtime)
     case .desktopNotification(let title, let body):
       return emitInfo(
         .desktopNotification(title: title, body: body),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .ringBell:
-      return emitInfo(.bellRang, pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(.bellRang, pane: pane, contentID: contentID, runtime: runtime)
     case .commandFinished(let exit, let duration):
       return emitInfo(
         .commandFinished(exitCode: exit, duration: duration),
-        pane: pane, paneID: paneID, runtime: runtime)
+        pane: pane, contentID: contentID, runtime: runtime)
     case .showChildExited(let code):
       pane.markExited(code: code)
-      runtime.emitInfoChanged(paneID, .childExited(code: code))
+      runtime.emitInfoChanged(contentID, .childExited(code: code))
       logger.debug("surface action: show_child_exited (code \(code))")
       // libghostty's `childExited` does NOT call `self.close()` on macOS: the
       // `login` wrapper breaks its runtime/exit-code detection, so every child
@@ -554,7 +554,7 @@ extension GhosttyActionDecoder {
       // path emits this action immediately before `self.close()`) from tearing
       // the pane down twice.
       Task { @MainActor in
-        runtime.surface(for: paneID)?.requestClose(processAlive: false)
+        runtime.surface(for: contentID)?.requestClose(processAlive: false)
       }
       return true
     case .undo:
@@ -575,7 +575,7 @@ extension GhosttyActionDecoder {
 
     // Bucket 5 — Config lifecycle
     case .reloadConfig(let soft):
-      runtime.reloadSurfaceConfig(paneID: paneID, soft: soft)
+      runtime.reloadSurfaceConfig(contentID: contentID, soft: soft)
       logger.debug("surface action: reload_config (soft: \(soft))")
       return true
 
@@ -619,10 +619,10 @@ extension GhosttyActionDecoder {
   @MainActor
   fileprivate static func emitPaneIntent(
     _ request: PaneActionRequest,
-    paneID: PaneID,
+    contentID: ContentID,
     runtime: GhosttyRuntime
   ) -> Bool {
-    runtime.emit(.paneActionRequested(paneID, request))
+    runtime.emit(.paneActionRequested(contentID, request))
     return true
   }
 
@@ -639,11 +639,11 @@ extension GhosttyActionDecoder {
   fileprivate static func emitInfo(
     _ delta: PaneInfoDelta,
     pane: PaneSurface,
-    paneID: PaneID,
+    contentID: ContentID,
     runtime: GhosttyRuntime
   ) -> Bool {
     pane.apply(delta)
-    runtime.emitInfoChanged(paneID, delta)
+    runtime.emitInfoChanged(contentID, delta)
     return true
   }
 }

@@ -87,7 +87,7 @@ public final class UserNotificationsOSNotifier: OSNotifier {
     } else {
       content.body = entry.body
     }
-    content.threadIdentifier = entry.source.paneID.raw.uuidString
+    content.threadIdentifier = entry.source.contentID.raw.uuidString
     content.categoryIdentifier = entry.kind.rawValue
     content.sound = playSound ? .default : nil
     content.userInfo = ["deeplink": Self.deeplink(for: entry.source).absoluteString]
@@ -102,9 +102,10 @@ public final class UserNotificationsOSNotifier: OSNotifier {
 
   // MARK: - Deeplink
 
-  /// `codans://focus?project=...&worktree=...&tab=...&pane=...`. Parsed
+  /// `codans://focus?project=...&worktree=...&content=...`. Parsed
   /// in `AppDelegate.userNotificationCenter(_:didReceive:...)` to recover the
-  /// originating `(projectID, worktreeID, tabID, paneID)` tuple.
+  /// originating `(projectID, worktreeID, contentID)` tuple; the Pane and
+  /// Tab are resolved from the Content when the link is followed.
   public static func deeplink(for source: InboxEntry.SourcePath) -> URL {
     var components = URLComponents()
     components.scheme = "codans"
@@ -112,8 +113,7 @@ public final class UserNotificationsOSNotifier: OSNotifier {
     components.queryItems = [
       URLQueryItem(name: "project", value: source.projectID.raw.uuidString),
       URLQueryItem(name: "worktree", value: source.worktreeID.raw.uuidString),
-      URLQueryItem(name: "tab", value: source.tabID.raw.uuidString),
-      URLQueryItem(name: "pane", value: source.paneID.raw.uuidString),
+      URLQueryItem(name: "content", value: source.contentID.raw.uuidString),
     ]
     // `URLComponents.url` cannot fail here — every component is statically
     // valid — but the API is optional, so fall back to a non-encoded form.

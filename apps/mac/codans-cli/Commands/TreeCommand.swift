@@ -7,11 +7,11 @@ import CodansKit
 struct TreeCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "tree",
-    abstract: "List projects, worktrees, tabs, and panes.",
+    abstract: "List projects, worktrees, panes, and tabs.",
     discussion: """
       Use 'codans tree' as the first discovery command. It prints the full hierarchy so
-      you do not have to walk projects, worktrees, tabs, and panes one command at
-      a time.
+      you do not have to walk projects, worktrees, panes, and tabs one command at
+      a time. Each Tab line carries the id of the session it holds.
       """
   )
 
@@ -62,20 +62,51 @@ struct HierarchyTree: Codable, Sendable {
     return nil
   }
 
-  func locateTab(_ tabID: TabID) -> TabPath? {
+  func locatePane(_ paneID: PaneID) -> PanePath? {
     for project in projects {
-      for worktree in project.worktrees where worktree.tabs.contains(where: { $0.id == tabID }) {
-        return TabPath(projectID: project.id, worktreeID: worktree.id, tabID: tabID)
+      for worktree in project.worktrees where worktree.panes.contains(where: { $0.id == paneID }) {
+        return PanePath(projectID: project.id, worktreeID: worktree.id, paneID: paneID)
       }
     }
     return nil
   }
 
-  func locatePane(_ paneID: PaneID) -> PanePath? {
+  func locateTab(_ tabID: TabID) -> TabPath? {
+    locateTab { $0.id == tabID }
+  }
+
+  func locateContent(_ contentID: ContentID) -> TabPath? {
+    locateTab { $0.content.id == contentID }
+  }
+
+  /// Resolves a session reference whose flavour the caller does not know:
+  /// the server hands back a Content, Tab or Pane id depending on the
+  /// alias shape (`current`, `@label`, `t<n>`, `p<n>`). A Pane stands for
+  /// its selected Tab.
+  func locateSession(_ uuid: UUID) -> TabPath? {
+    if let path = locateContent(ContentID(raw: uuid)) { return path }
+    if let path = locateTab(TabID(raw: uuid)) { return path }
     for project in projects {
       for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
-          return PanePath(projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: paneID)
+        if let pane = worktree.pane(PaneID(raw: uuid)), let tab = pane.selectedTab {
+          return TabPath(
+            projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id,
+            contentID: tab.content.id)
+        }
+      }
+    }
+    return nil
+  }
+
+  private func locateTab(where predicate: (Tab) -> Bool) -> TabPath? {
+    for project in projects {
+      for worktree in project.worktrees {
+        for pane in worktree.panes {
+          if let tab = pane.tabs.first(where: predicate) {
+            return TabPath(
+              projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id,
+              contentID: tab.content.id)
+          }
         }
       }
     }
@@ -88,23 +119,26 @@ struct WorktreePath: Sendable {
   let worktreeID: WorktreeID
 }
 
+/// A Tab and the session it holds, with its containers.
 struct TabPath: Sendable {
   let projectID: ProjectID
   let worktreeID: WorktreeID
+  let paneID: PaneID
   let tabID: TabID
+  let contentID: ContentID
 }
 
+/// A layout leaf with its containers.
 struct PanePath: Sendable {
   let projectID: ProjectID
   let worktreeID: WorktreeID
-  let tabID: TabID
   let paneID: PaneID
 }
 
 struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
   let projects: [Project]
   /// Stable short handles from the app. Text mode prints them in place of
-  /// the positional index (`Tab t3:` / `Pane p7:`) so agents can copy a
+  /// the positional index (`Pane p7:` / `Tab t3:`) so agents can copy a
   /// selector that survives reordering; nil (older app) falls back to the
   /// positional numbering. JSON mode carries them as `handle` next to the
   /// UUID (null from an older app).
@@ -140,18 +174,22 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
         )
         lines.append("      path: \(worktree.path)")
 
-        for (tabIndex, tab) in worktree.tabs.enumerated() {
-          let selectedTab = tab.id == worktree.selectedTabID ? "*" : " "
-          let title = tab.name ?? tab.cachedDisplayTitle ?? "untitled"
-          let tabLabel = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" } ?? "\(tabIndex + 1)"
+        for (paneIndex, pane) in worktree.panes.enumerated() {
+          let focusedPane = pane.id == worktree.focusedPaneID ? "*" : " "
+          let paneLabel = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" } ?? "\(paneIndex + 1)"
+          lines.append("      [\(focusedPane)] Pane \(paneLabel):  \(pane.id)")
 
-          lines.append("      [\(selectedTab)] Tab \(tabLabel): \(title)  \(tab.id)")
-
-          for (paneIndex, pane) in tab.panes.enumerated() {
-            let labels = pane.labels.sorted()
+          for (tabIndex, tab) in pane.tabs.enumerated() {
+            let selectedTab = tab.id == pane.selectedTabID ? "*" : " "
+            let title = tab.name ?? tab.cachedDisplayTitle ?? "untitled"
+            let tabLabel = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" } ?? "\(tabIndex + 1)"
+            let terminal = tab.content.terminal
+            let labels = terminal?.labels.sorted() ?? []
             let labelSuffix = labels.isEmpty ? "" : "  @\(labels.joined(separator: ",@"))"
-            let paneLabel = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" } ?? "\(paneIndex + 1)"
-            lines.append("            Pane \(paneLabel): \(pane.workingDirectory)  \(pane.id)\(labelSuffix)")
+            let cwd = terminal.map { "  \($0.workingDirectory)" } ?? ""
+            lines.append(
+              "          [\(selectedTab)] Tab \(tabLabel): \(title)  \(tab.id)  content \(tab.content.id)\(cwd)\(labelSuffix)"
+            )
           }
         }
       }
@@ -194,8 +232,10 @@ struct HierarchyWorktreeDTO: Encodable {
   /// Repository root for a workspace child checkout; null otherwise (the
   /// Project's `gitRoot` applies).
   let sourceGitRoot: String?
+  let focusedPaneID: String?
+  /// The focused Pane's selected Tab.
   let selectedTabID: String?
-  let tabs: [HierarchyTabDTO]
+  let panes: [HierarchyPaneDTO]
 
   init(worktree: Worktree, handles: IPC.TargetHandles?) {
     self.id = worktree.id.description
@@ -203,8 +243,24 @@ struct HierarchyWorktreeDTO: Encodable {
     self.path = worktree.path
     self.branch = worktree.branch
     self.sourceGitRoot = worktree.sourceGitRoot
-    self.selectedTabID = worktree.selectedTabID?.description
-    self.tabs = worktree.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
+    self.focusedPaneID = worktree.focusedPaneID?.description
+    self.selectedTabID = worktree.focusedPane?.selectedTabID?.description
+    self.panes = worktree.panes.map { HierarchyPaneDTO(pane: $0, handles: handles) }
+  }
+}
+
+struct HierarchyPaneDTO: Encodable {
+  let id: String
+  /// `p<n>` selector, the same one the text tree prints.
+  let handle: String?
+  let selectedTabID: String?
+  let tabs: [HierarchyTabDTO]
+
+  init(pane: Pane, handles: IPC.TargetHandles?) {
+    self.id = pane.id.description
+    self.handle = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" }
+    self.selectedTabID = pane.selectedTabID?.description
+    self.tabs = pane.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
   }
 }
 
@@ -214,28 +270,23 @@ struct HierarchyTabDTO: Encodable {
   let handle: String?
   let name: String?
   let cachedDisplayTitle: String?
-  let panes: [HierarchyPaneDTO]
+  let contentID: String
+  /// `ContentKind` raw value.
+  let kind: String
+  let workingDirectory: String?
+  let labels: [String]
+  let agent: String?
 
   init(tab: Tab, handles: IPC.TargetHandles?) {
     self.id = tab.id.description
     self.handle = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" }
     self.name = tab.name
     self.cachedDisplayTitle = tab.cachedDisplayTitle
-    self.panes = tab.panes.map { HierarchyPaneDTO(pane: $0, handles: handles) }
-  }
-}
-
-struct HierarchyPaneDTO: Encodable {
-  let id: String
-  /// `p<n>` selector, the same one the text tree prints.
-  let handle: String?
-  let workingDirectory: String
-  let labels: [String]
-
-  init(pane: Pane, handles: IPC.TargetHandles?) {
-    self.id = pane.id.description
-    self.handle = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" }
-    self.workingDirectory = pane.workingDirectory
-    self.labels = pane.labels.sorted()
+    self.contentID = tab.content.id.description
+    self.kind = tab.content.state.kind.rawValue
+    let terminal = tab.content.terminal
+    self.workingDirectory = terminal?.workingDirectory
+    self.labels = terminal?.labels.sorted() ?? []
+    self.agent = terminal?.agentKind?.rawValue
   }
 }

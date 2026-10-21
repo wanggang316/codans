@@ -50,7 +50,7 @@ nonisolated enum WorkflowRunDisplay {
   struct RoleRow: Equatable, Identifiable {
     var id: String
     var name: String
-    var paneID: PaneID?
+    var contentID: ContentID?
     /// Last agent state the engine observed for this role
     /// (`idle`/`working`/`blocked`/`done`/`error`/`gone`), `nil` before the
     /// first observation.
@@ -61,7 +61,7 @@ nonisolated enum WorkflowRunDisplay {
   static func roleRows(for run: WorkflowRunState) -> [RoleRow] {
     run.definition.roles.map { role in
       RoleRow(
-        id: role.name, name: role.name, paneID: run.bindings[role.name]?.paneID,
+        id: role.name, name: role.name, contentID: run.bindings[role.name]?.contentID,
         state: run.roleStates[role.name])
     }
   }

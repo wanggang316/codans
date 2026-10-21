@@ -28,10 +28,10 @@ struct CommandPaletteFeature {
     /// UserDefaults on the hot path. Writes land in the parent after
     /// `.delegate(.activate(…))` completes.
     var recency: [String: TimeInterval] = [:]
-    /// Source pane for Pane/Window-scoped activations. Filled from the
+    /// Source Content for Pane/Window-scoped activations. Filled from the
     /// `.appeared` payload so `RootFeature.route` can target the right
     /// pane without re-reading the catalog.
-    var focusedPaneID: PaneID?
+    var focusedContentID: ContentID?
   }
 
   enum Action: Equatable {
@@ -46,7 +46,7 @@ struct CommandPaletteFeature {
       Catalog,
       [EditorDescriptor],
       [String: TimeInterval],
-      PaneID?,
+      ContentID?,
       Bool
     )
     /// Follow-up of `.appeared` carrying the built item list. Splitting these
@@ -67,8 +67,8 @@ struct CommandPaletteFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .appeared(let selection, let catalog, let descriptors, let recency, let paneID, let precise):
-        state.focusedPaneID = paneID
+      case .appeared(let selection, let catalog, let descriptors, let recency, let contentID, let precise):
+        state.focusedContentID = contentID
         state.recency = recency
         state.isIndexed = false
         state.items = []
@@ -85,7 +85,7 @@ struct CommandPaletteFeature {
               selection: selection,
               catalog: catalog,
               editorDescriptors: descriptors,
-              focusedPaneID: paneID,
+              focusedContentID: contentID,
               paneFocusPrecise: precise
             )
           }

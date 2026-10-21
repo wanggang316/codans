@@ -120,7 +120,7 @@ struct AgentWait: AsyncParsableCommand {
       let response: IPC.AgentWaitResponse = try await client.call(
         .agentWait,
         params: IPC.AgentWaitRequest(
-          paneID: PaneID(raw: uuid), until: until, timeoutMillis: Int(waitTimeout * 1000)),
+          paneID: ContentID(raw: uuid), until: until, timeoutMillis: Int(waitTimeout * 1000)),
         // The server holds the request for the whole wait; give the client
         // side headroom beyond it.
         timeout: .seconds(waitTimeout + 5)

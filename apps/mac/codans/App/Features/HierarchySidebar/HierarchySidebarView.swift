@@ -56,13 +56,13 @@ struct HierarchySidebarView: View {
   /// Row-tap dispatcher for the AgentState panel — routes to
   /// `RootFeature.agentState(.rowTapped)`. Closure (rather than direct
   /// store write) keeps Sidebar decoupled from Root.
-  var onAgentStateRowTapped: (PaneID) -> Void = { _ in }
+  var onAgentStateRowTapped: (ContentID) -> Void = { _ in }
   /// Row context-menu "Hand Off…" dispatcher — routes to
   /// `RootFeature.agentState(.handOffTapped)`.
-  var onAgentStateRowHandOff: (PaneID) -> Void = { _ in }
+  var onAgentStateRowHandOff: (ContentID) -> Void = { _ in }
   /// Row context-menu "Run Workflow" dispatcher — routes to
   /// `RootFeature.agentState(.runWorkflowTapped)`.
-  var onAgentStateRowRunWorkflow: (PaneID, String) -> Void = { _, _ in }
+  var onAgentStateRowRunWorkflow: (ContentID, String) -> Void = { _, _ in }
   /// Whether the AgentState bottom panel is currently expanded.
   /// Persisted so the footer toggle's last state survives a relaunch —
   /// users who keep the panel open during long sessions should not
@@ -266,26 +266,26 @@ struct HierarchySidebarView: View {
         if agentStatePanelVisible, let registry = agentStateStore {
           AgentStateSidebarPanel(
             registry: registry,
-            resolveSourcePath: { paneID in
+            resolveSourcePath: { contentID in
               resolveAgentStateSourcePath(
-                paneID: paneID,
+                contentID: contentID,
                 catalog: hierarchyManager.catalog
               )
             },
-            focusedPaneID: currentlyFocusedPaneID(),
-            onTapRow: { paneID in
+            focusedContentID: currentlyFocusedContentID(),
+            onTapRow: { contentID in
               // Panel stays open after a row tap — the user often
               // fan-jumps between agents and re-opening the panel
               // each time is friction.
-              onAgentStateRowTapped(paneID)
+              onAgentStateRowTapped(contentID)
             },
             onClose: {
               withAnimation(.easeOut(duration: 0.18)) {
                 agentStatePanelOpen = false
               }
             },
-            onHandOffRow: { paneID in onAgentStateRowHandOff(paneID) },
-            onRunWorkflowRow: { paneID, workflowID in onAgentStateRowRunWorkflow(paneID, workflowID) },
+            onHandOffRow: { contentID in onAgentStateRowHandOff(contentID) },
+            onRunWorkflowRow: { contentID, workflowID in onAgentStateRowRunWorkflow(contentID, workflowID) },
             workflowEngine: workflowEngine,
             height: $agentStatePanelHeight,
             minHeight: Self.agentStatePanelMinHeight,
@@ -1804,20 +1804,19 @@ struct HierarchySidebarView: View {
     agentStateStore?.needsAttention == true
   }
 
-  /// Walks the selection chain (project → worktree → tab) and returns
-  /// the pane the user is currently focused on, or nil when the chain
-  /// breaks (no project selected, archived worktree, etc.). Used by the
-  /// AgentState sidebar panel to highlight the row corresponding to
+  /// Walks the selection chain (project → worktree → focused Pane) and
+  /// returns the Content the user is currently focused on, or nil when the
+  /// chain breaks (no project selected, archived worktree, etc.). Used by
+  /// the AgentState sidebar panel to highlight the row corresponding to
   /// the pane already in view.
-  private func currentlyFocusedPaneID() -> PaneID? {
+  private func currentlyFocusedContentID() -> ContentID? {
     let catalog = hierarchyManager.catalog
     guard let projectID = catalog.selectedProjectID,
       let project = catalog.projects.first(where: { $0.id == projectID }),
       let worktreeID = project.selectedWorktreeID,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let tabID = worktree.selectedTabID
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return nil }
-    return hierarchyManager.lastFocusedPane(in: tabID)
+    return worktree.focusedPane?.selectedTab?.contentID
   }
 
 }
@@ -1843,9 +1842,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   private var isRowBusy: Bool {
     guard let rowWorktree else { return false }
     return hierarchyManager.worktreeIsDirty(rowWorktree)
-      || rowWorktree.tabs.contains { tab in
-        tab.panes.contains { agentStateStore?.workingPaneIDs.contains($0.id) == true }
-      }
+      || rowWorktree.contentIDs.contains { agentStateStore?.workingContentIDs.contains($0) == true }
   }
   /// The ⌃N number to show, while ⌘ is held.
   var hotkeyHint: Int?
@@ -2282,7 +2279,7 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
   }
 }
 
-/// Walks the catalog for a paneID and returns the source tuple the
+/// Walks the catalog for a contentID and returns the source tuple the
 /// AgentState row needs: names + color for the breadcrumb, plus the
 /// worktree path and remote host that key the hover summary card's
 /// session scan (`remoteHost` non-nil routes the scan over SSH; its
@@ -2293,17 +2290,14 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 /// Returns nil when the pane has been torn down between event delivery
 /// and the next popover render — the row renders an em-dash fallback.
 private func resolveAgentStateSourcePath(
-  paneID: PaneID,
+  contentID: ContentID,
   catalog: Catalog
 ) -> (
   project: String, worktree: String, projectColor: ProjectColor?,
   worktreePath: String, remoteHost: RemoteHost?
 )? {
   for project in catalog.projects {
-    for worktree in project.worktrees
-    where worktree.tabs.contains(where: { tab in
-      tab.panes.contains(where: { $0.id == paneID })
-    }) {
+    for worktree in project.worktrees where worktree.tab(forContent: contentID) != nil {
       return (project.name, worktree.name, project.color, worktree.path, project.remoteHost)
     }
   }

@@ -10,19 +10,19 @@ import Foundation
 extension WorkflowEngine {
   func perform(_ effect: WorkflowEffect, on session: WorkflowRunSession) async {
     switch effect {
-    case .awaitRole(let role, let paneID, let until, let timeoutMinutes):
-      startRoleWait(session, role: role, paneID: paneID, until: until, timeoutMinutes: timeoutMinutes)
+    case .awaitRole(let role, let contentID, let until, let timeoutMinutes):
+      startRoleWait(session, role: role, contentID: contentID, until: until, timeoutMinutes: timeoutMinutes)
     case .cancelRoleWait(let role):
       session.roleWaits[role]?.cancel()
       session.roleWaits[role] = nil
-    case .openActivation(let ordinal, let paneID, let token):
-      registry.open(runID: session.id, ordinal: ordinal, paneID: paneID, token: token)
+    case .openActivation(let ordinal, let contentID, let token):
+      registry.open(runID: session.id, ordinal: ordinal, contentID: contentID, token: token)
     case .revokeActivation(let ordinal):
       registry.revoke(runID: session.id, ordinal: ordinal)
     case .materializeInstruction(let ordinal, let stepID, let text):
       await materializeInstruction(session, ordinal: ordinal, stepID: stepID, text: text)
-    case .inject(let paneID, let ordinal, let line):
-      inject(session, paneID: paneID, ordinal: ordinal, line: line)
+    case .inject(let contentID, let ordinal, let line):
+      inject(session, contentID: contentID, ordinal: ordinal, line: line)
     case .launch(let request):
       launch(session, request: request)
     case .runCommand(let stepID, let ordinal, let command, let workingDirectory, let environment, let timeoutSeconds):
@@ -35,9 +35,9 @@ extension WorkflowEngine {
       session.watchdogs[ordinal]?.cancel()
       session.watchdogs[ordinal] = nil
     case .notify(let title, let body):
-      dependencies.notify(title, body, session.focusPaneID)
-    case .closePane(let paneID, _):
-      closePane(session, paneID: paneID)
+      dependencies.notify(title, body, session.focusContentID)
+    case .closeTab(let contentID, _):
+      closeTab(session, contentID: contentID)
     case .persistDelivery(let ordinal, let name, let body, _, _):
       await persistDelivery(session, ordinal: ordinal, name: name, body: body)
     case .persistRecord:
@@ -49,20 +49,20 @@ extension WorkflowEngine {
 
   // MARK: - Immediate effects
 
-  private func inject(_ session: WorkflowRunSession, paneID: PaneID, ordinal: Int, line: String) {
-    if dependencies.sendLine(paneID, line) {
+  private func inject(_ session: WorkflowRunSession, contentID: ContentID, ordinal: Int, line: String) {
+    if dependencies.sendLine(contentID, line) {
       apply(.injected(ordinal: ordinal), to: session)
     } else {
-      apply(.injectionFailed(ordinal: ordinal, reason: "pane \(paneID) has no terminal surface"), to: session)
+      apply(.injectionFailed(ordinal: ordinal, reason: "pane \(contentID) has no terminal surface"), to: session)
     }
   }
 
   /// Only a pane this run still owns is closed: a pane the user already
   /// repurposed, or one another run took over, is left alone.
-  private func closePane(_ session: WorkflowRunSession, paneID: PaneID) {
-    guard registry.runID(forPane: paneID) == session.id else { return }
-    registry.leave(paneID: paneID, runID: session.id)
-    dependencies.closePane(paneID)
+  private func closeTab(_ session: WorkflowRunSession, contentID: ContentID) {
+    guard registry.runID(forContent: contentID) == session.id else { return }
+    registry.leave(contentID: contentID, runID: session.id)
+    dependencies.closeTab(contentID)
   }
 
   // MARK: - Files
@@ -124,11 +124,11 @@ extension WorkflowEngine {
     session.launchTask = Task { @MainActor [weak self] in
       guard let self else { return }
       do {
-        let paneID = try await dependencies.launch(request, source, profile)
+        let contentID = try await dependencies.launch(request, source, profile)
         guard !Task.isCancelled else { return }
-        registry.bind(runID: session.id, ordinal: request.ordinal, paneID: paneID)
+        registry.bind(runID: session.id, ordinal: request.ordinal, contentID: contentID)
         remember(session, role: request.role, profileID: profile.id)
-        apply(.launched(ordinal: request.ordinal, paneID: paneID), to: session)
+        apply(.launched(ordinal: request.ordinal, contentID: contentID), to: session)
       } catch {
         guard !Task.isCancelled else { return }
         apply(.launchFailed(ordinal: request.ordinal, reason: String(describing: error)), to: session)
@@ -219,7 +219,7 @@ extension WorkflowEngine {
   private func startRoleWait(
     _ session: WorkflowRunSession,
     role: String,
-    paneID: PaneID,
+    contentID: ContentID,
     until: WorkflowWaitCondition,
     timeoutMinutes: Int?
   ) {
@@ -230,11 +230,11 @@ extension WorkflowEngine {
       var blockedSince: Date?
       while let self, !Task.isCancelled {
         let now = dependencies.now()
-        guard dependencies.paneExists(paneID) else {
+        guard dependencies.contentExists(contentID) else {
           apply(until == .exit ? .roleExited(role: role) : .roleGone(role: role), to: session)
           return
         }
-        let state = dependencies.agentState(paneID)
+        let state = dependencies.agentState(contentID)
         session.machine.observe(role: role, state: state?.rawValue ?? "gone")
         if let deadline, now >= deadline {
           apply(.waitTimedOut(role: role), to: session)
@@ -285,7 +285,7 @@ extension WorkflowEngine {
   /// stuck on a prompt, or a pane that vanished. Re-arming replaces.
   private func armWatchdog(_ session: WorkflowRunSession, ordinal: Int, idleGraceSeconds: Int, deadline: Date?) {
     session.watchdogs[ordinal]?.cancel()
-    guard let activation = session.machine.run.activations[ordinal], let paneID = activation.paneID else { return }
+    guard let activation = session.machine.run.activations[ordinal], let contentID = activation.contentID else { return }
     let role = activation.role
     // After a nudge the agent may never start working again; the second
     // grace must count from idle as it is.
@@ -296,11 +296,11 @@ extension WorkflowEngine {
       var blockedSince: Date?
       while let self, !Task.isCancelled {
         let now = dependencies.now()
-        guard dependencies.paneExists(paneID) else {
+        guard dependencies.contentExists(contentID) else {
           apply(.roleGone(role: role), to: session)
           return
         }
-        let state = dependencies.agentState(paneID)
+        let state = dependencies.agentState(contentID)
         session.machine.observe(role: role, state: state?.rawValue ?? "gone")
         if let deadline, now >= deadline {
           apply(.watchdog(ordinal: ordinal, .deadlineReached), to: session)

@@ -110,7 +110,7 @@ struct HandoffTo: AsyncParsableCommand {
         .handoffTo,
         params: IPC.HandoffRequest(
           action: .to,
-          paneID: PaneID(raw: paneUUID),
+          paneID: ContentID(raw: paneUUID),
           receiver: agent,
           profile: profile,
           brief: resolvedBrief.brief,
@@ -150,7 +150,7 @@ struct HandoffSave: AsyncParsableCommand {
         .handoffSave,
         params: IPC.HandoffRequest(
           action: .save,
-          paneID: PaneID(raw: paneUUID),
+          paneID: ContentID(raw: paneUUID),
           brief: resolvedBrief.brief,
           contextOnly: resolvedBrief.contextOnly,
           note: note,

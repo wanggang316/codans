@@ -7,7 +7,7 @@ private let binderLogger = Logger(
 )
 
 /// Identifies which coding agent is running in each pane and persists
-/// that decision via `HierarchyClient.setPaneAgentKind`.
+/// that decision via `HierarchyClient.setAgentKind`.
 ///
 /// Foreground job snapshots are the authoritative signal: they follow the
 /// PTY foreground process group, so an agent started after an idle shell is
@@ -38,27 +38,27 @@ final class AgentBinder {
   }
 
   private let client: HierarchyClient
-  private let currentAgentKind: @MainActor (PaneID) -> AgentKind?
-  /// Optional post-bind hook: fired immediately AFTER `setPaneAgentKind` lands
+  private let currentAgentKind: @MainActor (ContentID) -> AgentKind?
+  /// Optional post-bind hook: fired immediately AFTER `setAgentKind` lands
   /// a non-nil binding. AppState wires this to `AgentStateStore.onAgentBound`
   /// so the AgentState UI learns about the new agent without a separate
   /// observation pass. Default no-op keeps existing tests / callers
   /// untouched.
-  private let agentBoundHandler: @MainActor (PaneID, AgentKind, String?, Bool) -> Void
+  private let agentBoundHandler: @MainActor (ContentID, AgentKind, String?, Bool) -> Void
   /// Companion of `agentBoundHandler` — fires on `unbind(_:)` and on any
-  /// path that writes a nil binding through `setPaneAgentKind`. AppState
+  /// path that writes a nil binding through `setAgentKind`. AppState
   /// wires this to `AgentStateStore.onAgentUnbound`.
-  private let agentUnboundHandler: @MainActor (PaneID) -> Void
-  private var presenceByPane: [PaneID: Presence] = [:]
-  private var materializedBindings: Set<PaneID> = []
+  private let agentUnboundHandler: @MainActor (ContentID) -> Void
+  private var presenceByPane: [ContentID: Presence] = [:]
+  private var materializedBindings: Set<ContentID> = []
 
   init(
     client: HierarchyClient,
-    currentAgentKind: @escaping @MainActor (PaneID) -> AgentKind?,
-    agentBoundHandler: @escaping @MainActor (PaneID, AgentKind, String?, Bool) -> Void = {
+    currentAgentKind: @escaping @MainActor (ContentID) -> AgentKind?,
+    agentBoundHandler: @escaping @MainActor (ContentID, AgentKind, String?, Bool) -> Void = {
       _, _, _, _ in
     },
-    agentUnboundHandler: @escaping @MainActor (PaneID) -> Void = { _ in }
+    agentUnboundHandler: @escaping @MainActor (ContentID) -> Void = { _ in }
   ) {
     self.client = client
     self.currentAgentKind = currentAgentKind
@@ -69,22 +69,22 @@ final class AgentBinder {
   /// Re-run classification for this pane in response to the given trigger
   /// and write only when the result differs from the current binding.
   /// See the type-level doc comment for the signal contract.
-  func consider(paneID: PaneID, trigger: Trigger) {
-    let existing = currentAgentKind(paneID)
+  func consider(contentID: ContentID, trigger: Trigger) {
+    let existing = currentAgentKind(contentID)
 
     switch trigger {
     case .foregroundJobChanged(let job):
       let classified = AgentKindPatterns.classify(foregroundJob: job)
       if classified == nil, existing == nil {
-        presenceByPane.removeValue(forKey: paneID)
+        presenceByPane.removeValue(forKey: contentID)
         return
       }
-      var presence = presenceByPane[paneID] ?? Presence()
-      defer { presenceByPane[paneID] = presence }
+      var presence = presenceByPane[contentID] ?? Presence()
+      defer { presenceByPane[contentID] = presence }
       if classified == nil {
         if existing != nil, !presence.shouldRelease(afterMiss: classified) {
           logTransition(
-            action: "retain", paneID: paneID, existing: existing,
+            action: "retain", contentID: contentID, existing: existing,
             classified: classified, job: job, misses: presence.misses
           )
           return
@@ -93,20 +93,20 @@ final class AgentBinder {
         _ = presence.shouldRelease(afterMiss: classified)
       }
       if classified == existing {
-        if let kind = classified, !materializedBindings.contains(paneID) {
-          materializedBindings.insert(paneID)
-          agentBoundHandler(paneID, kind, nil, true)
+        if let kind = classified, !materializedBindings.contains(contentID) {
+          materializedBindings.insert(contentID)
+          agentBoundHandler(contentID, kind, nil, true)
           logTransition(
-            action: "materialize", paneID: paneID, existing: existing,
+            action: "materialize", contentID: contentID, existing: existing,
             classified: classified, job: job, misses: presence.misses
           )
         } else {
-          binderLogger.debug("noop pane=\(Self.paneTag(paneID), privacy: .public)")
+          binderLogger.debug("noop pane=\(Self.paneTag(contentID), privacy: .public)")
         }
         return
       }
       writeIfChanged(
-        paneID: paneID,
+        contentID: contentID,
         existing: existing,
         next: classified,
         job: job,
@@ -119,14 +119,14 @@ final class AgentBinder {
   /// Pane teardown: clear the agent binding. Always calls the writer; the
   /// underlying writer is idempotent so a never-bound pane costs only a
   /// snapshot read.
-  func unbind(_ paneID: PaneID) {
-    let existing = currentAgentKind(paneID)
-    presenceByPane.removeValue(forKey: paneID)
-    materializedBindings.remove(paneID)
-    client.setPaneAgentKind(paneID, nil)
-    agentUnboundHandler(paneID)
+  func unbind(_ contentID: ContentID) {
+    let existing = currentAgentKind(contentID)
+    presenceByPane.removeValue(forKey: contentID)
+    materializedBindings.remove(contentID)
+    client.setAgentKind(contentID, nil)
+    agentUnboundHandler(contentID)
     logTransition(
-      action: "unbind", paneID: paneID, existing: existing, classified: nil
+      action: "unbind", contentID: contentID, existing: existing, classified: nil
     )
   }
 
@@ -136,7 +136,7 @@ final class AgentBinder {
   /// `.paneCrashed` / `.paneClosedByTab`. Archive and project removal use
   /// `suspendSurface`, which emits none of those, so a pane torn down that
   /// way keeps its `materializedBindings` membership forever. Archive makes
-  /// that user-visible: soft-hide keeps the same `PaneID` and leaves
+  /// that user-visible: soft-hide keeps the same `ContentID` and leaves
   /// `Pane.agentKind` set, so when the user unarchives and the agent runs
   /// again `consider` sees `classified == existing` with the pane still
   /// marked materialized and takes the noop branch — `agentBoundHandler`
@@ -146,15 +146,15 @@ final class AgentBinder {
   /// `unbind` does: this runs from the catalog-mutation drain, and writing
   /// back into the catalog here would feed itself. Dropping the local maps
   /// is enough — the next `consider` re-materializes from scratch.
-  func reconcileMembership(livePaneIDs: Set<PaneID>) {
-    presenceByPane = presenceByPane.filter { livePaneIDs.contains($0.key) }
-    materializedBindings.formIntersection(livePaneIDs)
+  func reconcileMembership(liveContentIDs: Set<ContentID>) {
+    presenceByPane = presenceByPane.filter { liveContentIDs.contains($0.key) }
+    materializedBindings.formIntersection(liveContentIDs)
   }
 
   // MARK: - Helpers
 
   private func writeIfChanged(
-    paneID: PaneID,
+    contentID: ContentID,
     existing: AgentKind?,
     next: AgentKind?,
     job: ForegroundJob?,
@@ -162,7 +162,7 @@ final class AgentBinder {
     assumeUserInputSeen: Bool
   ) {
     guard existing != next else {
-      binderLogger.debug("noop pane=\(Self.paneTag(paneID), privacy: .public)")
+      binderLogger.debug("noop pane=\(Self.paneTag(contentID), privacy: .public)")
       return
     }
     let action: String
@@ -174,26 +174,26 @@ final class AgentBinder {
       action = "rebind"
     }
     logTransition(
-      action: action, paneID: paneID, existing: existing, classified: next,
+      action: action, contentID: contentID, existing: existing, classified: next,
       job: job, misses: misses
     )
-    client.setPaneAgentKind(paneID, next)
+    client.setAgentKind(contentID, next)
     // Post-bind hook — fire AFTER the writer so the registry observes the
     // same kind that just landed in the catalog. Session-id is not modelled
     // here yet (always nil); when `setPaneAgentSessionID` callers wake
     // up, plumb a third channel down through this hook.
     if let kind = next {
-      materializedBindings.insert(paneID)
-      agentBoundHandler(paneID, kind, nil, assumeUserInputSeen)
+      materializedBindings.insert(contentID)
+      agentBoundHandler(contentID, kind, nil, assumeUserInputSeen)
     } else {
-      materializedBindings.remove(paneID)
-      agentUnboundHandler(paneID)
+      materializedBindings.remove(contentID)
+      agentUnboundHandler(contentID)
     }
   }
 
   /// Short pane-id slug for log correlation. UUID-prefix only, no PII.
-  private static func paneTag(_ paneID: PaneID) -> String {
-    String(paneID.raw.uuidString.prefix(8))
+  private static func paneTag(_ contentID: ContentID) -> String {
+    String(contentID.raw.uuidString.prefix(8))
   }
 
   /// Single-line diagnostic emitted on every binding transition. Format:
@@ -206,7 +206,7 @@ final class AgentBinder {
   /// commandLines, which can contain secrets in argv.
   private func logTransition(
     action: String,
-    paneID: PaneID,
+    contentID: ContentID,
     existing: AgentKind?,
     classified: AgentKind?,
     job: ForegroundJob? = nil,
@@ -216,7 +216,7 @@ final class AgentBinder {
     let procsStr =
       job?.processes.prefix(4).map(\.processName).joined(separator: ",") ?? "-"
     binderLogger.info(
-      "action=\(action, privacy: .public) pane=\(Self.paneTag(paneID), privacy: .public) kind=\(existing?.rawValue ?? "nil", privacy: .public)→\(classified?.rawValue ?? "nil", privacy: .public) pgid=\(pgidStr, privacy: .public) procs=\(procsStr, privacy: .public) misses=\(misses, privacy: .public)/\(Presence.releaseMissThreshold, privacy: .public)"
+      "action=\(action, privacy: .public) pane=\(Self.paneTag(contentID), privacy: .public) kind=\(existing?.rawValue ?? "nil", privacy: .public)→\(classified?.rawValue ?? "nil", privacy: .public) pgid=\(pgidStr, privacy: .public) procs=\(procsStr, privacy: .public) misses=\(misses, privacy: .public)/\(Presence.releaseMissThreshold, privacy: .public)"
     )
   }
 }

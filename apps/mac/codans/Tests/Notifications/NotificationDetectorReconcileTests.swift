@@ -16,27 +16,27 @@ struct NotificationDetectorReconcileTests {
   func reconcileDropsPanesAbsentFromTheCatalog() async {
     let f = Fixture()
 
-    await f.detector.handle(.paneOutput(f.paneID, Data("build ok\n".utf8)))
-    await f.detector.handle(.paneIdle(f.paneID, duration: 60))
-    #expect(f.detector.trackedPanesForTesting == [f.paneID])
+    await f.detector.handle(.paneOutput(f.contentID, Data("build ok\n".utf8)))
+    await f.detector.handle(.paneIdle(f.contentID, duration: 60))
+    #expect(f.detector.trackedContentsForTesting == [f.contentID])
     #expect(f.store.entries.count == 1)
 
-    // Archive's shape: the pane drops out of `visiblePaneIDs()` while the
+    // Archive's shape: the pane drops out of `visibleContentIDs()` while the
     // catalog still holds it, and no `.paneExited` is ever emitted.
-    f.detector.reconcileMembership(livePaneIDs: [])
+    f.detector.reconcileMembership(liveContentIDs: [])
 
-    #expect(f.detector.trackedPanesForTesting.isEmpty)
+    #expect(f.detector.trackedContentsForTesting.isEmpty)
   }
 
   @Test
   func reconcileKeepsPanesThatAreStillLive() async {
     let f = Fixture()
 
-    await f.detector.handle(.paneOutput(f.paneID, Data("build ok\n".utf8)))
-    f.detector.reconcileMembership(livePaneIDs: [f.paneID])
+    await f.detector.handle(.paneOutput(f.contentID, Data("build ok\n".utf8)))
+    f.detector.reconcileMembership(liveContentIDs: [f.contentID])
 
-    #expect(f.detector.trackedPanesForTesting == [f.paneID])
-    await f.detector.handle(.paneIdle(f.paneID, duration: 60))
+    #expect(f.detector.trackedContentsForTesting == [f.contentID])
+    await f.detector.handle(.paneIdle(f.contentID, duration: 60))
     #expect(f.store.entries.count == 1)
   }
 
@@ -44,14 +44,14 @@ struct NotificationDetectorReconcileTests {
   private struct Fixture {
     let store: NotificationStore
     let detector: NotificationDetector
-    let paneID: PaneID
+    let contentID: ContentID
 
     init() {
-      let paneID = PaneID()
+      let contentID = ContentID()
       let tabID = TabID()
       let worktreeID = WorktreeID()
       let projectID = ProjectID()
-      self.paneID = paneID
+      self.contentID = contentID
 
       let storeURL = FileManager.default.temporaryDirectory.appending(
         component: "notif-detector-reconcile-\(UUID().uuidString).json"
@@ -70,9 +70,11 @@ struct NotificationDetectorReconcileTests {
         now: { Date() }
       )
 
-      let pane = Pane(id: paneID, workingDirectory: "/tmp")
-      let tab = Tab(id: tabID, panes: [pane])
-      let worktree = Worktree(id: worktreeID, name: "main", path: "/tmp", tabs: [tab])
+      let tab = Tab(id: tabID, content: .terminal(id: contentID, workingDirectory: "/tmp"))
+      let pane = Pane(tabs: [tab])
+      let worktree = Worktree(
+        id: worktreeID, name: "main", path: "/tmp",
+        splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
       let project = Project(id: projectID, name: "p", rootPath: "/tmp", worktrees: [worktree])
       let catalog = Catalog(projects: [project])
 
@@ -82,7 +84,6 @@ struct NotificationDetectorReconcileTests {
         tracker: PaneKeyboardActivityTracker(),
         settingsReader: reader,
         catalogSnapshot: { catalog },
-        lastFocusedPane: { _ in nil },
         isAppFrontmost: { false },
         onProjectActivity: nil
       )

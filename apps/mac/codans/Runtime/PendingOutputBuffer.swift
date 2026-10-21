@@ -15,21 +15,21 @@ import CodansCore
 /// and the explicit `flush()` call already covers the well-formed path.
 @MainActor
 final class PendingOutputBuffer {
-  let paneID: PaneID
+  let contentID: ContentID
   let flushInterval: Duration
   let maxBufferSize: Int
 
   private var buffer = Data()
   private var flushTask: Task<Void, Never>?
-  private let emit: @MainActor @Sendable (PaneID, Data) -> Void
+  private let emit: @MainActor @Sendable (ContentID, Data) -> Void
 
   init(
-    paneID: PaneID,
+    contentID: ContentID,
     flushInterval: Duration = .milliseconds(16),
     maxBufferSize: Int = 16 * 1024,
-    emit: @escaping @MainActor @Sendable (PaneID, Data) -> Void
+    emit: @escaping @MainActor @Sendable (ContentID, Data) -> Void
   ) {
-    self.paneID = paneID
+    self.contentID = contentID
     self.flushInterval = flushInterval
     self.maxBufferSize = maxBufferSize
     self.emit = emit
@@ -63,7 +63,7 @@ final class PendingOutputBuffer {
     guard !buffer.isEmpty else { return }
     let payload = buffer
     buffer = Data()
-    emit(paneID, payload)
+    emit(contentID, payload)
   }
 
   private func armFlushTimer() {

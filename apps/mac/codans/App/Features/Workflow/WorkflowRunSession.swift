@@ -76,10 +76,10 @@ final class WorkflowRunSession {
 
   /// The pane a user most likely wants to see for this run: the pane of
   /// the role being waited on, else the initiator.
-  var focusPaneID: PaneID? {
-    if let activation = run.currentActivation, let paneID = activation.paneID { return paneID }
-    if let role = run.currentStep?.role, let paneID = run.paneID(for: role) { return paneID }
-    return run.configuration.initiatorPaneID ?? run.bindings.values.compactMap(\.paneID).first
+  var focusContentID: ContentID? {
+    if let activation = run.currentActivation, let contentID = activation.contentID { return contentID }
+    if let role = run.currentStep?.role, let contentID = run.contentID(for: role) { return contentID }
+    return run.configuration.initiatorContentID ?? run.bindings.values.compactMap(\.contentID).first
   }
 
   func elapsed(at now: Date) -> TimeInterval {

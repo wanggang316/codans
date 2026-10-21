@@ -184,9 +184,9 @@ enum PathResolver {
 
 /// Resolves the container ids a worktree- or tab-scoped verb sends. When the
 /// innermost target is named explicitly and its containers are left on
-/// `current`, the containers come from the tree rather than the calling pane,
-/// so `codans tab close t3` and `codans pane new --tab t3` work from any
-/// shell — the target already determines where it lives.
+/// `current`, the containers come from the tree rather than the calling
+/// session, so `codans tab close t3` and `codans pane new --tab t3` work from
+/// any shell — the target already determines where it lives.
 enum ScopeResolver {
   static func isCurrent(_ value: String) -> Bool { value == "current" || value == "." }
 
@@ -207,21 +207,26 @@ enum ScopeResolver {
     return WorktreePath(projectID: ProjectID(raw: projectUUID), worktreeID: WorktreeID(raw: worktreeUUID))
   }
 
+  /// A Tab is located through the tree in every case: the path also names
+  /// the Pane holding it and the session it carries, which the alias alone
+  /// cannot tell. Explicit containers override what the tree found.
   static func tab(
     project: String, worktree: String, tab: String, client: RPCClient
   ) async throws -> TabPath {
     let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
-    if isCurrent(project), isCurrent(worktree), !isCurrent(tab) {
-      let tree = try await HierarchyTree.load(client: client)
-      guard let located = tree.locateTab(TabID(raw: tabUUID)) else {
-        throw CLIError(
-          code: .notFound, message: "tab \(tabUUID.uuidString) not found",
-          details: ["kind": "tab", "id": tabUUID.uuidString])
-      }
+    let tree = try await HierarchyTree.load(client: client)
+    guard let located = tree.locateSession(tabUUID) else {
+      throw CLIError(
+        code: .notFound, message: "tab \(tabUUID.uuidString) not found",
+        details: ["kind": "tab", "id": tabUUID.uuidString])
+    }
+    if isCurrent(project), isCurrent(worktree) {
       return located
     }
     let scope = try await Self.worktree(project: project, worktree: worktree, client: client)
-    return TabPath(projectID: scope.projectID, worktreeID: scope.worktreeID, tabID: TabID(raw: tabUUID))
+    return TabPath(
+      projectID: scope.projectID, worktreeID: scope.worktreeID, paneID: located.paneID,
+      tabID: located.tabID, contentID: located.contentID)
   }
 }
 

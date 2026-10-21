@@ -51,6 +51,34 @@ struct AliasResolverTests {
   }
 
   @Test
+  func currentTabAndContentPronounsReadTheirOwnEnv() async throws {
+    let tabID = UUID()
+    let contentID = UUID()
+    let env = [
+      "CODANS_PANE_ID": UUID().uuidString,
+      "CODANS_TAB_ID": tabID.uuidString,
+      "CODANS_CONTENT_ID": contentID.uuidString,
+    ]
+    let tab = try await AliasResolver.resolve("current", kind: .tab, env: env, client: Self.failingClient())
+    #expect(tab == tabID)
+    let content = try await AliasResolver.resolve(
+      "current", kind: .content, env: env, client: Self.failingClient())
+    #expect(content == contentID)
+  }
+
+  @Test
+  func callerContextPrefersContentIDOverPaneID() {
+    let contentID = UUID()
+    let paneID = UUID()
+    #expect(
+      AliasResolver.callerContentID(env: [
+        "CODANS_CONTENT_ID": contentID.uuidString, "CODANS_PANE_ID": paneID.uuidString,
+      ]) == ContentID(raw: contentID))
+    #expect(AliasResolver.callerContentID(env: ["CODANS_PANE_ID": paneID.uuidString]) == ContentID(raw: paneID))
+    #expect(AliasResolver.callerContentID(env: [:]) == nil)
+  }
+
+  @Test
   func dotPronounReadsEnv() async throws {
     let uuid = UUID()
     let resolved = try await AliasResolver.resolve(
@@ -91,6 +119,36 @@ struct AliasResolverTests {
       "current",
       kind: .worktree,
       env: [:],
+      client: client
+    )
+    #expect(resolved == targetID)
+  }
+
+  @Test
+  func serverResolveCarriesCallerContentAsContext() async throws {
+    let contentID = UUID()
+    let targetID = UUID()
+    let transport = InMemoryTransport()
+    transport.script = { frames in
+      let hello = try JSONDecoder().decode(IPC.Request.self, from: frames[0])
+      let real = try JSONDecoder().decode(IPC.Request.self, from: frames[1])
+      let request = try real.params.decoded(as: IPC.AliasResolveRequest.self)
+      #expect(request.kind == .content)
+      #expect(request.contextPaneID == ContentID(raw: contentID))
+      let body = try JSONEncoder().encode(IPC.AliasResolveResult(kind: .content, id: targetID))
+      let resultJSON = try JSONDecoder().decode(JSONValue.self, from: body)
+      return [
+        .success(id: hello.id, result: .object([:])),
+        .success(id: real.id, result: resultJSON),
+      ]
+    }
+    let client = RPCClient(transport: transport, versions: .init(clientVersion: "0.3.0"))
+    defer { Task { await client.shutdown() } }
+
+    let resolved = try await AliasResolver.resolve(
+      "@reviewer",
+      kind: .content,
+      env: ["CODANS_CONTENT_ID": contentID.uuidString],
       client: client
     )
     #expect(resolved == targetID)
