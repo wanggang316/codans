@@ -1,8 +1,8 @@
 # 设计文档：Pane Layout
 
-**状态：** 规划中（P1 在 `feat/card-pane` 实现；P2 / P3 已规划）
+**状态：** P1 已上线（可见）：模型与迁移、内容运行时、每 Pane 一条 tab 条、键盘、CLI / IPC / 环境变量；P2（chip 拖拽、边缘 split、zoom 退出控件）与 P3 已规划
 **作者：** Gump（与 Claude）
-**实现：** 无（规划阶段）。词汇表见仓库根 [CONTEXT.md](../../CONTEXT.md)；决策记录见 [ADR-0001](../adr/0001-three-ids-pane-tab-content.md)、[ADR-0002](../adr/0002-content-runtime-outside-hierarchy-manager.md)。
+**实现：** 模型与迁移 `apps/mac/CodansCore/`（Pane / Tab / ContentSnapshot / SplitTree / catalog v3 → v4 迁移器）；内容运行时 `apps/mac/codans/Runtime/Content/`；布局与 tab 条 `apps/mac/codans/App/Features/TabBar/` 与 split 视口；CLI `apps/mac/codans-cli/Commands/{TabCommands,PaneCommands,TerminalCommands}.swift`。词汇表见仓库根 [CONTEXT.md](../../CONTEXT.md)；决策记录见 [ADR-0001](../adr/0001-three-ids-pane-tab-content.md)、[ADR-0002](../adr/0002-content-runtime-outside-hierarchy-manager.md)。
 
 ## 背景与范围
 
