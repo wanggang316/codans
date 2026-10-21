@@ -22,15 +22,15 @@ struct TerminalClientTests {
   func liveEventsStreamBroadcastsEmittedEvents() async {
     let (client, engine) = makeLiveEngine()
     let stream = client.events()
-    let paneID = PaneID()
+    let contentID = ContentID()
     let tabID = TabID()
 
-    engine.emit(.paneReady(paneID))
+    engine.emit(.paneReady(contentID))
     engine.emit(.tabActivated(tabID))
 
     var iterator = stream.makeAsyncIterator()
     if case .paneReady(let pid) = await iterator.next() {
-      #expect(pid == paneID)
+      #expect(pid == contentID)
     } else {
       Issue.record("expected paneReady first")
     }
@@ -42,14 +42,12 @@ struct TerminalClientTests {
   }
 
   @Test
-  func liveEnsureSurfaceThrowsWhenAddressUnknown() async {
+  func liveEnsureSurfaceThrowsWhenContentUnknown() async {
     let (client, _) = makeLiveEngine()
     do {
-      try await client.ensureSurface(
-        PaneID(), TabID(), WorktreeID(), ProjectID(), nil
-      )
-      Issue.record("ensureSurface should throw for unknown address")
-    } catch TerminalClient.Error.worktreeNotFound {
+      try await client.ensureSurface(ContentID(), nil)
+      Issue.record("ensureSurface should throw for an unknown Content")
+    } catch TerminalClient.Error.contentNotFound {
       // expected
     } catch {
       Issue.record("unexpected error: \(error)")

@@ -22,8 +22,8 @@ struct RootFeatureTests {
     // the tab-chip / sidebar spinners pinned on a dead pane forever.
     let (eventStream, eventContinuation) = AsyncStream<TerminalEvent>.makeStream()
     let (selectionStream, selectionContinuation) = AsyncStream<HierarchySelection>.makeStream()
-    let paneID = PaneID()
-    let markedIdle = LockIsolated<PaneID?>(nil)
+    let contentID = ContentID()
+    let markedIdle = LockIsolated<ContentID?>(nil)
 
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
@@ -31,22 +31,22 @@ struct RootFeatureTests {
       $0.terminalClient.events = { eventStream }
       $0.hierarchyClient.selectionChanges = { selectionStream }
       $0.hierarchyClient.snapshot = { Catalog() }
-      $0.hierarchyClient.markPaneIdle = { id in
-        markedIdle.withValue { $0 = id }
+      $0.hierarchyClient.setProgressBusy = { id, busy in
+        if !busy { markedIdle.withValue { $0 = id } }
       }
       $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
 
     await store.send(.onLaunch)
-    eventContinuation.yield(.paneCrashed(paneID, reason: "test"))
+    eventContinuation.yield(.paneCrashed(contentID, reason: "test"))
     await store.receive(\.paneProgressBusyChanged)
 
     eventContinuation.finish()
     selectionContinuation.finish()
     await store.send(.onQuit)
 
-    #expect(markedIdle.value == paneID)
+    #expect(markedIdle.value == contentID)
   }
 
   @Test
@@ -71,8 +71,8 @@ struct RootFeatureTests {
     await store.send(.onLaunch)
 
     // Yield a single lifecycle event.
-    let paneID = PaneID()
-    eventContinuation.yield(.paneReady(paneID))
+    let contentID = ContentID()
+    eventContinuation.yield(.paneReady(contentID))
     await store.receive(\.engineEventReceived) { state in
       state.lastEvent = .paneReady
     }
@@ -84,19 +84,14 @@ struct RootFeatureTests {
   }
 
   @Test
-  func selectionChangedMirrorsActiveTabFromSnapshot() async {
-    // Build a catalog snapshot with a Worktree whose selectedTabID is a
-    // known value; assert the reducer reads through the snapshot and
-    // mirrors that TabID into state.detail.splitViewport.activeTabID.
+  func selectionChangedMirrorsWorktreeAndSeedsPaneHosts() async {
+    // The reducer reads the selected Worktree through the snapshot, mirrors
+    // its id into the split viewport and seeds one host per Pane (its
+    // selected Tab's Content).
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
-    let tabID = TabID()
-
-    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
-    let worktree = Worktree(
-      id: worktreeID, name: "w", path: "/w", branch: "main",
-      tabs: [tab], selectedTabID: tabID
-    )
+    let tab = Tab(name: "t", content: .terminal(workingDirectory: "/w"))
+    let worktree = Self.worktree(id: worktreeID, name: "w", path: "/w", branch: "main", tabs: [tab])
     let project = Project(
       id: projectID, name: "p", rootPath: "/", gitRoot: "/",
 
@@ -107,7 +102,6 @@ struct RootFeatureTests {
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
     } withDependencies: {
-      // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
       $0.continuousClock = ImmediateClock()
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
@@ -120,20 +114,50 @@ struct RootFeatureTests {
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
       $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
       $0.editorClient = EditorClient.testValue
-      // `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`, which spawns a
-      // pane in the active tab when it has none. The fixture tab is empty so
-      // `openPane` is reached; stub it to a no-op since this test asserts
-      // only the splitViewport tabID mirror.
-      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
-    // Non-exhaustive: this test is about the splitViewport tabID mirror only.
+    // Non-exhaustive: this test is about the splitViewport mirror only.
     store.exhaustivity = .off
 
     let selection = HierarchySelection(projectID: projectID, worktreeID: worktreeID)
     await store.send(.selectionChanged(selection)) { state in
       state.selection = selection
-      state.detail.splitViewport.activeTabID = tabID
+      state.detail.splitViewport.worktreeID = worktreeID
+      state.detail.splitViewport.paneHosts = [
+        PaneHostFeature.State(
+          contentID: tab.contentID, paneID: worktree.panes[0].id, tabID: tab.id,
+          worktreeID: worktreeID, projectID: projectID)
+      ]
     }
+  }
+
+  // MARK: - Layout fixtures
+
+  /// A Worktree with one Pane holding `tabs`, the first one selected and
+  /// the Pane focused.
+  private static func worktree(
+    id: WorktreeID = WorktreeID(), name: String, path: String, branch: String? = nil,
+    tabs: [Tab], isNew: Bool = false
+  ) -> Worktree {
+    let pane = Pane(tabs: tabs)
+    return Worktree(
+      id: id, name: name, path: path, branch: branch,
+      splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id, isNew: isNew)
+  }
+
+  /// The focused Pane's selected Tab of the selected Worktree, the way the
+  /// live client answers `focusedContent`.
+  private static func focusedContent(in catalog: Catalog, worktreeID: WorktreeID) -> TabAddress? {
+    for project in catalog.projects {
+      guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else { continue }
+      guard let pane = worktree.focusedPane, let tab = pane.selectedTab else { return nil }
+      return TabAddress(
+        projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id, contentID: tab.contentID)
+    }
+    return nil
+  }
+
+  private static func address(_ catalog: Catalog, worktreeID: WorktreeID) -> TabAddress {
+    focusedContent(in: catalog, worktreeID: worktreeID)!
   }
 
   // MARK: - Git Viewer routing
@@ -144,14 +168,8 @@ struct RootFeatureTests {
     projectID: ProjectID,
     worktreeA: WorktreeID, worktreeB: WorktreeID
   ) -> Catalog {
-    let wtA = Worktree(
-      id: worktreeA, name: "A", path: "/a", branch: "a",
-      tabs: [], selectedTabID: nil
-    )
-    let wtB = Worktree(
-      id: worktreeB, name: "B", path: "/b", branch: "b",
-      tabs: [], selectedTabID: nil
-    )
+    let wtA = Worktree(id: worktreeA, name: "A", path: "/a", branch: "a")
+    let wtB = Worktree(id: worktreeB, name: "B", path: "/b", branch: "b")
     let project = Project(
       id: projectID, name: "p", rootPath: "/", gitRoot: "/",
       worktrees: [wtA, wtB], selectedWorktreeID: worktreeA
@@ -514,7 +532,7 @@ struct RootFeatureTests {
     // variant lands. Exhaustive switch at the enum level would be safer but
     // requires Equatable which TerminalEvent can't have (Data payload). This
     // test provides at least surface coverage that every variant maps.
-    let pane = PaneID()
+    let pane = ContentID()
     let tab = TabID()
     let worktree = WorktreeID()
 
@@ -576,17 +594,14 @@ struct RootFeatureTests {
     var tabs: [Tab] = []
     var ids: [TabID] = []
     for i in 0..<tabCount {
-      let tabID = TabID()
-      let paneID = PaneID()
-      let pane = Pane(id: paneID, workingDirectory: "/tmp", initialCommand: nil)
-      tabs.append(
-        Tab(id: tabID, name: "t\(i)", splitTree: SplitTree(leaf: paneID), panes: [pane])
-      )
-      ids.append(tabID)
+      let tab = Tab(name: "t\(i)", content: .terminal(workingDirectory: "/tmp"))
+      tabs.append(tab)
+      ids.append(tab.id)
     }
+    let pane = Pane(tabs: tabs, selectedTabID: ids[selectedIndex])
     let worktree = Worktree(
       id: worktreeID, name: "main", path: "/tmp", branch: "main",
-      tabs: tabs, selectedTabID: ids[selectedIndex]
+      splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id
     )
     let project = Project(
       id: projectID, name: "p", rootPath: "/tmp",
@@ -608,10 +623,10 @@ struct RootFeatureTests {
       // Opening a pane in a new tab waits out `TabBarMetrics.firstPaneDelay`.
       $0.continuousClock = ImmediateClock()
       $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.createTab = { _, _, _ in TabID() }
-      // The new-tab reducer auto-spawns a pane in the worktree cwd;
-      // stub the call so the unimplemented closure does not record.
-      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
+      $0.hierarchyClient.newTab = { _, _, _, _, _, _, _ in Self.address(catalog, worktreeID: wt) }
+      // The new-tab reducer brings the session up; stub the call so the
+      // unimplemented closure does not record.
+      $0.hierarchyClient.ensureSurface = { _ in }
     }
     store.exhaustivity = .off
 
@@ -631,8 +646,7 @@ struct RootFeatureTests {
 
   @Test
   func closeActiveTabForCurrentWorktreeForwardsActiveTab() async {
-    // Each fixture tab has exactly one pane, so ⌘W takes the
-    // single-pane branch and closes the whole tab.
+    // ⌘W closes the selected Tab of the focused Pane.
     let (pr, wt, ids, catalog) = Self.tabBarFixture(tabCount: 3, selectedIndex: 1)
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: pr, worktreeID: wt)
@@ -642,7 +656,8 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.closeTab = { id, _, _ in
+      $0.hierarchyClient.focusedContent = { id in Self.focusedContent(in: catalog, worktreeID: id) }
+      $0.hierarchyClient.closeTab = { id in
         captured.withValue { $0 = id }
       }
     }
@@ -654,27 +669,19 @@ struct RootFeatureTests {
   }
 
   @Test
-  func closeActiveTabForCurrentWorktreeClosesFocusedPaneWhenSplit() async throws {
-    // Active tab has two panes: ⌘W must close the focused pane only,
-    // leaving the tab itself open.
+  func closeActiveTabForCurrentWorktreeClosesTheFocusedPanesTabWhenSplit() async throws {
+    // Two Panes side by side, the right one focused: ⌘W closes the right
+    // Pane's selected Tab and never a whole Pane directly.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
-    let tabID = TabID()
-    let leftPane = PaneID()
-    let rightPane = PaneID()
-    let tab = Tab(
-      id: tabID, name: "t",
-      splitTree: try SplitTree(leaf: leftPane).inserting(
-        rightPane, at: leftPane, direction: .right
-      ),
-      panes: [
-        Pane(id: leftPane, workingDirectory: "/tmp", initialCommand: nil),
-        Pane(id: rightPane, workingDirectory: "/tmp", initialCommand: nil),
-      ]
-    )
+    let leftTab = Tab(name: "l", content: .terminal(workingDirectory: "/tmp"))
+    let rightTab = Tab(name: "r", content: .terminal(workingDirectory: "/tmp"))
+    let leftPane = Pane(tabs: [leftTab])
+    let rightPane = Pane(tabs: [rightTab])
     let worktree = Worktree(
       id: worktreeID, name: "main", path: "/tmp", branch: "main",
-      tabs: [tab], selectedTabID: tabID
+      splitTree: try SplitTree(leaf: leftPane.id).inserting(rightPane.id, at: leftPane.id, direction: .right),
+      panes: [leftPane, rightPane], focusedPaneID: rightPane.id
     )
     let project = Project(
       id: projectID, name: "p", rootPath: "/tmp",
@@ -691,11 +698,11 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.lastFocusedPane = { _ in rightPane }
-      $0.hierarchyClient.closePane = { id, _, _, _ in
+      $0.hierarchyClient.focusedContent = { id in Self.focusedContent(in: catalog, worktreeID: id) }
+      $0.hierarchyClient.closePane = { id in
         closedPane.withValue { $0 = id }
       }
-      $0.hierarchyClient.closeTab = { id, _, _ in
+      $0.hierarchyClient.closeTab = { id in
         closedTab.withValue { $0 = id }
       }
     }
@@ -703,90 +710,25 @@ struct RootFeatureTests {
 
     await store.send(.closeActiveTabForCurrentWorktree)
     await store.finish()
-    #expect(closedPane.value == rightPane)
-    #expect(closedTab.value == nil)
-  }
-
-  @Test
-  func paneLifecycleExitedClosesTabWhenLastPaneInTab() async {
-    // ⌘W routed via Ghostty's `close_surface` lands here. With one pane in
-    // the tab, the surviving tab would be empty — close it instead of
-    // leaving a zombie.
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    let tabID = TabID()
-    let paneID = PaneID()
-    let pane = Pane(id: paneID, workingDirectory: "/tmp", initialCommand: nil)
-    let tab = Tab(
-      id: tabID, name: "t", splitTree: SplitTree(leaf: paneID), panes: [pane]
-    )
-    let worktree = Worktree(
-      id: worktreeID, name: "main", path: "/tmp", branch: "main",
-      tabs: [tab], selectedTabID: tabID
-    )
-    let project = Project(
-      id: projectID, name: "p", rootPath: "/tmp",
-      worktrees: [worktree], selectedWorktreeID: worktreeID
-    )
-    let catalog = Catalog(projects: [project])
-    let address = PaneAddress(
-      projectID: projectID, worktreeID: worktreeID,
-      tabID: tabID, paneID: paneID
-    )
-
-    let closedTab = LockIsolated<TabID?>(nil)
-    let closedPane = LockIsolated<PaneID?>(nil)
-    let store = TestStore(initialState: RootFeature.State()) {
-      RootFeature()
-    } withDependencies: {
-      $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.addressOf = { _ in address }
-      $0.hierarchyClient.closeTab = { id, _, _ in
-        closedTab.withValue { $0 = id }
-      }
-      $0.hierarchyClient.closePane = { id, _, _, _ in
-        closedPane.withValue { $0 = id }
-      }
-    }
-    store.exhaustivity = .off
-
-    await store.send(.paneLifecycleExited(paneID))
-    await store.finish()
-    #expect(closedTab.value == tabID)
+    #expect(closedTab.value == rightTab.id)
     #expect(closedPane.value == nil)
   }
 
   @Test
-  func paneLifecycleExitedClosesOnlyPaneWhenTabHasSiblings() async throws {
-    // Multi-pane tab: keep the tab, drop the pane, transfer focus.
+  func paneLifecycleExitedClosesTheContentsTab() async {
+    // ghostty's `close_surface` and a child exit both land here: the
+    // session's Tab leaves the catalog; the manager retires the Pane when
+    // that was its last Tab.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
-    let tabID = TabID()
-    let leftPane = PaneID()
-    let rightPane = PaneID()
-    let tab = Tab(
-      id: tabID, name: "t",
-      splitTree: try SplitTree(leaf: leftPane).inserting(
-        rightPane, at: leftPane, direction: .right
-      ),
-      panes: [
-        Pane(id: leftPane, workingDirectory: "/tmp", initialCommand: nil),
-        Pane(id: rightPane, workingDirectory: "/tmp", initialCommand: nil),
-      ]
-    )
-    let worktree = Worktree(
-      id: worktreeID, name: "main", path: "/tmp", branch: "main",
-      tabs: [tab], selectedTabID: tabID
-    )
+    let tab = Tab(name: "t", content: .terminal(workingDirectory: "/tmp"))
+    let worktree = Self.worktree(id: worktreeID, name: "main", path: "/tmp", branch: "main", tabs: [tab])
     let project = Project(
       id: projectID, name: "p", rootPath: "/tmp",
       worktrees: [worktree], selectedWorktreeID: worktreeID
     )
     let catalog = Catalog(projects: [project])
-    let address = PaneAddress(
-      projectID: projectID, worktreeID: worktreeID,
-      tabID: tabID, paneID: rightPane
-    )
+    let address = Self.address(catalog, worktreeID: worktreeID)
 
     let closedTab = LockIsolated<TabID?>(nil)
     let closedPane = LockIsolated<PaneID?>(nil)
@@ -795,20 +737,36 @@ struct RootFeatureTests {
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
       $0.hierarchyClient.addressOf = { _ in address }
-      $0.hierarchyClient.closeTab = { id, _, _ in
+      $0.hierarchyClient.closeTab = { id in
         closedTab.withValue { $0 = id }
       }
-      $0.hierarchyClient.closePane = { id, _, _, _ in
+      $0.hierarchyClient.closePane = { id in
         closedPane.withValue { $0 = id }
       }
-      $0.hierarchyClient.focusSurfaceView = { _ in }
     }
     store.exhaustivity = .off
 
-    await store.send(.paneLifecycleExited(rightPane))
+    await store.send(.paneLifecycleExited(tab.contentID))
     await store.finish()
-    #expect(closedPane.value == rightPane)
-    #expect(closedTab.value == nil)
+    #expect(closedTab.value == tab.id)
+    #expect(closedPane.value == nil)
+  }
+
+  @Test
+  func paneLifecycleExitedDropsTheGitCommandMarker() async {
+    // A session that exits mid-command never emits its trailing git edge;
+    // the tracked set must not keep it.
+    let contentID = ContentID()
+    var initial = RootFeature.State()
+    initial.contentsRunningGitCommand = [contentID]
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.addressOf = { _ in nil }
+    }
+    await store.send(.paneLifecycleExited(contentID)) { state in
+      state.contentsRunningGitCommand = []
+    }
   }
 
   @Test
@@ -817,20 +775,24 @@ struct RootFeatureTests {
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: pr, worktreeID: wt)
 
-    let captured = LockIsolated<TabID?>(nil)
+    let captured = LockIsolated<(Int, PaneID)?>(nil)
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.selectTab = { id, _, _ in
-        captured.withValue { $0 = id }
+      $0.hierarchyClient.focusedContent = { id in Self.focusedContent(in: catalog, worktreeID: id) }
+      $0.hierarchyClient.selectTabAtIndex = { index, paneID in
+        captured.withValue { $0 = (index, paneID) }
+        return ids[index]
       }
     }
     store.exhaustivity = .off
 
+    // ⌘3 is the third chip: a zero-based position in the focused Pane.
     await store.send(.selectTabAtIndexForCurrentWorktree(3))
-    await store.receive(\.detail.tabBar)
-    #expect(captured.value == ids[2])
+    await store.finish()
+    #expect(captured.value?.0 == 2)
+    #expect(captured.value?.1 == catalog.projects[0].worktrees[0].panes[0].id)
   }
 
   @Test
@@ -842,6 +804,9 @@ struct RootFeatureTests {
       RootFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.focusedContent = { id in Self.focusedContent(in: catalog, worktreeID: id) }
+      // The manager answers nil for a position past the strip.
+      $0.hierarchyClient.selectTabAtIndex = { _, _ in nil }
     }
 
     // Tab count is 2; asking for the 5th is out of range.
@@ -851,8 +816,7 @@ struct RootFeatureTests {
 
   @Test
   func selectAdjacentTabCallsClient() async {
-    let pr = ProjectID()
-    let wt = WorktreeID()
+    let (pr, wt, _, catalog) = Self.tabBarFixture(tabCount: 2, selectedIndex: 0)
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: pr, worktreeID: wt)
 
@@ -860,7 +824,8 @@ struct RootFeatureTests {
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.hierarchyClient.selectAdjacentTab = { dir, _, _ in
+      $0.hierarchyClient.focusedContent = { id in Self.focusedContent(in: catalog, worktreeID: id) }
+      $0.hierarchyClient.selectAdjacentTab = { dir, _ in
         captured.withValue { $0 = dir }
         return nil
       }
@@ -893,15 +858,17 @@ struct RootFeatureTests {
     )
     let catalog = Catalog(projects: [project])
 
-    struct OpenPaneCall: Sendable, Equatable {
-      let tabID: TabID
+    struct NewTabCall: Sendable, Equatable {
       let worktreeID: WorktreeID
       let projectID: ProjectID
-      let cwd: String
+      let cwd: String?
       let initialCommand: String?
     }
-    let openPaneCalls = LockIsolated<[OpenPaneCall]>([])
-    let createTabCalls = LockIsolated<Int>(0)
+    let newTabCalls = LockIsolated<[NewTabCall]>([])
+    let broughtUp = LockIsolated<[ContentID]>([])
+    let contentID = ContentID()
+    let created = TabAddress(
+      projectID: projectID, worktreeID: worktreeID, paneID: PaneID(), tabID: tabID, contentID: contentID)
 
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
@@ -909,21 +876,19 @@ struct RootFeatureTests {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.createTab = { _, _, _ in
-        createTabCalls.withValue { $0 += 1 }
-        return tabID
-      }
-      $0.hierarchyClient.openPane = { tab, wt, pr, cwd, cmd in
-        openPaneCalls.withValue {
+      $0.hierarchyClient.newTab = { _, wt, pr, content, _, _, _ in
+        newTabCalls.withValue {
           $0.append(
-            OpenPaneCall(
-              tabID: tab, worktreeID: wt, projectID: pr, cwd: cwd, initialCommand: cmd))
+            NewTabCall(
+              worktreeID: wt, projectID: pr, cwd: content.terminal?.workingDirectory,
+              initialCommand: content.terminal?.initialCommand))
         }
-        return PaneID()
+        return created
       }
+      $0.hierarchyClient.ensureSurface = { id in broughtUp.withValue { $0.append(id) } }
       $0.hierarchyClient.selectProject = { _ in }
       $0.hierarchyClient.selectWorktree = { _, _ in }
-      $0.hierarchyClient.selectTab = { _, _, _ in }
+      $0.hierarchyClient.selectTab = { _ in }
       $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off
@@ -932,10 +897,9 @@ struct RootFeatureTests {
       .openShellEditorInWorktree(worktreePath: worktreePath, projectID: projectID))
     await store.finish()
 
-    #expect(createTabCalls.value == 1)
-    #expect(openPaneCalls.value.count == 1)
-    let call = openPaneCalls.value.first
-    #expect(call?.tabID == tabID)
+    #expect(newTabCalls.value.count == 1)
+    #expect(broughtUp.value == [contentID])
+    let call = newTabCalls.value.first
     #expect(call?.worktreeID == worktreeID)
     #expect(call?.projectID == projectID)
     #expect(call?.cwd == worktreePath)
@@ -1051,16 +1015,13 @@ struct RootFeatureTests {
     // reveal the worktree in the sidebar — expand the parent project, show
     // the sidebar, and bump the reveal trigger — so a row scrolled off-screen
     // (or hidden under a collapsed project) scrolls into view.
-    let pane = Pane(workingDirectory: "/repo")
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
-    let worktree = Worktree(name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id)
+    let tab = Tab(content: .terminal(workingDirectory: "/repo"))
+    let worktree = Self.worktree(name: "main", path: "/repo", tabs: [tab])
     var project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo")
     project.worktrees = [worktree]
     var catalog = Catalog()
     catalog.projects = [project]
-    let address = PaneAddress(
-      projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: pane.id
-    )
+    let address = Self.address(catalog, worktreeID: worktree.id)
     let expandCalls = LockIsolated<[(ProjectID, Bool)]>([])
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
@@ -1071,8 +1032,8 @@ struct RootFeatureTests {
       $0.hierarchyClient.addressOf = { _ in address }
       $0.hierarchyClient.selectProject = { _ in }
       $0.hierarchyClient.selectWorktree = { _, _ in }
-      $0.hierarchyClient.selectTab = { _, _, _ in }
-      $0.hierarchyClient.focusPane = { _, _, _, _ in }
+      $0.hierarchyClient.selectTab = { _ in }
+      $0.hierarchyClient.focusPane = { _ in }
       $0.hierarchyClient.focusSurfaceView = { _ in }
       $0.hierarchyClient.setProjectExpanded = { pid, expanded in
         expandCalls.withValue { $0.append((pid, expanded)) }
@@ -1081,7 +1042,7 @@ struct RootFeatureTests {
     store.exhaustivity = .off
 
     let before = store.state.revealSelectionTrigger
-    await store.send(.agentState(.rowTapped(pane.id)))
+    await store.send(.agentState(.rowTapped(tab.contentID)))
     await store.finish()
 
     #expect(store.state.revealSelectionTrigger != before)
@@ -1734,11 +1695,8 @@ struct RootFeatureTests {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let tabID = TabID()
-    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
-    let worktree = Worktree(
-      id: worktreeID, name: "w", path: "/w", branch: "main",
-      tabs: [tab], selectedTabID: tabID
-    )
+    let tab = Tab(id: tabID, name: "t", content: .terminal(workingDirectory: "/w"))
+    let worktree = Self.worktree(id: worktreeID, name: "w", path: "/w", branch: "main", tabs: [tab])
     let project = Project(
       id: projectID, name: "p", rootPath: "/", gitRoot: "/",
       worktrees: [worktree], selectedWorktreeID: worktreeID
@@ -1761,7 +1719,6 @@ struct RootFeatureTests {
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
       $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
       $0.editorClient = EditorClient.testValue
-      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
     store.exhaustivity = .off
 
@@ -1824,7 +1781,7 @@ struct RootFeatureTests {
     // seam that actually lands a first pane. Here we let the post-switch
     // `.selectionChanged` actually run the live chain: gate switches →
     // `selectionChanged` is received → `autoSeedTabAndPaneIfNeeded` sees the
-    // new worktree's EMPTY tabs → `createTab` then `openPane` fire. Covers the
+    // new worktree has NO Pane → `newTab` then `ensureSurface` fire. Covers the
     // switch→pane seam behind VAL-SWITCH-001..007.
     //
     // In the live app, the gate's `selectWorktree(...)` emits the
@@ -1837,12 +1794,9 @@ struct RootFeatureTests {
     let pendingID = PendingWorktreeID()
     let newTabID = TabID()
 
-    // Catalog whose new worktree has NO tabs — the precondition that makes
-    // the seed chain reach `createTab` + `openPane`.
-    let worktree = Worktree(
-      id: worktreeID, name: "feat", path: "/repo/feat", branch: "feat",
-      tabs: [], selectedTabID: nil
-    )
+    // Catalog whose new worktree has NO Pane — the precondition that makes
+    // the seed chain reach `newTab` + `ensureSurface`.
+    let worktree = Worktree(id: worktreeID, name: "feat", path: "/repo/feat", branch: "feat")
     let project = Project(
       id: projectID, name: "p", rootPath: "/repo", gitRoot: "/repo",
       worktrees: [worktree], selectedWorktreeID: worktreeID
@@ -1852,14 +1806,15 @@ struct RootFeatureTests {
     let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: true))
 
     let selectRecorder = SelectRecorder()
-    let createTabCalls = LockIsolated<Int>(0)
-    struct OpenPaneCall: Sendable, Equatable {
-      let tabID: TabID
+    struct NewTabCall: Sendable, Equatable {
       let worktreeID: WorktreeID
       let projectID: ProjectID
-      let cwd: String
+      let cwd: String?
     }
-    let openPaneCalls = LockIsolated<[OpenPaneCall]>([])
+    let newTabCalls = LockIsolated<[NewTabCall]>([])
+    let broughtUp = LockIsolated<[ContentID]>([])
+    let created = TabAddress(
+      projectID: projectID, worktreeID: worktreeID, paneID: PaneID(), tabID: newTabID, contentID: ContentID())
 
     var initial = RootFeature.State()
     initial.activePendingWorktreeID = pendingID
@@ -1879,16 +1834,13 @@ struct RootFeatureTests {
         selectRecorder.worktree.withValue { $0 = wt }
       }
       // The seed chain we are pinning.
-      $0.hierarchyClient.createTab = { _, _, _ in
-        createTabCalls.withValue { $0 += 1 }
-        return newTabID
-      }
-      $0.hierarchyClient.openPane = { tab, wt, pr, cwd, _ in
-        openPaneCalls.withValue {
-          $0.append(OpenPaneCall(tabID: tab, worktreeID: wt, projectID: pr, cwd: cwd))
+      $0.hierarchyClient.newTab = { _, wt, pr, content, _, _, _ in
+        newTabCalls.withValue {
+          $0.append(NewTabCall(worktreeID: wt, projectID: pr, cwd: content.terminal?.workingDirectory))
         }
-        return PaneID()
+        return created
       }
+      $0.hierarchyClient.ensureSurface = { id in broughtUp.withValue { $0.append(id) } }
       // `.selectionChanged` with a real project transition fans into
       // `.gitHub(.projectActivated)`, which touches `.date` + remoteInfo +
       // batchPullRequests; stub each so the chain completes (mirrors
@@ -1912,17 +1864,16 @@ struct RootFeatureTests {
     #expect(selectRecorder.project.value == projectID, "gate must select the project")
     #expect(selectRecorder.worktree.value == worktreeID, "gate must select the worktree")
 
-    // The post-switch selection lands and the seed chain runs. `.openPane` is
-    // fired from a `Task { @MainActor }` inside the reducer, so let the store
-    // settle before asserting the recorded calls.
+    // The post-switch selection lands and the seed chain runs. `ensureSurface`
+    // is fired from a `Task { @MainActor }` inside the reducer, so let the
+    // store settle before asserting the recorded calls.
     await store.send(
       .selectionChanged(HierarchySelection(projectID: projectID, worktreeID: worktreeID)))
     await store.finish()
 
-    #expect(createTabCalls.value == 1, "the switch must seed a first tab")
-    #expect(openPaneCalls.value.count == 1, "the switch must seed a first pane")
-    let call = openPaneCalls.value.first
-    #expect(call?.tabID == newTabID)
+    #expect(newTabCalls.value.count == 1, "the switch must seed a first tab")
+    #expect(broughtUp.value == [created.contentID], "the switch must bring the first session up")
+    let call = newTabCalls.value.first
     #expect(call?.worktreeID == worktreeID)
     #expect(call?.projectID == projectID)
     #expect(call?.cwd == "/repo/feat")
@@ -1934,16 +1885,16 @@ struct RootFeatureTests {
     // bell — funnel through `focusHierarchyPath`. Jumping to the pane must
     // also reveal its worktree in the sidebar so an off-screen / collapsed
     // target scrolls into view.
-    let pane = Pane(workingDirectory: "/repo")
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
-    let worktree = Worktree(name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id)
+    let tab = Tab(content: .terminal(workingDirectory: "/repo"))
+    let worktree = Self.worktree(name: "main", path: "/repo", tabs: [tab])
     var project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo")
     project.worktrees = [worktree]
     var catalog = Catalog()
     catalog.projects = [project]
     let source = InboxEntry.SourcePath(
-      projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: pane.id
+      projectID: project.id, worktreeID: worktree.id, contentID: tab.contentID
     )
+    let address = Self.address(catalog, worktreeID: worktree.id)
     let expandCalls = LockIsolated<[(ProjectID, Bool)]>([])
     let store = TestStore(initialState: RootFeature.State()) {
       RootFeature()
@@ -1951,10 +1902,11 @@ struct RootFeatureTests {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.addressOf = { _ in address }
       $0.hierarchyClient.selectProject = { _ in }
       $0.hierarchyClient.selectWorktree = { _, _ in }
-      $0.hierarchyClient.selectTab = { _, _, _ in }
-      $0.hierarchyClient.focusPane = { _, _, _, _ in }
+      $0.hierarchyClient.selectTab = { _ in }
+      $0.hierarchyClient.focusPane = { _ in }
       $0.hierarchyClient.focusSurfaceView = { _ in }
       $0.hierarchyClient.setProjectExpanded = { pid, expanded in
         expandCalls.withValue { $0.append((pid, expanded)) }
@@ -1983,11 +1935,8 @@ struct RootFeatureTests {
     let worktreeID = WorktreeID()
     let tabID = TabID()
 
-    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
-    let worktree = Worktree(
-      id: worktreeID, name: "w", path: "/w", branch: "main",
-      tabs: [tab], selectedTabID: tabID, isNew: true
-    )
+    let tab = Tab(id: tabID, name: "t", content: .terminal(workingDirectory: "/w"))
+    let worktree = Self.worktree(id: worktreeID, name: "w", path: "/w", branch: "main", tabs: [tab], isNew: true)
     let project = Project(
       id: projectID, name: "p", rootPath: "/", gitRoot: "/",
       worktrees: [worktree], selectedWorktreeID: worktreeID
@@ -2006,7 +1955,6 @@ struct RootFeatureTests {
       $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
         isNewCalls.withValue { $0.append((wt, isNew)) }
       }
-      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
       $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
@@ -2033,11 +1981,8 @@ struct RootFeatureTests {
     let worktreeID = WorktreeID()
     let tabID = TabID()
 
-    let tab = Tab(id: tabID, name: "t", splitTree: SplitTree(), panes: [])
-    let worktree = Worktree(
-      id: worktreeID, name: "w", path: "/w", branch: "main",
-      tabs: [tab], selectedTabID: tabID, isNew: false
-    )
+    let tab = Tab(id: tabID, name: "t", content: .terminal(workingDirectory: "/w"))
+    let worktree = Self.worktree(id: worktreeID, name: "w", path: "/w", branch: "main", tabs: [tab], isNew: false)
     let project = Project(
       id: projectID, name: "p", rootPath: "/", gitRoot: "/",
       worktrees: [worktree], selectedWorktreeID: worktreeID
@@ -2056,7 +2001,6 @@ struct RootFeatureTests {
       $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
         isNewCalls.withValue { $0.append((wt, isNew)) }
       }
-      $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
       $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
@@ -2074,9 +2018,9 @@ struct RootFeatureTests {
 
   // MARK: - Hand-off orders
 
-  private static func handoffSource(paneID: PaneID) -> HandoffFeature.Source {
+  private static func handoffSource(contentID: ContentID) -> HandoffFeature.Source {
     HandoffFeature.Source(
-      paneID: paneID, projectID: ProjectID(raw: UUID()), worktreeID: WorktreeID(raw: UUID()),
+      contentID: contentID, projectID: ProjectID(raw: UUID()), worktreeID: WorktreeID(raw: UUID()),
       agent: .claudeCode)
   }
 
@@ -2085,13 +2029,13 @@ struct RootFeatureTests {
   /// CLI completion as a toast. Nothing waits on screen.
   @Test
   func briefHandOffClosesThePanelAndFinishesOnTheMatchingCompletion() async {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let requestID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
     let (completions, continuation) = AsyncStream<HandoffCompletion>.makeStream()
-    let registered = LockIsolated<[(UUID, PaneID)]>([])
-    let typed = LockIsolated<[(PaneID, String)]>([])
+    let registered = LockIsolated<[(UUID, ContentID)]>([])
+    let typed = LockIsolated<[(ContentID, String)]>([])
     var initial = RootFeature.State()
-    let source = Self.handoffSource(paneID: paneID)
+    let source = Self.handoffSource(contentID: contentID)
     initial.handoff = HandoffFeature.State.make(source: source, profiles: [AgentProfile(kind: .codex)])
 
     let store = TestStore(initialState: initial) {
@@ -2116,24 +2060,24 @@ struct RootFeatureTests {
     }
     #expect(registered.value.count == 1)
     #expect(registered.value.first?.0 == requestID)
-    #expect(registered.value.first?.1 == paneID)
-    #expect(typed.value.first?.0 == paneID)
+    #expect(registered.value.first?.1 == contentID)
+    #expect(typed.value.first?.0 == contentID)
     #expect(
       typed.value.first?.1
-        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
+        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, sourceContentID: contentID, cli: "codans")
         || typed.value.first?.1
           == HandoffKickoff.sourceInstruction(
-            for: .handOff(to: .codex), requestID: requestID, sourcePaneID: paneID, cli: "codans")
+            for: .handOff(to: .codex), requestID: requestID, sourceContentID: contentID, cli: "codans")
     )
 
     // A completion for another request is not ours.
     continuation.yield(
       HandoffCompletion(
-        action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .inline, launched: nil,
+        action: .to, sourceContentID: contentID, receiver: .codex, briefing: .inline, launched: nil,
         requestID: UUID()))
     // Ours, without a launched pane so no focus walk is needed here.
     let mine = HandoffCompletion(
-      action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .inline, launched: nil,
+      action: .to, sourceContentID: contentID, receiver: .codex, briefing: .inline, launched: nil,
       requestID: requestID)
     continuation.yield(mine)
     await store.receive(.handoffFinished(mine, targetTitle: "Codex"))
@@ -2145,12 +2089,12 @@ struct RootFeatureTests {
   /// instead of quietly downgrading to a context-only hand-off.
   @Test
   func undeliverableBriefRequestWarnsAndSupersedes() async {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let requestID = UUID()
     let superseded = LockIsolated<[UUID]>([])
     var initial = RootFeature.State()
     initial.handoff = HandoffFeature.State.make(
-      source: Self.handoffSource(paneID: paneID), profiles: [AgentProfile(kind: .codex)])
+      source: Self.handoffSource(contentID: contentID), profiles: [AgentProfile(kind: .codex)])
 
     let store = TestStore(initialState: initial) {
       RootFeature()
@@ -2181,14 +2125,14 @@ struct RootFeatureTests {
   /// lands on the receiver.
   @Test
   func contextOnlyHandOffRunsAtOnceAndReportsTheOutcome() async {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let ran = LockIsolated<[IPC.HandoffRequest]>([])
-    let source = Self.handoffSource(paneID: paneID)
+    let source = Self.handoffSource(contentID: contentID)
     let profile = AgentProfile(kind: .codex, name: "Build")
     var initial = RootFeature.State()
     initial.handoff = HandoffFeature.State.make(source: source, profiles: [profile], placement: .split(.right))
     let completion = HandoffCompletion(
-      action: .to, sourcePaneID: paneID, receiver: .codex, briefing: .none, launched: nil, requestID: nil)
+      action: .to, sourceContentID: contentID, receiver: .codex, briefing: .none, launched: nil, requestID: nil)
 
     let store = TestStore(initialState: initial) {
       RootFeature()

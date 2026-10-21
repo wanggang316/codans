@@ -17,12 +17,12 @@ import Testing
 @MainActor
 struct RestoredAgentSeedSelectionTests {
   private static func record(
-    _ paneID: PaneID,
+    _ paneID: ContentID,
     kind: String = "claude-code",
     state: String = "working"
   ) -> PersistedAgentRecord {
     PersistedAgentRecord(
-      paneID: paneID,
+      contentID: paneID,
       kindRaw: kind,
       stateRaw: state,
       pid: 0,
@@ -34,14 +34,14 @@ struct RestoredAgentSeedSelectionTests {
   /// the working/blocked badge survives the quit→launch cycle.
   @Test
   func aliveDaemonWithValidRawsIsSeeded() {
-    let pane = PaneID()
+    let pane = ContentID()
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane, state: "working")],
       isDaemonAlive: { _ in true }
     )
 
     #expect(seeds.count == 1)
-    #expect(seeds.first?.paneID == pane)
+    #expect(seeds.first?.contentID == pane)
     #expect(seeds.first?.kind == .claudeCode)
     #expect(seeds.first?.state == .working)
   }
@@ -50,7 +50,7 @@ struct RestoredAgentSeedSelectionTests {
   /// the empty-`catalog.sessions` filter made EVERY record look dead.)
   @Test
   func deadDaemonIsSkipped() {
-    let pane = PaneID()
+    let pane = ContentID()
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane)],
       isDaemonAlive: { _ in false }
@@ -62,8 +62,8 @@ struct RestoredAgentSeedSelectionTests {
   /// Liveness is per-pane: only the alive pane's agent is seeded.
   @Test
   func onlyAliveDaemonsAreSeeded() {
-    let alive = PaneID()
-    let dead = PaneID()
+    let alive = ContentID()
+    let dead = ContentID()
     let seeds = AppState.selectAgentSeeds(
       restored: [
         alive: Self.record(alive, state: "blocked"),
@@ -73,14 +73,14 @@ struct RestoredAgentSeedSelectionTests {
     )
 
     #expect(seeds.count == 1)
-    #expect(seeds.first?.paneID == alive)
+    #expect(seeds.first?.contentID == alive)
     #expect(seeds.first?.state == .blocked)
   }
 
   /// An unknown `kindRaw` from a future build is dropped, not crashed on.
   @Test
   func unknownKindRawIsSkipped() {
-    let pane = PaneID()
+    let pane = ContentID()
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane, kind: "future-agent-9000")],
       isDaemonAlive: { _ in true }
@@ -92,7 +92,7 @@ struct RestoredAgentSeedSelectionTests {
   /// A snapshot written before `finished` was renamed restores as `done`.
   @Test
   func legacyFinishedStateRawRestoresAsDone() {
-    let pane = PaneID()
+    let pane = ContentID()
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane, state: "finished")],
       isDaemonAlive: { _ in true }
@@ -104,7 +104,7 @@ struct RestoredAgentSeedSelectionTests {
   /// An unknown `stateRaw` from a future build is dropped, not crashed on.
   @Test
   func unknownStateRawIsSkipped() {
-    let pane = PaneID()
+    let pane = ContentID()
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane, state: "hyperfocused")],
       isDaemonAlive: { _ in true }
@@ -118,7 +118,7 @@ struct RestoredAgentSeedSelectionTests {
   /// ever runs for a pane the sweep map already answered.
   @Test
   func knownLivenessShortCircuitsProbe() {
-    let pane = PaneID()
+    let pane = ContentID()
     var probed = false
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane, state: "working")],
@@ -131,7 +131,7 @@ struct RestoredAgentSeedSelectionTests {
 
     #expect(probed == false)
     #expect(seeds.count == 1)
-    #expect(seeds.first?.paneID == pane)
+    #expect(seeds.first?.contentID == pane)
   }
 
   /// A sweep verdict of "dead" drops the record without probing — the sweep
@@ -139,7 +139,7 @@ struct RestoredAgentSeedSelectionTests {
   /// resurrect the badge.
   @Test
   func knownDeadOverridesProbe() {
-    let pane = PaneID()
+    let pane = ContentID()
     var probed = false
     let seeds = AppState.selectAgentSeeds(
       restored: [pane: Self.record(pane)],
@@ -159,9 +159,9 @@ struct RestoredAgentSeedSelectionTests {
   /// direct probe, preserving the pre-dedup behavior.
   @Test
   func absentFromKnownLivenessFallsBackToProbe() {
-    let seen = PaneID()
-    let unseen = PaneID()
-    var probedPanes: [PaneID] = []
+    let seen = ContentID()
+    let unseen = ContentID()
+    var probedPanes: [ContentID] = []
     let seeds = AppState.selectAgentSeeds(
       restored: [
         seen: Self.record(seen, state: "working"),

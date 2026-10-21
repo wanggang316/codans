@@ -17,6 +17,21 @@ struct HierarchyManagerTests {
     manager = HierarchyManager(catalog: .default, store: store, runtime: fakeRuntime)
   }
 
+  private var worktree: Worktree {
+    manager.catalog.projects[0].worktrees[0]
+  }
+
+  @discardableResult
+  private func newTab(
+    in worktreeID: WorktreeID, in projectID: ProjectID, name: String? = nil,
+    workingDirectory: String = "/tmp", initialCommand: String? = nil
+  ) throws -> TabAddress {
+    try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID,
+      content: .terminal(workingDirectory: workingDirectory, initialCommand: initialCommand),
+      name: name)
+  }
+
   @Test
   func createWorktreeAppendsAndSetsSelected() throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
@@ -44,7 +59,7 @@ struct HierarchyManagerTests {
   }
 
   @Test
-  func createTabAppendsAndSetsSelected() throws {
+  func newTabAppendsAndSetsSelected() throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID,
@@ -53,15 +68,16 @@ struct HierarchyManagerTests {
       branch: "main"
     )
 
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: "tab1")
+    let created = try newTab(in: worktreeID, in: projectID, name: "tab1")
 
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.count == 1)
-    #expect(manager.catalog.projects[0].worktrees[0].tabs[0].id == tabID)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabID)
+    #expect(worktree.allTabs.count == 1)
+    #expect(worktree.allTabs[0].id == created.tabID)
+    #expect(worktree.allTabs[0].name == "tab1")
+    #expect(worktree.pane(created.paneID)?.selectedTabID == created.tabID)
   }
 
   @Test
-  func openPaneInEmptyTabCreatesLeaf() async throws {
+  func newTabInEmptyWorktreeCreatesLeaf() async throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID,
@@ -69,22 +85,15 @@ struct HierarchyManagerTests {
       path: "/repo",
       branch: "main"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
 
-    let paneID = try await manager.openPane(
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    let created = try newTab(in: worktreeID, in: projectID)
+    try await manager.ensureSurface(for: created.contentID)
 
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.panes.count == 1)
-    #expect(tab.panes[0].id == paneID)
-    #expect(tab.splitTree.leaves() == [paneID])
+    #expect(worktree.panes.count == 1)
+    #expect(worktree.panes[0].id == created.paneID)
+    #expect(worktree.splitTree.leaves() == [created.paneID])
     #expect(fakeRuntime.ensureSurfaceCalls.count == 1)
-    #expect(fakeRuntime.ensureSurfaceCalls[0].paneID == paneID)
+    #expect(fakeRuntime.ensureSurfaceCalls[0].contentID == created.contentID)
   }
 
   @Test
@@ -96,93 +105,55 @@ struct HierarchyManagerTests {
       path: "/repo",
       branch: "main"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    let first = try newTab(in: worktreeID, in: projectID)
+    try await manager.ensureSurface(for: first.contentID)
 
     fakeRuntime.reset()
-    let newPaneID = try await manager.splitPane(
-      paneID,
-      direction: .right,
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    let created = try manager.splitPane(
+      from: first.paneID, direction: .right, content: .terminal(workingDirectory: "/tmp"))
+    try await manager.ensureSurface(for: created.contentID)
 
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.panes.count == 2)
-    #expect(tab.splitTree.leaves().count == 2)
-    #expect(tab.splitTree.contains(newPaneID))
+    #expect(worktree.panes.count == 2)
+    #expect(worktree.splitTree.leaves().count == 2)
+    #expect(worktree.splitTree.contains(created.paneID))
     #expect(fakeRuntime.ensureSurfaceCalls.count == 1)
-    #expect(fakeRuntime.ensureSurfaceCalls[0].paneID == newPaneID)
+    #expect(fakeRuntime.ensureSurfaceCalls[0].contentID == created.contentID)
   }
 
-  /// Regression guard for the worktree-create double-seed race
-  /// (`fix/resume-bug`). The create-worktree flow seeds its first pane via
-  /// `createPaneRow` from a *synchronous* reducer body so the Pane row is
-  /// observable before the `.selectionChanged` it triggers reaches
-  /// `RootFeature`. If the row only landed after an `await` (as the
-  /// all-in-one async `openPane` does), `autoSeedTabAndPaneIfNeeded` would
-  /// read an empty tab and race in a second pane — the two concurrent
-  /// `zmx serve` spawns then collide and one fails with `zmxServeFailed`.
-  /// So `createPaneRow` must (a) insert the pane synchronously and (b) NOT
-  /// bring the surface up.
+  /// Regression guard for the worktree-create double-seed race. The
+  /// create-worktree flow seeds its first Tab from a *synchronous* reducer
+  /// body so the row is observable before the `.selectionChanged` it
+  /// triggers reaches `RootFeature`. If the row only landed after an
+  /// `await`, the auto-seed would read an empty Worktree and race in a
+  /// second Tab — the two concurrent `zmx serve` spawns then collide and
+  /// one fails with `zmxServeFailed`. So `newTab` must (a) insert the Tab
+  /// synchronously and (b) NOT bring the surface up; `ensureSurface` is
+  /// the async half, and bringing it up once spawns exactly one surface.
   @Test
-  func createPaneRowInsertsPaneSynchronouslyWithoutSurface() throws {
+  func newTabInsertsRowSynchronouslyAndSurfaceComesUpOnce() async throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "main", path: "/repo", branch: "main"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
 
-    let paneID = try manager.createPaneRow(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo", initialCommand: "echo setup"
-    )
+    let created = try newTab(
+      in: worktreeID, in: projectID, workingDirectory: "/repo", initialCommand: "echo setup")
 
-    // Row is observable immediately — no `await`, so an auto-seed snapshot
-    // taken right after this point sees a non-empty tab.
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.panes.count == 1)
-    #expect(tab.panes[0].id == paneID)
-    #expect(tab.panes[0].initialCommand == "echo setup")
-    #expect(tab.splitTree.leaves() == [paneID])
-    // The async half (`ensurePaneSurface`) has not run, so no daemon spawn.
+    #expect(worktree.allTabs.count == 1)
+    #expect(worktree.allTabs[0].id == created.tabID)
+    #expect(worktree.allTabs[0].content.terminal?.initialCommand == "echo setup")
+    #expect(worktree.splitTree.leaves() == [created.paneID])
     #expect(fakeRuntime.ensureSurfaceCalls.isEmpty)
-  }
 
-  /// `openPane` stays the all-in-one path: synchronous `createPaneRow`
-  /// followed by the async surface bringup. Exactly one pane, one surface —
-  /// the two-phase split must not double-spawn.
-  @Test
-  func openPaneSeedsRowAndSurfaceExactlyOnce() async throws {
-    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
-    let worktreeID = try manager.createWorktree(
-      in: projectID, name: "main", path: "/repo", branch: "main"
-    )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo", initialCommand: nil
-    )
-
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.panes.count == 1)
-    #expect(tab.panes[0].id == paneID)
+    try await manager.ensureSurface(for: created.contentID)
+    try await manager.ensureSurface(for: created.contentID)
+    #expect(worktree.allTabs.count == 1)
     #expect(fakeRuntime.ensureSurfaceCalls.count == 1)
-    #expect(fakeRuntime.ensureSurfaceCalls[0].paneID == paneID)
+    #expect(fakeRuntime.ensureSurfaceCalls[0].contentID == created.contentID)
   }
 
   @Test
-  func closePaneRemovesFromSplitTree() async throws {
+  func closeTabRemovesLeafFromSplitTree() async throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID,
@@ -190,26 +161,19 @@ struct HierarchyManagerTests {
       path: "/repo",
       branch: "main"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    let created = try newTab(in: worktreeID, in: projectID)
+    try await manager.ensureSurface(for: created.contentID)
 
     fakeRuntime.reset()
-    try manager.closePane(paneID, in: tabID, in: worktreeID, in: projectID)
+    try manager.closeTab(created.tabID)
 
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.panes.isEmpty)
-    #expect(tab.splitTree.isEmpty)
-    #expect(fakeRuntime.closeSurfaceCalls == [paneID])
+    #expect(worktree.panes.isEmpty)
+    #expect(worktree.splitTree.isEmpty)
+    #expect(fakeRuntime.closeSurfaceCalls == [created.contentID])
   }
 
   @Test
-  func tabValidateInvariantsHoldsAfterSplit() async throws {
+  func worktreeValidateInvariantsHoldsAfterSplit() async throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID,
@@ -217,53 +181,14 @@ struct HierarchyManagerTests {
       path: "/repo",
       branch: "main"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    let first = try newTab(in: worktreeID, in: projectID)
 
-    _ = try await manager.splitPane(
-      paneID,
-      direction: .right,
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    _ = try manager.splitPane(
+      from: first.paneID, direction: .right, content: .terminal(workingDirectory: "/tmp"))
 
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
     #expect(throws: Never.self) {
-      try tab.validateInvariants()
+      try worktree.validateInvariants()
     }
-  }
-
-  @Test
-  func focusPaneSetsZoom() async throws {
-    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
-    let worktreeID = try manager.createWorktree(
-      in: projectID,
-      name: "main",
-      path: "/repo",
-      branch: "main"
-    )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID,
-      in: worktreeID,
-      in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
-
-    try manager.focusPane(paneID, in: tabID, in: worktreeID, in: projectID)
-
-    let tab = manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.splitTree.zoomed == paneID)
   }
 
   // Per-Project editor / worktrees-directory mutators moved off HierarchyManager in v3
@@ -309,35 +234,29 @@ struct HierarchyManagerTests {
   }
 
   @Test
-  func removeProjectSuspendsEveryPaneAndAnnounces() async throws {
+  func removeProjectSuspendsEveryContentAndAnnounces() async throws {
     let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
     let liveWorktree = try manager.createWorktree(
       in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
     )
-    let liveTab = try manager.createTab(in: liveWorktree, in: projectID, name: nil)
-    let livePane = try await manager.openPane(
-      in: liveTab, in: liveWorktree, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
-    )
+    let live = try newTab(in: liveWorktree, in: projectID, workingDirectory: "/repo/feat")
+    try await manager.ensureSurface(for: live.contentID)
     let archivedWorktree = try manager.createWorktree(
       in: projectID, name: "old", path: "/repo/old", branch: "old"
     )
-    let archivedTab = try manager.createTab(in: archivedWorktree, in: projectID, name: nil)
-    let archivedPane = try await manager.openPane(
-      in: archivedTab, in: archivedWorktree, in: projectID,
-      workingDirectory: "/repo/old", initialCommand: nil
-    )
+    let archived = try newTab(in: archivedWorktree, in: projectID, workingDirectory: "/repo/old")
+    try await manager.ensureSurface(for: archived.contentID)
     try manager.setWorktreeArchived(worktreeID: archivedWorktree, archived: true)
     fakeRuntime.reset()
 
     try manager.removeProject(projectID)
 
-    // Suspend, not close: surfaces are lazy, so a backgrounded pane's zmx
+    // Suspend, not close: surfaces are lazy, so a backgrounded Content's zmx
     // daemon would otherwise leak, and `.paneExited` would route through
-    // paneLifecycleExited → closePane for panes already deleted wholesale.
+    // the exit path → closeTab for Tabs already deleted wholesale.
     // Archived worktrees are included — their control socket is gone, which
     // the live runtime treats as a no-op.
-    #expect(Set(fakeRuntime.suspendSurfaceCalls) == Set([livePane, archivedPane]))
+    #expect(Set(fakeRuntime.suspendSurfaceCalls) == Set([live.contentID, archived.contentID]))
     #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
     // One structural-mutation announce so the AgentState reconcile runs
     // against the now-smaller catalog and retires the project's agent rows.
@@ -346,27 +265,22 @@ struct HierarchyManagerTests {
   }
 
   @Test
-  func removeProjectClearsBusySetsAndFocusMemory() async throws {
+  func removeProjectClearsBusySignal() async throws {
     let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
-    )
-    manager.setPaneCommandBusy(paneID, true)
-    manager.markPaneRunning(paneID)
-    manager.setLastFocusedPane(paneID, in: tabID)
+    let created = try newTab(in: worktreeID, in: projectID, workingDirectory: "/repo/feat")
+    try await manager.ensureSurface(for: created.contentID)
+    manager.setCommandQueue([QueuedCommand(text: "make", timing: .afterCurrentTask)], for: created.contentID)
+    #expect(manager.isBusy(created.contentID))
 
     try manager.removeProject(projectID)
 
     // Removal suspends rather than closes, so the `.paneExited` cleanup in
-    // closePane never runs. Stale members keep the O(1) short-circuit in
-    // the dirty predicates from ever firing again.
-    #expect(!manager.paneIsBusy(paneID))
-    #expect(manager.lastFocusedPane(in: tabID) == nil)
+    // closeTab never runs; the busy predicate must still read false for a
+    // Content the catalog no longer holds.
+    #expect(!manager.isBusy(created.contentID))
   }
 
   @Test
@@ -474,11 +388,12 @@ struct HierarchyManagerTests {
 
   // MARK: - Tab-bar uplift (M2-T2.1)
 
-  /// Seeds a worktree with three tabs and returns (space, project, worktree, tabIDs).
-  /// Every tab gets one pane so `closeTab`'s runtime-teardown path is exercised
-  /// the same way the real UI drives it.
+  /// Seeds a worktree with three Tabs in one Pane and returns
+  /// (project, worktree, pane, tabIDs). Every Tab's surface is brought up
+  /// so `closeTab`'s runtime-teardown path is exercised the same way the
+  /// real UI drives it.
   @MainActor
-  private func makeFixtureWithThreeTabs() async throws -> (ProjectID, WorktreeID, [TabID]) {
+  private func makeFixtureWithThreeTabs() async throws -> (ProjectID, WorktreeID, PaneID, [TabID]) {
     let projectID = manager.addProject(
       name: "project", rootPath: "/tmp", gitRoot: "/tmp"
     )
@@ -486,144 +401,148 @@ struct HierarchyManagerTests {
       in: projectID, name: "main", path: "/repo", branch: "main"
     )
     var tabIDs: [TabID] = []
+    var paneID: PaneID?
     for name in ["one", "two", "three"] {
-      let tid = try manager.createTab(in: worktreeID, in: projectID, name: name)
-      _ = try await manager.openPane(
-        in: tid, in: worktreeID, in: projectID,
-        workingDirectory: "/tmp", initialCommand: nil
-      )
-      tabIDs.append(tid)
+      let created = try newTab(in: worktreeID, in: projectID, name: name)
+      try await manager.ensureSurface(for: created.contentID)
+      tabIDs.append(created.tabID)
+      paneID = created.paneID
     }
-    return (projectID, worktreeID, tabIDs)
+    return (projectID, worktreeID, try #require(paneID), tabIDs)
+  }
+
+  private func selectedTabID(in paneID: PaneID) -> TabID? {
+    manager.catalog.pane(paneID)?.selectedTabID
   }
 
   @Test
   func renameTabWritesName() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
-    try manager.renameTab(tabs[1], in: wt, in: pr, name: "renamed")
-    let stored = manager.catalog.projects[0].worktrees[0].tabs[1].name
+    let (_, _, _, tabs) = try await makeFixtureWithThreeTabs()
+    try manager.renameTab(tabs[1], name: "renamed")
+    let stored = worktree.allTabs[1].name
     #expect(stored == "renamed")
   }
 
   @Test
   func renameTabWithUnchangedNameIsNoOp() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, _, tabs) = try await makeFixtureWithThreeTabs()
     // Same value → no throw, still equals the original.
-    try manager.renameTab(tabs[0], in: wt, in: pr, name: "one")
-    #expect(manager.catalog.projects[0].worktrees[0].tabs[0].name == "one")
+    try manager.renameTab(tabs[0], name: "one")
+    #expect(worktree.allTabs[0].name == "one")
   }
 
   @Test
   func renameTabThrowsOnMissingID() async throws {
-    let (pr, wt, _) = try await makeFixtureWithThreeTabs()
+    _ = try await makeFixtureWithThreeTabs()
     #expect(throws: HierarchyError.self) {
-      try manager.renameTab(TabID(), in: wt, in: pr, name: "nope")
+      try manager.renameTab(TabID(), name: "nope")
     }
   }
 
   @Test
   func reorderTabsAcceptsPermutation() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     let permuted = [tabs[2], tabs[0], tabs[1]]
-    try manager.reorderTabs(in: wt, in: pr, orderedIDs: permuted)
-    let stored = manager.catalog.projects[0].worktrees[0].tabs.map(\.id)
+    try manager.reorderTabs(in: pane, orderedIDs: permuted)
+    let stored = worktree.allTabs.map(\.id)
     #expect(stored == permuted)
   }
 
   @Test
   func reorderTabsRejectsMismatchedSet() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     // Drop the last id → set mismatch → invariantViolation.
     let shortened = Array(tabs.dropLast())
     #expect(throws: HierarchyError.self) {
-      try manager.reorderTabs(in: wt, in: pr, orderedIDs: shortened)
+      try manager.reorderTabs(in: pane, orderedIDs: shortened)
     }
   }
 
   @Test
   func closeOtherTabsKeepsPivotSelected() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
-    try manager.closeOtherTabs(keeping: tabs[1], in: wt, in: pr)
-    let remaining = manager.catalog.projects[0].worktrees[0].tabs.map(\.id)
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
+    try manager.closeOtherTabs(keeping: tabs[1])
+    let remaining = worktree.allTabs.map(\.id)
     #expect(remaining == [tabs[1]])
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[1])
+    #expect(selectedTabID(in: pane) == tabs[1])
   }
 
   @Test
   func closeTabsToRightTrimsSuffix() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
-    try manager.closeTabsToRight(of: tabs[0], in: wt, in: pr)
-    let remaining = manager.catalog.projects[0].worktrees[0].tabs.map(\.id)
+    let (_, _, _, tabs) = try await makeFixtureWithThreeTabs()
+    try manager.closeTabsToRight(of: tabs[0])
+    let remaining = worktree.allTabs.map(\.id)
     #expect(remaining == [tabs[0]])
   }
 
   @Test
   func closeTabsToRightNoOpForLastTab() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
-    try manager.closeTabsToRight(of: tabs.last!, in: wt, in: pr)
-    let remaining = manager.catalog.projects[0].worktrees[0].tabs.map(\.id)
+    let (_, _, _, tabs) = try await makeFixtureWithThreeTabs()
+    try manager.closeTabsToRight(of: tabs.last!)
+    let remaining = worktree.allTabs.map(\.id)
     #expect(remaining == tabs)
   }
 
   @Test
   func closeTabsToRightKeepsPivotSelectedWhenActiveWasDoomed() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     // makeFixtureWithThreeTabs leaves the last tab selected; ask to
     // close everything to the right of the first one. The user's
     // active tab is in the doomed suffix, so without the explicit
     // reseat the auto-advance would land on `tabs.first` regardless
     // of which pivot was passed.
-    try manager.closeTabsToRight(of: tabs[0], in: wt, in: pr)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[0])
+    try manager.closeTabsToRight(of: tabs[0])
+    #expect(selectedTabID(in: pane) == tabs[0])
   }
 
   @Test
   func closeTabsToRightKeepsPivotSelectedWhenPivotIsMid() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     // Pivot is the middle tab; auto-advance would otherwise land on
     // tabs[0] when tabs[2] (the active tab) closes.
-    try manager.closeTabsToRight(of: tabs[1], in: wt, in: pr)
-    let remaining = manager.catalog.projects[0].worktrees[0].tabs.map(\.id)
+    try manager.closeTabsToRight(of: tabs[1])
+    let remaining = worktree.allTabs.map(\.id)
     #expect(remaining == [tabs[0], tabs[1]])
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[1])
+    #expect(selectedTabID(in: pane) == tabs[1])
   }
 
   @Test
   func closeTabSelectsRightNeighborWhenMiddleTabClosed() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
-    try manager.selectTab(tabs[1], in: wt, in: pr)
-    try manager.closeTab(tabs[1], in: wt, in: pr)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[2])
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
+    try manager.selectTab(tabs[1])
+    try manager.closeTab(tabs[1])
+    #expect(selectedTabID(in: pane) == tabs[2])
   }
 
   @Test
   func closeTabFallsBackToLeftNeighborWhenLastTabClosed() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     // makeFixtureWithThreeTabs already leaves tabs[2] (the trailing tab) selected.
-    try manager.closeTab(tabs[2], in: wt, in: pr)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[1])
+    try manager.closeTab(tabs[2])
+    #expect(selectedTabID(in: pane) == tabs[1])
   }
 
   @Test
-  func closeTabClearsSelectionWhenSoleTabClosed() throws {
+  func closeTabClosesPaneWhenSoleTabClosed() throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/tmp", gitRoot: "/tmp"
     )
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "main", path: "/repo", branch: "main"
     )
-    let only = try manager.createTab(in: worktreeID, in: projectID, name: "only")
-    try manager.closeTab(only, in: worktreeID, in: projectID)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == nil)
+    let only = try newTab(in: worktreeID, in: projectID, name: "only")
+    try manager.closeTab(only.tabID)
+    #expect(worktree.panes.isEmpty)
+    #expect(worktree.focusedPaneID == nil)
   }
 
   @Test
   func closeTabPreservesSelectionWhenInactiveTabClosed() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
-    try manager.selectTab(tabs[1], in: wt, in: pr)
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
+    try manager.selectTab(tabs[1])
     // Closing a non-selected tab must not move the selection.
-    try manager.closeTab(tabs[0], in: wt, in: pr)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[1])
+    try manager.closeTab(tabs[0])
+    #expect(selectedTabID(in: pane) == tabs[1])
   }
 
   @Test
@@ -632,67 +551,64 @@ struct HierarchyManagerTests {
     // stays empty and subsequent ⌘W bypasses Ghostty's perfKE, falling
     // through to the menu where the system Close Window can shadow
     // our binding and close the whole window.
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     fakeRuntime.reset()
     // Close the trailing (selected) tab → fallback to its left neighbor.
-    try manager.closeTab(tabs[2], in: wt, in: pr)
-    let newSelected = manager.catalog.projects[0].worktrees[0].selectedTabID
-    #expect(newSelected == tabs[1])
-    let neighborPaneID = manager.catalog.projects[0]
-      .worktrees[0].tabs.first { $0.id == tabs[1] }!.panes[0].id
-    #expect(fakeRuntime.focusSurfaceViewCalls.contains(neighborPaneID))
+    try manager.closeTab(tabs[2])
+    #expect(selectedTabID(in: pane) == tabs[1])
+    let neighbourContentID = try #require(manager.catalog.tab(tabs[1])).contentID
+    #expect(fakeRuntime.focusSurfaceViewCalls.contains(neighbourContentID))
   }
 
   @Test
   func closeAllTabsEmptiesWorktree() async throws {
-    let (pr, wt, _) = try await makeFixtureWithThreeTabs()
-    try manager.closeAllTabs(in: wt, in: pr)
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.isEmpty)
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == nil)
+    let (_, _, pane, _) = try await makeFixtureWithThreeTabs()
+    try manager.closeAllTabs(in: pane)
+    #expect(worktree.allTabs.isEmpty)
+    #expect(worktree.panes.isEmpty)
+    #expect(worktree.focusedPaneID == nil)
   }
 
   @Test
   func selectAdjacentTabWrapsForward() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     // After makeFixtureWithThreeTabs the last-created tab is selected.
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[2])
-    let next = try manager.selectAdjacentTab(direction: .next, in: wt, in: pr)
+    #expect(selectedTabID(in: pane) == tabs[2])
+    let next = try manager.selectAdjacentTab(direction: .next, in: pane)
     #expect(next == tabs[0])
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[0])
+    #expect(selectedTabID(in: pane) == tabs[0])
   }
 
   @Test
   func selectAdjacentTabWrapsBackward() async throws {
-    let (pr, wt, tabs) = try await makeFixtureWithThreeTabs()
+    let (_, _, pane, tabs) = try await makeFixtureWithThreeTabs()
     // Selected is tabs[2]; previous from 2 is 1, from 0 is 2 (wrap). Check both.
-    _ = try manager.selectTab(tabs[0], in: wt, in: pr)
-    let previous = try manager.selectAdjacentTab(direction: .previous, in: wt, in: pr)
+    try manager.selectTab(tabs[0])
+    let previous = try manager.selectAdjacentTab(direction: .previous, in: pane)
     #expect(previous == tabs[2])
-    #expect(manager.catalog.projects[0].worktrees[0].selectedTabID == tabs[2])
+    #expect(selectedTabID(in: pane) == tabs[2])
   }
 
   @Test
-  func selectAdjacentTabReturnsNilOnEmptyWorktree() throws {
+  func selectAdjacentTabThrowsOnUnknownPane() throws {
     let projectID = manager.addProject(
       name: "project", rootPath: "/tmp", gitRoot: "/tmp"
     )
-    let worktreeID = try manager.createWorktree(
+    _ = try manager.createWorktree(
       in: projectID, name: "main", path: "/repo", branch: "main"
     )
-    let result = try manager.selectAdjacentTab(
-      direction: .next, in: worktreeID, in: projectID
-    )
-    #expect(result == nil)
+    // An empty Worktree has no Pane to walk, so there is no id to pass.
+    #expect(throws: HierarchyError.self) {
+      try manager.selectAdjacentTab(direction: .next, in: PaneID())
+    }
   }
 
-  // MARK: - Runtime state: focus memory + dirty (M3-T3.5)
+  // MARK: - Runtime state: Pane focus across Tabs
 
-  /// Seeds a worktree with two tabs. Tab A has two panes (so we can
-  /// remember "the second pane"), tab B has one pane (so selectTab has
-  /// a fallback leaf on the other side).
+  /// Seeds a worktree with two Panes. Pane A has two Tabs, Pane B has one.
   @MainActor
-  private func makeFixtureTwoTabsWithPanes() async throws -> (
-    ProjectID, WorktreeID, TabID, TabID, PaneID, PaneID, PaneID
+  private func makeFixtureTwoPanes() async throws -> (
+    ProjectID, WorktreeID, TabAddress, TabAddress, TabAddress
   ) {
     let projectID = manager.addProject(
       name: "project", rootPath: "/tmp", gitRoot: "/tmp"
@@ -700,124 +616,51 @@ struct HierarchyManagerTests {
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "main", path: "/repo", branch: "main"
     )
-    let tabA = try manager.createTab(in: worktreeID, in: projectID, name: "A")
-    let tabAPane1 = try await manager.openPane(
-      in: tabA, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp", initialCommand: nil
-    )
-    let tabAPane2 = try await manager.splitPane(
-      tabAPane1, direction: .right,
-      in: tabA, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp", initialCommand: nil
-    )
-    let tabB = try manager.createTab(in: worktreeID, in: projectID, name: "B")
-    let tabBPane = try await manager.openPane(
-      in: tabB, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp", initialCommand: nil
-    )
-    return (projectID, worktreeID, tabA, tabB, tabAPane1, tabAPane2, tabBPane)
+    let paneATab1 = try newTab(in: worktreeID, in: projectID, name: "A1")
+    try await manager.ensureSurface(for: paneATab1.contentID)
+    let paneB = try manager.splitPane(
+      from: paneATab1.paneID, direction: .right, content: .terminal(workingDirectory: "/tmp"))
+    try await manager.ensureSurface(for: paneB.contentID)
+    let paneATab2 = try manager.newTab(
+      in: paneATab1.paneID, worktreeID: worktreeID, projectID: projectID,
+      content: .terminal(workingDirectory: "/tmp"), name: "A2")
+    try await manager.ensureSurface(for: paneATab2.contentID)
+    return (projectID, worktreeID, paneATab1, paneATab2, paneB)
   }
 
   @Test
-  func selectTabRestoresLastFocusedPane() async throws {
-    let (pr, wt, tabA, tabB, _, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    // Remember tabA's second pane, then bounce through tabB and back.
-    try manager.focusPane(tabAPane2, in: tabA, in: wt, in: pr)
+  func focusPaneRestoresItsSelectedTab() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    // Pane A's selection is its second Tab; bounce through Pane B and back.
+    #expect(selectedTabID(in: paneATab1.paneID) == paneATab2.tabID)
+    try manager.focusPane(paneB.paneID)
     fakeRuntime.reset()
-    try manager.selectTab(tabB, in: wt, in: pr)
-    try manager.selectTab(tabA, in: wt, in: pr)
-    // Selecting tabA restores tabAPane2 (focusSurfaceView called with it).
-    #expect(fakeRuntime.focusSurfaceViewCalls.contains(tabAPane2))
+    try manager.selectTab(paneATab2.tabID)
+    #expect(worktree.focusedPaneID == paneATab1.paneID)
+    #expect(fakeRuntime.focusSurfaceViewCalls.contains(paneATab2.contentID))
   }
 
   @Test
-  func selectTabFallsBackToLeftmostLeafWhenRememberedPaneClosed() async throws {
-    let (pr, wt, tabA, tabB, tabAPane1, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    try manager.focusPane(tabAPane2, in: tabA, in: wt, in: pr)
-    // The remembered pane disappears out from under us.
-    try manager.closePane(tabAPane2, in: tabA, in: wt, in: pr)
+  func focusNeighbourFallsBackToTheSelectedTabWhenTheRememberedOneClosed() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    // The selected Tab disappears out from under us.
+    try manager.closeTab(paneATab2.tabID)
+    try manager.focusPane(paneB.paneID)
     fakeRuntime.reset()
-    try manager.selectTab(tabB, in: wt, in: pr)
-    try manager.selectTab(tabA, in: wt, in: pr)
-    // Fallback: leftmost leaf of tabA's tree = tabAPane1.
-    #expect(fakeRuntime.focusSurfaceViewCalls.contains(tabAPane1))
+    let landed = try manager.focusNeighbour(of: paneB.paneID, direction: .left)
+    #expect(landed == paneATab1.paneID)
+    // Fallback: the Pane's surviving selected Tab.
+    #expect(fakeRuntime.focusSurfaceViewCalls.contains(paneATab1.contentID))
   }
 
   @Test
-  func closePaneClearsLastFocusedAndRunningEntries() async throws {
-    let (pr, wt, tabA, _, _, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    try manager.focusPane(tabAPane2, in: tabA, in: wt, in: pr)
-    manager.markPaneRunning(tabAPane2)
-    #expect(manager.lastFocusedPane(in: tabA) == tabAPane2)
-    #expect(manager.tabIsDirty(tabA))
-    try manager.closePane(tabAPane2, in: tabA, in: wt, in: pr)
-    #expect(manager.lastFocusedPane(in: tabA) == nil)
-    #expect(!manager.tabIsDirty(tabA))
-  }
-
-  @Test
-  func closeTabClearsRuntimeMapsForAllPanes() async throws {
-    let (pr, wt, tabA, _, tabAPane1, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    try manager.focusPane(tabAPane1, in: tabA, in: wt, in: pr)
-    manager.markPaneRunning(tabAPane2)
-    try manager.closeTab(tabA, in: wt, in: pr)
-    #expect(manager.lastFocusedPane(in: tabA) == nil)
-    // Dirty read on a now-absent tab: the walk finds no tab → false.
-    #expect(!manager.tabIsDirty(tabA))
-  }
-
-  @Test
-  func selectAdjacentTabRestoresLastFocusedPaneOnTarget() async throws {
-    let (pr, wt, tabA, tabB, _, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    // Remember tabA's second pane, then bounce to tabB so adjacency
-    // jumps land back on tabA.
-    try manager.focusPane(tabAPane2, in: tabA, in: wt, in: pr)
-    try manager.selectTab(tabB, in: wt, in: pr)
-    fakeRuntime.reset()
-    let landed = try manager.selectAdjacentTab(
-      direction: .previous, in: wt, in: pr
-    )
-    #expect(landed == tabA)
-    #expect(fakeRuntime.focusSurfaceViewCalls.contains(tabAPane2))
-  }
-
-  @Test
-  func tabIsDirtyReflectsAnyRunningPane() async throws {
-    let (_, _, tabA, _, tabAPane1, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    #expect(!manager.tabIsDirty(tabA))
-    manager.markPaneRunning(tabAPane1)
-    #expect(manager.tabIsDirty(tabA))
-    manager.markPaneIdle(tabAPane1)
-    #expect(!manager.tabIsDirty(tabA))
-    manager.markPaneRunning(tabAPane2)
-    #expect(manager.tabIsDirty(tabA))
-  }
-
-  @Test
-  func tabIsDirtyUnionsCommandBusyWithProgress() async throws {
-    let (_, _, tabA, _, tabAPane1, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    #expect(!manager.tabIsDirty(tabA))
-
-    // The foreground-command source lights the tab on its own.
-    manager.setPaneCommandBusy(tabAPane1, true)
-    #expect(manager.tabIsDirty(tabA))
-
-    // OSC progress and command sources are independent: clearing one while
-    // the other still holds keeps the tab dirty (no clobbering a shared set).
-    manager.markPaneRunning(tabAPane2)
-    manager.setPaneCommandBusy(tabAPane1, false)
-    #expect(manager.tabIsDirty(tabA))
-
-    manager.markPaneIdle(tabAPane2)
-    #expect(!manager.tabIsDirty(tabA))
-  }
-
-  @Test
-  func closePaneClearsCommandBusyEntry() async throws {
-    let (pr, wt, tabA, _, _, tabAPane2, _) = try await makeFixtureTwoTabsWithPanes()
-    manager.setPaneCommandBusy(tabAPane2, true)
-    #expect(manager.tabIsDirty(tabA))
-    try manager.closePane(tabAPane2, in: tabA, in: wt, in: pr)
-    #expect(!manager.tabIsDirty(tabA))
+  func closePaneDropsProcessRowsOfEveryTab() async throws {
+    let (_, worktreeID, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    manager.recordProcessLaunch(contentID: paneATab1.contentID, name: "make", kind: .run)
+    manager.recordProcessLaunch(contentID: paneATab2.contentID, name: "test", kind: .run)
+    #expect(manager.processEntries(in: worktreeID).count == 2)
+    try manager.closePane(paneATab1.paneID)
+    #expect(manager.processEntries(in: worktreeID).isEmpty)
+    #expect(worktree.panes.map(\.id) == [paneB.paneID])
   }
 }

@@ -21,7 +21,7 @@ import CodansCore
 /// reaper's own logic and the user-test stage, not faked here.
 @MainActor
 struct RestoreStatePrecedenceTests {
-  private static func session(_ paneID: PaneID) -> Session {
+  private static func session(_ paneID: ContentID) -> Session {
     Session(
       paneID: paneID,
       socketPath: "/tmp/\(paneID.raw.uuidString).sock",
@@ -43,8 +43,8 @@ struct RestoreStatePrecedenceTests {
   /// on top of it (no double-apply).
   @Test
   func aliveDaemonExcludedSoStaleSnapIsNeverReApplied() {
-    let alivePane = PaneID()
-    let states: [PaneID: SessionState] = [
+    let alivePane = ContentID()
+    let states: [ContentID: SessionState] = [
       alivePane: .alive(Self.session(alivePane))
     ]
 
@@ -64,10 +64,10 @@ struct RestoreStatePrecedenceTests {
   /// cross-contamination of the derived map).
   @Test
   func deadPaneColdStartsWhileSnapshotSiblingRestores() {
-    let deadPane = PaneID()
-    let snapPane = PaneID()
+    let deadPane = ContentID()
+    let snapPane = ContentID()
     let snapURL = URL(fileURLWithPath: "/snaps/\(snapPane.raw.uuidString).snap")
-    let states: [PaneID: SessionState] = [
+    let states: [ContentID: SessionState] = [
       deadPane: .dead(Self.session(deadPane)),
       snapPane: .snapshot(snapURL),
     ]
@@ -88,14 +88,14 @@ struct RestoreStatePrecedenceTests {
   /// panes that exist; that runtime guard is exercised at the user-test
   /// stage. Here we pin the keying invariant the binding relies on.)
   @Test
-  func eachSnapshotKeyedByOwnPaneIDNoMisBinding() {
-    let paneA = PaneID()
-    let paneB = PaneID()
-    let paneC = PaneID()
+  func eachSnapshotKeyedByOwnContentIDNoMisBinding() {
+    let paneA = ContentID()
+    let paneB = ContentID()
+    let paneC = ContentID()
     let urlA = URL(fileURLWithPath: "/snaps/\(paneA.raw.uuidString).snap")
     let urlB = URL(fileURLWithPath: "/snaps/\(paneB.raw.uuidString).snap")
     let urlC = URL(fileURLWithPath: "/snaps/\(paneC.raw.uuidString).snap")
-    let states: [PaneID: SessionState] = [
+    let states: [ContentID: SessionState] = [
       paneA: .snapshot(urlA),
       paneB: .snapshot(urlB),
       paneC: .snapshot(urlC),

@@ -67,7 +67,10 @@ struct HierarchyManagerWorkspaceTests {
           name: "app", path: "/tmp/ws/app", exists: true, branch: "feat/x", sourceGitRoot: nil)
       ])
     let rowID = manager.catalog.projects[0].worktrees[1].id
-    let tabID = try manager.createTab(in: rowID, in: projectID, name: "t")
+    let tabID = try manager.newTab(
+      in: nil, worktreeID: rowID, projectID: projectID,
+      content: .terminal(workingDirectory: "/tmp/ws/app"), name: "t"
+    ).tabID
 
     let result = manager.reconcileWorkspaceChildren(
       projectID: projectID,
@@ -82,7 +85,7 @@ struct HierarchyManagerWorkspaceTests {
     #expect(row.name == "app")
     #expect(row.branch == "main")
     #expect(row.sourceGitRoot == "/src/app")
-    #expect(row.tabs.map(\.id) == [tabID])
+    #expect(row.allTabs.map(\.id) == [tabID])
   }
 
   @Test
