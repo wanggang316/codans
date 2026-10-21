@@ -105,16 +105,18 @@ processBase(inheriting:overrides:socketPath:marketingVersion:)
      并把本 app 内置 CLI 的目录放到 PATH 最前
      —— 写在最后，所以项目自定义的同名变量（包括自己重建的 PATH）永远遮不住它们
 
-forSurface(base, paneID:, zmxDirectory:)
-  5. ZMX_DIR      钉死到本通道的缓存目录
-  6. ZMX_SESSION  清空 —— 从 zmx pane 里启动的 app 会继承父会话名，attach 会当作
+forSurface(base, <content / tab / pane ids>, zmxDirectory:)
+  5. ZMX_DIR      钉死到本通道的 runtime 目录
+  6. ZMX_SESSION  清空 —— 从 zmx 终端里启动的 app 会继承父会话名，attach 会当作
                   「切换到那个会话」而失败，表现为 tab 一闪就没
-  7. CODANS_PANE_ID  pane 自己的 id
+  7. CODANS_CONTENT_ID  会话自己的 id（zmx 会话名、agent 状态、通知都以它记账）
+     CODANS_TAB_ID      装着这份会话的 Tab 的 id
+     CODANS_PANE_ID     该 Tab 所在 Pane 的 id
 ```
 
-worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。
+worktree 终端在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。
 
-只注入 `CODANS_PANE_ID` 而不注入 tab / worktree / project id 是有意的：pane id 终生不变，烘进环境是安全的；其余三个会随 pane 被移动而过期，所以由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认这五个键，是为了让调用方手动导出时能就地短路，但 app 只写 pane 那一个。
+三个 id 各有一个含义、互不别名（见 [pane-layout.md](pane-layout.md) 与 ADR-0001）：agent 与脚本用 `CODANS_CONTENT_ID` 定位"自己"，用 `CODANS_TAB_ID` / `CODANS_PANE_ID` 对周围的条或布局动手。不注入 worktree / project id 是有意的：它们由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认 `CODANS_PROJECT_ID` / `CODANS_WORKTREE_ID`，是为了让调用方手动导出时能就地短路，但 app 只写上面三个。
 
 ### pane 里的 CLI 叫什么
 
@@ -155,13 +157,13 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 - **按 configuration 给不同 bundle id。** 隔离最彻底，但通知中心、Sparkle、URL scheme 全部一分为二，Debug 包会失去与真实安装一致的系统行为，测的就不再是要发的东西。否决。
 - **把两个 socket resolver 合并成一个。** 会丢掉那条故意的不对称，或者要在一个函数里塞两个开关。保留两个门面、共享拼写，成本更低也更诚实。
 - **让 `HandoffKickoff` 直接引用 `HandoffStore` 的 URL 再取相对路径。** 会把 prompt 文本和文件系统绑在一起，而 prompt 只需要名字。独立的纯 `HandoffLayout` 更小。
-- **注入全部四个层级 id。** tab / worktree / project id 会随 pane 移动而失效，注入即埋雷。只注入不变的那一个。
+- **再注入 worktree / project id。** 它们由服务端从进程祖先解析即可，烘进环境只会多一处可能过期的副本。只注入会话自己的三个 id（Content / Tab / Pane），每个一个含义。
 
 ## Cross-Cutting
 
 - **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
 - **可观测性**：`codans doctor` 打印它解析到的 socket 与 `socketFromEnvironment`；「命令跑到别的 app」先看这个。
-- **调用方身份**：pane 导出 `CODANS_PANE_ID`；服务端由该 Pane 推导所属 Tab、Worktree 和 Project。
+- **调用方身份**：终端导出 `CODANS_CONTENT_ID` / `CODANS_TAB_ID` / `CODANS_PANE_ID`；服务端由 Content 推导所属 Tab、Pane、Worktree 和 Project。
 
 ## 风险
 

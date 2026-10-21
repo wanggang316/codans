@@ -19,7 +19,7 @@ SwiftUI layout, which is free to change.
 
 The implemented settings and catalog stores use separate versioned documents:
 `~/.codans/config/settings.json` (this doc, hand-editable config) and
-`~/.codans/state/catalog.json` (the app-owned Project→Worktree→Tab→Pane tree), each with atomic-rename writes. A separate
+`~/.codans/state/catalog.json` (the app-owned Project→Worktree→Pane→Tab tree), each with atomic-rename writes. A separate
 `hooks.json` for event subscriptions is **planned, not implemented**; see
 [lifecycle-hooks.md](./lifecycle-hooks.md). This is not an exhaustive inventory
 of persisted files — see [architecture.md](../architecture.md). Keeping each
@@ -215,8 +215,8 @@ policy chokepoint) enforces:
 The inbox **is** the only in-app surface; there is no separate transient toast,
 so gating it satisfies the "no in-app banner" requirement without building one.
 The schema has no top-level `enabled` or `mute.enabled` switch. `mute`
-contains `mutedRuleIDs` and `mutedPaneIDs`; the Settings UI reports their
-counts. Runtime Pane muting uses the `notifications:muted` label and drops
+contains `mutedRuleIDs` and `mutedContentIDs` (a mute follows the session); the Settings UI reports their
+counts. Runtime muting of a Tab uses the `notifications:muted` label and drops
 candidates in the detector before any delivery path. The stored mute sets
 are not consulted by the detector or coordinator.
 
