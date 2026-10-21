@@ -8,7 +8,7 @@ import os
 /// attribution from the socket peer. Owns no run state itself.
 @MainActor
 final class WorkflowHandlers {
-  typealias CallerPaneResolver = @MainActor (pid_t) -> PaneID?
+  typealias CallerPaneResolver = @MainActor (pid_t) -> ContentID?
 
   private let settings: SettingsStore
   private let engine: WorkflowEngine
@@ -16,10 +16,10 @@ final class WorkflowHandlers {
   private let admission: WorkflowAdmission
   private let discovery: WorkflowDiscovery
   private let catalog: @MainActor () -> Catalog
-  private let addressOf: @MainActor (PaneID) -> PaneAddress?
+  private let addressOf: @MainActor (ContentID) -> TabAddress?
   private let callerPaneResolver: CallerPaneResolver
   /// Pane → `p<n>` handle, refreshed against the catalog on each call.
-  let paneHandles: @MainActor () -> [PaneID: Int]
+  let paneHandles: @MainActor () -> [ContentID: Int]
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "workflow")
 
   init(
@@ -29,9 +29,9 @@ final class WorkflowHandlers {
     admission: WorkflowAdmission,
     discovery: WorkflowDiscovery,
     catalog: @escaping @MainActor () -> Catalog,
-    addressOf: @escaping @MainActor (PaneID) -> PaneAddress?,
+    addressOf: @escaping @MainActor (ContentID) -> TabAddress?,
     callerPaneResolver: @escaping CallerPaneResolver = { _ in nil },
-    paneHandles: @escaping @MainActor () -> [PaneID: Int] = { [:] }
+    paneHandles: @escaping @MainActor () -> [ContentID: Int] = { [:] }
   ) {
     self.settings = settings
     self.engine = engine
@@ -61,16 +61,16 @@ final class WorkflowHandlers {
   func run(_ request: IPC.WorkflowRunRequest, peerPID: pid_t?) async throws -> IPC.WorkflowRunResponse {
     try checkEnabled()
     let caller = callerPane(request.callerPaneID, peerPID: peerPID)
-    var sourcePaneID = request.sourcePaneID
-    if sourcePaneID == nil, request.worktreeID == nil {
-      sourcePaneID = caller
+    var sourceContentID = request.sourcePaneID
+    if sourceContentID == nil, request.worktreeID == nil {
+      sourceContentID = caller
     }
     let admitted = try admission.admit(
       WorkflowAdmission.Request(
         workflow: request.workflow,
-        sourcePaneID: sourcePaneID,
+        sourceContentID: sourceContentID,
         worktreeID: request.worktreeID,
-        callerPaneID: caller,
+        callerContentID: caller,
         roles: request.roles,
         inputs: request.inputs,
         skip: request.skip))
@@ -99,20 +99,20 @@ final class WorkflowHandlers {
     let caller = callerPane(request.callerPaneID, peerPID: peerPID)
     if let runID = request.runID {
       if let session = engine.session(for: runID) {
-        return IPC.WorkflowStatusResponse(run: summary(session, callerPaneID: caller), participant: nil)
+        return IPC.WorkflowStatusResponse(run: summary(session, callerContentID: caller), participant: nil)
       }
       guard let record = recordOnDisk(runID: runID, near: caller) else {
         throw IPCError.domain(code: "RUN_NOT_FOUND", message: "no run \(runID.uuidString)", hint: nil)
       }
       return IPC.WorkflowStatusResponse(run: summary(record), participant: nil)
     }
-    guard let caller, let runID = registry.runID(forPane: caller), let session = engine.session(for: runID) else {
+    guard let caller, let runID = registry.runID(forContent: caller), let session = engine.session(for: runID) else {
       throw IPCError.domain(
         code: "RUN_NOT_FOUND", message: "the calling pane takes part in no run", hint: "pass a run id")
     }
-    let role = session.run.bindings.first { $0.value.paneID == caller }?.key ?? ""
+    let role = session.run.bindings.first { $0.value.contentID == caller }?.key ?? ""
     return IPC.WorkflowStatusResponse(
-      run: summary(session, callerPaneID: caller),
+      run: summary(session, callerContentID: caller),
       participant: IPC.WorkflowParticipantSummary(role: role, paneID: caller))
   }
 
@@ -155,7 +155,7 @@ final class WorkflowHandlers {
 
   /// Explicit `--run --step` → that step's current activation (manual);
   /// otherwise the token, then the caller's pane, name the activation.
-  private func deliveryTarget(_ request: IPC.WorkflowDeliverRequest, caller: PaneID?) throws -> DeliveryTarget {
+  private func deliveryTarget(_ request: IPC.WorkflowDeliverRequest, caller: ContentID?) throws -> DeliveryTarget {
     if let runID = request.runID, let stepID = request.stepID {
       guard let run = engine.run(for: runID), engine.session(for: runID).map({ !$0.run.status.isTerminal }) == true
       else {
@@ -165,26 +165,26 @@ final class WorkflowHandlers {
         throw IPCError.domain(
           code: "STEP_NOT_EXPECTING", message: "step \(stepID) is not waiting for a delivery", hint: nil)
       }
-      try checkRoleMatch(caller: caller, runID: runID, paneID: activation.paneID, force: request.force)
+      try checkRoleMatch(caller: caller, runID: runID, contentID: activation.contentID, force: request.force)
       return DeliveryTarget(runID: runID, ordinal: activation.ordinal, manual: true)
     }
     // A token names the activation exactly; the caller pane is the
     // cross-check. Only without a token does the pane alone decide.
     if let token = request.token, let entry = registry.activation(forToken: token) {
-      try checkRoleMatch(caller: caller, runID: entry.runID, paneID: entry.paneID, force: request.force)
+      try checkRoleMatch(caller: caller, runID: entry.runID, contentID: entry.contentID, force: request.force)
       return DeliveryTarget(runID: entry.runID, ordinal: entry.ordinal, manual: false)
     }
-    if let caller, let entry = registry.activation(forPane: caller) {
+    if let caller, let entry = registry.activation(forContent: caller) {
       return DeliveryTarget(runID: entry.runID, ordinal: entry.ordinal, manual: false)
     }
     if let token = request.token {
       guard let entry = registry.activation(forToken: token) else {
         throw IPCError.domain(code: "TOKEN_INVALID", message: "no waiting step matches this token", hint: nil)
       }
-      try checkRoleMatch(caller: caller, runID: entry.runID, paneID: entry.paneID, force: request.force)
+      try checkRoleMatch(caller: caller, runID: entry.runID, contentID: entry.contentID, force: request.force)
       return DeliveryTarget(runID: entry.runID, ordinal: entry.ordinal, manual: false)
     }
-    if let caller, registry.runID(forPane: caller) != nil {
+    if let caller, registry.runID(forContent: caller) != nil {
       throw IPCError.domain(
         code: "STEP_NOT_EXPECTING", message: "no step is waiting on the calling pane", hint: nil)
     }
@@ -196,9 +196,9 @@ final class WorkflowHandlers {
 
   /// A pane delivering for a step that belongs to another pane (or another
   /// run) is a mix-up unless the caller said `--force`.
-  private func checkRoleMatch(caller: PaneID?, runID: UUID, paneID: PaneID?, force: Bool) throws {
+  private func checkRoleMatch(caller: ContentID?, runID: UUID, contentID: ContentID?, force: Bool) throws {
     guard let caller, !force else { return }
-    let mismatch = (paneID != nil && paneID != caller) || registry.runID(forPane: caller).map { $0 != runID } == true
+    let mismatch = (contentID != nil && contentID != caller) || registry.runID(forContent: caller).map { $0 != runID } == true
     if mismatch {
       throw IPCError.domain(
         code: "ROLE_MISMATCH",
@@ -224,7 +224,7 @@ final class WorkflowHandlers {
     }
     engine.resolve(runID: request.runID, action: action, verdict: request.verdict)
     return IPC.WorkflowStatusResponse(
-      run: summary(session, callerPaneID: callerPane(nil, peerPID: peerPID)), participant: nil)
+      run: summary(session, callerContentID: callerPane(nil, peerPID: peerPID)), participant: nil)
   }
 
   func cancel(_ request: IPC.WorkflowCancelRequest, peerPID: pid_t?) throws -> IPC.WorkflowStatusResponse {
@@ -234,7 +234,7 @@ final class WorkflowHandlers {
     }
     engine.cancel(runID: request.runID)
     return IPC.WorkflowStatusResponse(
-      run: summary(session, callerPaneID: callerPane(nil, peerPID: peerPID)), participant: nil)
+      run: summary(session, callerContentID: callerPane(nil, peerPID: peerPID)), participant: nil)
   }
 
   // MARK: - listRuns
@@ -256,7 +256,7 @@ final class WorkflowHandlers {
     }
     for session in engine.activeRuns + engine.finishedRuns
     where session.run.configuration.source.worktreeID == worktreeID {
-      runs[session.id] = summary(session, callerPaneID: nil)
+      runs[session.id] = summary(session, callerContentID: nil)
     }
     var sorted = runs.values.sorted { $0.startedAt > $1.startedAt }
     if let limit = request.limit, limit > 0 {
@@ -273,14 +273,14 @@ final class WorkflowHandlers {
     }
   }
 
-  private func callerPane(_ explicit: PaneID?, peerPID: pid_t?) -> PaneID? {
+  private func callerPane(_ explicit: ContentID?, peerPID: pid_t?) -> ContentID? {
     if let explicit { return explicit }
     guard let peerPID else { return nil }
     return callerPaneResolver(peerPID)
   }
 
-  private func worktree(of paneID: PaneID?) -> WorktreeID? {
-    paneID.flatMap(addressOf)?.worktreeID
+  private func worktree(of contentID: ContentID?) -> WorktreeID? {
+    contentID.flatMap(addressOf)?.worktreeID
   }
 
   private func worktreeRoot(_ worktreeID: WorktreeID) -> URL? {
@@ -294,7 +294,7 @@ final class WorkflowHandlers {
 
   /// A run this app no longer holds: the caller's worktree first, then
   /// every local worktree in the catalog.
-  private func recordOnDisk(runID: UUID, near caller: PaneID?) -> WorkflowRunRecord? {
+  private func recordOnDisk(runID: UUID, near caller: ContentID?) -> WorkflowRunRecord? {
     var roots: [URL] = []
     if let worktreeID = worktree(of: caller), let root = worktreeRoot(worktreeID) {
       roots.append(root)

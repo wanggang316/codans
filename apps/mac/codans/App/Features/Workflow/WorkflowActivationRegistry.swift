@@ -73,7 +73,7 @@ final class WorkflowActivationRegistry {
   }
 
   func join(contents: some Sequence<ContentID>, runID: UUID) {
-    for contentID in panes { join(contentID: contentID, runID: runID) }
+    for contentID in contents { join(contentID: contentID, runID: runID) }
   }
 
   /// Drops one pane from its run without ending the run: a closed

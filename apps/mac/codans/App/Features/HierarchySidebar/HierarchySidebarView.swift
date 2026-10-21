@@ -104,6 +104,7 @@ struct HierarchySidebarView: View {
     return min(max(agentStatePanelHeight, minH), maxH)
   }
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
   @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
@@ -1995,7 +1996,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
 
   private var isRowBusy: Bool {
     guard let rowWorktree else { return false }
-    return hierarchyManager.worktreeIsDirty(rowWorktree)
+    return contentRuntime?.worktreeIsDirty(rowWorktree) == true
       || rowWorktree.contentIDs.contains { agentStateStore?.workingContentIDs.contains($0) == true }
   }
   /// The ⌃N number to show, while ⌘ is held.

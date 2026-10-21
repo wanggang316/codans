@@ -12,7 +12,7 @@ import os.log
 /// could launch or execute (bundles, or a file the editor refuses) is only
 /// revealed in Finder.
 nonisolated struct TerminalLinkClient: Sendable {
-  var open: @MainActor @Sendable (_ paneID: PaneID, _ raw: String, _ workingDirectory: String?) async throws -> Void
+  var open: @MainActor @Sendable (_ contentID: ContentID, _ raw: String, _ workingDirectory: String?) async throws -> Void
 }
 
 nonisolated enum TerminalLinkError: LocalizedError, Equatable {
@@ -30,17 +30,17 @@ nonisolated enum TerminalLinkError: LocalizedError, Equatable {
 extension TerminalLinkClient: DependencyKey {
   private static let logger = Logger(subsystem: "com.gumpw.codans.app", category: "terminal-link")
 
-  static let liveValue = Self { paneID, raw, workingDirectory in
+  static let liveValue = Self { contentID, raw, workingDirectory in
     @Dependency(HierarchyClient.self) var hierarchyClient
     let catalog = hierarchyClient.snapshot()
-    let address = hierarchyClient.addressOf(paneID)
+    let address = hierarchyClient.addressOf(contentID)
     let project = address.flatMap { address in catalog.projects.first { $0.id == address.projectID } }
     let worktree = address.flatMap { address in project?.worktrees.first { $0.id == address.worktreeID } }
     let isRemote = project?.remoteHost != nil
     // libghostty drops OSC 7 reports naming a non-local host, so a Server
     // project's pwd is absent or stale; fall back to the catalog's remote path.
     let base =
-      (isRemote ? nil : workingDirectory) ?? catalog.pane(paneID)?.workingDirectory ?? worktree?.path
+      (isRemote ? nil : workingDirectory) ?? catalog.content(contentID)?.terminal?.workingDirectory ?? worktree?.path
     let fileManager = FileManager.default
     guard
       let link = TerminalLink.parse(

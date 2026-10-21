@@ -25,9 +25,9 @@ nonisolated enum CallerPaneResolver {
   /// for tests; production uses the sysctl-backed `parentPID(of:)`.
   static func resolve(
     callerPID: pid_t,
-    paneByShellPID: [pid_t: PaneID],
+    paneByShellPID: [pid_t: ContentID],
     parentOf: (pid_t) -> pid_t? = CallerPaneResolver.parentPID(of:)
-  ) -> PaneID? {
+  ) -> ContentID? {
     guard callerPID > 0, !paneByShellPID.isEmpty else { return nil }
     var pid = callerPID
     var visited = Set<pid_t>()

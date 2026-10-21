@@ -1650,6 +1650,18 @@ final class HierarchyManager {
     return nil
   }
 
+  /// Relabels a worktree in the sidebar. The name is display-only (the
+  /// path and branch stay), so this is a plain catalog write. Unchanged
+  /// value is a silent no-op.
+  func renameWorktree(_ id: WorktreeID, in projectID: ProjectID, name: String) throws {
+    guard let (projectIndex, worktreeIndex) = findWorktreeIndices(worktreeID: id, projectID: projectID) else {
+      throw HierarchyError.notFound("Worktree \(id)")
+    }
+    guard catalog.projects[projectIndex].worktrees[worktreeIndex].name != name else { return }
+    catalog.projects[projectIndex].worktrees[worktreeIndex].name = name
+    store.scheduleSave(catalog)
+  }
+
   /// Tears down every terminal surface attached to the Worktree without
   /// mutating the catalog. Used by force-remove so any held file handles
   /// are released before `git worktree remove --force` runs; the catalog

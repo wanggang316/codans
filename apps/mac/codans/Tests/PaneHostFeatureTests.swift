@@ -19,9 +19,10 @@ import CodansCore
 /// out of xctest reach.
 @MainActor
 struct PaneHostFeatureTests {
-  private static func makeState(paneID: PaneID = PaneID()) -> PaneHostFeature.State {
+  private static func makeState(contentID: ContentID = ContentID()) -> PaneHostFeature.State {
     PaneHostFeature.State(
-      paneID: paneID,
+      contentID: contentID,
+      paneID: PaneID(),
       tabID: TabID(),
       worktreeID: WorktreeID(),
       projectID: ProjectID()
@@ -30,11 +31,11 @@ struct PaneHostFeatureTests {
 
   /// Deterministic failure so the state mutation closure can assert the
   /// exact `.failed` payload.
-  private static let fixedErrorWorktreeID = WorktreeID()
+  private static let fixedErrorContentID = ContentID()
   private static var failureForFixedError: PaneHostFeature.Failure {
     PaneHostFeature.Failure(
-      reason: "This pane no longer exists in the workspace.",
-      detail: String(describing: TerminalClient.Error.worktreeNotFound(fixedErrorWorktreeID))
+      reason: "This tab no longer exists in the workspace.",
+      detail: String(describing: TerminalClient.Error.contentNotFound(fixedErrorContentID))
     )
   }
   private static let surfaceNotRegistered = PaneHostFeature.Failure(
@@ -49,7 +50,7 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, initialSize in
+      $0.terminalClient.ensureSurface = { _, initialSize in
         sizes.withValue { $0.append(initialSize) }
       }
     }
@@ -70,7 +71,7 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, initialSize in
+      $0.terminalClient.ensureSurface = { _, initialSize in
         sizes.withValue { $0.append(initialSize) }
       }
     }
@@ -92,7 +93,7 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, initialSize in
+      $0.terminalClient.ensureSurface = { _, initialSize in
         sizes.withValue { $0.append(initialSize) }
       }
     }
@@ -113,9 +114,9 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _ in
         ensureCalls.withValue { $0 += 1 }
-        throw TerminalClient.Error.worktreeNotFound(Self.fixedErrorWorktreeID)
+        throw TerminalClient.Error.contentNotFound(Self.fixedErrorContentID)
       }
     }
 
@@ -135,7 +136,7 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _ in
         ensureCalls.withValue { $0 += 1 }
       }
     }
@@ -158,9 +159,9 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _ in
         ensureCalls.withValue { $0 += 1 }
-        throw TerminalClient.Error.worktreeNotFound(Self.fixedErrorWorktreeID)
+        throw TerminalClient.Error.contentNotFound(Self.fixedErrorContentID)
       }
     }
 
@@ -188,7 +189,7 @@ struct PaneHostFeatureTests {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, _, _, _, _ in
+      $0.terminalClient.ensureSurface = { _, _ in
         ensureCalls.withValue { $0 += 1 }
       }
     }

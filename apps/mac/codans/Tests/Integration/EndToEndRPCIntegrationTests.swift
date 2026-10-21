@@ -71,13 +71,13 @@ struct EndToEndRPCIntegrationTests {
   func terminalSendWithNoSinkReturnsUnsupported() async throws {
     try await withStack { client in
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: ContentID
         let text: String
       }
       do {
         _ = try await client.callRaw(
           .terminalSendInput,
-          params: Params(paneID: PaneID(raw: UUID()), text: "hello")
+          params: Params(paneID: ContentID(raw: UUID()), text: "hello")
         )
         Issue.record("expected throw")
       } catch RPCClient.RPCError.ipc(let err) {

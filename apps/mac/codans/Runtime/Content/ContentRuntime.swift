@@ -156,9 +156,15 @@ final class ContentRuntime {
     guard anyTerminalBusy else { return false }
     for project in hierarchy.catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else { continue }
-      return worktree.allTabs.contains { Self.isDirty($0, isBusy: isTerminalBusy) }
+      return worktreeIsDirty(worktree)
     }
     return false
+  }
+
+  /// Rows already hold the worktree; avoid another catalog search per icon.
+  func worktreeIsDirty(_ worktree: Worktree) -> Bool {
+    guard anyTerminalBusy else { return false }
+    return worktree.allTabs.contains { Self.isDirty($0, isBusy: isTerminalBusy) }
   }
 
   private static func isDirty(_ tab: Tab, isBusy: (ContentID) -> Bool) -> Bool {

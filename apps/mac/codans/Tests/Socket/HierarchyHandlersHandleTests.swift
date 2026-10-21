@@ -75,24 +75,35 @@ struct TargetHandleRegistryTests {
     let thirdPaneID = PaneID()
   }
 
+  /// One Pane per included Tab, laid out left to right in `included` order.
   static func catalog(_ ids: FixtureIDs, tabs included: [FixtureTab]) -> Catalog {
-    let tabs = included.map { which -> Tab in
+    let panes = included.map { which -> Pane in
       let (tabID, paneID, name): (TabID, PaneID, String)
       switch which {
       case .first: (tabID, paneID, name) = (ids.firstTabID, ids.firstPaneID, "one")
       case .second: (tabID, paneID, name) = (ids.secondTabID, ids.secondPaneID, "two")
       case .third: (tabID, paneID, name) = (ids.thirdTabID, ids.thirdPaneID, "three")
       }
-      let pane = Pane(id: paneID, workingDirectory: "/repo", initialCommand: nil)
-      return Tab(id: tabID, name: name, splitTree: SplitTree(leaf: paneID), panes: [pane])
+      let tab = Tab(id: tabID, name: name, content: .terminal(workingDirectory: "/repo"))
+      return Pane(id: paneID, tabs: [tab])
+    }
+    var splitTree = SplitTree<PaneID>()
+    for (index, pane) in panes.enumerated() {
+      if index == 0 {
+        splitTree = SplitTree(leaf: pane.id)
+      } else {
+        // swiftlint:disable:next force_try
+        splitTree = try! splitTree.inserting(pane.id, at: panes[index - 1].id, direction: .right)
+      }
     }
     let worktree = Worktree(
       id: ids.worktreeID,
       name: "main",
       path: "/repo",
       branch: "main",
-      tabs: tabs,
-      selectedTabID: tabs.first?.id
+      splitTree: splitTree,
+      panes: panes,
+      focusedPaneID: panes.first?.id
     )
     let project = Project(
       id: ids.projectID,
@@ -123,6 +134,24 @@ struct HierarchyHandlersHandleTests {
     )
     let paneResult: IPC.AliasResolveResult = try Self.decodeUnary(paneOutcome)
     #expect(paneResult.id == fixture.ids.secondPaneID.raw)
+  }
+
+  @Test
+  func resolveAliasConvertsAHandleToTheAskedKind() async throws {
+    let fixture = Self.makeFixture()
+
+    // A Pane handle names its selected Tab, and a Tab handle its Pane.
+    let tabOutcome = await fixture.handlers.resolveAlias(
+      try JSONValue.encoded(IPC.AliasResolveRequest(kind: .tab, value: "p2"))
+    )
+    let tabResult: IPC.AliasResolveResult = try Self.decodeUnary(tabOutcome)
+    #expect(tabResult.id == fixture.ids.secondTabID.raw)
+
+    let paneOutcome = await fixture.handlers.resolveAlias(
+      try JSONValue.encoded(IPC.AliasResolveRequest(kind: .pane, value: "t1"))
+    )
+    let paneResult: IPC.AliasResolveResult = try Self.decodeUnary(paneOutcome)
+    #expect(paneResult.id == fixture.ids.firstPaneID.raw)
   }
 
   @Test

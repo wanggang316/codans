@@ -7,7 +7,7 @@ import Testing
 
 /// The rename / prune / split / resize verbs go through the same manager
 /// calls the sidebar and the keyboard use; these pin the wire contract
-/// (`{id, name}`, `{pruned}`, the new pane id) and the error mapping.
+/// (`{id, name}`, `{pruned}`, the new session id) and the error mapping.
 @MainActor
 struct HierarchyHandlersLayoutTests {
   // MARK: - Renames
@@ -64,20 +64,20 @@ struct HierarchyHandlersLayoutTests {
     let named = await fixture.handlers.renameTab(
       try JSONValue.encoded(
         HierarchyHandlers.RenameTabParams(
-          id: fixture.tab.id, worktreeID: fixture.worktree.id, projectID: fixture.project.id,
+          id: fixture.tab1.id, worktreeID: fixture.worktree.id, projectID: fixture.project.id,
           name: "dev server")))
     let namedResult: HierarchyHandlers.RenameResult = try Self.decodeUnary(named)
     #expect(namedResult.name == "dev server")
-    #expect(fixture.manager.catalog.projects[0].worktrees[0].tabs[0].name == "dev server")
+    #expect(fixture.manager.catalog.tab(fixture.tab1.id)?.name == "dev server")
 
     let cleared = await fixture.handlers.renameTab(
       try JSONValue.encoded(
         HierarchyHandlers.RenameTabParams(
-          id: fixture.tab.id, worktreeID: fixture.worktree.id, projectID: fixture.project.id,
+          id: fixture.tab1.id, worktreeID: fixture.worktree.id, projectID: fixture.project.id,
           name: "")))
     let clearedResult: HierarchyHandlers.RenameResult = try Self.decodeUnary(cleared)
     #expect(clearedResult.name == nil)
-    #expect(fixture.manager.catalog.projects[0].worktrees[0].tabs[0].name == nil)
+    #expect(fixture.manager.catalog.tab(fixture.tab1.id)?.name == nil)
 
     let missing = await fixture.handlers.renameTab(
       try JSONValue.encoded(
@@ -153,25 +153,27 @@ struct HierarchyHandlersLayoutTests {
   @Test
   func splitPaneAddsBesideTheAnchorWithTheProjectEnvAndLiveDirectory() async throws {
     let fixture = Fixture(env: ["CODANS_TEST_MARK": "from-provider"])
-    fixture.runtime.currentWorkingDirectories[fixture.pane1.id] = "/repo/live"
+    fixture.runtime.currentWorkingDirectories[fixture.content1] = "/repo/live"
 
     let outcome = await fixture.handlers.splitPane(
       try JSONValue.encoded(
         HierarchyHandlers.SplitPaneParams(
-          paneID: fixture.pane1.id, tabID: fixture.tab.id, worktreeID: fixture.worktree.id,
+          paneID: fixture.pane1.id.raw, tabID: fixture.tab1.id, worktreeID: fixture.worktree.id,
           projectID: fixture.project.id, direction: .down, workingDirectory: nil,
           initialCommand: "htop", labels: ["monitor"])))
     let result: PaneIDPayload = try Self.decodeUnary(outcome)
 
-    let tab = fixture.manager.catalog.projects[0].worktrees[0].tabs[0]
-    #expect(tab.panes.count == 3)
-    #expect(tab.splitTree.contains(result.id))
-    let created = try #require(tab.panes.first(where: { $0.id == result.id }))
+    let worktree = fixture.manager.catalog.projects[0].worktrees[0]
+    #expect(worktree.panes.count == 3)
+    let createdPane = try #require(worktree.pane(forContent: result.id))
+    #expect(worktree.splitTree.contains(createdPane.id))
+    #expect(worktree.focusedPaneID == createdPane.id)
+    let created = try #require(worktree.tab(forContent: result.id)?.content.terminal)
     #expect(created.workingDirectory == "/repo/live")
     #expect(created.initialCommand == "htop")
     #expect(created.labels == ["monitor"])
     let call = try #require(fixture.runtime.ensureSurfaceCalls.last)
-    #expect(call.paneID == result.id)
+    #expect(call.contentID == result.id)
     #expect(call.env["CODANS_TEST_MARK"] == "from-provider")
   }
 
@@ -179,21 +181,25 @@ struct HierarchyHandlersLayoutTests {
   func splitPaneHonoursAnExplicitDirectoryAndRejectsUnknownAnchors() async throws {
     let fixture = Fixture()
 
+    // The anchor may be named by its session id; the split lands beside
+    // the Pane holding it.
     let outcome = await fixture.handlers.splitPane(
       try JSONValue.encoded(
         HierarchyHandlers.SplitPaneParams(
-          paneID: fixture.pane2.id, tabID: fixture.tab.id, worktreeID: fixture.worktree.id,
+          paneID: fixture.content2.raw, tabID: fixture.tab2.id, worktreeID: fixture.worktree.id,
           projectID: fixture.project.id, direction: .right, workingDirectory: "/elsewhere",
           initialCommand: nil, labels: nil)))
     let result: PaneIDPayload = try Self.decodeUnary(outcome)
-    let created = fixture.manager.catalog.projects[0].worktrees[0].tabs[0].panes
-      .first(where: { $0.id == result.id })
+    let worktree = fixture.manager.catalog.projects[0].worktrees[0]
+    let created = worktree.tab(forContent: result.id)?.content.terminal
     #expect(created?.workingDirectory == "/elsewhere")
+    let createdPane = try #require(worktree.pane(forContent: result.id))
+    #expect(worktree.splitTree.focusTarget(spatial: .left, from: createdPane.id) == fixture.pane2.id)
 
     let missing = await fixture.handlers.splitPane(
       try JSONValue.encoded(
         HierarchyHandlers.SplitPaneParams(
-          paneID: PaneID(), tabID: fixture.tab.id, worktreeID: fixture.worktree.id,
+          paneID: PaneID().raw, tabID: fixture.tab1.id, worktreeID: fixture.worktree.id,
           projectID: fixture.project.id, direction: .right, workingDirectory: nil,
           initialCommand: nil, labels: nil)))
     guard case .failed(.notFound(let kind, _)) = missing else {
@@ -213,12 +219,12 @@ struct HierarchyHandlersLayoutTests {
     // the right adds 40 / 400 to the ratio.
     let outcome = await fixture.handlers.resizePane(
       try JSONValue.encoded(
-        HierarchyHandlers.ResizePaneParams(paneID: fixture.pane2.id, direction: .right, amount: 40)))
+        HierarchyHandlers.ResizePaneParams(paneID: fixture.pane2.id.raw, direction: .right, amount: 40)))
     guard case .unary = outcome else {
       Issue.record("expected unary success, got \(outcome)")
       return
     }
-    let tree = fixture.manager.catalog.projects[0].worktrees[0].tabs[0].splitTree
+    let tree = fixture.manager.catalog.projects[0].worktrees[0].splitTree
     guard case .split(let split)? = tree.root else {
       Issue.record("expected a split root, got \(String(describing: tree.root))")
       return
@@ -232,7 +238,7 @@ struct HierarchyHandlersLayoutTests {
 
     let missing = await fixture.handlers.resizePane(
       try JSONValue.encoded(
-        HierarchyHandlers.ResizePaneParams(paneID: PaneID(), direction: .left, amount: nil)))
+        HierarchyHandlers.ResizePaneParams(paneID: PaneID().raw, direction: .left, amount: nil)))
     guard case .failed(.notFound(let kind, _)) = missing else {
       Issue.record("expected .notFound, got \(missing)")
       return
@@ -241,7 +247,7 @@ struct HierarchyHandlersLayoutTests {
 
     let zero = await fixture.handlers.resizePane(
       try JSONValue.encoded(
-        HierarchyHandlers.ResizePaneParams(paneID: fixture.pane1.id, direction: .left, amount: 0)))
+        HierarchyHandlers.ResizePaneParams(paneID: fixture.pane1.id.raw, direction: .left, amount: 0)))
     guard case .failed(.invalidParams) = zero else {
       Issue.record("expected .invalidParams, got \(zero)")
       return
@@ -264,7 +270,8 @@ struct HierarchyHandlersLayoutTests {
     var reconciled: [ProjectID] = []
   }
 
-  /// One git project, one worktree, one tab with two panes side by side.
+  /// One git project, one worktree, two Panes side by side with one Tab
+  /// each.
   @MainActor
   private struct Fixture {
     let runtime = FakeHierarchyRuntime()
@@ -272,9 +279,12 @@ struct HierarchyHandlersLayoutTests {
     let handlers: HierarchyHandlers
     let project: Project
     let worktree: Worktree
-    let tab: Tab
+    let tab1: Tab
+    let tab2: Tab
     let pane1: Pane
     let pane2: Pane
+    var content1: ContentID { tab1.contentID }
+    var content2: ContentID { tab2.contentID }
 
     init(
       gitRoot: String? = "/repo",
@@ -282,12 +292,15 @@ struct HierarchyHandlersLayoutTests {
       reconcileWorktrees: @escaping @MainActor (ProjectID) async -> Void = { _ in },
       worktreePruner: (@MainActor @Sendable (URL) async throws -> Int)? = nil
     ) {
-      let pane1 = Pane(workingDirectory: "/repo")
-      let pane2 = Pane(workingDirectory: "/repo")
+      let tab1 = Tab(content: .terminal(workingDirectory: "/repo"))
+      let tab2 = Tab(content: .terminal(workingDirectory: "/repo"))
+      let pane1 = Pane(tabs: [tab1])
+      let pane2 = Pane(tabs: [tab2])
       // swiftlint:disable:next force_try
       let splitTree = try! SplitTree(leaf: pane1.id).inserting(pane2.id, at: pane1.id, direction: .right)
-      let tab = Tab(splitTree: splitTree, panes: [pane1, pane2])
-      let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab])
+      let worktree = Worktree(
+        name: "main", path: "/repo", branch: "main",
+        splitTree: splitTree, panes: [pane1, pane2], focusedPaneID: pane1.id)
       let project = Project(name: "repo", rootPath: "/repo", gitRoot: gitRoot, worktrees: [worktree])
       let manager = HierarchyManager(
         catalog: Catalog(projects: [project]),
@@ -306,7 +319,8 @@ struct HierarchyHandlersLayoutTests {
       )
       self.project = project
       self.worktree = worktree
-      self.tab = tab
+      self.tab1 = tab1
+      self.tab2 = tab2
       self.pane1 = pane1
       self.pane2 = pane2
     }

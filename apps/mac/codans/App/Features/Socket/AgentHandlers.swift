@@ -20,7 +20,7 @@ final class AgentHandlers {
   /// Shared with `HierarchyHandlers` so `agent.listStates` prints the same
   /// `p<n>` handles `tree` does.
   private let handleRegistry: TargetHandleRegistry
-  private let focusedPane: @MainActor () -> PaneID?
+  private let focusedPane: @MainActor () -> ContentID?
   /// Poll cadence of `wait`; injected so tests can shorten it.
   private let waitPollMillis: Int
 
@@ -30,7 +30,7 @@ final class AgentHandlers {
     installation: AgentInstallationStore?,
     stateStore: @escaping @MainActor () -> AgentStateStore? = { nil },
     handleRegistry: TargetHandleRegistry = TargetHandleRegistry(),
-    focusedPane: @escaping @MainActor () -> PaneID? = { nil },
+    focusedPane: @escaping @MainActor () -> ContentID? = { nil },
     waitPollMillis: Int = 200
   ) {
     self.settings = settings
@@ -103,7 +103,7 @@ final class AgentHandlers {
       agent: outcome.profile.kind.rawValue,
       command: outcome.command,
       tabID: outcome.tabID,
-      paneID: outcome.paneID
+      paneID: outcome.contentID
     )
   }
 
@@ -123,13 +123,16 @@ final class AgentHandlers {
     var rows: [IPC.AgentStateEntry] = []
     for project in catalog.projects {
       for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes {
-            guard let entry = stateStore.entries[pane.id] else { continue }
+        for pane in TargetHandleRegistry.panesInLayoutOrder(worktree) {
+          for tab in pane.tabs {
+            let contentID = tab.contentID
+            guard let entry = stateStore.entries[contentID] else { continue }
             rows.append(
               IPC.AgentStateEntry(
-                paneID: pane.id.description,
-                handle: handles.panes[pane.id.description].map { "p\($0)" },
+                paneID: contentID.description,
+                // The session's short handle is its Tab's: `t<n>` is what
+                // `tab send` / `tab show` take.
+                handle: handles.tabs[tab.id.description].map { "t\($0)" },
                 agent: entry.kind.rawValue,
                 agentName: entry.kind.displayName,
                 state: entry.state.rawValue,
@@ -137,15 +140,15 @@ final class AgentHandlers {
                 source: entry.source.rawValue,
                 blockedKind: entry.blockedKind?.rawValue,
                 message: entry.message,
-                sessionID: entry.sessionID ?? pane.agentSessionID,
-                title: stateStore.title(for: pane.id),
+                sessionID: entry.sessionID ?? tab.content.terminal?.agentSessionID,
+                title: stateStore.title(for: contentID),
                 projectID: project.id.description,
                 projectName: project.name,
                 worktreeID: worktree.id.description,
                 worktreeName: worktree.name,
                 tabID: tab.id.description,
                 tabTitle: tab.name ?? tab.cachedDisplayTitle,
-                isFocused: focused == pane.id
+                isFocused: focused == contentID
               ))
           }
         }
@@ -165,7 +168,7 @@ final class AgentHandlers {
     guard let stateStore = stateStore() else {
       throw IPCError.unsupported(reason: "agent state is not available in this build")
     }
-    guard hierarchy.snapshot().pane(request.paneID) != nil else {
+    guard hierarchy.snapshot().content(request.paneID) != nil else {
       throw IPCError.notFound(kind: "pane", id: request.paneID.description)
     }
     let timeout = min(max(request.timeoutMillis, 1), Self.maxWaitMillis)
@@ -173,7 +176,7 @@ final class AgentHandlers {
     let baseline = stateStore.entries[request.paneID]
     while true {
       let entry = stateStore.entries[request.paneID]
-      let paneExists = hierarchy.snapshot().pane(request.paneID) != nil
+      let paneExists = hierarchy.snapshot().content(request.paneID) != nil
       let satisfied: Bool
       switch request.until {
       case .idle: satisfied = entry?.state == .idle

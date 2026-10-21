@@ -57,8 +57,8 @@ extension HierarchyHandlers {
 
   public struct RenameTabParams: Codable, Sendable {
     public let id: TabID
-    public let worktreeID: WorktreeID
-    public let projectID: ProjectID
+    public let worktreeID: WorktreeID?
+    public let projectID: ProjectID?
     public let name: String?
   }
   /// `hierarchy.renameTab` — a blank or missing name clears the user's
@@ -67,12 +67,12 @@ extension HierarchyHandlers {
     await Task.yield()
     guard let req = try? params.decoded(as: RenameTabParams.self) else {
       return .failed(
-        .invalidParams(message: "renameTab requires {id, worktreeID, projectID}", path: nil))
+        .invalidParams(message: "renameTab requires {id}", path: nil))
     }
     let trimmed = req.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let name: String? = trimmed.isEmpty ? nil : trimmed
     do {
-      try manager.renameTab(req.id, in: req.worktreeID, in: req.projectID, name: name)
+      try manager.renameTab(req.id, name: name)
       return .unary(try JSONValue.encoded(RenameResult(id: req.id.description, name: name)))
     } catch {
       return failure(for: error, fallbackKind: "tab", fallbackID: req.id.description)
@@ -127,10 +127,11 @@ extension HierarchyHandlers {
   // MARK: - Split tree
 
   public struct SplitPaneParams: Codable, Sendable {
-    public let paneID: PaneID
-    public let tabID: TabID
-    public let worktreeID: WorktreeID
-    public let projectID: ProjectID
+    /// The anchor: a Pane id, or a Tab / session id (its Pane).
+    public let paneID: UUID
+    public let tabID: TabID?
+    public let worktreeID: WorktreeID?
+    public let projectID: ProjectID?
     public let direction: SplitTree<PaneID>.NewDirection
     /// Defaults to the anchor pane's live directory, so the new shell
     /// starts where its neighbour is.
@@ -138,52 +139,46 @@ extension HierarchyHandlers {
     public let initialCommand: String?
     public let labels: [String]?
   }
-  /// `hierarchy.splitPane` — a new pane beside `paneID`, the way the
-  /// keyboard split does, with the project env every CLI-spawned pane gets.
+  /// `hierarchy.splitPane` — a new Pane with a fresh Tab beside the
+  /// anchor, the way the keyboard split does, with the project env every
+  /// CLI-spawned session gets. Answers with the new session's id.
   public func splitPane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     guard let req = try? params.decoded(as: SplitPaneParams.self) else {
-      return .failed(
-        .invalidParams(
-          message: "splitPane requires {paneID, tabID, worktreeID, projectID, direction}", path: nil))
+      return .failed(.invalidParams(message: "splitPane requires {paneID, direction}", path: nil))
     }
-    guard
-      let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == req.worktreeID }),
-      let tab = worktree.tabs.first(where: { $0.id == req.tabID }),
-      let anchor = tab.panes.first(where: { $0.id == req.paneID })
+    guard let anchorID = layoutPane(for: req.paneID),
+      let address = manager.catalog.address(forPane: anchorID),
+      let anchor = manager.catalog.pane(anchorID),
+      let anchorTab = anchor.selectedTab
     else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(.notFound(kind: "pane", id: req.paneID.uuidString))
     }
-    let requested = req.workingDirectory ?? overlayLivePaneDirectories(in: [anchor])[0].workingDirectory
+    let requested =
+      req.workingDirectory
+      ?? overlayLiveDirectories(in: [anchorTab])[0].content.terminal?.workingDirectory
+      ?? NSHomeDirectory()
     let workingDirectory = effectiveWorkingDirectory(
-      requested, projectID: req.projectID, worktreeID: req.worktreeID)
+      requested, projectID: address.projectID, worktreeID: address.worktreeID)
     do {
-      let id = try await manager.splitPane(
-        req.paneID,
+      try manager.requireLocalDirectory(workingDirectory, in: address.projectID)
+      let created = try manager.splitPane(
+        from: anchorID,
         direction: req.direction,
-        in: req.tabID,
-        in: req.worktreeID,
-        in: req.projectID,
-        workingDirectory: workingDirectory,
-        initialCommand: req.initialCommand,
-        env: envProvider(req.projectID)
+        content: .terminal(
+          workingDirectory: workingDirectory, initialCommand: req.initialCommand,
+          labels: Set(req.labels ?? []))
       )
-      if let labels = req.labels, !labels.isEmpty {
-        do {
-          try manager.setPaneLabels(id, labels: Set(labels), replace: true)
-        } catch {
-          return .failed(.internal("pane created (id=\(id)) but setPaneLabels failed: \(error)"))
-        }
-      }
-      return .unary(try JSONValue.encoded(PaneIDPayload(id: id)))
+      try await manager.ensureSurface(for: created.contentID, env: envProvider(address.projectID))
+      return .unary(try JSONValue.encoded(PaneIDPayload(id: created.contentID)))
     } catch {
-      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.description)
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.uuidString)
     }
   }
 
   public struct ResizePaneParams: Codable, Sendable {
-    public let paneID: PaneID
+    /// A Pane id, or a Tab / session id (its Pane).
+    public let paneID: UUID
     /// Which edge grows: `left` / `right` move the nearest vertical divider,
     /// `up` / `down` the nearest horizontal one.
     public let direction: SplitTree<PaneID>.NewDirection
@@ -202,8 +197,8 @@ extension HierarchyHandlers {
     guard amount > 0 else {
       return .failed(.invalidParams(message: "amount must be positive", path: ["amount"]))
     }
-    guard manager.addressOf(paneID: req.paneID) != nil else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    guard let paneID = layoutPane(for: req.paneID) else {
+      return .failed(.notFound(kind: "pane", id: req.paneID.uuidString))
     }
     let direction: ResizeDirection
     switch req.direction {
@@ -213,10 +208,10 @@ extension HierarchyHandlers {
     case .down: direction = .down
     }
     do {
-      try manager.resizePane(req.paneID, direction: direction, amount: amount)
+      try manager.resizePane(paneID, direction: direction, amount: amount)
       return .unary(.object([:]))
     } catch {
-      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.description)
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.uuidString)
     }
   }
 }
