@@ -3,9 +3,10 @@ import Testing
 
 @testable import CodansCore
 
-/// Exercises `Catalog.init(from:)` / `Catalog.encode(to:)` for the v3
-/// schema (Tags + flat Projects + activeTagFilter). The decoder rejects
-/// any pre-v3 payload as `unsupportedVersion`.
+/// Exercises `Catalog.init(from:)` / `Catalog.encode(to:)` for the v4
+/// schema. The decoder reads the current version only and names why it
+/// refused any other: pre-v3 as `unsupportedVersion`, v3 as
+/// `needsMigration`, above v4 as `newerVersion`.
 struct CatalogCodableTests {
   @Test
   func emptyCatalogRoundTrip() throws {
@@ -45,16 +46,34 @@ struct CatalogCodableTests {
   }
 
   @Test
-  func decodingRejectsUnknownVersion() throws {
+  func decodingNewerVersionIsDistinctFromUnsupported() throws {
     let payload = Data(#"{"version": 99, "projects": [], "tags": []}"#.utf8)
-    #expect(throws: Catalog.DecodingIssue.unsupportedVersion(99)) {
+    #expect(throws: Catalog.DecodingIssue.newerVersion(99)) {
       _ = try JSONDecoder().decode(Catalog.self, from: payload)
     }
   }
 
   @Test
+  func decodingV3CatalogAsksForMigration() throws {
+    let payload = Data(#"{"version": 3, "projects": []}"#.utf8)
+    #expect(throws: Catalog.DecodingIssue.needsMigration(3)) {
+      _ = try JSONDecoder().decode(Catalog.self, from: payload)
+    }
+  }
+
+  @Test
+  func peekVersionReadsTheVersionAlone() throws {
+    // The rest of the document is not this build's shape on purpose.
+    let payload = Data(#"{"version": 7, "projects": "not an array"}"#.utf8)
+    #expect(try Catalog.peekVersion(in: payload) == 7)
+    #expect(throws: DecodingError.self) {
+      _ = try Catalog.peekVersion(in: Data(#"{"projects": []}"#.utf8))
+    }
+  }
+
+  @Test
   func decodingTolerantOfMissingOptionalFields() throws {
-    let payload = Data(#"{"version": 3}"#.utf8)
+    let payload = Data(#"{"version": 4}"#.utf8)
     let catalog = try JSONDecoder().decode(Catalog.self, from: payload)
     #expect(catalog.projects.isEmpty)
     #expect(catalog.tags.isEmpty)
@@ -86,9 +105,9 @@ struct CatalogCodableTests {
 
   @Test
   func decodingV2CatalogRejectsAsUnsupportedVersion() throws {
-    // No backward-compat: the decoder accepts v3 only. v2 (and earlier)
-    // catalogs surface as `unsupportedVersion` so the app fails loud
-    // instead of silently dropping the user's data.
+    // v2 (and earlier) catalogs have no migration path: they surface as
+    // `unsupportedVersion` so the app fails loud instead of silently
+    // dropping the user's data.
     let payload = Data(#"{"version": 2, "spaces": []}"#.utf8)
     #expect(throws: Catalog.DecodingIssue.unsupportedVersion(2)) {
       _ = try JSONDecoder().decode(Catalog.self, from: payload)

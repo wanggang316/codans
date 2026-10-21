@@ -1,7 +1,10 @@
 import Foundation
 
 public nonisolated struct Catalog: Equatable, Sendable {
-  public static let currentVersion = 3
+  public static let currentVersion = 4
+  /// Oldest on-disk version `CatalogLoader` can still lift to
+  /// `currentVersion`. Anything older is refused outright.
+  public static let oldestMigratableVersion = 3
 
   public var version: Int
   public var projects: [Project]
@@ -47,19 +50,47 @@ public nonisolated struct Catalog: Equatable, Sendable {
 }
 
 extension Catalog: Codable {
+  /// Why `init(from:)` refused a document before reading any record.
+  /// Only `currentVersion` decodes here; the other versions are told
+  /// apart so a store can migrate, open read-only, or refuse.
   public enum DecodingIssue: Error, Equatable {
+    /// Older than `oldestMigratableVersion`.
     case unsupportedVersion(Int)
+    /// Migratable through `CatalogLoader` / `CatalogMigrationV3ToV4`.
+    case needsMigration(Int)
+    /// Written by a newer build. The file must stay untouched.
+    case newerVersion(Int)
+
+    static func classify(_ version: Int) -> DecodingIssue? {
+      switch version {
+      case Catalog.currentVersion: return nil
+      case ..<Catalog.oldestMigratableVersion: return .unsupportedVersion(version)
+      case ..<Catalog.currentVersion: return .needsMigration(version)
+      default: return .newerVersion(version)
+      }
+    }
   }
 
   private enum CodingKeys: String, CodingKey {
     case version, projects, tags, activeTagFilter, sidebarFilter, projectSortMode, selectedProjectID
   }
 
+  /// Reads the `version` field alone. A store asks this before a full
+  /// decode so a document from a newer build is recognised as such even
+  /// when its records no longer have this build's shape.
+  public static func peekVersion(in data: Data) throws -> Int {
+    try JSONDecoder().decode(VersionProbe.self, from: data).version
+  }
+
+  private struct VersionProbe: Decodable {
+    let version: Int
+  }
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let version = try container.decode(Int.self, forKey: .version)
-    guard version == Catalog.currentVersion else {
-      throw DecodingIssue.unsupportedVersion(version)
+    if let issue = DecodingIssue.classify(version) {
+      throw issue
     }
     self.version = Catalog.currentVersion
     self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
@@ -148,6 +179,29 @@ extension Catalog {
           return lhs.offset < rhs.offset
         }
         .map { $0.element }
+    }
+  }
+}
+
+// MARK: - Layout invariants
+
+extension Catalog {
+  public enum LayoutIssue: Error, Equatable {
+    case inconsistentWorktree(WorktreeID, Worktree.InvariantError)
+  }
+
+  /// Every Worktree satisfies `Worktree.validateInvariants()`. Decoding
+  /// repairs dangling selection and focus only; a loader or migrator
+  /// calls this and rejects the whole document otherwise.
+  public func validateLayouts() throws {
+    for project in projects {
+      for worktree in project.worktrees {
+        do {
+          try worktree.validateInvariants()
+        } catch let issue as Worktree.InvariantError {
+          throw LayoutIssue.inconsistentWorktree(worktree.id, issue)
+        }
+      }
     }
   }
 }
