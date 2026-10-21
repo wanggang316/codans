@@ -20,7 +20,7 @@ struct WorkflowWireTypesCodableTests {
 
   static func sampleBinding() -> IPC.WorkflowRoleBindingSummary {
     IPC.WorkflowRoleBindingSummary(
-      role: "reviewer", source: "launch", paneID: PaneID(), handle: "p4",
+      role: "reviewer", source: "launch", paneID: ContentID(), handle: "p4",
       profileID: UUID(), profileName: "Claude Code", agent: "claude")
   }
 
@@ -49,7 +49,7 @@ struct WorkflowWireTypesCodableTests {
           name: "review", ordinal: 3, path: "/repo/.codans/workflow-runs/abc/deliveries/review.3.md",
           latestPath: "/repo/.codans/workflow-runs/abc/deliveries/review.md", verdict: nil, isProvisional: true)
       ],
-      bindings: [sampleBinding(), IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: PaneID())],
+      bindings: [sampleBinding(), IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: ContentID())],
       steps: [
         IPC.WorkflowStepSummary(id: "step-1", name: nil, outcome: "success", iteration: nil),
         IPC.WorkflowStepSummary(id: "review", name: "Review", outcome: nil, iteration: nil),
@@ -86,7 +86,7 @@ struct WorkflowWireTypesCodableTests {
   @Test
   func runRequestAndResponseRoundTrip() throws {
     let request = IPC.WorkflowRunRequest(
-      workflow: "review", sourcePaneID: PaneID(), worktreeID: nil,
+      workflow: "review", sourcePaneID: ContentID(), worktreeID: nil,
       roles: ["reviewer": "auto"], inputs: ["scope": "src"], skip: ["lint"], origin: "cli")
     #expect(try roundTrip(request) == request)
 
@@ -108,12 +108,12 @@ struct WorkflowWireTypesCodableTests {
   func statusRequestAndResponseRoundTrip() throws {
     let byRun = IPC.WorkflowStatusRequest(runID: UUID(), callerPaneID: nil)
     #expect(try roundTrip(byRun) == byRun)
-    let byCaller = IPC.WorkflowStatusRequest(runID: nil, callerPaneID: PaneID())
+    let byCaller = IPC.WorkflowStatusRequest(runID: nil, callerPaneID: ContentID())
     #expect(try roundTrip(byCaller) == byCaller)
 
     let response = IPC.WorkflowStatusResponse(
       run: Self.sampleRun(),
-      participant: IPC.WorkflowParticipantSummary(role: "reviewer", paneID: PaneID()))
+      participant: IPC.WorkflowParticipantSummary(role: "reviewer", paneID: ContentID()))
     #expect(try roundTrip(response) == response)
   }
 
@@ -129,7 +129,7 @@ struct WorkflowWireTypesCodableTests {
   @Test
   func deliverRequestAndResponseRoundTrip() throws {
     let request = IPC.WorkflowDeliverRequest(
-      callerPaneID: PaneID(), token: "t", runID: UUID(), stepID: "review",
+      callerPaneID: ContentID(), token: "t", runID: UUID(), stepID: "review",
       body: "## Findings\nnone\n", verdict: "clean", force: true)
     #expect(try roundTrip(request) == request)
     let minimal = IPC.WorkflowDeliverRequest(body: "x")
@@ -151,7 +151,7 @@ struct WorkflowWireTypesCodableTests {
 
   @Test
   func listRunsRequestAndResponseRoundTrip() throws {
-    let request = IPC.WorkflowListRunsRequest(worktreeID: nil, paneID: PaneID(), limit: 20)
+    let request = IPC.WorkflowListRunsRequest(worktreeID: nil, paneID: ContentID(), limit: 20)
     #expect(try roundTrip(request) == request)
     let response = IPC.WorkflowRunListResponse(runs: [Self.sampleRun(), Self.sampleRun()])
     #expect(try roundTrip(response) == response)
