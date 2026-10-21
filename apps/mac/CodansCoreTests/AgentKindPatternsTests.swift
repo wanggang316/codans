@@ -190,42 +190,37 @@ struct AgentKindPatternsTests {
     )
   }
 
-  // MARK: - Pane Codable round-trip
+  // MARK: - Terminal content Codable round-trip
 
   @Test
-  func paneCodable_roundTripsAgentFields() throws {
-    let original = Pane(
+  func terminalContentCodable_roundTripsAgentFields() throws {
+    let original = TerminalContentState(
       workingDirectory: "/tmp",
       agentKind: .claudeCode,
       agentSessionID: "abc"
     )
     let data = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(Pane.self, from: data)
-    #expect(decoded.id == original.id)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: data)
     #expect(decoded.agentKind == .claudeCode)
     #expect(decoded.agentSessionID == "abc")
   }
 
-  // MARK: - Pane backward / forward compat
+  // MARK: - Terminal content backward / forward compat
 
   @Test
-  func paneCodable_preAgentJSONDecodesWithNilAgentFields() throws {
+  func terminalContentCodable_preAgentJSONDecodesWithNilAgentFields() throws {
     let json = #"""
-      {
-        "id": { "raw": "00000000-0000-0000-0000-000000000001" },
-        "workingDirectory": "/tmp"
-      }
+      { "workingDirectory": "/tmp" }
       """#
-    let data = Data(json.utf8)
-    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: Data(json.utf8))
     #expect(decoded.agentKind == nil)
     #expect(decoded.agentSessionID == nil)
   }
 
   @Test
-  func paneCodable_defaultPaneOmitsAgentKeysOnReencode() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let data = try JSONEncoder().encode(pane)
+  func terminalContentCodable_defaultOmitsAgentKeysOnReencode() throws {
+    let state = TerminalContentState(workingDirectory: "/tmp")
+    let data = try JSONEncoder().encode(state)
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     #expect(object?.keys.contains("agentKind") == false)
     #expect(object?.keys.contains("agentSessionID") == false)

@@ -19,10 +19,10 @@ struct CatalogCodableTests {
 
   @Test
   func populatedCatalogRoundTrip() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let pane = Pane(tabs: [Tab(content: .terminal(workingDirectory: "/tmp"))])
     let worktree = Worktree(
-      name: "main", path: "/repo", branch: "main", tabs: [tab], selectedTabID: tab.id
+      name: "main", path: "/repo", branch: "main", splitTree: SplitTree(leaf: pane.id), panes: [pane],
+      focusedPaneID: pane.id
     )
     let tag = Tag(name: "client-acme", color: .blue)
     let project = Project(
@@ -159,60 +159,27 @@ struct CatalogCodableTests {
     #expect(decoded.isNew == false)
   }
 
-  // MARK: - Pane.runScriptID round-trips
+  // MARK: - runScriptID round-trips
 
   @Test
-  func paneRunScriptIDRoundTrips() throws {
-    // The run-pane association must survive a relaunch, so unlike the
+  func runScriptIDRoundTrips() throws {
+    // The run-script association must survive a relaunch, so unlike the
     // agent binding this field persists.
     let scriptID = UUID()
-    let pane = Pane(workingDirectory: "/tmp", runScriptID: scriptID)
-    let data = try JSONEncoder().encode(pane)
-    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    let state = TerminalContentState(workingDirectory: "/tmp", runScriptID: scriptID)
+    let data = try JSONEncoder().encode(state)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: data)
     #expect(decoded.runScriptID == scriptID)
   }
 
   @Test
-  func paneRunScriptIDNilOmitsKeyFromJSON() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let data = try JSONEncoder().encode(pane)
+  func runScriptIDNilOmitsKeyFromJSON() throws {
+    let state = TerminalContentState(workingDirectory: "/tmp")
+    let data = try JSONEncoder().encode(state)
     let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(dict["runScriptID"] == nil)
 
-    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: data)
     #expect(decoded.runScriptID == nil)
   }
-
-  // MARK: - Tab invariants
-
-  @Test
-  func tabInvariantsHoldForSeededTab() throws {
-    let a = Pane(workingDirectory: "/a")
-    let b = Pane(workingDirectory: "/b")
-    let tree = try SplitTree(leaf: a.id).inserting(b.id, at: a.id, direction: .right)
-    let tab = Tab(splitTree: tree, panes: [a, b])
-    try tab.validateInvariants()
-  }
-
-  @Test
-  func tabInvariantsFailWhenPanesDriftFromTree() throws {
-    let a = Pane(workingDirectory: "/a")
-    let b = Pane(workingDirectory: "/b")
-    let extraPane = Pane(workingDirectory: "/c")
-    let tree = try SplitTree(leaf: a.id).inserting(b.id, at: a.id, direction: .right)
-    let badTab = Tab(splitTree: tree, panes: [a, b, extraPane])
-    #expect(throws: Tab.InvariantError.self) {
-      try badTab.validateInvariants()
-    }
-  }
-
-  @Test
-  func tabInvariantsFailOnDuplicatePaneIDs() throws {
-    let a = Pane(workingDirectory: "/a")
-    let tab = Tab(splitTree: SplitTree(leaf: a.id), panes: [a, a])
-    #expect(throws: Tab.InvariantError.duplicatePaneIDs) {
-      try tab.validateInvariants()
-    }
-  }
-
 }
