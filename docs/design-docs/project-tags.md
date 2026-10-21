@@ -5,12 +5,12 @@
 ## Scope
 
 Codans has one main window and a separate Settings window. Its hierarchy is
-`Catalog → Project → Worktree → Tab → Pane`. Tags classify Projects across
+`Catalog → Project → Worktree → Pane → Tab`. Tags classify Projects across
 that hierarchy without owning their worktrees or terminal sessions.
 
 The authoritative structural state is `HierarchyManager.catalog`. Selection
 belongs to `Catalog.selectedProjectID`, `Project.selectedWorktreeID`, and
-`Worktree.selectedTabID`. A Tag has no independent selection or session state.
+`Worktree.focusedPaneID` and `Pane.selectedTabID`. A Tag has no independent selection or session state.
 
 ## Data Model
 

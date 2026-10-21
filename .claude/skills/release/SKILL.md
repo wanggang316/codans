@@ -80,11 +80,14 @@ lists (name the CLI verb; leave flags to `--help`).
   protocol terms. Name the UI surface the user sees.
 
 Categories follow Keep a Changelog 1.1.0: `Added`, `Changed`, `Deprecated`,
-`Removed`, `Fixed`, `Security`.
+`Removed`, `Fixed`, `Security`, plus `Breaking` as the first category when
+`[Unreleased]` carries one: CLI, IPC, environment-variable, settings, or
+on-disk changes a user or script must act on. It is never reseeded; carry
+its entries over verbatim in meaning, consolidated like the others.
 
 Then edit `CHANGELOG.md`: put the rewritten notes under
 `## [X.Y.Z] - YYYY-MM-DD` (today, local TZ), drop its empty categories, and
-reseed an empty `## [Unreleased]` above it with all six headers.
+reseed an empty `## [Unreleased]` above it with the six standard headers.
 
 ### 4. Bump the version
 

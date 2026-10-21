@@ -36,10 +36,11 @@ and the project does not yet follow semantic versioning — every release until
   tab; target handles carry `panes` and `tabs`. The `system.hello`
   protocol version is bumped, so a `codans` binary from another build is
   refused — use the CLI bundled with the app.
-- **Settings keys renamed.** Session-scoped settings keys that said
-  "pane" use the tab vocabulary (for example `resumePanesOnLaunch` →
-  `resumeTabsOnLaunch`). Old keys are read once and dropped on the next
-  save.
+- **Settings keys renamed.** Settings keys that said "pane" for a session
+  follow the new vocabulary: `notifications.mute.mutedPaneIDs` is
+  `mutedContentIDs` (a mute follows the session), and the on-finished
+  script action `closePane` is `closeTab`. Old keys are read once and
+  dropped on the next save.
 - **Catalog v4 with a one-shot migration.** The first launch converts a
   v3 catalog to v4 and keeps the v3 file under `~/.codans/state/backups/`.
   Your selected tab's split layout becomes the pane layout, the sessions
