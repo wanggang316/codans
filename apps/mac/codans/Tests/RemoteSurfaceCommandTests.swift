@@ -6,7 +6,7 @@ import Testing
 
 struct RemoteSurfaceCommandTests {
   private let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
-  private let paneID = PaneID(raw: UUID(uuidString: "00000000-0000-0000-0000-0000000000AB")!)
+  private let paneID = ContentID(raw: UUID(uuidString: "00000000-0000-0000-0000-0000000000AB")!)
 
   @Test
   func reconnectLoopClosesOnlyAfterARealSession() {
@@ -39,7 +39,7 @@ struct RemoteSurfaceCommandTests {
     for zmx in ["/opt/zmx", nil] {
       for persistence in [true, false] {
         let command = RemoteSurfaceCommand.build(
-          host: host, paneID: paneID, remotePath: "/srv/my app",
+          host: host, contentID: paneID, remotePath: "/srv/my app",
           localZmxPath: zmx, hostPersistence: persistence
         )
         try Self.assertShellParses(command, label: "zmx=\(zmx ?? "nil") persist=\(persistence)")
@@ -130,7 +130,7 @@ struct RemoteSurfaceCommandTests {
     // The full build still parses as valid shell with the notice embedded
     // (its single-quoted printf crosses every quoting layer).
     let command = RemoteSurfaceCommand.build(
-      host: host, paneID: paneID, remotePath: "/srv/app",
+      host: host, contentID: paneID, remotePath: "/srv/app",
       localZmxPath: "/opt/zmx", hostPersistence: true
     )
     try Self.assertShellParses(command, label: "keychain-notice")
@@ -242,7 +242,7 @@ struct RemoteSurfaceCommandTests {
   func buildWrapsLoopInLocalZmxWhenAvailable() {
     let command = RemoteSurfaceCommand.build(
       host: host,
-      paneID: paneID,
+      contentID: paneID,
       remotePath: "/srv/app",
       localZmxPath: "/opt/zmx",
       hostPersistence: true
@@ -258,7 +258,7 @@ struct RemoteSurfaceCommandTests {
   func buildFallsBackToBareLoopWithoutLocalZmx() {
     let command = RemoteSurfaceCommand.build(
       host: host,
-      paneID: paneID,
+      contentID: paneID,
       remotePath: "/srv/app",
       localZmxPath: nil,
       hostPersistence: true

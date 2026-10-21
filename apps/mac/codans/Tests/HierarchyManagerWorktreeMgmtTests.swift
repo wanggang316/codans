@@ -129,60 +129,29 @@ struct HierarchyManagerWorktreeMgmtTests {
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
     )
-    let tabID = try manager.createTab(
-      in: worktreeID, in: projectID, name: nil
+    let created = try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID,
+      content: .terminal(workingDirectory: "/repo/feat")
     )
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
-    )
+    try await manager.ensureSurface(for: created.contentID)
     fakeRuntime.reset()
-    fakeRuntime.livePaneIDs.insert(paneID)
+    fakeRuntime.liveContentIDs.insert(created.contentID)
 
     try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
 
     // Archive routes through suspendSurface (kills the daemon, emits no
     // .paneExited) — NOT closeSurface, whose .paneExited would route through
-    // paneLifecycleExited → closePane and delete the Pane.
-    #expect(fakeRuntime.suspendSurfaceCalls == [paneID])
+    // the exit path → closeTab and delete the Tab.
+    #expect(fakeRuntime.suspendSurfaceCalls == [created.contentID])
     #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
-    // Soft-hide keeps the Pane in the catalog for restore.
+    // Soft-hide keeps the Tab in the catalog for restore.
     let worktree = manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }
     #expect(worktree?.archived == true)
-    #expect(worktree?.tabs.flatMap { $0.panes }.map(\.id) == [paneID])
+    #expect(worktree?.allTabs.map(\.id) == [created.tabID])
+    #expect(worktree?.contentIDs == [created.contentID])
     // One structural-mutation announce so the AgentState reconcile runs
-    // against visiblePaneIDs() and retires the hidden worktree's rows.
+    // against visibleContentIDs() and retires the hidden worktree's rows.
     #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
-  }
-
-  @Test
-  func archiveClearsBusySetsSoTheRunControlDoesNotStickOnRunning() async throws {
-    let projectID = manager.addProject(
-      name: "p", rootPath: "/repo", gitRoot: "/repo"
-    )
-    let worktreeID = try manager.createWorktree(
-      in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
-    )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
-    )
-    let scriptID = UUID()
-    manager.setRunScriptPane(worktreeID: worktreeID, scriptID: scriptID, paneID: paneID)
-    manager.setPaneCommandBusy(paneID, true)
-    manager.setLastFocusedPane(paneID, in: tabID)
-    #expect(manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID))
-
-    try manager.setWorktreeArchived(worktreeID: worktreeID, archived: true)
-
-    // Soft-hide keeps the Pane in the catalog, so `isScriptRunning`'s
-    // "catalog.pane is gone" guard cannot retire the entry — only clearing
-    // the busy set does. Archive already killed the daemon, so a control
-    // still reading "running" here would never resolve, even on unarchive.
-    #expect(!manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID))
-    #expect(!manager.paneIsBusy(paneID))
-    #expect(manager.lastFocusedPane(in: tabID) == nil)
   }
 
   @Test
@@ -304,23 +273,23 @@ struct HierarchyManagerWorktreeMgmtTests {
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
+    let created = try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID,
+      content: .terminal(workingDirectory: "/repo/feat")
     )
-    manager.setPaneCommandBusy(paneID, true)
-    manager.setLastFocusedPane(paneID, in: tabID)
+    try await manager.ensureSurface(for: created.contentID)
+    manager.setCommandQueue(
+      [QueuedCommand(text: "make", timing: .afterCurrentTask)], for: created.contentID)
+    #expect(manager.isBusy(created.contentID))
     fakeRuntime.reset()
 
     try manager.removeWorktree(worktreeID, from: projectID)
 
-    // `closeSurface` emits `.paneExited` only for Panes that had a live
-    // surface, so a Worktree of never-opened Panes would otherwise leave the
+    // `closeSurface` emits `.paneExited` only for Contents that had a live
+    // surface, so a Worktree of never-opened Tabs would otherwise leave the
     // membership reconcilers with no signal at all.
     #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
-    #expect(!manager.paneIsBusy(paneID))
-    #expect(manager.lastFocusedPane(in: tabID) == nil)
+    #expect(!manager.isBusy(created.contentID))
   }
 
   @Test
@@ -668,30 +637,26 @@ struct HierarchyManagerWorktreeMgmtTests {
     let staleID = try manager.createWorktree(
       in: projectID, name: "stale", path: "/repo/stale", branch: "stale"
     )
-    let tabID = try manager.createTab(
-      in: staleID, in: projectID, name: nil
+    let created = try manager.newTab(
+      in: nil, worktreeID: staleID, projectID: projectID,
+      content: .terminal(workingDirectory: "/repo/stale")
     )
-    let paneID = try await manager.openPane(
-      in: tabID, in: staleID, in: projectID,
-      workingDirectory: "/repo/stale", initialCommand: nil
-    )
-    manager.setPaneCommandBusy(paneID, true)
+    try await manager.ensureSurface(for: created.contentID)
     fakeRuntime.reset()
-    fakeRuntime.livePaneIDs.insert(paneID)
+    fakeRuntime.liveContentIDs.insert(created.contentID)
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID,
       entries: [(path: "/repo", branch: "main", head: "f00dcafe00000000000000000000000000000000")]
     )
     // Suspend, not close. This path archives, and `closeSurface`'s
-    // `.paneExited` routes through `paneLifecycleExited` into `closeTab` /
-    // `closePane`, deleting the very rows soft-hide keeps for restore. It
-    // also left a never-opened Pane's daemon running.
-    #expect(fakeRuntime.suspendSurfaceCalls == [paneID])
+    // `.paneExited` routes through the exit path into `closeTab`, deleting
+    // the very rows soft-hide keeps for restore. It also left a
+    // never-opened Content's daemon running.
+    #expect(fakeRuntime.suspendSurfaceCalls == [created.contentID])
     #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
     let stale = manager.catalog.projects[0].worktrees.first { $0.id == staleID }
     #expect(stale?.archived == true)
-    #expect(stale?.tabs.flatMap { $0.panes }.map(\.id) == [paneID])
-    #expect(!manager.paneIsBusy(paneID))
+    #expect(stale?.contentIDs == [created.contentID])
     // Auto-archive fires without the user asking, so a ghost row left behind
     // in the Agents View here is especially confusing.
     #expect(fakeRuntime.announceHierarchyMutatedCount == 1)
@@ -768,58 +733,53 @@ struct HierarchyManagerWorktreeMgmtTests {
     let featureID = try manager.createWorktree(
       in: projectID, name: "feature", path: "/repo/feature", branch: "feature"
     )
-    let tabID = try manager.createTab(
-      in: featureID, in: projectID, name: nil
+    let created = try manager.newTab(
+      in: nil, worktreeID: featureID, projectID: projectID,
+      content: .terminal(workingDirectory: "/repo/feature")
     )
-    let paneID = try await manager.openPane(
-      in: tabID, in: featureID, in: projectID,
-      workingDirectory: "/repo/feature", initialCommand: nil
-    )
+    try await manager.ensureSurface(for: created.contentID)
     fakeRuntime.reset()
-    fakeRuntime.livePaneIDs.insert(paneID)
+    fakeRuntime.liveContentIDs.insert(created.contentID)
     _ = manager.reconcileDiscoveredWorktrees(
       projectID: projectID, entries: []
     )
     #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
   }
 
-  // MARK: - runningPaneCount
+  // MARK: - runningContentCount
 
   @Test
-  func runningPaneCountReflectsRuntime() async throws {
+  func runningContentCountReflectsRuntime() async throws {
     let projectID = manager.addProject(
       name: "p", rootPath: "/repo", gitRoot: "/repo"
     )
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "feature", path: "/repo/feat", branch: "feature"
     )
-    let tabID = try manager.createTab(
-      in: worktreeID, in: projectID, name: nil
+    let first = try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID,
+      content: .terminal(workingDirectory: "/repo/feat")
     )
-    let paneA = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
+    try await manager.ensureSurface(for: first.contentID)
+    let second = try manager.splitPane(
+      from: first.paneID, direction: .right, content: .terminal(workingDirectory: "/repo/feat")
     )
-    let paneB = try await manager.splitPane(
-      paneA, direction: .right,
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/feat", initialCommand: nil
-    )
-    // Only paneA is live.
-    fakeRuntime.livePaneIDs = [paneA]
-    #expect(manager.runningPaneCount(worktreeID: worktreeID) == 1)
+    try await manager.ensureSurface(for: second.contentID)
+    // Only the first is live.
+    fakeRuntime.liveContentIDs = [first.contentID]
+    #expect(manager.runningContentCount(worktreeID: worktreeID) == 1)
     // Both live.
-    fakeRuntime.livePaneIDs = [paneA, paneB]
-    #expect(manager.runningPaneCount(worktreeID: worktreeID) == 2)
+    fakeRuntime.liveContentIDs = [first.contentID, second.contentID]
+    #expect(manager.runningContentCount(worktreeID: worktreeID) == 2)
     // None live.
-    fakeRuntime.livePaneIDs = []
-    #expect(manager.runningPaneCount(worktreeID: worktreeID) == 0)
+    fakeRuntime.liveContentIDs = []
+    #expect(manager.runningContentCount(worktreeID: worktreeID) == 0)
   }
 
   @Test
-  func runningPaneCountUnknownIDIsZero() {
+  func runningContentCountUnknownIDIsZero() {
     let unknown = WorktreeID()
-    #expect(manager.runningPaneCount(worktreeID: unknown) == 0)
+    #expect(manager.runningContentCount(worktreeID: unknown) == 0)
   }
 
   // MARK: - createWorktree uniqueness

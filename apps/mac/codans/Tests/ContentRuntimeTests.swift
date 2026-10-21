@@ -64,6 +64,7 @@ final class FakeTabContent: TabContent {
 
 @MainActor
 struct ContentRuntimeTests {
+  @MainActor
   private struct Fixture {
     let manager: HierarchyManager
     let fakeRuntime = FakeHierarchyRuntime()

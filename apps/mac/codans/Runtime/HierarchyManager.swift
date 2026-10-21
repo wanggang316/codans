@@ -1030,23 +1030,6 @@ final class HierarchyManager {
     }
   }
 
-  /// Toggles membership of `label` in `Pane.labels`. `present: true` inserts;
-  /// `present: false` removes. Set semantics make repeated calls idempotent
-  /// (the in-memory state matches what a single call with the same `present`
-  /// would produce). Silent no-op on unknown `paneID`. Persists via the
-  /// standard debounced save pipeline so rapid toggles coalesce into one
-  /// disk write per 500 ms window; in-memory state changes immediately so a
-  /// subsequent read inside the debounce window sees the latest value.
-  ///
-  /// Behind notifications-v1-1's pane right-click "Mute notifications" toggle
-  /// (`notifications:muted` label). The notification detector consults
-  /// `Pane.labels` to drop muted-pane candidates.
-  /// Writes `newPath` into `Pane.workingDirectory` for the matching pane so a
-  /// restart restores the pane at the cwd the user last `cd`'d to rather than
-  /// its creation-time cwd. Driven reactively by `PaneInfoDelta.pwd` (libghostty
-  /// OSC 7) routed through `RootFeature.engineEvents`. Idempotent: equal-path
-  /// writes and unknown pane ids are silent no-ops and skip `scheduleSave`, so
-  /// idle cwd traffic never touches the catalog file.
   // MARK: - Content (session) fields
 
   /// Applies `body` to the terminal state of `contentID` and persists when
@@ -1066,6 +1049,12 @@ final class HierarchyManager {
     return true
   }
 
+  /// Writes `newPath` as the Content's working directory so a restart
+  /// restores the session at the cwd the user last `cd`'d to rather than
+  /// its creation-time cwd. Driven reactively by `PaneInfoDelta.pwd`
+  /// (libghostty OSC 7) routed through `RootFeature.engineEvents`.
+  /// Idempotent: equal-path writes and unknown ids skip `scheduleSave`, so
+  /// idle cwd traffic never touches the catalog file.
   func updateWorkingDirectory(for contentID: ContentID, to newPath: String) {
     guard !newPath.isEmpty else { return }
     mutateTerminalContent(contentID) { state in
@@ -1075,6 +1064,11 @@ final class HierarchyManager {
     }
   }
 
+  /// Toggles membership of `label` in the Content's labels. `present: true`
+  /// inserts; `present: false` removes. Set semantics make repeated calls
+  /// idempotent, and an unchanged set skips the save. Behind the content
+  /// right-click "Mute notifications" toggle (`notifications:muted`): the
+  /// notification detector consults the labels to drop muted candidates.
   func setContentLabel(_ contentID: ContentID, label: String, present: Bool) {
     mutateTerminalContent(contentID) { state in
       if present {

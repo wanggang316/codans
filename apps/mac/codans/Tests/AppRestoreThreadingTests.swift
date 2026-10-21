@@ -15,7 +15,7 @@ import CodansCore
 /// bats mechanism; this unit test is the decisive white-box evidence.
 @MainActor
 struct AppRestoreThreadingTests {
-  private static func session(_ paneID: PaneID) -> Session {
+  private static func session(_ paneID: ContentID) -> Session {
     Session(
       paneID: paneID,
       socketPath: "/tmp/\(paneID.raw.uuidString).sock",
@@ -33,14 +33,14 @@ struct AppRestoreThreadingTests {
   /// preserved and keyed by the same paneID.
   @Test
   func derivesOnlySnapshotStates() {
-    let alivePane = PaneID()
-    let deadPane = PaneID()
-    let snapPaneA = PaneID()
-    let snapPaneB = PaneID()
+    let alivePane = ContentID()
+    let deadPane = ContentID()
+    let snapPaneA = ContentID()
+    let snapPaneB = ContentID()
     let urlA = URL(fileURLWithPath: "/snaps/\(snapPaneA.raw.uuidString).snap")
     let urlB = URL(fileURLWithPath: "/snaps/\(snapPaneB.raw.uuidString).snap")
 
-    let states: [PaneID: SessionState] = [
+    let states: [ContentID: SessionState] = [
       alivePane: .alive(Self.session(alivePane)),
       deadPane: .dead(Self.session(deadPane)),
       snapPaneA: .snapshot(urlA),
@@ -65,9 +65,9 @@ struct AppRestoreThreadingTests {
   /// daemon and no `.snap` file exists.
   @Test
   func noSnapshotsDeriveEmptyRestores() {
-    let alivePane = PaneID()
-    let deadPane = PaneID()
-    let states: [PaneID: SessionState] = [
+    let alivePane = ContentID()
+    let deadPane = ContentID()
+    let states: [ContentID: SessionState] = [
       alivePane: .alive(Self.session(alivePane)),
       deadPane: .dead(Self.session(deadPane)),
     ]

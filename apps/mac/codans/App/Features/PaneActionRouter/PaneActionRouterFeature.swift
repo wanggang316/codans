@@ -55,7 +55,7 @@ struct PaneActionRouterFeature {
     }
   }
 
-  // swiftlint:disable:next cyclomatic_complexity function_body_length
+  // swiftlint:disable:next cyclomatic_complexity
   private func dispatch(_ contentID: ContentID, _ request: PaneActionRequest) -> Effect<Action> {
     switch request {
     case .newTab:
