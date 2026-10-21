@@ -10,11 +10,11 @@ import Foundation
 struct CommandQueueFeature {
   @ObservableState
   struct State: Equatable, Identifiable {
-    var id: PaneID { paneID }
+    var id: ContentID { contentID }
 
     /// Pane the panel is editing. Fixed for the presentation's lifetime —
     /// re-opening on another pane replaces the whole state.
-    let paneID: PaneID
+    let contentID: ContentID
     var draft: String = ""
     var mode: Mode = .afterCurrentTask
     /// First (or only) fire time for `.scheduled`. Seeded a few minutes out
@@ -25,8 +25,8 @@ struct CommandQueueFeature {
     var repeatAmount: Int = 30
     var repeatUnit: IntervalUnit = .minutes
 
-    init(paneID: PaneID, now: Date = Date()) {
-      self.paneID = paneID
+    init(contentID: ContentID, now: Date = Date()) {
+      self.contentID = contentID
       self.scheduledAt = Self.defaultScheduleDate(from: now)
     }
 
@@ -165,7 +165,7 @@ struct CommandQueueFeature {
       case .submitted:
         let text = state.trimmedDraft
         guard !text.isEmpty else { return .none }
-        let paneID = state.paneID
+        let contentID = state.contentID
         switch state.mode {
         case .now:
           // Never enters the queue — it is already delivered. The panel is
@@ -173,9 +173,9 @@ struct CommandQueueFeature {
           // surface is a given here. `sendCommand` (not `sendInput`) so the
           // body lands as one paste and the Return arrives as its own
           // keypress; see its docstring.
-          terminalClient.sendCommand(paneID, text)
+          terminalClient.sendCommand(contentID, text)
         case .afterCurrentTask:
-          append(.init(text: text, timing: .afterCurrentTask, createdAt: date.now), to: paneID)
+          append(.init(text: text, timing: .afterCurrentTask, createdAt: date.now), to: contentID)
         case .scheduled:
           append(
             .init(
@@ -183,7 +183,7 @@ struct CommandQueueFeature {
               timing: .scheduled(at: state.scheduledAt, repeatEvery: state.repeatInterval),
               createdAt: date.now,
             ),
-            to: paneID,
+            to: contentID,
           )
         }
         state.draft = ""
@@ -193,12 +193,12 @@ struct CommandQueueFeature {
         return .none
 
       case .removeTapped(let id):
-        let queue = hierarchyClient.commandQueue(state.paneID)
-        hierarchyClient.setCommandQueue(state.paneID, queue.filter { $0.id != id })
+        let queue = hierarchyClient.commandQueue(state.contentID)
+        hierarchyClient.setCommandQueue(state.contentID, queue.filter { $0.id != id })
         return .none
 
       case .clearAllTapped:
-        hierarchyClient.setCommandQueue(state.paneID, [])
+        hierarchyClient.setCommandQueue(state.contentID, [])
         return .none
       }
     }
@@ -206,9 +206,9 @@ struct CommandQueueFeature {
 
   /// Read-modify-write against the live catalog rather than a snapshot: the
   /// runner can drain an entry between the panel opening and this append.
-  private func append(_ command: QueuedCommand, to paneID: PaneID) {
-    var queue = hierarchyClient.commandQueue(paneID)
+  private func append(_ command: QueuedCommand, to contentID: ContentID) {
+    var queue = hierarchyClient.commandQueue(contentID)
     queue.append(command)
-    hierarchyClient.setCommandQueue(paneID, queue)
+    hierarchyClient.setCommandQueue(contentID, queue)
   }
 }

@@ -60,7 +60,7 @@ final class NotificationCoordinator {
     let settings = settingsReader.notifications
     let auth = settingsReader.authStatus
 
-    // Inbox path. `inbox.append` may dedup (same paneID+kind within 30 s
+    // Inbox path. `inbox.append` may dedup (same contentID+kind within 30 s
     // merges into the prior entry preserving its `readAt`) or evict an
     // unread row when the 500-cap is hit. Both outcomes mean the
     // per-worktree unread count did NOT actually grow on this call, so
@@ -216,8 +216,7 @@ final class NotificationCoordinator {
       source: InboxEntry.SourcePath(
         projectID: ProjectID(raw: zeroUUID),
         worktreeID: WorktreeID(raw: zeroUUID),
-        tabID: TabID(raw: zeroUUID),
-        paneID: PaneID(raw: zeroUUID)
+        contentID: ContentID(raw: zeroUUID)
       )
     )
     let candidate = NotificationCoordinator.Candidate(

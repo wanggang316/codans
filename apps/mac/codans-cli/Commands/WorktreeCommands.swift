@@ -414,6 +414,8 @@ struct WorktreeDTO: Encodable {
   let name: String
   let path: String
   let branch: String?
+  let focusedPaneID: String?
+  /// The focused Pane's selected Tab.
   let selectedTabID: String?
 
   init(worktree: Worktree) {
@@ -421,6 +423,7 @@ struct WorktreeDTO: Encodable {
     self.name = worktree.name
     self.path = worktree.path
     self.branch = worktree.branch
-    self.selectedTabID = worktree.selectedTabID?.description
+    self.focusedPaneID = worktree.focusedPaneID?.description
+    self.selectedTabID = worktree.focusedPane?.selectedTabID?.description
   }
 }

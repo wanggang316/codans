@@ -75,6 +75,8 @@ struct WorktreeShow: AsyncParsableCommand {
       ("selected", d.isSelected ? "yes" : "no"),
       ("archived", d.isArchived ? "yes" : "no"),
       ("pinned", d.isPinned ? "yes" : "no"),
+      ("panes", "\(d.paneCount)"),
+      ("focused pane", d.focusedPaneID ?? "-"),
       ("tabs", "\(d.tabCount)"),
       ("selected tab", d.selectedTabID ?? "-"),
     ]
@@ -84,7 +86,7 @@ struct WorktreeShow: AsyncParsableCommand {
 struct TabShow: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "show",
-    abstract: "Describe a tab: title, handle, containers, focused pane, pane ids."
+    abstract: "Describe a tab: title, handle, containers, session id."
   )
 
   @OptionGroup var globals: GlobalOptions
@@ -108,11 +110,13 @@ struct TabShow: AsyncParsableCommand {
       ("title", d.title ?? "(untitled)"),
       ("name", d.name ?? "(auto)"),
       ("icon", d.icon ?? "(auto)"),
+      ("color", d.color?.rawValue ?? "(none)"),
+      ("content", d.contentID),
+      ("pane", d.paneID),
       ("worktree", d.worktreeID),
       ("project", d.projectID),
       ("selected", d.isSelected ? "yes" : "no"),
       ("focused pane", d.focusedPaneID ?? "-"),
-      ("panes", d.paneIDs.isEmpty ? "(none)" : d.paneIDs.joined(separator: ", ")),
     ]
   }
 }
@@ -151,6 +155,7 @@ struct PaneShow: AsyncParsableCommand {
       ("labels", d.labels.isEmpty ? "-" : d.labels.map { "@\($0)" }.joined(separator: " ")),
       ("agent", d.agent ?? "-"),
       ("session", d.agentSessionID ?? "-"),
+      ("content", d.contentID),
       ("tab", d.tabID),
       ("worktree", d.worktreeID),
       ("project", d.projectID),

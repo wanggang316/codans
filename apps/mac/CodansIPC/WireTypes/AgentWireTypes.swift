@@ -94,7 +94,7 @@ extension IPC {
     public let agent: String
     public let command: String
     public let tabID: TabID?
-    public let paneID: PaneID?
+    public let paneID: ContentID?
 
     public init(
       profileID: UUID,
@@ -102,7 +102,7 @@ extension IPC {
       agent: String,
       command: String,
       tabID: TabID?,
-      paneID: PaneID?
+      paneID: ContentID?
     ) {
       self.profileID = profileID
       self.profileName = profileName

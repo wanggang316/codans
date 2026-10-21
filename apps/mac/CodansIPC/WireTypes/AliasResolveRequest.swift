@@ -5,16 +5,18 @@ extension IPC {
   /// Params for `hierarchy.resolveAlias`. The CLI's `AliasResolver` sends
   /// one of these for every non-UUID identifier (current/index/label/glob);
   /// pure UUIDs are resolved locally and do not round-trip.
+  /// `contextPaneID` carries the caller's session (`CODANS_CONTENT_ID`);
+  /// the key keeps its historical spelling on the wire.
   public struct AliasResolveRequest: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Hashable, Sendable {
-      case project, worktree, tab, pane, tag
+      case project, worktree, tab, pane, tag, content
     }
 
     public let kind: Kind
     public let value: String
-    public let contextPaneID: PaneID?
+    public let contextPaneID: ContentID?
 
-    public init(kind: Kind, value: String, contextPaneID: PaneID? = nil) {
+    public init(kind: Kind, value: String, contextPaneID: ContentID? = nil) {
       self.kind = kind
       self.value = value
       self.contextPaneID = contextPaneID

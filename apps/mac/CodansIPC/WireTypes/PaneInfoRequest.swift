@@ -9,9 +9,9 @@ extension IPC {
   /// pane; this verb round-trips through the daemon so a stale catalog
   /// row does not leak past as live truth.
   public struct PaneInfoRequest: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+    public let paneID: ContentID
 
-    public init(paneID: PaneID) {
+    public init(paneID: ContentID) {
       self.paneID = paneID
     }
   }
@@ -34,14 +34,14 @@ extension IPC {
   /// back to `pane.read --raw` and parse the `vt`-format dump, which
   /// includes the cursor and SM/DECSM mode prologue.
   public struct PaneInfoResponse: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let shellPid: Int32
     public let pwd: String
     public let cursor: PaneCursor?
     public let modes: [String: Bool]?
 
     public init(
-      paneID: PaneID,
+      paneID: ContentID,
       shellPid: Int32,
       pwd: String,
       cursor: PaneCursor? = nil,

@@ -25,7 +25,7 @@ import SwiftUI
 /// content resizes after presentation crashes — see `AgentSessionSummaryCard`
 /// — and this card will grow rows as actions are added.
 struct PaneHUDView: View {
-  let paneID: PaneID
+  let contentID: ContentID
   /// The pane's live terminal surface, which services every
   /// `PaneSurfaceAction` row. Optional only for hosts that render the card
   /// without a running pane (the HUD render tests, previews); `LazyPaneHost`
@@ -45,11 +45,11 @@ struct PaneHUDView: View {
   /// `expanded` seeds the card's state. The app always starts collapsed;
   /// the seed exists so a rendering test can lay out the open card.
   init(
-    paneID: PaneID, surface: PaneSurface? = nil, expanded: Bool = false,
+    contentID: ContentID, surface: PaneSurface? = nil, expanded: Bool = false,
     onShowQueue: @escaping () -> Void = {},
   ) {
     self.onShowQueue = onShowQueue
-    self.paneID = paneID
+    self.contentID = contentID
     self.surface = surface
     _isExpanded = State(initialValue: expanded)
   }
@@ -98,9 +98,9 @@ struct PaneHUDView: View {
 
   private func resolveModel() -> PaneHUDModel? {
     PaneHUDModel.resolve(
-      paneID: paneID,
+      contentID: contentID,
       in: hierarchyManager.catalog,
-      agent: agentStateStore?.entries[paneID]?.kind,
+      agent: agentStateStore?.entries[contentID]?.kind,
     )
   }
 
@@ -268,7 +268,7 @@ struct PaneHUDView: View {
   private func handOffButton(_ model: PaneHUDModel) -> some View {
     Button {
       setExpanded(false)
-      actions.handOff(paneID)
+      actions.handOff(contentID)
     } label: {
       HStack(spacing: 7) {
         Image(systemName: "arrow.left.arrow.right")
@@ -293,7 +293,7 @@ struct PaneHUDView: View {
   private func commandQueueButton(_ model: PaneHUDModel) -> some View {
     Button {
       setExpanded(false)
-      actions.commandQueue(paneID)
+      actions.commandQueue(contentID)
     } label: {
       HStack(spacing: 7) {
         Image(systemName: CommandQueueStyle.symbol)

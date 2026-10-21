@@ -71,17 +71,16 @@ struct LazyPaneHost: View {
           // right-click, which is why the surface is handed in. Layered
           // above the progress strip so the card is never clipped by it.
           .overlay(alignment: .topTrailing) {
-            PaneCommandQueueChrome(paneID: store.paneID, surface: surface)
+            PaneCommandQueueChrome(contentID: store.contentID, surface: surface)
           }
           // Right-click menu. Attached only on `.ready` so loading / failure
           // placeholders do not get a stale menu; placed before `.animation`
           // so the animation envelope wraps the menu modifier too.
           .contextMenu {
             PaneContextMenu(
-              paneID: store.paneID,
+              contentID: store.contentID,
               tabID: store.tabID,
-              worktreeID: store.worktreeID,
-              projectID: store.projectID,
+              paneID: store.paneID,
             )
           }
           .animation(

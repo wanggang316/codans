@@ -3,8 +3,8 @@ import CodansCore
 
 extension IPC {
   /// Fan-out scope for `terminal.broadcastInput`. Three kinds:
-  /// tab / worktree / label. Encoded as a tagged union
-  /// `{ "kind": String, "target": String }`.
+  /// tab (that Tab's one session) / worktree / label. Encoded as a tagged
+  /// union `{ "kind": String, "target": String }`.
   public struct BroadcastScope: Codable, Equatable, Hashable, Sendable {
     public enum Kind: String, Codable, Hashable, Sendable {
       case tab, worktree, label

@@ -7,8 +7,8 @@ import os.log
 /// daemon whose Unix control socket responded to `connect(2)` within the
 /// probe timeout; `.dead` entries are catalog rows whose socket is gone
 /// or rejected our probe, and are removed from `sessions.json` as part
-/// of the same sweep. `.snapshot` entries name a paneID for which a
-/// `<paneID>.snap` file exists in the canonical snapshot directory but
+/// of the same sweep. `.snapshot` entries name a contentID for which a
+/// `<contentID>.snap` file exists in the canonical snapshot directory but
 /// no live daemon was found — written by the quit-time snapshot tier
 /// when the "Resume panes on launch" toggle is off.
 public enum SessionState: Sendable, Equatable {
@@ -19,7 +19,7 @@ public enum SessionState: Sendable, Equatable {
 
 /// Launch-time companion to `SessionLifecycle`. Reads the persisted
 /// `sessions.json` catalog, probes each entry's daemon socket, and
-/// returns a per-paneID state map so the pane-creation path can divert
+/// returns a per-contentID state map so the pane-creation path can divert
 /// to `PaneDaemonBringup.reattach` for daemons that survived the last
 /// quit. Dead entries are pruned from the on-disk catalog and
 /// their stale socket files unlinked best-effort so a future sweep
@@ -70,14 +70,14 @@ public final class SessionReaper {
     self.currentSessionEpoch = currentSessionEpoch
   }
 
-  /// Read the on-disk catalog, probe every entry, and return per-paneID
+  /// Read the on-disk catalog, probe every entry, and return per-contentID
   /// state. Dead entries are removed from the catalog and their socket
   /// files unlinked; the pruned catalog is persisted synchronously so a
   /// crash between the sweep and the first reattach does not resurrect
   /// stale rows.
   ///
-  /// `livePaneIDs`, when supplied, enables the orphan branch: a daemon
-  /// whose socket answers `connect(2)` but whose `PaneID` is absent
+  /// `liveContentIDs`, when supplied, enables the orphan branch: a daemon
+  /// whose socket answers `connect(2)` but whose `ContentID` is absent
   /// from the hierarchy catalog has no surface to reattach to. The
   /// `ensureSurface` path would never claim it, so without this branch
   /// the daemon would survive untouched until the 7-day stale cutoff
@@ -90,7 +90,7 @@ public final class SessionReaper {
   /// through `SessionStore.load` as an empty catalog (with the corrupt
   /// file moved aside), so the typical "no usable catalog" path returns
   /// an empty map without throwing.
-  public func sweep(livePaneIDs: Set<PaneID>? = nil) throws -> [PaneID: SessionState] {
+  public func sweep(liveContentIDs: Set<ContentID>? = nil) throws -> [ContentID: SessionState] {
     var catalog = coordinator.catalog
 
     let now = clock()
@@ -100,7 +100,7 @@ public final class SessionReaper {
     // degraded launch never mass-recycles otherwise-healthy daemons.
     let liveEpoch = currentSessionEpoch()
 
-    var states: [PaneID: SessionState] = [:]
+    var states: [ContentID: SessionState] = [:]
     var deadKeys: [String] = []
     for (key, session) in catalog.sessions {
       let alive = Self.probe(socketPath: session.socketPath)
@@ -117,15 +117,15 @@ public final class SessionReaper {
           // prune the row, drop the socket + snapshot. `ensureSurface` then
           // respawns a clean daemon in the live session — which is what
           // makes a relaunch actually heal the pane instead of re-attaching
-          // to the same broken daemon by its stable PaneID. See `SessionEpoch`.
+          // to the same broken daemon by its stable ContentID. See `SessionEpoch`.
           logger.notice(
-            "Recycling stranded daemon for pane \(session.paneID, privacy: .public): epoch=\(session.sessionEpoch ?? "nil", privacy: .public) != live=\(liveEpoch ?? "nil", privacy: .public)"
+            "Recycling stranded daemon for pane \(session.contentID, privacy: .public): epoch=\(session.sessionEpoch ?? "nil", privacy: .public) != live=\(liveEpoch ?? "nil", privacy: .public)"
           )
           Self.sendOneShotKill(socketPath: session.socketPath)
-          states[session.paneID] = .dead(session)
+          states[session.contentID] = .dead(session)
           deadKeys.append(key)
           _ = Darwin.unlink(session.socketPath)
-          deleteSnapshotFile(for: session.paneID)
+          deleteSnapshotFile(for: session.contentID)
         } else if session.lastAttachedAt < staleCutoff {
           // Stale daemon: send `.kill` over a one-shot connection, then
           // treat the entry as dead so the row is pruned and the
@@ -133,32 +133,32 @@ public final class SessionReaper {
           // wait for the daemon to fully exit — `.kill` is best-effort
           // and the next sweep would re-probe and clean up anyway.
           logger.notice(
-            "Killing stale daemon for pane \(session.paneID, privacy: .public): lastAttachedAt=\(session.lastAttachedAt, privacy: .public) older than staleAfter=\(self.staleAfter)s"
+            "Killing stale daemon for pane \(session.contentID, privacy: .public): lastAttachedAt=\(session.lastAttachedAt, privacy: .public) older than staleAfter=\(self.staleAfter)s"
           )
           Self.sendOneShotKill(socketPath: session.socketPath)
-          states[session.paneID] = .dead(session)
+          states[session.contentID] = .dead(session)
           deadKeys.append(key)
           _ = Darwin.unlink(session.socketPath)
-          deleteSnapshotFile(for: session.paneID)
-        } else if let livePaneIDs, !livePaneIDs.contains(session.paneID) {
+          deleteSnapshotFile(for: session.contentID)
+        } else if let liveContentIDs, !liveContentIDs.contains(session.contentID) {
           // Orphan daemon: alive on the wire, but no surface in the
           // hierarchy will ever claim it. Mirror the stale branch —
           // one-shot kill, prune the row, drop the socket and any
           // companion snapshot — so resources don't leak across launches
           // when sessions.json and hierarchy.json fall out of sync.
           logger.notice(
-            "Killing orphan daemon for pane \(session.paneID, privacy: .public) (not present in hierarchy)"
+            "Killing orphan daemon for pane \(session.contentID, privacy: .public) (not present in hierarchy)"
           )
           Self.sendOneShotKill(socketPath: session.socketPath)
-          states[session.paneID] = .dead(session)
+          states[session.contentID] = .dead(session)
           deadKeys.append(key)
           _ = Darwin.unlink(session.socketPath)
-          deleteSnapshotFile(for: session.paneID)
+          deleteSnapshotFile(for: session.contentID)
         } else {
-          states[session.paneID] = .alive(session)
+          states[session.contentID] = .alive(session)
         }
       } else {
-        states[session.paneID] = .dead(session)
+        states[session.contentID] = .dead(session)
         deadKeys.append(key)
         // Best-effort unlink — the daemon may have exited and left a
         // stale socket file behind (zmx normally cleans up, but a
@@ -186,11 +186,11 @@ public final class SessionReaper {
       }
     }
 
-    // Snapshot fallback: every `<paneID>.snap` file in the
+    // Snapshot fallback: every `<contentID>.snap` file in the
     // canonical snapshot directory becomes a `.snapshot` state unless
-    // the paneID already has a live daemon (in which case the snap is
+    // the contentID already has a live daemon (in which case the snap is
     // stale and is unlinked). Snapshots and live daemons co-existing
-    // for the same paneID would have meant the toggle was flipped from
+    // for the same contentID would have meant the toggle was flipped from
     // off → on between two quits without a relaunch in between; the
     // live daemon wins, and the snap is dropped.
     mergeSnapshotsIntoStates(&states)
@@ -260,7 +260,7 @@ public final class SessionReaper {
     var changed = false
     let legacyPrefix = legacy.standardizedFileURL.path + "/"
     for (key, var session) in catalog.sessions where session.socketPath.hasPrefix(legacyPrefix) {
-      session.socketPath = socketDirectory.appendingPathComponent(session.paneID.raw.uuidString).path
+      session.socketPath = socketDirectory.appendingPathComponent(session.contentID.raw.uuidString).path
       catalog.sessions[key] = session
       changed = true
     }
@@ -306,7 +306,7 @@ public final class SessionReaper {
   /// The FS scan catches those too. Callers without a hierarchy view
   /// pass the empty set, which collapses the orphan check to "any
   /// socket with no catalog row".
-  public func sweepFilesystemOrphans(livePaneIDs: Set<PaneID> = []) {
+  public func sweepFilesystemOrphans(liveContentIDs: Set<ContentID> = []) {
     let fm = FileManager.default
     guard fm.fileExists(atPath: socketDirectory.path) else { return }
 
@@ -324,9 +324,9 @@ public final class SessionReaper {
       return
     }
 
-    let claimedPaneIDs: Set<PaneID> = Set(
-      coordinator.catalog.sessions.values.map(\.paneID)
-    ).union(livePaneIDs)
+    let claimedPaneIDs: Set<ContentID> = Set(
+      coordinator.catalog.sessions.values.map(\.contentID)
+    ).union(liveContentIDs)
 
     for url in contents {
       // The socket directory also holds `logs/` and `snapshots/`
@@ -336,27 +336,27 @@ public final class SessionReaper {
       // need to reap — gating on it would skip every real daemon. The
       // UUID-name parse below is the actual identity filter (zmx writes
       // sockets as `<ZMX_DIR>/<session_name>` and we pass
-      // `paneID.raw.uuidString` as the session name); excluding
+      // `contentID.raw.uuidString` as the session name); excluding
       // directories is only a guard against a stray UUID-named folder.
       let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey])
       if resourceValues?.isDirectory == true { continue }
       let name = url.lastPathComponent
       guard let uuid = UUID(uuidString: name) else { continue }
-      let paneID = PaneID(raw: uuid)
-      if claimedPaneIDs.contains(paneID) { continue }
+      let contentID = ContentID(raw: uuid)
+      if claimedPaneIDs.contains(contentID) { continue }
 
       logger.notice(
         "Killing FS-orphan daemon at \(url.path, privacy: .public) (no catalog row, no hierarchy pane)"
       )
       Self.sendOneShotKill(socketPath: url.path)
       _ = Darwin.unlink(url.path)
-      deleteSnapshotFile(for: paneID)
+      deleteSnapshotFile(for: contentID)
     }
 
     sweepOrphanSnapshots(claimedPaneIDs: claimedPaneIDs)
   }
 
-  /// Delete `<paneID>.snap` files whose pane is claimed by neither the
+  /// Delete `<contentID>.snap` files whose pane is claimed by neither the
   /// session catalog nor the hierarchy.
   ///
   /// The socket scan above reaches a snapshot only when its daemon's socket
@@ -367,7 +367,7 @@ public final class SessionReaper {
   /// there forever and was re-discovered as a resumable pane on every
   /// launch. `deleteSnapshotFile`'s doc comment promised this sweep existed;
   /// now it does.
-  private func sweepOrphanSnapshots(claimedPaneIDs: Set<PaneID>) {
+  private func sweepOrphanSnapshots(claimedPaneIDs: Set<ContentID>) {
     let fm = FileManager.default
     guard fm.fileExists(atPath: snapshotDirectory.path) else { return }
     let contents: [URL]
@@ -387,21 +387,21 @@ public final class SessionReaper {
       guard let uuid = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
         continue
       }
-      let paneID = PaneID(raw: uuid)
-      if claimedPaneIDs.contains(paneID) { continue }
+      let contentID = ContentID(raw: uuid)
+      if claimedPaneIDs.contains(contentID) { continue }
       logger.notice(
         "Removing FS-orphan snapshot at \(url.path, privacy: .public) (no catalog row, no hierarchy pane)"
       )
-      deleteSnapshotFile(for: paneID)
+      deleteSnapshotFile(for: contentID)
     }
   }
 
   /// Scan `snapshotDirectory` for `<uuid>.snap` files and merge them
-  /// into the per-paneID state map. Stale snapshots whose paneID is
+  /// into the per-contentID state map. Stale snapshots whose contentID is
   /// already `.alive` are deleted from disk so a future sweep does not
   /// re-discover them. Missing-directory and any other I/O failure are
   /// non-fatal: we simply produce no extra entries.
-  private func mergeSnapshotsIntoStates(_ states: inout [PaneID: SessionState]) {
+  private func mergeSnapshotsIntoStates(_ states: inout [ContentID: SessionState]) {
     let fm = FileManager.default
     let dirPath = snapshotDirectory.path
     guard fm.fileExists(atPath: dirPath) else { return }
@@ -422,8 +422,8 @@ public final class SessionReaper {
     for url in contents where url.pathExtension == "snap" {
       let stem = url.deletingPathExtension().lastPathComponent
       guard let uuid = UUID(uuidString: stem) else { continue }
-      let paneID = PaneID(raw: uuid)
-      switch states[paneID] {
+      let contentID = ContentID(raw: uuid)
+      switch states[contentID] {
       case .alive:
         // Live daemon trumps a stale snapshot. The live tier on the next
         // quit will produce a fresh catalog row; the snap from the
@@ -436,7 +436,7 @@ public final class SessionReaper {
           )
         }
       case .dead, .none:
-        states[paneID] = .snapshot(url)
+        states[contentID] = .snapshot(url)
       case .snapshot:
         // Already set (shouldn't happen — uuid is unique within a scan)
         // but guard against duplicates rather than overwriting silently.
@@ -453,10 +453,10 @@ public final class SessionReaper {
   /// next launch `catalog.sessions` is empty and cannot tell which restored
   /// agents still have a live daemon. The agent-seed path probes the
   /// canonical control socket directly instead — the same `connect(2)` test
-  /// `sweep` applies to catalog rows, just addressed by `PaneID` rather than
+  /// `sweep` applies to catalog rows, just addressed by `ContentID` rather than
   /// a catalog row.
-  static func isDaemonAlive(paneID: PaneID) -> Bool {
-    probe(socketPath: ZmxControlClient.socketPath(for: paneID))
+  static func isDaemonAlive(contentID: ContentID) -> Bool {
+    probe(socketPath: ZmxControlClient.socketPath(for: contentID))
   }
 
   /// Synchronous `connect(2)` probe against a Unix domain socket. Uses
@@ -588,22 +588,22 @@ public final class SessionReaper {
     }
   }
 
-  /// Remove `<paneID>.snap` from the canonical snapshot directory.
+  /// Remove `<contentID>.snap` from the canonical snapshot directory.
   /// Used by the 7-day reap path so a stale daemon's last snapshot
   /// does not get picked up by the snapshot-tier merge as a "ghost"
   /// resumable pane. Missing-file and any other I/O failure is
-  /// non-fatal — the merge already skips paneIDs whose UUID does
+  /// non-fatal — the merge already skips contentIDs whose UUID does
   /// not parse, and a stranded snap is reaped by `sweepOrphanSnapshots`,
   /// which `sweepFilesystemOrphans` runs during bring-up.
-  private func deleteSnapshotFile(for paneID: PaneID) {
-    let snapURL = snapshotDirectory.appendingPathComponent("\(paneID.raw.uuidString).snap")
+  private func deleteSnapshotFile(for contentID: ContentID) {
+    let snapURL = snapshotDirectory.appendingPathComponent("\(contentID.raw.uuidString).snap")
     let fm = FileManager.default
     guard fm.fileExists(atPath: snapURL.path) else { return }
     do {
       try fm.removeItem(at: snapURL)
     } catch {
       logger.warning(
-        "Failed to remove snapshot for stale pane \(paneID, privacy: .public): \(String(describing: error), privacy: .public)"
+        "Failed to remove snapshot for stale pane \(contentID, privacy: .public): \(String(describing: error), privacy: .public)"
       )
     }
   }

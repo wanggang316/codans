@@ -21,7 +21,7 @@ extension IPC {
   /// daemon's `serializeTerminalState` output so callers can assert on
   /// the original ANSI byte stream (cursor, SGR, OSC, DECSM, etc.).
   public struct PaneReadRequest: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let range: PaneReadRange
     /// Return only the last N newline-delimited lines. Applied after
     /// the daemon's dump arrives and after `range` filtering.
@@ -31,7 +31,7 @@ extension IPC {
     public let raw: Bool
 
     public init(
-      paneID: PaneID,
+      paneID: ContentID,
       range: PaneReadRange = .all,
       tail: Int? = nil,
       raw: Bool = false
@@ -52,11 +52,11 @@ extension IPC {
       case vt
     }
 
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let format: Format
     public let content: String
 
-    public init(paneID: PaneID, format: Format, content: String) {
+    public init(paneID: ContentID, format: Format, content: String) {
       self.paneID = paneID
       self.format = format
       self.content = content

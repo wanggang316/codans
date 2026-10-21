@@ -11,16 +11,19 @@ import Testing
 /// the render still has to succeed, which is the assertion.
 @MainActor
 struct PaneHUDRenderTests {
-  private static func makeManager(queued: Int) -> (HierarchyManager, PaneID) {
-    let paneID = PaneID()
-    let pane = Pane(
-      id: paneID,
-      workingDirectory: "/tmp/w",
-      agentKind: .claudeCode,
-      commandQueue: (0..<queued).map { QueuedCommand(text: "cmd \($0)", timing: .afterCurrentTask) }
-    )
-    let tab = Tab(splitTree: SplitTree(leaf: paneID), panes: [pane])
-    let worktree = Worktree(name: "w", path: "/tmp/w", branch: "main", tabs: [tab])
+  private static func makeManager(queued: Int) -> (HierarchyManager, ContentID) {
+    let contentID = ContentID()
+    let tab = Tab(
+      content: .terminal(
+        id: contentID,
+        workingDirectory: "/tmp/w",
+        agentKind: .claudeCode,
+        commandQueue: (0..<queued).map { QueuedCommand(text: "cmd \($0)", timing: .afterCurrentTask) }
+      ))
+    let pane = Pane(tabs: [tab])
+    let worktree = Worktree(
+      name: "w", path: "/tmp/w", branch: "main",
+      splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
     let project = Project(name: "p", rootPath: "/tmp", worktrees: [worktree])
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")
@@ -29,7 +32,7 @@ struct PaneHUDRenderTests {
       store: CatalogStore(fileURL: tempURL),
       runtime: FakeHierarchyRuntime()
     )
-    return (manager, paneID)
+    return (manager, contentID)
   }
 
   /// The HUD as `LazyPaneHost` mounts it: top-trailing over a dark surface.
@@ -37,11 +40,11 @@ struct PaneHUDRenderTests {
   /// `PaneSurfaceAction` rows render in their disabled state. The frame is
   /// tall enough for the full card, which is what these renders are for.
   private static func render(
-    manager: HierarchyManager, paneID: PaneID, expanded: Bool
+    manager: HierarchyManager, contentID: ContentID, expanded: Bool
   ) -> CGImage? {
     let content = ZStack(alignment: .topTrailing) {
       Color(red: 0.12, green: 0.12, blue: 0.12)
-      PaneHUDView(paneID: paneID, expanded: expanded)
+      PaneHUDView(contentID: contentID, expanded: expanded)
         .padding(.top, 4)
         .padding(.trailing, 4)
     }
@@ -62,9 +65,9 @@ struct PaneHUDRenderTests {
 
   @Test
   func rendersCollapsedAndExpanded() throws {
-    let (manager, paneID) = Self.makeManager(queued: 2)
-    let collapsed = try #require(Self.render(manager: manager, paneID: paneID, expanded: false))
-    let expanded = try #require(Self.render(manager: manager, paneID: paneID, expanded: true))
+    let (manager, contentID) = Self.makeManager(queued: 2)
+    let collapsed = try #require(Self.render(manager: manager, contentID: contentID, expanded: false))
+    let expanded = try #require(Self.render(manager: manager, contentID: contentID, expanded: true))
     try Self.write(collapsed, name: "hud-collapsed.png")
     try Self.write(expanded, name: "hud-expanded.png")
     #expect(collapsed.width == 640)

@@ -6,7 +6,7 @@ import Foundation
 /// command carries the token, so it is spelled out only for the pane that
 /// is meant to run it.
 extension WorkflowHandlers {
-  func summary(_ session: WorkflowRunSession, callerPaneID: PaneID?) -> IPC.WorkflowRunSummary {
+  func summary(_ session: WorkflowRunSession, callerContentID: ContentID?) -> IPC.WorkflowRunSummary {
     let run = session.run
     return IPC.WorkflowRunSummary(
       runID: run.id,
@@ -21,7 +21,7 @@ extension WorkflowHandlers {
       worktreeID: run.configuration.source.worktreeID,
       currentStep: run.currentStep.map { Self.stepSummary($0, record: run.steps[$0.id]) },
       phase: run.phase.name,
-      activation: run.currentActivation.map { activationSummary($0, run: run, callerPaneID: callerPaneID) },
+      activation: run.currentActivation.map { activationSummary($0, run: run, callerContentID: callerContentID) },
       deliveries: run.deliveries.values.sorted { $0.ordinal < $1.ordinal }.map(Self.deliverySummary),
       bindings: bindingSummaries(run.bindings, definition: run.definition),
       steps: run.definition.flattenedSteps.map { Self.stepSummary($0, record: run.steps[$0.id]) }
@@ -103,10 +103,10 @@ extension WorkflowHandlers {
   }
 
   func activationSummary(
-    _ activation: WorkflowActivation, run: WorkflowRunState, callerPaneID: PaneID?
+    _ activation: WorkflowActivation, run: WorkflowRunState, callerContentID: ContentID?
   ) -> IPC.WorkflowActivationSummary {
     var commands: [String] = []
-    if let callerPaneID, callerPaneID == activation.paneID {
+    if let callerContentID, callerContentID == activation.contentID {
       commands = [
         WorkflowCompletionCommand.render(
           cli: run.configuration.cliCommand, token: activation.token, verdicts: activation.expectation.verdicts)
@@ -129,14 +129,14 @@ extension WorkflowHandlers {
     let handles = paneHandles()
     return order.compactMap { role -> IPC.WorkflowRoleBindingSummary? in
       guard let binding = bindings[role] else { return nil }
-      let handle = binding.paneID.flatMap { handles[$0] }.map { "p\($0)" }
+      let handle = binding.contentID.flatMap { handles[$0] }.map { "p\($0)" }
       switch binding {
-      case .current(let paneID), .pick(let paneID):
+      case .current(let contentID), .pick(let contentID):
         return IPC.WorkflowRoleBindingSummary(
-          role: role, source: binding.source.rawValue, paneID: paneID, handle: handle)
-      case .launch(let profileID, let profileName, let agent, let paneID):
+          role: role, source: binding.source.rawValue, paneID: contentID, handle: handle)
+      case .launch(let profileID, let profileName, let agent, let contentID):
         return IPC.WorkflowRoleBindingSummary(
-          role: role, source: binding.source.rawValue, paneID: paneID, handle: handle,
+          role: role, source: binding.source.rawValue, paneID: contentID, handle: handle,
           profileID: profileID, profileName: profileName, agent: agent.rawValue)
       }
     }

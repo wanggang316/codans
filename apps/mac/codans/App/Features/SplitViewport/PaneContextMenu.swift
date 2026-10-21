@@ -2,58 +2,55 @@ import ComposableArchitecture
 import SwiftUI
 import CodansCore
 
-/// Pure model for the pane right-click context menu. Side effects (reading
-/// labels, flipping mute, closing the pane) go through closures so the
-/// menu's logic stays testable without spinning up a SwiftUI view tree.
+/// Pure model for the content-area right-click menu. Side effects (reading
+/// labels, flipping mute, closing) go through closures so the menu's logic
+/// stays testable without spinning up a SwiftUI view tree.
 struct PaneContextMenuModel {
-  let paneID: PaneID
+  let contentID: ContentID
   let snapshot: () -> Catalog
-  let setLabel: (PaneID, String, Bool) -> Void
-  /// Tears down the pane through `HierarchyClient.closePane`. The full
-  /// pane address is captured by the view at the call site, so the model
-  /// only needs to fire the closure. Defaults to a no-op so label-only
-  /// tests can construct the model without wiring close.
+  let setLabel: (ContentID, String, Bool) -> Void
+  /// Closes the Tab holding the Content through `HierarchyClient.closeTab`.
+  /// Defaults to a no-op so label-only tests can construct the model
+  /// without wiring close.
+  var closeTab: () -> Void = {}
+  /// Closes the whole Pane the Tab sits in.
   var closePane: () -> Void = {}
 
   var isMuted: Bool {
-    snapshot().pane(paneID)?.isNotificationsMuted ?? false
+    snapshot().content(contentID)?.terminal?.isNotificationsMuted ?? false
   }
 
   func toggleMute() {
-    setLabel(paneID, InboxLabels.muted, !isMuted)
+    setLabel(contentID, InboxLabels.muted, !isMuted)
   }
 
   func close() {
-    closePane()
+    closeTab()
   }
 }
 
-/// Right-click menu for a pane. Hosts the "Mute notifications" toggle
-/// and a "Close" item that tears the pane down; future menu items can be
-/// added here without churning `LazyPaneHost`.
+/// Right-click menu on a Tab's content. Hosts the "Mute notifications"
+/// toggle, "Close Tab" and "Close Pane"; future menu items can be added
+/// here without churning `LazyPaneHost`.
 ///
 /// The menu reads `HierarchyClient.snapshot()` lazily inside
 /// `PaneContextMenuModel.isMuted` on every render so the checkmark
 /// reflects the latest label state when the user re-opens the menu —
-/// the per-pane mute label flips elsewhere are picked up without an
+/// the per-Content mute label flips elsewhere are picked up without an
 /// explicit observer.
 struct PaneContextMenu: View {
-  let paneID: PaneID
+  let contentID: ContentID
   let tabID: TabID
-  let worktreeID: WorktreeID
-  let projectID: ProjectID
+  let paneID: PaneID
   @Dependency(HierarchyClient.self) private var hierarchy
 
   private var model: PaneContextMenuModel {
     PaneContextMenuModel(
-      paneID: paneID,
+      contentID: contentID,
       snapshot: hierarchy.snapshot,
-      setLabel: hierarchy.setPaneLabel,
-      // Mirrors the ⌘W focused-pane path (RootFeature) and the prepared
-      // `SplitViewportFeature.closePaneButtonTapped`: a plain pane
-      // teardown. Closing the tab's last pane leaves an empty tab, which
-      // `SplitViewportView` renders as its "No panes" placeholder.
-      closePane: { try? hierarchy.closePane(paneID, tabID, worktreeID, projectID) }
+      setLabel: hierarchy.setContentLabel,
+      closeTab: { try? hierarchy.closeTab(tabID) },
+      closePane: { try? hierarchy.closePane(paneID) }
     )
   }
 
@@ -70,7 +67,12 @@ struct PaneContextMenu: View {
     Button {
       model.close()
     } label: {
-      Label("Close", systemImage: "xmark")
+      Label("Close Tab", systemImage: "xmark")
+    }
+    Button {
+      model.closePane()
+    } label: {
+      Label("Close Pane", systemImage: "rectangle.slash")
     }
   }
 }

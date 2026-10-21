@@ -203,10 +203,7 @@ struct WorktreeDetailView: View {
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
         BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-        VStack(spacing: 0) {
-          tabBarRow(address: address)
-          terminalRegion(address: address)
-        }
+        terminalRegion(address: address)
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -238,39 +235,24 @@ struct WorktreeDetailView: View {
     return WorktreeInfo(worktree: worktree, project: project)
   }
 
-  /// Tab bar row above the terminal region. Branch label + bell / open-in
-  /// chips used to live to the right of the tabs (old `unifiedHeader`); they
-  /// moved into the window titlebar via `worktreeToolbarContent(address:)`
-  /// so the content region gets its vertical space back.
-  @ViewBuilder
-  private func tabBarRow(address: Address) -> some View {
-    TabBarView(
-      store: store.scope(state: \.tabBar, action: \.tabBar),
-      projectID: address.project,
-      worktreeID: address.worktree,
-      activeTabID: address.activeTab,
-      agentStateStore: agentStateStore
-    )
-    .frame(maxWidth: .infinity, alignment: .leading)
-    // No solid `.windowBackgroundColor` fill: with the toolbar chrome
-    // hidden, the bar reads as a continuation of the titlebar region
-    // (the NSWindow's natural backdrop). A solid fill across the full
-    // detail width — including the area covered by the floating
-    // sidebar — turns any repaint into a visible flash.
-  }
-
+  /// The Worktree's split tree of Panes, each with its own tab strip. The
+  /// branch label + bell / open-in chips live in the window titlebar via
+  /// `worktreeToolbarContent(address:)`, so the whole content region is
+  /// the layout.
   private func terminalRegion(address: Address) -> some View {
-    TerminalMountDeferral(
+    let worktree = worktreeInfo(for: address)?.worktree
+    return TerminalMountDeferral(
       worktreeID: address.worktree,
-      activeTabID: address.activeTab,
-      tabIDs: worktreeInfo(for: address)?.worktree.tabs.map(\.id) ?? []
+      activeContentID: address.focusedContent,
+      contentIDs: worktree?.contentIDs ?? []
     ) {
-      if let tabID = address.activeTab {
+      if worktree?.panes.isEmpty == false {
         SplitViewportView(
           store: store.scope(state: \.splitViewport, action: \.splitViewport),
+          tabBarStore: store.scope(state: \.tabBar, action: \.tabBar),
           projectID: address.project,
           worktreeID: address.worktree,
-          tabID: tabID
+          agentStateStore: agentStateStore
         )
       } else {
         emptyTab(address: address)
@@ -533,7 +515,8 @@ struct WorktreeDetailView: View {
   private struct Address {
     let project: ProjectID
     let worktree: WorktreeID
-    let activeTab: TabID?
+    /// The focused Pane's selected Content; nil for an empty Worktree.
+    let focusedContent: ContentID?
   }
 
   private func resolveAddress() -> Address? {
@@ -548,7 +531,7 @@ struct WorktreeDetailView: View {
     return Address(
       project: projectID,
       worktree: worktreeID,
-      activeTab: worktree.selectedTabID
+      focusedContent: worktree.focusedPane?.selectedTab?.contentID
     )
   }
 
@@ -562,14 +545,14 @@ struct WorktreeDetailView: View {
       remoteHost: info?.project.remoteHost,
       onNewTab: {
         store.send(
-          .tabBar(.newTabButtonTapped(inWorktree: address.worktree, inProject: address.project)))
+          .tabBar(.newTabButtonTapped(inPane: nil, inWorktree: address.worktree, inProject: address.project)))
       },
       onResumeSession: { session in
         store.send(
           .tabBar(
             .resumeAgentSessionTapped(
               agent: session.agent, sessionID: session.sessionID,
-              inWorktree: address.worktree, inProject: address.project
+              inPane: nil, inWorktree: address.worktree, inProject: address.project
             )))
       }
     )
@@ -623,22 +606,22 @@ struct WorktreeDetailView: View {
 /// `.navigationTitle("")` fallback for macOS 14. Both suppress the
 /// bundle-name title; only the modern API also frees the leading slot
 /// so default-placement items + ToolbarSpacers lay out predictably.
-/// Holds back the terminal of the tab selected because the shown tab was
-/// just closed, until the tab bar's close animation has played. A terminal
+/// Holds back the terminal of the Tab selected because the shown Tab was
+/// just closed, until the strip's close animation has played. A terminal
 /// surface entering the window stalls compositing for a few frames; landing
-/// mid-animation it freezes the tab bar, landing after it the stall is
-/// invisible. Plain tab and worktree switches mount at once — nothing
-/// animates then.
+/// mid-animation it freezes the strip, landing after it the stall is
+/// invisible. Plain Tab and worktree switches mount at once — nothing
+/// animates then. Keyed on the focused Pane's selected Content.
 private struct TerminalMountDeferral<Content: View>: View {
   let worktreeID: WorktreeID
-  let activeTabID: TabID?
-  /// Tabs of `worktreeID`.
-  let tabIDs: [TabID]
+  let activeContentID: ContentID?
+  /// Contents of `worktreeID`.
+  let contentIDs: [ContentID]
   @ViewBuilder let content: Content
 
-  /// Worktree and tab whose terminal is mounted.
+  /// Worktree and Content whose terminal is mounted.
   @State private var mountedWorktreeID: WorktreeID?
-  @State private var mountedTabID: TabID?
+  @State private var mountedContentID: ContentID?
 
   var body: some View {
     Group {
@@ -648,23 +631,23 @@ private struct TerminalMountDeferral<Content: View>: View {
         content
       }
     }
-    .task(id: activeTabID) {
+    .task(id: activeContentID) {
       if isDeferring {
         try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
         guard !Task.isCancelled else { return }
       }
       mountedWorktreeID = worktreeID
-      mountedTabID = activeTabID
+      mountedContentID = activeContentID
     }
   }
 
-  /// The mounted tab is gone and another one took over the selection. A
-  /// worktree switch never counts: the mounted tab is only missing from
-  /// `tabIDs` because they list the other worktree's tabs.
+  /// The mounted Content is gone and another one took over the selection.
+  /// A worktree switch never counts: the mounted Content is only missing
+  /// from `contentIDs` because they list the other worktree's sessions.
   private var isDeferring: Bool {
-    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID
+    guard let mountedContentID, mountedContentID != activeContentID, mountedWorktreeID == worktreeID
     else { return false }
-    return !tabIDs.contains(mountedTabID)
+    return !contentIDs.contains(mountedContentID)
   }
 }
 

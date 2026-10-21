@@ -10,14 +10,14 @@ import Foundation
 nonisolated struct HandoffClient: Sendable {
   /// The outgoing side of a handoff for a pane, or nil when the pane is not
   /// in the catalog. `agentKind == nil` means no agent is detected there.
-  var source: @MainActor @Sendable (_ paneID: PaneID) -> HandoffSource?
-  var register: @MainActor @Sendable (_ requestID: UUID, _ sourcePaneID: PaneID) -> Void
+  var source: @MainActor @Sendable (_ contentID: ContentID) -> HandoffSource?
+  var register: @MainActor @Sendable (_ requestID: UUID, _ sourceContentID: ContentID) -> Void
   var supersede: @MainActor @Sendable (_ requestID: UUID) -> Bool
   /// Broadcast, no replay — subscribe before injecting the request.
   var completions: @MainActor @Sendable () -> AsyncStream<HandoffCompletion>
   /// Types `text` (plus Enter) into the pane's live surface. `false` when
   /// the pane has no surface to take input.
-  var sendInstruction: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Bool
+  var sendInstruction: @MainActor @Sendable (_ contentID: ContentID, _ text: String) -> Bool
   /// Runs a handoff transition in-process — the panel's fallback when the
   /// live agent cannot be asked. Same code path as the CLI verbs.
   var run: @MainActor @Sendable (_ request: IPC.HandoffRequest) async throws -> HandoffCompletion
@@ -44,15 +44,15 @@ extension HandoffClient {
     engine: TerminalEngine,
     cli: String,
     installation: AgentInstallationStore,
-    source: @escaping @MainActor @Sendable (PaneID) -> HandoffSource?
+    source: @escaping @MainActor @Sendable (ContentID) -> HandoffSource?
   ) -> HandoffClient {
     HandoffClient(
       source: source,
-      register: { registry.register($0, sourcePaneID: $1) },
+      register: { registry.register($0, sourceContentID: $1) },
       supersede: { registry.supersede($0) },
       completions: { registry.completions() },
-      sendInstruction: { paneID, text in
-        guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return false }
+      sendInstruction: { contentID, text in
+        guard let surface = engine.ghosttyRuntime?.surface(for: contentID) else { return false }
         // Same submit convention as script dispatch: the trailing newline is
         // what makes a TUI input box accept the line.
         surface.sendInput(text + "\n")
@@ -66,7 +66,7 @@ extension HandoffClient {
           }
         return HandoffCompletion(
           action: response.action,
-          sourcePaneID: request.paneID,
+          sourceContentID: request.contentID,
           receiver: response.receiver.flatMap { AgentKind(rawValue: $0) },
           briefing: HandoffBriefingOutcome(rawValue: response.briefing) ?? .none,
           launched: response.launchedPane,
@@ -100,7 +100,7 @@ extension HandoffClient: DependencyKey {
     run: unimplemented(
       "HandoffClient.run",
       placeholder: HandoffCompletion(
-        action: .save, sourcePaneID: PaneID(), receiver: nil, briefing: .none,
+        action: .save, sourceContentID: ContentID(), receiver: nil, briefing: .none,
         launched: nil, requestID: nil))
   )
 }

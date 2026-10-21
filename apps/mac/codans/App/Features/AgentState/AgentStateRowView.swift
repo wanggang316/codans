@@ -20,7 +20,7 @@ import SwiftUI
 /// driven by a local `@State` flag flipped in `.onAppear`; reduce-motion
 /// suppresses the flip so the icon renders at full opacity statically.
 struct AgentStateRowView: View {
-  let paneID: PaneID
+  let contentID: ContentID
   let entry: AgentStateStore.AgentEntry
   let projectName: String
   let worktreeName: String
@@ -162,7 +162,7 @@ struct AgentStateRowView: View {
     // — a proxy element that carries the label without collapsing the
     // children-contain semantics needed for sub-element probing.
     .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("agentState.row.\(paneID)")
+    .accessibilityIdentifier("agentState.row.\(contentID)")
     .accessibilityRepresentation {
       Button(accessibilityLabelText, action: handleTap)
     }
@@ -187,7 +187,7 @@ struct AgentStateRowView: View {
         try? await Task.sleep(for: Self.summaryCardHoverDelay)
         guard !Task.isCancelled else { return }
         let snapshot = await AgentSessionSummarySnapshot.make(
-          paneID: paneID,
+          contentID: contentID,
           entry: entry,
           projectName: projectName,
           worktreeName: worktreeName,
@@ -228,7 +228,7 @@ struct AgentStateRowView: View {
   /// leading edge and pushes project all the way to the trailing edge
   /// via an internal `Spacer`, so the project name visually right-
   /// aligns against the status icon. The primary line carries the
-  /// `agentState.row.<paneID>.headline` accessibility identifier in
+  /// `agentState.row.<contentID>.headline` accessibility identifier in
   /// both modes (the headline contract surface stays on the user-
   /// facing worktree text).
   @ViewBuilder
@@ -241,7 +241,7 @@ struct AgentStateRowView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("agentState.row.\(paneID).headline")
+          .accessibilityIdentifier("agentState.row.\(contentID).headline")
         HStack(spacing: 3) {
           Text(projectName)
             .font(.caption2)
@@ -267,7 +267,7 @@ struct AgentStateRowView: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("agentState.row.\(paneID).headline")
+          .accessibilityIdentifier("agentState.row.\(contentID).headline")
         HStack(spacing: 3) {
           Text(projectName)
             .font(.caption2)
@@ -333,7 +333,7 @@ struct AgentStateRowView: View {
     stateIcon
       .font(.caption2)
       .accessibilityElement(children: .ignore)
-      .accessibilityIdentifier("agentState.row.\(paneID).state")
+      .accessibilityIdentifier("agentState.row.\(contentID).state")
       .accessibilityLabel(entry.state.rawValue)
   }
 

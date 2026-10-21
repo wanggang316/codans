@@ -5,7 +5,7 @@ import OSLog
 
 private let paneHostLogger = Logger(subsystem: "com.gumpw.codans.shell", category: "pane-host")
 
-/// Lifecycle reducer for a single pane's `PaneSurface`. Owns the
+/// Lifecycle reducer for one shown Content's `PaneSurface`. Owns the
 /// first-resolve, retry, and failure surfacing that used to live in a
 /// SwiftUI view body. `@Dependency(TerminalClient.self)` sits here
 /// (reducer-scoped, where `Store.withDependencies` in `bringUp()` actually
@@ -20,6 +20,11 @@ private let paneHostLogger = Logger(subsystem: "com.gumpw.codans.shell", categor
 struct PaneHostFeature {
   @ObservableState
   struct State: Equatable, Identifiable {
+    /// The session shown in the slot; the host's identity, so switching
+    /// the Pane's selected Tab swaps the host.
+    let contentID: ContentID
+    /// Where the Tab sat when the host was seeded. Informational — the
+    /// engine resolves the live address from the catalog.
     let paneID: PaneID
     let tabID: TabID
     let worktreeID: WorktreeID
@@ -33,7 +38,7 @@ struct PaneHostFeature {
     /// `.task`. A retry reuses it.
     var slotSize: CGSize?
 
-    var id: PaneID { paneID }
+    var id: ContentID { contentID }
 
     enum Phase: Equatable {
       case loading
@@ -66,15 +71,15 @@ struct PaneHostFeature {
     /// Fired from `LeafView`'s `.task` (routed through the parent store
     /// behind a membership check — see `LazyPaneHost`'s doc). Idempotent:
     /// registry short-circuit keeps re-renders free. `slotSize` is the
-    /// laid-out size of the pane's slot: a new surface starts at it, so a
+    /// laid-out size of the slot: a new surface starts at it, so a
     /// live session behind a re-attach is not resized through a
     /// placeholder width first.
     case task(slotSize: CGSize)
     case retryButtonTapped
     /// Internal: the async `ensureSurface` call returned successfully and
-    /// the registry now holds a surface for this pane.
+    /// the registry now holds a surface for this Content.
     case resolveCompleted(SurfaceBox)
-    /// Internal: bring-up failed (missing zmx binary, unresolvable pane, or
+    /// Internal: bring-up failed (missing zmx binary, unresolvable Content, or
     /// `ghostty_surface_new`).
     case resolveFailed(Failure)
   }
@@ -98,10 +103,10 @@ struct PaneHostFeature {
         state.surface = box
         return .none
       case .resolveFailed(let failure):
-        let paneIDDescription = state.paneID.description
+        let contentIDDescription = state.contentID.description
         let message = failure.detail ?? failure.reason
         paneHostLogger.error(
-          "ensureSurface failed for \(paneIDDescription, privacy: .public): \(message, privacy: .public)"
+          "ensureSurface failed for \(contentIDDescription, privacy: .public): \(message, privacy: .public)"
         )
         state.phase = .failed(failure)
         state.surface = nil
@@ -115,22 +120,19 @@ struct PaneHostFeature {
     // already wired (e.g. the prior tab-switch eagerly seeded it via
     // `selectionChanges`), avoid scheduling an async effect just to
     // re-discover it.
-    if let existing = terminalClient.surface(state.paneID) {
+    if let existing = terminalClient.surface(state.contentID) {
       return .send(.resolveCompleted(SurfaceBox(surface: existing)))
     }
-    let paneID = state.paneID
-    let tabID = state.tabID
-    let worktreeID = state.worktreeID
-    let projectID = state.projectID
+    let contentID = state.contentID
     let initialSize = state.slotSize
     return .run { [client = terminalClient] send in
       do {
-        try await client.ensureSurface(paneID, tabID, worktreeID, projectID, initialSize)
+        try await client.ensureSurface(contentID, initialSize)
       } catch {
         await send(.resolveFailed(Failure(error: error)))
         return
       }
-      if let surface = await client.surface(paneID) {
+      if let surface = await client.surface(contentID) {
         await send(.resolveCompleted(SurfaceBox(surface: surface)))
       } else {
         await send(.resolveFailed(Failure(reason: "Surface not registered after creation.")))

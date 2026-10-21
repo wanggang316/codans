@@ -2,6 +2,30 @@ import CodansCore
 import Foundation
 import os.log
 
+/// What `CatalogStore.load` found. The app reads it to gate the session
+/// reaper and the unread sweep (off on any loss or read-only outcome) and
+/// to show the "update required" screen for a read-only catalog.
+nonisolated struct CatalogLoadReport: Equatable, Sendable {
+  /// The file declares a version above this build's. The catalog was not
+  /// read, not moved, and will not be saved.
+  var readOnlyVersion: Int?
+  /// The file was migrated from this version at load; a copy of the
+  /// original sits in `backups/`.
+  var migratedFromVersion: Int?
+  /// Tabs skipped because their record did not decode.
+  var droppedTabs = 0
+  /// Panes removed because every one of their Tabs dropped.
+  var droppedPanes = 0
+
+  var isReadOnly: Bool { readOnlyVersion != nil }
+  var decodeLossCount: Int { droppedTabs + droppedPanes }
+  /// A dropped Tab's session must not be reaped as an orphan, and a
+  /// catalog this build cannot write must not have its sessions touched.
+  var allowsSessionSweeps: Bool { !isReadOnly && decodeLossCount == 0 }
+
+  static let clean = CatalogLoadReport()
+}
+
 @MainActor
 class CatalogStore {
   private let fileURL: URL
@@ -9,23 +33,13 @@ class CatalogStore {
 
   private var pendingSaveTask: Task<Void, Never>?
   private var latestCatalog: Catalog?
-  /// False once `load` met a file it must not overwrite: one it could
-  /// neither read nor back up, one from a newer build, or a migrated file
-  /// whose original could not be backed up. Every save is then dropped: an
-  /// in-memory catalog must never replace a user's project list that this
-  /// build cannot read or cannot restore.
+  /// False once `load` met a file it must not overwrite: one from a newer
+  /// build, or one it could neither read nor back up. Every save is then
+  /// dropped: an empty in-memory catalog must never replace a user's
+  /// project list that is merely unreadable to this build.
   private(set) var persistenceEnabled = true
-  /// Why `load` turned saving off, for the one launch alert. `nil` when the
-  /// catalog loaded normally.
-  private(set) var loadIssue: LoadIssue?
-
-  enum LoadIssue: Equatable {
-    /// The file was written by a newer build. It stays in place unchanged.
-    case newerVersion(Int)
-    /// A migration ran, but the original could not be copied to `backups/`,
-    /// so the migrated catalog lives in memory only.
-    case migrationBackupFailed
-  }
+  /// Outcome of the last `load`; `.clean` before it runs.
+  private(set) var loadReport: CatalogLoadReport = .clean
 
   init(fileURL: URL = Catalog.defaultURL()) {
     self.fileURL = fileURL
@@ -40,82 +54,109 @@ class CatalogStore {
     return store
   }
 
-  /// Reads the catalog and brings it to `Catalog.currentVersion`.
-  ///
-  /// - An older readable version is migrated in memory, the original is
-  ///   copied to `backups/`, and the result is written at once.
-  /// - A newer version stays in place (with a copy in `backups/`); saving is
-  ///   turned off and an empty catalog is returned.
-  /// - A corrupt or retired file is moved into `backups/` and an empty
-  ///   catalog is returned.
-  /// Any failure that leaves an unreadable file in place throws and turns
-  /// saving off.
+  /// Reads the catalog. Outcomes, all recorded in `loadReport`:
+  /// - a missing file reads as the default catalog;
+  /// - a file of an older version is migrated in memory, a copy of the
+  ///   original is kept in `backups/`, and the current shape is written
+  ///   at once;
+  /// - a file of a newer version is left untouched and the store goes
+  ///   read-only (nothing is ever saved);
+  /// - a current file decodes tolerantly, counting dropped records;
+  /// - a corrupt file is moved into `backups/` and an empty catalog is
+  ///   returned. Any failure that leaves an unreadable file in place
+  ///   throws and disables saving.
   func load() throws -> Catalog {
-    let decoded: Catalog?
+    loadReport = .clean
+    let data: Data?
     do {
-      decoded = try AtomicFileStore.read(Catalog.self, at: fileURL)
-    } catch Catalog.DecodingIssue.newerVersion(let version) {
-      return keepNewerFile(version: version)
-    } catch Catalog.DecodingIssue.unsupportedVersion(let version) {
-      return try setAside(reason: .unsupported(version: version))
-    } catch is DecodingError {
-      return try setAside(reason: .corrupt)
+      data = try Self.readData(at: fileURL)
     } catch {
       persistenceEnabled = false
       throw error
     }
-    guard var existing = decoded else { return .default }
+    guard let data else { return .default }
+
+    let outcome: CatalogLoadOutcome
+    do {
+      outcome = try CatalogLoader.decode(data)
+    } catch Catalog.DecodingIssue.unsupportedVersion(let version) {
+      return try setAside(reason: .unsupported(version: version))
+    } catch is DecodingError {
+      return try setAside(reason: .corrupt)
+    } catch is Catalog.LayoutIssue {
+      return try setAside(reason: .corrupt)
+    }
+    let decoded: Catalog
+    switch outcome {
+    case .readOnly(let version):
+      loadReport.readOnlyVersion = version
+      persistenceEnabled = false
+      logger.error(
+        "catalog.json is version \(version, privacy: .public); this build reads up to \(Catalog.currentVersion, privacy: .public). Read-only."
+      )
+      return .default
+    case .migrated(let migrated, let fromVersion):
+      decoded = try commitMigration(migrated, fromVersion: fromVersion)
+    case .current(let catalog, let loss):
+      decoded = catalog
+      loadReport.droppedTabs = loss.droppedTabs
+      loadReport.droppedPanes = loss.droppedPanes
+      if !loss.isEmpty {
+        logger.error(
+          "catalog.json decoded with losses: \(loss.droppedTabs, privacy: .public) tab(s), \(loss.droppedPanes, privacy: .public) pane(s); session sweeps are off for this launch"
+        )
+      }
+    }
+    var existing = decoded
     // Self-heal Server projects whose `remoteHost` was stripped by an older
     // build sharing this catalog (tolerant decode + full re-encode drops
     // unknown keys). The sidecar is invisible to those builds, so it
     // survives; persist the healed catalog immediately so a crash before
     // the next debounced save can't lose the repair.
-    var needsSave = false
+    var repaired = false
     if RemoteHostSidecar.repair(&existing, sidecarURL: sidecarURL) {
       logger.notice("restored remoteHost fields from sidecar")
-      needsSave = true
+      repaired = true
     }
     // Same failure, different field: a build predating `isWorkspace` drops
     // the key and may probe a `gitRoot` onto the workspace root. The
     // manifest on disk is the durable signal — re-derive the flag from it.
-    // Runs before the migration so a repaired Workspace gets its groups.
     if WorkspaceMarkerRepair.repair(&existing) {
       logger.notice("restored isWorkspace flags from workspace manifests")
-      needsSave = true
+      repaired = true
     }
-    if existing.version < Catalog.currentVersion {
-      let fromVersion = existing.version
-      existing = CatalogMigrationV3ToV4.migrate(existing)
-      do {
-        try StoreBackup.copyAside(fileURL, reason: .migrated(fromVersion: fromVersion))
-      } catch {
-        persistenceEnabled = false
-        loadIssue = .migrationBackupFailed
-        logger.error("catalog.json v\(fromVersion) backup failed; migrated in memory, saving disabled: \(error)")
-        return existing
-      }
-      logger.notice("migrated catalog.json from v\(fromVersion) to v\(Catalog.currentVersion)")
-      needsSave = true
-    }
-    if needsSave {
+    if repaired {
       try? saveNow(existing)
     }
     return existing
   }
 
-  /// A newer build owns this file. Keep it byte-identical: no move, no
-  /// save. The copy in `backups/` is best effort, for the case where the
-  /// user deletes the file to recover.
-  private func keepNewerFile(version: Int) -> Catalog {
-    persistenceEnabled = false
-    loadIssue = .newerVersion(version)
+  /// Older shape lifted in memory: keep a copy of the original under
+  /// `backups/` (copy, never move — the file stays in place until the new
+  /// shape is durably written), then write the current shape at once. A
+  /// backup that fails leaves the file alone and disables saving, so the
+  /// original can never be overwritten without its copy existing.
+  private func commitMigration(_ migrated: Catalog, fromVersion: Int) throws -> Catalog {
+    let reason = StoreBackup.Reason.migrated(fromVersion: fromVersion)
     do {
-      try StoreBackup.copyAside(fileURL, reason: .unsupported(version: version))
+      let backup = try StoreBackup.prepareURL(for: fileURL, reason: reason)
+      try FileManager.default.copyItem(at: fileURL, to: backup)
+      StoreBackup.prune(for: fileURL, reason: reason)
+      logger.notice(
+        "backed up catalog.json v\(fromVersion, privacy: .public) to \(backup.lastPathComponent, privacy: .public)")
     } catch {
-      logger.error("catalog.json v\(version) backup copy failed: \(error)")
+      persistenceEnabled = false
+      logger.error("catalog.json v\(fromVersion, privacy: .public) backup failed; saving disabled: \(error)")
+      throw error
     }
-    logger.error("catalog.json is v\(version), newer than this build; saving disabled")
-    return .default
+    loadReport.migratedFromVersion = fromVersion
+    try saveNow(migrated)
+    return migrated
+  }
+
+  private static func readData(at url: URL) throws -> Data? {
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return try Data(contentsOf: url)
   }
 
   private func setAside(reason: StoreBackup.Reason) throws -> Catalog {
@@ -136,6 +177,7 @@ class CatalogStore {
   }
 
   func scheduleSave(_ catalog: Catalog) {
+    guard persistenceEnabled else { return }
     latestCatalog = catalog
 
     pendingSaveTask?.cancel()

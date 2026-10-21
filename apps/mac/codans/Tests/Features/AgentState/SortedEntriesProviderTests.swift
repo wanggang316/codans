@@ -26,13 +26,13 @@ struct SortedEntriesProviderTests {
   @Test
   func primaryStateOrderIsBlockedErrorDoneWorkingIdle() {
     let now = Date(timeIntervalSince1970: 1_000)
-    let pBlocked = PaneID()
-    let pWorking = PaneID()
-    let pFin = PaneID()
-    let pError = PaneID()
-    let pIdle = PaneID()
+    let pBlocked = ContentID()
+    let pWorking = ContentID()
+    let pFin = ContentID()
+    let pError = ContentID()
+    let pIdle = ContentID()
 
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [
       pIdle: .init(kind: .claudeCode, sessionID: nil, state: .idle, lastTransitionAt: now),
       pWorking: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: now),
       pBlocked: .init(kind: .pi, sessionID: nil, state: .blocked, lastTransitionAt: now),
@@ -49,37 +49,37 @@ struct SortedEntriesProviderTests {
   @Test
   func sameStateOrdersByLastTransitionDescending() {
     let t0 = Date(timeIntervalSince1970: 1_000)
-    let pOld = PaneID()
-    let pMid = PaneID()
-    let pNew = PaneID()
+    let pOld = ContentID()
+    let pMid = ContentID()
+    let pNew = ContentID()
 
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [
       pOld: .init(kind: .claudeCode, sessionID: nil, state: .working, lastTransitionAt: t0),
       pMid: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: t0.addingTimeInterval(5)),
       pNew: .init(kind: .pi, sessionID: nil, state: .working, lastTransitionAt: t0.addingTimeInterval(10)),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
-    #expect(result.map(\.paneID) == [pNew, pMid, pOld])
+    #expect(result.map(\.contentID) == [pNew, pMid, pOld])
   }
 
-  /// Equal `lastTransitionAt` → tie-break by `paneID.raw.uuidString`
+  /// Equal `lastTransitionAt` → tie-break by `contentID.raw.uuidString`
   /// ascending. Documented behaviour; protects against any
   /// hash-order-of-dictionary nondeterminism.
   @Test
-  func tieBreakUsesPaneIDAscending() {
+  func tieBreakUsesContentIDAscending() {
     let now = Date(timeIntervalSince1970: 1_000)
     // Construct UUIDs in a known order. `00000…` sorts ahead of `ffffff…`.
-    let lo = PaneID(raw: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
-    let hi = PaneID(raw: UUID(uuidString: "ffffffff-ffff-ffff-ffff-fffffffffff0")!)
+    let lo = ContentID(raw: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+    let hi = ContentID(raw: UUID(uuidString: "ffffffff-ffff-ffff-ffff-fffffffffff0")!)
 
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [
       hi: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: now),
       lo: .init(kind: .claudeCode, sessionID: nil, state: .working, lastTransitionAt: now),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
-    #expect(result.map(\.paneID) == [lo, hi])
+    #expect(result.map(\.contentID) == [lo, hi])
   }
 
   /// Combined sort: across-state ordering wins over within-state. A
@@ -88,15 +88,15 @@ struct SortedEntriesProviderTests {
   @Test
   func stateOrderBeatsTransitionAge() {
     let t0 = Date(timeIntervalSince1970: 1_000)
-    let staleBlocked = PaneID()
-    let freshIdle = PaneID()
+    let staleBlocked = ContentID()
+    let freshIdle = ContentID()
 
-    let entries: [PaneID: AgentStateStore.AgentEntry] = [
+    let entries: [ContentID: AgentStateStore.AgentEntry] = [
       freshIdle: .init(kind: .codex, sessionID: nil, state: .idle, lastTransitionAt: t0.addingTimeInterval(3_600)),
       staleBlocked: .init(kind: .claudeCode, sessionID: nil, state: .blocked, lastTransitionAt: t0),
     ]
 
     let result = SortedEntriesProvider.sorted(entries)
-    #expect(result.map(\.paneID) == [staleBlocked, freshIdle])
+    #expect(result.map(\.contentID) == [staleBlocked, freshIdle])
   }
 }

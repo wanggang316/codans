@@ -38,15 +38,18 @@ struct WorkflowCommand: AsyncParsableCommand {
   )
 }
 
-/// What the app injected into the calling pane's environment. Only the pane
-/// id and the activation token are read here; the server treats both as
-/// hints and attributes the caller from the connection's peer PID when the
-/// pane id is absent (a wrapper or subshell may have dropped it).
+/// What the app injected into the calling session's environment. Only the
+/// session id and the activation token are read here; the server treats both
+/// as hints and attributes the caller from the connection's peer PID when the
+/// session id is absent (a wrapper or subshell may have dropped it).
 enum WorkflowCallerContext {
-  static func paneID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> PaneID? {
-    environment[CodansEnvironment.Key.paneID.rawValue]
-      .flatMap(UUID.init(uuidString:))
-      .map(PaneID.init(raw:))
+  static func paneID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> ContentID? {
+    for key in [CodansEnvironment.Key.contentID, .paneID] {
+      if let uuid = environment[key.rawValue].flatMap(UUID.init(uuidString:)) {
+        return ContentID(raw: uuid)
+      }
+    }
+    return nil
   }
 
   static func token(in environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
@@ -70,12 +73,12 @@ enum WorkflowRunID {
 }
 
 /// Resolves the optional `source` positional of `run` and the `--worktree`
-/// option of `list` / `runs` into what the request carries: a pane id
-/// (pane-shaped references) or a worktree id (everything else, tabs
-/// included — a tab only determines its worktree).
+/// option of `list` / `runs` into what the request carries: a session id
+/// (session-shaped references: `current`, `@label`, `p<n>`, `t<n>`) or a
+/// worktree id (everything else).
 enum WorkflowSourceResolver {
   struct Resolved: Equatable {
-    var paneID: PaneID?
+    var paneID: ContentID?
     var worktreeID: WorktreeID?
   }
 
@@ -85,11 +88,11 @@ enum WorkflowSourceResolver {
     }
     if ScopeResolver.isCurrent(source) || source.hasPrefix("@") || isHandle(source, prefix: "p") {
       let uuid = try await AliasResolver.resolve(source, kind: .pane, client: client)
-      return Resolved(paneID: PaneID(raw: uuid))
+      return Resolved(paneID: try await session(uuid, client: client))
     }
     if isHandle(source, prefix: "t") {
       let uuid = try await AliasResolver.resolve(source, kind: .tab, client: client)
-      return Resolved(worktreeID: try await worktree(ofTab: TabID(raw: uuid), client: client))
+      return Resolved(paneID: try await session(uuid, client: client))
     }
     let uuid = try await AliasResolver.resolve(source, kind: .worktree, client: client)
     return Resolved(worktreeID: WorktreeID(raw: uuid))
@@ -100,29 +103,29 @@ enum WorkflowSourceResolver {
     if let worktreeID = resolved.worktreeID { return worktreeID }
     guard let paneID = resolved.paneID else { throw notFound("worktree", reference) }
     let tree = try await HierarchyTree.load(client: client)
-    guard let located = tree.locatePane(paneID) else { throw notFound("pane", paneID.description) }
+    guard let located = tree.locateContent(paneID) else { throw notFound("pane", paneID.description) }
     return located.worktreeID
   }
 
-  /// A bare UUID names a pane, a worktree, or a tab; the tree decides.
+  /// A bare UUID names a session (by Content, Tab or Pane id) or a
+  /// worktree; the tree decides.
   private static func resolveUUID(_ uuid: UUID, client: RPCClient) async throws -> Resolved {
     let tree = try await HierarchyTree.load(client: client)
-    if tree.locatePane(PaneID(raw: uuid)) != nil {
-      return Resolved(paneID: PaneID(raw: uuid))
+    if let located = tree.locateSession(uuid) {
+      return Resolved(paneID: located.contentID)
     }
     if tree.locateWorktree(WorktreeID(raw: uuid)) != nil {
       return Resolved(worktreeID: WorktreeID(raw: uuid))
     }
-    if let tab = tree.locateTab(TabID(raw: uuid)) {
-      return Resolved(worktreeID: tab.worktreeID)
-    }
     throw notFound("source", uuid.uuidString)
   }
 
-  private static func worktree(ofTab tabID: TabID, client: RPCClient) async throws -> WorktreeID {
+  /// The alias resolver hands back a Content, Tab or Pane id depending on
+  /// the reference shape; the request always carries the session.
+  private static func session(_ uuid: UUID, client: RPCClient) async throws -> ContentID {
     let tree = try await HierarchyTree.load(client: client)
-    guard let located = tree.locateTab(tabID) else { throw notFound("tab", tabID.description) }
-    return located.worktreeID
+    guard let located = tree.locateSession(uuid) else { throw notFound("pane", uuid.uuidString) }
+    return located.contentID
   }
 
   private static func isHandle(_ value: String, prefix: Character) -> Bool {

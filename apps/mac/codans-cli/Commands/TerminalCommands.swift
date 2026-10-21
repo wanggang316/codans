@@ -85,7 +85,7 @@ struct SendCommand: AsyncParsableCommand {
         let stableMillis: Int
       }
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: ContentID
         let text: String
         let wait: WaitParams?
         let capture: Bool
@@ -100,7 +100,7 @@ struct SendCommand: AsyncParsableCommand {
       let result: Result = try await client.call(
         .terminalSendInput,
         params: Params(
-          paneID: PaneID(raw: uuid),
+          paneID: ContentID(raw: uuid),
           text: input.text,
           wait: waiting ? WaitParams(timeoutMillis: Int(waitTimeout * 1000), stableMillis: stableMs) : nil,
           capture: capture
@@ -164,7 +164,7 @@ struct SendCommand: AsyncParsableCommand {
       try await activatePane(uuid, client: client)
     }
     struct Params: Codable {
-      let paneID: PaneID
+      let paneID: ContentID
       let hex: String
     }
     struct Result: Codable {
@@ -172,7 +172,7 @@ struct SendCommand: AsyncParsableCommand {
     }
     let result: Result = try await client.call(
       .terminalSendRawBytes,
-      params: Params(paneID: PaneID(raw: uuid), hex: hex)
+      params: Params(paneID: ContentID(raw: uuid), hex: hex)
     )
     try Renderer.emitObject(
       ["paneID": uuid.uuidString, "bytes": result.bytes],
@@ -228,12 +228,12 @@ struct SendKeyCommand: AsyncParsableCommand {
         try await activatePane(uuid, client: client)
       }
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: ContentID
         let key: IPC.TerminalNamedKey
       }
       _ = try await client.callRaw(
         .terminalSendKey,
-        params: Params(paneID: PaneID(raw: uuid), key: named)
+        params: Params(paneID: ContentID(raw: uuid), key: named)
       )
       try Renderer.emitObject(
         ["paneID": uuid.uuidString, "key": named.rawValue],
@@ -327,7 +327,7 @@ struct CaptureCommand: AsyncParsableCommand {
         let timeoutMillis: Int
       }
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: ContentID
         let extent: String
         let waitStable: WaitStablePayload?
       }
@@ -361,7 +361,7 @@ struct CaptureCommand: AsyncParsableCommand {
       let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
       let result: Result = try await client.call(
         .terminalReadText,
-        params: Params(paneID: PaneID(raw: uuid), extent: scope.rawValue, waitStable: wait)
+        params: Params(paneID: ContentID(raw: uuid), extent: scope.rawValue, waitStable: wait)
       )
       let trimmed = Self.trim(result.text, lastLines: lines)
       var object: [String: Any] = [
@@ -411,7 +411,7 @@ private func activatePane(_ uuid: UUID, client: RPCClient) async throws {
   _ = try await client.callRaw(
     .hierarchyFocusPane,
     params: PaneLocatorBody(
-      id: path.paneID,
+      id: path.contentID,
       tabID: path.tabID,
       worktreeID: path.worktreeID,
       projectID: path.projectID

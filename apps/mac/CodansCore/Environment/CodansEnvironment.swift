@@ -17,11 +17,16 @@ public nonisolated enum CodansEnvironment {
     /// launched from the pane discards it when it names the other channel
     /// (see `SocketPaths.resolve`).
     case socketPath = "CODANS_SOCKET_PATH"
-    /// The pane's own id. Stable for the pane's whole life, so it is safe to
-    /// bake into the environment at spawn — unlike its tab or worktree,
-    /// which change when the pane is moved and are therefore resolved
-    /// server-side from process ancestry instead. The CLI's `current`
-    /// pronoun reads it first.
+    /// The session's own id: the `ContentID` of the Tab's Content. Keys the
+    /// zmx session name, agent state, notifications, and command queues, so
+    /// it is the id a script inside the Tab uses to address itself. The
+    /// CLI's `current` pronoun reads it first.
+    case contentID = "CODANS_CONTENT_ID"
+    /// The Tab (strip slot) holding the session at spawn time.
+    case tabID = "CODANS_TAB_ID"
+    /// The Pane (split-tree leaf) holding the Tab at spawn time. A Tab can
+    /// move to another Pane later; the value is not rewritten, so a script
+    /// that needs the live Pane asks the server.
     case paneID = "CODANS_PANE_ID"
     /// Absolute worktree root. User-facing: pinned as a read-only row in the
     /// Environment editor, which refuses a user key of the same name.
@@ -67,7 +72,6 @@ public nonisolated enum CodansEnvironment {
     /// one by hand short-circuits the server round trip for that kind.
     case projectID = "CODANS_PROJECT_ID"
     case worktreeID = "CODANS_WORKTREE_ID"
-    case tabID = "CODANS_TAB_ID"
     case tagID = "CODANS_TAG_ID"
 
     // MARK: Overrides and seams read at startup

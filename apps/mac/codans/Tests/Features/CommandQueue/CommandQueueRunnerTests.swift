@@ -13,14 +13,14 @@ struct CommandQueueRunnerTests {
   /// the terminal surface.
   @MainActor
   final class Harness {
-    var queues: [PaneID: [QueuedCommand]] = [:]
-    var ready: Set<PaneID> = []
-    var live: Set<PaneID> = []
-    var sent: [(paneID: PaneID, text: String)] = []
+    var queues: [ContentID: [QueuedCommand]] = [:]
+    var ready: Set<ContentID> = []
+    var live: Set<ContentID> = []
+    var sent: [(contentID: ContentID, text: String)] = []
     var now: Date
 
-    let paneID = PaneID()
-    let otherPaneID = PaneID()
+    let contentID = ContentID()
+    let otherContentID = ContentID()
 
     init(now: Date = Date(timeIntervalSinceReferenceDate: 1_000_000)) {
       self.now = now
@@ -29,12 +29,12 @@ struct CommandQueueRunnerTests {
     func makeRunner() -> CommandQueueRunner {
       CommandQueueRunner(
         queuedPanes: { [self] in
-          queues.filter { !$0.value.isEmpty }.map { (paneID: $0.key, queue: $0.value) }
+          queues.filter { !$0.value.isEmpty }.map { (contentID: $0.key, queue: $0.value) }
         },
-        setQueue: { [self] paneID, queue in queues[paneID] = queue },
-        isPaneReady: { [self] paneID in ready.contains(paneID) },
-        hasLiveSurface: { [self] paneID in live.contains(paneID) },
-        send: { [self] paneID, text in sent.append((paneID, text)) },
+        setQueue: { [self] contentID, queue in queues[contentID] = queue },
+        isPaneReady: { [self] contentID in ready.contains(contentID) },
+        hasLiveSurface: { [self] contentID in live.contains(contentID) },
+        send: { [self] contentID, text in sent.append((contentID, text)) },
         now: { [self] in now }
       )
     }
@@ -43,31 +43,31 @@ struct CommandQueueRunnerTests {
   @Test
   func readyPaneFiresItsQueuedCommand() {
     let h = Harness()
-    h.live = [h.paneID]
-    h.ready = [h.paneID]
-    h.queues[h.paneID] = [QueuedCommand(text: "make test", timing: .afterCurrentTask)]
+    h.live = [h.contentID]
+    h.ready = [h.contentID]
+    h.queues[h.contentID] = [QueuedCommand(text: "make test", timing: .afterCurrentTask)]
 
     h.makeRunner().drain()
 
     #expect(h.sent.count == 1)
-    #expect(h.sent.first?.paneID == h.paneID)
+    #expect(h.sent.first?.contentID == h.contentID)
     // No trailing newline: submission is a separate Return keypress issued
     // by `TerminalClient.sendCommand`, so an agent TUI can't read the
     // command and its newline as one pasted block.
     #expect(h.sent.first?.text == "make test")
-    #expect(h.queues[h.paneID]?.isEmpty == true)
+    #expect(h.queues[h.contentID]?.isEmpty == true)
   }
 
   @Test
   func busyPaneHoldsItsQueuedCommand() {
     let h = Harness()
-    h.live = [h.paneID]
-    h.queues[h.paneID] = [QueuedCommand(text: "make test", timing: .afterCurrentTask)]
+    h.live = [h.contentID]
+    h.queues[h.contentID] = [QueuedCommand(text: "make test", timing: .afterCurrentTask)]
 
     h.makeRunner().drain()
 
     #expect(h.sent.isEmpty)
-    #expect(h.queues[h.paneID]?.count == 1)
+    #expect(h.queues[h.contentID]?.count == 1)
   }
 
   /// A pane whose surface has not been created yet would swallow the send.
@@ -75,13 +75,13 @@ struct CommandQueueRunnerTests {
   @Test
   func paneWithoutASurfaceKeepsItsQueue() {
     let h = Harness()
-    h.ready = [h.paneID]
-    h.queues[h.paneID] = [QueuedCommand(text: "make test", timing: .afterCurrentTask)]
+    h.ready = [h.contentID]
+    h.queues[h.contentID] = [QueuedCommand(text: "make test", timing: .afterCurrentTask)]
 
     h.makeRunner().drain()
 
     #expect(h.sent.isEmpty)
-    #expect(h.queues[h.paneID]?.count == 1)
+    #expect(h.queues[h.contentID]?.count == 1)
   }
 
   /// The settle window: readiness is derived from rendered terminal state and
@@ -90,9 +90,9 @@ struct CommandQueueRunnerTests {
   @Test
   func consecutiveQueuedCommandsAreSeparatedByTheSettleWindow() {
     let h = Harness()
-    h.live = [h.paneID]
-    h.ready = [h.paneID]
-    h.queues[h.paneID] = [
+    h.live = [h.contentID]
+    h.ready = [h.contentID]
+    h.queues[h.contentID] = [
       QueuedCommand(text: "first", timing: .afterCurrentTask),
       QueuedCommand(text: "second", timing: .afterCurrentTask),
     ]
@@ -111,23 +111,23 @@ struct CommandQueueRunnerTests {
   @Test
   func dueScheduleFiresEvenWhileThePaneIsBusy() {
     let h = Harness()
-    h.live = [h.paneID]
-    h.queues[h.paneID] = [
+    h.live = [h.contentID]
+    h.queues[h.contentID] = [
       QueuedCommand(text: "/compact", timing: .scheduled(at: h.now, repeatEvery: nil))
     ]
 
     h.makeRunner().drain()
 
     #expect(h.sent.map(\.text) == ["/compact"])
-    #expect(h.queues[h.paneID]?.isEmpty == true)
+    #expect(h.queues[h.contentID]?.isEmpty == true)
   }
 
   @Test
   func futureScheduleIsNotFired() {
     let h = Harness()
-    h.live = [h.paneID]
-    h.ready = [h.paneID]
-    h.queues[h.paneID] = [
+    h.live = [h.contentID]
+    h.ready = [h.contentID]
+    h.queues[h.contentID] = [
       QueuedCommand(
         text: "/compact",
         timing: .scheduled(at: h.now.addingTimeInterval(60), repeatEvery: nil)
@@ -142,15 +142,15 @@ struct CommandQueueRunnerTests {
   @Test
   func repeatingScheduleStaysQueuedAndRearms() {
     let h = Harness()
-    h.live = [h.paneID]
-    h.queues[h.paneID] = [
+    h.live = [h.contentID]
+    h.queues[h.contentID] = [
       QueuedCommand(text: "/compact", timing: .scheduled(at: h.now, repeatEvery: 60))
     ]
     let runner = h.makeRunner()
 
     runner.drain()
-    #expect(h.queues[h.paneID]?.count == 1)
-    #expect(h.queues[h.paneID]?.first?.timing == .scheduled(at: h.now.addingTimeInterval(60), repeatEvery: 60))
+    #expect(h.queues[h.contentID]?.count == 1)
+    #expect(h.queues[h.contentID]?.first?.timing == .scheduled(at: h.now.addingTimeInterval(60), repeatEvery: 60))
 
     // Next period. Past the settle window, so nothing throttles it.
     h.now = h.now.addingTimeInterval(60)
@@ -161,10 +161,10 @@ struct CommandQueueRunnerTests {
   @Test
   func panesDrainIndependently() {
     let h = Harness()
-    h.live = [h.paneID, h.otherPaneID]
-    h.ready = [h.paneID, h.otherPaneID]
-    h.queues[h.paneID] = [QueuedCommand(text: "a", timing: .afterCurrentTask)]
-    h.queues[h.otherPaneID] = [QueuedCommand(text: "b", timing: .afterCurrentTask)]
+    h.live = [h.contentID, h.otherContentID]
+    h.ready = [h.contentID, h.otherContentID]
+    h.queues[h.contentID] = [QueuedCommand(text: "a", timing: .afterCurrentTask)]
+    h.queues[h.otherContentID] = [QueuedCommand(text: "b", timing: .afterCurrentTask)]
 
     h.makeRunner().drain()
 

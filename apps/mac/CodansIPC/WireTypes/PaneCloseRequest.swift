@@ -14,13 +14,13 @@ extension IPC {
   /// (typically the CLI) do not need to round-trip through
   /// `hierarchy.resolvePaneLabel` first.
   public struct PaneCloseRequest: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let tabID: TabID?
     public let worktreeID: WorktreeID?
     public let projectID: ProjectID?
 
     public init(
-      paneID: PaneID,
+      paneID: ContentID,
       tabID: TabID? = nil,
       worktreeID: WorktreeID? = nil,
       projectID: ProjectID? = nil
@@ -37,10 +37,10 @@ extension IPC {
   /// or stale CLI invocation). Callers map that to a non-zero exit so
   /// scripts can tell apart a successful kill from a missing pane.
   public struct PaneCloseResponse: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+    public let paneID: ContentID
     public let closed: Bool
 
-    public init(paneID: PaneID, closed: Bool) {
+    public init(paneID: ContentID, closed: Bool) {
       self.paneID = paneID
       self.closed = closed
     }

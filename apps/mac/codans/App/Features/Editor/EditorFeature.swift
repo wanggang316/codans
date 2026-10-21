@@ -118,8 +118,8 @@ struct EditorFeature {
       case .openRequested(let editorID, let worktreePath, let projectID):
         // `.shellEditor` cannot launch through `editorClient.open` — the service
         // signature has no Pane/Tab context. Route the spawn out to `RootFeature`
-        // via the delegate so it can call `hierarchyClient.openPane(...
-        // initialCommand: "$EDITOR")` for the target worktree's tab. This path is
+        // via the delegate so it can call `hierarchyClient.newTab(...
+        // initialCommand: "$EDITOR")` for the target worktree. This path is
         // transport-agnostic: a Server project's Pane runs the remote shell, so
         // `$EDITOR` launches on the host natively.
         if editorID == EditorRegistry.shellEditorID {

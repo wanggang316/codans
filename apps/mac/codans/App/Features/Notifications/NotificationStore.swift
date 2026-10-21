@@ -91,7 +91,7 @@ public final class NotificationStore {
 
   // MARK: - Mutators
 
-  /// Append a new entry. Applies the 30 s `(paneID, kind)` dedup window —
+  /// Append a new entry. Applies the 30 s `(contentID, kind)` dedup window —
   /// duplicates merge in place rather than creating a new row. Never grows
   /// the inbox past `InboxStorage.cap`.
   public func append(_ entry: InboxEntry) {
@@ -121,10 +121,10 @@ public final class NotificationStore {
   /// R1: when the user focuses a pane, every unread entry whose source
   /// pane matches is marked read in one pass. Idempotent — a no-op when
   /// the pane has no unread entries.
-  public func markReadForPane(_ paneID: PaneID, at readAt: Date = Date()) {
+  public func markReadForPane(_ contentID: ContentID, at readAt: Date = Date()) {
     var didMutate = false
     let updated = entries.map { entry -> InboxEntry in
-      guard entry.source.paneID == paneID, entry.isUnread else { return entry }
+      guard entry.source.contentID == contentID, entry.isUnread else { return entry }
       didMutate = true
       var copy = entry
       copy.readAt = readAt
@@ -141,9 +141,9 @@ public final class NotificationStore {
   /// every catalog mutation that could remove a pane (close pane / tab,
   /// remove worktree / project). Idempotent — a no-op when every unread
   /// entry still points at a live pane.
-  public func sweepOrphanUnreads(livePaneIDs: Set<PaneID>, at readAt: Date = Date()) {
-    let updated = InboxStorage.markingReadForOrphanPanes(
-      livePaneIDs: livePaneIDs,
+  public func sweepOrphanUnreads(liveContentIDs: Set<ContentID>, at readAt: Date = Date()) {
+    let updated = InboxStorage.markingReadForOrphanContents(
+      liveContentIDs: liveContentIDs,
       in: entries,
       at: readAt
     )

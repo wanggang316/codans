@@ -17,7 +17,7 @@ struct WorkflowCommandsContractTests {
     IPC.WorkflowRunSummary(
       runID: UUID(), workflowID: "review", workflowName: "Code Review", state: state,
       startedAt: started, runDirectory: "/repo/.codans/workflow-runs/abc",
-      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: PaneID(), handle: "p1")],
+      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: ContentID(), handle: "p1")],
       steps: [IPC.WorkflowStepSummary(id: "review", name: "Review")])
   }
 
@@ -66,7 +66,7 @@ struct WorkflowCommandsContractTests {
 
   @Test
   func runSendsBindingsAndDecodesSelfInitiatedTask() async throws {
-    let paneID = PaneID()
+    let paneID = ContentID()
     let expected = IPC.WorkflowRunResponse(
       runID: UUID(), workflowID: "handoff", workflowName: "Handoff", runDirectory: "/repo/.codans/workflow-runs/x",
       bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: paneID, handle: "p2")],
@@ -91,7 +91,7 @@ struct WorkflowCommandsContractTests {
 
   @Test
   func statusWithoutRunIDSendsTheCallerPane() async throws {
-    let paneID = PaneID()
+    let paneID = ContentID()
     let expected = IPC.WorkflowStatusResponse(
       run: Self.run(), participant: IPC.WorkflowParticipantSummary(role: "author", paneID: paneID))
     let transport = exchange(.workflowStatus, params: IPC.WorkflowStatusRequest.self, response: expected) { params in

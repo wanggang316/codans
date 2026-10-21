@@ -10,7 +10,7 @@ import os.log
 ///
 /// `detachAllForQuit(action:)` therefore has real work only when resume is
 /// disabled: it asks each live daemon to serialize its scrollback to a
-/// `<paneID>.snap` and then tears the daemon down, so nothing is left to
+/// `<contentID>.snap` and then tears the daemon down, so nothing is left to
 /// reattach to. When resume is enabled the daemons are simply left running —
 /// the app exiting is enough. `sessions.json` is written empty either way:
 /// daemon liveness is recovered by re-attaching from the persisted Pane list
@@ -34,7 +34,7 @@ final class SessionLifecycle {
   /// Set by AppState alongside `agentSnapshotProvider`, for the same reason:
   /// lifecycle stays ignorant of `AgentStateStore`'s type. Nil counts agents
   /// as idle, leaving only the terminal busy signals.
-  var agentBusyProvider: (@MainActor (PaneID) -> Bool)?
+  var agentBusyProvider: (@MainActor (ContentID) -> Bool)?
 
   init(
     manager: HierarchyManager,
@@ -56,7 +56,7 @@ final class SessionLifecycle {
   }
 
   /// Number of live panes doing work a quit could interrupt: a running
-  /// foreground command or OSC 9;4 progress (`HierarchyManager.paneIsBusy`),
+  /// foreground command, OSC 9;4 progress or a queued command (`HierarchyManager.isBusy`),
   /// or an agent mid-task (`agentBusyProvider`). An idle shell or an agent
   /// waiting at its prompt does not count. Drives the `.auto` quit
   /// confirmation, which should only interrupt the user when there is
@@ -64,7 +64,7 @@ final class SessionLifecycle {
   var busyPaneCount: Int {
     guard let ghosttyRuntime else { return 0 }
     return ghosttyRuntime.allLiveSurfaces()
-      .filter { manager.paneIsBusy($0.paneID) || agentBusyProvider?($0.paneID) == true }
+      .filter { manager.isBusy($0.contentID) || agentBusyProvider?($0.contentID) == true }
       .count
   }
 
@@ -87,7 +87,7 @@ final class SessionLifecycle {
   ///   `zmx attach` client; the daemon detaches and keeps its PTY child, so
   ///   the next launch re-attaches to the same session and resumes.
   /// - `.snapshot`: resume is disabled. Serialize each pane (the daemon writes
-  ///   its `<paneID>.snap` and exits) then tear the daemon down, so the next
+  ///   its `<contentID>.snap` and exits) then tear the daemon down, so the next
   ///   launch starts every pane fresh from the on-disk snapshot rather than a
   ///   live session. (The name predates the move to a live-only resume model.)
   ///
@@ -106,7 +106,7 @@ final class SessionLifecycle {
     var agents: [String: PersistedAgentRecord] = [:]
     if let provider = agentSnapshotProvider {
       for record in provider() {
-        agents[record.paneID.raw.uuidString] = record
+        agents[record.contentID.raw.uuidString] = record
       }
     }
     persist(
@@ -117,12 +117,12 @@ final class SessionLifecycle {
       ))
 
     guard case .snapshot = action else { return }
-    await snapshotLivePanes(surfaces.map(\.paneID))
+    await snapshotLivePanes(surfaces.map(\.contentID))
   }
 
   /// Snapshot every live pane with bounded concurrency, then await each
   /// daemon's acknowledgement. For each pane:
-  /// - `.acknowledged`: the daemon wrote its `<paneID>.snap` and exited — done.
+  /// - `.acknowledged`: the daemon wrote its `<contentID>.snap` and exited — done.
   /// - `.timedOut`: the daemon never closed the socket within the per-pane
   ///   deadline (e.g. wedged). Fall back to `.kill(for:)` so it does not
   ///   survive the quit, and log a kill-fallback line naming the pane so the
@@ -136,7 +136,7 @@ final class SessionLifecycle {
   /// cannot spawn unbounded socket I/O. Each call is itself deadline-bounded,
   /// so the whole pass completes within roughly
   /// `perPaneSnapshotTimeout × ceil(N / maxConcurrentSnapshots)`.
-  private func snapshotLivePanes(_ paneIDs: [PaneID]) async {
+  private func snapshotLivePanes(_ contentIDs: [ContentID]) async {
     let timeout = Self.perPaneSnapshotTimeout
     let window = Self.maxConcurrentSnapshots
     let logger = self.logger
@@ -144,18 +144,18 @@ final class SessionLifecycle {
     await withTaskGroup(of: Void.self) { group in
       var next = 0
       // Prime the window.
-      let initial = min(window, paneIDs.count)
+      let initial = min(window, contentIDs.count)
       while next < initial {
-        let paneID = paneIDs[next]
-        group.addTask { await Self.snapshotOne(paneID, timeout: timeout, logger: logger) }
+        let contentID = contentIDs[next]
+        group.addTask { await Self.snapshotOne(contentID, timeout: timeout, logger: logger) }
         next += 1
       }
       // Slide: each completed task admits the next pending pane, so the number
       // of in-flight tasks never exceeds `window`.
       while await group.next() != nil {
-        guard next < paneIDs.count else { continue }
-        let paneID = paneIDs[next]
-        group.addTask { await Self.snapshotOne(paneID, timeout: timeout, logger: logger) }
+        guard next < contentIDs.count else { continue }
+        let contentID = contentIDs[next]
+        group.addTask { await Self.snapshotOne(contentID, timeout: timeout, logger: logger) }
         next += 1
       }
     }
@@ -166,9 +166,9 @@ final class SessionLifecycle {
   /// touches no instance state; `ZmxControlClient.snapshot/kill` do their own
   /// socket I/O off the main actor.
   nonisolated private static func snapshotOne(
-    _ paneID: PaneID, timeout: Duration, logger: Logger
+    _ contentID: ContentID, timeout: Duration, logger: Logger
   ) async {
-    switch await ZmxControlClient.snapshot(for: paneID, timeout: timeout) {
+    switch await ZmxControlClient.snapshot(for: contentID, timeout: timeout) {
     case .acknowledged, .noSocket:
       // `.acknowledged`: snapshot written, daemon exited.
       // `.noSocket`: daemon already gone — clean no-op, not a fallback.
@@ -176,9 +176,9 @@ final class SessionLifecycle {
     case .timedOut:
       // Daemon did not acknowledge in time — tear it down so it does not
       // outlive the quit, and record the fallback for the user-test stage.
-      ZmxControlClient.kill(for: paneID)
+      ZmxControlClient.kill(for: contentID)
       logger.info(
-        "zmx.snapshot kill-fallback pane=\(paneID.raw.uuidString, privacy: .public)"
+        "zmx.snapshot kill-fallback pane=\(contentID.raw.uuidString, privacy: .public)"
       )
     }
   }

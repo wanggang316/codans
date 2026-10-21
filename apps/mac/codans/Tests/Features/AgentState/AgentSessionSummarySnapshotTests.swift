@@ -28,10 +28,10 @@ struct AgentSessionSummarySnapshotTests {
     session: AgentSessionSummary? = nil,
     paneTitle: String? = nil,
     now: TimeInterval = 90,
-    paneID: PaneID = PaneID()
+    contentID: ContentID = ContentID()
   ) -> AgentSessionSummarySnapshot {
     AgentSessionSummarySnapshot(
-      paneID: paneID,
+      contentID: contentID,
       entry: entry(),
       projectName: "codans",
       worktreeName: "main",
@@ -44,9 +44,9 @@ struct AgentSessionSummarySnapshotTests {
 
   @Test
   func ageIsFrozenAtCaptureTimeAndKeyedByPane() {
-    let paneID = PaneID()
-    let captured = snapshot(now: 90, paneID: paneID)
-    #expect(captured.id == paneID)
+    let contentID = ContentID()
+    let captured = snapshot(now: 90, contentID: contentID)
+    #expect(captured.id == contentID)
     #expect(captured.ageText == "1m")
   }
 

@@ -20,10 +20,10 @@ import CodansCore
 nonisolated enum ZmxAttachCommand {
   /// The zmx session name for a Pane. zmx names its control socket
   /// `<ZMX_DIR>/<ZMX_SESSION_PREFIX><session>`; codans sets no prefix
-  /// and uses the PaneID's UUID string, so the name is stable across
+  /// and uses the ContentID's UUID string, so the name is stable across
   /// launches (the property that makes re-attach work).
-  static func session(for paneID: PaneID) -> String {
-    paneID.raw.uuidString
+  static func session(for contentID: ContentID) -> String {
+    contentID.raw.uuidString
   }
 
   /// `[<zmx>, attach, <session>, (--restore-from <path>)]`, prepended by

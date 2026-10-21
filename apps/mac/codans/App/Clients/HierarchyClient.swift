@@ -161,141 +161,117 @@ nonisolated struct HierarchyClient: Sendable {
       _ id: WorktreeID?, _ inProject: ProjectID
     ) throws -> Void
 
-  var createTab:
-    @MainActor @Sendable (
-      _ worktreeID: WorktreeID, _ inProject: ProjectID, _ name: String?
-    ) throws -> TabID
-  var closeTab:
-    @MainActor @Sendable (
-      _ id: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
-  var selectTab:
-    @MainActor @Sendable (
-      _ id: TabID?, _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
+  // MARK: - Tab verbs
 
-  // MARK: - Tab mutations
-
-  var renameTab:
+  /// Opens a new Tab holding `content`. A nil Pane targets the Worktree's
+  /// focused Pane; a Worktree without Panes gets its first one. `select`
+  /// makes the Tab the Pane's selected one and focuses the Pane. Catalog
+  /// only — pair with `ensureSurface` to bring the session up.
+  var newTab:
     @MainActor @Sendable (
-      _ id: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ name: String?
-    ) throws -> Void
-  var setTabColor:
-    @MainActor @Sendable (
-      _ id: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ color: TabColor?
-    ) throws -> Void
-  /// Updates the tab's SF Symbol icon under the `TabIconLock` rules
+      _ paneID: PaneID?, _ worktreeID: WorktreeID, _ projectID: ProjectID,
+      _ content: ContentSnapshot, _ name: String?, _ initialTitle: String?, _ select: Bool
+    ) throws -> TabAddress
+  /// Closes the Tab and its Content; the last Tab of a Pane closes the
+  /// Pane. Asks first when the Content still holds queued commands.
+  var closeTab: @MainActor @Sendable (_ tabID: TabID) throws -> Void
+  /// Selects the Tab in its Pane and focuses that Pane.
+  var selectTab: @MainActor @Sendable (_ tabID: TabID) throws -> Void
+  /// Selects the Tab at a zero-based position of the Pane's strip; out of
+  /// range is a no-op returning nil.
+  var selectTabAtIndex: @MainActor @Sendable (_ index: Int, _ paneID: PaneID) throws -> TabID?
+  var selectAdjacentTab:
+    @MainActor @Sendable (_ direction: TabAdjacency, _ paneID: PaneID) throws -> TabID?
+  var renameTab: @MainActor @Sendable (_ tabID: TabID, _ name: String?) throws -> Void
+  var setTabColor: @MainActor @Sendable (_ tabID: TabID, _ color: TabColor?) throws -> Void
+  /// Updates the tab's icon under the `TabIconLock` rules
   /// (`.auto` ≤ `.script` ≤ `.user`). A write whose `lock` cannot
   /// override the tab's current lock is a silent no-op — UI consumers
   /// re-read the tab afterwards if they need to confirm the result.
   var setTabIcon:
-    @MainActor @Sendable (
-      _ id: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ icon: String?,
-      _ lock: TabIconLock
-    ) throws -> Void
-  var reorderTabs:
-    @MainActor @Sendable (
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ orderedIDs: [TabID]
-    ) throws -> Void
-  var closeOtherTabs:
-    @MainActor @Sendable (
-      _ keeping: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
-  var closeTabsToRight:
-    @MainActor @Sendable (
-      _ of: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
-  var closeAllTabs:
-    @MainActor @Sendable (
-      _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
-  var selectAdjacentTab:
-    @MainActor @Sendable (
-      _ direction: TabAdjacency,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> TabID?
+    @MainActor @Sendable (_ tabID: TabID, _ icon: String?, _ lock: TabIconLock) throws -> Void
+  var reorderTabs: @MainActor @Sendable (_ paneID: PaneID, _ orderedIDs: [TabID]) throws -> Void
+  /// Moves a Tab by a relative offset within its Pane, wrapping.
+  var moveTab: @MainActor @Sendable (_ tabID: TabID, _ offset: Int) throws -> Void
+  var closeOtherTabs: @MainActor @Sendable (_ keeping: TabID) throws -> Void
+  var closeTabsToRight: @MainActor @Sendable (_ of: TabID) throws -> Void
+  /// Closes every Tab of the Pane — and so the Pane.
+  var closeAllTabs: @MainActor @Sendable (_ paneID: PaneID) throws -> Void
 
-  // MARK: - Runtime state
+  // MARK: - Pane verbs
 
-  /// Read path for the chip's dirty (running-command) spinner. Bound by
-  /// `TabChipLabel`; reflects `markPaneRunning` / `markPaneIdle`.
-  var tabIsDirty: @MainActor @Sendable (_ tabID: TabID) -> Bool
-  /// Worktree-scoped variant of `tabIsDirty`. Sidebar rows surface a busy
-  /// glyph when any pane in any tab of the worktree is marked running.
-  var worktreeIsDirty: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Bool
-  /// Returns the Pane the user most recently focused in `tabID`, or nil.
-  /// Mirrors `HierarchyManager.lastFocusedPane(in:)`.
-  var lastFocusedPane: @MainActor @Sendable (_ tabID: TabID) -> PaneID?
-  /// Forwards to `HierarchyManager.markPaneRunning`.
-  var markPaneRunning: @MainActor @Sendable (_ paneID: PaneID) -> Void
-  /// Forwards to `HierarchyManager.markPaneIdle`.
-  var markPaneIdle: @MainActor @Sendable (_ paneID: PaneID) -> Void
-  /// Writer for the foreground-command busy flag, calling
-  /// `HierarchyManager.setPaneCommandBusy`. The root reducer invokes it when
-  /// the foreground-job poller reports a pane's group started/stopped a
-  /// non-agent command. Unions with OSC 9;4 in `tabIsDirty` / `worktreeIsDirty`.
-  var setPaneCommandBusy: @MainActor @Sendable (_ paneID: PaneID, _ busy: Bool) -> Void
-
-  var openPane:
-    @MainActor @Sendable (
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ workingDirectory: String, _ initialCommand: String?
-    ) async throws -> PaneID
+  /// Creates a Pane beside `paneID` with one fresh Tab holding `content`
+  /// and focuses it. Catalog only, like `newTab`.
   var splitPane:
     @MainActor @Sendable (
       _ paneID: PaneID, _ direction: SplitTree<PaneID>.NewDirection,
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ workingDirectory: String, _ initialCommand: String?
-    ) async throws -> PaneID
-  /// Synchronous catalog half of `openPane`: inserts the Pane row into the
-  /// Tab (split tree + pane array) and persists, without the async zmx
-  /// surface bringup. Callers seeding a pane from a synchronous reducer body
-  /// use this so the Pane is observable before the next `.selectionChanged`
-  /// fires — closing the `RootFeature.autoSeedTabAndPaneIfNeeded` double-seed
-  /// race. Pair with `ensurePaneSurface` to bring the surface up afterwards.
-  var createPaneRow:
-    @MainActor @Sendable (
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ workingDirectory: String, _ initialCommand: String?
-    ) throws -> PaneID
-  /// Async surface-bringup half of `openPane`: spawns the zmx daemon and
-  /// attaches the libghostty surface for an already-inserted Pane row.
-  /// Idempotent — a no-op when the surface already exists.
-  var ensurePaneSurface:
-    @MainActor @Sendable (
-      _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
-      _ inProject: ProjectID
-    ) async throws -> Void
-  var closePane:
-    @MainActor @Sendable (
-      _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
-      _ inProject: ProjectID
-    ) throws -> Void
-  var focusPane:
-    @MainActor @Sendable (
-      _ paneID: PaneID, _ tabID: TabID, _ inWorktree: WorktreeID,
-      _ inProject: ProjectID
-    ) throws -> Void
-  /// View-level first-responder focus. Unlike `focusPane` this does
-  /// NOT mutate the catalog (no zoom flag, no persistence) — it only
-  /// asks the runtime to call `makeFirstResponder` on the pane's
-  /// surface view. Used post-split (focus the new pane) and post-close
-  /// (transfer focus to the surviving sibling per ghostty's policy).
-  var focusSurfaceView: @MainActor @Sendable (_ paneID: PaneID) -> Void
+      _ content: ContentSnapshot, _ name: String?, _ initialTitle: String?
+    ) throws -> TabAddress
+  /// Closes every Tab of the Pane. Asks first when any holds queued commands.
+  var closePane: @MainActor @Sendable (_ paneID: PaneID) throws -> Void
+  /// Catalog focus only (persisted). Responder-chain focus is
+  /// `focusSurfaceView`, since the surface may not exist yet.
+  var focusPane: @MainActor @Sendable (_ paneID: PaneID) throws -> Void
+  /// Moves focus to the Pane's neighbour in `direction` and hands its
+  /// selected Content the keyboard; nil when there is none that way.
+  var focusNeighbour:
+    @MainActor @Sendable (_ paneID: PaneID, _ direction: FocusDirection) throws -> PaneID?
+  /// Zooms the Pane to fill the layout area, or un-zooms it. Returns the
+  /// new zoom state.
+  var toggleZoom: @MainActor @Sendable (_ paneID: PaneID) throws -> Bool
   var resizeSplit:
     @MainActor @Sendable (
       _ path: SplitTree<PaneID>.Path, _ ratio: Double,
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
+      _ worktreeID: WorktreeID, _ projectID: ProjectID
     ) throws -> Void
+  /// Resizes a Pane along the given direction by `amount` (pixels, scaled
+  /// to a ratio delta by the manager).
+  var resizePane:
+    @MainActor @Sendable (
+      _ paneID: PaneID, _ direction: ResizeDirection, _ amount: Double
+    ) throws -> Void
+  /// Sets every split ratio of the Worktree's tree to 0.5.
+  var equalizeSplits:
+    @MainActor @Sendable (_ worktreeID: WorktreeID, _ projectID: ProjectID) throws -> Void
+  /// Re-positions an existing Pane next to `anchorID`, splitting the anchor
+  /// along `direction`. Pure split-tree reshape — the moved Pane's Contents
+  /// stay alive. Backs the pane drag-and-drop gesture.
+  var movePane:
+    @MainActor @Sendable (
+      _ paneID: PaneID, _ anchorID: PaneID, _ direction: SplitTree<PaneID>.NewDirection
+    ) throws -> Void
+
+  // MARK: - Surfaces and runtime state
+
+  /// Brings the Content's surface up (spawn or re-attach), with the
+  /// Project's env vars resolved from Settings. Idempotent.
+  var ensureSurface: @MainActor @Sendable (_ contentID: ContentID) async throws -> Void
+  /// View-level first-responder focus. Does NOT mutate the catalog — it only
+  /// asks the runtime to call `makeFirstResponder` on the Content's surface
+  /// view. Used post-split (focus the new Pane) and post-close (transfer
+  /// focus to the surviving neighbour).
+  var focusSurfaceView: @MainActor @Sendable (_ contentID: ContentID) -> Void
+  /// The focused Pane's selected Tab in the Worktree — where ⌘T, ⌘W and the
+  /// `.focused` script target land. nil for a Worktree without Panes.
+  var focusedContent: @MainActor @Sendable (_ worktreeID: WorktreeID) -> TabAddress?
+  /// Resolves a Content to the Project / Worktree / Pane / Tab holding it.
+  /// nil when the Content is not in the catalog — expected during teardown
+  /// races on the action callback thread.
+  var addressOf: @MainActor @Sendable (_ contentID: ContentID) -> TabAddress?
+  /// Read path for the chip's dirty (running-command) spinner.
+  var tabIsDirty: @MainActor @Sendable (_ tabID: TabID) -> Bool
+  /// Worktree-scoped variant of `tabIsDirty`. Sidebar rows surface a busy
+  /// glyph when any Content of the worktree is marked running.
+  var worktreeIsDirty: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Bool
+  /// OSC 9;4 progress writer for the Content's `TabChrome`.
+  var setProgressBusy: @MainActor @Sendable (_ contentID: ContentID, _ busy: Bool) -> Void
+  /// Foreground-command busy writer for the Content's `TabChrome`. The root
+  /// reducer invokes it when the foreground-job poller reports a session's
+  /// group started/stopped a non-agent command.
+  var setCommandBusy: @MainActor @Sendable (_ contentID: ContentID, _ busy: Bool) -> Void
+  /// Whether closing the Content would lose work (running command, working
+  /// agent, queued commands). The close-confirmation gate reads it.
+  var isContentBusy: @MainActor @Sendable (_ contentID: ContentID) -> Bool
 
   // HierarchyClient is read-only for per-Project preferences (see `snapshot` / `kind`):
   // per-Project editor / worktrees-directory values live on `Settings.projects[pid]` and
@@ -374,8 +350,8 @@ nonisolated struct HierarchyClient: Sendable {
       _ worktreeID: WorktreeID, _ inProject: ProjectID
     ) async throws -> String?
 
-  /// Forwards `HierarchyManager.runningPaneCount`.
-  var runningPaneCount: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Int
+  /// Forwards `HierarchyManager.runningContentCount`.
+  var runningContentCount: @MainActor @Sendable (_ worktreeID: WorktreeID) -> Int
 
   // MARK: - Project Management
 
@@ -419,59 +395,6 @@ nonisolated struct HierarchyClient: Sendable {
   /// under a Project. Read-only; the app never writes kind — it flows from
   /// `gitRoot` set at project-discovery time.
   var kind: @MainActor @Sendable (_ projectID: ProjectID) -> ProjectKind?
-
-  // MARK: - Pane Action Routing
-
-  /// Resolves a `PaneID` to the hierarchy address needed to service
-  /// pane-scoped intents (target resolution for `closeTab`, `moveTab`,
-  /// `selectTab`, `equalizeTabSplits`, etc.). Returns `nil` when the pane
-  /// is not in the catalog — expected during teardown races on the action
-  /// callback thread.
-  var addressOf: @MainActor @Sendable (PaneID) -> PaneAddress?
-
-  /// Moves a Tab by a relative offset within its Worktree. Positive shifts
-  /// right, negative shifts left. Clamped to the Worktree's tab-array
-  /// bounds by `HierarchyManager.moveTab`.
-  var moveTab:
-    @MainActor @Sendable (
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ offset: Int
-    ) throws -> Void
-
-  /// Sets every split node's ratio in the Tab's SplitTree to 0.5 so sibling
-  /// panes render at equal sizes. Leaf-only trees are a silent no-op.
-  var equalizeTabSplits:
-    @MainActor @Sendable (
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
-
-  /// Resizes a Pane in the SplitTree along the given direction by `amount`.
-  /// `amount` is interpreted as a ratio delta (clamped by SplitTree) — the
-  /// ghostty RESIZE_SPLIT action carries pixel amounts but codans's
-  /// tree only stores ratios.
-  var resizePane:
-    @MainActor @Sendable (
-      _ paneID: PaneID, _ direction: ResizeDirection, _ amount: Double
-    ) throws -> Void
-
-  /// Re-positions an existing Pane next to `anchorID`, splitting the anchor
-  /// along `direction`. Pure split-tree reshape — the moved pane's surface
-  /// stays alive (no teardown / re-spawn). Backs the pane drag-and-drop
-  /// gesture; self-moves and unknown ids resolve to a no-op / throw inside
-  /// the manager.
-  var movePane:
-    @MainActor @Sendable (
-      _ paneID: PaneID, _ anchorID: PaneID,
-      _ direction: SplitTree<PaneID>.NewDirection,
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
-
-  /// Clears the Tab's zoomed-pane flag. Paired with `focusPane` (which
-  /// sets the zoom) to service `PaneActionRequest.toggleSplitZoom`.
-  var unzoomTab:
-    @MainActor @Sendable (
-      _ tabID: TabID, _ inWorktree: WorktreeID, _ inProject: ProjectID
-    ) throws -> Void
 
   // MARK: - Project Settings
 
@@ -577,42 +500,42 @@ nonisolated struct HierarchyClient: Sendable {
       _ mode: WorktreePromotionMode
     ) -> Void
 
-  /// Inserts or removes `label` from `Pane.labels` (Set semantics → idempotent
-  /// on repeated calls with the same `present`). Silent no-op on unknown
-  /// `paneID`. In-memory state changes immediately so the next read sees the
-  /// new label; only the disk write is debounced via the standard catalog
-  /// save pipeline. Consumed by the pane right-click "Mute notifications"
-  /// menu (`notifications:muted` label).
-  var setPaneLabel:
+  /// Inserts or removes `label` from the Content's labels (Set semantics →
+  /// idempotent on repeated calls with the same `present`). Silent no-op on
+  /// an unknown id. In-memory state changes immediately so the next read
+  /// sees the new label; only the disk write is debounced via the standard
+  /// catalog save pipeline. Consumed by the content right-click "Mute
+  /// notifications" menu (`notifications:muted` label).
+  var setContentLabel:
     @MainActor @Sendable (
-      _ paneID: PaneID,
+      _ contentID: ContentID,
       _ label: String,
       _ present: Bool
     ) -> Void
 
-  /// Writes `Pane.agentKind` (classified CLI agent currently driving the
-  /// pane, e.g. `.claudeCode` / `.codex` / `.pi`). `nil` clears the field.
-  /// Idempotent: a repeat call with the same value is a true no-op
-  /// (no persistence churn). Silent no-op on unknown `paneID`. Consumed
-  /// by `AgentBinder`, which derives the kind from foreground job snapshots.
-  var setPaneAgentKind: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind?) -> Void
+  /// Writes the Content's `agentKind` (classified CLI agent currently
+  /// driving the session, e.g. `.claudeCode` / `.codex` / `.pi`). `nil`
+  /// clears the field. Idempotent: a repeat call with the same value is a
+  /// true no-op (no persistence churn). Silent no-op on an unknown id.
+  /// Consumed by `AgentBinder`, which derives the kind from foreground job
+  /// snapshots.
+  var setAgentKind: @MainActor @Sendable (_ contentID: ContentID, _ kind: AgentKind?) -> Void
 
-  /// Writes `Pane.agentSessionID` (agent-supplied session identifier;
-  /// stable across resumes for the same agent process). `nil` clears the
-  /// field. Idempotent: a repeat call with the same value is a true
-  /// no-op. Silent no-op on unknown `paneID`. Consumed alongside
-  /// `setPaneAgentKind` by `AgentBinder`.
-  var setPaneAgentSessionID: @MainActor @Sendable (_ paneID: PaneID, _ sessionID: String?) -> Void
+  /// Writes the Content's `agentSessionID` (agent-supplied session
+  /// identifier; stable across resumes for the same agent process). `nil`
+  /// clears the field. Idempotent. Silent no-op on an unknown id. Consumed
+  /// alongside `setAgentKind` by `AgentBinder`.
+  var setAgentSessionID: @MainActor @Sendable (_ contentID: ContentID, _ sessionID: String?) -> Void
 
-  /// Writes the pane's live `workingDirectory` so restart restores it at the
-  /// cwd the user last `cd`'d to instead of the creation-time cwd. Driven by
-  /// libghostty `OSC 7` deltas routed through `RootFeature.engineEvents`. The
-  /// manager-side mutator is idempotent on equal paths and silent on unknown
-  /// ids, so a noisy shell that re-asserts the same pwd every prompt never
-  /// touches the catalog file.
-  var updatePaneWorkingDirectory:
+  /// Writes the Content's live `workingDirectory` so restart restores it at
+  /// the cwd the user last `cd`'d to instead of the creation-time cwd.
+  /// Driven by libghostty `OSC 7` deltas routed through
+  /// `RootFeature.engineEvents`. The manager-side mutator is idempotent on
+  /// equal paths and silent on unknown ids, so a noisy shell that
+  /// re-asserts the same pwd every prompt never touches the catalog file.
+  var updateWorkingDirectory:
     @MainActor @Sendable (
-      _ paneID: PaneID,
+      _ contentID: ContentID,
       _ newPath: String
     ) -> Void
 
@@ -628,15 +551,15 @@ nonisolated struct HierarchyClient: Sendable {
       _ segment: WorktreeSegment, _ from: IndexSet, _ to: Int
     ) throws -> Void
 
-  /// Commands parked on `paneID`, `[]` for an unknown pane. Read by the
+  /// Commands parked on the Content, `[]` for an unknown id. Read by the
   /// Command Queue panel so the reducer edits against live catalog state
   /// rather than a snapshot taken when the panel opened.
-  var commandQueue: @MainActor @Sendable (_ paneID: PaneID) -> [QueuedCommand]
+  var commandQueue: @MainActor @Sendable (_ contentID: ContentID) -> [QueuedCommand]
 
-  /// Replaces `paneID`'s command queue wholesale. Read-modify-write is the
-  /// intended usage; the manager side is the single canonical writer and
-  /// no-ops on an unknown pane or an unchanged queue.
-  var setCommandQueue: @MainActor @Sendable (_ paneID: PaneID, _ queue: [QueuedCommand]) -> Void
+  /// Replaces the Content's command queue wholesale. Read-modify-write is
+  /// the intended usage; the manager side is the single canonical writer
+  /// and no-ops on an unknown id or an unchanged queue.
+  var setCommandQueue: @MainActor @Sendable (_ contentID: ContentID, _ queue: [QueuedCommand]) -> Void
 }
 
 enum RunScriptError: Error, Equatable, Sendable {
@@ -691,24 +614,14 @@ nonisolated struct AgentLaunchSpec: Sendable, Equatable {
   }
 }
 
-/// What an agent launch produced. `tabID` / `paneID` are nil when the
-/// command was typed into the focused pane rather than a fresh surface.
+/// What an agent launch produced. The ids are nil when the command was
+/// typed into the focused session rather than a fresh one.
 nonisolated struct AgentLaunchOutcome: Sendable, Equatable {
   let profile: AgentProfile
   let command: String
   let tabID: TabID?
   let paneID: PaneID?
-}
-
-/// Full hierarchy address a `PaneID` resolves to. Carries the IDs of every
-/// ancestor so `HierarchyClient` mutations that require the full chain
-/// (`closeTab`, `selectTab`, `equalizeTabSplits`, …) can be called without a
-/// second catalog walk.
-nonisolated struct PaneAddress: Sendable, Equatable {
-  let projectID: ProjectID
-  let worktreeID: WorktreeID
-  let tabID: TabID
-  let paneID: PaneID
+  let contentID: ContentID?
 }
 
 /// Coarse selection payload. `nil` for any level means "no selection at that
@@ -739,6 +652,7 @@ extension HierarchyClient {
     gitWorktreeClient: GitWorktreeClient = .makeLive(),
     gitCLI: GitWorktreeCLI = GitWorktreeCLI(),
     terminalClient: TerminalClient? = nil,
+    contents: ContentRuntime? = nil,
     confirmQueueDiscard:
       @escaping @MainActor (
         QueuedCommandDiscard, _ completion: @escaping @MainActor (Bool) -> Void
@@ -746,22 +660,22 @@ extension HierarchyClient {
         QueuedCommandsCloseDialog.present(discard, completion: completion)
       }
   ) -> HierarchyClient {
-    /// Closing a pane that still holds queued commands is asked first. The
+    /// Closing a Tab that still holds queued commands is asked first. The
     /// gate sits here, on the UI's bridge, rather than in the manager: the
     /// CLI and the run-script auto-close policies reach the manager directly
     /// and must never block on a prompt. It also steps aside when none of
-    /// the panes has a live surface — a pane whose process already exited
-    /// is being tidied up, not closed, and its queue could not run anyway.
-    /// When it does ask, the close happens in the answer's completion, so
-    /// the caller's `try` returns having closed nothing yet.
+    /// the Contents has a live surface — a session whose process already
+    /// exited is being tidied up, not closed, and its queue could not run
+    /// anyway. When it does ask, the close happens in the answer's
+    /// completion, so the caller's `try` returns having closed nothing yet.
     func closeAfterConfirming(
-      panes: [Pane],
+      contents: [ContentSnapshot],
       subject: QueuedCommandDiscard.Subject,
       _ close: @escaping @MainActor () throws -> Void
     ) throws {
-      let queued = panes.reduce(0) { $0 + $1.commandQueue.count }
+      let queued = contents.reduce(0) { $0 + ($1.terminal?.commandQueue.count ?? 0) }
       let anyLive =
-        terminalClient.map { client in panes.contains { client.surface($0.id) != nil } } ?? true
+        terminalClient.map { client in contents.contains { client.surface($0.id) != nil } } ?? true
       guard queued > 0, anyLive else {
         try close()
         return
@@ -771,19 +685,31 @@ extension HierarchyClient {
         try? close()
       }
     }
-    func tabs(in worktreeID: WorktreeID, _ projectID: ProjectID) -> [Tab] {
-      manager.catalog.projects.first(where: { $0.id == projectID })?
-        .worktrees.first(where: { $0.id == worktreeID })?.tabs ?? []
-    }
     func closeTabsAfterConfirming(
-      _ doomed: [Tab], in worktreeID: WorktreeID, _ projectID: ProjectID,
+      _ doomed: [Tab],
       _ close: @escaping @MainActor () throws -> Void
     ) throws {
       try closeAfterConfirming(
-        panes: doomed.flatMap(\.panes),
+        contents: doomed.map(\.content),
         subject: doomed.count == 1 ? .tab : .tabs(doomed.count),
         close
       )
+    }
+    func resolvedEnv(_ projectID: ProjectID) -> [String: String] {
+      // Resolve project envVars from the SettingsStore so every spawn path
+      // (strip "+", split, run scripts, IPC) inherits Project-defined env.
+      // When the live wiring omits a SettingsStore (headless tests) the env
+      // defaults to empty and the session spawns with the raw process env.
+      settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) } ?? [:]
+    }
+    func requireContentDirectory(_ content: ContentSnapshot, in projectID: ProjectID) throws {
+      // Stale catalog state: libghostty crashes when it spawns a shell in a
+      // cwd that is gone (the folder was moved, or `git worktree remove` ran
+      // outside the app before reconcile caught up). Reject here so callers'
+      // `try?` swallows the error instead of bringing down the app.
+      if let cwd = content.terminal?.workingDirectory {
+        try manager.requireLocalDirectory(cwd, in: projectID)
+      }
     }
 
     return HierarchyClient(
@@ -850,141 +776,99 @@ extension HierarchyClient {
       selectWorktree: { worktreeID, projectID in
         try manager.selectWorktree(worktreeID, in: projectID)
       },
-      createTab: { worktreeID, projectID, name in
-        // A Tab in a missing folder could never start its first Pane: refuse
-        // it rather than leave an empty Tab behind.
-        if let path = manager.catalog.projects.first(where: { $0.id == projectID })?
-          .worktrees.first(where: { $0.id == worktreeID })?.path
-        {
-          try manager.requireLocalDirectory(path, in: projectID)
-        }
-        return try manager.createTab(in: worktreeID, in: projectID, name: name)
-      },
-      closeTab: { tabID, worktreeID, projectID in
-        let doomed = tabs(in: worktreeID, projectID).filter { $0.id == tabID }
-        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
-          try manager.closeTab(tabID, in: worktreeID, in: projectID)
-        }
-      },
-      selectTab: { tabID, worktreeID, projectID in
-        try manager.selectTab(tabID, in: worktreeID, in: projectID)
-      },
-      renameTab: { tabID, worktreeID, projectID, name in
-        try manager.renameTab(tabID, in: worktreeID, in: projectID, name: name)
-      },
-      setTabColor: { tabID, worktreeID, projectID, color in
-        try manager.setTabColor(tabID, in: worktreeID, in: projectID, color: color)
-      },
-      setTabIcon: { tabID, worktreeID, projectID, icon, lock in
-        try manager.setTabIcon(
-          tabID, in: worktreeID, in: projectID, icon: icon, lock: lock
+      newTab: { paneID, worktreeID, projectID, content, name, initialTitle, select in
+        try requireContentDirectory(content, in: projectID)
+        return try manager.newTab(
+          in: paneID, worktreeID: worktreeID, projectID: projectID,
+          content: content, name: name, initialTitle: initialTitle, select: select
         )
       },
-      reorderTabs: { worktreeID, projectID, orderedIDs in
-        try manager.reorderTabs(
-          in: worktreeID, in: projectID, orderedIDs: orderedIDs)
-      },
-      closeOtherTabs: { keepID, worktreeID, projectID in
-        let doomed = tabs(in: worktreeID, projectID).filter { $0.id != keepID }
-        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
-          try manager.closeOtherTabs(
-            keeping: keepID, in: worktreeID, in: projectID)
+      closeTab: { tabID in
+        let doomed = [manager.catalog.tab(tabID)].compactMap { $0 }
+        try closeTabsAfterConfirming(doomed) {
+          try manager.closeTab(tabID)
         }
       },
-      closeTabsToRight: { pivotID, worktreeID, projectID in
-        let all = tabs(in: worktreeID, projectID)
+      selectTab: { tabID in try manager.selectTab(tabID) },
+      selectTabAtIndex: { index, paneID in try manager.selectTab(at: index, in: paneID) },
+      selectAdjacentTab: { direction, paneID in
+        try manager.selectAdjacentTab(direction: direction, in: paneID)
+      },
+      renameTab: { tabID, name in try manager.renameTab(tabID, name: name) },
+      setTabColor: { tabID, color in try manager.setTabColor(tabID, color: color) },
+      setTabIcon: { tabID, icon, lock in try manager.setTabIcon(tabID, icon: icon, lock: lock) },
+      reorderTabs: { paneID, orderedIDs in
+        try manager.reorderTabs(in: paneID, orderedIDs: orderedIDs)
+      },
+      moveTab: { tabID, offset in try manager.moveTab(tabID, offset: offset) },
+      closeOtherTabs: { keepID in
+        let doomed = manager.catalog.address(forTab: keepID)
+          .flatMap { manager.catalog.pane($0.paneID)?.tabs.filter { $0.id != keepID } } ?? []
+        try closeTabsAfterConfirming(doomed) {
+          try manager.closeOtherTabs(keeping: keepID)
+        }
+      },
+      closeTabsToRight: { pivotID in
+        let all = manager.catalog.address(forTab: pivotID).flatMap { manager.catalog.pane($0.paneID)?.tabs } ?? []
         let doomed =
           all.firstIndex(where: { $0.id == pivotID })
           .map { Array(all[($0 + 1)...]) } ?? []
-        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
-          try manager.closeTabsToRight(
-            of: pivotID, in: worktreeID, in: projectID)
+        try closeTabsAfterConfirming(doomed) {
+          try manager.closeTabsToRight(of: pivotID)
         }
       },
-      closeAllTabs: { worktreeID, projectID in
-        let doomed = tabs(in: worktreeID, projectID)
-        try closeTabsAfterConfirming(doomed, in: worktreeID, projectID) {
-          try manager.closeAllTabs(in: worktreeID, in: projectID)
+      closeAllTabs: { paneID in
+        let doomed = manager.catalog.pane(paneID)?.tabs ?? []
+        try closeTabsAfterConfirming(doomed) {
+          try manager.closeAllTabs(in: paneID)
         }
       },
-      selectAdjacentTab: { direction, worktreeID, projectID in
-        try manager.selectAdjacentTab(
-          direction: direction, in: worktreeID, in: projectID)
-      },
-      tabIsDirty: { tabID in manager.tabIsDirty(tabID) },
-      worktreeIsDirty: { worktreeID in manager.worktreeIsDirty(worktreeID) },
-      lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
-      markPaneRunning: { paneID in manager.markPaneRunning(paneID) },
-      markPaneIdle: { paneID in manager.markPaneIdle(paneID) },
-      setPaneCommandBusy: { paneID, busy in manager.setPaneCommandBusy(paneID, busy) },
-      openPane: { [weak settings] tabID, worktreeID, projectID, cwd, initial in
-        // Stale catalog state: libghostty crashes when it spawns a shell in
-        // a cwd that is gone (the folder was moved, or `git worktree remove`
-        // ran outside the app before reconcile caught up). Reject here so
-        // callers' `try?` swallows the error instead of bringing down the app.
-        try manager.requireLocalDirectory(cwd, in: projectID)
-        // Resolve project envVars from the SettingsStore so every
-        // user-flow openPane (TabBar new-tab, SplitViewport new-tab,
-        // CreateWorktree, IPC openPane) inherits Project-defined env. When
-        // the live wiring omits a SettingsStore (legacy callers, headless
-        // tests) the env defaults to empty and the pane spawns with the
-        // raw process env.
-        let env: [String: String] =
-          settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
-          ?? [:]
-        return try await manager.openPane(
-          in: tabID, in: worktreeID, in: projectID,
-          workingDirectory: cwd, initialCommand: initial, env: env
+      splitPane: { paneID, direction, content, name, initialTitle in
+        guard let projectID = manager.catalog.projectID(forPane: paneID) else {
+          throw HierarchyError.notFound("Pane \(paneID)")
+        }
+        try requireContentDirectory(content, in: projectID)
+        return try manager.splitPane(
+          from: paneID, direction: direction, content: content, name: name, initialTitle: initialTitle
         )
       },
-      splitPane: { [weak settings] paneID, direction, tabID, worktreeID, projectID, cwd, initial in
-        // Splits inherit the same Project envVars as the parent pane —
-        // the new pty is forked from a fresh shell, not the existing one,
-        // so the env hook still has to run.
-        try manager.requireLocalDirectory(cwd, in: projectID)
-        let env: [String: String] =
-          settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
-          ?? [:]
-        return try await manager.splitPane(
-          paneID, direction: direction,
-          in: tabID, in: worktreeID, in: projectID,
-          workingDirectory: cwd, initialCommand: initial, env: env
-        )
-      },
-      createPaneRow: { tabID, worktreeID, projectID, cwd, initial in
-        try manager.createPaneRow(
-          in: tabID, in: worktreeID, in: projectID,
-          workingDirectory: cwd, initialCommand: initial
-        )
-      },
-      ensurePaneSurface: { [weak settings] paneID, tabID, worktreeID, projectID in
-        // Mirror openPane's env resolution — this is the surface-bringup
-        // half, so Project-defined envVars must still reach the spawned shell.
-        let env: [String: String] =
-          settings.map { HierarchyManager.resolvedEnv(for: projectID, in: $0.settings) }
-          ?? [:]
-        try await manager.ensurePaneSurface(
-          paneID, in: tabID, in: worktreeID, in: projectID, env: env
-        )
-      },
-      closePane: { paneID, tabID, worktreeID, projectID in
-        let doomed = [manager.catalog.pane(paneID)].compactMap { $0 }
-        try closeAfterConfirming(panes: doomed, subject: .pane) {
-          try manager.closePane(paneID, in: tabID, in: worktreeID, in: projectID)
+      closePane: { paneID in
+        let doomed = manager.catalog.pane(paneID)?.tabs.map(\.content) ?? []
+        try closeAfterConfirming(contents: doomed, subject: .pane) {
+          try manager.closePane(paneID)
         }
       },
-      focusPane: { paneID, tabID, worktreeID, projectID in
-        try manager.focusPane(paneID, in: tabID, in: worktreeID, in: projectID)
+      focusPane: { paneID in try manager.focusPane(paneID) },
+      focusNeighbour: { paneID, direction in
+        try manager.focusNeighbour(of: paneID, direction: direction)
       },
-      focusSurfaceView: { paneID in
-        manager.focusSurfaceView(for: paneID)
+      toggleZoom: { paneID in try manager.toggleZoom(paneID) },
+      resizeSplit: { path, ratio, worktreeID, projectID in
+        try manager.resizeSplit(at: path, ratio: ratio, in: worktreeID, in: projectID)
       },
-      resizeSplit: { path, ratio, tabID, worktreeID, projectID in
-        try manager.resizeSplit(
-          at: path, ratio: ratio,
-          in: tabID, in: worktreeID, in: projectID
-        )
+      resizePane: { paneID, direction, amount in
+        try manager.resizePane(paneID, direction: direction, amount: amount)
       },
+      equalizeSplits: { worktreeID, projectID in
+        try manager.equalizeSplits(in: worktreeID, in: projectID)
+      },
+      movePane: { paneID, anchorID, direction in
+        try manager.movePane(paneID, relativeTo: anchorID, direction: direction)
+      },
+      ensureSurface: { contentID in
+        guard let projectID = manager.catalog.projectID(forContent: contentID) else {
+          throw HierarchyError.notFound("Content \(contentID)")
+        }
+        try await manager.ensureSurface(for: contentID, env: resolvedEnv(projectID))
+      },
+      focusSurfaceView: { contentID in manager.focusSurfaceView(for: contentID) },
+      focusedContent: { worktreeID in manager.focusedContent(in: worktreeID) },
+      addressOf: { contentID in manager.catalog.address(forContent: contentID) },
+      tabIsDirty: { tabID in contents?.tabIsDirty(tabID) ?? false },
+      worktreeIsDirty: { worktreeID in contents?.worktreeIsDirty(worktreeID) ?? false },
+      setProgressBusy: { contentID, busy in contents?.setProgressBusy(contentID, busy) },
+      setCommandBusy: { contentID, busy in contents?.setCommandBusy(contentID, busy) },
+      isContentBusy: { contentID in manager.isBusy(contentID) },
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
       setWorktreeArchived: { worktreeID, archived in
@@ -1030,8 +914,8 @@ extension HierarchyClient {
           deleteRemoteBranch: deleteRemote
         )
       },
-      runningPaneCount: { worktreeID in
-        manager.runningPaneCount(worktreeID: worktreeID)
+      runningContentCount: { worktreeID in
+        manager.runningContentCount(worktreeID: worktreeID)
       },
       setProjectLoadState: { projectID, state in
         manager.setProjectLoadState(state, projectID: projectID)
@@ -1056,36 +940,6 @@ extension HierarchyClient {
       },
       kind: { projectID in
         manager.catalog.projects.first(where: { $0.id == projectID })?.kind
-      },
-      addressOf: { paneID in
-        guard let (projectID, worktreeID, tabID) = manager.addressOf(paneID: paneID)
-        else { return nil }
-        return PaneAddress(
-          projectID: projectID,
-          worktreeID: worktreeID,
-          tabID: tabID,
-          paneID: paneID
-        )
-      },
-      moveTab: { tabID, worktreeID, projectID, offset in
-        try manager.moveTab(
-          tabID, in: worktreeID, in: projectID, offset: offset
-        )
-      },
-      equalizeTabSplits: { tabID, worktreeID, projectID in
-        try manager.equalizeTabSplits(tabID, in: worktreeID, in: projectID)
-      },
-      resizePane: { paneID, direction, amount in
-        try manager.resizePane(paneID, direction: direction, amount: amount)
-      },
-      movePane: { paneID, anchorID, direction, tabID, worktreeID, projectID in
-        try manager.movePane(
-          paneID, relativeTo: anchorID, direction: direction,
-          in: tabID, in: worktreeID, in: projectID
-        )
-      },
-      unzoomTab: { tabID, worktreeID, projectID in
-        try manager.unfocusPane(in: tabID, in: worktreeID, in: projectID)
       },
       runScript: { [weak settings] scriptID, projectID, worktreeID in
         try await runScript(
@@ -1147,7 +1001,7 @@ extension HierarchyClient {
         )
       },
       stopAllScripts: { worktreeID in
-        for scriptID in manager.runningScriptIDs(in: worktreeID) {
+        for scriptID in contents?.runningScriptIDs(in: worktreeID) ?? [] {
           stopScript(
             scriptID: scriptID,
             worktreeID: worktreeID,
@@ -1167,17 +1021,17 @@ extension HierarchyClient {
       promoteWorktree: { projectID, worktreeID, mode in
         manager.promoteWorktree(in: projectID, worktreeID: worktreeID, mode: mode)
       },
-      setPaneLabel: { paneID, label, present in
-        manager.setPaneLabel(paneID: paneID, label: label, present: present)
+      setContentLabel: { contentID, label, present in
+        manager.setContentLabel(contentID, label: label, present: present)
       },
-      setPaneAgentKind: { paneID, kind in
-        manager.setPaneAgentKind(paneID, kind: kind)
+      setAgentKind: { contentID, kind in
+        manager.setAgentKind(contentID, kind: kind)
       },
-      setPaneAgentSessionID: { paneID, sessionID in
-        manager.setPaneAgentSessionID(paneID, sessionID: sessionID)
+      setAgentSessionID: { contentID, sessionID in
+        manager.setAgentSessionID(contentID, sessionID: sessionID)
       },
-      updatePaneWorkingDirectory: { paneID, newPath in
-        manager.updatePaneWorkingDirectory(paneID, to: newPath)
+      updateWorkingDirectory: { contentID, newPath in
+        manager.updateWorkingDirectory(for: contentID, to: newPath)
       },
       reorderWorktrees: { projectID, segment, from, to in
         try manager.reorderWorktrees(
@@ -1185,26 +1039,26 @@ extension HierarchyClient {
           segment: segment, from: from, to: to
         )
       },
-      commandQueue: { paneID in manager.commandQueue(for: paneID) },
-      setCommandQueue: { paneID, queue in manager.setCommandQueue(queue, for: paneID) }
+      commandQueue: { contentID in manager.commandQueue(for: contentID) },
+      setCommandQueue: { contentID, queue in manager.setCommandQueue(queue, for: contentID) }
     )
   }
 
   /// Resolves the script + worktree, then dispatches according to the
   /// script's `target`:
-  ///   - `.newTab` : open a fresh tab and run as the new pane's
-  ///                 `initialCommand`.
+  ///   - `.newTab` : open a fresh Tab in the focused Pane and run as the
+  ///                 new session's `initialCommand`.
   ///   - `.focused`: write the command (with trailing newline) to the
-  ///                 worktree's last-focused pane via `TerminalClient`.
-  ///                 No new pane / tab is created.
-  ///   - `.split`  : split the focused pane in `script.direction` and run
-  ///                 as the split's `initialCommand`.
+  ///                 focused Pane's selected Content via `TerminalClient`.
+  ///                 No new Tab is created.
+  ///   - `.split`  : split the focused Pane in `script.direction` and run
+  ///                 as the new Pane's first session.
   ///
-  /// `.focused` and `.split` fall back to `.newTab` when no anchor pane is
-  /// available (empty worktree, no focused pane in the selected tab).
+  /// `.focused` and `.split` fall back to `.newTab` when no anchor is
+  /// available (empty worktree).
   ///
-  /// When `target` spawned a pane and `resolvedOnFinished` is non-`.none`,
-  /// a detached observer waits for that pane's child to exit and then
+  /// When `target` spawned a session and `resolvedOnFinished` is non-`.none`,
+  /// a detached observer waits for that session's child to exit and then
   /// applies the policy (`.closePane` / `.closeTab`).
   @MainActor
   private static func runScript(
@@ -1261,14 +1115,14 @@ extension HierarchyClient {
 
   /// Launches a resolved `AgentProfile` through the shared script pipeline.
   /// The profile renders into a synthetic `ScriptDefinition` — the
-  /// dispatcher already knows how to open a tab / split / focused pane with a
-  /// command and a tab icon, and an agent launch is exactly that plus a
-  /// different way of composing the command string.
+  /// dispatcher already knows how to open a Tab / split / focused session
+  /// with a command and a tab icon, and an agent launch is exactly that plus
+  /// a different way of composing the command string.
   ///
-  /// `tracksRunPane: false` is the one behavioural difference: an agent is a
-  /// session, not a job, so a second launch of the same profile opens a
-  /// second session instead of re-typing into the first one's pane (which is
-  /// what the Run/Stop toggle wants for scripts).
+  /// `tracksRunContent: false` is the one behavioural difference: an agent
+  /// is a session, not a job, so a second launch of the same profile opens a
+  /// second session instead of re-typing into the first one's terminal
+  /// (which is what the Run/Stop toggle wants for scripts).
   @MainActor
   private static func launchAgent(
     spec: AgentLaunchSpec,
@@ -1300,38 +1154,39 @@ extension HierarchyClient {
       onFinished: .none,
       focus: spec.focus
     )
-    let paneID = try await runResolvedScript(
+    let spawned = try await runResolvedScript(
       script: script,
       projectID: spec.projectID,
       worktreeID: spec.worktreeID,
       manager: manager,
       snapshot: snapshot,
       terminalClient: terminalClient,
-      tracksRunPane: false,
+      tracksRunContent: false,
       anchorPaneID: spec.anchorPaneID
     )
-    let tabID = paneID.flatMap { manager.addressOf(paneID: $0)?.2 }
-    return AgentLaunchOutcome(profile: profile, command: command, tabID: tabID, paneID: paneID)
+    return AgentLaunchOutcome(
+      profile: profile, command: command,
+      tabID: spawned?.tabID, paneID: spawned?.paneID, contentID: spawned?.contentID)
   }
 
   /// Shared execution pipeline for a fully-resolved `ScriptDefinition`,
   /// regardless of whether it came from a Project's `scripts`, the global
   /// `general.globalScripts` list, or an agent profile. Resolves the worktree
-  /// cwd + env, honours the run-pane reuse / Run-Stop tracking / onFinished
-  /// policy, and spawns the tab/pane. Run-pane tracking keys on (worktreeID,
+  /// cwd + env, honours the run-session reuse / Run-Stop tracking / onFinished
+  /// policy, and spawns the Tab / Pane. Run tracking keys on (worktreeID,
   /// scriptID); global and project scripts never collide because each carries
   /// a distinct UUID.
   ///
-  /// `tracksRunPane: false` opts a caller out of both halves of that tracking
-  /// — no reuse lookup on the way in, no `setRunScriptPane` on the way out —
-  /// so every invocation spawns a fresh surface.
+  /// `tracksRunContent: false` opts a caller out of both halves of that
+  /// tracking — no reuse lookup on the way in, no `setRunScriptContent` on
+  /// the way out — so every invocation spawns a fresh surface.
   ///
-  /// `anchorPaneID` names the pane a `.split` divides. Left nil, the split
-  /// anchors on the worktree's focused pane; a pane that is not in this
+  /// `anchorPaneID` names the Pane a `.split` divides. Left nil, the split
+  /// anchors on the worktree's focused Pane; a Pane that is not in this
   /// worktree is ignored the same way.
   ///
-  /// Returns the pane the command landed in when a fresh surface was spawned;
-  /// `nil` for a reused run pane or a `.focused` dispatch.
+  /// Returns the address the command landed in when a fresh session was
+  /// spawned; `nil` for a reused run session or a `.focused` dispatch.
   @MainActor
   @discardableResult
   private static func runResolvedScript(
@@ -1341,9 +1196,9 @@ extension HierarchyClient {
     manager: HierarchyManager,
     snapshot: Settings,
     terminalClient: TerminalClient?,
-    tracksRunPane: Bool = true,
+    tracksRunContent: Bool = true,
     anchorPaneID: PaneID? = nil
-  ) async throws -> PaneID? {
+  ) async throws -> TabAddress? {
     let scriptID = script.id
     var foundWorktreePath: String?
     outer: for project in manager.catalog.projects where project.id == projectID {
@@ -1360,37 +1215,34 @@ extension HierarchyClient {
     let onFinishedNeeded = script.resolvedOnFinished != .none
 
     // Reuse path: a run is unique per (worktree, script). If the dedicated
-    // run pane is still alive — from an earlier run this session or restored
-    // from the persisted catalog after a relaunch — never spawn a second
-    // tab/pane for it.
-    if tracksRunPane,
+    // run session is still alive — from an earlier run this session or
+    // restored from the persisted catalog after a relaunch — never spawn a
+    // second Tab for it.
+    if tracksRunContent,
       script.target == .newTab || script.target == .split,
       let terminalClient,
-      let existing = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
+      let existing = manager.runScriptContent(worktreeID: worktreeID, scriptID: scriptID)
     {
-      if manager.isScriptRunning(worktreeID: worktreeID, scriptID: scriptID) {
+      let isRunning = terminalClient.surface(existing) != nil && manager.contentActivity?(existing) == true
+      if isRunning {
         // Already executing — surface the run instead of typing a second
         // command into the busy pty. Honour `focus` so background scripts
         // stay background.
-        if script.focus, let (proj, wt, tab) = manager.addressOf(paneID: existing) {
-          try? manager.selectTab(tab, in: wt, in: proj)
-          manager.focusSurfaceView(for: existing)
+        if script.focus, let address = manager.catalog.address(forContent: existing) {
+          try? manager.selectTab(address.tabID)
         }
         return nil
       }
-      // Idle run pane → re-run in place. Subscribe before the send for the
-      // same no-replay reason as the spawn path below.
+      // Idle run session → re-run in place. Subscribe before the send for
+      // the same no-replay reason as the spawn path below.
       let reuseStream: AsyncStream<TerminalEvent>? =
         onFinishedNeeded ? terminalClient.events() : nil
-      if let (proj, wt, tab) = manager.addressOf(paneID: existing) {
-        // After a relaunch the restored pane has no live surface yet (they
-        // spawn lazily when a tab is shown); bring it up first or the
-        // sendInput below lands on nothing. No-op when already live.
-        try? await manager.ensurePaneSurface(existing, in: tab, in: wt, in: proj, env: env)
-        if script.focus {
-          try? manager.selectTab(tab, in: wt, in: proj)
-          manager.focusSurfaceView(for: existing)
-        }
+      // After a relaunch the restored session has no live surface yet (they
+      // spawn lazily when a Tab is shown); bring it up first or the
+      // sendInput below lands on nothing. No-op when already live.
+      try? await manager.ensureSurface(for: existing, env: env)
+      if script.focus, let address = manager.catalog.address(forContent: existing) {
+        try? manager.selectTab(address.tabID)
       }
       // Same wrapping as the spawn path: a close-on-finish policy needs the
       // shell to exit after the command so `childExited` fires.
@@ -1398,11 +1250,11 @@ extension HierarchyClient {
         command: script.command,
         policy: script.resolvedOnFinished
       )
-      manager.recordProcessLaunch(paneID: existing, name: script.displayName, kind: .run)
+      manager.recordProcessLaunch(contentID: existing, name: script.displayName, kind: .run)
       terminalClient.sendInput(existing, rerunCommand + "\n")
       if let reuseStream {
         scheduleOnFinishedAction(
-          paneID: existing,
+          contentID: existing,
           policy: script.resolvedOnFinished,
           manager: manager,
           eventStream: reuseStream
@@ -1418,54 +1270,49 @@ extension HierarchyClient {
     let preSubscribedStream: AsyncStream<TerminalEvent>? =
       onFinishedNeeded ? terminalClient?.events() : nil
 
-    let spawnedPaneID = try await dispatchTrackedScript(
+    let spawned = try await dispatchTrackedScript(
       script: script, worktreeID: worktreeID, projectID: projectID, cwd: cwd,
       env: env, manager: manager, terminalClient: terminalClient,
-      tracksRunPane: tracksRunPane, anchorPaneID: anchorPaneID
+      tracksRunContent: tracksRunContent, anchorPaneID: anchorPaneID
     )
 
-    // Record the dedicated pane so the next run reuses it and the toolbar
-    // Run/Stop toggle can find it. Only `.newTab` / `.split` create one;
-    // `.focused` returns nil (it writes into the user's focused pane).
-    if tracksRunPane,
-      let spawnedPaneID,
+    // Record the dedicated session so the next run reuses it and the
+    // toolbar Run/Stop toggle can find it. Only `.newTab` / `.split` create
+    // one; `.focused` returns nil (it writes into the user's focused session).
+    if tracksRunContent,
+      let spawned,
       script.target == .newTab || script.target == .split
     {
-      manager.setRunScriptPane(
-        worktreeID: worktreeID, scriptID: scriptID, paneID: spawnedPaneID)
+      manager.setRunScriptContent(
+        worktreeID: worktreeID, scriptID: scriptID, contentID: spawned.contentID)
     }
 
-    if let spawnedPaneID, let stream = preSubscribedStream {
+    if let spawned, let stream = preSubscribedStream {
       scheduleOnFinishedAction(
-        paneID: spawnedPaneID,
+        contentID: spawned.contentID,
         policy: script.resolvedOnFinished,
         manager: manager,
         eventStream: stream
       )
     }
 
-    // Neither `.newTab` nor `.split` auto-focuses the spawned surface:
-    // - `.split`: splitPane leaves first-responder on the source pane.
-    // - `.newTab`: createTab sets selectedTabID before openPane adds the
-    //   pane, so the tab switch happens against an empty tab and the
-    //   subsequent openPane never grabs focus on its own.
     // Honour the script's `focus` by dispatching `focusSurfaceView` async,
     // the same way the manual ⌘D / ⌘T paths do — the surface view needs
     // to attach to the hosting window before `makeFirstResponder` takes.
     if script.focus,
       script.target == .split || script.target == .newTab,
-      let spawnedPaneID
+      let spawned
     {
       Task { @MainActor in
-        manager.focusSurfaceView(for: spawnedPaneID)
+        manager.focusSurfaceView(for: spawned.contentID)
       }
     }
-    return spawnedPaneID
+    return spawned
   }
 
-  /// Launch attribution is separate from the dedicated Run pane reuse index.
-  /// Capture focused-pane intent before dispatch so process birth can reject
-  /// input sent to an already-running command.
+  /// Launch attribution is separate from the dedicated run reuse index.
+  /// Capture focused-session intent before dispatch so process birth can
+  /// reject input sent to an already-running command.
   @MainActor
   private static func dispatchTrackedScript(
     script: ScriptDefinition,
@@ -1475,22 +1322,22 @@ extension HierarchyClient {
     env: [String: String],
     manager: HierarchyManager,
     terminalClient: TerminalClient?,
-    tracksRunPane: Bool,
+    tracksRunContent: Bool,
     anchorPaneID: PaneID?
-  ) async throws -> PaneID? {
+  ) async throws -> TabAddress? {
     let processLaunchRequestedAt = Date.now
-    let focusedProcessPane =
+    let focusedProcessContent =
       script.target == .focused && terminalClient != nil
-      ? focusedAnchor(worktreeID: worktreeID, in: manager)?.paneID : nil
-    if let focusedProcessPane {
+      ? manager.focusedContent(in: worktreeID)?.contentID : nil
+    if let focusedProcessContent {
       manager.recordProcessLaunch(
-        paneID: focusedProcessPane, name: script.displayName, kind: tracksRunPane ? .run : .agent,
+        contentID: focusedProcessContent, name: script.displayName, kind: tracksRunContent ? .run : .agent,
         now: processLaunchRequestedAt, requiresIdle: true
       )
     }
-    let spawnedPaneID: PaneID?
+    let spawned: TabAddress?
     do {
-      spawnedPaneID = try await dispatchScript(
+      spawned = try await dispatchScript(
         script: script,
         worktreeID: worktreeID,
         projectID: projectID,
@@ -1501,29 +1348,28 @@ extension HierarchyClient {
         anchorPaneID: anchorPaneID
       )
     } catch {
-      if let focusedProcessPane,
-        manager.processRegistry.launches[focusedProcessPane]?.requestedAt == processLaunchRequestedAt
+      if let focusedProcessContent,
+        manager.processRegistry.launches[focusedProcessContent]?.requestedAt == processLaunchRequestedAt
       {
-        manager.processRegistry.launches.removeValue(forKey: focusedProcessPane)
+        manager.processRegistry.launches.removeValue(forKey: focusedProcessContent)
       }
       throw error
     }
 
-    if let spawnedPaneID {
+    if let spawned {
       manager.recordProcessLaunch(
-        paneID: spawnedPaneID, name: script.displayName, kind: tracksRunPane ? .run : .agent
+        contentID: spawned.contentID, name: script.displayName, kind: tracksRunContent ? .run : .agent
       )
     }
 
-    return spawnedPaneID
+    return spawned
   }
 
-  /// Stops the run for `(worktreeID, scriptID)`: interrupts the pane's
-  /// child (Ctrl-C → SIGINT) and then closes the run surface — the whole
-  /// tab when the run pane is its only pane, just the pane otherwise (a
-  /// `.split` run, or a run tab the user split into). Stop is a teardown,
-  /// not a pause: the next run spawns a fresh tab/pane. Best-effort: silent
-  /// no-op when no live run pane is tracked or no `TerminalClient` is wired.
+  /// Stops the run for `(worktreeID, scriptID)`: interrupts the session's
+  /// child (Ctrl-C → SIGINT) and then closes its Tab — which closes the
+  /// Pane when it was the last Tab. Stop is a teardown, not a pause: the
+  /// next run spawns a fresh Tab. Best-effort: silent no-op when no live run
+  /// session is tracked or no `TerminalClient` is wired.
   @MainActor
   private static func stopScript(
     scriptID: UUID,
@@ -1532,10 +1378,10 @@ extension HierarchyClient {
     terminalClient: TerminalClient?
   ) {
     guard let terminalClient,
-      let paneID = manager.runScriptPane(worktreeID: worktreeID, scriptID: scriptID)
+      let contentID = manager.runScriptContent(worktreeID: worktreeID, scriptID: scriptID)
     else {
       runScriptLogger.info(
-        "stopScript: no live run pane to interrupt for script \(scriptID, privacy: .public)"
+        "stopScript: no live run session to interrupt for script \(scriptID, privacy: .public)"
       )
       return
     }
@@ -1544,41 +1390,15 @@ extension HierarchyClient {
     // as text never reaches the PTY as an interrupt. The interrupt gives the
     // child a graceful SIGINT before the surface teardown below hangs up
     // the pty.
-    terminalClient.interrupt(paneID)
-    guard let (projectID, resolvedWorktreeID, tabID) = manager.addressOf(paneID: paneID) else {
-      return
-    }
-    let tab =
-      manager.catalog.projects
-      .first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == resolvedWorktreeID })?
-      .tabs.first(where: { $0.id == tabID })
-    if tab?.panes.count == 1 {
-      try? manager.closeTab(tabID, in: resolvedWorktreeID, in: projectID)
-      return
-    }
-    // Resolve the survivor BEFORE the tree mutation invalidates the leaf, then
-    // hand it focus. `closePane` drops the tab's last-focused entry (the run
-    // pane usually owns it — scripts spawn with `focus: true`), and unlike the
-    // ⌘W / pane-action close paths nothing else re-homes input, so the Tab was
-    // left with no focused pane until the user clicked one.
-    //
-    // Called synchronously rather than hopping a turn like the reducer-side
-    // close paths: the survivor's surface view is still attached here (SwiftUI
-    // rebuilds the viewport after this turn), so `makeFirstResponder` takes
-    // immediately, and `GhosttySurfaceView` reclaims first responder on its own
-    // once the rebuild re-attaches it.
-    let focusTarget = tab?.splitTree.focusTargetAfterClosing(paneID)
-    try? manager.closePane(paneID, in: tabID, in: resolvedWorktreeID, in: projectID)
-    if let focusTarget {
-      manager.focusSurfaceView(for: focusTarget)
-    }
+    terminalClient.interrupt(contentID)
+    guard let address = manager.catalog.address(forContent: contentID) else { return }
+    try? manager.closeTab(address.tabID)
   }
 
   /// Materializes a `ScriptDefinition` into a runtime action and returns the
-  /// spawned `PaneID` if a new pane was created (`.newTab` / `.split`), or
-  /// `nil` for `.focused` (which writes into an existing pane). Falls back to
-  /// `.newTab` for `.focused` / `.split` when there is no anchor pane.
+  /// spawned address if a new session was created (`.newTab` / `.split`), or
+  /// `nil` for `.focused` (which writes into an existing session). Falls
+  /// back to `.newTab` for `.focused` / `.split` when there is no anchor.
   @MainActor
   private static func dispatchScript(
     script: ScriptDefinition,
@@ -1589,7 +1409,7 @@ extension HierarchyClient {
     manager: HierarchyManager,
     terminalClient: TerminalClient?,
     anchorPaneID: PaneID? = nil
-  ) async throws -> PaneID? {
+  ) async throws -> TabAddress? {
     // initialCommand is replayed by TerminalEngine via `sendInput(command + "\n")`
     // into an interactive shell, so the shell stays at a prompt after the user's
     // command finishes and `paneExited` never fires. When the script has an
@@ -1601,30 +1421,25 @@ extension HierarchyClient {
       command: script.command,
       policy: script.resolvedOnFinished
     )
+    let content = ContentSnapshot.terminal(workingDirectory: cwd, initialCommand: spawnCommand)
 
-    func openInNewTab() async throws -> PaneID {
-      try manager.requireLocalDirectory(cwd, in: projectID)
-      let tabID = try manager.createTab(
-        in: worktreeID, in: projectID,
-        name: nil,
-        initialTitle: script.displayName,
-        select: script.focus
-      )
-      // Carry the script's resolved SF Symbol onto the spawned tab under
+    func bringUp(_ address: TabAddress) async throws -> TabAddress {
+      // Carry the script's resolved SF Symbol onto the spawned Tab under
       // the .script lock. A later auto re-derivation cannot displace it;
-      // a user pick still can. Failures are non-fatal — the tab keeps
+      // a user pick still can. Failures are non-fatal — the Tab keeps
       // running with its default icon.
-      try? manager.setTabIcon(
-        tabID, in: worktreeID, in: projectID,
-        icon: script.resolvedSystemImage,
-        lock: .script
+      try? manager.setTabIcon(address.tabID, icon: script.resolvedSystemImage, lock: .script)
+      try await manager.ensureSurface(for: address.contentID, env: env)
+      return address
+    }
+
+    func openInNewTab() async throws -> TabAddress {
+      try manager.requireLocalDirectory(cwd, in: projectID)
+      let address = try manager.newTab(
+        in: nil, worktreeID: worktreeID, projectID: projectID,
+        content: content, name: nil, initialTitle: script.displayName, select: script.focus
       )
-      return try await manager.openPane(
-        in: tabID, in: worktreeID, in: projectID,
-        workingDirectory: cwd,
-        initialCommand: spawnCommand,
-        env: env
-      )
+      return try await bringUp(address)
     }
 
     switch script.target {
@@ -1632,35 +1447,34 @@ extension HierarchyClient {
       return try await openInNewTab()
 
     case .focused:
-      // sendInput needs the focused pane and the terminal runtime; absent
-      // either, fall back to a fresh tab so the user always sees output.
+      // sendInput needs the focused session and the terminal runtime; absent
+      // either, fall back to a fresh Tab so the user always sees output.
       if let terminalClient,
-        let anchor = focusedAnchor(worktreeID: worktreeID, in: manager)
+        let anchor = manager.focusedContent(in: worktreeID)
       {
-        terminalClient.sendInput(anchor.paneID, script.command + "\n")
+        terminalClient.sendInput(anchor.contentID, script.command + "\n")
         return nil
       }
       runScriptLogger.info(
-        "target=.focused fell back to .newTab — \(terminalClient == nil ? "no TerminalClient" : "no focused pane in worktree", privacy: .public)"
+        "target=.focused fell back to .newTab — \(terminalClient == nil ? "no TerminalClient" : "no focused Pane in worktree", privacy: .public)"
       )
       return try await openInNewTab()
 
     case .split:
       if let anchor = explicitAnchor(anchorPaneID, worktreeID: worktreeID, in: manager)
-        ?? focusedAnchor(worktreeID: worktreeID, in: manager)
+        ?? manager.focusedContent(in: worktreeID)?.paneID
       {
         try manager.requireLocalDirectory(cwd, in: projectID)
-        return try await manager.splitPane(
-          anchor.paneID,
+        let address = try manager.splitPane(
+          from: anchor,
           direction: mapSplitDirection(script.direction),
-          in: anchor.tabID, in: worktreeID, in: projectID,
-          workingDirectory: cwd,
-          initialCommand: spawnCommand,
-          env: env
+          content: content,
+          initialTitle: script.displayName
         )
+        return try await bringUp(address)
       }
       runScriptLogger.info(
-        "target=.split fell back to .newTab — no focused pane in worktree"
+        "target=.split fell back to .newTab — no focused Pane in worktree"
       )
       return try await openInNewTab()
     }
@@ -1679,47 +1493,16 @@ extension HierarchyClient {
     return trimmed.isEmpty ? "exit" : "\(trimmed); exit"
   }
 
-  /// A caller-named split anchor, accepted only while it is still a pane of
-  /// this worktree; anything else falls through to the focused-pane rule.
+  /// A caller-named split anchor, accepted only while it is still a Pane of
+  /// this worktree; anything else falls through to the focused-Pane rule.
   @MainActor
   private static func explicitAnchor(
     _ paneID: PaneID?,
     worktreeID: WorktreeID,
     in manager: HierarchyManager
-  ) -> (tabID: TabID, paneID: PaneID)? {
-    guard let paneID, let address = manager.addressOf(paneID: paneID), address.1 == worktreeID
-    else { return nil }
-    return (address.2, paneID)
-  }
-
-  /// Picks the worktree's selected (or first) tab and returns its
-  /// last-focused pane — the anchor for `.focused` / `.split` dispatch.
-  /// Falls back to the tab's first leaf when no pane has gained focus
-  /// since the tab was created.
-  @MainActor
-  private static func focusedAnchor(
-    worktreeID: WorktreeID,
-    in manager: HierarchyManager
-  ) -> (tabID: TabID, paneID: PaneID)? {
-    var foundWorktree: Worktree?
-    outer: for project in manager.catalog.projects {
-      if let wt = project.worktrees.first(where: { $0.id == worktreeID }) {
-        foundWorktree = wt
-        break outer
-      }
-    }
-    guard let worktree = foundWorktree else { return nil }
-    let tabID = worktree.selectedTabID ?? worktree.tabs.first?.id
-    guard let tabID else { return nil }
-    if let paneID = manager.lastFocusedPane(in: tabID) {
-      return (tabID, paneID)
-    }
-    if let tab = worktree.tabs.first(where: { $0.id == tabID }),
-      let firstPane = tab.panes.first
-    {
-      return (tabID, firstPane.id)
-    }
-    return nil
+  ) -> PaneID? {
+    guard let paneID, manager.catalog.worktreeID(forPane: paneID) == worktreeID else { return nil }
+    return paneID
   }
 
   /// Maps the settings-layer `ScriptSplitDirection` onto the runtime's
@@ -1736,17 +1519,15 @@ extension HierarchyClient {
     }
   }
 
-  /// Subscribes to terminal events and, when the spawned pane's child
-  /// exits / crashes / is closed by tab-autoclose, applies the
-  /// `onFinished` policy on the main actor. Closes the pane only — for
-  /// `.closeTab` the address-resolved `tabID` is closed instead. Silent
-  /// no-op when the pane is no longer in the catalog by the time the
-  /// exit lands (already torn down by the user, etc.). The caller is
-  /// responsible for subscribing to `events()` *before* the pane spawn
-  /// so a one-shot script's `paneExited` is not missed.
+  /// Subscribes to terminal events and, when the spawned session's child
+  /// exits / crashes, applies the `onFinished` policy on the main actor.
+  /// Silent no-op when the Content is no longer in the catalog by the time
+  /// the exit lands (already torn down by the user, etc.). The caller is
+  /// responsible for subscribing to `events()` *before* the spawn so a
+  /// one-shot script's `paneExited` is not missed.
   @MainActor
   private static func scheduleOnFinishedAction(
-    paneID: PaneID,
+    contentID: ContentID,
     policy: ScriptOnFinished,
     manager: HierarchyManager,
     eventStream: AsyncStream<TerminalEvent>
@@ -1754,25 +1535,24 @@ extension HierarchyClient {
     Task.detached(priority: .userInitiated) {
       for await event in eventStream {
         switch event {
-        case .paneInfoChanged(let pid, .childExited) where pid == paneID:
+        case .paneInfoChanged(let id, .childExited) where id == contentID:
           // The child ended, but libghostty keeps the surface open (its
           // embedded API force-enables wait-after-command whenever a
           // spawn command is set), so `paneExited` would only fire after
-          // a keypress in the dead pane. The child's exit IS the
+          // a keypress in the dead session. The child's exit IS the
           // "finished" the policy is about — apply it now.
           await MainActor.run {
-            applyOnFinished(policy: policy, paneID: paneID, manager: manager)
+            applyOnFinished(policy: policy, contentID: contentID, manager: manager)
           }
           return
-        case .paneExited(let pid, _, _) where pid == paneID,
-          .paneCrashed(let pid, _) where pid == paneID:
+        case .paneExited(let id, _, _) where id == contentID,
+          .paneCrashed(let id, _) where id == contentID:
           await MainActor.run {
-            applyOnFinished(policy: policy, paneID: paneID, manager: manager)
+            applyOnFinished(policy: policy, contentID: contentID, manager: manager)
           }
           return
-        case .paneClosedByTab(let pid, _) where pid == paneID:
-          // Already torn down by tab-autoclose — pane no longer exists,
-          // so neither closePane nor closeTab has anything to do.
+        case .paneClosedByTab(let id, _) where id == contentID:
+          // Already torn down — nothing left to close.
           return
         default:
           continue
@@ -1784,29 +1564,28 @@ extension HierarchyClient {
   @MainActor
   private static func applyOnFinished(
     policy: ScriptOnFinished,
-    paneID: PaneID,
+    contentID: ContentID,
     manager: HierarchyManager
   ) {
-    guard let address = manager.addressOf(paneID: paneID) else { return }
-    let (projectID, worktreeID, tabID) = address
+    guard let address = manager.catalog.address(forContent: contentID) else { return }
     switch policy {
     case .none:
       return
     case .closePane:
-      try? manager.closePane(paneID, in: tabID, in: worktreeID, in: projectID)
+      try? manager.closePane(address.paneID)
     case .closeTab:
-      try? manager.closeTab(tabID, in: worktreeID, in: projectID)
+      try? manager.closeTab(address.tabID)
     }
   }
 
-  /// Opens a fresh tab on the worktree, runs `command` as the new pane's
-  /// `initialCommand`, and suspends until that pane's child process exits
-  /// (or crashes). Returns immediately as a no-op when the worktree is
-  /// gone, the tab/pane could not be created, or no `TerminalClient` is
-  /// wired. Used by the archive / delete lifecycle flows — both must wait
-  /// for the user's script to finish before mutating catalog state.
+  /// Opens a fresh Tab on the worktree, runs `command` as the new session's
+  /// `initialCommand`, and suspends until that session's child process
+  /// exits (or crashes). Returns immediately as a no-op when the worktree is
+  /// gone, the Tab could not be created, or no `TerminalClient` is wired.
+  /// Used by the archive / delete lifecycle flows — both must wait for the
+  /// user's script to finish before mutating catalog state.
   ///
-  /// `initialCommand` is delivered to the pane via `sendInput`, i.e. it
+  /// `initialCommand` is delivered to the session via `sendInput`, i.e. it
   /// is typed into an interactive shell rather than passed through
   /// `sh -c`. A bare `npm install\n` would therefore leave the shell at
   /// an interactive prompt and the await would block until the user
@@ -1818,13 +1597,13 @@ extension HierarchyClient {
   /// Completion keys on the CHILD's exit (`paneInfoChanged(.childExited)`),
   /// not on `paneExited`: libghostty's embedded API force-enables
   /// `wait-after-command` whenever a spawn command is set (every codans
-  /// pane sets one — `zmx attach`), so a surface whose child died stays
+  /// session sets one — `zmx attach`), so a surface whose child died stays
   /// open until a keypress, and `paneExited` — which fires on SURFACE
   /// close — would stall the lifecycle until the user pressed a key in
-  /// the dead pane. On a clean exit the transient script tab is torn
-  /// down here; a failing script keeps its tab so the output stays
+  /// the dead session. On a clean exit the transient script Tab is torn
+  /// down here; a failing script keeps its Tab so the output stays
   /// readable. The surface-close family is still matched as a fallback
-  /// for races (user closes the tab mid-script, crash, teardown).
+  /// for races (user closes the Tab mid-script, crash, teardown).
   @MainActor
   private static func openNewTabAndAwaitExit(
     worktreeID: WorktreeID,
@@ -1851,43 +1630,40 @@ extension HierarchyClient {
     let env = HierarchyManager.resolvedEnv(for: projectID, in: settings)
 
     // Subscribe before spawn: events() is broadcast and does not
-    // replay. A one-shot script that exits between createTab + openPane
-    // and a later events() call would otherwise be missed and the
-    // archive/delete await would hang forever.
+    // replay. A one-shot script that exits between newTab and a later
+    // events() call would otherwise be missed and the archive/delete await
+    // would hang forever.
     let stream = terminalClient.events()
 
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     let wrapped = trimmed.isEmpty ? "exit" : "\(trimmed); exit"
 
-    let paneID: PaneID
-    let tabID: TabID
+    let address: TabAddress
     do {
-      tabID = try manager.createTab(
-        in: worktreeID, in: projectID, name: nil, initialTitle: tabName
+      address = try manager.newTab(
+        in: nil, worktreeID: worktreeID, projectID: projectID,
+        content: .terminal(workingDirectory: cwd, initialCommand: wrapped),
+        initialTitle: tabName
       )
-      paneID = try await manager.openPane(
-        in: tabID, in: worktreeID, in: projectID,
-        workingDirectory: cwd,
-        initialCommand: wrapped,
-        env: env
-      )
+      try await manager.ensureSurface(for: address.contentID, env: env)
     } catch {
       return
     }
+    let contentID = address.contentID
 
     for await event in stream {
       switch event {
-      case .paneInfoChanged(let pid, .childExited(let code)) where pid == paneID:
+      case .paneInfoChanged(let id, .childExited(let code)) where id == contentID:
         // The script (and its `; exit` shell) is done — this is the
         // lifecycle's completion signal. `exit` propagates the last
         // command's status, so `code` is the script's own outcome.
         if code == 0 {
-          try? manager.closeTab(tabID, in: worktreeID, in: projectID)
+          try? manager.closeTab(address.tabID)
         }
         return
-      case .paneExited(let pid, _, _) where pid == paneID,
-        .paneCrashed(let pid, _) where pid == paneID,
-        .paneClosedByTab(let pid, _) where pid == paneID:
+      case .paneExited(let id, _, _) where id == contentID,
+        .paneCrashed(let id, _) where id == contentID,
+        .paneClosedByTab(let id, _) where id == contentID:
         return
       default:
         continue
@@ -2354,55 +2130,31 @@ extension HierarchyClient: DependencyKey {
     removeWorktree: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     selectProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     selectWorktree: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    createTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    closeTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    selectTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    renameTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setTabColor: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setTabIcon: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    reorderTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    closeOtherTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    closeTabsToRight: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    closeAllTabs: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    selectAdjacentTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    tabIsDirty: { _ in false },
-    worktreeIsDirty: { _ in false },
-    lastFocusedPane: { _ in nil },
-    markPaneRunning: { _ in },
-    markPaneIdle: { _ in },
-    setPaneCommandBusy: { _, _ in },
-    openPane: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    splitPane: { _, _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    createPaneRow: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    ensurePaneSurface: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    closePane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    focusPane: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    resizeSplit: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    snapshot: { fatalError("HierarchyClient.liveValue not configured") },
-    selectionChanges: { AsyncStream { $0.finish() } },
-    setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setWorktreePinned: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setWorktreeIsNew: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setProjectExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    reconcileDiscoveredWorktrees: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    createWorktreeWithGit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    removeWorktreeWithGit: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    runningPaneCount: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    setProjectLoadState: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    reorderProjects: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setProjectSortMode: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    applyManualProjectOrder: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    bumpProjectActivity: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    isPathRegistered: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    projectContaining: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    kind: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    addressOf: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    moveTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    equalizeTabSplits: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    newTab: { _, _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    closeTab: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    selectTab: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    selectTabAtIndex: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    selectAdjacentTab: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    renameTab: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setTabColor: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setTabIcon: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    reorderTabs: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    moveTab: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    closeOtherTabs: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    closeTabsToRight: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    closeAllTabs: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    splitPane: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    closePane: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    focusPane: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    focusNeighbour: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    toggleZoom: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    resizeSplit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     resizePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    movePane: { _, _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    unzoomTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    equalizeSplits: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    movePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    ensureSurface: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    focusedContent: { _ in fatalError("HierarchyClient.liveValue not configured") },
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runCommand: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2416,16 +2168,16 @@ extension HierarchyClient: DependencyKey {
     promoteWorktree: { _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
-    setPaneLabel: { _, _, _ in
+    setContentLabel: { _, _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
-    setPaneAgentKind: { _, _ in
+    setAgentKind: { _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
-    setPaneAgentSessionID: { _, _ in
+    setAgentSessionID: { _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
-    updatePaneWorkingDirectory: { _, _ in
+    updateWorkingDirectory: { _, _ in
       fatalError("HierarchyClient.liveValue not configured")
     },
     reorderWorktrees: { _, _, _, _ in
@@ -2463,34 +2215,48 @@ extension HierarchyClient: DependencyKey {
     removeWorktree: unimplemented("HierarchyClient.removeWorktree"),
     selectProject: unimplemented("HierarchyClient.selectProject"),
     selectWorktree: unimplemented("HierarchyClient.selectWorktree"),
-    createTab: unimplemented("HierarchyClient.createTab", placeholder: TabID()),
+    newTab: unimplemented(
+      "HierarchyClient.newTab",
+      placeholder: TabAddress(
+        projectID: ProjectID(), worktreeID: WorktreeID(), paneID: PaneID(), tabID: TabID(), contentID: ContentID())
+    ),
     closeTab: unimplemented("HierarchyClient.closeTab"),
     selectTab: unimplemented("HierarchyClient.selectTab"),
+    selectTabAtIndex: unimplemented("HierarchyClient.selectTabAtIndex", placeholder: nil),
+    selectAdjacentTab: unimplemented("HierarchyClient.selectAdjacentTab", placeholder: nil),
     renameTab: unimplemented("HierarchyClient.renameTab"),
     setTabColor: unimplemented("HierarchyClient.setTabColor"),
     setTabIcon: unimplemented("HierarchyClient.setTabIcon"),
     reorderTabs: unimplemented("HierarchyClient.reorderTabs"),
+    moveTab: unimplemented("HierarchyClient.moveTab"),
     closeOtherTabs: unimplemented("HierarchyClient.closeOtherTabs"),
     closeTabsToRight: unimplemented("HierarchyClient.closeTabsToRight"),
     closeAllTabs: unimplemented("HierarchyClient.closeAllTabs"),
-    selectAdjacentTab: unimplemented("HierarchyClient.selectAdjacentTab", placeholder: nil),
-    tabIsDirty: unimplemented("HierarchyClient.tabIsDirty", placeholder: false),
-    worktreeIsDirty: unimplemented("HierarchyClient.worktreeIsDirty", placeholder: false),
-    lastFocusedPane: unimplemented("HierarchyClient.lastFocusedPane", placeholder: nil),
-    markPaneRunning: unimplemented("HierarchyClient.markPaneRunning"),
-    markPaneIdle: unimplemented("HierarchyClient.markPaneIdle"),
-    setPaneCommandBusy: unimplemented("HierarchyClient.setPaneCommandBusy"),
-    openPane: unimplemented("HierarchyClient.openPane", placeholder: PaneID()),
-    splitPane: unimplemented("HierarchyClient.splitPane", placeholder: PaneID()),
-    createPaneRow: unimplemented("HierarchyClient.createPaneRow", placeholder: PaneID()),
-    ensurePaneSurface: unimplemented("HierarchyClient.ensurePaneSurface"),
+    splitPane: unimplemented(
+      "HierarchyClient.splitPane",
+      placeholder: TabAddress(
+        projectID: ProjectID(), worktreeID: WorktreeID(), paneID: PaneID(), tabID: TabID(), contentID: ContentID())
+    ),
     closePane: unimplemented("HierarchyClient.closePane"),
     focusPane: unimplemented("HierarchyClient.focusPane"),
+    focusNeighbour: unimplemented("HierarchyClient.focusNeighbour", placeholder: nil),
+    toggleZoom: unimplemented("HierarchyClient.toggleZoom", placeholder: false),
+    resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
+    resizePane: unimplemented("HierarchyClient.resizePane"),
+    equalizeSplits: unimplemented("HierarchyClient.equalizeSplits"),
+    movePane: unimplemented("HierarchyClient.movePane"),
+    ensureSurface: unimplemented("HierarchyClient.ensureSurface"),
     // Pure visual side-effect (focuses an NSView; no return value, no test
     // contract worth asserting). Every create/split path tail-calls this, so
     // an `unimplemented` here turns ~all routing tests into noisy stub farms.
     focusSurfaceView: { _ in },
-    resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
+    focusedContent: unimplemented("HierarchyClient.focusedContent", placeholder: nil),
+    addressOf: unimplemented("HierarchyClient.addressOf", placeholder: nil),
+    tabIsDirty: unimplemented("HierarchyClient.tabIsDirty", placeholder: false),
+    worktreeIsDirty: unimplemented("HierarchyClient.worktreeIsDirty", placeholder: false),
+    setProgressBusy: unimplemented("HierarchyClient.setProgressBusy"),
+    setCommandBusy: unimplemented("HierarchyClient.setCommandBusy"),
+    isContentBusy: unimplemented("HierarchyClient.isContentBusy", placeholder: false),
     snapshot: unimplemented(
       "HierarchyClient.snapshot",
       placeholder: Catalog()
@@ -2510,7 +2276,7 @@ extension HierarchyClient: DependencyKey {
     removeWorktreeWithGit: unimplemented(
       "HierarchyClient.removeWorktreeWithGit", placeholder: nil
     ),
-    runningPaneCount: unimplemented("HierarchyClient.runningPaneCount", placeholder: 0),
+    runningContentCount: unimplemented("HierarchyClient.runningContentCount", placeholder: 0),
     setProjectLoadState: unimplemented("HierarchyClient.setProjectLoadState"),
     reorderProjects: unimplemented("HierarchyClient.reorderProjects"),
     setProjectSortMode: unimplemented("HierarchyClient.setProjectSortMode"),
@@ -2519,12 +2285,6 @@ extension HierarchyClient: DependencyKey {
     isPathRegistered: unimplemented("HierarchyClient.isPathRegistered", placeholder: nil),
     projectContaining: unimplemented("HierarchyClient.projectContaining", placeholder: nil),
     kind: unimplemented("HierarchyClient.kind", placeholder: nil),
-    addressOf: unimplemented("HierarchyClient.addressOf", placeholder: nil),
-    moveTab: unimplemented("HierarchyClient.moveTab"),
-    equalizeTabSplits: unimplemented("HierarchyClient.equalizeTabSplits"),
-    resizePane: unimplemented("HierarchyClient.resizePane"),
-    movePane: unimplemented("HierarchyClient.movePane"),
-    unzoomTab: unimplemented("HierarchyClient.unzoomTab"),
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
     runCommand: unimplemented("HierarchyClient.runCommand"),
@@ -2532,7 +2292,7 @@ extension HierarchyClient: DependencyKey {
     launchAgent: unimplemented(
       "HierarchyClient.launchAgent",
       placeholder: AgentLaunchOutcome(
-        profile: AgentProfile(kind: .claudeCode), command: "", tabID: nil, paneID: nil)
+        profile: AgentProfile(kind: .claudeCode), command: "", tabID: nil, paneID: nil, contentID: nil)
     ),
     stopScript: unimplemented("HierarchyClient.stopScript"),
     stopAllScripts: unimplemented("HierarchyClient.stopAllScripts"),
@@ -2540,10 +2300,10 @@ extension HierarchyClient: DependencyKey {
       "HierarchyClient.runWorktreeLifecycleScript"
     ),
     promoteWorktree: unimplemented("HierarchyClient.promoteWorktree"),
-    setPaneLabel: unimplemented("HierarchyClient.setPaneLabel"),
-    setPaneAgentKind: unimplemented("HierarchyClient.setPaneAgentKind"),
-    setPaneAgentSessionID: unimplemented("HierarchyClient.setPaneAgentSessionID"),
-    updatePaneWorkingDirectory: unimplemented("HierarchyClient.updatePaneWorkingDirectory"),
+    setContentLabel: unimplemented("HierarchyClient.setContentLabel"),
+    setAgentKind: unimplemented("HierarchyClient.setAgentKind"),
+    setAgentSessionID: unimplemented("HierarchyClient.setAgentSessionID"),
+    updateWorkingDirectory: unimplemented("HierarchyClient.updateWorkingDirectory"),
     reorderWorktrees: unimplemented("HierarchyClient.reorderWorktrees"),
     // Quiet `[]` mirrors the liveValue fallback: SwiftUI bodies read the
     // queue on every render of a pane badge, and a detached render pass in

@@ -18,9 +18,7 @@ struct SidebarWorktreeActivityIcon: View {
 
   private var isExecuting: Bool {
     hierarchyManager.worktreeIsDirty(worktree)
-      || worktree.tabs.contains { tab in
-        tab.panes.contains { agentStateStore?.workingPaneIDs.contains($0.id) == true }
-      }
+      || worktree.contentIDs.contains { agentStateStore?.workingContentIDs.contains($0) == true }
   }
 
   var body: some View {

@@ -2,11 +2,14 @@ import CodansCore
 import ComposableArchitecture
 import Foundation
 
-/// Tab bar reducer. State-free controller: Worktree.tabs is read from the
-/// environment `HierarchyManager` at render time; actions dispatch create /
+/// Tab bar reducer, one instance shared by every Pane's strip of the
+/// selected Worktree. State-free controller: a Pane's Tabs are read from
+/// the environment `HierarchyManager` at render time; actions dispatch new /
 /// select / close / rename / reorder / bulk-close commands through
-/// `HierarchyClient`. Errors are swallowed (logged via the client's own
-/// channels) — tab-bar failures are rare and not worth modal UX today.
+/// `HierarchyClient`. Tab ids are catalog-unique, so a chip action names
+/// its Tab alone; strip-level actions name their Pane. Errors are swallowed
+/// (logged via the client's own channels) — tab-bar failures are rare and
+/// not worth modal UX today.
 @Reducer
 struct TabBarFeature {
   /// Sheet payload while the user is editing a tab's name. Lifted into the reducer
@@ -37,9 +40,11 @@ struct TabBarFeature {
   }
 
   enum Action: Equatable {
-    case newTabButtonTapped(inWorktree: WorktreeID, inProject: ProjectID)
-    case tabButtonTapped(TabID, inWorktree: WorktreeID, inProject: ProjectID)
-    case closeButtonTapped(TabID, inWorktree: WorktreeID, inProject: ProjectID)
+    /// "+" on a strip. `inPane == nil` means the focused Pane (⌘T), or the
+    /// first Pane of a Worktree that has none.
+    case newTabButtonTapped(inPane: PaneID?, inWorktree: WorktreeID, inProject: ProjectID)
+    case tabButtonTapped(TabID)
+    case closeButtonTapped(TabID)
 
     /// Open the rename sheet for `tabID`. Sources: chip context-menu Rename
     /// (any tab) and `RootFeature.renameActiveTabForCurrentWorktreeRequested`
@@ -49,49 +54,43 @@ struct TabBarFeature {
     /// committing. Commit path clears `renameTarget` inside `renameSubmitted`
     /// so the sheet animates away on Enter.
     case renameDismissed
-    case renameSubmitted(
-      TabID, name: String?, inWorktree: WorktreeID, inProject: ProjectID)
+    case renameSubmitted(TabID, name: String?)
     case colorRequested(TabID, currentColor: TabColor?)
     case colorDismissed
-    case colorSubmitted(
-      TabID, color: TabColor?, inWorktree: WorktreeID, inProject: ProjectID)
+    case colorSubmitted(TabID, color: TabColor?)
     case iconRequested(TabID, currentIcon: String?)
     case iconDismissed
-    case iconSubmitted(
-      TabID, icon: String?, inWorktree: WorktreeID, inProject: ProjectID)
-    case contextMenuCloseOthers(TabID, inWorktree: WorktreeID, inProject: ProjectID)
-    case contextMenuCloseToRight(TabID, inWorktree: WorktreeID, inProject: ProjectID)
-    case contextMenuCloseAll(inWorktree: WorktreeID, inProject: ProjectID)
-    case dragReorderEnded(
-      orderedIDs: [TabID], inWorktree: WorktreeID, inProject: ProjectID)
-    case middleClicked(TabID, inWorktree: WorktreeID, inProject: ProjectID)
-    /// Trailing split button click. Anchors on the active tab's
-    /// last-focused pane (falling back to the leftmost leaf for tabs
-    /// that haven't been focused since launch) and splits it in
-    /// `direction`. Silent no-op if the worktree has no active tab or
-    /// the tab has no panes.
+    case iconSubmitted(TabID, icon: String?)
+    case contextMenuCloseOthers(TabID)
+    case contextMenuCloseToRight(TabID)
+    case contextMenuCloseAll(inPane: PaneID)
+    case dragReorderEnded(orderedIDs: [TabID], inPane: PaneID)
+    case middleClicked(TabID)
+    /// Trailing split button click, or the ⌘D / ⌘⇧D chords. Splits
+    /// `fromPane` (nil = the focused Pane) in `direction`, creating a Pane
+    /// with a fresh Tab in the anchor's directory. Silent no-op when the
+    /// Worktree has no Pane.
     case trailingSplitRequested(
       direction: SplitTree<PaneID>.NewDirection,
-      inWorktree: WorktreeID, inProject: ProjectID)
+      fromPane: PaneID?, inWorktree: WorktreeID, inProject: ProjectID)
     /// Play button on an Agent Session History row (trailing-accessory
-    /// popover). Opens a fresh tab whose pane runs the agent's resume
+    /// popover). Opens a fresh Tab whose session runs the agent's resume
     /// invocation (e.g. `claude --resume <id>`) as `initialCommand`, so the
-    /// agent process owns the pane exactly like a manually-launched agent —
-    /// AgentBinder classifies it from the foreground job as usual.
+    /// agent process owns the session exactly like a manually-launched agent
+    /// — AgentBinder classifies it from the foreground job as usual.
     case resumeAgentSessionTapped(
       agent: AgentKind, sessionID: String,
-      inWorktree: WorktreeID, inProject: ProjectID)
+      inPane: PaneID?, inWorktree: WorktreeID, inProject: ProjectID)
     /// An agent picked from the `+` button's press-and-hold / right-click
-    /// menu. Starts the profile in a new tab whatever its saved placement —
-    /// the user reached it from the new-tab button.
+    /// menu. Starts the profile in a new Tab of that Pane whatever its saved
+    /// placement — the user reached it from the new-tab button.
     case launchAgentInNewTabTapped(
-      profileID: UUID, inWorktree: WorktreeID, inProject: ProjectID)
+      profileID: UUID, inPane: PaneID?, inWorktree: WorktreeID, inProject: ProjectID)
     /// "Manage Agents…" footer of the same menu.
     case manageAgentsTapped
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
-  @Dependency(\.continuousClock) private var clock
   @Dependency(SettingsWriter.self) private var settingsWriter
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
 
@@ -106,46 +105,27 @@ struct TabBarFeature {
         state.renameTarget = nil
         return .none
 
-      case .newTabButtonTapped(let worktreeID, let projectID):
-        guard let tabID = try? hierarchyClient.createTab(worktreeID, projectID, nil)
-        else { return .none }
-        // Resolve worktree.path from the catalog so the auto-spawned pane
-        // starts in the Worktree's directory instead of `$HOME`. Silent no-op
-        // if the Worktree vanished between createTab and this lookup.
-        let catalog = hierarchyClient.snapshot()
+      case .newTabButtonTapped(let paneID, let worktreeID, let projectID):
+        // Resolve worktree.path from the catalog so the session starts in
+        // the Worktree's directory instead of `$HOME`. Silent no-op if the
+        // Worktree vanished.
+        guard let cwd = worktreePath(worktreeID, projectID) else { return .none }
         guard
-          let worktree = catalog.projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID })
+          let created = try? hierarchyClient.newTab(
+            paneID, worktreeID, projectID, .terminal(workingDirectory: cwd), nil, nil, true)
         else { return .none }
-        let cwd = worktree.path
-        // Promote the new pane's surface to first responder so the new tab
-        // opens with keyboard focus on its lone pane. Dispatched async so
-        // SwiftUI has time to attach the surface view to the window before
-        // `makeFirstResponder` runs — `focusSurfaceView` retries with
-        // backoff if the window isn't ready yet. Mirrors the focus flow
-        // in `PaneActionRouterFeature.newSplit`.
-        return .run { [client = hierarchyClient, clock] _ in
-          // Let the tab bar's insertion animation play first; see
-          // `TabBarMetrics.firstPaneDelay`.
-          try? await clock.sleep(for: TabBarMetrics.firstPaneDelay)
-          guard
-            let newPaneID = try? await client.openPane(
-              tabID, worktreeID, projectID, cwd, nil
-            )
-          else { return }
-          await MainActor.run { client.focusSurfaceView(newPaneID) }
-        }
+        return bringUpAndFocus(created.contentID)
 
-      case .tabButtonTapped(let tabID, let worktreeID, let projectID):
-        try? hierarchyClient.selectTab(tabID, worktreeID, projectID)
+      case .tabButtonTapped(let tabID):
+        try? hierarchyClient.selectTab(tabID)
         return .none
 
-      case .closeButtonTapped(let tabID, let worktreeID, let projectID):
-        try? hierarchyClient.closeTab(tabID, worktreeID, projectID)
+      case .closeButtonTapped(let tabID):
+        try? hierarchyClient.closeTab(tabID)
         return .none
 
-      case .renameSubmitted(let tabID, let name, let worktreeID, let projectID):
-        try? hierarchyClient.renameTab(tabID, worktreeID, projectID, name)
+      case .renameSubmitted(let tabID, let name):
+        try? hierarchyClient.renameTab(tabID, name)
         state.renameTarget = nil
         return .none
 
@@ -157,8 +137,8 @@ struct TabBarFeature {
         state.colorTarget = nil
         return .none
 
-      case .colorSubmitted(let tabID, let color, let worktreeID, let projectID):
-        try? hierarchyClient.setTabColor(tabID, worktreeID, projectID, color)
+      case .colorSubmitted(let tabID, let color):
+        try? hierarchyClient.setTabColor(tabID, color)
         state.colorTarget = nil
         return .none
 
@@ -170,62 +150,51 @@ struct TabBarFeature {
         state.iconTarget = nil
         return .none
 
-      case .iconSubmitted(let tabID, let icon, let worktreeID, let projectID):
-        try? hierarchyClient.setTabIcon(tabID, worktreeID, projectID, icon, .user)
+      case .iconSubmitted(let tabID, let icon):
+        try? hierarchyClient.setTabIcon(tabID, icon, .user)
         state.iconTarget = nil
         return .none
 
-      case .contextMenuCloseOthers(let tabID, let worktreeID, let projectID):
-        try? hierarchyClient.closeOtherTabs(tabID, worktreeID, projectID)
+      case .contextMenuCloseOthers(let tabID):
+        try? hierarchyClient.closeOtherTabs(tabID)
         return .none
 
-      case .contextMenuCloseToRight(let tabID, let worktreeID, let projectID):
-        try? hierarchyClient.closeTabsToRight(tabID, worktreeID, projectID)
+      case .contextMenuCloseToRight(let tabID):
+        try? hierarchyClient.closeTabsToRight(tabID)
         return .none
 
-      case .contextMenuCloseAll(let worktreeID, let projectID):
-        try? hierarchyClient.closeAllTabs(worktreeID, projectID)
+      case .contextMenuCloseAll(let paneID):
+        try? hierarchyClient.closeAllTabs(paneID)
         return .none
 
-      case .dragReorderEnded(let orderedIDs, let worktreeID, let projectID):
-        try? hierarchyClient.reorderTabs(worktreeID, projectID, orderedIDs)
+      case .dragReorderEnded(let orderedIDs, let paneID):
+        try? hierarchyClient.reorderTabs(paneID, orderedIDs)
         return .none
 
-      case .middleClicked(let tabID, let worktreeID, let projectID):
-        try? hierarchyClient.closeTab(tabID, worktreeID, projectID)
+      case .middleClicked(let tabID):
+        try? hierarchyClient.closeTab(tabID)
         return .none
 
-      case .trailingSplitRequested(let direction, let worktreeID, let projectID):
+      case .trailingSplitRequested(let direction, let fromPane, let worktreeID, let projectID):
         let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog.projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let activeTabID = worktree.selectedTabID,
-          let activeTab = worktree.tabs.first(where: { $0.id == activeTabID })
+        // Anchor on the requested Pane, else the focused one, so the menu
+        // chord ("Split Right/Down") and the strip's split button both
+        // fork from where the user actually is.
+        guard let anchor = fromPane ?? hierarchyClient.focusedContent(worktreeID)?.paneID,
+          let pane = catalog.pane(anchor)
         else { return .none }
-        // Anchor on the tab's last-focused pane so the menu chord ("Split
-        // Right/Down") and the toolbar split button both fork from where
-        // the user actually is. `leaves().first` is the safety net for
-        // tabs that haven't been focused since launch.
+        // The new session starts where the anchor's selected session is.
+        let cwd =
+          pane.selectedTab?.content.terminal?.workingDirectory
+          ?? worktreePath(worktreeID, projectID) ?? NSHomeDirectory()
         guard
-          let anchor = hierarchyClient.lastFocusedPane(activeTabID)
-            ?? activeTab.splitTree.leaves().first,
-          let anchorPane = activeTab.panes.first(where: { $0.id == anchor })
+          let created = try? hierarchyClient.splitPane(
+            anchor, direction, .terminal(workingDirectory: cwd), nil, nil)
         else { return .none }
-        let cwd = anchorPane.workingDirectory
-        return .run { [client = hierarchyClient] _ in
-          guard
-            let newPaneID = try? await client.splitPane(
-              anchor, direction,
-              activeTabID, worktreeID, projectID,
-              cwd, nil
-            )
-          else { return }
-          await MainActor.run { client.focusSurfaceView(newPaneID) }
-        }
+        return bringUpAndFocus(created.contentID)
 
-      case .resumeAgentSessionTapped(let agent, let sessionID, let worktreeID, let projectID):
-        // Same catalog resolution as `newTabButtonTapped`: the pane must
+      case .resumeAgentSessionTapped(let agent, let sessionID, let paneID, let worktreeID, let projectID):
+        // Same catalog resolution as `newTabButtonTapped`: the session must
         // spawn in the Worktree's directory for the agent CLI to find the
         // session it recorded against that cwd.
         // The scanner only emits summaries for agents whose adapter can
@@ -233,33 +202,28 @@ struct TabBarFeature {
         // a user-visible state.
         guard
           let command = AgentRuntimeAdapters.adapter(for: agent)
-            .resumeCommand(sessionID: sessionID)
+            .resumeCommand(sessionID: sessionID),
+          let cwd = worktreePath(worktreeID, projectID)
         else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog.projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID })
-        else { return .none }
-        let cwd = worktree.path
         // No tab name: a name is a sticky rename, and the chip must follow
-        // the agent's live title like a command typed in a pane.
-        return .run { [client = hierarchyClient] _ in
-          guard
-            let tabID = try? await client.createTab(worktreeID, projectID, nil),
-            let paneID = try? await client.openPane(
-              tabID, worktreeID, projectID, cwd, command)
-          else { return }
-          // Same post-spawn focus dispatch as `newTabButtonTapped`: the
-          // surface view must attach to the hosting window before
-          // `makeFirstResponder` takes.
-          await MainActor.run { client.focusSurfaceView(paneID) }
-        }
+        // the agent's live title like a command typed in a session.
+        guard
+          let created = try? hierarchyClient.newTab(
+            paneID, worktreeID, projectID,
+            .terminal(workingDirectory: cwd, initialCommand: command), nil, nil, true)
+        else { return .none }
+        return bringUpAndFocus(created.contentID)
 
-      case .launchAgentInNewTabTapped(let profileID, let worktreeID, let projectID):
+      case .launchAgentInNewTabTapped(let profileID, let paneID, let worktreeID, let projectID):
         // A profile removed between opening the menu and picking it is a
         // silent no-op, like the rest of the tab bar's rare failures.
         guard let profile = settingsWriter.readSnapshotSync().agents.profile(id: profileID)
         else { return .none }
+        // `.newTab` lands in the focused Pane; the menu belongs to a
+        // specific strip, so focus that Pane first.
+        if let paneID {
+          try? hierarchyClient.focusPane(paneID)
+        }
         let spec = AgentLaunchSpec(
           profile: profile, projectID: projectID, worktreeID: worktreeID, target: .newTab)
         return .run { [client = hierarchyClient] _ in
@@ -272,6 +236,23 @@ struct TabBarFeature {
           await MainActor.run { presenter.openAt(.agents) }
         }
       }
+    }
+  }
+
+  private func worktreePath(_ worktreeID: WorktreeID, _ projectID: ProjectID) -> String? {
+    hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+      .worktrees.first(where: { $0.id == worktreeID })?.path
+  }
+
+  /// Spawn the new Tab's session, then promote its surface to first
+  /// responder so the Tab opens with keyboard focus. Dispatched async so
+  /// SwiftUI has time to attach the surface view to the window before
+  /// `makeFirstResponder` runs — `focusSurfaceView` retries with backoff
+  /// if the window isn't ready yet.
+  private func bringUpAndFocus(_ contentID: ContentID) -> Effect<Action> {
+    .run { [client = hierarchyClient] _ in
+      guard (try? await client.ensureSurface(contentID)) != nil else { return }
+      await MainActor.run { client.focusSurfaceView(contentID) }
     }
   }
 }

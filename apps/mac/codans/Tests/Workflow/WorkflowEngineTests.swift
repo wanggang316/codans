@@ -13,14 +13,14 @@ struct WorkflowEngineTests {
   /// Scripted world the engine polls.
   final class World {
     var now = Date(timeIntervalSince1970: 1_700_000_000)
-    var lines: [(PaneID, String)] = []
+    var lines: [(ContentID, String)] = []
     var sendSucceeds = true
-    var states: [PaneID: AgentStateStore.AgentRuntimeState] = [:]
-    var existing: Set<PaneID> = []
-    var notifications: [(String, String, PaneID?)] = []
+    var states: [ContentID: AgentStateStore.AgentRuntimeState] = [:]
+    var existing: Set<ContentID> = []
+    var notifications: [(String, String, ContentID?)] = []
     var remembered: [WorkflowBindingMemory] = []
     var launches: [WorkflowLaunchRequest] = []
-    var launchPane = PaneID()
+    var launchPane = ContentID()
 
     func advance(_ seconds: TimeInterval) {
       now = now.addingTimeInterval(seconds)
@@ -32,7 +32,7 @@ struct WorkflowEngineTests {
     let registry: WorkflowActivationRegistry
     let world: World
     let root: URL
-    let paneID: PaneID
+    let contentID: ContentID
   }
 
   static let yaml = """
@@ -66,13 +66,13 @@ struct WorkflowEngineTests {
       .appending(path: "WorkflowEngineTests-\(UUID().uuidString)", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     let world = World()
-    let paneID = PaneID()
-    world.existing = [paneID, world.launchPane]
-    world.states[paneID] = .idle
+    let contentID = ContentID()
+    world.existing = [contentID, world.launchPane]
+    world.states[contentID] = .idle
     let registry = WorkflowActivationRegistry()
     var dependencies = WorkflowEngineDependencies(
-      sendLine: { paneID, line in
-        world.lines.append((paneID, line))
+      sendLine: { contentID, line in
+        world.lines.append((contentID, line))
         return world.sendSucceeds
       },
       launch: { request, _, _ in
@@ -80,11 +80,11 @@ struct WorkflowEngineTests {
         return world.launchPane
       },
       runCommand: { _, _, _, _ in .exited(code: 0, stdout: Data("ok\n".utf8), stderr: Data(), stdoutOverflow: false) },
-      closePane: { _ in },
-      focusPane: { _ in },
-      paneExists: { world.existing.contains($0) },
+      closeTab: { _ in },
+      focusContent: { _ in },
+      contentExists: { world.existing.contains($0) },
       agentState: { world.states[$0] },
-      notify: { title, body, paneID in world.notifications.append((title, body, paneID)) },
+      notify: { title, body, contentID in world.notifications.append((title, body, contentID)) },
       profile: { AgentProfile(id: $0, kind: .claudeCode, name: "Reviewer") },
       rememberBinding: { world.remembered.append($0) }
     )
@@ -93,7 +93,7 @@ struct WorkflowEngineTests {
     dependencies.idleHoldSeconds = idleHold
     dependencies.pollInterval = .milliseconds(5)
     let engine = WorkflowEngine(registry: registry, dependencies: dependencies)
-    return Harness(engine: engine, registry: registry, world: world, root: root, paneID: paneID)
+    return Harness(engine: engine, registry: registry, world: world, root: root, contentID: contentID)
   }
 
   static func entry(yaml: String, id: String = "ping") throws -> WorkflowCatalogEntry {
@@ -116,9 +116,9 @@ struct WorkflowEngineTests {
     var bindings: [String: WorkflowRoleBinding] = [:]
     for role in definition.roles {
       switch role.source {
-      case .current, .pick: bindings[role.name] = .current(paneID: harness.paneID)
+      case .current, .pick: bindings[role.name] = .current(contentID: harness.contentID)
       case .launch:
-        bindings[role.name] = .launch(profileID: UUID(), profileName: "Reviewer", agent: .claudeCode, paneID: nil)
+        bindings[role.name] = .launch(profileID: UUID(), profileName: "Reviewer", agent: .claudeCode, contentID: nil)
       }
     }
     return WorkflowRunConfiguration(
@@ -130,7 +130,7 @@ struct WorkflowEngineTests {
       bindings: bindings,
       runDirectory: WorkflowRunLayout.runDirectory(worktreeRoot: harness.root, runID: id).path(percentEncoded: false),
       cliCommand: "codans",
-      initiatorPaneID: selfInitiated ? harness.paneID : nil,
+      initiatorContentID: selfInitiated ? harness.contentID : nil,
       startedAt: harness.world.now,
       idleGraceSeconds: 10
     )
@@ -160,12 +160,12 @@ struct WorkflowEngineTests {
     harness.world.advance(2)
     await Self.settle { !harness.world.lines.isEmpty }
     let line = try #require(harness.world.lines.first)
-    #expect(line.0 == harness.paneID)
+    #expect(line.0 == harness.contentID)
     #expect(line.1.hasPrefix("Summarize the diff."))
     #expect(line.1.contains("codans workflow deliver"))
     await Self.settle { harness.engine.run(for: started.runID)?.phase == .waitingForDelivery(ordinal: 1) }
     #expect(harness.engine.run(for: started.runID)?.phase == .waitingForDelivery(ordinal: 1))
-    #expect(harness.registry.activation(forPane: harness.paneID)?.ordinal == 1)
+    #expect(harness.registry.activation(forContent: harness.contentID)?.ordinal == 1)
     // The record and log are on disk.
     let store = WorkflowRunStore(runDirectory: URL(fileURLWithPath: configuration.runDirectory))
     #expect(try store.readRecord()?.status == .running)
@@ -194,7 +194,7 @@ struct WorkflowEngineTests {
     let started = try await harness.engine.start(configuration: configuration, entry: entry)
     let task = try #require(started.selfInitiated)
     #expect(harness.world.lines.isEmpty, "a self-initiated task is handed back, not typed")
-    let token = try #require(harness.registry.activation(forPane: harness.paneID)?.token)
+    let token = try #require(harness.registry.activation(forContent: harness.contentID)?.token)
     #expect(task.completionCommand?.contains(token) == true)
 
     let wrong = await harness.engine.deliver(
@@ -217,7 +217,7 @@ struct WorkflowEngineTests {
     #expect(harness.engine.run(for: started.runID)?.status == .completed)
     #expect(harness.engine.activeRuns.isEmpty)
     #expect(harness.engine.finishedRuns.count == 1)
-    #expect(harness.registry.activation(forPane: harness.paneID) == nil)
+    #expect(harness.registry.activation(forContent: harness.contentID) == nil)
     #expect(harness.world.notifications.contains { $0.1.hasPrefix("Done ") })
     let index = try WorkflowRunIndex.load(worktreeRoot: harness.root)
     #expect(index.runs.map(\.id) == [started.runID])
@@ -236,9 +236,9 @@ struct WorkflowEngineTests {
     try await Task.sleep(for: .milliseconds(40))
     #expect(harness.world.lines.isEmpty)
 
-    harness.world.states[harness.paneID] = .working
+    harness.world.states[harness.contentID] = .working
     try await Task.sleep(for: .milliseconds(30))
-    harness.world.states[harness.paneID] = .idle
+    harness.world.states[harness.contentID] = .idle
     // The grace counts from the first idle observation, so let the poller
     // see idle before the clock jumps past the grace.
     try await Task.sleep(for: .milliseconds(30))
@@ -268,10 +268,10 @@ struct WorkflowEngineTests {
     #expect(request.role == "reviewer")
     #expect(request.environment[CodansEnvironment.Key.workflowRun.rawValue] == started.runID.uuidString)
     #expect(request.environment[CodansEnvironment.Key.workflowToken.rawValue] != nil)
-    #expect(harness.registry.runID(forPane: harness.world.launchPane) == started.runID)
-    #expect(harness.registry.activation(forPane: harness.world.launchPane)?.ordinal == 1)
+    #expect(harness.registry.runID(forContent: harness.world.launchPane) == started.runID)
+    #expect(harness.registry.activation(forContent: harness.world.launchPane)?.ordinal == 1)
     #expect(harness.world.remembered.first?.role == "reviewer")
-    #expect(harness.engine.run(for: started.runID)?.bindings["reviewer"]?.paneID == harness.world.launchPane)
+    #expect(harness.engine.run(for: started.runID)?.bindings["reviewer"]?.contentID == harness.world.launchPane)
   }
 
   @Test
@@ -283,7 +283,7 @@ struct WorkflowEngineTests {
     #expect(harness.engine.cancel(runID: started.runID))
     await Self.settle { harness.engine.activeRuns.isEmpty }
     #expect(harness.engine.run(for: started.runID)?.status == .cancelled)
-    #expect(harness.registry.activation(forPane: harness.paneID) == nil)
-    #expect(harness.registry.runID(forPane: harness.paneID) == nil)
+    #expect(harness.registry.activation(forContent: harness.contentID) == nil)
+    #expect(harness.registry.runID(forContent: harness.contentID) == nil)
   }
 }

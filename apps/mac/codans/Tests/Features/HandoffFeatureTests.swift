@@ -10,12 +10,12 @@ import Testing
 /// and the order it hands to the parent for Brief, Context, and Save Progress.
 @MainActor
 struct HandoffFeatureTests {
-  private static let paneID = PaneID()
+  private static let contentID = ContentID()
   private static let codexProfile = AgentProfile(kind: .codex, name: "Build")
 
   // Fixed ids: the delegate order is compared against this source.
   private static let source = HandoffFeature.Source(
-    paneID: paneID,
+    contentID: contentID,
     projectID: ProjectID(raw: UUID()),
     worktreeID: WorktreeID(raw: UUID()),
     agent: .claudeCode

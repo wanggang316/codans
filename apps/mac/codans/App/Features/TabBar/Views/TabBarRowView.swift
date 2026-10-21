@@ -559,6 +559,7 @@ private struct ResolvingTabChipView: View {
   let onCacheLiveTitle: (String) -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
   @Dependency(TerminalClient.self) private var terminalClient
@@ -604,24 +605,23 @@ private struct ResolvingTabChipView: View {
     }
   }
 
-  /// Script tint for the chip's icon while this tab's dedicated run pane is
-  /// executing. Run panes are skipped by `tabIsDirty`, so a running script
-  /// never swaps the chip's glyph for the spinner — the glyph picking up the
-  /// script's colour is the running affordance instead. `nil` when no run
-  /// pane in this tab is busy, or its script no longer exists in Settings.
-  /// Reads `HierarchyManager.paneIsBusy` (@Observable) so the tint tracks
+  /// Script tint for the chip's icon while this Tab's dedicated run session
+  /// is executing. Run sessions are skipped by `tabIsDirty`, so a running
+  /// script never swaps the chip's glyph for the spinner — the glyph picking
+  /// up the script's colour is the running affordance instead. `nil` when
+  /// the session is idle, or its script no longer exists in Settings. Reads
+  /// `ContentRuntime.isTerminalBusy` (@Observable) so the tint tracks
   /// start/stop automatically.
   private var runningScriptIconTint: Color? {
-    guard let settings = settingsStore?.settings else { return nil }
-    for pane in tab.panes {
-      guard let scriptID = pane.runScriptID, hierarchyManager.paneIsBusy(pane.id) else { continue }
-      let script =
-        settings.general.globalScripts.first(where: { $0.id == scriptID })
-        ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
-      guard let script else { return nil }
-      return ScriptTintColorPalette.color(for: script.resolvedTintColor)
-    }
-    return nil
+    guard let settings = settingsStore?.settings,
+      let scriptID = tab.content.terminal?.runScriptID,
+      contentRuntime?.isTerminalBusy(tab.contentID) == true
+    else { return nil }
+    let script =
+      settings.general.globalScripts.first(where: { $0.id == scriptID })
+      ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
+    guard let script else { return nil }
+    return ScriptTintColorPalette.color(for: script.resolvedTintColor)
   }
 
   /// Whether to render the chip's running spinner. A working coding agent
@@ -642,13 +642,12 @@ private struct ResolvingTabChipView: View {
     return terminalBusy || agentWorking
   }
 
-  /// Title sourced strictly from the live focused-pane `SurfaceInfo`.
+  /// Title sourced strictly from the live session's `SurfaceInfo`.
   /// Returns `nil` when the surface hasn't been spawned yet or the shell
   /// hasn't pushed any of OSC 2 / OSC 0 / OSC 7 — letting the caller
   /// decide whether to fall back to the persisted cache or "Tab N".
   private var liveResolvedTitle: String? {
-    let paneID = hierarchyManager.lastFocusedPane(in: tab.id) ?? tab.panes.first?.id
-    guard let paneID, let surface = terminalClient.surface(paneID) else { return nil }
+    guard let surface = terminalClient.surface(tab.contentID) else { return nil }
     let info = surface.info
     // Read all observable properties up-front so SwiftUI registers
     // observation on every one — `if let` short-circuits would skip
@@ -669,11 +668,8 @@ private struct ResolvingTabChipView: View {
     if let name = tab.name, !name.isEmpty { return name }
     if let live { return live }
     if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
-    let pane =
-      tab.panes.first { $0.id == hierarchyManager.lastFocusedPane(in: tab.id) }
-      ?? tab.panes.first
-    if let pane {
-      let basename = (pane.workingDirectory as NSString).lastPathComponent
+    if let cwd = tab.content.terminal?.workingDirectory {
+      let basename = (cwd as NSString).lastPathComponent
       if !basename.isEmpty { return basename }
     }
     return emptyTabTitle

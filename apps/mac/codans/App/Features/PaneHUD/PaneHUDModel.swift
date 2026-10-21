@@ -19,30 +19,30 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
 
   var canHandOff: Bool { handOffBlockedReason == nil }
 
-  /// Resolves the HUD for `paneID`, or `nil` when the pane is no longer in
+  /// Resolves the HUD for `contentID`, or `nil` when the pane is no longer in
   /// the catalog (it was closed while its host was still on screen).
   ///
-  /// `agent` comes from the caller rather than `Pane.agentKind` alone: the
+  /// `agent` comes from the caller rather than `TerminalContentState.agentKind` alone: the
   /// live `AgentStateStore` sees an agent the moment its process is
   /// classified, while the catalog field only carries what was persisted.
   /// Callers pass the store's answer and let this fall back to the catalog.
   static func resolve(
-    paneID: PaneID,
+    contentID: ContentID,
     in catalog: Catalog,
     agent: AgentKind?
   ) -> PaneHUDModel? {
     guard
-      let projectID = catalog.projectID(forPane: paneID),
+      let projectID = catalog.projectID(forContent: contentID),
       let project = catalog.projects.first(where: { $0.id == projectID })
     else {
       return nil
     }
-    let pane = catalog.pane(paneID)
-    let resolvedAgent = agent ?? pane?.agentKind
+    let content = catalog.content(contentID)?.terminal
+    let resolvedAgent = agent ?? content?.agentKind
     return PaneHUDModel(
       agent: resolvedAgent,
       handOffBlockedReason: handOffBlockedReason(project: project, agent: resolvedAgent),
-      queuedCommandCount: pane?.commandQueue.count ?? 0
+      queuedCommandCount: content?.commandQueue.count ?? 0
     )
   }
 

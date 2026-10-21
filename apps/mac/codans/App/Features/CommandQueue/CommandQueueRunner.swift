@@ -6,7 +6,7 @@ private let runnerLogger = Logger(
   subsystem: "com.gumpw.codans.commandqueue", category: "runner"
 )
 
-/// Drains every Pane's `commandQueue`: one poll pass decides which parked
+/// Drains every Content's `commandQueue`: one poll pass decides which parked
 /// command is due and writes it into that pane's terminal.
 ///
 /// Polling rather than event-subscribing is deliberate. Two of the three
@@ -17,7 +17,7 @@ private let runnerLogger = Logger(
 /// panes that actually hold a queue.
 ///
 /// State that must persist (the queue itself, a repeat's next occurrence)
-/// lives on `Pane.commandQueue`; the only thing held here is the per-pane
+/// lives on `TerminalContentState.commandQueue`; the only thing held here is the per-pane
 /// settle log, which is meaningless across a relaunch.
 @MainActor
 final class CommandQueueRunner {
@@ -34,26 +34,26 @@ final class CommandQueueRunner {
   /// itself into one prompt on consecutive ticks.
   static let settleWindow: TimeInterval = 3
 
-  private let queuedPanes: @MainActor () -> [(paneID: PaneID, queue: [QueuedCommand])]
-  private let setQueue: @MainActor (PaneID, [QueuedCommand]) -> Void
-  private let isPaneReady: @MainActor (PaneID) -> Bool
-  private let hasLiveSurface: @MainActor (PaneID) -> Bool
+  private let queuedPanes: @MainActor () -> [(contentID: ContentID, queue: [QueuedCommand])]
+  private let setQueue: @MainActor (ContentID, [QueuedCommand]) -> Void
+  private let isPaneReady: @MainActor (ContentID) -> Bool
+  private let hasLiveSurface: @MainActor (ContentID) -> Bool
   /// Delivers one command to a pane: types it, then submits it. Wired to
   /// `TerminalClient.sendCommand`, which owns the gap between the two.
-  private let send: @MainActor (PaneID, String) -> Void
+  private let send: @MainActor (ContentID, String) -> Void
   private let now: () -> Date
 
   /// Last fire per pane, pruned to the settle window on every pass so the
   /// map can't grow with the session.
-  private var lastFiredAt: [PaneID: Date] = [:]
+  private var lastFiredAt: [ContentID: Date] = [:]
   private var tickTask: Task<Void, Never>?
 
   init(
-    queuedPanes: @escaping @MainActor () -> [(paneID: PaneID, queue: [QueuedCommand])],
-    setQueue: @escaping @MainActor (PaneID, [QueuedCommand]) -> Void,
-    isPaneReady: @escaping @MainActor (PaneID) -> Bool,
-    hasLiveSurface: @escaping @MainActor (PaneID) -> Bool,
-    send: @escaping @MainActor (PaneID, String) -> Void,
+    queuedPanes: @escaping @MainActor () -> [(contentID: ContentID, queue: [QueuedCommand])],
+    setQueue: @escaping @MainActor (ContentID, [QueuedCommand]) -> Void,
+    isPaneReady: @escaping @MainActor (ContentID) -> Bool,
+    hasLiveSurface: @escaping @MainActor (ContentID) -> Bool,
+    send: @escaping @MainActor (ContentID, String) -> Void,
     now: @escaping () -> Date = Date.init
   ) {
     self.queuedPanes = queuedPanes
@@ -94,32 +94,32 @@ final class CommandQueueRunner {
   /// Returns the panes that fired this pass — diagnostics and test assertions
   /// only; callers in the app ignore it.
   @discardableResult
-  func drain() -> [PaneID] {
+  func drain() -> [ContentID] {
     let now = now()
-    var fired: [PaneID] = []
+    var fired: [ContentID] = []
 
-    for (paneID, queue) in queuedPanes() {
+    for (contentID, queue) in queuedPanes() {
       // No surface means `send` would write into nothing and the entry would
       // be consumed for real. Hold the whole pane until it materialises —
       // a scheduled command that came due while its tab was never opened
       // this session fires once, on the tick after the surface exists.
-      guard hasLiveSurface(paneID) else { continue }
-      if let last = lastFiredAt[paneID], now.timeIntervalSince(last) < Self.settleWindow {
+      guard hasLiveSurface(contentID) else { continue }
+      if let last = lastFiredAt[contentID], now.timeIntervalSince(last) < Self.settleWindow {
         continue
       }
-      guard let command = queue.nextToFire(now: now, isReady: isPaneReady(paneID)) else {
+      guard let command = queue.nextToFire(now: now, isReady: isPaneReady(contentID)) else {
         continue
       }
       runnerLogger.info(
-        "fire pane=\(paneID.raw.uuidString, privacy: .public) repeating=\(command.timing.isRepeating, privacy: .public)"
+        "fire pane=\(contentID.raw.uuidString, privacy: .public) repeating=\(command.timing.isRepeating, privacy: .public)"
       )
       // Text only — `send` is `TerminalClient.sendCommand`, which submits
       // with a separate Return keypress so an agent TUI doesn't read the
       // command and its newline as one pasted block.
-      send(paneID, command.text)
-      lastFiredAt[paneID] = now
-      setQueue(paneID, queue.advancing(command, firedAt: now))
-      fired.append(paneID)
+      send(contentID, command.text)
+      lastFiredAt[contentID] = now
+      setQueue(contentID, queue.advancing(command, firedAt: now))
+      fired.append(contentID)
     }
 
     lastFiredAt = lastFiredAt.filter { now.timeIntervalSince($0.value) < Self.settleWindow }

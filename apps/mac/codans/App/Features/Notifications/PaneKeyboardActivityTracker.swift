@@ -2,7 +2,7 @@ import Foundation
 import CodansCore
 
 /// Records the last user-keystroke timestamp per pane. Reads as
-/// `[PaneID: Date]` snapshots that `NotificationDetector` feeds to
+/// `[ContentID: Date]` snapshots that `NotificationDetector` feeds to
 /// `PaneAttentionInterpreter.Context.lastUserKeystrokeAt` so the interpreter's
 /// 1-second `userTypingRecently` suppression can actually fire on real
 /// user input.
@@ -18,7 +18,7 @@ import CodansCore
 /// interpreter contexts; teardown events purge entries.
 @MainActor
 public final class PaneKeyboardActivityTracker {
-  private var lastByPane: [PaneID: Date] = [:]
+  private var lastByPane: [ContentID: Date] = [:]
 
   /// Process-global weak handle for the AppKit responder path. NSView
   /// subclasses (`GhosttySurfaceView`) cannot read SwiftUI's `@Environment`
@@ -33,30 +33,30 @@ public final class PaneKeyboardActivityTracker {
   /// the AgentState state machine clears its sticky `waitingForInput`
   /// flag on real typing. The default no-op keeps the tracker
   /// detector-local for existing call sites that don't need the hook.
-  public var onActivity: (@MainActor (PaneID) -> Void)?
+  public var onActivity: (@MainActor (ContentID) -> Void)?
 
   public init() {}
 
-  /// Record a user key event delivered to `paneID` at `at`. Called from
+  /// Record a user key event delivered to `contentID` at `at`. Called from
   /// GhosttySurfaceView's key delivery site, before the bytes hand off
   /// to libghostty's PTY.
-  public func recordKey(in paneID: PaneID, at: Date = Date()) {
-    lastByPane[paneID] = at
-    onActivity?(paneID)
+  public func recordKey(in contentID: ContentID, at: Date = Date()) {
+    lastByPane[contentID] = at
+    onActivity?(contentID)
   }
 
   /// Snapshot of all recorded timestamps. The detector calls this once
   /// per `TerminalEvent` to build a Context; the snapshot is a Dictionary
   /// copy (cheap — bounded by open panes, ≤ tens) so the detector can
   /// safely capture it into a per-call Context value.
-  public func snapshot() -> [PaneID: Date] {
+  public func snapshot() -> [ContentID: Date] {
     lastByPane
   }
 
   /// Purge a pane's entry. Called from teardown branches (paneExited /
   /// paneCrashed / paneClosedByTab) so the map's upper bound is "open
   /// panes plus a handful in-flight" rather than monotonically growing.
-  public func purge(_ paneID: PaneID) {
-    lastByPane.removeValue(forKey: paneID)
+  public func purge(_ contentID: ContentID) {
+    lastByPane.removeValue(forKey: contentID)
   }
 }

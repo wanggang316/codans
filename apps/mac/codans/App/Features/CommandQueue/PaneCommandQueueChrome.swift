@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Shares pane-local visibility between the floating list and its restore button.
 struct PaneCommandQueueChrome: View {
-  let paneID: PaneID
+  let contentID: ContentID
   let surface: PaneSurface?
 
   @SceneStorage private var isHidden: Bool
@@ -11,14 +11,14 @@ struct PaneCommandQueueChrome: View {
   @State private var isExpanded = false
   @State private var requestedPage = 0
 
-  init(paneID: PaneID, surface: PaneSurface?) {
-    self.paneID = paneID
+  init(contentID: ContentID, surface: PaneSurface?) {
+    self.contentID = contentID
     self.surface = surface
-    _isHidden = SceneStorage(wrappedValue: false, "commandQueue.hidden.\(paneID)")
+    _isHidden = SceneStorage(wrappedValue: false, "commandQueue.hidden.\(contentID)")
   }
 
   private var entries: [QueuedCommand] {
-    hierarchyManager.catalog.pane(paneID)?.commandQueue ?? []
+    hierarchyManager.catalog.content(contentID)?.terminal?.commandQueue ?? []
   }
 
   var body: some View {
@@ -39,7 +39,7 @@ struct PaneCommandQueueChrome: View {
             .padding(.top, 14)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        PaneHUDView(paneID: paneID, surface: surface) {
+        PaneHUDView(contentID: contentID, surface: surface) {
           isHidden = false
         }
       }
@@ -55,7 +55,7 @@ struct PaneCommandQueueChrome: View {
           .fontWeight(.medium)
           .lineLimit(1)
         Spacer(minLength: 0)
-        Button("Clear All") { hierarchyManager.setCommandQueue([], for: paneID) }
+        Button("Clear All") { hierarchyManager.setCommandQueue([], for: contentID) }
           .foregroundStyle(.secondary)
         Button {
           isHidden = true
@@ -128,7 +128,7 @@ struct PaneCommandQueueChrome: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       Button {
-        hierarchyManager.setCommandQueue(entries.filter { $0.id != entry.id }, for: paneID)
+        hierarchyManager.setCommandQueue(entries.filter { $0.id != entry.id }, for: contentID)
       } label: {
         Image(systemName: "xmark.circle.fill")
           .foregroundStyle(.secondary)

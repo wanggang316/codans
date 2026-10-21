@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 
 extension IPC {
@@ -65,8 +66,11 @@ extension IPC {
     public let isArchived: Bool
     public let isPinned: Bool
     public let isSelected: Bool
+    /// The focused Pane's selected Tab.
     public let selectedTabID: String?
     public let tabCount: Int
+    public let focusedPaneID: String?
+    public let paneCount: Int
     /// The row's group and role inside a workspace; nil elsewhere.
     public let workspaceGroup: WorkspaceGroupRef?
 
@@ -82,6 +86,8 @@ extension IPC {
       isSelected: Bool,
       selectedTabID: String?,
       tabCount: Int,
+      focusedPaneID: String?,
+      paneCount: Int,
       workspaceGroup: WorkspaceGroupRef? = nil
     ) {
       self.id = id
@@ -95,20 +101,28 @@ extension IPC {
       self.isSelected = isSelected
       self.selectedTabID = selectedTabID
       self.tabCount = tabCount
+      self.focusedPaneID = focusedPaneID
+      self.paneCount = paneCount
       self.workspaceGroup = workspaceGroup
     }
   }
 
   /// `hierarchy.describeTab`. `title` is what the sidebar shows (the user's
   /// name, else the last live title); `name` is only the user-set part.
+  /// `paneID` is the Pane holding the Tab and `contentID` its session;
+  /// `focusedPaneID` is the Worktree's focused Pane and `paneIDs` is
+  /// `[paneID]`, both kept so older readers keep decoding.
   public struct TabDescription: Codable, Equatable, Sendable {
     public let id: String
     public let handle: String?
     public let projectID: String
     public let worktreeID: String
+    public let paneID: String
+    public let contentID: String
     public let title: String?
     public let name: String?
     public let icon: String?
+    public let color: TabColor?
     public let isSelected: Bool
     public let focusedPaneID: String?
     public let paneIDs: [String]
@@ -118,9 +132,12 @@ extension IPC {
       handle: String?,
       projectID: String,
       worktreeID: String,
+      paneID: String,
+      contentID: String,
       title: String?,
       name: String?,
       icon: String?,
+      color: TabColor?,
       isSelected: Bool,
       focusedPaneID: String?,
       paneIDs: [String]
@@ -129,24 +146,30 @@ extension IPC {
       self.handle = handle
       self.projectID = projectID
       self.worktreeID = worktreeID
+      self.paneID = paneID
+      self.contentID = contentID
       self.title = title
       self.name = name
       self.icon = icon
+      self.color = color
       self.isSelected = isSelected
       self.focusedPaneID = focusedPaneID
       self.paneIDs = paneIDs
     }
   }
 
-  /// `hierarchy.describePane`. `workingDirectory` is the live shell
-  /// directory when the surface has reported one, else the creation-time
-  /// one; `isLive` says whether a terminal surface is bound this session.
+  /// `hierarchy.describePane`. Describes one session: `tabID` is the Tab
+  /// holding it and `contentID` its session id. `workingDirectory` is the
+  /// live shell directory when the surface has reported one, else the
+  /// creation-time one; `isLive` says whether a terminal surface is bound
+  /// this session.
   public struct PaneDescription: Codable, Equatable, Sendable {
     public let id: String
     public let handle: String?
     public let projectID: String
     public let worktreeID: String
     public let tabID: String
+    public let contentID: String
     public let workingDirectory: String
     public let initialCommand: String?
     public let labels: [String]
@@ -161,6 +184,7 @@ extension IPC {
       projectID: String,
       worktreeID: String,
       tabID: String,
+      contentID: String,
       workingDirectory: String,
       initialCommand: String?,
       labels: [String],
@@ -174,6 +198,7 @@ extension IPC {
       self.projectID = projectID
       self.worktreeID = worktreeID
       self.tabID = tabID
+      self.contentID = contentID
       self.workingDirectory = workingDirectory
       self.initialCommand = initialCommand
       self.labels = labels

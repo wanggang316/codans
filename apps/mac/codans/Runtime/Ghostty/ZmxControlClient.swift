@@ -27,7 +27,7 @@ nonisolated enum ZmxControlClient {
   }
 
   /// Outcome of a best-effort `.snapshot` request. The daemon answers a
-  /// snapshot by writing its `<paneID>.snap` and then closing the socket,
+  /// snapshot by writing its `<contentID>.snap` and then closing the socket,
   /// so socket EOF before the deadline is the acknowledgement.
   enum SnapshotResult: Equatable, Sendable {
     /// Daemon closed the socket (EOF) before the deadline — snapshot done.
@@ -42,18 +42,18 @@ nonisolated enum ZmxControlClient {
   /// the `ZMX_DIR` pin in `PaneDaemonBringup.canonicalSocketDirectory()`
   /// and the session name in `ZmxAttachCommand.session(for:)` — the daemon
   /// binds `<ZMX_DIR>/<session>` (codans sets no `ZMX_SESSION_PREFIX`).
-  static func socketPath(for paneID: PaneID) -> String {
-    canonicalSocketDirectory().appendingPathComponent(paneID.raw.uuidString).path
+  static func socketPath(for contentID: ContentID) -> String {
+    canonicalSocketDirectory().appendingPathComponent(contentID.raw.uuidString).path
   }
 
   /// Query the daemon's shell-child PID (and cwd). Used by foreground-job /
   /// agent detection, which resolves the foreground process group from the
   /// shell PID via `proc_pidinfo` — it needs only the PID, not a PTY fd.
   static func info(
-    for paneID: PaneID, timeout: Duration = .seconds(2)
+    for contentID: ContentID, timeout: Duration = .seconds(2)
   ) async throws -> ZmxInfoPayload {
     let reply = try await query(
-      socketPath: socketPath(for: paneID),
+      socketPath: socketPath(for: contentID),
       request: ZmxFrame(tag: .info),
       expect: .info,
       timeout: timeout
@@ -64,12 +64,12 @@ nonisolated enum ZmxControlClient {
   /// Query the daemon's rendered scrollback in the given format (backs
   /// `codans pane read`). Returns the raw `.history` payload bytes.
   static func history(
-    for paneID: PaneID, format: ZmxHistoryFormat, timeout: Duration = .seconds(5)
+    for contentID: ContentID, format: ZmxHistoryFormat, timeout: Duration = .seconds(5)
   ) async throws -> Data {
     var payload = Data(capacity: 1)
     payload.append(format.rawValue)
     let reply = try await query(
-      socketPath: socketPath(for: paneID),
+      socketPath: socketPath(for: contentID),
       request: ZmxFrame(tag: .history, payload: payload),
       expect: .history,
       timeout: timeout
@@ -115,8 +115,8 @@ nonisolated enum ZmxControlClient {
   /// child). Used when a pane is destroyed for good. Fire-and-forget — the
   /// daemon closes its socket on `.kill`, so there is no reply to await. A
   /// missing socket (daemon already gone) is a silent no-op.
-  static func kill(for paneID: PaneID) {
-    let path = socketPath(for: paneID)
+  static func kill(for contentID: ContentID) {
+    let path = socketPath(for: contentID)
     DispatchQueue.global(qos: .utility).async {
       guard let fd = try? openConnection(socketPath: path) else { return }
       defer { Darwin.close(fd) }
@@ -125,7 +125,7 @@ nonisolated enum ZmxControlClient {
   }
 
   /// Best-effort `.snapshot`: ask a pane's daemon to write its
-  /// `<paneID>.snap` now, then wait (bounded) for the daemon to close the
+  /// `<contentID>.snap` now, then wait (bounded) for the daemon to close the
   /// socket — its EOF is the acknowledgement that the snapshot landed.
   ///
   /// Mirrors `kill(for:)`'s transport (same `openConnection`/`sendAll`) and
@@ -139,11 +139,11 @@ nonisolated enum ZmxControlClient {
   /// A missing control socket (daemon already gone) is a silent no-op that
   /// returns `.noSocket` — it never throws.
   static func snapshot(
-    for paneID: PaneID, timeout: Duration = .seconds(2)
+    for contentID: ContentID, timeout: Duration = .seconds(2)
   ) async -> SnapshotResult {
-    let path = socketPath(for: paneID)
+    let path = socketPath(for: contentID)
     let deadlineMs = max(Int(timeout.components.seconds * 1000), 1)
-    logger.info("zmx.snapshot send pane=\(paneID.raw.uuidString, privacy: .public)")
+    logger.info("zmx.snapshot send pane=\(contentID.raw.uuidString, privacy: .public)")
     return await withCheckedContinuation { (cont: CheckedContinuation<SnapshotResult, Never>) in
       DispatchQueue.global(qos: .userInitiated).async {
         cont.resume(returning: runSnapshot(socketPath: path, deadlineMs: deadlineMs))
