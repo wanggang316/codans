@@ -44,7 +44,7 @@ struct WireTypeCodableTests {
 
   @Test
   func aliasResolveRoundTrip() throws {
-    let req = IPC.AliasResolveRequest(kind: .pane, value: "@agent", contextPaneID: PaneID())
+    let req = IPC.AliasResolveRequest(kind: .pane, value: "@agent", contextPaneID: ContentID())
     let reqData = try JSONEncoder().encode(req)
     let reqDecoded = try JSONDecoder().decode(IPC.AliasResolveRequest.self, from: reqData)
     #expect(reqDecoded == req)
