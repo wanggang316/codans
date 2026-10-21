@@ -171,7 +171,7 @@ struct TerminalContentState {
   6. 任一记录不可读则整个迁移不执行、不写文件，进入只读界面。
 - **版本高于本构建**：只读的“需要升级”界面；不挪文件、不保存、不运行 session reaper 与 unread 清扫。
 - **v4 容错解码**：单个 Tab 不可读只丢该 Tab 并计数；丢失数大于零时本次启动关闭 session reaper 与 unread 清扫。
-- settings：作用于会话的键改为 tab 语义（如 `resumePanesOnLaunch` → `resumeTabsOnLaunch`），经 `SettingsMigration` 一次性改键。
+- settings：以会话为对象的键按新词汇命名——`notifications.mute.mutedPaneIDs` → `mutedContentIDs`（静音跟着会话走）、`ScriptOnFinished` 的 `closePane` → `closeTab`——经 `SettingsMigration` 一次性读旧写新。
 
 ### 组件边界
 
