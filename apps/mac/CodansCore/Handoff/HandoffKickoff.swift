@@ -33,12 +33,12 @@ public nonisolated enum HandoffKickoff {
   public static func sourceInstruction(
     for request: Request,
     requestID: UUID,
-    sourcePaneID: PaneID,
+    sourceContentID: ContentID,
     cli: String = CLIInvocation.commandName,
     placement: HandoffPlacement = .default
   ) -> String {
     let command = Self.command(
-      for: request, requestID: requestID, sourcePaneID: sourcePaneID, cli: cli, placement: placement)
+      for: request, requestID: requestID, sourceContentID: sourceContentID, cli: cli, placement: placement)
     let sections = HandoffBriefing.sectionSkeleton.joined(separator: ", ")
     let ask: String
     switch request {
@@ -55,26 +55,26 @@ public nonisolated enum HandoffKickoff {
 
   /// The shell command the source agent runs. The injected request and the
   /// handler's retry guidance share it, so a retry keeps the explicit source
-  /// pane and the request id. Without them, the CLI falls back to the pane
-  /// inherited from the agent's environment, which can be stale.
+  /// Content and the request id. Without them, the CLI falls back to the
+  /// Content inherited from the agent's environment, which can be stale.
   ///
   /// The placement rides on the command, so the CLI path and the panel agree
   /// without a second channel; the default adds nothing to the line.
   public static func command(
     for request: Request,
     requestID: UUID?,
-    sourcePaneID: PaneID,
+    sourceContentID: ContentID,
     cli: String = CLIInvocation.commandName,
     placement: HandoffPlacement = .default
   ) -> String {
     let env = requestID.map { "\(requestIDEnvironmentKey)=\($0.uuidString) " } ?? ""
-    let pane = "--pane \(sourcePaneID.description)"
+    let tab = "--tab \(sourceContentID.description)"
     switch request {
     case .handOff(let receiver):
       let placementFlags = placement.cliArguments.map { " \($0)" }.joined()
-      return "\(env)\(cli) handoff to \(receiver.rawValue) \(pane)\(placementFlags) --brief -"
+      return "\(env)\(cli) handoff to \(receiver.rawValue) \(tab)\(placementFlags) --brief -"
     case .checkpoint:
-      return "\(env)\(cli) handoff save \(pane) --brief -"
+      return "\(env)\(cli) handoff save \(tab) --brief -"
     }
   }
 

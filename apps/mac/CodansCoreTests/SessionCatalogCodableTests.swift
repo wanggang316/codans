@@ -39,9 +39,9 @@ struct SessionCatalogCodableTests {
   /// for an empty-but-encoded catalog.
   @Test
   func agentsRoundTripWhenPopulated() throws {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let record = PersistedAgentRecord(
-      paneID: paneID,
+      contentID: contentID,
       kindRaw: "claude-code",
       stateRaw: "waitingForInput",
       pid: 4242,
@@ -50,15 +50,15 @@ struct SessionCatalogCodableTests {
     let catalog = SessionCatalog(
       version: SessionCatalog.currentVersion,
       sessions: [:],
-      agents: [paneID.raw.uuidString: record]
+      agents: [contentID.raw.uuidString: record]
     )
 
     let encoded = try JSONEncoder.touchCodeDefault.encode(catalog)
     let decoded = try JSONDecoder.touchCodeDefault.decode(SessionCatalog.self, from: encoded)
 
     #expect(decoded == catalog)
-    #expect(decoded.agents[paneID.raw.uuidString]?.kindRaw == "claude-code")
-    #expect(decoded.agents[paneID.raw.uuidString]?.pid == 4242)
+    #expect(decoded.agents[contentID.raw.uuidString]?.kindRaw == "claude-code")
+    #expect(decoded.agents[contentID.raw.uuidString]?.pid == 4242)
 
     // Also confirm the encoded JSON includes the `agents` key even when
     // the agents map is empty — symmetry with the v1 decode test above.
@@ -76,9 +76,9 @@ struct SessionCatalogCodableTests {
   /// so the shape stays in sync with the canonical encoder.
   @Test
   func unknownAgentEnumRawsDecodeWithoutFailing() throws {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let known = PersistedAgentRecord(
-      paneID: paneID,
+      contentID: contentID,
       kindRaw: "claude-code",
       stateRaw: "idle",
       pid: 99,
@@ -87,7 +87,7 @@ struct SessionCatalogCodableTests {
     let baseline = SessionCatalog(
       version: SessionCatalog.currentVersion,
       sessions: [:],
-      agents: [paneID.raw.uuidString: known]
+      agents: [contentID.raw.uuidString: known]
     )
     let encoded = try JSONEncoder.touchCodeDefault.encode(baseline)
     var json = try #require(String(data: encoded, encoding: .utf8))
@@ -98,7 +98,7 @@ struct SessionCatalogCodableTests {
     let catalog = try JSONDecoder.touchCodeDefault.decode(SessionCatalog.self, from: mutated)
 
     #expect(catalog.agents.count == 1)
-    let record = try #require(catalog.agents[paneID.raw.uuidString])
+    let record = try #require(catalog.agents[contentID.raw.uuidString])
     #expect(record.kindRaw == "future-agent-not-in-this-build")
     #expect(record.stateRaw == "waitingForUnknownThing")
   }

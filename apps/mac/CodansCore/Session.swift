@@ -1,6 +1,6 @@
 import Foundation
 
-/// One running `zmx` daemon belonging to a single `Pane`. Persisted in
+/// One running `zmx` daemon belonging to a single Content. Persisted in
 /// `sessions.json` so the app can rediscover, ping, and re-attach to live
 /// daemons across restarts — independent of the project catalog, since a
 /// daemon may outlive any individual app session.
@@ -9,7 +9,8 @@ import Foundation
 /// re-attach we refuse to talk to a daemon stamped with a version whose
 /// IPC schema we do not understand (the check itself lands later).
 public nonisolated struct Session: Codable, Equatable, Sendable {
-  public let paneID: PaneID
+  /// The Content this daemon hosts. The on-disk key is `paneID`.
+  public let contentID: ContentID
   public var socketPath: String
   public var pid: Int32
   public var createdAt: Date
@@ -27,8 +28,13 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
   /// its login session and is recycled. See `SessionEpoch`.
   public var sessionEpoch: String?
 
+  private enum CodingKeys: String, CodingKey {
+    case contentID = "paneID"
+    case socketPath, pid, createdAt, lastAttachedAt, command, cwd, zmxVersion, sessionEpoch
+  }
+
   public init(
-    paneID: PaneID,
+    contentID: ContentID,
     socketPath: String,
     pid: Int32,
     createdAt: Date,
@@ -38,7 +44,7 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
     zmxVersion: String,
     sessionEpoch: String? = nil
   ) {
-    self.paneID = paneID
+    self.contentID = contentID
     self.socketPath = socketPath
     self.pid = pid
     self.createdAt = createdAt
@@ -50,7 +56,7 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
   }
 }
 
-/// Per-pane agent state snapshot captured at quit time and replayed at
+/// Per-Content agent state snapshot captured at quit time and replayed at
 /// the next launch so the ActiveAgents UI doesn't show "loading" for
 /// every surviving agent until the first viewport refresh lands.
 ///
@@ -59,26 +65,32 @@ public nonisolated struct Session: Codable, Equatable, Sendable {
 /// `AgentRuntimeState` can decode old catalogs and gracefully drop
 /// unknown variants instead of failing the whole load.
 public nonisolated struct PersistedAgentRecord: Codable, Equatable, Sendable {
-  public let paneID: PaneID
+  /// The Content the agent runs in. The on-disk key is `paneID`.
+  public let contentID: ContentID
   public let kindRaw: String
   public let stateRaw: String
   /// Process group leader of the agent at capture time, for diagnostics.
   /// NOT used for restore liveness: on the External backend the agent runs
   /// inside the daemon's PTY and no foreground PID is readable, so this is
   /// frequently `0`. Restore liveness is instead a direct daemon-socket
-  /// probe per pane (see `AppState.seedRestoredAgents` /
+  /// probe per Content (see `AppState.seedRestoredAgents` /
   /// `SessionReaper.isDaemonAlive`).
   public let pid: Int32
   public let capturedAt: Date
 
+  private enum CodingKeys: String, CodingKey {
+    case contentID = "paneID"
+    case kindRaw, stateRaw, pid, capturedAt
+  }
+
   public init(
-    paneID: PaneID,
+    contentID: ContentID,
     kindRaw: String,
     stateRaw: String,
     pid: Int32,
     capturedAt: Date
   ) {
-    self.paneID = paneID
+    self.contentID = contentID
     self.kindRaw = kindRaw
     self.stateRaw = stateRaw
     self.pid = pid
@@ -86,8 +98,8 @@ public nonisolated struct PersistedAgentRecord: Codable, Equatable, Sendable {
   }
 }
 
-/// Versioned on-disk container for the per-pane session catalog. The
-/// `sessions` map is keyed by the pane's UUID-string description so the
+/// Versioned on-disk container for the per-Content session catalog. The
+/// `sessions` map is keyed by the Content's UUID-string description so the
 /// JSON stays diff-stable and human-greppable.
 public nonisolated struct SessionCatalog: Codable, Equatable, Sendable {
   public static let currentVersion = 1
@@ -96,7 +108,7 @@ public nonisolated struct SessionCatalog: Codable, Equatable, Sendable {
   public var sessions: [String: Session]
   /// Agent state captured at the previous quit's live tier. Optional in
   /// decode so v1 catalogs without this field still load as a catalog
-  /// with no agents to restore. Keyed by pane UUID string, mirroring
+  /// with no agents to restore. Keyed by Content UUID string, mirroring
   /// `sessions`.
   public var agents: [String: PersistedAgentRecord]
 
@@ -119,9 +131,10 @@ public nonisolated struct SessionCatalog: Codable, Equatable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.version = try container.decode(Int.self, forKey: .version)
     self.sessions = try container.decode([String: Session].self, forKey: .sessions)
-    self.agents = try container.decodeIfPresent(
-      [String: PersistedAgentRecord].self, forKey: .agents
-    ) ?? [:]
+    self.agents =
+      try container.decodeIfPresent(
+        [String: PersistedAgentRecord].self, forKey: .agents
+      ) ?? [:]
   }
 
   public func encode(to encoder: Encoder) throws {

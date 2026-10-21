@@ -155,7 +155,7 @@ extension WorkflowMachine {
       profileName = .string(launchedName)
     }
     return .object([
-      "pane-id": binding?.paneID.map { .string($0.description) } ?? .null,
+      "pane-id": binding?.contentID.map { .string($0.description) } ?? .null,
       "agent": agent,
       "name": profileName,
       "state": run.roleStates[name].map(WorkflowValue.string) ?? .null,

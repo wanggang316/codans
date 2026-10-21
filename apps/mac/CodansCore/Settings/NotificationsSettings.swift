@@ -151,36 +151,37 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
 }
 
 /// Mute sets for the notifications system. Rule IDs are opaque strings owned by the
-/// rule engine; pane IDs are the canonical `PaneID` from the hierarchy. Both keys
+/// rule engine; Content IDs are the canonical `ContentID` from the hierarchy. Both keys
 /// are optional on decode — a missing key yields an empty set — so partial JSON
 /// (e.g., a hand-edit that only mentions one of the two sets) does not fail to load.
 /// Encoded as a JSON array of strings for `mutedRuleIDs`, and an array of
-/// `{"raw":"<uuid>"}` objects for `mutedPaneIDs` via `PaneID`'s synthesised Codable.
+/// `{"raw":"<uuid>"}` objects under the `mutedPaneIDs` key for `mutedContentIDs`.
 public nonisolated struct MuteSettings: Equatable, Sendable, Codable {
   public var mutedRuleIDs: Set<String>
-  public var mutedPaneIDs: Set<PaneID>
+  public var mutedContentIDs: Set<ContentID>
 
   public init(
     mutedRuleIDs: Set<String> = [],
-    mutedPaneIDs: Set<PaneID> = []
+    mutedContentIDs: Set<ContentID> = []
   ) {
     self.mutedRuleIDs = mutedRuleIDs
-    self.mutedPaneIDs = mutedPaneIDs
+    self.mutedContentIDs = mutedContentIDs
   }
 
   private enum CodingKeys: String, CodingKey {
-    case mutedRuleIDs, mutedPaneIDs
+    case mutedRuleIDs
+    case mutedContentIDs = "mutedPaneIDs"
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.mutedRuleIDs = try container.decodeIfPresent(Set<String>.self, forKey: .mutedRuleIDs) ?? []
-    self.mutedPaneIDs = try container.decodeIfPresent(Set<PaneID>.self, forKey: .mutedPaneIDs) ?? []
+    self.mutedContentIDs = try container.decodeIfPresent(Set<ContentID>.self, forKey: .mutedContentIDs) ?? []
   }
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(mutedRuleIDs, forKey: .mutedRuleIDs)
-    try container.encode(mutedPaneIDs, forKey: .mutedPaneIDs)
+    try container.encode(mutedContentIDs, forKey: .mutedContentIDs)
   }
 }

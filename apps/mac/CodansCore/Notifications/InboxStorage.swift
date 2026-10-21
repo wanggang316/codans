@@ -24,7 +24,7 @@ public nonisolated enum InboxStorage {
   // MARK: - Append / dedup
 
   /// Apply the dedup window: if the most recent entry from the same
-  /// `(paneID, kind)` pair is within `dedupWindow` seconds of `incoming`,
+  /// `(contentID, kind)` pair is within `dedupWindow` seconds of `incoming`,
   /// return an array where that entry has been replaced (preserving its
   /// id and prior `readAt`) by an updated copy with the incoming
   /// `title`, `body`, and `createdAt`. Otherwise prepend the incoming
@@ -36,7 +36,7 @@ public nonisolated enum InboxStorage {
     var result = existing
 
     if let dedupIndex = result.firstIndex(where: { entry in
-      entry.source.paneID == incoming.source.paneID
+      entry.source.contentID == incoming.source.contentID
         && entry.kind == incoming.kind
         && abs(entry.createdAt.timeIntervalSince(incoming.createdAt)) <= dedupWindow
     }) {
@@ -128,18 +128,18 @@ public nonisolated enum InboxStorage {
     }
   }
 
-  /// Mark every unread entry whose source pane is **not** in `livePaneIDs`
-  /// as read. Used to clear roll-up indicators left behind when a pane (or
-  /// its enclosing tab / worktree / project) is closed without the user
-  /// ever focusing it — the entry has nowhere to surface and would
+  /// Mark every unread entry whose source Content is **not** in
+  /// `liveContentIDs` as read. Used to clear roll-up indicators left behind
+  /// when a Tab (or its Pane / worktree / project) is closed without the
+  /// user ever focusing it — the entry has nowhere to surface and would
   /// otherwise keep the worktree/project bell lit indefinitely.
-  public static func markingReadForOrphanPanes(
-    livePaneIDs: Set<PaneID>,
+  public static func markingReadForOrphanContents(
+    liveContentIDs: Set<ContentID>,
     in entries: [InboxEntry],
     at readAt: Date = Date()
   ) -> [InboxEntry] {
     entries.map { entry in
-      guard entry.isUnread, !livePaneIDs.contains(entry.source.paneID) else { return entry }
+      guard entry.isUnread, !liveContentIDs.contains(entry.source.contentID) else { return entry }
       var updated = entry
       updated.readAt = readAt
       return updated
