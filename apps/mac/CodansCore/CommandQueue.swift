@@ -3,9 +3,9 @@ import Foundation
 /// One entry in a Pane's command queue: the literal text to type into that
 /// pane's terminal, plus the rule deciding *when* it is typed.
 ///
-/// Persisted on `Pane.commandQueue`. The Pane row — not its pty child — is
+/// Persisted on `TerminalContentState.commandQueue`. The Content — not its pty child — is
 /// the identity a deferred command is attached to, the same reasoning that
-/// puts `Pane.runScriptID` in the catalog: a relaunch restores the pane, so
+/// puts `TerminalContentState.runScriptID` in the catalog: a relaunch restores the Content, so
 /// it must also restore what that pane still owes the user.
 ///
 /// "Send now" is deliberately *not* a case here. A command the user asked to
@@ -175,15 +175,21 @@ extension Array where Element == QueuedCommand {
 // MARK: - What a close would discard
 
 extension Tab {
-  /// Queued commands parked on this tab's panes — what closing it discards.
+  /// Queued commands parked on this Tab's Content — what closing it discards.
   public var queuedCommandCount: Int {
-    panes.reduce(0) { $0 + $1.commandQueue.count }
+    content.terminal?.commandQueue.count ?? 0
+  }
+}
+
+extension Pane {
+  public var queuedCommandCount: Int {
+    tabs.reduce(0) { $0 + $1.queuedCommandCount }
   }
 }
 
 extension Worktree {
   public var queuedCommandCount: Int {
-    tabs.reduce(0) { $0 + $1.queuedCommandCount }
+    panes.reduce(0) { $0 + $1.queuedCommandCount }
   }
 }
 

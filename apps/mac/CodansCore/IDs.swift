@@ -30,6 +30,14 @@ public nonisolated struct PaneID: HierarchyID {
   public init(raw: UUID) { self.raw = raw }
 }
 
+/// Identity of a session (a Tab's Content). Keys everything that outlives
+/// a layout change: zmx session names, agent state, notifications, command
+/// queues, run-script bindings, `CODANS_CONTENT_ID`.
+public nonisolated struct ContentID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
+}
+
 public nonisolated struct TagID: HierarchyID {
   public let raw: UUID
   public init(raw: UUID) { self.raw = raw }

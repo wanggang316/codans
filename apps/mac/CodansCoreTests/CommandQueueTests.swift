@@ -108,7 +108,8 @@ struct CommandQueueTests {
   @Test
   func earliestDueScheduleWinsAmongOverdueEntries() {
     let late = QueuedCommand(text: "late", timing: .scheduled(at: epoch.addingTimeInterval(-10), repeatEvery: nil))
-    let earlier = QueuedCommand(text: "earlier", timing: .scheduled(at: epoch.addingTimeInterval(-60), repeatEvery: nil))
+    let earlier = QueuedCommand(
+      text: "earlier", timing: .scheduled(at: epoch.addingTimeInterval(-60), repeatEvery: nil))
     #expect([late, earlier].nextToFire(now: epoch, isReady: true)?.text == "earlier")
   }
 
@@ -149,40 +150,40 @@ struct CommandQueueTests {
   }
 
   @Test
-  func paneOmitsAnEmptyQueueFromItsEncodedForm() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let json = try JSONSerialization.jsonObject(
-      with: try JSONEncoder().encode(pane)
-    ) as? [String: Any]
+  func terminalContentOmitsAnEmptyQueueFromItsEncodedForm() throws {
+    let state = TerminalContentState(workingDirectory: "/tmp")
+    let json =
+      try JSONSerialization.jsonObject(
+        with: try JSONEncoder().encode(state)
+      ) as? [String: Any]
     #expect(json?["commandQueue"] == nil)
   }
 
   @Test
-  func paneRoundTripsANonEmptyQueue() throws {
-    let pane = Pane(
+  func terminalContentRoundTripsANonEmptyQueue() throws {
+    let state = TerminalContentState(
       workingDirectory: "/tmp",
       commandQueue: [
         QueuedCommand(text: "make test", timing: .afterCurrentTask),
         QueuedCommand(text: "/compact", timing: .scheduled(at: epoch, repeatEvery: 900)),
       ]
     )
-    let decoded = try JSONDecoder().decode(Pane.self, from: try JSONEncoder().encode(pane))
-    #expect(decoded.commandQueue == pane.commandQueue)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: try JSONEncoder().encode(state))
+    #expect(decoded.commandQueue == state.commandQueue)
   }
 
   /// A queue written by a build that knows a timing kind this one doesn't
-  /// must cost the queue, not the catalog.
+  /// must cost the queue, not the Tab.
   @Test
-  func paneSurvivesAnUndecodableQueue() throws {
+  func terminalContentSurvivesAnUndecodableQueue() throws {
     let json = """
       {
-        "id": { "raw": "\(UUID().uuidString)" },
         "workingDirectory": "/tmp",
         "commandQueue": [{ "id": "\(UUID().uuidString)", "text": "x",
                            "createdAt": 0, "timing": { "kind": "fromTheFuture" } }]
       }
       """
-    let decoded = try JSONDecoder().decode(Pane.self, from: Data(json.utf8))
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: Data(json.utf8))
     #expect(decoded.commandQueue.isEmpty)
     #expect(decoded.workingDirectory == "/tmp")
   }
@@ -190,24 +191,31 @@ struct CommandQueueTests {
   // MARK: - What a close would discard
 
   @Test
-  func countsQueuedCommandsThroughTheHierarchy() {
-    let queued = Pane(
-      id: PaneID(), workingDirectory: "/tmp/w",
-      commandQueue: [
-        QueuedCommand(text: "a", timing: .afterCurrentTask),
-        QueuedCommand(text: "b", timing: .afterCurrentTask),
-      ]
-    )
-    let idle = Pane(id: PaneID(), workingDirectory: "/tmp/w")
-    let tab = Tab(splitTree: SplitTree(leaf: queued.id), panes: [queued, idle])
-    let emptyTab = Tab(splitTree: SplitTree(leaf: idle.id), panes: [idle])
-    var archived = Worktree(name: "old", path: "/tmp/old", branch: "old", tabs: [tab])
+  func countsQueuedCommandsThroughTheHierarchy() throws {
+    let queued = Tab(
+      content: .terminal(
+        workingDirectory: "/tmp/w",
+        commandQueue: [
+          QueuedCommand(text: "a", timing: .afterCurrentTask),
+          QueuedCommand(text: "b", timing: .afterCurrentTask)
+        ]))
+    let idle = Tab(content: .terminal(workingDirectory: "/tmp/w"))
+    let busyPane = Pane(tabs: [queued, idle])
+    let idlePane = Pane(tabs: [idle])
+    let tree = try SplitTree(leaf: busyPane.id).inserting(idlePane.id, at: busyPane.id, direction: .right)
+    var archived = Worktree(
+      name: "old", path: "/tmp/old", branch: "old", splitTree: SplitTree(leaf: busyPane.id), panes: [busyPane],
+      focusedPaneID: busyPane.id)
     archived.archived = true
-    let live = Worktree(name: "w", path: "/tmp/w", branch: "main", tabs: [tab, emptyTab])
+    let live = Worktree(
+      name: "w", path: "/tmp/w", branch: "main", splitTree: tree, panes: [busyPane, idlePane],
+      focusedPaneID: busyPane.id)
     let project = Project(name: "p", rootPath: "/tmp", worktrees: [live, archived])
 
-    #expect(tab.queuedCommandCount == 2)
-    #expect(emptyTab.queuedCommandCount == 0)
+    #expect(queued.queuedCommandCount == 2)
+    #expect(idle.queuedCommandCount == 0)
+    #expect(busyPane.queuedCommandCount == 2)
+    #expect(idlePane.queuedCommandCount == 0)
     #expect(live.queuedCommandCount == 2)
     // Removing the project takes the archived worktree's dormant queue too.
     #expect(project.queuedCommandCount == 4)
