@@ -267,6 +267,12 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  func setSidebarFilter(_ filter: SidebarFilter) {
+    guard catalog.sidebarFilter != filter else { return }
+    catalog.sidebarFilter = filter
+    store.scheduleSave(catalog)
+  }
+
   // MARK: - Project mutations
 
   /// Registers a local project. `isWorkspace` marks a workspace root: a plain

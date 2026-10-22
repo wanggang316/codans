@@ -85,4 +85,49 @@ struct CatalogSidebarTests {
     let unfiltered = Catalog(projects: [tagged, workspace, failed], projectSortMode: .manual)
     #expect(unfiltered.sidebarSelectionOrder.map(\.worktreeID) == [folderRoot.id, workspaceRoot.id, checkout.id])
   }
+
+  @Test
+  func categoryFiltersAndFavoritesShareSelectionOrder() {
+    let repository = self.repository
+    let workspace = self.workspace
+    var remote = folder
+    remote.remoteHost = RemoteHost(alias: "server")
+    var catalog = Catalog(projects: [repository, remote, workspace], projectSortMode: .manual)
+    catalog.sidebarFilter = .local
+    #expect(catalog.sidebarProjects.map(\.id) == [repository.id])
+    catalog.sidebarFilter = .remote
+    #expect(catalog.sidebarProjects.map(\.id) == [remote.id])
+    catalog.sidebarFilter = .workspace
+    #expect(catalog.sidebarProjects.map(\.id) == [workspace.id])
+    catalog.sidebarFilter = .favorites
+    #expect(catalog.sidebarProjects.map(\.id) == [repository.id])
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [pinned.id])
+    catalog.projects[0].worktrees[2].archived = true
+    #expect(catalog.sidebarProjects.isEmpty)
+  }
+
+  @Test
+  func favoritesKeepWorkspaceMembersAndRespectTags() {
+    var starredWorkspace = workspace
+    starredWorkspace.worktrees[1].isPinned = true
+    let tag = TagID()
+    starredWorkspace.tagIDs = [tag]
+    var catalog = Catalog(projects: [repository, starredWorkspace], activeTagFilter: .tags([tag]))
+    catalog.sidebarFilter = .favorites
+    #expect(catalog.sidebarProjects.map(\.id) == [starredWorkspace.id])
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [checkout.id])
+    catalog.projects[1].isExpanded = false
+    #expect(catalog.sidebarSelectionOrder.isEmpty)
+  }
+
+  @Test
+  func filterPersistsAndOldCatalogDefaultsToAll() throws {
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+    var catalog = Catalog(projects: [folder])
+    let original = try encoder.encode(catalog)
+    #expect(try decoder.decode(Catalog.self, from: original).sidebarFilter == .all)
+    catalog.sidebarFilter = .favorites
+    #expect(try decoder.decode(Catalog.self, from: encoder.encode(catalog)) == catalog)
+  }
 }

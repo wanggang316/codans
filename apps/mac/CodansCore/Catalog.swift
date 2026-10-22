@@ -6,6 +6,7 @@ public nonisolated struct Catalog: Equatable, Sendable {
   public var version: Int
   public var projects: [Project]
   public var tags: [Tag]
+  public var sidebarFilter: SidebarFilter = .all
   public var activeTagFilter: TagFilter
   /// Sidebar-wide project ordering policy. The `projects` array always
   /// stores the manual order; `.joinOrder` and `.activeFirst` are
@@ -51,7 +52,7 @@ extension Catalog: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, projects, tags, activeTagFilter, projectSortMode, selectedProjectID
+    case version, projects, tags, activeTagFilter, sidebarFilter, projectSortMode, selectedProjectID
   }
 
   public init(from decoder: Decoder) throws {
@@ -62,6 +63,7 @@ extension Catalog: Codable {
     }
     self.version = Catalog.currentVersion
     self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
+    self.sidebarFilter = try container.decodeIfPresent(SidebarFilter.self, forKey: .sidebarFilter) ?? .all
     self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
     self.activeTagFilter =
       try container.decodeIfPresent(TagFilter.self, forKey: .activeTagFilter) ?? .all
@@ -73,6 +75,9 @@ extension Catalog: Codable {
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
+    if sidebarFilter != .all {
+      try container.encode(sidebarFilter, forKey: .sidebarFilter)
+    }
     try container.encode(version, forKey: .version)
     try container.encode(projects, forKey: .projects)
     try container.encode(tags, forKey: .tags)

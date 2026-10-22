@@ -34,6 +34,10 @@
 
 - **依赖方向：app → CodansCore，单向。** `FinderClient` 是 app 侧；`CodansCore` 永不 import AppKit。
 
+### 快速分类过滤
+
+侧栏顶部使用胶囊按钮提供 All、Local、Remote、Workspace、Favorites。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Local 包含非 Workspace 的本地项目；Remote 包含 SSH 项目；Favorites 复用 Worktree 的置顶状态，仅显示未归档的置顶行及其父项目。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
+
 ### Tag filter（已实现，当前隐藏）
 
 侧栏底部 footer 钉在 `.safeAreaInset(edge: .bottom)`。Tag 过滤入口（`TagFilterPopoverFooter` 的过滤按钮 + popover 内的 `TagFilterList`）已实现并保留接线：popover 列每个 `Tag` 一行 + 隐含 `[All]` / `[Untagged]`，点击切换 `Catalog.activeTagFilter`（多选 OR；`[Untagged]` 互斥，仅在存在无标签 Project 时出现）。但该过滤按钮**当前刻意隐藏**（`TagChipFooter.swift`）——footer 当前只露排序与刷新，过滤可在不重接调用点的前提下重新挂出。Tag 模型（`Tag` / `TagID` / `TagFilter` / `Project.tagIDs` / `Catalog.tags` / `Catalog.activeTagFilter`）、CRUD、持久化和接口边界 全在 [project-tags.md](project-tags.md)，本文不复述。

@@ -369,7 +369,8 @@ struct HierarchySidebarFeature {
     /// `.all` or `.untagged` it becomes `.tags([id])`. Within `.tags(set)`,
     /// `id` toggles in/out; an empty result resets to `.all`.
     case tagChipTapped(TagID)
-    /// Resets the filter to `.all`.
+    case sidebarFilterSelected(SidebarFilter)
+    /// Resets the tag filter to `.all`.
     case allChipTapped
     /// Sets filter to `.untagged`. Mutually exclusive with `.tags(...)`.
     case untaggedChipTapped
@@ -789,6 +790,10 @@ struct HierarchySidebarFeature {
         }
       }
       hierarchyClient.setActiveTagFilter(next)
+      return .none
+
+    case .sidebarFilterSelected(let filter):
+      hierarchyClient.setSidebarFilter(filter)
       return .none
 
     case .allChipTapped:
