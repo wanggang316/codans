@@ -48,7 +48,7 @@ final class WorkflowHandlers {
 
   func list(_ request: IPC.WorkflowListRequest, peerPID: pid_t?) throws -> IPC.WorkflowListResponse {
     try checkEnabled()
-    let worktreeID = request.worktreeID ?? worktree(of: request.paneID ?? callerPane(nil, peerPID: peerPID))
+    let worktreeID = request.worktreeID ?? worktree(of: request.contentID ?? callerPane(nil, peerPID: peerPID))
     let root = worktreeID.flatMap(worktreeRoot)
     let workflows = discovery.catalog(worktreeRoot: root).map {
       workflowSummary($0, settings: settings.settings.workflows)
@@ -60,8 +60,8 @@ final class WorkflowHandlers {
 
   func run(_ request: IPC.WorkflowRunRequest, peerPID: pid_t?) async throws -> IPC.WorkflowRunResponse {
     try checkEnabled()
-    let caller = callerPane(request.callerPaneID, peerPID: peerPID)
-    var sourceContentID = request.sourcePaneID
+    let caller = callerPane(request.callerContentID, peerPID: peerPID)
+    var sourceContentID = request.sourceContentID
     if sourceContentID == nil, request.worktreeID == nil {
       sourceContentID = caller
     }
@@ -96,7 +96,7 @@ final class WorkflowHandlers {
 
   func status(_ request: IPC.WorkflowStatusRequest, peerPID: pid_t?) throws -> IPC.WorkflowStatusResponse {
     try checkEnabled()
-    let caller = callerPane(request.callerPaneID, peerPID: peerPID)
+    let caller = callerPane(request.callerContentID, peerPID: peerPID)
     if let runID = request.runID {
       if let session = engine.session(for: runID) {
         return IPC.WorkflowStatusResponse(run: summary(session, callerContentID: caller), participant: nil)
@@ -113,14 +113,14 @@ final class WorkflowHandlers {
     let role = session.run.bindings.first { $0.value.contentID == caller }?.key ?? ""
     return IPC.WorkflowStatusResponse(
       run: summary(session, callerContentID: caller),
-      participant: IPC.WorkflowParticipantSummary(role: role, paneID: caller))
+      participant: IPC.WorkflowParticipantSummary(role: role, contentID: caller))
   }
 
   // MARK: - deliver
 
   func deliver(_ request: IPC.WorkflowDeliverRequest, peerPID: pid_t?) async throws -> IPC.WorkflowDeliverResponse {
     try checkEnabled()
-    let caller = callerPane(request.callerPaneID, peerPID: peerPID)
+    let caller = callerPane(request.callerContentID, peerPID: peerPID)
     let target = try deliveryTarget(request, caller: caller)
     let result = await engine.deliver(
       runID: target.runID, ordinal: target.ordinal, token: request.token, allowManual: target.manual,
@@ -241,7 +241,7 @@ final class WorkflowHandlers {
 
   func listRuns(_ request: IPC.WorkflowListRunsRequest, peerPID: pid_t?) throws -> IPC.WorkflowRunListResponse {
     try checkEnabled()
-    guard let worktreeID = request.worktreeID ?? worktree(of: request.paneID ?? callerPane(nil, peerPID: peerPID))
+    guard let worktreeID = request.worktreeID ?? worktree(of: request.contentID ?? callerPane(nil, peerPID: peerPID))
     else {
       throw IPCError.invalidParams(message: "no worktree: run from inside a pane or pass --worktree", path: nil)
     }

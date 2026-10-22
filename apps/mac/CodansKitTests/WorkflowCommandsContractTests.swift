@@ -17,7 +17,7 @@ struct WorkflowCommandsContractTests {
     IPC.WorkflowRunSummary(
       runID: UUID(), workflowID: "review", workflowName: "Code Review", state: state,
       startedAt: started, runDirectory: "/repo/.codans/workflow-runs/abc",
-      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: ContentID(), handle: "p1")],
+      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: ContentID(), handle: "p1")],
       steps: [IPC.WorkflowStepSummary(id: "review", name: "Review")])
   }
 
@@ -57,7 +57,7 @@ struct WorkflowCommandsContractTests {
     ])
     let transport = exchange(.workflowList, params: IPC.WorkflowListRequest.self, response: expected) { params in
       #expect(params.worktreeID == worktreeID)
-      #expect(params.paneID == nil)
+      #expect(params.contentID == nil)
     }
     let result: IPC.WorkflowListResponse = try await client(transport).call(
       .workflowList, params: IPC.WorkflowListRequest(worktreeID: worktreeID))
@@ -66,15 +66,15 @@ struct WorkflowCommandsContractTests {
 
   @Test
   func runSendsBindingsAndDecodesSelfInitiatedTask() async throws {
-    let paneID = ContentID()
+    let contentID = ContentID()
     let expected = IPC.WorkflowRunResponse(
       runID: UUID(), workflowID: "handoff", workflowName: "Handoff", runDirectory: "/repo/.codans/workflow-runs/x",
-      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", paneID: paneID, handle: "p2")],
+      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: contentID, handle: "p2")],
       selfInitiated: IPC.WorkflowSelfInitiatedTask(
         stepID: "brief", line: "Write the briefing.", completionCommand: "CODANS_WORKFLOW_TOKEN=t codans workflow deliver -"))
     let transport = exchange(.workflowRun, params: IPC.WorkflowRunRequest.self, response: expected) { params in
       #expect(params.workflow == "handoff")
-      #expect(params.sourcePaneID == paneID)
+      #expect(params.sourceContentID == contentID)
       #expect(params.roles == ["reviewer": "auto"])
       #expect(params.inputs == ["scope": "src"])
       #expect(params.skip == ["lint"])
@@ -83,7 +83,7 @@ struct WorkflowCommandsContractTests {
     let result: IPC.WorkflowRunResponse = try await client(transport).call(
       .workflowRun,
       params: IPC.WorkflowRunRequest(
-        workflow: "handoff", sourcePaneID: paneID, roles: ["reviewer": "auto"], inputs: ["scope": "src"],
+        workflow: "handoff", sourceContentID: contentID, roles: ["reviewer": "auto"], inputs: ["scope": "src"],
         skip: ["lint"]))
     #expect(result == expected)
     #expect(result.selfInitiated?.completionCommand.hasSuffix("deliver -") == true)
@@ -91,15 +91,15 @@ struct WorkflowCommandsContractTests {
 
   @Test
   func statusWithoutRunIDSendsTheCallerPane() async throws {
-    let paneID = ContentID()
+    let contentID = ContentID()
     let expected = IPC.WorkflowStatusResponse(
-      run: Self.run(), participant: IPC.WorkflowParticipantSummary(role: "author", paneID: paneID))
+      run: Self.run(), participant: IPC.WorkflowParticipantSummary(role: "author", contentID: contentID))
     let transport = exchange(.workflowStatus, params: IPC.WorkflowStatusRequest.self, response: expected) { params in
       #expect(params.runID == nil)
-      #expect(params.callerPaneID == paneID)
+      #expect(params.callerContentID == contentID)
     }
     let result: IPC.WorkflowStatusResponse = try await client(transport).call(
-      .workflowStatus, params: IPC.WorkflowStatusRequest(callerPaneID: paneID))
+      .workflowStatus, params: IPC.WorkflowStatusRequest(callerContentID: contentID))
     #expect(result == expected)
     #expect(result.run.startedAt == Self.started)
   }

@@ -7,7 +7,7 @@ extension IPC {
   /// the server refuses any other value, and the client refuses a server
   /// that reports another one. Raise it on every change an older peer
   /// would misread.
-  public static let protocolVersion = 2
+  public static let protocolVersion = 3
 }
 
 /// `system.hello` request payload. Pipelined as the first frame of every

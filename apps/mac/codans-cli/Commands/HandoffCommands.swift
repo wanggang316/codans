@@ -109,12 +109,12 @@ struct HandoffTo: AsyncParsableCommand {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
+      let sourceUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.HandoffResponse = try await client.call(
         .handoffTo,
         params: IPC.HandoffRequest(
           action: .to,
-          paneID: ContentID(raw: paneUUID),
+          contentID: ContentID(raw: sourceUUID),
           receiver: agent,
           profile: profile,
           brief: resolvedBrief.brief,
@@ -153,12 +153,12 @@ struct HandoffSave: AsyncParsableCommand {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
+      let sourceUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.HandoffResponse = try await client.call(
         .handoffSave,
         params: IPC.HandoffRequest(
           action: .save,
-          paneID: ContentID(raw: paneUUID),
+          contentID: ContentID(raw: sourceUUID),
           brief: resolvedBrief.brief,
           contextOnly: resolvedBrief.contextOnly,
           note: note,

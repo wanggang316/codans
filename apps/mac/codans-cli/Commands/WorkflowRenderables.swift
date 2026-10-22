@@ -28,7 +28,7 @@ enum WorkflowTextFormat {
 struct WorkflowBindingOutput: Encodable {
   let role: String
   let source: String
-  let paneID: String?
+  let contentID: String?
   let handle: String?
   let profileID: String?
   let profileName: String?
@@ -37,7 +37,7 @@ struct WorkflowBindingOutput: Encodable {
   init(_ binding: IPC.WorkflowRoleBindingSummary) {
     role = binding.role
     source = binding.source
-    paneID = binding.paneID?.description
+    contentID = binding.contentID?.description
     handle = binding.handle
     profileID = binding.profileID?.uuidString
     profileName = binding.profileName
@@ -46,7 +46,7 @@ struct WorkflowBindingOutput: Encodable {
 
   /// `reviewer: launch → p4 (Claude Code, claude)`
   var line: String {
-    var target = handle ?? paneID ?? "unbound"
+    var target = handle ?? contentID ?? "unbound"
     let profile = [profileName, agent].compactMap { $0 }
     if !profile.isEmpty { target += " (\(profile.joined(separator: ", ")))" }
     return "\(role): \(source) → \(target)"
@@ -205,14 +205,14 @@ struct WorkflowStatusRenderable: Encodable, CustomStringConvertible {
 
   private struct Participant: Encodable {
     let role: String
-    let paneID: String
+    let contentID: String
   }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: Key.self)
     try container.encode(WorkflowRunOutput(response.run), forKey: .run)
     try container.encodeIfPresent(
-      response.participant.map { Participant(role: $0.role, paneID: $0.paneID.description) },
+      response.participant.map { Participant(role: $0.role, contentID: $0.contentID.description) },
       forKey: .participant)
   }
 
@@ -225,7 +225,7 @@ struct WorkflowStatusRenderable: Encodable, CustomStringConvertible {
       lines.append("  step: \(Self.stepLabel(step))\(phase)")
     }
     if let participant = response.participant {
-      lines.append("  you: \(participant.role) in pane \(participant.paneID)")
+      lines.append("  you: \(participant.role) in session \(participant.contentID)")
     }
     if let attention = run.attention {
       lines.append(contentsOf: Self.attentionBlock(attention))

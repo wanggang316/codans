@@ -227,8 +227,8 @@ final class HandoffHandlers {
   // MARK: - Steps
 
   private func resolvedSource(_ request: IPC.HandoffRequest) throws -> HandoffSource {
-    guard let source = resolveSource(request.paneID) else {
-      throw IPCError.notFound(kind: "pane", id: request.paneID.description)
+    guard let source = resolveSource(request.contentID) else {
+      throw IPCError.notFound(kind: "content", id: request.contentID.description)
     }
     guard !source.isRemote else {
       throw IPCError.unsupported(
@@ -264,7 +264,7 @@ final class HandoffHandlers {
     throw IPCError.invalidParams(
       message: HandoffKickoff.briefRequiredMessage(
         command: HandoffKickoff.command(
-          for: retry, requestID: request.requestID, sourceContentID: request.paneID, cli: cli,
+          for: retry, requestID: request.requestID, sourceContentID: request.contentID, cli: cli,
           placement: placement)),
       path: ["brief"])
   }
@@ -273,7 +273,7 @@ final class HandoffHandlers {
   /// gave up on it and took the context-only path itself.
   private func authorize(_ request: IPC.HandoffRequest) throws {
     guard let requestID = request.requestID else { return }
-    switch registry.claim(requestID, sourceContentID: request.paneID) {
+    switch registry.claim(requestID, sourceContentID: request.contentID) {
     case .claimed:
       return
     case .wrongSource(let expected):

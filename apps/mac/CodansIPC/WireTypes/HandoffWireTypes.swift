@@ -8,15 +8,15 @@ extension IPC {
   }
 
   /// Params for `handoff.save` / `handoff.to`. The CLI resolves the source
-  /// pane before sending (`current` → the calling pane), so the server only
-  /// ever sees a concrete `paneID`.
+  /// session before sending (`current` → the caller's own), so the server only
+  /// ever sees a concrete `contentID`.
   ///
   /// `brief` and `contextOnly` are the two ways to answer "where does the
   /// briefing come from"; the handler rejects a request that gives neither
   /// with guidance and zero side effects.
   public struct HandoffRequest: Codable, Equatable, Sendable {
     public let action: HandoffAction
-    public let paneID: ContentID
+    public let contentID: ContentID
     /// Receiving agent token for `to` (raw value, executable, or display
     /// name). Ignored by `save`.
     public let receiver: String?
@@ -38,7 +38,7 @@ extension IPC {
 
     public init(
       action: HandoffAction,
-      paneID: ContentID,
+      contentID: ContentID,
       receiver: String? = nil,
       profile: String? = nil,
       brief: String? = nil,
@@ -50,7 +50,7 @@ extension IPC {
       direction: ScriptSplitDirection? = nil
     ) {
       self.action = action
-      self.paneID = paneID
+      self.contentID = contentID
       self.receiver = receiver
       self.profile = profile
       self.brief = brief

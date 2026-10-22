@@ -146,6 +146,11 @@ public enum OutputEnvelope {
     "agent.wait": 2,
     "handoff.to": 2,
     "handoff.save": 2,
+    "workflow.run": 2,
+    "workflow.status": 2,
+    "workflow.resolve": 2,
+    "workflow.cancel": 2,
+    "workflow.runs": 2,
   ]
 
   public static func schemaVersion(command: String) -> String {
