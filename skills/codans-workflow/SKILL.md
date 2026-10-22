@@ -77,7 +77,7 @@ token already in its environment.
    for the user to accept, ask you again, or skip. Do not resubmit on your own.
 4. Lost? `codans workflow status` (no arguments) answers "who am I": this pane's run, role,
    awaited step, and completion command.
-5. Never report a step as done through `codans pane send` or plain chat; only `deliver`
+5. Never report a step as done through `codans tab send` or plain chat; only `deliver`
    completes it.
 
 ## Authoring

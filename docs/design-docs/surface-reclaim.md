@@ -48,4 +48,4 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 ## 验证
 
 - `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析。
-- 隔离 Debug 实例（`CODANS_SURFACE_RECLAIM_SECONDS=8`），两个 tab 各一个 pane，显示 B 以隐藏 A：线程 17 → 12，A 的 zmx socket 仍在，`pane read` 仍可用；再次显示 A：线程回到 17，shell 里导出的变量仍在，`initialCommand` 的副作用只出现一次。
+- 隔离 Debug 实例（`CODANS_SURFACE_RECLAIM_SECONDS=8`），两个 tab 各一个 pane，显示 B 以隐藏 A：线程 17 → 12，A 的 zmx socket 仍在，`tab read` 仍可用；再次显示 A：线程回到 17，shell 里导出的变量仍在，`initialCommand` 的副作用只出现一次。

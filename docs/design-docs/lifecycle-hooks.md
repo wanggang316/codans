@@ -252,7 +252,7 @@ public nonisolated struct HookSubscription: Codable, Equatable, Sendable, Identi
   public enum Scope: Codable, Equatable, Sendable {
     case anyPane
     case paneID(PaneID)
-    case paneLabel(String)         // 经 `codans pane label <pane> <tag>` 设置
+    case paneLabel(String)         // 经 `codans tab label <tab> <tag>` 设置
     case tabID(TabID)
     case tabLabel(String)
     case worktreeID(WorktreeID)
