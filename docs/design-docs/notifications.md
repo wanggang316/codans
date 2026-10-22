@@ -114,7 +114,7 @@ coordinator 在追加前后读取 inbox 中该 Worktree 的真实未读数，只
 
 ## 设置（`NotificationsSettings`）
 
-`Settings.notifications` 是通知设置 section。字段通过 `decodeIfPresent` 解码，文件中缺失的字段采用默认值。投递字段为 `inAppEnabled`、`systemEnabled`、`soundEnabled`、`dockBadgeEnabled`；指示器字段为 `statusBarBellEnabled`、`projectBellEnabled`、`worktreeBellEnabled`、`tabBellEnabled`，只控制显示、不影响收集。`moveNotifiedWorktreeToTop` 控制提升；`commandFinishedEnabled` 与 `commandFinishedThresholdSec` 控制命令完成检测（阈值默认 10 秒，解码与 UI 钳到 `[1,3600]`）。以上布尔值默认开启。`mute` 保存 `mutedRuleIDs` / `mutedPaneIDs` 集合，Settings 仅显示数量；检测与投递路径不读取这些集合。逐 Pane 静音的运行时入口是 `Pane.labels`。
+`Settings.notifications` 是通知设置 section。字段通过 `decodeIfPresent` 解码，文件中缺失的字段采用默认值。投递字段为 `inAppEnabled`、`systemEnabled`、`soundEnabled`、`dockBadgeEnabled`；指示器字段为 `statusBarBellEnabled`、`projectBellEnabled`、`worktreeBellEnabled`、`tabBellEnabled`，只控制显示、不影响收集。`moveNotifiedWorktreeToTop` 控制提升；`commandFinishedEnabled` 与 `commandFinishedThresholdSec` 控制命令完成检测（阈值默认 10 秒，解码与 UI 钳到 `[1,3600]`）。以上布尔值默认开启。`mute` 保存 `mutedRuleIDs` / `mutedContentIDs` 集合（静音跟着会话走；仍写着旧键 `mutedPaneIDs` 的文件读入一次，下次保存写新键），Settings 仅显示数量；检测与投递路径不读取这些集合。逐 Pane 静音的运行时入口是 `Pane.labels`。
 
 **为何是四个正交布尔而非一个 `level` 枚举**：用户需要枚举表达不出的交叉组合（in-app 关 + system 开 =「仅后台」）。Sound 与 Dock badge 又是另外两个独立维度。
 

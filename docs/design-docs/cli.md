@@ -174,18 +174,18 @@
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans tab list` | `hierarchy.listTabs` | `HierarchyHandlers.listTabs` | `[--project P] [--worktree W] [--pane PANE]`；缺省列当前 Worktree 的全部 Tab，`--pane` 只列该 Pane 条上的 |
+| `codans tab list` | `hierarchy.listTabs` | `HierarchyHandlers.listTabs` | `[--project P] [--worktree W] [--pane PANE]`；缺省列当前 Worktree 的全部 Tab（Pane 按布局顺序），`--pane` 只列该 Pane 条上的；每行与 `tab show` 同形 |
 | `codans tab show [TAB]` | `hierarchy.describeTab` | `HierarchyHandlers.describeTab` | `[TAB]`；回带 `{id, handle, paneID, contentID, title, name, icon, color, isSelected, workingDirectory（live 优先）, labels, agent, agentSessionID, isLive}`（`title` = 用户名或最近的 live 标题）。读 catalog；`tab info` 才是问守护 |
-| `codans tab new [CMD…]` | `hierarchy.createTab` | `HierarchyManager.createTab` | `[CMD…]`（省略则默认登录 shell），`[--project P] [--worktree W] [--pane PANE] [--name NAME] [--cwd PATH] [--label TAG…]`。在目标 Pane（缺省焦点 Pane）的条尾新建一个 Tab 并立即打开其终端；Worktree 没有 Pane 时先建一个 Pane。回带新 Tab 的 `{id, handle, paneID, contentID}` |
-| `codans tab focus TAB` | `hierarchy.activateTab` | `HierarchyManager.selectTab` | `TAB`；选中该 Tab 并把键盘焦点交给它所在的 Pane |
+| `codans tab new [CMD…]` | `hierarchy.createTab` | `HierarchyManager.newTab` | `[CMD…]`（省略则默认登录 shell），`[--project P] [--worktree W] [--pane PANE] [--name NAME] [--cwd PATH] [--label TAG…]`。在目标 Pane（缺省焦点 Pane）的条尾新建一个 Tab 并立即打开其终端；Worktree 没有 Pane 时先建一个 Pane。回带新 Tab 的 `{id, handle, paneID, contentID}`，文本模式只打印新 Tab id。在 Tab 外运行且 `--project` / `--worktree` 都留在 `current` 时，落到窗口当前显示的 Worktree |
+| `codans tab focus TAB` | `hierarchy.activateTab` | `HierarchyManager.selectTab` | `TAB`；选中该 Tab、聚焦它所在的 Pane、把它的 Worktree 带到前台，并把键盘焦点交给它的终端 |
 | `codans tab rename TAB [NAME]` | `hierarchy.renameTab` | `HierarchyManager.renameTab` | `TAB`，`[NAME]`（缺省或空串 → 清除用户标题，回到 shell 的 live 标题） |
 | `codans tab close TAB` | `hierarchy.closeTab` | `HierarchyManager.closeTab` | `TAB`；关闭 Tab 并结束其会话（杀掉 zmx 守护、丢弃持久 session 项）。关掉 Pane 的最后一个 Tab 即关掉该 Pane。CLI 不弹关闭确认 |
-| `codans tab label TAB TAG…` | `hierarchy.setPaneLabels` | `HierarchyManager.setTabLabels` | `TAB`，`TAG…`，`[--replace]`；标签存在 terminal Content 状态上 |
+| `codans tab label TAB TAG…` | `hierarchy.setTabLabels` | `HierarchyManager.setContentLabels` | `TAB`，`TAG…`，`[--replace]`；标签存在 terminal Content 状态上 |
 | `codans tab reset TAB` | `terminal.resetPane` | libghostty reset 绑定动作 | `TAB`；清 scrollback 并重初始化终端，不打扰子进程 |
 | `codans tab send [TAB] TEXT` | `terminal.sendInput` / `terminal.sendRawBytes` | `TerminalEngine.sendInput` | 见下 |
 | `codans tab send-key [TAB] KEY` | `terminal.sendKey` | ghostty key event | 命名特殊键：`escape/up/down/left/right/tab/enter/backspace/delete/home/end/pgup/pgdn/f1..f12/ctrl_c/ctrl_d/ctrl_l/ctrl_z` |
-| `codans tab read [TAB]` | `pane.read` | zmx 守护 `serializeTerminalState` dump | `[--raw]`（vt 格式，保留 ANSI/cursor/modes/OSC 7）`[--tail N] [--range visible\|scrollback\|all]` |
-| `codans tab info [TAB]` | `pane.info` | 探测 zmx 守护 | 回带 shell pid + pwd（cursor/modes 当前为 null）；走守护而非 catalog，故陈旧 catalog 行不会冒充 live 真相 |
+| `codans tab read [TAB]` | `tab.read` | zmx 守护 `serializeTerminalState` dump | `[--raw]`（vt 格式，保留 ANSI/cursor/modes/OSC 7）`[--tail N] [--range visible\|scrollback\|all]` |
+| `codans tab info [TAB]` | `tab.info` | 探测 zmx 守护 | 回带 shell pid + pwd（cursor/modes 当前为 null）；走守护而非 catalog，故陈旧 catalog 行不会冒充 live 真相 |
 | `codans tab capture [TAB]` | `terminal.readText` | libghostty 渲染文本 | 纯文本快照；`[--scope viewport\|screen] [--lines N] [--wait-stable]`。原始 ANSI 字节流捕获**当前不支持**（libghostty 只暴露解析后文本，非原始 PTY 字节流） |
 
 `TAB` 位置可以给 Tab id、Content id，也可以给 Pane id（解析为该 Pane 的选中 Tab）；见[寻址与别名解析](#寻址与别名解析)。容器推断（`ScopeResolver`，`CommonCommandSupport.swift`）：显式给出 Tab（或 Pane、Worktree）而 `--project` / `--worktree` 留在 `current` 时，容器从 `codans tree` 一次往返里定位，不依赖调用方所在 Tab——`codans tab close t3` 在任何 shell 都可用。
@@ -208,16 +208,16 @@
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans pane list` | `hierarchy.listPanes` | `HierarchyHandlers.listPanes` | `[--project P] [--worktree W]`；每行回带 `{id, handle, worktreeID, selectedTabID, tabIDs, isFocused}` |
-| `codans pane focus PANE` | `hierarchy.focusPane` | `HierarchyManager.focusPane` | `PANE`；把键盘焦点交给该 Pane，Tab 级快捷键随之作用于它的条 |
+| `codans pane focus [PANE] [--direction D]` | `hierarchy.focusPane` | `HierarchyManager.focusPane` / `focusNeighbour` | `PANE`；把键盘焦点交给该 Pane，Tab 级快捷键随之作用于它的条。`--direction left\|right\|up\|down\|previous\|next` 从该 Pane（缺省为 `--project` / `--worktree` 的焦点 Pane）移到那个方向的邻居，与键盘相同；在边缘不动，回带 `{paneID, moved}` |
 | `codans pane split [PANE]` | `hierarchy.splitPane` | `HierarchyManager.splitPane` | `[PANE]`（锚点，唯一的位置参数，默认焦点 Pane），`[--direction right\|left\|up\|down]`（默认 right），`[--cwd PATH]`（默认锚点 Pane 选中 Tab 的 live 目录，不是 `$PWD`），`[--label TAG…]`，`[--command CMD]`。与键盘分屏同一条路径：在锚点旁新建一个 Pane 并放进一个新 Tab，新终端带项目环境；回带 `{paneID, tabID, contentID, anchor, direction}`，文本模式打印**新 Tab 的 id**，以便紧接着 `tab send` |
 | `codans pane close PANE` | `hierarchy.closePane` | `HierarchyManager.closePane` | `PANE`；关闭该 Pane 及其条上全部 Tab（每个会话按 `tab close` 处理）。位置上给的是 Tab id 或 Content id 时以 `invalidParams` 拒绝并提示 `tab close`——避免只想关一个会话却关掉整个 Pane |
 | `codans pane resize PANE DIR` | `hierarchy.resizePane` | `HierarchyManager.resizePane` | `PANE`，`DIR`（`left`/`right` 动最近的竖分隔线，`up`/`down` 动横的），`[--amount PX]`（像素，默认 40，manager 按 400px/ratio 换算）。该方向没有分隔线则无操作 |
-| `codans pane equalize` | `hierarchy.equalizePanes` | `HierarchyManager.equalizePanes` | `[--project P] [--worktree W]`；把当前 Worktree split 树的所有分隔线归为等分 |
-| `codans pane zoom [PANE]` | `hierarchy.zoomPane` / `hierarchy.unzoomPane` | `HierarchyManager.toggleZoom` | `[PANE]`（默认焦点 Pane）；切换 zoom：被 zoom 的 Pane 填满布局区，其余 Pane 隐藏；再次执行即退出 |
+| `codans pane equalize` | `hierarchy.equalizePanes` | `HierarchyManager.equalizeSplits` | `[--project P] [--worktree W]`；把当前 Worktree split 树的所有分隔线归为等分 |
+| `codans pane zoom [PANE] [--off]` | `hierarchy.zoomPane` / `hierarchy.unzoomPane` | `HierarchyManager.toggleZoom` | `[PANE]`（默认当前 Pane）；切换 zoom：被 zoom 的 Pane 填满布局区并保留它的条，其余 Pane 隐藏；再次执行即退出。`--off`（`unzoomPane`）只退出、从不进入。回带 `{paneID, zoomed}` |
 
 `PANE` 位置给 Tab id 或 Content id 时，`focus` / `split` / `resize` / `zoom` 解析到所属 Pane；只有 `close` 拒绝（见上）。
 
-**旧位置的动词**：`codans pane new` / `show` / `send` / `send-key` / `read` / `info` / `capture` / `label` / `reset` 与 `codans tab switch` 仍被 CLI 识别，但只做一件事：以非零退出码失败，并在 stderr 的 `error:` / `hint:` 行给出新位置（如 `use "codans tab send"`）。脚本因此会大声失败而不是静默打到错的对象。
+**旧位置的动词**：`codans pane new` / `show` / `send` / `send-key` / `read` / `info` / `capture` / `label` / `reset` 与 `codans tab switch` 仍被 CLI 识别（隐藏，不出现在 `--help`、`help-json` 中），但只做一件事：以 exit 1 失败，并在 stderr 的 `error:` / `hint:` 行给出新位置（如 ``use `codans tab send` ``）；`--json` 时是 `MOVED_VERB` 错误信封，`details.to` 是新位置。脚本因此会大声失败而不是静默打到错的对象。
 
 #### `codans tab send` / `codans broadcast`
 
@@ -291,11 +291,12 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 
 `TAB` / `PANE` / `TARGET` 参数由 `AliasResolver`（`CodansKit/Transport/AliasResolver.swift`）与服务端 `HierarchyHandlers.resolveAlias` 共同解析，对每种 kind（`project`/`worktree`/`pane`/`tab`）依次尝试：
 
-1. **UUID** —— 任何合法 UUID 串假定为规范 ID，本地校验，无往返。服务端按三个 id 表（Pane / Tab / Content）查找后**解析到动词需要的层级**：需要 Tab 的位置收到 Pane id → 该 Pane 的选中 Tab，收到 Content id → 装着它的 Tab；需要 Pane 的位置收到 Tab 或 Content id → 所属 Pane。唯一例外是 `pane close`：收到 Tab / Content id 以 `invalidParams` 拒绝并提示 `tab close`。
+1. **UUID** —— project / worktree / tag 的 UUID 本地校验后直接使用，无往返；Pane / Tab / Content 的 UUID 一律交给服务端，服务端按三个 id 表（Pane / Tab / Content）查找后**解析到动词需要的层级**：需要 Tab 的位置收到 Pane id → 该 Pane 的选中 Tab，收到 Content id → 装着它的 Tab；需要 Pane 的位置收到 Tab 或 Content id → 所属 Pane。解析结果同时回报值本身命名的层级（`matched`）。唯一例外是 `pane close`：收到 Tab / Content id（或 `t<n>`、`@label`）以 exit 1 拒绝并提示 `tab close`。
 2. **`current` / `.`** —— 若对应的 `CODANS_{PROJECT,WORKTREE,PANE,TAB,CONTENT}_ID` 环境变量存在则本地解析；否则交给服务端：先把调用方归属到 Tab（连接的内核 peer PID 沿祖先链匹配 live 终端的 shell PID，退而取请求里的上下文 Content id），tab 级直接返回，pane / worktree / project 级从 catalog 中持有该 Tab 的行读出。终端只导出自己的三个 id，所以 `--project current` 等全靠这一步；不在 Tab 里 → `notFound(kind, "current")`，CLI 渲染为"no current <kind>: this shell is not inside a Codans tab"（exit 2）。
 3. **`@label`** —— 仅 Tab：匹配 terminal Content 的 `labels`；多于一个匹配则报 conflict。
 4. **`p<n>` / `t<n>`** —— `TargetHandleRegistry` 的稳定短句柄：`p<n>` 是 Pane，`t<n>` 是 Tab；句柄没有别的含义。
-5. **名字** —— project 按 name / canonicalName；worktree 按 name 或 branch，调用方在 Tab 里时限定在该 Tab 的 project 内；tab 按 title，限定在该 Tab 的 worktree 内；均不区分大小写。唯一命中即返回，多个命中 → `conflict`（请传 id），零命中 → `notFound`。Pane 没有名字：裸词按 `invalidParams` 拒绝并提示引号（常见于未加引号的 `tab send echo hi`）。
+5. **名字** —— project 按 name / canonicalName；worktree 按 name 或 branch，调用方在 Tab 里时限定在该 Tab 的 project 内；tab 按 title，限定在该 Tab 的 worktree 内；均不区分大小写。唯一命中即返回，多个命中 → `conflict`（请传 id），零命中 → `notFound`（未加引号的 `tab send echo hi` 因此以 exit 2 报 `tab not found: echo`）。Pane 与 Content 没有名字：`--pane` 等位置上的裸词按 `invalidParams` 拒绝并提示引号。
+   `@selected` 是 project / worktree 位置的另一个代词：窗口当前显示的 Project 与 Worktree。Tab 与 Pane 动词（`tab new` / `tab list` / `pane list` / `pane equalize` / `pane focus --direction`）在 Tab 外运行、两个容器都留在 `current` 时自动退到它。
 6. **路径**（仅 worktree）—— `/abs`、`~/x`、`./x`、`../x`、`..` 视为路径（分支名也含 `/`，故只认这些前缀）：CLI 先相对 `$PWD` 变成绝对路径（`AliasResolver.absolutePathIfPathShaped`），服务端按规范化路径匹配"等于 worktree 根或位于其下"的 worktree，跨 project；嵌套时取最深的一个。
 
 **位置参数只承载目标**：每个动词最多一个位置目标，容器用 `--project/--worktree/--pane`；文本、命令、新对象的名字不与目标争位（`tab send` 的一参/二参形式是唯一例外，`pane split` 的命令走 `--command`）。早先设想的 index 与 path glob 形式未实现。所有非 UUID 解析是一次到 `hierarchy.resolveAlias` 的往返，先于真正的方法调用。结果只在单次 `codans` 调用内缓存，绝不跨调用。
@@ -306,12 +307,12 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 
 ```json
 { "schemaVersion": "codans.cli.tab.send.v1", "data": { … } }
-{ "schemaVersion": "codans.cli.pane.focus.v1",
+{ "schemaVersion": "codans.cli.pane.focus.v2",
   "error": { "code": "NOT_FOUND", "message": "pane not found: p9", "hint": "…", "details": { "kind": "pane", "id": "p9" } } }
 ```
 
-- `schemaVersion` = `codans.cli.<命令路径>.v1`，命令路径由 `CommandPaths` 从根 `CommandConfiguration` 树推出（不含可执行名，`codans` / `codans-dev` 相同），经 task-local `Renderer.context` 传给每次渲染；`CommandRunner.run(self, globals:)` 负责设置它并把失败也渲染成信封（JSON 模式下错误走 stdout，文本模式仍是 stderr 的 `error:` / `hint:` 行）。
-- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED` 这类退出码分不清的情形；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
+- `schemaVersion` = `codans.cli.<命令路径>.v<n>`；`n` 从 1 起，命令的输出形状或其中 id 的含义变了就在 `OutputEnvelope.revisions` 里加一（如 `tree`、`tab show`、`pane split` 为 v2）。命令路径由 `CommandPaths` 从根 `CommandConfiguration` 树推出（不含可执行名，`codans` / `codans-dev` 相同），经 task-local `Renderer.context` 传给每次渲染；`CommandRunner.run(self, globals:)` 负责设置它并把失败也渲染成信封（JSON 模式下错误走 stdout，文本模式仍是 stderr 的 `error:` / `hint:` 行）。
+- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED`、`MOVED_VERB`（旧位置的动词，exit 1）这类退出码分不清的情形；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
 - 形状由 `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`（JSON Schema 2020-12）描述：信封 + `error` 严格，`data` 按 `schemaVersion` 绑定到各命令的定义；回归 harness 末尾用 `.claude/skills/self-verify/cli-regression/validate-json.py`（无依赖的子集校验器）校验命令的 JSON 输出。单测 `RendererEnvelopeTests` 钉住信封与退出码 → 错误码表。
 - 例外：`codans help-json` 裸打印命令树；ArgumentParser 拒绝的命令行（exit 64）打印解析器自己的文本。
 
@@ -323,7 +324,7 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 - **方法枚举。** `IPC.Method`（`apps/mac/CodansIPC/Method.swift`）覆盖每个 RPC，raw value 是小写点分串（`hierarchy.createWorktree`、`terminal.sendInput`）。两端 switch 此枚举，绝不 switch raw 串。
 - **流终止契约。** 请求设 `stream: true`；数据帧为 `{id, stream: true, result: …}`。服务端订阅结束时发送 `{id, stream: false}`；`RPCClient` 收到终帧立即结束流，不等待 EOF；响应携带 `error` 时抛出该 IPC 错误。没有终帧的 EOF 在当前客户端中映射为 `RPCError.timeout`，与帧间等待超时相同。`UnixSocketTransport.close()` 使用 `SHUT_RDWR` 并关闭 fd；没有 `SHUT_WR` 半关闭握手或收到客户端半关闭后 flush 并回终帧的契约。
 - **错误码。** `IPCError` 含 `.unknownMethod` / `.invalidParams` / `.notFound` / `.conflict` / `.unsupported` / `.internal` / `.overloaded` / `.versionMismatch`。
-- **兼容性握手。** 握手是专用的首帧 RPC `system.hello`（**非**逐请求 header——逐请求 header 会对每次调用重复编码版本信息，并与"一连接一流"规则冲突）。连接打开 → 客户端发 `system.hello`（带 `clientVersion`/`clientBinary`）→ 服务端回 `serverVersion` / `appBundleVersion` / `protocolMajor` / `protocolMinor` / `deprecatedMethods`。服务端按客户端与服务端版本的 major 检查兼容性，不兼容时返回 `.versionMismatch`。客户端检查握手错误，不读取成功响应中的 minor 或 `deprecatedMethods` 来生成警告。
+- **兼容性握手。** 握手是专用的首帧 RPC `system.hello`（**非**逐请求 header——逐请求 header 会对每次调用重复编码版本信息，并与"一连接一流"规则冲突）。连接打开 → 客户端发 `system.hello`（带 `clientVersion`/`clientBinary`/`protocolVersion`）→ 服务端回 `serverVersion` / `appBundleVersion` / `protocolMajor` / `protocolMinor` / `deprecatedMethods`。wire 契约有自己的版本号 `IPC.protocolVersion`（`CodansIPC/HandshakeTypes.swift`，当前为 2），两端编译进同一常量：服务端拒绝 `protocolVersion` 不同或缺失的客户端，客户端拒绝 `protocolMajor` 不同的服务端（exit 6，提示使用应用自带的 CLI）；此外服务端仍按两端营销版本的 major 检查兼容性。不兼容时返回 `.versionMismatch`，同一连接上紧随的请求不会执行。客户端检查握手错误，不读取成功响应中的 minor 或 `deprecatedMethods` 来生成警告。
 
   **`codans` 把 `system.hello` 与真实请求作为两个 pipelined 帧一次写出**（每次调用都开新连接），使热 socket 上不增加额外往返。版本偏斜时服务端对 hello 返回 `.versionMismatch` 并丢弃第二帧；响应 ID 按 hello vs real 配对，否则抛 `.misorderedResponse`。
 
@@ -472,7 +473,7 @@ CLIFilesystem (probe only; real impl + test fakes)
 ### 版本与兼容
 
 - **版本来源。** `codans --version` 与 `codans doctor` 显示 CLI 构建版本；服务端版本由 `system.hello` 返回。应用与 bundle 内 CLI 共同分发。
-- **握手兼容边界。** 服务端拒绝 major 不兼容的客户端；成功握手不保证每个方法都可用，调用方仍需处理未知方法、参数错误和响应解码失败。`deprecatedMethods` 是握手字段，CLI 没有弃用警告逻辑。
+- **握手兼容边界。** 服务端拒绝 IPC 协议版本或 major 不兼容的客户端，与旧版 CLI 二进制不做 wire 兼容；成功握手不保证每个方法都可用，调用方仍需处理未知方法、参数错误和响应解码失败。`deprecatedMethods` 是握手字段，CLI 没有弃用警告逻辑。
 
 ### 性能
 
