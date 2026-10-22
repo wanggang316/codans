@@ -40,17 +40,17 @@ struct TerminalEngineTests {
   @Test
   func programStatusPublishesOnlyChangedSummaries() async {
     let (engine, _, _, _) = makeEngine()
-    let paneID = PaneID()
+    let contentID = ContentID()
     let stream = engine.events()
     let working = ProgramStatusReport(state: .working, app: "claude-code")
-    engine.ingestProgramStatus(working, for: paneID)
-    engine.ingestProgramStatus(working, for: paneID)
-    engine.ingestProgramStatus(ProgramStatusReport(state: .clear), for: paneID)
+    engine.ingestProgramStatus(working, for: contentID)
+    engine.ingestProgramStatus(working, for: contentID)
+    engine.ingestProgramStatus(ProgramStatusReport(state: .clear), for: contentID)
     engine.finishEventStream()
 
     var summaries: [ProgramStatusSummary?] = []
     for await event in stream {
-      if case .paneProgramStatusChanged(let id, let summary) = event, id == paneID {
+      if case .paneProgramStatusChanged(let id, let summary) = event, id == contentID {
         summaries.append(summary)
       }
     }
@@ -62,9 +62,9 @@ struct TerminalEngineTests {
   @Test
   func programStatusOfAnUnboundPaneGovernsNothing() {
     let (engine, _, _, _) = makeEngine()
-    let paneID = PaneID()
-    engine.ingestProgramStatus(ProgramStatusReport(state: .working, app: "claude-code"), for: paneID)
-    #expect(!engine.programStatusGoverns(paneID))
+    let contentID = ContentID()
+    engine.ingestProgramStatus(ProgramStatusReport(state: .working, app: "claude-code"), for: contentID)
+    #expect(!engine.programStatusGoverns(contentID))
   }
 
   // MARK: - Fan-out
@@ -73,27 +73,27 @@ struct TerminalEngineTests {
   func subscribeThenEmitDeliversInOrder() async {
     let (engine, _, _, _) = makeEngine()
     let tabID = TabID()
-    let paneID = PaneID()
+    let contentID = ContentID()
 
     // Register the continuation synchronously by calling events() first —
     // the AsyncStream initializer closure registers with the engine during
     // this call, so subsequent emits reach the buffer even before the
     // async iterator runs.
     let stream = engine.events()
-    engine.emit(.paneCreated(paneID, tabID))
-    engine.emit(.paneReady(paneID))
+    engine.emit(.paneCreated(contentID, tabID))
+    engine.emit(.paneReady(contentID))
 
     var iterator = stream.makeAsyncIterator()
     guard case .paneCreated(let pid1, let tid1) = await iterator.next() else {
       Issue.record("expected paneCreated")
       return
     }
-    #expect(pid1 == paneID && tid1 == tabID)
+    #expect(pid1 == contentID && tid1 == tabID)
     guard case .paneReady(let pid2) = await iterator.next() else {
       Issue.record("expected paneReady")
       return
     }
-    #expect(pid2 == paneID)
+    #expect(pid2 == contentID)
   }
 
   @Test
@@ -126,13 +126,13 @@ struct TerminalEngineTests {
   func lifecycleOnlySubscriberSkipsOutputEvents() async {
     let (engine, _, _, _) = makeEngine()
     let tabID = TabID()
-    let paneID = PaneID()
+    let contentID = ContentID()
 
     let stream = engine.events(lifecycleOnly: true)
-    engine.emit(.paneOutput(paneID, Data([0x01])))
-    engine.emit(.paneOutput(paneID, Data([0x02])))
+    engine.emit(.paneOutput(contentID, Data([0x01])))
+    engine.emit(.paneOutput(contentID, Data([0x02])))
     engine.emit(.tabActivated(tabID))
-    engine.emit(.paneReady(paneID))
+    engine.emit(.paneReady(contentID))
 
     var iterator = stream.makeAsyncIterator()
     let first = await iterator.next()
@@ -153,30 +153,30 @@ struct TerminalEngineTests {
   @Test
   func appendOutputCoalescesIntoSingleEvent() async throws {
     let (engine, _, _, _) = makeEngine()
-    let paneID = PaneID()
+    let contentID = ContentID()
     let stream = engine.events()
 
-    engine.appendOutput(paneID: paneID, bytes: Data([0x01, 0x02]))
-    engine.appendOutput(paneID: paneID, bytes: Data([0x03]))
-    engine.flushOutput(for: paneID)
+    engine.appendOutput(contentID: contentID, bytes: Data([0x01, 0x02]))
+    engine.appendOutput(contentID: contentID, bytes: Data([0x03]))
+    engine.flushOutput(for: contentID)
 
     var iterator = stream.makeAsyncIterator()
     guard case .paneOutput(let pid, let data) = await iterator.next() else {
       Issue.record("expected paneOutput")
       return
     }
-    #expect(pid == paneID)
+    #expect(pid == contentID)
     #expect(data == Data([0x01, 0x02, 0x03]))
   }
 
   @Test
   func disposeOutputBufferFlushesPendingBytes() async throws {
     let (engine, _, _, _) = makeEngine()
-    let paneID = PaneID()
+    let contentID = ContentID()
     let stream = engine.events()
 
-    engine.appendOutput(paneID: paneID, bytes: Data([0xAA]))
-    engine.disposeOutputBuffer(for: paneID)
+    engine.appendOutput(contentID: contentID, bytes: Data([0xAA]))
+    engine.disposeOutputBuffer(for: contentID)
 
     var iterator = stream.makeAsyncIterator()
     if case .paneOutput(_, let data) = await iterator.next() {
@@ -211,15 +211,13 @@ struct TerminalEngineTests {
 
   private func seedPane(
     in manager: HierarchyManager
-  ) async throws -> (ProjectID, WorktreeID, TabID, PaneID) {
+  ) async throws -> (ProjectID, WorktreeID, TabID, ContentID) {
     let projectID = manager.addProject(name: "p", rootPath: "/", gitRoot: "/")
     let worktreeID = try manager.createWorktree(in: projectID, name: "w", path: "/w", branch: "main")
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/w", initialCommand: nil
-    )
-    return (projectID, worktreeID, tabID, paneID)
+    let address = try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID, content: .terminal(workingDirectory: "/w"))
+    try await manager.ensureSurface(for: address.contentID)
+    return (projectID, worktreeID, address.tabID, address.contentID)
   }
 
   // MARK: - Crash isolation
@@ -227,27 +225,27 @@ struct TerminalEngineTests {
   @Test
   func firstCrashSurvives() async throws {
     let (engine, manager, _, _) = makeEngine()
-    let (_, _, tabID, paneID) = try await seedPane(in: manager)
+    let (_, _, tabID, contentID) = try await seedPane(in: manager)
 
-    let outcome = engine.recordPaneCrash(paneID: paneID, reason: "segv")
+    let outcome = engine.recordPaneCrash(contentID: contentID, reason: "segv")
     #expect(outcome == .survived)
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.contains(where: { $0.id == tabID }))
+    #expect(manager.catalog.projects[0].worktrees[0].allTabs.contains(where: { $0.id == tabID }))
   }
 
   @Test
   func threeCrashesWithinWindowAutoClosesTabAndEmitsCrashLoopCause() async throws {
     let (engine, manager, clk, _) = makeEngine()
-    let (_, _, tabID, paneID) = try await seedPane(in: manager)
+    let (_, _, tabID, contentID) = try await seedPane(in: manager)
 
     let stream = engine.events(lifecycleOnly: true)
 
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "1") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "1") == .survived)
     clk.advance(by: 5)
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "2") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "2") == .survived)
     clk.advance(by: 5)
-    let outcome = engine.recordPaneCrash(paneID: paneID, reason: "3")
+    let outcome = engine.recordPaneCrash(contentID: contentID, reason: "3")
     #expect(outcome == .tabAutoClosed(tabID))
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.isEmpty)
+    #expect(manager.catalog.projects[0].worktrees[0].allTabs.isEmpty)
 
     var events: [TerminalEvent] = []
     var iterator = stream.makeAsyncIterator()
@@ -271,68 +269,66 @@ struct TerminalEngineTests {
   @Test
   func crashesOlderThanWindowDropFromRing() async throws {
     let (engine, manager, clk, _) = makeEngine()
-    let (_, _, tabID, paneID) = try await seedPane(in: manager)
+    let (_, _, tabID, contentID) = try await seedPane(in: manager)
 
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "1") == .survived)
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "2") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "1") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "2") == .survived)
     clk.advance(by: 31)
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "3") == .survived)
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "4") == .survived)
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.contains(where: { $0.id == tabID }))
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "3") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "4") == .survived)
+    #expect(manager.catalog.projects[0].worktrees[0].allTabs.contains(where: { $0.id == tabID }))
   }
 
   @Test
   func crashExactlyAtWindowBoundaryIsStillCounted() async throws {
     let (engine, manager, clk, _) = makeEngine()
-    let (_, _, tabID, paneID) = try await seedPane(in: manager)
+    let (_, _, tabID, contentID) = try await seedPane(in: manager)
 
     // t=0
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "1") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "1") == .survived)
     // advance to exactly window boundary (30s). Older entry should still be
     // included (>= cutoff, not > cutoff).
     clk.advance(by: 30)
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "2") == .survived)
-    let outcome = engine.recordPaneCrash(paneID: paneID, reason: "3")
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "2") == .survived)
+    let outcome = engine.recordPaneCrash(contentID: contentID, reason: "3")
     #expect(outcome == .tabAutoClosed(tabID))
   }
 
   @Test
   func retryPaneClearsRingAndEmitsReady() async throws {
     let (engine, manager, _, _) = makeEngine()
-    let (_, _, tabID, paneID) = try await seedPane(in: manager)
+    let (_, _, tabID, contentID) = try await seedPane(in: manager)
 
-    _ = engine.recordPaneCrash(paneID: paneID, reason: "1")
-    _ = engine.recordPaneCrash(paneID: paneID, reason: "2")
-    #expect(engine.retryPane(paneID))
+    _ = engine.recordPaneCrash(contentID: contentID, reason: "1")
+    _ = engine.recordPaneCrash(contentID: contentID, reason: "2")
+    #expect(engine.retryPane(contentID))
 
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "3") == .survived)
-    #expect(engine.recordPaneCrash(paneID: paneID, reason: "4") == .survived)
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.contains(where: { $0.id == tabID }))
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "3") == .survived)
+    #expect(engine.recordPaneCrash(contentID: contentID, reason: "4") == .survived)
+    #expect(manager.catalog.projects[0].worktrees[0].allTabs.contains(where: { $0.id == tabID }))
   }
 
   @Test
   func retryPaneReturnsFalseForUnknownID() {
     let (engine, _, _, _) = makeEngine()
-    #expect(!engine.retryPane(PaneID()))
+    #expect(!engine.retryPane(ContentID()))
   }
 
   @Test
-  func tabAutoCloseEmitsPaneExitedForSiblings() async throws {
+  func tabAutoCloseLeavesTheSiblingTabOfThePaneAlone() async throws {
     let (engine, manager, clk, _) = makeEngine()
-    let (projectID, worktreeID, tabID, paneA) = try await seedPane(in: manager)
-    let paneB = try await manager.splitPane(
-      paneA, direction: .right,
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/w", initialCommand: nil
-    )
+    let (projectID, worktreeID, tabID, contentA) = try await seedPane(in: manager)
+    let sibling = try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID, content: .terminal(workingDirectory: "/w"))
+    try await manager.ensureSurface(for: sibling.contentID)
 
     let stream = engine.events(lifecycleOnly: true)
 
-    _ = engine.recordPaneCrash(paneID: paneA, reason: "1")
+    _ = engine.recordPaneCrash(contentID: contentA, reason: "1")
     clk.advance(by: 5)
-    _ = engine.recordPaneCrash(paneID: paneA, reason: "2")
+    _ = engine.recordPaneCrash(contentID: contentA, reason: "2")
     clk.advance(by: 5)
-    _ = engine.recordPaneCrash(paneID: paneA, reason: "3")
+    #expect(engine.recordPaneCrash(contentID: contentA, reason: "3") == .tabAutoClosed(tabID))
 
     var events: [TerminalEvent] = []
     var iterator = stream.makeAsyncIterator()
@@ -341,27 +337,17 @@ struct TerminalEngineTests {
       if case .tabAutoClosed = event { break }
     }
 
-    let closedSiblings = events.compactMap { event -> PaneID? in
-      if case .paneClosedByTab(let pid, _) = event { return pid }
+    // A Tab holds exactly one Content, so a crash loop closes that Tab
+    // and nothing else: the sibling Tab keeps its Content and the Pane.
+    let closed = events.compactMap { event -> TabID? in
+      if case .tabAutoClosed(let id, _) = event { return id }
       return nil
     }
-    #expect(closedSiblings.contains(paneB))
-    #expect(!closedSiblings.contains(paneA))  // paneA emitted .paneCrashed, not .paneClosedByTab
-
-    // Sibling close must land BEFORE the tab auto-close signal so consumers
-    // release per-pane state in order.
-    let siblingIdx = events.firstIndex {
-      if case .paneClosedByTab(let pid, _) = $0, pid == paneB { return true }
-      return false
-    }
-    let tabCloseIdx = events.firstIndex {
-      if case .tabAutoClosed = $0 { return true }
-      return false
-    }
-    #expect(siblingIdx != nil && tabCloseIdx != nil)
-    if let siblingIdx, let tabCloseIdx {
-      #expect(siblingIdx < tabCloseIdx)
-    }
+    #expect(closed == [tabID])
+    let worktree = manager.catalog.projects[0].worktrees[0]
+    #expect(worktree.allTabs.map(\.id) == [sibling.tabID])
+    #expect(worktree.panes.map(\.id) == [sibling.paneID])
+    #expect(manager.catalog.content(sibling.contentID) != nil)
   }
 
   // MARK: - Pending restore consume-once
@@ -369,36 +355,36 @@ struct TerminalEngineTests {
   @Test
   func consumeRestorePathReturnsSeededPathThenNil() {
     let (engine, _, _, _) = makeEngine()
-    let paneID = PaneID()
+    let contentID = ContentID()
     let url = URL(fileURLWithPath: "/tmp/snapshot-\(UUID().uuidString).bin")
-    engine.pendingRestores[paneID] = url
+    engine.pendingRestores[contentID] = url
 
     // First read returns the path and clears the entry.
-    #expect(engine.consumeRestorePath(for: paneID) == url.path)
+    #expect(engine.consumeRestorePath(for: contentID) == url.path)
     // Second read for the same pane sees an empty map → nil (consume-once).
-    #expect(engine.consumeRestorePath(for: paneID) == nil)
+    #expect(engine.consumeRestorePath(for: contentID) == nil)
   }
 
   @Test
   func consumeRestorePathLeavesOtherPanesUnaffected() {
     let (engine, _, _, _) = makeEngine()
-    let paneA = PaneID()
-    let paneB = PaneID()
+    let contentA = ContentID()
+    let contentB = ContentID()
     let urlA = URL(fileURLWithPath: "/tmp/a.bin")
     let urlB = URL(fileURLWithPath: "/tmp/b.bin")
-    engine.pendingRestores[paneA] = urlA
-    engine.pendingRestores[paneB] = urlB
+    engine.pendingRestores[contentA] = urlA
+    engine.pendingRestores[contentB] = urlB
 
     // Consuming one pane's restore must not disturb the other's entry.
-    #expect(engine.consumeRestorePath(for: paneA) == urlA.path)
-    #expect(engine.consumeRestorePath(for: paneB) == urlB.path)
-    #expect(engine.consumeRestorePath(for: paneA) == nil)
+    #expect(engine.consumeRestorePath(for: contentA) == urlA.path)
+    #expect(engine.consumeRestorePath(for: contentB) == urlB.path)
+    #expect(engine.consumeRestorePath(for: contentA) == nil)
   }
 
   @Test
   func consumeRestorePathReturnsNilForAbsentPane() {
     let (engine, _, _, _) = makeEngine()
-    #expect(engine.consumeRestorePath(for: PaneID()) == nil)
+    #expect(engine.consumeRestorePath(for: ContentID()) == nil)
   }
 
   // MARK: - Subscribe-after-finish

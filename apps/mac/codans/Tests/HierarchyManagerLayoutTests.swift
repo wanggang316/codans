@@ -42,7 +42,7 @@ struct HierarchyManagerLayoutTests {
     let worktree = worktree
     #expect(worktree.isConsistent, sourceLocation: location)
     #expect(worktree.panes.allSatisfy { !$0.tabs.isEmpty }, sourceLocation: location)
-    #expect(worktree.panes.allSatisfy(\.hasResolvedSelection), sourceLocation: location)
+    #expect(worktree.panes.allSatisfy { $0.hasResolvedSelection }, sourceLocation: location)
     #expect((worktree.focusedPaneID == nil) == worktree.panes.isEmpty, sourceLocation: location)
   }
 

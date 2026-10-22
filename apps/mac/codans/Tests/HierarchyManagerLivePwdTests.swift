@@ -8,15 +8,15 @@ import Testing
 struct HierarchyManagerLivePwdTests {
   @Test
   func writesNewPathIntoCatalog() throws {
-    let (manager, paneID) = try Self.makeManagerWithPane(initialPath: "/repo")
-    manager.updatePaneWorkingDirectory(paneID, to: "/repo/sub")
-    #expect(Self.readWorkingDirectory(manager, paneID: paneID) == "/repo/sub")
+    let (manager, contentID) = try Self.makeManagerWithContent(initialPath: "/repo")
+    manager.updateWorkingDirectory(for: contentID, to: "/repo/sub")
+    #expect(Self.readWorkingDirectory(manager, contentID: contentID) == "/repo/sub")
   }
 
   @Test
   func equalPathIsNoOpAndSkipsSave() throws {
-    let (manager, paneID, url) = try Self.makeManagerWithPaneOnDisk(initialPath: "/repo")
-    manager.updatePaneWorkingDirectory(paneID, to: "/repo")
+    let (manager, contentID, url) = try Self.makeManagerWithContentOnDisk(initialPath: "/repo")
+    manager.updateWorkingDirectory(for: contentID, to: "/repo")
     // No catalog file should exist — the equal-path write must not schedule
     // a save and must not even prime the writer.
     #expect(!FileManager.default.fileExists(atPath: url.path))
@@ -24,37 +24,37 @@ struct HierarchyManagerLivePwdTests {
 
   @Test
   func emptyPathIsIgnored() throws {
-    let (manager, paneID) = try Self.makeManagerWithPane(initialPath: "/repo")
-    manager.updatePaneWorkingDirectory(paneID, to: "")
-    #expect(Self.readWorkingDirectory(manager, paneID: paneID) == "/repo")
+    let (manager, contentID) = try Self.makeManagerWithContent(initialPath: "/repo")
+    manager.updateWorkingDirectory(for: contentID, to: "")
+    #expect(Self.readWorkingDirectory(manager, contentID: contentID) == "/repo")
   }
 
   @Test
-  func unknownPaneIDIsSilentNoOp() throws {
-    let (manager, paneID) = try Self.makeManagerWithPane(initialPath: "/repo")
-    manager.updatePaneWorkingDirectory(PaneID(), to: "/elsewhere")
-    #expect(Self.readWorkingDirectory(manager, paneID: paneID) == "/repo")
+  func unknownContentIDIsSilentNoOp() throws {
+    let (manager, contentID) = try Self.makeManagerWithContent(initialPath: "/repo")
+    manager.updateWorkingDirectory(for: ContentID(), to: "/elsewhere")
+    #expect(Self.readWorkingDirectory(manager, contentID: contentID) == "/repo")
   }
 
   // MARK: - Helpers
 
-  static func makeManagerWithPane(initialPath: String) throws -> (HierarchyManager, PaneID) {
-    let (manager, paneID, _) = try makeManagerWithPaneOnDisk(initialPath: initialPath)
-    return (manager, paneID)
+  static func makeManagerWithContent(initialPath: String) throws -> (HierarchyManager, ContentID) {
+    let (manager, contentID, _) = try makeManagerWithContentOnDisk(initialPath: initialPath)
+    return (manager, contentID)
   }
 
-  static func makeManagerWithPaneOnDisk(
+  static func makeManagerWithContentOnDisk(
     initialPath: String
-  ) throws -> (HierarchyManager, PaneID, URL) {
+  ) throws -> (HierarchyManager, ContentID, URL) {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
       .appendingPathComponent("codans-pwd-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let url = dir.appendingPathComponent("catalog.json")
 
-    let pane = Pane(workingDirectory: initialPath)
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let tab = Tab(content: .terminal(workingDirectory: initialPath))
+    let pane = Pane(tabs: [tab])
     let worktree = Worktree(
-      name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id
+      name: "main", path: "/repo", splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id
     )
     let project = Project(
       name: "p", rootPath: "/repo", gitRoot: "/repo",
@@ -65,19 +65,10 @@ struct HierarchyManagerLivePwdTests {
     let store = CatalogStore(fileURL: url)
     let runtime = FakeHierarchyRuntime()
     let manager = HierarchyManager(catalog: catalog, store: store, runtime: runtime)
-    return (manager, pane.id, url)
+    return (manager, tab.contentID, url)
   }
 
-  static func readWorkingDirectory(_ manager: HierarchyManager, paneID: PaneID) -> String? {
-    for project in manager.catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          if let pane = tab.panes.first(where: { $0.id == paneID }) {
-            return pane.workingDirectory
-          }
-        }
-      }
-    }
-    return nil
+  static func readWorkingDirectory(_ manager: HierarchyManager, contentID: ContentID) -> String? {
+    manager.catalog.content(contentID)?.terminal?.workingDirectory
   }
 }

@@ -5,18 +5,18 @@ import CodansCore
 @testable import Codans
 
 /// Forwarding contract: the `env` argument passed to
-/// `HierarchyManager.openPane` and `splitPane` reaches the runtime's
+/// `HierarchyManager.ensureSurface(for:env:)` reaches the runtime's
 /// `ensureSurface` call, augmented with the per-worktree built-in path
 /// variables (`CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`) that
-/// codans injects for every pane. FakeHierarchyRuntime records the env
+/// codans injects for every Content. FakeHierarchyRuntime records the env
 /// on every call so we can assert the exact map made it across.
 ///
 /// The fixture worktree lives at `/repo` and its Project root at `/tmp`,
-/// so every spawned pane sees those two built-ins on top of the caller's
-/// env.
+/// so every spawned Content sees those two built-ins on top of the
+/// caller's env.
 @MainActor
 struct HierarchyManagerOpenPaneEnvForwardTests {
-  /// Built-ins injected for the `setupTab` fixture (worktree `/repo`,
+  /// Built-ins injected for the `setupWorktree` fixture (worktree `/repo`,
   /// root `/tmp`). Merged into every expected env below.
   private let builtins: [String: String] = [
     BuiltinEnvVar.worktreePath.key: "/repo",
@@ -32,45 +32,40 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
     return (manager, runtime)
   }
 
-  private func setupTab(_ manager: HierarchyManager) throws -> (
-    ProjectID, WorktreeID, TabID
-  ) {
+  private func setupWorktree(_ manager: HierarchyManager) throws -> (ProjectID, WorktreeID) {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "main", path: "/repo", branch: "main"
     )
-    let tabID = try manager.createTab(
-      in: worktreeID, in: projectID, name: nil
-    )
-    return (projectID, worktreeID, tabID)
+    return (projectID, worktreeID)
+  }
+
+  private func newTab(_ manager: HierarchyManager, in worktreeID: WorktreeID, in projectID: ProjectID) throws
+    -> TabAddress
+  {
+    try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID, content: .terminal(workingDirectory: "/tmp"))
   }
 
   @Test
-  func openPaneForwardsEnvToRuntime() async throws {
+  func ensureSurfaceForwardsEnvToRuntime() async throws {
     let (manager, runtime) = makeManager()
-    let (projectID, worktreeID, tabID) = try setupTab(manager)
+    let (projectID, worktreeID) = try setupWorktree(manager)
+    let created = try newTab(manager, in: worktreeID, in: projectID)
 
-    _ = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil,
-      env: ["A": "1", "B": "2"]
-    )
+    try await manager.ensureSurface(for: created.contentID, env: ["A": "1", "B": "2"])
 
     #expect(runtime.ensureSurfaceCalls.count == 1)
     #expect(runtime.ensureSurfaceCalls[0].env == ["A": "1", "B": "2"].merging(builtins) { _, b in b })
   }
 
   @Test
-  func openPaneDefaultEnvIsBuiltinsOnly() async throws {
+  func ensureSurfaceDefaultEnvIsBuiltinsOnly() async throws {
     let (manager, runtime) = makeManager()
-    let (projectID, worktreeID, tabID) = try setupTab(manager)
+    let (projectID, worktreeID) = try setupWorktree(manager)
+    let created = try newTab(manager, in: worktreeID, in: projectID)
 
-    _ = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    try await manager.ensureSurface(for: created.contentID)
 
     #expect(runtime.ensureSurfaceCalls.count == 1)
     // No caller env, so the recorded env is exactly the injected built-ins.
@@ -78,23 +73,15 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   }
 
   @Test
-  func splitPaneForwardsEnvToRuntime() async throws {
+  func splitPaneContentForwardsEnvToRuntime() async throws {
     let (manager, runtime) = makeManager()
-    let (projectID, worktreeID, tabID) = try setupTab(manager)
-    let firstPaneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil
-    )
+    let (projectID, worktreeID) = try setupWorktree(manager)
+    let first = try newTab(manager, in: worktreeID, in: projectID)
+    try await manager.ensureSurface(for: first.contentID)
 
-    _ = try await manager.splitPane(
-      firstPaneID,
-      direction: .right,
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil,
-      env: ["SPLIT_VAR": "42"]
-    )
+    let second = try manager.splitPane(
+      from: first.paneID, direction: .right, content: .terminal(workingDirectory: "/tmp"))
+    try await manager.ensureSurface(for: second.contentID, env: ["SPLIT_VAR": "42"])
 
     #expect(runtime.ensureSurfaceCalls.count == 2)
     #expect(
@@ -103,16 +90,12 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   }
 
   @Test
-  func openPaneEmptyEnvStillCarriesBuiltins() async throws {
+  func ensureSurfaceEmptyEnvStillCarriesBuiltins() async throws {
     let (manager, runtime) = makeManager()
-    let (projectID, worktreeID, tabID) = try setupTab(manager)
+    let (projectID, worktreeID) = try setupWorktree(manager)
+    let created = try newTab(manager, in: worktreeID, in: projectID)
 
-    _ = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil,
-      env: [:]
-    )
+    try await manager.ensureSurface(for: created.contentID, env: [:])
 
     #expect(runtime.ensureSurfaceCalls[0].env == builtins)
   }
@@ -123,12 +106,11 @@ struct HierarchyManagerOpenPaneEnvForwardTests {
   @Test
   func builtinPathVarsWinOverUserEnvOfSameName() async throws {
     let (manager, runtime) = makeManager()
-    let (projectID, worktreeID, tabID) = try setupTab(manager)
+    let (projectID, worktreeID) = try setupWorktree(manager)
+    let created = try newTab(manager, in: worktreeID, in: projectID)
 
-    _ = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/tmp",
-      initialCommand: nil,
+    try await manager.ensureSurface(
+      for: created.contentID,
       env: [
         BuiltinEnvVar.worktreePath.key: "/tampered",
         BuiltinEnvVar.rootPath.key: "/tampered",
