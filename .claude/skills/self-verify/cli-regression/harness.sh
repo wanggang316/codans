@@ -296,7 +296,8 @@ phase_tab() {
   echo "  tab1=$TAB1 content=$TAB1C pane=$P1"
   t T01b 0 "tab new --json carries handle t<n>, pane and content ids" -- bash -c "jq -e '.data | (.handle|startswith(\"t\")) and (.paneID|length==36) and (.contentID|length==36)' '$LOGS/T01.out'"
   t T01c 0 "tab new prints only the new tab id in text mode" -- bash -c "id=\$($CLI tab new --pane $P1 --cwd '$FIX') && [[ \$id =~ ^[0-9A-F-]{36}\$ ]] && $CLI tab close \$id >/dev/null"
-  t T01d 0 "tab new outside a tab without --project/--worktree uses the shown worktree" -- bash -c "id=\$($CLI tab new --cwd '$FIX') && $CLI tab close \$id >/dev/null"
+  t T01d 0 "tab new outside a tab without --project/--worktree fails and names --worktree @selected" -- bash -c "out=\$($CLI tab new --cwd '$FIX' --json); rc=\$?; test \$rc -eq 2 && jq -e '.error.code==\"NO_CURRENT_CONTEXT\" and (.error.hint|contains(\"--worktree @selected\"))' <<<\"\$out\""
+  t T01e 0 "tab new --worktree @selected opens in the worktree the window shows" -- bash -c "id=\$($CLI tab new --worktree @selected --cwd '$FIX') && $CLI tab close \$id >/dev/null"
   t T02 0 "tab new --pane <pane> --name --label" -- cli tab new --pane "$P1" --name "dev server" --cwd "$FIX" --label agent worker --json
   TAB2=$(jf T02 .id); TAB2C=$(jf T02 .contentID)
   t T02b 0 "tab new --pane put the tab on that pane's strip" -- bash -c "jq -e '.data.paneID==\"$P1\"' '$LOGS/T02.out'"

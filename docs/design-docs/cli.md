@@ -304,7 +304,7 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 3. **`@label`** —— 仅 Tab：匹配 terminal Content 的 `labels`；多于一个匹配则报 conflict。
 4. **`p<n>` / `t<n>`** —— `TargetHandleRegistry` 的稳定短句柄：`p<n>` 是 Pane，`t<n>` 是 Tab；句柄没有别的含义。
 5. **名字** —— project 按 name / canonicalName；worktree 按 name 或 branch，调用方在 Tab 里时限定在该 Tab 的 project 内；tab 按 title，限定在该 Tab 的 worktree 内；均不区分大小写。唯一命中即返回，多个命中 → `conflict`（请传 id），零命中 → `notFound`（未加引号的 `tab send echo hi` 因此以 exit 2 报 `tab not found: echo`）。Pane 与 Content 没有名字：`--pane` 等位置上的裸词按 `invalidParams` 拒绝并提示引号。
-   `@selected` 是 project / worktree 位置的另一个代词：窗口当前显示的 Project 与 Worktree。Tab 与 Pane 动词（`tab new` / `tab list` / `pane list` / `pane equalize` / `pane focus --direction`）在 Tab 外运行、两个容器都留在 `current` 时自动退到它。
+   `@selected` 是 project / worktree 位置的另一个代词：窗口当前显示的 Project 与 Worktree。它只在显式传入时生效（如 `--worktree @selected`）：在 Tab 外运行、容器留在 `current` 的动词不会退到它，而是报 `NO_CURRENT_CONTEXT`（exit 2），提示中给出 `--worktree @selected`。
 6. **路径**（仅 worktree）—— `/abs`、`~/x`、`./x`、`../x`、`..` 视为路径（分支名也含 `/`，故只认这些前缀）：CLI 先相对 `$PWD` 变成绝对路径（`AliasResolver.absolutePathIfPathShaped`），服务端按规范化路径匹配"等于 worktree 根或位于其下"的 worktree，跨 project；嵌套时取最深的一个。
 
 **位置参数只承载目标**：每个动词最多一个位置目标，容器用 `--project/--worktree/--pane`；文本、命令、新对象的名字不与目标争位（`tab send` 的一参/二参形式是唯一例外，`pane split` 的命令走 `--command`）。早先设想的 index 与 path glob 形式未实现。所有非 UUID 解析是一次到 `hierarchy.resolveAlias` 的往返，先于真正的方法调用。结果只在单次 `codans` 调用内缓存，绝不跨调用。

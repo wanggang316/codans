@@ -150,10 +150,9 @@ command runs in, so it works from any subshell or wrapper inside a tab.
 Outside a codans Tab there is no current tab: the command fails with
 `no current <kind>: this shell is not inside a Codans tab` (exit 2,
 `NO_CURRENT_CONTEXT`) — pass an explicit id, name, or path, or run
-`codans tree` to discover one. The exception: `tab new`, `tab list`,
-`pane list`, `pane equalize`, and `pane focus --direction` with both
-`--project` and `--worktree` left on `current` act on the worktree the
-window shows. Verbs whose target already determines its
+`codans tree` to discover one. To act on the worktree the window shows,
+say so with `--worktree @selected` (`codans tab new --worktree @selected`);
+no verb picks it on its own. Verbs whose target already determines its
 containers (`tab close t3`, `tab new --pane p2`, `worktree rm <id>`) never
 need `--project` / `--worktree` at all.
 

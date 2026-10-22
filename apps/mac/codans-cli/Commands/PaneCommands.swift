@@ -57,7 +57,7 @@ struct PaneList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.layoutWorktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let worktreeID: WorktreeID
         let projectID: ProjectID
@@ -114,7 +114,7 @@ struct PaneFocus: AsyncParsableCommand {
         let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
         params = Params(id: paneID, projectID: nil, worktreeID: nil, direction: direction?.rawValue)
       } else {
-        let scope = try await ScopeResolver.layoutWorktree(project: project, worktree: worktree, client: client)
+        let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
         params = Params(
           id: nil, projectID: scope.projectID, worktreeID: scope.worktreeID, direction: direction?.rawValue)
       }
@@ -309,7 +309,7 @@ struct PaneEqualize: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.layoutWorktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let projectID: ProjectID
         let worktreeID: WorktreeID

@@ -108,11 +108,16 @@ struct CLIError: Error, CustomStringConvertible {
     switch rpc {
     case .ipc(.notFound(let kind, let id)) where id == "current" || id == ".":
       // The pronoun could not be attributed to a Tab: the caller is not
-      // inside one (or the Tab's shell was replaced). Say what to do.
+      // inside one (or the Tab's shell was replaced). Say what to do. A
+      // container is never guessed: the worktree the window shows is an
+      // explicit opt-in.
+      let isContainer = kind == "worktree" || kind == "project"
       return CLIError(
         code: .notFound,
         message: "no current \(kind): this shell is not inside a Codans tab",
-        hint: "pass an explicit \(kind) id, or run the command from a tab",
+        hint: isContainer
+          ? "pass --worktree <name|id>, or --worktree @selected for the worktree the window shows"
+          : "pass an explicit \(kind) id, or run the command from a tab",
         errorCode: .noCurrentContext,
         details: ["kind": kind]
       )
@@ -197,21 +202,6 @@ enum PathResolver {
 enum ScopeResolver {
   static func isCurrent(_ value: String) -> Bool { value == "current" || value == "." }
 
-  /// The worktree the Tab and Pane verbs act in. Outside any Tab (a plain
-  /// terminal) `current` has nothing to name, so with both containers left
-  /// on `current` they fall back to the worktree the window shows.
-  static func layoutWorktree(
-    project: String, worktree: String, client: RPCClient
-  ) async throws -> WorktreePath {
-    do {
-      return try await Self.worktree(project: project, worktree: worktree, client: client)
-    } catch let error as AliasResolver.Error {
-      guard case .rpc(.ipc(.notFound(_, let id))) = error, isCurrent(id), isCurrent(project), isCurrent(worktree)
-      else { throw error }
-      return try await Self.worktree(project: "@selected", worktree: "@selected", client: client)
-    }
-  }
-
   static func worktree(
     project: String, worktree: String, client: RPCClient
   ) async throws -> WorktreePath {
@@ -237,7 +227,7 @@ enum ScopeResolver {
     project: String, worktree: String, pane: String?, client: RPCClient
   ) async throws -> (scope: WorktreePath, paneID: PaneID?) {
     guard let pane else {
-      return (try await Self.layoutWorktree(project: project, worktree: worktree, client: client), nil)
+      return (try await Self.worktree(project: project, worktree: worktree, client: client), nil)
     }
     let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
     if isCurrent(project), isCurrent(worktree) {
