@@ -80,7 +80,7 @@ struct HandoffHandlersTests {
     let handlers = HandoffHandlers(
       settings: settings,
       registry: registry,
-      resolveSource: { paneID in paneID == source.paneID ? source : nil },
+      resolveSource: { contentID in contentID == source.contentID ? source : nil },
       readScreen: { _ in screen },
       collectRepoState: { _ in
         HandoffRepoState(branch: "feat/x", isGit: true, changedFiles: ["a.swift"], additions: 2, deletions: 1)
@@ -89,7 +89,8 @@ struct HandoffHandlersTests {
         launches.specs.append(spec)
         if let failure = launches.failure { throw failure }
         return AgentLaunchOutcome(
-          profile: spec.profile, command: "cmd", tabID: launches.tabID, paneID: launches.paneID)
+          profile: spec.profile, command: "cmd", tabID: launches.tabID, paneID: nil,
+          contentID: launches.contentID)
       },
       typeKickoff: { contentID, agent, prompt in
         launches.kickoffs.append((contentID, agent, prompt))

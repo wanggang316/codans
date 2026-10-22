@@ -61,10 +61,10 @@ struct MainWindowCommandsTests {
     )
     let mirror = Mirror(reflecting: commands)
     let labels = mirror.children.compactMap(\.label)
-    #expect(mirror.children.count == 5)
+    #expect(mirror.children.count == 6)
     #expect(
       Set(labels) == [
-        "store", "shortcuts", "sidebarFocus", "settingsStore", "hierarchyManager",
+        "store", "shortcuts", "sidebarFocus", "settingsStore", "hierarchyManager", "contentRuntime",
       ]
     )
   }

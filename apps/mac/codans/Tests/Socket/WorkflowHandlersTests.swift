@@ -11,10 +11,10 @@ import Testing
 @MainActor
 struct WorkflowHandlersTests {
   final class World {
-    var lines: [(PaneID, String)] = []
-    var states: [PaneID: AgentStateStore.AgentRuntimeState] = [:]
-    var kinds: [PaneID: AgentKind] = [:]
-    var notifications: [(String, String, PaneID?)] = []
+    var lines: [(ContentID, String)] = []
+    var states: [ContentID: AgentStateStore.AgentRuntimeState] = [:]
+    var kinds: [ContentID: AgentKind] = [:]
+    var notifications: [(String, String, ContentID?)] = []
   }
 
   struct Harness {
@@ -25,8 +25,8 @@ struct WorkflowHandlersTests {
     let world: World
     let root: URL
     let workflows: URL
-    let paneID: PaneID
-    let otherPaneID: PaneID
+    let paneID: ContentID
+    let otherPaneID: ContentID
     let worktreeID: WorktreeID
   }
 
@@ -78,34 +78,35 @@ struct WorkflowHandlersTests {
     settings.mutateAgents { $0.profiles = profiles }
 
     let world = World()
-    let pane = Pane(workingDirectory: root.path(percentEncoded: false))
-    let other = Pane(workingDirectory: root.path(percentEncoded: false))
-    let tab = Tab(name: "dev", panes: [pane, other])
-    let worktree = Worktree(name: "wt", path: root.path(percentEncoded: false), branch: "main", tabs: [tab])
+    let tab = Tab(name: "dev", content: .terminal(workingDirectory: root.path(percentEncoded: false)))
+    let other = Tab(content: .terminal(workingDirectory: root.path(percentEncoded: false)))
+    let pane = Pane(tabs: [tab, other])
+    let worktree = Worktree(
+      name: "wt", path: root.path(percentEncoded: false), branch: "main",
+      splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
     let project = Project(name: "proj", rootPath: root.path(percentEncoded: false), worktrees: [worktree])
     let catalog = Catalog(projects: [project])
     if let agent {
-      world.kinds[pane.id] = agent
-      world.states[pane.id] = .idle
+      world.kinds[tab.contentID] = agent
+      world.states[tab.contentID] = .idle
     }
-    let addressOf: @MainActor (PaneID) -> PaneAddress? = { paneID in
-      guard tab.panes.contains(where: { $0.id == paneID }) else { return nil }
-      return PaneAddress(projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: paneID)
+    let addressOf: @MainActor (ContentID) -> TabAddress? = { contentID in
+      catalog.address(forContent: contentID)
     }
 
     let registry = WorkflowActivationRegistry()
     var dependencies = WorkflowEngineDependencies(
-      sendLine: { paneID, line in
-        world.lines.append((paneID, line))
+      sendLine: { contentID, line in
+        world.lines.append((contentID, line))
         return true
       },
-      launch: { _, _, _ in other.id },
+      launch: { _, _, _ in other.contentID },
       runCommand: { _, _, _, _ in .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false) },
-      closePane: { _ in },
-      focusPane: { _ in },
-      paneExists: { paneID in tab.panes.contains { $0.id == paneID } },
+      closeTab: { _ in },
+      focusContent: { _ in },
+      contentExists: { contentID in catalog.content(contentID) != nil },
       agentState: { world.states[$0] },
-      notify: { title, body, paneID in world.notifications.append((title, body, paneID)) },
+      notify: { title, body, contentID in world.notifications.append((title, body, contentID)) },
       profile: { id in settings.settings.agents.profile(id: id) },
       rememberBinding: { memory in settings.mutateWorkflows { $0.remember(memory) } }
     )
@@ -119,9 +120,9 @@ struct WorkflowHandlersTests {
         settings: { settings.settings },
         catalog: { catalog },
         addressOf: addressOf,
-        resolvePane: { reference in UUID(uuidString: reference).map(PaneID.init(raw:)) },
+        resolvePane: { reference in UUID(uuidString: reference).map(ContentID.init(raw:)) },
         agentKind: { world.kinds[$0] },
-        runID: { registry.runID(forPane: $0) },
+        runID: { registry.runID(forContent: $0) },
         cliCommand: "codans",
         now: { Date(timeIntervalSince1970: 1_700_000_000) }
       ))
@@ -136,7 +137,7 @@ struct WorkflowHandlersTests {
     )
     return Harness(
       handlers: handlers, engine: engine, registry: registry, settings: settings, world: world, root: root,
-      workflows: workflows, paneID: pane.id, otherPaneID: other.id, worktreeID: worktree.id)
+      workflows: workflows, paneID: tab.contentID, otherPaneID: other.contentID, worktreeID: worktree.id)
   }
 
   static func domainCode(_ body: () async throws -> some Any) async -> String? {
@@ -308,7 +309,7 @@ struct WorkflowHandlersTests {
     #expect(harness.world.lines.isEmpty)
     #expect(response.bindings.map(\.role) == ["author"])
     #expect(response.bindings[0].paneID == harness.paneID)
-    let activation = try #require(harness.registry.activation(forPane: harness.paneID))
+    let activation = try #require(harness.registry.activation(forContent: harness.paneID))
     #expect(task.completionCommand.contains(activation.token))
 
     // "Who am I": the calling pane's run, with the completion command.
@@ -348,7 +349,7 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.run(
       IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
-    let token = try #require(harness.registry.activation(forPane: harness.paneID)?.token)
+    let token = try #require(harness.registry.activation(forContent: harness.paneID)?.token)
     let delivered = try await harness.handlers.deliver(
       IPC.WorkflowDeliverRequest(callerPaneID: harness.paneID, token: token, body: "no heading here"), peerPID: nil)
     #expect(delivered.state == "provisional")
@@ -405,7 +406,7 @@ struct WorkflowHandlersTests {
     let cancelled = try harness.handlers.cancel(IPC.WorkflowCancelRequest(runID: response.runID), peerPID: nil)
     #expect(cancelled.run.state == "cancelled")
     await Self.settle { harness.engine.activeRuns.isEmpty }
-    #expect(harness.registry.runID(forPane: harness.paneID) == nil)
+    #expect(harness.registry.runID(forContent: harness.paneID) == nil)
     let again = await Self.domainCode {
       try harness.handlers.cancel(IPC.WorkflowCancelRequest(runID: response.runID), peerPID: nil)
     }
