@@ -9,9 +9,9 @@ import CodansCore
 /// correct single-quote escaping of the `/bin/sh -c` command string.
 struct ZmxAttachCommandTests {
   @Test
-  func sessionIsThePaneUUID() {
-    let paneID = PaneID()
-    #expect(ZmxAttachCommand.session(for: paneID) == paneID.raw.uuidString)
+  func sessionIsTheContentUUID() {
+    let contentID = ContentID()
+    #expect(ZmxAttachCommand.session(for: contentID) == contentID.raw.uuidString)
   }
 
   @Test

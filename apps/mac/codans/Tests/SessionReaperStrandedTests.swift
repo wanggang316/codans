@@ -29,9 +29,9 @@ struct SessionReaperStrandedTests {
     return (coordinator, dir, { store.release(); try? FileManager.default.removeItem(at: dir) })
   }
 
-  private func row(_ paneID: PaneID, socketPath: String, epoch: String?, lastAttachedAt: Date) -> Session {
+  private func row(_ contentID: ContentID, socketPath: String, epoch: String?, lastAttachedAt: Date) -> Session {
     Session(
-      paneID: paneID, socketPath: socketPath, pid: 0,
+      contentID: contentID, socketPath: socketPath, pid: 0,
       createdAt: lastAttachedAt, lastAttachedAt: lastAttachedAt,
       command: [], cwd: "/tmp", zmxVersion: "", sessionEpoch: epoch
     )
@@ -44,7 +44,7 @@ struct SessionReaperStrandedTests {
   func aliveDaemonWithStaleEpochIsRecycled() throws {
     let (coordinator, _, cleanup) = try makeStack()
     defer { cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
     // Short path: AF_UNIX `sun_path` caps at ~104 bytes, far under a deep
     // NSTemporaryDirectory()-based path, so bind the listener directly in /tmp.
     let socketPath = "/tmp/cdr-\(UUID().uuidString.prefix(8)).sock"
@@ -59,7 +59,7 @@ struct SessionReaperStrandedTests {
       clock: { now },
       currentSessionEpoch: { "107395" }   // live session rotated away from the stamp
     )
-    let states = try reaper.sweep(livePaneIDs: [pane])
+    let states = try reaper.sweep(liveContentIDs: [pane])
 
     guard case .dead = states[pane] else {
       Issue.record("expected stranded daemon to be recycled (.dead), got \(String(describing: states[pane]))")
@@ -75,7 +75,7 @@ struct SessionReaperStrandedTests {
   func aliveDaemonWithMatchingEpochIsKept() throws {
     let (coordinator, _, cleanup) = try makeStack()
     defer { cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
     // Short path: AF_UNIX `sun_path` caps at ~104 bytes, far under a deep
     // NSTemporaryDirectory()-based path, so bind the listener directly in /tmp.
     let socketPath = "/tmp/cdr-\(UUID().uuidString.prefix(8)).sock"
@@ -90,7 +90,7 @@ struct SessionReaperStrandedTests {
       clock: { now },
       currentSessionEpoch: { "107395" }   // same session — not stranded
     )
-    let states = try reaper.sweep(livePaneIDs: [pane])
+    let states = try reaper.sweep(liveContentIDs: [pane])
 
     guard case .alive = states[pane] else {
       Issue.record("expected matching-epoch daemon to be kept (.alive), got \(String(describing: states[pane]))")

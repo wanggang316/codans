@@ -40,9 +40,9 @@ struct SessionReaperLegacyDirectoryTests {
     }
   }
 
-  private func row(_ paneID: PaneID, socketPath: String, at date: Date) -> Session {
+  private func row(_ contentID: ContentID, socketPath: String, at date: Date) -> Session {
     Session(
-      paneID: paneID, socketPath: socketPath, pid: 0,
+      contentID: contentID, socketPath: socketPath, pid: 0,
       createdAt: date, lastAttachedAt: date,
       command: [], cwd: "/tmp", zmxVersion: "", sessionEpoch: "1"
     )
@@ -63,7 +63,7 @@ struct SessionReaperLegacyDirectoryTests {
   func liveLegacyDaemonIsReachedAtItsNewPath() throws {
     let fixture = try makeFixture()
     defer { fixture.cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
     let legacyPath = fixture.legacy.appendingPathComponent(pane.raw.uuidString).path
     let runtimePath = fixture.runtime.appendingPathComponent(pane.raw.uuidString).path
     let fd = ListeningUnixSocket.bind(at: legacyPath)
@@ -78,7 +78,7 @@ struct SessionReaperLegacyDirectoryTests {
     #expect(!FileManager.default.fileExists(atPath: legacyPath))
     #expect(fixture.coordinator.catalog.sessions[pane.raw.uuidString]?.socketPath == runtimePath)
 
-    let states = try reaper.sweep(livePaneIDs: [pane])
+    let states = try reaper.sweep(liveContentIDs: [pane])
     guard case .alive(let session) = states[pane] else {
       Issue.record("expected the moved daemon to probe alive, got \(String(describing: states[pane]))")
       return
@@ -92,7 +92,7 @@ struct SessionReaperLegacyDirectoryTests {
   func legacySnapshotIsAdoptedByTheRuntimeDirectory() throws {
     let fixture = try makeFixture()
     defer { fixture.cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
     let legacySnapshots = fixture.legacy.appendingPathComponent("snapshots", isDirectory: true)
     try FileManager.default.createDirectory(at: legacySnapshots, withIntermediateDirectories: true)
     let name = "\(pane.raw.uuidString).snap"
@@ -101,7 +101,7 @@ struct SessionReaperLegacyDirectoryTests {
 
     let reaper = makeReaper(fixture, now: now)
     reaper.migrateLegacySocketDirectory(from: fixture.legacy)
-    let states = try reaper.sweep(livePaneIDs: [pane])
+    let states = try reaper.sweep(liveContentIDs: [pane])
 
     let expected = fixture.runtime
       .appendingPathComponent("snapshots", isDirectory: true)
@@ -122,7 +122,7 @@ struct SessionReaperLegacyDirectoryTests {
     let fixture = try makeFixture()
     defer { fixture.cleanup() }
     try FileManager.default.createDirectory(at: fixture.runtime, withIntermediateDirectories: true)
-    let pane = PaneID()
+    let pane = ContentID()
     let legacyPath = fixture.legacy.appendingPathComponent(pane.raw.uuidString).path
     let runtimePath = fixture.runtime.appendingPathComponent(pane.raw.uuidString).path
     let legacyFD = ListeningUnixSocket.bind(at: legacyPath)
@@ -137,7 +137,7 @@ struct SessionReaperLegacyDirectoryTests {
 
     #expect(!FileManager.default.fileExists(atPath: legacyPath))
     #expect(FileManager.default.fileExists(atPath: runtimePath))
-    let states = try reaper.sweep(livePaneIDs: [pane])
+    let states = try reaper.sweep(liveContentIDs: [pane])
     guard case .alive = states[pane] else {
       Issue.record("expected the runtime daemon to be kept, got \(String(describing: states[pane]))")
       return
