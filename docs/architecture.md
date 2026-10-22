@@ -7,11 +7,11 @@ codans is a native macOS application that orchestrates terminals into a four-lev
 
 The system is a **Tuist-managed monorepo** because the product ships three co-versioned artifacts — the Mac app, the `codans` CLI, and the published Agent Skill — whose development benefits from atomic cross-cutting changes (protocol edits, CLI contract changes, domain-model evolution) and shared tooling.
 
-Architecture is adapted from two reference projects the user maintains and encourages borrowing from: **supacode** and **supaterm**. See [References](#references) for file anchors. The structural shape — Swift 6, Tuist, libghostty-via-submodule, hybrid TCA + `@Observable`, JSON-RPC over Unix socket — is lifted from these projects because they have already validated the pattern on the same workload codans targets.
+The structural shape — Swift 6, Tuist, libghostty-via-submodule, hybrid TCA + `@Observable`, JSON-RPC over a Unix socket — is an established pattern for native macOS terminal apps that embed libghostty and serve a companion CLI; it has been validated on the same workload codans targets.
 
 ## Codemap
 
-The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/mac/`. The top level holds monorepo-wide concerns (docs, root Makefile that delegates, `mise.toml`). This mirrors supaterm's multi-platform-ready layout.
+The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/mac/`. The top level holds monorepo-wide concerns (docs, root Makefile that delegates, `mise.toml`). The layout leaves room for further platforms next to `apps/mac/`.
 
 ### Tuist targets under `apps/mac/`
 
@@ -42,7 +42,7 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | `codans/App/Features/WorktreeHeader/` | Branch identity and editor, Run, and Agent controls. Editor intents delegate to `RootFeature`. The surrounding Worktree detail toolbar also presents status, live processes and notifications. Git Viewer uses the configurable ⌘G command; Worktree → Show Changes opens the independent read-only comparison window. See [Main window](design-docs/main-window.md). |
 | `codans/App/Features/Socket/` | Socket server + `MethodRouter` + per-namespace handlers (`SystemHandlers`, `HierarchyHandlers`, `TerminalHandlers`, `EditorHandlers`). `EditorHandlers` serves `editor.describe` / `editor.open` / `editor.setGlobalDefault` / `editor.setProjectDefault`, bridging `EditorClient` + `HierarchyClient` to the `CodansIPC/Editor/` wire types. |
 
-Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by **folder convention + code review**, not by Tuist target edges. This matches supacode/supaterm's idiom. Promote a subfolder to its own target only when it gains a test bundle, becomes consumed by another app (e.g. iOS), or needs to restrict its public API surface.
+Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by **folder convention + code review**, not by Tuist target edges. Promote a subfolder to its own target only when it gains a test bundle, becomes consumed by another app (e.g. iOS), or needs to restrict its public API surface.
 
 ### Directories at the repo root (monorepo-wide)
 
@@ -103,7 +103,7 @@ skills/codans-cli/          (text-only, no Swift dependencies)
 **Enforcement:**
 - Tuist target `dependencies:` lists in `apps/mac/Project.swift` — each Tuist target declares exactly which frameworks it depends on.
 - Code review: PRs that break the in-app-module folder convention (e.g., `codans/Git/*.swift` importing from `codans/Runtime/`) are rejected.
-- Future: a `make mac-inspect-dependencies` target (supacode-inspired) to flag unwanted in-app cross-imports.
+- Future: a `make mac-inspect-dependencies` target to flag unwanted in-app cross-imports.
 
 ## Architectural Invariants
 
@@ -141,7 +141,7 @@ Rules not visible in code. Violating any of these will not fail tests immediatel
 - **Commands** (TCA → runtime): `terminalClient.ensureSurface(...)`, `terminalClient.sendInput(content, text)`
 - **Events** (runtime → TCA): `terminalClient.events()` returns an `AsyncStream<TerminalEvent>` the root reducer subscribes to and maps to `Action.terminal(...)`
 
-Rationale: agent-heavy terminals produce thousands of output events per second; routing every byte through a TCA reducer is a known anti-pattern (value-type state diffs, Effect allocation, Equatable checks). Both reference projects ended at this split — supacode explicitly; supaterm implicitly via reference-type state within TCA.
+Rationale: agent-heavy terminals produce thousands of output events per second; routing every byte through a TCA reducer is a known anti-pattern (value-type state diffs, Effect allocation, Equatable checks). Reducers therefore hold only coarse UI state, and the per-byte terminal state lives in reference types the reducers never diff.
 
 ### IPC
 
@@ -280,15 +280,15 @@ Hard-won constraints that are invisible in the code but break the build or crash
 
 | Technology | Scope | Purpose | Rationale |
 |---|---|---|---|
-| Swift 6 | all | Language | Native macOS; libghostty has first-class Swift/C interop via GhosttyKit; aligns with both reference projects |
-| Tuist 4 | workspace | Project + target generation | Modular Xcode workspace; internal targets declared in `apps/mac/Project.swift`. Same pattern as supacode/supaterm |
+| Swift 6 | all | Language | Native macOS; libghostty has first-class Swift/C interop via GhosttyKit |
+| Tuist 4 | workspace | Project + target generation | Modular Xcode workspace; internal targets declared in `apps/mac/Project.swift` |
 | SPM (via Tuist `Package.swift`) | workspace | External dependencies | Standard tool for fetching third-party libraries (TCA, ArgumentParser, Sparkle); integrated into Tuist |
 | mise | workspace | Tool version pinning | Committed `mise.toml` pins `tuist`, `zig`, `swiftlint`, `xcbeautify`; keeps supported tool versions explicit |
-| libghostty (via `ThirdParty/ghostty` submodule → Zig → `GhosttyKit.xcframework`) | `codans/Runtime (in-app module)` | Terminal emulator | Best macOS-native terminal renderer with a stable C API; building from submodule (not prebuilt XCFramework) matches supacode/supaterm and lets us patch Ghostty if needed |
-| The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitHub); proven in both reference projects |
-| Swift Observation (`@Observable`) | `codans/Runtime (in-app module)`, parts of `apps/mac` | Runtime state | Hybrid complement to TCA for high-frequency terminal state; native Swift 6 feature; proven in supacode |
-| ArgumentParser | `apps/mac/codans-cli/` | CLI parsing | Apple's official CLI framework; same as both reference projects |
-| Sparkle | `apps/mac` | Auto-update | De facto standard for macOS app updates; same as supacode |
+| libghostty (via `ThirdParty/ghostty` submodule → Zig → `GhosttyKit.xcframework`) | `codans/Runtime (in-app module)` | Terminal emulator | Best macOS-native terminal renderer with a stable C API; building from submodule (not prebuilt XCFramework) pins the exact Ghostty commit and lets us patch Ghostty if needed |
+| The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitHub) |
+| Swift Observation (`@Observable`) | `codans/Runtime (in-app module)`, parts of `apps/mac` | Runtime state | Hybrid complement to TCA for high-frequency terminal state; native Swift 6 feature |
+| ArgumentParser | `apps/mac/codans-cli/` | CLI parsing | Apple's official CLI framework |
+| Sparkle | `apps/mac` | Auto-update | De facto standard for macOS app updates |
 | SwiftLint + swift-format | workspace | Lint + format | Style consistency; enforced in CI; configured via `.swiftlint.yml` and `.swift-format.json` |
 
 ## Entry Points
@@ -304,26 +304,6 @@ Hard-won constraints that are invisible in the code but break the build or crash
 | Persistence boundary | `apps/mac/CodansCore/AtomicFileStore.swift` | Atomic-rename JSON read/write; version checks belong to callers |
 
 ## References
-
-### Reference projects — borrow first, deviate with reason
-
-- **supaterm** — `/Users/wanggang/dev/opensource/supaterm`
-  - JSON-RPC wire protocol: `apps/mac/SupatermCLIShared/SupatermSocketProtocol.swift`
-  - Agent hook JSON format: `apps/mac/SupatermCLIShared/SupatermAgentHook.swift`
-  - `SplitTree<ViewType>` generic: `apps/mac/supaterm/Features/Terminal/Models/`
-  - Persistence pattern + schema version: `apps/mac/supaterm/Features/Terminal/Models/TerminalSession.swift`
-  - Ghostty submodule build: `apps/mac/scripts/build-ghostty.sh`
-
-- **supacode** — `/Users/wanggang/dev/opensource/supacode`
-  - Hybrid TCA + `@Observable` bridge: `supacode/Clients/Terminal/TerminalClient.swift`
-  - AgentHookSocketServer: `supacode/Infrastructure/AgentHookSocketServer.swift`
-  - Worktree terminal manager: `supacode/Features/Terminal/BusinessLogic/WorktreeTerminalManager.swift`
-  - Deeplink parser: `supacode/Domain/Deeplink*`
-  - `mise.toml` + `scripts/build-ghostty.sh` with fingerprint cache
-  - Tuist modular targets: `Project.swift`
-
-- **supaterm-skills** — `/Users/wanggang/dev/opensource/supaterm-skills`
-  - Reference layout for our `skills/codans-cli/`: `SKILL.md` + `references/` + `agents/`
 
 ### External references
 
