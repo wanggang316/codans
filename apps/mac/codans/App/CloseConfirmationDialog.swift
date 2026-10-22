@@ -16,16 +16,6 @@ struct CloseConfirmationPrompt: Equatable {
   /// Whether an affected Tab runs a foreground command or a working agent.
   var isRunning: Bool
 
-  /// The settings decision for a close over these Tabs. `anyLive` is false
-  /// when no affected Content has a live surface: a session whose process
-  /// already exited is being tidied up, its queue could never run, so it
-  /// counts as idle.
-  static func shouldPrompt(
-    _ setting: CloseTabConfirmation, anyBusy: Bool, anyLive: Bool
-  ) -> Bool {
-    setting.shouldPrompt(anyBusy: anyBusy && anyLive)
-  }
-
   /// "3 queued commands will be discarded." — shared with the sidebar's
   /// Remove Worktree / Remove Project prompts so the wording matches.
   static func discardNotice(_ count: Int) -> String {
