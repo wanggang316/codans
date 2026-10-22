@@ -28,6 +28,28 @@ public enum QuitConfirmation: String, Codable, CaseIterable, Equatable, Sendable
   }
 }
 
+/// User-facing "Confirm before closing a tab" preference. One rule covers closing a
+/// Tab and closing a Pane (every Tab in it). Default `.busy`: ask only when an
+/// affected Tab runs a foreground command, hosts a working agent, or holds queued
+/// commands — the work a close would lose.
+public enum CloseTabConfirmation: String, Codable, CaseIterable, Equatable, Sendable {
+  /// Ask only when an affected Tab is busy.
+  case busy
+  /// Ask before every close.
+  case always
+  /// Never ask.
+  case never
+
+  /// Whether a close whose affected Tabs are busy (`anyBusy`) asks first.
+  public func shouldPrompt(anyBusy: Bool) -> Bool {
+    switch self {
+    case .busy: anyBusy
+    case .always: true
+    case .never: false
+    }
+  }
+}
+
 /// User-facing "On quit" action. Drives both the no-dialog branch
 /// (`applicationShouldTerminate` applies this directly when `QuitConfirmation` skips the
 /// dialog) and the default-focused button in the dialog when it IS shown. Canonical home
@@ -94,6 +116,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// quit by default.
   public var quitAction: QuitAction
 
+  /// Whether closing a Tab or a Pane asks first. Default `.busy`.
+  public var closeTabConfirmation: CloseTabConfirmation
+
   /// Whether the AgentState sidebar panel should auto-open whenever any
   /// bound agent transitions into the `loading` state. Default `true`. When
   /// off, the panel only opens via the sidebar footer's toggle button. The
@@ -139,6 +164,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     updatesAutomaticallyDownloadUpdates: Bool = false,
     quitConfirmation: QuitConfirmation = .auto,
     quitAction: QuitAction = .keepRunning,
+    closeTabConfirmation: CloseTabConfirmation = .busy,
     agentsViewAutoOpen: Bool = true,
     agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
     agentsViewAutoSort: Bool = true,
@@ -156,6 +182,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.updatesAutomaticallyDownloadUpdates = updatesAutomaticallyDownloadUpdates
     self.quitConfirmation = quitConfirmation
     self.quitAction = quitAction
+    self.closeTabConfirmation = closeTabConfirmation
     self.agentsViewAutoOpen = agentsViewAutoOpen
     self.agentsViewDisplayMode = agentsViewDisplayMode
     self.agentsViewAutoSort = agentsViewAutoSort
@@ -170,6 +197,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case quitConfirmation, quitAction
+    case closeTabConfirmation
     case agentsViewAutoOpen
     case agentsViewDisplayMode
     case agentsViewAutoSort
@@ -245,6 +273,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       self.quitConfirmation = .auto
       self.quitAction = .keepRunning
     }
+    // An unknown value (a newer build's case) falls back to the default
+    // rather than failing the whole settings decode.
+    self.closeTabConfirmation =
+      (try? container.decodeIfPresent(CloseTabConfirmation.self, forKey: .closeTabConfirmation))
+      .flatMap { $0 } ?? .busy
     self.agentsViewAutoOpen =
       try container.decodeIfPresent(Bool.self, forKey: .agentsViewAutoOpen) ?? true
     // Older settings files predate this field. Default to `.normal` so
@@ -288,6 +321,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       updatesAutomaticallyDownloadUpdates, forKey: .updatesAutomaticallyDownloadUpdates)
     try container.encode(quitConfirmation, forKey: .quitConfirmation)
     try container.encode(quitAction, forKey: .quitAction)
+    try container.encode(closeTabConfirmation, forKey: .closeTabConfirmation)
     try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
     try container.encode(agentsViewDisplayMode, forKey: .agentsViewDisplayMode)
     try container.encode(crashReportsEnabled, forKey: .crashReportsEnabled)
