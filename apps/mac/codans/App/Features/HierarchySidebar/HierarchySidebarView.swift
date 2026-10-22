@@ -2361,7 +2361,8 @@ private struct SidebarFilterBar: View {
           .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(selected ? Color.white : Color.secondary)
           .frame(maxWidth: selected ? .infinity : nil)
-          .frame(minWidth: 24, minHeight: 30)
+          .frame(minWidth: 24)
+          .frame(height: TabBarMetrics.trackHeight)
           .padding(.horizontal, selected ? 6 : 0)
           .background(selected ? tint(for: filter) : Color.primary.opacity(0.05), in: Capsule())
           .contentShape(Capsule())
@@ -2373,7 +2374,7 @@ private struct SidebarFilterBar: View {
       }
     }
     .padding(.horizontal, 8)
-    .padding(.vertical, 8)
+    .padding(.bottom, TabBarMetrics.trackBottomInset)
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selection)
   }
 
