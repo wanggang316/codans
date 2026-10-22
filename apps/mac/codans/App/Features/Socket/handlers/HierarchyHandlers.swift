@@ -337,7 +337,7 @@ final class HierarchyHandlers {
     let id: UUID? =
       request.kind == .project
       ? projectID?.raw
-      : catalog.projects.first(where: { $0.id == projectID })?.selectedWorktreeID?.raw
+      : projectID.flatMap { catalog.project($0)?.selectedWorktreeID?.raw }
     guard let id else {
       return .failed(.notFound(kind: request.kind.rawValue, id: request.value))
     }
@@ -846,10 +846,7 @@ final class HierarchyHandlers {
     } catch {
       return .failed(.invalidParams(message: "createTab requires {projectID, worktreeID}", path: nil))
     }
-    guard
-      let worktree = manager.catalog.projects.first(where: { $0.id == req.projectID })?
-        .worktrees.first(where: { $0.id == req.worktreeID })
-    else {
+    guard let worktree = worktree(req.worktreeID, in: req.projectID) else {
       return .failed(.notFound(kind: "worktree", id: req.worktreeID.description))
     }
     var hostPane: PaneID?
@@ -1265,8 +1262,9 @@ final class HierarchyHandlers {
     }
     let origin: PaneID? =
       req.id
-      ?? manager.catalog.projects.first(where: { $0.id == req.projectID })?
-      .worktrees.first(where: { $0.id == req.worktreeID })?.focusedPaneID
+      ?? req.projectID.flatMap { projectID in
+        req.worktreeID.flatMap { worktree($0, in: projectID) }
+      }?.focusedPaneID
     guard let origin else {
       if req.id == nil, req.worktreeID == nil {
         return .failed(.invalidParams(message: "focusPane requires {id} or {worktreeID, direction}", path: nil))
@@ -1555,8 +1553,7 @@ final class HierarchyHandlers {
   }
 
   func worktree(_ worktreeID: WorktreeID, in projectID: ProjectID) -> Worktree? {
-    manager.catalog.projects.first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == worktreeID })
+    manager.catalog.worktree(worktreeID, in: projectID)
   }
 
   private func overlayLivePaneDirectories(in projects: [Project]) -> [Project] {

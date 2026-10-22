@@ -16,11 +16,11 @@ private struct TabHUDActionsKey: EnvironmentKey {
 /// Defaults to no-ops so a preview or a test host renders the HUD without
 /// wiring the root store.
 struct TabHUDActions {
-  /// Opens the Hand Off panel for the given pane. Routed to
-  /// `RootFeature.handoffRequested`, which re-checks the pane's agent and
+  /// Opens the Hand Off panel for the given Content. Routed to
+  /// `RootFeature.handoffRequested`, which re-checks the Content's agent and
   /// project kind before presenting.
   var handOff: (ContentID) -> Void = { _ in }
-  /// Opens the Command Queue sheet for the given pane — the same one ⌘L
+  /// Opens the Command Queue sheet for the given Content — the same one ⌘L
   /// summons. Routed to `RootFeature.commandQueueToggle`.
   var commandQueue: (ContentID) -> Void = { _ in }
 }

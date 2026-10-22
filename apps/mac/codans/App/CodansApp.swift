@@ -1704,8 +1704,7 @@ final class AppState {
     agentState: AgentStateStore?
   ) -> HandoffSource? {
     guard let address = manager.catalog.address(forContent: contentID),
-      let project = manager.catalog.projects.first(where: { $0.id == address.projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == address.worktreeID }),
+      case let (project, worktree)? = manager.catalog.worktree(address.worktreeID),
       let tab = worktree.tab(address.tabID)
     else { return nil }
     let terminal = tab.content.terminal
@@ -2037,9 +2036,8 @@ final class AppState {
   /// while another app held foreground.
   static func currentlyFocusedContent(catalog: Catalog) -> ContentID? {
     guard let activeProjectID = catalog.displayedSelectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == activeProjectID }),
-      let worktreeID = project.selectedWorktreeID,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      let worktreeID = catalog.project(activeProjectID)?.selectedWorktreeID,
+      let worktree = catalog.worktree(worktreeID, in: activeProjectID)
     else { return nil }
     return worktree.focusedPane?.selectedTab?.contentID
   }

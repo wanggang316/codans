@@ -82,6 +82,25 @@ extension Catalog {
 
   // MARK: - Nodes
 
+  public func project(_ id: ProjectID) -> Project? {
+    projects.first { $0.id == id }
+  }
+
+  /// The Worktree with `id` and the Project holding it.
+  public func worktree(_ id: WorktreeID) -> (project: Project, worktree: Worktree)? {
+    for project in projects {
+      if let worktree = project.worktrees.first(where: { $0.id == id }) {
+        return (project, worktree)
+      }
+    }
+    return nil
+  }
+
+  /// The Worktree with `id`, only when `projectID` holds it.
+  public func worktree(_ id: WorktreeID, in projectID: ProjectID) -> Worktree? {
+    project(projectID)?.worktrees.first { $0.id == id }
+  }
+
   public func tab(_ id: TabID) -> Tab? {
     firstTab { $0.id == id }?.0
   }
@@ -149,12 +168,7 @@ extension Catalog {
   /// Every `ContentID` under the given Worktree, flat across its Panes.
   /// Empty when the Worktree is not in the catalog.
   public func contentIDs(inWorktree worktreeID: WorktreeID) -> Set<ContentID> {
-    for project in projects {
-      if let worktree = project.worktrees.first(where: { $0.id == worktreeID }) {
-        return Set(worktree.contentIDs)
-      }
-    }
-    return []
+    worktree(worktreeID).map { Set($0.worktree.contentIDs) } ?? []
   }
 
   /// Every `ContentID` in the catalog. Membership reconciles (agent

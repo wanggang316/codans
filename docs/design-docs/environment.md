@@ -38,7 +38,7 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 | `CodansEnvironment.Key` | codans 读或写的每一个环境变量名，附写者、读者、生命周期 | 所有读写点；类型化持有者（`BuiltinEnvVar`、`TermProgramEnv`、`CLIBundleLocator.EnvKey`、`HandoffKickoff.requestIDEnvironmentKey`）保留 API、从它取值 |
 | `HandoffLayout` | `.codans/handoff/` 的文件与目录名 | `HandoffStore`（URL）、`HandoffKickoff`（给接收方的相对路径字符串） |
 
-app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，所有 surface 共用。
+app 层再加一个 `TabEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，所有 surface 共用。
 
 ### 通道隔离了什么
 
@@ -120,7 +120,7 @@ worktree 终端在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 
 
 ### pane 里的 CLI 叫什么
 
-pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pane 的 app** 自带的 CLI。做法是让名字携带通道：Debug 构建把 CLI 内嵌为 `bin/codans-dev`，Release 为 `bin/codans`；`PaneEnvironment` 把内置 `bin/` 目录（同目录还有 `zmx`）加进 `PATH`，并导出 `CODANS_CLI` 为绝对路径。两者都在项目 overrides 之后写入；同一目录在 `PATH` 里只保留一份。
+pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pane 的 app** 自带的 CLI。做法是让名字携带通道：Debug 构建把 CLI 内嵌为 `bin/codans-dev`，Release 为 `bin/codans`；`TabEnvironment` 把内置 `bin/` 目录（同目录还有 `zmx`）加进 `PATH`，并导出 `CODANS_CLI` 为绝对路径。两者都在项目 overrides 之后写入；同一目录在 `PATH` 里只保留一份。
 
 靠 `PATH` **顺序**是不够的，这是前一版的错误：pane 的 shell 是 login shell，macOS 的 `/etc/zprofile` 会运行 `path_helper`，把 `/etc/paths` 里的系统目录（含 `/usr/local/bin`）排到最前，app 前置的目录被挤到后面。同名的 `codans` 永远输给 `/usr/local/bin/codans`，也就是生产包。唯一的名字不需要顺序：系统里没有第二个 `codans-dev`，目录排在哪都能找到；找不到时是 command not found，而不是悄悄打到另一个 app——失败的方向是对的。
 
@@ -149,7 +149,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 - `BuildChannel`、`CodansEnvironment`、`HandoffLayout` 只依赖 Foundation，无副作用，可在任何 target 使用。
 - `SocketDiscovery`（CodansKit）与 `SocketPaths`（app）是两个门面：拼写委托给 `BuildChannel`，各自只保留本侧的解析语义。
-- `PaneEnvironment` 属 `codans/Runtime/`，是 app 内唯一写 pane 环境的地方；`HierarchyManager.resolvedEnv` 是它的 Settings 感知封装。
+- `TabEnvironment` 属 `codans/Runtime/`，是 app 内唯一写 pane 环境的地方；`HierarchyManager.resolvedEnv` 是它的 Settings 感知封装。
 - 新增按通道区分的东西，应从 `BuildChannel.current` 派生，不再新增 `#if DEBUG`。新增环境变量，先在 `CodansEnvironment.Key` 里登记。
 
 ## 备选方案
@@ -161,7 +161,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 ## Cross-Cutting
 
-- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
+- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`TabEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
 - **可观测性**：`codans doctor` 打印它解析到的 socket 与 `socketFromEnvironment`；「命令跑到别的 app」先看这个。
 - **调用方身份**：终端导出 `CODANS_CONTENT_ID` / `CODANS_TAB_ID` / `CODANS_PANE_ID`；服务端由 Content 推导所属 Tab、Pane、Worktree 和 Project。
 

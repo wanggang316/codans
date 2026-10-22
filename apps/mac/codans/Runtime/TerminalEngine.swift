@@ -251,7 +251,7 @@ final class TerminalEngine {
     // chdirs the ssh process into) must be a real *local* path — the remote
     // worktree path is meaningless locally. Local Contents run the user's
     // shell under `zmx attach <session>`, anchored at their own directory.
-    let remoteHost = hierarchy.catalog.projects.first(where: { $0.id == address.projectID })?.remoteHost
+    let remoteHost = hierarchy.catalog.project(address.projectID)?.remoteHost
     let launch: SurfaceLaunch
     let surfaceWorkingDirectory: String
     if let remoteHost {
@@ -282,8 +282,8 @@ final class TerminalEngine {
     try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
     // Each Content is its own top-level zmx session, addressed by its UUID;
     // the builder pins `ZMX_DIR`, clears an inherited `ZMX_SESSION`, and
-    // stamps the three ids. See `PaneEnvironment.forSurface` for why each.
-    let surfaceEnv = PaneEnvironment.forSurface(env, address: address, zmxDirectory: zmxDir)
+    // stamps the three ids. See `TabEnvironment.forSurface` for why each.
+    let surfaceEnv = TabEnvironment.forSurface(env, address: address, zmxDirectory: zmxDir)
 
     // Start at the size of the slot that will show the Content, so a live
     // session is not resized through a placeholder width (see

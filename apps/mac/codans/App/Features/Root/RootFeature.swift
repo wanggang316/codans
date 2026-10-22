@@ -1200,8 +1200,7 @@ struct RootFeature {
         let catalog = hierarchyClient.snapshot()
         guard
           let address = catalog.address(forContent: contentID),
-          let project = catalog.projects.first(where: { $0.id == address.projectID }),
-          let worktree = project.worktrees.first(where: { $0.id == address.worktreeID }),
+          case let (project, worktree)? = catalog.worktree(address.worktreeID),
           // The fetch unit the session's row belongs to: the Project's
           // repository, or — in a workspace — the member repository this
           // checkout came from.
@@ -2298,9 +2297,7 @@ struct RootFeature {
     }
     hierarchyClient.selectProject(address.projectID)
     guard
-      hierarchyClient.snapshot()
-        .projects.first(where: { $0.id == address.projectID })?
-        .worktrees.contains(where: { $0.id == address.worktreeID }) == true
+      hierarchyClient.snapshot().worktree(address.worktreeID, in: address.projectID) != nil
     else { return .none }
     try? hierarchyClient.selectWorktree(address.worktreeID, address.projectID)
     // Scroll the now-selected worktree into view. Done before the Tab guard
@@ -2680,8 +2677,7 @@ struct RootFeature {
     else { return }
     let catalog = hierarchyClient.snapshot()
     guard
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
+      let worktree = catalog.worktree(worktreeID, in: projectID),
       worktree.panes.isEmpty
     else { return }
     guard
@@ -2715,9 +2711,7 @@ struct RootFeature {
     guard
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID,
-      let worktree = hierarchyClient.snapshot()
-        .projects.first(where: { $0.id == projectID })?
-        .worktrees.first(where: { $0.id == worktreeID })
+      let worktree = hierarchyClient.snapshot().worktree(worktreeID, in: projectID)
     else {
       splitViewport.paneHosts = []
       return

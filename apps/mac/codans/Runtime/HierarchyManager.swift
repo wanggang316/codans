@@ -1740,13 +1740,11 @@ final class HierarchyManager {
   /// The Content currently shown and focused in the Worktree: the focused
   /// Pane's selected Tab. `nil` for a Worktree without Panes.
   func focusedContent(in worktreeID: WorktreeID) -> TabAddress? {
-    for project in catalog.projects {
-      guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else { continue }
-      guard let pane = worktree.focusedPane, let tab = pane.selectedTab else { return nil }
-      return TabAddress(
-        projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id, contentID: tab.content.id)
-    }
-    return nil
+    guard case let (project, worktree)? = catalog.worktree(worktreeID),
+      let pane = worktree.focusedPane, let tab = pane.selectedTab
+    else { return nil }
+    return TabAddress(
+      projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id, contentID: tab.content.id)
   }
 
   // MARK: - Tab verbs
@@ -2274,8 +2272,7 @@ final class HierarchyManager {
   func ensureSurface(for contentID: ContentID, env: [String: String] = [:]) async throws {
     guard !runtime.hasSurface(for: contentID) else { return }
     guard let address = catalog.address(forContent: contentID),
-      let project = catalog.projects.first(where: { $0.id == address.projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == address.worktreeID }),
+      case let (project, worktree)? = catalog.worktree(address.worktreeID),
       let content = worktree.tab(address.tabID)?.content
     else {
       throw HierarchyError.notFound("Content \(contentID)")
@@ -2467,7 +2464,7 @@ final class HierarchyManager {
     for projectID: ProjectID,
     in settings: Settings
   ) -> [String: String] {
-    PaneEnvironment.processBase(
+    TabEnvironment.processBase(
       overrides: settings.projects[projectID]?.envVars ?? [:],
       socketPath: SocketPaths.resolve()
     )

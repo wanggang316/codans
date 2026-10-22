@@ -1967,9 +1967,8 @@ struct HierarchySidebarView: View {
   private func currentlyFocusedContentID() -> ContentID? {
     let catalog = hierarchyManager.catalog
     guard let projectID = catalog.selectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let worktreeID = project.selectedWorktreeID,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      let worktreeID = catalog.project(projectID)?.selectedWorktreeID,
+      let worktree = catalog.worktree(worktreeID, in: projectID)
     else { return nil }
     return worktree.focusedPane?.selectedTab?.contentID
   }

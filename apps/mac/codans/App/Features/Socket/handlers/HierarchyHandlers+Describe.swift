@@ -121,8 +121,7 @@ extension HierarchyHandlers {
   func paneDescription(_ paneID: PaneID) -> IPC.PaneDescription? {
     let catalog = manager.catalog
     guard let address = catalog.address(forPane: paneID),
-      let worktree = catalog.projects.first(where: { $0.id == address.projectID })?
-        .worktrees.first(where: { $0.id == address.worktreeID }),
+      let worktree = catalog.worktree(address.worktreeID, in: address.projectID),
       let pane = worktree.pane(paneID)
     else { return nil }
     handleRegistry.sync(with: catalog)

@@ -28,9 +28,9 @@ import SwiftUI
 /// — and this card will grow rows as actions are added.
 struct TabHUDView: View {
   let contentID: ContentID
-  /// The pane's live terminal surface, which services every
+  /// The Tab's live terminal surface, which services every
   /// `PaneSurfaceAction` row. Optional only for hosts that render the card
-  /// without a running pane (the HUD render tests, previews); `LazyPaneHost`
+  /// without a running session (the HUD render tests, previews); `LazyPaneHost`
   /// mounts the HUD alongside the surface, so in the app it is always there.
   /// Without one those rows render disabled rather than vanishing.
   let surface: PaneSurface?
@@ -323,10 +323,10 @@ struct TabHUDView: View {
     .accessibilityIdentifier("tab_hud.command_queue")
   }
 
-  /// One row per `PaneSurfaceAction`, driven straight at the pane's surface
+  /// One row per `PaneSurfaceAction`, driven straight at the Tab's surface
   /// — the same entry point the right-click menu items use, so a split from
   /// here lands in `PaneActionRouterFeature` exactly as one from there does
-  /// and inherits its policy (closing a tab's last pane retires the tab, a
+  /// and inherits its policy (closing a pane's last tab closes the pane, a
   /// sibling reclaims focus).
   private func surfaceActionButton(_ action: PaneSurfaceAction) -> some View {
     // Copy needs a selection to copy. Shown disabled rather than dropped, so

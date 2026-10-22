@@ -92,7 +92,7 @@
     3. build-channel default             (Debug: /tmp/codans-dev-$UID.sock;
                                           Release: /tmp/codans-$UID.sock)
 
-  Injected env vars inside every terminal Tab (built by PaneEnvironment):
+  Injected env vars inside every terminal Tab (built by TabEnvironment):
     CODANS_SOCKET_PATH, CODANS_CLI, CODANS_PANE_ID (the Pane),
     CODANS_TAB_ID (the Tab), CODANS_CONTENT_ID (the session),
     CODANS_WORKTREE_PATH, CODANS_ROOT_PATH, ZMX_DIR, ZMX_SESSION (cleared),

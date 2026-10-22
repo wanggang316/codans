@@ -250,8 +250,7 @@ struct TabBarFeature {
   }
 
   private func worktreePath(_ worktreeID: WorktreeID, _ projectID: ProjectID) -> String? {
-    hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == worktreeID })?.path
+    hierarchyClient.snapshot().worktree(worktreeID, in: projectID)?.path
   }
 
   /// Spawn the new Tab's session, then promote its surface to first
