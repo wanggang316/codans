@@ -658,8 +658,10 @@ struct HierarchyManagerTests {
     let (_, worktreeID, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
     manager.recordProcessLaunch(contentID: paneATab1.contentID, name: "make", kind: .run)
     manager.recordProcessLaunch(contentID: paneATab2.contentID, name: "test", kind: .run)
-    #expect(manager.processEntries(in: worktreeID).count == 2)
+    // A launch is pending until a foreground sample confirms it.
+    #expect(manager.processRegistry.launches.count == 2)
     try manager.closePane(paneATab1.paneID)
+    #expect(manager.processRegistry.launches.isEmpty)
     #expect(manager.processEntries(in: worktreeID).isEmpty)
     #expect(worktree.panes.map(\.id) == [paneB.paneID])
   }
