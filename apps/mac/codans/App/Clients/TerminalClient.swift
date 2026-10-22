@@ -113,7 +113,7 @@ extension TerminalClient {
       ensureSurface: { contentID, geometry in
         let catalog = engine.hierarchy.catalog
         guard let address = catalog.address(forContent: contentID),
-          case let (project, worktree)? = catalog.worktree(address.worktreeID),
+          case (let project, let worktree)? = catalog.worktree(address.worktreeID),
           let content = worktree.tab(address.tabID)?.content
         else {
           throw TerminalClient.Error.contentNotFound(contentID)

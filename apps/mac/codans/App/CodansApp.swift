@@ -1704,7 +1704,7 @@ final class AppState {
     agentState: AgentStateStore?
   ) -> HandoffSource? {
     guard let address = manager.catalog.address(forContent: contentID),
-      case let (project, worktree)? = manager.catalog.worktree(address.worktreeID),
+      case (let project, let worktree)? = manager.catalog.worktree(address.worktreeID),
       let tab = worktree.tab(address.tabID)
     else { return nil }
     let terminal = tab.content.terminal
