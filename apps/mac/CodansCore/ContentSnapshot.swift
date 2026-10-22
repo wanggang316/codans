@@ -118,9 +118,9 @@ public nonisolated struct TerminalContentState: Equatable, Sendable {
   /// runtime. Persists across catalog reloads so the agent view can render
   /// an agent-specific status before any output is observed.
   public var agentKind: AgentKind?
-  /// Opaque per-agent session identifier (e.g. the Claude Code session
-  /// UUID) used to correlate the Content with the agent's own session
-  /// records. Optional because not every agent exposes one.
+  /// Opaque identifier of an agent's own session, used to correlate the
+  /// Content with that agent's session records. Optional because not
+  /// every agent exposes one.
   public var agentSessionID: String?
   /// `ScriptDefinition.id` of the run script this Content is dedicated to,
   /// `nil` for an ordinary terminal. Persisted so the next run after a
