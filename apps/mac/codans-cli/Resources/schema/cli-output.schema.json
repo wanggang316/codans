@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://codans.dev/schemas/cli-output.v1.json",
   "title": "codans CLI --json output",
-  "description": "Every `codans <verb> --json` prints one object: `schemaVersion` (`codans.cli.<command path>.v1`, the same on every build channel) plus exactly one of `data` (success) or `error` (failure). Commands not bound below still use the envelope; their `data` is any object. `codans help-json` is the one exception and prints its tree bare. Nullable properties may be omitted entirely (the CLI omits nil fields).",
+  "description": "Every `codans <verb> --json` prints one object: `schemaVersion` (`codans.cli.<command path>.v<n>`, the same on every build channel; `n` is raised when a command's output shape or the meaning of its ids changes) plus exactly one of `data` (success) or `error` (failure). Commands not bound below still use the envelope; their `data` is any object. `codans help-json` is the one exception and prints its tree bare. Nullable properties may be omitted entirely (the CLI omits nil fields).",
   "type": "object",
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "pattern": "^codans\\.cli\\.[a-z][a-z0-9.-]*\\.v1$"
+      "pattern": "^codans\\.cli\\.[a-z][a-z0-9.-]*\\.v[0-9]+$"
     },
     "data": {
       "type": "object"
@@ -47,7 +47,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.tree.v1"
+            "const": "codans.cli.tree.v2"
           }
         },
         "required": [
@@ -127,7 +127,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.worktree.show.v1"
+            "const": "codans.cli.worktree.show.v2"
           }
         },
         "required": [
@@ -147,7 +147,27 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.tab.show.v1"
+            "const": "codans.cli.tab.list.v2"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabList"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.show.v2"
           }
         },
         "required": [
@@ -167,7 +187,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.show.v1"
+            "const": "codans.cli.tab.new.v2"
           }
         },
         "required": [
@@ -178,7 +198,7 @@
       "then": {
         "properties": {
           "data": {
-            "$ref": "#/$defs/paneShow"
+            "$ref": "#/$defs/tabCreated"
           }
         }
       }
@@ -187,7 +207,267 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.list.v1"
+            "const": "codans.cli.tab.focus.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabTarget"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.rename.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/rename"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.close.v2"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabClosed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.send.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabSend"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.send.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabSend"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.send-key.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabSendKey"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.send-key.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabSendKey"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.capture.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabCapture"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.capture.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabCapture"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.read.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabRead"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.info.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabInfo"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.label.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabLabel"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.tab.reset.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/tabTarget"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.pane.list.v2"
           }
         },
         "required": [
@@ -207,7 +487,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.new.v1"
+            "const": "codans.cli.pane.focus.v2"
           }
         },
         "required": [
@@ -218,7 +498,7 @@
       "then": {
         "properties": {
           "data": {
-            "$ref": "#/$defs/paneCreated"
+            "$ref": "#/$defs/paneFocus"
           }
         }
       }
@@ -227,7 +507,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.split.v1"
+            "const": "codans.cli.pane.split.v2"
           }
         },
         "required": [
@@ -247,7 +527,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.send.v1"
+            "const": "codans.cli.pane.close.v2"
           }
         },
         "required": [
@@ -258,7 +538,7 @@
       "then": {
         "properties": {
           "data": {
-            "$ref": "#/$defs/paneSend"
+            "$ref": "#/$defs/paneClosed"
           }
         }
       }
@@ -267,67 +547,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.capture.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/paneCapture"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
-            "const": "codans.cli.pane.read.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/paneRead"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
-            "const": "codans.cli.pane.info.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/paneInfo"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
-            "const": "codans.cli.pane.focus.v1"
+            "const": "codans.cli.pane.resize.v2"
           }
         },
         "required": [
@@ -347,7 +567,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.close.v1"
+            "const": "codans.cli.pane.equalize.v1"
           }
         },
         "required": [
@@ -367,7 +587,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.reset.v1"
+            "const": "codans.cli.pane.zoom.v1"
           }
         },
         "required": [
@@ -378,7 +598,7 @@
       "then": {
         "properties": {
           "data": {
-            "$ref": "#/$defs/idMessage"
+            "$ref": "#/$defs/paneZoom"
           }
         }
       }
@@ -387,7 +607,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.pane.resize.v1"
+            "const": "codans.cli.broadcast.v2"
           }
         },
         "required": [
@@ -398,47 +618,7 @@
       "then": {
         "properties": {
           "data": {
-            "$ref": "#/$defs/idMessage"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
-            "const": "codans.cli.tab.switch.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/idMessage"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
-            "const": "codans.cli.tab.close.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/idMessage"
+            "$ref": "#/$defs/broadcast"
           }
         }
       }
@@ -647,26 +827,6 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.tab.rename.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/rename"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
             "const": "codans.cli.worktree.prune.v1"
           }
         },
@@ -679,26 +839,6 @@
         "properties": {
           "data": {
             "$ref": "#/$defs/worktreePrune"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "schemaVersion": {
-            "const": "codans.cli.broadcast.v1"
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "data"
-        ]
-      },
-      "then": {
-        "properties": {
-          "data": {
-            "$ref": "#/$defs/broadcast"
           }
         }
       }
@@ -1067,20 +1207,26 @@
             "null"
           ]
         },
-        "workingDirectory": {
-          "type": "string"
+        "selectedTabID": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "labels": {
+        "isFocused": {
+          "type": "boolean"
+        },
+        "tabs": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/treeTab"
           }
         }
       },
       "required": [
         "id",
-        "workingDirectory",
-        "labels"
+        "isFocused",
+        "tabs"
       ],
       "additionalProperties": false
     },
@@ -1108,16 +1254,42 @@
             "null"
           ]
         },
-        "panes": {
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "kind": {
+          "enum": [
+            "terminal"
+          ]
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "workingDirectory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/treePane"
+            "type": "string"
           }
+        },
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
-        "panes"
+        "contentID",
+        "kind",
+        "isSelected",
+        "labels"
       ],
       "additionalProperties": false
     },
@@ -1139,16 +1311,28 @@
             "null"
           ]
         },
+        "sourceGitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "focusedPaneID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selectedTabID": {
           "type": [
             "string",
             "null"
           ]
         },
-        "tabs": {
+        "panes": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/treeTab"
+            "$ref": "#/$defs/treePane"
           }
         }
       },
@@ -1156,7 +1340,7 @@
         "id",
         "name",
         "path",
-        "tabs"
+        "panes"
       ],
       "additionalProperties": false
     },
@@ -1366,13 +1550,13 @@
         "isSelected": {
           "type": "boolean"
         },
-        "selectedTabID": {
+        "focusedPaneID": {
           "type": [
             "string",
             "null"
           ]
         },
-        "tabCount": {
+        "paneCount": {
           "type": "integer"
         }
       },
@@ -1385,137 +1569,12 @@
         "isArchived",
         "isPinned",
         "isSelected",
-        "tabCount"
+        "paneCount"
       ],
       "additionalProperties": false
     },
     "tabShow": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/uuid"
-        },
-        "handle": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "projectID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "worktreeID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "icon": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "isSelected": {
-          "type": "boolean"
-        },
-        "focusedPaneID": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "paneIDs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "id",
-        "projectID",
-        "worktreeID",
-        "isSelected",
-        "paneIDs"
-      ],
-      "additionalProperties": false
-    },
-    "paneShow": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/uuid"
-        },
-        "handle": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "projectID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "worktreeID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "tabID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "workingDirectory": {
-          "type": "string"
-        },
-        "initialCommand": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "labels": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "agent": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "agentSessionID": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "isLive": {
-          "type": "boolean"
-        },
-        "isFocused": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "id",
-        "projectID",
-        "worktreeID",
-        "tabID",
-        "workingDirectory",
-        "labels",
-        "isLive",
-        "isFocused"
-      ],
-      "additionalProperties": false
+      "$ref": "#/$defs/tabDescription"
     },
     "paneList": {
       "type": "object",
@@ -1523,27 +1582,7 @@
         "panes": {
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/$defs/uuid"
-              },
-              "workingDirectory": {
-                "type": "string"
-              },
-              "labels": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "id",
-              "workingDirectory",
-              "labels"
-            ],
-            "additionalProperties": false
+            "$ref": "#/$defs/paneDescription"
           }
         }
       },
@@ -1552,22 +1591,16 @@
       ],
       "additionalProperties": false
     },
-    "paneCreated": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/uuid"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "additionalProperties": false
-    },
     "paneSplit": {
       "type": "object",
       "properties": {
-        "id": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
           "$ref": "#/$defs/uuid"
         },
         "anchor": {
@@ -1583,129 +1616,11 @@
         }
       },
       "required": [
-        "id",
+        "paneID",
+        "tabID",
+        "contentID",
         "anchor",
         "direction"
-      ],
-      "additionalProperties": false
-    },
-    "paneSend": {
-      "type": "object",
-      "properties": {
-        "paneID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "bytes": {
-          "type": "integer"
-        },
-        "completed": {
-          "type": "boolean"
-        },
-        "waitedMs": {
-          "type": "integer"
-        },
-        "busyObserved": {
-          "type": "boolean"
-        },
-        "output": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "paneID",
-        "bytes"
-      ],
-      "additionalProperties": false
-    },
-    "paneCapture": {
-      "type": "object",
-      "properties": {
-        "paneID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "scope": {
-          "enum": [
-            "viewport",
-            "screen"
-          ]
-        },
-        "lines": {
-          "type": "integer"
-        },
-        "text": {
-          "type": "string"
-        },
-        "stabilized": {
-          "type": "boolean"
-        },
-        "waitedMs": {
-          "type": "integer"
-        },
-        "samples": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "paneID",
-        "scope",
-        "lines",
-        "text"
-      ],
-      "additionalProperties": false
-    },
-    "paneRead": {
-      "type": "object",
-      "properties": {
-        "paneID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "format": {
-          "type": "string"
-        },
-        "range": {
-          "type": "string"
-        },
-        "content": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "paneID",
-        "format",
-        "range",
-        "content"
-      ],
-      "additionalProperties": false
-    },
-    "paneInfo": {
-      "type": "object",
-      "properties": {
-        "paneID": {
-          "$ref": "#/$defs/uuid"
-        },
-        "shellPid": {
-          "type": "integer"
-        },
-        "pwd": {
-          "type": "string"
-        },
-        "cursor": {
-          "type": [
-            "object",
-            "null"
-          ]
-        },
-        "modes": {
-          "type": [
-            "object",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "paneID",
-        "shellPid",
-        "pwd"
       ],
       "additionalProperties": false
     },
@@ -2961,6 +2876,477 @@
         "path",
         "isValid",
         "diagnostics"
+      ],
+      "additionalProperties": false
+    },
+    "tabDescription": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "worktreeID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "enum": [
+            "red",
+            "orange",
+            "yellow",
+            "green",
+            "blue",
+            "purple",
+            "grey",
+            null
+          ]
+        },
+        "isSelected": {
+          "type": "boolean"
+        },
+        "workingDirectory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agentSessionID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isLive": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "projectID",
+        "worktreeID",
+        "paneID",
+        "contentID",
+        "isSelected",
+        "labels",
+        "isLive"
+      ],
+      "additionalProperties": false
+    },
+    "paneDescription": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "worktreeID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "selectedTabID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tabIDs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "isFocused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "projectID",
+        "worktreeID",
+        "tabIDs",
+        "isFocused"
+      ],
+      "additionalProperties": false
+    },
+    "tabList": {
+      "type": "object",
+      "properties": {
+        "tabs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tabDescription"
+          }
+        }
+      },
+      "required": [
+        "tabs"
+      ],
+      "additionalProperties": false
+    },
+    "tabCreated": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "handle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        }
+      },
+      "required": [
+        "id",
+        "paneID",
+        "contentID"
+      ],
+      "additionalProperties": false
+    },
+    "tabClosed": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        }
+      },
+      "required": [
+        "id",
+        "contentID"
+      ],
+      "additionalProperties": false
+    },
+    "tabTarget": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID"
+      ],
+      "additionalProperties": false
+    },
+    "tabLabel": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID",
+        "labels"
+      ],
+      "additionalProperties": false
+    },
+    "paneFocus": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "moved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paneID",
+        "moved"
+      ],
+      "additionalProperties": false
+    },
+    "paneClosed": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "tabIDs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "tabIDs"
+      ],
+      "additionalProperties": false
+    },
+    "paneZoom": {
+      "type": "object",
+      "properties": {
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "zoomed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paneID",
+        "zoomed"
+      ],
+      "additionalProperties": false
+    },
+    "tabSend": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "waitedMs": {
+          "type": "integer"
+        },
+        "busyObserved": {
+          "type": "boolean"
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID",
+        "bytes"
+      ],
+      "additionalProperties": false
+    },
+    "tabCapture": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "scope": {
+          "enum": [
+            "viewport",
+            "screen"
+          ]
+        },
+        "lines": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "stabilized": {
+          "type": "boolean"
+        },
+        "waitedMs": {
+          "type": "integer"
+        },
+        "samples": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID",
+        "scope",
+        "lines",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "tabRead": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "format": {
+          "type": "string"
+        },
+        "range": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID",
+        "format",
+        "range",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "tabInfo": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "shellPid": {
+          "type": "integer"
+        },
+        "pwd": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "modes": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID",
+        "shellPid",
+        "pwd"
+      ],
+      "additionalProperties": false
+    },
+    "tabSendKey": {
+      "type": "object",
+      "properties": {
+        "tabID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contentID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tabID",
+        "contentID",
+        "paneID",
+        "key"
       ],
       "additionalProperties": false
     }

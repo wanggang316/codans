@@ -261,11 +261,11 @@ public enum CLIMovedVerb {
 
   public static func message(executable: String, from old: String) -> (message: String, hint: String) {
     let new = table[old] ?? old
-    return (
-      "`\(executable) \(old)` moved to `\(executable) \(new)`",
-      "use `\(executable) \(new)`; `\(executable) pane` keeps only the layout verbs"
-        + " (list, focus, split, close, resize, equalize, zoom)"
-    )
+    let layoutNote =
+      old.hasPrefix("pane ")
+      ? "; `\(executable) pane` keeps only the layout verbs (list, focus, split, close, resize, equalize, zoom)"
+      : ""
+    return ("`\(executable) \(old)` moved to `\(executable) \(new)`", "use `\(executable) \(new)`\(layoutNote)")
   }
 }
 
