@@ -4,6 +4,9 @@
 # agents. Never touches the default dev / release sockets or catalogs.
 #
 # Usage: harness.sh <Debug Codans.app path> [all|setup|quit]
+#
+# `tab` verbs drive one Tab and its session, `pane` verbs the layout; ids
+# come from the harness's own `tab new` / `pane split` output.
 #   all    launch the instance, run every phase, quit it (default)
 #   setup  launch the instance and leave it running (manual probing)
 #   quit   stop a running instance
@@ -20,11 +23,13 @@ SCRATCH="${CODANS_CLI_REGRESSION_DIR:-$(mktemp -d -t codans-cli-regression)}"
 mkdir -p "$SCRATCH"
 CLI="$APP/Contents/Resources/bin/codans-dev"
 # AF_UNIX paths are capped near 104 bytes, so the socket stays out of $SCRATCH.
-SOCK="/tmp/codans-t-$(id -u).sock"
+# CODANS_CLI_REGRESSION_SOCK / _CACHE override them so two harness runs
+# (or another isolated instance) never share a socket or daemons.
+SOCK="${CODANS_CLI_REGRESSION_SOCK:-/tmp/codans-t-$(id -u).sock}"
 # The cache dir holds one zmx socket per pane, so it stays short too. Without
 # it the instance shares the dev cache and its launch sweep kills the dev
 # app's pane sessions.
-CACHE="/tmp/codans-t-cache-$(id -u)"
+CACHE="${CODANS_CLI_REGRESSION_CACHE:-/tmp/codans-t-cache-$(id -u)}"
 CONF="$SCRATCH/conf"
 RUN="$SCRATCH/run"
 FIX="$RUN/fixture"
@@ -62,8 +67,9 @@ cli() { "$CLI" "$@"; }
 
 # ---------- environment ----------
 # Scrub the release pane's own context so the dev CLI and the test app
-# never see Gump's socket / pane id.
-unset CODANS_PANE_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH ZMX_DIR ZMX_SESSION TERM_PROGRAM TERM_PROGRAM_VERSION
+# never see Gump's socket / pane / tab / content ids.
+unset CODANS_PANE_ID CODANS_TAB_ID CODANS_CONTENT_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH \
+  CODANS_RUNTIME_DIR ZMX_DIR ZMX_SESSION TERM_PROGRAM TERM_PROGRAM_VERSION
 # A state root would win over CODANS_CONFIG_DIR; unset, state follows it.
 unset CODANS_STATE_DIR
 export CODANS_SOCKET_PATH="$SOCK"
@@ -122,7 +128,7 @@ quit_app() {
   local pid; pid=$(pgrep -f "$APP/Contents/MacOS/Codans" | head -1)
   [[ -n "$pid" ]] && kill -TERM "$pid" && sleep 2
   pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null && kill -KILL "$pid"
-  # zmx daemons of panes the run did not close hold files in the cache dir.
+  # zmx daemons of tabs the run did not close hold files in the cache dir.
   local holders; holders=$(lsof -t +D "$CACHE" 2>/dev/null | sort -u)
   [[ -n "$holders" ]] && kill -TERM $holders 2>/dev/null
   rm -rf "$CACHE"
@@ -130,11 +136,11 @@ quit_app() {
   echo "quit test app"
 }
 
-wait_text() { # wait_text <pane> <needle> [secs]
-  local pane="$1" needle="$2" secs="${3:-10}"
+wait_text() { # wait_text <tab> <needle> [secs]
+  local tab="$1" needle="$2" secs="${3:-10}"
   for _ in $(seq 1 $((secs*5))); do
-    if cli pane capture "$pane" --scope screen 2>/dev/null | grep -q -- "$needle"; then return 0; fi
-    if cli pane read "$pane" 2>/dev/null | grep -q -- "$needle"; then return 0; fi
+    if cli tab capture "$tab" --scope screen 2>/dev/null | grep -q -- "$needle"; then return 0; fi
+    if cli tab read "$tab" 2>/dev/null | grep -q -- "$needle"; then return 0; fi
     sleep 0.2
   done
   return 1
@@ -283,206 +289,235 @@ phase_worktree() {
   t W25d 2 "worktree show unregistered path -> 2" -- cli worktree show /tmp
 }
 
-phase_tab_pane() {
+phase_tab() {
   echo "== tab"
-  t T01 0 "tab new (unnamed)" -- cli tab new --project "$PID" --worktree "$WT1" --json
-  TAB1=$(jf T01 .id)
-  t T02 0 "tab new named" -- cli tab new "dev server" --project "$PID" --worktree "$WT1" --json
-  TAB2=$(jf T02 .id)
-  t T03 0 "tab switch <id>" -- cli tab switch "$TAB1"
-  t T04 0 "tree prints t<n> handle" -- bash -c "$CLI tree --project $PID | grep -E 'Tab t[0-9]+:'"
+  t T01 0 "tab new --project --worktree --cwd (focused pane, or the worktree's first)" -- cli tab new --project "$PID" --worktree "$WT1" --cwd "$FIX" --json
+  TAB1=$(jf T01 .id); TAB1C=$(jf T01 .contentID); P1=$(jf T01 .paneID)
+  echo "  tab1=$TAB1 content=$TAB1C pane=$P1"
+  t T01b 0 "tab new --json carries handle t<n>, pane and content ids" -- bash -c "jq -e '.data | (.handle|startswith(\"t\")) and (.paneID|length==36) and (.contentID|length==36)' '$LOGS/T01.out'"
+  t T01c 0 "tab new prints only the new tab id in text mode" -- bash -c "id=\$($CLI tab new --pane $P1 --cwd '$FIX') && [[ \$id =~ ^[0-9A-F-]{36}\$ ]] && $CLI tab close \$id >/dev/null"
+  t T01d 0 "tab new outside a tab without --project/--worktree uses the shown worktree" -- bash -c "id=\$($CLI tab new --cwd '$FIX') && $CLI tab close \$id >/dev/null"
+  t T02 0 "tab new --pane <pane> --name --label" -- cli tab new --pane "$P1" --name "dev server" --cwd "$FIX" --label agent worker --json
+  TAB2=$(jf T02 .id); TAB2C=$(jf T02 .contentID)
+  t T02b 0 "tab new --pane put the tab on that pane's strip" -- bash -c "jq -e '.data.paneID==\"$P1\"' '$LOGS/T02.out'"
+  t T03 0 "tab focus <id>" -- cli tab focus "$TAB1"
+  t T04 0 "tree prints Pane p<n> and Tab t<n> lines" -- bash -c "$CLI tree --project $PID | grep -E 'Pane p[0-9]+:' && $CLI tree --project $PID | grep -E 'Tab t[0-9]+: .*content [0-9A-F-]{36}'"
   TH=$($CLI tree --project "$PID" | grep -E "Tab t[0-9]+: .*$TAB2" | sed -E 's/.*Tab (t[0-9]+):.*/\1/')
-  echo "  tab2 handle: $TH"
-  t T05 0 "tab switch by handle $TH" -- cli tab switch "$TH"
-  t T06 2 "tab switch random uuid -> 2" -- cli tab switch "$(uuidgen)"
-  t T07 2 "tab switch t999 -> 2" -- cli tab switch t999
-  t T08 2 "tab new --worktree current outside pane -> 2" -- cli tab new --project "$PID"
-  t T08b 0 "tab new --worktree <branch name> (project inferred)" -- cli tab new byname --worktree bugfix/menu --json
+  PH=$($CLI tree --project "$PID" | grep -E "Pane p[0-9]+: .*$P1" | sed -E 's/.*Pane (p[0-9]+):.*/\1/')
+  echo "  tab2 handle: $TH  pane1 handle: $PH"
+  t T04b 0 "tree --json nests worktree -> panes -> tabs with handles and focus" -- bash -c "$CLI tree --project $PID --json | jq -e '.data.projects[0].worktrees[] | select(.id==\"$WT1\") | (.focusedPaneID|length==36) and (.panes|all((.handle|startswith(\"p\")) and (.tabs|all((.handle|startswith(\"t\")) and (.contentID|length==36)))))'"
+  t T05 0 "tab focus by handle $TH" -- cli tab focus "$TH"
+  t T06 2 "tab focus random uuid -> 2" -- cli tab focus "$(uuidgen)"
+  t T07 2 "tab focus t999 -> 2" -- cli tab focus t999
+  t T08 2 "tab new --project only, worktree current outside a tab -> 2" -- cli tab new --project "$PID"
+  t T08b 0 "tab new --worktree <branch name> (project inferred)" -- cli tab new --name byname --worktree bugfix/menu --cwd "$FIX" --json
   cli tab close "$(jf T08b .id)" >/dev/null
   t T09 0 "tab list" -- cli tab list --project "$PID" --worktree "$WT1"
-  t T09b 0 "tab list --worktree <id> only (project inferred)" -- bash -c "$CLI tab list --worktree $WT1 --json | jq -e '.data | .tabs|length>=2'"
-  t T10 0 "tab close <id> with explicit locator" -- cli tab close "$TAB2" --project "$PID" --worktree "$WT1"
-  t T11 2 "tab close again -> 2" -- cli tab close "$TAB2" --project "$PID" --worktree "$WT1"
-  t T12 0 "tab close <id> without --project/--worktree (inferred)" -- cli tab close "$TAB1"
-  t T13 0 "tab new again for the pane phase" -- cli tab new "dev server" --worktree "$WT1" --json
-  TAB1=$(jf T13 .id)
-  t T14 0 "tab switch by title" -- cli tab switch "dev server"
-  t T15 0 "tab show <id> --json has handle + title + worktree" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.data | (.handle|startswith(\"t\")) and .title==\"dev server\" and .worktreeID==\"$WT1\"'"
-  t T15b 0 "tab show by title (text)" -- cli tab show "dev server"
-  t T16 0 "tab rename <id> renamed-tab (containers inferred)" -- cli tab rename "$TAB1" renamed-tab --json
-  t T16b 0 "tab switch by the new title" -- cli tab switch renamed-tab
-  t T17 0 "tab rename <id> (no name) clears the title" -- bash -c "$CLI tab rename $TAB1 --json | jq -e '.data | .name==null'"
-  t T17b 0 "tab show after clear has name null" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.data | .name==null'"
-  cli tab rename "$TAB1" "dev server" >/dev/null
+  t T09b 0 "tab list --pane <handle> lists that strip" -- bash -c "$CLI tab list --pane $PH --json | jq -e '.data.tabs | (map(.id)|index(\"$TAB1\")) and (map(.id)|index(\"$TAB2\")) and all(.paneID==\"$P1\")'"
+  t T09c 0 "tab list --pane <tab id> means that tab's pane" -- bash -c "$CLI tab list --pane $TAB2 --json | jq -e '.data.tabs|all(.paneID==\"$P1\")'"
+  t T10 0 "tab show --json: handle, pane, content, title, labels" -- bash -c "$CLI tab show $TAB2 --json | jq -e '.data | (.handle==\"$TH\") and .paneID==\"$P1\" and .contentID==\"$TAB2C\" and .title==\"dev server\" and .labels==[\"agent\",\"worker\"] and .worktreeID==\"$WT1\"'"
+  t T10b 0 "tab show <content id> names its tab" -- bash -c "$CLI tab show $TAB2C --json | jq -e '.data.id==\"$TAB2\"'"
+  t T10c 0 "tab show <pane id> names the pane's selected tab" -- bash -c "sel=\$($CLI pane list --project $PID --worktree $WT1 --json | jq -r '.data.panes[]|select(.id==\"$P1\")|.selectedTabID'); $CLI tab show $P1 --json | jq -e \".data.id==\\\"\$sel\\\" and .data.isSelected\""
+  t T10d 0 "tab show by title (text)" -- cli tab show "dev server"
+  t T11 0 "tab rename <id> renamed-tab" -- cli tab rename "$TAB2" renamed-tab --json
+  t T11b 0 "tab focus by the new title" -- cli tab focus renamed-tab
+  t T12 0 "tab rename <id> (no name) clears the title" -- bash -c "$CLI tab rename $TAB2 --json | jq -e '.data | .name==null'"
+  cli tab rename "$TAB2" "dev server" >/dev/null
+  t T13 0 "tab label add" -- cli tab label "$TAB1" alpha beta
+  t T14 0 "tab label --replace" -- cli tab label "$TAB1" solo --replace
+  t T14b 0 "labels after replace == [solo]" -- bash -c "$CLI tab show $TAB1 --json | jq -e '.data.labels==[\"solo\"]'"
+  t T15 64 "tab label without labels -> 64" -- cli tab label "$TAB1"
+  t T16 0 "tab info --json has shellPid + pwd + all three ids" -- bash -c "$CLI tab info $TAB1 --json | jq -e '.data | .shellPid>0 and (.pwd|length>0) and .tabID==\"$TAB1\" and .contentID==\"$TAB1C\" and .paneID==\"$P1\"'"
+  t T17 0 "tab reset" -- cli tab reset "$TAB1"
+  t T18 2 "tab info unknown -> 2" -- cli tab info "$(uuidgen)"
 
+  echo "== verbs at their former location"
+  for spec in "pane new|tab new" "pane show $TAB1|tab show" "pane send $TAB1 hi|tab send" "pane send-key $TAB1 enter|tab send-key" \
+    "pane capture $TAB1|tab capture" "pane read $TAB1|tab read" "pane info $TAB1|tab info" "pane label $TAB1 x|tab label" \
+    "pane reset $TAB1|tab reset" "tab switch $TAB1|tab focus"; do
+    IFS='|' read -r old new <<<"$spec"
+    verb="${old%% *}-$(echo "$old" | cut -d' ' -f2)"
+    t "M-$verb" 1 "$old -> 1 naming '$new'" -- bash -c "$CLI $old 2>&1 >/dev/null | grep -qF 'codans-dev $new' && exit 1"
+  done
+  t M-json 1 "moved verb --json: MOVED_VERB envelope on stdout" -- bash -c "out=\$($CLI pane read $TAB1 --json); rc=\$?; jq -e '.error.code==\"MOVED_VERB\" and .error.details.to==\"tab read\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
+}
+
+phase_pane() {
   echo "== pane"
-  t N01 0 "pane new default shell" -- cli pane new --project "$PID" --worktree "$WT1" --tab "$TAB1" --cwd "$FIX" --json
-  PANE1=$(jf N01 .id); echo "  pane1=$PANE1"
-  t N02 0 "pane new with labels + cmd (-- sh)" -- cli pane new --project "$PID" --worktree "$WT1" --tab "$TAB1" --cwd "$FIX" --label agent worker -- /bin/sh -c 'echo PANE2-READY; exec /bin/sh'
-  PANE2=$(jf N02 .id 2>/dev/null); [[ -z "$PANE2" || "$PANE2" == null ]] && PANE2=$(grep -o '[0-9A-F-]\{36\}' "$LOGS/N02.out" | head -1); echo "  pane2=$PANE2"
-  t N03 0 "pane new cwd default (\$PWD)" -- bash -c "cd '$RUN' && $CLI pane new --project $PID --worktree $WT1 --tab $TAB1 --json"
-  PANE3=$(jf N03 .id)
-  TAB1H=$($CLI tree --project "$PID" | grep -E "Tab t[0-9]+: .*$TAB1" | sed -E 's/.*Tab (t[0-9]+):.*/\1/'); echo "  tab1 handle: $TAB1H"
-  t N04 0 "pane new --tab by handle (containers inferred)" -- cli pane new --tab "$TAB1H" --cwd "$FIX" --json
-  PANE4=$(jf N04 .id)
-  t N05 0 "pane list" -- cli pane list --project "$PID" --worktree "$WT1" --tab "$TAB1"
-  t N05b 0 "pane list --tab <handle> only has 4 panes" -- bash -c "$CLI pane list --tab $TAB1H --json | jq -e '.data | .panes|length==4'"
-  t N05c 0 "tree --json carries handles" -- bash -c "$CLI tree --project $PID --json | jq -e '.data | [.projects[0].worktrees[].tabs[].panes[].handle]|all(startswith(\"p\"))'"
-  t N06 0 "tree shows labels @agent,@worker + p<n>" -- bash -c "$CLI tree --project $PID | grep -E 'Pane p[0-9]+: .*@agent,@worker'"
-  PH=$($CLI tree --project "$PID" | grep -E "Pane p[0-9]+: .*$PANE1" | sed -E 's/.*Pane (p[0-9]+):.*/\1/'); echo "  pane1 handle: $PH"
-  sleep 2
-  t N07 0 "pane focus <id>" -- cli pane focus "$PANE1"
-  t N08 0 "pane focus <handle>" -- cli pane focus "$PH"
-  t N09 0 "pane focus @label" -- cli pane focus @agent
-  t N10 2 "pane focus random uuid -> 2" -- cli pane focus "$(uuidgen)"
-  t N11 2 "pane focus @nolabel -> 2" -- cli pane focus @nolabel
-  t N12 0 "pane label add" -- cli pane label "$PANE1" alpha beta
-  t N13 0 "pane label --replace" -- cli pane label "$PANE1" solo --replace
-  t N14 0 "labels after replace == [solo]" -- bash -c "$CLI tree --project $PID --json | jq -e '.data | [.projects[0].worktrees[].tabs[].panes[]|select(.id==\"$PANE1\")|.labels]==[[\"solo\"]]'"
-  t N15 64 "pane label no labels -> 64" -- cli pane label "$PANE1"
-  t N16 0 "pane label second pane 'agent' (dup label)" -- cli pane label "$PANE3" agent
-  t N17 3 "pane focus @agent ambiguous -> 3" -- cli pane focus @agent
-  cli pane label "$PANE3" x --replace >/dev/null
-  t N18 0 "pane info" -- cli pane info "$PANE1"
-  t N19 0 "pane info --json has shellPid+pwd" -- bash -c "$CLI pane info $PANE1 --json | jq -e '.data | .shellPid>0 and (.pwd|length>0)'"
-  t N20 0 "pane reset" -- cli pane reset "$PANE1"
-  t N21 "*" "pane info on closed/unknown pane" -- cli pane info "$(uuidgen)"
-  t N22 0 "pane split <id> --direction down" -- cli pane split "$PANE1" --direction down --json
-  SPLITPANE=$(jf N22 .id); echo "  split pane=$SPLITPANE"
+  t N01 0 "pane split <pane> --direction down --json: new pane, tab, content" -- cli pane split "$P1" --direction down --cwd "$FIX" --json
+  SP=$(jf N01 .paneID); ST=$(jf N01 .tabID); SC=$(jf N01 .contentID); echo "  split pane=$SP tab=$ST content=$SC"
+  t N01b 0 "the new tab sits on the new pane" -- bash -c "$CLI tab show $ST --json | jq -e '.data | .paneID==\"$SP\" and .contentID==\"$SC\"'"
+  t N02 0 "pane list --json: panes in layout order with handles, strips, focus" -- bash -c "$CLI pane list --project $PID --worktree $WT1 --json | jq -e '.data.panes | (map(.id)|index(\"$P1\")) and (map(.id)|index(\"$SP\")) and all(.handle|startswith(\"p\")) and (map(select(.isFocused))|length==1) and (map(select(.id==\"$SP\"))[0].tabIDs==[\"$ST\"])'"
+  t N03 0 "pane focus <id>" -- cli pane focus "$SP"
+  t N04 0 "pane focus <handle>" -- cli pane focus "$PH"
+  t N05 0 "pane focus <tab id> focuses that tab's pane" -- bash -c "$CLI pane focus $ST --json | jq -e '.data.paneID==\"$SP\"'"
+  t N06 0 "pane focus --direction up moves to the pane above" -- bash -c "$CLI pane focus --direction up --project $PID --worktree $WT1 --json | jq -e '.data.paneID==\"$P1\" and .data.moved'"
+  t N06b 0 "pane focus --direction up at the edge stays" -- bash -c "$CLI pane focus $P1 --direction up --json | jq -e '.data.moved==false'"
+  t N07 2 "pane focus random uuid -> 2" -- cli pane focus "$(uuidgen)"
+  t N07b 1 "pane focus without pane or direction -> 1" -- cli pane focus
+  t N08 0 "pane resize <id> up" -- cli pane resize "$SP" up
+  t N08b 0 "pane resize <tab id> --amount 80 down" -- cli pane resize "$ST" down --amount 80
+  t N09 2 "pane resize random uuid -> 2" -- cli pane resize "$(uuidgen)" right
+  t N10 1 "pane resize --amount 0 -> 1" -- cli pane resize "$SP" right --amount 0
+  t N11 0 "pane zoom zooms" -- bash -c "$CLI pane zoom $SP --json | jq -e '.data.zoomed==true and .data.paneID==\"$SP\"'"
+  t N11b 0 "pane zoom again un-zooms" -- bash -c "$CLI pane zoom $SP --json | jq -e '.data.zoomed==false'"
+  t N11c 0 "pane zoom --off on an unzoomed pane is a no-op" -- bash -c "$CLI pane zoom $SP --off --json | jq -e '.data.zoomed==false'"
+  t N12 0 "pane equalize" -- cli pane equalize --project "$PID" --worktree "$WT1"
+  t N13 1 "pane close <tab id> -> 1 naming tab close" -- bash -c "$CLI pane close $ST 2>&1 >/dev/null | grep -q 'tab close' && exit 1"
+  t N13b 1 "pane close <content id> -> 1" -- cli pane close "$SC"
+  t N13c 1 "pane close <t-handle> -> 1" -- cli pane close "$TH"
+  t N13d 0 "the refused pane is still there" -- bash -c "$CLI tab show $ST --json | jq -e '.data.paneID==\"$SP\"'"
   # zsh discards input queued before it finishes starting, so re-send until the shell answers.
-  t N22b 0 "split pane runs a shell with the project env" -- bash -c "for n in 1 2 3 4 5; do sleep 2; $CLI pane send $SPLITPANE 'echo MARK-SPLIT-\$CODANS_CLI' >/dev/null; for i in \$(seq 1 15); do $CLI pane capture $SPLITPANE --scope screen | grep -q 'MARK-SPLIT-.*/codans-dev' && exit 0; sleep 0.2; done; done; exit 1"
-  t N23 0 "pane show <split> --json sits in tab1 with the anchor's cwd" -- bash -c "$CLI pane show $SPLITPANE --json | jq -e '.data | .tabID==\"$TAB1\" and .worktreeID==\"$WT1\" and (.handle|startswith(\"p\")) and .isLive==true' && cwd=\$($CLI pane show $SPLITPANE --json | jq -r '.data | .workingDirectory') && [[ \"\${cwd#/private}\" == \"${FIX#/private}\" ]]"
-  t N24 0 "pane show <id> text" -- cli pane show "$PANE1"
-  t N24b 0 "pane show by handle" -- cli pane show "$PH"
-  t N25 0 "pane resize <id> down" -- cli pane resize "$PANE1" down
-  t N25b 0 "pane resize --amount 80 left" -- cli pane resize "$PANE1" left --amount 80
-  t N26 2 "pane resize random uuid -> 2" -- cli pane resize "$(uuidgen)" right
-  t N27 1 "pane resize --amount 0 -> 1" -- cli pane resize "$PANE1" right --amount 0
-  t N28 2 "pane split random uuid -> 2" -- cli pane split "$(uuidgen)"
-  t N29 0 "pane close the split pane" -- cli pane close "$SPLITPANE"
-  t N30 0 "pane split --command runs it" -- cli pane split "$PANE1" --command 'echo SPLIT-CMD-MARK' --json
-  SPLITPANE2=$(jf N30 .id)
-  t N30b 0 "split command output appears" -- wait_text "$SPLITPANE2" SPLIT-CMD-MARK 15
-  cli pane close "$SPLITPANE2" >/dev/null 2>&1
+  t N14 0 "split tab runs a shell with the project env" -- bash -c "for n in 1 2 3 4 5; do sleep 2; $CLI send --tab $ST 'echo MARK-SPLIT-\$CODANS_CLI' >/dev/null; for i in \$(seq 1 15); do $CLI capture $ST --scope screen | grep -q 'MARK-SPLIT-.*/codans-dev' && exit 0; sleep 0.2; done; done; exit 1"
+  t N15 0 "pane close <pane> closes its tabs" -- bash -c "$CLI pane close $SP --json | jq -e '.data.id==\"$SP\" and .data.tabIDs==[\"$ST\"]'"
+  t N15b 2 "pane close again -> 2" -- cli pane close "$SP"
+  t N15c 2 "its tab is gone too" -- cli tab show "$ST"
+  t N16 2 "pane split random uuid -> 2" -- cli pane split "$(uuidgen)"
+  t N17 0 "pane split --command prints the new tab id" -- bash -c "$CLI pane split $PH --direction right --command 'echo SPLIT-CMD-MARK' > '$LOGS/N17.id' && grep -qE '^[0-9A-F-]{36}\$' '$LOGS/N17.id'"
+  ST2=$(cat "$LOGS/N17.id")
+  t N17b 0 "split command output appears in that tab" -- wait_text "$ST2" SPLIT-CMD-MARK 15
+  t N17c 0 "pane close <pane> --json (via the split tab's pane)" -- bash -c "p=\$($CLI tab show $ST2 --json | jq -r .data.paneID) && $CLI pane close \$p >/dev/null"
 }
 
 phase_terminal() {
   echo "== terminal io"
-  t S01 0 "pane send <id> text (Enter)" -- cli pane send "$PANE1" 'echo MARK-S01'
-  t S02 0 "readback shows MARK-S01" -- wait_text "$PANE1" MARK-S01
-  t S03 1 "pane send -p solo (no @) -> 1 usage error" -- cli pane send -p solo 'echo MARK-S03'
-  t S04 0 "pane send -p @solo" -- cli pane send -p @solo 'echo MARK-S04'
-  t S05 0 "readback MARK-S04" -- wait_text "$PANE1" MARK-S04
-  t S06 0 "pane send --no-enter then send-key enter" -- bash -c "$CLI pane send --no-enter $PANE1 'echo MARK-S06' && $CLI pane send-key $PANE1 enter"
-  t S07 0 "readback MARK-S06" -- wait_text "$PANE1" MARK-S06
-  t S08 0 "pane send --stdin" -- bash -c "printf 'echo MARK-S08\n' | $CLI pane send --stdin $PANE1"
-  t S09 0 "readback MARK-S08" -- wait_text "$PANE1" MARK-S08
-  t S10 0 "pane send multi-word unquoted (target parse?)" -- cli pane send "$PANE1" echo MARK-S10 more words
-  t S11 0 "readback MARK-S10" -- wait_text "$PANE1" 'MARK-S10 more words'
-  t S12 1 "pane send echo hi (unquoted) -> 1" -- cli pane send echo hi
-  t S12b 0 "S12 error names the stray word" -- grep -q 'unknown pane "echo"' "$LOGS/S12.err"
-  t S13 1 "pane send no text -> 1" -- cli pane send
+  t S01 0 "tab send <id> text (Enter)" -- cli tab send "$TAB1" 'echo MARK-S01'
+  t S02 0 "readback shows MARK-S01" -- wait_text "$TAB1" MARK-S01
+  t S03 1 "send --pane solo (bare word) -> 1 usage error" -- cli send --pane solo 'echo MARK-S03'
+  t S04 0 "send --tab @solo" -- cli send --tab @solo 'echo MARK-S04'
+  t S05 0 "readback MARK-S04" -- wait_text "$TAB1" MARK-S04
+  t S06 0 "tab send --no-enter then send-key enter" -- bash -c "$CLI tab send --no-enter $TAB1 'echo MARK-S06' && $CLI tab send-key $TAB1 enter"
+  t S07 0 "readback MARK-S06" -- wait_text "$TAB1" MARK-S06
+  t S08 0 "send --stdin --tab" -- bash -c "printf 'echo MARK-S08\n' | $CLI send --stdin --tab $TAB1"
+  t S09 0 "readback MARK-S08" -- wait_text "$TAB1" MARK-S08
+  t S10 0 "tab send multi-word unquoted" -- cli tab send "$TAB1" echo MARK-S10 more words
+  t S11 0 "readback MARK-S10" -- wait_text "$TAB1" 'MARK-S10 more words'
+  t S12 2 "tab send echo hi (unquoted) -> 2, no tab titled echo" -- cli tab send echo hi
+  t S12b 0 "S12 error names the stray word" -- grep -q 'echo' "$LOGS/S12.err"
+  t S13 1 "send no text -> 1" -- cli send
   # stdin is closed explicitly: on an interactive stdin the CLI would block reading it.
-  t S14 1 "pane send --stdin with empty stdin -> 1" -- bash -c "$CLI pane send --stdin $PANE1 </dev/null"
-  t S15 0 "pane send --raw hex (ESC [ A)" -- cli pane send "$PANE1" --raw 1b5b41
-  t S16 1 "pane send --raw + --no-enter -> 1" -- cli pane send "$PANE1" --raw 1b --no-enter
-  t S17 1 "pane send --raw + text -> 1" -- cli pane send "$PANE1" --raw 1b hello
-  t S18 "*" "pane send --raw bad hex" -- cli pane send "$PANE1" --raw zz
-  t S19 0 "pane send --raw with 0x and spaces" -- cli pane send "$PANE1" --raw '0x15 0x0d'
-  t S20 0 "pane send --focus" -- cli pane send --focus "$PANE1" 'echo MARK-S20'
-  # ctrl_d ends the shell, so the key sweep gets a throwaway pane.
-  KEYPANE=$($CLI pane new --tab "$TAB1" --cwd "$FIX" --json | jq -r '.data | .id'); sleep 1
-  t S21 0 "send-key all named keys (throwaway pane)" -- bash -c "for k in escape up down left right tab enter backspace delete home end pgup pgdn f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 ctrl_c ctrl_l ctrl_z ctrl_d; do $CLI pane send-key $KEYPANE \$k >/dev/null || exit 1; done"
-  t S22 0 "send-key ctrl-c dashed form" -- cli pane send-key "$PANE1" ctrl-c
-  t S23 0 "send-key -p" -- cli pane send-key -p "$PANE1" ctrl_l
-  t S24 1 "send-key bogus -> 1" -- cli pane send-key "$PANE1" bogus
-  t S25 1 "send-key none -> 1" -- cli pane send-key
-  cli pane close "$KEYPANE" >/dev/null 2>&1
-  cli pane send "$PANE1" 'clear; for i in $(seq 1 80); do echo LINE-$i; done; echo MARK-S26' >/dev/null
-  wait_text "$PANE1" MARK-S26
-  t S26 0 "pane read (zmx dump)" -- cli pane read "$PANE1"
-  t S27 0 "pane read contains LINE-80" -- bash -c "$CLI pane read $PANE1 | grep -q LINE-80"
-  t S28 0 "pane read --tail 3 -> 3 lines" -- bash -c "$CLI pane read $PANE1 --tail 3 | wc -l | tr -d ' ' | grep -qE '^[1-4]$'"
-  t S29 1 "pane read --tail 0 -> 1" -- cli pane read "$PANE1" --tail 0
-  t S30 0 "pane read --raw has ESC" -- bash -c "$CLI pane read $PANE1 --raw | grep -q \$'\\x1b'"
-  t S31 0 "pane read --range visible" -- cli pane read "$PANE1" --range visible
-  t S32 0 "pane send --wait returns once the command finished" -- bash -c "$CLI pane send $PANE1 'sleep 2; echo MARK-WAIT' --wait --json | jq -e '.data.completed==true and .data.waitedMs>=1500'"
-  t S33 0 "pane send --capture returns the command's output" -- bash -c "$CLI pane send $PANE1 'echo CAP-A; echo CAP-B' --capture --json | jq -e '.data.output|contains(\"CAP-B\")'"
-  t S33b 0 "pane send --capture text mode prints the output only" -- bash -c "$CLI pane send $PANE1 'echo CAP-TEXT-ONLY' --capture | grep -qx 'CAP-TEXT-ONLY'"
-  t S34 11 "pane send --wait past --wait-timeout -> 11 WAIT_TIMEOUT" -- bash -c "out=\$($CLI pane send $PANE1 'sleep 4' --wait --wait-timeout 1 --json); rc=\$?; jq -e '.error.code==\"WAIT_TIMEOUT\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
+  t S14 1 "send --stdin with empty stdin -> 1" -- bash -c "$CLI send --stdin --tab $TAB1 </dev/null"
+  t S15 0 "tab send --raw hex (ESC [ A)" -- cli tab send "$TAB1" --raw 1b5b41
+  t S16 1 "send --raw + --no-enter -> 1" -- cli send --tab "$TAB1" --raw 1b --no-enter
+  t S17 1 "tab send --raw + text -> 1" -- cli tab send "$TAB1" --raw 1b hello
+  t S18 "*" "tab send --raw bad hex" -- cli tab send "$TAB1" --raw zz
+  t S19 0 "send --raw with 0x and spaces" -- cli send --tab "$TAB1" --raw '0x15 0x0d'
+  t S20 0 "tab send --focus" -- cli tab send --focus "$TAB1" 'echo MARK-S20'
+  t S20b 1 "send --tab and --pane together -> 1" -- cli send --tab "$TAB1" --pane "$P1" 'x'
+  t S20c 0 "send --tab <content id> reaches that tab" -- bash -c "$CLI send --tab $TAB1C 'echo MARK-S20C' --json | jq -e '.data.tabID==\"$TAB1\" and .data.contentID==\"$TAB1C\"'"
+  t S20d 0 "send --pane <pane> reaches the pane's selected tab" -- bash -c "$CLI tab focus $TAB1 >/dev/null && $CLI send --pane $P1 'echo MARK-S20D' --json | jq -e '.data.tabID==\"$TAB1\" and .data.paneID==\"$P1\"'"
+  t S20e 0 "readback MARK-S20D" -- wait_text "$TAB1" MARK-S20D
+  # ctrl_d ends the shell, so the key sweep gets a throwaway tab.
+  KEYTAB=$($CLI tab new --pane "$P1" --cwd "$FIX" --json | jq -r '.data | .id'); sleep 1
+  t S21 0 "send-key all named keys (throwaway tab)" -- bash -c "for k in escape up down left right tab enter backspace delete home end pgup pgdn f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 ctrl_c ctrl_l ctrl_z ctrl_d; do $CLI send-key --tab $KEYTAB \$k >/dev/null || exit 1; done"
+  t S22 0 "tab send-key ctrl-c dashed form" -- cli tab send-key "$TAB1" ctrl-c
+  t S23 0 "send-key --tab" -- cli send-key --tab "$TAB1" ctrl_l
+  t S24 1 "send-key bogus -> 1" -- cli tab send-key "$TAB1" bogus
+  t S25 1 "send-key none -> 1" -- cli send-key
+  cli tab close "$KEYTAB" >/dev/null 2>&1
+  cli tab send "$TAB1" 'clear; for i in $(seq 1 80); do echo LINE-$i; done; echo MARK-S26' >/dev/null
+  wait_text "$TAB1" MARK-S26
+  t S26 0 "tab read (zmx dump)" -- cli tab read "$TAB1"
+  t S27 0 "tab read contains LINE-80" -- bash -c "$CLI tab read $TAB1 | grep -q LINE-80"
+  t S28 0 "tab read --tail 3 -> 3 lines" -- bash -c "$CLI tab read $TAB1 --tail 3 | wc -l | tr -d ' ' | grep -qE '^[1-4]$'"
+  t S29 1 "tab read --tail 0 -> 1" -- cli tab read "$TAB1" --tail 0
+  t S30 0 "tab read --raw has ESC" -- bash -c "$CLI tab read $TAB1 --raw | grep -q \$'\\x1b'"
+  t S31 0 "tab read --range visible" -- cli tab read "$TAB1" --range visible
+  t S32 0 "tab send --wait returns once the command finished" -- bash -c "$CLI tab send $TAB1 'sleep 2; echo MARK-WAIT' --wait --json | jq -e '.data.completed==true and .data.waitedMs>=1500'"
+  t S33 0 "send --capture returns the command's output" -- bash -c "$CLI send --tab $TAB1 'echo CAP-A; echo CAP-B' --capture --json | jq -e '.data.output|contains(\"CAP-B\")'"
+  t S33b 0 "tab send --capture text mode prints the output only" -- bash -c "$CLI tab send $TAB1 'echo CAP-TEXT-ONLY' --capture | grep -qx 'CAP-TEXT-ONLY'"
+  t S34 11 "tab send --wait past --wait-timeout -> 11 WAIT_TIMEOUT" -- bash -c "out=\$($CLI tab send $TAB1 'sleep 4' --wait --wait-timeout 1 --json); rc=\$?; jq -e '.error.code==\"WAIT_TIMEOUT\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
   sleep 4
-  t S35 1 "pane send --raw with --wait -> 1" -- cli pane send "$PANE1" --raw 1b --wait
-  t S32 0 "pane read --json" -- bash -c "$CLI pane read $PANE1 --json | jq -e '.data | .format==\"plain\"'"
-  t S33 64 "pane read --screen is not an option -> 64" -- cli pane read "$PANE1" --screen
-  t S34 0 "pane capture" -- cli pane capture "$PANE1"
-  t S35 0 "pane capture --lines 5 -> 5 lines" -- bash -c "$CLI pane capture $PANE1 --lines 5 --json | jq -e '.data | .lines==5'"
-  t S36 0 "pane capture --scope screen" -- cli pane capture "$PANE1" --scope screen
-  t S37 1 "pane capture --lines 0 -> 1" -- cli pane capture "$PANE1" --lines 0
-  t S38 0 "pane capture --wait-stable --json" -- bash -c "$CLI pane capture $PANE1 --wait-stable --json | jq -e '.data | .stabilized==true'"
-  t S39 1 "pane capture --wait-stable --timeout-ms >= --timeout -> 1" -- cli pane capture "$PANE1" --wait-stable --timeout-ms 20000
-  t S40 64 "pane capture -p is not an option -> 64" -- cli pane capture -p "$PANE1"
-  t S41 0 "pane capture --scope bogus -> usage(1)?" -- bash -c "$CLI pane capture $PANE1 --scope bogus; test \$? -ne 0"
+  t S35 1 "tab send --raw with --wait -> 1" -- cli tab send "$TAB1" --raw 1b --wait
+  t S36 0 "tab read --json" -- bash -c "$CLI tab read $TAB1 --json | jq -e '.data | .format==\"plain\" and .tabID==\"$TAB1\"'"
+  t S37 64 "tab read --screen is not an option -> 64" -- cli tab read "$TAB1" --screen
+  t S38 0 "tab capture" -- cli tab capture "$TAB1"
+  t S39 0 "capture --tab --lines 5 -> 5 lines" -- bash -c "$CLI capture --tab $TAB1 --lines 5 --json | jq -e '.data | .lines==5'"
+  t S40 0 "capture --pane --scope screen" -- cli capture --pane "$P1" --scope screen
+  t S41 1 "tab capture --lines 0 -> 1" -- cli tab capture "$TAB1" --lines 0
+  t S42 0 "tab capture --wait-stable --json" -- bash -c "$CLI tab capture $TAB1 --wait-stable --json | jq -e '.data | .stabilized==true'"
+  t S43 1 "tab capture --wait-stable --timeout-ms >= --timeout -> 1" -- cli tab capture "$TAB1" --wait-stable --timeout-ms 20000
+  t S44 1 "capture positional and --tab together -> 1" -- cli capture "$TAB1" --tab "$TAB1"
+  t S45 0 "tab capture --scope bogus fails" -- bash -c "$CLI tab capture $TAB1 --scope bogus; test \$? -ne 0"
   echo "== broadcast"
-  t B01 0 "broadcast --tab" -- cli broadcast --tab "$TAB1" 'echo MARK-B01'
-  t B02 0 "readback in pane1" -- wait_text "$PANE1" MARK-B01
-  t B03 0 "broadcast --tab delivered==4" -- bash -c "$CLI broadcast --tab $TAB1 --json 'echo MARK-B03' | jq -e '.data | .delivered==4'"
+  NP1=$($CLI tab list --pane "$P1" --json | jq '.data.tabs|length')
+  t B01 0 "broadcast --pane" -- cli broadcast --pane "$P1" 'echo MARK-B01'
+  t B02 0 "readback in tab1" -- wait_text "$TAB1" MARK-B01
+  t B03 0 "broadcast --pane delivered == the pane's tab count ($NP1)" -- bash -c "$CLI broadcast --pane $P1 --json 'echo MARK-B03' | jq -e '.data | .delivered==$NP1'"
+  t B03b 0 "broadcast --pane <tab id> means that tab's pane" -- bash -c "$CLI broadcast --pane $TAB2 --json 'echo MARK-B03B' | jq -e '.data | .delivered==$NP1'"
   t B04 0 "broadcast --worktree" -- cli broadcast --worktree "$WT1" 'echo MARK-B04'
   t B05 0 "broadcast --label" -- cli broadcast --label agent 'echo MARK-B05'
   t B06 0 "broadcast --label unknown delivered==0" -- bash -c "$CLI broadcast --label nolabel --json 'x' | jq -e '.data | .delivered==0'"
   t B07 1 "broadcast no scope -> 1" -- cli broadcast 'x'
-  t B08 1 "broadcast two scopes -> 1" -- cli broadcast --tab "$TAB1" --label a 'x'
-  t B09 0 "broadcast --stdin --no-enter" -- bash -c "printf 'echo MARK-B09' | $CLI broadcast --tab $TAB1 --stdin --no-enter"
-  cli broadcast --tab "$TAB1" --stdin --no-enter <<<'' >/dev/null 2>&1; cli pane send-key "$PANE1" enter >/dev/null
-  t B10 1 "broadcast --stdin + text -> 1" -- bash -c "echo x | $CLI broadcast --tab $TAB1 --stdin 'y'"
-  t B11 2 "broadcast --tab current outside pane -> 2" -- cli broadcast --tab current 'x'
+  t B08 1 "broadcast two scopes -> 1" -- cli broadcast --pane "$P1" --label a 'x'
+  t B08b 64 "broadcast --tab is not a scope -> 64" -- cli broadcast --tab "$TAB1" 'x'
+  t B09 0 "broadcast --stdin --no-enter" -- bash -c "printf 'echo MARK-B09' | $CLI broadcast --pane $P1 --stdin --no-enter"
+  cli broadcast --pane "$P1" --stdin --no-enter <<<'' >/dev/null 2>&1; cli tab send-key "$TAB1" enter >/dev/null
+  t B10 1 "broadcast --stdin + text -> 1" -- bash -c "echo x | $CLI broadcast --pane $P1 --stdin 'y'"
+  t B11 2 "broadcast --pane current outside a tab -> 2" -- cli broadcast --pane current 'x'
 }
 
 phase_incontext() {
-  echo "== in-pane context (commands run inside pane1 through pane send)"
-  # Each probe writes `CTX-<id>=<exit>` on the pane's screen.
+  echo "== in-tab context (commands run inside tab1 through tab send)"
+  # Each probe writes `CTX-<id>=<exit>` on the tab's screen.
   ctx() { # ctx <id> <cmdline>
     local id="$1"; shift
-    cli pane send "$PANE1" "clear; $* >/tmp/codans-ctx-$id.out 2>&1; echo CTX-$id=\$?" >/dev/null
+    cli tab send "$TAB1" "clear; $* >/tmp/codans-ctx-$id.out 2>&1; echo CTX-$id=\$?" >/dev/null
     # Wait for the marker *with* an exit code: the echoed command line itself
     # shows `CTX-<id>=$?` until `clear` runs, and would satisfy a bare prefix.
-    wait_text "$PANE1" "CTX-$id=[0-9]" 10
-    local line; line=$(cli pane capture "$PANE1" --scope screen | grep -o "CTX-$id=[0-9]*" | tail -1)
+    wait_text "$TAB1" "CTX-$id=[0-9]" 10
+    local line; line=$(cli tab capture "$TAB1" --scope screen | grep -o "CTX-$id=[0-9]*" | tail -1)
     echo "${line#*=}"
   }
+  cli tab focus "$TAB1" >/dev/null
+  # `send-key escape` stays last: the ESC it types into this very shell
+  # would swallow the start of the next probe's command line.
   for spec in \
     "X01|tree --project current|0" \
-    "X02|pane send 'echo CTX-INNER'|0" \
-    "X03|pane read|0" \
-    "X04|pane capture --lines 3|0" \
-    "X05|pane info|0" \
+    "X02|send 'echo CTX-INNER'|0" \
+    "X03|tab read|0" \
+    "X04|tab capture --lines 3|0" \
+    "X05|tab info|0" \
     "X06|project commands list|0" \
-    "X07|tab new ctxtab --json|0" \
-    "X08|pane new --json|0" \
-    "X09|broadcast --tab current 'echo CTX-BC'|0" \
+    "X07|tab new --json|0" \
+    "X08|pane split --json|0" \
+    "X09|broadcast --pane current 'echo CTX-BC'|0" \
     "X10|worktree new test/ctx-wt --json|0" \
     "X11|pane focus current|0" \
-    "X12|pane label current ctxlabel|0" \
+    "X12|tab label current ctxlabel|0" \
     "X13|agent list|0" \
     "X14|doctor --json|0" \
-    "X16|tab switch current|0" \
+    "X16|tab focus current|0" \
     "X17|worktree switch current|0" \
-    "X15|pane send-key escape|0" \
+    "X18|tab show current --json|0" \
+    "X19|pane list --json|0" \
+    "X15|send-key escape|0" \
     ; do
     IFS='|' read -r id cmd want <<<"$spec"
     got=$(ctx "$id" "codans-dev $cmd")
     verdict=PASS; [[ "$got" != "$want" ]] && verdict=FAIL
     [[ $verdict == PASS ]] && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
     cp "/tmp/codans-ctx-$id.out" "$LOGS/$id.out" 2>/dev/null
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$verdict" "$want" "$got" "in-pane: codans-dev $cmd" "" >>"$RESULTS"
-    printf '%-8s %-4s want=%-3s got=%-3s in-pane: codans-dev %s\n' "$id" "$verdict" "$want" "$got" "$cmd"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$verdict" "$want" "$got" "in-tab: codans-dev $cmd" "" >>"$RESULTS"
+    printf '%-8s %-4s want=%-3s got=%-3s in-tab: codans-dev %s\n' "$id" "$verdict" "$want" "$got" "$cmd"
     [[ $verdict == FAIL ]] && head -2 "$LOGS/$id.out" | sed 's/^/    out: /'
   done
-  # prove the pane's env only carries CODANS_PANE_ID
-  ctx X20 'env | grep -E "^CODANS_" | cut -d= -f1 | sort | tr "\n" " "' >/dev/null
-  note "pane env CODANS_* keys: $(cat /tmp/codans-ctx-X20.out)"
-  # cleanup ctx worktree if created
+  t X07b 0 "tab new in a tab opens on the caller's pane" -- bash -c "jq -e '.data.paneID==\"$P1\"' '$LOGS/X07.out'"
+  t X08b 0 "pane split in a tab splits the caller's pane (new pane, new tab)" -- bash -c "jq -e '.data.anchor==\"$P1\" and (.data.paneID!=\"$P1\")' '$LOGS/X08.out'"
+  t X18b 0 "tab show current is the calling tab" -- bash -c "jq -e '.data.id==\"$TAB1\" and .data.contentID==\"$TAB1C\" and .data.paneID==\"$P1\"' '$LOGS/X18.out'"
+  # The tab's environment carries exactly its three ids.
+  ctx X20 'env | grep -E "^CODANS_(PANE|TAB|CONTENT)_ID=" | sort | tr "\n" " "' >/dev/null
+  cp /tmp/codans-ctx-X20.out "$LOGS/X20.env"
+  note "tab env ids: $(cat /tmp/codans-ctx-X20.out)"
+  t X20 0 "CODANS_PANE_ID / CODANS_TAB_ID / CODANS_CONTENT_ID name the calling pane / tab / content" -- bash -c "grep -q 'CODANS_CONTENT_ID=$TAB1C' '$LOGS/X20.env' && grep -q 'CODANS_PANE_ID=$P1' '$LOGS/X20.env' && grep -q 'CODANS_TAB_ID=$TAB1' '$LOGS/X20.env'"
+  # cleanup what the probes created
+  local made; made=$(jq -r '.data.id' "$LOGS/X07.out" 2>/dev/null || true)
+  [[ -n "$made" && "$made" != null ]] && cli tab close "$made" >/dev/null 2>&1
+  made=$(jq -r '.data.paneID' "$LOGS/X08.out" 2>/dev/null || true)
+  [[ -n "$made" && "$made" != null ]] && cli pane close "$made" >/dev/null 2>&1
   local ctxwt; ctxwt=$(jq -r '.data | .id' "$LOGS/X10.out" 2>/dev/null || true)
   [[ -n "$ctxwt" && "$ctxwt" != null ]] && cli worktree rm "$ctxwt" --project "$PID" >/dev/null 2>&1
+  for f in /tmp/codans-ctx-*.out; do rm -f "$f"; done
 }
 
 phase_agent_handoff() {
@@ -494,32 +529,36 @@ phase_agent_handoff() {
   t G05 2 "agent launch unknown profile -> 2" -- cli agent launch 'No Such Profile' --project "$PID" --worktree "$WT1"
   t G06 3 "agent launch disabled profile -> 3" -- cli agent launch 'Disabled Codex' --project "$PID" --worktree "$WT1"
   t G07 0 "agent launch 'Fake Amp' --background --json" -- cli agent launch 'Fake Amp' --background --project "$PID" --worktree "$WT1" --json
-  AGPANE=$(jf G07 .paneID)
-  t G08 0 "fake amp started in new pane" -- wait_text "$AGPANE" 'FAKE-AGENT amp' 10
+  AGTAB=$(jf G07 .tabID)
+  t G07b 0 "agent launch reports tab, content, and pane ids" -- bash -c "jq -e '.data | (.tabID|length==36) and (.contentID|length==36) and (.paneID|length==36)' '$LOGS/G07.out'"
+  t G08 0 "fake amp started in the new tab" -- wait_text "$AGTAB" 'FAKE-AGENT amp' 10
   t G09 4 "agent launch amp --prompt -> 4 unsupported" -- cli agent launch --agent amp --prompt 'hi' --project "$PID" --worktree "$WT1"
   t G10 0 "agent launch --agent claude --prompt - (stdin) --split right" -- bash -c "echo 'do the thing' | $CLI agent launch --agent claude --prompt - --split right --project $PID --worktree $WT1 --json"
-  AGPANE2=$(jf G10 .paneID)
-  t G11 0 "fake claude got prompt on argv" -- wait_text "$AGPANE2" 'do the thing' 10
+  AGTAB2=$(jf G10 .tabID); AGPANE2=$(jf G10 .paneID)
+  t G10b 0 "--split put the agent on a new pane" -- bash -c "test '$AGPANE2' != '$P1' && $CLI tab show $AGTAB2 --json | jq -e '.data.paneID==\"$AGPANE2\"'"
+  t G11 0 "fake claude got prompt on argv" -- wait_text "$AGTAB2" 'do the thing' 10
   t G12 1 "agent launch --prompt '' -> 1" -- cli agent launch --agent claude --prompt '   ' --project "$PID" --worktree "$WT1"
-  t G13 2 "agent launch --worktree current outside pane -> 2" -- cli agent launch --agent claude --project "$PID"
+  t G13 2 "agent launch --worktree current outside a tab -> 2" -- cli agent launch --agent claude --project "$PID"
   t G14 0 "agent launch --worktree <branch> --background" -- cli agent launch 'Fake Amp' --background --worktree bugfix/menu --json
-  AGPANE3=$(jf G14 .paneID)
+  AGTAB3=$(jf G14 .tabID)
   echo "== agent status / wait"
+  AGC=$(jf G07 .contentID)
   t G15 0 "agent status" -- cli agent status
-  t G15b 0 "agent status --json lists the launched fake amp pane (classifier may take a while)" -- bash -c "for i in \$(seq 1 150); do $CLI agent status --json | jq -e '.data.agents[]|select(.paneID==\"$AGPANE\" and .agent==\"amp\")' >/dev/null 2>&1 && exit 0; sleep 0.2; done; $CLI agent status --json; exit 1"
-  t G15c 0 "agent status entries carry handle + containers" -- bash -c "$CLI agent status --json | jq -e '.data.count>=1 and (.data.agents[0].handle|startswith(\"p\")) and (.data.agents[0].worktreeID|length==36)'"
-  t G16 0 "agent wait --until exit on a plain shell pane resolves at once" -- bash -c "$CLI agent wait $PANE1 --until exit --wait-timeout 5 --json | jq -e '.data.satisfied==true and .data.waitedMs<1000'"
-  t G17 11 "agent wait --until working on a plain shell pane -> 11 WAIT_TIMEOUT" -- bash -c "out=\$($CLI agent wait $PANE1 --until working --wait-timeout 1 --json); rc=\$?; jq -e '.error.code==\"WAIT_TIMEOUT\" and .error.details.until==\"working\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
+  t G15b 0 "agent status --json lists the launched fake amp (classifier may take a while)" -- bash -c "for i in \$(seq 1 150); do $CLI agent status --json | jq -e '.data.agents[]|select(.contentID==\"$AGC\" and .agent==\"amp\" and .tabID==\"$AGTAB\")' >/dev/null 2>&1 && exit 0; sleep 0.2; done; $CLI agent status --json; exit 1"
+  t G15c 0 "agent status entries carry the tab handle + pane + containers" -- bash -c "$CLI agent status --json | jq -e '.data.count>=1 and (.data.agents[0].handle|startswith(\"t\")) and (.data.agents[0].paneID|length==36) and (.data.agents[0].worktreeID|length==36)'"
+  t G16 0 "agent wait --until exit on a plain shell tab resolves at once" -- bash -c "$CLI agent wait $TAB1 --until exit --wait-timeout 5 --json | jq -e '.data.satisfied==true and .data.waitedMs<1000 and .data.contentID==\"$TAB1C\"'"
+  t G16b 0 "agent wait <pane id> waits on the pane's selected tab" -- bash -c "$CLI agent wait $P1 --until exit --wait-timeout 5 --json | jq -e '.data.satisfied==true'"
+  t G17 11 "agent wait --until working on a plain shell tab -> 11 WAIT_TIMEOUT" -- bash -c "out=\$($CLI agent wait $TAB1 --until working --wait-timeout 1 --json); rc=\$?; jq -e '.error.code==\"WAIT_TIMEOUT\" and .error.details.until==\"working\"' <<<\"\$out\" >/dev/null && exit \$rc; exit 99"
   t G18 2 "agent wait random uuid -> 2" -- cli agent wait "$(uuidgen)" --until idle --wait-timeout 1
-  t G19 1 "agent wait --timeout 0 -> 1" -- cli agent wait "$PANE1" --until idle --wait-timeout 0
-  t G20 64 "agent wait --until bogus -> 64" -- cli agent wait "$PANE1" --until bogus
+  t G19 1 "agent wait --timeout 0 -> 1" -- cli agent wait "$TAB1" --until idle --wait-timeout 0
+  t G20 64 "agent wait --until bogus -> 64" -- cli agent wait "$TAB1" --until bogus
   echo "== handoff"
-  t H01 1 "handoff to bogus agent -> 1" -- cli handoff to bogus --pane "$PANE1" --no-brief
-  t H02 1 "handoff to amp neither brief nor no-brief -> 1" -- cli handoff to amp --pane "$PANE1"
-  t H03 1 "handoff --brief + --no-brief -> 1" -- cli handoff to amp --pane "$PANE1" --brief x --no-brief
-  t H04 1 "handoff --brief '' -> 1" -- cli handoff to amp --pane "$PANE1" --brief '  '
-  t H05 1 "handoff to amp --brief missing sections -> 1" -- cli handoff to amp --pane "$PANE1" --brief 'just text' --no-launch
-  t H06 0 "handoff save --brief - (heredoc)" -- bash -c "$CLI handoff save --pane $PANE1 --brief - <<'EOF'
+  t H01 1 "handoff to bogus agent -> 1" -- cli handoff to bogus --pane "$TAB1" --no-brief
+  t H02 1 "handoff to amp neither brief nor no-brief -> 1" -- cli handoff to amp --pane "$TAB1"
+  t H03 1 "handoff --brief + --no-brief -> 1" -- cli handoff to amp --pane "$TAB1" --brief x --no-brief
+  t H04 1 "handoff --brief '' -> 1" -- cli handoff to amp --pane "$TAB1" --brief '  '
+  t H05 1 "handoff to amp --brief missing sections -> 1" -- cli handoff to amp --pane "$TAB1" --brief 'just text' --no-launch
+  t H06 0 "handoff save --brief - (heredoc)" -- bash -c "$CLI handoff save --pane $TAB1 --brief - <<'EOF'
 # Handoff
 ## Objective
 Test objective
@@ -529,38 +568,34 @@ State
 1. go
 EOF"
   t H07 0 "current.md written in worktree" -- test -f "$WT1PATH/.codans/handoff/current.md"
-  t H08 0 "handoff save --no-brief (context only)" -- cli handoff save --pane "$PANE1" --no-brief --json
-  t H09 0 "handoff to amp --no-brief --no-launch --json" -- cli handoff to amp --pane "$PANE1" --no-brief --no-launch --json
-  # A split receiver's surface comes up with its tab; make the source pane's tab the visible one first.
-  cli pane focus "$PANE1" >/dev/null; sleep 1
-  t H10 0 "handoff to amp --profile 'Fake Amp' --split down --no-brief (launches fake)" -- cli handoff to amp --pane "$PANE1" --profile 'Fake Amp' --split down --no-brief --json
-  t H10b 0 "handoff --json prints launchedPane ids as strings" -- bash -c "jq -e '.data | .launchedPane.paneID|type==\"string\"' '$LOGS/H10.out'"
-  HOPANE=$(jf H10 .launchedPane.paneID)
-  t H11 0 "receiver fake amp came up" -- wait_text "$HOPANE" 'FAKE-AGENT amp' 15
-  if [[ -n "$HOPANE" && "$HOPANE" != null ]]; then
-    { cli tree --project "$PID"; cli pane info "$HOPANE"; cli pane read "$HOPANE" --tail 20; cli pane capture "$HOPANE" --scope screen; } > "$LOGS/H11.diag" 2>&1
+  t H08 0 "handoff save --no-brief (context only)" -- cli handoff save --pane "$TAB1" --no-brief --json
+  t H09 0 "handoff to amp --no-brief --no-launch --json" -- cli handoff to amp --pane "$TAB1C" --no-brief --no-launch --json
+  # A split receiver's surface comes up with its tab; make the source tab the visible one first.
+  cli tab focus "$TAB1" >/dev/null; sleep 1
+  t H10 0 "handoff to amp --profile 'Fake Amp' --split down --no-brief (launches fake)" -- cli handoff to amp --pane "$TAB1" --profile 'Fake Amp' --split down --no-brief --json
+  t H10b 0 "handoff --json prints launchedPane tab / content / pane ids" -- bash -c "jq -e '.data | (.launchedPane.contentID|type==\"string\") and (.launchedPane.tabID|type==\"string\") and (.launchedPane.paneID!=\"$P1\")' '$LOGS/H10.out'"
+  HOTAB=$(jf H10 .launchedPane.tabID)
+  t H11 0 "receiver fake amp came up" -- wait_text "$HOTAB" 'FAKE-AGENT amp' 15
+  if [[ -n "$HOTAB" && "$HOTAB" != null ]]; then
+    { cli tree --project "$PID"; cli tab info "$HOTAB"; cli tab read "$HOTAB" --tail 20; cli tab capture "$HOTAB" --scope screen; } > "$LOGS/H11.diag" 2>&1
   fi
   # The kickoff is typed once the foreground-job classifier has seen the agent; that poll
-  # can take tens of seconds for a fresh pane, so this is the run's longest wait.
-  t H12 0 "typed kickoff reached fake amp (RECEIVED:)" -- wait_text "$HOPANE" 'RECEIVED:' 75
-  if [[ -n "$HOPANE" && "$HOPANE" != null ]]; then
-    { cli pane capture "$HOPANE" --scope screen; log show --process Codans --last 3m --style compact 2>/dev/null | grep -i "kickoff"; } > "$LOGS/H12.diag" 2>&1
-  fi
-  t H13 1 "handoff to amp --tab --split -> 1" -- cli handoff to amp --pane "$PANE1" --tab --split up --no-brief
-  t H14 2 "handoff to claude --pane current outside pane -> 2" -- cli handoff to claude --no-brief --no-launch
-  for p in "$AGPANE" "$AGPANE2" "$AGPANE3" "$HOPANE"; do [[ -n "$p" && "$p" != null ]] && cli pane close "$p" >/dev/null 2>&1; done
+  # can take tens of seconds for a fresh tab, so this is the run's longest wait.
+  t H12 0 "typed kickoff reached fake amp (RECEIVED:)" -- wait_text "$HOTAB" 'RECEIVED:' 75
+  t H13 1 "handoff to amp --tab --split -> 1" -- cli handoff to amp --pane "$TAB1" --tab --split up --no-brief
+  t H14 2 "handoff to claude --pane current outside a tab -> 2" -- cli handoff to claude --no-brief --no-launch
+  for tab in "$AGTAB" "$AGTAB2" "$AGTAB3" "$HOTAB"; do [[ -n "$tab" && "$tab" != null ]] && cli tab close "$tab" >/dev/null 2>&1; done
 }
 
 phase_close() {
   echo "== close & teardown"
-  t Z01 0 "pane close <id>" -- cli pane close "$PANE4"
-  t Z02 2 "pane close again -> 2" -- cli pane close "$PANE4"
-  t Z03 0 "pane close with explicit locator" -- cli pane close "$PANE3" --project "$PID" --worktree "$WT1" --tab "$TAB1"
-  t Z04 0 "pane close @worker" -- cli pane close @worker
-  t Z05 0 "pane close by handle" -- cli pane close "$PH"
-  t Z06 0 "tab close <id> explicit" -- cli tab close "$TAB1" --project "$PID" --worktree "$WT1"
-  # any leftovers
-  for p in $($CLI tree --project "$PID" --json | jq -r '.data | .projects[].worktrees[].tabs[].panes[].id'); do cli pane close "$p" >/dev/null 2>&1; done
+  t Z01 0 "tab close <id>" -- bash -c "$CLI tab close $TAB2 --json | jq -e '.data.id==\"$TAB2\" and .data.contentID==\"$TAB2C\"'"
+  t Z02 2 "tab close again -> 2" -- cli tab close "$TAB2"
+  t Z03 0 "tab close @solo (label)" -- cli tab close @solo
+  t Z03b 2 "tab1 is gone" -- cli tab show "$TAB1"
+  # any leftovers, by pane
+  for p in $($CLI tree --project "$PID" --json | jq -r '.data | .projects[].worktrees[].panes[].id'); do cli pane close "$p" >/dev/null 2>&1; done
+  t Z04 0 "tree has no panes left" -- bash -c "$CLI tree --project $PID --json | jq -e '[.data.projects[].worktrees[].panes[]]|length==0'"
   t Z07 0 "worktree rm wt1 --delete (project inferred)" -- cli worktree rm "$WT1" --delete
   t Z08 0 "project rm by name" -- cli project rm fixture
   t Z09 0 "tree empty" -- bash -c "$CLI tree --json | jq -e '.data | .projects|length==0'"
@@ -572,7 +607,7 @@ phase_close() {
 case "$PHASE" in
   all)
     setup; launch_app
-    phase_app; phase_project; phase_worktree; phase_tab_pane; phase_terminal; phase_incontext; phase_agent_handoff; phase_close
+    phase_app; phase_project; phase_worktree; phase_tab; phase_pane; phase_terminal; phase_incontext; phase_agent_handoff; phase_close
     ;;
   setup) setup; launch_app ;;
   quit) quit_app ;;
