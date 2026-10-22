@@ -378,14 +378,15 @@ struct HierarchyClientTests {
     #expect(labels(of: contentID, in: manager).contains("notifications:muted"))
   }
 
-  // MARK: - Closing with queued commands
+  // MARK: - Close confirmation
 
   /// Stands in for the confirmation sheet: records what it was asked and
   /// answers with a scripted verdict.
   @MainActor
   private final class ConfirmProbe {
-    var asked: [QueuedCommandDiscard] = []
+    var asked: [CloseConfirmationPrompt] = []
     var answer = false
+    var setting: CloseTabConfirmation = .busy
   }
 
   private func makeConfirmingClient() -> (HierarchyClient, HierarchyManager, ConfirmProbe) {
@@ -397,8 +398,9 @@ struct HierarchyClientTests {
     let probe = ConfirmProbe()
     let client = HierarchyClient.live(
       manager: manager,
-      confirmQueueDiscard: { discard, completion in
-        probe.asked.append(discard)
+      closeTabConfirmation: { probe.setting },
+      confirmClose: { prompt, completion in
+        probe.asked.append(prompt)
         completion(probe.answer)
       }
     )
@@ -433,7 +435,7 @@ struct HierarchyClientTests {
 
     try client.closeTab(seed.queuedTab)
 
-    #expect(probe.asked == [QueuedCommandDiscard(subject: .tab, queuedCount: 1)])
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .tab, queuedCount: 1, isRunning: false)])
     #expect(tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
   }
 
@@ -450,7 +452,7 @@ struct HierarchyClientTests {
   }
 
   @Test
-  func closingATabWithoutQueuedCommandsNeverAsks() throws {
+  func closingAnIdleTabNeverAsksWhenBusyOnly() throws {
     let (client, manager, probe) = makeConfirmingClient()
     let seed = try seedQueuedTab(client, manager)
     let plainTab = try #require(tabIDs(manager, seed.worktreeID).first { $0 != seed.queuedTab })
@@ -469,8 +471,70 @@ struct HierarchyClientTests {
 
     try client.closeAllTabs(seed.paneID)
 
-    #expect(probe.asked == [QueuedCommandDiscard(subject: .tabs(before), queuedCount: 1)])
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .tabs(before), queuedCount: 1, isRunning: false)])
     #expect(tabIDs(manager, seed.worktreeID).count == before)
+  }
+
+  /// The setting × busy matrix through the real gate: busy asks only for
+  /// the busy Tab, always asks for both, never asks for neither.
+  @Test(arguments: [
+    (CloseTabConfirmation.busy, true, true),
+    (.busy, false, false),
+    (.always, true, true),
+    (.always, false, true),
+    (.never, true, false),
+    (.never, false, false),
+  ])
+  func closeTabAsksPerSettingAndBusyState(
+    setting: CloseTabConfirmation, closeBusyTab: Bool, expectAsk: Bool
+  ) throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    probe.setting = setting
+    let seed = try seedQueuedTab(client, manager)
+    let idleTab = try #require(tabIDs(manager, seed.worktreeID).first { $0 != seed.queuedTab })
+    let target = closeBusyTab ? seed.queuedTab : idleTab
+
+    try client.closeTab(target)
+
+    #expect(probe.asked.isEmpty == !expectAsk)
+    #expect(tabIDs(manager, seed.worktreeID).contains(target) == expectAsk)
+  }
+
+  /// A running command or working agent counts as busy, not only a queue.
+  @Test
+  func closingATabWithARunningCommandAsksAndSaysSo() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+    let idle = try #require(manager.catalog.pane(seed.paneID)?.tabs.first { $0.id != seed.queuedTab })
+    manager.contentActivity = { $0 == idle.contentID }
+
+    try client.closeTab(idle.id)
+
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .tab, queuedCount: 0, isRunning: true)])
+  }
+
+  /// Closing a Pane applies the same rule over every Tab in it.
+  @Test
+  func closingAPaneAsksWhenAnyOfItsTabsIsBusy() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+
+    try client.closePane(seed.paneID)
+
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .pane, queuedCount: 1, isRunning: false)])
+    #expect(manager.catalog.pane(seed.paneID) != nil)
+  }
+
+  @Test
+  func closingAPaneNeverAsksWhenSetToNever() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    probe.setting = .never
+    let seed = try seedQueuedTab(client, manager)
+
+    try client.closePane(seed.paneID)
+
+    #expect(probe.asked.isEmpty)
+    #expect(manager.catalog.pane(seed.paneID) == nil)
   }
 
   // MARK: - newTab in a missing folder

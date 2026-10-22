@@ -24,7 +24,7 @@ struct PaneSurfaceActionTests {
   }
 
   /// The HUD builds each row's accessibility identifier as
-  /// `pane_hud.<accessibilityID>`, which is also how the AX-driven UI
+  /// `tab_hud.<accessibilityID>`, which is also how the AX-driven UI
   /// harness addresses rows — a collision would make one unreachable.
   @Test
   func accessibilityIDsAreUnique() {

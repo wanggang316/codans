@@ -1,11 +1,13 @@
 import CodansCore
 import SwiftUI
 
-/// Per-pane actions menu, anchored to the pane's top-right corner.
+/// Per-Tab actions menu, anchored to the top-right corner of the content
+/// area. It acts on the Tab whose Content it overlays — the selected Tab of
+/// its Pane.
 ///
 /// Collapsed it is a single button, with a queue button beneath it while the
-/// pane holds queued commands. Expanded it lists the actions that are a property
-/// of *this* pane. The first two are the pane's own affairs: handing its
+/// Tab holds queued commands. Expanded it lists the actions that are a property
+/// of *this* Tab. The first two are the Tab's own affairs: handing its
 /// agent's task off and opening its command queue. Under them sits every
 /// action the terminal surface offers — copy, paste,
 /// the four splits, reset, the pane id, close — rendered from the same
@@ -24,7 +26,7 @@ import SwiftUI
 /// appearing. It is deliberately not an `NSPopover`: a popover whose SwiftUI
 /// content resizes after presentation crashes — see `AgentSessionSummaryCard`
 /// — and this card will grow rows as actions are added.
-struct PaneHUDView: View {
+struct TabHUDView: View {
   let contentID: ContentID
   /// The pane's live terminal surface, which services every
   /// `PaneSurfaceAction` row. Optional only for hosts that render the card
@@ -35,7 +37,7 @@ struct PaneHUDView: View {
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
-  @Environment(\.paneHUDActions) private var actions
+  @Environment(\.tabHUDActions) private var actions
 
   @State private var isExpanded: Bool
   @State private var isButtonHovered = false
@@ -91,8 +93,8 @@ struct PaneHUDView: View {
     withAnimation(Self.expansion) { isExpanded = expanded }
   }
 
-  private func resolveModel() -> PaneHUDModel? {
-    PaneHUDModel.resolve(
+  private func resolveModel() -> TabHUDModel? {
+    TabHUDModel.resolve(
       contentID: contentID,
       in: hierarchyManager.catalog,
       agent: agentStateStore?.entries[contentID]?.kind
@@ -101,7 +103,7 @@ struct PaneHUDView: View {
 
   // MARK: - Card
 
-  private func card(_ model: PaneHUDModel) -> some View {
+  private func card(_ model: TabHUDModel) -> some View {
     HStack(alignment: .top, spacing: 8) {
       if isExpanded {
         expandedBody(model)
@@ -169,7 +171,7 @@ struct PaneHUDView: View {
       .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
   }
 
-  private func menuButton(_ model: PaneHUDModel) -> some View {
+  private func menuButton(_ model: TabHUDModel) -> some View {
     Button {
       setExpanded(!isExpanded)
     } label: {
@@ -193,14 +195,14 @@ struct PaneHUDView: View {
     }
     .buttonStyle(.plain)
     .onHover { isButtonHovered = $0 }
-    .accessibilityIdentifier("pane_hud.toggle")
+    .accessibilityIdentifier("tab_hud.toggle")
     .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
   }
 
   /// Opens the Command Queue sheet directly. Same box as the menu button so
   /// the two read as one stack; static, because a parked queue is a state to
   /// glance at rather than an alarm.
-  private func queueButton(_ model: PaneHUDModel) -> some View {
+  private func queueButton(_ model: TabHUDModel) -> some View {
     Button {
       setExpanded(false)
       actions.commandQueue(contentID)
@@ -219,18 +221,18 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .onHover { isQueueButtonHovered = $0 }
     .help(Self.queuedPhrase(model))
-    .accessibilityIdentifier("pane_hud.queue")
+    .accessibilityIdentifier("tab_hud.queue")
     .accessibilityLabel("Command queue, \(Self.queuedPhrase(model))")
   }
 
-  private static func queuedPhrase(_ model: PaneHUDModel) -> String {
+  private static func queuedPhrase(_ model: TabHUDModel) -> String {
     let count = model.queuedCommandCount
     return count == 1 ? "1 queued command" : "\(count) queued commands"
   }
 
   // MARK: - Expanded body
 
-  private func expandedBody(_ model: PaneHUDModel) -> some View {
+  private func expandedBody(_ model: TabHUDModel) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       // The pane's own affairs first: what its agent is doing and what is
       // queued for it.
@@ -262,7 +264,7 @@ struct PaneHUDView: View {
   // MARK: - Actions
 
   @ViewBuilder
-  private func handOffButton(_ model: PaneHUDModel) -> some View {
+  private func handOffButton(_ model: TabHUDModel) -> some View {
     Button {
       setExpanded(false)
       actions.handOff(contentID)
@@ -284,10 +286,10 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .disabled(!model.canHandOff)
     .help(model.handOffBlockedReason ?? "Hand this task to another agent")
-    .accessibilityIdentifier("pane_hud.hand_off")
+    .accessibilityIdentifier("tab_hud.hand_off")
   }
 
-  private func commandQueueButton(_ model: PaneHUDModel) -> some View {
+  private func commandQueueButton(_ model: TabHUDModel) -> some View {
     Button {
       setExpanded(false)
       actions.commandQueue(contentID)
@@ -311,7 +313,7 @@ struct PaneHUDView: View {
     }
     .buttonStyle(.plain)
     .help("Queue commands to send to this pane")
-    .accessibilityIdentifier("pane_hud.command_queue")
+    .accessibilityIdentifier("tab_hud.command_queue")
   }
 
   /// One row per `PaneSurfaceAction`, driven straight at the pane's surface
@@ -342,6 +344,6 @@ struct PaneHUDView: View {
     }
     .buttonStyle(.plain)
     .disabled(!isEnabled)
-    .accessibilityIdentifier("pane_hud.\(action.accessibilityID)")
+    .accessibilityIdentifier("tab_hud.\(action.accessibilityID)")
   }
 }

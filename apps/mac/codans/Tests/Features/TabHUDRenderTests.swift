@@ -10,7 +10,7 @@ import Testing
 /// window. Writes PNGs only when `PANE_HUD_RENDER_DIR` is set; otherwise
 /// the render still has to succeed, which is the assertion.
 @MainActor
-struct PaneHUDRenderTests {
+struct TabHUDRenderTests {
   private static func makeManager(queued: Int) -> (HierarchyManager, ContentID) {
     let contentID = ContentID()
     let tab = Tab(
@@ -44,7 +44,7 @@ struct PaneHUDRenderTests {
   ) -> CGImage? {
     let content = ZStack(alignment: .topTrailing) {
       Color(red: 0.12, green: 0.12, blue: 0.12)
-      PaneHUDView(contentID: contentID, expanded: expanded)
+      TabHUDView(contentID: contentID, expanded: expanded)
         .padding(.top, 4)
         .padding(.trailing, 4)
     }

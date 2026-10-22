@@ -71,7 +71,7 @@ struct LazyPaneHost: View {
           // right-click, which is why the surface is handed in. Layered
           // above the progress strip so the card is never clipped by it.
           .overlay(alignment: .topTrailing) {
-            PaneHUDView(contentID: store.contentID, surface: surface)
+            TabHUDView(contentID: store.contentID, surface: surface)
           }
           // Right-click menu. Attached only on `.ready` so loading / failure
           // placeholders do not get a stale menu; placed before `.animation`

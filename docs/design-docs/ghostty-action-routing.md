@@ -144,7 +144,7 @@ libghostty 的 `ghostty_surface_config_s.env_vars` 缓冲**假定不被 `ghostty
 
 终端右键菜单与 Pane HUD 的终端操作共享 `PaneSurfaceAction.groups`，包括复制、粘贴、四向拆分、重置终端、复制 Pane ID 与关闭 Pane。没有选区时，右键菜单隐藏复制项，HUD 保留禁用项。交接、命令队列和通知静音属于 HUD 自身的层级操作，不在这份 surface 操作列表中。
 
-Source: [PaneSurfaceAction.swift](../../apps/mac/codans/Runtime/Ghostty/PaneSurfaceAction.swift), [GhosttySurfaceView.swift](../../apps/mac/codans/Runtime/Ghostty/GhosttySurfaceView.swift), [PaneHUDView.swift](../../apps/mac/codans/App/Features/PaneHUD/PaneHUDView.swift).
+Source: [PaneSurfaceAction.swift](../../apps/mac/codans/Runtime/Ghostty/PaneSurfaceAction.swift), [GhosttySurfaceView.swift](../../apps/mac/codans/Runtime/Ghostty/GhosttySurfaceView.swift), [TabHUDView.swift](../../apps/mac/codans/App/Features/TabHUD/TabHUDView.swift).
 
 ## 备选方案（Alternatives）
 

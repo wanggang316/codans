@@ -8,7 +8,7 @@ import Testing
 /// the view cannot re-derive: whether the pane is still known, which agent it
 /// carries, and whether hand off is offered there.
 @MainActor
-struct PaneHUDModelTests {
+struct TabHUDModelTests {
   private static func catalog(
     remoteHost: RemoteHost? = nil,
     agentKind: AgentKind? = nil,
@@ -43,7 +43,7 @@ struct PaneHUDModelTests {
   @Test
   func offersHandOffForAPaneWithAPersistedAgent() {
     let contentID = ContentID()
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: contentID,
       in: Self.catalog(agentKind: .claudeCode, contentID: contentID),
       agent: nil
@@ -59,7 +59,7 @@ struct PaneHUDModelTests {
       QueuedCommand(text: "make test", timing: .afterCurrentTask),
       QueuedCommand(text: "git status", timing: .scheduled(at: .distantFuture, repeatEvery: nil)),
     ]
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: contentID,
       in: Self.catalog(commandQueue: queue, contentID: contentID),
       agent: nil
@@ -70,7 +70,7 @@ struct PaneHUDModelTests {
   @Test
   func reportsAnEmptyQueueAsZero() {
     let contentID = ContentID()
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: contentID,
       in: Self.catalog(contentID: contentID),
       agent: nil
@@ -80,7 +80,7 @@ struct PaneHUDModelTests {
 
   @Test
   func returnsNilForAPaneThatLeftTheCatalog() {
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: ContentID(),
       in: Self.catalog(contentID: ContentID()),
       agent: nil
@@ -91,7 +91,7 @@ struct PaneHUDModelTests {
   @Test
   func liveAgentStateWinsOverThePersistedPaneField() {
     let contentID = ContentID()
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: contentID,
       in: Self.catalog(agentKind: nil, contentID: contentID),
       agent: .codex
@@ -103,7 +103,7 @@ struct PaneHUDModelTests {
   @Test
   func handOffIsBlockedWithoutAnAgent() {
     let contentID = ContentID()
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: contentID,
       in: Self.catalog(agentKind: nil, contentID: contentID),
       agent: nil
@@ -115,7 +115,7 @@ struct PaneHUDModelTests {
   @Test
   func handOffIsBlockedOnServerProjects() {
     let contentID = ContentID()
-    let model = PaneHUDModel.resolve(
+    let model = TabHUDModel.resolve(
       contentID: contentID,
       in: Self.catalog(
         remoteHost: RemoteHost(alias: "mini.local", username: "tester"),

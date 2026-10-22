@@ -56,6 +56,24 @@ enum TabBarColors {
     dark: .clear
   )
 
+  /// Inactive strip (an unfocused Pane, or any strip of a window that is not
+  /// key): the system bar of an inactive window, sampled on macOS 26. Track
+  /// and dividers keep their active values; the selected capsule goes flat
+  /// (dimmer fill and rims, no shadow) and every title drops to the same
+  /// tertiary tone, selected or not.
+  static let inactiveSelectedBackground: Color = adaptive(
+    light: NSColor(srgbRed: 241 / 255, green: 241 / 255, blue: 241 / 255, alpha: 1),
+    dark: .white.withAlphaComponent(0.056)
+  )
+  static let inactiveRimOuter: Color = adaptive(
+    light: .white.withAlphaComponent(0.8),
+    dark: .white.withAlphaComponent(0.18)
+  )
+  static let inactiveRimInner: Color = adaptive(
+    light: .white.withAlphaComponent(0.5),
+    dark: .white.withAlphaComponent(0.10)
+  )
+
   /// Circle behind the close glyph while the pointer is on the button,
   /// layered over the chip's own hover / selected capsule.
   static let closeButtonHoverBackground: Color = adaptive(
@@ -93,6 +111,13 @@ enum TabBarColors {
   /// secondary label color.
   static func inactiveTextOpacity(for colorScheme: ColorScheme) -> Double {
     (colorScheme == .dark ? 0.549 : 0.498) / 0.847
+  }
+
+  /// Every chip title of an inactive strip: `activeText` at this opacity.
+  /// Light lands on the tertiary label color (black 0.259); dark measures
+  /// white ~0.28, a touch above tertiary (0.247).
+  static func inactiveStripTextOpacity(for colorScheme: ColorScheme) -> Double {
+    (colorScheme == .dark ? 0.28 : 0.259) / 0.847
   }
 
   private static func adaptive(light: NSColor, dark: NSColor) -> Color {
