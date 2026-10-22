@@ -67,7 +67,7 @@ struct AgentHandlersTests {
     let byName = try await handlers.launch(
       IPC.AgentLaunchRequest(projectID: projectID, worktreeID: worktreeID, profile: "build"))
     #expect(byName.profileID == build.id)
-    #expect(byName.paneID != nil)
+    #expect(byName.contentID != nil)
 
     _ = try await handlers.launch(
       IPC.AgentLaunchRequest(

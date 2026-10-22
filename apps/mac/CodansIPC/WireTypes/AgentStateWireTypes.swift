@@ -6,7 +6,9 @@ extension IPC {
   /// runtime state, as the sidebar's Agents View shows it. Ids are plain
   /// strings so the CLI prints the row as-is.
   public struct AgentStateEntry: Codable, Equatable, Sendable {
-    public let paneID: String
+    /// The session the agent runs in; agent state is kept per Content.
+    public let contentID: String
+    /// The Tab's `t<n>` handle.
     public let handle: String?
     /// `AgentKind.rawValue` and its display name.
     public let agent: String
@@ -34,10 +36,11 @@ extension IPC {
     public let worktreeName: String
     public let tabID: String
     public let tabTitle: String?
+    public let paneID: String
     public let isFocused: Bool
 
     public init(
-      paneID: String,
+      contentID: String,
       handle: String?,
       agent: String,
       agentName: String,
@@ -54,9 +57,10 @@ extension IPC {
       worktreeName: String,
       tabID: String,
       tabTitle: String?,
+      paneID: String,
       isFocused: Bool
     ) {
-      self.paneID = paneID
+      self.contentID = contentID
       self.handle = handle
       self.agent = agent
       self.agentName = agentName
@@ -73,6 +77,7 @@ extension IPC {
       self.worktreeName = worktreeName
       self.tabID = tabID
       self.tabTitle = tabTitle
+      self.paneID = paneID
       self.isFocused = isFocused
     }
   }
@@ -117,13 +122,13 @@ extension IPC {
   }
 
   public struct AgentWaitRequest: Codable, Equatable, Sendable {
-    public let paneID: ContentID
+    public let contentID: ContentID
     public let until: AgentWaitCondition
     /// 1 through 600 000; the server clamps.
     public let timeoutMillis: Int
 
-    public init(paneID: ContentID, until: AgentWaitCondition, timeoutMillis: Int) {
-      self.paneID = paneID
+    public init(contentID: ContentID, until: AgentWaitCondition, timeoutMillis: Int) {
+      self.contentID = contentID
       self.until = until
       self.timeoutMillis = timeoutMillis
     }
@@ -132,7 +137,7 @@ extension IPC {
   /// `satisfied == false` means the deadline passed; `state` is then the
   /// last observed state so the caller can decide what to do.
   public struct AgentWaitResponse: Codable, Equatable, Sendable {
-    public let paneID: String
+    public let contentID: String
     public let until: String
     public let satisfied: Bool
     public let state: String?
@@ -141,7 +146,7 @@ extension IPC {
     public let waitedMs: Int
 
     public init(
-      paneID: String,
+      contentID: String,
       until: String,
       satisfied: Bool,
       state: String?,
@@ -149,7 +154,7 @@ extension IPC {
       agent: String?,
       waitedMs: Int
     ) {
-      self.paneID = paneID
+      self.contentID = contentID
       self.until = until
       self.satisfied = satisfied
       self.state = state

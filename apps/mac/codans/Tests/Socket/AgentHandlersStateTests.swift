@@ -55,7 +55,7 @@ struct AgentHandlersStateTests {
 
     #expect(response.count == 2)
     #expect(
-      response.agents.map(\.paneID) == [fixture.agentContentID.description, fixture.idleContentID.description])
+      response.agents.map(\.contentID) == [fixture.agentContentID.description, fixture.idleContentID.description])
     let first = try #require(response.agents.first)
     #expect(first.agent == "claude-code")
     #expect(first.agentName == AgentKind.claudeCode.displayName)
@@ -107,7 +107,7 @@ struct AgentHandlersStateTests {
     }
 
     let response = try await fixture.handlers.wait(
-      IPC.AgentWaitRequest(paneID: contentID, until: .idle, timeoutMillis: 3000))
+      IPC.AgentWaitRequest(contentID: contentID, until: .idle, timeoutMillis: 3000))
 
     #expect(response.satisfied)
     #expect(response.state == "idle")
@@ -130,7 +130,7 @@ struct AgentHandlersStateTests {
     let fixture = makeFixture()
 
     let response = try await fixture.handlers.wait(
-      IPC.AgentWaitRequest(paneID: fixture.agentContentID, until: .done, timeoutMillis: 120))
+      IPC.AgentWaitRequest(contentID: fixture.agentContentID, until: .done, timeoutMillis: 120))
 
     #expect(!response.satisfied)
     #expect(response.state == "working")
@@ -147,7 +147,7 @@ struct AgentHandlersStateTests {
       store.seedRestored([(contentID: contentID, kind: .claudeCode, state: .blocked)])
     }
     let changed = try await fixture.handlers.wait(
-      IPC.AgentWaitRequest(paneID: contentID, until: .changed, timeoutMillis: 3000))
+      IPC.AgentWaitRequest(contentID: contentID, until: .changed, timeoutMillis: 3000))
     #expect(changed.satisfied)
     #expect(changed.state == "blocked")
 
@@ -156,25 +156,25 @@ struct AgentHandlersStateTests {
       store.onAgentUnbound(contentID)
     }
     let exited = try await fixture.handlers.wait(
-      IPC.AgentWaitRequest(paneID: contentID, until: .exit, timeoutMillis: 3000))
+      IPC.AgentWaitRequest(contentID: contentID, until: .exit, timeoutMillis: 3000))
     #expect(exited.satisfied)
     #expect(exited.state == nil)
     #expect(exited.agent == "claude-code")
   }
 
   @Test
-  func waitOnAnUnknownPaneIsNotFound() async {
+  func waitOnAnUnknownTabIsNotFound() async {
     let fixture = makeFixture()
     do {
       _ = try await fixture.handlers.wait(
-        IPC.AgentWaitRequest(paneID: ContentID(), until: .idle, timeoutMillis: 100))
+        IPC.AgentWaitRequest(contentID: ContentID(), until: .idle, timeoutMillis: 100))
       Issue.record("expected notFound")
     } catch let error as IPCError {
       guard case .notFound(let kind, _) = error else {
         Issue.record("expected notFound, got \(error)")
         return
       }
-      #expect(kind == "pane")
+      #expect(kind == "tab")
     } catch {
       Issue.record("unexpected \(error)")
     }
@@ -188,7 +188,7 @@ struct AgentHandlersStateTests {
       settings: SettingsStore(fileURL: url), hierarchy: HierarchyClient.testValue, installation: nil)
     #expect(throws: IPCError.self) { try handlers.listStates() }
     await #expect(throws: IPCError.self) {
-      try await handlers.wait(IPC.AgentWaitRequest(paneID: ContentID(), until: .idle, timeoutMillis: 10))
+      try await handlers.wait(IPC.AgentWaitRequest(contentID: ContentID(), until: .idle, timeoutMillis: 10))
     }
   }
 }

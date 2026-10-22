@@ -1877,7 +1877,7 @@ struct RootFeature {
             return .send(.statusBar(.push(.success("Handed off to \(title)"))))
           }
           return .merge(
-            .send(.agentState(.rowTapped(launched.paneID))),
+            .send(.agentState(.rowTapped(launched.contentID))),
             .send(.statusBar(.push(.success("Handed off to \(title)"))))
           )
         }

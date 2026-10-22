@@ -325,7 +325,7 @@ struct HierarchyHandlersCreateWorktreeTests {
     #expect(spec.projectID == fixture.projectID)
     #expect(result.created)
     #expect(result.agent?.profileID == codex.id)
-    #expect(result.agent?.paneID == launcher.contentID)
+    #expect(result.agent?.contentID == launcher.contentID)
   }
 
   @Test

@@ -779,7 +779,8 @@ final class HierarchyHandlers {
           agent: outcome.profile.kind.rawValue,
           command: outcome.command,
           tabID: outcome.tabID,
-          paneID: outcome.contentID
+          contentID: outcome.contentID,
+          paneID: outcome.paneID
         ))
     } catch {
       return .failure(

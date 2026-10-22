@@ -141,6 +141,11 @@ public enum OutputEnvelope {
     "pane.close": 2,
     "pane.resize": 2,
     "broadcast": 2,
+    "agent.status": 2,
+    "agent.launch": 2,
+    "agent.wait": 2,
+    "handoff.to": 2,
+    "handoff.save": 2,
   ]
 
   public static func schemaVersion(command: String) -> String {

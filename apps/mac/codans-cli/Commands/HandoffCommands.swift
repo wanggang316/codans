@@ -185,14 +185,16 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
     let projectID: String
     let worktreeID: String
     let tabID: String
-    let paneID: String
+    let contentID: String
+    let paneID: String?
     let profileName: String
 
     init(_ pane: IPC.HandoffLaunchedPane) {
       projectID = pane.projectID.description
       worktreeID = pane.worktreeID.description
       tabID = pane.tabID.description
-      paneID = pane.paneID.description
+      contentID = pane.contentID.description
+      paneID = pane.paneID?.description
       profileName = pane.profileName
     }
   }
@@ -232,7 +234,7 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
         lines.append("  archived: \(archived)")
       }
       if let pane = response.launchedPane {
-        lines.append("  launched \(pane.profileName) in pane \(pane.paneID) (tab \(pane.tabID))")
+        lines.append("  launched \(pane.profileName) in tab \(pane.tabID) (content \(pane.contentID))")
       } else {
         lines.append("  receiver not launched")
       }
