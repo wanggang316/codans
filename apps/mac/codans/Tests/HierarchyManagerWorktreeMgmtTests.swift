@@ -6,7 +6,7 @@ import Testing
 
 /// Covers the three new Worktree-Management-era additions on
 /// `HierarchyManager`: `setWorktreeArchived`,
-/// `reconcileDiscoveredWorktrees`, and `runningPaneCount`.
+/// `reconcileDiscoveredWorktrees`, and `runningContentCount`.
 ///
 /// Each test builds a fresh manager + fake runtime per `init`, matching
 /// the pattern in `HierarchyManagerTests.swift`.

@@ -23,7 +23,7 @@ import CodansCore
 struct RestoreStatePrecedenceTests {
   private static func session(_ paneID: ContentID) -> Session {
     Session(
-      paneID: paneID,
+      contentID: paneID,
       socketPath: "/tmp/\(paneID.raw.uuidString).sock",
       pid: 4242,
       createdAt: Date(timeIntervalSince1970: 0),
