@@ -155,7 +155,9 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
 /// are optional on decode — a missing key yields an empty set — so partial JSON
 /// (e.g., a hand-edit that only mentions one of the two sets) does not fail to load.
 /// Encoded as a JSON array of strings for `mutedRuleIDs`, and an array of
-/// `{"raw":"<uuid>"}` objects under the `mutedPaneIDs` key for `mutedContentIDs`.
+/// `{"raw":"<uuid>"}` objects for `mutedContentIDs`. A file that still
+/// carries the set under `mutedPaneIDs` (same session ids) is read once and
+/// written back under `mutedContentIDs`: a mute follows the session.
 public nonisolated struct MuteSettings: Equatable, Sendable, Codable {
   public var mutedRuleIDs: Set<String>
   public var mutedContentIDs: Set<ContentID>
@@ -170,13 +172,16 @@ public nonisolated struct MuteSettings: Equatable, Sendable, Codable {
 
   private enum CodingKeys: String, CodingKey {
     case mutedRuleIDs
-    case mutedContentIDs = "mutedPaneIDs"
+    case mutedContentIDs
+    case legacyMutedPaneIDs = "mutedPaneIDs"
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.mutedRuleIDs = try container.decodeIfPresent(Set<String>.self, forKey: .mutedRuleIDs) ?? []
-    self.mutedContentIDs = try container.decodeIfPresent(Set<ContentID>.self, forKey: .mutedContentIDs) ?? []
+    self.mutedContentIDs =
+      try container.decodeIfPresent(Set<ContentID>.self, forKey: .mutedContentIDs)
+      ?? container.decodeIfPresent(Set<ContentID>.self, forKey: .legacyMutedPaneIDs) ?? []
   }
 
   public func encode(to encoder: Encoder) throws {
