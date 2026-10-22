@@ -927,7 +927,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.workflow.run.v1"
+            "const": "codans.cli.workflow.run.v2"
           }
         },
         "required": [
@@ -947,7 +947,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.workflow.status.v1"
+            "const": "codans.cli.workflow.status.v2"
           }
         },
         "required": [
@@ -987,7 +987,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.workflow.resolve.v1"
+            "const": "codans.cli.workflow.resolve.v2"
           }
         },
         "required": [
@@ -1007,7 +1007,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.workflow.cancel.v1"
+            "const": "codans.cli.workflow.cancel.v2"
           }
         },
         "required": [
@@ -1027,7 +1027,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.workflow.runs.v1"
+            "const": "codans.cli.workflow.runs.v2"
           }
         },
         "required": [
@@ -2279,7 +2279,7 @@
             "pick"
           ]
         },
-        "paneID": {
+        "contentID": {
           "oneOf": [
             {
               "$ref": "#/$defs/uuid"
@@ -2682,13 +2682,13 @@
                 "role": {
                   "type": "string"
                 },
-                "paneID": {
+                "contentID": {
                   "$ref": "#/$defs/uuid"
                 }
               },
               "required": [
                 "role",
-                "paneID"
+                "contentID"
               ],
               "additionalProperties": false
             },

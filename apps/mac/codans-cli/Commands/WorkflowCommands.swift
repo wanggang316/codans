@@ -73,7 +73,7 @@ enum WorkflowRunID {
 /// worktree id (everything else).
 enum WorkflowSourceResolver {
   struct Resolved: Equatable {
-    var paneID: ContentID?
+    var contentID: ContentID?
     var worktreeID: WorktreeID?
   }
 
@@ -86,7 +86,7 @@ enum WorkflowSourceResolver {
     {
       // The server converts any of the three ids or handles to the session.
       let uuid = try await AliasResolver.resolve(source, kind: .content, client: client)
-      return Resolved(paneID: ContentID(raw: uuid))
+      return Resolved(contentID: ContentID(raw: uuid))
     }
     let uuid = try await AliasResolver.resolve(source, kind: .worktree, client: client)
     return Resolved(worktreeID: WorktreeID(raw: uuid))
@@ -95,9 +95,9 @@ enum WorkflowSourceResolver {
   static func worktree(_ reference: String, client: RPCClient) async throws -> WorktreeID {
     let resolved = try await resolve(reference, client: client)
     if let worktreeID = resolved.worktreeID { return worktreeID }
-    guard let paneID = resolved.paneID else { throw notFound("worktree", reference) }
+    guard let contentID = resolved.contentID else { throw notFound("worktree", reference) }
     let tree = try await HierarchyTree.load(client: client)
-    guard let located = tree.locateContent(paneID) else { throw notFound("pane", paneID.description) }
+    guard let located = tree.locateContent(contentID) else { throw notFound("content", contentID.description) }
     return located.worktreeID
   }
 
@@ -106,7 +106,7 @@ enum WorkflowSourceResolver {
   private static func resolveUUID(_ uuid: UUID, client: RPCClient) async throws -> Resolved {
     let tree = try await HierarchyTree.load(client: client)
     if let located = tree.locateSession(uuid) {
-      return Resolved(paneID: located.contentID)
+      return Resolved(contentID: located.contentID)
     }
     if tree.locateWorktree(WorktreeID(raw: uuid)) != nil {
       return Resolved(worktreeID: WorktreeID(raw: uuid))
@@ -150,7 +150,7 @@ struct WorkflowList: AsyncParsableCommand {
         .workflowList,
         params: IPC.WorkflowListRequest(
           worktreeID: worktreeID,
-          paneID: worktreeID == nil ? WorkflowCallerContext.contentID() : nil)
+          contentID: worktreeID == nil ? WorkflowCallerContext.contentID() : nil)
       )
       try Renderer.emit(WorkflowListRenderable(response: response), mode: globals.renderMode)
     }
@@ -195,7 +195,7 @@ struct WorkflowRun: AsyncParsableCommand {
       let inputs = try CLIKeyValuePairs.parse(input, option: "--input")
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      var resolved = WorkflowSourceResolver.Resolved(paneID: WorkflowCallerContext.contentID())
+      var resolved = WorkflowSourceResolver.Resolved(contentID: WorkflowCallerContext.contentID())
       if let source {
         resolved = try await WorkflowSourceResolver.resolve(source, client: client)
       }
@@ -203,9 +203,9 @@ struct WorkflowRun: AsyncParsableCommand {
         .workflowRun,
         params: IPC.WorkflowRunRequest(
           workflow: workflow,
-          sourcePaneID: resolved.paneID,
+          sourceContentID: resolved.contentID,
           worktreeID: resolved.worktreeID,
-          callerPaneID: WorkflowCallerContext.contentID(),
+          callerContentID: WorkflowCallerContext.contentID(),
           roles: roles,
           inputs: inputs,
           skip: skip,

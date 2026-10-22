@@ -2870,7 +2870,7 @@ struct RootFeature {
     case .contextOnly(let profile, let title):
       let request = IPC.HandoffRequest(
         action: .to,
-        paneID: contentID,
+        contentID: contentID,
         receiver: profile.kind.rawValue,
         profile: profile.id.uuidString,
         contextOnly: true,

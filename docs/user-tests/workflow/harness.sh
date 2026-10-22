@@ -210,9 +210,9 @@ phase_setup() {
   WT=$(jf S02 .id); WTPATH=$(jf S02 .path); echo "  worktree=$WT path=$WTPATH"
   t S03 0 "workflow list shows the three built-ins" -- bash -c "$CLI workflow list --json | jq -e '([.data.workflows[].id]|sort==[\"advisor\",\"handoff\",\"review-loop\"]) and all(.data.workflows[]; .isValid and .scope==\"bundle\")'"
   t S04 0 "author: launch Fake Claude" -- cli agent launch 'Fake Claude' --background --project "$PID" --worktree "$WT" --json
-  AUTHOR=$(jf S04 .paneID); echo "  author pane: $AUTHOR"
+  AUTHOR=$(jf S04 .contentID); echo "  author session: $AUTHOR"
   t S05 0 "author fake started" -- wait_text "$AUTHOR" 'FAKE CLAUDE started' 15
-  t S06 0 "author is detected as claude and idle" -- bash -c "for i in \$(seq 1 100); do $CLI agent status --json | jq -e '.data.agents[]|select(.paneID==\"$AUTHOR\" and .agent==\"claude-code\" and .state==\"idle\")' >/dev/null 2>&1 && exit 0; sleep 0.3; done; $CLI agent status --json; exit 1"
+  t S06 0 "author is detected as claude and idle" -- bash -c "for i in \$(seq 1 100); do $CLI agent status --json | jq -e '.data.agents[]|select(.contentID==\"$AUTHOR\" and .agent==\"claude-code\" and .state==\"idle\")' >/dev/null 2>&1 && exit 0; sleep 0.3; done; $CLI agent status --json; exit 1"
   echo "== admission errors"
   t E01 2 "run unknown workflow -> 2 WORKFLOW_NOT_FOUND" -- bash -c "out=\$($CLI workflow run nope $AUTHOR --json); rc=\$?; jq -e '.error.code==\"WORKFLOW_NOT_FOUND\"' <<<\"\$out\" >/dev/null && exit \$rc; echo \"\$out\"; exit 99"
   t E02 1 "run advisor without its required input -> 1 INPUT_REQUIRED" -- bash -c "out=\$($CLI workflow run advisor $AUTHOR --role advisor='Fake Claude' --json); rc=\$?; jq -e '.error.code==\"INPUT_REQUIRED\"' <<<\"\$out\" >/dev/null && exit \$rc; echo \"\$out\"; exit 99"
@@ -225,7 +225,7 @@ phase_review_loop() {
   printf 'issues\nclean\n' >"$FAKESTATE/verdicts"
   t R01 0 "run review-loop from the author pane" -- cli workflow run review-loop "$AUTHOR" --role reviewer='Fake Claude' --input max-rounds=2 --json
   RUN1=$(jf R01 .runID); echo "  run: $RUN1"
-  t R02 0 "bindings: author=current pane, reviewer=Fake Claude" -- bash -c "jq -e '(.data.bindings|map(select(.role==\"author\"))[0].paneID==\"$AUTHOR\") and (.data.bindings|map(select(.role==\"reviewer\"))[0].profileName==\"Fake Claude\")' '$LOGS/R01.out'"
+  t R02 0 "bindings: author=current pane, reviewer=Fake Claude" -- bash -c "jq -e '(.data.bindings|map(select(.role==\"author\"))[0].contentID==\"$AUTHOR\") and (.data.bindings|map(select(.role==\"reviewer\"))[0].profileName==\"Fake Claude\")' '$LOGS/R01.out'"
   t R03 0 "run completes" -- wait_state "$RUN1" completed 150
   t R04 0 "status: review verdict clean at ordinal 3, fixes delivered" -- bash -c "$CLI workflow status $RUN1 --json | jq -e '(.data.run.deliveries|map(select(.name==\"review\"))[0]|.verdict==\"clean\" and .ordinal==3) and (.data.run.deliveries|map(select(.name==\"fixes\"))|length==1)'"
   t R05 0 "deliveries on disk under the worktree" -- bash -c "test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.md' && test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.1.md' && test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/fixes.2.md' && grep -q '## Findings' '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.md'"

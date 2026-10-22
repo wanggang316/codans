@@ -133,10 +133,10 @@ extension WorkflowHandlers {
       switch binding {
       case .current(let contentID), .pick(let contentID):
         return IPC.WorkflowRoleBindingSummary(
-          role: role, source: binding.source.rawValue, paneID: contentID, handle: handle)
+          role: role, source: binding.source.rawValue, contentID: contentID, handle: handle)
       case .launch(let profileID, let profileName, let agent, let contentID):
         return IPC.WorkflowRoleBindingSummary(
-          role: role, source: binding.source.rawValue, paneID: contentID, handle: handle,
+          role: role, source: binding.source.rawValue, contentID: contentID, handle: handle,
           profileID: profileID, profileName: profileName, agent: agent.rawValue)
       }
     }

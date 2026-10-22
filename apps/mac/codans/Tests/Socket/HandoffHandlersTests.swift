@@ -116,13 +116,13 @@ struct HandoffHandlersTests {
     contextOnly: Bool = false,
     launch: Bool = true,
     requestID: UUID? = nil,
-    paneID: ContentID? = nil,
+    contentID: ContentID? = nil,
     target: ScriptTarget? = nil,
     direction: ScriptSplitDirection? = nil
   ) -> IPC.HandoffRequest {
     IPC.HandoffRequest(
       action: action,
-      paneID: paneID ?? harness.source.contentID,
+      contentID: contentID ?? harness.source.contentID,
       receiver: receiver,
       profile: profile,
       brief: brief,
@@ -401,13 +401,13 @@ struct HandoffHandlersTests {
   // MARK: - Source resolution
 
   @Test
-  func unknownPaneAndRemoteWorktreeAreRejected() async throws {
+  func unknownContentAndRemoteWorktreeAreRejected() async throws {
     let harness = try Self.makeHarness()
     let unknown = await Self.ipcError {
-      try await harness.handlers.save(Self.request(.save, harness, contextOnly: true, paneID: ContentID()))
+      try await harness.handlers.save(Self.request(.save, harness, contextOnly: true, contentID: ContentID()))
     }
-    guard case .notFound(let kind, _) = unknown, kind == "pane" else {
-      Issue.record("expected notFound(pane), got \(String(describing: unknown))")
+    guard case .notFound(let kind, _) = unknown, kind == "content" else {
+      Issue.record("expected notFound(content), got \(String(describing: unknown))")
       return
     }
 
@@ -484,10 +484,10 @@ struct HandoffHandlersTests {
       try await harness.handlers.to(
         Self.request(
           .to, harness, receiver: "codex", brief: Self.briefing,
-          requestID: requestID, paneID: sourceContentID))
+          requestID: requestID, contentID: sourceContentID))
     }
-    guard case .notFound(let kind, _) = error, kind == "pane" else {
-      Issue.record("expected notFound(pane), got \(String(describing: error))")
+    guard case .notFound(let kind, _) = error, kind == "content" else {
+      Issue.record("expected notFound(content), got \(String(describing: error))")
       return
     }
     #expect(!FileManager.default.fileExists(atPath: harness.store.stateDirectory.path))

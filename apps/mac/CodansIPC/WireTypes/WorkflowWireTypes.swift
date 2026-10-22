@@ -112,14 +112,14 @@ extension IPC {
   }
 
   /// Params for `workflow.list`. Both nil means "attribute the caller from
-  /// the connection's peer PID; outside a pane, list every scope".
+  /// the connection's peer PID; outside a Tab, list every scope".
   public struct WorkflowListRequest: Codable, Equatable, Sendable {
     public let worktreeID: WorktreeID?
-    public let paneID: ContentID?
+    public let contentID: ContentID?
 
-    public init(worktreeID: WorktreeID? = nil, paneID: ContentID? = nil) {
+    public init(worktreeID: WorktreeID? = nil, contentID: ContentID? = nil) {
       self.worktreeID = worktreeID
-      self.paneID = paneID
+      self.contentID = contentID
     }
   }
 
@@ -131,18 +131,18 @@ extension IPC {
     }
   }
 
-  /// Params for `workflow.run`. `sourcePaneID` nil with `worktreeID` nil
-  /// asks the server to attribute the caller's pane from the peer PID.
+  /// Params for `workflow.run`. `sourceContentID` nil with `worktreeID` nil
+  /// asks the server to attribute the caller's session from the peer PID.
   public struct WorkflowRunRequest: Codable, Equatable, Sendable {
     /// Definition id, or its unique display name.
     public let workflow: String
-    public let sourcePaneID: ContentID?
+    public let sourceContentID: ContentID?
     public let worktreeID: WorktreeID?
     /// The session the CLI ran in (`CODANS_CONTENT_ID`), independent of the
     /// explicit source. Only a run started from the `current` role's own
-    /// pane is self-initiated; the server falls back to peer-PID
+    /// session is self-initiated; the server falls back to peer-PID
     /// attribution when this is nil.
-    public let callerPaneID: ContentID?
+    public let callerContentID: ContentID?
     /// Role name → binding (`auto`, a profile name or id, or a pane
     /// reference for `pick` roles).
     public let roles: [String: String]
@@ -154,18 +154,18 @@ extension IPC {
 
     public init(
       workflow: String,
-      sourcePaneID: ContentID? = nil,
+      sourceContentID: ContentID? = nil,
       worktreeID: WorktreeID? = nil,
-      callerPaneID: ContentID? = nil,
+      callerContentID: ContentID? = nil,
       roles: [String: String] = [:],
       inputs: [String: String] = [:],
       skip: [String] = [],
       origin: String = "cli"
     ) {
       self.workflow = workflow
-      self.sourcePaneID = sourcePaneID
+      self.sourceContentID = sourceContentID
       self.worktreeID = worktreeID
-      self.callerPaneID = callerPaneID
+      self.callerContentID = callerContentID
       self.roles = roles
       self.inputs = inputs
       self.skip = skip
@@ -173,14 +173,14 @@ extension IPC {
     }
   }
 
-  /// A role as frozen into a run: the pane it is (or will be) bound to and,
+  /// A role as frozen into a run: the session it is (or will be) bound to and,
   /// for `launch` roles, the profile that was resolved at admission.
   public struct WorkflowRoleBindingSummary: Codable, Equatable, Sendable {
     public let role: String
     /// `current` | `launch` | `pick`.
     public let source: String
-    public let paneID: ContentID?
-    /// `p<n>` handle for display, when the pane is known.
+    public let contentID: ContentID?
+    /// `p<n>` handle for display, when the session is known.
     public let handle: String?
     public let profileID: UUID?
     public let profileName: String?
@@ -189,7 +189,7 @@ extension IPC {
     public init(
       role: String,
       source: String,
-      paneID: ContentID? = nil,
+      contentID: ContentID? = nil,
       handle: String? = nil,
       profileID: UUID? = nil,
       profileName: String? = nil,
@@ -197,7 +197,7 @@ extension IPC {
     ) {
       self.role = role
       self.source = source
-      self.paneID = paneID
+      self.contentID = contentID
       self.handle = handle
       self.profileID = profileID
       self.profileName = profileName
@@ -418,26 +418,26 @@ extension IPC {
   }
 
   /// Params for `workflow.status`. Without `runID` the server answers
-  /// "which run am I in": it looks up `callerPaneID` (or, when that is nil
-  /// too, the pane attributed from the peer PID) in the activation
+  /// "which run am I in": it looks up `callerContentID` (or, when that is nil
+  /// too, the session attributed from the peer PID) in the activation
   /// registry and returns that run plus the caller's `participant` row.
   public struct WorkflowStatusRequest: Codable, Equatable, Sendable {
     public let runID: UUID?
-    public let callerPaneID: ContentID?
+    public let callerContentID: ContentID?
 
-    public init(runID: UUID? = nil, callerPaneID: ContentID? = nil) {
+    public init(runID: UUID? = nil, callerContentID: ContentID? = nil) {
       self.runID = runID
-      self.callerPaneID = callerPaneID
+      self.callerContentID = callerContentID
     }
   }
 
   public struct WorkflowParticipantSummary: Codable, Equatable, Sendable {
     public let role: String
-    public let paneID: ContentID
+    public let contentID: ContentID
 
-    public init(role: String, paneID: ContentID) {
+    public init(role: String, contentID: ContentID) {
       self.role = role
-      self.paneID = paneID
+      self.contentID = contentID
     }
   }
 
@@ -452,12 +452,12 @@ extension IPC {
   }
 
   /// Params for `workflow.deliver`. The activation is found through the
-  /// caller's pane and confirmed by `token`; `runID` + `stepID` are the
-  /// explicit route for a caller outside any pane (recorded as a manual
+  /// caller's session and confirmed by `token`; `runID` + `stepID` are the
+  /// explicit route for a caller outside any Tab (recorded as a manual
   /// delivery). `force` accepts a body the validator would otherwise
   /// reject under `strict`.
   public struct WorkflowDeliverRequest: Codable, Equatable, Sendable {
-    public let callerPaneID: ContentID?
+    public let callerContentID: ContentID?
     public let token: String?
     public let runID: UUID?
     public let stepID: String?
@@ -466,7 +466,7 @@ extension IPC {
     public let force: Bool
 
     public init(
-      callerPaneID: ContentID? = nil,
+      callerContentID: ContentID? = nil,
       token: String? = nil,
       runID: UUID? = nil,
       stepID: String? = nil,
@@ -474,7 +474,7 @@ extension IPC {
       verdict: String? = nil,
       force: Bool = false
     ) {
-      self.callerPaneID = callerPaneID
+      self.callerContentID = callerContentID
       self.token = token
       self.runID = runID
       self.stepID = stepID
@@ -539,12 +539,12 @@ extension IPC {
   /// Params for `workflow.listRuns`; scoping follows `WorkflowListRequest`.
   public struct WorkflowListRunsRequest: Codable, Equatable, Sendable {
     public let worktreeID: WorktreeID?
-    public let paneID: ContentID?
+    public let contentID: ContentID?
     public let limit: Int?
 
-    public init(worktreeID: WorktreeID? = nil, paneID: ContentID? = nil, limit: Int? = nil) {
+    public init(worktreeID: WorktreeID? = nil, contentID: ContentID? = nil, limit: Int? = nil) {
       self.worktreeID = worktreeID
-      self.paneID = paneID
+      self.contentID = contentID
       self.limit = limit
     }
   }

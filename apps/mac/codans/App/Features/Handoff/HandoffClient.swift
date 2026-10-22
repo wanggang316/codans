@@ -66,7 +66,7 @@ extension HandoffClient {
           }
         return HandoffCompletion(
           action: response.action,
-          sourceContentID: request.paneID,
+          sourceContentID: request.contentID,
           receiver: response.receiver.flatMap { AgentKind(rawValue: $0) },
           briefing: HandoffBriefingOutcome(rawValue: response.briefing) ?? .none,
           launched: response.launchedPane,

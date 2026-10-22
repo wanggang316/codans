@@ -166,7 +166,7 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness()
     let code = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "nope", sourcePaneID: harness.paneID), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "nope", sourceContentID: harness.paneID), peerPID: nil)
     }
     #expect(code == "WORKFLOW_NOT_FOUND")
   }
@@ -184,13 +184,13 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness(files: ["broken": broken])
     do {
       _ = try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "broken", sourcePaneID: harness.paneID), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "broken", sourceContentID: harness.paneID), peerPID: nil)
       Issue.record("expected WORKFLOW_INVALID")
     } catch IPCError.domain(let code, _, let hint) {
       #expect(code == "WORKFLOW_INVALID")
       #expect(hint?.contains("error") == true)
     }
-    let listed = try harness.handlers.list(IPC.WorkflowListRequest(paneID: harness.paneID), peerPID: nil)
+    let listed = try harness.handlers.list(IPC.WorkflowListRequest(contentID: harness.paneID), peerPID: nil)
     #expect(listed.workflows.map(\.id) == ["broken"])
     #expect(listed.workflows[0].isValid == false)
   }
@@ -201,10 +201,10 @@ struct WorkflowHandlersTests {
     harness.settings.mutateWorkflows { $0.disabled = ["ping"] }
     let code = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     }
     #expect(code == "WORKFLOW_DISABLED")
-    let listed = try harness.handlers.list(IPC.WorkflowListRequest(paneID: harness.paneID), peerPID: nil)
+    let listed = try harness.handlers.list(IPC.WorkflowListRequest(contentID: harness.paneID), peerPID: nil)
     #expect(listed.workflows.first { $0.id == "ping" }?.isEnabled == false)
   }
 
@@ -213,7 +213,7 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness()
     harness.settings.mutateWorkflows { $0.isEnabled = false }
     let code = await Self.domainCode {
-      try harness.handlers.list(IPC.WorkflowListRequest(paneID: harness.paneID), peerPID: nil)
+      try harness.handlers.list(IPC.WorkflowListRequest(contentID: harness.paneID), peerPID: nil)
     }
     #expect(code == "unsupported")
   }
@@ -237,7 +237,7 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness(agent: nil)
     let code = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     }
     #expect(code == "SOURCE_REQUIRED")
   }
@@ -248,7 +248,7 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness(profiles: [profile])
     do {
       _ = try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "launcher", sourcePaneID: harness.paneID), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "launcher", sourceContentID: harness.paneID), peerPID: nil)
       Issue.record("expected INPUT_REQUIRED")
     } catch IPCError.domain(let code, let message, _) {
       #expect(code == "INPUT_REQUIRED")
@@ -261,7 +261,7 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness(profiles: [AgentProfile(kind: .codex, name: "Codex")])
     let code = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "launcher", sourcePaneID: harness.paneID, inputs: ["focus": "tests"]),
+        IPC.WorkflowRunRequest(workflow: "launcher", sourceContentID: harness.paneID, inputs: ["focus": "tests"]),
         peerPID: nil)
     }
     #expect(code == "PROFILE_REQUIRED")
@@ -272,12 +272,12 @@ struct WorkflowHandlersTests {
     let harness = try Self.makeHarness()
     let role = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID, roles: ["ghost": "auto"]), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID, roles: ["ghost": "auto"]), peerPID: nil)
     }
     #expect(role == "invalidParams")
     let skip = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID, skip: ["ask"]), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID, skip: ["ask"]), peerPID: nil)
     }
     #expect(skip == "invalidParams", "done needs the delivery ask produces")
   }
@@ -290,7 +290,7 @@ struct WorkflowHandlersTests {
     // An explicit `[source]` pane from a shell that is not that pane: the
     // author has to be told, so the line is typed and nothing is handed back.
     let response = try await harness.handlers.run(
-      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+      IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     #expect(response.selfInitiated == nil)
     await Self.settle { !harness.world.lines.isEmpty }
     #expect(harness.world.lines.first?.1.hasPrefix("Summarize the diff.") == true)
@@ -300,7 +300,7 @@ struct WorkflowHandlersTests {
   func selfInitiatedRunDeliversAndAdvances() async throws {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.run(
-      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID, callerPaneID: harness.paneID),
+      IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID, callerContentID: harness.paneID),
       peerPID: nil)
     let task = try #require(response.selfInitiated)
     #expect(task.stepID == "ask")
@@ -308,30 +308,30 @@ struct WorkflowHandlersTests {
     #expect(task.completionCommand.contains("codans workflow deliver"))
     #expect(harness.world.lines.isEmpty)
     #expect(response.bindings.map(\.role) == ["author"])
-    #expect(response.bindings[0].paneID == harness.paneID)
+    #expect(response.bindings[0].contentID == harness.paneID)
     let activation = try #require(harness.registry.activation(forContent: harness.paneID))
     #expect(task.completionCommand.contains(activation.token))
 
     // "Who am I": the calling pane's run, with the completion command.
     let status = try harness.handlers.status(
-      IPC.WorkflowStatusRequest(callerPaneID: harness.paneID), peerPID: nil)
+      IPC.WorkflowStatusRequest(callerContentID: harness.paneID), peerPID: nil)
     #expect(status.run.runID == response.runID)
     #expect(status.participant?.role == "author")
     #expect(status.run.activation?.completionCommands == [task.completionCommand])
     // Another pane asking about the run gets no token-bearing command.
     let outsider = try harness.handlers.status(
-      IPC.WorkflowStatusRequest(runID: response.runID, callerPaneID: harness.otherPaneID), peerPID: nil)
+      IPC.WorkflowStatusRequest(runID: response.runID, callerContentID: harness.otherPaneID), peerPID: nil)
     #expect(outsider.run.activation?.completionCommands == [])
 
     let wrong = await Self.domainCode {
       try await harness.handlers.deliver(
-        IPC.WorkflowDeliverRequest(callerPaneID: harness.paneID, token: "nope", body: "## Summary\nfine"),
+        IPC.WorkflowDeliverRequest(callerContentID: harness.paneID, token: "nope", body: "## Summary\nfine"),
         peerPID: nil)
     }
     #expect(wrong == "TOKEN_INVALID")
 
     let delivered = try await harness.handlers.deliver(
-      IPC.WorkflowDeliverRequest(callerPaneID: harness.paneID, token: activation.token, body: "## Summary\nfine"),
+      IPC.WorkflowDeliverRequest(callerContentID: harness.paneID, token: activation.token, body: "## Summary\nfine"),
       peerPID: nil)
     #expect(delivered.state == "delivered")
     #expect(delivered.stepID == "ask")
@@ -340,7 +340,7 @@ struct WorkflowHandlersTests {
     let final = try harness.handlers.status(IPC.WorkflowStatusRequest(runID: response.runID), peerPID: nil)
     #expect(final.run.state == "completed")
     #expect(final.run.deliveries.map(\.name) == ["summary"])
-    let runs = try harness.handlers.listRuns(IPC.WorkflowListRunsRequest(paneID: harness.paneID), peerPID: nil)
+    let runs = try harness.handlers.listRuns(IPC.WorkflowListRunsRequest(contentID: harness.paneID), peerPID: nil)
     #expect(runs.runs.map(\.runID) == [response.runID])
   }
 
@@ -348,10 +348,10 @@ struct WorkflowHandlersTests {
   func provisionalDeliveryIsResolvedByAccept() async throws {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.run(
-      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+      IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     let token = try #require(harness.registry.activation(forContent: harness.paneID)?.token)
     let delivered = try await harness.handlers.deliver(
-      IPC.WorkflowDeliverRequest(callerPaneID: harness.paneID, token: token, body: "no heading here"), peerPID: nil)
+      IPC.WorkflowDeliverRequest(callerContentID: harness.paneID, token: token, body: "no heading here"), peerPID: nil)
     #expect(delivered.state == "provisional")
     #expect(!delivered.issues.isEmpty)
     let waiting = try harness.handlers.status(IPC.WorkflowStatusRequest(runID: response.runID), peerPID: nil)
@@ -375,11 +375,11 @@ struct WorkflowHandlersTests {
   func manualDeliveryFromOutsideAPaneNamesTheStep() async throws {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.run(
-      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+      IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     let mismatch = await Self.domainCode {
       try await harness.handlers.deliver(
         IPC.WorkflowDeliverRequest(
-          callerPaneID: harness.otherPaneID, runID: response.runID, stepID: "ask", body: "## Summary\nok"),
+          callerContentID: harness.otherPaneID, runID: response.runID, stepID: "ask", body: "## Summary\nok"),
         peerPID: nil)
     }
     #expect(mismatch == "ROLE_MISMATCH")
@@ -397,10 +397,10 @@ struct WorkflowHandlersTests {
   func cancelEndsTheRunAndFreesThePane() async throws {
     let harness = try Self.makeHarness()
     let response = try await harness.handlers.run(
-      IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+      IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     let busy = await Self.domainCode {
       try await harness.handlers.run(
-        IPC.WorkflowRunRequest(workflow: "ping", sourcePaneID: harness.paneID), peerPID: nil)
+        IPC.WorkflowRunRequest(workflow: "ping", sourceContentID: harness.paneID), peerPID: nil)
     }
     #expect(busy == "PANE_BUSY")
     let cancelled = try harness.handlers.cancel(IPC.WorkflowCancelRequest(runID: response.runID), peerPID: nil)
