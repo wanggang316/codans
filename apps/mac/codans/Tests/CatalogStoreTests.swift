@@ -148,4 +148,71 @@ struct CatalogStoreTests {
     #expect(store.loadReport == .clean)
     #expect(store.loadReport.allowsSessionSweeps)
   }
+
+  /// A v3 file whose record cannot be read: the launch path gets an empty
+  /// catalog, but with saving and every session sweep off, and the file
+  /// left byte-identical with a copy in `backups/`.
+  @Test
+  func malformedVersion3TurnsSweepsAndSavingOff() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.tearDown() }
+    let original = Data(#"{ "version": 3, "projects": [{ "id": 5, "name": "p" }] }"#.utf8)
+    try original.write(to: sandbox.catalogURL)
+
+    let store = CatalogStore(fileURL: sandbox.catalogURL)
+    #expect(throws: (any Error).self) { try store.load() }
+    #expect(store.loadReport.loadFailed)
+    #expect(!store.loadReport.allowsSessionSweeps)
+    #expect(!store.persistenceEnabled)
+
+    let launched = store.loadForLaunch()
+    #expect(launched == .empty)
+    #expect(!store.loadReport.allowsSessionSweeps)
+    store.scheduleSave(launched)
+    store.flushPending()
+    try store.saveNow(launched)
+
+    #expect(try Data(contentsOf: sandbox.catalogURL) == original)
+    let copies = sandbox.backups.filter { $0.contains("corrupt") }
+    #expect(copies.count == 2)
+    if let name = copies.first {
+      let copy = try Data(
+        contentsOf: sandbox.directory.appendingPathComponent(StoreBackup.directoryName).appendingPathComponent(name))
+      #expect(copy == original)
+    }
+  }
+
+  /// A current file that breaks a layout invariant takes the same path.
+  @Test
+  func brokenLayoutTurnsSweepsAndSavingOff() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.tearDown() }
+    // The split tree names Pane 10, but the Worktree holds no Pane.
+    let original = Self.v4(panes: "")
+    try original.write(to: sandbox.catalogURL)
+
+    let store = CatalogStore(fileURL: sandbox.catalogURL)
+    #expect(store.loadForLaunch() == .empty)
+    #expect(store.loadReport.loadFailed)
+    #expect(!store.loadReport.allowsSessionSweeps)
+    #expect(!store.persistenceEnabled)
+    #expect(try Data(contentsOf: sandbox.catalogURL) == original)
+  }
+
+  /// The file exists but cannot be read at all (here: a directory).
+  @Test
+  func unreadableFileTurnsSweepsAndSavingOff() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.tearDown() }
+    try FileManager.default.createDirectory(at: sandbox.catalogURL, withIntermediateDirectories: false)
+
+    let store = CatalogStore(fileURL: sandbox.catalogURL)
+    #expect(store.loadForLaunch() == .empty)
+    #expect(store.loadReport.loadFailed)
+    #expect(!store.loadReport.allowsSessionSweeps)
+    #expect(!store.persistenceEnabled)
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: sandbox.catalogURL.path, isDirectory: &isDirectory))
+    #expect(isDirectory.boolValue)
+  }
 }

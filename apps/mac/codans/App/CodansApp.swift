@@ -669,10 +669,9 @@ final class AppState {
     // and writes it, and other builds of the channel share that file.
     let catalogStore = isTestHost ? CatalogStore.detached() : CatalogStore()
     let runtime = LiveHierarchyRuntime()
-    // An unreadable catalog is either backed up (and reads as empty) or
-    // leaves the store with saving disabled, so `.empty` here can never
-    // overwrite the user's project list.
-    let catalog = isTestHost ? .empty : ((try? catalogStore.load()) ?? .empty)
+    // An unreadable catalog reads as empty with saving and session sweeps
+    // off, so the empty list never overwrites the file nor reaps its sessions.
+    let catalog = isTestHost ? .empty : catalogStore.loadForLaunch()
 
     let manager = HierarchyManager(
       catalog: catalog,
@@ -1101,8 +1100,9 @@ final class AppState {
     self.focusReadMarkerTask = Task { @MainActor in
       await Self.observeFocusedPaneForRead(catalog: { manager.catalog }, store: inbox)
     }
-    // Off when the catalog loaded with losses or read-only: an unread entry
-    // of a dropped Tab must not be swept as an orphan.
+    // Off when the catalog failed to load, loaded with losses, or is
+    // read-only: an unread entry of a Tab this launch could not read must
+    // not be swept as an orphan.
     if catalogStore.loadReport.allowsSessionSweeps {
       self.orphanSweepTask = Task { @MainActor in
         await Self.observeOrphanUnreadsSweep(catalog: { manager.catalog }, store: inbox)
@@ -1835,12 +1835,12 @@ final class AppState {
     // `AppDirectories.runtimeDirectory`).
     reaper.migrateLegacySocketDirectory(from: PaneDaemonBringup.legacySocketDirectory())
     let liveContentIDs = hierarchyManager.catalog.allContentIDs()
-    // A catalog that loaded with losses or read-only keeps every daemon: a
-    // dropped Tab's session would otherwise be reaped as an orphan, and a
-    // file this build cannot write must not have its sessions touched.
+    // A catalog that failed to load, loaded with losses, or is read-only
+    // keeps every daemon: a Tab this launch could not read would otherwise
+    // have its session reaped as an orphan.
     guard catalogStore.loadReport.allowsSessionSweeps else {
       Logger(subsystem: "com.gumpw.codans.runtime", category: "runtime.session.reaper")
-        .notice("session sweeps skipped: catalog loaded read-only or with losses")
+        .notice("session sweeps skipped: catalog failed to load, loaded read-only or with losses")
       profiler.mark("session sweep")
       return
     }
