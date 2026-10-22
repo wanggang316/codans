@@ -56,6 +56,7 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ tags: Set<TagID>
     ) -> Void
+  var setSidebarFilter: @MainActor @Sendable (SidebarFilter) -> Void
   /// Replaces the catalog-wide active tag filter. Empty `.tags(set)` is
   /// normalized to `.all`.
   var setActiveTagFilter: @MainActor @Sendable (_ filter: TagFilter) -> Void
@@ -768,6 +769,7 @@ extension HierarchyClient {
       setProjectTags: { projectID, tags in
         manager.setProjectTags(projectID, tags: tags)
       },
+      setSidebarFilter: { manager.setSidebarFilter($0) },
       setActiveTagFilter: { filter in manager.setActiveTagFilter(filter) },
       addProject: { name, rootPath, gitRoot in
         manager.addProject(name: name, rootPath: rootPath, gitRoot: gitRoot)
@@ -2240,6 +2242,7 @@ extension HierarchyClient: DependencyKey {
     recolorTag: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeTag: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectTags: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setSidebarFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2344,6 +2347,7 @@ extension HierarchyClient: DependencyKey {
     recolorTag: unimplemented("HierarchyClient.recolorTag"),
     removeTag: unimplemented("HierarchyClient.removeTag"),
     setProjectTags: unimplemented("HierarchyClient.setProjectTags"),
+    setSidebarFilter: unimplemented("HierarchyClient.setSidebarFilter"),
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
     addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),

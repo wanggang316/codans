@@ -1,5 +1,9 @@
 import Foundation
 
+public nonisolated enum SidebarFilter: String, Codable, CaseIterable, Sendable {
+  case all, local, remote, workspace, favorites
+}
+
 extension Project {
   /// The worktree the Project's own sidebar row stands for, when the Project
   /// has no repository of its own — a plain folder, a remote folder, or a
@@ -44,10 +48,22 @@ public nonisolated struct SidebarRowAddress: Equatable, Sendable {
 }
 
 extension Catalog {
-  /// Projects in the order the sidebar lists them: the active tag filter
-  /// applied, then the chosen sort order.
+  /// Projects in sidebar order after category and tag filtering. Favorites
+  /// contain only pinned, unarchived worktrees; the catalog stays unchanged.
   public var sidebarProjects: [Project] {
-    sorted(tagFilteredProjects)
+    sorted(
+      tagFilteredProjects.compactMap { project in
+        switch sidebarFilter {
+        case .all: return project
+        case .local: return !project.isRemote && !project.isWorkspace ? project : nil
+        case .remote: return project.isRemote ? project : nil
+        case .workspace: return project.isWorkspace ? project : nil
+        case .favorites:
+          var filtered = project
+          filtered.worktrees = project.worktrees.filter { $0.isPinned && !$0.archived }
+          return filtered.worktrees.isEmpty ? nil : filtered
+        }
+      })
   }
 
   /// Every row a user can select, in the order the sidebar shows them: a

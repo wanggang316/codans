@@ -2394,6 +2394,10 @@ struct RootFeature {
         return .none
 
       case .revealCurrentWorktreeInSidebarRequested:
+        if let worktreeID = state.selection.worktreeID, let projectID = state.selection.projectID {
+          revealWorktreeInSidebar(worktreeID, in: projectID, state: &state)
+          return .none
+        }
         state.sidebarVisible = true
         state.revealSelectionTrigger = UUID()
         return .none
@@ -2475,7 +2479,15 @@ struct RootFeature {
   private func revealWorktreeInSidebar(
     _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
   ) {
-    let project = hierarchyClient.snapshot().projects.first { $0.id == projectID }
+    let catalog = hierarchyClient.snapshot()
+    if catalog.sidebarFilter != .all,
+      !catalog.sidebarProjects.contains(where: { project in
+        project.worktrees.contains { $0.id == worktreeID }
+      })
+    {
+      hierarchyClient.setSidebarFilter(.all)
+    }
+    let project = catalog.projects.first { $0.id == projectID }
     if project?.rowWorktree?.id != worktreeID {
       hierarchyClient.setProjectExpanded(projectID, true)
     }

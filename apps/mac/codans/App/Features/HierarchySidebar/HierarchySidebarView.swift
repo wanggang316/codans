@@ -233,6 +233,10 @@ struct HierarchySidebarView: View {
           store.send(.gitEnvironmentRecheckTapped)
         }
       }
+      SidebarFilterBar(selection: catalog.sidebarFilter) {
+        store.send(.sidebarFilterSelected($0))
+      }
+      .disabled(isReordering)
       if isReordering {
         reorderBanner
       }
@@ -545,7 +549,17 @@ struct HierarchySidebarView: View {
   private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double)
     -> some View
   {
-    if projects.isEmpty {
+    if projects.isEmpty && !hierarchyManager.catalog.projects.isEmpty {
+      VStack(spacing: 8) {
+        Text("No matching projects").font(.headline)
+        Text("Choose another filter to see your projects.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+      .multilineTextAlignment(.center)
+      .padding()
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if projects.isEmpty {
       emptyState
     } else {
       // `⌃1`…`⌃9` plus `⌃0` (10th slot) go to the first ten selectable rows on
@@ -783,7 +797,9 @@ struct HierarchySidebarView: View {
           let mainRows = children.filter { $0.path == project.rootPath }
           let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
           let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
-          let pendingRows = store.pendingWorktrees.filter { $0.projectID == project.id }
+          let pendingRows = store.pendingWorktrees.filter {
+            $0.projectID == project.id && hierarchyManager.catalog.sidebarFilter != .favorites
+          }
           ForEach(mainRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
           }
@@ -2320,5 +2336,74 @@ private struct LifecyclePhaseLineView: View {
       return Color(nsColor: .alternateSelectedControlTextColor)
     }
     return progress.kind == .archive ? .orange : .red
+  }
+}
+
+private struct SidebarFilterBar: View {
+  let selection: SidebarFilter
+  var onSelect: (SidebarFilter) -> Void
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    HStack(spacing: 3) {
+      ForEach(SidebarFilter.allCases, id: \.self) { filter in
+        let selected = selection == filter
+        Button {
+          onSelect(filter)
+        } label: {
+          HStack(spacing: 5) {
+            Image(systemName: symbol(for: filter))
+              .accessibilityHidden(true)
+            if selected {
+              Text(title(for: filter)).lineLimit(1)
+            }
+          }
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundStyle(selected ? Color.white : Color.secondary)
+          .frame(maxWidth: selected ? .infinity : nil)
+          .frame(minWidth: 24, minHeight: 30)
+          .padding(.horizontal, selected ? 6 : 0)
+          .background(selected ? tint(for: filter) : Color.primary.opacity(0.05), in: Capsule())
+          .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(title(for: filter))
+        .accessibilityLabel(title(for: filter))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+      }
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 8)
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selection)
+  }
+
+  private func title(for filter: SidebarFilter) -> String {
+    switch filter {
+    case .all: "All"
+    case .local: "Local"
+    case .remote: "Remote"
+    case .workspace: "Workspace"
+    case .favorites: "Favorites"
+    }
+  }
+
+  private func symbol(for filter: SidebarFilter) -> String {
+    switch filter {
+    case .all: "square.grid.2x2.fill"
+    case .local: "desktopcomputer"
+    case .remote: "network"
+    case .workspace: "square.stack.3d.up.fill"
+    case .favorites: "star.fill"
+    }
+  }
+
+  private func tint(for filter: SidebarFilter) -> Color {
+    switch filter {
+    case .all: .blue
+    case .local: .green
+    case .remote: .indigo
+    case .workspace: .purple
+    case .favorites: Color(red: 0.65, green: 0.42, blue: 0.08)
+    }
   }
 }
