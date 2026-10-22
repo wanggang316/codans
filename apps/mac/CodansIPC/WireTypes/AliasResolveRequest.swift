@@ -1,38 +1,48 @@
-import Foundation
 import CodansCore
+import Foundation
 
 extension IPC {
   /// Params for `hierarchy.resolveAlias`. The CLI's `AliasResolver` sends
-  /// one of these for every non-UUID identifier (current/index/label/glob);
-  /// pure UUIDs are resolved locally and do not round-trip.
-  /// `contextPaneID` carries the caller's session (`CODANS_CONTENT_ID`);
-  /// the key keeps its historical spelling on the wire.
+  /// one of these for every Pane / Tab / Content reference (ids included,
+  /// since the server converts between the three levels) and for every
+  /// non-UUID project / worktree / tag reference. `contextContentID`
+  /// carries the caller's session (`CODANS_CONTENT_ID`).
   public struct AliasResolveRequest: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Hashable, Sendable {
-      case project, worktree, tab, pane, tag, content
+      case project, worktree, pane, tab, content, tag
     }
 
     public let kind: Kind
     public let value: String
-    public let contextPaneID: ContentID?
+    public let contextContentID: ContentID?
 
-    public init(kind: Kind, value: String, contextPaneID: ContentID? = nil) {
+    public init(kind: Kind, value: String, contextContentID: ContentID? = nil) {
       self.kind = kind
       self.value = value
-      self.contextPaneID = contextPaneID
+      self.contextContentID = contextContentID
     }
   }
 
-  /// Result for `hierarchy.resolveAlias`. `disambiguations` is non-empty
-  /// only when the caller's verb is list-shaped and tolerates multiple hits.
+  /// Result for `hierarchy.resolveAlias`. `id` is at the requested `kind`;
+  /// `matched` is the level the value itself named (`pane`, `tab`, or
+  /// `content`) before conversion, so a verb that must not convert (`pane
+  /// close` given a Tab) can refuse. `disambiguations` is non-empty only
+  /// when the caller's verb is list-shaped and tolerates multiple hits.
   public struct AliasResolveResult: Codable, Equatable, Sendable {
     public let kind: AliasResolveRequest.Kind
     public let id: UUID
+    public let matched: AliasResolveRequest.Kind?
     public let disambiguations: [UUID]?
 
-    public init(kind: AliasResolveRequest.Kind, id: UUID, disambiguations: [UUID]? = nil) {
+    public init(
+      kind: AliasResolveRequest.Kind,
+      id: UUID,
+      matched: AliasResolveRequest.Kind? = nil,
+      disambiguations: [UUID]? = nil
+    ) {
       self.kind = kind
       self.id = id
+      self.matched = matched
       self.disambiguations = disambiguations
     }
   }

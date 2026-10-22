@@ -80,8 +80,8 @@ final class TargetHandleRegistry {
   /// Wire-shaped snapshot for `hierarchy.listProjects` responses.
   func snapshot() -> IPC.TargetHandles {
     IPC.TargetHandles(
-      tabs: Dictionary(uniqueKeysWithValues: tabHandles.map { ($0.key.raw.uuidString, $0.value) }),
-      panes: Dictionary(uniqueKeysWithValues: paneHandles.map { ($0.key.raw.uuidString, $0.value) })
+      panes: Dictionary(uniqueKeysWithValues: paneHandles.map { ($0.key.raw.uuidString, $0.value) }),
+      tabs: Dictionary(uniqueKeysWithValues: tabHandles.map { ($0.key.raw.uuidString, $0.value) })
     )
   }
 

@@ -19,8 +19,11 @@ public enum CLIErrorCode: String, Codable, Sendable, CaseIterable {
   case socketUnusable = "SOCKET_UNUSABLE"
   case wrongChannel = "WRONG_CHANNEL"
   case `internal` = "INTERNAL"
-  /// `current` / `.` used outside a Codans pane (exit 2).
+  /// `current` / `.` used outside a Codans tab (exit 2).
   case noCurrentContext = "NO_CURRENT_CONTEXT"
+  /// A verb used at its former location; the message names the new one
+  /// (exit 1).
+  case movedVerb = "MOVED_VERB"
   /// Text or stdin body was empty (exit 1).
   case emptyInput = "EMPTY_INPUT"
   /// A `--wait` / `--until` condition did not hold before the deadline
@@ -115,15 +118,33 @@ public struct CLIErrorPayload: Codable, Equatable, Sendable {
 }
 
 /// What `--json` prints: one object with `schemaVersion` and exactly one of
-/// `data` / `error`. `schemaVersion` is `codans.cli.<command path>.v1`
-/// (`codans.cli.pane.send.v1`), the same for every build channel, so a
-/// consumer can pin the shape it parses.
+/// `data` / `error`. `schemaVersion` is `codans.cli.<command path>.v<n>`
+/// (`codans.cli.tab.send.v1`), the same for every build channel, so a
+/// consumer can pin the shape it parses. `n` starts at 1 and is raised in
+/// `revisions` whenever a command's output shape or the meaning of its ids
+/// changes.
 public enum OutputEnvelope {
   public static let schemaPrefix = "codans.cli"
-  public static let schemaSuffix = "v1"
+
+  /// Commands whose output changed after they first shipped. A command
+  /// absent here is at revision 1.
+  public static let revisions: [String: Int] = [
+    "tree": 2,
+    "worktree.show": 2,
+    "tab.list": 2,
+    "tab.show": 2,
+    "tab.new": 2,
+    "tab.close": 2,
+    "pane.list": 2,
+    "pane.focus": 2,
+    "pane.split": 2,
+    "pane.close": 2,
+    "pane.resize": 2,
+    "broadcast": 2,
+  ]
 
   public static func schemaVersion(command: String) -> String {
-    "\(schemaPrefix).\(command).\(schemaSuffix)"
+    "\(schemaPrefix).\(command).v\(revisions[command] ?? 1)"
   }
 }
 

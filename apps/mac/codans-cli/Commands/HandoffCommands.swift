@@ -77,7 +77,11 @@ struct HandoffTo: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Receiving agent token: claude, codex, gemini, omp, cursor-agent, …")
   var agent: String
-  @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
+  @Option(
+    name: .long,
+    help:
+      "Source tab: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or 'current' (the calling tab)."
+  )
   var pane: String = "current"
   @Option(name: .long, help: "Profile (name or id) to launch the receiver with.")
   var profile: String?
@@ -105,7 +109,7 @@ struct HandoffTo: AsyncParsableCommand {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let paneUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.HandoffResponse = try await client.call(
         .handoffTo,
         params: IPC.HandoffRequest(
@@ -134,7 +138,11 @@ struct HandoffSave: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
+  @Option(
+    name: .long,
+    help:
+      "Source tab: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or 'current' (the calling tab)."
+  )
   var pane: String = "current"
   @OptionGroup var briefOptions: HandoffBriefOptions
   @Option(name: .long, help: "Note appended to the handoff log.")
@@ -145,7 +153,7 @@ struct HandoffSave: AsyncParsableCommand {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let paneUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.HandoffResponse = try await client.call(
         .handoffSave,
         params: IPC.HandoffRequest(

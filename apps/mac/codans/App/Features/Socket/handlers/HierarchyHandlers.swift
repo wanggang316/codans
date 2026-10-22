@@ -178,13 +178,14 @@ final class HierarchyHandlers {
   // MARK: - Reads
 
   /// `hierarchy.resolveAlias` — turn a string identifier into the
-  /// canonical UUID for `kind`. Supports the set the CLI drives: `current`
-  /// / `.` (the calling pane, attributed from `peerPID` + process ancestry
-  /// or the request's `contextPaneID`, and for the other kinds the pane's
-  /// containers), pane labels (`@label`), short target handles (`t<n>` /
-  /// `p<n>`), and names — a project's name, a worktree's name or branch, a
-  /// tab's title — scoped to the calling pane's containers when there is
-  /// one.
+  /// canonical UUID for `kind`. Supports the set the CLI drives: Pane, Tab
+  /// and Content ids (converted to the requested level), `current` / `.`
+  /// (the calling Tab, attributed from `peerPID` + process ancestry or the
+  /// request's `contextContentID`, and for the other kinds the Tab's
+  /// containers), Content labels (`@label`), short target handles (`p<n>`
+  /// for Panes, `t<n>` for Tabs), and names — a project's name, a
+  /// worktree's name or branch, a Tab's title — scoped to the calling
+  /// Tab's containers when there is one.
   public func resolveAlias(_ params: JSONValue, peerPID: pid_t? = nil) async -> RouterOutcome {
     await Task.yield()
     let request: IPC.AliasResolveRequest
@@ -194,10 +195,10 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "resolveAlias requires {kind, value}", path: nil))
     }
     if let uuid = UUID(uuidString: request.value) {
-      guard let id = convert(uuid, to: request.kind) else {
+      guard let match = convert(uuid, to: request.kind) else {
         return .failed(.notFound(kind: request.kind.rawValue, id: request.value))
       }
-      return resolved(request.kind, id)
+      return resolved(request.kind, match)
     }
     if request.value == "current" || request.value == "." {
       return resolveCurrent(request, peerPID: peerPID)
@@ -205,8 +206,8 @@ final class HierarchyHandlers {
     if request.kind.isSessionLevel, request.value.hasPrefix("@") {
       let label = String(request.value.dropFirst())
       let matches = Self.contentsMatchingLabel(label: label, catalog: manager.catalog)
-      if matches.count == 1, let id = convert(matches[0].raw, to: request.kind) {
-        return resolved(request.kind, id)
+      if matches.count == 1, let match = convert(matches[0].raw, to: request.kind) {
+        return resolved(request.kind, match)
       }
       if matches.count > 1 {
         return .failed(.conflict(reason: "label @\(label) matches \(matches.count) tabs"))
@@ -215,67 +216,91 @@ final class HierarchyHandlers {
     }
     if request.kind.isSessionLevel, let handle = TargetHandleRegistry.parse(request.value, prefix: "t") {
       handleRegistry.sync(with: manager.catalog)
-      guard let tabID = handleRegistry.tab(forHandle: handle), let id = convert(tabID.raw, to: request.kind)
+      guard let tabID = handleRegistry.tab(forHandle: handle), let match = convert(tabID.raw, to: request.kind)
       else {
         return .failed(.notFound(kind: "tab", id: request.value))
       }
-      return resolved(request.kind, id)
+      return resolved(request.kind, match)
     }
     if request.kind.isSessionLevel, let handle = TargetHandleRegistry.parse(request.value, prefix: "p") {
       handleRegistry.sync(with: manager.catalog)
-      guard let contentID = handleRegistry.pane(forHandle: handle), let id = convert(contentID.raw, to: request.kind)
+      guard let paneID = handleRegistry.pane(forHandle: handle), let match = convert(paneID.raw, to: request.kind)
       else {
         return .failed(.notFound(kind: "pane", id: request.value))
       }
-      return resolved(request.kind, id)
+      return resolved(request.kind, match)
     }
     return resolveByName(request, peerPID: peerPID)
   }
 
-  /// Any id position accepts a Pane, Tab or Content id and resolves to the
-  /// level the verb needs: a Content or Tab names its owning Pane; a Pane
-  /// or Content names its Tab; a Tab or Pane (its selected Tab) names its
-  /// Content. Project / Worktree / Tag ids pass through. `nil` when the
-  /// id is not in the catalog.
-  private func convert(_ uuid: UUID, to kind: IPC.AliasResolveRequest.Kind) -> UUID? {
-    let catalog = manager.catalog
-    switch kind {
-    case .project, .worktree, .tag:
-      return uuid
-    case .pane:
-      if catalog.pane(PaneID(raw: uuid)) != nil { return uuid }
-      if let paneID = catalog.paneID(forTab: TabID(raw: uuid)) { return paneID.raw }
-      return catalog.paneID(forContent: ContentID(raw: uuid))?.raw
-    case .tab:
-      if catalog.tab(TabID(raw: uuid)) != nil { return uuid }
-      if let tabID = catalog.tabID(forContent: ContentID(raw: uuid)) { return tabID.raw }
-      return catalog.pane(PaneID(raw: uuid))?.selectedTabID?.raw
-    case .content:
-      if catalog.content(ContentID(raw: uuid)) != nil { return uuid }
-      if let contentID = catalog.contentID(forTab: TabID(raw: uuid)) { return contentID.raw }
-      return catalog.pane(PaneID(raw: uuid))?.selectedTab?.contentID.raw
-    }
+  /// An id converted to the level a verb needs, with the level the id
+  /// itself named.
+  struct ResolvedID {
+    let id: UUID
+    let matched: IPC.AliasResolveRequest.Kind?
   }
 
-  private func resolved(_ kind: IPC.AliasResolveRequest.Kind, _ id: UUID) -> RouterOutcome {
-    let result = IPC.AliasResolveResult(kind: kind, id: id)
+  /// Any id position accepts a Pane, Tab or Content id and resolves to the
+  /// level the verb needs: a Content or Tab names its owning Pane; a Pane
+  /// (its selected Tab) or Content names its Tab; a Tab or Pane (its
+  /// selected Tab) names its Content. Project / Worktree / Tag ids pass
+  /// through. `nil` when the id is not in the catalog.
+  func convert(_ uuid: UUID, to kind: IPC.AliasResolveRequest.Kind) -> ResolvedID? {
+    let catalog = manager.catalog
+    guard kind.isSessionLevel else { return ResolvedID(id: uuid, matched: nil) }
+    if let pane = catalog.pane(PaneID(raw: uuid)) {
+      let id: UUID? =
+        switch kind {
+        case .pane: pane.id.raw
+        case .tab: pane.selectedTabID?.raw
+        default: pane.selectedTab?.contentID.raw
+        }
+      return id.map { ResolvedID(id: $0, matched: .pane) }
+    }
+    if let tab = catalog.tab(TabID(raw: uuid)) {
+      let id: UUID? =
+        switch kind {
+        case .pane: catalog.paneID(forTab: tab.id)?.raw
+        case .tab: tab.id.raw
+        default: tab.contentID.raw
+        }
+      return id.map { ResolvedID(id: $0, matched: .tab) }
+    }
+    let contentID = ContentID(raw: uuid)
+    guard catalog.content(contentID) != nil else { return nil }
+    let id: UUID? =
+      switch kind {
+      case .pane: catalog.paneID(forContent: contentID)?.raw
+      case .tab: catalog.tabID(forContent: contentID)?.raw
+      default: contentID.raw
+      }
+    return id.map { ResolvedID(id: $0, matched: .content) }
+  }
+
+  private func resolved(_ kind: IPC.AliasResolveRequest.Kind, _ match: ResolvedID) -> RouterOutcome {
+    let result = IPC.AliasResolveResult(kind: kind, id: match.id, matched: match.matched)
     return (try? JSONValue.encoded(result)).map(RouterOutcome.unary)
       ?? .failed(.internal("encode resolveAlias result"))
   }
 
-  /// The session a request comes from. Kernel peer-PID attribution wins
-  /// over the request's env-derived `contextPaneID`: the former is ground
-  /// truth, the latter is the caller's claim.
-  private func callerContent(_ request: IPC.AliasResolveRequest, peerPID: pid_t?) -> ContentID? {
-    peerPID.flatMap { callerPaneResolver($0) } ?? request.contextPaneID
+  private func resolved(_ kind: IPC.AliasResolveRequest.Kind, _ id: UUID) -> RouterOutcome {
+    resolved(kind, ResolvedID(id: id, matched: kind.isSessionLevel ? kind : nil))
   }
 
-  /// `current` / `.`, server-side. The CLI resolves the pronoun from
-  /// `$CODANS_PANE_ID` locally and dials only when that env var is missing
-  /// (agent-spawned subshells, wrappers, env-scrubbing tools) or when it
-  /// needs a container the pane never exports — a pane knows only its own
-  /// id, so `--project current` and friends land here and are read off
-  /// the catalog row that holds the calling pane.
+  /// The session a request comes from. Kernel peer-PID attribution wins
+  /// over the request's env-derived `contextContentID`: the former is
+  /// ground truth, the latter is the caller's claim.
+  private func callerContent(_ request: IPC.AliasResolveRequest, peerPID: pid_t?) -> ContentID? {
+    peerPID.flatMap { callerPaneResolver($0) } ?? request.contextContentID
+  }
+
+  /// `current` / `.`, server-side. The CLI resolves the pronoun from the
+  /// Tab's `CODANS_PANE_ID` / `CODANS_TAB_ID` / `CODANS_CONTENT_ID`
+  /// locally and dials only when that variable is missing (agent-spawned
+  /// subshells, wrappers, env-scrubbing tools) or when it needs a
+  /// container the Tab never exports, so `--project current` and friends
+  /// land here and are read off the catalog row that holds the calling
+  /// Tab.
   private func resolveCurrent(
     _ request: IPC.AliasResolveRequest, peerPID: pid_t?
   ) -> RouterOutcome {
@@ -412,11 +437,6 @@ final class HierarchyHandlers {
   public func activateWorktree(_ params: JSONValue) async -> RouterOutcome {
     await runActivate(params) { id in
       try manager.activateWorktree(WorktreeID(raw: id))
-    }
-  }
-  public func activateTab(_ params: JSONValue) async -> RouterOutcome {
-    await runActivate(params) { id in
-      try manager.activateTab(TabID(raw: id))
     }
   }
 
@@ -775,8 +795,27 @@ final class HierarchyHandlers {
   public struct CreateTabParams: Codable, Sendable {
     public let projectID: ProjectID
     public let worktreeID: WorktreeID
+    /// The Pane whose strip takes the Tab: a Pane id, or a Tab / Content id
+    /// (its Pane). Absent → the Worktree's focused Pane; a Worktree with no
+    /// Pane gets its first one.
+    public let paneID: UUID?
     public let name: String?
+    /// Absent → the worktree root.
+    public let workingDirectory: String?
+    public let initialCommand: String?
+    public let labels: [String]?
   }
+  /// The Tab a spawn produced: the CLI drives it right away by any of the
+  /// three ids.
+  public struct CreatedTab: Codable, Sendable {
+    public let id: TabID
+    public let handle: String?
+    public let paneID: PaneID
+    public let contentID: ContentID
+  }
+  /// `hierarchy.createTab` — a new Tab at the end of a Pane's strip,
+  /// selected, with its terminal started at once and the project env every
+  /// CLI-spawned session gets.
   public func createTab(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: CreateTabParams
@@ -785,82 +824,56 @@ final class HierarchyHandlers {
     } catch {
       return .failed(.invalidParams(message: "createTab requires {projectID, worktreeID}", path: nil))
     }
-    do {
-      if let path = manager.catalog.projects.first(where: { $0.id == req.projectID })?
-        .worktrees.first(where: { $0.id == req.worktreeID })?.path
-      {
-        try manager.requireLocalDirectory(path, in: req.projectID)
-      }
-      // A Tab is a session: it opens in the focused Pane (or as the first
-      // Pane) at the worktree root and comes up at once.
-      guard let path = manager.catalog.projects.first(where: { $0.id == req.projectID })?
-        .worktrees.first(where: { $0.id == req.worktreeID })?.path
-      else {
-        return .failed(.notFound(kind: "worktree", id: req.worktreeID.description))
-      }
-      let created = try manager.newTab(
-        in: nil, worktreeID: req.worktreeID, projectID: req.projectID,
-        content: .terminal(workingDirectory: path), name: req.name
-      )
-      try await manager.ensureSurface(for: created.contentID, env: envProvider(req.projectID))
-      return .unary(try JSONValue.encoded(TabIDPayload(id: created.tabID)))
-    } catch {
-      return failure(for: error, fallbackKind: "worktree", fallbackID: req.worktreeID.description)
+    guard
+      let worktree = manager.catalog.projects.first(where: { $0.id == req.projectID })?
+        .worktrees.first(where: { $0.id == req.worktreeID })
+    else {
+      return .failed(.notFound(kind: "worktree", id: req.worktreeID.description))
     }
-  }
-
-  public struct OpenPaneParams: Codable, Sendable {
-    public let projectID: ProjectID
-    public let worktreeID: WorktreeID
-    /// Where the session opens: a Pane id, or a Tab id (its Pane). Absent
-    /// or unknown → the Worktree's focused Pane.
-    public let tabID: UUID?
-    public let workingDirectory: String
-    public let initialCommand: String?
-    public let labels: [String]
-  }
-  public func openPane(_ params: JSONValue) async -> RouterOutcome {
-    await Task.yield()
-    let req: OpenPaneParams
-    do {
-      req = try params.decoded(as: OpenPaneParams.self)
-    } catch {
-      return .failed(
-        .invalidParams(
-          message: "openPane requires {projectID, worktreeID, workingDirectory}", path: nil))
+    var hostPane: PaneID?
+    if let requested = req.paneID {
+      guard let paneID = layoutPane(for: requested) else {
+        return .failed(.notFound(kind: "pane", id: requested.uuidString))
+      }
+      guard worktree.pane(paneID) != nil else {
+        return .failed(
+          .invalidParams(
+            message: "pane \(paneID.description) is not in worktree \(worktree.name)", path: ["paneID"]))
+      }
+      hostPane = paneID
     }
-    // Server (remote) projects: the CLI defaults `--cwd` to the CALLER's local
-    // pwd, which is meaningless on the host — the remote shell would `cd` into
-    // whatever local directory the caller happened to be in (when it exists on
-    // the host) or fall back to `$HOME`. Accept the supplied cwd only when it
-    // targets the worktree (or a subpath of it) on the host; otherwise land in
-    // the worktree root, matching what the UI's tab/pane creation does.
+    // Server (remote) projects: the CLI defaults the cwd to the caller's
+    // local pwd, which is meaningless on the host; see
+    // `effectiveWorkingDirectory`.
     let workingDirectory = effectiveWorkingDirectory(
-      req.workingDirectory, projectID: req.projectID, worktreeID: req.worktreeID)
+      req.workingDirectory ?? worktree.path, projectID: req.projectID, worktreeID: req.worktreeID)
     do {
-      // Same env the sidebar's new-pane paths resolve: the project's own
-      // `envVars` plus the always-on keys (socket, `CODANS_CLI`, the
-      // `TERM_PROGRAM` marker). Without it a CLI-spawned pane inherited the
-      // bare app environment, so `codans-dev` was off its PATH and the
-      // product marker read `ghostty`.
       try manager.requireLocalDirectory(workingDirectory, in: req.projectID)
-      let hostPane = req.tabID.flatMap { layoutPane(for: $0) }
       let created = try manager.newTab(
         in: hostPane, worktreeID: req.worktreeID, projectID: req.projectID,
         content: .terminal(
-          workingDirectory: workingDirectory, initialCommand: req.initialCommand, labels: Set(req.labels))
+          workingDirectory: workingDirectory, initialCommand: req.initialCommand, labels: Set(req.labels ?? [])),
+        name: req.name
       )
       try await manager.ensureSurface(for: created.contentID, env: envProvider(req.projectID))
-      return .unary(try JSONValue.encoded(PaneIDPayload(id: created.contentID)))
+      handleRegistry.sync(with: manager.catalog)
+      return .unary(
+        try JSONValue.encoded(
+          CreatedTab(
+            id: created.tabID,
+            handle: handleRegistry.handle(forTab: created.tabID).map { "t\($0)" },
+            paneID: created.paneID,
+            contentID: created.contentID)))
     } catch {
       return failure(for: error, fallbackKind: "worktree", fallbackID: req.worktreeID.description)
     }
   }
 
-  /// The cwd a new pane in (`projectID`, `worktreeID`) starts in. Local
+  /// The cwd a new Tab in (`projectID`, `worktreeID`) starts in. Local
   /// projects take `requested` as-is; a remote project accepts it only when
   /// it targets the worktree (or a subpath) on the host, else the worktree
-  /// root — see `openPane` for why.
+  /// root: the remote shell would otherwise `cd` into whatever local
+  /// directory the caller happened to be in, or fall back to `$HOME`.
   func effectiveWorkingDirectory(
     _ requested: String, projectID: ProjectID, worktreeID: WorktreeID
   ) -> String {
@@ -876,24 +889,25 @@ final class HierarchyHandlers {
     return requested
   }
 
-  public struct SetPaneLabelsParams: Codable, Sendable {
-    public let id: ContentID
+  public struct SetTabLabelsParams: Codable, Sendable {
+    public let contentID: ContentID
     public let labels: [String]
     public let replace: Bool
   }
-  public func setPaneLabels(_ params: JSONValue) async -> RouterOutcome {
+  /// `hierarchy.setTabLabels` — labels live on the Tab's terminal Content.
+  public func setTabLabels(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
-    let req: SetPaneLabelsParams
+    let req: SetTabLabelsParams
     do {
-      req = try params.decoded(as: SetPaneLabelsParams.self)
+      req = try params.decoded(as: SetTabLabelsParams.self)
     } catch {
-      return .failed(.invalidParams(message: "setPaneLabels requires {id, labels}", path: nil))
+      return .failed(.invalidParams(message: "setTabLabels requires {contentID, labels}", path: nil))
     }
     do {
-      try manager.setContentLabels(req.id, labels: Set(req.labels), replace: req.replace)
+      try manager.setContentLabels(req.contentID, labels: Set(req.labels), replace: req.replace)
       return .unary(.object([:]))
     } catch {
-      return failure(for: error, fallbackKind: "pane", fallbackID: req.id.description)
+      return failure(for: error, fallbackKind: "tab", fallbackID: req.contentID.description)
     }
   }
 
@@ -985,189 +999,160 @@ final class HierarchyHandlers {
 
   public struct CloseTabParams: Codable, Sendable {
     public let id: TabID
-    public let worktreeID: WorktreeID?
-    public let projectID: ProjectID?
   }
+  public struct ClosedTab: Codable, Sendable {
+    public let id: TabID
+    public let contentID: ContentID
+  }
+  /// `hierarchy.closeTab` — the explicit termination verb. Kills the Tab's
+  /// zmx daemon (bounded ≤ 2 s wait for its control socket to vanish),
+  /// drops the persisted session entry, then removes the Tab; the last Tab
+  /// of a Pane closes the Pane. The RPC returns only once the daemon is
+  /// gone, so a script can rely on it.
   public func closeTab(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: CloseTabParams
     do { req = try params.decoded(as: CloseTabParams.self) } catch {
-      return .failed(
-        .invalidParams(
-          message: "closeTab requires {id}",
-          path: nil
-        ))
+      return .failed(.invalidParams(message: "closeTab requires {id}", path: nil))
     }
+    guard let address = manager.catalog.address(forTab: req.id) else {
+      return .failed(.notFound(kind: "tab", id: req.id.description))
+    }
+    await terminate(address.contentID)
     do {
       try manager.closeTab(req.id)
-      return .unary(.object([:]))
+      return .unary(try JSONValue.encoded(ClosedTab(id: req.id, contentID: address.contentID)))
     } catch {
       return failure(for: error, fallbackKind: "tab", fallbackID: req.id.description)
     }
   }
 
-  /// A session locator. `id` is the session; the container ids are
-  /// accepted for callers that already resolved them, and ignored — the
-  /// catalog is the authority on where the session sits now.
-  public struct PaneLocatorParams: Codable, Sendable {
-    public let id: ContentID
-    public let tabID: TabID?
-    public let worktreeID: WorktreeID?
-    public let projectID: ProjectID?
+  public struct ClosePaneParams: Codable, Sendable {
+    /// Must name a Pane. A Tab or Content id is refused rather than
+    /// widened to its Pane: the caller meant one session.
+    public let id: UUID
   }
-  /// `hierarchy.closePane` — closes the session's Tab (and its Pane when
-  /// that was the last Tab).
+  public struct ClosedPane: Codable, Sendable {
+    public let id: PaneID
+    public let tabIDs: [TabID]
+  }
+  /// `hierarchy.closePane` — closes the Pane and every Tab on its strip,
+  /// each session terminated as `closeTab` does.
   public func closePane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
-    let req: PaneLocatorParams
-    do { req = try params.decoded(as: PaneLocatorParams.self) } catch {
+    let req: ClosePaneParams
+    do { req = try params.decoded(as: ClosePaneParams.self) } catch {
       return .failed(.invalidParams(message: "closePane requires {id}", path: nil))
     }
-    guard let address = manager.catalog.address(forContent: req.id) else {
-      return .failed(.notFound(kind: "pane", id: req.id.description))
-    }
-    do {
-      try manager.closeTab(address.tabID)
-      return .unary(.object([:]))
-    } catch {
-      return failure(for: error, fallbackKind: "pane", fallbackID: req.id.description)
-    }
-  }
-
-  /// Handles `pane.close` — the user's explicit termination verb. Sends
-  /// `.kill` to the pane's zmx daemon (bounded ≤ 2 s wait for the
-  /// control socket to vanish), drops the persisted session-catalog
-  /// entry, and removes the pane from the in-memory hierarchy.
-  ///
-  /// Distinct from `hierarchy.closePane`: the latter detaches the
-  /// libghostty surface so a future attach can resume the same daemon;
-  /// this verb guarantees the daemon is gone before returning.
-  ///
-  /// Returns `closed == false` (without raising) when the pane is not
-  /// present in the catalog — the CLI maps that to a non-zero exit so
-  /// scripts can distinguish a successful kill from a missing pane.
-  public func paneClose(_ params: JSONValue) async -> RouterOutcome {
-    await Task.yield()
-    let req: IPC.PaneCloseRequest
-    do {
-      req = try params.decoded(as: IPC.PaneCloseRequest.self)
-    } catch {
-      return .failed(.invalidParams(message: "pane.close requires {contentID}", path: nil))
-    }
-
-    // The catalog is the authority on where the session sits: the
-    // caller's container ids describe where it was when the caller looked.
-    guard let address = manager.catalog.address(forContent: req.paneID) else {
-      // Pane is not in the catalog. Surface the catalog-state truthfully
-      // so the CLI can tell apart "already closed" from "kill succeeded".
-      let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: false)
-      return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
-        ?? .failed(.internal("encode pane.close result"))
-    }
-
-    // Kill the daemon first. ZmxClient.kill polls for socket-file
-    // disappearance with a 2 s cap, so this awaits at most that long
-    // even if the daemon is wedged.
-    await daemonKiller(req.paneID)
-
-    // Reap the persisted session-catalog entry. Best-effort: a missing
-    // coordinator (no-resume mode) or a save failure is non-fatal — log
-    // and continue rather than failing the RPC, which only promises that
-    // the daemon was killed.
-    if let coordinator = sessionCoordinator {
-      do {
-        try coordinator.recordClose(req.paneID)
-      } catch {
-        logger.warning(
-          "pane.close: sessions.json reap failed: \(String(describing: error), privacy: .public)"
-        )
+    guard let pane = manager.catalog.pane(PaneID(raw: req.id)) else {
+      if let match = convert(req.id, to: .tab) {
+        return .failed(Self.closePaneRefusal(id: req.id.uuidString, matched: match.matched))
       }
+      return .failed(.notFound(kind: "pane", id: req.id.uuidString))
     }
-
-    // Tear down the in-memory hierarchy entry. The libghostty surface
-    // close inside `manager.closeTab` is now redundant (daemonKiller
-    // already shut the daemon socket), but it stays idempotent so the
-    // call remains the canonical place to update the layout.
+    for contentID in pane.contentIDs {
+      await terminate(contentID)
+    }
     do {
-      try manager.closeTab(address.tabID)
+      try manager.closePane(pane.id)
+      return .unary(try JSONValue.encoded(ClosedPane(id: pane.id, tabIDs: pane.tabIDs)))
     } catch {
-      return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.description)
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.id.uuidString)
     }
-
-    let response = IPC.PaneCloseResponse(paneID: req.paneID, closed: true)
-    return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
-      ?? .failed(.internal("encode pane.close result"))
   }
 
-  /// Handles `pane.info` — probe the pane's zmx daemon for shell pid,
-  /// pwd, and (when available) cursor + terminal modes. The daemon's
-  /// frozen `.Info` payload only carries `pid` + `cwd` today; `cursor`
-  /// and `modes` are surfaced as `nil` so callers can fall back to
-  /// `pane.read --raw` for byte-faithful assertions.
-  public func paneInfo(_ params: JSONValue) async -> RouterOutcome {
-    await Task.yield()
-    let req: IPC.PaneInfoRequest
+  /// `pane close` given a Tab or Content id: refused, naming the verb that
+  /// closes one Tab.
+  static func closePaneRefusal(id: String, matched: IPC.AliasResolveRequest.Kind?) -> IPCError {
+    let level = matched == .content ? "a Content (session)" : "a Tab"
+    return .invalidParams(
+      message:
+        "\(id) names \(level), not a Pane; `pane close` closes a whole Pane with all its Tabs. "
+        + "Use `codans tab close` to close one Tab",
+      path: ["id"])
+  }
+
+  /// Kill the session's daemon and drop its persisted entry. Best-effort
+  /// on the entry: the verb only promises the daemon is gone.
+  private func terminate(_ contentID: ContentID) async {
+    await daemonKiller(contentID)
+    guard let coordinator = sessionCoordinator else { return }
     do {
-      req = try params.decoded(as: IPC.PaneInfoRequest.self)
+      try coordinator.recordClose(contentID)
     } catch {
-      return .failed(.invalidParams(message: "pane.info requires {contentID}", path: nil))
+      logger.warning("close: sessions.json reap failed: \(String(describing: error), privacy: .public)")
     }
-    guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+  }
+
+  /// Handles `tab.info` — probe the Tab's zmx daemon for shell pid, pwd,
+  /// and (when available) cursor + terminal modes. The daemon's frozen
+  /// `.Info` payload only carries `pid` + `cwd` today; `cursor` and
+  /// `modes` are surfaced as `nil` so callers can fall back to
+  /// `tab.read --raw` for byte-faithful assertions.
+  public func tabInfo(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: IPC.TabInfoRequest
+    do {
+      req = try params.decoded(as: IPC.TabInfoRequest.self)
+    } catch {
+      return .failed(.invalidParams(message: "tab.info requires {contentID}", path: nil))
+    }
+    guard let probe = runtimeProbe(req.contentID) else {
+      return .failed(.notFound(kind: "tab", id: req.contentID.description))
     }
     let payload: ZmxInfoPayload
     do {
       payload = try await probe.requestInfo()
     } catch {
-      return .failed(.internal("pane.info: \(error)"))
+      return .failed(.internal("tab.info: \(error)"))
     }
-    let response = IPC.PaneInfoResponse(
-      paneID: req.paneID,
+    let response = IPC.TabInfoResponse(
+      contentID: req.contentID,
       shellPid: payload.pid,
       pwd: payload.cwd,
       cursor: nil,
       modes: nil
     )
     return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
-      ?? .failed(.internal("encode pane.info result"))
+      ?? .failed(.internal("encode tab.info result"))
   }
 
-  /// Handles `pane.read` — pull serialized terminal state from the
-  /// pane's zmx daemon. The daemon returns the full
-  /// `serializeTerminalState` dump in the requested format (`plain`
-  /// strips ANSI; `vt` keeps them, including cursor / modes / OSC 7).
-  /// `range` and `tail` are applied client-side after the dump arrives.
-  public func paneRead(_ params: JSONValue) async -> RouterOutcome {
+  /// Handles `tab.read` — pull serialized terminal state from the Tab's
+  /// zmx daemon. The daemon returns the full `serializeTerminalState` dump
+  /// in the requested format (`plain` strips ANSI; `vt` keeps them,
+  /// including cursor / modes / OSC 7). `range` and `tail` are applied
+  /// here after the dump arrives.
+  public func tabRead(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
-    let req: IPC.PaneReadRequest
+    let req: IPC.TabReadRequest
     do {
-      req = try params.decoded(as: IPC.PaneReadRequest.self)
+      req = try params.decoded(as: IPC.TabReadRequest.self)
     } catch {
-      return .failed(.invalidParams(message: "pane.read requires {contentID}", path: nil))
+      return .failed(.invalidParams(message: "tab.read requires {contentID}", path: nil))
     }
     if let tail = req.tail, tail <= 0 {
       return .failed(.invalidParams(message: "tail must be a positive integer", path: ["tail"]))
     }
-    guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+    guard let probe = runtimeProbe(req.contentID) else {
+      return .failed(.notFound(kind: "tab", id: req.contentID.description))
     }
     let format: ZmxHistoryFormat = req.raw ? .vt : .plain
     let dump: Data
     do {
       dump = try await probe.readHistory(format: format)
     } catch {
-      return .failed(.internal("pane.read: \(error)"))
+      return .failed(.internal("tab.read: \(error)"))
     }
     let content = String(data: dump, encoding: .utf8) ?? ""
     let filtered = Self.applyRange(content, range: req.range)
     let trimmed = Self.applyTail(filtered, tail: req.tail)
-    let response = IPC.PaneReadResponse(
-      paneID: req.paneID,
+    let response = IPC.TabReadResponse(
+      contentID: req.contentID,
       format: req.raw ? .vt : .plain,
       content: trimmed
     )
     return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
-      ?? .failed(.internal("encode pane.read result"))
+      ?? .failed(.internal("encode tab.read result"))
   }
 
   /// Client-side range filtering. The daemon dumps scrollback above
@@ -1176,7 +1161,7 @@ final class HierarchyHandlers {
   /// with the split point. `all` is the canonical (pass-through) shape;
   /// `visible` / `scrollback` are best-effort filters until the daemon
   /// learns to label the boundary.
-  static func applyRange(_ content: String, range: IPC.PaneReadRange) -> String {
+  static func applyRange(_ content: String, range: IPC.TabReadRange) -> String {
     switch range {
     case .all:
       return content
@@ -1199,30 +1184,104 @@ final class HierarchyHandlers {
   /// The Pane an id names for placement: the Pane itself, or the Pane
   /// holding that Tab / session. `nil` when the id is unknown.
   func layoutPane(for id: UUID) -> PaneID? {
-    let catalog = manager.catalog
-    if catalog.pane(PaneID(raw: id)) != nil { return PaneID(raw: id) }
-    if let contentID = catalog.paneID(forTab: TabID(raw: id)) { return contentID }
-    return catalog.paneID(forContent: ContentID(raw: id))
+    convert(id, to: .pane).map { PaneID(raw: $0.id) }
   }
 
-  public func focusPane(_ params: JSONValue) async -> RouterOutcome {
+  /// `hierarchy.activateTab` — `tab focus`: selects the Tab, focuses its
+  /// Pane, brings its Worktree forward, and hands its terminal the
+  /// keyboard.
+  public func activateTab(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
-    let req: PaneLocatorParams
-    do { req = try params.decoded(as: PaneLocatorParams.self) } catch {
-      return .failed(.invalidParams(message: "focusPane requires {id}", path: nil))
+    let req: ActivateParams
+    do { req = try params.decoded(as: ActivateParams.self) } catch {
+      return .failed(.invalidParams(message: "activateTab requires {id}", path: nil))
     }
-    guard let address = manager.catalog.address(forContent: req.id) else {
-      return .failed(.notFound(kind: "pane", id: req.id.description))
+    guard let address = manager.catalog.address(forTab: TabID(raw: req.id)) else {
+      return .failed(.notFound(kind: "tab", id: req.id.uuidString))
     }
     do {
-      try manager.selectWorktree(address.worktreeID, in: address.projectID)
-      try manager.focusPane(address.paneID)
-      try manager.selectTab(address.tabID)
-      try await manager.ensureSurface(for: req.id, env: envProvider(address.projectID))
-      manager.focusSurfaceView(for: req.id)
+      try await reveal(address)
       return .unary(.object([:]))
     } catch {
-      return failure(for: error, fallbackKind: "pane", fallbackID: req.id.description)
+      return failure(for: error, fallbackKind: "tab", fallbackID: req.id.uuidString)
+    }
+  }
+
+  /// Bring a Tab on screen with keyboard focus: its Worktree selected, its
+  /// Pane focused, the Tab selected, its surface started.
+  func reveal(_ address: TabAddress) async throws {
+    try manager.selectWorktree(address.worktreeID, in: address.projectID)
+    try manager.focusPane(address.paneID)
+    try manager.selectTab(address.tabID)
+    try await manager.ensureSurface(for: address.contentID, env: envProvider(address.projectID))
+    manager.focusSurfaceView(for: address.contentID)
+  }
+
+  public enum FocusDirectionParam: String, Codable, Sendable {
+    case left, right, up, down, previous, next
+  }
+  public struct FocusPaneParams: Codable, Sendable {
+    /// The Pane to focus, or with `direction` the Pane to move from.
+    /// Absent → the focused Pane of (`projectID`, `worktreeID`).
+    public let id: PaneID?
+    public let projectID: ProjectID?
+    public let worktreeID: WorktreeID?
+    public let direction: FocusDirectionParam?
+  }
+  public struct FocusedPane: Codable, Sendable {
+    public let paneID: PaneID
+    /// False when `direction` found no neighbour (an edge is a no-op).
+    public let moved: Bool
+  }
+  /// `hierarchy.focusPane` — focus a Pane by id, or move focus to the
+  /// neighbour in a direction, the way the keyboard does.
+  public func focusPane(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    let req: FocusPaneParams
+    do { req = try params.decoded(as: FocusPaneParams.self) } catch {
+      return .failed(.invalidParams(message: "focusPane requires {id} or {worktreeID, direction}", path: nil))
+    }
+    let origin: PaneID? =
+      req.id
+      ?? manager.catalog.projects.first(where: { $0.id == req.projectID })?
+      .worktrees.first(where: { $0.id == req.worktreeID })?.focusedPaneID
+    guard let origin else {
+      if req.id == nil, req.worktreeID == nil {
+        return .failed(.invalidParams(message: "focusPane requires {id} or {worktreeID, direction}", path: nil))
+      }
+      return .failed(.notFound(kind: "pane", id: req.worktreeID?.description ?? "focused"))
+    }
+    var target = origin
+    var moved = true
+    do {
+      if let direction = req.direction {
+        let mapped: FocusDirection =
+          switch direction {
+          case .left: .left
+          case .right: .right
+          case .up: .up
+          case .down: .down
+          case .previous: .previous
+          case .next: .next
+          }
+        if let neighbour = try manager.focusNeighbour(of: origin, direction: mapped) {
+          target = neighbour
+        } else {
+          moved = false
+        }
+      }
+      let catalog = manager.catalog
+      guard let address = catalog.address(forPane: target), let selected = catalog.pane(target)?.selectedTab
+      else {
+        return .failed(.notFound(kind: "pane", id: target.description))
+      }
+      try await reveal(
+        TabAddress(
+          projectID: address.projectID, worktreeID: address.worktreeID, paneID: target, tabID: selected.id,
+          contentID: selected.contentID))
+      return .unary(try JSONValue.encoded(FocusedPane(paneID: target, moved: moved)))
+    } catch {
+      return failure(for: error, fallbackKind: "pane", fallbackID: origin.description)
     }
   }
 
@@ -1426,61 +1485,56 @@ final class HierarchyHandlers {
   public struct ListTabsParams: Codable, Sendable {
     public let worktreeID: WorktreeID
     public let projectID: ProjectID
+    /// Narrows the listing to one Pane's strip (a Pane id, or a Tab /
+    /// Content id resolving to its Pane). Absent → every Tab of the
+    /// Worktree, Panes in layout order.
+    public let paneID: UUID?
   }
   public func listTabs(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: ListTabsParams
     do { req = try params.decoded(as: ListTabsParams.self) } catch {
-      return .failed(
-        .invalidParams(
-          message: "listTabs requires {worktreeID, projectID}",
-          path: nil
-        ))
+      return .failed(.invalidParams(message: "listTabs requires {worktreeID, projectID}", path: nil))
     }
-    guard let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == req.worktreeID })
-    else {
+    guard let worktree = worktree(req.worktreeID, in: req.projectID) else {
       return .failed(.notFound(kind: "worktree", id: req.worktreeID.description))
     }
-    let tabs = overlayLiveDirectories(in: worktree.allTabs)
+    var panes = TargetHandleRegistry.panesInLayoutOrder(worktree)
+    if let filter = req.paneID {
+      guard let paneID = layoutPane(for: filter), panes.contains(where: { $0.id == paneID }) else {
+        return .failed(.notFound(kind: "pane", id: filter.uuidString))
+      }
+      panes = panes.filter { $0.id == paneID }
+    }
+    let tabs = panes.flatMap(\.tabs).compactMap { tabDescription($0.id) }
     return await Self.encodeOffMain("listTabs") {
       try JSONValue.encoded(ListTabsPayload(tabs: tabs))
     }
   }
 
   public struct ListPanesParams: Codable, Sendable {
-    /// Narrows the listing to one Pane (a Pane id, or a Tab / session id
-    /// resolving to its Pane). Absent → every Pane of the Worktree.
-    public let tabID: UUID?
     public let worktreeID: WorktreeID
     public let projectID: ProjectID
   }
+  /// `hierarchy.listPanes` — the Worktree's Panes in layout order.
   public func listPanes(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     let req: ListPanesParams
     do { req = try params.decoded(as: ListPanesParams.self) } catch {
-      return .failed(
-        .invalidParams(
-          message: "listPanes requires {worktreeID, projectID}",
-          path: nil
-        ))
+      return .failed(.invalidParams(message: "listPanes requires {worktreeID, projectID}", path: nil))
     }
-    guard let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == req.worktreeID })
-    else {
+    guard let worktree = worktree(req.worktreeID, in: req.projectID) else {
       return .failed(.notFound(kind: "worktree", id: req.worktreeID.description))
     }
-    var panes = TargetHandleRegistry.panesInLayoutOrder(worktree)
-    if let filter = req.tabID {
-      guard let contentID = layoutPane(for: filter) else {
-        return .failed(.notFound(kind: "pane", id: filter.uuidString))
-      }
-      panes = panes.filter { $0.id == contentID }
-    }
-    panes = overlayLiveDirectories(in: panes)
+    let panes = TargetHandleRegistry.panesInLayoutOrder(worktree).compactMap { paneDescription($0.id) }
     return await Self.encodeOffMain("listPanes") {
       try JSONValue.encoded(ListPanesPayload(panes: panes))
     }
+  }
+
+  func worktree(_ worktreeID: WorktreeID, in projectID: ProjectID) -> Worktree? {
+    manager.catalog.projects.first(where: { $0.id == projectID })?
+      .worktrees.first(where: { $0.id == worktreeID })
   }
 
   private func overlayLivePaneDirectories(in projects: [Project]) -> [Project] {
@@ -1560,11 +1614,8 @@ nonisolated struct ListProjectsPayload: Codable, Sendable {
   }
 }
 nonisolated struct ListWorktreesPayload: Codable, Sendable { let worktrees: [Worktree] }
-nonisolated struct ListTabsPayload: Codable, Sendable { let tabs: [Tab] }
-nonisolated struct ListPanesPayload: Codable, Sendable { let panes: [Pane] }
+nonisolated struct ListTabsPayload: Codable, Sendable { let tabs: [IPC.TabDescription] }
+nonisolated struct ListPanesPayload: Codable, Sendable { let panes: [IPC.PaneDescription] }
 struct ListTagsPayload: Codable, Sendable { let tags: [Tag] }
 struct ProjectIDPayload: Codable, Sendable { let id: ProjectID }
-struct TabIDPayload: Codable, Sendable { let id: TabID }
-/// The session a spawn produced; the CLI drives it with this id.
-struct PaneIDPayload: Codable, Sendable { let id: ContentID }
 struct TagIDPayload: Codable, Sendable { let id: TagID }

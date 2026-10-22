@@ -1,12 +1,12 @@
 import ArgumentParser
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Foundation
 
-/// `codans <project|worktree|tab|pane> show` — one entity, with the facts
-/// `tree` folds into a line. `pane show` reads the catalog (containers,
-/// labels, agent, focus); `pane info` asks the terminal daemon instead.
+/// `codans <project|worktree|tab> show` — one entity, with the facts
+/// `tree` folds into a line. `tab show` reads the catalog (containers,
+/// labels, agent, selection); `tab info` asks the terminal daemon instead.
 
 struct ProjectShow: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -47,7 +47,7 @@ struct ProjectShow: AsyncParsableCommand {
 struct WorktreeShow: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "show",
-    abstract: "Describe a worktree: path, branch, project, selection, tab count."
+    abstract: "Describe a worktree: path, branch, project, selection, panes."
   )
 
   @OptionGroup var globals: GlobalOptions
@@ -77,8 +77,6 @@ struct WorktreeShow: AsyncParsableCommand {
       ("pinned", d.isPinned ? "yes" : "no"),
       ("panes", "\(d.paneCount)"),
       ("focused pane", d.focusedPaneID ?? "-"),
-      ("tabs", "\(d.tabCount)"),
-      ("selected tab", d.selectedTabID ?? "-"),
     ]
   }
 }
@@ -86,11 +84,16 @@ struct WorktreeShow: AsyncParsableCommand {
 struct TabShow: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "show",
-    abstract: "Describe a tab: title, handle, containers, session id."
+    abstract: "Describe a tab from the catalog: handle, pane, content, chip, cwd, labels, agent.",
+    discussion: """
+      Reads what Codans knows about the tab (its pane and session ids,
+      handle, title, color, labels, the agent it runs, whether it is
+      selected and live). `tab info` asks the tab's terminal daemon instead.
+      """
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
+  @Argument(help: "Tab: an id (tab, content, or pane → its selected tab), t<n>, @label, title, or 'current'.")
   var tab: String = "current"
 
   func run() async throws {
@@ -115,51 +118,11 @@ struct TabShow: AsyncParsableCommand {
       ("pane", d.paneID),
       ("worktree", d.worktreeID),
       ("project", d.projectID),
-      ("selected", d.isSelected ? "yes" : "no"),
-      ("focused pane", d.focusedPaneID ?? "-"),
-    ]
-  }
-}
-
-struct PaneShow: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "show",
-    abstract: "Describe a pane from the catalog: containers, cwd, labels, agent, focus.",
-    discussion: """
-      Reads what Codans knows about the pane (its tab / worktree / project,
-      handle, labels, the agent it runs, whether it is focused and live).
-      `codans pane info` asks the pane's terminal daemon instead.
-      """
-  )
-
-  @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
-  var pane: String = "current"
-
-  func run() async throws {
-    await CommandRunner.run(self, globals: globals) {
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      let description: IPC.PaneDescription = try await client.call(
-        .hierarchyDescribePane, params: IPC.DescribeRequest(id: uuid))
-      try Renderer.emit(KeyValueRenderable(description, lines: Self.lines), mode: globals.renderMode)
-    }
-  }
-
-  private static func lines(_ d: IPC.PaneDescription) -> [(String, String)] {
-    [
-      ("pane", d.id + (d.handle.map { "  (\($0))" } ?? "")),
-      ("cwd", d.workingDirectory),
-      ("command", d.initialCommand ?? "(default shell)"),
+      ("cwd", d.workingDirectory ?? "-"),
       ("labels", d.labels.isEmpty ? "-" : d.labels.map { "@\($0)" }.joined(separator: " ")),
       ("agent", d.agent ?? "-"),
       ("session", d.agentSessionID ?? "-"),
-      ("content", d.contentID),
-      ("tab", d.tabID),
-      ("worktree", d.worktreeID),
-      ("project", d.projectID),
-      ("focused", d.isFocused ? "yes" : "no"),
+      ("selected", d.isSelected ? "yes" : "no"),
       ("live", d.isLive ? "yes" : "no"),
     ]
   }
