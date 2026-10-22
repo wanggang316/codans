@@ -2351,12 +2351,20 @@ private struct SidebarFilterBar: View {
       let spacing: CGFloat = 6
       let count = CGFloat(SidebarFilter.allCases.count)
       let unitWidth = max(0, (geometry.size.width - spacing * (count - 1)) / (count + 2))
-      HStack(spacing: spacing) {
-        ForEach(SidebarFilter.allCases, id: \.self) { filter in
+      let filters = SidebarFilter.allCases
+      let selectedIndex = filters.firstIndex(of: selection) ?? 0
+      ZStack(alignment: .leading) {
+        ForEach(Array(filters.enumerated()), id: \.element) { index, filter in
           filterButton(filter, unitWidth: unitWidth)
+            .offset(x: CGFloat(index) * (unitWidth + spacing) + (index > selectedIndex ? unitWidth * 2 : 0))
         }
       }
-      .animation(reduceMotion ? nil : .smooth(duration: 0.32), value: selection)
+      .frame(width: geometry.size.width, height: TabBarMetrics.trackHeight, alignment: .leading)
+      // The same interpolation moves each edge, so adjacent capsules keep their gap.
+      .animation(
+        reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32),
+        value: selection
+      )
     }
     .frame(height: TabBarMetrics.trackHeight)
     .padding(.horizontal, 8)
@@ -2376,27 +2384,41 @@ private struct SidebarFilterBar: View {
     return Button {
       onSelect(filter)
     } label: {
-      HStack(spacing: selected ? 5 : 0) {
-        Image(systemName: symbol(for: filter))
-          .frame(width: 14)
-          .accessibilityHidden(true)
-        // Keep the label mounted so rapid changes reverse the same animation.
-        Text(title)
+      Capsule()
+        .fill(Color.primary.opacity(0.035))
+        .overlay {
+          Capsule()
+            .fill(tint(for: filter))
+            .opacity(selected ? 1 : hoveredFilter == filter ? 0.3 : 0)
+        }
+        .overlay {
+          // The label keeps its full size and exits through the capsule edge.
+          // Only the icon's position changes; text never squeezes its siblings.
+          HStack(spacing: 5) {
+            Image(systemName: symbol(for: filter))
+              .frame(width: 14)
+              .accessibilityHidden(true)
+            Text(title)
+              .fixedSize()
+              .opacity(selected ? 1 : 0)
+              .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12).delay(selected ? 0.1 : 0),
+                value: selected
+              )
+              .accessibilityHidden(true)
+          }
+          .font(.system(size: TabBarMetrics.titleFontSize, weight: .semibold))
+          .foregroundStyle(selected ? Color.white : Color.secondary)
           .fixedSize()
-          .frame(width: selected ? titleWidth : 0)
-          .opacity(selected ? 1 : 0)
-          .clipped()
-          .accessibilityHidden(true)
-      }
-      .font(.system(size: TabBarMetrics.titleFontSize, weight: .semibold))
-      .foregroundStyle(selected ? Color.white : Color.secondary)
-      .scaleEffect(selected ? labelScale : 1)
-      .frame(width: selected ? expandedWidth : unitWidth, height: TabBarMetrics.trackHeight)
-      .background(
-        selected ? tint(for: filter)
-          : hoveredFilter == filter ? tint(for: filter).opacity(0.3) : Color.primary.opacity(0.035),
-        in: Capsule()
-      )
+          .offset(x: selected ? 0 : (titleWidth + 5) / 2)
+          .animation(
+            reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22).delay(selected ? 0.06 : 0),
+            value: selected
+          )
+          .scaleEffect(labelScale)
+        }
+        .frame(width: selected ? expandedWidth : unitWidth, height: TabBarMetrics.trackHeight)
+        .clipShape(Capsule())
       .contentShape(Capsule())
     }
     .buttonStyle(.plain)
