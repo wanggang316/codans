@@ -16,12 +16,17 @@ nonisolated struct CatalogLoadReport: Equatable, Sendable {
   var droppedTabs = 0
   /// Panes removed because every one of their Tabs dropped.
   var droppedPanes = 0
+  /// The file exists but this build could not read it (I/O error,
+  /// malformed record, broken layout, failed migration). It stays in
+  /// place for a fixed build, and nothing is saved this launch.
+  var loadFailed = false
 
   var isReadOnly: Bool { readOnlyVersion != nil }
   var decodeLossCount: Int { droppedTabs + droppedPanes }
   /// A dropped Tab's session must not be reaped as an orphan, and a
-  /// catalog this build cannot write must not have its sessions touched.
-  var allowsSessionSweeps: Bool { !isReadOnly && decodeLossCount == 0 }
+  /// catalog this build cannot read or write must not have its sessions
+  /// touched: every live session would look like an orphan.
+  var allowsSessionSweeps: Bool { !isReadOnly && !loadFailed && decodeLossCount == 0 }
 
   static let clean = CatalogLoadReport()
 }
@@ -34,7 +39,7 @@ class CatalogStore {
   private var pendingSaveTask: Task<Void, Never>?
   private var latestCatalog: Catalog?
   /// False once `load` met a file it must not overwrite: one from a newer
-  /// build, or one it could neither read nor back up. Every save is then
+  /// build, or one it could not read. Every save is then
   /// dropped: an empty in-memory catalog must never replace a user's
   /// project list that is merely unreadable to this build.
   private(set) var persistenceEnabled = true
@@ -53,29 +58,40 @@ class CatalogStore {
   /// - a file of a newer version is left untouched and the store goes
   ///   read-only (nothing is ever saved);
   /// - a current file decodes tolerantly, counting dropped records;
-  /// - a corrupt file is moved into `backups/` and an empty catalog is
-  ///   returned. Any failure that leaves an unreadable file in place
-  ///   throws and disables saving.
+  /// - any other failure throws, sets `loadFailed`, and disables saving.
+  ///   A corrupt or unsupported file is copied into `backups/` and left
+  ///   in place, so a fixed build can still read it.
   func load() throws -> Catalog {
     loadReport = .clean
-    let data: Data?
     do {
-      data = try Self.readData(at: fileURL)
+      return try readCatalog()
     } catch {
+      loadReport.loadFailed = true
       persistenceEnabled = false
+      logger.error("catalog.json could not be loaded; saving and session sweeps are off for this launch: \(error)")
       throw error
     }
-    guard let data else { return .default }
+  }
+
+  /// The launch path: a failed `load` reads as an empty catalog that is
+  /// never saved (`persistenceEnabled` is false) and never sweeps sessions
+  /// (`loadReport.allowsSessionSweeps` is false).
+  func loadForLaunch() -> Catalog {
+    (try? load()) ?? .empty
+  }
+
+  private func readCatalog() throws -> Catalog {
+    guard let data = try Self.readData(at: fileURL) else { return .default }
 
     let outcome: CatalogLoadOutcome
     do {
       outcome = try CatalogLoader.decode(data)
     } catch Catalog.DecodingIssue.unsupportedVersion(let version) {
-      return try setAside(reason: .unsupported(version: version))
-    } catch is DecodingError {
-      return try setAside(reason: .corrupt)
-    } catch is Catalog.LayoutIssue {
-      return try setAside(reason: .corrupt)
+      keepCopy(reason: .unsupported(version: version))
+      throw Catalog.DecodingIssue.unsupportedVersion(version)
+    } catch {
+      keepCopy(reason: .corrupt)
+      throw error
     }
     let decoded: Catalog
     switch outcome {
@@ -136,8 +152,7 @@ class CatalogStore {
       logger.notice(
         "backed up catalog.json v\(fromVersion, privacy: .public) to \(backup.lastPathComponent, privacy: .public)")
     } catch {
-      persistenceEnabled = false
-      logger.error("catalog.json v\(fromVersion, privacy: .public) backup failed; saving disabled: \(error)")
+      logger.error("catalog.json v\(fromVersion, privacy: .public) backup failed: \(error)")
       throw error
     }
     loadReport.migratedFromVersion = fromVersion
@@ -150,15 +165,16 @@ class CatalogStore {
     return try Data(contentsOf: url)
   }
 
-  private func setAside(reason: StoreBackup.Reason) throws -> Catalog {
+  /// Best effort: the original stays in place either way, and saving is
+  /// off for the launch, so a failed copy loses nothing.
+  private func keepCopy(reason: StoreBackup.Reason) {
     do {
-      let backup = try StoreBackup.moveAside(fileURL, reason: reason)
-      logger.error("catalog.json unreadable; backed up to \(backup.lastPathComponent, privacy: .public), starting empty")
-      return .default
+      let backup = try StoreBackup.prepareURL(for: fileURL, reason: reason)
+      try FileManager.default.copyItem(at: fileURL, to: backup)
+      StoreBackup.prune(for: fileURL, reason: reason)
+      logger.error("catalog.json unreadable; copied to \(backup.lastPathComponent, privacy: .public)")
     } catch {
-      persistenceEnabled = false
-      logger.error("catalog.json unreadable and backup failed; saving disabled: \(error)")
-      throw error
+      logger.error("catalog.json unreadable and its backup copy failed: \(error)")
     }
   }
 
