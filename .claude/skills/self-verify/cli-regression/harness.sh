@@ -470,6 +470,11 @@ phase_incontext() {
     echo "${line#*=}"
   }
   cli tab focus "$TAB1" >/dev/null
+  # The tab's environment carries exactly its three ids.
+  ctx X20 'env | grep -E "^CODANS_(PANE|TAB|CONTENT)_ID=" | sort | tr "\n" " "' >/dev/null
+  cp /tmp/codans-ctx-X20.out "$LOGS/X20.env"
+  note "tab env ids: $(cat /tmp/codans-ctx-X20.out)"
+  t X20 0 "CODANS_PANE_ID / CODANS_TAB_ID / CODANS_CONTENT_ID name the calling pane / tab / content" -- bash -c "grep -q 'CODANS_CONTENT_ID=$TAB1C' '$LOGS/X20.env' && grep -q 'CODANS_PANE_ID=$P1' '$LOGS/X20.env' && grep -q 'CODANS_TAB_ID=$TAB1' '$LOGS/X20.env'"
   # `send-key escape` stays last: the ESC it types into this very shell
   # would swallow the start of the next probe's command line.
   for spec in \
@@ -505,11 +510,6 @@ phase_incontext() {
   t X07b 0 "tab new in a tab opens on the caller's pane" -- bash -c "jq -e '.data.paneID==\"$P1\"' '$LOGS/X07.out'"
   t X08b 0 "pane split in a tab splits the caller's pane (new pane, new tab)" -- bash -c "jq -e '.data.anchor==\"$P1\" and (.data.paneID!=\"$P1\")' '$LOGS/X08.out'"
   t X18b 0 "tab show current is the calling tab" -- bash -c "jq -e '.data.id==\"$TAB1\" and .data.contentID==\"$TAB1C\" and .data.paneID==\"$P1\"' '$LOGS/X18.out'"
-  # The tab's environment carries exactly its three ids.
-  ctx X20 'env | grep -E "^CODANS_(PANE|TAB|CONTENT)_ID=" | sort | tr "\n" " "' >/dev/null
-  cp /tmp/codans-ctx-X20.out "$LOGS/X20.env"
-  note "tab env ids: $(cat /tmp/codans-ctx-X20.out)"
-  t X20 0 "CODANS_PANE_ID / CODANS_TAB_ID / CODANS_CONTENT_ID name the calling pane / tab / content" -- bash -c "grep -q 'CODANS_CONTENT_ID=$TAB1C' '$LOGS/X20.env' && grep -q 'CODANS_PANE_ID=$P1' '$LOGS/X20.env' && grep -q 'CODANS_TAB_ID=$TAB1' '$LOGS/X20.env'"
   # cleanup what the probes created
   local made; made=$(jq -r '.data.id' "$LOGS/X07.out" 2>/dev/null || true)
   [[ -n "$made" && "$made" != null ]] && cli tab close "$made" >/dev/null 2>&1
