@@ -71,7 +71,7 @@ struct LazyPaneHost: View {
           // right-click, which is why the surface is handed in. Layered
           // above the progress strip so the card is never clipped by it.
           .overlay(alignment: .topTrailing) {
-            PaneHUDView(paneID: store.paneID, surface: surface)
+            PaneCommandQueueChrome(paneID: store.paneID, surface: surface)
           }
           // Right-click menu. Attached only on `.ready` so loading / failure
           // placeholders do not get a stale menu; placed before `.animation`
@@ -81,12 +81,12 @@ struct LazyPaneHost: View {
               paneID: store.paneID,
               tabID: store.tabID,
               worktreeID: store.worktreeID,
-              projectID: store.projectID
+              projectID: store.projectID,
             )
           }
           .animation(
             .easeInOut(duration: 0.2),
-            value: surface.info.progressState
+            value: surface.info.progressState,
           )
       } else {
         // Should not happen — `phase == .ready` is set by the reducer

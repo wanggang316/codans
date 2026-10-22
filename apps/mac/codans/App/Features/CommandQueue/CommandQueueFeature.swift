@@ -2,14 +2,10 @@ import CodansCore
 import ComposableArchitecture
 import Foundation
 
-/// Editor state for the Command Queue panel (⌘⌥L).
+/// Editor state for the Command Queue panel (⌘L).
 ///
-/// Only the *draft* lives here. The queue itself is catalog state
-/// (`Pane.commandQueue`) and the panel reads it straight off the
-/// `@Observable` `HierarchyManager`, so a command draining while the panel is
-/// open disappears from the list without a reducer round-trip. That split is
-/// the documented hybrid boundary: terminal / hierarchy state is
-/// `@Observable`, app flow state is TCA.
+/// Only the draft lives here. The pane overlay reads the queue from the live
+/// catalog. This keeps editor state separate from commands managed by the runner.
 @Reducer
 struct CommandQueueFeature {
   @ObservableState
@@ -168,9 +164,9 @@ struct CommandQueueFeature {
             .init(
               text: text,
               timing: .scheduled(at: state.scheduledAt, repeatEvery: state.repeatInterval),
-              createdAt: date.now
+              createdAt: date.now,
             ),
-            to: paneID
+            to: paneID,
           )
         }
         state.draft = ""
