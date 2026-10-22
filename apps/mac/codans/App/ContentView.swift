@@ -156,8 +156,8 @@ struct ContentView: View {
     .environment(agentStateStore)
     .environment(contentRuntime)
     .environment(
-      \.paneHUDActions,
-      PaneHUDActions(
+      \.tabHUDActions,
+      TabHUDActions(
         handOff: { paneID in store.send(.handoffRequested(paneID)) },
         commandQueue: { paneID in store.send(.commandQueueToggle(paneID)) }
       )

@@ -11,7 +11,7 @@ import Foundation
 ///
 /// The list is deliberately terminal-scoped. Actions that belong to the
 /// pane's *row* rather than its surface — hand off, the command queue, the
-/// notification mute — are the HUD's own and live in `PaneHUDView`.
+/// notification mute — are the HUD's own and live in `TabHUDView`.
 nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
   case copy
   case paste
@@ -74,7 +74,7 @@ nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
     self == .copy
   }
 
-  /// Suffix for the HUD row's accessibility identifier (`pane_hud.<id>`),
+  /// Suffix for the HUD row's accessibility identifier (`tab_hud.<id>`),
   /// which is also how the AX-driven UI harness addresses the row.
   var accessibilityID: String {
     switch self {
