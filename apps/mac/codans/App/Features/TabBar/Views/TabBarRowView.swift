@@ -78,6 +78,9 @@ struct TabBarRowView: View {
 
   @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+  /// ⌘1–9 select by position in the focused Pane, so only its strip shows
+  /// the chord hints.
+  @Environment(\.tabStripIsActive) private var stripIsActive
 
   /// Name of the row's coordinate space — drag location, chip frames, and
   /// the floating-copy position are all measured against it so they share
@@ -485,7 +488,7 @@ struct TabBarRowView: View {
   /// slot (replacing the close button while held). Beyond ten tabs the schema has no
   /// chord; returns nil and the chip keeps its close-button slot.
   private func chordHint(for tabIndex: Int) -> String? {
-    guard commandKeyObserver.isCommandHeld,
+    guard stripIsActive, commandKeyObserver.isCommandHeld,
       let id = CommandID.switchToTab(index: tabIndex),
       let resolved = resolvedShortcuts[id], resolved.isEnabled,
       let binding = resolved.binding

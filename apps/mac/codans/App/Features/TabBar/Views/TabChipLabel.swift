@@ -32,14 +32,17 @@ struct TabChipLabel: View {
   var iconTint: Color?
 
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.tabStripIsActive) private var stripIsActive
 
   /// An idle chip's title is the selected title dimmed, not recolored: a
   /// style change makes SwiftUI replace the text at its final frame, so in
   /// an add / close reflow the title would jump ahead of its chip, while an
   /// opacity change animates in place. Pixel-identical to the secondary
-  /// label color (see `TabBarColors.inactiveTextOpacity`).
+  /// label color (see `TabBarColors.inactiveTextOpacity`). An inactive
+  /// strip dims every title, selected included, to one tertiary tone.
   private var textOpacity: Double {
-    isActive ? 1 : TabBarColors.inactiveTextOpacity(for: colorScheme)
+    guard stripIsActive else { return TabBarColors.inactiveStripTextOpacity(for: colorScheme) }
+    return isActive ? 1 : TabBarColors.inactiveTextOpacity(for: colorScheme)
   }
 
   var body: some View {
