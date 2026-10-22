@@ -389,6 +389,8 @@ struct HierarchyClientTests {
     var setting: CloseTabConfirmation = .busy
   }
 
+  /// `terminalClient` defaults to one with no live surface at all, so
+  /// every gate decision here is made for Tabs that never came up.
   private func makeConfirmingClient() -> (HierarchyClient, HierarchyManager, ConfirmProbe) {
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")
@@ -396,8 +398,11 @@ struct HierarchyClientTests {
       catalog: .default, store: CatalogStore(fileURL: tempURL), runtime: FakeHierarchyRuntime()
     )
     let probe = ConfirmProbe()
+    var terminal = TerminalClient.testValue
+    terminal.surface = { _ in nil }
     let client = HierarchyClient.live(
       manager: manager,
+      terminalClient: terminal,
       closeTabConfirmation: { probe.setting },
       confirmClose: { prompt, completion in
         probe.asked.append(prompt)
@@ -436,6 +441,28 @@ struct HierarchyClientTests {
     try client.closeTab(seed.queuedTab)
 
     #expect(probe.asked == [CloseConfirmationPrompt(subject: .tab, queuedCount: 1, isRunning: false)])
+    #expect(tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
+  }
+
+  /// Busy is the manager's verdict for every affected Tab: a queued Tab
+  /// whose surface never came up (none does under this client) asks in
+  /// busy mode, and a Pane holding one asks too.
+  @Test
+  func queuedTabWithoutASurfaceAsksInBusyMode() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    probe.setting = .busy
+    let seed = try seedQueuedTab(client, manager)
+    let content = try #require(manager.catalog.tab(seed.queuedTab)?.content.id)
+    #expect(manager.isBusy(content))
+
+    try client.closeTab(seed.queuedTab)
+    try client.closePane(seed.paneID)
+
+    #expect(
+      probe.asked == [
+        CloseConfirmationPrompt(subject: .tab, queuedCount: 1, isRunning: false),
+        CloseConfirmationPrompt(subject: .pane, queuedCount: 1, isRunning: false),
+      ])
     #expect(tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
   }
 
