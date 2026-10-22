@@ -39,7 +39,7 @@ struct PaneCommandQueueChrome: View {
             .padding(.top, 14)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        PaneHUDView(contentID: contentID, surface: surface) {
+        TabHUDView(contentID: contentID, surface: surface) {
           isHidden = false
         }
       }
