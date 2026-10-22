@@ -109,6 +109,6 @@ struct ShortcutSchemaAuditTests {
     (.selectWorktreeAt8, (0x1C, [.control])),
     (.selectWorktreeAt9, (0x19, [.control])),
     (.selectWorktreeAt10, (0x1D, [.control])),  // 0
-    (.toggleCommandQueue, (0x25, [.command, .option])),  // ⌘⌥L
+    (.toggleCommandQueue, (0x25, [.command])),  // ⌘L
   ]
 }

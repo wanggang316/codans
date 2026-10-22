@@ -32,6 +32,7 @@ struct PaneHUDView: View {
   /// mounts the HUD alongside the surface, so in the app it is always there.
   /// Without one those rows render disabled rather than vanishing.
   let surface: PaneSurface?
+  let onShowQueue: () -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
@@ -39,11 +40,15 @@ struct PaneHUDView: View {
 
   @State private var isExpanded: Bool
   @State private var isButtonHovered = false
-  @State private var isQueueButtonHovered = false
+  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   /// `expanded` seeds the card's state. The app always starts collapsed;
   /// the seed exists so a rendering test can lay out the open card.
-  init(paneID: PaneID, surface: PaneSurface? = nil, expanded: Bool = false) {
+  init(
+    paneID: PaneID, surface: PaneSurface? = nil, expanded: Bool = false,
+    onShowQueue: @escaping () -> Void = {},
+  ) {
+    self.onShowQueue = onShowQueue
     self.paneID = paneID
     self.surface = surface
     _isExpanded = State(initialValue: expanded)
@@ -54,7 +59,7 @@ struct PaneHUDView: View {
   /// greedy — the whole strip is the tap target — so something has to bound
   /// them. Without a definite width here they resolve against the overlay's
   /// proposal, which is the entire pane, and the card swallows the terminal.
-  private static let cardWidth: CGFloat = 176
+  private static let cardWidth: CGFloat = 210
   /// Chrome box around the glyph. Deliberately larger than the 13pt symbol:
   /// at 22pt the fill read as a tight outline rather than a control.
   private static let buttonSize: CGFloat = 30
@@ -95,7 +100,7 @@ struct PaneHUDView: View {
     PaneHUDModel.resolve(
       paneID: paneID,
       in: hierarchyManager.catalog,
-      agent: agentStateStore?.entries[paneID]?.kind
+      agent: agentStateStore?.entries[paneID]?.kind,
     )
   }
 
@@ -113,8 +118,7 @@ struct PaneHUDView: View {
       }
       // The queue button stacks under the menu button rather than beside it,
       // so the corner stays one column of same-sized controls. Collapsed
-      // only: expanded, the card's Command Queue row is the same action, and
-      // the button would sit on top of the card beside it.
+      // only: the expanded menu uses this space for its actions.
       VStack(spacing: 6) {
         menuButton(model)
         if model.queuedCommandCount > 0, !isExpanded {
@@ -197,30 +201,29 @@ struct PaneHUDView: View {
     .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
   }
 
-  /// Opens the Command Queue sheet directly. Same box as the menu button so
-  /// the two read as one stack; static, because a parked queue is a state to
-  /// glance at rather than an alarm.
+  /// Restores the pane overlay without opening the composer.
   private func queueButton(_ model: PaneHUDModel) -> some View {
     Button {
       setExpanded(false)
-      actions.commandQueue(paneID)
+      onShowQueue()
     } label: {
-      Image(systemName: CommandQueueStyle.symbol)
-        .font(.system(size: 13, weight: .regular))
-        .foregroundStyle(isQueueButtonHovered ? Color.primary : Color.secondary)
-        .frame(width: Self.buttonSize, height: Self.buttonSize)
-        .background {
-          chrome(cornerRadius: Self.buttonCornerRadius)
-            .opacity(isExpanded ? 0 : 1)
-            .allowsHitTesting(false)
-        }
-        .contentShape(Rectangle())
+      VStack(spacing: 1) {
+        Image(systemName: CommandQueueStyle.symbol)
+          .font(.system(size: 11))
+          .accessibilityHidden(true)
+        Text("\(model.queuedCommandCount)")
+          .font(.system(size: 9, weight: .semibold))
+          .monospacedDigit()
+      }
+      .foregroundStyle(Color.accentColor)
+      .frame(width: Self.buttonSize, height: Self.buttonSize)
+      .background(chrome(cornerRadius: Self.buttonCornerRadius))
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .onHover { isQueueButtonHovered = $0 }
-    .help(Self.queuedPhrase(model))
+    .help("Show queued commands")
     .accessibilityIdentifier("pane_hud.queue")
-    .accessibilityLabel("Command queue, \(Self.queuedPhrase(model))")
+    .accessibilityLabel("Show command queue, \(Self.queuedPhrase(model))")
   }
 
   private static func queuedPhrase(_ model: PaneHUDModel) -> String {
@@ -295,14 +298,18 @@ struct PaneHUDView: View {
       HStack(spacing: 7) {
         Image(systemName: CommandQueueStyle.symbol)
           .font(.system(size: 11))
+          .accessibilityHidden(true)
           .frame(width: 14, height: 14, alignment: .center)
           .accessibilityHidden(true)
         Text("Command Queue…")
         Spacer(minLength: 0)
-        if model.queuedCommandCount > 0 {
-          Text("\(model.queuedCommandCount)")
+        if let shortcut = resolvedShortcuts[.toggleCommandQueue],
+          shortcut.isEnabled, let binding = shortcut.binding
+        {
+          Text(ShortcutDisplay.chord(for: binding))
+            .tracking(3)
             .foregroundStyle(.secondary)
-            .monospacedDigit()
+            .fixedSize()
         }
       }
       .font(.system(size: 12))

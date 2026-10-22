@@ -113,7 +113,7 @@ struct RootFeature {
     /// Opened by a Command Palette "Run Workflow" row; holds only the
     /// start draft — a run that exists belongs to the engine.
     @Presents var workflowStart: WorkflowStartFeature.State?
-    /// Command Queue panel (⌘⌥L, or a click on a pane's queue badge).
+    /// Command Queue composer (⌘L, or the pane menu action).
     /// `nil` = hidden. Scoped to exactly one pane for the presentation's
     /// lifetime; re-opening on a different pane replaces the state rather
     /// than re-targeting it, so a half-typed draft can never land in a pane
@@ -423,7 +423,7 @@ struct RootFeature {
     case workflowStart(PresentationAction<WorkflowStartFeature.Action>)
     /// Toggle the Command Queue panel. `nil` resolves the target pane the
     /// same way `commandPaletteToggle` does (the active tab's last-focused
-    /// leaf), which is what the ⌘⌥L menu binding sends; the pane badge sends
+    /// leaf), which is what the ⌘L menu binding sends; the pane badge sends
     /// its own id. Toggling while the panel is open on a *different* pane
     /// re-targets rather than closing — the user asked for that pane.
     case commandQueueToggle(PaneID?)
@@ -2454,7 +2454,7 @@ struct RootFeature {
   /// catalog, so callers must have already committed the worktree selection.
   /// The pane a pane-scoped command with no explicit source should target:
   /// the active tab's last-focused leaf, falling back to that tab's first
-  /// leaf. Reuses the Command Palette's resolver so ⌘⌥L and a menu-triggered
+  /// leaf. Reuses the Command Palette's resolver so ⌘L and a menu-triggered
   /// ⌘P agree on what "the current pane" means.
   private func focusedPaneID(state: State) -> PaneID? {
     let catalog = hierarchyClient.snapshot()
