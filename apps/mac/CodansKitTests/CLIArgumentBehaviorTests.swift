@@ -1,6 +1,6 @@
+import CodansIPC
 import Foundation
 import Testing
-import CodansIPC
 
 @testable import CodansKit
 
@@ -12,7 +12,7 @@ struct CLIArgumentBehaviorTests {
   @Test
   func broadcastScopeEncodingStableAcrossKinds() throws {
     let cases: [IPC.BroadcastScope] = [
-      IPC.BroadcastScope(kind: .tab, target: UUID().uuidString),
+      IPC.BroadcastScope(kind: .pane, target: UUID().uuidString),
       IPC.BroadcastScope(kind: .worktree, target: UUID().uuidString),
       IPC.BroadcastScope(kind: .label, target: "agent"),
     ]

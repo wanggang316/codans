@@ -57,8 +57,6 @@ extension HierarchyHandlers {
 
   public struct RenameTabParams: Codable, Sendable {
     public let id: TabID
-    public let worktreeID: WorktreeID?
-    public let projectID: ProjectID?
     public let name: String?
   }
   /// `hierarchy.renameTab` — a blank or missing name clears the user's
@@ -127,21 +125,24 @@ extension HierarchyHandlers {
   // MARK: - Split tree
 
   public struct SplitPaneParams: Codable, Sendable {
-    /// The anchor: a Pane id, or a Tab / session id (its Pane).
+    /// The anchor: a Pane id, or a Tab / Content id (its Pane).
     public let paneID: UUID
-    public let tabID: TabID?
-    public let worktreeID: WorktreeID?
-    public let projectID: ProjectID?
     public let direction: SplitTree<PaneID>.NewDirection
-    /// Defaults to the anchor pane's live directory, so the new shell
-    /// starts where its neighbour is.
+    /// Defaults to the anchor's selected Tab's live directory, so the new
+    /// shell starts where its neighbour is.
     public let workingDirectory: String?
     public let initialCommand: String?
     public let labels: [String]?
   }
+  /// The Pane a split produced and the Tab it opened with.
+  public struct SplitResult: Codable, Sendable {
+    public let paneID: PaneID
+    public let tabID: TabID
+    public let contentID: ContentID
+  }
   /// `hierarchy.splitPane` — a new Pane with a fresh Tab beside the
   /// anchor, the way the keyboard split does, with the project env every
-  /// CLI-spawned session gets. Answers with the new session's id.
+  /// CLI-spawned session gets.
   public func splitPane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     guard let req = try? params.decoded(as: SplitPaneParams.self) else {
@@ -170,14 +171,17 @@ extension HierarchyHandlers {
           labels: Set(req.labels ?? []))
       )
       try await manager.ensureSurface(for: created.contentID, env: envProvider(address.projectID))
-      return .unary(try JSONValue.encoded(PaneIDPayload(id: created.contentID)))
+      manager.focusSurfaceView(for: created.contentID)
+      return .unary(
+        try JSONValue.encoded(
+          SplitResult(paneID: created.paneID, tabID: created.tabID, contentID: created.contentID)))
     } catch {
       return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.uuidString)
     }
   }
 
   public struct ResizePaneParams: Codable, Sendable {
-    /// A Pane id, or a Tab / session id (its Pane).
+    /// A Pane id, or a Tab / Content id (its Pane).
     public let paneID: UUID
     /// Which edge grows: `left` / `right` move the nearest vertical divider,
     /// `up` / `down` the nearest horizontal one.
@@ -186,7 +190,7 @@ extension HierarchyHandlers {
     /// them onto the split ratio. Default is a visible nudge.
     public let amount: Double?
   }
-  /// `hierarchy.resizePane` — nudge the divider next to `paneID`. A pane
+  /// `hierarchy.resizePane` — nudge the divider next to `paneID`. A Pane
   /// with no split in that orientation is a no-op, like the keybind.
   public func resizePane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -212,6 +216,69 @@ extension HierarchyHandlers {
       return .unary(.object([:]))
     } catch {
       return failure(for: error, fallbackKind: "pane", fallbackID: req.paneID.uuidString)
+    }
+  }
+
+  public struct EqualizePanesParams: Codable, Sendable {
+    public let projectID: ProjectID
+    public let worktreeID: WorktreeID
+  }
+  /// `hierarchy.equalizePanes` — every divider of the Worktree's split
+  /// tree back to an even split.
+  public func equalizePanes(_ params: JSONValue) async -> RouterOutcome {
+    await Task.yield()
+    guard let req = try? params.decoded(as: EqualizePanesParams.self) else {
+      return .failed(.invalidParams(message: "equalizePanes requires {projectID, worktreeID}", path: nil))
+    }
+    do {
+      try manager.equalizeSplits(in: req.worktreeID, in: req.projectID)
+      return .unary(.object([:]))
+    } catch {
+      return failure(for: error, fallbackKind: "worktree", fallbackID: req.worktreeID.description)
+    }
+  }
+
+  public struct ZoomPaneParams: Codable, Sendable {
+    /// A Pane id, or a Tab / Content id (its Pane).
+    public let id: UUID
+  }
+  public struct ZoomResult: Codable, Sendable {
+    public let paneID: PaneID
+    public let zoomed: Bool
+  }
+  /// `hierarchy.zoomPane` — toggles the zoom on the Pane (zoomed: it fills
+  /// the layout area; again: back to the layout) and focuses it.
+  public func zoomPane(_ params: JSONValue) async -> RouterOutcome {
+    await setZoom(params, method: "zoomPane") { _ in true }
+  }
+
+  /// `hierarchy.unzoomPane` — leaves the zoom when the Pane is the zoomed
+  /// one; otherwise a no-op.
+  public func unzoomPane(_ params: JSONValue) async -> RouterOutcome {
+    await setZoom(params, method: "unzoomPane") { isZoomed in isZoomed }
+  }
+
+  private func setZoom(
+    _ params: JSONValue, method: String, shouldToggle: (_ isZoomed: Bool) -> Bool
+  ) async -> RouterOutcome {
+    await Task.yield()
+    guard let req = try? params.decoded(as: ZoomPaneParams.self) else {
+      return .failed(.invalidParams(message: "\(method) requires {id}", path: nil))
+    }
+    guard let paneID = layoutPane(for: req.id), let address = manager.catalog.address(forPane: paneID),
+      let worktree = worktree(address.worktreeID, in: address.projectID)
+    else {
+      return .failed(.notFound(kind: "pane", id: req.id.uuidString))
+    }
+    let isZoomed = worktree.splitTree.zoomed == paneID
+    do {
+      let zoomed = shouldToggle(isZoomed) ? try manager.toggleZoom(paneID) : isZoomed
+      if let contentID = manager.catalog.pane(paneID)?.selectedTab?.contentID {
+        manager.focusSurfaceView(for: contentID)
+      }
+      return .unary(try JSONValue.encoded(ZoomResult(paneID: paneID, zoomed: zoomed)))
+    } catch {
+      return failure(for: error, fallbackKind: "pane", fallbackID: req.id.uuidString)
     }
   }
 }

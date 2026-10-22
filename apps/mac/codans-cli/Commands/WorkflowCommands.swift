@@ -86,13 +86,12 @@ enum WorkflowSourceResolver {
     if let uuid = UUID(uuidString: source) {
       return try await resolveUUID(uuid, client: client)
     }
-    if ScopeResolver.isCurrent(source) || source.hasPrefix("@") || isHandle(source, prefix: "p") {
-      let uuid = try await AliasResolver.resolve(source, kind: .pane, client: client)
-      return Resolved(paneID: try await session(uuid, client: client))
-    }
-    if isHandle(source, prefix: "t") {
-      let uuid = try await AliasResolver.resolve(source, kind: .tab, client: client)
-      return Resolved(paneID: try await session(uuid, client: client))
+    if ScopeResolver.isCurrent(source) || source.hasPrefix("@") || isHandle(source, prefix: "p")
+      || isHandle(source, prefix: "t")
+    {
+      // The server converts any of the three ids or handles to the session.
+      let uuid = try await AliasResolver.resolve(source, kind: .content, client: client)
+      return Resolved(paneID: ContentID(raw: uuid))
     }
     let uuid = try await AliasResolver.resolve(source, kind: .worktree, client: client)
     return Resolved(worktreeID: WorktreeID(raw: uuid))
@@ -118,14 +117,6 @@ enum WorkflowSourceResolver {
       return Resolved(worktreeID: WorktreeID(raw: uuid))
     }
     throw notFound("source", uuid.uuidString)
-  }
-
-  /// The alias resolver hands back a Content, Tab or Pane id depending on
-  /// the reference shape; the request always carries the session.
-  private static func session(_ uuid: UUID, client: RPCClient) async throws -> ContentID {
-    let tree = try await HierarchyTree.load(client: client)
-    guard let located = tree.locateSession(uuid) else { throw notFound("pane", uuid.uuidString) }
-    return located.contentID
   }
 
   private static func isHandle(_ value: String, prefix: Character) -> Bool {

@@ -1,8 +1,8 @@
 import ArgumentParser
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Foundation
 
 struct TreeCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -174,7 +174,7 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
         )
         lines.append("      path: \(worktree.path)")
 
-        for (paneIndex, pane) in worktree.panes.enumerated() {
+        for (paneIndex, pane) in worktree.panesInLayoutOrder.enumerated() {
           let focusedPane = pane.id == worktree.focusedPaneID ? "*" : " "
           let paneLabel = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" } ?? "\(paneIndex + 1)"
           lines.append("      [\(focusedPane)] Pane \(paneLabel):  \(pane.id)")
@@ -245,7 +245,9 @@ struct HierarchyWorktreeDTO: Encodable {
     self.sourceGitRoot = worktree.sourceGitRoot
     self.focusedPaneID = worktree.focusedPaneID?.description
     self.selectedTabID = worktree.focusedPane?.selectedTabID?.description
-    self.panes = worktree.panes.map { HierarchyPaneDTO(pane: $0, handles: handles) }
+    self.panes = worktree.panesInLayoutOrder.map {
+      HierarchyPaneDTO(pane: $0, isFocused: $0.id == worktree.focusedPaneID, handles: handles)
+    }
   }
 }
 
@@ -254,13 +256,17 @@ struct HierarchyPaneDTO: Encodable {
   /// `p<n>` selector, the same one the text tree prints.
   let handle: String?
   let selectedTabID: String?
+  let isFocused: Bool
   let tabs: [HierarchyTabDTO]
 
-  init(pane: Pane, handles: IPC.TargetHandles?) {
+  init(pane: Pane, isFocused: Bool, handles: IPC.TargetHandles?) {
     self.id = pane.id.description
     self.handle = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" }
     self.selectedTabID = pane.selectedTabID?.description
-    self.tabs = pane.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
+    self.isFocused = isFocused
+    self.tabs = pane.tabs.map {
+      HierarchyTabDTO(tab: $0, isSelected: $0.id == pane.selectedTabID, handles: handles)
+    }
   }
 }
 
@@ -273,20 +279,33 @@ struct HierarchyTabDTO: Encodable {
   let contentID: String
   /// `ContentKind` raw value.
   let kind: String
+  let isSelected: Bool
   let workingDirectory: String?
   let labels: [String]
   let agent: String?
 
-  init(tab: Tab, handles: IPC.TargetHandles?) {
+  init(tab: Tab, isSelected: Bool, handles: IPC.TargetHandles?) {
     self.id = tab.id.description
     self.handle = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" }
     self.name = tab.name
     self.cachedDisplayTitle = tab.cachedDisplayTitle
     self.contentID = tab.content.id.description
     self.kind = tab.content.state.kind.rawValue
+    self.isSelected = isSelected
     let terminal = tab.content.terminal
     self.workingDirectory = terminal?.workingDirectory
     self.labels = terminal?.labels.sorted() ?? []
     self.agent = terminal?.agentKind?.rawValue
+  }
+}
+
+extension Worktree {
+  /// Panes as the layout shows them, left-to-right / top-to-bottom — the
+  /// order `p<n>` handles are issued in; a Pane missing from the tree
+  /// (never, by invariant) trails in array order.
+  var panesInLayoutOrder: [Pane] {
+    let leaves = splitTree.leaves()
+    let seen = Set(leaves)
+    return leaves.compactMap { pane($0) } + panes.filter { !seen.contains($0.id) }
   }
 }

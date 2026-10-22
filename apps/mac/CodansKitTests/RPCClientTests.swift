@@ -1,7 +1,7 @@
-import Foundation
-import Testing
 import CodansCore
 import CodansIPC
+import Foundation
+import Testing
 
 @testable import CodansKit
 
@@ -37,6 +37,40 @@ struct RPCClientTests {
     struct Pong: Codable { let pong: Bool }
     let pong: Pong = try await client.call(.systemPing, params: EmptyPayload())
     #expect(pong.pong == true)
+  }
+
+  @Test
+  func helloCarriesTheProtocolVersion() async throws {
+    let transport = InMemoryTransport()
+    transport.script = { requestFrames in
+      let hello = try JSONDecoder().decode(IPC.Request.self, from: requestFrames[0])
+      let request = try hello.params.decoded(as: HelloRequest.self)
+      #expect(request.protocolVersion == IPC.protocolVersion)
+      let real = try JSONDecoder().decode(IPC.Request.self, from: requestFrames[1])
+      return [
+        .success(id: hello.id, result: .object(["protocolMajor": .int(Int64(IPC.protocolVersion))])),
+        .success(id: real.id, result: .object([:])),
+      ]
+    }
+    let client = RPCClient(transport: transport, versions: .init(clientVersion: "0.3.0"))
+    _ = try await client.callRaw(.systemPing, params: EmptyPayload())
+  }
+
+  @Test
+  func serverOfAnotherProtocolIsRefused() async throws {
+    let transport = InMemoryTransport()
+    transport.script = { requestFrames in
+      let hello = try JSONDecoder().decode(IPC.Request.self, from: requestFrames[0])
+      let real = try JSONDecoder().decode(IPC.Request.self, from: requestFrames[1])
+      return [
+        .success(id: hello.id, result: .object(["protocolMajor": .int(1)])),
+        .success(id: real.id, result: .object([:])),
+      ]
+    }
+    let client = RPCClient(transport: transport, versions: .init(clientVersion: "0.3.0"))
+    await #expect(throws: RPCClient.RPCError.protocolMismatch(client: IPC.protocolVersion, server: 1)) {
+      _ = try await client.callRaw(.systemPing, params: EmptyPayload())
+    }
   }
 
   @Test

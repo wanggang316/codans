@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// Handlers for `terminal.*` — send input into a pane, broadcast across
@@ -116,12 +116,13 @@ public final class TerminalHandlers {
     let before = req.capture == true ? sink.readText(contentID: req.contentID, extent: .screen) : nil
     let ok = sink.sendInput(contentID: req.contentID, text: req.text)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "tab", id: req.contentID.description))
     }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
       let outcome = await waitForCompletion(contentID: req.contentID, wait: wait, sink: sink)
-      let output = req.capture == true
+      let output =
+        req.capture == true
         ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
       result = SendInputResult(
         delivered: true, completed: outcome.completed, waitedMillis: outcome.waitedMillis,
@@ -199,7 +200,8 @@ public final class TerminalHandlers {
       common += 1
     }
     afterLines.removeFirst(common)
-    let firstSentLine = sent.split(separator: "\n").first.map(String.init)?
+    let firstSentLine =
+      sent.split(separator: "\n").first.map(String.init)?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if let first = afterLines.first, !firstSentLine.isEmpty, first.contains(firstSentLine) {
       afterLines.removeFirst()
@@ -228,7 +230,7 @@ public final class TerminalHandlers {
     }
     let ok = sink.sendKey(contentID: req.contentID, key: req.key)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "tab", id: req.contentID.description))
     }
     return .unary(.object(["delivered": .bool(true)]))
   }
@@ -256,7 +258,7 @@ public final class TerminalHandlers {
     }
     let ok = sink.sendRawBytes(contentID: req.contentID, bytes: bytes)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "tab", id: req.contentID.description))
     }
     return .unary(
       .object([
@@ -358,7 +360,7 @@ public final class TerminalHandlers {
         read: { [sink] in sink.readText(contentID: req.contentID, extent: extent) }
       )
       guard let outcome = await waiter.run() else {
-        return .failed(.notFound(kind: "pane", id: req.contentID.description))
+        return .failed(.notFound(kind: "tab", id: req.contentID.description))
       }
       result = ReadTextResult(
         text: outcome.text,
@@ -368,7 +370,7 @@ public final class TerminalHandlers {
       )
     } else {
       guard let text = sink.readText(contentID: req.contentID, extent: extent) else {
-        return .failed(.notFound(kind: "pane", id: req.contentID.description))
+        return .failed(.notFound(kind: "tab", id: req.contentID.description))
       }
       result = ReadTextResult(text: text)
     }
@@ -396,7 +398,7 @@ public final class TerminalHandlers {
     }
     let ok = sink.resetPane(contentID: req.contentID)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "tab", id: req.contentID.description))
     }
     return .unary(.object(["reset": .bool(true)]))
   }

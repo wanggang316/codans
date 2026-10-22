@@ -2641,11 +2641,8 @@ final class TerminalInputSink: TerminalHandlers.InputSink {
 
   private func contentIDs(matching scope: IPC.BroadcastScope, in catalog: Catalog) -> [ContentID] {
     switch scope.kind {
-    case .tab:
-      // A Tab id names its one session; a Pane id fans out to every Tab of
-      // the Pane.
+    case .pane:
       guard let uuid = UUID(uuidString: scope.target) else { return [] }
-      if let tab = catalog.tab(TabID(raw: uuid)) { return [tab.contentID] }
       return catalog.pane(PaneID(raw: uuid))?.contentIDs ?? []
     case .worktree:
       guard let id = UUID(uuidString: scope.target).map(WorktreeID.init(raw:)) else { return [] }

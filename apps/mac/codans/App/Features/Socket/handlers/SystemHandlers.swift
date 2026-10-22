@@ -1,7 +1,7 @@
 import AppKit
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 
 /// Handlers for the `system.*` method namespace. Construct once and inject
 /// into `MethodRouter`.
@@ -17,7 +17,7 @@ public final class SystemHandlers {
     public init(
       server: String,
       appBundle: String,
-      protocolMajor: Int = 1,
+      protocolMajor: Int = IPC.protocolVersion,
       protocolMinor: Int = 0,
       deprecatedMethods: [String] = []
     ) {
@@ -51,7 +51,8 @@ public final class SystemHandlers {
   // MARK: - Handlers
 
   /// `system.hello` — connection handshake. Returns the server's version
-  /// info. Major-version skew surfaces as `.versionMismatch`; clients that
+  /// info. A protocol-version or major-version skew surfaces as
+  /// `.versionMismatch`; clients that
   /// send a malformed `clientVersion` get `.invalidParams`.
   public func hello(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -64,6 +65,16 @@ public final class SystemHandlers {
           message: "system.hello requires clientVersion + clientBinary",
           path: nil
         ))
+    }
+    // The wire contract is versioned on its own: a client of another
+    // protocol (or one that predates the field) would misread ids and
+    // shapes, so it is refused whatever its marketing version says.
+    if request.protocolVersion != versions.protocolMajor {
+      let clientProtocol = request.protocolVersion.map(String.init) ?? "none"
+      return .failed(
+        .versionMismatch(
+          client: "\(request.clientVersion) (IPC protocol \(clientProtocol))",
+          server: "\(versions.server) (IPC protocol \(versions.protocolMajor))"))
     }
     if !Self.versionsCompatible(client: request.clientVersion, server: versions.server) {
       return .failed(.versionMismatch(client: request.clientVersion, server: versions.server))

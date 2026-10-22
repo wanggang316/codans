@@ -102,7 +102,7 @@ struct AgentWait: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
+  @Argument(help: "Tab: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or 'current'.")
   var pane: String = "current"
   @Option(name: .long, help: "Condition: idle, working, blocked, done, error, changed, or exit.")
   var until: IPC.AgentWaitCondition
@@ -116,7 +116,7 @@ struct AgentWait: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let uuid = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.AgentWaitResponse = try await client.call(
         .agentWait,
         params: IPC.AgentWaitRequest(

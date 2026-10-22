@@ -15,13 +15,13 @@ struct RendererEnvelopeTests {
 
   @Test
   func successEnvelopeCarriesSchemaVersionAndData() throws {
-    let json = try Renderer.$context.withValue(RenderContext(command: "pane.send")) {
+    let json = try Renderer.$context.withValue(RenderContext(command: "tab.send")) {
       var out = ""
       try Renderer.emit(Sample(id: "p1", count: 2), mode: .json) { out = $0 }
       return out
     }
     let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
-    #expect(object["schemaVersion"] as? String == "codans.cli.pane.send.v1")
+    #expect(object["schemaVersion"] as? String == "codans.cli.tab.send.v1")
     let data = try #require(object["data"] as? [String: Any])
     #expect(data["id"] as? String == "p1")
     #expect(data["count"] as? Int == 2)
@@ -51,7 +51,7 @@ struct RendererEnvelopeTests {
       return out
     }
     let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
-    #expect(object["schemaVersion"] as? String == "codans.cli.pane.focus.v1")
+    #expect(object["schemaVersion"] as? String == "codans.cli.pane.focus.v2")
     #expect(object["data"] == nil)
     let error = try #require(object["error"] as? [String: Any])
     #expect(error["code"] as? String == "NOT_FOUND")
