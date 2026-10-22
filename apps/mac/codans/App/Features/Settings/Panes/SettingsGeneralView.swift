@@ -69,6 +69,14 @@ struct SettingsGeneralView: View {
     )
   }
 
+  /// "Confirm before closing a tab" picker binding.
+  private var closeTabConfirmationBinding: Binding<CloseTabConfirmation> {
+    Binding(
+      get: { settingsStore.settings.general.closeTabConfirmation },
+      set: { settingsStore.setCloseTabConfirmation($0) }
+    )
+  }
+
   /// "On quit" action picker binding. Drives both the no-dialog branch (applied directly)
   /// and the default-focused button when the dialog IS shown.
   private var quitActionBinding: Binding<QuitAction> {
@@ -161,6 +169,19 @@ struct SettingsGeneralView: View {
           "Auto asks only when a pane is running a command or an agent is mid-task. "
             + "Keep session running lets long-running commands survive the quit; "
             + "Snapshot saves the screen state and exits."
+        )
+      }
+
+      Section {
+        Picker("Confirm before closing a tab", selection: closeTabConfirmationBinding) {
+          Text("When busy").tag(CloseTabConfirmation.busy)
+          Text("Always").tag(CloseTabConfirmation.always)
+          Text("Never").tag(CloseTabConfirmation.never)
+        }
+      } footer: {
+        Text(
+          "Also applies to closing a pane, over all of its tabs. When busy asks only when a tab "
+            + "is running a command, an agent is mid-task, or commands are queued."
         )
       }
 

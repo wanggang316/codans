@@ -45,6 +45,9 @@ struct TabBarFeature {
     case newTabButtonTapped(inPane: PaneID?, inWorktree: WorktreeID, inProject: ProjectID)
     case tabButtonTapped(TabID)
     case closeButtonTapped(TabID)
+    /// A click on the strip outside its chips and controls: focuses the
+    /// Pane and hands its selected Tab the keyboard.
+    case stripTapped(PaneID)
 
     /// Open the rename sheet for `tabID`. Sources: chip context-menu Rename
     /// (any tab) and `RootFeature.renameActiveTabForCurrentWorktreeRequested`
@@ -122,6 +125,13 @@ struct TabBarFeature {
 
       case .closeButtonTapped(let tabID):
         try? hierarchyClient.closeTab(tabID)
+        return .none
+
+      case .stripTapped(let paneID):
+        try? hierarchyClient.focusPane(paneID)
+        guard let contentID = hierarchyClient.snapshot().pane(paneID)?.selectedTab?.contentID
+        else { return .none }
+        hierarchyClient.focusSurfaceView(contentID)
         return .none
 
       case .renameSubmitted(let tabID, let name):

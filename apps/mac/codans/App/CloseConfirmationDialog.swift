@@ -1,7 +1,8 @@
 import AppKit
+import CodansCore
 
 /// What a close would take with it, for the confirmation prompt.
-struct QueuedCommandDiscard: Equatable {
+struct CloseConfirmationPrompt: Equatable {
   enum Subject: Equatable {
     case pane
     case tab
@@ -10,7 +11,20 @@ struct QueuedCommandDiscard: Equatable {
   }
 
   var subject: Subject
+  /// Queued commands across the affected Tabs; discarded by the close.
   var queuedCount: Int
+  /// Whether an affected Tab runs a foreground command or a working agent.
+  var isRunning: Bool
+
+  /// The settings decision for a close over these Tabs. `anyLive` is false
+  /// when no affected Content has a live surface: a session whose process
+  /// already exited is being tidied up, its queue could never run, so it
+  /// counts as idle.
+  static func shouldPrompt(
+    _ setting: CloseTabConfirmation, anyBusy: Bool, anyLive: Bool
+  ) -> Bool {
+    setting.shouldPrompt(anyBusy: anyBusy && anyLive)
+  }
 
   /// "3 queued commands will be discarded." — shared with the sidebar's
   /// Remove Worktree / Remove Project prompts so the wording matches.
@@ -21,28 +35,27 @@ struct QueuedCommandDiscard: Equatable {
   }
 }
 
-/// Sheet asking whether to close a pane or tab that still holds queued
-/// commands. The queue lives on the pane, so closing the pane discards it
-/// silently; this is the one place the user learns that before it happens.
+/// Sheet asking whether to close a pane or tab, per the "Confirm before
+/// closing a tab" setting.
 ///
 /// Presented as a sheet on the key window and answered through a completion
 /// rather than `runModal()`: the close requests that reach it are sent from
 /// inside reducers, and a nested modal run loop there would re-enter the
 /// store. Cancel is the default — the prompt exists to protect work that
-/// cannot be recovered, so Return keeps it and Close Anyway takes a click.
+/// cannot be recovered, so Return keeps it and Close takes a click.
 @MainActor
-enum QueuedCommandsCloseDialog {
+enum CloseConfirmationDialog {
   static func present(
-    _ discard: QueuedCommandDiscard,
+    _ prompt: CloseConfirmationPrompt,
     completion: @escaping @MainActor (Bool) -> Void
   ) {
     let alert = NSAlert()
     alert.alertStyle = .warning
-    alert.messageText = Self.title(for: discard.subject)
-    alert.informativeText = QueuedCommandDiscard.discardNotice(discard.queuedCount)
+    alert.messageText = Self.title(for: prompt.subject)
+    alert.informativeText = Self.detail(for: prompt)
     // First button takes Return; a button titled "Cancel" takes Escape too.
     alert.addButton(withTitle: "Cancel")
-    let close = alert.addButton(withTitle: "Close Anyway")
+    let close = alert.addButton(withTitle: "Close")
     close.hasDestructiveAction = true
 
     if let window = NSApp.keyWindow ?? NSApp.mainWindow {
@@ -54,11 +67,22 @@ enum QueuedCommandsCloseDialog {
     }
   }
 
-  private static func title(for subject: QueuedCommandDiscard.Subject) -> String {
+  private static func title(for subject: CloseConfirmationPrompt.Subject) -> String {
     switch subject {
     case .pane: return "Close this pane?"
     case .tab: return "Close this tab?"
     case .tabs(let count): return "Close \(count) tabs?"
     }
+  }
+
+  private static func detail(for prompt: CloseConfirmationPrompt) -> String {
+    var lines: [String] = []
+    if prompt.isRunning {
+      lines.append("A command or agent is still running and will be stopped.")
+    }
+    if prompt.queuedCount > 0 {
+      lines.append(CloseConfirmationPrompt.discardNotice(prompt.queuedCount))
+    }
+    return lines.joined(separator: " ")
   }
 }

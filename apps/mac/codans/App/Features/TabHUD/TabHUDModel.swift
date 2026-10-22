@@ -1,12 +1,12 @@
 import CodansCore
 import Foundation
 
-/// What the pane HUD has to decide, resolved from the catalog and the live
-/// agent store in one pass: which agent this pane carries, and whether hand
+/// What the Tab HUD has to decide, resolved from the catalog and the live
+/// agent store in one pass: which agent this Tab's Content carries, and whether hand
 /// off can be offered here. Kept out of the view body so the rules are
 /// testable without a view tree and the "why is this unavailable" answers
 /// are spelled once.
-nonisolated struct PaneHUDModel: Equatable, Sendable {
+nonisolated struct TabHUDModel: Equatable, Sendable {
   /// Agent codans currently attributes to this pane.
   let agent: AgentKind?
   /// Why hand off cannot be offered here, or `nil` when it can. Phrased for
@@ -30,7 +30,7 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
     contentID: ContentID,
     in catalog: Catalog,
     agent: AgentKind?
-  ) -> PaneHUDModel? {
+  ) -> TabHUDModel? {
     guard
       let projectID = catalog.projectID(forContent: contentID),
       let project = catalog.projects.first(where: { $0.id == projectID })
@@ -39,7 +39,7 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
     }
     let content = catalog.content(contentID)?.terminal
     let resolvedAgent = agent ?? content?.agentKind
-    return PaneHUDModel(
+    return TabHUDModel(
       agent: resolvedAgent,
       handOffBlockedReason: handOffBlockedReason(project: project, agent: resolvedAgent),
       queuedCommandCount: content?.commandQueue.count ?? 0

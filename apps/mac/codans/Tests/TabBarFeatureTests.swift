@@ -118,6 +118,34 @@ struct TabBarFeatureTests {
     #expect(received.value == tabID)
   }
 
+  @Test
+  func stripTapFocusesThePaneAndItsSelectedTab() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let tabs = (0..<2).map { _ in Tab(content: .terminal(workingDirectory: "/tmp")) }
+    let other = Pane(tabs: [Tab(content: .terminal(workingDirectory: "/tmp"))])
+    let pane = Pane(tabs: tabs, selectedTabID: tabs[1].id)
+    let catalog = Self.catalog(
+      projectID: projectID, worktreeID: worktreeID,
+      splitTree: (try? SplitTree(leaf: other.id).inserting(pane.id, at: other.id, direction: .right))
+        ?? SplitTree(leaf: other.id),
+      panes: [other, pane], focusedPaneID: other.id)
+    let focusedPane = LockIsolated<PaneID?>(nil)
+    let focusedSurface = LockIsolated<ContentID?>(nil)
+
+    let store = TestStore(initialState: TabBarFeature.State()) {
+      TabBarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.focusPane = { id in focusedPane.withValue { $0 = id } }
+      $0.hierarchyClient.focusSurfaceView = { id in focusedSurface.withValue { $0 = id } }
+    }
+
+    await store.send(.stripTapped(pane.id))
+    #expect(focusedPane.value == pane.id)
+    #expect(focusedSurface.value == tabs[1].contentID)
+  }
+
   // MARK: - Tab-bar uplift (M2-T2.10)
 
   @Test

@@ -1,7 +1,7 @@
 import CodansCore
 import SwiftUI
 
-/// Actions the pane HUD fires that only the root store can service.
+/// Actions the Tab HUD fires that only the root store can service.
 ///
 /// The HUD sits four levels below `ContentView` (`SplitViewportView` →
 /// `SubtreeView` → `LeafView` → `LazyPaneHost`), and the two intermediate
@@ -9,13 +9,13 @@ import SwiftUI
 /// churn every initialiser; the environment carries it in one hop instead —
 /// the same trade `ContentView` already makes with `onAddProject` and
 /// `onFocusHierarchyPath`, one level up.
-private struct PaneHUDActionsKey: EnvironmentKey {
-  static let defaultValue = PaneHUDActions()
+private struct TabHUDActionsKey: EnvironmentKey {
+  static let defaultValue = TabHUDActions()
 }
 
 /// Defaults to no-ops so a preview or a test host renders the HUD without
 /// wiring the root store.
-struct PaneHUDActions {
+struct TabHUDActions {
   /// Opens the Hand Off panel for the given pane. Routed to
   /// `RootFeature.handoffRequested`, which re-checks the pane's agent and
   /// project kind before presenting.
@@ -26,8 +26,8 @@ struct PaneHUDActions {
 }
 
 extension EnvironmentValues {
-  var paneHUDActions: PaneHUDActions {
-    get { self[PaneHUDActionsKey.self] }
-    set { self[PaneHUDActionsKey.self] = newValue }
+  var tabHUDActions: TabHUDActions {
+    get { self[TabHUDActionsKey.self] }
+    set { self[TabHUDActionsKey.self] = newValue }
   }
 }

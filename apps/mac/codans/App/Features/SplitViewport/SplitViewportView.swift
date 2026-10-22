@@ -72,6 +72,25 @@ struct SplitViewportView: View {
       guard !Task.isCancelled else { return }
       settledWorktreeID = graced
     }
+    .onChange(of: worktreeID) {
+      // Wait one turn so the previous Worktree's surface has left the
+      // window before reading where the keyboard is.
+      DispatchQueue.main.async { restoreKeyboardFocus() }
+    }
+  }
+
+  /// Hands the keyboard back to the focused Pane's selected Tab after a
+  /// Worktree switch — but only when the keyboard was in a terminal: the
+  /// previous surface left the window (first responder fell back to the
+  /// window) or another surface still holds it. A switch made from the
+  /// sidebar keeps the keyboard there, so arrow-key navigation goes on.
+  private func restoreKeyboardFocus() {
+    guard let window = NSApp.keyWindow else { return }
+    let responder = window.firstResponder
+    guard responder == nil || responder === window || responder is GhosttySurfaceView,
+      let contentID = currentWorktree()?.focusedPane?.selectedTab?.contentID
+    else { return }
+    hierarchyManager.focusSurfaceView(for: contentID)
   }
 
   /// The tree to draw: the zoomed Pane alone when one is zoomed, else the

@@ -653,34 +653,44 @@ extension HierarchyClient {
     gitCLI: GitWorktreeCLI = GitWorktreeCLI(),
     terminalClient: TerminalClient? = nil,
     contents: ContentRuntime? = nil,
-    confirmQueueDiscard:
+    closeTabConfirmation: (@MainActor () -> CloseTabConfirmation)? = nil,
+    confirmClose:
       @escaping @MainActor (
-        QueuedCommandDiscard, _ completion: @escaping @MainActor (Bool) -> Void
-      ) -> Void = { discard, completion in
-        QueuedCommandsCloseDialog.present(discard, completion: completion)
+        CloseConfirmationPrompt, _ completion: @escaping @MainActor (Bool) -> Void
+      ) -> Void = { prompt, completion in
+        CloseConfirmationDialog.present(prompt, completion: completion)
       }
   ) -> HierarchyClient {
-    /// Closing a Tab that still holds queued commands is asked first. The
-    /// gate sits here, on the UI's bridge, rather than in the manager: the
-    /// CLI and the run-script auto-close policies reach the manager directly
-    /// and must never block on a prompt. It also steps aside when none of
-    /// the Contents has a live surface — a session whose process already
-    /// exited is being tidied up, not closed, and its queue could not run
-    /// anyway. When it does ask, the close happens in the answer's
-    /// completion, so the caller's `try` returns having closed nothing yet.
+    /// Closing a Tab or a Pane asks first per the "Confirm before closing a
+    /// tab" setting. The gate sits here, on the UI's bridge, rather than in
+    /// the manager: the CLI and the run-script auto-close policies reach the
+    /// manager directly and must never block on a prompt. Busy steps aside
+    /// when none of the Contents has a live surface — a session whose
+    /// process already exited is being tidied up, not closed, and its queue
+    /// could not run anyway. When it does ask, the close happens in the
+    /// answer's completion, so the caller's `try` returns having closed
+    /// nothing yet.
     func closeAfterConfirming(
       contents: [ContentSnapshot],
-      subject: QueuedCommandDiscard.Subject,
+      subject: CloseConfirmationPrompt.Subject,
       _ close: @escaping @MainActor () throws -> Void
     ) throws {
+      let setting =
+        closeTabConfirmation?() ?? settings?.settings.general.closeTabConfirmation ?? .busy
       let queued = contents.reduce(0) { $0 + ($1.terminal?.commandQueue.count ?? 0) }
+      let anyBusy = contents.contains { manager.isBusy($0.id) }
       let anyLive =
         terminalClient.map { client in contents.contains { client.surface($0.id) != nil } } ?? true
-      guard queued > 0, anyLive else {
+      guard
+        !contents.isEmpty,
+        CloseConfirmationPrompt.shouldPrompt(setting, anyBusy: anyBusy, anyLive: anyLive)
+      else {
         try close()
         return
       }
-      confirmQueueDiscard(QueuedCommandDiscard(subject: subject, queuedCount: queued)) { confirmed in
+      let isRunning = anyLive && contents.contains { manager.contentActivity?($0.id) ?? false }
+      let prompt = CloseConfirmationPrompt(subject: subject, queuedCount: queued, isRunning: isRunning)
+      confirmClose(prompt) { confirmed in
         guard confirmed else { return }
         try? close()
       }

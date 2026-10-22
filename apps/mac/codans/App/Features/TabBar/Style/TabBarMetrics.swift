@@ -50,6 +50,31 @@ enum TabBarMetrics {
   static let dividerWidth: CGFloat = chipSpacing
   static let dividerHeight: CGFloat = 18
 
+  /// Trailing accessory buttons (+, history, split right, split down): a
+  /// square hit target, the gap between two of them, and the cluster's
+  /// horizontal padding on each side.
+  static let accessorySize: CGFloat = 22
+  static let accessorySpacing: CGFloat = 4
+  static let accessoryClusterPadding: CGFloat = 6
+  /// Gap between the chip track and the accessory cluster.
+  static let trackAccessoryGap: CGFloat = 4
+
+  /// Width of an accessory cluster holding `count` buttons.
+  static func accessoryClusterWidth(count: Int) -> CGFloat {
+    guard count > 0 else { return 0 }
+    return CGFloat(count) * accessorySize + CGFloat(count - 1) * accessorySpacing
+      + accessoryClusterPadding * 2
+  }
+
+  /// Whether a strip `stripWidth` wide folds history and the two split
+  /// buttons into the `+` menu. The full cluster folds once it would leave
+  /// the track less than one minimum-width chip, so a narrow Pane keeps
+  /// room for its chips.
+  static func foldsAccessories(stripWidth: CGFloat) -> Bool {
+    let fullStrip = trackLeadingInset + chipMinWidth + trackAccessoryGap + accessoryClusterWidth(count: 4)
+    return stripWidth < fullStrip
+  }
+
   /// Delay before the trailing split buttons show their pane-tree preview
   /// popover.
   static let hoverPreviewDelay: Duration = .milliseconds(350)
