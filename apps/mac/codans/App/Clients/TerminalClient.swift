@@ -30,19 +30,23 @@ nonisolated struct TerminalClient: Sendable {
   var setFocus: @MainActor @Sendable (_ contentID: ContentID, _ focused: Bool) -> Void
   var retryPane: @MainActor @Sendable (_ contentID: ContentID) -> Bool
 
-  /// Create or return the existing `PaneSurface` for the Content. Throws
-  /// `TerminalClient.Error.contentNotFound` if the Content is not in the
-  /// current catalog. The address, Worktree and Project env are resolved
-  /// here so the engine receives everything the spawn needs. `initialSize`
-  /// is the size in points of the slot that will show the Content, when
-  /// known; see `TerminalEngine.ensureSurface`.
+  /// Create or return the existing `PaneSurface` for the Content, through
+  /// `ContentRuntime`. Throws `TerminalClient.Error.contentNotFound` if the
+  /// Content is not in the current catalog. The address, Worktree and
+  /// Project env are resolved here so the spawn receives everything it
+  /// needs. `geometry` is the slot that will show the Content, when known;
+  /// see `TerminalEngine.ensureSurface`.
   ///
   /// `async throws` because bring-up spawns the zmx daemon and completes a
   /// control-socket handshake before libghostty wires the External PTY
   /// backend onto the new surface.
   var ensureSurface:
-    @MainActor @Sendable (_ contentID: ContentID, _ initialSize: CGSize?) async throws -> Void
-  var closeSurface: @MainActor @Sendable (_ contentID: ContentID) -> Void
+    @MainActor @Sendable (_ contentID: ContentID, _ geometry: ContentGeometry?) async throws -> Void
+  /// The content host view placed the Content in a slot of `geometry`
+  /// (on appear and on every slot change); see `ContentRuntime.mount`.
+  var mount: @MainActor @Sendable (_ contentID: ContentID, _ geometry: ContentGeometry) -> Void
+  /// The content host view left its slot.
+  var unmount: @MainActor @Sendable (_ contentID: ContentID) -> Void
 
   /// Look up an existing `PaneSurface` registered with the engine. Returns
   /// `nil` when no surface has been created for the Content yet; callers
@@ -75,14 +79,13 @@ nonisolated struct TerminalClient: Sendable {
 // MARK: - Live bridge
 
 extension TerminalClient {
-  /// `contents` is the registry the surface is created through, so the
-  /// strip finds a `TabChrome` for every live Content; `envProvider`
-  /// resolves the Project's env vars for the spawn. Both default to the
-  /// bare engine path for headless tests.
+  /// `contents` is the registry every surface is created, mounted and
+  /// unmounted through, so the strip finds a `TabChrome` for every live
+  /// Content; `envProvider` resolves the Project's env vars for the spawn.
   @MainActor
   static func live(
     engine: TerminalEngine,
-    contents: ContentRuntime? = nil,
+    contents: ContentRuntime,
     envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] }
   ) -> TerminalClient {
     TerminalClient(
@@ -107,7 +110,7 @@ extension TerminalClient {
         engine.ghosttyRuntime?.surface(for: contentID)?.setFocus(focused)
       },
       retryPane: { contentID in engine.retryPane(contentID) },
-      ensureSurface: { contentID, initialSize in
+      ensureSurface: { contentID, geometry in
         let catalog = engine.hierarchy.catalog
         guard let address = catalog.address(forContent: contentID),
           let project = catalog.projects.first(where: { $0.id == address.projectID }),
@@ -119,15 +122,10 @@ extension TerminalClient {
         let env = HierarchyManager.injectingBuiltins(
           envProvider(address.projectID), worktreePath: worktree.path, rootPath: project.rootPath,
           workspaceRoot: project.isWorkspace ? project.rootPath : nil)
-        let geometry = initialSize.map { ContentGeometry(size: $0) }
-        if let contents {
-          _ = try await contents.ensure(content, in: address, worktree: worktree, env: env, geometry: geometry)
-        } else {
-          _ = try await engine.ensureSurface(
-            for: content, at: address, in: worktree, env: env, initialSize: initialSize)
-        }
+        _ = try await contents.ensure(content, in: address, worktree: worktree, env: env, geometry: geometry)
       },
-      closeSurface: { contentID in engine.closeSurface(for: contentID) },
+      mount: { contentID, geometry in contents.mount(contentID, geometry: geometry) },
+      unmount: { contentID in contents.unmount(contentID) },
       surface: { contentID in engine.ghosttyRuntime?.surface(for: contentID) },
       events: { engine.events() }
     )
@@ -146,7 +144,8 @@ extension TerminalClient: DependencyKey {
     setFocus: { _, _ in fatalError("TerminalClient.liveValue not configured") },
     retryPane: { _ in fatalError("TerminalClient.liveValue not configured") },
     ensureSurface: { _, _ in fatalError("TerminalClient.liveValue not configured") },
-    closeSurface: { _ in fatalError("TerminalClient.liveValue not configured") },
+    mount: { _, _ in fatalError("TerminalClient.liveValue not configured") },
+    unmount: { _ in fatalError("TerminalClient.liveValue not configured") },
     surface: { _ in nil },
     events: { AsyncStream { $0.finish() } }
   )
@@ -158,7 +157,8 @@ extension TerminalClient: DependencyKey {
     setFocus: unimplemented("TerminalClient.setFocus"),
     retryPane: unimplemented("TerminalClient.retryPane", placeholder: false),
     ensureSurface: unimplemented("TerminalClient.ensureSurface"),
-    closeSurface: unimplemented("TerminalClient.closeSurface"),
+    mount: unimplemented("TerminalClient.mount"),
+    unmount: unimplemented("TerminalClient.unmount"),
     // Quiet `{ _ in nil }` mirrors the liveValue fallback above: pane-host
     // / view-side lookups for a not-yet-attached surface are an expected
     // outcome, not a test contract worth asserting. Without this default,

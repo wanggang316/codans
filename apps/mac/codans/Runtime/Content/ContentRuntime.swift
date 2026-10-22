@@ -1,12 +1,15 @@
 import CodansCore
 import Foundation
 import Observation
+import os.log
 
-/// Registry of live Content, keyed by `ContentID`. Owns the `TabContent`
-/// instances — creates one the first time a Content is brought up, drops
-/// it on close / suspend — and is where views fetch a renderer and the
-/// strip fetches a `TabChrome`. `HierarchyManager` never holds live
-/// state; it drives this registry through the `HierarchyRuntime` seam.
+/// Registry of live Content, keyed by `ContentID`, and the single path for
+/// a Content's lifecycle (ADR-0002). Owns the `TabContent` instances —
+/// creates one the first time a Content is brought up, drops it on close /
+/// suspend — and keeps the chrome the strip's busy predicates read.
+/// `HierarchyManager` never holds live state; it drives this registry
+/// through the `HierarchyRuntime` seam, and the content host view mounts
+/// and unmounts through `TerminalClient`.
 ///
 /// Busy predicates over the catalog (`tabIsDirty`, `worktreeIsDirty`,
 /// `isScriptRunning`) live here rather than on the manager because they
@@ -17,51 +20,28 @@ import Observation
 final class ContentRuntime {
   typealias Factory = @MainActor (ContentSnapshot) -> any TabContent
 
-  /// Whether this launch may run the session reaper, the filesystem
-  /// orphan sweep and the unread sweep. Off when the catalog loaded with
-  /// losses or read-only: a dropped Tab's session must not be reaped as
-  /// an orphan, and a catalog this build cannot write must not have its
-  /// sessions touched.
-  let sessionSweepsEnabled: Bool
-
   @ObservationIgnored private unowned let hierarchy: HierarchyManager
   @ObservationIgnored private let makeContent: Factory
+  @ObservationIgnored private let logger = Logger(subsystem: "com.gumpw.codans.runtime", category: "content")
   private var contents: [ContentID: any TabContent] = [:]
+  /// The slot each Content was last mounted in. A bring-up that knows no
+  /// slot (a re-attach after an idle reclaim, an IPC-driven ensure) starts
+  /// at this size, so a live session is not resized through another width.
+  @ObservationIgnored private var mountedGeometry: [ContentID: ContentGeometry] = [:]
 
-  init(
-    hierarchy: HierarchyManager,
-    loadReport: CatalogLoadReport = .clean,
-    makeContent: @escaping Factory
-  ) {
+  init(hierarchy: HierarchyManager, makeContent: @escaping Factory) {
     self.hierarchy = hierarchy
-    self.sessionSweepsEnabled = loadReport.allowsSessionSweeps
     self.makeContent = makeContent
   }
 
   // Explicit nonisolated deinit; see `TerminalEngine.deinit`.
   deinit {}
 
-  // MARK: - Registry
-
-  func content(for id: ContentID) -> (any TabContent)? {
-    contents[id]
-  }
-
-  func chrome(for id: ContentID) -> TabChrome? {
-    contents[id]?.chrome
-  }
-
-  var registeredContentIDs: Set<ContentID> {
-    Set(contents.keys)
-  }
-
-  /// Registered Contents whose live resources exist right now.
-  var liveContentIDs: Set<ContentID> {
-    Set(contents.filter { $0.value.isLive }.keys)
-  }
+  // MARK: - Lifecycle
 
   /// Create the instance on first use, then bring its live resources up
   /// (or re-attach). Idempotent: an already-live Content returns at once.
+  /// Without a `geometry`, the last mounted slot's geometry is used.
   @discardableResult
   func ensure(
     _ snapshot: ContentSnapshot,
@@ -77,34 +57,45 @@ final class ContentRuntime {
       content = makeContent(snapshot)
       contents[snapshot.id] = content
     }
-    try await content.create(snapshot: snapshot, at: address, in: worktree, env: env, geometry: geometry)
+    try await content.create(
+      snapshot: snapshot, at: address, in: worktree, env: env,
+      geometry: geometry ?? mountedGeometry[snapshot.id])
     return content
   }
 
+  /// The content host view placed the Content's renderer in a slot of
+  /// `geometry` (on appear, and again when the slot changes size).
   func mount(_ id: ContentID, geometry: ContentGeometry) {
+    mountedGeometry[id] = geometry
     contents[id]?.mount(geometry: geometry)
   }
 
+  /// The renderer left its slot; the Content stays alive.
   func unmount(_ id: ContentID) {
     contents[id]?.unmount()
   }
 
-  /// Tear the Content down for good and forget it. A Content that was
-  /// never brought up this launch has no instance here; the caller's
-  /// engine-side close still kills its daemon.
+  /// Tear the Content down for good and forget it. A Content not brought
+  /// up this launch still has a daemon to kill, so it gets an instance
+  /// from the catalog snapshot just for the teardown.
   func close(_ id: ContentID) {
-    contents.removeValue(forKey: id)?.close()
+    teardownInstance(id)?.close()
   }
 
-  /// Archive teardown; see `TabContent.suspend`.
+  /// Archive teardown; see `TabContent.suspend`. Same lookup as `close`.
   func suspend(_ id: ContentID) {
-    contents.removeValue(forKey: id)?.suspend()
+    teardownInstance(id)?.suspend()
   }
 
-  /// Forget the instance without touching its resources — the engine
-  /// already reported the surface gone.
-  func release(_ id: ContentID) {
-    contents.removeValue(forKey: id)
+  private func teardownInstance(_ id: ContentID) -> (any TabContent)? {
+    mountedGeometry.removeValue(forKey: id)
+    if let registered = contents.removeValue(forKey: id) { return registered }
+    guard let snapshot = hierarchy.catalog.content(id) else {
+      logger.error(
+        "teardown of content \(id.raw.uuidString, privacy: .public) that is neither live nor in the catalog")
+      return nil
+    }
+    return makeContent(snapshot)
   }
 
   func acceptFocus(_ id: ContentID) {

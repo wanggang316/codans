@@ -20,7 +20,7 @@ import SwiftUI
 /// Surfaces are retained across tab switches by `TerminalEngine`'s
 /// registry. The reducer's registry short-circuit reuses them on
 /// reappearance; explicit teardown still goes through
-/// `HierarchyClient.closePane` → `TerminalEngine.closeSurface`.
+/// `HierarchyClient.closeTab` → `ContentRuntime.close` → `TerminalContent.close`.
 struct LazyPaneHost: View {
   @Bindable var store: StoreOf<PaneHostFeature>
   /// False until `loadingChromeDelay` has elapsed on the current

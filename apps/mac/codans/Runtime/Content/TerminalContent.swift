@@ -41,11 +41,14 @@ final class TerminalContent: TabContent {
     chrome.source = surface.info
   }
 
-  /// The surface view sizes itself from its slot (`GhosttySurfaceView`),
-  /// and a re-attach after reclaim starts at the size recorded by the
-  /// engine; nothing to forward here.
+  /// A live surface view follows its slot through layout
+  /// (`GhosttySurfaceView.pushGeometry`), and `ContentRuntime` hands the
+  /// mounted geometry to the next `create`, so a re-attach starts at the
+  /// slot size. Nothing else to resize here.
   func mount(geometry: ContentGeometry) {}
 
+  /// The surface and its daemon stay up off-screen; the engine's idle
+  /// reclaim decides when a hidden surface goes.
   func unmount() {}
 
   func close() {

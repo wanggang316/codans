@@ -14,8 +14,8 @@ protocol TabChromeSource: AnyObject {
 }
 
 /// The strip-facing state of one Content. One instance per registered
-/// Content, owned by its `TabContent`; the chip reads it through
-/// `ContentRuntime.chrome(for:)`.
+/// Content, owned by its `TabContent`; the strip reads it through the
+/// `ContentRuntime` busy predicates (`isTerminalBusy`, `tabIsDirty`).
 ///
 /// `isBusy` and `isCommandBusy` are the two "terminal busy" sources the
 /// strip ORs together: OSC 9;4 progress reports and a running foreground

@@ -14,4 +14,8 @@ nonisolated struct ContentGeometry: Equatable, Sendable {
     self.size = size
     self.scale = scale
   }
+
+  /// A slot that has not been laid out yet reports a zero size; it says
+  /// nothing about where the Content will be shown.
+  var isLaidOut: Bool { size.width > 0 && size.height > 0 }
 }

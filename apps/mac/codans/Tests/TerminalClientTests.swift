@@ -15,7 +15,8 @@ struct TerminalClientTests {
     // ghosttyRuntime = nil: we exercise events() and closure wiring, not
     // actual surface creation (requires a real GhosttyRuntime + window).
     let engine = TerminalEngine(store: store, hierarchy: manager)
-    return (TerminalClient.live(engine: engine), engine)
+    let contents = ContentRuntime(hierarchy: manager) { TerminalContent(id: $0.id, engine: engine) }
+    return (TerminalClient.live(engine: engine, contents: contents), engine)
   }
 
   @Test

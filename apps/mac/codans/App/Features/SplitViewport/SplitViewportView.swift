@@ -337,6 +337,8 @@ private struct PaneView: View {
   /// change, layout) forces a rebuild — which is what produced the stale
   /// light/dark wash on unfocused panes after a theme switch.
   @Environment(\.colorScheme) private var colorScheme
+  /// Backing scale of the window the slot lives in, for the mount geometry.
+  @Environment(\.displayScale) private var displayScale
   /// Bumped on `.ghosttyRuntimeConfigApplied` so the overlay re-resolves when
   /// the user picks a new ghostty theme (Settings → Terminal, or by editing
   /// `~/.config/ghostty/config`). `colorScheme` only covers the appearance
@@ -438,7 +440,18 @@ private struct PaneView: View {
         // at send time (both run on MainActor, so no gap in between).
         .task(id: contentID) {
           guard store.paneHosts[id: contentID] != nil else { return }
-          store.send(.paneHosts(.element(id: contentID, action: .task(slotSize: slotSize))))
+          let geometry = ContentGeometry(size: slotSize, scale: displayScale)
+          store.send(.paneHosts(.element(id: contentID, action: .task(geometry: geometry))))
+        }
+        // Mount / unmount follow the host's place in the layout, through
+        // the same membership check as the bring-up above.
+        .onChange(of: ContentGeometry(size: slotSize, scale: displayScale)) { _, geometry in
+          guard store.paneHosts[id: contentID] != nil else { return }
+          store.send(.paneHosts(.element(id: contentID, action: .slotChanged(geometry))))
+        }
+        .onDisappear {
+          guard store.paneHosts[id: contentID] != nil else { return }
+          store.send(.paneHosts(.element(id: contentID, action: .disappeared)))
         }
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
