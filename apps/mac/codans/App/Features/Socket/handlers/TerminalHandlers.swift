@@ -68,14 +68,14 @@ public final class TerminalHandlers {
     }
   }
   public struct SendInputParams: Codable, Sendable {
-    public let contentID: ContentID
+    public let paneID: ContentID
     public let text: String
     public let wait: SendWaitParams?
     /// With `wait`, also return the screen lines the command produced.
     public let capture: Bool?
 
-    public init(contentID: ContentID, text: String, wait: SendWaitParams? = nil, capture: Bool? = nil) {
-      self.contentID = contentID
+    public init(paneID: ContentID, text: String, wait: SendWaitParams? = nil, capture: Bool? = nil) {
+      self.paneID = paneID
       self.text = text
       self.wait = wait
       self.capture = capture
@@ -111,16 +111,16 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: SendInputParams.self)
     } catch {
-      return .failed(.invalidParams(message: "sendInput requires {contentID, text}", path: nil))
+      return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
-    let before = req.capture == true ? sink.readText(contentID: req.contentID, extent: .screen) : nil
-    let ok = sink.sendInput(contentID: req.contentID, text: req.text)
+    let before = req.capture == true ? sink.readText(contentID: req.paneID, extent: .screen) : nil
+    let ok = sink.sendInput(contentID: req.paneID, text: req.text)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
     }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
-      let outcome = await waitForCompletion(contentID: req.contentID, wait: wait, sink: sink)
+      let outcome = await waitForCompletion(contentID: req.paneID, wait: wait, sink: sink)
       let output = req.capture == true
         ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
       result = SendInputResult(
@@ -211,7 +211,7 @@ public final class TerminalHandlers {
   }
 
   public struct SendKeyParams: Codable, Sendable {
-    public let contentID: ContentID
+    public let paneID: ContentID
     public let key: IPC.TerminalNamedKey
   }
   public func sendKey(_ params: JSONValue) async -> RouterOutcome {
@@ -224,17 +224,17 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: SendKeyParams.self)
     } catch {
-      return .failed(.invalidParams(message: "sendKey requires {contentID, key}", path: nil))
+      return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
     }
-    let ok = sink.sendKey(contentID: req.contentID, key: req.key)
+    let ok = sink.sendKey(contentID: req.paneID, key: req.key)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
     }
     return .unary(.object(["delivered": .bool(true)]))
   }
 
   public struct SendRawBytesParams: Codable, Sendable {
-    public let contentID: ContentID
+    public let paneID: ContentID
     /// Hex-encoded bytes, e.g. "1b5b41" for ESC [ A (up arrow CSI).
     /// Whitespace and an optional "0x" prefix are tolerated by the decoder.
     public let hex: String
@@ -249,14 +249,14 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: SendRawBytesParams.self)
     } catch {
-      return .failed(.invalidParams(message: "sendRawBytes requires {contentID, hex}", path: nil))
+      return .failed(.invalidParams(message: "sendRawBytes requires {paneID, hex}", path: nil))
     }
     guard let bytes = Self.decodeHex(req.hex) else {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
-    let ok = sink.sendRawBytes(contentID: req.contentID, bytes: bytes)
+    let ok = sink.sendRawBytes(contentID: req.paneID, bytes: bytes)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
     }
     return .unary(
       .object([
@@ -315,7 +315,7 @@ public final class TerminalHandlers {
     public let timeoutMillis: Int
   }
   public struct ReadTextParams: Codable, Sendable {
-    public let contentID: ContentID
+    public let paneID: ContentID
     public let extent: ReadExtent?
     /// When present, poll until stable instead of reading once.
     public let waitStable: WaitStableParams?
@@ -345,7 +345,7 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: ReadTextParams.self)
     } catch {
-      return .failed(.invalidParams(message: "readText requires {contentID}", path: nil))
+      return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
     }
     let extent = req.extent ?? .viewport
     let result: ReadTextResult
@@ -355,10 +355,10 @@ public final class TerminalHandlers {
         stableMillis: ws.stableMillis,
         intervalMillis: ws.intervalMillis,
         timeoutMillis: ws.timeoutMillis,
-        read: { [sink] in sink.readText(contentID: req.contentID, extent: extent) }
+        read: { [sink] in sink.readText(contentID: req.paneID, extent: extent) }
       )
       guard let outcome = await waiter.run() else {
-        return .failed(.notFound(kind: "pane", id: req.contentID.description))
+        return .failed(.notFound(kind: "pane", id: req.paneID.description))
       }
       result = ReadTextResult(
         text: outcome.text,
@@ -367,8 +367,8 @@ public final class TerminalHandlers {
         samples: outcome.samples
       )
     } else {
-      guard let text = sink.readText(contentID: req.contentID, extent: extent) else {
-        return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      guard let text = sink.readText(contentID: req.paneID, extent: extent) else {
+        return .failed(.notFound(kind: "pane", id: req.paneID.description))
       }
       result = ReadTextResult(text: text)
     }
@@ -380,7 +380,7 @@ public final class TerminalHandlers {
   }
 
   public struct ResetPaneParams: Codable, Sendable {
-    public let contentID: ContentID
+    public let paneID: ContentID
   }
   public func resetPane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
@@ -392,11 +392,11 @@ public final class TerminalHandlers {
     do {
       req = try params.decoded(as: ResetPaneParams.self)
     } catch {
-      return .failed(.invalidParams(message: "resetPane requires {contentID}", path: nil))
+      return .failed(.invalidParams(message: "resetPane requires {paneID}", path: nil))
     }
-    let ok = sink.resetPane(contentID: req.contentID)
+    let ok = sink.resetPane(contentID: req.paneID)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.contentID.description))
+      return .failed(.notFound(kind: "pane", id: req.paneID.description))
     }
     return .unary(.object(["reset": .bool(true)]))
   }

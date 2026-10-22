@@ -161,7 +161,6 @@ extension HierarchyHandlers {
     let workingDirectory = effectiveWorkingDirectory(
       requested, projectID: address.projectID, worktreeID: address.worktreeID)
     do {
-      try manager.requireLocalDirectory(workingDirectory, in: address.projectID)
       let created = try manager.splitPane(
         from: anchorID,
         direction: req.direction,
