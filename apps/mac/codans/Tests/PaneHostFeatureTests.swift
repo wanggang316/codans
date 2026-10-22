@@ -41,42 +41,42 @@ struct PaneHostFeatureTests {
   private static let surfaceNotRegistered = PaneHostFeature.Failure(
     reason: "Surface not registered after creation."
   )
-  private static let slotSize = CGSize(width: 1_640, height: 1_020)
+  private static let geometry = ContentGeometry(size: CGSize(width: 1_640, height: 1_020), scale: 2)
 
   @Test
-  func taskStartsTheSurfaceAtTheSlotSize() async {
-    let sizes = LockIsolated<[CGSize?]>([])
+  func taskStartsTheSurfaceAtTheSlotGeometry() async {
+    let sizes = LockIsolated<[ContentGeometry?]>([])
     let store = TestStore(initialState: Self.makeState()) {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, initialSize in
-        sizes.withValue { $0.append(initialSize) }
+      $0.terminalClient.ensureSurface = { _, geometry in
+        sizes.withValue { $0.append(geometry) }
       }
     }
 
-    await store.send(.task(slotSize: Self.slotSize)) {
-      $0.slotSize = Self.slotSize
+    await store.send(.task(geometry: Self.geometry)) {
+      $0.slotGeometry = Self.geometry
     }
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
     }
-    #expect(sizes.value == [Self.slotSize])
+    #expect(sizes.value == [Self.geometry])
   }
 
   @Test
   func taskWithAnEmptySlotLeavesTheInitialSizeUnknown() async {
-    let sizes = LockIsolated<[CGSize?]>([])
+    let sizes = LockIsolated<[ContentGeometry?]>([])
     let store = TestStore(initialState: Self.makeState()) {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, initialSize in
-        sizes.withValue { $0.append(initialSize) }
+      $0.terminalClient.ensureSurface = { _, geometry in
+        sizes.withValue { $0.append(geometry) }
       }
     }
 
-    await store.send(.task(slotSize: .zero))
+    await store.send(.task(geometry: ContentGeometry(size: .zero, scale: 2)))
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
     }
@@ -84,17 +84,17 @@ struct PaneHostFeatureTests {
   }
 
   @Test
-  func retryStartsTheSurfaceAtTheLastSlotSize() async {
-    let sizes = LockIsolated<[CGSize?]>([])
+  func retryStartsTheSurfaceAtTheLastSlotGeometry() async {
+    let sizes = LockIsolated<[ContentGeometry?]>([])
     var initial = Self.makeState()
     initial.phase = .failed(.init(reason: "prior"))
-    initial.slotSize = Self.slotSize
+    initial.slotGeometry = Self.geometry
     let store = TestStore(initialState: initial) {
       PaneHostFeature()
     } withDependencies: {
       $0.terminalClient.surface = { _ in nil }
-      $0.terminalClient.ensureSurface = { _, initialSize in
-        sizes.withValue { $0.append(initialSize) }
+      $0.terminalClient.ensureSurface = { _, geometry in
+        sizes.withValue { $0.append(geometry) }
       }
     }
 
@@ -104,7 +104,7 @@ struct PaneHostFeatureTests {
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
     }
-    #expect(sizes.value == [Self.slotSize])
+    #expect(sizes.value == [Self.geometry])
   }
 
   @Test
@@ -120,8 +120,8 @@ struct PaneHostFeatureTests {
       }
     }
 
-    await store.send(.task(slotSize: Self.slotSize)) {
-      $0.slotSize = Self.slotSize
+    await store.send(.task(geometry: Self.geometry)) {
+      $0.slotGeometry = Self.geometry
     }
     await store.receive(.resolveFailed(Self.failureForFixedError)) {
       $0.phase = .failed(Self.failureForFixedError)
@@ -141,8 +141,8 @@ struct PaneHostFeatureTests {
       }
     }
 
-    await store.send(.task(slotSize: Self.slotSize)) {
-      $0.slotSize = Self.slotSize
+    await store.send(.task(geometry: Self.geometry)) {
+      $0.slotGeometry = Self.geometry
     }
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
@@ -194,13 +194,53 @@ struct PaneHostFeatureTests {
       }
     }
 
-    await store.send(.task(slotSize: Self.slotSize)) {
-      $0.slotSize = Self.slotSize
+    await store.send(.task(geometry: Self.geometry)) {
+      $0.slotGeometry = Self.geometry
     }
     await store.receive(.resolveFailed(Self.surfaceNotRegistered)) {
       $0.phase = .failed(Self.surfaceNotRegistered)
     }
     #expect(ensureCalls.value == 1)
+  }
+
+  /// A shown Content follows its slot: a size or scale change mounts it
+  /// at the new geometry, an empty slot is ignored, and leaving the view
+  /// hierarchy unmounts it.
+  @Test
+  func readyHostMountsOnSlotChangeAndUnmountsOnDisappear() async {
+    let mounts = LockIsolated<[ContentGeometry]>([])
+    let unmounts = LockIsolated<Int>(0)
+    var initial = Self.makeState()
+    initial.phase = .ready
+    let store = TestStore(initialState: initial) {
+      PaneHostFeature()
+    } withDependencies: {
+      $0.terminalClient.mount = { _, geometry in mounts.withValue { $0.append(geometry) } }
+      $0.terminalClient.unmount = { _ in unmounts.withValue { $0 += 1 } }
+    }
+
+    await store.send(.slotChanged(Self.geometry)) {
+      $0.slotGeometry = Self.geometry
+    }
+    await store.send(.slotChanged(ContentGeometry(size: .zero, scale: 2)))
+    await store.send(.disappeared)
+    await store.finish()
+
+    #expect(mounts.value == [Self.geometry])
+    #expect(unmounts.value == 1)
+  }
+
+  /// A host still bringing its surface up only records the slot; the
+  /// mount waits for the surface.
+  @Test
+  func loadingHostRecordsTheSlotWithoutMounting() async {
+    let store = TestStore(initialState: Self.makeState()) {
+      PaneHostFeature()
+    }
+
+    await store.send(.slotChanged(Self.geometry)) {
+      $0.slotGeometry = Self.geometry
+    }
   }
 
   @Test

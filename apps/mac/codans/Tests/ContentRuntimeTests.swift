@@ -72,7 +72,7 @@ struct ContentRuntimeTests {
     let projectID: ProjectID
     let worktreeID: WorktreeID
 
-    init(loadReport: CatalogLoadReport = .clean) {
+    init() {
       let tempURL = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString + ".json")
       let manager = HierarchyManager(
         catalog: .default, store: CatalogStore(fileURL: tempURL), runtime: fakeRuntime)
@@ -81,8 +81,9 @@ struct ContentRuntimeTests {
       // swiftlint:disable:next force_try
       worktreeID = try! manager.createWorktree(in: projectID, name: "main", path: "/tmp", branch: "main")
       let box = ContentBox()
-      runtime = ContentRuntime(hierarchy: manager, loadReport: loadReport) { snapshot in
+      runtime = ContentRuntime(hierarchy: manager) { snapshot in
         let content = FakeTabContent(id: snapshot.id)
+        box.made.append(snapshot.id)
         box.contents[snapshot.id] = content
         return content
       }
@@ -93,9 +94,12 @@ struct ContentRuntimeTests {
 
     final class ContentBox {
       var contents: [ContentID: FakeTabContent] = [:]
+      /// Every factory call in order, including teardown-only instances.
+      var made: [ContentID] = []
     }
 
     func content(_ id: ContentID) -> FakeTabContent? { box.contents[id] }
+    var made: [ContentID] { box.made }
 
     func newTab(cwd: String = "/tmp") throws -> TabAddress {
       try manager.newTab(
@@ -116,7 +120,7 @@ struct ContentRuntimeTests {
   func ensureCreatesOneInstanceThenReattaches() async throws {
     let fixture = Fixture()
     let address = try fixture.newTab()
-    #expect(fixture.runtime.content(for: address.contentID) == nil)
+    #expect(fixture.made.isEmpty)
 
     try await fixture.ensure(address, geometry: ContentGeometry(size: CGSize(width: 800, height: 600), scale: 2))
     let content = try #require(fixture.content(address.contentID))
@@ -124,18 +128,39 @@ struct ContentRuntimeTests {
     #expect(content.lastAddress == address)
     #expect(content.lastEnv == ["K": "v"])
     #expect(content.lastGeometry?.size == CGSize(width: 800, height: 600))
-    #expect(fixture.runtime.liveContentIDs == [address.contentID])
+    #expect(content.isLive)
 
     // A second ensure reuses the instance; the content decides it is a
     // re-attach.
     try await fixture.ensure(address)
     #expect(fixture.content(address.contentID) === content)
     #expect(content.calls == ["create", "create"])
-    #expect(fixture.runtime.registeredContentIDs == [address.contentID])
+    #expect(fixture.made == [address.contentID])
+  }
+
+  /// A bring-up without a slot (an IPC ensure, a re-attach after reclaim)
+  /// starts at the slot the Content was last mounted in.
+  @Test
+  func ensureWithoutGeometryUsesTheMountedSlot() async throws {
+    let fixture = Fixture()
+    let address = try fixture.newTab()
+    try await fixture.ensure(address)
+    let content = try #require(fixture.content(address.contentID))
+    let slot = ContentGeometry(size: CGSize(width: 1_200, height: 700), scale: 2)
+
+    fixture.runtime.mount(address.contentID, geometry: slot)
+    try await fixture.ensure(address)
+    #expect(content.calls == ["create", "mount", "create"])
+    #expect(content.lastGeometry == slot)
+
+    // An explicit slot wins over the remembered one.
+    let explicit = ContentGeometry(size: CGSize(width: 300, height: 200), scale: 1)
+    try await fixture.ensure(address, geometry: explicit)
+    #expect(content.lastGeometry == explicit)
   }
 
   @Test
-  func mountCloseOrderingAndRelease() async throws {
+  func mountCloseOrdering() async throws {
     let fixture = Fixture()
     let address = try fixture.newTab()
     try await fixture.ensure(address)
@@ -148,11 +173,34 @@ struct ContentRuntimeTests {
 
     #expect(content.calls == ["create", "mount", "focus", "unmount", "close"])
     #expect(!content.isLive)
-    #expect(fixture.runtime.content(for: address.contentID) == nil)
-    #expect(fixture.runtime.liveContentIDs.isEmpty)
-    // Closing again is a no-op: the instance is gone.
-    fixture.runtime.close(address.contentID)
+    // The instance is gone: a later focus does not reach it.
+    fixture.runtime.acceptFocus(address.contentID)
     #expect(content.calls.count == 5)
+  }
+
+  /// A Content not brought up this launch still has a daemon to kill:
+  /// close and suspend build an instance from the catalog just for the
+  /// teardown, and drive it.
+  @Test
+  func closeAndSuspendReachAContentNeverBroughtUp() throws {
+    let fixture = Fixture()
+    let closed = try fixture.newTab()
+    let suspended = try fixture.newTab()
+
+    fixture.runtime.close(closed.contentID)
+    fixture.runtime.suspend(suspended.contentID)
+
+    #expect(fixture.made == [closed.contentID, suspended.contentID])
+    #expect(fixture.content(closed.contentID)?.calls == ["close"])
+    #expect(fixture.content(suspended.contentID)?.calls == ["suspend"])
+  }
+
+  /// An id the catalog does not know has nothing to tear down.
+  @Test
+  func closeOfAnUnknownContentDoesNothing() {
+    let fixture = Fixture()
+    fixture.runtime.close(ContentID())
+    #expect(fixture.made.isEmpty)
   }
 
   @Test
@@ -164,7 +212,7 @@ struct ContentRuntimeTests {
 
     fixture.runtime.suspend(address.contentID)
     #expect(content.calls == ["create", "suspend"])
-    #expect(fixture.runtime.content(for: address.contentID) == nil)
+    #expect(fixture.made == [address.contentID])
   }
 
   @Test
@@ -195,7 +243,7 @@ struct ContentRuntimeTests {
     #expect(!fixture.runtime.tabIsDirty(address.tabID))
 
     try await fixture.ensure(address)
-    let chrome = try #require(fixture.runtime.chrome(for: address.contentID))
+    let chrome = try #require(fixture.content(address.contentID)?.chrome)
     #expect(!chrome.isTerminalBusy)
 
     fixture.runtime.setProgressBusy(address.contentID, true)
@@ -253,22 +301,5 @@ struct ContentRuntimeTests {
     fixture.manager.setCommandQueue(
       [QueuedCommand(text: "make", timing: .afterCurrentTask, createdAt: Date())], for: address.contentID)
     #expect(fixture.manager.isBusy(address.contentID))
-  }
-
-  @Test
-  func sessionSweepsAreGatedByTheLoadReport() {
-    #expect(Fixture().runtime.sessionSweepsEnabled)
-    var loss = CatalogLoadReport()
-    loss.droppedTabs = 1
-    #expect(!Fixture(loadReport: loss).runtime.sessionSweepsEnabled)
-    var panes = CatalogLoadReport()
-    panes.droppedPanes = 1
-    #expect(!Fixture(loadReport: panes).runtime.sessionSweepsEnabled)
-    var readOnly = CatalogLoadReport()
-    readOnly.readOnlyVersion = 9
-    #expect(!Fixture(loadReport: readOnly).runtime.sessionSweepsEnabled)
-    var migrated = CatalogLoadReport()
-    migrated.migratedFromVersion = 3
-    #expect(Fixture(loadReport: migrated).runtime.sessionSweepsEnabled)
   }
 }

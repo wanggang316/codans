@@ -56,7 +56,7 @@ struct PaneHostView: NSViewRepresentable {
   static func dismantleNSView(_ nsView: PaneSurfaceContainerView, coordinator: ()) {
     // Deliberately does NOT touch the surface view: a newer container may
     // already own it. Surface teardown runs through
-    // `HierarchyClient.closePane` → `TerminalEngine.closeSurface`.
+    // `HierarchyClient.closeTab` → `ContentRuntime.close`.
     _ = nsView
   }
 }

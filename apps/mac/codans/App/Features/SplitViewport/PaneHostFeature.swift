@@ -34,9 +34,9 @@ struct PaneHostFeature {
     /// `SurfaceBox`; the live surface is owned by `TerminalEngine`'s
     /// registry.
     var surface: SurfaceBox?
-    /// Size in points of the slot that shows this pane, from the last
-    /// `.task`. A retry reuses it.
-    var slotSize: CGSize?
+    /// The slot that shows this Content (size in points, backing scale),
+    /// from the last `.task` / `.slotChanged`. A retry reuses it.
+    var slotGeometry: ContentGeometry?
 
     var id: ContentID { contentID }
 
@@ -70,11 +70,15 @@ struct PaneHostFeature {
   enum Action: Equatable {
     /// Fired from `LeafView`'s `.task` (routed through the parent store
     /// behind a membership check — see `LazyPaneHost`'s doc). Idempotent:
-    /// registry short-circuit keeps re-renders free. `slotSize` is the
-    /// laid-out size of the slot: a new surface starts at it, so a
-    /// live session behind a re-attach is not resized through a
-    /// placeholder width first.
-    case task(slotSize: CGSize)
+    /// registry short-circuit keeps re-renders free. `geometry` is the
+    /// laid-out slot: a new surface starts at it, so a live session behind
+    /// a re-attach is not resized through a placeholder width first. Once
+    /// the surface is up, the Content is mounted at it.
+    case task(geometry: ContentGeometry)
+    /// The slot changed size or backing scale while shown.
+    case slotChanged(ContentGeometry)
+    /// The host left the view hierarchy; the Content stays alive.
+    case disappeared
     case retryButtonTapped
     /// Internal: the async `ensureSurface` call returned successfully and
     /// the registry now holds a surface for this Content.
@@ -93,15 +97,22 @@ struct PaneHostFeature {
         state.phase = .loading
         state.surface = nil
         return resolveSurface(state: state)
-      case .task(let slotSize):
-        if slotSize.width > 0, slotSize.height > 0 {
-          state.slotSize = slotSize
+      case .task(let geometry):
+        if geometry.isLaidOut {
+          state.slotGeometry = geometry
         }
         return resolveSurface(state: state)
+      case .slotChanged(let geometry):
+        guard geometry.isLaidOut else { return .none }
+        state.slotGeometry = geometry
+        return state.phase == .ready ? mount(state) : .none
+      case .disappeared:
+        let contentID = state.contentID
+        return .run { [client = terminalClient] _ in await client.unmount(contentID) }
       case .resolveCompleted(let box):
         state.phase = .ready
         state.surface = box
-        return .none
+        return mount(state)
       case .resolveFailed(let failure):
         let contentIDDescription = state.contentID.description
         let message = failure.detail ?? failure.reason
@@ -115,6 +126,12 @@ struct PaneHostFeature {
     }
   }
 
+  private func mount(_ state: State) -> Effect<Action> {
+    guard let geometry = state.slotGeometry else { return .none }
+    let contentID = state.contentID
+    return .run { [client = terminalClient] _ in await client.mount(contentID, geometry) }
+  }
+
   private func resolveSurface(state: State) -> Effect<Action> {
     // Registry short-circuit on the main thread — when the surface is
     // already wired (e.g. the prior tab-switch eagerly seeded it via
@@ -124,10 +141,10 @@ struct PaneHostFeature {
       return .send(.resolveCompleted(SurfaceBox(surface: existing)))
     }
     let contentID = state.contentID
-    let initialSize = state.slotSize
+    let geometry = state.slotGeometry
     return .run { [client = terminalClient] send in
       do {
-        try await client.ensureSurface(contentID, initialSize)
+        try await client.ensureSurface(contentID, geometry)
       } catch {
         await send(.resolveFailed(Failure(error: error)))
         return

@@ -726,11 +726,9 @@ final class AppState {
     }
     // The content registry is the manager's runtime seam: every surface the
     // manager brings up registers a `TerminalContent` here, so the strips
-    // find a `TabChrome` for it. The reaper / unread gates read the load
-    // report through it.
+    // find a `TabChrome` for it.
     let contents = ContentRuntime(
       hierarchy: hierarchyManager,
-      loadReport: catalogStore.loadReport,
       makeContent: { snapshot in TerminalContent(id: snapshot.id, engine: engine) }
     )
     self.contentRuntime = contents
@@ -825,7 +823,7 @@ final class AppState {
         registry?.entries[contentID]?.state.isMidTask ?? false
       }
     }
-    startCommandQueueRunner(manager: manager, engine: engine)
+    startCommandQueueRunner(manager: manager, engine: engine, terminal: terminalClient)
     // SwiftUI views (e.g. `ProjectGeneralSettingsView`) read `@Dependency(SettingsWriter.self)`
     // directly; that resolution bypasses the per-store `withDependencies` overrides below and
     // would otherwise hit the `liveValue` `fatalError` placeholders. Install the live
@@ -843,7 +841,7 @@ final class AppState {
       $0.editorClient = editor
       $0.hierarchyClient = hierarchy
       $0.settingsWriter = .live(settings)
-      $0.terminalClient = .live(engine: engine)
+      $0.terminalClient = terminalClient
     }
 
     // Sparkle bringup: push persisted Updates preferences to the live updater so
@@ -894,7 +892,7 @@ final class AppState {
       fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate },
       settings: { [settings] in settings.settings })
     let workflowEngine = makeWorkflowEngine(
-      hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
+      hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, terminal: terminalClient)
     self.workflowEngine = workflowEngine
     workflowCatalog.follow(hierarchyManager)
     self.store = Store(initialState: RootFeature.State()) {
@@ -919,7 +917,7 @@ final class AppState {
       $0[WorkflowStartClient.self] = self.makeWorkflowStartClient(
         engine: workflowEngine, hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings)
       $0.workflowClient = .live(engine: workflowEngine)
-      $0.terminalClient = .live(engine: engine)
+      $0.terminalClient = terminalClient
       // SSH-routing git clients (see construction above) so every reducer-side
       // git consumer transparently reaches Server-project repositories.
       $0.gitService = routedGitClient
@@ -1347,9 +1345,8 @@ final class AppState {
     hierarchy: HierarchyManager,
     hierarchyClient: HierarchyClient,
     settingsStore: SettingsStore,
-    engine: TerminalEngine
+    terminal: TerminalClient
   ) -> WorkflowEngine {
-    let terminal = TerminalClient.live(engine: engine, contents: contentRuntime)
     let socketPath = SocketPaths.resolve()
     let dependencies = WorkflowEngineDependencies(
       sendLine: { contentID, line in
@@ -2340,7 +2337,9 @@ final class AppState {
   /// raw terminal-busy union only for panes with no bound agent — see
   /// `CommandQueueRunner.isReady` for why the busy sets alone are the wrong
   /// signal for an agent pane.
-  private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
+  private func startCommandQueueRunner(
+    manager: HierarchyManager, engine: TerminalEngine, terminal: TerminalClient
+  ) {
     guard commandQueueRunner == nil else { return }
     // A pane mid-turn or holding queued commands must keep its surface: the
     // idle-surface reclaim would otherwise detach it while work is pending.
@@ -2350,7 +2349,6 @@ final class AppState {
     }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
     // aimed at an agent session needs its Return as a separate keypress.
-    let terminal = TerminalClient.live(engine: engine, contents: contentRuntime)
     let runner = CommandQueueRunner(
       queuedPanes: { [weak manager] in manager?.contentsWithQueuedCommands() ?? [] },
       setQueue: { [weak manager] contentID, queue in
@@ -2540,40 +2538,42 @@ final class AppState {
   }
 }
 
-/// Adapter: lets `HierarchyManager` drive live Content through the
-/// content registry (instances, chrome) and the engine (surfaces,
-/// daemons). Both are attached after the manager is constructed to break
-/// the circular dependency.
+/// Adapter: lets `HierarchyManager` drive live Content. Create, close,
+/// suspend and focus go through the content registry, which drives the
+/// engine through each `TabContent` (ADR-0002); the engine answers the
+/// read-only surface queries. Both are attached after the manager is
+/// constructed to break the circular dependency.
 @MainActor
 final class LiveHierarchyRuntime: HierarchyRuntime {
   private weak var engine: TerminalEngine?
-  private weak var contents: ContentRuntime?
+  private weak var attachedContents: ContentRuntime?
 
   func attach(engine: TerminalEngine, contents: ContentRuntime) {
     self.engine = engine
-    self.contents = contents
+    self.attachedContents = contents
+  }
+
+  /// The registry is required: a lifecycle call before `attach` is a
+  /// wiring bug, not a state to paper over with a direct engine call.
+  private var contents: ContentRuntime {
+    guard let attachedContents else {
+      preconditionFailure("LiveHierarchyRuntime used before attach(engine:contents:)")
+    }
+    return attachedContents
   }
 
   func ensureSurface(
     for content: ContentSnapshot, at address: TabAddress, in worktree: Worktree, env: [String: String]
   ) async throws {
-    if let contents {
-      _ = try await contents.ensure(content, in: address, worktree: worktree, env: env)
-    } else {
-      _ = try await engine?.ensureSurface(for: content, at: address, in: worktree, env: env)
-    }
+    _ = try await contents.ensure(content, in: address, worktree: worktree, env: env)
   }
 
-  /// The registry drops the instance; the engine kills the daemon even
-  /// when no instance was ever created this launch (surfaces are lazy).
   func closeSurface(for contentID: ContentID) {
-    contents?.release(contentID)
-    engine?.closeSurface(for: contentID)
+    contents.close(contentID)
   }
 
   func suspendSurface(for contentID: ContentID) {
-    contents?.release(contentID)
-    engine?.suspendSurface(for: contentID)
+    contents.suspend(contentID)
   }
 
   func announceHierarchyMutated() {
@@ -2589,7 +2589,7 @@ final class LiveHierarchyRuntime: HierarchyRuntime {
   }
 
   func focusSurfaceView(for contentID: ContentID) {
-    engine?.focusSurfaceView(for: contentID)
+    contents.acceptFocus(contentID)
   }
 }
 

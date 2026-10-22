@@ -36,7 +36,7 @@ struct SplitViewportFeatureTests {
       contentID: ContentID(), paneID: PaneID(), tabID: TabID(),
       worktreeID: WorktreeID(), projectID: ProjectID())
     var ready = kept
-    ready.slotSize = CGSize(width: 10, height: 10)
+    ready.slotGeometry = ContentGeometry(size: CGSize(width: 10, height: 10))
     let fresh = PaneHostFeature.State(
       contentID: ContentID(), paneID: PaneID(), tabID: TabID(),
       worktreeID: kept.worktreeID, projectID: kept.projectID)
