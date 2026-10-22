@@ -7,25 +7,31 @@ import Testing
 /// Every surface's environment is built here, so these pin the set of keys
 /// codans injects and the precedence between them.
 struct PaneEnvironmentTests {
-  private static let paneID = PaneID(raw: UUID(uuidString: "0B6D6A2E-5B3C-4D1F-9E1A-000000000001")!)
+  private static let address = TabAddress(
+    projectID: ProjectID(), worktreeID: WorktreeID(),
+    paneID: PaneID(raw: UUID(uuidString: "0B6D6A2E-5B3C-4D1F-9E1A-000000000001")!),
+    tabID: TabID(raw: UUID(uuidString: "0B6D6A2E-5B3C-4D1F-9E1A-000000000002")!),
+    contentID: ContentID(raw: UUID(uuidString: "0B6D6A2E-5B3C-4D1F-9E1A-000000000003")!))
   private static let zmxDir = URL(fileURLWithPath: "/tmp/zmx-test", isDirectory: true)
 
   @Test
-  func surfaceStageAddsExactlyThePaneScopedKeys() {
+  func surfaceStageAddsExactlyTheAddressScopedKeys() {
     let base = ["KEEP": "me"]
-    let env = PaneEnvironment.forSurface(base, paneID: Self.paneID, zmxDirectory: Self.zmxDir)
+    let env = PaneEnvironment.forSurface(base, address: Self.address, zmxDirectory: Self.zmxDir)
     #expect(env["KEEP"] == "me")
     #expect(env[CodansEnvironment.Key.zmxDirectory.rawValue] == "/tmp/zmx-test")
     #expect(env[CodansEnvironment.Key.zmxSession.rawValue] == "")
-    #expect(env[CodansEnvironment.Key.paneID.rawValue] == Self.paneID.raw.uuidString)
-    #expect(env.count == 4)
+    #expect(env[CodansEnvironment.Key.contentID.rawValue] == Self.address.contentID.raw.uuidString)
+    #expect(env[CodansEnvironment.Key.tabID.rawValue] == Self.address.tabID.raw.uuidString)
+    #expect(env[CodansEnvironment.Key.paneID.rawValue] == Self.address.paneID.raw.uuidString)
+    #expect(env.count == 6)
   }
 
   @Test
   func inheritedZmxSessionIsClearedNotForwarded() {
     // The exact failure this guards: an app started inside a zmx pane.
     let base = [CodansEnvironment.Key.zmxSession.rawValue: "parent-session"]
-    let env = PaneEnvironment.forSurface(base, paneID: Self.paneID, zmxDirectory: Self.zmxDir)
+    let env = PaneEnvironment.forSurface(base, address: Self.address, zmxDirectory: Self.zmxDir)
     #expect(env[CodansEnvironment.Key.zmxSession.rawValue] == "")
   }
 
@@ -71,7 +77,7 @@ struct PaneEnvironmentTests {
     let surface = PaneEnvironment.forSurface(
       PaneEnvironment.processBase(
         inheriting: [:], overrides: [:], socketPath: "/tmp/s.sock", cliBinary: nil, marketingVersion: nil),
-      paneID: Self.paneID,
+      address: Self.address,
       zmxDirectory: Self.zmxDir
     )
     let expected: Set<String> = [
@@ -79,6 +85,8 @@ struct PaneEnvironmentTests {
       TermProgramEnv.programKey,
       CodansEnvironment.Key.zmxDirectory.rawValue,
       CodansEnvironment.Key.zmxSession.rawValue,
+      CodansEnvironment.Key.contentID.rawValue,
+      CodansEnvironment.Key.tabID.rawValue,
       CodansEnvironment.Key.paneID.rawValue,
     ]
     #expect(Set(surface.keys) == expected)

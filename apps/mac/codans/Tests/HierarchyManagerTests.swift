@@ -173,7 +173,7 @@ struct HierarchyManagerTests {
   }
 
   @Test
-  func worktreeValidateInvariantsHoldsAfterSplit() async throws {
+  func worktreeValidateInvariantsHoldsAfterSplit() throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
     let worktreeID = try manager.createWorktree(
       in: projectID,
