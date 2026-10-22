@@ -35,12 +35,12 @@ struct HierarchyHandlersResolveAliasTests {
   }
 
   @Test
-  func peerAttributionWinsOverContextPaneID() async throws {
+  func peerAttributionWinsOverContextContentID() async throws {
     let peerContent = ContentID()
     let envContent = ContentID()
     let handlers = Self.makeHandlers { _ in peerContent }
     let params = try JSONValue.encoded(
-      IPC.AliasResolveRequest(kind: .content, value: "current", contextPaneID: envContent)
+      IPC.AliasResolveRequest(kind: .content, value: "current", contextContentID: envContent)
     )
 
     let outcome = await handlers.resolveAlias(params, peerPID: 1)
@@ -50,11 +50,11 @@ struct HierarchyHandlersResolveAliasTests {
   }
 
   @Test
-  func unattributedCallerFallsBackToContextPaneID() async throws {
+  func unattributedCallerFallsBackToContextContentID() async throws {
     let envContent = ContentID()
     let handlers = Self.makeHandlers { _ in nil }
     let params = try JSONValue.encoded(
-      IPC.AliasResolveRequest(kind: .content, value: "current", contextPaneID: envContent)
+      IPC.AliasResolveRequest(kind: .content, value: "current", contextContentID: envContent)
     )
 
     let outcome = await handlers.resolveAlias(params, peerPID: 1)
@@ -121,13 +121,85 @@ struct HierarchyHandlersResolveAliasTests {
       (.pane, fixture.pane.raw), (.tab, fixture.tab.raw), (.content, fixture.content.raw),
     ]
     for (kind, expected) in levels {
-      for (_, given) in levels {
+      for (named, given) in levels {
         let params = try JSONValue.encoded(IPC.AliasResolveRequest(kind: kind, value: given.uuidString))
         let outcome = await handlers.resolveAlias(params, peerPID: nil)
         let result: IPC.AliasResolveResult = try Self.decodeUnary(outcome)
         #expect(result.kind == kind)
         #expect(result.id == expected)
+        #expect(result.matched == named)
       }
+    }
+  }
+
+  /// A Pane id in a Tab or Content position means the Pane's selected Tab,
+  /// not its first one.
+  @Test
+  func paneIdNamesItsSelectedTab() async throws {
+    let first = Tab(content: .terminal(workingDirectory: "/repo"))
+    let second = Tab(content: .terminal(workingDirectory: "/repo"))
+    let pane = Pane(tabs: [first, second], selectedTabID: second.id)
+    let worktree = Worktree(
+      name: "main", path: "/repo", branch: "main", splitTree: SplitTree(leaf: pane.id), panes: [pane],
+      focusedPaneID: pane.id)
+    let handlers = Self.makeHandlers(
+      catalog: Catalog(projects: [Project(name: "repo", rootPath: "/repo", worktrees: [worktree])])
+    ) { _ in nil }
+
+    for (kind, expected) in [
+      (IPC.AliasResolveRequest.Kind.tab, second.id.raw), (.content, second.contentID.raw),
+    ] {
+      let params = try JSONValue.encoded(IPC.AliasResolveRequest(kind: kind, value: pane.id.raw.uuidString))
+      let result: IPC.AliasResolveResult = try Self.decodeUnary(await handlers.resolveAlias(params, peerPID: nil))
+      #expect(result.id == expected)
+      #expect(result.matched == .pane)
+    }
+  }
+
+  /// `p<n>` names a Pane and `t<n>` a Tab; each converts to the asked level
+  /// and reports its own.
+  @Test
+  func handlesNamePanesAndTabsAtEachLevel() async throws {
+    let fixture = Self.makeCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in nil }
+    let cases: [(String, IPC.AliasResolveRequest.Kind, UUID, IPC.AliasResolveRequest.Kind)] = [
+      ("p1", .pane, fixture.pane.raw, .pane),
+      ("p1", .tab, fixture.tab.raw, .pane),
+      ("p1", .content, fixture.content.raw, .pane),
+      ("t1", .pane, fixture.pane.raw, .tab),
+      ("t1", .tab, fixture.tab.raw, .tab),
+      ("t1", .content, fixture.content.raw, .tab),
+    ]
+    for (handle, kind, expected, named) in cases {
+      let params = try JSONValue.encoded(IPC.AliasResolveRequest(kind: kind, value: handle))
+      let result: IPC.AliasResolveResult = try Self.decodeUnary(await handlers.resolveAlias(params, peerPID: nil))
+      #expect(result.id == expected, "\(handle) as \(kind)")
+      #expect(result.matched == named)
+    }
+    let unknown = await handlers.resolveAlias(
+      try JSONValue.encoded(IPC.AliasResolveRequest(kind: .tab, value: "p9")), peerPID: nil)
+    guard case .failed(.notFound(let kind, _)) = unknown else {
+      Issue.record("expected .notFound, got \(unknown)")
+      return
+    }
+    #expect(kind == "pane")
+  }
+
+  /// `@selected` names what the window shows, for callers outside any Tab.
+  @Test
+  func selectedPronounNamesTheWindowsProjectAndWorktree() async throws {
+    let fixture = Self.makeCatalog()
+    var catalog = fixture.catalog
+    catalog.selectedProjectID = fixture.project
+    catalog.projects[0].selectedWorktreeID = fixture.worktree
+    let handlers = Self.makeHandlers(catalog: catalog) { _ in nil }
+
+    for (kind, expected) in [
+      (IPC.AliasResolveRequest.Kind.project, fixture.project.raw), (.worktree, fixture.worktree.raw),
+    ] {
+      let params = try JSONValue.encoded(IPC.AliasResolveRequest(kind: kind, value: "@selected"))
+      let result: IPC.AliasResolveResult = try Self.decodeUnary(await handlers.resolveAlias(params, peerPID: nil))
+      #expect(result.id == expected)
     }
   }
 

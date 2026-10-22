@@ -22,10 +22,10 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let text: String
     }
-    let params = try JSONValue.encoded(Params(paneID: ContentID(), text: "hello"))
+    let params = try JSONValue.encoded(Params(contentID: ContentID(), text: "hello"))
     try server.send(
       IPC.Request(id: "s1", method: .terminalSendInput, params: params)
     )
@@ -74,10 +74,10 @@ struct TerminalHandlersTests {
     let pid = ContentID()
     sink.registered.insert(pid.raw)
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let text: String
     }
-    let params = try JSONValue.encoded(Params(paneID: pid, text: "ls\n"))
+    let params = try JSONValue.encoded(Params(contentID: pid, text: "ls\n"))
     try server.send(
       IPC.Request(id: "s2", method: .terminalSendInput, params: params)
     )
@@ -95,10 +95,10 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let text: String
     }
-    let params = try JSONValue.encoded(Params(paneID: ContentID(), text: "x"))
+    let params = try JSONValue.encoded(Params(contentID: ContentID(), text: "x"))
     try server.send(
       IPC.Request(id: "s3", method: .terminalSendInput, params: params)
     )
@@ -118,9 +118,9 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
     }
-    let params = try JSONValue.encoded(Params(paneID: ContentID()))
+    let params = try JSONValue.encoded(Params(contentID: ContentID()))
     try server.send(
       IPC.Request(id: "rp1", method: .terminalResetPane, params: params)
     )
@@ -143,9 +143,9 @@ struct TerminalHandlersTests {
     let pid = ContentID()
     sink.registered.insert(pid.raw)
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
     }
-    let params = try JSONValue.encoded(Params(paneID: pid))
+    let params = try JSONValue.encoded(Params(contentID: pid))
     try server.send(
       IPC.Request(id: "rp2", method: .terminalResetPane, params: params)
     )
@@ -163,9 +163,9 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
     }
-    let params = try JSONValue.encoded(Params(paneID: ContentID()))
+    let params = try JSONValue.encoded(Params(contentID: ContentID()))
     try server.send(
       IPC.Request(id: "rp3", method: .terminalResetPane, params: params)
     )
@@ -189,10 +189,10 @@ struct TerminalHandlersTests {
     sink.registered.insert(pid.raw)
     sink.textByPane[pid.raw] = "prompt\noutput"
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let extent: String
     }
-    let params = try JSONValue.encoded(Params(paneID: pid, extent: "viewport"))
+    let params = try JSONValue.encoded(Params(contentID: pid, extent: "viewport"))
     try server.send(
       IPC.Request(id: "r1", method: .terminalReadText, params: params)
     )
@@ -226,13 +226,13 @@ struct TerminalHandlersTests {
       let timeoutMillis: Int
     }
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let extent: String
       let waitStable: WaitStable
     }
     let params = try JSONValue.encoded(
       Params(
-        paneID: pid, extent: "viewport",
+        contentID: pid, extent: "viewport",
         waitStable: WaitStable(stableMillis: 30, intervalMillis: 10, timeoutMillis: 1000)))
     try server.send(
       IPC.Request(id: "ws1", method: .terminalReadText, params: params)
@@ -266,13 +266,13 @@ struct TerminalHandlersTests {
       let timeoutMillis: Int
     }
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let extent: String
       let waitStable: WaitStable
     }
     let params = try JSONValue.encoded(
       Params(
-        paneID: ContentID(), extent: "viewport",
+        contentID: ContentID(), extent: "viewport",
         waitStable: WaitStable(stableMillis: 30, intervalMillis: 10, timeoutMillis: 1000)))
     try server.send(
       IPC.Request(id: "ws2", method: .terminalReadText, params: params)

@@ -8,21 +8,21 @@ import Testing
 @MainActor
 struct HierarchyHandlersLiveDirectoryTests {
   @Test
-  func listPanesUsesLiveWorkingDirectoryWhenAvailable() async throws {
+  func listTabsUsesLiveWorkingDirectoryWhenAvailable() async throws {
     let fixture = Self.makeFixture(liveDirectory: "/repo/app")
     let params = try JSONValue.encoded(
-      HierarchyHandlers.ListPanesParams(
-        tabID: fixture.paneID.raw,
+      HierarchyHandlers.ListTabsParams(
         worktreeID: fixture.worktreeID,
-        projectID: fixture.projectID
+        projectID: fixture.projectID,
+        paneID: fixture.paneID.raw
       )
     )
 
-    let outcome = await fixture.handlers.listPanes(params)
-    let payload: ListPanesPayload = try Self.decodeUnary(outcome)
+    let outcome = await fixture.handlers.listTabs(params)
+    let payload: ListTabsPayload = try Self.decodeUnary(outcome)
 
-    let directories = payload.panes.flatMap(\.tabs).map { $0.content.terminal?.workingDirectory }
-    #expect(directories == ["/repo/app"])
+    #expect(payload.tabs.map(\.workingDirectory) == ["/repo/app"])
+    #expect(payload.tabs.map(\.paneID) == [fixture.paneID.description])
   }
 
   @Test
@@ -40,12 +40,7 @@ struct HierarchyHandlersLiveDirectoryTests {
   func focusPanePromotesSurfaceView() async throws {
     let fixture = Self.makeFixture(liveDirectory: "/repo/app")
     let params = try JSONValue.encoded(
-      HierarchyHandlers.PaneLocatorParams(
-        id: fixture.contentID,
-        tabID: fixture.tabID,
-        worktreeID: fixture.worktreeID,
-        projectID: fixture.projectID
-      )
+      HierarchyHandlers.FocusPaneParams(id: fixture.paneID, projectID: nil, worktreeID: nil, direction: nil)
     )
 
     let outcome = await fixture.handlers.focusPane(params)

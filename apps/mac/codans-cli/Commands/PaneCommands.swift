@@ -57,7 +57,7 @@ struct PaneList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.layoutWorktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let worktreeID: WorktreeID
         let projectID: ProjectID
@@ -114,7 +114,7 @@ struct PaneFocus: AsyncParsableCommand {
         let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
         params = Params(id: paneID, projectID: nil, worktreeID: nil, direction: direction?.rawValue)
       } else {
-        let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+        let scope = try await ScopeResolver.layoutWorktree(project: project, worktree: worktree, client: client)
         params = Params(
           id: nil, projectID: scope.projectID, worktreeID: scope.worktreeID, direction: direction?.rawValue)
       }
@@ -165,7 +165,7 @@ struct PaneSplit: AsyncParsableCommand {
       defer { Task { await client.shutdown() } }
       let anchor = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: UUID
         let direction: String
         let workingDirectory: String?
         let initialCommand: String?
@@ -179,7 +179,7 @@ struct PaneSplit: AsyncParsableCommand {
       let result: Result = try await client.call(
         .hierarchySplitPane,
         params: Params(
-          paneID: anchor,
+          paneID: anchor.raw,
           direction: direction.rawValue,
           workingDirectory: cwd.map { PathResolver.absolute($0) },
           initialCommand: command.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 },
@@ -277,13 +277,13 @@ struct PaneResize: AsyncParsableCommand {
       defer { Task { await client.shutdown() } }
       let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: UUID
         let direction: String
         let amount: Double
       }
       _ = try await client.callRaw(
         .hierarchyResizePane,
-        params: Params(paneID: paneID, direction: direction.rawValue, amount: amount)
+        params: Params(paneID: paneID.raw, direction: direction.rawValue, amount: amount)
       )
       try Renderer.emit(
         IDMessage(id: paneID.description, message: "resized pane \(paneID) \(direction.rawValue)"),
@@ -309,7 +309,7 @@ struct PaneEqualize: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.layoutWorktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
         let projectID: ProjectID
         let worktreeID: WorktreeID
@@ -346,13 +346,13 @@ struct PaneZoom: AsyncParsableCommand {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
       let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
-      struct Params: Codable { let id: PaneID }
+      struct Params: Codable { let id: UUID }
       struct Result: Codable {
         let paneID: PaneID
         let zoomed: Bool
       }
       let result: Result = try await client.call(
-        off ? .hierarchyUnzoomPane : .hierarchyZoomPane, params: Params(id: paneID))
+        off ? .hierarchyUnzoomPane : .hierarchyZoomPane, params: Params(id: paneID.raw))
       try Renderer.emitObject(
         ["paneID": result.paneID.description, "zoomed": result.zoomed], mode: globals.renderMode
       ) { _ in

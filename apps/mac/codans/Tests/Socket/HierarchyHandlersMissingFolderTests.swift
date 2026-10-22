@@ -46,15 +46,15 @@ struct HierarchyHandlersMissingFolderTests {
   }
 
   @Test
-  func openPaneInMissingFolderFailsAndFlagsProject() async throws {
+  func createTabWithAPaneInMissingFolderFailsAndFlagsProject() async throws {
     let root = missingPath()
     let fixture = makeFixture(rootPath: root)
     let params = try JSONValue.encoded(
-      HierarchyHandlers.OpenPaneParams(
-        projectID: fixture.project.id, worktreeID: fixture.worktree.id,
-        tabID: fixture.tab.id.raw, workingDirectory: root, initialCommand: nil, labels: []))
+      HierarchyHandlers.CreateTabParams(
+        projectID: fixture.project.id, worktreeID: fixture.worktree.id, paneID: fixture.tab.id.raw, name: nil,
+        workingDirectory: root, initialCommand: nil, labels: []))
 
-    let outcome = await fixture.handlers.openPane(params)
+    let outcome = await fixture.handlers.createTab(params)
 
     guard case .failed(let error) = outcome else {
       Issue.record("expected failure, got \(outcome)")
@@ -73,7 +73,8 @@ struct HierarchyHandlersMissingFolderTests {
     let fixture = makeFixture(rootPath: root)
     let params = try JSONValue.encoded(
       HierarchyHandlers.CreateTabParams(
-        projectID: fixture.project.id, worktreeID: fixture.worktree.id, name: nil))
+        projectID: fixture.project.id, worktreeID: fixture.worktree.id, paneID: nil, name: nil,
+        workingDirectory: nil, initialCommand: nil, labels: nil))
 
     let outcome = await fixture.handlers.createTab(params)
 

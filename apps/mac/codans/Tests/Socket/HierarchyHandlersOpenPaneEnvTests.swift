@@ -39,17 +39,18 @@ struct HierarchyHandlersOpenPaneEnvTests {
       }
     )
     let params = try JSONValue.encoded(
-      HierarchyHandlers.OpenPaneParams(
+      HierarchyHandlers.CreateTabParams(
         projectID: project.id,
         worktreeID: worktree.id,
-        tabID: tab.id.raw,
+        paneID: tab.id.raw,
+        name: nil,
         workingDirectory: repo,
         initialCommand: nil,
         labels: []
       )
     )
 
-    let outcome = await handlers.openPane(params)
+    let outcome = await handlers.createTab(params)
 
     guard case .unary = outcome else {
       Issue.record("expected unary success, got \(outcome)")

@@ -197,6 +197,21 @@ enum PathResolver {
 enum ScopeResolver {
   static func isCurrent(_ value: String) -> Bool { value == "current" || value == "." }
 
+  /// The worktree the Tab and Pane verbs act in. Outside any Tab (a plain
+  /// terminal) `current` has nothing to name, so with both containers left
+  /// on `current` they fall back to the worktree the window shows.
+  static func layoutWorktree(
+    project: String, worktree: String, client: RPCClient
+  ) async throws -> WorktreePath {
+    do {
+      return try await Self.worktree(project: project, worktree: worktree, client: client)
+    } catch AliasResolver.Error.rpc(.ipc(.notFound(_, let id)))
+      where isCurrent(id) && isCurrent(project) && isCurrent(worktree)
+    {
+      return try await Self.worktree(project: "@selected", worktree: "@selected", client: client)
+    }
+  }
+
   static func worktree(
     project: String, worktree: String, client: RPCClient
   ) async throws -> WorktreePath {
@@ -222,7 +237,7 @@ enum ScopeResolver {
     project: String, worktree: String, pane: String?, client: RPCClient
   ) async throws -> (scope: WorktreePath, paneID: PaneID?) {
     guard let pane else {
-      return (try await Self.worktree(project: project, worktree: worktree, client: client), nil)
+      return (try await Self.layoutWorktree(project: project, worktree: worktree, client: client), nil)
     }
     let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
     if isCurrent(project), isCurrent(worktree) {
