@@ -139,16 +139,21 @@ when it closes, and are never reused within one app session, so a stale
 handle fails with not-found instead of hitting the wrong target. Names
 are case-insensitive and scoped to the calling tab's containers when
 there is one (`--worktree main` means "this project's main"); an
-ambiguous name is a conflict (exit 3, `CONFLICT`) — pass the id. Panes
-have no name: a bare word where a target is expected is a usage error,
-which is usually unquoted text (`codans tab send echo hi` — quote it).
+ambiguous name is a conflict (exit 3, `CONFLICT`) — pass the id. A bare
+word in a tab slot is looked up as a title, so unquoted text fails as
+not-found (`codans tab send echo hi` → `tab not found: echo`, exit 2 —
+quote it). Panes have no name: a bare word where a pane is expected is a
+usage error (exit 1).
 
 `current` for a project / worktree / pane / tab is derived from the tab the
 command runs in, so it works from any subshell or wrapper inside a tab.
 Outside a codans Tab there is no current tab: the command fails with
 `no current <kind>: this shell is not inside a Codans tab` (exit 2,
 `NO_CURRENT_CONTEXT`) — pass an explicit id, name, or path, or run
-`codans tree` to discover one. Verbs whose target already determines its
+`codans tree` to discover one. The exception: `tab new`, `tab list`,
+`pane list`, `pane equalize`, and `pane focus --direction` with both
+`--project` and `--worktree` left on `current` act on the worktree the
+window shows. Verbs whose target already determines its
 containers (`tab close t3`, `tab new --pane p2`, `worktree rm <id>`) never
 need `--project` / `--worktree` at all.
 
@@ -469,6 +474,7 @@ text — that is `codans tab`.
 ```bash
 codans pane list                                     # panes in the current worktree: handle, selected tab, focus
 codans pane focus <pane>                             # give it keyboard focus (⌘T / ⌘W now act on its strip)
+codans pane focus --direction left                   # move focus to the neighbour, like the keyboard
 codans pane split                                    # new pane with a fresh tab to the right of the focused one
 codans pane split <pane> --direction down --command htop   # beside <pane>; cwd = its selected tab's
 codans pane split --json | jq -r .data.tabID         # prints the NEW TAB's id — drive it right away
@@ -476,6 +482,7 @@ codans pane resize <pane> right --amount 80          # move the divider next to 
 codans pane equalize                                 # make every split in the worktree equal
 codans pane zoom                                     # focused pane fills the layout; run again to leave
 codans pane zoom <pane>
+codans pane zoom --off                               # only leave the zoom, never enter it
 codans pane close <pane>                             # close the pane AND every tab in it
 ```
 

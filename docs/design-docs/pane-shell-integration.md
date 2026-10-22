@@ -101,7 +101,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
   - `interactive(wrapper:)`：本地 pane。`command` 留空，传 wrapper，并**显式设置 `wait_after_command = true`**。embedded 模式只在设置了 `command` 时才自动打开它；codans 依赖"子进程退出后 surface 不自动关闭"，以 `paneInfoChanged(.childExited)` 作为结束信号。
   - `command(_:)`：远端 pane。沿用现有命令字符串，并设置 `disable_shell_integration = true`，让这条本地 SSH 循环的启动方式不受全局集成配置影响。
 - `ZmxAttachCommand.wrapperArgv` 生成 wrapper argv，`--restore-from` 在其中；字符串形态的 `build` 只给远端 pane 用。
-- `ForegroundJobReader.foregroundProcessGroupID` 用 `sysctl(KERN_PROC_PID)` 读守护进程子进程的 `e_tpgid`。这个子进程是 `login(1)`，它保持 setuid root，`proc_pidinfo(PROC_PIDTBSDINFO)` 对它返回 EPERM；用 `proc_pidinfo` 读会让前台任务检测（tab 的忙碌指示、`pane send --wait`）始终判定为空闲。
+- `ForegroundJobReader.foregroundProcessGroupID` 用 `sysctl(KERN_PROC_PID)` 读守护进程子进程的 `e_tpgid`。这个子进程是 `login(1)`，它保持 setuid root，`proc_pidinfo(PROC_PIDTBSDINFO)` 对它返回 EPERM；用 `proc_pidinfo` 读会让前台任务检测（tab 的忙碌指示、`tab send --wait`）始终判定为空闲。
 
 ### 默认选项
 

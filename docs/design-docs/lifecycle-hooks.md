@@ -412,7 +412,7 @@ sentinel-prefix 路由使 `hooks.json` 保持唯一用户可见注册表：一�
 - **`CodansCore/Hooks/` 下新文件：** `HookEvent.swift`、`HookEnvelope.swift`、`HookEventData.swift`、`HookSubscription.swift`、`HookConfig.swift`。
 - **不改既有 `Pane`/`Tab`/`Worktree`。** 信封的各 Ref 是对既有类型的单向投影。
 - **`Pane` 上新增可选 labels**（为 `scope: .paneLabel`）：`var labels: Set<String> = []`。additive struct 字段，version-gated `Catalog` 解码器容忍其在 v1 文件缺失，无须 bump。
-- **`Pane.labels` 的单一规范写者：`HierarchyManager.setPaneLabels(_:labels:replace:)`。** 产品中三个面写 labels（CLI 的 `codans pane label`、hook 动作 DSL 的 `HookAction.setPaneLabels`、任何未来 UI）全经此一方法路由，无其他代码路径写 `labels`。这保持写路径可审计、经 `CatalogStore.scheduleSave` 防抖保存、并保证 `.labels` 集与其别名索引一致。`HookAction.setPaneLabels` 是对同一方法的薄进程内调用，非第二个写者。
+- **`Pane.labels` 的单一规范写者：`HierarchyManager.setPaneLabels(_:labels:replace:)`。** 产品中三个面写 labels（CLI 的 `codans tab label`、hook 动作 DSL 的 `HookAction.setPaneLabels`、任何未来 UI）全经此一方法路由，无其他代码路径写 `labels`。这保持写路径可审计、经 `CatalogStore.scheduleSave` 防抖保存、并保证 `.labels` 集与其别名索引一致。`HookAction.setPaneLabels` 是对同一方法的薄进程内调用，非第二个写者。
 - **无 schema bump。** `HookConfig.version` 是自己的文件，从 1 起，独立于 `Catalog.version`。
 
 ### 错误处理模型

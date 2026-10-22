@@ -36,7 +36,7 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 - 重新 attach 不重放 `initialCommand`：那会把 `claude` 之类的命令当作键入送进正在运行的 TUI。也不再发 `.paneCreated` / `.paneReady`，pane 从未消失。
 - 回收时保留前台快照与进程行，重新 attach 后轮询继续，不会产生一次假的「agent 解绑 / 重绑」。
 - 已回收 pane 被关闭或归档时，除了 kill daemon，还补做 `handleSurfaceClose` 的清理。
-- `runtimeProbe`（`pane.read`、`pane.info`）对已回收 pane 仍返回探针：daemon 在无 surface 时照常应答。
+- `runtimeProbe`（`tab.read`、`tab.info`）对已回收 pane 仍返回探针：daemon 在无 surface 时照常应答。
 
 ## 已知取舍
 
