@@ -22,7 +22,9 @@ struct HelpJSONCommand: ParsableCommand {
 
   static func walk(_ type: ParsableCommand.Type, name: String) -> Node {
     let config = type.configuration
-    let children = config.subcommands.map { sub in
+    // Hidden subcommands (verbs kept at a former location only to fail with
+    // the new one, and this command itself) are not part of the shape.
+    let children = config.subcommands.filter(\.configuration.shouldDisplay).map { sub in
       walk(sub, name: sub.configuration.commandName ?? "")
     }
     return Node(
