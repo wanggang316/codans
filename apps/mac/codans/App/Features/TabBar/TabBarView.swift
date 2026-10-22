@@ -18,8 +18,9 @@ struct TabBarView: View {
   let projectID: ProjectID
   let worktreeID: WorktreeID
   let paneID: PaneID
-  /// Whether this Pane is the Worktree's focused one. The focused strip
-  /// renders active; the others inactive (styling is the UI ticket's).
+  /// Whether this Pane is the Worktree's focused one. The focused strip of
+  /// the key window renders active; every other strip renders the inactive
+  /// window style.
   var isFocused: Bool = true
   /// AgentState registry (optional — previews / tests omit it). OR'd into the
   /// per-tab busy spinner so a chip lights while a bound agent in that tab is
@@ -27,12 +28,35 @@ struct TabBarView: View {
   var agentStateStore: AgentStateStore?
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
+  @Environment(\.controlActiveState) private var controlActiveState
+  /// Strip width, for the accessory fold. Starts wide so the first frame
+  /// shows the full cluster rather than flashing the folded one.
+  @State private var stripWidth: CGFloat = .infinity
+
+  /// Active style: focused Pane in the key window, like the system bar,
+  /// which renders inactive whenever its window is not key.
+  private var isActiveStyle: Bool {
+    isFocused && controlActiveState != .inactive
+  }
 
   var body: some View {
-    HStack(spacing: 4, content: barContent)
+    HStack(spacing: TabBarMetrics.trackAccessoryGap, content: barContent)
       .padding(.leading, TabBarMetrics.trackLeadingInset)
       .frame(height: TabBarMetrics.trackHeight)
       .padding(.bottom, TabBarMetrics.trackBottomInset)
+      .onGeometryChange(for: CGFloat.self, of: \.size.width) { stripWidth = $0 }
+      // A click on the strip outside a chip or a control focuses the Pane,
+      // like a click on its content.
+      .background {
+        // Not an accessibility element: AX focuses a Pane through its
+        // chips and content, this only catches stray pointer clicks.
+        Color.clear
+          .contentShape(.rect)
+          .gesture(TapGesture().onEnded { store.send(.stripTapped(paneID)) })
+          .accessibilityHidden(true)
+      }
+      .environment(\.tabStripIsActive, isActiveStyle)
+      .accessibilityIdentifier("tab_strip.\(paneID.raw.uuidString)")
       .sheet(
         item: Binding(
           get: { store.renameTarget },
@@ -101,10 +125,10 @@ struct TabBarView: View {
         Spacer(minLength: 0)
       }
       TabBarTrailingAccessories(
-        activeTabSplitTree: currentSplitTree(),
         worktreePath: currentWorktree()?.path,
         remoteHost: hierarchyManager.catalog.projects
           .first(where: { $0.id == projectID })?.remoteHost,
+        isFolded: TabBarMetrics.foldsAccessories(stripWidth: stripWidth),
         onNewTab: {
           store.send(.newTabButtonTapped(inPane: paneID, inWorktree: worktreeID, inProject: projectID))
         },
@@ -133,13 +157,6 @@ struct TabBarView: View {
         }
       )
     }
-  }
-
-  /// The Worktree's tree for the trailing hover-preview popover. `nil`
-  /// when the Worktree has no Panes.
-  private func currentSplitTree() -> SplitTree<PaneID>? {
-    guard let worktree = currentWorktree(), !worktree.splitTree.isEmpty else { return nil }
-    return worktree.splitTree
   }
 
   /// True iff the Tab's Content hosts a bound agent currently `.working`.

@@ -60,6 +60,7 @@ struct TabChipView: View {
 
   @State private var isHovering = false
   @State private var hoverCardAnchor = TabHoverCardAnchor()
+  @Environment(\.tabStripIsActive) private var stripIsActive
 
   var body: some View {
     Group {
@@ -201,8 +202,10 @@ struct TabChipView: View {
     selectIfInactive()
   }
 
+  /// The selected chip of an unfocused Pane still selects: selecting a Tab
+  /// focuses its Pane.
   private func selectIfInactive() {
-    if !isActive { onSelect() }
+    if !isActive || !stripIsActive { onSelect() }
   }
 }
 
