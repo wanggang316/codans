@@ -17,7 +17,9 @@ struct WorkflowCommandsContractTests {
     IPC.WorkflowRunSummary(
       runID: UUID(), workflowID: "review", workflowName: "Code Review", state: state,
       startedAt: started, runDirectory: "/repo/.codans/workflow-runs/abc",
-      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: ContentID(), handle: "p1")],
+      bindings: [
+        IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: ContentID(), handle: "p1")
+      ],
       steps: [IPC.WorkflowStepSummary(id: "review", name: "Review")])
   }
 
@@ -69,7 +71,9 @@ struct WorkflowCommandsContractTests {
     let contentID = ContentID()
     let expected = IPC.WorkflowRunResponse(
       runID: UUID(), workflowID: "handoff", workflowName: "Handoff", runDirectory: "/repo/.codans/workflow-runs/x",
-      bindings: [IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: contentID, handle: "p2")],
+      bindings: [
+        IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: contentID, handle: "p2")
+      ],
       selfInitiated: IPC.WorkflowSelfInitiatedTask(
         stepID: "brief", line: "Write the briefing.", completionCommand: "CODANS_WORKFLOW_TOKEN=t codans workflow deliver -"))
     let transport = exchange(.workflowRun, params: IPC.WorkflowRunRequest.self, response: expected) { params in

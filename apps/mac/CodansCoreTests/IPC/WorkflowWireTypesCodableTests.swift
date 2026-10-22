@@ -49,7 +49,9 @@ struct WorkflowWireTypesCodableTests {
           name: "review", ordinal: 3, path: "/repo/.codans/workflow-runs/abc/deliveries/review.3.md",
           latestPath: "/repo/.codans/workflow-runs/abc/deliveries/review.md", verdict: nil, isProvisional: true)
       ],
-      bindings: [sampleBinding(), IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: ContentID())],
+      bindings: [
+        sampleBinding(), IPC.WorkflowRoleBindingSummary(role: "author", source: "current", contentID: ContentID()),
+      ],
       steps: [
         IPC.WorkflowStepSummary(id: "step-1", name: nil, outcome: "success", iteration: nil),
         IPC.WorkflowStepSummary(id: "review", name: "Review", outcome: nil, iteration: nil),
@@ -85,13 +87,19 @@ struct WorkflowWireTypesCodableTests {
     let contentID = ContentID()
     let run = try JSONValue.encoded(
       IPC.WorkflowRunRequest(workflow: "w", sourceContentID: contentID, callerContentID: contentID))
-    guard case .object(let fields) = run else { Issue.record("not an object"); return }
+    guard case .object(let fields) = run else {
+      Issue.record("not an object")
+      return
+    }
     #expect(fields["sourceContentID"] != nil)
     #expect(fields["callerContentID"] != nil)
     #expect(fields.keys.allSatisfy { !$0.contains("Pane") && !$0.hasPrefix("pane") })
 
     let handoff = try JSONValue.encoded(IPC.HandoffRequest(action: .save, contentID: contentID))
-    guard case .object(let handoffFields) = handoff else { Issue.record("not an object"); return }
+    guard case .object(let handoffFields) = handoff else {
+      Issue.record("not an object")
+      return
+    }
     #expect(handoffFields["contentID"] != nil)
     #expect(handoffFields["paneID"] == nil)
   }

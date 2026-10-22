@@ -1190,7 +1190,7 @@ struct RootFeature {
         let catalog = hierarchyClient.snapshot()
         guard
           let address = catalog.address(forContent: contentID),
-          case let (project, worktree)? = catalog.worktree(address.worktreeID),
+          case (let project, let worktree)? = catalog.worktree(address.worktreeID),
           // The fetch unit the session's row belongs to: the Project's
           // repository, or — in a workspace — the member repository this
           // checkout came from.

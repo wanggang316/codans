@@ -1572,7 +1572,7 @@ final class HierarchyManager {
   /// The Content currently shown and focused in the Worktree: the focused
   /// Pane's selected Tab. `nil` for a Worktree without Panes.
   func focusedContent(in worktreeID: WorktreeID) -> TabAddress? {
-    guard case let (project, worktree)? = catalog.worktree(worktreeID),
+    guard case (let project, let worktree)? = catalog.worktree(worktreeID),
       let pane = worktree.focusedPane, let tab = pane.selectedTab
     else { return nil }
     return TabAddress(
@@ -2104,7 +2104,7 @@ final class HierarchyManager {
   func ensureSurface(for contentID: ContentID, env: [String: String] = [:]) async throws {
     guard !runtime.hasSurface(for: contentID) else { return }
     guard let address = catalog.address(forContent: contentID),
-      case let (project, worktree)? = catalog.worktree(address.worktreeID),
+      case (let project, let worktree)? = catalog.worktree(address.worktreeID),
       let content = worktree.tab(address.tabID)?.content
     else {
       throw HierarchyError.notFound("Content \(contentID)")
