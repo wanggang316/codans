@@ -100,9 +100,8 @@ public final class NotificationDetector {
     guard isAppFrontmost() else { return nil }
     let catalog = catalogSnapshot()
     guard let activeProjectID = catalog.displayedSelectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == activeProjectID }),
-      let worktreeID = project.selectedWorktreeID,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      let worktreeID = catalog.project(activeProjectID)?.selectedWorktreeID,
+      let worktree = catalog.worktree(worktreeID, in: activeProjectID)
     else { return nil }
     return worktree.focusedPane?.selectedTab?.contentID
   }

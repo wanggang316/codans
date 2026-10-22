@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// Assembles the environment a pane's shell starts with. Every surface goes
+/// Assembles the environment a Tab's shell starts with. Every surface goes
 /// through here, so the set of variables codans injects is decided once and
 /// cannot diverge between spawn paths. The names come from `CodansEnvironment.Key`.
 ///
@@ -14,14 +14,14 @@ import Foundation
 /// 2. `forSurface` needs the *Tab*: the three ids of its address and the
 ///    zmx socket directory. `TerminalEngine.ensureSurface` applies it last,
 ///    after the worktree built-ins.
-nonisolated enum PaneEnvironment {
+nonisolated enum TabEnvironment {
   /// `CFBundleShortVersionString` of the running app; nil under a bare
   /// `xctest` host, in which case the version key is simply omitted.
   static let appMarketingVersion: String? =
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
   /// The CLI this app bundles, located once. `nil` only when no binary can
-  /// be found at all (a bare test host), in which case panes get no `PATH`
+  /// be found at all (a bare test host), in which case Tabs get no `PATH`
   /// entry and no `CODANS_CLI`.
   static let bundledCLI: URL? = try? CLIBundleLocator.locateBinary()
 
@@ -32,8 +32,8 @@ nonisolated enum PaneEnvironment {
   /// them.
   ///
   /// The CLI is made reachable two ways. Its directory goes first on `PATH`,
-  /// so a bare `codans` typed or scripted inside the pane is this app's
-  /// binary; that is what keeps a Debug pane off the installed Release CLI,
+  /// so a bare `codans` typed or scripted inside the Tab is this app's
+  /// binary; that is what keeps a Debug Tab off the installed Release CLI,
   /// which is older and dials the Release socket. `CODANS_CLI` carries the
   /// absolute path for the case a shell rc rebuilds `PATH` and drops the
   /// entry. Both are written after the project's overrides on purpose — a
@@ -65,7 +65,7 @@ nonisolated enum PaneEnvironment {
   }
 
   /// `directory` first, then the existing entries with any earlier copy of
-  /// `directory` removed — so re-spawning a pane from inside a pane does not
+  /// `directory` removed — so re-spawning a Tab from inside a Tab does not
   /// stack the entry, and an installed copy later on `PATH` never wins.
   static func prefixingPath(_ path: String?, with directory: String) -> String {
     let rest = (path ?? "")
@@ -79,7 +79,7 @@ nonisolated enum PaneEnvironment {
   ///
   /// - `ZMX_DIR` is pinned so the daemon socket lands where the control
   ///   client and the reaper look; the caller has already created it.
-  /// - `ZMX_SESSION` is cleared. An app launched from inside a zmx pane
+  /// - `ZMX_SESSION` is cleared. An app launched from inside a zmx session
   ///   inherits the parent's session name, and `zmx attach` reads a set
   ///   value as "switch to that session from within it" — which fails,
   ///   because the parent lives in another `ZMX_DIR`. That surfaced as a

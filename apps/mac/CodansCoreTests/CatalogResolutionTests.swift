@@ -54,6 +54,25 @@ struct CatalogResolutionTests {
   }
 
   @Test
+  func projectAndWorktreeResolveByID() throws {
+    let first = try worktree(name: "a", path: "/a", [[tab("/a")]])
+    let second = try worktree(name: "b", path: "/b", [[tab("/b")]])
+    let p1 = Project(name: "p1", rootPath: "/a", gitRoot: "/a", worktrees: [first])
+    let p2 = Project(name: "p2", rootPath: "/b", gitRoot: "/b", worktrees: [second])
+    let catalog = Catalog(projects: [p1, p2])
+
+    #expect(catalog.project(p2.id) == p2)
+    #expect(catalog.project(ProjectID()) == nil)
+    let found = try #require(catalog.worktree(second.id))
+    #expect(found.project.id == p2.id)
+    #expect(found.worktree == second)
+    #expect(catalog.worktree(WorktreeID()) == nil)
+    #expect(catalog.worktree(second.id, in: p2.id) == second)
+    // A Worktree is only found under the Project that holds it.
+    #expect(catalog.worktree(second.id, in: p1.id) == nil)
+  }
+
+  @Test
   func unknownIDsResolveToNil() {
     let catalog = Catalog(projects: [
       Project(name: "p", rootPath: "/p", worktrees: [Worktree(name: "w", path: "/p")])

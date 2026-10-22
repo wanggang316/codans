@@ -36,7 +36,7 @@ struct HierarchyManagerResolvedEnvTests {
     if let version = appMarketingVersion {
       env[TermProgramEnv.versionKey] = version
     }
-    if let cli = PaneEnvironment.bundledCLI {
+    if let cli = TabEnvironment.bundledCLI {
       env[CodansEnvironment.Key.cli.rawValue] = cli.path
     }
     return env
@@ -46,9 +46,9 @@ struct HierarchyManagerResolvedEnvTests {
   /// comparisons below stay exact whether or not a bundled CLI is locatable
   /// under this test host.
   private static func expectingCLI(_ env: [String: String]) -> [String: String] {
-    guard let cli = PaneEnvironment.bundledCLI else { return env }
+    guard let cli = TabEnvironment.bundledCLI else { return env }
     var env = env
-    env["PATH"] = PaneEnvironment.prefixingPath(env["PATH"], with: cli.deletingLastPathComponent().path)
+    env["PATH"] = TabEnvironment.prefixingPath(env["PATH"], with: cli.deletingLastPathComponent().path)
     return env
   }
 
@@ -71,7 +71,7 @@ struct HierarchyManagerResolvedEnvTests {
     #expect(resolved["MY_PROJECT_VAR"] == "hello")
     // Process env keys still present.
     // Inherited `PATH` survives, behind this app's CLI directory.
-    if let cli = PaneEnvironment.bundledCLI {
+    if let cli = TabEnvironment.bundledCLI {
       #expect(resolved["PATH"]?.hasPrefix(cli.deletingLastPathComponent().path + ":") == true)
       #expect(resolved["PATH"]?.hasSuffix(ProcessInfo.processInfo.environment["PATH"] ?? "") == true)
     } else {

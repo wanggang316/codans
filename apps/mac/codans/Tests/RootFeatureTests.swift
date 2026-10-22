@@ -147,13 +147,11 @@ struct RootFeatureTests {
   /// The focused Pane's selected Tab of the selected Worktree, the way the
   /// live client answers `focusedContent`.
   private static func focusedContent(in catalog: Catalog, worktreeID: WorktreeID) -> TabAddress? {
-    for project in catalog.projects {
-      guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else { continue }
-      guard let pane = worktree.focusedPane, let tab = pane.selectedTab else { return nil }
-      return TabAddress(
-        projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id, contentID: tab.contentID)
-    }
-    return nil
+    guard case let (project, worktree)? = catalog.worktree(worktreeID),
+      let pane = worktree.focusedPane, let tab = pane.selectedTab
+    else { return nil }
+    return TabAddress(
+      projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id, contentID: tab.contentID)
   }
 
   private static func address(_ catalog: Catalog, worktreeID: WorktreeID) -> TabAddress {

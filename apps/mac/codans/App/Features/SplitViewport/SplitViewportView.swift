@@ -181,9 +181,7 @@ struct SplitViewportView: View {
   }
 
   private func currentWorktree() -> Worktree? {
-    hierarchyManager.catalog
-      .projects.first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == worktreeID })
+    hierarchyManager.catalog.worktree(worktreeID, in: projectID)
   }
 
   /// Stable identity for `.task(id:)`: if the shown Contents (in Pane
@@ -488,10 +486,7 @@ private struct PaneView: View {
   }
 
   private var isFocused: Bool {
-    hierarchyManager.catalog.projects
-      .first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == worktreeID })?
-      .focusedPaneID == paneID
+    hierarchyManager.catalog.worktree(worktreeID, in: projectID)?.focusedPaneID == paneID
   }
 
   /// Wash on unfocused Panes inside a multi-Pane Worktree. Matches ghostty's

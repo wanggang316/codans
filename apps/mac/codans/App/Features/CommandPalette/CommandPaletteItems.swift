@@ -643,8 +643,7 @@ enum CommandPaletteItems {
     guard
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID,
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      let worktree = catalog.worktree(worktreeID, in: projectID)
     else { return nil }
     return worktree.focusedPane?.selectedTab?.contentID
   }

@@ -116,7 +116,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 | `title` | 开 | **关** | tab 标题有自己的优先级：手动名称 > OSC 2 > OSC 0 > pwd 目录名。打开后集成会持续发 OSC 2（提示符处为路径，执行中为命令行），把 tab 名字从紧凑的目录名换成长路径或命令。OSC 7 已足够提供目录名。用户可写 `title` 打开 |
 | `ssh-env` | 关 | **开** | 本设计的核心修复：`TERM=xterm-ghostty` 时用 `xterm-256color` 连接，并请求传递 `COLORTERM`、`TERM_PROGRAM(_VERSION)`（是否生效取决于主机的 `AcceptEnv`） |
 | `ssh-terminfo` | 关 | 关 | 会往远端 `~/.terminfo` 写文件，并用 `ControlMaster`/`ControlPath` 多建一条连接，可能和用户自己的 ssh 复用配置冲突。它的缓存依赖 `ghostty` 命令行程序，codans 没有分发这个程序，所以每次连接都会重新探测一遍 |
-| `path` | 开 | **关** | 会把 `Codans.app/Contents/MacOS` 加进 `PATH`，那里没有 `ghostty` 命令行程序，加进去没有意义。codans 的 CLI 已由 `PaneEnvironment` 放进 `PATH` |
+| `path` | 开 | **关** | 会把 `Codans.app/Contents/MacOS` 加进 `PATH`，那里没有 `ghostty` 命令行程序，加进去没有意义。codans 的 CLI 已由 `TabEnvironment` 放进 `PATH` |
 
 `shell-integration`（默认 `detect`）和 `command` 保持 Ghostty 默认，用户配置原样生效。
 
@@ -134,7 +134,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 - **zmx**：执行 `attach` 收到的 argv，负责会话持久化和快照恢复。不了解 shell 集成，本设计不改 zmx。
 - **`PaneSurface`**：把启动描述翻译成 `ghostty_surface_config_s`，是 app 内唯一构造 surface 配置的地方。
 - **`TerminalEngine`**：决定每个 pane 用哪种启动形态：本地用 `interactive`，远端用 `command`。
-- **`PaneEnvironment`**：只写 codans 自己的变量，见 [environment.md](environment.md)。集成相关变量（`ZDOTDIR`、`GHOSTTY_*`）由 libghostty 在启动时写入，`PaneEnvironment` 不碰它们。
+- **`TabEnvironment`**：只写 codans 自己的变量，见 [environment.md](environment.md)。集成相关变量（`ZDOTDIR`、`GHOSTTY_*`）由 libghostty 在启动时写入，`TabEnvironment` 不碰它们。
 
 ## 技术决策
 

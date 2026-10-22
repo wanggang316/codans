@@ -2,24 +2,24 @@ import CodansCore
 import Foundation
 
 /// What the Tab HUD has to decide, resolved from the catalog and the live
-/// agent store in one pass: which agent this Tab's Content carries, and whether hand
-/// off can be offered here. Kept out of the view body so the rules are
+/// agent store in one pass: which agent this Tab's Content carries, and
+/// whether hand off can be offered here. Kept out of the view body so the rules are
 /// testable without a view tree and the "why is this unavailable" answers
 /// are spelled once.
 nonisolated struct TabHUDModel: Equatable, Sendable {
-  /// Agent codans currently attributes to this pane.
+  /// Agent codans currently attributes to this Tab's Content.
   let agent: AgentKind?
   /// Why hand off cannot be offered here, or `nil` when it can. Phrased for
   /// display; the same conditions `RootFeature.handoffRequested` re-checks
   /// authoritatively when the row is actually tapped.
   let handOffBlockedReason: String?
-  /// Commands parked on this pane. Shows the queue button under the actions
+  /// Commands parked on this Tab's Content. Shows the queue button under the actions
   /// button and the count on the Command Queue row; zero renders neither.
   let queuedCommandCount: Int
 
   var canHandOff: Bool { handOffBlockedReason == nil }
 
-  /// Resolves the HUD for `contentID`, or `nil` when the pane is no longer in
+  /// Resolves the HUD for `contentID`, or `nil` when its Tab is no longer in
   /// the catalog (it was closed while its host was still on screen).
   ///
   /// `agent` comes from the caller rather than `TerminalContentState.agentKind` alone: the
