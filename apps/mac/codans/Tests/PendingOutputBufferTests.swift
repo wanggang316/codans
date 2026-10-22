@@ -8,10 +8,10 @@ import CodansCore
 struct PendingOutputBufferTests {
   @Test
   func coalescesSuccessiveAppendsIntoOneEmission() async throws {
-    var emissions: [(PaneID, Data)] = []
-    let paneID = PaneID()
+    var emissions: [(ContentID, Data)] = []
+    let contentID = ContentID()
     let buffer = PendingOutputBuffer(
-      paneID: paneID,
+      contentID: contentID,
       flushInterval: .milliseconds(20),
       maxBufferSize: 1024
     ) { id, data in
@@ -30,16 +30,16 @@ struct PendingOutputBufferTests {
     }
 
     #expect(emissions.count == 1)
-    #expect(emissions[0].0 == paneID)
+    #expect(emissions[0].0 == contentID)
     #expect(emissions[0].1 == Data([0x41, 0x42, 0x43, 0x44, 0x45]))
   }
 
   @Test
   func immediateFlushWhenBufferExceedsMax() {
-    var emissions: [(PaneID, Data)] = []
-    let paneID = PaneID()
+    var emissions: [(ContentID, Data)] = []
+    let contentID = ContentID()
     let buffer = PendingOutputBuffer(
-      paneID: paneID,
+      contentID: contentID,
       flushInterval: .seconds(10),
       maxBufferSize: 4
     ) { id, data in
@@ -54,13 +54,13 @@ struct PendingOutputBufferTests {
 
   @Test
   func immediateFlushWhenBufferReachesMaxExactly() {
-    var emissions: [(PaneID, Data)] = []
+    var emissions: [(ContentID, Data)] = []
     let buffer = PendingOutputBuffer(
-      paneID: PaneID(),
+      contentID: ContentID(),
       flushInterval: .seconds(10),
       maxBufferSize: 4
     ) { _, data in
-      emissions.append((PaneID(), data))
+      emissions.append((ContentID(), data))
     }
 
     buffer.append(Data([1, 2, 3, 4]))
@@ -71,10 +71,10 @@ struct PendingOutputBufferTests {
 
   @Test
   func flushDrainsSynchronously() {
-    var emissions: [(PaneID, Data)] = []
-    let paneID = PaneID()
+    var emissions: [(ContentID, Data)] = []
+    let contentID = ContentID()
     let buffer = PendingOutputBuffer(
-      paneID: paneID,
+      contentID: contentID,
       flushInterval: .seconds(10)
     ) { id, data in
       emissions.append((id, data))
@@ -89,8 +89,8 @@ struct PendingOutputBufferTests {
 
   @Test
   func flushOnEmptyBufferEmitsNothing() {
-    var emissions: [(PaneID, Data)] = []
-    let buffer = PendingOutputBuffer(paneID: PaneID()) { id, data in
+    var emissions: [(ContentID, Data)] = []
+    let buffer = PendingOutputBuffer(contentID: ContentID()) { id, data in
       emissions.append((id, data))
     }
 
