@@ -205,9 +205,9 @@ enum ScopeResolver {
   ) async throws -> WorktreePath {
     do {
       return try await Self.worktree(project: project, worktree: worktree, client: client)
-    } catch AliasResolver.Error.rpc(.ipc(.notFound(_, let id)))
-      where isCurrent(id) && isCurrent(project) && isCurrent(worktree)
-    {
+    } catch let error as AliasResolver.Error {
+      guard case .rpc(.ipc(.notFound(_, let id))) = error, isCurrent(id), isCurrent(project), isCurrent(worktree)
+      else { throw error }
       return try await Self.worktree(project: "@selected", worktree: "@selected", client: client)
     }
   }
