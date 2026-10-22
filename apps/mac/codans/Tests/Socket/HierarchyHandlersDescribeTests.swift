@@ -10,56 +10,57 @@ import Testing
 @MainActor
 struct HierarchyHandlersDescribeTests {
   @Test
-  func describePaneCarriesContainersHandleLabelsAndLiveDirectory() async throws {
+  func describeTabCarriesPaneContentChipAndSessionFields() async throws {
     let fixture = Fixture()
     fixture.runtime.currentWorkingDirectories[fixture.content2] = "/live/dir"
     // Agent bindings are session state: the manager clears persisted ones
     // on load, so bind through its writer like the classifier does.
     fixture.manager.setAgentKind(fixture.content2, kind: .amp)
-    try fixture.manager.focusPane(fixture.pane2.id)
+    try fixture.manager.setTabColor(fixture.tab2.id, color: .blue)
 
-    let outcome = await fixture.handlers.describePane(try Self.request(fixture.content2.raw))
-    let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
+    let outcome = await fixture.handlers.describeTab(try Self.request(fixture.tab2.id.raw))
+    let description: IPC.TabDescription = try Self.decodeUnary(outcome)
 
-    #expect(description.id == fixture.content2.description)
-    #expect(description.contentID == fixture.content2.description)
+    #expect(description.id == fixture.tab2.id.description)
     #expect(description.handle == "t2")
     #expect(description.projectID == fixture.project.id.description)
     #expect(description.worktreeID == fixture.worktree.id.description)
-    #expect(description.tabID == fixture.tab2.id.description)
+    #expect(description.paneID == fixture.pane2.id.description)
+    #expect(description.contentID == fixture.content2.description)
+    #expect(description.color == .blue)
+    #expect(description.isSelected)
     #expect(description.workingDirectory == "/live/dir")
     #expect(description.labels == ["agent", "worker"])
     #expect(description.agent == "amp")
-    #expect(description.isFocused)
     #expect(!description.isLive)
   }
 
+  /// Any of the three ids describes the Tab: a Content id names its Tab, a
+  /// Pane id its selected Tab.
   @Test
-  func describePaneAcceptsTabAndPaneIds() async throws {
+  func describeTabAcceptsContentAndPaneIds() async throws {
     let fixture = Fixture()
 
-    for id in [fixture.tab2.id.raw, fixture.pane2.id.raw] {
-      let outcome = await fixture.handlers.describePane(try Self.request(id))
-      let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
-      #expect(description.id == fixture.content2.description)
+    for id in [fixture.content2.raw, fixture.pane2.id.raw] {
+      let outcome = await fixture.handlers.describeTab(try Self.request(id))
+      let description: IPC.TabDescription = try Self.decodeUnary(outcome)
+      #expect(description.id == fixture.tab2.id.description)
     }
   }
 
   @Test
-  func describePaneReportsLiveWhenAProbeIsBound() async throws {
+  func describeTabReportsLiveWhenAProbeIsBound() async throws {
     let fixture = Fixture(probeIsBound: true)
-    try fixture.manager.focusPane(fixture.pane2.id)
 
-    let outcome = await fixture.handlers.describePane(try Self.request(fixture.content1.raw))
-    let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
+    let outcome = await fixture.handlers.describeTab(try Self.request(fixture.tab1.id.raw))
+    let description: IPC.TabDescription = try Self.decodeUnary(outcome)
 
     #expect(description.isLive)
     #expect(description.workingDirectory == "/repo")
-    #expect(!description.isFocused)
   }
 
   @Test
-  func describeTabFallsBackToTheCachedTitleAndNamesItsPane() async throws {
+  func describeTabFallsBackToTheCachedTitle() async throws {
     let fixture = Fixture()
 
     let outcome = await fixture.handlers.describeTab(try Self.request(fixture.tab1.id.raw))
@@ -68,21 +69,37 @@ struct HierarchyHandlersDescribeTests {
     #expect(description.handle == "t1")
     #expect(description.title == "zsh — repo")
     #expect(description.name == nil)
-    #expect(description.isSelected)
-    #expect(description.paneID == fixture.pane1.id.description)
-    #expect(description.contentID == fixture.content1.description)
-    #expect(description.paneIDs == [fixture.pane1.id.description])
-    #expect(description.focusedPaneID == fixture.pane1.id.description)
   }
 
   @Test
-  func describeTabAcceptsASessionId() async throws {
+  func describePaneCarriesHandleStripAndFocus() async throws {
+    let fixture = Fixture()
+    try fixture.manager.focusPane(fixture.pane2.id)
+
+    let outcome = await fixture.handlers.describePane(try Self.request(fixture.pane2.id.raw))
+    let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
+
+    #expect(description.id == fixture.pane2.id.description)
+    #expect(description.handle == "p2")
+    #expect(description.projectID == fixture.project.id.description)
+    #expect(description.worktreeID == fixture.worktree.id.description)
+    #expect(description.selectedTabID == fixture.tab2.id.description)
+    #expect(description.tabIDs == [fixture.tab2.id.description])
+    #expect(description.isFocused)
+  }
+
+  /// A Tab or Content id describes the Pane holding it.
+  @Test
+  func describePaneAcceptsTabAndContentIds() async throws {
     let fixture = Fixture()
 
-    let outcome = await fixture.handlers.describeTab(try Self.request(fixture.content2.raw))
-    let description: IPC.TabDescription = try Self.decodeUnary(outcome)
-
-    #expect(description.id == fixture.tab2.id.description)
+    for id in [fixture.tab1.id.raw, fixture.content1.raw] {
+      let outcome = await fixture.handlers.describePane(try Self.request(id))
+      let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
+      #expect(description.id == fixture.pane1.id.description)
+      #expect(description.handle == "p1")
+      #expect(description.isFocused)
+    }
   }
 
   @Test
@@ -95,9 +112,7 @@ struct HierarchyHandlersDescribeTests {
     #expect(worktree.projectName == "repo")
     #expect(worktree.branch == "main")
     #expect(worktree.isSelected)
-    #expect(worktree.tabCount == 2)
     #expect(worktree.paneCount == 2)
-    #expect(worktree.selectedTabID == fixture.tab1.id.description)
     #expect(worktree.focusedPaneID == fixture.pane1.id.description)
 
     let projectOutcome = await fixture.handlers.describeProject(

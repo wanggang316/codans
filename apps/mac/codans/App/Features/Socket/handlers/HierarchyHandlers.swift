@@ -203,6 +203,9 @@ final class HierarchyHandlers {
     if request.value == "current" || request.value == "." {
       return resolveCurrent(request, peerPID: peerPID)
     }
+    if request.value == Self.selectedPronoun, request.kind == .project || request.kind == .worktree {
+      return resolveSelected(request)
+    }
     if request.kind.isSessionLevel, request.value.hasPrefix("@") {
       let label = String(request.value.dropFirst())
       let matches = Self.contentsMatchingLabel(label: label, catalog: manager.catalog)
@@ -317,6 +320,24 @@ final class HierarchyHandlers {
     case .project: id = catalog.projectID(forContent: content)?.raw
     case .tag: id = nil
     }
+    guard let id else {
+      return .failed(.notFound(kind: request.kind.rawValue, id: request.value))
+    }
+    return resolved(request.kind, id)
+  }
+
+  /// `@selected` — the project / worktree the window shows. A caller
+  /// outside any Tab (a plain terminal) has no `current`; verbs that create
+  /// something fall back to what the user is looking at.
+  static let selectedPronoun = "@selected"
+
+  private func resolveSelected(_ request: IPC.AliasResolveRequest) -> RouterOutcome {
+    let catalog = manager.catalog
+    let projectID = catalog.displayedSelectedProjectID
+    let id: UUID? =
+      request.kind == .project
+      ? projectID?.raw
+      : catalog.projects.first(where: { $0.id == projectID })?.selectedWorktreeID?.raw
     guard let id else {
       return .failed(.notFound(kind: request.kind.rawValue, id: request.value))
     }

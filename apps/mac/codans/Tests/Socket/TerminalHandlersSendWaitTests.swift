@@ -39,12 +39,12 @@ struct TerminalHandlersSendWaitTests {
     capture: Bool
   ) async throws -> TerminalHandlers.SendInputResult {
     struct Params: Codable {
-      let paneID: ContentID
+      let contentID: ContentID
       let text: String
       let wait: TerminalHandlers.SendWaitParams
       let capture: Bool
     }
-    let params = try JSONValue.encoded(Params(paneID: pane, text: text, wait: wait, capture: capture))
+    let params = try JSONValue.encoded(Params(contentID: pane, text: text, wait: wait, capture: capture))
     let outcome = await handlers.sendInput(params)
     guard case .unary(let value) = outcome else {
       Issue.record("expected unary, got \(outcome)")

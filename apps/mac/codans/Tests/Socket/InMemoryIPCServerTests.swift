@@ -25,6 +25,40 @@ struct InMemoryIPCServerTests {
     #expect(ping.error == nil)
   }
 
+  /// A client of another IPC protocol (or one that predates the field) is
+  /// refused at the handshake, and the request it pipelined behind the
+  /// hello never runs.
+  @Test(arguments: [nil, IPC.protocolVersion - 1] as [Int?])
+  func helloOfAnotherProtocolIsRefused(protocolVersion: Int?) async throws {
+    let server = Self.makeHarness()
+    defer { server.stop() }
+
+    let hello = try JSONValue.encoded(
+      HelloRequest(clientVersion: "0.3.0", clientBinary: "codans", protocolVersion: protocolVersion))
+    try server.send(IPC.Request(id: "hello-old", method: .systemHello, params: hello))
+    let response = try await server.awaitResponse()
+    guard case .versionMismatch(_, let serverSide) = response.error else {
+      Issue.record("expected versionMismatch, got \(String(describing: response.error))")
+      return
+    }
+    #expect(serverSide.contains("IPC protocol \(IPC.protocolVersion)"))
+
+    try server.send(IPC.Request(id: "ping-after", method: .systemPing))
+    let ping = try await server.awaitResponse()
+    #expect(ping.error != nil)
+  }
+
+  @Test
+  func helloReportsTheProtocolVersion() async throws {
+    let server = Self.makeHarness()
+    defer { server.stop() }
+
+    try Self.sendHello(server)
+    let hello = try await server.awaitResponse()
+    let response = try #require(hello.result).decoded(as: HelloResponse.self)
+    #expect(response.protocolMajor == IPC.protocolVersion)
+  }
+
   @Test
   func nonHelloFirstFrameIsRejected() async throws {
     let server = Self.makeHarness()

@@ -57,12 +57,12 @@ struct TabList: AsyncParsableCommand {
       struct Params: Codable {
         let worktreeID: WorktreeID
         let projectID: ProjectID
-        let paneID: PaneID?
+        let paneID: UUID?
       }
       let result: TabListPayload = try await client.call(
         .hierarchyListTabs,
         params: Params(
-          worktreeID: resolved.scope.worktreeID, projectID: resolved.scope.projectID, paneID: resolved.paneID)
+          worktreeID: resolved.scope.worktreeID, projectID: resolved.scope.projectID, paneID: resolved.paneID?.raw)
       )
       try Renderer.emit(TabListRenderable(tabs: result.tabs), mode: globals.renderMode)
     }
@@ -106,7 +106,7 @@ struct TabNew: AsyncParsableCommand {
       struct Params: Codable {
         let projectID: ProjectID
         let worktreeID: WorktreeID
-        let paneID: PaneID?
+        let paneID: UUID?
         let name: String?
         let workingDirectory: String
         let initialCommand: String?
@@ -123,7 +123,7 @@ struct TabNew: AsyncParsableCommand {
         params: Params(
           projectID: resolved.scope.projectID,
           worktreeID: resolved.scope.worktreeID,
-          paneID: resolved.paneID,
+          paneID: resolved.paneID?.raw,
           name: name,
           workingDirectory: PathResolver.absolute(cwd),
           initialCommand: command.isEmpty ? nil : command.joined(separator: " "),
