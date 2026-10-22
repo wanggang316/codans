@@ -316,7 +316,7 @@ public final class MethodRouter {
   }
 
   /// `workflow.*` adapter. `peerPID` reaches every verb: the caller's pane
-  /// is attributed from it when the CLI ran without `CODANS_PANE_ID`.
+  /// is attributed from it when the CLI ran without `CODANS_CONTENT_ID`.
   private func routeWorkflow(_ request: IPC.Request, peerPID: pid_t?) async -> RouterOutcome? {
     guard let h = workflowHandlers else { return nil }
     switch request.method {

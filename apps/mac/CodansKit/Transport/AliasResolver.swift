@@ -113,8 +113,10 @@ public enum AliasResolver {
   }
 
   /// The caller's own session (`CODANS_CONTENT_ID`), sent as the
-  /// server-side context for `hierarchy.resolveAlias`.
-  static func callerContentID(env: [String: String]) -> ContentID? {
+  /// server-side context for `hierarchy.resolveAlias` and as the caller of
+  /// workflow requests. `CODANS_PANE_ID` names a Pane and is never read as
+  /// a session id.
+  public static func callerContentID(env: [String: String]) -> ContentID? {
     env[CodansEnvironment.Key.contentID.rawValue].flatMap(UUID.init(uuidString:)).map(ContentID.init(raw:))
   }
 

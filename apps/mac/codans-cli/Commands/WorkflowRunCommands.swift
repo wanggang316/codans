@@ -30,7 +30,7 @@ struct WorkflowStatus: AsyncParsableCommand {
         .workflowStatus,
         params: IPC.WorkflowStatusRequest(
           runID: parsedRunID,
-          callerPaneID: parsedRunID == nil ? WorkflowCallerContext.paneID() : nil)
+          callerPaneID: parsedRunID == nil ? WorkflowCallerContext.contentID() : nil)
       )
       try Renderer.emit(WorkflowStatusRenderable(response: response), mode: globals.renderMode)
     }
@@ -87,7 +87,7 @@ struct WorkflowDeliver: AsyncParsableCommand {
       let response: IPC.WorkflowDeliverResponse = try await client.call(
         .workflowDeliver,
         params: IPC.WorkflowDeliverRequest(
-          callerPaneID: WorkflowCallerContext.paneID(),
+          callerPaneID: WorkflowCallerContext.contentID(),
           token: token ?? WorkflowCallerContext.token(),
           runID: explicitRun?.runID,
           stepID: explicitRun?.stepID,
@@ -264,7 +264,7 @@ struct WorkflowRuns: AsyncParsableCommand {
         .workflowListRuns,
         params: IPC.WorkflowListRunsRequest(
           worktreeID: worktreeID,
-          paneID: worktreeID == nil ? WorkflowCallerContext.paneID() : nil,
+          paneID: worktreeID == nil ? WorkflowCallerContext.contentID() : nil,
           limit: limit)
       )
       try Renderer.emit(WorkflowRunListRenderable(response: response), mode: globals.renderMode)

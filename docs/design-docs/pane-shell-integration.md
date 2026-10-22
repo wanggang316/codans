@@ -65,7 +65,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 - 进程树为"守护进程 → `login`（独立进程组）→ shell（独立进程组）"；
 - `ssh -t` 到缺少 terminfo 的主机，远端为 `TERM=xterm-256color`，zsh 主机上 Backspace、←、Home、Delete 显示正确，bash 主机上 `tput` 可用；
 - `cd` 之后 pane 的工作目录随之更新（OSC 7），超过阈值的命令结束后产生"命令完成 / 失败"通知（OSC 133）；
-- 前台任务检测、agent 识别、不带 `CODANS_PANE_ID` 的 CLI 调用方解析、app 退出重进后重新接上会话，都与集成前一致。
+- 前台任务检测、agent 识别、不带 `CODANS_CONTENT_ID` 的 CLI 调用方解析、app 退出重进后重新接上会话，都与集成前一致。
 
 ### 系统上下文
 
@@ -202,7 +202,7 @@ libghostty 支持强制指定 shell 类型。否决理由：
   - 跑一条长命令能触发 `commandFinished` 通知；
   - 在 pane 里执行 `exit` 后，pane 照常关闭并从 catalog 移除；
   - 退出 app 再启动后能重新接上会话，`--restore-from` 快照能正常恢复；
-  - CLI 不带 `CODANS_PANE_ID` 时，调用方解析仍能命中正确的 pane；
+  - CLI 不带 `CODANS_CONTENT_ID` 时，调用方解析仍能命中正确的会话；
   - agent 识别：shell 处于提示符时前台进程组只有 shell（`login` 在自己的进程组里），运行 `claude` 时能识别出来。
 - **macOS 登录会话**：`login(1)` 从客户端侧挪到守护进程侧。需验证 pane 里访问钥匙串的 CLI（如 `claude` 的登录态）行为不变。
 
