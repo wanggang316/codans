@@ -1182,7 +1182,7 @@ final class AppState {
       callerPaneResolver: { [weak terminalEngine] callerPID in
         // Ground-truth caller attribution: match the connecting process's
         // ancestry against every live pane's daemon shell PID. Covers CLI
-        // calls whose environment lost CODANS_PANE_ID (agent-spawned
+        // calls whose environment lost CODANS_CONTENT_ID (agent-spawned
         // subshells, wrappers) — the ancestor chain still passes through
         // the pane's shell. The snapshot is rebuilt per call; the map is
         // small (one entry per live pane) and shell PIDs can change

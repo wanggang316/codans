@@ -43,13 +43,8 @@ struct WorkflowCommand: AsyncParsableCommand {
 /// as hints and attributes the caller from the connection's peer PID when the
 /// session id is absent (a wrapper or subshell may have dropped it).
 enum WorkflowCallerContext {
-  static func paneID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> ContentID? {
-    for key in [CodansEnvironment.Key.contentID, .paneID] {
-      if let uuid = environment[key.rawValue].flatMap(UUID.init(uuidString:)) {
-        return ContentID(raw: uuid)
-      }
-    }
-    return nil
+  static func contentID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> ContentID? {
+    AliasResolver.callerContentID(env: environment)
   }
 
   static func token(in environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
@@ -155,7 +150,7 @@ struct WorkflowList: AsyncParsableCommand {
         .workflowList,
         params: IPC.WorkflowListRequest(
           worktreeID: worktreeID,
-          paneID: worktreeID == nil ? WorkflowCallerContext.paneID() : nil)
+          paneID: worktreeID == nil ? WorkflowCallerContext.contentID() : nil)
       )
       try Renderer.emit(WorkflowListRenderable(response: response), mode: globals.renderMode)
     }
@@ -200,7 +195,7 @@ struct WorkflowRun: AsyncParsableCommand {
       let inputs = try CLIKeyValuePairs.parse(input, option: "--input")
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      var resolved = WorkflowSourceResolver.Resolved(paneID: WorkflowCallerContext.paneID())
+      var resolved = WorkflowSourceResolver.Resolved(paneID: WorkflowCallerContext.contentID())
       if let source {
         resolved = try await WorkflowSourceResolver.resolve(source, client: client)
       }
@@ -210,7 +205,7 @@ struct WorkflowRun: AsyncParsableCommand {
           workflow: workflow,
           sourcePaneID: resolved.paneID,
           worktreeID: resolved.worktreeID,
-          callerPaneID: WorkflowCallerContext.paneID(),
+          callerPaneID: WorkflowCallerContext.contentID(),
           roles: roles,
           inputs: inputs,
           skip: skip,

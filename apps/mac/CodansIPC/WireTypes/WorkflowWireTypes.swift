@@ -138,7 +138,7 @@ extension IPC {
     public let workflow: String
     public let sourcePaneID: ContentID?
     public let worktreeID: WorktreeID?
-    /// The pane the CLI ran in (`CODANS_PANE_ID`), independent of the
+    /// The session the CLI ran in (`CODANS_CONTENT_ID`), independent of the
     /// explicit source. Only a run started from the `current` role's own
     /// pane is self-initiated; the server falls back to peer-PID
     /// attribution when this is nil.

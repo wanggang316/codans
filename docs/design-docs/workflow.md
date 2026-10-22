@@ -244,7 +244,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 无论从 CLI 还是 Command Palette / 启动面板发起，最终都是同一个 `WorkflowAdmission.admit(request)`，它不碰任何 pane：
 
 1. 按 id（再按唯一 name）解析定义；有 error 诊断 → `WORKFLOW_INVALID`（带诊断）；Settings 里被禁用 → `WORKFLOW_DISABLED`；
-2. 确定 source：调用方 pane（`CODANS_PANE_ID` / 进程祖先链）或显式的 pane / worktree 引用；有 `current` 角色却没有 pane → `SOURCE_REQUIRED`；
+2. 确定 source：调用方会话（`CODANS_CONTENT_ID` / 进程祖先链）或显式的 pane / worktree 引用；有 `current` 角色却没有 pane → `SOURCE_REQUIRED`；
 3. 仓库作用域且含 `run:` 步骤的文件需要已被信任（D8）→ 否则 `WORKFLOW_TRUST_REQUIRED`；
 4. `--input` 类型化并检查范围；必填输入缺失 → GUI 询问 / CLI `INPUT_REQUIRED`；
 5. `--skip` 只接受"其 delivery 没有非可选消费者"的 step，否则 `INVALID_ARGUMENT` 指出依赖它的 step；
