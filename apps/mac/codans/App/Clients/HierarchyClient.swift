@@ -1069,7 +1069,7 @@ extension HierarchyClient {
   ///
   /// When `target` spawned a session and `resolvedOnFinished` is non-`.none`,
   /// a detached observer waits for that session's child to exit and then
-  /// applies the policy (`.closePane` / `.closeTab`).
+  /// applies the policy (`.closeTab`).
   @MainActor
   private static func runScript(
     scriptID: UUID,
@@ -1581,8 +1581,6 @@ extension HierarchyClient {
     switch policy {
     case .none:
       return
-    case .closePane:
-      try? manager.closePane(address.paneID)
     case .closeTab:
       try? manager.closeTab(address.tabID)
     }

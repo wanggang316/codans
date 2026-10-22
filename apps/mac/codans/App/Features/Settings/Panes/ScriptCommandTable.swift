@@ -712,21 +712,19 @@ private struct ScriptCommandPopover: View {
   }
 
   /// Maps the single "Close when finished" checkbox onto the target-specific
-  /// `ScriptOnFinished` case (`.closeTab` for a tab, `.closePane` for a split).
+  /// `ScriptOnFinished.closeTab` (a split closes its Pane with its only Tab).
   private var closeBinding: Binding<Bool> {
     Binding(
       get: {
         switch script.target {
-        case .newTab: return script.onFinished == .closeTab
-        case .split: return script.onFinished == .closePane
+        case .newTab, .split: return script.onFinished == .closeTab
         case .focused: return false
         }
       },
       set: { isOn in
         var updated = script
         switch script.target {
-        case .newTab: updated.onFinished = isOn ? .closeTab : .none
-        case .split: updated.onFinished = isOn ? .closePane : .none
+        case .newTab, .split: updated.onFinished = isOn ? .closeTab : .none
         case .focused: updated.onFinished = .none
         }
         onUpdate(updated)
