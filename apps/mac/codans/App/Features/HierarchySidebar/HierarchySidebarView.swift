@@ -1734,7 +1734,7 @@ struct HierarchySidebarView: View {
         .queuedCommandCount,
       count > 0
     else { return base }
-    return base + " " + QueuedCommandDiscard.discardNotice(count)
+    return base + " " + CloseConfirmationPrompt.discardNotice(count)
   }
 
   private var projectRemovalMessage: String {
@@ -1746,7 +1746,7 @@ struct HierarchySidebarView: View {
         .queuedCommandCount,
       count > 0
     else { return base }
-    return base + " " + QueuedCommandDiscard.discardNotice(count)
+    return base + " " + CloseConfirmationPrompt.discardNotice(count)
   }
 
   // MARK: - New badge pill
