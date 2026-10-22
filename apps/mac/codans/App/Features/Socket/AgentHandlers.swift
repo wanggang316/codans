@@ -103,7 +103,8 @@ final class AgentHandlers {
       agent: outcome.profile.kind.rawValue,
       command: outcome.command,
       tabID: outcome.tabID,
-      paneID: outcome.contentID
+      contentID: outcome.contentID,
+      paneID: outcome.paneID
     )
   }
 
@@ -129,7 +130,7 @@ final class AgentHandlers {
             guard let entry = stateStore.entries[contentID] else { continue }
             rows.append(
               IPC.AgentStateEntry(
-                paneID: contentID.description,
+                contentID: contentID.description,
                 // The session's short handle is its Tab's: `t<n>` is what
                 // `tab send` / `tab show` take.
                 handle: handles.tabs[tab.id.description].map { "t\($0)" },
@@ -148,6 +149,7 @@ final class AgentHandlers {
                 worktreeName: worktree.name,
                 tabID: tab.id.description,
                 tabTitle: tab.name ?? tab.cachedDisplayTitle,
+                paneID: pane.id.description,
                 isFocused: focused == contentID
               ))
           }
@@ -168,15 +170,15 @@ final class AgentHandlers {
     guard let stateStore = stateStore() else {
       throw IPCError.unsupported(reason: "agent state is not available in this build")
     }
-    guard hierarchy.snapshot().content(request.paneID) != nil else {
-      throw IPCError.notFound(kind: "pane", id: request.paneID.description)
+    guard hierarchy.snapshot().content(request.contentID) != nil else {
+      throw IPCError.notFound(kind: "tab", id: request.contentID.description)
     }
     let timeout = min(max(request.timeoutMillis, 1), Self.maxWaitMillis)
     let start = ContinuousClock.now
-    let baseline = stateStore.entries[request.paneID]
+    let baseline = stateStore.entries[request.contentID]
     while true {
-      let entry = stateStore.entries[request.paneID]
-      let paneExists = hierarchy.snapshot().content(request.paneID) != nil
+      let entry = stateStore.entries[request.contentID]
+      let paneExists = hierarchy.snapshot().content(request.contentID) != nil
       let satisfied: Bool
       switch request.until {
       case .idle: satisfied = entry?.state == .idle
@@ -191,7 +193,7 @@ final class AgentHandlers {
       let waitedMs = Int(elapsed / .milliseconds(1))
       if satisfied || waitedMs >= timeout {
         return IPC.AgentWaitResponse(
-          paneID: request.paneID.description,
+          contentID: request.contentID.description,
           until: request.until.rawValue,
           satisfied: satisfied,
           state: entry?.state.rawValue,

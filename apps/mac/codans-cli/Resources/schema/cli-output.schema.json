@@ -687,7 +687,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.agent.launch.v1"
+            "const": "codans.cli.agent.launch.v2"
           }
         },
         "required": [
@@ -707,7 +707,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.agent.status.v1"
+            "const": "codans.cli.agent.status.v2"
           }
         },
         "required": [
@@ -727,7 +727,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.agent.wait.v1"
+            "const": "codans.cli.agent.wait.v2"
           }
         },
         "required": [
@@ -847,7 +847,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.handoff.to.v1"
+            "const": "codans.cli.handoff.to.v2"
           }
         },
         "required": [
@@ -867,7 +867,7 @@
       "if": {
         "properties": {
           "schemaVersion": {
-            "const": "codans.cli.handoff.save.v1"
+            "const": "codans.cli.handoff.save.v2"
           }
         },
         "required": [
@@ -1696,6 +1696,9 @@
         "tabID": {
           "type": "string"
         },
+        "contentID": {
+          "type": "string"
+        },
         "paneID": {
           "type": "string"
         }
@@ -1706,6 +1709,7 @@
         "agent",
         "command",
         "tabID",
+        "contentID",
         "paneID"
       ],
       "additionalProperties": false
@@ -1713,7 +1717,7 @@
     "agentStatusEntry": {
       "type": "object",
       "properties": {
-        "paneID": {
+        "contentID": {
           "$ref": "#/$defs/uuid"
         },
         "handle": {
@@ -1789,12 +1793,15 @@
             "null"
           ]
         },
+        "paneID": {
+          "$ref": "#/$defs/uuid"
+        },
         "isFocused": {
           "type": "boolean"
         }
       },
       "required": [
-        "paneID",
+        "contentID",
         "agent",
         "agentName",
         "state",
@@ -1804,7 +1811,8 @@
         "worktreeID",
         "worktreeName",
         "tabID",
-        "isFocused"
+        "isFocused",
+        "paneID"
       ],
       "additionalProperties": false
     },
@@ -1830,7 +1838,7 @@
     "agentWait": {
       "type": "object",
       "properties": {
-        "paneID": {
+        "contentID": {
           "$ref": "#/$defs/uuid"
         },
         "until": {
@@ -1862,7 +1870,7 @@
         }
       },
       "required": [
-        "paneID",
+        "contentID",
         "until",
         "satisfied",
         "waitedMs"
@@ -2035,8 +2043,14 @@
             "tabID": {
               "$ref": "#/$defs/uuid"
             },
-            "paneID": {
+            "contentID": {
               "$ref": "#/$defs/uuid"
+            },
+            "paneID": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "profileName": {
               "type": "string"
@@ -2046,7 +2060,7 @@
             "projectID",
             "worktreeID",
             "tabID",
-            "paneID",
+            "contentID",
             "profileName"
           ],
           "additionalProperties": false

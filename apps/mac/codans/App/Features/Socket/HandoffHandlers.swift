@@ -200,7 +200,7 @@ final class HandoffHandlers {
     }
     try? await log(
       coordinator, from: source.agentKind, to: receiver,
-      disposition: launched.map { .pane($0.paneID.description) } ?? .skipped,
+      disposition: launched.map { .pane($0.contentID.description) } ?? .skipped,
       transition: transition, note: request.note, now: timestamp)
 
     registry.publish(
@@ -339,7 +339,8 @@ final class HandoffHandlers {
         projectID: source.projectID,
         worktreeID: source.worktreeID,
         tabID: tabID,
-        paneID: contentID,
+        contentID: contentID,
+        paneID: outcome.paneID,
         profileName: profile.displayName
       )
     } catch {

@@ -253,7 +253,7 @@ struct HandoffHandlersTests {
     #expect(response.receiver == "codex")
     #expect(response.hasBriefing)
     #expect(response.archivedPath == ".codans/handoff/archive/20231114-221320-claude-code-to-codex.md")
-    #expect(response.launchedPane?.paneID == harness.launches.contentID)
+    #expect(response.launchedPane?.contentID == harness.launches.contentID)
     #expect(response.launchedPane?.tabID == harness.launches.tabID)
     #expect(response.launchedPane?.profileName == "Codex")
 
@@ -362,7 +362,7 @@ struct HandoffHandlersTests {
     let response = try await harness.handlers.to(
       Self.request(.to, harness, receiver: "amp", brief: Self.briefing))
 
-    #expect(response.launchedPane?.paneID == harness.launches.contentID)
+    #expect(response.launchedPane?.contentID == harness.launches.contentID)
     let spec = try #require(harness.launches.specs.first)
     #expect(spec.profile.kind == .amp)
     let kickoff = try #require(await harness.launches.awaitKickoff())

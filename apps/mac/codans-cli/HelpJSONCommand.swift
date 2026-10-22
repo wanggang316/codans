@@ -24,7 +24,7 @@ struct HelpJSONCommand: ParsableCommand {
     let config = type.configuration
     // Hidden subcommands (verbs kept at a former location only to fail with
     // the new one, and this command itself) are not part of the shape.
-    let children = config.subcommands.filter(\.configuration.shouldDisplay).map { sub in
+    let children = config.subcommands.filter { $0.configuration.shouldDisplay }.map { sub in
       walk(sub, name: sub.configuration.commandName ?? "")
     }
     return Node(

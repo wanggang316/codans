@@ -86,15 +86,17 @@ extension IPC {
     }
   }
 
-  /// Result for `agent.launch`. `tabID` / `paneID` are nil when the launch
-  /// typed into the focused pane instead of creating a surface.
+  /// Result for `agent.launch`: the Tab the agent runs in, its session,
+  /// and the Pane holding it. All nil when the launch typed into the
+  /// focused Tab instead of creating one.
   public struct AgentLaunchResponse: Codable, Equatable, Sendable {
     public let profileID: UUID
     public let profileName: String
     public let agent: String
     public let command: String
     public let tabID: TabID?
-    public let paneID: ContentID?
+    public let contentID: ContentID?
+    public let paneID: PaneID?
 
     public init(
       profileID: UUID,
@@ -102,13 +104,15 @@ extension IPC {
       agent: String,
       command: String,
       tabID: TabID?,
-      paneID: ContentID?
+      contentID: ContentID?,
+      paneID: PaneID?
     ) {
       self.profileID = profileID
       self.profileName = profileName
       self.agent = agent
       self.command = command
       self.tabID = tabID
+      self.contentID = contentID
       self.paneID = paneID
     }
   }

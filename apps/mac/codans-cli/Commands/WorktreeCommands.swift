@@ -214,6 +214,7 @@ struct WorktreeNew: AsyncParsableCommand {
           "agent": launched.agent,
           "command": launched.command,
           "tabID": launched.tabID?.description ?? "",
+          "contentID": launched.contentID?.description ?? "",
           "paneID": launched.paneID?.description ?? "",
         ]
       }
@@ -221,8 +222,9 @@ struct WorktreeNew: AsyncParsableCommand {
         var line =
           "\(created ? "created" : "registered") worktree \(result.id.description)  \(displayName)  \(result.path)"
         if let launched = result.agent {
-          line += "\nlaunched \(launched.profileName)"
-            + (launched.paneID.map { " in pane \($0.description)" } ?? "")
+          line +=
+            "\nlaunched \(launched.profileName)"
+            + (launched.tabID.map { " in tab \($0.description)" } ?? "")
         }
         return line
       }

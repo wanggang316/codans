@@ -68,19 +68,22 @@ extension IPC {
     public let projectID: ProjectID
     public let worktreeID: WorktreeID
     public let tabID: TabID
-    public let paneID: ContentID
+    public let contentID: ContentID
+    public let paneID: PaneID?
     public let profileName: String
 
     public init(
       projectID: ProjectID,
       worktreeID: WorktreeID,
       tabID: TabID,
-      paneID: ContentID,
+      contentID: ContentID,
+      paneID: PaneID?,
       profileName: String
     ) {
       self.projectID = projectID
       self.worktreeID = worktreeID
       self.tabID = tabID
+      self.contentID = contentID
       self.paneID = paneID
       self.profileName = profileName
     }
