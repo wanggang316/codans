@@ -73,7 +73,10 @@ struct CodansApp: App {
     // users create extras out-of-band.
     Window("Codans", id: CodansApp.mainWindowID) {
       AppAppearanceView(settingsStore: appState.settingsStore) {
-        if let store = appState.store, appState.terminalEngine != nil {
+        if appState.store != nil, let fileVersion = appState.catalogReadOnlyVersion {
+          CatalogUpdateRequiredView(fileVersion: fileVersion)
+            .frame(minWidth: 800, minHeight: 600)
+        } else if let store = appState.store, appState.terminalEngine != nil {
           ContentView(
             store: store,
             hierarchyManager: appState.hierarchyManager,
@@ -587,6 +590,9 @@ final class AppState {
   private(set) var developerPaneDependencies: DeveloperPaneDependencies?
 
   private let catalogStore: CatalogStore
+  /// Set when `catalog.json` was written by a newer build: the main window
+  /// shows `CatalogUpdateRequiredView` instead of the workspace.
+  var catalogReadOnlyVersion: Int? { catalogStore.loadReport.readOnlyVersion }
   private let hierarchyRuntime: LiveHierarchyRuntime
   /// Registry of live Content (surfaces, chrome). Built in `bringUp`
   /// alongside the engine; nil before then.
