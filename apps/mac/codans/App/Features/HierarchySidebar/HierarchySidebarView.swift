@@ -107,7 +107,6 @@ struct HierarchySidebarView: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
   @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
-  @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
 
   /// Tracks whether the `.command` modifier is currently pressed. When held the sidebar
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
@@ -208,14 +207,6 @@ struct HierarchySidebarView: View {
     // the panel. Availability never changes the persisted open preference.
     let agentStatePanelAvailable = !catalog.projects.isEmpty && agentStateStore != nil
     let agentStatePanelVisible = agentStatePanelAvailable && agentStatePanelOpen
-    // Force `@Observable` subscription to `agentStateStore.entries` even
-    // while the panel is closed and `registry` is never unwrapped in
-    // the conditional below. Without this top-level read the body
-    // never re-evaluates on entry mutations, and the `.onChange(of:
-    // anyAgentNeedsAttention)` modifier below never fires the auto-open
-    // transition (the rising edge into "any agent is loading").
-    let _ = anyAgentNeedsAttention
-
     // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
@@ -857,7 +848,7 @@ struct HierarchySidebarView: View {
         gitHubStore: gitHubStore,
         rowWorktree: root,
         isRowSelected: currentSelection.worktreeID == root.id,
-        isRowBusy: hierarchyManager.worktreeIsDirty(root.id) || anyAgentWorking(in: root),
+        agentStateStore: agentStateStore,
         hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
         onToggleExpansion: toggleExpansion
       ) {
@@ -995,7 +986,7 @@ struct HierarchySidebarView: View {
         isSelected: isSelected
       )
       newBadgePill(for: worktree)
-      diffStatsChip(for: worktree, in: project, snapshot: snapshot)
+      SidebarWorktreeDiffStats(worktreeID: worktree.id)
       gitHubBadge(for: worktree, in: project)
       runScriptPingAccessory(for: worktree, in: project)
       // Trailing chord hint, after both the row content and the optional PR pill so it
@@ -1094,43 +1085,13 @@ struct HierarchySidebarView: View {
     // click, leave the table off-responder, and the row would stay grey
     // even though state moved.
     let lifecycle = store.lifecycleProgress[worktree.id]
-    // Aggregated "any pane in this worktree is busy" signal — the union of two
-    // sources: (1) the terminal signal via `HierarchyManager.worktreeIsDirty(_:)`
-    // (OSC 9;4 progress ∪ a running foreground command), and (2) any bound agent
-    // rendered as `.working`. Agents are excluded from the terminal signal (they
-    // stay foreground for their whole session), so this OR is what lights the row
-    // while an agent works without emitting OSC 9;4. Both reads are `@Observable`,
-    // so the spinner tracks either source automatically. Rendered at the leading
-    // icon slot (replacing WorktreeRowIcon) — one consistent "busy" affordance.
-    // Dedicated run-script panes are excluded from `worktreeIsDirty`; their
-    // activity renders as the trailing ping dot (`runScriptPingAccessory`)
-    // so a running script never hijacks the row icon.
-    let isExecuting =
-      hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
-      Group {
-        if lifecycle != nil {
-          // Archive / delete is mid-flight — swap the row icon for a
-          // spinner so the click feels acknowledged; the phase line below
-          // says where the teardown is. The row vanishes once the
-          // lifecycle completes (archive → archived list, delete → gone).
-          lifecycleSpinner
-        } else if isExecuting {
-          ProgressView()
-            .controlSize(.small)
-            .frame(width: 14, height: 14)
-            .accessibilityLabel("Worktree has a running command")
-        } else {
-          WorktreeRowIcon(
-            snapshot: snapshot, rollup: rollup, isSelected: isSelected,
-            glyph: leadingGlyph,
-            hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id)
-              == true
-              && settingsStore.settings.notifications.worktreeBellEnabled,
-            isDefaultBranch: isMainCheckout && !isSyntheticWorktree
-          )
-        }
-      }
+      SidebarWorktreeActivityIcon(
+        worktree: worktree, agentStateStore: agentStateStore,
+        snapshot: snapshot, rollup: rollup, isSelected: isSelected,
+        glyph: leadingGlyph, isDefaultBranch: isMainCheckout && !isSyntheticWorktree,
+        hasLifecycle: lifecycle != nil
+      )
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
           Text(rowTitle)
@@ -1182,18 +1143,6 @@ struct HierarchySidebarView: View {
     content.background(alignment: .topLeading) {
       hotkeyChord(hotkeyNumber, worktreeID: worktree.id, projectID: project.id)
     }
-  }
-
-  /// Leading icon for a row mid-archive / mid-delete: an indeterminate
-  /// spinner through BOTH phases — motion in this slot is what tells the
-  /// user the lifecycle is alive (a static glyph here reads as
-  /// "stalled"). The script glyph annotates the second line instead —
-  /// see `LifecyclePhaseLineView`.
-  private var lifecycleSpinner: some View {
-    ProgressView()
-      .controlSize(.small)
-      .frame(width: 14, height: 14)
-      .accessibilityLabel("Working")
   }
 
   // Main-checkout guard: the row whose path is the Project's rootPath is the main checkout
@@ -1281,7 +1230,7 @@ struct HierarchySidebarView: View {
     // A source Project's row that a workspace lists as a child is likewise
     // the workspace's to archive or remove.
     let isWorkspaceMember =
-      !project.isWorkspace && hierarchyManager.workspaceMembership(forPath: worktree.path) != nil
+      !project.isWorkspace && hierarchyManager.workspaceMemberships[worktree.id] != nil
     if !isMainCheckout, !project.isWorkspace, !isWorkspaceMember {
       if worktree.archived {
         Button {
@@ -1655,7 +1604,7 @@ struct HierarchySidebarView: View {
   @ViewBuilder
   fileprivate func workspaceMembershipBadge(for worktree: Worktree, in project: Project) -> some View {
     if !project.isWorkspace,
-      let membership = hierarchyManager.workspaceMembership(forPath: worktree.path)
+      let membership = hierarchyManager.workspaceMemberships[worktree.id]
     {
       Button {
         store.send(.workspaceMembershipBadgeTapped(membership))
@@ -1686,69 +1635,10 @@ struct HierarchySidebarView: View {
       : "Remove \(count) merged Worktrees?"
   }
 
-  // MARK: - Diff stats chip
-
-  /// Compact `+N −M` chip rendered to the right of the row content. Counts
-  /// come from `WorktreeLocalDiffMonitor` (the diff viewer's Uncommitted totals) so
-  /// every worktree — PR-matched or not — surfaces the same "uncommitted
-  /// edits in this worktree" signal. Refresh on HEAD events is wired in
-  /// `RootFeature.worktreeHeadChanged`; row-mount falls back to the
-  /// monitor's freshness window. The titlebar `StatusPullRequestView` still
-  /// shows the PR's pushed `+/−` for the active worktree if users want the
-  /// at-base comparison.
-  @ViewBuilder
-  fileprivate func diffStatsChip(
-    for worktree: Worktree, in project: Project, snapshot: PullRequestSnapshot?
-  ) -> some View {
-    if let local = worktreeLocalDiffMonitor.stats[worktree.id] ?? nil,
-      local.additions > 0 || local.deletions > 0
-    {
-      DiffStatsChip(
-        additions: local.additions,
-        deletions: local.deletions
-      )
-      // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
-      // not trailing, so the chip's right edge stays flush when it's the row's last
-      // visible accessory.
-      .padding(.leading, 6)
-    }
-  }
-
-  // MARK: - Run-script ping dot
-
-  /// Trailing indicator that lights while any script's dedicated run pane
-  /// in this worktree is executing. Complements the run tab's tinted icon:
-  /// run activity is deliberately excluded from `worktreeIsDirty`, so this
-  /// dot — not the leading spinner — is the row's "command running" signal.
-  /// Hovering swaps the dot for a Stop button that tears down every
-  /// executing script in the worktree; its own Button intercepts the click
-  /// so the row selection doesn't also fire (same sibling arrangement as
-  /// `gitHubBadge`).
-  @ViewBuilder
   fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
-    let tints = runningScriptTints(for: worktree, in: project)
-    if !tints.isEmpty {
-      RunScriptPingStopControl(colors: tints) {
-        store.send(.worktreeStopRunScriptsTapped(worktreeID: worktree.id))
-      }
-      // Own the leading gap from the previous accessory (outer HStack is
-      // `spacing: 0`), same convention as `diffStatsChip`.
-      .padding(.leading, 6)
-      .padding(.trailing, 2)
+    SidebarRunScriptAccessory(worktreeID: worktree.id, projectID: project.id) {
+      store.send(.worktreeStopRunScriptsTapped(worktreeID: worktree.id))
     }
-  }
-
-  /// Tints of every script currently executing in `worktree`, project
-  /// commands first, then globals — the order the Run menu lists them.
-  /// Both `isScriptRunning` and the settings read are `@Observable`, so the
-  /// row re-renders when a run starts/stops or a script's tint changes.
-  private func runningScriptTints(for worktree: Worktree, in project: Project) -> [Color] {
-    let settings = settingsStore.settings
-    let scripts = (settings.projects[project.id]?.scripts ?? []) + settings.general.globalScripts
-    return
-      scripts
-      .filter { hierarchyManager.isScriptRunning(worktreeID: worktree.id, scriptID: $0.id) }
-      .map { ScriptTintColorPalette.color(for: $0.resolvedTintColor) }
   }
 
   // MARK: - GitHub badge + popover
@@ -1884,22 +1774,7 @@ struct HierarchySidebarView: View {
   /// General → `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange`
   /// fires only on real transitions, not on every entry mutation.
   private var anyAgentNeedsAttention: Bool {
-    guard let entries = agentStateStore?.entries else { return false }
-    return entries.values.contains { entry in
-      entry.state == .working || entry.state == .blocked
-    }
-  }
-
-  /// True iff any pane in `worktree` hosts a bound agent currently `.working`.
-  /// OR'd into the worktree row's busy spinner so render-derived agent activity
-  /// lights the row even when the program emits no OSC 9;4 and the foreground
-  /// job is the agent itself (deliberately excluded from the terminal signal).
-  /// Only `.working` counts — `.blocked` is "waiting on the user", not busy.
-  private func anyAgentWorking(in worktree: Worktree) -> Bool {
-    guard let entries = agentStateStore?.entries, !entries.isEmpty else { return false }
-    return worktree.tabs.contains { tab in
-      tab.panes.contains { entries[$0.id]?.state == .working }
-    }
+    agentStateStore?.needsAttention == true
   }
 
   /// Walks the selection chain (project → worktree → tab) and returns
@@ -1936,7 +1811,15 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// unread bell, and ⌃N hint, the way a worktree row does.
   var rowWorktree: Worktree?
   var isRowSelected = false
-  var isRowBusy = false
+  var agentStateStore: AgentStateStore?
+
+  private var isRowBusy: Bool {
+    guard let rowWorktree else { return false }
+    return hierarchyManager.worktreeIsDirty(rowWorktree)
+      || rowWorktree.tabs.contains { tab in
+        tab.panes.contains { agentStateStore?.workingPaneIDs.contains($0.id) == true }
+      }
+  }
   /// The ⌃N number to show, while ⌘ is held.
   var hotkeyHint: Int?
   let onToggleExpansion: () -> Void
@@ -1962,7 +1845,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
     guard let gitHubStore else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
-      .filter { hierarchyManager.workspaceMembership(forPath: $0.path) == nil }
+      .filter { hierarchyManager.workspaceMemberships[$0.id] == nil }
       .filter { gitHubStore.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }

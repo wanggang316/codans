@@ -1,6 +1,7 @@
 import CodansCore
 import ComposableArchitecture
 import Foundation
+import Observation
 import Testing
 
 @testable import Codans
@@ -211,6 +212,41 @@ struct AgentStateStoreProgramStatusTests {
     f.report(.working)
     f.report(.blocked, kind: .permission)
     #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func sidebarActivityIgnoresMessageChangesAndTracksUnbind() {
+    let f = Fixture()
+    bindClaude(f)
+    f.report(.working, message: "Reading files")
+    #expect(f.registry.workingPaneIDs == [f.paneID])
+    #expect(f.registry.needsAttention)
+    let invalidated = LockIsolated(false)
+    withObservationTracking {
+      _ = f.registry.workingPaneIDs
+      _ = f.registry.needsAttention
+    } onChange: {
+      invalidated.setValue(true)
+    }
+    f.report(.working, message: "Running tests")
+    #expect(!invalidated.value)
+    f.report(.blocked, kind: .permission)
+    #expect(invalidated.value)
+    #expect(f.registry.workingPaneIDs.isEmpty)
+    #expect(f.registry.needsAttention)
+    f.registry.onAgentUnbound(f.paneID)
+    #expect(!f.registry.needsAttention)
+  }
+
+  @Test
+  func sidebarActivityTracksRestoredAndRetiredAgents() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    #expect(f.registry.workingPaneIDs == [f.paneID])
+    #expect(f.registry.needsAttention)
+    f.registry.reconcileMembership(livePaneIDs: [])
+    #expect(f.registry.workingPaneIDs.isEmpty)
+    #expect(!f.registry.needsAttention)
   }
 
   @Test
