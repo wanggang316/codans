@@ -327,8 +327,8 @@ final class HierarchyHandlers {
   }
 
   /// `@selected` — the project / worktree the window shows. A caller
-  /// outside any Tab (a plain terminal) has no `current`; verbs that create
-  /// something fall back to what the user is looking at.
+  /// outside any Tab (a plain terminal) has no `current` and must name its
+  /// containers; this pronoun is the explicit way to name the shown ones.
   static let selectedPronoun = "@selected"
 
   private func resolveSelected(_ request: IPC.AliasResolveRequest) -> RouterOutcome {
