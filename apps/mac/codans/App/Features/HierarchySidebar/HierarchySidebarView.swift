@@ -2461,38 +2461,66 @@ private struct SidebarFilterBar: View {
   var onSelect: (SidebarFilter) -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+  @State private var hoveredFilter: SidebarFilter?
+
   var body: some View {
-    HStack(spacing: 3) {
-      ForEach(SidebarFilter.allCases, id: \.self) { filter in
-        let selected = selection == filter
-        Button {
-          onSelect(filter)
-        } label: {
-          HStack(spacing: 5) {
-            Image(systemName: symbol(for: filter))
-              .accessibilityHidden(true)
-            if selected {
-              Text(title(for: filter)).lineLimit(1)
-            }
-          }
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(selected ? Color.white : Color.secondary)
-          .frame(maxWidth: selected ? .infinity : nil)
-          .frame(minWidth: 24)
-          .frame(height: TabBarMetrics.trackHeight)
-          .padding(.horizontal, selected ? 6 : 0)
-          .background(selected ? tint(for: filter) : Color.primary.opacity(0.05), in: Capsule())
-          .contentShape(Capsule())
+    GeometryReader { geometry in
+      let spacing: CGFloat = 6
+      let count = CGFloat(SidebarFilter.allCases.count)
+      let unitWidth = max(0, (geometry.size.width - spacing * (count - 1)) / (count + 2))
+      HStack(spacing: spacing) {
+        ForEach(SidebarFilter.allCases, id: \.self) { filter in
+          filterButton(filter, unitWidth: unitWidth)
         }
-        .buttonStyle(.plain)
-        .help(title(for: filter))
-        .accessibilityLabel(title(for: filter))
-        .accessibilityAddTraits(selected ? .isSelected : [])
       }
+      .animation(reduceMotion ? nil : .smooth(duration: 0.32), value: selection)
     }
+    .frame(height: TabBarMetrics.trackHeight)
     .padding(.horizontal, 8)
     .padding(.bottom, TabBarMetrics.trackBottomInset)
-    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selection)
+  }
+
+  private func filterButton(_ filter: SidebarFilter, unitWidth: CGFloat) -> some View {
+    let selected = selection == filter
+    let title = title(for: filter)
+    let titleWidth = ceil(
+      (title as NSString).size(withAttributes: [
+        .font: NSFont.systemFont(ofSize: TabBarMetrics.titleFontSize, weight: .semibold)
+      ]).width)
+    let expandedWidth = unitWidth * 3
+    let labelScale = min(1, max(0, expandedWidth - 12) / (14 + 5 + titleWidth))
+
+    return Button {
+      onSelect(filter)
+    } label: {
+      HStack(spacing: selected ? 5 : 0) {
+        Image(systemName: symbol(for: filter))
+          .frame(width: 14)
+          .accessibilityHidden(true)
+        // Keep the label mounted so rapid changes reverse the same animation.
+        Text(title)
+          .fixedSize()
+          .frame(width: selected ? titleWidth : 0)
+          .opacity(selected ? 1 : 0)
+          .clipped()
+          .accessibilityHidden(true)
+      }
+      .font(.system(size: TabBarMetrics.titleFontSize, weight: .semibold))
+      .foregroundStyle(selected ? Color.white : Color.secondary)
+      .scaleEffect(selected ? labelScale : 1)
+      .frame(width: selected ? expandedWidth : unitWidth, height: TabBarMetrics.trackHeight)
+      .background(
+        selected ? tint(for: filter)
+          : hoveredFilter == filter ? tint(for: filter).opacity(0.3) : Color.primary.opacity(0.035),
+        in: Capsule()
+      )
+      .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .onHover { hoveredFilter = $0 ? filter : nil }
+    .help(title)
+    .accessibilityLabel(title)
+    .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
   private func title(for filter: SidebarFilter) -> String {
