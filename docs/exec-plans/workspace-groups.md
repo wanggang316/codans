@@ -339,8 +339,9 @@ For each `member` row of the group, collected without side effects:
 - Uncommitted changes: `git status --porcelain=v1 -z --untracked-files=all`
   (`GitCommand.status`) count.
 - Unpushed commits: with an upstream, `git rev-list --count @{upstream}..HEAD`;
-  without one, `git rev-list --count HEAD --not --exclude=refs/heads/<branch>
-  --branches --remotes` (commits no other ref holds); detached HEAD uses
+  without one, `git rev-list --count HEAD --not --exclude=<branch>
+  --branches --remotes` (commits no other ref holds; `--exclude` matches
+  the short name that `--branches` expands); detached HEAD uses
   `HEAD --not --branches --remotes`.
 - Running terminals: busy contents in the member rows and the group row
   (`workspaceGroupBusyPanes`).
@@ -514,4 +515,45 @@ Edges: 1 → 2; 2 → 3, 4, 5; 3 + 4 → 6; 3 + 5 → 7; 4 + 5 → 8; 6 + 7 + 8 
 
 ## Status
 
-Planned. No implementation yet.
+Each item has its own evidence. One item does not prove another.
+
+- **Implementation: done** on `feat/workspace-groups` (tickets 1–9). The
+  final pass fixed five defects found in native acceptance: the New Group
+  sheet crashed on open (synchronous settings read off the main actor),
+  the Settings window had no live `WorkspaceClient` (source Remove and Add
+  did nothing), a group folder row's header showed "(detached)" and opened
+  the branch popover, the delete dialog repeated one branch per project,
+  and the hover-only header and group controls had no accessibility
+  actions.
+- **Automated checks: pass.** CodansCoreTests (1000 tests; the only
+  failure is the known baseline `AgentRuntimeAdapterTests`), the
+  Workspace, catalog, sidebar, settings, and socket suites of CodansTests
+  (17 suites, 155 tests), and `WorkspaceCommandsTests` (CodansKit).
+- **Migration: pass** on an isolated Debug instance. A version 3 catalog
+  with a Workspace (root row with two tabs, two child rows on different
+  branches, live zmx sessions) and a version 1 manifest migrated to
+  catalog version 4 with a `backups/catalog.migrated-v3-*.json` copy; the
+  root row became `existing`'s group row and the children its members,
+  with row, tab, and pane ids, paths, branches, and the selected row
+  kept; all three sessions reattached with their scrollback.
+  `workspace-groups.json` and the `default` links were written and
+  `workspace.json` kept its bytes. A restart changed no group, row, tab,
+  or pane id and did not rewrite the manifest.
+- **Native acceptance: pass, with one open defect** (isolated instance,
+  AX-driven, screenshots). Covered: add a Workspace from two projects
+  (no branch created or switched), group and member terminals (cwd and
+  `CODANS_WORKSPACE_GROUP*`), two named groups through the sheet, member
+  branch switch (summary "2 branches", row id kept), add and remove a
+  source from the sidebar and from Settings (only `default` changes),
+  restart (groups, rows, tabs, panes, selection, scrollback kept), delete
+  with visible risks and acknowledgment, many-member delete sheet, an
+  injected partial failure (retained member, "Deletion incomplete", Retry
+  in a selected row), collapse with a selected member (no ghost row),
+  and Workspace removal with owned files. Open: after a member removal
+  fails, `git worktree remove --force` has already removed the
+  worktree's admin entry, so the retained folder is no longer a checkout
+  and Retry stays blocked ("not a git repository") until the folder is
+  removed by hand. Not exercised: hover-only visuals (the system
+  Notification Center window blocked guarded pointer input), group
+  creation rollback and setup-script failure (covered by
+  `WorkspaceGroupCreationTests`).
