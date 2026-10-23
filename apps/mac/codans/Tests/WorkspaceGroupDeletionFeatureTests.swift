@@ -165,25 +165,32 @@ struct WorkspaceGroupDeletionFeatureTests {
     #expect(!store.state.canDelete)
   }
 
+  /// Removing the Workspace stops the terminals of the `default` group's
+  /// reference rows too, so the sheet lists them and asks for the
+  /// acknowledgment before it deletes through the Workspace.
   @Test
-  func deleteFilesChecksEveryNamedGroupAndDeletesThroughTheWorkspace() async {
+  func deleteFilesListsDefaultTerminalsAndDeletesThroughTheWorkspace() async {
     let f = DeletionFixture()
     let defaultGroup = WorkspaceGroupID()
+    let referencePane = PaneID()
     var project = f.project
     project.workspaceGroups.insert(WorkspaceGroupRecord(id: defaultGroup, name: "default", kind: .default), at: 0)
-    let checked = LockIsolated<[WorkspaceGroupID]>([])
+    project.worktrees.append(
+      Worktree(
+        name: "app", path: "/src/app",
+        tabs: [Tab(name: "dev", panes: [Pane(id: referencePane, workingDirectory: "/src/app")])],
+        workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .reference)))
     let requests = LockIsolated<[WorkspaceRemovalRequest]>([])
     let clean = f.check()
+    let terminals = GroupDeletionCheck(
+      projectID: project.id, groupID: defaultGroup, groupName: "default", busyPaneIDs: [referencePane])
     let store = TestStore(
       initialState: WorkspaceGroupDeletionFeature.State(target: .workspace(projectID: project.id, name: "ws"))
     ) {
       WorkspaceGroupDeletionFeature()
     } withDependencies: { [project] in
       $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
-      $0.workspaceClient.checkGroupDeletion = { _, groupID in
-        checked.withValue { $0.append(groupID) }
-        return clean
-      }
+      $0.workspaceClient.checkWorkspaceDeletion = { _ in [clean, terminals] }
       $0.workspaceClient.removeWorkspace = { _, request in
         requests.withValue { $0.append(request) }
         return WorkspaceRemovalOutcome(deletedFolder: true)
@@ -192,14 +199,33 @@ struct WorkspaceGroupDeletionFeatureTests {
 
     await store.send(.checkRequested)
     await store.receive(\.checkLoaded) {
-      $0.checks = [clean]
+      $0.checks = [clean, terminals]
       $0.phase = .ready
+      $0.runningTerminals = ["app › dev"]
     }
-    #expect(checked.value == [f.groupID])
+    #expect(store.state.hasRisks)
+    #expect(!store.state.canDelete)
+    await store.send(.acknowledgesRisksChanged(true)) { $0.acknowledgesRisks = true }
     await store.send(.deleteTapped) { $0.phase = .deleting }
     await store.receive(\.deletionFinished)
     await store.receive(\.delegate.completed)
-    #expect(requests.value == [.deleteOwnedFiles(GroupDeletionRequest())])
+    #expect(requests.value == [.deleteOwnedFiles(GroupDeletionRequest(acknowledgeRisks: true))])
+  }
+
+  /// A migrated group did not create its members' branches; the sheet says
+  /// so instead of the generic reasons.
+  @Test
+  func branchesTheGroupDidNotCreateAreNamedAsKept() {
+    let f = DeletionFixture()
+    var check = f.check(deletableBranches: [])
+    check.members[0].createdBranch = false
+    var state = WorkspaceGroupDeletionFeature.State(target: f.target)
+    state.checks = [check]
+    #expect(state.branchesNote == "Branches are kept: the group did not create them.")
+
+    check.members[0].createdBranch = true
+    state.checks = [check]
+    #expect(state.branchesNote.hasPrefix("No branch can be deleted"))
   }
 }
 
@@ -301,7 +327,7 @@ extension WorkspaceGroupDeletionFeatureTests {
       HierarchySidebarFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
-      $0.workspaceClient.checkGroupDeletion = { _, _ in f.check(uncommitted: 1) }
+      $0.workspaceClient.checkWorkspaceDeletion = { _ in [f.check(uncommitted: 1)] }
     }
 
     await store.send(.workspaceRemoveConfirmed(deleteFiles: true)) {

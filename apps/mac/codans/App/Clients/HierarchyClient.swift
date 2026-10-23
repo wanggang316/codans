@@ -115,8 +115,8 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ worktreeIDs: [WorktreeID]
     ) -> Void
-  /// Busy panes of a group's own row and member rows, run-script panes
-  /// included. Forwards to `HierarchyManager.workspaceGroupBusyPanes`.
+  /// Busy panes of every row of a group, run-script panes included.
+  /// Forwards to `HierarchyManager.workspaceGroupBusyPanes`.
   var workspaceGroupBusyPanes:
     @MainActor @Sendable (
       _ projectID: ProjectID, _ groupID: WorkspaceGroupID

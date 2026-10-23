@@ -20,6 +20,13 @@ public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
     public var deletableBranches: [String]
     /// Why a probe of this member failed; any value blocks the delete.
     public var checkFailure: String?
+    /// The folder is still on disk, but its source no longer lists it as a
+    /// worktree (an earlier removal stopped part way). Its files cannot be
+    /// probed; the delete removes the folder itself, so it is a risk.
+    public var residualFolder: Bool
+    /// The group created this member's branch. A migrated member records no
+    /// created branch, so its branch is never deleted.
+    public var createdBranch: Bool
 
     public init(
       name: String,
@@ -29,8 +36,11 @@ public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
       uncommittedCount: Int = 0,
       unpushedCount: Int = 0,
       deletableBranches: [String] = [],
-      checkFailure: String? = nil
+      checkFailure: String? = nil,
+      residualFolder: Bool = false,
+      createdBranch: Bool = true
     ) {
+      self.createdBranch = createdBranch
       self.name = name
       self.worktreeID = worktreeID
       self.path = path
@@ -39,9 +49,32 @@ public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
       self.unpushedCount = unpushedCount
       self.deletableBranches = deletableBranches
       self.checkFailure = checkFailure
+      self.residualFolder = residualFolder
     }
 
-    public var hasRisks: Bool { uncommittedCount > 0 || unpushedCount > 0 }
+    private enum CodingKeys: String, CodingKey {
+      case name, worktreeID, path, branch, uncommittedCount, unpushedCount, deletableBranches, checkFailure
+      case residualFolder, createdBranch
+    }
+
+    // The two flags are optional on the wire, so a payload without them
+    // still decodes.
+    public init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      self.init(
+        name: try container.decode(String.self, forKey: .name),
+        worktreeID: try container.decode(WorktreeID.self, forKey: .worktreeID),
+        path: try container.decode(String.self, forKey: .path),
+        branch: try container.decodeIfPresent(String.self, forKey: .branch),
+        uncommittedCount: try container.decode(Int.self, forKey: .uncommittedCount),
+        unpushedCount: try container.decode(Int.self, forKey: .unpushedCount),
+        deletableBranches: try container.decode([String].self, forKey: .deletableBranches),
+        checkFailure: try container.decodeIfPresent(String.self, forKey: .checkFailure),
+        residualFolder: try container.decodeIfPresent(Bool.self, forKey: .residualFolder) ?? false,
+        createdBranch: try container.decodeIfPresent(Bool.self, forKey: .createdBranch) ?? true)
+    }
+
+    public var hasRisks: Bool { uncommittedCount > 0 || unpushedCount > 0 || residualFolder }
   }
 
   public var projectID: ProjectID

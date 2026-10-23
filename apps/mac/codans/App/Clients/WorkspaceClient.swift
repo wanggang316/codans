@@ -172,6 +172,12 @@ struct WorkspaceClient: Sendable {
       _ projectID: ProjectID, _ groupID: WorkspaceGroupID, _ request: GroupDeletionRequest
     ) async throws -> GroupDeletionOutcome = unimplemented(
       "WorkspaceClient.deleteGroup", placeholder: GroupDeletionOutcome(deletedGroup: false))
+  /// What deleting the Workspace's files would destroy, without side
+  /// effects: one check per named group, then, when any of them is busy, the
+  /// terminals of the `default` group and its reference rows (their sources
+  /// are kept, but the terminals stop).
+  var checkWorkspaceDeletion: @MainActor @Sendable (_ projectID: ProjectID) async -> [GroupDeletionCheck] =
+    unimplemented("WorkspaceClient.checkWorkspaceDeletion", placeholder: [])
   /// Removes the Workspace from the sidebar, or deletes the files it owns.
   /// Source main checkouts are kept either way.
   var removeWorkspace:
@@ -288,6 +294,9 @@ extension WorkspaceClient {
       deleteGroup: { projectID, groupID, request in
         try await deleteGroup(projectID: projectID, groupID: groupID, request: request, context: context)
       },
+      checkWorkspaceDeletion: { projectID in
+        await checkWorkspaceDeletion(projectID: projectID, context: context)
+      }
       removeWorkspace: { projectID, request in
         try await removeWorkspace(projectID: projectID, request: request, context: context)
       }

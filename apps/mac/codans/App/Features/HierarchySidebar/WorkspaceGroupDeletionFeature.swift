@@ -26,7 +26,8 @@ struct WorkspaceGroupDeletionFeature {
 
     let target: Target
     var phase: Phase = .checking
-    /// One check per named group the delete covers.
+    /// One check per named group the delete covers; a Workspace delete adds
+    /// the `default` group's running terminals.
     var checks: [GroupDeletionCheck] = []
     /// Tabs of the covered rows that are running something, by display name.
     var runningTerminals: [String] = []
@@ -59,6 +60,20 @@ struct WorkspaceGroupDeletionFeature {
     var deletableBranches: [String] {
       var seen = Set<String>()
       return checks.flatMap(\.members).flatMap(\.deletableBranches).filter { seen.insert($0).inserted }
+    }
+
+    /// What happens to branches, under the delete-branches choice.
+    var branchesNote: String {
+      let branches = deletableBranches
+      if !branches.isEmpty {
+        return "Deletes \(branches.joined(separator: ", ")). Other branches stay."
+      }
+      let members = checks.flatMap(\.members)
+      if !members.isEmpty, members.allSatisfy({ !$0.createdBranch }) {
+        return "Branches are kept: the group did not create them."
+      }
+      return
+        "No branch can be deleted: each one existed before the group, is checked out elsewhere, or is a default branch."
     }
 
     var canDelete: Bool {
@@ -102,21 +117,14 @@ struct WorkspaceGroupDeletionFeature {
       case .checkRequested:
         state.phase = .checking
         state.errorMessage = nil
-        let groupIDs: [WorkspaceGroupID]
-        switch state.target {
-        case .group(_, let groupID, _):
-          groupIDs = [groupID]
-        case .workspace(let projectID, _):
-          groupIDs =
-            hierarchyClient.snapshot().projects.first { $0.id == projectID }?
-            .workspaceGroups.filter { $0.kind == .named }.map(\.id) ?? []
-        }
-        return .run { [client = workspaceClient, projectID = state.projectID] send in
-          var checks: [GroupDeletionCheck] = []
-          for groupID in groupIDs {
-            checks.append(await client.checkGroupDeletion(projectID, groupID))
+        let target = state.target
+        return .run { [client = workspaceClient] send in
+          switch target {
+          case .group(let projectID, let groupID, _):
+            await send(.checkLoaded([await client.checkGroupDeletion(projectID, groupID)]))
+          case .workspace(let projectID, _):
+            await send(.checkLoaded(await client.checkWorkspaceDeletion(projectID)))
           }
-          await send(.checkLoaded(checks))
         }
 
       case .checkLoaded(let checks):

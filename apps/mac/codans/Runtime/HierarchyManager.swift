@@ -1626,13 +1626,14 @@ final class HierarchyManager {
     runtime.announceHierarchyMutated()
   }
 
-  /// Panes of the group row and the group's member rows that are running
-  /// something (`paneIsBusy`), run-script panes included: a group delete
-  /// stops all of them.
+  /// Panes of every row of the group (group row, members, and for
+  /// `default` its reference rows) that are running something
+  /// (`paneIsBusy`), run-script panes included: deleting the group or the
+  /// Workspace stops all of them.
   func workspaceGroupBusyPanes(projectID: ProjectID, groupID: WorkspaceGroupID) -> [PaneID] {
     guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
     return project.worktrees
-      .filter { $0.workspaceSlot?.groupID == groupID && $0.workspaceSlot?.role != .reference }
+      .filter { $0.workspaceSlot?.groupID == groupID }
       .flatMap { $0.tabs.flatMap(\.panes) }
       .map(\.id)
       .filter(paneIsBusy)

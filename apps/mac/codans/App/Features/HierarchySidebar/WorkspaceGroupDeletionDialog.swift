@@ -76,8 +76,13 @@ struct WorkspaceGroupDeletionDialog: View {
   private func groupSection(_ check: GroupDeletionCheck) -> some View {
     Section {
       if check.members.isEmpty && check.groupCheckFailures.isEmpty {
-        Text("No checkouts.")
-          .foregroundStyle(.secondary)
+        // The `default` group links to the sources: removal stops its
+        // terminals and never deletes a source.
+        Text(
+          check.groupName == WorkspaceLayout.defaultGroupName
+            ? "Links to the source projects. The projects do not change." : "No checkouts."
+        )
+        .foregroundStyle(.secondary)
       }
       ForEach(check.members, id: \.path) { member in
         MemberRow(member: member)
@@ -115,12 +120,8 @@ struct WorkspaceGroupDeletionDialog: View {
       )
       .disabled(branches.isEmpty)
     } footer: {
-      Text(
-        branches.isEmpty
-          ? "No branch can be deleted: each one existed before the group, is checked out elsewhere, or is a default branch."
-          : "Deletes \(branches.joined(separator: ", ")). Other branches stay."
-      )
-      .foregroundStyle(.secondary)
+      Text(store.branchesNote)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -233,6 +234,9 @@ private struct MemberRow: View {
 
   private var risks: [String] {
     var risks: [String] = []
+    if member.residualFolder {
+      risks.append("Folder left by an earlier removal")
+    }
     if member.uncommittedCount > 0 {
       risks.append(
         member.uncommittedCount == 1 ? "1 uncommitted change" : "\(member.uncommittedCount) uncommitted changes")

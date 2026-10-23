@@ -636,7 +636,8 @@ struct GroupDeletionCheckRenderable: Encodable, CustomStringConvertible {
   }
 
   private enum MemberKey: String, CodingKey {
-    case name, worktreeID, path, branch, uncommittedCount, unpushedCount, deletableBranches, checkFailure
+    case name, worktreeID, path, branch, uncommittedCount, unpushedCount, deletableBranches, checkFailure,
+      residualFolder
   }
 
   func encode(to encoder: Encoder) throws {
@@ -656,6 +657,7 @@ struct GroupDeletionCheckRenderable: Encodable, CustomStringConvertible {
       try nested.encode(member.unpushedCount, forKey: .unpushedCount)
       try nested.encode(member.deletableBranches, forKey: .deletableBranches)
       try nested.encode(member.checkFailure, forKey: .checkFailure)
+      try nested.encode(member.residualFolder, forKey: .residualFolder)
     }
     try container.encode(check.busyPaneIDs.map(\.description), forKey: .busyPaneIDs)
     try container.encode(check.extraEntries, forKey: .extraEntries)
@@ -670,6 +672,7 @@ struct GroupDeletionCheckRenderable: Encodable, CustomStringConvertible {
         facts.append("deletable branches: \(member.deletableBranches.joined(separator: ", "))")
       }
       if let failure = member.checkFailure { facts.append("check failed: \(failure)") }
+      if member.residualFolder { facts.append("folder left by an earlier removal") }
       lines.append("  \(member.name)  [\(member.branch ?? "detached")]  \(facts.joined(separator: ", "))")
     }
     if !check.busyPaneIDs.isEmpty { lines.append("  running terminals: \(check.busyPaneIDs.count)") }

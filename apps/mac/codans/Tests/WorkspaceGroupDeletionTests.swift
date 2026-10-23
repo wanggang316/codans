@@ -329,6 +329,65 @@ struct WorkspaceGroupDeletionTests {
     #expect(fx.project(layout.projectID)?.workspaceGroups.map(\.id) == [layout.defaultID])
   }
 
+  /// A removal that stops part way (here: the member folder is immutable)
+  /// leaves a folder git no longer lists. Retry reports it as a residual
+  /// folder that needs acknowledgment, then deletes it and prunes the
+  /// source, without a manual `rm`.
+  @Test
+  func retryAfterAPartialRemovalDeletesTheResidualFolder() async throws {
+    let fx = try WorkspaceClientFixture()
+    defer {
+      _ = try? setImmutable(false, fx.path("ws/fix/lib"))
+      fx.cleanUp()
+    }
+    let layout = try await makeLayout(fx)
+    try setImmutable(true, layout.fixLib)
+
+    let first = try await fx.client.deleteGroup(
+      layout.projectID, layout.fixID, GroupDeletionRequest(deleteBranches: true, acknowledgeRisks: true))
+    try setImmutable(false, layout.fixLib)
+
+    #expect(first.failures.map(\.name) == ["lib"])
+    #expect(fx.isDirectory(layout.fixLib))
+    let listed = try fx.git(["worktree", "list", "--porcelain"], cwd: layout.lib)
+    #expect(!listed.contains(layout.fixLib))
+
+    let check = await fx.client.checkGroupDeletion(layout.projectID, layout.fixID)
+    #expect(!check.isBlocked)
+    #expect(check.hasRisks)
+    let lib = try #require(check.members.first { $0.name == "lib" })
+    #expect(lib.residualFolder)
+    #expect(lib.checkFailure == nil)
+    await #expect(throws: WorkspaceError.risksNotAcknowledged(check)) {
+      _ = try await fx.client.deleteGroup(layout.projectID, layout.fixID, GroupDeletionRequest(deleteBranches: true))
+    }
+    #expect(fx.isDirectory(layout.fixLib))
+
+    let retry = try await fx.client.deleteGroup(
+      layout.projectID, layout.fixID, GroupDeletionRequest(deleteBranches: true, acknowledgeRisks: true))
+
+    #expect(retry.deletedGroup)
+    #expect(retry.failures.isEmpty)
+    #expect(!fx.exists(layout.fixDirectory))
+    let remaining = try fx.git(["worktree", "list", "--porcelain"], cwd: layout.lib)
+      .split(separator: "\n").filter { $0.hasPrefix("worktree ") }
+      .map { HierarchyManager.canonicalPath(String($0.dropFirst("worktree ".count))) }
+    #expect(remaining == [layout.lib], "\(remaining)")
+    #expect(fx.isDirectory("\(layout.lib)/.git"))
+    #expect(fx.project(layout.projectID)?.workspaceGroups.map(\.id) == [layout.defaultID])
+  }
+
+  /// `chflags uchg` / `nouchg` on `path`.
+  @discardableResult
+  func setImmutable(_ immutable: Bool, _ path: String) throws -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/chflags")
+    process.arguments = [immutable ? "uchg" : "nouchg", path]
+    try process.run()
+    process.waitUntilExit()
+    return process.terminationStatus == 0
+  }
+
   @Test
   func deletingTheMigratedGroupKeepsRootStateAndOtherGroups() async throws {
     let fx = try WorkspaceClientFixture()
@@ -451,6 +510,38 @@ struct WorkspaceGroupDeletionTests {
     }
     #expect(fx.project(layout.projectID) != nil)
     #expect(fx.isDirectory(layout.fixApp))
+  }
+
+  /// Removing the Workspace stops the terminals of the `default` group and
+  /// its reference rows too, so the check lists them and they need the
+  /// acknowledgment. The sources themselves are never deleted.
+  @Test
+  func deletingOwnedFilesListsDefaultGroupTerminals() async throws {
+    let fx = try WorkspaceClientFixture()
+    defer { fx.cleanUp() }
+    let layout = try await makeLayout(fx)
+    let referencePane = try await busyPane(in: try fx.row(in: layout.projectID, at: layout.app), layout)
+    let defaultPane = try await busyPane(in: try fx.row(in: layout.projectID, at: layout.defaultDirectory), layout)
+
+    let checks = await fx.client.checkWorkspaceDeletion(layout.projectID)
+
+    #expect(checks.map(\.groupID) == [layout.fixID, layout.defaultID])
+    let defaultCheck = try #require(checks.last)
+    #expect(Set(defaultCheck.busyPaneIDs) == [referencePane, defaultPane])
+    #expect(defaultCheck.members.isEmpty)
+    #expect(defaultCheck.hasRisks)
+    await #expect(throws: WorkspaceError.risksNotAcknowledged(defaultCheck)) {
+      _ = try await fx.client.removeWorkspace(layout.projectID, .deleteOwnedFiles(GroupDeletionRequest()))
+    }
+    #expect(fx.project(layout.projectID) != nil)
+    #expect(fx.isDirectory(layout.fixApp))
+
+    let outcome = try await fx.client.removeWorkspace(
+      layout.projectID, .deleteOwnedFiles(GroupDeletionRequest(acknowledgeRisks: true)))
+
+    #expect(outcome.failures.isEmpty)
+    #expect(fx.project(layout.projectID) == nil)
+    #expect(fx.isDirectory("\(layout.app)/.git"))
   }
 
   @Test

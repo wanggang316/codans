@@ -85,6 +85,7 @@ extension WorkspaceClient {
           worktreeID: row?.id ?? WorktreeID(raw: member.id.raw),
           path: path,
           sourceGitRoot: member.sourceGitRoot ?? row?.sourceGitRoot,
+          recordedBranch: member.branch,
           createdBranch: member.createdBranch == true))
     }
     var result = GroupDeletionCheck(
@@ -127,14 +128,31 @@ extension WorkspaceClient {
     worktreeID: WorktreeID,
     path: String,
     sourceGitRoot: String?,
+    recordedBranch: String?,
     createdBranch: Bool
   ) async -> GroupDeletionCheck.Member {
-    var result = GroupDeletionCheck.Member(name: name, worktreeID: worktreeID, path: path)
+    var result = GroupDeletionCheck.Member(
+      name: name, worktreeID: worktreeID, path: path, createdBranch: createdBranch)
     // A checkout that is already gone holds nothing to lose; the delete only
     // clears its registration.
     guard FileManager.default.fileExists(atPath: path) else { return result }
     do {
       guard let sourceGitRoot else { throw WorkspaceError.memberWithoutSource(name: name) }
+      // An earlier removal that stopped part way leaves a folder git no
+      // longer lists. It cannot be probed as a checkout; the delete removes
+      // the folder itself, which needs the acknowledgment.
+      guard try await isListedWorktree(path, sourceGitRoot: sourceGitRoot) else {
+        result.residualFolder = true
+        if createdBranch, let recordedBranch,
+          try await git(
+            ["rev-parse", "--verify", "-q", "refs/heads/\(recordedBranch)"], at: sourceGitRoot, allowedCodes: [0, 1]
+          ).code == 0,
+          try await isDeletable(branch: recordedBranch, memberPath: path, sourceGitRoot: sourceGitRoot)
+        {
+          result.deletableBranches = [recordedBranch]
+        }
+        return result
+      }
       let branch = try await currentBranch(at: path)
       result.branch = branch
       result.uncommittedCount = try await uncommittedCount(at: path)
@@ -214,6 +232,17 @@ extension WorkspaceClient {
       }
     }
     return true
+  }
+
+  /// Whether the source repository still lists `path` as one of its
+  /// worktrees.
+  static func isListedWorktree(_ path: String, sourceGitRoot: String) async throws -> Bool {
+    let list = try await git(["worktree", "list", "--porcelain"], at: sourceGitRoot)
+    let target = HierarchyManager.canonicalPath(path)
+    return list.text.split(separator: "\n").contains { line in
+      line.hasPrefix("worktree ")
+        && HierarchyManager.canonicalPath(String(line.dropFirst("worktree ".count))) == target
+    }
   }
 
   struct GitOutput {
@@ -298,10 +327,17 @@ extension WorkspaceClient {
       let canonical = HierarchyManager.canonicalPath(path)
       let rows = groupRows.filter { HierarchyManager.canonicalPath($0.path) == canonical }
       let sourceGitRoot = member.sourceGitRoot ?? rows.first?.sourceGitRoot
+      let probed = check.members.first { $0.path == path }
       do {
-        try await removeMemberCheckout(
-          name: member.name, path: path, sourceGitRoot: sourceGitRoot, rootPath: rootPath, manifest: manifest,
-          git: context.git)
+        if probed?.residualFolder == true {
+          try await removeResidualFolder(
+            name: member.name, path: path, sourceGitRoot: sourceGitRoot, rootPath: rootPath, manifest: manifest,
+            git: context.git)
+        } else {
+          try await removeMemberCheckout(
+            name: member.name, path: path, sourceGitRoot: sourceGitRoot, rootPath: rootPath, manifest: manifest,
+            git: context.git)
+        }
       } catch {
         outcome.failures.append(.init(name: member.name, path: path, reason: describe(error)))
         continue
@@ -374,6 +410,28 @@ extension WorkspaceClient {
       URL(fileURLWithPath: sourceGitRoot, isDirectory: true), URL(fileURLWithPath: path, isDirectory: true))
   }
 
+  /// Deletes a member folder its source no longer lists as a worktree, then
+  /// prunes the source so no stale admin entry stays. The folder must pass
+  /// `WorkspaceOwnership`, which keeps a symbolic link, a path outside the
+  /// Workspace, and anything inside a source repository.
+  static func removeResidualFolder(
+    name: String,
+    path: String,
+    sourceGitRoot: String?,
+    rootPath: String,
+    manifest: WorkspaceGroupsManifest,
+    git: GitWorktreeClient
+  ) async throws {
+    guard let sourceGitRoot else { throw WorkspaceError.memberWithoutSource(name: name) }
+    if entryExists(path) {
+      if case .notOwned(let rejection) = WorkspaceOwnership.check(path: path, rootPath: rootPath, manifest: manifest) {
+        throw GroupDeletionStepError.notOwned(path: path, rejection)
+      }
+      try FileManager.default.removeItem(atPath: path)
+    }
+    _ = try await git.pruneWorktrees(URL(fileURLWithPath: sourceGitRoot, isDirectory: true))
+  }
+
   /// Deletes a group directory the Workspace owns. A directory that is not
   /// owned (for example a symbolic link) is left in place and logged.
   static func removeGroupDirectory(_ directory: String, rootPath: String, manifest: WorkspaceGroupsManifest) throws {
@@ -386,6 +444,52 @@ extension WorkspaceClient {
   }
 
   // MARK: Workspace removal
+
+  @MainActor
+  static func checkWorkspaceDeletion(projectID: ProjectID, context: Context) async -> [GroupDeletionCheck] {
+    guard let project = context.hierarchy.snapshot().projects.first(where: { $0.id == projectID }),
+      project.isWorkspace
+    else {
+      return [
+        GroupDeletionCheck(
+          projectID: projectID, groupID: WorkspaceGroupID(), groupName: "",
+          groupCheckFailures: [describe(WorkspaceError.notWorkspace(projectID))])
+      ]
+    }
+    do {
+      return await workspaceChecks(
+        project, manifest: try loadGroupsManifest(rootPath: project.rootPath), context: context)
+    } catch {
+      return [
+        GroupDeletionCheck(
+          projectID: projectID, groupID: WorkspaceGroupID(), groupName: project.name,
+          groupCheckFailures: [describe(error)])
+      ]
+    }
+  }
+
+  /// One check per named group, then the `default` group's busy terminals
+  /// (its group row and reference rows) when there are any. The default
+  /// check has no members: removal never deletes a source, it only stops
+  /// those terminals.
+  @MainActor
+  static func workspaceChecks(
+    _ project: Project, manifest: WorkspaceGroupsManifest, context: Context
+  ) async -> [GroupDeletionCheck] {
+    var checks: [GroupDeletionCheck] = []
+    for group in manifest.groups where group.kind == .named {
+      checks.append(
+        await check(GroupDeletionTarget(project: project, manifest: manifest, group: group), context: context))
+    }
+    if let group = manifest.defaultGroup {
+      let busy = context.hierarchy.workspaceGroupBusyPanes(project.id, group.id)
+      if !busy.isEmpty {
+        checks.append(
+          GroupDeletionCheck(projectID: project.id, groupID: group.id, groupName: group.name, busyPaneIDs: busy))
+      }
+    }
+    return checks
+  }
 
   @MainActor
   static func removeWorkspace(
@@ -413,19 +517,16 @@ extension WorkspaceClient {
   ) async throws -> WorkspaceRemovalOutcome {
     let rootPath = project.rootPath
     let manifest = try loadGroupsManifest(rootPath: rootPath)
-    var checks: [GroupDeletionCheck] = []
-    for group in manifest.groups where group.kind == .named {
-      checks.append(
-        await check(GroupDeletionTarget(project: project, manifest: manifest, group: group), context: context))
-    }
+    let checks = await workspaceChecks(project, manifest: manifest, context: context)
     if let blocked = checks.first(where: \.isBlocked) { throw WorkspaceError.checkFailed(blocked) }
     if !request.acknowledgeRisks, let risky = checks.first(where: \.hasRisks) {
       throw WorkspaceError.risksNotAcknowledged(risky)
     }
 
+    let named = Set(manifest.groups.filter { $0.kind == .named }.map(\.id))
     var failures: [String] = []
     var keptBranches: [String] = []
-    for check in checks {
+    for check in checks where named.contains(check.groupID) {
       // Each delete rewrites the manifest; read it again for the next one.
       let target = try groupDeletionTarget(projectID: project.id, groupID: check.groupID, context: context)
       let outcome = try await performGroupDeletion(target, check: check, request: request, context: context)

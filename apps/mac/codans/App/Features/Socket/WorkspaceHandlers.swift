@@ -392,6 +392,9 @@ final class WorkspaceHandlers {
       member.checkFailure.map { "\(member.name): check failed: \($0)" }
     }
     for member in check.members {
+      if member.residualFolder {
+        lines.append("\(member.name): folder left by an earlier removal")
+      }
       if member.uncommittedCount > 0 {
         lines.append("\(member.name): \(counted(member.uncommittedCount, "uncommitted file"))")
       }
