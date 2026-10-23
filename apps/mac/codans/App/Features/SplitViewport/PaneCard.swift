@@ -36,27 +36,3 @@ extension View {
       }
   }
 }
-
-/// The surface the Pane cards float on: the terminal background, darkened
-/// so the cards stand off it in both appearances — a little in light mode,
-/// more in dark mode, where a small step does not read.
-struct PaneCardBackdrop: View {
-  @Environment(\.colorScheme) private var colorScheme
-  /// Bumped on a ghostty theme reload, which `colorScheme` does not cover.
-  @State private var configReloadTick = 0
-
-  var body: some View {
-    Rectangle()
-      .fill(Color(nsColor: color))
-      .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-        configReloadTick &+= 1
-      }
-  }
-
-  private var color: NSColor {
-    _ = configReloadTick
-    let terminal = GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
-    let fraction: CGFloat = colorScheme == .dark ? 0.35 : 0.07
-    return terminal.blended(withFraction: fraction, of: .black) ?? terminal
-  }
-}
