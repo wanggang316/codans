@@ -921,6 +921,18 @@ struct HierarchySidebarView: View {
         }
       }
       .buttonStyle(.plain)
+      // The Workspace header's `+` and `⋯` show only on hover, which also
+      // hides them from accessibility; the row offers their entries.
+      .accessibilityActions {
+        if project.isWorkspace {
+          Button("New Group") { store.send(.workspaceNewGroupTapped(projectID: project.id)) }
+          Button("Add Project") { store.send(.workspaceAddProjectTapped(projectID: project.id)) }
+          Button("Workspace Settings") { store.send(.projectSettingsTapped(projectID: project.id)) }
+          Button("Remove Workspace") {
+            store.send(.workspaceRemoveTapped(projectID: project.id, name: project.name))
+          }
+        }
+      }
       .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
       .listRowBackground(Color.clear)
       .listRowSeparator(.hidden)
@@ -2370,6 +2382,9 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
     .onHover { isHovering = $0 }
     .accessibilityElement(children: .contain)
     .accessibilityLabel(group.kind == .default ? "\(group.name), default group" : group.name)
+    // The chevron is hidden until hover, which also hides it from
+    // accessibility; the row itself must offer the toggle.
+    .accessibilityAction(named: Text(group.isExpanded ? "Collapse Group" : "Expand Group"), onToggleExpansion)
   }
 
   /// The failed items with their reasons, or what Retry does after a
