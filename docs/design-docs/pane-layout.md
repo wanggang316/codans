@@ -110,11 +110,10 @@ struct TerminalContentState {
 - 条与上方边缘、条与下方内容的间距相同（`trackTopInset` = `trackBottomInset`）。
 - 条左端没有关闭 Pane 的按钮；关闭 Pane 经 `pane close`、右键菜单或关掉最后一个 Tab。
 
-### Pane 卡片
+### 分隔线
 
-- 每个 Pane（条 + 内容）画成一张浮在底色上的卡片，参照浮动 sidebar：圆角 16、卡片之间及与布局区边缘的间距 8（`PaneCardMetrics`），细描边，无阴影。
-- 卡片底色是终端背景色，终端在卡片左右与底部内缩 6，圆角不切到文字。卡片外的窗口背景不另行着色，卡片只靠描边区分。
-- split 之间不画分隔线；两张卡片之间的间隙是调整比例的拖动区。
+- Pane 之间是平铺的，参照 Xcode 编辑器分栏：无圆角、无间隙，相邻两个 Pane 之间画一条 2pt 的分隔线（`separatorColor`）。
+- 分隔线是调整比例的拖动区，双击均分。
 
 ### 拖拽（P2）
 

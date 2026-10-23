@@ -67,10 +67,10 @@ and the project does not yet follow semantic versioning — every release until
   pane's edge to split it into a new pane on that side. The session keeps
   running. The grab strip on top of a split pane is gone; tabs are the
   only thing you drag.
-- **Panes are cards.** Each pane, its tab strip included, floats as a
-  rounded card with a hairline rim, like the sidebar; the gap between two
-  cards is where you drag to resize. The tab strip sits as far from the
-  card's top as from the terminal below it.
+- **Panes split like editors.** Panes sit edge to edge with a 2pt divider
+  between them, as the editor splits in Xcode do; drag the divider to
+  resize. The tab strip sits as far from the pane's top as from the
+  terminal below it.
 - **Tab actions live on the tab.** Hover a tab chip and an actions button
   appears on its right, the mirror of the close button on its left: hand
   off, command queue, copy, paste, splits, reset, and close. The actions

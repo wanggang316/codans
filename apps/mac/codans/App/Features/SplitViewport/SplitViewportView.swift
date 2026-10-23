@@ -54,9 +54,6 @@ struct SplitViewportView: View {
           projectID: projectID,
           agentStateStore: agentStateStore
         )
-        // Each card pads itself by half the gap; this other half makes the
-        // gap at the layout's edge equal to the gap between two cards.
-        .padding(PaneCardMetrics.gap / 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(tabDrag)
         .overlay { TabDragPreview(session: tabDrag) }
@@ -291,10 +288,8 @@ private struct SubtreeView: View {
             ))
         }
       ),
-      // The cards carry the gap between them; the divider is only the
-      // drag target in it.
-      dividerColor: .clear,
-      dividerWidth: 0,
+      dividerColor: Color(nsColor: .separatorColor),
+      dividerWidth: 2,
       left: {
         SubtreeView(
           node: split.left,
@@ -399,10 +394,7 @@ private struct PaneView: View {
       .onGeometryChange(
         for: CGRect.self, of: { $0.frame(in: .global) },
         action: { tabDrag.setContentFrame($0, for: paneID) })
-      .padding([.horizontal, .bottom], PaneCardMetrics.contentInset)
     }
-    .paneCard(fill: cardFill)
-    .padding(PaneCardMetrics.gap / 2)
     .onDisappear {
       tabDrag.setStripFrame(nil, for: paneID)
       tabDrag.setContentFrame(nil, for: paneID)
@@ -490,16 +482,6 @@ private struct PaneView: View {
 
   private var isFocused: Bool {
     hierarchyManager.catalog.worktree(worktreeID, in: projectID)?.focusedPaneID == paneID
-  }
-
-  /// The card is the terminal's own background, so the inset around the
-  /// surface reads as part of it. Re-read on a theme change, like the dim
-  /// overlay (see `shouldDimUnfocusedSplit`).
-  private var cardFill: Color {
-    _ = configReloadTick
-    _ = colorScheme
-    let background = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
-    return Color(nsColor: background)
   }
 
   /// Wash on unfocused Panes inside a multi-Pane Worktree. Matches ghostty's
