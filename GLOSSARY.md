@@ -2,8 +2,8 @@
 
 ## Workspace model
 
-These terms define the planned Workspace group model. See the
-[Workspace design](docs/design-docs/workspace.md) for availability and behavior.
+These terms define the Workspace group model. See the
+[Workspace design](docs/design-docs/workspace.md) for its behavior.
 
 **Workspace**: A collection of source projects with a default workspace group
 and named workspace groups.
