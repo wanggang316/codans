@@ -1,6 +1,7 @@
 import CodansCore
 import ComposableArchitecture
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Sheet-hosted command composer. Queued commands appear in the pane overlay.
 /// Return submits; Shift-Return inserts a line break; Escape closes the sheet.
@@ -11,6 +12,9 @@ struct CommandQueueView: View {
   let onDismiss: () -> Void
 
   @FocusState private var draftFocused: Bool
+  @State private var showsFilePicker = false
+  @State private var showsFileError = false
+  @State private var fileError = ""
 
   private static let width: CGFloat = 560
   private static let editorHeight: CGFloat = 110
@@ -26,11 +30,6 @@ struct CommandQueueView: View {
         Section {
           composer
         }
-        if store.mode == .scheduled {
-          Section("Schedule") {
-            scheduleRow
-          }
-        }
       }
       .formStyle(.grouped)
       .scrollBounceBehavior(.basedOnSize)
@@ -38,6 +37,21 @@ struct CommandQueueView: View {
     .frame(width: Self.width)
     .onAppear { draftFocused = true }
     .onExitCommand(perform: onDismiss)
+    .fileImporter(isPresented: $showsFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+      switch result {
+      case .success(let urls):
+        store.send(.filesSelected(urls))
+        draftFocused = true
+      case .failure(let error):
+        fileError = error.localizedDescription
+        showsFileError = true
+      }
+    }
+    .alert("Could Not Select Files", isPresented: $showsFileError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(fileError)
+    }
   }
 
   // MARK: - Composer
@@ -47,7 +61,23 @@ struct CommandQueueView: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 4) {
       editor
+      // Keep this row's space in every mode so the sheet does not resize.
+      scheduleRow
+        .opacity(store.mode == .scheduled ? 1 : 0)
+        .disabled(store.mode != .scheduled)
+        .allowsHitTesting(store.mode == .scheduled)
+        .accessibilityHidden(store.mode != .scheduled)
       HStack(spacing: 8) {
+        Button {
+          showsFilePicker = true
+        } label: {
+          Image(systemName: "paperclip")
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help("Insert file paths")
+        .accessibilityLabel("Select files")
         Spacer()
         modeMenu
         sendButton
@@ -93,32 +123,35 @@ struct CommandQueueView: View {
   }
 
   private var scheduleRow: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    HStack(spacing: 6) {
+      Text("At")
+        .foregroundStyle(.secondary)
       DatePicker(
         "Send at",
         selection: $store.scheduledAt.sending(\.scheduledAtChanged),
         displayedComponents: [.date, .hourAndMinute]
       )
+      .labelsHidden()
       .datePickerStyle(.field)
-      HStack(spacing: 8) {
-        Toggle("Repeat every", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
-        Spacer()
-        TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
-          .labelsHidden()
-          .textFieldStyle(.roundedBorder)
-          .frame(width: 52)
-          .disabled(!store.repeatEnabled)
-        Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
-          ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
-            Text(unit.title).tag(unit)
-          }
-        }
+      Spacer(minLength: 4)
+      Toggle("Repeat every", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
+      TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
         .labelsHidden()
-        .frame(width: 96)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 42)
         .disabled(!store.repeatEnabled)
+      Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
+        ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
+          Text(unit.title).tag(unit)
+        }
       }
+      .labelsHidden()
+      .frame(width: 80)
+      .disabled(!store.repeatEnabled)
     }
-    .font(.callout)
+    .font(.caption)
+    .controlSize(.small)
+    .frame(height: 28)
   }
 
   /// Send timing, as the small labelled menu a chat composer keeps at its
