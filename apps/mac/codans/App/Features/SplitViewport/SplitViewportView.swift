@@ -35,6 +35,9 @@ struct SplitViewportView: View {
   /// still matches and shows the affordance immediately, which is the
   /// settled state the placeholder is actually for.
   @State private var settledWorktreeID: WorktreeID?
+  /// How far the window toolbar reaches down over the viewport: the top
+  /// safe area inset, 0 when something else sits between them.
+  @State private var toolbarInset: CGFloat = 0
 
   /// How long a just-shown Worktree is allowed to look empty before the
   /// actionable placeholder appears. Warm bringup of a first Pane measures
@@ -48,16 +51,25 @@ struct SplitViewportView: View {
         SubtreeView(
           node: root,
           path: SplitTree<PaneID>.Path(),
+          touchesTop: true,
+          toolbarInset: toolbarInset,
           store: store,
           tabBarStore: tabBarStore,
           worktreeID: worktreeID,
           projectID: projectID,
           agentStateStore: agentStateStore
         )
-        // The toolbar already leaves a gap under its items, so a strip on
-        // the top edge drops its own top inset: the track then sits as far
-        // under the toolbar items as Safari's tab bar does.
-        .padding(.top, -TabBarMetrics.trackTopInset)
+        // The Panes extend under the toolbar. The toolbar's scroll edge
+        // effect covers it and the top tab strips, and the strips float
+        // over that effect.
+        .overlay {
+          ScrollEdgeEffectView(extraTopInset: toolbarInset > 0 ? TabBarMetrics.floatingBarHeight : 0)
+            .allowsHitTesting(false)
+        }
+        .overlayPreferenceValue(FloatingTabStripKey.self) { anchors in
+          floatingTabStrips(anchors)
+        }
+        .ignoresSafeArea(.container, edges: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(tabDrag)
         .overlay { TabDragPreview(session: tabDrag) }
@@ -66,6 +78,11 @@ struct SplitViewportView: View {
       } else {
         warmingPlaceholder
       }
+    }
+    .onGeometryChange(for: CGFloat.self) {
+      $0.safeAreaInsets.top
+    } action: {
+      toolbarInset = $0
     }
     .task(id: currentHostSeedsKey()) {
       syncPaneHosts()
@@ -107,6 +124,28 @@ struct SplitViewportView: View {
       let contentID = currentWorktree()?.focusedPane?.selectedTab?.contentID
     else { return }
     hierarchyManager.focusSurfaceView(for: contentID)
+  }
+
+  /// The tab strips of the Panes under the toolbar, drawn over the scroll
+  /// edge effect at the slots those Panes keep free for them.
+  private func floatingTabStrips(_ anchors: [PaneID: Anchor<CGRect>]) -> some View {
+    GeometryReader { geo in
+      ForEach(Array(anchors.keys), id: \.self) { paneID in
+        if let anchor = anchors[paneID] {
+          let rect = geo[anchor]
+          TabBarView(
+            store: tabBarStore,
+            projectID: projectID,
+            worktreeID: worktreeID,
+            paneID: paneID,
+            isFocused: currentWorktree()?.focusedPaneID == paneID,
+            agentStateStore: agentStateStore
+          )
+          .frame(width: rect.width, height: rect.height)
+          .offset(x: rect.minX, y: rect.minY)
+        }
+      }
+    }
   }
 
   /// The tree to draw: the zoomed Pane alone when one is zoomed, else the
@@ -249,6 +288,9 @@ struct SplitViewportView: View {
 private struct SubtreeView: View {
   let node: SplitTree<PaneID>.Node
   let path: SplitTree<PaneID>.Path
+  /// True when this subtree's top edge is the viewport's top edge.
+  let touchesTop: Bool
+  let toolbarInset: CGFloat
   let store: StoreOf<SplitViewportFeature>
   let tabBarStore: StoreOf<TabBarFeature>
   let worktreeID: WorktreeID
@@ -260,6 +302,8 @@ private struct SubtreeView: View {
     case .leaf(let paneID):
       PaneView(
         paneID: paneID,
+        stripFloats: touchesTop && toolbarInset > 0,
+        toolbarInset: toolbarInset,
         store: store,
         tabBarStore: tabBarStore,
         worktreeID: worktreeID,
@@ -298,6 +342,8 @@ private struct SubtreeView: View {
         SubtreeView(
           node: split.left,
           path: leftPath,
+          touchesTop: touchesTop,
+          toolbarInset: toolbarInset,
           store: store,
           tabBarStore: tabBarStore,
           worktreeID: worktreeID,
@@ -309,6 +355,9 @@ private struct SubtreeView: View {
         SubtreeView(
           node: split.right,
           path: rightPath,
+          // A vertical split stacks its children: the second one is below.
+          touchesTop: touchesTop && split.direction == .horizontal,
+          toolbarInset: toolbarInset,
           store: store,
           tabBarStore: tabBarStore,
           worktreeID: worktreeID,
@@ -332,6 +381,12 @@ private struct SubtreeView: View {
 /// One Pane: its tab strip over the content host of its selected Tab.
 private struct PaneView: View {
   let paneID: PaneID
+  /// True when the Pane is under the window toolbar. Its terminal then
+  /// fills it up to the window top, and its strip floats over the toolbar's
+  /// scroll edge effect (`SplitViewportView.floatingTabStrips`). Else the
+  /// strip sits above the terminal, and nothing scrolls under it.
+  let stripFloats: Bool
+  let toolbarInset: CGFloat
   let store: StoreOf<SplitViewportFeature>
   let tabBarStore: StoreOf<TabBarFeature>
   let worktreeID: WorktreeID
@@ -372,9 +427,6 @@ private struct PaneView: View {
     // after the drop clears the target.
     let activeDropZone: PaneDropZone? =
       if case .edge(paneID, let zone)? = tabDrag.target { zone } else { nil }
-    // The terminal fills the whole Pane and the strip floats over its top
-    // on a translucent bar: the grid starts below the strip, and the rows
-    // above it scroll under the strip.
     return ZStack(alignment: .top) {
       GeometryReader { geo in
         TerminalMountDeferral(
@@ -385,22 +437,17 @@ private struct PaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-      .environment(\.terminalContentInsetTop, TabBarMetrics.barHeight)
+      // Under the toolbar the grid starts below the floating strip, and the
+      // rows above it scroll under the strip and the toolbar.
+      .environment(\.terminalContentInsetTop, stripFloats ? toolbarInset + TabBarMetrics.floatingBarHeight : 0)
       .onGeometryChange(
         for: CGRect.self, of: { $0.frame(in: .global) },
         action: { tabDrag.setContentFrame($0, for: paneID) })
-      TabBarView(
-        store: tabBarStore,
-        projectID: projectID,
-        worktreeID: worktreeID,
-        paneID: paneID,
-        isFocused: isFocused,
-        agentStateStore: agentStateStore
-      )
-      .background(VisualEffectBackground(material: .titlebar, blendingMode: .withinWindow))
-      .onGeometryChange(
-        for: CGRect.self, of: { $0.frame(in: .global) },
-        action: { tabDrag.setStripFrame($0, for: paneID) })
+      .padding(.top, stripFloats ? 0 : TabBarMetrics.barHeight)
+      stripSlot
+        .onGeometryChange(
+          for: CGRect.self, of: { $0.frame(in: .global) },
+          action: { tabDrag.setStripFrame($0, for: paneID) })
     }
     // Drop-zone highlight over the whole Pane, strip included: the new Pane
     // takes that half of it, its own strip on top. Never hit-tested, and
@@ -415,6 +462,27 @@ private struct PaneView: View {
       tabDrag.setContentFrame(nil, for: paneID)
     }
     .id(paneID)
+  }
+
+  /// The strip, or under the toolbar the free slot that the floating strip
+  /// covers.
+  @ViewBuilder
+  private var stripSlot: some View {
+    if stripFloats {
+      Color.clear
+        .frame(height: TabBarMetrics.barHeight)
+        .anchorPreference(key: FloatingTabStripKey.self, value: .bounds) { [paneID: $0] }
+        .padding(.top, toolbarInset - TabBarMetrics.trackTopInset)
+    } else {
+      TabBarView(
+        store: tabBarStore,
+        projectID: projectID,
+        worktreeID: worktreeID,
+        paneID: paneID,
+        isFocused: isFocused,
+        agentStateStore: agentStateStore
+      )
+    }
   }
 
   private var selectedContentID: ContentID? {
@@ -532,5 +600,14 @@ private struct PaneView: View {
   private var shouldDimUnfocusedSplit: Bool {
     _ = configReloadTick
     return isSplit && !isFocused
+  }
+}
+
+/// The slots of the floating tab strips, by Pane.
+private struct FloatingTabStripKey: PreferenceKey {
+  static let defaultValue: [PaneID: Anchor<CGRect>] = [:]
+
+  static func reduce(value: inout [PaneID: Anchor<CGRect>], nextValue: () -> [PaneID: Anchor<CGRect>]) {
+    value.merge(nextValue()) { $1 }
   }
 }

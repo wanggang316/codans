@@ -111,10 +111,14 @@ struct WorktreeDetailView: View {
   /// dark-only theme that would clash with the system-appearance sidebar
   /// and the neutral empty body (gray/dark chrome framing a light window).
   /// Painting no band keeps the whole no-project window on the system tone.
+  /// A Worktree's terminals run under the toolbar themselves, so they get
+  /// no top band either.
   private var chromeTintEdges: Edge.Set {
-    let isPlaceholder = activePendingWorktree == nil && resolveAddress() == nil
-    if isPlaceholder { return [] }
-    return isWindowFullscreen ? [.leading] : [.top, .leading]
+    switch resolveDetailMode() {
+    case nil: return []
+    case .creating: return isWindowFullscreen ? [.leading] : [.top, .leading]
+    case .worktree: return [.leading]
+    }
   }
 
   @ViewBuilder
@@ -134,18 +138,19 @@ struct WorktreeDetailView: View {
         // `worktreeToolbarContent(mode:)` for why the creating and settled
         // states must not each bring their own.
         .toolbar { worktreeToolbarContent(mode: mode) }
-        // Drop the system-painted window-toolbar chrome so the macOS 26
-        // floating-sidebar overlay only blends against the detail body
-        // underneath it. Without this, the toolbar's full-window glass
-        // repaints on every toolbar-state change (tab switch rebuilds
-        // `worktreeToolbarContent`) and flickers across the area covered
-        // by the translucent sidebar.
+        // A Worktree's terminals run under the toolbar, so the toolbar
+        // keeps its default background: the scroll edge effect over them.
+        // Other states drop the system-painted window-toolbar chrome so the
+        // macOS 26 floating-sidebar overlay only blends against the detail
+        // body underneath it. Without this, the toolbar's full-window glass
+        // repaints on every toolbar-state change and flickers across the
+        // area covered by the translucent sidebar.
         //
         // Re-show the chrome when fullscreen — without it, the sidebar `+`
         // button and detail toolbar render over the terminal pane with
         // nothing behind them (the title bar normally provides the visual
         // backing).
-        .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
+        .toolbarBackground(toolbarBackgroundVisibility(mode), for: .windowToolbar)
         .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
         .onReceive(
           NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
@@ -160,6 +165,12 @@ struct WorktreeDetailView: View {
     } else {
       placeholder
     }
+  }
+
+  private func toolbarBackgroundVisibility(_ mode: DetailMode) -> Visibility {
+    if isWindowFullscreen { return .visible }
+    if case .worktree = mode { return .automatic }
+    return .hidden
   }
 
   /// Which worktree surface the detail column renders. Resolved once per
