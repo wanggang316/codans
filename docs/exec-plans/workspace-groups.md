@@ -539,7 +539,7 @@ Each item has its own evidence. One item does not prove another.
   `workspace-groups.json` and the `default` links were written and
   `workspace.json` kept its bytes. A restart changed no group, row, tab,
   or pane id and did not rewrite the manifest.
-- **Native acceptance: pass, with one open defect** (isolated instance,
+- **Native acceptance: pass** (isolated instance,
   AX-driven, screenshots). Covered: add a Workspace from two projects
   (no branch created or switched), group and member terminals (cwd and
   `CODANS_WORKSPACE_GROUP*`), two named groups through the sheet, member
@@ -549,11 +549,15 @@ Each item has its own evidence. One item does not prove another.
   with visible risks and acknowledgment, many-member delete sheet, an
   injected partial failure (retained member, "Deletion incomplete", Retry
   in a selected row), collapse with a selected member (no ghost row),
-  and Workspace removal with owned files. Open: after a member removal
-  fails, `git worktree remove --force` has already removed the
-  worktree's admin entry, so the retained folder is no longer a checkout
-  and Retry stays blocked ("not a git repository") until the folder is
-  removed by hand. Not exercised: hover-only visuals (the system
+  and Workspace removal with owned files. The defect found there (after a
+  member removal fails, `git worktree remove --force` has already removed
+  the worktree's admin entry, so Retry stayed blocked with "not a git
+  repository") is fixed: the check reports the folder as a residual
+  folder that needs the acknowledgment, and the delete removes it through
+  `WorkspaceOwnership` and prunes the source. A real-git test reproduces
+  it with an immutable member folder
+  (`retryAfterAPartialRemovalDeletesTheResidualFolder`); the fix was not
+  rerun natively. Not exercised: hover-only visuals (the system
   Notification Center window blocked guarded pointer input), group
   creation rollback and setup-script failure (covered by
   `WorkspaceGroupCreationTests`).

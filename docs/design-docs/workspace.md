@@ -34,6 +34,9 @@
 - 发现风险时，在弹窗中列出具体风险，要求显式勾选「Discard these changes and stop the terminals」后才能继续。检查失败则阻止删除并提供重试，不把无法检查视为没有风险。IPC 在服务端重新检查，不能绕过确认。
 - 整个 Workspace 提供「Remove from Sidebar」与「Delete Workspace Files…」（删除所有命名组、`default` 链接及 Workspace 自身目录，同样先检查风险）；两种操作都不删除源项目主工作区。
 - 删除部分失败时，保留失败项，组行显示「Deletion incomplete · N items not removed」与 Retry，失败原因在提示与重试弹窗的「Not Removed Last Time」中列出；重启后只保留 `deletion` 状态，Retry 重新检查。
+- 成员移除中途失败时，`git worktree remove --force` 可能已删除该 worktree 的管理目录，留下的文件夹不再是 checkout。Retry 的检查发现源仓库不再列出该路径时，把它报告为「Folder left by an earlier removal」（`residualFolder`），与组目录内的其他文件一样需要显式确认；确认后经 `WorkspaceOwnership` 检查删除该文件夹，并对源仓库执行 `git worktree prune`。
+- 「Delete Workspace Files…」还会停止 `default` 组行与引用行的终端，这些运行中的终端同样列入检查并需要确认；源项目本身不被删除。
+- 删除确认框中，若组内成员的分支都不是该组创建的（如迁移来的 `existing` 组），说明分支因此保留。
 
 ### 已有 Workspace 迁移
 
@@ -51,10 +54,6 @@
 ### 技术决策：迁移保留路径与会话身份
 
 reconcile 按 canonical path 匹配已有 Worktree 并保留其 ID 与 tabs，迁移沿用这一身份。`existing` 组使用旧 Workspace 根作为会话目录；删除该组只删除其成员 checkout，保留根目录与 `.codans`，不递归删除仍被 Workspace、`default` 或其他组使用的父目录。
-
-### 已知限制
-
-- 成员移除失败时，`git worktree remove --force` 已删除该 worktree 的管理目录，保留下来的文件夹不再是 checkout；Retry 的检查因此报「not a git repository」并一直阻止删除，需手工删除该文件夹后再 Retry。
 
 ## 背景与范围
 
@@ -106,7 +105,7 @@ reconcile 按 canonical path 匹配已有 Worktree 并保留其 ID 与 tabs，�
 | D12 | 源项目探测统一走 `GitWorktreeCLI.inspectRepository(at:)`；子目录与 linked worktree 归一到仓库根；裸仓库拒绝 | 与 `--repo` 一致 |
 | D13 | 远程源先 clone 到用户选定目录（默认 `~/.codans/sources/<repoName>`），已是同一远程的 clone 则复用；`git clone --progress` 可取消 | 远程只是「先 clone」的本地源 |
 | D14 | `createdBranch` 记录组是否新建了该分支；删除只提供删除这类分支，且排除被其他 worktree 检出的分支与默认分支 | 不删除用户原有分支 |
-| D15 | 删除检查（`GroupDeletionCheck`）无副作用：`git status --porcelain=v1 -z --untracked-files=all` 计数；有 upstream 用 `@{upstream}..HEAD`，否则 `HEAD --not --exclude=<branch> --branches --remotes`；忙碌终端（`workspaceGroupBusyPanes`）；组目录内非成员条目 | 风险需显式确认；无法检查即阻止 |
+| D15 | 删除检查（`GroupDeletionCheck`）无副作用：`git status --porcelain=v1 -z --untracked-files=all` 计数；有 upstream 用 `@{upstream}..HEAD`，否则 `HEAD --not --exclude=<branch> --branches --remotes`；忙碌终端（`workspaceGroupBusyPanes`）；组目录内非成员条目；源仓库不再列出的成员文件夹（`residualFolder`） | 风险需显式确认；无法检查即阻止 |
 
 ### manifest v2
 
@@ -210,14 +209,14 @@ WorkspaceHandlers (workspace.*) ─┘
 ### 新建组
 
 - `createGroupStream(plan, token)`：先再跑一次 preflight，任一阻塞问题在 I/O 前失败；逐项目可选 fetch，再以 `createWorktreeStream(pathOverride: <root>/<group>/<name>)` 检出，记账（`createdDirectory`、仅在分支原本不存在时记 `createdBranch`、`addedWorktree`）。
-- 任一检出失败或取消：在 `Task.detached` 中逆序回滚，`rolledBack(failures)` 报告残留路径与原因，manifest 与 catalog 不写入。
+- 任一检出失败或取消：在 `Task.detached` 中逆序回滚，`rolledBack(failures)` 报告残留路径与原因，manifest 与 catalog 不写入。worktree 移除失败时保留包含它的组目录，并报告该目录与原因。preflight 要求计划包含当前所有源项目（`missingSource`）。
 - 全部检出完成：写 manifest、reconcile、发出 `registered`；然后逐成员跑 setup script（失败记为 `setupFailed`，组保留）；流以 `GroupCreationResult` 结束，`RootFeature` 随后为每个成员启动所选 Agent 并选中、展开该组。
 - GUI：Workspace 行 `+` 打开 `.newGroup` sheet：Name、Branch（留空用组名），每个项目一节（Based on、Fetch、Copy ignored、Copy untracked、Launch agent），默认值来自 `groupCreationDefaults`。
 
 ### 删除与移除
 
-- **删除命名组**（组行「Delete Group…」/ `codans workspace group delete`）：`checkGroupDeletion` 给出风险（D15）；`deleteGroup` 重新检查，`checkFailed` 或未确认的风险直接抛出。执行：在 catalog 与 manifest 记下 `deletion`，拆除组内所有行的 surface，逐成员 `removeWorktree(repoRoot: sourceGitRoot, path)`（relocate-then-prune）、按选项删分支、从 manifest 删成员、删行与镜像行；单个成员失败则保留它与原因并继续。全部成员移除后，组目录经 `WorkspaceOwnership` 允许且不是 `.` 时删除，再删组记录与组行；否则组保留 `deletion` 状态。
-- **移除 Workspace**（Workspace 行「Remove Workspace…」/ `codans workspace remove`）：`sidebarOnly` 只删 catalog 条目；`deleteOwnedFiles` 对所有命名组做一次合并检查（同样需要确认），逐组删除，删除 `default` 链接与目录，全部成功且所有权允许时再删根目录并删 catalog 条目；部分失败保留 Workspace 与失败组的 `deletion` 状态。两者都不删除源主工作区。
+- **删除命名组**（组行「Delete Group…」/ `codans workspace group delete`）：`checkGroupDeletion` 给出风险（D15）；`deleteGroup` 重新检查，`checkFailed` 或未确认的风险直接抛出。执行：在 catalog 与 manifest 记下 `deletion`，拆除组内所有行的 surface，逐成员 `removeWorktree(repoRoot: sourceGitRoot, path)`（relocate-then-prune；`residualFolder` 成员经 `WorkspaceOwnership` 删除文件夹后 `git worktree prune`）、按选项删分支、从 manifest 删成员、删行与镜像行；单个成员失败则保留它与原因并继续。全部成员移除后，组目录经 `WorkspaceOwnership` 允许且不是 `.` 时删除，再删组记录与组行；否则组保留 `deletion` 状态。
+- **移除 Workspace**（Workspace 行「Remove Workspace…」/ `codans workspace remove`）：`sidebarOnly` 只删 catalog 条目；`deleteOwnedFiles` 用 `checkWorkspaceDeletion` 对所有命名组与 `default` 组行、引用行的运行中终端做一次合并检查（同样需要确认），逐组删除，删除 `default` 链接与目录，全部成功且所有权允许时再删根目录并删 catalog 条目；部分失败保留 Workspace 与失败组的 `deletion` 状态。两者都不删除源主工作区。
 - 引用的移除见「创建与源项目」，从不删除磁盘内容。
 
 ### GitHub：按成员仓库取数
@@ -237,6 +236,6 @@ WorkspaceHandlers (workspace.*) ─┘
 
 ## 横切关注点
 
-- **已知限制**：见「已知限制」。旧构建对 workspace 根仍会跑 `discoverGitRoot`，D10 要求根不在仓库内。v3 构建会把 v4 catalog 移到 `backups/` 并以空 catalog 启动；迁移时的 v3 备份可用于降级。远程源的 clone 只在创建回滚时删除。
+- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`，D10 要求根不在仓库内。v3 构建会把 v4 catalog 移到 `backups/` 并以空 catalog 启动；迁移时的 v3 备份可用于降级。远程源的 clone 只在创建回滚时删除。
 - **日志**：`com.gumpw.codans.hierarchy/reconcile` 记录追加 / 归档 / 「manifest 不再点名的行」/ 默认链接目录中的非链接条目。
 - **测试**：CodansCoreTests（`CatalogMigrationV3ToV4Tests`、manifest v2 编解码与 v1 → v2 迁移、`WorkspaceOwnership`、`WorkspaceDefaultLinks`、`CatalogSidebarTests`）；`PersistenceVersioningTests`、`CatalogStoreWorkspaceRepairTests`；`HierarchyManagerWorkspaceTests`、`HierarchyClientWorkspaceReconcileTests`（真实 git：迁移后身份、分支切换、源缺失）；`WorkspaceClientTests`、`WorkspaceSourcesTests`、`WorkspaceGroupCreationTests`、`WorkspaceGroupDeletionTests`（真实 git + 真实 `CatalogStore` + `FakeHierarchyRuntime`）；TestStore：`CreateWorkspaceFeatureTests`、`HierarchySidebarFeatureTests`、`WorkspaceGroupDeletionFeatureTests`、`ProjectSettingsWorkspaceSourcesTests`；`WorkspaceHandlersTests`、`HierarchyHandlersWorkspaceTests`、`WorkspaceCommandsTests`。原生验收记录见执行计划「Status」。
