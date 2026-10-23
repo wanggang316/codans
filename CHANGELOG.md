@@ -71,9 +71,9 @@ and the project does not yet follow semantic versioning — every release until
   divider between them, as the editor splits in Xcode do; drag the divider to
   resize. The tab strip sits as far from the pane's top as from the
   terminal below it.
-- **Tab strip sized like Safari's.** The strip is taller with larger tab
-  titles, and the top strip sits as close under the toolbar as Safari's
-  tab bar does.
+- **Tab strip sized like Safari's.** The strip is as tall as Safari's tab
+  bar, and the top strip sits as close under the toolbar as Safari's
+  does.
 - **Tab actions live on the tab.** Hover a tab chip and an actions button
   appears on its right, the mirror of the close button on its left: hand
   off, command queue, copy, paste, splits, reset, and close. The actions
