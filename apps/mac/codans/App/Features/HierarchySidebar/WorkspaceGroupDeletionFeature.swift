@@ -55,8 +55,10 @@ struct WorkspaceGroupDeletionFeature {
 
     var isBlocked: Bool { checks.contains(where: \.isBlocked) }
     var hasRisks: Bool { checks.contains(where: \.hasRisks) }
+    /// Each branch once: a group usually has the same branch in every project.
     var deletableBranches: [String] {
-      checks.flatMap(\.members).flatMap(\.deletableBranches)
+      var seen = Set<String>()
+      return checks.flatMap(\.members).flatMap(\.deletableBranches).filter { seen.insert($0).inserted }
     }
 
     var canDelete: Bool {

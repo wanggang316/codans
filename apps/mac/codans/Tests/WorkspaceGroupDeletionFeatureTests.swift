@@ -47,6 +47,25 @@ private struct DeletionFixture {
 
 @MainActor
 struct WorkspaceGroupDeletionFeatureTests {
+  /// A group checks out one branch in every project; the confirmation names
+  /// each branch once.
+  @Test
+  func theSameBranchInSeveralProjectsIsListedOnce() {
+    let f = DeletionFixture()
+    var check = f.check(deletableBranches: ["feat"])
+    check.members.append(
+      .init(
+        name: "api", worktreeID: WorktreeID(), path: "/ws/feat/api", branch: "feat",
+        deletableBranches: ["feat"]))
+    check.members.append(
+      .init(
+        name: "lib", worktreeID: WorktreeID(), path: "/ws/feat/lib", branch: "feat-lib",
+        deletableBranches: ["feat-lib"]))
+    var state = WorkspaceGroupDeletionFeature.State(target: f.target)
+    state.checks = [check]
+    #expect(state.deletableBranches == ["feat", "feat-lib"])
+  }
+
   @Test
   func deleteStaysDisabledUntilTheRisksAreAcknowledged() async {
     let f = DeletionFixture()
