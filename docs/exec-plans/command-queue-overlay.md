@@ -3,7 +3,7 @@
 ## Agreed behavior
 
 - Command-L opens the command composer. It uses the New Agent grouped form style and closes after a nonempty command is sent or queued. The composer does not list queued commands.
-- Schedule controls use one row above the composer actions only in Schedule mode. The editor gives up the same height while that row is visible, so other modes have no blank control row and the sheet height stays constant. Repeat uses a compact checkbox; interval controls appear only when enabled.
+- Schedule opens a fixed-size popover beside the send timing control. Date/time and repeat options live there; Done closes it. A clickable summary reopens the settings. The composer keeps its full editor height in every mode, with no reserved schedule row.
 - The file picker can select multiple files. Append their absolute paths to the draft using shared POSIX single-quote escaping; selection alone does not send.
 - The pane menu displays the resolved shortcut in gray, aligned right, with space between symbols.
 - Queued commands float at the top of their pane without reserving terminal space. Use the pane menu material.
@@ -27,7 +27,7 @@
 - Full `make mac-check` encountered existing formatting/lint conflicts and an unrelated sidebar accessibility violation. Unrelated formatter edits were removed.
 - Regenerating the workspace with `make mac-generate` resolved the stale deployment targets and missing Yams integration. The app now builds; 17 selected app tests pass (queue submission, pagination, pane HUD rendering, and parent-driven composer dismissal).
 - The file selection follow-up passes all 14 CommandQueueFeature tests, including multiple paths, quote escaping, Unicode paths, preserved whitespace, and empty selections. Changed-file lint and `git diff --check` pass.
-- Schedule layout was checked with native offscreen renders in light and dark appearances, including Repeat enabled and disabled. The final UI change passes the app build and changed-file lint.
+- The schedule popover was checked with native offscreen renders in light and dark appearances, including Never and Every repeat modes. The final UI change passes the app build and changed-file lint.
 - Live interaction, full composer appearance, and keyboard delivery have not been manually verified.
 
 The overlay falls back to the queue badge when a pane is too short for one row and its controls. Visibility uses scene storage keyed by pane ID, so view remounts and new commands do not reset it.

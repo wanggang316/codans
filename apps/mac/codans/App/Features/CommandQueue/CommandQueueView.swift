@@ -12,13 +12,13 @@ struct CommandQueueView: View {
   let onDismiss: () -> Void
 
   @FocusState private var draftFocused: Bool
+  @State private var showsScheduleEditor = false
   @State private var showsFilePicker = false
   @State private var showsFileError = false
   @State private var fileError = ""
 
   private static let width: CGFloat = 560
   private static let editorHeight: CGFloat = 110
-  private static let scheduleRowHeight: CGFloat = 28
 
   var body: some View {
     VStack(spacing: 0) {
@@ -62,9 +62,6 @@ struct CommandQueueView: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 4) {
       editor
-      if store.mode == .scheduled {
-        scheduleRow
-      }
       HStack(spacing: 8) {
         Button {
           showsFilePicker = true
@@ -77,7 +74,28 @@ struct CommandQueueView: View {
         .help("Insert file paths")
         .accessibilityLabel("Select files")
         Spacer()
-        modeMenu
+        HStack(spacing: 8) {
+          if store.mode == .scheduled {
+            Button {
+              showsScheduleEditor = true
+            } label: {
+              Text(scheduleSummary)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            }
+            .buttonStyle(.borderless)
+            .help(scheduleSummary)
+            .accessibilityLabel("Edit schedule: \(scheduleSummary)")
+          }
+          modeMenu
+        }
+        .popover(isPresented: $showsScheduleEditor, arrowEdge: .bottom) {
+          scheduleEditor
+        }
+        .onChange(of: store.mode) { _, mode in
+          showsScheduleEditor = mode == .scheduled
+        }
         sendButton
       }
     }
@@ -88,8 +106,7 @@ struct CommandQueueView: View {
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()
-      // Scheduling uses editor space rather than adding a blank row in other modes.
-      .frame(height: Self.editorHeight - (store.mode == .scheduled ? Self.scheduleRowHeight + 4 : 0))
+      .frame(height: Self.editorHeight)
       .overlay(alignment: .topLeading) {
         if store.draft.isEmpty {
           // `TextEditor` has no placeholder of its own; this sits where the
@@ -121,57 +138,61 @@ struct CommandQueueView: View {
       .accessibilityLabel("Command")
   }
 
-  private var scheduleRow: some View {
-    HStack(spacing: 8) {
-      Text("At")
-        .foregroundStyle(.secondary)
+  private var scheduleSummary: String {
+    CommandQueueStyle.description(of: .scheduled(at: store.scheduledAt, repeatEvery: store.repeatInterval))
+  }
+
+  private var scheduleEditor: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Schedule message")
+        .font(.headline)
       DatePicker(
         "Send at",
         selection: $store.scheduledAt.sending(\.scheduledAtChanged),
         displayedComponents: [.date, .hourAndMinute]
       )
-      .labelsHidden()
       .datePickerStyle(.field)
-      .fixedSize()
-      Divider()
-        .frame(height: 14)
-        .padding(.horizontal, 4)
-      Toggle("Repeat", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
-        .toggleStyle(.checkbox)
+      HStack {
+        Text("Repeat")
+        Spacer()
+        Picker("Repeat", selection: $store.repeatEnabled.sending(\.repeatEnabledChanged)) {
+          Text("Never").tag(false)
+          Text("Every…").tag(true)
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
         .fixedSize()
-      if store.repeatEnabled {
-        Text("every")
-          .foregroundStyle(.secondary)
-        TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
-          .labelsHidden()
-          .textFieldStyle(.roundedBorder)
-          .multilineTextAlignment(.center)
-          .frame(width: 38)
-        Menu {
+      }
+      HStack(spacing: 8) {
+        if store.repeatEnabled {
+          Text("Every")
+            .foregroundStyle(.secondary)
+          TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
+            .labelsHidden()
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 56)
           Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
             ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
               Text(unit.title).tag(unit)
             }
           }
-        } label: {
-          HStack(spacing: 4) {
-            Text(store.repeatUnit.title)
-            Image(systemName: "chevron.down")
-              .font(.system(size: 8, weight: .semibold))
-              .accessibilityHidden(true)
-          }
-          .foregroundStyle(.secondary)
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .fixedSize()
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("Repeat interval unit")
+        Spacer(minLength: 8)
+        Button("Done") {
+          showsScheduleEditor = false
+          draftFocused = true
+        }
+        .keyboardShortcut(.defaultAction)
       }
+      .frame(height: 28)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .font(.system(size: 11))
-    .controlSize(.small)
-    .frame(height: Self.scheduleRowHeight)
+    .padding(20)
+    // Keep the native popover size stable when repeat controls appear.
+    .frame(width: 340, height: 208)
+    .onExitCommand { showsScheduleEditor = false }
   }
 
   /// Send timing, as the small labelled menu a chat composer keeps at its
@@ -209,7 +230,7 @@ struct CommandQueueView: View {
     // ⌘↩ as well as the composer's plain Return, so sending works from the
     // schedule fields too.
     .keyboardShortcut(.return, modifiers: .command)
-    .disabled(!store.canSubmit)
+    .disabled(!store.canSubmit || showsScheduleEditor)
     .help("\(sendTitle) (⌘↩)")
     .accessibilityLabel(sendTitle)
   }
