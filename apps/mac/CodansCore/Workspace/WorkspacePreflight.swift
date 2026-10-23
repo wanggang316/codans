@@ -33,6 +33,9 @@ public nonisolated struct WorkspacePreflight: Equatable, Sendable {
       case reservedGroupName
       /// Another group of the Workspace already has this name.
       case duplicateGroupName
+      /// A new group must hold every project of the Workspace; the plan
+      /// leaves at least one out.
+      case missingSource
     }
 
     public var kind: Kind

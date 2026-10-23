@@ -66,6 +66,14 @@ extension WorkspaceClient {
         .init(kind: .invalidBranchName, message: "\u{201C}\(branch)\u{201D} is not a valid branch name."))
     }
     let listed = Set(manifest.projects.map { canonical($0.sourceGitRoot) })
+    let planned = Set(plan.members.map { canonical($0.sourceGitRoot) })
+    let missing = manifest.projects.filter { !planned.contains(canonical($0.sourceGitRoot)) }.map(\.name)
+    if !missing.isEmpty {
+      result.groupIssues.append(
+        .init(
+          kind: .missingSource,
+          message: "A group includes every workspace project. Missing: \(missing.joined(separator: ", "))."))
+    }
     var names = Set<String>()
     for member in plan.members {
       var issues: [WorkspacePreflight.Issue] = []

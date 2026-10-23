@@ -126,6 +126,23 @@ struct WorkspaceGroupCreationTests {
     #expect(duplicate.groupIssues.map(\.kind).contains(.duplicateGroupName))
   }
 
+  @Test
+  func aPlanThatOmitsAWorkspaceProjectIsRejected() async throws {
+    let fx = try WorkspaceClientFixture()
+    defer { fx.cleanUp() }
+    let setup = try await makeWorkspace(fx)
+    var partial = plan(setup)
+    partial.members.removeAll { $0.name == "lib" }
+
+    let preflight = await fx.client.preflightGroup(partial)
+
+    #expect(preflight.groupIssues.map(\.kind) == [.missingSource])
+    #expect(preflight.groupIssues.first?.message.contains("lib") == true)
+    let (_, error) = await fx.collect(fx.client.createGroupStream(partial, UUID()))
+    #expect(error as? WorkspaceError == .groupPreflightFailed(preflight))
+    #expect(!fx.exists("\(setup.root)/fix"))
+  }
+
   // MARK: Creation
 
   @Test
