@@ -12,15 +12,13 @@ struct SidebarWorktreeActivityIcon: View {
   let isDefaultBranch: Bool
   let hasLifecycle: Bool
 
-  @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
 
   private var isExecuting: Bool {
-    hierarchyManager.worktreeIsDirty(worktree)
-      || worktree.tabs.contains { tab in
-        tab.panes.contains { agentStateStore?.workingPaneIDs.contains($0.id) == true }
-      }
+    contentRuntime?.worktreeIsDirty(worktree) == true
+      || worktree.contentIDs.contains { agentStateStore?.workingContentIDs.contains($0) == true }
   }
 
   var body: some View {
@@ -58,7 +56,7 @@ struct SidebarRunScriptAccessory: View {
   let worktreeID: WorktreeID
   let projectID: ProjectID
   let stop: () -> Void
-  @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(SettingsStore.self) private var settingsStore
 
   var body: some View {
@@ -66,7 +64,7 @@ struct SidebarRunScriptAccessory: View {
     let scripts = (settings.projects[projectID]?.scripts ?? []) + settings.general.globalScripts
     let tints =
       scripts
-      .filter { hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id) }
+      .filter { contentRuntime?.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id) == true }
       .map { ScriptTintColorPalette.color(for: $0.resolvedTintColor) }
     if !tints.isEmpty {
       RunScriptPingStopControl(colors: tints, onStop: stop)

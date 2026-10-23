@@ -103,7 +103,7 @@ struct ProjectSortModeTests {
 
   @Test
   func missingSortModeDecodesToDefault() throws {
-    let payload = Data(#"{"version": 3}"#.utf8)
+    let payload = Data(#"{"version": 4}"#.utf8)
     let catalog = try JSONDecoder().decode(Catalog.self, from: payload)
     #expect(catalog.projectSortMode == .joinOrder)
   }

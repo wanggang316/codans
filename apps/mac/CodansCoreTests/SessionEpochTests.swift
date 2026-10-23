@@ -47,7 +47,7 @@ struct SessionEpochTests {
 
   private func makeSession(epoch: String?) -> Session {
     Session(
-      paneID: PaneID(),
+      contentID: ContentID(),
       socketPath: "/tmp/zmx/pane.sock",
       pid: 1234,
       createdAt: Date(timeIntervalSince1970: 1_700_000_000),

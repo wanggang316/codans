@@ -13,7 +13,7 @@ struct SessionStoreTests {
     let storeA = try SessionStore(fileURL: ctx.fileURL)
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let session1 = Session(
-      paneID: PaneID(),
+      contentID: ContentID(),
       socketPath: "/tmp/zmx/pane-a.sock",
       pid: 1234,
       createdAt: now,
@@ -23,7 +23,7 @@ struct SessionStoreTests {
       zmxVersion: "0.1.0"
     )
     let session2 = Session(
-      paneID: PaneID(),
+      contentID: ContentID(),
       socketPath: "/tmp/zmx/pane-b.sock",
       pid: 5678,
       createdAt: now.addingTimeInterval(60),
@@ -33,8 +33,8 @@ struct SessionStoreTests {
       zmxVersion: "0.1.0"
     )
     let catalog = SessionCatalog(sessions: [
-      session1.paneID.description: session1,
-      session2.paneID.description: session2,
+      session1.contentID.description: session1,
+      session2.contentID.description: session2,
     ])
 
     try storeA.saveNow(catalog)
@@ -123,7 +123,7 @@ struct SessionStoreTests {
     at stamp: Date
   ) -> SessionCatalog {
     let session = Session(
-      paneID: PaneID(),
+      contentID: ContentID(),
       socketPath: "/tmp/zmx/test-\(pid).sock",
       pid: pid,
       createdAt: stamp,
@@ -132,7 +132,7 @@ struct SessionStoreTests {
       cwd: "/tmp",
       zmxVersion: "0.1.0"
     )
-    return SessionCatalog(sessions: [session.paneID.description: session])
+    return SessionCatalog(sessions: [session.contentID.description: session])
   }
 
   private struct TempContext {

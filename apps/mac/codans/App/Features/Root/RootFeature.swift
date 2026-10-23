@@ -34,13 +34,13 @@ struct RootFeature {
     /// stream directly via child-feature subscriptions.
     var lastEvent: LastEventMarker?
 
-    /// Panes whose foreground process group is currently a `git` / `gh`
-    /// command (see `ForegroundJobClassifier.indicatesGitCommand`). A pane
+    /// Sessions whose foreground process group is currently a `git` / `gh`
+    /// command (see `ForegroundJobClassifier.indicatesGitCommand`). A session
     /// leaving this set is the trailing edge of a prompt-run VCS command —
     /// the moment we kick an immediate git + PR refresh for its Project so a
     /// `gh pr create` / `git push` surfaces in the sidebar within seconds
     /// instead of waiting for the 60 s liveness poll.
-    var panesRunningGitCommand: Set<PaneID> = []
+    var contentsRunningGitCommand: Set<ContentID> = []
 
     var sidebar: HierarchySidebarFeature.State = .init()
     var detail: WorktreeDetailFeature.State = .init()
@@ -219,34 +219,34 @@ struct RootFeature {
     case engineEventReceived(LastEventMarker)
     /// Emitted from the event stream when libghostty reports a surface
     /// has exited (child died, user-initiated close via `close_surface`
-    /// binding, or crash). The root reducer resolves the pane's address
-    /// and calls `hierarchyClient.closePane` to drop the catalog entry.
-    case paneLifecycleExited(PaneID)
+    /// binding, or crash). The root reducer resolves the session's Tab
+    /// and calls `hierarchyClient.closeTab` to drop the catalog entry.
+    case paneLifecycleExited(ContentID)
     /// Forwarded from `paneInfoChanged + .progress(...)` in the engine
     /// event stream. `isBusy` is true for any non-`REMOVE` OSC 9;4
-    /// state. Drives the tab-chip running spinner (via
-    /// `HierarchyManager.runningPanes`) and the sidebar busy glyph.
-    case paneProgressBusyChanged(PaneID, Bool)
+    /// state. Drives the tab-chip running spinner (via the session's
+    /// `TabChrome`) and the sidebar busy glyph.
+    case paneProgressBusyChanged(ContentID, Bool)
     /// Forwarded from `foregroundJobChanged` in the engine event stream.
     /// `isBusy` is true when the pane's foreground process group is a real
     /// non-agent command (see `ForegroundJobClassifier`). A session-level
     /// "terminal busy" source unioned with OSC 9;4 in the sidebar / tab-chip
     /// spinner, so plain commands that never emit OSC 9;4 still light it.
-    case paneCommandBusyChanged(PaneID, Bool)
+    case paneCommandBusyChanged(ContentID, Bool)
     /// Forwarded from `foregroundJobChanged` in the engine event stream.
     /// `running` is true when the pane's foreground process group is a
     /// `git` / `gh` command (see `ForegroundJobClassifier.indicatesGitCommand`).
     /// The reducer tracks the running set and, on the trailing edge (a
     /// prompt-run VCS command finishing), kicks an immediate git + PR refresh
     /// for the pane's Project.
-    case paneGitCommandActivity(PaneID, running: Bool)
+    case paneGitCommandActivity(ContentID, running: Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
     /// directory the user last `cd`'d to rather than its creation-time cwd.
-    /// The reducer routes through `HierarchyClient.updatePaneWorkingDirectory`,
+    /// The reducer routes through `HierarchyClient.updateWorkingDirectory`,
     /// which is idempotent on equal paths so a shell that re-asserts the same
     /// pwd every prompt never touches the catalog file.
-    case paneLivePwdChanged(PaneID, String)
+    case paneLivePwdChanged(ContentID, String)
     /// Emitted by `WorktreeHeadWatcher` when a worktree's `.git/HEAD`
     /// file changes — typically a `git checkout` / `git switch` inside
     /// a codans pane. The reducer reconciles that worktree's
@@ -301,11 +301,10 @@ struct RootFeature {
     /// buttons; both routes land on `.detail(.tabBar(.trailingSplitRequested))`
     /// so trees / hooks fire identically.
     case splitCurrentPaneRequested(direction: SplitTree<PaneID>.NewDirection)
-    /// `⌘⌥←/→/↑/↓` menu bindings — moves focus to the adjacent split inside
-    /// the active tab. Resolves the focused pane via `lastFocusedPane` (with
-    /// a leftmost-leaf fallback so the chord still works on a freshly
-    /// selected tab) and forwards `.gotoSplit(direction:)` through the same
-    /// router that handles libghostty's built-in `goto_split` keybind.
+    /// `⌘⌥←/→/↑/↓` menu bindings — moves focus to the adjacent Pane of the
+    /// selected Worktree. Starts from the focused Pane's selected Content
+    /// and forwards `.gotoSplit(direction:)` through the same router that
+    /// handles libghostty's built-in `goto_split` keybind.
     case focusAdjacentPaneInCurrentTabRequested(direction: FocusDirection)
     /// Tab-bar uplift: `⌘T` menu binding. Resolves the current Worktree
     /// and forwards `.detail(.tabBar(.newTabButtonTapped))`.
@@ -400,33 +399,33 @@ struct RootFeature {
     /// `EditorService.open` cannot (no Pane/Tab context in the service signature).
     case openShellEditorInWorktree(worktreePath: String, projectID: ProjectID?)
     /// Toggle the Command Palette overlay. Sources: `⌘P` menu binding
-    /// (source pane unknown — payload is `nil`), and
-    /// `paneActionRouter(.delegate(.commandPaletteToggleRequested(paneID)))`
+    /// (source session unknown — payload is `nil`), and
+    /// `paneActionRouter(.delegate(.commandPaletteToggleRequested(contentID)))`
     /// forwarded from the ghostty keybind pipeline (payload carries the
-    /// source pane so Pane-scoped palette actions target the right
-    /// split).
-    case commandPaletteToggle(PaneID?)
+    /// source session so session-scoped palette actions target the right
+    /// Pane).
+    case commandPaletteToggle(ContentID?)
     case commandPalette(PresentationAction<CommandPaletteFeature.Action>)
-    /// Open the Hand Off panel for `paneID`, or for the selected worktree's
-    /// focused pane when nil. Refused with a status toast when no agent is
-    /// detected in that pane — a handoff needs an agent to ask.
-    case handoffRequested(PaneID?)
+    /// Open the Hand Off panel for the session, or for the selected
+    /// worktree's focused session when nil. Refused with a status toast when
+    /// no agent is detected there — a handoff needs an agent to ask.
+    case handoffRequested(ContentID?)
     case handoff(PresentationAction<HandoffFeature.Action>)
     /// A hand-off ordered from the panel finished; the panel is long gone.
     case handoffFinished(HandoffCompletion, targetTitle: String)
     case handoffFailed(message: String)
     /// Open the workflow start panel for `workflowID`, scoped to a worktree.
-    /// Sent by the palette's "Run Workflow" rows; `sourcePaneID` is the pane
-    /// the palette was opened from, which becomes the `current` role only
-    /// when it is an agent pane in that worktree.
-    case workflowStartRequested(ProjectID, WorktreeID, workflowID: String, sourcePaneID: PaneID?)
+    /// Sent by the palette's "Run Workflow" rows; `sourceContentID` is the
+    /// session the palette was opened from, which becomes the `current` role
+    /// only when it is an agent session in that worktree.
+    case workflowStartRequested(ProjectID, WorktreeID, workflowID: String, sourceContentID: ContentID?)
     case workflowStart(PresentationAction<WorkflowStartFeature.Action>)
-    /// Toggle the Command Queue panel. `nil` resolves the target pane the
-    /// same way `commandPaletteToggle` does (the active tab's last-focused
-    /// leaf), which is what the ⌘⌥L menu binding sends; the pane badge sends
-    /// its own id. Toggling while the panel is open on a *different* pane
-    /// re-targets rather than closing — the user asked for that pane.
-    case commandQueueToggle(PaneID?)
+    /// Toggle the Command Queue panel. `nil` resolves the target session the
+    /// same way `commandPaletteToggle` does (the focused Pane's selected
+    /// Tab), which is what the ⌘⌥L menu binding sends; the badge sends its
+    /// own id. Toggling while the panel is open on a *different* session
+    /// re-targets rather than closing — the user asked for that one.
+    case commandQueueToggle(ContentID?)
     case commandQueue(PresentationAction<CommandQueueFeature.Action>)
     /// Toggle the New Agent dialog. Opens on the selected project.
     case newAgentRequested
@@ -466,13 +465,13 @@ struct RootFeature {
   /// via `@AppStorage`, but keeping the case in the enum lets a future
   /// programmatic close chord land without a reshuffle.
   enum AgentStateAction: Equatable {
-    case rowTapped(PaneID)
+    case rowTapped(ContentID)
     /// Row context menu "Hand Off…" — opens the panel for the row's own
     /// pane, whatever pane currently holds focus.
-    case handOffTapped(PaneID)
+    case handOffTapped(ContentID)
     /// Row context menu "Run Workflow ▸ <name>" — the row's pane plays the
     /// `current` role, whatever pane currently holds focus.
-    case runWorkflowTapped(PaneID, workflowID: String)
+    case runWorkflowTapped(ContentID, workflowID: String)
     case dismissRequested
   }
 
@@ -677,24 +676,24 @@ struct RootFeature {
               // events also bump the marker so tests that observe `lastEvent`
               // still see them pass through.
               switch event {
-              case .paneActionRequested(let paneID, let request):
-                await send(.paneActionRouter(.requested(paneID, request)))
+              case .paneActionRequested(let contentID, let request):
+                await send(.paneActionRouter(.requested(contentID, request)))
               case .windowActionRequested(let request):
                 await send(.windowActionRouter(.requested(request)))
-              case .paneExited(let paneID, _, _):
+              case .paneExited(let contentID, _, _):
                 // ghostty's `close_surface` binding + child-exit both land
                 // here. Surface memory is already freed by the engine; we
                 // still need to remove the Pane from the catalog so the
                 // SplitTree collapses and no stale black rect is rendered.
-                await send(.paneLifecycleExited(paneID))
-              case .paneCrashed(let paneID, _):
+                await send(.paneLifecycleExited(contentID))
+              case .paneCrashed(let contentID, _):
                 // The pane stays in the catalog for the user to retry, but
                 // its OSC 9;4 running flag would otherwise leak: a crashing
                 // program rarely gets a chance to emit the REMOVE state
                 // that closes out the indicator. Force-clear so the
                 // tab-chip / sidebar spinners do not pin on a dead pane.
-                await send(.paneProgressBusyChanged(paneID, false))
-              case .paneInfoChanged(let paneID, .progress(let state, _)):
+                await send(.paneProgressBusyChanged(contentID, false))
+              case .paneInfoChanged(let contentID, .progress(let state, _)):
                 // OSC 9;4 progress reports drive the per-pane "executing"
                 // signal. Any non-REMOVE state (set / indeterminate /
                 // pause / error) marks the pane as running; REMOVE clears
@@ -702,8 +701,8 @@ struct RootFeature {
                 // app today and is what lights up the tab-chip spinner +
                 // sidebar busy glyph.
                 let isBusy = state != GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
-                await send(.paneProgressBusyChanged(paneID, isBusy))
-              case .foregroundJobChanged(let paneID, let job):
+                await send(.paneProgressBusyChanged(contentID, isBusy))
+              case .foregroundJobChanged(let contentID, let job):
                 // Foreground process group → session-level "terminal busy".
                 // A non-shell, non-agent command lights the tab-chip /
                 // sidebar spinner even when the program never emits OSC 9;4.
@@ -712,21 +711,21 @@ struct RootFeature {
                 // the foreground until logout.
                 await send(
                   .paneCommandBusyChanged(
-                    paneID, ForegroundJobClassifier.indicatesBusyCommand(job)))
+                    contentID, ForegroundJobClassifier.indicatesBusyCommand(job)))
                 // Same source, narrower predicate: track `git` / `gh` commands
                 // so a finishing `gh pr create` / `git push` triggers an
                 // immediate PR + diff refresh.
                 await send(
                   .paneGitCommandActivity(
-                    paneID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
-              case .paneInfoChanged(let paneID, .pwd(let pwd)):
+                    contentID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
+              case .paneInfoChanged(let contentID, .pwd(let pwd)):
                 // libghostty OSC 7 → persist the live cwd so a restart
                 // restores the pane at the directory the user last `cd`'d
                 // to. Nil / empty payloads are dropped here so we never
                 // overwrite a real path with a transient clear; the
                 // manager-side mutator further dedupes equal-path writes.
                 if let pwd, !pwd.isEmpty {
-                  await send(.paneLivePwdChanged(paneID, pwd))
+                  await send(.paneLivePwdChanged(contentID, pwd))
                 }
               case .hierarchyMutated(let scope)
               where scope != .selection && scope != .tags:
@@ -939,31 +938,27 @@ struct RootFeature {
             hierarchyClient.setWorktreeIsNew(worktreeID, false)
           }
         }
-        // Auto-seed a Tab + Pane when the selected Worktree has none so
+        // Auto-seed a first Tab when the selected Worktree has no Pane so
         // switching to a brand-new Worktree immediately shows a live
         // terminal rooted at `worktree.path` instead of a placeholder that
         // forces the user to click twice. Safe to run unconditionally on
-        // every selection change: createTab/openPane are no-ops when the
-        // Worktree already has tabs/panes (we gate on .isEmpty below).
+        // every selection change: it gates on `panes.isEmpty`.
         if !(selection.worktreeID.map(state.agentLaunchWorktreeIDs.contains) ?? false) {
-          autoSeedTabAndPaneIfNeeded(for: selection)
+          autoSeedFirstTabIfNeeded(for: selection)
         }
-        // Mirror the selection's active tab into the split viewport so the
-        // lazy-surface lifecycle can react without reading HierarchyManager
-        // from a reducer. Tab is resolved on-the-fly from the catalog.
-        let tabID = resolveActiveTab(selection: selection)
-        state.detail.splitViewport.activeTabID = tabID
+        // Mirror the selection into the split viewport so the lazy-surface
+        // lifecycle can react without reading HierarchyManager from a
+        // reducer.
+        state.detail.splitViewport.worktreeID = selection.worktreeID
         // Eagerly rebuild `paneHosts` for the new selection in the SAME
         // reducer tick, with warm ghostty surfaces pre-attached. SwiftUI's
         // next render then finds a fully populated `.ready` host array —
         // no ProgressView scope-miss frame, no "Creating surface…"
         // placeholder frame. The existing `.task(id:)` sync in
         // `SplitViewportView` stays as a fallback for paths that don't go
-        // through `selectionChanged` (TabBar tap within the same worktree,
-        // pane open / split / close inside the active tab).
-        reconcilePaneHosts(
-          &state.detail.splitViewport, selection: selection, tabID: tabID
-        )
+        // through `selectionChanged` (Tab select inside the same worktree,
+        // Pane open / split / close).
+        reconcilePaneHosts(&state.detail.splitViewport, selection: selection)
         var effects: [Effect<Action>] = []
         // Resolved once and reused by the branch-switcher forwarding below.
         // `nil` when either id is nil, which downstream reducers treat as a
@@ -1168,52 +1163,37 @@ struct RootFeature {
         state.lastEvent = marker
         return .none
 
-      case .paneProgressBusyChanged(let paneID, let isBusy):
-        // Idempotent: `markPaneRunning` / `markPaneIdle` collapse repeats
-        // through `Set.insert` / `Set.remove`, so we don't dedupe here.
-        // No state mutation — the dirty flags read straight off
-        // `HierarchyManager.runningPanes` and SwiftUI invalidates via the
-        // chip / sidebar's binding to that runtime set.
-        if isBusy {
-          hierarchyClient.markPaneRunning(paneID)
-        } else {
-          hierarchyClient.markPaneIdle(paneID)
-        }
+      case .paneProgressBusyChanged(let contentID, let isBusy):
+        // Idempotent at the chrome. No state mutation — the dirty flags
+        // read straight off the session's `TabChrome` and SwiftUI
+        // invalidates via the chip / sidebar's observation of it.
+        hierarchyClient.setProgressBusy(contentID, isBusy)
         return .none
 
-      case .paneCommandBusyChanged(let paneID, let isBusy):
+      case .paneCommandBusyChanged(let contentID, let isBusy):
         // Sibling of `paneProgressBusyChanged` for the foreground-job source.
-        // No reducer state mutation — the dirty flags read straight off
-        // `HierarchyManager.commandBusyPanes` and SwiftUI invalidates via the
-        // chip / sidebar's binding to that runtime set.
-        hierarchyClient.setPaneCommandBusy(paneID, isBusy)
+        hierarchyClient.setCommandBusy(contentID, isBusy)
         return .none
 
-      case .paneGitCommandActivity(let paneID, let running):
+      case .paneGitCommandActivity(let contentID, let running):
         // Edge-triggered on the foreground `git` / `gh` set. We act ONLY on
         // the trailing edge (a command the user ran at the prompt finishing)
-        // and ONLY for panes we previously saw running one — so an idle
+        // and ONLY for sessions we previously saw running one — so an idle
         // shell's unrelated job churn never triggers a fetch.
         if running {
-          state.panesRunningGitCommand.insert(paneID)
+          state.contentsRunningGitCommand.insert(contentID)
           return .none
         }
-        guard state.panesRunningGitCommand.remove(paneID) != nil else { return .none }
-        // Resolve the pane's owning Project + Worktree from the live catalog
-        // (same walk as `worktreeHeadChanged`).
+        guard state.contentsRunningGitCommand.remove(contentID) != nil else { return .none }
+        // Resolve the session's owning Project + Worktree from the live
+        // catalog (same walk as `worktreeHeadChanged`).
         let catalog = hierarchyClient.snapshot()
-        let owner = catalog.projects.first { project in
-          project.worktrees.contains { worktree in
-            worktree.tabs.contains { $0.panes.contains { $0.id == paneID } }
-          }
-        }
         guard
-          let project = owner,
-          let worktree = project.worktrees.first(where: { worktree in
-            worktree.tabs.contains { $0.panes.contains { $0.id == paneID } }
-          }),
-          // The fetch unit the pane's row belongs to: the Project's repository,
-          // or — in a workspace — the member repository this checkout came from.
+          let address = catalog.address(forContent: contentID),
+          case (let project, let worktree)? = catalog.worktree(address.worktreeID),
+          // The fetch unit the session's row belongs to: the Project's
+          // repository, or — in a workspace — the member repository this
+          // checkout came from.
           let unit = Self.gitHubFetchUnit(in: project, worktreeID: worktree.id, fallback: nil)
         else { return .none }
         let projectID = project.id
@@ -1247,56 +1227,26 @@ struct RootFeature {
         }
         .cancellable(id: CancelID.gitCommandRefresh(unit.projectID), cancelInFlight: true)
 
-      case .paneLivePwdChanged(let paneID, let path):
+      case .paneLivePwdChanged(let contentID, let path):
         // No reducer state mutation — the manager writes through to the
         // catalog directly and debounces the disk save via `scheduleSave`.
-        hierarchyClient.updatePaneWorkingDirectory(paneID, path)
+        hierarchyClient.updateWorkingDirectory(contentID, path)
         return .none
 
-      case .paneLifecycleExited(let paneID):
-        // A pane that exits mid-command never emits its trailing git-edge,
-        // so drop any tracked running-state to keep the set bounded.
-        state.panesRunningGitCommand.remove(paneID)
-        // Resolve the pane's address from the live catalog (the engine
-        // already unregistered the surface, but the catalog still holds
-        // the Pane entity here). Address can be nil if a racing teardown
-        // dropped the pane first — then there's nothing to do.
-        guard let address = hierarchyClient.addressOf(paneID) else {
+      case .paneLifecycleExited(let contentID):
+        // A session that exits mid-command never emits its trailing
+        // git-edge, so drop any tracked running-state to keep the set bounded.
+        state.contentsRunningGitCommand.remove(contentID)
+        // Resolve the Tab from the live catalog (the engine already
+        // unregistered the surface, but the catalog still holds the Tab
+        // here). Nil if a racing teardown dropped it first — then there's
+        // nothing to do. `closeTab` is a no-op for the surface (already torn
+        // down) but does the catalog cleanup, retires the Pane when this was
+        // its last Tab, and hands focus to the neighbour.
+        guard let address = hierarchyClient.addressOf(contentID) else {
           return .none
         }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let tab = catalog
-            .projects.first(where: { $0.id == address.projectID })?
-            .worktrees.first(where: { $0.id == address.worktreeID })?
-            .tabs.first(where: { $0.id == address.tabID })
-        else { return .none }
-        // Single-pane tab: ⌘W's `close_surface` should also retire the now-empty
-        // tab. Leaving a zombie tab with no panes shows a blank pane area and
-        // makes the window look broken. `closeTab` is a no-op for the surface
-        // (already torn down by the engine) but does the catalog cleanup and
-        // routes selection to the adjacent tab.
-        if tab.panes.count <= 1 {
-          try? hierarchyClient.closeTab(
-            address.tabID, address.worktreeID, address.projectID
-          )
-          return .none
-        }
-        // Multi-pane tab: drop the pane and transfer focus to the survivor.
-        // Compute the focus target BEFORE mutating the tree so the leaf
-        // identity is still valid. Matches ghostty's macOS controller:
-        // closing the leftmost leaf → focus next; otherwise → focus previous.
-        let focusTarget = tab.splitTree.focusTargetAfterClosing(paneID)
-        try? hierarchyClient.closePane(
-          paneID, address.tabID, address.worktreeID, address.projectID
-        )
-        if let focusTarget {
-          return .run { [client = hierarchyClient] _ in
-            await MainActor.run {
-              client.focusSurfaceView(focusTarget)
-            }
-          }
-        }
+        try? hierarchyClient.closeTab(address.tabID)
         return .none
 
       // Sidebar delegate routing. Must come before the catch-all
@@ -1490,7 +1440,7 @@ struct RootFeature {
         // No agent tab landed: give the worktree the shell tab its selection
         // skipped while the launch was in flight.
         if state.selection.worktreeID == worktreeID {
-          autoSeedTabAndPaneIfNeeded(for: state.selection)
+          autoSeedFirstTabIfNeeded(for: state.selection)
         }
         return .send(.statusBar(.push(.warning(failure))))
 
@@ -1687,7 +1637,7 @@ struct RootFeature {
             let worktreeID = state.selection.worktreeID
           else { return .none }
           return .send(
-            .workflowStartRequested(projectID, worktreeID, workflowID: workflowID, sourcePaneID: nil))
+            .workflowStartRequested(projectID, worktreeID, workflowID: workflowID, sourceContentID: nil))
 
         case .manageWorkflowsRequested(let createNew):
           let presenter = settingsWindowPresenter
@@ -1752,15 +1702,15 @@ struct RootFeature {
       // pipeline into the palette's top-level toggle. `presentTerminal`
       // stays an explicit no-op — the sidebar/detail focus flow already
       // handles active-worktree swaps.
-      case .paneActionRouter(.delegate(.commandPaletteToggleRequested(let paneID))):
-        return .send(.commandPaletteToggle(paneID))
+      case .paneActionRouter(.delegate(.commandPaletteToggleRequested(let contentID))):
+        return .send(.commandPaletteToggle(contentID))
       case .paneActionRouter(.delegate(.presentTerminalRequested)):
         return .none
       case .paneActionRouter(
-        .delegate(.openLinkRequested(let paneID, let raw, let workingDirectory))):
+        .delegate(.openLinkRequested(let contentID, let raw, let workingDirectory))):
         return .run { [terminalLinkClient] send in
           do {
-            try await terminalLinkClient.open(paneID, raw, workingDirectory)
+            try await terminalLinkClient.open(contentID, raw, workingDirectory)
           } catch {
             await send(.statusBar(.push(.warning(Self.shortToastMessage(error.localizedDescription)))))
           }
@@ -1779,56 +1729,17 @@ struct RootFeature {
         // Sub-feature transitions handled by the Scope; ignore in root.
         return .none
 
-      case .agentState(.handOffTapped(let paneID)):
-        return .send(.handoffRequested(paneID))
+      case .agentState(.handOffTapped(let contentID)):
+        return .send(.handoffRequested(contentID))
 
-      case .agentState(.runWorkflowTapped(let paneID, let workflowID)):
-        guard let address = hierarchyClient.addressOf(paneID) else { return .none }
+      case .agentState(.runWorkflowTapped(let contentID, let workflowID)):
+        guard let address = hierarchyClient.addressOf(contentID) else { return .none }
         return .send(
           .workflowStartRequested(
-            address.projectID, address.worktreeID, workflowID: workflowID, sourcePaneID: paneID))
+            address.projectID, address.worktreeID, workflowID: workflowID, sourceContentID: contentID))
 
-      case .agentState(.rowTapped(let paneID)):
-        // Walk the live catalog to the (project, worktree, tab) chain
-        // containing `paneID` and land focus on the pane. Same shape as
-        // `.focusHierarchyPath` — re-read snapshot between mutations so
-        // a teardown race steers us to the deepest still-existing
-        // ancestor rather than committing a doomed selection. Silent
-        // no-op when the pane has already left the catalog (close + tap
-        // race).
-        guard let address = hierarchyClient.addressOf(paneID) else {
-          return .none
-        }
-        hierarchyClient.selectProject(address.projectID)
-        guard
-          hierarchyClient.snapshot()
-            .projects.first(where: { $0.id == address.projectID })?
-            .worktrees.contains(where: { $0.id == address.worktreeID }) == true
-        else { return .none }
-        try? hierarchyClient.selectWorktree(address.worktreeID, address.projectID)
-        // Scroll the now-selected worktree into view. Done before the
-        // tab/pane guards so a teardown race that drops the tab still leaves
-        // the worktree revealed.
-        revealWorktreeInSidebar(address.worktreeID, in: address.projectID, state: &state)
-        guard
-          hierarchyClient.snapshot()
-            .projects.first(where: { $0.id == address.projectID })?
-            .worktrees.first(where: { $0.id == address.worktreeID })?
-            .tabs.contains(where: { $0.id == address.tabID }) == true
-        else { return .none }
-        try? hierarchyClient.selectTab(address.tabID, address.worktreeID, address.projectID)
-        guard
-          hierarchyClient.snapshot()
-            .projects.first(where: { $0.id == address.projectID })?
-            .worktrees.first(where: { $0.id == address.worktreeID })?
-            .tabs.first(where: { $0.id == address.tabID })?
-            .flatPaneIDs.contains(paneID) == true
-        else { return .none }
-        try? hierarchyClient.focusPane(
-          paneID, address.tabID, address.worktreeID, address.projectID
-        )
-        hierarchyClient.focusSurfaceView(paneID)
-        return .none
+      case .agentState(.rowTapped(let contentID)):
+        return revealContent(contentID, state: &state)
 
       case .agentState(.dismissRequested):
         // Reserved for future direct close-from-reducer paths (e.g. a
@@ -1838,41 +1749,27 @@ struct RootFeature {
         // future call sites don't blow up.
         return .none
 
-      case .commandPaletteToggle(let sourcePaneID):
+      case .commandPaletteToggle(let sourceContentID):
         if state.commandPalette == nil {
           state.commandPalette = CommandPaletteFeature.State()
           let selection = state.selection
           let catalog = hierarchyClient.snapshot()
           let descriptors = state.editor.descriptors
           let recency = CommandPaletteRecencyPersistence.load()
-          // Menu-triggered palette opens have no source pane; fall back
-          // to the first leaf of the selected tab's split tree so Window-
-          // scoped actions still resolve to the correct NSWindow.
-          // Pane-scoped palette items that depend on real focus are
-          // omitted by the builder when the source is a leaf fallback.
-          // Prefer the tab's last-focused pane as the fallback so menu-
-          // triggered palette opens still anchor split / focus / zoom on
-          // the pane the user actually worked in. `lastFocusedPane`
-          // mirrors the same per-tab focus libghostty owns, so a fallback
-          // that hits it is as precise as the keybind pipeline.
-          let activeTabID = catalog
-            .projects.first(where: { $0.id == selection.projectID })?
-            .worktrees.first(where: { $0.id == selection.worktreeID })?
-            .selectedTabID
-          let lastFocused = activeTabID.flatMap { hierarchyClient.lastFocusedPane($0) }
-          let fallbackPaneID = CommandPaletteItems.resolveFocusedPaneID(
-            selection: selection, catalog: catalog,
-            lastFocusedPane: { _ in lastFocused }
-          )
-          let resolvedPaneID = sourcePaneID ?? fallbackPaneID
-          let paneSourceIsPrecise =
-            sourcePaneID != nil || (lastFocused != nil && fallbackPaneID == lastFocused)
+          // Menu-triggered palette opens have no source session; fall back
+          // to the focused Pane's selected Content so Window-scoped actions
+          // still resolve to the correct NSWindow. The persisted focus is
+          // the same one libghostty's keybind pipeline reports, so the
+          // fallback is as precise as an explicit source.
+          let fallbackContentID = focusedContentID(state: state)
+          let resolvedContentID = sourceContentID ?? fallbackContentID
+          let paneSourceIsPrecise = sourceContentID != nil || fallbackContentID != nil
           return .send(
             .commandPalette(
               .presented(
                 .appeared(
                   selection, catalog, descriptors, recency,
-                  resolvedPaneID, paneSourceIsPrecise
+                  resolvedContentID, paneSourceIsPrecise
                 )
               )
             )
@@ -1893,18 +1790,18 @@ struct RootFeature {
         if let recency = state.commandPalette?.recency {
           CommandPaletteRecencyPersistence.save(recency)
         }
-        let sourcePaneID = state.commandPalette?.focusedPaneID
+        let sourceContentID = state.commandPalette?.focusedContentID
         state.commandPalette = nil
-        return route(kind, state: &state, sourcePaneID: sourcePaneID)
+        return route(kind, state: &state, sourceContentID: sourceContentID)
 
       case .commandPalette(.dismiss):
         state.commandPalette = nil
         return .none
 
-      case .handoffRequested(let explicitPaneID):
+      case .handoffRequested(let explicitContentID):
         guard state.handoff == nil else { return .none }
-        let paneID = explicitPaneID ?? focusedPaneForSelection(state)
-        guard let paneID, let source = handoffClient.source(paneID) else {
+        let contentID = explicitContentID ?? focusedContentID(state: state)
+        guard let contentID, let source = handoffClient.source(contentID) else {
           return .send(.statusBar(.push(.warning("Hand off needs a focused pane"))))
         }
         guard let agent = source.agentKind else {
@@ -1916,7 +1813,7 @@ struct RootFeature {
         }
         state.handoff = HandoffFeature.State.make(
           source: HandoffFeature.Source(
-            paneID: paneID,
+            contentID: contentID,
             projectID: source.projectID,
             worktreeID: source.worktreeID,
             agent: agent
@@ -1952,7 +1849,7 @@ struct RootFeature {
             return .send(.statusBar(.push(.success("Handed off to \(title)"))))
           }
           return .merge(
-            .send(.agentState(.rowTapped(launched.paneID))),
+            .send(.agentState(.rowTapped(launched.contentID))),
             .send(.statusBar(.push(.success("Handed off to \(title)"))))
           )
         }
@@ -1960,10 +1857,10 @@ struct RootFeature {
       case .handoffFailed(let message):
         return .send(.statusBar(.push(.warning("Hand off failed: \(message)"))))
 
-      case .workflowStartRequested(let projectID, let worktreeID, let workflowID, let explicitPaneID):
+      case .workflowStartRequested(let projectID, let worktreeID, let workflowID, let explicitContentID):
         return openWorkflowStart(
           projectID: projectID, worktreeID: worktreeID, workflowID: workflowID,
-          explicitPaneID: explicitPaneID, state: &state)
+          explicitContentID: explicitContentID, state: &state)
 
       case .workflowStart(.presented(.delegate(.dismiss))), .workflowStart(.dismiss):
         state.workflowStart = nil
@@ -1981,16 +1878,16 @@ struct RootFeature {
       case .commandPalette:
         return .none
 
-      case .commandQueueToggle(let sourcePaneID):
-        guard let paneID = sourcePaneID ?? focusedPaneID(state: state) else {
-          // No pane to attach a queue to (empty worktree, no tab). Silently
+      case .commandQueueToggle(let sourceContentID):
+        guard let contentID = sourceContentID ?? focusedContentID(state: state) else {
+          // No session to attach a queue to (empty worktree). Silently
           // no-op rather than opening a panel that can't commit anything.
           return .none
         }
-        if state.commandQueue?.paneID == paneID {
+        if state.commandQueue?.contentID == contentID {
           state.commandQueue = nil
         } else {
-          state.commandQueue = CommandQueueFeature.State(paneID: paneID)
+          state.commandQueue = CommandQueueFeature.State(contentID: contentID)
         }
         return .none
 
@@ -2057,43 +1954,24 @@ struct RootFeature {
           .detail(
             .tabBar(
               .trailingSplitRequested(
-                direction: direction,
+                direction: direction, fromPane: nil,
                 inWorktree: worktreeID, inProject: projectID
               ))))
 
       case .focusAdjacentPaneInCurrentTabRequested(let direction):
-        // Resolve the active tab from the selection, then prefer its
-        // remembered focused pane so the neighbor walk starts from where
-        // the user actually is — falling back to the leftmost leaf when no
-        // pane has been focused yet (freshly selected tab). Dispatching
-        // through the router lets libghostty's built-in `goto_split` chord
-        // and our menu chord share the exact same effect.
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let tabID = worktree.selectedTabID,
-          let tab = worktree.tabs.first(where: { $0.id == tabID })
-        else { return .none }
-        let paneID =
-          hierarchyClient.lastFocusedPane(tabID)
-          ?? tab.splitTree.leaves().first
-        guard let paneID else { return .none }
+        // Start the neighbour walk from the focused Pane's selected Content.
+        // Dispatching through the router lets libghostty's built-in
+        // `goto_split` chord and our menu chord share the exact same effect.
+        guard let contentID = focusedContentID(state: state) else { return .none }
         return .send(
-          .paneActionRouter(.requested(paneID, .gotoSplit(direction: direction))))
+          .paneActionRouter(.requested(contentID, .gotoSplit(direction: direction))))
 
       case .focusHierarchyPath(let source):
-        // Walk the source path against the *live* catalog, re-reading the
-        // snapshot between each `select*` mutation so a tab autoclose or
-        // pane teardown that lands mid-walk steers us to the deepest
-        // still-existing ancestor rather than an empty leaf. Holding a single
-        // `let catalog =` across mutations would tell us a deleted node still
-        // exists.
+        // Walk against the *live* catalog, re-reading the snapshot between
+        // each `select*` mutation so a teardown that lands mid-walk steers
+        // us to the deepest still-existing ancestor rather than an empty
+        // leaf. The Pane and Tab are resolved from the Content at tap time,
+        // so a Tab that moved since the notification still lands.
         guard hierarchyClient.snapshot().projects.contains(where: { $0.id == source.projectID }) else {
           return .none
         }
@@ -2109,37 +1987,14 @@ struct RootFeature {
         // Refuse to navigate into an archived worktree. The row is hidden
         // from the sidebar and selecting it would persist a stale
         // `project.selectedWorktreeID = <archived>` that snaps focus back
-        // to a closed pane on the next launch — and surfaces a non-
+        // to a closed session on the next launch — and surfaces a non-
         // navigable target via the StatusBar notification taps.
         guard !targetWorktree.archived else { return .none }
         try? hierarchyClient.selectWorktree(source.worktreeID, source.projectID)
-        // Scroll the deep-linked worktree into view before the tab/pane
-        // guards so a teardown race still leaves the worktree revealed.
+        // Scroll the deep-linked worktree into view before the Tab guard so
+        // a teardown race still leaves the worktree revealed.
         revealWorktreeInSidebar(source.worktreeID, in: source.projectID, state: &state)
-
-        guard
-          let worktree = hierarchyClient.snapshot()
-            .projects.first(where: { $0.id == source.projectID })?
-            .worktrees.first(where: { $0.id == source.worktreeID }),
-          worktree.tabs.contains(where: { $0.id == source.tabID })
-        else {
-          return .none
-        }
-        try? hierarchyClient.selectTab(source.tabID, source.worktreeID, source.projectID)
-
-        guard
-          let tab = hierarchyClient.snapshot()
-            .projects.first(where: { $0.id == source.projectID })?
-            .worktrees.first(where: { $0.id == source.worktreeID })?
-            .tabs.first(where: { $0.id == source.tabID }),
-          tab.flatPaneIDs.contains(source.paneID)
-        else {
-          return .none
-        }
-        try? hierarchyClient.focusPane(
-          source.paneID, source.tabID, source.worktreeID, source.projectID
-        )
-        hierarchyClient.focusSurfaceView(source.paneID)
+        focusContentInSelectedWorktree(source.contentID)
         return .none
 
       case .openShellEditorInWorktree(let worktreePath, let projectIDHint):
@@ -2153,29 +2008,30 @@ struct RootFeature {
         }
         let (projectID, worktreeID) = address
         guard
-          let tabID = try? hierarchyClient.createTab(worktreeID, projectID, nil)
+          let created = try? hierarchyClient.newTab(
+            nil, worktreeID, projectID,
+            .terminal(workingDirectory: worktreePath, initialCommand: "$EDITOR"), nil, nil, true)
         else {
           return .send(.editor(.openFailed(reason: "Could not create tab for $EDITOR")))
         }
-        // openPane is async (zmx daemon spawn); thread through an Effect so the
-        // post-spawn selection and success notification happen after the pane
-        // is wired into the catalog. On openPane failure the editor open is
-        // reported as failed instead of half-succeeded.
+        // ensureSurface is async (zmx daemon spawn); thread through an Effect
+        // so the post-spawn selection and success notification happen after
+        // the session is live. On failure the editor open is reported as
+        // failed instead of half-succeeded.
         return .run { [client = hierarchyClient] send in
           do {
-            _ = try await client.openPane(
-              tabID, worktreeID, projectID, worktreePath, "$EDITOR")
+            try await client.ensureSurface(created.contentID)
           } catch {
             await send(.editor(.openFailed(reason: "Could not spawn $EDITOR pane")))
             return
           }
-          // Bring the user to the freshly spawned Pane. Selecting after the catalog
-          // mutation lets `autoSeedTabAndPaneIfNeeded` (driven by selectionChanges)
-          // see the populated tab and skip its own seed.
+          // Bring the user to the freshly spawned Tab. Selecting after the
+          // catalog mutation lets `autoSeedFirstTabIfNeeded` (driven by
+          // selectionChanges) see the populated Worktree and skip its own seed.
           await MainActor.run {
             client.selectProject(projectID)
             try? client.selectWorktree(worktreeID, projectID)
-            try? client.selectTab(tabID, worktreeID, projectID)
+            try? client.selectTab(created.tabID)
           }
           await send(
             .editor(.openSucceeded(editorID: EditorRegistry.shellEditorID, displayName: "$EDITOR")))
@@ -2204,110 +2060,45 @@ struct RootFeature {
           .detail(
             .tabBar(
               .newTabButtonTapped(
-                inWorktree: worktreeID, inProject: projectID
+                inPane: nil, inWorktree: worktreeID, inProject: projectID
               ))))
 
       case .closeActiveTabForCurrentWorktree:
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let activeTabID = worktree.selectedTabID,
-          let activeTab = worktree.tabs.first(where: { $0.id == activeTabID })
-        else { return .none }
-        // Multi-pane tab: ⌘W closes just the focused pane, leaving the tab
-        // open with its remaining panes (matches iTerm/Terminal.app). Single
-        // (or zero) pane: fall through and close the whole tab.
-        if activeTab.panes.count > 1 {
-          let focusID =
-            hierarchyClient.lastFocusedPane(activeTabID)
-            ?? activeTab.splitTree.leaves().first
-          if let focusID {
-            try? hierarchyClient.closePane(
-              focusID, activeTabID, worktreeID, projectID
-            )
-          }
-          return .none
-        }
-        return .send(
-          .detail(
-            .tabBar(
-              .closeButtonTapped(
-                activeTabID, inWorktree: worktreeID, inProject: projectID
-              ))))
+        // ⌘W closes the selected Tab of the focused Pane; the manager
+        // retires the Pane when that was its last Tab.
+        guard let focused = focusedContent(state: state) else { return .none }
+        return .send(.detail(.tabBar(.closeButtonTapped(focused.tabID))))
 
       case .selectTabAtIndexForCurrentWorktree(let n):
-        guard
-          n >= 1,
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          n <= worktree.tabs.count
-        else { return .none }
-        let targetTabID = worktree.tabs[n - 1].id
-        return .send(
-          .detail(
-            .tabBar(
-              .tabButtonTapped(
-                targetTabID, inWorktree: worktreeID, inProject: projectID
-              ))))
+        guard n >= 1, let focused = focusedContent(state: state) else { return .none }
+        _ = try? hierarchyClient.selectTabAtIndex(n - 1, focused.paneID)
+        return .none
 
       case .selectAdjacentTabForCurrentWorktree(let direction):
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
+        guard let focused = focusedContent(state: state) else { return .none }
         // Selection mutation lives in HierarchyManager — no TabBarFeature
         // action to forward since there's no TabID to look up yet.
-        _ = try? hierarchyClient.selectAdjacentTab(direction, worktreeID, projectID)
+        _ = try? hierarchyClient.selectAdjacentTab(direction, focused.paneID)
         return .none
 
       case .renameActiveTabForCurrentWorktreeRequested:
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let activeTabID = worktree.selectedTabID,
-          let activeTab = worktree.tabs.first(where: { $0.id == activeTabID })
+        guard let focused = focusedContent(state: state),
+          let tab = hierarchyClient.snapshot().tab(focused.tabID)
         else { return .none }
         return .send(
           .detail(
             .tabBar(
-              .renameRequested(activeTabID, currentName: activeTab.name ?? "")
+              .renameRequested(focused.tabID, currentName: tab.name ?? "")
             )))
 
       case .changeActiveTabColorForCurrentWorktreeRequested:
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let activeTabID = worktree.selectedTabID,
-          let activeTab = worktree.tabs.first(where: { $0.id == activeTabID })
+        guard let focused = focusedContent(state: state),
+          let tab = hierarchyClient.snapshot().tab(focused.tabID)
         else { return .none }
         return .send(
           .detail(
             .tabBar(
-              .colorRequested(activeTabID, currentColor: activeTab.color)
+              .colorRequested(focused.tabID, currentColor: tab.color)
             )))
 
       case .revealCurrentWorktreeInFinderRequested:
@@ -2456,22 +2247,50 @@ struct RootFeature {
   /// that's scrolled off-screen or hidden under a collapsed project always
   /// comes into view. The sidebar reads the scroll target from the live
   /// catalog, so callers must have already committed the worktree selection.
-  /// The pane a pane-scoped command with no explicit source should target:
-  /// the active tab's last-focused leaf, falling back to that tab's first
-  /// leaf. Reuses the Command Palette's resolver so ⌘⌥L and a menu-triggered
-  /// ⌘P agree on what "the current pane" means.
-  private func focusedPaneID(state: State) -> PaneID? {
-    let catalog = hierarchyClient.snapshot()
-    let activeTabID = catalog
-      .projects.first(where: { $0.id == state.selection.projectID })?
-      .worktrees.first(where: { $0.id == state.selection.worktreeID })?
-      .selectedTabID
-    let lastFocused = activeTabID.flatMap { hierarchyClient.lastFocusedPane($0) }
-    return CommandPaletteItems.resolveFocusedPaneID(
-      selection: state.selection,
-      catalog: catalog,
-      lastFocusedPane: { _ in lastFocused }
-    )
+  /// The session a session-scoped command with no explicit source should
+  /// target: the selected Worktree's focused Pane's selected Tab. ⌘⌥L, a
+  /// menu-triggered ⌘P and Hand Off all agree on what "the current
+  /// session" means.
+  private func focusedContent(state: State) -> TabAddress? {
+    guard let worktreeID = state.selection.worktreeID else { return nil }
+    return hierarchyClient.focusedContent(worktreeID)
+  }
+
+  private func focusedContentID(state: State) -> ContentID? {
+    focusedContent(state: state)?.contentID
+  }
+
+  /// Lands the user on a Content: select its Project and Worktree, reveal
+  /// the row, focus its Pane, select its Tab, hand its surface the
+  /// keyboard. Re-reads the snapshot between mutations so a teardown race
+  /// steers to the deepest still-existing ancestor rather than committing a
+  /// doomed selection. Silent no-op when the Content has already left the
+  /// catalog (close + tap race).
+  private func revealContent(_ contentID: ContentID, state: inout State) -> Effect<Action> {
+    guard let address = hierarchyClient.addressOf(contentID) else {
+      return .none
+    }
+    hierarchyClient.selectProject(address.projectID)
+    guard
+      hierarchyClient.snapshot().worktree(address.worktreeID, in: address.projectID) != nil
+    else { return .none }
+    try? hierarchyClient.selectWorktree(address.worktreeID, address.projectID)
+    // Scroll the now-selected worktree into view. Done before the Tab guard
+    // so a teardown race that drops the Tab still leaves the worktree
+    // revealed.
+    revealWorktreeInSidebar(address.worktreeID, in: address.projectID, state: &state)
+    focusContentInSelectedWorktree(contentID)
+    return .none
+  }
+
+  /// The Tab half of a reveal: focus the Content's Pane, select its Tab,
+  /// and make its surface first responder — resolved live, so a Tab that
+  /// moved between Panes still lands.
+  private func focusContentInSelectedWorktree(_ contentID: ContentID) {
+    guard let address = hierarchyClient.addressOf(contentID) else { return }
+    try? hierarchyClient.focusPane(address.paneID)
+    try? hierarchyClient.selectTab(address.tabID)
+    hierarchyClient.focusSurfaceView(contentID)
   }
 
   /// Brings a worktree's row on screen: opens its Project unless the
@@ -2504,7 +2323,7 @@ struct RootFeature {
   private func route(
     _ kind: CommandPaletteItem.Kind,
     state: inout State,
-    sourcePaneID: PaneID?
+    sourceContentID: ContentID?
   ) -> Effect<Action> {
     switch kind {
     // App
@@ -2688,14 +2507,14 @@ struct RootFeature {
       }
 
     case .handOff:
-      return .send(.handoffRequested(sourcePaneID))
+      return .send(.handoffRequested(sourceContentID))
 
     // Agent Workflows — open the start panel for the chosen definition in
     // the worktree that built the item.
     case .runWorkflow(let projectID, let worktreeID, let workflowID):
       return .send(
         .workflowStartRequested(
-          projectID, worktreeID, workflowID: workflowID, sourcePaneID: sourcePaneID))
+          projectID, worktreeID, workflowID: workflowID, sourceContentID: sourceContentID))
 
     case .cancelWorkflow(let runID):
       workflowClient.cancel(runID)
@@ -2703,14 +2522,8 @@ struct RootFeature {
 
     // Pane / Window — thin wrappers over the routers
     case .paneAction(let req):
-      guard
-        let paneID = sourcePaneID
-          ?? CommandPaletteItems.resolveFocusedPaneID(
-            selection: state.selection, catalog: hierarchyClient.snapshot(),
-            lastFocusedPane: { hierarchyClient.lastFocusedPane($0) }
-          )
-      else { return .none }
-      return .send(.paneActionRouter(.requested(paneID, req)))
+      guard let contentID = sourceContentID ?? focusedContentID(state: state) else { return .none }
+      return .send(.paneActionRouter(.requested(contentID, req)))
     case .windowAction(let req):
       return .send(.windowActionRouter(.requested(req)))
     }
@@ -2828,85 +2641,65 @@ struct RootFeature {
   /// Runs on every `.selectionChanged`. Mutations do not change the
   /// selection tuple `(space, project, worktree)`, so the downstream
   /// stream does not re-fire and there is no loop.
-  private func autoSeedTabAndPaneIfNeeded(for selection: HierarchySelection) {
+  private func autoSeedFirstTabIfNeeded(for selection: HierarchySelection) {
     guard
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID
     else { return }
     let catalog = hierarchyClient.snapshot()
     guard
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      let worktree = catalog.worktree(worktreeID, in: projectID),
+      worktree.panes.isEmpty
     else { return }
-    let cwd = worktree.path
-    if worktree.tabs.isEmpty {
-      guard let tabID = try? hierarchyClient.createTab(worktreeID, projectID, nil)
-      else { return }
-      // Auto-seed runs from a synchronous reducer body; `openPane` is now
-      // async (zmx daemon bringup). Fire-and-forget — the result is unused
-      // and PaneHostFeature reports any bring-up error to the user via its
-      // own `.failed` phase.
-      let client = hierarchyClient
-      Task { @MainActor in
-        _ = try? await client.openPane(tabID, worktreeID, projectID, cwd, nil)
-      }
-      return
-    }
-    let activeTabID = worktree.selectedTabID ?? worktree.tabs.first?.id
-    guard let activeTabID,
-      let tab = worktree.tabs.first(where: { $0.id == activeTabID }),
-      tab.panes.isEmpty
+    guard
+      let created = try? hierarchyClient.newTab(
+        nil, worktreeID, projectID, .terminal(workingDirectory: worktree.path), nil, nil, true)
     else { return }
+    // Auto-seed runs from a synchronous reducer body; `ensureSurface` is
+    // async (zmx daemon bringup). Fire-and-forget — the result is unused
+    // and PaneHostFeature reports any bring-up error to the user via its
+    // own `.failed` phase.
     let client = hierarchyClient
     Task { @MainActor in
-      _ = try? await client.openPane(activeTabID, worktreeID, projectID, cwd, nil)
+      try? await client.ensureSurface(created.contentID)
     }
   }
 
   /// Rebuilds `SplitViewportFeature.State.paneHosts` for the selection's
-  /// active Tab in the same reducer tick, eagerly marking entries `.ready`
-  /// when the engine already holds a live surface for the pane. Without
-  /// this, the first render after a Worktree switch sees a stale
-  /// `paneHosts` (still keyed by the previous Worktree's PaneIDs), which
-  /// forces `LeafView`'s `store.scope(...)` lookup to return nil and
-  /// render a `ProgressView` placeholder — the visible "flash" on
-  /// cross-Worktree navigation. Preserving entries carried from the prior
-  /// selection keeps any pending `.failed` / `.retry` state intact when
-  /// the same pane re-enters the viewport (e.g. tab-bar cycle).
+  /// Worktree in the same reducer tick — one host per Pane, for its
+  /// selected Tab — eagerly marking entries `.ready` when the engine already
+  /// holds a live surface. Without this, the first render after a Worktree
+  /// switch sees a stale `paneHosts` (still keyed by the previous
+  /// Worktree's sessions), which forces the leaf's `store.scope(...)` lookup
+  /// to return nil and render a `ProgressView` placeholder — the visible
+  /// "flash" on cross-Worktree navigation. Preserving entries carried from
+  /// the prior selection keeps any pending `.failed` / `.retry` state intact
+  /// when the same session re-enters the viewport.
   private func reconcilePaneHosts(
     _ splitViewport: inout SplitViewportFeature.State,
-    selection: HierarchySelection,
-    tabID: TabID?
+    selection: HierarchySelection
   ) {
     guard
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID,
-      let tabID
-    else {
-      splitViewport.paneHosts = []
-      return
-    }
-    let catalog = hierarchyClient.snapshot()
-    guard
-      let tab = catalog
-        .projects.first(where: { $0.id == projectID })?
-        .worktrees.first(where: { $0.id == worktreeID })?
-        .tabs.first(where: { $0.id == tabID })
+      let worktree = hierarchyClient.snapshot().worktree(worktreeID, in: projectID)
     else {
       splitViewport.paneHosts = []
       return
     }
     let existing = splitViewport.paneHosts
     splitViewport.paneHosts = IdentifiedArray(
-      uniqueElements: tab.panes.map { pane in
-        if let carry = existing[id: pane.id] { return carry }
+      uniqueElements: worktree.panes.compactMap { pane -> PaneHostFeature.State? in
+        guard let tab = pane.selectedTab else { return nil }
+        if let carry = existing[id: tab.contentID] { return carry }
         var seeded = PaneHostFeature.State(
+          contentID: tab.contentID,
           paneID: pane.id,
-          tabID: tabID,
+          tabID: tab.id,
           worktreeID: worktreeID,
           projectID: projectID
         )
-        if let surface = terminalClient.surface(pane.id) {
+        if let surface = terminalClient.surface(tab.contentID) {
           seeded.phase = .ready
           seeded.surface = SurfaceBox(surface: surface)
         }
@@ -2943,22 +2736,6 @@ struct RootFeature {
     }
   }
 
-  /// The pane a selection-scoped hand-off targets: the selected worktree's
-  /// active tab's last-focused pane, else that tab's first pane. Same
-  /// resolution the Command Palette uses for its fallback source.
-  private func focusedPaneForSelection(_ state: State) -> PaneID? {
-    let catalog = hierarchyClient.snapshot()
-    let activeTabID = catalog
-      .projects.first(where: { $0.id == state.selection.projectID })?
-      .worktrees.first(where: { $0.id == state.selection.worktreeID })?
-      .selectedTabID
-    let lastFocused = activeTabID.flatMap { hierarchyClient.lastFocusedPane($0) }
-    return CommandPaletteItems.resolveFocusedPaneID(
-      selection: state.selection, catalog: catalog,
-      lastFocusedPane: { _ in lastFocused }
-    )
-  }
-
   /// Builds the workflow start draft for one definition. Refuses only what
   /// the panel could not render at all — workflows switched off, a worktree
   /// or a definition that has since gone. Everything the user can still fix
@@ -2968,7 +2745,7 @@ struct RootFeature {
     projectID: ProjectID,
     worktreeID: WorktreeID,
     workflowID: String,
-    explicitPaneID: PaneID?,
+    explicitContentID: ContentID?,
     state: inout State
   ) -> Effect<Action> {
     guard state.workflowStart == nil else { return .none }
@@ -2987,7 +2764,7 @@ struct RootFeature {
     // A `current` role binds the focused pane only when an agent is running
     // in it; otherwise the row stays empty and admission reports
     // SOURCE_REQUIRED rather than the panel guessing a pane.
-    let focused = explicitPaneID ?? focusedPaneForSelection(state)
+    let focused = explicitContentID ?? focusedContentID(state: state)
     let sourcePane = focused.flatMap { workflowStartClient.agentPane($0, worktreeID) }
     guard
       let draft = WorkflowStartFeature.State.make(
@@ -2997,7 +2774,7 @@ struct RootFeature {
           worktreeID: worktreeID,
           worktreeName: worktree.name,
           worktreePath: worktree.path,
-          paneID: sourcePane?.id,
+          contentID: sourcePane?.id,
           paneLabel: sourcePane.map { "\($0.label) · \($0.agent.displayName)" },
           agent: sourcePane?.agent),
         agents: settings.agents,
@@ -3023,19 +2800,19 @@ struct RootFeature {
     placement: HandoffPlacement
   ) -> Effect<Action> {
     let client = handoffClient
-    let paneID = source.paneID
+    let contentID = source.contentID
     switch order {
     case .brief(let request, let title):
       let requestID = uuid()
-      client.register(requestID, paneID)
+      client.register(requestID, contentID)
       let instruction = HandoffKickoff.sourceInstruction(
-        for: request, requestID: requestID, sourcePaneID: paneID, cli: client.cli, placement: placement)
+        for: request, requestID: requestID, sourceContentID: contentID, cli: client.cli, placement: placement)
       let agent = source.agentName
       return .run { send in
         // Subscribe before typing: the stream does not replay, and a fast
         // agent could answer before a later subscription lands.
         let stream = await client.completions()
-        guard await client.sendInstruction(paneID, instruction) else {
+        guard await client.sendInstruction(contentID, instruction) else {
           // The pane is gone or wedged. Retire the request the agent will
           // never see; starting the receiver without a briefing is the
           // user's call (Hand Off with Context), not a silent downgrade.
@@ -3048,7 +2825,7 @@ struct RootFeature {
           return
         }
         for await completion in stream
-        where completion.requestID == requestID && completion.sourcePaneID == paneID {
+        where completion.requestID == requestID && completion.sourceContentID == contentID {
           await send(.handoffFinished(completion, targetTitle: title))
           return
         }
@@ -3058,7 +2835,7 @@ struct RootFeature {
     case .contextOnly(let profile, let title):
       let request = IPC.HandoffRequest(
         action: .to,
-        paneID: paneID,
+        contentID: contentID,
         receiver: profile.kind.rawValue,
         profile: profile.id.uuidString,
         contextOnly: true,
@@ -3168,21 +2945,6 @@ struct RootFeature {
     case .missingProject:
       return "Launch agent failed: project not available"
     }
-  }
-
-  /// Resolve the active tab for a selection using the snapshot from the
-  /// hierarchy client. The snapshot is synchronously available because
-  /// `HierarchyClient.snapshot` forwards `hierarchyManager.catalog` which
-  /// is updated on the MainActor before `selectionChanges` yields.
-  private func resolveActiveTab(selection: HierarchySelection) -> TabID? {
-    let catalog = hierarchyClient.snapshot()
-    guard
-      let projectID = selection.projectID,
-      let worktreeID = selection.worktreeID,
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
-    else { return nil }
-    return worktree.selectedTabID
   }
 
   /// Locates a `Project` in the current catalog snapshot by `projectID`.

@@ -35,11 +35,16 @@ struct TerminalHandlersSendWaitTests {
   }
 
   private func send(
-    _ handlers: TerminalHandlers, pane: PaneID, text: String, wait: TerminalHandlers.SendWaitParams,
+    _ handlers: TerminalHandlers, pane: ContentID, text: String, wait: TerminalHandlers.SendWaitParams,
     capture: Bool
   ) async throws -> TerminalHandlers.SendInputResult {
-    let params = try JSONValue.encoded(
-      TerminalHandlers.SendInputParams(paneID: pane, text: text, wait: wait, capture: capture))
+    struct Params: Codable {
+      let contentID: ContentID
+      let text: String
+      let wait: TerminalHandlers.SendWaitParams
+      let capture: Bool
+    }
+    let params = try JSONValue.encoded(Params(contentID: pane, text: text, wait: wait, capture: capture))
     let outcome = await handlers.sendInput(params)
     guard case .unary(let value) = outcome else {
       Issue.record("expected unary, got \(outcome)")
@@ -52,7 +57,7 @@ struct TerminalHandlersSendWaitTests {
   func completesOnceTheCommandIsNoLongerBusyAndTheScreenSettles() async throws {
     let sink = FakeSink()
     let clock = TerminalStabilityWaiterTests.VirtualClock()
-    let pane = PaneID()
+    let pane = ContentID()
     sink.registered.insert(pane.raw)
     // before-read, then the loop: the command echoes, prints, redraws the prompt.
     sink.textScript[pane.raw] = ["$ ", "$ ", "$ echo hi\nhi\n$ ", "$ echo hi\nhi\n$ "]
@@ -74,7 +79,7 @@ struct TerminalHandlersSendWaitTests {
   func aCommandTooQuickForTheBusyPollerCompletesAfterTheGrace() async throws {
     let sink = FakeSink()
     let clock = TerminalStabilityWaiterTests.VirtualClock()
-    let pane = PaneID()
+    let pane = ContentID()
     sink.registered.insert(pane.raw)
     sink.textScript[pane.raw] = ["$ ", "$ true\n$ "]
     let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([false]))
@@ -93,7 +98,7 @@ struct TerminalHandlersSendWaitTests {
   func aCommandStillBusyAtTheDeadlineReportsIncomplete() async throws {
     let sink = FakeSink()
     let clock = TerminalStabilityWaiterTests.VirtualClock()
-    let pane = PaneID()
+    let pane = ContentID()
     sink.registered.insert(pane.raw)
     sink.textScript[pane.raw] = ["$ ", "$ sleep 9\n"]
     let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([true]))

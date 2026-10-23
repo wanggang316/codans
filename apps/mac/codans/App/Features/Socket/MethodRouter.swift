@@ -61,7 +61,7 @@ public final class MethodRouter {
     logger.debug("route \(request.method.rawValue, privacy: .public) id=\(request.id, privacy: .public)")
     if let outcome = await routeSystem(request) { return outcome }
     if let outcome = await routeHierarchy(request, peerPID: peerPID) { return outcome }
-    if let outcome = await routePane(request) { return outcome }
+    if let outcome = await routeTabDaemon(request) { return outcome }
     if let outcome = await routeTerminal(request) { return outcome }
     if let outcome = await routeEditor(request) { return outcome }
     if let outcome = routeProject(request) { return outcome }
@@ -101,17 +101,14 @@ public final class MethodRouter {
     }
   }
 
-  /// `pane.*` namespace — explicit-termination verbs that own the zmx
-  /// daemon lifecycle. Lives next to `hierarchy.*` because both share
-  /// `HierarchyHandlers`, but routed separately so the wire-namespace
-  /// split (`pane.close` vs `hierarchy.closePane`) shows up in the
-  /// dispatch surface.
-  private func routePane(_ request: IPC.Request) async -> RouterOutcome? {
+  /// `tab.*` namespace — probes that reach a Tab's zmx daemon directly
+  /// rather than the catalog. Lives next to `hierarchy.*` because both
+  /// share `HierarchyHandlers`.
+  private func routeTabDaemon(_ request: IPC.Request) async -> RouterOutcome? {
     guard let h = hierarchyHandlers else { return nil }
     switch request.method {
-    case .paneClose: return await h.paneClose(request.params)
-    case .paneInfo: return await h.paneInfo(request.params)
-    case .paneRead: return await h.paneRead(request.params)
+    case .tabInfo: return await h.tabInfo(request.params)
+    case .tabRead: return await h.tabRead(request.params)
     default: return nil
     }
   }
@@ -160,10 +157,9 @@ public final class MethodRouter {
     case .hierarchyRemoveWorktree: return await h.removeWorktree(request.params)
     case .hierarchyCreateTab: return await h.createTab(request.params)
     case .hierarchyCloseTab: return await h.closeTab(request.params)
-    case .hierarchyOpenPane: return await h.openPane(request.params)
     case .hierarchyClosePane: return await h.closePane(request.params)
     case .hierarchyFocusPane: return await h.focusPane(request.params)
-    case .hierarchySetPaneLabels: return await h.setPaneLabels(request.params)
+    case .hierarchySetTabLabels: return await h.setTabLabels(request.params)
     default: return nil
     }
   }
@@ -182,6 +178,9 @@ public final class MethodRouter {
     case .hierarchyPruneWorktrees: return await h.pruneWorktrees(request.params)
     case .hierarchySplitPane: return await h.splitPane(request.params)
     case .hierarchyResizePane: return await h.resizePane(request.params)
+    case .hierarchyEqualizePanes: return await h.equalizePanes(request.params)
+    case .hierarchyZoomPane: return await h.zoomPane(request.params)
+    case .hierarchyUnzoomPane: return await h.unzoomPane(request.params)
     default: return nil
     }
   }
@@ -317,7 +316,7 @@ public final class MethodRouter {
   }
 
   /// `workflow.*` adapter. `peerPID` reaches every verb: the caller's pane
-  /// is attributed from it when the CLI ran without `CODANS_PANE_ID`.
+  /// is attributed from it when the CLI ran without `CODANS_CONTENT_ID`.
   private func routeWorkflow(_ request: IPC.Request, peerPID: pid_t?) async -> RouterOutcome? {
     guard let h = workflowHandlers else { return nil }
     switch request.method {

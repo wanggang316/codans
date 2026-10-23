@@ -20,7 +20,7 @@ import SwiftUI
 /// Surfaces are retained across tab switches by `TerminalEngine`'s
 /// registry. The reducer's registry short-circuit reuses them on
 /// reappearance; explicit teardown still goes through
-/// `HierarchyClient.closePane` → `TerminalEngine.closeSurface`.
+/// `HierarchyClient.closeTab` → `ContentRuntime.close` → `TerminalContent.close`.
 struct LazyPaneHost: View {
   @Bindable var store: StoreOf<PaneHostFeature>
   /// False until `loadingChromeDelay` has elapsed on the current
@@ -65,23 +65,14 @@ struct LazyPaneHost: View {
           .overlay {
             PaneLinkHoverBanner(surface: surface)
           }
-          // Top-right actions menu: collapsed to a single button, expanded
-          // to the actions scoped to this pane — the pane's own (hand off,
-          // command queue, mute) plus everything its surface offers on
-          // right-click, which is why the surface is handed in. Layered
-          // above the progress strip so the card is never clipped by it.
-          .overlay(alignment: .topTrailing) {
-            PaneHUDView(paneID: store.paneID, surface: surface)
-          }
           // Right-click menu. Attached only on `.ready` so loading / failure
           // placeholders do not get a stale menu; placed before `.animation`
           // so the animation envelope wraps the menu modifier too.
           .contextMenu {
             PaneContextMenu(
-              paneID: store.paneID,
+              contentID: store.contentID,
               tabID: store.tabID,
-              worktreeID: store.worktreeID,
-              projectID: store.projectID
+              paneID: store.paneID
             )
           }
           .animation(

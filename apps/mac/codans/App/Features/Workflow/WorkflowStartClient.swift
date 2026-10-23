@@ -10,7 +10,7 @@ import Foundation
 nonisolated struct WorkflowStartClient: Sendable {
   /// One agent pane offered to a `pick` role.
   struct PaneChoice: Equatable, Sendable, Identifiable {
-    let id: PaneID
+    let id: ContentID
     /// `p<n> · <tab>`, the same handle the CLI prints.
     let label: String
     let agent: AgentKind
@@ -27,7 +27,7 @@ nonisolated struct WorkflowStartClient: Sendable {
   /// One pane, when it lives in `worktreeID` and runs a recognized agent.
   /// A pane already taking part in a run still answers here: admission is
   /// the one that says `PANE_BUSY`, and it says it better than a blank row.
-  var agentPane: @MainActor @Sendable (_ paneID: PaneID, _ worktreeID: WorktreeID) -> PaneChoice? = { _, _ in nil }
+  var agentPane: @MainActor @Sendable (_ contentID: ContentID, _ worktreeID: WorktreeID) -> PaneChoice? = { _, _ in nil }
   var admit: @MainActor @Sendable (WorkflowAdmission.Request) throws -> WorkflowAdmission.Admitted
   var start: @MainActor @Sendable (WorkflowRunConfiguration, WorkflowCatalogEntry) async throws -> UUID
   /// Records the user's agreement to run a repository file's shell steps.
@@ -48,8 +48,8 @@ extension WorkflowStartClient {
     registry: WorkflowActivationRegistry,
     catalog: @escaping @MainActor @Sendable () -> Catalog,
     workflowCatalog: WorkflowCatalogStore,
-    paneHandles: @escaping @MainActor @Sendable () -> [PaneID: Int],
-    agentKind: @escaping @MainActor @Sendable (PaneID) -> AgentKind?
+    paneHandles: @escaping @MainActor @Sendable () -> [ContentID: Int],
+    agentKind: @escaping @MainActor @Sendable (ContentID) -> AgentKind?
   ) -> WorkflowStartClient {
     WorkflowStartClient(
       catalog: { worktreePath in
@@ -60,14 +60,14 @@ extension WorkflowStartClient {
       freeAgentPanes: { worktreeID in
         Self.agentPanes(
           in: worktreeID, catalog: catalog(), handles: paneHandles(), agentKind: agentKind,
-          isFree: { registry.runID(forPane: $0) == nil })
+          isFree: { registry.runID(forContent: $0) == nil })
       },
-      agentPane: { paneID, worktreeID in
+      agentPane: { contentID, worktreeID in
         Self.agentPanes(
           in: worktreeID, catalog: catalog(), handles: paneHandles(), agentKind: agentKind,
           isFree: { _ in true }
         )
-        .first { $0.id == paneID }
+        .first { $0.id == contentID }
       },
       admit: { try admission.admit($0) },
       start: { configuration, entry in
@@ -85,21 +85,20 @@ extension WorkflowStartClient {
   private static func agentPanes(
     in worktreeID: WorktreeID,
     catalog: Catalog,
-    handles: [PaneID: Int],
-    agentKind: @MainActor (PaneID) -> AgentKind?,
-    isFree: (PaneID) -> Bool
+    handles: [ContentID: Int],
+    agentKind: @MainActor (ContentID) -> AgentKind?,
+    isFree: (ContentID) -> Bool
   ) -> [PaneChoice] {
     var choices: [PaneChoice] = []
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else { continue }
-      for tab in worktree.tabs {
-        for pane in tab.panes {
-          guard let kind = agentKind(pane.id), isFree(pane.id) else { continue }
-          let handle = handles[pane.id].map { "p\($0)" } ?? String(pane.id.raw.uuidString.prefix(8))
-          let title = [tab.name, tab.cachedDisplayTitle].compactMap { $0 }.first { !$0.isEmpty }
-          let label = title.map { "\(handle) · \($0)" } ?? handle
-          choices.append(PaneChoice(id: pane.id, label: label, agent: kind))
-        }
+      for tab in worktree.allTabs {
+        let contentID = tab.contentID
+        guard let kind = agentKind(contentID), isFree(contentID) else { continue }
+        let handle = handles[contentID].map { "p\($0)" } ?? String(contentID.raw.uuidString.prefix(8))
+        let title = [tab.name, tab.cachedDisplayTitle].compactMap { $0 }.first { !$0.isEmpty }
+        let label = title.map { "\(handle) · \($0)" } ?? handle
+        choices.append(PaneChoice(id: contentID, label: label, agent: kind))
       }
     }
     return choices

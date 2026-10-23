@@ -11,8 +11,8 @@ import CodansCore
 ///
 /// Panes are inserted one tick at a time (single reconcile per id) so the
 /// seeded insertion order is deterministic — `reconcileMembership` orders a
-/// same-tick batch by triage + paneID, which would otherwise depend on the
-/// random UUIDs `PaneID()` produces.
+/// same-tick batch by triage + contentID, which would otherwise depend on the
+/// random UUIDs `ContentID()` produces.
 @MainActor
 struct AgentStateOrderCoordinatorTests {
   private func entry(
@@ -31,8 +31,8 @@ struct AgentStateOrderCoordinatorTests {
   @Test
   func membershipAppliesImmediately() {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
-    let a = PaneID()
-    let b = PaneID()
+    let a = ContentID()
+    let b = ContentID()
     coordinator.reconcile(entries: [a: entry(.idle)], autoSort: true)
     #expect(coordinator.orderedIDs == [a])
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.idle)], autoSort: true)
@@ -44,8 +44,8 @@ struct AgentStateOrderCoordinatorTests {
   @Test
   func significantTransitionResortsWhenOn() async {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
-    let a = PaneID()
-    let b = PaneID()
+    let a = ContentID()
+    let b = ContentID()
     coordinator.reconcile(entries: [a: entry(.idle)], autoSort: true)
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.idle)], autoSort: true)
     #expect(coordinator.orderedIDs == [a, b])
@@ -59,8 +59,8 @@ struct AgentStateOrderCoordinatorTests {
   @Test
   func doneToIdleKeepsPosition() async {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
-    let a = PaneID()
-    let b = PaneID()
+    let a = ContentID()
+    let b = ContentID()
     coordinator.reconcile(entries: [a: entry(.idle)], autoSort: true)
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.idle)], autoSort: true)
     #expect(coordinator.orderedIDs == [a, b])
@@ -81,8 +81,8 @@ struct AgentStateOrderCoordinatorTests {
   @Test
   func autoSortOffNeverReorders() async {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
-    let a = PaneID()
-    let b = PaneID()
+    let a = ContentID()
+    let b = ContentID()
     coordinator.reconcile(entries: [a: entry(.idle)], autoSort: false)
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.idle)], autoSort: false)
     #expect(coordinator.orderedIDs == [a, b])
@@ -95,8 +95,8 @@ struct AgentStateOrderCoordinatorTests {
   @Test
   func enablingAutoSortSettlesIntoTriageOrder() async {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
-    let a = PaneID()
-    let b = PaneID()
+    let a = ContentID()
+    let b = ContentID()
     // Build [a, b] under auto-sort off with b blocked (would be top if sorted).
     coordinator.reconcile(entries: [a: entry(.idle)], autoSort: false)
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.blocked)], autoSort: false)
@@ -112,8 +112,8 @@ struct AgentStateOrderCoordinatorTests {
   @Test
   func removalDropsRowImmediately() {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
-    let a = PaneID()
-    let b = PaneID()
+    let a = ContentID()
+    let b = ContentID()
     coordinator.reconcile(entries: [a: entry(.idle)], autoSort: true)
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.idle)], autoSort: true)
     #expect(coordinator.orderedIDs == [a, b])

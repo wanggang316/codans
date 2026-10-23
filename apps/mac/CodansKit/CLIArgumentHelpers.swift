@@ -62,12 +62,12 @@ public struct CLIResolvedSendInput: Equatable, Sendable {
 public enum CLISendInput {
   public static func resolve(
     arguments: [String],
-    explicitPane: String?,
+    explicitTarget: String?,
     stdin: String?,
     readsStdin: Bool,
     noEnter: Bool
   ) throws -> CLIResolvedSendInput {
-    let target = explicitPane
+    let target = explicitTarget
 
     if readsStdin {
       guard let stdin, !stdin.isEmpty else {
@@ -189,23 +189,83 @@ public struct CLIWorkspaceCheckoutFlags: Equatable, Sendable {
 }
 
 public enum CLIBroadcastScopeSelection: Equatable, Sendable {
-  case tab(String)
+  case pane(String)
   case worktree(String)
   case label(String)
 
   public static func resolve(
-    tab: String?,
+    pane: String?,
     worktree: String?,
     label: String?
   ) throws -> CLIBroadcastScopeSelection {
     var selections: [CLIBroadcastScopeSelection] = []
-    if let tab { selections.append(.tab(tab)) }
+    if let pane { selections.append(.pane(pane)) }
     if let worktree { selections.append(.worktree(worktree)) }
     if let label { selections.append(.label(label)) }
     guard selections.count == 1 else {
       throw CLIArgumentError.invalidScopeCount(expected: 1, actual: selections.count)
     }
     return selections[0]
+  }
+}
+
+/// The session a send / send-key / capture targets. `--tab` names a Tab
+/// (any of the three ids resolves to it); `--pane` names a Pane and means
+/// that Pane's selected Tab — so `--pane current` is the caller's Pane's
+/// selected Tab, not necessarily the caller's own Tab. A positional
+/// target is a `--tab`.
+public enum CLITargetSelection: Equatable, Sendable {
+  case tab(String)
+  case pane(String)
+
+  /// At most one of `tab`, `pane`, `positional`; none → the calling Tab.
+  public static func resolve(tab: String?, pane: String?, positional: String?) throws -> CLITargetSelection {
+    let given = [tab, pane, positional].compactMap { $0 }
+    guard given.count <= 1 else {
+      throw CLIArgumentError.invalidArgumentCount(
+        message: "pass one target: a positional tab, --tab, or --pane")
+    }
+    if let pane { return .pane(pane) }
+    return .tab(tab ?? positional ?? "current")
+  }
+
+  /// The `--tab` / `--pane` value when one was given, for the commands
+  /// whose positionals are split by `CLISendInput`.
+  public static func explicit(tab: String?, pane: String?) throws -> CLITargetSelection? {
+    if tab != nil, pane != nil {
+      throw CLIArgumentError.invalidArgumentCount(message: "pass either --tab or --pane, not both")
+    }
+    if let pane { return .pane(pane) }
+    return tab.map(CLITargetSelection.tab)
+  }
+}
+
+/// Verbs that left their former location. The old spelling stays
+/// parseable only to fail loudly with the new one, so a script written
+/// against it never hits the wrong level silently.
+public enum CLIMovedVerb {
+  /// Former command path (space separated, without the executable) →
+  /// the path that replaced it.
+  public static let table: [String: String] = [
+    "pane new": "tab new",
+    "pane show": "tab show",
+    "pane send": "tab send",
+    "pane send-key": "tab send-key",
+    "pane capture": "tab capture",
+    "pane read": "tab read",
+    "pane info": "tab info",
+    "pane label": "tab label",
+    "pane reset": "tab reset",
+    "tab switch": "tab focus",
+  ]
+
+  public static func message(executable: String, from old: String) -> (message: String, hint: String) {
+    let new = table[old] ?? old
+    let layoutNote =
+      old.hasPrefix("pane ")
+      ? "; `\(executable) pane` keeps only the layout verbs (list, focus, split, close, resize, equalize, zoom)"
+      : ""
+    return ("`\(executable) \(old)` moved to `\(executable) \(new)`", "use `\(executable) \(new)`\(layoutNote)")
   }
 }
 

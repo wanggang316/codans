@@ -51,12 +51,13 @@ struct PaneHostView: NSViewRepresentable {
     // left it detached, and swaps in a replacement surface when a pane is
     // re-created under a live host (retry after a failed bring-up).
     nsView.adopt(surfaceView)
+    (surfaceView as? GhosttySurfaceView)?.contentInsetTop = context.environment.terminalContentInsetTop
   }
 
   static func dismantleNSView(_ nsView: PaneSurfaceContainerView, coordinator: ()) {
     // Deliberately does NOT touch the surface view: a newer container may
     // already own it. Surface teardown runs through
-    // `HierarchyClient.closePane` → `TerminalEngine.closeSurface`.
+    // `HierarchyClient.closeTab` → `ContentRuntime.close`.
     _ = nsView
   }
 }
@@ -132,4 +133,10 @@ final class PaneSurfaceContainerView: NSView {
     }
     hostedView.frame = bounds
   }
+}
+
+extension EnvironmentValues {
+  /// Height of the band at the top of a terminal that translucent chrome
+  /// covers. The grid starts below the band, and earlier rows scroll under it.
+  @Entry var terminalContentInsetTop: CGFloat = 0
 }

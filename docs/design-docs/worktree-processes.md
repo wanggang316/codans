@@ -65,7 +65,7 @@ after 15 seconds.
 
 Launch attribution is not persisted. After restarting Codans, all foreground
 commands are rediscovered only from fresh live samples. Run display names fall
-back to the observed process name; an old pane label alone is not evidence of
+back to the observed process name; an old tab label alone is not evidence of
 liveness. Launch provenance enriches names but never gates process visibility.
 
 ## Process icons

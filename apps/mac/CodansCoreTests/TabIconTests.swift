@@ -12,7 +12,7 @@ struct TabIconTests {
 
   @Test
   func userOverridesScript() {
-    let original = Tab(icon: "hammer", iconLock: .script)
+    let original = Tab(icon: "hammer", iconLock: .script, content: .terminal(workingDirectory: "/tmp"))
     let updated = original.applyingIcon("paintbrush", lock: .user)
     #expect(updated?.icon == "paintbrush")
     #expect(updated?.iconLock == .user)
@@ -20,7 +20,7 @@ struct TabIconTests {
 
   @Test
   func scriptCanOverrideAuto() {
-    let original = Tab(icon: "terminal", iconLock: .auto)
+    let original = Tab(icon: "terminal", iconLock: .auto, content: .terminal(workingDirectory: "/tmp"))
     let updated = original.applyingIcon("hammer", lock: .script)
     #expect(updated?.icon == "hammer")
     #expect(updated?.iconLock == .script)
@@ -28,21 +28,21 @@ struct TabIconTests {
 
   @Test
   func scriptCannotOverrideUser() {
-    let original = Tab(icon: "paintbrush", iconLock: .user)
+    let original = Tab(icon: "paintbrush", iconLock: .user, content: .terminal(workingDirectory: "/tmp"))
     let updated = original.applyingIcon("hammer", lock: .script)
     #expect(updated == nil)
   }
 
   @Test
   func autoCannotOverrideScript() {
-    let original = Tab(icon: "hammer", iconLock: .script)
+    let original = Tab(icon: "hammer", iconLock: .script, content: .terminal(workingDirectory: "/tmp"))
     let updated = original.applyingIcon("terminal", lock: .auto)
     #expect(updated == nil)
   }
 
   @Test
   func sameLockAlwaysUpdates() {
-    let original = Tab(icon: "hammer", iconLock: .script)
+    let original = Tab(icon: "hammer", iconLock: .script, content: .terminal(workingDirectory: "/tmp"))
     let updated = original.applyingIcon("wrench", lock: .script)
     #expect(updated?.icon == "wrench")
     #expect(updated?.iconLock == .script)
@@ -50,7 +50,7 @@ struct TabIconTests {
 
   @Test
   func userNilResetsToAuto() {
-    let original = Tab(icon: "paintbrush", iconLock: .user)
+    let original = Tab(icon: "paintbrush", iconLock: .user, content: .terminal(workingDirectory: "/tmp"))
     let updated = original.applyingIcon(nil, lock: .user)
     #expect(updated?.icon == nil)
     #expect(updated?.iconLock == .auto)
@@ -60,52 +60,43 @@ struct TabIconTests {
 
   @Test
   func resolvedIconPrefersLockedOverFallback() {
-    let tab = Tab(icon: "paintbrush", iconLock: .user)
+    let tab = Tab(icon: "paintbrush", iconLock: .user, content: .terminal(workingDirectory: "/tmp"))
     #expect(tab.resolvedIcon(autoFallback: "terminal") == "paintbrush")
   }
 
   @Test
   func resolvedIconFallsBackForAutoLock() {
-    let tab = Tab(icon: "stale-cache", iconLock: .auto)
+    let tab = Tab(icon: "stale-cache", iconLock: .auto, content: .terminal(workingDirectory: "/tmp"))
     #expect(tab.resolvedIcon(autoFallback: "terminal") == "terminal")
   }
 
   @Test
   func resolvedIconReturnsFallbackWhenIconEmpty() {
-    let tab = Tab(icon: "", iconLock: .user)
+    let tab = Tab(icon: "", iconLock: .user, content: .terminal(workingDirectory: "/tmp"))
     #expect(tab.resolvedIcon(autoFallback: "terminal") == "terminal")
   }
 
   // MARK: - Codable migration
 
   @Test
-  func decodesLegacyPayloadWithoutIconFields() throws {
-    let pane = Pane(workingDirectory: "/tmp")
+  func decodesPayloadWithoutIconFields() throws {
     let json = """
       {
         "id": { "raw": "\(TabID().raw.uuidString)" },
-        "splitTree": { "root": { "leaf": { "_0": { "raw": "\(pane.id.raw.uuidString)" } } } },
-        "panes": [{
-          "id": { "raw": "\(pane.id.raw.uuidString)" },
-          "workingDirectory": "/tmp"
-        }]
+        "content": {
+          "id": { "raw": "\(ContentID().raw.uuidString)" },
+          "state": { "kind": "terminal", "terminal": { "workingDirectory": "/tmp" } }
+        }
       }
       """
-    let data = Data(json.utf8)
-    let decoded = try JSONDecoder().decode(Tab.self, from: data)
+    let decoded = try JSONDecoder().decode(Tab.self, from: Data(json.utf8))
     #expect(decoded.icon == nil)
     #expect(decoded.iconLock == .auto)
   }
 
   @Test
   func roundTripsLockedIcon() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let tab = Tab(
-      icon: "sparkles",
-      iconLock: .user,
-      splitTree: SplitTree(leaf: pane.id),
-      panes: [pane]
-    )
+    let tab = Tab(icon: "sparkles", iconLock: .user, content: .terminal(workingDirectory: "/tmp"))
     let data = try JSONEncoder().encode(tab)
     let decoded = try JSONDecoder().decode(Tab.self, from: data)
     #expect(decoded.icon == "sparkles")
@@ -114,8 +105,7 @@ struct TabIconTests {
 
   @Test
   func omitsIconLockKeyWhenAuto() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let tab = Tab(content: .terminal(workingDirectory: "/tmp"))
     let data = try JSONEncoder().encode(tab)
     let body = try #require(String(bytes: data, encoding: .utf8))
     #expect(!body.contains("\"iconLock\""))

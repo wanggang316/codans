@@ -4,99 +4,71 @@ import Testing
 @testable import Codans
 @testable import CodansCore
 
-/// Coverage for the persistent run-pane association. The contract:
+/// Coverage for the persistent run-Content association. The contract:
 ///
-///   1. `setRunScriptPane` stamps `Pane.runScriptID` into the catalog and
-///      schedules a save — the association must survive a relaunch.
-///   2. A fresh `HierarchyManager` rebuilds `scriptRunPanes` from those
-///      stamps, so `runScriptPane` resolves the restored pane without any
-///      run having happened this session.
-///   3. `tabIsDirty` / `worktreeIsDirty` skip run panes — their activity is
-///      rendered by the tab's tinted icon and the sidebar ping dot, never
-///      the generic spinner. `paneIsBusy` is the raw per-pane read those
-///      affordances use instead.
+///   1. `setRunScriptContent` stamps `runScriptID` into the Content's
+///      catalog state and schedules a save — the association must survive
+///      a relaunch.
+///   2. A fresh `HierarchyManager` rebuilds its run index from those
+///      stamps, so `runScriptContent` resolves the restored Content
+///      without any run having happened this session.
+///
+/// The dirty predicates that skip run Contents live on `ContentRuntime`;
+/// see `ContentRuntimeTests`.
 @MainActor
 struct HierarchyManagerRunScriptPaneTests {
   @Test
-  func setRunScriptPaneStampsCatalogAndSchedulesSave() throws {
+  func setRunScriptContentStampsCatalogAndSchedulesSave() throws {
     let fixture = Self.makeFixture()
     let baseline = fixture.store.scheduleSaveCallCount
     let scriptID = UUID()
 
-    fixture.manager.setRunScriptPane(
-      worktreeID: fixture.worktreeID, scriptID: scriptID, paneID: fixture.paneID
+    fixture.manager.setRunScriptContent(
+      worktreeID: fixture.worktreeID, scriptID: scriptID, contentID: fixture.contentID
     )
 
-    #expect(fixture.manager.catalog.pane(fixture.paneID)?.runScriptID == scriptID)
+    #expect(fixture.manager.catalog.content(fixture.contentID)?.terminal?.runScriptID == scriptID)
     #expect(fixture.store.scheduleSaveCallCount == baseline + 1)
     #expect(
-      fixture.manager.runScriptPane(worktreeID: fixture.worktreeID, scriptID: scriptID)
-        == fixture.paneID
+      fixture.manager.runScriptContent(worktreeID: fixture.worktreeID, scriptID: scriptID)
+        == fixture.contentID
     )
   }
 
   @Test
-  func initRebuildsRunPaneIndexFromPersistedStamps() throws {
+  func initRebuildsRunIndexFromPersistedStamps() throws {
     let scriptID = UUID()
     let fixture = Self.makeFixture(runScriptID: scriptID)
 
     #expect(
-      fixture.manager.runScriptPane(worktreeID: fixture.worktreeID, scriptID: scriptID)
-        == fixture.paneID
+      fixture.manager.runScriptContent(worktreeID: fixture.worktreeID, scriptID: scriptID)
+        == fixture.contentID
+    )
+    #expect(
+      fixture.manager.runScriptContents(in: fixture.worktreeID).map(\.contentID) == [fixture.contentID]
     )
   }
 
   @Test
-  func runScriptPaneIsNilForUnknownScript() throws {
+  func runScriptContentIsNilForUnknownScript() throws {
     let fixture = Self.makeFixture(runScriptID: UUID())
 
     #expect(
-      fixture.manager.runScriptPane(worktreeID: fixture.worktreeID, scriptID: UUID()) == nil
+      fixture.manager.runScriptContent(worktreeID: fixture.worktreeID, scriptID: UUID()) == nil
     )
   }
 
   @Test
-  func dirtyPredicatesSkipRunPanesButPaneIsBusyReadsThem() throws {
+  func runScriptContentForgetsAClosedContent() throws {
     let scriptID = UUID()
     let fixture = Self.makeFixture(runScriptID: scriptID)
 
-    fixture.manager.setPaneCommandBusy(fixture.paneID, true)
+    try fixture.manager.closeTab(fixture.tabID)
 
-    #expect(fixture.manager.paneIsBusy(fixture.paneID))
-    #expect(!fixture.manager.tabIsDirty(fixture.tabID))
-    #expect(!fixture.manager.worktreeIsDirty(fixture.worktreeID))
     #expect(
-      fixture.manager.isScriptRunning(worktreeID: fixture.worktreeID, scriptID: scriptID)
+      fixture.manager.runScriptContent(worktreeID: fixture.worktreeID, scriptID: scriptID) == nil
     )
-  }
-
-  @Test
-  func runningScriptIDsEnumeratesOnlyBusyRunPanes() throws {
-    let scriptID = UUID()
-    let fixture = Self.makeFixture(runScriptID: scriptID)
-
-    // Tracked but idle → nothing to stop.
-    #expect(fixture.manager.runningScriptIDs(in: fixture.worktreeID).isEmpty)
-
-    fixture.manager.setPaneCommandBusy(fixture.paneID, true)
-
-    #expect(fixture.manager.runningScriptIDs(in: fixture.worktreeID) == [scriptID])
-    // Scoped to the queried worktree — another worktree's teardown must
-    // not stop this one's run.
-    #expect(fixture.manager.runningScriptIDs(in: WorktreeID()).isEmpty)
-
-    fixture.manager.setPaneCommandBusy(fixture.paneID, false)
-    #expect(fixture.manager.runningScriptIDs(in: fixture.worktreeID).isEmpty)
-  }
-
-  @Test
-  func dirtyPredicatesStillLightForOrdinaryPanes() throws {
-    let fixture = Self.makeFixture()
-
-    fixture.manager.setPaneCommandBusy(fixture.paneID, true)
-
-    #expect(fixture.manager.tabIsDirty(fixture.tabID))
-    #expect(fixture.manager.worktreeIsDirty(fixture.worktreeID))
+    #expect(fixture.manager.runScriptContents(in: fixture.worktreeID).isEmpty)
   }
 
   // MARK: - Helpers
@@ -104,12 +76,12 @@ struct HierarchyManagerRunScriptPaneTests {
   private struct Fixture {
     let manager: HierarchyManager
     let store: RecordingCatalogStore
-    let paneID: PaneID
+    let contentID: ContentID
     let tabID: TabID
     let worktreeID: WorktreeID
   }
 
-  /// Single-Project / single-Worktree / single-Tab / single-Pane catalog,
+  /// Single-Project / single-Worktree / single-Pane / single-Tab catalog,
   /// optionally pre-stamped with a `runScriptID` to simulate a catalog
   /// written by a previous session.
   private static func makeFixture(runScriptID: UUID? = nil) -> Fixture {
@@ -118,10 +90,10 @@ struct HierarchyManagerRunScriptPaneTests {
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let url = dir.appendingPathComponent("catalog.json")
 
-    let pane = Pane(workingDirectory: "/tmp", runScriptID: runScriptID)
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let tab = Tab(content: .terminal(workingDirectory: "/tmp", runScriptID: runScriptID))
+    let pane = Pane(tabs: [tab])
     let worktree = Worktree(
-      name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id
+      name: "main", path: "/repo", splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id
     )
     let project = Project(
       name: "p", rootPath: "/repo", gitRoot: "/repo",
@@ -135,7 +107,7 @@ struct HierarchyManagerRunScriptPaneTests {
     )
     return Fixture(
       manager: manager, store: store,
-      paneID: pane.id, tabID: tab.id, worktreeID: worktree.id
+      contentID: tab.contentID, tabID: tab.id, worktreeID: worktree.id
     )
   }
 }

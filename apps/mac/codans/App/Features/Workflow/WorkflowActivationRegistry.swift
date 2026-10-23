@@ -17,28 +17,28 @@ final class WorkflowActivationRegistry {
     let ordinal: Int
     let token: String
     /// `nil` while a `launch` role's pane is still being created.
-    var paneID: PaneID?
+    var contentID: ContentID?
   }
 
   /// Open activations by run, then ordinal.
   private var activations: [UUID: [Int: Entry]] = [:]
   /// Every pane that currently takes part in a run.
-  private var runByPane: [PaneID: UUID] = [:]
+  private var runByPane: [ContentID: UUID] = [:]
 
   // MARK: - Activations
 
   /// Registers a token. Re-opening the same ordinal replaces the entry,
   /// which is how a `launch` role's pane is attached once known.
-  func open(runID: UUID, ordinal: Int, paneID: PaneID?, token: String) {
-    activations[runID, default: [:]][ordinal] = Entry(runID: runID, ordinal: ordinal, token: token, paneID: paneID)
-    if let paneID { join(paneID: paneID, runID: runID) }
+  func open(runID: UUID, ordinal: Int, contentID: ContentID?, token: String) {
+    activations[runID, default: [:]][ordinal] = Entry(runID: runID, ordinal: ordinal, token: token, contentID: contentID)
+    if let contentID { join(contentID: contentID, runID: runID) }
   }
 
   /// Attaches the pane a launched role landed in to its open activation.
-  func bind(runID: UUID, ordinal: Int, paneID: PaneID) {
-    join(paneID: paneID, runID: runID)
+  func bind(runID: UUID, ordinal: Int, contentID: ContentID) {
+    join(contentID: contentID, runID: runID)
     guard var entry = activations[runID]?[ordinal] else { return }
-    entry.paneID = paneID
+    entry.contentID = contentID
     activations[runID]?[ordinal] = entry
   }
 
@@ -49,12 +49,12 @@ final class WorkflowActivationRegistry {
     }
   }
 
-  /// The activation waiting on `paneID`, if any. A pane has one open
+  /// The activation waiting on `contentID`, if any. A pane has one open
   /// activation at a time once finished ones are revoked; should two
   /// overlap, the newest (highest ordinal) is the one a delivery means.
-  func activation(forPane paneID: PaneID) -> Entry? {
-    guard let runID = runByPane[paneID] else { return nil }
-    return activations[runID]?.values.filter { $0.paneID == paneID }.max { $0.ordinal < $1.ordinal }
+  func activation(forContent contentID: ContentID) -> Entry? {
+    guard let runID = runByPane[contentID] else { return nil }
+    return activations[runID]?.values.filter { $0.contentID == contentID }.max { $0.ordinal < $1.ordinal }
   }
 
   func activation(forToken token: String) -> Entry? {
@@ -68,27 +68,27 @@ final class WorkflowActivationRegistry {
 
   /// Reserves `panes` for `runID`. Admission has already refused panes
   /// another run holds, so an existing membership here is the same run.
-  func join(paneID: PaneID, runID: UUID) {
-    runByPane[paneID] = runID
+  func join(contentID: ContentID, runID: UUID) {
+    runByPane[contentID] = runID
   }
 
-  func join(panes: some Sequence<PaneID>, runID: UUID) {
-    for paneID in panes { join(paneID: paneID, runID: runID) }
+  func join(contents: some Sequence<ContentID>, runID: UUID) {
+    for contentID in contents { join(contentID: contentID, runID: runID) }
   }
 
   /// Drops one pane from its run without ending the run: a closed
   /// `launch` role's pane, for instance.
-  func leave(paneID: PaneID, runID: UUID) {
-    guard runByPane[paneID] == runID else { return }
-    runByPane[paneID] = nil
+  func leave(contentID: ContentID, runID: UUID) {
+    guard runByPane[contentID] == runID else { return }
+    runByPane[contentID] = nil
   }
 
-  /// The run `paneID` currently takes part in.
-  func runID(forPane paneID: PaneID) -> UUID? {
-    runByPane[paneID]
+  /// The run `contentID` currently takes part in.
+  func runID(forContent contentID: ContentID) -> UUID? {
+    runByPane[contentID]
   }
 
-  func panes(in runID: UUID) -> [PaneID] {
+  func contents(in runID: UUID) -> [ContentID] {
     runByPane.filter { $0.value == runID }.map(\.key)
   }
 

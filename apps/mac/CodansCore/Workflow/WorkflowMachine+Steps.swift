@@ -227,32 +227,32 @@ extension WorkflowMachine {
   ) {
     let selfInitiation = transition.allowSelfInitiation
     transition.allowSelfInitiation = false
-    guard let binding = run.bindings[role], let paneID = binding.paneID else {
+    guard let binding = run.bindings[role], let contentID = binding.contentID else {
       fail(step: step, reason: "role \(role) has no pane", &transition)
       return
     }
     let ordinal = mintOrdinal()
     run.steps[step.id]?.ordinal = ordinal
     if let expect {
-      openActivation(for: step, role: role, paneID: paneID, ordinal: ordinal, expect: expect, &transition)
+      openActivation(for: step, role: role, contentID: contentID, ordinal: ordinal, expect: expect, &transition)
     }
-    if selfInitiation, case .current(let pane) = binding, pane == run.configuration.initiatorPaneID {
+    if selfInitiation, case .current(let pane) = binding, pane == run.configuration.initiatorContentID {
       selfInitiate(step, content: content, ordinal: ordinal, &transition)
       return
     }
-    awaitIdle(role: role, paneID: paneID, ordinal: ordinal, &transition)
+    awaitIdle(role: role, contentID: contentID, ordinal: ordinal, &transition)
   }
 
-  mutating func awaitIdle(role: String, paneID: PaneID, ordinal: Int, _ transition: inout Transition) {
+  mutating func awaitIdle(role: String, contentID: ContentID, ordinal: Int, _ transition: inout Transition) {
     run.phase = .waitingForRole(role: role, ordinal: ordinal)
-    transition.effects.append(.awaitRole(role: role, paneID: paneID, until: .idle, timeoutMinutes: nil))
+    transition.effects.append(.awaitRole(role: role, contentID: contentID, until: .idle, timeoutMinutes: nil))
     log("step \(run.currentStepID ?? ""): waiting for \(role) to go idle", &transition)
   }
 
   private mutating func openActivation(
     for step: WorkflowStep,
     role: String,
-    paneID: PaneID?,
+    contentID: ContentID?,
     ordinal: Int,
     expect: WorkflowExpectation,
     _ transition: inout Transition
@@ -262,13 +262,13 @@ extension WorkflowMachine {
       ordinal: ordinal,
       stepID: step.id,
       role: role,
-      paneID: paneID,
+      contentID: contentID,
       delivery: expect.delivery,
       expectation: expect,
       token: token,
       iteration: run.cursor.iteration
     )
-    transition.effects.append(.openActivation(ordinal: ordinal, paneID: paneID, token: token))
+    transition.effects.append(.openActivation(ordinal: ordinal, contentID: contentID, token: token))
   }
 
   /// The initiating agent already holds the task in its hands: hand the
@@ -363,11 +363,11 @@ extension WorkflowMachine {
     _ transition: inout Transition
   ) {
     transition.allowSelfInitiation = false
-    guard case .launch(let profileID, _, _, let paneID)? = run.bindings[role] else {
+    guard case .launch(let profileID, _, _, let contentID)? = run.bindings[role] else {
       fail(step: step, reason: "role \(role) is not a launch role", &transition)
       return
     }
-    guard paneID == nil else {
+    guard contentID == nil else {
       fail(step: step, reason: "role \(role) was already launched", &transition)
       return
     }
@@ -376,7 +376,7 @@ extension WorkflowMachine {
     guard var rendered = render(prompt, for: step, &transition) else { return }
     var environment = launchEnvironment(role: role)
     if let expect {
-      openActivation(for: step, role: role, paneID: nil, ordinal: ordinal, expect: expect, &transition)
+      openActivation(for: step, role: role, contentID: nil, ordinal: ordinal, expect: expect, &transition)
       if let activation = run.activations[ordinal] {
         rendered += WorkflowCompletionCommand.prompt(command: completionCommand(for: activation))
         environment[CodansEnvironment.Key.workflowToken.rawValue] = activation.token
@@ -402,7 +402,7 @@ extension WorkflowMachine {
     _ transition: inout Transition
   ) {
     let definition = run.definition.role(named: role) ?? WorkflowRole(name: role, source: .launch)
-    let anchor = run.bindings.values.first { $0.source == .current }?.paneID ?? run.configuration.initiatorPaneID
+    let anchor = run.bindings.values.first { $0.source == .current }?.contentID ?? run.configuration.initiatorContentID
     run.phase = .launching(ordinal: ordinal)
     transition.effects.append(
       .launch(
@@ -414,7 +414,7 @@ extension WorkflowMachine {
           placement: definition.placement,
           direction: definition.direction,
           background: definition.background,
-          anchorPaneID: anchor,
+          anchorContentID: anchor,
           environment: environment
         )))
     log("step \(run.currentStepID ?? ""): launching \(role)", &transition)
@@ -423,13 +423,13 @@ extension WorkflowMachine {
   private mutating func enterRun(_ step: WorkflowStep, _ command: WorkflowRunCommand, _ transition: inout Transition) {
     transition.allowSelfInitiation = false
     if let role = command.inRole {
-      guard let paneID = run.paneID(for: role) else {
+      guard let contentID = run.contentID(for: role) else {
         fail(step: step, reason: "role \(role) has no pane", &transition)
         return
       }
       let ordinal = mintOrdinal()
       run.steps[step.id]?.ordinal = ordinal
-      awaitIdle(role: role, paneID: paneID, ordinal: ordinal, &transition)
+      awaitIdle(role: role, contentID: contentID, ordinal: ordinal, &transition)
       return
     }
     guard let rendered = render(command.command, for: step, &transition) else { return }
@@ -466,39 +466,39 @@ extension WorkflowMachine {
     _ transition: inout Transition
   ) {
     transition.allowSelfInitiation = false
-    guard let paneID = run.paneID(for: role) else {
+    guard let contentID = run.contentID(for: role) else {
       fail(step: step, reason: "role \(role) has no pane", &transition)
       return
     }
     let ordinal = mintOrdinal()
     run.steps[step.id]?.ordinal = ordinal
-    awaitState(role: role, paneID: paneID, until: until, timeoutMinutes: timeoutMinutes, &transition)
+    awaitState(role: role, contentID: contentID, until: until, timeoutMinutes: timeoutMinutes, &transition)
   }
 
   mutating func awaitState(
     role: String,
-    paneID: PaneID,
+    contentID: ContentID,
     until: WorkflowWaitCondition,
     timeoutMinutes: Int?,
     _ transition: inout Transition
   ) {
     run.phase = .waitingForState(role: role, until: until)
-    transition.effects.append(.awaitRole(role: role, paneID: paneID, until: until, timeoutMinutes: timeoutMinutes))
+    transition.effects.append(.awaitRole(role: role, contentID: contentID, until: until, timeoutMinutes: timeoutMinutes))
     log("step \(run.currentStepID ?? ""): waiting for \(role) until \(until.rawValue)", &transition)
   }
 
   private mutating func enterClose(_ step: WorkflowStep, role: String, _ transition: inout Transition) {
     transition.allowSelfInitiation = false
-    guard case .launch(let profileID, let profileName, let agent, let paneID)? = run.bindings[role] else {
+    guard case .launch(let profileID, let profileName, let agent, let contentID)? = run.bindings[role] else {
       fail(step: step, reason: "role \(role) is not a launch role", &transition)
       return
     }
-    guard let paneID else {
+    guard let contentID else {
       fail(step: step, reason: "role \(role) has no pane", &transition)
       return
     }
-    transition.effects.append(.closePane(paneID: paneID, role: role))
-    run.bindings[role] = .launch(profileID: profileID, profileName: profileName, agent: agent, paneID: nil)
+    transition.effects.append(.closeTab(contentID: contentID, role: role))
+    run.bindings[role] = .launch(profileID: profileID, profileName: profileName, agent: agent, contentID: nil)
     run.roleStates[role] = "gone"
     completeStep(step, outcome: .success, &transition)
   }

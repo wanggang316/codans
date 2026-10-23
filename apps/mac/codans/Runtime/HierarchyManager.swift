@@ -77,25 +77,11 @@ final class HierarchyManager {
   var processRegistry = WorktreeProcessRegistry()
   private let runtime: HierarchyRuntime
 
-  /// Runtime-only map of the pane the user most recently focused inside a
-  /// given tab. Read by `selectTab` to restore focus on tab switches;
-  /// cleared when the pane or the tab is closed. Never persisted — wall-
-  /// clock-live state that must be rebuilt each launch.
-  private var lastFocusedPaneByTab: [TabID: PaneID] = [:]
-
-  /// Panes flagged busy by OSC 9;4 progress reports, written by the root
-  /// reducer through `markPaneRunning` / `markPaneIdle`. One of two
-  /// "terminal busy" sources; `tabIsDirty` / `worktreeIsDirty` read the
-  /// union with `commandBusyPanes`. Stored as a `Set` so absence is the
-  /// natural "idle" signal and `contains` is the only read shape.
-  private var runningPanes: Set<PaneID> = []
-
-  /// Panes whose foreground process group is a real running command (see
-  /// `ForegroundJobClassifier`), fed by the foreground-job poller through
-  /// the root reducer's `setPaneCommandBusy`. Independent of `runningPanes`
-  /// so the OSC and foreground-job writers never clobber each other's
-  /// insert/remove; the dirty predicates OR the two together.
-  private var commandBusyPanes: Set<PaneID> = []
+  /// Live activity of a Content beyond what the catalog records: a running
+  /// foreground command or a working agent. Injected by the app, which
+  /// owns the content runtime and the agent store; `isBusy(_:)` ORs it
+  /// with the catalog's own signal (a non-empty command queue).
+  var contentActivity: (@MainActor (ContentID) -> Bool)?
 
   /// Fired after a Project is dropped from the catalog, with its id.
   ///
@@ -115,7 +101,7 @@ final class HierarchyManager {
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
-    rebuildRunScriptPanes()
+    rebuildRunScriptContents()
     refreshWorkspaceMemberships()
     if didStampLegacyTimestamps || didClearAgentBindings {
       // Persist the migration so successive launches start from the
@@ -126,29 +112,20 @@ final class HierarchyManager {
     }
   }
 
-  /// Agent bindings (`Pane.agentKind` + `Pane.agentSessionID`) are
-  /// session-scoped: the pty child that hosted the agent dies when
+  /// Agent bindings (`agentKind` + `agentSessionID` of a terminal Content)
+  /// are session-scoped: the pty child that hosted the agent dies when
   /// codans quits, so on every cold start the catalog's stored kind
   /// describes a process that no longer exists. Keep these fields
   /// runtime-only by wiping them at launch — AgentBinder re-classifies
   /// once the user actually runs the agent again. Returns true if any
-  /// pane was mutated.
+  /// Content was mutated.
   private static func clearAgentBindings(in catalog: inout Catalog) -> Bool {
     var mutated = false
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          for paneIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes.indices {
-            let pane = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex]
-            if pane.agentKind != nil || pane.agentSessionID != nil {
-              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentKind = nil
-              catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex].agentSessionID =
-                nil
-              mutated = true
-            }
-          }
-        }
-      }
+    catalog.forEachTerminalContent { state in
+      guard state.agentKind != nil || state.agentSessionID != nil else { return }
+      state.agentKind = nil
+      state.agentSessionID = nil
+      mutated = true
     }
     return mutated
   }
@@ -299,9 +276,7 @@ final class HierarchyManager {
         id: WorktreeID(),
         name: (rootPath as NSString).lastPathComponent,
         path: rootPath,
-        branch: nil,
-        tabs: [],
-        selectedTabID: nil
+        branch: nil
       )
       worktrees = [synthetic]
       selectedWorktreeID = synthetic.id
@@ -348,9 +323,7 @@ final class HierarchyManager {
         id: WorktreeID(),
         name: (rootPath as NSString).lastPathComponent,
         path: rootPath,
-        branch: nil,
-        tabs: [],
-        selectedTabID: nil
+        branch: nil
       )
       worktrees = [synthetic]
       selectedWorktreeID = synthetic.id
@@ -402,9 +375,7 @@ final class HierarchyManager {
           id: WorktreeID(),
           name: (rootPath as NSString).lastPathComponent,
           path: rootPath,
-          branch: nil,
-          tabs: [],
-          selectedTabID: nil
+          branch: nil
         )
         catalog.projects[index].worktrees = [synthetic]
         catalog.projects[index].selectedWorktreeID = synthetic.id
@@ -530,25 +501,14 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  /// Drops the runtime-only bookkeeping every Pane / Tab in `tabs` owns:
-  /// the two busy sets and the tab's remembered focus.
-  ///
-  /// `closePane` / `closeTab` clear these inline, but they only run for
-  /// teardown that emits `.paneExited`. The archive and project-removal
-  /// paths use `suspendSurface`, which deliberately emits none, so without
-  /// this the entries survive their Pane. For archive that is a live bug
-  /// rather than a leak: soft-hide keeps the Pane in the catalog, so a
-  /// stale `commandBusyPanes` member keeps `isScriptRunning` true forever
-  /// and pins the Worktree's Run / Stop control to "running" even though
-  /// archive already killed the daemon.
-  private func purgeRuntimeState(forTabs tabs: [Tab]) {
-    for tab in tabs {
-      for pane in tab.panes {
-        runningPanes.remove(pane.id)
-        commandBusyPanes.remove(pane.id)
-        processRegistry.remove(pane.id)
-      }
-      lastFocusedPaneByTab.removeValue(forKey: tab.id)
+  /// Drops the runtime-only bookkeeping the manager keeps per Content (the
+  /// process row). `closeTab` / `closePane` clear it inline, but they only
+  /// run for teardown that emits `.paneExited`. The archive and
+  /// project-removal paths use `suspendSurface`, which deliberately emits
+  /// none, so without this the rows survive their Content.
+  private func purgeRuntimeState(forContents contentIDs: [ContentID]) {
+    for contentID in contentIDs {
+      processRegistry.remove(contentID)
     }
   }
 
@@ -573,11 +533,11 @@ final class HierarchyManager {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == id }) else {
       throw HierarchyError.notFound("Project \(id)")
     }
-    let tabs = catalog.projects[projectIndex].worktrees.flatMap { $0.tabs }
-    for pane in tabs.flatMap({ $0.panes }) {
-      runtime.suspendSurface(for: pane.id)
+    let contentIDs = catalog.projects[projectIndex].worktrees.flatMap(\.contentIDs)
+    for contentID in contentIDs {
+      runtime.suspendSurface(for: contentID)
     }
-    purgeRuntimeState(forTabs: tabs)
+    purgeRuntimeState(forContents: contentIDs)
     // The Project is the only referent of its custom icon file, so drop the
     // artwork with it rather than leaving it orphaned in the config directory.
     if let iconFileName = catalog.projects[projectIndex].icon?.customFileName {
@@ -761,9 +721,7 @@ final class HierarchyManager {
       id: worktreeID,
       name: name,
       path: canonicalizedPath,
-      branch: branch,
-      tabs: [],
-      selectedTabID: nil
+      branch: branch
     )
     // Insert at the top of the unpinned segment (after the last main/pinned row,
     // before the first unpinned row) so newly created worktrees are visible
@@ -801,10 +759,10 @@ final class HierarchyManager {
     if worktree.path == catalog.projects[projectIndex].rootPath {
       throw HierarchyError.invariantViolation("Cannot remove main checkout")
     }
-    for pane in worktree.tabs.flatMap({ $0.panes }) {
-      runtime.closeSurface(for: pane.id)
+    for contentID in worktree.contentIDs {
+      runtime.closeSurface(for: contentID)
     }
-    purgeRuntimeState(forTabs: worktree.tabs)
+    purgeRuntimeState(forContents: worktree.contentIDs)
 
     catalog.projects[projectIndex].worktrees.remove(at: worktreeIndex)
     if catalog.projects[projectIndex].selectedWorktreeID == id {
@@ -853,14 +811,14 @@ final class HierarchyManager {
       }
       guard worktree.archived != archived else { return }
       if archived {
-        for pane in worktree.tabs.flatMap({ $0.panes }) {
-          // `suspendSurface`, not `closeSurface`: kill each pane's daemon
+        for contentID in worktree.contentIDs {
+          // `suspendSurface`, not `closeSurface`: kill each session's daemon
           // even when it has no live surface (lazy surfaces left a
-          // backgrounded archived pane's daemon running for days), and emit
-          // no `.paneExited` so soft-hide keeps the Pane in the catalog.
-          runtime.suspendSurface(for: pane.id)
+          // backgrounded archived session's daemon running for days), and
+          // emit no `.paneExited` so soft-hide keeps the Tab in the catalog.
+          runtime.suspendSurface(for: contentID)
         }
-        purgeRuntimeState(forTabs: worktree.tabs)
+        purgeRuntimeState(forContents: worktree.contentIDs)
       }
       catalog.projects[projectIndex].worktrees[worktreeIndex].archived = archived
       // Stamp the archive time so the Cleanup auto-delete sweep can age the
@@ -1073,132 +1031,82 @@ final class HierarchyManager {
     }
   }
 
-  /// Toggles membership of `label` in `Pane.labels`. `present: true` inserts;
-  /// `present: false` removes. Set semantics make repeated calls idempotent
-  /// (the in-memory state matches what a single call with the same `present`
-  /// would produce). Silent no-op on unknown `paneID`. Persists via the
-  /// standard debounced save pipeline so rapid toggles coalesce into one
-  /// disk write per 500 ms window; in-memory state changes immediately so a
-  /// subsequent read inside the debounce window sees the latest value.
-  ///
-  /// Behind notifications-v1-1's pane right-click "Mute notifications" toggle
-  /// (`notifications:muted` label). The notification detector consults
-  /// `Pane.labels` to drop muted-pane candidates.
-  /// Writes `newPath` into `Pane.workingDirectory` for the matching pane so a
-  /// restart restores the pane at the cwd the user last `cd`'d to rather than
-  /// its creation-time cwd. Driven reactively by `PaneInfoDelta.pwd` (libghostty
-  /// OSC 7) routed through `RootFeature.engineEvents`. Idempotent: equal-path
-  /// writes and unknown pane ids are silent no-ops and skip `scheduleSave`, so
+  // MARK: - Content (session) fields
+
+  /// Applies `body` to the terminal state of `contentID` and persists when
+  /// `body` reports a change. Every session-field writer goes through here
+  /// so the catalog walk and the unchanged-value guard (no save, no
+  /// debounce churn for a repeated write) are spelled once. Returns
+  /// `false` when the Content is unknown.
+  @discardableResult
+  private func mutateTerminalContent(
+    _ contentID: ContentID,
+    _ body: (inout TerminalContentState) -> Bool
+  ) -> Bool {
+    guard let changed = catalog.withTerminalContent(contentID, body) else { return false }
+    if changed {
+      store.scheduleSave(catalog)
+    }
+    return true
+  }
+
+  /// Writes `newPath` as the Content's working directory so a restart
+  /// restores the session at the cwd the user last `cd`'d to rather than
+  /// its creation-time cwd. Driven reactively by `PaneInfoDelta.pwd`
+  /// (libghostty OSC 7) routed through `RootFeature.engineEvents`.
+  /// Idempotent: equal-path writes and unknown ids skip `scheduleSave`, so
   /// idle cwd traffic never touches the catalog file.
-  func updatePaneWorkingDirectory(_ paneID: PaneID, to newPath: String) {
+  func updateWorkingDirectory(for contentID: ContentID, to newPath: String) {
     guard !newPath.isEmpty else { return }
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-          guard let paneIndex = tab.panes.firstIndex(where: { $0.id == paneID }) else {
-            continue
-          }
-          guard tab.panes[paneIndex].workingDirectory != newPath else { return }
-          catalog.projects[projectIndex]
-            .worktrees[worktreeIndex]
-            .tabs[tabIndex]
-            .panes[paneIndex].workingDirectory = newPath
-          store.scheduleSave(catalog)
-          return
-        }
-      }
+    mutateTerminalContent(contentID) { state in
+      guard state.workingDirectory != newPath else { return false }
+      state.workingDirectory = newPath
+      return true
     }
   }
 
-  func setPaneLabel(paneID: PaneID, label: String, present: Bool) {
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-          guard let paneIndex = tab.panes.firstIndex(where: { $0.id == paneID }) else {
-            continue
-          }
-          if present {
-            let (inserted, _) = catalog.projects[projectIndex]
-              .worktrees[worktreeIndex]
-              .tabs[tabIndex]
-              .panes[paneIndex].labels.insert(label)
-            // Idempotent: already-present insert is a true no-op for both
-            // in-memory state and the disk file. Skip the save to avoid
-            // touching the catalog file when nothing changed.
-            guard inserted else { return }
-          } else {
-            guard
-              catalog.projects[projectIndex]
-                .worktrees[worktreeIndex]
-                .tabs[tabIndex]
-                .panes[paneIndex].labels.remove(label) != nil
-            else { return }
-          }
-          store.scheduleSave(catalog)
-          return
-        }
+  /// Toggles membership of `label` in the Content's labels. `present: true`
+  /// inserts; `present: false` removes. Set semantics make repeated calls
+  /// idempotent, and an unchanged set skips the save. Behind the content
+  /// right-click "Mute notifications" toggle (`notifications:muted`): the
+  /// notification detector consults the labels to drop muted candidates.
+  func setContentLabel(_ contentID: ContentID, label: String, present: Bool) {
+    mutateTerminalContent(contentID) { state in
+      if present {
+        return state.labels.insert(label).inserted
       }
+      return state.labels.remove(label) != nil
     }
   }
 
-  // MARK: - Pane agent identity
+  // MARK: - Content agent identity
 
-  /// Writes `Pane.agentKind` (the classified CLI agent currently driving
-  /// the pane). `nil` clears the field. Silent no-op on unknown `paneID`.
-  /// Idempotent — a repeat call with the same value is a true no-op
-  /// (no `scheduleSave`, no debounce churn). The single canonical writer
-  /// for `agentKind`; the `AgentBinder` routes its classification output
-  /// through here so all persistence flows through the standard
+  /// Writes the Content's `agentKind` (the classified CLI agent currently
+  /// driving the session). `nil` clears the field. Silent no-op on an
+  /// unknown id. Idempotent — a repeat call with the same value is a true
+  /// no-op (no `scheduleSave`, no debounce churn). The single canonical
+  /// writer for `agentKind`; the `AgentBinder` routes its classification
+  /// output through here so all persistence flows through the standard
   /// `store.scheduleSave(catalog)` pipeline.
-  func setPaneAgentKind(_ paneID: PaneID, kind: AgentKind?) {
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
-          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
-            continue
-          }
-          // Idempotent: unchanged value skips persistence so repeated
-          // foreground snapshots for the same agent do not wake the
-          // 500 ms debounce.
-          guard panes[paneIndex].agentKind != kind else { return }
-          catalog.projects[projectIndex]
-            .worktrees[worktreeIndex]
-            .tabs[tabIndex]
-            .panes[paneIndex].agentKind = kind
-          store.scheduleSave(catalog)
-          return
-        }
-      }
+  func setAgentKind(_ contentID: ContentID, kind: AgentKind?) {
+    mutateTerminalContent(contentID) { state in
+      guard state.agentKind != kind else { return false }
+      state.agentKind = kind
+      return true
     }
   }
 
-  /// Writes `Pane.agentSessionID` (agent-supplied session identifier).
-  /// `nil` clears the field. Silent no-op on unknown `paneID`. Idempotent
-  /// — repeat calls with the same value skip the save. Single canonical
-  /// writer; consumed by `AgentBinder` alongside `setPaneAgentKind`.
-  func setPaneAgentSessionID(_ paneID: PaneID, sessionID: String?) {
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
-          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else {
-            continue
-          }
-          guard panes[paneIndex].agentSessionID != sessionID else { return }
-          catalog.projects[projectIndex]
-            .worktrees[worktreeIndex]
-            .tabs[tabIndex]
-            .panes[paneIndex].agentSessionID = sessionID
-          store.scheduleSave(catalog)
-          return
-        }
-      }
+  /// Writes the Content's `agentSessionID` (agent-supplied session
+  /// identifier). `nil` clears the field. Silent no-op on an unknown id.
+  /// Idempotent — repeat calls with the same value skip the save. Single
+  /// canonical writer; consumed by `AgentBinder` alongside `setAgentKind`.
+  func setAgentSessionID(_ contentID: ContentID, sessionID: String?) {
+    mutateTerminalContent(contentID) { state in
+      guard state.agentSessionID != sessionID else { return false }
+      state.agentSessionID = sessionID
+      return true
     }
   }
-
   /// Merges worktrees discovered on disk (typically from
   /// `wt ls --json`) into the catalog. Path-canonicalized dedupe
   /// against existing rows — both sides go through
@@ -1283,9 +1191,7 @@ final class HierarchyManager {
         name: name,
         path: canonical,
         branch: entryBranch,
-        headSHA: entryHead,
-        tabs: [],
-        selectedTabID: nil
+        headSHA: entryHead
       )
       catalog.projects[projectIndex].worktrees.append(worktree)
       appended += 1
@@ -1333,10 +1239,10 @@ final class HierarchyManager {
       // running, and for a Pane that DID have a surface its `.paneExited`
       // routed through `paneLifecycleExited` into `closeTab` / `closePane`,
       // deleting the very rows soft-hide keeps in the catalog for restore.
-      for pane in worktree.tabs.flatMap({ $0.panes }) {
-        runtime.suspendSurface(for: pane.id)
+      for contentID in worktree.contentIDs {
+        runtime.suspendSurface(for: contentID)
       }
-      purgeRuntimeState(forTabs: worktree.tabs)
+      purgeRuntimeState(forContents: worktree.contentIDs)
       if let idx = catalog.projects[projectIndex].worktrees.firstIndex(where: { $0.id == worktree.id }) {
         catalog.projects[projectIndex].worktrees[idx].archived = true
         // Stamp the archive time for the Cleanup auto-delete sweep (the loop
@@ -1443,10 +1349,10 @@ final class HierarchyManager {
             updated += 1
           }
         } else if !existing.archived, !existing.isPinned {
-          for pane in existing.tabs.flatMap({ $0.panes }) {
-            runtime.suspendSurface(for: pane.id)
+          for contentID in existing.contentIDs {
+            runtime.suspendSurface(for: contentID)
           }
-          purgeRuntimeState(forTabs: existing.tabs)
+          purgeRuntimeState(forContents: existing.contentIDs)
           catalog.projects[projectIndex].worktrees[existingIndex].archived = true
           catalog.projects[projectIndex].worktrees[existingIndex].archivedAt = Date()
           archived += 1
@@ -1460,9 +1366,7 @@ final class HierarchyManager {
           name: observation.name,
           path: canonical,
           branch: observation.branch,
-          tabs: [],
-          selectedTabID: nil,
-          sourceGitRoot: observation.sourceGitRoot
+                    sourceGitRoot: observation.sourceGitRoot
         )
       )
       appended += 1
@@ -1572,6 +1476,18 @@ final class HierarchyManager {
     return nil
   }
 
+  /// Relabels a worktree in the sidebar. The name is display-only (the
+  /// path and branch stay), so this is a plain catalog write. Unchanged
+  /// value is a silent no-op.
+  func renameWorktree(_ id: WorktreeID, in projectID: ProjectID, name: String) throws {
+    guard let (projectIndex, worktreeIndex) = findWorktreeIndices(worktreeID: id, projectID: projectID) else {
+      throw HierarchyError.notFound("Worktree \(id)")
+    }
+    guard catalog.projects[projectIndex].worktrees[worktreeIndex].name != name else { return }
+    catalog.projects[projectIndex].worktrees[worktreeIndex].name = name
+    store.scheduleSave(catalog)
+  }
+
   /// Tears down every terminal surface attached to the Worktree without
   /// mutating the catalog. Used by force-remove so any held file handles
   /// are released before `git worktree remove --force` runs; the catalog
@@ -1581,455 +1497,245 @@ final class HierarchyManager {
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
-      for pane in worktree.tabs.flatMap({ $0.panes }) {
-        runtime.closeSurface(for: pane.id)
-        runningPanes.remove(pane.id)
-        commandBusyPanes.remove(pane.id)
-        processRegistry.remove(pane.id)
-      }
-      for tab in worktree.tabs {
-        lastFocusedPaneByTab.removeValue(forKey: tab.id)
+      for contentID in worktree.contentIDs {
+        runtime.closeSurface(for: contentID)
+        processRegistry.remove(contentID)
       }
       return
     }
   }
 
-  /// Counts the number of Panes in this Worktree whose terminal surface
-  /// is live. Used by force-remove to size the confirmation copy
-  /// ("This will terminate N running processes"). 0 when the id is unknown.
-  func runningPaneCount(worktreeID: WorktreeID) -> Int {
+  /// Counts the Contents in this Worktree whose terminal surface is live.
+  /// Used by force-remove to size the confirmation copy ("This will
+  /// terminate N running processes"). 0 when the id is unknown.
+  func runningContentCount(worktreeID: WorktreeID) -> Int {
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
-      return worktree.tabs
-        .flatMap { $0.panes }
-        .filter { runtime.hasSurface(for: $0.id) }
-        .count
+      return worktree.contentIDs.filter { runtime.hasSurface(for: $0) }.count
     }
     return 0
   }
 
-  // MARK: - Tab mutations
+  // MARK: - Layout addressing
 
-  func createTab(
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    name: String?,
-    initialTitle: String? = nil,
-    select: Bool = true
-  ) throws -> TabID {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-
-    let tabID = TabID()
-    // `initialTitle` seeds the cached title, not `name`: `name` is the
-    // sticky manual rename, and a command-spawned tab must keep following
-    // the live title its pane reports.
-    let tab = Tab(
-      id: tabID, name: name, cachedDisplayTitle: initialTitle, splitTree: SplitTree(), panes: [])
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.append(tab)
-    // Background-script support: when `select == false` the new tab is
-    // appended without stealing the worktree's selectedTabID, so a script
-    // with `focus: false` runs in the strip while the user stays put.
-    // The first tab of an otherwise-empty worktree always wins selection
-    // — there is nothing to "stay focused on" and an unselected sole tab
-    // would render an empty worktree with no live pane.
-    let existingTabs = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs
-    let existingSelection = catalog.projects[projectIndex].worktrees[worktreeIndex].selectedTabID
-    if select || existingTabs.count == 1 || existingSelection == nil {
-      catalog.projects[projectIndex].worktrees[worktreeIndex].selectedTabID = tabID
-    }
-    store.scheduleSave(catalog)
-    return tabID
+  /// `(projectIndex, worktreeIndex)` of the Worktree hosting `paneID`.
+  private func worktreeIndices(forPane paneID: PaneID) -> (Int, Int)? {
+    guard let address = catalog.address(forPane: paneID) else { return nil }
+    return findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
   }
 
-  func closeTab(
-    _ id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
+  private func worktreeIndices(forTab tabID: TabID) -> (Int, Int)? {
+    guard let address = catalog.address(forTab: tabID) else { return nil }
+    return findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
+  }
+
+  /// Runs `body` on a copy of the Worktree, checks the layout invariants
+  /// on the result, and only then writes it back and persists. A body that
+  /// would leave the Worktree inconsistent never reaches the catalog.
+  private func mutateLayout(
+    at indices: (Int, Int),
+    _ body: (inout Worktree) throws -> Void
   ) throws {
-    guard
+    var worktree = catalog.projects[indices.0].worktrees[indices.1]
+    try body(&worktree)
+    do {
+      try worktree.validateInvariants()
+    } catch {
+      throw HierarchyError.invariantViolation("layout invariant broken: \(error)")
+    }
+    catalog.projects[indices.0].worktrees[indices.1] = worktree
+    store.scheduleSave(catalog)
+  }
+
+  /// Applies `body` to the Tab and persists when it reports a change.
+  @discardableResult
+  private func mutateTab(_ tabID: TabID, _ body: (inout Tab) -> Bool) throws -> Bool {
+    guard let address = catalog.address(forTab: tabID),
       let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
+        worktreeID: address.worktreeID, projectID: address.projectID),
+      let paneIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].panes.firstIndex(where: {
+        $0.id == address.paneID
+      }),
+      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].panes[paneIndex].tabs.firstIndex(
+        where: { $0.id == tabID })
     else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    let changed = body(&catalog.projects[projectIndex].worktrees[worktreeIndex].panes[paneIndex].tabs[tabIndex])
+    if changed {
+      store.scheduleSave(catalog)
+    }
+    return changed
+  }
+
+  /// The Content currently shown and focused in the Worktree: the focused
+  /// Pane's selected Tab. `nil` for a Worktree without Panes.
+  func focusedContent(in worktreeID: WorktreeID) -> TabAddress? {
+    guard case (let project, let worktree)? = catalog.worktree(worktreeID),
+      let pane = worktree.focusedPane, let tab = pane.selectedTab
+    else { return nil }
+    return TabAddress(
+      projectID: project.id, worktreeID: worktree.id, paneID: pane.id, tabID: tab.id, contentID: tab.content.id)
+  }
+
+  // MARK: - Tab verbs
+
+  /// Opens a new Tab holding `content`. `paneID == nil` targets the
+  /// focused Pane; a Worktree with no Panes gets its first Pane (which
+  /// becomes focused). `select` makes the Tab the Pane's selected one and
+  /// focuses the Pane; `false` appends it quietly, so a background script
+  /// runs in the strip while the user stays put — except for the first
+  /// Tab of a fresh Pane, which is always selected.
+  ///
+  /// Catalog-only: the surface comes up through `ensureSurface(for:env:)`
+  /// so a caller mutating the catalog from a synchronous reducer body can
+  /// observe the Tab before any bring-up is in flight.
+  @discardableResult
+  func newTab(
+    in paneID: PaneID?,
+    worktreeID: WorktreeID,
+    projectID: ProjectID,
+    content: ContentSnapshot,
+    name: String? = nil,
+    initialTitle: String? = nil,
+    select: Bool = true
+  ) throws -> TabAddress {
+    guard let indices = findWorktreeIndices(worktreeID: worktreeID, projectID: projectID) else {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
+    // `initialTitle` seeds the cached title, not `name`: `name` is the
+    // sticky manual rename, and a command-spawned Tab must keep following
+    // the live title its session reports.
+    let tab = Tab(name: name, cachedDisplayTitle: initialTitle, content: content)
+    var hostPaneID = paneID
+    try mutateLayout(at: indices) { worktree in
+      if let paneID {
+        guard worktree.pane(paneID) != nil else { throw HierarchyError.notFound("Pane \(paneID)") }
+      } else {
+        hostPaneID = worktree.focusedPaneID ?? worktree.panes.first?.id
+      }
+      guard let targetID = hostPaneID,
+        let paneIndex = worktree.panes.firstIndex(where: { $0.id == targetID })
+      else {
+        let pane = Pane(tabs: [tab])
+        worktree.splitTree = SplitTree(leaf: pane.id)
+        worktree.panes = [pane]
+        worktree.focusedPaneID = pane.id
+        hostPaneID = pane.id
+        return
+      }
+      worktree.panes[paneIndex].tabs.append(tab)
+      if select {
+        worktree.panes[paneIndex].selectedTabID = tab.id
+        worktree.focusedPaneID = targetID
+      }
+    }
+    guard let hostPaneID else { throw HierarchyError.invariantViolation("new Tab has no Pane") }
+    return TabAddress(
+      projectID: projectID, worktreeID: worktreeID, paneID: hostPaneID, tabID: tab.id, contentID: content.id)
+  }
 
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == id
-      })
+  /// Closes the Tab and its Content. The last Tab of a Pane closes the
+  /// Pane with its split-tree leaf; focus then moves to the neighbour
+  /// `SplitTree.focusTargetAfterClosing` names. Closing the selected Tab
+  /// of a surviving Pane selects the right neighbour, else the new last
+  /// Tab (the platform convention).
+  func closeTab(_ tabID: TabID) throws {
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
     else {
-      throw HierarchyError.notFound("Tab \(id)")
+      throw HierarchyError.notFound("Tab \(tabID)")
     }
-
-    let tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-    for pane in tab.panes {
-      runtime.closeSurface(for: pane.id)
-      runningPanes.remove(pane.id)
-      commandBusyPanes.remove(pane.id)
-      processRegistry.remove(pane.id)
-    }
-    lastFocusedPaneByTab.removeValue(forKey: id)
-
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.remove(at: tabIndex)
-    if catalog.projects[projectIndex].worktrees[worktreeIndex].selectedTabID == id {
-      // Match the platform convention (Safari/Chrome/VSCode/iTerm): pick the
-      // right neighbor; if the closed tab was the last one, fall back to the
-      // new last tab. After `remove(at:)`, the original right neighbor sits at
-      // `tabIndex`; an out-of-range index means we removed the trailing tab.
-      let remaining = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs
-      let nextTab = tabIndex < remaining.count ? remaining[tabIndex] : remaining.last
-      catalog.projects[projectIndex].worktrees[worktreeIndex].selectedTabID = nextTab?.id
-      // Transfer AppKit first-responder focus to the new tab's surface.
-      // Without this the closed surface's responder slot stays empty and
-      // the next ⌘W bypasses Ghostty's `performKeyEquivalent`, falling
-      // through to the menu where the system Close Window shadows our
-      // binding and shuts the window. Mirrors `selectTab`'s focus logic.
-      if let nextTab {
-        let flatPaneIDs = Set(nextTab.panes.map(\.id))
-        let remembered = lastFocusedPaneByTab[nextTab.id]
-          .flatMap { flatPaneIDs.contains($0) ? $0 : nil }
-        if let focusID = remembered ?? nextTab.splitTree.leaves().first {
-          runtime.focusSurfaceView(for: focusID)
+    runtime.closeSurface(for: address.contentID)
+    processRegistry.remove(address.contentID)
+    var focusTarget: ContentID?
+    try mutateLayout(at: indices) { worktree in
+      guard let paneIndex = worktree.panes.firstIndex(where: { $0.id == address.paneID }),
+        let tabIndex = worktree.panes[paneIndex].tabs.firstIndex(where: { $0.id == tabID })
+      else { throw HierarchyError.notFound("Tab \(tabID)") }
+      worktree.panes[paneIndex].tabs.remove(at: tabIndex)
+      if worktree.panes[paneIndex].tabs.isEmpty {
+        focusTarget = Self.removePane(address.paneID, from: &worktree)
+      } else if worktree.panes[paneIndex].selectedTabID == tabID {
+        let remaining = worktree.panes[paneIndex].tabs
+        let next = tabIndex < remaining.count ? remaining[tabIndex] : remaining[remaining.count - 1]
+        worktree.panes[paneIndex].selectedTabID = next.id
+        if worktree.focusedPaneID == address.paneID {
+          focusTarget = next.content.id
         }
       }
     }
-    store.scheduleSave(catalog)
-  }
-
-  func selectTab(
-    _ id: TabID?,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    catalog.projects[projectIndex].worktrees[worktreeIndex].selectedTabID = id
-    store.scheduleSave(catalog)
-
-    // Focus the last-used pane in the target tab; fall back to the
-    // leftmost leaf of the split tree when no memory exists or the
-    // remembered pane has since been closed. Silent no-op when there is
-    // no active tab or the tab has no panes.
-    guard
-      let tabID = id,
-      let tab = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.first(where: { $0.id == tabID })
-    else { return }
-    let flatPaneIDs = Set(tab.panes.map(\.id))
-    let remembered = lastFocusedPaneByTab[tabID].flatMap { flatPaneIDs.contains($0) ? $0 : nil }
-    if let focusID = remembered ?? tab.splitTree.leaves().first {
-      runtime.focusSurfaceView(for: focusID)
+    // Transfer AppKit first-responder focus to the surface that took the
+    // closed one's place. Without this the closed surface's responder slot
+    // stays empty and the next ⌘W bypasses Ghostty's `performKeyEquivalent`,
+    // falling through to the menu where the system Close Window shadows
+    // our binding and shuts the window.
+    if let focusTarget {
+      runtime.focusSurfaceView(for: focusTarget)
     }
   }
 
-  // MARK: - Tab mutations (tab-bar uplift)
-
-  /// Renames a Tab in place. `nil` clears the custom name so the UI falls
-  /// back to the default "Tab" label. Unchanged value is a silent no-op
-  /// (no save scheduled) so repeated calls are free.
-  /// Relabels a worktree in the sidebar. The name is display-only (the
-  /// path and branch stay), so this is a plain catalog write.
-  func renameWorktree(_ id: WorktreeID, in projectID: ProjectID, name: String) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: id,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(id)")
+  /// Drops the Pane and its leaf. Moves the focus to the neighbour when
+  /// the Pane was focused, clears a zoom on it. Returns the Content to
+  /// hand keyboard focus to, when the focus moved.
+  private static func removePane(_ paneID: PaneID, from worktree: inout Worktree) -> ContentID? {
+    let neighbour = worktree.splitTree.focusTargetAfterClosing(paneID)
+    worktree.splitTree = worktree.splitTree.removing(paneID)
+    worktree.panes.removeAll { $0.id == paneID }
+    if worktree.panes.isEmpty {
+      worktree.splitTree = SplitTree()
+      worktree.focusedPaneID = nil
+      return nil
     }
-    guard catalog.projects[projectIndex].worktrees[worktreeIndex].name != name else { return }
-    catalog.projects[projectIndex].worktrees[worktreeIndex].name = name
-    store.scheduleSave(catalog)
+    let focusMoves = worktree.focusedPaneID == paneID || worktree.focusedPane == nil
+    guard focusMoves else { return nil }
+    let target = neighbour.flatMap { worktree.pane($0) } ?? worktree.panes[0]
+    worktree.focusedPaneID = target.id
+    return target.selectedTab?.content.id
   }
 
-  func renameTab(
-    _ id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    name: String?
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
+  /// Selects the Tab in its Pane and focuses that Pane — a click on a
+  /// chip means "show this and type here". Idempotent on the catalog;
+  /// the surface is asked for first-responder either way so a click on
+  /// the already-selected chip still brings input back to it.
+  func selectTab(_ tabID: TabID) throws {
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID),
+      let paneIndex = catalog.projects[indices.0].worktrees[indices.1].panes.firstIndex(where: {
+        $0.id == address.paneID
+      })
     else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
+      throw HierarchyError.notFound("Tab \(tabID)")
     }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
-    else {
-      throw HierarchyError.notFound("Tab \(id)")
+    let worktree = catalog.projects[indices.0].worktrees[indices.1]
+    if worktree.panes[paneIndex].selectedTabID != tabID || worktree.focusedPaneID != address.paneID {
+      catalog.projects[indices.0].worktrees[indices.1].panes[paneIndex].selectedTabID = tabID
+      catalog.projects[indices.0].worktrees[indices.1].focusedPaneID = address.paneID
+      store.scheduleSave(catalog)
     }
-    guard
-      catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs[tabIndex].name != name
-    else { return }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex].name = name
-    store.scheduleSave(catalog)
+    runtime.focusSurfaceView(for: address.contentID)
   }
 
-  func setTabColor(
-    _ id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    color: TabColor?
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
-    else {
-      throw HierarchyError.notFound("Tab \(id)")
-    }
-    guard
-      catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs[tabIndex].color != color
-    else { return }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex].color = color
-    store.scheduleSave(catalog)
-  }
-
-  /// Update the tab's SF Symbol icon, subject to the lock precedence in
-  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
-  /// against a higher lock is a silent no-op; a `.user` write with `nil`
-  /// drops the lock back to `.auto` so the runtime fallback takes over
-  /// again. Persists through the same debounced save path as the other
-  /// tab mutators.
-  func setTabIcon(
-    _ id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    icon: String?,
-    lock: TabIconLock
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
-    else {
-      throw HierarchyError.notFound("Tab \(id)")
-    }
-    let current = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex]
-    guard let updated = current.applyingIcon(icon, lock: lock),
-      updated != current
-    else { return }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex] = updated
-    store.scheduleSave(catalog)
-  }
-
-  /// Persists the most recently resolved live tab title so the chip can
-  /// fall back to it on the next launch (before the surface respawns and
-  /// the shell re-pushes OSC titles). No-op when the cache is unchanged
-  /// so a hot OSC stream does not churn the catalog (saves are debounced
-  /// further downstream by `CatalogStore`). Failures to locate the tab
-  /// are silent — the cache is best-effort, never load-bearing.
-  func setCachedTabTitle(
-    _ title: String?,
-    for tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID, projectID: projectID
-      )
-    else { return }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == tabID })
-    else { return }
-    guard
-      catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitle != title
-    else { return }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitle = title
-    store.scheduleSave(catalog)
-  }
-
-  /// Replaces the Worktree's tab ordering in a single atomic write. The
-  /// incoming id set must match the current set exactly — mismatched input
-  /// throws `.invariantViolation` so upstream drag bugs surface immediately
-  /// instead of silently discarding tabs. Same-order input is a silent
-  /// no-op.
-  func reorderTabs(
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    orderedIDs: [TabID]
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    let existing = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs
-    let currentIDs = existing.map(\.id)
-    guard Set(currentIDs) == Set(orderedIDs) else {
-      throw HierarchyError.invariantViolation("tab reorder set mismatch")
-    }
-    guard currentIDs != orderedIDs else { return }
-    let byID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-    let reordered = orderedIDs.compactMap { byID[$0] }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs = reordered
-    store.scheduleSave(catalog)
-  }
-
-  /// Closes every Tab in the Worktree except `id`. Reuses `closeTab` per
-  /// sibling so runtime surfaces are torn down the same way they are for
-  /// the single-close path. The pivot is re-selected at the end in case the
-  /// per-close auto-advance moved selection elsewhere during teardown.
-  func closeOtherTabs(
-    keeping id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    let siblingIDs = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs
-      .map(\.id)
-      .filter { $0 != id }
-    for siblingID in siblingIDs {
-      try? closeTab(siblingID, in: worktreeID, in: projectID)
-    }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].selectedTabID = id
-    store.scheduleSave(catalog)
-  }
-
-  /// Closes every Tab whose position is strictly after `id`'s. Reuses
-  /// `closeTab` per sibling for the same runtime-teardown reasoning as
-  /// `closeOtherTabs`. No-op when `id` is the last tab.
-  func closeTabsToRight(
-    of id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let pivotIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
-    else {
-      throw HierarchyError.notFound("Tab \(id)")
-    }
-    let doomedIDs = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs
-      .suffix(from: pivotIndex + 1)
-      .map(\.id)
-    for doomedID in doomedIDs {
-      try? closeTab(doomedID, in: worktreeID, in: projectID)
-    }
-    // Mirror `closeOtherTabs`: if the user's active tab was inside the
-    // doomed suffix, `closeTab`'s auto-advance lands on `tabs.first`, not
-    // the pivot. Reseat selection so the pivot stays the user's anchor.
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].selectedTabID = id
-    store.scheduleSave(catalog)
-  }
-
-  /// Closes every Tab in the Worktree.
-  func closeAllTabs(
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    let allIDs = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs.map(\.id)
-    for tabID in allIDs {
-      try? closeTab(tabID, in: worktreeID, in: projectID)
-    }
-  }
-
-  /// Selects the tab before / after the current selection, wrapping at the
-  /// ends. Returns the newly selected id, or `nil` when the Worktree has no
-  /// tabs. If no tab is currently selected the jump is relative to the
-  /// first tab (so `.previous` lands on the last, `.next` on the second).
+  /// Selects the Tab at `index` (zero-based) in the Pane's strip. Out of
+  /// range is a silent no-op returning `nil`, matching the ⌘1…⌘9 chords.
   @discardableResult
-  func selectAdjacentTab(
-    direction: TabAdjacency,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws -> TabID? {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    let tabs = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs
-    guard !tabs.isEmpty else { return nil }
-    let currentID = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].selectedTabID
-    let currentIndex =
-      currentID.flatMap { id in
-        tabs.firstIndex(where: { $0.id == id })
-      } ?? 0
-    let count = tabs.count
+  func selectTab(at index: Int, in paneID: PaneID) throws -> TabID? {
+    guard let pane = catalog.pane(paneID) else { throw HierarchyError.notFound("Pane \(paneID)") }
+    guard pane.tabs.indices.contains(index) else { return nil }
+    let tabID = pane.tabs[index].id
+    try selectTab(tabID)
+    return tabID
+  }
+
+  /// Selects the Tab before / after the Pane's selection, wrapping at the
+  /// ends. Returns the newly selected id.
+  @discardableResult
+  func selectAdjacentTab(direction: TabAdjacency, in paneID: PaneID) throws -> TabID? {
+    guard let pane = catalog.pane(paneID) else { throw HierarchyError.notFound("Pane \(paneID)") }
+    guard !pane.tabs.isEmpty else { return nil }
+    let currentIndex = pane.selectedTabID.flatMap { id in pane.tabs.firstIndex { $0.id == id } } ?? 0
+    let count = pane.tabs.count
     let newIndex: Int
     switch direction {
     case .previous:
@@ -2037,686 +1743,350 @@ final class HierarchyManager {
     case .next:
       newIndex = (currentIndex + 1) % count
     }
-    let newID = tabs[newIndex].id
-    // Route through `selectTab` rather than writing `selectedTabID`
-    // directly so the focus-restoration block fires for the keyboard
-    // shortcut path. Otherwise `⌘⇧[` / `⌘⇧]` would persist the new
-    // selection without ever asking AppKit to focus the remembered pane.
-    try selectTab(newID, in: worktreeID, in: projectID)
+    let newID = pane.tabs[newIndex].id
+    try selectTab(newID)
     return newID
   }
 
-  // MARK: - Runtime state (tab-bar uplift)
-
-  /// Records `paneID` as the tab's last-focused pane so a future
-  /// `selectTab` call can restore it. `nil` clears the entry. No catalog
-  /// mutation — the map is runtime-only.
-  func setLastFocusedPane(_ paneID: PaneID?, in tabID: TabID) {
-    if let paneID {
-      lastFocusedPaneByTab[tabID] = paneID
-    } else {
-      lastFocusedPaneByTab.removeValue(forKey: tabID)
+  /// Renames a Tab in place. `nil` clears the custom name so the UI falls
+  /// back to the live title. Unchanged value is a silent no-op.
+  func renameTab(_ tabID: TabID, name: String?) throws {
+    try mutateTab(tabID) { tab in
+      guard tab.name != name else { return false }
+      tab.name = name
+      return true
     }
   }
 
-  /// Returns the last-focused pane for `tabID`, or `nil` if none was
-  /// recorded or the remembered pane has since been closed.
-  func lastFocusedPane(in tabID: TabID) -> PaneID? {
-    lastFocusedPaneByTab[tabID]
+  func setTabColor(_ tabID: TabID, color: TabColor?) throws {
+    try mutateTab(tabID) { tab in
+      guard tab.color != color else { return false }
+      tab.color = color
+      return true
+    }
   }
 
-  func currentWorkingDirectory(for paneID: PaneID) -> String? {
-    runtime.currentWorkingDirectory(for: paneID)
+  /// Update the Tab's icon, subject to the lock precedence in
+  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
+  /// against a higher lock is a silent no-op; a `.user` write with `nil`
+  /// drops the lock back to `.auto` so the runtime fallback takes over.
+  func setTabIcon(_ tabID: TabID, icon: String?, lock: TabIconLock) throws {
+    try mutateTab(tabID) { tab in
+      guard let updated = tab.applyingIcon(icon, lock: lock), updated != tab else { return false }
+      tab = updated
+      return true
+    }
   }
 
-  /// Marks `paneID` as running a tracked command. No caller wired today.
-  /// Idempotent.
-  func markPaneRunning(_ paneID: PaneID) {
-    runningPanes.insert(paneID)
+  /// Persists the most recently resolved live title so the chip can fall
+  /// back to it on the next launch (before the surface respawns and the
+  /// shell re-pushes OSC titles). No-op when unchanged so a hot OSC stream
+  /// does not churn the catalog. Failures to locate the Tab are silent —
+  /// the cache is best-effort, never load-bearing.
+  func setCachedTabTitle(_ title: String?, for tabID: TabID) {
+    _ = try? mutateTab(tabID) { tab in
+      guard tab.cachedDisplayTitle != title else { return false }
+      tab.cachedDisplayTitle = title
+      return true
+    }
   }
 
-  /// Clears `paneID`'s running flag. Idempotent.
-  func markPaneIdle(_ paneID: PaneID) {
-    runningPanes.remove(paneID)
-  }
-
-  /// Sets whether `paneID`'s foreground process group is a running command.
-  /// Idempotent. Fed by the foreground-job poller via the root reducer; the
-  /// dirty predicates OR this with the OSC-driven `runningPanes`.
-  func setPaneCommandBusy(_ paneID: PaneID, _ busy: Bool) {
-    if busy { commandBusyPanes.insert(paneID) } else { commandBusyPanes.remove(paneID) }
-  }
-
-  /// True when any pane inside `tabID` is currently marked running.
-  /// Reads a runtime set, never touches the catalog.
-  func tabIsDirty(_ tabID: TabID) -> Bool {
-    // Fast-path: no pane is running anywhere in the app, so the catalog
-    // walk is pointless. Until something starts populating `runningPanes`,
-    // this short-circuit means the chip's per-render call is a single
-    // set-emptiness check rather than a hierarchy walk.
-    guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
-    // Walk the catalog once to locate the tab; absent tabs read as idle.
-    // Dedicated run-script panes are excluded: their activity is expressed
-    // by the tab's tinted script icon and the sidebar ping dot, not the
-    // generic spinner (see `isScriptRunning`).
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID })
-        else { continue }
-        return tab.panes.contains {
-          $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
-        }
+  /// Replaces the Pane's Tab ordering in a single write. The incoming id
+  /// set must match the current set exactly — a mismatch throws
+  /// `.invariantViolation` so upstream drag bugs surface immediately
+  /// instead of silently discarding Tabs. Same-order input is a no-op.
+  func reorderTabs(in paneID: PaneID, orderedIDs: [TabID]) throws {
+    guard let indices = worktreeIndices(forPane: paneID) else {
+      throw HierarchyError.notFound("Pane \(paneID)")
+    }
+    var changed = false
+    try mutateLayout(at: indices) { worktree in
+      guard let paneIndex = worktree.panes.firstIndex(where: { $0.id == paneID }) else {
+        throw HierarchyError.notFound("Pane \(paneID)")
       }
-    }
-    return false
-  }
-
-  /// Raw terminal-busy read for a single pane (OSC 9;4 progress ∪ running
-  /// foreground command) — the same union `tabIsDirty` aggregates, exposed
-  /// per-pane so run-script affordances (tab icon tint, sidebar ping dot)
-  /// can light up for panes the dirty predicates deliberately skip.
-  func paneIsBusy(_ paneID: PaneID) -> Bool {
-    runningPanes.contains(paneID) || commandBusyPanes.contains(paneID)
-  }
-
-  /// True when any pane inside `worktreeID` (any tab, any leaf) is
-  /// currently marked running. Sidebar uses this to surface a busy
-  /// glyph on the worktree row even when its tab is unfocused.
-  func worktreeIsDirty(_ worktreeID: WorktreeID) -> Bool {
-    guard !runningPanes.isEmpty || !commandBusyPanes.isEmpty else { return false }
-    // Run-script panes are excluded for the same reason as `tabIsDirty`:
-    // the worktree row shows a trailing ping dot for those instead of the
-    // leading spinner.
-    for project in catalog.projects {
-      guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
-      else { continue }
-      return worktreeIsDirty(worktree)
-    }
-    return false
-  }
-
-  /// Rows already hold the worktree; avoid another catalog search per icon.
-  func worktreeIsDirty(_ worktree: Worktree) -> Bool {
-    worktree.tabs.contains { tab in
-      tab.panes.contains {
-        $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
+      let existing = worktree.panes[paneIndex].tabs
+      let currentIDs = existing.map(\.id)
+      guard Set(currentIDs) == Set(orderedIDs), currentIDs.count == orderedIDs.count else {
+        throw HierarchyError.invariantViolation("tab reorder set mismatch")
       }
+      guard currentIDs != orderedIDs else { return }
+      let byID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+      worktree.panes[paneIndex].tabs = orderedIDs.compactMap { byID[$0] }
+      changed = true
+    }
+    _ = changed
+  }
+
+  /// Moves a Tab inside its Pane by `offset` positions, wrapping cyclically
+  /// like Ghostty's `move_tab`: moving the last Tab forward places it first.
+  /// Zero or identity offsets are a silent no-op.
+  func moveTab(_ tabID: TabID, offset: Int) throws {
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    try mutateLayout(at: indices) { worktree in
+      guard let paneIndex = worktree.panes.firstIndex(where: { $0.id == address.paneID }),
+        let tabIndex = worktree.panes[paneIndex].tabs.firstIndex(where: { $0.id == tabID })
+      else { throw HierarchyError.notFound("Tab \(tabID)") }
+      let count = worktree.panes[paneIndex].tabs.count
+      // Swift's `%` on negative dividends returns a negative remainder, so
+      // pre-add a multiple of `count` to land in [0, count).
+      let target = ((tabIndex + offset) % count + count) % count
+      guard target != tabIndex else { return }
+      let tab = worktree.panes[paneIndex].tabs.remove(at: tabIndex)
+      worktree.panes[paneIndex].tabs.insert(tab, at: target)
     }
   }
 
-  // MARK: - Run-script panes
-
-  /// Identity of a dedicated run-script pane: the worktree it lives in plus
-  /// the `ScriptDefinition.id` that spawned it. Keying on both lets each
-  /// script keep its own reusable pane while surviving worktree switches.
-  private struct ScriptPaneKey: Hashable {
-    let worktree: WorktreeID
-    let script: UUID
-  }
-
-  /// Maps a (worktree, script) pair to the pane a `.newTab` / `.split` run
-  /// script last spawned. Lets repeated runs reuse the same pane instead of
-  /// piling up tabs, and lets the Run/Stop toggle find the pane to interrupt.
-  /// The persistent identity lives on `Pane.runScriptID`; this map is the
-  /// in-memory index over it, rebuilt from the catalog at init so a relaunch
-  /// still routes the next run into the restored pane.
-  private var scriptRunPanes: [ScriptPaneKey: PaneID] = [:]
-
-  /// Rebuilds the (worktree, script) → pane index from the persisted
-  /// `Pane.runScriptID` stamps. Called once from init, before any run can
-  /// mutate the map. Later stamps win on (impossible-by-construction, but
-  /// hand-edited-catalog-safe) duplicates.
-  private func rebuildRunScriptPanes() {
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes {
-            guard let scriptID = pane.runScriptID else { continue }
-            scriptRunPanes[ScriptPaneKey(worktree: worktree.id, script: scriptID)] = pane.id
-          }
-        }
+  /// Moves a Tab into another Pane of the same Worktree at `index`
+  /// (clamped to the strip), selects it there and focuses that Pane. The
+  /// Content is kept alive; responder focus is the caller's call, after the
+  /// moved surface is back in a window. A source Pane left without Tabs closes, like
+  /// closing its last Tab.
+  func moveTab(_ tabID: TabID, toPane targetID: PaneID, at index: Int) throws {
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    try mutateLayout(at: indices) { worktree in
+      guard worktree.pane(targetID) != nil else {
+        throw HierarchyError.notFound("Pane \(targetID) in Worktree \(address.worktreeID)")
       }
-    }
-  }
-
-  /// The live run pane for `(worktreeID, scriptID)`, or `nil` when none was
-  /// recorded or the recorded pane has since closed. Lazily prunes stale
-  /// entries so callers never act on a dead pane — no need to hook every
-  /// close path.
-  func runScriptPane(worktreeID: WorktreeID, scriptID: UUID) -> PaneID? {
-    let key = ScriptPaneKey(worktree: worktreeID, script: scriptID)
-    guard let paneID = scriptRunPanes[key] else { return nil }
-    if catalog.pane(paneID) == nil {
-      scriptRunPanes.removeValue(forKey: key)
-      return nil
-    }
-    return paneID
-  }
-
-  /// Records the pane a run script spawned so the next run can reuse it.
-  /// Stamps `Pane.runScriptID` in the catalog as well — the persisted half
-  /// of the association that `rebuildRunScriptPanes` reads back after a
-  /// relaunch.
-  func setRunScriptPane(worktreeID: WorktreeID, scriptID: UUID, paneID: PaneID) {
-    scriptRunPanes[ScriptPaneKey(worktree: worktreeID, script: scriptID)] = paneID
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
-          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else { continue }
-          catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-            .panes[paneIndex].runScriptID = scriptID
-          store.scheduleSave(catalog)
-          return
-        }
+      if targetID == address.paneID, worktree.pane(targetID)?.tabs.count == 1 { return }
+      let tab = try Self.detachTab(tabID, from: address.paneID, in: &worktree)
+      guard let targetIndex = worktree.panes.firstIndex(where: { $0.id == targetID }) else {
+        throw HierarchyError.notFound("Pane \(targetID)")
       }
+      let slot = min(max(index, 0), worktree.panes[targetIndex].tabs.count)
+      worktree.panes[targetIndex].tabs.insert(tab, at: slot)
+      worktree.panes[targetIndex].selectedTabID = tabID
+      worktree.focusedPaneID = targetID
     }
   }
 
-  /// Every script whose tracked run pane in `worktreeID` is currently
-  /// executing. Same busy signals and same no-prune discipline as
-  /// `isScriptRunning`, but enumerating instead of probing — this is what
-  /// "stop everything in this worktree" paths (sidebar ping-dot Stop,
-  /// archive / remove teardown) iterate, since callers there don't know
-  /// which scripts are live.
-  func runningScriptIDs(in worktreeID: WorktreeID) -> [UUID] {
-    guard !commandBusyPanes.isEmpty || !runningPanes.isEmpty else { return [] }
-    return scriptRunPanes.compactMap { key, paneID in
-      guard key.worktree == worktreeID,
-        catalog.pane(paneID) != nil,
-        commandBusyPanes.contains(paneID) || runningPanes.contains(paneID)
-      else { return nil }
-      return key.script
-    }
-  }
-
-  /// True when the script's tracked run pane exists AND is currently running a
-  /// foreground command. Drives the toolbar Run⇄Stop toggle; reuses the same
-  /// busy signals (`commandBusyPanes` / `runningPanes`) as the tab spinner so
-  /// the two surfaces agree on what "executing" means.
-  ///
-  /// Pure read — unlike `runScriptPane` it does NOT prune stale entries,
-  /// because this is called from SwiftUI `body` where mutating `@Observable`
-  /// state would warn. A closed run pane reads as not-running here (its
-  /// `catalog.pane` is gone); the stale map entry is pruned later by the
-  /// next `runScriptPane` call on the run/stop effect path.
-  func isScriptRunning(worktreeID: WorktreeID, scriptID: UUID) -> Bool {
-    guard !commandBusyPanes.isEmpty || !runningPanes.isEmpty,
-      let paneID = scriptRunPanes[ScriptPaneKey(worktree: worktreeID, script: scriptID)],
-      catalog.pane(paneID) != nil
-    else { return false }
-    return commandBusyPanes.contains(paneID) || runningPanes.contains(paneID)
-  }
-
-  // MARK: - Pane mutations
-
-  func openPane(
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    workingDirectory: String,
-    initialCommand: String?,
-    env: [String: String] = [:]
-  ) async throws -> PaneID {
-    // Two-phase: the synchronous catalog mutation (`createPaneRow`) lands the
-    // Pane row first, then the async zmx-daemon + libghostty bringup follows
-    // via `ensurePaneSurface`. Splitting the phases lets callers that mutate
-    // the catalog from a synchronous reducer body reserve the row before any
-    // `.selectionChanged` is processed — see `createPaneRow`'s note.
-    let paneID = try createPaneRow(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: workingDirectory, initialCommand: initialCommand
-    )
-    try await ensurePaneSurface(
-      paneID, in: tabID, in: worktreeID, in: projectID, env: env
-    )
-    return paneID
-  }
-
-  /// Synchronous catalog half of `openPane`: allocates a `PaneID`, inserts it
-  /// into the Tab's split tree (a fresh leaf when the tree is empty, else a
-  /// right-split of the first leaf) and pane array, validates invariants, and
-  /// persists — WITHOUT the async zmx-daemon + libghostty surface bringup that
-  /// `ensurePaneSurface` performs.
-  ///
-  /// Split out so a caller mutating the catalog from a *synchronous* reducer
-  /// body can guarantee the Pane row is observable before the next
-  /// `.selectionChanged` is processed. `RootFeature.autoSeedTabAndPaneIfNeeded`
-  /// gates on `tab.panes.isEmpty`; once the create-worktree flow began seeding
-  /// its first pane through the now-async `openPane`, that gate was read against
-  /// a catalog snapshot taken while bringup was still in flight, so auto-seed
-  /// fired a second, redundant pane — and the two concurrent `zmx serve` spawns
-  /// raced, the loser surfacing `zmxServeFailed`. Reserving the row
-  /// synchronously closes that window.
+  /// Moves a Tab into a new Pane beside `anchorID`, split along
+  /// `direction`, and focuses it. The Content is kept alive. When the Tab
+  /// is the only one of its Pane, that Pane itself moves instead (and a
+  /// move beside itself is a no-op). Returns the Pane that holds the Tab.
   @discardableResult
-  func createPaneRow(
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    workingDirectory: String,
-    initialCommand: String?
+  func splitTab(
+    _ tabID: TabID,
+    beside anchorID: PaneID,
+    direction: SplitTree<PaneID>.NewDirection
   ) throws -> PaneID {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
     else {
       throw HierarchyError.notFound("Tab \(tabID)")
     }
-
-    let paneID = PaneID()
-    let pane = Pane(id: paneID, workingDirectory: workingDirectory, initialCommand: initialCommand)
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-
-    if tab.splitTree.isEmpty {
-      tab.splitTree = SplitTree(leaf: paneID)
-    } else {
-      let leaves = tab.splitTree.leaves()
-      guard let anchor = leaves.first else {
-        throw HierarchyError.invariantViolation("Tab has split tree but no leaves")
+    var hostID = address.paneID
+    try mutateLayout(at: indices) { worktree in
+      guard worktree.pane(anchorID) != nil else {
+        throw HierarchyError.notFound("Pane \(anchorID) in Worktree \(address.worktreeID)")
       }
-      tab.splitTree = try tab.splitTree.inserting(paneID, at: anchor, direction: .right)
+      if worktree.pane(address.paneID)?.tabs.count == 1 {
+        guard anchorID != address.paneID else { return }
+        worktree.splitTree = try worktree.splitTree
+          .moving(address.paneID, relativeTo: anchorID, direction: direction)
+          .settingZoomed(nil)
+      } else {
+        let tab = try Self.detachTab(tabID, from: address.paneID, in: &worktree)
+        let pane = Pane(tabs: [tab])
+        worktree.splitTree = try worktree.splitTree
+          .inserting(pane.id, at: anchorID, direction: direction)
+          .settingZoomed(nil)
+        worktree.panes.append(pane)
+        hostID = pane.id
+      }
+      worktree.focusedPaneID = hostID
     }
-
-    tab.panes.append(pane)
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-
-    try tab.validateInvariants()
-
-    store.scheduleSave(catalog)
-    return paneID
+    return hostID
   }
 
+  /// Takes the Tab out of its Pane without touching its Content. A Pane
+  /// left empty is removed; a selected Tab hands the selection to its
+  /// right neighbour, else to the new last Tab (as `closeTab` does).
+  private static func detachTab(
+    _ tabID: TabID, from paneID: PaneID, in worktree: inout Worktree
+  ) throws -> Tab {
+    guard let paneIndex = worktree.panes.firstIndex(where: { $0.id == paneID }),
+      let tabIndex = worktree.panes[paneIndex].tabs.firstIndex(where: { $0.id == tabID })
+    else { throw HierarchyError.notFound("Tab \(tabID)") }
+    let tab = worktree.panes[paneIndex].tabs.remove(at: tabIndex)
+    let remaining = worktree.panes[paneIndex].tabs
+    if remaining.isEmpty {
+      _ = removePane(paneID, from: &worktree)
+    } else if worktree.panes[paneIndex].selectedTabID == tabID {
+      worktree.panes[paneIndex].selectedTabID = remaining[min(tabIndex, remaining.count - 1)].id
+    }
+    return tab
+  }
+
+  /// Closes every Tab in the Pane except `tabID`. Reuses `closeTab` per
+  /// sibling so surfaces are torn down the same way as a single close.
+  func closeOtherTabs(keeping tabID: TabID) throws {
+    guard let address = catalog.address(forTab: tabID), let pane = catalog.pane(address.paneID) else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    for sibling in pane.tabIDs where sibling != tabID {
+      try? closeTab(sibling)
+    }
+    try selectTab(tabID)
+  }
+
+  /// Closes every Tab whose position in the Pane is strictly after
+  /// `tabID`'s. No-op when it is the last Tab.
+  func closeTabsToRight(of tabID: TabID) throws {
+    guard let address = catalog.address(forTab: tabID), let pane = catalog.pane(address.paneID),
+      let pivot = pane.tabs.firstIndex(where: { $0.id == tabID })
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    for doomed in pane.tabs.suffix(from: pivot + 1).map(\.id) {
+      try? closeTab(doomed)
+    }
+    // A close inside the doomed suffix may have advanced the selection;
+    // reseat it so the pivot stays the user's anchor.
+    try selectTab(tabID)
+  }
+
+  /// Closes every Tab in the Pane — which closes the Pane.
+  func closeAllTabs(in paneID: PaneID) throws {
+    try closePane(paneID)
+  }
+
+  // MARK: - Pane verbs
+
+  /// Creates a Pane beside `paneID` with one fresh Tab holding `content`,
+  /// and focuses it. A zoom on the Worktree is cleared: the new Pane must
+  /// be visible. Catalog-only, like `newTab`.
+  @discardableResult
   func splitPane(
-    _ paneID: PaneID,
+    from paneID: PaneID,
     direction: SplitTree<PaneID>.NewDirection,
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    workingDirectory: String,
-    initialCommand: String?,
-    env: [String: String] = [:]
-  ) async throws -> PaneID {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
+    content: ContentSnapshot,
+    name: String? = nil,
+    initialTitle: String? = nil
+  ) throws -> TabAddress {
+    guard let address = catalog.address(forPane: paneID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
     else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
-    }
-
-    let newPaneID = PaneID()
-    let newPane = Pane(id: newPaneID, workingDirectory: workingDirectory, initialCommand: initialCommand)
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-
-    tab.splitTree = try tab.splitTree.inserting(newPaneID, at: paneID, direction: direction)
-    tab.panes.append(newPane)
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-
-    try tab.validateInvariants()
-
-    let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
-    try await runtime.ensureSurface(
-      for: newPane, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
-    )
-
-    store.scheduleSave(catalog)
-    return newPaneID
-  }
-
-  func closePane(
-    _ paneID: PaneID,
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
-    }
-
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-    guard let paneIndex = tab.panes.firstIndex(where: { $0.id == paneID }) else {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
-
-    runtime.closeSurface(for: paneID)
-    runningPanes.remove(paneID)
-    commandBusyPanes.remove(paneID)
-    processRegistry.remove(paneID)
-    if lastFocusedPaneByTab[tabID] == paneID {
-      lastFocusedPaneByTab.removeValue(forKey: tabID)
+    let tab = Tab(name: name, cachedDisplayTitle: initialTitle, content: content)
+    let pane = Pane(tabs: [tab])
+    try mutateLayout(at: indices) { worktree in
+      worktree.splitTree = try worktree.splitTree
+        .inserting(pane.id, at: paneID, direction: direction)
+        .settingZoomed(nil)
+      worktree.panes.append(pane)
+      worktree.focusedPaneID = pane.id
     }
-
-    tab.panes.remove(at: paneIndex)
-    tab.splitTree = tab.splitTree.removing(paneID)
-
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-
-    try tab.validateInvariants()
-
-    store.scheduleSave(catalog)
+    return TabAddress(
+      projectID: address.projectID, worktreeID: address.worktreeID, paneID: pane.id, tabID: tab.id,
+      contentID: content.id)
   }
 
-  /// Make the surface view for `paneID` the first responder of its
-  /// window. Distinct from `focusPane` (which flips the Tab's zoom
-  /// flag) — this only touches AppKit responder-chain focus so keyboard
-  /// input routes correctly. Silent no-op when the surface or window
-  /// isn't available.
-  func focusSurfaceView(for paneID: PaneID) {
-    runtime.focusSurfaceView(for: paneID)
-  }
-
-  func focusPane(
-    _ paneID: PaneID,
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
-    }
-
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-    guard tab.panes.contains(where: { $0.id == paneID }) else {
+  /// Closes every Tab of the Pane and the Pane itself; focus moves to the
+  /// neighbour when the Pane was focused.
+  func closePane(_ paneID: PaneID) throws {
+    guard let indices = worktreeIndices(forPane: paneID), let pane = catalog.pane(paneID) else {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
-
-    tab.splitTree = tab.splitTree.settingZoomed(paneID)
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-    // Remember this pane as the tab's last-focused so the next `selectTab`
-    // call restores it instead of snapping to the leftmost leaf.
-    lastFocusedPaneByTab[tabID] = paneID
-
-    store.scheduleSave(catalog)
+    for contentID in pane.contentIDs {
+      runtime.closeSurface(for: contentID)
+      processRegistry.remove(contentID)
+    }
+    var focusTarget: ContentID?
+    try mutateLayout(at: indices) { worktree in
+      focusTarget = Self.removePane(paneID, from: &worktree)
+    }
+    if let focusTarget {
+      runtime.focusSurfaceView(for: focusTarget)
+    }
   }
 
-  func ensurePaneSurface(
-    _ paneID: PaneID,
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    env: [String: String] = [:]
-  ) async throws {
-    guard !runtime.hasSurface(for: paneID) else { return }
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.first(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
-    }
-    guard let pane = tab.panes.first(where: { $0.id == paneID }) else {
+  /// Makes `paneID` the Worktree's focused Pane. Persists; unchanged is a
+  /// no-op. Responder-chain focus is the caller's call
+  /// (`focusSurfaceView(for:)`), since the surface may not exist yet.
+  func focusPane(_ paneID: PaneID) throws {
+    guard let indices = worktreeIndices(forPane: paneID) else {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
-    let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
-    try await runtime.ensureSurface(
-      for: pane, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
-    )
+    guard catalog.projects[indices.0].worktrees[indices.1].focusedPaneID != paneID else { return }
+    catalog.projects[indices.0].worktrees[indices.1].focusedPaneID = paneID
+    store.scheduleSave(catalog)
   }
 
-  func unfocusPane(
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
+  /// Moves focus from `paneID` to its neighbour in `direction` and hands
+  /// the neighbour's selected Content the keyboard. Returns the neighbour,
+  /// or `nil` when there is none in that direction (an edge is a no-op).
+  @discardableResult
+  func focusNeighbour(of paneID: PaneID, direction: FocusDirection) throws -> PaneID? {
+    guard let indices = worktreeIndices(forPane: paneID) else {
+      throw HierarchyError.notFound("Pane \(paneID)")
     }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
+    let worktree = catalog.projects[indices.0].worktrees[indices.1]
+    let target: PaneID?
+    switch direction {
+    case .previous: target = worktree.splitTree.focusTarget(for: .previous, from: paneID)
+    case .next: target = worktree.splitTree.focusTarget(for: .next, from: paneID)
+    case .left: target = worktree.splitTree.focusTarget(spatial: .left, from: paneID)
+    case .right: target = worktree.splitTree.focusTarget(spatial: .right, from: paneID)
+    case .up: target = worktree.splitTree.focusTarget(spatial: .up, from: paneID)
+    case .down: target = worktree.splitTree.focusTarget(spatial: .down, from: paneID)
     }
+    guard let target, let pane = worktree.pane(target) else { return nil }
+    try focusPane(target)
+    if let contentID = pane.selectedTab?.content.id {
+      runtime.focusSurfaceView(for: contentID)
+    }
+    return target
+  }
 
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-    tab.splitTree = tab.splitTree.settingZoomed(nil)
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-
-    store.scheduleSave(catalog)
+  /// Zooms the Pane to fill the layout area, or un-zooms it when it is the
+  /// zoomed one. Focuses the Pane either way. Returns the new zoom state.
+  @discardableResult
+  func toggleZoom(_ paneID: PaneID) throws -> Bool {
+    guard let indices = worktreeIndices(forPane: paneID) else {
+      throw HierarchyError.notFound("Pane \(paneID)")
+    }
+    var zoomed = false
+    try mutateLayout(at: indices) { worktree in
+      zoomed = worktree.splitTree.zoomed != paneID
+      worktree.splitTree = worktree.splitTree.settingZoomed(zoomed ? paneID : nil)
+      worktree.focusedPaneID = paneID
+    }
+    return zoomed
   }
 
   func resizeSplit(
     at path: SplitTree<PaneID>.Path,
     ratio: Double,
-    in tabID: TabID,
     in worktreeID: WorktreeID,
     in projectID: ProjectID
   ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
+    guard let indices = findWorktreeIndices(worktreeID: worktreeID, projectID: projectID) else {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
+    try mutateLayout(at: indices) { worktree in
+      worktree.splitTree = try worktree.splitTree.resizing(at: path, ratio: ratio)
     }
-
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-    tab.splitTree = try tab.splitTree.resizing(at: path, ratio: ratio)
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-
-    store.scheduleSave(catalog)
   }
 
-  /// Re-positions an existing pane next to `anchorID`, splitting the anchor
-  /// along `direction`. Pure split-tree reshape — the moved pane's surface is
-  /// never torn down (its shell keeps running), so unlike `splitPane` /
-  /// `closePane` there is no runtime surface lifecycle here. The pane *set* is
-  /// unchanged, so the leaves-match-panes invariant still holds. A move onto
-  /// the pane itself collapses to a no-op inside `SplitTree.moving`.
-  func movePane(
-    _ paneID: PaneID,
-    relativeTo anchorID: PaneID,
-    direction: SplitTree<PaneID>.NewDirection,
-    in tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
+  /// Sets every split node's `ratio` in the Worktree's tree to 0.5 so
+  /// sibling Panes render at equal sizes. Leaf-only trees are a no-op.
+  func equalizeSplits(in worktreeID: WorktreeID, in projectID: ProjectID) throws {
+    guard let indices = findWorktreeIndices(worktreeID: worktreeID, projectID: projectID) else {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
-
-    guard
-      let tabIndex = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.firstIndex(where: {
-        $0.id == tabID
-      })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
+    guard let root = catalog.projects[indices.0].worktrees[indices.1].splitTree.root else { return }
+    try mutateLayout(at: indices) { worktree in
+      worktree.splitTree = SplitTree(root: Self.balancingRatios(in: root), zoomed: worktree.splitTree.zoomed)
     }
-
-    var tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-    guard tab.panes.contains(where: { $0.id == paneID }) else {
-      throw HierarchyError.notFound("Pane \(paneID)")
-    }
-    guard tab.panes.contains(where: { $0.id == anchorID }) else {
-      throw HierarchyError.notFound("Pane \(anchorID)")
-    }
-
-    tab.splitTree = try tab.splitTree.moving(paneID, relativeTo: anchorID, direction: direction)
-    catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-
-    try tab.validateInvariants()
-
-    store.scheduleSave(catalog)
-  }
-
-  // MARK: - Pane address resolution
-
-  /// Resolves a `PaneID` to the full hierarchy address that owns it. Used by
-  /// `PaneActionRouterFeature` to service pane-scoped intents (closeTab,
-  /// moveTab, activateTab, equalizeTabSplits). Linear in total pane count —
-  /// acceptable at the cardinalities we support; no secondary index needed
-  /// yet. `nil` when the pane is unknown (closed mid-flight, stale callback).
-  func addressOf(paneID: PaneID) -> (ProjectID, WorktreeID, TabID)? {
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
-          return (project.id, worktree.id, tab.id)
-        }
-      }
-    }
-    return nil
-  }
-
-  // MARK: - Tab reordering
-
-  /// Moves a Tab inside its Worktree by `offset` positions. Positive shifts
-  /// right, negative shifts left; the final index is clamped to the Worktree's
-  /// tab-array bounds so the caller does not need to know the array length.
-  /// Zero offset or clamped-to-identity is a silent no-op (no save scheduled).
-  /// Persists via the standard debounced `store.scheduleSave` pipeline.
-  func moveTab(
-    _ tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    offset: Int
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == tabID })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
-    }
-    let count = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs.count
-    // Ghostty's move_tab wraps cyclically: moving the last tab forward
-    // places it first, moving the first backward places it last. Swift's
-    // `%` on negative dividends returns a negative remainder, so pre-add
-    // a multiple of `count` to land in [0, count).
-    guard count > 0 else { return }
-    let normalized = ((tabIndex + offset) % count + count) % count
-    let target = normalized
-    guard target != tabIndex else { return }
-    let tab = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs.remove(at: tabIndex)
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs.insert(tab, at: target)
-    store.scheduleSave(catalog)
-  }
-
-  // MARK: - Split equalization
-
-  /// Sets every split node's `ratio` inside the Tab's `SplitTree` to 0.5 so
-  /// sibling panes render at equal sizes. Leaf-only trees are a silent
-  /// no-op. Persists. The concept of a "weight=1 layout" in the design doc
-  /// maps onto this ratio — codans's tree only carries per-split ratios,
-  /// not per-leaf weights, so every balanced split is ratio == 0.5.
-  func equalizeTabSplits(
-    _ tabID: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == tabID })
-    else {
-      throw HierarchyError.notFound("Tab \(tabID)")
-    }
-    var tab = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex]
-    guard let root = tab.splitTree.root else { return }
-    let balanced = Self.balancingRatios(in: root)
-    tab.splitTree = SplitTree(root: balanced, zoomed: tab.splitTree.zoomed)
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex] = tab
-    store.scheduleSave(catalog)
   }
 
   private static func balancingRatios(
@@ -2737,17 +2107,13 @@ final class HierarchyManager {
     }
   }
 
-  // MARK: - Pane resize
-
   /// Adjusts the ratio of the closest ancestor split whose orientation
   /// matches `direction`. The ghostty RESIZE_SPLIT action carries a pixel
-  /// amount (default keybinds are e.g. 10–20 px), but codans's split
-  /// tree only stores ratios in `[0.1, 0.9]`. Adding the raw pixel value
-  /// to a ratio collapses the split on the first keypress, so we scale
-  /// the delta by `pixelsPerRatioStep` — an empirical divisor that maps
-  /// a default 10 px keybind to a ~2.5% ratio nudge on a typical 400 px
-  /// split. The viewport layer will later expose the real split frame
-  /// via `ResizePaneOptions` so the divisor can become per-split.
+  /// amount (default keybinds are e.g. 10–20 px), but the split tree only
+  /// stores ratios in `[0.1, 0.9]`. Adding the raw pixel value to a ratio
+  /// collapses the split on the first keypress, so the delta is scaled by
+  /// `pixelsPerRatioStep` — an empirical divisor that maps a default 10 px
+  /// keybind to a ~2.5% ratio nudge on a typical 400 px split.
   ///
   /// Direction semantics (matches ghostty's FocusDirection analog):
   /// - `.left`: grow the left child  → decrease ratio of nearest horizontal split
@@ -2755,38 +2121,23 @@ final class HierarchyManager {
   /// - `.up`: grow the top child     → decrease ratio of nearest vertical split
   /// - `.down`: grow the bottom child → increase ratio of nearest vertical split
   ///
-  /// Silent no-op when the pane is unknown or no ancestor split matches the
+  /// Silent no-op when the Pane is unknown or no ancestor split matches the
   /// direction (e.g. resize-left on a purely vertical column).
   func resizePane(_ paneID: PaneID, direction: ResizeDirection, amount: Double) throws {
-    // Empirical px → ratio scale. See doc above.
     let pixelsPerRatioStep: Double = 400
     let ratioDelta = amount / pixelsPerRatioStep
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-        for tabIndex in worktree.tabs.indices
-        where worktree.tabs[tabIndex].splitTree.contains(paneID) {
-          var tab = worktree.tabs[tabIndex]
-          guard let leafPath = tab.splitTree.path(to: paneID) else { return }
-          let orientation: SplitTree<PaneID>.Direction =
-            (direction == .left || direction == .right)
-            ? .horizontal : .vertical
-          guard
-            let (ancestorPath, currentRatio, grewRight) = Self.findAncestorSplit(
-              root: tab.splitTree.root,
-              leafPath: leafPath,
-              orientation: orientation
-            )
-          else { return }
-          let grow: Bool = (direction == .right || direction == .down)
-          let signedDelta = (grewRight == grow) ? ratioDelta : -ratioDelta
-          let newRatio = currentRatio + signedDelta
-          tab.splitTree = try tab.splitTree.resizing(at: ancestorPath, ratio: newRatio)
-          catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex] = tab
-          store.scheduleSave(catalog)
-          return
-        }
-      }
+    guard let indices = worktreeIndices(forPane: paneID) else { return }
+    try mutateLayout(at: indices) { worktree in
+      guard let leafPath = worktree.splitTree.path(to: paneID) else { return }
+      let orientation: SplitTree<PaneID>.Direction =
+        (direction == .left || direction == .right) ? .horizontal : .vertical
+      guard
+        let (ancestorPath, currentRatio, grewRight) = Self.findAncestorSplit(
+          root: worktree.splitTree.root, leafPath: leafPath, orientation: orientation)
+      else { return }
+      let grow = (direction == .right || direction == .down)
+      let signedDelta = (grewRight == grow) ? ratioDelta : -ratioDelta
+      worktree.splitTree = try worktree.splitTree.resizing(at: ancestorPath, ratio: currentRatio + signedDelta)
     }
   }
 
@@ -2811,6 +2162,105 @@ final class HierarchyManager {
     return nil
   }
 
+  // MARK: - Surfaces
+
+  /// Brings the Content's surface up (or re-attaches it). Idempotent: a
+  /// live surface returns at once. The worktree built-ins
+  /// (`CODANS_WORKTREE_PATH` …) are injected here, after the caller's env.
+  func ensureSurface(for contentID: ContentID, env: [String: String] = [:]) async throws {
+    guard !runtime.hasSurface(for: contentID) else { return }
+    guard let address = catalog.address(forContent: contentID),
+      case (let project, let worktree)? = catalog.worktree(address.worktreeID),
+      let content = worktree.tab(address.tabID)?.content
+    else {
+      throw HierarchyError.notFound("Content \(contentID)")
+    }
+    let workspaceRoot = project.isWorkspace ? project.rootPath : nil
+    try await runtime.ensureSurface(
+      for: content, at: address, in: worktree,
+      env: Self.injectingBuiltins(
+        env, worktreePath: worktree.path, rootPath: project.rootPath, workspaceRoot: workspaceRoot)
+    )
+  }
+
+  /// Make the Content's surface view the first responder of its window.
+  /// Distinct from `focusPane` (the catalog focus) — this only touches the
+  /// AppKit responder chain so keyboard input routes correctly. Silent
+  /// no-op when the surface or window isn't available.
+  func focusSurfaceView(for contentID: ContentID) {
+    runtime.focusSurfaceView(for: contentID)
+  }
+
+  func currentWorkingDirectory(for contentID: ContentID) -> String? {
+    runtime.currentWorkingDirectory(for: contentID)
+  }
+
+  // MARK: - Run-script Contents
+
+  /// Identity of a dedicated run-script Content: the worktree it lives in
+  /// plus the `ScriptDefinition.id` that spawned it. Keying on both lets
+  /// each script keep its own reusable Content while surviving worktree
+  /// switches.
+  private struct ScriptContentKey: Hashable {
+    let worktree: WorktreeID
+    let script: UUID
+  }
+
+  /// Maps a (worktree, script) pair to the Content a `.newTab` / `.split`
+  /// run script last spawned. Lets repeated runs reuse the same Content
+  /// instead of piling up Tabs, and lets the Run/Stop toggle find the
+  /// Content to interrupt. The persistent identity lives on
+  /// `TerminalContentState.runScriptID`; this map is the in-memory index
+  /// over it, rebuilt from the catalog at init so a relaunch still routes
+  /// the next run into the restored Content.
+  private var scriptRunContents: [ScriptContentKey: ContentID] = [:]
+
+  private func rebuildRunScriptContents() {
+    for project in catalog.projects {
+      for worktree in project.worktrees {
+        for tab in worktree.allTabs {
+          guard let scriptID = tab.content.terminal?.runScriptID else { continue }
+          scriptRunContents[ScriptContentKey(worktree: worktree.id, script: scriptID)] = tab.content.id
+        }
+      }
+    }
+  }
+
+  /// The live run Content for `(worktreeID, scriptID)`, or `nil` when none
+  /// was recorded or the recorded Content has since closed. Lazily prunes
+  /// stale entries so callers never act on a dead Content.
+  func runScriptContent(worktreeID: WorktreeID, scriptID: UUID) -> ContentID? {
+    let key = ScriptContentKey(worktree: worktreeID, script: scriptID)
+    guard let contentID = scriptRunContents[key] else { return nil }
+    if catalog.content(contentID) == nil {
+      scriptRunContents.removeValue(forKey: key)
+      return nil
+    }
+    return contentID
+  }
+
+  /// Records the Content a run script spawned so the next run can reuse
+  /// it. Stamps `runScriptID` in the catalog as well — the persisted half
+  /// of the association that `rebuildRunScriptContents` reads back.
+  func setRunScriptContent(worktreeID: WorktreeID, scriptID: UUID, contentID: ContentID) {
+    scriptRunContents[ScriptContentKey(worktree: worktreeID, script: scriptID)] = contentID
+    mutateTerminalContent(contentID) { state in
+      guard state.runScriptID != scriptID else { return false }
+      state.runScriptID = scriptID
+      return true
+    }
+  }
+
+  /// Every recorded (script, Content) pair of the worktree whose Content
+  /// still exists. Pure read — no pruning, so it is safe from SwiftUI
+  /// `body`.
+  func runScriptContents(in worktreeID: WorktreeID) -> [(scriptID: UUID, contentID: ContentID)] {
+    scriptRunContents.compactMap { key, contentID in
+      guard key.worktree == worktreeID, catalog.content(contentID) != nil else { return nil }
+      return (scriptID: key.script, contentID: contentID)
+    }
+  }
+
   // MARK: - Worktree / Tab activation
 
   func activateWorktree(_ id: WorktreeID) throws {
@@ -2824,101 +2274,83 @@ final class HierarchyManager {
   }
 
   func activateTab(_ id: TabID) throws {
-    for (pi, project) in catalog.projects.enumerated() {
-      for (wi, worktree) in project.worktrees.enumerated()
-      where worktree.tabs.contains(where: { $0.id == id }) {
-        catalog.projects[pi].worktrees[wi].selectedTabID = id
-        store.scheduleSave(catalog)
-        return
-      }
-    }
-    throw HierarchyError.notFound("Tab \(id)")
+    try selectTab(id)
   }
 
-  // MARK: - Pane labels
+  // MARK: - Content labels
 
-  /// Update a Pane's `labels` set. **Single canonical writer** — every
-  /// user-facing write path (the CLI's `codans pane label`, the hook action
-  /// DSL's `HookAction.setPaneLabels`, any future UI) routes through this
-  /// method. Keeps label mutations auditable and persists through the same
-  /// `CatalogStore.scheduleSave` every other mutation uses.
+  /// Update a Content's `labels` set. **Single canonical writer** — every
+  /// user-facing write path (the CLI's label verb, the hook action DSL,
+  /// any future UI) routes through this method, so label mutations stay
+  /// auditable and persist through `CatalogStore.scheduleSave`.
   ///
   /// - Parameters:
-  ///   - paneID: target Pane.
-  ///   - labels: labels to apply.
   ///   - replace: when `true`, replaces the set entirely; when `false`,
   ///     union-merges with the existing set.
-  /// - Throws: `HierarchyError.notFound` if the Pane id is unknown.
-  func setPaneLabels(
-    _ paneID: PaneID,
+  /// - Throws: `HierarchyError.notFound` if the Content id is unknown.
+  func setContentLabels(
+    _ contentID: ContentID,
     labels: Set<String>,
     replace: Bool = false
   ) throws {
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
-          if let paneIndex = panes.firstIndex(where: { $0.id == paneID }) {
-            var pane = panes[paneIndex]
-            pane.labels = replace ? labels : pane.labels.union(labels)
-            catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes[paneIndex] = pane
-            store.scheduleSave(catalog)
-            return
-          }
-        }
-      }
+    let found = mutateTerminalContent(contentID) { state in
+      let next = replace ? labels : state.labels.union(labels)
+      guard next != state.labels else { return false }
+      state.labels = next
+      return true
     }
-    throw HierarchyError.notFound("Pane \(paneID)")
+    guard found else { throw HierarchyError.notFound("Content \(contentID)") }
   }
 
   // MARK: - Command queue
 
-  /// The commands parked on `paneID`, or `[]` when the pane is unknown.
-  func commandQueue(for paneID: PaneID) -> [QueuedCommand] {
-    catalog.pane(paneID)?.commandQueue ?? []
+  /// The commands parked on the Content, or `[]` when it is unknown.
+  func commandQueue(for contentID: ContentID) -> [QueuedCommand] {
+    catalog.content(contentID)?.terminal?.commandQueue ?? []
   }
 
-  /// **Single canonical writer** for `Pane.commandQueue` — the editor panel,
-  /// the badge's per-row delete, and the runner's post-fire re-arm all land
-  /// here, so every queue mutation persists through the same
-  /// `CatalogStore.scheduleSave` as the rest of the hierarchy.
+  /// **Single canonical writer** for a Content's `commandQueue` — the
+  /// editor panel, the badge's per-row delete, and the runner's post-fire
+  /// re-arm all land here, so every queue mutation persists through the
+  /// same `CatalogStore.scheduleSave` as the rest of the hierarchy.
   ///
-  /// Silently no-ops for an unknown pane rather than throwing: every caller
-  /// is a best-effort UI action or a background drain pass racing a pane
-  /// close, and neither has anything useful to do with the error.
-  func setCommandQueue(_ queue: [QueuedCommand], for paneID: PaneID) {
-    for projectIndex in catalog.projects.indices {
-      for worktreeIndex in catalog.projects[projectIndex].worktrees.indices {
-        for tabIndex in catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.indices {
-          let panes = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex].panes
-          guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }) else { continue }
-          guard panes[paneIndex].commandQueue != queue else { return }
-          catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
-            .panes[paneIndex].commandQueue = queue
-          store.scheduleSave(catalog)
-          return
-        }
-      }
+  /// Silently no-ops for an unknown Content rather than throwing: every
+  /// caller is a best-effort UI action or a background drain pass racing
+  /// a close, and neither has anything useful to do with the error.
+  func setCommandQueue(_ queue: [QueuedCommand], for contentID: ContentID) {
+    mutateTerminalContent(contentID) { state in
+      guard state.commandQueue != queue else { return false }
+      state.commandQueue = queue
+      return true
     }
   }
 
-  /// Every pane that currently owes the user something, paired with its
-  /// queue. One catalog walk per drain pass; the runner needs the pairing
-  /// rather than a per-pane probe so a tick costs a single traversal.
-  func panesWithQueuedCommands() -> [(paneID: PaneID, queue: [QueuedCommand])] {
-    var result: [(paneID: PaneID, queue: [QueuedCommand])] = []
+  /// Every Content that currently owes the user something, paired with
+  /// its queue. One catalog walk per drain pass. Archived worktrees are
+  /// skipped: their daemons are down.
+  func contentsWithQueuedCommands() -> [(contentID: ContentID, queue: [QueuedCommand])] {
+    var result: [(contentID: ContentID, queue: [QueuedCommand])] = []
     for project in catalog.projects {
       for worktree in project.worktrees where !worktree.archived {
-        for tab in worktree.tabs {
-          for pane in tab.panes where !pane.commandQueue.isEmpty {
-            result.append((paneID: pane.id, queue: pane.commandQueue))
-          }
+        for tab in worktree.allTabs {
+          guard let queue = tab.content.terminal?.commandQueue, !queue.isEmpty else { continue }
+          result.append((contentID: tab.content.id, queue: queue))
         }
       }
     }
     return result
   }
 
+  // MARK: - Busy predicate
+
+  /// Whether closing the Content would lose work: a running foreground
+  /// command, a working agent (both through `contentActivity`), or a
+  /// non-empty command queue. The close-confirmation gate reads it for
+  /// every Tab a close affects.
+  func isBusy(_ contentID: ContentID) -> Bool {
+    if !commandQueue(for: contentID).isEmpty { return true }
+    return contentActivity?(contentID) ?? false
+  }
   // MARK: - Env resolution
 
   /// Resolves the merged environment for a Project's spawned subprocesses.
@@ -2930,7 +2362,7 @@ final class HierarchyManager {
     for projectID: ProjectID,
     in settings: Settings
   ) -> [String: String] {
-    PaneEnvironment.processBase(
+    TabEnvironment.processBase(
       overrides: settings.projects[projectID]?.envVars ?? [:],
       socketPath: SocketPaths.resolve()
     )

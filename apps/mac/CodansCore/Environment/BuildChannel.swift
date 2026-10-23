@@ -36,7 +36,9 @@ public nonisolated enum BuildChannel: String, Sendable, CaseIterable {
 
   /// Product slug every channel-scoped resource is named after:
   /// `~/.<slug>` (config + state + run), `~/Library/Caches/<slug>`,
-  /// `/tmp/<slug>-<uid>.sock`, `/usr/local/bin/<slug>`.
+  /// `/tmp/<slug>-<uid>.sock`, `/usr/local/bin/<slug>`. A Debug build of a
+  /// linked worktree extends the data paths with its instance name (see
+  /// `AppInstance`); the CLI name stays the channel's.
   public var slug: String {
     switch self {
     case .development: return "codans-dev"

@@ -49,74 +49,90 @@ extension HierarchyHandlers {
           isArchived: worktree.archived,
           isPinned: worktree.isPinned,
           isSelected: project.selectedWorktreeID == worktree.id,
-          selectedTabID: worktree.selectedTabID?.description,
-          tabCount: worktree.tabs.count
+          focusedPaneID: worktree.focusedPaneID?.description,
+          paneCount: worktree.panes.count
         ))
     }
     return .failed(.notFound(kind: "worktree", id: req.id.uuidString))
   }
 
+  /// `hierarchy.describeTab` — a Tab id, or a Content id (its Tab), or a
+  /// Pane id (its selected Tab).
   public func describeTab(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     guard let req = try? params.decoded(as: IPC.DescribeRequest.self) else {
       return .failed(.invalidParams(message: "describeTab requires {id}", path: nil))
     }
-    let catalog = manager.catalog
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        guard let tab = worktree.tabs.first(where: { $0.id.raw == req.id }) else { continue }
-        handleRegistry.sync(with: catalog)
-        let handle = handleRegistry.snapshot().tabs[tab.id.description].map { "t\($0)" }
-        return Self.encodeDescription(
-          IPC.TabDescription(
-            id: tab.id.description,
-            handle: handle,
-            projectID: project.id.description,
-            worktreeID: worktree.id.description,
-            title: tab.name ?? tab.cachedDisplayTitle,
-            name: tab.name,
-            icon: tab.icon,
-            isSelected: worktree.selectedTabID == tab.id,
-            focusedPaneID: tab.splitTree.zoomed?.description,
-            paneIDs: tab.panes.map(\.id.description)
-          ))
-      }
+    guard let tabID = convert(req.id, to: .tab).map({ TabID(raw: $0.id) }),
+      let description = tabDescription(tabID)
+    else {
+      return .failed(.notFound(kind: "tab", id: req.id.uuidString))
     }
-    return .failed(.notFound(kind: "tab", id: req.id.uuidString))
+    return Self.encodeDescription(description)
   }
 
+  /// `hierarchy.describePane` — a Pane id, or a Tab / Content id (its Pane).
   public func describePane(_ params: JSONValue) async -> RouterOutcome {
     await Task.yield()
     guard let req = try? params.decoded(as: IPC.DescribeRequest.self) else {
       return .failed(.invalidParams(message: "describePane requires {id}", path: nil))
     }
-    let catalog = manager.catalog
-    for project in catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          guard let pane = tab.panes.first(where: { $0.id.raw == req.id }) else { continue }
-          handleRegistry.sync(with: catalog)
-          let handle = handleRegistry.snapshot().panes[pane.id.description].map { "p\($0)" }
-          let live = overlayLivePaneDirectories(in: [pane])[0]
-          return Self.encodeDescription(
-            IPC.PaneDescription(
-              id: pane.id.description,
-              handle: handle,
-              projectID: project.id.description,
-              worktreeID: worktree.id.description,
-              tabID: tab.id.description,
-              workingDirectory: live.workingDirectory,
-              initialCommand: pane.initialCommand,
-              labels: pane.labels.sorted(),
-              agent: pane.agentKind?.rawValue,
-              agentSessionID: pane.agentSessionID,
-              isLive: runtimeProbe(pane.id) != nil,
-              isFocused: tab.splitTree.zoomed == pane.id
-            ))
-        }
-      }
+    guard let paneID = convert(req.id, to: .pane).map({ PaneID(raw: $0.id) }),
+      let description = paneDescription(paneID)
+    else {
+      return .failed(.notFound(kind: "pane", id: req.id.uuidString))
     }
-    return .failed(.notFound(kind: "pane", id: req.id.uuidString))
+    return Self.encodeDescription(description)
+  }
+
+  /// The wire description of one Tab; shared by `describeTab` and the
+  /// rows of `listTabs`.
+  func tabDescription(_ tabID: TabID) -> IPC.TabDescription? {
+    let catalog = manager.catalog
+    guard let address = catalog.address(forTab: tabID),
+      let pane = catalog.pane(address.paneID),
+      let tab = pane.tab(tabID)
+    else { return nil }
+    handleRegistry.sync(with: catalog)
+    let terminal = tab.content.terminal
+    return IPC.TabDescription(
+      id: tab.id.description,
+      handle: handleRegistry.handle(forTab: tab.id).map { "t\($0)" },
+      projectID: address.projectID.description,
+      worktreeID: address.worktreeID.description,
+      paneID: pane.id.description,
+      contentID: tab.contentID.description,
+      title: tab.name ?? tab.cachedDisplayTitle,
+      name: tab.name,
+      icon: tab.icon,
+      color: tab.color,
+      isSelected: pane.selectedTabID == tab.id,
+      workingDirectory: overlayLiveDirectories(in: [tab])[0].content.terminal?.workingDirectory,
+      labels: (terminal?.labels ?? []).sorted(),
+      agent: terminal?.agentKind?.rawValue,
+      agentSessionID: terminal?.agentSessionID,
+      isLive: runtimeProbe(tab.contentID) != nil
+    )
+  }
+
+  /// The wire description of one Pane; shared by `describePane` and the
+  /// rows of `listPanes`.
+  func paneDescription(_ paneID: PaneID) -> IPC.PaneDescription? {
+    let catalog = manager.catalog
+    guard let address = catalog.address(forPane: paneID),
+      let worktree = catalog.worktree(address.worktreeID, in: address.projectID),
+      let pane = worktree.pane(paneID)
+    else { return nil }
+    handleRegistry.sync(with: catalog)
+    return IPC.PaneDescription(
+      id: pane.id.description,
+      handle: handleRegistry.handle(forPane: pane.id).map { "p\($0)" },
+      projectID: address.projectID.description,
+      worktreeID: address.worktreeID.description,
+      selectedTabID: pane.selectedTabID?.description,
+      tabIDs: pane.tabIDs.map(\.description),
+      isFocused: worktree.focusedPaneID == pane.id
+    )
   }
 
   private static func encodeDescription<T: Encodable>(_ description: T) -> RouterOutcome {

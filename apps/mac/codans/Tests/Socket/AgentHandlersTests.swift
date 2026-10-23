@@ -30,7 +30,8 @@ struct AgentHandlersTests {
     hierarchy.kind = { pid in pid == projectID ? .gitRepo : nil }
     hierarchy.launchAgent = { spec in
       recorder.specs.append(spec)
-      return AgentLaunchOutcome(profile: spec.profile, command: "cmd", tabID: TabID(), paneID: PaneID())
+      return AgentLaunchOutcome(
+        profile: spec.profile, command: "cmd", tabID: TabID(), paneID: PaneID(), contentID: ContentID())
     }
     return AgentHandlers(settings: makeStore(profiles: profiles), hierarchy: hierarchy, installation: nil)
   }
@@ -66,7 +67,7 @@ struct AgentHandlersTests {
     let byName = try await handlers.launch(
       IPC.AgentLaunchRequest(projectID: projectID, worktreeID: worktreeID, profile: "build"))
     #expect(byName.profileID == build.id)
-    #expect(byName.paneID != nil)
+    #expect(byName.contentID != nil)
 
     _ = try await handlers.launch(
       IPC.AgentLaunchRequest(

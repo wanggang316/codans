@@ -81,17 +81,20 @@ struct PersistenceVersioningTests {
     let directory = try tempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("catalog.json")
-    let future = Data(#"{"version": 99, "projects": []}"#.utf8)
-    try future.write(to: url)
+    // A file from a newer build stays in place read-only (see
+    // `CatalogStoreTests`); a corrupt one stays in place too, with a copy.
+    let corrupt = Data(#"{"version": 4, "projects": "not a list"}"#.utf8)
+    try corrupt.write(to: url)
 
     let store = CatalogStore(fileURL: url)
-    let loaded = try store.load()
+    let loaded = store.loadForLaunch()
 
     #expect(loaded.projects.isEmpty)
-    #expect(store.persistenceEnabled)
+    #expect(!store.persistenceEnabled)
+    #expect(try Data(contentsOf: url) == corrupt)
     let backups = try FileManager.default.contentsOfDirectory(
       at: StoreBackup.directory(for: url), includingPropertiesForKeys: nil)
-    #expect(backups.map(\.lastPathComponent).contains { $0.hasPrefix("catalog.unsupported-v99-") })
-    #expect(try Data(contentsOf: backups[0]) == future)
+    #expect(backups.map(\.lastPathComponent).contains { $0.hasPrefix("catalog.corrupt-") })
+    #expect(try Data(contentsOf: backups[0]) == corrupt)
   }
 }

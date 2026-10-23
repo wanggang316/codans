@@ -65,7 +65,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 - 进程树为"守护进程 → `login`（独立进程组）→ shell（独立进程组）"；
 - `ssh -t` 到缺少 terminfo 的主机，远端为 `TERM=xterm-256color`，zsh 主机上 Backspace、←、Home、Delete 显示正确，bash 主机上 `tput` 可用；
 - `cd` 之后 pane 的工作目录随之更新（OSC 7），超过阈值的命令结束后产生"命令完成 / 失败"通知（OSC 133）；
-- 前台任务检测、agent 识别、不带 `CODANS_PANE_ID` 的 CLI 调用方解析、app 退出重进后重新接上会话，都与集成前一致。
+- 前台任务检测、agent 识别、不带 `CODANS_CONTENT_ID` 的 CLI 调用方解析、app 退出重进后重新接上会话，都与集成前一致。
 
 ### 系统上下文
 
@@ -101,7 +101,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
   - `interactive(wrapper:)`：本地 pane。`command` 留空，传 wrapper，并**显式设置 `wait_after_command = true`**。embedded 模式只在设置了 `command` 时才自动打开它；codans 依赖"子进程退出后 surface 不自动关闭"，以 `paneInfoChanged(.childExited)` 作为结束信号。
   - `command(_:)`：远端 pane。沿用现有命令字符串，并设置 `disable_shell_integration = true`，让这条本地 SSH 循环的启动方式不受全局集成配置影响。
 - `ZmxAttachCommand.wrapperArgv` 生成 wrapper argv，`--restore-from` 在其中；字符串形态的 `build` 只给远端 pane 用。
-- `ForegroundJobReader.foregroundProcessGroupID` 用 `sysctl(KERN_PROC_PID)` 读守护进程子进程的 `e_tpgid`。这个子进程是 `login(1)`，它保持 setuid root，`proc_pidinfo(PROC_PIDTBSDINFO)` 对它返回 EPERM；用 `proc_pidinfo` 读会让前台任务检测（tab 的忙碌指示、`pane send --wait`）始终判定为空闲。
+- `ForegroundJobReader.foregroundProcessGroupID` 用 `sysctl(KERN_PROC_PID)` 读守护进程子进程的 `e_tpgid`。这个子进程是 `login(1)`，它保持 setuid root，`proc_pidinfo(PROC_PIDTBSDINFO)` 对它返回 EPERM；用 `proc_pidinfo` 读会让前台任务检测（tab 的忙碌指示、`tab send --wait`）始终判定为空闲。
 
 ### 默认选项
 
@@ -116,7 +116,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 | `title` | 开 | **关** | tab 标题有自己的优先级：手动名称 > OSC 2 > OSC 0 > pwd 目录名。打开后集成会持续发 OSC 2（提示符处为路径，执行中为命令行），把 tab 名字从紧凑的目录名换成长路径或命令。OSC 7 已足够提供目录名。用户可写 `title` 打开 |
 | `ssh-env` | 关 | **开** | 本设计的核心修复：`TERM=xterm-ghostty` 时用 `xterm-256color` 连接，并请求传递 `COLORTERM`、`TERM_PROGRAM(_VERSION)`（是否生效取决于主机的 `AcceptEnv`） |
 | `ssh-terminfo` | 关 | 关 | 会往远端 `~/.terminfo` 写文件，并用 `ControlMaster`/`ControlPath` 多建一条连接，可能和用户自己的 ssh 复用配置冲突。它的缓存依赖 `ghostty` 命令行程序，codans 没有分发这个程序，所以每次连接都会重新探测一遍 |
-| `path` | 开 | **关** | 会把 `Codans.app/Contents/MacOS` 加进 `PATH`，那里没有 `ghostty` 命令行程序，加进去没有意义。codans 的 CLI 已由 `PaneEnvironment` 放进 `PATH` |
+| `path` | 开 | **关** | 会把 `Codans.app/Contents/MacOS` 加进 `PATH`，那里没有 `ghostty` 命令行程序，加进去没有意义。codans 的 CLI 已由 `TabEnvironment` 放进 `PATH` |
 
 `shell-integration`（默认 `detect`）和 `command` 保持 Ghostty 默认，用户配置原样生效。
 
@@ -134,7 +134,7 @@ codans 的交互式 pane 不设置 `command`，而是传 wrapper `[zmx, attach, 
 - **zmx**：执行 `attach` 收到的 argv，负责会话持久化和快照恢复。不了解 shell 集成，本设计不改 zmx。
 - **`PaneSurface`**：把启动描述翻译成 `ghostty_surface_config_s`，是 app 内唯一构造 surface 配置的地方。
 - **`TerminalEngine`**：决定每个 pane 用哪种启动形态：本地用 `interactive`，远端用 `command`。
-- **`PaneEnvironment`**：只写 codans 自己的变量，见 [environment.md](environment.md)。集成相关变量（`ZDOTDIR`、`GHOSTTY_*`）由 libghostty 在启动时写入，`PaneEnvironment` 不碰它们。
+- **`TabEnvironment`**：只写 codans 自己的变量，见 [environment.md](environment.md)。集成相关变量（`ZDOTDIR`、`GHOSTTY_*`）由 libghostty 在启动时写入，`TabEnvironment` 不碰它们。
 
 ## 技术决策
 
@@ -202,7 +202,7 @@ libghostty 支持强制指定 shell 类型。否决理由：
   - 跑一条长命令能触发 `commandFinished` 通知；
   - 在 pane 里执行 `exit` 后，pane 照常关闭并从 catalog 移除；
   - 退出 app 再启动后能重新接上会话，`--restore-from` 快照能正常恢复；
-  - CLI 不带 `CODANS_PANE_ID` 时，调用方解析仍能命中正确的 pane；
+  - CLI 不带 `CODANS_CONTENT_ID` 时，调用方解析仍能命中正确的会话；
   - agent 识别：shell 处于提示符时前台进程组只有 shell（`login` 在自己的进程组里），运行 `claude` 时能识别出来。
 - **macOS 登录会话**：`login(1)` 从客户端侧挪到守护进程侧。需验证 pane 里访问钥匙串的 CLI（如 `claude` 的登录态）行为不变。
 

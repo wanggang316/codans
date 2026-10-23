@@ -331,7 +331,7 @@ struct CommandQueueView: View {
   /// Live queue for the edited pane. Read inside `body`'s tracking scope so
   /// `@Observable` re-renders the list when the runner drains an entry.
   private var entries: [QueuedCommand] {
-    hierarchyManager.catalog.pane(store.paneID)?.commandQueue ?? []
+    hierarchyManager.catalog.content(store.contentID)?.terminal?.commandQueue ?? []
   }
 }
 

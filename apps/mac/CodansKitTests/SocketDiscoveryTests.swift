@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 import Testing
 
@@ -11,13 +12,8 @@ struct SocketDiscoveryTests {
   }
 
   @Test
-  func defaultPathMatchesBuildChannel() {
-    let path = SocketDiscovery.defaultSocketPath(uid: 1234)
-    #if DEBUG
-      #expect(path == "/tmp/codans-dev-1234.sock")
-    #else
-      #expect(path == "/tmp/codans-1234.sock")
-    #endif
+  func defaultPathIsTheInstances() {
+    #expect(SocketDiscovery.defaultSocketPath(uid: 1234) == AppInstance.socketPath(uid: 1234))
   }
 
   @Test
@@ -74,13 +70,13 @@ struct SocketDiscoveryTests {
   }
 
   /// The developer's tool follows its name: run from a release pane it still
-  /// drives the development app.
+  /// drives its own development app — the one of its instance.
   @Test
   func developmentCLIIgnoresAReleasePaneAndDialsItsOwnSocket() throws {
     let pane = SocketDiscovery.productionSocketPath(uid: 7)
     let resolved = try SocketDiscovery.resolve(
       environment: ["CODANS_SOCKET_PATH": pane], channel: .development, uid: 7)
-    #expect(resolved == SocketDiscovery.developmentSocketPath(uid: 7))
+    #expect(resolved == SocketDiscovery.defaultSocketPath(uid: 7))
   }
 
   @Test

@@ -21,7 +21,7 @@ private let storeLogger = Logger(
 /// view. Nothing is persisted: every entry is reconstructed from the
 /// live event flow at process start.
 ///
-/// `entries` is keyed by `PaneID` and exposes one `AgentEntry` per
+/// `entries` is keyed by `ContentID` and exposes one `AgentEntry` per
 /// pane that has been bound via `onAgentBound(_:kind:sessionID:)`. The
 /// dictionary is `@Observable`-tracked so SwiftUI consumers re-render
 /// on every transition; every mutation writes the full entry struct
@@ -110,17 +110,17 @@ final class AgentStateStore {
   /// Public, read-only view of bound agents. `@Observable` tracks
   /// dictionary subscript writes so SwiftUI consumers re-render on
   /// every state transition.
-  private(set) var entries: [PaneID: AgentEntry] = [:] {
+  private(set) var entries: [ContentID: AgentEntry] = [:] {
     didSet {
       let working = Set(entries.compactMap { $0.value.state == .working ? $0.key : nil })
       let attention = entries.values.contains { $0.state == .working || $0.state == .blocked }
-      if workingPaneIDs != working { workingPaneIDs = working }
+      if workingContentIDs != working { workingContentIDs = working }
       if needsAttention != attention { needsAttention = attention }
     }
   }
 
   /// Sidebar signals exclude message and source changes.
-  private(set) var workingPaneIDs: Set<PaneID> = []
+  private(set) var workingContentIDs: Set<ContentID> = []
   private(set) var needsAttention = false
 
   /// Per-pane derivation scratch. Kept around for all panes the
@@ -170,7 +170,7 @@ final class AgentStateStore {
 
   private typealias AgentRawState = PaneAttentionInterpreter.AgentActivityState
 
-  private var scratch: [PaneID: Scratch] = [:]
+  private var scratch: [ContentID: Scratch] = [:]
 
   /// One attention stop: the agent stopped for the user (blocked, or its
   /// turn ended). Read by notification delivery: a stop the user already
@@ -186,24 +186,24 @@ final class AgentStateStore {
 
   /// The pane's current attention stop. Replaced on every new stop, removed
   /// when the agent works again.
-  @ObservationIgnored private var attentionStops: [PaneID: AttentionStop] = [:]
+  @ObservationIgnored private var attentionStops: [ContentID: AttentionStop] = [:]
 
   /// Globally focused pane, if any. Used to avoid surfacing
   /// `.done` for work the user is already looking at; focus
   /// change events still clear a previously surfaced finished state.
-  private let focusedPane: @MainActor () -> PaneID?
-  /// True when the user can see `paneID` right now (app active, pane has
+  private let focusedPane: @MainActor () -> ContentID?
+  /// True when the user can see `contentID` right now (app active, pane has
   /// keyboard focus). Unlike `focusedPane`, this is gated on the app being
   /// frontmost, so an agent that stops while the user is in another app is
   /// not recorded as observed.
-  private let isPaneInView: @MainActor (PaneID) -> Bool
+  private let isPaneInView: @MainActor (ContentID) -> Bool
   /// Time source. Injected so tests can assert on `lastTransitionAt`
   /// without racing real `Date()`.
   private let now: () -> Date
 
   init(
-    focusedPane: @escaping @MainActor () -> PaneID?,
-    isPaneInView: @escaping @MainActor (PaneID) -> Bool = { _ in false },
+    focusedPane: @escaping @MainActor () -> ContentID?,
+    isPaneInView: @escaping @MainActor (ContentID) -> Bool = { _ in false },
     now: @escaping () -> Date = Date.init
   ) {
     self.focusedPane = focusedPane
@@ -255,13 +255,13 @@ final class AgentStateStore {
   func onTerminalEvent(_ event: TerminalEvent) {
     storeLogger.debug("onTerminalEvent \(Self.eventTag(event), privacy: .public)")
     switch event {
-    case .paneIdle(let paneID, _):
-      ensureScratch(paneID)
-      refresh(paneID)
+    case .paneIdle(let contentID, _):
+      ensureScratch(contentID)
+      refresh(contentID)
 
-    case .paneExited(let paneID, _, _),
-      .paneCrashed(let paneID, _),
-      .paneClosedByTab(let paneID, _):
+    case .paneExited(let contentID, _, _),
+      .paneCrashed(let contentID, _),
+      .paneClosedByTab(let contentID, _):
       // Teardown — store forgets the pane entirely. Anything
       // downstream that wants to remember the last state should
       // snapshot before teardown.
@@ -276,25 +276,25 @@ final class AgentStateStore {
       // (tests, future non-binder consumers) without going through
       // AgentBinder. The redundant removeValue for an already-
       // unbound pane is a single `@Observable` no-op write.
-      entries.removeValue(forKey: paneID)
-      scratch.removeValue(forKey: paneID)
-      attentionStops.removeValue(forKey: paneID)
+      entries.removeValue(forKey: contentID)
+      scratch.removeValue(forKey: contentID)
+      attentionStops.removeValue(forKey: contentID)
 
-    case .paneViewportChanged(let paneID, let text):
-      applyViewportText(text, paneID: paneID)
+    case .paneViewportChanged(let contentID, let text):
+      applyViewportText(text, contentID: contentID)
 
-    case .paneProgramStatusChanged(let paneID, let summary):
-      applyProgramStatus(summary, paneID: paneID)
+    case .paneProgramStatusChanged(let contentID, let summary):
+      applyProgramStatus(summary, contentID: contentID)
 
-    case .paneInfoChanged(let paneID, .title(let title)):
+    case .paneInfoChanged(let contentID, .title(let title)):
       // Display-only title cache — no refresh: the title never feeds
       // derivation (a "Working…" title must not flip state; see
       // `titleChangesDoNotDriveWorkingAfterInput`). Scratch is created
       // if absent so a title observed before the agent binds is already
       // available when the card first opens.
-      var s = scratch[paneID] ?? .fresh()
+      var s = scratch[contentID] ?? .fresh()
       s.lastTitle = title
-      scratch[paneID] = s
+      scratch[contentID] = s
 
     case .paneInfoChanged,
       .paneOutput,
@@ -306,12 +306,12 @@ final class AgentStateStore {
     }
   }
 
-  /// The user typed into `paneID`. Marks the pane as observed and
+  /// The user typed into `contentID`. Marks the pane as observed and
   /// optimistically clears a blocked state — the user is responding to the
   /// prompt, so drop the attention cue until the next snapshot re-derives it.
-  func onPaneKeyboardActivity(_ paneID: PaneID) {
-    guard var s = scratch[paneID] else { return }
-    let clearsBlocked = s.rawState == .blocked && !isGoverned(s, paneID: paneID)
+  func onPaneKeyboardActivity(_ contentID: ContentID) {
+    guard var s = scratch[contentID] else { return }
+    let clearsBlocked = s.rawState == .blocked && !isGoverned(s, contentID: contentID)
     if clearsBlocked {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
@@ -319,43 +319,43 @@ final class AgentStateStore {
     }
     s.userInputSeen = true
     s.seen = true
-    scratch[paneID] = s
+    scratch[contentID] = s
     // Keystrokes reach only the key surface, so typing is a look at the pane.
-    attentionStops[paneID]?.observed = true
-    refresh(paneID)
-    if clearsBlocked { attentionStops[paneID]?.blockedPromptCleared = true }
+    attentionStops[contentID]?.observed = true
+    refresh(contentID)
+    if clearsBlocked { attentionStops[contentID]?.blockedPromptCleared = true }
   }
 
-  /// `paneID` was focused in the catalog. Clears display-only attention
+  /// `contentID` was focused in the catalog. Clears display-only attention
   /// like `onPaneKeyboardActivity`, but counts as a look at the current
   /// attention stop only when the pane is in view (see `markObserved`).
-  func onPaneFocused(_ paneID: PaneID) {
-    guard var s = scratch[paneID] else { return }
-    let clearsBlocked = s.rawState == .blocked && !isGoverned(s, paneID: paneID)
+  func onPaneFocused(_ contentID: ContentID) {
+    guard var s = scratch[contentID] else { return }
+    let clearsBlocked = s.rawState == .blocked && !isGoverned(s, contentID: contentID)
     if clearsBlocked {
       s.lastViewportText = nil
       s.lastWorkingAt = nil
       s.rawState = .idle
     }
     s.seen = true
-    scratch[paneID] = s
-    markObserved(paneID)
-    refresh(paneID)
-    if clearsBlocked { attentionStops[paneID]?.blockedPromptCleared = true }
+    scratch[contentID] = s
+    markObserved(contentID)
+    refresh(contentID)
+    if clearsBlocked { attentionStops[contentID]?.blockedPromptCleared = true }
   }
 
-  /// The user may be looking at `paneID` without a focus change — for
+  /// The user may be looking at `contentID` without a focus change — for
   /// example the app became active again with the pane already focused.
   /// Records that the current attention stop was observed only when the
   /// pane is really in view: catalog focus also moves for a CLI focus
   /// call while another app is in front. Badges are left to the regular
   /// focus path.
-  func markObserved(_ paneID: PaneID) {
-    guard isPaneInView(paneID) else { return }
-    attentionStops[paneID]?.observed = true
+  func markObserved(_ contentID: ContentID) {
+    guard isPaneInView(contentID) else { return }
+    attentionStops[contentID]?.observed = true
   }
 
-  /// `AgentBinder` identified an agent in `paneID`. Materialise an
+  /// `AgentBinder` identified an agent in `contentID`. Materialise an
   /// entry and derive the initial state from any scratch already
   /// accumulated before the foreground job is identified.
   ///
@@ -367,46 +367,46 @@ final class AgentStateStore {
   /// `.idle` until the user types. The app-restart case is handled
   /// separately by the persisted seed (see `seedRestored`), preserved below.
   func onAgentBound(
-    _ paneID: PaneID,
+    _ contentID: ContentID,
     kind: AgentKind,
     sessionID: String?,
     assumeUserInputSeen: Bool = false
   ) {
     let viewportImpliesActive: Bool = {
-      guard let text = scratch[paneID]?.lastViewportText else { return false }
+      guard let text = scratch[contentID]?.lastViewportText else { return false }
       let raw = PaneAttentionInterpreter.classifyAgentActivity(kind: kind, viewportText: text)
       return raw == .working || raw == .blocked
     }()
     let effectiveUserInputSeen = assumeUserInputSeen || viewportImpliesActive
 
-    if var existing = scratch[paneID] {
+    if var existing = scratch[contentID] {
       existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
-      scratch[paneID] = existing
+      scratch[contentID] = existing
     } else {
-      scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
+      scratch[contentID] = .fresh(userInputSeen: effectiveUserInputSeen)
     }
     // Preserve a state seeded from the persisted quit snapshot
     // (`seedRestored`). The binder re-identifies the restored agent and
     // calls this on launch; hardcoding `.idle` here dropped the resumed
     // working/blocked badge before any live viewport arrived. Fresh
     // bindings have no prior entry and correctly start `.idle`.
-    let seeded = entries[paneID]
-    entries[paneID] = AgentEntry(
+    let seeded = entries[contentID]
+    entries[contentID] = AgentEntry(
       kind: kind,
       sessionID: sessionID,
       state: seeded?.state ?? .idle,
       lastTransitionAt: seeded?.lastTransitionAt ?? now()
     )
-    refresh(paneID)
+    refresh(contentID)
   }
 
   /// User-driven unbind path. Drops both the entry and its scratch so
   /// the row disappears from the view and subsequent events for
   /// this pane become silent no-ops until something rebinds.
-  func onAgentUnbound(_ paneID: PaneID) {
-    entries.removeValue(forKey: paneID)
-    scratch.removeValue(forKey: paneID)
-    attentionStops.removeValue(forKey: paneID)
+  func onAgentUnbound(_ contentID: ContentID) {
+    entries.removeValue(forKey: contentID)
+    scratch.removeValue(forKey: contentID)
+    attentionStops.removeValue(forKey: contentID)
   }
 
   /// Catalog-membership backstop. Drops every entry (and its scratch)
@@ -423,18 +423,18 @@ final class AgentStateStore {
   /// mutation breaks that loop. Driven by the app's event drain on
   /// `hierarchyMutated` (see `AppState.dispatchToAgentStateStore`).
   ///
-  /// Takes a flat `Set<PaneID>` rather than a `Catalog` so the store stays
+  /// Takes a flat `Set<ContentID>` rather than a `Catalog` so the store stays
   /// free of hierarchy imports — the catalog walk lives in the wiring layer.
-  func reconcileMembership(livePaneIDs: Set<PaneID>) {
-    let stale = entries.keys.filter { !livePaneIDs.contains($0) }
+  func reconcileMembership(liveContentIDs: Set<ContentID>) {
+    let stale = entries.keys.filter { !liveContentIDs.contains($0) }
     guard !stale.isEmpty else { return }
-    for paneID in stale {
+    for contentID in stale {
       storeLogger.info(
-        "reconcile-drop pane=\(paneID.raw.uuidString, privacy: .public) — absent from catalog"
+        "reconcile-drop pane=\(contentID.raw.uuidString, privacy: .public) — absent from catalog"
       )
-      entries.removeValue(forKey: paneID)
-      scratch.removeValue(forKey: paneID)
-      attentionStops.removeValue(forKey: paneID)
+      entries.removeValue(forKey: contentID)
+      scratch.removeValue(forKey: contentID)
+      attentionStops.removeValue(forKey: contentID)
     }
   }
 
@@ -448,15 +448,15 @@ final class AgentStateStore {
   /// Scratch is initialised with `userInputSeen = true` so the
   /// restored state cannot be flipped to a synthetic "done" cue
   /// before any user interaction; the next real event refines it.
-  func seedRestored(_ records: [(paneID: PaneID, kind: AgentKind, state: AgentRuntimeState)]) {
+  func seedRestored(_ records: [(contentID: ContentID, kind: AgentKind, state: AgentRuntimeState)]) {
     for record in records {
-      entries[record.paneID] = AgentEntry(
+      entries[record.contentID] = AgentEntry(
         kind: record.kind,
         sessionID: nil,
         state: record.state,
         lastTransitionAt: now()
       )
-      scratch[record.paneID] = .fresh(
+      scratch[record.contentID] = .fresh(
         userInputSeen: true,
         awaitingFirstClassification: true
       )
@@ -465,26 +465,26 @@ final class AgentStateStore {
 
   // MARK: - Reads
 
-  /// Latest OSC title observed for `paneID` — the terminal title agents
+  /// Latest OSC title observed for `contentID` — the terminal title agents
   /// push as they work, which doubles as a one-line "what is the agent
   /// doing" cue — or nil when none has arrived (or the pane has been
   /// torn down). Read by the hover summary card. Reading `scratch`
   /// inside a SwiftUI body registers `@Observable` tracking, so an open
   /// card re-renders as the agent retitles the pane.
-  func title(for paneID: PaneID) -> String? {
-    scratch[paneID]?.lastTitle
+  func title(for contentID: ContentID) -> String? {
+    scratch[contentID]?.lastTitle
   }
 
-  /// One line on what the agent in `paneID` is doing: its own program
+  /// One line on what the agent in `contentID` is doing: its own program
   /// status message when it sent one, otherwise the pane's OSC title.
-  func activityText(for paneID: PaneID) -> String? {
-    entries[paneID]?.message ?? title(for: paneID)
+  func activityText(for contentID: ContentID) -> String? {
+    entries[contentID]?.message ?? title(for: contentID)
   }
 
-  /// True when the agent in `paneID` has stopped for the user (blocked or
+  /// True when the agent in `contentID` has stopped for the user (blocked or
   /// done) and the user has looked at the pane since that stop.
-  func hasObservedAttention(_ paneID: PaneID) -> Bool {
-    attentionStops[paneID]?.observed == true
+  func hasObservedAttention(_ contentID: ContentID) -> Bool {
+    attentionStops[contentID]?.observed == true
   }
 
   // MARK: - Derivation
@@ -509,24 +509,24 @@ final class AgentStateStore {
     }
   }
 
-  /// The program status record that decides `paneID`'s state, or nil when
+  /// The program status record that decides `contentID`'s state, or nil when
   /// the pane falls back to the screen.
-  private func governingActivity(_ s: Scratch, paneID: PaneID) -> ProgramStatusSummary.Record? {
-    guard let summary = s.programStatus, summary.governs(entries[paneID]?.kind) else {
+  private func governingActivity(_ s: Scratch, contentID: ContentID) -> ProgramStatusSummary.Record? {
+    guard let summary = s.programStatus, summary.governs(entries[contentID]?.kind) else {
       return nil
     }
     return summary.activity
   }
 
-  private func isGoverned(_ s: Scratch, paneID: PaneID) -> Bool {
-    governingActivity(s, paneID: paneID) != nil
+  private func isGoverned(_ s: Scratch, contentID: ContentID) -> Bool {
+    governingActivity(s, contentID: contentID) != nil
   }
 
-  private func applyProgramStatus(_ summary: ProgramStatusSummary?, paneID: PaneID) {
-    var s = scratch[paneID] ?? .fresh()
-    let wasGoverned = isGoverned(s, paneID: paneID)
+  private func applyProgramStatus(_ summary: ProgramStatusSummary?, contentID: ContentID) {
+    var s = scratch[contentID] ?? .fresh()
+    let wasGoverned = isGoverned(s, contentID: contentID)
     s.programStatus = summary
-    if wasGoverned, !isGoverned(s, paneID: paneID) {
+    if wasGoverned, !isGoverned(s, contentID: contentID) {
       // The screen was not read while the report governed, so the cached
       // text is stale. Derive from the next live snapshot instead, and do
       // not read the end of the report as a finished screen turn.
@@ -536,8 +536,8 @@ final class AgentStateStore {
       s.rawState = .idle
       s.seen = true
     }
-    scratch[paneID] = s
-    refresh(paneID)
+    scratch[contentID] = s
+    refresh(contentID)
   }
 
   /// Opens a new attention stop when the agent blocks or its turn ends, and
@@ -548,46 +548,46 @@ final class AgentStateStore {
   /// optimistic clear in `onPaneFocused` / `onPaneKeyboardActivity` is the
   /// same stop, so a look at the prompt is not lost.
   private func trackAttentionStop(
-    _ paneID: PaneID, previous: AgentRawState, current: AgentRawState, hasViewport: Bool
+    _ contentID: ContentID, previous: AgentRawState, current: AgentRawState, hasViewport: Bool
   ) {
     switch current {
     case .working:
-      attentionStops.removeValue(forKey: paneID)
+      attentionStops.removeValue(forKey: contentID)
     case .blocked where previous != .blocked:
-      if attentionStops[paneID]?.blockedPromptCleared == true {
-        attentionStops[paneID]?.blockedPromptCleared = false
+      if attentionStops[contentID]?.blockedPromptCleared == true {
+        attentionStops[contentID]?.blockedPromptCleared = false
       } else {
-        attentionStops[paneID] = AttentionStop(observed: isPaneInView(paneID))
+        attentionStops[contentID] = AttentionStop(observed: isPaneInView(contentID))
       }
     case .idle where previous.isActive:
-      attentionStops[paneID] = AttentionStop(observed: isPaneInView(paneID))
+      attentionStops[contentID] = AttentionStop(observed: isPaneInView(contentID))
     case .idle where hasViewport:
       // A fresh snapshot without the prompt: the cleared prompt was resolved,
       // so a prompt that shows up later is a new stop.
-      attentionStops[paneID]?.blockedPromptCleared = false
+      attentionStops[contentID]?.blockedPromptCleared = false
     default:
       break
     }
   }
 
-  private func isFocused(_ paneID: PaneID) -> Bool {
-    focusedPane() == paneID
+  private func isFocused(_ contentID: ContentID) -> Bool {
+    focusedPane() == contentID
   }
 
-  private func ensureScratch(_ paneID: PaneID) {
-    if scratch[paneID] == nil {
-      scratch[paneID] = .fresh()
+  private func ensureScratch(_ contentID: ContentID) {
+    if scratch[contentID] == nil {
+      scratch[contentID] = .fresh()
     }
   }
 
-  private func applyViewportText(_ text: String, paneID: PaneID) {
-    var s = scratch[paneID] ?? .fresh()
+  private func applyViewportText(_ text: String, contentID: ContentID) {
+    var s = scratch[contentID] ?? .fresh()
     s.lastViewportText = text
     // A real viewport classification now governs; release the restored
     // seed so normal derivation takes over (see `seedRestored`).
     s.awaitingFirstClassification = false
-    scratch[paneID] = s
-    refresh(paneID)
+    scratch[contentID] = s
+    refresh(contentID)
   }
 
   /// Diagnostic tag — short shape-only string for the active log
@@ -635,13 +635,13 @@ final class AgentStateStore {
   /// Apply the latest raw + display derivation. Scratch is updated even
   /// when the pane is not bound yet so pre-bind signals still influence
   /// `onAgentBound`.
-  private func refresh(_ paneID: PaneID) {
-    guard var s = scratch[paneID] else { return }
-    if let activity = governingActivity(s, paneID: paneID) {
-      refreshFromProgramStatus(paneID, scratch: s, activity: activity)
+  private func refresh(_ contentID: ContentID) {
+    guard var s = scratch[contentID] else { return }
+    if let activity = governingActivity(s, contentID: contentID) {
+      refreshFromProgramStatus(contentID, scratch: s, activity: activity)
       return
     }
-    let kind = entries[paneID]?.kind
+    let kind = entries[contentID]?.kind
     let previousRaw = s.rawState
     var newRaw = deriveRawState(s, kind: kind)
     if kind != nil {
@@ -652,15 +652,15 @@ final class AgentStateStore {
         lastWorkingAt: &s.lastWorkingAt
       )
     }
-    if isFocused(paneID) {
+    if isFocused(contentID) {
       s.seen = true
     } else if previousRaw.isActive, newRaw == .idle {
       s.seen = false
     }
     s.rawState = newRaw
-    scratch[paneID] = s
+    scratch[contentID] = s
     trackAttentionStop(
-      paneID, previous: previousRaw, current: newRaw, hasViewport: s.lastViewportText != nil)
+      contentID, previous: previousRaw, current: newRaw, hasViewport: s.lastViewportText != nil)
 
     // A pane seeded from the quit snapshot holds its restored display
     // state until the first live viewport classification — deriving from
@@ -669,13 +669,13 @@ final class AgentStateStore {
     // lands, handing control back to normal derivation.
     if s.awaitingFirstClassification { return }
 
-    commit(paneID, state: displayState(for: s), source: .screen, blockedKind: nil, message: nil)
+    commit(contentID, state: displayState(for: s), source: .screen, blockedKind: nil, message: nil)
   }
 
   /// The program status path of `refresh`: the agent's report decides the
   /// state. No working hold, no "user input first" gate, and no screen read.
   private func refreshFromProgramStatus(
-    _ paneID: PaneID, scratch current: Scratch, activity: ProgramStatusSummary.Record
+    _ contentID: ContentID, scratch current: Scratch, activity: ProgramStatusSummary.Record
   ) {
     var s = current
     let previousRaw = s.rawState
@@ -686,7 +686,7 @@ final class AgentStateStore {
     case .idle, .done, .error, .clear: newRaw = .idle
     }
     let isNewDone = activity.state == .done && s.appliedProgramStatusState != .done
-    if isFocused(paneID) {
+    if isFocused(contentID) {
       s.seen = true
     } else if isNewDone {
       s.seen = false
@@ -695,8 +695,8 @@ final class AgentStateStore {
     s.lastWorkingAt = nil
     s.appliedProgramStatusState = activity.state
     s.awaitingFirstClassification = false
-    scratch[paneID] = s
-    trackAttentionStop(paneID, previous: previousRaw, current: newRaw, hasViewport: false)
+    scratch[contentID] = s
+    trackAttentionStop(contentID, previous: previousRaw, current: newRaw, hasViewport: false)
 
     let state: AgentRuntimeState
     switch activity.state {
@@ -707,20 +707,20 @@ final class AgentStateStore {
     case .idle, .clear: state = .idle
     }
     commit(
-      paneID, state: state, source: .programStatus,
+      contentID, state: state, source: .programStatus,
       blockedKind: activity.kind, message: activity.message)
   }
 
   /// Write the derived state to the entry. The transition time moves only
   /// when the state itself changes.
   private func commit(
-    _ paneID: PaneID,
+    _ contentID: ContentID,
     state newState: AgentRuntimeState,
     source: AgentStateSource,
     blockedKind: ProgramStatusKind?,
     message: String?
   ) {
-    guard var entry = entries[paneID] else { return }
+    guard var entry = entries[contentID] else { return }
     var updated = entry
     updated.state = newState
     updated.source = source
@@ -729,11 +729,11 @@ final class AgentStateStore {
     guard updated != entry else { return }
     if entry.state != newState {
       storeLogger.info(
-        "state-transition pane=\(paneID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public) source=\(source.rawValue, privacy: .public)"
+        "state-transition pane=\(contentID.raw.uuidString, privacy: .public) \(entry.state.rawValue, privacy: .public)->\(newState.rawValue, privacy: .public) source=\(source.rawValue, privacy: .public)"
       )
       updated.lastTransitionAt = now()
     }
     entry = updated
-    entries[paneID] = entry
+    entries[contentID] = entry
   }
 }

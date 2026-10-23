@@ -1,13 +1,16 @@
 import Foundation
 
+/// One slot in a Pane's strip: the chip attributes (title, color, icon)
+/// and exactly one Content.
 public nonisolated struct Tab: Equatable, Sendable, Identifiable {
   public var id: TabID
+  /// User-set title; `nil` follows the live title.
   public var name: String?
   /// Snapshot of the most recently resolved live title (OSC tabTitle /
-  /// title / pwd basename). Persisted to the catalog so a tab whose
-  /// surface has not yet been re-spawned after app launch still shows
-  /// the previous session's title instead of falling back to "Tab N".
-  /// Cleared / overwritten as soon as a live title is observed again.
+  /// title / pwd basename). Persisted so a Tab whose surface has not yet
+  /// been re-spawned after app launch still shows the previous session's
+  /// title instead of falling back to "Tab N". Overwritten as soon as a
+  /// live title is observed again.
   public var cachedDisplayTitle: String?
   /// Per-tab accent color for the active underline stripe. `nil` = system accent.
   public var color: TabColor?
@@ -21,8 +24,7 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
   /// stick across auto re-derivation; `.auto` writes are best-effort
   /// suggestions from the runtime. See `applyingIcon(_:lock:)`.
   public var iconLock: TabIconLock
-  public var splitTree: SplitTree<PaneID>
-  public var panes: [Pane]
+  public var content: ContentSnapshot
 
   public init(
     id: TabID = TabID(),
@@ -31,8 +33,7 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
     color: TabColor? = nil,
     icon: String? = nil,
     iconLock: TabIconLock = .auto,
-    splitTree: SplitTree<PaneID> = SplitTree(),
-    panes: [Pane] = []
+    content: ContentSnapshot
   ) {
     self.id = id
     self.name = name
@@ -40,15 +41,10 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
     self.color = color
     self.icon = icon
     self.iconLock = iconLock
-    self.splitTree = splitTree
-    self.panes = panes
+    self.content = content
   }
 
-  /// The set of PaneIDs that appear as leaves in the split tree.
-  public var splitTreeLeafIDs: Set<PaneID> { Set(splitTree.leaves()) }
-
-  /// The set of PaneIDs stored in the flat panes array.
-  public var flatPaneIDs: Set<PaneID> { Set(panes.map(\.id)) }
+  public var contentID: ContentID { content.id }
 
   /// Resolves the SF Symbol to render for this tab. A locked write
   /// (`.user` / `.script`) wins outright; `.auto` defers to the caller's
@@ -75,24 +71,11 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
     }
     return copy
   }
-
-  /// Invariant: leaves of `splitTree` equal IDs of `panes`. Debug-only callers.
-  public enum InvariantError: Error, Equatable {
-    case leavesDoNotMatchPanes(leaves: Set<PaneID>, panes: Set<PaneID>)
-    case duplicatePaneIDs
-  }
-
-  public func validateInvariants() throws {
-    guard flatPaneIDs.count == panes.count else { throw InvariantError.duplicatePaneIDs }
-    let leaves = splitTreeLeafIDs
-    let flat = flatPaneIDs
-    if leaves != flat { throw InvariantError.leavesDoNotMatchPanes(leaves: leaves, panes: flat) }
-  }
 }
 
 extension Tab: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, cachedDisplayTitle, color, icon, iconLock, splitTree, panes
+    case id, name, cachedDisplayTitle, color, icon, iconLock, content
   }
 
   public init(from decoder: Decoder) throws {
@@ -103,13 +86,11 @@ extension Tab: Codable {
     self.color = try c.decodeIfPresent(TabColor.self, forKey: .color)
     self.icon = try c.decodeIfPresent(String.self, forKey: .icon)
     self.iconLock = try c.decodeIfPresent(TabIconLock.self, forKey: .iconLock) ?? .auto
-    self.splitTree = try c.decode(SplitTree<PaneID>.self, forKey: .splitTree)
-    self.panes = try c.decode([Pane].self, forKey: .panes)
+    self.content = try c.decode(ContentSnapshot.self, forKey: .content)
   }
 
   /// Omit-when-default encoding so an unset tab does not litter
-  /// `catalog.json` with `iconLock=auto` and absent `icon` keys. Older
-  /// builds that decode this file still see a clean object.
+  /// `catalog.json` with `iconLock=auto` and absent `icon` keys.
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(id, forKey: .id)
@@ -120,7 +101,6 @@ extension Tab: Codable {
     if iconLock != .auto {
       try c.encode(iconLock, forKey: .iconLock)
     }
-    try c.encode(splitTree, forKey: .splitTree)
-    try c.encode(panes, forKey: .panes)
+    try c.encode(content, forKey: .content)
   }
 }

@@ -8,8 +8,84 @@ and the project does not yet follow semantic versioning — every release until
 
 ## [Unreleased]
 
+### Breaking
+
+- **CLI verbs moved to match the new hierarchy.** `codans tab` carries
+  the session verbs (`list`, `show`, `new`, `focus`, `rename`, `close`,
+  `send`, `send-key`, `capture`, `read`, `info`, `label`, `reset`) and
+  `codans pane` the layout verbs (`list`, `focus`, `split`, `close`,
+  `resize`, `equalize`, `zoom`). `codans pane new` / `show` / `send` /
+  `send-key` / `capture` / `read` / `info` / `label` / `reset` and
+  `codans tab switch` exit non-zero and name their new location. Top-level
+  `send`, `send-key`, `capture`, and `broadcast` target with `--tab` or
+  `--pane`, where a pane means its selected tab; `broadcast --tab` is
+  replaced by `--pane` (scopes: pane, worktree, label). `pane split`
+  creates a pane with a fresh tab and prints the new tab's id; `pane
+  close` given a tab id refuses and points at `tab close`. Any id slot
+  accepts a pane, tab, or content id; the handles mean what they say:
+  `p<n>` is a pane, `t<n>` is a tab.
+- **Environment variables changed meaning.** `CODANS_PANE_ID` identifies
+  the pane (the layout slot around you), `CODANS_TAB_ID` the tab, and
+  `CODANS_CONTENT_ID` the session itself. Scripts and agents that used
+  `CODANS_PANE_ID` to address their own session must use
+  `CODANS_CONTENT_ID`; there is no alias for the former meaning.
+- **IPC description shapes and handshake.** `hierarchy.describe*`
+  returns the focused pane id and pane count on a worktree, the selected
+  tab id and tab ids on a pane, and the pane id, content id, chip
+  attributes, working directory, labels, agent fields, and liveness on a
+  tab; target handles carry `panes` and `tabs`. The `system.hello`
+  protocol version is bumped, so a `codans` binary from another build is
+  refused — use the CLI bundled with the app.
+- **Settings keys renamed.** Settings keys that said "pane" for a session
+  follow the new vocabulary: `notifications.mute.mutedPaneIDs` is
+  `mutedContentIDs` (a mute follows the session), and the on-finished
+  script action `closePane` is `closeTab`. Old keys are read once and
+  dropped on the next save.
+- **Catalog v4 with a one-shot migration.** The first launch converts a
+  v3 catalog to v4 and keeps the v3 file under `~/.codans/state/backups/`.
+  Your selected tab's split layout becomes the pane layout, the sessions
+  of your other tabs are stacked as tabs in the focused pane, and every
+  session reattaches because its id becomes the content id unchanged. A
+  catalog written by a newer build opens a read-only "update required"
+  screen; nothing is moved, saved, or killed.
+
 ### Added
 
+- **Panes side by side, tabs stacked inside each pane.** A worktree's
+  content area is a split layout of panes; each pane carries its own tab
+  strip and shows one tab at a time, so an agent, a dev server, and a
+  test watcher can share the screen and any slot can hold more sessions
+  than it shows. ⌘T, ⌘W, and ⌘1–9 act on the focused pane's strip, split
+  right / down create a pane, the directional focus commands move between
+  panes, and toggle zoom fills the layout with the focused pane. A tab's
+  title, color, and icon travel with the tab. A close-confirmation
+  setting (busy / always / never) covers closing a tab and closing a
+  pane; busy means a running foreground command, a working agent, or
+  queued commands.
+- **Drag a tab to another pane.** Drag a tab chip along its strip to
+  reorder it, onto another pane's strip to move it there, or onto a
+  pane's edge to split it into a new pane on that side. The session keeps
+  running. The grab strip on top of a split pane is gone; tabs are the
+  only thing you drag.
+- **Panes split like editors.** Panes sit edge to edge with a thin, light
+  divider between them, as the editor splits in Xcode do; drag the divider to
+  resize. The tab strip sits as far from the pane's top as from the
+  terminal below it.
+- **Terminal output scrolls under the toolbar and the tab strip.** The top
+  Panes reach up under the window toolbar, and their strips float below it.
+  Earlier lines slide under both with the system scroll edge effect, as page
+  content does under Safari's toolbar and tab bar. Full-screen programs still
+  start right below the strip. Strips of lower Panes sit above their
+  terminals.
+- **Tab strip sized like Safari's.** The strip is as tall as Safari's tab
+  bar, and the top strip sits as close under the toolbar as Safari's
+  does.
+- **Tab actions live on the tab.** Hover a tab chip and an actions button
+  appears on its right, the mirror of the close button on its left: hand
+  off, command queue, copy, paste, splits, reset, and close. The actions
+  button in the terminal's top-right corner and the split buttons at the
+  end of the tab strip are gone; split from the keyboard, the Command
+  Palette, or this menu.
 - **Agents report their own state.** Claude Code, Pi, and omp send OSC
   7501 program status, and codans now answers and uses it: the Agents
   View shows working the moment a prompt is sent, blocked with what the

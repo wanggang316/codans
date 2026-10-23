@@ -22,6 +22,10 @@ mkdir -p "$SCRATCH"
 CLI="$APP/Contents/Resources/bin/codans-dev"
 # AF_UNIX paths are capped near 104 bytes, so the socket stays out of $SCRATCH.
 SOCK="/tmp/codans-w-$(id -u).sock"
+# The cache dir holds one zmx socket per tab, so it stays short too. Without
+# it the instance shares the dev cache and its launch sweep kills the dev
+# app's tab sessions.
+CACHE="/tmp/codans-w-cache-$(id -u)"
 CONF="$SCRATCH/conf"
 WORKFLOWS="$SCRATCH/workflows"
 RUN="$SCRATCH/run"
@@ -56,15 +60,22 @@ note() { printf 'NOTE\t%s\n' "$*" >>"$RESULTS"; echo "  note: $*"; }
 cli() { "$CLI" "$@"; }
 
 # ---------- environment ----------
-unset CODANS_PANE_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH ZMX_DIR ZMX_SESSION TERM_PROGRAM TERM_PROGRAM_VERSION CODANS_WORKFLOW_TOKEN CODANS_WORKFLOW_RUN CODANS_WORKFLOW_ROLE
+# Scrub the host tab's own context so the dev CLI and the test app never
+# see the developer's socket / pane / tab / content ids.
+unset CODANS_PANE_ID CODANS_TAB_ID CODANS_CONTENT_ID CODANS_CLI CODANS_WORKTREE_PATH CODANS_ROOT_PATH \
+  CODANS_RUNTIME_DIR ZMX_DIR ZMX_SESSION TERM_PROGRAM TERM_PROGRAM_VERSION \
+  CODANS_WORKFLOW_TOKEN CODANS_WORKFLOW_RUN CODANS_WORKFLOW_ROLE
+# A state root would win over CODANS_CONFIG_DIR; unset, state follows it.
+unset CODANS_STATE_DIR
 export CODANS_SOCKET_PATH="$SOCK"
 export CODANS_CONFIG_DIR="$CONF"
+export CODANS_CACHE_DIR="$CACHE"
 export CODANS_WORKFLOWS_DIR="$WORKFLOWS"
 
 setup() {
   : >"$RESULTS"
   rm -rf "$CONF" "$RUN" "$WORKFLOWS"; mkdir -p "$CONF" "$RUN" "$WTS" "$FAKEBIN" "$FAKESTATE" "$LOGS" "$WORKFLOWS"
-  bash "$REPO_ROOT/docs/user-tests/_shared/fixtures/setup/restore-repo-multi-branch.sh" "$FIX" >/dev/null
+  bash "$REPO_ROOT/.claude/skills/self-verify/fixtures/restore-repo.sh" "$FIX" >/dev/null
   git -C "$FIX" checkout -q feat/header-redesign
   # A participant: idles at a prompt, looks like Claude working while it
   # "thinks", then runs the delivery command it was handed. Verdicts are
@@ -167,12 +178,17 @@ quit_app() {
   kill -TERM "$pid" && sleep 2
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid"
   rm -f "$SCRATCH/app.pid"
+  # zmx daemons of tabs the run did not close hold files in the cache dir.
+  local holders; holders=$(lsof -t +D "$CACHE" 2>/dev/null | sort -u)
+  [[ -n "$holders" ]] && kill -TERM $holders 2>/dev/null
+  rm -rf "$CACHE"
+  rm -f "$SOCK"
   echo "quit test app"
 }
-wait_text() { # wait_text <pane> <needle> [secs]
-  local pane="$1" needle="$2" secs="${3:-10}"
+wait_text() { # wait_text <tab> <needle> [secs]
+  local tab="$1" needle="$2" secs="${3:-10}"
   for _ in $(seq 1 $((secs*5))); do
-    if cli pane read "$pane" 2>/dev/null | grep -q -- "$needle"; then return 0; fi
+    if cli tab read "$tab" 2>/dev/null | grep -q -- "$needle"; then return 0; fi
     sleep 0.2
   done
   return 1
@@ -190,11 +206,11 @@ wait_state() { # wait_state <run-id> <state> [secs] — succeeds when the run re
 }
 
 # Optional catalog watcher: with WF_WATCH=1, records worktree + pane ids
-# twice a second to logs/catalog.log so a vanished pane can be dated.
+# twice a second to logs/catalog.log so a vanished tab can be dated.
 start_watcher() {
   [[ "${WF_WATCH:-0}" == 1 ]] || return 0
   ( while :; do
-      printf '%s %s\n' "$(date +%T)" "$(cli tree --json 2>/dev/null | jq -c '[.. | objects | select(has("tabs")) | {w: .id[0:8], panes: [.tabs[].panes[].id[0:8]]}]')" >>"$LOGS/catalog.log"
+      printf '%s %s\n' "$(date +%T)" "$(cli tree --json 2>/dev/null | jq -c '[.. | objects | select(has("panes")) | {w: .id[0:8], tabs: [.panes[].tabs[].contentID[0:8]]}]')" >>"$LOGS/catalog.log"
       sleep 0.5
     done ) &
   WATCHER_PID=$!
@@ -210,9 +226,9 @@ phase_setup() {
   WT=$(jf S02 .id); WTPATH=$(jf S02 .path); echo "  worktree=$WT path=$WTPATH"
   t S03 0 "workflow list shows the three built-ins" -- bash -c "$CLI workflow list --json | jq -e '([.data.workflows[].id]|sort==[\"advisor\",\"handoff\",\"review-loop\"]) and all(.data.workflows[]; .isValid and .scope==\"bundle\")'"
   t S04 0 "author: launch Fake Claude" -- cli agent launch 'Fake Claude' --background --project "$PID" --worktree "$WT" --json
-  AUTHOR=$(jf S04 .paneID); echo "  author pane: $AUTHOR"
+  AUTHOR=$(jf S04 .contentID); echo "  author session: $AUTHOR"
   t S05 0 "author fake started" -- wait_text "$AUTHOR" 'FAKE CLAUDE started' 15
-  t S06 0 "author is detected as claude and idle" -- bash -c "for i in \$(seq 1 100); do $CLI agent status --json | jq -e '.data.agents[]|select(.paneID==\"$AUTHOR\" and .agent==\"claude-code\" and .state==\"idle\")' >/dev/null 2>&1 && exit 0; sleep 0.3; done; $CLI agent status --json; exit 1"
+  t S06 0 "author is detected as claude and idle" -- bash -c "for i in \$(seq 1 100); do $CLI agent status --json | jq -e '.data.agents[]|select(.contentID==\"$AUTHOR\" and .agent==\"claude-code\" and .state==\"idle\")' >/dev/null 2>&1 && exit 0; sleep 0.3; done; $CLI agent status --json; exit 1"
   echo "== admission errors"
   t E01 2 "run unknown workflow -> 2 WORKFLOW_NOT_FOUND" -- bash -c "out=\$($CLI workflow run nope $AUTHOR --json); rc=\$?; jq -e '.error.code==\"WORKFLOW_NOT_FOUND\"' <<<\"\$out\" >/dev/null && exit \$rc; echo \"\$out\"; exit 99"
   t E02 1 "run advisor without its required input -> 1 INPUT_REQUIRED" -- bash -c "out=\$($CLI workflow run advisor $AUTHOR --role advisor='Fake Claude' --json); rc=\$?; jq -e '.error.code==\"INPUT_REQUIRED\"' <<<\"\$out\" >/dev/null && exit \$rc; echo \"\$out\"; exit 99"
@@ -225,7 +241,7 @@ phase_review_loop() {
   printf 'issues\nclean\n' >"$FAKESTATE/verdicts"
   t R01 0 "run review-loop from the author pane" -- cli workflow run review-loop "$AUTHOR" --role reviewer='Fake Claude' --input max-rounds=2 --json
   RUN1=$(jf R01 .runID); echo "  run: $RUN1"
-  t R02 0 "bindings: author=current pane, reviewer=Fake Claude" -- bash -c "jq -e '(.data.bindings|map(select(.role==\"author\"))[0].paneID==\"$AUTHOR\") and (.data.bindings|map(select(.role==\"reviewer\"))[0].profileName==\"Fake Claude\")' '$LOGS/R01.out'"
+  t R02 0 "bindings: author=current pane, reviewer=Fake Claude" -- bash -c "jq -e '(.data.bindings|map(select(.role==\"author\"))[0].contentID==\"$AUTHOR\") and (.data.bindings|map(select(.role==\"reviewer\"))[0].profileName==\"Fake Claude\")' '$LOGS/R01.out'"
   t R03 0 "run completes" -- wait_state "$RUN1" completed 150
   t R04 0 "status: review verdict clean at ordinal 3, fixes delivered" -- bash -c "$CLI workflow status $RUN1 --json | jq -e '(.data.run.deliveries|map(select(.name==\"review\"))[0]|.verdict==\"clean\" and .ordinal==3) and (.data.run.deliveries|map(select(.name==\"fixes\"))|length==1)'"
   t R05 0 "deliveries on disk under the worktree" -- bash -c "test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.md' && test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.1.md' && test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/fixes.2.md' && grep -q '## Findings' '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.md'"

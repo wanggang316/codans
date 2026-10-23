@@ -29,13 +29,13 @@ struct SessionCoordinatorEpochTests {
   }
 
   private func makeSession(
-    _ paneID: PaneID,
+    _ contentID: ContentID,
     epoch: String?,
     lastAttachedAt: Date
   ) -> Session {
     Session(
-      paneID: paneID,
-      socketPath: "/tmp/zmx/\(paneID.raw.uuidString)",
+      contentID: contentID,
+      socketPath: "/tmp/zmx/\(contentID.raw.uuidString)",
       pid: 0,
       createdAt: Date(timeIntervalSince1970: 1_700_000_000),
       lastAttachedAt: lastAttachedAt,
@@ -53,7 +53,7 @@ struct SessionCoordinatorEpochTests {
   func epochIsPreservedAcrossReattachInNewSession() throws {
     let (coordinator, cleanup) = try makeCoordinator()
     defer { cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
     let born = Date(timeIntervalSince1970: 1_700_000_000)
     let reattached = born.addingTimeInterval(3600)
 
@@ -74,7 +74,7 @@ struct SessionCoordinatorEpochTests {
   func epochIsStampedWhenNoPriorRow() throws {
     let (coordinator, cleanup) = try makeCoordinator()
     defer { cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
 
     coordinator.recordLive(makeSession(pane, epoch: "107395", lastAttachedAt: Date()))
 
@@ -88,7 +88,7 @@ struct SessionCoordinatorEpochTests {
   func nilPriorEpochIsAdoptable() throws {
     let (coordinator, cleanup) = try makeCoordinator()
     defer { cleanup() }
-    let pane = PaneID()
+    let pane = ContentID()
 
     coordinator.recordLive(makeSession(pane, epoch: nil, lastAttachedAt: Date()))
     coordinator.recordLive(makeSession(pane, epoch: "107395", lastAttachedAt: Date()))

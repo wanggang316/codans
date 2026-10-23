@@ -9,19 +9,19 @@ struct WorkflowEngineDependencies {
   var now: @MainActor () -> Date = { Date() }
   var makeToken: @MainActor () -> String = { WorkflowEngine.randomToken() }
   /// Types one line plus Enter; `false` when the pane has no surface.
-  var sendLine: @MainActor (PaneID, String) -> Bool
+  var sendLine: @MainActor (ContentID, String) -> Bool
   /// Starts a `launch` role from its frozen profile and returns the pane.
-  var launch: @MainActor (WorkflowLaunchRequest, WorkflowRunSource, AgentProfile) async throws -> PaneID
+  var launch: @MainActor (WorkflowLaunchRequest, WorkflowRunSource, AgentProfile) async throws -> ContentID
   /// `run:` step: shell command, working directory, extra environment,
   /// timeout in seconds.
   var runCommand: @Sendable (String, String, [String: String], Int) async -> CommandOutcome
-  var closePane: @MainActor (PaneID) -> Void
-  var focusPane: @MainActor (PaneID) -> Void
-  var paneExists: @MainActor (PaneID) -> Bool
+  var closeTab: @MainActor (ContentID) -> Void
+  var focusContent: @MainActor (ContentID) -> Void
+  var contentExists: @MainActor (ContentID) -> Bool
   /// `nil` when no agent is bound to the pane.
-  var agentState: @MainActor (PaneID) -> AgentStateStore.AgentRuntimeState?
+  var agentState: @MainActor (ContentID) -> AgentStateStore.AgentRuntimeState?
   /// Inbox notification: title, body, the pane it concerns.
-  var notify: @MainActor (String, String, PaneID?) -> Void
+  var notify: @MainActor (String, String, ContentID?) -> Void
   var profile: @MainActor (UUID) -> AgentProfile?
   var rememberBinding: @MainActor (WorkflowBindingMemory) -> Void
   /// How long `idle` must hold before a role counts as idle.
@@ -87,7 +87,7 @@ final class WorkflowEngine {
     let session = WorkflowRunSession(entry: entry, store: store, machine: machine)
     session.pendingLog = machine.run.log
     sessions[configuration.id] = session
-    registry.join(panes: configuration.bindings.values.compactMap(\.paneID), runID: configuration.id)
+    registry.join(contents: configuration.bindings.values.compactMap(\.contentID), runID: configuration.id)
     noteAttention(session, previous: nil)
     enqueue(effects, on: session)
     await drain(session)
@@ -132,7 +132,7 @@ final class WorkflowEngine {
   func resolve(runID: UUID, action: WorkflowUserAction, verdict: String?) -> Bool {
     guard let session = sessions[runID] else { return false }
     if action == .focusPane {
-      if let paneID = session.focusPaneID { dependencies.focusPane(paneID) }
+      if let contentID = session.focusContentID { dependencies.focusContent(contentID) }
       return true
     }
     apply(.user(action, verdict: verdict), to: session)
@@ -171,8 +171,8 @@ final class WorkflowEngine {
   private func noteAttention(_ session: WorkflowRunSession, previous: WorkflowAttention?) {
     guard let attention = session.machine.run.status.attention, attention != previous else { return }
     let run = session.machine.run
-    let paneID = attention.role.flatMap { run.paneID(for: $0) } ?? run.configuration.initiatorPaneID
-    dependencies.notify("Workflow · \(run.definition.name)", attention.message, paneID)
+    let contentID = attention.role.flatMap { run.contentID(for: $0) } ?? run.configuration.initiatorContentID
+    dependencies.notify("Workflow · \(run.definition.name)", attention.message, contentID)
   }
 
   // MARK: - Queue
@@ -219,8 +219,8 @@ final class WorkflowEngine {
     sessions[session.id] = nil
     finishedSessions.append(session)
     let run = session.machine.run
-    let paneID = run.configuration.initiatorPaneID ?? run.bindings.values.compactMap(\.paneID).first
-    dependencies.notify("Workflow · \(run.definition.name)", Self.finishMessage(status), paneID)
+    let contentID = run.configuration.initiatorContentID ?? run.bindings.values.compactMap(\.contentID).first
+    dependencies.notify("Workflow · \(run.definition.name)", Self.finishMessage(status), contentID)
   }
 
   static func finishMessage(_ status: WorkflowRunStatus) -> String {

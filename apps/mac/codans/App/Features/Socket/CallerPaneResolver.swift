@@ -5,7 +5,7 @@ import CodansCore
 /// Attribute a connecting CLI process to the pane it was launched from by
 /// walking the caller's process ancestry against the live pane → shell-PID
 /// map. This is kernel ground truth: it keeps working when a subshell,
-/// wrapper, or env-scrubbing tool dropped `CODANS_PANE_ID`, and it can
+/// wrapper, or env-scrubbing tool dropped `CODANS_CONTENT_ID`, and it can
 /// never name a pane the caller is not actually running inside.
 ///
 /// Each pane's shell lives under its zmx daemon, so a `codans` invocation
@@ -25,9 +25,9 @@ nonisolated enum CallerPaneResolver {
   /// for tests; production uses the sysctl-backed `parentPID(of:)`.
   static func resolve(
     callerPID: pid_t,
-    paneByShellPID: [pid_t: PaneID],
+    paneByShellPID: [pid_t: ContentID],
     parentOf: (pid_t) -> pid_t? = CallerPaneResolver.parentPID(of:)
-  ) -> PaneID? {
+  ) -> ContentID? {
     guard callerPID > 0, !paneByShellPID.isEmpty else { return nil }
     var pid = callerPID
     var visited = Set<pid_t>()

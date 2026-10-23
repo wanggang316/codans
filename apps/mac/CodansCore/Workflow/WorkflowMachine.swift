@@ -20,7 +20,7 @@ public nonisolated enum WorkflowRunEvent: Equatable, Sendable {
   case waitTimedOut(role: String)
   case injected(ordinal: Int)
   case injectionFailed(ordinal: Int, reason: String)
-  case launched(ordinal: Int, paneID: PaneID)
+  case launched(ordinal: Int, contentID: ContentID)
   case launchFailed(ordinal: Int, reason: String)
   case commandFinished(
     stepID: String, exitCode: Int?, stdout: String, stdoutPath: String, timedOut: Bool, spawnFailure: String?)
@@ -42,7 +42,7 @@ public nonisolated struct WorkflowLaunchRequest: Equatable, Sendable {
   public var placement: WorkflowRole.Placement
   public var direction: ScriptSplitDirection
   public var background: Bool
-  public var anchorPaneID: PaneID?
+  public var anchorContentID: ContentID?
   public var environment: [String: String]
 
   public init(
@@ -53,7 +53,7 @@ public nonisolated struct WorkflowLaunchRequest: Equatable, Sendable {
     placement: WorkflowRole.Placement,
     direction: ScriptSplitDirection,
     background: Bool,
-    anchorPaneID: PaneID?,
+    anchorContentID: ContentID?,
     environment: [String: String]
   ) {
     self.role = role
@@ -63,7 +63,7 @@ public nonisolated struct WorkflowLaunchRequest: Equatable, Sendable {
     self.placement = placement
     self.direction = direction
     self.background = background
-    self.anchorPaneID = anchorPaneID
+    self.anchorContentID = anchorContentID
     self.environment = environment
   }
 }
@@ -73,17 +73,17 @@ public nonisolated struct WorkflowLaunchRequest: Equatable, Sendable {
 public nonisolated enum WorkflowEffect: Equatable, Sendable {
   /// Answered with `roleIdle` / `roleBlocked` / `roleGone` / `roleExited`
   /// / `waitTimedOut`.
-  case awaitRole(role: String, paneID: PaneID, until: WorkflowWaitCondition, timeoutMinutes: Int?)
+  case awaitRole(role: String, contentID: ContentID, until: WorkflowWaitCondition, timeoutMinutes: Int?)
   case cancelRoleWait(role: String)
-  /// Registers a token. A `launch` role opens with `paneID == nil` and is
+  /// Registers a token. A `launch` role opens with `contentID == nil` and is
   /// opened again with the pane once `launched` arrives.
-  case openActivation(ordinal: Int, paneID: PaneID?, token: String)
+  case openActivation(ordinal: Int, contentID: ContentID?, token: String)
   case revokeActivation(ordinal: Int)
   /// Writes `instructions/<step>.<ordinal>.md`; the path is deterministic
   /// (`WorkflowRunLayout`) so the pointer line is already rendered.
   case materializeInstruction(ordinal: Int, stepID: String, text: String)
   /// One line plus Enter. Answered with `injected` / `injectionFailed`.
-  case inject(paneID: PaneID, ordinal: Int, line: String)
+  case inject(contentID: ContentID, ordinal: Int, line: String)
   /// Answered with `launched` / `launchFailed`.
   case launch(WorkflowLaunchRequest)
   /// Answered with `commandFinished`.
@@ -93,7 +93,7 @@ public nonisolated enum WorkflowEffect: Equatable, Sendable {
   case armWatchdog(ordinal: Int, idleGraceSeconds: Int, deadline: Date?)
   case disarmWatchdog(ordinal: Int)
   case notify(title: String, body: String)
-  case closePane(paneID: PaneID, role: String)
+  case closeTab(contentID: ContentID, role: String)
   /// Answered with `deliveryPersisted` / `deliveryPersistFailed`.
   case persistDelivery(ordinal: Int, name: String, body: String, verdict: String?, provisional: Bool)
   case persistRecord

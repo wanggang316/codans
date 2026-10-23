@@ -70,7 +70,7 @@ final class TerminalEngine {
   /// entry, its first `attach` is built with `--restore-from <path>`; the entry
   /// is removed on consumption so a later bring-up of the same pane in the same
   /// session (close + reopen) gets a clean cold command with no stale restore.
-  var pendingRestores: [PaneID: URL] = [:]
+  var pendingRestores: [ContentID: URL] = [:]
 
   private static let logger = Logger(
     subsystem: "com.gumpw.codans.runtime", category: "runtime.session.lifecycle"
@@ -83,27 +83,27 @@ final class TerminalEngine {
   )
 
   private let registry = SubscriberRegistry()
-  private var outputBuffers: [PaneID: PendingOutputBuffer] = [:]
-  private var crashRings: [PaneID: [Date]] = [:]
+  private var outputBuffers: [ContentID: PendingOutputBuffer] = [:]
+  private var crashRings: [ContentID: [Date]] = [:]
   private let foregroundJobReader: ForegroundJobReader
   private var foregroundJobPollTask: Task<Void, Never>?
-  private var foregroundJobPaneIDs: Set<PaneID> = []
+  private var foregroundJobContentIDs: Set<ContentID> = []
   /// Remote (Server-project) panes and their hosts. These skip the local
   /// poller — their local foreground is permanently the `ssh` tunnel — and
   /// are sampled by the host-side foreground probe instead, which feeds the
   /// SAME snapshot / binder / viewport pipeline as local panes.
-  private var remoteForegroundPanes: [PaneID: RemoteHost] = [:]
+  private var remoteForegroundPanes: [ContentID: RemoteHost] = [:]
   private var remoteProbeTask: Task<Void, Never>?
-  private var foregroundJobSnapshots: [PaneID: ForegroundJob] = [:]
-  private var foregroundJobMisses: [PaneID: UInt8] = [:]
-  private var viewportSnapshots: [PaneID: String] = [:]
+  private var foregroundJobSnapshots: [ContentID: ForegroundJob] = [:]
+  private var foregroundJobMisses: [ContentID: UInt8] = [:]
+  private var viewportSnapshots: [ContentID: String] = [:]
   /// When each pane's active-region snapshot last changed. Drives the
   /// bounded `.paneIdle` settle nudges emitted while an agent pane is quiet
   /// (see `viewportPollOutcome`).
-  private var viewportChangedAt: [PaneID: Date] = [:]
+  private var viewportChangedAt: [ContentID: Date] = [:]
   /// OSC 7501 program status records per pane. Keyed by pane, not surface:
   /// they survive a surface reclaim and re-attach, like the session does.
-  private var programStatusRecords: [PaneID: ProgramStatusRecords] = [:]
+  private var programStatusRecords: [ContentID: ProgramStatusRecords] = [:]
   /// Process-group → resolved foreground job cache. The poll loop hits
   /// every PGID at ≤300 ms when an agent is bound; the underlying
   /// `proc_listpids` + `proc_pidinfo` + `KERN_PROCARGS2` triad costs a
@@ -126,16 +126,16 @@ final class TerminalEngine {
   var reclaimPolicy = SurfaceReclaimPolicy()
   /// App-level veto, consulted per candidate: the agent store and command
   /// queue live above the Runtime layer, so the app injects what it knows.
-  var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
+  var reclaimVeto: @MainActor (ContentID) -> Bool = { _ in false }
   /// Last time each registered surface was seen inside a window.
-  private var lastDisplayedAt: [PaneID: Date] = [:]
+  private var lastDisplayedAt: [ContentID: Date] = [:]
   /// Panes whose surface was detached by the reclaim sweep. Their zmx daemon
   /// still runs, so a later `ensureSurface` is a re-attach, not a spawn:
   /// it must not replay `initialCommand` into the live shell.
-  private(set) var reclaimedPanes: Set<PaneID> = []
+  private(set) var reclaimedPanes: Set<ContentID> = []
   /// Size in points of each reclaimed pane's surface view when it was
   /// detached; the re-attach starts at it.
-  private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
+  private var reclaimedSurfaceSizes: [ContentID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
 
   /// Inject a `GhosttyRuntime` for real pane surfaces, or pass `nil` for
@@ -177,26 +177,26 @@ final class TerminalEngine {
 
   nonisolated enum SurfaceError: LocalizedError, Sendable {
     case runtimeUnavailable
-    case paneHasNoTab
+    case notATerminal
 
     var errorDescription: String? {
       switch self {
       case .runtimeUnavailable:
         return "The terminal engine is not running."
-      case .paneHasNoTab:
-        return "This pane is not attached to a tab."
+      case .notATerminal:
+        return "This content is not a terminal."
       }
     }
   }
 
   // swiftlint:disable async_without_await
-  /// Create a libghostty surface for the given Pane. Idempotent: if a
-  /// surface is already registered for the pane, returns the existing one.
+  /// Create a libghostty surface for the Content. Idempotent: if a
+  /// surface is already registered for it, returns the existing one.
   /// Wires the surface's `onClose` to emit the lifecycle event + dispose
-  /// buffer. Throws `paneHasNoTab` if the Pane isn't yet wired into a
-  /// Tab — the engine uses the Tab ID in the `.paneCreated` event, so
-  /// callers must add the Pane to a Tab via `HierarchyManager.openPane`
-  /// (or `splitPane`) before calling this.
+  /// buffer. `address` is where the Tab sits right now; the engine uses it
+  /// for the spawn-time environment and the `.paneCreated` event, and
+  /// resolves later focus questions live from the catalog, since a Tab can
+  /// move to another Pane while its surface lives on.
   ///
   /// Stays `async throws` to satisfy the `HierarchyRuntime` protocol (whose
   /// other conformers await) and because every caller already `await`s it;
@@ -204,19 +204,19 @@ final class TerminalEngine {
   /// `zmx attach` child, so there is no daemon round-trip to await here.
   @discardableResult
   func ensureSurface(
-    for pane: Pane,
+    for content: ContentSnapshot,
+    at address: TabAddress,
     in worktree: Worktree,
     env: [String: String] = [:],
     initialSize: CGSize? = nil
   ) async throws -> PaneSurface {
     // swiftlint:enable async_without_await
     guard let runtime = ghosttyRuntime else { throw SurfaceError.runtimeUnavailable }
-    if let existing = runtime.surface(for: pane.id) {
+    let contentID = content.id
+    if let existing = runtime.surface(for: contentID) {
       return existing
     }
-    guard let tabID = tabIDForPane(pane.id) else {
-      throw SurfaceError.paneHasNoTab
-    }
+    guard let terminal = content.terminal else { throw SurfaceError.notATerminal }
 
     // Exec-backend bringup: libghostty forks `zmx attach <session>` and owns
     // the local PTY plus its sizing (it spawns the child at the surface's
@@ -231,31 +231,34 @@ final class TerminalEngine {
     // the command below. `command` is built a single time and reused for BOTH
     // the initial PaneSurface attempt and the ticked retry, so the path
     // is consumed once and the retry still restores. A later ensureSurface for
-    // the same pane (close + reopen) finds the map already cleared, so it gets a
-    // clean cold command with no stale re-restore. Do NOT move this consume into
-    // the attempt/retry block or that consume-once invariant breaks.
-    let restorePath = consumeRestorePath(for: pane.id)
+    // the same Content (close + reopen) finds the map already cleared, so it
+    // gets a clean cold command with no stale re-restore. Do NOT move this
+    // consume into the attempt/retry block or that consume-once invariant
+    // breaks.
+    let restorePath = consumeRestorePath(for: contentID)
     if restorePath != nil {
       Self.logger.info(
-        "zmx.restore applied pane=\(pane.id.raw.uuidString, privacy: .public)"
+        "zmx.restore applied content=\(contentID.raw.uuidString, privacy: .public)"
       )
     }
-    let session = ZmxAttachCommand.session(for: pane.id)
-    // A Server-project pane runs its shell on the remote host: libghostty
+    // The zmx session is named after the ContentID — the session UUID —
+    // so a session created before the layout change reattaches unchanged.
+    let session = ZmxAttachCommand.session(for: contentID)
+    // A Server-project Content runs its shell on the remote host: libghostty
     // spawns a local `zmx attach` (quit-persistence of the tunnel) wrapping an
     // SSH reconnect loop that lands in the remote worktree. The remote `cd`
     // owns the directory, so libghostty's local `working_directory` (which it
     // chdirs the ssh process into) must be a real *local* path — the remote
-    // worktree path is meaningless locally. Local panes run the user's shell
-    // under `zmx attach <session>`, anchored at the pane's own directory.
-    let remoteHost = remoteHost(forPane: pane.id)
+    // worktree path is meaningless locally. Local Contents run the user's
+    // shell under `zmx attach <session>`, anchored at their own directory.
+    let remoteHost = hierarchy.catalog.project(address.projectID)?.remoteHost
     let launch: SurfaceLaunch
     let surfaceWorkingDirectory: String
     if let remoteHost {
       let command = RemoteSurfaceCommand.build(
         host: remoteHost,
-        paneID: pane.id,
-        remotePath: pane.workingDirectory,
+        contentID: contentID,
+        remotePath: terminal.workingDirectory,
         // A missing local zmx degrades to the bare reconnect loop (no
         // quit-persistence of the tunnel; reconnect still works).
         localZmxPath: try? PaneDaemonBringup.zmxBinaryURL().path,
@@ -273,42 +276,42 @@ final class TerminalEngine {
           restoreFrom: restorePath
         )
       )
-      surfaceWorkingDirectory = pane.workingDirectory
+      surfaceWorkingDirectory = terminal.workingDirectory
     }
     let zmxDir = PaneDaemonBringup.canonicalSocketDirectory()
     try? FileManager.default.createDirectory(at: zmxDir, withIntermediateDirectories: true)
-    // Each pane is its own top-level zmx session, addressed by its paneUUID;
+    // Each Content is its own top-level zmx session, addressed by its UUID;
     // the builder pins `ZMX_DIR`, clears an inherited `ZMX_SESSION`, and
-    // stamps the pane's id. See `PaneEnvironment.forSurface` for why each.
-    let surfaceEnv = PaneEnvironment.forSurface(env, paneID: pane.id, zmxDirectory: zmxDir)
+    // stamps the three ids. See `TabEnvironment.forSurface` for why each.
+    let surfaceEnv = TabEnvironment.forSurface(env, address: address, zmxDirectory: zmxDir)
 
-    // Start at the size of the slot that will show the pane, so a live
+    // Start at the size of the slot that will show the Content, so a live
     // session is not resized through a placeholder width (see
     // `GhosttySurfaceView.init`). Without a slot size, a re-attach after an
-    // idle reclaim falls back to the size the pane had when it was reclaimed.
-    let initialSize = initialSize ?? reclaimedSurfaceSizes[pane.id]
+    // idle reclaim falls back to the size the surface had when it was reclaimed.
+    let initialSize = initialSize ?? reclaimedSurfaceSizes[contentID]
     let surface = try Self.withSurfaceInitRetry(runtime: runtime) {
       try PaneSurface(
-        runtime: runtime, paneID: pane.id, session: session, launch: launch,
+        runtime: runtime, contentID: contentID, session: session, launch: launch,
         workingDirectory: surfaceWorkingDirectory, env: surfaceEnv, initialSize: initialSize
       )
     }
     runtime.register(pane: surface)
-    let isReattach = noteSurfaceRegistered(pane.id)
+    let isReattach = noteSurfaceRegistered(contentID)
     // Continuous catalog write-through: record the live session so a crash
-    // between launches still surfaces this pane to the next launch's reaper.
-    // The socket path is derivable from the pane id + canonical ZMX_DIR; the
-    // daemon PID is learned lazily via the control `.info` probe.
+    // between launches still surfaces this Content to the next launch's
+    // reaper. The socket path is derivable from the id + canonical ZMX_DIR;
+    // the daemon PID is learned lazily via the control `.info` probe.
     if let coordinator = sessionCoordinator {
       coordinator.recordLive(
         Session(
-          paneID: pane.id,
-          socketPath: ZmxControlClient.socketPath(for: pane.id),
+          contentID: contentID,
+          socketPath: ZmxControlClient.socketPath(for: contentID),
           pid: 0,
           createdAt: Date(),
           lastAttachedAt: Date(),
           command: [],
-          cwd: pane.workingDirectory,
+          cwd: terminal.workingDirectory,
           zmxVersion: "",
           // Stamp the live login session so the next launch's reaper can
           // tell a daemon that outlived its session apart from one still
@@ -317,64 +320,74 @@ final class TerminalEngine {
         )
       )
     }
-    // Local-process introspection carries no signal for a remote pane: its
-    // local foreground group is permanently the `ssh` tunnel, which the
+    // Local-process introspection carries no signal for a remote Content:
+    // its local foreground group is permanently the `ssh` tunnel, which the
     // classifier reads as a running command — pinning the tab / worktree busy
-    // spinner forever on a pane that is just sitting at the remote prompt.
-    // Remote panes are sampled by the host-side foreground probe instead
+    // spinner forever on a session that is just sitting at the remote prompt.
+    // Remote Contents are sampled by the host-side foreground probe instead
     // (`RemoteForegroundProbe`), which feeds the same binder / busy / viewport
-    // pipeline with the pane's REAL foreground job on the host.
+    // pipeline with the REAL foreground job on the host.
     if let remoteHost {
-      remoteForegroundPanes[pane.id] = remoteHost
-      remoteProcessGenerations[pane.id] = UUID()
+      remoteForegroundPanes[contentID] = remoteHost
+      remoteProcessGenerations[contentID] = UUID()
       Self.probeLogger.info(
-        "register pane=\(pane.id.raw.uuidString.prefix(8), privacy: .public) host=\(remoteHost.authority, privacy: .public)"
+        "register content=\(contentID.raw.uuidString.prefix(8), privacy: .public) host=\(remoteHost.authority, privacy: .public)"
       )
       startRemoteForegroundProbingIfNeeded()
     } else {
-      foregroundJobPaneIDs.insert(pane.id)
+      foregroundJobContentIDs.insert(contentID)
       startForegroundJobPollingIfNeeded()
     }
     surface.onClose = { [weak self] processAlive in
-      self?.handleSurfaceClose(paneID: pane.id, processAlive: processAlive)
+      self?.handleSurfaceClose(contentID: contentID, processAlive: processAlive)
     }
-    // Bridge AppKit first-responder into HierarchyManager so the tab's
-    // last-focused pane tracks user clicks. Without this, click-driven
-    // focus changes only update libghostty + the responder chain — the
-    // catalog-level map never moves and consumers like the tab-bar
-    // chip's title resolver keep reading from the wrong pane.
+    // Bridge AppKit first-responder into the catalog focus so the Worktree's
+    // focused Pane tracks user clicks. Without this, click-driven focus
+    // changes only update libghostty + the responder chain — the persisted
+    // focus never moves and consumers like the strip's active style keep
+    // reading the wrong Pane. Resolved live: the Tab may have moved.
     surface.view.onBecomeFirstResponder = { [weak self] in
-      self?.surfaceBecameFirstResponder(pane.id, in: tabID)
+      self?.surfaceBecameFirstResponder(contentID)
     }
     // Lets the view RESTORE firstResponder after a SwiftUI split/zoom rebuild
-    // re-attaches it — only the tab's last-focused pane reclaims, so a freshly
-    // split pane keeps input without siblings stealing it. Additive only.
+    // re-attaches it — only the focused Pane's selected Content reclaims, so
+    // a freshly split Pane keeps input without siblings stealing it.
     surface.view.shouldClaimFocus = { [weak self] in
-      self?.hierarchy.lastFocusedPane(in: tabID) == pane.id
+      self?.isFocusedContent(contentID) ?? false
     }
     // Right-click menu items raise PaneActionRequest values directly on the
     // view; lift them onto the engine's event stream so they reach
     // PaneActionRouterFeature through the same path as libghostty-decoded
     // intents (new_split / reset / etc.).
     surface.view.onPaneAction = { [weak self] request in
-      self?.emit(.paneActionRequested(pane.id, request))
+      self?.emit(.paneActionRequested(contentID, request))
     }
-    // Forward `pane.initialCommand` to the freshly spawned shell so
-    // `.shellEditor` launches ("$EDITOR\n") actually run. HierarchyManager.openPane stores
-    // the command on the Pane; this is the one place it gets replayed when the surface
-    // comes up.
+    // Forward the live-only `initialCommand` to the freshly spawned shell so
+    // `.shellEditor` launches ("$EDITOR\n") actually run. This is the one
+    // place it gets replayed when the surface comes up.
     // A re-attach after an idle reclaim reaches a shell that already ran it
-    // (or a TUI that would take the text as typed input), and the pane never
-    // stopped existing, so no lifecycle event either.
+    // (or a TUI that would take the text as typed input), and the Content
+    // never stopped existing, so no lifecycle event either.
     if isReattach { return surface }
-    if let initialCommand = pane.initialCommand, !initialCommand.isEmpty {
+    if let initialCommand = terminal.initialCommand, !initialCommand.isEmpty {
       surface.sendInput(initialCommand + "\n")
     }
-    emit(.paneCreated(pane.id, tabID))
-    emit(.paneReady(pane.id))
+    emit(.paneCreated(contentID, address.tabID))
+    emit(.paneReady(contentID))
     return surface
   }
 
+  /// The registered surface for the Content, if any.
+  func surface(for contentID: ContentID) -> PaneSurface? {
+    ghosttyRuntime?.surface(for: contentID)
+  }
+
+  /// Whether the Content is the one keystrokes should reach: its Tab is
+  /// selected in the Worktree's focused Pane.
+  private func isFocusedContent(_ contentID: ContentID) -> Bool {
+    guard let address = hierarchy.catalog.address(forContent: contentID) else { return false }
+    return hierarchy.focusedContent(in: address.worktreeID)?.contentID == contentID
+  }
   /// Dispose a pane's surface. Idempotent. Routes through
   /// `handleSurfaceClose` so the lifecycle event is emitted exactly once
   /// whether the close is user-initiated or callback-driven.
@@ -385,8 +398,8 @@ final class TerminalEngine {
   /// shell child should not survive. The app-quit path never comes through
   /// here — it goes through `SessionLifecycle.detachAllForQuit`, which
   /// decides keep-running vs. snapshot — so resume is unaffected.
-  func closeSurface(for paneID: PaneID) {
-    guard let surface = ghosttyRuntime?.surface(for: paneID) else {
+  func closeSurface(for contentID: ContentID) {
+    guard let surface = ghosttyRuntime?.surface(for: contentID) else {
       // Surfaces are lazy. A Pane the user never opened this session has
       // none, yet its zmx daemon is running — and every caller here is
       // deleting the Pane outright, so nothing will ever reattach. The old
@@ -395,17 +408,17 @@ final class TerminalEngine {
       // socket, exactly as `suspendSurface` does; a missing socket is a
       // silent no-op. No `.paneExited` is emitted: there was no surface to
       // close, and the event's consumers all key off surface teardown.
-      ZmxControlClient.kill(for: paneID)
+      ZmxControlClient.kill(for: contentID)
       // A reclaimed pane did have a live surface this session, so its
       // per-pane state (polling, snapshots, process row) is still held and
       // its consumers expect the normal close event.
-      if reclaimedPanes.contains(paneID) {
-        handleSurfaceClose(paneID: paneID, processAlive: true)
+      if reclaimedPanes.contains(contentID) {
+        handleSurfaceClose(contentID: contentID, processAlive: true)
       }
       return
     }
     surface.closeKillingDaemon()
-    handleSurfaceClose(paneID: paneID, processAlive: true)
+    handleSurfaceClose(contentID: contentID, processAlive: true)
   }
 
   /// Archive teardown — see `HierarchyRuntime.suspendSurface`. Two
@@ -417,30 +430,30 @@ final class TerminalEngine {
   ///  2. No `.paneExited` is emitted (`announce: false`). Archive is
   ///     soft-hide: the Pane must stay in the catalog for restore, and
   ///     `.paneExited` would route through `paneLifecycleExited → closePane`.
-  func suspendSurface(for paneID: PaneID) {
-    guard let surface = ghosttyRuntime?.surface(for: paneID) else {
+  func suspendSurface(for contentID: ContentID) {
+    guard let surface = ghosttyRuntime?.surface(for: contentID) else {
       // No live surface — kill the still-running daemon directly via its
       // control socket (a missing socket is a silent no-op).
-      ZmxControlClient.kill(for: paneID)
-      if reclaimedPanes.contains(paneID) {
-        handleSurfaceClose(paneID: paneID, processAlive: true, announce: false)
+      ZmxControlClient.kill(for: contentID)
+      if reclaimedPanes.contains(contentID) {
+        handleSurfaceClose(contentID: contentID, processAlive: true, announce: false)
       }
       return
     }
     surface.closeKillingDaemon()
-    handleSurfaceClose(paneID: paneID, processAlive: true, announce: false)
+    handleSurfaceClose(contentID: contentID, processAlive: true, announce: false)
   }
 
   /// Whether a live surface is currently registered for the pane.
   /// Used by force-remove to size the "terminate N running processes"
   /// confirmation dialog (spec W-Q3).
-  func hasSurface(for paneID: PaneID) -> Bool {
+  func hasSurface(for contentID: ContentID) -> Bool {
     guard let runtime = ghosttyRuntime else { return false }
-    return runtime.surface(for: paneID) != nil
+    return runtime.surface(for: contentID) != nil
   }
 
-  func currentWorkingDirectory(for paneID: PaneID) -> String? {
-    guard let pwd = ghosttyRuntime?.surface(for: paneID)?.info.pwd,
+  func currentWorkingDirectory(for contentID: ContentID) -> String? {
+    guard let pwd = ghosttyRuntime?.surface(for: contentID)?.info.pwd,
       !pwd.isEmpty
     else { return nil }
     return pwd
@@ -457,36 +470,38 @@ final class TerminalEngine {
   /// backoff: 0s, 50ms, 100ms, 200ms, 400ms (capped at ~0.75s total).
   /// Safe to call when the surface or window never materialises —
   /// retries stop on their own.
-  func focusSurfaceView(for paneID: PaneID) {
-    focusSurfaceView(for: paneID, attempt: 0)
+  func focusSurfaceView(for contentID: ContentID) {
+    focusSurfaceView(for: contentID, attempt: 0)
   }
 
   /// Called after a pane's surface becomes the first responder. The app
   /// injects what it does with it: focus can land on the surface after the
   /// catalog selection already moved (a sidebar click that switches tabs).
-  var onSurfaceFocused: @MainActor (PaneID) -> Void = { _ in }
+  var onSurfaceFocused: @MainActor (ContentID) -> Void = { _ in }
 
-  private func surfaceBecameFirstResponder(_ paneID: PaneID, in tabID: TabID) {
-    hierarchy.setLastFocusedPane(paneID, in: tabID)
+  private func surfaceBecameFirstResponder(_ contentID: ContentID) {
+    if let address = hierarchy.catalog.address(forContent: contentID) {
+      try? hierarchy.focusPane(address.paneID)
+    }
     // The window records the new first responder only after
     // `becomeFirstResponder` returns, so report on the next turn.
-    Task { @MainActor [weak self] in self?.onSurfaceFocused(paneID) }
+    Task { @MainActor [weak self] in self?.onSurfaceFocused(contentID) }
   }
 
-  /// True when keystrokes would go to `paneID` right now: the app is active
+  /// True when keystrokes would go to `contentID` right now: the app is active
   /// and the pane's surface is the first responder of the key window.
-  func isSurfaceFocused(_ paneID: PaneID) -> Bool {
+  func isSurfaceFocused(_ contentID: ContentID) -> Bool {
     guard NSApp.isActive,
-      let view = ghosttyRuntime?.surface(for: paneID)?.view,
+      let view = ghosttyRuntime?.surface(for: contentID)?.view,
       let window = view.window, window.isKeyWindow
     else { return false }
     return window.firstResponder === view
   }
 
-  private func focusSurfaceView(for paneID: PaneID, attempt: Int) {
+  private func focusSurfaceView(for contentID: ContentID, attempt: Int) {
     guard attempt < 5 else { return }
     guard let runtime = ghosttyRuntime,
-      let surface = runtime.surface(for: paneID)
+      let surface = runtime.surface(for: contentID)
     else { return }
     if let window = surface.view.window {
       // Reconcile libghostty focus before the AppKit firstResponder switch.
@@ -499,7 +514,7 @@ final class TerminalEngine {
       // non-target surface to set_focus(false); the target gets set_focus(true)
       // via its own becomeFirstResponder below. `set_focus` is idempotent,
       // so repeats on the normal path are harmless.
-      runtime.defocusAllSurfaces(except: paneID)
+      runtime.defocusAllSurfaces(except: contentID)
       if window.firstResponder !== surface.view {
         surface.view.claimFirstResponder(in: window, reason: "focusSurfaceView")
       }
@@ -508,16 +523,16 @@ final class TerminalEngine {
     let delayMs: Int = attempt == 0 ? 50 : 50 << attempt
     Task { @MainActor [weak self] in
       try? await Task.sleep(for: .milliseconds(delayMs))
-      self?.focusSurfaceView(for: paneID, attempt: attempt + 1)
+      self?.focusSurfaceView(for: contentID, attempt: attempt + 1)
     }
   }
 
-  private func handleSurfaceClose(paneID: PaneID, processAlive: Bool, announce: Bool = true) {
+  private func handleSurfaceClose(contentID: ContentID, processAlive: Bool, announce: Bool = true) {
     // Snapshot the surface state BEFORE unregistering so a stale registry
     // entry can't drop the lifecycle event. Unregister after emit so any
     // in-flight lookup in subscriber code still resolves the surface.
-    let state = ghosttyRuntime?.surface(for: paneID)?.state ?? .ready
-    disposeOutputBuffer(for: paneID)
+    let state = ghosttyRuntime?.surface(for: contentID)?.state ?? .ready
+    disposeOutputBuffer(for: contentID)
 
     // `announce: false` is the archive (soft-hide) path: tear down the
     // engine's per-pane scratch but emit no lifecycle event, so the Pane is
@@ -527,50 +542,46 @@ final class TerminalEngine {
     if announce {
       switch state {
       case .crashed(let reason):
-        _ = recordPaneCrash(paneID: paneID, reason: reason)
+        _ = recordPaneCrash(contentID: contentID, reason: reason)
       case .exited(let code):
-        emit(.paneExited(paneID, code: code, signal: nil))
+        emit(.paneExited(contentID, code: code, signal: nil))
       default:
         // No explicit state set by markExited/markCrashed: use processAlive
         // to distinguish user-initiated close (code 0) from child exit where
         // we lack a real exit code (code -1 as a "unknown" sentinel).
-        emit(.paneExited(paneID, code: processAlive ? 0 : -1, signal: nil))
+        emit(.paneExited(contentID, code: processAlive ? 0 : -1, signal: nil))
       }
     }
 
-    ghosttyRuntime?.unregister(paneID: paneID)
-    reclaimedPanes.remove(paneID)
-    reclaimedSurfaceSizes.removeValue(forKey: paneID)
-    lastDisplayedAt.removeValue(forKey: paneID)
-    foregroundJobPaneIDs.remove(paneID)
-    remoteForegroundPanes.removeValue(forKey: paneID)
-    remoteProcessGenerations.removeValue(forKey: paneID)
+    ghosttyRuntime?.unregister(contentID: contentID)
+    reclaimedPanes.remove(contentID)
+    reclaimedSurfaceSizes.removeValue(forKey: contentID)
+    lastDisplayedAt.removeValue(forKey: contentID)
+    foregroundJobContentIDs.remove(contentID)
+    remoteForegroundPanes.removeValue(forKey: contentID)
+    remoteProcessGenerations.removeValue(forKey: contentID)
     stopRemoteForegroundProbingIfIdle()
-    if let snapshot = foregroundJobSnapshots[paneID] {
+    if let snapshot = foregroundJobSnapshots[contentID] {
       // Evict the cache entry for the closing pane's PGID so a recycled
       // group id picked up by a later pane never reads back this pane's
       // last job description.
       foregroundJobCache.removeValue(forKey: snapshot.processGroupID)
     }
-    hierarchy.processRegistry.remove(paneID)
-    foregroundJobSnapshots.removeValue(forKey: paneID)
-    foregroundJobMisses.removeValue(forKey: paneID)
-    viewportSnapshots.removeValue(forKey: paneID)
-    viewportChangedAt.removeValue(forKey: paneID)
-    programStatusRecords.removeValue(forKey: paneID)
+    hierarchy.processRegistry.remove(contentID)
+    foregroundJobSnapshots.removeValue(forKey: contentID)
+    foregroundJobMisses.removeValue(forKey: contentID)
+    viewportSnapshots.removeValue(forKey: contentID)
+    viewportChangedAt.removeValue(forKey: contentID)
+    programStatusRecords.removeValue(forKey: contentID)
     // The crash ring is the one per-pane map `recordPaneCrash` owns: it
     // appends here and clears on the auto-close / retry branches, so it must
     // survive a crash close. Every other close ends the pane for good and
     // nothing can ever append to its ring again.
     if case .crashed = state, announce {
     } else {
-      crashRings.removeValue(forKey: paneID)
+      crashRings.removeValue(forKey: contentID)
     }
     stopForegroundJobPollingIfIdle()
-  }
-
-  private func tabIDForPane(_ paneID: PaneID) -> TabID? {
-    findPane(paneID)?.tabID
   }
 
   /// Remove and return the pending snapshot-restore path for a pane, if any.
@@ -579,8 +590,8 @@ final class TerminalEngine {
   /// cold command with no stale re-restore. Extracted as its own method so the
   /// consume-once mechanism is unit-testable without driving the libghostty
   /// surface path.
-  func consumeRestorePath(for paneID: PaneID) -> String? {
-    pendingRestores.removeValue(forKey: paneID)?.path
+  func consumeRestorePath(for contentID: ContentID) -> String? {
+    pendingRestores.removeValue(forKey: contentID)?.path
   }
 
   /// Process-group leader PID of the pane's current foreground job, or
@@ -590,8 +601,8 @@ final class TerminalEngine {
   /// liveness. PGID is preferred over an individual process PID because
   /// it tracks the foreground group leader and survives parent/child
   /// turnover within the same agent invocation.
-  func foregroundProcessGroupID(for paneID: PaneID) -> Int32? {
-    foregroundJobSnapshots[paneID]?.processGroupID
+  func foregroundProcessGroupID(for contentID: ContentID) -> Int32? {
+    foregroundJobSnapshots[contentID]?.processGroupID
   }
 
   /// Return a fresh event stream for a new subscriber. Multi-consumer safe:
@@ -639,22 +650,22 @@ final class TerminalEngine {
   /// Feed bytes from a ghostty surface into the per-pane coalescer. Creates
   /// a buffer on first use. Output may split a UTF-8 codepoint at the 16KB
   /// buffer boundary — text consumers must buffer across batches per pane.
-  func appendOutput(paneID: PaneID, bytes: Data) {
-    let buffer = outputBuffers[paneID] ?? makeBuffer(for: paneID)
+  func appendOutput(contentID: ContentID, bytes: Data) {
+    let buffer = outputBuffers[contentID] ?? makeBuffer(for: contentID)
     buffer.append(bytes)
   }
 
-  func flushOutput(for paneID: PaneID) {
-    outputBuffers[paneID]?.flush()
+  func flushOutput(for contentID: ContentID) {
+    outputBuffers[contentID]?.flush()
   }
 
   /// Drop the per-pane output buffer, flushing any pending bytes first. The
   /// buffer's isolated-deinit fallback exists as a safety net, but callers
   /// should invoke this explicitly when a surface closes so bytes flush
   /// while the engine is still accepting emits.
-  func disposeOutputBuffer(for paneID: PaneID) {
-    outputBuffers[paneID]?.flush()
-    outputBuffers.removeValue(forKey: paneID)
+  func disposeOutputBuffer(for contentID: ContentID) {
+    outputBuffers[contentID]?.flush()
+    outputBuffers.removeValue(forKey: contentID)
   }
 
   /// Idempotent, terminal. After calling, `emit` is a no-op and all
@@ -679,7 +690,7 @@ final class TerminalEngine {
   enum CrashOutcome: Equatable, Sendable {
     /// Pane is still alive; UI should render a retry placeholder.
     case survived
-    /// Enclosing Tab was auto-closed because the crash loop exceeded policy.
+    /// The Tab was auto-closed because the crash loop exceeded policy.
     case tabAutoClosed(TabID)
     /// Attempted to auto-close but `HierarchyManager.closeTab` threw; ring
     /// preserved so a later attempt can succeed. The message is the error's
@@ -690,128 +701,71 @@ final class TerminalEngine {
 
   @discardableResult
   func recordPaneCrash(
-    paneID: PaneID,
+    contentID: ContentID,
     reason: String
   ) -> CrashOutcome {
     // Flush any buffered output so subscribers see the final bytes BEFORE the
     // crash event — otherwise the UI shows a stale prompt with the crash
     // overlay and consumers miss the last line of whatever the pane emitted.
-    disposeOutputBuffer(for: paneID)
-    emit(.paneCrashed(paneID, reason: reason))
+    disposeOutputBuffer(for: contentID)
+    emit(.paneCrashed(contentID, reason: reason))
 
     let now = clock()
     let cutoff = now.addingTimeInterval(-crashPolicy.window)
-    var ring = crashRings[paneID, default: []].filter { $0 >= cutoff }
+    var ring = crashRings[contentID, default: []].filter { $0 >= cutoff }
     ring.append(now)
     // Cap the ring so repeated crashes inside the window can't grow memory.
     if ring.count > crashPolicy.maxCrashesInWindow {
       ring = Array(ring.suffix(crashPolicy.maxCrashesInWindow))
     }
-    crashRings[paneID] = ring
+    crashRings[contentID] = ring
 
     guard ring.count >= crashPolicy.maxCrashesInWindow else {
       return .survived
     }
 
-    guard let location = findPane(paneID) else {
-      crashRings.removeValue(forKey: paneID)
+    guard let address = hierarchy.catalog.address(forContent: contentID) else {
+      crashRings.removeValue(forKey: contentID)
       return .survived
     }
 
-    // Snapshot sibling panes BEFORE closeTab removes them. Each gets its
-    // own paneExited event so per-pane subscribers can release state.
-    let siblingPaneIDs = siblingPaneIDs(in: location, excluding: paneID)
-
     do {
-      try hierarchy.closeTab(
-        location.tabID,
-        in: location.worktreeID,
-        in: location.projectID
-      )
+      try hierarchy.closeTab(address.tabID)
     } catch {
       // Preserve the ring so a retry can still close the tab.
       return .closeFailed(error.localizedDescription)
     }
 
-    crashRings.removeValue(forKey: paneID)
+    crashRings.removeValue(forKey: contentID)
     let cause: TabAutoCloseCause = .crashLoop(count: ring.count, window: crashPolicy.window)
-    for siblingID in siblingPaneIDs {
-      disposeOutputBuffer(for: siblingID)
-      // Forced close, not clean exit — distinct variant so persistence and
-      // hook consumers don't misreport as code-0 exit.
-      emit(.paneClosedByTab(siblingID, cause: cause))
-    }
-    emit(.tabAutoClosed(location.tabID, cause: cause))
-    return .tabAutoClosed(location.tabID)
+    emit(.tabAutoClosed(address.tabID, cause: cause))
+    return .tabAutoClosed(address.tabID)
   }
 
   /// Retry a crashed pane. Returns false when the pane no longer exists
   /// (e.g. its Tab was already auto-closed).
   @discardableResult
-  func retryPane(_ paneID: PaneID) -> Bool {
-    guard findPane(paneID) != nil else {
+  func retryPane(_ contentID: ContentID) -> Bool {
+    guard hierarchy.catalog.content(contentID) != nil else {
       return false
     }
-    crashRings.removeValue(forKey: paneID)
-    emit(.paneReady(paneID))
+    crashRings.removeValue(forKey: contentID)
+    emit(.paneReady(contentID))
     return true
   }
 
   // MARK: - Private
 
-  private struct PaneLocation {
-    let projectID: ProjectID
-    let worktreeID: WorktreeID
-    let tabID: TabID
-  }
-
-  /// The SSH host of the pane's owning Project, or `nil` for a local pane.
-  /// Drives the remote-vs-local surface-command branch in `ensureSurface`.
-  private func remoteHost(forPane paneID: PaneID) -> RemoteHost? {
-    guard let location = findPane(paneID) else { return nil }
-    return hierarchy.catalog.projects
-      .first(where: { $0.id == location.projectID })?.remoteHost
-  }
-
-  private func findPane(_ paneID: PaneID) -> PaneLocation? {
-    for project in hierarchy.catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
-          return PaneLocation(
-            projectID: project.id,
-            worktreeID: worktree.id,
-            tabID: tab.id
-          )
-        }
-      }
-    }
-    return nil
-  }
-
-  private func siblingPaneIDs(
-    in location: PaneLocation,
-    excluding excluded: PaneID
-  ) -> [PaneID] {
-    guard
-      let project = hierarchy.catalog.projects.first(where: { $0.id == location.projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == location.worktreeID }),
-      let tab = worktree.tabs.first(where: { $0.id == location.tabID })
-    else {
-      return []
-    }
-    return tab.panes.map(\.id).filter { $0 != excluded }
-  }
-
-  private func makeBuffer(for paneID: PaneID) -> PendingOutputBuffer {
+  private func makeBuffer(for contentID: ContentID) -> PendingOutputBuffer {
     // The engine must outlive its output buffers. disposeOutputBuffer drops
     // the buffer while the engine is still broadcasting, so the weak capture
     // only matters as a safety net if the buffer is dropped via deinit after
     // finishEventStream — in that case emit is a no-op, bytes silently fall
     // on the floor (documented trade-off).
-    let buffer = PendingOutputBuffer(paneID: paneID) { [weak self] id, data in
+    let buffer = PendingOutputBuffer(contentID: contentID) { [weak self] id, data in
       self?.emit(.paneOutput(id, data))
     }
-    outputBuffers[paneID] = buffer
+    outputBuffers[contentID] = buffer
     return buffer
   }
 
@@ -827,17 +781,17 @@ final class TerminalEngine {
   }
 
   private func stopForegroundJobPollingIfIdle() {
-    guard foregroundJobPaneIDs.isEmpty else { return }
+    guard foregroundJobContentIDs.isEmpty else { return }
     foregroundJobPollTask?.cancel()
     foregroundJobPollTask = nil
   }
 
   private func pollForegroundJobs() {
-    guard let ghosttyRuntime, !foregroundJobPaneIDs.isEmpty else { return }
+    guard let ghosttyRuntime, !foregroundJobContentIDs.isEmpty else { return }
 
-    var groupByPane: [PaneID: Int32] = [:]
-    for paneID in foregroundJobPaneIDs {
-      guard let surface = ghosttyRuntime.surface(for: paneID),
+    var groupByPane: [ContentID: Int32] = [:]
+    for contentID in foregroundJobContentIDs {
+      guard let surface = ghosttyRuntime.surface(for: contentID),
         let groupID = foregroundJobReader.resolveProcessGroupID(
           preferred: surface.foregroundProcessGroupID(),
           childPID: surface.childProcessID()
@@ -845,7 +799,7 @@ final class TerminalEngine {
       else {
         continue
       }
-      groupByPane[paneID] = groupID
+      groupByPane[contentID] = groupID
     }
 
     let activeGroupIDs = Set(groupByPane.values)
@@ -872,37 +826,37 @@ final class TerminalEngine {
     // unrelated group to a long-departed job.
     foregroundJobCache = foregroundJobCache.filter { activeGroupIDs.contains($0.key) }
 
-    for paneID in foregroundJobPaneIDs {
+    for contentID in foregroundJobContentIDs {
       let next: ForegroundJob
-      if let groupID = groupByPane[paneID], let job = jobsByGroup[groupID] {
+      if let groupID = groupByPane[contentID], let job = jobsByGroup[groupID] {
         next = job
       } else {
-        next = ForegroundJob(processGroupID: groupByPane[paneID] ?? 0, processes: [])
+        next = ForegroundJob(processGroupID: groupByPane[contentID] ?? 0, processes: [])
       }
-      processForegroundSample(paneID: paneID, next: next, now: now)
+      processForegroundSample(contentID: contentID, next: next, now: now)
     }
   }
 
   /// Shared per-pane tail of both foreground samplers (local poll loop and
   /// remote host probe): empty-sample hysteresis, change detection, binder
   /// delivery, and the viewport nudge.
-  private func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
-    if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
-      hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
+  private func processForegroundSample(contentID: ContentID, next: ForegroundJob, now: Date) {
+    if next.isEmpty, foregroundJobSnapshots[contentID] == nil {
+      hierarchy.updateProcessSample(contentID: contentID, job: next, now: now)
       return
     }
     if next.isEmpty {
-      let misses = min((foregroundJobMisses[paneID] ?? 0) + 1, 3)
-      foregroundJobMisses[paneID] = misses
+      let misses = min((foregroundJobMisses[contentID] ?? 0) + 1, 3)
+      foregroundJobMisses[contentID] = misses
       guard misses >= 3 else { return }
     } else {
-      foregroundJobMisses[paneID] = 0
+      foregroundJobMisses[contentID] = 0
     }
-    hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
-    dropLiveProgramStatusIfAgentGone(paneID: paneID, foregroundJob: next)
-    let changed = foregroundJobSnapshots[paneID] != next
+    hierarchy.updateProcessSample(contentID: contentID, job: next, now: now)
+    dropLiveProgramStatusIfAgentGone(contentID: contentID, foregroundJob: next)
+    let changed = foregroundJobSnapshots[contentID] != next
     if changed {
-      foregroundJobSnapshots[paneID] = next
+      foregroundJobSnapshots[contentID] = next
     }
     // Deliver `next` to the binder on a genuine change, and *also* keep
     // re-delivering an unchanged job while a bound pane's foreground has
@@ -913,7 +867,7 @@ final class TerminalEngine {
     // ghost agent in the view. The re-delivery lets the binder's release
     // hysteresis run to completion; it is self-limiting because the pane
     // stops being bound once released. See `shouldRedeliverForegroundJob`.
-    let paneIsBound = hierarchy.catalog.pane(paneID)?.agentKind != nil
+    let paneIsBound = hierarchy.catalog.content(contentID)?.terminal?.agentKind != nil
     let foregroundIsStaleNonAgent =
       !next.isEmpty && AgentKindPatterns.classify(foregroundJob: next) == nil
     if Self.shouldRedeliverForegroundJob(
@@ -921,10 +875,10 @@ final class TerminalEngine {
       paneIsBound: paneIsBound,
       foregroundIsStaleNonAgent: foregroundIsStaleNonAgent
     ) {
-      emit(.foregroundJobChanged(paneID, next))
+      emit(.foregroundJobChanged(contentID, next))
     }
-    if let surface = ghosttyRuntime?.surface(for: paneID) {
-      emitViewportIfNeeded(paneID: paneID, surface: surface, foregroundJob: next, now: now)
+    if let surface = ghosttyRuntime?.surface(for: contentID) {
+      emitViewportIfNeeded(contentID: contentID, surface: surface, foregroundJob: next, now: now)
     }
   }
 
@@ -952,17 +906,17 @@ final class TerminalEngine {
   /// Whether the pane's surface was detached by the reclaim sweep while its
   /// daemon keeps running. Out-of-band probes (`pane.read`, `pane.info`)
   /// use this: the daemon answers them with no surface attached.
-  func isReclaimed(_ paneID: PaneID) -> Bool {
-    reclaimedPanes.contains(paneID)
+  func isReclaimed(_ contentID: ContentID) -> Bool {
+    reclaimedPanes.contains(contentID)
   }
 
   /// Bookkeeping for a freshly registered surface. Returns whether it is a
   /// re-attach of a reclaimed pane.
-  private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
-    lastDisplayedAt[paneID] = clock()
+  private func noteSurfaceRegistered(_ contentID: ContentID) -> Bool {
+    lastDisplayedAt[contentID] = clock()
     startReclaimSweepIfNeeded()
-    reclaimedSurfaceSizes.removeValue(forKey: paneID)
-    return reclaimedPanes.remove(paneID) != nil
+    reclaimedSurfaceSizes.removeValue(forKey: contentID)
+    return reclaimedPanes.remove(contentID) != nil
   }
 
   /// Detach a pane's surface but keep its zmx daemon. Frees the surface's
@@ -970,53 +924,53 @@ final class TerminalEngine {
   /// no lifecycle event is emitted and the sampling state (foreground
   /// snapshot, process row) is kept, so the pane still looks alive to its
   /// observers; only the live poll stops until `ensureSurface` re-attaches.
-  func reclaimSurface(for paneID: PaneID) {
-    guard let surface = ghosttyRuntime?.surface(for: paneID) else { return }
+  func reclaimSurface(for contentID: ContentID) {
+    guard let surface = ghosttyRuntime?.surface(for: contentID) else { return }
     // Detaching ends the `zmx attach` child; make sure that cannot surface
     // as a pane exit.
     surface.onClose = nil
-    reclaimedSurfaceSizes[paneID] = surface.view.bounds.size
-    disposeOutputBuffer(for: paneID)
+    reclaimedSurfaceSizes[contentID] = surface.view.bounds.size
+    disposeOutputBuffer(for: contentID)
     surface.close()
-    ghosttyRuntime?.unregister(paneID: paneID)
-    foregroundJobPaneIDs.remove(paneID)
-    lastDisplayedAt.removeValue(forKey: paneID)
-    reclaimedPanes.insert(paneID)
+    ghosttyRuntime?.unregister(contentID: contentID)
+    foregroundJobContentIDs.remove(contentID)
+    lastDisplayedAt.removeValue(forKey: contentID)
+    reclaimedPanes.insert(contentID)
     stopForegroundJobPollingIfIdle()
     Self.logger.info(
-      "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
+      "surface.reclaim pane=\(contentID.raw.uuidString.prefix(8), privacy: .public)"
     )
   }
 
   /// One sweep: note which surfaces are on screen, then reclaim the ones the
   /// policy accepts. Returns the reclaimed panes.
   @discardableResult
-  func reclaimIdleSurfaces() -> [PaneID] {
+  func reclaimIdleSurfaces() -> [ContentID] {
     guard let runtime = ghosttyRuntime else { return [] }
     let now = clock()
-    var reclaimed: [PaneID] = []
+    var reclaimed: [ContentID] = []
     for surface in runtime.allLiveSurfaces() {
-      let paneID = surface.paneID
+      let contentID = surface.contentID
       // Surfaces outside the catalog (the master terminal) are not ours to
       // manage.
-      guard hierarchy.catalog.pane(paneID) != nil else { continue }
+      guard hierarchy.catalog.content(contentID) != nil else { continue }
       if surface.isDisplayed {
-        lastDisplayedAt[paneID] = now
+        lastDisplayedAt[contentID] = now
         continue
       }
-      let hiddenSince = lastDisplayedAt[paneID] ?? now
-      lastDisplayedAt[paneID] = hiddenSince
+      let hiddenSince = lastDisplayedAt[contentID] ?? now
+      lastDisplayedAt[contentID] = hiddenSince
       let candidate = SurfaceReclaimPolicy.Candidate(
         hiddenFor: now.timeIntervalSince(hiddenSince),
-        quietFor: now.timeIntervalSince(viewportChangedAt[paneID] ?? .distantPast),
-        foregroundJob: foregroundJobSnapshots[paneID],
-        isRemote: remoteForegroundPanes[paneID] != nil,
+        quietFor: now.timeIntervalSince(viewportChangedAt[contentID] ?? .distantPast),
+        foregroundJob: foregroundJobSnapshots[contentID],
+        isRemote: remoteForegroundPanes[contentID] != nil,
         isSurfaceReady: surface.state == .ready,
-        isVetoed: reclaimVeto(paneID)
+        isVetoed: reclaimVeto(contentID)
       )
       if reclaimPolicy.shouldReclaim(candidate) {
-        reclaimSurface(for: paneID)
-        reclaimed.append(paneID)
+        reclaimSurface(for: contentID)
+        reclaimed.append(contentID)
       }
     }
     return reclaimed
@@ -1053,7 +1007,7 @@ final class TerminalEngine {
     remoteProbeTask = nil
   }
 
-  private var remoteProcessGenerations: [PaneID: UUID] = [:]
+  private var remoteProcessGenerations: [ContentID: UUID] = [:]
 
   /// One probe per host per tick, covering every remote pane on it. A failed
   /// probe (unreachable host) freezes its panes' state — no emission — so a
@@ -1062,18 +1016,18 @@ final class TerminalEngine {
   /// Process rows are cleared on failure because their liveness is unknown.
   private func probeRemoteForegroundJobs() async {
     guard !remoteForegroundPanes.isEmpty else { return }
-    var panesByHost: [RemoteHost: [PaneID]] = [:]
-    for (paneID, host) in remoteForegroundPanes {
-      panesByHost[host, default: []].append(paneID)
+    var panesByHost: [RemoteHost: [ContentID]] = [:]
+    for (contentID, host) in remoteForegroundPanes {
+      panesByHost[host, default: []].append(contentID)
     }
-    for (host, paneIDs) in panesByHost {
+    for (host, contentIDs) in panesByHost {
       let generations = remoteProcessGenerations
       guard let jobs = await RemoteForegroundProbe.run(host: host) else {
         Self.probeLogger.error(
-          "probe failed host=\(host.authority, privacy: .public) panes=\(paneIDs.count, privacy: .public)"
+          "probe failed host=\(host.authority, privacy: .public) panes=\(contentIDs.count, privacy: .public)"
         )
-        for paneID in paneIDs where generations[paneID] == remoteProcessGenerations[paneID] {
-          hierarchy.suspendProcessSample(paneID: paneID, now: clock())
+        for contentID in contentIDs where generations[contentID] == remoteProcessGenerations[contentID] {
+          hierarchy.suspendProcessSample(contentID: contentID, now: clock())
         }
         continue
       }
@@ -1082,12 +1036,12 @@ final class TerminalEngine {
       )
       let now = clock()
       // Re-check membership: a pane can close during the SSH await.
-      for paneID in paneIDs
-      where remoteForegroundPanes[paneID] != nil
-        && generations[paneID] == remoteProcessGenerations[paneID]
+      for contentID in contentIDs
+      where remoteForegroundPanes[contentID] != nil
+        && generations[contentID] == remoteProcessGenerations[contentID]
       {
-        let next = jobs[paneID.raw] ?? ForegroundJob(processGroupID: 0, processes: [])
-        processForegroundSample(paneID: paneID, next: next, now: now)
+        let next = jobs[contentID.raw] ?? ForegroundJob(processGroupID: 0, processes: [])
+        processForegroundSample(contentID: contentID, next: next, now: now)
       }
     }
   }
@@ -1097,11 +1051,11 @@ final class TerminalEngine {
   /// a bound/visible agent samples at 1s (release latency), everything else
   /// at 3s (bind latency for a freshly launched agent).
   private func remoteProbeInterval() -> Duration {
-    for paneID in remoteForegroundPanes.keys {
-      if hierarchy.catalog.pane(paneID)?.agentKind != nil {
+    for contentID in remoteForegroundPanes.keys {
+      if hierarchy.catalog.content(contentID)?.terminal?.agentKind != nil {
         return .seconds(1)
       }
-      if let job = foregroundJobSnapshots[paneID],
+      if let job = foregroundJobSnapshots[contentID],
         AgentKindPatterns.classify(foregroundJob: job) != nil
       {
         return .seconds(1)
@@ -1112,11 +1066,11 @@ final class TerminalEngine {
 
   private func foregroundJobPollInterval() -> Duration {
     var sawRunningCommand = false
-    for paneID in foregroundJobPaneIDs {
-      if hierarchy.catalog.pane(paneID)?.agentKind != nil {
+    for contentID in foregroundJobContentIDs {
+      if hierarchy.catalog.content(contentID)?.terminal?.agentKind != nil {
         return .milliseconds(300)
       }
-      if let job = foregroundJobSnapshots[paneID] {
+      if let job = foregroundJobSnapshots[contentID] {
         if AgentKindPatterns.classify(foregroundJob: job) != nil {
           return .milliseconds(300)
         }
@@ -1132,33 +1086,33 @@ final class TerminalEngine {
   }
 
   private func emitViewportIfNeeded(
-    paneID: PaneID,
+    contentID: ContentID,
     surface: PaneSurface,
     foregroundJob: ForegroundJob,
     now: Date
   ) {
     let hasAgentSignal =
-      hierarchy.catalog.pane(paneID)?.agentKind != nil
+      hierarchy.catalog.content(contentID)?.terminal?.agentKind != nil
       || AgentKindPatterns.classify(foregroundJob: foregroundJob) != nil
     // Classify against the active interaction region, not the whole viewport:
     // scrollback that happens to still be visible must not pin the agent on a
     // stale prompt/spinner. Skip the read while the agent's own program
     // status decides its state: nothing would consume the text.
-    guard hasAgentSignal, !programStatusGoverns(paneID),
+    guard hasAgentSignal, !programStatusGoverns(contentID),
       let text = surface.readText(.active)
     else { return }
     switch Self.viewportPollOutcome(
       text: text,
-      previous: viewportSnapshots[paneID],
-      changedAt: viewportChangedAt[paneID],
+      previous: viewportSnapshots[contentID],
+      changedAt: viewportChangedAt[contentID],
       now: now
     ) {
     case .changed:
-      viewportSnapshots[paneID] = text
-      viewportChangedAt[paneID] = now
-      emit(.paneViewportChanged(paneID, text: text))
+      viewportSnapshots[contentID] = text
+      viewportChangedAt[contentID] = now
+      emit(.paneViewportChanged(contentID, text: text))
     case .idleNudge(let duration):
-      emit(.paneIdle(paneID, duration: duration))
+      emit(.paneIdle(contentID, duration: duration))
     case .quiet:
       break
     }
@@ -1166,47 +1120,47 @@ final class TerminalEngine {
 
   // MARK: Program status (OSC 7501)
 
-  /// Apply one OSC 7501 report to `paneID`'s records and publish the new
+  /// Apply one OSC 7501 report to `contentID`'s records and publish the new
   /// summary when it changed. Report text is untrusted and never logged.
-  func ingestProgramStatus(_ report: ProgramStatusReport, for paneID: PaneID) {
-    var records = programStatusRecords[paneID] ?? ProgramStatusRecords()
+  func ingestProgramStatus(_ report: ProgramStatusReport, for contentID: ContentID) {
+    var records = programStatusRecords[contentID] ?? ProgramStatusRecords()
     let before = records.summary
     guard records.apply(report) else { return }
     Self.logger.debug(
-      "program-status pane=\(paneID.raw.uuidString, privacy: .public) state=\(report.state.rawValue, privacy: .public) kind=\(report.kind?.rawValue ?? "-", privacy: .public) app=\(report.app ?? "-", privacy: .public) child=\(!report.id.isEmpty, privacy: .public)"
+      "program-status pane=\(contentID.raw.uuidString, privacy: .public) state=\(report.state.rawValue, privacy: .public) kind=\(report.kind?.rawValue ?? "-", privacy: .public) app=\(report.app ?? "-", privacy: .public) child=\(!report.id.isEmpty, privacy: .public)"
     )
-    storeProgramStatus(records, for: paneID, before: before)
+    storeProgramStatus(records, for: contentID, before: before)
   }
 
-  /// Whether `paneID`'s program status decides the state of the agent
+  /// Whether `contentID`'s program status decides the state of the agent
   /// bound to it. While true the screen is not read and the agent's
   /// OSC 9;4 progress is not shown as terminal activity.
-  func programStatusGoverns(_ paneID: PaneID) -> Bool {
-    guard let summary = programStatusRecords[paneID]?.summary else { return false }
-    return summary.governs(hierarchy.catalog.pane(paneID)?.agentKind)
+  func programStatusGoverns(_ contentID: ContentID) -> Bool {
+    guard let summary = programStatusRecords[contentID]?.summary else { return false }
+    return summary.governs(hierarchy.catalog.content(contentID)?.terminal?.agentKind)
   }
 
   /// The protocol drops `working` / `blocked` records when the reporting
   /// process exits. codans keeps records only for agent panes: once the
   /// pane is unbound and its foreground is no agent, the reporting agent
   /// is gone.
-  private func dropLiveProgramStatusIfAgentGone(paneID: PaneID, foregroundJob: ForegroundJob) {
-    guard var records = programStatusRecords[paneID],
-      hierarchy.catalog.pane(paneID)?.agentKind == nil,
+  private func dropLiveProgramStatusIfAgentGone(contentID: ContentID, foregroundJob: ForegroundJob) {
+    guard var records = programStatusRecords[contentID],
+      hierarchy.catalog.content(contentID)?.terminal?.agentKind == nil,
       foregroundJob.isEmpty || AgentKindPatterns.classify(foregroundJob: foregroundJob) == nil
     else { return }
     let before = records.summary
     guard records.dropLiveRecords() else { return }
-    storeProgramStatus(records, for: paneID, before: before)
+    storeProgramStatus(records, for: contentID, before: before)
   }
 
   private func storeProgramStatus(
-    _ records: ProgramStatusRecords, for paneID: PaneID, before: ProgramStatusSummary?
+    _ records: ProgramStatusRecords, for contentID: ContentID, before: ProgramStatusSummary?
   ) {
-    programStatusRecords[paneID] = records.isEmpty ? nil : records
+    programStatusRecords[contentID] = records.isEmpty ? nil : records
     let after = records.summary
     if after != before {
-      emit(.paneProgramStatusChanged(paneID, after))
+      emit(.paneProgramStatusChanged(contentID, after))
     }
   }
 

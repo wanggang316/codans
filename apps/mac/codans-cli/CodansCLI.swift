@@ -21,16 +21,20 @@ struct CodansCLI: AsyncParsableCommand {
       Common examples:
         \(commandName) status
         \(commandName) tree
-        \(commandName) pane send 'pwd'
-        \(commandName) pane send <pane> 'git status --short'
-        \(commandName) pane new --label agent codex
+        \(commandName) send 'pwd'
+        \(commandName) tab send <tab> 'git status --short'
+        \(commandName) tab new --label agent codex
+        \(commandName) pane split --direction down
         \(commandName) agent launch --agent claude
         \(commandName) handoff to codex --brief - <<'EOF' … EOF
         \(commandName) open --in cursor
 
-      Inside a pane, --project / --worktree / --tab / --pane default to the
-      pane's own containers ('current'); elsewhere pass an id, a t<n> / p<n>
-      handle from `\(commandName) tree`, an @label, or a name.
+      `tab` verbs act on one Tab and its session; `pane` verbs shape the
+      layout. Any id position accepts a Pane, Tab, or Content id and
+      resolves it to the level the verb needs. Inside a Tab, --project /
+      --worktree / --pane / --tab default to the Tab's own ('current');
+      elsewhere pass an id, a p<n> / t<n> handle from `\(commandName) tree`,
+      an @label, or a name.
       """,
     version: "Codans \(CodansCLI.version)",
     subcommands: [
@@ -42,6 +46,9 @@ struct CodansCLI: AsyncParsableCommand {
       WorktreeCommand.self,
       TabCommand.self,
       PaneCommand.self,
+      SendCommand.self,
+      SendKeyCommand.self,
+      CaptureCommand.self,
       BroadcastCommand.self,
       AgentCommand.self,
       HandoffCommand.self,

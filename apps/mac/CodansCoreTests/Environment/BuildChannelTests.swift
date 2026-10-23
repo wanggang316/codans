@@ -39,7 +39,7 @@ struct BuildChannelTests {
   @Test
   func derivedSpellingsAgree() {
     // The consumers that used to carry their own `#if DEBUG`.
-    #expect(AppDirectories.name == BuildChannel.current.slug)
+    #expect(AppDirectories.name == AppInstance.slug)
     #expect(CLIInvocation.commandName == BuildChannel.current.slug)
   }
 }

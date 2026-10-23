@@ -1,24 +1,24 @@
-import Foundation
 import CodansCore
+import Foundation
 
 extension IPC {
-  /// Params for `pane.info` — probe a pane's zmx daemon for the
+  /// Params for `tab.info` — probe a Tab's zmx daemon for the
   /// metadata that backs VT-fidelity assertions (shell pid, working
   /// directory, cursor position, terminal modes). Distinct from
-  /// `hierarchy.describePane`, which reports the catalog's view of the
-  /// pane; this verb round-trips through the daemon so a stale catalog
+  /// `hierarchy.describeTab`, which reports the catalog's view of the
+  /// Tab; this verb round-trips through the daemon so a stale catalog
   /// row does not leak past as live truth.
-  public struct PaneInfoRequest: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+  public struct TabInfoRequest: Codable, Equatable, Sendable {
+    public let contentID: ContentID
 
-    public init(paneID: PaneID) {
-      self.paneID = paneID
+    public init(contentID: ContentID) {
+      self.contentID = contentID
     }
   }
 
   /// Cursor position reported by the daemon. Row/col are 0-indexed
   /// against the active screen buffer.
-  public struct PaneCursor: Codable, Equatable, Sendable {
+  public struct TabCursor: Codable, Equatable, Sendable {
     public let row: UInt16
     public let col: UInt16
 
@@ -28,26 +28,26 @@ extension IPC {
     }
   }
 
-  /// Result for `pane.info`. `cursor` and `modes` are optional because
+  /// Result for `tab.info`. `cursor` and `modes` are optional because
   /// the daemon's frozen `Info` payload does not yet carry them —
   /// callers that need byte-faithful cursor/mode assertions should fall
-  /// back to `pane.read --raw` and parse the `vt`-format dump, which
+  /// back to `tab.read --raw` and parse the `vt`-format dump, which
   /// includes the cursor and SM/DECSM mode prologue.
-  public struct PaneInfoResponse: Codable, Equatable, Sendable {
-    public let paneID: PaneID
+  public struct TabInfoResponse: Codable, Equatable, Sendable {
+    public let contentID: ContentID
     public let shellPid: Int32
     public let pwd: String
-    public let cursor: PaneCursor?
+    public let cursor: TabCursor?
     public let modes: [String: Bool]?
 
     public init(
-      paneID: PaneID,
+      contentID: ContentID,
       shellPid: Int32,
       pwd: String,
-      cursor: PaneCursor? = nil,
+      cursor: TabCursor? = nil,
       modes: [String: Bool]? = nil
     ) {
-      self.paneID = paneID
+      self.contentID = contentID
       self.shellPid = shellPid
       self.pwd = pwd
       self.cursor = cursor

@@ -28,16 +28,16 @@ import CodansCore
 final class AgentStateOrderCoordinator {
   /// Display order consumed by the view. Survivors first, newcomers
   /// appended; replaced wholesale by a debounced triage sort when armed.
-  private(set) var orderedIDs: [PaneID] = []
+  private(set) var orderedIDs: [ContentID] = []
 
   /// Last-observed state per pane, used to detect significant transitions
   /// across `reconcile` calls.
   @ObservationIgnored
-  private var lastStates: [PaneID: AgentStateStore.AgentRuntimeState] = [:]
+  private var lastStates: [ContentID: AgentStateStore.AgentRuntimeState] = [:]
   /// Most recent entries snapshot, sorted at debounce-fire time so the
   /// re-sort reflects the latest states rather than a stale capture.
   @ObservationIgnored
-  private var latestEntries: [PaneID: AgentStateStore.AgentEntry] = [:]
+  private var latestEntries: [ContentID: AgentStateStore.AgentEntry] = [:]
   @ObservationIgnored
   private var pendingResort: Task<Void, Never>?
   @ObservationIgnored
@@ -69,7 +69,7 @@ final class AgentStateOrderCoordinator {
   /// Reconcile the display order against a fresh entries snapshot.
   /// `autoSort` mirrors `Settings → General → Agents View → Auto-sort`.
   func reconcile(
-    entries: [PaneID: AgentStateStore.AgentEntry],
+    entries: [ContentID: AgentStateStore.AgentEntry],
     autoSort: Bool
   ) {
     latestEntries = entries
@@ -108,7 +108,7 @@ final class AgentStateOrderCoordinator {
   /// current order and cancels any pending re-sort.
   func autoSortChanged(
     to autoSort: Bool,
-    entries: [PaneID: AgentStateStore.AgentEntry]
+    entries: [ContentID: AgentStateStore.AgentEntry]
   ) {
     latestEntries = entries
     lastStates = entries.mapValues(\.state)
@@ -135,7 +135,7 @@ final class AgentStateOrderCoordinator {
   }
 
   private func applyResort() {
-    let sorted = SortedEntriesProvider.sorted(latestEntries).map(\.paneID)
+    let sorted = SortedEntriesProvider.sorted(latestEntries).map(\.contentID)
     if sorted != orderedIDs {
       orderedIDs = sorted
     }

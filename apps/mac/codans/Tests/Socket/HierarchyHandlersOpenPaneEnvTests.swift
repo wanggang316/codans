@@ -17,8 +17,11 @@ struct HierarchyHandlersOpenPaneEnvTests {
     let runtime = FakeHierarchyRuntime()
     // A real folder: the handler refuses a Pane in a missing one.
     let repo = NSTemporaryDirectory()
-    let tab = Tab(name: "dev")
-    let worktree = Worktree(name: "main", path: repo, branch: "main", tabs: [tab])
+    let tab = Tab(name: "dev", content: .terminal(workingDirectory: repo))
+    let pane = Pane(tabs: [tab])
+    let worktree = Worktree(
+      name: "main", path: repo, branch: "main",
+      splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
     let project = Project(name: "repo", rootPath: repo, gitRoot: repo, worktrees: [worktree])
     let manager = HierarchyManager(
       catalog: Catalog(projects: [project]),
@@ -36,17 +39,18 @@ struct HierarchyHandlersOpenPaneEnvTests {
       }
     )
     let params = try JSONValue.encoded(
-      HierarchyHandlers.OpenPaneParams(
+      HierarchyHandlers.CreateTabParams(
         projectID: project.id,
         worktreeID: worktree.id,
-        tabID: tab.id,
+        paneID: tab.id.raw,
+        name: nil,
         workingDirectory: repo,
         initialCommand: nil,
         labels: []
       )
     )
 
-    let outcome = await handlers.openPane(params)
+    let outcome = await handlers.createTab(params)
 
     guard case .unary = outcome else {
       Issue.record("expected unary success, got \(outcome)")

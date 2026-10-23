@@ -4,10 +4,11 @@ import Foundation
 struct WorktreeProcessEntry: Identifiable, Equatable, Sendable {
   enum Kind: Equatable, Sendable { case agent, run, command }
 
-  var id: PaneID { paneID }
-  let paneID: PaneID
+  var id: ContentID { contentID }
+  let contentID: ContentID
   let projectID: ProjectID
   let worktreeID: WorktreeID
+  let paneID: PaneID
   let tabID: TabID
   let name: String
   let kind: Kind
@@ -19,8 +20,9 @@ struct WorktreeProcessEntry: Identifiable, Equatable, Sendable {
   var agentKind: AgentKind?
 }
 
-/// Session-only launch attribution. A catalog run-pane association alone never
-/// creates an entry: every visible row requires a live foreground sample.
+/// Session-only launch attribution. A catalog run-Content association alone
+/// never creates an entry: every visible row requires a live foreground
+/// sample.
 struct WorktreeProcessRegistry: Equatable {
   struct Launch: Equatable {
     let name: String
@@ -42,69 +44,69 @@ struct WorktreeProcessRegistry: Equatable {
     let expiresAt: Date
   }
 
-  var suspended: [PaneID: Suspended] = [:]
-  var foregroundJobs: [PaneID: ForegroundJob] = [:]
-  var entries: [PaneID: WorktreeProcessEntry] = [:]
-  var launches: [PaneID: Launch] = [:]
+  var suspended: [ContentID: Suspended] = [:]
+  var foregroundJobs: [ContentID: ForegroundJob] = [:]
+  var entries: [ContentID: WorktreeProcessEntry] = [:]
+  var launches: [ContentID: Launch] = [:]
 
-  mutating func suspend(_ paneID: PaneID, now: Date) {
-    if let entry = entries.removeValue(forKey: paneID) {
-      suspended[paneID] = .init(entry: entry, expiresAt: now.addingTimeInterval(30))
+  mutating func suspend(_ contentID: ContentID, now: Date) {
+    if let entry = entries.removeValue(forKey: contentID) {
+      suspended[contentID] = .init(entry: entry, expiresAt: now.addingTimeInterval(30))
     }
-    if let pending = suspended[paneID], pending.expiresAt <= now {
-      remove(paneID)
-    } else if suspended[paneID] == nil,
-      let launch = launches[paneID], now.timeIntervalSince(launch.requestedAt) >= 15
+    if let pending = suspended[contentID], pending.expiresAt <= now {
+      remove(contentID)
+    } else if suspended[contentID] == nil,
+      let launch = launches[contentID], now.timeIntervalSince(launch.requestedAt) >= 15
     {
-      remove(paneID)
+      remove(contentID)
     }
   }
 
-  mutating func retireIdle(_ paneID: PaneID, now: Date) {
+  mutating func retireIdle(_ contentID: ContentID, now: Date) {
     // A shell sample immediately retires an observed job. Before first
     // observation allow the shell a bounded window to start the command.
-    let hadSuspended = suspended[paneID] != nil
-    let hadEntry = entries[paneID] != nil || hadSuspended
-    if hadSuspended { suspended.removeValue(forKey: paneID) }
-    if entries[paneID] != nil { entries.removeValue(forKey: paneID) }
+    let hadSuspended = suspended[contentID] != nil
+    let hadEntry = entries[contentID] != nil || hadSuspended
+    if hadSuspended { suspended.removeValue(forKey: contentID) }
+    if entries[contentID] != nil { entries.removeValue(forKey: contentID) }
     if hadEntry
-      || launches[paneID].map({ now.timeIntervalSince($0.requestedAt) >= 15 })
+      || launches[contentID].map({ now.timeIntervalSince($0.requestedAt) >= 15 })
         == true
     {
-      if launches[paneID] != nil { launches.removeValue(forKey: paneID) }
+      if launches[contentID] != nil { launches.removeValue(forKey: contentID) }
     }
   }
 
-  mutating func remove(_ paneID: PaneID) {
-    suspended.removeValue(forKey: paneID)
-    foregroundJobs.removeValue(forKey: paneID)
-    entries.removeValue(forKey: paneID)
-    launches.removeValue(forKey: paneID)
+  mutating func remove(_ contentID: ContentID) {
+    suspended.removeValue(forKey: contentID)
+    foregroundJobs.removeValue(forKey: contentID)
+    entries.removeValue(forKey: contentID)
+    launches.removeValue(forKey: contentID)
   }
 }
 
 extension HierarchyManager {
   func recordProcessLaunch(
-    paneID: PaneID, name: String, kind: WorktreeProcessEntry.Kind, now: Date = .now,
+    contentID: ContentID, name: String, kind: WorktreeProcessEntry.Kind, now: Date = .now,
     requiresIdle: Bool = false
   ) {
-    guard let (_, worktreeID, _) = addressOf(paneID: paneID),
-      catalog.projects.flatMap(\.worktrees).contains(where: { $0.id == worktreeID && !$0.archived })
+    guard let address = catalog.address(forContent: contentID),
+      catalog.projects.flatMap(\.worktrees).contains(where: { $0.id == address.worktreeID && !$0.archived })
     else { return }
-    if requiresIdle, let job = processRegistry.foregroundJobs[paneID],
+    if requiresIdle, let job = processRegistry.foregroundJobs[contentID],
       AgentKindPatterns.classify(foregroundJob: job) != nil
         || ForegroundJobClassifier.indicatesRunningCommand(job)
     {
       return
     }
     let observedIdle =
-      processRegistry.foregroundJobs[paneID].map {
+      processRegistry.foregroundJobs[contentID].map {
         !$0.isEmpty
           && AgentKindPatterns.classify(foregroundJob: $0) == nil
           && !ForegroundJobClassifier.indicatesRunningCommand($0)
       } ?? false
-    processRegistry.remove(paneID)
-    processRegistry.launches[paneID] = .init(
+    processRegistry.remove(contentID)
+    processRegistry.launches[contentID] = .init(
       name: name, kind: kind, requestedAt: now, requiresNewProcess: requiresIdle,
       observedIdle: observedIdle)
   }
@@ -114,60 +116,56 @@ extension HierarchyManager {
       catalog.projects.flatMap(\.worktrees).contains(where: { $0.id == worktreeID && !$0.archived })
     else { return [] }
     return processRegistry.entries.values.filter {
-      $0.worktreeID == worktreeID && catalog.pane($0.paneID) != nil
+      $0.worktreeID == worktreeID && catalog.content($0.contentID) != nil
     }.sorted {
       if $0.observedAt != $1.observedAt { return $0.observedAt < $1.observedAt }
-      return $0.paneID.raw.uuidString < $1.paneID.raw.uuidString
+      return $0.contentID.raw.uuidString < $1.contentID.raw.uuidString
     }
   }
 
-  /// The process a tab shows in its hover card: the tab's focused pane's
-  /// process when it has one, else the tab's longest-running one.
+  /// The process a Tab shows in its hover card: its one Content's process.
   func processEntry(inTab tabID: TabID) -> WorktreeProcessEntry? {
-    guard let worktreeID = processRegistry.entries.values.first(where: { $0.tabID == tabID })?.worktreeID
-    else { return nil }
-    let entries = processEntries(in: worktreeID).filter { addressOf(paneID: $0.paneID)?.2 == tabID }
-    let focused = lastFocusedPane(in: tabID)
-    return entries.first { $0.paneID == focused } ?? entries.first
+    guard let address = catalog.address(forTab: tabID) else { return nil }
+    return processEntries(in: address.worktreeID).first { $0.contentID == address.contentID }
   }
 
   func isCurrentProcess(_ entry: WorktreeProcessEntry) -> Bool {
     processEntries(in: entry.worktreeID).contains(entry)
   }
 
-  func suspendProcessSample(paneID: PaneID, now: Date) {
+  func suspendProcessSample(contentID: ContentID, now: Date) {
     var registry = processRegistry
-    registry.suspend(paneID, now: now)
+    registry.suspend(contentID, now: now)
     if registry != processRegistry { processRegistry = registry }
   }
 
-  func updateProcessSample(paneID: PaneID, job: ForegroundJob, now: Date) {
+  func updateProcessSample(contentID: ContentID, job: ForegroundJob, now: Date) {
     var registry = processRegistry
     defer {
       if registry != processRegistry { processRegistry = registry }
     }
-    guard let (projectID, worktreeID, tabID) = addressOf(paneID: paneID),
-      let worktree = catalog.projects.flatMap(\.worktrees).first(where: { $0.id == worktreeID }),
-      !worktree.archived, let pane = catalog.pane(paneID)
+    guard let address = catalog.address(forContent: contentID),
+      let worktree = catalog.projects.flatMap(\.worktrees).first(where: { $0.id == address.worktreeID }),
+      !worktree.archived, let state = catalog.content(contentID)?.terminal
     else {
-      registry.remove(paneID)
+      registry.remove(contentID)
       return
     }
-    if let suspended = registry.suspended[paneID], suspended.expiresAt <= now {
-      registry.remove(paneID)
+    if let suspended = registry.suspended[contentID], suspended.expiresAt <= now {
+      registry.remove(contentID)
     }
-    if registry.foregroundJobs[paneID] != job { registry.foregroundJobs[paneID] = job }
+    if registry.foregroundJobs[contentID] != job { registry.foregroundJobs[contentID] = job }
     let agentKind = AgentKindPatterns.classify(foregroundJob: job)
     let running = agentKind != nil || ForegroundJobClassifier.indicatesRunningCommand(job)
     guard running else {
-      registry.retireIdle(paneID, now: now)
+      registry.retireIdle(contentID, now: now)
       return
     }
-    if registry.entries[paneID] == nil, registry.suspended[paneID] == nil,
-      let pending = registry.launches[paneID],
+    if registry.entries[contentID] == nil, registry.suspended[contentID] == nil,
+      let pending = registry.launches[contentID],
       now.timeIntervalSince(pending.requestedAt) >= 15
     {
-      registry.launches.removeValue(forKey: paneID)
+      registry.launches.removeValue(forKey: contentID)
     }
     let process =
       job.processes.first(where: {
@@ -177,26 +175,27 @@ extension HierarchyManager {
         }
         return $0.pid == job.processGroupID
       }) ?? job.processes[0]
-    if registry.launches[paneID]?.accepts(process) == false {
-      registry.launches.removeValue(forKey: paneID)
+    if registry.launches[contentID]?.accepts(process) == false {
+      registry.launches.removeValue(forKey: contentID)
     }
     let previous =
-      registry.entries[paneID]
-      ?? registry.suspended.removeValue(forKey: paneID)?.entry
+      registry.entries[contentID]
+      ?? registry.suspended.removeValue(forKey: contentID)?.entry
     let sameProcess = previous?.pid == process.pid && previous?.startedAt == process.startedAt
     if previous != nil && !sameProcess {
-      registry.launches.removeValue(forKey: paneID)
+      registry.launches.removeValue(forKey: contentID)
     }
-    let currentLaunch = registry.launches[paneID]
+    let currentLaunch = registry.launches[contentID]
     let name = currentLaunch?.name ?? agentKind?.displayName ?? process.processName
     let nextEntry = WorktreeProcessEntry(
-      paneID: paneID, projectID: projectID, worktreeID: worktreeID, tabID: tabID,
+      contentID: contentID, projectID: address.projectID, worktreeID: address.worktreeID,
+      paneID: address.paneID, tabID: address.tabID,
       name: name, kind: agentKind != nil ? .agent : (currentLaunch?.kind ?? .command),
       pid: process.pid, startedAt: process.startedAt,
       observedAt: sameProcess ? (previous?.observedAt ?? now) : now,
-      workingDirectory: pane.workingDirectory,
+      workingDirectory: state.workingDirectory,
       processName: process.processName, agentKind: agentKind
     )
-    if registry.entries[paneID] != nextEntry { registry.entries[paneID] = nextEntry }
+    if registry.entries[contentID] != nextEntry { registry.entries[contentID] = nextEntry }
   }
 }

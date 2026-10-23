@@ -154,8 +154,8 @@ struct CommandPaletteItemsTests {
   // MARK: - Focused pane resolution
 
   @Test
-  func resolveFocusedPaneIDReturnsNilWhenNoSelection() {
-    let id = CommandPaletteItems.resolveFocusedPaneID(
+  func resolveFocusedContentIDReturnsNilWhenNoSelection() {
+    let id = CommandPaletteItems.resolveFocusedContentID(
       selection: Self.emptySelection, catalog: Self.emptyCatalog
     )
     #expect(id == nil)

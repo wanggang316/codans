@@ -181,9 +181,9 @@ struct ScriptDefinitionCodableTests {
     let ntDecoded = try decoder.decode(ScriptDefinition.self, from: try encoder.encode(nt))
     #expect(ntDecoded == nt)
 
-    // split + closePane: kept.
-    let sp = ScriptDefinition(command: "echo", target: .split, direction: .left, onFinished: .closePane)
-    #expect(sp.resolvedOnFinished == .closePane)
+    // split + closeTab: kept (the split's only Tab closes, and its Pane with it).
+    let sp = ScriptDefinition(command: "echo", target: .split, direction: .left, onFinished: .closeTab)
+    #expect(sp.resolvedOnFinished == .closeTab)
     let spDecoded = try decoder.decode(ScriptDefinition.self, from: try encoder.encode(sp))
     #expect(spDecoded == sp)
 
@@ -193,10 +193,19 @@ struct ScriptDefinitionCodableTests {
     let focText = try #require(String(bytes: try encoder.encode(foc), encoding: .utf8))
     // onFinished encodes the *validated* value, so .focused never writes it.
     #expect(focText.contains("\"onFinished\"") == false)
+  }
 
-    // Invalid combo from disk (split + closeTab): tolerated, runtime treats as .none.
-    let invalid = ScriptDefinition(command: "echo", target: .split, onFinished: .closeTab)
-    #expect(invalid.resolvedOnFinished == .none)
+  /// The stored `closePane` token is read once as `closeTab` and written
+  /// back under the new name.
+  @Test
+  func legacyClosePaneIsReadAsCloseTabAndWrittenAsCloseTab() throws {
+    let json = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","command":"make test","target":"split","direction":"down","onFinished":"closePane"}"#
+    let decoded = try decoder.decode(ScriptDefinition.self, from: Data(json.utf8))
+    #expect(decoded.onFinished == .closeTab)
+    #expect(decoded.resolvedOnFinished == .closeTab)
+    let text = try #require(String(bytes: try encoder.encode(decoded), encoding: .utf8))
+    #expect(text.contains("\"onFinished\":\"closeTab\""))
+    #expect(!text.contains("closePane"))
   }
 
   @Test

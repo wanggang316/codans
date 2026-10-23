@@ -22,7 +22,7 @@ public nonisolated enum CLIInvocation {
   ///
   /// The name reaches us in two cases. Either nothing is installed under it,
   /// so the only candidate is the bundle's own `bin/` — which every pane has
-  /// on PATH (`PaneEnvironment`), and which no shell reordering can displace
+  /// on PATH (`TabEnvironment`), and which no shell reordering can displace
   /// when there is no competitor. Or the installed symlink resolves to our
   /// bundled binary. Existence alone is not enough: `/usr/local/bin/codans`
   /// normally links into `/Applications/Codans.app`, so a locally-built

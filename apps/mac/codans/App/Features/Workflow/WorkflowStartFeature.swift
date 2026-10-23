@@ -21,7 +21,7 @@ struct WorkflowStartFeature {
     let worktreePath: String
     /// The focused pane, and only when it is an agent pane in this
     /// worktree — a `current` role has nothing else to bind to.
-    let paneID: PaneID?
+    let contentID: ContentID?
     let paneLabel: String?
     let agent: AgentKind?
 
@@ -30,7 +30,7 @@ struct WorkflowStartFeature {
       worktreeID: WorktreeID,
       worktreeName: String,
       worktreePath: String,
-      paneID: PaneID? = nil,
+      contentID: ContentID? = nil,
       paneLabel: String? = nil,
       agent: AgentKind? = nil
     ) {
@@ -38,7 +38,7 @@ struct WorkflowStartFeature {
       self.worktreeID = worktreeID
       self.worktreeName = worktreeName
       self.worktreePath = worktreePath
-      self.paneID = paneID
+      self.contentID = contentID
       self.paneLabel = paneLabel
       self.agent = agent
     }
@@ -59,7 +59,7 @@ struct WorkflowStartFeature {
     var profileID: UUID?
     /// `pick` only.
     var panes: [PaneChoice] = []
-    var paneID: PaneID?
+    var contentID: ContentID?
 
     var id: String { name }
   }
@@ -145,7 +145,7 @@ struct WorkflowStartFeature {
           roles.append(
             RoleRow(
               name: role.name, source: .pick, panes: offered,
-              paneID: offered.count == 1 ? offered[0].id : nil))
+              contentID: offered.count == 1 ? offered[0].id : nil))
         }
       }
       let inputs = definition.inputs.map { input in
@@ -225,7 +225,7 @@ struct WorkflowStartFeature {
           return row.profiles.isEmpty
             ? "No enabled agent profile can play \"\(row.name)\"."
             : "Choose a profile for \"\(row.name)\"."
-        case .pick where row.paneID == nil:
+        case .pick where row.contentID == nil:
           return row.panes.isEmpty
             ? "No free agent pane in \(source.worktreeName) can play \"\(row.name)\"."
             : "Choose a pane for \"\(row.name)\"."
@@ -271,7 +271,7 @@ struct WorkflowStartFeature {
         case .launch:
           if let profileID = row.profileID { roleOverrides[row.name] = profileID.uuidString }
         case .pick:
-          if let paneID = row.paneID { roleOverrides[row.name] = paneID.raw.uuidString }
+          if let contentID = row.contentID { roleOverrides[row.name] = contentID.raw.uuidString }
         case .current:
           continue
         }
@@ -285,11 +285,11 @@ struct WorkflowStartFeature {
       }
       return WorkflowAdmission.Request(
         workflow: entry.id,
-        sourcePaneID: source.paneID,
+        sourceContentID: source.contentID,
         worktreeID: source.worktreeID,
         // The GUI is never the agent a `current` role addresses, so the
         // first message is typed rather than handed back as self-initiated.
-        callerPaneID: nil,
+        callerContentID: nil,
         roles: roleOverrides,
         inputs: values,
         skip: skipped.sorted())
@@ -298,7 +298,7 @@ struct WorkflowStartFeature {
 
   enum Action: Equatable {
     case setProfile(role: String, profileID: UUID?)
-    case setPane(role: String, paneID: PaneID?)
+    case setPane(role: String, contentID: ContentID?)
     case setInput(name: String, text: String)
     case setSkipped(stepID: String, Bool)
     case runTapped
@@ -329,9 +329,9 @@ struct WorkflowStartFeature {
         state.message = nil
         return .none
 
-      case .setPane(let role, let paneID):
+      case .setPane(let role, let contentID):
         guard let index = state.roles.firstIndex(where: { $0.name == role }) else { return .none }
-        state.roles[index].paneID = paneID
+        state.roles[index].contentID = contentID
         state.message = nil
         return .none
 

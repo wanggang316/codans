@@ -22,10 +22,10 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
       let text: String
     }
-    let params = try JSONValue.encoded(Params(paneID: PaneID(), text: "hello"))
+    let params = try JSONValue.encoded(Params(contentID: ContentID(), text: "hello"))
     try server.send(
       IPC.Request(id: "s1", method: .terminalSendInput, params: params)
     )
@@ -71,13 +71,13 @@ struct TerminalHandlersTests {
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
 
-    let pid = PaneID()
+    let pid = ContentID()
     sink.registered.insert(pid.raw)
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
       let text: String
     }
-    let params = try JSONValue.encoded(Params(paneID: pid, text: "ls\n"))
+    let params = try JSONValue.encoded(Params(contentID: pid, text: "ls\n"))
     try server.send(
       IPC.Request(id: "s2", method: .terminalSendInput, params: params)
     )
@@ -95,10 +95,10 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
       let text: String
     }
-    let params = try JSONValue.encoded(Params(paneID: PaneID(), text: "x"))
+    let params = try JSONValue.encoded(Params(contentID: ContentID(), text: "x"))
     try server.send(
       IPC.Request(id: "s3", method: .terminalSendInput, params: params)
     )
@@ -118,9 +118,9 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
     }
-    let params = try JSONValue.encoded(Params(paneID: PaneID()))
+    let params = try JSONValue.encoded(Params(contentID: ContentID()))
     try server.send(
       IPC.Request(id: "rp1", method: .terminalResetPane, params: params)
     )
@@ -140,12 +140,12 @@ struct TerminalHandlersTests {
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
 
-    let pid = PaneID()
+    let pid = ContentID()
     sink.registered.insert(pid.raw)
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
     }
-    let params = try JSONValue.encoded(Params(paneID: pid))
+    let params = try JSONValue.encoded(Params(contentID: pid))
     try server.send(
       IPC.Request(id: "rp2", method: .terminalResetPane, params: params)
     )
@@ -163,9 +163,9 @@ struct TerminalHandlersTests {
     _ = try await server.awaitResponse()
 
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
     }
-    let params = try JSONValue.encoded(Params(paneID: PaneID()))
+    let params = try JSONValue.encoded(Params(contentID: ContentID()))
     try server.send(
       IPC.Request(id: "rp3", method: .terminalResetPane, params: params)
     )
@@ -185,14 +185,14 @@ struct TerminalHandlersTests {
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
 
-    let pid = PaneID()
+    let pid = ContentID()
     sink.registered.insert(pid.raw)
     sink.textByPane[pid.raw] = "prompt\noutput"
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
       let extent: String
     }
-    let params = try JSONValue.encoded(Params(paneID: pid, extent: "viewport"))
+    let params = try JSONValue.encoded(Params(contentID: pid, extent: "viewport"))
     try server.send(
       IPC.Request(id: "r1", method: .terminalReadText, params: params)
     )
@@ -216,7 +216,7 @@ struct TerminalHandlersTests {
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
 
-    let pid = PaneID()
+    let pid = ContentID()
     sink.registered.insert(pid.raw)
     // Output churns for the first reads, then holds on "done".
     sink.textScript[pid.raw] = ["boot", "boot\nrun", "done", "done"]
@@ -226,13 +226,13 @@ struct TerminalHandlersTests {
       let timeoutMillis: Int
     }
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
       let extent: String
       let waitStable: WaitStable
     }
     let params = try JSONValue.encoded(
       Params(
-        paneID: pid, extent: "viewport",
+        contentID: pid, extent: "viewport",
         waitStable: WaitStable(stableMillis: 30, intervalMillis: 10, timeoutMillis: 1000)))
     try server.send(
       IPC.Request(id: "ws1", method: .terminalReadText, params: params)
@@ -266,13 +266,13 @@ struct TerminalHandlersTests {
       let timeoutMillis: Int
     }
     struct Params: Codable {
-      let paneID: PaneID
+      let contentID: ContentID
       let extent: String
       let waitStable: WaitStable
     }
     let params = try JSONValue.encoded(
       Params(
-        paneID: PaneID(), extent: "viewport",
+        contentID: ContentID(), extent: "viewport",
         waitStable: WaitStable(stableMillis: 30, intervalMillis: 10, timeoutMillis: 1000)))
     try server.send(
       IPC.Request(id: "ws2", method: .terminalReadText, params: params)
@@ -355,27 +355,27 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   private var scriptCursor: [UUID: Int] = [:]
   private let lock = NSLock()
 
-  func sendInput(paneID: PaneID, text: String) -> Bool {
+  func sendInput(contentID: ContentID, text: String) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
-    delivered.append(Delivery(paneID: paneID.raw, text: text))
+    guard registered.contains(contentID.raw) else { return false }
+    delivered.append(Delivery(paneID: contentID.raw, text: text))
     return true
   }
 
-  func sendKey(paneID: PaneID, key: IPC.TerminalNamedKey) -> Bool {
+  func sendKey(contentID: ContentID, key: IPC.TerminalNamedKey) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
-    keys.append((paneID.raw, key))
+    guard registered.contains(contentID.raw) else { return false }
+    keys.append((contentID.raw, key))
     return true
   }
 
-  func sendRawBytes(paneID: PaneID, bytes: [UInt8]) -> Bool {
+  func sendRawBytes(contentID: ContentID, bytes: [UInt8]) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
-    rawBytes.append((paneID.raw, bytes))
+    guard registered.contains(contentID.raw) else { return false }
+    rawBytes.append((contentID.raw, bytes))
     return true
   }
 
@@ -386,23 +386,23 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
     return registered.count
   }
 
-  func readText(paneID: PaneID, extent: TerminalHandlers.ReadExtent) -> String? {
+  func readText(contentID: ContentID, extent: TerminalHandlers.ReadExtent) -> String? {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return nil }
-    if let script = textScript[paneID.raw], !script.isEmpty {
-      let cursor = scriptCursor[paneID.raw] ?? 0
-      scriptCursor[paneID.raw] = cursor + 1
+    guard registered.contains(contentID.raw) else { return nil }
+    if let script = textScript[contentID.raw], !script.isEmpty {
+      let cursor = scriptCursor[contentID.raw] ?? 0
+      scriptCursor[contentID.raw] = cursor + 1
       return script[min(cursor, script.count - 1)]
     }
-    return textByPane[paneID.raw] ?? ""
+    return textByPane[contentID.raw] ?? ""
   }
 
-  func resetPane(paneID: PaneID) -> Bool {
+  func resetPane(contentID: ContentID) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return false }
-    resets.append(paneID.raw)
+    guard registered.contains(contentID.raw) else { return false }
+    resets.append(contentID.raw)
     return true
   }
 }

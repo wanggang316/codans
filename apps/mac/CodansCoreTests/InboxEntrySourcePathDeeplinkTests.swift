@@ -3,7 +3,7 @@ import Testing
 
 @testable import CodansCore
 
-/// Self-test for the `(projectID, worktreeID, tabID, paneID)` round-trip
+/// Self-test for the `(projectID, worktreeID, contentID)` round-trip
 /// across the macOS banner deeplink. The encoder lives in the app
 /// target's `OSNotifier.deeplink(for:)` and the decoder in
 /// `AppDelegate.parseDeeplink(_:)`; both are exercised together in
@@ -16,8 +16,7 @@ struct InboxEntrySourcePathDeeplinkTests {
     let path = InboxEntry.SourcePath(
       projectID: ProjectID(),
       worktreeID: WorktreeID(),
-      tabID: TabID(),
-      paneID: PaneID()
+      contentID: ContentID()
     )
     // The deeplink encoder lives in the app target; here we mirror the
     // format inline to ensure both sides agree.
@@ -25,8 +24,7 @@ struct InboxEntrySourcePathDeeplinkTests {
       .appending(queryItems: [
         URLQueryItem(name: "project", value: path.projectID.raw.uuidString),
         URLQueryItem(name: "worktree", value: path.worktreeID.raw.uuidString),
-        URLQueryItem(name: "tab", value: path.tabID.raw.uuidString),
-        URLQueryItem(name: "pane", value: path.paneID.raw.uuidString),
+        URLQueryItem(name: "content", value: path.contentID.raw.uuidString),
       ])
     let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
     let items = Dictionary(
@@ -39,7 +37,6 @@ struct InboxEntrySourcePathDeeplinkTests {
     #expect(url.host == "focus")
     #expect(items["project"] == path.projectID.raw.uuidString)
     #expect(items["worktree"] == path.worktreeID.raw.uuidString)
-    #expect(items["tab"] == path.tabID.raw.uuidString)
-    #expect(items["pane"] == path.paneID.raw.uuidString)
+    #expect(items["content"] == path.contentID.raw.uuidString)
   }
 }

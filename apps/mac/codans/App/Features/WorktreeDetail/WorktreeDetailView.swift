@@ -111,10 +111,14 @@ struct WorktreeDetailView: View {
   /// dark-only theme that would clash with the system-appearance sidebar
   /// and the neutral empty body (gray/dark chrome framing a light window).
   /// Painting no band keeps the whole no-project window on the system tone.
+  /// A Worktree's terminals run under the toolbar themselves, so they get
+  /// no top band either.
   private var chromeTintEdges: Edge.Set {
-    let isPlaceholder = activePendingWorktree == nil && resolveAddress() == nil
-    if isPlaceholder { return [] }
-    return isWindowFullscreen ? [.leading] : [.top, .leading]
+    switch resolveDetailMode() {
+    case nil: return []
+    case .creating: return isWindowFullscreen ? [.leading] : [.top, .leading]
+    case .worktree: return [.leading]
+    }
   }
 
   @ViewBuilder
@@ -134,18 +138,19 @@ struct WorktreeDetailView: View {
         // `worktreeToolbarContent(mode:)` for why the creating and settled
         // states must not each bring their own.
         .toolbar { worktreeToolbarContent(mode: mode) }
-        // Drop the system-painted window-toolbar chrome so the macOS 26
-        // floating-sidebar overlay only blends against the detail body
-        // underneath it. Without this, the toolbar's full-window glass
-        // repaints on every toolbar-state change (tab switch rebuilds
-        // `worktreeToolbarContent`) and flickers across the area covered
-        // by the translucent sidebar.
+        // A Worktree's terminals run under the toolbar, so the toolbar
+        // keeps its default background: the scroll edge effect over them.
+        // Other states drop the system-painted window-toolbar chrome so the
+        // macOS 26 floating-sidebar overlay only blends against the detail
+        // body underneath it. Without this, the toolbar's full-window glass
+        // repaints on every toolbar-state change and flickers across the
+        // area covered by the translucent sidebar.
         //
         // Re-show the chrome when fullscreen — without it, the sidebar `+`
         // button and detail toolbar render over the terminal pane with
         // nothing behind them (the title bar normally provides the visual
         // backing).
-        .toolbarBackground(isWindowFullscreen ? .visible : .hidden, for: .windowToolbar)
+        .toolbarBackground(toolbarBackgroundVisibility(mode), for: .windowToolbar)
         .onAppear { isWindowFullscreen = Self.detectMainWindowFullscreen() }
         .onReceive(
           NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)
@@ -160,6 +165,12 @@ struct WorktreeDetailView: View {
     } else {
       placeholder
     }
+  }
+
+  private func toolbarBackgroundVisibility(_ mode: DetailMode) -> Visibility {
+    if isWindowFullscreen { return .visible }
+    if case .worktree = mode { return .automatic }
+    return .hidden
   }
 
   /// Which worktree surface the detail column renders. Resolved once per
@@ -203,10 +214,7 @@ struct WorktreeDetailView: View {
         // banner reads as a "drop-down notification strip" regardless
         // of which tab / pane is foreground.
         BranchSwitcherErrorBannerView(store: branchSwitcherStore)
-        VStack(spacing: 0) {
-          tabBarRow(address: address)
-          terminalRegion(address: address)
-        }
+        terminalRegion(address: address)
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -238,43 +246,22 @@ struct WorktreeDetailView: View {
     return WorktreeInfo(worktree: worktree, project: project)
   }
 
-  /// Tab bar row above the terminal region. Branch label + bell / open-in
-  /// chips used to live to the right of the tabs (old `unifiedHeader`); they
-  /// moved into the window titlebar via `worktreeToolbarContent(address:)`
-  /// so the content region gets its vertical space back.
+  /// The Worktree's split tree of Panes, each with its own tab strip. The
+  /// branch label + bell / open-in chips live in the window titlebar via
+  /// `worktreeToolbarContent(address:)`, so the whole content region is
+  /// the layout.
   @ViewBuilder
-  private func tabBarRow(address: Address) -> some View {
-    TabBarView(
-      store: store.scope(state: \.tabBar, action: \.tabBar),
-      projectID: address.project,
-      worktreeID: address.worktree,
-      activeTabID: address.activeTab,
-      agentStateStore: agentStateStore
-    )
-    .frame(maxWidth: .infinity, alignment: .leading)
-    // No solid `.windowBackgroundColor` fill: with the toolbar chrome
-    // hidden, the bar reads as a continuation of the titlebar region
-    // (the NSWindow's natural backdrop). A solid fill across the full
-    // detail width — including the area covered by the floating
-    // sidebar — turns any repaint into a visible flash.
-  }
-
   private func terminalRegion(address: Address) -> some View {
-    TerminalMountDeferral(
-      worktreeID: address.worktree,
-      activeTabID: address.activeTab,
-      tabIDs: worktreeInfo(for: address)?.worktree.tabs.map(\.id) ?? []
-    ) {
-      if let tabID = address.activeTab {
-        SplitViewportView(
-          store: store.scope(state: \.splitViewport, action: \.splitViewport),
-          projectID: address.project,
-          worktreeID: address.worktree,
-          tabID: tabID
-        )
-      } else {
-        emptyTab(address: address)
-      }
+    if worktreeInfo(for: address)?.worktree.panes.isEmpty == false {
+      SplitViewportView(
+        store: store.scope(state: \.splitViewport, action: \.splitViewport),
+        tabBarStore: store.scope(state: \.tabBar, action: \.tabBar),
+        projectID: address.project,
+        worktreeID: address.worktree,
+        agentStateStore: agentStateStore
+      )
+    } else {
+      emptyTab(address: address)
     }
   }
 
@@ -533,7 +520,6 @@ struct WorktreeDetailView: View {
   private struct Address {
     let project: ProjectID
     let worktree: WorktreeID
-    let activeTab: TabID?
   }
 
   private func resolveAddress() -> Address? {
@@ -541,15 +527,11 @@ struct WorktreeDetailView: View {
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID,
       let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      project.worktrees.contains(where: { $0.id == worktreeID })
     else {
       return nil
     }
-    return Address(
-      project: projectID,
-      worktree: worktreeID,
-      activeTab: worktree.selectedTabID
-    )
+    return Address(project: projectID, worktree: worktreeID)
   }
 
   /// Routes the empty-page buttons through the same `TabBarFeature` actions
@@ -562,14 +544,14 @@ struct WorktreeDetailView: View {
       remoteHost: info?.project.remoteHost,
       onNewTab: {
         store.send(
-          .tabBar(.newTabButtonTapped(inWorktree: address.worktree, inProject: address.project)))
+          .tabBar(.newTabButtonTapped(inPane: nil, inWorktree: address.worktree, inProject: address.project)))
       },
       onResumeSession: { session in
         store.send(
           .tabBar(
             .resumeAgentSessionTapped(
               agent: session.agent, sessionID: session.sessionID,
-              inWorktree: address.worktree, inProject: address.project
+              inPane: nil, inWorktree: address.worktree, inProject: address.project
             )))
       }
     )
@@ -623,51 +605,6 @@ struct WorktreeDetailView: View {
 /// `.navigationTitle("")` fallback for macOS 14. Both suppress the
 /// bundle-name title; only the modern API also frees the leading slot
 /// so default-placement items + ToolbarSpacers lay out predictably.
-/// Holds back the terminal of the tab selected because the shown tab was
-/// just closed, until the tab bar's close animation has played. A terminal
-/// surface entering the window stalls compositing for a few frames; landing
-/// mid-animation it freezes the tab bar, landing after it the stall is
-/// invisible. Plain tab and worktree switches mount at once — nothing
-/// animates then.
-private struct TerminalMountDeferral<Content: View>: View {
-  let worktreeID: WorktreeID
-  let activeTabID: TabID?
-  /// Tabs of `worktreeID`.
-  let tabIDs: [TabID]
-  @ViewBuilder let content: Content
-
-  /// Worktree and tab whose terminal is mounted.
-  @State private var mountedWorktreeID: WorktreeID?
-  @State private var mountedTabID: TabID?
-
-  var body: some View {
-    Group {
-      if isDeferring {
-        Color.clear
-      } else {
-        content
-      }
-    }
-    .task(id: activeTabID) {
-      if isDeferring {
-        try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
-        guard !Task.isCancelled else { return }
-      }
-      mountedWorktreeID = worktreeID
-      mountedTabID = activeTabID
-    }
-  }
-
-  /// The mounted tab is gone and another one took over the selection. A
-  /// worktree switch never counts: the mounted tab is only missing from
-  /// `tabIDs` because they list the other worktree's tabs.
-  private var isDeferring: Bool {
-    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID
-    else { return false }
-    return !tabIDs.contains(mountedTabID)
-  }
-}
-
 private struct SuppressTitleModifier: ViewModifier {
   func body(content: Content) -> some View {
     if #available(macOS 15.0, *) {

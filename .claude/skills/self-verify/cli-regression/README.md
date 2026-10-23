@@ -2,10 +2,16 @@
 
 `harness.sh` drives an isolated Debug instance of Codans through every
 `codans` verb and asserts exit codes (and, where it matters, output): app
-diagnostics, `tree`, project / worktree / tab / pane lifecycle (including
-`show`, `rename`, `worktree prune`, `pane split`, `pane resize`, path
-targets), terminal I/O (`send` with `--wait` / `--capture`, `send-key`,
-`read`, `capture`, `broadcast`), in-pane `current` resolution, agent
+diagnostics, `tree`, project / worktree lifecycle, the `tab` session
+verbs (new / show / focus / rename / label / info / reset, three-id and
+`t<n>` / `p<n>` resolution, `tab new` outside any tab), verbs at their
+former location (`pane send` …, `tab switch` must exit 1 naming the new
+one), the `pane` layout verbs (split / focus by id and direction /
+resize / zoom / equalize / close, and `pane close` refusing a tab or
+content id), terminal I/O (`tab send` / top-level `send` with `--tab` /
+`--pane`, `--wait` / `--capture`, `send-key`, `read`, `capture`,
+`broadcast --pane`), in-tab `current` resolution and the
+`CODANS_PANE_ID` / `CODANS_TAB_ID` / `CODANS_CONTENT_ID` values, agent
 profiles, `agent status` / `agent wait`, hand-off, and `skill`
 install / uninstall against a scratch `$HOME`. A final case validates
 every `--json` output of the run against the CLI output schema
@@ -25,15 +31,17 @@ bash .claude/skills/self-verify/cli-regression/harness.sh "$APP" all
 
 - The app is launched from its binary with `CODANS_CONFIG_DIR` set to a
   scratch directory, `CODANS_CACHE_DIR=/tmp/codans-t-cache-<uid>`, and
-  `CODANS_SOCKET_PATH=/tmp/codans-t-<uid>.sock`; the
-  calling pane's own `CODANS_*` / `ZMX_*` / `TERM_PROGRAM` variables are
-  unset first, so neither the instance nor the CLI can reach a real app.
+  `CODANS_SOCKET_PATH=/tmp/codans-t-<uid>.sock` (override both with
+  `CODANS_CLI_REGRESSION_CACHE` / `CODANS_CLI_REGRESSION_SOCK`, keeping
+  them short); the calling tab's own `CODANS_*` / `ZMX_*` /
+  `TERM_PROGRAM` variables are unset first, so neither the instance nor
+  the CLI can reach a real app.
   `CODANS_STATE_DIR` is unset too: it would win over `CODANS_CONFIG_DIR`,
   and without it the state root follows the scratch config dir.
 - `status` uptime is asserted right after launch; a socket answered by an
   older instance aborts the run.
 - Every id comes from the harness's own `project add` / `tab new` /
-  `pane new` output.
+  `pane split` output.
 - Agents are shell scripts named `claude` / `amp` on a private directory,
   reached through agent profiles in the scratch `settings.json` whose
   `envVars.PATH` puts that directory first. `RECEIVED:` on screen proves a
@@ -54,9 +62,10 @@ under `.data` (the `jf` helper does), and expect `.error.code` on failures.
 
 ## Traps
 
-- `ctrl_d` ends a shell pane; the key sweep uses a throwaway pane.
+- `ctrl_d` ends a shell; the key sweep uses a throwaway tab. The in-tab
+  `send-key escape` probe runs last for the same reason.
 - Do not run `xcodebuild test` while the harness is up — it rewrites the
   Debug bundle under the running instance.
-- A pane that is not `pane close`d leaves a zmx daemon behind after the
-  app quits. `quit` stops every process that holds a file in the private
+- A tab that is not closed leaves a zmx daemon behind after the app
+  quits. `quit` stops every process that holds a file in the private
   cache dir, then removes the dir.

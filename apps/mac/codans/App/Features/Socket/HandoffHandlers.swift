@@ -7,9 +7,11 @@ import os
 /// where the pane lives, the worktree root the artifact goes under, and the
 /// agent codans currently sees in that pane.
 nonisolated struct HandoffSource: Sendable, Equatable {
-  let paneID: PaneID
+  let contentID: ContentID
   let projectID: ProjectID
   let worktreeID: WorktreeID
+  /// The Pane the source Tab sits in: a `.split` placement anchors on it.
+  let paneID: PaneID
   let tabID: TabID
   let worktreePath: String
   /// Server projects keep their worktree on the remote host; the artifact
@@ -38,11 +40,11 @@ nonisolated struct HandoffSource: Sendable, Equatable {
 /// itself when the completion arrives through `registry`.
 @MainActor
 final class HandoffHandlers {
-  typealias SourceResolver = @MainActor (PaneID) -> HandoffSource?
-  typealias ScreenReader = @MainActor (PaneID) -> String?
+  typealias SourceResolver = @MainActor (ContentID) -> HandoffSource?
+  typealias ScreenReader = @MainActor (ContentID) -> String?
   typealias RepoStateCollector = @Sendable (URL) async -> HandoffRepoState
   typealias Launcher = @MainActor (AgentLaunchSpec) async throws -> AgentLaunchOutcome
-  typealias KickoffTyper = @MainActor (_ paneID: PaneID, _ agent: AgentKind, _ prompt: String) async -> Bool
+  typealias KickoffTyper = @MainActor (_ contentID: ContentID, _ agent: AgentKind, _ prompt: String) async -> Bool
 
   private let settings: SettingsStore
   private let resolveSource: SourceResolver
@@ -118,7 +120,7 @@ final class HandoffHandlers {
     }
     registry.publish(
       HandoffCompletion(
-        action: .save, sourcePaneID: source.paneID, receiver: nil,
+        action: .save, sourceContentID: source.contentID, receiver: nil,
         briefing: checkpoint.briefing, launched: nil, requestID: request.requestID
       )
     )
@@ -198,12 +200,12 @@ final class HandoffHandlers {
     }
     try? await log(
       coordinator, from: source.agentKind, to: receiver,
-      disposition: launched.map { .pane($0.paneID.description) } ?? .skipped,
+      disposition: launched.map { .pane($0.contentID.description) } ?? .skipped,
       transition: transition, note: request.note, now: timestamp)
 
     registry.publish(
       HandoffCompletion(
-        action: .to, sourcePaneID: source.paneID, receiver: receiver,
+        action: .to, sourceContentID: source.contentID, receiver: receiver,
         briefing: transition.briefing, launched: launched, requestID: request.requestID
       )
     )
@@ -225,8 +227,8 @@ final class HandoffHandlers {
   // MARK: - Steps
 
   private func resolvedSource(_ request: IPC.HandoffRequest) throws -> HandoffSource {
-    guard let source = resolveSource(request.paneID) else {
-      throw IPCError.notFound(kind: "pane", id: request.paneID.description)
+    guard let source = resolveSource(request.contentID) else {
+      throw IPCError.notFound(kind: "content", id: request.contentID.description)
     }
     guard !source.isRemote else {
       throw IPCError.unsupported(
@@ -262,7 +264,7 @@ final class HandoffHandlers {
     throw IPCError.invalidParams(
       message: HandoffKickoff.briefRequiredMessage(
         command: HandoffKickoff.command(
-          for: retry, requestID: request.requestID, sourcePaneID: request.paneID, cli: cli,
+          for: retry, requestID: request.requestID, sourceContentID: request.contentID, cli: cli,
           placement: placement)),
       path: ["brief"])
   }
@@ -271,7 +273,7 @@ final class HandoffHandlers {
   /// gave up on it and took the context-only path itself.
   private func authorize(_ request: IPC.HandoffRequest) throws {
     guard let requestID = request.requestID else { return }
-    switch registry.claim(requestID, sourcePaneID: request.paneID) {
+    switch registry.claim(requestID, sourceContentID: request.contentID) {
     case .claimed:
       return
     case .wrongSource(let expected):
@@ -288,9 +290,9 @@ final class HandoffHandlers {
     HandoffSessionContext(
       agentKind: source.agentKind,
       sessionID: source.sessionID,
-      paneID: source.paneID.description,
+      paneID: source.contentID.description,
       paneTitle: source.paneTitle,
-      screenExcerpt: readScreen(source.paneID)
+      screenExcerpt: readScreen(source.contentID)
     )
   }
 
@@ -318,7 +320,7 @@ final class HandoffHandlers {
     )
     do {
       let outcome = try await launch(spec)
-      guard let tabID = outcome.tabID, let paneID = outcome.paneID else { return nil }
+      guard let tabID = outcome.tabID, let contentID = outcome.contentID else { return nil }
       if !profile.descriptor.supportsInitialPrompt {
         // The command line carried no prompt for this agent, so type it once
         // the agent is up. Detached: the response must not wait on a TUI's
@@ -327,9 +329,9 @@ final class HandoffHandlers {
         let logger = self.logger
         let kind = profile.kind
         Task { @MainActor in
-          if await typeKickoff(paneID, kind, prompt) { return }
+          if await typeKickoff(contentID, kind, prompt) { return }
           logger.error(
-            "kickoff not delivered: \(kind.rawValue, privacy: .public) never appeared in pane \(paneID.description, privacy: .public), or its input box never showed the text"
+            "kickoff not delivered: \(kind.rawValue, privacy: .public) never appeared in pane \(contentID.description, privacy: .public), or its input box never showed the text"
           )
         }
       }
@@ -337,7 +339,8 @@ final class HandoffHandlers {
         projectID: source.projectID,
         worktreeID: source.worktreeID,
         tabID: tabID,
-        paneID: paneID,
+        contentID: contentID,
+        paneID: outcome.paneID,
         profileName: profile.displayName
       )
     } catch {

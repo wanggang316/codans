@@ -186,7 +186,7 @@ public final class SocketServer {
     // Kernel-reported peer PID (`LOCAL_PEERPID`) — read once at accept
     // and carried on the connection so `hierarchy.resolveAlias` can
     // attribute a `current`-pane request to the caller's pane via
-    // process ancestry even when the caller lost `CODANS_PANE_ID`.
+    // process ancestry even when the caller lost `CODANS_CONTENT_ID`.
     let peerPID = SocketPeerAuth.peerPID(fd: clientFD)
 
     let connectionID = UUID()

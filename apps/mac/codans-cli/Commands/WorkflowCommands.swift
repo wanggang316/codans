@@ -38,15 +38,13 @@ struct WorkflowCommand: AsyncParsableCommand {
   )
 }
 
-/// What the app injected into the calling pane's environment. Only the pane
-/// id and the activation token are read here; the server treats both as
-/// hints and attributes the caller from the connection's peer PID when the
-/// pane id is absent (a wrapper or subshell may have dropped it).
+/// What the app injected into the calling session's environment. Only the
+/// session id and the activation token are read here; the server treats both
+/// as hints and attributes the caller from the connection's peer PID when the
+/// session id is absent (a wrapper or subshell may have dropped it).
 enum WorkflowCallerContext {
-  static func paneID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> PaneID? {
-    environment[CodansEnvironment.Key.paneID.rawValue]
-      .flatMap(UUID.init(uuidString:))
-      .map(PaneID.init(raw:))
+  static func contentID(in environment: [String: String] = ProcessInfo.processInfo.environment) -> ContentID? {
+    AliasResolver.callerContentID(env: environment)
   }
 
   static func token(in environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
@@ -70,12 +68,12 @@ enum WorkflowRunID {
 }
 
 /// Resolves the optional `source` positional of `run` and the `--worktree`
-/// option of `list` / `runs` into what the request carries: a pane id
-/// (pane-shaped references) or a worktree id (everything else, tabs
-/// included — a tab only determines its worktree).
+/// option of `list` / `runs` into what the request carries: a session id
+/// (session-shaped references: `current`, `@label`, `p<n>`, `t<n>`) or a
+/// worktree id (everything else).
 enum WorkflowSourceResolver {
   struct Resolved: Equatable {
-    var paneID: PaneID?
+    var contentID: ContentID?
     var worktreeID: WorktreeID?
   }
 
@@ -83,13 +81,12 @@ enum WorkflowSourceResolver {
     if let uuid = UUID(uuidString: source) {
       return try await resolveUUID(uuid, client: client)
     }
-    if ScopeResolver.isCurrent(source) || source.hasPrefix("@") || isHandle(source, prefix: "p") {
-      let uuid = try await AliasResolver.resolve(source, kind: .pane, client: client)
-      return Resolved(paneID: PaneID(raw: uuid))
-    }
-    if isHandle(source, prefix: "t") {
-      let uuid = try await AliasResolver.resolve(source, kind: .tab, client: client)
-      return Resolved(worktreeID: try await worktree(ofTab: TabID(raw: uuid), client: client))
+    if ScopeResolver.isCurrent(source) || source.hasPrefix("@") || isHandle(source, prefix: "p")
+      || isHandle(source, prefix: "t")
+    {
+      // The server converts any of the three ids or handles to the session.
+      let uuid = try await AliasResolver.resolve(source, kind: .content, client: client)
+      return Resolved(contentID: ContentID(raw: uuid))
     }
     let uuid = try await AliasResolver.resolve(source, kind: .worktree, client: client)
     return Resolved(worktreeID: WorktreeID(raw: uuid))
@@ -98,31 +95,23 @@ enum WorkflowSourceResolver {
   static func worktree(_ reference: String, client: RPCClient) async throws -> WorktreeID {
     let resolved = try await resolve(reference, client: client)
     if let worktreeID = resolved.worktreeID { return worktreeID }
-    guard let paneID = resolved.paneID else { throw notFound("worktree", reference) }
+    guard let contentID = resolved.contentID else { throw notFound("worktree", reference) }
     let tree = try await HierarchyTree.load(client: client)
-    guard let located = tree.locatePane(paneID) else { throw notFound("pane", paneID.description) }
+    guard let located = tree.locateContent(contentID) else { throw notFound("content", contentID.description) }
     return located.worktreeID
   }
 
-  /// A bare UUID names a pane, a worktree, or a tab; the tree decides.
+  /// A bare UUID names a session (by Content, Tab or Pane id) or a
+  /// worktree; the tree decides.
   private static func resolveUUID(_ uuid: UUID, client: RPCClient) async throws -> Resolved {
     let tree = try await HierarchyTree.load(client: client)
-    if tree.locatePane(PaneID(raw: uuid)) != nil {
-      return Resolved(paneID: PaneID(raw: uuid))
+    if let located = tree.locateSession(uuid) {
+      return Resolved(contentID: located.contentID)
     }
     if tree.locateWorktree(WorktreeID(raw: uuid)) != nil {
       return Resolved(worktreeID: WorktreeID(raw: uuid))
     }
-    if let tab = tree.locateTab(TabID(raw: uuid)) {
-      return Resolved(worktreeID: tab.worktreeID)
-    }
     throw notFound("source", uuid.uuidString)
-  }
-
-  private static func worktree(ofTab tabID: TabID, client: RPCClient) async throws -> WorktreeID {
-    let tree = try await HierarchyTree.load(client: client)
-    guard let located = tree.locateTab(tabID) else { throw notFound("tab", tabID.description) }
-    return located.worktreeID
   }
 
   private static func isHandle(_ value: String, prefix: Character) -> Bool {
@@ -161,7 +150,7 @@ struct WorkflowList: AsyncParsableCommand {
         .workflowList,
         params: IPC.WorkflowListRequest(
           worktreeID: worktreeID,
-          paneID: worktreeID == nil ? WorkflowCallerContext.paneID() : nil)
+          contentID: worktreeID == nil ? WorkflowCallerContext.contentID() : nil)
       )
       try Renderer.emit(WorkflowListRenderable(response: response), mode: globals.renderMode)
     }
@@ -206,7 +195,7 @@ struct WorkflowRun: AsyncParsableCommand {
       let inputs = try CLIKeyValuePairs.parse(input, option: "--input")
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      var resolved = WorkflowSourceResolver.Resolved(paneID: WorkflowCallerContext.paneID())
+      var resolved = WorkflowSourceResolver.Resolved(contentID: WorkflowCallerContext.contentID())
       if let source {
         resolved = try await WorkflowSourceResolver.resolve(source, client: client)
       }
@@ -214,9 +203,9 @@ struct WorkflowRun: AsyncParsableCommand {
         .workflowRun,
         params: IPC.WorkflowRunRequest(
           workflow: workflow,
-          sourcePaneID: resolved.paneID,
+          sourceContentID: resolved.contentID,
           worktreeID: resolved.worktreeID,
-          callerPaneID: WorkflowCallerContext.paneID(),
+          callerContentID: WorkflowCallerContext.contentID(),
           roles: roles,
           inputs: inputs,
           skip: skip,

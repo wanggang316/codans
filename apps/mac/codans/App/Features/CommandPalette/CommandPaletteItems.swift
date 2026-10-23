@@ -22,7 +22,7 @@ enum CommandPaletteItems {
     selection: HierarchySelection,
     catalog: Catalog,
     editorDescriptors: [EditorDescriptor] = [],
-    focusedPaneID: PaneID? = nil,
+    focusedContentID: ContentID? = nil,
     paneFocusPrecise: Bool = false
   ) -> [CommandPaletteItem] {
     var items = appItems()
@@ -73,13 +73,13 @@ enum CommandPaletteItems {
         }
       }
     }
-    if let focusedPaneID {
-      // Window actions only need any leaf in the current tab to resolve
-      // the source NSWindow, so they're always safe once we have a
-      // PaneID. Pane actions that depend on real focus (split / goto /
+    if let focusedContentID {
+      // Window actions only need any Content in the current worktree to
+      // resolve the source NSWindow, so they're always safe once we have a
+      // ContentID. Pane actions that depend on real focus (split / goto /
       // resize / zoom) are only emitted when the pane was reported by
-      // the ghostty keybind path — not a fallback from leaves().first.
-      items.append(contentsOf: windowItems(focusedPaneID: focusedPaneID))
+      // the ghostty keybind path — not a fallback from the focused Pane.
+      items.append(contentsOf: windowItems(focusedContentID: focusedContentID))
       if paneFocusPrecise {
         items.append(contentsOf: paneFocusDependentItems())
       }
@@ -631,33 +631,27 @@ enum CommandPaletteItems {
     )
   }
 
-  /// Resolves a PaneID for palette actions opened without a precise
-  /// libghostty source (menu, toolbar). Prefers the tab's last-focused
-  /// pane via `lastFocusedPane` so split / focus / zoom actions anchor
-  /// where the user actually is; falls back to the first leaf when no
-  /// pane has been focused since the tab was selected. The first-leaf
-  /// fallback is still safe for Window-scoped actions because every
-  /// leaf in a tab maps to the same NSWindow.
-  static func resolveFocusedPaneID(
+  /// Resolves a ContentID for palette actions opened without a precise
+  /// libghostty source (menu, toolbar): the selected Tab of the worktree's
+  /// focused Pane, so split / focus / zoom actions anchor where the user
+  /// actually is. Safe for Window-scoped actions because every Pane in a
+  /// worktree maps to the same NSWindow.
+  static func resolveFocusedContentID(
     selection: HierarchySelection,
-    catalog: Catalog,
-    lastFocusedPane: (TabID) -> PaneID? = { _ in nil }
-  ) -> PaneID? {
+    catalog: Catalog
+  ) -> ContentID? {
     guard
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID,
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let selectedTabID = worktree.selectedTabID,
-      let tab = worktree.tabs.first(where: { $0.id == selectedTabID })
+      let worktree = catalog.worktree(worktreeID, in: projectID)
     else { return nil }
-    return lastFocusedPane(selectedTabID) ?? tab.splitTree.leaves().first
+    return worktree.focusedPane?.selectedTab?.contentID
   }
 
   // MARK: - Private builders
 
-  /// Tab-scoped Pane actions: any pane in the current tab resolves to
-  /// the same Tab via `addressOf`, so fallback-resolved paneIDs are
+  /// Pane-scoped Tab actions: any Content in the focused Pane resolves to
+  /// the same Pane via `addressOf`, so fallback-resolved contentIDs are
   /// sufficient. Safe to emit regardless of whether focus was precise.
   private static func paneTabScopedItems() -> [CommandPaletteItem] {
     [
@@ -776,14 +770,14 @@ enum CommandPaletteItems {
   /// `NSWindow.toggleTabOverview` has no native window-tab group to act on —
   /// both surfaced as dead palette rows. `Close Window` and `Toggle
   /// Fullscreen` map onto real AppKit calls and stay.
-  private static func windowItems(focusedPaneID: PaneID) -> [CommandPaletteItem] {
+  private static func windowItems(focusedContentID: ContentID) -> [CommandPaletteItem] {
     [
       CommandPaletteItem(
         id: "window.toggle-fullscreen",
         title: "Toggle Fullscreen",
         searchText: "window fullscreen",
         icon: "arrow.up.left.and.arrow.down.right",
-        kind: .windowAction(.toggleFullscreen(from: focusedPaneID))
+        kind: .windowAction(.toggleFullscreen(from: focusedContentID))
       ),
       CommandPaletteItem(
         id: "window.close",
@@ -791,7 +785,7 @@ enum CommandPaletteItems {
         searchText: "window close",
         icon: "xmark",
         hiddenWhenQueryEmpty: true,
-        kind: .windowAction(.close(from: focusedPaneID))
+        kind: .windowAction(.close(from: focusedContentID))
       ),
     ]
   }

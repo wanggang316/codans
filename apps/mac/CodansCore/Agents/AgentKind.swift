@@ -1,7 +1,7 @@
 import Foundation
 
 /// Coding agents recognised by the AgentState feature. The raw value is
-/// the stable identifier persisted in `catalog.json` (see `Pane.agentKind`)
+/// the stable identifier persisted in `catalog.json` (see `TerminalContentState.agentKind`)
 /// and reported over the wire; everything else agent-specific (display
 /// name, classifier patterns, resume invocation) lives on the agent's
 /// `AgentRuntimeAdapter`.

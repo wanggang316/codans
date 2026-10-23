@@ -325,7 +325,7 @@ struct HierarchyHandlersCreateWorktreeTests {
     #expect(spec.projectID == fixture.projectID)
     #expect(result.created)
     #expect(result.agent?.profileID == codex.id)
-    #expect(result.agent?.paneID == launcher.paneID)
+    #expect(result.agent?.contentID == launcher.contentID)
   }
 
   @Test
@@ -388,11 +388,11 @@ struct HierarchyHandlersCreateWorktreeTests {
   @MainActor
   private final class LauncherSpy {
     var specs: [AgentLaunchSpec] = []
-    let paneID = PaneID()
+    let contentID = ContentID()
     func launch(_ spec: AgentLaunchSpec) -> AgentLaunchOutcome {
       specs.append(spec)
       return AgentLaunchOutcome(
-        profile: spec.profile, command: "agent", tabID: TabID(), paneID: paneID)
+        profile: spec.profile, command: "agent", tabID: TabID(), paneID: PaneID(), contentID: contentID)
     }
   }
 

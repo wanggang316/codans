@@ -8,7 +8,7 @@ import SwiftUI
 struct AgentSessionSummarySnapshot: Identifiable, Equatable {
   /// The row's pane. Doubles as the popover item identity, so a card
   /// captured for one row can never be reused for another.
-  let id: PaneID
+  let id: ContentID
   let entry: AgentStateStore.AgentEntry
   let projectName: String
   let worktreeName: String
@@ -35,7 +35,7 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
   }()
 
   init(
-    paneID: PaneID,
+    contentID: ContentID,
     entry: AgentStateStore.AgentEntry,
     projectName: String,
     worktreeName: String,
@@ -44,7 +44,7 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
     paneTitle: String?,
     now: Date = Date()
   ) {
-    self.id = paneID
+    self.id = contentID
     self.entry = entry
     self.projectName = projectName
     self.worktreeName = worktreeName
@@ -65,7 +65,7 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
   /// `AgentSessionHistoryPopover`'s scan dispatch. A nil `worktreePath`
   /// (legacy call sites, torn-down panes) skips the scan.
   static func make(
-    paneID: PaneID,
+    contentID: ContentID,
     entry: AgentStateStore.AgentEntry,
     projectName: String,
     worktreeName: String,
@@ -89,7 +89,7 @@ struct AgentSessionSummarySnapshot: Identifiable, Equatable {
       )
     }
     return AgentSessionSummarySnapshot(
-      paneID: paneID,
+      contentID: contentID,
       entry: entry,
       projectName: projectName,
       worktreeName: worktreeName,

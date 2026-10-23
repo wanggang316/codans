@@ -25,18 +25,17 @@ public final class NotificationDetector {
   private let store: NotificationStore
   private let coordinator: NotificationCoordinator
   private let catalogSnapshot: @MainActor () -> Catalog
-  private let lastFocusedPane: @MainActor (TabID) -> PaneID?
   private let isAppFrontmost: @MainActor () -> Bool
   /// True when the pane has keyboard focus in the active app right now
   /// (AppKit ground truth — the catalog-level focus map is runtime-only and
   /// can lag).
-  private let isPaneFocused: @MainActor (PaneID) -> Bool
+  private let isPaneFocused: @MainActor (ContentID) -> Bool
   /// True when the pane's agent stopped for the user and the user looked at
   /// the pane after that stop. Agents often notify some time after the stop
   /// (Claude's "waiting for input" fires after a minute idle), so focus at
   /// post time alone misses a look that already happened. Applies only to
   /// the agent's own cues: a crash is a new event the user has not seen.
-  private let hasObservedAttention: @MainActor (PaneID) -> Bool
+  private let hasObservedAttention: @MainActor (ContentID) -> Bool
   /// Side-channel keystroke tracker. Snapshotted once per event into the
   /// interpreter's `Context.lastUserKeystrokeAt` so the 1-second
   /// `userTypingRecently` suppression can actually fire on real input.
@@ -55,15 +54,15 @@ public final class NotificationDetector {
   /// Panes that have produced any `paneOutput` since launch (or since the
   /// last time their child exited). Gates `paneIdle` so a freshly spawned
   /// pane that has never produced output cannot fire a `taskFinished`.
-  private var hasProducedOutput: Set<PaneID> = []
+  private var hasProducedOutput: Set<ContentID> = []
 
-  /// Cached `(projectID, worktreeID, tabID, paneID)` per pane so a
+  /// Cached `(projectID, worktreeID, contentID)` per Content so a
   /// terminal `paneExited` / `paneCrashed` event can still produce a
   /// notification even when `RootFeature`'s parallel event consumer
   /// has already called `closePane` and removed the pane from the
   /// live catalog. Updated whenever a live catalog walk succeeds;
   /// cleared on the pane's lifecycle teardown events.
-  private var paneSourceCache: [PaneID: InboxEntry.SourcePath] = [:]
+  private var paneSourceCache: [ContentID: InboxEntry.SourcePath] = [:]
 
   init(
     store: NotificationStore,
@@ -71,10 +70,9 @@ public final class NotificationDetector {
     tracker: PaneKeyboardActivityTracker,
     settingsReader: any NotificationSettingsReader,
     catalogSnapshot: @escaping @MainActor () -> Catalog,
-    lastFocusedPane: @escaping @MainActor (TabID) -> PaneID?,
     isAppFrontmost: @escaping @MainActor () -> Bool = { NSApp.isActive },
-    isPaneFocused: @escaping @MainActor (PaneID) -> Bool = { _ in false },
-    hasObservedAttention: @escaping @MainActor (PaneID) -> Bool = { _ in false },
+    isPaneFocused: @escaping @MainActor (ContentID) -> Bool = { _ in false },
+    hasObservedAttention: @escaping @MainActor (ContentID) -> Bool = { _ in false },
     onProjectActivity: (@MainActor (ProjectID) -> Void)? = nil
   ) {
     self.store = store
@@ -82,33 +80,30 @@ public final class NotificationDetector {
     self.tracker = tracker
     self.settingsReader = settingsReader
     self.catalogSnapshot = catalogSnapshot
-    self.lastFocusedPane = lastFocusedPane
     self.isAppFrontmost = isAppFrontmost
     self.isPaneFocused = isPaneFocused
     self.hasObservedAttention = hasObservedAttention
     self.onProjectActivity = onProjectActivity
   }
 
-  /// The single globally focused pane — the pane the user is *actually*
+  /// The single globally focused Content — the one the user is *actually*
   /// looking at right now. Composed from the active project → active
-  /// worktree → active tab → that tab's last-focused split, and only
-  /// when the app itself is frontmost. There is at most one such pane
-  /// at any moment; `nil` means "the user is not looking at any pane"
-  /// (app backgrounded, no selection, sidebar focus, etc.).
+  /// worktree → focused Pane → its selected Tab, and only when the app
+  /// itself is frontmost. There is at most one such Content at any
+  /// moment; `nil` means "the user is not looking at any pane" (app
+  /// backgrounded, no selection, sidebar focus, etc.).
   ///
   /// Notifications whose source matches this pane are dropped entirely:
   /// no inbox row, no banner, no badge — the user is already eyeballing
   /// the in-pane output.
-  private func globallyFocusedPane() -> PaneID? {
+  private func globallyFocusedPane() -> ContentID? {
     guard isAppFrontmost() else { return nil }
     let catalog = catalogSnapshot()
     guard let activeProjectID = catalog.displayedSelectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == activeProjectID }),
-      let worktreeID = project.selectedWorktreeID,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let tabID = worktree.selectedTabID
+      let worktreeID = catalog.project(activeProjectID)?.selectedWorktreeID,
+      let worktree = catalog.worktree(worktreeID, in: activeProjectID)
     else { return nil }
-    return lastFocusedPane(tabID)
+    return worktree.focusedPane?.selectedTab?.contentID
   }
 
   /// Single entry point. Called for every `TerminalEvent` the runtime
@@ -130,14 +125,14 @@ public final class NotificationDetector {
   /// exists, and a stale `hasProducedOutput` membership let an unarchived
   /// pane fire an idle notification before it had produced anything this
   /// session.
-  public func reconcileMembership(livePaneIDs: Set<PaneID>) {
-    let departed = hasProducedOutput.subtracting(livePaneIDs)
-      .union(paneSourceCache.keys.filter { !livePaneIDs.contains($0) })
+  public func reconcileMembership(liveContentIDs: Set<ContentID>) {
+    let departed = hasProducedOutput.subtracting(liveContentIDs)
+      .union(paneSourceCache.keys.filter { !liveContentIDs.contains($0) })
     guard !departed.isEmpty else { return }
     hasProducedOutput.subtract(departed)
-    for paneID in departed {
-      paneSourceCache.removeValue(forKey: paneID)
-      tracker.purge(paneID)
+    for contentID in departed {
+      paneSourceCache.removeValue(forKey: contentID)
+      tracker.purge(contentID)
     }
   }
 
@@ -146,7 +141,7 @@ public final class NotificationDetector {
   /// actually dropped one — the caches are otherwise unobservable, and the
   /// notification a stale entry produces is swallowed by the coordinator's
   /// own dedupe. Nothing in the app reads this.
-  var trackedPanesForTesting: Set<PaneID> {
+  var trackedContentsForTesting: Set<ContentID> {
     hasProducedOutput.union(paneSourceCache.keys)
   }
 
@@ -168,19 +163,19 @@ public final class NotificationDetector {
     }
 
     switch step.outputFlag {
-    case .markProduced(let paneID):
-      hasProducedOutput.insert(paneID)
+    case .markProduced(let contentID):
+      hasProducedOutput.insert(contentID)
       // Refresh the source-path cache while the pane is still live in
       // the catalog. By the time a future paneExited event flows through
       // here, RootFeature's parallel consumer may have removed the pane;
       // the cache means we still know where it lived.
-      _ = liveResolve(paneID: paneID)
-    case .clearProduced(let paneID):
-      hasProducedOutput.remove(paneID)
+      _ = liveResolve(contentID: contentID)
+    case .clearProduced(let contentID):
+      hasProducedOutput.remove(contentID)
       // Same upper-bound guarantee for the keystroke map: teardown events
       // purge so the map's size stays bounded by "open panes plus a
       // handful in-flight" rather than monotonically growing.
-      tracker.purge(paneID)
+      tracker.purge(contentID)
     // Don't drop cache here — `emit` for the same teardown event still
     // needs to look up the source path. Cache is dropped at the end of
     // `emit` once we've actually used it.
@@ -193,7 +188,7 @@ public final class NotificationDetector {
   }
 
   private func emit(_ cue: PaneAttentionInterpreter.Cue, isTeardown: Bool) async {
-    guard let resolved = resolve(paneID: cue.paneID) else { return }
+    guard let resolved = resolve(contentID: cue.contentID) else { return }
     if resolved.muted { return }
 
     // Pre-compute the focused-pane comparison once so the coordinator does
@@ -204,10 +199,10 @@ public final class NotificationDetector {
     // per-tab last-focused behaviour: a notification fired from a
     // non-active tab's last-focused split *will* notify, because by
     // definition the user isn't looking at it.
-    let paneID = resolved.source.paneID
+    let contentID = resolved.source.contentID
     let sourceIsFocused =
-      isPaneFocused(paneID) || paneID == globallyFocusedPane()
-      || (!isTeardown && hasObservedAttention(paneID))
+      isPaneFocused(contentID) || contentID == globallyFocusedPane()
+      || (!isTeardown && hasObservedAttention(contentID))
 
     // Title stays clean; the source breadcrumb (`<project> · <worktree>`)
     // is attached as `bannerSourceLabel` and appended to the OS banner
@@ -247,13 +242,13 @@ public final class NotificationDetector {
     // the cached source path to resolve, but no future event for this
     // pane id will ever arrive again — clean up.
     if isTeardown {
-      paneSourceCache.removeValue(forKey: cue.paneID)
+      paneSourceCache.removeValue(forKey: cue.contentID)
     }
   }
 
   // MARK: - Helpers
 
-  /// Resolve `paneID` to source path + mute state + worktree label +
+  /// Resolve `contentID` to source path + mute state + worktree label +
   /// project label. Tries the live catalog first; falls back to
   /// `paneSourceCache` when the pane has already been removed from the
   /// catalog (typical on `paneExited`: `RootFeature.paneLifecycleExited`
@@ -262,11 +257,11 @@ public final class NotificationDetector {
   /// never had any prior catalog presence in this process. Cache fallback
   /// path loses worktree/project labels + mute info; that's an acceptable
   /// trade for not silently swallowing the final teardown notification.
-  private func resolve(paneID: PaneID) -> Resolved? {
-    if let live = liveResolve(paneID: paneID) {
+  private func resolve(contentID: ContentID) -> Resolved? {
+    if let live = liveResolve(contentID: contentID) {
       return live
     }
-    if let cached = paneSourceCache[paneID] {
+    if let cached = paneSourceCache[contentID] {
       return Resolved(source: cached, muted: false, worktreeLabel: nil, projectLabel: nil)
     }
     return nil
@@ -276,28 +271,25 @@ public final class NotificationDetector {
   /// later teardown events still have a valid source after the pane
   /// has been removed from the catalog.
   @discardableResult
-  private func liveResolve(paneID: PaneID) -> Resolved? {
+  private func liveResolve(contentID: ContentID) -> Resolved? {
     let catalog = catalogSnapshot()
     for project in catalog.projects {
       for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          guard let pane = tab.panes.first(where: { $0.id == paneID }) else { continue }
-          let source = InboxEntry.SourcePath(
-            projectID: project.id,
-            worktreeID: worktree.id,
-            tabID: tab.id,
-            paneID: pane.id
-          )
-          paneSourceCache[paneID] = source
-          let worktreeLabel = worktree.name.isEmpty ? nil : worktree.name
-          let projectLabel = project.name.isEmpty ? nil : project.name
-          return Resolved(
-            source: source,
-            muted: pane.isNotificationsMuted,
-            worktreeLabel: worktreeLabel,
-            projectLabel: projectLabel
-          )
-        }
+        guard let tab = worktree.tab(forContent: contentID) else { continue }
+        let source = InboxEntry.SourcePath(
+          projectID: project.id,
+          worktreeID: worktree.id,
+          contentID: contentID
+        )
+        paneSourceCache[contentID] = source
+        let worktreeLabel = worktree.name.isEmpty ? nil : worktree.name
+        let projectLabel = project.name.isEmpty ? nil : project.name
+        return Resolved(
+          source: source,
+          muted: tab.content.terminal?.isNotificationsMuted ?? false,
+          worktreeLabel: worktreeLabel,
+          projectLabel: projectLabel
+        )
       }
     }
     return nil

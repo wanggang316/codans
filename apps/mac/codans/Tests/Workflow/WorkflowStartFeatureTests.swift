@@ -80,7 +80,7 @@ struct WorkflowStartFeatureTests {
     worktreeID: WorktreeID(raw: UUID()),
     worktreeName: "feat-workflow",
     worktreePath: "/repo",
-    paneID: PaneID(),
+    contentID: ContentID(),
     paneLabel: "p1 · dev · Claude Code",
     agent: .claudeCode
   )
@@ -155,16 +155,16 @@ struct WorkflowStartFeatureTests {
           text: What do you think?
           expect: {delivery: opinion}
       """
-    let pane = WorkflowStartClient.PaneChoice(id: PaneID(), label: "p2 · dev", agent: .claudeCode)
-    let second = WorkflowStartClient.PaneChoice(id: PaneID(), label: "p3 · dev", agent: .codex)
+    let pane = WorkflowStartClient.PaneChoice(id: ContentID(), label: "p2 · dev", agent: .claudeCode)
+    let second = WorkflowStartClient.PaneChoice(id: ContentID(), label: "p3 · dev", agent: .codex)
 
     let ambiguous = try Self.makeState(yaml, id: "advisor", panes: [pane, second])
     #expect(ambiguous.roles.first?.panes.map(\.id) == [pane.id, second.id])
-    #expect(ambiguous.roles.first?.paneID == nil)
+    #expect(ambiguous.roles.first?.contentID == nil)
     #expect(ambiguous.validationMessage == "Choose a pane for \"advisor\".")
 
     let single = try Self.makeState(yaml, id: "advisor", panes: [pane])
-    #expect(single.roles.first?.paneID == pane.id)
+    #expect(single.roles.first?.contentID == pane.id)
     #expect(single.validationMessage == nil)
   }
 
@@ -265,7 +265,7 @@ struct WorkflowStartFeatureTests {
 
   private static func rootStore(
     selection: HierarchySelection = .empty,
-    addressOf: @escaping @MainActor @Sendable (PaneID) -> PaneAddress? = { _ in nil }
+    addressOf: @escaping @MainActor @Sendable (ContentID) -> TabAddress? = { _ in nil }
   ) -> TestStoreOf<RootFeature> {
     var state = RootFeature.State()
     state.selection = selection
@@ -295,7 +295,7 @@ struct WorkflowStartFeatureTests {
 
     await store.send(.worktreeHeader(.delegate(.runWorkflowRequested(workflowID: "advisor"))))
     await store.receive(
-      .workflowStartRequested(projectID, worktreeID, workflowID: "advisor", sourcePaneID: nil))
+      .workflowStartRequested(projectID, worktreeID, workflowID: "advisor", sourceContentID: nil))
   }
 
   /// A pick from an Agents View row's menu pins that row's pane as the
@@ -303,13 +303,14 @@ struct WorkflowStartFeatureTests {
   @Test
   @MainActor
   func anAgentRowMenuStartsWithThatPaneAsTheSource() async {
-    let address = PaneAddress(projectID: ProjectID(), worktreeID: WorktreeID(), tabID: TabID(), paneID: PaneID())
-    let store = Self.rootStore(addressOf: { $0 == address.paneID ? address : nil })
+    let address = TabAddress(
+      projectID: ProjectID(), worktreeID: WorktreeID(), paneID: PaneID(), tabID: TabID(), contentID: ContentID())
+    let store = Self.rootStore(addressOf: { $0 == address.contentID ? address : nil })
 
-    await store.send(.agentState(.runWorkflowTapped(address.paneID, workflowID: "advisor")))
+    await store.send(.agentState(.runWorkflowTapped(address.contentID, workflowID: "advisor")))
     await store.receive(
       .workflowStartRequested(
-        address.projectID, address.worktreeID, workflowID: "advisor", sourcePaneID: address.paneID))
+        address.projectID, address.worktreeID, workflowID: "advisor", sourceContentID: address.contentID))
   }
 
   // MARK: - Admission
@@ -350,8 +351,8 @@ struct WorkflowStartFeatureTests {
 
     #expect(request.workflow == "review-loop")
     #expect(request.worktreeID == Self.source.worktreeID)
-    #expect(request.sourcePaneID == Self.source.paneID)
-    #expect(request.callerPaneID == nil)
+    #expect(request.sourceContentID == Self.source.contentID)
+    #expect(request.callerContentID == nil)
     #expect(request.roles == ["reviewer": Self.reviewerProfile.id.uuidString])
     #expect(request.inputs == ["focus": "the parser", "max-rounds": "3"])
     #expect(request.skip == ["fix"])
@@ -373,7 +374,7 @@ struct WorkflowStartFeatureTests {
         workflows: .default, panes: []))
     state.inputs[0].text = "the parser"
     #expect(state.source.paneLabel == nil)
-    #expect(state.request().sourcePaneID == nil)
+    #expect(state.request().sourceContentID == nil)
 
     let store = TestStore(initialState: state) {
       WorkflowStartFeature()

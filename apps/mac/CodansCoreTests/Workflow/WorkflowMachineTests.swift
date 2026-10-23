@@ -11,8 +11,8 @@ struct WorkflowMachineTests {
   // MARK: - Fixtures
 
   private static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
-  private static let authorPane = PaneID(raw: UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!)
-  private static let reviewerPane = PaneID(raw: UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!)
+  private static let authorPane = ContentID(raw: UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!)
+  private static let reviewerPane = ContentID(raw: UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!)
   private static let reviewerProfile = UUID(uuidString: "00000000-0000-0000-0000-0000000000C0")!
   private static let runID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D0")!
   private static let runDirectory = "/w/.codans/workflow-runs/run"
@@ -103,7 +103,7 @@ struct WorkflowMachineTests {
     _ definition: WorkflowDefinition,
     bindings: [String: WorkflowRoleBinding]? = nil,
     inputs: [String: WorkflowValue] = ["max-rounds": 3, "focus": ""],
-    initiatorPaneID: PaneID? = nil
+    initiatorContentID: ContentID? = nil
   ) -> WorkflowRunConfiguration {
     WorkflowRunConfiguration(
       id: runID,
@@ -111,14 +111,14 @@ struct WorkflowMachineTests {
       source: WorkflowRunSource(
         projectID: ProjectID(), worktreeID: WorktreeID(), worktreePath: "/w", worktreeName: "w", branch: "main"),
       bindings: bindings ?? [
-        "author": .current(paneID: authorPane),
+        "author": .current(contentID: authorPane),
         "reviewer": .launch(
-          profileID: reviewerProfile, profileName: "Reviewer", agent: .codex, paneID: nil),
+          profileID: reviewerProfile, profileName: "Reviewer", agent: .codex, contentID: nil),
       ],
       inputs: inputs,
       runDirectory: runDirectory,
       cliCommand: "codans",
-      initiatorPaneID: initiatorPaneID,
+      initiatorContentID: initiatorContentID,
       startedAt: epoch
     )
   }
@@ -177,7 +177,7 @@ struct WorkflowMachineTests {
   /// waiting for the author).
   private static func afterKickoff(verdict: String = "issues") throws -> Driver {
     let driver = Driver(configuration(try reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: reviewerPane))
     _ = driver.deliver(1, token: "tok-1", body: "## Findings\n- nit\n", verdict: verdict)
     driver.apply(.deliveryPersisted(ordinal: 1, path: "/w/d/review.1.md", latestPath: "/w/d/review.md"))
     return driver
@@ -189,7 +189,7 @@ struct WorkflowMachineTests {
   func startLaunchesTheReviewerWithTokenInEnvironment() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
     #expect(driver.startEffects.count == 3)
-    #expect(driver.startEffects[0] == .openActivation(ordinal: 1, paneID: nil, token: "tok-1"))
+    #expect(driver.startEffects[0] == .openActivation(ordinal: 1, contentID: nil, token: "tok-1"))
     guard case .launch(let request) = driver.startEffects[1] else {
       Issue.record("expected a launch effect, got \(driver.startEffects[1])")
       return
@@ -200,7 +200,7 @@ struct WorkflowMachineTests {
     #expect(request.placement == .split)
     #expect(request.direction == .right)
     #expect(request.background)
-    #expect(request.anchorPaneID == Self.authorPane)
+    #expect(request.anchorContentID == Self.authorPane)
     #expect(request.environment["CODANS_WORKFLOW_TOKEN"] == "tok-1")
     #expect(request.environment["CODANS_WORKFLOW_RUN"] == Self.runID.uuidString)
     #expect(request.environment["CODANS_WORKFLOW_ROLE"] == "reviewer")
@@ -215,22 +215,22 @@ struct WorkflowMachineTests {
   @Test
   func launchedArmsTheWatchdogAndBindsThePane() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    let effects = driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    let effects = driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     #expect(
       effects == [
-        .openActivation(ordinal: 1, paneID: Self.reviewerPane, token: "tok-1"),
+        .openActivation(ordinal: 1, contentID: Self.reviewerPane, token: "tok-1"),
         .armWatchdog(ordinal: 1, idleGraceSeconds: 180, deadline: nil),
         .persistRecord,
       ])
     #expect(driver.run.phase == .waitingForDelivery(ordinal: 1))
-    #expect(driver.run.bindings["reviewer"]?.paneID == Self.reviewerPane)
-    #expect(driver.run.activations[1]?.paneID == Self.reviewerPane)
+    #expect(driver.run.bindings["reviewer"]?.contentID == Self.reviewerPane)
+    #expect(driver.run.activations[1]?.contentID == Self.reviewerPane)
   }
 
   @Test
   func acceptedDeliveryIsPersistedThenTheLoopStarts() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     let delivered = driver.deliver(1, token: "tok-1", body: "## Findings\n- nit\n", verdict: "issues")
     #expect(delivered.outcome == .accepted)
     #expect(
@@ -246,8 +246,8 @@ struct WorkflowMachineTests {
       effects == [
         .disarmWatchdog(ordinal: 1),
         .revokeActivation(ordinal: 1),
-        .openActivation(ordinal: 2, paneID: Self.authorPane, token: "tok-2"),
-        .awaitRole(role: "author", paneID: Self.authorPane, until: .idle, timeoutMinutes: nil),
+        .openActivation(ordinal: 2, contentID: Self.authorPane, token: "tok-2"),
+        .awaitRole(role: "author", contentID: Self.authorPane, until: .idle, timeoutMinutes: nil),
         .persistRecord,
       ])
     #expect(driver.run.steps["kickoff"]?.outcome == .success)
@@ -269,7 +269,7 @@ struct WorkflowMachineTests {
           ordinal: 2, stepID: "fix",
           text: "Address the review at /w/d/review.1.md. Deliver a short summary when done."),
         .inject(
-          paneID: Self.authorPane, ordinal: 2,
+          contentID: Self.authorPane, ordinal: 2,
           line: "[codans] Read and follow \(instructionPath) — finish with: \(Self.command("tok-2"))"),
         .persistRecord,
       ])
@@ -293,14 +293,14 @@ struct WorkflowMachineTests {
       afterFixes == [
         .disarmWatchdog(ordinal: 2),
         .revokeActivation(ordinal: 2),
-        .openActivation(ordinal: 3, paneID: Self.reviewerPane, token: "tok-3"),
-        .awaitRole(role: "reviewer", paneID: Self.reviewerPane, until: .idle, timeoutMinutes: nil),
+        .openActivation(ordinal: 3, contentID: Self.reviewerPane, token: "tok-3"),
+        .awaitRole(role: "reviewer", contentID: Self.reviewerPane, until: .idle, timeoutMinutes: nil),
         .persistRecord,
       ])
     #expect(
       driver.apply(.roleIdle(role: "reviewer")) == [
         .inject(
-          paneID: Self.reviewerPane, ordinal: 3,
+          contentID: Self.reviewerPane, ordinal: 3,
           line: "Re-review after the fixes described in /w/d/fixes.2.md. — finish with: "
             + Self.command("tok-3", verdicts: ["clean", "issues"])),
         .persistRecord,
@@ -343,8 +343,8 @@ struct WorkflowMachineTests {
       ])
     let driver = Driver(
       Self.configuration(
-        definition, bindings: ["author": .current(paneID: Self.authorPane)], inputs: [:],
-        initiatorPaneID: Self.authorPane))
+        definition, bindings: ["author": .current(contentID: Self.authorPane)], inputs: [:],
+        initiatorContentID: Self.authorPane))
     let task = try #require(driver.selfInitiated)
     #expect(task.stepID == "brief")
     #expect(task.ordinal == 1)
@@ -353,7 +353,7 @@ struct WorkflowMachineTests {
     #expect(task.line.hasPrefix("[codans] Read and follow "))
     #expect(
       driver.startEffects == [
-        .openActivation(ordinal: 1, paneID: Self.authorPane, token: "tok-1"),
+        .openActivation(ordinal: 1, contentID: Self.authorPane, token: "tok-1"),
         .materializeInstruction(ordinal: 1, stepID: "brief", text: "Write a briefing."),
         .armWatchdog(ordinal: 1, idleGraceSeconds: 180, deadline: nil),
         .persistRecord,
@@ -373,12 +373,12 @@ struct WorkflowMachineTests {
       ])
     let driver = Driver(
       Self.configuration(
-        definition, bindings: ["author": .current(paneID: Self.authorPane)], inputs: [:],
-        initiatorPaneID: Self.reviewerPane))
+        definition, bindings: ["author": .current(contentID: Self.authorPane)], inputs: [:],
+        initiatorContentID: Self.reviewerPane))
     #expect(driver.selfInitiated == nil)
     #expect(
       driver.startEffects == [
-        .awaitRole(role: "author", paneID: Self.authorPane, until: .idle, timeoutMinutes: nil), .persistRecord,
+        .awaitRole(role: "author", contentID: Self.authorPane, until: .idle, timeoutMinutes: nil), .persistRecord,
       ])
   }
 
@@ -500,7 +500,7 @@ struct WorkflowMachineTests {
   @Test
   func wrongTokenIsRejectedWithoutSideEffects() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     let before = driver.run
     let result = driver.deliver(1, token: "nope", body: "## Findings\nx", verdict: "clean")
     guard case .rejected(let code, _) = result.outcome else {
@@ -517,7 +517,7 @@ struct WorkflowMachineTests {
   @Test
   func missingTokenNeedsManualAddressing() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     guard case .rejected(let code, _) = driver.deliver(1, token: nil, body: "## Findings\nx", verdict: "clean").outcome
     else {
       Issue.record("expected rejection")
@@ -531,7 +531,7 @@ struct WorkflowMachineTests {
   @Test
   func unknownOrdinalIsNotExpecting() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     guard case .rejected(let code, _) = driver.deliver(2, token: "tok-1", body: "x").outcome else {
       Issue.record("expected rejection")
       return
@@ -549,7 +549,7 @@ struct WorkflowMachineTests {
   @Test
   func unknownVerdictAndEmptyBodyAreRejected() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     guard
       case .rejected(let code, _) = driver.deliver(1, token: "tok-1", body: "## Findings\nx", verdict: "meh").outcome
     else {
@@ -568,7 +568,7 @@ struct WorkflowMachineTests {
   @Test
   func provisionalDeliveryAsksTheUserAndAskAgainReinjects() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     let delivered = driver.deliver(1, token: "tok-1", body: "Looks fine.")
     #expect(
       delivered.outcome
@@ -594,7 +594,7 @@ struct WorkflowMachineTests {
 
     #expect(
       driver.user(.askAgain) == [
-        .awaitRole(role: "reviewer", paneID: Self.reviewerPane, until: .idle, timeoutMinutes: nil), .persistRecord,
+        .awaitRole(role: "reviewer", contentID: Self.reviewerPane, until: .idle, timeoutMinutes: nil), .persistRecord,
       ])
     #expect(driver.run.status == .running)
     #expect(driver.run.activations[1]?.state == .waiting)
@@ -619,7 +619,7 @@ struct WorkflowMachineTests {
   @Test
   func acceptWithVerdictFillsTheMissingVerdict() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     _ = driver.deliver(1, token: "tok-1", body: "## Findings\nNone.")
     driver.apply(.deliveryPersisted(ordinal: 1, path: "/w/d/review.1.md", latestPath: "/w/d/review.md"))
     #expect(driver.run.status.attention?.actions.contains(.acceptWithVerdict) == true)
@@ -640,7 +640,7 @@ struct WorkflowMachineTests {
     strict.strict = true
     definition.steps[0].verb = .launch(role: "reviewer", prompt: try Self.template("Review."), expect: strict)
     let driver = Driver(Self.configuration(definition))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     guard case .rejected(let code, _) = driver.deliver(1, token: "tok-1", body: "## Findings\nx").outcome else {
       Issue.record("expected rejection")
       return
@@ -692,7 +692,7 @@ struct WorkflowMachineTests {
     // verdict stays "issues" from round one, so the loop goes around again.
     #expect(driver.run.state["round"] == 2)
     #expect(driver.run.currentStepID == "fix")
-    #expect(effects.contains(.openActivation(ordinal: 4, paneID: Self.authorPane, token: "tok-4")))
+    #expect(effects.contains(.openActivation(ordinal: 4, contentID: Self.authorPane, token: "tok-4")))
   }
 
   @Test
@@ -715,12 +715,12 @@ struct WorkflowMachineTests {
   @Test
   func watchdogNudgesOnceThenAsksForAttention() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     let nudge = driver.apply(.watchdog(ordinal: 1, .idleGraceElapsed))
     #expect(
       nudge == [
         .inject(
-          paneID: Self.reviewerPane, ordinal: 1,
+          contentID: Self.reviewerPane, ordinal: 1,
           line: "[codans] When your work is complete, deliver it with: "
             + Self.command("tok-1", verdicts: ["clean", "issues"])),
         .armWatchdog(ordinal: 1, idleGraceSeconds: 180, deadline: nil),
@@ -750,7 +750,7 @@ struct WorkflowMachineTests {
     let driver = Driver(Self.configuration(definition))
     let deadline = Self.epoch.addingTimeInterval(1800)
     #expect(
-      driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane)).contains(
+      driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane)).contains(
         .armWatchdog(ordinal: 1, idleGraceSeconds: 180, deadline: deadline)))
     driver.apply(.watchdog(ordinal: 1, .deadlineReached))
     let attention = try #require(driver.run.status.attention)
@@ -765,11 +765,11 @@ struct WorkflowMachineTests {
   @Test
   func staleOrdinalsAreIgnored() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     let before = driver.run
     #expect(driver.apply(.watchdog(ordinal: 99, .idleGraceElapsed)).isEmpty)
     #expect(driver.apply(.injected(ordinal: 7)).isEmpty)
-    #expect(driver.apply(.launched(ordinal: 3, paneID: Self.authorPane)).isEmpty)
+    #expect(driver.apply(.launched(ordinal: 3, contentID: Self.authorPane)).isEmpty)
     #expect(driver.apply(.deliveryPersisted(ordinal: 5, path: "x", latestPath: "y")).isEmpty)
     var after = driver.run
     after.log = before.log
@@ -845,10 +845,10 @@ struct WorkflowMachineTests {
       roles: [WorkflowRole(name: "reviewer", source: .pick)],
       steps: [WorkflowStep(id: "settle", verb: .wait(role: "reviewer", until: .idle, timeoutMinutes: 5))])
     let driver = Driver(
-      Self.configuration(definition, bindings: ["reviewer": .pick(paneID: Self.reviewerPane)], inputs: [:]))
+      Self.configuration(definition, bindings: ["reviewer": .pick(contentID: Self.reviewerPane)], inputs: [:]))
     #expect(
       driver.startEffects == [
-        .awaitRole(role: "reviewer", paneID: Self.reviewerPane, until: .idle, timeoutMinutes: 5), .persistRecord,
+        .awaitRole(role: "reviewer", contentID: Self.reviewerPane, until: .idle, timeoutMinutes: 5), .persistRecord,
       ])
     #expect(driver.run.phase == .waitingForState(role: "reviewer", until: .idle))
     let effects = driver.apply(.waitTimedOut(role: "reviewer"))
@@ -858,7 +858,7 @@ struct WorkflowMachineTests {
     #expect(attention.actions == [.keepWaiting, .skip, .cancel])
     #expect(
       driver.user(.keepWaiting) == [
-        .awaitRole(role: "reviewer", paneID: Self.reviewerPane, until: .idle, timeoutMinutes: 5), .persistRecord,
+        .awaitRole(role: "reviewer", contentID: Self.reviewerPane, until: .idle, timeoutMinutes: 5), .persistRecord,
       ])
     #expect(driver.apply(.roleIdle(role: "reviewer")).last == .finished(.completed))
     #expect(driver.run.steps["settle"]?.outcome == .success)
@@ -874,13 +874,13 @@ struct WorkflowMachineTests {
           id: "show", verb: .run(WorkflowRunCommand(command: try Self.template("git status"), inRole: "author")))
       ])
     let driver = Driver(
-      Self.configuration(definition, bindings: ["author": .current(paneID: Self.authorPane)], inputs: [:]))
+      Self.configuration(definition, bindings: ["author": .current(contentID: Self.authorPane)], inputs: [:]))
     #expect(
       driver.startEffects.first
-        == .awaitRole(role: "author", paneID: Self.authorPane, until: .idle, timeoutMinutes: nil))
+        == .awaitRole(role: "author", contentID: Self.authorPane, until: .idle, timeoutMinutes: nil))
     #expect(
       driver.apply(.roleIdle(role: "author")) == [
-        .inject(paneID: Self.authorPane, ordinal: 1, line: "git status"), .persistRecord,
+        .inject(contentID: Self.authorPane, ordinal: 1, line: "git status"), .persistRecord,
       ])
     #expect(driver.apply(.injected(ordinal: 1)).last == .finished(.completed))
   }
@@ -895,7 +895,7 @@ struct WorkflowMachineTests {
           id: "say", verb: .message(role: "author", content: .text(try Self.template("one\ntwo")), expect: nil))
       ])
     let driver = Driver(
-      Self.configuration(definition, bindings: ["author": .current(paneID: Self.authorPane)], inputs: [:]))
+      Self.configuration(definition, bindings: ["author": .current(contentID: Self.authorPane)], inputs: [:]))
     driver.apply(.roleIdle(role: "author"))
     guard case .failed(let step, let reason) = driver.run.status else {
       Issue.record("expected failed, got \(driver.run.status)")
@@ -910,7 +910,7 @@ struct WorkflowMachineTests {
   @Test
   func goneLaunchRoleOffersRelaunchWhichMintsAFreshActivation() throws {
     let driver = Driver(Self.configuration(try Self.reviewLoop()))
-    driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     let gone = driver.apply(.roleGone(role: "reviewer"))
     #expect(gone == [.disarmWatchdog(ordinal: 1), .persistRecord])
     let attention = try #require(driver.run.status.attention)
@@ -919,7 +919,7 @@ struct WorkflowMachineTests {
 
     let relaunch = driver.user(.relaunch)
     #expect(relaunch[0] == .revokeActivation(ordinal: 1))
-    #expect(relaunch[1] == .openActivation(ordinal: 2, paneID: nil, token: "tok-2"))
+    #expect(relaunch[1] == .openActivation(ordinal: 2, contentID: nil, token: "tok-2"))
     guard case .launch(let request) = relaunch[2] else {
       Issue.record("expected a launch, got \(relaunch)")
       return
@@ -929,8 +929,8 @@ struct WorkflowMachineTests {
     #expect(driver.run.activations[1]?.state == .revoked)
     #expect(driver.run.status == .running)
     #expect(driver.run.phase == .launching(ordinal: 2))
-    driver.apply(.launched(ordinal: 2, paneID: Self.authorPane))
-    #expect(driver.run.bindings["reviewer"]?.paneID == Self.authorPane)
+    driver.apply(.launched(ordinal: 2, contentID: Self.authorPane))
+    #expect(driver.run.bindings["reviewer"]?.contentID == Self.authorPane)
     #expect(driver.run.phase == .waitingForDelivery(ordinal: 2))
   }
 
@@ -963,9 +963,9 @@ struct WorkflowMachineTests {
     }
     #expect(request.prompt == "Review the uncommitted changes in this worktree. ")
     #expect(request.environment["CODANS_WORKFLOW_TOKEN"] == nil)
-    let launched = driver.apply(.launched(ordinal: request.ordinal, paneID: Self.reviewerPane))
+    let launched = driver.apply(.launched(ordinal: request.ordinal, contentID: Self.reviewerPane))
     #expect(
-      launched.contains(.awaitRole(role: "reviewer", paneID: Self.reviewerPane, until: .idle, timeoutMinutes: nil)))
+      launched.contains(.awaitRole(role: "reviewer", contentID: Self.reviewerPane, until: .idle, timeoutMinutes: nil)))
     #expect(driver.run.currentStepID == "re-review")
     #expect(driver.run.activations[3]?.state == .revoked)
     #expect(driver.run.currentActivation?.state == .waiting)
@@ -981,10 +981,10 @@ struct WorkflowMachineTests {
         WorkflowStep(id: "bye", verb: .close(role: "reviewer")),
       ])
     let driver = Driver(Self.configuration(definition, inputs: [:]))
-    let effects = driver.apply(.launched(ordinal: 1, paneID: Self.reviewerPane))
+    let effects = driver.apply(.launched(ordinal: 1, contentID: Self.reviewerPane))
     #expect(
-      effects == [.closePane(paneID: Self.reviewerPane, role: "reviewer"), .persistRecord, .finished(.completed)])
-    #expect(driver.run.bindings["reviewer"]?.paneID == nil)
+      effects == [.closeTab(contentID: Self.reviewerPane, role: "reviewer"), .persistRecord, .finished(.completed)])
+    #expect(driver.run.bindings["reviewer"]?.contentID == nil)
   }
 
   // MARK: - Context and record
@@ -1018,7 +1018,7 @@ struct WorkflowMachineTests {
     #expect(record.workflowID == "review-loop")
     #expect(record.phase == "waiting_for_role")
     #expect(record.activations["2"]?.state == .waiting)
-    #expect(record.bindings["reviewer"]?.paneID == Self.reviewerPane)
+    #expect(record.bindings["reviewer"]?.contentID == Self.reviewerPane)
     let data = try WorkflowRunRecord.encoder.encode(record)
     let json = try #require(String(data: data, encoding: .utf8))
     #expect(!json.contains("tok-"))

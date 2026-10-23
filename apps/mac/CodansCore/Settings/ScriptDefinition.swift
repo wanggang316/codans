@@ -110,10 +110,8 @@ public nonisolated struct ScriptDefinition: Equatable, Codable, Sendable, Identi
     switch target {
     case .focused:
       return .none
-    case .newTab:
-      return onFinished == .closeTab ? .closeTab : .none
-    case .split:
-      return onFinished == .closePane ? .closePane : .none
+    case .newTab, .split:
+      return onFinished
     }
   }
 

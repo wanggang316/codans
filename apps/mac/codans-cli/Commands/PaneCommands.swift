@@ -4,10 +4,47 @@ import CodansIPC
 import CodansKit
 import Foundation
 
+/// `codans pane …` — the layout verbs. A Pane is a split-tree leaf that
+/// holds a strip of Tabs; it never takes text or shows a screen. Every Pane
+/// position accepts a Pane id or a Tab / Content id (resolved to its Pane),
+/// a `p<n>` / `t<n>` handle, an `@label`, or `current` — except `close`,
+/// which refuses a Tab so one session never takes its whole Pane down.
+struct PaneCommand: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "pane",
+    abstract: "Shape the layout: list, focus, split, close, resize, equalize, and zoom panes.",
+    subcommands: [
+      PaneList.self,
+      PaneFocus.self,
+      PaneSplit.self,
+      PaneClose.self,
+      PaneResize.self,
+      PaneEqualize.self,
+      PaneZoom.self,
+      MovedPaneNew.self,
+      MovedPaneShow.self,
+      MovedPaneSend.self,
+      MovedPaneSendKey.self,
+      MovedPaneCapture.self,
+      MovedPaneRead.self,
+      MovedPaneInfo.self,
+      MovedPaneLabel.self,
+      MovedPaneReset.self,
+    ]
+  )
+}
+
+private let paneArgumentHelp = ArgumentHelp(
+  "Pane: an id (pane, or tab / content → its pane), p<n>, t<n>, @label, or 'current'.")
+
+enum SplitDirectionArgument: String, ExpressibleByArgument, CaseIterable {
+  case right, left, up, down
+}
+
 struct PaneList: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "list",
-    abstract: "List panes for a tab."
+    abstract: "List a worktree's panes in layout order."
   )
 
   @OptionGroup var globals: GlobalOptions
@@ -15,102 +52,81 @@ struct PaneList: AsyncParsableCommand {
   var project: String = "current"
   @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'.")
-  var tab: String = "current"
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
       struct Params: Codable {
-        let tabID: TabID
         let worktreeID: WorktreeID
         let projectID: ProjectID
       }
       let result: PaneListPayload = try await client.call(
         .hierarchyListPanes,
-        params: Params(tabID: scope.tabID, worktreeID: scope.worktreeID, projectID: scope.projectID)
+        params: Params(worktreeID: scope.worktreeID, projectID: scope.projectID)
       )
       try Renderer.emit(PaneListRenderable(panes: result.panes), mode: globals.renderMode)
     }
   }
 }
 
-struct PaneCommand: AsyncParsableCommand {
+struct PaneFocus: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
-    commandName: "pane",
-    abstract: "List, create, split, resize, focus, close, label, read, reset, and send panes.",
-    subcommands: [
-      PaneList.self,
-      PaneNew.self,
-      PaneSplit.self,
-      PaneShow.self,
-      PaneFocus.self,
-      PaneResize.self,
-      PaneClose.self,
-      PaneLabel.self,
-      PaneReset.self,
-      SendCommand.self,
-      SendKeyCommand.self,
-      PaneRead.self,
-      PaneInfo.self,
-      CaptureCommand.self,
-    ]
+    commandName: "focus",
+    abstract: "Give a pane the keyboard, by id or by direction.",
+    discussion: """
+      With a pane, focus it. With --direction, move focus from the pane
+      (default: the focused pane of the current worktree) to its neighbour
+      that way, as the keyboard does; at an edge nothing moves.
+      """
   )
-}
 
-struct PaneNew: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "new",
-    abstract: "Create a pane, optionally with an initial command."
-  )
+  enum Direction: String, ExpressibleByArgument, CaseIterable {
+    case left, right, up, down, previous, next
+  }
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(parsing: .remaining, help: "Initial command. Omit for the default shell.")
-  var command: [String] = []
-  @Option(name: .long, help: "Project id, name, or 'current'.")
+  @Argument(help: paneArgumentHelp)
+  var pane: String?
+  @Option(name: .long, help: "Move focus: left, right, up, down, previous, or next.")
+  var direction: Direction?
+  @Option(name: .long, help: "Project id, name, or 'current' (with --direction and no pane).")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current' (with --direction and no pane).")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'.")
-  var tab: String = "current"
-  @Option(name: .long, help: "Working directory. Defaults to $PWD.")
-  var cwd: String?
-  @Option(name: .long, parsing: .upToNextOption, help: "Initial labels.")
-  var label: [String] = []
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
+      guard pane != nil || direction != nil else {
+        throw CLIError(code: .userError, message: "pass a pane, --direction, or both")
+      }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
-      let initialCommand = command.isEmpty ? nil : command.joined(separator: " ")
       struct Params: Codable {
-        let projectID: ProjectID
-        let worktreeID: WorktreeID
-        let tabID: TabID
-        let workingDirectory: String
-        let initialCommand: String?
-        let labels: [String]
+        let id: PaneID?
+        let projectID: ProjectID?
+        let worktreeID: WorktreeID?
+        let direction: String?
       }
-      struct Result: Codable { let id: PaneID }
-      let result: Result = try await client.call(
-        .hierarchyOpenPane,
-        params: Params(
-          projectID: scope.projectID,
-          worktreeID: scope.worktreeID,
-          tabID: scope.tabID,
-          workingDirectory: PathResolver.absolute(cwd),
-          initialCommand: initialCommand,
-          labels: label
-        )
-      )
+      let params: Params
+      if let pane {
+        let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
+        params = Params(id: paneID, projectID: nil, worktreeID: nil, direction: direction?.rawValue)
+      } else {
+        let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+        params = Params(
+          id: nil, projectID: scope.projectID, worktreeID: scope.worktreeID, direction: direction?.rawValue)
+      }
+      struct Result: Codable {
+        let paneID: PaneID
+        let moved: Bool
+      }
+      let result: Result = try await client.call(.hierarchyFocusPane, params: params)
       try Renderer.emitObject(
-        ["id": result.id.description],
-        mode: globals.renderMode
+        ["paneID": result.paneID.description, "moved": result.moved], mode: globals.renderMode
       ) { _ in
-        "created pane \(result.id.description)"
+        result.moved ? "focused pane \(result.paneID)" : "no pane \(direction?.rawValue ?? "") of \(result.paneID)"
       }
     }
   }
@@ -119,27 +135,25 @@ struct PaneNew: AsyncParsableCommand {
 struct PaneSplit: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "split",
-    abstract: "Split a pane and start a shell (or a command) in the new half.",
+    abstract: "Split a pane: a new pane beside it, with a new tab running a shell (or a command).",
     discussion: """
       The new pane appears beside the anchor pane in the given direction,
-      like the keyboard split. Its working directory defaults to the anchor's
-      live directory, not $PWD; pass --cwd to choose another. The one
-      positional is the anchor; a command goes in --command so the two
-      never compete for the same slot.
+      like the keyboard split. Its working directory defaults to the anchor
+      pane's selected tab's live directory, not $PWD; pass --cwd to choose
+      another. The one positional is the anchor; a command goes in --command
+      so the two never compete for the same slot. Prints the new tab's id so
+      the next command can drive it; the JSON result also carries the new
+      pane and content ids.
       """
   )
 
-  enum Direction: String, ExpressibleByArgument, CaseIterable {
-    case right, left, up, down
-  }
-
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Anchor pane id, p<n> handle, @label, or 'current'.")
+  @Argument(help: paneArgumentHelp)
   var pane: String = "current"
-  @Option(name: .long, help: "Initial command for the new pane. Omit for the default shell.")
+  @Option(name: .long, help: "Initial command for the new tab. Omit for the default shell.")
   var command: String?
   @Option(name: .long, help: "Side of the anchor the new pane takes: right (default), left, up, down.")
-  var direction: Direction = .right
+  var direction: SplitDirectionArgument = .right
   @Option(name: .long, help: "Working directory. Defaults to the anchor pane's directory.")
   var cwd: String?
   @Option(name: .long, parsing: .upToNextOption, help: "Initial labels.")
@@ -149,27 +163,23 @@ struct PaneSplit: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      let path = try await PaneLocatorFlow.resolvePanePath(
-        paneUUID: paneUUID, project: "current", worktree: "current", tab: "current", client: client)
+      let anchor = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
       struct Params: Codable {
-        let paneID: PaneID
-        let tabID: TabID
-        let worktreeID: WorktreeID
-        let projectID: ProjectID
+        let paneID: UUID
         let direction: String
         let workingDirectory: String?
         let initialCommand: String?
         let labels: [String]
       }
-      struct Result: Codable { let id: PaneID }
+      struct Result: Codable {
+        let paneID: PaneID
+        let tabID: TabID
+        let contentID: ContentID
+      }
       let result: Result = try await client.call(
         .hierarchySplitPane,
         params: Params(
-          paneID: path.paneID,
-          tabID: path.tabID,
-          worktreeID: path.worktreeID,
-          projectID: path.projectID,
+          paneID: anchor.raw,
           direction: direction.rawValue,
           workingDirectory: cwd.map { PathResolver.absolute($0) },
           initialCommand: command.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 },
@@ -177,10 +187,62 @@ struct PaneSplit: AsyncParsableCommand {
         )
       )
       try Renderer.emitObject(
-        ["id": result.id.description, "anchor": paneUUID.uuidString, "direction": direction.rawValue],
+        [
+          "paneID": result.paneID.description,
+          "tabID": result.tabID.description,
+          "contentID": result.contentID.description,
+          "anchor": anchor.description,
+          "direction": direction.rawValue,
+        ],
         mode: globals.renderMode
       ) { _ in
-        "created pane \(result.id.description) \(direction.rawValue) of \(paneUUID.uuidString)"
+        result.tabID.description
+      }
+    }
+  }
+}
+
+struct PaneClose: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "close",
+    abstract: "Close a pane and every tab on its strip.",
+    discussion: """
+      Each tab's session ends as with `tab close` (its terminal daemon is
+      killed). Only a pane id, p<n>, or 'current' is accepted: a tab or
+      content id is refused, so a script that meant one session never
+      closes a whole pane — use `tab close` for that.
+      """
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Argument(help: "Pane: a pane id, p<n>, or 'current'.")
+  var pane: String
+
+  func run() async throws {
+    await CommandRunner.run(self, globals: globals) {
+      let client = CLISession.connect(globals: globals)
+      defer { Task { await client.shutdown() } }
+      let match = try await AliasResolver.resolveMatch(pane, kind: .pane, client: client)
+      if let matched = match.matched, matched != .pane {
+        throw CLIError(
+          code: .userError,
+          message: "\(pane) names a \(matched == .content ? "content (session)" : "tab"), not a pane;"
+            + " `pane close` closes a whole pane with all its tabs",
+          hint: "use `\(CodansCLI.commandName) tab close \(pane)` to close one tab",
+          errorCode: .invalidArgument,
+          details: ["kind": matched.rawValue, "value": pane])
+      }
+      struct Params: Codable { let id: UUID }
+      struct Result: Codable {
+        let id: PaneID
+        let tabIDs: [TabID]
+      }
+      let result: Result = try await client.call(.hierarchyClosePane, params: Params(id: match.id))
+      try Renderer.emitObject(
+        ["id": result.id.description, "tabIDs": result.tabIDs.map(\.description)],
+        mode: globals.renderMode
+      ) { _ in
+        "closed pane \(result.id) (\(result.tabIDs.count) tab\(result.tabIDs.count == 1 ? "" : "s"))"
       }
     }
   }
@@ -199,10 +261,10 @@ struct PaneResize: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
+  @Argument(help: paneArgumentHelp)
   var pane: String
   @Argument(help: "Direction to grow: left, right, up, or down.")
-  var direction: PaneSplit.Direction
+  var direction: SplitDirectionArgument
   @Option(name: .long, help: "Pixels to move the divider (default 40).")
   var amount: Double = 40
 
@@ -213,444 +275,199 @@ struct PaneResize: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
       struct Params: Codable {
-        let paneID: PaneID
+        let paneID: UUID
         let direction: String
         let amount: Double
       }
       _ = try await client.callRaw(
         .hierarchyResizePane,
-        params: Params(paneID: PaneID(raw: uuid), direction: direction.rawValue, amount: amount)
+        params: Params(paneID: paneID.raw, direction: direction.rawValue, amount: amount)
       )
       try Renderer.emit(
-        IDMessage(id: uuid.uuidString, message: "resized pane \(uuid.uuidString) \(direction.rawValue)"),
+        IDMessage(id: paneID.description, message: "resized pane \(paneID) \(direction.rawValue)"),
         mode: globals.renderMode
       )
     }
   }
 }
 
-struct PaneLocatorArgs: ParsableArguments {
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
-  var pane: String
-  @Option(name: .long, help: "Project id, name, or 'current'. Usually inferred from the pane id.")
+struct PaneEqualize: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "equalize",
+    abstract: "Give every pane of a worktree an even share of the layout."
+  )
+
+  @OptionGroup var globals: GlobalOptions
+  @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
-  @Option(name: .long, help: "Worktree id, name, branch, or 'current'. Usually inferred from the pane id.")
+  @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
   var worktree: String = "current"
-  @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'. Usually inferred from the pane id.")
-  var tab: String = "current"
-}
-
-struct PaneFocus: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "focus",
-    abstract: "Focus a pane."
-  )
-
-  @OptionGroup var globals: GlobalOptions
-  @OptionGroup var args: PaneLocatorArgs
-
-  func run() async throws {
-    await PaneLocatorFlow.run(
-      self,
-      globals: globals,
-      args: args,
-      method: .hierarchyFocusPane,
-      verbLabel: "focused"
-    )
-  }
-}
-
-struct PaneClose: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "close",
-    abstract: "Close a pane and kill its zmx daemon.",
-    discussion: """
-      Sends `.kill` to the pane's zmx daemon (bounded ≤ 2 s wait for the
-      daemon's control socket to vanish), drops the persisted session
-      catalog entry, and removes the pane from the in-memory hierarchy.
-
-      Distinct from the UI X-button path, which detaches the libghostty
-      surface so a future attach can resume the same daemon. Use this
-      verb when you want the daemon gone.
-      """
-  )
-
-  @OptionGroup var globals: GlobalOptions
-  @OptionGroup var args: PaneLocatorArgs
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(args.pane, kind: .pane, client: client)
-      // Best-effort locator: when the caller didn't override the
-      // project/worktree/tab triple, send only the paneID and let the
-      // handler walk the catalog server-side. Saves a round-trip on the
-      // common `codans pane close <id>` shape.
-      let request: IPC.PaneCloseRequest
-      if args.project != "current" || args.worktree != "current" || args.tab != "current" {
-        let path = try await PaneLocatorFlow.resolvePanePath(
-          paneUUID: paneUUID,
-          args: args,
-          client: client
-        )
-        request = IPC.PaneCloseRequest(
-          paneID: path.paneID,
-          tabID: path.tabID,
-          worktreeID: path.worktreeID,
-          projectID: path.projectID
-        )
-      } else {
-        request = IPC.PaneCloseRequest(paneID: PaneID(raw: paneUUID))
+      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      struct Params: Codable {
+        let projectID: ProjectID
+        let worktreeID: WorktreeID
       }
-      let response: IPC.PaneCloseResponse = try await client.call(.paneClose, params: request)
-      if response.closed {
-        try Renderer.emit(
-          IDMessage(
-            id: paneUUID.uuidString,
-            message: "closed pane \(paneUUID.uuidString)"
-          ),
-          mode: globals.renderMode
-        )
-      } else {
-        throw CLIError(
-          code: .notFound,
-          message: "no pane found for \(paneUUID.uuidString)",
-          details: ["kind": "pane", "id": paneUUID.uuidString]
-        )
-      }
+      _ = try await client.callRaw(
+        .hierarchyEqualizePanes, params: Params(projectID: scope.projectID, worktreeID: scope.worktreeID))
+      try Renderer.emit(
+        IDMessage(id: scope.worktreeID.description, message: "equalized panes of worktree \(scope.worktreeID)"),
+        mode: globals.renderMode
+      )
     }
   }
 }
 
-struct PaneReset: AsyncParsableCommand {
+struct PaneZoom: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
-    commandName: "reset",
-    abstract: "Reset a pane's terminal state.",
+    commandName: "zoom",
+    abstract: "Toggle zoom: the pane fills the layout area; again to return.",
     discussion: """
-      Routes through libghostty's reset binding action — the same path the
-      context-menu "Reset Terminal" item uses. Clears scrollback and
-      reinitialises the terminal without disturbing the child process.
+      A zoomed pane fills the layout area and keeps its tab strip; the
+      other panes are hidden, not closed. Running it on the zoomed pane
+      (or --off) returns to the layout.
       """
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
+  @Argument(help: paneArgumentHelp)
   var pane: String = "current"
+  @Flag(name: .long, help: "Only leave the zoom; never zoom in.")
+  var off: Bool = false
 
   func run() async throws {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      struct Params: Codable {
+      let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
+      struct Params: Codable { let id: UUID }
+      struct Result: Codable {
         let paneID: PaneID
+        let zoomed: Bool
       }
-      _ = try await client.callRaw(
-        .terminalResetPane,
-        params: Params(paneID: PaneID(raw: uuid))
-      )
-      try Renderer.emit(
-        IDMessage(id: uuid.uuidString, message: "reset pane \(uuid.uuidString)"),
-        mode: globals.renderMode
-      )
-    }
-  }
-}
-
-struct PaneLabel: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "label",
-    abstract: "Add labels to a pane."
-  )
-
-  @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
-  var pane: String
-  @Argument(help: "Labels.")
-  var labels: [String]
-  @Flag(name: .long, help: "Replace the existing labels.")
-  var replace: Bool = false
-
-  func run() async throws {
-    await CommandRunner.run(self, globals: globals) {
-      guard !labels.isEmpty else {
-        throw CLIError(code: .userError, message: "specify at least one label")
-      }
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      struct Params: Codable {
-        let id: PaneID
-        let labels: [String]
-        let replace: Bool
-      }
-      _ = try await client.callRaw(
-        .hierarchySetPaneLabels,
-        params: Params(id: PaneID(raw: uuid), labels: labels, replace: replace)
-      )
+      let result: Result = try await client.call(
+        off ? .hierarchyUnzoomPane : .hierarchyZoomPane, params: Params(id: paneID.raw))
       try Renderer.emitObject(
-        ["id": uuid.uuidString, "labels": labels],
-        mode: globals.renderMode
+        ["paneID": result.paneID.description, "zoomed": result.zoomed], mode: globals.renderMode
       ) { _ in
-        "labeled pane \(uuid.uuidString)"
+        result.zoomed ? "zoomed pane \(result.paneID)" : "pane \(result.paneID) not zoomed"
       }
     }
   }
 }
 
-struct PaneLocatorBody: Codable, Sendable {
-  let id: PaneID
-  let tabID: TabID
-  let worktreeID: WorktreeID
-  let projectID: ProjectID
-}
-
-enum PaneLocatorFlow {
-  static func run(
-    _ command: some ParsableCommand,
-    globals: GlobalOptions,
-    args: PaneLocatorArgs,
-    method: IPC.Method,
-    verbLabel: String
-  ) async {
-    await CommandRunner.run(command, globals: globals) {
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(args.pane, kind: .pane, client: client)
-      let path = try await resolvePanePath(
-        paneUUID: paneUUID,
-        args: args,
-        client: client
-      )
-      _ = try await client.callRaw(
-        method,
-        params: PaneLocatorBody(
-          id: path.paneID,
-          tabID: path.tabID,
-          worktreeID: path.worktreeID,
-          projectID: path.projectID
-        )
-      )
-      try Renderer.emit(
-        IDMessage(id: paneUUID.uuidString, message: "\(verbLabel) pane \(paneUUID.uuidString)"),
-        mode: globals.renderMode
-      )
-    }
-  }
-
-  static func resolvePanePath(
-    paneUUID: UUID,
-    args: PaneLocatorArgs,
-    client: RPCClient
-  ) async throws -> PanePath {
-    try await resolvePanePath(
-      paneUUID: paneUUID,
-      project: args.project,
-      worktree: args.worktree,
-      tab: args.tab,
-      client: client
-    )
-  }
-
-  static func resolvePanePath(
-    paneUUID: UUID,
-    project: String,
-    worktree: String,
-    tab: String,
-    client: RPCClient
-  ) async throws -> PanePath {
-    if project != "current" || worktree != "current" || tab != "current" {
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
-      let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
-      let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
-      return PanePath(
-        projectID: ProjectID(raw: projectUUID),
-        worktreeID: WorktreeID(raw: worktreeUUID),
-        tabID: TabID(raw: tabUUID),
-        paneID: PaneID(raw: paneUUID)
-      )
-    }
-
-    let paneID = PaneID(raw: paneUUID)
-    let tree = try await HierarchyTree.load(client: client)
-    guard let path = tree.locatePane(paneID) else {
-      throw CLIError(
-        code: .notFound, message: "pane \(paneUUID.uuidString) not found",
-        details: ["kind": "pane", "id": paneUUID.uuidString])
-    }
-    return path
-  }
-}
-
-struct PaneInfo: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "info",
-    abstract: "Probe a pane's zmx daemon for shell pid, pwd, and (when available) cursor + modes.",
-    discussion: """
-      Round-trips through the pane's zmx daemon rather than the catalog,
-      so a stale catalog row does not leak past as live truth. The
-      daemon's frozen Info payload carries pid + cwd today; cursor and
-      modes are reported as null until a future tag carries them, in
-      which case callers should fall back to `codans pane read --raw` and
-      parse the vt-format dump.
-      """
-  )
-
-  @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
-  var pane: String = "current"
-
-  func run() async throws {
-    await CommandRunner.run(self, globals: globals) {
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      let response: IPC.PaneInfoResponse = try await client.call(
-        .paneInfo,
-        params: IPC.PaneInfoRequest(paneID: PaneID(raw: uuid))
-      )
-      try Renderer.emit(PaneInfoRenderable(response: response), mode: globals.renderMode)
-    }
-  }
-}
-
-struct PaneInfoRenderable: Encodable, CustomStringConvertible {
-  let response: IPC.PaneInfoResponse
-  private enum Key: String, CodingKey {
-    case paneID, shellPid, pwd, cursor, modes
-  }
-
-  func encode(to encoder: Encoder) throws {
-    var container = encoder.container(keyedBy: Key.self)
-    try container.encode(response.paneID.description, forKey: .paneID)
-    try container.encode(response.shellPid, forKey: .shellPid)
-    try container.encode(response.pwd, forKey: .pwd)
-    try container.encode(response.cursor, forKey: .cursor)
-    try container.encode(response.modes, forKey: .modes)
-  }
-
-  var description: String {
-    var lines: [String] = []
-    lines.append("pane:    \(response.paneID.description)")
-    lines.append("shell:   pid=\(response.shellPid)")
-    lines.append("pwd:     \(response.pwd)")
-    if let cursor = response.cursor {
-      lines.append("cursor:  row=\(cursor.row) col=\(cursor.col)")
-    }
-    if let modes = response.modes, !modes.isEmpty {
-      let pairs = modes.sorted { $0.key < $1.key }
-        .map { "\($0.key)=\($0.value ? "on" : "off")" }
-        .joined(separator: " ")
-      lines.append("modes:   \(pairs)")
-    }
-    return lines.joined(separator: "\n")
-  }
-}
-
-struct PaneRead: AsyncParsableCommand {
-  static let configuration = CommandConfiguration(
-    commandName: "read",
-    abstract: "Read serialized terminal state from a pane's zmx daemon.",
-    discussion: """
-      Returns the daemon's serializeTerminalState dump. Pass --raw for the
-      vt-format dump (ANSI escapes, cursor, modes, OSC 7 preserved);
-      omit it for the plain-text dump. --tail N keeps the last N lines.
-      --range is reserved for future viewport / scrollback splitting; the
-      daemon currently returns the full dump regardless of range.
-      """
-  )
-
-  enum Range: String, ExpressibleByArgument, CaseIterable {
-    case visible
-    case scrollback
-    case all
-  }
-
-  @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
-  var pane: String = "current"
-  @Flag(name: .long, help: "Return the vt-format dump with ANSI escapes preserved.")
-  var raw: Bool = false
-  @Option(name: .long, help: "Keep only the last N newline-delimited lines.")
-  var tail: Int?
-  @Option(name: .long, help: "Range: visible, scrollback, or all (default).")
-  var range: Range = .all
-
-  func run() async throws {
-    await CommandRunner.run(self, globals: globals) {
-      if let tail, tail <= 0 {
-        throw CLIError(code: .userError, message: "--tail must be a positive integer")
-      }
-      let client = CLISession.connect(globals: globals)
-      defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
-      let wireRange: IPC.PaneReadRange = {
-        switch range {
-        case .visible: return .visible
-        case .scrollback: return .scrollback
-        case .all: return .all
-        }
-      }()
-      let response: IPC.PaneReadResponse = try await client.call(
-        .paneRead,
-        params: IPC.PaneReadRequest(
-          paneID: PaneID(raw: uuid),
-          range: wireRange,
-          tail: tail,
-          raw: raw
-        )
-      )
-      // --raw dumps the literal byte stream so callers can grep for
-      // ANSI codes; structured renderers (json) get the same content
-      // wrapped in metadata.
-      try Renderer.emitObject(
-        [
-          "paneID": uuid.uuidString,
-          "format": response.format.rawValue,
-          "range": range.rawValue,
-          "content": response.content,
-        ],
-        mode: globals.renderMode
-      ) { obj in
-        obj["content"] as? String ?? ""
-      }
-    }
-  }
-}
-
-struct PaneListPayload: Codable { let panes: [Pane] }
+struct PaneListPayload: Codable { let panes: [IPC.PaneDescription] }
 
 struct PaneListRenderable: Encodable, CustomStringConvertible {
-  let panes: [Pane]
+  let panes: [IPC.PaneDescription]
   private enum Key: String, CodingKey { case panes }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: Key.self)
-    try container.encode(panes.map(PaneDTO.init(pane:)), forKey: .panes)
+    try container.encode(panes, forKey: .panes)
   }
 
   var description: String {
     panes.isEmpty
       ? "(no panes)"
       : panes.map { pane in
-        let labels = pane.labels.sorted().joined(separator: ",")
-        let suffix = labels.isEmpty ? "" : " [\(labels)]"
-        return "\(pane.id)  \(pane.workingDirectory)\(suffix)"
+        let focused = pane.isFocused ? "*" : " "
+        let handle = pane.handle.map { "\($0)  " } ?? ""
+        let selected = pane.selectedTabID.map { "  selected \($0)" } ?? ""
+        return "[\(focused)] \(handle)\(pane.id)  (\(pane.tabIDs.count) tabs)\(selected)"
       }.joined(separator: "\n")
   }
 }
 
-struct PaneDTO: Encodable {
-  let id: String
-  let workingDirectory: String
-  let labels: [String]
+// MARK: - Verbs that moved to `tab`
 
-  init(pane: Pane) {
-    self.id = pane.id.description
-    self.workingDirectory = pane.workingDirectory
-    self.labels = pane.labels.sorted()
+/// A verb at its former location: parses anything and fails with the new
+/// location, in text or JSON as the caller asked. Hidden from help.
+protocol MovedVerbCommand: AsyncParsableCommand {
+  static var formerPath: String { get }
+  var passthrough: [String] { get }
+}
+
+extension MovedVerbCommand {
+  static func movedConfiguration(_ name: String) -> CommandConfiguration {
+    CommandConfiguration(commandName: name, shouldDisplay: false)
   }
+
+  func run() async throws {
+    let text = CLIMovedVerb.message(executable: CodansCLI.commandName, from: Self.formerPath)
+    let mode: RenderMode = passthrough.contains("--json") ? .json : .text(useColor: true)
+    let context = RenderContext(command: CommandPaths.path(for: Self.self))
+    await Renderer.$context.withValue(context) {
+      CLIError(
+        code: .userError, message: text.message, hint: text.hint, errorCode: .movedVerb,
+        details: ["moved": Self.formerPath, "to": CLIMovedVerb.table[Self.formerPath] ?? ""]
+      ).exitProcess(mode: mode)
+    }
+  }
+}
+
+struct MovedPaneNew: MovedVerbCommand {
+  static let configuration = movedConfiguration("new")
+  static let formerPath = "pane new"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneShow: MovedVerbCommand {
+  static let configuration = movedConfiguration("show")
+  static let formerPath = "pane show"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneSend: MovedVerbCommand {
+  static let configuration = movedConfiguration("send")
+  static let formerPath = "pane send"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneSendKey: MovedVerbCommand {
+  static let configuration = movedConfiguration("send-key")
+  static let formerPath = "pane send-key"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneCapture: MovedVerbCommand {
+  static let configuration = movedConfiguration("capture")
+  static let formerPath = "pane capture"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneRead: MovedVerbCommand {
+  static let configuration = movedConfiguration("read")
+  static let formerPath = "pane read"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneInfo: MovedVerbCommand {
+  static let configuration = movedConfiguration("info")
+  static let formerPath = "pane info"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneLabel: MovedVerbCommand {
+  static let configuration = movedConfiguration("label")
+  static let formerPath = "pane label"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedPaneReset: MovedVerbCommand {
+  static let configuration = movedConfiguration("reset")
+  static let formerPath = "pane reset"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
+}
+
+struct MovedTabSwitch: MovedVerbCommand {
+  static let configuration = movedConfiguration("switch")
+  static let formerPath = "tab switch"
+  @Argument(parsing: .captureForPassthrough) var passthrough: [String] = []
 }

@@ -3,7 +3,7 @@ import CodansIPC
 import Foundation
 
 /// App-lifetime registry that backs the CLI's short target handles
-/// (`t<n>` for Tabs, `p<n>` for Panes). Handles are monotonically
+/// (`p<n>` for Panes, `t<n>` for Tabs). Handles are monotonically
 /// increasing integers assigned per kind on first sight, stay stable for
 /// as long as the entity lives, and are released when the entity leaves
 /// the catalog. The counters never rewind, so a released handle is never
@@ -22,7 +22,8 @@ final class TargetHandleRegistry {
   private var nextPaneHandle = 1
 
   /// Bring the handle maps in line with `catalog`: assign the next
-  /// handle to unseen tabs/panes in hierarchy order and drop entries
+  /// handle to unseen Panes / Tabs in hierarchy order (Panes in split-tree
+  /// leaf order, then each Pane's Tabs in strip order) and drop entries
   /// whose ids are gone. Called before every read or lookup, so first
   /// assignment order matches what `codans tree` prints even when a
   /// handle is resolved before any listing ran.
@@ -31,17 +32,17 @@ final class TargetHandleRegistry {
     var livePanes: Set<PaneID> = []
     for project in catalog.projects {
       for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          liveTabs.insert(tab.id)
-          if tabHandles[tab.id] == nil {
-            tabHandles[tab.id] = nextTabHandle
-            nextTabHandle += 1
+        for pane in Self.panesInLayoutOrder(worktree) {
+          livePanes.insert(pane.id)
+          if paneHandles[pane.id] == nil {
+            paneHandles[pane.id] = nextPaneHandle
+            nextPaneHandle += 1
           }
-          for pane in tab.panes {
-            livePanes.insert(pane.id)
-            if paneHandles[pane.id] == nil {
-              paneHandles[pane.id] = nextPaneHandle
-              nextPaneHandle += 1
+          for tab in pane.tabs {
+            liveTabs.insert(tab.id)
+            if tabHandles[tab.id] == nil {
+              tabHandles[tab.id] = nextTabHandle
+              nextTabHandle += 1
             }
           }
         }
@@ -49,6 +50,15 @@ final class TargetHandleRegistry {
     }
     tabHandles = tabHandles.filter { liveTabs.contains($0.key) }
     paneHandles = paneHandles.filter { livePanes.contains($0.key) }
+  }
+
+  /// Panes as the layout shows them, left-to-right / top-to-bottom; a Pane
+  /// missing from the tree (never, by invariant) trails in array order.
+  static func panesInLayoutOrder(_ worktree: Worktree) -> [Pane] {
+    let leaves = worktree.splitTree.leaves()
+    let ordered = leaves.compactMap { worktree.pane($0) }
+    let seen = Set(leaves)
+    return ordered + worktree.panes.filter { !seen.contains($0.id) }
   }
 
   func tab(forHandle handle: Int) -> TabID? {
@@ -59,18 +69,25 @@ final class TargetHandleRegistry {
     paneHandles.first(where: { $0.value == handle })?.key
   }
 
+  func handle(forTab tabID: TabID) -> Int? {
+    tabHandles[tabID]
+  }
+
+  func handle(forPane paneID: PaneID) -> Int? {
+    paneHandles[paneID]
+  }
+
   /// Wire-shaped snapshot for `hierarchy.listProjects` responses.
   func snapshot() -> IPC.TargetHandles {
     IPC.TargetHandles(
-      tabs: Dictionary(uniqueKeysWithValues: tabHandles.map { ($0.key.raw.uuidString, $0.value) }),
-      panes: Dictionary(uniqueKeysWithValues: paneHandles.map { ($0.key.raw.uuidString, $0.value) })
+      panes: Dictionary(uniqueKeysWithValues: paneHandles.map { ($0.key.raw.uuidString, $0.value) }),
+      tabs: Dictionary(uniqueKeysWithValues: tabHandles.map { ($0.key.raw.uuidString, $0.value) })
     )
   }
 
   /// Parse a short-handle selector (`t12` / `p3`). Strict shape: the
-  /// lowercase kind prefix followed by digits only, so pane labels and
-  /// project names can never collide with the handle namespace by
-  /// accident.
+  /// lowercase kind prefix followed by digits only, so labels and project
+  /// names can never collide with the handle namespace by accident.
   static func parse(_ value: String, prefix: Character) -> Int? {
     guard value.first == prefix else { return nil }
     let digits = value.dropFirst()
