@@ -110,6 +110,7 @@ struct TerminalContentState {
 - 条与上方边缘、条与下方内容的间距相同（`trackTopInset` = `trackBottomInset`）。贴着布局区顶边的条不留上间距：工具栏自身已在按钮下方留出间距，track 与工具栏按钮的距离因此与 Safari 的 tab 栏相同。
 - track 高 32，取自 Safari（macOS 26）的 tab 栏；标题字号、颜色与曲线取自系统窗口 tab 栏（`NSTabBar`）。
 - 条左端没有关闭 Pane 的按钮；关闭 Pane 经 `pane close`、右键菜单或关掉最后一个 Tab。
+- 条浮在终端上方：终端占满整个 Pane，条下垫一层半透明材质（`NSVisualEffectView` `.titlebar`，窗口失焦时仍保持半透明）。终端经 `ghostty_surface_set_content_inset_top` 把条的高度设为顶部内缩带：网格从带下方开始，视口上方的历史行画进带里，滚动时内容从条下经过并被模糊。备用屏（全屏 TUI）没有历史，带里为空，首行仍在条下方完整可见。
 
 ### 分隔线
 

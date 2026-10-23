@@ -441,10 +441,22 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     return (UInt32(max(px.width, 0)), UInt32(max(px.height, 0)))
   }
 
+  /// Height in points of the band at the top that translucent chrome covers.
+  /// The grid starts below it; libghostty draws the rows above the viewport
+  /// into it, so they scroll under the chrome.
+  var contentInsetTop: CGFloat = 0 {
+    didSet {
+      guard contentInsetTop != oldValue else { return }
+      pushGeometry()
+    }
+  }
+
   private func pushGeometry() {
     guard let surface else { return }
     let scale = backingScaleFactor()
     ghostty_surface_set_content_scale(surface, scale, scale)
+    let inset = convertToBacking(NSSize(width: 0, height: contentInsetTop)).height
+    ghostty_surface_set_content_inset_top(surface, UInt32(max(inset, 0).rounded()))
     // ghostty_surface_set_size takes device-pixel dimensions.
     let px = convertToBacking(bounds.size)
     if px.width > 0, px.height > 0 {

@@ -71,6 +71,10 @@ and the project does not yet follow semantic versioning — every release until
   divider between them, as the editor splits in Xcode do; drag the divider to
   resize. The tab strip sits as far from the pane's top as from the
   terminal below it.
+- **Terminal output scrolls under the tab strip.** The strip floats on a
+  translucent bar over the terminal; earlier lines slide under it, blurred,
+  as page content does under Safari's tab bar. Full-screen programs still
+  start right below the strip.
 - **Tab strip sized like Safari's.** The strip is as tall as Safari's tab
   bar, and the top strip sits as close under the toolbar as Safari's
   does.

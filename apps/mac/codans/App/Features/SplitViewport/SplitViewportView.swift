@@ -372,18 +372,10 @@ private struct PaneView: View {
     // after the drop clears the target.
     let activeDropZone: PaneDropZone? =
       if case .edge(paneID, let zone)? = tabDrag.target { zone } else { nil }
-    return VStack(spacing: 0) {
-      TabBarView(
-        store: tabBarStore,
-        projectID: projectID,
-        worktreeID: worktreeID,
-        paneID: paneID,
-        isFocused: isFocused,
-        agentStateStore: agentStateStore
-      )
-      .onGeometryChange(
-        for: CGRect.self, of: { $0.frame(in: .global) },
-        action: { tabDrag.setStripFrame($0, for: paneID) })
+    // The terminal fills the whole Pane and the strip floats over its top
+    // on a translucent bar: the grid starts below the strip, and the rows
+    // above it scroll under the strip.
+    return ZStack(alignment: .top) {
       GeometryReader { geo in
         TerminalMountDeferral(
           activeContentID: selectedContentID,
@@ -393,9 +385,22 @@ private struct PaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
+      .environment(\.terminalContentInsetTop, TabBarMetrics.barHeight)
       .onGeometryChange(
         for: CGRect.self, of: { $0.frame(in: .global) },
         action: { tabDrag.setContentFrame($0, for: paneID) })
+      TabBarView(
+        store: tabBarStore,
+        projectID: projectID,
+        worktreeID: worktreeID,
+        paneID: paneID,
+        isFocused: isFocused,
+        agentStateStore: agentStateStore
+      )
+      .background(VisualEffectBackground(material: .titlebar, blendingMode: .withinWindow))
+      .onGeometryChange(
+        for: CGRect.self, of: { $0.frame(in: .global) },
+        action: { tabDrag.setStripFrame($0, for: paneID) })
     }
     // Drop-zone highlight over the whole Pane, strip included: the new Pane
     // takes that half of it, its own strip on top. Never hit-tested, and
