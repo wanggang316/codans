@@ -76,6 +76,21 @@ public nonisolated enum StoreBackup {
     return backup
   }
 
+  /// Copies `url` into `backups/` and prunes older backups of the same file
+  /// and reason. The original stays in place. Throws when the copy fails.
+  @discardableResult
+  public static func copyAside(
+    _ url: URL,
+    reason: Reason,
+    at date: Date = Date(),
+    fileManager: FileManager = .default
+  ) throws -> URL {
+    let backup = try prepareURL(for: url, reason: reason, at: date, fileManager: fileManager)
+    try fileManager.copyItem(at: url, to: backup)
+    prune(for: url, reason: reason, fileManager: fileManager)
+    return backup
+  }
+
   /// Deletes all but the newest `keep` backups of `url` for `reason`.
   /// Timestamps sort lexically, so name order is age order. Best effort.
   public static func prune(

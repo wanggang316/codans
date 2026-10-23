@@ -650,16 +650,20 @@ final class AppState {
     // `~/.codans[-dev]/{config,state}` and sweep crash-orphaned temp files. Skipped
     // as an XCTest host so a test run never relocates the developer's data.
     let environment = ProcessInfo.processInfo.environment
-    if environment["XCTestBundlePath"] == nil, environment["XCTestConfigurationFilePath"] == nil {
+    let isTestHost =
+      environment["XCTestBundlePath"] != nil || environment["XCTestConfigurationFilePath"] != nil
+    if !isTestHost {
       PersistenceLaunch.prepare(environment: environment)
     }
 
-    let catalogStore = CatalogStore()
+    // The XCTest host must not load the channel's catalog: loading migrates
+    // and writes it, and other builds of the channel share that file.
+    let catalogStore = isTestHost ? CatalogStore.detached() : CatalogStore()
     let runtime = GhosttyBackedHierarchyRuntime()
     // An unreadable catalog is either backed up (and reads as empty) or
     // leaves the store with saving disabled, so `.empty` here can never
     // overwrite the user's project list.
-    let catalog = (try? catalogStore.load()) ?? .empty
+    let catalog = isTestHost ? .empty : ((try? catalogStore.load()) ?? .empty)
 
     let manager = HierarchyManager(
       catalog: catalog,
@@ -944,6 +948,12 @@ final class AppState {
     )
 
     profiler.mark("finish")
+
+    // Deferred one turn so the alert appears over the main window instead
+    // of blocking its first frame.
+    if let issue = catalogStore.loadIssue {
+      Task { @MainActor in CatalogLoadIssueAlert.present(issue) }
+    }
   }
 
   private func startNotificationObservers(
