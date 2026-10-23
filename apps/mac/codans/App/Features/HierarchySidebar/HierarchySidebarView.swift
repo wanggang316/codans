@@ -1852,6 +1852,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   @Environment(RollupIndexProvider.self) private var rollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var isHovering = false
   @State private var isPlusHovering = false

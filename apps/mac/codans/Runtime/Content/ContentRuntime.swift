@@ -144,7 +144,13 @@ final class ContentRuntime {
   /// busy, with the same run-script exclusion as `tabIsDirty`. The sidebar
   /// uses it for the worktree row's busy glyph.
   func worktreeIsDirty(_ worktreeID: WorktreeID) -> Bool {
-    guard anyTerminalBusy, let worktree = hierarchy.catalog.worktree(worktreeID)?.worktree else { return false }
+    guard let worktree = hierarchy.catalog.worktree(worktreeID)?.worktree else { return false }
+    return worktreeIsDirty(worktree)
+  }
+
+  /// Rows already hold the worktree; avoid another catalog search per icon.
+  func worktreeIsDirty(_ worktree: Worktree) -> Bool {
+    guard anyTerminalBusy else { return false }
     return worktree.allTabs.contains { Self.isDirty($0, isBusy: isTerminalBusy) }
   }
 
