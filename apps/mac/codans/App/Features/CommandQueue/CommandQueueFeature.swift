@@ -98,6 +98,7 @@ struct CommandQueueFeature {
 
   enum Action: Equatable {
     case draftChanged(String)
+    case filesSelected([URL])
     case modeChanged(State.Mode)
     case scheduledAtChanged(Date)
     case repeatEnabledChanged(Bool)
@@ -123,6 +124,17 @@ struct CommandQueueFeature {
       switch action {
       case .draftChanged(let text):
         state.draft = text
+        return .none
+
+      case .filesSelected(let urls):
+        let paths = urls.filter(\.isFileURL)
+          .map { ShellQuoting.quoted($0.path(percentEncoded: false)) }
+          .joined(separator: " ")
+        guard !paths.isEmpty else { return .none }
+        if let last = state.draft.last, !last.isWhitespace {
+          state.draft += " "
+        }
+        state.draft += paths
         return .none
 
       case .modeChanged(let mode):

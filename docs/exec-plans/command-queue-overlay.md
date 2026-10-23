@@ -3,6 +3,8 @@
 ## Agreed behavior
 
 - Command-L opens the command composer. It uses the New Agent grouped form style and closes after a nonempty command is sent or queued. The composer does not list queued commands.
+- Schedule controls use one reserved row above the composer actions. Switching send modes does not change the sheet height.
+- The file picker can select multiple files. Append their absolute paths to the draft using shared POSIX single-quote escaping; selection alone does not send.
 - The pane menu displays the resolved shortcut in gray, aligned right, with space between symbols.
 - Queued commands float at the top of their pane without reserving terminal space. Use the pane menu material.
 - Show up to three commands initially. Show More expands the list; Show Less collapses it. Use pages when the expanded list exceeds the pane height. Do not scroll.
@@ -24,6 +26,7 @@
 - Passed: SwiftUI type checking for the overlay with temporary dependency substitutes. This checks SwiftUI API usage, not application integration.
 - Full `make mac-check` encountered existing formatting/lint conflicts and an unrelated sidebar accessibility violation. Unrelated formatter edits were removed.
 - Regenerating the workspace with `make mac-generate` resolved the stale deployment targets and missing Yams integration. The app now builds; 17 selected app tests pass (queue submission, pagination, pane HUD rendering, and parent-driven composer dismissal).
+- The file selection follow-up passes all 14 CommandQueueFeature tests, including multiple paths, quote escaping, Unicode paths, preserved whitespace, and empty selections. Changed-file lint and `git diff --check` pass.
 - Live interaction, composer appearance, and keyboard delivery have not been manually verified.
 
 The overlay falls back to the queue badge when a pane is too short for one row and its controls. Visibility uses scene storage keyed by pane ID, so view remounts and new commands do not reset it.

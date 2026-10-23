@@ -187,4 +187,34 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
     await store.send(.repeatAmountChanged(0)) { $0.repeatAmount = 1 }
   }
+
+  @Test
+  func selectedFilesAppendQuotedPathsWithoutSending() async {
+    let recorder = Recorder()
+    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review" }
+    await store.send(.filesSelected([
+      URL(fileURLWithPath: "/tmp/my file.txt"),
+      URL(fileURLWithPath: "/tmp/it's.txt"),
+    ])) {
+      $0.draft = "Review '/tmp/my file.txt' '/tmp/it'\\''s.txt'"
+    }
+    #expect(recorder.sent.isEmpty)
+    #expect(recorder.queue.isEmpty)
+  }
+
+  @Test
+  func fileSelectionPreservesTrailingNewline() async {
+    let recorder = Recorder()
+    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review\n" }
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")])) {
+      $0.draft = "Review\n'/tmp/报告.txt'"
+    }
+  }
+
+  @Test
+  func emptyAndNonFileSelectionsDoNotChangeDraft() async {
+    let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Keep this" }
+    await store.send(.filesSelected([]))
+    await store.send(.filesSelected([URL(string: "https://example.com/file")!]))
+  }
 }
