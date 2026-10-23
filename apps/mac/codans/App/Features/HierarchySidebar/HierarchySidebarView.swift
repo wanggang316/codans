@@ -967,12 +967,17 @@ struct HierarchySidebarView: View {
       isSelected: terminal.map { currentSelection.worktreeID == $0.id } ?? false,
       agentStateStore: agentStateStore,
       hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
-      onToggleExpansion: toggleExpansion
-    ) {
-      if let terminal {
-        runScriptPingAccessory(for: terminal, in: project)
+      deletionFailures: store.workspaceGroupDeletionFailures[group.id] ?? [],
+      onToggleExpansion: toggleExpansion,
+      onRetryDeletion: {
+        store.send(.deleteGroupTapped(projectID: project.id, groupID: group.id))
+      },
+      accessory: {
+        if let terminal {
+          runScriptPingAccessory(for: terminal, in: project)
+        }
       }
-    }
+    )
     .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     if let terminal {
@@ -1407,12 +1412,12 @@ struct HierarchySidebarView: View {
     if let slot = worktree.workspaceSlot {
       switch slot.role {
       case .groupTerminal:
-        if project.workspaceGroups.first(where: { $0.id == slot.groupID })?.kind == .named {
+        if let group = project.workspaceGroups.first(where: { $0.id == slot.groupID }), group.kind == .named {
           Divider()
           Button(role: .destructive) {
             store.send(.deleteGroupTapped(projectID: project.id, groupID: slot.groupID))
           } label: {
-            Label("Delete Group…", systemImage: "trash")
+            Label(group.deletion == nil ? "Delete Group…" : "Retry Deletion…", systemImage: "trash")
           }
         }
       case .reference:
@@ -2296,12 +2301,22 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   let isSelected: Bool
   let agentStateStore: AgentStateStore?
   var hotkeyHint: Int?
+  /// Items the last delete could not remove; known only until a restart.
+  let deletionFailures: [GroupDeletionOutcome.Failure]
   let onToggleExpansion: () -> Void
+  let onRetryDeletion: () -> Void
   @ViewBuilder let accessory: () -> Accessory
   @State private var isHovering = false
   @State private var isChevronHovering = false
 
   private var caption: String {
+    if group.deletion != nil {
+      switch deletionFailures.count {
+      case 0: return "Deletion incomplete"
+      case 1: return "Deletion incomplete · 1 item not removed"
+      default: return "Deletion incomplete · \(deletionFailures.count) items not removed"
+      }
+    }
     var parts = [summary.memberCount == 1 ? "1 project" : "\(summary.memberCount) projects"]
     switch summary.branch {
     case .single(let branch): parts.append(branch)
@@ -2320,11 +2335,18 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
           .lineLimit(1)
         Text(caption)
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(group.deletion == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
           .lineLimit(1)
+          .help(deletionHelp)
       }
       Spacer(minLength: 4)
       accessory()
+      if group.deletion != nil {
+        Button("Retry", action: onRetryDeletion)
+          .buttonStyle(.borderless)
+          .controlSize(.small)
+          .help("Check the group again and finish deleting it")
+      }
       Button(action: onToggleExpansion) {
         Image(systemName: "chevron.right")
           .font(.system(size: 11, weight: .medium))
@@ -2348,6 +2370,16 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
     .onHover { isHovering = $0 }
     .accessibilityElement(children: .contain)
     .accessibilityLabel(group.kind == .default ? "\(group.name), default group" : group.name)
+  }
+
+  /// The failed items with their reasons, or what Retry does after a
+  /// restart, when the reasons are no longer known.
+  private var deletionHelp: String {
+    guard group.deletion != nil else { return "" }
+    guard !deletionFailures.isEmpty else {
+      return "Some items of this group were not removed. Retry checks the group again."
+    }
+    return deletionFailures.map { "\($0.name): \($0.reason)" }.joined(separator: "\n")
   }
 
   @ViewBuilder

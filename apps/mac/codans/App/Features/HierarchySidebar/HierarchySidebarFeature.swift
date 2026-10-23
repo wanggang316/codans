@@ -125,11 +125,17 @@ struct HierarchySidebarFeature {
     var archivedWorktreesSheet: ArchivedWorktreesFeature.State?
     var pendingWorktreeRemoval: PendingWorktreeRemoval?
     var pendingProjectRemoval: PendingProjectRemoval?
-    /// "Remove from Workspace" confirmation for one member checkout.
-    var pendingWorkspaceMemberRemoval: PendingWorktreeRemoval?
-    /// "Remove Workspace" confirmation; the dialog offers entry-only or
-    /// delete-checkouts.
+    /// "Remove from Workspace" confirmation for one source project.
+    var pendingWorkspaceSourceRemoval: PendingWorkspaceSourceRemoval?
+    /// "Remove Workspace" confirmation; the dialog offers sidebar-only or
+    /// the delete sheet.
     var pendingWorkspaceRemoval: PendingProjectRemoval?
+    /// Delete sheet for a named group or for every file a Workspace owns.
+    var groupDeletionSheet: WorkspaceGroupDeletionFeature.State?
+    /// Items the last delete of a group could not remove, by group. The
+    /// group row lists them next to its Retry; a restart forgets them and
+    /// only the group's persisted `deletion` state remains.
+    var workspaceGroupDeletionFailures: [WorkspaceGroupID: [GroupDeletionOutcome.Failure]] = [:]
     /// Pending "Archive All Merged Worktrees" batch awaiting its confirm
     /// dialog. Non-nil → dialog visible.
     var pendingArchiveAllMerged: PendingMergedBatch?
@@ -407,16 +413,19 @@ struct HierarchySidebarFeature {
     /// Workspace header `⋯` → Add Project…: add a source project, which
     /// joins `default` as a reference.
     case workspaceAddProjectTapped(projectID: ProjectID)
-    /// Group row context menu → Delete Group… (named groups only).
+    /// Group row context menu → Delete Group… (named groups only), and
+    /// Retry on a group whose deletion is incomplete.
     case deleteGroupTapped(projectID: ProjectID, groupID: WorkspaceGroupID)
+    /// Child-feature actions for the Workspace delete sheet.
+    case groupDeletionSheet(WorkspaceGroupDeletionFeature.Action)
     /// Reference row context menu → Remove from Workspace…: the source
     /// project leaves the Workspace; its checkout stays untouched.
     case removeSourceTapped(worktreeID: WorktreeID, inProject: ProjectID)
     case workspaceMemberRemoveConfirmed
     case workspaceMemberRemoveCancelled
     case workspaceMemberRemoveFinished(message: String?)
-    /// Project ⋯ menu on a workspace: entry-only, or delete every checkout
-    /// and the folder.
+    /// Workspace header ⋯ → Remove Workspace…: sidebar only, or on to the
+    /// delete sheet for every file the Workspace owns.
     case workspaceRemoveTapped(projectID: ProjectID, name: String)
     case workspaceRemoveConfirmed(deleteFiles: Bool)
     case workspaceRemoveCancelled
@@ -541,6 +550,17 @@ struct HierarchySidebarFeature {
         return .send(.addProjectFolderPicked(URL(fileURLWithPath: localPath)))
       case .cloneRepoSheet:
         return .none
+      case .groupDeletionSheet(.delegate(.dismissed)):
+        state.groupDeletionSheet = nil
+        return .none
+
+      case .groupDeletionSheet(.delegate(.completed(let completion))):
+        state.groupDeletionSheet = nil
+        return groupDeletionCompleted(completion, state: &state)
+
+      case .groupDeletionSheet:
+        return .none
+
       case .createWorkspaceSheet(.delegate(.dismissed)):
         state.createWorkspaceSheet = nil
         return .none
@@ -601,6 +621,9 @@ struct HierarchySidebarFeature {
     }
     .ifLet(\.cloneRepoSheet, action: \.cloneRepoSheet) {
       CloneRepoFeature()
+    }
+    .ifLet(\.groupDeletionSheet, action: \.groupDeletionSheet) {
+      WorkspaceGroupDeletionFeature()
     }
     .ifLet(\.createWorkspaceSheet, action: \.createWorkspaceSheet) {
       CreateWorkspaceFeature()
@@ -747,34 +770,37 @@ struct HierarchySidebarFeature {
           existingSourceRoots: existingSourceRoots))
       return .none
 
-    case .deleteGroupTapped:
-      // The delete dialog and its preflight attach here. The view offers
-      // the entry on named groups only: `default` is never deleted.
-      return .none
+    case .deleteGroupTapped(let projectID, let groupID):
+      // `default` is never deleted; the view offers the entry on named
+      // groups only, and this guard covers every other route.
+      guard
+        let group = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .workspaceGroups.first(where: { $0.id == groupID }),
+        group.kind == .named,
+        state.groupDeletionSheet == nil
+      else { return .none }
+      // A retry keeps the branch choice the interrupted delete was made with.
+      state.groupDeletionSheet = WorkspaceGroupDeletionFeature.State(
+        target: .group(projectID: projectID, groupID: groupID, name: group.name),
+        deleteBranches: group.deletion?.deleteBranches ?? false,
+        previousFailures: state.workspaceGroupDeletionFailures[groupID] ?? [])
+      return .send(.groupDeletionSheet(.checkRequested))
 
     case .removeSourceTapped(let worktreeID, let projectID):
-      // Only a reference names a source project; a group member goes with
-      // its group, and a group row with the group.
       guard
-        let row = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
-          .worktrees.first(where: { $0.id == worktreeID }),
-        row.workspaceSlot?.role == .reference
+        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+        let pending = PendingWorkspaceSourceRemoval(
+          worktreeID: worktreeID, in: project, tabIsDirty: hierarchyClient.tabIsDirty)
       else { return .none }
-      state.pendingWorkspaceMemberRemoval = PendingWorktreeRemoval(
-        worktreeID: worktreeID, projectID: projectID, displayName: row.name)
+      state.pendingWorkspaceSourceRemoval = pending
       return .none
 
     case .workspaceMemberRemoveConfirmed:
-      guard let pending = state.pendingWorkspaceMemberRemoval else { return .none }
-      state.pendingWorkspaceMemberRemoval = nil
-      // Only a source project can leave a Workspace on its own; a group
-      // member goes with its group.
-      let row = hierarchyClient.snapshot().projects.first { $0.id == pending.projectID }?
-        .worktrees.first { $0.id == pending.worktreeID }
-      let sourceGitRoot = row?.sourceGitRoot ?? row?.path ?? ""
+      guard let pending = state.pendingWorkspaceSourceRemoval else { return .none }
+      state.pendingWorkspaceSourceRemoval = nil
       return .run { [client = workspaceClient] send in
         do {
-          try await client.removeSource(pending.projectID, sourceGitRoot)
+          try await client.removeSource(pending.projectID, pending.sourceGitRoot)
           await send(.workspaceMemberRemoveFinished(message: nil))
         } catch {
           await send(.workspaceMemberRemoveFinished(message: error.localizedDescription))
@@ -782,7 +808,7 @@ struct HierarchySidebarFeature {
       }
 
     case .workspaceMemberRemoveCancelled:
-      state.pendingWorkspaceMemberRemoval = nil
+      state.pendingWorkspaceSourceRemoval = nil
       return .none
 
     case .workspaceMemberRemoveFinished(let message):
@@ -797,17 +823,18 @@ struct HierarchySidebarFeature {
     case .workspaceRemoveConfirmed(let deleteFiles):
       guard let pending = state.pendingWorkspaceRemoval else { return .none }
       state.pendingWorkspaceRemoval = nil
+      if deleteFiles {
+        // Deleting files goes through the same check and acknowledgment as
+        // Delete Group…, over every named group.
+        guard state.groupDeletionSheet == nil else { return .none }
+        state.groupDeletionSheet = WorkspaceGroupDeletionFeature.State(
+          target: .workspace(projectID: pending.projectID, name: pending.displayName))
+        return .send(.groupDeletionSheet(.checkRequested))
+      }
       return .run { [client = workspaceClient] send in
         do {
-          let outcome = try await client.removeWorkspace(
-            pending.projectID, deleteFiles ? .deleteOwnedFiles(GroupDeletionRequest()) : .sidebarOnly)
-          var notes: [String] = []
-          if !outcome.failures.isEmpty {
-            notes.append(
-              "Could not unregister \(outcome.failures.joined(separator: ", ")); the folder was kept.")
-          }
-          notes.append(contentsOf: outcome.keptBranches)
-          await send(.workspaceRemoveFinished(message: notes.isEmpty ? nil : notes.joined(separator: " ")))
+          _ = try await client.removeWorkspace(pending.projectID, .sidebarOnly)
+          await send(.workspaceRemoveFinished(message: nil))
         } catch {
           await send(.workspaceRemoveFinished(message: error.localizedDescription))
         }
@@ -1358,7 +1385,7 @@ struct HierarchySidebarFeature {
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
-    case .cloneRepoSheet, .createWorkspaceSheet:
+    case .cloneRepoSheet, .createWorkspaceSheet, .groupDeletionSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
@@ -1458,6 +1485,33 @@ struct HierarchySidebarFeature {
       }
     }
     .cancellable(id: CancelID.pending(id), cancelInFlight: true)
+  }
+
+  /// After the delete sheet closed: a group that kept items lists them on
+  /// its row (its persisted `deletion` state shows the Retry); kept
+  /// branches and Workspace-level failures go to the lifecycle toast.
+  private func groupDeletionCompleted(
+    _ completion: WorkspaceGroupDeletionFeature.Completion, state: inout State
+  ) -> Effect<Action> {
+    var notes: [String] = []
+    switch completion {
+    case .group(_, let groupID, let outcome):
+      state.workspaceGroupDeletionFailures[groupID] = outcome.deletedGroup ? nil : outcome.failures
+      if !outcome.keptBranches.isEmpty {
+        notes.append("Kept branches: \(outcome.keptBranches.joined(separator: "; ")).")
+      }
+    case .workspace(_, let outcome):
+      if !outcome.failures.isEmpty {
+        notes.append(
+          "Could not delete \(outcome.failures.joined(separator: "; ")). The workspace stays in the sidebar; retry from each group."
+        )
+      }
+      if !outcome.keptBranches.isEmpty {
+        notes.append("Kept branches: \(outcome.keptBranches.joined(separator: "; ")).")
+      }
+    }
+    if !notes.isEmpty { state.lifecycleErrorToast = notes.joined(separator: " ") }
+    return .none
   }
 
   /// Local git Projects a workspace can check out from.
