@@ -42,7 +42,7 @@ app 层再加一个 `TabEnvironment`（`codans/Runtime/`），把「一个 pane 
 
 ### 通道隔离了什么
 
-`BuildChannel.current.slug` 派生出全部按通道分开的资源：
+`BuildChannel.current.slug` 派生出全部按通道分开的资源（Debug 构建的数据路径再按实例细分，见下一节）：
 
 ```
                      Debug                               Release
@@ -58,6 +58,26 @@ CLI 名               codans-dev                          codans
 ```
 
 config 根放用户会手改的文件，state 根放只有 app 写的文件，runtime 根放 zmx 的 daemon socket、快照与日志，cache 根放可重建的数据。socket 不能放在 cache 根下：清理工具会整目录删掉 `~/Library/Caches/<slug>`，daemon 还活着却再也连不上，下一次 `zmx attach` 会在原地新建会话，pane 里的 shell 和 agent 就"消失"了（见 [lessons-learned](../lessons-learned/2026-10-20-cache-cleaner-wiped-zmx-sockets.md)）。0.7.11 及更早版本把 socket 放在 cache 根下，启动时 `SessionReaper.migrateLegacySocketDirectory` 把还活着的 daemon 的 socket 挪进 runtime 根（已绑定的 AF_UNIX socket 改名后仍可连接）。0.7.8 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。`~/.codans/` 下的 `repos/`、`workspaces/`、`sources/` 是用户的 git 工作区，不按通道区分，两个构建共用。
+
+### 实例：每个 worktree 的 dev 构建各用一套数据
+
+数据路径（config / state / runtime / cache 根与 IPC socket）不直接用通道 slug，而用 `AppInstance.slug`：通道 slug 后面再接实例名。
+
+```
+构建                                  实例名        数据根                       IPC socket
+Release                               无            ~/.codans/                   /tmp/codans-<uid>.sock
+Debug，仓库主 checkout                无            ~/.codans-dev/               /tmp/codans-dev-<uid>.sock
+Debug，linked worktree（如 card-pane） card-pane     ~/.codans-dev-card-pane/     /tmp/codans-dev-card-pane-<uid>.sock
+Debug，测试运行（XCTest）             xctest        ~/.codans-dev-xctest/        /tmp/codans-dev-xctest-<uid>.sock
+```
+
+- 构建阶段 `scripts/stamp-instance.sh` 在 Debug 构建里判断源码所在 checkout：`git rev-parse --absolute-git-dir` 与 `--git-common-dir` 不同即 linked worktree，把 worktree 目录名（小写字母、数字、中间的连字符，至多 24 字符）写进包内 Info.plist 的 `CodansInstance`；主 checkout 与 Release 不写。每次构建都重跑，checkout 变了实例跟着变。
+- app 与包内 CLI 读同一份 Info.plist：CLI 从自身可执行文件（经安装软链解析后）向上找到所在 `.app`。所以 pane 外直接运行某个包的 `codans-dev`，拨的就是那个包的实例。
+- 测试运行恒为 `xctest` 实例：app target 的测试跑在完整的 app 里，会加载并保存 catalog，不能碰开发者的数据。
+- 一个分支改了 catalog 格式，只会改写它自己实例的数据，别的分支的构建读不到它。两个分支的 dev app 也可以同时运行，各自绑定自己的 socket。
+- CLI 名仍按通道（`codans-dev`），不带实例名。
+- `SocketPaths.resolve` 把与本构建不同的任一通道默认 socket 视为继承来的宿主路径：worktree 实例的 app 从共享 dev app 的 pane 里启动时，不会去绑定宿主的 socket。
+- 上面四个覆盖变量仍然优先于实例派生的路径。
 
 两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 
