@@ -296,7 +296,7 @@ extension WorkspaceClient {
       },
       checkWorkspaceDeletion: { projectID in
         await checkWorkspaceDeletion(projectID: projectID, context: context)
-      }
+      },
       removeWorkspace: { projectID, request in
         try await removeWorkspace(projectID: projectID, request: request, context: context)
       }
