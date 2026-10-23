@@ -44,3 +44,16 @@ public nonisolated struct NotificationID: Codable, Hashable, Sendable, CustomStr
   public init(raw: UUID = UUID()) { self.raw = raw }
   public var description: String { raw.uuidString }
 }
+
+/// Identifier of a Workspace group. Not a `HierarchyID` node of its own:
+/// group rows are `Worktree`s that carry it in their `WorkspaceSlot`.
+public nonisolated struct WorkspaceGroupID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
+}
+
+/// Identifier of one member checkout inside a Workspace group manifest.
+public nonisolated struct WorkspaceMemberID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
+}

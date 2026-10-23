@@ -1,8 +1,13 @@
 import Foundation
 
 public nonisolated struct Catalog: Equatable, Sendable {
-  public static let currentVersion = 3
+  public static let currentVersion = 4
+  /// Oldest version this build still reads; it is migrated on load.
+  public static let oldestReadableVersion = 3
 
+  /// Version of the decoded file. Lower than `currentVersion` until
+  /// `CatalogMigrationV3ToV4` has run; always `currentVersion` when built in
+  /// memory.
   public var version: Int
   public var projects: [Project]
   public var tags: [Tag]
@@ -48,7 +53,10 @@ public nonisolated struct Catalog: Equatable, Sendable {
 
 extension Catalog: Codable {
   public enum DecodingIssue: Error, Equatable {
+    /// Retired version this build no longer reads.
     case unsupportedVersion(Int)
+    /// Written by a newer build. The file must stay as it is.
+    case newerVersion(Int)
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -58,10 +66,15 @@ extension Catalog: Codable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let version = try container.decode(Int.self, forKey: .version)
-    guard version == Catalog.currentVersion else {
+    guard version <= Catalog.currentVersion else {
+      throw DecodingIssue.newerVersion(version)
+    }
+    guard version >= Catalog.oldestReadableVersion else {
       throw DecodingIssue.unsupportedVersion(version)
     }
-    self.version = Catalog.currentVersion
+    // Version 3 has the same shape minus the Workspace group fields, which
+    // decode to their defaults; the store then runs the migration.
+    self.version = version
     self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
     self.sidebarFilter = try container.decodeIfPresent(SidebarFilter.self, forKey: .sidebarFilter) ?? .all
     self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
