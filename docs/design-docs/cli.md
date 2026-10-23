@@ -116,7 +116,7 @@
 | `codans status` | `system.status` | server 标识、uptime、connected-clients 数 |
 | `codans launch [--wait N]` | *(本地)* | 若未运行则 `open -g Codans.app` 并最多等 N 秒（默认 10）等 socket 出现；唯一会拉起应用的命令。CLI 自己环境里的 `CODANS_SOCKET_PATH` / `CODANS_CONFIG_DIR` / `CODANS_STATE_DIR` 经 `open --env` 转交给应用，等待的 socket 与应用绑定的是同一个 |
 | `codans doctor` | *(本地)* | 检查 socket 路径、可达性、是否来自环境变量、CLI 版本；不做应用往返 |
-| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；`--json` 的 project 带 `kind`（`ProjectKind` raw value），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null），tab / pane 带 `handle`（`t<n>` / `p<n>`） |
+| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；`--json` 的 project 带 `kind`（`ProjectKind` raw value），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null）与 `workspaceGroup`（workspace 行的 `{id, name, role}`，`role` 为 `groupTerminal` / `reference` / `member`，其余省略），tab / pane 带 `handle`（`t<n>` / `p<n>`）。workspace 的行按组排列（`default` 在前），文本输出把成员行缩进在组行之下 |
 | `codans broadcast` | `terminal.broadcastInput` | 见 [send / broadcast](#codans-pane-send--codans-broadcast) |
 
 > `codans --version` 印 `Codans <version>`（ArgumentParser 内建）。
@@ -142,28 +142,36 @@
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans worktree list` | `hierarchy.listWorktrees` | `HierarchyHandlers.listWorktrees` | `[--project P]` |
-| `codans worktree show [ID]` | `hierarchy.describeWorktree` | `HierarchyHandlers.describeWorktree` | `[ID]`；回带 `{id, projectID, projectName, name, path, branch, isArchived, isPinned, isSelected, selectedTabID, tabCount}` |
+| `codans worktree show [ID]` | `hierarchy.describeWorktree` | `HierarchyHandlers.describeWorktree` | `[ID]`；回带 `{id, projectID, projectName, name, path, branch, isArchived, isPinned, isSelected, selectedTabID, tabCount, workspaceGroup?}`（`workspaceGroup` 同 `tree --json`） |
 | `codans worktree rename ID NAME` | `hierarchy.renameWorktree` | `HierarchyManager.renameWorktree` | `ID`，`NAME`（仅侧栏标签，路径/分支不变；空白拒绝），`[--project P]` |
 | `codans worktree prune` | `hierarchy.pruneWorktrees` | `GitWorktreeClient.pruneWorktrees` → `HierarchyClient.reconcileDiscoveredWorktrees` | `[--project P]`；回带 `{projectID, pruned}`。文件夹项目 → `invalidParams`，远端项目 → `unsupported` |
 | `codans worktree new BRANCH` | `hierarchy.createWorktree` | `HierarchyHandlers.createWorktree` → `GitWorktreeClient.createWorktreeStream` + `HierarchyManager.createWorktree` | `BRANCH`，`[--project P] [--path PATH] [--name NAME] [--base REF] [--reuse-existing] [--profile NAME\|ID] [--agent TOKEN]` |
 | `codans worktree switch ID` | `hierarchy.activateWorktree` | `HierarchyManager.selectWorktree` | `ID` |
-| `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree`；`--delete` → `HierarchyClient.removeWorktreeWithGit` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P] [--delete]`。不带 `--delete` 只删 catalog 行（真实 git worktree 会被下一次 reconcile 收回）；`--delete` 走侧栏 Remove Worktree 同一条路径（拆 surface → relocate-then-prune → 按 Settings 删分支），响应 `{id, deleted, warning?}` |
+| `codans worktree rm [ID]` | `hierarchy.removeWorktree` | `HierarchyManager.removeWorktree`；`--delete` → `HierarchyClient.removeWorktreeWithGit` | `ID`，或 `--by-path PATH [--all]`（按规范化路径删一/多行），`[--project P] [--delete]`。不带 `--delete` 只删 catalog 行（真实 git worktree 会被下一次 reconcile 收回）；`--delete` 走侧栏 Remove Worktree 同一条路径（拆 surface → relocate-then-prune → 按 Settings 删分支），响应 `{id, deleted, warning?}`。workspace 的任何行（组行、引用行、成员行）及其在来源项目下的镜像行 → `conflict`，改用 `workspace drop` / `workspace group delete` |
 
 `--path` 缺省由服务端解析：展开 project 配置的 worktrees 目录并附加分支名；响应回带解析后的绝对路径。目标路径**不存在**且项目是本地 git 项目时，服务端先经 New Worktree sheet 同一条 `wt sw` 流水线把 worktree 造出来（分支不存在则从 `--base` / 项目 pinned base ref / 默认远程分支 / `HEAD` 新建，存在则直接 checkout；项目的 copy / fetch / setup 设置生效；`wt sw --path` 让分支名与目录名解耦），再入 catalog；路径已存在则原样登记（收编外部创建的 worktree）；远端项目与无 git root 的文件夹项目保持只写 catalog。响应回带 `created`。`--reuse-existing`：若同规范化路径的 worktree 已存在，返回其 id 而非以 conflict 失败（名字冲突仍失败）。git 失败按"调用方该怎么办"映射：非法分支名 / 未知 ref → `invalidParams`，分支已存在 / 未提交改动 / 锁 → `conflict`，其它 → `internal` 附 stderr。
 
 #### `codans workspace …`
 
-`WorkspaceCommand.subcommands`：`create`、`add`、`drop`、`remove`、`show`。成员检出、manifest 写入与删除由服务端 `WorkspaceClient` 编排（见 D21）。
+`WorkspaceCommand.subcommands`：`create`、`add`、`drop`、`remove`、`show`、`group`（`create`、`delete`）。Workspace 只登记来源项目（`default` 组引用其主检出）；分支只属于命名组。所有 handler 只调用 `WorkspaceClient`（见 D21）。
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans workspace create TITLE` | `workspace.create` | `WorkspaceHandlers.create` → `WorkspaceClient.create` | `TITLE`，`--project P` / `--repo PATH`（非裸仓库）/ `--remote URL`（各可重复），合计 ≥ 2；`[--branch B] [--base REF] [--existing \| --track] [--reset-local] [--clone-into DIR] [--path ROOT] [--description D]` |
-| `codans workspace add WS` | `workspace.add` | `WorkspaceHandlers.add` → `WorkspaceClient.add` | `WS`（别名/名字/`current`），`--project P` / `--repo PATH` / `--remote URL` 三选一；`[--name N] [--branch B] [--base REF] [--existing \| --track \| --ref REMOTE/BRANCH] [--reset-local] [--clone-into DIR] [--role R]` |
-| `codans workspace drop WS MEMBER` | `workspace.drop` | `WorkspaceHandlers.drop` → `WorkspaceClient.drop` | `MEMBER` 为成员目录名；`[--keep-branch]`。移走 checkout（relocate-then-prune）、删分支（git 拒绝时回带 note）、改 manifest、删本行与源 Project 的镜像行 |
-| `codans workspace remove WS` | `workspace.remove` | `WorkspaceHandlers.remove` → `WorkspaceClient.remove` | 缺省只删条目；`--delete-files` 逐成员注销并删根目录（任一失败则根目录保留并回带 `failures`）；`--delete-branches` 需配合 `--delete-files` |
-| `codans workspace show [WS]` | `workspace.describe` | `WorkspaceHandlers.describe` | `WS` 缺省 `current` |
+| `codans workspace create TITLE` | `workspace.create` | `WorkspaceHandlers.create` → `WorkspaceClient.createWorkspace` | `TITLE`，`--project P` / `--repo PATH`（非裸仓库）/ `--remote URL`（各可重复），合计 ≥ 1；`[--clone-into DIR] [--path ROOT] [--description D]`。不建分支、不切换分支 |
+| `codans workspace add WS [PATH]` | `workspace.add` | `WorkspaceHandlers.add` → `WorkspaceClient.addSource` | `WS`（别名/名字/`current`），`PATH` 或 `--project P` / `--repo PATH` / `--remote URL` 四选一；`[--name N] [--clone-into DIR]`。只改 `default` 组与链接，命名组不变；响应为新的来源项目 |
+| `codans workspace drop WS PROJECT` | `workspace.drop` | `WorkspaceHandlers.drop` → `WorkspaceClient.removeSource` | `PROJECT` 为来源名或路径。只移除来源与其 `default` 链接、引用行；磁盘上的来源目录与所有检出保留。命名组成员 → `conflict`（"delete its group"） |
+| `codans workspace remove WS` | `workspace.remove` | `WorkspaceHandlers.remove` → `WorkspaceClient.removeWorkspace` | 缺省只删条目（`sidebarOnly`）；`--delete-files` 删除 Workspace 拥有的文件（`deleteOwnedFiles`：各命名组、`default` 链接与目录、可拥有时的根目录），来源主检出始终保留；`--discard` 确认风险；`--delete-branches` 删除组创建的分支。后两者需配合 `--delete-files` |
+| `codans workspace show [WS]` | `workspace.describe` | `WorkspaceHandlers.describe` | `WS` 缺省 `current`。返回 `projects[{name, sourceGitRoot, sourceKind, remoteURL, branch, worktreeID}]` 与 `groups[{id, name, isDefault, path, worktreeID, deletion, members[{name, path, branch, sourceGitRoot, role, worktreeID}]}]`；`default` 在前，其成员 `role` 为 `reference`，命名组成员为 `member` |
+| `codans workspace group create WS NAME` | `workspace.createGroup` | `WorkspaceHandlers.createGroup` → `WorkspaceClient.createGroupStream`（等待结果） | `--branch B`（必填，所有项目同一分支）；`[--base PROJECT=REF]…`（按来源名覆盖 base）`[--no-fetch] [--copy-ignored] [--copy-untracked] [--agent PROFILE]`。未给的选项取各来源项目的设置（`groupCreationDefaults`）。响应 `{projectID, group, setupFailures}` |
+| `codans workspace group delete WS GROUP` | `workspace.deleteGroup`；`--dry-run` → `workspace.checkGroupDeletion` | `WorkspaceHandlers.deleteGroup` / `checkGroupDeletion` → `WorkspaceClient` | `GROUP` 为组名或 id；`[--delete-branches] [--discard] [--dry-run]`。`default` → `conflict` |
 
-成员来源：`--project` 先经 `hierarchy.resolveAlias` 解析为 id，服务端读其 `gitRoot`；`--repo` 发绝对路径，服务端 `git rev-parse --git-common-dir` + `--is-bare-repository` 求仓库根（仓库子目录、linked worktree 归一到根；裸仓库以 `invalidParams` 拒绝）；`--remote` 发 URL，服务端定 clone 目标（`--clone-into`，缺省 `~/.codans/sources/<repoName>`；该处已是同一远程的 clone 则复用，否则取空闲的 `-N` 兄弟），clone 后与本地来源一致。检出模式：缺省新建分支；`--existing` 用已有本地分支；`--track` 用远程跟踪分支 `origin/<branch>`（`add` 上可用 `--ref <remote>/<branch>` 指定任意远程 ref，分支名缺省取 ref 的分支部分）；`--reset-local` 只与 `--track` / `--ref` 搭配，把已存在的同名本地分支重置到远程 tip，缺省保留本地分支原样。缺省值：成员目录名 = 仓库目录名，分支 = 标题 slug（`add` 用 workspace 名 slug），base = 仓库默认远端分支，根目录 = `~/.codans/workspaces/<slug>`（被占用则 `-2`、`-3`）。`--json` 输出经 `WorkspaceSummaryRenderable`，nil 字段编码为 `null`；成员带 `sourceKind`（`local` / `remote`）与 `remoteURL`。见 [Workspace](workspace.md)。
+来源解析：`--project` 先经 `hierarchy.resolveAlias` 解析为 id，服务端读其 `gitRoot`；`--repo` 发绝对路径，服务端 `git rev-parse --git-common-dir` + `--is-bare-repository` 求仓库根（仓库子目录、linked worktree 归一到根；裸仓库以 `invalidParams` 拒绝）；`--remote` 发 URL，服务端定 clone 目标（`--clone-into`，缺省 `~/.codans/sources/<repoName>`；该处已是同一远程的 clone 则复用，否则取空闲的 `-N` 兄弟）。根目录缺省 `~/.codans/workspaces/<slug>`（被占用则 `-2`、`-3`）。
+
+旧形状直接报错，不静默转发：wire 上 `workspace.create` 的 `members` / `branch` / `baseRef` / `useExistingBranch` / `trackRemote`、来源上的 `branch` / `baseRef` / `useExistingBranch` / `remoteRef` / `resetLocalBranch` / `role`、`workspace.add` 的 `member`、`workspace.drop` 的 `member` / `keepBranch` 均以 `invalidParams` 拒绝，消息指向 `workspace group create`（`RetiredWireKeys`）。CLI 上 `create` / `add` 的 `--branch` / `--base` / `--existing` / `--track` / `--ref` / `--reset-local` / `--role` 与 `drop --keep-branch` 隐藏保留，只为给出同样的报错。
+
+组创建：服务端先读取默认值，再按请求覆盖，交给 `createGroupStream`；预检中与磁盘冲突的问题（本地分支已存在、目录已存在、组名重复）→ `conflict`，其余（分支名非法等）→ `invalidParams`，消息逐项点名项目。检出失败时已建的检出全部回滚。setup 失败不影响组，作为 `setupFailures` 返回。`--agent` 在 CLI 端先经 `agent.listProfiles` 校验（名字或 id，须启用），组创建完成后再对每个成员调用 `agent.launch`（`focus: false`），因此组建成前不会启动任何 agent；启动失败作为 `agentFailures` 报告。
+
+删除与风险：`workspace.checkGroupDeletion` 返回 `GroupDeletionCheck`（每个成员的未提交文件数、未推送提交数、可删分支、探测失败，以及忙碌终端、组目录内的其他文件）。`workspace.deleteGroup` 与 `workspace.remove --delete-files` 在服务端重新检查：探测失败（`checkFailed`）或风险未确认（`risksNotAcknowledged`）都返回 `conflict`，原因中逐行列出（`app: 2 uncommitted files; 1 running terminal; …`），CLI 以 exit 3 退出，未带 `--discard` 时附提示。部分失败时组保留并带 `deletion` 状态，重复同一命令即重试。`--json` 输出经 `WorkspaceSummaryRenderable` / `WorkspaceGroupCreateRenderable` / `GroupDeletionCheckRenderable` / `GroupDeletionRenderable`，nil 字段编码为 `null`。见 [Workspace](workspace.md)。
 
 #### `codans tab …`
 
@@ -448,8 +456,8 @@ CLIFilesystem (probe only; real impl + test fakes)
 - **D20 — `handoff` 的源默认是调用方 pane，且 briefing 必须显式给出或显式放弃。** 让在线 agent 交接自己是主路径（它持有任何 transcript 都无法复原的工作上下文）；`--brief`/`--no-brief` 二选一避免 codans 替第三方调用方发起模型调用。接收方任何 agent 均可启动：有已验证 `promptStyle` 的走命令行参数，其余在 agent 出现后由 app 键入 kickoff；`--no-launch` 仍可只归档不启动。见 [agent-handoff.md](agent-handoff.md)。
 - **D21 — workspace 磁盘操作由 app 层 `WorkspaceClient` 编排。** GUI 与 IPC 共用成员检出、manifest 写入及失败清理路径，handler 只负责 wire 转换与错误映射。`worktree new` / `rm --delete` 和 handoff 也有磁盘副作用，命令组不能作为只读边界。见 [workspace.md](workspace.md)。
 - **D22 — 成员来源在客户端区分「已注册 Project」「本地路径」与「远程 URL」，仓库根一律由服务端求。** `--project` 走 D4 的别名解析拿到 id；`--repo` 发绝对路径，`--remote` 发仓库 URL。这样 CLI 不需要本地 git，也不会把 CLI 机器上的路径解析结果与 app 的 catalog 对不上。
-- **D23 — workspace 成员数量校验放 `CodansKit`（`CLIWorkspaceMemberSource.resolve`），在拨号前抛 `userError`。** 与 `CLIBroadcastScopeSelection` 同型：纯参数逻辑放 kit 才能被 `CodansKitTests` 覆盖，且区分于服务端的 `notFound` / `conflict`。
-- **D24 — 检出模式三选一（`--existing` / `--track` / `--ref`）与 `--reset-local` 的搭配约束同样放 kit（`CLIWorkspaceCheckoutFlags.resolve`），服务端 `WorkspaceHandlers.checkout` 再守一次。** wire 上 `useExistingBranch` / `remoteRef` / `trackRemote` 是三个独立字段而非一个枚举：第三方客户端漏传其一时缺省仍是「新建分支」，永不落到会改写本地分支的 `-B` 路径；`resetLocalBranch` 缺省 nil，只有显式 `true` 才生效。
+- **D23 — workspace 来源数量校验放 `CodansKit`（`CLIWorkspaceMemberSource.resolve`），在拨号前抛 `userError`。** 与 `CLIBroadcastScopeSelection` 同型：纯参数逻辑放 kit 才能被 `CodansKitTests` 覆盖，且区分于服务端的 `notFound` / `conflict`。`--agent` 的 profile 匹配同样放 kit（`CLIAgentProfileMatch.resolve`）。
+- **D24 — Workspace 只登记来源，分支只属于命名组；旧的分支字段报错而不是被忽略。** 解码时 `RetiredWireKeys` 拒绝旧键并以 `invalidParams` 指向 `workspace group create`：静默丢弃会让调用方以为分支已建好。`workspace group create --agent` 由 CLI 在 `workspace.createGroup` 返回后逐成员调用 `agent.launch`，使 agent 只在所有检出存在之后启动，且 `WorkspaceHandlers` 只依赖 `WorkspaceClient`。
 - **D18 — `broadcast` 在顶层命名空间，而 `send` 在 `codans pane` 下。** `broadcast` 是显式的扇出动作、置于顶层减少键入；`send`/`send-key`/`read`/`capture` 作为 pane 级操作归在 `pane` 子命令树下（与 `codans pane send` 的 discussion 示例一致）。
 
 ## Cross-Cutting
