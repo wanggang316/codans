@@ -1,5 +1,23 @@
 import Foundation
 
+public nonisolated enum SidebarFilter: String, Codable, CaseIterable, Sendable {
+  case all, remote, workspace, pin, pullRequests
+
+  public init(from decoder: Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    switch value {
+    case "local": self = .all
+    case "favorites": self = .pin
+    default: self = Self(rawValue: value) ?? .all
+    }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+}
+
 extension Project {
   /// The worktree the Project's own sidebar row stands for, when the Project
   /// has no repository of its own — a plain folder, a remote folder, or a
@@ -44,10 +62,27 @@ public nonisolated struct SidebarRowAddress: Equatable, Sendable {
 }
 
 extension Catalog {
-  /// Projects in the order the sidebar lists them: the active tag filter
-  /// applied, then the chosen sort order.
+  /// Projects in sidebar order after category and tag filtering. Pin results
+  /// contain only pinned, unarchived worktrees; the catalog stays unchanged.
   public var sidebarProjects: [Project] {
-    sorted(tagFilteredProjects)
+    sidebarProjects(pullRequestWorktreeIDs: [])
+  }
+
+  public func sidebarProjects(pullRequestWorktreeIDs: Set<WorktreeID>) -> [Project] {
+    sorted(
+      tagFilteredProjects.compactMap { project in
+        switch sidebarFilter {
+        case .all: return project
+        case .remote: return project.isRemote ? project : nil
+        case .workspace: return project.isWorkspace ? project : nil
+        case .pin, .pullRequests:
+          var filtered = project
+          filtered.worktrees = project.worktrees.filter {
+            !$0.archived && (sidebarFilter == .pin ? $0.isPinned : pullRequestWorktreeIDs.contains($0.id))
+          }
+          return filtered.worktrees.isEmpty ? nil : filtered
+        }
+      })
   }
 
   /// Every row a user can select, in the order the sidebar shows them: a
@@ -56,7 +91,11 @@ extension Catalog {
   /// of a Project that failed to load are not on screen, so they are left
   /// out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
   public var sidebarSelectionOrder: [SidebarRowAddress] {
-    sidebarProjects.flatMap { project -> [SidebarRowAddress] in
+    sidebarSelectionOrder(pullRequestWorktreeIDs: [])
+  }
+
+  public func sidebarSelectionOrder(pullRequestWorktreeIDs: Set<WorktreeID>) -> [SidebarRowAddress] {
+    sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs).flatMap { project -> [SidebarRowAddress] in
       if case .failed = project.loadState { return [] }
       var rows: [Worktree] = []
       if let row = project.rowWorktree { rows.append(row) }

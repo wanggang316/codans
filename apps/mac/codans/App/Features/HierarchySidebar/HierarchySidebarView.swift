@@ -107,7 +107,6 @@ struct HierarchySidebarView: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
   @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
-  @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
 
   /// Tracks whether the `.command` modifier is currently pressed. When held the sidebar
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
@@ -202,24 +201,21 @@ struct HierarchySidebarView: View {
       + rest.map(SidebarRow.worktree)
   }
 
+  private var pullRequestWorktreeIDs: Set<WorktreeID> {
+    guard let gitHubStore else { return [] }
+    return Set(gitHubStore.snapshots.keys)
+  }
+
   var body: some View {
     let catalog = hierarchyManager.catalog
     // Use the full catalog so a tag filter with no matches does not hide
     // the panel. Availability never changes the persisted open preference.
     let agentStatePanelAvailable = !catalog.projects.isEmpty && agentStateStore != nil
     let agentStatePanelVisible = agentStatePanelAvailable && agentStatePanelOpen
-    // Force `@Observable` subscription to `agentStateStore.entries` even
-    // while the panel is closed and `registry` is never unwrapped in
-    // the conditional below. Without this top-level read the body
-    // never re-evaluates on entry mutations, and the `.onChange(of:
-    // anyAgentNeedsAttention)` modifier below never fires the auto-open
-    // transition (the rising edge into "any agent is loading").
-    let _ = anyAgentNeedsAttention
-
     // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
-    let visibleProjects = catalog.sidebarProjects
+    let visibleProjects = catalog.sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
 
     let isReordering = store.isReorderingProjects
@@ -242,6 +238,10 @@ struct HierarchySidebarView: View {
           store.send(.gitEnvironmentRecheckTapped)
         }
       }
+      SidebarFilterBar(selection: catalog.sidebarFilter) {
+        store.send(.sidebarFilterSelected($0))
+      }
+      .disabled(isReordering)
       if isReordering {
         reorderBanner
       }
@@ -554,7 +554,17 @@ struct HierarchySidebarView: View {
   private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double)
     -> some View
   {
-    if projects.isEmpty {
+    if projects.isEmpty && !hierarchyManager.catalog.projects.isEmpty {
+      VStack(spacing: 8) {
+        Text("No matching projects").font(.headline)
+        Text("Choose another filter to see your projects.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+      .multilineTextAlignment(.center)
+      .padding()
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if projects.isEmpty {
       emptyState
     } else {
       // `⌃1`…`⌃9` plus `⌃0` (10th slot) go to the first ten selectable rows on
@@ -562,7 +572,8 @@ struct HierarchySidebarView: View {
       // stand for a folder, and the rows of expanded Projects); matching hints
       // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
       let hotkeyIndex: [WorktreeID: Int] = Dictionary(
-        hierarchyManager.catalog.sidebarSelectionOrder.prefix(10).enumerated()
+        hierarchyManager.catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
+          .prefix(10).enumerated()
           .map { ($0.element.worktreeID, $0.offset) },
         uniquingKeysWith: { first, _ in first })
       // List + .listStyle(.sidebar) with NO `.scrollIndicators(.*)` modifier.
@@ -792,14 +803,19 @@ struct HierarchySidebarView: View {
           let mainRows = children.filter { $0.path == project.rootPath }
           let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
           let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
-          let pendingRows = store.pendingWorktrees.filter { $0.projectID == project.id }
+          let pendingRows = store.pendingWorktrees.filter {
+            $0.projectID == project.id && hierarchyManager.catalog.sidebarFilter != .pin
+              && hierarchyManager.catalog.sidebarFilter != .pullRequests
+          }
           ForEach(mainRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
           }
           ForEach(pinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
           }
           .onMove { source, destination in
+            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -812,8 +828,10 @@ struct HierarchySidebarView: View {
           }
           ForEach(unpinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
           }
           .onMove { source, destination in
+            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -857,7 +875,7 @@ struct HierarchySidebarView: View {
         gitHubStore: gitHubStore,
         rowWorktree: root,
         isRowSelected: currentSelection.worktreeID == root.id,
-        isRowBusy: hierarchyManager.worktreeIsDirty(root.id) || anyAgentWorking(in: root),
+        agentStateStore: agentStateStore,
         hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
         onToggleExpansion: toggleExpansion
       ) {
@@ -995,7 +1013,7 @@ struct HierarchySidebarView: View {
         isSelected: isSelected
       )
       newBadgePill(for: worktree)
-      diffStatsChip(for: worktree, in: project, snapshot: snapshot)
+      SidebarWorktreeDiffStats(worktreeID: worktree.id)
       gitHubBadge(for: worktree, in: project)
       runScriptPingAccessory(for: worktree, in: project)
       // Trailing chord hint, after both the row content and the optional PR pill so it
@@ -1094,43 +1112,13 @@ struct HierarchySidebarView: View {
     // click, leave the table off-responder, and the row would stay grey
     // even though state moved.
     let lifecycle = store.lifecycleProgress[worktree.id]
-    // Aggregated "any pane in this worktree is busy" signal — the union of two
-    // sources: (1) the terminal signal via `HierarchyManager.worktreeIsDirty(_:)`
-    // (OSC 9;4 progress ∪ a running foreground command), and (2) any bound agent
-    // rendered as `.working`. Agents are excluded from the terminal signal (they
-    // stay foreground for their whole session), so this OR is what lights the row
-    // while an agent works without emitting OSC 9;4. Both reads are `@Observable`,
-    // so the spinner tracks either source automatically. Rendered at the leading
-    // icon slot (replacing WorktreeRowIcon) — one consistent "busy" affordance.
-    // Dedicated run-script panes are excluded from `worktreeIsDirty`; their
-    // activity renders as the trailing ping dot (`runScriptPingAccessory`)
-    // so a running script never hijacks the row icon.
-    let isExecuting =
-      hierarchyManager.worktreeIsDirty(worktree.id) || anyAgentWorking(in: worktree)
     let content = HStack(spacing: 6) {
-      Group {
-        if lifecycle != nil {
-          // Archive / delete is mid-flight — swap the row icon for a
-          // spinner so the click feels acknowledged; the phase line below
-          // says where the teardown is. The row vanishes once the
-          // lifecycle completes (archive → archived list, delete → gone).
-          lifecycleSpinner
-        } else if isExecuting {
-          ProgressView()
-            .controlSize(.small)
-            .frame(width: 14, height: 14)
-            .accessibilityLabel("Worktree has a running command")
-        } else {
-          WorktreeRowIcon(
-            snapshot: snapshot, rollup: rollup, isSelected: isSelected,
-            glyph: leadingGlyph,
-            hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id)
-              == true
-              && settingsStore.settings.notifications.worktreeBellEnabled,
-            isDefaultBranch: isMainCheckout && !isSyntheticWorktree
-          )
-        }
-      }
+      SidebarWorktreeActivityIcon(
+        worktree: worktree, agentStateStore: agentStateStore,
+        snapshot: snapshot, rollup: rollup, isSelected: isSelected,
+        glyph: leadingGlyph, isDefaultBranch: isMainCheckout && !isSyntheticWorktree,
+        hasLifecycle: lifecycle != nil
+      )
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
           Text(rowTitle)
@@ -1182,18 +1170,6 @@ struct HierarchySidebarView: View {
     content.background(alignment: .topLeading) {
       hotkeyChord(hotkeyNumber, worktreeID: worktree.id, projectID: project.id)
     }
-  }
-
-  /// Leading icon for a row mid-archive / mid-delete: an indeterminate
-  /// spinner through BOTH phases — motion in this slot is what tells the
-  /// user the lifecycle is alive (a static glyph here reads as
-  /// "stalled"). The script glyph annotates the second line instead —
-  /// see `LifecyclePhaseLineView`.
-  private var lifecycleSpinner: some View {
-    ProgressView()
-      .controlSize(.small)
-      .frame(width: 14, height: 14)
-      .accessibilityLabel("Working")
   }
 
   // Main-checkout guard: the row whose path is the Project's rootPath is the main checkout
@@ -1281,7 +1257,7 @@ struct HierarchySidebarView: View {
     // A source Project's row that a workspace lists as a child is likewise
     // the workspace's to archive or remove.
     let isWorkspaceMember =
-      !project.isWorkspace && hierarchyManager.workspaceMembership(forPath: worktree.path) != nil
+      !project.isWorkspace && hierarchyManager.workspaceMemberships[worktree.id] != nil
     if !isMainCheckout, !project.isWorkspace, !isWorkspaceMember {
       if worktree.archived {
         Button {
@@ -1655,7 +1631,7 @@ struct HierarchySidebarView: View {
   @ViewBuilder
   fileprivate func workspaceMembershipBadge(for worktree: Worktree, in project: Project) -> some View {
     if !project.isWorkspace,
-      let membership = hierarchyManager.workspaceMembership(forPath: worktree.path)
+      let membership = hierarchyManager.workspaceMemberships[worktree.id]
     {
       Button {
         store.send(.workspaceMembershipBadgeTapped(membership))
@@ -1686,69 +1662,10 @@ struct HierarchySidebarView: View {
       : "Remove \(count) merged Worktrees?"
   }
 
-  // MARK: - Diff stats chip
-
-  /// Compact `+N −M` chip rendered to the right of the row content. Counts
-  /// come from `WorktreeLocalDiffMonitor` (the diff viewer's Uncommitted totals) so
-  /// every worktree — PR-matched or not — surfaces the same "uncommitted
-  /// edits in this worktree" signal. Refresh on HEAD events is wired in
-  /// `RootFeature.worktreeHeadChanged`; row-mount falls back to the
-  /// monitor's freshness window. The titlebar `StatusPullRequestView` still
-  /// shows the PR's pushed `+/−` for the active worktree if users want the
-  /// at-base comparison.
-  @ViewBuilder
-  fileprivate func diffStatsChip(
-    for worktree: Worktree, in project: Project, snapshot: PullRequestSnapshot?
-  ) -> some View {
-    if let local = worktreeLocalDiffMonitor.stats[worktree.id] ?? nil,
-      local.additions > 0 || local.deletions > 0
-    {
-      DiffStatsChip(
-        additions: local.additions,
-        deletions: local.deletions
-      )
-      // Own the leading gap from the row content (outer HStack is `spacing: 0`). Leading,
-      // not trailing, so the chip's right edge stays flush when it's the row's last
-      // visible accessory.
-      .padding(.leading, 6)
-    }
-  }
-
-  // MARK: - Run-script ping dot
-
-  /// Trailing indicator that lights while any script's dedicated run pane
-  /// in this worktree is executing. Complements the run tab's tinted icon:
-  /// run activity is deliberately excluded from `worktreeIsDirty`, so this
-  /// dot — not the leading spinner — is the row's "command running" signal.
-  /// Hovering swaps the dot for a Stop button that tears down every
-  /// executing script in the worktree; its own Button intercepts the click
-  /// so the row selection doesn't also fire (same sibling arrangement as
-  /// `gitHubBadge`).
-  @ViewBuilder
   fileprivate func runScriptPingAccessory(for worktree: Worktree, in project: Project) -> some View {
-    let tints = runningScriptTints(for: worktree, in: project)
-    if !tints.isEmpty {
-      RunScriptPingStopControl(colors: tints) {
-        store.send(.worktreeStopRunScriptsTapped(worktreeID: worktree.id))
-      }
-      // Own the leading gap from the previous accessory (outer HStack is
-      // `spacing: 0`), same convention as `diffStatsChip`.
-      .padding(.leading, 6)
-      .padding(.trailing, 2)
+    SidebarRunScriptAccessory(worktreeID: worktree.id, projectID: project.id) {
+      store.send(.worktreeStopRunScriptsTapped(worktreeID: worktree.id))
     }
-  }
-
-  /// Tints of every script currently executing in `worktree`, project
-  /// commands first, then globals — the order the Run menu lists them.
-  /// Both `isScriptRunning` and the settings read are `@Observable`, so the
-  /// row re-renders when a run starts/stops or a script's tint changes.
-  private func runningScriptTints(for worktree: Worktree, in project: Project) -> [Color] {
-    let settings = settingsStore.settings
-    let scripts = (settings.projects[project.id]?.scripts ?? []) + settings.general.globalScripts
-    return
-      scripts
-      .filter { hierarchyManager.isScriptRunning(worktreeID: worktree.id, scriptID: $0.id) }
-      .map { ScriptTintColorPalette.color(for: $0.resolvedTintColor) }
   }
 
   // MARK: - GitHub badge + popover
@@ -1884,22 +1801,7 @@ struct HierarchySidebarView: View {
   /// General → `agentsViewAutoOpen`. Exposed as a `Bool` so `.onChange`
   /// fires only on real transitions, not on every entry mutation.
   private var anyAgentNeedsAttention: Bool {
-    guard let entries = agentStateStore?.entries else { return false }
-    return entries.values.contains { entry in
-      entry.state == .working || entry.state == .blocked
-    }
-  }
-
-  /// True iff any pane in `worktree` hosts a bound agent currently `.working`.
-  /// OR'd into the worktree row's busy spinner so render-derived agent activity
-  /// lights the row even when the program emits no OSC 9;4 and the foreground
-  /// job is the agent itself (deliberately excluded from the terminal signal).
-  /// Only `.working` counts — `.blocked` is "waiting on the user", not busy.
-  private func anyAgentWorking(in worktree: Worktree) -> Bool {
-    guard let entries = agentStateStore?.entries, !entries.isEmpty else { return false }
-    return worktree.tabs.contains { tab in
-      tab.panes.contains { entries[$0.id]?.state == .working }
-    }
+    agentStateStore?.needsAttention == true
   }
 
   /// Walks the selection chain (project → worktree → tab) and returns
@@ -1936,7 +1838,15 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// unread bell, and ⌃N hint, the way a worktree row does.
   var rowWorktree: Worktree?
   var isRowSelected = false
-  var isRowBusy = false
+  var agentStateStore: AgentStateStore?
+
+  private var isRowBusy: Bool {
+    guard let rowWorktree else { return false }
+    return hierarchyManager.worktreeIsDirty(rowWorktree)
+      || rowWorktree.tabs.contains { tab in
+        tab.panes.contains { agentStateStore?.workingPaneIDs.contains($0.id) == true }
+      }
+  }
   /// The ⌃N number to show, while ⌘ is held.
   var hotkeyHint: Int?
   let onToggleExpansion: () -> Void
@@ -1962,7 +1872,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
     guard let gitHubStore else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
-      .filter { hierarchyManager.workspaceMembership(forPath: $0.path) == nil }
+      .filter { hierarchyManager.workspaceMemberships[$0.id] == nil }
       .filter { gitHubStore.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
@@ -2437,5 +2347,195 @@ private struct LifecyclePhaseLineView: View {
       return Color(nsColor: .alternateSelectedControlTextColor)
     }
     return progress.kind == .archive ? .orange : .red
+  }
+}
+
+private struct SidebarFilterBar: View {
+  let selection: SidebarFilter
+  var onSelect: (SidebarFilter) -> Void
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  @State private var hoveredFilter: SidebarFilter?
+
+  var body: some View {
+    GeometryReader { geometry in
+      let spacing: CGFloat = 6
+      let count = CGFloat(SidebarFilter.allCases.count)
+      let unitWidth = max(0, (geometry.size.width - spacing * (count - 1)) / (count + 2))
+      SidebarFilterLayout(
+        expansion: SidebarFilterExpansion(selection: selection),
+        height: TabBarMetrics.trackHeight, spacing: spacing
+      ) {
+        ForEach(SidebarFilter.allCases, id: \.self) { filter in
+          filterButton(filter, unitWidth: unitWidth)
+        }
+      }
+      .animation(
+        reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32),
+        value: selection
+      )
+    }
+    .frame(height: TabBarMetrics.trackHeight)
+    .padding(.horizontal, 8)
+    .padding(.bottom, TabBarMetrics.trackBottomInset)
+  }
+
+  private func filterButton(_ filter: SidebarFilter, unitWidth: CGFloat) -> some View {
+    let selected = selection == filter
+    let title = title(for: filter)
+    let titleWidth = ceil(
+      (title as NSString).size(withAttributes: [
+        .font: NSFont.systemFont(ofSize: TabBarMetrics.titleFontSize, weight: .semibold)
+      ]).width)
+    let expandedWidth = unitWidth * 3
+    let labelScale = min(1, max(0, expandedWidth - 12) / (14 + 5 + titleWidth))
+
+    return Button {
+      onSelect(filter)
+    } label: {
+      Capsule()
+        .fill(Color.primary.opacity(0.035))
+        .overlay {
+          Capsule()
+            .fill(tint(for: filter))
+            .opacity(selected ? 1 : hoveredFilter == filter ? 0.3 : 0)
+        }
+        .overlay {
+          // The label keeps its full size and exits through the capsule edge.
+          // Only the icon's position changes; text never squeezes its siblings.
+          HStack(spacing: 5) {
+            Image(systemName: symbol(for: filter))
+              .frame(width: 14)
+              .accessibilityHidden(true)
+            Text(title)
+              .fixedSize()
+              .opacity(selected ? 1 : 0)
+              .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.12).delay(selected ? 0.1 : 0),
+                value: selected
+              )
+              .accessibilityHidden(true)
+          }
+          .font(.system(size: TabBarMetrics.titleFontSize, weight: .semibold))
+          .foregroundStyle(selected ? Color.white : Color.secondary)
+          .fixedSize()
+          .offset(x: selected ? 0 : (titleWidth + 5) / 2)
+          .animation(
+            reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22).delay(selected ? 0.06 : 0),
+            value: selected
+          )
+          .scaleEffect(labelScale)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: TabBarMetrics.trackHeight)
+        .clipShape(Capsule())
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .onHover { hoveredFilter = $0 ? filter : nil }
+    .help(title)
+    .accessibilityLabel(title)
+    .accessibilityAddTraits(selected ? .isSelected : [])
+  }
+
+  private func title(for filter: SidebarFilter) -> String {
+    switch filter {
+    case .all: "All"
+    case .remote: "Remote"
+    case .workspace: "Workspace"
+    case .pin: "Pin"
+    case .pullRequests: "PR"
+    }
+  }
+
+  private func symbol(for filter: SidebarFilter) -> String {
+    switch filter {
+    case .all: "square.grid.2x2.fill"
+    case .remote: "wifi"
+    case .workspace: "square.stack.3d.up.fill"
+    case .pin: "pin.fill"
+    case .pullRequests: "arrow.triangle.pull"
+    }
+  }
+
+  private func tint(for filter: SidebarFilter) -> Color {
+    switch filter {
+    case .all: .blue
+    case .remote: .indigo
+    case .workspace: .purple
+    case .pullRequests: .green
+    case .pin: Color(red: 0.65, green: 0.42, blue: 0.08)
+    }
+  }
+}
+
+/// A single animated layout owns both edges of every capsule. Child frame and
+/// offset animations cannot guarantee a fixed gap when a transition is interrupted.
+nonisolated struct SidebarFilterLayout: Layout {
+  var expansion: SidebarFilterExpansion
+  var height: CGFloat
+  var spacing: CGFloat = 6
+
+  var animatableData: SidebarFilterExpansion {
+    get { expansion }
+    set { expansion = newValue }
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    CGSize(width: proposal.width ?? 260, height: height)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    for (subview, frame) in zip(subviews, frames(width: bounds.width)) {
+      subview.place(
+        at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY),
+        anchor: .topLeading,
+        proposal: ProposedViewSize(width: frame.width, height: bounds.height)
+      )
+    }
+  }
+
+  func frames(width: CGFloat) -> [CGRect] {
+    let weights = expansion.values.map { max(0, $0) }
+    let total = max(weights.reduce(0, +), 1e-9)
+    let unit = max(0, (width - spacing * CGFloat(weights.count - 1)) / CGFloat(weights.count + 2))
+    var x: CGFloat = 0
+    return weights.map { weight in
+      let itemWidth = unit * (1 + 2 * weight / total)
+      defer { x += itemWidth + spacing }
+      return CGRect(x: x, y: 0, width: itemWidth, height: height)
+    }
+  }
+}
+
+nonisolated struct SidebarFilterExpansion: VectorArithmetic {
+  var values: [Double]
+
+  init(selection: SidebarFilter) {
+    values = SidebarFilter.allCases.map { $0 == selection ? 1 : 0 }
+  }
+
+  private init(values: [Double]) {
+    self.values = values
+  }
+
+  static var zero: Self {
+    Self(values: SidebarFilter.allCases.map { _ in 0 })
+  }
+
+  static func + (lhs: Self, rhs: Self) -> Self {
+    Self(values: zip(lhs.values, rhs.values).map { $0 + $1 })
+  }
+
+  static func - (lhs: Self, rhs: Self) -> Self {
+    Self(values: zip(lhs.values, rhs.values).map { $0 - $1 })
+  }
+
+  mutating func scale(by rhs: Double) {
+    values = values.map { $0 * rhs }
+  }
+
+  var magnitudeSquared: Double {
+    values.reduce(0) { $0 + $1 * $1 }
   }
 }

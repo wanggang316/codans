@@ -176,3 +176,49 @@ struct HierarchySidebarOrderingTests {
       ])
   }
 }
+
+@MainActor
+struct SidebarFilterLayoutTests {
+  @Test
+  func transitionsKeepEveryGapAndBothOuterEdges() {
+    for width: CGFloat in [220, 260, 320] {
+      for from in SidebarFilter.allCases {
+        for to in SidebarFilter.allCases {
+          let start = SidebarFilterExpansion(selection: from)
+          let end = SidebarFilterExpansion(selection: to)
+          for step in 0...100 {
+            checkFrames(blend(start, end, Double(step) / 100), width: width)
+          }
+          let interrupted = blend(start, end, 0.37)
+          for next in SidebarFilter.allCases {
+            for step in 0...20 {
+              checkFrames(
+                blend(interrupted, SidebarFilterExpansion(selection: next), Double(step) / 20),
+                width: width
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func blend(
+    _ from: SidebarFilterExpansion, _ to: SidebarFilterExpansion, _ progress: Double
+  ) -> SidebarFilterExpansion {
+    var delta = to - from
+    delta.scale(by: progress)
+    return from + delta
+  }
+
+  private func checkFrames(_ expansion: SidebarFilterExpansion, width: CGFloat) {
+    let frames = SidebarFilterLayout(expansion: expansion, height: 28).frames(width: width)
+    #expect(frames.count == SidebarFilter.allCases.count)
+    #expect(frames.first?.minX == 0)
+    #expect(abs((frames.last?.maxX ?? 0) - width) < 0.000001)
+    for (left, right) in zip(frames, frames.dropFirst()) {
+      #expect(abs(right.minX - left.maxX - 6) < 0.000001)
+      #expect(left.width > 0)
+    }
+  }
+}

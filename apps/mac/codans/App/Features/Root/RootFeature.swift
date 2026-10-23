@@ -2394,13 +2394,17 @@ struct RootFeature {
         return .none
 
       case .revealCurrentWorktreeInSidebarRequested:
+        if let worktreeID = state.selection.worktreeID, let projectID = state.selection.projectID {
+          revealWorktreeInSidebar(worktreeID, in: projectID, state: &state)
+          return .none
+        }
         state.sidebarVisible = true
         state.revealSelectionTrigger = UUID()
         return .none
 
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
-        let order = catalog.sidebarSelectionOrder
+        let order = catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys))
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2475,7 +2479,15 @@ struct RootFeature {
   private func revealWorktreeInSidebar(
     _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
   ) {
-    let project = hierarchyClient.snapshot().projects.first { $0.id == projectID }
+    let catalog = hierarchyClient.snapshot()
+    if catalog.sidebarFilter != .all,
+      !catalog.sidebarProjects(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys)).contains(where: { project in
+        project.worktrees.contains { $0.id == worktreeID }
+      })
+    {
+      hierarchyClient.setSidebarFilter(.all)
+    }
+    let project = catalog.projects.first { $0.id == projectID }
     if project?.rowWorktree?.id != worktreeID {
       hierarchyClient.setProjectExpanded(projectID, true)
     }

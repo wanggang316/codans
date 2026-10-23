@@ -67,7 +67,12 @@ enum WorktreePromotionMode: Sendable, Equatable {
 @MainActor
 @Observable
 final class HierarchyManager {
-  private(set) var catalog: Catalog
+  private(set) var catalog: Catalog {
+    didSet { refreshWorkspaceMemberships() }
+  }
+  @ObservationIgnored private var workspaceMembershipIndex = WorkspaceMembershipIndex()
+  private(set) var workspaceMemberships: [WorktreeID: WorkspaceMembership] = [:]
+
   private let store: CatalogStore
   var processRegistry = WorktreeProcessRegistry()
   private let runtime: HierarchyRuntime
@@ -111,6 +116,7 @@ final class HierarchyManager {
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
     rebuildRunScriptPanes()
+    refreshWorkspaceMemberships()
     if didStampLegacyTimestamps || didClearAgentBindings {
       // Persist the migration so successive launches start from the
       // backfilled timestamps rather than re-deriving them on every
@@ -264,6 +270,12 @@ final class HierarchyManager {
     }
     guard catalog.activeTagFilter != normalized else { return }
     catalog.activeTagFilter = normalized
+    store.scheduleSave(catalog)
+  }
+
+  func setSidebarFilter(_ filter: SidebarFilter) {
+    guard catalog.sidebarFilter != filter else { return }
+    catalog.sidebarFilter = filter
     store.scheduleSave(catalog)
   }
 
@@ -1478,9 +1490,15 @@ final class HierarchyManager {
     return (appended, updated, archived)
   }
 
+  private func refreshWorkspaceMemberships() {
+    workspaceMembershipIndex.update(catalog: catalog, canonicalize: Self.canonicalPath)
+    let memberships = workspaceMembershipIndex.memberships
+    if workspaceMemberships != memberships { workspaceMemberships = memberships }
+  }
+
   /// The workspace child row at `path`, if any Project's child checkout lives
-  /// there. Answers from the catalog alone — no manifest read, no I/O — so
-  /// the sidebar and the reconcile can ask on every pass.
+  /// there. Resolves live filesystem aliases for command guards. Views use
+  /// `workspaceMemberships`, refreshed when catalog identity or paths change.
   func workspaceMembership(forPath path: String) -> WorkspaceMembership? {
     catalog.workspaceMembership(
       forCanonicalPath: Self.canonicalPath(path),
@@ -2112,13 +2130,18 @@ final class HierarchyManager {
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
-      return worktree.tabs.contains { tab in
-        tab.panes.contains {
-          $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
-        }
-      }
+      return worktreeIsDirty(worktree)
     }
     return false
+  }
+
+  /// Rows already hold the worktree; avoid another catalog search per icon.
+  func worktreeIsDirty(_ worktree: Worktree) -> Bool {
+    worktree.tabs.contains { tab in
+      tab.panes.contains {
+        $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
+      }
+    }
   }
 
   // MARK: - Run-script panes

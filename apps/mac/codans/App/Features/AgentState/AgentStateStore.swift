@@ -110,7 +110,18 @@ final class AgentStateStore {
   /// Public, read-only view of bound agents. `@Observable` tracks
   /// dictionary subscript writes so SwiftUI consumers re-render on
   /// every state transition.
-  private(set) var entries: [PaneID: AgentEntry] = [:]
+  private(set) var entries: [PaneID: AgentEntry] = [:] {
+    didSet {
+      let working = Set(entries.compactMap { $0.value.state == .working ? $0.key : nil })
+      let attention = entries.values.contains { $0.state == .working || $0.state == .blocked }
+      if workingPaneIDs != working { workingPaneIDs = working }
+      if needsAttention != attention { needsAttention = attention }
+    }
+  }
+
+  /// Sidebar signals exclude message and source changes.
+  private(set) var workingPaneIDs: Set<PaneID> = []
+  private(set) var needsAttention = false
 
   /// Per-pane derivation scratch. Kept around for all panes the
   /// store has heard about (bound or not) so signals that arrive

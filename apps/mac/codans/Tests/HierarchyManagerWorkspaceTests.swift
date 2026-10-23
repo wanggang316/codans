@@ -170,6 +170,31 @@ struct HierarchyManagerWorkspaceTests {
   }
 
   @Test
+  func displayMembershipIsAvailableForRestoredCatalog() {
+    let child = Worktree(name: "app", path: "/tmp/ws/app")
+    let project = Project(name: "ws", rootPath: "/tmp/ws", worktrees: [child], isWorkspace: true)
+    let restored = HierarchyManager(
+      catalog: Catalog(projects: [project]), store: store, runtime: fakeRuntime)
+    #expect(restored.workspaceMemberships[child.id]?.projectID == project.id)
+  }
+
+  @Test
+  func displayMembershipFollowsRenameAndRemoval() throws {
+    let projectID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
+    _ = manager.reconcileWorkspaceChildren(
+      projectID: projectID,
+      observations: [
+        Observation(name: "app", path: "/tmp/ws/app", exists: true, branch: "a", sourceGitRoot: nil)
+      ])
+    let childID = manager.catalog.projects[0].worktrees[1].id
+    #expect(manager.workspaceMemberships[childID]?.workspaceName == "ws")
+    try manager.renameProject(projectID, name: "Renamed")
+    #expect(manager.workspaceMemberships[childID]?.workspaceName == "Renamed")
+    try manager.removeProject(projectID)
+    #expect(manager.workspaceMemberships.isEmpty)
+  }
+
+  @Test
   func builtinEnvCarriesTheWorkspaceRootOnlyInsideAWorkspace() {
     let inside = HierarchyManager.injectingBuiltins(
       ["CODANS_WORKSPACE_ROOT": "stale"], worktreePath: "/tmp/ws/app", rootPath: "/tmp/ws",

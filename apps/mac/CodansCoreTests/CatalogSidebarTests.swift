@@ -85,4 +85,70 @@ struct CatalogSidebarTests {
     let unfiltered = Catalog(projects: [tagged, workspace, failed], projectSortMode: .manual)
     #expect(unfiltered.sidebarSelectionOrder.map(\.worktreeID) == [folderRoot.id, workspaceRoot.id, checkout.id])
   }
+
+  @Test
+  func categoryFiltersAndPinShareSelectionOrder() {
+    let repository = self.repository
+    let workspace = self.workspace
+    var remote = folder
+    remote.remoteHost = RemoteHost(alias: "server")
+    var catalog = Catalog(projects: [repository, remote, workspace], projectSortMode: .manual)
+    catalog.sidebarFilter = .remote
+    #expect(catalog.sidebarProjects.map(\.id) == [remote.id])
+    catalog.sidebarFilter = .workspace
+    #expect(catalog.sidebarProjects.map(\.id) == [workspace.id])
+    catalog.sidebarFilter = .pin
+    #expect(catalog.sidebarProjects.map(\.id) == [repository.id])
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [pinned.id])
+    catalog.projects[0].worktrees[2].archived = true
+    #expect(catalog.sidebarProjects.isEmpty)
+  }
+
+  @Test
+  func pinsKeepWorkspaceMembersAndRespectTags() {
+    var starredWorkspace = workspace
+    starredWorkspace.worktrees[1].isPinned = true
+    let tag = TagID()
+    starredWorkspace.tagIDs = [tag]
+    var catalog = Catalog(projects: [repository, starredWorkspace], activeTagFilter: .tags([tag]))
+    catalog.sidebarFilter = .pin
+    #expect(catalog.sidebarProjects.map(\.id) == [starredWorkspace.id])
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [checkout.id])
+    catalog.projects[1].isExpanded = false
+    #expect(catalog.sidebarSelectionOrder.isEmpty)
+  }
+
+  @Test
+  func filterPersistsAndOldCatalogDefaultsToAll() throws {
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+    var catalog = Catalog(projects: [folder])
+    let original = try encoder.encode(catalog)
+    #expect(try decoder.decode(Catalog.self, from: original).sidebarFilter == .all)
+    catalog.sidebarFilter = .pin
+    #expect(try decoder.decode(Catalog.self, from: encoder.encode(catalog)) == catalog)
+  }
+
+  @Test
+  func pullRequestFilterUsesLiveMatchesAndExcludesArchivedRows() {
+    var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
+    catalog.sidebarFilter = .pullRequests
+    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: []).isEmpty)
+    let matches: Set<WorktreeID> = [feature.id, checkout.id]
+    #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
+      == [feature.id, checkout.id])
+    catalog.projects[0].worktrees[0].archived = true
+    #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID) == [checkout.id])
+    #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [pinned.id]).map(\.worktreeID) == [pinned.id])
+    catalog.activeTagFilter = .tags([TagID()])
+    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: matches).isEmpty)
+  }
+
+  @Test
+  func legacyCategoriesMigrate() throws {
+    let decoder = JSONDecoder()
+    #expect(try decoder.decode(SidebarFilter.self, from: Data(#""local""#.utf8)) == .all)
+    #expect(try decoder.decode(SidebarFilter.self, from: Data(#""favorites""#.utf8)) == .pin)
+    #expect(SidebarFilter.allCases == [.all, .remote, .workspace, .pin, .pullRequests])
+  }
 }
