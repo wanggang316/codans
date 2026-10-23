@@ -1063,18 +1063,35 @@ extension HierarchySidebarFeatureTests {
   @Test
   func onlyAReferenceCanLeaveTheWorkspaceOnItsOwn() async {
     let f = WorkspaceFixture()
+    let busyTab = Tab(name: "dev server")
+    let idleTab = Tab(name: "shell")
+    var project = f.project
+    project.worktrees[1].tabs = [busyTab, idleTab]
+    let removed = LockIsolated<[String]>([])
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
-    } withDependencies: {
-      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+    } withDependencies: { [project] in
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0.hierarchyClient.tabIsDirty = { $0 == busyTab.id }
+      $0.workspaceClient.removeSource = { _, sourceGitRoot in
+        removed.withValue { $0.append(sourceGitRoot) }
+      }
     }
 
     await store.send(.removeSourceTapped(worktreeID: f.member.id, inProject: f.project.id))
     await store.send(.removeSourceTapped(worktreeID: f.rootRow.id, inProject: f.project.id))
     await store.send(.removeSourceTapped(worktreeID: f.reference.id, inProject: f.project.id)) {
-      $0.pendingWorkspaceMemberRemoval = PendingWorktreeRemoval(
-        worktreeID: f.reference.id, projectID: f.project.id, displayName: "app")
+      $0.pendingWorkspaceSourceRemoval = PendingWorkspaceSourceRemoval(
+        worktreeID: f.reference.id, in: project, tabIsDirty: { $0 == busyTab.id })
     }
+    // The confirmation names the terminals the removal stops.
+    #expect(store.state.pendingWorkspaceSourceRemoval?.runningTerminals == ["app › dev server"])
+    #expect(store.state.pendingWorkspaceSourceRemoval?.message.contains("app › dev server") == true)
+
+    // Only the reference goes: `removeSource` with the source path, nothing else.
+    await store.send(.workspaceMemberRemoveConfirmed) { $0.pendingWorkspaceSourceRemoval = nil }
+    await store.receive(\.workspaceMemberRemoveFinished)
+    #expect(removed.value == ["/src/app"])
   }
 
   @Test
