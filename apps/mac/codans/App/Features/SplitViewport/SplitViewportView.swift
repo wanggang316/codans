@@ -58,9 +58,6 @@ struct SplitViewportView: View {
         // gap at the layout's edge equal to the gap between two cards.
         .padding(PaneCardMetrics.gap / 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Under the toolbar too, so the toolbar and the cards share one
-        // surface, as the floating sidebar does.
-        .background(PaneCardBackdrop().ignoresSafeArea(edges: .top))
         .environment(tabDrag)
         .overlay { TabDragPreview(session: tabDrag) }
       } else if settledWorktreeID == worktreeID {
