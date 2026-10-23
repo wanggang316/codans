@@ -481,6 +481,10 @@ extension WorkspaceClient {
     let git = context.git
     let task = Task.detached { () -> [String] in
       var failures: [String] = []
+      // Worktrees git still lists. A directory that holds one is kept:
+      // deleting it would leave git an entry whose folder is gone and hide
+      // the real residue behind a removed parent.
+      var keptWorktrees: [String] = []
       for step in steps {
         switch step {
         case .addedWorktree(let repoRoot, let path):
@@ -491,6 +495,7 @@ extension WorkspaceClient {
           } catch {
             logger.warning("rollback could not remove worktree at \(path, privacy: .private): \(error)")
             failures.append("worktree at \(path): \(describe(error))")
+            keptWorktrees.append(path)
           }
         case .createdBranch(let repoRoot, let branch):
           if case .kept(let reason) = await git.deleteBranchIfExists(
@@ -506,6 +511,11 @@ extension WorkspaceClient {
             failures.append("branch \(branch) in \(repoRoot) (was \(previousTip)): \(describe(error))")
           }
         case .clonedRepository(let path), .createdDirectory(let path):
+          let held = keptWorktrees.filter { $0.hasPrefix(path.hasSuffix("/") ? path : path + "/") }
+          guard held.isEmpty else {
+            failures.append("\(path): kept because it holds \(held.joined(separator: ", "))")
+            continue
+          }
           do {
             try FileManager.default.removeItem(atPath: path)
           } catch {

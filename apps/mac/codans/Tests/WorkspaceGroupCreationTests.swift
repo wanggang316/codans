@@ -223,6 +223,12 @@ struct WorkspaceGroupCreationTests {
       return
     }
     #expect(failures.contains { $0.contains(appCheckout) && $0.contains("locked by test") })
+    // The group directory holds the checkout git still lists, so it stays
+    // and is reported instead of being deleted out from under git.
+    let groupDirectory = "\(setup.root)/fix"
+    #expect(fx.isDirectory(appCheckout))
+    #expect(failures.contains { $0.hasPrefix("\(groupDirectory):") && $0.contains(appCheckout) })
+    #expect(try worktreeCount(fx, setup.app) == 2)
   }
 
   // MARK: Setup
