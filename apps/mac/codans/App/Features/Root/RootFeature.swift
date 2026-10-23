@@ -1371,6 +1371,23 @@ struct RootFeature {
           }
         }
 
+      // Group creation streams every checkout, the registration, and the
+      // setup scripts before this arrives, so the agents start on a
+      // complete group. The user lands on the group's own row.
+      case .sidebar(.delegate(.workspaceGroupCreated(let result))):
+        var launches: [Effect<Action>] = []
+        for member in result.members {
+          guard let profileID = member.agentProfileID else { continue }
+          launches.append(
+            launchAgentInWorktree(
+              profileID: profileID, prompt: nil, projectID: result.projectID, worktreeID: member.worktreeID,
+              state: &state))
+        }
+        hierarchyClient.selectProject(result.projectID)
+        try? hierarchyClient.selectWorktree(result.groupWorktreeID, result.projectID)
+        revealWorktreeInSidebar(result.groupWorktreeID, in: result.projectID, state: &state)
+        return .merge(launches)
+
       case .sidebar(.delegate(.revealExistingProject(let projectID))):
         // Add Project picker hit a duplicate folder — jump the user to
         // the already-registered row.
