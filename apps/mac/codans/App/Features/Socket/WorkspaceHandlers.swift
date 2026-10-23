@@ -51,16 +51,18 @@ final class WorkspaceHandlers {
     let rootPath =
       request.rootPath.map { ($0 as NSString).expandingTildeInPath }
       ?? Self.uniqueDefaultRootPath(forTitle: title)
-    let plan = WorkspacePlan(
+    // Branch fields are still validated above; a Workspace now takes only
+    // its sources, and groups carry the branches.
+    let plan = WorkspaceSourcePlan(
       title: title,
       rootPath: rootPath,
       description: request.description,
       taskLinks: request.taskLinks ?? [],
-      members: members
+      sources: members.map(Self.source(for:))
     )
     let projectID: ProjectID
     do {
-      projectID = try await workspace.create(plan)
+      projectID = try await workspace.createWorkspace(plan)
     } catch {
       throw Self.ipcError(for: error)
     }
@@ -89,7 +91,7 @@ final class WorkspaceHandlers {
     )
     let worktreeID: WorktreeID
     do {
-      worktreeID = try await workspace.add(request.projectID, member)
+      worktreeID = try await workspace.addSource(request.projectID, Self.source(for: member))
     } catch {
       throw Self.ipcError(for: error)
     }
@@ -103,21 +105,19 @@ final class WorkspaceHandlers {
   // MARK: - drop / remove
 
   func drop(_ request: IPC.WorkspaceDropRequest) async throws -> IPC.WorkspaceDropResponse {
-    let summary = try describe(IPC.WorkspaceDescribeRequest(projectID: request.projectID))
-    guard let member = summary.members.first(where: { $0.name == request.member }) else {
+    let manifest = try groupsManifest(projectID: request.projectID)
+    guard let source = manifest.projects.first(where: { $0.name == request.member }) else {
+      if manifest.groups.contains(where: { $0.members.contains { $0.name == request.member } }) {
+        throw IPCError.conflict(reason: "\(request.member) belongs to a group; delete its group instead")
+      }
       throw IPCError.notFound(kind: "workspace member", id: request.member)
     }
-    guard let worktreeID = member.worktreeID else {
-      throw IPCError.conflict(
-        reason: "\(request.member) has no checkout on disk yet; refresh the workspace first")
-    }
-    let warning: String?
     do {
-      warning = try await workspace.drop(request.projectID, worktreeID, !request.keepBranch)
+      try await workspace.removeSource(request.projectID, source.sourceGitRoot)
     } catch {
       throw Self.ipcError(for: error)
     }
-    return IPC.WorkspaceDropResponse(name: member.name, path: member.path, warning: warning)
+    return IPC.WorkspaceDropResponse(name: source.name, path: source.sourceGitRoot, warning: nil)
   }
 
   func remove(_ request: IPC.WorkspaceRemoveRequest) async throws -> IPC.WorkspaceRemoveResponse {
@@ -131,7 +131,11 @@ final class WorkspaceHandlers {
     }
     let outcome: WorkspaceRemovalOutcome
     do {
-      outcome = try await workspace.remove(request.projectID, request.cleanup)
+      outcome = try await workspace.removeWorkspace(
+        request.projectID,
+        request.cleanup.deleteFiles
+          ? .deleteOwnedFiles(GroupDeletionRequest(deleteBranches: request.cleanup.deleteBranches))
+          : .sidebarOnly)
     } catch {
       throw Self.ipcError(for: error)
     }
@@ -142,41 +146,41 @@ final class WorkspaceHandlers {
   // MARK: - describe
 
   func describe(_ request: IPC.WorkspaceDescribeRequest) throws -> IPC.WorkspaceSummary {
-    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == request.projectID })
-    else {
-      throw IPCError.notFound(kind: "project", id: request.projectID.description)
+    let project = try workspaceProject(request.projectID)
+    let manifest = try groupsManifest(projectID: request.projectID)
+    func row(at path: String) -> Worktree? {
+      project.worktrees.first { HierarchyManager.canonicalPath($0.path) == path }
     }
-    guard project.isWorkspace else {
-      throw IPCError.invalidParams(
-        message: "\(project.name) is not a workspace", path: ["projectID"])
-    }
-    // The transient copy is filled by the reconcile; fall back to disk for a
-    // project registered moments ago.
-    let manifest: WorkspaceManifest
-    if let cached = project.workspace {
-      manifest = cached
-    } else {
-      do {
-        manifest = try WorkspaceManifestStore.load(rootPath: project.rootPath)
-      } catch {
-        throw IPCError.internal(String(describing: error))
-      }
-    }
-    let members = manifest.repositories.map { entry -> IPC.WorkspaceMemberSummary in
-      let path = HierarchyManager.canonicalPath(entry.resolvedPath(rootPath: project.rootPath))
-      let row = project.worktrees.first { HierarchyManager.canonicalPath($0.path) == path }
-      let sourceGitRoot = row?.sourceGitRoot ?? entry.sourceGitRoot
+    let references = manifest.projects.map { source -> IPC.WorkspaceMemberSummary in
+      let path = HierarchyManager.canonicalPath(source.sourceGitRoot)
+      let row = row(at: path)
       return IPC.WorkspaceMemberSummary(
-        name: entry.name,
+        name: source.name,
         path: path,
-        role: entry.role,
-        branch: row?.branch ?? entry.branch,
-        sourceGitRoot: sourceGitRoot,
-        sourceKind: Self.sourceKind(sourceGitRoot: sourceGitRoot, remoteURL: entry.remoteURL),
-        remoteURL: entry.remoteURL,
+        role: nil,
+        branch: row?.branch,
+        sourceGitRoot: source.sourceGitRoot,
+        sourceKind: Self.sourceKind(sourceGitRoot: source.sourceGitRoot, remoteURL: source.remoteURL),
+        remoteURL: source.remoteURL,
         worktreeID: row?.id
       )
     }
+    let groupMembers = manifest.groups.flatMap(\.members).map { member -> IPC.WorkspaceMemberSummary in
+      let path = HierarchyManager.canonicalPath((project.rootPath as NSString).appendingPathComponent(member.path))
+      let row = row(at: path)
+      let sourceGitRoot = row?.sourceGitRoot ?? member.sourceGitRoot
+      return IPC.WorkspaceMemberSummary(
+        name: member.name,
+        path: path,
+        role: member.role,
+        branch: row?.branch ?? member.branch,
+        sourceGitRoot: sourceGitRoot,
+        sourceKind: Self.sourceKind(sourceGitRoot: sourceGitRoot, remoteURL: nil),
+        remoteURL: nil,
+        worktreeID: row?.id
+      )
+    }
+    let members = references + groupMembers
     return IPC.WorkspaceSummary(
       projectID: project.id,
       title: manifest.title,
@@ -185,6 +189,37 @@ final class WorkspaceHandlers {
       taskLinks: manifest.taskLinks,
       members: members
     )
+  }
+
+  private func workspaceProject(_ projectID: ProjectID) throws -> Project {
+    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == projectID }) else {
+      throw IPCError.notFound(kind: "project", id: projectID.description)
+    }
+    guard project.isWorkspace else {
+      throw IPCError.invalidParams(message: "\(project.name) is not a workspace", path: ["projectID"])
+    }
+    return project
+  }
+
+  /// The transient copy is filled by the reconcile; fall back to disk for a
+  /// project registered moments ago.
+  private func groupsManifest(projectID: ProjectID) throws -> WorkspaceGroupsManifest {
+    let project = try workspaceProject(projectID)
+    if let cached = project.workspace { return cached }
+    do {
+      return try WorkspaceManifestStore.loadOrMigrate(rootPath: project.rootPath)
+    } catch {
+      throw IPCError.internal(String(describing: error))
+    }
+  }
+
+  private nonisolated static func source(for member: WorkspacePlan.Member) -> WorkspaceSource {
+    switch member.source {
+    case .local(let gitRoot):
+      return WorkspaceSource(location: .local(path: gitRoot), name: member.name)
+    case .remote(let url, let cloneDestination):
+      return WorkspaceSource(location: .remote(url: url, cloneDestination: cloneDestination), name: member.name)
+    }
   }
 
   // MARK: - Resolution
@@ -387,14 +422,21 @@ final class WorkspaceHandlers {
       case .invalidPlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository, .bareRepository,
         .invalidBranchName:
         return .invalidParams(message: workspace.localizedDescription, path: nil)
+      case .invalidSourcePlan, .groupPreflightFailed:
+        return .invalidParams(message: workspace.localizedDescription, path: nil)
       case .rootAlreadyRegistered, .rootAlreadyWorkspace, .destinationExists, .cloneDestinationTaken,
-        .memberExists, .memberWithoutSource, .cannotDropRoot:
+        .memberExists, .memberWithoutSource, .cannotDropRoot, .sourceExists, .cannotDeleteDefault,
+        .risksNotAcknowledged, .checkFailed:
         return .conflict(reason: workspace.localizedDescription)
       case .notWorkspace(let id):
         return .notFound(kind: "workspace", id: id.description)
       case .memberNotFound(let name):
         return .notFound(kind: "workspace member", id: name)
-      case .cancelled, .memberNotRegistered:
+      case .sourceNotFound(let path):
+        return .notFound(kind: "workspace project", id: path)
+      case .groupNotFound(let id):
+        return .notFound(kind: "workspace group", id: id.description)
+      case .cancelled, .memberNotRegistered, .manifestUnavailable, .notImplemented:
         return .internal(workspace.localizedDescription)
       }
     }

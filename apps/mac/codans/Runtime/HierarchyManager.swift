@@ -282,10 +282,9 @@ final class HierarchyManager {
   // MARK: - Project mutations
 
   /// Registers a local project. `isWorkspace` marks a workspace root: a plain
-  /// folder of child checkouts — it never carries a `gitRoot`, and the
-  /// synthetic row seeded below doubles as the workspace's main row (the
-  /// folder agents run in). Child rows are appended by the workspace
-  /// reconcile from the manifest, not here.
+  /// folder of checkout groups — it never carries a `gitRoot` and gets no
+  /// seeded row, because its header is not a terminal. The workspace
+  /// reconcile adds every group row from the manifest.
   func addProject(
     name: String, rootPath: String, gitRoot: String? = nil, isWorkspace: Bool = false
   ) -> ProjectID {
@@ -294,7 +293,7 @@ final class HierarchyManager {
     var selectedWorktreeID: WorktreeID?
     let gitRoot = isWorkspace ? nil : gitRoot
 
-    if gitRoot == nil {
+    if gitRoot == nil, !isWorkspace {
       let synthetic = Worktree(
         id: WorktreeID(),
         name: (rootPath as NSString).lastPathComponent,
@@ -1370,124 +1369,289 @@ final class HierarchyManager {
 
   // MARK: - Workspace
 
-  /// What the workspace reconcile observed for one manifest entry.
-  struct WorkspaceChildObservation: Equatable, Sendable {
-    /// Manifest entry name — the row's display name.
+  /// What the workspace reconcile observed for one row a manifest group
+  /// expects: the group directory itself, a `default` reference, or a
+  /// checkout a named group owns.
+  struct WorkspaceRowObservation: Equatable, Sendable {
+    /// Display name for a new row: the group name for a group row, the
+    /// source or member name otherwise. Existing rows are never renamed.
     let name: String
-    /// Canonical absolute path of the child folder.
+    /// Canonical absolute path. Never a path through a default link.
     let path: String
-    /// Whether the folder exists on disk.
+    let role: WorkspaceSlot.Role
+    /// Whether the directory exists on disk.
     let exists: Bool
     /// Live branch from git; nil when detached, missing, or not a repo.
     let branch: String?
     /// Root of the repository the checkout belongs to, from git.
     let sourceGitRoot: String?
+
+    init(
+      name: String,
+      path: String,
+      role: WorkspaceSlot.Role,
+      exists: Bool,
+      branch: String? = nil,
+      sourceGitRoot: String? = nil
+    ) {
+      self.name = name
+      self.path = path
+      self.role = role
+      self.exists = exists
+      self.branch = branch
+      self.sourceGitRoot = sourceGitRoot
+    }
+  }
+
+  /// One manifest group and the rows it expects, in manifest order.
+  struct WorkspaceGroupObservation: Equatable, Sendable {
+    let id: WorkspaceGroupID
+    let name: String
+    let kind: WorkspaceGroupKind
+    /// The manifest's deletion state; used only for a group the catalog
+    /// does not know yet.
+    let deletion: GroupDeletionState?
+    let rows: [WorkspaceRowObservation]
+  }
+
+  struct WorkspaceReconcileResult: Equatable, Sendable {
+    var appended = 0
+    var updated = 0
+    var archived = 0
   }
 
   /// Transient decoded manifest for display. Never persisted, equal-value
   /// writes dropped — same contract as `setProjectLoadState`.
-  func setProjectWorkspaceManifest(projectID: ProjectID, manifest: WorkspaceManifest?) {
+  func setProjectWorkspaceManifest(projectID: ProjectID, manifest: WorkspaceGroupsManifest?) {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else { return }
     guard catalog.projects[projectIndex].workspace != manifest else { return }
     catalog.projects[projectIndex].workspace = manifest
   }
 
-  /// Workspace counterpart of `reconcileDiscoveredWorktrees`. The manifest,
-  /// not `git worktree list`, is the membership source: every observation is
-  /// one manifest entry, resolved and probed on disk by the caller.
+  /// Workspace counterpart of `reconcileDiscoveredWorktrees`. The group
+  /// manifest, not `git worktree list`, is the membership source; the caller
+  /// resolves and probes every expected row on disk.
   ///
-  /// - An observed folder with no row: append a child row (name = entry
-  ///   name, branch / sourceGitRoot from git).
-  /// - An observed folder with a row: refresh `branch` and `sourceGitRoot`
-  ///   in place. The name is never re-synced — it tracks the folder, not the
-  ///   branch — so tabs, panes, and flags survive as they do for worktrees.
-  /// - A missing folder with a live row: soft-archive it, exactly as the
-  ///   stale sweep does for a worktree removed outside the app. The
-  ///   manifest entry is left alone; only an explicit removal edits it.
-  /// - A row no observation names (an entry the user deleted from the
-  ///   manifest by hand): left untouched and logged. Reconcile never deletes.
-  ///
-  /// The root row is never touched, and an empty observation set — a
-  /// manifest that names nothing — never archives anything, mirroring the
-  /// empty-discovery guard on the git path.
+  /// - `workspaceGroups` follows the manifest order; `isExpanded` and
+  ///   `deletion` are kept by group ID.
+  /// - An expected row is matched to a catalog row by canonical path (unique
+  ///   inside one Workspace). A match gets its slot set and its `branch` /
+  ///   `sourceGitRoot` refreshed in place; it is never renamed, so tabs,
+  ///   panes, and sessions survive.
+  /// - An expected row with no match is appended when its directory exists.
+  /// - A `member` whose directory is gone is soft-archived, as the stale
+  ///   sweep does for a worktree removed outside the app. A `reference`
+  ///   whose source is gone is kept and listed in
+  ///   `unavailableWorkspaceRows`: the source is not the Workspace's to
+  ///   archive.
+  /// - Rows no group expects are left unchanged and logged. Reconcile never
+  ///   deletes rows.
   @discardableResult
-  func reconcileWorkspaceChildren(
+  func reconcileWorkspaceGroups(
     projectID: ProjectID,
-    observations: [WorkspaceChildObservation]
-  ) -> (appended: Int, updated: Int, archived: Int) {
+    groups: [WorkspaceGroupObservation]
+  ) -> WorkspaceReconcileResult {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
       catalog.projects[projectIndex].isWorkspace
-    else { return (0, 0, 0) }
-    let rootCanonical = Self.canonicalPath(catalog.projects[projectIndex].rootPath)
-    var appended = 0
-    var updated = 0
-    var archived = 0
-    var observedPaths = Set<String>()
-    for observation in observations {
-      let canonical = Self.canonicalPath(observation.path)
-      guard canonical != rootCanonical else { continue }
-      observedPaths.insert(canonical)
-      let existingIndex = catalog.projects[projectIndex].worktrees
-        .firstIndex { Self.canonicalPath($0.path) == canonical }
-      if let existingIndex {
-        let existing = catalog.projects[projectIndex].worktrees[existingIndex]
-        if observation.exists {
-          if existing.branch != observation.branch {
-            catalog.projects[projectIndex].worktrees[existingIndex].branch = observation.branch
-            updated += 1
-          }
-          if let sourceGitRoot = observation.sourceGitRoot,
-            existing.sourceGitRoot != sourceGitRoot
-          {
-            catalog.projects[projectIndex].worktrees[existingIndex].sourceGitRoot = sourceGitRoot
-            updated += 1
-          }
-        } else if !existing.archived, !existing.isPinned {
-          for pane in existing.tabs.flatMap({ $0.panes }) {
-            runtime.suspendSurface(for: pane.id)
-          }
-          purgeRuntimeState(forTabs: existing.tabs)
-          catalog.projects[projectIndex].worktrees[existingIndex].archived = true
-          catalog.projects[projectIndex].worktrees[existingIndex].archivedAt = Date()
-          archived += 1
+    else { return WorkspaceReconcileResult() }
+    var project = catalog.projects[projectIndex]
+    var result = WorkspaceReconcileResult()
+    let records = Self.workspaceGroupRecords(groups, keeping: project.workspaceGroups)
+    let groupsChanged = records != project.workspaceGroups
+    project.workspaceGroups = records
+
+    var indexByPath: [String: Int] = [:]
+    for (index, row) in project.worktrees.enumerated() {
+      let canonical = Self.canonicalPath(row.path)
+      if indexByPath[canonical] == nil { indexByPath[canonical] = index }
+    }
+    var expectedPaths = Set<String>()
+    var unavailable = Set<WorktreeID>()
+    for group in groups {
+      for observation in group.rows {
+        let canonical = Self.canonicalPath(observation.path)
+        expectedPaths.insert(canonical)
+        let slot = WorkspaceSlot(groupID: group.id, role: observation.role)
+        if let index = indexByPath[canonical] {
+          applyWorkspaceRow(
+            observation, slot: slot, to: &project.worktrees[index], result: &result, unavailable: &unavailable)
+        } else if observation.exists {
+          project.worktrees.append(
+            Worktree(
+              name: observation.name,
+              path: canonical,
+              branch: observation.branch,
+              sourceGitRoot: observation.sourceGitRoot,
+              workspaceSlot: slot))
+          indexByPath[canonical] = project.worktrees.count - 1
+          result.appended += 1
         }
-        continue
       }
-      guard observation.exists else { continue }
-      catalog.projects[projectIndex].worktrees.append(
-        Worktree(
-          id: WorktreeID(),
-          name: observation.name,
-          path: canonical,
-          branch: observation.branch,
-          tabs: [],
-          selectedTabID: nil,
-          sourceGitRoot: observation.sourceGitRoot
-        )
-      )
-      appended += 1
     }
-    let unmanaged = catalog.projects[projectIndex].worktrees.filter {
-      let canonical = Self.canonicalPath($0.path)
-      return canonical != rootCanonical && !observedPaths.contains(canonical)
-    }
+    project.unavailableWorkspaceRows = unavailable
+
+    let unmanaged = project.worktrees.filter { !expectedPaths.contains(Self.canonicalPath($0.path)) }
     if !unmanaged.isEmpty {
       reconcileLogger.notice(
-        "workspace has \(unmanaged.count, privacy: .public) row(s) the manifest no longer names; left as-is: project=\(projectID.raw.uuidString, privacy: .public)"
+        "workspace has \(unmanaged.count, privacy: .public) row(s) no group names; left as-is: project=\(projectID.raw.uuidString, privacy: .public)"
       )
     }
-    if archived > 0 {
+    if result.archived > 0 {
       reconcileLogger.notice(
-        "auto-archived \(archived, privacy: .public) workspace child(ren) whose folder is gone: project=\(projectID.raw.uuidString, privacy: .public)"
+        "auto-archived \(result.archived, privacy: .public) workspace member(s) whose folder is gone: project=\(projectID.raw.uuidString, privacy: .public)"
       )
     }
-    if appended > 0 || updated > 0 || archived > 0 {
+    if project != catalog.projects[projectIndex] {
+      catalog.projects[projectIndex] = project
+    }
+    if groupsChanged || result != WorkspaceReconcileResult() {
       store.scheduleSave(catalog)
     }
-    if archived > 0 {
+    if result.archived > 0 {
       runtime.announceHierarchyMutated()
     }
-    return (appended, updated, archived)
+    return result
+  }
+
+  /// Manifest groups in manifest order, with the sidebar state of groups
+  /// the catalog already knows.
+  private static func workspaceGroupRecords(
+    _ groups: [WorkspaceGroupObservation], keeping current: [WorkspaceGroupRecord]
+  ) -> [WorkspaceGroupRecord] {
+    let known = Dictionary(current.map { ($0.id, $0) }) { first, _ in first }
+    return groups.map { group in
+      let previous = known[group.id]
+      return WorkspaceGroupRecord(
+        id: group.id,
+        name: group.name,
+        kind: group.kind,
+        isExpanded: previous?.isExpanded ?? false,
+        deletion: previous == nil ? group.deletion : previous?.deletion)
+    }
+  }
+
+  /// Places one existing row and refreshes it from what the reconcile saw.
+  private func applyWorkspaceRow(
+    _ observation: WorkspaceRowObservation,
+    slot: WorkspaceSlot,
+    to row: inout Worktree,
+    result: inout WorkspaceReconcileResult,
+    unavailable: inout Set<WorktreeID>
+  ) {
+    if row.workspaceSlot != slot {
+      row.workspaceSlot = slot
+      result.updated += 1
+    }
+    if observation.exists {
+      if row.branch != observation.branch {
+        row.branch = observation.branch
+        result.updated += 1
+      }
+      if let sourceGitRoot = observation.sourceGitRoot, row.sourceGitRoot != sourceGitRoot {
+        row.sourceGitRoot = sourceGitRoot
+        result.updated += 1
+      }
+      return
+    }
+    switch observation.role {
+    case .reference:
+      unavailable.insert(row.id)
+    case .member:
+      guard !row.archived, !row.isPinned else { return }
+      for pane in row.tabs.flatMap({ $0.panes }) {
+        runtime.suspendSurface(for: pane.id)
+      }
+      purgeRuntimeState(forTabs: row.tabs)
+      row.archived = true
+      row.archivedAt = Date()
+      result.archived += 1
+    case .groupTerminal:
+      break
+    }
+  }
+
+  /// Flips one group's sidebar disclosure flag. Persists; silent no-op for
+  /// unchanged values and unknown ids.
+  func setWorkspaceGroupExpanded(projectID: ProjectID, groupID: WorkspaceGroupID, isExpanded: Bool) {
+    updateWorkspaceGroup(projectID: projectID, groupID: groupID) { $0.isExpanded = isExpanded }
+  }
+
+  /// Records (or clears with `nil`) an unfinished destructive delete of one
+  /// group. Persists; silent no-op for unchanged values and unknown ids.
+  func setWorkspaceGroupDeletion(
+    projectID: ProjectID, groupID: WorkspaceGroupID, deletion: GroupDeletionState?
+  ) {
+    updateWorkspaceGroup(projectID: projectID, groupID: groupID) { $0.deletion = deletion }
+  }
+
+  private func updateWorkspaceGroup(
+    projectID: ProjectID,
+    groupID: WorkspaceGroupID,
+    _ change: (inout WorkspaceGroupRecord) -> Void
+  ) {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      let groupIndex = catalog.projects[projectIndex].workspaceGroups.firstIndex(where: { $0.id == groupID })
+    else { return }
+    var record = catalog.projects[projectIndex].workspaceGroups[groupIndex]
+    change(&record)
+    guard record != catalog.projects[projectIndex].workspaceGroups[groupIndex] else { return }
+    catalog.projects[projectIndex].workspaceGroups[groupIndex] = record
+    store.scheduleSave(catalog)
+  }
+
+  /// Removes Workspace rows from the catalog after closing their surfaces.
+  /// Never touches disk. Unlike `removeWorktree` it also removes a group
+  /// row at the Workspace root: that row is a group terminal, not a main
+  /// checkout the Project needs. Unknown ids are skipped.
+  func removeWorkspaceRows(projectID: ProjectID, worktreeIDs: [WorktreeID]) {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[projectIndex].isWorkspace
+    else { return }
+    let ids = Set(worktreeIDs)
+    let removed = catalog.projects[projectIndex].worktrees.filter { ids.contains($0.id) }
+    guard !removed.isEmpty else { return }
+    for worktree in removed {
+      for pane in worktree.tabs.flatMap({ $0.panes }) {
+        runtime.closeSurface(for: pane.id)
+      }
+      purgeRuntimeState(forTabs: worktree.tabs)
+    }
+    catalog.projects[projectIndex].worktrees.removeAll { ids.contains($0.id) }
+    catalog.projects[projectIndex].unavailableWorkspaceRows.subtract(ids)
+    if let selected = catalog.projects[projectIndex].selectedWorktreeID, ids.contains(selected) {
+      catalog.projects[projectIndex].selectedWorktreeID =
+        catalog.projects[projectIndex].worktrees.first { !$0.archived }?.id
+    }
+    store.scheduleSave(catalog)
+    runtime.announceHierarchyMutated()
+  }
+
+  /// Panes of the group row and the group's member rows that are running
+  /// something (`paneIsBusy`), run-script panes included: a group delete
+  /// stops all of them.
+  func workspaceGroupBusyPanes(projectID: ProjectID, groupID: WorkspaceGroupID) -> [PaneID] {
+    guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
+    return project.worktrees
+      .filter { $0.workspaceSlot?.groupID == groupID && $0.workspaceSlot?.role != .reference }
+      .flatMap { $0.tabs.flatMap(\.panes) }
+      .map(\.id)
+      .filter(paneIsBusy)
+  }
+
+  /// Group name and canonical group directory for a Workspace row's panes:
+  /// the group of the row's slot, with the directory of that group's row.
+  /// `nil` outside a Workspace, for a row without a slot, or before the
+  /// group row exists.
+  private func workspaceGroupEnvironment(
+    project: Project, worktree: Worktree
+  ) -> (name: String, directory: String)? {
+    guard project.isWorkspace, let slot = worktree.workspaceSlot,
+      let record = project.workspaceGroups.first(where: { $0.id == slot.groupID }),
+      let groupRow = project.worktrees.first(where: {
+        $0.workspaceSlot == WorkspaceSlot(groupID: slot.groupID, role: .groupTerminal)
+      })
+    else { return nil }
+    return (record.name, groupRow.path)
   }
 
   private func refreshWorkspaceMemberships() {
@@ -1496,9 +1660,10 @@ final class HierarchyManager {
     if workspaceMemberships != memberships { workspaceMemberships = memberships }
   }
 
-  /// The workspace child row at `path`, if any Project's child checkout lives
-  /// there. Resolves live filesystem aliases for command guards. Views use
-  /// `workspaceMemberships`, refreshed when catalog identity or paths change.
+  /// The workspace member row at `path`, if any Workspace group owns a
+  /// checkout there. References and group rows never match. Resolves live
+  /// filesystem aliases for command guards. Views use `workspaceMemberships`,
+  /// refreshed when catalog identity, paths, or slots change.
   func workspaceMembership(forPath path: String) -> WorkspaceMembership? {
     catalog.workspaceMembership(
       forCanonicalPath: Self.canonicalPath(path),
@@ -2374,12 +2539,9 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: newPane, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
+      env: builtinEnvironment(env, project: catalog.projects[projectIndex], worktree: worktree)
     )
 
     store.scheduleSave(catalog)
@@ -2505,12 +2667,9 @@ final class HierarchyManager {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: pane, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
+      env: builtinEnvironment(env, project: catalog.projects[projectIndex], worktree: worktree)
     )
   }
 
@@ -2947,21 +3106,40 @@ final class HierarchyManager {
     _ env: [String: String],
     worktreePath: String,
     rootPath: String,
-    workspaceRoot: String? = nil
+    workspaceRoot: String? = nil,
+    workspaceGroup: (name: String, directory: String)? = nil
   ) -> [String: String] {
     var merged = env
     merged[BuiltinEnvVar.worktreePath.key] = worktreePath
     merged[BuiltinEnvVar.rootPath.key] = rootPath
-    // Present only inside a workspace, so its absence is itself a signal.
+    // Present only inside a workspace, so their absence is itself a signal.
     // A user-defined entry of the same name is dropped either way: the
     // editor refuses the key, and a stale value from a project's envVars
     // must not leak into a non-workspace pane.
-    if let workspaceRoot {
-      merged[BuiltinEnvVar.workspaceRoot.key] = workspaceRoot
-    } else {
-      merged.removeValue(forKey: BuiltinEnvVar.workspaceRoot.key)
+    func set(_ variable: BuiltinEnvVar, _ value: String?) {
+      if let value {
+        merged[variable.key] = value
+      } else {
+        merged.removeValue(forKey: variable.key)
+      }
     }
+    set(.workspaceRoot, workspaceRoot)
+    set(.workspaceGroup, workspaceRoot == nil ? nil : workspaceGroup?.name)
+    set(.workspaceGroupDirectory, workspaceRoot == nil ? nil : workspaceGroup?.directory)
     return merged
+  }
+
+  /// `injectingBuiltins` for a row of `project`: Workspace rows also get
+  /// the root and the group of their slot.
+  private func builtinEnvironment(
+    _ env: [String: String], project: Project, worktree: Worktree
+  ) -> [String: String] {
+    Self.injectingBuiltins(
+      env,
+      worktreePath: worktree.path,
+      rootPath: project.rootPath,
+      workspaceRoot: project.isWorkspace ? project.rootPath : nil,
+      workspaceGroup: workspaceGroupEnvironment(project: project, worktree: worktree))
   }
 
   // MARK: - Helpers

@@ -34,6 +34,12 @@ public nonisolated enum CodansEnvironment {
     /// checkout — and absent everywhere else, so a script can test for it.
     /// User-facing, like `worktreePath`.
     case workspaceRoot = "CODANS_WORKSPACE_ROOT"
+    /// Name of the Workspace group the pane's row belongs to. Written only
+    /// into panes of Workspace rows that have a group, like `workspaceRoot`.
+    case workspaceGroup = "CODANS_WORKSPACE_GROUP"
+    /// Canonical directory of that group: the `default` directory for
+    /// references, the group directory for members and group rows.
+    case workspaceGroupDirectory = "CODANS_WORKSPACE_GROUP_DIR"
     /// Where zmx keeps its per-pane daemon sockets — this channel's runtime
     /// directory (`AppDirectories.runtimeDirectory`), pinned so the reaper
     /// and the control client look in the same place zmx writes to.

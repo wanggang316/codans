@@ -33,9 +33,9 @@ struct CatalogSidebarTests {
   }
 
   @Test
-  func aWorkspaceRowIsItsRootAndListsItsCheckouts() {
-    #expect(workspace.rowWorktree == workspaceRoot)
-    #expect(workspace.childWorktrees == [checkout])
+  func aWorkspaceHeaderStandsForNoRowAndListsEveryRow() {
+    #expect(workspace.rowWorktree == nil)
+    #expect(workspace.childWorktrees == [workspaceRoot, checkout])
     #expect(workspace.hasChildRows)
   }
 
@@ -62,7 +62,7 @@ struct CatalogSidebarTests {
     var catalog = Catalog(projects: [folder, collapsedWorkspace, repository], projectSortMode: .manual)
     #expect(
       catalog.sidebarSelectionOrder.map(\.worktreeID)
-        == [folderRoot.id, workspaceRoot.id, main.id, pinned.id, feature.id])
+        == [folderRoot.id, main.id, pinned.id, feature.id])
 
     catalog.projects[1].isExpanded = true
     catalog.projects[2].isExpanded = false
@@ -135,8 +135,9 @@ struct CatalogSidebarTests {
     catalog.sidebarFilter = .pullRequests
     #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: []).isEmpty)
     let matches: Set<WorktreeID> = [feature.id, checkout.id]
-    #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
-      == [feature.id, checkout.id])
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
+        == [feature.id, checkout.id])
     catalog.projects[0].worktrees[0].archived = true
     #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID) == [checkout.id])
     #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [pinned.id]).map(\.worktreeID) == [pinned.id])

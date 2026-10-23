@@ -71,9 +71,10 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Encoded only when set so catalogs without an icon stay byte-identical
   /// on round-trip.
   public var icon: ProjectIcon?
-  /// `true` when `rootPath` is a workspace: a plain folder holding several
-  /// child checkouts described by `<root>/.codans/workspace.json`. The main
-  /// Worktree row is the root itself; every other row is one child checkout.
+  /// `true` when `rootPath` is a workspace: a plain folder holding groups of
+  /// checkouts described by `<root>/.codans/workspace-groups.json`. The
+  /// Project itself is the sidebar header and stands for no row; every row
+  /// carries a `workspaceSlot` (group terminal, reference, or member).
   /// Persisted (omitted when `false`) so the kind is known synchronously at
   /// launch and survives the root being temporarily unreachable; the
   /// catalog load path re-derives it from the manifest on disk when an older
@@ -85,10 +86,15 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// plus sidebar state (`isExpanded`, `deletion`). Empty for other
   /// Projects; the encode path omits the key when empty.
   public var workspaceGroups: [WorkspaceGroupRecord]
-  /// Transient. The decoded manifest, filled by the workspace reconcile and
-  /// used for display only (title, description, roles). Nil until the first
-  /// reconcile after launch; no catalog logic may depend on it.
-  public var workspace: WorkspaceManifest?
+  /// Transient. The decoded group manifest, filled by the workspace
+  /// reconcile and used for display only (title, sources, group details).
+  /// Nil until the first reconcile after launch; no catalog logic may depend
+  /// on it.
+  public var workspace: WorkspaceGroupsManifest?
+  /// Transient. Reference rows whose source main checkout is missing on
+  /// disk. The rows stay (the source is not the Workspace's to archive);
+  /// the reconcile fills this so the sidebar can show them as unavailable.
+  public var unavailableWorkspaceRows: Set<WorktreeID> = []
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -109,7 +115,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     icon: ProjectIcon? = nil,
     isWorkspace: Bool = false,
     workspaceGroups: [WorkspaceGroupRecord] = [],
-    workspace: WorkspaceManifest? = nil,
+    workspace: WorkspaceGroupsManifest? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id

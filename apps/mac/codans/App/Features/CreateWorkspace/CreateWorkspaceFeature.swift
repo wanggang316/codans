@@ -554,11 +554,10 @@ struct CreateWorkspaceFeature {
 
       case .preflightTick:
         guard state.creation == .idle else { return .none }
-        let plan = state.checkedPlan
-        return .run { [client = workspaceClient] send in
-          await send(.preflightFinished(await client.preflight(plan)))
-        }
-        .cancellable(id: CancelID.preflight, cancelInFlight: true)
+        // The checkout-per-member flow this sheet drives is retired; the
+        // client has no preflight for it, so the form shows no findings.
+        return .send(.preflightFinished(WorkspacePreflight()))
+          .cancellable(id: CancelID.preflight, cancelInFlight: true)
 
       case .preflightFinished(let result):
         state.rootIssues = result.rootIssues.map(MemberIssue.init(preflight:))
@@ -913,15 +912,12 @@ struct CreateWorkspaceFeature {
   // MARK: - Creation
 
   private func startCreation(_ plan: WorkspacePlan, _ state: inout State) -> Effect<Action> {
-    let stream: AsyncThrowingStream<WorkspaceCreationEvent, Error>
-    let token = uuid()
-    switch state.mode {
-    case .create:
-      stream = workspaceClient.createStream(plan, token)
-    case .add(let projectID, _, _, _):
-      guard let member = plan.members.first else { return .none }
-      stream = workspaceClient.addStream(projectID, member, token)
+    // Workspaces no longer check out a branch per member at creation; the
+    // client refuses this flow until the sheet moves to sources and groups.
+    let stream = AsyncThrowingStream<WorkspaceCreationEvent, Error> {
+      $0.finish(throwing: WorkspaceError.notImplemented("Creating a workspace from this sheet"))
     }
+    let token = uuid()
     state.creationToken = token
     for id in state.members.ids { state.members[id: id]?.progress = .pending }
     state.creation = .running(current: nil)
@@ -942,6 +938,7 @@ struct CreateWorkspaceFeature {
     )
   }
 
+  // swiftlint:disable:next cyclomatic_complexity
   private func reduceCreationEvent(_ event: WorkspaceCreationEvent, state: inout State) -> Effect<Action> {
     func memberID(named name: String) -> MemberDraft.ID? {
       state.members.first { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == name }?.id
@@ -978,6 +975,9 @@ struct CreateWorkspaceFeature {
       }
     case .rolledBack(let failures):
       state.creation = .rolledBack(failures: failures)
+    default:
+      // Group events never reach this sheet.
+      break
     }
     return .none
   }

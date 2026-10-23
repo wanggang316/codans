@@ -6,15 +6,14 @@ import Testing
 @testable import Codans
 
 /// Wire-to-plan translation of the `workspace.*` handlers: member sources
-/// resolve to repository roots, defaults fill in, and client errors map to
-/// the IPC error the CLI turns into an exit code. The client is a stub that
-/// records the plan; the real orchestration is covered by
-/// `WorkspaceClientTests`.
+/// resolve to repository roots, invalid checkout flags are refused, and
+/// client errors map to the IPC error the CLI turns into an exit code. The
+/// client is a stub that records the source plan.
 @MainActor
 struct WorkspaceHandlersTests {
   private final class Recorder: @unchecked Sendable {
-    var plans: [WorkspacePlan] = []
-    var added: [(ProjectID, WorkspacePlan.Member)] = []
+    var plans: [WorkspaceSourcePlan] = []
+    var added: [(ProjectID, WorkspaceSource)] = []
   }
 
   private struct Fixture {
@@ -24,7 +23,7 @@ struct WorkspaceHandlersTests {
   }
 
   private func makeFixture(
-    createResult: @escaping @Sendable (WorkspacePlan) throws -> ProjectID = { _ in ProjectID() }
+    createResult: @escaping @Sendable (WorkspaceSourcePlan) throws -> ProjectID = { _ in ProjectID() }
   ) -> Fixture {
     let manager = HierarchyManager(
       catalog: Catalog(),
@@ -36,16 +35,14 @@ struct WorkspaceHandlersTests {
     let hierarchy = HierarchyClient.live(manager: manager)
     let recorder = Recorder()
     let client = WorkspaceClient(
-      create: { plan in
+      createWorkspace: { plan in
         recorder.plans.append(plan)
         return try createResult(plan)
       },
-      add: { projectID, member in
-        recorder.added.append((projectID, member))
+      addSource: { projectID, source in
+        recorder.added.append((projectID, source))
         return WorktreeID()
       },
-      drop: { _, _, _ in nil },
-      remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }
     )
     let handlers = WorkspaceHandlers(hierarchy: hierarchy, workspace: client, gitCLI: GitWorktreeCLI())
     return Fixture(handlers: handlers, manager: manager, recorder: recorder)
@@ -72,13 +69,10 @@ struct WorkspaceHandlersTests {
     let handlers = WorkspaceHandlers(
       hierarchy: HierarchyClient.live(manager: fx.manager),
       workspace: WorkspaceClient(
-        create: { plan in
+        createWorkspace: { plan in
           fx2.recorder.plans.append(plan)
           return workspaceID
-        },
-        add: { _, _ in WorktreeID() },
-        drop: { _, _, _ in nil },
-        remove: { _, _ in WorkspaceRemovalOutcome(deletedFolder: false) }),
+        }),
       gitCLI: GitWorktreeCLI())
 
     let summary = try await handlers.create(
@@ -92,12 +86,11 @@ struct WorkspaceHandlersTests {
     let plan = try #require(fx2.recorder.plans.first)
     #expect(plan.title == "Checkout Flow")
     #expect(plan.rootPath.hasSuffix("/.codans/workspaces/checkout-flow"))
-    #expect(plan.members.count == 2)
-    #expect(plan.members[0].name == "app")
-    #expect(plan.members[0].sourceGitRoot == "/src/app")
-    #expect(plan.members[0].checkout == .newBranch(branch: "checkout-flow", baseRef: nil))
-    #expect(plan.members[1].name == "svc")
-    #expect(plan.members[1].checkout == .existingBranch("other"))
+    #expect(
+      plan.sources == [
+        WorkspaceSource(location: .local(path: "/src/app"), name: "app"),
+        WorkspaceSource(location: .local(path: "/src/app"), name: "svc"),
+      ])
     #expect(summary.projectID == workspaceID)
     #expect(summary.title == "Checkout Flow")
     #expect(summary.members.map(\.name) == ["app"])
@@ -198,32 +191,23 @@ struct WorkspaceHandlersTests {
             branch: "mine", remoteRef: "origin/main", resetLocalBranch: true),
         ]))
     let plan = try #require(fx.recorder.plans.first)
-    #expect(plan.members.count == 3)
-    // Resolved to the repository root.
-    #expect(plan.members[0].name == "lib")
-    #expect(plan.members[0].source == .local(gitRoot: HierarchyManager.canonicalPath(lib)))
-    #expect(plan.members[0].checkout == .newBranch(branch: "mixed", baseRef: nil))
-    // Remote with a default destination under the request's clone base.
-    #expect(plan.members[1].name == "svc")
     #expect(
-      plan.members[1].source
-        == .remote(
-          url: "git@github.com:org/svc.git",
-          cloneDestination: (sources as NSString).appendingPathComponent("svc")))
-    // A remote ref defaults the branch to its branch part.
-    #expect(
-      plan.members[1].checkout
-        == .remoteTrackingRef(remoteRef: "origin/release", branch: "release", resetLocal: false))
-    // Named destination is tilde-expanded; explicit branch and reset kept.
-    #expect(plan.members[2].name == "pinned")
-    #expect(
-      plan.members[2].source
-        == .remote(
-          url: "https://example.com/team/tool",
-          cloneDestination: ("~/src/tool" as NSString).expandingTildeInPath))
-    #expect(
-      plan.members[2].checkout
-        == .remoteTrackingRef(remoteRef: "origin/main", branch: "mine", resetLocal: true))
+      plan.sources == [
+        // Resolved to the repository root.
+        WorkspaceSource(location: .local(path: HierarchyManager.canonicalPath(lib)), name: "lib"),
+        // Remote with a default destination under the request's clone base.
+        WorkspaceSource(
+          location: .remote(
+            url: "git@github.com:org/svc.git",
+            cloneDestination: (sources as NSString).appendingPathComponent("svc")),
+          name: "svc"),
+        // Named destination is tilde-expanded.
+        WorkspaceSource(
+          location: .remote(
+            url: "https://example.com/team/tool",
+            cloneDestination: ("~/src/tool" as NSString).expandingTildeInPath),
+          name: "pinned"),
+      ])
   }
 
   @Test
@@ -289,21 +273,6 @@ struct WorkspaceHandlersTests {
           title: "T", members: [IPC.WorkspaceMemberRequest(projectID: appID, remoteRef: "nobranch")]))
     }
     #expect(fx.recorder.plans.isEmpty)
-
-    // Request-level trackRemote applies origin/<branch> to every member.
-    _ = try? await fx.handlers.create(
-      IPC.WorkspaceCreateRequest(
-        title: "Track", branch: "feat", trackRemote: true,
-        members: [
-          IPC.WorkspaceMemberRequest(projectID: appID), IPC.WorkspaceMemberRequest(name: "b", projectID: appID),
-        ]))
-    let plan = try #require(fx.recorder.plans.first)
-    #expect(
-      plan.members.map(\.checkout)
-        == [
-          .remoteTrackingRef(remoteRef: "origin/feat", branch: "feat", resetLocal: false),
-          .remoteTrackingRef(remoteRef: "origin/feat", branch: "feat", resetLocal: false),
-        ])
   }
 
   @Test

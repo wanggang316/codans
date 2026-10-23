@@ -3,10 +3,12 @@ import ComposableArchitecture
 import Foundation
 import os
 
-/// Why a workspace could not be created or extended. Every case names the
-/// path or member involved so the CLI and the sheet can show it verbatim.
+/// Why a workspace operation could not run. Every case names the path,
+/// group, or member involved so the CLI and the sheets can show it verbatim.
 nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
   case invalidPlan([WorkspacePlan.ValidationIssue])
+  /// A source plan the client refuses before any I/O (empty title, no root).
+  case invalidSourcePlan(reason: String)
   case rootAlreadyRegistered(path: String)
   case rootIsFile(path: String)
   case rootAlreadyWorkspace(path: String)
@@ -31,18 +33,37 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
   /// repository, so there is nothing to unregister it from.
   case memberWithoutSource(name: String)
   case cannotDropRoot
+  /// The source is already listed in the Workspace.
+  case sourceExists(path: String)
+  /// The Workspace lists no source at this path.
+  case sourceNotFound(path: String)
+  case groupNotFound(WorkspaceGroupID)
+  /// The `default` group exists as long as the Workspace does.
+  case cannotDeleteDefault
+  /// A new group's preflight found blocking issues.
+  case groupPreflightFailed(WorkspacePreflight)
+  /// The delete would lose data the request did not acknowledge.
+  case risksNotAcknowledged(GroupDeletionCheck)
+  /// A deletion probe failed; nothing was deleted.
+  case checkFailed(GroupDeletionCheck)
+  /// The manifest could not be read or written.
+  case manifestUnavailable(reason: String)
+  /// The operation has no implementation in this build yet.
+  case notImplemented(String)
   case cancelled
 
   var errorDescription: String? {
     switch self {
     case .invalidPlan(let issues):
       return issues.map(\.description).joined(separator: "; ")
+    case .invalidSourcePlan(let reason):
+      return reason
     case .rootAlreadyRegistered(let path):
       return "\(path) is already a project in codans"
     case .rootIsFile(let path):
       return "\(path) is a file, not a folder"
     case .rootAlreadyWorkspace(let path):
-      return "\(path) is already a workspace (it carries \(WorkspaceLayout.rootRelativeManifestPath))"
+      return "\(path) is already a workspace (it carries \(WorkspaceLayout.stateDirectoryName)/)"
     case .rootInsideRepository(let path, let gitRoot):
       return "\(path) is inside the repository at \(gitRoot); a workspace root must not be inside a git repository"
     case .destinationExists(let path):
@@ -67,85 +88,121 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
       return "\"\(name)\" records no source repository, so its checkout cannot be unregistered"
     case .cannotDropRoot:
       return "the workspace root is not a member; remove the workspace instead"
+    case .sourceExists(let path):
+      return "\(path) is already a project of this workspace"
+    case .sourceNotFound(let path):
+      return "the workspace has no project at \(path)"
+    case .groupNotFound(let id):
+      return "the workspace has no group \(id)"
+    case .cannotDeleteDefault:
+      return "the \"default\" group cannot be deleted"
+    case .groupPreflightFailed(let preflight):
+      let messages = (preflight.groupIssues + preflight.memberIssues.values.flatMap { $0 })
+        .filter { !$0.isInformational }
+        .map(\.message)
+      return messages.isEmpty ? "the group cannot be created" : messages.joined(separator: "; ")
+    case .risksNotAcknowledged(let check):
+      return "deleting group \"\(check.groupName)\" would lose work; acknowledge the risks to continue"
+    case .checkFailed(let check):
+      return "group \"\(check.groupName)\" could not be checked; nothing was deleted"
+    case .manifestUnavailable(let reason):
+      return reason
+    case .notImplemented(let operation):
+      return "\(operation) is not available in this build"
     case .cancelled:
       return "workspace creation was cancelled; everything it created has been removed"
     }
   }
 }
 
-/// Creates workspaces and adds repositories to them. The GUI sheet and the
-/// `workspace.*` IPC handlers share this one orchestration so both entry
-/// points materialize, record, and register identically.
+/// The only mutation route for Workspaces, shared by the GUI sheets and the
+/// `workspace.*` IPC handlers so both entry points act identically.
 ///
-/// Order of operations, chosen so the catalog only ever sees a workspace
-/// whose folders exist: validate → preflight the root and every source →
-/// create the root folder → for each member clone its remote if it has one,
-/// fetch the remote its base ref names, `git worktree add` → write the
-/// manifest → register the Project → reconcile it (which fills the child
-/// rows from git) and each source Project (which shows its mirror rows).
-/// Any failure or cancellation before the manifest is written rolls back
-/// exactly what the ledger recorded.
-///
-/// The streaming variants report each step as a `WorkspaceCreationEvent`
-/// and can be stopped by token; `create` / `add` drain them.
+/// Each part lives in its own file: sources and Workspace creation in
+/// `WorkspaceClient+Sources.swift`, named groups in
+/// `WorkspaceClient+Groups.swift`, deletion and removal in
+/// `WorkspaceClient+Deletion.swift`. Every closure defaults to
+/// `unimplemented`, so a test stubs only what it drives.
 struct WorkspaceClient: Sendable {
-  var create: @MainActor @Sendable (_ plan: WorkspacePlan) async throws -> ProjectID
-  var add:
-    @MainActor @Sendable (_ projectID: ProjectID, _ member: WorkspacePlan.Member) async throws
-      -> WorktreeID
-  /// Remove one member: unregister its checkout from the source repository
-  /// (relocate-then-prune), optionally delete its branch, drop it from the
-  /// manifest, and remove its row plus any mirror row under the source
-  /// Project. Returns a note when the branch was kept (checked out elsewhere).
-  var drop:
-    @MainActor @Sendable (_ projectID: ProjectID, _ worktreeID: WorktreeID, _ deleteBranch: Bool)
-      async throws -> String?
-  /// Remove the workspace. With the default cleanup only the catalog entry
-  /// goes; with `deleteFiles` every member is unregistered first and the
-  /// folder is deleted only when all of them were.
-  var remove:
-    @MainActor @Sendable (_ projectID: ProjectID, _ cleanup: WorkspaceCleanup) async throws
-      -> WorkspaceRemovalOutcome
+  /// Validate the root, resolve the sources to main checkouts (cloning
+  /// remotes), write the group manifest with `default` only, sync the
+  /// default links, register, and reconcile. No branch is created or
+  /// switched. A failure rolls back the created root and clones only.
+  var createWorkspace: @MainActor @Sendable (_ plan: WorkspaceSourcePlan) async throws -> ProjectID =
+    unimplemented("WorkspaceClient.createWorkspace", placeholder: ProjectID())
+  /// Root and source findings of `createWorkspace`, collected without side
+  /// effects so a form can show them live. `memberIssues` is keyed by the
+  /// source's index in the plan, as a string.
+  var preflightWorkspace: @MainActor @Sendable (_ plan: WorkspaceSourcePlan) async -> WorkspacePreflight =
+    unimplemented("WorkspaceClient.preflightWorkspace", placeholder: WorkspacePreflight())
+  /// Append a source project, sync the default links, and reconcile. Named
+  /// groups are unchanged. Returns the new reference row.
+  var addSource: @MainActor @Sendable (_ projectID: ProjectID, _ source: WorkspaceSource) async throws -> WorktreeID =
+    unimplemented("WorkspaceClient.addSource", placeholder: WorktreeID())
+  /// Remove a source project, unlink it, and remove its reference row.
+  /// Never deletes a checkout or touches the source directory.
+  var removeSource: @MainActor @Sendable (_ projectID: ProjectID, _ sourceGitRoot: String) async throws -> Void =
+    unimplemented("WorkspaceClient.removeSource")
 
-  /// `create` as a stream of progress events. Finishes with `.registered`
-  /// on success, or throws the underlying `WorkspaceError` /
-  /// `GitWorktreeError` after rolling back (a `.memberFailed` event names
-  /// the row first). `cancelCreation(token)` stops it and rolls back.
-  var createStream:
-    @MainActor @Sendable (_ plan: WorkspacePlan, _ token: UUID)
-      -> AsyncThrowingStream<WorkspaceCreationEvent, Error> = { _, _ in
-        AsyncThrowingStream { $0.finish(throwing: WorkspaceError.cancelled) }
-      }
-  /// `add` as a stream; `.registered` carries the new row's id.
-  var addStream:
-    @MainActor @Sendable (_ projectID: ProjectID, _ member: WorkspacePlan.Member, _ token: UUID)
-      -> AsyncThrowingStream<WorkspaceCreationEvent, Error> = { _, _, _ in
-        AsyncThrowingStream { $0.finish(throwing: WorkspaceError.cancelled) }
-      }
+  /// Per-source defaults for a new group: base ref, fetch, copy options,
+  /// agent profile, and setup command from the source Project's settings
+  /// (global settings for an unregistered source).
+  var groupCreationDefaults: @MainActor @Sendable (_ projectID: ProjectID) async -> [MemberCreationOptions] =
+    unimplemented("WorkspaceClient.groupCreationDefaults", placeholder: [])
+  /// Everything `createGroupStream` would refuse, per project, without
+  /// side effects. `memberIssues` is keyed by member name.
+  var preflightGroup: @MainActor @Sendable (_ plan: WorkspaceGroupPlan) async -> WorkspacePreflight =
+    unimplemented("WorkspaceClient.preflightGroup", placeholder: WorkspacePreflight())
+  /// Creates a named group: preflight, every checkout (rolled back as a
+  /// whole on failure), manifest and catalog, then setup commands. Ends with
+  /// `.groupCreated(result)` on success. `cancelCreation(token)` stops it.
+  var createGroupStream:
+    @MainActor @Sendable (_ plan: WorkspaceGroupPlan, _ token: UUID)
+      -> AsyncThrowingStream<WorkspaceCreationEvent, Error> = unimplemented(
+        "WorkspaceClient.createGroupStream",
+        placeholder: AsyncThrowingStream { $0.finish(throwing: WorkspaceError.cancelled) })
   /// Stops the run started with `token`. The stream keeps flowing until it
   /// has reported the rollback, then finishes with `WorkspaceError.cancelled`.
-  var cancelCreation: @Sendable (_ token: UUID) async -> Void = { _ in }
-  /// Everything `create` would refuse, collected without side effects so a
-  /// form can show it live. Never throws; an empty result means go.
-  var preflight: @MainActor @Sendable (_ plan: WorkspacePlan) async -> WorkspacePreflight = { _ in
-    WorkspacePreflight()
+  var cancelCreation: @Sendable (_ token: UUID) async -> Void = unimplemented(
+    "WorkspaceClient.cancelCreation")
+
+  /// What deleting a named group would destroy, without side effects.
+  var checkGroupDeletion:
+    @MainActor @Sendable (_ projectID: ProjectID, _ groupID: WorkspaceGroupID) async -> GroupDeletionCheck =
+      unimplemented(
+        "WorkspaceClient.checkGroupDeletion",
+        placeholder: GroupDeletionCheck(projectID: ProjectID(), groupID: WorkspaceGroupID(), groupName: ""))
+  /// Deletes a named group after re-running the check. Throws
+  /// `risksNotAcknowledged` / `checkFailed` / `cannotDeleteDefault`.
+  var deleteGroup:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID, _ request: GroupDeletionRequest
+    ) async throws -> GroupDeletionOutcome = unimplemented(
+      "WorkspaceClient.deleteGroup", placeholder: GroupDeletionOutcome(deletedGroup: false))
+  /// Removes the Workspace from the sidebar, or deletes the files it owns.
+  /// Source main checkouts are kept either way.
+  var removeWorkspace:
+    @MainActor @Sendable (_ projectID: ProjectID, _ request: WorkspaceRemovalRequest) async throws
+      -> WorkspaceRemovalOutcome = unimplemented(
+        "WorkspaceClient.removeWorkspace", placeholder: WorkspaceRemovalOutcome(deletedFolder: false))
+}
+
+extension WorkspaceClient {
+  /// `createGroupStream` drained to its result, for callers that only wait
+  /// (IPC).
+  @MainActor
+  func createGroup(_ plan: WorkspaceGroupPlan) async throws -> GroupCreationResult {
+    var result: GroupCreationResult?
+    for try await event in createGroupStream(plan, UUID()) {
+      if case .groupCreated(let created) = event { result = created }
+    }
+    guard let result else { throw WorkspaceError.cancelled }
+    return result
   }
 }
 
 extension WorkspaceClient: TestDependencyKey {
-  static let testValue = WorkspaceClient(
-    create: unimplemented("WorkspaceClient.create", placeholder: ProjectID()),
-    add: unimplemented("WorkspaceClient.add", placeholder: WorktreeID()),
-    drop: unimplemented("WorkspaceClient.drop", placeholder: nil),
-    remove: unimplemented(
-      "WorkspaceClient.remove", placeholder: WorkspaceRemovalOutcome(deletedFolder: false)),
-    createStream: unimplemented(
-      "WorkspaceClient.createStream", placeholder: AsyncThrowingStream { $0.finish() }),
-    addStream: unimplemented(
-      "WorkspaceClient.addStream", placeholder: AsyncThrowingStream { $0.finish() }),
-    cancelCreation: unimplemented("WorkspaceClient.cancelCreation"),
-    preflight: unimplemented("WorkspaceClient.preflight", placeholder: WorkspacePreflight())
-  )
+  static let testValue = WorkspaceClient()
 }
 
 extension DependencyValues {
@@ -184,17 +241,17 @@ nonisolated final class WorkspaceCreationRegistry: @unchecked Sendable {
 // MARK: - Live
 
 extension WorkspaceClient {
-  nonisolated private static let logger = Logger(
+  nonisolated static let logger = Logger(
     subsystem: "com.gumpw.codans.hierarchy", category: "workspace")
 
   /// Everything the orchestration reaches for, bundled so the static steps
-  /// take one argument.
-  private struct Context: Sendable {
+  /// in each part file take one argument.
+  struct Context: Sendable {
     let hierarchy: HierarchyClient
     let git: GitWorktreeClient
     let cli: GitWorktreeCLI
     /// Whether to `git fetch` the remote a base ref names before checking
-    /// out — the same switch worktree creation honours.
+    /// out — the global switch worktree creation honours.
     let fetchRemoteOnCreate: @MainActor @Sendable () -> Bool
     let registry: WorkspaceCreationRegistry
   }
@@ -209,67 +266,45 @@ extension WorkspaceClient {
       hierarchy: hierarchy, git: gitWorktreeClient, cli: gitCLI,
       fetchRemoteOnCreate: fetchRemoteOnCreate, registry: WorkspaceCreationRegistry())
     return WorkspaceClient(
-      create: { plan in
-        try await drain(makeCreateStream(plan, token: UUID(), context: context)).projectID
+      createWorkspace: { plan in try await createWorkspace(plan, context: context) },
+      preflightWorkspace: { plan in await preflightWorkspace(plan, context: context) },
+      addSource: { projectID, source in
+        try await addSource(projectID: projectID, source: source, context: context)
       },
-      add: { projectID, member in
-        let registered = try await drain(
-          makeAddStream(projectID: projectID, member: member, token: UUID(), context: context))
-        guard let worktreeID = registered.worktreeID else {
-          throw WorkspaceError.memberNotRegistered(name: member.name)
+      removeSource: { projectID, sourceGitRoot in
+        try await removeSource(projectID: projectID, sourceGitRoot: sourceGitRoot, context: context)
+      },
+      groupCreationDefaults: { projectID in
+        await groupCreationDefaults(projectID: projectID, context: context)
+      },
+      preflightGroup: { plan in await preflightGroup(plan, context: context) },
+      createGroupStream: { plan, token in
+        makeStream(token: token, registry: context.registry) { yield in
+          try await performCreateGroup(plan, context: context, yield: yield)
         }
-        return worktreeID
-      },
-      drop: { projectID, worktreeID, deleteBranch in
-        try await Self.drop(
-          projectID: projectID, worktreeID: worktreeID, deleteBranch: deleteBranch,
-          hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient)
-      },
-      remove: { projectID, cleanup in
-        try await Self.remove(
-          projectID: projectID, cleanup: cleanup,
-          hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient)
-      },
-      createStream: { plan, token in
-        makeCreateStream(plan, token: token, context: context)
-      },
-      addStream: { projectID, member, token in
-        makeAddStream(projectID: projectID, member: member, token: token, context: context)
       },
       cancelCreation: { token in
         context.registry.cancel(token)
       },
-      preflight: { plan in
-        await preflight(plan, context: context)
+      checkGroupDeletion: { projectID, groupID in
+        await checkGroupDeletion(projectID: projectID, groupID: groupID, context: context)
+      },
+      deleteGroup: { projectID, groupID, request in
+        try await deleteGroup(projectID: projectID, groupID: groupID, request: request, context: context)
+      },
+      removeWorkspace: { projectID, request in
+        try await removeWorkspace(projectID: projectID, request: request, context: context)
       }
     )
   }
 
   // MARK: Streams
 
-  @MainActor
-  private static func makeCreateStream(
-    _ plan: WorkspacePlan, token: UUID, context: Context
-  ) -> AsyncThrowingStream<WorkspaceCreationEvent, Error> {
-    makeStream(token: token, registry: context.registry) { yield in
-      _ = try await performCreate(plan, context: context, yield: yield)
-    }
-  }
-
-  @MainActor
-  private static func makeAddStream(
-    projectID: ProjectID, member: WorkspacePlan.Member, token: UUID, context: Context
-  ) -> AsyncThrowingStream<WorkspaceCreationEvent, Error> {
-    makeStream(token: token, registry: context.registry) { yield in
-      _ = try await performAdd(projectID: projectID, member: member, context: context, yield: yield)
-    }
-  }
-
   /// Drives `body` on the main actor inside a registered task. A consumer
   /// that stops iterating cancels the task, which the steps observe between
   /// subprocesses; the rollback then runs detached and finishes on its own.
   @MainActor
-  private static func makeStream(
+  static func makeStream(
     token: UUID,
     registry: WorkspaceCreationRegistry,
     body:
@@ -292,209 +327,13 @@ extension WorkspaceClient {
     }
   }
 
-  private static func drain(
-    _ stream: AsyncThrowingStream<WorkspaceCreationEvent, Error>
-  ) async throws -> (projectID: ProjectID, worktreeID: WorktreeID?) {
-    var registered: (ProjectID, WorktreeID?)?
-    for try await event in stream {
-      if case .registered(let projectID, let worktreeID) = event {
-        registered = (projectID, worktreeID)
-      }
-    }
-    guard let registered else { throw WorkspaceError.cancelled }
-    return registered
-  }
-
-  // MARK: Create / add
-
-  @MainActor
-  private static func performCreate(
-    _ plan: WorkspacePlan,
-    context: Context,
-    yield: @escaping @Sendable (WorkspaceCreationEvent) -> Void
-  ) async throws -> ProjectID {
-    let issues = plan.validate()
-    guard issues.isEmpty else { throw WorkspaceError.invalidPlan(issues) }
-    let rootPath = canonical(plan.rootPath)
-    try await preflightRoot(rootPath, context: context)
-    var resolved: [ResolvedMember] = []
-    for member in plan.members {
-      resolved.append(try await resolve(member, rootPath: rootPath, context: context))
-    }
-
-    var ledger = WorkspaceMaterializationLedger()
-    var members: [WorkspacePlan.Member] = []
-    do {
-      try Task.checkCancellation()
-      let fileManager = FileManager.default
-      if !fileManager.fileExists(atPath: rootPath) {
-        try fileManager.createDirectory(atPath: rootPath, withIntermediateDirectories: true)
-        ledger.record(.createdDirectory(path: rootPath))
-      }
-      for entry in resolved {
-        try Task.checkCancellation()
-        members.append(try await materialize(entry, ledger: &ledger, context: context, yield: yield))
-      }
-      var materialized = plan
-      materialized.rootPath = rootPath
-      materialized.members = members
-      try WorkspaceManifestStore.save(materialized.manifest(), rootPath: rootPath)
-      yield(.manifestWritten)
-    } catch {
-      yield(.rollingBack)
-      let failures = await rollback(ledger, context: context)
-      yield(.rolledBack(failures: failures))
-      throw error is CancellationError ? WorkspaceError.cancelled : error
-    }
-
-    let projectID = context.hierarchy.addWorkspaceProject(plan.title, rootPath)
-    await context.hierarchy.reconcileDiscoveredWorktrees(projectID)
-    await reconcileSources(members.map(\.sourceGitRoot), hierarchy: context.hierarchy)
-    yield(.registered(projectID: projectID, worktreeID: nil))
-    return projectID
-  }
-
-  @MainActor
-  private static func performAdd(
-    projectID: ProjectID,
-    member: WorkspacePlan.Member,
-    context: Context,
-    yield: @escaping @Sendable (WorkspaceCreationEvent) -> Void
-  ) async throws -> WorktreeID {
-    let issues = WorkspacePlan.validate(members: [member])
-    guard issues.isEmpty else { throw WorkspaceError.invalidPlan(issues) }
-    guard let project = context.hierarchy.snapshot().projects.first(where: { $0.id == projectID }),
-      project.isWorkspace
-    else { throw WorkspaceError.notWorkspace(projectID) }
-    let rootPath = project.rootPath
-    var manifest = try WorkspaceManifestStore.load(rootPath: rootPath)
-    guard !manifest.repositories.contains(where: { $0.name == member.name }) else {
-      throw WorkspaceError.memberExists(name: member.name)
-    }
-    let entry = try await resolve(member, rootPath: rootPath, context: context)
-
-    var ledger = WorkspaceMaterializationLedger()
-    let stored: WorkspacePlan.Member
-    do {
-      try Task.checkCancellation()
-      stored = try await materialize(entry, ledger: &ledger, context: context, yield: yield)
-      manifest.repositories.append(stored.manifestEntry)
-      try WorkspaceManifestStore.save(manifest, rootPath: rootPath)
-      yield(.manifestWritten)
-    } catch {
-      yield(.rollingBack)
-      let failures = await rollback(ledger, context: context)
-      yield(.rolledBack(failures: failures))
-      throw error is CancellationError ? WorkspaceError.cancelled : error
-    }
-
-    await context.hierarchy.reconcileDiscoveredWorktrees(projectID)
-    await reconcileSources([stored.sourceGitRoot], hierarchy: context.hierarchy)
-    guard
-      let worktreeID = context.hierarchy.snapshot().projects.first(where: { $0.id == projectID })?
-        .worktrees.first(where: { HierarchyManager.canonicalPath($0.path) == entry.destination })?.id
-    else { throw WorkspaceError.memberNotRegistered(name: member.name) }
-    yield(.registered(projectID: projectID, worktreeID: worktreeID))
-    return worktreeID
-  }
-
-  // MARK: Drop / remove
-
-  @MainActor
-  private static func drop(
-    projectID: ProjectID,
-    worktreeID: WorktreeID,
-    deleteBranch: Bool,
-    hierarchy: HierarchyClient,
-    gitWorktreeClient: GitWorktreeClient
-  ) async throws -> String? {
-    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == projectID }),
-      project.isWorkspace
-    else { throw WorkspaceError.notWorkspace(projectID) }
-    guard let row = project.worktrees.first(where: { $0.id == worktreeID }) else {
-      throw WorkspaceError.memberNotFound(name: worktreeID.description)
-    }
-    guard row.path != project.rootPath else { throw WorkspaceError.cannotDropRoot }
-    let rootPath = project.rootPath
-    var manifest = try WorkspaceManifestStore.load(rootPath: rootPath)
-    let canonicalRow = HierarchyManager.canonicalPath(row.path)
-    let entryIndex = manifest.repositories.firstIndex {
-      HierarchyManager.canonicalPath($0.resolvedPath(rootPath: rootPath)) == canonicalRow
-    }
-
-    let warning = try await unregister(
-      row, sourceGitRoot: row.sourceGitRoot ?? entryIndex.flatMap { manifest.repositories[$0].sourceGitRoot },
-      deleteBranch: deleteBranch, hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient)
-
-    if let entryIndex {
-      manifest.repositories.remove(at: entryIndex)
-      try WorkspaceManifestStore.save(manifest, rootPath: rootPath)
-    }
-    try hierarchy.removeWorktree(worktreeID, projectID)
-    removeMirrorRows(forCanonicalPath: canonicalRow, hierarchy: hierarchy)
-    return warning
-  }
-
-  @MainActor
-  private static func remove(
-    projectID: ProjectID,
-    cleanup: WorkspaceCleanup,
-    hierarchy: HierarchyClient,
-    gitWorktreeClient: GitWorktreeClient
-  ) async throws -> WorkspaceRemovalOutcome {
-    guard let project = hierarchy.snapshot().projects.first(where: { $0.id == projectID }),
-      project.isWorkspace
-    else { throw WorkspaceError.notWorkspace(projectID) }
-    guard cleanup.deleteFiles else {
-      try hierarchy.removeProject(projectID)
-      return WorkspaceRemovalOutcome(deletedFolder: false)
-    }
-    let rootPath = project.rootPath
-    let manifest = try? WorkspaceManifestStore.load(rootPath: rootPath)
-    var failures: [String] = []
-    var keptBranches: [String] = []
-    for row in project.worktrees where row.path != project.rootPath {
-      let canonicalRow = HierarchyManager.canonicalPath(row.path)
-      let entry = manifest?.repositories.first {
-        HierarchyManager.canonicalPath($0.resolvedPath(rootPath: rootPath)) == canonicalRow
-      }
-      do {
-        if let warning = try await unregister(
-          row, sourceGitRoot: row.sourceGitRoot ?? entry?.sourceGitRoot,
-          deleteBranch: cleanup.deleteBranches, hierarchy: hierarchy,
-          gitWorktreeClient: gitWorktreeClient)
-        {
-          keptBranches.append("\(row.name): \(warning)")
-        }
-        removeMirrorRows(forCanonicalPath: canonicalRow, hierarchy: hierarchy)
-      } catch {
-        logger.warning("could not unregister workspace member \(row.name, privacy: .public): \(error)")
-        failures.append(row.name)
-      }
-    }
-    // The entry goes regardless; the folder only when every checkout is
-    // gone, since deleting it under a live registration strands the source
-    // repository's `git worktree list`.
-    try hierarchy.removeProject(projectID)
-    var deletedFolder = false
-    if failures.isEmpty {
-      do {
-        try FileManager.default.removeItem(atPath: rootPath)
-        deletedFolder = true
-      } catch {
-        logger.warning("could not delete workspace folder \(rootPath, privacy: .private): \(error)")
-        failures.append("folder")
-      }
-    }
-    return WorkspaceRemovalOutcome(
-      deletedFolder: deletedFolder, failures: failures, keptBranches: keptBranches)
-  }
+  // MARK: Removal helpers
 
   /// Tear down the row's terminals, move its checkout out from under the
   /// source repository, and optionally delete the branch. Returns the
   /// kept-branch note when git refused the deletion.
   @MainActor
-  private static func unregister(
+  static func unregister(
     _ row: Worktree,
     sourceGitRoot: String?,
     deleteBranch: Bool,
@@ -519,7 +358,7 @@ extension WorkspaceClient {
   /// Project reconciles; drop that row too, or it lingers pointing at a
   /// folder that is gone until the next stale sweep archives it.
   @MainActor
-  private static func removeMirrorRows(forCanonicalPath path: String, hierarchy: HierarchyClient) {
+  static func removeMirrorRows(forCanonicalPath path: String, hierarchy: HierarchyClient) {
     for project in hierarchy.snapshot().projects where !project.isWorkspace {
       for worktree in project.worktrees
       where HierarchyManager.canonicalPath(worktree.path) == path && worktree.path != project.rootPath {
@@ -533,61 +372,16 @@ extension WorkspaceClient {
   /// A member after preflight: canonical source root (where the clone will
   /// land, for a remote that is not on disk yet), absolute destination, and
   /// the URL still to clone from, if any.
-  private struct ResolvedMember: Sendable {
+  struct ResolvedMember: Sendable {
     let member: WorkspacePlan.Member
     let sourceGitRoot: String
     let destination: String
     let cloneFrom: String?
   }
 
-  @MainActor
-  private static func preflight(_ plan: WorkspacePlan, context: Context) async -> WorkspacePreflight {
-    var result = WorkspacePreflight()
-    let rootPath =
-      plan.rootPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      ? "" : canonical(plan.rootPath)
-    if !rootPath.isEmpty {
-      do {
-        try await preflightRoot(rootPath, context: context)
-        var isDirectory = ObjCBool(false)
-        if FileManager.default.fileExists(atPath: rootPath, isDirectory: &isDirectory), isDirectory.boolValue {
-          result.rootIssues.append(
-            .init(kind: .rootExists, message: "The folder already exists. Checkouts will be added inside it."))
-        }
-      } catch let error as WorkspaceError {
-        if let issue = preflightIssue(for: error) { result.rootIssues.append(issue) }
-      } catch {
-        result.rootIssues.append(.init(kind: .rootIsFile, message: describe(error)))
-      }
-    }
-    for member in plan.members {
-      var issues: [WorkspacePreflight.Issue] = []
-      do {
-        let resolved = try await resolve(member, rootPath: rootPath, context: context)
-        if case .remote = member.source, resolved.cloneFrom == nil {
-          issues.append(
-            .init(
-              kind: .cloneDestinationReused,
-              message: "\(tilde(resolved.sourceGitRoot)) already holds a clone of this remote. It will be reused."))
-        }
-      } catch let error as WorkspaceError {
-        // An empty branch is a form still being filled in, not a finding.
-        if !isEmptyBranchName(error), let issue = preflightIssue(for: error) {
-          issues.append(issue)
-        }
-      } catch {
-        issues.append(.init(kind: .sourceNotRepository, message: describe(error)))
-      }
-      if !issues.isEmpty {
-        result.memberIssues[member.name] = issues
-      }
-    }
-    return result
-  }
-
   /// A finding worded for the form: short, with home-relative paths. The
   /// CLI keeps `errorDescription`'s full wording.
-  private static func preflightIssue(for error: WorkspaceError) -> WorkspacePreflight.Issue? {
+  static func preflightIssue(for error: WorkspaceError) -> WorkspacePreflight.Issue? {
     switch error {
     case .rootAlreadyRegistered:
       return .init(kind: .rootAlreadyRegistered, message: "This folder is already a project in codans.")
@@ -613,23 +407,25 @@ extension WorkspaceClient {
         message: "\(tilde(path)) already exists and is not a clone of this remote. Choose another location.")
     case .invalidBranchName(let branch, _):
       return .init(kind: .invalidBranchName, message: "\u{201C}\(branch)\u{201D} is not a valid branch name.")
-    case .invalidPlan, .notWorkspace, .memberExists, .memberNotRegistered, .memberNotFound,
-      .memberWithoutSource, .cannotDropRoot, .cancelled:
+    case .invalidPlan, .invalidSourcePlan, .notWorkspace, .memberExists, .memberNotRegistered,
+      .memberNotFound, .memberWithoutSource, .cannotDropRoot, .sourceExists, .sourceNotFound,
+      .groupNotFound, .cannotDeleteDefault, .groupPreflightFailed, .risksNotAcknowledged, .checkFailed,
+      .manifestUnavailable, .notImplemented, .cancelled:
       return nil
     }
   }
 
-  private static func isEmptyBranchName(_ error: WorkspaceError) -> Bool {
+  static func isEmptyBranchName(_ error: WorkspaceError) -> Bool {
     if case .invalidBranchName(let branch, _) = error { return branch.isEmpty }
     return false
   }
 
-  private static func tilde(_ path: String) -> String {
+  static func tilde(_ path: String) -> String {
     (path as NSString).abbreviatingWithTildeInPath
   }
 
   @MainActor
-  private static func preflightRoot(_ rootPath: String, context: Context) async throws {
+  static func preflightRoot(_ rootPath: String, context: Context) async throws {
     if context.hierarchy.isPathRegistered(rootPath) != nil {
       throw WorkspaceError.rootAlreadyRegistered(path: rootPath)
     }
@@ -656,7 +452,7 @@ extension WorkspaceClient {
   /// a remote whose destination is free or already a clone of it), its
   /// destination is free, and its branch name is well-formed. A remote that
   /// still needs cloning comes back with `cloneFrom` set.
-  private static func resolve(
+  static func resolve(
     _ member: WorkspacePlan.Member,
     rootPath: String,
     context: Context
@@ -721,7 +517,7 @@ extension WorkspaceClient {
   /// every step recorded so rollback can undo it. Returns the member as it
   /// should be written to the manifest: source root on disk, checkout with
   /// its base ref resolved and its remote-tracking choice applied.
-  private static func materialize(
+  static func materialize(
     _ entry: ResolvedMember,
     ledger: inout WorkspaceMaterializationLedger,
     context: Context,
@@ -789,7 +585,7 @@ extension WorkspaceClient {
   /// The remote a checkout's base ref lives on, when the repository has it
   /// configured: `origin/main` → `origin`, an unnamed base → `origin` (the
   /// default remote branch is read from it). Nil when nothing needs fetching.
-  private static func remoteToFetch(
+  static func remoteToFetch(
     for checkout: WorkspaceCheckout, sourceURL: URL, git: GitWorktreeClient
   ) async -> String? {
     let candidate: String?
@@ -811,7 +607,7 @@ extension WorkspaceClient {
   /// new branch, and whether a remote-tracking checkout meets an existing
   /// local branch. Keeping the local branch turns the checkout into a plain
   /// `existingBranch`; a missing local branch never resets anything.
-  private static func finalizeCheckout(
+  static func finalizeCheckout(
     _ checkout: WorkspaceCheckout, sourceURL: URL, git: GitWorktreeClient
   ) async throws -> WorkspaceCheckout {
     switch checkout {
@@ -837,7 +633,7 @@ extension WorkspaceClient {
   /// Undo in reverse order. Runs detached so cancelling the creation task
   /// cannot SIGTERM the cleanup git subprocesses mid-flight; the caller
   /// still awaits the result. Returns what could not be undone.
-  private static func rollback(
+  static func rollback(
     _ ledger: WorkspaceMaterializationLedger, context: Context
   ) async -> [String] {
     guard !ledger.isEmpty else { return [] }
@@ -888,7 +684,7 @@ extension WorkspaceClient {
   /// Every registered Project whose repository is one of `sourceRoots` gets
   /// a reconcile so the new checkout shows up as its mirror row right away.
   @MainActor
-  private static func reconcileSources(_ sourceRoots: [String], hierarchy: HierarchyClient) async {
+  static func reconcileSources(_ sourceRoots: [String], hierarchy: HierarchyClient) async {
     let wanted = Set(sourceRoots)
     let projects = hierarchy.snapshot().projects.filter { project in
       guard project.remoteHost == nil, let gitRoot = project.gitRoot else { return false }
@@ -899,11 +695,11 @@ extension WorkspaceClient {
     }
   }
 
-  private static func canonical(_ path: String) -> String {
+  static func canonical(_ path: String) -> String {
     HierarchyManager.canonicalPath((path as NSString).expandingTildeInPath)
   }
 
-  private static func isDirectory(_ path: String) -> Bool {
+  static func isDirectory(_ path: String) -> Bool {
     var isDirectory = ObjCBool(false)
     return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
   }

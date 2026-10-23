@@ -23,6 +23,14 @@ public nonisolated struct WorkspacePreflight: Equatable, Sendable {
       /// will be reused. Informational.
       case cloneDestinationReused
       case invalidBranchName
+      /// The group branch already exists as a local branch of this project.
+      case localBranchExists
+      /// The base ref does not resolve in this project.
+      case baseRefMissing
+      /// The group name is reserved (`default`).
+      case reservedGroupName
+      /// Another group of the Workspace already has this name.
+      case duplicateGroupName
     }
 
     public var kind: Kind
@@ -43,16 +51,20 @@ public nonisolated struct WorkspacePreflight: Equatable, Sendable {
   }
 
   public var rootIssues: [Issue]
+  /// Group-level findings of a new group: name and group directory.
+  public var groupIssues: [Issue]
   /// Keyed by member name.
   public var memberIssues: [String: [Issue]]
 
-  public init(rootIssues: [Issue] = [], memberIssues: [String: [Issue]] = [:]) {
+  public init(rootIssues: [Issue] = [], groupIssues: [Issue] = [], memberIssues: [String: [Issue]] = [:]) {
     self.rootIssues = rootIssues
+    self.groupIssues = groupIssues
     self.memberIssues = memberIssues
   }
 
   public var hasBlockingIssues: Bool {
     rootIssues.contains { !$0.isInformational }
+      || groupIssues.contains { !$0.isInformational }
       || memberIssues.values.contains { $0.contains { !$0.isInformational } }
   }
 }

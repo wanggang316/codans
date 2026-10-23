@@ -49,13 +49,14 @@ struct HierarchyHandlersWorkspaceTests {
       Issue.record("expected invalidParams, got \(error)")
       return
     }
-    #expect(manager.catalog.projects[0].worktrees.count == 1)
+    #expect(manager.catalog.projects[0].worktrees.isEmpty)
   }
 
   @Test
   func removeWorktreeRefusesTheWorkspaceRoot() async throws {
     let (handlers, manager) = Self.makeFixture()
     let projectID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
+    Self.reconcile(manager, projectID, member: nil)
     let rootID = manager.catalog.projects[0].worktrees[0].id
 
     let params = try JSONValue.encoded(
@@ -76,12 +77,7 @@ struct HierarchyHandlersWorkspaceTests {
   func removeWorktreeRefusesWorkspaceChildrenAndTheirMirrorRows() async throws {
     let (handlers, manager) = Self.makeFixture()
     let workspaceID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
-    _ = manager.reconcileWorkspaceChildren(
-      projectID: workspaceID,
-      observations: [
-        HierarchyManager.WorkspaceChildObservation(
-          name: "app", path: "/tmp/ws/app", exists: true, branch: "feat", sourceGitRoot: "/src/app")
-      ])
+    Self.reconcile(manager, workspaceID, member: "/tmp/ws/app")
     let childID = manager.catalog.projects[0].worktrees[1].id
     let sourceID = manager.addProject(name: "app", rootPath: "/src/app", gitRoot: "/src/app")
     let mirrorID = try manager.createWorktree(in: sourceID, name: "feat", path: "/tmp/ws/app", branch: "feat")
@@ -97,6 +93,24 @@ struct HierarchyHandlersWorkspaceTests {
     }
     #expect(manager.catalog.projects[0].worktrees.count == 2)
     #expect(manager.catalog.projects[1].worktrees.count == 1)
+  }
+
+  /// The migrated layout: a group row at the root, plus one member.
+  private static func reconcile(_ manager: HierarchyManager, _ projectID: ProjectID, member: String?) {
+    var rows = [
+      HierarchyManager.WorkspaceRowObservation(name: "existing", path: "/tmp/ws", role: .groupTerminal, exists: true)
+    ]
+    if let member {
+      rows.append(
+        HierarchyManager.WorkspaceRowObservation(
+          name: "app", path: member, role: .member, exists: true, branch: "feat", sourceGitRoot: "/src/app"))
+    }
+    manager.reconcileWorkspaceGroups(
+      projectID: projectID,
+      groups: [
+        HierarchyManager.WorkspaceGroupObservation(
+          id: WorkspaceGroupID(), name: "existing", kind: .named, deletion: nil, rows: rows)
+      ])
   }
 
   private static func makeWorkspaceRoot() throws -> URL {

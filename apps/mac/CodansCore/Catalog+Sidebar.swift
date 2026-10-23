@@ -20,13 +20,14 @@ public nonisolated enum SidebarFilter: String, Codable, CaseIterable, Sendable {
 
 extension Project {
   /// The worktree the Project's own sidebar row stands for, when the Project
-  /// has no repository of its own — a plain folder, a remote folder, or a
-  /// workspace: the synthetic worktree at `rootPath`. Such a Project opens by
-  /// selecting its row and lists no child row for its root. A git Project
-  /// answers nil: its main checkout stays a child row, like every other
-  /// worktree of the repository.
+  /// has no repository of its own — a plain folder or a remote folder: the
+  /// synthetic worktree at `rootPath`. Such a Project opens by selecting its
+  /// row and lists no child row for its root. A git Project answers nil: its
+  /// main checkout stays a child row, like every other worktree of the
+  /// repository. A workspace answers nil too: its header is not a terminal,
+  /// and every row of it belongs to a group.
   public var rowWorktree: Worktree? {
-    guard gitRoot == nil else { return nil }
+    guard gitRoot == nil, !isWorkspace else { return nil }
     return worktrees.first { !$0.archived && $0.path == rootPath }
   }
 

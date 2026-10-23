@@ -694,7 +694,7 @@ struct HierarchySidebarFeature {
       }
       let existingNames = Set(
         project.worktrees.filter { $0.path != project.rootPath }.map(\.name)
-          + (project.workspace?.repositories.map(\.name) ?? []))
+          + (project.workspace?.projects.map(\.name) ?? []))
       state.createWorkspaceSheet = CreateWorkspaceFeature.State(
         candidates: Self.workspaceCandidates(in: snapshot),
         mode: .add(projectID: projectID, title: project.name, rootPath: project.rootPath, existingNames: existingNames))
@@ -709,10 +709,15 @@ struct HierarchySidebarFeature {
     case .workspaceMemberRemoveConfirmed:
       guard let pending = state.pendingWorkspaceMemberRemoval else { return .none }
       state.pendingWorkspaceMemberRemoval = nil
+      // Only a source project can leave a Workspace on its own; a group
+      // member goes with its group.
+      let row = hierarchyClient.snapshot().projects.first { $0.id == pending.projectID }?
+        .worktrees.first { $0.id == pending.worktreeID }
+      let sourceGitRoot = row?.sourceGitRoot ?? row?.path ?? ""
       return .run { [client = workspaceClient] send in
         do {
-          let warning = try await client.drop(pending.projectID, pending.worktreeID, true)
-          await send(.workspaceMemberRemoveFinished(message: warning))
+          try await client.removeSource(pending.projectID, sourceGitRoot)
+          await send(.workspaceMemberRemoveFinished(message: nil))
         } catch {
           await send(.workspaceMemberRemoveFinished(message: error.localizedDescription))
         }
@@ -736,8 +741,8 @@ struct HierarchySidebarFeature {
       state.pendingWorkspaceRemoval = nil
       return .run { [client = workspaceClient] send in
         do {
-          let outcome = try await client.remove(
-            pending.projectID, WorkspaceCleanup(deleteFiles: deleteFiles))
+          let outcome = try await client.removeWorkspace(
+            pending.projectID, deleteFiles ? .deleteOwnedFiles(GroupDeletionRequest()) : .sidebarOnly)
           var notes: [String] = []
           if !outcome.failures.isEmpty {
             notes.append(
