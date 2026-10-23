@@ -87,9 +87,12 @@ struct HierarchyClientWorkspaceReconcileTests {
     return CatalogMigrationV3ToV4.migrate(Catalog(projects: [workspace]))
   }
 
-  private func makeClient(_ catalog: Catalog, url: URL) -> (HierarchyClient, HierarchyManager) {
+  /// The manager's store is detached: a debounced save that fires after
+  /// `cleanUp()` would create the fixture directory again. The reload test
+  /// writes the catalog itself.
+  private func makeClient(_ catalog: Catalog) -> (HierarchyClient, HierarchyManager) {
     let manager = HierarchyManager(
-      catalog: catalog, store: CatalogStore(fileURL: url), runtime: FakeHierarchyRuntime())
+      catalog: catalog, store: CatalogStore.detached(), runtime: FakeHierarchyRuntime())
     return (HierarchyClient.live(manager: manager), manager)
   }
 
@@ -105,7 +108,7 @@ struct HierarchyClientWorkspaceReconcileTests {
     defer { fx.cleanUp() }
     let catalog = migratedCatalog(fx)
     let before = catalog.projects[0]
-    let (client, manager) = makeClient(catalog, url: fx.catalogURL)
+    let (client, manager) = makeClient(catalog)
 
     await client.reconcileDiscoveredWorktrees(before.id)
 
@@ -143,7 +146,7 @@ struct HierarchyClientWorkspaceReconcileTests {
     // Reload from disk, as a relaunch does, and reconcile again.
     try CatalogStore(fileURL: fx.catalogURL).saveNow(manager.catalog)
     let reloaded = try CatalogStore(fileURL: fx.catalogURL).load()
-    let (client2, manager2) = makeClient(reloaded, url: fx.catalogURL)
+    let (client2, manager2) = makeClient(reloaded)
     await client2.reconcileDiscoveredWorktrees(before.id)
     let relaunched = try #require(manager2.catalog.projects.first)
     #expect(relaunched.worktrees.map(\.id) == project.worktrees.map(\.id))
@@ -155,7 +158,7 @@ struct HierarchyClientWorkspaceReconcileTests {
   func memberBranchSwitchRefreshesBranchInPlace() async throws {
     let fx = try makeFixture()
     defer { fx.cleanUp() }
-    let (client, manager) = makeClient(migratedCatalog(fx), url: fx.catalogURL)
+    let (client, manager) = makeClient(migratedCatalog(fx))
     let projectID = try #require(manager.catalog.projects.first).id
     await client.reconcileDiscoveredWorktrees(projectID)
     let memberID = try #require(row(manager, path: fx.memberPath)).id
@@ -173,7 +176,7 @@ struct HierarchyClientWorkspaceReconcileTests {
   func missingSourceKeepsTheReferenceAndMissingMemberIsArchived() async throws {
     let fx = try makeFixture()
     defer { fx.cleanUp() }
-    let (client, manager) = makeClient(migratedCatalog(fx), url: fx.catalogURL)
+    let (client, manager) = makeClient(migratedCatalog(fx))
     let projectID = try #require(manager.catalog.projects.first).id
     await client.reconcileDiscoveredWorktrees(projectID)
     let referenceID = try #require(row(manager, path: fx.sourcePath)).id
@@ -195,7 +198,7 @@ struct HierarchyClientWorkspaceReconcileTests {
     defer { fx.cleanUp() }
     let url = WorkspaceLayout.groupsManifestURL(rootPath: fx.rootPath)
     try Data(#"{"schemaVersion": 3, "title": "ws", "projects": [], "groups": []}"#.utf8).write(to: url)
-    let (client, manager) = makeClient(migratedCatalog(fx), url: fx.catalogURL)
+    let (client, manager) = makeClient(migratedCatalog(fx))
     let before = manager.catalog.projects[0].worktrees
 
     await ProjectReconciler(client: client).reconcileAll(force: true)
