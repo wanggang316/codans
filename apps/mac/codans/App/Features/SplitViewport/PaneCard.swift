@@ -14,21 +14,13 @@ enum PaneCardMetrics {
 
 extension View {
   /// Draws the view as a Pane card: `fill` (the terminal background) in a
-  /// rounded shape with a hairline rim and a soft shadow, content clipped
-  /// to the shape.
+  /// rounded shape with a hairline rim, content clipped to the shape.
   func paneCard(fill: Color) -> some View {
     let shape = RoundedRectangle(cornerRadius: PaneCardMetrics.cornerRadius, style: .continuous)
     return
       self
       .clipShape(shape)
-      // The shadow is cast by a plain shape behind the content, not by the
-      // content itself: shadowing the content would composite the terminal
-      // surface off screen.
-      .background {
-        shape
-          .fill(fill)
-          .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
-      }
+      .background { shape.fill(fill) }
       .overlay {
         shape
           .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
