@@ -54,6 +54,10 @@ struct SplitViewportView: View {
           projectID: projectID,
           agentStateStore: agentStateStore
         )
+        // The toolbar already leaves a gap under its items, so a strip on
+        // the top edge drops its own top inset: the track then sits as far
+        // under the toolbar items as Safari's tab bar does.
+        .padding(.top, -TabBarMetrics.trackTopInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(tabDrag)
         .overlay { TabDragPreview(session: tabDrag) }

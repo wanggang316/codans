@@ -5,15 +5,16 @@ import Foundation
 /// the values live in one grep-able place; any layout tweak is a one-file
 /// diff.
 ///
-/// Values are measured from AppKit's own window-tabbing tab bar on macOS 26
-/// (`NSTabBar` / `NSTabButton`, the bar Finder uses): view frames read from
-/// the live view tree, colors and curves sampled from 2x captures.
+/// Colors and curves are measured from AppKit's own window-tabbing tab bar
+/// on macOS 26 (`NSTabBar` / `NSTabButton`, the bar Finder uses), sampled
+/// from 2x captures. The track height, the title size, and the gap under the
+/// toolbar follow Safari's tab bar on macOS 26, measured from 2x captures.
 enum TabBarMetrics {
   /// Height of the full Tab bar row: the track and its insets.
   static let barHeight: CGFloat = trackTopInset + trackHeight + trackBottomInset
 
   /// Recessed capsule track that hosts the chips.
-  static let trackHeight: CGFloat = 28
+  static let trackHeight: CGFloat = 32
   /// Gap from the edge above the strip to the track. Equal to the gap below,
   /// so the strip sits centered between what is above it and the content.
   static let trackTopInset: CGFloat = trackBottomInset
@@ -45,7 +46,7 @@ enum TabBarMetrics {
   static let chipTitleInset: CGFloat = chipSlotInset + closeButtonSize + 8
 
   /// Point size of the chip title and the close glyph.
-  static let titleFontSize: CGFloat = 11
+  static let titleFontSize: CGFloat = 13
   static let closeGlyphSize: CGFloat = 9
 
   /// Separator in the gap between two chips, vertically centered.
