@@ -206,13 +206,18 @@ nonisolated struct HierarchyClient: Sendable {
   /// Sets every split ratio of the Worktree's tree to 0.5.
   var equalizeSplits:
     @MainActor @Sendable (_ worktreeID: WorktreeID, _ projectID: ProjectID) throws -> Void
-  /// Re-positions an existing Pane next to `anchorID`, splitting the anchor
-  /// along `direction`. Pure split-tree reshape — the moved Pane's Contents
-  /// stay alive. Backs the pane drag-and-drop gesture.
-  var movePane:
+  /// Moves a Tab into another Pane of its Worktree at `index`, selected
+  /// and focused there. The Content stays alive. Backs the tab-chip drop
+  /// on another Pane's strip.
+  var moveTabToPane:
+    @MainActor @Sendable (_ tabID: TabID, _ paneID: PaneID, _ index: Int) throws -> Void
+  /// Moves a Tab into a new Pane beside `anchorID` (a lone Tab moves its
+  /// whole Pane) and returns the Pane that holds it. The Content stays
+  /// alive. Backs the tab-chip drop on a Pane's edge.
+  var splitTab:
     @MainActor @Sendable (
-      _ paneID: PaneID, _ anchorID: PaneID, _ direction: SplitTree<PaneID>.NewDirection
-    ) throws -> Void
+      _ tabID: TabID, _ anchorID: PaneID, _ direction: SplitTree<PaneID>.NewDirection
+    ) throws -> PaneID
 
   // MARK: - Surfaces and runtime state
 
@@ -817,8 +822,11 @@ extension HierarchyClient {
       equalizeSplits: { worktreeID, projectID in
         try manager.equalizeSplits(in: worktreeID, in: projectID)
       },
-      movePane: { paneID, anchorID, direction in
-        try manager.movePane(paneID, relativeTo: anchorID, direction: direction)
+      moveTabToPane: { tabID, paneID, index in
+        try manager.moveTab(tabID, toPane: paneID, at: index)
+      },
+      splitTab: { tabID, anchorID, direction in
+        try manager.splitTab(tabID, beside: anchorID, direction: direction)
       },
       ensureSurface: { contentID in
         guard let projectID = manager.catalog.projectID(forContent: contentID) else {
@@ -2057,7 +2065,8 @@ extension HierarchyClient: DependencyKey {
     resizeSplit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     resizePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     equalizeSplits: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    movePane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    moveTabToPane: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    splitTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     ensureSurface: { _ in fatalError("HierarchyClient.liveValue not configured") },
     focusSurfaceView: { _ in fatalError("HierarchyClient.liveValue not configured") },
     focusedContent: { _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2170,7 +2179,8 @@ extension HierarchyClient: DependencyKey {
     resizeSplit: unimplemented("HierarchyClient.resizeSplit"),
     resizePane: unimplemented("HierarchyClient.resizePane"),
     equalizeSplits: unimplemented("HierarchyClient.equalizeSplits"),
-    movePane: unimplemented("HierarchyClient.movePane"),
+    moveTabToPane: unimplemented("HierarchyClient.moveTabToPane"),
+    splitTab: unimplemented("HierarchyClient.splitTab", placeholder: PaneID()),
     ensureSurface: unimplemented("HierarchyClient.ensureSurface"),
     // Pure visual side-effect (focuses an NSView; no return value, no test
     // contract worth asserting). Every create/split path tail-calls this, so

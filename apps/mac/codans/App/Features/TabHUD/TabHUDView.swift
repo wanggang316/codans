@@ -76,10 +76,7 @@ struct TabHUDView: View {
     if let model = resolveModel() {
       card(model)
         // Squares the button off the pane's corner: with the container's own
-        // `chromeInset` this puts it 14pt in from both edges. The vertical
-        // half also has to clear `PaneDragHandle`, a 10pt full-width strip
-        // `LeafView` layers over the same surface and above this overlay —
-        // under it, hovering the button's top edge would arm a pane drag.
+        // `chromeInset` this puts it 14pt in from both edges.
         .padding(.top, 8)
         .padding(.trailing, 8)
     }

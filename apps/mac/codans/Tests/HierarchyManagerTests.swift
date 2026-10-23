@@ -653,6 +653,91 @@ struct HierarchyManagerTests {
     #expect(fakeRuntime.focusSurfaceViewCalls.contains(paneATab1.contentID))
   }
 
+  // MARK: - Tab moves across Panes
+
+  @Test
+  func moveTabToAnotherPaneInsertsSelectsAndFocusesIt() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    fakeRuntime.reset()
+    try manager.moveTab(paneATab2.tabID, toPane: paneB.paneID, at: 0)
+    #expect(manager.catalog.pane(paneB.paneID)?.tabIDs == [paneATab2.tabID, paneB.tabID])
+    #expect(selectedTabID(in: paneB.paneID) == paneATab2.tabID)
+    #expect(manager.catalog.pane(paneATab1.paneID)?.tabIDs == [paneATab1.tabID])
+    #expect(selectedTabID(in: paneATab1.paneID) == paneATab1.tabID)
+    #expect(worktree.focusedPaneID == paneB.paneID)
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+  }
+
+  @Test
+  func moveTabOfALonePaneClosesThatPane() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    fakeRuntime.reset()
+    try manager.moveTab(paneB.tabID, toPane: paneATab1.paneID, at: 1)
+    #expect(worktree.panes.map(\.id) == [paneATab1.paneID])
+    #expect(worktree.splitTree.leaves() == [paneATab1.paneID])
+    #expect(
+      manager.catalog.pane(paneATab1.paneID)?.tabIDs == [paneATab1.tabID, paneB.tabID, paneATab2.tabID])
+    #expect(worktree.focusedPaneID == paneATab1.paneID)
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+  }
+
+  @Test
+  func moveTabClampsTheIndexToTheStrip() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    try manager.moveTab(paneATab1.tabID, toPane: paneB.paneID, at: 99)
+    #expect(manager.catalog.pane(paneB.paneID)?.tabIDs == [paneB.tabID, paneATab1.tabID])
+    #expect(manager.catalog.pane(paneATab1.paneID)?.tabIDs == [paneATab2.tabID])
+  }
+
+  @Test
+  func moveTabIntoAnotherWorktreeThrows() async throws {
+    let (projectID, _, paneATab1, _, _) = try await makeFixtureTwoPanes()
+    let otherWorktree = try manager.createWorktree(in: projectID, name: "other", path: "/other", branch: "other")
+    let other = try newTab(in: otherWorktree, in: projectID)
+    #expect(throws: HierarchyError.self) {
+      try manager.moveTab(paneATab1.tabID, toPane: other.paneID, at: 0)
+    }
+  }
+
+  @Test
+  func splitTabPutsItInANewPaneBesideTheAnchor() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    fakeRuntime.reset()
+    let newPaneID = try manager.splitTab(paneATab2.tabID, beside: paneB.paneID, direction: .down)
+    #expect(worktree.splitTree.leaves() == [paneATab1.paneID, paneB.paneID, newPaneID])
+    #expect(manager.catalog.pane(newPaneID)?.tabIDs == [paneATab2.tabID])
+    #expect(manager.catalog.pane(paneATab1.paneID)?.tabIDs == [paneATab1.tabID])
+    #expect(worktree.focusedPaneID == newPaneID)
+    #expect(fakeRuntime.closeSurfaceCalls.isEmpty)
+  }
+
+  @Test
+  func splitTabBesideItsOwnPaneSplitsThatPane() async throws {
+    let (_, _, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
+    let newPaneID = try manager.splitTab(paneATab2.tabID, beside: paneATab1.paneID, direction: .left)
+    #expect(worktree.splitTree.leaves() == [newPaneID, paneATab1.paneID, paneB.paneID])
+    #expect(manager.catalog.pane(newPaneID)?.tabIDs == [paneATab2.tabID])
+  }
+
+  @Test
+  func splitTabOfALonePaneMovesThatPane() async throws {
+    let (_, _, paneATab1, _, paneB) = try await makeFixtureTwoPanes()
+    let landed = try manager.splitTab(paneB.tabID, beside: paneATab1.paneID, direction: .left)
+    #expect(landed == paneB.paneID)
+    #expect(worktree.splitTree.leaves() == [paneB.paneID, paneATab1.paneID])
+    #expect(worktree.panes.count == 2)
+  }
+
+  @Test
+  func splitTabOfALonePaneBesideItselfIsANoOp() async throws {
+    let (_, _, paneATab1, _, paneB) = try await makeFixtureTwoPanes()
+    let before = worktree
+    let landed = try manager.splitTab(paneB.tabID, beside: paneB.paneID, direction: .left)
+    #expect(landed == paneB.paneID)
+    #expect(worktree.splitTree == before.splitTree)
+    #expect(worktree.panes.map(\.id) == [paneATab1.paneID, paneB.paneID])
+  }
+
   @Test
   func closePaneDropsProcessRowsOfEveryTab() async throws {
     let (_, worktreeID, paneATab1, paneATab2, paneB) = try await makeFixtureTwoPanes()
