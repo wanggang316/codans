@@ -361,6 +361,29 @@ struct WorkspaceGroupDeletionTests {
     #expect(throws: (any Error).self) { try fx.row(in: layout.projectID, at: layout.root) }
   }
 
+  @Test
+  func plainWorktreeRemovalRefusesWorkspaceRowsAndTheirMirrors() async throws {
+    let fx = try WorkspaceClientFixture()
+    defer { fx.cleanUp() }
+    let layout = try await makeLayout(fx)
+    let appProjectID = fx.hierarchy.addProject("app", layout.app, layout.app)
+    await fx.hierarchy.reconcileDiscoveredWorktrees(appProjectID)
+    let mirror = try fx.row(in: appProjectID, at: layout.fixApp)
+    let member = try fx.row(in: layout.projectID, at: layout.fixApp)
+    let reference = try fx.row(in: layout.projectID, at: layout.app)
+
+    for (row, project) in [(member, layout.projectID), (reference, layout.projectID), (mirror, appProjectID)] {
+      await #expect(throws: (any Error).self) {
+        _ = try await fx.hierarchy.removeWorktreeWithGit(row.id, project)
+      }
+    }
+
+    #expect(fx.isDirectory(layout.fixApp))
+    #expect(fx.isDirectory("\(layout.app)/.git"))
+    #expect(try fx.row(in: layout.projectID, at: layout.fixApp).id == member.id)
+    #expect(try fx.row(in: appProjectID, at: layout.fixApp).id == mirror.id)
+  }
+
   // MARK: Workspace removal
 
   @Test

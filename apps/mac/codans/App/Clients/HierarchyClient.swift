@@ -2200,9 +2200,18 @@ extension HierarchyClient {
     deleteRemoteBranch: Bool
   ) async throws -> String? {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let gitRoot = project.gitRoot
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+    // Workspace rows and the source-side mirrors of member checkouts belong
+    // to the workspace flow, which removes them through its own checks.
+    // Every caller of this path is refused here, not only the sidebar.
+    if project.isWorkspace || manager.workspaceMembership(forPath: worktree.path) != nil {
+      throw HierarchyError.invariantViolation(
+        "\(worktree.path) belongs to a workspace; remove it through the workspace")
+    }
+    guard let gitRoot = project.gitRoot else {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
     manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
