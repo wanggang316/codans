@@ -388,17 +388,18 @@ private struct PaneView: View {
           paneContent(slotSize: geo.size)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Drop-zone highlight, drawn above the surface but never hit-tested.
-        // Shown only while this leaf is the active drop target.
-        .overlay {
-          if let activeDropZone {
-            PaneDropOverlay(zone: activeDropZone)
-          }
-        }
       }
       .onGeometryChange(
         for: CGRect.self, of: { $0.frame(in: .global) },
         action: { tabDrag.setContentFrame($0, for: paneID) })
+    }
+    // Drop-zone highlight over the whole Pane, strip included: the new Pane
+    // takes that half of it, its own strip on top. Never hit-tested, and
+    // shown only while this leaf is the active drop target.
+    .overlay {
+      if let activeDropZone {
+        PaneDropOverlay(zone: activeDropZone)
+      }
     }
     .onDisappear {
       tabDrag.setStripFrame(nil, for: paneID)
