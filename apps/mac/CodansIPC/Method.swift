@@ -49,14 +49,18 @@ extension IPC {
     case handoffSave = "handoff.save"
     case handoffTo = "handoff.to"
 
-    // workspace — multi-repository workspaces. `create` and `add`
-    // materialize checkouts on disk before touching the catalog; handlers
-    // live in `WorkspaceHandlers`.
+    // workspace — multi-repository workspaces. `create` / `add` / `drop`
+    // edit the source projects; `createGroup` / `deleteGroup` create and
+    // delete the checkouts of a named group. Handlers live in
+    // `WorkspaceHandlers` and call `WorkspaceClient` only.
     case workspaceCreate = "workspace.create"
     case workspaceAdd = "workspace.add"
     case workspaceDrop = "workspace.drop"
     case workspaceRemove = "workspace.remove"
     case workspaceDescribe = "workspace.describe"
+    case workspaceCreateGroup = "workspace.createGroup"
+    case workspaceCheckGroupDeletion = "workspace.checkGroupDeletion"
+    case workspaceDeleteGroup = "workspace.deleteGroup"
 
     // workflow — multi-agent runs driven by `<id>.workflow.yaml` files.
     // `list` / `run` / `listRuns` scope by worktree (or the caller's pane);

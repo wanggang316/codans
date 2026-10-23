@@ -3,9 +3,9 @@ import Foundation
 /// What deleting a named group would destroy, collected without side
 /// effects. Risks need explicit acknowledgment; a failed probe blocks the
 /// delete until a retry succeeds.
-public nonisolated struct GroupDeletionCheck: Equatable, Sendable {
+public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
   /// Findings for one member checkout of the group.
-  public struct Member: Equatable, Sendable {
+  public struct Member: Codable, Equatable, Sendable {
     public var name: String
     public var worktreeID: WorktreeID
     /// Absolute checkout path.
@@ -100,8 +100,8 @@ public nonisolated struct GroupDeletionRequest: Equatable, Sendable {
 
 /// What a group delete did. With any failure the group stays, with its
 /// `deletion` state set, so a retry can finish the job.
-public nonisolated struct GroupDeletionOutcome: Equatable, Sendable {
-  public struct Failure: Equatable, Sendable {
+public nonisolated struct GroupDeletionOutcome: Codable, Equatable, Sendable {
+  public struct Failure: Codable, Equatable, Sendable {
     public var name: String
     public var path: String
     public var reason: String

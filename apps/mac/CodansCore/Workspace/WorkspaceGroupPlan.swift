@@ -122,7 +122,7 @@ public nonisolated struct GroupCreationResult: Equatable, Sendable {
     }
   }
 
-  public struct SetupFailure: Equatable, Sendable {
+  public struct SetupFailure: Codable, Equatable, Sendable {
     public var name: String
     public var reason: String
 

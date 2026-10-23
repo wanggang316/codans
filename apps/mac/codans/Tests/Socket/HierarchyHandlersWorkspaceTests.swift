@@ -45,11 +45,40 @@ struct HierarchyHandlersWorkspaceTests {
       Issue.record("expected failure, got \(outcome)")
       return
     }
-    guard case .invalidParams = error else {
+    guard case .invalidParams(let message, _) = error else {
       Issue.record("expected invalidParams, got \(error)")
       return
     }
+    #expect(message.contains("workspace group create"))
     #expect(manager.catalog.projects[0].worktrees.isEmpty)
+  }
+
+  @Test
+  func describeWorktreeReportsTheGroupAndRole() async throws {
+    let (handlers, manager) = Self.makeFixture()
+    let workspaceID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
+    Self.reconcile(manager, workspaceID, member: "/tmp/ws/app")
+    let project = manager.catalog.projects[0]
+    let group = try #require(project.workspaceGroups.first)
+    let sourceID = manager.addProject(name: "app", rootPath: "/src/app", gitRoot: "/src/app")
+
+    var refs: [IPC.WorkspaceGroupRef?] = []
+    for id in project.worktrees.map(\.id)
+      + (manager.catalog.projects.first { $0.id == sourceID }?.worktrees.map(\.id) ?? [])
+    {
+      let outcome = await handlers.describeWorktree(try JSONValue.encoded(IPC.DescribeRequest(id: id.raw)))
+      guard case .unary(let value) = outcome else {
+        Issue.record("expected unary, got \(outcome)")
+        return
+      }
+      refs.append(try value.decoded(as: IPC.WorktreeDescription.self).workspaceGroup)
+    }
+    #expect(
+      Array(refs.prefix(2)) == [
+        IPC.WorkspaceGroupRef(id: group.id, name: "existing", role: .groupTerminal),
+        IPC.WorkspaceGroupRef(id: group.id, name: "existing", role: .member),
+      ])
+    #expect(refs.dropFirst(2).allSatisfy { $0 == nil })
   }
 
   @Test
@@ -123,13 +152,7 @@ struct HierarchyHandlersWorkspaceTests {
   }
 
   private static func makeFixture() -> (HierarchyHandlers, HierarchyManager) {
-    let manager = HierarchyManager(
-      catalog: Catalog(),
-      store: CatalogStore(
-        fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
-          .appendingPathComponent("codans-ws-handlers-\(UUID().uuidString).json")),
-      runtime: FakeHierarchyRuntime()
-    )
+    let manager = HierarchyManager(catalog: Catalog(), store: .detached(), runtime: FakeHierarchyRuntime())
     let handlers = HierarchyHandlers(manager: manager, settingsProvider: { Settings() })
     return (handlers, manager)
   }

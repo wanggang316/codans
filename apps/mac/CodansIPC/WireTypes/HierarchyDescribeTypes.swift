@@ -67,6 +67,8 @@ extension IPC {
     public let isSelected: Bool
     public let selectedTabID: String?
     public let tabCount: Int
+    /// The row's group and role inside a workspace; nil elsewhere.
+    public let workspaceGroup: WorkspaceGroupRef?
 
     public init(
       id: String,
@@ -79,7 +81,8 @@ extension IPC {
       isPinned: Bool,
       isSelected: Bool,
       selectedTabID: String?,
-      tabCount: Int
+      tabCount: Int,
+      workspaceGroup: WorkspaceGroupRef? = nil
     ) {
       self.id = id
       self.projectID = projectID
@@ -92,6 +95,7 @@ extension IPC {
       self.isSelected = isSelected
       self.selectedTabID = selectedTabID
       self.tabCount = tabCount
+      self.workspaceGroup = workspaceGroup
     }
   }
 

@@ -537,7 +537,8 @@ final class HierarchyHandlers {
     if project.isWorkspace {
       return .failed(
         .invalidParams(
-          message: "createWorktree is not available on a workspace; use `workspace add`",
+          message:
+            "createWorktree is not available on a workspace; create a group with `codans workspace group create`",
           path: nil
         ))
     }
@@ -906,15 +907,17 @@ final class HierarchyHandlers {
     do { req = try params.decoded(as: RemoveWorktreeParams.self) } catch {
       return .failed(.invalidParams(message: "removeWorktree requires {id, projectID}", path: nil))
     }
-    // Workspace membership is edited through the workspace flow: a child row
-    // is a checkout the manifest still names, and the same folder listed
-    // under its source repository belongs to the workspace too.
+    // Workspace rows are edited through the workspace flow only: the
+    // manifest names every group and member row, and the same member folder
+    // listed under its source repository belongs to the workspace too.
     if let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
       let worktree = project.worktrees.first(where: { $0.id == req.id })
     {
-      if project.isWorkspace, worktree.path != project.rootPath {
+      if project.isWorkspace {
         return .failed(
-          .conflict(reason: "\(worktree.name) is a workspace repository; remove it from the workspace instead"))
+          .conflict(
+            reason: "\(worktree.name) is a row of workspace \(project.name); use `codans workspace drop` "
+              + "for a source project or `codans workspace group delete` for a group"))
       }
       if !project.isWorkspace, let membership = manager.workspaceMembership(forPath: worktree.path) {
         return .failed(
