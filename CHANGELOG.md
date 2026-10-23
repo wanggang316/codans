@@ -67,6 +67,16 @@ and the project does not yet follow semantic versioning — every release until
   pane's edge to split it into a new pane on that side. The session keeps
   running. The grab strip on top of a split pane is gone; tabs are the
   only thing you drag.
+- **Panes are cards.** Each pane, its tab strip included, floats as a
+  rounded card on a darker surface, like the sidebar; the gap between two
+  cards is where you drag to resize. The tab strip sits as far from the
+  card's top as from the terminal below it.
+- **Tab actions live on the tab.** Hover a tab chip and an actions button
+  appears on its right, the mirror of the close button on its left: hand
+  off, command queue, copy, paste, splits, reset, and close. The actions
+  button in the terminal's top-right corner and the split buttons at the
+  end of the tab strip are gone; split from the keyboard, the Command
+  Palette, or this menu.
 - **Agents report their own state.** Claude Code, Pi, and omp send OSC
   7501 program status, and codans now answers and uses it: the Agents
   View shows working the moment a prompt is sent, blocked with what the

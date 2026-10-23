@@ -105,9 +105,16 @@ struct TerminalContentState {
 
 - 每个 Pane 一条，复用现有胶囊 tab 条实现（`TabBarView` 系列，含溢出堆叠与新建 / 关闭动画）。
 - 焦点 Pane 的条用活动样式；非焦点 Pane 的条用非活动窗口样式（按 Finder 非活动窗口实测补齐）。
-- 条尾控件：“+”（含 agent 菜单）、agent 历史、splitRight、splitDown。Pane 宽度不足时只保留 “+”，其余三项收进 “+” 的菜单。
+- 条尾控件：“+”（含 agent 菜单）与 agent 历史。Pane 宽度不足时只保留 “+”，历史收进 “+” 的菜单。split 经键盘、命令面板与 chip 的动作菜单。
+- 每个 chip 悬停时两端各出一个同尺寸按钮：左端关闭 Tab，右端 “…” 弹出该 Tab 的动作菜单（`TabActionsMenu`）：交接、命令队列，再按终端右键菜单的分组列出 `PaneSurfaceAction`（复制、粘贴、四向 split、重置、复制 ID、关闭 Tab）。没有选区时复制项禁用而不隐藏。
+- 条与上方边缘、条与下方内容的间距相同（`trackTopInset` = `trackBottomInset`）。
 - 条左端没有关闭 Pane 的按钮；关闭 Pane 经 `pane close`、右键菜单或关掉最后一个 Tab。
-- 右上角的 TabHUD 留在内容区域，列出当前 Tab 的内容动作。
+
+### Pane 卡片
+
+- 每个 Pane（条 + 内容）画成一张浮在底色上的卡片，参照浮动 sidebar：圆角 16、卡片之间及与布局区边缘的间距 8（`PaneCardMetrics`），细描边与浅阴影。
+- 卡片底色是终端背景色，终端在卡片左右与底部内缩 6，圆角不切到文字。底色（`PaneCardBackdrop`）是终端背景压暗：浅色约 7%，深色约 35%，并铺到工具栏下方。
+- split 之间不画分隔线；两张卡片之间的间隙是调整比例的拖动区。
 
 ### 拖拽（P2）
 
