@@ -255,6 +255,74 @@ struct WorkflowEngineTests {
     #expect(harness.engine.run(for: started.runID)?.status.attention?.reason == .noDeliveryAfterIdle)
   }
 
+  @Test
+  func watchdogRaisesAttentionWhenTheLaunchedAgentExits() async throws {
+    let harness = try Self.makeHarness()
+    let entry = try Self.entry(yaml: Self.launchYAML, id: "launch")
+    let configuration = try Self.configuration(harness, entry: entry, selfInitiated: false)
+    harness.world.states[harness.world.launchPane] = .idle
+    let started = try await harness.engine.start(configuration: configuration, entry: entry)
+    await Self.settle { harness.engine.run(for: started.runID)?.phase == .waitingForDelivery(ordinal: 1) }
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(harness.engine.run(for: started.runID)?.status.attention == nil)
+
+    // The agent quits; its pane stays open on a bare shell.
+    harness.world.states[harness.world.launchPane] = nil
+    await Self.settle { harness.engine.run(for: started.runID)?.status.attention != nil }
+    let attention = try #require(harness.engine.run(for: started.runID)?.status.attention)
+    #expect(attention.reason == .roleGone)
+    #expect(attention.actions == [.relaunch, .skip, .cancel])
+  }
+
+  @Test
+  func watchdogRaisesAttentionWhenTheAgentExitsAfterANudge() async throws {
+    let harness = try Self.makeHarness()
+    let entry = try Self.entry(yaml: Self.yaml)
+    let configuration = try Self.configuration(harness, entry: entry, selfInitiated: true)
+    let started = try await harness.engine.start(configuration: configuration, entry: entry)
+    harness.world.states[harness.paneID] = .working
+    try await Task.sleep(for: .milliseconds(30))
+    harness.world.states[harness.paneID] = .idle
+    try await Task.sleep(for: .milliseconds(30))
+    harness.world.advance(11)
+    await Self.settle { harness.engine.run(for: started.runID)?.activations[1]?.nudged == true }
+
+    // The re-armed watchdog still knows an agent was there.
+    harness.world.states[harness.paneID] = nil
+    await Self.settle { harness.engine.run(for: started.runID)?.status.attention != nil }
+    #expect(harness.engine.run(for: started.runID)?.status.attention?.reason == .roleGone)
+  }
+
+  @Test
+  func watchdogRaisesAttentionWhenTheLaunchedAgentNeverStarts() async throws {
+    let harness = try Self.makeHarness()
+    let entry = try Self.entry(yaml: Self.launchYAML, id: "launch")
+    let configuration = try Self.configuration(harness, entry: entry, selfInitiated: false)
+    let started = try await harness.engine.start(configuration: configuration, entry: entry)
+    await Self.settle { harness.engine.run(for: started.runID)?.phase == .waitingForDelivery(ordinal: 1) }
+    // No agent yet, but the startup grace has not passed.
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(harness.engine.run(for: started.runID)?.status.attention == nil)
+
+    harness.world.advance(harness.engine.dependencies.agentStartupGraceSeconds)
+    await Self.settle { harness.engine.run(for: started.runID)?.status.attention != nil }
+    #expect(harness.engine.run(for: started.runID)?.status.attention?.reason == .roleGone)
+  }
+
+  @Test
+  func watchdogWaitsOnACurrentPaneWithoutAnAgent() async throws {
+    let harness = try Self.makeHarness()
+    harness.world.states[harness.paneID] = nil
+    let entry = try Self.entry(yaml: Self.yaml)
+    let configuration = try Self.configuration(harness, entry: entry, selfInitiated: true)
+    let started = try await harness.engine.start(configuration: configuration, entry: entry)
+    // A person may deliver from a bare shell; only a launched role is
+    // expected to host an agent.
+    harness.world.advance(harness.engine.dependencies.agentStartupGraceSeconds * 2)
+    try await Task.sleep(for: .milliseconds(40))
+    #expect(harness.engine.run(for: started.runID)?.status.attention == nil)
+  }
+
   // MARK: - Launch
 
   @Test
