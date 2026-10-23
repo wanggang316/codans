@@ -4,7 +4,7 @@ import Foundation
 /// One source project in the Add Workspace / Add Project sheet. A source is
 /// a main checkout the `default` group references as it is: no branch is
 /// chosen and nothing is checked out.
-nonisolated struct SourceDraft: Equatable, Identifiable, Sendable {
+nonisolated struct WorkspaceSourceDraft: Equatable, Identifiable, Sendable {
   /// Where the repository comes from. The sheet tells a registered project
   /// from a folder picked on disk for display; the plan only knows local
   /// paths and remotes.
@@ -75,13 +75,13 @@ nonisolated struct RemoteSourceEditor: Equatable, Identifiable, Sendable {
   let id: UUID
   let isNew: Bool
   /// The remote as the URL field last applied it.
-  var draft: SourceDraft?
+  var draft: WorkspaceSourceDraft?
   /// The URL as typed. The draft follows it once it reads as a URL.
   var urlText = ""
   /// Why the URL can't be used.
   var sourceIssue: String?
 
-  init(id: UUID, isNew: Bool, draft: SourceDraft? = nil) {
+  init(id: UUID, isNew: Bool, draft: WorkspaceSourceDraft? = nil) {
     self.id = id
     self.isNew = isNew
     self.draft = draft

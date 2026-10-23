@@ -7,9 +7,9 @@ import SwiftUI
 /// (base ref, fetch, copy ignored / untracked files, agent), seeded from
 /// the project's settings. The footer shows the project's findings, or its
 /// progress once creation runs.
-struct WorkspaceGroupMemberSection: View {
+struct WorkspaceGroupMemberSectionView: View {
   let store: StoreOf<CreateWorkspaceFeature>
-  let member: GroupMemberDraft
+  let member: WorkspaceGroupMemberDraft
 
   var body: some View {
     Section {

@@ -87,7 +87,7 @@ struct CreateWorkspaceFeature {
     var locationPath: String
     /// Preflight findings about the workspace folder.
     var rootIssues: [MemberIssue] = []
-    var sources: IdentifiedArrayOf<SourceDraft> = []
+    var sources: IdentifiedArrayOf<WorkspaceSourceDraft> = []
     /// Why the folder picked last can't be added.
     var sourceIssue: String?
     var isResolvingFolder = false
@@ -101,7 +101,7 @@ struct CreateWorkspaceFeature {
     var branchDraft = ""
     /// Group-level preflight findings: name, folder, and branch.
     var groupPreflightIssues: [WorkspacePreflight.Issue] = []
-    var groupMembers: IdentifiedArrayOf<GroupMemberDraft> = []
+    var groupMembers: IdentifiedArrayOf<WorkspaceGroupMemberDraft> = []
     /// Enabled agent profiles offered per project.
     var agentProfiles: [AgentProfile] = []
     /// The projects and their defaults are still loading.
@@ -206,7 +206,7 @@ struct CreateWorkspaceFeature {
         sources: sources.map(\.source.workspaceSource))
     }
 
-    func issues(for source: SourceDraft) -> [MemberIssue] {
+    func issues(for source: WorkspaceSourceDraft) -> [MemberIssue] {
       source.preflightIssues.map(MemberIssue.init(preflight:))
     }
 
@@ -298,7 +298,7 @@ struct CreateWorkspaceFeature {
     /// One project's findings: its branches, then the client's preflight
     /// (a branch the group would create that already exists is reported
     /// here, under the project that has it).
-    func issues(for member: GroupMemberDraft) -> [MemberIssue] {
+    func issues(for member: WorkspaceGroupMemberDraft) -> [MemberIssue] {
       var issues: [MemberIssue] = []
       if case .failed(let message) = member.refs {
         issues.append(.warning(message))
@@ -423,7 +423,7 @@ struct CreateWorkspaceFeature {
         else { return .none }
         state.sourceIssue = nil
         state.sources.append(
-          SourceDraft(id: uuid(), source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot)))
+          WorkspaceSourceDraft(id: uuid(), source: .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot)))
         return edited(&state)
 
       case .addFolderTapped:
@@ -581,13 +581,13 @@ struct CreateWorkspaceFeature {
       state.sourceIssue = "\(abbreviated) is already in the list."
       return .none
     }
-    let source: SourceDraft.Source
+    let source: WorkspaceSourceDraft.Source
     if let candidate = state.candidates.first(where: { HierarchyManager.canonicalPath($0.gitRoot) == root }) {
       source = .project(candidate.id, name: candidate.name, gitRoot: candidate.gitRoot)
     } else {
       source = .localRepo(gitRoot: root)
     }
-    state.sources.append(SourceDraft(id: uuid(), source: source))
+    state.sources.append(WorkspaceSourceDraft(id: uuid(), source: source))
     return edited(&state)
   }
 
@@ -667,7 +667,7 @@ struct CreateWorkspaceFeature {
       let parent =
         editor.draft.map { ($0.source.gitRoot as NSString).deletingLastPathComponent }
         ?? WorkspaceLayout.defaultSourcesDirectory().path(percentEncoded: false)
-      state.remoteEditor?.draft = SourceDraft(
+      state.remoteEditor?.draft = WorkspaceSourceDraft(
         id: editor.id, source: .remote(url: url, cloneDestination: (parent as NSString).appendingPathComponent(name)))
     case .path:
       if reportsProblems {

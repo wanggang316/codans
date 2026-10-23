@@ -4,7 +4,7 @@ import Foundation
 /// One project of a new named group in the New Group sheet: the options it
 /// is checked out with, its branches for the base-ref menu, and its findings
 /// and progress.
-nonisolated struct GroupMemberDraft: Equatable, Identifiable, Sendable {
+nonisolated struct WorkspaceGroupMemberDraft: Equatable, Identifiable, Sendable {
   enum Progress: Equatable, Sendable {
     case pending
     case running(WorkspaceCreationEvent.Phase, lastLine: String?)

@@ -38,7 +38,7 @@ struct CreateWorkspaceSheet: View {
         }
       )
     ) { editor in
-      WorkspaceRemoteSourceSheet(store: store, opened: editor)
+      WorkspaceRemoteSourceSheetView(store: store, opened: editor)
     }
   }
 
@@ -54,7 +54,7 @@ struct CreateWorkspaceSheet: View {
       case .newGroup(_, let title, _):
         groupSection(workspaceTitle: title)
         ForEach(store.groupMembers) { member in
-          WorkspaceGroupMemberSection(store: store, member: member)
+          WorkspaceGroupMemberSectionView(store: store, member: member)
         }
       }
     }
@@ -121,7 +121,7 @@ struct CreateWorkspaceSheet: View {
   private var sourcesSection: some View {
     Section {
       ForEach(store.sources) { source in
-        WorkspaceSourceRow(store: store, source: source)
+        WorkspaceSourceRowView(store: store, source: source)
       }
     } header: {
       Text(store.isAddSourceMode ? "Project" : "Projects")

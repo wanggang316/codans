@@ -6,9 +6,9 @@ import SwiftUI
 /// where it comes from (the project's own icon, a folder on disk, or a
 /// remote), its name, the source path or URL, and its problems. Remove sits
 /// on the trailing edge; a remote also has Edit for its clone folder.
-struct WorkspaceSourceRow: View {
+struct WorkspaceSourceRowView: View {
   let store: StoreOf<CreateWorkspaceFeature>
-  let source: SourceDraft
+  let source: WorkspaceSourceDraft
 
   var body: some View {
     HStack(spacing: 10) {

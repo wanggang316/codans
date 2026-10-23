@@ -24,8 +24,8 @@ struct CreateWorkspaceFeatureTests {
   private let api = Feature.Candidate(id: ProjectID(), name: "api", gitRoot: "/src/api")
   private let workspaceID = ProjectID()
 
-  private var appSource: SourceDraft.Source { .project(app.id, name: "app", gitRoot: "/src/app") }
-  private var apiSource: SourceDraft.Source { .project(api.id, name: "api", gitRoot: "/src/api") }
+  private var appSource: WorkspaceSourceDraft.Source { .project(app.id, name: "app", gitRoot: "/src/app") }
+  private var apiSource: WorkspaceSourceDraft.Source { .project(api.id, name: "api", gitRoot: "/src/api") }
 
   private let appRefs = RefInventory(
     local: ["main", "wip"], remote: ["origin/main", "origin/release"], defaultBaseRef: "origin/main",
@@ -90,7 +90,7 @@ struct CreateWorkspaceFeatureTests {
     var state = groupState()
     state.isLoadingMembers = false
     state.groupName = name
-    state.groupMembers = [GroupMemberDraft(options: appDefaults), GroupMemberDraft(options: apiDefaults)]
+    state.groupMembers = [WorkspaceGroupMemberDraft(options: appDefaults), WorkspaceGroupMemberDraft(options: apiDefaults)]
     for id in state.groupMembers.ids { state.groupMembers[id: id]?.refs = .loaded(appRefs) }
     return state
   }
@@ -138,7 +138,7 @@ struct CreateWorkspaceFeatureTests {
   func pickedFoldersBecomeSourcesOrSayWhyNot() async {
     let picked = LockIsolated<URL?>(URL(fileURLWithPath: "/nonexistent-codans-test/notes"))
     var initial = Feature.State(candidates: [app, api])
-    initial.sources = [SourceDraft(id: UUID(9), source: appSource)]
+    initial.sources = [WorkspaceSourceDraft(id: UUID(9), source: appSource)]
     let store = makeStore(initial, pickFolder: { picked.value })
     store.exhaustivity = .off(showSkippedAssertions: false)
 
@@ -229,7 +229,7 @@ struct CreateWorkspaceFeatureTests {
     }
     var initial = Feature.State(candidates: [app, api], locationPath: "/ws")
     initial.titleDraft = "W"
-    initial.sources = [SourceDraft(id: UUID(8), source: appSource)]
+    initial.sources = [WorkspaceSourceDraft(id: UUID(8), source: appSource)]
     let store = makeStore(initial, workspace: client, clock: clock)
     store.exhaustivity = .off(showSkippedAssertions: false)
 

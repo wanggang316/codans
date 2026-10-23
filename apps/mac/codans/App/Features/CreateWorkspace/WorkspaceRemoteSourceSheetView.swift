@@ -4,7 +4,7 @@ import SwiftUI
 /// The dialog behind Add Remote… and a remote row's Edit button, as a
 /// grouped form like the sheet it opens from: the URL and the folder it is
 /// cloned into. Add / Save puts it in the list.
-struct WorkspaceRemoteSourceSheet: View {
+struct WorkspaceRemoteSourceSheetView: View {
   let store: StoreOf<CreateWorkspaceFeature>
   /// The dialog as the sheet was handed it. Only read while it closes, when
   /// the store has already dropped it: the last live copy keeps the fading

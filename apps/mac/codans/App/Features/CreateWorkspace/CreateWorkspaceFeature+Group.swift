@@ -12,7 +12,7 @@ extension CreateWorkspaceFeature {
     state.isLoadingMembers = false
     state.agentProfiles = agentProfiles
     state.groupMembers = IdentifiedArray(
-      defaults.map { GroupMemberDraft(options: $0) }, uniquingIDsWith: { first, _ in first })
+      defaults.map { WorkspaceGroupMemberDraft(options: $0) }, uniquingIDsWith: { first, _ in first })
     var effects = state.groupMembers.map { member -> Effect<Action> in
       loadRefs(id: member.id, gitRoot: member.options.sourceGitRoot)
     }
@@ -141,7 +141,7 @@ extension CreateWorkspaceFeature {
   }
 }
 
-extension GroupMemberDraft.Progress {
+extension WorkspaceGroupMemberDraft.Progress {
   fileprivate var isSettingUp: Bool {
     if case .settingUp = self { return true }
     return false

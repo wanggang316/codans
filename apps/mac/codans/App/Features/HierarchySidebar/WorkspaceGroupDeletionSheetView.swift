@@ -7,7 +7,7 @@ import SwiftUI
 /// their risks, the running terminals and other files it would remove, the
 /// branch choice with the branches it would delete, and the acknowledgment.
 /// Cancel / Delete sit in the bottom bar with the check status.
-struct WorkspaceGroupDeletionDialog: View {
+struct WorkspaceGroupDeletionSheetView: View {
   @Bindable var store: StoreOf<WorkspaceGroupDeletionFeature>
 
   var body: some View {

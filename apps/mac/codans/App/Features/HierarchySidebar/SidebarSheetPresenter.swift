@@ -44,7 +44,7 @@ struct SidebarSheetPresenter: ViewModifier {
         store.scope(state: \.groupDeletionSheet, action: \.groupDeletionSheet),
         onDismiss: { store.send(.groupDeletionSheet(.cancelTapped)) },
         content: { childStore in
-          WorkspaceGroupDeletionDialog(store: childStore)
+          WorkspaceGroupDeletionSheetView(store: childStore)
             .interactiveDismissDisabled(childStore.phase == .deleting)
         }
       )
