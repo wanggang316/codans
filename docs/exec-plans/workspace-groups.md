@@ -11,30 +11,28 @@ orchestration API, sidebar, settings, CLI/IPC, deletion preflight, and tests.
 
 ## Base branch and catalog version
 
-Build on the pane-layout work (PR #265, `feat/card-pane`), not on `main`.
+Build on `main` (integration branch `feat/workspace-groups`). The catalog
+model is the current one: `Worktree.tabs`, each `Tab` with a split tree of
+`Pane`s.
 
-- PR #265 already owns catalog version 4 and adds the migration framework
-  this work needs: `CatalogLoader` (`current` / `migrated` / `readOnly`),
-  `Catalog.oldestMigratableVersion`, backup-by-copy before the first write
-  (`CatalogStore.commitMigration`), and read-only mode for newer versions.
-- PR #265 rewrites the files this work must change:
-  `HierarchyManager.swift` (2132 changed lines), `HierarchyClient.swift`
-  (1231), `RootFeature.swift` (762), `CodansApp.swift` (653),
-  `CatalogStore.swift` (188), `Catalog.swift` (133), and
-  `HierarchySidebarView.swift` (62). It also replaces `Worktree.tabs` with a
-  split tree of Panes that own Tabs.
-- Preferred start: land #265, then branch from `main`. If #265 is not merged
-  when work starts, branch from `origin/feat/card-pane` and cherry-pick the
-  docs commits `efcbc185..0dd0f9af` and this plan. Rebase onto `main` after
-  #265 lands. `origin/main` also has 7 commits after the shared base that
-  touch `WorkspaceMembership` (`WorkspaceMembershipIndex`) and the sidebar;
-  #265 must absorb them first.
-- This work migrates the catalog from version 4 to version 5. A version 3
-  file migrates 3 → 4 → 5 in one load.
+- `main` has catalog version 3. `Catalog.init(from:)` rejects every other
+  version (`Catalog.swift:61`), and `CatalogStore.load` moves such a file to
+  `backups/` and starts empty. There is no migration path.
+- This work migrates the catalog from version 3 to version 4 and adds a
+  minimal migrate-on-load path (see "Catalog load path").
+
+## Coordination with #265
+
+PR #265 (pane layout) also claims catalog version 4 with its own v3 → v4
+migration and loader. Whichever PR lands second renumbers its schema to the
+next version and chains its migration after the other one (v3 → v4 → v5),
+and reuses the other loader instead of keeping two. Keep the workspace
+migration a separate pure function on a decoded `Catalog` so it can move
+behind either migration without changes.
 
 ## Persisted schema
 
-### Catalog version 5
+### Catalog version 4
 
 Two new fields. Both use `decodeIfPresent` with a default, and the encoder
 omits them at the default value.
@@ -53,9 +51,11 @@ named }`, `isExpanded` (default `false`), `deletion: GroupDeletionState?`
   `reference` is a default member; its `path` is the source main checkout.
   `member` is a checkout that the group owns (named groups, including the
   migrated `existing` group).
-- The version bump makes version 4 builds open the file read-only (#265
-  behavior), so they cannot strip the new fields. Unknown-field tolerance
-  alone does not protect the data.
+- The version bump stops version 3 builds from reading the file, so they
+  cannot strip the new fields. Unknown-field tolerance alone does not
+  protect the data. Version 3 builds move a version 4 file aside and start
+  empty; this is existing released behavior and the migration backup (below)
+  keeps the version 3 copy for a downgrade.
 
 ### Manifest version 2
 
@@ -113,9 +113,9 @@ pre-migration copy.
 
 | Input | Behavior |
 |---|---|
-| Catalog version < 3 | #265 behavior: copy to `backups/`, load fails, saving off. |
-| Catalog version 3 or 4 | Migrate in memory to 5, copy the original to `backups/`, write version 5 at once. |
-| Catalog version > 5 | #265 read-only mode; nothing saved. |
+| Catalog version < 3 | Unchanged rule: move to `backups/`, start empty. |
+| Catalog version 3 | Migrate in memory to 4, copy the original to `backups/`, write version 4 at once. |
+| Catalog version > 4 | Leave the file in place, keep a copy in `backups/`, disable saving, start empty, and show an alert at launch ("Created by a newer Codans; changes are not saved"). |
 | Manifest v2 `schemaVersion` > 2 | Project `loadState = .failed("Created by a newer Codans")`. No reconcile, no writes, no fallback to version 1. |
 | Manifest v2 unreadable or invalid | Same `.failed` state with the reason. Never re-migrate from version 1 over it. Retry re-reads. |
 | Only version 1 present | Migrate (below). |
@@ -126,9 +126,33 @@ pre-migration copy.
 
 ## Migration
 
-### Catalog 4 → 5 (`CodansCore/Persistence/CatalogMigrationV4ToV5.swift`)
+### Catalog load path
 
-Pure, no I/O. Chain it in `CatalogLoader` after `CatalogMigrationV3ToV4`.
+Small and rule-based; no general framework.
+
+- `Catalog.DecodingIssue` gains `newerVersion(Int)`. `Catalog.init(from:)`
+  accepts version 3 and 4; it records the source version so the store knows
+  a migration is due. Version 3 decodes with the same tolerant field rules
+  (the new fields are absent).
+- `CatalogMigrationV3ToV4.migrate(_ catalog: Catalog) -> Catalog`
+  (`CodansCore/Persistence/`) is pure and runs on the decoded value.
+- `CatalogStore.load`:
+  1. Decode. Version 3 → migrate in memory.
+  2. Copy the original file with `StoreBackup.prepareURL(…, reason:
+     .migrated(fromVersion: 3))` (copy, not move). If the copy fails,
+     disable saving and return the migrated catalog in memory only.
+  3. Write version 4 at once (`saveNow`), then run the existing repairs
+     (`RemoteHostSidecar`, `WorkspaceMarkerRepair`).
+  4. `newerVersion` → copy to `backups/` (reason `.unsupported`), leave the
+     file, set `persistenceEnabled = false` and `loadIssue = .newerVersion`,
+     return `.default`. `CodansApp` shows one alert at launch.
+  5. Other decode errors keep the current rule (move aside, start empty).
+- Repeat execution: the migration is deterministic. A crash before step 3
+  re-runs it on the same version 3 file with the same result; an extra backup
+  copy is harmless (`StoreBackup.prune` keeps the count bounded).
+
+### Catalog 3 → 4 workspace rows
+
 For each Project with `isWorkspace`:
 
 1. Create the group records `default` and `existing` with deterministic IDs:
@@ -136,7 +160,7 @@ For each Project with `isWorkspace`:
    SHA-256 of `"codans.workspace-group|<key>|<rootPath>"` (same technique
    as `workspaceFetchGroupID`). Keys: `default`, `existing`.
 2. The row at `rootPath` becomes `existing`'s `groupTerminal`. It keeps its
-   ID, panes, tabs, and content IDs.
+   ID, tabs, panes, and pane IDs (session identity).
 3. Every other row becomes `existing`'s `member`, archived rows included.
 4. `selectedWorktreeID` is unchanged, so selection stays on the same row.
 
@@ -207,8 +231,10 @@ Rules:
   - Inside one workspace Project, the canonical path is unique per row, so
     the reconcile still matches rows by canonical path and keeps their IDs.
   - A reference and the source Project's main row share one canonical path.
-    `Catalog.workspaceMembership` and `WorkspaceMembershipIndex` count only
-    role `member`. A source main row therefore gets no workspace badge and
+    `Catalog.workspaceMembership` (command guards) and
+    `WorkspaceMembershipIndex.update` (display, cached in
+    `HierarchyManager.workspaceMemberships`) count only role `member`; the
+    index must also rebuild when slots change, not only when paths change. A source main row therefore gets no workspace badge and
     no mirror guard, and `removeMirrorRows` can never select it.
   - Ownership for deletion is lexical: a path is owned only when its
     standardized form (no symlink resolution) is inside the canonical root,
@@ -251,8 +277,9 @@ New `HierarchyClient` closures (forwarding to `HierarchyManager`):
 `setWorkspaceGroupExpanded(projectID, groupID, Bool)`,
 `setWorkspaceGroupDeletion(projectID, groupID, GroupDeletionState?)`,
 `removeWorkspaceRows(projectID, worktreeIDs)` (tears down surfaces, removes
-rows, never touches disk), `workspaceGroupBusyContents(projectID, groupID)`
-(content IDs where `HierarchyManager.isBusy` is true), and the reworked
+rows, never touches disk), `workspaceGroupBusyPanes(projectID, groupID)`
+(pane IDs where `HierarchyManager.paneIsBusy` is true, run-script panes
+included), and the reworked
 `addWorkspaceProject(name, rootPath)`.
 
 ## WorkspaceClient orchestration API
@@ -316,7 +343,7 @@ For each `member` row of the group, collected without side effects:
   --branches --remotes` (commits no other ref holds); detached HEAD uses
   `HEAD --not --branches --remotes`.
 - Running terminals: busy contents in the member rows and the group row
-  (`workspaceGroupBusyContents`).
+  (`workspaceGroupBusyPanes`).
 - Group directory content: entries in the group directory that are not
   member checkouts (named groups only; never for path `.`).
 - Branches the delete-branch option would delete: the member's current
@@ -369,6 +396,9 @@ skip it.
   rows without a slot are left out (rows without a slot stay visible in
   `codans tree`).
 - Indentation: header 0, group rows 14 (current child inset), members 28.
+- `Catalog.sidebarFilter` (All / categories / pull-request filter) applies
+  to member rows; a group row stays visible while any of its members
+  matches, and the group is shown expanded for the filtered view only.
 - Group row: name, star (`star.fill`) for `default` placed before the name,
   member count, branch summary (single branch name, or "N branches"),
   pull-request summary, disclosure chevron on hover. Selecting it selects
@@ -422,9 +452,10 @@ new verbs. Old flag shapes fail with a clear message; no silent forwarding.
 
 ## Tickets and sequence
 
-1. Core schema and migrations (CodansCore only).
+1. Core schema, migrations, and the catalog load path (CodansCore,
+   `CatalogStore`, launch alert in `CodansApp`).
 2. Runtime mapping and reconcile (owns `HierarchyManager`, `HierarchyClient`,
-   `ProjectReconciler`, `CatalogStore`, env keys; declares the
+   `ProjectReconciler`, env keys; declares the
    `WorkspaceClient` surface; extracts the test fixture).
 3. Sources and group creation in `WorkspaceClient`.
 4. Deletion preflight, group deletion, Workspace removal in `WorkspaceClient`.
@@ -440,14 +471,15 @@ Edges: 1 → 2; 2 → 3, 4, 5; 3 + 4 → 6; 3 + 5 → 7; 4 + 5 → 8; 6 + 7 + 8 
 
 - CodansCoreTests (host-free): manifest v2 codec and `validate()`;
   manifest 1 → 2 (different member branches, `default` name collision,
-  empty manifest, determinism); catalog 4 → 5 and 3 → 5 through
-  `CatalogLoader` with legacy fixtures (IDs, paths, branches, panes, tabs,
-  content IDs, selection preserved); `WorkspaceOwnership` (symlinked default
+  empty manifest, determinism); catalog 3 → 4 with legacy fixtures (IDs,
+  paths, branches, tabs, pane IDs, selection preserved); `WorkspaceOwnership` (symlinked default
   paths, `.` group, paths outside root); `WorkspaceDefaultLinks` on a temp
   directory; sidebar projection (`CatalogSidebarTests`).
-- `CatalogStore` tests: version 4 file migrates with a backup copy and
-  writes version 5; repeat load does not duplicate groups; version 6 is
-  read-only; damaged file never returns a silently saved empty catalog.
+- `CatalogStore` tests (`PersistenceVersioningTests` pattern): version 3
+  file migrates with a backup copy and writes version 4; repeat load does not
+  duplicate groups; version 5 stays in place, saving off, issue reported;
+  failed backup copy disables saving; damaged file never returns a silently
+  saved empty catalog.
 - `HierarchyManagerWorkspaceTests` / `HierarchyClientWorkspaceReconcileTests`
   (real git): migrated identity (row IDs, panes, tabs, selection) after
   reconcile and after reload; repeat reconcile is stable; branch switch keeps
