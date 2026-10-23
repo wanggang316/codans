@@ -1,3 +1,4 @@
+import CodansCore
 import Testing
 
 @testable import Codans
@@ -10,13 +11,8 @@ struct SocketPathsTests {
   }
 
   @Test
-  func defaultPathMatchesBuildChannel() {
-    let path = SocketPaths.defaultSocketPath(uid: 1234)
-    #if DEBUG
-      #expect(path == "/tmp/codans-dev-1234.sock")
-    #else
-      #expect(path == "/tmp/codans-1234.sock")
-    #endif
+  func defaultPathIsTheInstances() {
+    #expect(SocketPaths.defaultSocketPath(uid: 1234) == "/tmp/\(AppInstance.slug)-1234.sock")
   }
 
   @Test
@@ -36,6 +32,17 @@ struct SocketPathsTests {
     #expect(SocketPaths.resolve(override: inheritedHostSocket, uid: 1234) == ownDefault)
     // Sanity: the inherited path really is the *other* channel, not our own.
     #expect(inheritedHostSocket != ownDefault)
+  }
+
+  @Test
+  func aWorktreeInstanceIgnoresTheSharedDevelopmentSocket() {
+    // A worktree instance's app launched from a pane of the shared
+    // development app inherits that app's socket; binding it would fail.
+    let own = "/tmp/codans-dev-card-pane-1234.sock"
+    #expect(SocketPaths.resolve(override: "/tmp/codans-dev-1234.sock", uid: 1234, ownDefault: own) == own)
+    #expect(SocketPaths.resolve(override: "/tmp/codans-1234.sock", uid: 1234, ownDefault: own) == own)
+    #expect(SocketPaths.resolve(override: own, uid: 1234, ownDefault: own) == own)
+    #expect(SocketPaths.resolve(override: nil, uid: 1234, ownDefault: own) == own)
   }
 
   @Test
