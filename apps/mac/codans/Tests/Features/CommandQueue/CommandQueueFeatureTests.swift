@@ -44,6 +44,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.mode = .now }
     await store.send(.draftChanged("ls -la")) { $0.draft = "ls -la" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     // No trailing newline — `sendCommand` owns the Return keypress.
     #expect(recorder.sent == ["ls -la"])
@@ -56,6 +57,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
     await store.send(.draftChanged("make test")) { $0.draft = "make test" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.sent.isEmpty)
     #expect(recorder.queue.map(\.text) == ["make test"])
@@ -75,6 +77,7 @@ struct CommandQueueFeatureTests {
     }
     await store.send(.draftChanged("/compact")) { $0.draft = "/compact" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.queue.first?.timing == .scheduled(at: fireAt, repeatEvery: 1800))
   }
@@ -90,6 +93,7 @@ struct CommandQueueFeatureTests {
     }
     await store.send(.draftChanged("/compact")) { $0.draft = "/compact" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.queue.first?.timing == .scheduled(at: fireAt, repeatEvery: nil))
   }
@@ -114,6 +118,7 @@ struct CommandQueueFeatureTests {
     let draft = "\nRefactor the parser.\n\nKeep the public API.\n"
     await store.send(.draftChanged(draft)) { $0.draft = draft }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     // Only the ends are trimmed. The blank line is part of the prompt, and
     // `sendCommand` delivers the body as one paste.
@@ -127,6 +132,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
     await store.send(.draftChanged("next")) { $0.draft = "next" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.queue.map(\.text) == ["already there", "next"])
   }

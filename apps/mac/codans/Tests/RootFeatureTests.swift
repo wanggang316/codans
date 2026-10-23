@@ -9,6 +9,16 @@ import Testing
 @MainActor
 struct RootFeatureTests {
   @Test
+  func submittedCommandClosesComposer() async {
+    var state = RootFeature.State()
+    state.commandQueue = CommandQueueFeature.State(paneID: PaneID())
+    let store = TestStore(initialState: state) { RootFeature() }
+    await store.send(.commandQueue(.presented(.delegate(.submitted)))) {
+      $0.commandQueue = nil
+    }
+  }
+
+  @Test
   func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())

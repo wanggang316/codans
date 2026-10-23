@@ -60,9 +60,9 @@ struct PaneCommandQueueChrome: View {
         Button {
           isHidden = true
         } label: {
-          Image(systemName: "minus")
-            .frame(width: 20, height: 24)
+          Image(systemName: "xmark")
         }
+        .buttonStyle(QueueDismissButtonStyle())
         .help("Hide queued commands")
         .accessibilityLabel("Hide queued commands")
       }
@@ -133,9 +133,26 @@ struct PaneCommandQueueChrome: View {
         Image(systemName: "xmark.circle.fill")
           .foregroundStyle(.secondary)
       }
+      .buttonStyle(QueueDismissButtonStyle())
       .accessibilityLabel("Remove queued command")
     }
     .frame(height: CommandQueuePage.rowHeight)
     .help(entry.text)
+  }
+}
+
+/// The full square is interactive, including the space around the glyph.
+private struct QueueDismissButtonStyle: ButtonStyle {
+  @State private var isHovered = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .frame(width: 28, height: 28)
+      .background {
+        RoundedRectangle(cornerRadius: 6)
+          .fill(Color.primary.opacity(configuration.isPressed ? 0.16 : (isHovered ? 0.08 : 0)))
+      }
+      .contentShape(Rectangle())
+      .onHover { isHovered = $0 }
   }
 }

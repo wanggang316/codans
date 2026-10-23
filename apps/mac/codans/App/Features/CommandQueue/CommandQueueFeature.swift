@@ -105,8 +105,13 @@ struct CommandQueueFeature {
     case repeatUnitChanged(IntervalUnit)
     /// Commit the draft under the selected mode.
     case submitted
+    case delegate(Delegate)
     case removeTapped(QueuedCommand.ID)
     case clearAllTapped
+
+    enum Delegate: Equatable {
+      case submitted
+    }
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
@@ -170,6 +175,9 @@ struct CommandQueueFeature {
           )
         }
         state.draft = ""
+        return .send(.delegate(.submitted))
+
+      case .delegate:
         return .none
 
       case .removeTapped(let id):

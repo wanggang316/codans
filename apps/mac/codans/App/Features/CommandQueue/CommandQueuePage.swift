@@ -1,7 +1,7 @@
 import Foundation
 
 /// Keeps a non-scrolling queue inside the pane as commands drain or its size changes.
-struct CommandQueuePage {
+nonisolated struct CommandQueuePage {
   static let rowHeight: CGFloat = 44
   static let chromeHeight: CGFloat = 76
 

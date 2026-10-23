@@ -2021,7 +2021,7 @@ struct RootFeature {
         }
         return .none
 
-      case .commandQueue(.dismiss):
+      case .commandQueue(.presented(.delegate(.submitted))), .commandQueue(.dismiss):
         state.commandQueue = nil
         return .none
 
