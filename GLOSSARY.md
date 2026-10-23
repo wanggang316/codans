@@ -8,7 +8,8 @@ These terms define the planned Workspace group model. See the
 **Workspace**: A collection of source projects with a default workspace group
 and named workspace groups.
 
-**Workspace group**: One set of member checkouts within a Workspace.
+**Workspace group**: One set of member checkouts within a Workspace. Membership
+refers to worktrees and does not change when a member switches branches.
 _Avoid_: Git worktree when referring to the whole group.
 
 **Default workspace group**: The group named `default` that references the
