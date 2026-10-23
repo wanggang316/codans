@@ -6,7 +6,6 @@ import os
 /// Why a workspace operation could not run. Every case names the path,
 /// group, or member involved so the CLI and the sheets can show it verbatim.
 nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
-  case invalidPlan([WorkspacePlan.ValidationIssue])
   /// A source plan the client refuses before any I/O (empty title, no root).
   case invalidSourcePlan(reason: String)
   case rootAlreadyRegistered(path: String)
@@ -48,14 +47,10 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
   case checkFailed(GroupDeletionCheck)
   /// The manifest could not be read or written.
   case manifestUnavailable(reason: String)
-  /// The operation has no implementation in this build yet.
-  case notImplemented(String)
   case cancelled
 
   var errorDescription: String? {
     switch self {
-    case .invalidPlan(let issues):
-      return issues.map(\.description).joined(separator: "; ")
     case .invalidSourcePlan(let reason):
       return reason
     case .rootAlreadyRegistered(let path):
@@ -107,8 +102,6 @@ nonisolated enum WorkspaceError: LocalizedError, Equatable, Sendable {
       return "group \"\(check.groupName)\" could not be checked; nothing was deleted"
     case .manifestUnavailable(let reason):
       return reason
-    case .notImplemented(let operation):
-      return "\(operation) is not available in this build"
     case .cancelled:
       return "workspace creation was cancelled; everything it created has been removed"
     }
@@ -372,16 +365,6 @@ extension WorkspaceClient {
 
   // MARK: Preflight
 
-  /// A member after preflight: canonical source root (where the clone will
-  /// land, for a remote that is not on disk yet), absolute destination, and
-  /// the URL still to clone from, if any.
-  struct ResolvedMember: Sendable {
-    let member: WorkspacePlan.Member
-    let sourceGitRoot: String
-    let destination: String
-    let cloneFrom: String?
-  }
-
   /// A finding worded for the form: short, with home-relative paths. The
   /// CLI keeps `errorDescription`'s full wording.
   static func preflightIssue(for error: WorkspaceError) -> WorkspacePreflight.Issue? {
@@ -410,10 +393,10 @@ extension WorkspaceClient {
         message: "\(tilde(path)) already exists and is not a clone of this remote. Choose another location.")
     case .invalidBranchName(let branch, _):
       return .init(kind: .invalidBranchName, message: "\u{201C}\(branch)\u{201D} is not a valid branch name.")
-    case .invalidPlan, .invalidSourcePlan, .notWorkspace, .memberExists, .memberNotRegistered,
+    case .invalidSourcePlan, .notWorkspace, .memberExists, .memberNotRegistered,
       .memberNotFound, .memberWithoutSource, .cannotDropRoot, .sourceExists, .sourceNotFound,
       .groupNotFound, .cannotDeleteDefault, .groupPreflightFailed, .risksNotAcknowledged, .checkFailed,
-      .manifestUnavailable, .notImplemented, .cancelled:
+      .manifestUnavailable, .cancelled:
       return nil
     }
   }
@@ -451,56 +434,6 @@ extension WorkspaceClient {
     }
   }
 
-  /// Checks a member without touching disk: its source is a repository (or
-  /// a remote whose destination is free or already a clone of it), its
-  /// destination is free, and its branch name is well-formed. A remote that
-  /// still needs cloning comes back with `cloneFrom` set.
-  static func resolve(
-    _ member: WorkspacePlan.Member,
-    rootPath: String,
-    context: Context
-  ) async throws -> ResolvedMember {
-    let destination = (rootPath as NSString).appendingPathComponent(member.name)
-    guard rootPath.isEmpty || !FileManager.default.fileExists(atPath: destination) else {
-      throw WorkspaceError.destinationExists(path: destination)
-    }
-    let sourceGitRoot: String
-    var cloneFrom: String?
-    switch member.source {
-    case .local(let path):
-      let expanded = canonical(path)
-      guard isDirectory(expanded), let probe = try? await context.cli.inspectRepository(at: expanded)
-      else { throw WorkspaceError.sourceNotRepository(path: expanded) }
-      guard !probe.isBare else { throw WorkspaceError.bareRepository(path: canonical(probe.root)) }
-      sourceGitRoot = canonical(probe.root)
-    case .remote(let url, let cloneDestination):
-      let remoteURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-      let expanded = canonical(cloneDestination)
-      if FileManager.default.fileExists(atPath: expanded) {
-        // Reuse a clone of the same remote; refuse anything else at that path.
-        guard isDirectory(expanded),
-          let probe = try? await context.cli.inspectRepository(at: expanded),
-          !probe.isBare, canonical(probe.root) == expanded,
-          let origin = await context.git.remoteURL(URL(fileURLWithPath: expanded, isDirectory: true), "origin"),
-          remoteURLsMatch(origin, remoteURL)
-        else { throw WorkspaceError.cloneDestinationTaken(path: expanded, remoteURL: remoteURL) }
-      } else {
-        cloneFrom = remoteURL
-      }
-      sourceGitRoot = expanded
-    }
-    // `check-ref-format --branch` needs no repository, so the not-yet-cloned
-    // source is asked the same way as a local one.
-    let branch = member.checkout.branch
-    let probeURL = URL(
-      fileURLWithPath: cloneFrom == nil ? sourceGitRoot : NSHomeDirectory(), isDirectory: true)
-    guard await context.git.isValidBranchName(probeURL, branch) else {
-      throw WorkspaceError.invalidBranchName(branch, repository: sourceGitRoot)
-    }
-    return ResolvedMember(
-      member: member, sourceGitRoot: sourceGitRoot, destination: destination, cloneFrom: cloneFrom)
-  }
-
   /// Two spellings of one remote: trailing slashes and a `.git` suffix are
   /// noise, the rest must match.
   nonisolated static func remoteURLsMatch(_ lhs: String, _ rhs: String) -> Bool {
@@ -514,76 +447,7 @@ extension WorkspaceClient {
     return normalized(lhs) == normalized(rhs)
   }
 
-  // MARK: Materialize / rollback
-
-  /// Clone (remote source), fetch (remote base ref), `git worktree add`;
-  /// every step recorded so rollback can undo it. Returns the member as it
-  /// should be written to the manifest: source root on disk, checkout with
-  /// its base ref resolved and its remote-tracking choice applied.
-  static func materialize(
-    _ entry: ResolvedMember,
-    ledger: inout WorkspaceMaterializationLedger,
-    context: Context,
-    yield: @escaping @Sendable (WorkspaceCreationEvent) -> Void
-  ) async throws -> WorkspacePlan.Member {
-    let name = entry.member.name
-    let sourceURL = URL(fileURLWithPath: entry.sourceGitRoot, isDirectory: true)
-    let destinationURL = URL(fileURLWithPath: entry.destination, isDirectory: true)
-    do {
-      var freshlyCloned = false
-      if let remoteURL = entry.cloneFrom {
-        yield(.memberStarted(name: name, phase: .cloning))
-        for try await line in context.git.cloneStream(remoteURL, sourceURL) {
-          yield(.progressLine(name: name, line: line))
-        }
-        // A cancelled consumer ends the clone stream quietly; do not read
-        // that as a finished clone.
-        try Task.checkCancellation()
-        ledger.record(.clonedRepository(path: entry.sourceGitRoot))
-        freshlyCloned = true
-      }
-
-      if !freshlyCloned, await context.fetchRemoteOnCreate(),
-        let remote = await remoteToFetch(for: entry.member.checkout, sourceURL: sourceURL, git: context.git)
-      {
-        yield(.memberStarted(name: name, phase: .fetching))
-        try await context.git.fetchRemote(sourceURL, remote)
-      }
-      try Task.checkCancellation()
-
-      let checkout = try await finalizeCheckout(entry.member.checkout, sourceURL: sourceURL, git: context.git)
-      yield(.memberStarted(name: name, phase: .checkingOut))
-      // `-B` moves the branch before the worktree exists, so the previous
-      // tip is recorded ahead of the command that may fail after moving it.
-      if case .remoteTrackingRef(_, let branch, true) = checkout,
-        let tip = try await context.git.branchTip(sourceURL, branch)
-      {
-        ledger.record(.resetBranch(repoRoot: entry.sourceGitRoot, branch: branch, previousTip: tip))
-      }
-      try await context.git.addWorktreeAt(sourceURL, destinationURL, checkout)
-      switch checkout {
-      case .newBranch(let branch, _):
-        ledger.record(.createdBranch(repoRoot: entry.sourceGitRoot, branch: branch))
-      case .remoteTrackingRef(_, let branch, let resetLocal) where !resetLocal:
-        // No local branch existed (a kept one becomes `.existingBranch`).
-        ledger.record(.createdBranch(repoRoot: entry.sourceGitRoot, branch: branch))
-      case .remoteTrackingRef, .existingBranch:
-        break
-      }
-      ledger.record(.addedWorktree(repoRoot: entry.sourceGitRoot, path: entry.destination))
-      yield(.memberFinished(name: name))
-
-      var member = entry.member
-      member.sourceGitRoot = entry.sourceGitRoot
-      member.checkout = checkout
-      return member
-    } catch {
-      if !(error is CancellationError) {
-        yield(.memberFailed(name: name, message: describe(error)))
-      }
-      throw error
-    }
-  }
+  // MARK: Checkout / rollback
 
   /// The remote a checkout's base ref lives on, when the repository has it
   /// configured: `origin/main` → `origin`, an unnamed base → `origin` (the
@@ -604,33 +468,6 @@ extension WorkspaceClient {
     }
     guard let candidate, await git.remoteURL(sourceURL, candidate) != nil else { return nil }
     return candidate
-  }
-
-  /// Fills what only the repository can answer: the default base ref of a
-  /// new branch, and whether a remote-tracking checkout meets an existing
-  /// local branch. Keeping the local branch turns the checkout into a plain
-  /// `existingBranch`; a missing local branch never resets anything.
-  static func finalizeCheckout(
-    _ checkout: WorkspaceCheckout, sourceURL: URL, git: GitWorktreeClient
-  ) async throws -> WorkspaceCheckout {
-    switch checkout {
-    case .newBranch(let branch, nil):
-      // Start from the repository's default remote branch when the caller
-      // named none; git's own default (HEAD) applies when that is unknown or
-      // names a ref this repository no longer has.
-      guard let base = try? await git.defaultRemoteBranchRef(sourceURL),
-        let refs = try? await git.branchRefs(sourceURL), refs.contains(base)
-      else { return .newBranch(branch: branch, baseRef: nil) }
-      return .newBranch(branch: branch, baseRef: base)
-    case .newBranch, .existingBranch:
-      return checkout
-    case .remoteTrackingRef(let remoteRef, let branch, let resetLocal):
-      let locals = try await git.localBranchNames(sourceURL)
-      guard locals.contains(branch) else {
-        return .remoteTrackingRef(remoteRef: remoteRef, branch: branch, resetLocal: false)
-      }
-      return resetLocal ? checkout : .existingBranch(branch)
-    }
   }
 
   /// Undo in reverse order. Runs detached so cancelling the creation task

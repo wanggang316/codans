@@ -342,7 +342,7 @@ final class WorkspaceHandlers {
     if let workspace = error as? WorkspaceError {
       let message = workspace.localizedDescription
       switch workspace {
-      case .invalidPlan, .invalidSourcePlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository,
+      case .invalidSourcePlan, .rootIsFile, .rootInsideRepository, .sourceNotRepository,
         .bareRepository, .invalidBranchName:
         return .invalidParams(message: message, path: nil)
       case .groupPreflightFailed(let preflight):
@@ -362,7 +362,7 @@ final class WorkspaceHandlers {
         return .notFound(kind: "workspace project", id: path)
       case .groupNotFound(let id):
         return .notFound(kind: "workspace group", id: id.description)
-      case .cancelled, .memberNotRegistered, .manifestUnavailable, .notImplemented:
+      case .cancelled, .memberNotRegistered, .manifestUnavailable:
         return .internal(message)
       }
     }
