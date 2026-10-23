@@ -934,6 +934,9 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.hierarchyClient = hierarchy
+      // The Workspace pane adds and removes sources through the same client
+      // as the sidebar; it has no live default.
+      $0.workspaceClient = workspaceClient
       $0[GhosttyTerminalSettingsClient.self] = .appLive()
     }
 
