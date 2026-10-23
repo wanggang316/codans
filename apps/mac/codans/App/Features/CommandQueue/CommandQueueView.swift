@@ -13,20 +13,31 @@ struct CommandQueueView: View {
   @FocusState private var draftFocused: Bool
 
   private static let width: CGFloat = 560
-  private static let boxCornerRadius: CGFloat = 6
-  /// About five lines of the composer's monospaced 12pt.
-  private static let editorHeight: CGFloat = 88
-  private static let composerFont = Font.system(size: 12, design: .monospaced)
+  private static let editorHeight: CGFloat = 110
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(spacing: 0) {
       Text("Command Queue")
         .font(.headline)
-      composer
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+      Form {
+        Section {
+          composer
+        }
+        if store.mode == .scheduled {
+          Section("Schedule") {
+            scheduleRow
+          }
+        }
+      }
+      .formStyle(.grouped)
+      .scrollBounceBehavior(.basedOnSize)
     }
-    .padding(24)
     .frame(width: Self.width)
     .onAppear { draftFocused = true }
+    .onExitCommand(perform: onDismiss)
   }
 
   // MARK: - Composer
@@ -36,39 +47,28 @@ struct CommandQueueView: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 4) {
       editor
-      if store.mode == .scheduled {
-        scheduleRow
-          .padding(.horizontal, 10)
-      }
       HStack(spacing: 8) {
-        modeMenu
         Spacer()
+        modeMenu
         sendButton
       }
-      .padding(.horizontal, 8)
-      .padding(.bottom, 6)
     }
-    .background(box)
-    .overlay(boxEdge(focused: draftFocused))
   }
 
   private var editor: some View {
     TextEditor(text: $store.draft.sending(\.draftChanged))
-      .font(Self.composerFont)
+      .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()
-      .padding(.horizontal, 4)
-      .padding(.top, 6)
       .frame(height: Self.editorHeight)
       .overlay(alignment: .topLeading) {
         if store.draft.isEmpty {
           // `TextEditor` has no placeholder of its own; this sits where the
           // first line of text will, matching the text container's inset.
           Text("Command or prompt… (⇧↩ for a new line)")
-            .font(Self.composerFont)
+            .font(.body)
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 9)
-            .padding(.top, 6)
+            .padding(.leading, 5)
             .allowsHitTesting(false)
         }
       }
@@ -92,50 +92,37 @@ struct CommandQueueView: View {
       .accessibilityLabel("Command")
   }
 
-  /// "At <date>   Repeat every <n> <unit>" on one line; the sheet is wide
-  /// enough for the sentence to read left to right without wrapping.
   private var scheduleRow: some View {
-    HStack(spacing: 8) {
-      Text("At")
-        .font(.callout)
-        .foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 12) {
       DatePicker(
-        "",
+        "Send at",
         selection: $store.scheduledAt.sending(\.scheduledAtChanged),
-        displayedComponents: [.date, .hourAndMinute],
+        displayedComponents: [.date, .hourAndMinute]
       )
-      .labelsHidden()
-      // `.field`, not `.compact`: a stepper field is typeable, needs no
-      // popover, and matches the Date & Time idiom this reads as.
       .datePickerStyle(.field)
-
-      Toggle(
-        "Repeat every",
-        isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged),
-      )
-      .font(.callout)
-      .padding(.leading, 12)
-      TextField(
-        "",
-        value: $store.repeatAmount.sending(\.repeatAmountChanged),
-        format: .number,
-      )
-      .textFieldStyle(.roundedBorder)
-      .frame(width: 52)
-      .disabled(!store.repeatEnabled)
-      Picker("", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
-        ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
-          Text(unit.title).tag(unit)
+      HStack(spacing: 8) {
+        Toggle("Repeat every", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
+        Spacer()
+        TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
+          .labelsHidden()
+          .textFieldStyle(.roundedBorder)
+          .frame(width: 52)
+          .disabled(!store.repeatEnabled)
+        Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
+          ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
+            Text(unit.title).tag(unit)
+          }
         }
+        .labelsHidden()
+        .frame(width: 96)
+        .disabled(!store.repeatEnabled)
       }
-      .labelsHidden()
-      .frame(width: 96)
-      .disabled(!store.repeatEnabled)
     }
+    .font(.callout)
   }
 
   /// Send timing, as the small labelled menu a chat composer keeps at its
-  /// bottom-left. The inline picker gives the menu its checkmarks.
+  /// bottom-right. The inline picker gives the menu its checkmarks.
   private var modeMenu: some View {
     Menu {
       Picker("Send", selection: $store.mode.sending(\.modeChanged)) {
@@ -147,7 +134,7 @@ struct CommandQueueView: View {
       .labelsHidden()
     } label: {
       Label(store.mode.title, systemImage: store.mode.symbol)
-        .font(.system(size: 11))
+        .font(.callout)
         .foregroundStyle(.secondary)
     }
     .menuStyle(.borderlessButton)
@@ -193,24 +180,6 @@ struct CommandQueueView: View {
         ? "Fires once at the chosen time."
         : "Fires at the chosen time, then repeats."
     }
-  }
-
-  // MARK: - Chrome
-
-  /// The composer's box. Its edge takes the accent colour while the editor
-  /// has focus, standing in for the focus ring the editor itself no longer
-  /// draws.
-  private var box: some View {
-    RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
-      .fill(Color(nsColor: .textBackgroundColor))
-  }
-
-  private func boxEdge(focused: Bool) -> some View {
-    RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
-      .stroke(
-        focused ? Color.accentColor : Color(nsColor: .separatorColor),
-        lineWidth: 1,
-      )
   }
 
 }
