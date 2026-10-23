@@ -18,6 +18,10 @@ public enum BuiltinEnvVar: Sendable, CaseIterable {
   case rootPath
   /// Absolute path of the workspace root; set only in workspace Projects.
   case workspaceRoot
+  /// Name of the Workspace group; set only in Workspace rows with a group.
+  case workspaceGroup
+  /// Canonical directory of the Workspace group.
+  case workspaceGroupDirectory
 
   /// The literal name written into the child process environment. Spelled
   /// in `CodansEnvironment.Key`, which is the master list of every variable.
@@ -26,6 +30,8 @@ public enum BuiltinEnvVar: Sendable, CaseIterable {
     case .worktreePath: return CodansEnvironment.Key.worktreePath.rawValue
     case .rootPath: return CodansEnvironment.Key.rootPath.rawValue
     case .workspaceRoot: return CodansEnvironment.Key.workspaceRoot.rawValue
+    case .workspaceGroup: return CodansEnvironment.Key.workspaceGroup.rawValue
+    case .workspaceGroupDirectory: return CodansEnvironment.Key.workspaceGroupDirectory.rawValue
     }
   }
 
@@ -37,6 +43,8 @@ public enum BuiltinEnvVar: Sendable, CaseIterable {
     case .worktreePath: return "Absolute path of the current worktree"
     case .rootPath: return "Absolute path of the project root"
     case .workspaceRoot: return "Absolute path of the workspace root (workspace projects only)"
+    case .workspaceGroup: return "Name of the workspace group (workspace projects only)"
+    case .workspaceGroupDirectory: return "Absolute path of the workspace group folder (workspace projects only)"
     }
   }
 

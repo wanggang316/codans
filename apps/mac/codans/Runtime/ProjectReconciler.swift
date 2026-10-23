@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Drives per-Project health reconciliation. Stats the `rootPath`, labels the
 /// Project `.failed(reason:)` when the folder is gone, otherwise hands off to
@@ -82,14 +82,18 @@ actor ProjectReconciler {
           projectID, Self.missingFolderState(rootPath: project.rootPath))
         return
       }
-      // A workspace whose manifest is gone or unreadable stays a workspace
-      // (the flag is sticky — demoting it would re-open the folder-project
-      // git probe) and reports the problem on its row instead. The reconcile
-      // closure re-reads the manifest for its contents; this pass only
-      // decides whether the row is healthy.
+      // A workspace whose manifest is gone, unreadable, invalid, or newer
+      // than this build stays a workspace (the flag is sticky — demoting it
+      // would re-open the folder-project git probe) and reports the problem
+      // on its row instead, without a reconcile or any write. A version 1
+      // manifest migrates here, so the reconcile closure reads the group
+      // manifest; this pass only decides whether the row is healthy.
       if project.isWorkspace {
         do {
-          _ = try WorkspaceManifestStore.load(rootPath: project.rootPath)
+          _ = try WorkspaceManifestStore.loadOrMigrate(rootPath: project.rootPath)
+        } catch WorkspaceManifestStore.Failure.newerSchema {
+          await client.setProjectLoadState(projectID, .failed(reason: "Created by a newer Codans"))
+          return
         } catch {
           await client.setProjectLoadState(
             projectID,

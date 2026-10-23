@@ -38,6 +38,6 @@ Use [_template.md](_template.md) as a starting point.
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、版本读取与恢复、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
 - [Workflow](workflow.md) — **实现中**：YAML 声明的多 agent 编排（GitHub Actions 风格语法 + 角色 / 显式 `deliver` 交付 / 循环与状态；activation token、attention 而非失败、`CodansCore` 纯状态机 + app 层 effect 解释、worktree 内 run 目录、`~/.codans/workflows/`）
-- [Workspace](workspace.md) — 跨多仓库的 Project：根目录即侧栏上的 workspace 行、子仓库 checkout 为真正的 Worktree 行；`.codans/workspace.json` 定成员、git 定活体事实；reconcile 在 git 探测前短路；创建 / 添加 / 移除经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚）；PR 按成员仓库取数、workspace 行聚合
+- [Workspace](workspace.md) — 跨多仓库的 Project：`default` 组引用各源项目主工作区，命名组每项目一个同分支 checkout，组与成员都是真正的 Worktree 行；`.codans/workspace-groups.json` 定组与成员、git 定活体事实；reconcile 在 git 探测前短路；创建、源增删、建组与删组经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚、删除前检查风险）；PR 按成员仓库取数、组行汇总
 - [Worktree](worktree.md) — Worktree 全生命周期（`git-wt` 创建/发现/archive/remove/prune）+ 四段侧边栏排序 + titlebar 状态栏 + header 分支切换器
 - [Worktree Processes](worktree-processes.md) — 当前 Worktree 的实时前台任务、启动名称归属、采样失效规则与 Pane 跳转

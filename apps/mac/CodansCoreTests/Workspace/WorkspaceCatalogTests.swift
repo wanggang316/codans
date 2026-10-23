@@ -42,8 +42,9 @@ struct WorkspaceCatalogTests {
 
   @Test
   func isWorkspaceIsOmittedWhenFalseAndRoundTripsWhenTrue() throws {
-    let plain = try JSONSerialization.jsonObject(
-      with: JSONEncoder().encode(Project(name: "p", rootPath: "/tmp/p"))) as? [String: Any]
+    let plain =
+      try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(Project(name: "p", rootPath: "/tmp/p"))) as? [String: Any]
     #expect(plain?["isWorkspace"] == nil)
 
     let workspace = Project(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
@@ -59,8 +60,9 @@ struct WorkspaceCatalogTests {
 
   @Test
   func sourceGitRootIsOmittedWhenNilAndRoundTripsWhenSet() throws {
-    let plain = try JSONSerialization.jsonObject(
-      with: JSONEncoder().encode(Worktree(name: "w", path: "/tmp/w"))) as? [String: Any]
+    let plain =
+      try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(Worktree(name: "w", path: "/tmp/w"))) as? [String: Any]
     #expect(plain?["sourceGitRoot"] == nil)
 
     let child = Worktree(name: "c", path: "/tmp/ws/c", sourceGitRoot: "/src/c")
@@ -72,11 +74,19 @@ struct WorkspaceCatalogTests {
   // MARK: - Membership
 
   @Test
-  func membershipFindsChildRowsButNeverTheRoot() {
-    let child = Worktree(name: "app", path: "/tmp/ws/app", sourceGitRoot: "/src/app")
+  func membershipFindsMemberRowsOnly() {
+    let group = WorkspaceGroupID()
+    let child = Worktree(
+      name: "app", path: "/tmp/ws/app", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: group, role: .member))
+    let groupRow = Worktree(
+      name: "ws", path: "/tmp/ws", workspaceSlot: WorkspaceSlot(groupID: group, role: .groupTerminal))
+    let reference = Worktree(
+      name: "app", path: "/src/app", workspaceSlot: WorkspaceSlot(groupID: WorkspaceGroupID(), role: .reference))
+    let unplaced = Worktree(name: "old", path: "/tmp/ws/old")
     let workspace = Project(
       name: "ws", rootPath: "/tmp/ws",
-      worktrees: [Worktree(name: "ws", path: "/tmp/ws"), child],
+      worktrees: [groupRow, child, reference, unplaced],
       isWorkspace: true)
     let repo = Project(
       name: "app", rootPath: "/src/app", gitRoot: "/src/app",
@@ -89,6 +99,7 @@ struct WorkspaceCatalogTests {
     #expect(hit?.workspaceName == "ws")
     #expect(catalog.workspaceMembership(forCanonicalPath: "/tmp/ws") { $0 } == nil)
     #expect(catalog.workspaceMembership(forCanonicalPath: "/src/app") { $0 } == nil)
+    #expect(catalog.workspaceMembership(forCanonicalPath: "/tmp/ws/old") { $0 } == nil)
   }
 
   // MARK: - Marker repair

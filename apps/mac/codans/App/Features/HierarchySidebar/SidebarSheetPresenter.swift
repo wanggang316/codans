@@ -1,10 +1,11 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// Presents the sidebar's own sheets — New Worktree, Clone Repository, and
-/// Archived Worktrees — off the sidebar store. Extracted into a
-/// `ViewModifier` (applied as a single `.modifier(...)`) for the same reason
-/// as `RemoteConnectionSheetPresenter`: inline `.sheet` modifiers with their
+/// Presents the sidebar's own sheets — New Worktree, Clone Repository,
+/// Archived Worktrees, and the Workspace delete sheet — off the sidebar
+/// store. Extracted into a `ViewModifier` (applied as a single
+/// `.modifier(...)`) for the same reason as
+/// `RemoteConnectionSheetPresenter`: inline `.sheet` modifiers with their
 /// binding and scope closures push the sidebar's `body` past the Swift
 /// type-checker's inference budget.
 ///
@@ -36,6 +37,15 @@ struct SidebarSheetPresenter: ViewModifier {
         onDismiss: { store.send(.archivedWorktreesSheetDismissed) },
         content: { childStore in
           ArchivedWorktreesSheet(store: childStore)
+        }
+      )
+      // Delete Group… and Remove Workspace → Delete Workspace Files….
+      .childSheet(
+        store.scope(state: \.groupDeletionSheet, action: \.groupDeletionSheet),
+        onDismiss: { store.send(.groupDeletionSheet(.cancelTapped)) },
+        content: { childStore in
+          WorkspaceGroupDeletionSheetView(store: childStore)
+            .interactiveDismissDisabled(childStore.phase == .deleting)
         }
       )
   }

@@ -1,6 +1,6 @@
 ---
 name: codans
-description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, create a multi-repository workspace or add a repository to one, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
+description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, create a multi-repository workspace, add a project to one, or create and delete its branch groups, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
 ---
 
 # codans CLI (`codans`)
@@ -74,11 +74,21 @@ Project       a tracked git repo (one Project per repo) — or a workspace
 ```
 
 A **workspace** Project (`"kind": "workspace"` in `codans tree --json`) is a
-plain folder holding checkouts of *several* repositories for one task, listed
-in `<root>/.codans/workspace.json`. Its first Worktree row is the folder
-itself; every other row is one member checkout, whose repository is reported
-as `sourceGitRoot`. Treat those rows as independent repos: `git -C <path>`
-per row, never `git worktree` commands against the workspace root.
+plain folder that groups *several* repositories (its source projects) for one
+task. Its rows come in groups, reported as `workspaceGroup {id, name, role}`
+in `codans tree --json`:
+
+- the `default` group links to each source project's main checkout
+  (`role: "reference"`);
+- each named group has one branch, checked out once per project under
+  `<root>/<group>/<project>` (`role: "member"`);
+- every group also has its own row for the group folder
+  (`role: "groupTerminal"`).
+
+A row's repository is reported as `sourceGitRoot`. Treat member rows as
+independent repos: `git -C <path>` per row, never `git worktree` commands
+against the workspace root. Create and delete groups with `codans workspace
+group …`, never with `codans worktree new` / `rm`, which refuse workspace rows.
 
 `codans` is on `PATH` automatically inside every codans Pane, and the app
 auto-detects which Project / Worktree / Tab / Pane that Pane belongs to —
@@ -286,38 +296,45 @@ Remove Worktree (directory removed, branch deleted per Settings).
 ### `codans workspace` — one task, several repositories
 
 ```bash
-codans workspace create "Checkout Flow" --project app --project api   # ≥ 2 members
-codans workspace create "Checkout Flow" --project app --repo ~/dev/shared-lib \
-  --branch feat/checkout --base origin/main --path ~/tmp/checkout-flow
-codans workspace create "Release" --project app --remote git@github.com:org/lib.git \
-  --branch release/1.2 --track                          # remote-tracking origin/release/1.2
-codans workspace add <workspace> --repo ~/dev/other --existing --branch main
-codans workspace add <workspace> --repo ~/dev/tool --ref origin/main   # remote-tracking ref
-codans workspace add <workspace> --remote https://host/team/svc --clone-into ~/src
-codans workspace drop <workspace> <member> [--keep-branch]   # unregister one checkout
-codans workspace remove <workspace> [--delete-files [--delete-branches]]
-codans workspace show [<workspace>]                    # manifest + live rows
+codans workspace create "Checkout Flow" --project app --project api   # sources only, no branch
+codans workspace create "Release" --project app --remote git@github.com:org/lib.git --path ~/tmp/release
+codans workspace add <workspace> ~/dev/other                 # or --project P / --remote URL
+codans workspace drop <workspace> <project>                  # name or path; disk unchanged
+codans workspace show [<workspace>] [--json]                 # projects + groups + rows
+codans workspace group create <workspace> feat --branch feat/checkout \
+  [--base app=origin/release] [--no-fetch] [--copy-ignored] [--copy-untracked] [--agent "Claude Code"]
+codans workspace group delete <workspace> feat --dry-run     # what would be lost
+codans workspace group delete <workspace> feat [--delete-branches] [--discard]
+codans workspace remove <workspace> [--delete-files [--discard] [--delete-branches]]
 ```
 
-`create` makes `<root>/<name>` for every member with `git worktree add`
-(new branch `--branch`, default: a slug of the title, from `--base`, default:
-the repository's default remote branch; `--existing` checks out an existing
-local branch instead; `--track` checks out the remote-tracking
-`origin/<branch>`), writes `<root>/.codans/workspace.json`, and registers the
-folder as a workspace Project. Members come from registered projects
-(`--project`), any local repository that is not bare (`--repo`), or a
-remote URL (`--remote`) — all repeatable. A remote is cloned once into
-`--clone-into` (default `~/.codans/sources/<name>`; an existing clone of the
-same remote there is reused) and then behaves like a local repository. With
-`--track` or `add --ref <remote>/<branch>`, a local branch of the same name is
-checked out as is; `--reset-local` points it at the remote tip instead and is
-never implied. The root defaults to `~/.codans/workspaces/<slug>` and must
-not sit inside a git repository. Both verbs really write to disk — a failure
-midway removes everything the call created, including a clone it made. `drop` moves one member's checkout out of the
-workspace and deletes its branch (unless `--keep-branch`); `remove` alone
-only de-registers, while `--delete-files` unregisters every member and
-deletes the folder — but keeps the folder if any member could not be
-unregistered, so a repository is never left pointing at a missing worktree.
+`create` registers the folder (default `~/.codans/workspaces/<slug>`, never
+inside a git repository) with its source projects: registered projects
+(`--project`), local repositories that are not bare (`--repo`), or remotes
+(`--remote`, cloned once into `--clone-into`, default `~/.codans/sources/<name>`).
+It creates no branch and checks nothing out; the `default` group links to each
+project's main checkout. `add` and `drop` change only the source list and the
+`default` group — named groups and every folder on disk stay as they are.
+
+`group create` checks out one branch in every project into
+`<root>/<name>/<project>`, using each project's Codans settings for base ref,
+fetch, and copy options unless a flag overrides them. A local branch of the
+same name in any project blocks it (exit 3, the project is named); a failed
+checkout removes every checkout the call made. Setup commands run after all
+checkouts exist; a failed one keeps the group and is reported. `--agent`
+starts that profile in each member once the group exists.
+
+`group delete` checks each member first. Uncommitted changes, unpushed
+commits, running terminals, or other files in the group folder fail it with
+the list (exit 3) unless `--discard` accepts losing them; a check that cannot
+run fails it too. A member that cannot be removed keeps the group with the rest
+deleted — run the same command again to retry. The `default` group cannot be
+deleted. `remove` alone only removes the sidebar entry; `--delete-files`
+deletes every named group, the links, and the workspace folder with the same
+checks. Source project folders are never deleted.
+
+Old branch flags on `create` / `add` (`--branch`, `--existing`, `--track`, …)
+and `drop --keep-branch` fail with a pointer to `group create`.
 
 ### `codans tab` — manage tabs inside a worktree
 
@@ -603,12 +620,12 @@ codans pane new --tab "$TAB" --cwd "$(codans worktree show "$WT" --json | jq -r 
 ### Start a cross-repository task in a workspace
 
 ```bash
-codans workspace create "Checkout Flow" --project app --project api --branch feat/checkout
-# The workspace root is the new project's first worktree; each member is a row.
-WS=$(codans tree --json | jq -r '.projects[] | select(.kind == "workspace") | .id')
-codans workspace show "$WS"
-codans tab new --worktree "$(codans tree --json | jq -r --arg ws "$WS" '.projects[] | select(.id == $ws) | .worktrees[0].id')" "agent"
-codans pane new -- claude    # runs at the workspace root; `git -C app`, `git -C api` per member
+WS=$(codans workspace create "Checkout Flow" --project app --project api --json | jq -r '.data.id')
+codans workspace group create "$WS" checkout --branch feat/checkout
+# The group's own row is the group folder; each member is a row under it.
+GROUP_ROW=$(codans workspace show "$WS" --json | jq -r '.data.groups[] | select(.name == "checkout") | .worktreeID')
+codans tab new --worktree "$GROUP_ROW" "agent"
+codans pane new -- claude    # runs in <root>/checkout; `git -C app`, `git -C api` per member
 ```
 
 ### Take over a task from the previous agent

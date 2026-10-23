@@ -78,4 +78,18 @@ struct StoreBackupTests {
       try StoreBackup.moveAside(directory.appendingPathComponent("absent.json"), reason: .corrupt)
     }
   }
+
+  @Test
+  func copyAsideKeepsTheOriginalInPlace() throws {
+    let directory = try makeDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    try Data("v3".utf8).write(to: url)
+
+    let backup = try StoreBackup.copyAside(url, reason: .migrated(fromVersion: 3), at: Self.epoch)
+
+    #expect(backup.lastPathComponent == "catalog.migrated-v3-19700101T000000Z.json")
+    #expect(try Data(contentsOf: url) == Data("v3".utf8))
+    #expect(try Data(contentsOf: backup) == Data("v3".utf8))
+  }
 }

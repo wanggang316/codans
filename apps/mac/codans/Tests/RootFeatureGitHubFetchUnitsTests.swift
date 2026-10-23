@@ -48,8 +48,25 @@ struct RootFeatureGitHubFetchUnitsTests {
 
     // The unit for a row, with a fallback for the root row.
     #expect(RootFeature.gitHubFetchUnit(in: project, worktreeID: api.id, fallback: nil)?.gitRoot.path == "/src/api")
-    #expect(RootFeature.gitHubFetchUnit(in: project, worktreeID: root.id, fallback: units[0])?.gitRoot.path == "/src/app")
+    #expect(
+      RootFeature.gitHubFetchUnit(in: project, worktreeID: root.id, fallback: units[0])?.gitRoot.path == "/src/app")
     #expect(RootFeature.gitHubFetchUnit(in: project, worktreeID: nil, fallback: nil) == nil)
+  }
+
+  @Test
+  func groupRowsAreNeverFetched() {
+    // A group row is a plain folder even when it still carries repository
+    // fields (a migrated root row); its references and members are fetched.
+    let group = WorkspaceGroupID()
+    let terminal = Worktree(
+      name: "existing", path: "/tmp/ws", branch: "feat", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: group, role: .groupTerminal))
+    let reference = Worktree(
+      name: "app", path: "/src/app", branch: "main", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: group, role: .reference))
+    let project = Project(name: "ws", rootPath: "/tmp/ws", worktrees: [terminal, reference], isWorkspace: true)
+    let units = RootFeature.gitHubFetchUnits(in: project)
+    #expect(units.flatMap(\.pairs).map(\.worktreeID) == [reference.id])
   }
 
   @Test

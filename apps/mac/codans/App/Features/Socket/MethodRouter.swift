@@ -72,8 +72,8 @@ public final class MethodRouter {
     return notWired(request.method)
   }
 
-  /// `workspace.*` adapter — typed handlers; `asyncOutcome` for the two
-  /// verbs that touch disk and git, `projectOutcome` for the read.
+  /// `workspace.*` adapter — typed handlers; `asyncOutcome` for the verbs
+  /// that touch disk and git, `projectOutcome` for the read.
   private func routeWorkspace(_ request: IPC.Request) async -> RouterOutcome? {
     guard let h = workspaceHandlers else { return nil }
     switch request.method {
@@ -96,6 +96,18 @@ public final class MethodRouter {
     case .workspaceDescribe:
       return Self.projectOutcome {
         try h.describe(request.params.decoded(as: IPC.WorkspaceDescribeRequest.self))
+      }
+    case .workspaceCreateGroup:
+      return await Self.asyncOutcome {
+        try await h.createGroup(request.params.decoded(as: IPC.WorkspaceGroupCreateRequest.self))
+      }
+    case .workspaceCheckGroupDeletion:
+      return await Self.asyncOutcome {
+        try await h.checkGroupDeletion(request.params.decoded(as: IPC.WorkspaceGroupRequest.self))
+      }
+    case .workspaceDeleteGroup:
+      return await Self.asyncOutcome {
+        try await h.deleteGroup(request.params.decoded(as: IPC.WorkspaceGroupDeleteRequest.self))
       }
     default: return nil
     }

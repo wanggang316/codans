@@ -650,16 +650,20 @@ final class AppState {
     // `~/.codans[-dev]/{config,state}` and sweep crash-orphaned temp files. Skipped
     // as an XCTest host so a test run never relocates the developer's data.
     let environment = ProcessInfo.processInfo.environment
-    if environment["XCTestBundlePath"] == nil, environment["XCTestConfigurationFilePath"] == nil {
+    let isTestHost =
+      environment["XCTestBundlePath"] != nil || environment["XCTestConfigurationFilePath"] != nil
+    if !isTestHost {
       PersistenceLaunch.prepare(environment: environment)
     }
 
-    let catalogStore = CatalogStore()
+    // The XCTest host must not load the channel's catalog: loading migrates
+    // and writes it, and other builds of the channel share that file.
+    let catalogStore = isTestHost ? CatalogStore.detached() : CatalogStore()
     let runtime = GhosttyBackedHierarchyRuntime()
     // An unreadable catalog is either backed up (and reads as empty) or
     // leaves the store with saving disabled, so `.empty` here can never
     // overwrite the user's project list.
-    let catalog = (try? catalogStore.load()) ?? .empty
+    let catalog = isTestHost ? .empty : ((try? catalogStore.load()) ?? .empty)
 
     let manager = HierarchyManager(
       catalog: catalog,
@@ -859,7 +863,8 @@ final class AppState {
     // identically. Local-only: it never routes through the SSH seam.
     let workspaceClient = WorkspaceClient.live(
       hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI(),
-      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate })
+      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate },
+      settings: { [settings] in settings.settings })
     let workflowEngine = makeWorkflowEngine(
       hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
     self.workflowEngine = workflowEngine
@@ -929,6 +934,9 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.hierarchyClient = hierarchy
+      // The Workspace pane adds and removes sources through the same client
+      // as the sidebar; it has no live default.
+      $0.workspaceClient = workspaceClient
       $0[GhosttyTerminalSettingsClient.self] = .appLive()
     }
 
@@ -944,6 +952,12 @@ final class AppState {
     )
 
     profiler.mark("finish")
+
+    // Deferred one turn so the alert appears over the main window instead
+    // of blocking its first frame.
+    if let issue = catalogStore.loadIssue {
+      Task { @MainActor in CatalogLoadIssueAlert.present(issue) }
+    }
   }
 
   private func startNotificationObservers(
@@ -1911,6 +1925,7 @@ final class AppState {
   /// - focused pane = `lastFocusedPane(activeTabID)`
   /// - expanded projects = `Project.isExpanded` filtered to true
   /// - row worktrees = each Project's `rowWorktree`, visible even collapsed
+  /// - row stand-ins = rows in a collapsed Workspace group → the group row
   static func focusState(
     from catalog: Catalog,
     lastFocusedPane: @MainActor (TabID) -> PaneID?
@@ -1927,7 +1942,8 @@ final class AppState {
       activeWorktreeID: activeWorktree?.id,
       activeProjectID: activeProject?.id,
       expandedProjectIDs: expanded,
-      rowWorktreeIDs: Set(catalog.projects.compactMap { $0.rowWorktree?.id })
+      rowWorktreeIDs: Set(catalog.projects.compactMap { $0.rowWorktree?.id }),
+      rowStandIns: catalog.workspaceRowStandIns
     )
   }
 

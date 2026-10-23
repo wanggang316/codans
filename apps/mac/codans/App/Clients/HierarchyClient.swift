@@ -81,19 +81,46 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
     ) -> Void
-  /// Register a workspace root — a plain folder carrying
-  /// `.codans/workspace.json`. Child rows are appended by the next reconcile
+  /// Register a workspace root — a plain folder carrying a workspace
+  /// manifest. No row is seeded; the next reconcile adds every group row
   /// from the manifest. Forwards to `HierarchyManager.addProject(isWorkspace:)`.
   var addWorkspaceProject:
     @MainActor @Sendable (
       _ name: String, _ rootPath: String
     ) -> ProjectID
-  /// The workspace child row whose directory is `path`, if any. Answers from
-  /// the catalog alone. Forwards to `HierarchyManager.workspaceMembership`.
+  /// The workspace member row whose directory is `path`, if any. References
+  /// and group rows never match. Answers from the catalog alone. Forwards to
+  /// `HierarchyManager.workspaceMembership`.
   var workspaceMembership:
     @MainActor @Sendable (
       _ path: String
     ) -> WorkspaceMembership?
+  /// Persisted sidebar disclosure of one Workspace group. Forwards to
+  /// `HierarchyManager.setWorkspaceGroupExpanded`.
+  var setWorkspaceGroupExpanded:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID, _ isExpanded: Bool
+    ) -> Void
+  /// Records or clears (`nil`) an unfinished destructive delete of one
+  /// group in the catalog. Forwards to
+  /// `HierarchyManager.setWorkspaceGroupDeletion`.
+  var setWorkspaceGroupDeletion:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID, _ deletion: GroupDeletionState?
+    ) -> Void
+  /// Closes the surfaces of Workspace rows and removes the rows from the
+  /// catalog, a group row at the root included. Never touches disk.
+  /// Forwards to `HierarchyManager.removeWorkspaceRows`.
+  var removeWorkspaceRows:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ worktreeIDs: [WorktreeID]
+    ) -> Void
+  /// Busy panes of every row of a group, run-script panes included.
+  /// Forwards to `HierarchyManager.workspaceGroupBusyPanes`.
+  var workspaceGroupBusyPanes:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID
+    ) -> [PaneID]
   /// Close every surface of the Worktree without touching the catalog —
   /// the step before a directory is moved out from under its terminals.
   /// Forwards to `HierarchyManager.tearDownWorktreeSurfaces`.
@@ -788,6 +815,18 @@ extension HierarchyClient {
         manager.addProject(name: name, rootPath: rootPath, gitRoot: nil, isWorkspace: true)
       },
       workspaceMembership: { path in manager.workspaceMembership(forPath: path) },
+      setWorkspaceGroupExpanded: { projectID, groupID, isExpanded in
+        manager.setWorkspaceGroupExpanded(projectID: projectID, groupID: groupID, isExpanded: isExpanded)
+      },
+      setWorkspaceGroupDeletion: { projectID, groupID, deletion in
+        manager.setWorkspaceGroupDeletion(projectID: projectID, groupID: groupID, deletion: deletion)
+      },
+      removeWorkspaceRows: { projectID, worktreeIDs in
+        manager.removeWorkspaceRows(projectID: projectID, worktreeIDs: worktreeIDs)
+      },
+      workspaceGroupBusyPanes: { projectID, groupID in
+        manager.workspaceGroupBusyPanes(projectID: projectID, groupID: groupID)
+      },
       tearDownWorktreeSurfaces: { worktreeID in
         manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
       },
@@ -1944,13 +1983,15 @@ extension HierarchyClient {
     }
   }
 
-  /// Workspace counterpart of `reconcile`. Membership comes from the manifest
-  /// under the root; live facts (branch, owning repository) come from git in
-  /// each child folder. Feeds `HierarchyManager.reconcileWorkspaceChildren`,
-  /// which appends, refreshes in place, and soft-archives children whose
-  /// folder is gone — and never touches the root row. Swallows and logs
-  /// errors like its siblings; the manifest's own health is reported on the
-  /// project row by `ProjectReconciler` before this runs.
+  /// Workspace counterpart of `reconcile`. Membership comes from the group
+  /// manifest under the root (migrated from version 1 on first sight); the
+  /// default links are brought in step with its source list; live facts
+  /// (branch, owning repository) come from git in each checkout. Feeds
+  /// `HierarchyManager.reconcileWorkspaceGroups`, which places rows into
+  /// groups, appends, refreshes in place, and soft-archives members whose
+  /// folder is gone. Swallows and logs errors like its siblings; the
+  /// manifest's own health is reported on the project row by
+  /// `ProjectReconciler` before this runs.
   @MainActor
   private static func reconcileWorkspace(
     project: Project,
@@ -1959,48 +2000,90 @@ extension HierarchyClient {
   ) async {
     let projectID = project.id
     let rootPath = project.rootPath
-    let manifest: WorkspaceManifest
+    let manifest: WorkspaceGroupsManifest
     do {
-      manifest = try WorkspaceManifestStore.load(rootPath: rootPath)
+      manifest = try WorkspaceManifestStore.loadOrMigrate(rootPath: rootPath)
     } catch {
       reconcileLogger.error(
-        "workspace reconcile skipped, manifest unreadable: project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .private(mask: .hash))"
+        "workspace reconcile skipped, manifest unusable: project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .private(mask: .hash))"
       )
       return
     }
-    manager.setProjectWorkspaceManifest(projectID: projectID, manifest: manifest)
-    var observations: [HierarchyManager.WorkspaceChildObservation] = []
-    for entry in manifest.repositories {
-      let canonical = HierarchyManager.canonicalPath(entry.resolvedPath(rootPath: rootPath))
-      var isDirectory = ObjCBool(false)
-      let exists =
-        FileManager.default.fileExists(atPath: canonical, isDirectory: &isDirectory)
-        && isDirectory.boolValue
-      var branch: String?
-      var sourceGitRoot: String?
-      if exists {
-        branch = try? await gitCLI.currentBranch(path: canonical)
-        sourceGitRoot = (try? await gitCLI.repositoryRoot(forCheckoutAt: canonical))
-          .map(HierarchyManager.canonicalPath)
-        if let declared = entry.sourceGitRoot, let sourceGitRoot,
-          HierarchyManager.canonicalPath(declared) != sourceGitRoot
-        {
-          reconcileLogger.notice(
-            "workspace child belongs to a different repository than its manifest declares: project=\(projectID.raw.uuidString, privacy: .public) child=\(entry.name, privacy: .public)"
-          )
-        }
-      }
-      observations.append(
-        HierarchyManager.WorkspaceChildObservation(
-          name: entry.name,
-          path: canonical,
-          exists: exists,
-          branch: branch,
-          sourceGitRoot: sourceGitRoot
+    do {
+      let report = try WorkspaceDefaultLinks.sync(rootPath: rootPath, manifest: manifest)
+      for note in report.notes {
+        reconcileLogger.notice(
+          "workspace default link left as-is: project=\(projectID.raw.uuidString, privacy: .public) note=\(String(describing: note), privacy: .private(mask: .hash))"
         )
+      }
+    } catch {
+      reconcileLogger.error(
+        "workspace default links not synced: project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .private(mask: .hash))"
       )
     }
-    _ = manager.reconcileWorkspaceChildren(projectID: projectID, observations: observations)
+    manager.setProjectWorkspaceManifest(projectID: projectID, manifest: manifest)
+
+    var groups: [HierarchyManager.WorkspaceGroupObservation] = []
+    for group in manifest.groups {
+      let groupPath = HierarchyManager.canonicalPath(
+        (rootPath as NSString).appendingPathComponent(group.path))
+      var rows = [
+        HierarchyManager.WorkspaceRowObservation(
+          name: group.name, path: groupPath, role: .groupTerminal, exists: isDirectory(groupPath))
+      ]
+      switch group.kind {
+      case .default:
+        for source in manifest.projects {
+          let path = HierarchyManager.canonicalPath(source.sourceGitRoot)
+          rows.append(
+            await observeCheckout(
+              name: source.name, path: path, role: .reference, declaredSource: path, gitCLI: gitCLI))
+        }
+      case .named:
+        for member in group.members {
+          let path = HierarchyManager.canonicalPath(
+            (rootPath as NSString).appendingPathComponent(member.path))
+          rows.append(
+            await observeCheckout(
+              name: member.name, path: path, role: .member,
+              declaredSource: member.sourceGitRoot.map(HierarchyManager.canonicalPath), gitCLI: gitCLI))
+        }
+      }
+      groups.append(
+        HierarchyManager.WorkspaceGroupObservation(
+          id: group.id, name: group.name, kind: group.kind, deletion: group.deletion, rows: rows))
+    }
+    manager.reconcileWorkspaceGroups(projectID: projectID, groups: groups)
+  }
+
+  /// Probes one checkout a Workspace row expects. The repository root comes
+  /// from git; the manifest's record is the fallback when git cannot answer.
+  @MainActor
+  private static func observeCheckout(
+    name: String,
+    path: String,
+    role: WorkspaceSlot.Role,
+    declaredSource: String?,
+    gitCLI: GitWorktreeCLI
+  ) async -> HierarchyManager.WorkspaceRowObservation {
+    guard isDirectory(path) else {
+      return HierarchyManager.WorkspaceRowObservation(name: name, path: path, role: role, exists: false)
+    }
+    let branch = try? await gitCLI.currentBranch(path: path)
+    let probed = (try? await gitCLI.repositoryRoot(forCheckoutAt: path)).map(HierarchyManager.canonicalPath)
+    if let declaredSource, let probed, declaredSource != probed {
+      reconcileLogger.notice(
+        "workspace checkout belongs to a different repository than its manifest declares: checkout=\(name, privacy: .public)"
+      )
+    }
+    return HierarchyManager.WorkspaceRowObservation(
+      name: name, path: path, role: role, exists: true, branch: branch,
+      sourceGitRoot: probed ?? declaredSource)
+  }
+
+  private static func isDirectory(_ path: String) -> Bool {
+    var isDirectory = ObjCBool(false)
+    return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
   }
 
   /// Server-project counterpart of `reconcile`: discovers the remote git root
@@ -2117,9 +2200,18 @@ extension HierarchyClient {
     deleteRemoteBranch: Bool
   ) async throws -> String? {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let gitRoot = project.gitRoot
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
+    // Workspace rows and the source-side mirrors of member checkouts belong
+    // to the workspace flow, which removes them through its own checks.
+    // Every caller of this path is refused here, not only the sidebar.
+    if project.isWorkspace || manager.workspaceMembership(forPath: worktree.path) != nil {
+      throw HierarchyError.invariantViolation(
+        "\(worktree.path) belongs to a workspace; remove it through the workspace")
+    }
+    guard let gitRoot = project.gitRoot else {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
     manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
@@ -2249,6 +2341,10 @@ extension HierarchyClient: DependencyKey {
     updateServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addWorkspaceProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     workspaceMembership: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    setWorkspaceGroupExpanded: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setWorkspaceGroupDeletion: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    removeWorkspaceRows: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    workspaceGroupBusyPanes: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     tearDownWorktreeSurfaces: { _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2354,6 +2450,10 @@ extension HierarchyClient: DependencyKey {
     updateServerProject: unimplemented("HierarchyClient.updateServerProject"),
     addWorkspaceProject: unimplemented("HierarchyClient.addWorkspaceProject", placeholder: ProjectID()),
     workspaceMembership: unimplemented("HierarchyClient.workspaceMembership", placeholder: nil),
+    setWorkspaceGroupExpanded: unimplemented("HierarchyClient.setWorkspaceGroupExpanded"),
+    setWorkspaceGroupDeletion: unimplemented("HierarchyClient.setWorkspaceGroupDeletion"),
+    removeWorkspaceRows: unimplemented("HierarchyClient.removeWorkspaceRows"),
+    workspaceGroupBusyPanes: unimplemented("HierarchyClient.workspaceGroupBusyPanes", placeholder: []),
     tearDownWorktreeSurfaces: unimplemented("HierarchyClient.tearDownWorktreeSurfaces"),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),

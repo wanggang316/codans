@@ -66,12 +66,15 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 
 ### Workspace orchestration
 
-A Workspace is a local Project with a synthetic root Worktree and member
-checkouts from multiple repositories. Membership comes from
-`.codans/workspace.json`; Git supplies branch and repository identity.
-`WorkspaceClient` owns creation, addition, removal and rollback for both GUI
-and CLI. Reconcile handles Workspace before Git-root discovery, and destructive
-operations resolve each member's source repository. See [Workspace](design-docs/workspace.md).
+A Workspace is a local Project with no row of its own. Its rows are
+Worktrees in groups: a `default` group that references the main checkout of
+each source project, and named groups that own one checkout per project.
+Groups and members come from `.codans/workspace-groups.json`; Git supplies
+branch and repository identity. `WorkspaceClient` owns creation, source
+changes, group creation and deletion (with a risk check) and rollback for
+both GUI and CLI. Reconcile handles Workspace before Git-root discovery, and
+every deletion goes through `WorkspaceOwnership`. See
+[Workspace](design-docs/workspace.md).
 
 ### Agent Skill
 

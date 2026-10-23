@@ -1,3 +1,4 @@
+import CodansIPC
 import Foundation
 
 public enum CLIArgumentError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -6,6 +7,7 @@ public enum CLIArgumentError: Error, Equatable, Sendable, CustomStringConvertibl
   case invalidArgumentCount(message: String)
   case invalidScopeCount(expected: Int, actual: Int)
   case invalidKeyValue(message: String)
+  case invalidValue(message: String)
 
   public var description: String {
     switch self {
@@ -17,7 +19,7 @@ public enum CLIArgumentError: Error, Equatable, Sendable, CustomStringConvertibl
       return message
     case .invalidScopeCount(let expected, let actual):
       return "expected \(expected) scope selection, got \(actual)"
-    case .invalidKeyValue(let message):
+    case .invalidKeyValue(let message), .invalidValue(let message):
       return message
     }
   }
@@ -149,42 +151,27 @@ public enum CLIWorkspaceMemberSource: Equatable, Sendable {
   }
 }
 
-/// How `codans workspace create` / `add` check members out, from the three
-/// mode flags. `--existing` (an existing local branch), `--track` (the
-/// remote-tracking `origin/<branch>`), and `--ref <remote>/<branch>` are
-/// exclusive; `--reset-local` only means something with one of the latter
-/// two.
-public struct CLIWorkspaceCheckoutFlags: Equatable, Sendable {
-  public var useExistingBranch: Bool?
-  public var trackRemote: Bool?
-  public var remoteRef: String?
-  public var resetLocalBranch: Bool?
-
+/// The agent profile a `--agent` value names: its id, else its name
+/// (case-insensitive). Disabled profiles are refused, as `agent launch`
+/// refuses them, so a caller learns before it changes anything.
+public enum CLIAgentProfileMatch {
   public static func resolve(
-    existing: Bool,
-    track: Bool,
-    ref: String?,
-    resetLocal: Bool
-  ) throws -> CLIWorkspaceCheckoutFlags {
-    let ref = ref?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let modes = [existing, track, ref?.isEmpty == false].filter { $0 }.count
-    if modes > 1 {
-      throw CLIArgumentError.invalidArgumentCount(
-        message: "--existing, --track, and --ref are exclusive; pass one")
+    _ selector: String, in profiles: [IPC.AgentProfileSummary]
+  ) throws -> IPC.AgentProfileSummary {
+    let wanted = selector.trimmingCharacters(in: .whitespaces)
+    guard
+      let profile = profiles.first(where: { $0.id.uuidString.caseInsensitiveCompare(wanted) == .orderedSame })
+        ?? profiles.first(where: { $0.name.caseInsensitiveCompare(wanted) == .orderedSame })
+    else {
+      let names = profiles.filter(\.isEnabled).map(\.name).joined(separator: ", ")
+      throw CLIArgumentError.invalidValue(
+        message: "no agent profile named \"\(wanted)\"" + (names.isEmpty ? "" : "; profiles: \(names)"))
     }
-    if let ref, !ref.isEmpty, !ref.contains("/") || ref.hasPrefix("/") || ref.hasSuffix("/") {
-      throw CLIArgumentError.invalidArgumentCount(
-        message: "--ref expects <remote>/<branch>, got \(ref)")
+    guard profile.isEnabled else {
+      throw CLIArgumentError.invalidValue(
+        message: "agent profile \"\(profile.name)\" is disabled; enable it in Settings > Agents")
     }
-    if resetLocal, !track, ref?.isEmpty != false {
-      throw CLIArgumentError.invalidArgumentCount(
-        message: "--reset-local needs --track or --ref")
-    }
-    return CLIWorkspaceCheckoutFlags(
-      useExistingBranch: existing ? true : nil,
-      trackRemote: track ? true : nil,
-      remoteRef: ref?.isEmpty == false ? ref : nil,
-      resetLocalBranch: resetLocal ? true : nil)
+    return profile
   }
 }
 

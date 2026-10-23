@@ -50,7 +50,8 @@ extension HierarchyHandlers {
           isPinned: worktree.isPinned,
           isSelected: project.selectedWorktreeID == worktree.id,
           selectedTabID: worktree.selectedTabID?.description,
-          tabCount: worktree.tabs.count
+          tabCount: worktree.tabs.count,
+          workspaceGroup: IPC.WorkspaceGroupRef(worktree: worktree, in: project)
         ))
     }
     return .failed(.notFound(kind: "worktree", id: req.id.uuidString))
