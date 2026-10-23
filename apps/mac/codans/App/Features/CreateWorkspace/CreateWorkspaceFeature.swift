@@ -475,7 +475,9 @@ struct CreateWorkspaceFeature {
         guard case .newGroup(let projectID, _, _) = state.mode, state.isLoadingMembers else { return .none }
         return .run { [client = workspaceClient, settings = settingsWriter] send in
           let defaults = await client.groupCreationDefaults(projectID)
-          let profiles = settings.readSnapshotSync().agents.enabledProfiles
+          // Async read: this effect resumes off the main actor, where the
+          // synchronous read traps.
+          let profiles = await settings.readSnapshot().agents.enabledProfiles
           await send(.groupDefaultsLoaded(defaults, agentProfiles: profiles))
         }
 

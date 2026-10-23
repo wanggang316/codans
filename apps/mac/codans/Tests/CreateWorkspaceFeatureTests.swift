@@ -72,6 +72,7 @@ struct CreateWorkspaceFeatureTests {
       $0.gitWorktreeClient = gitClient(appRefs)
       $0[WorkspaceClient.self] = workspace ?? workspaceClient()
       $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0[SettingsWriter.self].readSnapshot = { settings }
       $0.continuousClock = clock
       $0.uuid = .incrementing
       $0.fileExists = { _ in false }
@@ -329,6 +330,27 @@ struct CreateWorkspaceFeatureTests {
     #expect(
       store.state.groupPlan
         == WorkspaceGroupPlan(projectID: workspaceID, name: "feat", branch: "task/feat", members: [app, api]))
+  }
+
+  /// The live synchronous read asserts the main actor, and the load effect
+  /// resumes off it after the defaults arrive: it must read asynchronously.
+  @Test
+  func newGroupReadsAgentProfilesWithoutTheMainActorOnlyRead() async {
+    let profile = AgentProfile(kind: .claudeCode, name: "Claude")
+    var client = workspaceClient()
+    client.groupCreationDefaults = { _ in [appDefaults, apiDefaults] }
+    let store = makeStore(groupState(), workspace: client, agentProfiles: [profile])
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    store.dependencies[SettingsWriter.self].readSnapshotSync = {
+      Issue.record("readSnapshotSync called from an effect")
+      return .default
+    }
+
+    await store.send(.onAppear)
+    await store.receive(\.groupDefaultsLoaded) {
+      $0.isLoadingMembers = false
+      $0.agentProfiles = [profile]
+    }
   }
 
   @Test
