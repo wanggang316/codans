@@ -9,16 +9,19 @@ import Foundation
 /// (`NSTabBar` / `NSTabButton`, the bar Finder uses): view frames read from
 /// the live view tree, colors and curves sampled from 2x captures.
 enum TabBarMetrics {
-  /// Height of the full Tab bar row: the track plus `trackBottomInset`.
-  static let barHeight: CGFloat = trackHeight + trackBottomInset
+  /// Height of the full Tab bar row: the track and its insets.
+  static let barHeight: CGFloat = trackTopInset + trackHeight + trackBottomInset
 
   /// Recessed capsule track that hosts the chips.
   static let trackHeight: CGFloat = 28
-  /// The system bar sits flush under the toolbar and leaves this gap to
-  /// the content below it.
+  /// Gap from the edge above the strip to the track. Equal to the gap below,
+  /// so the strip sits centered between what is above it and the content.
+  static let trackTopInset: CGFloat = trackBottomInset
+  /// Gap between the track and the content below it.
   static let trackBottomInset: CGFloat = 8
-  /// Gap between the bar's leading edge and the track.
-  static let trackLeadingInset: CGFloat = 4
+  /// Gap between the bar's leading edge and the track. The terminal below
+  /// sits the same distance in from its card's edge.
+  static let trackLeadingInset: CGFloat = 6
   /// Chips are inset from the track on every side by this much.
   static let trackContentInset: CGFloat = 2
 
@@ -50,7 +53,7 @@ enum TabBarMetrics {
   static let dividerWidth: CGFloat = chipSpacing
   static let dividerHeight: CGFloat = 18
 
-  /// Trailing accessory buttons (+, history, split right, split down): a
+  /// Trailing accessory buttons (+, history): a
   /// square hit target, the gap between two of them, and the cluster's
   /// horizontal padding on each side.
   static let accessorySize: CGFloat = 22
@@ -66,18 +69,13 @@ enum TabBarMetrics {
       + accessoryClusterPadding * 2
   }
 
-  /// Whether a strip `stripWidth` wide folds history and the two split
-  /// buttons into the `+` menu. The full cluster folds once it would leave
-  /// the track less than one minimum-width chip, so a narrow Pane keeps
-  /// room for its chips.
+  /// Whether a strip `stripWidth` wide folds history into the `+` menu.
+  /// The full cluster folds once it would leave the track less than one
+  /// minimum-width chip, so a narrow Pane keeps room for its chips.
   static func foldsAccessories(stripWidth: CGFloat) -> Bool {
-    let fullStrip = trackLeadingInset + chipMinWidth + trackAccessoryGap + accessoryClusterWidth(count: 4)
+    let fullStrip = trackLeadingInset + chipMinWidth + trackAccessoryGap + accessoryClusterWidth(count: 2)
     return stripWidth < fullStrip
   }
-
-  /// Delay before the trailing split buttons show their pane-tree preview
-  /// popover.
-  static let hoverPreviewDelay: Duration = .milliseconds(350)
 
   /// Drag-reorder kicks in only after the pointer moves this far — keeps
   /// plain taps from being interpreted as drags.

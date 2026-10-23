@@ -43,6 +43,7 @@ struct TabBarView: View {
     HStack(spacing: TabBarMetrics.trackAccessoryGap, content: barContent)
       .padding(.leading, TabBarMetrics.trackLeadingInset)
       .frame(height: TabBarMetrics.trackHeight)
+      .padding(.top, TabBarMetrics.trackTopInset)
       .padding(.bottom, TabBarMetrics.trackBottomInset)
       .onGeometryChange(for: CGFloat.self, of: \.size.width) { stripWidth = $0 }
       // A click on the strip outside a chip or a control focuses the Pane,
@@ -144,16 +145,6 @@ struct TabBarView: View {
               agent: session.agent, sessionID: session.sessionID,
               inPane: paneID, inWorktree: worktreeID, inProject: projectID
             ))
-        },
-        onSplitRight: {
-          store.send(
-            .trailingSplitRequested(
-              direction: .right, fromPane: paneID, inWorktree: worktreeID, inProject: projectID))
-        },
-        onSplitDown: {
-          store.send(
-            .trailingSplitRequested(
-              direction: .down, fromPane: paneID, inWorktree: worktreeID, inProject: projectID))
         }
       )
     }

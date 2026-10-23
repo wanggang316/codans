@@ -1,19 +1,22 @@
 import CodansCore
 import SwiftUI
 
-/// Shares pane-local visibility between the floating list and its restore button.
+/// Shares Tab-local visibility between the floating list and its restore button.
 struct PaneCommandQueueChrome: View {
   let contentID: ContentID
-  let surface: PaneSurface?
 
   @SceneStorage private var isHidden: Bool
   @Environment(HierarchyManager.self) private var hierarchyManager
   @State private var isExpanded = false
   @State private var requestedPage = 0
 
-  init(contentID: ContentID, surface: PaneSurface?) {
+  /// Chrome box of the restore button.
+  private static let buttonSize: CGFloat = 30
+  private static let buttonCornerRadius: CGFloat = 8
+  private static let buttonInset: CGFloat = 6
+
+  init(contentID: ContentID) {
     self.contentID = contentID
-    self.surface = surface
     _isHidden = SceneStorage(wrappedValue: false, "commandQueue.hidden.\(contentID)")
   }
 
@@ -34,18 +37,54 @@ struct PaneCommandQueueChrome: View {
         {
           panel(page)
             .frame(maxWidth: 560)
-            .padding(.leading, 14)
-            .padding(.trailing, 58)
+            .padding(.horizontal, 14)
             .padding(.top, 14)
             .frame(maxWidth: .infinity, alignment: .top)
-        }
-        TabHUDView(contentID: contentID, surface: surface) {
-          isHidden = false
+        } else if isHidden, !entries.isEmpty {
+          restoreButton
+            .padding(Self.buttonInset)
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
       .onChange(of: page.index) { _, index in requestedPage = index }
     }
+  }
+
+  /// Shows the hidden list again without opening the composer.
+  private var restoreButton: some View {
+    Button {
+      isHidden = false
+    } label: {
+      VStack(spacing: 1) {
+        Image(systemName: CommandQueueStyle.symbol)
+          .font(.system(size: 11))
+          .accessibilityHidden(true)
+        Text("\(entries.count)")
+          .font(.system(size: 9, weight: .semibold))
+          .monospacedDigit()
+      }
+      .foregroundStyle(Color.accentColor)
+      .frame(width: Self.buttonSize, height: Self.buttonSize)
+      .background(buttonChrome)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help("Show queued commands")
+    .accessibilityIdentifier("pane.command_queue.show")
+    .accessibilityLabel("Show command queue, \(queuedPhrase)")
+  }
+
+  /// Glass chip without a shadow: terminal output sits right behind the
+  /// button, so the blur stops glyphs from reading through it.
+  private var buttonChrome: some View {
+    let shape = RoundedRectangle(cornerRadius: Self.buttonCornerRadius, style: .continuous)
+    return VisualEffectBackground(material: .popover, blendingMode: .withinWindow)
+      .clipShape(shape)
+      .overlay(shape.strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+  }
+
+  private var queuedPhrase: String {
+    entries.count == 1 ? "1 queued command" : "\(entries.count) queued commands"
   }
 
   private func panel(_ page: CommandQueuePage) -> some View {

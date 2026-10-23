@@ -659,7 +659,30 @@ private struct ResolvingTabChipView: View {
   @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
+  @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
+  @Environment(\.tabActions) private var tabActions
   @Dependency(TerminalClient.self) private var terminalClient
+
+  /// The chip's actions menu, resolved when it opens so the agent, the
+  /// queue count, and the selection are current.
+  private func actionsMenuItems() -> [PullDownMenuItem] {
+    let contentID = tab.contentID
+    guard
+      let model = TabActionsModel.resolve(
+        contentID: contentID, in: hierarchyManager.catalog,
+        agent: agentStateStore?.entries[contentID]?.kind)
+    else { return [] }
+    let surface = terminalClient.surface(contentID)
+    let actions = tabActions
+    return TabActionsMenu.items(
+      model: model,
+      hasSurface: surface != nil,
+      hasSelection: surface?.view.hasSelection == true,
+      perform: { surface?.view.perform($0) },
+      handOff: { actions.handOff(contentID) },
+      commandQueue: { actions.commandQueue(contentID) }
+    )
+  }
 
   var body: some View {
     let live = liveResolvedTitle
@@ -690,7 +713,8 @@ private struct ResolvingTabChipView: View {
       onStackClick: onStackClick,
       hoverCardProcess: { [hierarchyManager, tabID = tab.id] in
         hierarchyManager.processEntry(inTab: tabID)
-      }
+      },
+      actionsMenu: actionsMenuItems
     )
     .onChange(of: live, initial: true) { _, newLive in
       // Only persist once the surface has actually produced a live

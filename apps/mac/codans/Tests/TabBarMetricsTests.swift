@@ -3,19 +3,18 @@ import Testing
 
 @testable import Codans
 
-/// The narrow-strip rule: history and the split buttons fold into the `+`
-/// menu once the full accessory cluster would leave the track less than
-/// one minimum-width chip.
+/// The narrow-strip rule: history folds into the `+` menu once the full
+/// accessory cluster would leave the track less than one minimum-width chip.
 @MainActor
 struct TabBarMetricsTests {
-  /// Leading inset 4 + one 120-pt chip + 4-pt gap + four 22-pt buttons with
-  /// three 4-pt gaps and 6-pt padding on each side.
-  private static let threshold: CGFloat = 4 + 120 + 4 + (4 * 22 + 3 * 4 + 2 * 6)
+  /// Leading inset 6 + one 120-pt chip + 4-pt gap + two 22-pt buttons with
+  /// one 4-pt gap and 6-pt padding on each side.
+  private static let threshold: CGFloat = 6 + 120 + 4 + (2 * 22 + 4 + 2 * 6)
 
   @Test
   func thresholdIsOneChipPlusTheFullCluster() {
-    #expect(Self.threshold == 240)
-    #expect(TabBarMetrics.accessoryClusterWidth(count: 4) == 112)
+    #expect(Self.threshold == 190)
+    #expect(TabBarMetrics.accessoryClusterWidth(count: 2) == 60)
     #expect(TabBarMetrics.accessoryClusterWidth(count: 1) == 34)
     #expect(TabBarMetrics.accessoryClusterWidth(count: 0) == 0)
   }
@@ -23,8 +22,8 @@ struct TabBarMetricsTests {
   @Test(arguments: [
     (CGFloat(0), true),
     (100, true),
-    (239.5, true),
-    (240, false),
+    (189.5, true),
+    (190, false),
     (600, false),
     (.infinity, false),
   ])

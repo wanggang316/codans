@@ -864,7 +864,7 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     guard let surface, !ghostty_surface_mouse_captured(surface) else { return nil }
 
     // Built from `PaneSurfaceAction.groups` rather than spelled out here, so
-    // this menu and the pane HUD card offer exactly the same actions in the
+    // this menu and the tab chip's actions menu offer the same actions in the
     // same order. See `PaneSurfaceAction`.
     let menu = NSMenu()
     for group in PaneSurfaceAction.groups {
