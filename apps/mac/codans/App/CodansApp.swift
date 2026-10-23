@@ -863,7 +863,8 @@ final class AppState {
     // identically. Local-only: it never routes through the SSH seam.
     let workspaceClient = WorkspaceClient.live(
       hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI(),
-      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate })
+      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate },
+      settings: { [settings] in settings.settings })
     let workflowEngine = makeWorkflowEngine(
       hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
     self.workflowEngine = workflowEngine

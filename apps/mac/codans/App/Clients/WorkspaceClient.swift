@@ -253,6 +253,8 @@ extension WorkspaceClient {
     /// Whether to `git fetch` the remote a base ref names before checking
     /// out — the global switch worktree creation honours.
     let fetchRemoteOnCreate: @MainActor @Sendable () -> Bool
+    /// Current settings, for the per-project defaults of a new group.
+    let settings: @MainActor @Sendable () -> Settings
     let registry: WorkspaceCreationRegistry
   }
 
@@ -260,11 +262,12 @@ extension WorkspaceClient {
     hierarchy: HierarchyClient,
     gitWorktreeClient: GitWorktreeClient,
     gitCLI: GitWorktreeCLI,
-    fetchRemoteOnCreate: @escaping @MainActor @Sendable () -> Bool = { true }
+    fetchRemoteOnCreate: @escaping @MainActor @Sendable () -> Bool = { true },
+    settings: @escaping @MainActor @Sendable () -> Settings = { .default }
   ) -> WorkspaceClient {
     let context = Context(
       hierarchy: hierarchy, git: gitWorktreeClient, cli: gitCLI,
-      fetchRemoteOnCreate: fetchRemoteOnCreate, registry: WorkspaceCreationRegistry())
+      fetchRemoteOnCreate: fetchRemoteOnCreate, settings: settings, registry: WorkspaceCreationRegistry())
     return WorkspaceClient(
       createWorkspace: { plan in try await createWorkspace(plan, context: context) },
       preflightWorkspace: { plan in await preflightWorkspace(plan, context: context) },
@@ -444,7 +447,7 @@ extension WorkspaceClient {
       probe = (probe as NSString).deletingLastPathComponent
     }
     if let found = try? await context.cli.inspectRepository(at: probe) {
-      throw WorkspaceError.rootInsideRepository(path: rootPath, gitRoot: found.root)
+      throw WorkspaceError.rootInsideRepository(path: rootPath, gitRoot: canonical(found.root))
     }
   }
 
@@ -650,7 +653,7 @@ extension WorkspaceClient {
               URL(fileURLWithPath: path, isDirectory: true))
           } catch {
             logger.warning("rollback could not remove worktree at \(path, privacy: .private): \(error)")
-            failures.append("worktree at \(path)")
+            failures.append("worktree at \(path): \(describe(error))")
           }
         case .createdBranch(let repoRoot, let branch):
           if case .kept(let reason) = await git.deleteBranchIfExists(
@@ -663,14 +666,14 @@ extension WorkspaceClient {
             try await git.forceMoveBranch(URL(fileURLWithPath: repoRoot, isDirectory: true), branch, previousTip)
           } catch {
             logger.warning("rollback could not restore branch \(branch, privacy: .public): \(error)")
-            failures.append("branch \(branch) in \(repoRoot) (was \(previousTip))")
+            failures.append("branch \(branch) in \(repoRoot) (was \(previousTip)): \(describe(error))")
           }
         case .clonedRepository(let path), .createdDirectory(let path):
           do {
             try FileManager.default.removeItem(atPath: path)
           } catch {
             logger.warning("rollback could not remove \(path, privacy: .private): \(error)")
-            failures.append(path)
+            failures.append("\(path): \(error.localizedDescription)")
           }
         }
       }
