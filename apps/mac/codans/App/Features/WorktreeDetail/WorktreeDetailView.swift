@@ -239,24 +239,18 @@ struct WorktreeDetailView: View {
   /// branch label + bell / open-in chips live in the window titlebar via
   /// `worktreeToolbarContent(address:)`, so the whole content region is
   /// the layout.
+  @ViewBuilder
   private func terminalRegion(address: Address) -> some View {
-    let worktree = worktreeInfo(for: address)?.worktree
-    return TerminalMountDeferral(
-      worktreeID: address.worktree,
-      activeContentID: address.focusedContent,
-      contentIDs: worktree?.contentIDs ?? []
-    ) {
-      if worktree?.panes.isEmpty == false {
-        SplitViewportView(
-          store: store.scope(state: \.splitViewport, action: \.splitViewport),
-          tabBarStore: store.scope(state: \.tabBar, action: \.tabBar),
-          projectID: address.project,
-          worktreeID: address.worktree,
-          agentStateStore: agentStateStore
-        )
-      } else {
-        emptyTab(address: address)
-      }
+    if worktreeInfo(for: address)?.worktree.panes.isEmpty == false {
+      SplitViewportView(
+        store: store.scope(state: \.splitViewport, action: \.splitViewport),
+        tabBarStore: store.scope(state: \.tabBar, action: \.tabBar),
+        projectID: address.project,
+        worktreeID: address.worktree,
+        agentStateStore: agentStateStore
+      )
+    } else {
+      emptyTab(address: address)
     }
   }
 
@@ -515,8 +509,6 @@ struct WorktreeDetailView: View {
   private struct Address {
     let project: ProjectID
     let worktree: WorktreeID
-    /// The focused Pane's selected Content; nil for an empty Worktree.
-    let focusedContent: ContentID?
   }
 
   private func resolveAddress() -> Address? {
@@ -524,15 +516,11 @@ struct WorktreeDetailView: View {
       let projectID = selection.projectID,
       let worktreeID = selection.worktreeID,
       let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
+      project.worktrees.contains(where: { $0.id == worktreeID })
     else {
       return nil
     }
-    return Address(
-      project: projectID,
-      worktree: worktreeID,
-      focusedContent: worktree.focusedPane?.selectedTab?.contentID
-    )
+    return Address(project: projectID, worktree: worktreeID)
   }
 
   /// Routes the empty-page buttons through the same `TabBarFeature` actions
@@ -606,51 +594,6 @@ struct WorktreeDetailView: View {
 /// `.navigationTitle("")` fallback for macOS 14. Both suppress the
 /// bundle-name title; only the modern API also frees the leading slot
 /// so default-placement items + ToolbarSpacers lay out predictably.
-/// Holds back the terminal of the Tab selected because the shown Tab was
-/// just closed, until the strip's close animation has played. A terminal
-/// surface entering the window stalls compositing for a few frames; landing
-/// mid-animation it freezes the strip, landing after it the stall is
-/// invisible. Plain Tab and worktree switches mount at once — nothing
-/// animates then. Keyed on the focused Pane's selected Content.
-private struct TerminalMountDeferral<Content: View>: View {
-  let worktreeID: WorktreeID
-  let activeContentID: ContentID?
-  /// Contents of `worktreeID`.
-  let contentIDs: [ContentID]
-  @ViewBuilder let content: Content
-
-  /// Worktree and Content whose terminal is mounted.
-  @State private var mountedWorktreeID: WorktreeID?
-  @State private var mountedContentID: ContentID?
-
-  var body: some View {
-    Group {
-      if isDeferring {
-        Color.clear
-      } else {
-        content
-      }
-    }
-    .task(id: activeContentID) {
-      if isDeferring {
-        try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
-        guard !Task.isCancelled else { return }
-      }
-      mountedWorktreeID = worktreeID
-      mountedContentID = activeContentID
-    }
-  }
-
-  /// The mounted Content is gone and another one took over the selection.
-  /// A worktree switch never counts: the mounted Content is only missing
-  /// from `contentIDs` because they list the other worktree's sessions.
-  private var isDeferring: Bool {
-    guard let mountedContentID, mountedContentID != activeContentID, mountedWorktreeID == worktreeID
-    else { return false }
-    return !contentIDs.contains(mountedContentID)
-  }
-}
-
 private struct SuppressTitleModifier: ViewModifier {
   func body(content: Content) -> some View {
     if #available(macOS 15.0, *) {
