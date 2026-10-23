@@ -381,15 +381,20 @@ private struct PaneView: View {
         for: CGRect.self, of: { $0.frame(in: .global) },
         action: { tabDrag.setStripFrame($0, for: paneID) })
       GeometryReader { geo in
-        paneContent(slotSize: geo.size)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          // Drop-zone highlight, drawn above the surface but never hit-tested.
-          // Shown only while this leaf is the active drop target.
-          .overlay {
-            if let activeDropZone {
-              PaneDropOverlay(zone: activeDropZone)
-            }
+        TerminalMountDeferral(
+          activeContentID: selectedContentID,
+          contentIDs: hierarchyManager.catalog.pane(paneID)?.contentIDs ?? []
+        ) {
+          paneContent(slotSize: geo.size)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Drop-zone highlight, drawn above the surface but never hit-tested.
+        // Shown only while this leaf is the active drop target.
+        .overlay {
+          if let activeDropZone {
+            PaneDropOverlay(zone: activeDropZone)
           }
+        }
       }
       .onGeometryChange(
         for: CGRect.self, of: { $0.frame(in: .global) },

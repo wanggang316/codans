@@ -213,7 +213,7 @@ struct TerminalContentState {
 | `Tab` / `Pane` 两个类型名互换，中间态难读 | 一组原子提交内在 CodansCore 新建新模型并删除旧类型，由编译器驱动改完全部调用点 |
 | 迁移丢会话 | ContentID 延续旧 UUID；迁移前留 v3 副本；不一致整份拒绝；丢失计数关闭 reaper |
 | 旧构建读到 v4 | 本构建起版本高于自身即只读；不再把文件挪走 |
-| 每 Pane 一条 tab 条放大终端挂载停顿 | 沿用 `TerminalMountDeferral` 与首个内容延后挂载 |
+| 每 Pane 一条 tab 条放大终端挂载停顿 | `TerminalMountDeferral` 按 Pane 生效：关掉当前 Tab 时只让该 Pane 的内容区等条的动画播完，条与其他 Pane 照常显示 |
 
 ## 分期
 
