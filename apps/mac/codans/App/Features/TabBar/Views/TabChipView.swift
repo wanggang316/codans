@@ -1,7 +1,8 @@
 import CodansCore
 import SwiftUI
 
-/// One tab chip. Composes label + close button on top of a state-aware
+/// One tab chip. Composes label + close button (leading) + actions button
+/// (trailing) on top of a state-aware
 /// background and owns the chip's local hover / press state. The chip
 /// accepts plain closures rather than a TCA store so it stays agnostic
 /// of the feature that drives it — future milestones bolt drag /
@@ -57,6 +58,9 @@ struct TabChipView: View {
   var onStackClick: (() -> Void)?
   /// The process the tab runs, read live by the hover card while it shows.
   var hoverCardProcess: () -> WorktreeProcessEntry? = { nil }
+  /// Items of the trailing actions menu, built when it opens. `nil` hides
+  /// the actions button (previews, tests).
+  var actionsMenu: (() -> [PullDownMenuItem])?
 
   @State private var isHovering = false
   @State private var hoverCardAnchor = TabHoverCardAnchor()
@@ -173,23 +177,32 @@ struct TabChipView: View {
         .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
-      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
-      // tab's color dot (when set) sits there.
+      // Chord hint takes the trailing slot while ⌘ is held. Otherwise the
+      // actions button mirrors the close button: it shows on hover, and the
+      // tab's color dot (when set) holds the slot the rest of the time.
       Group {
         if let chordHint {
           Text(chordHint)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
             .accessibilityHidden(true)
-        } else if let tabColor {
-          Circle()
-            .fill(tabColor.swiftUIColor)
-            .frame(width: 8, height: 8)
-            .frame(width: TabBarMetrics.closeButtonSize)
+            .allowsHitTesting(false)
+        } else {
+          ZStack {
+            if let tabColor, !(showsHover && actionsMenu != nil) {
+              Circle()
+                .fill(tabColor.swiftUIColor)
+                .frame(width: 8, height: 8)
+                .frame(width: TabBarMetrics.closeButtonSize)
+                .allowsHitTesting(false)
+            }
+            if let actionsMenu {
+              TabChipActionsButton(isVisible: showsHover, menuItems: actionsMenu)
+            }
+          }
         }
       }
       .padding(.trailing, TabBarMetrics.chipSlotInset)
-      .allowsHitTesting(false)
     }
   }
 
