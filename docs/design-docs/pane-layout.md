@@ -1,6 +1,6 @@
 # 设计文档：Pane Layout
 
-**状态：** P1 已上线（可见）：模型与迁移、内容运行时、每 Pane 一条 tab 条、键盘、CLI / IPC / 环境变量；P2（chip 拖拽、边缘 split、zoom 退出控件）与 P3 已规划
+**状态：** P1 已上线（可见）：模型与迁移、内容运行时、每 Pane 一条 tab 条、键盘、CLI / IPC / 环境变量；P2 的 chip 拖拽（条内重排、移到另一 Pane 的条、拖到 Pane 四边生成新 Pane）已上线；P2 其余项（布局区边缘 split、zoom 退出控件）与 P3 已规划
 **作者：** Gump（与 Claude）
 **实现：** 模型与迁移 `apps/mac/CodansCore/`（Pane / Tab / ContentSnapshot / SplitTree / catalog v3 → v4 迁移器）；内容运行时 `apps/mac/codans/Runtime/Content/`；布局与 tab 条 `apps/mac/codans/App/Features/TabBar/` 与 split 视口；CLI `apps/mac/codans-cli/Commands/{TabCommands,PaneCommands,TerminalCommands}.swift`。词汇表见仓库根 [CONTEXT.md](../../CONTEXT.md)；决策记录见 [ADR-0001](../adr/0001-three-ids-pane-tab-content.md)、[ADR-0002](../adr/0002-content-runtime-outside-hierarchy-manager.md)。
 
@@ -111,9 +111,11 @@ struct TerminalContentState {
 
 ### 拖拽（P2）
 
-- 只拖 Tab chip。条内拖动重排；拖到同 Worktree 另一个 Pane 的条上移动过去；拖到 Pane 四边的落点生成新 Pane；拖到布局区边缘生成跨越根的 split。
+- 只拖 Tab chip。条内拖动重排；拖到同 Worktree 另一个 Pane 的条上移动过去，插入点按光标与各 chip 中线比较，目标条在插入点让出空位；拖到 Pane 内容区，按最近的一边在该 Pane 旁生成新 Pane（`PaneDropZone`），落点以半 Pane 高亮预览；拖到布局区边缘生成跨越根的 split。
+- Tab 移动不重建内容：`HierarchyManager.moveTab(_:toPane:at:)` 与 `splitTab(_:beside:direction:)` 只改 catalog，移入的 Tab 在目标 Pane 选中并获得焦点。移走最后一个 Tab 的 Pane 随之关闭；Pane 唯一的 Tab 拖到别的 Pane 边上等于移动整个 Pane，拖到自己 Pane 上不是落点。
+- 拖拽状态由每个视口一个的 `TabDragSession` 持有：chip 自己的 `DragGesture` 驱动它，各条与内容区按窗口坐标登记 frame，由它判定落点。光标在源条内时由源条就地重排；离开源条后浮起的 chip 画在视口层。
 - 跨两个 Pane 的落点预览画在父 split 上。无有效落点时松手无操作。
-- 不提供整 Pane 拖动。
+- 不提供整 Pane 拖动，内容区上方没有拖动把手。
 
 ### 关闭确认
 
@@ -210,5 +212,5 @@ struct TerminalContentState {
 ## 分期
 
 - **P1**：模型 + 迁移 + 内容运行时 + 每 Pane 条 + 键盘 + CLI / IPC / skill / 文档。
-- **P2**：chip 拖拽、边缘 split、zoom 退出控件。
+- **P2**：chip 拖拽（已上线）、布局区边缘 split、zoom 退出控件。
 - **P3**（各自另开设计）：hover-to-focus、未聚焦变暗、窗口模式、内容种类扩展。

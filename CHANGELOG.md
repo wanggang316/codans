@@ -62,6 +62,11 @@ and the project does not yet follow semantic versioning — every release until
   setting (busy / always / never) covers closing a tab and closing a
   pane; busy means a running foreground command, a working agent, or
   queued commands.
+- **Drag a tab to another pane.** Drag a tab chip along its strip to
+  reorder it, onto another pane's strip to move it there, or onto a
+  pane's edge to split it into a new pane on that side. The session keeps
+  running. The grab strip on top of a split pane is gone; tabs are the
+  only thing you drag.
 - **Agents report their own state.** Claude Code, Pi, and omp send OSC
   7501 program status, and codans now answers and uses it: the Agents
   View shows working the moment a prompt is sent, blocked with what the
