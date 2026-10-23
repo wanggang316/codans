@@ -110,7 +110,8 @@ struct TerminalContentState {
 - 条与上方边缘、条与下方内容的间距相同（`trackTopInset` = `trackBottomInset`）。贴着布局区顶边的条不留上间距：工具栏自身已在按钮下方留出间距，track 与工具栏按钮的距离因此与 Safari 的 tab 栏相同。
 - track 高 32，取自 Safari（macOS 26）的 tab 栏；标题字号、颜色与曲线取自系统窗口 tab 栏（`NSTabBar`）。
 - 条左端没有关闭 Pane 的按钮；关闭 Pane 经 `pane close`、右键菜单或关掉最后一个 Tab。
-- 条浮在终端上方：终端占满整个 Pane，条下垫一层半透明材质（`NSVisualEffectView` `.titlebar`，窗口失焦时仍保持半透明）。终端经 `ghostty_surface_set_content_inset_top` 把条的高度设为顶部内缩带：网格从带下方开始，视口上方的历史行画进带里，滚动时内容从条下经过并被模糊。备用屏（全屏 TUI）没有历史，带里为空，首行仍在条下方完整可见。
+- 顶边贴着窗口工具栏的 Pane（上下分屏的上半、左右分屏的各列）延伸到工具栏下方，终端从窗口顶边开始；条浮在工具栏下方，track 距工具栏按钮的间距同 Safari 标签栏。视口上覆一个透明、不接收事件的 `NSScrollView`（`ScrollEdgeEffectView`），`additionalSafeAreaInsets.top` 为条在工具栏下占的高度：AppKit 给工具栏下的滚动视图加系统滚动边缘效果（scroll pocket），覆盖工具栏和这一排条，模糊其下的终端。工具栏背景保持默认，`.toolbarBackground(.hidden)` 会关掉这一效果。终端经 `ghostty_surface_set_content_inset_top` 把工具栏加条的高度设为顶部内缩带：网格从带下方开始，视口上方的历史行画进带里，滚动时内容从条和工具栏下经过并被模糊。备用屏（全屏 TUI）没有历史，带里为空，首行仍在条下方完整可见。
+- 其余 Pane 的条直接位于终端上方，内容不从条下经过：公开 API 只让窗口工具栏触发滚动边缘效果。
 
 ### 分隔线
 

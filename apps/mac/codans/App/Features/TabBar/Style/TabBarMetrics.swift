@@ -13,6 +13,12 @@ enum TabBarMetrics {
   /// Height of the full Tab bar row: the track and its insets.
   static let barHeight: CGFloat = trackTopInset + trackHeight + trackBottomInset
 
+  /// Height a strip under the window toolbar adds below the toolbar. The
+  /// toolbar already leaves a gap under its items, so such a strip starts
+  /// `trackTopInset` up into the toolbar: its track then sits as far under
+  /// the toolbar items as Safari's tab bar does.
+  static let floatingBarHeight: CGFloat = barHeight - trackTopInset
+
   /// Recessed capsule track that hosts the chips.
   static let trackHeight: CGFloat = 32
   /// Gap from the edge above the strip to the track. Equal to the gap below,
