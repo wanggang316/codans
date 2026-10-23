@@ -18,10 +18,9 @@ enum TabBarMetrics {
   /// so the strip sits centered between what is above it and the content.
   static let trackTopInset: CGFloat = trackBottomInset
   /// Gap between the track and the content below it.
-  static let trackBottomInset: CGFloat = 8
-  /// Gap between the bar's leading edge and the track. The terminal below
-  /// sits the same distance in from its card's edge.
-  static let trackLeadingInset: CGFloat = 6
+  static let trackBottomInset: CGFloat = 6
+  /// Gap between the bar's leading edge and the track.
+  static let trackLeadingInset: CGFloat = 4
   /// Chips are inset from the track on every side by this much.
   static let trackContentInset: CGFloat = 2
 
@@ -58,7 +57,7 @@ enum TabBarMetrics {
   /// horizontal padding on each side.
   static let accessorySize: CGFloat = 22
   static let accessorySpacing: CGFloat = 4
-  static let accessoryClusterPadding: CGFloat = 6
+  static let accessoryClusterPadding: CGFloat = 4
   /// Gap between the chip track and the accessory cluster.
   static let trackAccessoryGap: CGFloat = 4
 

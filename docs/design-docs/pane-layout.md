@@ -112,7 +112,7 @@ struct TerminalContentState {
 
 ### 分隔线
 
-- Pane 之间是平铺的，参照 Xcode 编辑器分栏：无圆角、无间隙，相邻两个 Pane 之间画一条 2pt 的分隔线（`separatorColor`）。
+- Pane 之间是平铺的，参照 Xcode 编辑器分栏：无圆角、无间隙，相邻两个 Pane 之间画一条 1pt 的浅分隔线（`separatorColor` 的 60%）。
 - 分隔线是调整比例的拖动区，双击均分。
 
 ### 拖拽（P2）
