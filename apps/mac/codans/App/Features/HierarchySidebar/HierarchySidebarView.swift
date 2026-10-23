@@ -202,6 +202,11 @@ struct HierarchySidebarView: View {
       + rest.map(SidebarRow.worktree)
   }
 
+  private var pullRequestWorktreeIDs: Set<WorktreeID> {
+    guard let gitHubStore else { return [] }
+    return Set(gitHubStore.snapshots.keys)
+  }
+
   var body: some View {
     let catalog = hierarchyManager.catalog
     // Use the full catalog so a tag filter with no matches does not hide
@@ -219,7 +224,7 @@ struct HierarchySidebarView: View {
     // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
-    let visibleProjects = catalog.sidebarProjects
+    let visibleProjects = catalog.sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
 
     let isReordering = store.isReorderingProjects
@@ -576,7 +581,8 @@ struct HierarchySidebarView: View {
       // stand for a folder, and the rows of expanded Projects); matching hints
       // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
       let hotkeyIndex: [WorktreeID: Int] = Dictionary(
-        hierarchyManager.catalog.sidebarSelectionOrder.prefix(10).enumerated()
+        hierarchyManager.catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
+          .prefix(10).enumerated()
           .map { ($0.element.worktreeID, $0.offset) },
         uniquingKeysWith: { first, _ in first })
       // List + .listStyle(.sidebar) with NO `.scrollIndicators(.*)` modifier.
@@ -807,15 +813,18 @@ struct HierarchySidebarView: View {
           let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
           let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
           let pendingRows = store.pendingWorktrees.filter {
-            $0.projectID == project.id && hierarchyManager.catalog.sidebarFilter != .favorites
+            $0.projectID == project.id && hierarchyManager.catalog.sidebarFilter != .pin
+              && hierarchyManager.catalog.sidebarFilter != .pullRequests
           }
           ForEach(mainRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
           }
           ForEach(pinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
           }
           .onMove { source, destination in
+            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -828,8 +837,10 @@ struct HierarchySidebarView: View {
           }
           ForEach(unpinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
           }
           .onMove { source, destination in
+            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -2547,30 +2558,30 @@ private struct SidebarFilterBar: View {
   private func title(for filter: SidebarFilter) -> String {
     switch filter {
     case .all: "All"
-    case .local: "Local"
     case .remote: "Remote"
     case .workspace: "Workspace"
-    case .favorites: "Favorites"
+    case .pin: "Pin"
+    case .pullRequests: "PR"
     }
   }
 
   private func symbol(for filter: SidebarFilter) -> String {
     switch filter {
     case .all: "square.grid.2x2.fill"
-    case .local: "desktopcomputer"
-    case .remote: "network"
+    case .remote: "wifi"
     case .workspace: "square.stack.3d.up.fill"
-    case .favorites: "star.fill"
+    case .pin: "pin.fill"
+    case .pullRequests: "arrow.triangle.pull"
     }
   }
 
   private func tint(for filter: SidebarFilter) -> Color {
     switch filter {
     case .all: .blue
-    case .local: .green
     case .remote: .indigo
     case .workspace: .purple
-    case .favorites: Color(red: 0.65, green: 0.42, blue: 0.08)
+    case .pullRequests: .green
+    case .pin: Color(red: 0.65, green: 0.42, blue: 0.08)
     }
   }
 }

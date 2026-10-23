@@ -2404,7 +2404,7 @@ struct RootFeature {
 
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
-        let order = catalog.sidebarSelectionOrder
+        let order = catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys))
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2481,7 +2481,7 @@ struct RootFeature {
   ) {
     let catalog = hierarchyClient.snapshot()
     if catalog.sidebarFilter != .all,
-      !catalog.sidebarProjects.contains(where: { project in
+      !catalog.sidebarProjects(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys)).contains(where: { project in
         project.worktrees.contains { $0.id == worktreeID }
       })
     {
