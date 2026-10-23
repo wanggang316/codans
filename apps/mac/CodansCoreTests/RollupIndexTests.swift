@@ -73,6 +73,25 @@ struct RollupIndexTests {
   }
 
   @Test
+  func aRowInACollapsedGroupRollsToItsGroupRow() {
+    // worktreeA2 sits in a collapsed Workspace group whose row is worktreeA1.
+    let p = Pathset()
+    let unread = [
+      entry(project: p.projectA, worktree: p.worktreeA2, tab: p.tabA1Inactive, pane: p.paneA1ActiveTabUnfocused)
+    ]
+    let focus = RollupFocusState(
+      activeProjectID: p.projectB, expandedProjectIDs: [p.projectA], rowStandIns: [p.worktreeA2: p.worktreeA1])
+    #expect(RollupIndex.compute(unread: unread, focus: focus).unreadWorktrees == [p.worktreeA1])
+
+    // A collapsed Workspace still rolls everything up to its header.
+    let collapsed = RollupFocusState(
+      activeProjectID: p.projectB, expandedProjectIDs: [], rowStandIns: [p.worktreeA2: p.worktreeA1])
+    let index = RollupIndex.compute(unread: unread, focus: collapsed)
+    #expect(index.unreadProjects == [p.projectA])
+    #expect(index.unreadWorktrees.isEmpty)
+  }
+
+  @Test
   func projectExpandedButNotActiveRollsToWorktree() {
     let p = Pathset()
     let unread = [

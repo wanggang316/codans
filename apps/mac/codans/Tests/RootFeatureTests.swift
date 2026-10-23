@@ -1193,6 +1193,43 @@ struct RootFeatureTests {
     #expect(launched.value.first?.2 == worktreeID)
   }
 
+  /// A new Workspace group starts the agents its result names, one per
+  /// member that has one, and lands on the group's own row.
+  @Test
+  func workspaceGroupCreatedLaunchesMemberAgentsAndSelectsTheGroup() async {
+    let projectID = ProjectID()
+    let groupRow = WorktreeID()
+    let withAgent = WorktreeID()
+    let withoutAgent = WorktreeID()
+    let profileID = UUID()
+    let launched = LockIsolated<[(UUID, ProjectID, WorktreeID, String?)]>([])
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: nil, recorder: rec)
+    store.dependencies.hierarchyClient.launchAgentProfile = { pid, proj, wt, prompt in
+      launched.withValue { $0.append((pid, proj, wt, prompt)) }
+    }
+    store.dependencies.hierarchyClient.setProjectExpanded = { _, _ in }
+    let result = GroupCreationResult(
+      projectID: projectID, groupID: WorkspaceGroupID(), groupWorktreeID: groupRow,
+      members: [
+        .init(name: "app", worktreeID: withAgent, agentProfileID: profileID),
+        .init(name: "api", worktreeID: withoutAgent),
+      ])
+
+    await store.send(.sidebar(.delegate(.workspaceGroupCreated(result)))) {
+      $0.agentLaunchWorktreeIDs = [withAgent]
+    }
+    await store.receive(\.worktreeAgentLaunchFinished) {
+      $0.agentLaunchWorktreeIDs = []
+    }
+    #expect(launched.value.map(\.0) == [profileID])
+    #expect(launched.value.map(\.1) == [projectID])
+    #expect(launched.value.map(\.2) == [withAgent])
+    #expect(launched.value.map(\.3) == [nil])
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == groupRow)
+  }
+
   /// The New Agent dialog's prompt rides the pending creation and reaches
   /// the agent launch once the worktree materializes.
   @Test
@@ -2120,7 +2157,8 @@ struct RootFeatureTests {
     #expect(typed.value.first?.0 == paneID)
     #expect(
       typed.value.first?.1
-        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
+        == HandoffKickoff.sourceInstruction(
+          for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
         || typed.value.first?.1
           == HandoffKickoff.sourceInstruction(
             for: .handOff(to: .codex), requestID: requestID, sourcePaneID: paneID, cli: "codans")

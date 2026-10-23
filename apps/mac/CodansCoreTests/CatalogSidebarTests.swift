@@ -7,8 +7,22 @@ import Testing
 /// the order the sidebar offers its selectable rows in (⌃1…⌃0, ⌘⌃↑/↓).
 struct CatalogSidebarTests {
   private let folderRoot = Worktree(name: "notes", path: "/notes")
-  private let workspaceRoot = Worktree(name: "flow", path: "/ws/flow")
-  private let checkout = Worktree(name: "app", path: "/ws/flow/app", branch: "flow", sourceGitRoot: "/src/app")
+  private static let defaultGroup = WorkspaceGroupID()
+  private static let fixGroup = WorkspaceGroupID()
+  private let defaultTerminal = Worktree(
+    name: "default", path: "/ws/flow/default",
+    workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .groupTerminal))
+  private let reference = Worktree(
+    name: "app", path: "/src/app", branch: "main", sourceGitRoot: "/src/app",
+    workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .reference))
+  private let fixTerminal = Worktree(
+    name: "fix", path: "/ws/flow/fix", workspaceSlot: WorkspaceSlot(groupID: fixGroup, role: .groupTerminal))
+  private let checkout = Worktree(
+    name: "app", path: "/ws/flow/fix/app", branch: "fix/login", sourceGitRoot: "/src/app",
+    workspaceSlot: WorkspaceSlot(groupID: fixGroup, role: .member))
+  private let libCheckout = Worktree(
+    name: "lib", path: "/ws/flow/fix/lib", branch: "fix/login", sourceGitRoot: "/src/lib",
+    workspaceSlot: WorkspaceSlot(groupID: fixGroup, role: .member))
   private let main = Worktree(name: "main", path: "/repo", branch: "main")
   private let feature = Worktree(name: "feat", path: "/repo-feat", branch: "feat")
   private let pinned = Worktree(name: "hotfix", path: "/repo-hotfix", branch: "hotfix", isPinned: true)
@@ -18,7 +32,14 @@ struct CatalogSidebarTests {
   }
 
   private var workspace: Project {
-    Project(name: "flow", rootPath: "/ws/flow", worktrees: [workspaceRoot, checkout], isWorkspace: true)
+    Project(
+      name: "flow", rootPath: "/ws/flow",
+      worktrees: [defaultTerminal, reference, fixTerminal, checkout, libCheckout],
+      isWorkspace: true,
+      workspaceGroups: [
+        WorkspaceGroupRecord(id: Self.defaultGroup, name: "default", kind: .default),
+        WorkspaceGroupRecord(id: Self.fixGroup, name: "fix", kind: .named, isExpanded: true),
+      ])
   }
 
   private var repository: Project {
@@ -33,10 +54,79 @@ struct CatalogSidebarTests {
   }
 
   @Test
-  func aWorkspaceHeaderStandsForNoRowAndListsEveryRow() {
+  func aWorkspaceHeaderStandsForNoRowAndListsItsGroups() {
     #expect(workspace.rowWorktree == nil)
-    #expect(workspace.childWorktrees == [workspaceRoot, checkout])
     #expect(workspace.hasChildRows)
+    #expect(
+      workspace.workspaceSidebarRows == [
+        .group(workspace.workspaceGroups[0], terminal: defaultTerminal),
+        .group(workspace.workspaceGroups[1], terminal: fixTerminal),
+        .member(checkout, groupID: Self.fixGroup),
+        .member(libCheckout, groupID: Self.fixGroup),
+      ])
+    // A group row is selectable through its terminal row; members by their own.
+    #expect(
+      workspace.workspaceSidebarRows.map(\.worktreeID)
+        == [defaultTerminal.id, fixTerminal.id, checkout.id, libCheckout.id])
+  }
+
+  @Test
+  func workspaceGroupsExpandIndependently() {
+    var project = workspace
+    project.workspaceGroups[0].isExpanded = true
+    project.workspaceGroups[1].isExpanded = false
+    #expect(
+      project.workspaceSidebarRows.map(\.worktreeID) == [defaultTerminal.id, reference.id, fixTerminal.id])
+  }
+
+  @Test
+  func workspaceProjectionSkipsArchivedAndUnslottedRows() {
+    var project = workspace
+    project.worktrees[3].archived = true
+    project.worktrees.append(Worktree(name: "stray", path: "/ws/flow/stray"))
+    #expect(
+      project.workspaceSidebarRows.map(\.worktreeID) == [defaultTerminal.id, fixTerminal.id, libCheckout.id])
+  }
+
+  @Test
+  func aGroupWithoutATerminalRowStillListsItsMembers() {
+    var project = workspace
+    project.worktrees.removeAll { $0.id == defaultTerminal.id }
+    project.workspaceGroups[0].isExpanded = true
+    #expect(project.workspaceSidebarRows.first == .group(project.workspaceGroups[0], terminal: nil))
+    #expect(project.workspaceSidebarRows.compactMap(\.worktreeID).first == reference.id)
+  }
+
+  @Test
+  func groupSummaryCountsMembersAndBranches() {
+    var project = workspace
+    #expect(
+      project.workspaceGroupSummary(Self.fixGroup)
+        == WorkspaceGroupSummary(memberCount: 2, branch: .single("fix/login")))
+    project.worktrees[4].branch = "feat/lib"
+    #expect(
+      project.workspaceGroupSummary(Self.fixGroup) == WorkspaceGroupSummary(memberCount: 2, branch: .several(2)))
+    #expect(
+      project.workspaceGroupSummary(Self.defaultGroup)
+        == WorkspaceGroupSummary(memberCount: 1, branch: .single("main")))
+    #expect(
+      project.workspaceGroupSummary(WorkspaceGroupID()) == WorkspaceGroupSummary(memberCount: 0, branch: nil))
+  }
+
+  @Test
+  func revealingAMemberNamesItsCollapsedGroupOnly() {
+    #expect(workspace.collapsedWorkspaceGroup(revealing: reference.id) == Self.defaultGroup)
+    // Expanded group, group row, and unknown rows need no reveal.
+    #expect(workspace.collapsedWorkspaceGroup(revealing: checkout.id) == nil)
+    #expect(workspace.collapsedWorkspaceGroup(revealing: defaultTerminal.id) == nil)
+    #expect(workspace.collapsedWorkspaceGroup(revealing: WorktreeID()) == nil)
+    #expect(repository.collapsedWorkspaceGroup(revealing: main.id) == nil)
+  }
+
+  @Test
+  func rowsInACollapsedGroupStandBehindTheGroupRow() {
+    let catalog = Catalog(projects: [repository, workspace])
+    #expect(catalog.workspaceRowStandIns == [reference.id: defaultTerminal.id])
   }
 
   @Test
@@ -67,7 +157,8 @@ struct CatalogSidebarTests {
     catalog.projects[1].isExpanded = true
     catalog.projects[2].isExpanded = false
     #expect(
-      catalog.sidebarSelectionOrder.map(\.worktreeID) == [folderRoot.id, workspaceRoot.id, checkout.id])
+      catalog.sidebarSelectionOrder.map(\.worktreeID)
+        == [folderRoot.id, defaultTerminal.id, fixTerminal.id, checkout.id, libCheckout.id])
   }
 
   @Test
@@ -83,7 +174,9 @@ struct CatalogSidebarTests {
     #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [folderRoot.id])
 
     let unfiltered = Catalog(projects: [tagged, workspace, failed], projectSortMode: .manual)
-    #expect(unfiltered.sidebarSelectionOrder.map(\.worktreeID) == [folderRoot.id, workspaceRoot.id, checkout.id])
+    #expect(
+      unfiltered.sidebarSelectionOrder.map(\.worktreeID)
+        == [folderRoot.id, defaultTerminal.id, fixTerminal.id, checkout.id, libCheckout.id])
   }
 
   @Test
@@ -113,9 +206,21 @@ struct CatalogSidebarTests {
     var catalog = Catalog(projects: [repository, starredWorkspace], activeTagFilter: .tags([tag]))
     catalog.sidebarFilter = .pin
     #expect(catalog.sidebarProjects.map(\.id) == [starredWorkspace.id])
-    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [checkout.id])
+    // The matching member's group stays visible and opens for the filtered
+    // view only; the catalog keeps the group collapsed.
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [defaultTerminal.id, reference.id])
+    #expect(catalog.projects[1].workspaceGroups[0].isExpanded == false)
     catalog.projects[1].isExpanded = false
     #expect(catalog.sidebarSelectionOrder.isEmpty)
+  }
+
+  @Test
+  func aPinnedGroupRowShowsWithoutItsMembers() {
+    var project = workspace
+    project.worktrees[2].isPinned = true
+    var catalog = Catalog(projects: [project])
+    catalog.sidebarFilter = .pin
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [fixTerminal.id])
   }
 
   @Test
@@ -137,9 +242,11 @@ struct CatalogSidebarTests {
     let matches: Set<WorktreeID> = [feature.id, checkout.id]
     #expect(
       catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
-        == [feature.id, checkout.id])
+        == [feature.id, fixTerminal.id, checkout.id])
     catalog.projects[0].worktrees[0].archived = true
-    #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID) == [checkout.id])
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
+        == [fixTerminal.id, checkout.id])
     #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [pinned.id]).map(\.worktreeID) == [pinned.id])
     catalog.activeTagFilter = .tags([TagID()])
     #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: matches).isEmpty)

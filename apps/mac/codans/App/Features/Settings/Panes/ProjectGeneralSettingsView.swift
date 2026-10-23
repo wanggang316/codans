@@ -61,7 +61,7 @@ struct ProjectGeneralSettingsView: View {
     case .workspace:
       // A workspace root has no repository of its own: the worktree, GitHub,
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
-      // construction. Its own section lists the checkouts it holds.
+      // construction. Its own section lists its source projects.
       return [.general, .workspace, .editor, .environment]
     case .gitRepo, .server:
       // Server projects manage worktrees over SSH just like a local git repo,
@@ -180,6 +180,24 @@ struct ProjectGeneralSettingsView: View {
       }
     }
     .formStyle(.grouped)
+    // Remove… on a Workspace source row; on the Form, not on its Section.
+    .confirmationDialog(
+      store.pendingSourceRemoval?.title ?? "Remove from workspace?",
+      isPresented: Binding(
+        get: { store.pendingSourceRemoval != nil },
+        set: { if !$0 { store.send(.workspaceSourceRemoveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove from Workspace", role: .destructive) {
+        store.send(.workspaceSourceRemoveConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.workspaceSourceRemoveCancelled)
+      }
+    } message: {
+      Text(store.pendingSourceRemoval?.message ?? "")
+    }
     .task(id: projectID) { await loadBaseRefOptionsIfNeeded() }
   }
 
@@ -307,58 +325,125 @@ struct ProjectGeneralSettingsView: View {
 
   // MARK: - Workspace
 
-  /// The checkouts inside a workspace, one row each in the shape the New
-  /// Workspace sheet uses: the source's icon, the folder, the repository it
-  /// is a checkout of, and its branch. Read from the catalog rows the
-  /// sidebar shows, so it follows adds and drops as they happen.
+  /// The source projects of a workspace, one row each: the source's icon,
+  /// its name, the live branch of its main checkout, and its path, with
+  /// Remove… on the trailing side. Read from the reference rows of the
+  /// `default` group, so it follows adds and removes as they happen. Group
+  /// checkouts are not listed: a group is deleted from the sidebar as a
+  /// whole.
   private var workspaceSection: some View {
-    Section("Projects") {
-      let checkouts = workspaceCheckouts
-      if checkouts.isEmpty {
-        Text("No projects yet. Add one from the workspace's + in the sidebar.")
+    Section {
+      let sources = workspaceSources
+      if sources.isEmpty {
+        Text("No projects yet.")
           .foregroundStyle(.secondary)
       }
-      ForEach(checkouts, id: \.id) { checkout in
-        HStack(spacing: 10) {
-          let source = checkout.sourceGitRoot.flatMap { sourceProject(for: $0) }
-          ProjectIconView(icon: source?.icon, color: source?.color, size: 16)
-            .frame(width: 18)
-          VStack(alignment: .leading, spacing: 3) {
-            // Folder and branch together on top, source path beneath: the
-            // pair names the checkout, while the path is the long,
-            // middle-truncated line you only read when you need it.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-              Text(checkout.name)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .layoutPriority(1)
-              WorkspaceCheckoutLine(checkout: .checkedOut(branch: checkout.branch))
-            }
-            if let root = checkout.sourceGitRoot {
-              Text((root as NSString).abbreviatingWithTildeInPath)
+      ForEach(sources, id: \.id) { reference in
+        workspaceSourceRow(reference)
+      }
+    } header: {
+      Text("Projects")
+      Text("Their main checkouts make up the default group. New groups check out every project listed here.")
+    } footer: {
+      workspaceAddSourceButtons
+    }
+  }
+
+  private func workspaceSourceRow(_ reference: Worktree) -> some View {
+    LabeledContent {
+      Button("Remove…") {
+        store.send(.workspaceSourceRemoveTapped(reference.id))
+      }
+    } label: {
+      HStack(spacing: 10) {
+        let source = sourceProject(for: reference.sourceGitRoot ?? reference.path)
+        ProjectIconView(icon: source?.icon, color: source?.color, size: 16)
+          .frame(width: 18)
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(reference.name)
+              .fontWeight(.medium)
+              .lineLimit(1)
+              .layoutPriority(1)
+            if isUnavailable(reference) {
+              Text("Missing")
+                .foregroundStyle(.orange)
+                .help("The source folder is not on disk.")
+            } else {
+              Label(reference.branch ?? "detached", systemImage: "arrow.triangle.branch")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .help(root)
             }
           }
+          Text(((reference.sourceGitRoot ?? reference.path) as NSString).abbreviatingWithTildeInPath)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(reference.sourceGitRoot ?? reference.path)
         }
-        .padding(.vertical, 2)
       }
+      .padding(.vertical, 2)
     }
   }
 
-  /// The open project a checkout comes from, when its repository is one.
+  /// Add Project lists the open local repositories that are not in the
+  /// workspace yet; Add Folder… takes any repository folder on this Mac.
+  private var workspaceAddSourceButtons: some View {
+    let candidates = workspaceSourceCandidates
+    return HStack(spacing: 8) {
+      Menu {
+        ForEach(candidates, id: \.id) { candidate in
+          Button(candidate.name) {
+            if let gitRoot = candidate.gitRoot {
+              store.send(.workspaceAddSourceTapped(path: gitRoot))
+            }
+          }
+        }
+      } label: {
+        Text("Add Project")
+      }
+      .fixedSize()
+      .disabled(candidates.isEmpty)
+      .help(
+        candidates.isEmpty
+          ? "Every local repository open in codans is already in the workspace"
+          : "Add a project that is open in codans")
+      Button("Add Folder…") {
+        store.send(.workspaceAddFolderTapped)
+      }
+      .help("Add a repository folder from this Mac")
+    }
+    .foregroundStyle(.primary)
+  }
+
+  /// The open project a reference points at, when its repository is one.
   private func sourceProject(for gitRoot: String) -> Project? {
     hierarchyManager.catalog.projects.first { $0.gitRoot == gitRoot }
   }
 
-  private var workspaceCheckouts: [Worktree] {
-    guard let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }) else {
-      return []
+  private var workspaceProject: Project? {
+    hierarchyManager.catalog.projects.first { $0.id == projectID }
+  }
+
+  private var workspaceSources: [Worktree] {
+    workspaceProject?.worktrees.filter { !$0.archived && $0.workspaceSlot?.role == .reference } ?? []
+  }
+
+  private func isUnavailable(_ reference: Worktree) -> Bool {
+    workspaceProject?.unavailableWorkspaceRows.contains(reference.id) ?? false
+  }
+
+  /// Local repositories a workspace can take as sources: not remote, not a
+  /// workspace, and not listed already.
+  private var workspaceSourceCandidates: [Project] {
+    let listed = Set(workspaceSources.map { $0.sourceGitRoot ?? $0.path })
+    return hierarchyManager.catalog.projects.filter { project in
+      guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else { return false }
+      return !listed.contains(gitRoot)
     }
-    return project.worktrees.filter { !$0.archived && $0.path != project.rootPath }
   }
 
   // MARK: - Editor

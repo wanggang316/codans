@@ -1922,6 +1922,7 @@ final class AppState {
   /// - focused pane = `lastFocusedPane(activeTabID)`
   /// - expanded projects = `Project.isExpanded` filtered to true
   /// - row worktrees = each Project's `rowWorktree`, visible even collapsed
+  /// - row stand-ins = rows in a collapsed Workspace group → the group row
   static func focusState(
     from catalog: Catalog,
     lastFocusedPane: @MainActor (TabID) -> PaneID?
@@ -1938,7 +1939,8 @@ final class AppState {
       activeWorktreeID: activeWorktree?.id,
       activeProjectID: activeProject?.id,
       expandedProjectIDs: expanded,
-      rowWorktreeIDs: Set(catalog.projects.compactMap { $0.rowWorktree?.id })
+      rowWorktreeIDs: Set(catalog.projects.compactMap { $0.rowWorktree?.id }),
+      rowStandIns: catalog.workspaceRowStandIns
     )
   }
 

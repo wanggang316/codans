@@ -3,11 +3,12 @@ import ComposableArchitecture
 import SwiftUI
 
 /// Sheet for `CreateWorkspaceFeature`, laid out as a grouped form like the
-/// Settings panes: the workspace (title, location, and the Add Project
-/// menu), the list of projects with an edit and a remove button each, and
-/// Cancel / Create in the bottom bar. Projects are added and edited in
-/// `WorkspaceMemberEditorSheet`. In add mode the workspace is fixed and one
-/// project is added to it.
+/// Settings panes, with Cancel / Create in the bottom bar.
+/// - Add Workspace: title and location, then the source projects with a
+///   remove button each and the Add buttons below them.
+/// - Add Project: the fixed Workspace, then one source project.
+/// - New Group: name and branch, then one section per project with its
+///   base ref, fetch, copy and agent options, findings, and progress.
 struct CreateWorkspaceSheet: View {
   @Bindable var store: StoreOf<CreateWorkspaceFeature>
   @FocusState private var isTitleFocused: Bool
@@ -22,7 +23,8 @@ struct CreateWorkspaceSheet: View {
     .frame(width: 560)
     .frame(maxHeight: 760)
     .onAppear {
-      if !store.isAddMode { isTitleFocused = true }
+      if !store.isAddSourceMode { isTitleFocused = true }
+      store.send(.onAppear)
     }
     // `item:`, not `isPresented:`: the dialog's state is gone the moment it
     // closes, and a sheet whose content empties out mid-dismissal collapses
@@ -30,74 +32,55 @@ struct CreateWorkspaceSheet: View {
     // last held.
     .sheet(
       item: Binding(
-        get: { store.editor },
+        get: { store.remoteEditor },
         set: { editor in
-          if editor == nil { store.send(.editor(.cancelTapped)) }
+          if editor == nil { store.send(.remote(.cancelTapped)) }
         }
       )
     ) { editor in
-      WorkspaceMemberEditorSheet(store: store, opened: editor)
+      WorkspaceRemoteSourceSheet(store: store, opened: editor)
     }
   }
 
   private var form: some View {
-    ScrollViewReader { proxy in
-      Form {
+    Form {
+      switch store.mode {
+      case .addWorkspace:
         workspaceSection
-        projectsSection
-      }
-      .formStyle(.grouped)
-      .scrollBounceBehavior(.basedOnSize)
-      .disabled(store.creation.isBusy)
-      .onChange(of: store.members.count) { oldCount, newCount in
-        guard newCount > oldCount, let last = store.members.last else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
-          proxy.scrollTo(last.id, anchor: .bottom)
+        sourcesSection
+      case .addSource(_, let title, let rootPath, _):
+        addSourceSection(title: title, rootPath: rootPath)
+        sourcesSection
+      case .newGroup(_, let title, _):
+        groupSection(workspaceTitle: title)
+        ForEach(store.groupMembers) { member in
+          WorkspaceGroupMemberSection(store: store, member: member)
         }
       }
     }
+    .formStyle(.grouped)
+    .scrollBounceBehavior(.basedOnSize)
+    .disabled(store.creation.isBusy || store.creation == .createdWithSetupFailures)
   }
 
-  @ViewBuilder
+  // MARK: Add Workspace
+
   private var workspaceSection: some View {
-    switch store.mode {
-    case .create:
-      Section {
-        TextField(
-          "Title",
-          text: Binding(get: { store.titleDraft }, set: { store.send(.titleChanged($0)) }),
-          prompt: Text("Checkout Flow")
-        )
-        .focused($isTitleFocused)
-        locationRow
-      } header: {
-        Text("New Workspace")
-        Text("A folder with a checkout of each project, for work that spans them.")
-      } footer: {
-        VStack(alignment: .leading, spacing: 10) {
-          IssueList(issues: store.rootIssues)
-          if store.members.isEmpty {
-            addButtons
-          }
-        }
-      }
-      .headerProminence(.increased)
-    case .add(_, let title, let rootPath, _):
-      Section {
-        LabeledContent("Workspace", value: title)
-        LabeledContent("Location") {
-          PathText(path: rootPath)
-        }
-      } header: {
-        Text("Add Repository")
-        Text("Check out one more project into this workspace.")
-      } footer: {
-        if store.members.isEmpty {
-          addButtons
-        }
-      }
-      .headerProminence(.increased)
+    Section {
+      TextField(
+        "Title",
+        text: Binding(get: { store.titleDraft }, set: { store.send(.titleChanged($0)) }),
+        prompt: Text("Checkout Flow")
+      )
+      .focused($isTitleFocused)
+      locationRow
+    } header: {
+      Text("New Workspace")
+      Text("A folder that collects projects for work that spans them. Their checkouts stay as they are.")
+    } footer: {
+      IssueList(issues: store.rootIssues)
     }
+    .headerProminence(.increased)
   }
 
   private var locationRow: some View {
@@ -118,13 +101,54 @@ struct CreateWorkspaceSheet: View {
     }
   }
 
-  /// Below the list, or below the workspace section while the list is
-  /// empty, the way Settings puts "Add…" buttons under a list: a project
-  /// open in codans, any repository folder, or a remote to clone. Each
-  /// opens a dialog to set up the checkout before it is listed.
+  // MARK: Add Project
+
+  private func addSourceSection(title: String, rootPath: String) -> some View {
+    Section {
+      LabeledContent("Workspace", value: title)
+      LabeledContent("Location") {
+        PathText(path: rootPath)
+      }
+    } header: {
+      Text("Add Project")
+      Text("The project joins the default group as it is. No branch is created or changed.")
+    }
+    .headerProminence(.increased)
+  }
+
+  // MARK: Sources
+
+  private var sourcesSection: some View {
+    Section {
+      ForEach(store.sources) { source in
+        WorkspaceSourceRow(store: store, source: source)
+      }
+    } header: {
+      Text(store.isAddSourceMode ? "Project" : "Projects")
+    } footer: {
+      VStack(alignment: .leading, spacing: 10) {
+        if store.isResolvingFolder {
+          HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("Checking the folder\u{2026}").foregroundStyle(.secondary)
+          }
+        }
+        if let issue = store.sourceIssue {
+          Text(issue)
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        addButtons
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  /// Below the list, the way Settings puts "Add…" buttons under a list: a
+  /// project open in codans, any repository folder, or a remote to clone.
   @ViewBuilder
   private var addButtons: some View {
-    if store.canAddMembers {
+    if store.canAddSources {
       HStack(spacing: 8) {
         Menu {
           ForEach(store.availableCandidates) { candidate in
@@ -141,12 +165,12 @@ struct CreateWorkspaceSheet: View {
         .disabled(store.availableCandidates.isEmpty)
         .help(
           store.availableCandidates.isEmpty
-            ? "Every project open in codans is already in the list" : "Add a project that is open in codans")
-        Button("Add Folder…") {
+            ? "Every project open in codans is already listed" : "Add a project that is open in codans")
+        Button("Add Folder\u{2026}") {
           store.send(.addFolderTapped)
         }
         .help("Add a repository folder from this Mac")
-        Button("Add Remote…") {
+        Button("Add Remote\u{2026}") {
           store.send(.addRemoteTapped)
         }
         .help("Add a repository to clone from a URL")
@@ -163,20 +187,35 @@ struct CreateWorkspaceSheet: View {
     return ProjectIconView.folderSymbol
   }
 
-  @ViewBuilder
-  private var projectsSection: some View {
-    if !store.members.isEmpty {
-      Section {
-        ForEach(store.members) { member in
-          WorkspaceMemberRow(store: store, member: member)
-            .id(member.id)
-        }
-      } header: {
-        Text(store.isAddMode ? "Project" : "Projects")
-      } footer: {
-        addButtons
+  // MARK: New Group
+
+  private func groupSection(workspaceTitle: String) -> some View {
+    Section {
+      LabeledContent("Workspace", value: workspaceTitle)
+      TextField(
+        "Name",
+        text: Binding(get: { store.groupName }, set: { store.send(.groupNameChanged($0)) }),
+        prompt: Text("checkout-flow")
+      )
+      .focused($isTitleFocused)
+      LabeledContent {
+        TextField(
+          "Branch",
+          text: Binding(get: { store.branchDraft }, set: { store.send(.branchChanged($0)) }),
+          prompt: Text(store.groupBranch.isEmpty ? "branch-name" : store.groupBranch)
+        )
+        .labelsHidden()
+      } label: {
+        Text("Branch")
+        Text("Created in every project. Empty uses the group name.")
       }
+    } header: {
+      Text("New Group")
+      Text("A folder with a new checkout of every project in the workspace, all on one branch.")
+    } footer: {
+      IssueList(issues: store.groupIssues)
     }
+    .headerProminence(.increased)
   }
 }
 
