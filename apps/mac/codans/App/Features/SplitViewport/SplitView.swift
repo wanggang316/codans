@@ -18,8 +18,7 @@ struct SplitView<L: View, R: View>: View {
   let onEqualize: () -> Void
   let minSize: CGFloat = 10
   @Binding var split: CGFloat
-  /// Width of the drawn divider line. Zero draws none: the two sides carry
-  /// their own gap and the divider is only a drag target.
+  /// Width of the drawn divider line.
   private let splitterVisibleSize: CGFloat
   private let splitterInvisibleSize: CGFloat = 6
 
