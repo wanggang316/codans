@@ -288,8 +288,8 @@ private struct SubtreeView: View {
             ))
         }
       ),
-      dividerColor: Color(nsColor: .separatorColor),
-      dividerWidth: 2,
+      dividerColor: Color(nsColor: .separatorColor).opacity(0.6),
+      dividerWidth: 1,
       left: {
         SubtreeView(
           node: split.left,

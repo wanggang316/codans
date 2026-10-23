@@ -67,8 +67,8 @@ and the project does not yet follow semantic versioning — every release until
   pane's edge to split it into a new pane on that side. The session keeps
   running. The grab strip on top of a split pane is gone; tabs are the
   only thing you drag.
-- **Panes split like editors.** Panes sit edge to edge with a 2pt divider
-  between them, as the editor splits in Xcode do; drag the divider to
+- **Panes split like editors.** Panes sit edge to edge with a thin, light
+  divider between them, as the editor splits in Xcode do; drag the divider to
   resize. The tab strip sits as far from the pane's top as from the
   terminal below it.
 - **Tab actions live on the tab.** Hover a tab chip and an actions button
