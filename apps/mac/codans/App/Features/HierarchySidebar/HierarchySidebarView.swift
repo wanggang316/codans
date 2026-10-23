@@ -2468,16 +2468,14 @@ private struct SidebarFilterBar: View {
       let spacing: CGFloat = 6
       let count = CGFloat(SidebarFilter.allCases.count)
       let unitWidth = max(0, (geometry.size.width - spacing * (count - 1)) / (count + 2))
-      let filters = SidebarFilter.allCases
-      let selectedIndex = filters.firstIndex(of: selection) ?? 0
-      ZStack(alignment: .leading) {
-        ForEach(Array(filters.enumerated()), id: \.element) { index, filter in
+      SidebarFilterLayout(
+        expansion: SidebarFilterExpansion(selection: selection),
+        height: TabBarMetrics.trackHeight, spacing: spacing
+      ) {
+        ForEach(SidebarFilter.allCases, id: \.self) { filter in
           filterButton(filter, unitWidth: unitWidth)
-            .offset(x: CGFloat(index) * (unitWidth + spacing) + (index > selectedIndex ? unitWidth * 2 : 0))
         }
       }
-      .frame(width: geometry.size.width, height: TabBarMetrics.trackHeight, alignment: .leading)
-      // The same interpolation moves each edge, so adjacent capsules keep their gap.
       .animation(
         reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32),
         value: selection
@@ -2534,9 +2532,10 @@ private struct SidebarFilterBar: View {
           )
           .scaleEffect(labelScale)
         }
-        .frame(width: selected ? expandedWidth : unitWidth, height: TabBarMetrics.trackHeight)
+        .frame(maxWidth: .infinity)
+        .frame(height: TabBarMetrics.trackHeight)
         .clipShape(Capsule())
-      .contentShape(Capsule())
+        .contentShape(Capsule())
     }
     .buttonStyle(.plain)
     .onHover { hoveredFilter = $0 ? filter : nil }
@@ -2573,5 +2572,76 @@ private struct SidebarFilterBar: View {
     case .workspace: .purple
     case .favorites: Color(red: 0.65, green: 0.42, blue: 0.08)
     }
+  }
+}
+
+/// A single animated layout owns both edges of every capsule. Child frame and
+/// offset animations cannot guarantee a fixed gap when a transition is interrupted.
+nonisolated struct SidebarFilterLayout: Layout {
+  var expansion: SidebarFilterExpansion
+  var height: CGFloat
+  var spacing: CGFloat = 6
+
+  var animatableData: SidebarFilterExpansion {
+    get { expansion }
+    set { expansion = newValue }
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    CGSize(width: proposal.width ?? 260, height: height)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    for (subview, frame) in zip(subviews, frames(width: bounds.width)) {
+      subview.place(
+        at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY),
+        anchor: .topLeading,
+        proposal: ProposedViewSize(width: frame.width, height: bounds.height)
+      )
+    }
+  }
+
+  func frames(width: CGFloat) -> [CGRect] {
+    let weights = expansion.values.map { max(0, $0) }
+    let total = max(weights.reduce(0, +), 1e-9)
+    let unit = max(0, (width - spacing * CGFloat(weights.count - 1)) / CGFloat(weights.count + 2))
+    var x: CGFloat = 0
+    return weights.map { weight in
+      let itemWidth = unit * (1 + 2 * weight / total)
+      defer { x += itemWidth + spacing }
+      return CGRect(x: x, y: 0, width: itemWidth, height: height)
+    }
+  }
+}
+
+nonisolated struct SidebarFilterExpansion: VectorArithmetic {
+  var values: [Double]
+
+  init(selection: SidebarFilter) {
+    values = SidebarFilter.allCases.map { $0 == selection ? 1 : 0 }
+  }
+
+  private init(values: [Double]) {
+    self.values = values
+  }
+
+  static var zero: Self {
+    Self(values: SidebarFilter.allCases.map { _ in 0 })
+  }
+
+  static func + (lhs: Self, rhs: Self) -> Self {
+    Self(values: zip(lhs.values, rhs.values).map { $0 + $1 })
+  }
+
+  static func - (lhs: Self, rhs: Self) -> Self {
+    Self(values: zip(lhs.values, rhs.values).map { $0 - $1 })
+  }
+
+  mutating func scale(by rhs: Double) {
+    values = values.map { $0 * rhs }
+  }
+
+  var magnitudeSquared: Double {
+    values.reduce(0) { $0 + $1 * $1 }
   }
 }
