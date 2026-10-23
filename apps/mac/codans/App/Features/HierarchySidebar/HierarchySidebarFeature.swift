@@ -195,6 +195,11 @@ struct HierarchySidebarFeature {
 
     // Expansion
     case toggleProjectExpansion(ProjectID)
+    /// Group row chevron. Each group keeps its own persisted disclosure.
+    case toggleWorkspaceGroupExpansion(projectID: ProjectID, groupID: WorkspaceGroupID)
+    /// The selection moved to a Workspace row (from any source): open its
+    /// group when it is collapsed, so the selected row is on screen.
+    case revealWorkspaceRow(WorktreeID, inProject: ProjectID)
 
     // Toolbar — Add Project flow. The toolbar button drives the folder
     // picker directly (no intermediate sheet); the picked folder is then
@@ -397,12 +402,16 @@ struct HierarchySidebarFeature {
     /// Badge on a source Project's mirror row: jump to the workspace child
     /// row that owns the same checkout.
     case workspaceMembershipBadgeTapped(WorkspaceMembership)
-    /// Workspace header `+`: pick a local repository and check it out into
-    /// the workspace on a branch named after the workspace.
-    case workspaceAddRepositoryTapped(projectID: ProjectID)
-    /// Child-row context menu: unregister the member's checkout and drop it
-    /// from the manifest (its branch goes too, like Delete Worktree).
-    case workspaceMemberRemoveTapped(worktreeID: WorktreeID, inProject: ProjectID, name: String)
+    /// Workspace header `+`: open the New Group sheet.
+    case workspaceNewGroupTapped(projectID: ProjectID)
+    /// Workspace header `⋯` → Add Project…: add a source project, which
+    /// joins `default` as a reference.
+    case workspaceAddProjectTapped(projectID: ProjectID)
+    /// Group row context menu → Delete Group… (named groups only).
+    case deleteGroupTapped(projectID: ProjectID, groupID: WorkspaceGroupID)
+    /// Reference row context menu → Remove from Workspace…: the source
+    /// project leaves the Workspace; its checkout stays untouched.
+    case removeSourceTapped(worktreeID: WorktreeID, inProject: ProjectID)
     case workspaceMemberRemoveConfirmed
     case workspaceMemberRemoveCancelled
     case workspaceMemberRemoveFinished(message: String?)
@@ -626,6 +635,22 @@ struct HierarchySidebarFeature {
       hierarchyClient.setProjectExpanded(projectID, !current)
       return .none
 
+    case .toggleWorkspaceGroupExpansion(let projectID, let groupID):
+      guard
+        let group = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .workspaceGroups.first(where: { $0.id == groupID })
+      else { return .none }
+      hierarchyClient.setWorkspaceGroupExpanded(projectID, groupID, !group.isExpanded)
+      return .none
+
+    case .revealWorkspaceRow(let worktreeID, let projectID):
+      guard
+        let groupID = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .collapsedWorkspaceGroup(revealing: worktreeID)
+      else { return .none }
+      hierarchyClient.setWorkspaceGroupExpanded(projectID, groupID, true)
+      return .none
+
     // MARK: Toolbar
 
     case .toolbarAddProjectTapped:
@@ -685,25 +710,47 @@ struct HierarchySidebarFeature {
       try? hierarchyClient.selectWorktree(membership.worktreeID, membership.projectID)
       return .none
 
-    case .workspaceAddRepositoryTapped(let projectID):
-      // Same sheet as New Workspace, with the workspace fixed and one member
-      // enough; names already in the manifest are refused up front.
+    case .workspaceNewGroupTapped(let projectID):
+      let snapshot = hierarchyClient.snapshot()
+      guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
+        return .none
+      }
+      state.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: Self.workspaceCandidates(in: snapshot),
+        mode: .newGroup(projectID: projectID, title: project.name, rootPath: project.rootPath))
+      return .none
+
+    case .workspaceAddProjectTapped(let projectID):
+      // Same sheet as New Workspace, with the workspace fixed and one project
+      // enough; source names already in the Workspace are refused up front.
       let snapshot = hierarchyClient.snapshot()
       guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
         return .none
       }
       let existingNames = Set(
-        project.worktrees.filter { $0.path != project.rootPath }.map(\.name)
+        project.worktrees.filter { $0.workspaceSlot?.role == .reference }.map(\.name)
           + (project.workspace?.projects.map(\.name) ?? []))
       state.createWorkspaceSheet = CreateWorkspaceFeature.State(
         candidates: Self.workspaceCandidates(in: snapshot),
-        mode: .add(projectID: projectID, title: project.name, rootPath: project.rootPath, existingNames: existingNames))
+        mode: .add(
+          projectID: projectID, title: project.name, rootPath: project.rootPath, existingNames: existingNames))
       return .none
 
-    case .workspaceMemberRemoveTapped(let worktreeID, let projectID, let name):
-      guard isWorkspaceChild(worktreeID: worktreeID, projectID: projectID) else { return .none }
+    case .deleteGroupTapped:
+      // The delete dialog and its preflight attach here. The view offers
+      // the entry on named groups only: `default` is never deleted.
+      return .none
+
+    case .removeSourceTapped(let worktreeID, let projectID):
+      // Only a reference names a source project; a group member goes with
+      // its group, and a group row with the group.
+      guard
+        let row = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .worktrees.first(where: { $0.id == worktreeID }),
+        row.workspaceSlot?.role == .reference
+      else { return .none }
       state.pendingWorkspaceMemberRemoval = PendingWorktreeRemoval(
-        worktreeID: worktreeID, projectID: projectID, displayName: name)
+        worktreeID: worktreeID, projectID: projectID, displayName: row.name)
       return .none
 
     case .workspaceMemberRemoveConfirmed:
@@ -932,7 +979,7 @@ struct HierarchySidebarFeature {
       // protection. Guard at the lifecycle entry point so every dispatch path
       // is covered by a single check.
       if isMainCheckout(worktreeID: worktreeID, projectID: projectID)
-        || isWorkspaceChild(worktreeID: worktreeID, projectID: projectID)
+        || isWorkspaceRow(worktreeID: worktreeID, projectID: projectID)
         || isWorkspaceMember(worktreeID: worktreeID, projectID: projectID)
       {
         return .none
@@ -963,7 +1010,7 @@ struct HierarchySidebarFeature {
       // this would hide the project's root from the sidebar with no way back
       // short of editing the catalog file by hand.
       if isMainCheckout(worktreeID: wid, projectID: pid)
-        || isWorkspaceChild(worktreeID: wid, projectID: pid)
+        || isWorkspaceRow(worktreeID: wid, projectID: pid)
         || isWorkspaceMember(worktreeID: wid, projectID: pid)
       {
         return .none
@@ -1425,20 +1472,18 @@ struct HierarchySidebarFeature {
     return worktree.path == project.rootPath
   }
 
-  /// `true` when the Worktree is a child checkout of a workspace Project.
-  /// Archive and Remove are worktree-of-this-repo operations — a child's
-  /// repository is elsewhere, and removing it edits the workspace manifest —
-  /// so the plain worktree lifecycle refuses them; the workspace flow owns
-  /// membership changes. The view trims the menu items; this guard covers the
-  /// chords.
-  private func isWorkspaceChild(worktreeID: WorktreeID, projectID: ProjectID) -> Bool {
+  /// `true` for every row of a workspace Project: group rows, references,
+  /// and members. Archive and Remove are worktree-of-this-repo operations —
+  /// a reference is the source's main checkout, a member goes with its
+  /// group, a group row is the group directory — so the plain worktree
+  /// lifecycle refuses them; the workspace flow owns them. The view trims the
+  /// menu items; this guard covers the chords.
+  private func isWorkspaceRow(worktreeID: WorktreeID, projectID: ProjectID) -> Bool {
     let snapshot = hierarchyClient.snapshot()
-    guard
-      let project = snapshot.projects.first(where: { $0.id == projectID }),
-      project.isWorkspace,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
-    else { return false }
-    return worktree.path != project.rootPath
+    guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
+      return false
+    }
+    return project.worktrees.contains { $0.id == worktreeID }
   }
 
   /// `true` when a source Project's row is the same checkout a workspace

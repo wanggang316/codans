@@ -97,6 +97,16 @@ struct CreateWorkspaceSheet: View {
         }
       }
       .headerProminence(.increased)
+    case .newGroup(_, let title, let rootPath):
+      Section {
+        LabeledContent("Workspace", value: title)
+        LabeledContent("Location") {
+          PathText(path: rootPath)
+        }
+      } header: {
+        Text("New Group")
+      }
+      .headerProminence(.increased)
     }
   }
 

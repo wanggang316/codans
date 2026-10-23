@@ -2475,7 +2475,8 @@ struct RootFeature {
   }
 
   /// Brings a worktree's row on screen: opens its Project unless the
-  /// worktree is the Project row itself, which shows either way.
+  /// worktree is the Project row itself, which shows either way, and opens
+  /// the Workspace group the row is listed under.
   private func revealWorktreeInSidebar(
     _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
   ) {
@@ -2490,6 +2491,9 @@ struct RootFeature {
     let project = catalog.projects.first { $0.id == projectID }
     if project?.rowWorktree?.id != worktreeID {
       hierarchyClient.setProjectExpanded(projectID, true)
+    }
+    if let groupID = project?.collapsedWorkspaceGroup(revealing: worktreeID) {
+      hierarchyClient.setWorkspaceGroupExpanded(projectID, groupID, true)
     }
     state.sidebarVisible = true
     state.revealSelectionTrigger = UUID()
@@ -3247,8 +3251,9 @@ struct RootFeature {
 
   /// One batched GitHub fetch: the repository to ask about and the rows
   /// whose branches to ask for. A git Project is one unit keyed by its own
-  /// id. A workspace is one unit per member repository, each keyed by a
-  /// group id derived from the workspace id and the repository root — a
+  /// id. A workspace is one unit per repository of its references and
+  /// members (group rows are plain folders), each keyed by a fetch-group id
+  /// derived from the workspace id and the repository root — a
   /// `ProjectID` in shape, so `GitHubFeature`'s per-project maps, cancel
   /// ids, and on-disk cache carry it unchanged.
   nonisolated struct GitHubFetchUnit: Equatable, Sendable {
@@ -3268,7 +3273,7 @@ struct RootFeature {
     }
     var order: [String] = []
     var pairsByRoot: [String: [GitHubFeature.Action.WorktreeBranchPair]] = [:]
-    for worktree in project.worktrees {
+    for worktree in project.worktrees where worktree.workspaceSlot?.role != .groupTerminal {
       guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty,
         let root = project.repoRoot(for: worktree)
       else { continue }

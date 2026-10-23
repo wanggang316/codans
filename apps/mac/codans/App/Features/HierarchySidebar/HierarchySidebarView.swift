@@ -201,6 +201,16 @@ struct HierarchySidebarView: View {
       + rest.map(SidebarRow.worktree)
   }
 
+  /// The selected row when it belongs to a Workspace, read live like
+  /// `nativeSelectionBinding`.
+  private var selectedWorkspaceRow: SidebarRowAddress? {
+    let catalog = hierarchyManager.catalog
+    guard let project = catalog.projects.first(where: { $0.id == catalog.selectedProjectID }),
+      project.isWorkspace, let worktreeID = project.selectedWorktreeID
+    else { return nil }
+    return SidebarRowAddress(projectID: project.id, worktreeID: worktreeID)
+  }
+
   private var pullRequestWorktreeIDs: Set<WorktreeID> {
     guard let gitHubStore else { return [] }
     return Set(gitHubStore.snapshots.keys)
@@ -332,6 +342,12 @@ struct HierarchySidebarView: View {
     // `.task` firings a sidebar sees over a session collapse to a single
     // subprocess; only the banner's Recheck busts that cache.
     .task { store.send(.gitEnvironmentProbeRequested) }
+    // A Workspace row selected from anywhere (CLI, palette, restored
+    // selection, notification) inside a collapsed group opens that group.
+    .onChange(of: selectedWorkspaceRow, initial: true) { _, address in
+      guard let address else { return }
+      store.send(.revealWorkspaceRow(address.worktreeID, inProject: address.projectID))
+    }
     // Auto-open the Agents View panel on the rising edge into "any
     // bound agent is loading" — but only when the user has the
     // Settings → General toggle on. We do NOT auto-close when the
@@ -794,7 +810,9 @@ struct HierarchySidebarView: View {
         .listRowSeparator(.hidden)
       case .loading, .ready:
         projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] })
-        if isExpanded {
+        if isExpanded, project.isWorkspace {
+          workspaceRows(project, hotkeyIndex: hotkeyIndex)
+        } else if isExpanded {
           // Render the four segments individually so pinned and unpinned
           // each own their own ForEach + .onMove (per design doc §渲染合并
           // / 拖拽). Pending rows render in source order between pinned
@@ -909,6 +927,83 @@ struct HierarchySidebarView: View {
     }
   }
 
+  // MARK: - Workspace rows
+
+  /// The rows under an expanded Workspace header: each group, followed by
+  /// the references or members of an open group. Flat sibling List rows,
+  /// like a Project's worktree rows, so a group opens as plain row inserts.
+  private func workspaceRows(_ project: Project, hotkeyIndex: [WorktreeID: Int]) -> some View {
+    ForEach(project.workspaceSidebarRows, id: \.listID) { row in
+      switch row {
+      case .group(let group, let terminal):
+        workspaceGroupRow(
+          group, terminal: terminal, in: project, hotkeySlot: terminal.flatMap { hotkeyIndex[$0.id] })
+      case .member(let worktree, _):
+        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id], indent: 28)
+      }
+    }
+  }
+
+  /// A group row. Selecting it selects the group directory's row (List tag
+  /// = the terminal row), so the group opens a terminal like any row; only
+  /// the chevron opens and closes the group.
+  @ViewBuilder
+  private func workspaceGroupRow(
+    _ group: WorkspaceGroupRecord, terminal: Worktree?, in project: Project, hotkeySlot: Int?
+  ) -> some View {
+    let hotkeyNumber = hotkeySlot.map { $0 + 1 }
+    let toggleExpansion = {
+      var txn = Transaction()
+      txn.disablesAnimations = true
+      _ = withTransaction(txn) {
+        store.send(.toggleWorkspaceGroupExpansion(projectID: project.id, groupID: group.id))
+      }
+    }
+    let row = WorkspaceGroupRow(
+      group: group,
+      terminal: terminal,
+      summary: project.workspaceGroupSummary(group.id),
+      pullRequestSummary: pullRequestSummary(over: project.workspaceGroupMembers(group.id)),
+      isSelected: terminal.map { currentSelection.worktreeID == $0.id } ?? false,
+      agentStateStore: agentStateStore,
+      hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
+      onToggleExpansion: toggleExpansion
+    ) {
+      if let terminal {
+        runScriptPingAccessory(for: terminal, in: project)
+      }
+    }
+    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
+    .listRowSeparator(.hidden)
+    if let terminal {
+      row
+        .background(alignment: .topLeading) {
+          hotkeyChord(hotkeyNumber, worktreeID: terminal.id, projectID: project.id)
+        }
+        .tag(terminal.id)
+        .id(terminal.id)
+        .contextMenu { worktreeContextMenu(worktree: terminal, project: project) }
+    } else {
+      // The reconcile has not added the group directory's row yet: nothing
+      // to select or open.
+      row.listRowBackground(Color.clear)
+    }
+  }
+
+  /// Open and merged pull-request counts over `rows`, nil when nothing is
+  /// known yet: "3 PRs · 1 merged".
+  private func pullRequestSummary(over rows: [Worktree]) -> String? {
+    guard let gitHubStore else { return nil }
+    let snapshots = rows.compactMap { gitHubStore.snapshots[$0.id] }
+    guard !snapshots.isEmpty else { return nil }
+    let merged = snapshots.filter { $0.state == .merged }.count
+    let open = snapshots.count - merged
+    var parts: [String] = []
+    if open > 0 { parts.append(open == 1 ? "1 PR" : "\(open) PRs") }
+    if merged > 0 { parts.append("\(merged) merged") }
+    return parts.joined(separator: " · ")
+  }
+
   /// The per-row hotkey still requires a Button to bind to. Mounted as a 0×0
   /// invisible background so the shortcut lives in the responder chain
   /// without painting pixels or competing with List's hit-test for clicks
@@ -976,10 +1071,13 @@ struct HierarchySidebarView: View {
 
   // MARK: - Worktree row
 
+  /// `indent` is the row's leading inset: 14 under a Project, 28 under a
+  /// Workspace group.
   private func worktreeRow(
     _ worktree: Worktree,
     in project: Project,
-    hotkeySlot: Int?
+    hotkeySlot: Int?,
+    indent: CGFloat = 14
   ) -> some View {
     let isSelected = currentSelection.worktreeID == worktree.id
     let snapshot = gitHubStore?.snapshots[worktree.id]
@@ -1033,7 +1131,7 @@ struct HierarchySidebarView: View {
     // leading inset, so worktree content reads as a child level under the
     // (left-aligned) project header.
     .tag(worktree.id)
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
+    .listRowInsets(EdgeInsets(top: 2, leading: indent, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     .contextMenu { worktreeContextMenu(worktree: worktree, project: project) }
     .task(id: worktree.path) {
@@ -1062,8 +1160,9 @@ struct HierarchySidebarView: View {
     }
   }
 
+  /// A reference or member row of a Workspace group.
   private func isWorkspaceCheckout(_ worktree: Worktree, in project: Project) -> Bool {
-    project.isWorkspace && worktree.path != project.rootPath
+    project.isWorkspace && worktree.workspaceSlot.map { $0.role != .groupTerminal } == true
   }
 
   /// A row's name line and the caption under it. A worktree reads name over
@@ -1096,7 +1195,9 @@ struct HierarchySidebarView: View {
     hotkeyNumber: Int?,
     isSelected: Bool
   ) -> some View {
-    let isMainCheckout = worktree.path == project.rootPath
+    let isMainCheckout = !project.isWorkspace && worktree.path == project.rootPath
+    let isReference = project.isWorkspace && worktree.workspaceSlot?.role == .reference
+    let isUnavailable = project.unavailableWorkspaceRows.contains(worktree.id)
     // Dir-kind Projects auto-inject a single Worktree pointing at `rootPath`
     // (HierarchyManager.addProject). Detect it locally rather than via a
     // shared computed property — `gitRoot == nil` + path match is the same
@@ -1131,6 +1232,15 @@ struct HierarchySidebarView: View {
           // qualifies *this* checkout, and the trailing corner belongs to
           // the accessories that report on it.
           workspaceMembershipBadge(for: worktree, in: project)
+          // A reference is the source project's own checkout, linked into
+          // the Workspace rather than owned by it.
+          if isReference {
+            Image(systemName: "arrow.up.right")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .help("Linked to the source project's checkout")
+              .accessibilityLabel("Linked checkout")
+          }
           // Default-branch marker now lives in WorktreeRowIcon's leading
           // slot (star.fill replaces git-branch for the main checkout),
           // so there's no longer an inline star next to the name.
@@ -1151,6 +1261,10 @@ struct HierarchySidebarView: View {
           // so the whole row reads as one in-progress unit.
           LifecyclePhaseLineView(progress: lifecycle)
             .shimmer(isActive: !reduceMotion)
+        } else if isUnavailable {
+          Text("Source not found")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         } else if let rowCaption {
           Text(rowCaption)
             .font(.caption.monospaced())
@@ -1179,7 +1293,9 @@ struct HierarchySidebarView: View {
   private func worktreeContextMenu(
     worktree: Worktree, project: Project
   ) -> some View {
-    let isMainCheckout = worktree.path == project.rootPath
+    // A Workspace has no main checkout: its root, when it is a row, is the
+    // migrated group's directory.
+    let isMainCheckout = !project.isWorkspace && worktree.path == project.rootPath
 
     // Group 1 — Open / Reveal. Top-level "Open in <Default>" surfaces
     // the resolved editor by name (project override → global default →
@@ -1242,17 +1358,8 @@ struct HierarchySidebarView: View {
         )
       }
     }
-    // A workspace child's lifecycle is membership: removing it unregisters
-    // the checkout from its repository and edits the manifest.
-    if !isMainCheckout, project.isWorkspace {
-      Divider()
-      Button(role: .destructive) {
-        store.send(
-          .workspaceMemberRemoveTapped(
-            worktreeID: worktree.id, inProject: project.id, name: worktree.name))
-      } label: {
-        Label("Remove from Workspace…", systemImage: "trash")
-      }
+    if project.isWorkspace {
+      workspaceRowLifecycleItems(worktree: worktree, project: project)
     }
     // A source Project's row that a workspace lists as a child is likewise
     // the workspace's to archive or remove.
@@ -1288,6 +1395,36 @@ struct HierarchySidebarView: View {
         Label("Remove Worktree", systemImage: "trash")
       }
       .appKeyboardShortcut(.deleteCurrentWorktree, in: resolvedShortcuts)
+    }
+  }
+
+  /// The destructive entry of a Workspace row, if it has one. No row gets
+  /// Archive or Remove: a group goes as a whole (Delete Group…, never for
+  /// `default`), a member goes with its group, and a reference only leaves
+  /// the Workspace — its checkout is the source project's.
+  @ViewBuilder
+  private func workspaceRowLifecycleItems(worktree: Worktree, project: Project) -> some View {
+    if let slot = worktree.workspaceSlot {
+      switch slot.role {
+      case .groupTerminal:
+        if project.workspaceGroups.first(where: { $0.id == slot.groupID })?.kind == .named {
+          Divider()
+          Button(role: .destructive) {
+            store.send(.deleteGroupTapped(projectID: project.id, groupID: slot.groupID))
+          } label: {
+            Label("Delete Group…", systemImage: "trash")
+          }
+        }
+      case .reference:
+        Divider()
+        Button(role: .destructive) {
+          store.send(.removeSourceTapped(worktreeID: worktree.id, inProject: project.id))
+        } label: {
+          Label("Remove from Workspace…", systemImage: "minus.circle")
+        }
+      case .member:
+        EmptyView()
+      }
     }
   }
 
@@ -1877,22 +2014,6 @@ private struct ProjectHeaderRow<Accessory: View>: View {
       .map(\.id)
   }
 
-  /// Open and merged pull-request counts over a workspace's member rows,
-  /// nil when nothing is known yet.
-  private var workspacePullRequestSummary: String? {
-    guard project.isWorkspace, let gitHubStore else { return nil }
-    let snapshots = project.worktrees
-      .filter { !$0.archived && $0.path != project.rootPath }
-      .compactMap { gitHubStore.snapshots[$0.id] }
-    guard !snapshots.isEmpty else { return nil }
-    let merged = snapshots.filter { $0.state == .merged }.count
-    let open = snapshots.count - merged
-    var parts: [String] = []
-    if open > 0 { parts.append(open == 1 ? "1 PR" : "\(open) PRs") }
-    if merged > 0 { parts.append("\(merged) merged") }
-    return parts.joined(separator: " · ")
-  }
-
   /// Project name tint — hover- and selection-driven. The Project color
   /// deliberately does *not* reach the name: the icon to its left already
   /// carries it, and tinting both painted the same signal twice and cost the
@@ -1959,19 +2080,6 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           .help(host.displayAuthority)
           .accessibilityLabel("Remote server \(host.displayAuthority)")
       }
-      // A workspace is told apart by its default icon (the leading glyph
-      // above), so the header adds only the roll-up: pull requests across
-      // every member repository, so the task reads as one unit:
-      // "3 PRs · 1 merged".
-      if project.isWorkspace {
-        if let summary = workspacePullRequestSummary {
-          Text(summary)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-            .accessibilityLabel("Pull requests: \(summary)")
-        }
-      }
       Spacer(minLength: 4)
       accessory()
       // Keep the hover chrome from collapsing row width when hidden —
@@ -1990,109 +2098,27 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
         } else if project.isWorkspace {
-          // A workspace's `+` adds a repository, not a worktree: the new row
-          // is a checkout of another repository, named after it.
+          // A workspace's `+` adds a group: one branch checked out in every
+          // source project.
           Button {
-            store.send(.workspaceAddRepositoryTapped(projectID: project.id))
+            store.send(.workspaceNewGroupTapped(projectID: project.id))
           } label: {
-            iconLabel(systemName: "plus", label: "Add Repository to this Workspace", isHovering: isPlusHovering)
+            iconLabel(systemName: "plus", label: "New Group", isHovering: isPlusHovering)
           }
           .buttonStyle(.plain)
           .onHover { isPlusHovering = $0 }
-          .help("Add Repository…")
+          .help("New Group…")
         }
         Menu {
-          Button {
-            store.send(.projectSettingsTapped(projectID: project.id))
-          } label: {
-            Label("Project Settings…", systemImage: "slider.horizontal.3")
-          }
-          if project.isRemote {
-            Button {
-              store.send(.projectEditConnectionTapped(projectID: project.id))
-            } label: {
-              Label("Edit Connection…", systemImage: "tv.badge.wifi")
-            }
-          }
-          Divider()
-          // Worktree operations group: archived list, prune, and the
-          // merged-batch actions — kept together between dividers.
-          let archivedCount = project.worktrees.filter { $0.archived }.count
-          Button {
-            store.send(.projectShowArchivedTapped(projectID: project.id))
-          } label: {
-            Label(
-              archivedCount > 0
-                ? "Archived Worktrees (\(archivedCount))…"
-                : "Archived Worktrees…",
-              systemImage: "archivebox"
-            )
-          }
-          .appKeyboardShortcut(.showArchivedWorktrees, in: resolvedShortcuts)
-          // Prune and the merged batches act on one repository's worktree
-          // list; a workspace's rows belong to several, so the items are
-          // withheld rather than left to no-op.
-          if !project.isWorkspace {
-            Button {
-              store.send(.projectPruneTapped(projectID: project.id))
-            } label: {
-              Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
-            }
-            let mergedIDs = mergedWorktreeIDs
-            Button {
-              store.send(
-                .projectArchiveAllMergedTapped(
-                  projectID: project.id, worktreeIDs: mergedIDs
-                )
-              )
-            } label: {
-              Label(
-                mergedIDs.isEmpty
-                  ? "Archive All Merged"
-                  : "Archive All Merged (\(mergedIDs.count))",
-                systemImage: "archivebox"
-              )
-            }
-            .disabled(mergedIDs.isEmpty)
-            Button(role: .destructive) {
-              store.send(
-                .projectRemoveAllMergedTapped(
-                  projectID: project.id, worktreeIDs: mergedIDs
-                )
-              )
-            } label: {
-              Label(
-                mergedIDs.isEmpty
-                  ? "Remove All Merged"
-                  : "Remove All Merged (\(mergedIDs.count))",
-                systemImage: "trash"
-              )
-            }
-            .disabled(mergedIDs.isEmpty)
-          }
-          Divider()
-          // Tags entry intentionally hidden for now. `ProjectTagsMenu` and
-          // its tag-assignment logic (inline color palette + "Tags…"
-          // → global TagManager via `.openTagManager`) are retained — only
-          // the menu entry is suppressed. Re-add the line below to restore.
-          // ProjectTagsMenu(project: project, store: store)
           if project.isWorkspace {
-            Button(role: .destructive) {
-              store.send(.workspaceRemoveTapped(projectID: project.id, name: project.name))
-            } label: {
-              Label("Remove Workspace…", systemImage: "trash")
-            }
+            workspaceMenuItems
           } else {
-            Button(role: .destructive) {
-              store.send(
-                .projectRemoveTapped(projectID: project.id, name: project.name)
-              )
-            } label: {
-              Label("Remove Project", systemImage: "trash")
-            }
+            projectMenuItems
           }
         } label: {
-          iconLabel(systemName: "ellipsis", label: "Project options", isHovering: isMenuHovering)
+          iconLabel(
+            systemName: "ellipsis", label: project.isWorkspace ? "Workspace options" : "Project options",
+            isHovering: isMenuHovering)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -2124,6 +2150,109 @@ private struct ProjectHeaderRow<Accessory: View>: View {
     .onHover { isHovering = $0 }
   }
 
+  /// The Workspace header's `⋯` menu. Group and checkout entries live on
+  /// the group rows; the header manages the Workspace and its sources.
+  @ViewBuilder
+  private var workspaceMenuItems: some View {
+    Button {
+      store.send(.projectSettingsTapped(projectID: project.id))
+    } label: {
+      Label("Workspace Settings…", systemImage: "slider.horizontal.3")
+    }
+    Button {
+      store.send(.workspaceAddProjectTapped(projectID: project.id))
+    } label: {
+      Label("Add Project…", systemImage: "plus.rectangle.on.folder")
+    }
+    Divider()
+    Button(role: .destructive) {
+      store.send(.workspaceRemoveTapped(projectID: project.id, name: project.name))
+    } label: {
+      Label("Remove Workspace…", systemImage: "trash")
+    }
+  }
+
+  @ViewBuilder
+  private var projectMenuItems: some View {
+    Button {
+      store.send(.projectSettingsTapped(projectID: project.id))
+    } label: {
+      Label("Project Settings…", systemImage: "slider.horizontal.3")
+    }
+    if project.isRemote {
+      Button {
+        store.send(.projectEditConnectionTapped(projectID: project.id))
+      } label: {
+        Label("Edit Connection…", systemImage: "tv.badge.wifi")
+      }
+    }
+    Divider()
+    // Worktree operations group: archived list, prune, and the
+    // merged-batch actions — kept together between dividers.
+    let archivedCount = project.worktrees.filter { $0.archived }.count
+    Button {
+      store.send(.projectShowArchivedTapped(projectID: project.id))
+    } label: {
+      Label(
+        archivedCount > 0
+          ? "Archived Worktrees (\(archivedCount))…"
+          : "Archived Worktrees…",
+        systemImage: "archivebox"
+      )
+    }
+    .appKeyboardShortcut(.showArchivedWorktrees, in: resolvedShortcuts)
+    // Prune and the merged batches act on one repository's worktree list.
+    Button {
+      store.send(.projectPruneTapped(projectID: project.id))
+    } label: {
+      Label("Prune Stale Worktrees", systemImage: "wand.and.sparkles")
+    }
+    let mergedIDs = mergedWorktreeIDs
+    Button {
+      store.send(
+        .projectArchiveAllMergedTapped(
+          projectID: project.id, worktreeIDs: mergedIDs
+        )
+      )
+    } label: {
+      Label(
+        mergedIDs.isEmpty
+          ? "Archive All Merged"
+          : "Archive All Merged (\(mergedIDs.count))",
+        systemImage: "archivebox"
+      )
+    }
+    .disabled(mergedIDs.isEmpty)
+    Button(role: .destructive) {
+      store.send(
+        .projectRemoveAllMergedTapped(
+          projectID: project.id, worktreeIDs: mergedIDs
+        )
+      )
+    } label: {
+      Label(
+        mergedIDs.isEmpty
+          ? "Remove All Merged"
+          : "Remove All Merged (\(mergedIDs.count))",
+        systemImage: "trash"
+      )
+    }
+    .disabled(mergedIDs.isEmpty)
+    Divider()
+    // Tags entry intentionally hidden for now. `ProjectTagsMenu` and
+    // its tag-assignment logic (inline color palette + "Tags…"
+    // → global TagManager via `.openTagManager`) are retained — only
+    // the menu entry is suppressed. Re-add the line below to restore.
+    // ProjectTagsMenu(project: project, store: store)
+    Button(role: .destructive) {
+      store.send(
+        .projectRemoveTapped(projectID: project.id, name: project.name)
+      )
+    } label: {
+      Label("Remove Project", systemImage: "trash")
+    }
+  }
+
   /// 22×22 hit target with a subtle hover background. Used by the trailing
   /// "+" and "..." affordances so both share the same affordance footprint
   /// and so the click target is comfortably larger than the underlying SF
@@ -2139,6 +2268,105 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         Circle().fill(Color.primary.opacity(isHovering ? 0.08 : 0))
       )
       .contentShape(Circle())
+  }
+}
+
+// MARK: - Workspace group row
+
+extension WorkspaceSidebarRow {
+  /// Stable List identity: a group by its id, a member by its row.
+  fileprivate var listID: String {
+    switch self {
+    case .group(let group, _): "group:\(group.id.raw)"
+    case .member(let worktree, _): "row:\(worktree.id.raw)"
+    }
+  }
+}
+
+/// One Workspace group: a star in the leading slot for `default` (a folder
+/// for a named group), the name, and a caption with the member count, the
+/// branch summary, and the group's pull requests. Own view so hover state is
+/// per row.
+private struct WorkspaceGroupRow<Accessory: View>: View {
+  let group: WorkspaceGroupRecord
+  /// The group directory's row; carries busy and unread state.
+  let terminal: Worktree?
+  let summary: WorkspaceGroupSummary
+  let pullRequestSummary: String?
+  let isSelected: Bool
+  let agentStateStore: AgentStateStore?
+  var hotkeyHint: Int?
+  let onToggleExpansion: () -> Void
+  @ViewBuilder let accessory: () -> Accessory
+  @State private var isHovering = false
+  @State private var isChevronHovering = false
+
+  private var caption: String {
+    var parts = [summary.memberCount == 1 ? "1 project" : "\(summary.memberCount) projects"]
+    switch summary.branch {
+    case .single(let branch): parts.append(branch)
+    case .several(let count): parts.append("\(count) branches")
+    case nil: break
+    }
+    if let pullRequestSummary { parts.append(pullRequestSummary) }
+    return parts.joined(separator: " · ")
+  }
+
+  var body: some View {
+    HStack(spacing: 6) {
+      leadingIcon
+      VStack(alignment: .leading, spacing: 0) {
+        Text(group.name)
+          .lineLimit(1)
+        Text(caption)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 4)
+      accessory()
+      Button(action: onToggleExpansion) {
+        Image(systemName: "chevron.right")
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(isChevronHovering ? .primary : .secondary)
+          .rotationEffect(.degrees(group.isExpanded ? 90 : 0))
+          .frame(width: 22, height: 22)
+          .background(Circle().fill(Color.primary.opacity(isChevronHovering ? 0.08 : 0)))
+          .contentShape(Circle())
+          .accessibilityLabel(group.isExpanded ? "Collapse Group" : "Expand Group")
+      }
+      .buttonStyle(.plain)
+      .onHover { isChevronHovering = $0 }
+      .help(group.isExpanded ? "Collapse" : "Expand")
+      // Opacity, not conditional rendering, so the row width stays put.
+      .opacity(isHovering ? 1 : 0)
+      if let hotkeyHint {
+        SidebarHotkeyHint(number: hotkeyHint)
+      }
+    }
+    .contentShape(Rectangle())
+    .onHover { isHovering = $0 }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(group.kind == .default ? "\(group.name), default group" : group.name)
+  }
+
+  @ViewBuilder
+  private var leadingIcon: some View {
+    if let terminal {
+      SidebarWorktreeActivityIcon(
+        worktree: terminal, agentStateStore: agentStateStore,
+        snapshot: nil, rollup: .noChecks, isSelected: isSelected,
+        glyph: group.kind == .default ? .gitAnchor : .folder,
+        isDefaultBranch: group.kind == .default,
+        hasLifecycle: false
+      )
+    } else {
+      WorktreeRowIcon(
+        snapshot: nil, rollup: .noChecks, isSelected: isSelected,
+        glyph: group.kind == .default ? .gitAnchor : .folder,
+        isDefaultBranch: group.kind == .default
+      )
+    }
   }
 }
 

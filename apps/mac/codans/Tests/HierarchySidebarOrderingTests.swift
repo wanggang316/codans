@@ -119,17 +119,12 @@ struct HierarchySidebarOrderingTests {
 
   @Test
   func aFolderProjectListsNoRowForItsRoot() {
-    // The Project row itself stands for a folder's root; a workspace header
-    // stands for no row, so every workspace row is listed under it.
-    let root = Self.worktree(name: "ws", path: "/ws")
-    let checkout = Self.worktree(name: "app", path: "/ws/app")
-    let folder = Project(name: "notes", rootPath: "/ws", worktrees: [root])
-    let workspace = Project(name: "ws", rootPath: "/ws", worktrees: [root, checkout], isWorkspace: true)
+    // The Project row itself stands for a folder's root. (A workspace lists
+    // its groups instead: `Project.workspaceSidebarRows`.)
+    let root = Self.worktree(name: "notes", path: "/notes")
+    let folder = Project(name: "notes", rootPath: "/notes", worktrees: [root])
 
     #expect(HierarchySidebarView.orderedSidebarRows(project: folder, pendings: []).isEmpty)
-    #expect(
-      HierarchySidebarView.orderedSidebarRows(project: workspace, pendings: []).map(\.id)
-        == ["wt:\(root.id.raw)", "wt:\(checkout.id.raw)"])
   }
 
   @Test

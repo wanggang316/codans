@@ -34,6 +34,9 @@ struct CreateWorkspaceFeature {
     /// Adding to an existing workspace: title and folder are fixed, one
     /// member is the whole plan, and it goes through `addStream`.
     case add(projectID: ProjectID, title: String, rootPath: String, existingNames: Set<String>)
+    /// A new named group in an existing workspace. The sidebar opens the
+    /// sheet in this mode; the group form itself is not built yet.
+    case newGroup(projectID: ProjectID, title: String, rootPath: String)
   }
 
   enum CreationState: Equatable, Sendable {
@@ -111,7 +114,7 @@ struct CreateWorkspaceFeature {
 
     var rootPath: String {
       switch mode {
-      case .add(_, _, let rootPath, _):
+      case .add(_, _, let rootPath, _), .newGroup(_, _, let rootPath):
         return rootPath
       case .create:
         guard !titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }

@@ -963,3 +963,140 @@ struct HierarchySidebarFeatureTests {
     }
   }
 }
+
+// MARK: - Workspace groups
+
+/// A Workspace migrated from the old layout: its root row is the `existing`
+/// group's row; `default` lists one reference.
+private struct WorkspaceFixture {
+  let defaultGroup = WorkspaceGroupID()
+  let existingGroup = WorkspaceGroupID()
+  let defaultRow: Worktree
+  let reference: Worktree
+  let rootRow: Worktree
+  let member: Worktree
+  let project: Project
+
+  init() {
+    defaultRow = Worktree(
+      name: "default", path: "/ws/default",
+      workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .groupTerminal))
+    reference = Worktree(
+      name: "app", path: "/src/app", branch: "main", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .reference))
+    rootRow = Worktree(
+      name: "ws", path: "/ws", workspaceSlot: WorkspaceSlot(groupID: existingGroup, role: .groupTerminal))
+    member = Worktree(
+      name: "app", path: "/ws/app", branch: "feat", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: existingGroup, role: .member))
+    project = Project(
+      name: "ws", rootPath: "/ws", worktrees: [defaultRow, reference, rootRow, member], isWorkspace: true,
+      workspaceGroups: [
+        WorkspaceGroupRecord(id: defaultGroup, name: "default", kind: .default),
+        WorkspaceGroupRecord(id: existingGroup, name: "existing", kind: .named, isExpanded: true),
+      ])
+  }
+}
+
+extension HierarchySidebarFeatureTests {
+  @Test
+  func workspaceGroupsToggleIndependently() async {
+    let f = WorkspaceFixture()
+    let received = LockIsolated<[(WorkspaceGroupID, Bool)]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+      $0.hierarchyClient.setWorkspaceGroupExpanded = { projectID, groupID, isExpanded in
+        #expect(projectID == f.project.id)
+        received.withValue { $0.append((groupID, isExpanded)) }
+      }
+    }
+
+    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.defaultGroup))
+    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.existingGroup))
+    #expect(received.value.map(\.0) == [f.defaultGroup, f.existingGroup])
+    #expect(received.value.map(\.1) == [true, false])
+  }
+
+  @Test
+  func selectingARowInACollapsedGroupRevealsTheGroup() async {
+    let f = WorkspaceFixture()
+    let received = LockIsolated<[(WorkspaceGroupID, Bool)]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+      $0.hierarchyClient.setWorkspaceGroupExpanded = { _, groupID, isExpanded in
+        received.withValue { $0.append((groupID, isExpanded)) }
+      }
+    }
+
+    // Group rows and rows of an open group are on screen already.
+    await store.send(.revealWorkspaceRow(f.defaultRow.id, inProject: f.project.id))
+    await store.send(.revealWorkspaceRow(f.member.id, inProject: f.project.id))
+    #expect(received.value.isEmpty)
+    await store.send(.revealWorkspaceRow(f.reference.id, inProject: f.project.id))
+    #expect(received.value.map(\.0) == [f.defaultGroup])
+    #expect(received.value.map(\.1) == [true])
+  }
+
+  @Test
+  func archiveAndRemoveRejectEveryWorkspaceRow() async {
+    let f = WorkspaceFixture()
+    var initial = HierarchySidebarFeature.State()
+    initial.hasShownArchiveExplainer = true
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+    }
+
+    // No state change and no effect: an archive or remove would set a
+    // pending dialog or start a lifecycle on unimplemented client closures.
+    for row in [f.defaultRow, f.reference, f.rootRow, f.member] {
+      await store.send(.worktreeArchiveTapped(worktreeID: row.id, inProject: f.project.id, name: row.name))
+      await store.send(.worktreeRemoveTapped(worktreeID: row.id, inProject: f.project.id, name: row.name))
+    }
+  }
+
+  @Test
+  func onlyAReferenceCanLeaveTheWorkspaceOnItsOwn() async {
+    let f = WorkspaceFixture()
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+    }
+
+    await store.send(.removeSourceTapped(worktreeID: f.member.id, inProject: f.project.id))
+    await store.send(.removeSourceTapped(worktreeID: f.rootRow.id, inProject: f.project.id))
+    await store.send(.removeSourceTapped(worktreeID: f.reference.id, inProject: f.project.id)) {
+      $0.pendingWorkspaceMemberRemoval = PendingWorktreeRemoval(
+        worktreeID: f.reference.id, projectID: f.project.id, displayName: "app")
+    }
+  }
+
+  @Test
+  func headerEntriesOpenTheWorkspaceSheetInTheirModes() async {
+    let f = WorkspaceFixture()
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+    }
+
+    await store.send(.workspaceNewGroupTapped(projectID: f.project.id)) {
+      $0.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: [], mode: .newGroup(projectID: f.project.id, title: "ws", rootPath: "/ws"))
+    }
+    await store.send(.createWorkspaceSheet(.delegate(.dismissed))) {
+      $0.createWorkspaceSheet = nil
+    }
+    await store.send(.workspaceAddProjectTapped(projectID: f.project.id)) {
+      $0.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: [],
+        mode: .add(projectID: f.project.id, title: "ws", rootPath: "/ws", existingNames: ["app"]))
+    }
+  }
+}
