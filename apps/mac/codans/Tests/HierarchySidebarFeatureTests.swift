@@ -1096,7 +1096,32 @@ extension HierarchySidebarFeatureTests {
     await store.send(.workspaceAddProjectTapped(projectID: f.project.id)) {
       $0.createWorkspaceSheet = CreateWorkspaceFeature.State(
         candidates: [],
-        mode: .add(projectID: f.project.id, title: "ws", rootPath: "/ws", existingNames: ["app"]))
+        mode: .addSource(projectID: f.project.id, title: "ws", rootPath: "/ws", existingSourceRoots: ["/src/app"]))
     }
+  }
+
+  /// A created group goes up for its agents either way; the sheet stays
+  /// only to show a failed setup script.
+  @Test
+  func aCreatedGroupGoesUpAndClosesTheSheetUnlessSetupFailed() async {
+    let f = WorkspaceFixture()
+    let mode = CreateWorkspaceFeature.Mode.newGroup(projectID: f.project.id, title: "ws", rootPath: "/ws")
+    var initial = HierarchySidebarFeature.State()
+    initial.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: [], mode: mode)
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    }
+    let clean = GroupCreationResult(
+      projectID: f.project.id, groupID: WorkspaceGroupID(), groupWorktreeID: WorktreeID(), members: [])
+    var failed = clean
+    failed.setupFailures = [.init(name: "app", reason: "exit 1")]
+
+    await store.send(.createWorkspaceSheet(.delegate(.groupCreated(failed))))
+    await store.receive(\.delegate.workspaceGroupCreated, failed)
+    #expect(store.state.createWorkspaceSheet != nil)
+    await store.send(.createWorkspaceSheet(.delegate(.groupCreated(clean)))) {
+      $0.createWorkspaceSheet = nil
+    }
+    await store.receive(\.delegate.workspaceGroupCreated, clean)
   }
 }

@@ -468,6 +468,9 @@ struct HierarchySidebarFeature {
       case worktreeMaterialized(
         worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID,
         agentProfileID: UUID? = nil, agentPrompt: String? = nil)
+      /// A new Workspace group exists with every checkout. `RootFeature`
+      /// starts each member's agent and selects the group.
+      case workspaceGroupCreated(GroupCreationResult)
     }
   }
 
@@ -552,6 +555,13 @@ struct HierarchySidebarFeature {
         hierarchyClient.selectProject(projectID)
         try? hierarchyClient.selectWorktree(worktreeID, projectID)
         return .none
+      case .createWorkspaceSheet(.delegate(.groupCreated(let result))):
+        // A failed setup script keeps the sheet open to say which; the
+        // agents start either way, now that every checkout exists.
+        if result.setupFailures.isEmpty {
+          state.createWorkspaceSheet = nil
+        }
+        return .send(.delegate(.workspaceGroupCreated(result)))
       case .createWorkspaceSheet:
         return .none
       case .remoteConnectionSheet(.delegate(.dismissed)):
@@ -727,13 +737,14 @@ struct HierarchySidebarFeature {
       guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
         return .none
       }
-      let existingNames = Set(
-        project.worktrees.filter { $0.workspaceSlot?.role == .reference }.map(\.name)
-          + (project.workspace?.projects.map(\.name) ?? []))
+      let existingSourceRoots = Set(
+        project.worktrees.filter { $0.workspaceSlot?.role == .reference }.compactMap(\.sourceGitRoot)
+          + (project.workspace?.projects.map(\.sourceGitRoot) ?? []))
       state.createWorkspaceSheet = CreateWorkspaceFeature.State(
         candidates: Self.workspaceCandidates(in: snapshot),
-        mode: .add(
-          projectID: projectID, title: project.name, rootPath: project.rootPath, existingNames: existingNames))
+        mode: .addSource(
+          projectID: projectID, title: project.name, rootPath: project.rootPath,
+          existingSourceRoots: existingSourceRoots))
       return .none
 
     case .deleteGroupTapped:
