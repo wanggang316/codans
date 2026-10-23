@@ -18,6 +18,7 @@ struct CommandQueueView: View {
 
   private static let width: CGFloat = 560
   private static let editorHeight: CGFloat = 110
+  private static let scheduleRowHeight: CGFloat = 28
 
   var body: some View {
     VStack(spacing: 0) {
@@ -61,12 +62,9 @@ struct CommandQueueView: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 4) {
       editor
-      // Keep this row's space in every mode so the sheet does not resize.
-      scheduleRow
-        .opacity(store.mode == .scheduled ? 1 : 0)
-        .disabled(store.mode != .scheduled)
-        .allowsHitTesting(store.mode == .scheduled)
-        .accessibilityHidden(store.mode != .scheduled)
+      if store.mode == .scheduled {
+        scheduleRow
+      }
       HStack(spacing: 8) {
         Button {
           showsFilePicker = true
@@ -90,7 +88,8 @@ struct CommandQueueView: View {
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()
-      .frame(height: Self.editorHeight)
+      // Scheduling uses editor space rather than adding a blank row in other modes.
+      .frame(height: Self.editorHeight - (store.mode == .scheduled ? Self.scheduleRowHeight + 4 : 0))
       .overlay(alignment: .topLeading) {
         if store.draft.isEmpty {
           // `TextEditor` has no placeholder of its own; this sits where the
@@ -123,7 +122,7 @@ struct CommandQueueView: View {
   }
 
   private var scheduleRow: some View {
-    HStack(spacing: 6) {
+    HStack(spacing: 8) {
       Text("At")
         .foregroundStyle(.secondary)
       DatePicker(
@@ -133,25 +132,46 @@ struct CommandQueueView: View {
       )
       .labelsHidden()
       .datePickerStyle(.field)
-      Spacer(minLength: 4)
-      Toggle("Repeat every", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
-      TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
-        .labelsHidden()
-        .textFieldStyle(.roundedBorder)
-        .frame(width: 42)
-        .disabled(!store.repeatEnabled)
-      Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
-        ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
-          Text(unit.title).tag(unit)
+      .fixedSize()
+      Divider()
+        .frame(height: 14)
+        .padding(.horizontal, 4)
+      Toggle("Repeat", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
+        .toggleStyle(.checkbox)
+        .fixedSize()
+      if store.repeatEnabled {
+        Text("every")
+          .foregroundStyle(.secondary)
+        TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
+          .labelsHidden()
+          .textFieldStyle(.roundedBorder)
+          .multilineTextAlignment(.center)
+          .frame(width: 38)
+        Menu {
+          Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
+            ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
+              Text(unit.title).tag(unit)
+            }
+          }
+        } label: {
+          HStack(spacing: 4) {
+            Text(store.repeatUnit.title)
+            Image(systemName: "chevron.down")
+              .font(.system(size: 8, weight: .semibold))
+              .accessibilityHidden(true)
+          }
+          .foregroundStyle(.secondary)
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Repeat interval unit")
       }
-      .labelsHidden()
-      .frame(width: 80)
-      .disabled(!store.repeatEnabled)
     }
-    .font(.caption)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .font(.system(size: 11))
     .controlSize(.small)
-    .frame(height: 28)
+    .frame(height: Self.scheduleRowHeight)
   }
 
   /// Send timing, as the small labelled menu a chat composer keeps at its
