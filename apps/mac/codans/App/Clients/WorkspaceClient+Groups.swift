@@ -193,7 +193,7 @@ extension WorkspaceClient {
       yield(.rollingBack)
       let failures = await rollback(ledger, context: context)
       yield(.rolledBack(failures: failures))
-      throw error is CancellationError ? WorkspaceError.cancelled : error
+      throw mapCancellation(error)
     }
 
     await context.hierarchy.reconcileDiscoveredWorktrees(plan.projectID)

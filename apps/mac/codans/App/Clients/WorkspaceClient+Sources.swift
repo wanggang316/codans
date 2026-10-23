@@ -78,7 +78,7 @@ extension WorkspaceClient {
       if !failures.isEmpty {
         logger.warning("workspace creation left residue: \(failures.joined(separator: "; "), privacy: .private)")
       }
-      throw error is CancellationError ? WorkspaceError.cancelled : error
+      throw mapCancellation(error)
     }
 
     let projectID = context.hierarchy.addWorkspaceProject(title, rootPath)
@@ -151,7 +151,7 @@ extension WorkspaceClient {
       try saveManifest(manifest, rootPath: rootPath)
     } catch {
       _ = await rollback(ledger, context: context)
-      throw error is CancellationError ? WorkspaceError.cancelled : error
+      throw mapCancellation(error)
     }
     syncLinks(rootPath: rootPath, manifest: manifest)
     await context.hierarchy.reconcileDiscoveredWorktrees(projectID)

@@ -544,6 +544,12 @@ extension WorkspaceClient {
     return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
   }
 
+  /// The error a rolled-back step throws to its caller: a cancelled task
+  /// reads as `WorkspaceError.cancelled`, so callers match one case.
+  nonisolated static func mapCancellation(_ error: Error) -> Error {
+    error is CancellationError ? WorkspaceError.cancelled : error
+  }
+
   /// A one-line, user-facing reading of a step's error.
   nonisolated static func describe(_ error: Error) -> String {
     if let error = error as? GitWorktreeError {
