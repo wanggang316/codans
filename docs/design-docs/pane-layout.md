@@ -107,7 +107,8 @@ struct TerminalContentState {
 - 焦点 Pane 的条用活动样式；非焦点 Pane 的条用非活动窗口样式（按 Finder 非活动窗口实测补齐）。
 - 条尾控件：“+”（含 agent 菜单）与 agent 历史。Pane 宽度不足时只保留 “+”，历史收进 “+” 的菜单。split 经键盘、命令面板与 chip 的动作菜单。
 - 每个 chip 悬停时两端各出一个同尺寸按钮：左端关闭 Tab，右端 “…” 弹出该 Tab 的动作菜单（`TabActionsMenu`）：交接、命令队列，再按终端右键菜单的分组列出 `PaneSurfaceAction`（复制、粘贴、四向 split、重置、复制 ID、关闭 Tab）。没有选区时复制项禁用而不隐藏。
-- 条与上方边缘、条与下方内容的间距相同（`trackTopInset` = `trackBottomInset`）。
+- 条与上方边缘、条与下方内容的间距相同（`trackTopInset` = `trackBottomInset`）。贴着布局区顶边的条不留上间距：工具栏自身已在按钮下方留出间距，track 与工具栏按钮的距离因此与 Safari 的 tab 栏相同。
+- track 高 32、标题 13pt，取自 Safari（macOS 26）的 tab 栏；颜色与曲线取自系统窗口 tab 栏（`NSTabBar`）。
 - 条左端没有关闭 Pane 的按钮；关闭 Pane 经 `pane close`、右键菜单或关掉最后一个 Tab。
 
 ### 分隔线
