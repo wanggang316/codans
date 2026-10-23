@@ -104,6 +104,14 @@ extension Project {
     }
   }
 
+  /// The group whose folder `worktree` is, nil for any other row. Such a row
+  /// has no branch: it stands for its group, the way a folder row stands for
+  /// its Project.
+  public func workspaceGroup(standingFor worktree: Worktree) -> WorkspaceGroupRecord? {
+    guard let slot = worktree.workspaceSlot, slot.role == .groupTerminal else { return nil }
+    return workspaceGroups.first { $0.id == slot.groupID }
+  }
+
   /// The listed references or members of one group, in catalog order.
   public func workspaceGroupMembers(_ groupID: WorkspaceGroupID) -> [Worktree] {
     listedWorkspaceRows(in: groupID).filter { $0.workspaceSlot?.role != .groupTerminal }

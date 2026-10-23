@@ -71,6 +71,16 @@ struct CatalogSidebarTests {
   }
 
   @Test
+  func onlyAGroupFolderRowStandsForItsGroup() {
+    #expect(workspace.workspaceGroup(standingFor: defaultTerminal) == workspace.workspaceGroups[0])
+    #expect(workspace.workspaceGroup(standingFor: fixTerminal) == workspace.workspaceGroups[1])
+    // References and checkouts are repositories with their own branch.
+    #expect(workspace.workspaceGroup(standingFor: reference) == nil)
+    #expect(workspace.workspaceGroup(standingFor: checkout) == nil)
+    #expect(repository.workspaceGroup(standingFor: main) == nil)
+  }
+
+  @Test
   func workspaceGroupsExpandIndependently() {
     var project = workspace
     project.workspaceGroups[0].isExpanded = true
