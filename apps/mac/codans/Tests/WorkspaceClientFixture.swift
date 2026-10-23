@@ -14,6 +14,7 @@ struct WorkspaceClientFixture {
   let hierarchy: HierarchyClient
   let manager: HierarchyManager
   let runtime: FakeHierarchyRuntime
+  let store: CatalogStore
 
   /// Canonical (symlink-resolved) path of `base`.
   var basePath: String { base.path(percentEncoded: false) }
@@ -32,11 +33,8 @@ struct WorkspaceClientFixture {
     try FileManager.default.createDirectory(at: raw, withIntermediateDirectories: true)
     base = URL(fileURLWithPath: HierarchyManager.canonicalPath(raw.path), isDirectory: true)
     runtime = FakeHierarchyRuntime()
-    manager = HierarchyManager(
-      catalog: .default,
-      store: CatalogStore(fileURL: base.appendingPathComponent("catalog.json")),
-      runtime: runtime
-    )
+    store = CatalogStore(fileURL: base.appendingPathComponent("catalog.json"))
+    manager = HierarchyManager(catalog: .default, store: store, runtime: runtime)
     hierarchy = HierarchyClient.live(manager: manager)
     client = WorkspaceClient.live(
       hierarchy: hierarchy, gitWorktreeClient: gitWorktreeClient, gitCLI: GitWorktreeCLI(),
@@ -44,6 +42,9 @@ struct WorkspaceClientFixture {
   }
 
   func cleanUp() {
+    // A debounced save still pending would recreate `catalog.json` (and so
+    // `base`) after the removal; write it now so nothing is left to fire.
+    store.flushPending()
     try? FileManager.default.removeItem(at: base)
   }
 
