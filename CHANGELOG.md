@@ -68,7 +68,7 @@ and the project does not yet follow semantic versioning — every release until
   running. The grab strip on top of a split pane is gone; tabs are the
   only thing you drag.
 - **Panes are cards.** Each pane, its tab strip included, floats as a
-  rounded card with a hairline rim and a soft shadow, like the sidebar; the gap between two
+  rounded card with a hairline rim, like the sidebar; the gap between two
   cards is where you drag to resize. The tab strip sits as far from the
   card's top as from the terminal below it.
 - **Tab actions live on the tab.** Hover a tab chip and an actions button
