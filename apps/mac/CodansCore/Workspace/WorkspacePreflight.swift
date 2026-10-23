@@ -27,6 +27,8 @@ public nonisolated struct WorkspacePreflight: Equatable, Sendable {
       case localBranchExists
       /// The base ref does not resolve in this project.
       case baseRefMissing
+      /// The group name is empty or not a single folder name.
+      case invalidGroupName
       /// The group name is reserved (`default`).
       case reservedGroupName
       /// Another group of the Workspace already has this name.
