@@ -176,6 +176,7 @@ struct TabBarView: View {
     TabBarRowView(
       tabs: pane.tabs,
       activeTabID: pane.selectedTabID,
+      paneID: paneID,
       viewport: viewport,
       // Two busy signals, kept apart so the chip can treat them differently.
       // Terminal (OSC 9;4 progress ∪ running foreground command): reading the

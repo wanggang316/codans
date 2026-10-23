@@ -43,7 +43,8 @@ struct SplitViewportFeature {
     /// Emitted by `PaneDropDelegate` when a Pane is dropped onto an edge of
     /// another Pane in the same Worktree. Re-positions the dragged Pane next
     /// to the anchor; its Contents are preserved (no teardown).
-    case movePaneRequested(PaneID, anchor: PaneID, direction: SplitTree<PaneID>.NewDirection)
+    case moveTabRequested(TabID, toPane: PaneID, at: Int)
+    case splitTabRequested(TabID, anchor: PaneID, direction: SplitTree<PaneID>.NewDirection)
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
@@ -108,21 +109,29 @@ struct SplitViewportFeature {
         try? hierarchyClient.resizeSplit(path, ratio, worktreeID, projectID)
         return .none
 
-      case .movePaneRequested(let paneID, let anchorID, let direction):
-        try? hierarchyClient.movePane(paneID, anchorID, direction)
-        // Keep the moved Pane focused after the layout settles — mirrors the
-        // post-split focus tail-call. The surface view needs the rebuilt
-        // hierarchy attached before `makeFirstResponder` takes, so hop async.
-        guard let contentID = hierarchyClient.snapshot().pane(paneID)?.selectedTab?.contentID else {
-          return .none
-        }
-        return .run { [client = hierarchyClient] _ in
-          await MainActor.run { client.focusSurfaceView(contentID) }
-        }
+      case .moveTabRequested(let tabID, let paneID, let index):
+        guard (try? hierarchyClient.moveTabToPane(tabID, paneID, index)) != nil else { return .none }
+        return focusMovedTab(tabID)
+
+      case .splitTabRequested(let tabID, let anchorID, let direction):
+        guard (try? hierarchyClient.splitTab(tabID, anchorID, direction)) != nil else { return .none }
+        return focusMovedTab(tabID)
       }
     }
     .forEach(\.paneHosts, action: \.paneHosts) {
       PaneHostFeature()
+    }
+  }
+
+  /// Keeps the moved Tab focused after the layout settles — mirrors the
+  /// post-split focus tail-call. The surface view needs the rebuilt
+  /// hierarchy attached before `makeFirstResponder` takes, so hop async.
+  private func focusMovedTab(_ tabID: TabID) -> Effect<Action> {
+    guard let contentID = hierarchyClient.snapshot().address(forTab: tabID)?.contentID else {
+      return .none
+    }
+    return .run { [client = hierarchyClient] _ in
+      await MainActor.run { client.focusSurfaceView(contentID) }
     }
   }
 

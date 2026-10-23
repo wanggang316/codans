@@ -37,9 +37,18 @@ import SwiftUI
 /// copy follows the cursor in an overlay. The final permutation is
 /// dispatched once via `onReorder` on drop — the catalog mutation stays a
 /// single absolute-order commit.
+///
+/// Across Panes: the same gesture feeds the viewport's `TabDragSession`.
+/// Once the cursor leaves this strip the local reorder pauses, the lifted
+/// chip follows the cursor at the viewport level, and the session commits a
+/// drop on another strip or on a Pane edge. A strip that is the target opens
+/// a gap at the insertion index.
 struct TabBarRowView: View {
   let tabs: [CodansCore.Tab]
   let activeTabID: TabID?
+  /// The Pane this strip belongs to, for drags across Panes. Nil (previews /
+  /// tests) keeps the drag inside the row.
+  var paneID: PaneID?
   /// Scroll viewport the row lives in. `.unbounded` (previews / tests)
   /// collapses every chip to `chipMinWidth` with no stacking.
   var viewport: TabBarViewport = .unbounded
@@ -81,6 +90,7 @@ struct TabBarRowView: View {
   /// ⌘1–9 select by position in the focused Pane, so only its strip shows
   /// the chord hints.
   @Environment(\.tabStripIsActive) private var stripIsActive
+  @Environment(TabDragSession.self) private var dragSession: TabDragSession?
 
   /// Name of the row's coordinate space — drag location, chip frames, and
   /// the floating-copy position are all measured against it so they share
@@ -110,6 +120,9 @@ struct TabBarRowView: View {
   @State private var hoveredID: TabID?
   /// Last selection that was present in `tabs`; see `selectedID`.
   @State private var heldSelectionID: TabID?
+  /// The row's origin in the window space; converts row-space drag points
+  /// and chip frames for `TabDragSession`.
+  @State private var rowOrigin: CGPoint = .zero
 
   /// Selection as drawn. A new tab's selection (navigation state) can land a
   /// frame or two before the catalog delivers the tab itself; until it is in
@@ -136,11 +149,26 @@ struct TabBarRowView: View {
     return ordered + tabs.filter { !known.contains($0.id) }
   }
 
+  /// The drag is over this strip (or there is no session): the row
+  /// reorders locally and draws the lifted chip itself.
+  private var dragIsLocal: Bool {
+    guard let dragSession, dragSession.drag != nil else { return true }
+    return dragSession.target == .sourceStrip
+  }
+
+  /// Insertion index of a chip dragged in from another Pane, while this
+  /// strip is the drop target.
+  private var incomingGapIndex: Int? {
+    guard let paneID, case .strip(paneID, let index)? = dragSession?.target else { return nil }
+    return index
+  }
+
   var body: some View {
     let rendered = renderedTabs
-    let widths = chipWidths(count: rendered.count)
     let stack = stackedFrames(for: rendered)
-    let slots = chipSlots(widths: widths, stack: stack)
+    // A stacked row has no room to open a gap; the drop still lands there.
+    let gap = stack == nil ? incomingGapIndex.map { min($0, rendered.count) } : nil
+    let (widths, slots) = chipPlacement(count: rendered.count, stack: stack, gap: gap)
     ChipRowLayout(slots: slots) {
       ForEach(Array(rendered.enumerated()), id: \.element.id) { index, tab in
         chipView(for: tab, index: index, count: rendered.count, stack: stack)
@@ -188,9 +216,24 @@ struct TabBarRowView: View {
       }
     }
     .coordinateSpace(name: Self.rowSpace)
-    .onPreferenceChange(ChipFrameKey.self) { chipFrames = $0 }
+    .onPreferenceChange(ChipFrameKey.self) { frames in
+      chipFrames = frames
+      reportChipMidXs()
+    }
+    .onGeometryChange(
+      for: CGPoint.self, of: { $0.frame(in: .global).origin },
+      action: { origin in
+        rowOrigin = origin
+        reportChipMidXs()
+      })
+    .onDisappear {
+      if let paneID { dragSession?.setChipMidXs(nil, for: paneID) }
+      // A row torn down mid-drag (its Pane closed) never sees `onEnded`.
+      if draggingID != nil, dragSession?.drag?.tabID == draggingID { dragSession?.end() }
+    }
     .overlay(alignment: .topLeading) { floatingChip(in: rendered) }
     .animation(Self.addRemoveAnimation, value: rendered.map(\.id))
+    .animation(Self.addRemoveAnimation, value: gap)
     .onAppear {
       orderIDs = tabs.map(\.id)
       revealIfStacked(activeTabID)
@@ -269,16 +312,27 @@ struct TabBarRowView: View {
   }
 
   /// The lifted chip that tracks the cursor during a drag, rendered above
-  /// the row. Non-interactive — the gesture lives on the in-flow chip,
-  /// which continues to receive drag events even at zero opacity.
+  /// the row while the cursor is over it (the viewport draws it elsewhere).
+  /// Non-interactive — the gesture lives on the in-flow chip, which
+  /// continues to receive drag events even at zero opacity.
   @ViewBuilder
   private func floatingChip(in rendered: [CodansCore.Tab]) -> some View {
-    if let id = draggingID,
+    if dragIsLocal, let id = draggingID,
       let index = rendered.firstIndex(where: { $0.id == id }),
       let frame = chipFrames[id]
     {
-      chipView(for: rendered[index], index: index, count: rendered.count)
-        .frame(width: frame.width, height: TabBarMetrics.chipHeight)
+      liftedChip(for: rendered[index], index: index, count: rendered.count, width: frame.width)
+        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
+        .zIndex(10)
+    }
+  }
+
+  /// The dragged chip as it floats: opaque, raised, shadowed.
+  private func liftedChip(
+    for tab: CodansCore.Tab, index: Int, count: Int, width: CGFloat
+  ) -> some View {
+    chipView(for: tab, index: index, count: count)
+        .frame(width: width, height: TabBarMetrics.chipHeight)
         // Opaque plate so the lifted copy occludes the chips it floats
         // over — the chip's own idle fill is `.clear`, which would let
         // their titles bleed through and overlap.
@@ -289,14 +343,19 @@ struct TabBarRowView: View {
         // drag code itself is unchanged from when this shipped clean). Clipping
         // bounds the copy to `chipHeight` regardless of why it overflows; the
         // shadow is applied after, so it still feathers outside the clip.
-        .frame(width: frame.width, height: TabBarMetrics.chipHeight)
+        .frame(width: width, height: TabBarMetrics.chipHeight)
         .clipped()
         .scaleEffect(1.03)
         .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
         .allowsHitTesting(false)
-        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
-        .zIndex(10)
-    }
+  }
+
+  /// Publishes the chips' window-space centers, in strip order, so the
+  /// session can turn a cursor over this strip into an insertion index.
+  private func reportChipMidXs() {
+    guard let paneID, let dragSession else { return }
+    let midXs = tabs.compactMap { chipFrames[$0.id].map { rowOrigin.x + $0.midX } }
+    dragSession.setChipMidXs(midXs, for: paneID)
   }
 
   private func reorderGesture(for tab: CodansCore.Tab) -> some Gesture {
@@ -305,24 +364,45 @@ struct TabBarRowView: View {
       coordinateSpace: .named(Self.rowSpace)
     )
     .onChanged { value in
+      let point = CGPoint(x: rowOrigin.x + value.location.x, y: rowOrigin.y + value.location.y)
       if draggingID != tab.id {
         // First tick of a new drag — snapshot the current order as the
         // mutable baseline, then claim this chip as the dragged one.
         orderIDs = tabs.map(\.id)
         draggingID = tab.id
+        beginSessionDrag(of: tab, at: point)
+      } else {
+        dragSession?.move(to: point)
       }
       dragCursorX = value.location.x
-      updateOrder()
+      if dragIsLocal { updateOrder() }
     }
     .onEnded { _ in
       let final = orderIDs
       draggingID = nil
       dragCursorX = 0
+      // Only a drop on this strip reorders it; a drop elsewhere was
+      // committed by the session, and a drop on nothing changes nothing.
+      let isLocalDrop = dragSession.map { $0.end() == .sourceStrip } ?? true
+      orderIDs = tabs.map(\.id)
       // Single absolute-order commit; skip the no-op when nothing moved.
-      if final != tabs.map(\.id) {
+      if isLocalDrop, final != tabs.map(\.id) {
+        orderIDs = final
         onReorder(final)
       }
     }
+  }
+
+  private func beginSessionDrag(of tab: CodansCore.Tab, at point: CGPoint) {
+    guard let paneID, let dragSession,
+      let index = tabs.firstIndex(where: { $0.id == tab.id })
+    else { return }
+    let width = chipFrames[tab.id]?.width ?? TabBarMetrics.chipMinWidth
+    let preview = liftedChip(for: tab, index: index, count: tabs.count, width: width)
+    dragSession.begin(
+      TabDragSession.Drag(
+        tabID: tab.id, sourcePaneID: paneID, isLoneTab: tabs.count == 1, preview: AnyView(preview)),
+      at: point)
   }
 
   /// Steps the dragged chip past an adjacent neighbor once it overlaps that
@@ -359,6 +439,20 @@ struct TabBarRowView: View {
       let moved = orderIDs.remove(at: current)
       orderIDs.insert(moved, at: target)
     }
+  }
+
+  /// Widths and slots of the row's chips. With a `gap` the row is laid out
+  /// for one more chip and that slot stays empty for the incoming one.
+  private func chipPlacement(count: Int, stack: StackState?, gap: Int?)
+    -> (widths: [CGFloat], slots: [ChipRowLayout.Slot])
+  {
+    var widths = chipWidths(count: count + (gap == nil ? 0 : 1))
+    var slots = chipSlots(widths: widths, stack: stack)
+    if let gap {
+      widths.remove(at: gap)
+      slots.remove(at: gap)
+    }
+    return (widths, slots)
   }
 
   /// Whole-point chip widths that exactly fill the track: an equal share

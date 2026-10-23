@@ -150,33 +150,80 @@ struct SplitViewportFeatureTests {
   }
 
   @Test
-  func movePaneRefocusesTheMovedPanesSession() async {
+  func moveTabRequestMovesItAndRefocusesItsSession() async {
     let paneID = PaneID()
-    let anchorID = PaneID()
+    let targetID = PaneID()
     let tab = Tab(content: .terminal(workingDirectory: "/"))
-    let moved = LockIsolated<(PaneID, PaneID, SplitTree<PaneID>.NewDirection)?>(nil)
+    let other = Tab(content: .terminal(workingDirectory: "/"))
+    let moved = LockIsolated<(TabID, PaneID, Int)?>(nil)
     let focused = LockIsolated<ContentID?>(nil)
-    let worktree = Worktree(
-      id: WorktreeID(), name: "w", path: "/",
-      splitTree: SplitTree(leaf: paneID), panes: [Pane(id: paneID, tabs: [tab])],
-      focusedPaneID: paneID)
-    let catalog = Catalog(projects: [Project(name: "p", rootPath: "/", worktrees: [worktree])])
+    let catalog = Self.catalog(panes: [Pane(id: paneID, tabs: [tab]), Pane(id: targetID, tabs: [other])])
 
     let store = TestStore(initialState: SplitViewportFeature.State()) {
       SplitViewportFeature()
     } withDependencies: {
-      $0.hierarchyClient.movePane = { pid, anchor, dir in
-        moved.withValue { $0 = (pid, anchor, dir) }
+      $0.hierarchyClient.moveTabToPane = { id, pane, index in moved.withValue { $0 = (id, pane, index) } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.focusSurfaceView = { id in focused.withValue { $0 = id } }
+    }
+
+    await store.send(.moveTabRequested(tab.id, toPane: targetID, at: 1))
+    await store.finish()
+    #expect(moved.value?.0 == tab.id)
+    #expect(moved.value?.1 == targetID)
+    #expect(moved.value?.2 == 1)
+    #expect(focused.value == tab.contentID)
+  }
+
+  @Test
+  func splitTabRequestSplitsItOutAndRefocusesItsSession() async {
+    let paneID = PaneID()
+    let tab = Tab(content: .terminal(workingDirectory: "/"))
+    let other = Tab(content: .terminal(workingDirectory: "/"))
+    let split = LockIsolated<(TabID, PaneID, SplitTree<PaneID>.NewDirection)?>(nil)
+    let focused = LockIsolated<ContentID?>(nil)
+    let catalog = Self.catalog(panes: [Pane(id: paneID, tabs: [tab, other])])
+
+    let store = TestStore(initialState: SplitViewportFeature.State()) {
+      SplitViewportFeature()
+    } withDependencies: {
+      $0.hierarchyClient.splitTab = { id, anchor, direction in
+        split.withValue { $0 = (id, anchor, direction) }
+        return PaneID()
       }
       $0.hierarchyClient.snapshot = { catalog }
       $0.hierarchyClient.focusSurfaceView = { id in focused.withValue { $0 = id } }
     }
 
-    await store.send(.movePaneRequested(paneID, anchor: anchorID, direction: .down))
+    await store.send(.splitTabRequested(tab.id, anchor: paneID, direction: .down))
     await store.finish()
-    #expect(moved.value?.0 == paneID)
-    #expect(moved.value?.1 == anchorID)
-    #expect(moved.value?.2 == .down)
+    #expect(split.value?.0 == tab.id)
+    #expect(split.value?.1 == paneID)
+    #expect(split.value?.2 == .down)
     #expect(focused.value == tab.contentID)
+  }
+
+  @Test
+  func failedTabMoveLeavesFocusAlone() async {
+    let focused = LockIsolated<ContentID?>(nil)
+    let store = TestStore(initialState: SplitViewportFeature.State()) {
+      SplitViewportFeature()
+    } withDependencies: {
+      $0.hierarchyClient.moveTabToPane = { _, _, _ in throw HierarchyError.notFound("Pane") }
+      $0.hierarchyClient.focusSurfaceView = { id in focused.withValue { $0 = id } }
+    }
+
+    await store.send(.moveTabRequested(TabID(), toPane: PaneID(), at: 0))
+    #expect(focused.value == nil)
+  }
+
+  private static func catalog(panes: [Pane]) -> Catalog {
+    var tree = SplitTree(leaf: panes[0].id)
+    for pane in panes.dropFirst() {
+      tree = (try? tree.inserting(pane.id, at: panes[0].id, direction: .right)) ?? tree
+    }
+    let worktree = Worktree(
+      id: WorktreeID(), name: "w", path: "/", splitTree: tree, panes: panes, focusedPaneID: panes[0].id)
+    return Catalog(projects: [Project(name: "p", rootPath: "/", worktrees: [worktree])])
   }
 }

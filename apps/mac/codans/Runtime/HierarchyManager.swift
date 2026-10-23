@@ -2008,6 +2008,91 @@ final class HierarchyManager {
     }
   }
 
+  /// Moves a Tab into another Pane of the same Worktree at `index`
+  /// (clamped to the strip), selects it there and focuses that Pane. The
+  /// Content is kept alive; responder focus is the caller's call, after the
+  /// moved surface is back in a window. A source Pane left without Tabs closes, like
+  /// closing its last Tab.
+  func moveTab(_ tabID: TabID, toPane targetID: PaneID, at index: Int) throws {
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    try mutateLayout(at: indices) { worktree in
+      guard worktree.pane(targetID) != nil else {
+        throw HierarchyError.notFound("Pane \(targetID) in Worktree \(address.worktreeID)")
+      }
+      if targetID == address.paneID, worktree.pane(targetID)?.tabs.count == 1 { return }
+      let tab = try Self.detachTab(tabID, from: address.paneID, in: &worktree)
+      guard let targetIndex = worktree.panes.firstIndex(where: { $0.id == targetID }) else {
+        throw HierarchyError.notFound("Pane \(targetID)")
+      }
+      let slot = min(max(index, 0), worktree.panes[targetIndex].tabs.count)
+      worktree.panes[targetIndex].tabs.insert(tab, at: slot)
+      worktree.panes[targetIndex].selectedTabID = tabID
+      worktree.focusedPaneID = targetID
+    }
+  }
+
+  /// Moves a Tab into a new Pane beside `anchorID`, split along
+  /// `direction`, and focuses it. The Content is kept alive. When the Tab
+  /// is the only one of its Pane, that Pane itself moves instead (and a
+  /// move beside itself is a no-op). Returns the Pane that holds the Tab.
+  @discardableResult
+  func splitTab(
+    _ tabID: TabID,
+    beside anchorID: PaneID,
+    direction: SplitTree<PaneID>.NewDirection
+  ) throws -> PaneID {
+    guard let address = catalog.address(forTab: tabID),
+      let indices = findWorktreeIndices(worktreeID: address.worktreeID, projectID: address.projectID)
+    else {
+      throw HierarchyError.notFound("Tab \(tabID)")
+    }
+    var hostID = address.paneID
+    try mutateLayout(at: indices) { worktree in
+      guard worktree.pane(anchorID) != nil else {
+        throw HierarchyError.notFound("Pane \(anchorID) in Worktree \(address.worktreeID)")
+      }
+      if worktree.pane(address.paneID)?.tabs.count == 1 {
+        guard anchorID != address.paneID else { return }
+        worktree.splitTree = try worktree.splitTree
+          .moving(address.paneID, relativeTo: anchorID, direction: direction)
+          .settingZoomed(nil)
+      } else {
+        let tab = try Self.detachTab(tabID, from: address.paneID, in: &worktree)
+        let pane = Pane(tabs: [tab])
+        worktree.splitTree = try worktree.splitTree
+          .inserting(pane.id, at: anchorID, direction: direction)
+          .settingZoomed(nil)
+        worktree.panes.append(pane)
+        hostID = pane.id
+      }
+      worktree.focusedPaneID = hostID
+    }
+    return hostID
+  }
+
+  /// Takes the Tab out of its Pane without touching its Content. A Pane
+  /// left empty is removed; a selected Tab hands the selection to its
+  /// right neighbour, else to the new last Tab (as `closeTab` does).
+  private static func detachTab(
+    _ tabID: TabID, from paneID: PaneID, in worktree: inout Worktree
+  ) throws -> Tab {
+    guard let paneIndex = worktree.panes.firstIndex(where: { $0.id == paneID }),
+      let tabIndex = worktree.panes[paneIndex].tabs.firstIndex(where: { $0.id == tabID })
+    else { throw HierarchyError.notFound("Tab \(tabID)") }
+    let tab = worktree.panes[paneIndex].tabs.remove(at: tabIndex)
+    let remaining = worktree.panes[paneIndex].tabs
+    if remaining.isEmpty {
+      _ = removePane(paneID, from: &worktree)
+    } else if worktree.panes[paneIndex].selectedTabID == tabID {
+      worktree.panes[paneIndex].selectedTabID = remaining[min(tabIndex, remaining.count - 1)].id
+    }
+    return tab
+  }
+
   /// Closes every Tab in the Pane except `tabID`. Reuses `closeTab` per
   /// sibling so surfaces are torn down the same way as a single close.
   func closeOtherTabs(keeping tabID: TabID) throws {
@@ -2243,25 +2328,6 @@ final class HierarchyManager {
       return (ancestorPath, split.ratio, childBranch == .right)
     }
     return nil
-  }
-
-  /// Re-positions an existing Pane next to `anchorID`, splitting the anchor
-  /// along `direction`. Pure split-tree reshape — the moved Pane's Contents
-  /// are never torn down. The Pane set is unchanged, so the
-  /// leaves-match-panes invariant still holds. A move onto the Pane itself
-  /// collapses to a no-op inside `SplitTree.moving`.
-  func movePane(
-    _ paneID: PaneID,
-    relativeTo anchorID: PaneID,
-    direction: SplitTree<PaneID>.NewDirection
-  ) throws {
-    guard let indices = worktreeIndices(forPane: paneID) else {
-      throw HierarchyError.notFound("Pane \(paneID)")
-    }
-    try mutateLayout(at: indices) { worktree in
-      guard worktree.pane(anchorID) != nil else { throw HierarchyError.notFound("Pane \(anchorID)") }
-      worktree.splitTree = try worktree.splitTree.moving(paneID, relativeTo: anchorID, direction: direction)
-    }
   }
 
   // MARK: - Surfaces

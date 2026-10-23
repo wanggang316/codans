@@ -21,11 +21,10 @@ struct SplitViewportView: View {
   let worktreeID: WorktreeID
   var agentStateStore: AgentStateStore?
   @Environment(HierarchyManager.self) private var hierarchyManager
-  /// Shared drop-highlight state for the pane-move gesture, scoped to this
-  /// viewport. A single shared value (vs per-leaf state) so the highlight
-  /// follows the cursor across panes and always clears on drop — see
-  /// `PaneDropHighlight`.
-  @State private var dropHighlight = PaneDropHighlight()
+  /// The tab-chip drag across this viewport's Panes. One shared value (vs
+  /// per-leaf state) so exactly one drop target lights up and it always
+  /// clears on drop.
+  @State private var tabDrag = TabDragSession()
   /// The Worktree whose `emptyStateGrace` has already elapsed, or nil before
   /// any has. It is compared against `worktreeID` *inside* the render pass,
   /// so a Worktree the view has just been pointed at fails the check on its
@@ -56,7 +55,8 @@ struct SplitViewportView: View {
           agentStateStore: agentStateStore
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(dropHighlight)
+        .environment(tabDrag)
+        .overlay { TabDragPreview(session: tabDrag) }
       } else if settledWorktreeID == worktreeID {
         emptyPlaceholder
       } else {
@@ -65,6 +65,18 @@ struct SplitViewportView: View {
     }
     .task(id: currentHostSeedsKey()) {
       syncPaneHosts()
+    }
+    .onAppear {
+      tabDrag.onDrop = { [store] tabID, target in
+        switch target {
+        case .strip(let paneID, let index):
+          store.send(.moveTabRequested(tabID, toPane: paneID, at: index))
+        case .edge(let paneID, let zone):
+          store.send(.splitTabRequested(tabID, anchor: paneID, direction: zone.splitDirection))
+        case .sourceStrip:
+          break
+        }
+      }
     }
     .task(id: worktreeID) {
       let graced = worktreeID
@@ -321,12 +333,11 @@ private struct PaneView: View {
   let projectID: ProjectID
   let agentStateStore: AgentStateStore?
   /// True when this leaf sits below at least one split node — i.e. the
-  /// Worktree has more than one Pane. A lone Pane skips the dim overlay and
-  /// the drag handle since there is nothing to re-arrange against.
+  /// Worktree has more than one Pane. A lone Pane skips the dim overlay.
   let isSplit: Bool
-  /// Shared drop-highlight state (one per viewport). This leaf renders the
-  /// edge overlay only while it is the active target — see `PaneDropHighlight`.
-  @Environment(PaneDropHighlight.self) private var dropHighlight
+  /// The viewport's tab-chip drag. This leaf registers its strip and content
+  /// frames and draws the edge overlay only while it is the drop target.
+  @Environment(TabDragSession.self) private var tabDrag
   @Environment(HierarchyManager.self) private var hierarchyManager
   /// Pulled in so the dim overlay re-evaluates when the user flips Appearance
   /// (or the OS auto-switches). `unfocusedSplitFill()` resolves against the
@@ -349,13 +360,13 @@ private struct PaneView: View {
   @Dependency(TerminalClient.self) private var terminalClient
 
   var body: some View {
-    // Read the shared highlight in the body's OWN tracking scope (not only
-    // inside the nested `.overlay`/`GeometryReader` closures). Observation only
+    // Read the drop target in the body's OWN tracking scope (not only inside
+    // the nested `.overlay`/`GeometryReader` closures). Observation only
     // re-renders this leaf for property reads it captured while evaluating
-    // `body`; reading it solely inside a child closure means the overlay shows
-    // during the drag (the active session forces re-renders) but never retracts
-    // when `clear()` runs on drop — the stuck-highlight bug.
-    let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
+    // `body`; a read solely inside a child closure can leave the overlay up
+    // after the drop clears the target.
+    let activeDropZone: PaneDropZone? =
+      if case .edge(paneID, let zone)? = tabDrag.target { zone } else { nil }
     return VStack(spacing: 0) {
       TabBarView(
         store: tabBarStore,
@@ -365,36 +376,12 @@ private struct PaneView: View {
         isFocused: isFocused,
         agentStateStore: agentStateStore
       )
+      .onGeometryChange(
+        for: CGRect.self, of: { $0.frame(in: .global) },
+        action: { tabDrag.setStripFrame($0, for: paneID) })
       GeometryReader { geo in
         paneContent(slotSize: geo.size)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          // Grab affordance — only meaningful when there is somewhere to move to.
-          .overlay(alignment: .top) {
-            if isSplit {
-              PaneDragHandle(paneID: paneID)
-            }
-          }
-          // Drop target. The custom `.touchCodePaneID` type (declared in the
-          // app's Info.plist `UTExportedTypeDeclarations`) is what makes
-          // `validateDrop` match the dragged item — without that declaration the
-          // pasteboard type is a dynamic UTI that never conforms, so the drop is
-          // silently rejected. `geo.size` feeds the edge-zone math.
-          .background {
-            Color.clear
-              .contentShape(.rect)
-              .onDrop(
-                of: [.touchCodePaneID],
-                delegate: PaneDropDelegate(
-                  anchorID: paneID,
-                  viewSize: geo.size,
-                  highlight: dropHighlight,
-                  commit: { sourceID, zone in
-                    store.send(
-                      .movePaneRequested(sourceID, anchor: paneID, direction: zone.splitDirection))
-                  }
-                )
-              )
-          }
           // Drop-zone highlight, drawn above the surface but never hit-tested.
           // Shown only while this leaf is the active drop target.
           .overlay {
@@ -403,6 +390,13 @@ private struct PaneView: View {
             }
           }
       }
+      .onGeometryChange(
+        for: CGRect.self, of: { $0.frame(in: .global) },
+        action: { tabDrag.setContentFrame($0, for: paneID) })
+    }
+    .onDisappear {
+      tabDrag.setStripFrame(nil, for: paneID)
+      tabDrag.setContentFrame(nil, for: paneID)
     }
     .id(paneID)
   }
