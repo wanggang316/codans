@@ -33,7 +33,7 @@ struct CreateWorkspaceFeatureTests {
 
   private let appDefaults = MemberCreationOptions(
     sourceGitRoot: "/src/app", name: "app", baseRef: "origin/release", fetch: true, copyIgnored: true,
-    copyUntracked: false, agentProfileID: UUID(99), setupCommand: "make setup")
+    copyUntracked: false, setupCommand: "make setup")
   private let apiDefaults = MemberCreationOptions(
     sourceGitRoot: "/src/api", name: "api", baseRef: "origin/main", fetch: false, copyIgnored: false,
     copyUntracked: true)
@@ -62,17 +62,13 @@ struct CreateWorkspaceFeatureTests {
     _ initial: Feature.State,
     workspace: WorkspaceClient? = nil,
     clock: TestClock<Duration> = TestClock(),
-    agentProfiles: [AgentProfile] = [],
     pickFolder: @escaping @Sendable () -> URL? = { nil }
   ) -> TestStore<Feature.State, Feature.Action> {
-    let settings = Settings(agents: AgentSettings(profiles: agentProfiles))
-    return TestStore(initialState: initial) {
+    TestStore(initialState: initial) {
       Feature()
     } withDependencies: {
       $0.gitWorktreeClient = gitClient(appRefs)
       $0[WorkspaceClient.self] = workspace ?? workspaceClient()
-      $0[SettingsWriter.self].readSnapshotSync = { settings }
-      $0[SettingsWriter.self].readSnapshot = { settings }
       $0.continuousClock = clock
       $0.uuid = .incrementing
       $0.fileExists = { _ in false }
@@ -291,21 +287,19 @@ struct CreateWorkspaceFeatureTests {
 
   @Test
   func newGroupSeedsEveryProjectFromItsDefaults() async {
-    let profile = AgentProfile(kind: .claudeCode, name: "Claude")
     let asked = LockIsolated<[ProjectID]>([])
     var client = workspaceClient()
     client.groupCreationDefaults = { projectID in
       asked.withValue { $0.append(projectID) }
       return [appDefaults, apiDefaults]
     }
-    let store = makeStore(groupState(), workspace: client, agentProfiles: [profile])
+    let store = makeStore(groupState(), workspace: client)
     store.exhaustivity = .off(showSkippedAssertions: false)
 
     #expect(store.state.createHint == "Loading the workspace\u{2019}s projects\u{2026}")
     await store.send(.onAppear)
     await store.receive(\.groupDefaultsLoaded) {
       $0.isLoadingMembers = false
-      $0.agentProfiles = [profile]
     }
     #expect(asked.value == [workspaceID])
     #expect(store.state.groupMembers.map(\.options) == [appDefaults, apiDefaults])
@@ -315,42 +309,19 @@ struct CreateWorkspaceFeatureTests {
     #expect(store.state.createHint == "Enter a group name.")
 
     // One branch for every project, the group name unless typed.
-    await store.send(.groupNameChanged("feat"))
-    #expect(store.state.groupPlan?.branch == "feat")
+    await store.send(.groupNameChanged("feat/abc"))
+    #expect(store.state.groupPlan?.branch == "feat/abc")
     await store.send(.branchChanged("task/feat"))
     // Each project keeps its own options.
     await store.send(.groupMember("/src/api", .baseRefChanged("origin/release")))
-    await store.send(.groupMember("/src/api", .agentChanged(profile.id)))
     await store.send(.groupMember("/src/app", .fetchChanged(false)))
     var app = appDefaults
     app.fetch = false
     var api = apiDefaults
     api.baseRef = "origin/release"
-    api.agentProfileID = profile.id
     #expect(
       store.state.groupPlan
-        == WorkspaceGroupPlan(projectID: workspaceID, name: "feat", branch: "task/feat", members: [app, api]))
-  }
-
-  /// The live synchronous read asserts the main actor, and the load effect
-  /// resumes off it after the defaults arrive: it must read asynchronously.
-  @Test
-  func newGroupReadsAgentProfilesWithoutTheMainActorOnlyRead() async {
-    let profile = AgentProfile(kind: .claudeCode, name: "Claude")
-    var client = workspaceClient()
-    client.groupCreationDefaults = { _ in [appDefaults, apiDefaults] }
-    let store = makeStore(groupState(), workspace: client, agentProfiles: [profile])
-    store.exhaustivity = .off(showSkippedAssertions: false)
-    store.dependencies[SettingsWriter.self].readSnapshotSync = {
-      Issue.record("readSnapshotSync called from an effect")
-      return .default
-    }
-
-    await store.send(.onAppear)
-    await store.receive(\.groupDefaultsLoaded) {
-      $0.isLoadingMembers = false
-      $0.agentProfiles = [profile]
-    }
+        == WorkspaceGroupPlan(projectID: workspaceID, name: "feat/abc", branch: "task/feat", members: [app, api]))
   }
 
   @Test

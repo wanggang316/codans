@@ -21,9 +21,10 @@
 ### 创建与成员状态
 
 - 新建入口用于创建命名工作区组：弹窗提供统一分支名称（留空用组名），覆盖全部成员，不允许逐项目覆盖分支名称。任一项目存在同名分支时，在该项目下提示并阻止创建。
-- 每个项目单独配置 Base ref、Fetch、复制 ignored / untracked 文件、启动 Agent；默认值沿用各项目设置。
+- 组名可包含斜杠，例如 `feat/abc`；展示名与默认分支名保留原值，目录名沿用 Workspace 标题的规范化规则（`feat-abc`）。校验、创建与 manifest 使用同一个派生目录名，并拒绝目录冲突；已有组保留记录的路径。
+- 每个项目单独配置 Base ref、Fetch、复制 ignored / untracked 文件；默认值沿用各项目设置。GUI 不提供项目级 Launch agent，也不继承源项目的自动启动 Agent 设置。
 - 任一成员 checkout 创建失败时，整体回滚本次新建的 checkout 和分支，保留表单供修正重试；清理失败时列出残留目录与原因。
-- 全部 checkout 创建成功后才执行各项目的 setup script 和 Agent 启动。脚本失败保留工作区组并报告错误，不承诺回滚脚本副作用。
+- 全部 checkout 创建成功后才执行各项目的 setup script。脚本失败保留工作区组并报告错误，不承诺回滚脚本副作用。
 - 组关联各项目的 worktree，不以当前分支作为成员身份。成员分支发生变化时，刷新成员展示及组的分支汇总，不改变成员归属与行 ID；统一分支名称是创建时的约束。
 - Workspace 项目列表的增删立即影响 `default`，并用于后续新建组；已有命名组保留创建时的成员，不随项目列表变化自动增删 checkout。
 
@@ -210,8 +211,8 @@ WorkspaceHandlers (workspace.*) ─┘
 
 - `createGroupStream(plan, token)`：先再跑一次 preflight，任一阻塞问题在 I/O 前失败；逐项目可选 fetch，再以 `createWorktreeStream(pathOverride: <root>/<group>/<name>)` 检出，记账（`createdDirectory`、仅在分支原本不存在时记 `createdBranch`、`addedWorktree`）。
 - 任一检出失败或取消：在 `Task.detached` 中逆序回滚，`rolledBack(failures)` 报告残留路径与原因，manifest 与 catalog 不写入。worktree 移除失败时保留包含它的组目录，并报告该目录与原因。preflight 要求计划包含当前所有源项目（`missingSource`）。
-- 全部检出完成：写 manifest、reconcile、发出 `registered`；然后逐成员跑 setup script（失败记为 `setupFailed`，组保留）；流以 `GroupCreationResult` 结束，`RootFeature` 随后为每个成员启动所选 Agent 并选中、展开该组。
-- GUI：Workspace 行 `+` 打开 `.newGroup` sheet：Name、Branch（留空用组名），每个项目一节（Based on、Fetch、Copy ignored、Copy untracked、Launch agent），默认值来自 `groupCreationDefaults`。
+- 全部检出完成：写 manifest、reconcile、发出 `registered`；然后逐成员跑 setup script（失败记为 `setupFailed`，组保留）；流以 `GroupCreationResult` 结束，`RootFeature` 随后选中、展开该组；CLI 的显式 `--agent` 仍可在组创建后启动指定 Agent。
+- GUI：Workspace 行 `+` 打开 `.newGroup` sheet：Name、Branch（留空用组名），每个项目一节（Based on、Fetch、Copy ignored、Copy untracked），默认值来自 `groupCreationDefaults`。
 
 ### 删除与移除
 

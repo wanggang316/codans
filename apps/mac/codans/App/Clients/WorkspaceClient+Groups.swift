@@ -5,9 +5,9 @@ import Foundation
 // `<root>/<group>/<name>`; the checkouts succeed or are rolled back as a
 // whole, and setup commands run only after all of them exist.
 extension WorkspaceClient {
-  /// Per source, the same defaults ordinary worktree creation uses: the
-  /// project's settings chained to the global ones. A source that is not a
-  /// registered Project uses the global settings.
+  /// Per-source checkout and setup defaults, without automatic agent launch.
+  /// Project settings fall back to global settings; an unregistered source
+  /// uses the global settings.
   @MainActor
   static func groupCreationDefaults(projectID: ProjectID, context: Context) async -> [MemberCreationOptions] {
     guard let project = try? workspaceProject(projectID, context: context),
@@ -15,7 +15,6 @@ extension WorkspaceClient {
     else { return [] }
     let settings = context.settings()
     let projects = context.hierarchy.snapshot().projects
-    let enabledProfiles = Set(settings.agents.enabledProfiles.map(\.id))
     var result: [MemberCreationOptions] = []
     for source in manifest.projects {
       let sourceGitRoot = canonical(source.sourceGitRoot)
@@ -39,7 +38,6 @@ extension WorkspaceClient {
           fetch: git?.fetchRemoteOnWorktreeCreate ?? context.fetchRemoteOnCreate(),
           copyIgnored: git?.copyIgnoredOnWorktreeCreate ?? settings.worktree.copyIgnoredOnCreate,
           copyUntracked: git?.copyUntrackedOnWorktreeCreate ?? settings.worktree.copyUntrackedOnCreate,
-          agentProfileID: git?.launchAgentProfileOnWorktreeCreate.flatMap { enabledProfiles.contains($0) ? $0 : nil },
           setupCommand: setup?.isEmpty == false ? setup : nil))
     }
     return result
@@ -103,16 +101,18 @@ extension WorkspaceClient {
     if name == WorkspaceLayout.defaultGroupName {
       return [.init(kind: .reservedGroupName, message: "\u{201C}\(name)\u{201D} is reserved.")]
     }
-    guard WorkspaceManifest.isValidChildPath(name), name != WorkspaceLayout.stateDirectoryName else {
-      return [.init(kind: .invalidGroupName, message: "\u{201C}\(name)\u{201D} is not a valid folder name.")]
+    guard name != WorkspaceLayout.stateDirectoryName else {
+      return [.init(kind: .reservedGroupName, message: "\u{201C}\(name)\u{201D} is reserved.")]
     }
-    if manifest.groups.contains(where: { $0.name == name || $0.path == name }) {
+    if manifest.groups.contains(where: { $0.name == name }) {
       return [
         .init(kind: .duplicateGroupName, message: "The workspace already has a group named \u{201C}\(name)\u{201D}.")
       ]
     }
-    let directory = (rootPath as NSString).appendingPathComponent(name)
-    if FileManager.default.fileExists(atPath: directory) {
+    let directory = (rootPath as NSString).appendingPathComponent(plan.directoryName)
+    if manifest.groups.contains(where: { $0.path == plan.directoryName })
+      || FileManager.default.fileExists(atPath: directory)
+    {
       return [.init(kind: .destinationExists, message: "\(tilde(directory)) already exists.")]
     }
     return []
@@ -171,7 +171,7 @@ extension WorkspaceClient {
     let project = try workspaceProject(plan.projectID, context: context)
     let rootPath = project.rootPath
     let branch = plan.branch.trimmingCharacters(in: .whitespacesAndNewlines)
-    let groupPath = (rootPath as NSString).appendingPathComponent(plan.name)
+    let groupPath = (rootPath as NSString).appendingPathComponent(plan.directoryName)
 
     var ledger = WorkspaceMaterializationLedger()
     let group: WorkspaceGroupsManifest.Group
@@ -185,11 +185,11 @@ extension WorkspaceClient {
           member, branch: branch, groupPath: groupPath, ledger: &ledger, context: context, yield: yield)
       }
       group = WorkspaceGroupsManifest.Group(
-        id: WorkspaceGroupID(), name: plan.name, kind: .named, path: plan.name, branch: branch,
+        id: WorkspaceGroupID(), name: plan.name, kind: .named, path: plan.directoryName, branch: branch,
         createdAt: Date(),
         members: plan.members.map { member in
           WorkspaceGroupsManifest.Member(
-            id: WorkspaceMemberID(), name: member.name, path: "\(plan.name)/\(member.name)",
+            id: WorkspaceMemberID(), name: member.name, path: "\(plan.directoryName)/\(member.name)",
             sourceGitRoot: canonical(member.sourceGitRoot), checkoutMode: .newBranch, branch: branch,
             baseRef: member.baseRef, createdBranch: true)
         })
