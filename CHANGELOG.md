@@ -16,8 +16,27 @@ and the project does not yet follow semantic versioning — every release until
   agent needs, and a new error state when the agent reports a failure.
   `codans agent status` adds `source`, `blockedKind`, and `message`.
   Other agents still read from the screen.
+- **Workspaces hold groups.** A Workspace lists its source projects in a
+  starred `default` group that links to each project's main checkout as
+  it is, with no branch created or switched. A named group (the header's
+  `+`, or `codans workspace group create`) checks out one branch in every
+  project, with each project's own base ref, fetch, and copy settings,
+  and starts agents only after every checkout exists. Each group and each
+  member has its own terminal; groups open and close on their own. A
+  member that switches branch stays in its group. Deleting a group checks
+  every member first and asks before it discards uncommitted changes,
+  unpushed commits, or running terminals; items it cannot remove stay
+  with a Retry.
 
 ### Changed
+
+- **Breaking: the catalog moves to version 4.** The first launch migrates
+  a version 3 catalog, keeps a copy in `backups/`, and puts each existing
+  Workspace's checkouts and terminals into a named group `existing`, with
+  paths, branches, and tab and pane ids kept. A Workspace manifest moves
+  to `.codans/workspace-groups.json`; the old `workspace.json` stays
+  untouched. Earlier builds cannot read the new catalog. A catalog from a
+  newer build stays on disk unchanged and this build does not save over it.
 
 - **The finished agent state is now called done.** `codans agent status`
   reports `done`, and `codans agent wait --until done` (or `error`) waits
@@ -27,6 +46,12 @@ and the project does not yet follow semantic versioning — every release until
 ### Deprecated
 
 ### Removed
+
+- **Breaking: `codans workspace` no longer takes branch flags.**
+  `workspace create` and `workspace add` take source projects only; the
+  branch and checkout flags (`--branch`, `--existing`, `--track`, …) and
+  `workspace drop --keep-branch` fail with a pointer to `codans workspace
+  group create` and `group delete`.
 
 ### Fixed
 

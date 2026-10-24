@@ -207,6 +207,32 @@ nonisolated struct GitWorktreeClient: Sendable {
 
   var fetchRemote: @Sendable (_ repoRoot: URL, _ remote: String) async throws -> Void
   var changedFiles: @Sendable (_ worktreeRoot: URL) async throws -> [String]
+  /// Runs a project setup command (`bash -lc`) in `directory`, passing each
+  /// output line to `onLine`. The same runner `createWorktreeStream` uses
+  /// for its setup phase; callers that check out several worktrees first
+  /// run setup afterwards through this. Cancelling the calling task
+  /// terminates the child. Local only. Defaults to a stub that reports a
+  /// start failure so existing memberwise callers stay source-compatible.
+  var runSetupScript:
+    @Sendable (_ directory: URL, _ command: String, _ onLine: @escaping @Sendable (String) -> Void) async
+      -> SetupScriptOutcome = { _, _, _ in .failedToStart(reason: "not configured") }
+}
+
+/// How a project setup command ended. Setup is best-effort: no outcome
+/// throws or undoes the checkout it ran in.
+nonisolated enum SetupScriptOutcome: Equatable, Sendable {
+  case succeeded
+  case failedToStart(reason: String)
+  case exited(code: Int32)
+
+  /// One line for the user; nil on success.
+  var failureReason: String? {
+    switch self {
+    case .succeeded: return nil
+    case .failedToStart(let reason): return "setup script failed to start: \(reason)"
+    case .exited(let code): return "setup script exited with code \(code)"
+    }
+  }
 }
 
 // MARK: - Pure helpers (visible for tests)
@@ -968,8 +994,44 @@ nonisolated extension GitWorktreeClient {
         )
         let stdout = try extractStdout(outcome, command: "git status --porcelain")
         return parsePorcelainPaths(stdout)
+      },
+
+      runSetupScript: { directory, command, onLine in
+        let processBox = CreateWorktreeProcessBox()
+        return await withTaskCancellationHandler {
+          await runLocalSetupScript(
+            command: command, directory: directory,
+            onSpawn: { process in
+              processBox.set(process)
+              onCreateWorktreeSpawn?(process)
+            },
+            onLine: onLine)
+        } onCancel: {
+          processBox.terminateIfRunning()
+        }
       }
     )
+  }
+
+  /// `bash -lc <command>` in `directory`, every stdout and stderr line to
+  /// `onLine`. Shared by the setup phase of `createWorktreeStream` and
+  /// `runSetupScript`.
+  static func runLocalSetupScript(
+    command: String,
+    directory: URL,
+    onSpawn: @Sendable (Process) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> SetupScriptOutcome {
+    let outcome = await GitWorktreeShell.runStream(
+      executable: URL(fileURLWithPath: "/bin/bash"),
+      arguments: ["-lc", command],
+      cwd: directory,
+      onSpawn: onSpawn,
+      onStdout: onLine,
+      onStderr: onLine
+    )
+    if let reason = outcome.spawnFailedReason { return .failedToStart(reason: reason) }
+    return outcome.exitCode == 0 ? .succeeded : .exited(code: outcome.exitCode)
   }
 
   /// Remote worktree listing mapped into the local `GitWtEntry` shape so the
@@ -1102,7 +1164,6 @@ nonisolated extension GitWorktreeClient {
 
   // Local streaming `wt sw` creation body, extracted verbatim so the routed
   // `createWorktreeStream` closure stays readable.
-  // swiftlint:disable:next function_body_length
   private static func makeLocalCreateWorktreeStream(
     spec: CreateWorktreeSpec,
     onCreateWorktreeSpawn: (@Sendable (Process) -> Void)?
@@ -1209,26 +1270,20 @@ nonisolated extension GitWorktreeClient {
           let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
           if let setup, !setup.isEmpty {
             continuation.yield(.setupPhaseBegan(worktreePath: worktreeURL))
-            let setupOutcome = await GitWorktreeShell.runStream(
-              executable: URL(fileURLWithPath: "/bin/bash"),
-              arguments: ["-lc", setup],
-              cwd: worktreeURL,
+            let setupOutcome = await runLocalSetupScript(
+              command: setup,
+              directory: worktreeURL,
               onSpawn: { process in
                 processBox.set(process)
                 onCreateWorktreeSpawn?(process)
               },
-              onStdout: { line in continuation.yield(.progressLine(line)) },
-              onStderr: { line in continuation.yield(.progressLine(line)) }
+              onLine: { line in continuation.yield(.progressLine(line)) }
             )
             // Best-effort: a spawn failure or non-zero exit from the
             // setup script must NOT throw or roll back the worktree.
             // We note it as a final progress line and still finish.
-            if let reason = setupOutcome.spawnFailedReason {
-              continuation.yield(
-                .progressLine("setup script failed to start: \(reason)"))
-            } else if setupOutcome.exitCode != 0 {
-              continuation.yield(
-                .progressLine("setup script exited with code \(setupOutcome.exitCode)"))
+            if let reason = setupOutcome.failureReason {
+              continuation.yield(.progressLine(reason))
             }
           }
 

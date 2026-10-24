@@ -20,21 +20,28 @@ public nonisolated struct WorkspaceMembership: Equatable, Sendable {
   }
 }
 
+extension Worktree {
+  /// Whether this row is a checkout a Workspace group owns. Only these rows
+  /// make a directory a Workspace member: a reference shares the source main
+  /// checkout's path but does not own it, and a group row is a plain folder.
+  public var isWorkspaceMember: Bool {
+    workspaceSlot?.role == .member
+  }
+}
+
 extension Catalog {
-  /// The workspace child row whose directory is `canonicalPath`, if any.
-  /// Root rows never match — the workspace root is not a child of itself.
-  /// `canonicalize` is applied to every stored row path so callers can
-  /// compare in the form they already hold (the app passes its symlink-
+  /// The Workspace member row whose directory is `canonicalPath`, if any.
+  /// Group rows, references, and rows the reconcile has not placed never
+  /// match. `canonicalize` is applied to every stored row path so callers
+  /// can compare in the form they already hold (the app passes its symlink-
   /// resolving canonicalizer; tests may pass identity).
   public func workspaceMembership(
     forCanonicalPath canonicalPath: String,
     canonicalize: (String) -> String
   ) -> WorkspaceMembership? {
     for project in projects where project.isWorkspace {
-      let root = canonicalize(project.rootPath)
-      for worktree in project.worktrees {
-        let path = canonicalize(worktree.path)
-        guard path != root, path == canonicalPath else { continue }
+      for worktree in project.worktrees where worktree.isWorkspaceMember {
+        guard canonicalize(worktree.path) == canonicalPath else { continue }
         return WorkspaceMembership(
           projectID: project.id, worktreeID: worktree.id, workspaceName: project.name)
       }
@@ -44,17 +51,18 @@ extension Catalog {
 }
 
 /// Display-only membership for registered local rows. Command guards use the
-/// live path lookup above. Rebuilding depends on identity, not terminal state.
+/// live path lookup above. Rebuilding depends on identity, paths, and
+/// Workspace slots, not terminal state.
 public nonisolated struct WorkspaceMembershipIndex {
   private struct Row: Equatable {
     let id: WorktreeID
     let path: String
+    let isMember: Bool
   }
 
   private struct Source: Equatable {
     let id: ProjectID
     let workspaceName: String?
-    let rootPath: String?
     let rows: [Row]
   }
 
@@ -73,8 +81,9 @@ public nonisolated struct WorkspaceMembershipIndex {
       Source(
         id: project.id,
         workspaceName: project.isWorkspace ? project.name : nil,
-        rootPath: project.isWorkspace ? project.rootPath : nil,
-        rows: project.worktrees.map { Row(id: $0.id, path: $0.path) })
+        rows: project.worktrees.map {
+          Row(id: $0.id, path: $0.path, isMember: project.isWorkspace && $0.isWorkspaceMember)
+        })
     }
     guard next != sources else { return }
     sources = next
@@ -88,11 +97,10 @@ public nonisolated struct WorkspaceMembershipIndex {
     }
     var byPath: [String: WorkspaceMembership] = [:]
     for source in next {
-      guard let name = source.workspaceName, let rootPath = source.rootPath else { continue }
-      let root = resolve(rootPath)
-      for row in source.rows {
+      guard let name = source.workspaceName else { continue }
+      for row in source.rows where row.isMember {
         let path = resolve(row.path)
-        guard path != root, byPath[path] == nil else { continue }
+        guard byPath[path] == nil else { continue }
         byPath[path] = WorkspaceMembership(
           projectID: source.id, worktreeID: row.id, workspaceName: name)
       }

@@ -33,4 +33,13 @@ public nonisolated enum WorkspaceCreationEvent: Equatable, Sendable {
   /// Rollback finished. `failures` names what could not be undone and needs
   /// a hand — empty means the disk is as it was.
   case rolledBack(failures: [String])
+  /// Every checkout of a new group exists, the manifest records the group,
+  /// and its rows are in the catalog.
+  case groupRegistered(groupID: WorkspaceGroupID, memberWorktreeIDs: [WorktreeID])
+  /// A member's setup command started, after every checkout exists.
+  case setupStarted(name: String)
+  /// A member's setup command failed. The group stays.
+  case setupFailed(name: String, reason: String)
+  /// Last event of a successful group creation.
+  case groupCreated(GroupCreationResult)
 }

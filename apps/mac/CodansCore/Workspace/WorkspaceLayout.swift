@@ -14,6 +14,16 @@ public nonisolated enum WorkspaceLayout {
   public static let stateDirectoryName = HandoffLayout.stateDirectoryName
   /// Manifest file inside the state directory.
   public static let manifestFileName = "workspace.json"
+  /// Group manifest (schema 2) inside the state directory. A separate file
+  /// from the version 1 manifest: version 1 writers drop unknown keys, so
+  /// they must never see group data.
+  public static let groupsManifestFileName = "workspace-groups.json"
+  /// Reserved name and preferred folder of the `default` group.
+  public static let defaultGroupName = "default"
+  /// Name of the named group that migration builds from version 1 members.
+  public static let migratedGroupName = "existing"
+  /// Path of the migrated group: the Workspace root itself.
+  public static let migratedGroupPath = "."
 
   /// `.codans/workspace.json` — the manifest as an agent sees it from the
   /// workspace root.
@@ -32,6 +42,11 @@ public nonisolated enum WorkspaceLayout {
 
   public static func manifestURL(rootPath: String) -> URL {
     manifestURL(rootURL: URL(fileURLWithPath: rootPath, isDirectory: true))
+  }
+
+  public static func groupsManifestURL(rootPath: String) -> URL {
+    stateDirectoryURL(rootURL: URL(fileURLWithPath: rootPath, isDirectory: true))
+      .appending(path: groupsManifestFileName, directoryHint: .notDirectory)
   }
 
   /// Where new workspaces are created when the caller names no folder:

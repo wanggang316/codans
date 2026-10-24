@@ -1,8 +1,8 @@
 import ArgumentParser
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Foundation
 
 struct TreeCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -129,29 +129,31 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
       lines.append("\(project.name)  \(project.id)\(kindSuffix)")
       lines.append("  path: \(project.rootPath)")
 
-      let worktrees = project.worktrees.filter { !$0.archived }
-      for (worktreeIndex, worktree) in worktrees.enumerated() {
+      for (worktreeIndex, row) in Self.rows(of: project).enumerated() {
+        let worktree = row.worktree
+        let indent = String(repeating: "  ", count: row.depth)
         let selectedWorktree = worktree.id == project.selectedWorktreeID ? "*" : " "
         let branch = worktree.branch ?? "no branch"
         let pinned = worktree.isPinned ? " pinned" : ""
+        let group = IPC.WorkspaceGroupRef(worktree: worktree, in: project).map { Self.label(for: $0) } ?? ""
 
         lines.append(
-          "  [\(selectedWorktree)] Worktree \(worktreeIndex + 1): \(worktree.name)  [\(branch)]\(pinned)  \(worktree.id)"
+          "\(indent)  [\(selectedWorktree)] Worktree \(worktreeIndex + 1): \(worktree.name)  [\(branch)]\(pinned)\(group)  \(worktree.id)"
         )
-        lines.append("      path: \(worktree.path)")
+        lines.append("\(indent)      path: \(worktree.path)")
 
         for (tabIndex, tab) in worktree.tabs.enumerated() {
           let selectedTab = tab.id == worktree.selectedTabID ? "*" : " "
           let title = tab.name ?? tab.cachedDisplayTitle ?? "untitled"
           let tabLabel = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" } ?? "\(tabIndex + 1)"
 
-          lines.append("      [\(selectedTab)] Tab \(tabLabel): \(title)  \(tab.id)")
+          lines.append("\(indent)      [\(selectedTab)] Tab \(tabLabel): \(title)  \(tab.id)")
 
           for (paneIndex, pane) in tab.panes.enumerated() {
             let labels = pane.labels.sorted()
             let labelSuffix = labels.isEmpty ? "" : "  @\(labels.joined(separator: ",@"))"
             let paneLabel = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" } ?? "\(paneIndex + 1)"
-            lines.append("            Pane \(paneLabel): \(pane.workingDirectory)  \(pane.id)\(labelSuffix)")
+            lines.append("\(indent)            Pane \(paneLabel): \(pane.workingDirectory)  \(pane.id)\(labelSuffix)")
           }
         }
       }
@@ -161,6 +163,38 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
       }
     }
     return lines.joined(separator: "\n")
+  }
+
+  /// Unarchived rows in display order. A workspace nests each group's
+  /// rows under its group row (`default` first); rows without a group
+  /// follow at the top level.
+  static func rows(of project: Project) -> [(worktree: Worktree, depth: Int)] {
+    let live = project.worktrees.filter { !$0.archived }
+    guard project.isWorkspace, !project.workspaceGroups.isEmpty else { return live.map { ($0, 0) } }
+    let groups =
+      project.workspaceGroups.filter { $0.kind == .default } + project.workspaceGroups.filter { $0.kind != .default }
+    var rows: [(worktree: Worktree, depth: Int)] = []
+    var placed = Set<WorktreeID>()
+    for group in groups {
+      let inGroup = live.filter { $0.workspaceSlot?.groupID == group.id }
+      for worktree in inGroup where worktree.workspaceSlot?.role == .groupTerminal {
+        rows.append((worktree, 0))
+      }
+      for worktree in inGroup where worktree.workspaceSlot?.role != .groupTerminal {
+        rows.append((worktree, 1))
+      }
+      placed.formUnion(inGroup.map(\.id))
+    }
+    rows += live.filter { !placed.contains($0.id) }.map { ($0, 0) }
+    return rows
+  }
+
+  private static func label(for ref: IPC.WorkspaceGroupRef) -> String {
+    switch ref.role {
+    case .groupTerminal: return "  (group \(ref.name))"
+    case .reference: return "  (project in \(ref.name))"
+    case .member: return "  (member of \(ref.name))"
+    }
   }
 }
 
@@ -181,8 +215,8 @@ struct HierarchyProjectDTO: Encodable {
     self.gitRoot = project.gitRoot
     self.kind = project.kind.rawValue
     self.selectedWorktreeID = project.selectedWorktreeID?.description
-    self.worktrees = project.worktrees.filter { !$0.archived }
-      .map { HierarchyWorktreeDTO(worktree: $0, handles: handles) }
+    self.worktrees = HierarchyTreeRenderable.rows(of: project)
+      .map { HierarchyWorktreeDTO(worktree: $0.worktree, project: project, handles: handles) }
   }
 }
 
@@ -194,15 +228,27 @@ struct HierarchyWorktreeDTO: Encodable {
   /// Repository root for a workspace child checkout; null otherwise (the
   /// Project's `gitRoot` applies).
   let sourceGitRoot: String?
+  /// `{id, name, role}` for a workspace row (`role`: `groupTerminal`,
+  /// `reference`, or `member`); null otherwise.
+  let workspaceGroup: WorkspaceGroupDTO?
   let selectedTabID: String?
   let tabs: [HierarchyTabDTO]
 
-  init(worktree: Worktree, handles: IPC.TargetHandles?) {
+  struct WorkspaceGroupDTO: Encodable {
+    let id: String
+    let name: String
+    let role: String
+  }
+
+  init(worktree: Worktree, project: Project, handles: IPC.TargetHandles?) {
     self.id = worktree.id.description
     self.name = worktree.name
     self.path = worktree.path
     self.branch = worktree.branch
     self.sourceGitRoot = worktree.sourceGitRoot
+    self.workspaceGroup = IPC.WorkspaceGroupRef(worktree: worktree, in: project).map {
+      WorkspaceGroupDTO(id: $0.id.description, name: $0.name, role: $0.role.rawValue)
+    }
     self.selectedTabID = worktree.selectedTabID?.description
     self.tabs = worktree.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
   }

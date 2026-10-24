@@ -4,9 +4,15 @@ import Testing
 @testable import CodansCore
 
 struct WorkspaceMembershipIndexTests {
+  private static let group = WorkspaceGroupID()
+
+  private func member(_ name: String, path: String) -> Worktree {
+    Worktree(name: name, path: path, workspaceSlot: WorkspaceSlot(groupID: Self.group, role: .member))
+  }
+
   @Test
   func aliasesMatchAndUnrelatedChangesDoNotResolvePathsAgain() {
-    let child = Worktree(name: "app", path: "/real/ws/app")
+    let child = member("app", path: "/real/ws/app")
     let mirror = Worktree(name: "mirror", path: "/alias/ws/app")
     var catalog = Catalog(projects: [
       Project(name: "ws", rootPath: "/real/ws", worktrees: [child], isWorkspace: true),
@@ -21,7 +27,7 @@ struct WorkspaceMembershipIndexTests {
     index.update(catalog: catalog, canonicalize: normalize)
     #expect(index.memberships[mirror.id]?.worktreeID == child.id)
     let initialCalls = calls
-    #expect(initialCalls == 3)
+    #expect(initialCalls == 2)
     catalog.projects[1].worktrees[0].name = "Renamed"
     catalog.projects[1].worktrees[0].isPinned = true
     catalog.projects[1].selectedWorktreeID = mirror.id
@@ -53,11 +59,11 @@ struct WorkspaceMembershipIndexTests {
 
   @Test
   func duplicateMembershipUsesCatalogOrderIncludingArchivedChildren() {
-    var child = Worktree(name: "app", path: "/ws/app")
+    var child = member("app", path: "/ws/app")
     child.archived = true
     let first = Project(name: "first", rootPath: "/ws", worktrees: [child], isWorkspace: true)
     let second = Project(
-      name: "second", rootPath: "/other", worktrees: [Worktree(name: "app", path: child.path)],
+      name: "second", rootPath: "/other", worktrees: [member("app", path: child.path)],
       isWorkspace: true)
     var catalog = Catalog(projects: [first, second])
     var index = WorkspaceMembershipIndex()
@@ -69,17 +75,37 @@ struct WorkspaceMembershipIndexTests {
   }
 
   @Test
-  func rootsDoNotMatchAndChangedPathsRemoveMembership() {
-    let root = Worktree(name: "root", path: "/ws")
-    let child = Worktree(name: "app", path: "/ws/app")
-    var catalog = Catalog(projects: [
-      Project(name: "ws", rootPath: "/ws", worktrees: [root, child], isWorkspace: true)
+  func referencesAndGroupRowsGiveTheSourceMainRowNoMembership() {
+    let groupRow = Worktree(
+      name: "default", path: "/ws/default",
+      workspaceSlot: WorkspaceSlot(groupID: Self.group, role: .groupTerminal))
+    let reference = Worktree(
+      name: "app", path: "/src/app", workspaceSlot: WorkspaceSlot(groupID: Self.group, role: .reference))
+    let sourceMain = Worktree(name: "main", path: "/src/app")
+    let catalog = Catalog(projects: [
+      Project(name: "ws", rootPath: "/ws", worktrees: [groupRow, reference], isWorkspace: true),
+      Project(name: "app", rootPath: "/src/app", gitRoot: "/src/app", worktrees: [sourceMain]),
     ])
     var index = WorkspaceMembershipIndex()
     index.update(catalog: catalog, canonicalize: { $0 })
-    #expect(index.memberships[root.id] == nil)
+    #expect(index.memberships.isEmpty)
+  }
+
+  @Test
+  func slotChangesRebuildTheIndex() {
+    let child = Worktree(name: "app", path: "/ws/app")
+    var catalog = Catalog(projects: [
+      Project(name: "ws", rootPath: "/ws", worktrees: [child], isWorkspace: true)
+    ])
+    var index = WorkspaceMembershipIndex()
+    index.update(catalog: catalog, canonicalize: { $0 })
+    #expect(index.memberships.isEmpty)
+
+    catalog.projects[0].worktrees[0].workspaceSlot = WorkspaceSlot(groupID: Self.group, role: .member)
+    index.update(catalog: catalog, canonicalize: { $0 })
     #expect(index.memberships[child.id]?.worktreeID == child.id)
-    catalog.projects[0].worktrees[1].path = "/ws"
+
+    catalog.projects[0].worktrees[0].workspaceSlot = WorkspaceSlot(groupID: Self.group, role: .reference)
     index.update(catalog: catalog, canonicalize: { $0 })
     #expect(index.memberships.isEmpty)
   }

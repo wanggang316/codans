@@ -3,9 +3,10 @@ import Testing
 
 @testable import CodansCore
 
-/// Exercises `Catalog.init(from:)` / `Catalog.encode(to:)` for the v3
-/// schema (Tags + flat Projects + activeTagFilter). The decoder rejects
-/// any pre-v3 payload as `unsupportedVersion`.
+/// Exercises `Catalog.init(from:)` / `Catalog.encode(to:)` (Tags + flat
+/// Projects + activeTagFilter). The decoder rejects any pre-v3 payload as
+/// `unsupportedVersion` and any payload newer than the current version as
+/// `newerVersion`.
 struct CatalogCodableTests {
   @Test
   func emptyCatalogRoundTrip() throws {
@@ -45,9 +46,9 @@ struct CatalogCodableTests {
   }
 
   @Test
-  func decodingRejectsUnknownVersion() throws {
+  func decodingRejectsNewerVersion() throws {
     let payload = Data(#"{"version": 99, "projects": [], "tags": []}"#.utf8)
-    #expect(throws: Catalog.DecodingIssue.unsupportedVersion(99)) {
+    #expect(throws: Catalog.DecodingIssue.newerVersion(99)) {
       _ = try JSONDecoder().decode(Catalog.self, from: payload)
     }
   }
@@ -86,7 +87,7 @@ struct CatalogCodableTests {
 
   @Test
   func decodingV2CatalogRejectsAsUnsupportedVersion() throws {
-    // No backward-compat: the decoder accepts v3 only. v2 (and earlier)
+    // No backward-compat before v3. v2 (and earlier)
     // catalogs surface as `unsupportedVersion` so the app fails loud
     // instead of silently dropping the user's data.
     let payload = Data(#"{"version": 2, "spaces": []}"#.utf8)

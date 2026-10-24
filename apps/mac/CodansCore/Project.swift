@@ -71,19 +71,30 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Encoded only when set so catalogs without an icon stay byte-identical
   /// on round-trip.
   public var icon: ProjectIcon?
-  /// `true` when `rootPath` is a workspace: a plain folder holding several
-  /// child checkouts described by `<root>/.codans/workspace.json`. The main
-  /// Worktree row is the root itself; every other row is one child checkout.
+  /// `true` when `rootPath` is a workspace: a plain folder holding groups of
+  /// checkouts described by `<root>/.codans/workspace-groups.json`. The
+  /// Project itself is the sidebar header and stands for no row; every row
+  /// carries a `workspaceSlot` (group terminal, reference, or member).
   /// Persisted (omitted when `false`) so the kind is known synchronously at
   /// launch and survives the root being temporarily unreachable; the
   /// catalog load path re-derives it from the manifest on disk when an older
   /// build has stripped the key. Sticky: it is never cleared because the
   /// manifest went missing — see `ProjectKind`.
   public var isWorkspace: Bool
-  /// Transient. The decoded manifest, filled by the workspace reconcile and
-  /// used for display only (title, description, roles). Nil until the first
-  /// reconcile after launch; no catalog logic may depend on it.
-  public var workspace: WorkspaceManifest?
+  /// Workspace groups, `default` first and then named groups in creation
+  /// order. A cache of the group manifest for synchronous launch rendering,
+  /// plus sidebar state (`isExpanded`, `deletion`). Empty for other
+  /// Projects; the encode path omits the key when empty.
+  public var workspaceGroups: [WorkspaceGroupRecord]
+  /// Transient. The decoded group manifest, filled by the workspace
+  /// reconcile and used for display only (title, sources, group details).
+  /// Nil until the first reconcile after launch; no catalog logic may depend
+  /// on it.
+  public var workspace: WorkspaceGroupsManifest?
+  /// Transient. Reference rows whose source main checkout is missing on
+  /// disk. The rows stay (the source is not the Workspace's to archive);
+  /// the reconcile fills this so the sidebar can show them as unavailable.
+  public var unavailableWorkspaceRows: Set<WorktreeID> = []
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -103,7 +114,8 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     color: ProjectColor? = nil,
     icon: ProjectIcon? = nil,
     isWorkspace: Bool = false,
-    workspace: WorkspaceManifest? = nil,
+    workspaceGroups: [WorkspaceGroupRecord] = [],
+    workspace: WorkspaceGroupsManifest? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id
@@ -126,6 +138,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.color = color
     self.icon = icon
     self.isWorkspace = isWorkspace
+    self.workspaceGroups = workspaceGroups
     self.workspace = workspace
     self.loadState = loadState
   }
@@ -173,7 +186,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
-      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon, isWorkspace
+      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon, isWorkspace, workspaceGroups
   }
 
   public init(from decoder: Decoder) throws {
@@ -213,6 +226,8 @@ extension Project: Codable {
     // a future icon case written by a newer build both land in this branch.
     self.icon = try? container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
     self.isWorkspace = try container.decodeIfPresent(Bool.self, forKey: .isWorkspace) ?? false
+    self.workspaceGroups =
+      try container.decodeIfPresent([WorkspaceGroupRecord].self, forKey: .workspaceGroups) ?? []
     self.workspace = nil
     self.loadState = .loading
   }
@@ -262,6 +277,9 @@ extension Project: Codable {
     // byte-identical on round-trip.
     if isWorkspace {
       try container.encode(true, forKey: .isWorkspace)
+    }
+    if !workspaceGroups.isEmpty {
+      try container.encode(workspaceGroups, forKey: .workspaceGroups)
     }
     // `workspace` and `loadState` intentionally not encoded (transient).
   }
