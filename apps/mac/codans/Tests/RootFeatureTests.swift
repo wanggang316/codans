@@ -10,7 +10,11 @@ import Testing
 struct RootFeatureTests {
   @Test
   func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
-    let store = TestStore(initialState: RootFeature.State()) { RootFeature() }
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    let store = TestStore(initialState: initial) { RootFeature() } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog() }
+    }
     await store.send(.openDiffRequested)
   }
 
@@ -210,6 +214,66 @@ struct RootFeatureTests {
   }
 
   @Test(arguments: [false, true])
+  func gitViewerChordUsesLiveSelectionBeforeSelectionEventArrives(acrossProjects: Bool) async {
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    var catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB
+    )
+
+    let targetProjectID = acrossProjects ? ProjectID() : projectID
+    if acrossProjects {
+      let target = catalog.projects[0].worktrees.removeLast()
+      catalog.projects.append(
+        Project(id: targetProjectID, name: "other", rootPath: "/other", gitRoot: "/other",
+          worktrees: [target], selectedWorktreeID: worktreeB))
+      catalog.selectedProjectID = targetProjectID
+    } else {
+      catalog.projects[0].selectedWorktreeID = worktreeB
+    }
+    let liveCatalog = catalog
+
+    let descriptor = EditorDescriptor(
+      id: "fork",
+      displayName: "Fork",
+      bundleIdentifier: "com.DanPristupov.Fork",
+      launchMode: .directory,
+      appURL: URL(fileURLWithPath: "/Applications/Fork.app"),
+      alternateBundleIdentifiers: []
+    )
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(
+      projectID: projectID, worktreeID: worktreeA
+    )
+    initial.editor.descriptors = [descriptor]
+
+    let settings = Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { liveCatalog }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      // The resolved `.editor(.openRequested)` runs EditorFeature's open
+      // effect; stub the client + clock so the downstream chain completes
+      // without hitting unimplemented dependencies.
+      $0.editorClient = EditorClient.testValue
+      $0.editorClient.open = { _, id in
+        EditorChoice(id: id ?? "finder", displayName: "x", binaryPath: nil)
+      }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.diffInspectorToggledForCurrentWorktree)
+    await store.receive(
+      .editor(.openRequested(editorID: "fork", worktreePath: "/b", projectID: targetProjectID)))
+    await store.finish()
+  }
+
+  @Test(arguments: [false, true])
   func gitViewerChordRoutesBuiltInAndLegacyNilToDiffWindow(legacyNil: Bool) async {
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
@@ -219,8 +283,12 @@ struct RootFeatureTests {
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      // Isolate routing from live AppKit window creation: this worktree is no longer in the catalog.
-      $0.hierarchyClient.snapshot = { Catalog() }
+      // Keep a selected ID without a matching worktree to avoid creating an AppKit window.
+      $0.hierarchyClient.snapshot = {
+        Catalog(projects: [
+          Project(name: "p", rootPath: "/", gitRoot: "/", selectedWorktreeID: WorktreeID())
+        ])
+      }
       $0[SettingsWriter.self].readSnapshotSync = { snapshot }
     }
     await store.send(.diffInspectorToggledForCurrentWorktree)

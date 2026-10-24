@@ -595,8 +595,8 @@ struct RootFeature {
           }
         }
       case .openDiffRequested:
-        guard let projectID = state.selection.projectID, let worktreeID = state.selection.worktreeID
-        else { return .none }
+        guard let selection = currentGitViewerSelection() else { return .none }
+        let (projectID, worktreeID) = selection
         return openDiff(projectID: projectID, worktreeID: worktreeID, scope: nil, state: state)
       case .sidebar(.delegate(.showChanges(let projectID, let worktreeID, let scope))):
         return openInExternalGitViewer(projectID: projectID, worktreeID: worktreeID, state: state)
@@ -606,6 +606,16 @@ struct RootFeature {
 
       }
     }
+  }
+
+  private func currentGitViewerSelection() -> (ProjectID, WorktreeID)? {
+    // The sidebar updates the catalog before the selection stream reaches this reducer.
+    let catalog = hierarchyClient.snapshot()
+    guard let projectID = catalog.displayedSelectedProjectID,
+      let project = catalog.projects.first(where: { $0.id == projectID }),
+      let worktreeID = project.selectedWorktreeID
+    else { return nil }
+    return (projectID, worktreeID)
   }
 
   /// Opens the worktree in the Git Viewer chosen in Settings when it is not the
@@ -2006,10 +2016,8 @@ struct RootFeature {
         return .none
 
       case .diffInspectorToggledForCurrentWorktree:
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
+        guard let selection = currentGitViewerSelection() else { return .none }
+        let (projectID, worktreeID) = selection
         return openInExternalGitViewer(projectID: projectID, worktreeID: worktreeID, state: state)
           ?? .send(.openDiffRequested)
 
