@@ -1,37 +1,22 @@
 import AppKit
 
-/// The one launch alert for a catalog this build loaded with saving off.
-/// Without it the user sees an empty or partly restored sidebar and no
-/// reason why changes vanish after a restart.
+/// The one launch alert for a catalog this build could not load. Saving
+/// is then off, so without it the user sees an empty sidebar and no reason
+/// why changes vanish after a restart. A catalog from a newer build shows
+/// `CatalogUpdateRequiredView` instead.
 @MainActor
 enum CatalogLoadIssueAlert {
-  static func present(_ issue: CatalogStore.LoadIssue) {
+  static let messageText = "Project list could not be loaded; changes are not saved"
+  static let informativeText =
+    "Codans could not read or migrate catalog.json. The file is kept unchanged, with a copy "
+    + "in the backups folder when one could be made, and this session runs without saving."
+
+  static func present() {
     let alert = NSAlert()
     alert.alertStyle = .warning
-    alert.messageText = messageText(for: issue)
-    alert.informativeText = informativeText(for: issue)
+    alert.messageText = messageText
+    alert.informativeText = informativeText
     alert.addButton(withTitle: "OK")
     alert.runModal()
-  }
-
-  static func messageText(for issue: CatalogStore.LoadIssue) -> String {
-    switch issue {
-    case .newerVersion:
-      return "Created by a newer Codans; changes are not saved"
-    case .migrationBackupFailed:
-      return "Project list could not be backed up; changes are not saved"
-    }
-  }
-
-  static func informativeText(for issue: CatalogStore.LoadIssue) -> String {
-    switch issue {
-    case .newerVersion(let version):
-      return "The project list (catalog.json) uses version \(version), which this version of "
-        + "Codans cannot read. The file is kept unchanged. Update Codans to use it."
-    case .migrationBackupFailed:
-      return "Codans updated the project list format, but it could not copy the original "
-        + "catalog.json to the backups folder. The original file is kept unchanged and this "
-        + "session runs without saving."
-    }
   }
 }

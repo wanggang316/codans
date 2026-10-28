@@ -981,8 +981,8 @@ final class AppState {
 
     // Deferred one turn so the alert appears over the main window instead
     // of blocking its first frame.
-    if let issue = catalogStore.loadIssue {
-      Task { @MainActor in CatalogLoadIssueAlert.present(issue) }
+    if catalogStore.loadReport.loadFailed {
+      Task { @MainActor in CatalogLoadIssueAlert.present() }
     }
   }
 
