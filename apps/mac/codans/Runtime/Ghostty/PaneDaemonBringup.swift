@@ -12,7 +12,7 @@ import CodansCore
 @MainActor
 enum PaneDaemonBringup {
   /// Canonical zmx `ZMX_DIR`. The daemon places its control socket here
-  /// and writes snapshots into `<ZMX_DIR>/snapshots/<paneID>.snap`. We
+  /// and writes snapshots into `<ZMX_DIR>/snapshots/<contentID>.snap`. We
   /// pin this to `~/.<AppDirectories.name>/run` (`codans`, or `codans-dev`
   /// for Debug builds) so the socket path the daemon binds lines up
   /// byte-for-byte with `ZmxControlClient.socketPath` and `SessionReaper`'s
@@ -33,7 +33,7 @@ enum PaneDaemonBringup {
     AppDirectories.cacheDirectory()
   }
 
-  /// Directory the daemon writes `<paneID>.snap` into when `.Snapshot`
+  /// Directory the daemon writes `<contentID>.snap` into when `.Snapshot`
   /// fires. Kept here (rather than re-derived in `SessionReaper`) so the
   /// canonical path has one owner.
   static func canonicalSnapshotDirectory() -> URL {

@@ -33,16 +33,16 @@ nonisolated enum AgentRowOrdering {
   /// unchanged — returns an array equal to `order`.
   @MainActor
   static func reconcileMembership(
-    order: [PaneID],
-    entries: [PaneID: AgentStateStore.AgentEntry]
-  ) -> [PaneID] {
+    order: [ContentID],
+    entries: [ContentID: AgentStateStore.AgentEntry]
+  ) -> [ContentID] {
     let survivors = order.filter { entries[$0] != nil }
     let known = Set(survivors)
     let newcomerKeys = Set(entries.keys).subtracting(known)
     guard !newcomerKeys.isEmpty else { return survivors }
     let sortedNewcomers = SortedEntriesProvider
       .sorted(entries.filter { newcomerKeys.contains($0.key) })
-      .map(\.paneID)
+      .map(\.contentID)
     return survivors + sortedNewcomers
   }
 

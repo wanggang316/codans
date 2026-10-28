@@ -65,13 +65,13 @@ struct AgentActivityPresentationTests {
 
   @Test
   func mountedActivityTracksPaneTitlesWithoutResizing() async throws {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let registry = AgentStateStore(focusedPane: { nil })
-    registry.onAgentBound(paneID, kind: .codex, sessionID: nil)
-    let entry = registry.entries[paneID]
+    registry.onAgentBound(contentID, kind: .codex, sessionID: nil)
+    let entry = registry.entries[contentID]
     let activity = AgentActivityPresentation(title: nil, kind: .codex, interval: .zero)
     let host = NSHostingView(
-      rootView: AgentSessionActivityLine(paneTitle: { registry.title(for: paneID) }, activity: activity)
+      rootView: AgentSessionActivityLine(paneTitle: { registry.title(for: contentID) }, activity: activity)
         .frame(width: 296)
     )
     let window = NSWindow(
@@ -88,7 +88,7 @@ struct AgentActivityPresentationTests {
     #expect(initialSize == NSSize(width: 296, height: 16))
 
     for title in ["Running tests", String(repeating: "Long activity ", count: 30), "Codex"] {
-      registry.onTerminalEvent(.paneInfoChanged(paneID, .title(title)))
+      registry.onTerminalEvent(.paneInfoChanged(contentID, .title(title)))
       let expected = AgentSummaryCardFormat.activityLine(from: title, kind: .codex)
       // Give the mounted SwiftUI observation graph a display turn; do not
       // replace rootView, which would hide a broken live subscription.
@@ -99,7 +99,7 @@ struct AgentActivityPresentationTests {
       }
       #expect(activity.text == expected)
       #expect(host.fittingSize == initialSize)
-      #expect(registry.entries[paneID] == entry)
+      #expect(registry.entries[contentID] == entry)
     }
   }
 
@@ -111,7 +111,7 @@ struct AgentActivityPresentationTests {
       : nil
     let sizes = [nil, "Reading", String(repeating: "A long activity title ", count: 30), "✳ Codex"].map { title in
       let snapshot = AgentSessionSummarySnapshot(
-        paneID: PaneID(),
+        contentID: ContentID(),
         entry: .init(kind: .codex, sessionID: nil, state: .working, lastTransitionAt: .now),
         projectName: "Project", worktreeName: "main", projectColor: nil,
         session: session, paneTitle: title

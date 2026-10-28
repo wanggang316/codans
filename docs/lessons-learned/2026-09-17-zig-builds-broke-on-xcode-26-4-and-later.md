@@ -77,7 +77,15 @@ Upgrading zig was not an option. The ghostty fork is based on v1.3.1, whose
     SDK as `CODANS_ZIG_MACOS_SDK` and prepends `bin/` to PATH.
   - `bin/xcrun` answers exactly zig's query with that SDK and forwards
     everything else to `/usr/bin/xcrun`.
-  - If no installed SDK qualifies, the build stops with an explanation.
+  - If no installed SDK qualifies (Command Line Tools updates remove the old
+    SDKs), `activate.sh` on arm64 makes an APFS clone of the newest installed
+    SDK older than the stock one (zig 0.15.2 cannot build its libc++ against
+    the macOS 27 headers; the stock SDK is the last resort) under
+    `apps/mac/.build/sdk-compat/` and adds `arm64-macos` next to every
+    `arm64e-macos` in its `.tbd` stubs. Apple's linker already links arm64
+    against the arm64e stubs; the copy only states that for zig. The copy is
+    made once per SDK (a stamp file marks it complete).
+  - On other architectures the build stops with an explanation.
   - The wrapper does nothing unless the variable is set. Ghostty's inner
     `xcodebuild` inherits PATH but no other environment variables
     (`GhosttyXcodebuild.zig`), so it keeps the stock SDK and linker.

@@ -8,20 +8,21 @@ import Testing
 @MainActor
 struct HierarchyHandlersLiveDirectoryTests {
   @Test
-  func listPanesUsesLiveWorkingDirectoryWhenAvailable() async throws {
+  func listTabsUsesLiveWorkingDirectoryWhenAvailable() async throws {
     let fixture = Self.makeFixture(liveDirectory: "/repo/app")
     let params = try JSONValue.encoded(
-      HierarchyHandlers.ListPanesParams(
-        tabID: fixture.tabID,
+      HierarchyHandlers.ListTabsParams(
         worktreeID: fixture.worktreeID,
-        projectID: fixture.projectID
+        projectID: fixture.projectID,
+        paneID: fixture.paneID.raw
       )
     )
 
-    let outcome = await fixture.handlers.listPanes(params)
-    let payload: ListPanesPayload = try Self.decodeUnary(outcome)
+    let outcome = await fixture.handlers.listTabs(params)
+    let payload: ListTabsPayload = try Self.decodeUnary(outcome)
 
-    #expect(payload.panes.map(\.workingDirectory) == ["/repo/app"])
+    #expect(payload.tabs.map(\.workingDirectory) == ["/repo/app"])
+    #expect(payload.tabs.map(\.paneID) == [fixture.paneID.description])
   }
 
   @Test
@@ -30,19 +31,16 @@ struct HierarchyHandlersLiveDirectoryTests {
     let outcome = await fixture.handlers.listProjects(.object([:]))
     let payload: ListProjectsPayload = try Self.decodeUnary(outcome)
 
-    #expect(payload.projects.first?.worktrees.first?.tabs.first?.panes.first?.workingDirectory == "/repo/packages/api")
+    let directory = payload.projects.first?.worktrees.first?.panes.first?.tabs.first?
+      .content.terminal?.workingDirectory
+    #expect(directory == "/repo/packages/api")
   }
 
   @Test
   func focusPanePromotesSurfaceView() async throws {
     let fixture = Self.makeFixture(liveDirectory: "/repo/app")
     let params = try JSONValue.encoded(
-      HierarchyHandlers.PaneLocatorParams(
-        id: fixture.paneID,
-        tabID: fixture.tabID,
-        worktreeID: fixture.worktreeID,
-        projectID: fixture.projectID
-      )
+      HierarchyHandlers.FocusPaneParams(id: fixture.paneID, projectID: nil, worktreeID: nil, direction: nil)
     )
 
     let outcome = await fixture.handlers.focusPane(params)
@@ -51,8 +49,8 @@ struct HierarchyHandlersLiveDirectoryTests {
       return
     }
 
-    #expect(fixture.runtime.focusSurfaceViewCalls.last == fixture.paneID)
-    #expect(fixture.runtime.ensureSurfaceCalls.last?.paneID == fixture.paneID)
+    #expect(fixture.runtime.focusSurfaceViewCalls.last == fixture.contentID)
+    #expect(fixture.runtime.ensureSurfaceCalls.last?.contentID == fixture.contentID)
   }
 
   private static func makeFixture(liveDirectory: String) -> Fixture {
@@ -60,15 +58,17 @@ struct HierarchyHandlersLiveDirectoryTests {
     let worktreeID = WorktreeID()
     let tabID = TabID()
     let paneID = PaneID()
-    let pane = Pane(id: paneID, workingDirectory: "/repo", initialCommand: nil)
-    let tab = Tab(id: tabID, name: "Run", splitTree: SplitTree(leaf: paneID), panes: [pane])
+    let contentID = ContentID()
+    let tab = Tab(id: tabID, name: "Run", content: .terminal(id: contentID, workingDirectory: "/repo"))
+    let pane = Pane(id: paneID, tabs: [tab])
     let worktree = Worktree(
       id: worktreeID,
       name: "main",
       path: "/repo",
       branch: "main",
-      tabs: [tab],
-      selectedTabID: tabID
+      splitTree: SplitTree(leaf: paneID),
+      panes: [pane],
+      focusedPaneID: paneID
     )
     let project = Project(
       id: projectID,
@@ -79,7 +79,7 @@ struct HierarchyHandlersLiveDirectoryTests {
       selectedWorktreeID: worktreeID
     )
     let runtime = FakeHierarchyRuntime()
-    runtime.currentWorkingDirectories[paneID] = liveDirectory
+    runtime.currentWorkingDirectories[contentID] = liveDirectory
     let manager = HierarchyManager(
       catalog: Catalog(projects: [project]),
       store: CatalogStore(fileURL: Self.tempURL()),
@@ -91,7 +91,8 @@ struct HierarchyHandlersLiveDirectoryTests {
       projectID: projectID,
       worktreeID: worktreeID,
       tabID: tabID,
-      paneID: paneID
+      paneID: paneID,
+      contentID: contentID
     )
   }
 
@@ -115,6 +116,7 @@ struct HierarchyHandlersLiveDirectoryTests {
     let worktreeID: WorktreeID
     let tabID: TabID
     let paneID: PaneID
+    let contentID: ContentID
   }
 
   private enum TestError: Error {

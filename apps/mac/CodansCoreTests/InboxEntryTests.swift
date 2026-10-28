@@ -10,8 +10,7 @@ struct InboxEntryTests {
     InboxEntry.SourcePath(
       projectID: ProjectID(),
       worktreeID: WorktreeID(),
-      tabID: TabID(),
-      paneID: PaneID()
+      contentID: ContentID()
     )
   }
 

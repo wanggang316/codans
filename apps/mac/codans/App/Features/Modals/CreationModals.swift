@@ -4,7 +4,7 @@ import CodansCore
 
 /// Lightweight sheet reducer for the new-tab creation flow.
 /// Holds a draft name, validates on submit, dispatches the matching
-/// `HierarchyClient.createTab`, and dismisses.
+/// `HierarchyClient.newTab`, and dismisses.
 
 @Reducer
 struct NewTabFeature {
@@ -33,8 +33,20 @@ struct NewTabFeature {
       case .submitButtonTapped:
         let trimmed = state.draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         let name: String? = trimmed.isEmpty ? nil : trimmed
-        _ = try? hierarchyClient.createTab(state.worktreeID, state.projectID, name)
-        return .run { _ in await dismiss() }
+        let catalog = hierarchyClient.snapshot()
+        let worktree = catalog.projects.first { $0.id == state.projectID }?
+          .worktrees.first { $0.id == state.worktreeID }
+        let address = worktree.flatMap { worktree in
+          try? hierarchyClient.newTab(
+            nil, state.worktreeID, state.projectID,
+            .terminal(workingDirectory: worktree.path), name, nil, true)
+        }
+        return .run { _ in
+          // `newTab` is catalog-only; the session comes up here so the
+          // new Tab is live before the sheet is gone.
+          if let address { try? await hierarchyClient.ensureSurface(address.contentID) }
+          await dismiss()
+        }
       case .cancelButtonTapped:
         return .run { _ in await dismiss() }
       }

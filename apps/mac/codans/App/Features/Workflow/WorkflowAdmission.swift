@@ -12,13 +12,13 @@ import Foundation
 struct WorkflowAdmission {
   struct Request {
     var workflow: String
-    var sourcePaneID: PaneID?
+    var sourceContentID: ContentID?
     var worktreeID: WorktreeID?
     /// The pane the request came from, when it came from one. Only this
     /// pane can be the run's initiator: a run started from elsewhere
     /// against a `[source]` pane must have its first message typed, not
     /// handed back to a caller that is not the agent.
-    var callerPaneID: PaneID?
+    var callerContentID: ContentID?
     var roles: [String: String] = [:]
     var inputs: [String: String] = [:]
     var skip: [String] = []
@@ -29,12 +29,12 @@ struct WorkflowAdmission {
     var discovery: WorkflowDiscovery
     var settings: @MainActor () -> Settings
     var catalog: @MainActor () -> Catalog
-    var addressOf: @MainActor (PaneID) -> PaneAddress?
+    var addressOf: @MainActor (ContentID) -> TabAddress?
     /// Resolves `p<n>`, a pane UUID, or `@label` to a pane.
-    var resolvePane: @MainActor (String) -> PaneID?
-    var agentKind: @MainActor (PaneID) -> AgentKind?
+    var resolvePane: @MainActor (String) -> ContentID?
+    var agentKind: @MainActor (ContentID) -> AgentKind?
     /// The run a pane already belongs to.
-    var runID: @MainActor (PaneID) -> UUID?
+    var runID: @MainActor (ContentID) -> UUID?
     var cliCommand: String
     var now: @MainActor () -> Date = { Date() }
   }
@@ -52,7 +52,7 @@ struct WorkflowAdmission {
     let name: String
     let branch: String?
     let isRemote: Bool
-    let paneID: PaneID?
+    let contentID: ContentID?
   }
 
   let context: Context
@@ -90,7 +90,7 @@ struct WorkflowAdmission {
         worktreeRoot: URL(fileURLWithPath: source.path, isDirectory: true), runID: runID
       ).path(percentEncoded: false),
       cliCommand: context.cliCommand,
-      initiatorPaneID: request.callerPaneID,
+      initiatorContentID: request.callerContentID,
       startedAt: context.now()
     )
     return Admitted(configuration: configuration, entry: entry)
@@ -128,14 +128,14 @@ struct WorkflowAdmission {
   // MARK: - Source
 
   private func resolveSource(_ request: Request) throws -> Source? {
-    if let paneID = request.sourcePaneID {
-      guard let address = context.addressOf(paneID) else {
-        throw IPCError.notFound(kind: "pane", id: paneID.description)
+    if let contentID = request.sourceContentID {
+      guard let address = context.addressOf(contentID) else {
+        throw IPCError.notFound(kind: "pane", id: contentID.description)
       }
-      return source(worktreeID: address.worktreeID, paneID: paneID)
+      return source(worktreeID: address.worktreeID, contentID: contentID)
     }
     if let worktreeID = request.worktreeID {
-      guard let source = source(worktreeID: worktreeID, paneID: nil) else {
+      guard let source = source(worktreeID: worktreeID, contentID: nil) else {
         throw IPCError.notFound(kind: "worktree", id: worktreeID.description)
       }
       return source
@@ -143,12 +143,12 @@ struct WorkflowAdmission {
     return nil
   }
 
-  private func source(worktreeID: WorktreeID, paneID: PaneID?) -> Source? {
+  private func source(worktreeID: WorktreeID, contentID: ContentID?) -> Source? {
     for project in context.catalog().projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else { continue }
       return Source(
         projectID: project.id, worktreeID: worktree.id, path: worktree.path, name: worktree.name,
-        branch: worktree.branch, isRemote: project.isRemote, paneID: paneID)
+        branch: worktree.branch, isRemote: project.isRemote, contentID: contentID)
     }
     return nil
   }
@@ -245,33 +245,33 @@ struct WorkflowAdmission {
       throw IPCError.invalidParams(message: "workflow has no role named \"\(name)\"", path: ["roles", name])
     }
     var bindings: [String: WorkflowRoleBinding] = [:]
-    var claimed: Set<PaneID> = []
+    var claimed: Set<ContentID> = []
     for role in definition.roles {
       switch role.source {
       case .current:
-        let paneID = try currentPane(for: role, definition: definition, source: source, skipped: skipped)
-        try claim(paneID, for: role, claimed: &claimed)
-        bindings[role.name] = .current(paneID: paneID)
+        let contentID = try currentPane(for: role, definition: definition, source: source, skipped: skipped)
+        try claim(contentID, for: role, claimed: &claimed)
+        bindings[role.name] = .current(contentID: contentID)
       case .pick:
-        let paneID = try pickedPane(for: role, override: overrides[role.name], source: source)
-        try claim(paneID, for: role, claimed: &claimed)
-        bindings[role.name] = .pick(paneID: paneID)
+        let contentID = try pickedPane(for: role, override: overrides[role.name], source: source)
+        try claim(contentID, for: role, claimed: &claimed)
+        bindings[role.name] = .pick(contentID: contentID)
       case .launch:
         let profile = try launchProfile(for: role, override: overrides[role.name], workflowID: definition.id)
         bindings[role.name] = .launch(
-          profileID: profile.id, profileName: profile.displayName, agent: profile.kind, paneID: nil)
+          profileID: profile.id, profileName: profile.displayName, agent: profile.kind, contentID: nil)
       }
     }
     return bindings
   }
 
-  private func claim(_ paneID: PaneID, for role: WorkflowRole, claimed: inout Set<PaneID>) throws {
-    if let other = context.runID(paneID) {
+  private func claim(_ contentID: ContentID, for role: WorkflowRole, claimed: inout Set<ContentID>) throws {
+    if let other = context.runID(contentID) {
       throw IPCError.domain(
-        code: "PANE_BUSY", message: "pane \(paneID) already takes part in run \(other.uuidString)", hint: nil)
+        code: "PANE_BUSY", message: "pane \(contentID) already takes part in run \(other.uuidString)", hint: nil)
     }
-    guard claimed.insert(paneID).inserted else {
-      throw IPCError.invalidParams(message: "pane \(paneID) is bound to two roles", path: ["roles", role.name])
+    guard claimed.insert(contentID).inserted else {
+      throw IPCError.invalidParams(message: "pane \(contentID) is bound to two roles", path: ["roles", role.name])
     }
   }
 
@@ -279,8 +279,8 @@ struct WorkflowAdmission {
   /// is not skipped will type into it; a bare shell can still start a run.
   private func currentPane(
     for role: WorkflowRole, definition: WorkflowDefinition, source: Source, skipped: Set<String>
-  ) throws -> PaneID {
-    guard let paneID = source.paneID else {
+  ) throws -> ContentID {
+    guard let contentID = source.contentID else {
       throw IPCError.domain(
         code: "SOURCE_REQUIRED", message: "role \"\(role.name)\" is the calling pane; run from inside a pane",
         hint: nil)
@@ -289,28 +289,28 @@ struct WorkflowAdmission {
       if case .message(let target, _, _) = step.verb { return target == role.name && !skipped.contains(step.id) }
       return false
     }
-    if messaged, context.agentKind(paneID) == nil {
+    if messaged, context.agentKind(contentID) == nil {
       throw IPCError.domain(
         code: "SOURCE_REQUIRED", message: "the calling pane has no recognized agent for role \"\(role.name)\"",
         hint: nil)
     }
-    return paneID
+    return contentID
   }
 
-  private func pickedPane(for role: WorkflowRole, override: String?, source: Source) throws -> PaneID {
+  private func pickedPane(for role: WorkflowRole, override: String?, source: Source) throws -> ContentID {
     guard let reference = override, !reference.isEmpty else {
       throw IPCError.invalidParams(
         message: "role \"\(role.name)\" needs a pane: --role \(role.name)=<p<n>|uuid|@label>",
         path: ["roles", role.name])
     }
-    guard let paneID = context.resolvePane(reference), let address = context.addressOf(paneID) else {
+    guard let contentID = context.resolvePane(reference), let address = context.addressOf(contentID) else {
       throw IPCError.invalidParams(message: "no pane matches \"\(reference)\"", path: ["roles", role.name])
     }
     guard address.worktreeID == source.worktreeID else {
       throw IPCError.invalidParams(
         message: "pane \(reference) is not in the source worktree", path: ["roles", role.name])
     }
-    guard let kind = context.agentKind(paneID) else {
+    guard let kind = context.agentKind(contentID) else {
       throw IPCError.invalidParams(message: "pane \(reference) has no recognized agent", path: ["roles", role.name])
     }
     if let allowed = role.agents, !allowed.contains(kind) {
@@ -318,7 +318,7 @@ struct WorkflowAdmission {
         message: "pane \(reference) runs \(kind.rawValue); role \"\(role.name)\" wants \(Self.list(allowed))",
         path: ["roles", role.name])
     }
-    return paneID
+    return contentID
   }
 
   /// Override → remembered binding → the definition's `profile:` → the

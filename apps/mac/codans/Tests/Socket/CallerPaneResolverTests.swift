@@ -9,7 +9,7 @@ import Testing
 struct CallerPaneResolverTests {
   @Test
   func callerItselfIsThePaneShell() {
-    let pane = PaneID()
+    let pane = ContentID()
     let resolved = CallerPaneResolver.resolve(
       callerPID: 100,
       paneByShellPID: [100: pane],
@@ -20,7 +20,7 @@ struct CallerPaneResolverTests {
 
   @Test
   func ancestorChainReachesPaneShell() {
-    let pane = PaneID()
+    let pane = ContentID()
     // cli(400) → subshell(300) → agent(200) → pane shell(100)
     let parents: [pid_t: pid_t] = [400: 300, 300: 200, 200: 100]
     let resolved = CallerPaneResolver.resolve(
@@ -36,7 +36,7 @@ struct CallerPaneResolverTests {
     let parents: [pid_t: pid_t] = [400: 300, 300: 1]
     let resolved = CallerPaneResolver.resolve(
       callerPID: 400,
-      paneByShellPID: [100: PaneID()],
+      paneByShellPID: [100: ContentID()],
       parentOf: { parents[$0] }
     )
     #expect(resolved == nil)
@@ -47,7 +47,7 @@ struct CallerPaneResolverTests {
     let parents: [pid_t: pid_t] = [400: 300, 300: 400]
     let resolved = CallerPaneResolver.resolve(
       callerPID: 400,
-      paneByShellPID: [100: PaneID()],
+      paneByShellPID: [100: ContentID()],
       parentOf: { parents[$0] }
     )
     #expect(resolved == nil)
@@ -88,7 +88,7 @@ struct CallerPaneResolverTests {
     // register there, so only assert with a live parent chain.
     let parent = getppid()
     guard parent > 1 else { return }
-    let pane = PaneID()
+    let pane = ContentID()
     let resolved = CallerPaneResolver.resolve(
       callerPID: getpid(),
       paneByShellPID: [parent: pane]

@@ -1,12 +1,12 @@
-import Foundation
 import CodansCore
+import Foundation
 
 extension IPC {
-  /// Selects which slice of the daemon's terminal mirror `pane.read`
+  /// Selects which slice of the daemon's terminal mirror `tab.read`
   /// returns. The daemon today serializes the entire terminal (scrollback
   /// + visible region) in one shot; `visible` and `scrollback` are
   /// filtered client-side after the daemon returns its full dump.
-  public enum PaneReadRange: String, Codable, Sendable {
+  public enum TabReadRange: String, Codable, Sendable {
     /// Active viewport only — what the user currently sees on screen.
     case visible
     /// Scrolled-off rows above the viewport.
@@ -15,14 +15,14 @@ extension IPC {
     case all
   }
 
-  /// Params for `pane.read` — pull serialized terminal state straight
-  /// from the pane's zmx daemon. Unlike `terminal.readText`, which
+  /// Params for `tab.read` — pull serialized terminal state straight
+  /// from the Tab's zmx daemon. Unlike `terminal.readText`, which
   /// reads libghostty's parsed-text surface, this verb returns the
   /// daemon's `serializeTerminalState` output so callers can assert on
   /// the original ANSI byte stream (cursor, SGR, OSC, DECSM, etc.).
-  public struct PaneReadRequest: Codable, Equatable, Sendable {
-    public let paneID: PaneID
-    public let range: PaneReadRange
+  public struct TabReadRequest: Codable, Equatable, Sendable {
+    public let contentID: ContentID
+    public let range: TabReadRange
     /// Return only the last N newline-delimited lines. Applied after
     /// the daemon's dump arrives and after `range` filtering.
     public let tail: Int?
@@ -31,33 +31,33 @@ extension IPC {
     public let raw: Bool
 
     public init(
-      paneID: PaneID,
-      range: PaneReadRange = .all,
+      contentID: ContentID,
+      range: TabReadRange = .all,
       tail: Int? = nil,
       raw: Bool = false
     ) {
-      self.paneID = paneID
+      self.contentID = contentID
       self.range = range
       self.tail = tail
       self.raw = raw
     }
   }
 
-  /// Result for `pane.read`. `content` is the (possibly trimmed)
+  /// Result for `tab.read`. `content` is the (possibly trimmed)
   /// serialized terminal state. `format` records whether `content`
   /// carries ANSI escapes (`vt`) or stripped text (`plain`).
-  public struct PaneReadResponse: Codable, Equatable, Sendable {
+  public struct TabReadResponse: Codable, Equatable, Sendable {
     public enum Format: String, Codable, Sendable {
       case plain
       case vt
     }
 
-    public let paneID: PaneID
+    public let contentID: ContentID
     public let format: Format
     public let content: String
 
-    public init(paneID: PaneID, format: Format, content: String) {
-      self.paneID = paneID
+    public init(contentID: ContentID, format: Format, content: String) {
+      self.contentID = contentID
       self.format = format
       self.content = content
     }

@@ -86,8 +86,6 @@ extension IPC {
     case hierarchyDescribeTab = "hierarchy.describeTab"
     case hierarchyDescribePane = "hierarchy.describePane"
     case hierarchyResolveAlias = "hierarchy.resolveAlias"
-    case hierarchyResolvePaneLabel = "hierarchy.resolvePaneLabel"
-    case hierarchyResolveWorktreeGlob = "hierarchy.resolveWorktreeGlob"
 
     // hierarchy — mutations
     case hierarchyAddProject = "hierarchy.addProject"
@@ -99,18 +97,20 @@ extension IPC {
     case hierarchyActivateWorktree = "hierarchy.activateWorktree"
     case hierarchyRenameWorktree = "hierarchy.renameWorktree"
     case hierarchyPruneWorktrees = "hierarchy.pruneWorktrees"
+    // Tab verbs act on one strip slot and its Content; Pane verbs act on
+    // the layout. Any id parameter is the level the method names.
     case hierarchyCreateTab = "hierarchy.createTab"
     case hierarchyCloseTab = "hierarchy.closeTab"
     case hierarchyActivateTab = "hierarchy.activateTab"
     case hierarchyRenameTab = "hierarchy.renameTab"
-    case hierarchyOpenPane = "hierarchy.openPane"
+    case hierarchySetTabLabels = "hierarchy.setTabLabels"
     case hierarchySplitPane = "hierarchy.splitPane"
     case hierarchyClosePane = "hierarchy.closePane"
     case hierarchyFocusPane = "hierarchy.focusPane"
     case hierarchyResizePane = "hierarchy.resizePane"
+    case hierarchyEqualizePanes = "hierarchy.equalizePanes"
     case hierarchyZoomPane = "hierarchy.zoomPane"
     case hierarchyUnzoomPane = "hierarchy.unzoomPane"
-    case hierarchySetPaneLabels = "hierarchy.setPaneLabels"
     case hierarchyCreateTag = "hierarchy.createTag"
     case hierarchyRenameTag = "hierarchy.renameTag"
     case hierarchyRecolorTag = "hierarchy.recolorTag"
@@ -118,15 +118,12 @@ extension IPC {
     case hierarchySetProjectTags = "hierarchy.setProjectTags"
     case hierarchySetActiveTagFilter = "hierarchy.setActiveTagFilter"
 
-    // pane — explicit-termination verbs that own the zmx daemon
-    // lifecycle (kill + sessions.json reap), distinct from the
-    // detach-only `hierarchy.closePane` mutation above. `pane.info`
-    // and `pane.read` probe the daemon directly so VT-fidelity tests
-    // can assert byte-level state (cursor, modes, serialized history)
-    // that libghostty's parsed-text surface does not expose.
-    case paneClose = "pane.close"
-    case paneInfo = "pane.info"
-    case paneRead = "pane.read"
+    // tab — probes of a Tab's zmx daemon. They reach the daemon directly
+    // so VT-fidelity tests can assert byte-level state (cursor, modes,
+    // serialized history) that libghostty's parsed-text surface does not
+    // expose.
+    case tabInfo = "tab.info"
+    case tabRead = "tab.read"
 
     // terminal
     case terminalSendInput = "terminal.sendInput"

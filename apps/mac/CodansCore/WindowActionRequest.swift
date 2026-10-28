@@ -5,17 +5,17 @@ import Foundation
 /// `WindowActionRouterFeature` dispatches to `WindowService`, `UpdatesClient`,
 /// `AppLifecycleClient`, or `EditorClient` as appropriate.
 ///
-/// `from:` carries the source pane's ID for intents that need to resolve
+/// `from:` carries the source Content's ID for intents that need to resolve
 /// back to an `NSWindow`. The receiving router performs the mapping —
 /// Runtime does not touch NSWindow.
 public nonisolated enum WindowActionRequest: Sendable, Equatable {
-  case new(from: PaneID)
-  case close(from: PaneID)
+  case new(from: ContentID)
+  case close(from: ContentID)
   case closeAll
   case goto(target: GotoWindowTarget)
-  case toggleFullscreen(from: PaneID)
-  case toggleMaximize(from: PaneID)
-  case toggleTabOverview(from: PaneID)
+  case toggleFullscreen(from: ContentID)
+  case toggleMaximize(from: ContentID)
+  case toggleTabOverview(from: ContentID)
   case toggleAppVisibility
   case quit
   case checkForUpdates

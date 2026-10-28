@@ -293,84 +293,75 @@ struct HierarchyClientTests {
     // No expectation needed beyond "did not crash".
   }
 
-  // MARK: - setPaneLabel
+  // MARK: - setContentLabel
 
-  /// Helper: opens a pane in a fresh tab on a fresh worktree and returns the
-  /// (projectID, paneID) pair used by the label tests below.
+  /// Helper: opens a Tab on a fresh worktree and returns the Content id
+  /// used by the label tests below.
   @MainActor
-  private func makePane() async throws -> (HierarchyClient, HierarchyManager, PaneID) {
+  private func makeContent() async throws -> (HierarchyClient, HierarchyManager, ContentID) {
     let (client, manager) = makeLiveClient()
     let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
     let worktreeID = try manager.createWorktree(
       in: projectID, name: "w", path: "/repo/w", branch: "w"
     )
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID, in: worktreeID, in: projectID,
-      workingDirectory: "/repo/w", initialCommand: nil
+    let address = try manager.newTab(
+      in: nil, worktreeID: worktreeID, projectID: projectID,
+      content: .terminal(workingDirectory: "/repo/w")
     )
-    return (client, manager, paneID)
+    try await manager.ensureSurface(for: address.contentID)
+    return (client, manager, address.contentID)
   }
 
   @MainActor
-  private func labels(of paneID: PaneID, in manager: HierarchyManager) -> Set<String> {
-    for project in manager.catalog.projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          if let pane = tab.panes.first(where: { $0.id == paneID }) {
-            return pane.labels
-          }
-        }
-      }
-    }
-    return []
+  private func labels(of contentID: ContentID, in manager: HierarchyManager) -> Set<String> {
+    manager.catalog.content(contentID)?.terminal?.labels ?? []
   }
 
   @Test
-  func setPaneLabelInsertsWhenPresent() async throws {
-    let (client, manager, paneID) = try await makePane()
-    #expect(labels(of: paneID, in: manager).contains("notifications:muted") == false)
+  func setContentLabelInsertsWhenPresent() async throws {
+    let (client, manager, contentID) = try await makeContent()
+    #expect(labels(of: contentID, in: manager).contains("notifications:muted") == false)
 
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    #expect(labels(of: paneID, in: manager).contains("notifications:muted"))
+    client.setContentLabel(contentID, "notifications:muted", true)
+    #expect(labels(of: contentID, in: manager).contains("notifications:muted"))
   }
 
   @Test
-  func setPaneLabelRemovesWhenAbsent() async throws {
-    let (client, manager, paneID) = try await makePane()
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    #expect(labels(of: paneID, in: manager).contains("notifications:muted"))
+  func setContentLabelRemovesWhenAbsent() async throws {
+    let (client, manager, contentID) = try await makeContent()
+    client.setContentLabel(contentID, "notifications:muted", true)
+    #expect(labels(of: contentID, in: manager).contains("notifications:muted"))
 
-    client.setPaneLabel(paneID, "notifications:muted", false)
-    #expect(labels(of: paneID, in: manager).contains("notifications:muted") == false)
+    client.setContentLabel(contentID, "notifications:muted", false)
+    #expect(labels(of: contentID, in: manager).contains("notifications:muted") == false)
   }
 
   /// Set semantics: a second insert is idempotent — the label appears once.
   @Test
-  func setPaneLabelIdempotentOnDoubleInsert() async throws {
-    let (client, manager, paneID) = try await makePane()
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    let labels = labels(of: paneID, in: manager)
+  func setContentLabelIdempotentOnDoubleInsert() async throws {
+    let (client, manager, contentID) = try await makeContent()
+    client.setContentLabel(contentID, "notifications:muted", true)
+    client.setContentLabel(contentID, "notifications:muted", true)
+    let labels = labels(of: contentID, in: manager)
     #expect(labels == ["notifications:muted"])
   }
 
   /// Set semantics: removing twice leaves the label absent (no crash, no
   /// re-insert).
   @Test
-  func setPaneLabelIdempotentOnDoubleRemove() async throws {
-    let (client, manager, paneID) = try await makePane()
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    client.setPaneLabel(paneID, "notifications:muted", false)
-    client.setPaneLabel(paneID, "notifications:muted", false)
-    #expect(labels(of: paneID, in: manager).contains("notifications:muted") == false)
+  func setContentLabelIdempotentOnDoubleRemove() async throws {
+    let (client, manager, contentID) = try await makeContent()
+    client.setContentLabel(contentID, "notifications:muted", true)
+    client.setContentLabel(contentID, "notifications:muted", false)
+    client.setContentLabel(contentID, "notifications:muted", false)
+    #expect(labels(of: contentID, in: manager).contains("notifications:muted") == false)
   }
 
-  /// Random PaneID → silent no-op, no crash.
+  /// Random ContentID → silent no-op, no crash.
   @Test
-  func setPaneLabelOnMissingPaneIsNoOp() {
+  func setContentLabelOnMissingContentIsNoOp() {
     let (client, _) = makeLiveClient()
-    client.setPaneLabel(PaneID(), "notifications:muted", true)
+    client.setContentLabel(ContentID(), "notifications:muted", true)
     // No expectation needed beyond "did not crash".
   }
 
@@ -379,24 +370,27 @@ struct HierarchyClientTests {
   /// debounce window in CI and the spec calls out the in-memory check as
   /// the primary signal (D-OQ3 decision).
   @Test
-  func setPaneLabelDebouncedDiskWrite() async throws {
-    let (client, manager, paneID) = try await makePane()
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    client.setPaneLabel(paneID, "notifications:muted", false)
-    client.setPaneLabel(paneID, "notifications:muted", true)
-    #expect(labels(of: paneID, in: manager).contains("notifications:muted"))
+  func setContentLabelDebouncedDiskWrite() async throws {
+    let (client, manager, contentID) = try await makeContent()
+    client.setContentLabel(contentID, "notifications:muted", true)
+    client.setContentLabel(contentID, "notifications:muted", false)
+    client.setContentLabel(contentID, "notifications:muted", true)
+    #expect(labels(of: contentID, in: manager).contains("notifications:muted"))
   }
 
-  // MARK: - Closing with queued commands
+  // MARK: - Close confirmation
 
   /// Stands in for the confirmation sheet: records what it was asked and
   /// answers with a scripted verdict.
   @MainActor
   private final class ConfirmProbe {
-    var asked: [QueuedCommandDiscard] = []
+    var asked: [CloseConfirmationPrompt] = []
     var answer = false
+    var setting: CloseTabConfirmation = .busy
   }
 
+  /// `terminalClient` defaults to one with no live surface at all, so
+  /// every gate decision here is made for Tabs that never came up.
   private func makeConfirmingClient() -> (HierarchyClient, HierarchyManager, ConfirmProbe) {
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")
@@ -404,36 +398,39 @@ struct HierarchyClientTests {
       catalog: .default, store: CatalogStore(fileURL: tempURL), runtime: FakeHierarchyRuntime()
     )
     let probe = ConfirmProbe()
+    var terminal = TerminalClient.testValue
+    terminal.surface = { _ in nil }
     let client = HierarchyClient.live(
       manager: manager,
-      confirmQueueDiscard: { discard, completion in
-        probe.asked.append(discard)
+      terminalClient: terminal,
+      closeTabConfirmation: { probe.setting },
+      confirmClose: { prompt, completion in
+        probe.asked.append(prompt)
         completion(probe.answer)
       }
     )
     return (client, manager, probe)
   }
 
-  /// A worktree with two tabs, the first holding one queued command.
+  /// A worktree with two Tabs in one Pane, the first holding one queued
+  /// command.
   private func seedQueuedTab(
     _ client: HierarchyClient, _ manager: HierarchyManager
-  ) throws -> (projectID: ProjectID, worktreeID: WorktreeID, queuedTab: TabID) {
+  ) throws -> (projectID: ProjectID, worktreeID: WorktreeID, paneID: PaneID, queuedTab: TabID) {
     let projectID = client.addProject("p", "/tmp", "/tmp")
-    // A real folder: `createTab` refuses a Tab in a missing one.
+    // A real folder: `newTab` refuses a Tab in a missing one.
     let worktreeID = try client.createWorktree(projectID, "w", "/tmp", "main")
-    // `createTab` seeds no pane; the pane row is a separate insert.
-    let queuedTab = try client.createTab(worktreeID, projectID, nil)
-    let queuedPane = try client.createPaneRow(queuedTab, worktreeID, projectID, "/tmp/w", nil)
-    let plainTab = try client.createTab(worktreeID, projectID, nil)
-    _ = try client.createPaneRow(plainTab, worktreeID, projectID, "/tmp/w", nil)
+    // Catalog only: no surface comes up for either Tab.
+    let queued = try client.newTab(nil, worktreeID, projectID, .terminal(workingDirectory: "/tmp"), nil, nil, true)
+    _ = try client.newTab(nil, worktreeID, projectID, .terminal(workingDirectory: "/tmp"), nil, nil, true)
     manager.setCommandQueue(
-      [QueuedCommand(text: "make test", timing: .afterCurrentTask)], for: queuedPane
+      [QueuedCommand(text: "make test", timing: .afterCurrentTask)], for: queued.contentID
     )
-    return (projectID, worktreeID, queuedTab)
+    return (projectID, worktreeID, queued.paneID, queued.tabID)
   }
 
   private func tabIDs(_ manager: HierarchyManager, _ worktreeID: WorktreeID) -> [TabID] {
-    manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.tabs.map(\.id) ?? []
+    manager.catalog.projects[0].worktrees.first { $0.id == worktreeID }?.allTabs.map(\.id) ?? []
   }
 
   @Test
@@ -441,9 +438,31 @@ struct HierarchyClientTests {
     let (client, manager, probe) = makeConfirmingClient()
     let seed = try seedQueuedTab(client, manager)
 
-    try client.closeTab(seed.queuedTab, seed.worktreeID, seed.projectID)
+    try client.closeTab(seed.queuedTab)
 
-    #expect(probe.asked == [QueuedCommandDiscard(subject: .tab, queuedCount: 1)])
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .tab, queuedCount: 1, isRunning: false)])
+    #expect(tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
+  }
+
+  /// Busy is the manager's verdict for every affected Tab: a queued Tab
+  /// whose surface never came up (none does under this client) asks in
+  /// busy mode, and a Pane holding one asks too.
+  @Test
+  func queuedTabWithoutASurfaceAsksInBusyMode() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    probe.setting = .busy
+    let seed = try seedQueuedTab(client, manager)
+    let content = try #require(manager.catalog.tab(seed.queuedTab)?.content.id)
+    #expect(manager.isBusy(content))
+
+    try client.closeTab(seed.queuedTab)
+    try client.closePane(seed.paneID)
+
+    #expect(
+      probe.asked == [
+        CloseConfirmationPrompt(subject: .tab, queuedCount: 1, isRunning: false),
+        CloseConfirmationPrompt(subject: .pane, queuedCount: 1, isRunning: false),
+      ])
     #expect(tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
   }
 
@@ -453,19 +472,19 @@ struct HierarchyClientTests {
     let seed = try seedQueuedTab(client, manager)
     probe.answer = true
 
-    try client.closeTab(seed.queuedTab, seed.worktreeID, seed.projectID)
+    try client.closeTab(seed.queuedTab)
 
     #expect(probe.asked.count == 1)
     #expect(!tabIDs(manager, seed.worktreeID).contains(seed.queuedTab))
   }
 
   @Test
-  func closingATabWithoutQueuedCommandsNeverAsks() throws {
+  func closingAnIdleTabNeverAsksWhenBusyOnly() throws {
     let (client, manager, probe) = makeConfirmingClient()
     let seed = try seedQueuedTab(client, manager)
     let plainTab = try #require(tabIDs(manager, seed.worktreeID).first { $0 != seed.queuedTab })
 
-    try client.closeTab(plainTab, seed.worktreeID, seed.projectID)
+    try client.closeTab(plainTab)
 
     #expect(probe.asked.isEmpty)
     #expect(!tabIDs(manager, seed.worktreeID).contains(plainTab))
@@ -477,64 +496,107 @@ struct HierarchyClientTests {
     let seed = try seedQueuedTab(client, manager)
     let before = tabIDs(manager, seed.worktreeID).count
 
-    try client.closeAllTabs(seed.worktreeID, seed.projectID)
+    try client.closeAllTabs(seed.paneID)
 
-    #expect(probe.asked == [QueuedCommandDiscard(subject: .tabs(before), queuedCount: 1)])
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .tabs(before), queuedCount: 1, isRunning: false)])
     #expect(tabIDs(manager, seed.worktreeID).count == before)
   }
 
-  // MARK: - openPane in a missing folder
+  /// The setting × busy matrix through the real gate: busy asks only for
+  /// the busy Tab, always asks for both, never asks for neither.
+  @Test(arguments: [
+    (CloseTabConfirmation.busy, true, true),
+    (.busy, false, false),
+    (.always, true, true),
+    (.always, false, true),
+    (.never, true, false),
+    (.never, false, false),
+  ])
+  func closeTabAsksPerSettingAndBusyState(
+    setting: CloseTabConfirmation, closeBusyTab: Bool, expectAsk: Bool
+  ) throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    probe.setting = setting
+    let seed = try seedQueuedTab(client, manager)
+    let idleTab = try #require(tabIDs(manager, seed.worktreeID).first { $0 != seed.queuedTab })
+    let target = closeBusyTab ? seed.queuedTab : idleTab
 
+    try client.closeTab(target)
+
+    #expect(probe.asked.isEmpty == !expectAsk)
+    #expect(tabIDs(manager, seed.worktreeID).contains(target) == expectAsk)
+  }
+
+  /// A running command or working agent counts as busy, not only a queue.
   @Test
-  func openPaneInMissingProjectRootMarksProjectFailed() async throws {
-    let (client, manager) = makeLiveClient()
-    let root = "/tmp/codans-missing-\(UUID().uuidString)"
-    let projectID = client.addProject("p", root, root)
-    let worktreeID = try client.createWorktree(projectID, "main", root, "main")
-    // Through the manager: the client refuses a Tab in a missing folder.
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+  func closingATabWithARunningCommandAsksAndSaysSo() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+    let idle = try #require(manager.catalog.pane(seed.paneID)?.tabs.first { $0.id != seed.queuedTab })
+    manager.contentActivity = { $0 == idle.contentID }
 
-    await #expect(throws: HierarchyError.directoryMissing(root)) {
-      _ = try await client.openPane(tabID, worktreeID, projectID, root, nil)
-    }
+    try client.closeTab(idle.id)
 
-    #expect(
-      manager.catalog.projects[0].loadState
-        == ProjectReconciler.missingFolderState(rootPath: root))
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .tab, queuedCount: 0, isRunning: true)])
+  }
+
+  /// Closing a Pane applies the same rule over every Tab in it.
+  @Test
+  func closingAPaneAsksWhenAnyOfItsTabsIsBusy() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    let seed = try seedQueuedTab(client, manager)
+
+    try client.closePane(seed.paneID)
+
+    #expect(probe.asked == [CloseConfirmationPrompt(subject: .pane, queuedCount: 1, isRunning: false)])
+    #expect(manager.catalog.pane(seed.paneID) != nil)
   }
 
   @Test
-  func openPaneInMissingWorktreeKeepsProjectLoadState() async throws {
-    let (client, manager) = makeLiveClient()
-    let projectID = client.addProject("p", "/tmp", "/tmp")
-    let missing = "/tmp/codans-missing-\(UUID().uuidString)"
-    let worktreeID = try client.createWorktree(projectID, "w", missing, "main")
-    // Through the manager: the client refuses a Tab in a missing folder.
-    let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
-    let before = manager.catalog.projects[0].loadState
+  func closingAPaneNeverAsksWhenSetToNever() throws {
+    let (client, manager, probe) = makeConfirmingClient()
+    probe.setting = .never
+    let seed = try seedQueuedTab(client, manager)
 
-    await #expect(throws: HierarchyError.self) {
-      _ = try await client.openPane(tabID, worktreeID, projectID, missing, nil)
-    }
+    try client.closePane(seed.paneID)
 
-    #expect(manager.catalog.projects[0].loadState == before)
+    #expect(probe.asked.isEmpty)
+    #expect(manager.catalog.pane(seed.paneID) == nil)
   }
 
+  // MARK: - newTab in a missing folder
+
   @Test
-  func createTabInMissingFolderThrowsWithoutAddingTab() throws {
+  func newTabInMissingProjectRootMarksProjectFailed() throws {
     let (client, manager) = makeLiveClient()
     let root = "/tmp/codans-missing-\(UUID().uuidString)"
     let projectID = client.addProject("p", root, root)
     let worktreeID = try client.createWorktree(projectID, "main", root, "main")
 
     #expect(throws: HierarchyError.directoryMissing(root)) {
-      _ = try client.createTab(worktreeID, projectID, nil)
+      _ = try client.newTab(nil, worktreeID, projectID, .terminal(workingDirectory: root), nil, nil, true)
     }
 
-    #expect(manager.catalog.projects[0].worktrees[0].tabs.isEmpty)
+    #expect(manager.catalog.projects[0].worktrees[0].allTabs.isEmpty)
     #expect(
       manager.catalog.projects[0].loadState
         == ProjectReconciler.missingFolderState(rootPath: root))
+  }
+
+  @Test
+  func newTabInMissingWorktreeKeepsProjectLoadState() throws {
+    let (client, manager) = makeLiveClient()
+    let projectID = client.addProject("p", "/tmp", "/tmp")
+    let missing = "/tmp/codans-missing-\(UUID().uuidString)"
+    let worktreeID = try client.createWorktree(projectID, "w", missing, "main")
+    let before = manager.catalog.projects[0].loadState
+
+    #expect(throws: HierarchyError.self) {
+      _ = try client.newTab(nil, worktreeID, projectID, .terminal(workingDirectory: missing), nil, nil, true)
+    }
+
+    #expect(manager.catalog.projects[0].worktrees[0].allTabs.isEmpty)
+    #expect(manager.catalog.projects[0].loadState == before)
   }
 
   // MARK: - Command-spawned tab titles
@@ -553,7 +615,7 @@ struct HierarchyClientTests {
 
     try await client.runCommand(script, projectID, worktreeID)
 
-    let tab = try #require(manager.catalog.projects[0].worktrees[0].tabs.last)
+    let tab = try #require(manager.catalog.projects[0].worktrees[0].allTabs.last)
     #expect(tab.name == nil)
     #expect(tab.cachedDisplayTitle == "Dev")
   }

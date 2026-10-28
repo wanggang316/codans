@@ -15,11 +15,11 @@ struct AgentNotificationConsistencyTests {
     #expect(PaneAttentionInterpreter.classify(title: title, body: body) == .waitingForInput)
 
     let events: [TerminalEvent] = [
-      .paneOutput(fixture.paneID, Data()),
-      .paneInfoChanged(fixture.paneID, .desktopNotification(title: title, body: body)),
+      .paneOutput(fixture.contentID, Data()),
+      .paneInfoChanged(fixture.contentID, .desktopNotification(title: title, body: body)),
     ]
 
-    fixture.registry.onAgentBound(fixture.paneID, kind: .codex, sessionID: nil)
+    fixture.registry.onAgentBound(fixture.contentID, kind: .codex, sessionID: nil)
     for event in events {
       fixture.registry.onTerminalEvent(event)
       await fixture.detector.handle(event)
@@ -27,31 +27,31 @@ struct AgentNotificationConsistencyTests {
 
     // The inbox records the attention event; the live agent state is purely
     // render-derived and stays idle until the rendered region shows activity.
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
+    #expect(fixture.registry.entries[fixture.contentID]?.state == .idle)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .waitingForInput)
-    #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
+    #expect(fixture.store.entries.first?.source.contentID == fixture.contentID)
   }
 
   @Test
   func bellRangNotifiesInboxWithoutFlippingLiveState() async {
     let fixture = Fixture()
     let events: [TerminalEvent] = [
-      .paneOutput(fixture.paneID, Data()),
-      .paneInfoChanged(fixture.paneID, .bellRang),
+      .paneOutput(fixture.contentID, Data()),
+      .paneInfoChanged(fixture.contentID, .bellRang),
     ]
 
-    fixture.registry.onAgentBound(fixture.paneID, kind: .codex, sessionID: nil)
+    fixture.registry.onAgentBound(fixture.contentID, kind: .codex, sessionID: nil)
     for event in events {
       fixture.registry.onTerminalEvent(event)
       await fixture.detector.handle(event)
     }
 
     // Same decoupling for the bell: inbox-worthy, but not a live signal.
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
+    #expect(fixture.registry.entries[fixture.contentID]?.state == .idle)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .waitingForInput)
-    #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
+    #expect(fixture.store.entries.first?.source.contentID == fixture.contentID)
   }
 
   @Test
@@ -62,34 +62,34 @@ struct AgentNotificationConsistencyTests {
     #expect(PaneAttentionInterpreter.classify(title: title, body: body) == .taskFinished)
 
     let events: [TerminalEvent] = [
-      .paneOutput(fixture.paneID, Data()),
-      .paneInfoChanged(fixture.paneID, .desktopNotification(title: title, body: body)),
+      .paneOutput(fixture.contentID, Data()),
+      .paneInfoChanged(fixture.contentID, .desktopNotification(title: title, body: body)),
     ]
 
-    fixture.registry.onAgentBound(fixture.paneID, kind: .codex, sessionID: nil)
+    fixture.registry.onAgentBound(fixture.contentID, kind: .codex, sessionID: nil)
     for event in events {
       fixture.registry.onTerminalEvent(event)
       await fixture.detector.handle(event)
     }
 
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .idle)
+    #expect(fixture.registry.entries[fixture.contentID]?.state == .idle)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .taskFinished)
-    #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
+    #expect(fixture.store.entries.first?.source.contentID == fixture.contentID)
   }
 
   @Test
   func viewportLifecycleAndPaneIdleAreConsistent() async {
     let fixture = Fixture()
-    fixture.registry.onAgentBound(fixture.paneID, kind: .codex, sessionID: nil)
-    fixture.registry.onPaneKeyboardActivity(fixture.paneID)
+    fixture.registry.onAgentBound(fixture.contentID, kind: .codex, sessionID: nil)
+    fixture.registry.onPaneKeyboardActivity(fixture.contentID)
 
-    let working = TerminalEvent.paneViewportChanged(fixture.paneID, text: "• Working (10s)")
+    let working = TerminalEvent.paneViewportChanged(fixture.contentID, text: "• Working (10s)")
     fixture.registry.onTerminalEvent(working)
     await fixture.detector.handle(working)
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .working)
+    #expect(fixture.registry.entries[fixture.contentID]?.state == .working)
 
-    let output = TerminalEvent.paneOutput(fixture.paneID, Data())
+    let output = TerminalEvent.paneOutput(fixture.contentID, Data())
     fixture.registry.onTerminalEvent(output)
     await fixture.detector.handle(output)
 
@@ -99,41 +99,41 @@ struct AgentNotificationConsistencyTests {
     fixture.nowBox.setValue(
       fixture.nowBox.value.addingTimeInterval(PaneAttentionInterpreter.agentWorkingHold + 0.5)
     )
-    let idleViewport = TerminalEvent.paneViewportChanged(fixture.paneID, text: "codex> ")
+    let idleViewport = TerminalEvent.paneViewportChanged(fixture.contentID, text: "codex> ")
     fixture.registry.onTerminalEvent(idleViewport)
     await fixture.detector.handle(idleViewport)
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .done)
+    #expect(fixture.registry.entries[fixture.contentID]?.state == .done)
 
     let idle = TerminalEvent.paneIdle(
-      fixture.paneID,
+      fixture.contentID,
       duration: PaneAttentionInterpreter.idleThreshold
     )
     fixture.registry.onTerminalEvent(idle)
     await fixture.detector.handle(idle)
 
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .done)
+    #expect(fixture.registry.entries[fixture.contentID]?.state == .done)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .taskFinished)
-    #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)
+    #expect(fixture.store.entries.first?.source.contentID == fixture.contentID)
   }
 
   @Test
   func paneExitedTeardownIsConsistent() async {
     let fixture = Fixture()
-    fixture.registry.onAgentBound(fixture.paneID, kind: .codex, sessionID: nil)
-    #expect(fixture.registry.entries[fixture.paneID] != nil)
+    fixture.registry.onAgentBound(fixture.contentID, kind: .codex, sessionID: nil)
+    #expect(fixture.registry.entries[fixture.contentID] != nil)
 
-    let exit = TerminalEvent.paneExited(fixture.paneID, code: 0, signal: nil)
+    let exit = TerminalEvent.paneExited(fixture.contentID, code: 0, signal: nil)
     fixture.registry.onTerminalEvent(exit)
     await fixture.detector.handle(exit)
 
-    #expect(fixture.registry.entries[fixture.paneID] == nil)
+    #expect(fixture.registry.entries[fixture.contentID] == nil)
     #expect(fixture.store.entries.isEmpty)
   }
 
   @MainActor
   final class Fixture {
-    let paneID = PaneID()
+    let contentID = ContentID()
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let tabID = TabID()
@@ -170,7 +170,7 @@ struct AgentNotificationConsistencyTests {
         projectID: projectID,
         worktreeID: worktreeID,
         tabID: tabID,
-        paneID: paneID
+        contentID: contentID
       )
       self.detector = NotificationDetector(
         store: store,
@@ -178,7 +178,6 @@ struct AgentNotificationConsistencyTests {
         tracker: PaneKeyboardActivityTracker(),
         settingsReader: reader,
         catalogSnapshot: { catalog },
-        lastFocusedPane: { _ in nil },
         isAppFrontmost: { false },
         onProjectActivity: nil
       )
@@ -188,11 +187,13 @@ struct AgentNotificationConsistencyTests {
       projectID: ProjectID,
       worktreeID: WorktreeID,
       tabID: TabID,
-      paneID: PaneID
+      contentID: ContentID
     ) -> Catalog {
-      let pane = Pane(id: paneID, workingDirectory: "/tmp")
-      let tab = Tab(id: tabID, panes: [pane])
-      let worktree = Worktree(id: worktreeID, name: "main", path: "/tmp", tabs: [tab])
+      let tab = Tab(id: tabID, content: .terminal(id: contentID, workingDirectory: "/tmp"))
+      let pane = Pane(tabs: [tab])
+      let worktree = Worktree(
+        id: worktreeID, name: "main", path: "/tmp",
+        splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
       let project = Project(
         id: projectID,
         name: "Fixture",

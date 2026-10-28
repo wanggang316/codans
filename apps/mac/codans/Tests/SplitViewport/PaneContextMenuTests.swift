@@ -10,26 +10,29 @@ import CodansCore
 /// AC contracts on the production code path the menu drives.
 ///
 /// AC coverage:
-/// - AC-V11-M-001 / UT-V11-M-001: unmuted pane reports `isMuted == false`.
+/// - AC-V11-M-001 / UT-V11-M-001: unmuted session reports `isMuted == false`.
 /// - AC-V11-M-002 / UT-V11-M-002: toggle on unmuted writes `present: true`;
-///   subsequent read on a muted pane reports `isMuted == true`; toggle on
+///   subsequent read on a muted session reports `isMuted == true`; toggle on
 ///   muted writes `present: false`.
 @MainActor
 struct PaneContextMenuTests {
   // MARK: - Fixtures
 
-  /// Builds a single-project / single-worktree / single-tab / single-pane
-  /// catalog. Returns the assembled catalog and the pane id so tests can
-  /// flip the pane's `labels` without re-deriving identities.
-  private func makeCatalog(paneLabels: Set<String> = []) -> (Catalog, PaneID) {
-    let paneID = PaneID()
-    let pane = Pane(id: paneID, workingDirectory: "/tmp", labels: paneLabels)
-    let tab = Tab(id: TabID(), name: "fixture", panes: [pane])
+  /// Builds a single-project / single-worktree / single-pane / single-tab
+  /// catalog. Returns the assembled catalog and the content id so tests can
+  /// flip the session's `labels` without re-deriving identities.
+  private func makeCatalog(paneLabels: Set<String> = []) -> (Catalog, ContentID) {
+    let contentID = ContentID()
+    let tab = Tab(
+      name: "fixture", content: .terminal(id: contentID, workingDirectory: "/tmp", labels: paneLabels))
+    let pane = Pane(tabs: [tab])
     let worktree = Worktree(
       id: WorktreeID(),
       name: "fixture",
       path: "/tmp",
-      tabs: [tab]
+      splitTree: SplitTree(leaf: pane.id),
+      panes: [pane],
+      focusedPaneID: pane.id
     )
     let project = Project(
       id: ProjectID(),
@@ -38,33 +41,33 @@ struct PaneContextMenuTests {
       worktrees: [worktree]
     )
     let catalog = Catalog(projects: [project])
-    return (catalog, paneID)
+    return (catalog, contentID)
   }
 
-  /// Captures every `setLabel(paneID, label, present)` call so tests can
+  /// Captures every `setLabel(contentID, label, present)` call so tests can
   /// assert on argument tuples without inspecting closure state.
   @MainActor
   private final class SetLabelRecorder {
-    private(set) var calls: [(PaneID, String, Bool)] = []
-    func record(_ paneID: PaneID, _ label: String, _ present: Bool) {
-      calls.append((paneID, label, present))
+    private(set) var calls: [(ContentID, String, Bool)] = []
+    func record(_ contentID: ContentID, _ label: String, _ present: Bool) {
+      calls.append((contentID, label, present))
     }
   }
 
   // MARK: - isMuted
 
-  /// AC-V11-M-001: a freshly-spawned pane carries no labels, so the menu
+  /// AC-V11-M-001: a freshly-spawned session carries no labels, so the menu
   /// reports `isMuted == false` and (in the view layer) renders the
   /// `bell.slash` glyph instead of the checkmark.
   @Test
   func isMutedFalseWhenLabelAbsent() {
-    let (catalog, paneID) = makeCatalog(paneLabels: [])
+    let (catalog, contentID) = makeCatalog(paneLabels: [])
     let recorder = SetLabelRecorder()
     let model = PaneContextMenuModel(
-      paneID: paneID,
+      contentID: contentID,
       snapshot: { catalog },
-      setLabel: { paneID, label, present in
-        recorder.record(paneID, label, present)
+      setLabel: { contentID, label, present in
+        recorder.record(contentID, label, present)
       }
     )
 
@@ -73,17 +76,17 @@ struct PaneContextMenuTests {
   }
 
   /// AC-V11-M-002 (read side): once `InboxLabels.muted` is present on the
-  /// pane, the menu reports `isMuted == true` and the next render shows
+  /// session, the menu reports `isMuted == true` and the next render shows
   /// the checkmark.
   @Test
   func isMutedTrueWhenLabelPresent() {
-    let (catalog, paneID) = makeCatalog(paneLabels: [InboxLabels.muted])
+    let (catalog, contentID) = makeCatalog(paneLabels: [InboxLabels.muted])
     let recorder = SetLabelRecorder()
     let model = PaneContextMenuModel(
-      paneID: paneID,
+      contentID: contentID,
       snapshot: { catalog },
-      setLabel: { paneID, label, present in
-        recorder.record(paneID, label, present)
+      setLabel: { contentID, label, present in
+        recorder.record(contentID, label, present)
       }
     )
 
@@ -93,17 +96,17 @@ struct PaneContextMenuTests {
 
   // MARK: - toggleMute
 
-  /// AC-V11-M-002 (write side, unmuted → muted): toggling an unmuted pane
-  /// invokes `setLabel(paneID, InboxLabels.muted, true)` exactly once.
+  /// AC-V11-M-002 (write side, unmuted → muted): toggling an unmuted session
+  /// invokes `setLabel(contentID, InboxLabels.muted, true)` exactly once.
   @Test
   func toggleOnUnmutedRequestsLabelPresent() {
-    let (catalog, paneID) = makeCatalog(paneLabels: [])
+    let (catalog, contentID) = makeCatalog(paneLabels: [])
     let recorder = SetLabelRecorder()
     let model = PaneContextMenuModel(
-      paneID: paneID,
+      contentID: contentID,
       snapshot: { catalog },
-      setLabel: { paneID, label, present in
-        recorder.record(paneID, label, present)
+      setLabel: { contentID, label, present in
+        recorder.record(contentID, label, present)
       }
     )
 
@@ -111,22 +114,22 @@ struct PaneContextMenuTests {
 
     #expect(recorder.calls.count == 1)
     guard let call = recorder.calls.first else { return }
-    #expect(call.0 == paneID)
+    #expect(call.0 == contentID)
     #expect(call.1 == InboxLabels.muted)
     #expect(call.2 == true)
   }
 
-  /// AC-V11-M-002 (write side, muted → unmuted): toggling a muted pane
-  /// invokes `setLabel(paneID, InboxLabels.muted, false)` exactly once.
+  /// AC-V11-M-002 (write side, muted → unmuted): toggling a muted session
+  /// invokes `setLabel(contentID, InboxLabels.muted, false)` exactly once.
   @Test
   func toggleOnMutedRequestsLabelAbsent() {
-    let (catalog, paneID) = makeCatalog(paneLabels: [InboxLabels.muted])
+    let (catalog, contentID) = makeCatalog(paneLabels: [InboxLabels.muted])
     let recorder = SetLabelRecorder()
     let model = PaneContextMenuModel(
-      paneID: paneID,
+      contentID: contentID,
       snapshot: { catalog },
-      setLabel: { paneID, label, present in
-        recorder.record(paneID, label, present)
+      setLabel: { contentID, label, present in
+        recorder.record(contentID, label, present)
       }
     )
 
@@ -134,25 +137,25 @@ struct PaneContextMenuTests {
 
     #expect(recorder.calls.count == 1)
     guard let call = recorder.calls.first else { return }
-    #expect(call.0 == paneID)
+    #expect(call.0 == contentID)
     #expect(call.1 == InboxLabels.muted)
     #expect(call.2 == false)
   }
 
   // MARK: - close
 
-  /// The "Close" menu item fires the injected `closePane` closure exactly
-  /// once. The closure captures the full pane address at the view call
-  /// site; the model only owns the firing, so this pins that contract.
+  /// The "Close Tab" menu item fires the injected `closeTab` closure
+  /// exactly once. The closure captures the Tab id at the view call site;
+  /// the model only owns the firing, so this pins that contract.
   @Test
-  func closeFiresClosePaneOnce() {
-    let (catalog, paneID) = makeCatalog(paneLabels: [])
+  func closeFiresCloseTabOnce() {
+    let (catalog, contentID) = makeCatalog(paneLabels: [])
     var closeCount = 0
     let model = PaneContextMenuModel(
-      paneID: paneID,
+      contentID: contentID,
       snapshot: { catalog },
       setLabel: { _, _, _ in },
-      closePane: { closeCount += 1 }
+      closeTab: { closeCount += 1 }
     )
 
     model.close()
@@ -160,20 +163,20 @@ struct PaneContextMenuTests {
     #expect(closeCount == 1)
   }
 
-  /// Reading and writing are independent — an unknown pane id snapshots
+  /// Reading and writing are independent — an unknown content id snapshots
   /// as `nil` and reports `isMuted == false` (no crash, no spurious
-  /// label write). Guards the menu against the rare case where the pane
+  /// label write). Guards the menu against the rare case where the session
   /// is removed from the catalog between menu-open and click.
   @Test
-  func isMutedFalseWhenPaneMissing() {
+  func isMutedFalseWhenContentMissing() {
     let (catalog, _) = makeCatalog(paneLabels: [InboxLabels.muted])
-    let foreignID = PaneID()
+    let foreignID = ContentID()
     let recorder = SetLabelRecorder()
     let model = PaneContextMenuModel(
-      paneID: foreignID,
+      contentID: foreignID,
       snapshot: { catalog },
-      setLabel: { paneID, label, present in
-        recorder.record(paneID, label, present)
+      setLabel: { contentID, label, present in
+        recorder.record(contentID, label, present)
       }
     )
 

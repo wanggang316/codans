@@ -64,7 +64,7 @@ extension WorkflowMachine {
   /// role is idle again. The token stays valid.
   private mutating func performAskAgain(_ transition: inout Transition) {
     guard let ordinal = run.currentOrdinal, var activation = run.activations[ordinal],
-      activation.state == .provisional || activation.state == .waiting, let paneID = activation.paneID
+      activation.state == .provisional || activation.state == .waiting, let contentID = activation.contentID
     else { return }
     activation.pendingLine = WorkflowCompletionCommand.askAgainLine(
       issues: activation.issues, command: completionCommand(for: activation))
@@ -72,7 +72,7 @@ extension WorkflowMachine {
     activation.nudged = false
     run.activations[ordinal] = activation
     run.status = .running
-    awaitIdle(role: activation.role, paneID: paneID, ordinal: ordinal, &transition)
+    awaitIdle(role: activation.role, contentID: contentID, ordinal: ordinal, &transition)
   }
 
   // MARK: - Keep waiting
@@ -81,13 +81,13 @@ extension WorkflowMachine {
     run.status = .running
     switch run.phase {
     case .waitingForRole(let role, let ordinal):
-      guard let paneID = run.paneID(for: role) else { return }
-      awaitIdle(role: role, paneID: paneID, ordinal: ordinal, &transition)
+      guard let contentID = run.contentID(for: role) else { return }
+      awaitIdle(role: role, contentID: contentID, ordinal: ordinal, &transition)
     case .waitingForState(let role, let until):
-      guard let paneID = run.paneID(for: role), let step = run.currentStep,
+      guard let contentID = run.contentID(for: role), let step = run.currentStep,
         case .wait(_, _, let timeoutMinutes) = step.verb
       else { return }
-      awaitState(role: role, paneID: paneID, until: until, timeoutMinutes: timeoutMinutes, &transition)
+      awaitState(role: role, contentID: contentID, until: until, timeoutMinutes: timeoutMinutes, &transition)
     case .waitingForDelivery(let ordinal):
       rearmWatchdog(ordinal: ordinal, extendingDeadline: reason == .deliveryTimeout, &transition)
     case .idle, .injecting, .launching, .runningCommand, .finished:
@@ -165,7 +165,7 @@ extension WorkflowMachine {
       case .launch(let profileID, let profileName, let agent, _)? = run.bindings[role]
     else { return }
     closeActivation(as: .revoked, &transition)
-    run.bindings[role] = .launch(profileID: profileID, profileName: profileName, agent: agent, paneID: nil)
+    run.bindings[role] = .launch(profileID: profileID, profileName: profileName, agent: agent, contentID: nil)
     if case .launch = step.verb {
       reenterCurrentStep(&transition)
       return
@@ -192,10 +192,10 @@ extension WorkflowMachine {
       reenterCurrentStep(&transition)
     case .injectionFailed:
       guard case .injecting(let ordinal) = run.phase, let step = run.currentStep,
-        let target = injectionContent(of: step), let paneID = run.paneID(for: target.role)
+        let target = injectionContent(of: step), let contentID = run.contentID(for: target.role)
       else { return }
       run.status = .running
-      awaitIdle(role: target.role, paneID: paneID, ordinal: ordinal, &transition)
+      awaitIdle(role: target.role, contentID: contentID, ordinal: ordinal, &transition)
     case .provisionalDelivery, .roleBlocked, .roleGone, .deliveryTimeout, .noDeliveryAfterIdle, .launchFailed,
       .waitTimeout:
       break

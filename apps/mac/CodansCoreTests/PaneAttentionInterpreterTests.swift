@@ -25,7 +25,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneOutputMarksProducedAndProducesNoCue() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneOutput(pane, Data()),
       hasProducedOutput: []
@@ -38,20 +38,20 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func desktopNotificationWithoutPromptCueIsTaskFinished() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .desktopNotification(title: "Build done", body: "5 targets compiled")),
       hasProducedOutput: []
     )
     #expect(step.cue?.kind == .taskFinished)
     #expect(step.cue?.title == "Build done")
-    #expect(step.cue?.paneID == pane)
+    #expect(step.cue?.contentID == pane)
   }
 
   @Test
   func desktopNotificationWithPermissionCueIsWaitingForInput() {
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .desktopNotification(title: "Permission required", body: "")),
+      .paneInfoChanged(ContentID(), .desktopNotification(title: "Permission required", body: "")),
       hasProducedOutput: []
     )
     #expect(step.cue?.kind == .waitingForInput)
@@ -60,7 +60,7 @@ struct PaneAttentionInterpreterTests {
   @Test
   func desktopNotificationWithTitleSuffixedQuestionMarkIsWaitingForInput() {
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .desktopNotification(title: "Apply migration?", body: "")),
+      .paneInfoChanged(ContentID(), .desktopNotification(title: "Apply migration?", body: "")),
       hasProducedOutput: []
     )
     #expect(step.cue?.kind == .waitingForInput)
@@ -73,7 +73,7 @@ struct PaneAttentionInterpreterTests {
     // suffix to avoid misclassifying these as waiting-for-input.
     let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(
-        PaneID(),
+        ContentID(),
         .desktopNotification(title: "Build done", body: "5 targets in 2.3s. Add tests?")
       ),
       hasProducedOutput: []
@@ -84,7 +84,7 @@ struct PaneAttentionInterpreterTests {
   @Test
   func desktopNotificationWithApprovalCueIsWaitingForInput() {
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .desktopNotification(title: "Approval needed", body: "rm /tmp/x")),
+      .paneInfoChanged(ContentID(), .desktopNotification(title: "Approval needed", body: "rm /tmp/x")),
       hasProducedOutput: []
     )
     #expect(step.cue?.kind == .waitingForInput)
@@ -100,13 +100,13 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func bellRangIsWaitingForInput() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(pane, .bellRang),
       hasProducedOutput: []
     )
     #expect(step.cue?.kind == .waitingForInput)
-    #expect(step.cue?.paneID == pane)
+    #expect(step.cue?.contentID == pane)
     #expect(step.outputFlag == .unchanged)
   }
 
@@ -121,7 +121,7 @@ struct PaneAttentionInterpreterTests {
     // Default threshold is 10 s; pass 30 s so the event fires.
     let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(
-        PaneID(),
+        ContentID(),
         .commandFinished(exitCode: 0, duration: Self.longDurationNs)
       ),
       hasProducedOutput: []
@@ -135,7 +135,7 @@ struct PaneAttentionInterpreterTests {
   func commandFinishedNonZeroExitMentionsStatus() {
     let step = PaneAttentionInterpreter.interpret(
       .paneInfoChanged(
-        PaneID(),
+        ContentID(),
         .commandFinished(exitCode: 137, duration: Self.longDurationNs)
       ),
       hasProducedOutput: []
@@ -149,7 +149,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func commandFinishedDisabled_suppressesEvenLongSuccess() {
-    let pane = PaneID()
+    let pane = ContentID()
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
       commandFinishedEnabled: false,
@@ -171,7 +171,7 @@ struct PaneAttentionInterpreterTests {
     )
     // 5 s < 10 s threshold.
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: 5 * 1_000_000_000)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 0, duration: 5 * 1_000_000_000)),
       context: context
     )
     #expect(step.cue == nil)
@@ -185,7 +185,7 @@ struct PaneAttentionInterpreterTests {
       commandFinishedThresholdSec: 10
     )
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: 10 * 1_000_000_000)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 0, duration: 10 * 1_000_000_000)),
       context: context
     )
     #expect(step.cue != nil)
@@ -200,7 +200,7 @@ struct PaneAttentionInterpreterTests {
       commandFinishedThresholdSec: 10
     )
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: Self.longDurationNs)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 0, duration: Self.longDurationNs)),
       context: context
     )
     #expect(step.cue?.title == "Command finished")
@@ -214,7 +214,7 @@ struct PaneAttentionInterpreterTests {
       commandFinishedThresholdSec: 10
     )
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 130, duration: Self.longDurationNs)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 130, duration: Self.longDurationNs)),
       context: context
     )
     #expect(step.cue == nil)
@@ -228,7 +228,7 @@ struct PaneAttentionInterpreterTests {
       commandFinishedThresholdSec: 10
     )
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 143, duration: Self.longDurationNs)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 143, duration: Self.longDurationNs)),
       context: context
     )
     #expect(step.cue == nil)
@@ -242,7 +242,7 @@ struct PaneAttentionInterpreterTests {
       commandFinishedThresholdSec: 10
     )
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 1, duration: Self.longDurationNs)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 1, duration: Self.longDurationNs)),
       context: context
     )
     #expect(step.cue != nil)
@@ -252,7 +252,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func keystrokeWithinSuppressionWindow_suppresses() {
-    let pane = PaneID()
+    let pane = ContentID()
     let now = Date()
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
@@ -270,7 +270,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func keystrokeOutsideSuppressionWindow_doesNotSuppress() {
-    let pane = PaneID()
+    let pane = ContentID()
     let now = Date()
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
@@ -288,8 +288,8 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func keystrokeForDifferentPane_doesNotSuppress() {
-    let pane = PaneID()
-    let otherPane = PaneID()
+    let pane = ContentID()
+    let otherPane = ContentID()
     let now = Date()
     let context = PaneAttentionInterpreter.Context(
       hasProducedOutput: [],
@@ -315,7 +315,7 @@ struct PaneAttentionInterpreterTests {
       commandFinishedThresholdSec: 0
     )
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .commandFinished(exitCode: 0, duration: 1_000_000_000)),
+      .paneInfoChanged(ContentID(), .commandFinished(exitCode: 0, duration: 1_000_000_000)),
       context: context
     )
     #expect(step.cue != nil)
@@ -326,20 +326,20 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneExitedCleanProducesNoCue() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneExited(pane, code: 0, signal: nil),
       hasProducedOutput: [pane]
     )
     #expect(step.cue == nil)
-    // Cache management still runs so a recreated PaneID can't
+    // Cache management still runs so a recreated ContentID can't
     // inherit the prior 'has produced output' gate state.
     #expect(step.outputFlag == .clearProduced(pane))
   }
 
   @Test
   func paneExitedNonZeroProducesNoCue() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneExited(pane, code: 1, signal: nil),
       hasProducedOutput: [pane]
@@ -350,7 +350,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneExitedBySignalProducesNoCue() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneExited(pane, code: 0, signal: 9),
       hasProducedOutput: [pane]
@@ -363,7 +363,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneCrashedSurfacesReason() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneCrashed(pane, reason: "Subprocess panicked"),
       hasProducedOutput: [pane]
@@ -378,7 +378,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneIdleBelowThresholdIsDropped() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneIdle(pane, duration: PaneAttentionInterpreter.idleThreshold - 1),
       hasProducedOutput: [pane]
@@ -389,7 +389,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneIdleAboveThresholdWithoutPriorOutputIsDropped() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneIdle(pane, duration: PaneAttentionInterpreter.idleThreshold + 60),
       hasProducedOutput: []  // pane has not produced anything yet
@@ -399,7 +399,7 @@ struct PaneAttentionInterpreterTests {
 
   @Test
   func paneIdleAboveThresholdWithPriorOutputIsTaskFinished() {
-    let pane = PaneID()
+    let pane = ContentID()
     let step = PaneAttentionInterpreter.interpret(
       .paneIdle(pane, duration: 45),
       hasProducedOutput: [pane]
@@ -414,13 +414,13 @@ struct PaneAttentionInterpreterTests {
   @Test
   func untrackedEventsProduceNoCueAndNoFlagChange() {
     let cases: [TerminalEvent] = [
-      .paneCreated(PaneID(), TabID()),
-      .paneReady(PaneID()),
+      .paneCreated(ContentID(), TabID()),
+      .paneReady(ContentID()),
       .tabActivated(TabID()),
       .worktreeActivated(WorktreeID()),
       .hierarchyMutated(.catalog),
-      .foregroundJobChanged(PaneID(), ForegroundJob(processGroupID: 1, processes: [])),
-      .paneViewportChanged(PaneID(), text: "screen"),
+      .foregroundJobChanged(ContentID(), ForegroundJob(processGroupID: 1, processes: [])),
+      .paneViewportChanged(ContentID(), text: "screen"),
       .configChanged,
     ]
     for event in cases {
@@ -433,7 +433,7 @@ struct PaneAttentionInterpreterTests {
   @Test
   func paneInfoChangedWithUnrelatedDeltaIsIgnored() {
     let step = PaneAttentionInterpreter.interpret(
-      .paneInfoChanged(PaneID(), .title("New title")),
+      .paneInfoChanged(ContentID(), .title("New title")),
       hasProducedOutput: []
     )
     #expect(step.cue == nil)

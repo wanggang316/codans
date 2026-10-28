@@ -1,3 +1,4 @@
+import CodansCore
 import Foundation
 
 extension IPC {
@@ -54,7 +55,8 @@ extension IPC {
     }
   }
 
-  /// `hierarchy.describeWorktree`.
+  /// `hierarchy.describeWorktree`. `focusedPaneID` is the Pane that takes
+  /// keyboard input; `paneCount` counts the leaves of the split tree.
   public struct WorktreeDescription: Codable, Equatable, Sendable {
     public let id: String
     public let projectID: String
@@ -65,8 +67,8 @@ extension IPC {
     public let isArchived: Bool
     public let isPinned: Bool
     public let isSelected: Bool
-    public let selectedTabID: String?
-    public let tabCount: Int
+    public let focusedPaneID: String?
+    public let paneCount: Int
     /// The row's group and role inside a workspace; nil elsewhere.
     public let workspaceGroup: WorkspaceGroupRef?
 
@@ -80,8 +82,8 @@ extension IPC {
       isArchived: Bool,
       isPinned: Bool,
       isSelected: Bool,
-      selectedTabID: String?,
-      tabCount: Int,
+      focusedPaneID: String?,
+      paneCount: Int,
       workspaceGroup: WorkspaceGroupRef? = nil
     ) {
       self.id = id
@@ -93,66 +95,23 @@ extension IPC {
       self.isArchived = isArchived
       self.isPinned = isPinned
       self.isSelected = isSelected
-      self.selectedTabID = selectedTabID
-      self.tabCount = tabCount
+      self.focusedPaneID = focusedPaneID
+      self.paneCount = paneCount
       self.workspaceGroup = workspaceGroup
     }
   }
 
-  /// `hierarchy.describeTab`. `title` is what the sidebar shows (the user's
-  /// name, else the last live title); `name` is only the user-set part.
-  public struct TabDescription: Codable, Equatable, Sendable {
-    public let id: String
-    public let handle: String?
-    public let projectID: String
-    public let worktreeID: String
-    public let title: String?
-    public let name: String?
-    public let icon: String?
-    public let isSelected: Bool
-    public let focusedPaneID: String?
-    public let paneIDs: [String]
-
-    public init(
-      id: String,
-      handle: String?,
-      projectID: String,
-      worktreeID: String,
-      title: String?,
-      name: String?,
-      icon: String?,
-      isSelected: Bool,
-      focusedPaneID: String?,
-      paneIDs: [String]
-    ) {
-      self.id = id
-      self.handle = handle
-      self.projectID = projectID
-      self.worktreeID = worktreeID
-      self.title = title
-      self.name = name
-      self.icon = icon
-      self.isSelected = isSelected
-      self.focusedPaneID = focusedPaneID
-      self.paneIDs = paneIDs
-    }
-  }
-
-  /// `hierarchy.describePane`. `workingDirectory` is the live shell
-  /// directory when the surface has reported one, else the creation-time
-  /// one; `isLive` says whether a terminal surface is bound this session.
+  /// `hierarchy.describePane` and the rows of `hierarchy.listPanes`. A Pane
+  /// is a split-tree leaf holding a strip of Tabs; `handle` is its `p<n>`
+  /// selector, `tabIDs` the strip in order, and `isFocused` whether it is
+  /// the Worktree's focused Pane.
   public struct PaneDescription: Codable, Equatable, Sendable {
     public let id: String
     public let handle: String?
     public let projectID: String
     public let worktreeID: String
-    public let tabID: String
-    public let workingDirectory: String
-    public let initialCommand: String?
-    public let labels: [String]
-    public let agent: String?
-    public let agentSessionID: String?
-    public let isLive: Bool
+    public let selectedTabID: String?
+    public let tabIDs: [String]
     public let isFocused: Bool
 
     public init(
@@ -160,27 +119,80 @@ extension IPC {
       handle: String?,
       projectID: String,
       worktreeID: String,
-      tabID: String,
-      workingDirectory: String,
-      initialCommand: String?,
-      labels: [String],
-      agent: String?,
-      agentSessionID: String?,
-      isLive: Bool,
+      selectedTabID: String?,
+      tabIDs: [String],
       isFocused: Bool
     ) {
       self.id = id
       self.handle = handle
       self.projectID = projectID
       self.worktreeID = worktreeID
-      self.tabID = tabID
+      self.selectedTabID = selectedTabID
+      self.tabIDs = tabIDs
+      self.isFocused = isFocused
+    }
+  }
+
+  /// `hierarchy.describeTab` and the rows of `hierarchy.listTabs`. A Tab
+  /// is a strip slot with its chip attributes and one Content: `handle` is
+  /// its `t<n>` selector, `paneID` the Pane holding it, `contentID` its
+  /// session. `title` is what the chip shows (the user's name, else the
+  /// last live title); `name` is only the user-set part.
+  /// `workingDirectory` is the live shell directory when the session has
+  /// reported one, else the creation-time one; `isLive` says whether a
+  /// terminal surface is bound this app session.
+  public struct TabDescription: Codable, Equatable, Sendable {
+    public let id: String
+    public let handle: String?
+    public let projectID: String
+    public let worktreeID: String
+    public let paneID: String
+    public let contentID: String
+    public let title: String?
+    public let name: String?
+    public let icon: String?
+    public let color: TabColor?
+    public let isSelected: Bool
+    public let workingDirectory: String?
+    public let labels: [String]
+    public let agent: String?
+    public let agentSessionID: String?
+    public let isLive: Bool
+
+    public init(
+      id: String,
+      handle: String?,
+      projectID: String,
+      worktreeID: String,
+      paneID: String,
+      contentID: String,
+      title: String?,
+      name: String?,
+      icon: String?,
+      color: TabColor?,
+      isSelected: Bool,
+      workingDirectory: String?,
+      labels: [String],
+      agent: String?,
+      agentSessionID: String?,
+      isLive: Bool
+    ) {
+      self.id = id
+      self.handle = handle
+      self.projectID = projectID
+      self.worktreeID = worktreeID
+      self.paneID = paneID
+      self.contentID = contentID
+      self.title = title
+      self.name = name
+      self.icon = icon
+      self.color = color
+      self.isSelected = isSelected
       self.workingDirectory = workingDirectory
-      self.initialCommand = initialCommand
       self.labels = labels
       self.agent = agent
       self.agentSessionID = agentSessionID
       self.isLive = isLive
-      self.isFocused = isFocused
     }
   }
 }

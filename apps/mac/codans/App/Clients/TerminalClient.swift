@@ -7,7 +7,7 @@ import CodansCore
 /// each closure to a concrete `TerminalEngine` instance at app startup via
 /// `.withDependencies`.
 nonisolated struct TerminalClient: Sendable {
-  var sendInput: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
+  var sendInput: @MainActor @Sendable (_ contentID: ContentID, _ text: String) -> Void
 
   /// Deliver `text` to the pane as one paste, then submit it with a real
   /// Return keypress after a short gap.
@@ -22,37 +22,37 @@ nonisolated struct TerminalClient: Sendable {
   /// submits, which is how `text + "\n"` used to leave a newline sitting in
   /// the composer. Anything aimed at a pane that may be running an agent
   /// must go through here.
-  var sendCommand: @MainActor @Sendable (_ paneID: PaneID, _ text: String) -> Void
+  var sendCommand: @MainActor @Sendable (_ contentID: ContentID, _ text: String) -> Void
   /// Interrupt the pane's foreground process (Ctrl-C → SIGINT). Goes through
   /// the key-event path rather than `sendInput`, whose text path filters
   /// control bytes. No-op when the pane has no live surface.
-  var interrupt: @MainActor @Sendable (_ paneID: PaneID) -> Void
-  var setFocus: @MainActor @Sendable (_ paneID: PaneID, _ focused: Bool) -> Void
-  var retryPane: @MainActor @Sendable (_ paneID: PaneID) -> Bool
+  var interrupt: @MainActor @Sendable (_ contentID: ContentID) -> Void
+  var setFocus: @MainActor @Sendable (_ contentID: ContentID, _ focused: Bool) -> Void
+  var retryPane: @MainActor @Sendable (_ contentID: ContentID) -> Bool
 
-  /// Create or return the existing `PaneSurface` for the pane. Throws
-  /// `TerminalClient.Error.worktreeNotFound` if the worktree address doesn't
-  /// resolve inside the current catalog. The client takes the full address
-  /// so the engine's `ensureSurface(for:in:)` can hand the `Worktree`
-  /// struct to ghostty as the surface config's working directory source.
-  /// `initialSize` is the size in points of the slot that will show the
-  /// pane, when known; see `TerminalEngine.ensureSurface`.
+  /// Create or return the existing `PaneSurface` for the Content, through
+  /// `ContentRuntime`. Throws `TerminalClient.Error.contentNotFound` if the
+  /// Content is not in the current catalog. The address, Worktree and
+  /// Project env are resolved here so the spawn receives everything it
+  /// needs. `geometry` is the slot that will show the Content, when known;
+  /// see `TerminalEngine.ensureSurface`.
   ///
-  /// `async throws` because bring-up spawns the `zmx serve` daemon and
-  /// completes a control-socket handshake before libghostty wires the
-  /// External PTY backend onto the new surface.
+  /// `async throws` because bring-up spawns the zmx daemon and completes a
+  /// control-socket handshake before libghostty wires the External PTY
+  /// backend onto the new surface.
   var ensureSurface:
-    @MainActor @Sendable (
-      _ paneID: PaneID, _ inTab: TabID, _ inWorktree: WorktreeID,
-      _ inProject: ProjectID, _ initialSize: CGSize?
-    ) async throws -> Void
-  var closeSurface: @MainActor @Sendable (_ paneID: PaneID) -> Void
+    @MainActor @Sendable (_ contentID: ContentID, _ geometry: ContentGeometry?) async throws -> Void
+  /// The content host view placed the Content in a slot of `geometry`
+  /// (on appear and on every slot change); see `ContentRuntime.mount`.
+  var mount: @MainActor @Sendable (_ contentID: ContentID, _ geometry: ContentGeometry) -> Void
+  /// The content host view left its slot.
+  var unmount: @MainActor @Sendable (_ contentID: ContentID) -> Void
 
   /// Look up an existing `PaneSurface` registered with the engine. Returns
-  /// `nil` when no surface has been created for the pane yet; callers
+  /// `nil` when no surface has been created for the Content yet; callers
   /// (notably `LazyPaneHost`) should call `ensureSurface` first on a
   /// cache miss.
-  var surface: @MainActor @Sendable (_ paneID: PaneID) -> PaneSurface?
+  var surface: @MainActor @Sendable (_ contentID: ContentID) -> PaneSurface?
 
   /// Event stream from the engine. Multi-consumer: each call returns a fresh
   /// subscriber registration. Lifecycle events always delivered; output
@@ -60,15 +60,12 @@ nonisolated struct TerminalClient: Sendable {
   var events: @MainActor @Sendable () -> AsyncStream<TerminalEvent>
 
   nonisolated enum Error: LocalizedError, Equatable, Sendable {
-    case worktreeNotFound(WorktreeID)
-    case paneNotFound(PaneID)
+    case contentNotFound(ContentID)
 
     var errorDescription: String? {
       switch self {
-      // The live bridge throws `worktreeNotFound` for any missing link in the
-      // project → worktree → tab → pane path, so name the pane, not the level.
-      case .worktreeNotFound, .paneNotFound:
-        return "This pane no longer exists in the workspace."
+      case .contentNotFound:
+        return "This tab no longer exists in the workspace."
       }
     }
   }
@@ -82,44 +79,52 @@ nonisolated struct TerminalClient: Sendable {
 // MARK: - Live bridge
 
 extension TerminalClient {
+  /// `contents` is the registry every surface is created, mounted and
+  /// unmounted through, so the strip finds a `TabChrome` for every live
+  /// Content; `envProvider` resolves the Project's env vars for the spawn.
   @MainActor
-  static func live(engine: TerminalEngine) -> TerminalClient {
+  static func live(
+    engine: TerminalEngine,
+    contents: ContentRuntime,
+    envProvider: @escaping @MainActor (ProjectID) -> [String: String] = { _ in [:] }
+  ) -> TerminalClient {
     TerminalClient(
-      sendInput: { paneID, text in
-        engine.ghosttyRuntime?.surface(for: paneID)?.sendInput(text)
+      sendInput: { contentID, text in
+        engine.ghosttyRuntime?.surface(for: contentID)?.sendInput(text)
       },
-      sendCommand: { paneID, text in
-        guard let surface = engine.ghosttyRuntime?.surface(for: paneID) else { return }
+      sendCommand: { contentID, text in
+        guard let surface = engine.ghosttyRuntime?.surface(for: contentID) else { return }
         surface.sendText(text)
         Task { @MainActor in
           try? await Task.sleep(for: TerminalClient.submitDelay)
           // Re-resolve rather than capturing `surface`: the pane can be
           // closed inside the gap, and submitting into a dead surface is
           // a no-op we'd rather express as "the pane is gone".
-          engine.ghosttyRuntime?.surface(for: paneID)?.sendNamedKey(.enter)
+          engine.ghosttyRuntime?.surface(for: contentID)?.sendNamedKey(.enter)
         }
       },
-      interrupt: { paneID in
-        engine.ghosttyRuntime?.surface(for: paneID)?.sendInterrupt()
+      interrupt: { contentID in
+        engine.ghosttyRuntime?.surface(for: contentID)?.sendInterrupt()
       },
-      setFocus: { paneID, focused in
-        engine.ghosttyRuntime?.surface(for: paneID)?.setFocus(focused)
+      setFocus: { contentID, focused in
+        engine.ghosttyRuntime?.surface(for: contentID)?.setFocus(focused)
       },
-      retryPane: { paneID in engine.retryPane(paneID) },
-      ensureSurface: { paneID, tabID, worktreeID, projectID, initialSize in
+      retryPane: { contentID in engine.retryPane(contentID) },
+      ensureSurface: { contentID, geometry in
         let catalog = engine.hierarchy.catalog
-        guard
-          let project = catalog.projects.first(where: { $0.id == projectID }),
-          let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-          let tab = worktree.tabs.first(where: { $0.id == tabID }),
-          let pane = tab.panes.first(where: { $0.id == paneID })
+        guard let address = catalog.address(forContent: contentID),
+          case (let project, let worktree)? = catalog.worktree(address.worktreeID),
+          let content = worktree.tab(address.tabID)?.content
         else {
-          throw TerminalClient.Error.worktreeNotFound(worktreeID)
+          throw TerminalClient.Error.contentNotFound(contentID)
         }
-        _ = try await engine.ensureSurface(for: pane, in: worktree, initialSize: initialSize)
+        let env = engine.hierarchy.builtinEnvironment(
+          envProvider(address.projectID), project: project, worktree: worktree)
+        _ = try await contents.ensure(content, in: address, worktree: worktree, env: env, geometry: geometry)
       },
-      closeSurface: { paneID in engine.closeSurface(for: paneID) },
-      surface: { paneID in engine.ghosttyRuntime?.surface(for: paneID) },
+      mount: { contentID, geometry in contents.mount(contentID, geometry: geometry) },
+      unmount: { contentID in contents.unmount(contentID) },
+      surface: { contentID in engine.ghosttyRuntime?.surface(for: contentID) },
       events: { engine.events() }
     )
   }
@@ -136,8 +141,9 @@ extension TerminalClient: DependencyKey {
     interrupt: { _ in fatalError("TerminalClient.liveValue not configured") },
     setFocus: { _, _ in fatalError("TerminalClient.liveValue not configured") },
     retryPane: { _ in fatalError("TerminalClient.liveValue not configured") },
-    ensureSurface: { _, _, _, _, _ in fatalError("TerminalClient.liveValue not configured") },
-    closeSurface: { _ in fatalError("TerminalClient.liveValue not configured") },
+    ensureSurface: { _, _ in fatalError("TerminalClient.liveValue not configured") },
+    mount: { _, _ in fatalError("TerminalClient.liveValue not configured") },
+    unmount: { _ in fatalError("TerminalClient.liveValue not configured") },
     surface: { _ in nil },
     events: { AsyncStream { $0.finish() } }
   )
@@ -149,7 +155,8 @@ extension TerminalClient: DependencyKey {
     setFocus: unimplemented("TerminalClient.setFocus"),
     retryPane: unimplemented("TerminalClient.retryPane", placeholder: false),
     ensureSurface: unimplemented("TerminalClient.ensureSurface"),
-    closeSurface: unimplemented("TerminalClient.closeSurface"),
+    mount: unimplemented("TerminalClient.mount"),
+    unmount: unimplemented("TerminalClient.unmount"),
     // Quiet `{ _ in nil }` mirrors the liveValue fallback above: pane-host
     // / view-side lookups for a not-yet-attached surface are an expected
     // outcome, not a test contract worth asserting. Without this default,

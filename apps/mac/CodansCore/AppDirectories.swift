@@ -12,16 +12,19 @@ import Foundation
 /// answered by) the other. Release builds keep the original `codans`
 /// paths, so the shipped app's on-disk location is unchanged.
 ///
-/// The suffix comes from `BuildChannel`, which is where the build-type
-/// decision is made and why.
+/// The suffix comes from `AppInstance`: the channel's slug from
+/// `BuildChannel`, plus the worktree name of a Debug build made in a linked
+/// git worktree.
 public nonisolated enum AppDirectories {
-  /// Channel slug: `codans-dev` for Debug builds, `codans` for Release. Names
-  /// the cache root and the legacy `~/.config/<name>` directory.
-  public static let name: String = BuildChannel.current.slug
+  /// Instance slug: `codans` for Release, `codans-dev` for a Debug build of
+  /// the main checkout, `codans-dev-<worktree>` for one of a linked
+  /// worktree. Names the cache root and the legacy `~/.config/<name>`
+  /// directory.
+  public static let name: String = AppInstance.slug
 
-  /// `~/.<name>` — the channel's root: `~/.codans` for Release,
-  /// `~/.codans-dev` for Debug. Config and state live under it, so the two
-  /// channels are isolated at the top level.
+  /// `~/.<name>` — the instance's root: `~/.codans` for Release,
+  /// `~/.codans-dev[-<worktree>]` for Debug. Config and state live under it,
+  /// so channels and instances are isolated at the top level.
   public static func channelDirectory(
     home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   ) -> URL {

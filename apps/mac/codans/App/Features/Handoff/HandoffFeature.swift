@@ -16,7 +16,7 @@ import Foundation
 struct HandoffFeature {
   /// The outgoing side, captured once when the panel opens.
   struct Source: Equatable, Sendable {
-    let paneID: PaneID
+    let contentID: ContentID
     let projectID: ProjectID
     let worktreeID: WorktreeID
     let agent: AgentKind

@@ -26,8 +26,8 @@ nonisolated enum RemoteSurfaceCommand {
   /// (the bare pane UUID) by a `codans-` prefix; the two live in different `zmx`
   /// namespaces (different machines) so a shared UUID would not collide, but the
   /// prefix keeps host-side sessions self-identifying in `zmx list`.
-  static func hostSessionName(for paneID: PaneID) -> String {
-    "codans-\(paneID.raw.uuidString)"
+  static func hostSessionName(for contentID: ContentID) -> String {
+    "codans-\(contentID.raw.uuidString)"
   }
 
   /// Compose the full surface command string handed to libghostty.
@@ -40,13 +40,13 @@ nonisolated enum RemoteSurfaceCommand {
   ///   when the host has `zmx`.
   static func build(
     host: RemoteHost,
-    paneID: PaneID,
+    contentID: ContentID,
     remotePath: String,
     localZmxPath: String?,
     hostPersistence: Bool = true
   ) -> String {
-    let hostSession = hostSessionName(for: paneID)
-    let paneUUID = paneID.raw.uuidString
+    let hostSession = hostSessionName(for: contentID)
+    let paneUUID = contentID.raw.uuidString
     let connectLine = SSHCommand.commandLine(
       host: host,
       remoteCommand: posixShellWrapped(
@@ -71,7 +71,7 @@ nonisolated enum RemoteSurfaceCommand {
     // relaunch re-attaches it exactly like a local pane.
     return ZmxAttachCommand.build(
       zmxPath: localZmxPath,
-      session: ZmxAttachCommand.session(for: paneID),
+      session: ZmxAttachCommand.session(for: contentID),
       userCommand: loop
     )
   }

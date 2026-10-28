@@ -2,14 +2,14 @@ import Foundation
 
 /// Catalog version 3 → 4: places every Workspace row into a group.
 ///
-/// Pure and deterministic, so a crash before the version 4 write repeats the
-/// same result, and so it can run behind any other catalog migration. Rows
-/// keep their IDs, tabs, and panes (session identity); only `workspaceSlot`
-/// and the Project's `workspaceGroups` are added.
+/// Runs on a catalog whose layout `CatalogMigrationV4ToV5` has already
+/// lifted, so it leaves `version` alone. Pure and deterministic, so a crash
+/// before the migrated write repeats the same result. Rows keep their IDs
+/// and Panes (session identity); only `workspaceSlot` and the Project's
+/// `workspaceGroups` are added.
 public nonisolated enum CatalogMigrationV3ToV4 {
   public static func migrate(_ catalog: Catalog) -> Catalog {
     var migrated = catalog
-    migrated.version = 4
     for index in migrated.projects.indices where migrated.projects[index].isWorkspace {
       migrateWorkspace(&migrated.projects[index])
     }

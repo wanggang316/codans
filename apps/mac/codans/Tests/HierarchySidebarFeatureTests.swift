@@ -1063,10 +1063,13 @@ extension HierarchySidebarFeatureTests {
   @Test
   func onlyAReferenceCanLeaveTheWorkspaceOnItsOwn() async {
     let f = WorkspaceFixture()
-    let busyTab = Tab(name: "dev server")
-    let idleTab = Tab(name: "shell")
+    let busyTab = Tab(name: "dev server", content: .terminal(workingDirectory: "/src/app"))
+    let idleTab = Tab(name: "shell", content: .terminal(workingDirectory: "/src/app"))
+    let pane = Pane(tabs: [busyTab, idleTab])
     var project = f.project
-    project.worktrees[1].tabs = [busyTab, idleTab]
+    project.worktrees[1].splitTree = SplitTree(leaf: pane.id)
+    project.worktrees[1].panes = [pane]
+    project.worktrees[1].focusedPaneID = pane.id
     let removed = LockIsolated<[String]>([])
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()

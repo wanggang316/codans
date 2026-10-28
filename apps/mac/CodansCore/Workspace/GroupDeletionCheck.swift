@@ -81,8 +81,8 @@ public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
   public var groupID: WorkspaceGroupID
   public var groupName: String
   public var members: [Member]
-  /// Panes of the group row and its member rows that are running something.
-  public var busyPaneIDs: [PaneID]
+  /// Contents of the group row and its member rows that are running something.
+  public var busyContentIDs: [ContentID]
   /// Entries of the group directory that are not member checkouts (named
   /// groups only; never for a group at the Workspace root).
   public var extraEntries: [String]
@@ -94,7 +94,7 @@ public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
     groupID: WorkspaceGroupID,
     groupName: String,
     members: [Member] = [],
-    busyPaneIDs: [PaneID] = [],
+    busyContentIDs: [ContentID] = [],
     extraEntries: [String] = [],
     groupCheckFailures: [String] = []
   ) {
@@ -102,14 +102,14 @@ public nonisolated struct GroupDeletionCheck: Codable, Equatable, Sendable {
     self.groupID = groupID
     self.groupName = groupName
     self.members = members
-    self.busyPaneIDs = busyPaneIDs
+    self.busyContentIDs = busyContentIDs
     self.extraEntries = extraEntries
     self.groupCheckFailures = groupCheckFailures
   }
 
   /// Something would be lost; the request must acknowledge it.
   public var hasRisks: Bool {
-    members.contains(where: \.hasRisks) || !busyPaneIDs.isEmpty || !extraEntries.isEmpty
+    members.contains(where: \.hasRisks) || !busyContentIDs.isEmpty || !extraEntries.isEmpty
   }
 
   /// A probe failed; the delete cannot run until a retry succeeds.

@@ -54,7 +54,7 @@ struct WorkspaceHandlersTests {
             name: "app", worktreeID: try row(memberPath).id, path: memberPath, branch: "feat/x",
             uncommittedCount: uncommitted, unpushedCount: 1, checkFailure: failure)
         ],
-        busyPaneIDs: [PaneID()], extraEntries: ["notes.txt"])
+        busyContentIDs: [ContentID()], extraEntries: ["notes.txt"])
     }
 
     func cleanUp() {

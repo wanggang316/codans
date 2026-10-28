@@ -38,11 +38,11 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 | `CodansEnvironment.Key` | codans 读或写的每一个环境变量名，附写者、读者、生命周期 | 所有读写点；类型化持有者（`BuiltinEnvVar`、`TermProgramEnv`、`CLIBundleLocator.EnvKey`、`HandoffKickoff.requestIDEnvironmentKey`）保留 API、从它取值 |
 | `HandoffLayout` | `.codans/handoff/` 的文件与目录名 | `HandoffStore`（URL）、`HandoffKickoff`（给接收方的相对路径字符串） |
 
-app 层再加一个 `PaneEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，所有 surface 共用。
+app 层再加一个 `TabEnvironment`（`codans/Runtime/`），把「一个 pane 的 shell 以什么环境启动」收成两个阶段，所有 surface 共用。
 
 ### 通道隔离了什么
 
-`BuildChannel.current.slug` 派生出全部按通道分开的资源：
+`BuildChannel.current.slug` 派生出全部按通道分开的资源（Debug 构建的数据路径再按实例细分，见下一节）：
 
 ```
                      Debug                               Release
@@ -58,6 +58,26 @@ CLI 名               codans-dev                          codans
 ```
 
 config 根放用户会手改的文件，state 根放只有 app 写的文件，runtime 根放 zmx 的 daemon socket、快照与日志，cache 根放可重建的数据。socket 不能放在 cache 根下：清理工具会整目录删掉 `~/Library/Caches/<slug>`，daemon 还活着却再也连不上，下一次 `zmx attach` 会在原地新建会话，pane 里的 shell 和 agent 就"消失"了（见 [lessons-learned](../lessons-learned/2026-10-20-cache-cleaner-wiped-zmx-sockets.md)）。0.7.11 及更早版本把 socket 放在 cache 根下，启动时 `SessionReaper.migrateLegacySocketDirectory` 把还活着的 daemon 的 socket 挪进 runtime 根（已绑定的 AF_UNIX socket 改名后仍可连接）。0.7.8 及更早版本把 config 与 state 都放在 `~/.config/<slug>/`，首次启动由 `LegacyConfigMigrator` 一次性迁入新根（见 [Architecture › Persistence](../architecture.md#persistence)）。`~/.codans/` 下的 `repos/`、`workspaces/`、`sources/` 是用户的 git 工作区，不按通道区分，两个构建共用。
+
+### 实例：每个 worktree 的 dev 构建各用一套数据
+
+数据路径（config / state / runtime / cache 根与 IPC socket）不直接用通道 slug，而用 `AppInstance.slug`：通道 slug 后面再接实例名。
+
+```
+构建                                  实例名        数据根                       IPC socket
+Release                               无            ~/.codans/                   /tmp/codans-<uid>.sock
+Debug，仓库主 checkout                无            ~/.codans-dev/               /tmp/codans-dev-<uid>.sock
+Debug，linked worktree（如 card-pane） card-pane     ~/.codans-dev-card-pane/     /tmp/codans-dev-card-pane-<uid>.sock
+Debug，测试运行（XCTest）             xctest        ~/.codans-dev-xctest/        /tmp/codans-dev-xctest-<uid>.sock
+```
+
+- 构建阶段 `scripts/stamp-instance.sh` 在 Debug 构建里判断源码所在 checkout：`git rev-parse --absolute-git-dir` 与 `--git-common-dir` 不同即 linked worktree，把 worktree 目录名（小写字母、数字、中间的连字符，至多 24 字符）写进包内 Info.plist 的 `CodansInstance`；主 checkout 与 Release 不写。每次构建都重跑，checkout 变了实例跟着变。
+- app 与包内 CLI 读同一份 Info.plist：CLI 从自身可执行文件（经安装软链解析后）向上找到所在 `.app`。所以 pane 外直接运行某个包的 `codans-dev`，拨的就是那个包的实例。
+- 测试运行恒为 `xctest` 实例：app target 的测试跑在完整的 app 里，会加载并保存 catalog，不能碰开发者的数据。
+- 一个分支改了 catalog 格式，只会改写它自己实例的数据，别的分支的构建读不到它。两个分支的 dev app 也可以同时运行，各自绑定自己的 socket。
+- CLI 名仍按通道（`codans-dev`），不带实例名。
+- `SocketPaths.resolve` 把与本构建不同的任一通道默认 socket 视为继承来的宿主路径：worktree 实例的 app 从共享 dev app 的 pane 里启动时，不会去绑定宿主的 socket。
+- 上面四个覆盖变量仍然优先于实例派生的路径。
 
 两个构建是**两个应用**：名字本身携带通道，一个通道的 CLI 只拨自己通道的 socket（见下文两节）。包内文件名由 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置给出（Debug `codans-dev`，Release `codans`），`embed-codans.sh` 按它落盘，`CLIBundleLocator` 按 `CLIInvocation.commandName` 查找；两者必须与 `BuildChannel.slug` 一致。
 
@@ -105,20 +125,22 @@ processBase(inheriting:overrides:socketPath:marketingVersion:)
      并把本 app 内置 CLI 的目录放到 PATH 最前
      —— 写在最后，所以项目自定义的同名变量（包括自己重建的 PATH）永远遮不住它们
 
-forSurface(base, paneID:, zmxDirectory:)
-  5. ZMX_DIR      钉死到本通道的缓存目录
-  6. ZMX_SESSION  清空 —— 从 zmx pane 里启动的 app 会继承父会话名，attach 会当作
+forSurface(base, <content / tab / pane ids>, zmxDirectory:)
+  5. ZMX_DIR      钉死到本通道的 runtime 目录
+  6. ZMX_SESSION  清空 —— 从 zmx 终端里启动的 app 会继承父会话名，attach 会当作
                   「切换到那个会话」而失败，表现为 tab 一闪就没
-  7. CODANS_PANE_ID  pane 自己的 id
+  7. CODANS_CONTENT_ID  会话自己的 id（zmx 会话名、agent 状态、通知都以它记账）
+     CODANS_TAB_ID      装着这份会话的 Tab 的 id
+     CODANS_PANE_ID     该 Tab 所在 Pane 的 id
 ```
 
-worktree pane 在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。
+worktree 终端在 4 和 5 之间还会由 `HierarchyManager.injectingBuiltins` 写入 `CODANS_WORKTREE_PATH` / `CODANS_ROOT_PATH`。
 
-只注入 `CODANS_PANE_ID` 而不注入 tab / worktree / project id 是有意的：pane id 终生不变，烘进环境是安全的；其余三个会随 pane 被移动而过期，所以由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认这五个键，是为了让调用方手动导出时能就地短路，但 app 只写 pane 那一个。
+三个 id 各有一个含义、互不别名（见 [pane-layout.md](pane-layout.md) 与 ADR-0001）：agent 与脚本用 `CODANS_CONTENT_ID` 定位"自己"，用 `CODANS_TAB_ID` / `CODANS_PANE_ID` 对周围的条或布局动手。不注入 worktree / project id 是有意的：它们由服务端从进程祖先解析。CLI 的 `AliasResolver` 仍认 `CODANS_PROJECT_ID` / `CODANS_WORKTREE_ID`，是为了让调用方手动导出时能就地短路，但 app 只写上面三个。
 
 ### pane 里的 CLI 叫什么
 
-pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pane 的 app** 自带的 CLI。做法是让名字携带通道：Debug 构建把 CLI 内嵌为 `bin/codans-dev`，Release 为 `bin/codans`；`PaneEnvironment` 把内置 `bin/` 目录（同目录还有 `zmx`）加进 `PATH`，并导出 `CODANS_CLI` 为绝对路径。两者都在项目 overrides 之后写入；同一目录在 `PATH` 里只保留一份。
+pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pane 的 app** 自带的 CLI。做法是让名字携带通道：Debug 构建把 CLI 内嵌为 `bin/codans-dev`，Release 为 `bin/codans`；`TabEnvironment` 把内置 `bin/` 目录（同目录还有 `zmx`）加进 `PATH`，并导出 `CODANS_CLI` 为绝对路径。两者都在项目 overrides 之后写入；同一目录在 `PATH` 里只保留一份。
 
 靠 `PATH` **顺序**是不够的，这是前一版的错误：pane 的 shell 是 login shell，macOS 的 `/etc/zprofile` 会运行 `path_helper`，把 `/etc/paths` 里的系统目录（含 `/usr/local/bin`）排到最前，app 前置的目录被挤到后面。同名的 `codans` 永远输给 `/usr/local/bin/codans`，也就是生产包。唯一的名字不需要顺序：系统里没有第二个 `codans-dev`，目录排在哪都能找到；找不到时是 command not found，而不是悄悄打到另一个 app——失败的方向是对的。
 
@@ -147,7 +169,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 - `BuildChannel`、`CodansEnvironment`、`HandoffLayout` 只依赖 Foundation，无副作用，可在任何 target 使用。
 - `SocketDiscovery`（CodansKit）与 `SocketPaths`（app）是两个门面：拼写委托给 `BuildChannel`，各自只保留本侧的解析语义。
-- `PaneEnvironment` 属 `codans/Runtime/`，是 app 内唯一写 pane 环境的地方；`HierarchyManager.resolvedEnv` 是它的 Settings 感知封装。
+- `TabEnvironment` 属 `codans/Runtime/`，是 app 内唯一写 pane 环境的地方；`HierarchyManager.resolvedEnv` 是它的 Settings 感知封装。
 - 新增按通道区分的东西，应从 `BuildChannel.current` 派生，不再新增 `#if DEBUG`。新增环境变量，先在 `CodansEnvironment.Key` 里登记。
 
 ## 备选方案
@@ -155,13 +177,13 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 - **按 configuration 给不同 bundle id。** 隔离最彻底，但通知中心、Sparkle、URL scheme 全部一分为二，Debug 包会失去与真实安装一致的系统行为，测的就不再是要发的东西。否决。
 - **把两个 socket resolver 合并成一个。** 会丢掉那条故意的不对称，或者要在一个函数里塞两个开关。保留两个门面、共享拼写，成本更低也更诚实。
 - **让 `HandoffKickoff` 直接引用 `HandoffStore` 的 URL 再取相对路径。** 会把 prompt 文本和文件系统绑在一起，而 prompt 只需要名字。独立的纯 `HandoffLayout` 更小。
-- **注入全部四个层级 id。** tab / worktree / project id 会随 pane 移动而失效，注入即埋雷。只注入不变的那一个。
+- **再注入 worktree / project id。** 它们由服务端从进程祖先解析即可，烘进环境只会多一处可能过期的副本。只注入会话自己的三个 id（Content / Tab / Pane），每个一个含义。
 
 ## Cross-Cutting
 
-- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
+- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`TabEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
 - **可观测性**：`codans doctor` 打印它解析到的 socket 与 `socketFromEnvironment`；「命令跑到别的 app」先看这个。
-- **调用方身份**：pane 导出 `CODANS_PANE_ID`；服务端由该 Pane 推导所属 Tab、Worktree 和 Project。
+- **调用方身份**：终端导出 `CODANS_CONTENT_ID` / `CODANS_TAB_ID` / `CODANS_PANE_ID`；服务端由 Content 推导所属 Tab、Pane、Worktree 和 Project。
 
 ## 风险
 

@@ -107,12 +107,17 @@ struct CLIError: Error, CustomStringConvertible {
   private static func fromRPCError(_ rpc: RPCClient.RPCError) -> CLIError {
     switch rpc {
     case .ipc(.notFound(let kind, let id)) where id == "current" || id == ".":
-      // The pronoun could not be attributed to a pane: the caller is not
-      // inside one (or the pane's shell was replaced). Say what to do.
+      // The pronoun could not be attributed to a Tab: the caller is not
+      // inside one (or the Tab's shell was replaced). Say what to do. A
+      // container is never guessed: the worktree the window shows is an
+      // explicit opt-in.
+      let isContainer = kind == "worktree" || kind == "project"
       return CLIError(
         code: .notFound,
-        message: "no current \(kind): this shell is not inside a Codans pane",
-        hint: "pass an explicit \(kind) id, or run the command from a pane",
+        message: "no current \(kind): this shell is not inside a Codans tab",
+        hint: isContainer
+          ? "pass --worktree <name|id>, or --worktree @selected for the worktree the window shows"
+          : "pass an explicit \(kind) id, or run the command from a tab",
         errorCode: .noCurrentContext,
         details: ["kind": kind]
       )
@@ -136,6 +141,13 @@ struct CLIError: Error, CustomStringConvertible {
       return CLIError(code: .internal, message: "transport stream closed")
     case .decodeFailed(let reason):
       return CLIError(code: .internal, message: "response decode failed: \(reason)")
+    case .protocolMismatch(let client, let server):
+      return CLIError(
+        code: .versionMismatch,
+        message: "this CLI speaks IPC protocol \(client), the running app speaks protocol \(server)",
+        hint: "use the codans CLI bundled with the running app (same release)",
+        details: ["clientProtocol": String(client), "serverProtocol": String(server)]
+      )
     case .misorderedResponse(let expected, let got):
       return CLIError(
         code: .internal,
@@ -184,9 +196,9 @@ enum PathResolver {
 
 /// Resolves the container ids a worktree- or tab-scoped verb sends. When the
 /// innermost target is named explicitly and its containers are left on
-/// `current`, the containers come from the tree rather than the calling pane,
-/// so `codans tab close t3` and `codans pane new --tab t3` work from any
-/// shell — the target already determines where it lives.
+/// `current`, the containers come from the tree rather than the calling
+/// session, so `codans tab list --worktree main` works from any shell —
+/// the target already determines where it lives.
 enum ScopeResolver {
   static func isCurrent(_ value: String) -> Bool { value == "current" || value == "." }
 
@@ -207,27 +219,71 @@ enum ScopeResolver {
     return WorktreePath(projectID: ProjectID(raw: projectUUID), worktreeID: WorktreeID(raw: worktreeUUID))
   }
 
-  static func tab(
-    project: String, worktree: String, tab: String, client: RPCClient
-  ) async throws -> TabPath {
-    let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
-    if isCurrent(project), isCurrent(worktree), !isCurrent(tab) {
-      let tree = try await HierarchyTree.load(client: client)
-      guard let located = tree.locateTab(TabID(raw: tabUUID)) else {
-        throw CLIError(
-          code: .notFound, message: "tab \(tabUUID.uuidString) not found",
-          details: ["kind": "tab", "id": tabUUID.uuidString])
-      }
-      return located
+  /// The worktree a Pane-scoped option names: an explicit `--pane` (any of
+  /// the three ids) locates its worktree through the tree, so
+  /// `tab new --pane p3` works from any shell; otherwise the
+  /// `--project` / `--worktree` pair decides.
+  static func worktree(
+    project: String, worktree: String, pane: String?, client: RPCClient
+  ) async throws -> (scope: WorktreePath, paneID: PaneID?) {
+    guard let pane else {
+      return (try await Self.worktree(project: project, worktree: worktree, client: client), nil)
     }
-    let scope = try await Self.worktree(project: project, worktree: worktree, client: client)
-    return TabPath(projectID: scope.projectID, worktreeID: scope.worktreeID, tabID: TabID(raw: tabUUID))
+    let paneID = PaneID(raw: try await AliasResolver.resolve(pane, kind: .pane, client: client))
+    if isCurrent(project), isCurrent(worktree) {
+      let tree = try await HierarchyTree.load(client: client)
+      guard let located = tree.locatePane(paneID) else {
+        throw CLIError(
+          code: .notFound, message: "pane \(paneID) not found", details: ["kind": "pane", "id": paneID.description])
+      }
+      return (WorktreePath(projectID: located.projectID, worktreeID: located.worktreeID), paneID)
+    }
+    return (try await Self.worktree(project: project, worktree: worktree, client: client), paneID)
+  }
+}
+
+/// A resolved Tab target: the Tab, its session, and the Pane holding it.
+struct TabTarget: Sendable {
+  let tabID: TabID
+  let contentID: ContentID
+  let paneID: PaneID
+
+  /// The ids every session verb's JSON output carries.
+  var jsonFields: [String: Any] {
+    ["tabID": tabID.description, "contentID": contentID.description, "paneID": paneID.description]
+  }
+
+  /// `--tab` / a positional names a Tab by any of the three ids; `--pane`
+  /// names a Pane and means its selected Tab. One `hierarchy.describeTab`
+  /// fills in the rest (it converts a Pane or Content id to the Tab).
+  static func resolve(_ selection: CLITargetSelection, client: RPCClient) async throws -> TabTarget {
+    let uuid: UUID
+    switch selection {
+    case .tab(let value):
+      uuid = try await AliasResolver.resolve(value, kind: .tab, client: client)
+    case .pane(let value):
+      uuid = try await AliasResolver.resolve(value, kind: .pane, client: client)
+    }
+    let description: IPC.TabDescription = try await client.call(
+      .hierarchyDescribeTab, params: IPC.DescribeRequest(id: uuid))
+    guard let tabID = UUID(uuidString: description.id), let contentID = UUID(uuidString: description.contentID),
+      let paneID = UUID(uuidString: description.paneID)
+    else {
+      throw CLIError(code: .internal, message: "describeTab returned malformed ids for \(uuid.uuidString)")
+    }
+    return TabTarget(tabID: TabID(raw: tabID), contentID: ContentID(raw: contentID), paneID: PaneID(raw: paneID))
+  }
+
+  /// `--focus`: select the Tab and focus its Pane, as `tab focus` does.
+  static func activate(_ target: TabTarget, client: RPCClient) async throws {
+    struct Params: Codable { let id: UUID }
+    _ = try await client.callRaw(.hierarchyActivateTab, params: Params(id: target.tabID.raw))
   }
 }
 
 enum CommandRunner {
   /// Runs a command body with the render context set to the command's
-  /// path (`pane.send`), so every JSON envelope it emits — success or the
+  /// path (`tab.send`), so every JSON envelope it emits — success or the
   /// failure this catches — carries the right `schemaVersion`.
   static func run(
     _ command: some ParsableCommand,

@@ -216,6 +216,13 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  /// Persist the user's "Confirm before closing a tab" preference. The UI's close
+  /// paths read it through `HierarchyClient.live` at close time.
+  func setCloseTabConfirmation(_ value: CloseTabConfirmation) {
+    settings.general.closeTabConfirmation = value
+    scheduleSave()
+  }
+
   /// Persist the user's "On quit" action. Applied directly when the confirmation dialog is
   /// skipped, and drives the default-focused button when the dialog IS shown.
   func setQuitAction(_ value: QuitAction) {

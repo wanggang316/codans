@@ -15,6 +15,10 @@ import SwiftUI
 struct TabChipBackground: View {
   let isActive: Bool
   let isHovering: Bool
+  /// Inactive strip: the selected capsule renders flat, as in the system
+  /// bar of an inactive window (dimmer fill and rims, no shadow, no hover
+  /// darkening).
+  @Environment(\.tabStripIsActive) private var stripIsActive
 
   var body: some View {
     // Both capsules stay in the tree so their geometry animates with the
@@ -30,14 +34,25 @@ struct TabChipBackground: View {
 
   private var selectedCapsule: some View {
     Capsule()
-      .fill(isHovering ? TabBarColors.activeHoverBackground : TabBarColors.activeBackground)
-      .overlay(Capsule().strokeBorder(TabBarColors.activeRimOuter, lineWidth: 0.5))
-      .overlay(
-        Capsule().strokeBorder(TabBarColors.activeRimInner, lineWidth: 0.5).padding(0.5)
-      )
+      .fill(selectedFill)
+      .overlay(Capsule().strokeBorder(rimOuter, lineWidth: 0.5))
+      .overlay(Capsule().strokeBorder(rimInner, lineWidth: 0.5).padding(0.5))
       // Flatten first: without it SwiftUI shadows each layer separately
       // and the rims cast a grey band onto the inside of the capsule.
       .compositingGroup()
-      .shadow(color: TabBarColors.activeShadow, radius: 1.5, y: 0.5)
+      .shadow(color: stripIsActive ? TabBarColors.activeShadow : .clear, radius: 1.5, y: 0.5)
+  }
+
+  private var rimOuter: Color {
+    stripIsActive ? TabBarColors.activeRimOuter : TabBarColors.inactiveRimOuter
+  }
+
+  private var rimInner: Color {
+    stripIsActive ? TabBarColors.activeRimInner : TabBarColors.inactiveRimInner
+  }
+
+  private var selectedFill: Color {
+    guard stripIsActive else { return TabBarColors.inactiveSelectedBackground }
+    return isHovering ? TabBarColors.activeHoverBackground : TabBarColors.activeBackground
   }
 }

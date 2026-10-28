@@ -3,8 +3,9 @@ import Testing
 
 @testable import CodansCore
 
-/// Catalog version 4 adds Workspace groups. Version 3 files still decode and
-/// migrate in memory; files from a newer build are reported, not read.
+/// Version 3 files have no Workspace groups. The loader lifts their layout
+/// (`CatalogMigrationV4ToV5`), then `CatalogMigrationV3ToV4` places every
+/// Workspace row into a group.
 struct CatalogMigrationV3ToV4Tests {
   private let rootID = "11111111-1111-1111-1111-111111111111"
   private let childID = "22222222-2222-2222-2222-222222222222"
@@ -56,27 +57,15 @@ struct CatalogMigrationV3ToV4Tests {
       """.utf8)
   }
 
+  /// The fixture with its layout lifted, as the loader hands it over.
   private func decodeLegacy() throws -> Catalog {
-    try JSONDecoder().decode(Catalog.self, from: legacyFixture)
-  }
-
-  @Test
-  func currentVersionIsFour() {
-    #expect(Catalog.currentVersion == 4)
-    #expect(Catalog().version == 4)
-  }
-
-  @Test
-  func versionThreeDecodesAndReportsItsSourceVersion() throws {
-    let catalog = try decodeLegacy()
-    #expect(catalog.version == 3)
-    #expect(catalog.projects.count == 2)
+    try CatalogMigrationV4ToV5.migrate(legacyFixture)
   }
 
   @Test
   func newerVersionIsReportedSeparatelyFromRetiredVersions() {
-    #expect(throws: Catalog.DecodingIssue.newerVersion(5)) {
-      _ = try JSONDecoder().decode(Catalog.self, from: Data(#"{"version": 5}"#.utf8))
+    #expect(throws: Catalog.DecodingIssue.newerVersion(6)) {
+      _ = try JSONDecoder().decode(Catalog.self, from: Data(#"{"version": 6}"#.utf8))
     }
     #expect(throws: Catalog.DecodingIssue.unsupportedVersion(2)) {
       _ = try JSONDecoder().decode(Catalog.self, from: Data(#"{"version": 2}"#.utf8))
@@ -88,7 +77,7 @@ struct CatalogMigrationV3ToV4Tests {
     let legacy = try decodeLegacy()
     let migrated = CatalogMigrationV3ToV4.migrate(legacy)
 
-    #expect(migrated.version == 4)
+    #expect(migrated.version == Catalog.currentVersion)
     #expect(migrated.selectedProjectID == legacy.selectedProjectID)
     let before = try #require(legacy.projects.last)
     let after = try #require(migrated.projects.last)
@@ -98,9 +87,9 @@ struct CatalogMigrationV3ToV4Tests {
     #expect(after.worktrees.map(\.path) == before.worktrees.map(\.path))
     #expect(after.worktrees.map(\.branch) == before.worktrees.map(\.branch))
     #expect(after.worktrees.map(\.archived) == before.worktrees.map(\.archived))
-    #expect(after.worktrees[0].tabs == before.worktrees[0].tabs)
-    #expect(after.worktrees[0].selectedTabID == before.worktrees[0].selectedTabID)
-    #expect(after.worktrees[0].tabs[0].panes.map(\.id.raw.uuidString) == [paneID])
+    #expect(after.worktrees[0].panes == before.worktrees[0].panes)
+    #expect(after.worktrees[0].focusedPaneID == before.worktrees[0].focusedPaneID)
+    #expect(after.worktrees[0].contentIDs.map(\.raw.uuidString) == [paneID])
     // The ordinary repository is untouched.
     #expect(migrated.projects[0] == legacy.projects[0])
   }
@@ -132,7 +121,7 @@ struct CatalogMigrationV3ToV4Tests {
   func workspaceWithOnlyItsRootStillGetsExisting() {
     let root = Worktree(name: "ws", path: "/tmp/solo")
     let project = Project(name: "solo", rootPath: "/tmp/solo", worktrees: [root], isWorkspace: true)
-    let migrated = CatalogMigrationV3ToV4.migrate(Catalog(version: 3, projects: [project]))
+    let migrated = CatalogMigrationV3ToV4.migrate(Catalog(projects: [project]))
     let groups = migrated.projects[0].workspaceGroups
     #expect(groups.map(\.name) == ["default", "existing"])
     #expect(migrated.projects[0].worktrees[0].workspaceSlot?.role == .groupTerminal)
@@ -147,12 +136,12 @@ struct CatalogMigrationV3ToV4Tests {
   }
 
   @Test
-  func migratedCatalogRoundTripsAsVersionFour() throws {
+  func migratedCatalogRoundTripsAtTheCurrentVersion() throws {
     let migrated = CatalogMigrationV3ToV4.migrate(try decodeLegacy())
     let data = try JSONEncoder().encode(migrated)
     let decoded = try JSONDecoder().decode(Catalog.self, from: data)
     #expect(decoded == migrated)
-    #expect(decoded.version == 4)
+    #expect(decoded.version == Catalog.currentVersion)
   }
 
   // MARK: - Codec

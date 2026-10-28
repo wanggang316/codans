@@ -45,8 +45,9 @@ public enum SocketDiscovery {
     BuildChannel.development.socketPath(uid: uid)
   }
 
+  /// This build's own socket: its instance's (see `AppInstance`).
   public static func defaultSocketPath(uid: uid_t = getuid()) -> String {
-    BuildChannel.current.socketPath(uid: uid)
+    AppInstance.socketPath(uid: uid)
   }
 
   /// Precedence: an explicit `override` (a `--socket` flag), then
@@ -81,17 +82,18 @@ public enum SocketDiscovery {
     uid: uid_t = getuid()
   ) throws(ForeignPaneRefusal) -> String {
     if let override, !override.isEmpty { return override }
+    let ownDefault = channel == .current ? defaultSocketPath(uid: uid) : channel.socketPath(uid: uid)
     guard let fromEnvironment = environment[CodansEnvironment.Key.socketPath.rawValue],
       !fromEnvironment.isEmpty
     else {
-      return channel.socketPath(uid: uid)
+      return ownDefault
     }
     if fromEnvironment == channel.other.socketPath(uid: uid) {
       switch channel {
       case .release:
         throw ForeignPaneRefusal(paneChannel: .development, socketPath: fromEnvironment)
       case .development:
-        return channel.socketPath(uid: uid)
+        return ownDefault
       }
     }
     return fromEnvironment

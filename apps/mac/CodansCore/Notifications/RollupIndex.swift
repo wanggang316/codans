@@ -12,28 +12,29 @@ import Foundation
 /// - L4 Project   — small unread dot to the right of the project name
 /// - L3 Worktree  — leading row icon swaps to a bell glyph
 /// - L2 Tab       — small unread dot prefixed before the tab title
-/// - L1 Pane      — no chrome. A source pane the user can already see
-///                  (its tab is active — the pane is either focused or a
-///                  visible sibling split) is a sink: the entry stays
-///                  unread in the inbox but emits no roll-up indicator.
+/// - L1 Content   — no chrome. A source Content the user can already see
+///                  (its Tab is the selected Tab of a Pane in the active
+///                  Worktree) is a sink: the entry stays unread in the
+///                  inbox but emits no roll-up indicator.
 ///
 /// `globalUnreadCount` is the total ungrouped unread count. Only the
 /// status-bar bell badge and the Dock tile badge consume it.
 public nonisolated struct RollupIndex: Equatable, Sendable {
   public let unreadProjects: Set<ProjectID>
   public let unreadWorktrees: Set<WorktreeID>
-  public let unreadTabs: Set<TabID>
+  /// Contents whose Tab chip shows the unread dot.
+  public let unreadContents: Set<ContentID>
   public let globalUnreadCount: Int
 
   public init(
     unreadProjects: Set<ProjectID> = [],
     unreadWorktrees: Set<WorktreeID> = [],
-    unreadTabs: Set<TabID> = [],
+    unreadContents: Set<ContentID> = [],
     globalUnreadCount: Int = 0
   ) {
     self.unreadProjects = unreadProjects
     self.unreadWorktrees = unreadWorktrees
-    self.unreadTabs = unreadTabs
+    self.unreadContents = unreadContents
     self.globalUnreadCount = globalUnreadCount
   }
 
@@ -47,7 +48,7 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
   ) -> RollupIndex {
     var unreadProjects: Set<ProjectID> = []
     var unreadWorktrees: Set<WorktreeID> = []
-    var unreadTabs: Set<TabID> = []
+    var unreadContents: Set<ContentID> = []
 
     for entry in unread {
       switch deepestHiddenLevel(for: entry.source, focus: focus) {
@@ -56,14 +57,13 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
       case .worktree:
         unreadWorktrees.insert(focus.rowStandIns[entry.source.worktreeID] ?? entry.source.worktreeID)
       case .tab:
-        unreadTabs.insert(entry.source.tabID)
-      case .pane:
-        // Sink: the source pane is already the deepest level the user can
-        // see (its tab is active — the pane is either focused or a visible
-        // sibling split). There is no pane-level chrome, and surfacing it
-        // at Tab / Worktree / Project would be wrong since the user is
-        // already looking into this tab. The entry stays unread in the
-        // inbox (counted in `globalUnreadCount`) but emits no indicator.
+        unreadContents.insert(entry.source.contentID)
+      case .content:
+        // Sink: the source Content is on screen (its Tab is selected in
+        // its Pane). There is no Content-level chrome, and surfacing it at
+        // Tab / Worktree / Project would be wrong since the user is already
+        // looking at it. The entry stays unread in the inbox (counted in
+        // `globalUnreadCount`) but emits no indicator.
         break
       }
     }
@@ -71,18 +71,18 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
     return RollupIndex(
       unreadProjects: unreadProjects,
       unreadWorktrees: unreadWorktrees,
-      unreadTabs: unreadTabs,
+      unreadContents: unreadContents,
       globalUnreadCount: unread.count
     )
   }
 
   // MARK: - Visibility logic
 
-  enum Level { case project, worktree, tab, pane }
+  enum Level { case project, worktree, tab, content }
 
   /// Decide which level renders the indicator for one source path. The
   /// rule is "deepest hidden ancestor": walk down from project, stop at
-  /// the first level the user cannot see into. `.pane` is the terminal
+  /// the first level the user cannot see into. `.content` is the terminal
   /// case — everything above it is visible, so `compute` treats it as an
   /// indicator-less sink.
   private static func deepestHiddenLevel(
@@ -99,26 +99,26 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
     if !worktreeIsActive {
       return .worktree
     }
-    let tabIsActive = focus.activeTabID == source.tabID
-    if !tabIsActive {
+    if !focus.visibleContentIDs.contains(source.contentID) {
       return .tab
     }
-    // Tab is active: the source pane is visible (focused or a sibling
-    // split), so there is no deeper hidden level. Classify as `.pane`,
-    // which `compute` drops as an indicator-less sink.
-    return .pane
+    // The Content is on screen, so there is no deeper hidden level.
+    // Classify as `.content`, which `compute` drops as an indicator-less
+    // sink.
+    return .content
   }
 }
 
-/// Snapshot of the data the user can currently see in the sidebar /
-/// tab-bar / pane chrome. Drives `RollupIndex.compute`'s visibility rule.
+/// Snapshot of the data the user can currently see in the sidebar and
+/// the Pane strips. Drives `RollupIndex.compute`'s visibility rule.
 public nonisolated struct RollupFocusState: Equatable, Sendable {
-  public let focusedPaneID: PaneID?
-  public let activeTabID: TabID?
+  /// Contents on screen: the selected Tab of every Pane of the active
+  /// Worktree.
+  public let visibleContentIDs: Set<ContentID>
   public let activeWorktreeID: WorktreeID?
   public let activeProjectID: ProjectID?
   /// Projects whose disclosure row is currently expanded in the sidebar.
-  /// Worktrees / tabs / panes inside a collapsed project are not visible
+  /// Worktrees / Panes / Tabs inside a collapsed project are not visible
   /// to the user, so unread events for them roll up to project level.
   public let expandedProjectIDs: Set<ProjectID>
   /// Worktrees drawn as their Project's own row (`Project.rowWorktree`):
@@ -130,16 +130,14 @@ public nonisolated struct RollupFocusState: Equatable, Sendable {
   public let rowStandIns: [WorktreeID: WorktreeID]
 
   public init(
-    focusedPaneID: PaneID? = nil,
-    activeTabID: TabID? = nil,
+    visibleContentIDs: Set<ContentID> = [],
     activeWorktreeID: WorktreeID? = nil,
     activeProjectID: ProjectID? = nil,
     expandedProjectIDs: Set<ProjectID> = [],
     rowWorktreeIDs: Set<WorktreeID> = [],
     rowStandIns: [WorktreeID: WorktreeID] = [:]
   ) {
-    self.focusedPaneID = focusedPaneID
-    self.activeTabID = activeTabID
+    self.visibleContentIDs = visibleContentIDs
     self.activeWorktreeID = activeWorktreeID
     self.activeProjectID = activeProjectID
     self.expandedProjectIDs = expandedProjectIDs

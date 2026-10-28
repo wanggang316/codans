@@ -79,9 +79,9 @@ struct TabChipSnapshotTests {
     // Second tab active — dividers should disappear on its left and right.
     let ids = [TabID(), TabID(), TabID()]
     let tabs: [CodansCore.Tab] = [
-      .init(id: ids[0], name: "main"),
-      .init(id: ids[1], name: "feature/login"),
-      .init(id: ids[2], name: "fix/crash"),
+      .init(id: ids[0], name: "main", content: .terminal(workingDirectory: "/tmp")),
+      .init(id: ids[1], name: "feature/login", content: .terminal(workingDirectory: "/tmp")),
+      .init(id: ids[2], name: "fix/crash", content: .terminal(workingDirectory: "/tmp")),
     ]
 
     let view = TabBarRowView(

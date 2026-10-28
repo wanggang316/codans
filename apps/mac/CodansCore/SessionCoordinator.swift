@@ -48,8 +48,8 @@ public final class SessionCoordinator {
   /// Remove a single row and persist synchronously. No-op when absent —
   /// the IPC `pane.close` path needs the operation to be idempotent so a
   /// stale invocation does not error.
-  public func recordClose(_ paneID: PaneID) throws {
-    let key = paneID.raw.uuidString
+  public func recordClose(_ contentID: ContentID) throws {
+    let key = contentID.raw.uuidString
     guard snapshot.sessions.removeValue(forKey: key) != nil else { return }
     try store.saveNow(snapshot)
   }
@@ -61,7 +61,7 @@ public final class SessionCoordinator {
   /// cancel the pending task before writing so this debounced row never
   /// clobbers an immediate save.
   ///
-  /// Idempotent: re-recording the same paneID overwrites the row, which
+  /// Idempotent: re-recording the same Content overwrites the row, which
   /// is exactly the semantics we want when a reattach refreshes
   /// `lastAttachedAt` or when a crashed pane respawns with a new pid.
   ///
@@ -80,7 +80,7 @@ public final class SessionCoordinator {
   /// field can fill in on first re-record.
   public func recordLive(_ session: Session) {
     var session = session
-    let key = session.paneID.raw.uuidString
+    let key = session.contentID.raw.uuidString
     if let bornEpoch = snapshot.sessions[key]?.sessionEpoch {
       session.sessionEpoch = bornEpoch
     }
@@ -106,14 +106,14 @@ public final class SessionCoordinator {
   }
 
   /// Read-only view of the agent map for the launch-time restore path.
-  /// Keyed by `PaneID` so the caller's liveness check (`kill(pid, 0)`)
-  /// can correlate against the engine's surviving paneIDs without
+  /// Keyed by `ContentID` so the caller's liveness check (`kill(pid, 0)`)
+  /// can correlate against the engine's surviving Contents without
   /// re-parsing UUIDs.
-  public var restoredAgents: [PaneID: PersistedAgentRecord] {
-    var out: [PaneID: PersistedAgentRecord] = [:]
+  public var restoredAgents: [ContentID: PersistedAgentRecord] {
+    var out: [ContentID: PersistedAgentRecord] = [:]
     out.reserveCapacity(snapshot.agents.count)
     for record in snapshot.agents.values {
-      out[record.paneID] = record
+      out[record.contentID] = record
     }
     return out
   }

@@ -10,7 +10,7 @@ import Testing
 /// engine or session is needed here.
 struct WorkflowRunDisplayTests {
   private static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
-  private static let authorPane = PaneID(raw: UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!)
+  private static let authorPane = ContentID(raw: UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!)
   private static let reviewerProfile = UUID(uuidString: "00000000-0000-0000-0000-0000000000C0")!
 
   /// Same shape as `WorkflowEngineTests.yaml`: a `message` step with an
@@ -44,10 +44,10 @@ struct WorkflowRunDisplayTests {
       definition: definition,
       source: WorkflowRunSource(
         projectID: ProjectID(), worktreeID: WorktreeID(), worktreePath: "/w", worktreeName: "w"),
-      bindings: ["author": .current(paneID: authorPane)],
+      bindings: ["author": .current(contentID: authorPane)],
       runDirectory: "/w/.codans/workflow-runs/run",
       cliCommand: "codans",
-      initiatorPaneID: authorPane,
+      initiatorContentID: authorPane,
       startedAt: epoch
     )
   }
@@ -124,16 +124,16 @@ struct WorkflowRunDisplayTests {
         source: WorkflowRunSource(
           projectID: ProjectID(), worktreeID: WorktreeID(), worktreePath: "/w", worktreeName: "w"),
         bindings: [
-          "author": .current(paneID: Self.authorPane),
-          "reviewer": .launch(profileID: Self.reviewerProfile, profileName: "Reviewer", agent: .codex, paneID: nil),
+          "author": .current(contentID: Self.authorPane),
+          "reviewer": .launch(profileID: Self.reviewerProfile, profileName: "Reviewer", agent: .codex, contentID: nil),
         ],
         runDirectory: "/w/.codans/workflow-runs/run", cliCommand: "codans", startedAt: Self.epoch))
     run.roleStates["author"] = "idle"
     let rows = WorkflowRunDisplay.roleRows(for: run)
     #expect(rows.map(\.id) == ["author", "reviewer"])
-    #expect(rows[0].paneID == Self.authorPane)
+    #expect(rows[0].contentID == Self.authorPane)
     #expect(rows[0].state == "idle")
-    #expect(rows[1].paneID == nil)
+    #expect(rows[1].contentID == nil)
   }
 
   @Test

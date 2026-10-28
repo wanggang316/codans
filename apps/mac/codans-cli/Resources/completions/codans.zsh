@@ -53,12 +53,15 @@ _codans() {
             'status:Show the running Codans app status.'
             'launch:Start Codans and wait for its command socket.'
             'doctor:Check local CLI configuration and app reachability.'
-            'tree:List projects, worktrees, tabs, and panes.'
+            'tree:List projects, worktrees, panes, and tabs.'
             'project:List, create, describe, rename, and remove projects.'
             'worktree:List, create, describe, switch, rename, prune, and remove worktrees.'
-            'tab:List, create, describe, switch, rename, and close tabs.'
-            'pane:List, create, split, resize, focus, close, label, read, reset, and send panes.'
-            'broadcast:Send text to a tab, worktree, or label scope.'
+            'tab:Drive tabs and their sessions: list, show, create, focus, rename, close, send, read, label, reset.'
+            'pane:Shape the layout: list, focus, split, close, resize, equalize, and zoom panes.'
+            'send:Send text to a tab (same as `tab send`).'
+            'send-key:Send a named special key to a tab (same as `tab send-key`).'
+            'capture:Capture a tab'\''s rendered text (same as `tab capture`).'
+            'broadcast:Send text to every tab of a pane, a worktree, or a label.'
             'agent:List and launch coding-agent profiles.'
             'handoff:Hand a task off between coding agents: archive, brief, and launch the receiver.'
             'workspace:Create workspaces, edit their projects, and manage their groups.'
@@ -71,7 +74,7 @@ _codans() {
         ;;
     arg)
         case "${words[1]}" in
-        status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|workspace|workflow|open|skill|help)
+        status|launch|doctor|tree|project|worktree|tab|pane|send|send-key|capture|broadcast|agent|handoff|workspace|workflow|open|skill|help)
             "_codans_${words[1]}" && ret=0
             ;;
         esac
@@ -299,7 +302,7 @@ _codans_project_commands_add() {
     local -ar ___kind=('run' 'test' 'deploy' 'lint' 'format' 'custom')
     local -ar ___target=('focused' 'newTab' 'split')
     local -ar ___direction=('up' 'down' 'left' 'right')
-    local -ar ___on_finished=('none' 'closePane' 'closeTab')
+    local -ar ___on_finished=('none' 'closeTab')
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
@@ -326,7 +329,7 @@ _codans_project_commands_edit() {
     local -ar ___kind=('run' 'test' 'deploy' 'lint' 'format' 'custom')
     local -ar ___target=('focused' 'newTab' 'split')
     local -ar ___direction=('up' 'down' 'left' 'right')
-    local -ar ___on_finished=('none' 'closePane' 'closeTab')
+    local -ar ___on_finished=('none' 'closeTab')
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
@@ -379,7 +382,7 @@ _codans_worktree() {
         local -ar subcommands=(
             'list:List worktrees for a project.'
             'new:Create a git worktree for a branch and add it to the project.'
-            'show:Describe a worktree: path, branch, project, selection, tab count.'
+            'show:Describe a worktree: path, branch, project, selection, panes.'
             'switch:Activate a worktree.'
             'rename:Set a worktree'\''s sidebar name (path and branch stay).'
             'prune:Run `git worktree prune` for a project and drop the stale rows.'
@@ -529,18 +532,25 @@ _codans_tab() {
     case "${state}" in
     command)
         local -ar subcommands=(
-            'list:List tabs for a worktree.'
-            'new:Create a tab.'
-            'show:Describe a tab: title, handle, containers, focused pane, pane ids.'
-            'switch:Activate a tab.'
+            'list:List the tabs of a worktree, or of one pane'\''s strip.'
+            'show:Describe a tab from the catalog: handle, pane, content, chip, cwd, labels, agent.'
+            'new:Open a new tab, optionally running a command.'
+            'focus:Select a tab and give its pane the keyboard.'
             'rename:Set a tab'\''s title, or clear it to follow the shell again.'
-            'close:Close a tab.'
+            'close:Close a tab and end its session.'
+            'send:Send text to a tab.'
+            'send-key:Send a named special key to a tab.'
+            'capture:Capture a tab'\''s rendered text.'
+            'read:Read serialized terminal state from a tab'\''s terminal daemon.'
+            'info:Probe a tab'\''s terminal daemon for shell pid, pwd, and (when available) cursor + modes.'
+            'label:Add labels to a tab'\''s session (target it later as @label).'
+            'reset:Reset a tab'\''s terminal state.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        list|new|show|switch|rename|close)
+        list|show|new|focus|rename|close|send|send-key|capture|read|info|label|reset)
             "_codans_tab_${words[1]}" && ret=0
             ;;
         esac
@@ -558,23 +568,7 @@ _codans_tab_list() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         '--project[Project id, name, or '\''current'\''.]:project:'
         '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
-        '--version[Show the version.]'
-        '(-h --help)'{-h,--help}'[Show help information.]'
-    )
-    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
-
-    return "${ret}"
-}
-
-_codans_tab_new() {
-    local -i ret=1
-    local -ar arg_specs=(
-        '--json[Emit JSON on stdout instead of human-readable text.]'
-        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
-        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':name:'
-        '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--pane[Only this pane'\''s strip\: an id (pane, tab, or content), p<n>, or '\''current'\''.]:pane:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -598,7 +592,28 @@ _codans_tab_show() {
     return "${ret}"
 }
 
-_codans_tab_switch() {
+_codans_tab_new() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '*:command:'
+        '--project[Project id, name, or '\''current'\''.]:project:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--pane[Pane whose strip takes the tab\: an id (pane, tab, or content), p<n>, or '\''current'\''.]:pane:'
+        '--name[Tab name.]:name:'
+        '--cwd[Working directory. Defaults to $PWD.]:cwd:'
+        '--label[Initial labels.]:label:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_focus() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
@@ -621,8 +636,6 @@ _codans_tab_rename() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':tab:'
         ':name:'
-        '--project[Project id, name, or '\''current'\''. Usually inferred from the tab.]:project:'
-        '--worktree[Worktree id, name, branch, or '\''current'\''. Usually inferred from the tab.]:worktree:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -638,8 +651,138 @@ _codans_tab_close() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':tab:'
-        '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_send() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '(-t --tab)'{-t,--tab}'[Target tab\: an id (pane, tab, or content), t<n>, @label, or '\''current'\''.]:tab:'
+        '(-p --pane)'{-p,--pane}'[Target pane (its selected tab)\: an id, p<n>, or '\''current'\''.]:pane:'
+        '*:arguments:'
+        '--stdin[Read text from stdin.]'
+        '--no-enter[Do not send trailing Enter after text.]'
+        '--raw[Send raw bytes as a hex string (e.g. 1b5b41 for ESC \[ A).]:raw:'
+        '--focus[Select the target tab and focus its pane after sending.]'
+        '--wait[Wait until the command the text started has finished.]'
+        '--capture[Wait, and return the output the command produced (implies --wait).]'
+        '--wait-timeout[Seconds to wait for completion with --wait / --capture (1 through 600, default 30).]:wait-timeout:'
+        '--stable-ms[With --wait\: the screen must hold still this long, in ms (default 500).]:stable-ms:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_send-key() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        '(-t --tab)'{-t,--tab}'[Target tab\: an id (pane, tab, or content), t<n>, @label, or '\''current'\''.]:tab:'
+        '(-p --pane)'{-p,--pane}'[Target pane (its selected tab)\: an id, p<n>, or '\''current'\''.]:pane:'
+        '*:arguments:'
+        '--focus[Select the target tab and focus its pane after sending.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_capture() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':target:'
+        '(-t --tab)'{-t,--tab}'[Target tab, as the positional.]:tab:'
+        '(-p --pane)'{-p,--pane}'[Target pane (its selected tab)\: an id, p<n>, or '\''current'\''.]:pane:'
+        '--scope[Capture scope\: viewport (default) or screen.]:scope:'
+        '--lines[Trim output to the last N non-empty lines.]:lines:'
+        '--wait-stable[Poll until the rendered text stops changing before capturing.]'
+        '--stable-ms[Wait-stable\: quiet window in ms the output must hold unchanged (default 500).]:stable-ms:'
+        '--interval-ms[Wait-stable\: poll interval in ms (default 100).]:interval-ms:'
+        '--timeout-ms[Wait-stable\: overall cap in ms before giving up (default 5000).]:timeout-ms:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_read() {
+    local -i ret=1
+    local -ar ___range=('visible' 'scrollback' 'all')
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':tab:'
+        '--raw[Return the vt-format dump with ANSI escapes preserved.]'
+        '--tail[Keep only the last N newline-delimited lines.]:tail:'
+        '--range[Range\: visible, scrollback, or all (default).]:range:{__codans_complete "${___range[@]}"}'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_info() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':tab:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_label() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':tab:'
+        '*:labels:'
+        '--replace[Replace the existing labels.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_tab_reset() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':tab:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -660,26 +803,19 @@ _codans_pane() {
     case "${state}" in
     command)
         local -ar subcommands=(
-            'list:List panes for a tab.'
-            'new:Create a pane, optionally with an initial command.'
-            'split:Split a pane and start a shell (or a command) in the new half.'
-            'show:Describe a pane from the catalog: containers, cwd, labels, agent, focus.'
-            'focus:Focus a pane.'
+            'list:List a worktree'\''s panes in layout order.'
+            'focus:Give a pane the keyboard, by id or by direction.'
+            'split:Split a pane: a new pane beside it, with a new tab running a shell (or a command).'
+            'close:Close a pane and every tab on its strip.'
             'resize:Move the divider next to a pane.'
-            'close:Close a pane and kill its zmx daemon.'
-            'label:Add labels to a pane.'
-            'reset:Reset a pane'\''s terminal state.'
-            'send:Send text to a pane.'
-            'send-key:Send a named special key to a pane.'
-            'read:Read serialized terminal state from a pane'\''s zmx daemon.'
-            'info:Probe a pane'\''s zmx daemon for shell pid, pwd, and (when available) cursor + modes.'
-            'capture:Capture a pane'\''s rendered text.'
+            'equalize:Give every pane of a worktree an even share of the layout.'
+            'zoom:Toggle zoom: the pane fills the layout area; again to return.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        list|new|split|show|focus|resize|close|label|reset|send|send-key|read|info|capture)
+        list|focus|split|close|resize|equalize|zoom)
             "_codans_pane_${words[1]}" && ret=0
             ;;
         esac
@@ -697,7 +833,6 @@ _codans_pane_list() {
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         '--project[Project id, name, or '\''current'\''.]:project:'
         '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
-        '--tab[Tab id, t<n> handle, title, or '\''current'\''.]:tab:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -706,18 +841,17 @@ _codans_pane_list() {
     return "${ret}"
 }
 
-_codans_pane_new() {
+_codans_pane_focus() {
     local -i ret=1
+    local -ar ___direction=('left' 'right' 'up' 'down' 'previous' 'next')
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        '*:command:'
-        '--project[Project id, name, or '\''current'\''.]:project:'
-        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
-        '--tab[Tab id, t<n> handle, title, or '\''current'\''.]:tab:'
-        '--cwd[Working directory. Defaults to $PWD.]:cwd:'
-        '--label[Initial labels.]:label:'
+        ':pane:'
+        '--direction[Move focus\: left, right, up, down, previous, or next.]:direction:{__codans_complete "${___direction[@]}"}'
+        '--project[Project id, name, or '\''current'\'' (with --direction and no pane).]:project:'
+        '--worktree[Worktree id, name, branch, or '\''current'\'' (with --direction and no pane).]:worktree:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -734,7 +868,7 @@ _codans_pane_split() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':pane:'
-        '--command[Initial command for the new pane. Omit for the default shell.]:command:'
+        '--command[Initial command for the new tab. Omit for the default shell.]:command:'
         '--direction[Side of the anchor the new pane takes\: right (default), left, up, down.]:direction:{__codans_complete "${___direction[@]}"}'
         '--cwd[Working directory. Defaults to the anchor pane'\''s directory.]:cwd:'
         '--label[Initial labels.]:label:'
@@ -746,31 +880,13 @@ _codans_pane_split() {
     return "${ret}"
 }
 
-_codans_pane_show() {
+_codans_pane_close() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':pane:'
-        '--version[Show the version.]'
-        '(-h --help)'{-h,--help}'[Show help information.]'
-    )
-    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
-
-    return "${ret}"
-}
-
-_codans_pane_focus() {
-    local -i ret=1
-    local -ar arg_specs=(
-        '--json[Emit JSON on stdout instead of human-readable text.]'
-        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
-        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':pane:'
-        '--project[Project id, name, or '\''current'\''. Usually inferred from the pane id.]:project:'
-        '--worktree[Worktree id, name, branch, or '\''current'\''. Usually inferred from the pane id.]:worktree:'
-        '--tab[Tab id, t<n> handle, title, or '\''current'\''. Usually inferred from the pane id.]:tab:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -797,16 +913,14 @@ _codans_pane_resize() {
     return "${ret}"
 }
 
-_codans_pane_close() {
+_codans_pane_equalize() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':pane:'
-        '--project[Project id, name, or '\''current'\''. Usually inferred from the pane id.]:project:'
-        '--worktree[Worktree id, name, branch, or '\''current'\''. Usually inferred from the pane id.]:worktree:'
-        '--tab[Tab id, t<n> handle, title, or '\''current'\''. Usually inferred from the pane id.]:tab:'
+        '--project[Project id, name, or '\''current'\''.]:project:'
+        '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -815,15 +929,14 @@ _codans_pane_close() {
     return "${ret}"
 }
 
-_codans_pane_label() {
+_codans_pane_zoom() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':pane:'
-        '*:labels:'
-        '--replace[Replace the existing labels.]'
+        '--off[Only leave the zoom; never zoom in.]'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -832,33 +945,19 @@ _codans_pane_label() {
     return "${ret}"
 }
 
-_codans_pane_reset() {
+_codans_send() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':pane:'
-        '--version[Show the version.]'
-        '(-h --help)'{-h,--help}'[Show help information.]'
-    )
-    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
-
-    return "${ret}"
-}
-
-_codans_pane_send() {
-    local -i ret=1
-    local -ar arg_specs=(
-        '--json[Emit JSON on stdout instead of human-readable text.]'
-        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
-        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        '(-p --pane)'{-p,--pane}'[Target pane id, p<n> handle, @label, or '\''current'\''.]:pane:'
+        '(-t --tab)'{-t,--tab}'[Target tab\: an id (pane, tab, or content), t<n>, @label, or '\''current'\''.]:tab:'
+        '(-p --pane)'{-p,--pane}'[Target pane (its selected tab)\: an id, p<n>, or '\''current'\''.]:pane:'
         '*:arguments:'
         '--stdin[Read text from stdin.]'
         '--no-enter[Do not send trailing Enter after text.]'
         '--raw[Send raw bytes as a hex string (e.g. 1b5b41 for ESC \[ A).]:raw:'
-        '--focus[Focus the target pane after sending.]'
+        '--focus[Select the target tab and focus its pane after sending.]'
         '--wait[Wait until the command the text started has finished.]'
         '--capture[Wait, and return the output the command produced (implies --wait).]'
         '--wait-timeout[Seconds to wait for completion with --wait / --capture (1 through 600, default 30).]:wait-timeout:'
@@ -871,15 +970,16 @@ _codans_pane_send() {
     return "${ret}"
 }
 
-_codans_pane_send-key() {
+_codans_send-key() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        '(-p --pane)'{-p,--pane}'[Target pane id, p<n> handle, @label, or '\''current'\''.]:pane:'
+        '(-t --tab)'{-t,--tab}'[Target tab\: an id (pane, tab, or content), t<n>, @label, or '\''current'\''.]:tab:'
+        '(-p --pane)'{-p,--pane}'[Target pane (its selected tab)\: an id, p<n>, or '\''current'\''.]:pane:'
         '*:arguments:'
-        '--focus[Focus the target pane after sending.]'
+        '--focus[Select the target tab and focus its pane after sending.]'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -888,47 +988,15 @@ _codans_pane_send-key() {
     return "${ret}"
 }
 
-_codans_pane_read() {
-    local -i ret=1
-    local -ar ___range=('visible' 'scrollback' 'all')
-    local -ar arg_specs=(
-        '--json[Emit JSON on stdout instead of human-readable text.]'
-        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
-        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':pane:'
-        '--raw[Return the vt-format dump with ANSI escapes preserved.]'
-        '--tail[Keep only the last N newline-delimited lines.]:tail:'
-        '--range[Range\: visible, scrollback, or all (default).]:range:{__codans_complete "${___range[@]}"}'
-        '--version[Show the version.]'
-        '(-h --help)'{-h,--help}'[Show help information.]'
-    )
-    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
-
-    return "${ret}"
-}
-
-_codans_pane_info() {
+_codans_capture() {
     local -i ret=1
     local -ar arg_specs=(
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':pane:'
-        '--version[Show the version.]'
-        '(-h --help)'{-h,--help}'[Show help information.]'
-    )
-    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
-
-    return "${ret}"
-}
-
-_codans_pane_capture() {
-    local -i ret=1
-    local -ar arg_specs=(
-        '--json[Emit JSON on stdout instead of human-readable text.]'
-        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
-        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        ':pane:'
+        ':target:'
+        '(-t --tab)'{-t,--tab}'[Target tab, as the positional.]:tab:'
+        '(-p --pane)'{-p,--pane}'[Target pane (its selected tab)\: an id, p<n>, or '\''current'\''.]:pane:'
         '--scope[Capture scope\: viewport (default) or screen.]:scope:'
         '--lines[Trim output to the last N non-empty lines.]:lines:'
         '--wait-stable[Poll until the rendered text stops changing before capturing.]'
@@ -949,9 +1017,9 @@ _codans_broadcast() {
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        '--tab[Tab id, t<n> handle, title, or '\''current'\''.]:tab:'
+        '--pane[Pane id (or a tab / content id\: its pane), p<n>, or '\''current'\''.]:pane:'
         '--worktree[Worktree id, name, branch, or '\''current'\''.]:worktree:'
-        '--label[Pane label.]:label:'
+        '--label[Tab label.]:label:'
         '*:text:'
         '--stdin[Read text from stdin.]'
         '--no-enter[Do not send trailing Enter after text.]'
@@ -1100,7 +1168,7 @@ _codans_handoff_to() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':agent:'
-        '--pane[Source pane id, p<n> handle, @label, or '\''current'\'' (the calling pane).]:pane:'
+        '--pane[Source tab\: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or '\''current'\'' (the calling tab).]:pane:'
         '--profile[Profile (name or id) to launch the receiver with.]:profile:'
         '--brief[Inline briefing; pass '\''-'\'' to read it from stdin (heredoc).]:brief:'
         '--no-brief[Context-only\: skip the briefing entirely.]'
@@ -1122,7 +1190,7 @@ _codans_handoff_save() {
         '--json[Emit JSON on stdout instead of human-readable text.]'
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
-        '--pane[Source pane id, p<n> handle, @label, or '\''current'\'' (the calling pane).]:pane:'
+        '--pane[Source tab\: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or '\''current'\'' (the calling tab).]:pane:'
         '--brief[Inline briefing; pass '\''-'\'' to read it from stdin (heredoc).]:brief:'
         '--no-brief[Context-only\: skip the briefing entirely.]'
         '--note[Note appended to the handoff log.]:note:'

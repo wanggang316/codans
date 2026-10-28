@@ -19,8 +19,8 @@ extension WorkflowMachine {
       handleInjected(ordinal, &transition)
     case .injectionFailed(let ordinal, let reason):
       handleInjectionFailed(ordinal, reason: reason, &transition)
-    case .launched(let ordinal, let paneID):
-      handleLaunched(ordinal, paneID: paneID, &transition)
+    case .launched(let ordinal, let contentID):
+      handleLaunched(ordinal, contentID: contentID, &transition)
     case .launchFailed(let ordinal, let reason):
       handleLaunchFailed(ordinal, reason: reason, &transition)
     case .commandFinished(let stepID, let exitCode, let stdout, let stdoutPath, let timedOut, let spawnFailure):
@@ -145,15 +145,15 @@ extension WorkflowMachine {
     // it works for a launched role too — a `launch` step has no text of
     // its own to type.
     if let activation = run.activations[ordinal], let pending = activation.pendingLine,
-      let paneID = activation.paneID ?? run.paneID(for: activation.role)
+      let contentID = activation.contentID ?? run.contentID(for: activation.role)
     {
       run.activations[ordinal]?.pendingLine = nil
       run.phase = .injecting(ordinal: ordinal)
-      transition.effects.append(.inject(paneID: paneID, ordinal: ordinal, line: pending))
+      transition.effects.append(.inject(contentID: contentID, ordinal: ordinal, line: pending))
       log("step \(step.id): reminding \(activation.role)", &transition)
       return
     }
-    guard let target = injectionContent(of: step), let paneID = run.paneID(for: target.role) else {
+    guard let target = injectionContent(of: step), let contentID = run.contentID(for: target.role) else {
       fail(step: step, reason: "step \(step.id) has nothing to type", &transition)
       return
     }
@@ -164,7 +164,7 @@ extension WorkflowMachine {
         .materializeInstruction(ordinal: ordinal, stepID: step.id, text: instruction.text))
     }
     run.phase = .injecting(ordinal: ordinal)
-    transition.effects.append(.inject(paneID: paneID, ordinal: ordinal, line: injection.line))
+    transition.effects.append(.inject(contentID: contentID, ordinal: ordinal, line: injection.line))
     log("step \(step.id): injecting into \(target.role)", &transition)
   }
 
@@ -190,24 +190,24 @@ extension WorkflowMachine {
 
   // MARK: - Launch
 
-  private mutating func handleLaunched(_ ordinal: Int, paneID: PaneID, _ transition: inout Transition) {
+  private mutating func handleLaunched(_ ordinal: Int, contentID: ContentID, _ transition: inout Transition) {
     // The launched role is the current step's: either the `launch` step
     // itself or a step that relaunched the role it addresses.
     guard run.status == .running, run.phase == .launching(ordinal: ordinal), let step = run.currentStep,
       let role = step.role,
       case .launch(let profileID, let profileName, let agent, _)? = run.bindings[role]
     else { return }
-    run.bindings[role] = .launch(profileID: profileID, profileName: profileName, agent: agent, paneID: paneID)
-    log("step \(step.id): \(role) launched in pane \(paneID)", &transition)
+    run.bindings[role] = .launch(profileID: profileID, profileName: profileName, agent: agent, contentID: contentID)
+    log("step \(step.id): \(role) launched in pane \(contentID)", &transition)
     guard case .launch = step.verb else {
       // A relaunch in the middle of another step: start that step over.
       reenterCurrentStep(&transition)
       return
     }
     if var activation = run.activations[ordinal], activation.state == .waiting {
-      activation.paneID = paneID
+      activation.contentID = contentID
       run.activations[ordinal] = activation
-      transition.effects.append(.openActivation(ordinal: ordinal, paneID: paneID, token: activation.token))
+      transition.effects.append(.openActivation(ordinal: ordinal, contentID: contentID, token: activation.token))
       armWatchdog(ordinal: ordinal, &transition)
     } else {
       complete(step, outcome: .success, &transition)
@@ -283,7 +283,7 @@ extension WorkflowMachine {
     _ transition: inout Transition
   ) {
     guard run.status == .running, run.phase == .waitingForDelivery(ordinal: ordinal),
-      var activation = run.activations[ordinal], activation.state == .waiting, let paneID = activation.paneID
+      var activation = run.activations[ordinal], activation.state == .waiting, let contentID = activation.contentID
     else { return }
     switch signal {
     case .idleGraceElapsed:
@@ -299,7 +299,7 @@ extension WorkflowMachine {
       activation.nudged = true
       run.activations[ordinal] = activation
       let line = WorkflowCompletionCommand.nudgeLine(command: completionCommand(for: activation))
-      transition.effects.append(.inject(paneID: paneID, ordinal: ordinal, line: line))
+      transition.effects.append(.inject(contentID: contentID, ordinal: ordinal, line: line))
       transition.effects.append(
         .armWatchdog(
           ordinal: ordinal, idleGraceSeconds: run.configuration.idleGraceSeconds, deadline: activation.deadline))

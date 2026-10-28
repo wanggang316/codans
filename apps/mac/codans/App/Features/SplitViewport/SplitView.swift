@@ -18,13 +18,15 @@ struct SplitView<L: View, R: View>: View {
   let onEqualize: () -> Void
   let minSize: CGFloat = 10
   @Binding var split: CGFloat
-  private let splitterVisibleSize: CGFloat = 1
+  /// Width of the drawn divider line.
+  private let splitterVisibleSize: CGFloat
   private let splitterInvisibleSize: CGFloat = 6
 
   init(
     _ direction: Direction,
     _ split: Binding<CGFloat>,
     dividerColor: Color,
+    dividerWidth: CGFloat = 1,
     resizeIncrements: CGSize = .init(width: 1, height: 1),
     @ViewBuilder left: (() -> L),
     @ViewBuilder right: (() -> R),
@@ -33,6 +35,7 @@ struct SplitView<L: View, R: View>: View {
     self.direction = direction
     self._split = split
     self.dividerColor = dividerColor
+    self.splitterVisibleSize = dividerWidth
     self.resizeIncrements = resizeIncrements
     self.left = left()
     self.right = right()

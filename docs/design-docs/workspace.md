@@ -236,6 +236,6 @@ WorkspaceHandlers (workspace.*) ─┘
 
 ## 横切关注点
 
-- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`，D10 要求根不在仓库内。v3 构建会把 v4 catalog 移到 `backups/` 并以空 catalog 启动；迁移时的 v3 备份可用于降级。远程源的 clone 只在创建回滚时删除。
+- **已知限制**：旧构建对 workspace 根仍会跑 `discoverGitRoot`，D10 要求根不在仓库内。v3 构建会把更新版本的 catalog 移到 `backups/` 并以空 catalog 启动；迁移时的原文件备份可用于降级。远程源的 clone 只在创建回滚时删除。
 - **日志**：`com.gumpw.codans.hierarchy/reconcile` 记录追加 / 归档 / 「manifest 不再点名的行」/ 默认链接目录中的非链接条目。
 - **测试**：CodansCoreTests（`CatalogMigrationV3ToV4Tests`、manifest v2 编解码与 v1 → v2 迁移、`WorkspaceOwnership`、`WorkspaceDefaultLinks`、`CatalogSidebarTests`）；`PersistenceVersioningTests`、`CatalogStoreWorkspaceRepairTests`；`HierarchyManagerWorkspaceTests`、`HierarchyClientWorkspaceReconcileTests`（真实 git：迁移后身份、分支切换、源缺失）；`WorkspaceClientTests`、`WorkspaceSourcesTests`、`WorkspaceGroupCreationTests`、`WorkspaceGroupDeletionTests`（真实 git + 真实 `CatalogStore` + `FakeHierarchyRuntime`）；TestStore：`CreateWorkspaceFeatureTests`、`HierarchySidebarFeatureTests`、`WorkspaceGroupDeletionFeatureTests`、`ProjectSettingsWorkspaceSourcesTests`；`WorkspaceHandlersTests`、`HierarchyHandlersWorkspaceTests`、`WorkspaceCommandsTests`。原生验收记录见执行计划「Status」。

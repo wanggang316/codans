@@ -109,7 +109,9 @@ struct HierarchyManagerWorkspaceTests {
 
   @Test
   func reconcileKeepsMigratedRowsAndAssignsSlotsInPlace() throws {
-    let rootRow = Worktree(name: "ws", path: "/tmp/ws", tabs: [Tab(name: "t")])
+    let pane = Pane(tabs: [Tab(name: "t", content: .terminal(workingDirectory: "/tmp/ws"))])
+    let rootRow = Worktree(
+      name: "ws", path: "/tmp/ws", splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
     let child = Worktree(name: "app-old-name", path: "/tmp/ws/app", branch: "feat/x")
     let project = Project(
       name: "ws", rootPath: "/tmp/ws", worktrees: [rootRow, child],
@@ -120,7 +122,7 @@ struct HierarchyManagerWorkspaceTests {
 
     let after = try self.project(project.id, in: manager)
     let root = try #require(after.worktrees.first { $0.id == rootRow.id })
-    #expect(root.tabs == rootRow.tabs)
+    #expect(root.panes == rootRow.panes)
     #expect(root.name == "ws")
     #expect(root.workspaceSlot == WorkspaceSlot(groupID: existingID, role: .groupTerminal))
     let member = try #require(after.worktrees.first { $0.id == child.id })
@@ -159,7 +161,10 @@ struct HierarchyManagerWorkspaceTests {
     let projectID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
     manager.reconcileWorkspaceGroups(projectID: projectID, groups: standardGroups())
     let memberID = try #require(row(try project(projectID), path: "/tmp/ws/app")).id
-    let tabID = try manager.createTab(in: memberID, in: projectID, name: "t")
+    let tabID = try manager.newTab(
+      in: nil, worktreeID: memberID, projectID: projectID, content: .terminal(workingDirectory: "/tmp/ws/app"),
+      name: "t"
+    ).tabID
 
     let result = manager.reconcileWorkspaceGroups(
       projectID: projectID, groups: standardGroups(memberBranch: "fix/y"))
@@ -168,7 +173,7 @@ struct HierarchyManagerWorkspaceTests {
     let member = try #require(try project(projectID).worktrees.first { $0.id == memberID })
     #expect(member.branch == "fix/y")
     #expect(member.name == "app")
-    #expect(member.tabs.map(\.id) == [tabID])
+    #expect(member.allTabs.map(\.id) == [tabID])
   }
 
   @Test
@@ -287,24 +292,26 @@ struct HierarchyManagerWorkspaceTests {
   }
 
   @Test
-  func busyPanesCoverTheGroupRowAndItsMembersOnly() async throws {
+  func busyContentsCoverTheGroupRowAndItsMembersOnly() throws {
     let projectID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
     manager.reconcileWorkspaceGroups(projectID: projectID, groups: standardGroups())
     let project = try project(projectID)
-    func busyPane(at path: String) async throws -> PaneID {
+    var running = Set<ContentID>()
+    func busyContent(at path: String) throws -> ContentID {
       let rowID = try #require(row(project, path: path)).id
-      let tabID = try manager.createTab(in: rowID, in: projectID, name: nil)
-      let paneID = try await manager.openPane(
-        in: tabID, in: rowID, in: projectID, workingDirectory: path, initialCommand: nil)
-      manager.setPaneCommandBusy(paneID, true)
-      return paneID
+      let contentID = try manager.newTab(
+        in: nil, worktreeID: rowID, projectID: projectID, content: .terminal(workingDirectory: path)
+      ).contentID
+      running.insert(contentID)
+      return contentID
     }
-    let rootPane = try await busyPane(at: "/tmp/ws")
-    let memberPane = try await busyPane(at: "/tmp/ws/app")
-    _ = try await busyPane(at: "/src/app")
+    let rootContent = try busyContent(at: "/tmp/ws")
+    let memberContent = try busyContent(at: "/tmp/ws/app")
+    _ = try busyContent(at: "/src/app")
+    manager.contentActivity = { [running] in running.contains($0) }
 
-    let busy = manager.workspaceGroupBusyPanes(projectID: projectID, groupID: existingID)
-    #expect(Set(busy) == [rootPane, memberPane])
+    let busy = manager.workspaceGroupBusyContents(projectID: projectID, groupID: existingID)
+    #expect(Set(busy) == [rootContent, memberContent])
   }
 
   // MARK: Environment
@@ -316,10 +323,10 @@ struct HierarchyManagerWorkspaceTests {
     let project = try project(projectID)
     func env(at path: String) async throws -> [String: String] {
       let rowID = try #require(row(project, path: path)).id
-      let tabID = try manager.createTab(in: rowID, in: projectID, name: nil)
-      _ = try await manager.openPane(
-        in: tabID, in: rowID, in: projectID, workingDirectory: path, initialCommand: nil,
-        env: ["CODANS_WORKSPACE_GROUP": "stale"])
+      let contentID = try manager.newTab(
+        in: nil, worktreeID: rowID, projectID: projectID, content: .terminal(workingDirectory: path)
+      ).contentID
+      try await manager.ensureSurface(for: contentID, env: ["CODANS_WORKSPACE_GROUP": "stale"])
       return try #require(fakeRuntime.ensureSurfaceCalls.last).env
     }
     let groupKey = BuiltinEnvVar.workspaceGroup.key

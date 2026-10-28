@@ -6,7 +6,7 @@ import SwiftUI
 /// Lists every bound Agent ordered by `SortedEntriesProvider.sorted(_:)`
 /// — primary by state-triage priority (`waitingForInput > finished >
 /// loading > idle`), secondary by `lastTransitionAt` desc. Each row is
-/// an `AgentStateRowView`; clicking dispatches `onTapRow(paneID)` so
+/// an `AgentStateRowView`; clicking dispatches `onTapRow(contentID)` so
 /// the caller (T6, via `WorktreeHeaderView`) can walk the catalog and
 /// call `HierarchyClient.focusPane`.
 ///
@@ -20,17 +20,17 @@ import SwiftUI
 /// programmatic open with no entries degrades gracefully instead of
 /// showing an empty frame.
 struct AgentStateView: View {
-  let entries: [PaneID: AgentStateStore.AgentEntry]
+  let entries: [ContentID: AgentStateStore.AgentEntry]
   let resolveSourcePath:
-    (PaneID) -> (
+    (ContentID) -> (
       project: String, worktree: String, projectColor: ProjectColor?, remoteAuthority: String?
     )?
-  let onTapRow: (PaneID) -> Void
+  let onTapRow: (ContentID) -> Void
 
   var body: some View {
     // Sort once per redraw and pass the array down. The previous
     // `sortedEntries` computed property re-sorted twice per redraw
-    // (once for the `ForEach` source, once for the `last?.paneID`
+    // (once for the `ForEach` source, once for the `last?.contentID`
     // divider check inside the loop) — cheap at N ≤ 20, but the
     // redundant work was unnecessary.
     let rows = SortedEntriesProvider.sorted(entries)
@@ -49,7 +49,7 @@ struct AgentStateView: View {
     .background(.ultraThinMaterial)
     // `.contain` keeps inner row / header identifiers individually
     // addressable by the user-test probes (the contract requires
-    // querying `agentState.row.<paneID>` *inside* the view).
+    // querying `agentState.row.<contentID>` *inside* the view).
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("agentState.view")
   }
@@ -68,18 +68,18 @@ struct AgentStateView: View {
   /// is cheaper than the lazy machinery. Each row gains its own row id
   /// via `AgentStateRowView`'s `.accessibilityIdentifier`, so external
   /// probes can address them individually.
-  private func list(rows: [(paneID: PaneID, entry: AgentStateStore.AgentEntry)]) -> some View {
+  private func list(rows: [(contentID: ContentID, entry: AgentStateStore.AgentEntry)]) -> some View {
     VStack(spacing: 0) {
-      ForEach(rows, id: \.paneID) { item in
-        let names = resolveSourcePath(item.paneID)
+      ForEach(rows, id: \.contentID) { item in
+        let names = resolveSourcePath(item.contentID)
         AgentStateRowView(
-          paneID: item.paneID,
+          contentID: item.contentID,
           entry: item.entry,
           projectName: names?.project ?? "—",
           worktreeName: names?.worktree ?? "—",
           projectColor: names?.projectColor,
           projectRemoteAuthority: names?.remoteAuthority,
-          onTap: { onTapRow(item.paneID) }
+          onTap: { onTapRow(item.contentID) }
         )
       }
     }

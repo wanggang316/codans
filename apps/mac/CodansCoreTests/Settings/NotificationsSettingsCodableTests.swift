@@ -33,7 +33,7 @@ struct NotificationsSettingsCodableTests {
       commandFinishedThresholdSec: 42,
       mute: MuteSettings(
         mutedRuleIDs: ["rule.a", "rule.b"],
-        mutedPaneIDs: [PaneID(raw: UUID()), PaneID(raw: UUID())]
+        mutedContentIDs: [ContentID(raw: UUID()), ContentID(raw: UUID())]
       )
     )
     let data = try encoder.encode(custom)
@@ -43,17 +43,17 @@ struct NotificationsSettingsCodableTests {
 
   @Test
   func muteSettingsRoundTrip() throws {
-    let paneA = PaneID(raw: UUID())
-    let paneB = PaneID(raw: UUID())
+    let paneA = ContentID(raw: UUID())
+    let paneB = ContentID(raw: UUID())
     let mute = MuteSettings(
       mutedRuleIDs: ["timeout.long", "git.dirty"],
-      mutedPaneIDs: [paneA, paneB]
+      mutedContentIDs: [paneA, paneB]
     )
     let data = try encoder.encode(mute)
     let decoded = try decoder.decode(MuteSettings.self, from: data)
     #expect(decoded == mute)
-    #expect(decoded.mutedPaneIDs.contains(paneA))
-    #expect(decoded.mutedPaneIDs.contains(paneB))
+    #expect(decoded.mutedContentIDs.contains(paneA))
+    #expect(decoded.mutedContentIDs.contains(paneB))
   }
 
   // MARK: - Decode with missing fields

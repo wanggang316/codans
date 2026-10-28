@@ -33,6 +33,7 @@ struct HeaderRunScriptSplitButton: View {
   /// `body` re-render the button when a run pane starts/stops executing —
   /// same source the tab busy spinner reads.
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(ContentRuntime.self) private var contentRuntime: ContentRuntime?
   @Environment(CommandKeyObserver.self) private var commandKeyObserver
 
   var body: some View {
@@ -50,7 +51,7 @@ struct HeaderRunScriptSplitButton: View {
     // (Ctrl-C) instead of launching another run.
     let isRunning =
       primary.map {
-        hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id)
+        contentRuntime?.isScriptRunning(worktreeID: worktreeID, scriptID: $0.id) ?? false
       } ?? false
     let primaryIcon: CommandIconRef =
       isRunning ? .symbol("stop.fill") : (primary?.resolvedIcon ?? .symbol(ScriptKind.run.defaultSystemImage))
@@ -118,7 +119,7 @@ struct HeaderRunScriptSplitButton: View {
   /// A running script's row becomes a red "Stop …" that interrupts it. Stop is
   /// shared by both lists: the run pane is keyed by (worktree, scriptID).
   private func command(for script: ScriptDefinition, isGlobal: Bool) -> RunMenuModel.Command {
-    let isRunning = hierarchyManager.isScriptRunning(worktreeID: worktreeID, scriptID: script.id)
+    let isRunning = contentRuntime?.isScriptRunning(worktreeID: worktreeID, scriptID: script.id) ?? false
     let chord = script.keyboardShortcut.flatMap {
       $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
     }

@@ -73,7 +73,7 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
       let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
       let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "")
       return
-        "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
+        "\(focus) \(row.handle ?? row.contentID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
     }.joined(separator: "\n")
   }
 
@@ -102,7 +102,7 @@ struct AgentWait: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
+  @Argument(help: "Tab: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or 'current'.")
   var pane: String = "current"
   @Option(name: .long, help: "Condition: idle, working, blocked, done, error, changed, or exit.")
   var until: IPC.AgentWaitCondition
@@ -116,11 +116,11 @@ struct AgentWait: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let uuid = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.AgentWaitResponse = try await client.call(
         .agentWait,
         params: IPC.AgentWaitRequest(
-          paneID: PaneID(raw: uuid), until: until, timeoutMillis: Int(waitTimeout * 1000)),
+          contentID: ContentID(raw: uuid), until: until, timeoutMillis: Int(waitTimeout * 1000)),
         // The server holds the request for the whole wait; give the client
         // side headroom beyond it.
         timeout: .seconds(waitTimeout + 5)
@@ -128,11 +128,11 @@ struct AgentWait: AsyncParsableCommand {
       guard response.satisfied else {
         throw CLIError(
           code: .requestTimeout,
-          message: "pane \(response.paneID) did not reach \(response.until) within \(Int(waitTimeout))s"
+          message: "tab \(response.contentID) did not reach \(response.until) within \(Int(waitTimeout))s"
             + (response.state.map { " (last state: \($0))" } ?? " (no agent bound)"),
           errorCode: .waitTimeout,
           details: [
-            "paneID": response.paneID, "until": response.until, "state": response.state ?? "",
+            "contentID": response.contentID, "until": response.until, "state": response.state ?? "",
             "waitedMs": String(response.waitedMs),
           ])
       }
@@ -149,7 +149,7 @@ struct AgentWaitRenderable: Encodable, CustomStringConvertible {
   }
 
   var description: String {
-    "pane \(response.paneID) reached \(response.until) after \(response.waitedMs)ms"
+    "tab \(response.contentID) reached \(response.until) after \(response.waitedMs)ms"
       + (response.state.map { " (state: \($0))" } ?? "")
   }
 }
@@ -250,12 +250,13 @@ struct AgentLaunch: AsyncParsableCommand {
           "agent": response.agent,
           "command": response.command,
           "tabID": response.tabID?.description ?? "",
+          "contentID": response.contentID?.description ?? "",
           "paneID": response.paneID?.description ?? "",
         ],
         mode: globals.renderMode
       ) { obj in
-        let pane = (obj["paneID"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        return "launched \(obj["profileName"] ?? "") in \(pane.map { "pane \($0)" } ?? "the focused pane")"
+        let tab = (obj["tabID"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return "launched \(obj["profileName"] ?? "") in \(tab.map { "tab \($0)" } ?? "the focused tab")"
       }
     }
   }

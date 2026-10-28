@@ -1,13 +1,11 @@
 import Foundation
 
 public nonisolated struct Catalog: Equatable, Sendable {
-  public static let currentVersion = 4
-  /// Oldest version this build still reads; it is migrated on load.
-  public static let oldestReadableVersion = 3
+  public static let currentVersion = 5
+  /// Oldest on-disk version `CatalogLoader` can still lift to
+  /// `currentVersion`. Anything older is refused outright.
+  public static let oldestMigratableVersion = 3
 
-  /// Version of the decoded file. Lower than `currentVersion` until
-  /// `CatalogMigrationV3ToV4` has run; always `currentVersion` when built in
-  /// memory.
   public var version: Int
   public var projects: [Project]
   public var tags: [Tag]
@@ -52,29 +50,49 @@ public nonisolated struct Catalog: Equatable, Sendable {
 }
 
 extension Catalog: Codable {
+  /// Why `init(from:)` refused a document before reading any record.
+  /// Only `currentVersion` decodes here; the other versions are told
+  /// apart so a store can migrate, open read-only, or refuse.
   public enum DecodingIssue: Error, Equatable {
-    /// Retired version this build no longer reads.
+    /// Older than `oldestMigratableVersion`.
     case unsupportedVersion(Int)
-    /// Written by a newer build. The file must stay as it is.
+    /// Migratable through `CatalogLoader`.
+    case needsMigration(Int)
+    /// Written by a newer build. The file must stay untouched.
     case newerVersion(Int)
+
+    static func classify(_ version: Int) -> DecodingIssue? {
+      switch version {
+      case Catalog.currentVersion: return nil
+      case ..<Catalog.oldestMigratableVersion: return .unsupportedVersion(version)
+      case ..<Catalog.currentVersion: return .needsMigration(version)
+      default: return .newerVersion(version)
+      }
+    }
   }
 
   private enum CodingKeys: String, CodingKey {
     case version, projects, tags, activeTagFilter, sidebarFilter, projectSortMode, selectedProjectID
   }
 
+  /// Reads the `version` field alone. A store asks this before a full
+  /// decode so a document from a newer build is recognised as such even
+  /// when its records no longer have this build's shape.
+  public static func peekVersion(in data: Data) throws -> Int {
+    try JSONDecoder().decode(VersionProbe.self, from: data).version
+  }
+
+  private struct VersionProbe: Decodable {
+    let version: Int
+  }
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let version = try container.decode(Int.self, forKey: .version)
-    guard version <= Catalog.currentVersion else {
-      throw DecodingIssue.newerVersion(version)
+    if let issue = DecodingIssue.classify(version) {
+      throw issue
     }
-    guard version >= Catalog.oldestReadableVersion else {
-      throw DecodingIssue.unsupportedVersion(version)
-    }
-    // Version 3 has the same shape minus the Workspace group fields, which
-    // decode to their defaults; the store then runs the migration.
-    self.version = version
+    self.version = Catalog.currentVersion
     self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
     self.sidebarFilter = try container.decodeIfPresent(SidebarFilter.self, forKey: .sidebarFilter) ?? .all
     self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
@@ -163,97 +181,27 @@ extension Catalog {
         .map { $0.element }
     }
   }
+}
 
-  /// Resolve a `PaneID` to the Project that currently hosts it, if any.
-  /// Walks `projects → worktrees → tabs → panes` and returns the first
-  /// match. Linear in the total pane count.
-  public func projectID(forPane paneID: PaneID) -> ProjectID? {
+// MARK: - Layout invariants
+
+extension Catalog {
+  public enum LayoutIssue: Error, Equatable {
+    case inconsistentWorktree(WorktreeID, Worktree.InvariantError)
+  }
+
+  /// Every Worktree satisfies `Worktree.validateInvariants()`. Decoding
+  /// repairs dangling selection and focus only; a loader or migrator
+  /// calls this and rejects the whole document otherwise.
+  public func validateLayouts() throws {
     for project in projects {
       for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
-          return project.id
+        do {
+          try worktree.validateInvariants()
+        } catch let issue as Worktree.InvariantError {
+          throw LayoutIssue.inconsistentWorktree(worktree.id, issue)
         }
       }
     }
-    return nil
-  }
-
-  /// Resolve a `PaneID` to the Worktree that currently hosts it, if any.
-  /// Walks `projects → worktrees → tabs → panes` and returns the first
-  /// match. Linear in the total pane count.
-  public func worktreeID(forPane paneID: PaneID) -> WorktreeID? {
-    for project in projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
-          return worktree.id
-        }
-      }
-    }
-    return nil
-  }
-
-  /// Resolve a `PaneID` to the Tab that currently hosts it, if any.
-  /// Walks `projects → worktrees → tabs → panes` and returns the first
-  /// match. Linear in the total pane count.
-  public func tabID(forPane paneID: PaneID) -> TabID? {
-    for project in projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs where tab.panes.contains(where: { $0.id == paneID }) {
-          return tab.id
-        }
-      }
-    }
-    return nil
-  }
-
-  /// All `PaneID`s currently living under the given Worktree, flat across
-  /// every tab. Returns an empty set if the Worktree is not in the catalog.
-  public func paneIDs(inWorktree worktreeID: WorktreeID) -> Set<PaneID> {
-    for project in projects {
-      guard let worktree = project.worktrees.first(where: { $0.id == worktreeID }) else {
-        continue
-      }
-      var ids: Set<PaneID> = []
-      for tab in worktree.tabs {
-        for pane in tab.panes { ids.insert(pane.id) }
-      }
-      return ids
-    }
-    return []
-  }
-
-  /// Every `PaneID` currently in the catalog, flat across all projects,
-  /// worktrees, and tabs. Linear in the total pane count. Used by the
-  /// AgentState registry's membership reconcile to detect bound entries
-  /// whose pane has left the hierarchy (see
-  /// `AgentStateStore.reconcileMembership`).
-  public func allPaneIDs() -> Set<PaneID> {
-    var ids: Set<PaneID> = []
-    for project in projects {
-      for worktree in project.worktrees {
-        for tab in worktree.tabs {
-          for pane in tab.panes { ids.insert(pane.id) }
-        }
-      }
-    }
-    return ids
-  }
-
-  /// Every `PaneID` in a non-archived (visible) worktree, flat across all
-  /// projects. Differs from `allPaneIDs()` only by skipping archived
-  /// worktrees. The AgentState registry's membership reconcile uses this so
-  /// a soft-hidden worktree's panes count as "gone": archive kills their
-  /// daemons, so their agent rows must retire — even though the Pane stays
-  /// in the catalog for restore (see `AgentStateStore.reconcileMembership`).
-  public func visiblePaneIDs() -> Set<PaneID> {
-    var ids: Set<PaneID> = []
-    for project in projects {
-      for worktree in project.worktrees where !worktree.archived {
-        for tab in worktree.tabs {
-          for pane in tab.panes { ids.insert(pane.id) }
-        }
-      }
-    }
-    return ids
   }
 }

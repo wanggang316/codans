@@ -29,8 +29,7 @@ struct NotificationCoordinatorTests {
       ?? InboxEntry.SourcePath(
         projectID: ProjectID(),
         worktreeID: WorktreeID(),
-        tabID: TabID(),
-        paneID: PaneID()
+        contentID: ContentID()
       )
     let entry = InboxEntry(
       kind: kind,
@@ -166,7 +165,7 @@ struct NotificationCoordinatorTests {
   }
 
   /// Regression guard for the I-1 / I-2 fix: when `InboxStorage.appending`
-  /// merges a second candidate into the prior entry (same `(paneID, kind)`
+  /// merges a second candidate into the prior entry (same `(contentID, kind)`
   /// within the 30 s dedup window, preserving the prior `readAt`), the
   /// coordinator must report `inAppAppended == false` for the merged
   /// candidate and must not double-count the worktree's unread total.
@@ -183,13 +182,12 @@ struct NotificationCoordinatorTests {
     let coordinator = makeCoordinator(inbox: inbox, notifier: notifier, reader: reader)
 
     // Both candidates share the same source path + kind so InboxStorage's
-    // 30 s `(paneID, kind)` dedup window collapses the second into the
+    // 30 s `(contentID, kind)` dedup window collapses the second into the
     // first.
     let source = InboxEntry.SourcePath(
       projectID: ProjectID(),
       worktreeID: WorktreeID(),
-      tabID: TabID(),
-      paneID: PaneID()
+      contentID: ContentID()
     )
     let first = await coordinator.handle(makeCandidate(source: source))
     let second = await coordinator.handle(makeCandidate(source: source))
@@ -364,8 +362,7 @@ struct NotificationCoordinatorTests {
     let source = InboxEntry.SourcePath(
       projectID: ProjectID(),
       worktreeID: WorktreeID(),
-      tabID: TabID(),
-      paneID: PaneID()
+      contentID: ContentID()
     )
     let decision = await coordinator.handle(makeCandidate(source: source))
 
@@ -381,7 +378,7 @@ struct NotificationCoordinatorTests {
   }
 
   /// AC-V11-WT-002 / UT-V11-WT-002: a second unread on the SAME worktree
-  /// (different paneID so dedup does not collapse it) must not re-promote
+  /// (different contentID so dedup does not collapse it) must not re-promote
   /// — `before > 0`, so the gate short-circuits.
   @Test
   func secondUnreadOnSameWorktreeDoesNotRetrigger() async throws {
@@ -401,12 +398,11 @@ struct NotificationCoordinatorTests {
 
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
-    let tabID = TabID()
     let firstSource = InboxEntry.SourcePath(
-      projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: PaneID()
+      projectID: projectID, worktreeID: worktreeID, contentID: ContentID()
     )
     let secondSource = InboxEntry.SourcePath(
-      projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: PaneID()
+      projectID: projectID, worktreeID: worktreeID, contentID: ContentID()
     )
 
     _ = await coordinator.handle(makeCandidate(source: firstSource))
@@ -447,9 +443,8 @@ struct NotificationCoordinatorTests {
 
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
-    let tabID = TabID()
     let firstSource = InboxEntry.SourcePath(
-      projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: PaneID()
+      projectID: projectID, worktreeID: worktreeID, contentID: ContentID()
     )
     _ = await coordinator.handle(makeCandidate(source: firstSource))
     #expect(recorder.calls.count == 1)
@@ -460,7 +455,7 @@ struct NotificationCoordinatorTests {
 
     // Fresh 0→N edge on the same worktree (new pane to bypass dedup).
     let secondSource = InboxEntry.SourcePath(
-      projectID: projectID, worktreeID: worktreeID, tabID: tabID, paneID: PaneID()
+      projectID: projectID, worktreeID: worktreeID, contentID: ContentID()
     )
     let decision = await coordinator.handle(makeCandidate(source: secondSource))
     guard case .posted(_, _, _, _, let promoted) = decision else {
@@ -643,7 +638,7 @@ struct NotificationCoordinatorTests {
     #expect(markerContent == "notifications.json.bak-gated")
   }
 
-  /// A deduped candidate (same `(paneID, kind)` within 30 s) does NOT
+  /// A deduped candidate (same `(contentID, kind)` within 30 s) does NOT
   /// trigger promote because `didAppend == false`. Confirms the round-2
   /// dedup→delta composition holds end-to-end through the promote branch.
   @Test
@@ -665,8 +660,7 @@ struct NotificationCoordinatorTests {
     let source = InboxEntry.SourcePath(
       projectID: ProjectID(),
       worktreeID: WorktreeID(),
-      tabID: TabID(),
-      paneID: PaneID()
+      contentID: ContentID()
     )
     _ = await coordinator.handle(makeCandidate(source: source))
     let second = await coordinator.handle(makeCandidate(source: source))

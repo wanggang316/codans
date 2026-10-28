@@ -2,91 +2,168 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Recursively renders the active Tab's `SplitTree<PaneID>`. Leaves scope
-/// a child `StoreOf<PaneHostFeature>` off the parent store and hand it
-/// to `LazyPaneHost`; splits become `HSplitView` / `VSplitView` per
-/// `SplitTree.Direction`. Surface lifecycle is owned entirely by
-/// `PaneHostFeature`; this view only bridges catalog changes into the
-/// reducer via `.panesInActiveTabChanged(_:)`.
+/// Recursively renders the Worktree's `SplitTree<PaneID>`. Each leaf is a
+/// `PaneView`: that Pane's tab strip stacked over the content host of its
+/// selected Tab. Splits become `SplitView`s per `SplitTree.Direction`. A
+/// zoomed Pane renders alone, strip included. Surface lifecycle is owned
+/// entirely by `PaneHostFeature`; this view only bridges catalog changes
+/// into the reducer via `.hostsChanged(_:)`.
 ///
-/// Empty-Tab UX: centered "No panes" placeholder with a "New Pane" button,
-/// held back for `emptyStateGrace` so a Tab that is still seeding its first
-/// Pane shows `warmingPlaceholder` instead. The Tab is never auto-closed by
-/// this view.
+/// Empty-Worktree UX: centered "press ⌘T" placeholder with a "New Tab"
+/// button, held back for `emptyStateGrace` so a Worktree that is still
+/// seeding its first Pane shows `warmingPlaceholder` instead.
 struct SplitViewportView: View {
   @Bindable var store: StoreOf<SplitViewportFeature>
+  /// Shared by every strip of the Worktree (one reducer, sheet state in
+  /// one place).
+  let tabBarStore: StoreOf<TabBarFeature>
   let projectID: ProjectID
   let worktreeID: WorktreeID
-  let tabID: TabID
+  var agentStateStore: AgentStateStore?
   @Environment(HierarchyManager.self) private var hierarchyManager
-  /// Shared drop-highlight state for the pane-move gesture, scoped to this
-  /// viewport. A single shared value (vs per-leaf state) so the highlight
-  /// follows the cursor across panes and always clears on drop — see
-  /// `PaneDropHighlight`.
-  @State private var dropHighlight = PaneDropHighlight()
-  /// The Tab whose `emptyStateGrace` has already elapsed, or nil before any
-  /// has. It is compared against `tabID` *inside* the render pass, so a Tab
-  /// the view has just been pointed at fails the check on its very first
-  /// frame. A Bool re-armed from `.task` cannot do that: `.task` runs after
-  /// that frame is already on screen, so the previous Tab's settled `true`
-  /// leaks the "New Pane" call to action through for ~100ms. A Tab that
-  /// empties out *later* (the user closed its last Pane) still matches and
-  /// shows the affordance immediately, which is the settled state the
-  /// placeholder is actually for.
-  @State private var settledTabID: TabID?
+  /// The tab-chip drag across this viewport's Panes. One shared value (vs
+  /// per-leaf state) so exactly one drop target lights up and it always
+  /// clears on drop.
+  @State private var tabDrag = TabDragSession()
+  /// The Worktree whose `emptyStateGrace` has already elapsed, or nil before
+  /// any has. It is compared against `worktreeID` *inside* the render pass,
+  /// so a Worktree the view has just been pointed at fails the check on its
+  /// very first frame. A Bool re-armed from `.task` cannot do that: `.task`
+  /// runs after that frame is already on screen, so the previous Worktree's
+  /// settled `true` leaks the "New Tab" call to action through for ~100ms.
+  /// A Worktree that empties out *later* (the user closed its last Pane)
+  /// still matches and shows the affordance immediately, which is the
+  /// settled state the placeholder is actually for.
+  @State private var settledWorktreeID: WorktreeID?
+  /// How far the window toolbar reaches down over the viewport: the top
+  /// safe area inset, 0 when something else sits between them.
+  @State private var toolbarInset: CGFloat = 0
 
-  /// How long a just-shown Tab is allowed to look empty before the
-  /// actionable "No panes" affordance appears. Warm bringup of a Tab's first
-  /// Pane measures ~350ms end to end, so this leaves headroom for a cold zmx
-  /// daemon without stranding a genuinely Pane-less Tab behind a spinner.
+  /// How long a just-shown Worktree is allowed to look empty before the
+  /// actionable placeholder appears. Warm bringup of a first Pane measures
+  /// ~350ms end to end, so this leaves headroom for a cold zmx daemon
+  /// without stranding a genuinely empty Worktree behind a blank.
   private static let emptyStateGrace: Duration = .milliseconds(1500)
 
   var body: some View {
     Group {
-      if let tab = currentTab(), !tab.splitTree.isEmpty, let root = tab.splitTree.root {
+      if let worktree = currentWorktree(), let root = visibleRoot(of: worktree) {
         SubtreeView(
           node: root,
           path: SplitTree<PaneID>.Path(),
+          touchesTop: true,
+          toolbarInset: toolbarInset,
           store: store,
-          tabID: tabID,
+          tabBarStore: tabBarStore,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
+          agentStateStore: agentStateStore
         )
+        // The Panes extend under the toolbar. The toolbar's scroll edge
+        // effect covers it and the top tab strips, and the strips float
+        // over that effect.
+        .overlay {
+          ScrollEdgeEffectView(extraTopInset: toolbarInset > 0 ? TabBarMetrics.floatingBarHeight : 0)
+            .allowsHitTesting(false)
+        }
+        .overlayPreferenceValue(FloatingTabStripKey.self) { anchors in
+          floatingTabStrips(anchors)
+        }
+        .ignoresSafeArea(.container, edges: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(dropHighlight)
-      } else if settledTabID == tabID {
+        .environment(tabDrag)
+        .overlay { TabDragPreview(session: tabDrag) }
+      } else if settledWorktreeID == worktreeID {
         emptyPlaceholder
       } else {
         warmingPlaceholder
       }
     }
-    .task(id: currentPaneSeedsKey()) {
+    .onGeometryChange(for: CGFloat.self) {
+      $0.safeAreaInsets.top
+    } action: {
+      toolbarInset = $0
+    }
+    .task(id: currentHostSeedsKey()) {
       syncPaneHosts()
     }
-    .task(id: tabID) {
-      let graced = tabID
+    .onAppear {
+      tabDrag.onDrop = { [store] tabID, target in
+        switch target {
+        case .strip(let paneID, let index):
+          store.send(.moveTabRequested(tabID, toPane: paneID, at: index))
+        case .edge(let paneID, let zone):
+          store.send(.splitTabRequested(tabID, anchor: paneID, direction: zone.splitDirection))
+        case .sourceStrip:
+          break
+        }
+      }
+    }
+    .task(id: worktreeID) {
+      let graced = worktreeID
       try? await Task.sleep(for: Self.emptyStateGrace)
       guard !Task.isCancelled else { return }
-      settledTabID = graced
+      settledWorktreeID = graced
+    }
+    .onChange(of: worktreeID) {
+      // Wait one turn so the previous Worktree's surface has left the
+      // window before reading where the keyboard is.
+      DispatchQueue.main.async { restoreKeyboardFocus() }
     }
   }
 
-  /// Neutral stand-in for a Tab whose first Pane row has not landed yet.
-  /// Opening a Tab is two steps — the Tab row is inserted synchronously,
-  /// its first Pane follows once the async zmx bringup path reaches
-  /// `createPaneRow` — so a brand-new (or just-switched-to) Tab renders
-  /// with an empty split tree for a frame or two. Showing `emptyPlaceholder`
-  /// in that window flashes a prominent "New Pane" call to action the user
-  /// never needs to press.
-  ///
+  /// Hands the keyboard back to the focused Pane's selected Tab after a
+  /// Worktree switch — but only when the keyboard was in a terminal: the
+  /// previous surface left the window (first responder fell back to the
+  /// window) or another surface still holds it. A switch made from the
+  /// sidebar keeps the keyboard there, so arrow-key navigation goes on.
+  private func restoreKeyboardFocus() {
+    guard let window = NSApp.keyWindow else { return }
+    let responder = window.firstResponder
+    guard responder == nil || responder === window || responder is GhosttySurfaceView,
+      let contentID = currentWorktree()?.focusedPane?.selectedTab?.contentID
+    else { return }
+    hierarchyManager.focusSurfaceView(for: contentID)
+  }
+
+  /// The tab strips of the Panes under the toolbar, drawn over the scroll
+  /// edge effect at the slots those Panes keep free for them.
+  private func floatingTabStrips(_ anchors: [PaneID: Anchor<CGRect>]) -> some View {
+    GeometryReader { geo in
+      ForEach(Array(anchors.keys), id: \.self) { paneID in
+        if let anchor = anchors[paneID] {
+          let rect = geo[anchor]
+          TabBarView(
+            store: tabBarStore,
+            projectID: projectID,
+            worktreeID: worktreeID,
+            paneID: paneID,
+            isFocused: currentWorktree()?.focusedPaneID == paneID,
+            agentStateStore: agentStateStore
+          )
+          .frame(width: rect.width, height: rect.height)
+          .offset(x: rect.minX, y: rect.minY)
+        }
+      }
+    }
+  }
+
+  /// The tree to draw: the zoomed Pane alone when one is zoomed, else the
+  /// whole tree. A zoom that names a Pane no longer in the tree is ignored.
+  private func visibleRoot(of worktree: Worktree) -> SplitTree<PaneID>.Node? {
+    if let zoomed = worktree.splitTree.zoomed, worktree.splitTree.contains(zoomed) {
+      return .leaf(zoomed)
+    }
+    return worktree.splitTree.root
+  }
+
+  /// Neutral stand-in for a Worktree whose first Pane has not landed yet.
   /// Deliberately bare: nothing but Ghostty's terminal background. A warm
-  /// Tab lands its first Pane in ~350ms, and a spinner that appears and
-  /// disappears inside that window reads as a flash rather than as
+  /// Worktree lands its first Pane in ~350ms, and a spinner that appears
+  /// and disappears inside that window reads as a flash rather than as
   /// progress. The one indicator worth showing belongs to a spawn slow
   /// enough to need explaining, and `LazyPaneHost.loadingPlaceholder`
-  /// owns it behind its own delay. Sharing the terminal tone with
-  /// `LeafView`'s cold-pane branch keeps the whole empty → live
-  /// progression on a single flat colour.
+  /// owns it behind its own delay.
   private var warmingPlaceholder: some View {
     let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
     return Color(nsColor: terminalBackground)
@@ -99,14 +176,13 @@ struct SplitViewportView: View {
       missingFolderPlaceholder(path: missingPath)
     } else {
       VStack(spacing: 12) {
-        Text("No panes in this Tab")
+        Text("No tabs open")
           .font(.title3)
           .foregroundStyle(.secondary)
-        Button("New Pane") {
+        Button("New Tab") {
           store.send(
-            .newPaneButtonTapped(
-              inTab: tabID, inWorktree: worktreeID,
-              inProject: projectID,
+            .newTabButtonTapped(
+              inPane: nil, inWorktree: worktreeID, inProject: projectID,
               workingDirectory: currentWorktreePath() ?? NSHomeDirectory()
             ))
         }
@@ -116,8 +192,8 @@ struct SplitViewportView: View {
     }
   }
 
-  /// Shown instead of "New Pane" when the Worktree folder is gone: a pane
-  /// cannot start there, so the button would silently do nothing.
+  /// Shown instead of "New Tab" when the Worktree folder is gone: a
+  /// session cannot start there, so the button would silently do nothing.
   private func missingFolderPlaceholder(path: String) -> some View {
     VStack(spacing: 8) {
       Label("Folder not found", systemImage: "exclamationmark.triangle.fill")
@@ -152,44 +228,39 @@ struct SplitViewportView: View {
   }
 
   /// Looks up the current Worktree's absolute path from the catalog so the
-  /// fallback "New Pane" button spawns a terminal rooted at the Worktree
+  /// fallback "New Tab" button spawns a terminal rooted at the Worktree
   /// directory. Returns nil if the Worktree has been pruned between render
   /// and tap — the caller falls back to `$HOME`.
   private func currentWorktreePath() -> String? {
-    hierarchyManager.catalog
-      .projects.first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == worktreeID })?
-      .path
+    currentWorktree()?.path
   }
 
-  private func currentTab() -> CodansCore.Tab? {
-    hierarchyManager.catalog
-      .projects.first(where: { $0.id == projectID })?
-      .worktrees.first(where: { $0.id == worktreeID })?
-      .tabs.first(where: { $0.id == tabID })
+  private func currentWorktree() -> Worktree? {
+    hierarchyManager.catalog.worktree(worktreeID, in: projectID)
   }
 
-  /// Stable identity for `.task(id:)`: if the pane set (in order) is the
-  /// same, SwiftUI won't re-fire the sync. Using the id collection directly
-  /// is cheap — tabs hold ≤ ~32 panes.
-  private func currentPaneSeedsKey() -> [PaneID] {
-    currentTab()?.panes.map(\.id) ?? []
+  /// Stable identity for `.task(id:)`: if the shown Contents (in Pane
+  /// order) are the same, SwiftUI won't re-fire the sync.
+  private func currentHostSeedsKey() -> [ContentID] {
+    currentWorktree()?.panes.compactMap { $0.selectedTab?.contentID } ?? []
   }
 
   private func syncPaneHosts() {
-    guard let tab = currentTab() else {
-      store.send(.panesInActiveTabChanged([]))
+    guard let worktree = currentWorktree() else {
+      store.send(.hostsChanged([]))
       return
     }
-    let seeds = tab.panes.map { pane in
-      PaneHostFeature.State(
+    let seeds = worktree.panes.compactMap { pane -> PaneHostFeature.State? in
+      guard let tab = pane.selectedTab else { return nil }
+      return PaneHostFeature.State(
+        contentID: tab.contentID,
         paneID: pane.id,
-        tabID: tabID,
+        tabID: tab.id,
         worktreeID: worktreeID,
         projectID: projectID
       )
     }
-    store.send(.panesInActiveTabChanged(seeds))
+    store.send(.hostsChanged(seeds))
   }
 
 }
@@ -217,20 +288,27 @@ struct SplitViewportView: View {
 private struct SubtreeView: View {
   let node: SplitTree<PaneID>.Node
   let path: SplitTree<PaneID>.Path
+  /// True when this subtree's top edge is the viewport's top edge.
+  let touchesTop: Bool
+  let toolbarInset: CGFloat
   let store: StoreOf<SplitViewportFeature>
-  let tabID: TabID
+  let tabBarStore: StoreOf<TabBarFeature>
   let worktreeID: WorktreeID
   let projectID: ProjectID
+  let agentStateStore: AgentStateStore?
 
   var body: some View {
     switch node {
     case .leaf(let paneID):
-      LeafView(
+      PaneView(
         paneID: paneID,
+        stripFloats: touchesTop && toolbarInset > 0,
+        toolbarInset: toolbarInset,
         store: store,
-        tabID: tabID,
+        tabBarStore: tabBarStore,
         worktreeID: worktreeID,
         projectID: projectID,
+        agentStateStore: agentStateStore,
         isSplit: !path.components.isEmpty
       )
     case .split(let split):
@@ -253,31 +331,38 @@ private struct SubtreeView: View {
             .resizeSplitRequested(
               capturedPath,
               ratio: Double(newRatio),
-              inTab: tabID,
               inWorktree: worktreeID,
               inProject: projectID
             ))
         }
       ),
-      dividerColor: Color(nsColor: .separatorColor),
+      dividerColor: Color(nsColor: .separatorColor).opacity(0.6),
+      dividerWidth: 1,
       left: {
         SubtreeView(
           node: split.left,
           path: leftPath,
+          touchesTop: touchesTop,
+          toolbarInset: toolbarInset,
           store: store,
-          tabID: tabID,
+          tabBarStore: tabBarStore,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
+          agentStateStore: agentStateStore
         )
       },
       right: {
         SubtreeView(
           node: split.right,
           path: rightPath,
+          // A vertical split stacks its children: the second one is below.
+          touchesTop: touchesTop && split.direction == .horizontal,
+          toolbarInset: toolbarInset,
           store: store,
-          tabID: tabID,
+          tabBarStore: tabBarStore,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
+          agentStateStore: agentStateStore
         )
       },
       onEqualize: {
@@ -285,7 +370,6 @@ private struct SubtreeView: View {
           .resizeSplitRequested(
             capturedPath,
             ratio: 0.5,
-            inTab: tabID,
             inWorktree: worktreeID,
             inProject: projectID
           ))
@@ -294,20 +378,26 @@ private struct SubtreeView: View {
   }
 }
 
-private struct LeafView: View {
+/// One Pane: its tab strip over the content host of its selected Tab.
+private struct PaneView: View {
   let paneID: PaneID
+  /// True when the Pane is under the window toolbar. Its terminal then
+  /// fills it up to the window top, and its strip floats over the toolbar's
+  /// scroll edge effect (`SplitViewportView.floatingTabStrips`). Else the
+  /// strip sits above the terminal, and nothing scrolls under it.
+  let stripFloats: Bool
+  let toolbarInset: CGFloat
   let store: StoreOf<SplitViewportFeature>
-  let tabID: TabID
+  let tabBarStore: StoreOf<TabBarFeature>
   let worktreeID: WorktreeID
   let projectID: ProjectID
+  let agentStateStore: AgentStateStore?
   /// True when this leaf sits below at least one split node — i.e. the
-  /// active Tab has more than one pane. Single-pane Tabs skip the dim
-  /// overlay and the drag handle since there is nothing to re-arrange
-  /// against.
+  /// Worktree has more than one Pane. A lone Pane skips the dim overlay.
   let isSplit: Bool
-  /// Shared drop-highlight state (one per viewport). This leaf renders the
-  /// edge overlay only while it is the active target — see `PaneDropHighlight`.
-  @Environment(PaneDropHighlight.self) private var dropHighlight
+  /// The viewport's tab-chip drag. This leaf registers its strip and content
+  /// frames and draws the edge overlay only while it is the drop target.
+  @Environment(TabDragSession.self) private var tabDrag
   @Environment(HierarchyManager.self) private var hierarchyManager
   /// Pulled in so the dim overlay re-evaluates when the user flips Appearance
   /// (or the OS auto-switches). `unfocusedSplitFill()` resolves against the
@@ -316,86 +406,106 @@ private struct LeafView: View {
   /// change, layout) forces a rebuild — which is what produced the stale
   /// light/dark wash on unfocused panes after a theme switch.
   @Environment(\.colorScheme) private var colorScheme
+  /// Backing scale of the window the slot lives in, for the mount geometry.
+  @Environment(\.displayScale) private var displayScale
   /// Bumped on `.ghosttyRuntimeConfigApplied` so the overlay re-resolves when
   /// the user picks a new ghostty theme (Settings → Terminal, or by editing
   /// `~/.config/ghostty/config`). `colorScheme` only covers the appearance
   /// flip path; without this tick the overlay stays on the previous theme's
   /// fill colour until the user re-focuses the pane or triggers a layout pass.
   @State private var configReloadTick: Int = 0
-  /// Used for the one-frame fallback on tab switch — see `paneContent`.
+  /// Used for the one-frame fallback on a Tab switch — see `paneContent`.
   /// Reducer state is the long-term source of truth; this lookup only fills
-  /// the gap between catalog update and `.panesInActiveTabChanged` landing.
+  /// the gap between catalog update and `.hostsChanged` landing.
   @Dependency(TerminalClient.self) private var terminalClient
 
   var body: some View {
-    // Read the shared highlight in the body's OWN tracking scope (not only
-    // inside the nested `.overlay`/`GeometryReader` closures). Observation only
+    // Read the drop target in the body's OWN tracking scope (not only inside
+    // the nested `.overlay`/`GeometryReader` closures). Observation only
     // re-renders this leaf for property reads it captured while evaluating
-    // `body`; reading it solely inside a child closure means the overlay shows
-    // during the drag (the active session forces re-renders) but never retracts
-    // when `clear()` runs on drop — the stuck-highlight bug.
-    let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
-    return GeometryReader { geo in
-      paneContent(slotSize: geo.size)
+    // `body`; a read solely inside a child closure can leave the overlay up
+    // after the drop clears the target.
+    let activeDropZone: PaneDropZone? =
+      if case .edge(paneID, let zone)? = tabDrag.target { zone } else { nil }
+    return ZStack(alignment: .top) {
+      GeometryReader { geo in
+        TerminalMountDeferral(
+          activeContentID: selectedContentID,
+          contentIDs: hierarchyManager.catalog.pane(paneID)?.contentIDs ?? []
+        ) {
+          paneContent(slotSize: geo.size)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Grab affordance — only meaningful when there is somewhere to move to.
-        .overlay(alignment: .top) {
-          if isSplit {
-            PaneDragHandle(paneID: paneID)
-          }
-        }
-        // Drop target. The custom `.touchCodePaneID` type (declared in the
-        // app's Info.plist `UTExportedTypeDeclarations`) is what makes
-        // `validateDrop` match the dragged item — without that declaration the
-        // pasteboard type is a dynamic UTI that never conforms, so the drop is
-        // silently rejected. `geo.size` feeds the edge-zone math.
-        .background {
-          Color.clear
-            .contentShape(.rect)
-            .onDrop(
-              of: [.touchCodePaneID],
-              delegate: PaneDropDelegate(
-                anchorID: paneID,
-                viewSize: geo.size,
-                highlight: dropHighlight,
-                commit: { sourceID, zone in
-                  store.send(
-                    .movePaneRequested(
-                      sourceID,
-                      anchor: paneID,
-                      direction: zone.splitDirection,
-                      inTab: tabID,
-                      inWorktree: worktreeID,
-                      inProject: projectID
-                    ))
-                }
-              )
-            )
-        }
-        // Drop-zone highlight, drawn above the surface but never hit-tested.
-        // Shown only while this leaf is the active drop target.
-        .overlay {
-          if let activeDropZone {
-            PaneDropOverlay(zone: activeDropZone)
-          }
-        }
+      }
+      // Under the toolbar the grid starts below the floating strip, and the
+      // rows above it scroll under the strip and the toolbar.
+      .environment(\.terminalContentInsetTop, stripFloats ? toolbarInset + TabBarMetrics.floatingBarHeight : 0)
+      .onGeometryChange(
+        for: CGRect.self, of: { $0.frame(in: .global) },
+        action: { tabDrag.setContentFrame($0, for: paneID) })
+      .padding(.top, stripFloats ? 0 : TabBarMetrics.barHeight)
+      stripSlot
+        .onGeometryChange(
+          for: CGRect.self, of: { $0.frame(in: .global) },
+          action: { tabDrag.setStripFrame($0, for: paneID) })
     }
+    // Drop-zone highlight over the whole Pane, strip included: the new Pane
+    // takes that half of it, its own strip on top. Never hit-tested, and
+    // shown only while this leaf is the active drop target.
+    .overlay {
+      if let activeDropZone {
+        PaneDropOverlay(zone: activeDropZone)
+      }
+    }
+    .onDisappear {
+      tabDrag.setStripFrame(nil, for: paneID)
+      tabDrag.setContentFrame(nil, for: paneID)
+    }
+    .id(paneID)
+  }
+
+  /// The strip, or under the toolbar the free slot that the floating strip
+  /// covers.
+  @ViewBuilder
+  private var stripSlot: some View {
+    if stripFloats {
+      Color.clear
+        .frame(height: TabBarMetrics.barHeight)
+        .anchorPreference(key: FloatingTabStripKey.self, value: .bounds) { [paneID: $0] }
+        .padding(.top, toolbarInset - TabBarMetrics.trackTopInset)
+    } else {
+      TabBarView(
+        store: tabBarStore,
+        projectID: projectID,
+        worktreeID: worktreeID,
+        paneID: paneID,
+        isFocused: isFocused,
+        agentStateStore: agentStateStore
+      )
+    }
+  }
+
+  private var selectedContentID: ContentID? {
+    hierarchyManager.catalog.pane(paneID)?.selectedTab?.contentID
   }
 
   @ViewBuilder
   private func paneContent(slotSize: CGSize) -> some View {
-    if let childStore = store.scope(
-      state: \.paneHosts[id: paneID],
-      action: \.paneHosts[id: paneID]
-    ) {
-      // `.id(paneID)` forces SwiftUI to rebuild the LazyPaneHost subtree when
-      // the pane changes. Without it, two leaves at the same split-tree
-      // position across worktree switches diff as "same view, new props", and
-      // `PaneHostView.updateNSView` (intentionally a no-op — ghostty owns its
-      // own rendering) never swaps the underlying `GhosttySurfaceView`, so the
-      // terminal visually stays on the previously-shown worktree.
+    if let contentID = selectedContentID,
+      let childStore = store.scope(
+        state: \.paneHosts[id: contentID],
+        action: \.paneHosts[id: contentID]
+      )
+    {
+      // `.id(contentID)` forces SwiftUI to rebuild the LazyPaneHost subtree
+      // when the shown session changes. Without it, two leaves at the same
+      // split-tree position across worktree switches diff as "same view, new
+      // props", and `PaneHostView.updateNSView` (intentionally a no-op —
+      // ghostty owns its own rendering) never swaps the underlying
+      // `GhosttySurfaceView`, so the terminal visually stays on the
+      // previously-shown session.
       LazyPaneHost(store: childStore)
-        .id(paneID)
+        .id(contentID)
         // Bringup trigger. Routed through the PARENT store with a
         // membership check instead of `childStore.send(.task)` inside
         // LazyPaneHost: the task body runs a beat after mount, and the
@@ -404,17 +514,28 @@ private struct LeafView: View {
         // exits. Sending an element action for a removed ID trips TCA's
         // missing-element runtime warning; the guard re-checks liveness
         // at send time (both run on MainActor, so no gap in between).
-        .task(id: paneID) {
-          guard store.paneHosts[id: paneID] != nil else { return }
-          store.send(.paneHosts(.element(id: paneID, action: .task(slotSize: slotSize))))
+        .task(id: contentID) {
+          guard store.paneHosts[id: contentID] != nil else { return }
+          let geometry = ContentGeometry(size: slotSize, scale: displayScale)
+          store.send(.paneHosts(.element(id: contentID, action: .task(geometry: geometry))))
+        }
+        // Mount / unmount follow the host's place in the layout, through
+        // the same membership check as the bring-up above.
+        .onChange(of: ContentGeometry(size: slotSize, scale: displayScale)) { _, geometry in
+          guard store.paneHosts[id: contentID] != nil else { return }
+          store.send(.paneHosts(.element(id: contentID, action: .slotChanged(geometry))))
+        }
+        .onDisappear {
+          guard store.paneHosts[id: contentID] != nil else { return }
+          store.send(.paneHosts(.element(id: contentID, action: .disappeared)))
         }
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
           configReloadTick &+= 1
         }
-    } else if let warmSurface = terminalClient.surface(paneID) {
-      // Tab-switch fast path: the catalog already points at this pane but
+    } else if let contentID = selectedContentID, let warmSurface = terminalClient.surface(contentID) {
+      // Tab-switch fast path: the catalog already points at this session but
       // `SplitViewportView.task(id:)` hasn't run yet, so the reducer-scoped
       // store doesn't exist. Falling through to the loading placeholder
       // here is what produces the visible grey flash on every tab switch.
@@ -422,22 +543,20 @@ private struct LeafView: View {
       // render it directly until the scoped store materialises on the next
       // tick — same NSView the reducer would have given us.
       PaneHostView(surface: warmSurface)
-        .id(paneID)
+        .id(contentID)
         .overlay { unfocusedDimOverlay }
         .animation(.easeInOut(duration: 0.12), value: isFocused)
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
           configReloadTick &+= 1
         }
     } else {
-      // Truly cold pane: surface hasn't been spawned yet (first render
+      // Truly cold session: surface hasn't been spawned yet (first render
       // after creation). Background tracks Ghostty's terminal color so
       // the hand-off to `LazyPaneHost.loadingPlaceholder` and then the
-      // live surface stays on a single tone — earlier we used
-      // `underPageBackgroundColor` here, which produced a visible grey
-      // flash before the terminal theme settled in. No spinner either:
-      // this phase is a handful of frames on the way to `LazyPaneHost`,
-      // which owns the one bringup indicator and only reveals it once a
-      // spawn is slow enough to be worth reporting.
+      // live surface stays on a single tone. No spinner either: this phase
+      // is a handful of frames on the way to `LazyPaneHost`, which owns the
+      // one bringup indicator and only reveals it once a spawn is slow
+      // enough to be worth reporting.
       let terminalBackground = GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
       Color(nsColor: terminalBackground)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -445,13 +564,13 @@ private struct LeafView: View {
   }
 
   private var isFocused: Bool {
-    hierarchyManager.lastFocusedPane(in: tabID) == paneID
+    hierarchyManager.catalog.worktree(worktreeID, in: projectID)?.focusedPaneID == paneID
   }
 
-  /// Wash on unfocused panes inside a multi-pane Tab. Matches ghostty's
+  /// Wash on unfocused Panes inside a multi-Pane Worktree. Matches ghostty's
   /// `unfocused-split` exactly: a hit-test-disabled `Rectangle` filled with
   /// `unfocused-split-fill` (defaults to terminal `background`) at
-  /// `1 - unfocused-split-opacity` (default 0.15). Single-pane Tabs and the
+  /// `1 - unfocused-split-opacity` (default 0.15). A lone Pane and the
   /// focused leaf get nothing.
   @ViewBuilder
   private var unfocusedDimOverlay: some View {
@@ -481,5 +600,14 @@ private struct LeafView: View {
   private var shouldDimUnfocusedSplit: Bool {
     _ = configReloadTick
     return isSplit && !isFocused
+  }
+}
+
+/// The slots of the floating tab strips, by Pane.
+private struct FloatingTabStripKey: PreferenceKey {
+  static let defaultValue: [PaneID: Anchor<CGRect>] = [:]
+
+  static func reduce(value: inout [PaneID: Anchor<CGRect>], nextValue: () -> [PaneID: Anchor<CGRect>]) {
+    value.merge(nextValue()) { $1 }
   }
 }

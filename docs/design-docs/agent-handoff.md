@@ -114,7 +114,7 @@ validate briefing → archiveCurrent(from, to) → writeBriefing | removeCurrent
 
 ### 谁是源？
 
-- `codans handoff` 默认源是**调用方 pane**：`AliasResolver` 先看 `CODANS_PANE_ID`，缺失则由服务端按进程祖先链归属（见 [cli.md](cli.md#寻址与别名解析)）。因此在自己 pane 里执行 `codans handoff to …` 的 agent 交接的就是它自己，与用户当前聚焦无关。
+- `codans handoff` 默认源是**调用方 Tab 的会话**：`AliasResolver` 先看 `CODANS_CONTENT_ID`，缺失则由服务端按进程祖先链归属（见 [cli.md](cli.md#寻址与别名解析)）。因此在自己 Tab 里执行 `codans handoff to …` 的 agent 交接的就是它自己，与用户当前聚焦无关。
 - `--pane` 显式覆盖。
 - 键入源 pane 的那一行命令写的是**调用方自己这套构建的 CLI**：Debug 的 CLI 叫 `codans-dev`（包内文件名、安装名、自称一致），写裸 `codans` 会解析到已安装的 Release 二进制。命令名在 wire-up 时由 `CLIInvocation.command` 解析一次：`/usr/local/bin` 下没有同名条目、或条目指向本构建就写短名，否则写 app 内置二进制的绝对路径。见 [environment.md](environment.md)。
 - 应用内入口：pane 右上角的操作菜单与 AgentState 行右键，取该 pane / 该行自己的 pane id；Command Palette 取选中 worktree 的聚焦 pane。pane 菜单是最贴近语义的入口——交接是这个 pane 里那个 agent 的属性——菜单只放 pane 级操作，不重复 header / 侧栏已有的 path、branch、diff、agent 信息。New Agent 对话框**不**提供交接：它启动新 agent，不知道要接替哪一个，而交接必须指向一个确定的 agent。

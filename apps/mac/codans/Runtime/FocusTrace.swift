@@ -30,7 +30,7 @@ enum FocusTrace {
 
   static func describe(_ responder: NSResponder?) -> String {
     guard let responder else { return "nil" }
-    if let surface = responder as? GhosttySurfaceView { return "surface(\(surface.paneID))" }
+    if let surface = responder as? GhosttySurfaceView { return "surface(\(surface.contentID))" }
     return String(describing: type(of: responder))
   }
 }

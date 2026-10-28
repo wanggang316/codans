@@ -6,11 +6,10 @@ import Testing
 
 /// Coverage for `HierarchyClient.stopScript` — the Run/Stop toggle's teardown.
 ///
-/// Stop interrupts the run pane's child and then closes it: the whole Tab when
-/// the run pane is the Tab's only pane, otherwise just that pane. The pane
-/// close drops the Tab's last-focused entry (run panes spawn with
-/// `focus: true`, so the run pane usually owns it), so Stop has to re-home
-/// input on the survivor the same way the ⌘W / pane-action close paths do.
+/// Stop interrupts the run Content's child and then closes its Tab. When
+/// that Tab was alone in its Pane the Pane goes with it and focus moves to
+/// the neighbour, so Stop re-homes input on the survivor the same way the
+/// ⌘W / pane-action close paths do.
 @MainActor
 struct HierarchyClientStopScriptTests {
   @Test
@@ -19,29 +18,29 @@ struct HierarchyClientStopScriptTests {
 
     fixture.client.stopScript(fixture.scriptID, fixture.projectID, fixture.worktreeID)
 
-    #expect(fixture.interrupted == [fixture.runPaneID])
-    #expect(fixture.manager.catalog.pane(fixture.runPaneID) == nil)
-    #expect(fixture.manager.catalog.pane(fixture.agentPaneID) != nil)
-    #expect(fixture.runtime.focusSurfaceViewCalls.last == fixture.agentPaneID)
+    #expect(fixture.interrupted == [fixture.runContentID])
+    #expect(fixture.manager.catalog.content(fixture.runContentID) == nil)
+    #expect(fixture.manager.catalog.content(fixture.agentContentID) != nil)
+    #expect(fixture.runtime.focusSurfaceViewCalls.last == fixture.agentContentID)
   }
 
-  /// The run pane alone in its Tab retires the Tab; there is no survivor to
-  /// focus, so no focus request is made.
+  /// The run Tab alone in the Worktree retires its Pane; there is no
+  /// survivor to focus, so no focus request is made.
   @Test
-  func stopClosesTheTabWhenTheRunPaneIsAlone() throws {
-    let fixture = Self.makeSinglePaneFixture()
+  func stopClosesTheTabWhenTheRunTabIsAlone() throws {
+    let fixture = Self.makeSingleTabFixture()
 
     fixture.client.stopScript(fixture.scriptID, fixture.projectID, fixture.worktreeID)
 
-    #expect(fixture.interrupted == [fixture.runPaneID])
-    #expect(fixture.manager.catalog.projects[0].worktrees[0].tabs.isEmpty)
+    #expect(fixture.interrupted == [fixture.runContentID])
+    #expect(fixture.manager.catalog.projects[0].worktrees[0].allTabs.isEmpty)
     #expect(fixture.runtime.focusSurfaceViewCalls.isEmpty)
   }
 
   // MARK: - Fixtures
 
   private final class InterruptRecorder: @unchecked Sendable {
-    var paneIDs: [PaneID] = []
+    var contentIDs: [ContentID] = []
   }
 
   private struct Fixture {
@@ -51,8 +50,8 @@ struct HierarchyClientStopScriptTests {
     let scriptID: UUID
     let projectID: ProjectID
     let worktreeID: WorktreeID
-    let agentPaneID: PaneID
-    let runPaneID: PaneID
+    let agentContentID: ContentID
+    let runContentID: ContentID
     private let recorder: InterruptRecorder
 
     init(
@@ -62,8 +61,8 @@ struct HierarchyClientStopScriptTests {
       scriptID: UUID,
       projectID: ProjectID,
       worktreeID: WorktreeID,
-      agentPaneID: PaneID,
-      runPaneID: PaneID,
+      agentContentID: ContentID,
+      runContentID: ContentID,
       recorder: InterruptRecorder
     ) {
       self.client = client
@@ -72,21 +71,24 @@ struct HierarchyClientStopScriptTests {
       self.scriptID = scriptID
       self.projectID = projectID
       self.worktreeID = worktreeID
-      self.agentPaneID = agentPaneID
-      self.runPaneID = runPaneID
+      self.agentContentID = agentContentID
+      self.runContentID = runContentID
       self.recorder = recorder
     }
 
-    var interrupted: [PaneID] { recorder.paneIDs }
+    var interrupted: [ContentID] { recorder.contentIDs }
   }
 
-  /// Agent pane on the left, run pane split off to the right — the layout the
+  /// Agent Tab on the left, run Tab split off to the right — the layout the
   /// Run/Stop toggle produces with a `.split` command.
   private static func makeSplitFixture() -> Fixture {
-    let agentPane = Pane(workingDirectory: "/repo")
+    let agentTab = Tab(content: .terminal(workingDirectory: "/repo"))
     let scriptID = UUID()
-    let runPane = Pane(workingDirectory: "/repo", runScriptID: scriptID)
-    let tab = Tab(
+    let runTab = Tab(content: .terminal(workingDirectory: "/repo", runScriptID: scriptID))
+    let agentPane = Pane(tabs: [agentTab])
+    let runPane = Pane(tabs: [runTab])
+    let worktree = Worktree(
+      name: "main", path: "/repo",
       splitTree: SplitTree(
         root: .split(
           SplitTree<PaneID>.Split(
@@ -96,29 +98,33 @@ struct HierarchyClientStopScriptTests {
             right: .leaf(runPane.id)
           ))
       ),
-      panes: [agentPane, runPane]
+      panes: [agentPane, runPane],
+      focusedPaneID: runPane.id
     )
     return makeFixture(
-      tab: tab, scriptID: scriptID, agentPaneID: agentPane.id, runPaneID: runPane.id
+      worktree: worktree, scriptID: scriptID, agentContentID: agentTab.contentID, runContentID: runTab.contentID
     )
   }
 
-  private static func makeSinglePaneFixture() -> Fixture {
+  private static func makeSingleTabFixture() -> Fixture {
     let scriptID = UUID()
-    let runPane = Pane(workingDirectory: "/repo", runScriptID: scriptID)
-    let tab = Tab(splitTree: SplitTree(leaf: runPane.id), panes: [runPane])
+    let runTab = Tab(content: .terminal(workingDirectory: "/repo", runScriptID: scriptID))
+    let runPane = Pane(tabs: [runTab])
+    let worktree = Worktree(
+      name: "main", path: "/repo", splitTree: SplitTree(leaf: runPane.id), panes: [runPane],
+      focusedPaneID: runPane.id
+    )
     return makeFixture(
-      tab: tab, scriptID: scriptID, agentPaneID: runPane.id, runPaneID: runPane.id
+      worktree: worktree, scriptID: scriptID, agentContentID: runTab.contentID, runContentID: runTab.contentID
     )
   }
 
   private static func makeFixture(
-    tab: Tab,
+    worktree: Worktree,
     scriptID: UUID,
-    agentPaneID: PaneID,
-    runPaneID: PaneID
+    agentContentID: ContentID,
+    runContentID: ContentID
   ) -> Fixture {
-    let worktree = Worktree(name: "main", path: "/repo", tabs: [tab], selectedTabID: tab.id)
     let project = Project(
       name: "p", rootPath: "/repo", gitRoot: "/repo",
       worktrees: [worktree], selectedWorktreeID: worktree.id
@@ -135,7 +141,7 @@ struct HierarchyClientStopScriptTests {
 
     let recorder = InterruptRecorder()
     var terminalClient = TerminalClient.testValue
-    terminalClient.interrupt = { paneID in recorder.paneIDs.append(paneID) }
+    terminalClient.interrupt = { contentID in recorder.contentIDs.append(contentID) }
 
     return Fixture(
       client: HierarchyClient.live(manager: manager, terminalClient: terminalClient),
@@ -144,8 +150,8 @@ struct HierarchyClientStopScriptTests {
       scriptID: scriptID,
       projectID: project.id,
       worktreeID: worktree.id,
-      agentPaneID: agentPaneID,
-      runPaneID: runPaneID,
+      agentContentID: agentContentID,
+      runContentID: runContentID,
       recorder: recorder
     )
   }

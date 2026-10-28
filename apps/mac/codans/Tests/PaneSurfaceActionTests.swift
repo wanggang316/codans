@@ -3,8 +3,8 @@ import Testing
 
 @testable import Codans
 
-/// `PaneSurfaceAction` exists so the surface's right-click menu and the pane
-/// HUD card cannot drift apart. Both renderers walk `groups`, so these pin
+/// `PaneSurfaceAction` exists so the surface's right-click menu and the tab
+/// chip's actions menu cannot drift apart. Both renderers walk `groups`, so these pin
 /// the properties that keep "walk groups" equivalent to "offer everything".
 struct PaneSurfaceActionTests {
   /// The renderers iterate `groups`, never `allCases`. An action added to
@@ -23,18 +23,8 @@ struct PaneSurfaceActionTests {
     #expect(PaneSurfaceAction.groups.last == [.close])
   }
 
-  /// The HUD builds each row's accessibility identifier as
-  /// `pane_hud.<accessibilityID>`, which is also how the AX-driven UI
-  /// harness addresses rows — a collision would make one unreachable.
-  @Test
-  func accessibilityIDsAreUnique() {
-    let ids = PaneSurfaceAction.allCases.map(\.accessibilityID)
-    #expect(Set(ids).count == ids.count)
-    #expect(ids.allSatisfy { !$0.isEmpty })
-  }
-
   /// Copy is the only action gated on a selection; everything else is always
-  /// offered. The right-click menu drops a gated item, the HUD disables it,
+  /// offered. The right-click menu drops a gated item, the chip menu disables it,
   /// and both ask this.
   @Test
   func onlyCopyNeedsASelection() {

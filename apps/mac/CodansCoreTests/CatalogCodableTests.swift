@@ -3,10 +3,10 @@ import Testing
 
 @testable import CodansCore
 
-/// Exercises `Catalog.init(from:)` / `Catalog.encode(to:)` (Tags + flat
-/// Projects + activeTagFilter). The decoder rejects any pre-v3 payload as
-/// `unsupportedVersion` and any payload newer than the current version as
-/// `newerVersion`.
+/// Exercises `Catalog.init(from:)` / `Catalog.encode(to:)` for the v5
+/// schema. The decoder reads the current version only and names why it
+/// refused any other: pre-v3 as `unsupportedVersion`, v3 and v4 as
+/// `needsMigration`, above v5 as `newerVersion`.
 struct CatalogCodableTests {
   @Test
   func emptyCatalogRoundTrip() throws {
@@ -20,10 +20,10 @@ struct CatalogCodableTests {
 
   @Test
   func populatedCatalogRoundTrip() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let pane = Pane(tabs: [Tab(content: .terminal(workingDirectory: "/tmp"))])
     let worktree = Worktree(
-      name: "main", path: "/repo", branch: "main", tabs: [tab], selectedTabID: tab.id
+      name: "main", path: "/repo", branch: "main", splitTree: SplitTree(leaf: pane.id), panes: [pane],
+      focusedPaneID: pane.id
     )
     let tag = Tag(name: "client-acme", color: .blue)
     let project = Project(
@@ -46,16 +46,34 @@ struct CatalogCodableTests {
   }
 
   @Test
-  func decodingRejectsNewerVersion() throws {
+  func decodingNewerVersionIsDistinctFromUnsupported() throws {
     let payload = Data(#"{"version": 99, "projects": [], "tags": []}"#.utf8)
     #expect(throws: Catalog.DecodingIssue.newerVersion(99)) {
       _ = try JSONDecoder().decode(Catalog.self, from: payload)
     }
   }
 
+  @Test(arguments: [3, 4])
+  func decodingOlderCatalogAsksForMigration(version: Int) throws {
+    let payload = Data(#"{"version": \#(version), "projects": []}"#.utf8)
+    #expect(throws: Catalog.DecodingIssue.needsMigration(version)) {
+      _ = try JSONDecoder().decode(Catalog.self, from: payload)
+    }
+  }
+
+  @Test
+  func peekVersionReadsTheVersionAlone() throws {
+    // The rest of the document is not this build's shape on purpose.
+    let payload = Data(#"{"version": 7, "projects": "not an array"}"#.utf8)
+    #expect(try Catalog.peekVersion(in: payload) == 7)
+    #expect(throws: DecodingError.self) {
+      _ = try Catalog.peekVersion(in: Data(#"{"projects": []}"#.utf8))
+    }
+  }
+
   @Test
   func decodingTolerantOfMissingOptionalFields() throws {
-    let payload = Data(#"{"version": 3}"#.utf8)
+    let payload = Data(#"{"version": 5}"#.utf8)
     let catalog = try JSONDecoder().decode(Catalog.self, from: payload)
     #expect(catalog.projects.isEmpty)
     #expect(catalog.tags.isEmpty)
@@ -87,9 +105,9 @@ struct CatalogCodableTests {
 
   @Test
   func decodingV2CatalogRejectsAsUnsupportedVersion() throws {
-    // No backward-compat before v3. v2 (and earlier)
-    // catalogs surface as `unsupportedVersion` so the app fails loud
-    // instead of silently dropping the user's data.
+    // v2 (and earlier) catalogs have no migration path: they surface as
+    // `unsupportedVersion` so the app fails loud instead of silently
+    // dropping the user's data.
     let payload = Data(#"{"version": 2, "spaces": []}"#.utf8)
     #expect(throws: Catalog.DecodingIssue.unsupportedVersion(2)) {
       _ = try JSONDecoder().decode(Catalog.self, from: payload)
@@ -160,60 +178,27 @@ struct CatalogCodableTests {
     #expect(decoded.isNew == false)
   }
 
-  // MARK: - Pane.runScriptID round-trips
+  // MARK: - runScriptID round-trips
 
   @Test
-  func paneRunScriptIDRoundTrips() throws {
-    // The run-pane association must survive a relaunch, so unlike the
+  func runScriptIDRoundTrips() throws {
+    // The run-script association must survive a relaunch, so unlike the
     // agent binding this field persists.
     let scriptID = UUID()
-    let pane = Pane(workingDirectory: "/tmp", runScriptID: scriptID)
-    let data = try JSONEncoder().encode(pane)
-    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    let state = TerminalContentState(workingDirectory: "/tmp", runScriptID: scriptID)
+    let data = try JSONEncoder().encode(state)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: data)
     #expect(decoded.runScriptID == scriptID)
   }
 
   @Test
-  func paneRunScriptIDNilOmitsKeyFromJSON() throws {
-    let pane = Pane(workingDirectory: "/tmp")
-    let data = try JSONEncoder().encode(pane)
+  func runScriptIDNilOmitsKeyFromJSON() throws {
+    let state = TerminalContentState(workingDirectory: "/tmp")
+    let data = try JSONEncoder().encode(state)
     let dict = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(dict["runScriptID"] == nil)
 
-    let decoded = try JSONDecoder().decode(Pane.self, from: data)
+    let decoded = try JSONDecoder().decode(TerminalContentState.self, from: data)
     #expect(decoded.runScriptID == nil)
   }
-
-  // MARK: - Tab invariants
-
-  @Test
-  func tabInvariantsHoldForSeededTab() throws {
-    let a = Pane(workingDirectory: "/a")
-    let b = Pane(workingDirectory: "/b")
-    let tree = try SplitTree(leaf: a.id).inserting(b.id, at: a.id, direction: .right)
-    let tab = Tab(splitTree: tree, panes: [a, b])
-    try tab.validateInvariants()
-  }
-
-  @Test
-  func tabInvariantsFailWhenPanesDriftFromTree() throws {
-    let a = Pane(workingDirectory: "/a")
-    let b = Pane(workingDirectory: "/b")
-    let extraPane = Pane(workingDirectory: "/c")
-    let tree = try SplitTree(leaf: a.id).inserting(b.id, at: a.id, direction: .right)
-    let badTab = Tab(splitTree: tree, panes: [a, b, extraPane])
-    #expect(throws: Tab.InvariantError.self) {
-      try badTab.validateInvariants()
-    }
-  }
-
-  @Test
-  func tabInvariantsFailOnDuplicatePaneIDs() throws {
-    let a = Pane(workingDirectory: "/a")
-    let tab = Tab(splitTree: SplitTree(leaf: a.id), panes: [a, a])
-    #expect(throws: Tab.InvariantError.duplicatePaneIDs) {
-      try tab.validateInvariants()
-    }
-  }
-
 }

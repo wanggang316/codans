@@ -22,11 +22,11 @@ struct CommandQueueFeatureTests {
   }
 
   private static func makeStore(
-    paneID: PaneID,
+    contentID: ContentID,
     recorder: Recorder,
     configure: (inout CommandQueueFeature.State) -> Void = { _ in }
   ) -> TestStoreOf<CommandQueueFeature> {
-    var state = CommandQueueFeature.State(paneID: paneID, now: epoch)
+    var state = CommandQueueFeature.State(contentID: contentID, now: epoch)
     configure(&state)
     return TestStore(initialState: state) {
       CommandQueueFeature()
@@ -41,7 +41,7 @@ struct CommandQueueFeatureTests {
   @Test
   func sendNowWritesToTheTerminalAndNeverQueues() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.mode = .now }
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) { $0.mode = .now }
     await store.send(.draftChanged("ls -la")) { $0.draft = "ls -la" }
     await store.send(.submitted) { $0.draft = "" }
     await store.receive(.delegate(.submitted))
@@ -54,7 +54,7 @@ struct CommandQueueFeatureTests {
   @Test
   func afterTaskModeAppendsAQueuedEntry() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder)
     await store.send(.draftChanged("make test")) { $0.draft = "make test" }
     await store.send(.submitted) { $0.draft = "" }
     await store.receive(.delegate(.submitted))
@@ -68,7 +68,7 @@ struct CommandQueueFeatureTests {
   func scheduledModeCarriesTheRepeatInterval() async {
     let recorder = Recorder()
     let fireAt = Self.epoch.addingTimeInterval(3600)
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) {
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) {
       $0.mode = .scheduled
       $0.scheduledAt = fireAt
       $0.repeatEnabled = true
@@ -86,7 +86,7 @@ struct CommandQueueFeatureTests {
   func repeatIsOmittedWhenTheToggleIsOff() async {
     let recorder = Recorder()
     let fireAt = Self.epoch.addingTimeInterval(3600)
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) {
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) {
       $0.mode = .scheduled
       $0.scheduledAt = fireAt
       $0.repeatAmount = 30
@@ -101,7 +101,7 @@ struct CommandQueueFeatureTests {
   @Test
   func whitespaceOnlyDraftIsRejected() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder)
     await store.send(.draftChanged("   \n ")) { $0.draft = "   \n " }
     await store.send(.submitted)
 
@@ -114,7 +114,7 @@ struct CommandQueueFeatureTests {
   @Test
   func lineBreaksInsideTheDraftSurviveTrimming() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.mode = .now }
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) { $0.mode = .now }
     let draft = "\nRefactor the parser.\n\nKeep the public API.\n"
     await store.send(.draftChanged(draft)) { $0.draft = draft }
     await store.send(.submitted) { $0.draft = "" }
@@ -129,7 +129,7 @@ struct CommandQueueFeatureTests {
   func appendReadsTheLiveQueueRatherThanASnapshot() async {
     let recorder = Recorder()
     recorder.queue = [QueuedCommand(text: "already there", timing: .afterCurrentTask)]
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder)
     await store.send(.draftChanged("next")) { $0.draft = "next" }
     await store.send(.submitted) { $0.draft = "" }
     await store.receive(.delegate(.submitted))
@@ -143,7 +143,7 @@ struct CommandQueueFeatureTests {
     let keep = QueuedCommand(text: "keep", timing: .afterCurrentTask)
     let drop = QueuedCommand(text: "drop", timing: .afterCurrentTask)
     recorder.queue = [keep, drop]
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder)
 
     await store.send(.removeTapped(drop.id))
 
@@ -157,7 +157,7 @@ struct CommandQueueFeatureTests {
       QueuedCommand(text: "a", timing: .afterCurrentTask),
       QueuedCommand(text: "b", timing: .afterCurrentTask),
     ]
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder)
 
     await store.send(.clearAllTapped)
 
@@ -169,7 +169,7 @@ struct CommandQueueFeatureTests {
   @Test
   func switchingToScheduleReseedsAPastDate() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) {
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) {
       $0.scheduledAt = Self.epoch.addingTimeInterval(-3600)
     }
     let expected = CommandQueueFeature.State.defaultScheduleDate(from: Self.epoch)
@@ -184,14 +184,14 @@ struct CommandQueueFeatureTests {
   @Test
   func repeatAmountIsClampedToAPositiveValue() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder)
     await store.send(.repeatAmountChanged(0)) { $0.repeatAmount = 1 }
   }
 
   @Test
   func selectedFilesAppendQuotedPathsWithoutSending() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review" }
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) { $0.draft = "Review" }
     await store.send(.filesSelected([
       URL(fileURLWithPath: "/tmp/my file.txt"),
       URL(fileURLWithPath: "/tmp/it's.txt"),
@@ -205,7 +205,7 @@ struct CommandQueueFeatureTests {
   @Test
   func fileSelectionPreservesTrailingNewline() async {
     let recorder = Recorder()
-    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review\n" }
+    let store = Self.makeStore(contentID: ContentID(), recorder: recorder) { $0.draft = "Review\n" }
     await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")])) {
       $0.draft = "Review\n'/tmp/报告.txt'"
     }
@@ -213,7 +213,7 @@ struct CommandQueueFeatureTests {
 
   @Test
   func emptyAndNonFileSelectionsDoNotChangeDraft() async {
-    let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Keep this" }
+    let store = Self.makeStore(contentID: ContentID(), recorder: Recorder()) { $0.draft = "Keep this" }
     await store.send(.filesSelected([]))
     await store.send(.filesSelected([URL(string: "https://example.com/file")!]))
   }

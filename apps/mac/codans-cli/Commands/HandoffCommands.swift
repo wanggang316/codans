@@ -77,7 +77,11 @@ struct HandoffTo: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Receiving agent token: claude, codex, gemini, omp, cursor-agent, …")
   var agent: String
-  @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
+  @Option(
+    name: .long,
+    help:
+      "Source tab: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or 'current' (the calling tab)."
+  )
   var pane: String = "current"
   @Option(name: .long, help: "Profile (name or id) to launch the receiver with.")
   var profile: String?
@@ -105,12 +109,12 @@ struct HandoffTo: AsyncParsableCommand {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let sourceUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.HandoffResponse = try await client.call(
         .handoffTo,
         params: IPC.HandoffRequest(
           action: .to,
-          paneID: PaneID(raw: paneUUID),
+          contentID: ContentID(raw: sourceUUID),
           receiver: agent,
           profile: profile,
           brief: resolvedBrief.brief,
@@ -134,7 +138,11 @@ struct HandoffSave: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
-  @Option(name: .long, help: "Source pane id, p<n> handle, @label, or 'current' (the calling pane).")
+  @Option(
+    name: .long,
+    help:
+      "Source tab: an id (tab, content, or pane → its selected tab), t<n>, p<n>, @label, or 'current' (the calling tab)."
+  )
   var pane: String = "current"
   @OptionGroup var briefOptions: HandoffBriefOptions
   @Option(name: .long, help: "Note appended to the handoff log.")
@@ -145,12 +153,12 @@ struct HandoffSave: AsyncParsableCommand {
       let resolvedBrief = try briefOptions.resolve()
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let paneUUID = try await AliasResolver.resolve(pane, kind: .pane, client: client)
+      let sourceUUID = try await AliasResolver.resolve(pane, kind: .content, client: client)
       let response: IPC.HandoffResponse = try await client.call(
         .handoffSave,
         params: IPC.HandoffRequest(
           action: .save,
-          paneID: PaneID(raw: paneUUID),
+          contentID: ContentID(raw: sourceUUID),
           brief: resolvedBrief.brief,
           contextOnly: resolvedBrief.contextOnly,
           note: note,
@@ -177,14 +185,16 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
     let projectID: String
     let worktreeID: String
     let tabID: String
-    let paneID: String
+    let contentID: String
+    let paneID: String?
     let profileName: String
 
     init(_ pane: IPC.HandoffLaunchedPane) {
       projectID = pane.projectID.description
       worktreeID = pane.worktreeID.description
       tabID = pane.tabID.description
-      paneID = pane.paneID.description
+      contentID = pane.contentID.description
+      paneID = pane.paneID?.description
       profileName = pane.profileName
     }
   }
@@ -224,7 +234,7 @@ struct HandoffRenderable: Encodable, CustomStringConvertible {
         lines.append("  archived: \(archived)")
       }
       if let pane = response.launchedPane {
-        lines.append("  launched \(pane.profileName) in pane \(pane.paneID) (tab \(pane.tabID))")
+        lines.append("  launched \(pane.profileName) in tab \(pane.tabID) (content \(pane.contentID))")
       } else {
         lines.append("  receiver not launched")
       }

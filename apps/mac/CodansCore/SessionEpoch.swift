@@ -14,7 +14,7 @@ import Foundation
 /// for the agent running in that pane. A pane opened fresh spawns a new
 /// daemon in the live session and works, which is also why "restart the
 /// app" never heals a stranded pane: relaunch re-attaches to the same
-/// surviving daemon by its stable PaneID.
+/// surviving daemon by its stable ContentID.
 ///
 /// We stamp each persisted `Session` with the audit session id (asid) at
 /// spawn time. On the next launch the reaper compares the row's stamp to

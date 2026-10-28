@@ -90,13 +90,13 @@ struct ProjectHandlersTests {
 
   @Test
   func addScriptNormalizesTargetIncompatibleOnFinished() throws {
-    // newTab + closePane (a split-only action on a tab target) is normalized to
+    // focused + closeTab (no session of its own to close) is normalized to
     // none — the echo and the persisted value both drop the on-finished (D13).
     let projectID = ProjectID(raw: UUID())
     let store = makeStore()
     let handlers = ProjectHandlers(settings: store, hierarchy: makeHierarchy(knowing: projectID))
 
-    let script = ScriptDefinition(kind: .run, command: "x", target: .newTab, onFinished: .closePane)
+    let script = ScriptDefinition(kind: .run, command: "x", target: .focused, onFinished: .closeTab)
     let response = try handlers.addScript(.init(projectID: projectID, script: script))
 
     #expect(response.script.onFinished == ScriptOnFinished.none)

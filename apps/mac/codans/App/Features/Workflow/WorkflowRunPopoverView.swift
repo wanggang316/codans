@@ -13,7 +13,7 @@ import SwiftUI
 struct WorkflowRunPopoverView: View {
   let session: WorkflowRunSession
   let engine: WorkflowEngine
-  let onFocusPane: (PaneID) -> Void
+  let onFocusPane: (ContentID) -> Void
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -126,8 +126,8 @@ struct WorkflowRunPopoverView: View {
             .font(.caption)
             .foregroundStyle(.primary)
           Spacer()
-          if let paneID = row.paneID {
-            Button("Focus") { onFocusPane(paneID) }
+          if let contentID = row.contentID {
+            Button("Focus") { onFocusPane(contentID) }
               .buttonStyle(.link)
               .font(.caption)
               .accessibilityIdentifier("agentState.workflow.focusRole")

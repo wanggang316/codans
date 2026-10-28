@@ -284,6 +284,15 @@ let project = Project(
           ],
           basedOnDependencyAnalysis: false
         ),
+        // Data instance: a Debug build made in a linked git worktree gets
+        // its own config, state, daemons, and socket (see `AppInstance`).
+        // Runs on every build, since the checkout can change under the
+        // same DerivedData.
+        .post(
+          script: "\"${SRCROOT}/scripts/stamp-instance.sh\"",
+          name: "Stamp instance",
+          basedOnDependencyAnalysis: false
+        ),
         // codans CLI embedding. Copies the codans binary built by its sibling
         // target into Resources/bin/$(CODANS_CLI_NAME) so the app can ship a
         // single self-contained .app, the installer has a stable inside-bundle

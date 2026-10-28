@@ -17,7 +17,7 @@ final class PaneSurface {
     case crashed(reason: String)
   }
 
-  let paneID: PaneID
+  let contentID: ContentID
   /// Observable informational state populated from the `PaneInfoDelta`
   /// stream via `apply(_:)`. Reference type — `let` is intentional; the
   /// instance lives for the full PaneSurface lifetime and its fields
@@ -58,9 +58,9 @@ final class PaneSurface {
   private let runtime: GhosttyRuntime
   /// Heap-allocated uuid_t bytes passed to libghostty as the surface
   /// userdata. close_surface_cb reads these bytes to recover the owning
-  /// PaneID without casting to a Swift object pointer (UAF-safe across
+  /// ContentID without casting to a Swift object pointer (UAF-safe across
   /// the C→main-queue hop).
-  nonisolated(unsafe) private let paneIDUserdata: UnsafeMutablePointer<UInt8>
+  nonisolated(unsafe) private let contentIDUserdata: UnsafeMutablePointer<UInt8>
 
   /// Defensive auto-reset for OSC 9;4 progress reports. Any non-REMOVE
   /// state schedules this task; if no fresh progress event arrives
@@ -93,7 +93,7 @@ final class PaneSurface {
 
   init(
     runtime: GhosttyRuntime,
-    paneID: PaneID,
+    contentID: ContentID,
     session: String,
     launch: SurfaceLaunch,
     workingDirectory: String,
@@ -102,18 +102,18 @@ final class PaneSurface {
   ) throws {
     guard let app = runtime.app else {
       throw GhosttyError.appInitFailed(
-        reason: "libghostty app not initialized; surface request for pane \(paneID)"
+        reason: "libghostty app not initialized; surface request for pane \(contentID)"
       )
     }
     self.runtime = runtime
-    self.paneID = paneID
+    self.contentID = contentID
     self.session = session
-    self.view = GhosttySurfaceView(paneID: paneID, initialSize: initialSize)
+    self.view = GhosttySurfaceView(contentID: contentID, initialSize: initialSize)
 
-    // Allocate 16 bytes to hold the PaneID's uuid bytes as surface userdata.
-    self.paneIDUserdata = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
-    withUnsafeBytes(of: paneID.raw.uuid) { src in
-      paneIDUserdata.update(
+    // Allocate 16 bytes to hold the ContentID's uuid bytes as surface userdata.
+    self.contentIDUserdata = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
+    withUnsafeBytes(of: contentID.raw.uuid) { src in
+      contentIDUserdata.update(
         from: src.bindMemory(to: UInt8.self).baseAddress!,
         count: 16
       )
@@ -138,10 +138,10 @@ final class PaneSurface {
     // a config reload then reset the font to the configured size anyway.
     config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
     // Per-surface userdata: opaque pointer to the 16 uuid-bytes of the
-    // owning PaneID. The close_surface_cb copies these bytes into a local
+    // owning ContentID. The close_surface_cb copies these bytes into a local
     // UUID so the callback survives the C→main-queue hop even if the
     // PaneSurface object is freed in-between.
-    config.userdata = UnsafeMutableRawPointer(paneIDUserdata)
+    config.userdata = UnsafeMutableRawPointer(contentIDUserdata)
     // Exec backend: libghostty forks the child under `zmx attach <session>`
     // (as the wrapper of the shell it resolves, or inside a fixed command —
     // see `SurfaceLaunch`) and owns the local PTY plus its sizing — it
@@ -196,7 +196,7 @@ final class PaneSurface {
       // its nil-pointer protocol. `retryable: true` tags it as a
       // transient failure so the caller knows it can back off and retry.
       throw GhosttyError.surfaceInitFailed(
-        reason: "ghostty_surface_new returned nil for pane \(paneID) (session=\(session))",
+        reason: "ghostty_surface_new returned nil for pane \(contentID) (session=\(session))",
         retryable: true
       )
     }
@@ -226,7 +226,7 @@ final class PaneSurface {
     if let surface {
       ghostty_surface_free(surface)
     }
-    paneIDUserdata.deallocate()
+    contentIDUserdata.deallocate()
   }
 
   /// Probe the daemon's shell-child PID and cache it in `daemonShellPID`.
@@ -237,11 +237,11 @@ final class PaneSurface {
   /// the foreground-job poller already tolerates. The PID is static for the
   /// session's lifetime, so the probe stops on first success.
   private func startShellPIDProbe() {
-    let paneID = self.paneID
+    let contentID = self.contentID
     shellPIDProbeTask = Task { [weak self] in
       for _ in 0..<40 {  // ~10s budget at 250ms steps
         if Task.isCancelled { return }
-        if let info = try? await ZmxControlClient.info(for: paneID), info.pid > 0 {
+        if let info = try? await ZmxControlClient.info(for: contentID), info.pid > 0 {
           self?.daemonShellPID = info.pid
           return
         }
@@ -287,7 +287,7 @@ final class PaneSurface {
     // (the resume path). When the pane is being destroyed for good, also
     // tell the daemon to exit so its shell doesn't outlive the pane.
     if killDaemon {
-      ZmxControlClient.kill(for: paneID)
+      ZmxControlClient.kill(for: contentID)
     }
     ghostty_surface_free(surface)
     self.surface = nil
@@ -818,6 +818,6 @@ final class PaneSurface {
     info.progressState = GHOSTTY_PROGRESS_STATE_REMOVE.rawValue
     info.progressValue = nil
     progressResetTask = nil
-    runtime.emitInfoChanged(paneID, cleared)
+    runtime.emitInfoChanged(contentID, cleared)
   }
 }

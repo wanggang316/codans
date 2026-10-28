@@ -156,7 +156,7 @@ struct WorkspaceCommandsTests {
           name: "app", worktreeID: WorktreeID(), path: "/ws/feat/app", branch: "feat/x", uncommittedCount: 2,
           deletableBranches: ["feat/x"])
       ],
-      busyPaneIDs: [PaneID()], extraEntries: ["notes.txt"])
+      busyContentIDs: [ContentID()], extraEntries: ["notes.txt"])
     #expect(try JSONDecoder().decode(GroupDeletionCheck.self, from: JSONEncoder().encode(check)) == check)
     let response = IPC.WorkspaceGroupDeleteResponse(
       projectID: check.projectID, groupID: check.groupID, groupName: "feat",

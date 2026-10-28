@@ -1,6 +1,6 @@
-import Foundation
 import CodansCore
 import CodansIPC
+import Foundation
 import os
 
 /// Typed JSON-RPC client. One instance per `codans` invocation.
@@ -29,6 +29,10 @@ public actor RPCClient {
     /// server-side reordering / frame corruption explicitly instead of
     /// letting the client hang forever waiting for the right reply.
     case misorderedResponse(expected: String, got: String)
+    /// The server speaks another `IPC.protocolVersion`. The CLI and the
+    /// app must come from the same release; there is no wire compatibility
+    /// across protocol versions.
+    case protocolMismatch(client: Int, server: Int)
   }
 
   private let transport: Transport
@@ -104,6 +108,7 @@ public actor RPCClient {
     if let error = helloResponse.error {
       throw RPCError.ipc(error)
     }
+    try Self.checkProtocol(helloResponse)
     let response = try await readResponse(deadline: start.advanced(by: timeout))
     if response.id != requestID {
       throw RPCError.misorderedResponse(expected: requestID, got: response.id)
@@ -205,6 +210,7 @@ public actor RPCClient {
     if let error = helloResponse.error {
       throw RPCError.ipc(error)
     }
+    try Self.checkProtocol(helloResponse)
 
     while !Task.isCancelled {
       let deadline = ContinuousClock.now.advanced(by: idleTimeout)
@@ -225,6 +231,17 @@ public actor RPCClient {
   }
 
   // MARK: - Internals
+
+  /// Refuses a server whose hello reports another protocol version. A
+  /// hello result without `protocolMajor` (test doubles) is accepted.
+  static func checkProtocol(_ hello: IPC.Response) throws {
+    guard case .object(let fields)? = hello.result, case .int(let major)? = fields["protocolMajor"] else {
+      return
+    }
+    if Int(major) != IPC.protocolVersion {
+      throw RPCError.protocolMismatch(client: IPC.protocolVersion, server: Int(major))
+    }
+  }
 
   /// Pipeline `system.hello` + the real request in one write, saving a
   /// round trip. The caller passes the pre-generated `helloID` so it can

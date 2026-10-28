@@ -8,7 +8,7 @@
 
 ## 背景与范围
 
-codans 已经具备"一个 agent 编排其它 agent"所需的全部**原语**：Agent Profiles 与统一的启动管线（`HierarchyClient.launchAgent`）、`AgentStateStore` 的逐 pane 运行态（`idle` / `working` / `blocked` / `done` / `error`）、`codans agent wait --until`、`codans pane send --wait --capture`、`codans handoff` 与 worktree 内的 `.codans/handoff/` 工件、以及 `{schemaVersion, data | error}` 的 JSON 信封（见 [cli.md](cli.md)、[agent-handoff.md](agent-handoff.md)、[active-agents-view.md](active-agents-view.md)、[lessons-learned 2026-09-14](../lessons-learned/2026-09-14-cli-agent-orchestration-gaps.md)）。
+codans 已经具备"一个 agent 编排其它 agent"所需的全部**原语**：Agent Profiles 与统一的启动管线（`HierarchyClient.launchAgent`）、`AgentStateStore` 的逐 pane 运行态（`idle` / `working` / `blocked` / `done` / `error`）、`codans agent wait --until`、`codans tab send --wait --capture`、`codans handoff` 与 worktree 内的 `.codans/handoff/` 工件、以及 `{schemaVersion, data | error}` 的 JSON 信封（见 [cli.md](cli.md)、[agent-handoff.md](agent-handoff.md)、[active-agents-view.md](active-agents-view.md)、[lessons-learned 2026-09-14](../lessons-learned/2026-09-14-cli-agent-orchestration-gaps.md)）。
 
 但用户每天真正在跑的编排——"在旁边分屏起一个 reviewer，把 diff 交给它审，读它的结论，修，再让它复审，直到 clean"——今天只存在于手敲的 CLI 序列或 agent 自己临场拼出的 bash 循环里。它不可复现、不可分享、没有可观测的进度，出了问题（agent 卡在权限提示、忘了汇报、回答得不合格式）也没有一个地方能停下来问用户。Handoff 是这类编排里唯一被固化的一条，而它是写死的状态机：目标列表、briefing 章节、kickoff 文案都是字面量，第二条编排就得再写一遍。
 
@@ -244,7 +244,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 无论从 CLI 还是 Command Palette / 启动面板发起，最终都是同一个 `WorkflowAdmission.admit(request)`，它不碰任何 pane：
 
 1. 按 id（再按唯一 name）解析定义；有 error 诊断 → `WORKFLOW_INVALID`（带诊断）；Settings 里被禁用 → `WORKFLOW_DISABLED`；
-2. 确定 source：调用方 pane（`CODANS_PANE_ID` / 进程祖先链）或显式的 pane / worktree 引用；有 `current` 角色却没有 pane → `SOURCE_REQUIRED`；
+2. 确定 source：调用方会话（`CODANS_CONTENT_ID` / 进程祖先链）或显式的 pane / worktree 引用；有 `current` 角色却没有 pane → `SOURCE_REQUIRED`；
 3. 仓库作用域且含 `run:` 步骤的文件需要已被信任（D8）→ 否则 `WORKFLOW_TRUST_REQUIRED`；
 4. `--input` 类型化并检查范围；必填输入缺失 → GUI 询问 / CLI `INPUT_REQUIRED`；
 5. `--skip` 只接受"其 delivery 没有非可选消费者"的 step，否则 `INVALID_ARGUMENT` 指出依赖它的 step；
@@ -330,7 +330,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 - **D3 — 校验是审查闸而不是墙。** 缺章节 / 缺 verdict 默认 provisional 交给用户，`strict: true` 才拒收。agent 的一次不合格式回答不应让一轮 20 分钟的 review 作废。
 - **D4 — token 关联不认证。** 真正的地址是调用方 pane 的等待中 activation；token 只用来拒绝迟到 / 重复 / 错 step 的交付。这与 `CODANS_HANDOFF_REQUEST_ID` + `HandoffRequestRegistry` 是同一个模式的推广。
 - **D5 — 单文件 YAML、文件名即 id，不做目录包。** 没有脚本 action 就没有需要打包的东西；文件更容易 diff、review、复制；与 GitHub 的"一个文件一个 workflow"一致。
-- **D6 — `run:` 步骤代替 action 包。** codans 是终端编排器，"跑一条命令拿退出码与输出"已经是 `pane send --wait --capture` 与 `CommandRunner` 的日常；JSON Schema 化的输入输出契约留到有真实需求时再加。默认 headless（确定的退出码 + 完整 stdout）而不是键入 pane（best-effort），`in: <role>` 是给"让用户看见"的可选项。
+- **D6 — `run:` 步骤代替 action 包。** codans 是终端编排器，"跑一条命令拿退出码与输出"已经是 `tab send --wait --capture` 与 `CommandRunner` 的日常；JSON Schema 化的输入输出契约留到有真实需求时再加。默认 headless（确定的退出码 + 完整 stdout）而不是键入 pane（best-effort），`in: <role>` 是给"让用户看见"的可选项。
 - **D7 — 引擎是 `@Observable` 运行态对象而不是 TCA reducer。** 与 `HierarchyManager` / `AgentStateStore` / `CommandQueueRunner` 同一模式：TCA 只持草稿与呈现，避免把长生命周期的 effect 队列塞进 reducer 的 `Effect` 生命周期里。
 - **D8 — 仓库作用域的 `run:` 需要一次性信任。** clone 一个仓库不应等于同意跑它 `.codans/workflows/` 里的 shell 命令。信任绑定 `(路径, 文件 SHA-256)`，存 `settings.json` `workflows.trusted`，只能在 app 里授予（Settings 或首次启动时的确认），CLI 不能；文件一改就要重新信任；只含 `message` / `launch` / `notify` 等步骤的文件不需要信任。用户作用域与内建隐式信任。
 - **D9 — `.codans/.gitignore` 从 `*` 改为放行 `workflows/`。** 仓库作用域必须能提交；`HandoffLayout` 写 gitignore 的地方改成写 `*` + `!.gitignore` + `!workflows/`，创建 `workflows/` 时幂等重写。已有仓库在首次发现到 `.codans/workflows/` 时也重写一次。
@@ -341,7 +341,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 
 ## 备选方案
 
-- **继续用 CLI 手工编排（bash 循环 + `agent wait` + `pane send`）。** 这条路保留且一等，但它不是机制：不可分享、无 attention、无 token 关联（迟到的输出会串到下一步）、无进度可见。工作流是在这些原语之上加上"可声明、可观测、可介入"三件事。
+- **继续用 CLI 手工编排（bash 循环 + `agent wait` + `tab send`）。** 这条路保留且一等，但它不是机制：不可分享、无 attention、无 token 关联（迟到的输出会串到下一步）、无进度可见。工作流是在这些原语之上加上"可声明、可观测、可介入"三件事。
 - **让一个 master agent 当编排器（MSGID / ACK 协议）。** 否决作为*机制*：编排本身消耗 master 的 token 与注意力，每一步的确定性都靠 prompt；ACK 循环是在没有交付通道时的补偿。工作流可以把 master 声明为 `current` 角色来兼容这种用法。
 - **一次性做全：目录包 + 脚本 action + JSON Schema + 内容指纹审批 + 全局历史 + 状态中心。** 否决：`run:` 与 `CommandRunner` 已覆盖确定性工作的主要场景；分阶段引入比一次性背上全部复杂度更符合 "Slow is Fast"。
 - **JSON 定义（免去 Yams 依赖）。** 否决：多行 prompt / instruction 在 JSON 里不可读，而工作流的主要内容就是 prompt。Yams 是纯 Swift、无传递依赖，`Package.resolved` 已受控（锁定精确版本）。
@@ -369,7 +369,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 
 - **turn-idle ≠ task-idle**：后台跑任务的 agent 会被过早 nudge。缓解：nudge 文案永远是"完成后交付"而不是"现在交付"；`idle_grace` 默认 180 s；authoring skill 写明。
 - **屏幕分类器的误判**（`AgentStateStore` 靠渲染文本识别 working/idle）：某个 agent 版本改了 UI 会让 idle 门控卡住或误注入。缓解：注入前的 2 s 稳定期；`blocked` / 长时间 `waiting_for_role` 都会升级 attention 而不是无限等；分类器本身已有逐 agent 的检测器与测试。
-- **agent 不遵守交付协议**（忘了、写错命令、用了 `pane send` 汇报）：watchdog 的一次 nudge + attention 的 Ask again；`status`（无参数）随时回答"我是谁、该做什么"；skill 与 kickoff 里都给出精确命令。
+- **agent 不遵守交付协议**（忘了、写错命令、用了 `tab send` 汇报）：watchdog 的一次 nudge + attention 的 Ask again；`status`（无参数）随时回答"我是谁、该做什么"；skill 与 kickoff 里都给出精确命令。
 - **仓库作用域文件是供应链入口**：D8 的信任闸；无 `run:` 的文件不需要信任但仍需用户从 Settings / Palette 主动启动，工作流从不自动运行。
 - **Yams 新依赖**：锁定精确版本进 `Package.resolved`（CI 曾因 float 的传递依赖断过）；解析器只用在定义读取这一处，替换成本低。
 - **`RootFeature` 继续膨胀**：Workflow 的 TCA 面只有启动面板一个 `@Presents`，放进现有的 `routerScopes` 组；运行态与设置面板不进 TCA。

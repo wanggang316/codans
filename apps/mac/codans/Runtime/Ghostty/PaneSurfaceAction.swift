@@ -4,14 +4,14 @@ import Foundation
 ///
 /// Both places the user reaches them from render this one list: the
 /// surface's own right-click menu (`GhosttySurfaceView.menu(for:)`) and the
-/// pane HUD card in the pane's top-right corner. Adding a case here puts the
-/// action in both, which is the point — the corner menu exists so these are
+/// actions menu on each tab chip. Adding a case here puts the action in
+/// both, which is the point — the chip menu exists so these are
 /// discoverable without knowing that right-click does anything, and a menu
 /// that silently offers less than the other is worse than no menu.
 ///
 /// The list is deliberately terminal-scoped. Actions that belong to the
-/// pane's *row* rather than its surface — hand off, the command queue, the
-/// notification mute — are the HUD's own and live in `PaneHUDView`.
+/// Tab rather than its surface — hand off, the command queue — are the chip
+/// menu's own and live in `TabActionsMenu`.
 nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
   case copy
   case paste
@@ -42,10 +42,9 @@ nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
     case .splitUp: "Split Up"
     case .resetTerminal: "Reset Terminal"
     case .copyPaneID: "Copy Pane ID"
-    // Named for its object: the menu it sits in also closes splits and
-    // reaches a tab's worth of panes, so a bare "Close" leaves the user
-    // guessing what goes away.
-    case .close: "Close Pane"
+    // Named for its object: a bare "Close" leaves the user guessing whether
+    // the Tab or its whole Pane goes away.
+    case .close: "Close Tab"
     }
   }
 
@@ -67,26 +66,10 @@ nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
   }
 
   /// Actions that need something selected on screen. The right-click menu
-  /// drops such an item; the HUD card shows it disabled, because a card the
-  /// user opens to find out what a pane can do should say that copying is
+  /// drops such an item; the chip menu shows it disabled, because a menu the
+  /// user opens to find out what a Tab can do should say that copying is
   /// possible at all.
   var needsSelection: Bool {
     self == .copy
-  }
-
-  /// Suffix for the HUD row's accessibility identifier (`pane_hud.<id>`),
-  /// which is also how the AX-driven UI harness addresses the row.
-  var accessibilityID: String {
-    switch self {
-    case .copy: "copy"
-    case .paste: "paste"
-    case .splitRight: "split_right"
-    case .splitDown: "split_down"
-    case .splitLeft: "split_left"
-    case .splitUp: "split_up"
-    case .resetTerminal: "reset_terminal"
-    case .copyPaneID: "copy_pane_id"
-    case .close: "close"
-    }
   }
 }

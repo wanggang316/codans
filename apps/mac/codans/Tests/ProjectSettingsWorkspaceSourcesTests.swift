@@ -10,14 +10,16 @@ import Testing
 @MainActor
 struct ProjectSettingsWorkspaceSourcesTests {
   private struct Fixture {
-    let busyTab = Tab(name: "tests")
+    let busyTab = Tab(name: "tests", content: .terminal(workingDirectory: "/src/app"))
     let groupID = WorkspaceGroupID()
     let project: Project
     let reference: Worktree
 
     init() {
+      let pane = Pane(tabs: [busyTab])
       reference = Worktree(
-        name: "app", path: "/src/app", branch: "main", tabs: [busyTab], sourceGitRoot: "/src/app",
+        name: "app", path: "/src/app", branch: "main", splitTree: SplitTree(leaf: pane.id), panes: [pane],
+        focusedPaneID: pane.id, sourceGitRoot: "/src/app",
         workspaceSlot: WorkspaceSlot(groupID: groupID, role: .reference))
       project = Project(
         name: "ws", rootPath: "/ws", worktrees: [reference], isWorkspace: true,
