@@ -3,7 +3,7 @@
 ## Agreed behavior
 
 - Command-L opens the command composer. It uses the New Agent grouped form style and closes after a nonempty command is sent or queued. The composer does not list queued commands.
-- Schedule opens a fixed-size popover beside the send timing control. Date/time and repeat options live there; Repeat is a checkbox with interval and unit controls on the same row when enabled. Done occupies a separate trailing footer and closes the popover. A clickable summary reopens the settings. The composer keeps its full editor height in every mode, with no reserved schedule row.
+- Schedule opens a fixed-size popover beside the send timing control. Date/time and repeat options live there; Repeat is a checkbox with interval and unit controls on the same row when enabled. Done occupies a separate trailing footer and closes the popover. A clickable summary reopens the settings. Anchor the popover to the send timing control itself, not the summary group, so changes to the summary width do not shift the popover. The composer keeps its full editor height in every mode, with no reserved schedule row.
 - The file picker can select multiple files. Append their absolute paths to the draft using shared POSIX single-quote escaping; selection alone does not send.
 - The pane menu displays the resolved shortcut in gray, aligned right, with space between symbols.
 - Queued commands float at the top of their pane without reserving terminal space. Use the pane menu material.
