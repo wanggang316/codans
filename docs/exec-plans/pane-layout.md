@@ -4,7 +4,7 @@ Design: [docs/design-docs/pane-layout.md](../design-docs/pane-layout.md). Glossa
 
 ## Objective
 
-Ship P1 of the pane layout on `feat/card-pane`: a Worktree is a split tree of Panes, each Pane holds a strip of Tabs, each Tab holds one Content. Catalog v4 with a one-shot v3 → v4 migration, a content runtime outside `HierarchyManager`, one capsule tab strip per Pane, and the renamed CLI / IPC / environment surface. One PR; every commit builds.
+Ship P1 of the pane layout on `feat/card-pane`: a Worktree is a split tree of Panes, each Pane holds a strip of Tabs, each Tab holds one Content. Catalog v5 with a one-shot v3 / v4 → v5 migration, a content runtime outside `HierarchyManager`, one capsule tab strip per Pane, and the renamed CLI / IPC / environment surface. One PR; every commit builds.
 
 ## Scope
 
@@ -17,7 +17,7 @@ Ship P1 of the pane layout on `feat/card-pane`: a Worktree is a split tree of Pa
 Commits in this order; each is a buildable, self-describing step.
 
 1. **Model.** Add `Pane`, `Tab`, `ContentSnapshot`, `ContentState`, `TerminalContentState`, `ContentID` to CodansCore; `Worktree` gains `splitTree`, `panes`, `focusedPaneID`; remove the old `Tab` / `Pane` types. Tests first: invariants (`isConsistent`), tolerant decode with loss count, omit-when-default encoding.
-2. **Migration.** `Catalog.currentVersion = 4`; `CatalogMigrationV3ToV4` with the six rules from the design doc; `CatalogStore.load` backs up v3 via `StoreBackup`, writes v4 immediately, and returns a read-only state for a newer version or a failed migration. Tests: fixture v3 catalogs (single tab, multi-tab, split tab, empty tab, zoomed, nil selection, malformed record).
+2. **Migration.** `Catalog.currentVersion = 5`; `CatalogMigrationV4ToV5` with the six rules from the design doc, then the Workspace group step for a v3 file; `CatalogStore.load` backs up the original via `StoreBackup`, writes v5 immediately, and returns a read-only state for a newer version or a failed migration. Tests: fixture v3 catalogs (single tab, multi-tab, split tab, empty tab, zoomed, nil selection, malformed record).
 3. **Runtime.** `Runtime/Content/`: `TabContent`, `ContentRuntime`, `TabChrome`, `ContentGeometry`, `TerminalContent` (wraps the `TerminalEngine` surface lifecycle). `HierarchyManager` drops `runningPanes`, `commandBusyPanes`, `lastFocusedPaneByTab`; its mutation API becomes Pane / Tab verbs. `AgentStateStore`, `SurfaceReclaimPolicy`, inbox key on ContentID. Reaper and unread sweeps gated on decode loss and read-only state.
 4. **UI.** `SplitViewportView` renders Panes; `PaneView` = strip + content host; `TabBarView` becomes per-Pane with active / inactive styling and the narrow-width accessory rule; `TabHUD`; keyboard `CommandID` routing to the focused Pane; close confirmation (`busy | always | never`); empty-worktree state. Screenshot check on an isolated instance.
 5. **CLI / IPC.** `codans tab` / `codans pane` verb layout, three-id token resolution, `p<n>` / `t<n>` handles, hard errors for moved verbs, `broadcast` scope rename, `hierarchy.describe` shapes, handshake version bump, pane environment (`CODANS_PANE_ID` / `CODANS_TAB_ID` / `CODANS_CONTENT_ID`), settings key migration.

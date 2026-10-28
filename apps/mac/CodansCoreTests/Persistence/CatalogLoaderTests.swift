@@ -4,8 +4,8 @@ import Testing
 @testable import CodansCore
 
 /// `CatalogLoader.decode(_:)` routes on the `version` field: the current
-/// version decodes tolerantly with a loss count, version 3 migrates, a
-/// newer version is read-only, and anything older is refused.
+/// version decodes tolerantly with a loss count, versions 3 and 4 migrate,
+/// a newer version is read-only, and anything older is refused.
 struct CatalogLoaderTests {
   private static func uuid(_ n: Int) -> UUID {
     UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", n))!
@@ -17,29 +17,29 @@ struct CatalogLoaderTests {
     #"{ "id": \#(id(n)), "content": { "id": \#(id(n + 100)), "state": { "kind": "terminal", "terminal": { "workingDirectory": "/repo" } } } }"#
   }
 
-  private static func v4(panes: String, focused: Int?) -> Data {
+  private static func current(panes: String, focused: Int?) -> Data {
     let focus = focused.map { #", "focusedPaneID": \#(id($0))"# } ?? ""
     let worktree =
       #"{ "id": \#(id(20)), "name": "w", "path": "/repo", "splitTree": { "root": { "leaf": { "_0": \#(id(10)) } } }, "panes": [\#(panes)]\#(focus) }"#
     let project = #"{ "id": \#(id(30)), "rootPath": "/repo", "worktrees": [\#(worktree)] }"#
-    return Data(#"{ "version": 4, "projects": [\#(project)] }"#.utf8)
+    return Data(#"{ "version": \#(Catalog.currentVersion), "projects": [\#(project)] }"#.utf8)
   }
 
   @Test
   func currentVersionDecodesWithAnEmptyLoss() throws {
-    let data = Self.v4(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1))] }"#, focused: 10)
+    let data = Self.current(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1))] }"#, focused: 10)
     guard case .current(let catalog, let loss) = try CatalogLoader.decode(data) else {
       Issue.record("expected .current")
       return
     }
     #expect(loss.isEmpty)
-    #expect(catalog.version == 4)
+    #expect(catalog.version == Catalog.currentVersion)
     #expect(catalog.projects[0].worktrees[0].contentIDs == [ContentID(raw: Self.uuid(101))])
   }
 
   @Test
   func currentVersionCountsAMalformedTab() throws {
-    let data = Self.v4(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1)), "not a tab"] }"#, focused: 10)
+    let data = Self.current(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1)), "not a tab"] }"#, focused: 10)
     guard case .current(let catalog, let loss) = try CatalogLoader.decode(data) else {
       Issue.record("expected .current")
       return
@@ -56,25 +56,25 @@ struct CatalogLoaderTests {
     let panes =
       #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1))] }, { "id": \#(Self.id(11)), "tabs": [\#(Self.tab(2))] }"#
     #expect(throws: Catalog.LayoutIssue.self) {
-      _ = try CatalogLoader.decode(Self.v4(panes: panes, focused: 10))
+      _ = try CatalogLoader.decode(Self.current(panes: panes, focused: 10))
     }
   }
 
-  @Test
-  func version3Migrates() throws {
+  @Test(arguments: [3, 4])
+  func anOlderLayoutMigrates(version: Int) throws {
     let formerTab =
       #"{ "id": \#(Self.id(1)), "splitTree": { "root": { "leaf": { "_0": \#(Self.id(101)) } } }, "panes": [{ "id": \#(Self.id(101)), "workingDirectory": "/repo" }] }"#
     let worktree =
       #"{ "id": \#(Self.id(20)), "name": "w", "path": "/repo", "tabs": [\#(formerTab)], "selectedTabID": \#(Self.id(1)) }"#
     let project = #"{ "id": \#(Self.id(30)), "rootPath": "/repo", "worktrees": [\#(worktree)] }"#
-    let data = Data(#"{ "version": 3, "projects": [\#(project)] }"#.utf8)
+    let data = Data(#"{ "version": \#(version), "projects": [\#(project)] }"#.utf8)
 
     guard case .migrated(let catalog, let fromVersion) = try CatalogLoader.decode(data) else {
       Issue.record("expected .migrated")
       return
     }
-    #expect(fromVersion == 3)
-    #expect(catalog.version == 4)
+    #expect(fromVersion == version)
+    #expect(catalog.version == Catalog.currentVersion)
     let migrated = catalog.projects[0].worktrees[0]
     try migrated.validateInvariants()
     #expect(migrated.contentIDs == [ContentID(raw: Self.uuid(101))])
@@ -82,12 +82,12 @@ struct CatalogLoaderTests {
 
   @Test
   func aNewerVersionIsReadOnly() throws {
-    let data = Data(#"{ "version": 5, "projects": [{ "shape": "unknown" }] }"#.utf8)
+    let data = Data(#"{ "version": 6, "projects": [{ "shape": "unknown" }] }"#.utf8)
     guard case .readOnly(let version) = try CatalogLoader.decode(data) else {
       Issue.record("expected .readOnly")
       return
     }
-    #expect(version == 5)
+    #expect(version == 6)
     #expect(try CatalogLoader.decode(data).catalog == nil)
   }
 

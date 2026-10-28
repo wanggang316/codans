@@ -79,7 +79,9 @@ struct HierarchyClientWorkspaceReconcileTests {
   /// A version 3 Workspace (root row with a tab, one child row) after the
   /// catalog migration, as `CatalogStore.load` hands it over.
   private func migratedCatalog(_ fx: Fixture) -> Catalog {
-    let root = Worktree(name: "ws", path: fx.rootPath, tabs: [Tab(name: "agent")])
+    let pane = Pane(tabs: [Tab(name: "agent", content: .terminal(workingDirectory: fx.rootPath))])
+    let root = Worktree(
+      name: "ws", path: fx.rootPath, splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id)
     let child = Worktree(name: "app", path: fx.memberPath, branch: "feat/x", sourceGitRoot: fx.sourcePath)
     let workspace = Project(
       name: "ws", rootPath: fx.rootPath, worktrees: [root, child], selectedWorktreeID: root.id,
@@ -125,7 +127,7 @@ struct HierarchyClientWorkspaceReconcileTests {
     for old in before.worktrees {
       let now = try #require(project.worktrees.first { $0.id == old.id })
       #expect(now.path == old.path)
-      #expect(now.tabs == old.tabs)
+      #expect(now.panes == old.panes)
       #expect(now.workspaceSlot == old.workspaceSlot)
     }
     let defaultGroupID = before.workspaceGroups[0].id

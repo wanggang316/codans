@@ -4,7 +4,7 @@ status: accepted
 
 # Three ids: PaneID, TabID, ContentID
 
-A Worktree layout is a split tree of Panes; a Pane holds Tabs; a Tab holds one Content. Each level has its own id, and the session identity is the ContentID: zmx session names, agent state, notifications, command queues, and `CODANS_CONTENT_ID` all key on it. TabID carries only chip attributes and strip position; PaneID carries only layout and focus. When the catalog migrates from v3 to v4, each session's UUID becomes its ContentID unchanged, and TabID / PaneID are freshly generated.
+A Worktree layout is a split tree of Panes; a Pane holds Tabs; a Tab holds one Content. Each level has its own id, and the session identity is the ContentID: zmx session names, agent state, notifications, command queues, and `CODANS_CONTENT_ID` all key on it. TabID carries only chip attributes and strip position; PaneID carries only layout and focus. When the catalog migrates to v5 (from v3 or v4), each session's UUID becomes its ContentID unchanged, and TabID / PaneID are freshly generated.
 
 ## Considered options
 

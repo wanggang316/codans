@@ -103,6 +103,7 @@ class CatalogStore {
       throw error
     }
     let decoded: Catalog
+    var migratedFromVersion: Int?
     switch outcome {
     case .readOnly(let version):
       loadReport.readOnlyVersion = version
@@ -112,7 +113,8 @@ class CatalogStore {
       )
       return .default
     case .migrated(let migrated, let fromVersion):
-      decoded = try commitMigration(migrated, fromVersion: fromVersion)
+      decoded = migrated
+      migratedFromVersion = fromVersion
     case .current(let catalog, let loss):
       decoded = catalog
       loadReport.droppedTabs = loss.droppedTabs
@@ -137,9 +139,16 @@ class CatalogStore {
     // Same failure, different field: a build predating `isWorkspace` drops
     // the key and may probe a `gitRoot` onto the workspace root. The
     // manifest on disk is the durable signal — re-derive the flag from it.
+    // Runs before the group migration so a repaired Workspace gets its groups.
     if WorkspaceMarkerRepair.repair(&existing) {
       logger.notice("restored isWorkspace flags from workspace manifests")
       repaired = true
+    }
+    if let fromVersion = migratedFromVersion {
+      if fromVersion < 4 {
+        existing = CatalogMigrationV3ToV4.migrate(existing)
+      }
+      return try commitMigration(existing, fromVersion: fromVersion)
     }
     if repaired {
       try? saveNow(existing)

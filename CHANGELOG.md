@@ -41,8 +41,9 @@ and the project does not yet follow semantic versioning — every release until
   `mutedContentIDs` (a mute follows the session), and the on-finished
   script action `closePane` is `closeTab`. Old keys are read once and
   dropped on the next save.
-- **Catalog v4 with a one-shot migration.** The first launch converts a
-  v3 catalog to v4 and keeps the v3 file under `~/.codans/state/backups/`.
+- **Catalog v5 with a one-shot migration.** The first launch converts a
+  v3 or v4 catalog to v5 and keeps the original file under
+  `~/.codans/state/backups/`.
   Your selected tab's split layout becomes the pane layout, the sessions
   of your other tabs are stacked as tabs in the focused pane, and every
   session reattaches because its id becomes the content id unchanged. A
@@ -106,13 +107,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Breaking: the catalog moves to version 4.** The first launch migrates
-  a version 3 catalog, keeps a copy in `backups/`, and puts each existing
-  Workspace's checkouts and terminals into a named group `existing`, with
-  paths, branches, and tab and pane ids kept. A Workspace manifest moves
-  to `.codans/workspace-groups.json`; the old `workspace.json` stays
-  untouched. Earlier builds cannot read the new catalog. A catalog from a
-  newer build stays on disk unchanged and this build does not save over it.
+- **Breaking: existing Workspaces move into a group.** The catalog
+  migration (see Breaking) puts each existing Workspace's checkouts and
+  terminals into a named group `existing`, with paths, branches, and
+  sessions kept. A Workspace manifest moves to
+  `.codans/workspace-groups.json`; the old `workspace.json` stays
+  untouched. Earlier builds cannot read the new catalog.
 
 - **The finished agent state is now called done.** `codans agent status`
   reports `done`, and `codans agent wait --until done` (or `error`) waits

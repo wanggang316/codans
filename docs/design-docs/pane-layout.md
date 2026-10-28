@@ -2,13 +2,13 @@
 
 **状态：** P1 已上线（可见）：模型与迁移、内容运行时、每 Pane 一条 tab 条、键盘、CLI / IPC / 环境变量；P2 的 chip 拖拽（条内重排、移到另一 Pane 的条、拖到 Pane 四边生成新 Pane）已上线；P2 其余项（布局区边缘 split、zoom 退出控件）与 P3 已规划
 **作者：** Gump（与 Claude）
-**实现：** 模型与迁移 `apps/mac/CodansCore/`（Pane / Tab / ContentSnapshot / SplitTree / catalog v3 → v4 迁移器）；内容运行时 `apps/mac/codans/Runtime/Content/`；布局与 tab 条 `apps/mac/codans/App/Features/TabBar/` 与 split 视口；CLI `apps/mac/codans-cli/Commands/{TabCommands,PaneCommands,TerminalCommands}.swift`。词汇表见仓库根 [CONTEXT.md](../../CONTEXT.md)；决策记录见 [ADR-0001](../adr/0001-three-ids-pane-tab-content.md)、[ADR-0002](../adr/0002-content-runtime-outside-hierarchy-manager.md)。
+**实现：** 模型与迁移 `apps/mac/CodansCore/`（Pane / Tab / ContentSnapshot / SplitTree / catalog v3 / v4 → v5 迁移器）；内容运行时 `apps/mac/codans/Runtime/Content/`；布局与 tab 条 `apps/mac/codans/App/Features/TabBar/` 与 split 视口；CLI `apps/mac/codans-cli/Commands/{TabCommands,PaneCommands,TerminalCommands}.swift`。词汇表见仓库根 [CONTEXT.md](../../CONTEXT.md)；决策记录见 [ADR-0001](../adr/0001-three-ids-pane-tab-content.md)、[ADR-0002](../adr/0002-content-runtime-outside-hierarchy-manager.md)。
 
 ## 背景与范围
 
 Worktree 的内容区由一棵 split 树组成，叶子是 **Pane**；每个 Pane 自带一条 tab 条，条上的每个 **Tab** 装一份 **Content**（第一期只有 terminal 一种）。层级为 `Project → Worktree → Pane → Tab`，Content 是 Tab 的载荷，不算一级。
 
-本文定义：数据模型与不变量、焦点与选中、键盘与 CLI 的作用对象、tab 条与拖拽、内容运行时、catalog v4 与 v3 → v4 迁移、公共面（环境变量 / CLI / IPC）的映射表。主窗口其余子系统（Sidebar、Header）见 [main-window.md](main-window.md)。
+本文定义：数据模型与不变量、焦点与选中、键盘与 CLI 的作用对象、tab 条与拖拽、内容运行时、catalog v5 与 v3 / v4 → v5 迁移、公共面（环境变量 / CLI / IPC）的映射表。主窗口其余子系统（Sidebar、Header）见 [main-window.md](main-window.md)。
 
 ## 目标与非目标
 
@@ -172,8 +172,8 @@ struct TerminalContentState {
 
 ### 持久化与迁移
 
-- `Catalog.currentVersion = 4`。
-- **v3 → v4**：加载时在内存迁移，先经 `StoreBackup` 留一份 v3 副本，再立即写出 v4。规则：
+- `Catalog.currentVersion = 5`。v4 是 Workspace 组版本（见 [workspace.md](workspace.md)），布局与 v3 相同。
+- **v3 / v4 → v5**：加载时在内存迁移，先经 `StoreBackup` 留一份原文件副本，再立即写出 v5。v3 文件在布局迁移之后再走 Workspace 组迁移（`CatalogMigrationV3ToV4`）。布局规则：
   1. Worktree 当前选中的旧 tab 的 split 树决定 Pane 布局，每个叶子会话成为一个单 Tab 的 Pane。
   2. 其余旧 tab 按顺序，把各自的会话堆进焦点 Pane 的条里；多叶子的旧 tab 按叶序摊成相邻 Tab。
   3. 每个旧会话的 UUID 原样成为 ContentID；TabID、PaneID 新生成。
@@ -181,14 +181,14 @@ struct TerminalContentState {
   5. 旧 zoom 状态与零会话的旧 tab 丢弃；旧 `selectedTabID` 为空时以第一个 tab 为焦点来源。
   6. 任一记录不可读则整个迁移不执行、不写文件，进入只读界面。
 - **版本高于本构建**：只读的“需要升级”界面；不挪文件、不保存、不运行 session reaper 与 unread 清扫。
-- **v4 容错解码**：单个 Tab 不可读只丢该 Tab 并计数；丢失数大于零时本次启动关闭 session reaper 与 unread 清扫。
+- **v5 容错解码**：单个 Tab 不可读只丢该 Tab 并计数；丢失数大于零时本次启动关闭 session reaper 与 unread 清扫。
 - settings：以会话为对象的键按新词汇命名——`notifications.mute.mutedPaneIDs` → `mutedContentIDs`（静音跟着会话走）、`ScriptOnFinished` 的 `closePane` → `closeTab`——经 `SettingsMigration` 一次性读旧写新。
 
 ### 组件边界
 
 | 组件 | 拥有 | 不拥有 |
 |---|---|---|
-| `CodansCore`（Pane / Tab / ContentSnapshot / SplitTree / 迁移器） | 模型、不变量、v3 → v4 迁移 | AppKit、运行时 |
+| `CodansCore`（Pane / Tab / ContentSnapshot / SplitTree / 迁移器） | 模型、不变量、v3 / v4 → v5 迁移 | AppKit、运行时 |
 | `HierarchyManager` | catalog 变更、焦点与选择流 | 内容活体状态、surface |
 | `Runtime/Content/` | 内容实例生命周期、TabChrome | catalog 结构变更 |
 | `SplitViewport` / `PaneView` / `TabBarView` | split 树渲染、每 Pane 的条、落点 | 内容创建（经 ContentRuntime） |
@@ -215,7 +215,7 @@ struct TerminalContentState {
 |---|---|
 | `Tab` / `Pane` 两个类型名互换，中间态难读 | 一组原子提交内在 CodansCore 新建新模型并删除旧类型，由编译器驱动改完全部调用点 |
 | 迁移丢会话 | ContentID 延续旧 UUID；迁移前留 v3 副本；不一致整份拒绝；丢失计数关闭 reaper |
-| 旧构建读到 v4 | 本构建起版本高于自身即只读；不再把文件挪走 |
+| 旧构建读到 v5 | 本构建起版本高于自身即只读；不再把文件挪走 |
 | 每 Pane 一条 tab 条放大终端挂载停顿 | `TerminalMountDeferral` 按 Pane 生效：关掉当前 Tab 时只让该 Pane 的内容区等条的动画播完，条与其他 Pane 照常显示 |
 
 ## 分期

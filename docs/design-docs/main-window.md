@@ -104,7 +104,7 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 
 Tab 条不是 Worktree 级的一行，而是**每个 Pane 自带一条**：Worktree 的内容区是一棵 split 树，叶子是 Pane，每个 Pane 在自己的内容区顶部渲染一条胶囊 tab 条，列出它持有的 Tab 并显示选中的那一个。焦点 Pane 的条用活动样式，其余 Pane 的条用非活动窗口样式；⌘T / ⌘W / ⌘1…⌘0 / ⌘⇧[ / ⌘⇧] 作用于焦点 Pane 的条，分屏命令新建 Pane。`TabBarView` 仍是胶囊 tab 条的实现（视觉对齐 AppKit 的 macOS 26 window-tabbing 条、溢出堆叠、新建 / 关闭动画、snapshot-on-drop 重排），`TabBarFeature` 把条上的每个操作一行转发经 `HierarchyClient`；chip 的忙碌、进度、徽标与实时标题来自该 Tab 的 `TabChrome`，不在 `HierarchyManager` 上。
 
-模型、不变量（Pane 永不为空、`selectedTabID` 始终有效、`focusedPaneID` 一致）、焦点与选中、条尾控件与窄 Pane 的折叠规则、关闭确认、拖拽分期，以及 catalog v4 的 Tab 条目形状，统一见 [pane-layout.md](pane-layout.md)；键盘绑定见 [keyboard-shortcuts.md](keyboard-shortcuts.md)。
+模型、不变量（Pane 永不为空、`selectedTabID` 始终有效、`focusedPaneID` 一致）、焦点与选中、条尾控件与窄 Pane 的折叠规则、关闭确认、拖拽分期，以及 catalog v5 的 Tab 条目形状，统一见 [pane-layout.md](pane-layout.md)；键盘绑定见 [keyboard-shortcuts.md](keyboard-shortcuts.md)。
 
 ## Component Boundaries
 

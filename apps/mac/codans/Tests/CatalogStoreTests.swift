@@ -4,8 +4,9 @@ import Testing
 
 @testable import Codans
 
-/// `CatalogStore.load()` against files on disk: a v3 file is backed up by
-/// copy and rewritten as v4 at once; a file from a newer build is left
+/// `CatalogStore.load()` against files on disk: a v3 or v4 file is backed
+/// up by copy and rewritten as the current version at once (a v3 Workspace
+/// also gets its groups); a file from a newer build is left
 /// byte-identical and the store goes read-only; a current file with an
 /// unreadable Tab surfaces the loss count that gates the session sweeps.
 @MainActor
@@ -20,21 +21,25 @@ struct CatalogStoreTests {
     #"{ "id": \#(id(n)), "content": { "id": \#(id(n + 100)), "state": { "kind": "terminal", "terminal": { "workingDirectory": "/repo" } } } }"#
   }
 
-  private static func v4(panes: String) -> Data {
+  private static func current(panes: String) -> Data {
     let worktree =
       #"{ "id": \#(id(20)), "name": "w", "path": "/repo", "splitTree": { "root": { "leaf": { "_0": \#(id(10)) } } }, "panes": [\#(panes)], "focusedPaneID": \#(id(10)) }"#
     let project = #"{ "id": \#(id(30)), "name": "p", "rootPath": "/repo", "worktrees": [\#(worktree)] }"#
-    return Data(#"{ "version": 4, "projects": [\#(project)] }"#.utf8)
+    return Data(#"{ "version": \#(Catalog.currentVersion), "projects": [\#(project)] }"#.utf8)
   }
 
-  private static func v3() -> Data {
+  /// A document with the pre-v5 layout: the Worktree holds former Tabs.
+  private static func legacy(version: Int = 3, worktreeExtra: String = "", projectExtra: String = "") -> Data {
     let formerTab =
       #"{ "id": \#(id(1)), "splitTree": { "root": { "leaf": { "_0": \#(id(101)) } } }, "panes": [{ "id": \#(id(101)), "workingDirectory": "/repo" }] }"#
     let worktree =
-      #"{ "id": \#(id(20)), "name": "w", "path": "/repo", "tabs": [\#(formerTab)], "selectedTabID": \#(id(1)) }"#
-    let project = #"{ "id": \#(id(30)), "name": "p", "rootPath": "/repo", "worktrees": [\#(worktree)] }"#
-    return Data(#"{ "version": 3, "projects": [\#(project)] }"#.utf8)
+      #"{ "id": \#(id(20)), "name": "w", "path": "/repo", "tabs": [\#(formerTab)], "selectedTabID": \#(id(1))\#(worktreeExtra) }"#
+    let project =
+      #"{ "id": \#(id(30)), "name": "p", "rootPath": "/repo", "worktrees": [\#(worktree)]\#(projectExtra) }"#
+    return Data(#"{ "version": \#(version), "projects": [\#(project)] }"#.utf8)
   }
+
+  private static func v3() -> Data { legacy() }
 
   private struct Sandbox {
     let directory: URL
@@ -58,7 +63,7 @@ struct CatalogStoreTests {
   }
 
   @Test
-  func version3IsBackedUpByCopyAndRewrittenAsVersion4() throws {
+  func version3IsBackedUpByCopyAndRewrittenAsTheCurrentVersion() throws {
     let sandbox = try Sandbox()
     defer { sandbox.tearDown() }
     let original = Self.v3()
@@ -87,6 +92,43 @@ struct CatalogStoreTests {
         contentsOf: sandbox.directory.appendingPathComponent(StoreBackup.directoryName).appendingPathComponent(name))
       #expect(copy == original)
     }
+  }
+
+  @Test
+  func version3WorkspaceRowsGetTheirGroupsAfterTheLayoutLift() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.tearDown() }
+    try Self.legacy(projectExtra: #", "isWorkspace": true"#).write(to: sandbox.catalogURL)
+
+    let store = CatalogStore(fileURL: sandbox.catalogURL)
+    let loaded = try store.load()
+
+    #expect(store.loadReport.migratedFromVersion == 3)
+    let project = try #require(loaded.projects.first)
+    #expect(project.workspaceGroups.map(\.name) == ["default", "existing"])
+    #expect(project.worktrees[0].workspaceSlot?.role == .groupTerminal)
+    #expect(project.worktrees[0].contentIDs == [ContentID(raw: Self.uuid(101))])
+    let reloaded = try #require(try AtomicFileStore.read(Catalog.self, at: sandbox.catalogURL))
+    #expect(reloaded == loaded)
+  }
+
+  @Test
+  func version4IsLiftedAndKeepsItsWorkspaceGroups() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.tearDown() }
+    let slot = #", "workspaceSlot": { "groupID": \#(Self.id(50)), "role": "member" }"#
+    let groups = #", "isWorkspace": true, "workspaceGroups": [{ "id": \#(Self.id(50)), "name": "fix", "kind": "named" }]"#
+    try Self.legacy(version: 4, worktreeExtra: slot, projectExtra: groups).write(to: sandbox.catalogURL)
+
+    let store = CatalogStore(fileURL: sandbox.catalogURL)
+    let loaded = try store.load()
+
+    #expect(store.loadReport.migratedFromVersion == 4)
+    let project = try #require(loaded.projects.first)
+    #expect(project.workspaceGroups.map(\.name) == ["fix"])
+    #expect(project.worktrees[0].workspaceSlot?.role == .member)
+    #expect(project.worktrees[0].contentIDs == [ContentID(raw: Self.uuid(101))])
+    #expect(sandbox.backups.contains { $0.contains("migrated-v4") })
   }
 
   @Test
@@ -122,7 +164,7 @@ struct CatalogStoreTests {
   func unreadableTabSurfacesTheLossCount() throws {
     let sandbox = try Sandbox()
     defer { sandbox.tearDown() }
-    try Self.v4(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1)), "not a tab"] }"#)
+    try Self.current(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1)), "not a tab"] }"#)
       .write(to: sandbox.catalogURL)
 
     let store = CatalogStore(fileURL: sandbox.catalogURL)
@@ -140,7 +182,7 @@ struct CatalogStoreTests {
   func cleanCurrentFileAllowsSessionSweeps() throws {
     let sandbox = try Sandbox()
     defer { sandbox.tearDown() }
-    try Self.v4(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1))] }"#).write(to: sandbox.catalogURL)
+    try Self.current(panes: #"{ "id": \#(Self.id(10)), "tabs": [\#(Self.tab(1))] }"#).write(to: sandbox.catalogURL)
 
     let store = CatalogStore(fileURL: sandbox.catalogURL)
     _ = try store.load()
@@ -188,7 +230,7 @@ struct CatalogStoreTests {
     let sandbox = try Sandbox()
     defer { sandbox.tearDown() }
     // The split tree names Pane 10, but the Worktree holds no Pane.
-    let original = Self.v4(panes: "")
+    let original = Self.current(panes: "")
     try original.write(to: sandbox.catalogURL)
 
     let store = CatalogStore(fileURL: sandbox.catalogURL)

@@ -40,7 +40,7 @@ public nonisolated enum CatalogLoader {
       try catalog.validateLayouts()
       return .current(catalog, loss: loss)
     case .needsMigration(let version):
-      return .migrated(try CatalogMigrationV3ToV4.migrate(v3: data), fromVersion: version)
+      return .migrated(try CatalogMigrationV4ToV5.migrate(data), fromVersion: version)
     case .newerVersion(let version):
       return .readOnly(version: version)
     case .unsupportedVersion(let version):
