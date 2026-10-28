@@ -118,9 +118,8 @@ extension TerminalClient {
         else {
           throw TerminalClient.Error.contentNotFound(contentID)
         }
-        let env = HierarchyManager.injectingBuiltins(
-          envProvider(address.projectID), worktreePath: worktree.path, rootPath: project.rootPath,
-          workspaceRoot: project.isWorkspace ? project.rootPath : nil)
+        let env = engine.hierarchy.builtinEnvironment(
+          envProvider(address.projectID), project: project, worktree: worktree)
         _ = try await contents.ensure(content, in: address, worktree: worktree, env: env, geometry: geometry)
       },
       mount: { contentID, geometry in contents.mount(contentID, geometry: geometry) },

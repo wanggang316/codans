@@ -93,7 +93,7 @@ extension WorkspaceClient {
       groupID: target.group.id,
       groupName: target.group.name,
       members: members,
-      busyPaneIDs: context.hierarchy.workspaceGroupBusyPanes(target.project.id, target.group.id))
+      busyContentIDs: context.hierarchy.workspaceGroupBusyContents(target.project.id, target.group.id))
     if target.group.path != WorkspaceLayout.migratedGroupPath {
       do {
         result.extraEntries = try extraEntries(of: target.group, rootPath: target.rootPath)
@@ -482,10 +482,10 @@ extension WorkspaceClient {
         await check(GroupDeletionTarget(project: project, manifest: manifest, group: group), context: context))
     }
     if let group = manifest.defaultGroup {
-      let busy = context.hierarchy.workspaceGroupBusyPanes(project.id, group.id)
+      let busy = context.hierarchy.workspaceGroupBusyContents(project.id, group.id)
       if !busy.isEmpty {
         checks.append(
-          GroupDeletionCheck(projectID: project.id, groupID: group.id, groupName: group.name, busyPaneIDs: busy))
+          GroupDeletionCheck(projectID: project.id, groupID: group.id, groupName: group.name, busyContentIDs: busy))
       }
     }
     return checks

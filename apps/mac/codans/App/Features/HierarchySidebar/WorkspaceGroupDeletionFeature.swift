@@ -202,14 +202,14 @@ struct WorkspaceGroupDeletionFeature {
     }
   }
 
-  /// "<row> › <tab>" for every tab holding a busy pane of the checks.
+  /// "<row> › <tab>" for every tab whose Content the checks list as busy.
   private func runningTerminals(for checks: [GroupDeletionCheck]) -> [String] {
-    let busy = Set(checks.flatMap(\.busyPaneIDs))
+    let busy = Set(checks.flatMap(\.busyContentIDs))
     guard !busy.isEmpty,
       let project = hierarchyClient.snapshot().projects.first(where: { $0.id == checks.first?.projectID })
     else { return [] }
     return project.worktrees.flatMap { row in
-      RunningTerminalNames.names(in: row) { tab in tab.panes.contains { busy.contains($0.id) } }
+      RunningTerminalNames.names(in: row) { tab in busy.contains(tab.content.id) }
     }
   }
 }

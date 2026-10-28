@@ -101,13 +101,15 @@ struct WorkspaceGroupDeletionTests {
       .split(separator: "\n").map(String.init)
   }
 
-  func busyPane(in row: Worktree, _ layout: Layout) async throws -> PaneID {
+  /// A new Tab in `row` whose Content reads as running a command.
+  func busyContent(in row: Worktree, _ layout: Layout) throws -> ContentID {
     let manager = layout.fx.manager
-    let tabID = try manager.createTab(in: row.id, in: layout.projectID, name: nil)
-    let paneID = try await manager.openPane(
-      in: tabID, in: row.id, in: layout.projectID, workingDirectory: row.path, initialCommand: nil)
-    manager.setPaneCommandBusy(paneID, true)
-    return paneID
+    let contentID = try manager.newTab(
+      in: nil, worktreeID: row.id, projectID: layout.projectID, content: .terminal(workingDirectory: row.path)
+    ).contentID
+    let previous = manager.contentActivity
+    manager.contentActivity = { $0 == contentID || previous?($0) == true }
+    return contentID
   }
 
   // MARK: Check
@@ -138,7 +140,7 @@ struct WorkspaceGroupDeletionTests {
     try fx.commit("local work", in: layout.fixLib)
     try "notes".write(toFile: "\(layout.fixDirectory)/notes.md", atomically: true, encoding: .utf8)
     let groupRow = try fx.row(in: layout.projectID, at: layout.fixDirectory)
-    let pane = try await busyPane(in: groupRow, layout)
+    let busy = try busyContent(in: groupRow, layout)
 
     let check = await fx.client.checkGroupDeletion(layout.projectID, layout.fixID)
 
@@ -146,7 +148,7 @@ struct WorkspaceGroupDeletionTests {
     #expect(!check.isBlocked)
     #expect(check.members.map(\.uncommittedCount) == [1, 0])
     #expect(check.members.map(\.unpushedCount) == [0, 1])
-    #expect(check.busyPaneIDs == [pane])
+    #expect(check.busyContentIDs == [busy])
     #expect(check.extraEntries == ["notes.md"])
   }
 
@@ -252,7 +254,7 @@ struct WorkspaceGroupDeletionTests {
     try "notes".write(toFile: "\(layout.fixDirectory)/notes.md", atomically: true, encoding: .utf8)
     let appTip = try fx.tip("HEAD", in: layout.app)
     let memberRow = try fx.row(in: layout.projectID, at: layout.fixApp)
-    _ = try await busyPane(in: memberRow, layout)
+    _ = try busyContent(in: memberRow, layout)
 
     let outcome = try await fx.client.deleteGroup(
       layout.projectID, layout.fixID, GroupDeletionRequest(deleteBranches: true, acknowledgeRisks: true))
@@ -269,7 +271,7 @@ struct WorkspaceGroupDeletionTests {
     let project = try #require(fx.project(layout.projectID))
     #expect(project.workspaceGroups.map(\.id) == [layout.defaultID])
     #expect(!project.worktrees.contains { $0.workspaceSlot?.groupID == layout.fixID })
-    #expect(fx.manager.workspaceGroupBusyPanes(projectID: layout.projectID, groupID: layout.fixID).isEmpty)
+    #expect(fx.manager.workspaceGroupBusyContents(projectID: layout.projectID, groupID: layout.fixID).isEmpty)
     // Sources and default links are untouched.
     #expect(fx.isDirectory("\(layout.app)/.git"))
     let link = try FileManager.default.destinationOfSymbolicLink(atPath: "\(layout.defaultDirectory)/app")
@@ -520,14 +522,14 @@ struct WorkspaceGroupDeletionTests {
     let fx = try WorkspaceClientFixture()
     defer { fx.cleanUp() }
     let layout = try await makeLayout(fx)
-    let referencePane = try await busyPane(in: try fx.row(in: layout.projectID, at: layout.app), layout)
-    let defaultPane = try await busyPane(in: try fx.row(in: layout.projectID, at: layout.defaultDirectory), layout)
+    let referenceContent = try busyContent(in: try fx.row(in: layout.projectID, at: layout.app), layout)
+    let defaultContent = try busyContent(in: try fx.row(in: layout.projectID, at: layout.defaultDirectory), layout)
 
     let checks = await fx.client.checkWorkspaceDeletion(layout.projectID)
 
     #expect(checks.map(\.groupID) == [layout.fixID, layout.defaultID])
     let defaultCheck = try #require(checks.last)
-    #expect(Set(defaultCheck.busyPaneIDs) == [referencePane, defaultPane])
+    #expect(Set(defaultCheck.busyContentIDs) == [referenceContent, defaultContent])
     #expect(defaultCheck.members.isEmpty)
     #expect(defaultCheck.hasRisks)
     await #expect(throws: WorkspaceError.risksNotAcknowledged(defaultCheck)) {

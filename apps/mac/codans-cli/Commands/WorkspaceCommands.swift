@@ -632,7 +632,7 @@ struct GroupDeletionCheckRenderable: Encodable, CustomStringConvertible {
   let check: GroupDeletionCheck
 
   private enum Key: String, CodingKey {
-    case groupID, groupName, hasRisks, isBlocked, members, busyPaneIDs, extraEntries, groupCheckFailures
+    case groupID, groupName, hasRisks, isBlocked, members, busyContentIDs, extraEntries, groupCheckFailures
   }
 
   private enum MemberKey: String, CodingKey {
@@ -659,7 +659,7 @@ struct GroupDeletionCheckRenderable: Encodable, CustomStringConvertible {
       try nested.encode(member.checkFailure, forKey: .checkFailure)
       try nested.encode(member.residualFolder, forKey: .residualFolder)
     }
-    try container.encode(check.busyPaneIDs.map(\.description), forKey: .busyPaneIDs)
+    try container.encode(check.busyContentIDs.map(\.description), forKey: .busyContentIDs)
     try container.encode(check.extraEntries, forKey: .extraEntries)
     try container.encode(check.groupCheckFailures, forKey: .groupCheckFailures)
   }
@@ -675,7 +675,7 @@ struct GroupDeletionCheckRenderable: Encodable, CustomStringConvertible {
       if member.residualFolder { facts.append("folder left by an earlier removal") }
       lines.append("  \(member.name)  [\(member.branch ?? "detached")]  \(facts.joined(separator: ", "))")
     }
-    if !check.busyPaneIDs.isEmpty { lines.append("  running terminals: \(check.busyPaneIDs.count)") }
+    if !check.busyContentIDs.isEmpty { lines.append("  running terminals: \(check.busyContentIDs.count)") }
     if !check.extraEntries.isEmpty { lines.append("  other files: \(check.extraEntries.joined(separator: ", "))") }
     for failure in check.groupCheckFailures { lines.append("  check failed: \(failure)") }
     if check.isBlocked {

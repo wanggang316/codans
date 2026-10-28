@@ -7,18 +7,27 @@ import Testing
 
 /// A Workspace with one named group `feat` holding one member checkout,
 /// whose group row runs a terminal.
+/// A row whose one Pane holds one Tab named `tab` on Content `contentID`.
+private func row(
+  name: String, path: String, tab: String, contentID: ContentID, slot: WorkspaceSlot
+) -> Worktree {
+  let pane = Pane(tabs: [Tab(name: tab, content: .terminal(id: contentID, workingDirectory: path))])
+  return Worktree(
+    name: name, path: path, splitTree: SplitTree(leaf: pane.id), panes: [pane], focusedPaneID: pane.id,
+    workspaceSlot: slot)
+}
+
 private struct DeletionFixture {
   let groupID = WorkspaceGroupID()
-  let busyPane = PaneID()
+  let busyContent = ContentID()
   let groupRow: Worktree
   let member: Worktree
   let project: Project
 
   init(deletion: GroupDeletionState? = nil) {
-    groupRow = Worktree(
-      name: "feat", path: "/ws/feat",
-      tabs: [Tab(name: "server", panes: [Pane(id: busyPane, workingDirectory: "/ws/feat")])],
-      workspaceSlot: WorkspaceSlot(groupID: groupID, role: .groupTerminal))
+    groupRow = row(
+      name: "feat", path: "/ws/feat", tab: "server", contentID: busyContent,
+      slot: WorkspaceSlot(groupID: groupID, role: .groupTerminal))
     member = Worktree(
       name: "app", path: "/ws/feat/app", branch: "feat", sourceGitRoot: "/src/app",
       workspaceSlot: WorkspaceSlot(groupID: groupID, role: .member))
@@ -37,7 +46,7 @@ private struct DeletionFixture {
           name: "app", worktreeID: member.id, path: member.path, branch: "feat",
           uncommittedCount: uncommitted, deletableBranches: deletableBranches, checkFailure: failure)
       ],
-      busyPaneIDs: busy ? [busyPane] : [])
+      busyContentIDs: busy ? [busyContent] : [])
   }
 
   var target: WorkspaceGroupDeletionFeature.State.Target {
@@ -172,18 +181,17 @@ struct WorkspaceGroupDeletionFeatureTests {
   func deleteFilesListsDefaultTerminalsAndDeletesThroughTheWorkspace() async {
     let f = DeletionFixture()
     let defaultGroup = WorkspaceGroupID()
-    let referencePane = PaneID()
+    let referenceContent = ContentID()
     var project = f.project
     project.workspaceGroups.insert(WorkspaceGroupRecord(id: defaultGroup, name: "default", kind: .default), at: 0)
     project.worktrees.append(
-      Worktree(
-        name: "app", path: "/src/app",
-        tabs: [Tab(name: "dev", panes: [Pane(id: referencePane, workingDirectory: "/src/app")])],
-        workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .reference)))
+      row(
+        name: "app", path: "/src/app", tab: "dev", contentID: referenceContent,
+        slot: WorkspaceSlot(groupID: defaultGroup, role: .reference)))
     let requests = LockIsolated<[WorkspaceRemovalRequest]>([])
     let clean = f.check()
     let terminals = GroupDeletionCheck(
-      projectID: project.id, groupID: defaultGroup, groupName: "default", busyPaneIDs: [referencePane])
+      projectID: project.id, groupID: defaultGroup, groupName: "default", busyContentIDs: [referenceContent])
     let store = TestStore(
       initialState: WorkspaceGroupDeletionFeature.State(target: .workspace(projectID: project.id, name: "ws"))
     ) {

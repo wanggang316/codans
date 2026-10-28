@@ -115,12 +115,12 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ worktreeIDs: [WorktreeID]
     ) -> Void
-  /// Busy panes of every row of a group, run-script panes included.
-  /// Forwards to `HierarchyManager.workspaceGroupBusyPanes`.
-  var workspaceGroupBusyPanes:
+  /// Busy Contents of every row of a group, run-script Contents included.
+  /// Forwards to `HierarchyManager.workspaceGroupBusyContents`.
+  var workspaceGroupBusyContents:
     @MainActor @Sendable (
       _ projectID: ProjectID, _ groupID: WorkspaceGroupID
-    ) -> [PaneID]
+    ) -> [ContentID]
   /// Close every surface of the Worktree without touching the catalog —
   /// the step before a directory is moved out from under its terminals.
   /// Forwards to `HierarchyManager.tearDownWorktreeSurfaces`.
@@ -759,8 +759,8 @@ extension HierarchyClient {
       removeWorkspaceRows: { projectID, worktreeIDs in
         manager.removeWorkspaceRows(projectID: projectID, worktreeIDs: worktreeIDs)
       },
-      workspaceGroupBusyPanes: { projectID, groupID in
-        manager.workspaceGroupBusyPanes(projectID: projectID, groupID: groupID)
+      workspaceGroupBusyContents: { projectID, groupID in
+        manager.workspaceGroupBusyContents(projectID: projectID, groupID: groupID)
       },
       tearDownWorktreeSurfaces: { worktreeID in
         manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
@@ -2130,7 +2130,7 @@ extension HierarchyClient: DependencyKey {
     setWorkspaceGroupExpanded: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorkspaceGroupDeletion: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeWorkspaceRows: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    workspaceGroupBusyPanes: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    workspaceGroupBusyContents: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     tearDownWorktreeSurfaces: { _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2240,7 +2240,7 @@ extension HierarchyClient: DependencyKey {
     setWorkspaceGroupExpanded: unimplemented("HierarchyClient.setWorkspaceGroupExpanded"),
     setWorkspaceGroupDeletion: unimplemented("HierarchyClient.setWorkspaceGroupDeletion"),
     removeWorkspaceRows: unimplemented("HierarchyClient.removeWorkspaceRows"),
-    workspaceGroupBusyPanes: unimplemented("HierarchyClient.workspaceGroupBusyPanes", placeholder: []),
+    workspaceGroupBusyContents: unimplemented("HierarchyClient.workspaceGroupBusyContents", placeholder: []),
     tearDownWorktreeSurfaces: unimplemented("HierarchyClient.tearDownWorktreeSurfaces"),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),

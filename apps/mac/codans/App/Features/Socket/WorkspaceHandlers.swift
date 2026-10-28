@@ -402,8 +402,8 @@ final class WorkspaceHandlers {
         lines.append("\(member.name): \(counted(member.unpushedCount, "unpushed commit"))")
       }
     }
-    if !check.busyPaneIDs.isEmpty {
-      lines.append(counted(check.busyPaneIDs.count, "running terminal"))
+    if !check.busyContentIDs.isEmpty {
+      lines.append(counted(check.busyContentIDs.count, "running terminal"))
     }
     if !check.extraEntries.isEmpty {
       lines.append("other files in the group folder: \(check.extraEntries.joined(separator: ", "))")

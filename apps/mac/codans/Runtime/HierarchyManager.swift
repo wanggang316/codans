@@ -1464,10 +1464,10 @@ final class HierarchyManager {
       unavailable.insert(row.id)
     case .member:
       guard !row.archived, !row.isPinned else { return }
-      for pane in row.tabs.flatMap({ $0.panes }) {
-        runtime.suspendSurface(for: pane.id)
+      for contentID in row.contentIDs {
+        runtime.suspendSurface(for: contentID)
       }
-      purgeRuntimeState(forTabs: row.tabs)
+      purgeRuntimeState(forContents: row.contentIDs)
       row.archived = true
       row.archivedAt = Date()
       result.archived += 1
@@ -1517,10 +1517,10 @@ final class HierarchyManager {
     let removed = catalog.projects[projectIndex].worktrees.filter { ids.contains($0.id) }
     guard !removed.isEmpty else { return }
     for worktree in removed {
-      for pane in worktree.tabs.flatMap({ $0.panes }) {
-        runtime.closeSurface(for: pane.id)
+      for contentID in worktree.contentIDs {
+        runtime.closeSurface(for: contentID)
       }
-      purgeRuntimeState(forTabs: worktree.tabs)
+      purgeRuntimeState(forContents: worktree.contentIDs)
     }
     catalog.projects[projectIndex].worktrees.removeAll { ids.contains($0.id) }
     catalog.projects[projectIndex].unavailableWorkspaceRows.subtract(ids)
@@ -1532,17 +1532,18 @@ final class HierarchyManager {
     runtime.announceHierarchyMutated()
   }
 
-  /// Panes of every row of the group (group row, members, and for
+  /// Contents of every row of the group (group row, members, and for
   /// `default` its reference rows) that are running something
-  /// (`paneIsBusy`), run-script panes included: deleting the group or the
-  /// Workspace stops all of them.
-  func workspaceGroupBusyPanes(projectID: ProjectID, groupID: WorkspaceGroupID) -> [PaneID] {
-    guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
+  /// (`contentActivity`), run-script Contents included: deleting the group
+  /// or the Workspace stops all of them.
+  func workspaceGroupBusyContents(projectID: ProjectID, groupID: WorkspaceGroupID) -> [ContentID] {
+    guard let project = catalog.projects.first(where: { $0.id == projectID }),
+      let isActive = contentActivity
+    else { return [] }
     return project.worktrees
       .filter { $0.workspaceSlot?.groupID == groupID }
-      .flatMap { $0.tabs.flatMap(\.panes) }
-      .map(\.id)
-      .filter(paneIsBusy)
+      .flatMap(\.contentIDs)
+      .filter { isActive($0) }
   }
 
   /// Group name and canonical group directory for a Workspace row's panes:
@@ -2343,11 +2344,9 @@ final class HierarchyManager {
     else {
       throw HierarchyError.notFound("Content \(contentID)")
     }
-    let workspaceRoot = project.isWorkspace ? project.rootPath : nil
     try await runtime.ensureSurface(
       for: content, at: address, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: project.rootPath, workspaceRoot: workspaceRoot)
+      env: builtinEnvironment(env, project: project, worktree: worktree)
     )
   }
 
@@ -2572,7 +2571,7 @@ final class HierarchyManager {
 
   /// `injectingBuiltins` for a row of `project`: Workspace rows also get
   /// the root and the group of their slot.
-  private func builtinEnvironment(
+  func builtinEnvironment(
     _ env: [String: String], project: Project, worktree: Worktree
   ) -> [String: String] {
     Self.injectingBuiltins(
