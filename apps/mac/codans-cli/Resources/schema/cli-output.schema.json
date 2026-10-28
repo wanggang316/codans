@@ -1317,6 +1317,30 @@
             "null"
           ]
         },
+        "workspaceGroup": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "enum": [
+                "groupTerminal",
+                "reference",
+                "member"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "role"
+          ],
+          "additionalProperties": false
+        },
         "focusedPaneID": {
           "type": [
             "string",

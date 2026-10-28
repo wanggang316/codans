@@ -64,7 +64,7 @@ _codans() {
             'broadcast:Send text to every tab of a pane, a worktree, or a label.'
             'agent:List and launch coding-agent profiles.'
             'handoff:Hand a task off between coding agents: archive, brief, and launch the receiver.'
-            'workspace:Create and extend multi-repository workspaces.'
+            'workspace:Create workspaces, edit their projects, and manage their groups.'
             'workflow:Run multi-agent workflows: start a run, deliver a step'\''s output, resolve attention.'
             'open:Open a directory in an external editor (or terminal / git client / Finder).'
             'skill:Install the bundled agent skills into your agents'\'' skill folders.'
@@ -1214,17 +1214,18 @@ _codans_workspace() {
     case "${state}" in
     command)
         local -ar subcommands=(
-            'create:Create a workspace from two or more repositories.'
-            'add:Add a repository to a workspace.'
-            'drop:Remove a repository from a workspace, unregistering its checkout.'
-            'remove:Remove a workspace from Codans, optionally deleting its checkouts.'
-            'show:Describe a workspace and its repositories.'
+            'create:Create a workspace from source projects.'
+            'add:Add a source project to a workspace.'
+            'drop:Remove a source project from a workspace.'
+            'remove:Remove a workspace from Codans, optionally deleting the files it owns.'
+            'show:Describe a workspace: its projects and groups.'
+            'group:Create and delete the named groups of a workspace.'
         )
         _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
-        create|add|drop|remove|show)
+        create|add|drop|remove|show|group)
             "_codans_workspace_${words[1]}" && ret=0
             ;;
         esac
@@ -1244,12 +1245,7 @@ _codans_workspace_create() {
         '*--project[Registered project to include (repeatable).]:project:'
         '*--repo[Local repository path to include (repeatable).]:repo:'
         '*--remote[Remote URL to clone and include (repeatable).]:remote:'
-        '--branch[Branch every member checks out. Default\: slug of the title.]:branch:'
-        '--base[Base ref for new branches. Default\: each repository'\''s default remote branch.]:base:'
-        '--existing[Check out an existing local branch instead of creating one.]'
-        '--track[Check out the remote-tracking origin/<branch> instead of creating one.]'
-        '--reset-local[With --track\: reset a same-named local branch to the remote tip.]'
-        '--clone-into[Folder remote members are cloned into. Default\: ~/.codans/sources.]:clone-into:'
+        '--clone-into[Folder remote sources are cloned into. Default\: ~/.codans/sources.]:clone-into:'
         '--path[Workspace folder. Default\: ~/.codans/workspaces/<slug>.]:path:'
         '--description[Task summary stored in the manifest.]:description:'
         '--version[Show the version.]'
@@ -1267,18 +1263,12 @@ _codans_workspace_add() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':workspace:'
+        ':path:'
         '*--project[Registered project to add.]:project:'
         '*--repo[Local repository path to add.]:repo:'
         '*--remote[Remote URL to clone and add.]:remote:'
-        '--name[Folder name under the workspace root. Default\: the repository'\''s folder name.]:name:'
-        '--branch[Branch to check out. Default\: slug of the workspace title, or the --ref branch.]:branch:'
-        '--base[Base ref for a new branch.]:base:'
-        '--existing[Check out an existing local branch instead of creating one.]'
-        '--track[Check out the remote-tracking origin/<branch> instead of creating one.]'
-        '--ref[Remote-tracking ref to check out, e.g. origin/feature.]:ref:'
-        '--reset-local[With --track or --ref\: reset a same-named local branch to the remote tip.]'
-        '--clone-into[Folder a remote member is cloned into. Default\: ~/.codans/sources.]:clone-into:'
-        '--role[Short role recorded in the manifest, e.g. backend.]:role:'
+        '--name[Link name in the default group. Default\: the repository'\''s folder name.]:name:'
+        '--clone-into[Folder a remote source is cloned into. Default\: ~/.codans/sources.]:clone-into:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -1294,8 +1284,7 @@ _codans_workspace_drop() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':workspace:'
-        ':member:'
-        '--keep-branch[Keep the member'\''s branch in the source repository.]'
+        ':project:'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -1311,8 +1300,9 @@ _codans_workspace_remove() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':workspace:'
-        '--delete-files[Unregister every checkout and delete the workspace folder.]'
-        '--delete-branches[With --delete-files\: also delete each member'\''s branch.]'
+        '--delete-files[Delete the groups, links, and workspace folder.]'
+        '--delete-branches[With --delete-files\: also delete the branches the groups created.]'
+        '--discard[With --delete-files\: accept losing changes, commits, and running terminals.]'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
@@ -1328,6 +1318,76 @@ _codans_workspace_show() {
         '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
         '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
         ':workspace:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace_group() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+        '(-): :->command'
+        '(-)*:: :->arg'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+    case "${state}" in
+    command)
+        local -ar subcommands=(
+            'create:Create a named group: one branch checked out for every project.'
+            'delete:Delete a named group: its checkouts, folder, and terminals.'
+        )
+        _describe -V subcommand subcommands && ret=0
+        ;;
+    arg)
+        case "${words[1]}" in
+        create|delete)
+            "_codans_workspace_group_${words[1]}" && ret=0
+            ;;
+        esac
+        ;;
+    esac
+
+    return "${ret}"
+}
+
+_codans_workspace_group_create() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':workspace:'
+        ':name:'
+        '--branch[Branch to create in every project.]:branch:'
+        '*--base[Base ref for one project, as <project>=<ref> (repeatable).]:base:'
+        '--no-fetch[Do not fetch the base ref'\''s remote first.]'
+        '--copy-ignored[Copy ignored files from each project into its checkout.]'
+        '--copy-untracked[Copy untracked files from each project into its checkout.]'
+        '--agent[Agent profile (name or id) to start in every member.]:agent:'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S : "${arg_specs[@]}" && ret=0
+
+    return "${ret}"
+}
+
+_codans_workspace_group_delete() {
+    local -i ret=1
+    local -ar arg_specs=(
+        '--json[Emit JSON on stdout instead of human-readable text.]'
+        '--socket[Override the socket path (default\: $CODANS_SOCKET_PATH → Debug /tmp/codans-dev-<uid>.sock, Release /tmp/codans-<uid>.sock).]:socket:'
+        '--timeout[Client-side timeout in seconds for a single unary call.]:timeout:'
+        ':workspace:'
+        ':group:'
+        '--delete-branches[Also delete the branches the group created.]'
+        '--discard[Accept losing changes, commits, running terminals, and other files.]'
+        '--dry-run[Print what deleting would lose; delete nothing.]'
         '--version[Show the version.]'
         '(-h --help)'{-h,--help}'[Show help information.]'
     )
