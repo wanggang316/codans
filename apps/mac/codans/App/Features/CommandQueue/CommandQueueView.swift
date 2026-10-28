@@ -152,21 +152,11 @@ struct CommandQueueView: View {
         displayedComponents: [.date, .hourAndMinute]
       )
       .datePickerStyle(.field)
-      HStack {
-        Text("Repeat")
-        Spacer()
-        Picker("Repeat", selection: $store.repeatEnabled.sending(\.repeatEnabledChanged)) {
-          Text("Never").tag(false)
-          Text("Every…").tag(true)
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .fixedSize()
-      }
       HStack(spacing: 8) {
+        Toggle("Repeat", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
+          .toggleStyle(.checkbox)
+          .fixedSize()
         if store.repeatEnabled {
-          Text("Every")
-            .foregroundStyle(.secondary)
           TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
             .labelsHidden()
             .textFieldStyle(.roundedBorder)
@@ -180,7 +170,11 @@ struct CommandQueueView: View {
           .pickerStyle(.menu)
           .fixedSize()
         }
-        Spacer(minLength: 8)
+        Spacer(minLength: 0)
+      }
+      .frame(height: 28)
+      HStack {
+        Spacer()
         Button("Done") {
           showsScheduleEditor = false
           draftFocused = true
