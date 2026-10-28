@@ -71,7 +71,7 @@ struct RollupIndexTests {
     // worktreeA2 sits in a collapsed Workspace group whose row is worktreeA1.
     let p = Pathset()
     let unread = [
-      entry(project: p.projectA, worktree: p.worktreeA2, tab: p.tabA1Inactive, pane: p.paneA1ActiveTabUnfocused)
+      entry(project: p.projectA, worktree: p.worktreeA2, content: p.contentA1Hidden)
     ]
     let focus = RollupFocusState(
       activeProjectID: p.projectB, expandedProjectIDs: [p.projectA], rowStandIns: [p.worktreeA2: p.worktreeA1])

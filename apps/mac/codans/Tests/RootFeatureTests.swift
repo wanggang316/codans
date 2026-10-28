@@ -11,7 +11,7 @@ struct RootFeatureTests {
   @Test
   func submittedCommandClosesComposer() async {
     var state = RootFeature.State()
-    state.commandQueue = CommandQueueFeature.State(paneID: PaneID())
+    state.commandQueue = CommandQueueFeature.State(contentID: ContentID())
     let store = TestStore(initialState: state) { RootFeature() }
     await store.send(.commandQueue(.presented(.delegate(.submitted)))) {
       $0.commandQueue = nil
