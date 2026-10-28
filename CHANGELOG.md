@@ -10,61 +10,55 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **Agents report their own state.** Claude Code, Pi, and omp send OSC
-  7501 program status, and codans now answers and uses it: the Agents
-  View shows working the moment a prompt is sent, blocked with what the
-  agent needs, and a new error state when the agent reports a failure.
-  `codans agent status` adds `source`, `blockedKind`, and `message`.
-  Other agents still read from the screen.
-- **Workspaces hold groups.** A Workspace lists its source projects in a
-  starred `default` group that links to each project's main checkout as
-  it is, with no branch created or switched. A named group (the header's
-  `+`, or `codans workspace group create`) checks out one branch in every
-  project, with each project's own base ref, fetch, and copy settings,
-  and starts agents only after every checkout exists. Each group and each
-  member has its own terminal; groups open and close on their own. A
-  member that switches branch stays in its group. Deleting a group checks
-  every member first and asks before it discards uncommitted changes,
-  unpushed commits, or running terminals; items it cannot remove stay
-  with a Retry.
-
 ### Changed
-
-- **Breaking: the catalog moves to version 4.** The first launch migrates
-  a version 3 catalog, keeps a copy in `backups/`, and puts each existing
-  Workspace's checkouts and terminals into a named group `existing`, with
-  paths, branches, and tab and pane ids kept. A Workspace manifest moves
-  to `.codans/workspace-groups.json`; the old `workspace.json` stays
-  untouched. Earlier builds cannot read the new catalog. A catalog from a
-  newer build stays on disk unchanged and this build does not save over it.
-
-- **The finished agent state is now called done.** `codans agent status`
-  reports `done`, and `codans agent wait --until done` (or `error`) waits
-  for it; `--until finished` still works. An agent's progress bar no
-  longer shows its tab as busy while it reports its own state.
 
 ### Deprecated
 
 ### Removed
 
-- **Breaking: `codans workspace` no longer takes branch flags.**
-  `workspace create` and `workspace add` take source projects only; the
-  branch and checkout flags (`--branch`, `--existing`, `--track`, …) and
-  `workspace drop --keep-branch` fail with a pointer to `codans workspace
-  group create` and `group delete`.
+### Fixed
+
+### Security
+
+## [0.8.0] - 2026-10-29
+
+### Added
+
+- **Agents report their own state.** Claude Code, Pi, and omp now tell
+  codans when they work, wait, or fail: the Agents View shows working as
+  soon as a prompt is sent, what a blocked agent needs, and a new error state.
+- **Workspaces hold branch groups.** A named group checks out one branch
+  in every project of a Workspace, each with its own terminal, and starts
+  agents once every checkout exists; create one from the header's `+`.
+- **The project sidebar has filters.** Capsules at the top of the sidebar
+  show All, Remote, Workspace, Pinned, or only worktrees with a pull
+  request.
+
+### Changed
+
+- **Breaking: the catalog moves to version 4.** The first launch backs up
+  and migrates it, putting each Workspace's checkouts and terminals into a
+  group named `existing`. Earlier builds cannot read the new catalog.
+- **The command queue lives in the pane.** ⌘L opens a composer that sends
+  now or on a schedule, once or repeating; queued commands float at the
+  top of their pane and fold into the queue button when hidden.
+- **The finished agent state is now called done.** `codans agent status`
+  reports `done`; `codans agent wait --until finished` still works.
+
+### Removed
+
+- **Breaking: `codans workspace` no longer takes branch flags.** Branches
+  belong to groups now: use `codans workspace group create` and `group
+  delete`.
 
 ### Fixed
 
-- **Panes no longer lose their shell and agent after a cache clean.** The
-  zmx daemon sockets lived in `~/Library/Caches/codans`, which cache
-  cleaners delete wholesale; the daemons kept running but could not be
-  reached, so the next attach started a fresh shell in the pane. The
-  sockets, snapshots, and zmx logs now live in `~/.codans/run`, and the
-  first launch moves the sockets of daemons that survived the old location.
-  `CODANS_RUNTIME_DIR` relocates the directory; `CODANS_CACHE_DIR` alone
-  places it at `<cache>/run`.
-
-### Security
+- **Panes keep their shell and agent after a cache clean.** Pane sessions
+  moved from `~/Library/Caches/codans`, which cache cleaners wipe, to
+  `~/.codans/run`; reattached panes also open at full width again.
+- **Tabs and the Git viewer follow what you see.** A tab started by a
+  script or agent launch shows the live title, and the Git viewer opens
+  on the selected worktree.
 
 ## [0.7.11] - 2026-10-15
 
