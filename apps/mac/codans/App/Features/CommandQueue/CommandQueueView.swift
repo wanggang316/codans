@@ -89,9 +89,11 @@ struct CommandQueueView: View {
             .accessibilityLabel("Edit schedule: \(scheduleSummary)")
           }
           modeMenu
-        }
-        .popover(isPresented: $showsScheduleEditor, arrowEdge: .bottom) {
-          scheduleEditor
+            // The summary changes width while editing. Anchor to the fixed
+            // trailing control so those changes cannot move the popover.
+            .popover(isPresented: $showsScheduleEditor, arrowEdge: .bottom) {
+              scheduleEditor
+            }
         }
         .onChange(of: store.mode) { _, mode in
           showsScheduleEditor = mode == .scheduled
