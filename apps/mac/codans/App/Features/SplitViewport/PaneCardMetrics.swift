@@ -8,7 +8,7 @@ enum PaneCardMetrics {
   /// Gap between two cards, and between the cards and the viewport edges.
   /// The split divider is exactly this thick, so the gap is also the drag
   /// target that resizes the split.
-  static let gap: CGFloat = 12
+  static let gap: CGFloat = 8
 
   static let cornerRadius: CGFloat = 12
 
