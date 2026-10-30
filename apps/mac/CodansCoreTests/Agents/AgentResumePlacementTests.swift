@@ -80,4 +80,29 @@ struct AgentResumePlacementTests {
     #expect(AgentResumePlacement.split(.down).resolved(in: .noFocusedPane) == .newTab)
     #expect(AgentResumePlacement.newTab.resolved(in: .noFocusedPane) == .newTab)
   }
+
+  @Test
+  func contextReadsTheSelectedTabsLastFocusedPane() {
+    let idle = Pane(workingDirectory: "/w")
+    let agent = Pane(workingDirectory: "/w", agentKind: .codex)
+    let tab = Tab(panes: [idle, agent])
+    let other = Tab(panes: [Pane(workingDirectory: "/w")])
+    let worktree = Worktree(name: "w", path: "/w", tabs: [other, tab], selectedTabID: tab.id)
+
+    let onAgent = AgentResumePlacement.Context(worktree: worktree) {
+      $0 == tab.id ? agent.id : nil
+    }
+    #expect(onAgent == .agentPane)
+    // Never focused since launch: the tab's first pane stands in.
+    let unfocused = AgentResumePlacement.Context(worktree: worktree) { _ in nil }
+    #expect(unfocused == .idlePane)
+  }
+
+  @Test
+  func contextWithoutTabsOrPanesHasNoFocusedPane() {
+    let empty = Worktree(name: "w", path: "/w")
+    #expect(AgentResumePlacement.Context(worktree: empty) { _ in nil } == .noFocusedPane)
+    let paneless = Worktree(name: "w", path: "/w", tabs: [Tab()])
+    #expect(AgentResumePlacement.Context(worktree: paneless) { _ in nil } == .noFocusedPane)
+  }
 }
