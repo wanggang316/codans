@@ -38,6 +38,17 @@ public nonisolated enum AgentResumePlacement: Hashable, Sendable {
       self.focusedPaneRunsAgent = focusedPaneRunsAgent
     }
 
+    /// The worktree's focused pane — the selected (or first) tab's
+    /// last-focused pane, else its first pane — the same pane the script
+    /// pipeline types into or splits. `lastFocusedPane` answers per tab.
+    public init(worktree: Worktree, lastFocusedPane: (TabID) -> PaneID?) {
+      let tabID = worktree.selectedTabID ?? worktree.tabs.first?.id
+      let tab = worktree.tabs.first { $0.id == tabID }
+      let lastFocused = tab.flatMap { lastFocusedPane($0.id) }
+      let pane = tab?.panes.first { $0.id == lastFocused } ?? tab?.panes.first
+      self.init(hasFocusedPane: pane != nil, focusedPaneRunsAgent: pane?.agentKind != nil)
+    }
+
     /// The empty-terminal entry: no tab, so no pane to type into or split.
     public static let noFocusedPane = Context(hasFocusedPane: false, focusedPaneRunsAgent: false)
 
