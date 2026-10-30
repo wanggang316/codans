@@ -13,14 +13,14 @@ enum TabBarMetrics {
   static let barHeight: CGFloat = trackHeight + trackBottomInset
 
   /// Recessed capsule track that hosts the chips.
-  static let trackHeight: CGFloat = 28
+  static let trackHeight: CGFloat = 34
   /// The system bar sits flush under the toolbar and leaves this gap to
   /// the content below it.
   static let trackBottomInset: CGFloat = 8
   /// Gap between the bar's leading edge and the track.
   static let trackLeadingInset: CGFloat = 4
   /// Chips are inset from the track on every side by this much.
-  static let trackContentInset: CGFloat = 2
+  static let trackContentInset: CGFloat = 3
 
   /// Chip height inside the track. The hover / selected capsule fills the
   /// whole chip.
@@ -37,18 +37,18 @@ enum TabBarMetrics {
   /// size, inset `chipSlotInset` from the chip edge.
   static let closeButtonSize: CGFloat = 16
   static let chipSlotInset: CGFloat = 5
-  /// Horizontal inset of the centered title on both sides — slot inset +
-  /// slot + 8-pt gap — so the title stays centered and never runs under
-  /// the close button or the trailing slot.
-  static let chipTitleInset: CGFloat = chipSlotInset + closeButtonSize + 8
+  /// Leading inset of the icon + title, and the trailing inset that keeps
+  /// the title clear of the trailing slot (close button / color dot).
+  static let chipContentLeadingInset: CGFloat = 12
+  static let chipTitleTrailingInset: CGFloat = chipSlotInset + closeButtonSize + 6
 
   /// Point size of the chip title and the close glyph.
-  static let titleFontSize: CGFloat = 11
+  static let titleFontSize: CGFloat = 13
   static let closeGlyphSize: CGFloat = 9
 
   /// Separator in the gap between two chips, vertically centered.
   static let dividerWidth: CGFloat = chipSpacing
-  static let dividerHeight: CGFloat = 18
+  static let dividerHeight: CGFloat = 20
 
   /// Delay before the trailing split buttons show their pane-tree preview
   /// popover.

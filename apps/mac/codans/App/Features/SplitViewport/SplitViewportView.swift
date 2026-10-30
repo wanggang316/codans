@@ -53,6 +53,9 @@ struct SplitViewportView: View {
           projectID: projectID
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The tab bar above already leaves `gap` under itself, so the cards
+        // inset only on the other three sides.
+        .padding([.horizontal, .bottom], PaneCardMetrics.gap)
         .environment(dropHighlight)
       } else if settledTabID == tabID {
         emptyPlaceholder
@@ -259,7 +262,10 @@ private struct SubtreeView: View {
             ))
         }
       ),
-      dividerColor: Color(nsColor: .separatorColor),
+      // The gap between two cards is the divider: the window backdrop shows
+      // through, and the whole gap is the resize target.
+      dividerColor: .clear,
+      dividerThickness: PaneCardMetrics.gap,
       left: {
         SubtreeView(
           node: split.left,
@@ -302,7 +308,7 @@ private struct LeafView: View {
   let projectID: ProjectID
   /// True when this leaf sits below at least one split node — i.e. the
   /// active Tab has more than one pane. Single-pane Tabs skip the dim
-  /// overlay and the drag handle since there is nothing to re-arrange
+  /// overlay and the header drag since there is nothing to re-arrange
   /// against.
   let isSplit: Bool
   /// Shared drop-highlight state (one per viewport). This leaf renders the
@@ -335,15 +341,47 @@ private struct LeafView: View {
     // during the drag (the active session forces re-renders) but never retracts
     // when `clear()` runs on drop — the stuck-highlight bug.
     let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
-    return GeometryReader { geo in
+    let shape = RoundedRectangle(cornerRadius: PaneCardMetrics.cornerRadius, style: .continuous)
+    return VStack(spacing: 0) {
+      PaneCardHeader(
+        paneID: paneID,
+        tabID: tabID,
+        isSplit: isSplit,
+        // A lone pane is the focused one by definition.
+        isFocused: isFocused || !isSplit,
+        onFocus: focus,
+        onSplit: split,
+        onClose: {
+          store.send(
+            .closePaneButtonTapped(
+              paneID, inTab: tabID, inWorktree: worktreeID, inProject: projectID))
+        }
+      )
+      // The header sits on the terminal background, so its text follows the
+      // terminal theme's tone rather than the app appearance.
+      .environment(\.colorScheme, terminalColorScheme)
+      surfaceSlot(activeDropZone: activeDropZone)
+        .padding([.horizontal, .bottom], PaneCardMetrics.surfaceInset)
+    }
+    .background(Color(nsColor: terminalBackground))
+    .overlay { unfocusedDimOverlay }
+    .animation(.easeInOut(duration: 0.12), value: isFocused)
+    .clipShape(shape)
+    .overlay {
+      shape
+        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: PaneCardMetrics.borderWidth)
+        .allowsHitTesting(false)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+      configReloadTick &+= 1
+    }
+  }
+
+  /// The terminal under the card header, plus the pane-move drop target.
+  private func surfaceSlot(activeDropZone: PaneDropZone?) -> some View {
+    GeometryReader { geo in
       paneContent(slotSize: geo.size)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Grab affordance — only meaningful when there is somewhere to move to.
-        .overlay(alignment: .top) {
-          if isSplit {
-            PaneDragHandle(paneID: paneID)
-          }
-        }
         // Drop target. The custom `.touchCodePaneID` type (declared in the
         // app's Info.plist `UTExportedTypeDeclarations`) is what makes
         // `validateDrop` match the dragged item — without that declaration the
@@ -382,6 +420,36 @@ private struct LeafView: View {
     }
   }
 
+  private func focus() {
+    store.send(
+      .focusPaneRequested(paneID, inTab: tabID, inWorktree: worktreeID, inProject: projectID))
+    hierarchyManager.focusSurfaceView(for: paneID)
+  }
+
+  private func split(_ direction: SplitTree<PaneID>.NewDirection) {
+    let workingDirectory =
+      hierarchyManager.currentWorkingDirectory(for: paneID)
+      ?? hierarchyManager.catalog.pane(paneID)?.workingDirectory
+      ?? NSHomeDirectory()
+    store.send(
+      .splitButtonTapped(
+        paneID, direction: direction,
+        inTab: tabID, inWorktree: worktreeID, inProject: projectID,
+        workingDirectory: workingDirectory))
+  }
+
+  /// Read after `configReloadTick` so a ghostty theme reload repaints the
+  /// card.
+  private var terminalBackground: NSColor {
+    _ = configReloadTick
+    return GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
+  }
+
+  private var terminalColorScheme: ColorScheme {
+    let perceived = terminalBackground.perceivedAppearance?.bestMatch(from: [.darkAqua, .aqua])
+    return perceived.map { $0 == .darkAqua ? .dark : .light } ?? colorScheme
+  }
+
   @ViewBuilder
   private func paneContent(slotSize: CGSize) -> some View {
     if let childStore = store.scope(
@@ -408,11 +476,6 @@ private struct LeafView: View {
           guard store.paneHosts[id: paneID] != nil else { return }
           store.send(.paneHosts(.element(id: paneID, action: .task(slotSize: slotSize))))
         }
-        .overlay { unfocusedDimOverlay }
-        .animation(.easeInOut(duration: 0.12), value: isFocused)
-        .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-          configReloadTick &+= 1
-        }
     } else if let warmSurface = terminalClient.surface(paneID) {
       // Tab-switch fast path: the catalog already points at this pane but
       // `SplitViewportView.task(id:)` hasn't run yet, so the reducer-scoped
@@ -423,11 +486,6 @@ private struct LeafView: View {
       // tick — same NSView the reducer would have given us.
       PaneHostView(surface: warmSurface)
         .id(paneID)
-        .overlay { unfocusedDimOverlay }
-        .animation(.easeInOut(duration: 0.12), value: isFocused)
-        .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-          configReloadTick &+= 1
-        }
     } else {
       // Truly cold pane: surface hasn't been spawned yet (first render
       // after creation). Background tracks Ghostty's terminal color so
