@@ -285,10 +285,11 @@ struct TabBarView: View {
     }
   }
 
-  /// A single tab needs no bar: there is nothing to switch to. With no tab
-  /// at all the bar stays, so its new-tab button is still there.
+  /// The bar shows only with two or more tabs: a single tab has nothing to
+  /// switch to, and with no tab the empty page offers New Tab and Resume
+  /// Session itself.
   private var showsBar: Bool {
-    currentWorktree()?.tabs.count != 1
+    (currentWorktree()?.tabs.count ?? 0) > 1
   }
 
   private func currentWorktree() -> Worktree? {
