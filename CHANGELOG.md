@@ -10,6 +10,11 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Choose where a resumed agent session opens.** The Agent Sessions
+  popover has a toolbar to resume in a new tab, in place in the focused
+  pane, or in a new split on any side. In Place is off while the focused
+  pane runs an agent. The last choice is kept for the whole app.
+
 ### Changed
 
 ### Deprecated
