@@ -36,7 +36,7 @@
 
 ### 快速分类过滤
 
-侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、Unread、PR。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及当前选中的 Worktree，连同父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
+侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、PR、Unread。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及其父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
 
 ### Tag filter（已实现，当前隐藏）
 

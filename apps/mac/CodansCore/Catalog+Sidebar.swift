@@ -1,7 +1,7 @@
 import Foundation
 
 public nonisolated enum SidebarFilter: String, Codable, CaseIterable, Sendable {
-  case all, remote, workspace, notifications, pullRequests
+  case all, remote, workspace, pullRequests, notifications
 
   /// Unknown and retired values (`local`, `favorites`, `pin`) decode as `.all`.
   public init(from decoder: Decoder) throws {
@@ -185,14 +185,11 @@ extension Catalog {
     sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
   }
 
-  /// `notifiedWorktreeIDs` are the worktrees with unread notifications. The
-  /// notification filter also keeps the selected worktree, so a row stays on
-  /// screen while opening it marks its notifications read.
+  /// `notifiedWorktreeIDs` are the worktrees the notification filter lists.
   public func sidebarProjects(
     pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
   ) -> [Project] {
-    let selectedWorktreeID = projects.first { $0.id == displayedSelectedProjectID }?.selectedWorktreeID
-    return sorted(
+    sorted(
       tagFilteredProjects.compactMap { project in
         let matches: (Worktree) -> Bool
         switch sidebarFilter {
@@ -200,7 +197,7 @@ extension Catalog {
         case .remote: return project.isRemote ? project : nil
         case .workspace: return project.isWorkspace ? project : nil
         case .notifications:
-          matches = { notifiedWorktreeIDs.contains($0.id) || $0.id == selectedWorktreeID }
+          matches = { notifiedWorktreeIDs.contains($0.id) }
         case .pullRequests:
           matches = { pullRequestWorktreeIDs.contains($0.id) }
         }
