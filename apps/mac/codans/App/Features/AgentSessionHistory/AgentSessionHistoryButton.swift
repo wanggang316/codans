@@ -39,7 +39,7 @@ struct AgentSessionHistoryButton: View {
               .fill(isHovering ? TabBarColors.hoverBackground : .clear)
           )
           .contentShape(Circle())
-      }
+      },
     )
     .buttonStyle(.plain)
     .onHover { isHovering = $0 }
@@ -50,7 +50,7 @@ struct AgentSessionHistoryButton: View {
       worktreePath: worktreePath,
       remoteHost: remoteHost,
       resumeContext: resumeContext,
-      onResume: onResume
+      onResume: onResume,
     )
   }
 }
@@ -67,7 +67,7 @@ extension View {
     worktreePath: String,
     remoteHost: RemoteHost?,
     resumeContext: AgentResumePlacement.Context,
-    onResume: @escaping (AgentSessionSummary, AgentResumePlacement) -> Void
+    onResume: @escaping (AgentSessionSummary, AgentResumePlacement) -> Void,
   ) -> some View {
     popover(isPresented: isPresented, arrowEdge: .bottom) {
       AgentSessionHistoryPopover(
@@ -78,7 +78,7 @@ extension View {
           isPresented.wrappedValue = false
           onResume(session, placement)
         },
-        onClose: { isPresented.wrappedValue = false }
+        onClose: { isPresented.wrappedValue = false },
       )
       .frame(minWidth: 340, idealWidth: 400, maxWidth: 520, minHeight: 180, idealHeight: 420)
     }
@@ -87,9 +87,9 @@ extension View {
 
 /// Popover body: header + agent-grouped session list, newest agent first,
 /// sessions newest-first within each group, and a bottom toolbar with the
-/// resume placement. Esc routing follows the
-/// `InboxPopoverContent` pattern (NSPopover doesn't dismiss on Esc while
-/// focus sits on the anchor toolbar button).
+/// resume placement. Esc routing follows the `InboxPopoverContent` pattern
+/// (NSPopover doesn't dismiss on Esc while focus sits on the anchor toolbar
+/// button).
 private struct AgentSessionHistoryPopover: View {
   let worktreePath: String
   var remoteHost: RemoteHost?
@@ -112,7 +112,7 @@ private struct AgentSessionHistoryPopover: View {
     remoteHost: RemoteHost?,
     resumeContext: AgentResumePlacement.Context,
     onResume: @escaping (AgentSessionSummary, AgentResumePlacement) -> Void,
-    onClose: @escaping () -> Void
+    onClose: @escaping () -> Void,
   ) {
     self.worktreePath = worktreePath
     self.remoteHost = remoteHost
@@ -182,7 +182,7 @@ private struct AgentSessionHistoryPopover: View {
                 AgentSessionRowView(
                   session: session,
                   resumeHelp: Self.resumeHelp(for: placement.resolved(in: resumeContext)),
-                  onResume: { onResume(session, placement) })
+                  onResume: { onResume(session, placement) },)
                 Divider()
               }
             }
@@ -240,17 +240,18 @@ private struct AgentSessionHistoryPopover: View {
       set: { target in
         switch target {
         case .newTab: choose(.newTab)
-        case .focused: choose(.inPlace)
+        case .focused where resumeContext.allowsInPlace: choose(.inPlace)
+        case .focused: break
         case .split: choose(.split(placement.direction ?? .right))
         }
-      }
+      },
     )
   }
 
   private var directionSelection: Binding<ScriptSplitDirection> {
     Binding(
       get: { placement.direction ?? .right },
-      set: { choose(.split($0)) }
+      set: { choose(.split($0)) },
     )
   }
 
