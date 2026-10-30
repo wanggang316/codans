@@ -44,8 +44,8 @@ struct EmptyTerminalPaneView: View {
         .padding(.top, 4)
     }
     .multilineTextAlignment(.center)
+    // No fill: the page sits on the window's sidebar-matching backdrop.
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private var actions: some View {
@@ -74,12 +74,14 @@ struct EmptyTerminalPaneView: View {
     .controlSize(.large)
   }
 
+  /// The tab bar (and its `+`) is hidden while there is no tab, so the hint
+  /// points at the chord and the New Tab button below.
   @ViewBuilder
   private var hint: some View {
     if let chord = newTabChord {
-      Text("Press \(Text(chord).monospaced()) or click \(Text("+").bold()) to open a new terminal.")
+      Text("Press \(Text(chord).monospaced()) or click New Tab to open a new terminal.")
     } else {
-      Text("Click \(Text("+").bold()) to open a new terminal.")
+      Text("Click New Tab to open a new terminal.")
     }
   }
 

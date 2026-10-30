@@ -53,8 +53,7 @@ struct SplitViewportView: View {
           projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // No leading gap: the sidebar already insets its own content from
-        // its trailing edge, so the cards sit flush against it.
+        // The leading gap depends on the sidebar; `WorktreeDetailView` owns it.
         .padding([.top, .trailing, .bottom], PaneCardMetrics.gap)
         .environment(dropHighlight)
       } else if settledTabID == tabID {
