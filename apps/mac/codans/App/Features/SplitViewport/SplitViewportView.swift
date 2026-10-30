@@ -50,12 +50,10 @@ struct SplitViewportView: View {
           store: store,
           tabID: tabID,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The tab bar above already leaves `gap` under itself, so the cards
-        // inset only on the other three sides.
-        .padding([.horizontal, .bottom], PaneCardMetrics.gap)
+        .padding(PaneCardMetrics.gap)
         .environment(dropHighlight)
       } else if settledTabID == tabID {
         emptyPlaceholder
@@ -110,7 +108,7 @@ struct SplitViewportView: View {
             .newPaneButtonTapped(
               inTab: tabID, inWorktree: worktreeID,
               inProject: projectID,
-              workingDirectory: currentWorktreePath() ?? NSHomeDirectory()
+              workingDirectory: currentWorktreePath() ?? NSHomeDirectory(),
             ))
         }
         .buttonStyle(.borderedProminent)
@@ -189,7 +187,7 @@ struct SplitViewportView: View {
         paneID: pane.id,
         tabID: tabID,
         worktreeID: worktreeID,
-        projectID: projectID
+        projectID: projectID,
       )
     }
     store.send(.panesInActiveTabChanged(seeds))
@@ -234,7 +232,7 @@ private struct SubtreeView: View {
         tabID: tabID,
         worktreeID: worktreeID,
         projectID: projectID,
-        isSplit: !path.components.isEmpty
+        isSplit: !path.components.isEmpty,
       )
     case .split(let split):
       splitBody(split)
@@ -258,9 +256,9 @@ private struct SubtreeView: View {
               ratio: Double(newRatio),
               inTab: tabID,
               inWorktree: worktreeID,
-              inProject: projectID
+              inProject: projectID,
             ))
-        }
+        },
       ),
       // The gap between two cards is the divider: the window backdrop shows
       // through, and the whole gap is the resize target.
@@ -273,7 +271,7 @@ private struct SubtreeView: View {
           store: store,
           tabID: tabID,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
         )
       },
       right: {
@@ -283,7 +281,7 @@ private struct SubtreeView: View {
           store: store,
           tabID: tabID,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
         )
       },
       onEqualize: {
@@ -293,9 +291,9 @@ private struct SubtreeView: View {
             ratio: 0.5,
             inTab: tabID,
             inWorktree: worktreeID,
-            inProject: projectID
+            inProject: projectID,
           ))
-      }
+      },
     )
   }
 }
@@ -328,6 +326,9 @@ private struct LeafView: View {
   /// flip path; without this tick the overlay stays on the previous theme's
   /// fill colour until the user re-focuses the pane or triggers a layout pass.
   @State private var configReloadTick: Int = 0
+  /// Pointer anywhere over the card: shows the header actions on an
+  /// unfocused pane.
+  @State private var isHoveringCard = false
   /// Used for the one-frame fallback on tab switch — see `paneContent`.
   /// Reducer state is the long-term source of truth; this lookup only fills
   /// the gap between catalog update and `.panesInActiveTabChanged` landing.
@@ -342,36 +343,56 @@ private struct LeafView: View {
     // when `clear()` runs on drop — the stuck-highlight bug.
     let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
     let shape = RoundedRectangle(cornerRadius: PaneCardMetrics.cornerRadius, style: .continuous)
+    // A lone pane is the focused one by definition.
+    let isFocusedCard = isFocused || !isSplit
+    let showsActions = isFocusedCard || isHoveringCard
     return VStack(spacing: 0) {
+      // The header is drawn as an overlay, above the terminal, so the
+      // actions menu laid over it can unfold down across the terminal.
+      Color.clear.frame(height: PaneCardMetrics.headerHeight)
+      surfaceSlot(activeDropZone: activeDropZone)
+        .padding([.horizontal, .bottom], PaneCardMetrics.surfaceInset)
+    }
+    .background(Color(nsColor: terminalBackground))
+    .overlay(alignment: .top) {
       PaneCardHeader(
         paneID: paneID,
         tabID: tabID,
         isSplit: isSplit,
-        // A lone pane is the focused one by definition.
-        isFocused: isFocused || !isSplit,
+        isFocused: isFocusedCard,
+        showsActions: showsActions,
         onFocus: focus,
         onSplit: split,
         onClose: {
           store.send(
             .closePaneButtonTapped(
               paneID, inTab: tabID, inWorktree: worktreeID, inProject: projectID))
-        }
+        },
       )
       // The header sits on the terminal background, so its text follows the
       // terminal theme's tone rather than the app appearance.
       .environment(\.colorScheme, terminalColorScheme)
-      surfaceSlot(activeDropZone: activeDropZone)
-        .padding([.horizontal, .bottom], PaneCardMetrics.surfaceInset)
     }
-    .background(Color(nsColor: terminalBackground))
     .overlay { unfocusedDimOverlay }
+    // Actions menu (hand off, command queue, the surface's own actions) in
+    // the header's menu slot, and the command queue list under the header.
+    .overlay(alignment: .topTrailing) {
+      // Without a live surface yet, the surface's own rows show disabled.
+      PaneCommandQueueChrome(
+        paneID: paneID, surface: terminalClient.surface(paneID), showsMenu: showsActions,
+        onMenuInteraction: focus,
+      )
+      .environment(\.colorScheme, terminalColorScheme)
+    }
     .animation(.easeInOut(duration: 0.12), value: isFocused)
+    .animation(.easeInOut(duration: 0.12), value: isHoveringCard)
     .clipShape(shape)
     .overlay {
       shape
         .strokeBorder(Color(nsColor: .separatorColor), lineWidth: PaneCardMetrics.borderWidth)
         .allowsHitTesting(false)
     }
+    .onHover { isHoveringCard = $0 }
     .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
       configReloadTick &+= 1
     }
@@ -404,10 +425,10 @@ private struct LeafView: View {
                       direction: zone.splitDirection,
                       inTab: tabID,
                       inWorktree: worktreeID,
-                      inProject: projectID
+                      inProject: projectID,
                     ))
-                }
-              )
+                },
+              ),
             )
         }
         // Drop-zone highlight, drawn above the surface but never hit-tested.
@@ -454,7 +475,7 @@ private struct LeafView: View {
   private func paneContent(slotSize: CGSize) -> some View {
     if let childStore = store.scope(
       state: \.paneHosts[id: paneID],
-      action: \.paneHosts[id: paneID]
+      action: \.paneHosts[id: paneID],
     ) {
       // `.id(paneID)` forces SwiftUI to rebuild the LazyPaneHost subtree when
       // the pane changes. Without it, two leaves at the same split-tree

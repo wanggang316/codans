@@ -2,18 +2,32 @@ import CodansCore
 import SwiftUI
 
 /// Shares pane-local visibility between the floating list and its restore button.
+///
+/// Laid over a whole pane card: the actions menu button lands in the card
+/// header, left of the close button, and the queue list hangs below the
+/// header over the terminal.
 struct PaneCommandQueueChrome: View {
   let paneID: PaneID
   let surface: PaneSurface?
+  /// Follows the visibility of the other header actions.
+  var showsMenu: Bool = true
+  /// A click on the menu also focuses its pane, so the header actions stay
+  /// up while the menu is open.
+  var onMenuInteraction: () -> Void = {}
 
   @SceneStorage private var isHidden: Bool
   @Environment(HierarchyManager.self) private var hierarchyManager
   @State private var isExpanded = false
   @State private var requestedPage = 0
 
-  init(paneID: PaneID, surface: PaneSurface?) {
+  init(
+    paneID: PaneID, surface: PaneSurface?, showsMenu: Bool = true,
+    onMenuInteraction: @escaping () -> Void = {},
+  ) {
     self.paneID = paneID
     self.surface = surface
+    self.showsMenu = showsMenu
+    self.onMenuInteraction = onMenuInteraction
     _isHidden = SceneStorage(wrappedValue: false, "commandQueue.hidden.\(paneID)")
   }
 
@@ -23,7 +37,7 @@ struct PaneCommandQueueChrome: View {
 
   var body: some View {
     GeometryReader { geometry in
-      let availableHeight = max(0, geometry.size.height - 28)
+      let availableHeight = max(0, geometry.size.height - PaneCardMetrics.headerHeight - 28)
       let page = CommandQueuePage(
         entryCount: entries.count, availableHeight: availableHeight,
         expanded: isExpanded, requestedPage: requestedPage,
@@ -36,11 +50,20 @@ struct PaneCommandQueueChrome: View {
             .frame(maxWidth: 560)
             .padding(.leading, 14)
             .padding(.trailing, 58)
-            .padding(.top, 14)
+            .padding(.top, PaneCardMetrics.headerHeight + 8)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        PaneHUDView(paneID: paneID, surface: surface) {
-          isHidden = false
+        if showsMenu {
+          PaneHUDView(
+            paneID: paneID, surface: surface,
+            onShowQueue: { isHidden = false },
+            onMenuPressed: onMenuInteraction
+          )
+          // Puts the menu button in the header slot that `PaneCardHeader`
+          // reserves left of its close button. The HUD pads its button by
+          // `chromeInset`, so that inset comes off both offsets.
+          .padding(.trailing, PaneCardMetrics.menuSlotTrailingOffset - PaneHUDView.chromeInset)
+          .offset(y: PaneCardMetrics.actionButtonTop - PaneHUDView.chromeInset)
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)

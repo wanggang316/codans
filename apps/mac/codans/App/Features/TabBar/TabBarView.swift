@@ -24,74 +24,81 @@ struct TabBarView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   var body: some View {
-    HStack(spacing: 4, content: barContent)
-      .padding(.leading, TabBarMetrics.trackLeadingInset)
-      .frame(height: TabBarMetrics.trackHeight)
-      .padding(.bottom, TabBarMetrics.trackBottomInset)
-      .sheet(
-        item: Binding(
-          get: { store.renameTarget },
-          set: { newValue in
-            // `.sheet(item:)` only ever sets `nil` (sheet dismissed by the
-            // system / drag-down). Commit path drives clear from inside the
-            // reducer via `.renameSubmitted`, so we forward nil → reducer
-            // and ignore non-nil writes.
-            if newValue == nil { store.send(.renameDismissed) }
-          }
-        )
-      ) { target in
-        TabRenameSheetView(
-          initialName: target.currentName,
-          onCommit: { newName in
-            store.send(
-              .renameSubmitted(
-                target.id, name: newName,
-                inWorktree: worktreeID, inProject: projectID
-              ))
-          },
-          onCancel: { store.send(.renameDismissed) }
-        )
+    Group {
+      if showsBar {
+        HStack(spacing: 4, content: barContent)
+          .padding(.leading, TabBarMetrics.trackLeadingInset)
+          .frame(height: TabBarMetrics.trackHeight)
+      } else {
+        // Keeps the sheets below mounted (a chip's context menu presents
+        // them) while the bar itself takes no space.
+        Color.clear.frame(height: 0)
       }
-      .sheet(
-        item: Binding(
-          get: { store.colorTarget },
-          set: { newValue in
-            if newValue == nil { store.send(.colorDismissed) }
-          }
-        )
-      ) { target in
-        TabColorSheetView(
-          initialColor: target.currentColor,
-          onCommit: { color in
-            store.send(
-              .colorSubmitted(
-                target.id, color: color,
-                inWorktree: worktreeID, inProject: projectID
-              ))
-          },
-          onCancel: { store.send(.colorDismissed) }
-        )
-      }
-      .sheet(
-        item: Binding(
-          get: { store.iconTarget },
-          set: { newValue in
-            if newValue == nil { store.send(.iconDismissed) }
-          }
-        )
-      ) { target in
-        TabIconPickerSheet(
-          initialIcon: target.currentIcon,
-          onCommit: { icon in
-            store.send(
-              .iconSubmitted(
-                target.id, icon: icon,
-                inWorktree: worktreeID, inProject: projectID
-              ))
-          },
-          onCancel: { store.send(.iconDismissed) }
-        )
-      }
+    }
+    .sheet(
+      item: Binding(
+        get: { store.renameTarget },
+        set: { newValue in
+          // `.sheet(item:)` only ever sets `nil` (sheet dismissed by the
+          // system / drag-down). Commit path drives clear from inside the
+          // reducer via `.renameSubmitted`, so we forward nil → reducer
+          // and ignore non-nil writes.
+          if newValue == nil { store.send(.renameDismissed) }
+        },
+      )
+    ) { target in
+      TabRenameSheetView(
+        initialName: target.currentName,
+        onCommit: { newName in
+          store.send(
+            .renameSubmitted(
+              target.id, name: newName,
+              inWorktree: worktreeID, inProject: projectID,
+            ))
+        },
+        onCancel: { store.send(.renameDismissed) },
+      )
+    }
+    .sheet(
+      item: Binding(
+        get: { store.colorTarget },
+        set: { newValue in
+          if newValue == nil { store.send(.colorDismissed) }
+        },
+      )
+    ) { target in
+      TabColorSheetView(
+        initialColor: target.currentColor,
+        onCommit: { color in
+          store.send(
+            .colorSubmitted(
+              target.id, color: color,
+              inWorktree: worktreeID, inProject: projectID,
+            ))
+        },
+        onCancel: { store.send(.colorDismissed) },
+      )
+    }
+    .sheet(
+      item: Binding(
+        get: { store.iconTarget },
+        set: { newValue in
+          if newValue == nil { store.send(.iconDismissed) }
+        },
+      )
+    ) { target in
+      TabIconPickerSheet(
+        initialIcon: target.currentIcon,
+        onCommit: { icon in
+          store.send(
+            .iconSubmitted(
+              target.id, icon: icon,
+              inWorktree: worktreeID, inProject: projectID,
+            ))
+        },
+        onCancel: { store.send(.iconDismissed) },
+      )
+    }
   }
 
   @ViewBuilder
@@ -103,10 +110,11 @@ struct TabBarView: View {
         TabBarOverflowScroll(itemCount: worktree.tabs.count) { viewport in
           rowView(for: worktree, viewport: viewport)
         }
-        .frame(height: TabBarMetrics.trackHeight)
-      } else {
-        Spacer(minLength: 0)
+        .frame(
+          maxWidth: TabBarMetrics.trackMaxWidth(chipCount: worktree.tabs.count),
+          maxHeight: TabBarMetrics.trackHeight)
       }
+      Spacer(minLength: 0)
       TabBarTrailingAccessories(
         activeTabSplitTree: activeSplitTree(),
         worktreePath: currentWorktree()?.path,
@@ -116,7 +124,7 @@ struct TabBarView: View {
         onNewTab: {
           store.send(
             .newTabButtonTapped(
-              inWorktree: worktreeID, inProject: projectID
+              inWorktree: worktreeID, inProject: projectID,
             ))
         },
         onLaunchAgent: { profileID in
@@ -129,23 +137,23 @@ struct TabBarView: View {
           store.send(
             .resumeAgentSessionTapped(
               agent: session.agent, sessionID: session.sessionID, placement: placement,
-              inWorktree: worktreeID, inProject: projectID
+              inWorktree: worktreeID, inProject: projectID,
             ))
         },
         onSplitRight: {
           store.send(
             .trailingSplitRequested(
               direction: .right,
-              inWorktree: worktreeID, inProject: projectID
+              inWorktree: worktreeID, inProject: projectID,
             ))
         },
         onSplitDown: {
           store.send(
             .trailingSplitRequested(
               direction: .down,
-              inWorktree: worktreeID, inProject: projectID
+              inWorktree: worktreeID, inProject: projectID,
             ))
-        }
+        },
       )
     }
   }
@@ -165,7 +173,7 @@ struct TabBarView: View {
   /// Static so the `isDirty` closure stays a light value-capture; only `.working`
   /// counts (`.blocked` is "waiting on the user", not busy).
   private static func tabHasWorkingAgent(
-    _ tabID: TabID, in worktree: Worktree, store: AgentStateStore?
+    _ tabID: TabID, in worktree: Worktree, store: AgentStateStore?,
   ) -> Bool {
     guard let entries = store?.entries, !entries.isEmpty,
       let tab = worktree.tabs.first(where: { $0.id == tabID })
@@ -194,37 +202,37 @@ struct TabBarView: View {
       onSelect: { tabID in
         store.send(
           .tabButtonTapped(
-            tabID, inWorktree: worktreeID, inProject: projectID
+            tabID, inWorktree: worktreeID, inProject: projectID,
           ))
       },
       onClose: { tabID in
         store.send(
           .closeButtonTapped(
-            tabID, inWorktree: worktreeID, inProject: projectID
+            tabID, inWorktree: worktreeID, inProject: projectID,
           ))
       },
       onMiddleClick: { tabID in
         store.send(
           .middleClicked(
-            tabID, inWorktree: worktreeID, inProject: projectID
+            tabID, inWorktree: worktreeID, inProject: projectID,
           ))
       },
       onCloseOthers: { tabID in
         store.send(
           .contextMenuCloseOthers(
-            tabID, inWorktree: worktreeID, inProject: projectID
+            tabID, inWorktree: worktreeID, inProject: projectID,
           ))
       },
       onCloseToRight: { tabID in
         store.send(
           .contextMenuCloseToRight(
-            tabID, inWorktree: worktreeID, inProject: projectID
+            tabID, inWorktree: worktreeID, inProject: projectID,
           ))
       },
       onCloseAll: {
         store.send(
           .contextMenuCloseAll(
-            inWorktree: worktreeID, inProject: projectID
+            inWorktree: worktreeID, inProject: projectID,
           ))
       },
       onRenameRequested: { tabID in
@@ -247,7 +255,7 @@ struct TabBarView: View {
         store.send(
           .dragReorderEnded(
             orderedIDs: orderedIDs,
-            inWorktree: worktreeID, inProject: projectID
+            inWorktree: worktreeID, inProject: projectID,
           ))
       },
       emptyTabTitle: (worktree.path as NSString).lastPathComponent,
@@ -261,9 +269,9 @@ struct TabBarView: View {
           title,
           for: tabID,
           in: worktreeID,
-          in: projectID
+          in: projectID,
         )
-      }
+      },
     )
     // A worktree switch swaps in a whole other tab list; a fresh row per
     // worktree keeps its chips from playing the add-tab insertion.
@@ -275,6 +283,12 @@ struct TabBarView: View {
     return AgentResumePlacement.Context(worktree: worktree) {
       hierarchyManager.lastFocusedPane(in: $0)
     }
+  }
+
+  /// A single tab needs no bar: there is nothing to switch to. With no tab
+  /// at all the bar stays, so its new-tab button is still there.
+  private var showsBar: Bool {
+    currentWorktree()?.tabs.count != 1
   }
 
   private func currentWorktree() -> Worktree? {
