@@ -112,6 +112,7 @@ struct TabBarView: View {
         worktreePath: currentWorktree()?.path,
         remoteHost: hierarchyManager.catalog.projects
           .first(where: { $0.id == projectID })?.remoteHost,
+        resumeContext: resumeContext(),
         onNewTab: {
           store.send(
             .newTabButtonTapped(
@@ -124,10 +125,10 @@ struct TabBarView: View {
               profileID: profileID, inWorktree: worktreeID, inProject: projectID))
         },
         onManageAgents: { store.send(.manageAgentsTapped) },
-        onResumeSession: { session in
+        onResumeSession: { session, placement in
           store.send(
             .resumeAgentSessionTapped(
-              agent: session.agent, sessionID: session.sessionID,
+              agent: session.agent, sessionID: session.sessionID, placement: placement,
               inWorktree: worktreeID, inProject: projectID
             ))
         },
@@ -267,6 +268,13 @@ struct TabBarView: View {
     // A worktree switch swaps in a whole other tab list; a fresh row per
     // worktree keeps its chips from playing the add-tab insertion.
     .id(worktreeID)
+  }
+
+  private func resumeContext() -> AgentResumePlacement.Context {
+    guard let worktree = currentWorktree() else { return .noFocusedPane }
+    return AgentResumePlacement.Context(worktree: worktree) {
+      hierarchyManager.lastFocusedPane(in: $0)
+    }
   }
 
   private func currentWorktree() -> Worktree? {

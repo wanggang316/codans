@@ -19,7 +19,9 @@ struct EmptyTerminalPaneView: View {
   /// SSH host of the worktree's project for Server projects, `nil` for local.
   var remoteHost: RemoteHost?
   let onNewTab: () -> Void
-  let onResumeSession: (AgentSessionSummary) -> Void
+  /// The worktree has no active tab, so there is no pane to type into or
+  /// split: In Place is disabled and New Split resumes in a new tab.
+  let onResumeSession: (AgentSessionSummary, AgentResumePlacement) -> Void
 
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var sessionHistoryShown = false
@@ -64,6 +66,7 @@ struct EmptyTerminalPaneView: View {
           isPresented: $sessionHistoryShown,
           worktreePath: worktreePath,
           remoteHost: remoteHost,
+          resumeContext: .noFocusedPane,
           onResume: onResumeSession
         )
       }
@@ -99,7 +102,7 @@ struct EmptyTerminalPaneView: View {
     message: "No terminals open",
     worktreePath: "/tmp",
     onNewTab: {},
-    onResumeSession: { _ in }
+    onResumeSession: { _, _ in }
   )
   .frame(width: 600, height: 400)
 }
