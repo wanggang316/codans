@@ -198,6 +198,7 @@ struct WorktreeDetailView: View {
           tabBarRow(address: address)
           terminalRegion(address: address)
         }
+        .background(PaneCardMetrics.backdrop)
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)

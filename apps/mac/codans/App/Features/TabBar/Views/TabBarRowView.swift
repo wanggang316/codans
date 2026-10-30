@@ -243,7 +243,11 @@ struct TabBarRowView: View {
       onChangeIcon: { onChangeIconRequested(tab.id) },
       onCopyID: { onCopyID(tab.id) },
       tabColor: tab.color,
-      icon: tab.resolvedIcon(autoFallback: nil),
+      // Every chip leads with a glyph: the agent's mark for an agent tab,
+      // a terminal otherwise.
+      icon: tab.resolvedIcon(
+        autoFallback: tab.panes.lazy.compactMap(\.agentKind).first.map(TabIconRef.icon(for:))
+          ?? "terminal"),
       sliceWidth: slice?.width,
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
