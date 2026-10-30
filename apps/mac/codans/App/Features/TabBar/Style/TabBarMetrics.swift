@@ -17,8 +17,8 @@ enum TabBarMetrics {
   /// The system bar sits flush under the toolbar and leaves this gap to
   /// the content below it.
   static let trackBottomInset: CGFloat = 8
-  /// Gap between the bar's leading edge and the track.
-  static let trackLeadingInset: CGFloat = 0
+  /// Gap between the bar's leading / trailing edges and the track.
+  static let trackHorizontalInset: CGFloat = 8
   /// Chips are inset from the track on every side by this much.
   static let trackContentInset: CGFloat = 3
 
@@ -37,10 +37,10 @@ enum TabBarMetrics {
   /// size, inset `chipSlotInset` from the chip edge.
   static let closeButtonSize: CGFloat = 16
   static let chipSlotInset: CGFloat = 5
-  /// Leading inset of the icon + title, and the trailing inset that keeps
-  /// the title clear of the trailing slot (close button / color dot).
-  static let chipContentLeadingInset: CGFloat = 12
-  static let chipTitleTrailingInset: CGFloat = chipSlotInset + closeButtonSize + 6
+  /// Horizontal inset of the centered title on both sides — slot inset +
+  /// slot + 8-pt gap — so the title stays centered and never runs under
+  /// the close button or the trailing slot.
+  static let chipTitleInset: CGFloat = chipSlotInset + closeButtonSize + 8
 
   /// Point size of the chip title and the close glyph.
   static let titleFontSize: CGFloat = 13

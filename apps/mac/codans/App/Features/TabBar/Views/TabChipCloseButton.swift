@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The `xmark` button on the trailing edge of a tab chip. A dedicated view
+/// The `xmark` button on the leading edge of a tab chip. A dedicated view
 /// so later milestones can add keyboard-shortcut hints and focus styling
 /// without widening `TabChipView`.
 ///

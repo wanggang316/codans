@@ -154,28 +154,28 @@ struct TabChipView: View {
       // leaving most of the chip dead. Pair with the explicit
       // `contentShape` here so the styled Button uses the expanded
       // rectangle as its hit shape, not the text glyph bounds.
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
       // A widening chip lays its title out at the final width at once;
       // keep it inside the chip until the chip catches up.
       .clipped()
       .contentShape(Rectangle())
-      // Icon + title lead; the trailing slot is reserved so the title
-      // truncates before it slides under the close button.
-      .padding(.leading, TabBarMetrics.chipContentLeadingInset)
-      .padding(.trailing, TabBarMetrics.chipTitleTrailingInset)
+      // Reserve the side slots symmetrically so the centered title stays
+      // centered and truncates before it slides under either overlay.
+      .padding(.horizontal, TabBarMetrics.chipTitleInset)
     }
     .buttonStyle(SelectOnPressStyle(onPress: pressed))
     .frame(
       maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight
     )
+    .overlay(alignment: .leading) {
+      TabChipCloseButton(isVisible: showsHover, action: onClose)
+        .padding(.leading, TabBarMetrics.chipSlotInset)
+    }
     .overlay(alignment: .trailing) {
-      // Chord hint takes the trailing slot while ⌘ is held; the close
-      // button takes it on hover; otherwise the tab's color dot (when set)
-      // sits there.
+      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
+      // tab's color dot (when set) sits there.
       Group {
-        if chordHint == nil && showsHover {
-          TabChipCloseButton(isVisible: true, action: onClose)
-        } else if let chordHint {
+        if let chordHint {
           Text(chordHint)
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
@@ -188,7 +188,7 @@ struct TabChipView: View {
         }
       }
       .padding(.trailing, TabBarMetrics.chipSlotInset)
-      .allowsHitTesting(chordHint == nil && showsHover)
+      .allowsHitTesting(false)
     }
   }
 
