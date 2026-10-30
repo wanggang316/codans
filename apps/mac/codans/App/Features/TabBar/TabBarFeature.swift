@@ -243,8 +243,10 @@ struct TabBarFeature {
           worktree: worktree, lastFocusedPane: { hierarchyClient.lastFocusedPane($0) })
         let resolved = placement.resolved(in: context)
         // A session, not a job: a fresh id per resume, and no onFinished
-        // policy. The pipeline spawns in the worktree's directory, which the
-        // agent CLI needs to find the session it recorded against that cwd.
+        // policy. A new tab or split spawns in the worktree's directory, which
+        // the agent CLI needs to find the session it recorded against that
+        // cwd. In Place types into the pane's shell as is, the same as a
+        // Project Command with that target, so it runs in the shell's cwd.
         let script = ScriptDefinition(
           kind: .custom,
           name: agent.displayName,
