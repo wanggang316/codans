@@ -53,8 +53,10 @@ struct SplitViewportView: View {
           projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The leading gap depends on the sidebar; `WorktreeDetailView` owns it.
-        .padding([.top, .trailing, .bottom], PaneCardMetrics.gap)
+        // No top gap: the toolbar already leaves one under its controls, and
+        // the tab bar adds its own when it shows. The leading gap depends on
+        // the sidebar; `WorktreeDetailView` owns it.
+        .padding([.trailing, .bottom], PaneCardMetrics.gap)
         .environment(dropHighlight)
       } else if settledTabID == tabID {
         emptyPlaceholder

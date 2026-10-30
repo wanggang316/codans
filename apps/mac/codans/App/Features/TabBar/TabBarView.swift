@@ -26,8 +26,9 @@ struct TabBarView: View {
     Group {
       if showsBar {
         barContent()
-          .padding(.leading, TabBarMetrics.trackLeadingInset)
+          .padding(.horizontal, TabBarMetrics.trackHorizontalInset)
           .frame(height: TabBarMetrics.trackHeight)
+          .padding(.bottom, TabBarMetrics.trackBottomInset)
       } else {
         // Keeps the sheets below mounted (a chip's context menu presents
         // them) while the bar itself takes no space.
