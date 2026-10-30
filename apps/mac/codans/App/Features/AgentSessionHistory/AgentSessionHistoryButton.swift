@@ -203,7 +203,7 @@ private struct AgentSessionHistoryPopover: View {
       Picker("Resume in", selection: targetSelection) {
         Text("New Tab").tag(ScriptTarget.newTab)
         Text("In Place").tag(ScriptTarget.focused)
-          .selectionDisabled(!resumeContext.allowsInPlace)
+          .disabled(!resumeContext.allowsInPlace)
         Text("New Split").tag(ScriptTarget.split)
       }
       .pickerStyle(.menu)
