@@ -53,7 +53,9 @@ struct SplitViewportView: View {
           projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(PaneCardMetrics.gap)
+        // No leading gap: the sidebar already insets its own content from
+        // its trailing edge, so the cards sit flush against it.
+        .padding([.top, .trailing, .bottom], PaneCardMetrics.gap)
         .environment(dropHighlight)
       } else if settledTabID == tabID {
         emptyPlaceholder
