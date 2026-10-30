@@ -20,7 +20,7 @@ and the project does not yet follow semantic versioning — every release until
 - **Notifications moved to the sidebar filter bar.** The Unread filter
   (bell) is the last item of the bar and lists only the worktrees with
   unread notifications. A row you open stays listed until you select
-  another one. The bell turns orange while
+  another row or filter; the next time you open Unread it is gone. The bell turns orange while
   notifications are unread; right-click it to mark all as read. ⌘U shows
   the sidebar with this filter.
 

@@ -136,7 +136,7 @@ inbox 在内存中是 `[InboxEntry]`，持久化到 `~/.codans/state/notificatio
 
 每个表面（侧栏 Project 点、Worktree 铃铛字形、Tab 点、Pane 顶线）通过一个小的 Equatable 切片读取 `RollupIndex`；L1–L4 仅为视觉。
 
-**Unread 过滤。** 侧栏顶部分类过滤栏的 Unread 项（`SidebarFilter.notifications`，铃铛字形）只列出 inbox 中有未读条目的 Worktree（按条目 `source.worktreeID`，不经上卷）及其父 Project。点开一行会把其聚焦 Pane 的条目标为已读；若这使选中行不再有未读，该行仍保留在列表中，直到选中移到别处（`RootFeature.State.readWhileSelectedWorktreeID`）。从未有过未读的选中行不列出。有未读时，未选中的铃铛字形显示为橙色；右键菜单提供 Mark All as Read。⌘U（Show Unread Notifications）显示侧栏并选中该过滤。没有 popover inbox：通知的「在哪」由过滤后的层级直接回答。
+**Unread 过滤。** 侧栏顶部分类过滤栏的 Unread 项（`SidebarFilter.notifications`，铃铛字形）只列出 inbox 中有未读条目的 Worktree（按条目 `source.worktreeID`，不经上卷）及其父 Project。点开一行会把其聚焦 Pane 的条目标为已读；若这使选中行不再有未读，该行仍保留在列表中，直到选中移到别处或再次选择过滤项（`RootFeature.State.readWhileSelectedWorktreeID`）；因此下次打开 Unread 时，已读的 Worktree 不再列出。从未有过未读的选中行不列出。有未读时，未选中的铃铛字形显示为橙色；右键菜单提供 Mark All as Read。⌘U（Show Unread Notifications）显示侧栏并选中该过滤。没有 popover inbox：通知的「在哪」由过滤后的层级直接回答。
 
 ## 导航
 

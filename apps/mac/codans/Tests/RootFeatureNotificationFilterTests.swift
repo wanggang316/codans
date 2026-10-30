@@ -60,6 +60,23 @@ struct RootFeatureNotificationFilterTests {
   }
 
   @Test
+  func reopeningTheFilterDropsTheKeptRow() async {
+    let catalog = self.catalog
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.setSidebarFilter = { _ in }
+    }
+    store.exhaustivity = .off
+    await store.send(.unreadWorktreesChanged([selected.id]))
+    await store.send(.unreadWorktreesChanged([]))
+    await store.send(.sidebar(.sidebarFilterSelected(.all)))
+    await store.send(.sidebar(.sidebarFilterSelected(.notifications)))
+    #expect(store.state.notifiedWorktreeIDs.isEmpty)
+  }
+
+  @Test
   func readingAnotherRowKeepsNothing() async {
     let store = makeStore()
     await store.send(.unreadWorktreesChanged([other.id]))
