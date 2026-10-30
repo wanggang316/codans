@@ -144,7 +144,8 @@ struct RootFeature {
     var unreadWorktreeIDs: Set<WorktreeID> = []
     /// The selected worktree whose last unread entries were read while it
     /// was selected. Opening a row marks its focused pane read; the row
-    /// stays in the notification filter until the selection moves on.
+    /// stays in the notification filter until the selection moves on or a
+    /// filter is selected again.
     var readWhileSelectedWorktreeID: WorktreeID?
 
     /// The rows the sidebar notification filter lists. Navigation that reads
@@ -1442,6 +1443,11 @@ struct RootFeature {
         // detail pane.
         guard state.sidebar.pendingWorktrees[id: pending.id] != nil else { return .none }
         focusPendingCreation(pending, state: &state)
+        return .none
+
+      // Opening a filter starts it fresh: a row already read stays out.
+      case .sidebar(.sidebarFilterSelected):
+        state.readWhileSelectedWorktreeID = nil
         return .none
 
       // Left-click on a pending row: come BACK to a creation the user
