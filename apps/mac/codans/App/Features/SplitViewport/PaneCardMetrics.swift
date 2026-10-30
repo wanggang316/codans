@@ -1,5 +1,4 @@
-import AppKit
-import SwiftUI
+import CoreGraphics
 
 /// Numeric design tokens for the pane cards. Each pane in the split
 /// viewport is drawn as a rounded card with a title header, floating on the
@@ -33,16 +32,6 @@ enum PaneCardMetrics {
   /// Hairline around the card, so a card keeps its edge when the terminal
   /// background is close to the window backdrop.
   static let borderWidth: CGFloat = 0.5
-
-  /// Window backdrop the cards float on, behind the tab bar and in the gaps.
-  /// A shade off the window background so a card on a light terminal theme
-  /// still stands out from it.
-  static let backdrop: Color = Color(
-    nsColor: NSColor(name: nil) { appearance in
-      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        ? .black.withAlphaComponent(0.25)
-        : .black.withAlphaComponent(0.06)
-    })
 
   /// Inset of the terminal surface inside the card, on the sides and the
   /// bottom, so text does not touch the card edge.
