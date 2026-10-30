@@ -182,7 +182,7 @@ private struct AgentSessionHistoryPopover: View {
                 AgentSessionRowView(
                   session: session,
                   resumeHelp: Self.resumeHelp(for: placement.resolved(in: resumeContext)),
-                  onResume: { onResume(session, placement) },)
+                ) { onResume(session, placement) }
                 Divider()
               }
             }
