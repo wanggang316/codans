@@ -63,7 +63,7 @@ struct ContentView: View {
             store.send(.toggleSidebarRequested)
           }
         }
-      }
+      },
     )
   }
 
@@ -77,11 +77,11 @@ struct ContentView: View {
       ZStack {
         mainSplit
         if let paletteStore = store.scope(
-          state: \.commandPalette, action: \.commandPalette.presented
+          state: \.commandPalette, action: \.commandPalette.presented,
         ) {
           CommandPaletteView(
             store: paletteStore,
-            onDismiss: { store.send(.commandPaletteToggle(nil)) }
+            onDismiss: { store.send(.commandPaletteToggle(nil)) },
           )
           .zIndex(100)
         }
@@ -90,7 +90,7 @@ struct ContentView: View {
             .zIndex(100)
         }
         if let workflowStartStore = store.scope(
-          state: \.workflowStart, action: \.workflowStart.presented
+          state: \.workflowStart, action: \.workflowStart.presented,
         ) {
           WorkflowStartOverlayView(store: workflowStartStore)
             .zIndex(100)
@@ -115,7 +115,7 @@ struct ContentView: View {
         onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) },
         onAgentStateRowRunWorkflow: { paneID, workflowID in
           store.send(.agentState(.runWorkflowTapped(paneID, workflowID: workflowID)))
-        }
+        },
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
@@ -139,7 +139,7 @@ struct ContentView: View {
         historyBack: store.navigationHistoryBack,
         historyForward: store.navigationHistoryForward,
         onHistoryJump: { jump in store.send(.worktreeHistoryJumpRequested(jump)) },
-        isSidebarVisible: store.sidebarVisible
+        isSidebarVisible: store.sidebarVisible,
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .overlay(alignment: .bottom) { editorToastOverlay }
@@ -155,8 +155,18 @@ struct ContentView: View {
       \.paneHUDActions,
       PaneHUDActions(
         handOff: { paneID in store.send(.handoffRequested(paneID)) },
-        commandQueue: { paneID in store.send(.commandQueueToggle(paneID)) }
-      )
+        commandQueue: { paneID in store.send(.commandQueueToggle(paneID)) },
+        resumeSession: { paneID, session, placement in
+          guard let (projectID, worktreeID, _) = hierarchyManager.addressOf(paneID: paneID)
+          else { return }
+          store.send(
+            .detail(
+              .tabBar(
+                .resumeAgentSessionTapped(
+                  agent: session.agent, sessionID: session.sessionID, placement: placement,
+                  inWorktree: worktreeID, inProject: projectID))))
+        },
+      ),
     )
     .environment(settingsStore)
     .environment(UpdatesEnvironment.model)
@@ -225,7 +235,7 @@ struct ContentView: View {
         new.updateCheckInterval,
         new.updatesAutomaticallyCheckForUpdates,
         new.updatesAutomaticallyDownloadUpdates,
-        false
+        false,
       )
     }
     // Presented as a sheet, not a ZStack overlay, so it picks up the same
@@ -240,7 +250,7 @@ struct ContentView: View {
         // Pass the pane explicitly: `.commandQueueToggle(nil)` would
         // re-resolve the focused pane, and if focus moved while the sheet
         // was open the toggle would re-target instead of close.
-        onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
+        onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) },
       )
       .environment(hierarchyManager)
     }
@@ -274,7 +284,7 @@ extension ContentView {
       .projects.first(where: { $0.id == pending.projectID })?.name
     return WorktreeDetailView.PendingWorktreeBinding(
       pending: pending,
-      repositoryName: repositoryName
+      repositoryName: repositoryName,
     )
   }
 

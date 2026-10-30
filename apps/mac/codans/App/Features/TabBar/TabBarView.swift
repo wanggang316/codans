@@ -7,13 +7,12 @@ import SwiftUI
 /// / rename / reorder / bulk-close actions through `TabBarFeature`.
 ///
 /// The chip row lives inside `TabBarOverflowScroll`, which owns horizontal
-/// scrolling, edge-gradient shadows, and auto-scroll-to-selected; the
-/// trailing accessory cluster is pinned outside the scroll region so `+`
-/// is always visible regardless of chip count.
+/// scrolling and overflow stacking; the track fills the bar's width. The
+/// bar carries no buttons of its own: new tabs come from ⌘T and the empty
+/// page, splits and session history from each pane's header.
 struct TabBarView: View {
   let store: StoreOf<TabBarFeature>
-  /// Resolved address of the active worktree whose tabs we render. When the
-  /// worktree is unresolved or has no tabs, only the trailing accessories show.
+  /// Resolved address of the active worktree whose tabs we render.
   let projectID: ProjectID
   let worktreeID: WorktreeID
   let activeTabID: TabID?
@@ -26,7 +25,7 @@ struct TabBarView: View {
   var body: some View {
     Group {
       if showsBar {
-        HStack(spacing: 4, content: barContent)
+        barContent()
           .padding(.leading, TabBarMetrics.trackLeadingInset)
           .frame(height: TabBarMetrics.trackHeight)
       } else {
@@ -103,70 +102,12 @@ struct TabBarView: View {
 
   @ViewBuilder
   private func barContent() -> some View {
-    Group {
-      // No tabs → no track: an empty capsule reads as a blank tab. The
-      // spacer keeps the accessories pinned trailing in its place.
-      if let worktree = currentWorktree(), !worktree.tabs.isEmpty {
-        TabBarOverflowScroll(itemCount: worktree.tabs.count) { viewport in
-          rowView(for: worktree, viewport: viewport)
-        }
-        .frame(
-          maxWidth: TabBarMetrics.trackMaxWidth(chipCount: worktree.tabs.count),
-          maxHeight: TabBarMetrics.trackHeight)
+    if let worktree = currentWorktree(), !worktree.tabs.isEmpty {
+      TabBarOverflowScroll(itemCount: worktree.tabs.count) { viewport in
+        rowView(for: worktree, viewport: viewport)
       }
-      Spacer(minLength: 0)
-      TabBarTrailingAccessories(
-        activeTabSplitTree: activeSplitTree(),
-        worktreePath: currentWorktree()?.path,
-        remoteHost: hierarchyManager.catalog.projects
-          .first(where: { $0.id == projectID })?.remoteHost,
-        resumeContext: resumeContext(),
-        onNewTab: {
-          store.send(
-            .newTabButtonTapped(
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-        onLaunchAgent: { profileID in
-          store.send(
-            .launchAgentInNewTabTapped(
-              profileID: profileID, inWorktree: worktreeID, inProject: projectID))
-        },
-        onManageAgents: { store.send(.manageAgentsTapped) },
-        onResumeSession: { session, placement in
-          store.send(
-            .resumeAgentSessionTapped(
-              agent: session.agent, sessionID: session.sessionID, placement: placement,
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-        onSplitRight: {
-          store.send(
-            .trailingSplitRequested(
-              direction: .right,
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-        onSplitDown: {
-          store.send(
-            .trailingSplitRequested(
-              direction: .down,
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-      )
+      .frame(height: TabBarMetrics.trackHeight)
     }
-  }
-
-  /// Splits the active tab's tree for the trailing hover-preview popover.
-  /// Returns `nil` when there is no active tab or the tab has no panes.
-  private func activeSplitTree() -> SplitTree<PaneID>? {
-    guard
-      let worktree = currentWorktree(),
-      let activeTabID,
-      let tab = worktree.tabs.first(where: { $0.id == activeTabID })
-    else { return nil }
-    return tab.splitTree.isEmpty ? nil : tab.splitTree
   }
 
   /// True iff tab `tabID` has a pane hosting a bound agent currently `.working`.
@@ -276,13 +217,6 @@ struct TabBarView: View {
     // A worktree switch swaps in a whole other tab list; a fresh row per
     // worktree keeps its chips from playing the add-tab insertion.
     .id(worktreeID)
-  }
-
-  private func resumeContext() -> AgentResumePlacement.Context {
-    guard let worktree = currentWorktree() else { return .noFocusedPane }
-    return AgentResumePlacement.Context(worktree: worktree) {
-      hierarchyManager.lastFocusedPane(in: $0)
-    }
   }
 
   /// The bar shows only with two or more tabs: a single tab has nothing to

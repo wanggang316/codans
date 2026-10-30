@@ -29,16 +29,6 @@ enum TabBarMetrics {
   /// Chips share the track width equally; below `chipMinWidth` they stop
   /// shrinking and the row scrolls instead.
   static let chipMinWidth: CGFloat = 120
-  /// Chips do not stretch to fill the bar: the track is only as wide as
-  /// this many points per chip, and the chips share that width.
-  static let chipIdealWidth: CGFloat = 200
-
-  /// Widest the track grows for `count` chips: `chipIdealWidth` each, plus
-  /// the gaps and the track's own inset.
-  static func trackMaxWidth(chipCount count: Int) -> CGFloat {
-    CGFloat(count) * chipIdealWidth + CGFloat(max(count - 1, 0)) * chipSpacing
-      + trackContentInset * 2
-  }
 
   /// Chips are laid out with a 1-pt gap; the separator is drawn inside it.
   static let chipSpacing: CGFloat = 1

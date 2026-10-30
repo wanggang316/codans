@@ -6,8 +6,9 @@ import SwiftUI
 ///
 /// Collapsed it is a single button, with a queue button beneath it while the
 /// pane holds queued commands. Expanded it lists the actions that are a property
-/// of *this* pane. The first two are the pane's own affairs: handing its
-/// agent's task off and opening its command queue. Under them sits every
+/// of *this* pane. The first rows are the pane's own affairs: handing its
+/// agent's task off, opening its command queue, and resuming a recorded
+/// agent session from the Session History popover. Under them sits every
 /// action the terminal surface offers — copy, paste,
 /// the four splits, reset, the pane id, close — rendered from the same
 /// `PaneSurfaceAction.groups` the surface's right-click menu is built from,
@@ -44,6 +45,9 @@ struct PaneHUDView: View {
 
   @State private var isExpanded: Bool
   @State private var isButtonHovered = false
+  /// The Session History popover, anchored to the menu button once its row
+  /// closes the card.
+  @State private var sessionHistoryShown = false
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   /// `expanded` seeds the card's state. The app always starts collapsed;
@@ -195,6 +199,7 @@ struct PaneHUDView: View {
     }
     .buttonStyle(.plain)
     .onHover { isButtonHovered = $0 }
+    .modifier(SessionHistoryAnchor(paneID: paneID, isPresented: $sessionHistoryShown))
     .accessibilityIdentifier("pane_hud.toggle")
     .accessibilityLabel(isExpanded ? "Hide pane actions" : "Show pane actions")
   }
@@ -237,6 +242,9 @@ struct PaneHUDView: View {
       // queued for it.
       handOffButton(model)
       commandQueueButton(model)
+      if sessionHistoryWorktree != nil {
+        sessionHistoryButton
+      }
       // Then everything the terminal surface offers, in the same order and
       // grouping as its right-click menu — the two are one list, so an
       // action is never in one menu and missing from the other.
@@ -319,6 +327,34 @@ struct PaneHUDView: View {
     .accessibilityIdentifier("pane_hud.command_queue")
   }
 
+  private var sessionHistoryButton: some View {
+    Button {
+      setExpanded(false)
+      sessionHistoryShown = true
+    } label: {
+      HStack(spacing: 7) {
+        Image(systemName: "clock.arrow.circlepath")
+          .font(.system(size: 11))
+          .frame(width: 14, height: 14, alignment: .center)
+          .accessibilityHidden(true)
+        Text("Session History…")
+        Spacer(minLength: 0)
+      }
+      .font(.system(size: 12))
+      .frame(minHeight: Self.buttonSize)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .help("Resume an agent session recorded in this worktree")
+    .accessibilityIdentifier("pane_hud.session_history")
+  }
+
+  /// The pane's worktree, when it still resolves. The Session History
+  /// popover scans its path.
+  private var sessionHistoryWorktree: Worktree? {
+    SessionHistoryAnchor.worktree(of: paneID, in: hierarchyManager)
+  }
+
   /// One row per `PaneSurfaceAction`, driven straight at the pane's surface
   /// — the same entry point the right-click menu items use, so a split from
   /// here lands in `PaneActionRouterFeature` exactly as one from there does
@@ -348,5 +384,47 @@ struct PaneHUDView: View {
     .buttonStyle(.plain)
     .disabled(!isEnabled)
     .accessibilityIdentifier("pane_hud.\(action.accessibilityID)")
+  }
+}
+
+/// Hosts the Session History popover on the menu button. Resolves the
+/// pane's worktree at presentation time, so a moved or pruned pane shows
+/// nothing rather than a stale list.
+private struct SessionHistoryAnchor: ViewModifier {
+  let paneID: PaneID
+  @Binding var isPresented: Bool
+
+  @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(\.paneHUDActions) private var actions
+
+  func body(content: Content) -> some View {
+    if let worktree = Self.worktree(of: paneID, in: hierarchyManager) {
+      content.agentSessionHistoryPopover(
+        isPresented: $isPresented,
+        worktreePath: worktree.path,
+        remoteHost: project(of: worktree)?.remoteHost,
+        resumeContext: AgentResumePlacement.Context(worktree: worktree) {
+          hierarchyManager.lastFocusedPane(in: $0)
+        },
+        onResume: { session, placement in
+          actions.resumeSession(paneID, session, placement)
+        },
+      )
+    } else {
+      content
+    }
+  }
+
+  private func project(of worktree: Worktree) -> Project? {
+    hierarchyManager.catalog.projects.first { $0.worktrees.contains { $0.id == worktree.id } }
+  }
+
+  @MainActor
+  static func worktree(of paneID: PaneID, in hierarchyManager: HierarchyManager) -> Worktree? {
+    guard let (projectID, worktreeID, _) = hierarchyManager.addressOf(paneID: paneID) else {
+      return nil
+    }
+    return hierarchyManager.catalog.projects.first { $0.id == projectID }?
+      .worktrees.first { $0.id == worktreeID }
   }
 }
