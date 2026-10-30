@@ -10,33 +10,45 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **Choose where a resumed agent session opens.** The Agent Sessions
-  popover has a toolbar to resume in a new tab, in place in the focused
-  pane, or in a new split on any side. In Place is off while the focused
-  pane runs an agent. The last choice is kept for the whole app.
-
 ### Changed
-
-- **Notifications moved to the sidebar filter bar.** The Unread filter
-  (bell) is the last item of the bar and lists only the worktrees with
-  unread notifications. A row you open stays listed until you select
-  another row or filter; the next time you open Unread it is gone. The bell turns orange while
-  notifications are unread; right-click it to mark all as read. ⌘U shows
-  the sidebar with this filter.
 
 ### Deprecated
 
 ### Removed
 
-- **Header notification bell, its inbox popover, and the Pin sidebar
-  filter.** The "Show status-bar bell" setting is gone with the bell. A
-  saved Pin filter opens as All. Pinned worktrees still sort first.
+### Fixed
+
+### Security
+
+## [0.9.0] - 2026-10-31
+
+### Added
+
+- **Choose where a resumed agent session opens.** Session History, now in
+  each pane's header menu, resumes a session in a new tab, in place in that
+  pane, or in a new split on any side. The last choice is kept app-wide.
+
+### Changed
+
+- **Panes are titled cards.** Each pane is a rounded card with a live title
+  and split and close buttons; drag the header to move it. A worktree with
+  one tab hides the tab bar, and new tabs come from ⌘T.
+- **Notifications moved to the sidebar filter bar.** The Unread filter
+  (bell) lists only worktrees with unread notifications and turns orange
+  while any are unread. Right-click it to mark all as read; ⌘U opens it.
+
+### Removed
+
+- **Header notification bell, its inbox popover, and the Pin filter.** The
+  "Show status-bar bell" setting is gone too. A saved Pin filter opens as
+  All; pinned worktrees still sort first.
 
 ### Fixed
 
-- Starting a workflow run no longer makes `.codans/` show as untracked in repositories without workflow definitions. `.codans/.gitignore` permits `workflows/` only once the repository has workflows, and the permitting form now lets the definition files through.
-
-### Security
+- **Workspace groups accept branch-style names.** A name such as
+  `feat/login` now works; the group's folder gets a safe name derived from it.
+- **`.codans/` no longer shows as untracked** after a workflow run in a
+  repository that has no workflow definitions.
 
 ## [0.8.0] - 2026-10-29
 
