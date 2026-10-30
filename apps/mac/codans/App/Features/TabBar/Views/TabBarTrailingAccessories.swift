@@ -7,7 +7,8 @@ import CodansCore
 ///
 /// Four actions: `+` creates a new tab in the active worktree (press-and-hold
 /// or right-click it to start an agent in the new tab instead); the session
-/// history clock resumes a recorded agent session in a new tab; the two
+/// history clock resumes a recorded agent session at the placement its
+/// popover's toolbar picks; the two
 /// split buttons cut a new pane horizontally or vertically off the active
 /// tab's leftmost leaf.
 struct TabBarTrailingAccessories: View {
@@ -19,10 +20,12 @@ struct TabBarTrailingAccessories: View {
   /// SSH host of the active worktree's project for Server projects, `nil`
   /// for local — routes the session-history scan to the host's stores.
   var remoteHost: RemoteHost?
+  /// The active worktree's focused pane, for the resume placement picker.
+  let resumeContext: AgentResumePlacement.Context
   let onNewTab: () -> Void
   let onLaunchAgent: (_ profileID: UUID) -> Void
   let onManageAgents: () -> Void
-  let onResumeSession: (AgentSessionSummary) -> Void
+  let onResumeSession: (AgentSessionSummary, AgentResumePlacement) -> Void
   let onSplitRight: () -> Void
   let onSplitDown: () -> Void
 
@@ -38,6 +41,7 @@ struct TabBarTrailingAccessories: View {
         AgentSessionHistoryButton(
           worktreePath: worktreePath,
           remoteHost: remoteHost,
+          resumeContext: resumeContext,
           onResume: onResumeSession
         )
       }

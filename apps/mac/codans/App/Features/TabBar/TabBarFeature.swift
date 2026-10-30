@@ -73,13 +73,13 @@ struct TabBarFeature {
     case trailingSplitRequested(
       direction: SplitTree<PaneID>.NewDirection,
       inWorktree: WorktreeID, inProject: ProjectID)
-    /// Play button on an Agent Session History row (trailing-accessory
-    /// popover). Opens a fresh tab whose pane runs the agent's resume
-    /// invocation (e.g. `claude --resume <id>`) as `initialCommand`, so the
-    /// agent process owns the pane exactly like a manually-launched agent —
-    /// AgentBinder classifies it from the foreground job as usual.
+    /// Play button on an Agent Session History row (trailing-accessory or
+    /// empty-terminal popover). Runs the agent's resume invocation (e.g.
+    /// `claude --resume <id>`) at `placement` through the shared script
+    /// pipeline, so the agent process owns its pane exactly like a
+    /// manually-launched agent and AgentBinder classifies it as usual.
     case resumeAgentSessionTapped(
-      agent: AgentKind, sessionID: String,
+      agent: AgentKind, sessionID: String, placement: AgentResumePlacement,
       inWorktree: WorktreeID, inProject: ProjectID)
     /// An agent picked from the `+` button's press-and-hold / right-click
     /// menu. Starts the profile in a new tab whatever its saved placement —
@@ -224,35 +224,37 @@ struct TabBarFeature {
           await MainActor.run { client.focusSurfaceView(newPaneID) }
         }
 
-      case .resumeAgentSessionTapped(let agent, let sessionID, let worktreeID, let projectID):
-        // Same catalog resolution as `newTabButtonTapped`: the pane must
-        // spawn in the Worktree's directory for the agent CLI to find the
-        // session it recorded against that cwd.
+      case .resumeAgentSessionTapped(
+        let agent, let sessionID, let placement, let worktreeID, let projectID):
         // The scanner only emits summaries for agents whose adapter can
         // resume, so a nil here signals a programming error upstream, not
         // a user-visible state.
         guard
           let command = AgentRuntimeAdapters.adapter(for: agent)
-            .resumeCommand(sessionID: sessionID)
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog.projects.first(where: { $0.id == projectID })?
+            .resumeCommand(sessionID: sessionID),
+          let worktree = hierarchyClient.snapshot().projects
+            .first(where: { $0.id == projectID })?
             .worktrees.first(where: { $0.id == worktreeID })
         else { return .none }
-        let cwd = worktree.path
-        // No tab name: a name is a sticky rename, and the chip must follow
-        // the agent's live title like a command typed in a pane.
+        // Re-check the placement against the worktree as it is now: the
+        // focused pane may have started an agent while the popover was open,
+        // and the empty-terminal entry has no pane to type into or split.
+        let context = AgentResumePlacement.Context(
+          worktree: worktree, lastFocusedPane: { hierarchyClient.lastFocusedPane($0) })
+        let resolved = placement.resolved(in: context)
+        // A session, not a job: a fresh id per resume, and no onFinished
+        // policy. The pipeline spawns in the worktree's directory, which the
+        // agent CLI needs to find the session it recorded against that cwd.
+        let script = ScriptDefinition(
+          kind: .custom,
+          name: agent.displayName,
+          command: command,
+          systemImage: TabIconRef.icon(for: agent),
+          target: resolved.target,
+          direction: resolved.direction ?? .right
+        )
         return .run { [client = hierarchyClient] _ in
-          guard
-            let tabID = try? await client.createTab(worktreeID, projectID, nil),
-            let paneID = try? await client.openPane(
-              tabID, worktreeID, projectID, cwd, command)
-          else { return }
-          // Same post-spawn focus dispatch as `newTabButtonTapped`: the
-          // surface view must attach to the hosting window before
-          // `makeFirstResponder` takes.
-          await MainActor.run { client.focusSurfaceView(paneID) }
+          try? await client.runAgentCommand(script, projectID, worktreeID)
         }
 
       case .launchAgentInNewTabTapped(let profileID, let worktreeID, let projectID):

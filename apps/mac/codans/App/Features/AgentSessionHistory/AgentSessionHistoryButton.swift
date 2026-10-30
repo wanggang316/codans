@@ -5,7 +5,7 @@ import SwiftUI
 /// clock glyph to the right of the `+` (new tab) button. Tapping lists
 /// every agent session the installed agent CLIs recorded against the
 /// current worktree in their own local stores; a row's play button reopens
-/// that session in a fresh tab. Chrome mirrors the sibling `+` / split
+/// that session at the placement chosen in the popover's bottom toolbar. Chrome mirrors the sibling `+` / split
 /// accessories (22×22 circular hover) so the cluster reads as one family.
 struct AgentSessionHistoryButton: View {
   /// Worktree path the popover scans against; also the cwd the resume
@@ -16,9 +16,11 @@ struct AgentSessionHistoryButton: View {
   /// routing — the command is typed into a pane whose shell already runs
   /// on the host.
   var remoteHost: RemoteHost?
+  /// The worktree's focused pane as the placement picker sees it.
+  let resumeContext: AgentResumePlacement.Context
   /// Row play-button callback. `TabBarView` maps this to
-  /// `TabBarFeature.resumeAgentSessionTapped`, which spawns the resume tab.
-  let onResume: (AgentSessionSummary) -> Void
+  /// `TabBarFeature.resumeAgentSessionTapped`, which runs the resume.
+  let onResume: (AgentSessionSummary, AgentResumePlacement) -> Void
 
   @State private var popoverShown = false
   @State private var isHovering = false
@@ -47,6 +49,7 @@ struct AgentSessionHistoryButton: View {
       isPresented: $popoverShown,
       worktreePath: worktreePath,
       remoteHost: remoteHost,
+      resumeContext: resumeContext,
       onResume: onResume
     )
   }
@@ -56,20 +59,24 @@ extension View {
   /// Anchors the Agent Session History popover to this view. Shared by the
   /// tab-bar clock accessory and the empty-terminal "Resume Session" button
   /// so both list the same sessions and resume the same way. The popover
-  /// dismisses itself before it calls `onResume`.
+  /// dismisses itself before it calls `onResume`. `resumeContext` is the
+  /// worktree's focused pane; the empty-terminal entry passes
+  /// `.noFocusedPane`.
   func agentSessionHistoryPopover(
     isPresented: Binding<Bool>,
     worktreePath: String,
     remoteHost: RemoteHost?,
-    onResume: @escaping (AgentSessionSummary) -> Void
+    resumeContext: AgentResumePlacement.Context,
+    onResume: @escaping (AgentSessionSummary, AgentResumePlacement) -> Void
   ) -> some View {
     popover(isPresented: isPresented, arrowEdge: .bottom) {
       AgentSessionHistoryPopover(
         worktreePath: worktreePath,
         remoteHost: remoteHost,
-        onResume: { session in
+        resumeContext: resumeContext,
+        onResume: { session, placement in
           isPresented.wrappedValue = false
-          onResume(session)
+          onResume(session, placement)
         },
         onClose: { isPresented.wrappedValue = false }
       )
@@ -79,13 +86,15 @@ extension View {
 }
 
 /// Popover body: header + agent-grouped session list, newest agent first,
-/// sessions newest-first within each group. Esc routing follows the
+/// sessions newest-first within each group, and a bottom toolbar with the
+/// resume placement. Esc routing follows the
 /// `InboxPopoverContent` pattern (NSPopover doesn't dismiss on Esc while
 /// focus sits on the anchor toolbar button).
 private struct AgentSessionHistoryPopover: View {
   let worktreePath: String
   var remoteHost: RemoteHost?
-  let onResume: (AgentSessionSummary) -> Void
+  let resumeContext: AgentResumePlacement.Context
+  let onResume: (AgentSessionSummary, AgentResumePlacement) -> Void
   let onClose: () -> Void
 
   /// nil while the initial scan runs. The scan stats and prefix-reads
@@ -93,12 +102,33 @@ private struct AgentSessionHistoryPopover: View {
   /// the main actor the popover opens on.
   @State private var groups: [AgentSessionGroup]?
   @FocusState private var focused: Bool
+  /// Read once per open. A remembered In Place that the focused pane cannot
+  /// take shows as New Tab without overwriting what is remembered; only a
+  /// pick in the toolbar writes it back.
+  @State private var placement: AgentResumePlacement
+
+  init(
+    worktreePath: String,
+    remoteHost: RemoteHost?,
+    resumeContext: AgentResumePlacement.Context,
+    onResume: @escaping (AgentSessionSummary, AgentResumePlacement) -> Void,
+    onClose: @escaping () -> Void
+  ) {
+    self.worktreePath = worktreePath
+    self.remoteHost = remoteHost
+    self.resumeContext = resumeContext
+    self.onResume = onResume
+    self.onClose = onClose
+    _placement = State(initialValue: AgentResumePlacementPersistence.load().shown(in: resumeContext))
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       header
       Divider()
       content
+      Divider()
+      toolbar
     }
     .focusable()
     .focused($focused)
@@ -149,7 +179,10 @@ private struct AgentSessionHistoryPopover: View {
             ForEach(groups) { group in
               sectionHeader(group)
               ForEach(group.sessions) { session in
-                AgentSessionRowView(session: session, onResume: { onResume(session) })
+                AgentSessionRowView(
+                  session: session,
+                  resumeHelp: Self.resumeHelp(for: placement.resolved(in: resumeContext)),
+                  onResume: { onResume(session, placement) })
                 Divider()
               }
             }
@@ -158,6 +191,80 @@ private struct AgentSessionHistoryPopover: View {
       }
     } else {
       loadingState
+    }
+  }
+
+  /// Where the row play button resumes: a target menu, and for a split a
+  /// second menu for the side. Same pair and look as the Hand Off panel,
+  /// plus "In Place", which is disabled while the focused pane runs an agent
+  /// or there is no focused pane.
+  private var toolbar: some View {
+    HStack(spacing: 8) {
+      Picker("Resume in", selection: targetSelection) {
+        Text("New Tab").tag(ScriptTarget.newTab)
+        Text("In Place").tag(ScriptTarget.focused)
+          .selectionDisabled(!resumeContext.allowsInPlace)
+        Text("New Split").tag(ScriptTarget.split)
+      }
+      .pickerStyle(.menu)
+      .labelsHidden()
+      .controlSize(.small)
+      .fixedSize()
+      .help("Where a resumed session opens")
+      .accessibilityIdentifier("agentSessions.placement")
+
+      if case .split = placement {
+        Picker("Split Direction", selection: directionSelection) {
+          Text("Right").tag(ScriptSplitDirection.right)
+          Text("Down").tag(ScriptSplitDirection.down)
+          Text("Left").tag(ScriptSplitDirection.left)
+          Text("Up").tag(ScriptSplitDirection.up)
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
+        .help("Which side of the focused pane the split opens on")
+        .accessibilityIdentifier("agentSessions.placement.direction")
+      }
+      Spacer()
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+  }
+
+  /// Switching to New Split from another placement starts on the right.
+  private var targetSelection: Binding<ScriptTarget> {
+    Binding(
+      get: { placement.target },
+      set: { target in
+        switch target {
+        case .newTab: choose(.newTab)
+        case .focused: choose(.inPlace)
+        case .split: choose(.split(placement.direction ?? .right))
+        }
+      }
+    )
+  }
+
+  private var directionSelection: Binding<ScriptSplitDirection> {
+    Binding(
+      get: { placement.direction ?? .right },
+      set: { choose(.split($0)) }
+    )
+  }
+
+  private func choose(_ newPlacement: AgentResumePlacement) {
+    guard newPlacement != placement else { return }
+    placement = newPlacement
+    AgentResumePlacementPersistence.save(newPlacement)
+  }
+
+  static func resumeHelp(for placement: AgentResumePlacement) -> String {
+    switch placement {
+    case .newTab: return "Resume in a new tab"
+    case .inPlace: return "Resume in the focused pane"
+    case .split: return "Resume in a new split"
     }
   }
 
@@ -194,6 +301,7 @@ private struct AgentSessionHistoryPopover: View {
 
 private struct AgentSessionRowView: View {
   let session: AgentSessionSummary
+  let resumeHelp: String
   let onResume: () -> Void
 
   /// Allocated once for the popover lifetime — a fresh
@@ -235,7 +343,7 @@ private struct AgentSessionRowView: View {
           .contentShape(Circle())
       }
       .buttonStyle(.plain)
-      .help("Resume in a new tab")
+      .help(resumeHelp)
       .accessibilityLabel("Resume session")
     }
     .padding(.horizontal, 12)

@@ -564,11 +564,11 @@ struct WorktreeDetailView: View {
         store.send(
           .tabBar(.newTabButtonTapped(inWorktree: address.worktree, inProject: address.project)))
       },
-      onResumeSession: { session in
+      onResumeSession: { session, placement in
         store.send(
           .tabBar(
             .resumeAgentSessionTapped(
-              agent: session.agent, sessionID: session.sessionID,
+              agent: session.agent, sessionID: session.sessionID, placement: placement,
               inWorktree: address.worktree, inProject: address.project
             )))
       }
