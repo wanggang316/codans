@@ -1,63 +1,9 @@
 import CodansCore
 import SwiftUI
 
-/// Tab-bar trailing accessory for the Agent Session History popover — a
-/// clock glyph to the right of the `+` (new tab) button. Tapping lists
-/// every agent session the installed agent CLIs recorded against the
-/// current worktree in their own local stores; a row's play button reopens
-/// that session at the placement chosen in the popover's bottom toolbar. Chrome mirrors the sibling `+` / split
-/// accessories (22×22 circular hover) so the cluster reads as one family.
-struct AgentSessionHistoryButton: View {
-  /// Worktree path the popover scans against; also the cwd the resume
-  /// tab spawns in. A remote path string for Server projects.
-  let worktreePath: String
-  /// SSH host for a Server-project worktree, `nil` for local. Routes the
-  /// popover's scan to the host's session stores over SSH; resume needs no
-  /// routing — the command is typed into a pane whose shell already runs
-  /// on the host.
-  var remoteHost: RemoteHost?
-  /// The worktree's focused pane as the placement picker sees it.
-  let resumeContext: AgentResumePlacement.Context
-  /// Row play-button callback. `TabBarView` maps this to
-  /// `TabBarFeature.resumeAgentSessionTapped`, which runs the resume.
-  let onResume: (AgentSessionSummary, AgentResumePlacement) -> Void
-
-  @State private var popoverShown = false
-  @State private var isHovering = false
-
-  var body: some View {
-    Button(
-      action: { popoverShown.toggle() },
-      label: {
-        Image(systemName: "clock.arrow.circlepath")
-          // Decorative — the button's accessibilityLabel below names the
-          // control; announcing the symbol too would double-speak it.
-          .accessibilityHidden(true)
-          .frame(width: 22, height: 22)
-          .background(
-            Circle()
-              .fill(isHovering ? TabBarColors.hoverBackground : .clear)
-          )
-          .contentShape(Circle())
-      },
-    )
-    .buttonStyle(.plain)
-    .onHover { isHovering = $0 }
-    .help("Agent Session History")
-    .accessibilityLabel("Agent session history")
-    .agentSessionHistoryPopover(
-      isPresented: $popoverShown,
-      worktreePath: worktreePath,
-      remoteHost: remoteHost,
-      resumeContext: resumeContext,
-      onResume: onResume,
-    )
-  }
-}
-
 extension View {
   /// Anchors the Agent Session History popover to this view. Shared by the
-  /// tab-bar clock accessory and the empty-terminal "Resume Session" button
+  /// pane header menu and the empty-terminal "Resume Session" button
   /// so both list the same sessions and resume the same way. The popover
   /// dismisses itself before it calls `onResume`. `resumeContext` is the
   /// worktree's focused pane; the empty-terminal entry passes
