@@ -105,11 +105,11 @@ struct SplitView<L: View, R: View>: View {
     switch direction {
     case .horizontal:
       result.origin.x += leftRect.size.width
-      result.origin.x += splitterVisibleSize / 2
+      result.origin.x += splitterVisibleSize
       result.size.width -= result.origin.x
     case .vertical:
       result.origin.y += leftRect.size.height
-      result.origin.y += splitterVisibleSize / 2
+      result.origin.y += splitterVisibleSize
       result.size.height -= result.origin.y
     }
     return result
@@ -118,9 +118,9 @@ struct SplitView<L: View, R: View>: View {
   private func splitterPoint(for size: CGSize, leftRect: CGRect) -> CGPoint {
     switch direction {
     case .horizontal:
-      return CGPoint(x: leftRect.size.width, y: size.height / 2)
+      return CGPoint(x: leftRect.size.width + splitterVisibleSize / 2, y: size.height / 2)
     case .vertical:
-      return CGPoint(x: size.width / 2, y: leftRect.size.height)
+      return CGPoint(x: size.width / 2, y: leftRect.size.height + splitterVisibleSize / 2)
     }
   }
 
