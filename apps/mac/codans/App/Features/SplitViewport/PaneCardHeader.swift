@@ -9,8 +9,10 @@ import SwiftUI
 /// that starts on it moves the pane, the same drag the drop targets in
 /// `LeafView` accept. A click focuses the pane.
 ///
-/// Actions show on the focused pane and on the pane under the pointer, so
-/// a still layout reads as plain titles.
+/// The owner decides when the actions show. The actions menu button is not
+/// drawn here: `PaneCommandQueueChrome` lays it over the slot this header
+/// leaves free left of the close button, because its expanded card has to
+/// draw above the terminal.
 struct PaneCardHeader: View {
   let paneID: PaneID
   let tabID: TabID
@@ -18,6 +20,7 @@ struct PaneCardHeader: View {
   /// next to.
   let isSplit: Bool
   let isFocused: Bool
+  let showsActions: Bool
   let onFocus: () -> Void
   let onSplit: (SplitTree<PaneID>.NewDirection) -> Void
   let onClose: () -> Void
@@ -25,7 +28,6 @@ struct PaneCardHeader: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(PaneDropHighlight.self) private var dropHighlight
   @Dependency(TerminalClient.self) private var terminalClient
-  @State private var isHovering = false
 
   var body: some View {
     HStack(spacing: 6) {
@@ -38,7 +40,7 @@ struct PaneCardHeader: View {
         .lineLimit(1)
         .truncationMode(.middle)
       Spacer(minLength: 8)
-      if isFocused || isHovering {
+      if showsActions {
         actions
           .transition(.opacity)
       }
@@ -46,22 +48,22 @@ struct PaneCardHeader: View {
     .padding(.horizontal, PaneCardMetrics.headerHorizontalInset)
     .frame(height: PaneCardMetrics.headerHeight)
     .contentShape(.rect)
-    .onHover { hovering in
-      withAnimation(.easeInOut(duration: 0.12)) { isHovering = hovering }
-    }
     .onTapGesture(perform: onFocus)
     .accessibilityAddTraits(.isButton)
     .modifier(PaneHeaderDragSource(paneID: paneID, isEnabled: isSplit, highlight: dropHighlight))
   }
 
   private var actions: some View {
-    HStack(spacing: 2) {
+    HStack(spacing: PaneCardMetrics.actionSpacing) {
       PaneCardHeaderButton(systemImage: "rectangle.split.2x1", help: "Split Right") {
         onSplit(.right)
       }
       PaneCardHeaderButton(systemImage: "rectangle.split.1x2", help: "Split Down") {
         onSplit(.down)
       }
+      // Actions menu slot, see the type comment.
+      Color.clear
+        .frame(width: PaneCardMetrics.actionButtonSize, height: PaneCardMetrics.actionButtonSize)
       PaneCardHeaderButton(systemImage: "xmark", help: "Close Pane", action: onClose)
     }
   }

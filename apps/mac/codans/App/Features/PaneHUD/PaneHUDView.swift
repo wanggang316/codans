@@ -1,7 +1,8 @@
 import CodansCore
 import SwiftUI
 
-/// Per-pane actions menu, anchored to the pane's top-right corner.
+/// Per-pane actions menu. Its button sits in the pane card header, left of
+/// the close button (`PaneCommandQueueChrome` places it there).
 ///
 /// Collapsed it is a single button, with a queue button beneath it while the
 /// pane holds queued commands. Expanded it lists the actions that are a property
@@ -33,6 +34,9 @@ struct PaneHUDView: View {
   /// Without one those rows render disabled rather than vanishing.
   let surface: PaneSurface?
   let onShowQueue: () -> Void
+  /// Called when the menu button is pressed, before the card opens or
+  /// closes.
+  var onMenuPressed: () -> Void = {}
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
@@ -47,8 +51,10 @@ struct PaneHUDView: View {
   init(
     paneID: PaneID, surface: PaneSurface? = nil, expanded: Bool = false,
     onShowQueue: @escaping () -> Void = {},
+    onMenuPressed: @escaping () -> Void = {},
   ) {
     self.onShowQueue = onShowQueue
+    self.onMenuPressed = onMenuPressed
     self.paneID = paneID
     self.surface = surface
     _isExpanded = State(initialValue: expanded)
@@ -60,14 +66,16 @@ struct PaneHUDView: View {
   /// them. Without a definite width here they resolve against the overlay's
   /// proposal, which is the entire pane, and the card swallows the terminal.
   private static let cardWidth: CGFloat = 210
-  /// Chrome box around the glyph. Deliberately larger than the 13pt symbol:
-  /// at 22pt the fill read as a tight outline rather than a control.
+  /// The menu button matches the other header action buttons.
+  private static let menuButtonSize: CGFloat = PaneCardMetrics.actionButtonSize
+  /// Queue button (hangs below the header, over the terminal) and the
+  /// expanded card's rows.
   private static let buttonSize: CGFloat = 30
   private static let buttonCornerRadius: CGFloat = 8
   private static let expansion = Animation.snappy(duration: 0.24, extraBounce: 0.02)
   /// Inset from the container's top-right corner to the button, applied in
   /// both states so the button is the fixed point the card grows away from.
-  private static let chromeInset: CGFloat = 6
+  static let chromeInset: CGFloat = 6
   /// Leading inset for the card's rows. The button's glyph sits 8.5pt inside
   /// its 30pt box and a row's 11pt glyph 1.5pt inside its 14pt box, so this
   /// is what puts the rows as far from the card's left edge as the glyph is
@@ -78,10 +86,6 @@ struct PaneHUDView: View {
   var body: some View {
     if let model = resolveModel() {
       card(model)
-        // Squares the button off the pane's corner: with the container's own
-        // `chromeInset` this puts it 14pt in from both edges.
-        .padding(.top, 8)
-        .padding(.trailing, 8)
     }
   }
 
@@ -116,7 +120,7 @@ struct PaneHUDView: View {
       // The queue button stacks under the menu button rather than beside it,
       // so the corner stays one column of same-sized controls. Collapsed
       // only: the expanded menu uses this space for its actions.
-      VStack(spacing: 6) {
+      VStack(alignment: .trailing, spacing: 6) {
         menuButton(model)
         if model.queuedCommandCount > 0, !isExpanded {
           queueButton(model)
@@ -172,24 +176,21 @@ struct PaneHUDView: View {
 
   private func menuButton(_ model: PaneHUDModel) -> some View {
     Button {
+      onMenuPressed()
       setExpanded(!isExpanded)
     } label: {
       // The system's "more actions" glyph: this is a menu of things to do to
       // the pane, not a readout about it.
-      Image(systemName: "ellipsis.circle")
-        .font(.system(size: 13, weight: .regular))
-        // Full strength always. Fading the glyph left terminal text legible
-        // through it, which read as a rendering fault rather than restraint.
+      Image(systemName: "ellipsis")
+        .font(.system(size: PaneCardMetrics.actionGlyphSize, weight: .regular))
         .foregroundStyle(isButtonHovered ? Color.primary : Color.secondary)
-        .frame(width: Self.buttonSize, height: Self.buttonSize)
-        .background {
-          // Expanded, the card behind the button already provides both.
-          chrome(cornerRadius: Self.buttonCornerRadius)
-            .opacity(isExpanded ? 0 : 1)
-            // The button's own `contentShape` defines its hit area; this is
-            // decoration and must not widen it.
+        .frame(width: Self.menuButtonSize, height: Self.menuButtonSize)
+        // Same hover fill as the other header buttons.
+        .background(
+          RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(Color.primary.opacity(isButtonHovered && !isExpanded ? 0.08 : 0))
             .allowsHitTesting(false)
-        }
+        )
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
