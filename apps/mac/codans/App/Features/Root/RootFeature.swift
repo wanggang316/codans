@@ -140,9 +140,19 @@ struct RootFeature {
     var revealSelectionTrigger: UUID = UUID()
 
     /// Worktrees with unread notifications, mirrored from `NotificationStore`
-    /// by `ContentView`. The sidebar notification filter matches these rows,
-    /// so navigation that reads the filtered order needs the same set.
-    var notifiedWorktreeIDs: Set<WorktreeID> = []
+    /// by `ContentView`.
+    var unreadWorktreeIDs: Set<WorktreeID> = []
+    /// The selected worktree whose last unread entries were read while it
+    /// was selected. Opening a row marks its focused pane read; the row
+    /// stays in the notification filter until the selection moves on.
+    var readWhileSelectedWorktreeID: WorktreeID?
+
+    /// The rows the sidebar notification filter lists. Navigation that reads
+    /// the filtered order uses the same set.
+    var notifiedWorktreeIDs: Set<WorktreeID> {
+      guard let readWhileSelectedWorktreeID else { return unreadWorktreeIDs }
+      return unreadWorktreeIDs.union([readWhileSelectedWorktreeID])
+    }
 
     /// Back/forward history of selections, browser-style. `Back` pops from
     /// `navigationHistoryBack` and pushes onto `navigationHistoryForward`;
@@ -365,7 +375,7 @@ struct RootFeature {
     /// (⌘U) routes here from the main menu.
     case showUnreadRequested
     /// `ContentView` mirrors the inbox's unread worktrees into state.
-    case notifiedWorktreesChanged(Set<WorktreeID>)
+    case unreadWorktreesChanged(Set<WorktreeID>)
     /// Resolves the current Worktree's absolute path and writes it to the
     /// system pasteboard. Silent no-op when no worktree is selected.
     case copyCurrentWorktreePathRequested
@@ -909,6 +919,9 @@ struct RootFeature {
         let priorProjectID = state.selection.projectID
         let priorSelection = state.selection
         state.selection = selection
+        if selection.worktreeID != state.readWhileSelectedWorktreeID {
+          state.readWhileSelectedWorktreeID = nil
+        }
         // Browser-style history. Skip the push when we just dispatched a
         // Back/Forward (otherwise that navigation would itself become a new
         // step); otherwise record the *previous* selection so a future Back
@@ -2395,8 +2408,18 @@ struct RootFeature {
         state.sidebarVisible = true
         return .send(.sidebar(.sidebarFilterSelected(.notifications)))
 
-      case .notifiedWorktreesChanged(let worktreeIDs):
-        state.notifiedWorktreeIDs = worktreeIDs
+      case .unreadWorktreesChanged(let worktreeIDs):
+        // Read the selection from the catalog: the focus change that marked
+        // the entries read can land before `selectionChanged` does.
+        let catalog = hierarchyClient.snapshot()
+        let selectedWorktreeID = catalog.projects
+          .first { $0.id == catalog.displayedSelectedProjectID }?.selectedWorktreeID
+        if let selectedWorktreeID, state.unreadWorktreeIDs.contains(selectedWorktreeID),
+          !worktreeIDs.contains(selectedWorktreeID)
+        {
+          state.readWhileSelectedWorktreeID = selectedWorktreeID
+        }
+        state.unreadWorktreeIDs = worktreeIDs
         return .none
 
       case .copyCurrentWorktreePathRequested:

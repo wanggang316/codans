@@ -107,6 +107,7 @@ struct ContentView: View {
         activePendingWorktreeID: store.activePendingWorktreeID,
         revealTrigger: store.revealSelectionTrigger,
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
+        notifiedWorktreeIDs: store.notifiedWorktreeIDs,
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
         workflowEngine: workflowEngine,
@@ -176,7 +177,7 @@ struct ContentView: View {
       store.send(.editor(.onAppear))
     }
     .onChange(of: notificationStore?.unreadWorktreeIDs ?? [], initial: true) { _, worktreeIDs in
-      store.send(.notifiedWorktreesChanged(worktreeIDs))
+      store.send(.unreadWorktreesChanged(worktreeIDs))
     }
     // A workflow's Run button in Settings: open the start panel here, for
     // the selected worktree, through the toolbar menu's own route.

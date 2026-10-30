@@ -41,6 +41,8 @@ struct HierarchySidebarView: View {
   /// badge (silent when no PR is matched) and the row hosts the PR popover. Nil in
   /// previews / tests that don't exercise the integration.
   var gitHubStore: StoreOf<GitHubFeature>?
+  /// Rows the notification filter lists (`RootFeature.State.notifiedWorktreeIDs`).
+  var notifiedWorktreeIDs: Set<WorktreeID> = []
   /// Optional editor store. Drives the worktree context menu's "Open in
   /// <Editor>" entry (resolved default) and "Open in" submenu (every
   /// installed editor). Nil in previews — the submenu falls back to the
@@ -215,10 +217,6 @@ struct HierarchySidebarView: View {
   private var pullRequestWorktreeIDs: Set<WorktreeID> {
     guard let gitHubStore else { return [] }
     return Set(gitHubStore.snapshots.keys)
-  }
-
-  private var notifiedWorktreeIDs: Set<WorktreeID> {
-    inbox?.unreadWorktreeIDs ?? []
   }
 
   var body: some View {

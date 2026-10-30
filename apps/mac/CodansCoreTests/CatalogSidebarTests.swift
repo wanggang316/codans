@@ -221,15 +221,14 @@ struct CatalogSidebarTests {
   }
 
   @Test
-  func notificationFilterKeepsTheSelectedRow() {
+  func notificationFilterListsOnlyNotifiedRows() {
     var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
     catalog.sidebarFilter = .notifications
     catalog.selectedProjectID = repository.id
     catalog.projects[0].selectedWorktreeID = feature.id
-    // Opening a row marks its notifications read; the row must not vanish.
     #expect(
       catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [checkout.id])
-        .map(\.worktreeID) == [feature.id, fixTerminal.id, checkout.id])
+        .map(\.worktreeID) == [fixTerminal.id, checkout.id])
   }
 
   @Test
@@ -302,6 +301,6 @@ struct CatalogSidebarTests {
     #expect(try decoder.decode(SidebarFilter.self, from: Data(#""local""#.utf8)) == .all)
     #expect(try decoder.decode(SidebarFilter.self, from: Data(#""favorites""#.utf8)) == .all)
     #expect(try decoder.decode(SidebarFilter.self, from: Data(#""pin""#.utf8)) == .all)
-    #expect(SidebarFilter.allCases == [.all, .remote, .workspace, .notifications, .pullRequests])
+    #expect(SidebarFilter.allCases == [.all, .remote, .workspace, .pullRequests, .notifications])
   }
 }
