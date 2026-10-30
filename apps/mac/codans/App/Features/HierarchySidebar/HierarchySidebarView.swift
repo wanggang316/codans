@@ -107,6 +107,7 @@ struct HierarchySidebarView: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
   @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
+  @Environment(NotificationStore.self) private var inbox: NotificationStore?
 
   /// Tracks whether the `.command` modifier is currently pressed. When held the sidebar
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
@@ -216,6 +217,10 @@ struct HierarchySidebarView: View {
     return Set(gitHubStore.snapshots.keys)
   }
 
+  private var notifiedWorktreeIDs: Set<WorktreeID> {
+    inbox?.unreadWorktreeIDs ?? []
+  }
+
   var body: some View {
     let catalog = hierarchyManager.catalog
     // Use the full catalog so a tag filter with no matches does not hide
@@ -225,7 +230,8 @@ struct HierarchySidebarView: View {
     // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
-    let visibleProjects = catalog.sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
+    let visibleProjects = catalog.sidebarProjects(
+      pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
 
     let isReordering = store.isReorderingProjects
@@ -248,9 +254,12 @@ struct HierarchySidebarView: View {
           store.send(.gitEnvironmentRecheckTapped)
         }
       }
-      SidebarFilterBar(selection: catalog.sidebarFilter) {
-        store.send(.sidebarFilterSelected($0))
-      }
+      SidebarFilterBar(
+        selection: catalog.sidebarFilter,
+        hasUnreadNotifications: (inbox?.unreadCount ?? 0) > 0,
+        onSelect: { store.send(.sidebarFilterSelected($0)) },
+        onMarkAllNotificationsRead: { inbox?.markAllRead() }
+      )
       .disabled(isReordering)
       if isReordering {
         reorderBanner
@@ -588,7 +597,8 @@ struct HierarchySidebarView: View {
       // stand for a folder, and the rows of expanded Projects); matching hints
       // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
       let hotkeyIndex: [WorktreeID: Int] = Dictionary(
-        hierarchyManager.catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
+        hierarchyManager.catalog.sidebarSelectionOrder(
+          pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
           .prefix(10).enumerated()
           .map { ($0.element.worktreeID, $0.offset) },
         uniquingKeysWith: { first, _ in first })
@@ -821,19 +831,22 @@ struct HierarchySidebarView: View {
           let mainRows = children.filter { $0.path == project.rootPath }
           let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
           let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
+          // The live-match filters show a subset of each segment, so its
+          // indices cannot drive a reorder.
+          let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
+            .contains(hierarchyManager.catalog.sidebarFilter)
           let pendingRows = store.pendingWorktrees.filter {
-            $0.projectID == project.id && hierarchyManager.catalog.sidebarFilter != .pin
-              && hierarchyManager.catalog.sidebarFilter != .pullRequests
+            $0.projectID == project.id && !isLiveMatchFilter
           }
           ForEach(mainRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
           }
           ForEach(pinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
+              .moveDisabled(isLiveMatchFilter)
           }
           .onMove { source, destination in
-            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
+            guard !isLiveMatchFilter else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -846,10 +859,10 @@ struct HierarchySidebarView: View {
           }
           ForEach(unpinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
+              .moveDisabled(isLiveMatchFilter)
           }
           .onMove { source, destination in
-            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
+            guard !isLiveMatchFilter else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -2627,7 +2640,11 @@ private struct LifecyclePhaseLineView: View {
 
 private struct SidebarFilterBar: View {
   let selection: SidebarFilter
+  /// Tints the notification glyph while it is not selected, so unread
+  /// notifications stay visible under any filter.
+  let hasUnreadNotifications: Bool
   var onSelect: (SidebarFilter) -> Void
+  var onMarkAllNotificationsRead: () -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   @State private var hoveredFilter: SidebarFilter?
@@ -2692,7 +2709,10 @@ private struct SidebarFilterBar: View {
               .accessibilityHidden(true)
           }
           .font(.system(size: TabBarMetrics.titleFontSize, weight: .semibold))
-          .foregroundStyle(selected ? Color.white : Color.secondary)
+          .foregroundStyle(
+            selected
+              ? Color.white
+              : filter == .notifications && hasUnreadNotifications ? tint(for: filter) : Color.secondary)
           .fixedSize()
           .offset(x: selected ? 0 : (titleWidth + 5) / 2)
           .animation(
@@ -2707,6 +2727,12 @@ private struct SidebarFilterBar: View {
         .contentShape(Capsule())
     }
     .buttonStyle(.plain)
+    .contextMenu {
+      if filter == .notifications {
+        Button("Mark All as Read", action: onMarkAllNotificationsRead)
+          .disabled(!hasUnreadNotifications)
+      }
+    }
     .onHover { hoveredFilter = $0 ? filter : nil }
     .help(title)
     .accessibilityLabel(title)
@@ -2718,7 +2744,7 @@ private struct SidebarFilterBar: View {
     case .all: "All"
     case .remote: "Remote"
     case .workspace: "Workspace"
-    case .pin: "Pin"
+    case .notifications: "Unread"
     case .pullRequests: "PR"
     }
   }
@@ -2728,7 +2754,7 @@ private struct SidebarFilterBar: View {
     case .all: "square.grid.2x2.fill"
     case .remote: "wifi"
     case .workspace: "square.stack.3d.up.fill"
-    case .pin: "pin.fill"
+    case .notifications: "bell.fill"
     case .pullRequests: "arrow.triangle.pull"
     }
   }
@@ -2739,7 +2765,7 @@ private struct SidebarFilterBar: View {
     case .remote: .indigo
     case .workspace: .purple
     case .pullRequests: .green
-    case .pin: Color(red: 0.65, green: 0.42, blue: 0.08)
+    case .notifications: .orange
     }
   }
 }

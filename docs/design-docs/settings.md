@@ -220,8 +220,7 @@ counts. Runtime Pane muting uses the `notifications:muted` label and drops
 candidates in the detector before any delivery path. The stored mute sets
 are not consulted by the detector or coordinator.
 
-`statusBarBellEnabled`, `projectBellEnabled`, `worktreeBellEnabled`, and
-`tabBellEnabled` control indicator visibility without changing inbox collection.
+`projectBellEnabled`, `worktreeBellEnabled`, and `tabBellEnabled` control indicator visibility without changing inbox collection.
 The full notification pipeline (detector → coordinator → sinks,
 roll-up badges, command-finished suppression) is its own subsystem — see
 [notifications.md](./notifications.md). This doc owns only the *settings* that

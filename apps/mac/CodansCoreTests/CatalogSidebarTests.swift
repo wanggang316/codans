@@ -190,7 +190,7 @@ struct CatalogSidebarTests {
   }
 
   @Test
-  func categoryFiltersAndPinShareSelectionOrder() {
+  func categoryFiltersShareSelectionOrder() {
     let repository = self.repository
     let workspace = self.workspace
     var remote = folder
@@ -200,37 +200,69 @@ struct CatalogSidebarTests {
     #expect(catalog.sidebarProjects.map(\.id) == [remote.id])
     catalog.sidebarFilter = .workspace
     #expect(catalog.sidebarProjects.map(\.id) == [workspace.id])
-    catalog.sidebarFilter = .pin
-    #expect(catalog.sidebarProjects.map(\.id) == [repository.id])
-    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [pinned.id])
-    catalog.projects[0].worktrees[2].archived = true
-    #expect(catalog.sidebarProjects.isEmpty)
   }
 
   @Test
-  func pinsKeepWorkspaceMembersAndRespectTags() {
-    var starredWorkspace = workspace
-    starredWorkspace.worktrees[1].isPinned = true
+  func notificationFilterUsesLiveMatchesAndExcludesArchivedRows() {
+    var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
+    catalog.sidebarFilter = .notifications
+    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: []).isEmpty)
+    let notified: Set<WorktreeID> = [pinned.id, checkout.id]
+    // Pull-request matches do not leak into the notification view.
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [feature.id], notifiedWorktreeIDs: notified)
+        .map(\.worktreeID) == [pinned.id, fixTerminal.id, checkout.id])
+    catalog.projects[0].worktrees[2].archived = true
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: notified).map(\.worktreeID)
+        == [fixTerminal.id, checkout.id])
+    catalog.activeTagFilter = .tags([TagID()])
+    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: notified).isEmpty)
+  }
+
+  @Test
+  func notificationFilterKeepsTheSelectedRow() {
+    var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
+    catalog.sidebarFilter = .notifications
+    catalog.selectedProjectID = repository.id
+    catalog.projects[0].selectedWorktreeID = feature.id
+    // Opening a row marks its notifications read; the row must not vanish.
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [checkout.id])
+        .map(\.worktreeID) == [feature.id, fixTerminal.id, checkout.id])
+  }
+
+  @Test
+  func aNotifiedGroupRowShowsWithoutItsMembers() {
+    let catalog = {
+      var catalog = Catalog(projects: [workspace])
+      catalog.sidebarFilter = .notifications
+      return catalog
+    }()
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [fixTerminal.id])
+        .map(\.worktreeID) == [fixTerminal.id])
+  }
+
+  @Test
+  func notifiedMembersKeepTheirGroupAndRespectTags() {
+    var tagged = workspace
     let tag = TagID()
-    starredWorkspace.tagIDs = [tag]
-    var catalog = Catalog(projects: [repository, starredWorkspace], activeTagFilter: .tags([tag]))
-    catalog.sidebarFilter = .pin
-    #expect(catalog.sidebarProjects.map(\.id) == [starredWorkspace.id])
+    tagged.tagIDs = [tag]
+    let catalog = {
+      var catalog = Catalog(projects: [repository, tagged], activeTagFilter: .tags([tag]))
+      catalog.sidebarFilter = .notifications
+      return catalog
+    }()
+    let notified: Set<WorktreeID> = [reference.id, feature.id]
+    #expect(
+      catalog.sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: notified).map(\.id) == [tagged.id])
     // The matching member's group stays visible and opens for the filtered
     // view only; the catalog keeps the group collapsed.
-    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [defaultTerminal.id, reference.id])
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: notified).map(\.worktreeID)
+        == [defaultTerminal.id, reference.id])
     #expect(catalog.projects[1].workspaceGroups[0].isExpanded == false)
-    catalog.projects[1].isExpanded = false
-    #expect(catalog.sidebarSelectionOrder.isEmpty)
-  }
-
-  @Test
-  func aPinnedGroupRowShowsWithoutItsMembers() {
-    var project = workspace
-    project.worktrees[2].isPinned = true
-    var catalog = Catalog(projects: [project])
-    catalog.sidebarFilter = .pin
-    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [fixTerminal.id])
   }
 
   @Test
@@ -240,7 +272,7 @@ struct CatalogSidebarTests {
     var catalog = Catalog(projects: [folder])
     let original = try encoder.encode(catalog)
     #expect(try decoder.decode(Catalog.self, from: original).sidebarFilter == .all)
-    catalog.sidebarFilter = .pin
+    catalog.sidebarFilter = .notifications
     #expect(try decoder.decode(Catalog.self, from: encoder.encode(catalog)) == catalog)
   }
 
@@ -248,25 +280,28 @@ struct CatalogSidebarTests {
   func pullRequestFilterUsesLiveMatchesAndExcludesArchivedRows() {
     var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
     catalog.sidebarFilter = .pullRequests
-    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: []).isEmpty)
+    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: []).isEmpty)
     let matches: Set<WorktreeID> = [feature.id, checkout.id]
     #expect(
-      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches, notifiedWorktreeIDs: []).map(\.worktreeID)
         == [feature.id, fixTerminal.id, checkout.id])
     catalog.projects[0].worktrees[0].archived = true
     #expect(
-      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches).map(\.worktreeID)
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: matches, notifiedWorktreeIDs: []).map(\.worktreeID)
         == [fixTerminal.id, checkout.id])
-    #expect(catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [pinned.id]).map(\.worktreeID) == [pinned.id])
+    #expect(
+      catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: [pinned.id], notifiedWorktreeIDs: [])
+        .map(\.worktreeID) == [pinned.id])
     catalog.activeTagFilter = .tags([TagID()])
-    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: matches).isEmpty)
+    #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: matches, notifiedWorktreeIDs: []).isEmpty)
   }
 
   @Test
   func legacyCategoriesMigrate() throws {
     let decoder = JSONDecoder()
     #expect(try decoder.decode(SidebarFilter.self, from: Data(#""local""#.utf8)) == .all)
-    #expect(try decoder.decode(SidebarFilter.self, from: Data(#""favorites""#.utf8)) == .pin)
-    #expect(SidebarFilter.allCases == [.all, .remote, .workspace, .pin, .pullRequests])
+    #expect(try decoder.decode(SidebarFilter.self, from: Data(#""favorites""#.utf8)) == .all)
+    #expect(try decoder.decode(SidebarFilter.self, from: Data(#""pin""#.utf8)) == .all)
+    #expect(SidebarFilter.allCases == [.all, .remote, .workspace, .notifications, .pullRequests])
   }
 }
