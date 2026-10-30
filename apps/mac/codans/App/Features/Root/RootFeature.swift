@@ -139,12 +139,10 @@ struct RootFeature {
     /// sessions, even though neither matters in practice.
     var revealSelectionTrigger: UUID = UUID()
 
-    /// Show-unread trigger. The chord (⌘U) bumps this to a fresh UUID;
-    /// `InboxBellView` observes the change through the WorktreeDetailView
-    /// scope and opens its popover. Same pattern as
-    /// `revealSelectionTrigger` — UUID rather than Bool so back-to-back
-    /// invocations always register as a new value.
-    var inboxBellPopoverTrigger: UUID = UUID()
+    /// Worktrees with unread notifications, mirrored from `NotificationStore`
+    /// by `ContentView`. The sidebar notification filter matches these rows,
+    /// so navigation that reads the filtered order needs the same set.
+    var notifiedWorktreeIDs: Set<WorktreeID> = []
 
     /// Back/forward history of selections, browser-style. `Back` pops from
     /// `navigationHistoryBack` and pushes onto `navigationHistoryForward`;
@@ -363,10 +361,11 @@ struct RootFeature {
     /// menu chord, the palette item, and any other entry point share the
     /// same effect.
     case checkForUpdatesRequested
-    /// Opens the status-bar bell popover (the in-app unread inbox). Bumps
-    /// `state.inboxBellPopoverTrigger` so `InboxBellView` toggles its
-    /// popover; the chord (⌘U) routes here from the main menu.
+    /// Shows the sidebar with the notification filter selected; the chord
+    /// (⌘U) routes here from the main menu.
     case showUnreadRequested
+    /// `ContentView` mirrors the inbox's unread worktrees into state.
+    case notifiedWorktreesChanged(Set<WorktreeID>)
     /// Resolves the current Worktree's absolute path and writes it to the
     /// system pasteboard. Silent no-op when no worktree is selected.
     case copyCurrentWorktreePathRequested
@@ -2393,7 +2392,11 @@ struct RootFeature {
         return .send(.windowActionRouter(.requested(.checkForUpdates)))
 
       case .showUnreadRequested:
-        state.inboxBellPopoverTrigger = UUID()
+        state.sidebarVisible = true
+        return .send(.sidebar(.sidebarFilterSelected(.notifications)))
+
+      case .notifiedWorktreesChanged(let worktreeIDs):
+        state.notifiedWorktreeIDs = worktreeIDs
         return .none
 
       case .copyCurrentWorktreePathRequested:
@@ -2429,7 +2432,8 @@ struct RootFeature {
 
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
-        let order = catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys))
+        let order = catalog.sidebarSelectionOrder(
+          pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs)
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2507,7 +2511,9 @@ struct RootFeature {
   ) {
     let catalog = hierarchyClient.snapshot()
     if catalog.sidebarFilter != .all,
-      !catalog.sidebarProjects(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys)).contains(where: { project in
+      !catalog.sidebarProjects(
+        pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs
+      ).contains(where: { project in
         project.worktrees.contains { $0.id == worktreeID }
       })
     {

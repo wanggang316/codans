@@ -21,8 +21,8 @@ struct ContentView: View {
   /// rows / tab bar / pane chrome can read per-level unread indicators
   /// without each site owning its own derivation.
   let notificationRollup: RollupIndexProvider?
-  /// Inbox owner. Threaded so the InboxBellView's popover can read
-  /// `entries`, mark rows read, and trigger a "Mark all read".
+  /// Inbox owner. Threaded so the sidebar notification filter can read
+  /// the unread worktrees and mark every entry read.
   let notificationStore: NotificationStore?
   /// Banner adapter. Threaded so the Settings → Notifications pane
   /// reuses the long-lived instance instead of spawning a fresh one
@@ -128,9 +128,7 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
-        onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
         onNewAgent: { store.send(.newAgentRequested) },
-        inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it
         // leaves `pendingWorktrees` (cancel / discard), this resolves to nil
@@ -176,6 +174,9 @@ struct ContentView: View {
       // remote Open button (and the context menu's editor list) could never
       // appear.
       store.send(.editor(.onAppear))
+    }
+    .onChange(of: notificationStore?.unreadWorktreeIDs ?? [], initial: true) { _, worktreeIDs in
+      store.send(.notifiedWorktreesChanged(worktreeIDs))
     }
     // A workflow's Run button in Settings: open the start panel here, for
     // the selected worktree, through the toolbar menu's own route.

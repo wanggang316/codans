@@ -11,7 +11,7 @@
 
 相邻子系统的权威文档：
 
-- 通知 / 未读上卷 / 状态栏铃铛：[notifications.md](notifications.md)。
+- 通知 / 未读上卷 / Unread 过滤：[notifications.md](notifications.md)。
 - Tag 模型 / 单窗口 / Tag 过滤：[project-tags.md](project-tags.md)。
 - 内置只读 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)。
 - Git Viewer（内置或外部客户端）：[editor-integration.md](editor-integration.md) 的「Git Viewer」一节。
@@ -36,7 +36,7 @@
 
 ### 快速分类过滤
 
-侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、Pin、PR。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Pin 复用 Worktree 的置顶状态，仅显示未归档的置顶行及其父项目；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。PR 数据刷新时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
+侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、Unread、PR。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及当前选中的 Worktree，连同父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
 
 ### Tag filter（已实现，当前隐藏）
 
@@ -153,7 +153,7 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 ## References
 
 - Tag / 单窗口：[project-tags.md](project-tags.md)
-- 通知 / 上卷 / 状态栏铃铛：[notifications.md](notifications.md)
+- 通知 / 上卷 / Unread 过滤：[notifications.md](notifications.md)
 - 内置 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)
 - Git Viewer（外部 git 客户端）：[editor-integration.md](editor-integration.md)
 - 键盘快捷键统管：[keyboard-shortcuts.md](keyboard-shortcuts.md)

@@ -17,9 +17,19 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **Notifications moved to the sidebar filter bar.** The Unread filter
+  (bell) takes the place of Pin and lists only the worktrees with unread
+  notifications, plus the selected one. The bell turns orange while
+  notifications are unread; right-click it to mark all as read. ⌘U shows
+  the sidebar with this filter.
+
 ### Deprecated
 
 ### Removed
+
+- **Header notification bell, its inbox popover, and the Pin sidebar
+  filter.** The "Show status-bar bell" setting is gone with the bell. A
+  saved Pin filter opens as All. Pinned worktrees still sort first.
 
 ### Fixed
 

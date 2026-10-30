@@ -21,6 +21,12 @@ public final class NotificationStore {
   /// for views to read than scanning `entries`.
   public private(set) var unreadCount: Int
 
+  /// Source worktrees of the unread entries. Feeds the sidebar
+  /// notification filter.
+  public var unreadWorktreeIDs: Set<WorktreeID> {
+    Set(entries.lazy.filter(\.isUnread).map(\.source.worktreeID))
+  }
+
   /// Non-nil when the inbox file on disk announced a `version` greater
   /// than this build understands and was renamed aside at launch. Set in
   /// `init` from `InboxFile.LoadResult`; never mutated thereafter. The

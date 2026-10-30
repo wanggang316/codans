@@ -15,7 +15,7 @@
 
 - 把运行时已经发出的结构化事件（OSC 9 桌面通知、终端 bell、OSC 133 命令结束、子进程退出、idle、crash）翻译成通知——**无需** stdout 扫描器。
 - 用既有的 `AtomicFileStore` 把 inbox 持久化跨重启。
-- 把未读状态呈现为按层级上卷的徽标（只在最深的隐藏祖先处显示），外加一个状态栏铃铛 + popover inbox。
+- 把未读状态呈现为按层级上卷的徽标（只在最深的隐藏祖先处显示），外加侧栏顶部的 Unread 过滤（只列出有未读通知的 Worktree）。
 - 让每条发出的通知都经过**唯一的策略闸（policy chokepoint）**，在任何副作用之前尊重用户设置与 macOS 授权。
 - 仅当来源 Pane 不是用户当前焦点时，才投递 macOS 横幅。
 
@@ -114,7 +114,7 @@ coordinator 在追加前后读取 inbox 中该 Worktree 的真实未读数，只
 
 ## 设置（`NotificationsSettings`）
 
-`Settings.notifications` 是通知设置 section。字段通过 `decodeIfPresent` 解码，文件中缺失的字段采用默认值。投递字段为 `inAppEnabled`、`systemEnabled`、`soundEnabled`、`dockBadgeEnabled`；指示器字段为 `statusBarBellEnabled`、`projectBellEnabled`、`worktreeBellEnabled`、`tabBellEnabled`，只控制显示、不影响收集。`moveNotifiedWorktreeToTop` 控制提升；`commandFinishedEnabled` 与 `commandFinishedThresholdSec` 控制命令完成检测（阈值默认 10 秒，解码与 UI 钳到 `[1,3600]`）。以上布尔值默认开启。`mute` 保存 `mutedRuleIDs` / `mutedPaneIDs` 集合，Settings 仅显示数量；检测与投递路径不读取这些集合。逐 Pane 静音的运行时入口是 `Pane.labels`。
+`Settings.notifications` 是通知设置 section。字段通过 `decodeIfPresent` 解码，文件中缺失的字段采用默认值。投递字段为 `inAppEnabled`、`systemEnabled`、`soundEnabled`、`dockBadgeEnabled`；指示器字段为 `projectBellEnabled`、`worktreeBellEnabled`、`tabBellEnabled`，只控制显示、不影响收集。`moveNotifiedWorktreeToTop` 控制提升；`commandFinishedEnabled` 与 `commandFinishedThresholdSec` 控制命令完成检测（阈值默认 10 秒，解码与 UI 钳到 `[1,3600]`）。以上布尔值默认开启。`mute` 保存 `mutedRuleIDs` / `mutedPaneIDs` 集合，Settings 仅显示数量；检测与投递路径不读取这些集合。逐 Pane 静音的运行时入口是 `Pane.labels`。
 
 **为何是四个正交布尔而非一个 `level` 枚举**：用户需要枚举表达不出的交叉组合（in-app 关 + system 开 =「仅后台」）。Sound 与 Dock badge 又是另外两个独立维度。
 
@@ -130,11 +130,13 @@ inbox 在内存中是 `[InboxEntry]`，持久化到 `~/.codans/state/notificatio
 
 ## 上卷（`RollupIndex`）
 
-在一个 TCA reducer 派生中计算（catalog 是几十个节点；每次输入增量做 O(N) 重算没问题），当两个输入之一变化时重建：未读集合，以及焦点状态（`focusedPaneID`、活跃 tab/worktree、展开集合）。各级指示器为**布尔**，唯一例外是状态栏铃铛——它携带数值型全局未读计数（被 Dock 徽标镜像）。
+在一个 TCA reducer 派生中计算（catalog 是几十个节点；每次输入增量做 O(N) 重算没问题），当两个输入之一变化时重建：未读集合，以及焦点状态（`focusedPaneID`、活跃 tab/worktree、展开集合）。各级指示器为**布尔**；数值型全局未读计数 `globalUnreadCount` 由 Dock 徽标镜像。
 
 **不变量——每条未读只贡献给恰好一个层级：最深的隐藏祖先。** L4 Project（折叠）· L3 Worktree（project 展开但 worktree 未活跃；Project 行自身代表的 worktree——文件夹、workspace 根，`Project.rowWorktree`——折叠时也在屏幕上，按 L3 计、铃铛画在 Project 行，见 `RollupFocusState.rowWorktreeIDs`）· L2 Tab（worktree 活跃但 tab 未活跃）· L1 Pane（tab 活跃但 pane 未聚焦）。在 L1，未读的 `.waitingForInput`（琥珀）压过 `.taskFinished`（绿）。`globalUnreadCount` 是未经上卷的总数（「每一条未读，无论你能否看到其来源」）。徽标计数必须是**对实时 catalog 的计算读取**，而非缓存字段——缓存会在仅 catalog 变更时变陈旧（例如删除一个非选中、令某条未读成为孤儿的 worktree），因为没有 selection 信号去使其失效。
 
-每个表面（侧栏 Project 点、Worktree 铃铛字形、Tab 点、Pane 顶线）通过一个小的 Equatable 切片读取 `RollupIndex`；L1–L4 仅为视觉。状态栏铃铛是**唯一**的 popover 入口（A5：逐级作用域 popover 被否——层级中的位置本身就回答了「在哪」，而对一个已上卷层级开作用域 popover，会展示其真实来源在更深几层的条目）。
+每个表面（侧栏 Project 点、Worktree 铃铛字形、Tab 点、Pane 顶线）通过一个小的 Equatable 切片读取 `RollupIndex`；L1–L4 仅为视觉。
+
+**Unread 过滤。** 侧栏顶部分类过滤栏的 Unread 项（`SidebarFilter.notifications`，铃铛字形）只列出 inbox 中有未读条目的 Worktree（按条目 `source.worktreeID`，不经上卷）及其父 Project，外加当前选中的 Worktree——点开一行会把其聚焦 Pane 的条目标为已读，该行不能因此从列表消失。有未读时，未选中的铃铛字形显示为橙色；右键菜单提供 Mark All as Read。⌘U（Show Unread Notifications）显示侧栏并选中该过滤。没有 popover inbox：通知的「在哪」由过滤后的层级直接回答。
 
 ## 导航
 
@@ -173,7 +175,7 @@ codans/App/Clients/HierarchyClient.swift   // + reorderWorktrees, setPaneLabel
 ## 备选方案（Alternatives）
 
 - **A1 — stdout 正则扫描器。** 否决：模式会漂移（"(y/n)" 会命中聊天记录），而一旦发一套正则就会招来规则编辑器。记录「请在你的工具里发 OSC 9」比永久维护这套正则更便宜；若真有用户撞上缺口，扫描器可作为增量回归。（根因见「技术决策」。）
-- **A2 — 侧栏 inbox 路由。** 否决：通知本质是瞬态的（读 → 点进 → 忘掉），常驻路由把它们过度提升。铃铛 + popover 才贴合实际流程。
+- **A2 — 侧栏 inbox 路由。** 否决：通知本质是瞬态的（读 → 点进 → 忘掉），常驻路由把它们过度提升。侧栏只提供按未读过滤的视图，不单列 inbox 条目。
 - **A3 — 基于 hook 的检测。** v1 否决：当前只有 Claude Code 写 c3 hooks；运行时的结构化事件覆盖任何遵守 OSC 9/133 的工具——严格更广。日后可增量加入。
 - **A4 — 把闸塞进检测器。** 否决：检测器已经是编排；把策略塞进去会模糊「纯翻译器 / 编排 / 策略」的拆分，并拉长测试矩阵。
 - **A5 — 逐级作用域 popover；单一开关枚举。** 均否决（见上文「上卷」与「设置」）。
