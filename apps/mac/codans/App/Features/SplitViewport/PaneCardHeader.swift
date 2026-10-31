@@ -42,13 +42,38 @@ struct PaneCardHeader: View {
           .transition(.opacity)
       }
     }
-    .padding(.leading, PaneCardMetrics.headerHorizontalInset - PaneCardMetrics.titleChipLeadingInset)
-    .padding(.trailing, PaneCardMetrics.headerHorizontalInset)
+    .padding(.horizontal, PaneCardMetrics.headerHorizontalInset)
     .frame(height: PaneCardMetrics.headerHeight)
     .contentShape(.rect)
     .onTapGesture(perform: onFocus)
     .accessibilityAddTraits(.isButton)
-    .modifier(PaneHeaderDragSource(paneID: paneID, isEnabled: isSplit, highlight: dropHighlight))
+    .modifier(
+      PaneHeaderDragSource(
+        paneID: paneID, isEnabled: isSplit, highlight: dropHighlight,
+        preview: dragPreview))
+  }
+
+  /// What follows the pointer during a pane move: the move mark and the
+  /// title on a capsule, not a snapshot of the header row.
+  private var dragPreview: some View {
+    HStack(spacing: PaneCardMetrics.titleChipSpacing) {
+      Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+        .font(.system(size: PaneCardMetrics.moveGlyphSize, weight: .medium))
+        .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
+        .accessibilityHidden(true)
+      Text(title)
+        .font(.system(size: PaneCardMetrics.headerTitleFontSize))
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .foregroundStyle(.primary)
+    .padding(.leading, PaneCardMetrics.titleChipLeadingInset + 2)
+    .padding(.trailing, PaneCardMetrics.titleChipTrailingInset + 2)
+    .frame(height: PaneCardMetrics.titleChipHeight + 6)
+    .frame(maxWidth: PaneCardMetrics.dragPreviewMaxWidth)
+    .fixedSize(horizontal: true, vertical: false)
+    .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
+    .overlay(Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
   }
 
   /// Glyph and title. When the pane can move, hovering them swaps the glyph
@@ -145,10 +170,11 @@ struct PaneCardHeader: View {
 
 /// Makes the header a pane drag source. A single-pane Tab has nowhere to
 /// drop the pane, so there the header starts no drag at all.
-private struct PaneHeaderDragSource: ViewModifier {
+private struct PaneHeaderDragSource<Preview: View>: ViewModifier {
   let paneID: PaneID
   let isEnabled: Bool
   let highlight: PaneDropHighlight
+  let preview: Preview
 
   func body(content: Content) -> some View {
     if isEnabled {
@@ -157,6 +183,8 @@ private struct PaneHeaderDragSource: ViewModifier {
         // the provider is handed to the system.
         highlight.begin()
         return paneDragProvider(for: paneID)
+      } preview: {
+        preview
       }
     } else {
       content
