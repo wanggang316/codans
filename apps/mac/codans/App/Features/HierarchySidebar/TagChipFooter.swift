@@ -109,8 +109,8 @@ struct TagFilterPopoverFooter: View {
     // Same insets as the Agents View card. The gap below the buttons equals
     // the one the card keeps above them, so they sit centered between the
     // card and the sidebar's bottom edge.
-    .padding(.horizontal, PaneCardMetrics.edgeMargin)
-    .padding(.bottom, PaneCardMetrics.edgeMargin)
+    .padding(.horizontal, AgentStateSidebarPanel.edgeInset)
+    .padding(.bottom, AgentStateSidebarPanel.edgeInset)
   }
 }
 

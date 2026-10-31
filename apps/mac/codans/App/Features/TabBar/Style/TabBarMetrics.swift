@@ -17,6 +17,8 @@ enum TabBarMetrics {
   /// The system bar sits flush under the toolbar and leaves this gap to
   /// the content below it.
   static let trackBottomInset: CGFloat = 8
+  /// Gap between the bar's leading / trailing edges and the track.
+  static let trackHorizontalInset: CGFloat = 8
   /// Chips are inset from the track on every side by this much.
   static let trackContentInset: CGFloat = 3
 

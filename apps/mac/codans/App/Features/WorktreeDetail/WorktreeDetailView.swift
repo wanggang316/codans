@@ -61,6 +61,9 @@ struct WorktreeDetailView: View {
   var historyForward: [HierarchySelection] = []
   /// Routes to `RootFeature.worktreeHistoryJumpRequested`.
   var onHistoryJump: (WorktreeHistoryJump) -> Void = { _ in }
+  /// Mirrors `RootFeature.State.sidebarVisible`; sets the leading gap of
+  /// the tab bar and the pane cards.
+  var isSidebarVisible: Bool = true
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   /// Window-toolbar chrome is hidden window-wide (see the
@@ -196,9 +199,10 @@ struct WorktreeDetailView: View {
           tabBarRow(address: address)
           terminalRegion(address: address)
         }
-        // The toolbar insets its items by the same margin, so the tab bar
-        // and the cards line up with them on both sides.
-        .padding(.horizontal, PaneCardMetrics.edgeMargin)
+        // The sidebar insets its own content from its trailing edge, so the
+        // cards sit flush against it; with the sidebar collapsed they take
+        // the same gap from the window edge as on every other side.
+        .padding(.leading, isSidebarVisible ? 0 : PaneCardMetrics.gap)
         // Same material as the sidebar, under the tab bar, the gaps between
         // the pane cards, and the toolbar, so the whole window reads as one
         // surface with the cards floating on it.

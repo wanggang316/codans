@@ -59,9 +59,9 @@ struct SplitViewportView: View {
         .coordinateSpace(.named(PaneMoveSession.coordinateSpace))
         .onPreferenceChange(PaneFramesPreferenceKey.self) { moveSession.frames = $0 }
         // No top gap: the toolbar already leaves one under its controls, and
-        // the tab bar adds its own when it shows. `WorktreeDetailView` owns
-        // the side margins.
-        .padding(.bottom, PaneCardMetrics.edgeMargin)
+        // the tab bar adds its own when it shows. The leading gap depends on
+        // the sidebar; `WorktreeDetailView` owns it.
+        .padding([.trailing, .bottom], PaneCardMetrics.gap)
         .environment(moveSession)
       } else if settledTabID == tabID {
         emptyPlaceholder
