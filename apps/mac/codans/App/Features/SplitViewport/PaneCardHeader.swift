@@ -26,6 +26,9 @@ struct PaneCardHeader: View {
   let onClose: () -> Void
   /// Drop of this pane on an edge of another pane in the Tab.
   let onMove: (_ anchor: PaneID, _ zone: PaneDropZone) -> Void
+  /// Whether the queued-commands list under the header is open. The queue
+  /// badge toggles it.
+  @Binding var isQueueListShown: Bool
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(PaneMoveSession.self) private var moveSession
@@ -39,6 +42,11 @@ struct PaneCardHeader: View {
     HStack(spacing: 0) {
       titleChip
       Spacer(minLength: 8)
+      if queuedCount > 0 {
+        queueBadge
+          .padding(.trailing, PaneCardMetrics.actionSpacing)
+          .transition(.opacity)
+      }
       if showsActions {
         actions
           .transition(.opacity)
@@ -93,6 +101,39 @@ struct PaneCardHeader: View {
       (hovering ? NSCursor.openHand : NSCursor.arrow).set()
     }
     .animation(.easeOut(duration: 0.12), value: showsMoveAffordance)
+  }
+
+  private var queuedCount: Int {
+    pane?.commandQueue.count ?? 0
+  }
+
+  /// Count of queued commands. Always shown while any wait, since it is
+  /// state rather than an action; a click opens the list.
+  private var queueBadge: some View {
+    Button {
+      isQueueListShown.toggle()
+    } label: {
+      HStack(spacing: 4) {
+        Image(systemName: CommandQueueStyle.symbol)
+          .font(.system(size: PaneCardMetrics.actionGlyphSize - 1, weight: .medium))
+          .accessibilityHidden(true)
+        Text("\(queuedCount)")
+          .font(.system(size: 11, weight: .semibold))
+          .monospacedDigit()
+      }
+      .foregroundStyle(Color.accentColor)
+      .padding(.horizontal, 8)
+      .frame(height: PaneCardMetrics.actionButtonSize)
+      .background(
+        Capsule().fill(Color.accentColor.opacity(isQueueListShown ? 0.24 : 0.14))
+      )
+      .contentShape(.capsule)
+    }
+    .buttonStyle(.plain)
+    .help(isQueueListShown ? "Hide Queued Commands" : "Show Queued Commands")
+    .accessibilityIdentifier("pane_hud.queue")
+    .accessibilityLabel(
+      queuedCount == 1 ? "1 queued command" : "\(queuedCount) queued commands")
   }
 
   private var actions: some View {
