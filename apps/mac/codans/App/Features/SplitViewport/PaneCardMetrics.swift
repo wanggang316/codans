@@ -25,6 +25,8 @@ enum PaneCardMetrics {
   static let titleChipTrailingInset: CGFloat = 10
   static let titleChipSpacing: CGFloat = 8
   static let moveGlyphSize: CGFloat = 11
+  /// Widest the chip that follows the pointer in a pane move can grow.
+  static let moveChipMaxWidth: CGFloat = 320
   /// Opacity of the primary color in every header hover fill.
   static let hoverFillOpacity: Double = 0.08
 

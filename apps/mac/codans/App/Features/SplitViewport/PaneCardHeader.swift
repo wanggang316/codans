@@ -51,7 +51,8 @@ struct PaneCardHeader: View {
     .accessibilityAddTraits(.isButton)
     .modifier(
       PaneHeaderMoveGesture(
-        paneID: paneID, isEnabled: isSplit, session: moveSession, onMove: onMove))
+        paneID: paneID, isEnabled: isSplit, title: title, session: moveSession,
+        onMove: onMove))
   }
 
   /// Glyph and title. When the pane can move, hovering them swaps the glyph
@@ -156,6 +157,7 @@ struct PaneCardHeader: View {
 private struct PaneHeaderMoveGesture: ViewModifier {
   let paneID: PaneID
   let isEnabled: Bool
+  let title: String
   let session: PaneMoveSession
   let onMove: (_ anchor: PaneID, _ zone: PaneDropZone) -> Void
 
@@ -165,7 +167,7 @@ private struct PaneHeaderMoveGesture: ViewModifier {
         .gesture(
           DragGesture(minimumDistance: 3, coordinateSpace: .named(PaneMoveSession.coordinateSpace))
             .onChanged { value in
-              session.drag(paneID, to: value.location)
+              session.drag(paneID, title: title, to: value.location)
               // Set on every move: the pointer crosses terminals, which set
               // their own cursor.
               NSCursor.closedHand.set()
