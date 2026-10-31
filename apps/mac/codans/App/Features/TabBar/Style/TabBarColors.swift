@@ -75,11 +75,6 @@ enum TabBarColors {
     dark: .black.withAlphaComponent(0.17)
   )
 
-  /// Opaque surface stamped under a chip while it is lifted in a drag, so
-  /// the floating copy fully occludes the chips it passes over instead of
-  /// letting their text bleed through the otherwise-transparent idle chip.
-  static let draggingBackground: Color = Color(nsColor: .windowBackgroundColor)
-
   /// Round hover affordance of the trailing accessory buttons (+, history,
   /// splits) — the bar's generic icon-button hover, not a chip state.
   static let hoverBackground: Color = Color.primary.opacity(0.06)
