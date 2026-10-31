@@ -279,6 +279,13 @@ struct HierarchySidebarView: View {
         .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
           sidebarHeightObservation = newHeight
         }
+        // The panel card is a translucent well with gaps around it, so it
+        // cannot hide the rows that scroll under it. Cut the list off at
+        // the panel's top edge instead.
+        .mask(alignment: .top) {
+          Rectangle()
+            .padding(.bottom, agentStatePanelVisible ? clampedAgentStatePanelHeight : 0)
+        }
 
         if agentStatePanelVisible, let registry = agentStateStore {
           AgentStateSidebarPanel(
