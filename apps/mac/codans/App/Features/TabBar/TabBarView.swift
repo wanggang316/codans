@@ -26,7 +26,9 @@ struct TabBarView: View {
     Group {
       if showsBar {
         barContent()
-          .padding(.horizontal, TabBarMetrics.trackHorizontalInset)
+          // Flush with the leading edge of the pane cards and with their
+          // trailing edge, which keeps the card gap from the window edge.
+          .padding(.trailing, PaneCardMetrics.gap)
           .frame(height: TabBarMetrics.trackHeight)
           .padding(.bottom, TabBarMetrics.trackBottomInset)
       } else {
