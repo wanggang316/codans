@@ -104,11 +104,9 @@ struct AgentStateSidebarPanel: View {
   private let resizeStripHeight: CGFloat = 12
 
   private let cornerRadius: CGFloat = 14
-  /// Gap between the card and the sidebar's side and bottom edges. The
-  /// card's own height is `height` minus the bottom gap, so the host's
-  /// list inset (`height`) still clears the whole panel. In an active
-  /// window the sidebar is its own glass panel with a visible edge, so the
-  /// card is centered in it rather than against the pane cards.
+  /// Gap between the card and the sidebar's bottom edge. The card's own
+  /// height is `height` minus this gap, so the host's list inset (`height`)
+  /// still clears the whole panel. The card spans the sidebar's full width.
   private let edgeInset: CGFloat = PaneCardMetrics.edgeMargin
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -122,7 +120,7 @@ struct AgentStateSidebarPanel: View {
     .background(shape.fill(.quinary))
     .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
     .clipShape(shape)
-    .padding([.horizontal, .bottom], edgeInset)
+    .padding(.bottom, edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
     // debounced inside the coordinator so the list doesn't flicker as
