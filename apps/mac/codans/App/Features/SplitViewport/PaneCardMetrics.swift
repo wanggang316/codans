@@ -43,9 +43,10 @@ enum PaneCardMetrics {
   /// background is close to the window backdrop.
   static let borderWidth: CGFloat = 0.5
 
-  /// Inset of the terminal surface inside the card, on the sides and the
-  /// bottom, so text does not touch the card edge.
-  static let surfaceInset: CGFloat = 6
+  /// Extra resize hit area on the two sides of the gap between cards. It
+  /// reaches only into the terminal's own edge padding, so it does not
+  /// take clicks from terminal text.
+  static let dividerHitOverhang: CGFloat = 4
 
   /// Opacity of an unfocused card in a split Tab.
   static let unfocusedOpacity: CGFloat = 0.7

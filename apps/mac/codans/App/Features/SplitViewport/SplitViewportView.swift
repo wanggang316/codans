@@ -264,11 +264,11 @@ private struct SubtreeView: View {
         },
       ),
       // The gap between two cards is the divider: the window backdrop shows
-      // through. The resize target also covers the card margins on both
-      // sides of the gap, up to the terminal edge.
+      // through. The resize target reaches a little past the gap on both
+      // sides.
       dividerColor: .clear,
       dividerThickness: PaneCardMetrics.gap,
-      dividerHitOverhang: PaneCardMetrics.surfaceInset * 2,
+      dividerHitOverhang: PaneCardMetrics.dividerHitOverhang,
       left: {
         SubtreeView(
           node: split.left,
@@ -349,7 +349,6 @@ private struct LeafView: View {
       // actions menu laid over it can unfold down across the terminal.
       Color.clear.frame(height: PaneCardMetrics.headerHeight)
       surfaceSlot(activeDropZone: activeDropZone)
-        .padding([.horizontal, .bottom], PaneCardMetrics.surfaceInset)
     }
     .background(Color(nsColor: terminalBackground))
     .overlay(alignment: .top) {
