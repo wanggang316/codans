@@ -7,14 +7,14 @@ enum PaneCardMetrics {
   /// Gap between two cards, and between the cards and the viewport edges.
   /// The split divider is exactly this thick, so the gap is also the drag
   /// target that resizes the split.
-  static let gap: CGFloat = 8
+  static let gap: CGFloat = 6
 
   static let cornerRadius: CGFloat = 12
 
   /// Card header row: icon + title on the leading side, pane actions on the
   /// trailing side.
   static let headerHeight: CGFloat = 32
-  static let headerHorizontalInset: CGFloat = 12
+  static let headerHorizontalInset: CGFloat = 6
   static let headerIconSize: CGFloat = 14
   static let headerTitleFontSize: CGFloat = 13
 
