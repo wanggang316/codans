@@ -24,9 +24,11 @@ struct PaneCardHeader: View {
   let onFocus: () -> Void
   let onSplit: (SplitTree<PaneID>.NewDirection) -> Void
   let onClose: () -> Void
+  /// Drop of this pane on an edge of another pane in the Tab.
+  let onMove: (_ anchor: PaneID, _ zone: PaneDropZone) -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(PaneDropHighlight.self) private var dropHighlight
+  @Environment(PaneMoveSession.self) private var moveSession
   @Dependency(TerminalClient.self) private var terminalClient
 
   /// Pointer over the glyph and title. In a split Tab this shows the move
@@ -48,38 +50,14 @@ struct PaneCardHeader: View {
     .onTapGesture(perform: onFocus)
     .accessibilityAddTraits(.isButton)
     .modifier(
-      PaneHeaderDragSource(
-        paneID: paneID, isEnabled: isSplit, highlight: dropHighlight,
-        preview: dragPreview))
-  }
-
-  /// What follows the pointer during a pane move: the move mark and the
-  /// title on a capsule, not a snapshot of the header row.
-  private var dragPreview: some View {
-    HStack(spacing: PaneCardMetrics.titleChipSpacing) {
-      Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-        .font(.system(size: PaneCardMetrics.moveGlyphSize, weight: .medium))
-        .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
-        .accessibilityHidden(true)
-      Text(title)
-        .font(.system(size: PaneCardMetrics.headerTitleFontSize))
-        .lineLimit(1)
-        .truncationMode(.middle)
-    }
-    .foregroundStyle(.primary)
-    .padding(.leading, PaneCardMetrics.titleChipLeadingInset + 2)
-    .padding(.trailing, PaneCardMetrics.titleChipTrailingInset + 2)
-    .frame(height: PaneCardMetrics.titleChipHeight + 6)
-    .frame(maxWidth: PaneCardMetrics.dragPreviewMaxWidth)
-    .fixedSize(horizontal: true, vertical: false)
-    .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
-    .overlay(Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+      PaneHeaderMoveGesture(
+        paneID: paneID, isEnabled: isSplit, session: moveSession, onMove: onMove))
   }
 
   /// Glyph and title. When the pane can move, hovering them swaps the glyph
   /// for a move mark on a capsule fill, to show the drag handle.
   private var titleChip: some View {
-    let showsMoveAffordance = isSplit && isHoveringTitle
+    let showsMoveAffordance = isSplit && (isHoveringTitle || moveSession.source == paneID)
     return HStack(spacing: PaneCardMetrics.titleChipSpacing) {
       Group {
         if showsMoveAffordance {
@@ -107,7 +85,12 @@ struct PaneCardHeader: View {
         .fill(Color.primary.opacity(showsMoveAffordance ? PaneCardMetrics.hoverFillOpacity : 0))
     )
     .contentShape(.capsule)
-    .onHover { isHoveringTitle = $0 }
+    .onHover { hovering in
+      isHoveringTitle = hovering
+      // An open hand tells the title is a handle; the move gesture closes it.
+      guard isSplit, moveSession.source == nil else { return }
+      (hovering ? NSCursor.openHand : NSCursor.arrow).set()
+    }
     .animation(.easeOut(duration: 0.12), value: showsMoveAffordance)
   }
 
@@ -168,24 +151,35 @@ struct PaneCardHeader: View {
   }
 }
 
-/// Makes the header a pane drag source. A single-pane Tab has nowhere to
-/// drop the pane, so there the header starts no drag at all.
-private struct PaneHeaderDragSource<Preview: View>: ViewModifier {
+/// Makes the header the handle of a pane move. A single-pane Tab has
+/// nowhere to move the pane, so there the header starts no move at all.
+private struct PaneHeaderMoveGesture: ViewModifier {
   let paneID: PaneID
   let isEnabled: Bool
-  let highlight: PaneDropHighlight
-  let preview: Preview
+  let session: PaneMoveSession
+  let onMove: (_ anchor: PaneID, _ zone: PaneDropZone) -> Void
 
   func body(content: Content) -> some View {
     if isEnabled {
-      content.onDrag {
-        // Arm the highlight for this drag and clear any stale state before
-        // the provider is handed to the system.
-        highlight.begin()
-        return paneDragProvider(for: paneID)
-      } preview: {
-        preview
-      }
+      content
+        .gesture(
+          DragGesture(minimumDistance: 3, coordinateSpace: .named(PaneMoveSession.coordinateSpace))
+            .onChanged { value in
+              session.drag(paneID, to: value.location)
+              // Set on every move: the pointer crosses terminals, which set
+              // their own cursor.
+              NSCursor.closedHand.set()
+            }
+            .onEnded { _ in
+              NSCursor.arrow.set()
+              guard let drop = session.finish(), drop.source == paneID else { return }
+              onMove(drop.anchor, drop.zone)
+            }
+        )
+        // A Tab switch can remove the header in the middle of a move.
+        .onDisappear {
+          if session.source == paneID { session.cancel() }
+        }
     } else {
       content
     }

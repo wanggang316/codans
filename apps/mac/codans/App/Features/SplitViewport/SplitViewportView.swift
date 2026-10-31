@@ -19,11 +19,10 @@ struct SplitViewportView: View {
   let worktreeID: WorktreeID
   let tabID: TabID
   @Environment(HierarchyManager.self) private var hierarchyManager
-  /// Shared drop-highlight state for the pane-move gesture, scoped to this
-  /// viewport. A single shared value (vs per-leaf state) so the highlight
-  /// follows the cursor across panes and always clears on drop — see
-  /// `PaneDropHighlight`.
-  @State private var dropHighlight = PaneDropHighlight()
+  /// The pane-move gesture state, scoped to this viewport. One shared value
+  /// (vs per-leaf state) so the highlight follows the pointer across panes
+  /// and always clears on drop — see `PaneMoveSession`.
+  @State private var moveSession = PaneMoveSession()
   /// The Tab whose `emptyStateGrace` has already elapsed, or nil before any
   /// has. It is compared against `tabID` *inside* the render pass, so a Tab
   /// the view has just been pointed at fails the check on its very first
@@ -53,11 +52,13 @@ struct SplitViewportView: View {
           projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .coordinateSpace(.named(PaneMoveSession.coordinateSpace))
+        .onPreferenceChange(PaneFramesPreferenceKey.self) { moveSession.frames = $0 }
         // No top gap: the toolbar already leaves one under its controls, and
         // the tab bar adds its own when it shows. The leading gap depends on
         // the sidebar; `WorktreeDetailView` owns it.
         .padding([.trailing, .bottom], PaneCardMetrics.gap)
-        .environment(dropHighlight)
+        .environment(moveSession)
       } else if settledTabID == tabID {
         emptyPlaceholder
       } else {
@@ -314,9 +315,9 @@ private struct LeafView: View {
   /// unfocused fade and the header drag since there is nothing to
   /// re-arrange against.
   let isSplit: Bool
-  /// Shared drop-highlight state (one per viewport). This leaf renders the
-  /// edge overlay only while it is the active target — see `PaneDropHighlight`.
-  @Environment(PaneDropHighlight.self) private var dropHighlight
+  /// Shared pane-move state (one per viewport). This leaf renders the edge
+  /// overlay only while it is the active target — see `PaneMoveSession`.
+  @Environment(PaneMoveSession.self) private var moveSession
   @Environment(HierarchyManager.self) private var hierarchyManager
   /// Fallback for `terminalColorScheme` when the terminal background has no
   /// perceived appearance.
@@ -333,13 +334,12 @@ private struct LeafView: View {
   @Dependency(TerminalClient.self) private var terminalClient
 
   var body: some View {
-    // Read the shared highlight in the body's OWN tracking scope (not only
-    // inside the nested `.overlay`/`GeometryReader` closures). Observation only
-    // re-renders this leaf for property reads it captured while evaluating
-    // `body`; reading it solely inside a child closure means the overlay shows
-    // during the drag (the active session forces re-renders) but never retracts
-    // when `clear()` runs on drop — the stuck-highlight bug.
-    let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
+    // Read the move session in the body's OWN tracking scope (not only inside
+    // the nested `.overlay` closures). Observation only re-renders this leaf
+    // for property reads it captured while evaluating `body`; reading it
+    // solely inside a child closure can leave the overlay up after the drop.
+    let activeDropZone: PaneDropZone? = moveSession.target == paneID ? moveSession.zone : nil
+    let isMoving = moveSession.source == paneID
     let shape = RoundedRectangle(cornerRadius: PaneCardMetrics.cornerRadius, style: .continuous)
     // A lone pane is the focused one by definition.
     let isFocusedCard = isFocused || !isSplit
@@ -348,7 +348,7 @@ private struct LeafView: View {
       // The header is drawn as an overlay, above the terminal, so the
       // actions menu laid over it can unfold down across the terminal.
       Color.clear.frame(height: PaneCardMetrics.headerHeight)
-      surfaceSlot(activeDropZone: activeDropZone)
+      surfaceSlot
     }
     .background(Color(nsColor: terminalBackground))
     .overlay(alignment: .top) {
@@ -364,6 +364,12 @@ private struct LeafView: View {
           store.send(
             .closePaneButtonTapped(
               paneID, inTab: tabID, inWorktree: worktreeID, inProject: projectID))
+        },
+        onMove: { anchor, zone in
+          store.send(
+            .movePaneRequested(
+              paneID, anchor: anchor, direction: zone.splitDirection,
+              inTab: tabID, inWorktree: worktreeID, inProject: projectID))
         },
       )
       // The header sits on the terminal background, so its text follows the
@@ -387,56 +393,36 @@ private struct LeafView: View {
         .strokeBorder(Color(nsColor: .separatorColor), lineWidth: PaneCardMetrics.borderWidth)
         .allowsHitTesting(false)
     }
+    // Where a moved pane will land. Drawn over the whole card, header too.
+    .overlay {
+      if let activeDropZone {
+        PaneDropOverlay(zone: activeDropZone)
+      }
+    }
     // An unfocused card lets the backdrop glass show through it, so it
-    // reads as set back from the focused one.
-    .opacity(isFocusedCard ? 1 : PaneCardMetrics.unfocusedOpacity)
+    // reads as set back from the focused one. The card being moved fades
+    // further.
+    .opacity(isMoving ? PaneCardMetrics.movingOpacity : isFocusedCard ? 1 : PaneCardMetrics.unfocusedOpacity)
     .animation(.easeInOut(duration: 0.12), value: isFocused)
+    .animation(.easeInOut(duration: 0.12), value: isMoving)
+    .background {
+      GeometryReader { geo in
+        Color.clear.preference(
+          key: PaneFramesPreferenceKey.self,
+          value: [paneID: geo.frame(in: .named(PaneMoveSession.coordinateSpace))])
+      }
+    }
     .onHover { isHoveringCard = $0 }
     .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
       configReloadTick &+= 1
     }
   }
 
-  /// The terminal under the card header, plus the pane-move drop target.
-  private func surfaceSlot(activeDropZone: PaneDropZone?) -> some View {
+  /// The terminal under the card header.
+  private var surfaceSlot: some View {
     GeometryReader { geo in
       paneContent(slotSize: geo.size)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Drop target. The custom `.touchCodePaneID` type (declared in the
-        // app's Info.plist `UTExportedTypeDeclarations`) is what makes
-        // `validateDrop` match the dragged item — without that declaration the
-        // pasteboard type is a dynamic UTI that never conforms, so the drop is
-        // silently rejected. `geo.size` feeds the edge-zone math.
-        .background {
-          Color.clear
-            .contentShape(.rect)
-            .onDrop(
-              of: [.touchCodePaneID],
-              delegate: PaneDropDelegate(
-                anchorID: paneID,
-                viewSize: geo.size,
-                highlight: dropHighlight,
-                commit: { sourceID, zone in
-                  store.send(
-                    .movePaneRequested(
-                      sourceID,
-                      anchor: paneID,
-                      direction: zone.splitDirection,
-                      inTab: tabID,
-                      inWorktree: worktreeID,
-                      inProject: projectID,
-                    ))
-                },
-              ),
-            )
-        }
-        // Drop-zone highlight, drawn above the surface but never hit-tested.
-        // Shown only while this leaf is the active drop target.
-        .overlay {
-          if let activeDropZone {
-            PaneDropOverlay(zone: activeDropZone)
-          }
-        }
     }
   }
 
