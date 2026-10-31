@@ -52,6 +52,10 @@ struct SplitViewportView: View {
           projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topLeading) {
+          PaneMoveChip(session: moveSession)
+            .animation(.easeOut(duration: 0.12), value: moveSession.source == nil)
+        }
         .coordinateSpace(.named(PaneMoveSession.coordinateSpace))
         .onPreferenceChange(PaneFramesPreferenceKey.self) { moveSession.frames = $0 }
         // No top gap: the toolbar already leaves one under its controls, and

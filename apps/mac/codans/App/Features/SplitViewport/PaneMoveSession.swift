@@ -55,6 +55,10 @@ final class PaneMoveSession {
 
   /// The pane being moved, or nil when no move is in progress.
   private(set) var source: PaneID?
+  /// Title of the moving pane, for the chip that follows the pointer.
+  private(set) var sourceTitle = ""
+  /// Pointer location in `coordinateSpace` while a move is in progress.
+  private(set) var location: CGPoint = .zero
   /// The pane under the pointer, other than the source.
   private(set) var target: PaneID?
   /// Which edge of `target` the pointer is over.
@@ -74,10 +78,12 @@ final class PaneMoveSession {
 
   /// Pointer moved to `location` while `pane` is dragged. Starts the move on
   /// the first call.
-  func drag(_ pane: PaneID, to location: CGPoint) {
+  func drag(_ pane: PaneID, title: String = "", to location: CGPoint) {
     if source != pane {
       source = pane
+      sourceTitle = title
     }
+    self.location = location
     guard
       let (hit, frame) = frames.first(where: { $0.key != pane && $0.value.contains(location) })
     else {
@@ -102,8 +108,48 @@ final class PaneMoveSession {
   /// Ends the move without a drop.
   func cancel() {
     source = nil
+    sourceTitle = ""
     target = nil
     zone = nil
+  }
+}
+
+/// The moving pane's title chip, drawn at the pointer so the user sees
+/// what is being moved. It is part of the viewport, not a drag image, so it
+/// tracks the pointer exactly and never leaves the window.
+struct PaneMoveChip: View {
+  let session: PaneMoveSession
+
+  var body: some View {
+    if session.source != nil {
+      HStack(spacing: PaneCardMetrics.titleChipSpacing) {
+        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+          .font(.system(size: PaneCardMetrics.moveGlyphSize, weight: .medium))
+          .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
+          .accessibilityHidden(true)
+        Text(session.sourceTitle)
+          .font(.system(size: PaneCardMetrics.headerTitleFontSize))
+          .lineLimit(1)
+          .truncationMode(.middle)
+      }
+      .foregroundStyle(.primary)
+      .padding(.leading, PaneCardMetrics.titleChipLeadingInset)
+      .padding(.trailing, PaneCardMetrics.titleChipTrailingInset)
+      .frame(height: PaneCardMetrics.titleChipHeight)
+      .frame(maxWidth: PaneCardMetrics.moveChipMaxWidth)
+      .fixedSize()
+      .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
+      .overlay(Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+      .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+      // The pointer holds the chip by its move mark, as it held the header.
+      .alignmentGuide(.leading) { _ in
+        PaneCardMetrics.titleChipLeadingInset + PaneCardMetrics.headerIconSize / 2
+      }
+      .alignmentGuide(.top) { $0.height / 2 }
+      .offset(x: session.location.x, y: session.location.y)
+      .allowsHitTesting(false)
+      .transition(.opacity)
+    }
   }
 }
 
