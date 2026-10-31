@@ -29,23 +29,21 @@ struct PaneCardHeader: View {
   @Environment(PaneDropHighlight.self) private var dropHighlight
   @Dependency(TerminalClient.self) private var terminalClient
 
+  /// Pointer over the glyph and title. In a split Tab this shows the move
+  /// affordance.
+  @State private var isHoveringTitle = false
+
   var body: some View {
-    HStack(spacing: 6) {
-      glyph
-        .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
-        .foregroundStyle(.secondary)
-      Text(title)
-        .font(.system(size: PaneCardMetrics.headerTitleFontSize, weight: .medium))
-        .foregroundStyle(isFocused ? .primary : .secondary)
-        .lineLimit(1)
-        .truncationMode(.middle)
+    HStack(spacing: 0) {
+      titleChip
       Spacer(minLength: 8)
       if showsActions {
         actions
           .transition(.opacity)
       }
     }
-    .padding(.horizontal, PaneCardMetrics.headerHorizontalInset)
+    .padding(.leading, PaneCardMetrics.headerHorizontalInset - PaneCardMetrics.titleChipInset)
+    .padding(.trailing, PaneCardMetrics.headerHorizontalInset)
     .frame(height: PaneCardMetrics.headerHeight)
     .contentShape(.rect)
     .onTapGesture(perform: onFocus)
@@ -53,12 +51,46 @@ struct PaneCardHeader: View {
     .modifier(PaneHeaderDragSource(paneID: paneID, isEnabled: isSplit, highlight: dropHighlight))
   }
 
+  /// Glyph and title. When the pane can move, hovering them swaps the glyph
+  /// for a move mark on a capsule fill, to show the drag handle.
+  private var titleChip: some View {
+    let showsMoveAffordance = isSplit && isHoveringTitle
+    return HStack(spacing: 6) {
+      Group {
+        if showsMoveAffordance {
+          Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+            .font(.system(size: PaneCardMetrics.headerIconSize - 1, weight: .medium))
+            .foregroundStyle(.primary)
+            .accessibilityHidden(true)
+        } else {
+          glyph
+            .foregroundStyle(.secondary)
+        }
+      }
+      .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
+      Text(title)
+        .font(.system(size: PaneCardMetrics.headerTitleFontSize, weight: .medium))
+        .foregroundStyle(isFocused ? .primary : .secondary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .padding(.horizontal, PaneCardMetrics.titleChipInset)
+    .frame(height: PaneCardMetrics.titleChipHeight)
+    .background(
+      Capsule()
+        .fill(Color.primary.opacity(showsMoveAffordance ? 0.06 : 0))
+    )
+    .contentShape(.capsule)
+    .onHover { isHoveringTitle = $0 }
+    .animation(.easeOut(duration: 0.12), value: showsMoveAffordance)
+  }
+
   private var actions: some View {
     HStack(spacing: PaneCardMetrics.actionSpacing) {
-      PaneCardHeaderButton(systemImage: "rectangle.split.2x1", help: "Split Right") {
+      PaneCardHeaderButton(systemImage: "square.righthalf.filled", help: "Split Right") {
         onSplit(.right)
       }
-      PaneCardHeaderButton(systemImage: "rectangle.split.1x2", help: "Split Down") {
+      PaneCardHeaderButton(systemImage: "square.bottomhalf.filled", help: "Split Down") {
         onSplit(.down)
       }
       // Actions menu slot, see the type comment.

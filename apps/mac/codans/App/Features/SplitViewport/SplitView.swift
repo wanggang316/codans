@@ -20,13 +20,15 @@ struct SplitView<L: View, R: View>: View {
   @Binding var split: CGFloat
   /// Thickness of the gap between the two sides. The divider fills it.
   private let splitterVisibleSize: CGFloat
-  private let splitterInvisibleSize: CGFloat = 6
+  /// Extra hit area added to the gap, split evenly across its two sides.
+  private let splitterInvisibleSize: CGFloat
 
   init(
     _ direction: Direction,
     _ split: Binding<CGFloat>,
     dividerColor: Color,
     dividerThickness: CGFloat = 1,
+    dividerHitOverhang: CGFloat = 6,
     resizeIncrements: CGSize = .init(width: 1, height: 1),
     @ViewBuilder left: (() -> L),
     @ViewBuilder right: (() -> R),
@@ -36,6 +38,7 @@ struct SplitView<L: View, R: View>: View {
     self._split = split
     self.dividerColor = dividerColor
     self.splitterVisibleSize = dividerThickness
+    self.splitterInvisibleSize = dividerHitOverhang
     self.resizeIncrements = resizeIncrements
     self.left = left()
     self.right = right()
@@ -141,24 +144,42 @@ struct SplitView<L: View, R: View>: View {
         Rectangle()
           .fill(color)
           .frame(width: visibleWidth, height: visibleHeight)
+        // Grip that shows the gap is a drag target.
+        Capsule()
+          .fill(.tertiary)
+          .frame(width: gripWidth, height: gripHeight)
+          .opacity(isHovered ? 1 : 0)
+          .animation(.easeOut(duration: 0.12), value: isHovered)
       }
       .frame(width: hitboxWidth, height: hitboxHeight)
       .contentShape(.rect)
-      .onHover { hovering in
-        guard hovering != isHovered else { return }
-        isHovered = hovering
-        if hovering {
-          hoverCursor.push()
-        } else {
-          NSCursor.pop()
+      // Set the cursor on every move, not once with push / pop: the
+      // terminal next to the gap sets its own cursor, and a single push
+      // loses to it.
+      .onContinuousHover { phase in
+        switch phase {
+        case .active:
+          isHovered = true
+          hoverCursor.set()
+        case .ended:
+          isHovered = false
+          NSCursor.arrow.set()
         }
       }
       .onDisappear {
         if isHovered {
           isHovered = false
-          NSCursor.pop()
+          NSCursor.arrow.set()
         }
       }
+    }
+
+    private var gripWidth: CGFloat {
+      direction == .horizontal ? 4 : 36
+    }
+
+    private var gripHeight: CGFloat {
+      direction == .horizontal ? 36 : 4
     }
 
     private var hoverCursor: NSCursor {

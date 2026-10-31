@@ -17,6 +17,9 @@ enum PaneCardMetrics {
   static let headerHorizontalInset: CGFloat = 6
   static let headerIconSize: CGFloat = 14
   static let headerTitleFontSize: CGFloat = 13
+  /// Capsule around the glyph and title that shows the move affordance.
+  static let titleChipHeight: CGFloat = 24
+  static let titleChipInset: CGFloat = 6
 
   /// Square hit box of one header action button.
   static let actionButtonSize: CGFloat = 22
