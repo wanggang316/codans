@@ -139,7 +139,6 @@ struct ContentView: View {
         historyBack: store.navigationHistoryBack,
         historyForward: store.navigationHistoryForward,
         onHistoryJump: { jump in store.send(.worktreeHistoryJumpRequested(jump)) },
-        isSidebarVisible: store.sidebarVisible,
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .overlay(alignment: .bottom) { editorToastOverlay }
