@@ -36,4 +36,7 @@ enum PaneCardMetrics {
   /// Inset of the terminal surface inside the card, on the sides and the
   /// bottom, so text does not touch the card edge.
   static let surfaceInset: CGFloat = 6
+
+  /// Opacity of an unfocused card in a split Tab.
+  static let unfocusedOpacity: CGFloat = 0.7
 }
