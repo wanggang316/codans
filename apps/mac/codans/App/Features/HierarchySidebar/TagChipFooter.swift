@@ -106,11 +106,12 @@ struct TagFilterPopoverFooter: View {
         .accessibilityLabel("Refresh all projects")
       }
     }
-    .padding(.horizontal, 8)
-    // The same gap below the buttons as the Agents View card keeps above
-    // them (its edge inset), so the buttons sit centered between the card
-    // and the sidebar's bottom edge.
-    .padding(.bottom, 10)
+    // Same insets as the Agents View card: none at the trailing edge, where
+    // the detail column's margin follows. The gap below the buttons equals
+    // the one the card keeps above them, so they sit centered between the
+    // card and the sidebar's bottom edge.
+    .padding(.leading, PaneCardMetrics.edgeMargin)
+    .padding(.bottom, PaneCardMetrics.edgeMargin)
   }
 }
 

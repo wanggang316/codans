@@ -104,10 +104,15 @@ struct AgentStateSidebarPanel: View {
   private let resizeStripHeight: CGFloat = 12
 
   private let cornerRadius: CGFloat = 14
-  /// Gap between the card and the sidebar's side and bottom edges. The
+  /// Gap between the card and the sidebar's leading and bottom edges. The
   /// card's own height is `height` minus the bottom gap, so the host's
   /// list inset (`height`) still clears the whole panel.
-  private let edgeInset: CGFloat = 10
+  ///
+  /// There is no trailing gap: the detail column's margin
+  /// (`PaneCardMetrics.edgeMargin`) already lies between the sidebar's
+  /// trailing edge and the pane cards, on the same backdrop. So the card is
+  /// as far from the pane cards as from the window edge.
+  private let edgeInset: CGFloat = PaneCardMetrics.edgeMargin
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     return VStack(spacing: 0) {
@@ -120,7 +125,7 @@ struct AgentStateSidebarPanel: View {
     .background(shape.fill(.quinary))
     .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
     .clipShape(shape)
-    .padding([.horizontal, .bottom], edgeInset)
+    .padding([.leading, .bottom], edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
     // debounced inside the coordinator so the list doesn't flicker as
