@@ -863,17 +863,22 @@ final class GhosttySurfaceView: NSView, NSTextInputClient {
     guard event.type == .rightMouseDown else { return nil }
     guard let surface, !ghostty_surface_mouse_captured(surface) else { return nil }
 
-    // Built from `PaneSurfaceAction.groups` rather than spelled out here, so
-    // this menu and the pane HUD card offer exactly the same actions in the
-    // same order. See `PaneSurfaceAction`.
     let menu = NSMenu()
+    addPaneActionItems(to: menu)
+    return menu
+  }
+
+  /// Appends the surface's actions to `menu`, one group per section. Built
+  /// from `PaneSurfaceAction.groups` rather than spelled out per menu, so
+  /// this right-click menu and the pane header's actions menu offer exactly
+  /// the same actions in the same order. See `PaneSurfaceAction`.
+  func addPaneActionItems(to menu: NSMenu) {
     for group in PaneSurfaceAction.groups {
       let offered = group.filter { !$0.needsSelection || hasSelection }
       guard !offered.isEmpty else { continue }
       if menu.numberOfItems > 0 { menu.addItem(.separator()) }
       for action in offered { menu.addItem(menuItem(action)) }
     }
-    return menu
   }
 
   private func menuItem(_ action: PaneSurfaceAction) -> NSMenuItem {

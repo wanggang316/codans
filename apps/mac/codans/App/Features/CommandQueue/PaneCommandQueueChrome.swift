@@ -1,11 +1,12 @@
 import CodansCore
 import SwiftUI
 
-/// Shares pane-local visibility between the floating list and its restore button.
+/// Laid over a whole pane card: the actions menu button in the card header,
+/// left of the close button, and the queued-commands list under the header.
 ///
-/// Laid over a whole pane card: the actions menu button lands in the card
-/// header, left of the close button, and the queue list hangs below the
-/// header over the terminal.
+/// The list opens only on request, from the queue badge in the header. It
+/// never opens by itself over the terminal: a queued command is waiting,
+/// not news, and the badge already says how many there are.
 struct PaneCommandQueueChrome: View {
   let paneID: PaneID
   let surface: PaneSurface?
@@ -14,168 +15,151 @@ struct PaneCommandQueueChrome: View {
   /// A click on the menu also focuses its pane, so the header actions stay
   /// up while the menu is open.
   var onMenuInteraction: () -> Void = {}
+  /// Whether the queued-commands list is open. The header's queue badge
+  /// toggles it.
+  @Binding var isQueueListShown: Bool
 
-  @SceneStorage private var isHidden: Bool
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @State private var isExpanded = false
-  @State private var requestedPage = 0
-
-  init(
-    paneID: PaneID, surface: PaneSurface?, showsMenu: Bool = true,
-    onMenuInteraction: @escaping () -> Void = {},
-  ) {
-    self.paneID = paneID
-    self.surface = surface
-    self.showsMenu = showsMenu
-    self.onMenuInteraction = onMenuInteraction
-    _isHidden = SceneStorage(wrappedValue: false, "commandQueue.hidden.\(paneID)")
-  }
 
   private var entries: [QueuedCommand] {
     hierarchyManager.catalog.pane(paneID)?.commandQueue ?? []
   }
 
   var body: some View {
-    GeometryReader { geometry in
-      let availableHeight = max(0, geometry.size.height - PaneCardMetrics.headerHeight - 28)
-      let page = CommandQueuePage(
-        entryCount: entries.count, availableHeight: availableHeight,
-        expanded: isExpanded, requestedPage: requestedPage,
-      )
-      ZStack(alignment: .topTrailing) {
-        if !isHidden, !entries.isEmpty,
-          availableHeight >= CommandQueuePage.chromeHeight + CommandQueuePage.rowHeight
-        {
-          panel(page)
-            .frame(maxWidth: 560)
-            .padding(.leading, 14)
-            .padding(.trailing, 58)
-            .padding(.top, PaneCardMetrics.headerHeight + 8)
-            .frame(maxWidth: .infinity, alignment: .top)
+    ZStack(alignment: .topTrailing) {
+      if isQueueListShown, !entries.isEmpty {
+        PaneCommandQueueList(paneID: paneID, entries: entries) {
+          isQueueListShown = false
         }
-        if showsMenu {
-          PaneHUDView(
-            paneID: paneID, surface: surface,
-            onShowQueue: { isHidden = false },
-            onMenuPressed: onMenuInteraction
-          )
-          // Puts the menu button in the header slot that `PaneCardHeader`
-          // reserves left of its close button. The HUD pads its button by
-          // `chromeInset`, so that inset comes off both offsets.
-          .padding(.trailing, PaneCardMetrics.menuSlotTrailingOffset - PaneHUDView.chromeInset)
-          .offset(y: PaneCardMetrics.actionButtonTop - PaneHUDView.chromeInset)
-        }
+        .padding(.top, PaneCardMetrics.headerHeight + 2)
+        .padding(.horizontal, PaneCardMetrics.headerHorizontalInset)
+        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-      .onChange(of: page.index) { _, index in requestedPage = index }
+      if showsMenu {
+        PaneActionsMenuButton(
+          paneID: paneID, surface: surface, onMenuPressed: onMenuInteraction
+        )
+        // Puts the menu button in the header slot that `PaneCardHeader`
+        // reserves left of its close button.
+        .padding(.trailing, PaneCardMetrics.menuSlotTrailingOffset)
+        .padding(.top, PaneCardMetrics.actionButtonTop)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    .animation(.easeOut(duration: 0.14), value: isQueueListShown && !entries.isEmpty)
+    // The list closes with its last command.
+    .onChange(of: entries.isEmpty) { _, isEmpty in
+      if isEmpty { isQueueListShown = false }
     }
   }
+}
 
-  private func panel(_ page: CommandQueuePage) -> some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 8) {
-        Text("Queued (\(entries.count))")
-          .fontWeight(.medium)
-          .lineLimit(1)
-        Spacer(minLength: 0)
-        Button("Clear All") { hierarchyManager.setCommandQueue([], for: paneID) }
+/// The queued commands of one pane, newest last, in a card under the
+/// header's queue badge. Opaque, so terminal output never reads through it.
+private struct PaneCommandQueueList: View {
+  let paneID: PaneID
+  let entries: [QueuedCommand]
+  let onDismiss: () -> Void
+
+  @Environment(HierarchyManager.self) private var hierarchyManager
+
+  private static let width: CGFloat = 380
+  private static let maxListHeight: CGFloat = 264
+  private static let cornerRadius: CGFloat = 10
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 6) {
+        Text("Queued Commands")
+          .font(.system(size: 12, weight: .semibold))
+        Text("\(entries.count)")
+          .font(.system(size: 11, weight: .medium))
+          .monospacedDigit()
           .foregroundStyle(.secondary)
-        Button {
-          isHidden = true
-        } label: {
-          Image(systemName: "xmark")
+        Spacer(minLength: 8)
+        Button("Clear All") { hierarchyManager.setCommandQueue([], for: paneID) }
+          .buttonStyle(.borderless)
+          .font(.system(size: 11))
+      }
+      .padding(.horizontal, 12)
+      .frame(height: 34)
+      Divider()
+      ScrollView {
+        VStack(spacing: 0) {
+          ForEach(entries) { entry in
+            PaneCommandQueueRow(entry: entry) {
+              hierarchyManager.setCommandQueue(entries.filter { $0.id != entry.id }, for: paneID)
+            }
+          }
         }
-        .buttonStyle(QueueDismissButtonStyle())
-        .help("Hide queued commands")
-        .accessibilityLabel("Hide queued commands")
+        .padding(4)
       }
-      .frame(height: 28)
-      ForEach(Array(entries[page.range])) { entry in
-        row(entry)
-      }
-      if entries.count > page.range.count || isExpanded {
-        footer(page)
-          .frame(height: 28)
-      }
+      .scrollBounceBehavior(.basedOnSize)
+      .frame(maxHeight: Self.maxListHeight)
+      .fixedSize(horizontal: false, vertical: true)
     }
-    .font(.system(size: 11))
-    .buttonStyle(.plain)
-    .padding(10)
-    .floatingCard(cornerRadius: 10)
+    .frame(maxWidth: Self.width)
+    .background {
+      RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        .fill(Color(nsColor: .windowBackgroundColor))
+        .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
+    }
+    .overlay {
+      RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
+    }
+    .dismissOnClickOutside(isPresented: true, onDismiss: onDismiss)
     .accessibilityIdentifier("pane.command_queue")
   }
+}
 
-  private func footer(_ page: CommandQueuePage) -> some View {
-    HStack(spacing: 8) {
-      Button(isExpanded ? "Show Less" : "Show More") {
-        isExpanded.toggle()
-        requestedPage = 0
-      }
-      Spacer(minLength: 0)
-      if isExpanded, page.count > 1 {
-        Button {
-          requestedPage = page.index - 1
-        } label: {
-          Image(systemName: "chevron.left")
-        }
-        .disabled(page.index == 0)
-        .accessibilityLabel("Previous queue page")
-        Text("\(page.index + 1) / \(page.count)")
-          .monospacedDigit()
-        Button {
-          requestedPage = page.index + 1
-        } label: {
-          Image(systemName: "chevron.right")
-        }
-        .disabled(page.index + 1 == page.count)
-        .accessibilityLabel("Next queue page")
-      }
-    }
-    .foregroundStyle(.secondary)
-  }
+/// One queued command: what will be sent, and when. The remove button shows
+/// on hover, so a list of commands does not read as a column of buttons.
+private struct PaneCommandQueueRow: View {
+  let entry: QueuedCommand
+  let onRemove: () -> Void
 
-  private func row(_ entry: QueuedCommand) -> some View {
-    HStack(spacing: 8) {
+  @State private var isHovered = false
+
+  var body: some View {
+    HStack(spacing: 10) {
       Image(systemName: entry.timing.fireDate == nil ? "arrow.turn.down.right" : "clock")
-        .accessibilityHidden(true)
+        .font(.system(size: 12))
         .foregroundStyle(.secondary)
-        .frame(width: 14)
+        .frame(width: 16)
+        .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(entry.text.split(whereSeparator: \.isNewline).joined(separator: " ⏎ "))
           .font(.system(size: 12, design: .monospaced))
           .lineLimit(1)
           .truncationMode(.tail)
         Text(CommandQueueStyle.description(of: entry.timing))
+          .font(.system(size: 11))
           .foregroundStyle(.secondary)
           .lineLimit(1)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      Button {
-        hierarchyManager.setCommandQueue(entries.filter { $0.id != entry.id }, for: paneID)
-      } label: {
-        Image(systemName: "xmark.circle.fill")
+      Button(action: onRemove) {
+        Image(systemName: "xmark")
+          .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(.secondary)
+          .frame(width: 20, height: 20)
+          .background(Circle().fill(Color.primary.opacity(PaneCardMetrics.hoverFillOpacity)))
+          .contentShape(.circle)
       }
-      .buttonStyle(QueueDismissButtonStyle())
+      .buttonStyle(.plain)
+      .opacity(isHovered ? 1 : 0)
+      .help("Remove")
       .accessibilityLabel("Remove queued command")
     }
-    .frame(height: CommandQueuePage.rowHeight)
+    .padding(.horizontal, 8)
+    .frame(height: 44)
+    .background(
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .fill(Color.primary.opacity(isHovered ? 0.05 : 0))
+    )
+    .contentShape(.rect)
+    .onHover { isHovered = $0 }
     .help(entry.text)
-  }
-}
-
-/// The full square is interactive, including the space around the glyph.
-private struct QueueDismissButtonStyle: ButtonStyle {
-  @State private var isHovered = false
-
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .frame(width: 28, height: 28)
-      .background {
-        RoundedRectangle(cornerRadius: 6)
-          .fill(Color.primary.opacity(configuration.isPressed ? 0.16 : (isHovered ? 0.08 : 0)))
-      }
-      .contentShape(Rectangle())
-      .onHover { isHovered = $0 }
   }
 }

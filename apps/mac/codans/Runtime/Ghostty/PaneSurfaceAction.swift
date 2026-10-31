@@ -4,14 +4,15 @@ import Foundation
 ///
 /// Both places the user reaches them from render this one list: the
 /// surface's own right-click menu (`GhosttySurfaceView.menu(for:)`) and the
-/// pane HUD card in the pane's top-right corner. Adding a case here puts the
+/// actions menu in the pane card header. Adding a case here puts the
 /// action in both, which is the point — the corner menu exists so these are
 /// discoverable without knowing that right-click does anything, and a menu
 /// that silently offers less than the other is worse than no menu.
 ///
 /// The list is deliberately terminal-scoped. Actions that belong to the
 /// pane's *row* rather than its surface — hand off, the command queue, the
-/// notification mute — are the HUD's own and live in `PaneHUDView`.
+/// notification mute — are the actions menu's own and live in
+/// `PaneActionsMenuButton`.
 nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
   case copy
   case paste
@@ -66,16 +67,14 @@ nonisolated enum PaneSurfaceAction: CaseIterable, Hashable, Sendable {
     }
   }
 
-  /// Actions that need something selected on screen. The right-click menu
-  /// drops such an item; the HUD card shows it disabled, because a card the
-  /// user opens to find out what a pane can do should say that copying is
-  /// possible at all.
+  /// Actions that need something selected on screen. Both menus drop such
+  /// an item while nothing is selected.
   var needsSelection: Bool {
     self == .copy
   }
 
-  /// Suffix for the HUD row's accessibility identifier (`pane_hud.<id>`),
-  /// which is also how the AX-driven UI harness addresses the row.
+  /// Suffix for an accessibility identifier (`pane_hud.<id>`), which is also
+  /// how the AX-driven UI harness addresses the row.
   var accessibilityID: String {
     switch self {
     case .copy: "copy"
