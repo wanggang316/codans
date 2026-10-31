@@ -186,6 +186,10 @@ struct TabBarRowView: View {
     }
     .coordinateSpace(name: Self.rowSpace)
     .onPreferenceChange(ChipFrameKey.self) { chipFrames = $0 }
+    // Cut the in-flow chips out under the lifted copy, so their titles do
+    // not show through it. The copy then needs no plate of its own and
+    // keeps the selected chip's translucent fill over the track.
+    .mask { dragMask }
     .overlay(alignment: .topLeading) { floatingChip(in: rendered) }
     .animation(Self.addRemoveAnimation, value: rendered.map(\.id))
     .onAppear {
@@ -269,6 +273,27 @@ struct TabBarRowView: View {
     }
   }
 
+  /// Everything but the lifted copy's footprint while a drag is in
+  /// progress; the whole row otherwise.
+  private var dragMask: some View {
+    GeometryReader { geo in
+      if let id = draggingID, let frame = chipFrames[id] {
+        // A little wider than the copy, which is scaled up while lifted.
+        let width = frame.width * 1.03 + 2
+        let cutout = CGRect(
+          x: dragCursorX - width / 2, y: 0, width: width, height: TabBarMetrics.chipHeight)
+        Path { path in
+          path.addRect(CGRect(origin: .zero, size: geo.size))
+          path.addRoundedRect(
+            in: cutout, cornerSize: CGSize(width: cutout.height / 2, height: cutout.height / 2))
+        }
+        .fill(style: FillStyle(eoFill: true))
+      } else {
+        Rectangle()
+      }
+    }
+  }
+
   /// The lifted chip that tracks the cursor during a drag, rendered above
   /// the row. Non-interactive — the gesture lives on the in-flow chip,
   /// which continues to receive drag events even at zero opacity.
@@ -280,10 +305,13 @@ struct TabBarRowView: View {
     {
       chipView(for: rendered[index], index: index, count: rendered.count)
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        // Opaque plate so the lifted copy occludes the chips it floats
-        // over — the chip's own idle fill is `.clear`, which would let
-        // their titles bleed through and overlap.
-        .background(Capsule().fill(TabBarColors.draggingBackground))
+        // A lifted idle chip takes the selected chip's raised capsule, so
+        // every lifted copy reads the same; a selected chip has its own.
+        .background {
+          if id != selectedID {
+            TabChipBackground(isActive: true, isHovering: false)
+          }
+        }
         // Hard-clip the lifted copy to its own chip frame. On macOS 26 the
         // copy's opaque background otherwise paints a tall white column up to
         // the titlebar during a drag (a SwiftUI host/overlay regression — the
