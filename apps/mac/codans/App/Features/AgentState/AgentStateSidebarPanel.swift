@@ -106,8 +106,11 @@ struct AgentStateSidebarPanel: View {
   private let cornerRadius: CGFloat = 14
   /// Gap between the card and the sidebar's bottom edge. The card's own
   /// height is `height` minus this gap, so the host's list inset (`height`)
-  /// still clears the whole panel. The card spans the sidebar's full width.
+  /// still clears the whole panel.
   private let edgeInset: CGFloat = PaneCardMetrics.edgeMargin
+  /// Gap between the card and the sidebar's sides: just enough to keep the
+  /// card's corners off the sidebar's edge.
+  private let sideInset: CGFloat = 2
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     return VStack(spacing: 0) {
@@ -120,6 +123,7 @@ struct AgentStateSidebarPanel: View {
     .background(shape.fill(.quinary))
     .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
     .clipShape(shape)
+    .padding(.horizontal, sideInset)
     .padding(.bottom, edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
