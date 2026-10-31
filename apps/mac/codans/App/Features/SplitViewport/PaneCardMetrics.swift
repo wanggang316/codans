@@ -18,8 +18,15 @@ enum PaneCardMetrics {
   static let headerIconSize: CGFloat = 14
   static let headerTitleFontSize: CGFloat = 13
   /// Capsule around the glyph and title that shows the move affordance.
-  static let titleChipHeight: CGFloat = 24
-  static let titleChipInset: CGFloat = 6
+  /// It has the height of an action button, so all hover fills in the
+  /// header have the same rounding.
+  static let titleChipHeight: CGFloat = actionButtonSize
+  static let titleChipLeadingInset: CGFloat = 6
+  static let titleChipTrailingInset: CGFloat = 10
+  static let titleChipSpacing: CGFloat = 8
+  static let moveGlyphSize: CGFloat = 11
+  /// Opacity of the primary color in every header hover fill.
+  static let hoverFillOpacity: Double = 0.08
 
   /// Square hit box of one header action button.
   static let actionButtonSize: CGFloat = 22

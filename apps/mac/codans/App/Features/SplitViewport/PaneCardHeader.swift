@@ -42,7 +42,7 @@ struct PaneCardHeader: View {
           .transition(.opacity)
       }
     }
-    .padding(.leading, PaneCardMetrics.headerHorizontalInset - PaneCardMetrics.titleChipInset)
+    .padding(.leading, PaneCardMetrics.headerHorizontalInset - PaneCardMetrics.titleChipLeadingInset)
     .padding(.trailing, PaneCardMetrics.headerHorizontalInset)
     .frame(height: PaneCardMetrics.headerHeight)
     .contentShape(.rect)
@@ -55,11 +55,11 @@ struct PaneCardHeader: View {
   /// for a move mark on a capsule fill, to show the drag handle.
   private var titleChip: some View {
     let showsMoveAffordance = isSplit && isHoveringTitle
-    return HStack(spacing: 6) {
+    return HStack(spacing: PaneCardMetrics.titleChipSpacing) {
       Group {
         if showsMoveAffordance {
           Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-            .font(.system(size: PaneCardMetrics.headerIconSize - 1, weight: .medium))
+            .font(.system(size: PaneCardMetrics.moveGlyphSize, weight: .medium))
             .foregroundStyle(.primary)
             .accessibilityHidden(true)
         } else {
@@ -69,16 +69,17 @@ struct PaneCardHeader: View {
       }
       .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
       Text(title)
-        .font(.system(size: PaneCardMetrics.headerTitleFontSize, weight: .medium))
+        .font(.system(size: PaneCardMetrics.headerTitleFontSize))
         .foregroundStyle(isFocused ? .primary : .secondary)
         .lineLimit(1)
         .truncationMode(.middle)
     }
-    .padding(.horizontal, PaneCardMetrics.titleChipInset)
+    .padding(.leading, PaneCardMetrics.titleChipLeadingInset)
+    .padding(.trailing, PaneCardMetrics.titleChipTrailingInset)
     .frame(height: PaneCardMetrics.titleChipHeight)
     .background(
       Capsule()
-        .fill(Color.primary.opacity(showsMoveAffordance ? 0.06 : 0))
+        .fill(Color.primary.opacity(showsMoveAffordance ? PaneCardMetrics.hoverFillOpacity : 0))
     )
     .contentShape(.capsule)
     .onHover { isHoveringTitle = $0 }
@@ -87,10 +88,16 @@ struct PaneCardHeader: View {
 
   private var actions: some View {
     HStack(spacing: PaneCardMetrics.actionSpacing) {
-      PaneCardHeaderButton(systemImage: "square.righthalf.filled", help: "Split Right") {
+      PaneCardHeaderButton(
+        systemImage: "rectangle.split.2x1", hoverSystemImage: "square.righthalf.filled",
+        help: "Split Right"
+      ) {
         onSplit(.right)
       }
-      PaneCardHeaderButton(systemImage: "square.bottomhalf.filled", help: "Split Down") {
+      PaneCardHeaderButton(
+        systemImage: "rectangle.split.1x2", hoverSystemImage: "square.bottomhalf.filled",
+        help: "Split Down"
+      ) {
         onSplit(.down)
       }
       // Actions menu slot, see the type comment.
@@ -157,9 +164,11 @@ private struct PaneHeaderDragSource: ViewModifier {
   }
 }
 
-/// Borderless glyph button with a rounded hover fill.
+/// Borderless glyph button with a capsule hover fill. It can swap to a
+/// different glyph while hovered.
 private struct PaneCardHeaderButton: View {
   let systemImage: String
+  var hoverSystemImage: String?
   let help: String
   let action: () -> Void
 
@@ -167,13 +176,13 @@ private struct PaneCardHeaderButton: View {
 
   var body: some View {
     Button(action: action) {
-      Image(systemName: systemImage)
+      Image(systemName: isHovering ? hoverSystemImage ?? systemImage : systemImage)
         .font(.system(size: PaneCardMetrics.actionGlyphSize, weight: .regular))
         .foregroundStyle(isHovering ? .primary : .secondary)
         .frame(width: PaneCardMetrics.actionButtonSize, height: PaneCardMetrics.actionButtonSize)
         .background(
-          RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(Color.primary.opacity(isHovering ? 0.08 : 0))
+          Capsule()
+            .fill(Color.primary.opacity(isHovering ? PaneCardMetrics.hoverFillOpacity : 0))
         )
         .contentShape(.rect)
     }

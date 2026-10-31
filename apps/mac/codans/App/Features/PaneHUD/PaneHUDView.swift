@@ -191,8 +191,10 @@ struct PaneHUDView: View {
         .frame(width: Self.menuButtonSize, height: Self.menuButtonSize)
         // Same hover fill as the other header buttons.
         .background(
-          RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(Color.primary.opacity(isButtonHovered && !isExpanded ? 0.08 : 0))
+          Capsule()
+            .fill(
+              Color.primary.opacity(
+                isButtonHovered && !isExpanded ? PaneCardMetrics.hoverFillOpacity : 0))
             .allowsHitTesting(false)
         )
         .contentShape(Rectangle())
