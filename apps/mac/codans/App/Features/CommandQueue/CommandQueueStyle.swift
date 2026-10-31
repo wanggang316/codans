@@ -1,7 +1,7 @@
 import CodansCore
 import SwiftUI
 
-/// Shared vocabulary for the queue affordances — the pane's queue button,
+/// Shared vocabulary for the queue affordances — the pane header's queue badge,
 /// the sheet's rows and the per-entry timing line all render through here so
 /// a queued command reads the same wherever it appears.
 enum CommandQueueStyle {

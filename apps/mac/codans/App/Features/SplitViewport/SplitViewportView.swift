@@ -332,6 +332,8 @@ private struct LeafView: View {
   /// Pointer anywhere over the card: shows the header actions on an
   /// unfocused pane.
   @State private var isHoveringCard = false
+  /// The queued-commands list under the header. The header badge opens it.
+  @State private var isQueueListShown = false
   /// Used for the one-frame fallback on tab switch — see `paneContent`.
   /// Reducer state is the long-term source of truth; this lookup only fills
   /// the gap between catalog update and `.panesInActiveTabChanged` landing.
@@ -375,6 +377,7 @@ private struct LeafView: View {
               paneID, anchor: anchor, direction: zone.splitDirection,
               inTab: tabID, inWorktree: worktreeID, inProject: projectID))
         },
+        isQueueListShown: $isQueueListShown,
       )
       // The header sits on the terminal background, so its text follows the
       // terminal theme's tone rather than the app appearance.
@@ -386,7 +389,7 @@ private struct LeafView: View {
       // Without a live surface yet, the surface's own rows show disabled.
       PaneCommandQueueChrome(
         paneID: paneID, surface: terminalClient.surface(paneID), showsMenu: showsActions,
-        onMenuInteraction: focus,
+        onMenuInteraction: focus, isQueueListShown: $isQueueListShown,
       )
       .environment(\.colorScheme, terminalColorScheme)
     }

@@ -13,8 +13,7 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
   /// display; the same conditions `RootFeature.handoffRequested` re-checks
   /// authoritatively when the row is actually tapped.
   let handOffBlockedReason: String?
-  /// Commands parked on this pane. Shows the queue button under the actions
-  /// button and the count on the Command Queue row; zero renders neither.
+  /// Commands parked on this pane.
   let queuedCommandCount: Int
 
   var canHandOff: Bool { handOffBlockedReason == nil }
