@@ -138,18 +138,27 @@ struct SplitView<L: View, R: View>: View {
     let invisibleSize: CGFloat
     let color: Color
     @State private var isHovered = false
+    /// Pointer position along the divider's length while hovered.
+    @State private var hoverOffset: CGFloat = 0
 
     var body: some View {
-      ZStack {
+      ZStack(alignment: .topLeading) {
         Rectangle()
           .fill(color)
           .frame(width: visibleWidth, height: visibleHeight)
-        // Grip that shows the gap is a drag target.
-        Capsule()
-          .fill(.tertiary)
-          .frame(width: gripWidth, height: gripHeight)
-          .opacity(isHovered ? 1 : 0)
-          .animation(.easeOut(duration: 0.12), value: isHovered)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Grip that shows the gap is a drag target. It sits at the pointer,
+        // not at the middle: a divider that spans several panes is grabbed
+        // next to the pane the user means, and its middle can be a crossing
+        // with other gaps.
+        GeometryReader { geo in
+          Capsule()
+            .fill(.tertiary)
+            .frame(width: gripWidth, height: gripHeight)
+            .position(gripPosition(in: geo.size))
+        }
+        .opacity(isHovered ? 1 : 0)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
       }
       .frame(width: hitboxWidth, height: hitboxHeight)
       .contentShape(.rect)
@@ -158,8 +167,9 @@ struct SplitView<L: View, R: View>: View {
       // loses to it.
       .onContinuousHover { phase in
         switch phase {
-        case .active:
+        case .active(let location):
           isHovered = true
+          hoverOffset = direction == .horizontal ? location.y : location.x
           hoverCursor.set()
         case .ended:
           isHovered = false
@@ -171,6 +181,17 @@ struct SplitView<L: View, R: View>: View {
           isHovered = false
           NSCursor.arrow.set()
         }
+      }
+    }
+
+    private func gripPosition(in size: CGSize) -> CGPoint {
+      switch direction {
+      case .horizontal:
+        let half = gripHeight / 2
+        return CGPoint(x: size.width / 2, y: min(max(hoverOffset, half), size.height - half))
+      case .vertical:
+        let half = gripWidth / 2
+        return CGPoint(x: min(max(hoverOffset, half), size.width - half), y: size.height / 2)
       }
     }
 
