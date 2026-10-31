@@ -25,7 +25,6 @@ enum PaneCardMetrics {
   static let titleChipTrailingInset: CGFloat = 10
   static let titleChipSpacing: CGFloat = 8
   static let moveGlyphSize: CGFloat = 11
-  static let dragPreviewMaxWidth: CGFloat = 320
   /// Opacity of the primary color in every header hover fill.
   static let hoverFillOpacity: Double = 0.08
 
@@ -51,4 +50,6 @@ enum PaneCardMetrics {
 
   /// Opacity of an unfocused card in a split Tab.
   static let unfocusedOpacity: CGFloat = 0.7
+  /// Opacity of the card while it is being moved.
+  static let movingOpacity: CGFloat = 0.4
 }
