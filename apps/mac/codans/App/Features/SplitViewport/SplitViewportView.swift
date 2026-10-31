@@ -308,26 +308,19 @@ private struct LeafView: View {
   let worktreeID: WorktreeID
   let projectID: ProjectID
   /// True when this leaf sits below at least one split node — i.e. the
-  /// active Tab has more than one pane. Single-pane Tabs skip the dim
-  /// overlay and the header drag since there is nothing to re-arrange
-  /// against.
+  /// active Tab has more than one pane. Single-pane Tabs skip the
+  /// unfocused fade and the header drag since there is nothing to
+  /// re-arrange against.
   let isSplit: Bool
   /// Shared drop-highlight state (one per viewport). This leaf renders the
   /// edge overlay only while it is the active target — see `PaneDropHighlight`.
   @Environment(PaneDropHighlight.self) private var dropHighlight
   @Environment(HierarchyManager.self) private var hierarchyManager
-  /// Pulled in so the dim overlay re-evaluates when the user flips Appearance
-  /// (or the OS auto-switches). `unfocusedSplitFill()` resolves against the
-  /// active ghostty palette, but without an observable dependency here SwiftUI
-  /// keeps the previous frame's overlay color until something else (focus
-  /// change, layout) forces a rebuild — which is what produced the stale
-  /// light/dark wash on unfocused panes after a theme switch.
+  /// Fallback for `terminalColorScheme` when the terminal background has no
+  /// perceived appearance.
   @Environment(\.colorScheme) private var colorScheme
-  /// Bumped on `.ghosttyRuntimeConfigApplied` so the overlay re-resolves when
-  /// the user picks a new ghostty theme (Settings → Terminal, or by editing
-  /// `~/.config/ghostty/config`). `colorScheme` only covers the appearance
-  /// flip path; without this tick the overlay stays on the previous theme's
-  /// fill colour until the user re-focuses the pane or triggers a layout pass.
+  /// Bumped on `.ghosttyRuntimeConfigApplied` so the card re-reads the
+  /// terminal background when the user picks a new ghostty theme.
   @State private var configReloadTick: Int = 0
   /// Pointer anywhere over the card: shows the header actions on an
   /// unfocused pane.
@@ -376,7 +369,6 @@ private struct LeafView: View {
       // terminal theme's tone rather than the app appearance.
       .environment(\.colorScheme, terminalColorScheme)
     }
-    .overlay { unfocusedDimOverlay }
     // Actions menu (hand off, command queue, the surface's own actions) in
     // the header's menu slot, and the command queue list under the header.
     .overlay(alignment: .topTrailing) {
@@ -387,7 +379,6 @@ private struct LeafView: View {
       )
       .environment(\.colorScheme, terminalColorScheme)
     }
-    .animation(.easeInOut(duration: 0.12), value: isFocused)
     .animation(.easeInOut(duration: 0.12), value: isHoveringCard)
     .clipShape(shape)
     .overlay {
@@ -395,6 +386,10 @@ private struct LeafView: View {
         .strokeBorder(Color(nsColor: .separatorColor), lineWidth: PaneCardMetrics.borderWidth)
         .allowsHitTesting(false)
     }
+    // An unfocused card lets the backdrop glass show through it, so it
+    // reads as set back from the focused one.
+    .opacity(isFocusedCard ? 1 : PaneCardMetrics.unfocusedOpacity)
+    .animation(.easeInOut(duration: 0.12), value: isFocused)
     .onHover { isHoveringCard = $0 }
     .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
       configReloadTick &+= 1
@@ -528,40 +523,5 @@ private struct LeafView: View {
 
   private var isFocused: Bool {
     hierarchyManager.lastFocusedPane(in: tabID) == paneID
-  }
-
-  /// Wash on unfocused panes inside a multi-pane Tab. Matches ghostty's
-  /// `unfocused-split` exactly: a hit-test-disabled `Rectangle` filled with
-  /// `unfocused-split-fill` (defaults to terminal `background`) at
-  /// `1 - unfocused-split-opacity` (default 0.15). Single-pane Tabs and the
-  /// focused leaf get nothing.
-  @ViewBuilder
-  private var unfocusedDimOverlay: some View {
-    if shouldDimUnfocusedSplit {
-      let runtime = GhosttyRuntime.shared
-      let fill = runtime?.unfocusedSplitFill(colorScheme) ?? .windowBackgroundColor
-      let opacity = runtime?.unfocusedSplitOpacity() ?? 0.15
-      if opacity > 0 {
-        Rectangle()
-          .fill(Color(nsColor: fill))
-          .allowsHitTesting(false)
-          .opacity(opacity)
-      }
-    }
-  }
-
-  /// `isSplit && !isFocused`, evaluated after reading `configReloadTick` so
-  /// the overlay rebuilds on ghostty config-file theme reloads (Settings →
-  /// Terminal picker / manual config edit). `colorScheme` is read inside the
-  /// overlay via `unfocusedSplitFill(colorScheme)`, covering OS / Appearance
-  /// flips; this read covers the config-reload tick. Without it the overlay
-  /// keeps the previous theme's wash colour until a focus change or layout
-  /// pass forces a rebuild. Reading the tick in this plain computed Bool —
-  /// rather than an inline `let _ =` inside the `@ViewBuilder` — keeps the
-  /// discard out of the result builder (a bare `_ =` does not type-check as a
-  /// builder statement) while still registering the SwiftUI dependency.
-  private var shouldDimUnfocusedSplit: Bool {
-    _ = configReloadTick
-    return isSplit && !isFocused
   }
 }
