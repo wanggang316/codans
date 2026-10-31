@@ -20,6 +20,28 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Security
 
+## [0.9.1] - 2026-10-31
+
+### Changed
+
+- **Moving a pane follows the pointer.** Drag a pane's title: its title chip
+  rides under the pointer and the drop target lights up as a half card. The
+  lagging drag image and the stray box inside the window are gone.
+- **Pane actions open a native menu.** The header's actions button now shows
+  the same items as the pane's right-click menu. Queued commands show as a
+  count badge in the header; click it to see and remove them.
+- **Pane cards read more clearly.** Unfocused cards fade back onto the
+  window glass, terminal text has even room inside the card, and the gap
+  between panes is easier to grab for resizing.
+
+### Fixed
+
+- **Sidebar filters stay round in a narrow sidebar.** They shrink to equal
+  circles instead of squashing.
+- **Sidebar rows no longer show through the Agents View card** when the list
+  scrolls under it.
+- **A dragged tab keeps its color** instead of turning into a gray capsule.
+
 ## [0.9.0] - 2026-10-31
 
 ### Added
