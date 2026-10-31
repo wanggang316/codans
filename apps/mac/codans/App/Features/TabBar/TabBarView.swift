@@ -26,6 +26,7 @@ struct TabBarView: View {
     Group {
       if showsBar {
         barContent()
+          .padding(.horizontal, TabBarMetrics.trackHorizontalInset)
           .frame(height: TabBarMetrics.trackHeight)
           .padding(.bottom, TabBarMetrics.trackBottomInset)
       } else {

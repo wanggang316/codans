@@ -100,7 +100,7 @@ struct AgentStateRowView: View {
         Spacer(minLength: 8)
         statusColumn
       }
-      .padding(.horizontal, AgentStateSidebarPanel.contentInset)
+      .padding(.horizontal, 12)
       // Compact mode tightens the row to roughly two-thirds of the
       // normal vertical padding so a single-line identity reads as
       // genuinely denser, not just one line collapsed into the same
@@ -318,10 +318,11 @@ struct AgentStateRowView: View {
     // Selected and hovering share the same soft gray wash — selection
     // is signalled by the darker logo tint (set elsewhere in the row),
     // not by a heavier background fill.
-    // Rounded like the sidebar list's selection, which these rows sit
-    // under.
-    RoundedRectangle(cornerRadius: 6, style: .continuous)
-      .fill(Color.gray.opacity(isSelected || isHovering ? 0.08 : 0))
+    if isSelected || isHovering {
+      Color.gray.opacity(0.08)
+    } else {
+      Color.clear
+    }
   }
 
   /// Trailing status column — state icon + short verb, in a single
