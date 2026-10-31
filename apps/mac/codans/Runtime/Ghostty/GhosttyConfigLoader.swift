@@ -91,15 +91,15 @@ enum GhosttyConfigLoader {
   /// every line is only a default the user can change.
   ///
   /// A pane card puts the terminal flush against its edges, so the space
-  /// between text and the card edge is the terminal's own padding: the same
-  /// on the sides and the bottom, and small at the top, under the card
-  /// header. `extend` paints the padding with the color of the nearest
+  /// between text and the card edge is the terminal's own padding: wider on
+  /// the sides, smaller at the bottom, and smallest at the top, under the
+  /// card header. `extend` paints the padding with the color of the nearest
   /// cell, so a full-width row (an agent's input bar) still reaches the
   /// card edge.
   private static let defaultsBody: String = """
     # codans defaults — managed automatically; do not edit.
     window-padding-x = 12
-    window-padding-y = 4,12
+    window-padding-y = 4,6
     window-padding-color = extend
 
     """
