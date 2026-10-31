@@ -28,6 +28,7 @@ enum GhosttyConfigLoader {
   /// returned handle and must `ghostty_config_free` it.
   static func makeFreshConfig() -> (config: ghostty_config_t, userBackgroundOpacity: Double)? {
     guard let config = ghostty_config_new() else { return nil }
+    loadFile(defaultsBody, named: "codans-ghostty-defaults.conf", into: config)
     ghostty_config_load_default_files(config)
     ghostty_config_load_recursive_files(config)
     applyOverrides(to: config)
@@ -86,6 +87,20 @@ enum GhosttyConfigLoader {
     category: "ghostty.config"
   )
 
+  /// Body of the defaults file. It loads before the user's config files, so
+  /// every line is only a default the user can change.
+  ///
+  /// A pane card puts the terminal flush against its edges. The padding
+  /// keeps text off the card edge, and `extend` paints it with the color of
+  /// the nearest cell, so a full-width row (an agent's input bar) still
+  /// reaches the card edge.
+  private static let defaultsBody: String = """
+    # codans defaults — managed automatically; do not edit.
+    window-padding-x = 8
+    window-padding-color = extend
+
+    """
+
   /// Body of the overrides file. Every line is a libghostty config
   /// directive; `keybind = <chord>=unbind` removes a previously-registered
   /// binding.
@@ -100,13 +115,18 @@ enum GhosttyConfigLoader {
   /// it on top of the supplied config. Silent no-op on write failure — the
   /// runtime still works, the user just keeps the stock keybinds.
   private static func applyOverrides(to config: ghostty_config_t) {
-    let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent("codans-ghostty-overrides.conf")
+    loadFile(overridesBody, named: "codans-ghostty-overrides.conf", into: config)
+  }
+
+  /// Write `body` to a temp file and load it into `config`. Silent no-op
+  /// on write failure.
+  private static func loadFile(_ body: String, named name: String, into config: ghostty_config_t) {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
     do {
-      try overridesBody.write(to: url, atomically: true, encoding: .utf8)
+      try body.write(to: url, atomically: true, encoding: .utf8)
     } catch {
       logger.error(
-        "could not write overrides file at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)"
+        "could not write \(name, privacy: .public) at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)"
       )
       return
     }
