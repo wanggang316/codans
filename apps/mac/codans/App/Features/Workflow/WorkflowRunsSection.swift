@@ -29,7 +29,7 @@ struct WorkflowRunsSection: View {
             .foregroundStyle(.secondary)
           Spacer()
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, AgentStateSidebarPanel.contentInset)
         .padding(.bottom, 4)
         ForEach(runs, id: \.id) { session in
           WorkflowRunRowView(session: session, engine: engine, onTapRun: onTapRun, isFinished: false)
@@ -74,10 +74,13 @@ struct WorkflowRunRowView: View {
           .font(.caption.monospacedDigit())
           .foregroundStyle(.tertiary)
       }
-      .padding(.horizontal, 10)
+      .padding(.horizontal, AgentStateSidebarPanel.contentInset)
       .padding(.vertical, 5)
       .opacity(isFinished ? 0.55 : 1)
-      .background(isHovering ? Color.primary.opacity(0.06) : Color.clear)
+      .background(
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+          .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+      )
       .contentShape(Rectangle())
       .onHover { isHovering = $0 }
       .onTapGesture { isPopoverPresented = true }

@@ -5,21 +5,23 @@ import SwiftUI
 /// AgentState panel anchored at the sidebar's bottom safe-area inset.
 ///
 /// Visual brief (per design pass):
-/// - A rounded card inset from the sidebar edges. Its fill is the
-///   system quinary fill over the sidebar's own glass, so the card reads
-///   as a lighter well of the sidebar rather than a separate surface.
-/// - Header carries no chrome: the title sits on top of the card
-///   directly. A faint capsule resize handle sits at the top; it
-///   strengthens when the cursor enters the narrow strip at the very
-///   top, which is also the sole drag-to-resize hit region. Cursor swaps
-///   to `resizeUpDown` on hover.
+/// - A section of the sidebar, not a card: no fill, border, or corners of
+///   its own, the way native sidebars group content. A card inside the
+///   sidebar's glass panel has no inset that reads right against both the
+///   panel edge and the pane cards next to it.
+/// - It follows the sidebar list's geometry: rows and the top rule span
+///   the list's selection column (`columnInset` from each side), and text
+///   starts where the list's row content starts (`contentInset`).
+/// - A hairline rule at the top separates it from the list. The strip
+///   around the rule is the sole drag-to-resize hit region; a capsule
+///   handle and the `resizeUpDown` cursor show on hover.
 /// - The close button has been removed; the footer toggle is the only
 ///   open/close affordance.
 ///
 /// Layout (top → bottom):
-/// - Resize strip (16pt; capsule fades in on hover).
+/// - Resize strip (12pt) around the hairline rule; the capsule fades in
+///   on hover.
 /// - Title row: "Agents View" + optional `(N)` count chip when N > 4.
-/// - Divider.
 /// - Scrollable list of `AgentStateRowView`s ordered by
 ///   `SortedEntriesProvider`.
 ///
@@ -103,27 +105,26 @@ struct AgentStateSidebarPanel: View {
   /// the user can scroll the list without accidentally resizing.
   private let resizeStripHeight: CGFloat = 12
 
-  private let cornerRadius: CGFloat = 14
-  /// Gap between the card and the sidebar's bottom edge. The card's own
-  /// height is `height` minus this gap, so the host's list inset (`height`)
-  /// still clears the whole panel.
+  /// Gap between the section and the sidebar's bottom edge. The section's
+  /// own height is `height` minus this gap, so the host's list inset
+  /// (`height`) still clears the whole panel.
   private let edgeInset: CGFloat = PaneCardMetrics.edgeMargin
-  /// Gap between the card and the sidebar's sides: just enough to keep the
-  /// card's corners off the sidebar's edge.
-  private let sideInset: CGFloat = 2
+  /// Inset of the sidebar list's selection column from each side, measured
+  /// from the live outline (its cells span x 10…289 in a 299pt sidebar).
+  static let columnInset: CGFloat = 10
+  /// Inset of row content inside the selection column, measured the same
+  /// way (a project row's content starts 6pt inside its cell).
+  static let contentInset: CGFloat = 6
+
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-    return VStack(spacing: 0) {
+    VStack(spacing: 0) {
       resizeStrip
       titleBar
       content
+        .padding(.horizontal, Self.columnInset)
     }
     .frame(height: max(0, clampedHeight - edgeInset))
     .frame(maxWidth: .infinity)
-    .background(shape.fill(.quinary))
-    .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
-    .clipShape(shape)
-    .padding(.horizontal, sideInset)
     .padding(.bottom, edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
@@ -142,15 +143,18 @@ struct AgentStateSidebarPanel: View {
     min(max(height, minHeight), maxHeight)
   }
 
-  /// Top-edge resize strip. The capsule fades in only on hover so the
-  /// panel reads as a clean card by default; once the user hovers, the
-  /// affordance + cursor signal "drag me".
+  /// Top-edge resize strip around the section's rule. The capsule fades
+  /// in only on hover, so the section reads as part of the list by
+  /// default; once the user hovers, the affordance + cursor signal
+  /// "drag me".
   private var resizeStrip: some View {
     ZStack {
+      Divider()
+        .padding(.horizontal, Self.columnInset)
       Capsule()
         .fill(.tertiary)
         .frame(width: 36, height: 4)
-        .opacity(strokeHovering ? 1 : 0.5)
+        .opacity(strokeHovering ? 1 : 0)
         .animation(.easeOut(duration: 0.12), value: strokeHovering)
     }
     .frame(maxWidth: .infinity)
@@ -192,7 +196,7 @@ struct AgentStateSidebarPanel: View {
       }
       Spacer()
     }
-    .padding(.horizontal, 10)
+    .padding(.horizontal, Self.columnInset + Self.contentInset)
     .padding(.top, 2)
     .padding(.bottom, 6)
   }
