@@ -89,13 +89,13 @@ struct PaneCardHeader: View {
   private var actions: some View {
     HStack(spacing: PaneCardMetrics.actionSpacing) {
       PaneCardHeaderButton(
-        systemImage: "rectangle.split.2x1", hoverSystemImage: "square.righthalf.filled",
+        systemImage: "square.split.2x1", hoverSystemImage: "square.righthalf.filled",
         help: "Split Right"
       ) {
         onSplit(.right)
       }
       PaneCardHeaderButton(
-        systemImage: "rectangle.split.1x2", hoverSystemImage: "square.bottomhalf.filled",
+        systemImage: "square.split.1x2", hoverSystemImage: "square.bottomhalf.filled",
         help: "Split Down"
       ) {
         onSplit(.down)
