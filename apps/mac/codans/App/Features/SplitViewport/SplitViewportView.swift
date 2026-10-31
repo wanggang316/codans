@@ -264,9 +264,11 @@ private struct SubtreeView: View {
         },
       ),
       // The gap between two cards is the divider: the window backdrop shows
-      // through, and the whole gap is the resize target.
+      // through. The resize target also covers the card margins on both
+      // sides of the gap, up to the terminal edge.
       dividerColor: .clear,
       dividerThickness: PaneCardMetrics.gap,
+      dividerHitOverhang: PaneCardMetrics.surfaceInset * 2,
       left: {
         SubtreeView(
           node: split.left,
