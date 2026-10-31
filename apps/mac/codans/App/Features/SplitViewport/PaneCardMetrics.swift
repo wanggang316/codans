@@ -9,12 +9,6 @@ enum PaneCardMetrics {
   /// target that resizes the split.
   static let gap: CGFloat = 6
 
-  /// Margin between the cards (and the tab bar) and the detail column's
-  /// edges. It is the inset of the window toolbar's items, so the back
-  /// button, the tab bar, and the cards share one leading edge, and the
-  /// trailing toolbar items line up with the cards' trailing edge.
-  static let edgeMargin: CGFloat = 8
-
   static let cornerRadius: CGFloat = 12
 
   /// Card header row: icon + title on the leading side, pane actions on the
