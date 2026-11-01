@@ -23,13 +23,14 @@ enum TabBarColors {
     dark: .white.withAlphaComponent(0.048)
   )
 
-  /// Sheen laid over the selected chip's glass while the pointer is over
-  /// it — a codans addition (the system bar keeps the selected tab unchanged
-  /// on hover). Safari lifts the glass by about this much, and keeps its
-  /// tone.
-  static let activeHoverSheen: Color = adaptive(
-    light: .white.withAlphaComponent(0.35),
-    dark: .white.withAlphaComponent(0.05)
+  /// Laid over the selected chip's glass while the pointer is over it — a
+  /// codans addition (the system bar keeps the selected tab unchanged on
+  /// hover). Safari's selected tab darkens on hover in light mode (#F5F5F6
+  /// to #EFEFF1) and lightens in dark mode, keeping its tone: the label
+  /// color at a low opacity.
+  static let activeHoverOverlay: Color = adaptive(
+    light: .black.withAlphaComponent(0.025),
+    dark: .white.withAlphaComponent(0.04)
   )
 
   /// Before macOS 26, which has no system glass to draw the selected chip
