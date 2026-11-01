@@ -38,6 +38,8 @@ pane 的 shell 由 zmx daemon 持有，surface 只是一个 `zmx attach` 客户�
 
 `.normal`（压力解除）不触发任何动作；已回收的 pane 在再次显示时按原路径重新 attach。
 
+Debug 构建另外监听 Darwin 通知 `dev.codans.debug.memory-pressure`，`notifyutil -p dev.codans.debug.memory-pressure` 注入一次 `.warning` 事件。`memory_pressure -S` 需要 root，此入口用于不提权测量回收前后的内存。
+
 veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态和命令队列位于 Runtime 层之上。窗口被遮挡或最小化时 surface 仍视为「在窗口内」，用户回来时不会遇到重新 attach。
 
 ### 重新 attach 与已回收状态
@@ -60,4 +62,5 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 
 - `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值、其余规则仍生效。
 - `TerminalEngineMemoryPressureTests` 注入 live surface 样本与压力事件，覆盖压力扫描的入口：隐藏且空闲的 shell / agent 被回收，显示中、远程、被 veto、运行命令、前台未知的 pane 保留。
+- 隔离 Debug 实例，11 个 tab 各一个空闲 shell（1 个显示、10 个隐藏），注入一次压力事件：phys footprint 858 MB → 228 MB，线程 51 → 11，挂接的 surface 11 → 1，日志 `reclaimed=10`；再显示被回收的 tab，原 shell 会话照常可用。
 - 隔离 Debug 实例（`CODANS_SURFACE_RECLAIM_SECONDS=8`），两个 tab 各一个 pane，显示 B 以隐藏 A：线程 17 → 12，A 的 zmx socket 仍在，`pane read` 仍可用；再次显示 A：线程回到 17，shell 里导出的变量仍在，`initialCommand` 的副作用只出现一次。

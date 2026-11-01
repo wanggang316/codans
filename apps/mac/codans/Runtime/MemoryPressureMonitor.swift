@@ -1,4 +1,5 @@
 import Dispatch
+import notify
 
 /// Level of a system memory-pressure event the app reacts to.
 nonisolated enum MemoryPressureLevel: String, Sendable {
@@ -12,6 +13,13 @@ nonisolated enum MemoryPressureLevel: String, Sendable {
 final class MemoryPressureMonitor {
   private let source: DispatchSourceMemoryPressure
   private let onPressure: @MainActor (MemoryPressureLevel) -> Void
+  #if DEBUG
+    /// Debug builds also take a simulated `.warning` event from
+    /// `notifyutil -p <simulatedPressureNotification>`. `memory_pressure -S`
+    /// needs root, which makes before/after measurements awkward.
+    static let simulatedPressureNotification = "dev.codans.debug.memory-pressure"
+    private var simulationToken: Int32 = NOTIFY_TOKEN_INVALID
+  #endif
 
   init(onPressure: @escaping @MainActor (MemoryPressureLevel) -> Void) {
     self.onPressure = onPressure
@@ -21,6 +29,9 @@ final class MemoryPressureMonitor {
   // Nonisolated for the same reason as `TerminalEngine.deinit`.
   deinit {
     source.cancel()
+    #if DEBUG
+      if simulationToken != NOTIFY_TOKEN_INVALID { notify_cancel(simulationToken) }
+    #endif
   }
 
   func start() {
@@ -36,9 +47,21 @@ final class MemoryPressureMonitor {
       }
     }
     source.activate()
+    #if DEBUG
+      notify_register_dispatch(Self.simulatedPressureNotification, &simulationToken, .main) {
+        [weak self] _ in
+        MainActor.assumeIsolated { self?.onPressure(.warning) }
+      }
+    #endif
   }
 
   func cancel() {
     source.cancel()
+    #if DEBUG
+      if simulationToken != NOTIFY_TOKEN_INVALID {
+        notify_cancel(simulationToken)
+        simulationToken = NOTIFY_TOKEN_INVALID
+      }
+    #endif
   }
 }
