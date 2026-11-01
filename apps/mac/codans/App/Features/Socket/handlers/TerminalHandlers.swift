@@ -130,17 +130,19 @@ public final class TerminalHandlers {
     // A surface attached by this call may still be replaying the daemon's
     // screen, so its text is no capture baseline: rows that land later would
     // read as the command's output. The daemon does not replay, so both ends
-    // of the capture come from its dump instead. When the daemon cannot be
-    // read, the surface is the fallback, as for an attached pane.
+    // of the capture come from its dump, and only from it: falling back to
+    // the surface, or mixing the two, would bring the replay back. When the
+    // daemon cannot be read before the send, nothing is sent.
     var before: String?
-    var captureFromDaemon = false
-    if req.capture == true {
-      if attached, let dump = await daemonScreen(req.paneID) {
-        before = dump
-        captureFromDaemon = true
-      } else {
-        before = sink.readText(paneID: req.paneID, extent: .screen)
+    let captureFromDaemon = req.capture == true && attached
+    if captureFromDaemon {
+      guard let dump = await readDaemonScreen(req.paneID) else {
+        return .failed(
+          .internal("pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry"))
       }
+      before = dump
+    } else if req.capture == true {
+      before = sink.readText(paneID: req.paneID, extent: .screen)
     }
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
@@ -150,7 +152,11 @@ public final class TerminalHandlers {
     if let wait = req.wait {
       let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
       var after = outcome.text
-      if captureFromDaemon, let dump = await daemonScreen(req.paneID) {
+      if captureFromDaemon {
+        guard let dump = await readDaemonScreen(req.paneID) else {
+          return .failed(
+            .internal("pane.send --capture: the text was sent, but the pane daemon's screen could not be read to capture its output"))
+        }
         after = dump
       }
       let output = req.capture == true
@@ -434,6 +440,20 @@ public final class TerminalHandlers {
   }
 
   static let replayWaitMillis = 3000
+
+  /// Reads the daemon's screen, retrying a failed read a few times: the
+  /// capture of a just-attached pane depends on it.
+  private func readDaemonScreen(_ paneID: PaneID) async -> String? {
+    for attempt in 0..<Self.daemonReadAttempts {
+      if let dump = await daemonScreen(paneID) { return dump }
+      if attempt + 1 < Self.daemonReadAttempts {
+        do { try await clock.sleep(millis: 100) } catch { return nil }
+      }
+    }
+    return nil
+  }
+
+  static let daemonReadAttempts = 3
 
   /// Whether the surface shows the daemon's screen: the daemon's last
   /// non-blank rows (up to `replayCompareRows`) end the surface text too.

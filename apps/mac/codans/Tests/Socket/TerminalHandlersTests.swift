@@ -433,6 +433,76 @@ struct TerminalHandlersTests {
     #expect(result.output == "ok")
   }
 
+  /// A just-attached pane's capture must come from the daemon only. When
+  /// the daemon cannot be read before the send, the call fails and types
+  /// nothing; it never falls back to the replaying surface.
+  @Test
+  func sendWithCaptureAfterAnAttachFailsBeforeSendingWhenTheDaemonCannotBeRead() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.textScript[pane.raw] = ["A\nA"]  // a partial replay
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      attachDetached: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      },
+      daemonScreen: { _ in nil })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(IPC.Request(id: "nb", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let response = try await server.awaitResponse()
+
+    guard case .internal(let message) = response.error else {
+      Issue.record("expected internal, got \(String(describing: response.error))")
+      return
+    }
+    #expect(message.contains("nothing was sent"))
+    #expect(sink.delivered.isEmpty)
+  }
+
+  /// When the daemon read after the send fails, the call reports that the
+  /// text was sent but its output cannot be captured, instead of diffing
+  /// the daemon's "before" against the surface's "after".
+  @Test
+  func sendWithCaptureAfterAnAttachFailsWithoutMixingSourcesWhenTheLaterReadFails() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    let oldScreen = "A\nB\nA"
+    sink.textScript[pane.raw] = [oldScreen, oldScreen + "\ntrue\nok"]
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      attachDetached: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      },
+      daemonScreen: { _ in sink.delivered.isEmpty ? oldScreen : nil })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(IPC.Request(id: "na", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let response = try await server.awaitResponse()
+
+    guard case .internal(let message) = response.error else {
+      Issue.record("expected internal, got \(String(describing: response.error))")
+      return
+    }
+    #expect(message.contains("the text was sent"))
+    #expect(sink.delivered.count == 1)
+    #expect(response.result == nil)
+  }
+
+  static func captureParams(_ pane: PaneID) throws -> JSONValue {
+    try JSONValue.encoded(
+      TerminalHandlers.SendInputParams(
+        paneID: pane, text: "true\n",
+        wait: TerminalHandlers.SendWaitParams(timeoutMillis: 2000, stableMillis: 50, graceMillis: 50),
+        capture: true))
+  }
+
   /// A pane that was attached before the call keeps the surface as its
   /// capture source; the daemon is not read.
   @Test
