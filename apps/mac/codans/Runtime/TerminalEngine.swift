@@ -1,6 +1,7 @@
 import AppKit
 import CodansCore
 import Foundation
+import Observation
 import os.log
 
 /// Public-facing façade that composes `CatalogStore`, `HierarchyManager`, and
@@ -141,6 +142,11 @@ final class TerminalEngine {
   private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
   private var memoryPressureMonitor: MemoryPressureMonitor?
+  /// Recent worktree selections, newest first: the recency input of the
+  /// reclaim policy.
+  private(set) var worktreeSelections = WorktreeSelectionHistory(
+    limit: SurfaceReclaimPolicy().recentWorktreeCount)
+  private var worktreeSelectionTask: Task<Void, Never>?
   /// Where the sweep finds and detaches live surfaces: the Ghostty runtime,
   /// or a fake in headless tests.
   var reclaimHost: (any ReclaimableSurfaceHost)?
@@ -200,6 +206,7 @@ final class TerminalEngine {
     foregroundJobPollTask?.cancel()
     remoteProbeTask?.cancel()
     reclaimSweepTask?.cancel()
+    worktreeSelectionTask?.cancel()
   }
 
   // MARK: - Pane surface lifecycle
@@ -705,6 +712,8 @@ final class TerminalEngine {
     reclaimSweepTask = nil
     memoryPressureMonitor?.cancel()
     memoryPressureMonitor = nil
+    worktreeSelectionTask?.cancel()
+    worktreeSelectionTask = nil
     for paneID in Array(detachedWatchers.keys) {
       stopWatchingDetachedPane(paneID)
     }
@@ -1177,8 +1186,54 @@ final class TerminalEngine {
     memoryPressureMonitor = monitor
   }
 
+  /// Record a worktree selection for the reclaim recency exemption.
+  func noteWorktreeSelected(_ id: WorktreeID) {
+    worktreeSelections.record(id)
+  }
+
+  /// Record every change of the displayed worktree. Idempotent.
+  func startWorktreeSelectionTracking() {
+    guard worktreeSelectionTask == nil, !finished else { return }
+    worktreeSelectionTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        // Re-armed per change; holds no strong reference while it waits.
+        guard let changed = self?.recordDisplayedWorktreeAndObserve() else { return }
+        for await _ in changed { break }
+      }
+    }
+  }
+
+  private func recordDisplayedWorktreeAndObserve() -> AsyncStream<Void> {
+    AsyncStream { continuation in
+      let selected = withObservationTracking {
+        hierarchy.catalog.displayedSelectedWorktreeID
+      } onChange: {
+        continuation.yield()
+        continuation.finish()
+      }
+      if let selected { noteWorktreeSelected(selected) }
+    }
+  }
+
+  /// Recency rank of each pane in the selected tab of a recently selected
+  /// worktree. Background tabs are not exempt: only the panes the user sees
+  /// right after switching back are worth keeping attached.
+  private func selectedTabRecencyByPane() -> [PaneID: Int] {
+    var ranks: [PaneID: Int] = [:]
+    for project in hierarchy.catalog.projects {
+      for worktree in project.worktrees {
+        guard let rank = worktreeSelections.rank(of: worktree.id),
+          let tab = worktree.tabs.first(where: { $0.id == worktree.selectedTabID })
+        else { continue }
+        for pane in tab.panes { ranks[pane.id] = rank }
+      }
+    }
+    return ranks
+  }
+
   private func sweepReclaimableSurfaces(ignoringThresholds: Bool) -> [PaneID] {
     let now = clock()
+    let selectedTabRecency = selectedTabRecencyByPane()
     var reclaimed: [PaneID] = []
     for sample in reclaimHost?.reclaimableSurfaces() ?? [] {
       let paneID = sample.paneID
@@ -1197,7 +1252,8 @@ final class TerminalEngine {
         foregroundJob: foregroundJobSnapshots[paneID],
         isRemote: remoteForegroundPanes[paneID] != nil,
         isSurfaceReady: sample.isReady,
-        isVetoed: reclaimVeto(paneID)
+        isVetoed: reclaimVeto(paneID),
+        selectedTabRecency: selectedTabRecency[paneID]
       )
       if reclaimPolicy.shouldReclaim(candidate, ignoringThresholds: ignoringThresholds),
         reclaimSurface(for: paneID)

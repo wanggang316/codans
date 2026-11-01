@@ -75,6 +75,32 @@ struct TerminalEngineMemoryPressureTests {
       return panes
     }
 
+    /// `count` worktrees, each with a selected front tab and a background
+    /// tab of one pane each.
+    func seedWorktrees(_ count: Int) async throws -> [(
+      id: WorktreeID, front: PaneID, back: PaneID
+    )] {
+      let projectID = manager.addProject(name: "p", rootPath: "/", gitRoot: "/")
+      var seeded: [(id: WorktreeID, front: PaneID, back: PaneID)] = []
+      for index in 0..<count {
+        let worktreeID = try manager.createWorktree(
+          in: projectID, name: "w\(index)", path: "/w\(index)", branch: "b\(index)")
+        var panes: [PaneID] = []
+        var tabs: [TabID] = []
+        for _ in 0..<2 {
+          let tabID = try manager.createTab(in: worktreeID, in: projectID, name: nil)
+          tabs.append(tabID)
+          panes.append(
+            try await manager.openPane(
+              in: tabID, in: worktreeID, in: projectID, workingDirectory: "/w",
+              initialCommand: nil))
+        }
+        try manager.selectTab(tabs[0], in: worktreeID, in: projectID)
+        seeded.append((worktreeID, panes[0], panes[1]))
+      }
+      return seeded
+    }
+
     /// A live surface whose pane has `job` as its sampled foreground.
     func addSurface(_ paneID: PaneID, displayed: Bool = false, job: ForegroundJob?) {
       host.surfaces.append(ReclaimableSurface(paneID: paneID, isDisplayed: displayed, isReady: true))
@@ -90,6 +116,11 @@ struct TerminalEngineMemoryPressureTests {
           pid: 100, parentPID: 1, processGroupID: 100,
           argv0: argv0, commandLine: commandLine ?? argv0)
       ])
+  }
+
+  /// Yield to the main actor until `condition` holds, or give up.
+  private static func yield(until condition: () -> Bool) async {
+    for _ in 0..<1000 where !condition() { await Task.yield() }
   }
 
   @Test
@@ -153,5 +184,53 @@ struct TerminalEngineMemoryPressureTests {
     harness.engine.finishEventStream()
     #expect(harness.engine.handleMemoryPressure(.warning).isEmpty)
     #expect(harness.host.detached.isEmpty)
+  }
+
+  @Test
+  func timedSweepKeepsSelectedTabsOfTheThreeMostRecentWorktrees() async throws {
+    let harness = Harness()
+    harness.engine.reclaimPolicy = SurfaceReclaimPolicy(hiddenThreshold: 0, quietThreshold: 0)
+    let worktrees = try await harness.seedWorktrees(4)
+    for worktree in worktrees {
+      harness.addSurface(worktree.front, job: Self.job("zsh"))
+      harness.addSurface(worktree.back, job: Self.job("zsh"))
+    }
+    for worktree in worktrees.prefix(3) { harness.engine.noteWorktreeSelected(worktree.id) }
+
+    let reclaimed = Set(harness.engine.reclaimIdleSurfaces())
+
+    // Background tabs of recent worktrees and every tab of the older one go.
+    #expect(reclaimed == Set(worktrees.map(\.back) + [worktrees[3].front]))
+
+    // Selecting a fourth worktree pushes the first out of the recent three.
+    harness.engine.noteWorktreeSelected(worktrees[3].id)
+    #expect(harness.engine.reclaimIdleSurfaces() == [worktrees[0].front])
+  }
+
+  @Test
+  func pressureSweepIgnoresWorktreeRecency() async throws {
+    let harness = Harness()
+    let worktree = try #require(try await harness.seedWorktrees(1).first)
+    harness.addSurface(worktree.front, job: Self.job("zsh"))
+    harness.engine.noteWorktreeSelected(worktree.id)
+
+    #expect(harness.engine.handleMemoryPressure(.warning) == [worktree.front])
+  }
+
+  @Test
+  func selectionTrackingRecordsEachDisplayedWorktree() async throws {
+    let harness = Harness()
+    let worktrees = try await harness.seedWorktrees(2)
+    let projectID = try #require(harness.manager.catalog.projects.last?.id)
+    harness.manager.selectProject(projectID)
+    try harness.manager.selectWorktree(worktrees[0].id, in: projectID)
+    harness.engine.startWorktreeSelectionTracking()
+    await Self.yield(until: { harness.engine.worktreeSelections.rank(of: worktrees[0].id) == 0 })
+    #expect(harness.engine.worktreeSelections.worktrees == [worktrees[0].id])
+
+    try harness.manager.selectWorktree(worktrees[1].id, in: projectID)
+    await Self.yield(until: { harness.engine.worktreeSelections.rank(of: worktrees[1].id) == 0 })
+    #expect(harness.engine.worktreeSelections.worktrees == [worktrees[1].id, worktrees[0].id])
+    harness.engine.finishEventStream()
   }
 }
