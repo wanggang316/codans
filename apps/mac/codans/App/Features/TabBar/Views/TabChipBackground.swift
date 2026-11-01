@@ -15,6 +15,7 @@ import SwiftUI
 struct TabChipBackground: View {
   let isActive: Bool
   let isHovering: Bool
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     // Both capsules stay in the tree so their geometry animates with the
@@ -29,15 +30,31 @@ struct TabChipBackground: View {
   }
 
   private var selectedCapsule: some View {
+    ZStack {
+      // The dark-mode system bar shows no shadow.
+      if colorScheme == .light {
+        outerShadow
+      }
+      Capsule()
+        .fill(isHovering ? TabBarColors.activeHoverBackground : TabBarColors.activeBackground)
+        .overlay(Capsule().strokeBorder(TabBarColors.activeRimOuter, lineWidth: 0.5))
+        .overlay(
+          Capsule().strokeBorder(TabBarColors.activeRimInner, lineWidth: 0.5).padding(0.5)
+        )
+    }
+  }
+
+  /// Drop shadow of the selected capsule, cut away under the capsule. The
+  /// fill is translucent, so a plain `.shadow` would darken it from below.
+  private var outerShadow: some View {
     Capsule()
-      .fill(isHovering ? TabBarColors.activeHoverBackground : TabBarColors.activeBackground)
-      .overlay(Capsule().strokeBorder(TabBarColors.activeRimOuter, lineWidth: 0.5))
-      .overlay(
-        Capsule().strokeBorder(TabBarColors.activeRimInner, lineWidth: 0.5).padding(0.5)
-      )
-      // Flatten first: without it SwiftUI shadows each layer separately
-      // and the rims cast a grey band onto the inside of the capsule.
-      .compositingGroup()
+      .fill(.black)
       .shadow(color: TabBarColors.activeShadow, radius: 1.5, y: 0.5)
+      .mask {
+        Rectangle()
+          .padding(-4)
+          .overlay(Capsule().blendMode(.destinationOut))
+          .compositingGroup()
+      }
   }
 }
