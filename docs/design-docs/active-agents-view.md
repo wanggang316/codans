@@ -248,7 +248,7 @@ Source: [ProgramStatusRecords.swift](../../apps/mac/CodansCore/Agents/ProgramSta
 
 ### IPC 与 CLI
 
-`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle 与焦点标记。`codans agent list` 列出启动配置，与运行态列表不同。
+`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle、焦点标记、`isLive` 与 `isAttached`。两个字段取自 `TerminalEngine.terminalState(for:)` 的 `PaneTerminalState`：`attached`（daemon 在跑，surface 在渲染）、`detached`（daemon 在跑，没有 surface：启动时恢复但 tab 尚未打开，或被闲置回收摘掉 surface）、`stopped`（没有 daemon）。没有 surface 的 pane 每次都探测 daemon 的 control socket，因为 daemon 可能跨 app 重启存活，也可能在无人观察时退出。`detached` 的 pane 仍在运行，但 app 收不到它的 viewport、OSC 与前台进程信号，所以它的 state 是最后一次已知值（文本输出标 `(sleeping)`）；终端动词会先为它挂载 surface。`stopped` 的条目文本标 `(not live)`，终端动词返回 `PANE_NOT_LIVE`。Agents View 对这三种条目都显示；没有 surface 的条目在状态图标前加 `zzz` 睡眠标记（`AgentStateStore.isSleeping`，由 `TerminalEngine.onSurfaceAttachmentChanged` 维护的 `attachedPaneIDs` 推出），tooltip 提示点击唤醒：点击行会聚焦该 pane，其 tab 显示时挂载 surface。`codans agent list` 列出启动配置，与运行态列表不同。
 
 `agent.wait` 对应 `codans agent wait <pane> --until <condition>`，在服务端按 200 ms 间隔读取同一状态源。条件为 `idle`、`working`、`blocked`、`done`、`error`、`changed` 或 `exit`（`finished` 作为 `done` 的旧名仍被接受，不再列出）：`changed` 比较起始条目的 state 与 kind，`exit` 在 entry 消失或 Pane 移除时满足。开始等待时 Pane 必须存在；已存在但无 agent 的 Pane 可立即满足 `exit`。CLI 默认等待 60 秒，允许 1–600 秒；超时返回 `WAIT_TIMEOUT`（exit 11）。`source == screen` 的结果是屏幕与前台进程的派生状态；`source == programStatus` 的结果来自 agent 自己的报告。
 

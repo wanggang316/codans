@@ -112,7 +112,8 @@ extension HierarchyHandlers {
               agent: pane.agentKind?.rawValue,
               agentSessionID: pane.agentSessionID,
               isLive: runtimeProbe(pane.id) != nil,
-              isFocused: tab.splitTree.zoomed == pane.id
+              isFocused: tab.splitTree.zoomed == pane.id,
+              isAttached: paneIsAttached(pane.id)
             ))
         }
       }

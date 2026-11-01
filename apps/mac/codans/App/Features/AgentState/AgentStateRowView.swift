@@ -41,6 +41,11 @@ struct AgentStateRowView: View {
   /// Defaults false so older call sites that don't pass it (legacy
   /// view, tests) still compile.
   var isSelected: Bool = false
+  /// True when no surface renders this row's pane: the agent still runs in
+  /// its daemon, but the app does not observe it, so `entry.state` is the
+  /// last known one. Draws a sleep glyph before the state icon. Defaults
+  /// false so legacy call sites and tests render unchanged.
+  var isSleeping: Bool = false
   /// Row density — `normal` keeps the two-line identity column;
   /// `compact` joins worktree and project on one line and tightens
   /// vertical padding. Defaults to `.normal` so the legacy default
@@ -98,6 +103,9 @@ struct AgentStateRowView: View {
         // right-aligned column down the list rather than floating at a
         // variable offset after each project name.
         Spacer(minLength: 8)
+        if isSleeping {
+          sleepGlyph
+        }
         statusColumn
       }
       .padding(.horizontal, 12)
@@ -325,6 +333,19 @@ struct AgentStateRowView: View {
     }
   }
 
+  /// Sleep marker for a pane no surface renders. Semibold compensates for
+  /// the thin strokes of the zzz glyph next to the filled state icons.
+  private var sleepGlyph: some View {
+    Image(systemName: "zzz")
+      .font(.caption2)
+      .fontWeight(.semibold)
+      .imageScale(.small)
+      .foregroundStyle(.secondary)
+      .help("Sleeping to save resources. Click to wake.")
+      .accessibilityIdentifier("agentState.row.\(paneID).sleeping")
+      .accessibilityLabel("Sleeping")
+  }
+
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
   /// centered against the two-line identity column. The state icon's
@@ -409,7 +430,7 @@ struct AgentStateRowView: View {
   /// is dropped from the visible row but kept here so VoiceOver still
   /// announces which kind of agent occupies the pane.
   private var accessibilityLabelText: String {
-    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)"
+    "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)" + (isSleeping ? ", sleeping" : "")
   }
 }
 

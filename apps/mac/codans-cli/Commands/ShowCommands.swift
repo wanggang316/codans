@@ -156,7 +156,7 @@ struct PaneShow: AsyncParsableCommand {
       ("project", d.projectID),
       ("focused", d.isFocused ? "yes" : "no"),
       ("live", d.isLive ? "yes" : "no"),
-    ]
+    ] + (d.isAttached.map { [("attached", $0 ? "yes" : "no")] } ?? [])
   }
 }
 

@@ -1136,17 +1136,12 @@ final class AppState {
       },
       runtimeProbe: { [weak terminalEngine] paneID in
         // `pane.info` / `pane.read` probe the daemon out-of-band via its
-        // control socket. Gate on a live surface (or an idle-reclaimed one,
-        // whose daemon still runs) so we don't hand back a probe for a pane
-        // whose daemon isn't running this session.
-        guard
-          terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil
-            || terminalEngine?.isReclaimed(paneID) == true
-        else {
-          return nil
-        }
+        // control socket, with or without a surface. Gate on a running
+        // daemon so a stopped pane reports `PANE_NOT_LIVE`.
+        guard terminalEngine?.terminalState(for: paneID).isLive == true else { return nil }
         return ZmxControlProbe(paneID: paneID)
       },
+      paneIsAttached: { [weak terminalEngine] paneID in terminalEngine?.terminalState(for: paneID).isAttached },
       sessionCoordinator: sessionCoordinator,
       callerPaneResolver: { [weak terminalEngine] callerPID in
         // Ground-truth caller attribution: match the connecting process's
@@ -1196,6 +1191,53 @@ final class AppState {
     )
   }
 
+  /// The `terminal.*` handler: input delivery through the engine's
+  /// surfaces, plus attaching a surface to a detached pane first.
+  private func makeTerminalHandlers(
+    hierarchy: HierarchyManager,
+    terminalEngine: TerminalEngine,
+    settingsStore: SettingsStore
+  ) -> TerminalHandlers {
+    let inputSink: TerminalInputSink? =
+      terminalEngine.ghosttyRuntime == nil
+      ? nil
+      : TerminalInputSink(
+        engine: terminalEngine,
+        onPaneInput: { [weak hierarchy] paneID in
+          guard let manager = hierarchy,
+            let projectID = manager.catalog.projectID(forPane: paneID)
+          else { return }
+          manager.bumpProjectActivity(projectID)
+        }
+      )
+    return TerminalHandlers(
+      sink: inputSink,
+      catalog: { hierarchy.catalog },
+      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false },
+      attachDetached: { [weak hierarchy, weak terminalEngine] paneID in
+        // The same attach the UI does when the tab is shown: the daemon runs,
+        // so this starts no new process and does not focus. Only a detached
+        // pane: on a stopped one the attach would start a new shell. A pane
+        // that was never shown has no known size, so its surface starts at
+        // the placeholder size until its tab is shown.
+        guard let hierarchy, terminalEngine?.terminalState(for: paneID) == .detached,
+          let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: paneID)
+        else { return false }
+        try? await hierarchy.ensurePaneSurface(
+          paneID, in: tabID, in: worktreeID, in: projectID,
+          env: HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings))
+        return terminalEngine?.terminalState(for: paneID) == .attached
+      },
+      daemonScreen: { paneID in
+        // The same plain dump `pane.read` returns; short timeout because
+        // the caller polls it.
+        guard let data = try? await ZmxControlClient.history(for: paneID, format: .plain, timeout: .seconds(1))
+        else { return nil }
+        return String(bytes: data, encoding: .utf8)
+      }
+    )
+  }
+
   /// Wires the SocketServer so `codans` CLI can talk to the running app.
   /// Skipped under XCTest — tests build their own in-memory harnesses and
   /// binding a shared Unix socket racing parallel runs makes the runner
@@ -1239,23 +1281,8 @@ final class AppState {
       sessionCoordinator: sessionCoordinator,
       gitWorktreeClient: gitWorktreeClient
     )
-    let inputSink: TerminalInputSink? =
-      terminalEngine.ghosttyRuntime == nil
-      ? nil
-      : TerminalInputSink(
-        engine: terminalEngine,
-        onPaneInput: { [weak hierarchy] paneID in
-          guard let manager = hierarchy,
-            let projectID = manager.catalog.projectID(forPane: paneID)
-          else { return }
-          manager.bumpProjectActivity(projectID)
-        }
-      )
-    let terminalHandlers = TerminalHandlers(
-      sink: inputSink,
-      catalog: { hierarchy.catalog },
-      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false }
-    )
+    let terminalHandlers = makeTerminalHandlers(
+      hierarchy: hierarchy, terminalEngine: terminalEngine, settingsStore: settingsStore)
     let editorHandlers = EditorHandlers(
       editor: editor,
       hierarchy: hierarchyClient,
@@ -1283,7 +1310,8 @@ final class AppState {
             catalog: hierarchy.catalog,
             lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
           )
-        }
+        },
+        paneTerminalState: { [weak terminalEngine] paneID in terminalEngine?.terminalState(for: paneID) ?? .stopped }
       ),
       handoffHandlers: handoffHandlers,
       workspaceHandlers: WorkspaceHandlers(
@@ -2230,6 +2258,12 @@ final class AppState {
     )
     self.agentStateStore = registry
     engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
+    for paneID in engine.attachedPaneIDs {
+      registry.onSurfaceAttachmentChanged(paneID, attached: true)
+    }
+    engine.onSurfaceAttachmentChanged = { [weak registry] paneID, attached in
+      registry?.onSurfaceAttachmentChanged(paneID, attached: attached)
+    }
     // Pre-seed the registry from the last quit's agent snapshot so a
     // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on

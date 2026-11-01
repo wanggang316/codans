@@ -21,6 +21,9 @@ final class AgentHandlers {
   /// `p<n>` handles `tree` does.
   private let handleRegistry: TargetHandleRegistry
   private let focusedPane: @MainActor () -> PaneID?
+  /// Whether the pane's terminal runs and whether a surface renders it;
+  /// the same state `pane.describe` reports.
+  private let paneTerminalState: @MainActor (PaneID) -> PaneTerminalState
   /// Poll cadence of `wait`; injected so tests can shorten it.
   private let waitPollMillis: Int
 
@@ -31,6 +34,7 @@ final class AgentHandlers {
     stateStore: @escaping @MainActor () -> AgentStateStore? = { nil },
     handleRegistry: TargetHandleRegistry = TargetHandleRegistry(),
     focusedPane: @escaping @MainActor () -> PaneID? = { nil },
+    paneTerminalState: @escaping @MainActor (PaneID) -> PaneTerminalState = { _ in .attached },
     waitPollMillis: Int = 200
   ) {
     self.settings = settings
@@ -39,6 +43,7 @@ final class AgentHandlers {
     self.stateStore = stateStore
     self.handleRegistry = handleRegistry
     self.focusedPane = focusedPane
+    self.paneTerminalState = paneTerminalState
     self.waitPollMillis = waitPollMillis
   }
 
@@ -111,6 +116,9 @@ final class AgentHandlers {
 
   /// `agent.listStates` — every agent-bearing pane with its derived runtime
   /// state, in hierarchy order: what the Agents View lists, for scripts.
+  /// Detached and stopped panes stay listed, as in the Agents View;
+  /// `isLive` / `isAttached` tell a script which rows run and which are
+  /// observed.
   func listStates() throws -> IPC.AgentStateListResponse {
     guard let stateStore = stateStore() else {
       throw IPCError.unsupported(reason: "agent state is not available in this build")
@@ -126,6 +134,7 @@ final class AgentHandlers {
         for tab in worktree.tabs {
           for pane in tab.panes {
             guard let entry = stateStore.entries[pane.id] else { continue }
+            let terminal = paneTerminalState(pane.id)
             rows.append(
               IPC.AgentStateEntry(
                 paneID: pane.id.description,
@@ -145,7 +154,9 @@ final class AgentHandlers {
                 worktreeName: worktree.name,
                 tabID: tab.id.description,
                 tabTitle: tab.name ?? tab.cachedDisplayTitle,
-                isFocused: focused == pane.id
+                isFocused: focused == pane.id,
+                isLive: terminal.isLive,
+                isAttached: terminal.isAttached
               ))
           }
         }

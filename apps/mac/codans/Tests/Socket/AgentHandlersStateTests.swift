@@ -44,6 +44,38 @@ struct AgentHandlersStateTests {
     return Fixture(handlers: handlers, store: store, pane: pane, idlePane: idlePane, catalog: catalog)
   }
 
+  /// The Agents View keeps rows for panes the app does not observe; the
+  /// rows say so. A detached pane (restored and not opened yet, or
+  /// reclaimed) runs with no surface; a stopped pane runs nothing.
+  @Test(arguments: [
+    (PaneTerminalState.detached, true, false),
+    (.stopped, false, false),
+  ])
+  func listStatesReportsTheTerminalStateOfEachRow(
+    other: PaneTerminalState, isLive: Bool, isAttached: Bool
+  ) throws {
+    let base = makeFixture()
+    var hierarchy = HierarchyClient.testValue
+    hierarchy.snapshot = { base.catalog }
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "AgentHandlersStateTests-\(UUID().uuidString).json")
+    let attachedPane = base.pane.id
+    let handlers = AgentHandlers(
+      settings: SettingsStore(fileURL: url), hierarchy: hierarchy, installation: nil,
+      stateStore: { base.store },
+      paneTerminalState: { $0 == attachedPane ? .attached : other })
+
+    let response = try handlers.listStates()
+
+    #expect(response.count == 2)
+    #expect(response.agents[0].isLive == true)
+    #expect(response.agents[0].isAttached == true)
+    #expect(response.agents[1].paneID == base.idlePane.id.description)
+    #expect(response.agents[1].state == "idle")
+    #expect(response.agents[1].isLive == isLive)
+    #expect(response.agents[1].isAttached == isAttached)
+  }
+
   @Test
   func listStatesReportsEveryBoundPaneInHierarchyOrder() throws {
     let fixture = makeFixture()

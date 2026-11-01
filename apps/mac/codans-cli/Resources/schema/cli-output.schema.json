@@ -1011,7 +1011,25 @@
             "NO_CURRENT_CONTEXT",
             "EMPTY_INPUT",
             "WAIT_TIMEOUT",
-            "CAPTURE_UNSUPPORTED"
+            "CAPTURE_UNSUPPORTED",
+            "PANE_NOT_LIVE",
+            "WORKFLOW_NOT_FOUND",
+            "WORKFLOW_INVALID",
+            "WORKFLOW_DISABLED",
+            "WORKFLOW_TRUST_REQUIRED",
+            "RUN_NOT_FOUND",
+            "SOURCE_REQUIRED",
+            "INPUT_REQUIRED",
+            "PROFILE_REQUIRED",
+            "PANE_BUSY",
+            "ROLE_MISMATCH",
+            "STEP_NOT_EXPECTING",
+            "TOKEN_REQUIRED",
+            "TOKEN_INVALID",
+            "OUTPUT_INVALID",
+            "OUTPUT_TOO_LARGE",
+            "VERDICT_REQUIRED",
+            "RENDERED_TEXT_INVALID"
           ]
         },
         "message": {
@@ -1533,6 +1551,9 @@
         },
         "isFocused": {
           "type": "boolean"
+        },
+        "isAttached": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -1905,6 +1926,12 @@
           ]
         },
         "isFocused": {
+          "type": "boolean"
+        },
+        "isLive": {
+          "type": "boolean"
+        },
+        "isAttached": {
           "type": "boolean"
         }
       },

@@ -50,11 +50,13 @@ final class HierarchyHandlers {
   /// for tests that exercise the catalog-side mutation in isolation.
   private let daemonKiller: @MainActor (PaneID) async -> Void
   /// Probe surface for `pane.info` / `pane.read`. Returns a typed
-  /// `PaneRuntimeProbe` view of the live `ZmxClient` for `paneID`, or
-  /// `nil` when no surface is bound (no live daemon to talk to). Kept
-  /// behind a protocol so tests can inject a fake without dragging
-  /// `GhosttyRuntime` into the test target.
+  /// `PaneRuntimeProbe` over the pane's daemon control socket, or `nil`
+  /// when no daemon runs for it. Kept behind a protocol so tests can inject
+  /// a fake without dragging `GhosttyRuntime` into the test target.
   let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
+  /// Whether a surface renders the pane, for `pane.describe`'s
+  /// `isAttached`; nil leaves the field out.
+  let paneIsAttached: @MainActor (PaneID) -> Bool?
   /// Persistent zmx-session catalog accessor. The `pane.close` handler
   /// drops the closed pane's row synchronously through the coordinator
   /// so the on-disk state reflects the kill before the RPC returns.
@@ -112,6 +114,7 @@ final class HierarchyHandlers {
     settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
     daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
     runtimeProbe: @escaping @MainActor (PaneID) -> PaneRuntimeProbe? = { _ in nil },
+    paneIsAttached: @escaping @MainActor (PaneID) -> Bool? = { _ in nil },
     sessionCoordinator: SessionCoordinator? = nil,
     callerPaneResolver: @escaping @MainActor (pid_t) -> PaneID? = { _ in nil },
     gitRootDiscovery: @escaping @MainActor (String) async -> String? = { _ in nil },
@@ -128,6 +131,7 @@ final class HierarchyHandlers {
     self.settingsProvider = settingsProvider
     self.daemonKiller = daemonKiller
     self.runtimeProbe = runtimeProbe
+    self.paneIsAttached = paneIsAttached
     self.sessionCoordinator = sessionCoordinator
     self.callerPaneResolver = callerPaneResolver
     self.gitRootDiscovery = gitRootDiscovery
@@ -1095,7 +1099,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "pane.info requires {paneID}", path: nil))
     }
     guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unprobeable(req.paneID))
     }
     let payload: ZmxInfoPayload
     do {
@@ -1112,6 +1116,14 @@ final class HierarchyHandlers {
     )
     return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
       ?? .failed(.internal("encode pane.info result"))
+  }
+
+  /// Why `pane.info` / `pane.read` have no probe: an unknown id is
+  /// `notFound`; a catalog pane with no running daemon is `PANE_NOT_LIVE`
+  /// (`pane.describe` reports it `isLive: false`).
+  private func unprobeable(_ paneID: PaneID) -> IPCError {
+    manager.catalog.pane(paneID) == nil
+      ? .notFound(kind: "pane", id: paneID.description) : .paneNotLive(paneID.description)
   }
 
   /// Handles `pane.read` — pull serialized terminal state from the
@@ -1131,7 +1143,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "tail must be a positive integer", path: ["tail"]))
     }
     guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unprobeable(req.paneID))
     }
     let format: ZmxHistoryFormat = req.raw ? .vt : .plain
     let dump: Data

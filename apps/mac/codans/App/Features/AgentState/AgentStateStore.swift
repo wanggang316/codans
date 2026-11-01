@@ -123,6 +123,12 @@ final class AgentStateStore {
   private(set) var workingPaneIDs: Set<PaneID> = []
   private(set) var needsAttention = false
 
+  /// Panes a terminal surface renders, fed by the engine's attach / detach
+  /// callback. A pane without one still runs in its daemon (restored and
+  /// not opened yet, or released by the idle reclaim) but sends no signals,
+  /// so its entry holds the last known state.
+  private(set) var attachedPaneIDs: Set<PaneID> = []
+
   /// Per-pane derivation scratch. Kept around for all panes the
   /// store has heard about (bound or not) so signals that arrive
   /// before an agent is identified still leave the correct raw state
@@ -463,7 +469,23 @@ final class AgentStateStore {
     }
   }
 
+  /// Engine callback: a surface was attached to or detached from `paneID`.
+  func onSurfaceAttachmentChanged(_ paneID: PaneID, attached: Bool) {
+    if attached {
+      attachedPaneIDs.insert(paneID)
+    } else {
+      attachedPaneIDs.remove(paneID)
+    }
+  }
+
   // MARK: - Reads
+
+  /// Whether `paneID`'s agent row is asleep: the agent runs, but no surface
+  /// renders the pane, so the app does not observe it and its state is the
+  /// last known one. Showing the pane wakes it.
+  func isSleeping(_ paneID: PaneID) -> Bool {
+    entries[paneID] != nil && !attachedPaneIDs.contains(paneID)
+  }
 
   /// Latest OSC title observed for `paneID` — the terminal title agents
   /// push as they work, which doubles as a one-line "what is the agent

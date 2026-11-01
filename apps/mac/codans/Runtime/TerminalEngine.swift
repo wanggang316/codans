@@ -127,6 +127,9 @@ final class TerminalEngine {
   /// App-level veto, consulted per candidate: the agent store and command
   /// queue live above the Runtime layer, so the app injects what it knows.
   var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
+  /// Called when a catalog pane's surface is attached (`true`) or detached
+  /// (`false`: reclaimed or closed). Lets the app show which panes sleep.
+  var onSurfaceAttachmentChanged: @MainActor (PaneID, Bool) -> Void = { _, _ in }
   /// Last time each registered surface was seen inside a window.
   private var lastDisplayedAt: [PaneID: Date] = [:]
   /// Panes whose surface was detached by the reclaim sweep. Their zmx daemon
@@ -539,6 +542,7 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    onSurfaceAttachmentChanged(paneID, false)
     reclaimedPanes.remove(paneID)
     reclaimedSurfaceSizes.removeValue(forKey: paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
@@ -950,15 +954,35 @@ final class TerminalEngine {
   // MARK: - Idle-surface reclaim
 
   /// Whether the pane's surface was detached by the reclaim sweep while its
-  /// daemon keeps running. Out-of-band probes (`pane.read`, `pane.info`)
-  /// use this: the daemon answers them with no surface attached.
+  /// daemon keeps running.
   func isReclaimed(_ paneID: PaneID) -> Bool {
     reclaimedPanes.contains(paneID)
+  }
+
+  /// Probes a pane daemon's control socket. Injected so tests do not need a
+  /// running daemon.
+  var isDaemonAlive: @MainActor (PaneID) -> Bool = { SessionReaper.isDaemonAlive(paneID: $0) }
+
+  /// Whether the pane's terminal runs and whether a surface renders it.
+  /// A pane without a surface is probed: a daemon can outlive the app
+  /// (resume on launch) and can exit while no surface watches it, so
+  /// neither the restore path nor the reclaim bookkeeping tells.
+  /// `pane.describe` and `agent.listStates` report this state, and the
+  /// terminal verbs attach a surface only to a `.detached` pane.
+  /// Panes that have a surface now.
+  var attachedPaneIDs: Set<PaneID> {
+    Set(ghosttyRuntime?.allLiveSurfaces().map(\.paneID) ?? [])
+  }
+
+  func terminalState(for paneID: PaneID) -> PaneTerminalState {
+    if ghosttyRuntime?.surface(for: paneID) != nil { return .attached }
+    return isDaemonAlive(paneID) ? .detached : .stopped
   }
 
   /// Bookkeeping for a freshly registered surface. Returns whether it is a
   /// re-attach of a reclaimed pane.
   private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
+    onSurfaceAttachmentChanged(paneID, true)
     lastDisplayedAt[paneID] = clock()
     startReclaimSweepIfNeeded()
     reclaimedSurfaceSizes.removeValue(forKey: paneID)
@@ -982,6 +1006,7 @@ final class TerminalEngine {
     foregroundJobPaneIDs.remove(paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
     reclaimedPanes.insert(paneID)
+    onSurfaceAttachmentChanged(paneID, false)
     stopForegroundJobPollingIfIdle()
     Self.logger.info(
       "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
@@ -1286,4 +1311,29 @@ extension TerminalEvent {
       return true
     }
   }
+}
+
+/// Whether a catalog pane's terminal runs, and whether the app shows it.
+///
+/// A pane's shell lives in its zmx daemon; the libghostty surface only
+/// renders it. Surfaces are lazy and can be released, so the two lifetimes
+/// differ:
+/// - `attached`: the daemon runs and a surface renders it. Viewport and
+///   foreground-job polling and OSC parsing see the pane.
+/// - `detached`: the daemon runs, but no surface is bound. This is a pane
+///   restored at launch whose tab was not opened yet, or a pane whose
+///   surface the idle reclaim released. The shell or agent still runs, but
+///   the app observes nothing, so agent state for it is cached.
+/// - `stopped`: no daemon runs. The pane quit with a snapshot, or its
+///   daemon exited while detached. Attaching a surface starts a new shell.
+nonisolated enum PaneTerminalState: String, Equatable, Sendable {
+  case attached
+  case detached
+  case stopped
+
+  /// The pane's shell runs: terminal verbs can reach it, attaching a
+  /// surface first when it is detached.
+  var isLive: Bool { self != .stopped }
+
+  var isAttached: Bool { self == .attached }
 }

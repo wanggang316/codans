@@ -46,6 +46,18 @@ struct HierarchyHandlersDescribeTests {
     #expect(!description.isFocused)
   }
 
+  /// A detached pane runs (its daemon answers the probe) with no surface.
+  @Test
+  func describePaneReportsADetachedPaneLiveButNotAttached() async throws {
+    let fixture = Fixture(probeIsBound: true, paneIsAttached: false)
+
+    let outcome = await fixture.handlers.describePane(try Self.request(fixture.pane1.id.raw))
+    let description: IPC.PaneDescription = try Self.decodeUnary(outcome)
+
+    #expect(description.isLive)
+    #expect(description.isAttached == false)
+  }
+
   @Test
   func describeTabFallsBackToTheCachedTitleAndListsPanes() async throws {
     let fixture = Fixture()
@@ -129,7 +141,7 @@ struct HierarchyHandlersDescribeTests {
     let pane1: Pane
     let pane2: Pane
 
-    init(probeIsBound: Bool = false) {
+    init(probeIsBound: Bool = false, paneIsAttached: Bool? = nil) {
       let pane1 = Pane(workingDirectory: "/repo")
       let pane2 = Pane(workingDirectory: "/repo/src", labels: ["worker", "agent"])
       // swiftlint:disable:next force_try
@@ -152,7 +164,8 @@ struct HierarchyHandlersDescribeTests {
       self.manager = manager
       self.handlers = HierarchyHandlers(
         manager: manager,
-        runtimeProbe: { _ in probeIsBound ? ProbeStub() : nil }
+        runtimeProbe: { _ in probeIsBound ? ProbeStub() : nil },
+        paneIsAttached: { _ in paneIsAttached }
       )
       self.project = project
       self.worktree = worktree

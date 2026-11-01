@@ -84,6 +84,24 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
+  /// A restored agent runs with no surface until its tab is shown, so its
+  /// row sleeps; an attach wakes it, and a reclaim puts it back to sleep.
+  /// A pane with no agent row never sleeps.
+  @Test
+  func anAgentRowSleepsWhileNoSurfaceRendersItsPane() {
+    let f = Fixture()
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .idle)])
+    #expect(f.registry.isSleeping(f.paneID))
+
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: true)
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: false)
+    #expect(f.registry.isSleeping(f.paneID))
+  }
+
   @Test
   func seededBlockedSurvivesLaunchRebind() {
     let f = Fixture()
