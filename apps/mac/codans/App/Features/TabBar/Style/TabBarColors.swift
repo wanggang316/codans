@@ -7,10 +7,9 @@ import SwiftUI
 /// individual chip views.
 ///
 /// Chip / track tokens reproduce AppKit's macOS 26 window-tabbing tab bar,
-/// sampled per appearance. The system draws the track and the selected tab
-/// with private Liquid Glass variants that public API cannot select
-/// (`.glassEffect` renders visibly different), so they are expressed as
-/// translucent fills that land on the same pixels over the window backdrop.
+/// sampled per appearance. The selected chip is the system's own glass (see
+/// `TabChipBackground`); the remaining tokens are translucent fills that
+/// land on the system's pixels over the window backdrop.
 enum TabBarColors {
   /// Recessed capsule track behind the chips.
   static let trackBackground: Color = adaptive(
@@ -24,28 +23,29 @@ enum TabBarColors {
     dark: .white.withAlphaComponent(0.048)
   )
 
-  /// Raised capsule of the selected chip. In light mode the system's glass
-  /// tab takes on the hue of the backdrop it sits on, which here is the
-  /// terminal background seen through the window glass. A white fill, opaque
-  /// or translucent, reads as a flat plate on a tinted bar. So the fill keeps
-  /// the hue and saturation of `backdrop` and takes the luminosity of the
-  /// sampled system value (#F8F8F8): on a neutral backdrop it lands exactly
-  /// on that value. In dark mode a translucent white already takes on the
-  /// backdrop.
-  static func activeBackground(over backdrop: NSColor, colorScheme: ColorScheme) -> Color {
-    colorScheme == .dark
-      ? Color(nsColor: .white.withAlphaComponent(0.14))
-      : Color(nsColor: backdrop.withLuminosity(248 / 255))
-  }
+  /// Sheen laid over the selected chip's glass while the pointer is over
+  /// it — a codans addition (the system bar keeps the selected tab unchanged
+  /// on hover). Safari lifts the glass by about this much, and keeps its
+  /// tone.
+  static let activeHoverSheen: Color = adaptive(
+    light: .white.withAlphaComponent(0.35),
+    dark: .white.withAlphaComponent(0.05)
+  )
+
+  /// Before macOS 26, which has no system glass to draw the selected chip
+  /// with: raised capsule of the selected chip. Opaque in light mode: its drop
+  /// shadow would otherwise show through a translucent fill and grey it.
+  static let activeBackground: Color = adaptive(
+    light: NSColor(srgbRed: 248 / 255, green: 248 / 255, blue: 248 / 255, alpha: 1),
+    dark: .white.withAlphaComponent(0.14)
+  )
 
   /// Selected capsule while the pointer is over it — a codans addition (the
-  /// system bar keeps the selected tab unchanged on hover). Light mode takes
-  /// the luminosity of #F0F0F0.
-  static func activeHoverBackground(over backdrop: NSColor, colorScheme: ColorScheme) -> Color {
-    colorScheme == .dark
-      ? Color(nsColor: .white.withAlphaComponent(0.18))
-      : Color(nsColor: backdrop.withLuminosity(240 / 255))
-  }
+  /// system bar keeps the selected tab unchanged on hover).
+  static let activeHoverBackground: Color = adaptive(
+    light: NSColor(srgbRed: 240 / 255, green: 240 / 255, blue: 240 / 255, alpha: 1),
+    dark: .white.withAlphaComponent(0.18)
+  )
 
   /// Two stacked 0.5-pt rims (outer, inner) that give the selected capsule
   /// its glass edge highlight.
@@ -104,23 +104,5 @@ enum TabBarColors {
       nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
       })
-  }
-}
-
-extension NSColor {
-  /// This color's hue and saturation at luminosity `target`, as the
-  /// `luminosity` blend mode computes it (W3C Compositing, SetLum + ClipColor).
-  fileprivate func withLuminosity(_ target: CGFloat) -> NSColor {
-    guard let rgb = usingColorSpace(.sRGB) else { return NSColor(white: target, alpha: 1) }
-    func luminosity(_ c: [CGFloat]) -> CGFloat { 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2] }
-    let source = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
-    let shift = target - luminosity(source)
-    var c = source.map { $0 + shift }
-    let l = luminosity(c)
-    let low = c.min() ?? l
-    let high = c.max() ?? l
-    if low < 0 { c = c.map { l + ($0 - l) * l / (l - low) } }
-    if high > 1 { c = c.map { l + ($0 - l) * (1 - l) / (high - l) } }
-    return NSColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: 1)
   }
 }
