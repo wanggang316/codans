@@ -35,6 +35,12 @@ extension IPC {
     public let tabID: String
     public let tabTitle: String?
     public let isFocused: Bool
+    /// Whether the pane has a running terminal this session, by the same
+    /// rule as `pane.describe`'s `isLive`. A pane restored from the quit
+    /// snapshot keeps its last known state but stays not live until its tab
+    /// is opened, so `state` is cached, not observed, and terminal verbs
+    /// fail with `PANE_NOT_LIVE`. Absent from older apps.
+    public let isLive: Bool?
 
     public init(
       paneID: String,
@@ -54,7 +60,8 @@ extension IPC {
       worktreeName: String,
       tabID: String,
       tabTitle: String?,
-      isFocused: Bool
+      isFocused: Bool,
+      isLive: Bool? = nil
     ) {
       self.paneID = paneID
       self.handle = handle
@@ -74,6 +81,7 @@ extension IPC {
       self.tabID = tabID
       self.tabTitle = tabTitle
       self.isFocused = isFocused
+      self.isLive = isLive
     }
   }
 

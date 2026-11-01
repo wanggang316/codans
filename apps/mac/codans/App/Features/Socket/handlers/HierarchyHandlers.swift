@@ -1095,7 +1095,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "pane.info requires {paneID}", path: nil))
     }
     guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unprobeable(req.paneID))
     }
     let payload: ZmxInfoPayload
     do {
@@ -1112,6 +1112,14 @@ final class HierarchyHandlers {
     )
     return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
       ?? .failed(.internal("encode pane.info result"))
+  }
+
+  /// Why `pane.info` / `pane.read` have no probe: an unknown id is
+  /// `notFound`; a catalog pane whose daemon is not attached this session
+  /// is `PANE_NOT_LIVE` (`pane.describe` reports it `isLive: false`).
+  private func unprobeable(_ paneID: PaneID) -> IPCError {
+    manager.catalog.pane(paneID) == nil
+      ? .notFound(kind: "pane", id: paneID.description) : .paneNotLive(paneID.description)
   }
 
   /// Handles `pane.read` — pull serialized terminal state from the
@@ -1131,7 +1139,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "tail must be a positive integer", path: ["tail"]))
     }
     guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unprobeable(req.paneID))
     }
     let format: ZmxHistoryFormat = req.raw ? .vt : .plain
     let dump: Data

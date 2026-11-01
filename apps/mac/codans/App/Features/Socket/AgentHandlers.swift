@@ -21,6 +21,9 @@ final class AgentHandlers {
   /// `p<n>` handles `tree` does.
   private let handleRegistry: TargetHandleRegistry
   private let focusedPane: @MainActor () -> PaneID?
+  /// Whether the pane has a running terminal this session; the same rule
+  /// `pane.describe` uses for `isLive`.
+  private let paneIsLive: @MainActor (PaneID) -> Bool
   /// Poll cadence of `wait`; injected so tests can shorten it.
   private let waitPollMillis: Int
 
@@ -31,6 +34,7 @@ final class AgentHandlers {
     stateStore: @escaping @MainActor () -> AgentStateStore? = { nil },
     handleRegistry: TargetHandleRegistry = TargetHandleRegistry(),
     focusedPane: @escaping @MainActor () -> PaneID? = { nil },
+    paneIsLive: @escaping @MainActor (PaneID) -> Bool = { _ in true },
     waitPollMillis: Int = 200
   ) {
     self.settings = settings
@@ -39,6 +43,7 @@ final class AgentHandlers {
     self.stateStore = stateStore
     self.handleRegistry = handleRegistry
     self.focusedPane = focusedPane
+    self.paneIsLive = paneIsLive
     self.waitPollMillis = waitPollMillis
   }
 
@@ -111,6 +116,8 @@ final class AgentHandlers {
 
   /// `agent.listStates` — every agent-bearing pane with its derived runtime
   /// state, in hierarchy order: what the Agents View lists, for scripts.
+  /// Restored panes stay listed (the Agents View shows them on purpose);
+  /// `isLive` tells a script which rows it can send input to.
   func listStates() throws -> IPC.AgentStateListResponse {
     guard let stateStore = stateStore() else {
       throw IPCError.unsupported(reason: "agent state is not available in this build")
@@ -145,7 +152,8 @@ final class AgentHandlers {
                 worktreeName: worktree.name,
                 tabID: tab.id.description,
                 tabTitle: tab.name ?? tab.cachedDisplayTitle,
-                isFocused: focused == pane.id
+                isFocused: focused == pane.id,
+                isLive: paneIsLive(pane.id)
               ))
           }
         }

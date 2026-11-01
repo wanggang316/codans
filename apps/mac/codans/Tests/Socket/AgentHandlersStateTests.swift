@@ -45,6 +45,29 @@ struct AgentHandlersStateTests {
   }
 
   @Test
+  func listStatesMarksARestoredPaneWithoutATerminalAsNotLive() throws {
+    // Learn the pane ids, then mark only the first one live: the second is a
+    // restored row whose tab was never opened this session.
+    let base = makeFixture()
+    var hierarchy = HierarchyClient.testValue
+    hierarchy.snapshot = { base.catalog }
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "AgentHandlersStateTests-\(UUID().uuidString).json")
+    let livePane = base.pane.id
+    let handlers = AgentHandlers(
+      settings: SettingsStore(fileURL: url), hierarchy: hierarchy, installation: nil,
+      stateStore: { base.store }, paneIsLive: { $0 == livePane })
+
+    let response = try handlers.listStates()
+
+    #expect(response.count == 2)
+    #expect(response.agents[0].isLive == true)
+    #expect(response.agents[1].paneID == base.idlePane.id.description)
+    #expect(response.agents[1].state == "idle")
+    #expect(response.agents[1].isLive == false)
+  }
+
+  @Test
   func listStatesReportsEveryBoundPaneInHierarchyOrder() throws {
     let fixture = makeFixture()
     let response = try fixture.handlers.listStates()

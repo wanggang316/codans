@@ -287,6 +287,46 @@ struct TerminalHandlersTests {
 
   // MARK: - Raw hex decoding
 
+  // MARK: - A catalog pane with no attached terminal
+
+  /// A pane restored from the quit snapshot is in the catalog, but its tab
+  /// was never opened, so it has no surface (the fake sink does not know
+  /// it). Terminal and probe verbs must say `PANE_NOT_LIVE`, not
+  /// `notFound`, so a script can tell it from a wrong id.
+  @Test(arguments: [
+    IPC.Method.terminalReadText, .terminalSendInput, .terminalSendKey, .terminalSendRawBytes,
+    .terminalResetPane, .paneRead, .paneInfo,
+  ])
+  func verbsOnACatalogPaneWithoutATerminalReturnPaneNotLive(method: IPC.Method) async throws {
+    let pane = Pane(workingDirectory: "/repo")
+    let tab = Tab(name: "dev", splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab])
+    let project = Project(name: "repo", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+    let server = Self.makeHarness(sink: FakeSink(), catalog: Catalog(projects: [project]))
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(IPC.Request(id: "nl", method: method, params: try Self.paneParams(method, pane.id)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == .paneNotLive(pane.id.description), "\(method.rawValue)")
+  }
+
+  @Test(arguments: [IPC.Method.terminalReadText, .paneRead])
+  func verbsOnAnUnknownPaneStillReturnNotFound(method: IPC.Method) async throws {
+    let server = Self.makeHarness(sink: FakeSink())
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    let id = PaneID()
+    try server.send(IPC.Request(id: "nf", method: method, params: try Self.paneParams(method, id)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == .notFound(kind: "pane", id: id.description), "\(method.rawValue)")
+  }
+
   @Test
   func decodeHexAcceptsPerTokenPrefixesAndWhitespace() {
     #expect(TerminalHandlers.decodeHex("1b5b41") == [0x1b, 0x5b, 0x41])
@@ -301,15 +341,26 @@ struct TerminalHandlersTests {
 
   // MARK: - Harness
 
+  /// Valid params for a pane-targeted verb, so the handler reaches its
+  /// pane lookup instead of failing on decode.
+  static func paneParams(_ method: IPC.Method, _ paneID: PaneID) throws -> JSONValue {
+    if method == .paneRead { return try JSONValue.encoded(IPC.PaneReadRequest(paneID: paneID)) }
+    return .object([
+      "paneID": try JSONValue.encoded(paneID), "text": .string("x"), "key": .string("enter"),
+      "hex": .string("0d"),
+    ])
+  }
+
   static func makeHarness(
     sink: TerminalHandlers.InputSink?,
-    clock: StabilityClock = SystemStabilityClock()
+    clock: StabilityClock = SystemStabilityClock(),
+    catalog seed: Catalog? = nil
   ) -> InMemoryIPCServer {
     let systemHandlers = SystemHandlers(
       versions: .init(server: "0.4.0", appBundle: "0.4.0+test")
     )
     let catalogStore = CatalogStore(fileURL: Self.tempURL())
-    let catalog = (try? catalogStore.load()) ?? Catalog()
+    let catalog = seed ?? (try? catalogStore.load()) ?? Catalog()
     let hierarchy = HierarchyManager(
       catalog: catalog,
       store: catalogStore,

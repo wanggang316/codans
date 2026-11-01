@@ -145,3 +145,16 @@ extension IPCError: Codable {
     }
   }
 }
+
+extension IPCError {
+  /// The pane is in the catalog but no terminal is attached to it this
+  /// session — typically restored from the quit snapshot with its tab never
+  /// opened. Distinct from `notFound`, so a script can tell "wrong id" from
+  /// "open it first". `pane focus` attaches the terminal.
+  public static func paneNotLive(_ id: String) -> IPCError {
+    .domain(
+      code: "PANE_NOT_LIVE",
+      message: "pane has no attached terminal: \(id)",
+      hint: "run `codans pane focus \(id)` or open its tab in Codans, then retry")
+  }
+}

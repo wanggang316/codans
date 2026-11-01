@@ -40,6 +40,11 @@ struct AgentStatus: AsyncParsableCommand {
       its own state; for the others the state is derived from the pane's
       screen (source: screen), so it can lag a moment behind the agent.
       `agent wait` blocks on it.
+
+      A pane restored from the last session keeps its last known state but
+      has no running terminal until its tab is opened. Such a row has
+      isLive: false (text: "(not live)"), and terminal commands on it fail
+      with PANE_NOT_LIVE.
       """
   )
 
@@ -71,7 +76,8 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
       let since = formatter.date(from: row.since).map { Self.age(from: $0, to: now) } ?? "-"
       let focus = row.isFocused ? "*" : " "
       let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
-      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "")
+      // A not-live row is a restored state with no running terminal behind it.
+      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "") + (row.isLive == false ? " (not live)" : "")
       return
         "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
     }.joined(separator: "\n")

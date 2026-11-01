@@ -239,7 +239,7 @@
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
 | `codans agent list` | `agent.listProfiles` | `AgentHandlers.listProfiles` | 无；每行回带 id、名字、agent、enabled、PATH 探测结果（未探测完为 null）、是否支持 prompt、完整启动命令 |
-| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/done/error）、`since`、`source`（programStatus/screen）、`blockedKind`、`message`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`。实时状态来自 `AgentStateStore`；退出快照与重启恢复规则见 [Active Agents](active-agents-view.md) |
+| `codans agent status` | `agent.listStates` | `AgentHandlers.listStates` ← `AgentStateStore.entries` | 无；Agents View 的每一行：`paneID`、`handle`、`agent`、`state`（idle/working/blocked/done/error）、`since`、`source`（programStatus/screen）、`blockedKind`、`message`、`sessionID`、`title`、所在 project / worktree / tab、`isFocused`、`isLive`（与 `pane show` 的 `isLive` 同一规则；从退出快照恢复、tab 尚未打开的 pane 为 `false`，其 `state` 是缓存值，文本输出标 `(not live)`）。实时状态来自 `AgentStateStore`；退出快照与重启恢复规则见 [Active Agents](active-agents-view.md) |
 | `codans agent wait PANE --until COND` | `agent.wait` | `AgentHandlers.wait`（服务端每 200 ms 轮询 store） | `PANE`，`--until idle\|working\|blocked\|done\|error\|changed\|exit`（`finished` 作为 `done` 的旧名仍被接受），`[--wait-timeout 1..600]`（默认 60；全局 `--timeout` 是 RPC 客户端上限，会被抬高以覆盖它）。`changed` = 相对 arm 时的状态有任何变化；`exit` = pane 上不再绑定 agent。服务端在 deadline 返回 `satisfied=false`，CLI 转成 exit 11 / `WAIT_TIMEOUT` 并在 `details` 里带最后状态 |
 | `codans agent launch [PROFILE]` | `agent.launch` | `HierarchyClient.launchAgent` | `[PROFILE]`（名字或 id）或 `--agent TOKEN`（该 agent 第一个启用的 profile，缺则临时裸预设），`[--project P] [--worktree W] [--prompt TEXT\|-] [--tab \| --split right\|left\|up\|down] [--background]` |
 
@@ -312,7 +312,7 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 ```
 
 - `schemaVersion` = `codans.cli.<命令路径>.v1`，命令路径由 `CommandPaths` 从根 `CommandConfiguration` 树推出（不含可执行名，`codans` / `codans-dev` 相同），经 task-local `Renderer.context` 传给每次渲染；`CommandRunner.run(self, globals:)` 负责设置它并把失败也渲染成信封（JSON 模式下错误走 stdout，文本模式仍是 stderr 的 `error:` / `hint:` 行）。
-- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED` 这类退出码分不清的情形；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
+- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED`、`PANE_NOT_LIVE` 这类退出码分不清的情形（`PANE_NOT_LIVE`，exit 3：pane 在 catalog 中但本会话没有挂载终端，`pane send` / `send-key` / `capture` / `read` 等终端动词无法到达；未知 id 仍是 `NOT_FOUND`。`pane focus` 会挂载终端）；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
 - 形状由 `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`（JSON Schema 2020-12）描述：信封 + `error` 严格，`data` 按 `schemaVersion` 绑定到各命令的定义；回归 harness 末尾用 `.claude/skills/self-verify/cli-regression/validate-json.py`（无依赖的子集校验器）校验命令的 JSON 输出。单测 `RendererEnvelopeTests` 钉住信封与退出码 → 错误码表。
 - 例外：`codans help-json` 裸打印命令树；ArgumentParser 拒绝的命令行（exit 64）打印解析器自己的文本。
 

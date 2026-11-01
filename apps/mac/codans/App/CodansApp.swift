@@ -1139,12 +1139,7 @@ final class AppState {
         // control socket. Gate on a live surface (or an idle-reclaimed one,
         // whose daemon still runs) so we don't hand back a probe for a pane
         // whose daemon isn't running this session.
-        guard
-          terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil
-            || terminalEngine?.isReclaimed(paneID) == true
-        else {
-          return nil
-        }
+        guard terminalEngine?.isPaneLive(paneID) == true else { return nil }
         return ZmxControlProbe(paneID: paneID)
       },
       sessionCoordinator: sessionCoordinator,
@@ -1283,7 +1278,8 @@ final class AppState {
             catalog: hierarchy.catalog,
             lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
           )
-        }
+        },
+        paneIsLive: { [weak terminalEngine] paneID in terminalEngine?.isPaneLive(paneID) ?? false }
       ),
       handoffHandlers: handoffHandlers,
       workspaceHandlers: WorkspaceHandlers(

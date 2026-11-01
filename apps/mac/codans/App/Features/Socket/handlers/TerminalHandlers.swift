@@ -116,7 +116,7 @@ public final class TerminalHandlers {
     let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unreachable(req.paneID))
     }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
@@ -228,7 +228,7 @@ public final class TerminalHandlers {
     }
     let ok = sink.sendKey(paneID: req.paneID, key: req.key)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unreachable(req.paneID))
     }
     return .unary(.object(["delivered": .bool(true)]))
   }
@@ -256,7 +256,7 @@ public final class TerminalHandlers {
     }
     let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unreachable(req.paneID))
     }
     return .unary(
       .object([
@@ -358,7 +358,7 @@ public final class TerminalHandlers {
         read: { [sink] in sink.readText(paneID: req.paneID, extent: extent) }
       )
       guard let outcome = await waiter.run() else {
-        return .failed(.notFound(kind: "pane", id: req.paneID.description))
+        return .failed(unreachable(req.paneID))
       }
       result = ReadTextResult(
         text: outcome.text,
@@ -368,7 +368,7 @@ public final class TerminalHandlers {
       )
     } else {
       guard let text = sink.readText(paneID: req.paneID, extent: extent) else {
-        return .failed(.notFound(kind: "pane", id: req.paneID.description))
+        return .failed(unreachable(req.paneID))
       }
       result = ReadTextResult(text: text)
     }
@@ -377,6 +377,13 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.internal("encode readText result: \(error)"))
     }
+  }
+
+  /// Why a terminal verb could not reach a pane: an id outside the catalog
+  /// is `notFound`; a catalog pane with no attached terminal (restored, tab
+  /// never opened) is `PANE_NOT_LIVE`, so a script knows to open it first.
+  private func unreachable(_ paneID: PaneID) -> IPCError {
+    catalog().pane(paneID) == nil ? .notFound(kind: "pane", id: paneID.description) : .paneNotLive(paneID.description)
   }
 
   public struct ResetPaneParams: Codable, Sendable {
@@ -396,7 +403,7 @@ public final class TerminalHandlers {
     }
     let ok = sink.resetPane(paneID: req.paneID)
     if !ok {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unreachable(req.paneID))
     }
     return .unary(.object(["reset": .bool(true)]))
   }

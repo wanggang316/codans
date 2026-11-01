@@ -248,7 +248,7 @@ Source: [ProgramStatusRecords.swift](../../apps/mac/CodansCore/Agents/ProgramSta
 
 ### IPC 与 CLI
 
-`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle 与焦点标记。`codans agent list` 列出启动配置，与运行态列表不同。
+`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle、焦点标记与 `isLive`。从退出快照恢复的条目在其 tab 打开前没有终端（`isLive: false`）：Agents View 仍列出它，但它的 state 是缓存值，对它执行终端动词返回 `PANE_NOT_LIVE`。`codans agent list` 列出启动配置，与运行态列表不同。
 
 `agent.wait` 对应 `codans agent wait <pane> --until <condition>`，在服务端按 200 ms 间隔读取同一状态源。条件为 `idle`、`working`、`blocked`、`done`、`error`、`changed` 或 `exit`（`finished` 作为 `done` 的旧名仍被接受，不再列出）：`changed` 比较起始条目的 state 与 kind，`exit` 在 entry 消失或 Pane 移除时满足。开始等待时 Pane 必须存在；已存在但无 agent 的 Pane 可立即满足 `exit`。CLI 默认等待 60 秒，允许 1–600 秒；超时返回 `WAIT_TIMEOUT`（exit 11）。`source == screen` 的结果是屏幕与前台进程的派生状态；`source == programStatus` 的结果来自 agent 自己的报告。
 

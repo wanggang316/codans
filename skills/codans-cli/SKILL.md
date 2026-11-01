@@ -446,6 +446,7 @@ recognises as running an agent, with the derived state it shows there.
 ```bash
 codans agent status                                  # p7  claude-code  working  3m12s  api/main  "dev server"
 codans agent status --json | jq '.data.agents[] | select(.state=="blocked") | .paneID'
+codans agent status --json | jq '.data.agents[] | select(.isLive != false) | .paneID'   # only panes you can send to
 codans agent wait p7 --until idle --wait-timeout 300      # block until the agent is waiting for input
 codans agent wait p7 --until changed                 # …or until anything about it changes
 codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent is bound to the pane
@@ -679,6 +680,7 @@ codans pane capture @worker --wait-stable --lines 40
 | `socket /tmp/codans-*.sock did not become reachable` | App isn't running. Run `codans launch` or open codans from the GUI.       |
 | `no current pane: this shell is not inside a Codans pane` (or project/worktree/tab) | You used `current` / `.` outside a codans Pane. Pass an explicit ID or name. |
 | `pane <uuid> not found`                             | The pane was closed, or the UUID came from a different app instance.     |
+| `pane has no attached terminal: <uuid>` (`PANE_NOT_LIVE`, exit 3) | The pane was restored from the last session and its tab was never opened; `agent status` shows it `(not live)`. Run `codans pane focus <pane>`, then retry. |
 | `unknown key "..."`                                 | `codans pane send-key` only knows the keys listed above. Use `--raw` for the rest. |
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
 | `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |

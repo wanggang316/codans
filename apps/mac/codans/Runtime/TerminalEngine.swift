@@ -956,6 +956,14 @@ final class TerminalEngine {
     reclaimedPanes.contains(paneID)
   }
 
+  /// Whether the pane's daemon runs this session: it has a surface, or the
+  /// reclaim sweep detached one. A pane restored from the quit snapshot whose
+  /// tab was never opened has neither. `pane.describe`'s `isLive` and
+  /// `agent.listStates`' `isLive` both read this.
+  func isPaneLive(_ paneID: PaneID) -> Bool {
+    ghosttyRuntime?.surface(for: paneID) != nil || isReclaimed(paneID)
+  }
+
   /// Bookkeeping for a freshly registered surface. Returns whether it is a
   /// re-attach of a reclaimed pane.
   private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
