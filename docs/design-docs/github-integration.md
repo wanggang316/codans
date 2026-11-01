@@ -389,6 +389,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | 手动刷新 | 用户动作（面板、popover 刷新按钮） | 立即刷新 Project |
 | 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
 | pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
+| 远端跟踪 ref 变更 | `RemoteRefsWatcher`（FSEvents 监听公共 git 目录下的 `refs/remotes/` 与 `packed-refs`） | 2 s 后刷新该取数单元，并在 3 min 内按 hot 档轮询。覆盖任意进程的 `git push` / `gh pr create` / `git fetch`，包括前台作业检测看不到的 agent |
 | `gh` 从 `.unavailable` 恢复 | `GhAvailabilityCache` | 刷新每个有排队请求的 Project |
 | App 变为活跃 | `NSApp.didBecomeActiveNotification` | reconcile 后，所有超过 30 s（`focusRefreshDebounce`）未取数的单元排队补刷，选中 Project 优先 |
 | liveness 轮询 | 前台 timer，gated on `NSApp.isActive` × 所有取数单元 | 按单元分档节奏强制刷新（见下表）；app resign active 即刻取消，故后台 app 零轮询 |
@@ -397,13 +398,15 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 
 **取消。** queued 刷新在 Project 关闭或用户导航离开时丢弃；in-flight 取数在 Project 失活时经 `.cancellable(id: CancelID.projectFetch(P), cancelInFlight: true)` 取消。
 
-**关于轮询的取舍。** 纯事件驱动的「用户交互时同等新鲜」前提只对*本地*状态成立——用户在终端 pane 打字不是 GitHub 失效事件，agent 在 pane 里跑的 `git push` / `gh pr create` 也不被前台作业检测识别，故源自 GitHub 侧的 check 完成、review、merge/close、新 PR 在纯事件驱动下无新鲜保证。补的信号是一个调度器：**覆盖所有 Project 的取数单元**、**只在 app 为前台时**（resign-active 即取消）、**按单元分档**（选中 Project 更快，有东西在飞时更快）。应用失去前台状态时停止轮询；仅离开键盘但应用仍为前台时，轮询继续。
+**关于轮询的取舍。** 纯事件驱动的「用户交互时同等新鲜」前提只对*本地*状态成立——用户在终端 pane 打字不是 GitHub 失效事件，agent 在 pane 里跑的 `git push` / `gh pr create` 只能靠远端跟踪 ref 监听发现，故源自 GitHub 侧的 check 完成、review、merge/close、新 PR 在纯事件驱动下无新鲜保证。补的信号是一个调度器：**覆盖所有 Project 的取数单元**、**只在 app 为前台时**（resign-active 即取消）、**按单元分档**（选中 Project 更快，有东西在飞时更快）。应用失去前台状态时停止轮询；仅离开键盘但应用仍为前台时，轮询继续。
 
 | 档位（按最近一次批量结果） | 选中 Project | 其他 Project |
 |---|---|---|
 | hot：有 open PR 的 check 在跑或 merge 状态 unknown | 10 s | 30 s |
 | warm：有 open PR，均已 settle | 30 s | 2 min |
 | cold：无 open PR，或尚未取数 | 60 s | 5 min |
+
+远端跟踪 ref 变更后 3 min（`remoteRefsHotWindow`）内，该单元不论批量结果如何都按 hot 档：push 之后 agent 常隔一段时间才 `gh pr create`，CI 也随后才启动。
 
 调度器单 timer：睡到最早到期的单元（夹在 1–60 s），到期单元按「选中优先、上次取数最早优先」启动，轮询发起的取数最多 2 个并发；某次取数完成即把空出的槽交给下一个到期单元。节奏以「上次取数开始时间」计，任何来源的取数（事件、手动、轮询）都会重置该单元的节奏。
 

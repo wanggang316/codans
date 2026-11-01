@@ -94,6 +94,11 @@ struct GitHubFeature {
     /// Drained by the scheduler at most `maxConcurrentPollFetches` at a time.
     var pendingPollRefresh: Set<ProjectID> = []
 
+    /// Units that poll as `.hot` until the stored time, whatever their batch says.
+    /// Set when a unit's remote-tracking refs move: a push is often followed by
+    /// `gh pr create` and CI starting, which a settled-tier cadence would show late.
+    var hotUntil: [ProjectID: Date] = [:]
+
     /// Last-known branch pairs per Project, so a poll tick — or a post-mutation /
     /// manual-retry refresh — can re-issue a fetch without the caller re-supplying them.
     /// Written everywhere `projectGitRoots[P]` is written (inside `enqueueProjectFetch`)
@@ -212,6 +217,11 @@ struct GitHubFeature {
     /// Queue a fetch for every polled unit, drained through the concurrency cap.
     case refreshAllRequested
 
+    /// The unit's remote-tracking refs changed on disk (`git push` / `git fetch`
+    /// from any process). Schedules a short-delay refresh and polls the unit as
+    /// `.hot` for `remoteRefsHotWindow`.
+    case remoteRefsChanged(ProjectID)
+
     /// Project-level refresh keyed by a single Worktree. Resolves the owning Project from
     /// `projectByWorktree` and runs the batched fetch. Backs the badge / popover
     /// error-state retry so a retry repaints the whole repo with full check rollups
@@ -285,8 +295,8 @@ struct GitHubFeature {
     /// Per-Project batched fetch. Re-dispatching `projectRefreshRequested`
     /// for an in-flight Project cancels the prior fetch and replaces it.
     case projectFetch(ProjectID)
-    /// Delayed post-mutation refresh — merge / close / markReady / rerun all
-    /// schedule this 2 s after a successful write.
+    /// Delayed refresh — merge / close / markReady / rerun schedule it 2 s after a
+    /// successful write; a remote-refs change schedules it too.
     case delayedProjectRefresh(ProjectID)
     /// `gh` availability recovery heartbeat — retries every 15 s after an outage.
     case availabilityRecovery
@@ -331,6 +341,10 @@ struct GitHubFeature {
   /// Most poll-started fetches in flight at once. Event-driven fetches do not count
   /// against it; the cap only spreads a catch-up across many Projects.
   static let maxConcurrentPollFetches = 2
+
+  /// How long a remote-refs change keeps a unit on the `.hot` cadence. Long enough
+  /// to cover an agent opening the PR some time after its push.
+  static let remoteRefsHotWindow: TimeInterval = 180
 
   /// Bounds on the timer delay. The floor stops a busy loop; the ceiling bounds how
   /// late a cadence change is noticed.
@@ -661,6 +675,13 @@ struct GitHubFeature {
         state.pendingPollRefresh = state.pollUnits
         return runPollScheduler(state: &state)
 
+      case .remoteRefsChanged(let projectID):
+        guard state.pollUnits.contains(projectID) else { return .none }
+        state.hotUntil[projectID] = now.addingTimeInterval(Self.remoteRefsHotWindow)
+        // The ref moves when the push lands; a `gh pr create` wrapping it opens
+        // the PR right after, so give GitHub a moment before reading back.
+        return scheduleDelayedRefresh(projectID)
+
       case .delayedProjectRefreshFired(let projectID):
         guard let gitRoot = state.projectGitRoots[projectID],
           let pairs = state.projectWorktreePairs[projectID]
@@ -700,6 +721,7 @@ struct GitHubFeature {
         state.selectedUnits.formIntersection(projectIDs)
         state.pendingPollRefresh.formIntersection(projectIDs)
         state.lastFetchStartedAt = state.lastFetchStartedAt.filter { projectIDs.contains($0.key) }
+        state.hotUntil = state.hotUntil.filter { projectIDs.contains($0.key) }
         // Persist the pruned map so the removal survives a relaunch even if no
         // fetch succeeds before quit.
         if state.snapshotsByProject.count != hadProjects {
@@ -817,9 +839,10 @@ struct GitHubFeature {
     return inFlight ? .hot : .warm
   }
 
-  private static func pollInterval(_ projectID: ProjectID, state: State) -> TimeInterval {
-    pollInterval(
-      pollTier(for: state.snapshotsByProject[projectID]),
+  private static func pollInterval(_ projectID: ProjectID, state: State, now: Date) -> TimeInterval {
+    let hot = state.hotUntil[projectID].map { now < $0 } ?? false
+    return pollInterval(
+      hot ? .hot : pollTier(for: state.snapshotsByProject[projectID]),
       selected: state.selectedUnits.contains(projectID))
   }
 
@@ -848,7 +871,7 @@ struct GitHubFeature {
       if state.pendingPollRefresh.contains(projectID) { return true }
       guard polling else { return false }
       let started = state.lastFetchStartedAt[projectID] ?? .distantPast
-      return now.timeIntervalSince(started) >= Self.pollInterval(projectID, state: state)
+      return now.timeIntervalSince(started) >= Self.pollInterval(projectID, state: state, now: now)
     }
     let ordered = due.sorted { lhs, rhs in
       let lhsSelected = state.selectedUnits.contains(lhs)
@@ -885,7 +908,7 @@ struct GitHubFeature {
         break
       }
       let started = state.lastFetchStartedAt[projectID] ?? .distantPast
-      let remaining = Self.pollInterval(projectID, state: state) - now.timeIntervalSince(started)
+      let remaining = Self.pollInterval(projectID, state: state, now: now) - now.timeIntervalSince(started)
       delay = min(delay, remaining)
     }
     return min(max(delay, Self.minPollDelay), Self.maxPollDelay)
@@ -974,7 +997,13 @@ struct GitHubFeature {
     worktreeID: WorktreeID, state: inout State
   ) -> Effect<Action> {
     guard let projectID = state.projectByWorktree[worktreeID] else { return .none }
-    return .run { [clock] send in
+    return scheduleDelayedRefresh(projectID)
+  }
+
+  /// Fetches the unit 2 s from now, so GitHub has settled a write before it is read
+  /// back. A second request within the window restarts it.
+  private func scheduleDelayedRefresh(_ projectID: ProjectID) -> Effect<Action> {
+    .run { [clock] send in
       try await clock.sleep(for: .seconds(2))
       await send(.delayedProjectRefreshFired(projectID))
     }
