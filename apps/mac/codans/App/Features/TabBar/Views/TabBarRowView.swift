@@ -100,6 +100,10 @@ struct TabBarRowView: View {
   @State private var draggingID: TabID?
   /// Live cursor X in the row space, driving the floating chip.
   @State private var dragCursorX: CGFloat = 0
+  /// Cursor X minus the dragged chip's center X at the start of the drag.
+  /// The lifted copy keeps it, so the chip stays where it was grabbed
+  /// instead of jumping to center on the cursor.
+  @State private var dragGrabOffset: CGFloat = 0
   /// Per-chip layout rects (row space) reported via `ChipFrameKey`. Read
   /// for neighbor-midpoint hit testing and to size the floating copy.
   @State private var chipFrames: [TabID: CGRect] = [:]
@@ -286,7 +290,8 @@ struct TabBarRowView: View {
         // shows past its antialiased edge.
         let width = frame.width + 2
         let cutout = CGRect(
-          x: dragCursorX - width / 2, y: 0, width: width, height: TabBarMetrics.chipHeight)
+          x: liftedCenterX(width: frame.width) - width / 2, y: 0, width: width,
+          height: TabBarMetrics.chipHeight)
         Path { path in
           path.addRect(CGRect(origin: .zero, size: geo.size))
           path.addRoundedRect(
@@ -327,7 +332,7 @@ struct TabBarRowView: View {
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
         .clipShape(Rectangle().inset(by: -Self.liftedChipShadowOutset))
         .allowsHitTesting(false)
-        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
+        .position(x: liftedCenterX(width: frame.width), y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
     }
   }
@@ -343,6 +348,8 @@ struct TabBarRowView: View {
         // mutable baseline, then claim this chip as the dragged one.
         orderIDs = tabs.map(\.id)
         draggingID = tab.id
+        let grabbedMidX = chipFrames[tab.id]?.midX ?? value.startLocation.x
+        dragGrabOffset = value.startLocation.x - grabbedMidX
       }
       dragCursorX = value.location.x
       updateOrder()
@@ -351,11 +358,23 @@ struct TabBarRowView: View {
       let final = orderIDs
       draggingID = nil
       dragCursorX = 0
+      dragGrabOffset = 0
       // Single absolute-order commit; skip the no-op when nothing moved.
       if final != tabs.map(\.id) {
         onReorder(final)
       }
     }
+  }
+
+  /// Center X of the lifted copy: the cursor less the grab offset, held
+  /// inside the row the way the system bar keeps a dragged tab in the bar.
+  private func liftedCenterX(width: CGFloat) -> CGFloat {
+    let x = dragCursorX - dragGrabOffset
+    let frames = chipFrames.values
+    guard let minX = frames.map(\.minX).min(), let maxX = frames.map(\.maxX).max(),
+      maxX - minX >= width
+    else { return x }
+    return min(max(x, minX + width / 2), maxX - width / 2)
   }
 
   /// Steps the dragged chip past an adjacent neighbor once it overlaps that
@@ -375,15 +394,16 @@ struct TabBarRowView: View {
       let current = orderIDs.firstIndex(of: id),
       let dragged = chipFrames[id]
     else { return }
+    let centerX = liftedCenterX(width: dragged.width)
     var target = current
     if current < orderIDs.count - 1,
       let next = chipFrames[orderIDs[current + 1]],
-      dragCursorX > (dragged.midX + next.midX) / 2
+      centerX > (dragged.midX + next.midX) / 2
     {
       target = current + 1
     } else if current > 0,
       let prev = chipFrames[orderIDs[current - 1]],
-      dragCursorX < (dragged.midX + prev.midX) / 2
+      centerX < (dragged.midX + prev.midX) / 2
     {
       target = current - 1
     }
