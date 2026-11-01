@@ -7,8 +7,8 @@ import SwiftUI
 ///
 /// Mirrors the macOS system tab bar: the selected chip is a raised glass
 /// capsule; an idle chip is transparent and picks up a flat capsule only
-/// while hovered. Unlike the system bar, the selected capsule also brightens
-/// slightly under the pointer, so every chip acknowledges hover. There is
+/// while hovered. Unlike the system bar, the selected capsule also shifts
+/// slightly under the pointer, as Safari's does, so every chip acknowledges hover. There is
 /// no separate pressed look — like the system bar, a chip is selected on
 /// mouse-down, so a press renders as the selected capsule immediately.
 /// All tokens come from `TabBarMetrics` / `TabBarColors`.
@@ -28,7 +28,7 @@ struct TabChipBackground: View {
           TabGlassCapsule()
             .overlay {
               Capsule()
-                .fill(isHovering ? TabBarColors.activeHoverSheen : .clear)
+                .fill(isHovering ? TabBarColors.activeHoverOverlay : .clear)
                 .allowsHitTesting(false)
             }
         } else {

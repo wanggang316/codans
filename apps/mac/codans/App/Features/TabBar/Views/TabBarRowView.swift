@@ -273,13 +273,18 @@ struct TabBarRowView: View {
     }
   }
 
+  /// How far the lifted copy's clip reaches past its chip frame: enough
+  /// for the glass shadow.
+  private static let liftedChipShadowOutset: CGFloat = 3
+
   /// Everything but the lifted copy's footprint while a drag is in
   /// progress; the whole row otherwise.
   private var dragMask: some View {
     GeometryReader { geo in
       if let id = draggingID, let frame = chipFrames[id] {
-        // A little wider than the copy, which is scaled up while lifted.
-        let width = frame.width * 1.03 + 2
+        // A little wider than the copy, so no sliver of the chip under it
+        // shows past its antialiased edge.
+        let width = frame.width + 2
         let cutout = CGRect(
           x: dragCursorX - width / 2, y: 0, width: width, height: TabBarMetrics.chipHeight)
         Path { path in
@@ -313,15 +318,14 @@ struct TabBarRowView: View {
           }
         }
         // Hard-clip the lifted copy to its own chip frame. On macOS 26 the
-        // copy's opaque background otherwise paints a tall white column up to
-        // the titlebar during a drag (a SwiftUI host/overlay regression — the
-        // drag code itself is unchanged from when this shipped clean). Clipping
-        // bounds the copy to `chipHeight` regardless of why it overflows; the
-        // shadow is applied after, so it still feathers outside the clip.
+        // copy's background otherwise paints a tall column up to the
+        // titlebar during a drag (a SwiftUI host/overlay regression — the
+        // drag code itself is unchanged from when this shipped clean). The
+        // clip reaches a little past the chip so the glass keeps its own
+        // shadow. Like Safari, the lifted copy keeps the chip's size and
+        // look: no scale, no extra shadow.
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        .clipped()
-        .scaleEffect(1.03)
-        .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
+        .clipShape(Rectangle().inset(by: -Self.liftedChipShadowOutset))
         .allowsHitTesting(false)
         .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
