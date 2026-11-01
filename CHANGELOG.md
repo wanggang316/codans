@@ -25,10 +25,15 @@ and the project does not yet follow semantic versioning — every release until
   `NOT_FOUND`, and `pane read` / `pane info` answer for it too.
   `pane send --capture` on such a pane compares the pane's own screen
   before and after, so the old screen never shows up as output.
+- **Agents View shows sleeping agents.** An agent whose pane has no
+  terminal view (restored and not opened yet, or idle long enough to have
+  its view released) still runs, but Codans does not watch it. Its row now
+  shows a sleep glyph next to its last known state; clicking the row wakes
+  it.
 - **`agent status` and `pane show` tell which panes are observed.** Rows
   now have `isLive` (the terminal runs) and `isAttached` (Codans shows and
-  watches it). A detached row keeps its last known state and shows
-  `(detached)`. A pane whose terminal no longer runs shows `(not live)`, and
+  watches it). A sleeping row keeps its last known state and shows
+  `(sleeping)`. A pane whose terminal no longer runs shows `(not live)`, and
   terminal commands on it fail with `PANE_NOT_LIVE` (exit 3); an unknown id
   is still `NOT_FOUND`.
 

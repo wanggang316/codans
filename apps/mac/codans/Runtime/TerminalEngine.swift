@@ -127,6 +127,9 @@ final class TerminalEngine {
   /// App-level veto, consulted per candidate: the agent store and command
   /// queue live above the Runtime layer, so the app injects what it knows.
   var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
+  /// Called when a catalog pane's surface is attached (`true`) or detached
+  /// (`false`: reclaimed or closed). Lets the app show which panes sleep.
+  var onSurfaceAttachmentChanged: @MainActor (PaneID, Bool) -> Void = { _, _ in }
   /// Last time each registered surface was seen inside a window.
   private var lastDisplayedAt: [PaneID: Date] = [:]
   /// Panes whose surface was detached by the reclaim sweep. Their zmx daemon
@@ -539,6 +542,7 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    onSurfaceAttachmentChanged(paneID, false)
     reclaimedPanes.remove(paneID)
     reclaimedSurfaceSizes.removeValue(forKey: paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
@@ -965,6 +969,11 @@ final class TerminalEngine {
   /// neither the restore path nor the reclaim bookkeeping tells.
   /// `pane.describe` and `agent.listStates` report this state, and the
   /// terminal verbs attach a surface only to a `.detached` pane.
+  /// Panes that have a surface now.
+  var attachedPaneIDs: Set<PaneID> {
+    Set(ghosttyRuntime?.allLiveSurfaces().map(\.paneID) ?? [])
+  }
+
   func terminalState(for paneID: PaneID) -> PaneTerminalState {
     if ghosttyRuntime?.surface(for: paneID) != nil { return .attached }
     return isDaemonAlive(paneID) ? .detached : .stopped
@@ -973,6 +982,7 @@ final class TerminalEngine {
   /// Bookkeeping for a freshly registered surface. Returns whether it is a
   /// re-attach of a reclaimed pane.
   private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
+    onSurfaceAttachmentChanged(paneID, true)
     lastDisplayedAt[paneID] = clock()
     startReclaimSweepIfNeeded()
     reclaimedSurfaceSizes.removeValue(forKey: paneID)
@@ -996,6 +1006,7 @@ final class TerminalEngine {
     foregroundJobPaneIDs.remove(paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
     reclaimedPanes.insert(paneID)
+    onSurfaceAttachmentChanged(paneID, false)
     stopForegroundJobPollingIfIdle()
     Self.logger.info(
       "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"

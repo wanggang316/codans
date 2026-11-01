@@ -2258,6 +2258,12 @@ final class AppState {
     )
     self.agentStateStore = registry
     engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
+    for paneID in engine.attachedPaneIDs {
+      registry.onSurfaceAttachmentChanged(paneID, attached: true)
+    }
+    engine.onSurfaceAttachmentChanged = { [weak registry] paneID, attached in
+      registry?.onSurfaceAttachmentChanged(paneID, attached: attached)
+    }
     // Pre-seed the registry from the last quit's agent snapshot so a
     // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on

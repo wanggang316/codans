@@ -41,10 +41,10 @@ struct AgentStatus: AsyncParsableCommand {
       screen (source: screen), so it can lag a moment behind the agent.
       `agent wait` blocks on it.
 
-      A detached pane (restored and not opened yet, or idle long enough to
+      A sleeping pane (restored and not opened yet, or idle long enough to
       have its terminal view released) still runs, but Codans does not watch
       it, so its state is the last known one: isAttached: false (text:
-      "(detached)"). Terminal commands attach it first. A pane whose
+      "(sleeping)"). Terminal commands attach it first. A pane whose
       terminal no longer runs has isLive: false (text: "(not live)"), and
       terminal commands on it fail with PANE_NOT_LIVE.
       """
@@ -89,7 +89,7 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
   /// carry neither field and get no mark.
   static func lifecycleMark(_ row: IPC.AgentStateEntry) -> String {
     if row.isLive == false { return " (not live)" }
-    if row.isAttached == false { return " (detached)" }
+    if row.isAttached == false { return " (sleeping)" }
     return ""
   }
 

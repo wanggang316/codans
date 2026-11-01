@@ -257,6 +257,7 @@ struct AgentStateSidebarPanel: View {
               projectColor: resolved?.projectColor,
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
+              isSleeping: registry.isSleeping(item.paneID),
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
               paneTitle: { registry.activityText(for: item.paneID) },
               worktreePath: resolved?.worktreePath,

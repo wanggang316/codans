@@ -446,7 +446,7 @@ recognises as running an agent, with the derived state it shows there.
 ```bash
 codans agent status                                  # p7  claude-code  working  3m12s  api/main  "dev server"
 codans agent status --json | jq '.data.agents[] | select(.state=="blocked") | .paneID'
-codans agent status --json | jq '.data.agents[] | select(.isLive != false) | .paneID'   # panes whose terminal runs (send attaches detached ones)
+codans agent status --json | jq '.data.agents[] | select(.isLive != false) | .paneID'   # panes whose terminal runs (send wakes sleeping ones)
 codans agent wait p7 --until idle --wait-timeout 300      # block until the agent is waiting for input
 codans agent wait p7 --until changed                 # …or until anything about it changes
 codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent is bound to the pane
@@ -468,7 +468,7 @@ agent without the state.
 
 A pane in a tab that is not open (restored from the last session, or idle
 long enough to have its terminal view released) still runs, but Codans
-does not watch it: its row has `isAttached: false` and shows `(detached)`,
+does not watch it: its row has `isAttached: false` and shows `(sleeping)`,
 and its state is the last one seen. `pane send` / `capture` attach it
 first. A row with `isLive: false` shows `(not live)`: its shell no longer
 runs.
