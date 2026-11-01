@@ -61,6 +61,6 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 ## 验证
 
 - `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值、其余规则仍生效。
-- `TerminalEngineMemoryPressureTests` 注入 live surface 样本与压力事件，覆盖压力扫描的入口：隐藏且空闲的 shell / agent 被回收，显示中、远程、被 veto、运行命令、前台未知的 pane 保留。
+- `TerminalEngineMemoryPressureTests` 用假的 `ReclaimableSurfaceHost`（生产中是 `GhosttyRuntime`）注入 surface 与压力事件：隐藏且空闲的 shell / agent 被 detach，并记为已回收、发出解除挂接通知、启动被动 watcher；显示中、被 veto、运行命令、前台未知的 pane 保留；detach 失败的 pane 不计入回收数。远程 pane 的规则由策略测试覆盖。
 - 隔离 Debug 实例，11 个 tab 各一个空闲 shell（1 个显示、10 个隐藏），注入一次压力事件：phys footprint 858 MB → 228 MB，线程 51 → 11，挂接的 surface 11 → 1，日志 `reclaimed=10`；再显示被回收的 tab，原 shell 会话照常可用。
 - 隔离 Debug 实例（`CODANS_SURFACE_RECLAIM_SECONDS=8`），两个 tab 各一个 pane，显示 B 以隐藏 A：线程 17 → 12，A 的 zmx socket 仍在，`pane read` 仍可用；再次显示 A：线程回到 17，shell 里导出的变量仍在，`initialCommand` 的副作用只出现一次。
