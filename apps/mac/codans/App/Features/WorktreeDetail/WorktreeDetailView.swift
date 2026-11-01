@@ -607,16 +607,14 @@ struct WorktreeDetailView: View {
   }
 }
 
-/// Wraps `.toolbar(removing: .title)` (macOS 15+) with a
-/// `.navigationTitle("")` fallback for macOS 14. Both suppress the
-/// bundle-name title; only the modern API also frees the leading slot
-/// so default-placement items + ToolbarSpacers lay out predictably.
-/// Holds back the terminal of the tab selected because the shown tab was
+/// Holds back the terminals of the tab selected because the shown tab was
 /// just closed, until the tab bar's close animation has played. A terminal
 /// surface entering the window stalls compositing for a few frames; landing
 /// mid-animation it freezes the tab bar, landing after it the stall is
-/// invisible. Plain tab and worktree switches mount at once — nothing
-/// animates then.
+/// invisible. Meanwhile the tab's pane cards show without their surfaces,
+/// so the region never goes blank. Plain tab and worktree switches mount at
+/// once — nothing animates then — and so does a close that leaves one tab,
+/// which hides the bar instead of animating it.
 private struct TerminalMountDeferral<Content: View>: View {
   let worktreeID: WorktreeID
   let activeTabID: TabID?
@@ -629,33 +627,34 @@ private struct TerminalMountDeferral<Content: View>: View {
   @State private var mountedTabID: TabID?
 
   var body: some View {
-    Group {
-      if isDeferring {
-        Color.clear
-      } else {
-        content
+    content
+      .environment(\.defersTerminalSurfaces, isDeferring)
+      .task(id: activeTabID) {
+        if isDeferring {
+          try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
+          guard !Task.isCancelled else { return }
+        }
+        mountedWorktreeID = worktreeID
+        mountedTabID = activeTabID
       }
-    }
-    .task(id: activeTabID) {
-      if isDeferring {
-        try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
-        guard !Task.isCancelled else { return }
-      }
-      mountedWorktreeID = worktreeID
-      mountedTabID = activeTabID
-    }
   }
 
-  /// The mounted tab is gone and another one took over the selection. A
-  /// worktree switch never counts: the mounted tab is only missing from
-  /// `tabIDs` because they list the other worktree's tabs.
+  /// The mounted tab is gone and another one took over the selection while
+  /// the bar stays up to animate the close. A worktree switch never counts:
+  /// the mounted tab is only missing from `tabIDs` because they list the
+  /// other worktree's tabs.
   private var isDeferring: Bool {
-    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID
+    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID,
+      tabIDs.count > 1
     else { return false }
     return !tabIDs.contains(mountedTabID)
   }
 }
 
+/// Wraps `.toolbar(removing: .title)` (macOS 15+) with a
+/// `.navigationTitle("")` fallback for macOS 14. Both suppress the
+/// bundle-name title; only the modern API also frees the leading slot
+/// so default-placement items + ToolbarSpacers lay out predictably.
 private struct SuppressTitleModifier: ViewModifier {
   func body(content: Content) -> some View {
     if #available(macOS 15.0, *) {
