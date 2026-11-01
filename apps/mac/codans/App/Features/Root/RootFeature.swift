@@ -778,33 +778,27 @@ struct RootFeature {
             await projectReconciler.reconcileAll()
             let actions: [GitHubFeature.Action] = await MainActor.run {
               var result: [GitHubFeature.Action] = Self.makeActiveProjectGitHubRefresh(client: client)
-              // Arm the liveness poll if the app launched frontmost.
-              result.append(
-                Self.makePollTargetChange(
-                  client: client, appActive: NSApplication.shared.isActive
-                )
-              )
+              // Register every fetch unit with the liveness poll, then start it if
+              // the app launched frontmost.
+              result.append(Self.makePollUnitsChange(catalog: client.snapshot()))
+              result.append(.appActiveChanged(NSApplication.shared.isActive))
               return result
             }
             for action in actions { await send(.gitHub(action)) }
           },
 
-          // Re-sync on window focus. Debounced inside the actor. The
-          // post-reconcile GitHub refresh covers the canonical flow:
-          // user runs `git checkout` in a pane, switches back to the app —
-          // focus fires, reconcile picks up the new branch, GitHubFeature
-          // re-evaluates the PR cache against the updated branch set.
+          // Re-sync on window focus. Debounced inside the actor. Resuming the
+          // poll after the reconcile covers the canonical flow: the user runs
+          // `git checkout` in a pane, switches back to the app — focus fires,
+          // reconcile picks up the new branch, and every Project not fetched
+          // within `GitHubFeature.focusRefreshDebounce` gets a catch-up fetch
+          // against the updated branch set, the selected Project first.
           .run { [projectReconciler, client = hierarchyClient] send in
             for await _ in focusStream {
               await projectReconciler.reconcileAll()
-              let actions: [GitHubFeature.Action] = await MainActor.run {
-                var result: [GitHubFeature.Action] = Self.makeActiveProjectGitHubRefresh(client: client)
-                // Re-point the liveness poll at the active Project (app is frontmost
-                // because didBecomeActive just fired).
-                result.append(Self.makePollTargetChange(client: client, appActive: true))
-                return result
-              }
-              for action in actions { await send(.gitHub(action)) }
+              let units = await MainActor.run { Self.makePollUnitsChange(catalog: client.snapshot()) }
+              await send(.gitHub(units))
+              await send(.gitHub(.appActiveChanged(true)))
             }
           }
           .cancellable(id: CancelID.projectReconcileFocus, cancelInFlight: true),
@@ -828,9 +822,7 @@ struct RootFeature {
           // backgrounded / idle app fires zero `gh api graphql` subprocesses.
           .run { send in
             for await _ in resignStream {
-              await send(
-                .gitHub(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: []))
-              )
+              await send(.gitHub(.appActiveChanged(false)))
             }
           }
           .cancellable(id: CancelID.appResignActive, cancelInFlight: true),
@@ -1065,26 +1057,9 @@ struct RootFeature {
                 ))
             )
           }
-          // Re-point the liveness poll at the newly-activated Project (or pause
-          // it if the app is not frontmost). `projectActivated` above owns the immediate
-          // refresh; this only arms the recurring poll. The poll has one slot,
-          // so in a workspace it follows the selected member's repository.
-          if NSApplication.shared.isActive,
-            let unit = Self.gitHubFetchUnit(
-              in: project, worktreeID: selection.worktreeID, fallback: units.first)
-          {
-            effects.append(
-              .send(
-                .gitHub(
-                  .pollTargetChanged(
-                    unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
-                ))
-            )
-          } else if !units.isEmpty {
-            effects.append(
-              .send(.gitHub(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])))
-            )
-          }
+          // Move the selected-tier cadence to the newly-activated Project.
+          // `projectActivated` above owns the immediate refresh.
+          effects.append(.send(.gitHub(Self.makePollUnitsChange(catalog: hierarchyClient.snapshot()))))
         }
         return .merge(effects)
 
@@ -1103,23 +1078,10 @@ struct RootFeature {
           .send(.gitHub(.pruneToCatalog(projectIDs: projectIDs, worktreeIDs: worktreeIDs)))
         ]
         // Rebuild the poll context from the live catalog. `projectWorktreePairs`
-        // is otherwise only written on a Project switch, so an unarchived
-        // Worktree never re-enters it: the poll keeps fetching the branch set
-        // captured while the row was hidden, and the restored row paints
-        // whatever its snapshot held at archive time. `pruneToCatalog` above
-        // already pauses a poll whose Project is gone, so this only re-arms a
-        // target that survived.
-        if let target = state.gitHub.pollTarget,
-          let unit = unitsByProject.values.lazy.flatMap({ $0 }).first(where: { $0.projectID == target })
-        {
-          effects.append(
-            .send(
-              .gitHub(
-                .pollTargetChanged(
-                  target, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs
-                )))
-          )
-        }
+        // is otherwise only written by a fetch, so an unarchived Worktree never
+        // re-enters it: the poll keeps fetching the branch set captured while
+        // the row was hidden. `pruneToCatalog` above already drops departed units.
+        effects.append(.send(.gitHub(Self.makePollUnitsChange(catalog: catalog))))
         return .merge(effects)
 
       case .worktreeHeadChanged(let worktreeID):
@@ -1127,8 +1089,8 @@ struct RootFeature {
         // Project so the reconciler can rerun `git worktree list --porcelain`
         // for that repo only — cheap, and `reconcileDiscoveredWorktrees`
         // updates `Worktree.branch` in place. The trailing GitHub refresh
-        // re-evaluates the active Project's PR cache against whatever branch
-        // set the reconcile settled on.
+        // re-evaluates the PR cache of the Project the HEAD moved in — not the
+        // selected one — against whatever branch set the reconcile settled on.
         let catalog = hierarchyClient.snapshot()
         guard
           let projectID = catalog.projects.first(where: { project in
@@ -1158,7 +1120,7 @@ struct RootFeature {
           }
           await projectReconciler.reconcile(projectID: projectID)
           for action in await MainActor.run(body: {
-            Self.makeActiveProjectGitHubRefresh(client: client)
+            Self.makeProjectGitHubRefresh(projectID: projectID, client: client)
           }) {
             await send(.gitHub(action))
           }
@@ -1373,7 +1335,7 @@ struct RootFeature {
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcile(projectID: projectID)
           for action in await MainActor.run(body: {
-            Self.makeActiveProjectGitHubRefresh(client: client)
+            Self.makeProjectGitHubRefresh(projectID: projectID, client: client)
           }) {
             await send(.gitHub(action))
           }
@@ -1383,15 +1345,13 @@ struct RootFeature {
         // Manual refresh from the sidebar bottom-bar. `force: true` bypasses
         // the reconciler's focus-driven debounce so the click takes effect
         // immediately even when a focus-triggered pass just ran. Follow up
-        // with a GitHub refresh so out-of-band branch changes propagate
-        // to the PR badges without waiting for the next selection event.
+        // with a GitHub refresh of every Project, so out-of-band branch and
+        // server-side changes reach all PR badges, not just the selected ones.
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcileAll(force: true)
-          for action in await MainActor.run(body: {
-            Self.makeActiveProjectGitHubRefresh(client: client)
-          }) {
-            await send(.gitHub(action))
-          }
+          let units = await MainActor.run { Self.makePollUnitsChange(catalog: client.snapshot()) }
+          await send(.gitHub(units))
+          await send(.gitHub(.refreshAllRequested))
         }
 
       // Group creation streams every checkout, the registration, and the
@@ -3316,11 +3276,7 @@ struct RootFeature {
   /// derived from the workspace id and the repository root — a
   /// `ProjectID` in shape, so `GitHubFeature`'s per-project maps, cancel
   /// ids, and on-disk cache carry it unchanged.
-  nonisolated struct GitHubFetchUnit: Equatable, Sendable {
-    let projectID: ProjectID
-    let gitRoot: URL
-    let pairs: [GitHubFeature.Action.WorktreeBranchPair]
-  }
+  typealias GitHubFetchUnit = GitHubFeature.FetchUnit
 
   nonisolated static func gitHubFetchUnits(in project: Project) -> [GitHubFetchUnit] {
     guard project.isWorkspace else {
@@ -3374,30 +3330,34 @@ struct RootFeature {
     return ProjectID(raw: uuid)
   }
 
-  /// Builds the `.gitHub(.pollTargetChanged)` that drives the active-Project liveness
-  /// poll. Returns a paused target (`nil`) when the app is not frontmost or
-  /// there is no active Project with a git root; otherwise targets the active Project.
-  /// Mirrors `makeActiveProjectGitHubRefresh`'s catalog walk so the poll tracks the same
-  /// branch set the immediate refresh fetches.
-  ///
-  /// `@MainActor` because `client.snapshot()` is main-isolated; callers in `.run`
-  /// closures bridge via `MainActor.run`.
+  /// Builds the `.gitHub(.pollUnitsChanged)` that tells the liveness poll which fetch
+  /// units exist and which belong to the selected Project. Every unit of every Project
+  /// is polled while the app is frontmost; the selected Project's units poll fastest.
+  nonisolated static func makePollUnitsChange(catalog: Catalog) -> GitHubFeature.Action {
+    var units: [GitHubFetchUnit] = []
+    var selected: Set<ProjectID> = []
+    for project in catalog.projects {
+      let projectUnits = gitHubFetchUnits(in: project)
+      units.append(contentsOf: projectUnits)
+      if project.id == catalog.selectedProjectID {
+        selected.formUnion(projectUnits.map(\.projectID))
+      }
+    }
+    return .pollUnitsChanged(units, selected: selected)
+  }
+
+  /// The fetch units of one Project, re-read from the live catalog, as forced-if-stale
+  /// refreshes. Used after a targeted reconcile so the refresh follows the Project the
+  /// event came from, not whichever Project is selected.
   @MainActor
-  static func makePollTargetChange(
-    client: HierarchyClient, appActive: Bool
-  ) -> GitHubFeature.Action {
-    let paused = GitHubFeature.Action.pollTargetChanged(
-      nil, gitRoot: nil, worktreeBranches: []
-    )
-    guard appActive else { return paused }
-    let catalog = client.snapshot()
-    guard let projectID = catalog.selectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == projectID }),
-      let unit = gitHubFetchUnit(
-        in: project, worktreeID: project.selectedWorktreeID,
-        fallback: gitHubFetchUnits(in: project).first)
-    else { return paused }
-    return .pollTargetChanged(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
+  static func makeProjectGitHubRefresh(
+    projectID: ProjectID, client: HierarchyClient
+  ) -> [GitHubFeature.Action] {
+    guard let project = client.snapshot().projects.first(where: { $0.id == projectID })
+    else { return [] }
+    return gitHubFetchUnits(in: project).map { unit in
+      .projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
+    }
   }
 
   /// Shared implementation behind Back, Forward, and the header control's
