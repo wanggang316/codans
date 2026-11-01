@@ -1,0 +1,29 @@
+# Debug app quit, probe pane daemon killed, app restarted (tab not opened)
+$ codans pane show <stopped pane> --json | grep -E "isLive|isAttached"
+    "isAttached" : false,
+    "isLive" : false,
+
+$ codans pane capture <stopped pane> --lines 5 --json
+{
+  "error" : {
+    "code" : "PANE_NOT_LIVE",
+    "hint" : "run `codans pane focus 2375AD3D-8D2D-4785-8884-2F189CF98FEC` or open its tab in Codans to start a new shell",
+    "message" : "pane terminal is not running: 2375AD3D-8D2D-4785-8884-2F189CF98FEC"
+  },
+  "schemaVersion" : "codans.cli.pane.capture.v1"
+}
+exit=3
+
+$ codans pane send <stopped pane> "echo nope" --json
+{
+  "error" : {
+    "code" : "PANE_NOT_LIVE",
+    "hint" : "run `codans pane focus 2375AD3D-8D2D-4785-8884-2F189CF98FEC` or open its tab in Codans to start a new shell",
+    "message" : "pane terminal is not running: 2375AD3D-8D2D-4785-8884-2F189CF98FEC"
+  },
+  "schemaVersion" : "codans.cli.pane.send.v1"
+}
+exit=3
+
+$ pgrep -f <pane uuid>   (no new shell was started)
+(none)

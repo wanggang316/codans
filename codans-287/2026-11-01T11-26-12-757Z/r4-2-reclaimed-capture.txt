@@ -1,0 +1,20 @@
+# app log: idle reclaim of the probe pane
+2026-11-01 19:22:30.731 I  Codans[91174:24dd0a6] [com.gumpw.codans.runtime:runtime.session.lifecycle] surface.reclaim pane=2375AD3D
+
+$ codans pane show <reclaimed pane> --json | grep -E "isLive|isAttached"
+    "isAttached" : false,
+    "isLive" : true,
+
+$ codans pane send <reclaimed pane> "echo second-marker" --capture --json
+{
+  "data" : {
+    "busyObserved" : false,
+    "bytes" : 19,
+    "completed" : true,
+    "output" : "second-marker\n\ncodans-287/apps/mac on  agent/codans-287 [!] via  v6.4 on ",
+    "paneID" : "2375AD3D-8D2D-4785-8884-2F189CF98FEC",
+    "waitedMs" : 1613
+  },
+  "schemaVersion" : "codans.cli.pane.send.v1"
+}
+exit=0

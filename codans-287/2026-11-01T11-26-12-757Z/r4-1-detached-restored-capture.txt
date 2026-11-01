@@ -1,0 +1,27 @@
+# Debug app restarted; probe tab not opened since
+$ codans pane show <restored pane> --json | grep -E "isLive|isAttached"
+    "isAttached" : false,
+    "isLive" : true,
+
+$ codans pane read <restored pane> | tail -27 | uniq -c   (daemon screen: A x20, B x5, A x20)
+  20 A
+   5 B
+  20 A
+
+$ codans pane send <restored pane> "echo captured-marker" --capture --json
+{
+  "data" : {
+    "busyObserved" : false,
+    "bytes" : 21,
+    "completed" : true,
+    "output" : "captured-marker\n\ncodans-287/apps/mac on  agent/codans-287 [!] via  v6.4 on ",
+    "paneID" : "2375AD3D-8D2D-4785-8884-2F189CF98FEC",
+    "waitedMs" : 1566
+  },
+  "schemaVersion" : "codans.cli.pane.send.v1"
+}
+exit=0
+
+$ codans pane show <same pane> --json | grep -E "isLive|isAttached"
+    "isAttached" : true,
+    "isLive" : true,

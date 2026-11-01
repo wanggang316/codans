@@ -1,0 +1,5 @@
+status row isLive=true isAttached=false: valid
+status row from older app: valid
+capture PANE_NOT_LIVE: valid
+negative: undeclared field: INVALID: Additional properties are not allowed ('bogus' was unexpected)
+negative: PANE_NOT_READY envelope: INVALID (removed code rejected)
