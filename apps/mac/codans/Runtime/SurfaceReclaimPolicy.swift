@@ -46,10 +46,15 @@ nonisolated struct SurfaceReclaimPolicy: Equatable, Sendable {
     var isVetoed: Bool
   }
 
-  func shouldReclaim(_ candidate: Candidate) -> Bool {
+  /// `ignoringThresholds` is the memory-pressure case: the system asks for
+  /// memory now, so how long a pane was hidden or quiet no longer matters.
+  /// Every other rule still holds.
+  func shouldReclaim(_ candidate: Candidate, ignoringThresholds: Bool = false) -> Bool {
     guard candidate.isSurfaceReady, !candidate.isRemote, !candidate.isVetoed else { return false }
-    guard candidate.hiddenFor >= hiddenThreshold, candidate.quietFor >= quietThreshold else {
-      return false
+    if !ignoringThresholds {
+      guard candidate.hiddenFor >= hiddenThreshold, candidate.quietFor >= quietThreshold else {
+        return false
+      }
     }
     // An agent holds the foreground for its whole life and is not a running
     // command; only a non-agent, non-shell program counts as work in flight.

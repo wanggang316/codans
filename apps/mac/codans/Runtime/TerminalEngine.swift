@@ -140,6 +140,7 @@ final class TerminalEngine {
   /// detached; the re-attach starts at it.
   private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
+  private var memoryPressureMonitor: MemoryPressureMonitor?
 
   // MARK: Detached-pane watchers
 
@@ -698,6 +699,8 @@ final class TerminalEngine {
     foregroundJobPollTask = nil
     reclaimSweepTask?.cancel()
     reclaimSweepTask = nil
+    memoryPressureMonitor?.cancel()
+    memoryPressureMonitor = nil
     for paneID in Array(detachedWatchers.keys) {
       stopWatchingDetachedPane(paneID)
     }
@@ -1141,19 +1144,72 @@ final class TerminalEngine {
     }
   }
 
+  /// What the sweep reads from one live surface and the engine's sampling
+  /// state for its pane.
+  struct LiveSurfaceSample: Equatable, Sendable {
+    var paneID: PaneID
+    var isDisplayed: Bool
+    var isReady: Bool
+    var foregroundJob: ForegroundJob?
+    var isRemote: Bool
+  }
+
+  /// Test seam: the live surfaces a sweep sees. Headless tests have no
+  /// `GhosttyRuntime`, so they inject samples to drive the sweep's decisions.
+  var liveSurfaceSamplesOverride: (() -> [LiveSurfaceSample])?
+
+  private func liveSurfaceSamples() -> [LiveSurfaceSample] {
+    if let liveSurfaceSamplesOverride { return liveSurfaceSamplesOverride() }
+    return (ghosttyRuntime?.allLiveSurfaces() ?? []).map { surface in
+      LiveSurfaceSample(
+        paneID: surface.paneID,
+        isDisplayed: surface.isDisplayed,
+        isReady: surface.state == .ready,
+        foregroundJob: foregroundJobSnapshots[surface.paneID],
+        isRemote: remoteForegroundPanes[surface.paneID] != nil
+      )
+    }
+  }
+
   /// One sweep: note which surfaces are on screen, then reclaim the ones the
   /// policy accepts. Returns the reclaimed panes.
   @discardableResult
   func reclaimIdleSurfaces() -> [PaneID] {
-    guard let runtime = ghosttyRuntime else { return [] }
+    sweepReclaimableSurfaces(ignoringThresholds: false)
+  }
+
+  /// Memory-pressure sweep: reclaim every hidden, eligible surface now,
+  /// without waiting for the hidden and quiet thresholds. Returns the
+  /// reclaimed panes.
+  @discardableResult
+  func handleMemoryPressure(_ level: MemoryPressureLevel) -> [PaneID] {
+    guard !finished else { return [] }
+    let reclaimed = sweepReclaimableSurfaces(ignoringThresholds: true)
+    Self.logger.info(
+      "surface.reclaim.pressure level=\(level.rawValue, privacy: .public) reclaimed=\(reclaimed.count, privacy: .public)"
+    )
+    return reclaimed
+  }
+
+  /// Start reclaiming on system memory-pressure events. Idempotent.
+  func startMemoryPressureMonitoring() {
+    guard memoryPressureMonitor == nil, !finished else { return }
+    let monitor = MemoryPressureMonitor { [weak self] level in
+      self?.handleMemoryPressure(level)
+    }
+    monitor.start()
+    memoryPressureMonitor = monitor
+  }
+
+  private func sweepReclaimableSurfaces(ignoringThresholds: Bool) -> [PaneID] {
     let now = clock()
     var reclaimed: [PaneID] = []
-    for surface in runtime.allLiveSurfaces() {
-      let paneID = surface.paneID
+    for sample in liveSurfaceSamples() {
+      let paneID = sample.paneID
       // Surfaces outside the catalog (the master terminal) are not ours to
       // manage.
       guard hierarchy.catalog.pane(paneID) != nil else { continue }
-      if surface.isDisplayed {
+      if sample.isDisplayed {
         lastDisplayedAt[paneID] = now
         continue
       }
@@ -1162,12 +1218,12 @@ final class TerminalEngine {
       let candidate = SurfaceReclaimPolicy.Candidate(
         hiddenFor: now.timeIntervalSince(hiddenSince),
         quietFor: now.timeIntervalSince(viewportChangedAt[paneID] ?? .distantPast),
-        foregroundJob: foregroundJobSnapshots[paneID],
-        isRemote: remoteForegroundPanes[paneID] != nil,
-        isSurfaceReady: surface.state == .ready,
+        foregroundJob: sample.foregroundJob,
+        isRemote: sample.isRemote,
+        isSurfaceReady: sample.isReady,
         isVetoed: reclaimVeto(paneID)
       )
-      if reclaimPolicy.shouldReclaim(candidate) {
+      if reclaimPolicy.shouldReclaim(candidate, ignoringThresholds: ignoringThresholds) {
         reclaimSurface(for: paneID)
         reclaimed.append(paneID)
       }
