@@ -153,7 +153,7 @@ public nonisolated struct ZmxResizePayload: Sendable, Equatable {
 
 /// Subset of zmx's `ipc.Info` decoded by the Swift client. The daemon
 /// transmits the full frozen `Info` extern struct (552 bytes) — we lift
-/// out only `pid` and `cwd` here; cursor/modes get added later when the
+/// out only `clients_len`, `pid` and `cwd` here; cursor/modes get added later when the
 /// surface integration needs them. The decoder tolerates a payload that
 /// is *exactly* `@sizeOf(ipc.Info) = 552` bytes long; any other size is
 /// treated as malformed so we notice when the daemon's wire shape drifts.
@@ -173,10 +173,13 @@ public nonisolated struct ZmxResizePayload: Sendable, Equatable {
 public nonisolated struct ZmxInfoPayload: Sendable, Equatable {
   public let pid: Int32
   public let cwd: String
+  /// Connected clients other than the one that asked.
+  public let clientsLen: UInt64
 
-  public init(pid: Int32, cwd: String) {
+  public init(pid: Int32, cwd: String, clientsLen: UInt64 = 0) {
     self.pid = pid
     self.cwd = cwd
+    self.clientsLen = clientsLen
   }
 
   /// Byte offsets/sizes from zmx's `ipc.Info` extern struct. Asserted by
@@ -189,6 +192,9 @@ public nonisolated struct ZmxInfoPayload: Sendable, Equatable {
 
   public static func decode(_ data: Data) throws -> ZmxInfoPayload {
     guard data.count == wireSize else { throw ZmxIPCError.malformedLength }
+    let clientsLen = data.withUnsafeBytes { raw -> UInt64 in
+      raw.loadUnaligned(fromByteOffset: 0, as: UInt64.self)
+    }
     let pid = data.withUnsafeBytes { raw -> Int32 in
       raw.loadUnaligned(fromByteOffset: pidOffset, as: Int32.self)
     }
@@ -202,6 +208,7 @@ public nonisolated struct ZmxInfoPayload: Sendable, Equatable {
     // Failable variant is preferred — daemon emits valid UTF-8 (POSIX path),
     // but if the payload is corrupted we want an empty cwd over a crash.
     let cwd = String(bytes: cwdBytes, encoding: .utf8) ?? ""
-    return ZmxInfoPayload(pid: Int32(littleEndian: pid), cwd: cwd)
+    return ZmxInfoPayload(
+      pid: Int32(littleEndian: pid), cwd: cwd, clientsLen: UInt64(littleEndian: clientsLen))
   }
 }

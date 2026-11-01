@@ -52,8 +52,14 @@ nonisolated enum ZmxControlClient {
   static func info(
     for paneID: PaneID, timeout: Duration = .seconds(2)
   ) async throws -> ZmxInfoPayload {
+    try await info(socketPath: socketPath(for: paneID), timeout: timeout)
+  }
+
+  static func info(
+    socketPath: String, timeout: Duration = .seconds(2)
+  ) async throws -> ZmxInfoPayload {
     let reply = try await query(
-      socketPath: socketPath(for: paneID),
+      socketPath: socketPath,
       request: ZmxFrame(tag: .info),
       expect: .info,
       timeout: timeout

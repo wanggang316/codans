@@ -146,6 +146,109 @@ struct TerminalEngineDetachedPaneTests {
     #expect(harness.watchers.count == 2)
   }
 
+  /// Lets a test decide when the surface counts as attached.
+  private final class AttachGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+      await withCheckedContinuation { continuation in
+        let resumeNow = lock.withLock {
+          if opened { return true }
+          waiters.append(continuation)
+          return false
+        }
+        if resumeNow { continuation.resume() }
+      }
+    }
+
+    func open() {
+      let pending = lock.withLock {
+        opened = true
+        defer { waiters.removeAll() }
+        return waiters
+      }
+      pending.forEach { $0.resume() }
+    }
+  }
+
+  private let working = DetachedPaneSignal.programStatus(
+    ProgramStatusReport(state: .working, app: "claude-code"))
+  private let done = DetachedPaneSignal.programStatus(
+    ProgramStatusReport(state: .done, app: "claude-code"))
+
+  @Test
+  func reattachKeepsTheWatcherUntilTheSurfaceIsAttached() async {
+    let harness = Harness()
+    let gate = AttachGate()
+    harness.engine.awaitSurfaceAttached = { _ in await gate.wait() }
+    harness.engine.detachedHandoffGrace = .milliseconds(50)
+    let paneID = PaneID()
+    let stream = harness.engine.events()
+    harness.engine.watchDetachedPanes([paneID])
+    let watcher = harness.watchers[0]
+
+    #expect(harness.engine.beginDetachedHandoff(paneID))
+    harness.engine.finishDetachedHandoffWhenAttached(paneID)
+    // Output before the surface connects reaches only the watcher.
+    watcher.onEvent(.signals([working]))
+    await settle()
+    #expect(!watcher.stopped)
+    // Overlap: both report `done`, in either order.
+    #expect(!harness.engine.admitSurfaceSignal(working, for: paneID))
+    #expect(harness.engine.admitSurfaceSignal(done, for: paneID))
+    watcher.onEvent(.signals([done, .desktopNotification(title: "", body: "ready")]))
+    await settle()
+    #expect(!harness.engine.admitSurfaceSignal(.desktopNotification(title: "", body: "ready"), for: paneID))
+    // The daemon cannot be reported gone while a surface takes over.
+    watcher.onEvent(.daemonGone)
+    await settle()
+
+    gate.open()
+    await settle()
+    #expect(watcher.stopped)
+    #expect(harness.changeKinds(for: paneID) == [.detached, .observationEnded])
+    try? await Task.sleep(for: .milliseconds(150))
+    // After the grace period the surface is the only source.
+    #expect(harness.engine.admitSurfaceSignal(done, for: paneID))
+    watcher.onEvent(.signals([.title("stale")]))
+    await settle()
+    harness.engine.finishEventStream()
+
+    var states: [ProgramStatusState?] = []
+    var notifications = 0
+    var titles = 0
+    for await event in stream {
+      switch event {
+      case .paneProgramStatusChanged(paneID, let summary): states.append(summary?.root?.state)
+      case .paneInfoChanged(paneID, .desktopNotification): notifications += 1
+      case .paneInfoChanged(paneID, .title): titles += 1
+      default: break
+      }
+    }
+    // `working` from the watcher only; `done` came from the surface, whose
+    // ingest this test does not run, so the watcher's copy was dropped.
+    #expect(states == [.working])
+    #expect(notifications == 1)
+    #expect(titles == 0)
+  }
+
+  @Test
+  func closeEndsTheWatcherAndTheHandoff() async {
+    let harness = Harness()
+    let paneID = PaneID()
+    harness.engine.watchDetachedPanes([paneID])
+    #expect(harness.engine.beginDetachedHandoff(paneID))
+    harness.watchers[0].onEvent(.signals([working]))
+    await settle()
+
+    harness.engine.closeSurface(for: paneID)
+    #expect(harness.watchers[0].stopped)
+    // No ledger left to drop a later surface's copy of `working`.
+    #expect(harness.engine.admitSurfaceSignal(working, for: paneID))
+  }
+
   @Test
   func explicitStopEndsObservationOnce() {
     let harness = Harness()
