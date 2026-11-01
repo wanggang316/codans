@@ -52,14 +52,8 @@ nonisolated enum ZmxControlClient {
   static func info(
     for paneID: PaneID, timeout: Duration = .seconds(2)
   ) async throws -> ZmxInfoPayload {
-    try await info(socketPath: socketPath(for: paneID), timeout: timeout)
-  }
-
-  static func info(
-    socketPath: String, timeout: Duration = .seconds(2)
-  ) async throws -> ZmxInfoPayload {
     let reply = try await query(
-      socketPath: socketPath,
+      socketPath: socketPath(for: paneID),
       request: ZmxFrame(tag: .info),
       expect: .info,
       timeout: timeout
@@ -127,6 +121,21 @@ nonisolated enum ZmxControlClient {
       guard let fd = try? openConnection(socketPath: path) else { return }
       defer { Darwin.close(fd) }
       try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .kill)))
+    }
+  }
+
+  /// Best-effort `.mark`: have the pane's daemon send `payload` to every
+  /// client as output, at this point in the stream. Fire-and-forget; a
+  /// missing socket is a silent no-op.
+  static func mark(for paneID: PaneID, payload: Data) {
+    mark(socketPath: socketPath(for: paneID), payload: payload)
+  }
+
+  static func mark(socketPath: String, payload: Data) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard let fd = try? openConnection(socketPath: socketPath) else { return }
+      defer { Darwin.close(fd) }
+      try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .mark, payload: payload)))
     }
   }
 

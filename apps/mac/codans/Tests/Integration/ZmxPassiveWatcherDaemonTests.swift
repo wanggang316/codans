@@ -151,27 +151,70 @@ struct ZmxPassiveWatcherDaemonTests {
     #expect(Date().timeIntervalSince(killedAt) < 3)
   }
 
-  /// The re-attach handoff stops the watcher once the daemon counts a
-  /// second client next to it.
+  /// Collects what a terminal client reads, as signals in stream order.
+  private final class TerminalReader: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = Data()
+
+    init(fd: Int32) {
+      Thread { [weak self] in
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while true {
+          let n = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+          guard n > 0, let self else { return }
+          self.lock.withLock { self.bytes.append(contentsOf: buffer[0..<n]) }
+        }
+      }.start()
+    }
+
+    var signals: [DetachedPaneSignal] {
+      var pending = lock.withLock { bytes }
+      var scanner = ZmxOutputScanner()
+      var signals: [DetachedPaneSignal] = []
+      while let frame = try? ZmxFraming.decode(buffer: &pending) {
+        if frame.tag == .output { signals += scanner.scan(frame.payload) }
+      }
+      return signals
+    }
+  }
+
+  /// `.Mark` reaches the watcher and an attached terminal at the same place
+  /// in the output stream: the fence the re-attach handoff splits on.
   @Test(.enabled(if: zmx != nil))
-  func secondClientCheckSeesTheAttachingTerminal() async throws {
+  func markReachesEveryClientInStreamOrder() async throws {
     let daemon = Daemon(zmx: try #require(Self.zmx))
     defer { daemon.cleanUp() }
     #expect(try daemon.run("serve", daemon.session, "--command", "/bin/sh") == 0)
     try await waitUntil { daemon.isListening() }
-    let watcher = ZmxPassiveWatcher(socketPath: daemon.socketPath) { _ in }
+    let log = EventLog()
+    let watcher = ZmxPassiveWatcher(socketPath: daemon.socketPath) { log.append($0) }
     watcher.start()
     defer { watcher.stop() }
     try await waitUntil { watcher.isConnected }
-    #expect(try await ZmxControlClient.info(socketPath: daemon.socketPath).clientsLen == 1)
-
     let terminal = try daemon.attachTerminal()
     defer { Darwin.close(terminal) }
-    let start = Date()
-    await TerminalEngine.waitForSecondClient(socketPath: daemon.socketPath)
+    let reader = TerminalReader(fd: terminal)
+    try await Task.sleep(for: .milliseconds(200))
 
-    #expect(Date().timeIntervalSince(start) < 1)
-    #expect(try await ZmxControlClient.info(socketPath: daemon.socketPath).clientsLen == 2)
+    try daemon.run("send", daemon.session, #"printf '\033]0;before\007'"# + "\n")
+    var watcherSignals: [DetachedPaneSignal] {
+      log.all.flatMap { event -> [DetachedPaneSignal] in
+        if case .signals(let s) = event { return s }
+        return []
+      }
+    }
+    try await waitUntil { watcherSignals.contains(.title("before")) }
+    var handoff = DetachedHandoff(watcherToken: UUID())
+    let fenceID = handoff.nextFence()
+    ZmxControlClient.mark(socketPath: daemon.socketPath, payload: DetachedHandoff.fenceBytes(fenceID))
+    try daemon.run("send", daemon.session, #"printf '\033]0;after\007'"# + "\n")
+    try await waitUntil { watcherSignals.contains(.title("after")) && reader.signals.contains(.title("after")) }
+
+    var scanner = ZmxOutputScanner()
+    let fence = scanner.scan(DetachedHandoff.fenceBytes(fenceID))[0]
+    let expected: [DetachedPaneSignal] = [.title("before"), fence, .title("after")]
+    #expect(watcherSignals.filter(expected.contains) == expected)
+    #expect(reader.signals.filter(expected.contains) == expected)
   }
 
   /// A program started after the last terminal detached still gets an
