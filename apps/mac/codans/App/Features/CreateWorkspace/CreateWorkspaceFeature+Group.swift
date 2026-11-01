@@ -7,10 +7,9 @@ import Foundation
 // its base-ref menu, and creation streams progress per project.
 extension CreateWorkspaceFeature {
   func membersLoaded(
-    _ defaults: [MemberCreationOptions], agentProfiles: [AgentProfile], state: inout State
+    _ defaults: [MemberCreationOptions], state: inout State
   ) -> Effect<Action> {
     state.isLoadingMembers = false
-    state.agentProfiles = agentProfiles
     state.groupMembers = IdentifiedArray(
       defaults.map { WorkspaceGroupMemberDraft(options: $0) }, uniquingIDsWith: { first, _ in first })
     var effects = state.groupMembers.map { member -> Effect<Action> in
@@ -33,7 +32,7 @@ extension CreateWorkspaceFeature {
       guard let member = state.groupMembers[id: id] else { return .none }
       state.groupMembers[id: id]?.refs = .loading
       return loadRefs(id: id, gitRoot: member.options.sourceGitRoot)
-    case .baseRefChanged, .fetchChanged, .copyIgnoredChanged, .copyUntrackedChanged, .agentChanged:
+    case .baseRefChanged, .fetchChanged, .copyIgnoredChanged, .copyUntrackedChanged:
       guard !state.creation.isBusy, state.creation != .createdWithSetupFailures else { return .none }
       state.groupMembers[id: id]?.options.apply(action)
       return edited(&state)
@@ -155,7 +154,6 @@ extension MemberCreationOptions {
     case .fetchChanged(let value): fetch = value
     case .copyIgnoredChanged(let value): copyIgnored = value
     case .copyUntrackedChanged(let value): copyUntracked = value
-    case .agentChanged(let profileID): agentProfileID = profileID
     case .retryRefsTapped, .refsLoaded, .refsFailed: break
     }
   }

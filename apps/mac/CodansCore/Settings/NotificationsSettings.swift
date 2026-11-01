@@ -23,14 +23,12 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
   /// Dock-tile unread badge. Independent of `inAppEnabled` because the badge can act as
   /// a peripheral cue even when the user hides the inbox.
   public var dockBadgeEnabled: Bool
-  /// Show the unread bell button + popover in the worktree status bar.
-  /// All four `<level>BellEnabled` knobs are visual-only filters on the
+  /// Show the project-level unread bell glyph in the sidebar.
+  /// The three `<level>BellEnabled` knobs are visual-only filters on the
   /// always-computed `RollupIndex` data — the inbox itself still receives
   /// every event (gated by `inAppEnabled`), they just hide the per-level
   /// indicator. Default on; users opt out per level if they want a quieter
   /// surface area.
-  public var statusBarBellEnabled: Bool
-  /// Show the project-level unread bell glyph in the sidebar.
   public var projectBellEnabled: Bool
   /// Show the worktree-level unread bell glyph in the sidebar.
   public var worktreeBellEnabled: Bool
@@ -57,7 +55,6 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
     systemEnabled: Bool = true,
     soundEnabled: Bool = true,
     dockBadgeEnabled: Bool = true,
-    statusBarBellEnabled: Bool = true,
     projectBellEnabled: Bool = true,
     worktreeBellEnabled: Bool = true,
     tabBellEnabled: Bool = true,
@@ -70,7 +67,6 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
     self.systemEnabled = systemEnabled
     self.soundEnabled = soundEnabled
     self.dockBadgeEnabled = dockBadgeEnabled
-    self.statusBarBellEnabled = statusBarBellEnabled
     self.projectBellEnabled = projectBellEnabled
     self.worktreeBellEnabled = worktreeBellEnabled
     self.tabBellEnabled = tabBellEnabled
@@ -95,7 +91,7 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
 
   private enum CodingKeys: String, CodingKey {
     case inAppEnabled, systemEnabled, soundEnabled, dockBadgeEnabled
-    case statusBarBellEnabled, projectBellEnabled, worktreeBellEnabled, tabBellEnabled
+    case projectBellEnabled, worktreeBellEnabled, tabBellEnabled
     case moveNotifiedWorktreeToTop
     case commandFinishedEnabled, commandFinishedThresholdSec
     case mute
@@ -107,8 +103,6 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
     self.systemEnabled = try container.decodeIfPresent(Bool.self, forKey: .systemEnabled) ?? true
     self.soundEnabled = try container.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? true
     self.dockBadgeEnabled = try container.decodeIfPresent(Bool.self, forKey: .dockBadgeEnabled) ?? true
-    self.statusBarBellEnabled =
-      try container.decodeIfPresent(Bool.self, forKey: .statusBarBellEnabled) ?? true
     self.projectBellEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .projectBellEnabled) ?? true
     self.worktreeBellEnabled =
@@ -139,7 +133,6 @@ public nonisolated struct NotificationsSettings: Equatable, Sendable, Codable {
     try container.encode(systemEnabled, forKey: .systemEnabled)
     try container.encode(soundEnabled, forKey: .soundEnabled)
     try container.encode(dockBadgeEnabled, forKey: .dockBadgeEnabled)
-    try container.encode(statusBarBellEnabled, forKey: .statusBarBellEnabled)
     try container.encode(projectBellEnabled, forKey: .projectBellEnabled)
     try container.encode(worktreeBellEnabled, forKey: .worktreeBellEnabled)
     try container.encode(tabBellEnabled, forKey: .tabBellEnabled)

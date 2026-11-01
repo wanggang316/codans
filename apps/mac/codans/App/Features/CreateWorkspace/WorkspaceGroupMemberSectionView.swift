@@ -4,7 +4,7 @@ import SwiftUI
 
 /// One project of a new group, as a form section: the checkout it gets on
 /// the group branch, then the same options the Create Worktree sheet offers
-/// (base ref, fetch, copy ignored / untracked files, agent), seeded from
+/// (base ref, fetch, copy ignored / untracked files), seeded from
 /// the project's settings. The footer shows the project's findings, or its
 /// progress once creation runs.
 struct WorkspaceGroupMemberSectionView: View {
@@ -24,9 +24,6 @@ struct WorkspaceGroupMemberSectionView: View {
       Toggle("Fetch remote before checkout", isOn: binding(\.fetch, { .fetchChanged($0) }))
       Toggle("Copy ignored files", isOn: binding(\.copyIgnored, { .copyIgnoredChanged($0) }))
       Toggle("Copy untracked files", isOn: binding(\.copyUntracked, { .copyUntrackedChanged($0) }))
-      if !store.agentProfiles.isEmpty {
-        agentPicker
-      }
       if let command = member.options.setupCommand {
         LabeledContent("Setup script") {
           Text(command)
@@ -53,24 +50,6 @@ struct WorkspaceGroupMemberSectionView: View {
     let branch = store.groupBranch
     let base = member.options.baseRef ?? member.refs.inventory?.defaultBase ?? "the default branch"
     return .newBranch(branch: branch.isEmpty ? nil : branch, base: base)
-  }
-
-  /// Launched once every checkout of the group exists and the setup
-  /// scripts have run.
-  private var agentPicker: some View {
-    Picker("Launch agent", selection: binding(\.agentProfileID, { .agentChanged($0) })) {
-      Text("None").tag(UUID?.none)
-      Divider()
-      ForEach(store.agentProfiles) { profile in
-        Label {
-          Text(profile.displayName)
-        } icon: {
-          AgentMenuIcon.image(for: profile.icon)
-            .accessibilityHidden(true)
-        }
-        .tag(UUID?.some(profile.id))
-      }
-    }
   }
 
   // MARK: Status

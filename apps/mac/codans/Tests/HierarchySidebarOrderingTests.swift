@@ -198,6 +198,25 @@ struct SidebarFilterLayoutTests {
     }
   }
 
+  @Test
+  func collapsedCapsulesStayRoundWhenNarrow() {
+    let count = CGFloat(SidebarFilter.allCases.count)
+    for width: CGFloat in [120, 160, 200, 240] {
+      let layout = SidebarFilterLayout(expansion: SidebarFilterExpansion(selection: .workspace), height: 34)
+      let frames = layout.frames(width: width)
+      let diameter = min(34, (width - 6 * (count - 1)) / count)
+      for (filter, frame) in zip(SidebarFilter.allCases, frames) {
+        #expect(abs(frame.height - diameter) < 0.000001)
+        #expect(abs(frame.midY - 17) < 0.000001)
+        if filter != .workspace {
+          #expect(abs(frame.width - diameter) < 0.000001)
+        } else {
+          #expect(frame.width >= diameter - 0.000001)
+        }
+      }
+    }
+  }
+
   private func blend(
     _ from: SidebarFilterExpansion, _ to: SidebarFilterExpansion, _ progress: Double
   ) -> SidebarFilterExpansion {

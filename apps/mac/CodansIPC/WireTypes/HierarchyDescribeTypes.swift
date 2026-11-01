@@ -140,7 +140,8 @@ extension IPC {
 
   /// `hierarchy.describePane`. `workingDirectory` is the live shell
   /// directory when the surface has reported one, else the creation-time
-  /// one; `isLive` says whether a terminal surface is bound this session.
+  /// one. `isLive` says whether the pane's terminal (its daemon) runs;
+  /// `isAttached` says whether a surface renders it (absent from older apps).
   public struct PaneDescription: Codable, Equatable, Sendable {
     public let id: String
     public let handle: String?
@@ -154,6 +155,7 @@ extension IPC {
     public let agentSessionID: String?
     public let isLive: Bool
     public let isFocused: Bool
+    public let isAttached: Bool?
 
     public init(
       id: String,
@@ -167,7 +169,8 @@ extension IPC {
       agent: String?,
       agentSessionID: String?,
       isLive: Bool,
-      isFocused: Bool
+      isFocused: Bool,
+      isAttached: Bool? = nil
     ) {
       self.id = id
       self.handle = handle
@@ -181,6 +184,7 @@ extension IPC {
       self.agentSessionID = agentSessionID
       self.isLive = isLive
       self.isFocused = isFocused
+      self.isAttached = isAttached
     }
   }
 }

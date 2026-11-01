@@ -21,8 +21,8 @@ struct ContentView: View {
   /// rows / tab bar / pane chrome can read per-level unread indicators
   /// without each site owning its own derivation.
   let notificationRollup: RollupIndexProvider?
-  /// Inbox owner. Threaded so the InboxBellView's popover can read
-  /// `entries`, mark rows read, and trigger a "Mark all read".
+  /// Inbox owner. Threaded so the sidebar notification filter can read
+  /// the unread worktrees and mark every entry read.
   let notificationStore: NotificationStore?
   /// Banner adapter. Threaded so the Settings → Notifications pane
   /// reuses the long-lived instance instead of spawning a fresh one
@@ -63,7 +63,7 @@ struct ContentView: View {
             store.send(.toggleSidebarRequested)
           }
         }
-      }
+      },
     )
   }
 
@@ -77,11 +77,11 @@ struct ContentView: View {
       ZStack {
         mainSplit
         if let paletteStore = store.scope(
-          state: \.commandPalette, action: \.commandPalette.presented
+          state: \.commandPalette, action: \.commandPalette.presented,
         ) {
           CommandPaletteView(
             store: paletteStore,
-            onDismiss: { store.send(.commandPaletteToggle(nil)) }
+            onDismiss: { store.send(.commandPaletteToggle(nil)) },
           )
           .zIndex(100)
         }
@@ -90,7 +90,7 @@ struct ContentView: View {
             .zIndex(100)
         }
         if let workflowStartStore = store.scope(
-          state: \.workflowStart, action: \.workflowStart.presented
+          state: \.workflowStart, action: \.workflowStart.presented,
         ) {
           WorkflowStartOverlayView(store: workflowStartStore)
             .zIndex(100)
@@ -107,6 +107,7 @@ struct ContentView: View {
         activePendingWorktreeID: store.activePendingWorktreeID,
         revealTrigger: store.revealSelectionTrigger,
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
+        notifiedWorktreeIDs: store.notifiedWorktreeIDs,
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
         workflowEngine: workflowEngine,
@@ -114,7 +115,7 @@ struct ContentView: View {
         onAgentStateRowHandOff: { paneID in store.send(.agentState(.handOffTapped(paneID))) },
         onAgentStateRowRunWorkflow: { paneID, workflowID in
           store.send(.agentState(.runWorkflowTapped(paneID, workflowID: workflowID)))
-        }
+        },
       )
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
@@ -128,9 +129,7 @@ struct ContentView: View {
         gitHubStore: store.scope(state: \.gitHub, action: \.gitHub),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
-        onFocusHierarchyPath: { source in store.send(.focusHierarchyPath(source)) },
         onNewAgent: { store.send(.newAgentRequested) },
-        inboxBellPopoverTrigger: store.inboxBellPopoverTrigger,
         // Resolve the root-level focus id to its sidebar row each render. The
         // pending row is the source of truth for streaming output; when it
         // leaves `pendingWorktrees` (cancel / discard), this resolves to nil
@@ -139,7 +138,8 @@ struct ContentView: View {
         activePendingWorktree: resolveActivePendingWorktree(),
         historyBack: store.navigationHistoryBack,
         historyForward: store.navigationHistoryForward,
-        onHistoryJump: { jump in store.send(.worktreeHistoryJumpRequested(jump)) }
+        onHistoryJump: { jump in store.send(.worktreeHistoryJumpRequested(jump)) },
+        isSidebarVisible: store.sidebarVisible,
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .overlay(alignment: .bottom) { editorToastOverlay }
@@ -155,8 +155,18 @@ struct ContentView: View {
       \.paneHUDActions,
       PaneHUDActions(
         handOff: { paneID in store.send(.handoffRequested(paneID)) },
-        commandQueue: { paneID in store.send(.commandQueueToggle(paneID)) }
-      )
+        commandQueue: { paneID in store.send(.commandQueueToggle(paneID)) },
+        resumeSession: { paneID, session, placement in
+          guard let (projectID, worktreeID, _) = hierarchyManager.addressOf(paneID: paneID)
+          else { return }
+          store.send(
+            .detail(
+              .tabBar(
+                .resumeAgentSessionTapped(
+                  agent: session.agent, sessionID: session.sessionID, placement: placement,
+                  inWorktree: worktreeID, inProject: projectID))))
+        },
+      ),
     )
     .environment(settingsStore)
     .environment(UpdatesEnvironment.model)
@@ -176,6 +186,9 @@ struct ContentView: View {
       // remote Open button (and the context menu's editor list) could never
       // appear.
       store.send(.editor(.onAppear))
+    }
+    .onChange(of: notificationStore?.unreadWorktreeIDs ?? [], initial: true) { _, worktreeIDs in
+      store.send(.unreadWorktreesChanged(worktreeIDs))
     }
     // A workflow's Run button in Settings: open the start panel here, for
     // the selected worktree, through the toolbar menu's own route.
@@ -222,7 +235,7 @@ struct ContentView: View {
         new.updateCheckInterval,
         new.updatesAutomaticallyCheckForUpdates,
         new.updatesAutomaticallyDownloadUpdates,
-        false
+        false,
       )
     }
     // Presented as a sheet, not a ZStack overlay, so it picks up the same
@@ -237,7 +250,7 @@ struct ContentView: View {
         // Pass the pane explicitly: `.commandQueueToggle(nil)` would
         // re-resolve the focused pane, and if focus moved while the sheet
         // was open the toggle would re-target instead of close.
-        onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) }
+        onDismiss: { store.send(.commandQueueToggle(queueStore.paneID)) },
       )
       .environment(hierarchyManager)
     }
@@ -271,7 +284,7 @@ extension ContentView {
       .projects.first(where: { $0.id == pending.projectID })?.name
     return WorktreeDetailView.PendingWorktreeBinding(
       pending: pending,
-      repositoryName: repositoryName
+      repositoryName: repositoryName,
     )
   }
 

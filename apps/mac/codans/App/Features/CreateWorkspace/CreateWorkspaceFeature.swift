@@ -102,8 +102,6 @@ struct CreateWorkspaceFeature {
     /// Group-level preflight findings: name, folder, and branch.
     var groupPreflightIssues: [WorkspacePreflight.Issue] = []
     var groupMembers: IdentifiedArrayOf<WorkspaceGroupMemberDraft> = []
-    /// Enabled agent profiles offered per project.
-    var agentProfiles: [AgentProfile] = []
     /// The projects and their defaults are still loading.
     var isLoadingMembers = false
 
@@ -328,7 +326,7 @@ struct CreateWorkspaceFeature {
     case remote(RemoteAction)
     // Group
     case onAppear
-    case groupDefaultsLoaded([MemberCreationOptions], agentProfiles: [AgentProfile])
+    case groupDefaultsLoaded([MemberCreationOptions])
     case groupNameChanged(String)
     case branchChanged(String)
     case groupMember(String, GroupMemberAction)
@@ -358,7 +356,6 @@ struct CreateWorkspaceFeature {
       case fetchChanged(Bool)
       case copyIgnoredChanged(Bool)
       case copyUntrackedChanged(Bool)
-      case agentChanged(UUID?)
       case retryRefsTapped
       case refsLoaded(RefInventory)
       case refsFailed(String)
@@ -392,7 +389,6 @@ struct CreateWorkspaceFeature {
   @Dependency(GitWorktreeClient.self) var gitWorktreeClient
   @Dependency(FolderPickerClient.self) private var folderPicker
   @Dependency(GitWorktreeCLI.self) private var gitCLI
-  @Dependency(SettingsWriter.self) var settingsWriter
   @Dependency(\.continuousClock) var clock
   @Dependency(\.uuid) var uuid
   @Dependency(FileExistsDependencyKey.self) private var fileExists
@@ -473,16 +469,13 @@ struct CreateWorkspaceFeature {
 
       case .onAppear:
         guard case .newGroup(let projectID, _, _) = state.mode, state.isLoadingMembers else { return .none }
-        return .run { [client = workspaceClient, settings = settingsWriter] send in
+        return .run { [client = workspaceClient] send in
           let defaults = await client.groupCreationDefaults(projectID)
-          // Async read: this effect resumes off the main actor, where the
-          // synchronous read traps.
-          let profiles = await settings.readSnapshot().agents.enabledProfiles
-          await send(.groupDefaultsLoaded(defaults, agentProfiles: profiles))
+          await send(.groupDefaultsLoaded(defaults))
         }
 
-      case .groupDefaultsLoaded(let defaults, let profiles):
-        return membersLoaded(defaults, agentProfiles: profiles, state: &state)
+      case .groupDefaultsLoaded(let defaults):
+        return membersLoaded(defaults, state: &state)
 
       case .groupNameChanged(let name):
         state.groupName = name

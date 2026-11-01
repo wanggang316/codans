@@ -22,8 +22,8 @@ struct WorktreeDetailView: View {
   /// chip lights while a bound agent in that tab is `.working` — the same
   /// registry `ContentView` hands the sidebar, kept in sync by construction.
   var agentStateStore: AgentStateStore?
-  /// Header feature — scoped by `ContentView` from the root. Drives the bell
-  /// badge and the Open-in split button's delegate routing.
+  /// Header feature — scoped by `ContentView` from the root. Drives the
+  /// Open-in split button's delegate routing.
   let headerStore: StoreOf<WorktreeHeaderFeature>
   /// Titlebar-center Worktree Status Bar store. Owns the toast slot; PR /
   /// motivational forms are view-level projections of other scopes.
@@ -41,18 +41,9 @@ struct WorktreeDetailView: View {
   /// to fire `toolbarAddProjectTapped` — same pattern as the editor toast
   /// that surfaces sidebar outcomes without a back-channel store.
   let onAddProject: () -> Void
-  /// v1 notifications: dispatches `RootFeature.focusHierarchyPath` from
-  /// the InboxBellView's row-tap. Wired by `ContentView` so this view
-  /// doesn't need to hold the root TCA scope just to fire one action.
-  let onFocusHierarchyPath: (InboxEntry.SourcePath) -> Void
   /// Opens the New Agent dialog from the header's New Agent button. Wired by
   /// `ContentView` to `RootFeature.newAgentRequested`, the action ⌘⇧N sends.
   var onNewAgent: () -> Void = {}
-  /// Bumped by `RootFeature` when the user invokes ⌘U / the "Show Unread
-  /// Notifications" menu item. Threaded down to `InboxBellView` whose
-  /// `.onChange` opens the popover — same UUID-trigger pattern as
-  /// `revealSelectionTrigger` for the sidebar.
-  let inboxBellPopoverTrigger: UUID
   /// `RootFeature.activePendingWorktreeID` resolved to its row in
   /// `sidebar.pendingWorktrees`, plus the parent Project's display
   /// name. Non-nil → the detail pane shows `WorktreeLoadingView`
@@ -70,6 +61,9 @@ struct WorktreeDetailView: View {
   var historyForward: [HierarchySelection] = []
   /// Routes to `RootFeature.worktreeHistoryJumpRequested`.
   var onHistoryJump: (WorktreeHistoryJump) -> Void = { _ in }
+  /// Mirrors `RootFeature.State.sidebarVisible`; sets the leading gap of
+  /// the tab bar and the pane cards.
+  var isSidebarVisible: Bool = true
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   /// Window-toolbar chrome is hidden window-wide (see the
@@ -94,14 +88,12 @@ struct WorktreeDetailView: View {
   var body: some View {
     detailBody
       // Paint a low-alpha Ghostty-terminal-background band into the
-      // detail's top + leading safe-area insets. The unified toolbar
-      // (`.toolbarBackground(.hidden)` below) and the macOS 26
-      // floating-sidebar overlay both render their glass material over
-      // the detail content, so painting in those insets is the surface
-      // the chrome actually samples. Without this the chrome is the
-      // neutral system tone regardless of which terminal palette is
-      // active. Skipped in fullscreen because the unified toolbar
-      // collapses and the system reserves no top inset to fill.
+      // detail's leading safe-area inset. The macOS 26 floating-sidebar
+      // overlay renders its glass material over the detail content, so
+      // painting in that inset is the surface the sidebar samples. The top
+      // inset (toolbar) gets no band: it shows the sidebar material laid
+      // under the detail content, like the rest of the window around the
+      // pane cards.
       .ghosttyChromeTint(edges: chromeTintEdges)
   }
 
@@ -114,7 +106,7 @@ struct WorktreeDetailView: View {
   private var chromeTintEdges: Edge.Set {
     let isPlaceholder = activePendingWorktree == nil && resolveAddress() == nil
     if isPlaceholder { return [] }
-    return isWindowFullscreen ? [.leading] : [.top, .leading]
+    return [.leading]
   }
 
   @ViewBuilder
@@ -207,6 +199,17 @@ struct WorktreeDetailView: View {
           tabBarRow(address: address)
           terminalRegion(address: address)
         }
+        // The sidebar insets its own content from its trailing edge, so the
+        // cards sit flush against it; with the sidebar collapsed they take
+        // the same gap from the window edge as on every other side.
+        .padding(.leading, isSidebarVisible ? 0 : PaneCardMetrics.gap)
+        // Same material as the sidebar, under the tab bar, the gaps between
+        // the pane cards, and the toolbar, so the whole window reads as one
+        // surface with the cards floating on it.
+        .background {
+          SidebarMatchingBackground()
+            .ignoresSafeArea(.container, edges: .top)
+        }
       }
       .animation(.easeInOut(duration: 0.18), value: branchSwitcherStore.switchError)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -280,7 +283,7 @@ struct WorktreeDetailView: View {
 
   /// Window-titlebar toolbar content — ONE declaration serving both the
   /// creating and the settled state. Branch label on the leading edge,
-  /// New Agent + status pill + bell at the optical center, Run / Open on the
+  /// New Agent + status pill at the optical center, Run / Open on the
   /// trailing edge. Mirrors the layout that used to live as the right cluster of the
   /// content-region header; moving it into `.toolbar {}` reclaims vertical
   /// pixels above the tab bar and matches macOS native chrome.
@@ -306,8 +309,8 @@ struct WorktreeDetailView: View {
   ///   - LEFT: `SkeletonBranchClusterView`, sized from the pending
   ///     worktree's REAL name + project name.
   ///   - MIDDLE: `SkeletonStatusPillView` carrying the motivational form's
-  ///     footprint. The bell beside it stays LIVE and interactive — it is
-  ///     window-level chrome (global unread count), not worktree data.
+  ///     footprint. New Agent beside it stays LIVE and interactive — it is
+  ///     window-level chrome, not worktree data.
   ///   - RIGHT: ghost Run / Open chips holding the real buttons' footprint,
   ///     so the trailing flexible spacer weighs the same in both modes.
   /// The left / middle stand-ins carry the `skeleton-left` /
@@ -352,8 +355,6 @@ struct WorktreeDetailView: View {
         ToolbarItem(placement: .navigation) { identitySlot(mode) }
         newAgentToolbarItem()
         ToolbarItem(placement: .principal) { statusSlot(mode) }
-        // The inbox stays outside the principal status item.
-        inboxBellToolbarItem()
         ToolbarItemGroup(placement: .primaryAction) {
           // Order: RunScript, Open. `ToolbarItemGroup` renders children
           // leading-to-trailing in declaration order. The workflow capsule
@@ -398,13 +399,10 @@ struct WorktreeDetailView: View {
   @available(macOS 26.0, *)
   @ToolbarContentBuilder
   private func centerToolbarItems(_ mode: DetailMode) -> some ToolbarContent {
-    // New Agent | status | inbox: starting an agent leads the center group.
+    // New Agent | status: starting an agent leads the center group.
     newAgentToolbarItem()
     ToolbarSpacer(.fixed)
     ToolbarItem { statusSlot(mode) }
-    // Keep the inbox in a separate group after the status capsule.
-    ToolbarSpacer(.fixed)
-    inboxBellToolbarItem()
   }
 
   /// Toolbar items are suppressed in exactly two states: a settled creation
@@ -511,22 +509,12 @@ struct WorktreeDetailView: View {
     }
   }
 
-  /// Live in both modes, like the bell: the dialog chooses its own project
+  /// Live in both modes: the dialog chooses its own project
   /// and worktree, so nothing about it waits on the selected worktree.
   @ToolbarContentBuilder
   private func newAgentToolbarItem() -> some ToolbarContent {
     ToolbarItem {
       HeaderNewAgentButton(action: onNewAgent)
-    }
-  }
-
-  @ToolbarContentBuilder
-  private func inboxBellToolbarItem() -> some ToolbarContent {
-    ToolbarItem {
-      InboxBellView(
-        onFocusHierarchyPath: onFocusHierarchyPath,
-        popoverTrigger: inboxBellPopoverTrigger
-      )
     }
   }
 
@@ -564,11 +552,11 @@ struct WorktreeDetailView: View {
         store.send(
           .tabBar(.newTabButtonTapped(inWorktree: address.worktree, inProject: address.project)))
       },
-      onResumeSession: { session in
+      onResumeSession: { session, placement in
         store.send(
           .tabBar(
             .resumeAgentSessionTapped(
-              agent: session.agent, sessionID: session.sessionID,
+              agent: session.agent, sessionID: session.sessionID, placement: placement,
               inWorktree: address.worktree, inProject: address.project
             )))
       }
@@ -619,16 +607,14 @@ struct WorktreeDetailView: View {
   }
 }
 
-/// Wraps `.toolbar(removing: .title)` (macOS 15+) with a
-/// `.navigationTitle("")` fallback for macOS 14. Both suppress the
-/// bundle-name title; only the modern API also frees the leading slot
-/// so default-placement items + ToolbarSpacers lay out predictably.
-/// Holds back the terminal of the tab selected because the shown tab was
+/// Holds back the terminals of the tab selected because the shown tab was
 /// just closed, until the tab bar's close animation has played. A terminal
 /// surface entering the window stalls compositing for a few frames; landing
 /// mid-animation it freezes the tab bar, landing after it the stall is
-/// invisible. Plain tab and worktree switches mount at once — nothing
-/// animates then.
+/// invisible. Meanwhile the tab's pane cards show without their surfaces,
+/// so the region never goes blank. Plain tab and worktree switches mount at
+/// once — nothing animates then — and so does a close that leaves one tab,
+/// which hides the bar instead of animating it.
 private struct TerminalMountDeferral<Content: View>: View {
   let worktreeID: WorktreeID
   let activeTabID: TabID?
@@ -641,33 +627,34 @@ private struct TerminalMountDeferral<Content: View>: View {
   @State private var mountedTabID: TabID?
 
   var body: some View {
-    Group {
-      if isDeferring {
-        Color.clear
-      } else {
-        content
+    content
+      .environment(\.defersTerminalSurfaces, isDeferring)
+      .task(id: activeTabID) {
+        if isDeferring {
+          try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
+          guard !Task.isCancelled else { return }
+        }
+        mountedWorktreeID = worktreeID
+        mountedTabID = activeTabID
       }
-    }
-    .task(id: activeTabID) {
-      if isDeferring {
-        try? await Task.sleep(for: TabBarMetrics.firstPaneDelay)
-        guard !Task.isCancelled else { return }
-      }
-      mountedWorktreeID = worktreeID
-      mountedTabID = activeTabID
-    }
   }
 
-  /// The mounted tab is gone and another one took over the selection. A
-  /// worktree switch never counts: the mounted tab is only missing from
-  /// `tabIDs` because they list the other worktree's tabs.
+  /// The mounted tab is gone and another one took over the selection while
+  /// the bar stays up to animate the close. A worktree switch never counts:
+  /// the mounted tab is only missing from `tabIDs` because they list the
+  /// other worktree's tabs.
   private var isDeferring: Bool {
-    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID
+    guard let mountedTabID, mountedTabID != activeTabID, mountedWorktreeID == worktreeID,
+      tabIDs.count > 1
     else { return false }
     return !tabIDs.contains(mountedTabID)
   }
 }
 
+/// Wraps `.toolbar(removing: .title)` (macOS 15+) with a
+/// `.navigationTitle("")` fallback for macOS 14. Both suppress the
+/// bundle-name title; only the modern API also frees the leading slot
+/// so default-placement items + ToolbarSpacers lay out predictably.
 private struct SuppressTitleModifier: ViewModifier {
   func body(content: Content) -> some View {
     if #available(macOS 15.0, *) {

@@ -226,9 +226,21 @@ agent ──OSC 7501──▶ zmx daemon ──bytes──▶ libghostty (fork)
 
 - **fork 补丁。** 上游 libghostty 只在 libghostty-vt 解析 7501，完整终端路径直接丢弃，`ghostty.h` 也没有对应 action。fork 回移植上游解析器，并新增 app 路径：回复探测（`?:states=…:kinds=…`，沿用查询的终止符）、把报告转成 `GHOSTTY_ACTION_PROGRAM_STATUS`、`RIS` 发一条空 `id` 的 `clear`。终端不保存记录，记录由嵌入方保存（与上游 vt API 相同的分工）。补丁清单见 fork 的 `README.tc.md`。
 - **zmx。** daemon 原样转发字节，挂接时由外层 ghostty 回复探测。daemon 在没有终端客户端挂接时会代答 DA1；Claude 看到 DA1 先回就判定不支持，所以 daemon 在同一处代答 `OSC 7501 ; ?`。
+- **没有 surface 的 Pane。** 启动时恢复但还没打开的 Pane、以及被空闲回收的 Pane 没有 surface。`TerminalEngine` 为每个这样的 Pane 保持一个被动 zmx watcher（`ZmxPassiveWatcher`，见下文「未挂接 Pane 的观测」），读出的 OSC 7501 走同一个 `ingestProgramStatus`。
 - **记录归属。** 记录按 PaneID 存在 `TerminalEngine`，不随 surface：surface 回收再挂接时记录保留。Pane 关闭时删除。协议要求进程退出或出现新提示符（OSC 133;A）时丢弃 `working` / `blocked`；133;A 不上报到 Swift，所以 codans 在「Pane 已解绑、且前台不是 agent」时丢弃 `working` / `blocked` / `idle`，`done` / `error` 保留到被新报告替换。
 - **归属判定（governs）。** 只有 root 记录（`app` 沿父链继承后）等于绑定 agent 的 `AgentRuntimeAdapter.programStatusApp`（`claude-code` / `codex` / `pi` / `omp` / `droid` / `opencode`；其余 agent 为 nil，验证后再开）时，程序状态才决定该 Pane 的状态。同一终端里其他程序（如 `brew`）的报告不会影响 agent 状态。
 - **pane 只跟随 root。** 子记录 `blocked` 让 Pane 显示 `blocked`（带子记录的 kind / message）；子记录 `working` 不算，后台工作不把 Pane 钉在 `working`。
+
+### 未挂接 Pane 的观测
+
+没有 surface 的 Pane 没有视口轮询、前台 job 采样，也收不到 libghostty 的 action。`TerminalEngine` 让「被观测的 Pane」集合等于 `PaneTerminalState.detached` 的 Pane（有 daemon、无 surface；即 `attachedPaneIDs` 之外、daemon 仍在跑的 Pane）：
+
+- **被动 watcher。** 每个这样的 Pane 一个额外的 zmx 客户端（`ZmxPassiveWatcher`）。它连上 Pane 的 daemon socket 后从不写入：不发 `.Init`，daemon 就不重放屏幕、不把它设为 leader、不按它改 PTY 尺寸，但 PTY 读循环仍把每个 `.Output` 帧广播给它。watcher 用 `ZmxOutputScanner` 增量扫描 OSC：7501 → `ingestProgramStatus`（规则移植自 libghostty 的 `program_status.zig`），9 → `paneInfoChanged(.desktopNotification)`，0 / 2 → `paneInfoChanged(.title)`。所有 watcher 共用一个串行队列上的 dispatch read source，成本是每 Pane 一个 fd，不占线程。一次读回调最多读 4 × 64 KiB，剩下的数据由（电平触发的）read source 再次回调，所以一个输出很多的 Pane 不会占住共享队列，主 actor 上同步的 `stop()` 最多等一批。
+- **生命周期。** 回收（`reclaimSurface`）后启动；启动时 app 对 `terminalState(for:) == .detached` 的可见 Pane 调 `watchDetachedPanes`。`closeSurface` / `suspendSurface` / CLI `pane close` 在 `.kill` 前、`finishEventStream` 时同步停掉 watcher，不会把用户的 kill 当成 daemon 自行退出。
+- **重新挂接的交接。** `ensureSurface` 在创建 surface 前同步停掉 watcher；创建失败时再启动它。从这一刻起 surface 是该 Pane 唯一的信号来源：watcher 已读到、但尚未在主 actor 上处理的信号被丢弃（只接受当前 watcher token、且 Pane 没有 surface 时的信号），所以同一信号不会送达两次，旧的 watcher 信号也不会覆盖 surface 报告的状态。代价是一个短窗口：watcher 停止之后、surface 的 `zmx attach` 连上 daemon 之前写出的 OSC 7501 / 9 / 标题，两边都收不到。这是已接受的取舍：agent 的下一份报告会纠正状态；为此改 zmx 协议、在输出流里插栅栏的代价高于它能挽回的信号。watcher 也把 RIS（`ESC c`）报告为 `clear`，与 libghostty 一致。
+- **daemon 端。** codans 的 zmx 所有断开路径都用 `closeClient(…, shutdown_on_last: false)`，watcher 断开不会结束会话；`Info.clients_len` 会把 watcher 计入，codans 不读这个字段。daemon 只把发过 `.Init` 的客户端算作终端（`Client.is_terminal`）；最后一个终端断开后（`closeClient` / `DetachAll` 重新计算 `has_terminal_client`），daemon 重新代答 DA1 与 `OSC 7501 ; ?`，所以回收后才启动的 agent 也能探测成功、上报程序状态。外部 `DetachAll` 会断开 watcher，watcher 以退避重连（0.25 s 起，上限 30 s）。
+- **daemon 存活。** watcher 的连接本身就是存活探针：daemon 退出时连接 EOF，随后连续 3 次连接被拒或 socket 不存在（约 1.75 s）即判定 daemon 已退出，不另设轮询。此时 engine 清掉该 Pane 的会话状态（回收标记、进程行、程序状态记录），app 经 `AgentBinder.unbind` 删掉 agent 行。Pane 留在 catalog；再次打开时 `zmx attach` 新建会话，与「上次退出后 daemon 已死」的恢复 Pane 相同。
+- **状态来源。** 未挂接期间屏幕无人读取：由屏幕决定的状态（含启动时的恢复种子）标为 `source: cached`；watcher 送来的程序状态仍是 `programStatus`。两者都由 `AgentStateStore.attachedPaneIDs` 判定，与睡眠标记（`isSleeping`）同源：`cached` 只出现在睡眠行上。重新挂接后回到 `screen`。
 
 **派生（归属成立时）。**
 
@@ -248,7 +260,7 @@ Source: [ProgramStatusRecords.swift](../../apps/mac/CodansCore/Agents/ProgramSta
 
 ### IPC 与 CLI
 
-`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle 与焦点标记。`codans agent list` 列出启动配置，与运行态列表不同。
+`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen` / `cached`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle、焦点标记、`isLive` 与 `isAttached`。两个字段取自 `TerminalEngine.terminalState(for:)` 的 `PaneTerminalState`：`attached`（daemon 在跑，surface 在渲染）、`detached`（daemon 在跑，没有 surface：启动时恢复但 tab 尚未打开，或被闲置回收摘掉 surface）、`stopped`（没有 daemon）。没有 surface 的 pane 每次都探测 daemon 的 control socket，因为 daemon 可能跨 app 重启存活，也可能在无人观察时退出。`detached` 的 pane 仍在运行，文本输出标 `(sleeping)`：app 读不到它的 viewport 与前台进程，但被动 watcher 仍送来 OSC 7501 / 9 / 标题（见「未挂接 Pane 的观测」），所以 agent 自报的状态仍是 `programStatus`，由屏幕推导的状态则是最后一次已知值（`source: cached`）。daemon 在 detached 期间退出时，watcher 删掉该 agent 行，所以睡眠标记不会挂在已经不在运行的 agent 上；`(not live)` 只出现在别的途径（如启动恢复时 daemon 已不在）留下的条目上。终端动词会先为它挂载 surface。`stopped` 的条目文本标 `(not live)`，终端动词返回 `PANE_NOT_LIVE`。Agents View 对这三种条目都显示；没有 surface 的条目在状态图标前加 `zzz` 睡眠标记（`AgentStateStore.isSleeping`，由 `TerminalEngine.onSurfaceAttachmentChanged` 维护的 `attachedPaneIDs` 推出），tooltip 提示点击唤醒：点击行会聚焦该 pane，其 tab 显示时挂载 surface。`source: cached` 的条目，状态图标调淡且不播放动画（恢复的 `working` 不会显示成正在工作），tooltip 说明这是最后一次已知状态；经 watcher 收到 OSC 7501 的条目仍是实时状态，照常显示。`codans agent list` 列出启动配置，与运行态列表不同。
 
 `agent.wait` 对应 `codans agent wait <pane> --until <condition>`，在服务端按 200 ms 间隔读取同一状态源。条件为 `idle`、`working`、`blocked`、`done`、`error`、`changed` 或 `exit`（`finished` 作为 `done` 的旧名仍被接受，不再列出）：`changed` 比较起始条目的 state 与 kind，`exit` 在 entry 消失或 Pane 移除时满足。开始等待时 Pane 必须存在；已存在但无 agent 的 Pane 可立即满足 `exit`。CLI 默认等待 60 秒，允许 1–600 秒；超时返回 `WAIT_TIMEOUT`（exit 11）。`source == screen` 的结果是屏幕与前台进程的派生状态；`source == programStatus` 的结果来自 agent 自己的报告。
 
@@ -348,7 +360,7 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 | 渲染区启发式随某个 agent 改版 TUI 而失配 | 支持 OSC 7501 的 agent 由自报状态决定，不读屏幕；其余 agent 的分类表在代码、非配置，每个 `AgentKind` 有视口 fixture 锁住当前模式，更新是一行 PR。 |
 | OSC 7501 规范仍是草案，生产者行为随版本变化 | 解析器与上游同源，便于跟进；`programStatusApp` 只对已验证的生产者开放；没有报告时自动回到视口路径。 |
 | Claude 只在启动时探测一次 | 外层 ghostty 与未挂接的 zmx daemon 都回复探测；探测失败的会话走视口路径。 |
-| surface 回收期间的报告丢失 | 回收只发生在非 mid-task 的 Pane；记录按 PaneID 保留，残留 `idle` / `done` 的风险低。 |
+| surface 回收期间的报告丢失 | 被动 watcher 在回收后继续读取 OSC 7501；记录按 PaneID 保留。重新挂接时 watcher 停止到 surface 连上之间的短窗口里的信号会丢失（已接受，见「重新挂接的交接」），下一份报告纠正状态；不会重复送达，也不会被旧信号覆盖。 |
 | 前台 job 在 agent 短暂让出前台（git / build / pager）时误清绑定 | `releaseMissThreshold = 6` 的迟滞：连续 6 次未命中才释放，任一命中清零。 |
 | 多个 writer 竞争 `Pane.agentKind`（binder + 未来手动 reset 路径） | 写入均经 `HierarchyManager` 的 `@MainActor`；既有防抖保存管线已串行化 catalog 变更。 |
 | Claude / Codex / 各 agent 的 logo 受 brand-mark license 约束 | 用官方 press / brand kit 与 brand glyph；条款含糊则该 kind 在 v1 回落通用 glyph，商用发布前复审。 |

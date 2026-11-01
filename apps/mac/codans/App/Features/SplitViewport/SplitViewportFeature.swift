@@ -43,7 +43,7 @@ struct SplitViewportFeature {
     case resizeSplitRequested(
       SplitTree<PaneID>.Path, ratio: Double,
       inTab: TabID, inWorktree: WorktreeID, inProject: ProjectID)
-    /// Emitted by `PaneDropDelegate` when a pane is dropped onto an edge of
+    /// Emitted by the pane header's move gesture when a pane is dropped onto an edge of
     /// another pane in the same Tab. Re-positions the dragged pane next to
     /// the anchor; the moved pane's surface is preserved (no teardown).
     case movePaneRequested(

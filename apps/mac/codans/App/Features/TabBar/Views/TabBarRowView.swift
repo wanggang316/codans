@@ -96,10 +96,17 @@ struct TabBarRowView: View {
   /// `Tab` values) so chip content — title / color / dirty — always reads
   /// fresh from the `tabs` prop while only the order is owned locally.
   @State private var orderIDs: [TabID] = []
-  /// The chip currently being dragged, or nil when idle.
+  /// The chip currently being dragged, or nil when idle. Stays set while
+  /// the lifted copy settles into its slot after the drop.
   @State private var draggingID: TabID?
+  /// The drop has happened and the lifted copy is animating into its slot.
+  @State private var isSettling = false
   /// Live cursor X in the row space, driving the floating chip.
   @State private var dragCursorX: CGFloat = 0
+  /// Cursor X minus the dragged chip's center X at the start of the drag.
+  /// The lifted copy keeps it, so the chip stays where it was grabbed
+  /// instead of jumping to center on the cursor.
+  @State private var dragGrabOffset: CGFloat = 0
   /// Per-chip layout rects (row space) reported via `ChipFrameKey`. Read
   /// for neighbor-midpoint hit testing and to size the floating copy.
   @State private var chipFrames: [TabID: CGRect] = [:]
@@ -186,6 +193,10 @@ struct TabBarRowView: View {
     }
     .coordinateSpace(name: Self.rowSpace)
     .onPreferenceChange(ChipFrameKey.self) { chipFrames = $0 }
+    // Cut the in-flow chips out under the lifted copy, so their titles do
+    // not show through it. The copy then needs no plate of its own and
+    // keeps the selected chip's translucent fill over the track.
+    .mask { dragMask }
     .overlay(alignment: .topLeading) { floatingChip(in: rendered) }
     .animation(Self.addRemoveAnimation, value: rendered.map(\.id))
     .onAppear {
@@ -243,7 +254,11 @@ struct TabBarRowView: View {
       onChangeIcon: { onChangeIconRequested(tab.id) },
       onCopyID: { onCopyID(tab.id) },
       tabColor: tab.color,
-      icon: tab.resolvedIcon(autoFallback: nil),
+      // Every chip leads with a glyph: the agent's mark for an agent tab,
+      // a terminal otherwise.
+      icon: tab.resolvedIcon(
+        autoFallback: tab.panes.lazy.compactMap(\.agentKind).first.map(TabIconRef.icon(for:))
+          ?? "terminal"),
       sliceWidth: slice?.width,
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
@@ -265,6 +280,37 @@ struct TabBarRowView: View {
     }
   }
 
+  /// How far the row mask and the lifted copy's clip reach past the chip
+  /// frames. The selected chip's glass draws its dark outer rim just past
+  /// its bounds; a clip at the bounds cuts it off and the chip reads as
+  /// missing an edge.
+  private static let glassRimOutset: CGFloat = 3
+
+  /// Everything but the lifted copy's footprint while a drag is in
+  /// progress; the whole row otherwise.
+  private var dragMask: some View {
+    GeometryReader { geo in
+      if let id = draggingID, let frame = chipFrames[id] {
+        // A little wider than the copy, so no sliver of the chip under it
+        // shows past its antialiased edge.
+        let width = frame.width + 2
+        let cutout = CGRect(
+          x: liftedCenterX(width: frame.width) - width / 2, y: 0, width: width,
+          height: TabBarMetrics.chipHeight)
+        Path { path in
+          path.addRect(
+            CGRect(origin: .zero, size: geo.size).insetBy(
+              dx: -Self.glassRimOutset, dy: -Self.glassRimOutset))
+          path.addRoundedRect(
+            in: cutout, cornerSize: CGSize(width: cutout.height / 2, height: cutout.height / 2))
+        }
+        .fill(style: FillStyle(eoFill: true))
+      } else {
+        Rectangle().padding(-Self.glassRimOutset)
+      }
+    }
+  }
+
   /// The lifted chip that tracks the cursor during a drag, rendered above
   /// the row. Non-interactive — the gesture lives on the in-flow chip,
   /// which continues to receive drag events even at zero opacity.
@@ -276,22 +322,24 @@ struct TabBarRowView: View {
     {
       chipView(for: rendered[index], index: index, count: rendered.count)
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        // Opaque plate so the lifted copy occludes the chips it floats
-        // over — the chip's own idle fill is `.clear`, which would let
-        // their titles bleed through and overlap.
-        .background(Capsule().fill(TabBarColors.draggingBackground))
+        // A lifted idle chip takes the selected chip's raised capsule, so
+        // every lifted copy reads the same; a selected chip has its own.
+        .background {
+          if id != selectedID {
+            TabChipBackground(isActive: true, isHovering: false)
+          }
+        }
         // Hard-clip the lifted copy to its own chip frame. On macOS 26 the
-        // copy's opaque background otherwise paints a tall white column up to
-        // the titlebar during a drag (a SwiftUI host/overlay regression — the
-        // drag code itself is unchanged from when this shipped clean). Clipping
-        // bounds the copy to `chipHeight` regardless of why it overflows; the
-        // shadow is applied after, so it still feathers outside the clip.
+        // copy's background otherwise paints a tall column up to the
+        // titlebar during a drag (a SwiftUI host/overlay regression — the
+        // drag code itself is unchanged from when this shipped clean). The
+        // clip reaches a little past the chip so the glass keeps its own
+        // shadow. Like Safari, the lifted copy keeps the chip's size and
+        // look: no scale, no extra shadow.
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        .clipped()
-        .scaleEffect(1.03)
-        .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
+        .clipShape(Rectangle().inset(by: -Self.glassRimOutset))
         .allowsHitTesting(false)
-        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
+        .position(x: liftedCenterX(width: frame.width), y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
     }
   }
@@ -302,24 +350,61 @@ struct TabBarRowView: View {
       coordinateSpace: .named(Self.rowSpace)
     )
     .onChanged { value in
-      if draggingID != tab.id {
+      if draggingID != tab.id || isSettling {
         // First tick of a new drag — snapshot the current order as the
         // mutable baseline, then claim this chip as the dragged one.
+        isSettling = false
         orderIDs = tabs.map(\.id)
         draggingID = tab.id
+        let grabbedMidX = chipFrames[tab.id]?.midX ?? value.startLocation.x
+        dragGrabOffset = value.startLocation.x - grabbedMidX
       }
       dragCursorX = value.location.x
       updateOrder()
     }
     .onEnded { _ in
       let final = orderIDs
-      draggingID = nil
-      dragCursorX = 0
       // Single absolute-order commit; skip the no-op when nothing moved.
       if final != tabs.map(\.id) {
         onReorder(final)
       }
+      settleDrop()
     }
+  }
+
+  /// Slides the lifted copy from where it was released into its slot, then
+  /// ends the drag, as Safari does; the chip never jumps on release.
+  private func settleDrop() {
+    guard let id = draggingID, let slot = chipFrames[id] else {
+      endDrag()
+      return
+    }
+    isSettling = true
+    withAnimation(Self.addRemoveAnimation) {
+      dragCursorX = slot.midX + dragGrabOffset
+    } completion: {
+      // A new drag that started mid-settle owns the state now.
+      guard isSettling, draggingID == id else { return }
+      endDrag()
+    }
+  }
+
+  private func endDrag() {
+    isSettling = false
+    draggingID = nil
+    dragCursorX = 0
+    dragGrabOffset = 0
+  }
+
+  /// Center X of the lifted copy: the cursor less the grab offset, held
+  /// inside the row the way the system bar keeps a dragged tab in the bar.
+  private func liftedCenterX(width: CGFloat) -> CGFloat {
+    let x = dragCursorX - dragGrabOffset
+    let frames = chipFrames.values
+    guard let minX = frames.map(\.minX).min(), let maxX = frames.map(\.maxX).max(),
+      maxX - minX >= width
+    else { return x }
+    return min(max(x, minX + width / 2), maxX - width / 2)
   }
 
   /// Steps the dragged chip past an adjacent neighbor once it overlaps that
@@ -339,15 +424,16 @@ struct TabBarRowView: View {
       let current = orderIDs.firstIndex(of: id),
       let dragged = chipFrames[id]
     else { return }
+    let centerX = liftedCenterX(width: dragged.width)
     var target = current
     if current < orderIDs.count - 1,
       let next = chipFrames[orderIDs[current + 1]],
-      dragCursorX > (dragged.midX + next.midX) / 2
+      centerX > (dragged.midX + next.midX) / 2
     {
       target = current + 1
     } else if current > 0,
       let prev = chipFrames[orderIDs[current - 1]],
-      dragCursorX < (dragged.midX + prev.midX) / 2
+      centerX < (dragged.midX + prev.midX) / 2
     {
       target = current - 1
     }

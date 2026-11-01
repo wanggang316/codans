@@ -15,6 +15,10 @@ nonisolated struct SurfaceReclaimPolicy: Equatable, Sendable {
   /// How long a pane's visible grid must stay unchanged. A hidden pane that
   /// still repaints is doing work the user may be waiting on.
   var quietThreshold: TimeInterval = 60
+  /// How many of the most recently selected worktrees keep their selected
+  /// tab attached however long it stays hidden: switching back to one of
+  /// them then costs no re-attach and screen replay.
+  var recentWorktreeCount = 3
 
   /// Gap between sweeps; half the hidden threshold when that is short, so a
   /// scaled-down run still reclaims promptly.
@@ -44,12 +48,24 @@ nonisolated struct SurfaceReclaimPolicy: Equatable, Sendable {
     var isSurfaceReady: Bool
     /// App-level veto: a mid-turn agent or a queued command.
     var isVetoed: Bool
+    /// Recency rank (0 = most recent) of the pane's worktree among recent
+    /// worktree selections, when the pane is in that worktree's selected
+    /// tab. Nil for a background-tab pane or a worktree not selected
+    /// recently.
+    var selectedTabRecency: Int?
   }
 
-  func shouldReclaim(_ candidate: Candidate) -> Bool {
+  /// `ignoringThresholds` is the memory-pressure case: the system asks for
+  /// memory now, so how long a pane was hidden or quiet no longer matters.
+  /// The recency exemption goes too: only the current selection, which is
+  /// on screen, stays attached. Every other rule still holds.
+  func shouldReclaim(_ candidate: Candidate, ignoringThresholds: Bool = false) -> Bool {
     guard candidate.isSurfaceReady, !candidate.isRemote, !candidate.isVetoed else { return false }
-    guard candidate.hiddenFor >= hiddenThreshold, candidate.quietFor >= quietThreshold else {
-      return false
+    if !ignoringThresholds {
+      if let rank = candidate.selectedTabRecency, rank < recentWorktreeCount { return false }
+      guard candidate.hiddenFor >= hiddenThreshold, candidate.quietFor >= quietThreshold else {
+        return false
+      }
     }
     // An agent holds the foreground for its whole life and is not a running
     // command; only a non-agent, non-shell program counts as work in flight.

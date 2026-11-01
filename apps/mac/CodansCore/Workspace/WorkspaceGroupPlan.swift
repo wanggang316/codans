@@ -94,10 +94,13 @@ public nonisolated struct MemberCreationOptions: Equatable, Sendable, Identifiab
 /// with its own options. Members are in source order.
 public nonisolated struct WorkspaceGroupPlan: Equatable, Sendable {
   public var projectID: ProjectID
-  /// Group name and folder under the Workspace root.
+  /// Display name, independent of the directory name.
   public var name: String
   public var branch: String
   public var members: [MemberCreationOptions]
+
+  /// A single safe path component, using the Workspace title convention.
+  public var directoryName: String { WorkspaceLayout.folderName(forTitle: name) }
 
   public init(projectID: ProjectID, name: String, branch: String, members: [MemberCreationOptions]) {
     self.projectID = projectID

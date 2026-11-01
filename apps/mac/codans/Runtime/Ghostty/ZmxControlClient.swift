@@ -192,7 +192,8 @@ nonisolated enum ZmxControlClient {
     }
   }
 
-  private static func openConnection(socketPath: String) throws -> Int32 {
+  /// Blocking `connect(2)` to a daemon socket, with `SO_NOSIGPIPE` set.
+  static func openConnection(socketPath: String) throws -> Int32 {
     let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     if fd < 0 { throw ControlError.socketCreateFailed(errno: errno) }
     var noSigPipe: Int32 = 1

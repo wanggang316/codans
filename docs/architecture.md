@@ -348,3 +348,7 @@ Hard-won constraints that are invisible in the code but break the build or crash
 6. **Runtime failure recovery.** See the reported-pane-failure policy under "Architectural Invariants"; this is not isolation from native process crashes.
 
 7. **Worktree storage layout defaults.** Local creation resolves its base through `WorktreeSettings.resolveBaseDirectory`: per-Project `worktreesDirectory` verbatim → global `defaultWorktreesDirectory/<canonicalProjectName>` → `~/.codans/repos/<canonicalProjectName>`. The new worktree name is appended to that base. `HierarchySidebarFeature` uses the path-derived canonical project name, so renaming the display name does not change the suggested directory. Remote creation instead uses the parent of the remote git root. See [Worktree](design-docs/worktree.md) and [Remote SSH projects](design-docs/remote-ssh-projects.md).
+
+### Command Queue presentation
+
+The command composer is a sheet; pending commands appear in a pane-local overlay. See [Command Queue Overlay](exec-plans/command-queue-overlay.md) for the interaction contract and validation.

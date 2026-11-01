@@ -65,13 +65,14 @@ struct WorkspaceGroupCreationTests {
     let lib = try fx.makeRepo(named: "src/lib")
     try fx.git(["branch", "release"], cwd: app)
     let appProjectID = fx.hierarchy.addProject("app", app, app)
-    var settings = Settings.default
+    let profile = AgentProfile(kind: .claudeCode, name: "Claude")
+    var settings = Settings(agents: AgentSettings(profiles: [profile]))
     settings.worktree.copyIgnoredOnCreate = false
     settings.worktree.copyUntrackedOnCreate = false
     settings.projects[appProjectID] = ProjectSettings(
       git: GitProjectSettings(
         worktreeBaseRef: "release", copyIgnoredOnWorktreeCreate: true, fetchRemoteOnWorktreeCreate: false,
-        createScript: ScriptDefinition(command: "make setup")))
+        launchAgentProfileOnWorktreeCreate: profile.id, createScript: ScriptDefinition(command: "make setup")))
     let client = WorkspaceClient.live(
       hierarchy: fx.hierarchy, gitWorktreeClient: .makeLive(), gitCLI: GitWorktreeCLI(),
       fetchRemoteOnCreate: { true }, settings: { settings })
@@ -124,6 +125,33 @@ struct WorkspaceGroupCreationTests {
     _ = try await fx.client.createGroup(plan(setup, name: "fix", branch: "fix/one"))
     let duplicate = await fx.client.preflightGroup(plan(setup, name: "fix", branch: "fix/two"))
     #expect(duplicate.groupIssues.map(\.kind).contains(.duplicateGroupName))
+  }
+
+  @Test
+  func slashGroupNameKeepsItsNameAndBranchWithASafeDirectory() async throws {
+    let fx = try WorkspaceClientFixture()
+    defer { fx.cleanUp() }
+    let setup = try await makeWorkspace(fx)
+    let groupPlan = plan(setup, name: "feat/abc", branch: "feat/abc")
+
+    let preflight = await fx.client.preflightGroup(groupPlan)
+    #expect(!preflight.hasBlockingIssues)
+    let result = try await fx.client.createGroup(groupPlan)
+    let manifest = try WorkspaceManifestStore.loadGroups(rootPath: setup.root)
+    let group = try #require(manifest.groups.first { $0.id == result.groupID })
+    #expect(group.name == "feat/abc")
+    #expect(group.path == "feat-abc")
+    #expect(group.members.map(\.path) == ["feat-abc/app", "feat-abc/lib"])
+    #expect(manifest.validate().isEmpty)
+    for member in group.members {
+      #expect(try fx.git(["branch", "--show-current"], cwd: "\(setup.root)/\(member.path)") == "feat/abc\n")
+    }
+    let row = try fx.row(in: setup.projectID, at: "\(setup.root)/feat-abc")
+    #expect(row.id == result.groupWorktreeID)
+
+    let collision = await fx.client.preflightGroup(plan(setup, name: "feat-abc", branch: "feat/other"))
+    #expect(collision.hasBlockingIssues)
+    #expect(try fx.git(["branch", "--show-current"], cwd: "\(setup.root)/feat-abc/app") == "feat/abc\n")
   }
 
   @Test

@@ -1,15 +1,12 @@
 import Foundation
 
 public nonisolated enum SidebarFilter: String, Codable, CaseIterable, Sendable {
-  case all, remote, workspace, pin, pullRequests
+  case all, remote, workspace, pullRequests, notifications
 
+  /// Unknown and retired values (`local`, `favorites`, `pin`) decode as `.all`.
   public init(from decoder: Decoder) throws {
     let value = try decoder.singleValueContainer().decode(String.self)
-    switch value {
-    case "local": self = .all
-    case "favorites": self = .pin
-    default: self = Self(rawValue: value) ?? .all
-    }
+    self = Self(rawValue: value) ?? .all
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -148,7 +145,7 @@ extension Project {
     worktrees.filter { !$0.archived && $0.workspaceSlot?.groupID == groupID }
   }
 
-  /// The filtered copy of a Workspace for the pin and pull-request views:
+  /// The filtered copy of a Workspace for the notification and pull-request views:
   /// matching rows, plus the row of every group with a match. A group with
   /// a matching member opens in this copy only.
   fileprivate func filteringWorkspaceRows(_ matches: (Worktree) -> Bool) -> Project {
@@ -181,31 +178,36 @@ public nonisolated struct SidebarRowAddress: Equatable, Sendable {
 }
 
 extension Catalog {
-  /// Projects in sidebar order after category and tag filtering. Pin results
-  /// contain only pinned, unarchived worktrees; the catalog stays unchanged.
+  /// Projects in sidebar order after category and tag filtering. The
+  /// notification and pull-request filters match no row here, because their
+  /// match sets are live app state; the catalog stays unchanged.
   public var sidebarProjects: [Project] {
-    sidebarProjects(pullRequestWorktreeIDs: [])
+    sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
   }
 
-  public func sidebarProjects(pullRequestWorktreeIDs: Set<WorktreeID>) -> [Project] {
+  /// `notifiedWorktreeIDs` are the worktrees the notification filter lists.
+  public func sidebarProjects(
+    pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
+  ) -> [Project] {
     sorted(
       tagFilteredProjects.compactMap { project in
+        let matches: (Worktree) -> Bool
         switch sidebarFilter {
         case .all: return project
         case .remote: return project.isRemote ? project : nil
         case .workspace: return project.isWorkspace ? project : nil
-        case .pin, .pullRequests:
-          let matches: (Worktree) -> Bool = {
-            self.sidebarFilter == .pin ? $0.isPinned : pullRequestWorktreeIDs.contains($0.id)
-          }
-          var filtered = project
-          if project.isWorkspace {
-            filtered = project.filteringWorkspaceRows(matches)
-          } else {
-            filtered.worktrees = project.worktrees.filter { !$0.archived && matches($0) }
-          }
-          return filtered.worktrees.isEmpty ? nil : filtered
+        case .notifications:
+          matches = { notifiedWorktreeIDs.contains($0.id) }
+        case .pullRequests:
+          matches = { pullRequestWorktreeIDs.contains($0.id) }
         }
+        var filtered = project
+        if project.isWorkspace {
+          filtered = project.filteringWorkspaceRows(matches)
+        } else {
+          filtered.worktrees = project.worktrees.filter { !$0.archived && matches($0) }
+        }
+        return filtered.worktrees.isEmpty ? nil : filtered
       })
   }
 
@@ -215,11 +217,13 @@ extension Catalog {
   /// of a Project that failed to load are not on screen, so they are left
   /// out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
   public var sidebarSelectionOrder: [SidebarRowAddress] {
-    sidebarSelectionOrder(pullRequestWorktreeIDs: [])
+    sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
   }
 
-  public func sidebarSelectionOrder(pullRequestWorktreeIDs: Set<WorktreeID>) -> [SidebarRowAddress] {
-    sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs).flatMap { project -> [SidebarRowAddress] in
+  public func sidebarSelectionOrder(
+    pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
+  ) -> [SidebarRowAddress] {
+    sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs).flatMap { project -> [SidebarRowAddress] in
       if case .failed = project.loadState { return [] }
       var rows: [WorktreeID] = []
       if let row = project.rowWorktree { rows.append(row.id) }

@@ -43,7 +43,7 @@ struct TabChipLabel: View {
   }
 
   var body: some View {
-    HStack(spacing: 4) {
+    HStack(spacing: 6) {
       if isDirty {
         ProgressView()
           .controlSize(.mini)
@@ -55,7 +55,7 @@ struct TabChipLabel: View {
           .accessibilityLabel("Has unread notifications")
       } else if let icon, !icon.isEmpty {
         glyph(for: icon)
-          .font(.system(size: 11))
+          .font(.system(size: 12))
           .foregroundStyle(iconTint ?? TabBarColors.activeText)
           .opacity(iconTint == nil ? textOpacity : 1)
           .accessibilityHidden(true)
@@ -77,7 +77,7 @@ struct TabChipLabel: View {
   /// and boxed to the SF Symbol's optical size so every path sits on the same
   /// baseline and inherits the same tint.
   private func glyph(for icon: String) -> some View {
-    StoredIconGlyph(icon: icon, markSize: 11)
+    StoredIconGlyph(icon: icon, markSize: 14)
       .accessibilityHidden(true)
   }
 }

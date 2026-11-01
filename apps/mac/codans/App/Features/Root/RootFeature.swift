@@ -113,7 +113,7 @@ struct RootFeature {
     /// Opened by a Command Palette "Run Workflow" row; holds only the
     /// start draft — a run that exists belongs to the engine.
     @Presents var workflowStart: WorkflowStartFeature.State?
-    /// Command Queue panel (⌘⌥L, or a click on a pane's queue badge).
+    /// Command Queue composer (⌘L, or the pane menu action).
     /// `nil` = hidden. Scoped to exactly one pane for the presentation's
     /// lifetime; re-opening on a different pane replaces the state rather
     /// than re-targeting it, so a half-typed draft can never land in a pane
@@ -139,12 +139,21 @@ struct RootFeature {
     /// sessions, even though neither matters in practice.
     var revealSelectionTrigger: UUID = UUID()
 
-    /// Show-unread trigger. The chord (⌘U) bumps this to a fresh UUID;
-    /// `InboxBellView` observes the change through the WorktreeDetailView
-    /// scope and opens its popover. Same pattern as
-    /// `revealSelectionTrigger` — UUID rather than Bool so back-to-back
-    /// invocations always register as a new value.
-    var inboxBellPopoverTrigger: UUID = UUID()
+    /// Worktrees with unread notifications, mirrored from `NotificationStore`
+    /// by `ContentView`.
+    var unreadWorktreeIDs: Set<WorktreeID> = []
+    /// The selected worktree whose last unread entries were read while it
+    /// was selected. Opening a row marks its focused pane read; the row
+    /// stays in the notification filter until the selection moves on or a
+    /// filter is selected again.
+    var readWhileSelectedWorktreeID: WorktreeID?
+
+    /// The rows the sidebar notification filter lists. Navigation that reads
+    /// the filtered order uses the same set.
+    var notifiedWorktreeIDs: Set<WorktreeID> {
+      guard let readWhileSelectedWorktreeID else { return unreadWorktreeIDs }
+      return unreadWorktreeIDs.union([readWhileSelectedWorktreeID])
+    }
 
     /// Back/forward history of selections, browser-style. `Back` pops from
     /// `navigationHistoryBack` and pushes onto `navigationHistoryForward`;
@@ -363,10 +372,11 @@ struct RootFeature {
     /// menu chord, the palette item, and any other entry point share the
     /// same effect.
     case checkForUpdatesRequested
-    /// Opens the status-bar bell popover (the in-app unread inbox). Bumps
-    /// `state.inboxBellPopoverTrigger` so `InboxBellView` toggles its
-    /// popover; the chord (⌘U) routes here from the main menu.
+    /// Shows the sidebar with the notification filter selected; the chord
+    /// (⌘U) routes here from the main menu.
     case showUnreadRequested
+    /// `ContentView` mirrors the inbox's unread worktrees into state.
+    case unreadWorktreesChanged(Set<WorktreeID>)
     /// Resolves the current Worktree's absolute path and writes it to the
     /// system pasteboard. Silent no-op when no worktree is selected.
     case copyCurrentWorktreePathRequested
@@ -423,7 +433,7 @@ struct RootFeature {
     case workflowStart(PresentationAction<WorkflowStartFeature.Action>)
     /// Toggle the Command Queue panel. `nil` resolves the target pane the
     /// same way `commandPaletteToggle` does (the active tab's last-focused
-    /// leaf), which is what the ⌘⌥L menu binding sends; the pane badge sends
+    /// leaf), which is what the ⌘L menu binding sends; the pane badge sends
     /// its own id. Toggling while the panel is open on a *different* pane
     /// re-targets rather than closing — the user asked for that pane.
     case commandQueueToggle(PaneID?)
@@ -910,6 +920,9 @@ struct RootFeature {
         let priorProjectID = state.selection.projectID
         let priorSelection = state.selection
         state.selection = selection
+        if selection.worktreeID != state.readWhileSelectedWorktreeID {
+          state.readWhileSelectedWorktreeID = nil
+        }
         // Browser-style history. Skip the push when we just dispatched a
         // Back/Forward (otherwise that navigation would itself become a new
         // step); otherwise record the *previous* selection so a future Back
@@ -1430,6 +1443,11 @@ struct RootFeature {
         // detail pane.
         guard state.sidebar.pendingWorktrees[id: pending.id] != nil else { return .none }
         focusPendingCreation(pending, state: &state)
+        return .none
+
+      // Opening a filter starts it fresh: a row already read stays out.
+      case .sidebar(.sidebarFilterSelected):
+        state.readWhileSelectedWorktreeID = nil
         return .none
 
       // Left-click on a pending row: come BACK to a creation the user
@@ -2021,7 +2039,7 @@ struct RootFeature {
         }
         return .none
 
-      case .commandQueue(.dismiss):
+      case .commandQueue(.presented(.delegate(.submitted))), .commandQueue(.dismiss):
         state.commandQueue = nil
         return .none
 
@@ -2393,7 +2411,21 @@ struct RootFeature {
         return .send(.windowActionRouter(.requested(.checkForUpdates)))
 
       case .showUnreadRequested:
-        state.inboxBellPopoverTrigger = UUID()
+        state.sidebarVisible = true
+        return .send(.sidebar(.sidebarFilterSelected(.notifications)))
+
+      case .unreadWorktreesChanged(let worktreeIDs):
+        // Read the selection from the catalog: the focus change that marked
+        // the entries read can land before `selectionChanged` does.
+        let catalog = hierarchyClient.snapshot()
+        let selectedWorktreeID = catalog.projects
+          .first { $0.id == catalog.displayedSelectedProjectID }?.selectedWorktreeID
+        if let selectedWorktreeID, state.unreadWorktreeIDs.contains(selectedWorktreeID),
+          !worktreeIDs.contains(selectedWorktreeID)
+        {
+          state.readWhileSelectedWorktreeID = selectedWorktreeID
+        }
+        state.unreadWorktreeIDs = worktreeIDs
         return .none
 
       case .copyCurrentWorktreePathRequested:
@@ -2429,7 +2461,8 @@ struct RootFeature {
 
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
-        let order = catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys))
+        let order = catalog.sidebarSelectionOrder(
+          pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs)
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2483,7 +2516,7 @@ struct RootFeature {
   /// catalog, so callers must have already committed the worktree selection.
   /// The pane a pane-scoped command with no explicit source should target:
   /// the active tab's last-focused leaf, falling back to that tab's first
-  /// leaf. Reuses the Command Palette's resolver so ⌘⌥L and a menu-triggered
+  /// leaf. Reuses the Command Palette's resolver so ⌘L and a menu-triggered
   /// ⌘P agree on what "the current pane" means.
   private func focusedPaneID(state: State) -> PaneID? {
     let catalog = hierarchyClient.snapshot()
@@ -2507,7 +2540,9 @@ struct RootFeature {
   ) {
     let catalog = hierarchyClient.snapshot()
     if catalog.sidebarFilter != .all,
-      !catalog.sidebarProjects(pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys)).contains(where: { project in
+      !catalog.sidebarProjects(
+        pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs
+      ).contains(where: { project in
         project.worktrees.contains { $0.id == worktreeID }
       })
     {

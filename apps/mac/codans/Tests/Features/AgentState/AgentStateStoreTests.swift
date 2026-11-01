@@ -84,6 +84,24 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
+  /// A restored agent runs with no surface until its tab is shown, so its
+  /// row sleeps; an attach wakes it, and a reclaim puts it back to sleep.
+  /// A pane with no agent row never sleeps.
+  @Test
+  func anAgentRowSleepsWhileNoSurfaceRendersItsPane() {
+    let f = Fixture(attached: false)
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .idle)])
+    #expect(f.registry.isSleeping(f.paneID))
+
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: true)
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: false)
+    #expect(f.registry.isSleeping(f.paneID))
+  }
+
   @Test
   func seededBlockedSurvivesLaunchRebind() {
     let f = Fixture()
@@ -577,7 +595,9 @@ struct AgentStateStoreTests {
     let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 0))
     let registry: AgentStateStore
 
-    init() {
+    /// `attached`: a surface renders the pane, as for any agent the binder
+    /// identified. Pass false for a restored or reclaimed pane.
+    init(attached: Bool = true) {
       let focused = self.focused
       let nowBox = self.nowBox
       let inView = self.inView
@@ -586,6 +606,7 @@ struct AgentStateStoreTests {
         isPaneInView: { _ in inView.value },
         now: { nowBox.value }
       )
+      if attached { registry.onSurfaceAttachmentChanged(paneID, attached: true) }
     }
 
     /// One user turn that the agent finishes: input, working, then idle.

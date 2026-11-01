@@ -35,6 +35,15 @@ extension IPC {
     public let tabID: String
     public let tabTitle: String?
     public let isFocused: Bool
+    /// Whether the pane's terminal (its daemon) runs, by the same rule as
+    /// `pane.describe`'s `isLive`. Terminal verbs on a not-live pane fail
+    /// with `PANE_NOT_LIVE`. Absent from older apps.
+    public let isLive: Bool?
+    /// Whether a surface renders the pane. A detached pane (restored and not
+    /// opened yet, or released by the idle reclaim) still runs, but the app
+    /// does not observe it, so `state` is the last known one. Terminal verbs
+    /// attach a surface first. Absent from older apps.
+    public let isAttached: Bool?
 
     public init(
       paneID: String,
@@ -54,7 +63,9 @@ extension IPC {
       worktreeName: String,
       tabID: String,
       tabTitle: String?,
-      isFocused: Bool
+      isFocused: Bool,
+      isLive: Bool? = nil,
+      isAttached: Bool? = nil
     ) {
       self.paneID = paneID
       self.handle = handle
@@ -74,6 +85,8 @@ extension IPC {
       self.tabID = tabID
       self.tabTitle = tabTitle
       self.isFocused = isFocused
+      self.isLive = isLive
+      self.isAttached = isAttached
     }
   }
 

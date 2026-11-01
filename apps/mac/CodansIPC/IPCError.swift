@@ -145,3 +145,17 @@ extension IPCError: Codable {
     }
   }
 }
+
+extension IPCError {
+  /// The pane is in the catalog but its terminal does not run: no daemon is
+  /// alive for it (the app quit with a snapshot, or the shell exited while
+  /// no surface was attached). Distinct from `notFound`, so a script can
+  /// tell "wrong id" from "nothing runs there". Opening the pane starts a
+  /// new shell.
+  public static func paneNotLive(_ id: String) -> IPCError {
+    .domain(
+      code: "PANE_NOT_LIVE",
+      message: "pane terminal is not running: \(id)",
+      hint: "run `codans pane focus \(id)` or open its tab in Codans to start a new shell")
+  }
+}

@@ -40,6 +40,15 @@ struct AgentStatus: AsyncParsableCommand {
       its own state; for the others the state is derived from the pane's
       screen (source: screen), so it can lag a moment behind the agent.
       `agent wait` blocks on it.
+
+      A sleeping pane (restored and not opened yet, or idle long enough to
+      have its terminal view released) still runs, but no terminal view
+      renders it: isAttached: false (text: "(sleeping)"). Its program status
+      still arrives (source: programStatus); a screen-derived state is the
+      last one seen (source: cached). If its terminal exits while sleeping,
+      the row goes away. Terminal commands attach it first. A pane whose
+      terminal no longer runs has isLive: false (text: "(not live)"), and
+      terminal commands on it fail with PANE_NOT_LIVE.
       """
   )
 
@@ -71,10 +80,19 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
       let since = formatter.date(from: row.since).map { Self.age(from: $0, to: now) } ?? "-"
       let focus = row.isFocused ? "*" : " "
       let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
-      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "")
+      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "") + Self.lifecycleMark(row)
       return
         "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
     }.joined(separator: "\n")
+  }
+
+  /// Marks a row whose state is not observed live: the terminal no longer
+  /// runs, or it runs with no surface to watch it. Rows from older apps
+  /// carry neither field and get no mark.
+  static func lifecycleMark(_ row: IPC.AgentStateEntry) -> String {
+    if row.isLive == false { return " (not live)" }
+    if row.isAttached == false { return " (sleeping)" }
+    return ""
   }
 
   static func age(from: Date, to: Date) -> String {

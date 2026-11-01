@@ -41,6 +41,8 @@ struct HierarchySidebarView: View {
   /// badge (silent when no PR is matched) and the row hosts the PR popover. Nil in
   /// previews / tests that don't exercise the integration.
   var gitHubStore: StoreOf<GitHubFeature>?
+  /// Rows the notification filter lists (`RootFeature.State.notifiedWorktreeIDs`).
+  var notifiedWorktreeIDs: Set<WorktreeID> = []
   /// Optional editor store. Drives the worktree context menu's "Open in
   /// <Editor>" entry (resolved default) and "Open in" submenu (every
   /// installed editor). Nil in previews — the submenu falls back to the
@@ -107,6 +109,7 @@ struct HierarchySidebarView: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
   @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
+  @Environment(NotificationStore.self) private var inbox: NotificationStore?
 
   /// Tracks whether the `.command` modifier is currently pressed. When held the sidebar
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
@@ -225,7 +228,8 @@ struct HierarchySidebarView: View {
     // Filter the project list by the catalog's active tag filter.
     // OR semantics on `.tags(set)`; `.untagged` shows projects with no
     // tags; `.all` is the no-op default.
-    let visibleProjects = catalog.sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
+    let visibleProjects = catalog.sidebarProjects(
+      pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
 
     let isReordering = store.isReorderingProjects
@@ -248,9 +252,12 @@ struct HierarchySidebarView: View {
           store.send(.gitEnvironmentRecheckTapped)
         }
       }
-      SidebarFilterBar(selection: catalog.sidebarFilter) {
-        store.send(.sidebarFilterSelected($0))
-      }
+      SidebarFilterBar(
+        selection: catalog.sidebarFilter,
+        hasUnreadNotifications: (inbox?.unreadCount ?? 0) > 0,
+        onSelect: { store.send(.sidebarFilterSelected($0)) },
+        onMarkAllNotificationsRead: { inbox?.markAllRead() }
+      )
       .disabled(isReordering)
       if isReordering {
         reorderBanner
@@ -271,6 +278,13 @@ struct HierarchySidebarView: View {
         )
         .onPreferenceChange(SidebarHeightPreferenceKey.self) { newHeight in
           sidebarHeightObservation = newHeight
+        }
+        // The panel card is a translucent well with gaps around it, so it
+        // cannot hide the rows that scroll under it. Cut the list off at
+        // the panel's top edge instead.
+        .mask(alignment: .top) {
+          Rectangle()
+            .padding(.bottom, agentStatePanelVisible ? clampedAgentStatePanelHeight : 0)
         }
 
         if agentStatePanelVisible, let registry = agentStateStore {
@@ -588,7 +602,8 @@ struct HierarchySidebarView: View {
       // stand for a folder, and the rows of expanded Projects); matching hints
       // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
       let hotkeyIndex: [WorktreeID: Int] = Dictionary(
-        hierarchyManager.catalog.sidebarSelectionOrder(pullRequestWorktreeIDs: pullRequestWorktreeIDs)
+        hierarchyManager.catalog.sidebarSelectionOrder(
+          pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
           .prefix(10).enumerated()
           .map { ($0.element.worktreeID, $0.offset) },
         uniquingKeysWith: { first, _ in first })
@@ -821,19 +836,22 @@ struct HierarchySidebarView: View {
           let mainRows = children.filter { $0.path == project.rootPath }
           let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
           let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
+          // The live-match filters show a subset of each segment, so its
+          // indices cannot drive a reorder.
+          let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
+            .contains(hierarchyManager.catalog.sidebarFilter)
           let pendingRows = store.pendingWorktrees.filter {
-            $0.projectID == project.id && hierarchyManager.catalog.sidebarFilter != .pin
-              && hierarchyManager.catalog.sidebarFilter != .pullRequests
+            $0.projectID == project.id && !isLiveMatchFilter
           }
           ForEach(mainRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
           }
           ForEach(pinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
+              .moveDisabled(isLiveMatchFilter)
           }
           .onMove { source, destination in
-            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
+            guard !isLiveMatchFilter else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -846,10 +864,10 @@ struct HierarchySidebarView: View {
           }
           ForEach(unpinnedRows) { worktree in
             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(hierarchyManager.catalog.sidebarFilter == .pullRequests)
+              .moveDisabled(isLiveMatchFilter)
           }
           .onMove { source, destination in
-            guard hierarchyManager.catalog.sidebarFilter != .pullRequests else { return }
+            guard !isLiveMatchFilter else { return }
             store.send(
               .reorderWorktrees(
                 projectID: project.id,
@@ -2627,22 +2645,25 @@ private struct LifecyclePhaseLineView: View {
 
 private struct SidebarFilterBar: View {
   let selection: SidebarFilter
+  /// Tints the notification glyph while it is not selected, so unread
+  /// notifications stay visible under any filter.
+  let hasUnreadNotifications: Bool
   var onSelect: (SidebarFilter) -> Void
+  var onMarkAllNotificationsRead: () -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   @State private var hoveredFilter: SidebarFilter?
 
   var body: some View {
     GeometryReader { geometry in
-      let spacing: CGFloat = 6
-      let count = CGFloat(SidebarFilter.allCases.count)
-      let unitWidth = max(0, (geometry.size.width - spacing * (count - 1)) / (count + 2))
-      SidebarFilterLayout(
+      let layout = SidebarFilterLayout(
         expansion: SidebarFilterExpansion(selection: selection),
-        height: TabBarMetrics.trackHeight, spacing: spacing
-      ) {
+        height: TabBarMetrics.trackHeight
+      )
+      let metrics = layout.metrics(width: geometry.size.width)
+      layout {
         ForEach(SidebarFilter.allCases, id: \.self) { filter in
-          filterButton(filter, unitWidth: unitWidth)
+          filterButton(filter, metrics: metrics)
         }
       }
       .animation(
@@ -2655,15 +2676,18 @@ private struct SidebarFilterBar: View {
     .padding(.bottom, TabBarMetrics.trackBottomInset)
   }
 
-  private func filterButton(_ filter: SidebarFilter, unitWidth: CGFloat) -> some View {
+  private func filterButton(_ filter: SidebarFilter, metrics: SidebarFilterLayout.Metrics) -> some View {
     let selected = selection == filter
     let title = title(for: filter)
     let titleWidth = ceil(
       (title as NSString).size(withAttributes: [
         .font: NSFont.systemFont(ofSize: TabBarMetrics.titleFontSize, weight: .semibold)
       ]).width)
-    let expandedWidth = unitWidth * 3
-    let labelScale = min(1, max(0, expandedWidth - 12) / (14 + 5 + titleWidth))
+    // The label shrinks a little to fit; past that the title is dropped and
+    // the selected capsule keeps only its icon.
+    let titleScale = min(1, max(0, metrics.expanded - 12) / (14 + 5 + titleWidth))
+    let showsTitle = selected && titleScale >= 0.8
+    let labelScale = showsTitle ? titleScale : min(1, max(0, metrics.diameter - 8) / 14)
 
     return Button {
       onSelect(filter)
@@ -2684,29 +2708,37 @@ private struct SidebarFilterBar: View {
               .accessibilityHidden(true)
             Text(title)
               .fixedSize()
-              .opacity(selected ? 1 : 0)
+              .opacity(showsTitle ? 1 : 0)
               .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.12).delay(selected ? 0.1 : 0),
-                value: selected
+                reduceMotion ? nil : .easeOut(duration: 0.12).delay(showsTitle ? 0.1 : 0),
+                value: showsTitle
               )
               .accessibilityHidden(true)
           }
           .font(.system(size: TabBarMetrics.titleFontSize, weight: .semibold))
-          .foregroundStyle(selected ? Color.white : Color.secondary)
+          .foregroundStyle(
+            selected
+              ? Color.white
+              : filter == .notifications && hasUnreadNotifications ? tint(for: filter) : Color.secondary)
           .fixedSize()
-          .offset(x: selected ? 0 : (titleWidth + 5) / 2)
+          .offset(x: showsTitle ? 0 : (titleWidth + 5) / 2)
           .animation(
-            reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22).delay(selected ? 0.06 : 0),
-            value: selected
+            reduceMotion ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22).delay(showsTitle ? 0.06 : 0),
+            value: showsTitle
           )
           .scaleEffect(labelScale)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: TabBarMetrics.trackHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(Capsule())
         .contentShape(Capsule())
     }
     .buttonStyle(.plain)
+    .contextMenu {
+      if filter == .notifications {
+        Button("Mark All as Read", action: onMarkAllNotificationsRead)
+          .disabled(!hasUnreadNotifications)
+      }
+    }
     .onHover { hoveredFilter = $0 ? filter : nil }
     .help(title)
     .accessibilityLabel(title)
@@ -2718,7 +2750,7 @@ private struct SidebarFilterBar: View {
     case .all: "All"
     case .remote: "Remote"
     case .workspace: "Workspace"
-    case .pin: "Pin"
+    case .notifications: "Unread"
     case .pullRequests: "PR"
     }
   }
@@ -2728,7 +2760,7 @@ private struct SidebarFilterBar: View {
     case .all: "square.grid.2x2.fill"
     case .remote: "wifi"
     case .workspace: "square.stack.3d.up.fill"
-    case .pin: "pin.fill"
+    case .notifications: "bell.fill"
     case .pullRequests: "arrow.triangle.pull"
     }
   }
@@ -2739,7 +2771,7 @@ private struct SidebarFilterBar: View {
     case .remote: .indigo
     case .workspace: .purple
     case .pullRequests: .green
-    case .pin: Color(red: 0.65, green: 0.42, blue: 0.08)
+    case .notifications: .orange
     }
   }
 }
@@ -2756,6 +2788,27 @@ nonisolated struct SidebarFilterLayout: Layout {
     set { expansion = newValue }
   }
 
+  /// Collapsed capsules never get narrower than they are tall; the selected
+  /// capsule takes the rest. When even that leaves no room, every capsule
+  /// becomes the same smaller circle.
+  struct Metrics {
+    var collapsed: CGFloat
+    var expanded: CGFloat
+    var diameter: CGFloat
+  }
+
+  func metrics(width: CGFloat) -> Metrics {
+    let count = CGFloat(expansion.values.count)
+    let available = max(0, width - spacing * (count - 1))
+    let unit = available / (count + 2)
+    let collapsed = max(unit, min(height, available / count))
+    return Metrics(
+      collapsed: collapsed,
+      expanded: available - (count - 1) * collapsed,
+      diameter: min(height, collapsed)
+    )
+  }
+
   func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
     CGSize(width: proposal.width ?? 260, height: height)
   }
@@ -2763,9 +2816,9 @@ nonisolated struct SidebarFilterLayout: Layout {
   func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
     for (subview, frame) in zip(subviews, frames(width: bounds.width)) {
       subview.place(
-        at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY),
+        at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
         anchor: .topLeading,
-        proposal: ProposedViewSize(width: frame.width, height: bounds.height)
+        proposal: ProposedViewSize(width: frame.width, height: frame.height)
       )
     }
   }
@@ -2773,12 +2826,13 @@ nonisolated struct SidebarFilterLayout: Layout {
   func frames(width: CGFloat) -> [CGRect] {
     let weights = expansion.values.map { max(0, $0) }
     let total = max(weights.reduce(0, +), 1e-9)
-    let unit = max(0, (width - spacing * CGFloat(weights.count - 1)) / CGFloat(weights.count + 2))
+    let metrics = metrics(width: width)
+    let y = (height - metrics.diameter) / 2
     var x: CGFloat = 0
     return weights.map { weight in
-      let itemWidth = unit * (1 + 2 * weight / total)
+      let itemWidth = metrics.collapsed + (metrics.expanded - metrics.collapsed) * weight / total
       defer { x += itemWidth + spacing }
-      return CGRect(x: x, y: 0, width: itemWidth, height: height)
+      return CGRect(x: x, y: y, width: itemWidth, height: metrics.diameter)
     }
   }
 }

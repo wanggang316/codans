@@ -12,15 +12,14 @@ enum TabBarMetrics {
   /// Height of the full Tab bar row: the track plus `trackBottomInset`.
   static let barHeight: CGFloat = trackHeight + trackBottomInset
 
-  /// Recessed capsule track that hosts the chips.
-  static let trackHeight: CGFloat = 28
+  /// Recessed capsule track that hosts the chips. Track height and chip
+  /// inset match Safari's tab bar (2x capture: 64-px track, 58-px chip).
+  static let trackHeight: CGFloat = 32
   /// The system bar sits flush under the toolbar and leaves this gap to
   /// the content below it.
   static let trackBottomInset: CGFloat = 8
-  /// Gap between the bar's leading edge and the track.
-  static let trackLeadingInset: CGFloat = 4
   /// Chips are inset from the track on every side by this much.
-  static let trackContentInset: CGFloat = 2
+  static let trackContentInset: CGFloat = 1.5
 
   /// Chip height inside the track. The hover / selected capsule fills the
   /// whole chip.
@@ -43,12 +42,12 @@ enum TabBarMetrics {
   static let chipTitleInset: CGFloat = chipSlotInset + closeButtonSize + 8
 
   /// Point size of the chip title and the close glyph.
-  static let titleFontSize: CGFloat = 11
+  static let titleFontSize: CGFloat = 13
   static let closeGlyphSize: CGFloat = 9
 
   /// Separator in the gap between two chips, vertically centered.
   static let dividerWidth: CGFloat = chipSpacing
-  static let dividerHeight: CGFloat = 18
+  static let dividerHeight: CGFloat = 20
 
   /// Delay before the trailing split buttons show their pane-tree preview
   /// popover.

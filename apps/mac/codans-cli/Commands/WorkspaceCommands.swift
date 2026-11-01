@@ -317,7 +317,7 @@ struct WorkspaceGroupCreate: AsyncParsableCommand {
     commandName: "create",
     abstract: "Create a named group: one branch checked out for every project.",
     discussion: """
-      Checks out --branch from each project into <root>/<name>/<project>. Each
+      Checks out --branch from each project into <root>/<group-folder>/<project>. Each
       project's base ref, fetch, and copy settings come from its Codans
       settings unless a flag overrides them; --base <project>=<ref> sets the
       base of one project (repeatable). A local branch with the same name in
@@ -331,7 +331,7 @@ struct WorkspaceGroupCreate: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String
-  @Argument(help: "Group name; also its folder under the workspace root.")
+  @Argument(help: "Group display name. A safe folder name is derived from it.")
   var name: String
   @Option(name: .long, help: "Branch to create in every project.")
   var branch: String

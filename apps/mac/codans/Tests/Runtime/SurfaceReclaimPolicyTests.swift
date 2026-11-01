@@ -23,11 +23,13 @@ struct SurfaceReclaimPolicyTests {
     job: ForegroundJob? = SurfaceReclaimPolicyTests.job("zsh"),
     isRemote: Bool = false,
     isReady: Bool = true,
-    isVetoed: Bool = false
+    isVetoed: Bool = false,
+    recency: Int? = nil
   ) -> SurfaceReclaimPolicy.Candidate {
     .init(
       hiddenFor: hiddenFor, quietFor: quietFor, foregroundJob: job,
-      isRemote: isRemote, isSurfaceReady: isReady, isVetoed: isVetoed)
+      isRemote: isRemote, isSurfaceReady: isReady, isVetoed: isVetoed,
+      selectedTabRecency: recency)
   }
 
   @Test
@@ -93,5 +95,42 @@ struct SurfaceReclaimPolicyTests {
     #expect(!policy.shouldReclaim(candidate(isRemote: true)))
     #expect(!policy.shouldReclaim(candidate(isReady: false)))
     #expect(!policy.shouldReclaim(candidate(isVetoed: true)))
+  }
+
+  @Test
+  func memoryPressureIgnoresHiddenAndQuietThresholds() {
+    let fresh = candidate(hiddenFor: 0, quietFor: 0)
+    #expect(!policy.shouldReclaim(fresh))
+    #expect(policy.shouldReclaim(fresh, ignoringThresholds: true))
+  }
+
+  @Test
+  func memoryPressureKeepsEveryOtherRule() {
+    let make = Self.job("make", "make test")
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, job: make), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, job: nil), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, isRemote: true), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, isReady: false), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, isVetoed: true), ignoringThresholds: true))
+  }
+
+  @Test
+  func selectedTabOfRecentWorktreeIsKeptByTimedSweep() {
+    #expect(policy.recentWorktreeCount == 3)
+    for rank in 0..<3 {
+      #expect(!policy.shouldReclaim(candidate(hiddenFor: 10_000, recency: rank)))
+    }
+  }
+
+  @Test
+  func selectedTabOfOlderWorktreeIsReclaimable() {
+    #expect(policy.shouldReclaim(candidate(recency: 3)))
+    #expect(policy.shouldReclaim(candidate(recency: nil)))
+  }
+
+  @Test
+  func memoryPressureIgnoresRecency() {
+    #expect(policy.shouldReclaim(candidate(hiddenFor: 0, recency: 0), ignoringThresholds: true))
+    #expect(policy.shouldReclaim(candidate(hiddenFor: 0, recency: 2), ignoringThresholds: true))
   }
 }

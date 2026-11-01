@@ -1,6 +1,7 @@
 import AppKit
 import CodansCore
 import Foundation
+import Observation
 import os.log
 
 /// Public-facing façade that composes `CatalogStore`, `HierarchyManager`, and
@@ -127,6 +128,9 @@ final class TerminalEngine {
   /// App-level veto, consulted per candidate: the agent store and command
   /// queue live above the Runtime layer, so the app injects what it knows.
   var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
+  /// Called when a catalog pane's surface is attached (`true`) or detached
+  /// (`false`: reclaimed or closed). Lets the app show which panes sleep.
+  var onSurfaceAttachmentChanged: @MainActor (PaneID, Bool) -> Void = { _, _ in }
   /// Last time each registered surface was seen inside a window.
   private var lastDisplayedAt: [PaneID: Date] = [:]
   /// Panes whose surface was detached by the reclaim sweep. Their zmx daemon
@@ -137,6 +141,36 @@ final class TerminalEngine {
   /// detached; the re-attach starts at it.
   private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
+  private var memoryPressureMonitor: MemoryPressureMonitor?
+  /// Recent worktree selections, newest first: the recency input of the
+  /// reclaim policy.
+  private(set) var worktreeSelections = WorktreeSelectionHistory(
+    limit: SurfaceReclaimPolicy().recentWorktreeCount)
+  private var worktreeSelectionTask: Task<Void, Never>?
+  /// Where the sweep finds and detaches live surfaces: the Ghostty runtime,
+  /// or a fake in headless tests.
+  var reclaimHost: (any ReclaimableSurfaceHost)?
+
+  // MARK: Detached-pane watchers
+
+  /// Called when a detached pane's daemon exits (its passive watcher gave
+  /// up). The pane stays in the catalog, now `PaneTerminalState.stopped`;
+  /// opening it starts a fresh session. The agent store lives above the
+  /// Runtime layer, so the app injects the reaction. Attach and detach
+  /// themselves are reported by `onSurfaceAttachmentChanged`.
+  var onDetachedDaemonExited: @MainActor (PaneID) -> Void = { _ in }
+  /// Test seam: whether a surface renders the pane. Headless tests have no
+  /// `GhosttyRuntime`, so they set this to model a re-attached pane.
+  var surfacePresenceOverride: ((PaneID) -> Bool)?
+  /// Builds the watcher for a pane. Tests inject a fake.
+  var makeDetachedPaneWatcher:
+    (PaneID, @escaping @Sendable (ZmxPassiveWatcher.Event) -> Void) -> any DetachedPaneWatching = {
+      paneID, onEvent in
+      ZmxPassiveWatcher(socketPath: ZmxControlClient.socketPath(for: paneID), onEvent: onEvent)
+    }
+  /// One watcher per pane that has a daemon and no surface. The token tells
+  /// a current watcher's events from those of a stopped one still in flight.
+  private var detachedWatchers: [PaneID: (token: UUID, watcher: any DetachedPaneWatching)] = [:]
 
   /// Inject a `GhosttyRuntime` for real pane surfaces, or pass `nil` for
   /// headless tests. When nil, `ensureSurface` throws.
@@ -152,6 +186,7 @@ final class TerminalEngine {
     self.ghosttyRuntime = ghosttyRuntime
     self.foregroundJobReader = foregroundJobReader
     self.clock = clock
+    self.reclaimHost = ghosttyRuntime
     // Back-pointer so the libghostty action decoder can emit events
     // (paneInfoChanged, paneActionRequested, etc.) onto this engine's
     // stream. Weak on the runtime side; no cycle.
@@ -171,6 +206,7 @@ final class TerminalEngine {
     foregroundJobPollTask?.cancel()
     remoteProbeTask?.cancel()
     reclaimSweepTask?.cancel()
+    worktreeSelectionTask?.cancel()
   }
 
   // MARK: - Pane surface lifecycle
@@ -287,11 +323,13 @@ final class TerminalEngine {
     // `GhosttySurfaceView.init`). Without a slot size, a re-attach after an
     // idle reclaim falls back to the size the pane had when it was reclaimed.
     let initialSize = initialSize ?? reclaimedSurfaceSizes[pane.id]
-    let surface = try Self.withSurfaceInitRetry(runtime: runtime) {
-      try PaneSurface(
-        runtime: runtime, paneID: pane.id, session: session, launch: launch,
-        workingDirectory: surfaceWorkingDirectory, env: surfaceEnv, initialSize: initialSize
-      )
+    let surface = try replacingDetachedWatcher(of: pane.id) {
+      try Self.withSurfaceInitRetry(runtime: runtime) {
+        try PaneSurface(
+          runtime: runtime, paneID: pane.id, session: session, launch: launch,
+          workingDirectory: surfaceWorkingDirectory, env: surfaceEnv, initialSize: initialSize
+        )
+      }
     }
     runtime.register(pane: surface)
     let isReattach = noteSurfaceRegistered(pane.id)
@@ -395,6 +433,9 @@ final class TerminalEngine {
       // socket, exactly as `suspendSurface` does; a missing socket is a
       // silent no-op. No `.paneExited` is emitted: there was no surface to
       // close, and the event's consumers all key off surface teardown.
+      // Stop the watcher first so the kill is not reported as a daemon
+      // that died on its own.
+      stopWatchingDetachedPane(paneID)
       ZmxControlClient.kill(for: paneID)
       // A reclaimed pane did have a live surface this session, so its
       // per-pane state (polling, snapshots, process row) is still held and
@@ -421,6 +462,7 @@ final class TerminalEngine {
     guard let surface = ghosttyRuntime?.surface(for: paneID) else {
       // No live surface — kill the still-running daemon directly via its
       // control socket (a missing socket is a silent no-op).
+      stopWatchingDetachedPane(paneID)
       ZmxControlClient.kill(for: paneID)
       if reclaimedPanes.contains(paneID) {
         handleSurfaceClose(paneID: paneID, processAlive: true, announce: false)
@@ -539,6 +581,8 @@ final class TerminalEngine {
     }
 
     ghosttyRuntime?.unregister(paneID: paneID)
+    onSurfaceAttachmentChanged(paneID, false)
+    stopWatchingDetachedPane(paneID)
     reclaimedPanes.remove(paneID)
     reclaimedSurfaceSizes.removeValue(forKey: paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
@@ -666,6 +710,13 @@ final class TerminalEngine {
     foregroundJobPollTask = nil
     reclaimSweepTask?.cancel()
     reclaimSweepTask = nil
+    memoryPressureMonitor?.cancel()
+    memoryPressureMonitor = nil
+    worktreeSelectionTask?.cancel()
+    worktreeSelectionTask = nil
+    for paneID in Array(detachedWatchers.keys) {
+      stopWatchingDetachedPane(paneID)
+    }
     // Drain any pending output into the lifecycle-bound path before finishing.
     for (_, buffer) in outputBuffers {
       buffer.flush()
@@ -886,7 +937,7 @@ final class TerminalEngine {
   /// Shared per-pane tail of both foreground samplers (local poll loop and
   /// remote host probe): empty-sample hysteresis, change detection, binder
   /// delivery, and the viewport nudge.
-  private func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
+  func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
     if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
       hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
       return
@@ -950,15 +1001,35 @@ final class TerminalEngine {
   // MARK: - Idle-surface reclaim
 
   /// Whether the pane's surface was detached by the reclaim sweep while its
-  /// daemon keeps running. Out-of-band probes (`pane.read`, `pane.info`)
-  /// use this: the daemon answers them with no surface attached.
+  /// daemon keeps running.
   func isReclaimed(_ paneID: PaneID) -> Bool {
     reclaimedPanes.contains(paneID)
+  }
+
+  /// Probes a pane daemon's control socket. Injected so tests do not need a
+  /// running daemon.
+  var isDaemonAlive: @MainActor (PaneID) -> Bool = { SessionReaper.isDaemonAlive(paneID: $0) }
+
+  /// Whether the pane's terminal runs and whether a surface renders it.
+  /// A pane without a surface is probed: a daemon can outlive the app
+  /// (resume on launch) and can exit while no surface watches it, so
+  /// neither the restore path nor the reclaim bookkeeping tells.
+  /// `pane.describe` and `agent.listStates` report this state, and the
+  /// terminal verbs attach a surface only to a `.detached` pane.
+  /// Panes that have a surface now.
+  var attachedPaneIDs: Set<PaneID> {
+    Set(ghosttyRuntime?.allLiveSurfaces().map(\.paneID) ?? [])
+  }
+
+  func terminalState(for paneID: PaneID) -> PaneTerminalState {
+    if ghosttyRuntime?.surface(for: paneID) != nil { return .attached }
+    return isDaemonAlive(paneID) ? .detached : .stopped
   }
 
   /// Bookkeeping for a freshly registered surface. Returns whether it is a
   /// re-attach of a reclaimed pane.
   private func noteSurfaceRegistered(_ paneID: PaneID) -> Bool {
+    onSurfaceAttachmentChanged(paneID, true)
     lastDisplayedAt[paneID] = clock()
     startReclaimSweepIfNeeded()
     reclaimedSurfaceSizes.removeValue(forKey: paneID)
@@ -970,37 +1041,206 @@ final class TerminalEngine {
   /// no lifecycle event is emitted and the sampling state (foreground
   /// snapshot, process row) is kept, so the pane still looks alive to its
   /// observers; only the live poll stops until `ensureSurface` re-attaches.
-  func reclaimSurface(for paneID: PaneID) {
-    guard let surface = ghosttyRuntime?.surface(for: paneID) else { return }
-    // Detaching ends the `zmx attach` child; make sure that cannot surface
-    // as a pane exit.
-    surface.onClose = nil
-    reclaimedSurfaceSizes[paneID] = surface.view.bounds.size
+  /// Returns whether a surface was detached.
+  @discardableResult
+  func reclaimSurface(for paneID: PaneID) -> Bool {
+    guard let host = reclaimHost else { return false }
     disposeOutputBuffer(for: paneID)
-    surface.close()
-    ghosttyRuntime?.unregister(paneID: paneID)
+    guard let size = host.detachSurface(for: paneID) else { return false }
+    reclaimedSurfaceSizes[paneID] = size
     foregroundJobPaneIDs.remove(paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
     reclaimedPanes.insert(paneID)
+    onSurfaceAttachmentChanged(paneID, false)
     stopForegroundJobPollingIfIdle()
+    watchDetachedPane(paneID)
     Self.logger.info(
       "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
     )
+    return true
+  }
+
+  // MARK: - Detached-pane watchers
+
+  /// Observe every pane in `paneIDs` that has no surface, such as the panes
+  /// restored at launch. A pane without a running daemon is reported as
+  /// `.daemonExited` once its watcher gives up.
+  func watchDetachedPanes(_ paneIDs: some Sequence<PaneID>) {
+    for paneID in paneIDs { watchDetachedPane(paneID) }
+  }
+
+  /// Whether a passive watcher observes `paneID`.
+  func isWatchingDetachedPane(_ paneID: PaneID) -> Bool {
+    detachedWatchers[paneID] != nil
+  }
+
+  private func watchDetachedPane(_ paneID: PaneID) {
+    guard !finished, detachedWatchers[paneID] == nil,
+      ghosttyRuntime?.surface(for: paneID) == nil
+    else { return }
+    let token = UUID()
+    let watcher = makeDetachedPaneWatcher(paneID) { event in
+      Task { @MainActor [weak self] in
+        self?.handleDetachedPaneEvent(event, paneID: paneID, token: token)
+      }
+    }
+    detachedWatchers[paneID] = (token, watcher)
+    watcher.start()
+  }
+
+  /// Run `makeSurface` with the pane's watcher stopped. The surface is the
+  /// pane's only source from here on: a signal is never delivered twice,
+  /// and a watcher signal still in flight is dropped (its token is gone),
+  /// so it cannot overwrite what the surface reports. Output written before
+  /// the surface's `zmx attach` connects reaches neither; the agent's next
+  /// report corrects any state missed there (an accepted trade-off, see
+  /// `active-agents-view.md`). If the surface cannot be created, the
+  /// watcher comes back.
+  private func replacingDetachedWatcher(
+    of paneID: PaneID, _ makeSurface: () throws -> PaneSurface
+  ) throws -> PaneSurface {
+    let wasWatching = stopWatchingDetachedPane(paneID)
+    do {
+      return try makeSurface()
+    } catch {
+      if wasWatching { watchDetachedPane(paneID) }
+      throw error
+    }
+  }
+
+  private func hasSurfaceForDetachedCheck(_ paneID: PaneID) -> Bool {
+    surfacePresenceOverride?(paneID) ?? (ghosttyRuntime?.surface(for: paneID) != nil)
+  }
+
+  /// Stop the pane's watcher, if any. Returns whether one was running.
+  /// Call it before killing a detached pane's daemon.
+  @discardableResult
+  func stopWatchingDetachedPane(_ paneID: PaneID) -> Bool {
+    guard let entry = detachedWatchers.removeValue(forKey: paneID) else { return false }
+    entry.watcher.stop()
+    return true
+  }
+
+  private func handleDetachedPaneEvent(
+    _ event: ZmxPassiveWatcher.Event, paneID: PaneID, token: UUID
+  ) {
+    // Only the current watcher of a pane without a surface counts. A
+    // callback queued before `stopWatchingDetachedPane` (re-attach, close)
+    // runs with a stale token; once a surface exists it is the pane's only
+    // source, so a late watcher signal must not overwrite its program
+    // status or title, or repeat its notification.
+    guard detachedWatchers[paneID]?.token == token, !hasSurfaceForDetachedCheck(paneID) else {
+      return
+    }
+    switch event {
+    case .signals(let signals):
+      for signal in signals {
+        switch signal {
+        case .title(let title):
+          emit(.paneInfoChanged(paneID, .title(title)))
+        case .desktopNotification(let title, let body):
+          emit(.paneInfoChanged(paneID, .desktopNotification(title: title, body: body)))
+        case .programStatus(let report):
+          ingestProgramStatus(report, for: paneID)
+        }
+      }
+    case .daemonGone:
+      detachedWatchers.removeValue(forKey: paneID)
+      Self.logger.info(
+        "detached.daemon-exited pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
+      )
+      // Drop what the engine kept for the session (reclaim mark, process
+      // row, program status), so a later open is a fresh session.
+      handleSurfaceClose(paneID: paneID, processAlive: false, announce: false)
+      onDetachedDaemonExited(paneID)
+    }
   }
 
   /// One sweep: note which surfaces are on screen, then reclaim the ones the
   /// policy accepts. Returns the reclaimed panes.
   @discardableResult
   func reclaimIdleSurfaces() -> [PaneID] {
-    guard let runtime = ghosttyRuntime else { return [] }
+    sweepReclaimableSurfaces(ignoringThresholds: false)
+  }
+
+  /// Memory-pressure sweep: reclaim every hidden, eligible surface now,
+  /// without waiting for the hidden and quiet thresholds. Returns the
+  /// reclaimed panes.
+  @discardableResult
+  func handleMemoryPressure(_ level: MemoryPressureLevel) -> [PaneID] {
+    guard !finished else { return [] }
+    let reclaimed = sweepReclaimableSurfaces(ignoringThresholds: true)
+    Self.logger.info(
+      "surface.reclaim.pressure level=\(level.rawValue, privacy: .public) reclaimed=\(reclaimed.count, privacy: .public)"
+    )
+    return reclaimed
+  }
+
+  /// Start reclaiming on system memory-pressure events. Idempotent.
+  func startMemoryPressureMonitoring() {
+    guard memoryPressureMonitor == nil, !finished else { return }
+    let monitor = MemoryPressureMonitor { [weak self] level in
+      self?.handleMemoryPressure(level)
+    }
+    monitor.start()
+    memoryPressureMonitor = monitor
+  }
+
+  /// Record a worktree selection for the reclaim recency exemption.
+  func noteWorktreeSelected(_ id: WorktreeID) {
+    worktreeSelections.record(id)
+  }
+
+  /// Record every change of the displayed worktree. Idempotent.
+  func startWorktreeSelectionTracking() {
+    guard worktreeSelectionTask == nil, !finished else { return }
+    worktreeSelectionTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        // Re-armed per change; holds no strong reference while it waits.
+        guard let changed = self?.recordDisplayedWorktreeAndObserve() else { return }
+        for await _ in changed { break }
+      }
+    }
+  }
+
+  private func recordDisplayedWorktreeAndObserve() -> AsyncStream<Void> {
+    AsyncStream { continuation in
+      let selected = withObservationTracking {
+        hierarchy.catalog.displayedSelectedWorktreeID
+      } onChange: {
+        continuation.yield()
+        continuation.finish()
+      }
+      if let selected { noteWorktreeSelected(selected) }
+    }
+  }
+
+  /// Recency rank of each pane in the selected tab of a recently selected
+  /// worktree. Background tabs are not exempt: only the panes the user sees
+  /// right after switching back are worth keeping attached.
+  private func selectedTabRecencyByPane() -> [PaneID: Int] {
+    var ranks: [PaneID: Int] = [:]
+    for project in hierarchy.catalog.projects {
+      for worktree in project.worktrees {
+        guard let rank = worktreeSelections.rank(of: worktree.id),
+          let tab = worktree.tabs.first(where: { $0.id == worktree.selectedTabID })
+        else { continue }
+        for pane in tab.panes { ranks[pane.id] = rank }
+      }
+    }
+    return ranks
+  }
+
+  private func sweepReclaimableSurfaces(ignoringThresholds: Bool) -> [PaneID] {
     let now = clock()
+    let selectedTabRecency = selectedTabRecencyByPane()
     var reclaimed: [PaneID] = []
-    for surface in runtime.allLiveSurfaces() {
-      let paneID = surface.paneID
+    for sample in reclaimHost?.reclaimableSurfaces() ?? [] {
+      let paneID = sample.paneID
       // Surfaces outside the catalog (the master terminal) are not ours to
       // manage.
       guard hierarchy.catalog.pane(paneID) != nil else { continue }
-      if surface.isDisplayed {
+      if sample.isDisplayed {
         lastDisplayedAt[paneID] = now
         continue
       }
@@ -1011,11 +1251,13 @@ final class TerminalEngine {
         quietFor: now.timeIntervalSince(viewportChangedAt[paneID] ?? .distantPast),
         foregroundJob: foregroundJobSnapshots[paneID],
         isRemote: remoteForegroundPanes[paneID] != nil,
-        isSurfaceReady: surface.state == .ready,
-        isVetoed: reclaimVeto(paneID)
+        isSurfaceReady: sample.isReady,
+        isVetoed: reclaimVeto(paneID),
+        selectedTabRecency: selectedTabRecency[paneID]
       )
-      if reclaimPolicy.shouldReclaim(candidate) {
+      if reclaimPolicy.shouldReclaim(candidate, ignoringThresholds: ignoringThresholds),
         reclaimSurface(for: paneID)
+      {
         reclaimed.append(paneID)
       }
     }
@@ -1286,4 +1528,29 @@ extension TerminalEvent {
       return true
     }
   }
+}
+
+/// Whether a catalog pane's terminal runs, and whether the app shows it.
+///
+/// A pane's shell lives in its zmx daemon; the libghostty surface only
+/// renders it. Surfaces are lazy and can be released, so the two lifetimes
+/// differ:
+/// - `attached`: the daemon runs and a surface renders it. Viewport and
+///   foreground-job polling and OSC parsing see the pane.
+/// - `detached`: the daemon runs, but no surface is bound. This is a pane
+///   restored at launch whose tab was not opened yet, or a pane whose
+///   surface the idle reclaim released. The shell or agent still runs, but
+///   the app observes nothing, so agent state for it is cached.
+/// - `stopped`: no daemon runs. The pane quit with a snapshot, or its
+///   daemon exited while detached. Attaching a surface starts a new shell.
+nonisolated enum PaneTerminalState: String, Equatable, Sendable {
+  case attached
+  case detached
+  case stopped
+
+  /// The pane's shell runs: terminal verbs can reach it, attaching a
+  /// surface first when it is detached.
+  var isLive: Bool { self != .stopped }
+
+  var isAttached: Bool { self == .attached }
 }

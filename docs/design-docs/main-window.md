@@ -11,7 +11,7 @@
 
 相邻子系统的权威文档：
 
-- 通知 / 未读上卷 / 状态栏铃铛：[notifications.md](notifications.md)。
+- 通知 / 未读上卷 / Unread 过滤：[notifications.md](notifications.md)。
 - Tag 模型 / 单窗口 / Tag 过滤：[project-tags.md](project-tags.md)。
 - 内置只读 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)。
 - Git Viewer（内置或外部客户端）：[editor-integration.md](editor-integration.md) 的「Git Viewer」一节。
@@ -36,7 +36,7 @@
 
 ### 快速分类过滤
 
-侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、Pin、PR。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Pin 复用 Worktree 的置顶状态，仅显示未归档的置顶行及其父项目；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。PR 数据刷新时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
+侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、PR、Unread。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及其父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
 
 ### Tag filter（已实现，当前隐藏）
 
@@ -125,7 +125,7 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
   - **已知偏差**：帧位置与原生最多差 1pt（原生浮点舍入细节）；窄条内标题偏移是经验拟合，薄窄条里可能差几 pt；新建 / 关闭 tab 以 Safari 实测为准（60fps 录屏逐帧量取）：新 tab 贴着自身终位的右端从 0 宽长出、标题从第一帧就在、居中于已露出部分，其余 tab 同步收窄；关闭的 tab 立即消失、其余 tab 展开补位；曲线是无回弹的临界阻尼 spring（response 0.15s，约 0.1s 到位）。选中态在动画中瞬时切换，不交叉淡入淡出。（AppKit `NSTabBar` 在中间插入时是从中心长出、约 0.5s，与 Safari 不同，以 Safari 为准。）
   - **有意偏离原生**（按产品要求）：选中 tab 标题不加粗（原生 semibold）；选中 tab hover 时胶囊略微加深（原生不变）。
   - **实现陷阱**：SwiftUI 会把新插入的视图直接放在终位布局，所以“从右端长出”用 insertion transition（胶囊裁切 + 内容平移）实现，不用布局宽度动画；未选中标题用不透明度把 `labelColor` 压到 `secondaryLabelColor`（两者 RGB 相同、仅 alpha 不同，像素一致），而不是切换 `foregroundStyle`，因为动画中改 style 会让文本在终位重建，标题会跳到 chip 前面；标题用 `.contentTransition(.identity)` 并裁在 chip 内，避免截断变化时交叉淡化留下省略号残影、以及变宽时溢出到邻居；新 tab 的选中态可能比 tab 本身早一两帧到达，行视图会先保持上一个选中。
-  - **终端挂载避开动画**：终端 surface 进入窗口会让合成停顿约 4 帧（主线程空闲，停在合成侧），恰好落在 tab 动画中就是卡顿。所以 UI 新建的 tab（+ 按钮、⌘T）在 `TabBarMetrics.firstPaneDelay`（160ms）后才打开首个 pane；关闭当前 tab 时，新选中 tab 的终端同样延后挂载（`TerminalMountDeferral`），期间终端区域留空。普通切换 tab 不延后。
+  - **终端挂载避开动画**：终端 surface 进入窗口会让合成停顿约 4 帧（主线程空闲，停在合成侧），恰好落在 tab 动画中就是卡顿。所以 UI 新建的 tab（+ 按钮、⌘T）在 `TabBarMetrics.firstPaneDelay`（160ms）后才打开首个 pane；关闭当前 tab 且 tab 栏仍显示时，新选中 tab 的终端同样延后挂载（`TerminalMountDeferral`），期间 pane 卡片照常绘制、只是不挂 surface（`defersTerminalSurfaces`），区域不会闪空。关闭后只剩一个 tab 时 tab 栏直接隐藏、无动画，立即挂载。普通切换 tab 不延后。
   - **新 tab 标题**：首个 pane 打开前标题取 worktree 目录名，shell 回报自己的标题后再替换（与 Terminal / Ghostty 行为一致）。
 
 - **不建并行 `TabBarState`。** tab 是 hierarchy-scoped（每 Worktree）。另起一个 `@Observable TabBarState` 容器意味着同一数据两个事实来源，并在 create/close/select 周围引入同步危险。既有模式（视图读 `HierarchyManager`、reducer 经 `HierarchyClient` 转发）已可扩展；在 `HierarchyClient` 上多挂几个闭包的边际成本，低于长期协调两个 store 的成本。
@@ -153,7 +153,7 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 ## References
 
 - Tag / 单窗口：[project-tags.md](project-tags.md)
-- 通知 / 上卷 / 状态栏铃铛：[notifications.md](notifications.md)
+- 通知 / 上卷 / Unread 过滤：[notifications.md](notifications.md)
 - 内置 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)
 - Git Viewer（外部 git 客户端）：[editor-integration.md](editor-integration.md)
 - 键盘快捷键统管：[keyboard-shortcuts.md](keyboard-shortcuts.md)
