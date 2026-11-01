@@ -41,6 +41,25 @@ private final class FakeZmxDaemon: @unchecked Sendable {
 
   var clientCount: Int { lock.withLock { clients.count } }
 
+  /// Queue as many frames as the socket takes without blocking, after
+  /// enlarging the send buffer. Returns how many frames went out whole.
+  func preload(_ frames: [ZmxFrame]) -> Int {
+    lock.withLock {
+      guard let fd = clients.first else { return 0 }
+      var size: Int32 = 4 * 1024 * 1024
+      _ = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
+      _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+      var sent = 0
+      for frame in frames {
+        let data = ZmxFraming.encode(frame)
+        let n = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+        guard n == data.count else { break }
+        sent += 1
+      }
+      return sent
+    }
+  }
+
   func broadcast(_ frame: ZmxFrame) {
     let data = ZmxFraming.encode(frame)
     lock.withLock {
@@ -206,6 +225,34 @@ struct ZmxPassiveWatcherTests {
     try await Task.sleep(for: .milliseconds(200))
 
     #expect(log.all.isEmpty)
+  }
+
+  /// One read callback handles a bounded batch, so a busy pane cannot hold
+  /// the shared queue (or a main-actor `stop()`) for its whole backlog.
+  @Test
+  func drainsALargeBacklogInBoundedBatches() async throws {
+    let daemon = FakeZmxDaemon()
+    defer { daemon.exit() }
+    let log = EventLog()
+    let queue = DispatchQueue(label: "test.watcher")
+    let watcher = ZmxPassiveWatcher(
+      socketPath: daemon.path, queue: queue, backoff: fastBackoff, readsPerEvent: 1
+    ) { log.append($0) }
+    watcher.start()
+    defer { watcher.stop() }
+    try await waitUntil { daemon.clientCount == 1 && watcher.isConnected }
+
+    // Each frame is larger than one 64 KiB read and ends with a title.
+    let padding = String(repeating: "x", count: 70 * 1024)
+    let frames = (0..<8).map { output(padding + "\u{1B}]0;t\($0)\u{07}") }
+    queue.suspend()
+    let sent = daemon.preload(frames)
+    queue.resume()
+    try #require(sent >= 2)
+    try await waitUntil { log.signals.count == sent }
+
+    #expect(log.signals == (0..<sent).map { .title("t\($0)") })
+    #expect(log.all.count >= 2)
   }
 
   /// Cost check: many watchers share one queue and need no thread each.

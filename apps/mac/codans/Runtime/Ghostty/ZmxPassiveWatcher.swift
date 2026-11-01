@@ -64,16 +64,19 @@ nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Send
   private var refusals = 0
   private var delay: TimeInterval
   private var readBuffer = [UInt8](repeating: 0, count: 64 * 1024)
+  private let readsPerEvent: Int
 
   init(
     socketPath: String,
     queue: DispatchQueue = ZmxPassiveWatcher.sharedQueue,
     backoff: Backoff = .default,
+    readsPerEvent: Int = 4,
     onEvent: @escaping @Sendable (Event) -> Void
   ) {
     self.socketPath = socketPath
     self.queue = queue
     self.backoff = backoff
+    self.readsPerEvent = max(1, readsPerEvent)
     self.onEvent = onEvent
     self.delay = backoff.initialDelay
   }
@@ -141,10 +144,17 @@ nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Send
     source.resume()
   }
 
+  /// Read at most `readsPerEvent` buffers, then return. The read source is
+  /// level-triggered, so data left in the socket fires the handler again
+  /// after the other work on the shared queue. A busy pane therefore cannot
+  /// starve the other watchers, and `stop()` (a `sync` from the main actor)
+  /// waits for at most one bounded batch.
   private func drain(fd: Int32) {
     var signals: [DetachedPaneSignal] = []
     defer { if !signals.isEmpty { onEvent(.signals(signals)) } }
-    while source != nil {
+    var reads = 0
+    while source != nil, reads < readsPerEvent {
+      reads += 1
       let n = readBuffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
       if n > 0 {
         pending.append(contentsOf: readBuffer[0..<n])
