@@ -40,7 +40,8 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 
 ## 已知取舍
 
-- 已回收期间，agent 若被定时任务唤醒，只有 hooks 能更新其状态；viewport 与 OSC 信号要等 pane 再次显示。
+- 已回收期间屏幕不被读取：viewport 推导的状态停在回收时（Agents View 标为 `source: cached`）。OSC 7501 / 9 / 标题由被动 zmx watcher 继续送达，daemon 退出时 agent 行随之删除，见 [active-agents-view.md](active-agents-view.md#未挂接-pane-的观测)。
+- 重新挂接时 watcher 先停、surface 再连上 daemon；这之间写出的 OSC 信号两边都收不到。agent 的下一份报告会纠正状态，见 [active-agents-view.md](active-agents-view.md#未挂接-pane-的观测)。
 - 已回收 pane 不计入 `runningPaneCount`（force-remove 确认文案中的进程数），会少算。
 - 发往已回收 pane 的排队命令要等 pane 再次显示后才发出，与「从未打开过的 pane」一致。
 - 阈值是常量，没有设置项。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。

@@ -1126,12 +1126,15 @@ final class AppState {
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
       settingsProvider: { settingsStore.settings },
-      daemonKiller: { paneID in
+      daemonKiller: { [weak terminalEngine] paneID in
         // Killing a pane's daemon is an out-of-band control `.kill`,
         // addressable by PaneID alone, so it works whether or not a surface
         // is live this session (the live byte stream runs through the
         // in-surface `zmx attach` client, not a held handle). The daemon
         // removes its own socket on shutdown, so no manual unlink is needed.
+        // A detached pane's watcher stops first: this kill is not a daemon
+        // that exited on its own.
+        terminalEngine?.stopWatchingDetachedPane(paneID)
         ZmxControlClient.kill(for: paneID)
       },
       runtimeProbe: { [weak terminalEngine] paneID in
@@ -2305,6 +2308,19 @@ final class AppState {
       }
     )
     self.agentBinder = binder
+    // Detached panes (`PaneTerminalState.detached`: restored and not opened
+    // yet, or reclaimed while idle) are observed by a passive zmx watcher,
+    // which keeps their program status current. When a detached pane's
+    // daemon exits, its agent row goes with it, so it never shows as
+    // sleeping. Without the session catalog this instance does not own
+    // the panes' daemons (second instance, no resume), so it watches none.
+    engine.onDetachedDaemonExited = { [weak binder] paneID in
+      binder?.unbind(paneID)
+    }
+    if self.sessionCoordinator != nil {
+      engine.watchDetachedPanes(
+        manager.catalog.visiblePaneIDs().filter { engine.terminalState(for: $0) == .detached })
+    }
     // Wire 3: keystroke fan-out. The detector continues to read
     // `snapshot()` per-event; the new `onActivity` callback fires on
     // every recorded keystroke so the registry can clear waiting-for-

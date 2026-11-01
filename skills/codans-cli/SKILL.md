@@ -467,11 +467,13 @@ default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
 agent without the state.
 
 A pane in a tab that is not open (restored from the last session, or idle
-long enough to have its terminal view released) still runs, but Codans
-does not watch it: its row has `isAttached: false` and shows `(sleeping)`,
-and its state is the last one seen. `pane send` / `capture` attach it
-first. A row with `isLive: false` shows `(not live)`: its shell no longer
-runs.
+long enough to have its terminal view released) still runs, but no terminal
+view renders it: its row has `isAttached: false` and shows `(sleeping)`.
+Codans still receives the program status such an agent reports (`source:
+programStatus`); a state derived from the screen is the last one seen
+(`source: cached`). If its shell exits while sleeping, the row goes away
+within about two seconds. `pane send` / `capture` attach it first. A row
+with `isLive: false` shows `(not live)`: its shell no longer runs.
 
 Profiles are the launch presets from Settings > Agents (agent, model, effort,
 execution mode, placement, extra args, env). Launching one opens a fresh tab

@@ -1879,7 +1879,8 @@
         "source": {
           "enum": [
             "programStatus",
-            "screen"
+            "screen",
+            "cached"
           ]
         },
         "blockedKind": {

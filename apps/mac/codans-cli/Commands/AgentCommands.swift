@@ -42,9 +42,11 @@ struct AgentStatus: AsyncParsableCommand {
       `agent wait` blocks on it.
 
       A sleeping pane (restored and not opened yet, or idle long enough to
-      have its terminal view released) still runs, but Codans does not watch
-      it, so its state is the last known one: isAttached: false (text:
-      "(sleeping)"). Terminal commands attach it first. A pane whose
+      have its terminal view released) still runs, but no terminal view
+      renders it: isAttached: false (text: "(sleeping)"). Its program status
+      still arrives (source: programStatus); a screen-derived state is the
+      last one seen (source: cached). If its terminal exits while sleeping,
+      the row goes away. Terminal commands attach it first. A pane whose
       terminal no longer runs has isLive: false (text: "(not live)"), and
       terminal commands on it fail with PANE_NOT_LIVE.
       """
