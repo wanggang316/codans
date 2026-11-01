@@ -140,6 +140,10 @@ final class TerminalEngine {
   /// detached; the re-attach starts at it.
   private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
+  private var memoryPressureMonitor: MemoryPressureMonitor?
+  /// Where the sweep finds and detaches live surfaces: the Ghostty runtime,
+  /// or a fake in headless tests.
+  var reclaimHost: (any ReclaimableSurfaceHost)?
 
   // MARK: Detached-pane watchers
 
@@ -176,6 +180,7 @@ final class TerminalEngine {
     self.ghosttyRuntime = ghosttyRuntime
     self.foregroundJobReader = foregroundJobReader
     self.clock = clock
+    self.reclaimHost = ghosttyRuntime
     // Back-pointer so the libghostty action decoder can emit events
     // (paneInfoChanged, paneActionRequested, etc.) onto this engine's
     // stream. Weak on the runtime side; no cycle.
@@ -698,6 +703,8 @@ final class TerminalEngine {
     foregroundJobPollTask = nil
     reclaimSweepTask?.cancel()
     reclaimSweepTask = nil
+    memoryPressureMonitor?.cancel()
+    memoryPressureMonitor = nil
     for paneID in Array(detachedWatchers.keys) {
       stopWatchingDetachedPane(paneID)
     }
@@ -921,7 +928,7 @@ final class TerminalEngine {
   /// Shared per-pane tail of both foreground samplers (local poll loop and
   /// remote host probe): empty-sample hysteresis, change detection, binder
   /// delivery, and the viewport nudge.
-  private func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
+  func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
     if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
       hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
       return
@@ -1025,15 +1032,13 @@ final class TerminalEngine {
   /// no lifecycle event is emitted and the sampling state (foreground
   /// snapshot, process row) is kept, so the pane still looks alive to its
   /// observers; only the live poll stops until `ensureSurface` re-attaches.
-  func reclaimSurface(for paneID: PaneID) {
-    guard let surface = ghosttyRuntime?.surface(for: paneID) else { return }
-    // Detaching ends the `zmx attach` child; make sure that cannot surface
-    // as a pane exit.
-    surface.onClose = nil
-    reclaimedSurfaceSizes[paneID] = surface.view.bounds.size
+  /// Returns whether a surface was detached.
+  @discardableResult
+  func reclaimSurface(for paneID: PaneID) -> Bool {
+    guard let host = reclaimHost else { return false }
     disposeOutputBuffer(for: paneID)
-    surface.close()
-    ghosttyRuntime?.unregister(paneID: paneID)
+    guard let size = host.detachSurface(for: paneID) else { return false }
+    reclaimedSurfaceSizes[paneID] = size
     foregroundJobPaneIDs.remove(paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
     reclaimedPanes.insert(paneID)
@@ -1043,6 +1048,7 @@ final class TerminalEngine {
     Self.logger.info(
       "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
     )
+    return true
   }
 
   // MARK: - Detached-pane watchers
@@ -1145,15 +1151,41 @@ final class TerminalEngine {
   /// policy accepts. Returns the reclaimed panes.
   @discardableResult
   func reclaimIdleSurfaces() -> [PaneID] {
-    guard let runtime = ghosttyRuntime else { return [] }
+    sweepReclaimableSurfaces(ignoringThresholds: false)
+  }
+
+  /// Memory-pressure sweep: reclaim every hidden, eligible surface now,
+  /// without waiting for the hidden and quiet thresholds. Returns the
+  /// reclaimed panes.
+  @discardableResult
+  func handleMemoryPressure(_ level: MemoryPressureLevel) -> [PaneID] {
+    guard !finished else { return [] }
+    let reclaimed = sweepReclaimableSurfaces(ignoringThresholds: true)
+    Self.logger.info(
+      "surface.reclaim.pressure level=\(level.rawValue, privacy: .public) reclaimed=\(reclaimed.count, privacy: .public)"
+    )
+    return reclaimed
+  }
+
+  /// Start reclaiming on system memory-pressure events. Idempotent.
+  func startMemoryPressureMonitoring() {
+    guard memoryPressureMonitor == nil, !finished else { return }
+    let monitor = MemoryPressureMonitor { [weak self] level in
+      self?.handleMemoryPressure(level)
+    }
+    monitor.start()
+    memoryPressureMonitor = monitor
+  }
+
+  private func sweepReclaimableSurfaces(ignoringThresholds: Bool) -> [PaneID] {
     let now = clock()
     var reclaimed: [PaneID] = []
-    for surface in runtime.allLiveSurfaces() {
-      let paneID = surface.paneID
+    for sample in reclaimHost?.reclaimableSurfaces() ?? [] {
+      let paneID = sample.paneID
       // Surfaces outside the catalog (the master terminal) are not ours to
       // manage.
       guard hierarchy.catalog.pane(paneID) != nil else { continue }
-      if surface.isDisplayed {
+      if sample.isDisplayed {
         lastDisplayedAt[paneID] = now
         continue
       }
@@ -1164,11 +1196,12 @@ final class TerminalEngine {
         quietFor: now.timeIntervalSince(viewportChangedAt[paneID] ?? .distantPast),
         foregroundJob: foregroundJobSnapshots[paneID],
         isRemote: remoteForegroundPanes[paneID] != nil,
-        isSurfaceReady: surface.state == .ready,
+        isSurfaceReady: sample.isReady,
         isVetoed: reclaimVeto(paneID)
       )
-      if reclaimPolicy.shouldReclaim(candidate) {
+      if reclaimPolicy.shouldReclaim(candidate, ignoringThresholds: ignoringThresholds),
         reclaimSurface(for: paneID)
+      {
         reclaimed.append(paneID)
       }
     }

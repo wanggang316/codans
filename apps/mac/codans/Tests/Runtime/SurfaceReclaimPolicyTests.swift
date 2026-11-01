@@ -94,4 +94,21 @@ struct SurfaceReclaimPolicyTests {
     #expect(!policy.shouldReclaim(candidate(isReady: false)))
     #expect(!policy.shouldReclaim(candidate(isVetoed: true)))
   }
+
+  @Test
+  func memoryPressureIgnoresHiddenAndQuietThresholds() {
+    let fresh = candidate(hiddenFor: 0, quietFor: 0)
+    #expect(!policy.shouldReclaim(fresh))
+    #expect(policy.shouldReclaim(fresh, ignoringThresholds: true))
+  }
+
+  @Test
+  func memoryPressureKeepsEveryOtherRule() {
+    let make = Self.job("make", "make test")
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, job: make), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, job: nil), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, isRemote: true), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, isReady: false), ignoringThresholds: true))
+    #expect(!policy.shouldReclaim(candidate(hiddenFor: 0, isVetoed: true), ignoringThresholds: true))
+  }
 }
