@@ -692,6 +692,8 @@ codans pane capture @worker --wait-stable --lines 40
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
 | `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |
 | `pane p7 did not reach idle within 60s`             | `agent wait` hit its deadline (exit 11, `WAIT_TIMEOUT`). Raise `--wait-timeout`, or check `codans agent status` for what the agent is doing. |
+| `pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry` | `--capture` attached a pane that had no terminal view, and its daemon did not answer. Nothing was typed; retry. |
+| `pane.send --capture: the text was sent, but the pane daemon's screen could not be read …` | The command was sent and ran, but its output could not be captured. Do not resend; read the pane with `codans pane read` or `codans pane capture`. |
 | `command in pane … still running after 30s`        | `pane send --wait` hit its deadline. Raise `--wait-timeout`, or read the pane later with `codans pane capture`. |
 | Help shows fewer commands than expected             | Trust `codans --help` over external docs; `codans help-json` prints the whole tree. |
 

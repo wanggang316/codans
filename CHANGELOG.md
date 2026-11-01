@@ -25,6 +25,8 @@ and the project does not yet follow semantic versioning — every release until
   `NOT_FOUND`, and `pane read` / `pane info` answer for it too.
   `pane send --capture` on such a pane compares the pane's own screen
   before and after, so the old screen never shows up as output.
+  If that screen cannot be read, nothing is sent; if it cannot be read
+  after the command ran, the error says the text was sent.
 - **Agents View shows sleeping agents.** An agent whose pane has no
   terminal view (restored and not opened yet, or idle long enough to have
   its view released) still runs, but Codans does not watch it. Its row now
