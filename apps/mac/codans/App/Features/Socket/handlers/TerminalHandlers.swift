@@ -120,8 +120,10 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
-    _ = await reattachReclaimed(req.paneID)
-    let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
+    // The capture baseline must be the replayed screen, not the blank one a
+    // fresh re-attach shows, or old rows would read as the command's output.
+    let settled = await reattachAndSettle(req.paneID, sink: sink)
+    let before = req.capture == true ? settled ?? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -234,7 +236,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
     }
-    _ = await reattachReclaimed(req.paneID)
+    _ = await reattachAndSettle(req.paneID, sink: sink)
     let ok = sink.sendKey(paneID: req.paneID, key: req.key)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -263,7 +265,7 @@ public final class TerminalHandlers {
     guard let bytes = Self.decodeHex(req.hex) else {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
-    _ = await reattachReclaimed(req.paneID)
+    _ = await reattachAndSettle(req.paneID, sink: sink)
     let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -358,19 +360,9 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
     }
     let extent = req.extent ?? .viewport
-    // A re-attached surface fills in as the daemon replays its screen, so a
-    // plain read right after it waits for that replay to settle.
-    let reattached = await reattachReclaimed(req.paneID)
+    _ = await reattachAndSettle(req.paneID, sink: sink)
     let result: ReadTextResult
-    if reattached, req.waitStable == nil {
-      let waiter = TerminalStabilityWaiter(
-        clock: clock, stableMillis: 150, intervalMillis: 25, timeoutMillis: 1500,
-        read: { [sink] in sink.readText(paneID: req.paneID, extent: extent) })
-      guard let outcome = await waiter.run() else {
-        return .failed(unreachable(req.paneID))
-      }
-      result = ReadTextResult(text: outcome.text)
-    } else if let ws = req.waitStable {
+    if let ws = req.waitStable {
       let waiter = TerminalStabilityWaiter(
         clock: clock,
         stableMillis: ws.stableMillis,
@@ -400,6 +392,28 @@ public final class TerminalHandlers {
     }
   }
 
+  /// Re-attaches a reclaimed pane, then waits for the daemon's screen replay
+  /// to land: first until the screen shows anything, then until it holds
+  /// still, within `reattachSettleMillis` in total. A fresh surface starts
+  /// blank, so without this a read, or a `capture` baseline, sees nothing.
+  /// Returns the settled screen text, or nil when nothing was re-attached.
+  private func reattachAndSettle(_ paneID: PaneID, sink: InputSink) async -> String? {
+    guard await reattachReclaimed(paneID) else { return nil }
+    let read: @MainActor () -> String? = { [sink] in sink.readText(paneID: paneID, extent: .screen) }
+    let start = clock.nowMillis()
+    while read()?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true,
+      clock.nowMillis() - start < Self.reattachSettleMillis
+    {
+      do { try await clock.sleep(millis: 25) } catch { break }
+    }
+    let waiter = TerminalStabilityWaiter(
+      clock: clock, stableMillis: 150, intervalMillis: 25,
+      timeoutMillis: max(0, Self.reattachSettleMillis - (clock.nowMillis() - start)), read: read)
+    return await waiter.run()?.text
+  }
+
+  static let reattachSettleMillis = 1500
+
   /// Why a terminal verb could not reach a pane: an id outside the catalog
   /// is `notFound`; a catalog pane with no attached terminal (restored, tab
   /// never opened) is `PANE_NOT_LIVE`, so a script knows to open it first.
@@ -422,7 +436,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "resetPane requires {paneID}", path: nil))
     }
-    _ = await reattachReclaimed(req.paneID)
+    _ = await reattachAndSettle(req.paneID, sink: sink)
     let ok = sink.resetPane(paneID: req.paneID)
     if !ok {
       return .failed(unreachable(req.paneID))

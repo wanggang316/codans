@@ -365,6 +365,37 @@ struct TerminalHandlersTests {
     #expect(try response.result?.decoded(as: TerminalHandlers.ReadTextResult.self).text == "claude> ready")
   }
 
+  /// `pane send --capture` on a reclaimed pane: the daemon replays the old
+  /// screen only after the re-attach. The capture baseline must be that
+  /// replayed screen, or its rows come back as the command's output.
+  @Test
+  func sendWithCaptureAfterAReattachBaselinesOnTheReplayedScreen() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.textScript[pane.raw] = ["", "", "", "old row one\nold row two\n$ "]
+    let server = Self.makeHarness(
+      sink: sink,
+      reattachReclaimed: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    let params = try JSONValue.encoded(
+      TerminalHandlers.SendInputParams(
+        paneID: pane, text: "true\n",
+        wait: TerminalHandlers.SendWaitParams(timeoutMillis: 2000, stableMillis: 50, graceMillis: 50),
+        capture: true))
+    try server.send(IPC.Request(id: "rc", method: .terminalSendInput, params: params))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == nil)
+    let result = try #require(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self))
+    #expect(result.output == "")
+  }
+
   @Test(arguments: [IPC.Method.terminalReadText, .paneRead])
   func verbsOnAnUnknownPaneStillReturnNotFound(method: IPC.Method) async throws {
     let server = Self.makeHarness(sink: FakeSink())
