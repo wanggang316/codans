@@ -1,0 +1,15 @@
+# Debug app, stand-in agent (/tmp/codans287-fake/claude, a compiled sleep) in a hidden tab after idle reclaim
+$ codans agent status
+  p2  claude-code  idle (sleeping)  1m39s  task-dispatch/main  "codans287-probe"
+
+# Agents View row, read from the accessibility tree (axlist.swift)
+    AXButton id= label=Claude Code, main, task-dispatch, idle, sleeping help=
+
+# kill the pane's zmx daemon while no surface watches it
+36159
+kill 36159; at 19:39:28
+row changed after ~8s (sweep interval 10 s)
+    AXButton id= label=Claude Code, main, task-dispatch, idle, not running help=
+
+$ codans agent status
+  p2  claude-code  idle (not live)  1m47s  task-dispatch/main  "codans287-probe"
