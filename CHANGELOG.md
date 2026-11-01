@@ -24,7 +24,8 @@ and the project does not yet follow semantic versioning — every release until
   on it fail with `PANE_NOT_LIVE` (exit 3) instead of `NOT_FOUND`.
 - **`pane send` / `pane capture` reach idle background panes.** A pane hidden
   long enough to have its terminal released is attached again before the
-  command runs, instead of failing.
+  command runs, instead of failing. If its screen has not finished loading,
+  `pane send --capture` returns `PANE_NOT_READY` (exit 3) without sending.
 
 ### Security
 

@@ -157,4 +157,14 @@ extension IPCError {
       message: "pane has no attached terminal: \(id)",
       hint: "run `codans pane focus \(id)` or open its tab in Codans, then retry")
   }
+
+  /// The pane's terminal was just re-attached and has not finished
+  /// replaying its screen, so a `capture` baseline would be incomplete. The
+  /// verb did nothing; a retry is safe.
+  public static func paneNotReady(_ id: String) -> IPCError {
+    .domain(
+      code: "PANE_NOT_READY",
+      message: "pane terminal is still loading its screen: \(id)",
+      hint: "nothing was sent; retry the command")
+  }
 }

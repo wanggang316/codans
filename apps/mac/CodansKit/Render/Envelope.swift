@@ -33,6 +33,9 @@ public enum CLIErrorCode: String, Codable, Sendable, CaseIterable {
   /// from the quit snapshot, tab never opened), so a terminal verb cannot
   /// reach it. The server raises it as `IPCError.domain` (exit 3).
   case paneNotLive = "PANE_NOT_LIVE"
+  /// The pane's terminal was just re-attached and is still replaying its
+  /// screen, so `pane send --capture` refused before sending (exit 3).
+  case paneNotReady = "PANE_NOT_READY"
 
   // Workflow codes. The server raises them as `IPCError.domain` and the CLI
   // passes them through unchanged; each names a situation a script can
@@ -70,7 +73,7 @@ public enum CLIErrorCode: String, Codable, Sendable, CaseIterable {
     switch self {
     case .workflowNotFound, .runNotFound:
       return .notFound
-    case .paneBusy, .paneNotLive, .stepNotExpecting, .roleMismatch, .tokenRequired, .tokenInvalid,
+    case .paneBusy, .paneNotLive, .paneNotReady, .stepNotExpecting, .roleMismatch, .tokenRequired, .tokenInvalid,
       .workflowDisabled, .workflowTrustRequired:
       return .conflict
     case .inputRequired, .profileRequired, .sourceRequired, .outputInvalid, .verdictRequired,

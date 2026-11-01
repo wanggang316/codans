@@ -681,6 +681,7 @@ codans pane capture @worker --wait-stable --lines 40
 | `no current pane: this shell is not inside a Codans pane` (or project/worktree/tab) | You used `current` / `.` outside a codans Pane. Pass an explicit ID or name. |
 | `pane <uuid> not found`                             | The pane was closed, or the UUID came from a different app instance.     |
 | `pane has no attached terminal: <uuid>` (`PANE_NOT_LIVE`, exit 3) | The pane was restored from the last session and its tab was never opened; `agent status` shows it `(not live)`. Run `codans pane focus <pane>`, then retry. |
+| `pane terminal is still loading its screen` (`PANE_NOT_READY`, exit 3) | `pane send --capture` hit a pane whose terminal was just re-attached and is still replaying its screen. Nothing was sent; retry. |
 | `unknown key "..."`                                 | `codans pane send-key` only knows the keys listed above. Use `--raw` for the rest. |
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
 | `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |

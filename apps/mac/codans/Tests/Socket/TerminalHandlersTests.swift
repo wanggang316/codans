@@ -327,7 +327,8 @@ struct TerminalHandlersTests {
       reattachReclaimed: { paneID in
         sink.registered.insert(paneID.raw)
         return true
-      })
+      },
+      daemonScreen: { _ in "" })
     defer { server.stop() }
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
@@ -352,7 +353,8 @@ struct TerminalHandlersTests {
       reattachReclaimed: { paneID in
         sink.registered.insert(paneID.raw)
         return true
-      })
+      },
+      daemonScreen: { _ in "claude> ready" })
     defer { server.stop() }
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
@@ -378,7 +380,8 @@ struct TerminalHandlersTests {
       reattachReclaimed: { paneID in
         sink.registered.insert(paneID.raw)
         return true
-      })
+      },
+      daemonScreen: { _ in "old row one\nold row two\n$" })
     defer { server.stop() }
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
@@ -394,6 +397,60 @@ struct TerminalHandlersTests {
     #expect(response.error == nil)
     let result = try #require(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self))
     #expect(result.output == "")
+  }
+
+  /// A replay that pauses after a partial screen, or never finishes, must
+  /// not become a capture baseline: the send is refused with
+  /// `PANE_NOT_READY` and nothing is typed. A retry checks again (the pane
+  /// is attached by then, so it is not re-attached) and succeeds once the
+  /// replay has landed.
+  @Test
+  func sendWithCaptureBeforeTheReplayLandsIsRefusedAndARetryChecksAgain() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    let fullScreen = "old row one\nold row two\n$ "
+    sink.textScript[pane.raw] = ["", "old row one"]  // pauses after a partial screen
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let server = Self.makeHarness(
+      sink: sink, clock: clock,
+      reattachReclaimed: { paneID in
+        guard !sink.registered.contains(paneID.raw) else { return false }
+        sink.registered.insert(paneID.raw)
+        return true
+      },
+      daemonScreen: { _ in fullScreen })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+    let params = try JSONValue.encoded(
+      TerminalHandlers.SendInputParams(
+        paneID: pane, text: "true\n",
+        wait: TerminalHandlers.SendWaitParams(timeoutMillis: 2000, stableMillis: 50, graceMillis: 50),
+        capture: true))
+
+    try server.send(IPC.Request(id: "p1", method: .terminalSendInput, params: params))
+    let refused = try await server.awaitResponse()
+    #expect(refused.error == .paneNotReady(pane.description))
+    #expect(sink.delivered.isEmpty)
+    #expect(clock.current >= TerminalHandlers.replayConfirmMillis)
+
+    sink.textScript[pane.raw] = [fullScreen]  // the replay lands
+    try server.send(IPC.Request(id: "p2", method: .terminalSendInput, params: params))
+    let retried = try await server.awaitResponse()
+    #expect(retried.error == nil)
+    #expect(sink.delivered.count == 1)
+    #expect(try retried.result?.decoded(as: TerminalHandlers.SendInputResult.self).output == "")
+  }
+
+  @Test
+  func replayCaughtUpComparesTheBottomRowsWithoutTrailingWhitespace() {
+    let daemon = "row 1\nrow 2\n$ \n\n"
+    #expect(TerminalHandlers.replayCaughtUp(surface: "row 1   \nrow 2\n$\n", daemon: daemon))
+    // More scrollback above on the surface is fine; the bottom rows decide.
+    #expect(TerminalHandlers.replayCaughtUp(surface: "older\nrow 1\nrow 2\n$ ", daemon: daemon))
+    #expect(!TerminalHandlers.replayCaughtUp(surface: "row 1", daemon: daemon))
+    #expect(!TerminalHandlers.replayCaughtUp(surface: "", daemon: daemon))
+    #expect(TerminalHandlers.replayCaughtUp(surface: "", daemon: "\n  \n"))
   }
 
   @Test(arguments: [IPC.Method.terminalReadText, .paneRead])
@@ -438,7 +495,8 @@ struct TerminalHandlersTests {
     sink: TerminalHandlers.InputSink?,
     clock: StabilityClock = SystemStabilityClock(),
     catalog seed: Catalog? = nil,
-    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false }
+    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
+    daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil }
   ) -> InMemoryIPCServer {
     let systemHandlers = SystemHandlers(
       versions: .init(server: "0.4.0", appBundle: "0.4.0+test")
@@ -452,7 +510,8 @@ struct TerminalHandlersTests {
     )
     let hierarchyHandlers = HierarchyHandlers(manager: hierarchy)
     let terminalHandlers = TerminalHandlers(
-      sink: sink, catalog: { hierarchy.catalog }, clock: clock, reattachReclaimed: reattachReclaimed)
+      sink: sink, catalog: { hierarchy.catalog }, clock: clock, reattachReclaimed: reattachReclaimed,
+      daemonScreen: daemonScreen)
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,

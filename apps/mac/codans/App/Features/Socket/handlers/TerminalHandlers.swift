@@ -43,6 +43,14 @@ public final class TerminalHandlers {
   /// first, so a pane that `pane.describe` / `agent.listStates` report live
   /// is one they can reach.
   private let reattachReclaimed: @MainActor (PaneID) async -> Bool
+  /// The pane daemon's own screen as plain text (`pane.read`'s source),
+  /// or nil when it cannot be read. A re-attached surface has caught up
+  /// with its replay once its bottom rows match this.
+  private let daemonScreen: @MainActor (PaneID) async -> String?
+  /// Re-attached panes whose replay is not yet confirmed. Kept across calls
+  /// so a retry after `PANE_NOT_READY` checks again instead of trusting a
+  /// surface that is still filling in.
+  private var unconfirmedReplays: Set<PaneID> = []
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
@@ -50,13 +58,15 @@ public final class TerminalHandlers {
     catalog: @escaping @MainActor () -> Catalog,
     clock: StabilityClock = SystemStabilityClock(),
     paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false },
-    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false }
+    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
+    daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil }
   ) {
     self.sink = sink
     self.catalog = catalog
     self.clock = clock
     self.paneIsBusy = paneIsBusy
     self.reattachReclaimed = reattachReclaimed
+    self.daemonScreen = daemonScreen
   }
 
   /// Optional completion wait on `sendInput`: poll until the pane is not
@@ -120,10 +130,15 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
-    // The capture baseline must be the replayed screen, not the blank one a
-    // fresh re-attach shows, or old rows would read as the command's output.
-    let settled = await reattachAndSettle(req.paneID, sink: sink)
-    let before = req.capture == true ? settled ?? sink.readText(paneID: req.paneID, extent: .screen) : nil
+    // The capture baseline must be the fully replayed screen, or old rows
+    // that land after it would read as the command's output. Refuse before
+    // sending when the replay cannot be confirmed: nothing happened, so a
+    // retry is safe.
+    let replay = await reattachAndConfirmReplay(req.paneID, sink: sink)
+    if req.capture == true, replay == .unconfirmed {
+      return .failed(.paneNotReady(req.paneID.description))
+    }
+    let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -236,7 +251,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
     }
-    _ = await reattachAndSettle(req.paneID, sink: sink)
+    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
     let ok = sink.sendKey(paneID: req.paneID, key: req.key)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -265,7 +280,7 @@ public final class TerminalHandlers {
     guard let bytes = Self.decodeHex(req.hex) else {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
-    _ = await reattachAndSettle(req.paneID, sink: sink)
+    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
     let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -360,7 +375,7 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
     }
     let extent = req.extent ?? .viewport
-    _ = await reattachAndSettle(req.paneID, sink: sink)
+    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
     let result: ReadTextResult
     if let ws = req.waitStable {
       let waiter = TerminalStabilityWaiter(
@@ -392,27 +407,63 @@ public final class TerminalHandlers {
     }
   }
 
-  /// Re-attaches a reclaimed pane, then waits for the daemon's screen replay
-  /// to land: first until the screen shows anything, then until it holds
-  /// still, within `reattachSettleMillis` in total. A fresh surface starts
-  /// blank, so without this a read, or a `capture` baseline, sees nothing.
-  /// Returns the settled screen text, or nil when nothing was re-attached.
-  private func reattachAndSettle(_ paneID: PaneID, sink: InputSink) async -> String? {
-    guard await reattachReclaimed(paneID) else { return nil }
-    let read: @MainActor () -> String? = { [sink] in sink.readText(paneID: paneID, extent: .screen) }
-    let start = clock.nowMillis()
-    while read()?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true,
-      clock.nowMillis() - start < Self.reattachSettleMillis
-    {
-      do { try await clock.sleep(millis: 25) } catch { break }
-    }
-    let waiter = TerminalStabilityWaiter(
-      clock: clock, stableMillis: 150, intervalMillis: 25,
-      timeoutMillis: max(0, Self.reattachSettleMillis - (clock.nowMillis() - start)), read: read)
-    return await waiter.run()?.text
+  enum ReplayState: Equatable {
+    /// No re-attach is pending: the surface is current.
+    case current
+    /// The re-attached surface caught up with the daemon's screen.
+    case confirmed
+    /// The replay did not catch up within `replayConfirmMillis`.
+    case unconfirmed
   }
 
-  static let reattachSettleMillis = 1500
+  /// Re-attaches a reclaimed pane, then confirms its replay: a fresh surface
+  /// starts blank and fills in as the daemon replays its screen, so it is
+  /// current only once its bottom rows match the daemon's own screen.
+  /// Polls up to `replayConfirmMillis`. A pane with no pending re-attach
+  /// returns `.current` at once.
+  func reattachAndConfirmReplay(_ paneID: PaneID, sink: InputSink) async -> ReplayState {
+    if await reattachReclaimed(paneID) {
+      unconfirmedReplays.insert(paneID)
+    }
+    guard unconfirmedReplays.contains(paneID) else { return .current }
+    let start = clock.nowMillis()
+    while true {
+      guard let surface = sink.readText(paneID: paneID, extent: .screen) else {
+        // The surface is gone again; the verb reports it.
+        unconfirmedReplays.remove(paneID)
+        return .current
+      }
+      if let daemon = await daemonScreen(paneID), Self.replayCaughtUp(surface: surface, daemon: daemon) {
+        unconfirmedReplays.remove(paneID)
+        return .confirmed
+      }
+      if clock.nowMillis() - start >= Self.replayConfirmMillis { return .unconfirmed }
+      do { try await clock.sleep(millis: 50) } catch { return .unconfirmed }
+    }
+  }
+
+  static let replayConfirmMillis = 3000
+
+  /// Whether the surface shows the daemon's screen: the daemon's last
+  /// non-blank rows (up to `replayCompareRows`) end the surface text too.
+  /// Rows compare without trailing whitespace, the one difference between
+  /// the daemon's plain dump and libghostty's rendered text.
+  static func replayCaughtUp(surface: String, daemon: String) -> Bool {
+    let expected = normalizedRows(daemon).suffix(replayCompareRows)
+    let shown = normalizedRows(surface)
+    return shown.count >= expected.count && shown.suffix(expected.count).elementsEqual(expected)
+  }
+
+  static let replayCompareRows = 20
+
+  private static func normalizedRows(_ text: String) -> [Substring] {
+    var rows = text.split(separator: "\n", omittingEmptySubsequences: false).map { row -> Substring in
+      guard let last = row.lastIndex(where: { !$0.isWhitespace }) else { return row[row.startIndex..<row.startIndex] }
+      return row[...last]
+    }
+    while rows.last?.isEmpty == true { rows.removeLast() }
+    return rows
+  }
 
   /// Why a terminal verb could not reach a pane: an id outside the catalog
   /// is `notFound`; a catalog pane with no attached terminal (restored, tab
@@ -436,7 +487,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "resetPane requires {paneID}", path: nil))
     }
-    _ = await reattachAndSettle(req.paneID, sink: sink)
+    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
     let ok = sink.resetPane(paneID: req.paneID)
     if !ok {
       return .failed(unreachable(req.paneID))

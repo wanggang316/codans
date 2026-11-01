@@ -1195,6 +1195,50 @@ final class AppState {
   /// Skipped under XCTest — tests build their own in-memory harnesses and
   /// binding a shared Unix socket racing parallel runs makes the runner
   /// hang.
+  /// The `terminal.*` handler: input delivery through the engine's
+  /// surfaces, plus the re-attach and replay check for reclaimed panes.
+  private func makeTerminalHandlers(
+    hierarchy: HierarchyManager,
+    terminalEngine: TerminalEngine,
+    settingsStore: SettingsStore
+  ) -> TerminalHandlers {
+    let inputSink: TerminalInputSink? =
+      terminalEngine.ghosttyRuntime == nil
+      ? nil
+      : TerminalInputSink(
+        engine: terminalEngine,
+        onPaneInput: { [weak hierarchy] paneID in
+          guard let manager = hierarchy,
+            let projectID = manager.catalog.projectID(forPane: paneID)
+          else { return }
+          manager.bumpProjectActivity(projectID)
+        }
+      )
+    return TerminalHandlers(
+      sink: inputSink,
+      catalog: { hierarchy.catalog },
+      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false },
+      reattachReclaimed: { [weak hierarchy, weak terminalEngine] paneID in
+        // Same re-attach the UI does when the tab is shown again: the daemon
+        // still runs, so this starts no new process and does not focus.
+        guard let hierarchy, terminalEngine?.isReclaimed(paneID) == true,
+          let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: paneID)
+        else { return false }
+        try? await hierarchy.ensurePaneSurface(
+          paneID, in: tabID, in: worktreeID, in: projectID,
+          env: HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings))
+        return terminalEngine?.isReclaimed(paneID) == false
+      },
+      daemonScreen: { paneID in
+        // The same plain dump `pane.read` returns; short timeout because
+        // the caller polls it.
+        guard let data = try? await ZmxControlClient.history(for: paneID, format: .plain, timeout: .seconds(1))
+        else { return nil }
+        return String(bytes: data, encoding: .utf8)
+      }
+    )
+  }
+
   private func startIPC(
     hierarchy: HierarchyManager,
     editor: EditorClient,
@@ -1234,34 +1278,8 @@ final class AppState {
       sessionCoordinator: sessionCoordinator,
       gitWorktreeClient: gitWorktreeClient
     )
-    let inputSink: TerminalInputSink? =
-      terminalEngine.ghosttyRuntime == nil
-      ? nil
-      : TerminalInputSink(
-        engine: terminalEngine,
-        onPaneInput: { [weak hierarchy] paneID in
-          guard let manager = hierarchy,
-            let projectID = manager.catalog.projectID(forPane: paneID)
-          else { return }
-          manager.bumpProjectActivity(projectID)
-        }
-      )
-    let terminalHandlers = TerminalHandlers(
-      sink: inputSink,
-      catalog: { hierarchy.catalog },
-      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false },
-      reattachReclaimed: { [weak hierarchy, weak terminalEngine] paneID in
-        // Same re-attach the UI does when the tab is shown again: the daemon
-        // still runs, so this starts no new process and does not focus.
-        guard let hierarchy, terminalEngine?.isReclaimed(paneID) == true,
-          let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: paneID)
-        else { return false }
-        try? await hierarchy.ensurePaneSurface(
-          paneID, in: tabID, in: worktreeID, in: projectID,
-          env: HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings))
-        return terminalEngine?.isReclaimed(paneID) == false
-      }
-    )
+    let terminalHandlers = makeTerminalHandlers(
+      hierarchy: hierarchy, terminalEngine: terminalEngine, settingsStore: settingsStore)
     let editorHandlers = EditorHandlers(
       editor: editor,
       hierarchy: hierarchyClient,

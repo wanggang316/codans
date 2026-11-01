@@ -312,7 +312,7 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 ```
 
 - `schemaVersion` = `codans.cli.<命令路径>.v1`，命令路径由 `CommandPaths` 从根 `CommandConfiguration` 树推出（不含可执行名，`codans` / `codans-dev` 相同），经 task-local `Renderer.context` 传给每次渲染；`CommandRunner.run(self, globals:)` 负责设置它并把失败也渲染成信封（JSON 模式下错误走 stdout，文本模式仍是 stderr 的 `error:` / `hint:` 行）。
-- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED`、`PANE_NOT_LIVE` 这类退出码分不清的情形（`PANE_NOT_LIVE`，exit 3：pane 在 catalog 中但本会话没有挂载终端，`pane send` / `send-key` / `capture` / `read` 等终端动词无法到达；未知 id 仍是 `NOT_FOUND`。`pane focus` 会挂载终端。闲置回收（idle reclaim）摘掉 surface、daemon 仍在的 pane 算 live：这些动词先重新挂载它的 surface（不新开进程、不抢焦点）再执行）；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
+- `error.code` 是 `CLIErrorCode` 的稳定字符串：每个退出码有默认码（`CLIErrorCode.default(for:)`），另有 `NO_CURRENT_CONTEXT`、`EMPTY_INPUT`、`WAIT_TIMEOUT`、`CAPTURE_UNSUPPORTED`、`PANE_NOT_LIVE` 这类退出码分不清的情形（`PANE_NOT_LIVE`，exit 3：pane 在 catalog 中但本会话没有挂载终端，`pane send` / `send-key` / `capture` / `read` 等终端动词无法到达；未知 id 仍是 `NOT_FOUND`。`pane focus` 会挂载终端。闲置回收（idle reclaim）摘掉 surface、daemon 仍在的 pane 算 live：这些动词先重新挂载它的 surface（不新开进程、不抢焦点），并等到 surface 底部各行与 daemon 屏幕（`pane.read` 的来源）一致才算回放完成。最多等 3 秒；`pane send --capture` 等不到就返回 `PANE_NOT_READY`（exit 3，什么都没发送，可直接重试）），其他动词照常执行；`details` 带结构化上下文（`kind`/`id`、`waitedMs`…）。
 - 形状由 `apps/mac/codans-cli/Resources/schema/cli-output.schema.json`（JSON Schema 2020-12）描述：信封 + `error` 严格，`data` 按 `schemaVersion` 绑定到各命令的定义；回归 harness 末尾用 `.claude/skills/self-verify/cli-regression/validate-json.py`（无依赖的子集校验器）校验命令的 JSON 输出。单测 `RendererEnvelopeTests` 钉住信封与退出码 → 错误码表。
 - 例外：`codans help-json` 裸打印命令树；ArgumentParser 拒绝的命令行（exit 64）打印解析器自己的文本。
 
