@@ -29,8 +29,7 @@ and the project does not yet follow semantic versioning — every release until
   terminal view (restored and not opened yet, or idle long enough to have
   its view released) still runs, but Codans does not watch it. Its row now
   shows a sleep glyph next to its last known state; clicking the row wakes
-  it. If the agent's terminal exits while unwatched, the row shows a stop
-  glyph instead: the agent is gone, and opening the pane starts a new shell.
+  it.
 - **`agent status` and `pane show` tell which panes are observed.** Rows
   now have `isLive` (the terminal runs) and `isAttached` (Codans shows and
   watches it). A sleeping row keeps its last known state and shows

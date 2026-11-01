@@ -129,12 +129,6 @@ final class AgentStateStore {
   /// so its entry holds the last known state.
   private(set) var attachedPaneIDs: Set<PaneID> = []
 
-  /// Detached agent panes whose daemon was found not running: the agent is
-  /// gone, and showing the pane starts a new shell rather than waking it.
-  /// Probed on detach and by `refreshDetachedLiveness`, because no surface
-  /// reports a daemon that exits while detached.
-  private(set) var stoppedPaneIDs: Set<PaneID> = []
-
   /// Per-pane derivation scratch. Kept around for all panes the
   /// store has heard about (bound or not) so signals that arrive
   /// before an agent is identified still leave the correct raw state
@@ -212,20 +206,15 @@ final class AgentStateStore {
   /// Time source. Injected so tests can assert on `lastTransitionAt`
   /// without racing real `Date()`.
   private let now: () -> Date
-  /// Probes a pane daemon's control socket. Injected so tests need no
-  /// running daemon; the default treats every daemon as running.
-  private let isDaemonAlive: @MainActor (PaneID) -> Bool
 
   init(
     focusedPane: @escaping @MainActor () -> PaneID?,
     isPaneInView: @escaping @MainActor (PaneID) -> Bool = { _ in false },
-    now: @escaping () -> Date = Date.init,
-    isDaemonAlive: @escaping @MainActor (PaneID) -> Bool = { _ in true }
+    now: @escaping () -> Date = Date.init
   ) {
     self.focusedPane = focusedPane
     self.isPaneInView = isPaneInView
     self.now = now
-    self.isDaemonAlive = isDaemonAlive
   }
 
   // MARK: - Inputs
@@ -484,28 +473,8 @@ final class AgentStateStore {
   func onSurfaceAttachmentChanged(_ paneID: PaneID, attached: Bool) {
     if attached {
       attachedPaneIDs.insert(paneID)
-      stoppedPaneIDs.remove(paneID)
     } else {
       attachedPaneIDs.remove(paneID)
-      refreshLiveness(of: paneID)
-    }
-  }
-
-  /// Re-probes the daemon of every detached agent pane. The app calls it
-  /// on a timer: a daemon can exit while no surface watches it.
-  func refreshDetachedLiveness() {
-    stoppedPaneIDs.formIntersection(entries.keys)
-    for paneID in entries.keys where !attachedPaneIDs.contains(paneID) {
-      refreshLiveness(of: paneID)
-    }
-  }
-
-  private func refreshLiveness(of paneID: PaneID) {
-    guard entries[paneID] != nil else { return }
-    if isDaemonAlive(paneID) {
-      stoppedPaneIDs.remove(paneID)
-    } else {
-      stoppedPaneIDs.insert(paneID)
     }
   }
 
@@ -515,14 +484,7 @@ final class AgentStateStore {
   /// renders the pane, so the app does not observe it and its state is the
   /// last known one. Showing the pane wakes it.
   func isSleeping(_ paneID: PaneID) -> Bool {
-    entries[paneID] != nil && !attachedPaneIDs.contains(paneID) && !stoppedPaneIDs.contains(paneID)
-  }
-
-  /// Whether `paneID`'s agent row is stopped: no surface renders the pane
-  /// and its daemon no longer runs, so the agent is gone and its state is
-  /// stale. Showing the pane starts a new shell.
-  func isStopped(_ paneID: PaneID) -> Bool {
-    entries[paneID] != nil && !attachedPaneIDs.contains(paneID) && stoppedPaneIDs.contains(paneID)
+    entries[paneID] != nil && !attachedPaneIDs.contains(paneID)
   }
 
   /// Latest OSC title observed for `paneID` — the terminal title agents
