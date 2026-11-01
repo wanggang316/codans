@@ -326,6 +326,7 @@ private struct LeafView: View {
   /// Fallback for `terminalColorScheme` when the terminal background has no
   /// perceived appearance.
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.defersTerminalSurfaces) private var defersTerminalSurfaces
   /// Bumped on `.ghosttyRuntimeConfigApplied` so the card re-reads the
   /// terminal background when the user picks a new ghostty theme.
   @State private var configReloadTick: Int = 0
@@ -465,7 +466,12 @@ private struct LeafView: View {
 
   @ViewBuilder
   private func paneContent(slotSize: CGSize) -> some View {
-    if let childStore = store.scope(
+    if defersTerminalSurfaces {
+      // The card stands in on the terminal tone until the surface may enter
+      // the window — see `defersTerminalSurfaces`.
+      Color(nsColor: terminalBackground)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if let childStore = store.scope(
       state: \.paneHosts[id: paneID],
       action: \.paneHosts[id: paneID],
     ) {
@@ -518,4 +524,12 @@ private struct LeafView: View {
   private var isFocused: Bool {
     hierarchyManager.lastFocusedPane(in: tabID) == paneID
   }
+}
+
+extension EnvironmentValues {
+  /// True while terminal surfaces must stay out of the window: pane cards
+  /// draw their chrome on the terminal tone and mount no surface. A surface
+  /// entering the window stalls compositing for a few frames, which would
+  /// freeze an animation in progress.
+  @Entry var defersTerminalSurfaces = false
 }
