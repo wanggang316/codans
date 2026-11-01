@@ -59,6 +59,31 @@ struct ZmxPassiveWatcherDaemonTests {
       return process.terminationStatus
     }
 
+    /// Run zmx and return its standard output.
+    func output(_ arguments: String...) throws -> String {
+      let process = Process()
+      process.executableURL = zmx
+      process.arguments = arguments
+      process.environment = ProcessInfo.processInfo.environment.merging(
+        ["ZMX_DIR": directory.path]) { _, new in new }
+      let pipe = Pipe()
+      process.standardOutput = pipe
+      process.standardError = FileHandle.nullDevice
+      try process.run()
+      let data = pipe.fileHandleForReading.readDataToEndOfFile()
+      process.waitUntilExit()
+      return String(bytes: data, encoding: .utf8) ?? ""
+    }
+
+    /// Connect like `zmx attach`: a client that sends `.Init`.
+    func attachTerminal() throws -> Int32 {
+      let fd = try ZmxControlClient.openConnection(socketPath: socketPath)
+      let frame = ZmxFraming.encode(
+        ZmxFrame(tag: .`init`, payload: ZmxResizePayload(cols: 80, rows: 24).encode()))
+      _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+      return fd
+    }
+
     func isListening() -> Bool {
       guard let fd = try? ZmxControlClient.openConnection(socketPath: socketPath) else {
         return false
@@ -124,5 +149,65 @@ struct ZmxPassiveWatcherDaemonTests {
     #expect(log.all.contains(.daemonGone))
     // Default backoff: EOF, then three refused connects 0.25 + 0.5 + 1 s apart.
     #expect(Date().timeIntervalSince(killedAt) < 3)
+  }
+
+  /// The re-attach handoff stops the watcher once the daemon counts a
+  /// second client next to it.
+  @Test(.enabled(if: zmx != nil))
+  func secondClientCheckSeesTheAttachingTerminal() async throws {
+    let daemon = Daemon(zmx: try #require(Self.zmx))
+    defer { daemon.cleanUp() }
+    #expect(try daemon.run("serve", daemon.session, "--command", "/bin/sh") == 0)
+    try await waitUntil { daemon.isListening() }
+    let watcher = ZmxPassiveWatcher(socketPath: daemon.socketPath) { _ in }
+    watcher.start()
+    defer { watcher.stop() }
+    try await waitUntil { watcher.isConnected }
+    #expect(try await ZmxControlClient.info(socketPath: daemon.socketPath).clientsLen == 1)
+
+    let terminal = try daemon.attachTerminal()
+    defer { Darwin.close(terminal) }
+    let start = Date()
+    await TerminalEngine.waitForSecondClient(socketPath: daemon.socketPath)
+
+    #expect(Date().timeIntervalSince(start) < 1)
+    #expect(try await ZmxControlClient.info(socketPath: daemon.socketPath).clientsLen == 2)
+  }
+
+  /// A program started after the last terminal detached still gets an
+  /// answer to the OSC 7501 support query, with the watcher connected.
+  /// Claude Code reports program status only after that answer.
+  @Test(.enabled(if: zmx != nil))
+  func answersTheProgramStatusQueryAfterTheTerminalDetached() async throws {
+    let daemon = Daemon(zmx: try #require(Self.zmx))
+    defer { daemon.cleanUp() }
+    let script = daemon.directory.appendingPathComponent("probe.sh")
+    try #"""
+      read go
+      stty -icanon -echo min 0 time 30
+      printf '\033]7501;?\033\\'
+      reply=$(dd bs=1 count=9 2>/dev/null)
+      stty sane
+      printf 'REPLY[%s]\n' "$reply" | tr '\033' 'E'
+      sleep 30
+      """#.write(to: script, atomically: true, encoding: .utf8)
+    #expect(try daemon.run("serve", daemon.session, "--command", "/bin/sh", script.path) == 0)
+    try await waitUntil { daemon.isListening() }
+
+    let terminal = try daemon.attachTerminal()
+    try await Task.sleep(for: .milliseconds(300))
+    Darwin.close(terminal)
+    let watcher = ZmxPassiveWatcher(socketPath: daemon.socketPath) { _ in }
+    watcher.start()
+    defer { watcher.stop() }
+    try await waitUntil { watcher.isConnected }
+
+    try daemon.run("send", daemon.session, "go\n")
+    var history = ""
+    try await waitUntil(timeout: 8) {
+      history = (try? daemon.output("history", daemon.session)) ?? ""
+      return history.contains("REPLY[")
+    }
+    #expect(history.contains("REPLY[E]7501;?:]"), "\(history)")
   }
 }
