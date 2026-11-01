@@ -11,6 +11,8 @@ struct TerminalEngineDetachedPaneTests {
     let onEvent: @Sendable (ZmxPassiveWatcher.Event) -> Void
     private(set) var started = false
     private(set) var stopped = false
+    /// Marks sent, decoded as the daemon's clients see them.
+    private(set) var marks: [DetachedPaneSignal] = []
 
     init(paneID: PaneID, onEvent: @escaping @Sendable (ZmxPassiveWatcher.Event) -> Void) {
       self.paneID = paneID
@@ -19,6 +21,10 @@ struct TerminalEngineDetachedPaneTests {
 
     func start() { started = true }
     func stop() { stopped = true }
+    func sendMark(_ payload: Data) {
+      var scanner = ZmxOutputScanner()
+      marks += scanner.scan(payload)
+    }
   }
 
   @MainActor
@@ -151,20 +157,8 @@ struct TerminalEngineDetachedPaneTests {
   private let done = DetachedPaneSignal.programStatus(
     ProgramStatusReport(state: .done, app: "claude-code"))
 
-  /// Records the fences the engine sends, decoded as both clients see them.
-  private final class FenceLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private var sent: [DetachedPaneSignal] = []
-    func append(_ bytes: Data) {
-      var scanner = ZmxOutputScanner()
-      let signals = scanner.scan(bytes)
-      lock.withLock { sent += signals }
-    }
-    var all: [DetachedPaneSignal] { lock.withLock { sent } }
-  }
-
-  private func waitForFences(_ log: FenceLog, count: Int) async {
-    for _ in 0..<200 where log.all.count < count {
+  private func waitForMarks(_ watcher: FakeWatcher, count: Int) async {
+    for _ in 0..<200 where watcher.marks.count < count {
       try? await Task.sleep(for: .milliseconds(5))
     }
   }
@@ -172,8 +166,6 @@ struct TerminalEngineDetachedPaneTests {
   @Test
   func reattachHandsOverAtTheSurfacesFirstFence() async {
     let harness = Harness()
-    let fences = FenceLog()
-    harness.engine.sendHandoffFence = { _, bytes in fences.append(bytes) }
     harness.engine.handoffFenceInterval = .milliseconds(10)
     let paneID = PaneID()
     let stream = harness.engine.events()
@@ -182,62 +174,79 @@ struct TerminalEngineDetachedPaneTests {
 
     #expect(harness.engine.beginDetachedHandoff(paneID))
     harness.engine.sendHandoffFences(paneID)
-    await waitForFences(fences, count: 2)
-    let f0 = fences.all[0]
-    let f1 = fences.all[1]
+    // Fences go out over the watcher's own socket.
+    await waitForMarks(watcher, count: 2)
+    let f0 = watcher.marks[0]
+    let f1 = watcher.marks[1]
 
-    // Stream: [working] f0 [done] f1 [done]. The surface connected after
-    // the first `done`, so its first fence is f1.
-    watcher.onEvent(.signals([working, f0, done]))
+    // Stream: [working] f0 [done] f1 [title]. The surface connected after
+    // `done`, so its first fence is f1. It reads `title` before the
+    // watcher has read f1: the title waits, so it cannot overtake `done`.
+    watcher.onEvent(.signals([working, f0]))
     await settle()
-    #expect(!watcher.stopped)
     #expect(!harness.engine.admitSurfaceSignal(f1, for: paneID))
-    #expect(harness.engine.admitSurfaceSignal(done, for: paneID))
-    watcher.onEvent(.signals([f1, done]))
+    #expect(!harness.engine.admitSurfaceSignal(.title("after"), for: paneID))
+    watcher.onEvent(.signals([done, f1, .title("after")]))
     await settle()
     #expect(watcher.stopped)
     #expect(harness.changeKinds(for: paneID) == [.detached, .observationEnded])
     // No more fences once the split is known.
-    let sentAtSplit = fences.all.count
+    let sentAtSplit = watcher.marks.count
     try? await Task.sleep(for: .milliseconds(50))
-    #expect(fences.all.count == sentAtSplit)
-    // Late events of the stopped watcher are stale.
-    watcher.onEvent(.signals([.title("stale")]))
-    await settle()
+    #expect(watcher.marks.count == sentAtSplit)
+    // From now on the surface is the source.
+    #expect(harness.engine.admitSurfaceSignal(working, for: paneID))
     harness.engine.finishEventStream()
 
-    var states: [ProgramStatusState?] = []
-    var titles = 0
+    var delivered: [String] = []
     for await event in stream {
       switch event {
-      case .paneProgramStatusChanged(paneID, let summary): states.append(summary?.root?.state)
-      case .paneInfoChanged(paneID, .title): titles += 1
+      case .paneProgramStatusChanged(paneID, let summary):
+        delivered.append(summary?.root?.state.rawValue ?? "none")
+      case .paneInfoChanged(paneID, .title(let title)): delivered.append("title:\(title ?? "")")
       default: break
       }
     }
-    // From the watcher: `working`, then the held `done` before f1. The
-    // surface's own `done` after f1 is admitted to its decoder, which this
-    // test does not run; the watcher's copy after f1 is dropped.
-    #expect(states == [.working, .done])
-    #expect(titles == 0)
+    // Watcher: `working`, `done` (both before f1). Surface: the title,
+    // released when the watcher reached f1. The watcher's copy of the
+    // title (after f1) is dropped.
+    #expect(delivered == ["working", "done", "title:after"])
   }
 
+  /// The surface never reads a fence (here: the daemon ignores `.Mark`).
+  /// The watcher has read everything, so it stays the pane's source.
   @Test
-  func handoffGivesUpWhenTheSurfaceNeverReadsAFence() async {
+  func handoffWithoutASurfaceFenceKeepsTheWatcherAsSource() async {
     let harness = Harness()
-    harness.engine.sendHandoffFence = { _, _ in }
     harness.engine.handoffFenceInterval = .milliseconds(5)
     harness.engine.handoffTimeout = .milliseconds(40)
     let paneID = PaneID()
+    let stream = harness.engine.events()
     harness.engine.watchDetachedPanes([paneID])
+    let watcher = harness.watchers[0]
     #expect(harness.engine.beginDetachedHandoff(paneID))
     #expect(!harness.engine.admitSurfaceSignal(working, for: paneID))
 
     harness.engine.sendHandoffFences(paneID)
     try? await Task.sleep(for: .milliseconds(150))
 
-    #expect(harness.watchers[0].stopped)
-    #expect(harness.engine.admitSurfaceSignal(working, for: paneID))
+    #expect(!watcher.stopped)
+    #expect(!harness.engine.admitSurfaceSignal(done, for: paneID))
+    watcher.onEvent(.signals([working, done]))
+    await settle()
+    // A later reclaim reuses the watcher and marks the pane detached again.
+    harness.engine.watchDetachedPanes([paneID])
+    #expect(harness.watchers.count == 1)
+    #expect(harness.changeKinds(for: paneID) == [.detached, .detached])
+    harness.engine.finishEventStream()
+
+    var states: [ProgramStatusState?] = []
+    for await event in stream {
+      if case .paneProgramStatusChanged(paneID, let summary) = event {
+        states.append(summary?.root?.state)
+      }
+    }
+    #expect(states == [.working, .done])
   }
 
   @Test

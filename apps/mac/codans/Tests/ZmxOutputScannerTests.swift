@@ -50,6 +50,11 @@ struct ZmxOutputScannerTests {
   }
 
   @Test
+  func reportsResetAsAClearOfEveryRecord() {
+    #expect(scan("text\u{1B}c") == [.programStatus(ProgramStatusReport(state: .clear))])
+  }
+
+  @Test
   func ignoresProgramStatusQuery() {
     #expect(scan("\u{1B}]7501;?\u{1B}\\").isEmpty)
   }

@@ -178,8 +178,10 @@ struct ZmxPassiveWatcherDaemonTests {
     }
   }
 
-  /// `.Mark` reaches the watcher and an attached terminal at the same place
-  /// in the output stream: the fence the re-attach handoff splits on.
+  /// `.Mark`, sent over the watcher's socket, reaches the watcher and an
+  /// attached terminal at the same place in the output stream: the fence
+  /// the re-attach handoff splits on. A mark sent while the child is in
+  /// the middle of an OSC waits for its end instead of breaking it.
   @Test(.enabled(if: zmx != nil))
   func markReachesEveryClientInStreamOrder() async throws {
     let daemon = Daemon(zmx: try #require(Self.zmx))
@@ -196,7 +198,10 @@ struct ZmxPassiveWatcherDaemonTests {
     let reader = TerminalReader(fd: terminal)
     try await Task.sleep(for: .milliseconds(200))
 
-    try daemon.run("send", daemon.session, #"printf '\033]0;before\007'"# + "\n")
+    // `hello` is written in two parts, one second apart.
+    try daemon.run(
+      "send", daemon.session,
+      #"printf '\033]0;before\007'; printf '\033]0;hel'; sleep 1; printf 'lo\007'"# + "\n")
     var watcherSignals: [DetachedPaneSignal] {
       log.all.flatMap { event -> [DetachedPaneSignal] in
         if case .signals(let s) = event { return s }
@@ -206,13 +211,17 @@ struct ZmxPassiveWatcherDaemonTests {
     try await waitUntil { watcherSignals.contains(.title("before")) }
     var handoff = DetachedHandoff(watcherToken: UUID())
     let fenceID = handoff.nextFence()
-    ZmxControlClient.mark(socketPath: daemon.socketPath, payload: DetachedHandoff.fenceBytes(fenceID))
+    // Sent while `\033]0;hel` is open.
+    try await Task.sleep(for: .milliseconds(300))
+    watcher.sendMark(DetachedHandoff.fenceBytes(fenceID))
+    var scanner = ZmxOutputScanner()
+    let fence = scanner.scan(DetachedHandoff.fenceBytes(fenceID))[0]
+    // Typed input is echoed: send the next line once the open OSC ended.
+    try await waitUntil { watcherSignals.contains(fence) }
     try daemon.run("send", daemon.session, #"printf '\033]0;after\007'"# + "\n")
     try await waitUntil { watcherSignals.contains(.title("after")) && reader.signals.contains(.title("after")) }
 
-    var scanner = ZmxOutputScanner()
-    let fence = scanner.scan(DetachedHandoff.fenceBytes(fenceID))[0]
-    let expected: [DetachedPaneSignal] = [.title("before"), fence, .title("after")]
+    let expected: [DetachedPaneSignal] = [.title("before"), .title("hello"), fence, .title("after")]
     #expect(watcherSignals.filter(expected.contains) == expected)
     #expect(reader.signals.filter(expected.contains) == expected)
   }

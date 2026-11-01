@@ -166,15 +166,15 @@ final class TerminalEngine {
   private var detachedWatchers: [PaneID: (token: UUID, watcher: any DetachedPaneWatching)] = [:]
   /// Re-attaches in progress, keyed by pane (see `DetachedHandoff`).
   private var detachedHandoffs: [PaneID: DetachedHandoff] = [:]
-  /// Sends a handoff fence into the pane's output stream (zmx `.Mark`).
-  var sendHandoffFence: @Sendable (PaneID, Data) -> Void = { paneID, bytes in
-    ZmxControlClient.mark(for: paneID, payload: bytes)
-  }
+  /// Attached panes whose watcher stayed on as the only signal source
+  /// after an abandoned handoff.
+  private var watchersOfAttachedPanes: Set<PaneID> = []
   /// Gap between fences while the surface attaches.
   var handoffFenceInterval: Duration = .milliseconds(50)
-  /// After this long without a fence on the surface (a daemon from a build
-  /// without `.Mark`, or a surface that never connects) the handoff gives up
-  /// and the surface becomes the only source.
+  /// After this long the handoff gives up (see `DetachedHandoff.abandon`):
+  /// when the surface never read a fence (a daemon from a build without
+  /// `.Mark`, or a surface that never connects), the watcher stays the
+  /// pane's only signal source.
   var handoffTimeout: Duration = .seconds(3)
 
   /// Inject a `GhosttyRuntime` for real pane surfaces, or pass `nil` for
@@ -1056,9 +1056,15 @@ final class TerminalEngine {
   }
 
   private func watchDetachedPane(_ paneID: PaneID) {
-    guard !finished, detachedWatchers[paneID] == nil,
-      ghosttyRuntime?.surface(for: paneID) == nil
-    else { return }
+    guard !finished, ghosttyRuntime?.surface(for: paneID) == nil else { return }
+    if detachedWatchers[paneID] != nil {
+      // A watcher that stayed on through an abandoned handoff already
+      // observes the pane; only the pane's state changes.
+      if watchersOfAttachedPanes.remove(paneID) != nil {
+        onDetachedPaneChange(paneID, .detached)
+      }
+      return
+    }
     let token = UUID()
     detachedHandoffs.removeValue(forKey: paneID)
     let watcher = makeDetachedPaneWatcher(paneID) { event in
@@ -1081,7 +1087,10 @@ final class TerminalEngine {
     let handingOver = beginDetachedHandoff(paneID)
     do {
       let surface = try makeSurface()
-      if handingOver { sendHandoffFences(paneID) }
+      if handingOver {
+        onDetachedPaneChange(paneID, .observationEnded)
+        sendHandoffFences(paneID)
+      }
       return surface
     } catch {
       if handingOver { detachedHandoffs.removeValue(forKey: paneID) }
@@ -1092,38 +1101,42 @@ final class TerminalEngine {
   /// Start a handoff for a watched pane. Returns false when nothing watches it.
   func beginDetachedHandoff(_ paneID: PaneID) -> Bool {
     guard let token = detachedWatchers[paneID]?.token else { return false }
+    watchersOfAttachedPanes.remove(paneID)
     detachedHandoffs[paneID] = DetachedHandoff(watcherToken: token)
     return true
   }
 
-  /// Send a fence every `handoffFenceInterval` until the surface reads one,
-  /// the handoff ends, or `handoffTimeout` passes.
+  /// Send a fence every `handoffFenceInterval` until the surface reads
+  /// one, and end the handoff after `handoffTimeout` if it is still open.
+  /// Fences go over the watcher's socket, in registration order.
   func sendHandoffFences(_ paneID: PaneID) {
     guard let token = detachedHandoffs[paneID]?.watcherToken else { return }
     let interval = handoffFenceInterval
     let deadline = ContinuousClock.now + handoffTimeout
     Task { @MainActor [weak self] in
-      while let self, self.detachedHandoffs[paneID]?.watcherToken == token,
-        self.detachedHandoffs[paneID]?.surfaceFence == nil
-      {
+      while let self, self.detachedHandoffs[paneID]?.watcherToken == token {
         guard ContinuousClock.now < deadline else {
           self.abandonDetachedHandoff(paneID)
           return
         }
-        if let id = self.detachedHandoffs[paneID]?.nextFence() {
-          self.sendHandoffFence(paneID, DetachedHandoff.fenceBytes(id))
+        if self.detachedHandoffs[paneID]?.surfaceFence == nil,
+          let id = self.detachedHandoffs[paneID]?.nextFence()
+        {
+          self.detachedWatchers[paneID]?.watcher.sendMark(DetachedHandoff.fenceBytes(id))
         }
         try? await Task.sleep(for: interval)
       }
     }
   }
 
-  /// Whether a signal a surface decoded should be delivered. During a
-  /// handoff the surface's signals count from its first fence on; a fence
-  /// itself is never delivered.
+  /// Whether a signal a surface decoded should be delivered now. During a
+  /// handoff the surface's signals count from its first fence on, in
+  /// stream order with the watcher's. While a watcher remains the pane's
+  /// source (an abandoned handoff), the surface's signals are its copies.
+  /// A fence itself is never delivered.
   func admitSurfaceSignal(_ signal: DetachedPaneSignal, for paneID: PaneID) -> Bool {
     guard var handoff = detachedHandoffs[paneID] else {
-      return DetachedHandoff.fenceID(of: signal) == nil
+      return DetachedHandoff.fenceID(of: signal) == nil && detachedWatchers[paneID] == nil
     }
     let step = handoff.surfaceRead(signal)
     detachedHandoffs[paneID] = handoff
@@ -1139,11 +1152,17 @@ final class TerminalEngine {
 
   private func abandonDetachedHandoff(_ paneID: PaneID) {
     guard var handoff = detachedHandoffs[paneID] else { return }
+    let outcome = handoff.abandon()
     Self.logger.info(
-      "detached.handoff-timeout pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
+      "detached.handoff-timeout pane=\(paneID.raw.uuidString.prefix(8), privacy: .public) surface-takes-over=\(outcome.surfaceTakesOver, privacy: .public)"
     )
-    deliverDetachedSignals(handoff.abandon(), paneID: paneID)
-    completeDetachedHandoff(paneID)
+    detachedHandoffs.removeValue(forKey: paneID)
+    deliverDetachedSignals(outcome.release, paneID: paneID)
+    if outcome.surfaceTakesOver {
+      stopWatchingDetachedPane(paneID)
+    } else {
+      watchersOfAttachedPanes.insert(paneID)
+    }
   }
 
   private func deliverDetachedSignals(_ signals: [DetachedPaneSignal], paneID: PaneID) {
@@ -1163,6 +1182,7 @@ final class TerminalEngine {
   /// Call it before killing a detached pane's daemon.
   @discardableResult
   func stopWatchingDetachedPane(_ paneID: PaneID) -> Bool {
+    watchersOfAttachedPanes.remove(paneID)
     guard let entry = detachedWatchers.removeValue(forKey: paneID) else { return false }
     entry.watcher.stop()
     onDetachedPaneChange(paneID, .observationEnded)
@@ -1189,8 +1209,9 @@ final class TerminalEngine {
         switch step {
         case .deliver: deliverDetachedSignals([signal], paneID: paneID)
         case .hold, .drop: break
-        case .complete:
+        case .complete(let surfaceSignals):
           completeDetachedHandoff(paneID)
+          deliverDetachedSignals(surfaceSignals, paneID: paneID)
           return
         }
       }
@@ -1198,6 +1219,9 @@ final class TerminalEngine {
       // During a handoff the new surface sees the exit itself.
       guard !isHandingOver else { return }
       detachedWatchers.removeValue(forKey: paneID)
+      // A watcher that stayed on as the source of an attached pane: the
+      // surface reports the exit through its own close path.
+      if watchersOfAttachedPanes.remove(paneID) != nil { return }
       Self.logger.info(
         "detached.daemon-exited pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
       )

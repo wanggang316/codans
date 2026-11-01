@@ -17,8 +17,8 @@ nonisolated enum DetachedPaneSignal: Equatable, Sendable {
 /// Incremental OSC scanner over raw PTY output. Sequences can split across
 /// `.Output` frames, so the scanner keeps its state between `scan` calls.
 ///
-/// It reads OSC strings only (`ESC ]` … `BEL` or `ESC \`), and ignores every
-/// other byte. It does not track DCS / APC strings: an `ESC ]` inside one is
+/// It reads OSC strings (`ESC ]` … `BEL` or `ESC \`) and RIS (`ESC c`), and
+/// ignores every other byte. It does not track DCS / APC strings: an `ESC ]` inside one is
 /// rare, and the parsers below reject bodies they do not recognise.
 nonisolated struct ZmxOutputScanner: Sendable {
   /// Longest OSC body kept. OSC 7501 caps a whole sequence at 4096 bytes;
@@ -54,6 +54,11 @@ nonisolated struct ZmxOutputScanner: Sendable {
     case .escape:
       if byte == 0x5D {
         startBody()
+      } else if byte == 0x63 {
+        // RIS (`ESC c`): libghostty reports it as a `clear` of every
+        // program status record; do the same.
+        state = .ground
+        return .programStatus(ProgramStatusReport(state: .clear))
       } else if byte != 0x1B {
         state = .ground
       }

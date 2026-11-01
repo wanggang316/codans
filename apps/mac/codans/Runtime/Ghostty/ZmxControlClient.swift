@@ -124,21 +124,6 @@ nonisolated enum ZmxControlClient {
     }
   }
 
-  /// Best-effort `.mark`: have the pane's daemon send `payload` to every
-  /// client as output, at this point in the stream. Fire-and-forget; a
-  /// missing socket is a silent no-op.
-  static func mark(for paneID: PaneID, payload: Data) {
-    mark(socketPath: socketPath(for: paneID), payload: payload)
-  }
-
-  static func mark(socketPath: String, payload: Data) {
-    DispatchQueue.global(qos: .userInitiated).async {
-      guard let fd = try? openConnection(socketPath: socketPath) else { return }
-      defer { Darwin.close(fd) }
-      try? sendAll(fd: fd, data: ZmxFraming.encode(ZmxFrame(tag: .mark, payload: payload)))
-    }
-  }
-
   /// Best-effort `.snapshot`: ask a pane's daemon to write its
   /// `<paneID>.snap` now, then wait (bounded) for the daemon to close the
   /// socket — its EOF is the acknowledgement that the snapshot landed.
