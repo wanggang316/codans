@@ -139,9 +139,11 @@ struct CommandPaletteView: View {
 
   private func row(_ item: CommandPaletteItem, selected: Bool) -> some View {
     HStack(spacing: 10) {
+      // Like the Agents view, the selected row darkens its glyph so selection
+      // does not rely on the background wash alone.
       StoredIconGlyph(icon: item.icon)
         .frame(width: 20)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(selected ? .primary : .secondary)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(item.title).font(.system(size: 13))
@@ -160,14 +162,13 @@ struct CommandPaletteView: View {
     .padding(.vertical, 8)
     .background {
       if selected {
-        // System unemphasized-selection gray, deepened one notch with a faint
-        // primary overlay so the row reads a touch darker in both color schemes.
+        // Translucent gray wash, like the Agents view row but deeper: the glass
+        // card is lighter than the Agents panel, and keyboard navigation needs
+        // the selected row to stand out. An opaque system selection color
+        // would sit on the glass as a flat slab instead of taking on the tint
+        // of the content beneath.
         RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-          .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
-          .overlay(
-            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-              .fill(Color.primary.opacity(0.06))
-          )
+          .fill(Color.gray.opacity(0.16))
       }
     }
   }
