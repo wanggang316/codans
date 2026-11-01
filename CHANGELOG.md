@@ -27,6 +27,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- **A sleeping agent's last known state no longer looks live.** When the
+  Agents View cannot observe an agent (its pane has no terminal view and the
+  agent does not report its own status), the state icon is dimmed and does
+  not animate, so a restored "working" does not read as work in progress.
 - **`pane send` / `pane capture` reach agents in tabs that are not open.**
   A pane restored from the last session whose tab was not opened yet, or a
   pane hidden long enough to have its terminal view released, still runs.

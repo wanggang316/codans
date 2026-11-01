@@ -346,13 +346,22 @@ struct AgentStateRowView: View {
       .accessibilityLabel("Sleeping")
   }
 
+  private var isStateCached: Bool { entry.source == .cached }
+
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
   /// centered against the two-line identity column. The state icon's
   /// `accessibilityLabel` is the raw enum value per the user-test contract.
+  ///
+  /// A cached state (no surface, and no program status report through the
+  /// passive watcher) is the last one seen, not a live one: the icon is
+  /// dimmed and does not animate, so a restored `working` does not read as
+  /// work in progress.
   private var statusColumn: some View {
     stateIcon
       .font(.caption2)
+      .opacity(isStateCached ? 0.45 : 1)
+      .help(isStateCached ? "Last known state. Click to wake and update it." : "")
       .accessibilityElement(children: .ignore)
       .accessibilityIdentifier("agentState.row.\(paneID).state")
       .accessibilityLabel(entry.state.rawValue)
@@ -382,7 +391,7 @@ struct AgentStateRowView: View {
       // every cell at full opacity. Tint follows `.primary` so the grid
       // is black in light mode / white in dark mode, distinct from the
       // orange "blocked" icon without competing visually for attention.
-      LoadingGridIcon(size: 16, isAnimating: !reduceMotion)
+      LoadingGridIcon(size: 16, isAnimating: !reduceMotion && !isStateCached)
         .foregroundStyle(.primary)
     case .done:
       Image(systemName: "checkmark.circle.fill")
