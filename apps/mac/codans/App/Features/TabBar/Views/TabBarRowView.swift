@@ -96,8 +96,11 @@ struct TabBarRowView: View {
   /// `Tab` values) so chip content — title / color / dirty — always reads
   /// fresh from the `tabs` prop while only the order is owned locally.
   @State private var orderIDs: [TabID] = []
-  /// The chip currently being dragged, or nil when idle.
+  /// The chip currently being dragged, or nil when idle. Stays set while
+  /// the lifted copy settles into its slot after the drop.
   @State private var draggingID: TabID?
+  /// The drop has happened and the lifted copy is animating into its slot.
+  @State private var isSettling = false
   /// Live cursor X in the row space, driving the floating chip.
   @State private var dragCursorX: CGFloat = 0
   /// Cursor X minus the dragged chip's center X at the start of the drag.
@@ -277,9 +280,11 @@ struct TabBarRowView: View {
     }
   }
 
-  /// How far the lifted copy's clip reaches past its chip frame: enough
-  /// for the glass shadow.
-  private static let liftedChipShadowOutset: CGFloat = 3
+  /// How far the row mask and the lifted copy's clip reach past the chip
+  /// frames. The selected chip's glass draws its dark outer rim just past
+  /// its bounds; a clip at the bounds cuts it off and the chip reads as
+  /// missing an edge.
+  private static let glassRimOutset: CGFloat = 3
 
   /// Everything but the lifted copy's footprint while a drag is in
   /// progress; the whole row otherwise.
@@ -293,13 +298,15 @@ struct TabBarRowView: View {
           x: liftedCenterX(width: frame.width) - width / 2, y: 0, width: width,
           height: TabBarMetrics.chipHeight)
         Path { path in
-          path.addRect(CGRect(origin: .zero, size: geo.size))
+          path.addRect(
+            CGRect(origin: .zero, size: geo.size).insetBy(
+              dx: -Self.glassRimOutset, dy: -Self.glassRimOutset))
           path.addRoundedRect(
             in: cutout, cornerSize: CGSize(width: cutout.height / 2, height: cutout.height / 2))
         }
         .fill(style: FillStyle(eoFill: true))
       } else {
-        Rectangle()
+        Rectangle().padding(-Self.glassRimOutset)
       }
     }
   }
@@ -330,7 +337,7 @@ struct TabBarRowView: View {
         // shadow. Like Safari, the lifted copy keeps the chip's size and
         // look: no scale, no extra shadow.
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        .clipShape(Rectangle().inset(by: -Self.liftedChipShadowOutset))
+        .clipShape(Rectangle().inset(by: -Self.glassRimOutset))
         .allowsHitTesting(false)
         .position(x: liftedCenterX(width: frame.width), y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
@@ -343,9 +350,10 @@ struct TabBarRowView: View {
       coordinateSpace: .named(Self.rowSpace)
     )
     .onChanged { value in
-      if draggingID != tab.id {
+      if draggingID != tab.id || isSettling {
         // First tick of a new drag — snapshot the current order as the
         // mutable baseline, then claim this chip as the dragged one.
+        isSettling = false
         orderIDs = tabs.map(\.id)
         draggingID = tab.id
         let grabbedMidX = chipFrames[tab.id]?.midX ?? value.startLocation.x
@@ -356,14 +364,36 @@ struct TabBarRowView: View {
     }
     .onEnded { _ in
       let final = orderIDs
-      draggingID = nil
-      dragCursorX = 0
-      dragGrabOffset = 0
       // Single absolute-order commit; skip the no-op when nothing moved.
       if final != tabs.map(\.id) {
         onReorder(final)
       }
+      settleDrop()
     }
+  }
+
+  /// Slides the lifted copy from where it was released into its slot, then
+  /// ends the drag, as Safari does; the chip never jumps on release.
+  private func settleDrop() {
+    guard let id = draggingID, let slot = chipFrames[id] else {
+      endDrag()
+      return
+    }
+    isSettling = true
+    withAnimation(Self.addRemoveAnimation) {
+      dragCursorX = slot.midX + dragGrabOffset
+    } completion: {
+      // A new drag that started mid-settle owns the state now.
+      guard isSettling, draggingID == id else { return }
+      endDrag()
+    }
+  }
+
+  private func endDrag() {
+    isSettling = false
+    draggingID = nil
+    dragCursorX = 0
+    dragGrabOffset = 0
   }
 
   /// Center X of the lifted copy: the cursor less the grab offset, held

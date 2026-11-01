@@ -55,10 +55,11 @@ struct TabChipBackground: View {
 }
 
 /// The glass of the system tab bar's selected tab: `NSGlassEffectView` in
-/// the variant and subvariant `NSTabButton` uses (read from a live window tab
-/// bar: `_variant` 1, `_subvariant` "tab"). It lenses the backdrop, so the
-/// chip takes on the window tone and carries the system's glass rim and
-/// shadow. Public API cannot select this look. The keys are guarded, so a
+/// the configuration `NSTabButton` uses (read from a live window tab bar:
+/// `_variant` 1, `_subvariant` "tab", `_contentLensing` 1). It lenses the
+/// backdrop, so the chip takes on the window tone and carries the system's
+/// glass rim and shadow. The rim falls just past the view's bounds, so no
+/// ancestor may clip at the chip frame. Public API cannot select this look. The keys are guarded, so a
 /// system that drops them falls back to the public glass.
 @available(macOS 26.0, *)
 private struct TabGlassCapsule: NSViewRepresentable {
@@ -73,6 +74,9 @@ private struct TabGlassCapsule: NSViewRepresentable {
     }
     if view.responds(to: NSSelectorFromString("set_subvariant:")) {
       view.setValue(Self.subvariant, forKey: "_subvariant")
+    }
+    if view.responds(to: NSSelectorFromString("set_contentLensing:")) {
+      view.setValue(1, forKey: "_contentLensing")
     }
     return view
   }
