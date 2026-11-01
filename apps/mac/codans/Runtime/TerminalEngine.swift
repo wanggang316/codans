@@ -149,6 +149,9 @@ final class TerminalEngine {
   /// Runtime layer, so the app injects the reaction. Attach and detach
   /// themselves are reported by `onSurfaceAttachmentChanged`.
   var onDetachedDaemonExited: @MainActor (PaneID) -> Void = { _ in }
+  /// Test seam: whether a surface renders the pane. Headless tests have no
+  /// `GhosttyRuntime`, so they set this to model a re-attached pane.
+  var surfacePresenceOverride: ((PaneID) -> Bool)?
   /// Builds the watcher for a pane. Tests inject a fake.
   var makeDetachedPaneWatcher:
     (PaneID, @escaping @Sendable (ZmxPassiveWatcher.Event) -> Void) -> any DetachedPaneWatching = {
@@ -1090,6 +1093,10 @@ final class TerminalEngine {
     }
   }
 
+  private func hasSurfaceForDetachedCheck(_ paneID: PaneID) -> Bool {
+    surfacePresenceOverride?(paneID) ?? (ghosttyRuntime?.surface(for: paneID) != nil)
+  }
+
   /// Stop the pane's watcher, if any. Returns whether one was running.
   /// Call it before killing a detached pane's daemon.
   @discardableResult
@@ -1102,12 +1109,16 @@ final class TerminalEngine {
   private func handleDetachedPaneEvent(
     _ event: ZmxPassiveWatcher.Event, paneID: PaneID, token: UUID
   ) {
-    let isCurrent = detachedWatchers[paneID]?.token == token
+    // Only the current watcher of a pane without a surface counts. A
+    // callback queued before `stopWatchingDetachedPane` (re-attach, close)
+    // runs with a stale token; once a surface exists it is the pane's only
+    // source, so a late watcher signal must not overwrite its program
+    // status or title, or repeat its notification.
+    guard detachedWatchers[paneID]?.token == token, !hasSurfaceForDetachedCheck(paneID) else {
+      return
+    }
     switch event {
     case .signals(let signals):
-      // Output read just before a re-attach is still real output; output
-      // of a pane that has since closed is not.
-      guard isCurrent || ghosttyRuntime?.surface(for: paneID) != nil else { return }
       for signal in signals {
         switch signal {
         case .title(let title):
@@ -1119,7 +1130,6 @@ final class TerminalEngine {
         }
       }
     case .daemonGone:
-      guard isCurrent else { return }
       detachedWatchers.removeValue(forKey: paneID)
       Self.logger.info(
         "detached.daemon-exited pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"

@@ -153,6 +153,65 @@ struct TerminalEngineDetachedPaneTests {
     #expect(harness.exitCount(for: paneID) == 0)
   }
 
+  /// The re-attach race: the watcher read signals and queued their
+  /// callbacks, `ensureSurface` stopped it and a surface now renders the
+  /// pane, and only then do the callbacks run. The surface is the only
+  /// source: no program status, title or notification from the watcher.
+  @Test
+  func queuedWatcherSignalsAreIgnoredOnceASurfaceIsAttached() async {
+    let harness = Harness()
+    let paneID = PaneID()
+    let stream = harness.engine.events()
+    harness.engine.watchDetachedPanes([paneID])
+    let watcher = harness.watchers[0]
+
+    // Queued before the stop, handled on the main actor after it.
+    watcher.onEvent(
+      .signals([
+        .programStatus(ProgramStatusReport(state: .working, app: "claude-code")),
+        .title("old"),
+        .desktopNotification(title: "", body: "again"),
+      ]))
+    watcher.onEvent(.daemonGone)
+    #expect(harness.engine.stopWatchingDetachedPane(paneID))
+    harness.engine.surfacePresenceOverride = { $0 == paneID }
+    await settle()
+    harness.engine.finishEventStream()
+
+    var delivered = 0
+    for await event in stream {
+      switch event {
+      case .paneProgramStatusChanged(paneID, _), .paneInfoChanged(paneID, _): delivered += 1
+      default: break
+      }
+    }
+    #expect(delivered == 0)
+    #expect(harness.exitCount(for: paneID) == 0)
+  }
+
+  /// Even a watcher still registered is not a source while a surface
+  /// renders the pane.
+  @Test
+  func aCurrentWatcherIsIgnoredWhileASurfaceExists() async {
+    let harness = Harness()
+    let paneID = PaneID()
+    let stream = harness.engine.events()
+    harness.engine.watchDetachedPanes([paneID])
+    harness.engine.surfacePresenceOverride = { $0 == paneID }
+
+    harness.watchers[0].onEvent(.signals([.title("old")]))
+    harness.watchers[0].onEvent(.daemonGone)
+    await settle()
+    harness.engine.finishEventStream()
+
+    var titles = 0
+    for await event in stream {
+      if case .paneInfoChanged(paneID, .title) = event { titles += 1 }
+    }
+    #expect(titles == 0)
+    #expect(harness.exitCount(for: paneID) == 0)
+  }
+
   @Test
   func daemonExitEndsObservationAndReportsIt() async {
     let harness = Harness()
