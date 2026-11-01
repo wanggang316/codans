@@ -278,13 +278,14 @@ struct GitHubFeatureTests {
   private static func makeStore(
     initialState: GitHubFeature.State = .init(),
     clock: any Clock<Duration> = ImmediateClock(),
+    date: DateGenerator = .constant(fixedDate),
     customize: @MainActor (inout GitHubClient) -> Void = { _ in },
     customizeGit: @MainActor (inout GitServiceClient) -> Void = { _ in }
   ) -> TestStore<GitHubFeature.State, GitHubFeature.Action> {
     TestStore(initialState: initialState) {
       GitHubFeature()
     } withDependencies: {
-      $0.date = .constant(fixedDate)
+      $0.date = date
       $0.continuousClock = clock
       var client = GitHubClient.testValue
       customize(&client)
@@ -308,6 +309,7 @@ struct GitHubFeatureTests {
       }
     }
     await store.send(.projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: [])) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.projectWorktreePairs[projectID] = []
       $0.inFlightFetchProjects.insert(projectID)
       $0.projectGitRoots[projectID] = gitRoot
@@ -343,6 +345,7 @@ struct GitHubFeatureTests {
       }
     }
     await store.send(.projectActivated(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.projectWorktreePairs[projectID] = [pair]
       $0.projectByWorktree[wid] = projectID
       $0.inFlightFetchProjects.insert(projectID)
@@ -448,6 +451,7 @@ struct GitHubFeatureTests {
     }
 
     await store.send(.projectRefreshRequested(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.projectGitRoots[projectID] = gitRoot
       $0.projectWorktreePairs[projectID] = [pair]
       $0.projectByWorktree[wid] = projectID
@@ -463,111 +467,279 @@ struct GitHubFeatureTests {
     }
   }
 
-  @Test
-  func pollTargetChangedArmsTickThenFetchesOnAdvance() async {
-    let clock = TestClock()
-    let projectID = ProjectID()
-    let wid = WorktreeID()
-    let gitRoot = URL(fileURLWithPath: "/tmp/test-repo")
-    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
-    let returnedSnapshot = Self.stubSnapshot(number: 7, headRefName: "feature/x")
-    let store = Self.makeStore(clock: clock) { client in
-      client.batchPullRequests = { _, _, _, _ in ["feature/x": returnedSnapshot] }
-    } customizeGit: { git in
-      git.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "w", repo: "r") }
-    }
-    // Arm only — retargeting never fetches immediately (projectActivated owns that).
-    await store.send(.pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
-      $0.pollTarget = projectID
-      $0.projectGitRoots[projectID] = gitRoot
-      $0.projectWorktreePairs[projectID] = [pair]
-      $0.projectByWorktree[wid] = projectID
-    }
-    // No cached batch yet → idle cadence (60 s). Advancing fires exactly one tick.
-    await clock.advance(by: .seconds(60))
-    await store.receive(.pollTick(projectID)) {
-      $0.inFlightFetchProjects.insert(projectID)
-      $0.loading.insert(wid)
-    }
-    await store.receive { action in
-      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
-      return pid == projectID
-    } assert: {
-      $0.inFlightFetchProjects.remove(projectID)
-      $0.loading.remove(wid)
-      $0.snapshotsByProject[projectID] = BatchedPullRequests(
-        host: "github.com", owner: "w", repo: "r",
-        byBranch: ["feature/x": returnedSnapshot],
-        seenBranches: ["feature/x"], fetchedAt: Self.fixedDate
-      )
-      $0.snapshots[wid] = returnedSnapshot
-      $0.snapshotLoadedAt[wid] = Self.fixedDate
-    }
-    // Tear down the re-armed timer so the store has no effect left in flight.
-    await store.send(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])) {
-      $0.pollTarget = nil
-    }
+  // MARK: - liveness poll
+
+  /// A fetch unit whose id sorts by `index`, so tie-breaks in the scheduler order are
+  /// deterministic. Its gitRoot names the repo the stubbed `remoteInfo` resolves to.
+  private static func pollUnit(_ index: Int) -> GitHubFeature.FetchUnit {
+    let uuid = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index))!
+    return GitHubFeature.FetchUnit(
+      projectID: ProjectID(raw: uuid),
+      gitRoot: URL(fileURLWithPath: "/repo/r\(index)"),
+      pairs: [.init(worktreeID: WorktreeID(), branch: "b\(index)")])
   }
 
-  @Test
-  func pollPausesWhenTargetNil() async {
-    let clock = TestClock()
-    let projectID = ProjectID()
-    let wid = WorktreeID()
-    let gitRoot = URL(fileURLWithPath: "/tmp/r")
-    let pair = GitHubFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "b")
-    let store = Self.makeStore(clock: clock) { client in
-      client.batchPullRequests = { _, _, _, _ in
-        Issue.record("no fetch should fire once the poll is paused")
+  /// Stubs the fetch chain so each call records the repo it fetched, optionally held
+  /// open on `gate` to keep it in flight.
+  private static func makePollStore(
+    initialState: GitHubFeature.State = .init(),
+    clock: TestClock<Duration>,
+    date: DateGenerator = .constant(fixedDate),
+    gate: Gate? = nil,
+    calls: LockIsolated<[String]>
+  ) -> TestStore<GitHubFeature.State, GitHubFeature.Action> {
+    let store = makeStore(initialState: initialState, clock: clock, date: date) { client in
+      client.batchPullRequests = { _, _, repo, _ in
+        calls.withValue { $0.append(repo) }
+        await gate?.wait()
         return [:]
       }
+    } customizeGit: { git in
+      git.remoteInfo = { root in
+        RemoteInfo(host: "github.com", owner: "w", repo: root.lastPathComponent)
+      }
     }
-    await store.send(.pollTargetChanged(projectID, gitRoot: gitRoot, worktreeBranches: [pair])) {
-      $0.pollTarget = projectID
-      $0.projectGitRoots[projectID] = gitRoot
-      $0.projectWorktreePairs[projectID] = [pair]
-      $0.projectByWorktree[wid] = projectID
+    store.exhaustivity = .off
+    return store
+  }
+
+  /// Seeds a polling store whose units all have a context to fetch with.
+  private static func pollState(
+    _ units: [GitHubFeature.FetchUnit],
+    selected: Set<ProjectID>,
+    lastStarted: [ProjectID: Date] = [:],
+    isPolling: Bool = true
+  ) -> GitHubFeature.State {
+    var state = GitHubFeature.State()
+    state.isPolling = isPolling
+    state.pollUnits = Set(units.map(\.projectID))
+    state.selectedUnits = selected
+    state.lastFetchStartedAt = lastStarted
+    for unit in units {
+      state.projectGitRoots[unit.projectID] = unit.gitRoot
+      state.projectWorktreePairs[unit.projectID] = unit.pairs
     }
-    await store.send(.pollTargetChanged(nil, gitRoot: nil, worktreeBranches: [])) {
-      $0.pollTarget = nil
-    }
-    // The armed tick was cancelled; advancing well past the cadence fires nothing.
-    await clock.advance(by: .seconds(120))
+    return state
   }
 
   @Test
-  func pollCadenceIsFastWhenAnyCheckIsRunning() {
+  func focusGainedFetchesEveryUnitSelectedFirstUnderTheConcurrencyCap() async {
+    let clock = TestClock()
+    let gate = Gate()
+    let calls = LockIsolated<[String]>([])
+    let (a, b, c) = (Self.pollUnit(3), Self.pollUnit(1), Self.pollUnit(2))
+    let store = Self.makePollStore(clock: clock, gate: gate, calls: calls)
+
+    await store.send(.pollUnitsChanged([a, b, c], selected: [a.projectID]))
+    #expect(store.state.inFlightFetchProjects.isEmpty)
+
+    await store.send(.appActiveChanged(true))
+    // The selected unit goes first; the next slot goes to the lowest id of the rest.
+    #expect(store.state.inFlightFetchProjects == [a.projectID, b.projectID])
+    #expect(store.state.pendingPollRefresh == [c.projectID])
+
+    gate.open()
+    // A finished fetch hands its slot to the queued unit without waiting for the timer.
+    await store.receive(\.projectBatchLoaded)
+    await store.receive(\.projectBatchLoaded)
+    await store.receive(\.projectBatchLoaded)
+    #expect(Set(calls.value) == ["r1", "r2", "r3"])
+    #expect(calls.value.count == 3)
+    #expect(store.state.pendingPollRefresh.isEmpty)
+
+    await store.send(.appActiveChanged(false))
+  }
+
+  @Test
+  func focusGainedSkipsUnitsFetchedWithinTheDebounce() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let (recent, stale) = (Self.pollUnit(1), Self.pollUnit(2))
+    let seed = Self.pollState(
+      [recent, stale], selected: [],
+      lastStarted: [
+        recent.projectID: Self.fixedDate.addingTimeInterval(-10),
+        stale.projectID: Self.fixedDate.addingTimeInterval(-31),
+      ],
+      isPolling: false)
+    let store = Self.makePollStore(initialState: seed, clock: clock, calls: calls)
+
+    await store.send(.appActiveChanged(true))
+    #expect(store.state.inFlightFetchProjects == [stale.projectID])
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r2"])
+
+    await store.send(.appActiveChanged(false))
+  }
+
+  @Test
+  func tickFetchesOnlyUnitsWhoseTierCadenceElapsed() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let (selected, other) = (Self.pollUnit(1), Self.pollUnit(2))
+    // Both cold. 61 s is past the selected cadence (60 s) but not the other's (300 s).
+    let started = Self.fixedDate.addingTimeInterval(-61)
+    let seed = Self.pollState(
+      [selected, other], selected: [selected.projectID],
+      lastStarted: [selected.projectID: started, other.projectID: started])
+    let store = Self.makePollStore(initialState: seed, clock: clock, calls: calls)
+
+    await store.send(.pollTick)
+    #expect(store.state.inFlightFetchProjects == [selected.projectID])
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r1"])
+
+    await store.send(.appActiveChanged(false))
+  }
+
+  @Test
+  func timerFiresWhenTheEarliestCadenceElapses() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let base = Self.fixedDate
+    let now = LockIsolated(base)
+    let unit = Self.pollUnit(1)
+    let seed = Self.pollState(
+      [unit], selected: [unit.projectID], lastStarted: [unit.projectID: Self.fixedDate],
+      isPolling: false)
+    let store = Self.makePollStore(
+      initialState: seed, clock: clock, date: DateGenerator { now.value }, calls: calls)
+
+    // Fetched just now: no catch-up, the timer arms for the selected cold cadence.
+    await store.send(.appActiveChanged(true))
+    #expect(store.state.inFlightFetchProjects.isEmpty)
+
+    now.setValue(base.addingTimeInterval(59))
+    await clock.advance(by: .seconds(59))
+    #expect(calls.value.isEmpty)
+
+    now.setValue(base.addingTimeInterval(60))
+    await clock.advance(by: .seconds(1))
+    await store.receive(\.pollTick)
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r1"])
+
+    await store.send(.appActiveChanged(false))
+  }
+
+  @Test
+  func pauseCancelsTheTimer() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let unit = Self.pollUnit(1)
+    let seed = Self.pollState(
+      [unit], selected: [unit.projectID], lastStarted: [unit.projectID: Self.fixedDate],
+      isPolling: false)
+    let store = Self.makePollStore(initialState: seed, clock: clock, calls: calls)
+
+    await store.send(.appActiveChanged(true))
+    await store.send(.appActiveChanged(false))
+    #expect(store.state.isPolling == false)
+    await clock.advance(by: .seconds(600))
+    #expect(calls.value.isEmpty)
+  }
+
+  @Test
+  func refreshAllFetchesEveryUnitRegardlessOfCadence() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let (a, b) = (Self.pollUnit(1), Self.pollUnit(2))
+    let seed = Self.pollState(
+      [a, b], selected: [a.projectID],
+      lastStarted: [a.projectID: Self.fixedDate, b.projectID: Self.fixedDate])
+    let store = Self.makePollStore(initialState: seed, clock: clock, calls: calls)
+
+    await store.send(.refreshAllRequested)
+    await store.receive(\.projectBatchLoaded)
+    await store.receive(\.projectBatchLoaded)
+    #expect(Set(calls.value) == ["r1", "r2"])
+
+    await store.send(.appActiveChanged(false))
+  }
+
+  @Test
+  func pollUnitsChangedMovesABadgeToTheNewBranch() async {
+    let projectID = ProjectID()
+    let moved = WorktreeID()
+    let gone = WorktreeID()
+    let kept = WorktreeID()
+    let oldSnap = Self.stubSnapshot(number: 1, headRefName: "old")
+    let newSnap = Self.stubSnapshot(number: 2, headRefName: "new")
+    let keptSnap = Self.stubSnapshot(number: 3, headRefName: "kept")
+    var seed = GitHubFeature.State()
+    seed.snapshots = [moved: oldSnap, gone: oldSnap, kept: keptSnap]
+    seed.snapshotsByProject[projectID] = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["old": oldSnap, "new": newSnap, "kept": keptSnap],
+      seenBranches: ["old", "new", "kept"], fetchedAt: Self.fixedDate)
+    let store = Self.makeStore(initialState: seed)
+    let pairs: [GitHubFeature.Action.WorktreeBranchPair] = [
+      .init(worktreeID: moved, branch: "new"),
+      .init(worktreeID: gone, branch: "no-pr"),
+      .init(worktreeID: kept, branch: "kept"),
+    ]
+    let unit = GitHubFeature.FetchUnit(
+      projectID: projectID, gitRoot: URL(fileURLWithPath: "/repo"), pairs: pairs)
+
+    // Not polling: only the context and the badges change, no fetch starts.
+    await store.send(.pollUnitsChanged([unit], selected: [])) {
+      $0.pollUnits = [projectID]
+      $0.projectGitRoots[projectID] = URL(fileURLWithPath: "/repo")
+      $0.projectWorktreePairs[projectID] = pairs
+      $0.projectByWorktree = [moved: projectID, gone: projectID, kept: projectID]
+      // A worktree that switched branches must not keep the old branch's PR.
+      $0.snapshots = [moved: newSnap, kept: keptSnap]
+    }
+  }
+
+  @Test
+  func pollTierIsHotWhenAnyCheckIsRunning() {
     let batched = BatchedPullRequests(
       host: "github.com", owner: "w", repo: "r",
       byBranch: ["b": Self.snapshot(state: .open, checkStatus: .inProgress, merge: .clean)],
       seenBranches: ["b"], fetchedAt: Self.fixedDate
     )
-    #expect(GitHubFeature.pollCadence(for: batched) == GitHubFeature.pollCadenceActive)
+    #expect(GitHubFeature.pollTier(for: batched) == .hot)
   }
 
   @Test
-  func pollCadenceIsFastWhenMergeStateUnknown() {
+  func pollTierIsHotWhenMergeStateUnknown() {
     let batched = BatchedPullRequests(
       host: "github.com", owner: "w", repo: "r",
       byBranch: ["b": Self.snapshot(state: .open, checkStatus: .completed, merge: .unknown)],
       seenBranches: ["b"], fetchedAt: Self.fixedDate
     )
-    #expect(GitHubFeature.pollCadence(for: batched) == GitHubFeature.pollCadenceActive)
+    #expect(GitHubFeature.pollTier(for: batched) == .hot)
   }
 
   @Test
-  func pollCadenceIsSlowWhenSettled() {
+  func pollTierIsWarmWhenOpenPullRequestsSettled() {
     let batched = BatchedPullRequests(
       host: "github.com", owner: "w", repo: "r",
       byBranch: ["b": Self.snapshot(state: .open, checkStatus: .completed, merge: .clean)],
       seenBranches: ["b"], fetchedAt: Self.fixedDate
     )
-    #expect(GitHubFeature.pollCadence(for: batched) == GitHubFeature.pollCadenceIdle)
+    #expect(GitHubFeature.pollTier(for: batched) == .warm)
   }
 
   @Test
-  func pollCadenceIsSlowWhenNoCachedBatch() {
-    #expect(GitHubFeature.pollCadence(for: nil) == GitHubFeature.pollCadenceIdle)
+  func pollTierIsColdWithoutAnOpenPullRequest() {
+    let merged = BatchedPullRequests(
+      host: "github.com", owner: "w", repo: "r",
+      byBranch: ["b": Self.snapshot(state: .merged, checkStatus: .inProgress, merge: .unknown)],
+      seenBranches: ["b"], fetchedAt: Self.fixedDate
+    )
+    #expect(GitHubFeature.pollTier(for: merged) == .cold)
+    #expect(GitHubFeature.pollTier(for: nil) == .cold)
+  }
+
+  @Test
+  func selectedUnitsPollFasterInEveryTier() {
+    for tier in [GitHubFeature.PollTier.hot, .warm, .cold] {
+      #expect(
+        GitHubFeature.pollInterval(tier, selected: true)
+          < GitHubFeature.pollInterval(tier, selected: false))
+    }
   }
 
   @Test
@@ -600,6 +772,7 @@ struct GitHubFeatureTests {
     // Delayed 2 s so GitHub settles the write before we read it back.
     await clock.advance(by: .seconds(2))
     await store.receive(.delayedProjectRefreshFired(projectID)) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.inFlightFetchProjects.insert(projectID)
       $0.loading.insert(wid)
     }
@@ -704,6 +877,7 @@ struct GitHubFeatureTests {
 
     await clock.advance(by: .seconds(2))
     await store.receive(.delayedProjectRefreshFired(projectID)) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.inFlightFetchProjects.insert(projectID)
       $0.loading.insert(keptWID)
     }
@@ -760,7 +934,7 @@ struct GitHubFeatureTests {
   }
 
   @Test
-  func pruneToCatalogDropsDeadKeysAndPausesThePoll() async {
+  func pruneToCatalogDropsDeadKeysAndTheirPollUnits() async {
     let live = ProjectID()
     let dead = ProjectID()
     let liveWID = WorktreeID()
@@ -783,7 +957,10 @@ struct GitHubFeatureTests {
     ]
     seed.inFlightFetchProjects = [dead]
     seed.queuedRefreshByProject = [dead]
-    seed.pollTarget = dead
+    seed.pollUnits = [live, dead]
+    seed.selectedUnits = [dead]
+    seed.pendingPollRefresh = [dead]
+    seed.lastFetchStartedAt = [live: Self.fixedDate, dead: Self.fixedDate]
     let store = Self.makeStore(initialState: seed)
 
     await store.send(
@@ -798,10 +975,13 @@ struct GitHubFeatureTests {
       $0.projectWorktreePairs = [live: [.init(worktreeID: liveWID, branch: "main")]]
       $0.inFlightFetchProjects = []
       $0.queuedRefreshByProject = []
-      // A poll left aimed at a removed Project keeps shelling out
+      // A poll left covering a removed Project keeps shelling out
       // `gh api graphql` against a repository the user unregistered, and each
       // success writes it straight back into the on-disk cache.
-      $0.pollTarget = nil
+      $0.pollUnits = [live]
+      $0.selectedUnits = []
+      $0.pendingPollRefresh = []
+      $0.lastFetchStartedAt = [live: Self.fixedDate]
     }
   }
 
@@ -823,6 +1003,7 @@ struct GitHubFeatureTests {
     }
 
     await store.send(.projectActivated(dead, gitRoot: gitRoot, worktreeBranches: [pair])) {
+      $0.lastFetchStartedAt[dead] = Self.fixedDate
       $0.projectGitRoots[dead] = gitRoot
       $0.projectWorktreePairs[dead] = [pair]
       $0.projectByWorktree[wid] = dead
@@ -832,6 +1013,7 @@ struct GitHubFeatureTests {
 
     // The Project leaves the catalog while `gh api graphql` is still running.
     await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.lastFetchStartedAt = [:]
       $0.projectGitRoots = [:]
       $0.projectWorktreePairs = [:]
       $0.projectByWorktree = [:]
@@ -859,6 +1041,7 @@ struct GitHubFeatureTests {
     let store = Self.makeStore(initialState: seed)
 
     await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.lastFetchStartedAt = [:]
       $0.projectGitRoots = [:]
       $0.projectWorktreePairs = [:]
       $0.projectByWorktree = [:]
@@ -891,6 +1074,7 @@ struct GitHubFeatureTests {
     let store = Self.makeStore(initialState: seed)
 
     await store.send(.pruneToCatalog(projectIDs: [], worktreeIDs: [])) {
+      $0.lastFetchStartedAt = [:]
       $0.projectGitRoots = [:]
       $0.inFlightFetchProjects = []
       $0.loading = []
@@ -972,6 +1156,7 @@ struct GitHubFeatureTests {
     await store.send(
       .projectActivated(project, gitRoot: gitRoot, worktreeBranches: [kept, gone])
     ) {
+      $0.lastFetchStartedAt[project] = Self.fixedDate
       $0.projectGitRoots[project] = gitRoot
       $0.projectWorktreePairs[project] = [kept, gone]
       $0.projectByWorktree = [keptWID: project, goneWID: project]
@@ -1043,7 +1228,7 @@ struct GitHubFeatureTests {
   func pruneToCatalogKeepsAPollWhoseProjectSurvived() async {
     let live = ProjectID()
     var seed = GitHubFeature.State()
-    seed.pollTarget = live
+    seed.pollUnits = [live]
     seed.projectGitRoots = [live: URL(fileURLWithPath: "/repo")]
     let store = Self.makeStore(initialState: seed)
 
@@ -1055,7 +1240,7 @@ struct GitHubFeatureTests {
   /// the catalog mutates underneath it.
   private final class Gate: @unchecked Sendable {
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var continuations: [CheckedContinuation<Void, Never>] = []
     private var opened = false
 
     func wait() async {
@@ -1066,7 +1251,7 @@ struct GitHubFeatureTests {
           c.resume()
           return
         }
-        continuation = c
+        continuations.append(c)
         lock.unlock()
       }
     }
@@ -1074,10 +1259,10 @@ struct GitHubFeatureTests {
     func open() {
       lock.lock()
       opened = true
-      let pending = continuation
-      continuation = nil
+      let pending = continuations
+      continuations = []
       lock.unlock()
-      pending?.resume()
+      for continuation in pending { continuation.resume() }
     }
   }
 

@@ -1,3 +1,4 @@
+import AppKit
 import CodansCore
 import CodansIPC
 import ComposableArchitecture
@@ -560,11 +561,16 @@ struct RootFeatureTests {
     }
 
     await store.send(.onLaunch)
-    // The launch sweep always arms the liveness poll. With an empty
-    // Catalog there is no active Project, so it fires the paused variant
-    // (`pollTargetChanged(nil, ...)`), a no-op state change. Receiving it before
-    // yielding the selection keeps the merged-effect action order deterministic.
-    await store.receive(\.gitHub.pollTargetChanged)
+    // The launch sweep always registers the poll units and reports whether the
+    // app is frontmost. An empty Catalog has no units, so no fetch or timer
+    // starts. Receiving them before yielding the selection keeps the
+    // merged-effect action order deterministic.
+    await store.receive(\.gitHub.pollUnitsChanged)
+    if NSApplication.shared.isActive {
+      await store.receive(\.gitHub.appActiveChanged) { $0.gitHub.isPolling = true }
+    } else {
+      await store.receive(\.gitHub.appActiveChanged)
+    }
 
     // `worktreeID: nil` is the key: the all-nil selection leaves State at its
     // defaults, so the test stays exhaustive without any downstream diff chain.
@@ -1081,6 +1087,7 @@ struct RootFeatureTests {
       // `git diff` subprocess first and blow the receive window under
       // parallel suite load. A no-op fetch keeps the effect deterministic.
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitHubFetch(&$0)
     }
     store.exhaustivity = .off
 
@@ -1111,6 +1118,7 @@ struct RootFeatureTests {
       // Same no-op fetch as the match-arm test: keep the effect free of
       // real `git diff` subprocesses so finish() returns promptly.
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitHubFetch(&$0)
     }
     store.exhaustivity = .off
 
@@ -1119,6 +1127,50 @@ struct RootFeatureTests {
     // by asserting no leftover effects produced a `headChangedForCurrentWorktree`.
     await store.send(.worktreeHeadChanged(worktreeB))
     await store.finish()
+  }
+
+  @Test
+  func worktreeHeadChangedRefreshesTheOwningProjectNotTheSelectedOne() async {
+    // A HEAD move in a Project that is not selected must refresh that
+    // Project's PR data; refreshing the selected one leaves the moved row
+    // showing the old branch's PR.
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    var catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB
+    )
+    let selected = Project(
+      id: ProjectID(), name: "other", rootPath: "/other", gitRoot: "/other",
+      worktrees: [], selectedWorktreeID: nil)
+    catalog.projects.append(selected)
+    catalog.selectedProjectID = selected.id
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitHubFetch(&$0)
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeHeadChanged(worktreeB))
+    await store.receive {
+      guard case .gitHub(.projectActivated(let refreshed, _, _)) = $0 else { return false }
+      return refreshed == projectID
+    }
+    await store.finish()
+  }
+
+  /// A HEAD change now refreshes the owning Project's PR data; stub the fetch
+  /// chain so it resolves without a live `git` / `gh` subprocess.
+  private static func stubGitHubFetch(_ values: inout DependencyValues) {
+    values.date = .constant(Date(timeIntervalSince1970: 1_700_000_000))
+    values[GitServiceClient.self].remoteInfo = { _ in
+      RemoteInfo(host: "github.com", owner: "w", repo: "r")
+    }
+    values[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
   }
 
   // MARK: - Agents-panel row tap reveals the worktree
