@@ -38,7 +38,9 @@ struct AgentStatus: AsyncParsableCommand {
       done, error), when it last changed, and where the pane lives. An agent
       that reports OSC 7501 program status (source: programStatus) decides
       its own state; for the others the state is derived from the pane's
-      screen (source: screen), so it can lag a moment behind the agent.
+      screen (source: screen), so it can lag a moment behind the agent. A
+      pane that is not open in the app has no screen to read, so its state
+      is the last one seen (source: cached).
       `agent wait` blocks on it.
       """
   )

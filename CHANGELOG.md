@@ -10,6 +10,14 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Agents in panes you have not opened stay current.** An agent in a pane
+  restored at launch, or in a hidden pane whose terminal was released while
+  idle, still updates its Agents View row when it reports its own state
+  (OSC 7501), and its notifications and title still arrive. When such a
+  pane's session ends, its row goes away within about two seconds.
+  `agent status` reports `source: cached` for a state that comes from a
+  screen nobody is reading.
+
 ### Changed
 
 ### Deprecated

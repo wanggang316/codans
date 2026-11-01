@@ -458,7 +458,8 @@ something; `blockedKind` says permission, question, or auth when known),
 program status (Claude Code, Pi, omp) sets its own state (`source:
 programStatus`, often with a `message`); for other agents the state is
 derived from the pane's screen (`source: screen`), so it can lag a moment
-behind the agent. `--until finished` still works as the old name of
+behind the agent. A pane that is not open in the app has no screen to
+read: its screen-derived state is the last one seen (`source: cached`). `--until finished` still works as the old name of
 `done`. `wait` resolves
 server-side, so no polling loop is needed. Past `--wait-timeout` (1–600 s,
 default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
