@@ -1,0 +1,27 @@
+$ codans pane show p2 --json | grep isLive
+    "isLive" : false,
+
+$ codans pane capture <uuid> --lines 5 --json
+{
+  "error" : {
+    "code" : "PANE_NOT_LIVE",
+    "hint" : "run `codans pane focus 7FF83E21-C1F2-42B9-96C1-3EF13486B19C` or open its tab in Codans, then retry",
+    "message" : "pane has no attached terminal: 7FF83E21-C1F2-42B9-96C1-3EF13486B19C"
+  },
+  "schemaVersion" : "codans.cli.pane.capture.v1"
+}
+exit=3
+
+$ codans pane capture <bogus-uuid> --json
+{
+  "error" : {
+    "code" : "NOT_FOUND",
+    "details" : {
+      "id" : "00000000-0000-0000-0000-000000000000",
+      "kind" : "pane"
+    },
+    "message" : "pane not found: 00000000-0000-0000-0000-000000000000"
+  },
+  "schemaVersion" : "codans.cli.pane.capture.v1"
+}
+exit=2

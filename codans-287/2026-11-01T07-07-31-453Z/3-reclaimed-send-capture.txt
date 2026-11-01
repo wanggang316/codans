@@ -1,0 +1,23 @@
+$ codans pane show <reclaimed> --json | grep isLive
+    "isLive" : true,
+
+$ time codans pane send <reclaimed> "echo captured-marker" --capture --json
+{
+  "data" : {
+    "busyObserved" : false,
+    "bytes" : 21,
+    "completed" : true,
+    "output" : "captured-marker\n\ncodans-287/apps/mac on  agent/codans-287 [!] via  v6.4 on    ",
+    "paneID" : "7FF83E21-C1F2-42B9-96C1-3EF13486B19C",
+    "waitedMs" : 1513
+  },
+  "schemaVersion" : "codans.cli.pane.send.v1"
+}
+exit=0 elapsed=1s
+
+$ codans pane capture <same pane> --lines 4
+captured-marker
+
+codans-287/apps/mac on  agent/codans-287 [!] via  v6.4 on    
+❯ 
+exit=0
