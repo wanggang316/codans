@@ -40,8 +40,10 @@ Upgrading zig was not an option. The ghostty fork is based on v1.3.1, whose
    (ghostty-org/ghostty#11991) was closed without a build-side fix, because
    the build runner itself fails to link before `build.zig` can run a check.
    Zig finds the SDK only through `xcrun --sdk macosx --show-sdk-path`
-   (`std/zig/system/darwin.zig`). The Command Line Tools on the same machine
-   still ship `MacOSX15.4.sdk`, whose stubs list `arm64-macos`.
+   (`std/zig/system/darwin.zig`), so `SDKROOT` has no effect. Older SDKs
+   (e.g. the Command Line Tools' `MacOSX15.4.sdk`) still list
+   `arm64-macos`, but a machine with only current SDKs (Xcode 27 and its
+   Command Line Tools) has none.
 
 2. **libtool drops unaligned archive members.** Ghostty merges its static
    libraries with `libtool -static -o libghostty-fat.a <libs…>`
@@ -71,13 +73,23 @@ Upgrading zig was not an option. The ghostty fork is based on v1.3.1, whose
 - **SDK: `apps/mac/scripts/xcode-compat/`.**
   - Both zig build scripts source `activate.sh`. It runs just before
     `zig build`, and only when the build fingerprint misses.
-  - If the resolved SDK's `libSystem.tbd` has no `<arch>-macos` target,
-    `activate.sh` picks the newest installed SDK that has one (Xcode's
-    platform directory first, then the Command Line Tools). It exports that
-    SDK as `CODANS_ZIG_MACOS_SDK` and prepends `bin/` to PATH.
-  - `bin/xcrun` answers exactly zig's query with that SDK and forwards
-    everything else to `/usr/bin/xcrun`.
-  - If no installed SDK qualifies, the build stops with an explanation.
+  - If the resolved SDK's `libSystem.tbd` has no `arm64-macos` target,
+    `activate.sh` builds a view of that same SDK with `sdk-view.pl`, under
+    `apps/mac/.build/xcode-compat/<key>/`. Directories that hold `.tbd`
+    stubs are real directories in the view; each stub lists `arm64-macos`
+    next to every `arm64e-macos`; everything else is a symlink to the real
+    SDK. This is the same arm64 → arm64e fallback that Apple's `ld` makes
+    and that ziglang/zig#31673 adds to zig. The key covers the SDK path,
+    the contents of its `libSystem.B.tbd`, and `xcode-compat/`, so an
+    in-place Xcode update builds a new view. A build takes about 10 s.
+  - The view's `usr/include/math.h` wraps the real header and defines
+    `INFINITY` / `NAN` when they are missing. The macOS 27 `math.h` gets
+    them from Clang's `float.h` through `__need_infinity_nan`, which zig
+    0.15.2's bundled `float.h` predates, so libc++ (`<random>`) fails with
+    `use of undeclared identifier 'INFINITY'`.
+  - `activate.sh` exports the view as `CODANS_ZIG_MACOS_SDK` and prepends
+    `bin/` to PATH. `bin/xcrun` answers exactly zig's query with the view
+    and forwards everything else to `/usr/bin/xcrun`.
   - The wrapper does nothing unless the variable is set. Ghostty's inner
     `xcodebuild` inherits PATH but no other environment variables
     (`GhosttyXcodebuild.zig`), so it keeps the stock SDK and linker.
