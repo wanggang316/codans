@@ -105,6 +105,9 @@ final class AgentStateStore {
     case programStatus
     /// The rendered active region (agent-specific classifier).
     case screen
+    /// The pane has no surface, so its screen is not read: the state is
+    /// the last one derived, or the one restored at launch.
+    case cached
   }
 
   /// Public, read-only view of bound agents. `@Observable` tracks
@@ -169,6 +172,10 @@ final class AgentStateStore {
   }
 
   private typealias AgentRawState = PaneAttentionInterpreter.AgentActivityState
+
+  /// Panes without a surface. A passive watcher still delivers their
+  /// program status, but nothing reads their screen.
+  @ObservationIgnored private var detachedPanes: Set<PaneID> = []
 
   private var scratch: [PaneID: Scratch] = [:]
 
@@ -426,6 +433,7 @@ final class AgentStateStore {
   /// Takes a flat `Set<PaneID>` rather than a `Catalog` so the store stays
   /// free of hierarchy imports — the catalog walk lives in the wiring layer.
   func reconcileMembership(livePaneIDs: Set<PaneID>) {
+    detachedPanes.formIntersection(livePaneIDs)
     let stale = entries.keys.filter { !livePaneIDs.contains($0) }
     guard !stale.isEmpty else { return }
     for paneID in stale {
@@ -436,6 +444,27 @@ final class AgentStateStore {
       scratch.removeValue(forKey: paneID)
       attentionStops.removeValue(forKey: paneID)
     }
+  }
+
+  /// `paneID` lost its surface (`true`) or got one back (`false`). While
+  /// detached, a state that the screen decided reports `.cached`.
+  func setDetached(_ paneID: PaneID, _ detached: Bool) {
+    if detached {
+      detachedPanes.insert(paneID)
+    } else {
+      detachedPanes.remove(paneID)
+    }
+    guard var entry = entries[paneID] else { return }
+    let source = observedSource(entry.source == .cached ? .screen : entry.source, paneID: paneID)
+    guard entry.source != source else { return }
+    entry.source = source
+    entries[paneID] = entry
+  }
+
+  /// The source to report: a screen-derived state of a detached pane is
+  /// cached, not observed.
+  private func observedSource(_ source: AgentStateSource, paneID: PaneID) -> AgentStateSource {
+    source == .screen && detachedPanes.contains(paneID) ? .cached : source
   }
 
   /// Pre-seed the registry from a persisted catalog at launch. Each
@@ -723,7 +752,7 @@ final class AgentStateStore {
     guard var entry = entries[paneID] else { return }
     var updated = entry
     updated.state = newState
-    updated.source = source
+    updated.source = observedSource(source, paneID: paneID)
     updated.blockedKind = blockedKind
     updated.message = message
     guard updated != entry else { return }

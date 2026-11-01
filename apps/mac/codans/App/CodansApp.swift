@@ -2271,6 +2271,26 @@ final class AppState {
       }
     )
     self.agentBinder = binder
+    // Panes without a surface (restored but not opened yet, or reclaimed
+    // while idle) are observed by a passive zmx watcher. Their screen is not
+    // read, so a screen-derived state is marked cached; when the daemon
+    // exits, the agent row goes with it, like a pane whose agent exited.
+    engine.onDetachedPaneChange = { [weak registry, weak binder] paneID, change in
+      switch change {
+      case .detached:
+        registry?.setDetached(paneID, true)
+      case .observationEnded:
+        registry?.setDetached(paneID, false)
+      case .daemonExited:
+        registry?.setDetached(paneID, false)
+        binder?.unbind(paneID)
+      }
+    }
+    // Without the session catalog this instance does not own the panes'
+    // daemons (second instance, no resume), so it does not watch them.
+    if self.sessionCoordinator != nil {
+      engine.watchDetachedPanes(manager.catalog.visiblePaneIDs())
+    }
     // Wire 3: keystroke fan-out. The detector continues to read
     // `snapshot()` per-event; the new `onActivity` callback fires on
     // every recorded keystroke so the registry can clear waiting-for-
