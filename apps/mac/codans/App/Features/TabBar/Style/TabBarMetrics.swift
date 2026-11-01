@@ -12,13 +12,14 @@ enum TabBarMetrics {
   /// Height of the full Tab bar row: the track plus `trackBottomInset`.
   static let barHeight: CGFloat = trackHeight + trackBottomInset
 
-  /// Recessed capsule track that hosts the chips.
-  static let trackHeight: CGFloat = 34
+  /// Recessed capsule track that hosts the chips. Track height and chip
+  /// inset match Safari's tab bar (2x capture: 64-px track, 58-px chip).
+  static let trackHeight: CGFloat = 32
   /// The system bar sits flush under the toolbar and leaves this gap to
   /// the content below it.
   static let trackBottomInset: CGFloat = 8
   /// Chips are inset from the track on every side by this much.
-  static let trackContentInset: CGFloat = 3
+  static let trackContentInset: CGFloat = 1.5
 
   /// Chip height inside the track. The hover / selected capsule fills the
   /// whole chip.
