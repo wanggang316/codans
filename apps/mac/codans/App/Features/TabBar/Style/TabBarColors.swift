@@ -24,17 +24,21 @@ enum TabBarColors {
     dark: .white.withAlphaComponent(0.048)
   )
 
-  /// Raised capsule of the selected chip. Opaque in light mode: its drop
-  /// shadow would otherwise show through a translucent fill and grey it.
+  /// Raised capsule of the selected chip. Translucent in both appearances,
+  /// like the system's glass tab: the window backdrop takes on the desktop
+  /// tint and the accent color, and an opaque neutral fill stands out
+  /// against it. The light alpha lands on the sampled system value (#F8F8F8)
+  /// over the track on a neutral backdrop.
   static let activeBackground: Color = adaptive(
-    light: NSColor(srgbRed: 248 / 255, green: 248 / 255, blue: 248 / 255, alpha: 1),
+    light: .white.withAlphaComponent(0.8),
     dark: .white.withAlphaComponent(0.14)
   )
 
   /// Selected capsule while the pointer is over it — a codans addition (the
-  /// system bar keeps the selected tab unchanged on hover).
+  /// system bar keeps the selected tab unchanged on hover). The light alpha
+  /// lands on #F0F0F0 over the track on a neutral backdrop.
   static let activeHoverBackground: Color = adaptive(
-    light: NSColor(srgbRed: 240 / 255, green: 240 / 255, blue: 240 / 255, alpha: 1),
+    light: .white.withAlphaComponent(0.57),
     dark: .white.withAlphaComponent(0.18)
   )
 
