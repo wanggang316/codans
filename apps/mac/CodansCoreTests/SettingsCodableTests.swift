@@ -287,3 +287,25 @@ struct LegacyBranchConflictKeyTests {
     #expect(result.fetchRemoteOnCreate == false, "Expected sibling key preserved")
   }
 }
+
+/// `general.reclaimHiddenSurfaces` gates idle surface reclaim. Absent means
+/// on, so existing installs keep reclaiming.
+struct ReclaimHiddenSurfacesCodableTests {
+  @Test
+  func defaultsToOn() throws {
+    #expect(GeneralSettings.default.reclaimHiddenSurfaces)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(
+      GeneralSettings.self, from: Data(#"{}"#.utf8))
+    #expect(decoded.reclaimHiddenSurfaces)
+  }
+
+  @Test
+  func offRoundTrips() throws {
+    var general = GeneralSettings.default
+    general.reclaimHiddenSurfaces = false
+    let data = try JSONEncoder.touchCodeDefault.encode(general)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(GeneralSettings.self, from: data)
+    #expect(decoded.reclaimHiddenSurfaces == false)
+    #expect(decoded == general)
+  }
+}

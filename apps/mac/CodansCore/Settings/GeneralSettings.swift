@@ -119,6 +119,12 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// re-enable starts a fresh anonymous id.
   public var crashReportsEnabled: Bool
 
+  /// Whether the app detaches the terminal surfaces of panes that stay
+  /// hidden, on a timer and on memory pressure (see `surface-reclaim.md`).
+  /// Default `true`. Off keeps every surface attached; panes already
+  /// detached stay detached until shown.
+  public var reclaimHiddenSurfaces: Bool
+
   /// User-defined commands that are available across every Project — the
   /// global counterpart to `ProjectSettings.scripts`. Surfaced in the
   /// worktree-header Command menu, the Command Palette, and the
@@ -143,6 +149,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
     agentsViewAutoSort: Bool = true,
     crashReportsEnabled: Bool = true,
+    reclaimHiddenSurfaces: Bool = true,
     globalScripts: [ScriptDefinition] = []
   ) {
     self.appearance = appearance
@@ -160,6 +167,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.agentsViewDisplayMode = agentsViewDisplayMode
     self.agentsViewAutoSort = agentsViewAutoSort
     self.crashReportsEnabled = crashReportsEnabled
+    self.reclaimHiddenSurfaces = reclaimHiddenSurfaces
     self.globalScripts = globalScripts
   }
 
@@ -174,6 +182,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case agentsViewDisplayMode
     case agentsViewAutoSort
     case crashReportsEnabled
+    case reclaimHiddenSurfaces
     case globalScripts
     /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
     /// `init(from:)` so legacy settings files migrate transparently on first launch.
@@ -262,6 +271,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     // with fresh installs; the user can opt out from Settings → General.
     self.crashReportsEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .crashReportsEnabled) ?? true
+    // Older settings files predate this field. Default to on: reclaim
+    // shipped before the setting existed.
+    self.reclaimHiddenSurfaces =
+      try container.decodeIfPresent(Bool.self, forKey: .reclaimHiddenSurfaces) ?? true
     // Older settings files predate this field. Absent → empty list; the
     // worktree-header Command menu and palette simply show no global
     // commands until the user adds one in Settings → Global Commands.
@@ -291,6 +304,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
     try container.encode(agentsViewDisplayMode, forKey: .agentsViewDisplayMode)
     try container.encode(crashReportsEnabled, forKey: .crashReportsEnabled)
+    try container.encode(reclaimHiddenSurfaces, forKey: .reclaimHiddenSurfaces)
     // Omit-when-empty: keep `general` free of an empty `globalScripts: []`
     // array on installs that never define a global command.
     if !globalScripts.isEmpty {

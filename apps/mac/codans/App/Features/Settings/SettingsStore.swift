@@ -241,6 +241,12 @@ final class SettingsStore {
     scheduleSave()
   }
 
+  func setReclaimHiddenSurfaces(_ enabled: Bool) {
+    guard settings.general.reclaimHiddenSurfaces != enabled else { return }
+    settings.general.reclaimHiddenSurfaces = enabled
+    scheduleSave()
+  }
+
   /// Toggles crash reporting at runtime. Persists the new value to
   /// settings.json. Disabling here is a hint for *future* launches — the
   /// Sentry SDK is bootstrapped once at `init()` from the on-disk value, so
