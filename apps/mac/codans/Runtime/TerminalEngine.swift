@@ -141,6 +141,9 @@ final class TerminalEngine {
   private var reclaimedSurfaceSizes: [PaneID: CGSize] = [:]
   private var reclaimSweepTask: Task<Void, Never>?
   private var memoryPressureMonitor: MemoryPressureMonitor?
+  /// Where the sweep finds and detaches live surfaces: the Ghostty runtime,
+  /// or a fake in headless tests.
+  var reclaimHost: (any ReclaimableSurfaceHost)?
 
   // MARK: Detached-pane watchers
 
@@ -177,6 +180,7 @@ final class TerminalEngine {
     self.ghosttyRuntime = ghosttyRuntime
     self.foregroundJobReader = foregroundJobReader
     self.clock = clock
+    self.reclaimHost = ghosttyRuntime
     // Back-pointer so the libghostty action decoder can emit events
     // (paneInfoChanged, paneActionRequested, etc.) onto this engine's
     // stream. Weak on the runtime side; no cycle.
@@ -924,7 +928,7 @@ final class TerminalEngine {
   /// Shared per-pane tail of both foreground samplers (local poll loop and
   /// remote host probe): empty-sample hysteresis, change detection, binder
   /// delivery, and the viewport nudge.
-  private func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
+  func processForegroundSample(paneID: PaneID, next: ForegroundJob, now: Date) {
     if next.isEmpty, foregroundJobSnapshots[paneID] == nil {
       hierarchy.updateProcessSample(paneID: paneID, job: next, now: now)
       return
@@ -1028,15 +1032,13 @@ final class TerminalEngine {
   /// no lifecycle event is emitted and the sampling state (foreground
   /// snapshot, process row) is kept, so the pane still looks alive to its
   /// observers; only the live poll stops until `ensureSurface` re-attaches.
-  func reclaimSurface(for paneID: PaneID) {
-    guard let surface = ghosttyRuntime?.surface(for: paneID) else { return }
-    // Detaching ends the `zmx attach` child; make sure that cannot surface
-    // as a pane exit.
-    surface.onClose = nil
-    reclaimedSurfaceSizes[paneID] = surface.view.bounds.size
+  /// Returns whether a surface was detached.
+  @discardableResult
+  func reclaimSurface(for paneID: PaneID) -> Bool {
+    guard let host = reclaimHost else { return false }
     disposeOutputBuffer(for: paneID)
-    surface.close()
-    ghosttyRuntime?.unregister(paneID: paneID)
+    guard let size = host.detachSurface(for: paneID) else { return false }
+    reclaimedSurfaceSizes[paneID] = size
     foregroundJobPaneIDs.remove(paneID)
     lastDisplayedAt.removeValue(forKey: paneID)
     reclaimedPanes.insert(paneID)
@@ -1046,6 +1048,7 @@ final class TerminalEngine {
     Self.logger.info(
       "surface.reclaim pane=\(paneID.raw.uuidString.prefix(8), privacy: .public)"
     )
+    return true
   }
 
   // MARK: - Detached-pane watchers
@@ -1144,33 +1147,6 @@ final class TerminalEngine {
     }
   }
 
-  /// What the sweep reads from one live surface and the engine's sampling
-  /// state for its pane.
-  struct LiveSurfaceSample: Equatable, Sendable {
-    var paneID: PaneID
-    var isDisplayed: Bool
-    var isReady: Bool
-    var foregroundJob: ForegroundJob?
-    var isRemote: Bool
-  }
-
-  /// Test seam: the live surfaces a sweep sees. Headless tests have no
-  /// `GhosttyRuntime`, so they inject samples to drive the sweep's decisions.
-  var liveSurfaceSamplesOverride: (() -> [LiveSurfaceSample])?
-
-  private func liveSurfaceSamples() -> [LiveSurfaceSample] {
-    if let liveSurfaceSamplesOverride { return liveSurfaceSamplesOverride() }
-    return (ghosttyRuntime?.allLiveSurfaces() ?? []).map { surface in
-      LiveSurfaceSample(
-        paneID: surface.paneID,
-        isDisplayed: surface.isDisplayed,
-        isReady: surface.state == .ready,
-        foregroundJob: foregroundJobSnapshots[surface.paneID],
-        isRemote: remoteForegroundPanes[surface.paneID] != nil
-      )
-    }
-  }
-
   /// One sweep: note which surfaces are on screen, then reclaim the ones the
   /// policy accepts. Returns the reclaimed panes.
   @discardableResult
@@ -1204,7 +1180,7 @@ final class TerminalEngine {
   private func sweepReclaimableSurfaces(ignoringThresholds: Bool) -> [PaneID] {
     let now = clock()
     var reclaimed: [PaneID] = []
-    for sample in liveSurfaceSamples() {
+    for sample in reclaimHost?.reclaimableSurfaces() ?? [] {
       let paneID = sample.paneID
       // Surfaces outside the catalog (the master terminal) are not ours to
       // manage.
@@ -1218,13 +1194,14 @@ final class TerminalEngine {
       let candidate = SurfaceReclaimPolicy.Candidate(
         hiddenFor: now.timeIntervalSince(hiddenSince),
         quietFor: now.timeIntervalSince(viewportChangedAt[paneID] ?? .distantPast),
-        foregroundJob: sample.foregroundJob,
-        isRemote: sample.isRemote,
+        foregroundJob: foregroundJobSnapshots[paneID],
+        isRemote: remoteForegroundPanes[paneID] != nil,
         isSurfaceReady: sample.isReady,
         isVetoed: reclaimVeto(paneID)
       )
-      if reclaimPolicy.shouldReclaim(candidate, ignoringThresholds: ignoringThresholds) {
+      if reclaimPolicy.shouldReclaim(candidate, ignoringThresholds: ignoringThresholds),
         reclaimSurface(for: paneID)
+      {
         reclaimed.append(paneID)
       }
     }
