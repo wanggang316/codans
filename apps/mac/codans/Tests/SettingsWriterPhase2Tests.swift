@@ -28,6 +28,17 @@ struct SettingsWriterPhase2Tests {
     #expect(saved.general.defaultGitViewerID == GeneralSettings.builtInGitViewerID)
   }
 
+  @Test func reclaimHiddenSurfacesPersistsOff() throws {
+    let (store, url) = makeStore()
+    defer { try? FileManager.default.removeItem(at: url) }
+    #expect(store.settings.general.reclaimHiddenSurfaces)
+    store.setReclaimHiddenSurfaces(false)
+    #expect(!store.settings.general.reclaimHiddenSurfaces)
+    try store.saveNow()
+    let saved = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: url))
+    #expect(!saved.general.reclaimHiddenSurfaces)
+  }
+
   // MARK: - setProjectGitField
 
   @Test

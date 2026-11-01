@@ -53,6 +53,15 @@ Debug 构建另外监听 Darwin 通知 `dev.codans.debug.memory-pressure`，`not
 
 veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态和命令队列位于 Runtime 层之上。窗口被遮挡或最小化时 surface 仍视为「在窗口内」，用户回来时不会遇到重新 attach。
 
+### 开关
+
+Settings → General → Memory 的「Release terminal views of hidden panes」（`GeneralSettings.reclaimHiddenSurfaces`，默认开）控制回收：
+
+- 关闭时，定时扫描与内存压力扫描都不回收任何 surface。扫描仍刷新显示中 pane 的 `lastDisplayedAt`，重新打开后隐藏时长从 pane 真正离开屏幕时算起。
+- 已回收的 pane 保持 detach，直到再次显示时按原路径重新 attach。
+- 引擎在每次扫描时读取 `TerminalEngine.isReclaimEnabled`（app 层注入，读 `SettingsStore`），因此修改即时生效，不需要重启。
+- 开启时 `CODANS_SURFACE_RECLAIM_SECONDS` 照常覆盖阈值；关闭时该变量不起作用。
+
 ### 重新 attach 与已回收状态
 
 - 重新 attach 以回收时 surface view 的尺寸起步。libghostty 在 `ghostty_surface_new` 内就按 surface 的初始尺寸 fork `zmx attach`，此时还没有任何布局；`zmx attach` 把这个尺寸作为 Init 发给 daemon。若用占位尺寸（libghostty 默认 800×600 px，或 view 的 800×600 pt 占位 frame），正在运行的 TUI 会先被 resize 到窄宽度再回到真实宽度，有时停在窄宽度直到用户改变窗口尺寸。因此 fork 的 `ghostty_surface_config_s` 增加了 `initial_width` / `initial_height`。初始尺寸取自将要显示该 pane 的槽位：`LeafView` 把 `GeometryReader` 量到的尺寸随 `PaneHostFeature.task(slotSize:)` 传给 `ensureSurface`。回收时记下的 view 尺寸只在没有槽位尺寸时兜底：只靠它时，实测仍有重新 attach 从 800×600 pt 占位起步（zmx 日志 `init resize rows=42 cols=113`，随后才是真实的 229 列），Claude Code 停在约一半宽度。
@@ -67,10 +76,11 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 - 重新挂接时 watcher 先停、surface 再连上 daemon；这之间写出的 OSC 信号两边都收不到。agent 的下一份报告会纠正状态，见 [active-agents-view.md](active-agents-view.md#未挂接-pane-的观测)。
 - 已回收 pane 不计入 `runningPaneCount`（force-remove 确认文案中的进程数），会少算。
 - 发往已回收 pane 的排队命令要等 pane 再次显示后才发出，与「从未打开过的 pane」一致。
-- 阈值是常量，没有设置项。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。
+- 阈值是常量，不能在设置里调整，只能整体开关（见[开关](#开关)）。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。
 
 ## 验证
 
+- `TerminalEngineMemoryPressureTests.disabledReclaimDetachesNothing` 覆盖开关：关闭时定时与压力扫描都不回收，重新开启后下一次扫描即回收。`ReclaimHiddenSurfacesCodableTests` 与 `SettingsWriterPhase2Tests` 覆盖默认值与持久化。
 - `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值与最近度、其余规则仍生效。
 - `WorktreeSelectionHistoryTests` 覆盖最近度记录：最新在前、重选不重复、超过 3 个时最旧的移出。`TerminalEngineMemoryPressureTests` 覆盖引擎侧：最近 3 个 worktree 的选中 tab 不被定时扫描回收，后台 tab 与较旧 worktree 照常回收，第 4 个 worktree 被选中后最旧的选中 tab 被回收；压力扫描忽略最近度；选择变化被记录。
 - `TerminalEngineMemoryPressureTests` 用假的 `ReclaimableSurfaceHost`（生产中是 `GhosttyRuntime`）注入 surface 与压力事件：隐藏且空闲的 shell / agent 被 detach，并记为已回收、发出解除挂接通知、启动被动 watcher；显示中、被 veto、运行命令、前台未知的 pane 保留；detach 失败的 pane 不计入回收数。远程 pane 的规则由策略测试覆盖。

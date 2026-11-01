@@ -107,6 +107,13 @@ struct SettingsGeneralView: View {
     )
   }
 
+  private var reclaimHiddenSurfacesBinding: Binding<Bool> {
+    Binding(
+      get: { settingsStore.settings.general.reclaimHiddenSurfaces },
+      set: { settingsStore.setReclaimHiddenSurfaces($0) }
+    )
+  }
+
   private var crashReportsEnabledBinding: Binding<Bool> {
     Binding(
       get: { settingsStore.settings.general.crashReportsEnabled },
@@ -236,6 +243,19 @@ struct SettingsGeneralView: View {
           Text("Compact").tag(AgentsViewDisplayMode.compact)
         }
         .pickerStyle(.menu)
+      }
+
+      Section {
+        Toggle(isOn: reclaimHiddenSurfacesBinding) {
+          Text("Release terminal views of hidden panes")
+          Text(
+            "Frees memory held by panes hidden for 20 minutes, or sooner when "
+              + "the system runs low. The shell keeps running and the pane "
+              + "reconnects when shown."
+          )
+        }
+      } header: {
+        Text("Memory")
       }
 
       Section {

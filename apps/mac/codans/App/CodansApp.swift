@@ -728,6 +728,9 @@ final class AppState {
     // SettingsStore loads itself (and migrates legacy formats) during `init(fileURL:)`.
     let manager = hierarchyManager
     let settings = settingsStore
+    engine.isReclaimEnabled = { [weak settings] in
+      settings?.settings.general.reclaimHiddenSurfaces ?? true
+    }
 
     // Build the editor + hierarchy clients once so the reducer stack AND the IPC
     // handlers share the exact same live instances — avoids two parallel

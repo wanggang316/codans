@@ -10,6 +10,12 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Hidden panes give memory back sooner, and you can turn it off.** When
+  macOS reports memory pressure, Codans releases the terminal views of
+  hidden panes at once instead of after 20 minutes. Panes in the selected
+  tab of the three most recently used worktrees stay ready. Settings →
+  General → Memory → "Release terminal views of hidden panes" turns the
+  release off. The shell keeps running either way.
 - **Agents in panes you have not opened stay current.** An agent in a pane
   restored at launch, or in a hidden pane whose terminal was released while
   idle, still updates its Agents View row when it reports its own state
