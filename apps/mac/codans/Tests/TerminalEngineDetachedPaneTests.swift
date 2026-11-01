@@ -26,7 +26,7 @@ struct TerminalEngineDetachedPaneTests {
     let engine: TerminalEngine
     let tempURL: URL
     var watchers: [FakeWatcher] = []
-    var changes: [(PaneID, TerminalEngine.DetachedPaneChange)] = []
+    var exited: [PaneID] = []
 
     init() {
       tempURL = FileManager.default.temporaryDirectory
@@ -39,15 +39,15 @@ struct TerminalEngineDetachedPaneTests {
         self.watchers.append(watcher)
         return watcher
       }
-      engine.onDetachedPaneChange = { [unowned self] paneID, change in
-        self.changes.append((paneID, change))
+      engine.onDetachedDaemonExited = { [unowned self] paneID in
+        self.exited.append(paneID)
       }
     }
 
     deinit { try? FileManager.default.removeItem(at: tempURL) }
 
-    func changeKinds(for paneID: PaneID) -> [TerminalEngine.DetachedPaneChange] {
-      changes.filter { $0.0 == paneID }.map(\.1)
+    func exitCount(for paneID: PaneID) -> Int {
+      exited.filter { $0 == paneID }.count
     }
   }
 
@@ -68,7 +68,7 @@ struct TerminalEngineDetachedPaneTests {
     #expect(harness.watchers.map(\.paneID) == [first, second])
     #expect(harness.watchers.allSatisfy { $0.started })
     #expect(harness.engine.isWatchingDetachedPane(first))
-    #expect(harness.changeKinds(for: first) == [.detached])
+    #expect(harness.exitCount(for: first) == 0)
   }
 
   @Test
@@ -125,7 +125,7 @@ struct TerminalEngineDetachedPaneTests {
       if case .paneInfoChanged(paneID, .title) = event { sawLateTitle = true }
     }
     #expect(!sawLateTitle)
-    #expect(harness.changeKinds(for: paneID) == [.detached, .observationEnded])
+    #expect(harness.exitCount(for: paneID) == 0)
   }
 
   /// Re-attach stops the watcher before the surface exists; signals it
@@ -150,7 +150,7 @@ struct TerminalEngineDetachedPaneTests {
       if case .paneProgramStatusChanged = event { sawStatus = true }
     }
     #expect(!sawStatus)
-    #expect(harness.changeKinds(for: paneID) == [.detached, .observationEnded])
+    #expect(harness.exitCount(for: paneID) == 0)
   }
 
   @Test
@@ -165,7 +165,7 @@ struct TerminalEngineDetachedPaneTests {
     await settle()
 
     #expect(!harness.engine.isWatchingDetachedPane(paneID))
-    #expect(harness.changeKinds(for: paneID) == [.detached, .daemonExited])
+    #expect(harness.exitCount(for: paneID) == 1)
     // A later watch is a fresh watcher, not the gone one.
     harness.engine.watchDetachedPanes([paneID])
     #expect(harness.watchers.count == 2)
@@ -180,7 +180,7 @@ struct TerminalEngineDetachedPaneTests {
     #expect(harness.engine.stopWatchingDetachedPane(paneID))
     #expect(!harness.engine.stopWatchingDetachedPane(paneID))
     #expect(harness.watchers[0].stopped)
-    #expect(harness.changeKinds(for: paneID) == [.detached, .observationEnded])
+    #expect(harness.exitCount(for: paneID) == 0)
   }
 
   @Test

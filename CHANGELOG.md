@@ -14,9 +14,10 @@ and the project does not yet follow semantic versioning — every release until
   restored at launch, or in a hidden pane whose terminal was released while
   idle, still updates its Agents View row when it reports its own state
   (OSC 7501), and its notifications and title still arrive. When such a
-  pane's session ends, its row goes away within about two seconds.
-  `agent status` reports `source: cached` for a state that comes from a
-  screen nobody is reading.
+  pane's session ends, its row goes away within about two seconds, so a
+  sleeping row is always a running agent. `agent status` reports
+  `source: cached` for a sleeping row whose state comes from a screen
+  nobody is reading.
 
 ### Changed
 
@@ -25,6 +26,27 @@ and the project does not yet follow semantic versioning — every release until
 ### Removed
 
 ### Fixed
+
+- **`pane send` / `pane capture` reach agents in tabs that are not open.**
+  A pane restored from the last session whose tab was not opened yet, or a
+  pane hidden long enough to have its terminal view released, still runs.
+  Terminal commands now attach it first instead of failing with
+  `NOT_FOUND`, and `pane read` / `pane info` answer for it too.
+  `pane send --capture` on such a pane compares the pane's own screen
+  before and after, so the old screen never shows up as output.
+  If that screen cannot be read, nothing is sent; if it cannot be read
+  after the command ran, the error says the text was sent.
+- **Agents View shows sleeping agents.** An agent whose pane has no
+  terminal view (restored and not opened yet, or idle long enough to have
+  its view released) still runs, but Codans does not watch it. Its row now
+  shows a sleep glyph next to its last known state; clicking the row wakes
+  it.
+- **`agent status` and `pane show` tell which panes are observed.** Rows
+  now have `isLive` (the terminal runs) and `isAttached` (Codans shows and
+  watches it). A sleeping row keeps its last known state and shows
+  `(sleeping)`. A pane whose terminal no longer runs shows `(not live)`, and
+  terminal commands on it fail with `PANE_NOT_LIVE` (exit 3); an unknown id
+  is still `NOT_FOUND`.
 
 ### Security
 

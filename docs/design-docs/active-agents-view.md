@@ -233,14 +233,14 @@ agent ──OSC 7501──▶ zmx daemon ──bytes──▶ libghostty (fork)
 
 ### 未挂接 Pane 的观测
 
-没有 surface 的 Pane 没有视口轮询、前台 job 采样，也收不到 libghostty 的 action。`TerminalEngine` 让「被观测的 Pane」集合等于「有 daemon、无 surface 的 Pane」：
+没有 surface 的 Pane 没有视口轮询、前台 job 采样，也收不到 libghostty 的 action。`TerminalEngine` 让「被观测的 Pane」集合等于 `PaneTerminalState.detached` 的 Pane（有 daemon、无 surface；即 `attachedPaneIDs` 之外、daemon 仍在跑的 Pane）：
 
 - **被动 watcher。** 每个这样的 Pane 一个额外的 zmx 客户端（`ZmxPassiveWatcher`）。它连上 Pane 的 daemon socket 后从不写入：不发 `.Init`，daemon 就不重放屏幕、不把它设为 leader、不按它改 PTY 尺寸，但 PTY 读循环仍把每个 `.Output` 帧广播给它。watcher 用 `ZmxOutputScanner` 增量扫描 OSC：7501 → `ingestProgramStatus`（规则移植自 libghostty 的 `program_status.zig`），9 → `paneInfoChanged(.desktopNotification)`，0 / 2 → `paneInfoChanged(.title)`。所有 watcher 共用一个串行队列上的 dispatch read source，成本是每 Pane 一个 fd，不占线程。一次读回调最多读 4 × 64 KiB，剩下的数据由（电平触发的）read source 再次回调，所以一个输出很多的 Pane 不会占住共享队列，主 actor 上同步的 `stop()` 最多等一批。
-- **生命周期。** 回收（`reclaimSurface`）后启动；启动时 app 对所有可见 Pane 调 `watchDetachedPanes`（已有 surface 的跳过）。`closeSurface` / `suspendSurface` / CLI `pane close` 在 `.kill` 前、`finishEventStream` 时同步停掉 watcher，不会把用户的 kill 当成 daemon 自行退出。
+- **生命周期。** 回收（`reclaimSurface`）后启动；启动时 app 对 `terminalState(for:) == .detached` 的可见 Pane 调 `watchDetachedPanes`。`closeSurface` / `suspendSurface` / CLI `pane close` 在 `.kill` 前、`finishEventStream` 时同步停掉 watcher，不会把用户的 kill 当成 daemon 自行退出。
 - **重新挂接的交接。** `ensureSurface` 在创建 surface 前同步停掉 watcher；创建失败时再启动它。从这一刻起 surface 是该 Pane 唯一的信号来源：watcher 已读到、但尚未在主 actor 上处理的信号因 token 失效被丢弃，所以同一信号不会送达两次，旧的 watcher 信号也不会覆盖 surface 报告的状态。代价是一个短窗口：watcher 停止之后、surface 的 `zmx attach` 连上 daemon 之前写出的 OSC 7501 / 9 / 标题，两边都收不到。这是已接受的取舍：agent 的下一份报告会纠正状态；为此改 zmx 协议、在输出流里插栅栏的代价高于它能挽回的信号。watcher 也把 RIS（`ESC c`）报告为 `clear`，与 libghostty 一致。
 - **daemon 端。** codans 的 zmx 所有断开路径都用 `closeClient(…, shutdown_on_last: false)`，watcher 断开不会结束会话；`Info.clients_len` 会把 watcher 计入，codans 不读这个字段。daemon 只把发过 `.Init` 的客户端算作终端（`Client.is_terminal`）；最后一个终端断开后（`closeClient` / `DetachAll` 重新计算 `has_terminal_client`），daemon 重新代答 DA1 与 `OSC 7501 ; ?`，所以回收后才启动的 agent 也能探测成功、上报程序状态。外部 `DetachAll` 会断开 watcher，watcher 以退避重连（0.25 s 起，上限 30 s）。
 - **daemon 存活。** watcher 的连接本身就是存活探针：daemon 退出时连接 EOF，随后连续 3 次连接被拒或 socket 不存在（约 1.75 s）即判定 daemon 已退出，不另设轮询。此时 engine 清掉该 Pane 的会话状态（回收标记、进程行、程序状态记录），app 经 `AgentBinder.unbind` 删掉 agent 行。Pane 留在 catalog；再次打开时 `zmx attach` 新建会话，与「上次退出后 daemon 已死」的恢复 Pane 相同。
-- **状态来源。** 未挂接期间屏幕无人读取：由屏幕决定的状态（含启动时的恢复种子）标为 `source: cached`；watcher 送来的程序状态仍是 `programStatus`。重新挂接后回到 `screen`。
+- **状态来源。** 未挂接期间屏幕无人读取：由屏幕决定的状态（含启动时的恢复种子）标为 `source: cached`；watcher 送来的程序状态仍是 `programStatus`。两者都由 `AgentStateStore.attachedPaneIDs` 判定，与睡眠标记（`isSleeping`）同源：`cached` 只出现在睡眠行上。重新挂接后回到 `screen`。
 
 **派生（归属成立时）。**
 
@@ -260,7 +260,7 @@ Source: [ProgramStatusRecords.swift](../../apps/mac/CodansCore/Agents/ProgramSta
 
 ### IPC 与 CLI
 
-`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle 与焦点标记。`codans agent list` 列出启动配置，与运行态列表不同。
+`agent.listStates` 对应 `codans agent status`，按 Project → Worktree → Tab → Pane 顺序返回 registry 中的条目，包括 agent、状态、最近变化时间、状态来源 `source`（`programStatus` / `screen` / `cached`）、`blockedKind`、agent 的 `message`、层级 ID、临时 Pane handle、焦点标记、`isLive` 与 `isAttached`。两个字段取自 `TerminalEngine.terminalState(for:)` 的 `PaneTerminalState`：`attached`（daemon 在跑，surface 在渲染）、`detached`（daemon 在跑，没有 surface：启动时恢复但 tab 尚未打开，或被闲置回收摘掉 surface）、`stopped`（没有 daemon）。没有 surface 的 pane 每次都探测 daemon 的 control socket，因为 daemon 可能跨 app 重启存活，也可能在无人观察时退出。`detached` 的 pane 仍在运行，文本输出标 `(sleeping)`：app 读不到它的 viewport 与前台进程，但被动 watcher 仍送来 OSC 7501 / 9 / 标题（见「未挂接 Pane 的观测」），所以 agent 自报的状态仍是 `programStatus`，由屏幕推导的状态则是最后一次已知值（`source: cached`）。daemon 在 detached 期间退出时，watcher 删掉该 agent 行，所以睡眠标记不会挂在已经不在运行的 agent 上；`(not live)` 只出现在别的途径（如启动恢复时 daemon 已不在）留下的条目上。终端动词会先为它挂载 surface。`stopped` 的条目文本标 `(not live)`，终端动词返回 `PANE_NOT_LIVE`。Agents View 对这三种条目都显示；没有 surface 的条目在状态图标前加 `zzz` 睡眠标记（`AgentStateStore.isSleeping`，由 `TerminalEngine.onSurfaceAttachmentChanged` 维护的 `attachedPaneIDs` 推出），tooltip 提示点击唤醒：点击行会聚焦该 pane，其 tab 显示时挂载 surface。`codans agent list` 列出启动配置，与运行态列表不同。
 
 `agent.wait` 对应 `codans agent wait <pane> --until <condition>`，在服务端按 200 ms 间隔读取同一状态源。条件为 `idle`、`working`、`blocked`、`done`、`error`、`changed` 或 `exit`（`finished` 作为 `done` 的旧名仍被接受，不再列出）：`changed` 比较起始条目的 state 与 kind，`exit` 在 entry 消失或 Pane 移除时满足。开始等待时 Pane 必须存在；已存在但无 agent 的 Pane 可立即满足 `exit`。CLI 默认等待 60 秒，允许 1–600 秒；超时返回 `WAIT_TIMEOUT`（exit 11）。`source == screen` 的结果是屏幕与前台进程的派生状态；`source == programStatus` 的结果来自 agent 自己的报告。
 

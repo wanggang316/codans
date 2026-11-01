@@ -106,7 +106,9 @@ final class AgentStateStore {
     /// The rendered active region (agent-specific classifier).
     case screen
     /// The pane has no surface, so its screen is not read: the state is
-    /// the last one derived, or the one restored at launch.
+    /// the last one derived, or the one restored at launch. Always a
+    /// sleeping row (`isSleeping`); a sleeping row whose agent reports
+    /// program status through the passive watcher stays `programStatus`.
     case cached
   }
 
@@ -125,6 +127,12 @@ final class AgentStateStore {
   /// Sidebar signals exclude message and source changes.
   private(set) var workingPaneIDs: Set<PaneID> = []
   private(set) var needsAttention = false
+
+  /// Panes a terminal surface renders, fed by the engine's attach / detach
+  /// callback. A pane without one still runs in its daemon (restored and
+  /// not opened yet, or released by the idle reclaim) but sends no signals,
+  /// so its entry holds the last known state.
+  private(set) var attachedPaneIDs: Set<PaneID> = []
 
   /// Per-pane derivation scratch. Kept around for all panes the
   /// store has heard about (bound or not) so signals that arrive
@@ -172,10 +180,6 @@ final class AgentStateStore {
   }
 
   private typealias AgentRawState = PaneAttentionInterpreter.AgentActivityState
-
-  /// Panes without a surface. A passive watcher still delivers their
-  /// program status, but nothing reads their screen.
-  @ObservationIgnored private var detachedPanes: Set<PaneID> = []
 
   private var scratch: [PaneID: Scratch] = [:]
 
@@ -402,7 +406,8 @@ final class AgentStateStore {
       kind: kind,
       sessionID: sessionID,
       state: seeded?.state ?? .idle,
-      lastTransitionAt: seeded?.lastTransitionAt ?? now()
+      lastTransitionAt: seeded?.lastTransitionAt ?? now(),
+      source: observedSource(.screen, paneID: paneID)
     )
     refresh(paneID)
   }
@@ -433,7 +438,6 @@ final class AgentStateStore {
   /// Takes a flat `Set<PaneID>` rather than a `Catalog` so the store stays
   /// free of hierarchy imports — the catalog walk lives in the wiring layer.
   func reconcileMembership(livePaneIDs: Set<PaneID>) {
-    detachedPanes.formIntersection(livePaneIDs)
     let stale = entries.keys.filter { !livePaneIDs.contains($0) }
     guard !stale.isEmpty else { return }
     for paneID in stale {
@@ -446,25 +450,10 @@ final class AgentStateStore {
     }
   }
 
-  /// `paneID` lost its surface (`true`) or got one back (`false`). While
-  /// detached, a state that the screen decided reports `.cached`.
-  func setDetached(_ paneID: PaneID, _ detached: Bool) {
-    if detached {
-      detachedPanes.insert(paneID)
-    } else {
-      detachedPanes.remove(paneID)
-    }
-    guard var entry = entries[paneID] else { return }
-    let source = observedSource(entry.source == .cached ? .screen : entry.source, paneID: paneID)
-    guard entry.source != source else { return }
-    entry.source = source
-    entries[paneID] = entry
-  }
-
   /// The source to report: a screen-derived state of a detached pane is
   /// cached, not observed.
   private func observedSource(_ source: AgentStateSource, paneID: PaneID) -> AgentStateSource {
-    source == .screen && detachedPanes.contains(paneID) ? .cached : source
+    source == .screen && !attachedPaneIDs.contains(paneID) ? .cached : source
   }
 
   /// Pre-seed the registry from a persisted catalog at launch. Each
@@ -483,7 +472,8 @@ final class AgentStateStore {
         kind: record.kind,
         sessionID: nil,
         state: record.state,
-        lastTransitionAt: now()
+        lastTransitionAt: now(),
+        source: observedSource(.screen, paneID: record.paneID)
       )
       scratch[record.paneID] = .fresh(
         userInputSeen: true,
@@ -492,7 +482,31 @@ final class AgentStateStore {
     }
   }
 
+  /// Engine callback: a surface was attached to or detached from `paneID`.
+  func onSurfaceAttachmentChanged(_ paneID: PaneID, attached: Bool) {
+    if attached {
+      attachedPaneIDs.insert(paneID)
+    } else {
+      attachedPaneIDs.remove(paneID)
+    }
+    // A screen-derived state is observed only while a surface renders the
+    // pane; without one it is cached.
+    guard var entry = entries[paneID] else { return }
+    let base: AgentStateSource = entry.source == .cached ? .screen : entry.source
+    let source = observedSource(base, paneID: paneID)
+    guard entry.source != source else { return }
+    entry.source = source
+    entries[paneID] = entry
+  }
+
   // MARK: - Reads
+
+  /// Whether `paneID`'s agent row is asleep: the agent runs, but no surface
+  /// renders the pane, so the app does not observe it and its state is the
+  /// last known one. Showing the pane wakes it.
+  func isSleeping(_ paneID: PaneID) -> Bool {
+    entries[paneID] != nil && !attachedPaneIDs.contains(paneID)
+  }
 
   /// Latest OSC title observed for `paneID` — the terminal title agents
   /// push as they work, which doubles as a one-line "what is the agent
