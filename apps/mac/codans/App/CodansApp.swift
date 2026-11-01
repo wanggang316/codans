@@ -523,6 +523,9 @@ final class AppState {
   /// can cancel cleanly. Runs an initial sweep on first iteration to clean up
   /// entries inherited from prior launches.
   @ObservationIgnored private var orphanSweepTask: Task<Void, Never>?
+  /// Re-probes the daemons of agent panes no surface renders, so a row
+  /// whose agent exited while detached shows as stopped, not sleeping.
+  @ObservationIgnored private var agentLivenessTask: Task<Void, Never>?
   /// Live banner adapter; held so the Settings panel can call
   /// `requestAuthorization()` from the recovery button. Single instance
   /// per process — Settings panel reads via `@Environment` rather than
@@ -1919,6 +1922,7 @@ final class AppState {
     dockBadgerTask?.cancel()
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
+    agentLivenessTask?.cancel()
     agentStateFocusTask?.cancel()
     // Drop the observation tokens explicitly so a `didBecomeActive`
     // arriving mid-shutdown cannot wake the coordinator on a half-torn-down
@@ -2254,9 +2258,17 @@ final class AppState {
           lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }
         )
       },
-      isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true }
+      isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
+      isDaemonAlive: { [weak engine] paneID in engine?.isDaemonAlive(paneID) ?? true }
     )
     self.agentStateStore = registry
+    agentLivenessTask = Task { @MainActor [weak registry] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(10))
+        guard let registry else { return }
+        registry.refreshDetachedLiveness()
+      }
+    }
     engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
     for paneID in engine.attachedPaneIDs {
       registry.onSurfaceAttachmentChanged(paneID, attached: true)

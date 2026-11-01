@@ -102,6 +102,47 @@ struct AgentStateStoreTests {
     #expect(f.registry.isSleeping(f.paneID))
   }
 
+  /// A daemon that exits while no surface watches the pane leaves a stale
+  /// row. It must read as stopped (the agent is gone; opening it starts a
+  /// new shell), not as asleep and wakeable.
+  @Test
+  func aDetachedRowWhoseDaemonExitsIsStoppedNotSleeping() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .idle)])
+    #expect(f.registry.isSleeping(f.paneID))
+    #expect(!f.registry.isStopped(f.paneID))
+
+    f.daemonAlive.setValue(false)
+    f.registry.refreshDetachedLiveness()
+    #expect(!f.registry.isSleeping(f.paneID))
+    #expect(f.registry.isStopped(f.paneID))
+
+    // Opening the pane attaches a surface: neither marker applies.
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: true)
+    #expect(!f.registry.isSleeping(f.paneID))
+    #expect(!f.registry.isStopped(f.paneID))
+  }
+
+  /// A surface that detaches from a pane whose daemon already exited is
+  /// stopped at once, without waiting for the periodic probe.
+  @Test
+  func detachingFromADeadDaemonMarksTheRowStoppedAtOnce() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .idle)])
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: true)
+
+    f.daemonAlive.setValue(false)
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: false)
+    #expect(f.registry.isStopped(f.paneID))
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    // The row goes away with its agent; the stopped mark goes with it.
+    f.registry.onAgentUnbound(f.paneID)
+    f.registry.refreshDetachedLiveness()
+    #expect(!f.registry.isStopped(f.paneID))
+    #expect(f.registry.stoppedPaneIDs.isEmpty)
+  }
+
   @Test
   func seededBlockedSurvivesLaunchRebind() {
     let f = Fixture()
@@ -593,16 +634,19 @@ struct AgentStateStoreTests {
     let focused = LockIsolated<PaneID?>(nil)
     let inView = LockIsolated(false)
     let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 0))
+    let daemonAlive = LockIsolated(true)
     let registry: AgentStateStore
 
     init() {
       let focused = self.focused
       let nowBox = self.nowBox
       let inView = self.inView
+      let daemonAlive = self.daemonAlive
       self.registry = AgentStateStore(
         focusedPane: { focused.value },
         isPaneInView: { _ in inView.value },
-        now: { nowBox.value }
+        now: { nowBox.value },
+        isDaemonAlive: { _ in daemonAlive.value }
       )
     }
 

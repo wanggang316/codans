@@ -258,6 +258,7 @@ struct AgentStateSidebarPanel: View {
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
               isSleeping: registry.isSleeping(item.paneID),
+              isStopped: registry.isStopped(item.paneID),
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
               paneTitle: { registry.activityText(for: item.paneID) },
               worktreePath: resolved?.worktreePath,
