@@ -22,6 +22,9 @@ and the project does not yet follow semantic versioning — every release until
   has `isLive`. A pane restored from the last session has no terminal until
   its tab is opened: it shows `(not live)`, and `pane capture` / `pane send`
   on it fail with `PANE_NOT_LIVE` (exit 3) instead of `NOT_FOUND`.
+- **`pane send` / `pane capture` reach idle background panes.** A pane hidden
+  long enough to have its terminal released is attached again before the
+  command runs, instead of failing.
 
 ### Security
 

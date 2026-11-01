@@ -1249,7 +1249,18 @@ final class AppState {
     let terminalHandlers = TerminalHandlers(
       sink: inputSink,
       catalog: { hierarchy.catalog },
-      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false }
+      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false },
+      reattachReclaimed: { [weak hierarchy, weak terminalEngine] paneID in
+        // Same re-attach the UI does when the tab is shown again: the daemon
+        // still runs, so this starts no new process and does not focus.
+        guard let hierarchy, terminalEngine?.isReclaimed(paneID) == true,
+          let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: paneID)
+        else { return false }
+        try? await hierarchy.ensurePaneSurface(
+          paneID, in: tabID, in: worktreeID, in: projectID,
+          env: HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings))
+        return terminalEngine?.isReclaimed(paneID) == false
+      }
     )
     let editorHandlers = EditorHandlers(
       editor: editor,

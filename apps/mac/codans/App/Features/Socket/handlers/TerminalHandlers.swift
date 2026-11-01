@@ -38,18 +38,25 @@ public final class TerminalHandlers {
   /// `sendInput`'s wait uses it to tell "the command is still running"
   /// from "the screen just stopped changing".
   private let paneIsBusy: @MainActor (PaneID) -> Bool
+  /// Brings back the surface of a pane the idle-reclaim sweep detached
+  /// (its daemon still runs) and returns whether it did. Pane verbs call it
+  /// first, so a pane that `pane.describe` / `agent.listStates` report live
+  /// is one they can reach.
+  private let reattachReclaimed: @MainActor (PaneID) async -> Bool
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
     sink: InputSink?,
     catalog: @escaping @MainActor () -> Catalog,
     clock: StabilityClock = SystemStabilityClock(),
-    paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false }
+    paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false },
+    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false }
   ) {
     self.sink = sink
     self.catalog = catalog
     self.clock = clock
     self.paneIsBusy = paneIsBusy
+    self.reattachReclaimed = reattachReclaimed
   }
 
   /// Optional completion wait on `sendInput`: poll until the pane is not
@@ -113,6 +120,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
+    _ = await reattachReclaimed(req.paneID)
     let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
@@ -226,6 +234,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
     }
+    _ = await reattachReclaimed(req.paneID)
     let ok = sink.sendKey(paneID: req.paneID, key: req.key)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -254,6 +263,7 @@ public final class TerminalHandlers {
     guard let bytes = Self.decodeHex(req.hex) else {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
+    _ = await reattachReclaimed(req.paneID)
     let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -348,8 +358,19 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
     }
     let extent = req.extent ?? .viewport
+    // A re-attached surface fills in as the daemon replays its screen, so a
+    // plain read right after it waits for that replay to settle.
+    let reattached = await reattachReclaimed(req.paneID)
     let result: ReadTextResult
-    if let ws = req.waitStable {
+    if reattached, req.waitStable == nil {
+      let waiter = TerminalStabilityWaiter(
+        clock: clock, stableMillis: 150, intervalMillis: 25, timeoutMillis: 1500,
+        read: { [sink] in sink.readText(paneID: req.paneID, extent: extent) })
+      guard let outcome = await waiter.run() else {
+        return .failed(unreachable(req.paneID))
+      }
+      result = ReadTextResult(text: outcome.text)
+    } else if let ws = req.waitStable {
       let waiter = TerminalStabilityWaiter(
         clock: clock,
         stableMillis: ws.stableMillis,
@@ -401,6 +422,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "resetPane requires {paneID}", path: nil))
     }
+    _ = await reattachReclaimed(req.paneID)
     let ok = sink.resetPane(paneID: req.paneID)
     if !ok {
       return .failed(unreachable(req.paneID))

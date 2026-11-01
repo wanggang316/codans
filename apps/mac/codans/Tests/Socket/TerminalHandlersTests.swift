@@ -313,6 +313,58 @@ struct TerminalHandlersTests {
     #expect(response.error == .paneNotLive(pane.id.description), "\(method.rawValue)")
   }
 
+  // MARK: - A reclaimed pane
+
+  /// The idle-reclaim sweep detaches a hidden pane's surface but keeps its
+  /// daemon, so `pane.describe` reports it live. A send must re-attach the
+  /// surface and land, not fail with `PANE_NOT_LIVE`.
+  @Test
+  func sendInputReattachesAReclaimedPaneAndDelivers() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    let server = Self.makeHarness(
+      sink: sink,
+      reattachReclaimed: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(
+      IPC.Request(id: "ra", method: .terminalSendInput, params: try Self.paneParams(.terminalSendInput, pane)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == nil)
+    #expect(sink.delivered == [FakeSink.Delivery(paneID: pane.raw, text: "x")])
+  }
+
+  /// A re-attached surface starts blank and fills in as the daemon replays
+  /// its screen; a plain read waits for that instead of returning blank.
+  @Test
+  func readTextAfterAReattachWaitsForTheReplay() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.textScript[pane.raw] = ["", "", "claude> ready"]
+    let server = Self.makeHarness(
+      sink: sink,
+      reattachReclaimed: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(
+      IPC.Request(id: "rr", method: .terminalReadText, params: try Self.paneParams(.terminalReadText, pane)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == nil)
+    #expect(try response.result?.decoded(as: TerminalHandlers.ReadTextResult.self).text == "claude> ready")
+  }
+
   @Test(arguments: [IPC.Method.terminalReadText, .paneRead])
   func verbsOnAnUnknownPaneStillReturnNotFound(method: IPC.Method) async throws {
     let server = Self.makeHarness(sink: FakeSink())
@@ -354,7 +406,8 @@ struct TerminalHandlersTests {
   static func makeHarness(
     sink: TerminalHandlers.InputSink?,
     clock: StabilityClock = SystemStabilityClock(),
-    catalog seed: Catalog? = nil
+    catalog seed: Catalog? = nil,
+    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false }
   ) -> InMemoryIPCServer {
     let systemHandlers = SystemHandlers(
       versions: .init(server: "0.4.0", appBundle: "0.4.0+test")
@@ -367,7 +420,8 @@ struct TerminalHandlersTests {
       runtime: FakeHierarchyRuntime()
     )
     let hierarchyHandlers = HierarchyHandlers(manager: hierarchy)
-    let terminalHandlers = TerminalHandlers(sink: sink, catalog: { hierarchy.catalog }, clock: clock)
+    let terminalHandlers = TerminalHandlers(
+      sink: sink, catalog: { hierarchy.catalog }, clock: clock, reattachReclaimed: reattachReclaimed)
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,

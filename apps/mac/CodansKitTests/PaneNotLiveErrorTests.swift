@@ -40,4 +40,42 @@ struct PaneNotLiveErrorTests {
       IPC.AgentStateEntry.self, from: JSONSerialization.data(withJSONObject: older),)
     #expect(decoded.isLive == nil)
   }
+
+  // MARK: - output schema
+
+  private static func outputSchemaDefs() throws -> [String: Any] {
+    let url = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("codans-cli/Resources/schema/cli-output.schema.json")
+    let schema = try #require(
+      JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    return try #require(schema["$defs"] as? [String: Any])
+  }
+
+  /// `agentStatusEntry` forbids extra properties, so every field the app
+  /// encodes must be declared or `--json` output fails validation.
+  @Test
+  func agentStatusEntrySchemaDeclaresEveryEncodedField() throws {
+    let entry = IPC.AgentStateEntry(
+      paneID: "p", handle: "p1", agent: "claude-code", agentName: "Claude Code", state: "blocked",
+      since: "2026-10-31T15:32:16Z", source: "programStatus", blockedKind: "permission", message: "m",
+      sessionID: "s", title: "t", projectID: "a", projectName: "codans", worktreeID: "b",
+      worktreeName: "main", tabID: "c", tabTitle: "dev", isFocused: true, isLive: false)
+    let encoded = try #require(
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
+    let def = try #require(try Self.outputSchemaDefs()["agentStatusEntry"] as? [String: Any])
+    let declared = try #require(def["properties"] as? [String: Any])
+    #expect(Set(encoded.keys).subtracting(declared.keys).isEmpty, "undeclared: \(Set(encoded.keys).subtracting(declared.keys))")
+    #expect((def["required"] as? [String])?.contains("isLive") == false, "isLive is absent from older apps")
+  }
+
+  /// The envelope's `error.code` enum lists every code the CLI can emit.
+  @Test
+  func errorCodeSchemaListsEveryCLIErrorCode() throws {
+    let error = try #require(try Self.outputSchemaDefs()["error"] as? [String: Any])
+    let properties = try #require(error["properties"] as? [String: Any])
+    let code = try #require(properties["code"] as? [String: Any])
+    let listed = Set(try #require(code["enum"] as? [String]))
+    #expect(listed == Set(CLIErrorCode.allCases.map(\.rawValue)))
+  }
 }
