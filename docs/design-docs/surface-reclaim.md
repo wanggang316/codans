@@ -22,17 +22,28 @@ pane 的 shell 由 zmx daemon 持有，surface 只是一个 `zmx attach` 客户�
 | 条件 | 原因 |
 |---|---|
 | 不在任何窗口内已超过 20 分钟 | 避免来回切换 tab 时反复重建 |
+| 不在最近选中的 3 个 worktree 的选中 tab 内 | 切回常用 worktree 时免去重新 attach 与屏幕重放 |
 | 画面静止至少 60 秒 | 仍在重绘的 pane 可能有用户在等的输出 |
 | 前台是 shell 提示符或 agent，不是运行中的命令 | 命令在跑时输出由 surface 消费 |
 | 不是远程 pane | 其 surface 下是 ssh 隧道，回收收益小、风险大 |
 | surface 处于 ready | 不碰 crashed / exited 状态 |
 | 无 veto：agent 不在回合中，没有排队命令 | 排队命令只在有 surface 时才会发出 |
 
+### 最近选中的 worktree
+
+最近选中的 3 个 worktree（`SurfaceReclaimPolicy.recentWorktreeCount`），其选中 tab 内的 pane 不被定时扫描回收，无论隐藏多久。切回这些 worktree 时，用户首先看到的就是这些 pane。
+
+- 最近度来自 worktree 选择：`TerminalEngine.startWorktreeSelectionTracking()` 观察 `Catalog.displayedSelectedWorktreeID`，每次变化记入 `WorktreeSelectionHistory`（最新在前，最多 3 个）。重新选中只把它移到最前，不重复记录。
+- 扫描时引擎把 pane 的排名（0 为当前选中）写入 `SurfaceReclaimPolicy.Candidate.selectedTabRecency`；只有 pane 在其 worktree 的选中 tab 内时才有排名。判定保持纯函数，可单独测试。
+- 同一 worktree 的后台 tab 不豁免。worktree 被挤出最近 3 个后，其选中 tab 按普通规则回收。
+- 内存压力扫描忽略最近度，只保留当前选中（它在窗口内，本就不回收）。
+
 ### 内存压力触发
 
 除定时扫描外，`TerminalEngine.startMemoryPressureMonitoring()` 订阅进程的内存压力事件（`DispatchSource.makeMemoryPressureSource`，`.warning` 与 `.critical`，见 `MemoryPressureMonitor`）。每个事件立即跑一次扫描（`handleMemoryPressure`），把所有隐藏且符合条件的 surface 一次回收：
 
 - 跳过「隐藏 20 分钟」与「画面静止 60 秒」两条阈值（`SurfaceReclaimPolicy.shouldReclaim(_:ignoringThresholds:)`）。系统此刻要内存，等待阈值没有意义。
+- 也跳过最近 worktree 的豁免：只保留当前选中。
 - 其余条件全部照旧：不在窗口内、本地 pane、surface ready、前台不是运行中的命令、无 veto。
 - 每次压力扫描记一行日志 `surface.reclaim.pressure level=<warning|critical> reclaimed=<n>`。
 
@@ -60,7 +71,8 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 
 ## 验证
 
-- `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值、其余规则仍生效。
+- `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值与最近度、其余规则仍生效。
+- `WorktreeSelectionHistoryTests` 覆盖最近度记录：最新在前、重选不重复、超过 3 个时最旧的移出。`TerminalEngineMemoryPressureTests` 覆盖引擎侧：最近 3 个 worktree 的选中 tab 不被定时扫描回收，后台 tab 与较旧 worktree 照常回收，第 4 个 worktree 被选中后最旧的选中 tab 被回收；压力扫描忽略最近度；选择变化被记录。
 - `TerminalEngineMemoryPressureTests` 用假的 `ReclaimableSurfaceHost`（生产中是 `GhosttyRuntime`）注入 surface 与压力事件：隐藏且空闲的 shell / agent 被 detach，并记为已回收、发出解除挂接通知、启动被动 watcher；显示中、被 veto、运行命令、前台未知的 pane 保留；detach 失败的 pane 不计入回收数。远程 pane 的规则由策略测试覆盖。
 - 隔离 Debug 实例，11 个 tab 各一个空闲 shell（1 个显示、10 个隐藏），注入一次压力事件：phys footprint 858 MB → 228 MB，线程 51 → 11，挂接的 surface 11 → 1，日志 `reclaimed=10`；再显示被回收的 tab，原 shell 会话照常可用。
 - 隔离 Debug 实例（`CODANS_SURFACE_RECLAIM_SECONDS=8`），两个 tab 各一个 pane，显示 B 以隐藏 A：线程 17 → 12，A 的 zmx socket 仍在，`pane read` 仍可用；再次显示 A：线程回到 17，shell 里导出的变量仍在，`initialCommand` 的副作用只出现一次。

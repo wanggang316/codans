@@ -717,6 +717,7 @@ final class AppState {
       engine.reclaimPolicy = policy
     }
     engine.startMemoryPressureMonitoring()
+    engine.startWorktreeSelectionTracking()
     hierarchyRuntime.attach(engine: engine)
     profiler.mark("ghostty+engine")
     bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)
