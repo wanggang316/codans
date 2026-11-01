@@ -4,8 +4,8 @@ import Testing
 
 @testable import CodansKit
 
-/// `PANE_NOT_LIVE` tells a script that a pane exists but has no attached
-/// terminal, which `NOT_FOUND` (a wrong id) does not. Both the code and its
+/// `PANE_NOT_LIVE` tells a script that a pane exists but its terminal does
+/// not run, which `NOT_FOUND` (a wrong id) does not. Both the code and its
 /// exit code are part of the CLI contract.
 struct PaneNotLiveErrorTests {
   @Test
@@ -24,21 +24,25 @@ struct PaneNotLiveErrorTests {
   }
 
   @Test
-  func agentStateEntryCarriesIsLiveAndDecodesRowsFromOlderApps() throws {
+  func agentStateEntryCarriesTerminalStateAndDecodesRowsFromOlderApps() throws {
     let entry = IPC.AgentStateEntry(
       paneID: "p", handle: "p1", agent: "claude-code", agentName: "Claude Code", state: "idle",
       since: "2026-10-31T15:32:16Z", sessionID: nil, title: nil, projectID: "a", projectName: "codans",
-      worktreeID: "b", worktreeName: "main", tabID: "c", tabTitle: nil, isFocused: false, isLive: false,)
+      worktreeID: "b", worktreeName: "main", tabID: "c", tabTitle: nil, isFocused: false, isLive: true,
+      isAttached: false)
     let data = try JSONEncoder().encode(entry)
     let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-    #expect(object["isLive"] as? Bool == false)
+    #expect(object["isLive"] as? Bool == true)
+    #expect(object["isAttached"] as? Bool == false)
     #expect(try JSONDecoder().decode(IPC.AgentStateEntry.self, from: data) == entry)
 
     var older = object
     older.removeValue(forKey: "isLive")
+    older.removeValue(forKey: "isAttached")
     let decoded = try JSONDecoder().decode(
-      IPC.AgentStateEntry.self, from: JSONSerialization.data(withJSONObject: older),)
+      IPC.AgentStateEntry.self, from: JSONSerialization.data(withJSONObject: older))
     #expect(decoded.isLive == nil)
+    #expect(decoded.isAttached == nil)
   }
 
   // MARK: - output schema
@@ -60,13 +64,14 @@ struct PaneNotLiveErrorTests {
       paneID: "p", handle: "p1", agent: "claude-code", agentName: "Claude Code", state: "blocked",
       since: "2026-10-31T15:32:16Z", source: "programStatus", blockedKind: "permission", message: "m",
       sessionID: "s", title: "t", projectID: "a", projectName: "codans", worktreeID: "b",
-      worktreeName: "main", tabID: "c", tabTitle: "dev", isFocused: true, isLive: false)
+      worktreeName: "main", tabID: "c", tabTitle: "dev", isFocused: true, isLive: true, isAttached: false)
     let encoded = try #require(
       try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
     let def = try #require(try Self.outputSchemaDefs()["agentStatusEntry"] as? [String: Any])
     let declared = try #require(def["properties"] as? [String: Any])
     #expect(Set(encoded.keys).subtracting(declared.keys).isEmpty, "undeclared: \(Set(encoded.keys).subtracting(declared.keys))")
-    #expect((def["required"] as? [String])?.contains("isLive") == false, "isLive is absent from older apps")
+    let required = Set(def["required"] as? [String] ?? [])
+    #expect(required.isDisjoint(with: ["isLive", "isAttached"]), "older apps omit them")
   }
 
   /// The envelope's `error.code` enum lists every code the CLI can emit.

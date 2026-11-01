@@ -38,19 +38,15 @@ public final class TerminalHandlers {
   /// `sendInput`'s wait uses it to tell "the command is still running"
   /// from "the screen just stopped changing".
   private let paneIsBusy: @MainActor (PaneID) -> Bool
-  /// Brings back the surface of a pane the idle-reclaim sweep detached
-  /// (its daemon still runs) and returns whether it did. Pane verbs call it
-  /// first, so a pane that `pane.describe` / `agent.listStates` report live
-  /// is one they can reach.
-  private let reattachReclaimed: @MainActor (PaneID) async -> Bool
-  /// The pane daemon's own screen as plain text (`pane.read`'s source),
-  /// or nil when it cannot be read. A re-attached surface has caught up
-  /// with its replay once its bottom rows match this.
+  /// Attaches a surface to a detached pane (its daemon runs, no surface is
+  /// bound: restored and not opened yet, or released by the idle reclaim)
+  /// and returns whether it did. Pane verbs call it first, so a pane that
+  /// `pane.describe` / `agent.listStates` report live is one they can reach.
+  private let attachDetached: @MainActor (PaneID) async -> Bool
+  /// The pane daemon's own terminal text (`pane.read`'s plain dump), or nil
+  /// when it cannot be read. The daemon does not replay, so this is the
+  /// source of truth while a new surface fills in.
   private let daemonScreen: @MainActor (PaneID) async -> String?
-  /// Re-attached panes whose replay is not yet confirmed. Kept across calls
-  /// so a retry after `PANE_NOT_READY` checks again instead of trusting a
-  /// surface that is still filling in.
-  private var unconfirmedReplays: Set<PaneID> = []
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
@@ -58,14 +54,14 @@ public final class TerminalHandlers {
     catalog: @escaping @MainActor () -> Catalog,
     clock: StabilityClock = SystemStabilityClock(),
     paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false },
-    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
+    attachDetached: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
     daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil }
   ) {
     self.sink = sink
     self.catalog = catalog
     self.clock = clock
     self.paneIsBusy = paneIsBusy
-    self.reattachReclaimed = reattachReclaimed
+    self.attachDetached = attachDetached
     self.daemonScreen = daemonScreen
   }
 
@@ -130,15 +126,22 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
-    // The capture baseline must be the fully replayed screen, or old rows
-    // that land after it would read as the command's output. Refuse before
-    // sending when the replay cannot be confirmed: nothing happened, so a
-    // retry is safe.
-    let replay = await reattachAndConfirmReplay(req.paneID, sink: sink)
-    if req.capture == true, replay == .unconfirmed {
-      return .failed(.paneNotReady(req.paneID.description))
+    let attached = await attachIfDetached(req.paneID, sink: sink)
+    // A surface attached by this call may still be replaying the daemon's
+    // screen, so its text is no capture baseline: rows that land later would
+    // read as the command's output. The daemon does not replay, so both ends
+    // of the capture come from its dump instead. When the daemon cannot be
+    // read, the surface is the fallback, as for an attached pane.
+    var before: String?
+    var captureFromDaemon = false
+    if req.capture == true {
+      if attached, let dump = await daemonScreen(req.paneID) {
+        before = dump
+        captureFromDaemon = true
+      } else {
+        before = sink.readText(paneID: req.paneID, extent: .screen)
+      }
     }
-    let before = req.capture == true ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -146,8 +149,12 @@ public final class TerminalHandlers {
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
       let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
+      var after = outcome.text
+      if captureFromDaemon, let dump = await daemonScreen(req.paneID) {
+        after = dump
+      }
       let output = req.capture == true
-        ? Self.capturedOutput(before: before ?? "", after: outcome.text, sent: req.text) : nil
+        ? Self.capturedOutput(before: before ?? "", after: after, sent: req.text) : nil
       result = SendInputResult(
         delivered: true, completed: outcome.completed, waitedMillis: outcome.waitedMillis,
         busyObserved: outcome.busyObserved, output: output)
@@ -251,7 +258,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "sendKey requires {paneID, key}", path: nil))
     }
-    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
+    _ = await attachIfDetached(req.paneID, sink: sink)
     let ok = sink.sendKey(paneID: req.paneID, key: req.key)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -280,7 +287,7 @@ public final class TerminalHandlers {
     guard let bytes = Self.decodeHex(req.hex) else {
       return .failed(.invalidParams(message: "hex must be an even-length hex string", path: ["hex"]))
     }
-    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
+    _ = await attachIfDetached(req.paneID, sink: sink)
     let ok = sink.sendRawBytes(paneID: req.paneID, bytes: bytes)
     if !ok {
       return .failed(unreachable(req.paneID))
@@ -375,7 +382,7 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "readText requires {paneID}", path: nil))
     }
     let extent = req.extent ?? .viewport
-    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
+    _ = await attachIfDetached(req.paneID, sink: sink)
     let result: ReadTextResult
     if let ws = req.waitStable {
       let waiter = TerminalStabilityWaiter(
@@ -407,42 +414,26 @@ public final class TerminalHandlers {
     }
   }
 
-  enum ReplayState: Equatable {
-    /// No re-attach is pending: the surface is current.
-    case current
-    /// The re-attached surface caught up with the daemon's screen.
-    case confirmed
-    /// The replay did not catch up within `replayConfirmMillis`.
-    case unconfirmed
-  }
-
-  /// Re-attaches a reclaimed pane, then confirms its replay: a fresh surface
-  /// starts blank and fills in as the daemon replays its screen, so it is
-  /// current only once its bottom rows match the daemon's own screen.
-  /// Polls up to `replayConfirmMillis`. A pane with no pending re-attach
-  /// returns `.current` at once.
-  func reattachAndConfirmReplay(_ paneID: PaneID, sink: InputSink) async -> ReplayState {
-    if await reattachReclaimed(paneID) {
-      unconfirmedReplays.insert(paneID)
-    }
-    guard unconfirmedReplays.contains(paneID) else { return .current }
+  /// Attaches a surface to a detached pane, then waits for the surface to
+  /// show the daemon's screen, up to `replayWaitMillis`. A new surface
+  /// starts blank and fills in as the daemon replays its screen and modes;
+  /// input sent before the replay lands is encoded for the wrong modes (for
+  /// example a TUI's keyboard protocol), and a read returns a partial screen.
+  /// The wait is best effort: nothing depends on proof that it completed
+  /// (`sendInput`'s capture reads the daemon instead). Returns whether this
+  /// call attached the surface.
+  func attachIfDetached(_ paneID: PaneID, sink: InputSink) async -> Bool {
+    guard await attachDetached(paneID) else { return false }
     let start = clock.nowMillis()
-    while true {
-      guard let surface = sink.readText(paneID: paneID, extent: .screen) else {
-        // The surface is gone again; the verb reports it.
-        unconfirmedReplays.remove(paneID)
-        return .current
-      }
-      if let daemon = await daemonScreen(paneID), Self.replayCaughtUp(surface: surface, daemon: daemon) {
-        unconfirmedReplays.remove(paneID)
-        return .confirmed
-      }
-      if clock.nowMillis() - start >= Self.replayConfirmMillis { return .unconfirmed }
-      do { try await clock.sleep(millis: 50) } catch { return .unconfirmed }
+    while clock.nowMillis() - start < Self.replayWaitMillis {
+      guard let surface = sink.readText(paneID: paneID, extent: .screen) else { break }
+      if let daemon = await daemonScreen(paneID), Self.replayCaughtUp(surface: surface, daemon: daemon) { break }
+      do { try await clock.sleep(millis: 50) } catch { break }
     }
+    return true
   }
 
-  static let replayConfirmMillis = 3000
+  static let replayWaitMillis = 3000
 
   /// Whether the surface shows the daemon's screen: the daemon's last
   /// non-blank rows (up to `replayCompareRows`) end the surface text too.
@@ -466,8 +457,8 @@ public final class TerminalHandlers {
   }
 
   /// Why a terminal verb could not reach a pane: an id outside the catalog
-  /// is `notFound`; a catalog pane with no attached terminal (restored, tab
-  /// never opened) is `PANE_NOT_LIVE`, so a script knows to open it first.
+  /// is `notFound`; a catalog pane whose terminal does not run (no daemon)
+  /// is `PANE_NOT_LIVE`, so a script can tell it from a wrong id.
   private func unreachable(_ paneID: PaneID) -> IPCError {
     catalog().pane(paneID) == nil ? .notFound(kind: "pane", id: paneID.description) : .paneNotLive(paneID.description)
   }
@@ -487,7 +478,7 @@ public final class TerminalHandlers {
     } catch {
       return .failed(.invalidParams(message: "resetPane requires {paneID}", path: nil))
     }
-    _ = await reattachAndConfirmReplay(req.paneID, sink: sink)
+    _ = await attachIfDetached(req.paneID, sink: sink)
     let ok = sink.resetPane(paneID: req.paneID)
     if !ok {
       return .failed(unreachable(req.paneID))

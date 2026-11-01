@@ -41,10 +41,12 @@ struct AgentStatus: AsyncParsableCommand {
       screen (source: screen), so it can lag a moment behind the agent.
       `agent wait` blocks on it.
 
-      A pane restored from the last session keeps its last known state but
-      has no running terminal until its tab is opened. Such a row has
-      isLive: false (text: "(not live)"), and terminal commands on it fail
-      with PANE_NOT_LIVE.
+      A detached pane (restored and not opened yet, or idle long enough to
+      have its terminal view released) still runs, but Codans does not watch
+      it, so its state is the last known one: isAttached: false (text:
+      "(detached)"). Terminal commands attach it first. A pane whose
+      terminal no longer runs has isLive: false (text: "(not live)"), and
+      terminal commands on it fail with PANE_NOT_LIVE.
       """
   )
 
@@ -76,11 +78,19 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
       let since = formatter.date(from: row.since).map { Self.age(from: $0, to: now) } ?? "-"
       let focus = row.isFocused ? "*" : " "
       let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
-      // A not-live row is a restored state with no running terminal behind it.
-      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "") + (row.isLive == false ? " (not live)" : "")
+      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "") + Self.lifecycleMark(row)
       return
         "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
     }.joined(separator: "\n")
+  }
+
+  /// Marks a row whose state is not observed live: the terminal no longer
+  /// runs, or it runs with no surface to watch it. Rows from older apps
+  /// carry neither field and get no mark.
+  static func lifecycleMark(_ row: IPC.AgentStateEntry) -> String {
+    if row.isLive == false { return " (not live)" }
+    if row.isAttached == false { return " (detached)" }
+    return ""
   }
 
   static func age(from: Date, to: Date) -> String {

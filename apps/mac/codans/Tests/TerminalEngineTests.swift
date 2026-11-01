@@ -35,6 +35,36 @@ struct TerminalEngineTests {
     return (engine, manager, clock, temp)
   }
 
+  // MARK: - Terminal state
+
+  @MainActor
+  private final class ProbeLog {
+    var ids: [PaneID] = []
+  }
+
+  /// A pane with no surface runs only while its daemon answers: a restored
+  /// pane not opened yet and a reclaimed pane are both `.detached`, and a
+  /// pane whose daemon is gone is `.stopped`.
+  @Test(arguments: [(true, PaneTerminalState.detached), (false, .stopped)])
+  func aPaneWithoutASurfaceIsDetachedOnlyWhileItsDaemonAnswers(
+    daemonAlive: Bool, expected: PaneTerminalState
+  ) {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    let probed = ProbeLog()
+    engine.isDaemonAlive = { id in
+      probed.ids.append(id)
+      return daemonAlive
+    }
+
+    let state = engine.terminalState(for: paneID)
+
+    #expect(state == expected)
+    #expect(state.isLive == daemonAlive)
+    #expect(!state.isAttached)
+    #expect(probed.ids == [paneID])
+  }
+
   // MARK: - Program status
 
   @Test

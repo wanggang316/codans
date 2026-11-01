@@ -289,10 +289,10 @@ struct TerminalHandlersTests {
 
   // MARK: - A catalog pane with no attached terminal
 
-  /// A pane restored from the quit snapshot is in the catalog, but its tab
-  /// was never opened, so it has no surface (the fake sink does not know
-  /// it). Terminal and probe verbs must say `PANE_NOT_LIVE`, not
-  /// `notFound`, so a script can tell it from a wrong id.
+  /// A stopped pane is in the catalog, but no daemon runs for it: there is
+  /// no surface (the fake sink does not know it) and nothing to attach.
+  /// Terminal and probe verbs must say `PANE_NOT_LIVE`, not `notFound`, so
+  /// a script can tell it from a wrong id.
   @Test(arguments: [
     IPC.Method.terminalReadText, .terminalSendInput, .terminalSendKey, .terminalSendRawBytes,
     .terminalResetPane, .paneRead, .paneInfo,
@@ -313,18 +313,18 @@ struct TerminalHandlersTests {
     #expect(response.error == .paneNotLive(pane.id.description), "\(method.rawValue)")
   }
 
-  // MARK: - A reclaimed pane
+  // MARK: - A detached pane
 
-  /// The idle-reclaim sweep detaches a hidden pane's surface but keeps its
-  /// daemon, so `pane.describe` reports it live. A send must re-attach the
+  /// A detached pane (restored and not opened yet, or reclaimed) runs with
+  /// no surface, so `pane.describe` reports it live. A send must attach a
   /// surface and land, not fail with `PANE_NOT_LIVE`.
   @Test
-  func sendInputReattachesAReclaimedPaneAndDelivers() async throws {
+  func sendInputAttachesADetachedPaneAndDelivers() async throws {
     let sink = FakeSink()
     let pane = PaneID()
     let server = Self.makeHarness(
       sink: sink,
-      reattachReclaimed: { paneID in
+      attachDetached: { paneID in
         sink.registered.insert(paneID.raw)
         return true
       },
@@ -341,16 +341,16 @@ struct TerminalHandlersTests {
     #expect(sink.delivered == [FakeSink.Delivery(paneID: pane.raw, text: "x")])
   }
 
-  /// A re-attached surface starts blank and fills in as the daemon replays
-  /// its screen; a plain read waits for that instead of returning blank.
+  /// A new surface starts blank and fills in as the daemon replays its
+  /// screen; a plain read waits for that instead of returning blank.
   @Test
-  func readTextAfterAReattachWaitsForTheReplay() async throws {
+  func readTextAfterAnAttachWaitsForTheReplay() async throws {
     let sink = FakeSink()
     let pane = PaneID()
     sink.textScript[pane.raw] = ["", "", "claude> ready"]
     let server = Self.makeHarness(
       sink: sink,
-      reattachReclaimed: { paneID in
+      attachDetached: { paneID in
         sink.registered.insert(paneID.raw)
         return true
       },
@@ -367,21 +367,54 @@ struct TerminalHandlersTests {
     #expect(try response.result?.decoded(as: TerminalHandlers.ReadTextResult.self).text == "claude> ready")
   }
 
-  /// `pane send --capture` on a reclaimed pane: the daemon replays the old
-  /// screen only after the re-attach. The capture baseline must be that
-  /// replayed screen, or its rows come back as the command's output.
+  /// The replay wait is best effort: a surface that never shows the
+  /// daemon's screen does not block the verb past `replayWaitMillis`.
   @Test
-  func sendWithCaptureAfterAReattachBaselinesOnTheReplayedScreen() async throws {
+  func aReplayThatNeverCatchesUpDoesNotBlockTheVerb() async throws {
     let sink = FakeSink()
     let pane = PaneID()
-    sink.textScript[pane.raw] = ["", "", "", "old row one\nold row two\n$ "]
+    sink.textScript[pane.raw] = [""]
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
     let server = Self.makeHarness(
-      sink: sink,
-      reattachReclaimed: { paneID in
+      sink: sink, clock: clock,
+      attachDetached: { paneID in
         sink.registered.insert(paneID.raw)
         return true
       },
-      daemonScreen: { _ in "old row one\nold row two\n$" })
+      daemonScreen: { _ in "claude> ready" })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(
+      IPC.Request(id: "rk", method: .terminalSendKey, params: try Self.paneParams(.terminalSendKey, pane)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == nil)
+    #expect(sink.keys.count == 1)
+    #expect(clock.current >= TerminalHandlers.replayWaitMillis)
+  }
+
+  /// `pane send --capture` on a pane this call attached diffs the daemon's
+  /// own screen, which does not replay. The surface is still filling in:
+  /// it shows a partial old screen whose bottom rows already match the
+  /// daemon's (repeated rows), and the rest of the old screen lands after
+  /// the send. None of those old rows may come back as output.
+  @Test
+  func sendWithCaptureAfterAnAttachDiffsTheDaemonScreen() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    let rowsA = Array(repeating: "A", count: 20)
+    let oldScreen = (rowsA + Array(repeating: "B", count: 5) + rowsA).joined(separator: "\n")
+    let partial = rowsA.joined(separator: "\n")
+    sink.textScript[pane.raw] = [partial, partial, oldScreen + "\ntrue\nok"]
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      attachDetached: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      },
+      daemonScreen: { _ in sink.delivered.isEmpty ? oldScreen : oldScreen + "\ntrue\nok" })
     defer { server.stop() }
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
@@ -395,51 +428,41 @@ struct TerminalHandlersTests {
     let response = try await server.awaitResponse()
 
     #expect(response.error == nil)
+    #expect(sink.delivered.count == 1)
     let result = try #require(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self))
-    #expect(result.output == "")
+    #expect(result.output == "ok")
   }
 
-  /// A replay that pauses after a partial screen, or never finishes, must
-  /// not become a capture baseline: the send is refused with
-  /// `PANE_NOT_READY` and nothing is typed. A retry checks again (the pane
-  /// is attached by then, so it is not re-attached) and succeeds once the
-  /// replay has landed.
+  /// A pane that was attached before the call keeps the surface as its
+  /// capture source; the daemon is not read.
   @Test
-  func sendWithCaptureBeforeTheReplayLandsIsRefusedAndARetryChecksAgain() async throws {
+  func sendWithCaptureOnAnAttachedPaneReadsTheSurface() async throws {
     let sink = FakeSink()
     let pane = PaneID()
-    let fullScreen = "old row one\nold row two\n$ "
-    sink.textScript[pane.raw] = ["", "old row one"]  // pauses after a partial screen
-    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    sink.registered.insert(pane.raw)
+    sink.textScript[pane.raw] = ["$ ", "$ true\nok\n$ "]
+    let daemonReads = CallCounter()
     let server = Self.makeHarness(
-      sink: sink, clock: clock,
-      reattachReclaimed: { paneID in
-        guard !sink.registered.contains(paneID.raw) else { return false }
-        sink.registered.insert(paneID.raw)
-        return true
-      },
-      daemonScreen: { _ in fullScreen })
+      sink: sink,
+      daemonScreen: { _ in
+        daemonReads.value += 1
+        return nil
+      })
     defer { server.stop() }
     try InMemoryIPCServerTests.sendHello(server)
     _ = try await server.awaitResponse()
+
     let params = try JSONValue.encoded(
       TerminalHandlers.SendInputParams(
         paneID: pane, text: "true\n",
         wait: TerminalHandlers.SendWaitParams(timeoutMillis: 2000, stableMillis: 50, graceMillis: 50),
         capture: true))
+    try server.send(IPC.Request(id: "ca", method: .terminalSendInput, params: params))
+    let response = try await server.awaitResponse()
 
-    try server.send(IPC.Request(id: "p1", method: .terminalSendInput, params: params))
-    let refused = try await server.awaitResponse()
-    #expect(refused.error == .paneNotReady(pane.description))
-    #expect(sink.delivered.isEmpty)
-    #expect(clock.current >= TerminalHandlers.replayConfirmMillis)
-
-    sink.textScript[pane.raw] = [fullScreen]  // the replay lands
-    try server.send(IPC.Request(id: "p2", method: .terminalSendInput, params: params))
-    let retried = try await server.awaitResponse()
-    #expect(retried.error == nil)
-    #expect(sink.delivered.count == 1)
-    #expect(try retried.result?.decoded(as: TerminalHandlers.SendInputResult.self).output == "")
+    #expect(response.error == nil)
+    #expect(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self).output == "ok")
+    #expect(daemonReads.value == 0)
   }
 
   @Test
@@ -495,7 +518,7 @@ struct TerminalHandlersTests {
     sink: TerminalHandlers.InputSink?,
     clock: StabilityClock = SystemStabilityClock(),
     catalog seed: Catalog? = nil,
-    reattachReclaimed: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
+    attachDetached: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
     daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil }
   ) -> InMemoryIPCServer {
     let systemHandlers = SystemHandlers(
@@ -510,7 +533,7 @@ struct TerminalHandlersTests {
     )
     let hierarchyHandlers = HierarchyHandlers(manager: hierarchy)
     let terminalHandlers = TerminalHandlers(
-      sink: sink, catalog: { hierarchy.catalog }, clock: clock, reattachReclaimed: reattachReclaimed,
+      sink: sink, catalog: { hierarchy.catalog }, clock: clock, attachDetached: attachDetached,
       daemonScreen: daemonScreen)
     let router = MethodRouter(
       systemHandlers: systemHandlers,
@@ -530,6 +553,11 @@ struct TerminalHandlersTests {
 
 /// Records every invocation; returns success iff the pane id was
 /// pre-registered.
+@MainActor
+private final class CallCounter {
+  var value = 0
+}
+
 final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   struct Delivery: Equatable {
     let paneID: UUID

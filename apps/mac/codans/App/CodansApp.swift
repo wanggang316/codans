@@ -1136,12 +1136,12 @@ final class AppState {
       },
       runtimeProbe: { [weak terminalEngine] paneID in
         // `pane.info` / `pane.read` probe the daemon out-of-band via its
-        // control socket. Gate on a live surface (or an idle-reclaimed one,
-        // whose daemon still runs) so we don't hand back a probe for a pane
-        // whose daemon isn't running this session.
-        guard terminalEngine?.isPaneLive(paneID) == true else { return nil }
+        // control socket, with or without a surface. Gate on a running
+        // daemon so a stopped pane reports `PANE_NOT_LIVE`.
+        guard terminalEngine?.terminalState(for: paneID).isLive == true else { return nil }
         return ZmxControlProbe(paneID: paneID)
       },
+      paneIsAttached: { [weak terminalEngine] paneID in terminalEngine?.terminalState(for: paneID).isAttached },
       sessionCoordinator: sessionCoordinator,
       callerPaneResolver: { [weak terminalEngine] callerPID in
         // Ground-truth caller attribution: match the connecting process's
@@ -1191,12 +1191,8 @@ final class AppState {
     )
   }
 
-  /// Wires the SocketServer so `codans` CLI can talk to the running app.
-  /// Skipped under XCTest — tests build their own in-memory harnesses and
-  /// binding a shared Unix socket racing parallel runs makes the runner
-  /// hang.
   /// The `terminal.*` handler: input delivery through the engine's
-  /// surfaces, plus the re-attach and replay check for reclaimed panes.
+  /// surfaces, plus attaching a surface to a detached pane first.
   private func makeTerminalHandlers(
     hierarchy: HierarchyManager,
     terminalEngine: TerminalEngine,
@@ -1218,16 +1214,19 @@ final class AppState {
       sink: inputSink,
       catalog: { hierarchy.catalog },
       paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false },
-      reattachReclaimed: { [weak hierarchy, weak terminalEngine] paneID in
-        // Same re-attach the UI does when the tab is shown again: the daemon
-        // still runs, so this starts no new process and does not focus.
-        guard let hierarchy, terminalEngine?.isReclaimed(paneID) == true,
+      attachDetached: { [weak hierarchy, weak terminalEngine] paneID in
+        // The same attach the UI does when the tab is shown: the daemon runs,
+        // so this starts no new process and does not focus. Only a detached
+        // pane: on a stopped one the attach would start a new shell. A pane
+        // that was never shown has no known size, so its surface starts at
+        // the placeholder size until its tab is shown.
+        guard let hierarchy, terminalEngine?.terminalState(for: paneID) == .detached,
           let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: paneID)
         else { return false }
         try? await hierarchy.ensurePaneSurface(
           paneID, in: tabID, in: worktreeID, in: projectID,
           env: HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings))
-        return terminalEngine?.isReclaimed(paneID) == false
+        return terminalEngine?.terminalState(for: paneID) == .attached
       },
       daemonScreen: { paneID in
         // The same plain dump `pane.read` returns; short timeout because
@@ -1239,6 +1238,10 @@ final class AppState {
     )
   }
 
+  /// Wires the SocketServer so `codans` CLI can talk to the running app.
+  /// Skipped under XCTest — tests build their own in-memory harnesses and
+  /// binding a shared Unix socket racing parallel runs makes the runner
+  /// hang.
   private func startIPC(
     hierarchy: HierarchyManager,
     editor: EditorClient,
@@ -1308,7 +1311,7 @@ final class AppState {
             lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
           )
         },
-        paneIsLive: { [weak terminalEngine] paneID in terminalEngine?.isPaneLive(paneID) ?? false }
+        paneTerminalState: { [weak terminalEngine] paneID in terminalEngine?.terminalState(for: paneID) ?? .stopped }
       ),
       handoffHandlers: handoffHandlers,
       workspaceHandlers: WorkspaceHandlers(

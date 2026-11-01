@@ -147,24 +147,15 @@ extension IPCError: Codable {
 }
 
 extension IPCError {
-  /// The pane is in the catalog but no terminal is attached to it this
-  /// session — typically restored from the quit snapshot with its tab never
-  /// opened. Distinct from `notFound`, so a script can tell "wrong id" from
-  /// "open it first". `pane focus` attaches the terminal.
+  /// The pane is in the catalog but its terminal does not run: no daemon is
+  /// alive for it (the app quit with a snapshot, or the shell exited while
+  /// no surface was attached). Distinct from `notFound`, so a script can
+  /// tell "wrong id" from "nothing runs there". Opening the pane starts a
+  /// new shell.
   public static func paneNotLive(_ id: String) -> IPCError {
     .domain(
       code: "PANE_NOT_LIVE",
-      message: "pane has no attached terminal: \(id)",
-      hint: "run `codans pane focus \(id)` or open its tab in Codans, then retry")
-  }
-
-  /// The pane's terminal was just re-attached and has not finished
-  /// replaying its screen, so a `capture` baseline would be incomplete. The
-  /// verb did nothing; a retry is safe.
-  public static func paneNotReady(_ id: String) -> IPCError {
-    .domain(
-      code: "PANE_NOT_READY",
-      message: "pane terminal is still loading its screen: \(id)",
-      hint: "nothing was sent; retry the command")
+      message: "pane terminal is not running: \(id)",
+      hint: "run `codans pane focus \(id)` or open its tab in Codans to start a new shell")
   }
 }

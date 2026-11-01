@@ -18,14 +18,19 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
-- **`agent status` tells restored agents from running ones.** Each row now
-  has `isLive`. A pane restored from the last session has no terminal until
-  its tab is opened: it shows `(not live)`, and `pane capture` / `pane send`
-  on it fail with `PANE_NOT_LIVE` (exit 3) instead of `NOT_FOUND`.
-- **`pane send` / `pane capture` reach idle background panes.** A pane hidden
-  long enough to have its terminal released is attached again before the
-  command runs, instead of failing. If its screen has not finished loading,
-  `pane send --capture` returns `PANE_NOT_READY` (exit 3) without sending.
+- **`pane send` / `pane capture` reach agents in tabs that are not open.**
+  A pane restored from the last session whose tab was not opened yet, or a
+  pane hidden long enough to have its terminal view released, still runs.
+  Terminal commands now attach it first instead of failing with
+  `NOT_FOUND`, and `pane read` / `pane info` answer for it too.
+  `pane send --capture` on such a pane compares the pane's own screen
+  before and after, so the old screen never shows up as output.
+- **`agent status` and `pane show` tell which panes are observed.** Rows
+  now have `isLive` (the terminal runs) and `isAttached` (Codans shows and
+  watches it). A detached row keeps its last known state and shows
+  `(detached)`. A pane whose terminal no longer runs shows `(not live)`, and
+  terminal commands on it fail with `PANE_NOT_LIVE` (exit 3); an unknown id
+  is still `NOT_FOUND`.
 
 ### Security
 

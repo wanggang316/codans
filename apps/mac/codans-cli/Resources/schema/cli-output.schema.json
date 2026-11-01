@@ -1013,7 +1013,6 @@
             "WAIT_TIMEOUT",
             "CAPTURE_UNSUPPORTED",
             "PANE_NOT_LIVE",
-            "PANE_NOT_READY",
             "WORKFLOW_NOT_FOUND",
             "WORKFLOW_INVALID",
             "WORKFLOW_DISABLED",
@@ -1552,6 +1551,9 @@
         },
         "isFocused": {
           "type": "boolean"
+        },
+        "isAttached": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -1927,6 +1929,9 @@
           "type": "boolean"
         },
         "isLive": {
+          "type": "boolean"
+        },
+        "isAttached": {
           "type": "boolean"
         }
       },

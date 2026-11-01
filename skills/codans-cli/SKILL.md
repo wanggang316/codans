@@ -446,7 +446,7 @@ recognises as running an agent, with the derived state it shows there.
 ```bash
 codans agent status                                  # p7  claude-code  working  3m12s  api/main  "dev server"
 codans agent status --json | jq '.data.agents[] | select(.state=="blocked") | .paneID'
-codans agent status --json | jq '.data.agents[] | select(.isLive != false) | .paneID'   # only panes you can send to
+codans agent status --json | jq '.data.agents[] | select(.isLive != false) | .paneID'   # panes whose terminal runs (send attaches detached ones)
 codans agent wait p7 --until idle --wait-timeout 300      # block until the agent is waiting for input
 codans agent wait p7 --until changed                 # …or until anything about it changes
 codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent is bound to the pane
@@ -465,6 +465,13 @@ server-side, so no polling loop is needed. Past `--wait-timeout` (1–600 s,
 default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
 `details.state` is the last state seen. `pane show` reports the bound
 agent without the state.
+
+A pane in a tab that is not open (restored from the last session, or idle
+long enough to have its terminal view released) still runs, but Codans
+does not watch it: its row has `isAttached: false` and shows `(detached)`,
+and its state is the last one seen. `pane send` / `capture` attach it
+first. A row with `isLive: false` shows `(not live)`: its shell no longer
+runs.
 
 Profiles are the launch presets from Settings > Agents (agent, model, effort,
 execution mode, placement, extra args, env). Launching one opens a fresh tab
@@ -680,8 +687,7 @@ codans pane capture @worker --wait-stable --lines 40
 | `socket /tmp/codans-*.sock did not become reachable` | App isn't running. Run `codans launch` or open codans from the GUI.       |
 | `no current pane: this shell is not inside a Codans pane` (or project/worktree/tab) | You used `current` / `.` outside a codans Pane. Pass an explicit ID or name. |
 | `pane <uuid> not found`                             | The pane was closed, or the UUID came from a different app instance.     |
-| `pane has no attached terminal: <uuid>` (`PANE_NOT_LIVE`, exit 3) | The pane was restored from the last session and its tab was never opened; `agent status` shows it `(not live)`. Run `codans pane focus <pane>`, then retry. |
-| `pane terminal is still loading its screen` (`PANE_NOT_READY`, exit 3) | `pane send --capture` hit a pane whose terminal was just re-attached and is still replaying its screen. Nothing was sent; retry. |
+| `pane terminal is not running: <uuid>` (`PANE_NOT_LIVE`, exit 3) | The pane is still in Codans, but its shell no longer runs; `agent status` shows it `(not live)`. `codans pane focus <pane>` opens it with a new shell. |
 | `unknown key "..."`                                 | `codans pane send-key` only knows the keys listed above. Use `--raw` for the rest. |
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
 | `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |
