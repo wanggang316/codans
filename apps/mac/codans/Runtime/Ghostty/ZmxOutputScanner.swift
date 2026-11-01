@@ -108,9 +108,9 @@ nonisolated struct ZmxOutputScanner: Sendable {
   /// Parse one OSC body (the bytes between `ESC ]` and the terminator).
   static func parse(body: [UInt8]) -> DetachedPaneSignal? {
     guard let semicolon = body.firstIndex(of: 0x3B) else { return nil }
-    let command = body[..<semicolon]
+    let command = String(bytes: body[..<semicolon], encoding: .utf8) ?? ""
     let payload = Array(body[(semicolon + 1)...])
-    switch String(decoding: command, as: UTF8.self) {
+    switch command {
     case "0", "2":
       guard let title = String(bytes: payload, encoding: .utf8) else { return nil }
       return .title(title)
@@ -180,17 +180,20 @@ nonisolated enum ProgramStatusParser {
   /// query and for a report the specification says to discard.
   static func parse(body: [UInt8]) -> ProgramStatusReport? {
     guard body.count <= maxBodyBytes, body != [0x3F] else { return nil }
+    // Lossy on purpose: bytes outside the value alphabet only occur in
+    // pairs the parser skips, as libghostty does.
+    // swiftlint:disable:next optional_data_string_conversion
     let data = String(decoding: body, as: UTF8.self)
     let fields = data.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
 
-    for field in fields {
-      guard let eq = field.firstIndex(of: "=") else { continue }
-      if trim(field[..<eq]).utf8.count > maxKeyBytes { return nil }
-    }
+    let keys = fields.compactMap { field in field.firstIndex(of: "=").map { trim(field[..<$0]) } }
+    if keys.contains(where: { $0.utf8.count > maxKeyBytes }) { return nil }
     for id in values("id", in: fields) where !isValidID(id) { return nil }
-    for (key, limit) in [("app", maxAppBytes), ("title", maxTitleEncodedBytes), ("msg", maxMsgEncodedBytes)] {
-      if values(key, in: fields).contains(where: { $0.utf8.count > limit }) { return nil }
+    let limits = [("app", maxAppBytes), ("title", maxTitleEncodedBytes), ("msg", maxMsgEncodedBytes)]
+    let overLimit = limits.contains { key, limit in
+      values(key, in: fields).contains { $0.utf8.count > limit }
     }
+    if overLimit { return nil }
 
     var title: String?
     if let encoded = values("title", in: fields).last {

@@ -1126,12 +1126,15 @@ final class AppState {
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
       settingsProvider: { settingsStore.settings },
-      daemonKiller: { paneID in
+      daemonKiller: { [weak terminalEngine] paneID in
         // Killing a pane's daemon is an out-of-band control `.kill`,
         // addressable by PaneID alone, so it works whether or not a surface
         // is live this session (the live byte stream runs through the
         // in-surface `zmx attach` client, not a held handle). The daemon
         // removes its own socket on shutdown, so no manual unlink is needed.
+        // A detached pane's watcher stops first: this kill is not a daemon
+        // that exited on its own.
+        terminalEngine?.stopWatchingDetachedPane(paneID)
         ZmxControlClient.kill(for: paneID)
       },
       runtimeProbe: { [weak terminalEngine] paneID in

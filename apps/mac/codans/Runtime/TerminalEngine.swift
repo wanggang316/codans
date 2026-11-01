@@ -314,20 +314,13 @@ final class TerminalEngine {
     // `GhosttySurfaceView.init`). Without a slot size, a re-attach after an
     // idle reclaim falls back to the size the pane had when it was reclaimed.
     let initialSize = initialSize ?? reclaimedSurfaceSizes[pane.id]
-    // The surface becomes the pane's observer; the watcher must be gone
-    // first so the two never feed the same output into the pipeline.
-    let wasWatching = stopWatchingDetachedPane(pane.id)
-    let surface: PaneSurface
-    do {
-      surface = try Self.withSurfaceInitRetry(runtime: runtime) {
+    let surface = try replacingDetachedWatcher(of: pane.id) {
+      try Self.withSurfaceInitRetry(runtime: runtime) {
         try PaneSurface(
           runtime: runtime, paneID: pane.id, session: session, launch: launch,
           workingDirectory: surfaceWorkingDirectory, env: surfaceEnv, initialSize: initialSize
         )
       }
-    } catch {
-      if wasWatching { watchDetachedPane(pane.id) }
-      throw error
     }
     runtime.register(pane: surface)
     let isReattach = noteSurfaceRegistered(pane.id)
@@ -1062,9 +1055,25 @@ final class TerminalEngine {
     onDetachedPaneChange(paneID, .detached)
   }
 
+  /// Run `makeSurface` with the pane's watcher stopped. The surface becomes
+  /// the pane's observer, so the two never feed the same output into the
+  /// pipeline; if the surface cannot be created, the watcher comes back.
+  private func replacingDetachedWatcher(
+    of paneID: PaneID, _ makeSurface: () throws -> PaneSurface
+  ) throws -> PaneSurface {
+    let wasWatching = stopWatchingDetachedPane(paneID)
+    do {
+      return try makeSurface()
+    } catch {
+      if wasWatching { watchDetachedPane(paneID) }
+      throw error
+    }
+  }
+
   /// Stop the pane's watcher, if any. Returns whether one was running.
+  /// Call it before killing a detached pane's daemon.
   @discardableResult
-  private func stopWatchingDetachedPane(_ paneID: PaneID) -> Bool {
+  func stopWatchingDetachedPane(_ paneID: PaneID) -> Bool {
     guard let entry = detachedWatchers.removeValue(forKey: paneID) else { return false }
     entry.watcher.stop()
     onDetachedPaneChange(paneID, .observationEnded)

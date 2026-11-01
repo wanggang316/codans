@@ -147,6 +147,18 @@ struct TerminalEngineDetachedPaneTests {
   }
 
   @Test
+  func explicitStopEndsObservationOnce() {
+    let harness = Harness()
+    let paneID = PaneID()
+    harness.engine.watchDetachedPanes([paneID])
+
+    #expect(harness.engine.stopWatchingDetachedPane(paneID))
+    #expect(!harness.engine.stopWatchingDetachedPane(paneID))
+    #expect(harness.watchers[0].stopped)
+    #expect(harness.changeKinds(for: paneID) == [.detached, .observationEnded])
+  }
+
+  @Test
   func finishingTheEngineStopsEveryWatcher() {
     let harness = Harness()
     harness.engine.watchDetachedPanes([PaneID(), PaneID()])
