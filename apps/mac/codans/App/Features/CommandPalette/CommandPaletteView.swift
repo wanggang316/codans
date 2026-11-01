@@ -162,11 +162,13 @@ struct CommandPaletteView: View {
     .padding(.vertical, 8)
     .background {
       if selected {
-        // Same translucent gray wash as the Agents view row. An opaque system
-        // selection color would sit on the glass card as a flat slab instead of
-        // taking on the tint of the content beneath.
+        // Translucent gray wash, like the Agents view row but deeper: the glass
+        // card is lighter than the Agents panel, and keyboard navigation needs
+        // the selected row to stand out. An opaque system selection color
+        // would sit on the glass as a flat slab instead of taking on the tint
+        // of the content beneath.
         RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-          .fill(Color.gray.opacity(0.08))
+          .fill(Color.gray.opacity(0.16))
       }
     }
   }
