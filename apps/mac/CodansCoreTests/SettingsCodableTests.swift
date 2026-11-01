@@ -287,3 +287,57 @@ struct LegacyBranchConflictKeyTests {
     #expect(result.fetchRemoteOnCreate == false, "Expected sibling key preserved")
   }
 }
+
+/// `GeneralSettings` has a hand-written `encode(to:)`, so a new field can be decoded but
+/// silently never written. These tests catch that drift.
+struct GeneralSettingsCodableTests {
+  /// Every field set to a non-default value, so a field that is not written decodes back to
+  /// its default and breaks equality.
+  private static let nonDefault = GeneralSettings(
+    appearance: .dark,
+    defaultEditorID: "vscode",
+    defaultGitViewerID: "fork",
+    defaultMergeStrategy: .rebase,
+    postMergeAction: .archive,
+    updateChannel: .tip,
+    updateCheckInterval: .threeHours,
+    updatesAutomaticallyCheckForUpdates: false,
+    updatesAutomaticallyDownloadUpdates: true,
+    quitConfirmation: .always,
+    quitAction: .snapshot,
+    agentsViewAutoOpen: false,
+    agentsViewDisplayMode: .compact,
+    agentsViewAutoSort: false,
+    crashReportsEnabled: false,
+    globalScripts: [ScriptDefinition(name: "Build", command: "make")]
+  )
+
+  @Test
+  func agentsViewAutoSortOffRoundTrips() throws {
+    let original = GeneralSettings(agentsViewAutoSort: false)
+    let data = try JSONEncoder.touchCodeDefault.encode(original)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(GeneralSettings.self, from: data)
+    #expect(decoded.agentsViewAutoSort == false)
+    #expect(decoded == original)
+  }
+
+  @Test
+  func nonDefaultValuesRoundTrip() throws {
+    let data = try JSONEncoder.touchCodeDefault.encode(Self.nonDefault)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(GeneralSettings.self, from: data)
+    #expect(decoded == Self.nonDefault)
+  }
+
+  /// A new `CodingKeys` case must either be written by `encode(to:)` or be listed in
+  /// `CodingKeys.retired`.
+  @Test
+  func encodeWritesEveryLiveCodingKey() throws {
+    let data = try JSONEncoder.touchCodeDefault.encode(Self.nonDefault)
+    let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let expected = Set(
+      GeneralSettings.CodingKeys.allCases
+        .filter { !GeneralSettings.CodingKeys.retired.contains($0) }
+        .map(\.stringValue))
+    #expect(Set(object.keys) == expected)
+  }
+}
