@@ -24,23 +24,28 @@ enum TabBarColors {
     dark: .white.withAlphaComponent(0.048)
   )
 
-  /// Raised capsule of the selected chip. Translucent in both appearances,
-  /// like the system's glass tab: the window backdrop takes on the desktop
-  /// tint and the accent color, and an opaque neutral fill stands out
-  /// against it. The light alpha lands on the sampled system value (#F8F8F8)
-  /// over the track on a neutral backdrop.
-  static let activeBackground: Color = adaptive(
-    light: .white.withAlphaComponent(0.8),
-    dark: .white.withAlphaComponent(0.14)
-  )
+  /// Raised capsule of the selected chip. In light mode the system's glass
+  /// tab takes on the hue of the backdrop it sits on, which here is the
+  /// terminal background seen through the window glass. A white fill, opaque
+  /// or translucent, reads as a flat plate on a tinted bar. So the fill keeps
+  /// the hue and saturation of `backdrop` and takes the luminosity of the
+  /// sampled system value (#F8F8F8): on a neutral backdrop it lands exactly
+  /// on that value. In dark mode a translucent white already takes on the
+  /// backdrop.
+  static func activeBackground(over backdrop: NSColor, colorScheme: ColorScheme) -> Color {
+    colorScheme == .dark
+      ? Color(nsColor: .white.withAlphaComponent(0.14))
+      : Color(nsColor: backdrop.withLuminosity(248 / 255))
+  }
 
   /// Selected capsule while the pointer is over it — a codans addition (the
-  /// system bar keeps the selected tab unchanged on hover). The light alpha
-  /// lands on #F0F0F0 over the track on a neutral backdrop.
-  static let activeHoverBackground: Color = adaptive(
-    light: .white.withAlphaComponent(0.57),
-    dark: .white.withAlphaComponent(0.18)
-  )
+  /// system bar keeps the selected tab unchanged on hover). Light mode takes
+  /// the luminosity of #F0F0F0.
+  static func activeHoverBackground(over backdrop: NSColor, colorScheme: ColorScheme) -> Color {
+    colorScheme == .dark
+      ? Color(nsColor: .white.withAlphaComponent(0.18))
+      : Color(nsColor: backdrop.withLuminosity(240 / 255))
+  }
 
   /// Two stacked 0.5-pt rims (outer, inner) that give the selected capsule
   /// its glass edge highlight.
@@ -99,5 +104,23 @@ enum TabBarColors {
       nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
       })
+  }
+}
+
+extension NSColor {
+  /// This color's hue and saturation at luminosity `target`, as the
+  /// `luminosity` blend mode computes it (W3C Compositing, SetLum + ClipColor).
+  fileprivate func withLuminosity(_ target: CGFloat) -> NSColor {
+    guard let rgb = usingColorSpace(.sRGB) else { return NSColor(white: target, alpha: 1) }
+    func luminosity(_ c: [CGFloat]) -> CGFloat { 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2] }
+    let source = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
+    let shift = target - luminosity(source)
+    var c = source.map { $0 + shift }
+    let l = luminosity(c)
+    let low = c.min() ?? l
+    let high = c.max() ?? l
+    if low < 0 { c = c.map { l + ($0 - l) * l / (l - low) } }
+    if high > 1 { c = c.map { l + ($0 - l) * (1 - l) / (high - l) } }
+    return NSColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: 1)
   }
 }
