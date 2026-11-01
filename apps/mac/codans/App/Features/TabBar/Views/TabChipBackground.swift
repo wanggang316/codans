@@ -16,6 +16,9 @@ struct TabChipBackground: View {
   let isActive: Bool
   let isHovering: Bool
   @Environment(\.colorScheme) private var colorScheme
+  /// Bumped on `.ghosttyRuntimeConfigApplied` so the selected fill re-reads
+  /// the terminal background when the theme changes.
+  @State private var configReloadTick = 0
 
   var body: some View {
     // Both capsules stay in the tree so their geometry animates with the
@@ -27,6 +30,22 @@ struct TabChipBackground: View {
         // animated add / close — no cross-fade between the two capsules.
         .animation(nil) { $0.opacity(isActive ? 1 : 0) }
     }
+    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+      configReloadTick &+= 1
+    }
+  }
+
+  /// The surface under the bar: the terminal background, which the window
+  /// glass takes its tone from.
+  private var backdrop: NSColor {
+    _ = configReloadTick
+    return GhosttyRuntime.shared?.backgroundColor() ?? .windowBackgroundColor
+  }
+
+  private var selectedFill: Color {
+    isHovering
+      ? TabBarColors.activeHoverBackground(over: backdrop, colorScheme: colorScheme)
+      : TabBarColors.activeBackground(over: backdrop, colorScheme: colorScheme)
   }
 
   private var selectedCapsule: some View {
@@ -36,7 +55,7 @@ struct TabChipBackground: View {
         outerShadow
       }
       Capsule()
-        .fill(isHovering ? TabBarColors.activeHoverBackground : TabBarColors.activeBackground)
+        .fill(selectedFill)
         .overlay(Capsule().strokeBorder(TabBarColors.activeRimOuter, lineWidth: 0.5))
         .overlay(
           Capsule().strokeBorder(TabBarColors.activeRimInner, lineWidth: 0.5).padding(0.5)
@@ -44,8 +63,8 @@ struct TabChipBackground: View {
     }
   }
 
-  /// Drop shadow of the selected capsule, cut away under the capsule. The
-  /// fill is translucent, so a plain `.shadow` would darken it from below.
+  /// Drop shadow of the selected capsule, cut away under the capsule so a
+  /// translucent fill does not pick it up.
   private var outerShadow: some View {
     Capsule()
       .fill(.black)
