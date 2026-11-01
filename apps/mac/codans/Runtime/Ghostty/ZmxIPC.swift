@@ -21,9 +21,6 @@ public nonisolated enum ZmxTag: UInt8, Sendable {
   case write = 12
   case taskComplete = 13
   case snapshot = 14
-  /// Broadcast the payload to every client as `.output`, in stream order,
-  /// without feeding the terminal mirror. Old daemons ignore it.
-  case mark = 15
 }
 
 /// Format byte sent in the payload of a `.history` request. Mirrors

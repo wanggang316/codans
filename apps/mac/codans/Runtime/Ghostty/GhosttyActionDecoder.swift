@@ -447,10 +447,6 @@ extension GhosttyActionDecoder {
 
     // Bucket 3 — Surface info
     case .setTitle(let title):
-      guard admitted(.title(title ?? ""), paneID: paneID, runtime: runtime) else {
-        pane.apply(.title(title))
-        return true
-      }
       return emitInfo(.title(title), pane: pane, paneID: paneID, runtime: runtime)
     case .setTabTitle(let title):
       return emitInfo(.tabTitle(title), pane: pane, paneID: paneID, runtime: runtime)
@@ -521,9 +517,7 @@ extension GhosttyActionDecoder {
           value: governed ? nil : value),
         pane: pane, paneID: paneID, runtime: runtime)
     case .programStatus(let report):
-      if admitted(.programStatus(report), paneID: paneID, runtime: runtime) {
-        runtime.terminalEngine?.ingestProgramStatus(report, for: paneID)
-      }
+      runtime.terminalEngine?.ingestProgramStatus(report, for: paneID)
       return true
 
     // Bucket 4 — Effectful
@@ -533,13 +527,9 @@ extension GhosttyActionDecoder {
       return emitPaneIntent(
         .openLink(raw: url, workingDirectory: pane.info.pwd), paneID: paneID, runtime: runtime)
     case .desktopNotification(let title, let body):
-      let delta = PaneInfoDelta.desktopNotification(title: title, body: body)
-      guard admitted(.desktopNotification(title: title, body: body), paneID: paneID, runtime: runtime)
-      else {
-        pane.apply(delta)
-        return true
-      }
-      return emitInfo(delta, pane: pane, paneID: paneID, runtime: runtime)
+      return emitInfo(
+        .desktopNotification(title: title, body: body),
+        pane: pane, paneID: paneID, runtime: runtime)
     case .ringBell:
       return emitInfo(.bellRang, pane: pane, paneID: paneID, runtime: runtime)
     case .commandFinished(let exit, let duration):
@@ -643,15 +633,6 @@ extension GhosttyActionDecoder {
   ) -> Bool {
     runtime.emit(.windowActionRequested(request))
     return true
-  }
-
-  /// False when the pane's detached watcher already delivered this signal
-  /// during a re-attach handoff (see `DetachedHandoffLedger`).
-  @MainActor
-  fileprivate static func admitted(
-    _ signal: DetachedPaneSignal, paneID: PaneID, runtime: GhosttyRuntime
-  ) -> Bool {
-    runtime.terminalEngine?.admitSurfaceSignal(signal, for: paneID) ?? true
   }
 
   @MainActor

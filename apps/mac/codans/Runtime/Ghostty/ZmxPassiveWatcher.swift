@@ -7,16 +7,12 @@ import os.log
 nonisolated protocol DetachedPaneWatching: AnyObject, Sendable {
   func start()
   func stop()
-  /// Ask the daemon to broadcast `payload` as output (zmx `.Mark`). Sent
-  /// over the watcher's own socket, so marks reach the daemon in call order.
-  func sendMark(_ payload: Data)
 }
 
 /// Passive zmx client for a pane that has no surface. It connects to the
-/// pane's daemon socket and sends nothing but `.Mark` fences during a
-/// re-attach handoff (`sendMark`). Without `.Init`, `.Input` or `.Resize`
-/// the daemon does not replay the screen, never makes it the leader, and
-/// never resizes the PTY for it, but still broadcasts every PTY `.Output` frame to it
+/// pane's daemon socket and never writes: without `.Init` the daemon does
+/// not replay the screen, never makes it the leader, and never resizes the
+/// PTY for it, but still broadcasts every PTY `.Output` frame to it
 /// (`ThirdParty/zmx/src/main.zig`, PTY read loop). Disconnects use
 /// `closeClient(…, shutdown_on_last: false)`, so the watcher going away
 /// never ends the session.
@@ -61,7 +57,6 @@ nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Send
 
   // State below is confined to `queue`.
   private var source: DispatchSourceRead?
-  private var fd: Int32 = -1
   private var scanner = ZmxOutputScanner()
   private var pending = Data()
   private var stopped = false
@@ -146,37 +141,7 @@ nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Send
     source.setEventHandler { [weak self] in self?.drain(fd: fd) }
     source.setCancelHandler { Darwin.close(fd) }
     self.source = source
-    self.fd = fd
     source.resume()
-  }
-
-  func sendMark(_ payload: Data) {
-    queue.async { [self] in
-      guard source != nil, fd >= 0 else { return }
-      let frame = ZmxFraming.encode(ZmxFrame(tag: .mark, payload: payload))
-      let sent = frame.withUnsafeBytes { raw -> Bool in
-        guard let base = raw.baseAddress else { return true }
-        var offset = 0
-        while offset < raw.count {
-          let n = Darwin.write(fd, base + offset, raw.count - offset)
-          if n > 0 {
-            offset += n
-          } else if n < 0, errno == EINTR {
-            continue
-          } else if n < 0, errno == EAGAIN {
-            // A mark is a few dozen bytes; a full socket buffer means the
-            // daemon is not reading. Wait briefly for room.
-            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-            guard Darwin.poll(&pfd, 1, 100) > 0 else { return false }
-          } else {
-            return false
-          }
-        }
-        return true
-      }
-      // A half-written frame would corrupt the stream: start over.
-      if !sent { dropConnection() }
-    }
   }
 
   /// Read at most `readsPerEvent` buffers, then return. The read source is
@@ -220,7 +185,6 @@ nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Send
   private func disconnect() {
     source?.cancel()
     source = nil
-    fd = -1
   }
 
   private func scheduleReconnect() {
