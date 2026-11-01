@@ -693,6 +693,45 @@ struct GitHubFeatureTests {
   }
 
   @Test
+  func remoteRefsChangeRefreshesTheUnitAndPollsItHot() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let base = Self.fixedDate
+    let now = LockIsolated(base)
+    let (pushed, other) = (Self.pollUnit(1), Self.pollUnit(2))
+    let seed = Self.pollState(
+      [pushed, other], selected: [],
+      lastStarted: [pushed.projectID: Self.fixedDate, other.projectID: Self.fixedDate])
+    let store = Self.makePollStore(
+      initialState: seed, clock: clock, date: DateGenerator { now.value }, calls: calls)
+
+    await store.send(.remoteRefsChanged(pushed.projectID))
+    #expect(
+      store.state.hotUntil[pushed.projectID]
+        == base.addingTimeInterval(GitHubFeature.remoteRefsHotWindow))
+    // GitHub gets a moment to open the PR a `gh pr create` pushes for.
+    await clock.advance(by: .seconds(2))
+    await store.receive(\.delayedProjectRefreshFired)
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r1"])
+
+    // Within the window the unit polls on the hot cadence for an unselected
+    // unit (30 s), while the cold one waits for its own (300 s).
+    now.setValue(base.addingTimeInterval(30))
+    await store.send(.pollTick)
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r1", "r1"])
+
+    await store.send(.appActiveChanged(false))
+  }
+
+  @Test
+  func remoteRefsChangeForAnUnknownUnitIsIgnored() async {
+    let store = Self.makeStore()
+    await store.send(.remoteRefsChanged(ProjectID()))
+  }
+
+  @Test
   func pollTierIsHotWhenAnyCheckIsRunning() {
     let batched = BatchedPullRequests(
       host: "github.com", owner: "w", repo: "r",

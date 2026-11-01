@@ -491,6 +491,9 @@ struct RootFeature {
     /// FSEvents working-tree observation that refreshes the `+N −M` chip
     /// after in-pane / in-editor edits (separate from the HEAD watcher).
     case worktreeWorkingTreeWatcher
+    /// FSEvents observation of each repository's remote-tracking refs, which
+    /// a `git push` from any process (an agent included) updates.
+    case remoteRefsWatcher
     /// `NSApplication.didResignActiveNotification` observation — pauses the GitHub
     /// liveness poll when the app is no longer frontmost.
     case appResignActive
@@ -516,6 +519,7 @@ struct RootFeature {
   @Dependency(ProjectReconciler.self) private var projectReconciler
   @Dependency(WorktreeHeadWatcher.self) private var worktreeHeadWatcher
   @Dependency(WorktreeWorkingTreeWatcher.self) private var worktreeWorkingTreeWatcher
+  @Dependency(RemoteRefsWatcher.self) private var remoteRefsWatcher
   @Dependency(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
   @Dependency(HandoffClient.self) private var handoffClient
@@ -854,6 +858,18 @@ struct RootFeature {
           }
           .cancellable(id: CancelID.worktreeWorkingTreeWatcher, cancelInFlight: true),
 
+          // A push moves the repository's remote-tracking refs. The pane
+          // foreground-job signal misses an agent's own `git push` (the agent
+          // stays the foreground job), so this is what surfaces a PR an agent
+          // opens, in any Project, without waiting for the poll.
+          .run { [remoteRefsWatcher] send in
+            let stream = await MainActor.run { remoteRefsWatcher.events() }
+            for await unitID in stream {
+              await send(.gitHub(.remoteRefsChanged(unitID)))
+            }
+          }
+          .cancellable(id: CancelID.remoteRefsWatcher, cancelInFlight: true),
+
           // Hydrate the GitHub integration's in-memory state from its on-disk
           // snapshot cache so the sidebar paints PR badges on the first render
           // pass, without the blank-then-populated flash the user sees when
@@ -905,6 +921,7 @@ struct RootFeature {
           .cancel(id: CancelID.periodicCleanup),
           .cancel(id: CancelID.worktreeHeadWatcher),
           .cancel(id: CancelID.worktreeWorkingTreeWatcher),
+          .cancel(id: CancelID.remoteRefsWatcher),
           .cancel(id: CancelID.appResignActive)
         )
 
