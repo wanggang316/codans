@@ -2,6 +2,13 @@ import Darwin
 import Foundation
 import os.log
 
+/// Observer of a pane that has no surface. `TerminalEngine` owns one per
+/// detached pane; tests substitute a fake.
+nonisolated protocol DetachedPaneWatching: AnyObject, Sendable {
+  func start()
+  func stop()
+}
+
 /// Passive zmx client for a pane that has no surface. It connects to the
 /// pane's daemon socket and never writes: without `.Init` the daemon does
 /// not replay the screen, never makes it the leader, and never resizes the
@@ -17,7 +24,7 @@ import os.log
 ///
 /// Each watcher holds one socket and one dispatch read source on a shared
 /// serial queue, so many watchers cost file descriptors, not threads.
-nonisolated final class ZmxPassiveWatcher: @unchecked Sendable {
+nonisolated final class ZmxPassiveWatcher: DetachedPaneWatching, @unchecked Sendable {
   enum Event: Equatable, Sendable {
     /// Signals found in one batch of output, in order.
     case signals([DetachedPaneSignal])
