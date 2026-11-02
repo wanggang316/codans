@@ -2497,13 +2497,13 @@ struct RootFeature {
         )
 
       case .worktreeHistoryBackRequested:
-        return Self.navigateHistory(&state, jump: .back(offset: 0))
+        return navigateHistory(&state, jump: .back(offset: 0))
 
       case .worktreeHistoryForwardRequested:
-        return Self.navigateHistory(&state, jump: .forward(offset: 0))
+        return navigateHistory(&state, jump: .forward(offset: 0))
 
       case .worktreeHistoryJumpRequested(let jump):
-        return Self.navigateHistory(&state, jump: jump)
+        return navigateHistory(&state, jump: jump)
       }
     }
     .ifLet(\.$commandPalette, action: \.commandPalette) {
@@ -2556,15 +2556,7 @@ struct RootFeature {
     _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
   ) {
     let catalog = hierarchyClient.snapshot()
-    if catalog.sidebarFilter != .all,
-      !catalog.sidebarProjects(
-        pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs
-      ).contains(where: { project in
-        project.worktrees.contains { $0.id == worktreeID }
-      })
-    {
-      hierarchyClient.setSidebarFilter(.all)
-    }
+    showAllFilterIfUnlisted(worktreeID, catalog: catalog, state: state)
     let project = catalog.projects.first { $0.id == projectID }
     if project?.rowWorktree?.id != worktreeID {
       hierarchyClient.setProjectExpanded(projectID, true)
@@ -2574,6 +2566,35 @@ struct RootFeature {
     }
     state.sidebarVisible = true
     state.revealSelectionTrigger = UUID()
+  }
+
+  /// Switches the sidebar category to All when the active one does not list
+  /// the worktree, so the sidebar selection always matches the detail.
+  /// A category that already lists the worktree stays.
+  private func showAllFilterIfUnlisted(
+    _ worktreeID: WorktreeID, catalog: Catalog, state: State
+  ) {
+    guard catalog.sidebarFilter != .all else { return }
+    let listed = catalog.sidebarProjects(
+      pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs
+    ).contains { project in
+      project.worktrees.contains { $0.id == worktreeID }
+    }
+    if !listed {
+      hierarchyClient.setSidebarFilter(.all)
+    }
+  }
+
+  /// Back / Forward / history jump: moves the stacks, then selects the
+  /// landing worktree under a sidebar category that lists it.
+  private func navigateHistory(_ state: inout State, jump: WorktreeHistoryJump) -> Effect<Action> {
+    guard
+      let target = Self.navigateHistory(&state, jump: jump),
+      let projectID = target.projectID,
+      let worktreeID = target.worktreeID
+    else { return .none }
+    showAllFilterIfUnlisted(worktreeID, catalog: hierarchyClient.snapshot(), state: state)
+    return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
   }
 
   // swiftlint:disable cyclomatic_complexity function_body_length
@@ -3425,11 +3446,13 @@ struct RootFeature {
   ///
   /// Nothing is mutated unless the target resolves to a real
   /// Project/Worktree pair — a half-applied jump would desync the two
-  /// stacks from the selection they describe.
+  /// stacks from the selection they describe. Returns the entry to select,
+  /// or nil when nothing moved.
+  @discardableResult
   static func navigateHistory(
     _ state: inout State,
     jump: WorktreeHistoryJump
-  ) -> Effect<Action> {
+  ) -> HierarchySelection? {
     let offset: Int
     let goingBack: Bool
     switch jump {
@@ -3442,16 +3465,13 @@ struct RootFeature {
     }
     var source = goingBack ? state.navigationHistoryBack : state.navigationHistoryForward
     var destination = goingBack ? state.navigationHistoryForward : state.navigationHistoryBack
-    guard offset >= 0, offset < source.count else { return .none }
+    guard offset >= 0, offset < source.count else { return nil }
 
     // Stacks are oldest-first, so the requested entry sits `offset` below
     // the top and everything above it was visited more recently.
     let targetIndex = source.count - 1 - offset
     let target = source[targetIndex]
-    guard
-      let projectID = target.projectID,
-      let worktreeID = target.worktreeID
-    else { return .none }
+    guard target.projectID != nil, target.worktreeID != nil else { return nil }
 
     let skipped = Array(source[(targetIndex + 1)...])
     source.removeSubrange(targetIndex...)
@@ -3473,7 +3493,7 @@ struct RootFeature {
     // sidebar stays hidden: Back / Forward live in the header and change
     // what the detail shows; they are not a request to open the column.
     state.revealSelectionTrigger = UUID()
-    return .send(.sidebar(.worktreeRowTapped(worktreeID, inProject: projectID)))
+    return target
   }
 
 }
