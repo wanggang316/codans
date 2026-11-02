@@ -92,9 +92,6 @@ struct NewAgentFeature {
     var agentProfiles: [AgentProfile] = []
     var agentProfileID: UUID?
     var prompt = ""
-    /// Last caret or selection in the prompt, as UTF-16 offsets. `nil`
-    /// until the editor reports one; picked files then go at the end.
-    var promptSelection: Range<Int>?
     var submitError: String?
     /// Draft to restore on appear. The worktree part waits until the form's
     /// options load: the base ref, the branch-name checks, and the branch
@@ -183,8 +180,9 @@ struct NewAgentFeature {
     case agentProfilesChanged([AgentProfile])
     case agentSelected(UUID)
     case promptChanged(String)
-    case promptSelectionChanged(Range<Int>)
-    case filesSelected([URL])
+    /// Picked files, and the prompt's caret or selection as UTF-16 offsets
+    /// (`nil` appends to the end).
+    case filesSelected([URL], selection: Range<Int>?)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -255,17 +253,10 @@ struct NewAgentFeature {
         state.prompt = prompt
         return .none
 
-      case .promptSelectionChanged(let range):
-        state.promptSelection = range
-        return .none
-
-      case .filesSelected(let urls):
-        guard
-          let result = ComposerPathInsertion.insert(
-            urls, into: state.prompt, selection: state.promptSelection)
-        else { return .none }
-        state.prompt = result.text
-        state.promptSelection = result.selection
+      case .filesSelected(let urls, let selection):
+        if let result = ComposerPathInsertion.insert(urls, into: state.prompt, selection: selection) {
+          state.prompt = result.text
+        }
         return .none
 
       case .sendTapped:

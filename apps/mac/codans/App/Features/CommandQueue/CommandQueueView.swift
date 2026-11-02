@@ -13,6 +13,7 @@ struct CommandQueueView: View {
   @FocusState private var draftFocused: Bool
   @State private var showsScheduleEditor = false
   @State private var showsFilePicker = false
+  @State private var draftSelection = ComposerSelection()
 
   private static let width: CGFloat = 560
   private static let editorHeight: CGFloat = 110
@@ -36,7 +37,7 @@ struct CommandQueueView: View {
     .onAppear { draftFocused = true }
     .onExitCommand(perform: onDismiss)
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
-      store.send(.filesSelected(urls))
+      draftSelection.edit({ store.draft }) { store.send(.filesSelected(urls, selection: $0)) }
       draftFocused = true
     }
   }
@@ -115,14 +116,6 @@ struct CommandQueueView: View {
         return .handled
       }
       .accessibilityLabel("Command")
-  }
-
-  /// The editor never clears the caret, so the setter only sees ranges.
-  private var draftSelection: Binding<Range<Int>?> {
-    Binding(
-      get: { store.draftSelection },
-      set: { if let range = $0 { store.send(.draftSelectionChanged(range)) } },
-    )
   }
 
   private var scheduleSummary: String {

@@ -192,12 +192,16 @@ struct CommandQueueFeatureTests {
   func selectedFilesAppendQuotedPathsWithoutSending() async {
     let recorder = Recorder()
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review" }
-    await store.send(.filesSelected([
-      URL(fileURLWithPath: "/tmp/my file.txt"),
-      URL(fileURLWithPath: "/tmp/it's.txt"),
-    ])) {
+    await store.send(
+      .filesSelected(
+        [
+          URL(fileURLWithPath: "/tmp/my file.txt"),
+          URL(fileURLWithPath: "/tmp/it's.txt"),
+        ],
+        selection: nil
+      )
+    ) {
       $0.draft = "Review '/tmp/my file.txt' '/tmp/it'\\''s.txt'"
-      $0.draftSelection = $0.draft.utf16.count..<$0.draft.utf16.count
     }
     #expect(recorder.sent.isEmpty)
     #expect(recorder.queue.isEmpty)
@@ -207,43 +211,23 @@ struct CommandQueueFeatureTests {
   func fileSelectionPreservesTrailingNewline() async {
     let recorder = Recorder()
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review\n" }
-    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")])) {
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")], selection: nil)) {
       $0.draft = "Review\n'/tmp/报告.txt'"
-      $0.draftSelection = $0.draft.utf16.count..<$0.draft.utf16.count
     }
   }
 
   @Test
   func emptyAndNonFileSelectionsDoNotChangeDraft() async {
     let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Keep this" }
-    await store.send(.filesSelected([]))
-    await store.send(.filesSelected([URL(string: "https://example.com/file")!]))
+    await store.send(.filesSelected([], selection: 0..<0))
+    await store.send(.filesSelected([URL(string: "https://example.com/file")!], selection: nil))
   }
 
   @Test
-  func selectedFilesReplaceSelectionAndMoveCaret() async {
+  func selectedFilesReplaceTheSelection() async {
     let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Open FILE now" }
-    await store.send(.draftSelectionChanged(5..<9)) {
-      $0.draftSelection = 5..<9
-    }
-    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a.txt")])) {
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a.txt")], selection: 5..<9)) {
       $0.draft = "Open '/tmp/a.txt' now"
-      $0.draftSelection = 17..<17
     }
-  }
-
-  @Test
-  func submitClearsRecordedCaret() async {
-    let paneID = PaneID()
-    let recorder = Recorder()
-    let store = Self.makeStore(paneID: paneID, recorder: recorder) {
-      $0.draft = "echo hi"
-      $0.draftSelection = 7..<7
-    }
-    await store.send(.submitted) {
-      $0.draft = ""
-      $0.draftSelection = nil
-    }
-    await store.receive(.delegate(.submitted))
   }
 }

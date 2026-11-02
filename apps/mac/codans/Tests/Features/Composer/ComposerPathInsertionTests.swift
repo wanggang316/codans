@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import Codans
@@ -80,5 +81,58 @@ struct ComposerPathInsertionTests {
     #expect(
       ComposerPathInsertion.insert(
         [URL(string: "https://example.com/file")!], into: "keep", selection: nil) == nil)
+  }
+}
+
+@MainActor
+struct ComposerSelectionTests {
+  @Test
+  func editPassesTheSelectionAndPutsTheCaretAfterTheInsertedText() throws {
+    guard #available(macOS 15, *) else { return }
+    var text = "open FILE now"
+    let selection = ComposerSelection()
+    let start = text.index(text.startIndex, offsetBy: 5)
+    let end = text.index(text.startIndex, offsetBy: 9)
+    selection.textSelection = TextSelection(range: start..<end)
+
+    var received: Range<Int>?
+    selection.edit({ text }) { range in
+      received = range
+      text = "open '/tmp/a.txt' now"
+    }
+
+    #expect(received == 5..<9)
+    guard case .selection(let caret) = try #require(selection.textSelection).indices else {
+      Issue.record("expected a single selection")
+      return
+    }
+    #expect(caret.isEmpty)
+    #expect(text.utf16.distance(from: text.startIndex, to: caret.lowerBound) == 17)
+  }
+
+  @Test
+  func noCaretPassesNilAndNilDoesNotClearARecordedCaret() {
+    guard #available(macOS 15, *) else { return }
+    let selection = ComposerSelection()
+    var received: Range<Int>? = 0..<0
+    selection.edit({ "abc" }) { received = $0 }
+    #expect(received == nil)
+
+    let text = "abc"
+    selection.textSelection = TextSelection(insertionPoint: text.endIndex)
+    selection.textSelection = nil
+    selection.edit({ text }) { received = $0 }
+    #expect(received == 3..<3)
+  }
+
+  @Test
+  func caretPastTheEndOfShorterTextCountsAsNoCaret() {
+    guard #available(macOS 15, *) else { return }
+    let long = "abcdef"
+    let selection = ComposerSelection()
+    selection.textSelection = TextSelection(insertionPoint: long.endIndex)
+    var received: Range<Int>? = 0..<0
+    selection.edit({ "ab" }) { received = $0 }
+    #expect(received == nil)
   }
 }

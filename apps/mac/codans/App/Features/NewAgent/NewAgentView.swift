@@ -15,6 +15,7 @@ struct NewAgentView: View {
   @Environment(AgentInstallationStore.self) private var installation
   @FocusState private var focus: Field?
   @State private var showsFilePicker = false
+  @State private var promptSelection = ComposerSelection()
 
   private enum Field: Hashable {
     case branchName
@@ -53,7 +54,7 @@ struct NewAgentView: View {
     .task(id: profiles) { store.send(.agentProfilesChanged(profiles)) }
     .onExitCommand { store.send(.cancelTapped) }
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
-      store.send(.filesSelected(urls))
+      promptSelection.edit({ store.prompt }) { store.send(.filesSelected(urls, selection: $0)) }
       focus = .prompt
     }
   }
@@ -364,14 +365,6 @@ struct NewAgentView: View {
         return .handled
       }
       .accessibilityLabel("Prompt")
-  }
-
-  /// The editor never clears the caret, so the setter only sees ranges.
-  private var promptSelection: Binding<Range<Int>?> {
-    Binding(
-      get: { store.promptSelection },
-      set: { if let range = $0 { store.send(.promptSelectionChanged(range)) } },
-    )
   }
 
   /// The agent to send to, as the small borderless menu a chat composer
