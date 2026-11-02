@@ -3,22 +3,17 @@ import SwiftUI
 /// Sidebar row for an in-flight worktree creation. Renders a spinner +
 /// latest progress line while running; a red dot + truncated error
 /// caption after failure. Right-click exposes Cancel (running) or
-/// Retry / Discard (failed). Not natively selectable (no `.tag`) — the
-/// container attaches a tap gesture instead, which re-focuses the
-/// creation (loading view + highlight) after the user navigated away.
-/// When the creation is the one the detail pane is following
-/// (`isHighlighted`), the container paints a manual accent background
-/// and this row switches its content to the selected-row light tones.
+/// Retry / Discard (failed). The container tags the row for the native
+/// List selection, so selecting it re-focuses the creation (loading view +
+/// highlight) after the user navigated away, and the system paints the
+/// same selection chrome as for worktree rows.
 /// See `docs/design-docs/worktree-sidebar-ordering.md` §pending 段.
 struct PendingWorktreeRow: View {
   let pending: PendingWorktree
-  /// True while this creation is the active one the detail pane follows —
-  /// the container draws the accent selection background, so every
-  /// explicitly-colored element here must flip to the light selected-row
-  /// tone (the same problem `WorktreeRowIcon` solves via
-  /// `backgroundProminence`, which never fires for this row because the
-  /// highlight is manual, not a native List selection).
-  var isHighlighted: Bool = false
+  /// `.increased` only while the row holds the emphasized (accent) native
+  /// selection. Every explicitly-colored element here must then flip to the
+  /// light selected-row tone, as `WorktreeRowIcon` does.
+  @Environment(\.backgroundProminence) private var backgroundProminence
   let onCancel: () -> Void
   let onRetry: () -> Void
   let onDiscard: () -> Void
@@ -152,6 +147,8 @@ struct PendingWorktreeRow: View {
       return raw.count > 60 ? String(raw.prefix(60)) + "…" : raw
     }
   }
+
+  private var isHighlighted: Bool { backgroundProminence == .increased }
 
   private var primaryColor: Color {
     isHighlighted ? Color(nsColor: .alternateSelectedControlTextColor) : .primary
