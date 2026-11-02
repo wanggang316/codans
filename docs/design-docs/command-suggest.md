@@ -114,7 +114,7 @@ protocol CommandSuggestionParser: Sendable {
 
 工具 mark 是 `ToolMark` 枚举（56 个），资源为 `tool-<raw>.imageset`：单色、24×24 viewBox、模板渲染，**跟随脚本颜色**，与 SF Symbol 同一套着色；来源与许可登记在 [tool-marks](../references/tool-marks.md)（Simple Icons CC0，`mise` 为自绘；Playwright 用 SF `theatermasks.fill`）。小尺寸下读成噪点的插画/细线/纯文字标（Composer、GNU、Maven、.NET）不收录。
 
-**存储**：沿用已有字符串字段——`ScriptDefinition.systemImage` 存 SF 名或 `mark:<tool>`，与 `Tab.icon` 的 `agent:` 前缀同构（运行脚本时该串原样写进 `Tab.icon`）。无 schema 变更：旧构建把 `mark:npm` 当作未知 symbol，只是不画；本构建遇到未知 mark 回退到类型默认图标。采纳建议时只在映射图标 ≠ 类型默认图标时写入，且不覆盖用户已给空 Run 选的图标。
+**存储**：沿用已有字符串字段——`ScriptDefinition.systemImage` 存 SF 名或 `mark:<tool>`，与 `agent:` 前缀同构（run pane 的 Header 与 Tab chip 原样显示该串，见 `PaneGlyph`）。无 schema 变更：旧构建把 `mark:npm` 当作未知 symbol，只是不画；本构建遇到未知 mark 回退到类型默认图标。采纳建议时只在映射图标 ≠ 类型默认图标时写入，且不覆盖用户已给空 Run 选的图标。
 
 **渲染**：所有画命令图标的地方都经 `CommandIconGlyph`（`CommandIconRef`）/ `StoredIconGlyph`（存储串，含 `agent:`）——Commands 表格、`+` 菜单、Header Run 按钮与其菜单、Command Palette、Tab chip、进程列表。菜单与 toolbar 会把 asset 图重新模板化并丢色，因此经 `CommandIconImage.tinted` 把颜色烘焙进非模板 `NSImage`。图标弹窗在 SF 网格下增加 Tools 网格。
 

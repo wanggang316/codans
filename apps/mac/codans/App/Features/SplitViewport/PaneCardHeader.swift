@@ -31,6 +31,7 @@ struct PaneCardHeader: View {
   @Binding var isQueueListShown: Bool
 
   @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
   @Environment(PaneMoveSession.self) private var moveSession
   @Dependency(TerminalClient.self) private var terminalClient
 
@@ -76,7 +77,6 @@ struct PaneCardHeader: View {
             .accessibilityHidden(true)
         } else {
           glyph
-            .foregroundStyle(.secondary)
         }
       }
       .frame(width: PaneCardMetrics.headerIconSize, height: PaneCardMetrics.headerIconSize)
@@ -157,11 +157,18 @@ struct PaneCardHeader: View {
     }
   }
 
-  /// Same glyph the tab chip shows while this pane is the tab's selected
-  /// pane (see `Tab.resolvedIcon(selectedPane:)`).
+  /// The pane's `PaneGlyph`, which the tab chip also shows while this is
+  /// the tab's selected pane. A running script's tint replaces the
+  /// secondary style.
   private var glyph: some View {
-    StoredIconGlyph(icon: TabIconRef.icon(for: pane), markSize: PaneCardMetrics.headerIconSize)
+    let glyph = PaneGlyph.resolve(
+      pane: pane, settings: settingsStore?.settings ?? .default,
+      isBusy: hierarchyManager.paneIsBusy(paneID))
+    return StoredIconGlyph(icon: glyph.icon, markSize: PaneCardMetrics.headerIconSize)
       .font(.system(size: PaneCardMetrics.headerIconSize - 2))
+      .foregroundStyle(
+        glyph.tint.map { AnyShapeStyle(ScriptTintColorPalette.color(for: $0)) }
+          ?? AnyShapeStyle(.secondary))
       .accessibilityHidden(true)
   }
 
