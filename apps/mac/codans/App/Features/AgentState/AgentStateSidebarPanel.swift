@@ -126,7 +126,7 @@ struct AgentStateSidebarPanel: View {
     .background(shape.fill(.quinary))
     .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
     .clipShape(shape)
-    .background(rowHotkeys)
+    .localHotkeys(rowHotkeys)
     .padding([.horizontal, .bottom], Self.edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
@@ -293,26 +293,16 @@ struct AgentStateSidebarPanel: View {
     return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }
 
-  /// One zero-size Button per hotkey slot, bound to `focusAgentAtN`. They live outside the
-  /// lazy list so a row scrolled out of view keeps its hotkey, and they exist only while
-  /// the panel is mounted, so `⌥N` reaches the terminal when the panel is closed.
-  private var rowHotkeys: some View {
-    let paneIDs = orderedRows.prefix(9).map(\.paneID)
-    return ZStack {
-      ForEach(Array(paneIDs.enumerated()), id: \.element) { offset, paneID in
-        if let id = CommandID.focusAgentAt(index: offset + 1) {
-          Button {
-            onTapRow(paneID)
-          } label: {
-            EmptyView()
-          }
-          .appKeyboardShortcut(id, in: resolvedShortcuts)
-        }
-      }
+  /// One hotkey per listed agent, up to 9, bound to `focusAgentAtN`. Active only while the
+  /// panel is mounted, so `⌥N` reaches the terminal when the panel is closed.
+  private var rowHotkeys: [LocalHotkey] {
+    orderedRows.prefix(9).enumerated().compactMap { offset, row in
+      guard let id = CommandID.focusAgentAt(index: offset + 1),
+        let resolved = resolvedShortcuts[id], let binding = resolved.binding
+      else { return nil }
+      let paneID = row.paneID
+      return LocalHotkey(binding: binding) { onTapRow(paneID) }
     }
-    .frame(width: 0, height: 0)
-    .opacity(0)
-    .accessibilityHidden(true)
   }
 
   /// The workflows a run started from a row in `worktreePath` could use —

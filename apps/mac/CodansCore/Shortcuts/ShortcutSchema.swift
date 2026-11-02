@@ -481,66 +481,66 @@ extension ShortcutSchema {
   ]
 
   private static let agentEntries: [Entry] = [
-    // Agents View — focus the pane of the Nth listed agent while the panel is open.
+    // Agents View — select the pane of the Nth listed agent while the panel is open.
     .init(
       id: .focusAgentAt1,
-      title: "Focus Agent 1",
+      title: "Select Agent 1",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_1), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt2,
-      title: "Focus Agent 2",
+      title: "Select Agent 2",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_2), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt3,
-      title: "Focus Agent 3",
+      title: "Select Agent 3",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_3), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt4,
-      title: "Focus Agent 4",
+      title: "Select Agent 4",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_4), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt5,
-      title: "Focus Agent 5",
+      title: "Select Agent 5",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_5), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt6,
-      title: "Focus Agent 6",
+      title: "Select Agent 6",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_6), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt7,
-      title: "Focus Agent 7",
+      title: "Select Agent 7",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_7), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt8,
-      title: "Focus Agent 8",
+      title: "Select Agent 8",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_8), modifiers: [.option])
     ),
     .init(
       id: .focusAgentAt9,
-      title: "Focus Agent 9",
+      title: "Select Agent 9",
       category: .agents,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_9), modifiers: [.option])

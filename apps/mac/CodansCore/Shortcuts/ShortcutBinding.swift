@@ -22,6 +22,12 @@ public struct ShortcutBinding: Equatable, Hashable, Sendable, Codable {
     self.modifiers = modifiers
     self.isEnabled = isEnabled
   }
+
+  /// Whether a key press with `keyCode` and exactly `modifiers` fires this binding. A
+  /// disabled binding fires on nothing.
+  public func matches(keyCode: UInt16, modifiers: ModifierMask) -> Bool {
+    isEnabled && self.keyCode == keyCode && self.modifiers == modifiers
+  }
 }
 
 /// Modifier-key set for a shortcut binding. Storage-layer mirror of SwiftUI's `EventModifiers`
