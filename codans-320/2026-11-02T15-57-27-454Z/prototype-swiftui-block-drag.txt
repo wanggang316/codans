@@ -1,0 +1,420 @@
+diff --git a/apps/mac/Configurations/mac-Info.plist b/apps/mac/Configurations/mac-Info.plist
+index 1acdcc9a..c1af7b7b 100644
+--- a/apps/mac/Configurations/mac-Info.plist
++++ b/apps/mac/Configurations/mac-Info.plist
+@@ -34,6 +34,19 @@
+ 	<string>bRg+MnS8YhPSuwCkPXyrJ7RvwtYGy2vH0HR+1h/IUXo=</string>
+ 	<key>SUEnableAutomaticChecks</key>
+ 	<true/>
++	<key>UTExportedTypeDeclarations</key>
++	<array>
++		<dict>
++			<key>UTTypeIdentifier</key>
++			<string>com.gumpw.codans.project-block</string>
++			<key>UTTypeDescription</key>
++			<string>codans Project</string>
++			<key>UTTypeConformsTo</key>
++			<array>
++				<string>public.data</string>
++			</array>
++		</dict>
++	</array>
+ 	<key>SentryDSN</key>
+ 	<!-- xcconfig strips `//` as a comment delimiter, so the URL is split:
+ 	     the literal `https://` lives here (in the plist, where comments
+diff --git a/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift b/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift
+index 9a422bad..546c236c 100644
+--- a/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift
++++ b/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift
+@@ -3,6 +3,7 @@ import CodansCore
+ import ComposableArchitecture
+ import OSLog
+ import SwiftUI
++import UniformTypeIdentifiers
+ 
+ private let autoOpenLogger = Logger(
+   subsystem: "com.gumpw.codans.agentstate", category: "autoOpen"
+@@ -187,6 +188,9 @@ struct HierarchySidebarView: View {
+   /// per-level indent the AppKit introspection retries paper over.
+   @State private var sidebarIndentReady = false
+ 
++  /// The Project block boundary a Project drag is over, while one is.
++  @State private var projectDropTarget: ProjectBlockDropTarget?
++
+   /// Heterogeneous rows under a Project row, in render order: main → pinned →
+   /// pending → unpinned (`Project.childWorktrees` plus the Project's pending
+   /// creations). `pendings` is filtered to the given project (caller passes
+@@ -615,8 +619,10 @@ struct HierarchySidebarView: View {
+       // posture is fine for source-list-style sidebars.
+       ScrollViewReader { proxy in
+         List(selection: nativeSelectionBinding) {
+-          ForEach(projects) { project in
+-            projectSection(project, hotkeyIndex: hotkeyIndex)
++          let visibleProjectIDs = projects.map(\.id)
++          ForEach(Array(projects.enumerated()), id: \.element.id) { index, project in
++            projectSection(
++              project, block: index, visibleProjectIDs: visibleProjectIDs, hotkeyIndex: hotkeyIndex)
+           }
+         }
+         .listStyle(.sidebar)
+@@ -735,9 +741,34 @@ struct HierarchySidebarView: View {
+ 
+   private func projectSection(
+     _ project: Project,
++    block: Int,
++    visibleProjectIDs: [ProjectID],
+     hotkeyIndex: [WorktreeID: Int]
+   ) -> some View {
+     let isExpanded = project.isExpanded
++    let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
++      .contains(hierarchyManager.catalog.sidebarFilter)
++    let pendingRows = store.pendingWorktrees.filter {
++      $0.projectID == project.id && !isLiveMatchFilter
++    }
++    let rowsUnder: Int
++    switch project.loadState {
++    case .failed: rowsUnder = 0
++    case .loading, .ready:
++      if !isExpanded {
++        rowsUnder = 0
++      } else if project.isWorkspace {
++        rowsUnder = project.workspaceSidebarRows.count
++      } else {
++        rowsUnder = project.childWorktrees.count + pendingRows.count
++      }
++    }
++    // Every row of the block is a drop target that snaps to the nearest
++    // block boundary, so the indicator never shows inside a block.
++    let slot = { (row: Int) in
++      ProjectBlockRowSlot(block: block, blockCount: visibleProjectIDs.count, row: row, rowCount: 1 + rowsUnder)
++    }
++    let onDrop = projectDropHandler(visibleProjectIDs: visibleProjectIDs)
+     return Group {
+       switch project.loadState {
+       case .failed(let reason):
+@@ -760,13 +791,19 @@ struct HierarchySidebarView: View {
+         // Same row metrics as the healthy Project header below — without
+         // them the failed row falls back to the sidebar's default insets and
+         // sits at a different indent than its siblings.
+-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
++        .listRowInsets(Self.projectRowInsets)
+         .listRowBackground(Color.clear)
+         .listRowSeparator(.hidden)
++        .onDrag { pdLog.notice("PDRAGDBG dragstart"); return NSItemProvider(item: (try? JSONEncoder().encode(ProjectBlockDragPayload(projectID: project.id))) as NSData?, typeIdentifier: UTType.codansProjectBlock.identifier) }
++        .projectBlockDropTarget(
++          slot(0), rowInsets: Self.projectRowInsets, target: $projectDropTarget, onDrop: onDrop)
+       case .loading, .ready:
+         projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] })
++          .onDrag { pdLog.notice("PDRAGDBG dragstart"); return NSItemProvider(item: (try? JSONEncoder().encode(ProjectBlockDragPayload(projectID: project.id))) as NSData?, typeIdentifier: UTType.codansProjectBlock.identifier) }
++          .projectBlockDropTarget(
++            slot(0), rowInsets: Self.projectRowInsets, target: $projectDropTarget, onDrop: onDrop)
+         if isExpanded, project.isWorkspace {
+-          workspaceRows(project, hotkeyIndex: hotkeyIndex)
++          workspaceRows(project, hotkeyIndex: hotkeyIndex, slot: slot, onDrop: onDrop)
+         } else if isExpanded {
+           // Render the four segments individually so pinned and unpinned
+           // each own their own ForEach + .onMove (per design doc §渲染合并
+@@ -776,19 +813,23 @@ struct HierarchySidebarView: View {
+           let mainRows = children.filter { $0.path == project.rootPath }
+           let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
+           let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
+-          // The live-match filters show a subset of each segment, so its
+-          // indices cannot drive a reorder.
+-          let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
+-            .contains(hierarchyManager.catalog.sidebarFilter)
+-          let pendingRows = store.pendingWorktrees.filter {
+-            $0.projectID == project.id && !isLiveMatchFilter
+-          }
+-          ForEach(mainRows) { worktree in
++          // Row index of each segment's first row inside the block.
++          let pinnedStart = 1 + mainRows.count
++          let pendingStart = pinnedStart + pinnedRows.count
++          let unpinnedStart = pendingStart + pendingRows.count
++          ForEach(Array(mainRows.enumerated()), id: \.element.id) { index, worktree in
+             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
++              .projectBlockDropTarget(
++                slot(1 + index), rowInsets: Self.worktreeRowInsets, target: $projectDropTarget, onDrop: onDrop)
+           }
+-          ForEach(pinnedRows) { worktree in
++          // The live-match filters show a subset of each segment, so its
++          // indices cannot drive a reorder.
++          ForEach(Array(pinnedRows.enumerated()), id: \.element.id) { index, worktree in
+             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+               .moveDisabled(isLiveMatchFilter)
++              .projectBlockDropTarget(
++                slot(pinnedStart + index), rowInsets: Self.worktreeRowInsets, target: $projectDropTarget,
++                onDrop: onDrop)
+           }
+           .onMove { source, destination in
+             guard !isLiveMatchFilter else { return }
+@@ -799,12 +840,18 @@ struct HierarchySidebarView: View {
+               )
+             )
+           }
+-          ForEach(pendingRows) { pending in
++          ForEach(Array(pendingRows.enumerated()), id: \.element.id) { index, pending in
+             pendingRow(pending)
++              .projectBlockDropTarget(
++                slot(pendingStart + index), rowInsets: Self.worktreeRowInsets, target: $projectDropTarget,
++                onDrop: onDrop)
+           }
+-          ForEach(unpinnedRows) { worktree in
++          ForEach(Array(unpinnedRows.enumerated()), id: \.element.id) { index, worktree in
+             worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+               .moveDisabled(isLiveMatchFilter)
++              .projectBlockDropTarget(
++                slot(unpinnedStart + index), rowInsets: Self.worktreeRowInsets, target: $projectDropTarget,
++                onDrop: onDrop)
+           }
+           .onMove { source, destination in
+             guard !isLiveMatchFilter else { return }
+@@ -820,6 +867,21 @@ struct HierarchySidebarView: View {
+     }
+   }
+ 
++  /// Resolves a Project block drop on a boundary between the visible blocks
++  /// to a move in the full Project order (ADR 0001).
++  private func projectDropHandler(visibleProjectIDs: [ProjectID]) -> (ProjectID, Int) -> Void {
++    { [store] projectID, boundary in
++      guard
++        let placement = ProjectPlacement.resolve(
++          moving: projectID, visible: visibleProjectIDs, boundary: boundary)
++      else { return }
++      store.send(.moveProject(projectID, to: placement))
++    }
++  }
++
++  private static let projectRowInsets = EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0)
++  private static let worktreeRowInsets = EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0)
++
+   // MARK: - Project row
+ 
+   /// A Project's own row. When the Project stands for a folder of its own
+@@ -864,7 +926,7 @@ struct HierarchySidebarView: View {
+       // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
+       .tag(root.id)
+       .id(root.id)
+-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
++      .listRowInsets(Self.projectRowInsets)
+       .listRowSeparator(.hidden)
+       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
+     } else {
+@@ -891,7 +953,7 @@ struct HierarchySidebarView: View {
+           }
+         }
+       }
+-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
++      .listRowInsets(Self.projectRowInsets)
+       .listRowBackground(Color.clear)
+       .listRowSeparator(.hidden)
+     }
+@@ -902,14 +964,25 @@ struct HierarchySidebarView: View {
+   /// The rows under an expanded Workspace header: each group, followed by
+   /// the references or members of an open group. Flat sibling List rows,
+   /// like a Project's worktree rows, so a group opens as plain row inserts.
+-  private func workspaceRows(_ project: Project, hotkeyIndex: [WorktreeID: Int]) -> some View {
+-    ForEach(project.workspaceSidebarRows, id: \.listID) { row in
++  private func workspaceRows(
++    _ project: Project,
++    hotkeyIndex: [WorktreeID: Int],
++    slot: @escaping (Int) -> ProjectBlockRowSlot,
++    onDrop: @escaping (ProjectID, Int) -> Void
++  ) -> some View {
++    ForEach(Array(project.workspaceSidebarRows.enumerated()), id: \.element.listID) { index, row in
+       switch row {
+       case .group(let group, let terminal):
+         workspaceGroupRow(
+           group, terminal: terminal, in: project, hotkeySlot: terminal.flatMap { hotkeyIndex[$0.id] })
++          .projectBlockDropTarget(
++            slot(1 + index), rowInsets: Self.worktreeRowInsets, target: $projectDropTarget, onDrop: onDrop)
+       case .member(let worktree, _):
+         worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id], indent: 28)
++          .projectBlockDropTarget(
++            slot(1 + index),
++            rowInsets: EdgeInsets(top: 2, leading: 28, bottom: 2, trailing: 0),
++            target: $projectDropTarget, onDrop: onDrop)
+       }
+     }
+   }
+diff --git a/apps/mac/codans/App/Features/HierarchySidebar/ProjectBlockDrag.swift b/apps/mac/codans/App/Features/HierarchySidebar/ProjectBlockDrag.swift
+new file mode 100644
+index 00000000..5547fcb7
+--- /dev/null
++++ b/apps/mac/codans/App/Features/HierarchySidebar/ProjectBlockDrag.swift
+@@ -0,0 +1,176 @@
++import CodansCore
++import SwiftUI
++import UniformTypeIdentifiers
++import OSLog
++
++let pdLog = Logger(subsystem: "com.gumpw.codans", category: "PDRAGDBG")
++
++// Direct drag of a Project block in the sidebar (ADR 0001). A Project block is
++// the Project row plus its worktree rows, which are sibling List rows, so
++// `ForEach.onMove` cannot move it. Each row of a block is a drop target that
++// snaps to the nearest block boundary, and the sidebar draws the insertion
++// indicator at that boundary.
++
++extension UTType {
++  /// Declared in `mac-Info.plist`. A private type: only a Project row drag
++  /// can drop on the sidebar, never text or files from another app.
++  nonisolated static let codansProjectBlock = UTType(exportedAs: "com.gumpw.codans.project-block")
++}
++
++/// The drag payload of a Project row.
++nonisolated struct ProjectBlockDragPayload: Codable, Transferable {
++  let projectID: ProjectID
++
++  static var transferRepresentation: some TransferRepresentation {
++    CodableRepresentation(contentType: .codansProjectBlock)
++  }
++}
++
++/// Where one sidebar row sits: in which visible Project block, and at which
++/// row of that block.
++struct ProjectBlockRowSlot: Equatable {
++  /// Index of the block among the visible Project blocks.
++  let block: Int
++  /// Number of visible Project blocks.
++  let blockCount: Int
++  /// Row index inside the block; the Project row is `0`.
++  let row: Int
++  /// Rows in the block: the Project row plus the rows shown under it.
++  let rowCount: Int
++
++  /// The block boundary nearest to a point `fraction` (0…1) down this row:
++  /// `block` (above the block) or `block + 1` (below it).
++  func boundary(atFraction fraction: Double) -> Int {
++    let position = Double(row) + min(max(fraction, 0), 1)
++    return position < Double(rowCount) / 2 ? block : block + 1
++  }
++
++  /// The row draws the indicator for `boundary` when it is the top row of
++  /// the block below the boundary, or the bottom row of the last block.
++  func indicatorEdge(for boundary: Int?) -> VerticalEdge? {
++    guard let boundary else { return nil }
++    if row == 0, boundary == block { return .top }
++    if row == rowCount - 1, block == blockCount - 1, boundary == blockCount { return .bottom }
++    return nil
++  }
++}
++
++/// The boundary the pointer is over, and the row that reported it. Rows
++/// report enter and exit in either order, so a row clears only its own value.
++struct ProjectBlockDropTarget: Equatable {
++  let boundary: Int
++  let reporter: ProjectBlockRowSlot
++}
++
++private struct ProjectBlockDropDelegate: DropDelegate {
++  let slot: ProjectBlockRowSlot
++  let rowHeight: Double
++  @Binding var target: ProjectBlockDropTarget?
++  let onDrop: (_ projectID: ProjectID, _ boundary: Int) -> Void
++
++  func validateDrop(info: DropInfo) -> Bool {
++    info.hasItemsConforming(to: [.codansProjectBlock])
++  }
++
++  func dropEntered(info: DropInfo) { pdLog.notice("PDRAGDBG enter \(slot.block) \(slot.row) y=\(info.location.y) h=\(rowHeight)"); report(info) }
++
++  func dropUpdated(info: DropInfo) -> DropProposal? {
++    report(info)
++    return DropProposal(operation: .move)
++  }
++
++  func dropExited(info: DropInfo) {
++    pdLog.notice("PDRAGDBG exit \(slot.block) \(slot.row) owner=\(target?.reporter == slot)")
++    if target?.reporter == slot { target = nil }
++  }
++
++  func performDrop(info: DropInfo) -> Bool {
++    let boundary = boundary(info)
++    pdLog.notice("PDRAGDBG perform \(slot.block) \(slot.row) boundary=\(boundary)")
++    target = nil
++    guard let provider = info.itemProviders(for: [.codansProjectBlock]).first else { return false }
++    _ = provider.loadTransferable(type: ProjectBlockDragPayload.self) { result in
++      guard case .success(let payload) = result else { return }
++      Task { @MainActor in onDrop(payload.projectID, boundary) }
++    }
++    return true
++  }
++
++  private func boundary(_ info: DropInfo) -> Int {
++    slot.boundary(atFraction: rowHeight > 0 ? info.location.y / rowHeight : 0)
++  }
++
++  private func report(_ info: DropInfo) {
++    let next = ProjectBlockDropTarget(boundary: boundary(info), reporter: slot)
++    if target != next { pdLog.notice("PDRAGDBG target \(next.boundary) from \(slot.block)/\(slot.row)"); target = next }
++  }
++}
++
++/// Insertion indicator in the style of the AppKit source-list drop line: an
++/// accent-colored line that starts with a small ring.
++struct ProjectDropIndicator: View {
++  static let ringDiameter: Double = 6
++  static let lineWidth: Double = 2
++
++  var body: some View {
++    HStack(spacing: 0) {
++      Circle()
++        .strokeBorder(Color.accentColor, lineWidth: Self.lineWidth)
++        .frame(width: Self.ringDiameter, height: Self.ringDiameter)
++      Rectangle()
++        .fill(Color.accentColor)
++        .frame(height: Self.lineWidth)
++    }
++    .frame(height: Self.ringDiameter)
++    .allowsHitTesting(false)
++    .accessibilityHidden(true)
++  }
++}
++
++private struct ProjectBlockDropTargetModifier: ViewModifier {
++  let slot: ProjectBlockRowSlot
++  /// The row's List insets. The indicator sits on the boundary between two
++  /// rows and starts at the sidebar's leading edge, not at the row content.
++  let rowInsets: EdgeInsets
++  @Binding var target: ProjectBlockDropTarget?
++  let onDrop: (ProjectID, Int) -> Void
++  @State private var rowHeight: Double = 0
++
++  func body(content: Content) -> some View {
++    let edge = slot.indicatorEdge(for: target?.boundary)
++    content
++      .onGeometryChange(for: Double.self) { $0.size.height } action: { rowHeight = $0 }
++      .onDrop(
++        of: [.codansProjectBlock],
++        delegate: ProjectBlockDropDelegate(
++          slot: slot, rowHeight: rowHeight, target: $target, onDrop: onDrop)
++      )
++      .overlay(alignment: edge == .bottom ? .bottom : .top) {
++        if let edge {
++          // Center the line on the gap between rows: the Project row's top
++          // inset plus the previous row's bottom inset, or below the last row.
++          let gapCenter = edge == .top ? (rowInsets.top + Self.rowBottomInset) / 2 : rowInsets.bottom / 2
++          let halfHeight = ProjectDropIndicator.ringDiameter / 2
++          ProjectDropIndicator()
++            .padding(.leading, -rowInsets.leading)
++            .offset(y: edge == .top ? -gapCenter - halfHeight : gapCenter + halfHeight)
++        }
++      }
++  }
++
++  /// Bottom inset every sidebar row uses.
++  private static let rowBottomInset: Double = 2
++}
++
++extension View {
++  /// Makes a sidebar row part of a Project block drop target.
++  func projectBlockDropTarget(
++    _ slot: ProjectBlockRowSlot,
++    rowInsets: EdgeInsets,
++    target: Binding<ProjectBlockDropTarget?>,
++    onDrop: @escaping (ProjectID, Int) -> Void
++  ) -> some View {
++    modifier(
++      ProjectBlockDropTargetModifier(slot: slot, rowInsets: rowInsets, target: target, onDrop: onDrop))
++  }
++}
