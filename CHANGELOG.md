@@ -17,9 +17,11 @@ and the project does not yet follow semantic versioning — every release until
   General → Memory → "Release terminal views of hidden panes" turns the
   release off. The shell keeps running either way.
 - **Agents in panes you have not opened stay current.** An agent in a pane
-  restored at launch, or in a hidden pane whose terminal was released while
-  idle, still updates its Agents View row when it reports its own state
-  (OSC 7501), and its notifications and title still arrive. When such a
+  restored at launch, or in a hidden pane whose terminal was released, still
+  updates its Agents View row when it reports its own state (OSC 7501), and
+  its notifications and title still arrive. Such an agent's hidden pane can
+  release its terminal mid-task too; an agent that does not report its own
+  state keeps its terminal until its turn ends. When such a
   pane's session ends, its row goes away within about two seconds, so a
   sleeping row is always a running agent. `agent status` reports
   `source: cached` for a sleeping row whose state comes from a screen

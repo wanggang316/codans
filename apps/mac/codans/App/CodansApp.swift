@@ -2420,10 +2420,11 @@ final class AppState {
   /// signal for an agent pane.
   private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
     guard commandQueueRunner == nil else { return }
-    // A pane mid-turn or holding queued commands must keep its surface: the
-    // idle-surface reclaim would otherwise detach it while work is pending.
+    // A pane whose turn only its screen tracks, or that holds queued
+    // commands, must keep its surface: queued commands go out only through
+    // a live surface.
     engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] paneID in
-      registry?.entries[paneID]?.state.isMidTask == true
+      registry?.needsSurfaceToTrackTurn(paneID) == true
         || manager?.catalog.pane(paneID)?.commandQueue.isEmpty == false
     }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
