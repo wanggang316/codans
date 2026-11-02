@@ -72,7 +72,21 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Removed
 
+- **Tabs no longer have Rename, Change Color or Change Icon.** The tab
+  context menu, the Tab menu, the command palette and the ⌥⌘R / ⌥⌘C
+  shortcuts no longer offer them, and tabs no longer show a color dot.
+  `codans tab rename` still sets a tab's title, and `codans tab show` no
+  longer prints an icon. Shortcut overrides you set for the two commands
+  are ignored.
+
 ### Fixed
+
+- **A tab's icon now matches the header of its selected pane.** It shows the
+  agent's mark only while an agent runs in that pane, the script's icon for
+  a pane that runs a script, and a terminal otherwise. A tab opened by an
+  agent profile no longer keeps the agent's icon after the agent exits or
+  after a restart. A script that runs in another pane of the tab no longer
+  colors the tab's icon.
 
 ### Security
 

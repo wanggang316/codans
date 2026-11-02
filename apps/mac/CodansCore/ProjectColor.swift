@@ -8,8 +8,7 @@ import SwiftUI
 /// system accent.
 ///
 /// The named palette is codans's own designed set, not the macOS Finder one
-/// `TagColor` / `TabColor` follow — those two are unchanged and still mirror
-/// the system colors. Exact values live on `hexValue`.
+/// `TagColor` follows — that one still mirrors the system colors. Exact values live on `hexValue`.
 ///
 /// Codable shape is a single string: named cases encode as their lower-case
 /// label (`"red"`, `"orange"`, …); custom encodes as the uppercase hex

@@ -339,8 +339,6 @@ struct RootFeature {
     /// forwards `.detail(.tabBar(.renameRequested(...)))` so chip
     /// context-menu and chord paths land on the same reducer transition.
     /// Silent no-op when no tab is active.
-    case renameActiveTabForCurrentWorktreeRequested
-    case changeActiveTabColorForCurrentWorktreeRequested
     /// Run a Project command in the current Worktree — the menu-bar Commands
     /// menu entry point. Carries only `scriptID`; the target Project + Worktree
     /// are resolved at handle-time by forwarding to the WorktreeHeader delegate
@@ -2340,44 +2338,6 @@ struct RootFeature {
         _ = try? hierarchyClient.selectAdjacentTab(direction, worktreeID, projectID)
         return .none
 
-      case .renameActiveTabForCurrentWorktreeRequested:
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let activeTabID = worktree.selectedTabID,
-          let activeTab = worktree.tabs.first(where: { $0.id == activeTabID })
-        else { return .none }
-        return .send(
-          .detail(
-            .tabBar(
-              .renameRequested(activeTabID, currentName: activeTab.name ?? "")
-            )))
-
-      case .changeActiveTabColorForCurrentWorktreeRequested:
-        guard
-          let projectID = state.selection.projectID,
-          let worktreeID = state.selection.worktreeID
-        else { return .none }
-        let catalog = hierarchyClient.snapshot()
-        guard
-          let worktree = catalog
-            .projects.first(where: { $0.id == projectID })?
-            .worktrees.first(where: { $0.id == worktreeID }),
-          let activeTabID = worktree.selectedTabID,
-          let activeTab = worktree.tabs.first(where: { $0.id == activeTabID })
-        else { return .none }
-        return .send(
-          .detail(
-            .tabBar(
-              .colorRequested(activeTabID, currentColor: activeTab.color)
-            )))
-
       case .revealCurrentWorktreeInFinderRequested:
         guard
           let projectID = state.selection.projectID,
@@ -2728,12 +2688,6 @@ struct RootFeature {
         let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })
       else { return .none }
       return .send(.sidebar(.projectRemoveTapped(projectID: projectID, name: project.name)))
-
-    // Tab — operate on the current Worktree's active tab
-    case .renameCurrentTab:
-      return .send(.renameActiveTabForCurrentWorktreeRequested)
-    case .changeCurrentTabColor:
-      return .send(.changeActiveTabColorForCurrentWorktreeRequested)
 
     // Editor
     case .openCurrentWorktreeInDefaultEditor:

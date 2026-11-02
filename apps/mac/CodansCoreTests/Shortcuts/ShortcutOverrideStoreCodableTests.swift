@@ -74,6 +74,43 @@ struct ShortcutOverrideStoreCodableTests {
   }
 
   @Test
+  func retiredCommandOverridesAreDropped() throws {
+    let json = Data(
+      """
+      {
+        "version": 1,
+        "overrides": {
+          "renameActiveTab": { "keyCode": 15, "modifiers": ["command"], "isEnabled": true },
+          "changeActiveTabColor": { "keyCode": 8, "modifiers": ["command"], "isEnabled": false },
+          "newTab": { "keyCode": 17, "modifiers": ["command", "option"], "isEnabled": true }
+        }
+      }
+      """.utf8
+    )
+
+    let decoded = try JSONDecoder.touchCodeDefault.decode(ShortcutOverrideStore.self, from: json)
+    #expect(decoded.overrides.keys.sorted { $0.rawValue < $1.rawValue } == [.newTab])
+  }
+
+  @Test
+  func unknownCommandFailsDecoding() throws {
+    let bad = Data(
+      """
+      {
+        "version": 1,
+        "overrides": {
+          "notACommand": { "keyCode": 17, "modifiers": ["command"], "isEnabled": true }
+        }
+      }
+      """.utf8
+    )
+
+    #expect(throws: DecodingError.self) {
+      _ = try JSONDecoder.touchCodeDefault.decode(ShortcutOverrideStore.self, from: bad)
+    }
+  }
+
+  @Test
   func modifierTokensDecodeRegardlessOfOrder() throws {
     // JSON key remains `toggleGitViewer` even after the Swift identifier
     // was renamed to `toggleDiffInspector` — pinned via `CommandID`'s raw

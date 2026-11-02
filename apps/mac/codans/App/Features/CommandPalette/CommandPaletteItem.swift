@@ -98,10 +98,6 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case removeAllMergedWorktrees
     case removeCurrentProject
 
-    // Tab — operate on the current Worktree's active tab.
-    case renameCurrentTab
-    case changeCurrentTabColor
-
     // Editor
     case openCurrentWorktreeInDefaultEditor
     case openCurrentWorktreeIn(EditorID)

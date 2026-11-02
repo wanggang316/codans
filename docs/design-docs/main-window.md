@@ -106,13 +106,13 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 
 ## Tab Bar
 
-终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（居中标题 + hover 时在左侧出现的关闭按钮 + active 浮起底板），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / rename / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
+终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（居中标题 + hover 时在左侧出现的关闭按钮 + active 浮起底板），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
 
 ### 不变量
 
 - **`Tab` 保持 `Codable` 纯数据，分屏树用 `PaneID` 间接、不嵌 `NSView`。** `Tab`（`apps/mac/CodansCore/Tab.swift`）被逐字持久化进 `catalog.json`；`splitTree` 持有 `PaneID` 而非活的 `PaneView`/`NSView`。把 AppKit/SwiftUI 视图嵌进 `Tab` 会逼出一套独立持久化形态、把核心域模型耦合到 UI 类型，并堵死未来的 headless 用途。ID 间接每次渲染一次字典查找，在现实 tab 数下可忽略。
 
-- **`Tab.icon` / `Tab.isDirty` 是持久字段。** 它们与 `HierarchyManager` 上记录前台运行状态的非持久集合分属不同层；运行状态不能以持久字段替代。
+- **chip 的图标与标题来自同一个 pane，图标与该 pane 卡片 Header 一致。** 选中 pane = Tab 最后获得焦点的 pane，没有时取第一个 pane。图标由 `PaneGlyph.resolve`（`apps/mac/CodansCore/PaneGlyph.swift`）算出，Header 与 chip 共用：pane 里有 agent → agent 标记；pane 是运行脚本的 run pane → 脚本图标，脚本运行时取脚本的 tint；否则 terminal。图标不持久化在 `Tab` 上，也没有用户覆盖；Tab 不提供改名、改色、改图标的界面（`codans tab rename` 仍可设标题）。旧 catalog 里的 `color` / `icon` / `iconLock` 键在解码时忽略，下次保存时丢弃。
 
 - **per-pane running/dirty 是 `HierarchyManager` 上的 runtime-only `Set<PaneID>`，永不持久化，各 teardown 路径清它。** chip 的"忙"指示源于该 wall-clock-live 的运行态集合；持久化它会泄漏陈旧的 spinner（重启后仍转）。每条拆除路径——`closePane` / `closeTab` / `tearDownWorktreeSurfaces`——都必须清理对应条目。同类的 `lastFocusedPaneByTab: [TabID: PaneID]`（`selectTab` 时据此恢复焦点，落到 split 树最左叶兜底）也是 runtime-only。
 - **"忙"只表示有一条会结束的命令在跑。** 两个来源取并集：OSC 9;4 进度上报，和前台进程组里的非 shell、非 agent 命令（`ForegroundJobClassifier.indicatesBusyCommand`）。交互式远程会话被排除——`ssh host`（无远程命令或带 `-t`）、`mosh`、`et` 会一直占着前台直到登出，转圈不传达任何信息；它们仍算作 worktree 进程列表里的运行中命令。判断 ssh 是否带远程命令要用真实 argv（`ForegroundProcess.arguments`），因为 shell 集成的 `ssh` 包装会传带空格的 `-o` 值。
@@ -123,7 +123,7 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 
 - **重排用 snapshot-on-drop，不逐 tick 调 `moveTab`。** 拖拽重排在**落下**时一次性提交绝对顺序 `reorderTabs(orderedIDs:)`，而非每个指针 tick 调 `moveTab(offset:)`。后者每次触发一次持久化保存，且两个连续 tick 跨过同一中点时引入重排闪烁。snapshot-on-drop 更省、更易单测、且贴合 catalog 真正想要的变更形态。
 
-- **视觉与交互对齐 AppKit 的 macOS 26 window-tabbing tab 条（Finder / Safari 同款），用 SwiftUI 按实测复刻。** 原生 tab 条是私有 `NSTabBar` / `NSTabButton`，只服务 `NSWindowTabGroup`（每个 tab 是一个独立窗口、挂在标题栏下），无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 颜色 / 快捷键提示；公开 API 里也没有能在窗口内渲染它的控件。所有参数取自在进程内遍历原生 tab 条视图树（frame / 字体）与 2x 截图取色，集中在 `TabBarMetrics` / `TabBarColors`：胶囊轨道高 28pt、内容内缩 2pt、chip 高 24pt 且间隔 1pt（分隔线 1×18pt 画在间隔里）、最小宽 120pt、关闭按钮与右侧槽位 16pt 距边 5pt、标题两侧对称留 29pt、11pt 标题尾部截断。选中 tab 在原生里是私有 Liquid Glass variant，`.glassEffect(.regular/.clear)` 实测色值对不上，故用半透明填充 + 两道 0.5pt 亮边 + 浅色模式阴影落到同样的像素；hover 是扁平淡胶囊并隐藏两侧分隔线；与原生一致在**按下时即选中**（没有单独的 pressed 态）。
+- **视觉与交互对齐 AppKit 的 macOS 26 window-tabbing tab 条（Finder / Safari 同款），用 SwiftUI 按实测复刻。** 原生 tab 条是私有 `NSTabBar` / `NSTabButton`，只服务 `NSWindowTabGroup`（每个 tab 是一个独立窗口、挂在标题栏下），无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 快捷键提示；公开 API 里也没有能在窗口内渲染它的控件。所有参数取自在进程内遍历原生 tab 条视图树（frame / 字体）与 2x 截图取色，集中在 `TabBarMetrics` / `TabBarColors`：胶囊轨道高 28pt、内容内缩 2pt、chip 高 24pt 且间隔 1pt（分隔线 1×18pt 画在间隔里）、最小宽 120pt、关闭按钮与右侧槽位 16pt 距边 5pt、标题两侧对称留 29pt、11pt 标题尾部截断。选中 tab 在原生里是私有 Liquid Glass variant，`.glassEffect(.regular/.clear)` 实测色值对不上，故用半透明填充 + 两道 0.5pt 亮边 + 浅色模式阴影落到同样的像素；hover 是扁平淡胶囊并隐藏两侧分隔线；与原生一致在**按下时即选中**（没有单独的 pressed 态）。
   - **溢出堆叠（`TabStackLayout`，纯函数、以原生采样为测试基准）**：tab 放不下时，`NSScrollView` 里只放一条与滚动范围等宽的空占位（提供偏移与 AppKit 滚动动画），chip 行画在它上面，由自定义 `Layout` 按视口坐标直接排到堆叠位置并裁成窄条（chip 若放在滚动内容里，SwiftUI 会按布局槽位剔除“不可见”的子视图，窗口变窄后选中 tab 会消失；只用 `.offset` 挪到堆叠位置则布局槽位不动，悬停、点击、分隔线、拖拽仍按旧位置走）——两端堆叠区宽 `min(视口/8, 128)`，只在该侧还有内容可滚时生效，越界的 tab 按 `(Z/2)·ln(1+d/(Z/2))` 压成窄条；选中 tab 不压缩，进入堆叠区后按双曲线减速，所在侧没有其他 tab 时一直滑到边缘钉住；首尾 tab 作为整摞的「底」贴边。压扁的 chip 仍按全宽排版再裁切（同原生 `mainContentClippingContainer`）：选中 tab 之前的内容贴左缘、之后的贴右缘，被堆叠区压缩的再向内推一段（按压缩来自哪一侧拟合），所以细窄条只露出空白边距、不露标题碎片，被选中 tab 盖住的部分裁掉（选中底板半透明，不能只靠重叠遮挡）。
   - **交互**：切换选中**不滚动**；点击堆叠窄条不选中，而是用 AppKit clip view 动画（0.25s ease-out cubic）滚动一页 `V − 2.5Z − W`；新建 tab 立即滚到可见；滚轮与触控板在 tab 条上的滚动都由本地监听直接驱动 clip view（主方向决定位移，垂直滚轮也横向滚动；每行 10pt，精确滚动 1:1），tab 放得下时不滚动、也不回弹。滚动偏移从 clip view 的 bounds 通知读取——SwiftUI 几何感知不到 AppKit 发起的滚动；定位 `NSScrollView` 的探针放在滚动内容之外，放在内容里会让 SwiftUI 不再绘制 chip。
   - **已知偏差**：帧位置与原生最多差 1pt（原生浮点舍入细节）；窄条内标题偏移是经验拟合，薄窄条里可能差几 pt；新建 / 关闭 tab 以 Safari 实测为准（60fps 录屏逐帧量取）：新 tab 贴着自身终位的右端从 0 宽长出、标题从第一帧就在、居中于已露出部分，其余 tab 同步收窄；关闭的 tab 立即消失、其余 tab 展开补位；曲线是无回弹的临界阻尼 spring（response 0.15s，约 0.1s 到位）。选中态在动画中瞬时切换，不交叉淡入淡出。（AppKit `NSTabBar` 在中间插入时是从中心长出、约 0.5s，与 Safari 不同，以 Safari 为准。）

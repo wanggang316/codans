@@ -115,7 +115,6 @@ extension IPC {
     public let worktreeID: String
     public let title: String?
     public let name: String?
-    public let icon: String?
     public let isSelected: Bool
     public let focusedPaneID: String?
     public let paneIDs: [String]
@@ -127,7 +126,6 @@ extension IPC {
       worktreeID: String,
       title: String?,
       name: String?,
-      icon: String?,
       isSelected: Bool,
       focusedPaneID: String?,
       paneIDs: [String]
@@ -138,7 +136,6 @@ extension IPC {
       self.worktreeID = worktreeID
       self.title = title
       self.name = name
-      self.icon = icon
       self.isSelected = isSelected
       self.focusedPaneID = focusedPaneID
       self.paneIDs = paneIDs

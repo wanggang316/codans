@@ -77,7 +77,6 @@ extension HierarchyHandlers {
             worktreeID: worktree.id.description,
             title: tab.name ?? tab.cachedDisplayTitle,
             name: tab.name,
-            icon: tab.icon,
             isSelected: worktree.selectedTabID == tab.id,
             focusedPaneID: tab.splitTree.zoomed?.description,
             paneIDs: tab.panes.map(\.id.description)

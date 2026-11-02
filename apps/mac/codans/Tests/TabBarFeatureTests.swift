@@ -80,26 +80,6 @@ struct TabBarFeatureTests {
   // MARK: - Tab-bar uplift (M2-T2.10)
 
   @Test
-  func renameSubmittedCallsRenameTab() async {
-    let tabID = TabID()
-    let received = LockIsolated<(TabID, String?)?>(nil)
-    let store = TestStore(initialState: TabBarFeature.State()) {
-      TabBarFeature()
-    } withDependencies: {
-      $0.hierarchyClient.renameTab = { id, _, _, name in
-        received.withValue { $0 = (id, name) }
-      }
-    }
-    await store.send(
-      .renameSubmitted(
-        tabID, name: "new-title",
-        inWorktree: WorktreeID(), inProject: ProjectID()
-      ))
-    #expect(received.value?.0 == tabID)
-    #expect(received.value?.1 == "new-title")
-  }
-
-  @Test
   func contextMenuCloseOthersCallsClient() async {
     let tabID = TabID()
     let received = LockIsolated<TabID?>(nil)
