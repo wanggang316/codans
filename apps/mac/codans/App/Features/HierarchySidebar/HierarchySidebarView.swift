@@ -2652,6 +2652,7 @@ private struct SidebarFilterBar: View {
   var onMarkAllNotificationsRead: () -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+  @Environment(CommandKeyObserver.self) private var commandKeyObserver
 
   @State private var hoveredFilter: SidebarFilter?
 
@@ -2689,6 +2690,18 @@ private struct SidebarFilterBar: View {
     let titleScale = min(1, max(0, metrics.expanded - 12) / (14 + 5 + titleWidth))
     let showsTitle = selected && titleScale >= 0.8
     let labelScale = showsTitle ? titleScale : min(1, max(0, metrics.diameter - 8) / 14)
+    // While ⌘ is held the chord replaces the label. It shrinks to fit a narrow
+    // collapsed capsule rather than run past its rounded ends.
+    let chord =
+      commandKeyObserver.isCommandHeld
+      ? ShortcutDisplay.chord(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts) : nil
+    let chordWidth = chord.map {
+      ceil(
+        ($0 as NSString).size(withAttributes: [
+          .font: NSFont.systemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize)
+        ]).width)
+    }
+    let chordScale = chordWidth.map { min(1, max(0, metrics.collapsed - 10) / max($0, 1)) } ?? 1
 
     return Button {
       onSelect(filter)
@@ -2728,6 +2741,16 @@ private struct SidebarFilterBar: View {
             value: showsTitle
           )
           .scaleEffect(labelScale)
+          .opacity(chord == nil ? 1 : 0)
+          .animation(reduceMotion ? nil : .shortcutHintFast, value: chord == nil)
+        }
+        .overlay {
+          Group {
+            if let chord {
+              ShortcutHintLabel(chord: chord, animation: .shortcutHintFast, onTint: selected)
+            }
+          }
+          .scaleEffect(chordScale)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(Capsule())

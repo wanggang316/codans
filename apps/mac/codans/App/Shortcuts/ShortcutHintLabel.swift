@@ -19,11 +19,14 @@ struct ShortcutHintLabel: View {
   /// Timing of this hint's own transition. The flag flip in `CommandKeyObserver` starts
   /// it; this value overrides that flip's animation for this hint only.
   var animation: Animation = .shortcutHint
+  /// Draws the chord in white for a hint that sits on a tinted (selected) fill, where
+  /// secondary gray would not read.
+  var onTint = false
 
   var body: some View {
     Text(chord)
       .font(font)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(onTint ? AnyShapeStyle(Color.white) : AnyShapeStyle(.secondary))
       .lineLimit(1)
       .fixedSize()
       .padding(.leading, leadingGap)
