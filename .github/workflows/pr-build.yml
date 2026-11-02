@@ -76,8 +76,11 @@ jobs:
 
       - name: Build Codans (Release, unsigned)
         working-directory: apps/mac
+        # xcbeautify drops some failures (for example a compiler crash) with
+        # no message, so keep the raw log and print its errors on failure.
         run: |
           set -o pipefail
+          RAW_LOG="$RUNNER_TEMP/xcodebuild.log"
           xcodebuild build \
             -workspace codans.xcworkspace \
             -scheme Codans \
@@ -86,4 +89,9 @@ jobs:
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | mise exec -- xcbeautify
+            | tee "$RAW_LOG" | mise exec -- xcbeautify || {
+              echo "::group::Errors from the raw xcodebuild log"
+              grep -nE -B2 -A12 "error:|Stack dump|PLEASE submit a bug report|Command SwiftCompile failed|signal" "$RAW_LOG" | head -400
+              echo "::endgroup::"
+              exit 1
+            }
