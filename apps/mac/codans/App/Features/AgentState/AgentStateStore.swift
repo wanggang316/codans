@@ -244,7 +244,7 @@ final class AgentStateStore {
   //    next snapshot re-derives it. A program status report is not
   //    second-guessed: the agent reports the end of its own prompt.
   //  - onTerminalEvent(.paneInfoChanged(.title)): cache the pane's
-  //    latest OSC title for the hover summary card's activity line.
+  //    latest sanitized OSC title for the row's activity text.
   //    Display-only — never an input to state derivation.
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.

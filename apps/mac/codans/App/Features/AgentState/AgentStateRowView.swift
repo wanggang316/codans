@@ -3,14 +3,13 @@ import SwiftUI
 
 /// One Agent row in the AgentState sidebar panel.
 ///
-/// Layout (current iteration per design feedback — agent name is now
-/// encoded by the leading logo alone, no longer duplicated in text;
-/// the relative-time column has been dropped entirely):
+/// Layout:
 /// - Leading: 20pt agent logo (per-kind brand glyph via `AgentLogoView`).
-/// - Center, two-line VStack:
-///     · Top:    `<ProjectName>` — primary callout.
-///     · Bottom: `<WorktreeName>` — caption / secondary.
-/// - Trailing: state icon + short state verb in a centered HStack.
+/// - Center, by density:
+///     · `normal`: the agent activity text (else the agent display name)
+///       over the identity line `<WorktreeName> <ProjectName>`.
+///     · `compact`: the identity line alone.
+/// - Trailing: sleep glyph (when sleeping) + state icon.
 ///
 /// Click target is the whole row — bound to `onTap`. The host (sidebar
 /// panel) intentionally does NOT collapse on tap; the row stays visible
@@ -51,16 +50,12 @@ struct AgentStateRowView: View {
   /// vertical padding. Defaults to `.normal` so the legacy default
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
-  /// Latest OSC title of this row's pane, consumed by the hover summary
-  /// card as its live "what is the agent doing" activity line. Defaults to
-  /// nil-returning so legacy call sites (popover variant, tests) compile
-  /// unchanged and simply show the card without an activity line.
-  var paneTitle: () -> String? = { nil }
-  /// Worktree path + remote host for the summary card's session scan.
-  /// Default nil (legacy call sites) renders the card without a session
-  /// block.
-  var worktreePath: String?
-  var remoteHost: RemoteHost?
+  /// Live agent activity text of this row's pane (OSC 7501 `message`, else
+  /// the OSC 0/2 title), shown on the first line in `normal` density. Read
+  /// only inside `AgentActivityLine` so updates re-render that line alone.
+  /// Defaults to nil-returning so legacy call sites (popover variant,
+  /// tests) show the agent display name.
+  var activityText: () -> String? = { nil }
   let onTap: () -> Void
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
   /// sites and tests render the row without a menu.
@@ -70,25 +65,7 @@ struct AgentStateRowView: View {
   var workflows: [(id: String, name: String, isValid: Bool)] = []
   var onRunWorkflow: ((String) -> Void)?
 
-  /// Delay before the hover summary card opens. Long enough that a
-  /// pointer sweeping the list to click a row never flashes cards,
-  /// short enough to feel like an inspection affordance.
-  private static let summaryCardHoverDelay: Duration = .milliseconds(500)
-
   @State private var isHovering = false
-  /// Frozen payload of the presented hover summary card, or nil when no
-  /// card is up. Driven purely by hover dwell — never by click — and
-  /// cleared on hover exit, row tap, and row teardown.
-  ///
-  /// The card is presented from a *snapshot* (session scan included) so
-  /// session metadata cannot resize the popover. Live activity uses a
-  /// permanently reserved single-line slot; see
-  /// `AgentSessionSummarySnapshot` for the crash a resizing popover
-  /// causes.
-  @State private var cardSnapshot: AgentSessionSummarySnapshot?
-  /// Pending hover-dwell + scan task. Cancelled on hover exit / row tap
-  /// so a sweep across rows doesn't queue up stale card presentations.
-  @State private var summaryCardTask: Task<Void, Never>?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
@@ -140,29 +117,8 @@ struct AgentStateRowView: View {
         }
       }
     }
-    .onHover(perform: handleHover)
-    .onDisappear {
-      summaryCardTask?.cancel()
-      summaryCardTask = nil
-      // Drop the card with the row. A popover left presented while its
-      // anchor leaves the hierarchy (list re-sort, pane closed) outlives
-      // the view it points at.
-      cardSnapshot = nil
-    }
-    // Hover summary card — a quick peek at the session behind this row.
-    // Anchored on the trailing edge so it opens over the content area
-    // (the panel lives in the sidebar) and the pointer stays on the row,
-    // keeping hover state stable while the card is up.
-    .popover(item: $cardSnapshot, arrowEdge: .trailing) { snapshot in
-      AgentSessionSummaryCard(snapshot: snapshot, paneTitle: paneTitle)
-        // Presentation is exclusively hover-owned (dwell opens, hover
-        // exit / row tap dismisses). Without this, AppKit's transient
-        // popover machinery consumes the outside click that dismisses
-        // the card, so the first click on the row died closing the
-        // popover and only a second click focused the pane.
-        .interactiveDismissDisabled(true)
-    }
-    // `.contain` keeps the `.headline` text and `.state` icon
+    .onHover { isHovering = $0 }
+    // `.contain` keeps the `.headline` / `.activity` texts and `.state` icon
     // individually addressable by their sub-element identifiers (the
     // user-test contract surface). `.accessibilityLabel` on a `.contain`
     // container is a no-op, so the row's full-sentence VoiceOver label is
@@ -176,114 +132,62 @@ struct AgentStateRowView: View {
     }
   }
 
-  /// Hover-in schedules the summary card after a dwell delay; hover-out
-  /// cancels a pending presentation and dismisses an open card. The
-  /// instant row-highlight (`isHovering`) stays independent of the
-  /// dwell timer so the row still lights up immediately.
-  ///
-  /// The session scan runs here, between the dwell and the presentation,
-  /// so the popover opens with its final content — a card that grows
-  /// when a scan lands is what crashed the app (see
-  /// `AgentSessionSummarySnapshot`). Cancellation is checked on both
-  /// sides of the scan so a pointer that has already left never presents.
-  private func handleHover(_ hovering: Bool) {
-    isHovering = hovering
-    summaryCardTask?.cancel()
-    summaryCardTask = nil
-    if hovering {
-      summaryCardTask = Task { @MainActor in
-        try? await Task.sleep(for: Self.summaryCardHoverDelay)
-        guard !Task.isCancelled else { return }
-        let snapshot = await AgentSessionSummarySnapshot.make(
-          paneID: paneID,
-          entry: entry,
-          projectName: projectName,
-          worktreeName: worktreeName,
-          projectColor: projectColor,
-          worktreePath: worktreePath,
-          remoteHost: remoteHost,
-          paneTitle: paneTitle()
-        )
-        guard !Task.isCancelled else { return }
-        cardSnapshot = snapshot
-      }
-    } else {
-      cardSnapshot = nil
-    }
-  }
-
-  /// Row tap focuses the pane — drop any pending / open summary card
-  /// first so the popover doesn't linger over the pane the user just
-  /// jumped to.
-  ///
-  /// The focus cascade itself is handed to the next main-loop turn. It
-  /// walks the catalog and re-selects project → worktree → tab → pane,
-  /// which tears down and rebuilds pane surfaces; running that from
-  /// inside the click that is simultaneously dismissing this row's
-  /// popover means AppKit is destroying views while SwiftUI is still
-  /// flushing the transaction that closed the popover. One turn of
-  /// separation is invisible to the user and keeps the two teardowns off
-  /// the same stack.
+  /// Row tap focuses the pane. The focus cascade walks the catalog and
+  /// re-selects project → worktree → tab → pane, which tears down and
+  /// rebuilds pane surfaces; it runs on the next main-loop turn so it does
+  /// not destroy views inside the click's own SwiftUI transaction.
   private func handleTap() {
-    summaryCardTask?.cancel()
-    summaryCardTask = nil
-    cardSnapshot = nil
     Task { @MainActor in onTap() }
   }
 
-  /// Identity column. `normal` stacks worktree (primary, callout) over
-  /// project (secondary, caption); `compact` keeps worktree at the
-  /// leading edge and pushes project all the way to the trailing edge
-  /// via an internal `Spacer`, so the project name visually right-
-  /// aligns against the status icon. The primary line carries the
-  /// `agentState.row.<paneID>.headline` accessibility identifier in
-  /// both modes (the headline contract surface stays on the user-
-  /// facing worktree text).
+  /// Center column. `normal` puts the live activity line over the identity
+  /// line; `compact` shows the identity line alone. A cached state dims the
+  /// activity text the same as the state icon: both are the last value
+  /// seen, not a live one.
   @ViewBuilder
   private var identityColumn: some View {
     switch displayMode {
     case .normal:
       VStack(alignment: .leading, spacing: 2) {
-        Text(worktreeName)
-          .font(.subheadline)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-          .accessibilityIdentifier("agentState.row.\(paneID).headline")
-        HStack(spacing: 3) {
-          Text(projectName)
-            .font(.caption2)
-            .foregroundStyle(projectNameStyle)
-            .lineLimit(1)
-            .truncationMode(.middle)
-          remoteGlyph
-        }
+        AgentActivityLine(
+          paneID: paneID,
+          activityText: activityText,
+          activity: AgentActivityPresentation(kind: entry.kind)
+        )
+        // A rebind to another agent kind starts a fresh presentation, so
+        // the fallback name and the redundant-title check follow the kind.
+        .id(entry.kind)
+        .opacity(isStateCached ? Self.cachedOpacity : 1)
+        identityLine
       }
     case .compact:
-      // Single-line variant: worktree at the leading edge, a small
-      // fixed gap, then project right after. Both share the available
-      // width — no `Spacer` or `layoutPriority` pushing one to a row
-      // edge, since a long branch name plus a forced trailing-edge
-      // project crushes the project text to a single letter. With
-      // equal priority both truncate proportionally and stay
-      // readable. The HStack intrinsic-sizes; the outer row's
-      // `Spacer(minLength: 8)` between identityColumn and
-      // statusColumn keeps the gap to the status icon.
-      HStack(spacing: 8) {
-        Text(worktreeName)
-          .font(.subheadline)
-          .foregroundStyle(.primary)
+      identityLine
+    }
+  }
+
+  /// Worktree at the leading edge, a small fixed gap, then project right
+  /// after. Both share the available width — no `Spacer` or
+  /// `layoutPriority` pushing one to a row edge, since a long branch name
+  /// plus a forced trailing-edge project crushes the project text to a
+  /// single letter. With equal priority both truncate proportionally and
+  /// stay readable. The worktree text carries the
+  /// `agentState.row.<paneID>.headline` identifier (the user-test contract
+  /// surface) in both densities.
+  private var identityLine: some View {
+    HStack(spacing: 8) {
+      Text(worktreeName)
+        .font(.subheadline)
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .accessibilityIdentifier("agentState.row.\(paneID).headline")
+      HStack(spacing: 3) {
+        Text(projectName)
+          .font(.caption2)
+          .foregroundStyle(projectNameStyle)
           .lineLimit(1)
           .truncationMode(.middle)
-          .accessibilityIdentifier("agentState.row.\(paneID).headline")
-        HStack(spacing: 3) {
-          Text(projectName)
-            .font(.caption2)
-            .foregroundStyle(projectNameStyle)
-            .lineLimit(1)
-            .truncationMode(.middle)
-          remoteGlyph
-        }
+        remoteGlyph
       }
     }
   }
@@ -347,6 +251,7 @@ struct AgentStateRowView: View {
   }
 
   private var isStateCached: Bool { entry.source == .cached }
+  private static let cachedOpacity = 0.45
 
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
@@ -360,7 +265,7 @@ struct AgentStateRowView: View {
   private var statusColumn: some View {
     stateIcon
       .font(.caption2)
-      .opacity(isStateCached ? 0.45 : 1)
+      .opacity(isStateCached ? Self.cachedOpacity : 1)
       .help(isStateCached ? "Last known state. Click to wake and update it." : "")
       .accessibilityElement(children: .ignore)
       .accessibilityIdentifier("agentState.row.\(paneID).state")
@@ -434,10 +339,9 @@ struct AgentStateRowView: View {
     }
   }
 
-  /// Full-sentence accessibility label combining display name,
-  /// worktree (top line), project (bottom line), and state. Agent name
-  /// is dropped from the visible row but kept here so VoiceOver still
-  /// announces which kind of agent occupies the pane.
+  /// Full-sentence accessibility label combining display name, worktree,
+  /// project, and state. The activity text is left out: it changes too
+  /// often for a label VoiceOver reads on focus.
   private var accessibilityLabelText: String {
     "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)" + (isSleeping ? ", sleeping" : "")
   }

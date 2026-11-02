@@ -2591,10 +2591,9 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 }
 
 /// Walks the catalog for a paneID and returns the source tuple the
-/// AgentState row needs: names + color for the breadcrumb, plus the
-/// worktree path and remote host that key the hover summary card's
-/// session scan (`remoteHost` non-nil routes the scan over SSH; its
-/// `displayAuthority` also badges the row). `projectColor` mirrors the
+/// AgentState row needs: names + color for the identity line, the
+/// worktree path that keys the row's workflow menu, and the remote host
+/// whose `displayAuthority` badges a Server project. `projectColor` mirrors the
 /// project's configured color so the row's project name renders in the
 /// same hue as the sidebar header and worktree-header label (`nil` =
 /// No Color → caption secondary).
