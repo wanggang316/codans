@@ -8,6 +8,10 @@ name: pr-build
 #
 # The build matches `release.sh archive` (Release, arm64, generic macOS)
 # without signing, so it needs no secrets.
+#
+# It also runs on pushes to main. A pull request can restore only caches
+# that its own runs or main saved, and a cache is saved only when the job
+# succeeds, so the main runs keep a warm cache for every new pull request.
 
 on:
   pull_request:
@@ -16,11 +20,19 @@ on:
       - "apps/mac/**"
       - "mise.toml"
       - ".github/workflows/pr-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/mac/**"
+      - "mise.toml"
+      - ".github/workflows/pr-build.yml"
   workflow_dispatch: {}
 
+# A new push to a pull request cancels its older run. Runs on main are not
+# cancelled, so each one can save its caches.
 concurrency:
   group: pr-build-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -70,6 +82,19 @@ jobs:
         with:
           path: apps/mac/Tuist/.build
           key: tuist-spm-${{ runner.os }}-${{ hashFiles('apps/mac/Tuist/Package.swift', 'apps/mac/Tuist/Package.resolved') }}
+
+      # build-zmx.sh skips the build when bin/zmx and a matching
+      # .fingerprint exist, so a restored cache saves the zig build.
+      - name: Capture zmx fingerprint for the cache key
+        run: echo "ZMX_FINGERPRINT=$(apps/mac/scripts/build-zmx.sh --print-fingerprint)" >> "$GITHUB_ENV"
+
+      - name: Cache zmx binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/mac/.build/zmx/bin
+            apps/mac/.build/zmx/.fingerprint
+          key: zmx-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ env.ZMX_FINGERPRINT }}
 
       - name: Generate project and build zmx
         run: make mac-generate mac-build-zmx
