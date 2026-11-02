@@ -101,10 +101,12 @@ asked.
 
 ### 5. Commit and tag
 
-Stage only the two release files, in one commit, with no trailers:
+Stage only the release files the bump touched (the script also syncs the CLI
+version string), in one commit, with no trailers:
 
 ```bash
-git add CHANGELOG.md apps/mac/Configurations/Project.xcconfig
+git add CHANGELOG.md apps/mac/Configurations/Project.xcconfig \
+  apps/mac/codans-cli/CodansCLI.swift
 git commit -m "chore(release): bump to X.Y.Z"
 git tag -a vX.Y.Z -m "vX.Y.Z"
 ```
