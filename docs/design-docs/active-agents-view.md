@@ -295,12 +295,16 @@ session 资料、状态 chip 与时间仍来自**开卡前解析好的快照**�
 
 本节是已确认、尚未实现的行布局；实现后替换上文「每行」与「行 hover 摘要卡」两节。
 
-- **第一行：活动文本。** 取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 Pane 的 OSC 0/2 标题。空白、或仅为 agent 名称的标题视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`）。
+- **第一行：活动文本。** 取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 Pane 的 OSC 0/2 标题。空白、或仅为 agent 名称的标题视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
+- **标题净化。** OSC 0/2 标题入库前与 7501 `message` 一样去掉双向覆盖与不可见格式字符，只用于显示，不写入日志。
 - **第二行：身份。** 与 `compact` 的单行身份相同：worktree 名 + project 名（project 色、Server 项目的 remote 标记）。
 - **`compact` 不变**，不显示活动文本。
 - **更新节奏。** 每行经 `AgentActivityPresentation` 合并一秒内的变化，只交付最新值。活动文本只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
 - **睡眠与缓存行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示活动文本；`source: cached` 的行与状态图标一样调淡。
 - **删除行 hover 摘要卡**（`AgentSessionSummaryCard` 及其 hover dwell 与 session 扫描）。实时活动已在行内，卡片其余内容不值得 popover 的复杂度（见「技术决策」）。
+  - 删除 `AgentSessionSummaryCard`、`AgentSessionSummarySnapshot`、行的 hover dwell 与对应测试。
+  - 保留：活动文本格式化（`activityLine` / `isRedundantActivityTitle`，迁出卡片、归入行的展示层）、`AgentActivityPresentation`、session 扫描器（`AgentSessionHistoryPopover`、PaneHUD、空 Pane 视图仍在使用）。
+- **无障碍。** `agentState.row.<paneID>.headline` 留在 worktree 文本上；活动文本标识为 `agentState.row.<paneID>.activity`。整行 VoiceOver label 不含活动文本，因为它变化频繁。
 
 > **附注：** 另有一个 `AgentStateView`（width 320 的 popover 变体，标题 "Active Agents (N)"）保留在 feature 目录中，但当前装配的宿主是侧栏面板，不是 popover。
 
