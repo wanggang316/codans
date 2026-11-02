@@ -2451,7 +2451,7 @@ private struct SidebarHotkeyHint: View {
   let chord: String
 
   var body: some View {
-    ShortcutHintLabel(chord: chord, leadingGap: 6, animation: .shortcutHintFast)
+    ShortcutHintLabel(chord: chord, leadingGap: 6)
   }
 }
 
@@ -2690,11 +2690,13 @@ private struct SidebarFilterBar: View {
     let titleScale = min(1, max(0, metrics.expanded - 12) / (14 + 5 + titleWidth))
     let showsTitle = selected && titleScale >= 0.8
     let labelScale = showsTitle ? titleScale : min(1, max(0, metrics.diameter - 8) / 14)
-    // While ⌘ is held the chord replaces the label. It shrinks to fit a narrow
-    // collapsed capsule rather than run past its rounded ends.
-    let chord =
-      commandKeyObserver.isCommandHeld
-      ? ShortcutDisplay.chord(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts) : nil
+    // While ⌘ is held the chord replaces the label. Both stay in the layout and
+    // only their opacity changes, so the swap is a cross-fade in place: an
+    // inserted chord would animate in from the label's moving geometry. The
+    // chord shrinks to fit a narrow collapsed capsule rather than run past its
+    // rounded ends.
+    let chord = ShortcutDisplay.chord(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts)
+    let showsChord = commandKeyObserver.isCommandHeld && chord != nil
     let chordWidth = chord.map {
       ceil(
         ($0 as NSString).size(withAttributes: [
@@ -2741,16 +2743,14 @@ private struct SidebarFilterBar: View {
             value: showsTitle
           )
           .scaleEffect(labelScale)
-          .opacity(chord == nil ? 1 : 0)
-          .animation(reduceMotion ? nil : .shortcutHintFast, value: chord == nil)
+          .opacity(showsChord ? 0 : 1)
         }
         .overlay {
-          Group {
-            if let chord {
-              ShortcutHintLabel(chord: chord, animation: .shortcutHintFast, onTint: selected)
-            }
+          if let chord {
+            ShortcutHintLabel(chord: chord, onTint: selected)
+              .scaleEffect(chordScale)
+              .opacity(showsChord ? 1 : 0)
           }
-          .scaleEffect(chordScale)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(Capsule())
