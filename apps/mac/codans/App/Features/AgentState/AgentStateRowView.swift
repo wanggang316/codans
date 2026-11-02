@@ -69,33 +69,33 @@ struct AgentStateRowView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    Button(action: handleTap) {
-      HStack(alignment: .center, spacing: 10) {
-        // Logo tint darkens to `.primary` on the selected row — the
-        // primary visual signal that this row is the current focus.
-        AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
-        identityColumn
-        // A greedy spacer pins the status icon to the row's trailing
-        // edge in both densities, so the state glyph reads as a single
-        // right-aligned column down the list rather than floating at a
-        // variable offset after each project name.
-        Spacer(minLength: 8)
-        if isSleeping {
-          sleepGlyph
-        }
-        statusColumn
+    HStack(alignment: .center, spacing: 10) {
+      // Logo tint darkens to `.primary` on the selected row — the
+      // primary visual signal that this row is the current focus.
+      AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
+      identityColumn
+      // A greedy spacer pins the status icon to the row's trailing
+      // edge in both densities, so the state glyph reads as a single
+      // right-aligned column down the list rather than floating at a
+      // variable offset after each project name.
+      Spacer(minLength: 8)
+      if isSleeping {
+        sleepGlyph
       }
-      .padding(.horizontal, 12)
-      // Compact mode tightens the row to roughly two-thirds of the
-      // normal vertical padding so a single-line identity reads as
-      // genuinely denser, not just one line collapsed into the same
-      // height.
-      .padding(.vertical, displayMode == .compact ? 4 : 8)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .contentShape(Rectangle())
-      .background(rowBackground)
+      statusColumn
     }
-    .buttonStyle(.plain)
+    .padding(.horizontal, 12)
+    // Compact mode tightens the row to roughly two-thirds of the
+    // normal vertical padding so a single-line identity reads as
+    // genuinely denser, not just one line collapsed into the same
+    // height.
+    .padding(.vertical, displayMode == .compact ? 4 : 8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
+    .background(rowBackground)
+    // Not a `Button`: a button merges its label's texts into one element,
+    // which hides the `.headline` / `.activity` / `.state` leaves.
+    .onTapGesture(perform: handleTap)
     .contextMenu {
       if let onHandOff {
         Button {
@@ -120,16 +120,15 @@ struct AgentStateRowView: View {
     .onHover { isHovering = $0 }
     // `.contain` keeps the `.headline` / `.activity` texts and `.state` icon
     // individually addressable by their sub-element identifiers (the
-    // user-test contract surface). `.accessibilityLabel` on a `.contain`
-    // container is a no-op, so the row's full-sentence VoiceOver label is
-    // installed via `.accessibilityRepresentation { Button(label, action:) }`
-    // — a proxy element that carries the label without collapsing the
-    // children-contain semantics needed for sub-element probing.
+    // user-test contract surface). The row group itself carries the
+    // full-sentence label (without the activity text) and the press action.
+    // No `.accessibilityRepresentation`: it replaces the whole subtree and
+    // would hide those leaves.
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("agentState.row.\(paneID)")
-    .accessibilityRepresentation {
-      Button(accessibilityLabelText, action: handleTap)
-    }
+    .accessibilityLabel(accessibilityLabelText)
+    .accessibilityAddTraits(.isButton)
+    .accessibilityAction(.default, handleTap)
   }
 
   /// Row tap focuses the pane. The focus cascade walks the catalog and
