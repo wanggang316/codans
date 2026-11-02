@@ -48,30 +48,12 @@ public nonisolated struct ProgramStatusReport: Sendable, Equatable {
     self.progress = progress
     self.id = id
     self.app = Self.nonEmpty(app)
-    self.title = Self.displayText(title)
-    self.message = Self.displayText(message)
+    self.title = UntrustedDisplayText.sanitized(title)
+    self.message = UntrustedDisplayText.sanitized(message)
   }
 
   private static func nonEmpty(_ value: String?) -> String? {
     guard let value, !value.isEmpty else { return nil }
     return value
-  }
-
-  /// Text shown outside the terminal grid must not carry bidirectional
-  /// overrides or invisible formatting characters (the protocol's security
-  /// guidance): they can reorder or hide what the user reads.
-  private static func displayText(_ value: String?) -> String? {
-    guard let value else { return nil }
-    let scalars = value.unicodeScalars.filter { !isInvisibleFormatting($0) }
-    return nonEmpty(String(String.UnicodeScalarView(scalars)))
-  }
-
-  private static func isInvisibleFormatting(_ scalar: Unicode.Scalar) -> Bool {
-    switch scalar.value {
-    case 0x061C, 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2069, 0xFEFF:
-      return true
-    default:
-      return false
-    }
   }
 }

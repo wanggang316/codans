@@ -254,7 +254,7 @@ agent ──OSC 7501──▶ zmx daemon ──bytes──▶ libghostty (fork)
 
 归属成立时：按键和聚焦不再乐观清除 `blocked`（agent 自己会报告提示结束）；`TerminalEngine` 跳过该 Pane 的 `readText`（不再发 viewport / idle nudge）；该 Pane 的 OSC 9;4 进度被当作 REMOVE，不再点亮终端忙碌（Claude 在工具调用时会发 9;4）。归属失效（记录被丢弃或 `clear`）时，状态回到视口路径，并丢弃过期的视口缓存与 raw 态，不把报告结束误读成一轮完成。
 
-报告里的 `message` / `title` 是不可信的程序文本：存储前去掉双向覆盖与不可见格式字符，只用于显示（hover 卡活动行优先显示 `message`，否则显示 OSC 标题），不写入持久日志；日志只记 state / kind / app。
+报告里的 `message` / `title` 是不可信的程序文本：存储前去掉双向覆盖与不可见格式字符，只用于显示（`normal` 行的活动文本优先显示 `message`，否则显示 OSC 标题），不写入持久日志；日志只记 state / kind / app。OSC 0/2 标题同样按此净化（`UntrustedDisplayText`）后才存入 `AgentStateStore`。
 
 Source: [ProgramStatusRecords.swift](../../apps/mac/CodansCore/Agents/ProgramStatusRecords.swift), [ProgramStatusReport.swift](../../apps/mac/CodansCore/Agents/ProgramStatusReport.swift), [TerminalEngine.swift](../../apps/mac/codans/Runtime/TerminalEngine.swift), [AgentStateStore.swift](../../apps/mac/codans/App/Features/AgentState/AgentStateStore.swift).
 
@@ -275,36 +275,20 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 布局（上→下）：resize strip（hover 才淡入 capsule）· 标题行（"Agents View" + 仅当 N > 4 时的 `(N)` chip）· divider · `AgentStateRowView` 的可滚动列表，顺序由 `SortedEntriesProvider` / `AgentStateOrderCoordinator` 给出。点击行经宿主的 `onTapRow` 派发聚焦；**面板在点击后刻意保持打开**，便于用户在 agent 间 fan-jump。
 
 每行：
-- 左侧 16pt agent logo（资源缺失回落到 SF Symbol）。
-- 标题行 `<ProjectName> / <WorktreeName>`（中段截断）；解析不到来源时显示 em-dash `—`（catalog 已移除该 Pane 的「ghost」行）。
-- 副标题：状态图标 + 状态标签 + 相对时间（"working · 12s" / "blocked · 4m" / "done · just now" / "error · 2m" / "idle · 1h"）。
+- 左侧 20pt agent logo（资源缺失回落到 SF Symbol）；右侧是睡眠标记（见「IPC 与 CLI」）与状态图标。
+- **身份行**：worktree 名 + project 名（project 色、Server 项目的 remote 标记），两者中段截断；解析不到来源时显示 em-dash `—`（catalog 已移除该 Pane 的「ghost」行）。
+- **`normal`（两行）**：第一行是活动文本，第二行是身份行。两行都是常规字重；第二行的 worktree 名比第一行小一号、用次级色。**`compact`（一行）** 只显示身份行，不显示活动文本。
+- **活动文本**取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 Pane 的 OSC 0/2 标题（存储前已净化，见「程序状态（OSC 7501）」）。空白、或仅为 agent 名称的文本（`AgentActivityFormat.isRedundantActivityTitle`）视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
+- **更新节奏。** 只有 `AgentActivityLine` 读取活动文本，所以变化只重绘这一行。每行经 `AgentActivityPresentation` 合并一秒内的变化，只交付最新值；行出现时的首个值立即显示。活动文本只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
+- **睡眠与缓存行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示活动文本；`source: cached` 的行，活动文本与状态图标一样调淡。
 - 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.done` → 绿勾；`.error` → 红色三角；`.idle` → 次级灰圈。
 - 行密度（两行 `normal` / 一行 `compact`）与 auto-sort 由 `Settings → General → Agents View` 控制。
+- **无障碍。** `agentState.row.<paneID>.headline` 在 worktree 文本上；活动文本标识为 `agentState.row.<paneID>.activity`。整行 VoiceOver label（agent 名、worktree、project、状态）不含活动文本，因为它变化频繁。
+- 行没有 hover 摘要卡（见「技术决策」）。session 扫描器仍服务于 `AgentSessionHistoryPopover`、PaneHUD 与空 Pane 视图。
 
 **无项目与空状态**：完整 catalog 没有项目时，隐藏面板、底部入口及列表占位，不修改已保存的开关偏好。按标签筛选后没有匹配项目不影响面板可用性。有项目但没有 agent 时，面板只显示居中的提示文字，不显示装饰图标。
 
-**行 hover 摘要卡** `AgentSessionSummaryCard`：指针在一行上停留 500ms 后，以 popover（`arrowEdge: .trailing`）弹出该会话的速览——agent logo + 名称、状态 chip、`<project> / <worktree>` 面包屑 + 状态停留时长、session 任务标题、实时 activity 行，以及 `<short id> · <相对时间>` 页脚。
-
-session 资料、状态 chip 与时间仍来自**开卡前解析好的快照**（`AgentSessionSummarySnapshot`）。session 扫描（本地 detached / Server 项目走 SSH）在 hover dwell 之后、popover 弹出之前完成，远程项目仍需等待 SSH 扫描。只有 activity 行订阅 `AgentStateStore.title(for:)` 缓存的当前 Pane OSC 标题；`AgentActivityPresentation` 合并一秒内的标题变化并交付最新值，不增加终端轮询，也不改变运行态、状态时间或行排序。没有标题或标题仅为 agent 名称时不显示文字；未主动更新终端标题的 agent 不会因此产生详细活动描述。
-
-活动行始终保留固定高度的单行空间，分隔线始终存在，长标题截断。**popover 在展示期间不能改变尺寸**：动态插入内容曾导致 SwiftUI 在显示周期内发起带动画的窗口 resize，嵌套 run loop 后访问已释放的 observer 而崩溃（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。关闭卡片时取消待交付的标题更新；点击行仍先撤下卡片，再把聚焦级联交给下一个 main-loop turn。
-
 排序由 `SortedEntriesProvider` 给出：先按状态优先级桶（triage 顺序），桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
-
-#### `normal` 行显示实时活动（已设计未实现）
-
-本节是已确认、尚未实现的行布局；实现后替换上文「每行」与「行 hover 摘要卡」两节。
-
-- **第一行：活动文本。** 取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 Pane 的 OSC 0/2 标题。空白、或仅为 agent 名称的标题视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
-- **标题净化。** OSC 0/2 标题入库前与 7501 `message` 一样去掉双向覆盖与不可见格式字符，只用于显示，不写入日志。
-- **第二行：身份。** 与 `compact` 的单行身份相同：worktree 名 + project 名（project 色、Server 项目的 remote 标记）。
-- **`compact` 不变**，不显示活动文本。
-- **更新节奏。** 每行经 `AgentActivityPresentation` 合并一秒内的变化，只交付最新值。活动文本只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
-- **睡眠与缓存行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示活动文本；`source: cached` 的行与状态图标一样调淡。
-- **删除行 hover 摘要卡**（`AgentSessionSummaryCard` 及其 hover dwell 与 session 扫描）。实时活动已在行内，卡片其余内容不值得 popover 的复杂度（见「技术决策」）。
-  - 删除 `AgentSessionSummaryCard`、`AgentSessionSummarySnapshot`、行的 hover dwell 与对应测试。
-  - 保留：活动文本格式化（`activityLine` / `isRedundantActivityTitle`，迁出卡片、归入行的展示层）、`AgentActivityPresentation`、session 扫描器（`AgentSessionHistoryPopover`、PaneHUD、空 Pane 视图仍在使用）。
-- **无障碍。** `agentState.row.<paneID>.headline` 留在 worktree 文本上；活动文本标识为 `agentState.row.<paneID>.activity`。整行 VoiceOver label 不含活动文本，因为它变化频繁。
 
 > **附注：** 另有一个 `AgentStateView`（width 320 的 popover 变体，标题 "Active Agents (N)"）保留在 feature 目录中，但当前装配的宿主是侧栏面板，不是 popover。
 
