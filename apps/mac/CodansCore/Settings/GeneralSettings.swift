@@ -173,7 +173,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
 
   public static let `default` = GeneralSettings()
 
-  private enum CodingKeys: String, CodingKey {
+  // Internal and `CaseIterable` so tests can check that `encode(to:)` writes every live key.
+  enum CodingKeys: String, CodingKey, CaseIterable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
@@ -190,6 +191,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     /// Retired earlier than `quitStrategy`. Decoded by `init(from:)` as the last
     /// migration step so very old files still find their way to the new defaults.
     case resumePanesOnLaunch
+
+    /// Keys that `init(from:)` reads only to migrate legacy files; `encode(to:)` never writes them.
+    static let retired: Set<CodingKeys> = [.quitStrategy, .resumePanesOnLaunch]
   }
 
   /// Legacy enum kept private to drive the `quitStrategy` migration branch. The user-facing
@@ -303,6 +307,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encode(quitAction, forKey: .quitAction)
     try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
     try container.encode(agentsViewDisplayMode, forKey: .agentsViewDisplayMode)
+    try container.encode(agentsViewAutoSort, forKey: .agentsViewAutoSort)
     try container.encode(crashReportsEnabled, forKey: .crashReportsEnabled)
     try container.encode(reclaimHiddenSurfaces, forKey: .reclaimHiddenSurfaces)
     // Omit-when-empty: keep `general` free of an empty `globalScripts: []`
