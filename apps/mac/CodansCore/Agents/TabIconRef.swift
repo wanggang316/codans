@@ -15,23 +15,14 @@ public nonisolated enum AgentIconRef: Equatable, Sendable, Hashable {
 /// reads the same everywhere.
 ///
 /// Parsing lives here rather than at the render site because the string is
-/// persisted in `catalog.json`: the prefix is a wire format, and anything
-/// that reads `Tab.icon` has to agree on it.
+/// persisted (a script's `systemImage`): the prefix is a wire format, and
+/// anything that reads a stored icon has to agree on it.
 public nonisolated enum TabIconRef {
   static let agentPrefix = "agent:"
 
-  /// Value to store in `Tab.icon` for a tab running `kind`.
+  /// Icon string that names `kind`'s brand mark.
   public static func icon(for kind: AgentKind) -> String {
     agentPrefix + kind.rawValue
-  }
-
-  /// Glyph for a pane without an agent.
-  public static let terminal = "terminal"
-
-  /// Glyph for `pane`, shared by its card header and its tab chip: the
-  /// agent's mark while an agent runs in it, a terminal otherwise.
-  public static func icon(for pane: Pane?) -> String {
-    pane?.agentKind.map { icon(for: $0) } ?? terminal
   }
 
   /// The agent an icon string names, or `nil` when it is a plain SF Symbol.

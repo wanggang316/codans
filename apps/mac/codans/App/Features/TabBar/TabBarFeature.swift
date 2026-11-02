@@ -4,61 +4,18 @@ import Foundation
 
 /// Tab bar reducer. State-free controller: Worktree.tabs is read from the
 /// environment `HierarchyManager` at render time; actions dispatch create /
-/// select / close / rename / reorder / bulk-close commands through
+/// select / close / reorder / bulk-close commands through
 /// `HierarchyClient`. Errors are swallowed (logged via the client's own
 /// channels) — tab-bar failures are rare and not worth modal UX today.
 @Reducer
 struct TabBarFeature {
-  /// Sheet payload while the user is editing a tab's name. Lifted into the reducer
-  /// (rather than left as `@State` in the view) so the global ⌘⇧R menu chord can
-  /// surface the same sheet without a parallel presentation channel — the chord
-  /// path resolves the active TabID in `RootFeature`, then dispatches
-  /// `.renameRequested(...)` here, identical to the chip's right-click → Rename.
-  struct RenameTarget: Identifiable, Equatable {
-    let id: TabID
-    let currentName: String
-  }
-
-  struct ColorTarget: Identifiable, Equatable {
-    let id: TabID
-    let currentColor: TabColor?
-  }
-
-  struct IconTarget: Identifiable, Equatable {
-    let id: TabID
-    let currentIcon: String?
-  }
-
   @ObservableState
-  struct State: Equatable {
-    var renameTarget: RenameTarget?
-    var colorTarget: ColorTarget?
-    var iconTarget: IconTarget?
-  }
+  struct State: Equatable {}
 
   enum Action: Equatable {
     case newTabButtonTapped(inWorktree: WorktreeID, inProject: ProjectID)
     case tabButtonTapped(TabID, inWorktree: WorktreeID, inProject: ProjectID)
     case closeButtonTapped(TabID, inWorktree: WorktreeID, inProject: ProjectID)
-
-    /// Open the rename sheet for `tabID`. Sources: chip context-menu Rename
-    /// (any tab) and `RootFeature.renameActiveTabForCurrentWorktreeRequested`
-    /// (active tab via ⌘⇧R menu chord).
-    case renameRequested(TabID, currentName: String)
-    /// Sheet dismissal — driven by the user closing the sheet without
-    /// committing. Commit path clears `renameTarget` inside `renameSubmitted`
-    /// so the sheet animates away on Enter.
-    case renameDismissed
-    case renameSubmitted(
-      TabID, name: String?, inWorktree: WorktreeID, inProject: ProjectID)
-    case colorRequested(TabID, currentColor: TabColor?)
-    case colorDismissed
-    case colorSubmitted(
-      TabID, color: TabColor?, inWorktree: WorktreeID, inProject: ProjectID)
-    case iconRequested(TabID, currentIcon: String?)
-    case iconDismissed
-    case iconSubmitted(
-      TabID, icon: String?, inWorktree: WorktreeID, inProject: ProjectID)
     case contextMenuCloseOthers(TabID, inWorktree: WorktreeID, inProject: ProjectID)
     case contextMenuCloseToRight(TabID, inWorktree: WorktreeID, inProject: ProjectID)
     case contextMenuCloseAll(inWorktree: WorktreeID, inProject: ProjectID)
@@ -96,16 +53,8 @@ struct TabBarFeature {
   @Dependency(SettingsWindowPresenter.self) private var settingsWindowPresenter
 
   var body: some Reducer<State, Action> {
-    Reduce { state, action in
+    Reduce { _, action in
       switch action {
-      case .renameRequested(let tabID, let currentName):
-        state.renameTarget = RenameTarget(id: tabID, currentName: currentName)
-        return .none
-
-      case .renameDismissed:
-        state.renameTarget = nil
-        return .none
-
       case .newTabButtonTapped(let worktreeID, let projectID):
         guard let tabID = try? hierarchyClient.createTab(worktreeID, projectID, nil)
         else { return .none }
@@ -142,37 +91,6 @@ struct TabBarFeature {
 
       case .closeButtonTapped(let tabID, let worktreeID, let projectID):
         try? hierarchyClient.closeTab(tabID, worktreeID, projectID)
-        return .none
-
-      case .renameSubmitted(let tabID, let name, let worktreeID, let projectID):
-        try? hierarchyClient.renameTab(tabID, worktreeID, projectID, name)
-        state.renameTarget = nil
-        return .none
-
-      case .colorRequested(let tabID, let currentColor):
-        state.colorTarget = ColorTarget(id: tabID, currentColor: currentColor)
-        return .none
-
-      case .colorDismissed:
-        state.colorTarget = nil
-        return .none
-
-      case .colorSubmitted(let tabID, let color, let worktreeID, let projectID):
-        try? hierarchyClient.setTabColor(tabID, worktreeID, projectID, color)
-        state.colorTarget = nil
-        return .none
-
-      case .iconRequested(let tabID, let currentIcon):
-        state.iconTarget = IconTarget(id: tabID, currentIcon: currentIcon)
-        return .none
-
-      case .iconDismissed:
-        state.iconTarget = nil
-        return .none
-
-      case .iconSubmitted(let tabID, let icon, let worktreeID, let projectID):
-        try? hierarchyClient.setTabIcon(tabID, worktreeID, projectID, icon, .user)
-        state.iconTarget = nil
         return .none
 
       case .contextMenuCloseOthers(let tabID, let worktreeID, let projectID):

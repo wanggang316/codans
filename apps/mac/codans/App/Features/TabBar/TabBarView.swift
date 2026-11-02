@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Horizontal tab bar for the active Worktree. Reads `Worktree.tabs` from
 /// the environment `HierarchyManager`; dispatches create / select / close
-/// / rename / reorder / bulk-close actions through `TabBarFeature`.
+/// / reorder / bulk-close actions through `TabBarFeature`.
 ///
 /// The chip row lives inside `TabBarOverflowScroll`, which owns horizontal
 /// scrolling and overflow stacking; the track fills the bar's width. The
@@ -23,83 +23,13 @@ struct TabBarView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
 
   var body: some View {
-    Group {
-      if showsBar {
-        barContent()
-          // Flush with the leading edge of the pane cards and with their
-          // trailing edge, which keeps the card gap from the window edge.
-          .padding(.trailing, PaneCardMetrics.gap)
-          .frame(height: TabBarMetrics.trackHeight)
-          .padding(.bottom, TabBarMetrics.trackBottomInset)
-      } else {
-        // Keeps the sheets below mounted (a chip's context menu presents
-        // them) while the bar itself takes no space.
-        Color.clear.frame(height: 0)
-      }
-    }
-    .sheet(
-      item: Binding(
-        get: { store.renameTarget },
-        set: { newValue in
-          // `.sheet(item:)` only ever sets `nil` (sheet dismissed by the
-          // system / drag-down). Commit path drives clear from inside the
-          // reducer via `.renameSubmitted`, so we forward nil → reducer
-          // and ignore non-nil writes.
-          if newValue == nil { store.send(.renameDismissed) }
-        },
-      )
-    ) { target in
-      TabRenameSheetView(
-        initialName: target.currentName,
-        onCommit: { newName in
-          store.send(
-            .renameSubmitted(
-              target.id, name: newName,
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-        onCancel: { store.send(.renameDismissed) },
-      )
-    }
-    .sheet(
-      item: Binding(
-        get: { store.colorTarget },
-        set: { newValue in
-          if newValue == nil { store.send(.colorDismissed) }
-        },
-      )
-    ) { target in
-      TabColorSheetView(
-        initialColor: target.currentColor,
-        onCommit: { color in
-          store.send(
-            .colorSubmitted(
-              target.id, color: color,
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-        onCancel: { store.send(.colorDismissed) },
-      )
-    }
-    .sheet(
-      item: Binding(
-        get: { store.iconTarget },
-        set: { newValue in
-          if newValue == nil { store.send(.iconDismissed) }
-        },
-      )
-    ) { target in
-      TabIconPickerSheet(
-        initialIcon: target.currentIcon,
-        onCommit: { icon in
-          store.send(
-            .iconSubmitted(
-              target.id, icon: icon,
-              inWorktree: worktreeID, inProject: projectID,
-            ))
-        },
-        onCancel: { store.send(.iconDismissed) },
-      )
+    if showsBar {
+      barContent()
+        // Flush with the leading edge of the pane cards and with their
+        // trailing edge, which keeps the card gap from the window edge.
+        .padding(.trailing, PaneCardMetrics.gap)
+        .frame(height: TabBarMetrics.trackHeight)
+        .padding(.bottom, TabBarMetrics.trackBottomInset)
     }
   }
 
@@ -178,18 +108,6 @@ struct TabBarView: View {
           .contextMenuCloseAll(
             inWorktree: worktreeID, inProject: projectID,
           ))
-      },
-      onRenameRequested: { tabID in
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
-        store.send(.renameRequested(tabID, currentName: tab.name ?? ""))
-      },
-      onChangeColorRequested: { tabID in
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
-        store.send(.colorRequested(tabID, currentColor: tab.color))
-      },
-      onChangeIconRequested: { tabID in
-        guard let tab = worktree.tabs.first(where: { $0.id == tabID }) else { return }
-        store.send(.iconRequested(tabID, currentIcon: tab.icon))
       },
       onCopyID: { tabID in
         NSPasteboard.general.clearContents()

@@ -93,7 +93,6 @@ struct TabShow: AsyncParsableCommand {
       ("tab", d.id + (d.handle.map { "  (\($0))" } ?? "")),
       ("title", d.title ?? "(untitled)"),
       ("name", d.name ?? "(auto)"),
-      ("icon", d.icon ?? "(auto)"),
       ("worktree", d.worktreeID),
       ("project", d.projectID),
       ("selected", d.isSelected ? "yes" : "no"),

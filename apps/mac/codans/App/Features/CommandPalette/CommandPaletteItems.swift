@@ -43,9 +43,6 @@ enum CommandPaletteItems {
         contentsOf: worktreeLifecycleItems(
           worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace, codeHost: codeHost))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
-      // Tab commands act on the current Worktree's active tab, so they're
-      // gated on the Worktree selection rather than on precise pane focus.
-      items.append(contentsOf: tabCommandItems(worktreeName: worktree.name))
       // Surface user-defined `ProjectSettings.scripts` for the active
       // Project. Reads through the SettingsWriter dependency so the palette
       // tracks the live `settings.json` snapshot — switching to a different
@@ -460,32 +457,6 @@ enum CommandPaletteItems {
         kind: .removeCurrentProject
       ))
     return items
-  }
-
-  /// Tab-scoped commands that act on the current Worktree's active tab.
-  /// Gated on the Worktree selection (not pane focus) because each routes
-  /// through a `…ForCurrentWorktree` action that resolves the active tab.
-  private static func tabCommandItems(worktreeName: String) -> [CommandPaletteItem] {
-    [
-      CommandPaletteItem(
-        id: "tab.rename",
-        title: "Rename Tab…",
-        subtitle: worktreeName,
-        searchText: "tab rename",
-        icon: "pencil",
-        commandID: .renameActiveTab,
-        kind: .renameCurrentTab
-      ),
-      CommandPaletteItem(
-        id: "tab.change-color",
-        title: "Change Tab Color…",
-        subtitle: worktreeName,
-        searchText: "tab color change",
-        icon: "paintpalette",
-        commandID: .changeActiveTabColor,
-        kind: .changeCurrentTabColor
-      ),
-    ]
   }
 
   private static func editorItems(

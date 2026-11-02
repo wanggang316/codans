@@ -123,8 +123,6 @@ struct ShortcutSchemaAuditTests {
     (.worktreeHistoryForward, (0x1E, [.command])),  // ⌘]
     (.newTab, (0x11, [.command])),  // t
     (.closeTab, (0x0D, [.command])),  // w
-    (.renameActiveTab, (0x0F, [.command, .option])),  // ⌘⌥R
-    (.changeActiveTabColor, (0x08, [.command, .option])),  // ⌘⌥C
     (.previousTab, (0x21, [.command, .shift])),  // [
     (.nextTab, (0x1E, [.command, .shift])),  // ]
     (.switchToTab1, (0x12, [.command])),

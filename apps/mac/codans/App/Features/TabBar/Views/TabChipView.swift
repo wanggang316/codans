@@ -7,12 +7,6 @@ import SwiftUI
 /// of the feature that drives it — future milestones bolt drag /
 /// middle-click affordances onto the same shape without widening that
 /// dependency.
-///
-/// Rename UX lives outside the chip: the context menu's Rename action
-/// fires `onRenameRequested`, and the parent (`TabBarView`) presents
-/// the editor as a window-attached sheet via `.sheet(item:)`. Keeping
-/// the editor at the bar level avoids per-chip popover state and gives
-/// rename a proper modal surface.
 struct TabChipView: View {
   let title: String
   let isActive: Bool
@@ -37,12 +31,8 @@ struct TabChipView: View {
   let onCloseOthers: () -> Void
   let onCloseToRight: () -> Void
   let onCloseAll: () -> Void
-  let onRenameRequested: () -> Void
-  let onChangeColor: () -> Void
-  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
-  let tabColor: TabColor?
-  /// Glyph resolved by `Tab.resolvedIcon(selectedPane:)` — `nil` hides the
+  /// Glyph of the tab's selected pane (see `PaneGlyph`) — `nil` hides the
   /// leading slot.
   var icon: String?
   /// Script-tint colour for `icon` while the selected run pane executes; see
@@ -111,9 +101,6 @@ struct TabChipView: View {
       TabChipContextMenu(
         isOnlyTab: isOnlyTab,
         isLastTab: isLastTab,
-        onRename: onRenameRequested,
-        onChangeColor: onChangeColor,
-        onChangeIcon: onChangeIcon,
         onCopyID: onCopyID,
         onClose: onClose,
         onCloseOthers: onCloseOthers,
@@ -130,7 +117,7 @@ struct TabChipView: View {
   private var chipContent: some View {
     // Hit layout: the select Button claims the whole chip rectangle so
     // a click anywhere on the chip selects it; the close button (leading)
-    // and the color dot / chord hint (trailing) are overlays on the same
+    // and the chord hint (trailing) are overlays on the same
     // rectangle so the close button intercepts its own taps without
     // forwarding to the outer Button. Without this, an HStack-of-Button-
     // plus-sibling layout leaves dead zones that swallow clicks.
@@ -174,24 +161,14 @@ struct TabChipView: View {
         .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
-      // The chord takes the trailing slot while ⌘ is held, in place of the
-      // tab's color dot (when set).
+      // The chord takes the trailing slot while ⌘ is held.
       let showsChord = showsChordHint && chordHint != nil
       ZStack(alignment: .trailing) {
-        if let tabColor {
-          Circle()
-            .fill(tabColor.swiftUIColor)
-            .frame(width: 8, height: 8)
-            .shortcutHintOutgoing(showsChord)
-            .frame(width: TabBarMetrics.closeButtonSize)
-        }
         if let chordHint {
           ShortcutHintLabel(chord: chordHint, trailingGap: TabBarMetrics.chordHintExtraInset)
             .shortcutHintIncoming(showsChord)
         }
       }
-      .padding(.trailing, TabBarMetrics.chipSlotInset)
-      .allowsHitTesting(false)
     }
   }
 

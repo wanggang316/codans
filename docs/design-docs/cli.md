@@ -181,7 +181,7 @@
 |---|---|---|---|
 | `codans tab list` | `hierarchy.listTabs` | `HierarchyHandlers.listTabs` | `[--project P] [--worktree W]` |
 | `codans tab new [NAME]` | `hierarchy.createTab` | `HierarchyManager.createTab` | `[NAME]`，`[--project P] [--worktree W]` |
-| `codans tab show [ID]` | `hierarchy.describeTab` | `HierarchyHandlers.describeTab` | `[ID]`；回带 `{id, handle, projectID, worktreeID, title, name, icon, isSelected, focusedPaneID, paneIDs}`（`title` = 用户名或最近的 live 标题） |
+| `codans tab show [ID]` | `hierarchy.describeTab` | `HierarchyHandlers.describeTab` | `[ID]`；回带 `{id, handle, projectID, worktreeID, title, name, isSelected, focusedPaneID, paneIDs}`（`title` = 用户名或最近的 live 标题） |
 | `codans tab switch ID` | `hierarchy.activateTab` | `HierarchyManager.selectTab` | `ID` |
 | `codans tab rename ID [NAME]` | `hierarchy.renameTab` | `HierarchyManager.renameTab` | `ID`，`[NAME]`（缺省或空串 → 清除用户标题，回到 shell 的 live 标题），`[--project P] [--worktree W]` |
 | `codans tab close ID` | `hierarchy.closeTab` | `HierarchyManager.closeTab` | `ID`，`[--project P] [--worktree W]` |

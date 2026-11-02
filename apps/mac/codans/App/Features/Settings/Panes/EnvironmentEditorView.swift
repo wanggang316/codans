@@ -172,7 +172,7 @@ private struct EnvVarEdit: Identifiable {
 }
 
 /// Modal sheet for adding or editing one environment variable. Built as a
-/// content-hugging card (the app's `TagManagerSheet` / `TabRenameSheetView`
+/// content-hugging card (the app's `TagManagerSheet`
 /// idiom) rather than a `NavigationStack` + grouped `Form`: a custom layout
 /// is the only way to pin the title leading, keep the action buttons tight
 /// against the hint, and let the fields blend borderlessly into the card.

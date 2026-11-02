@@ -61,9 +61,6 @@ struct TabBarRowView: View {
   let onCloseOthers: (TabID) -> Void
   let onCloseToRight: (TabID) -> Void
   let onCloseAll: () -> Void
-  let onRenameRequested: (TabID) -> Void
-  let onChangeColorRequested: (TabID) -> Void
-  let onChangeIconRequested: (TabID) -> Void
   let onCopyID: (TabID) -> Void
   let onReorder: @MainActor @Sendable ([TabID]) -> Void
   /// Title for a tab that has no pane yet — the worktree directory's name,
@@ -250,11 +247,7 @@ struct TabBarRowView: View {
       onCloseOthers: { onCloseOthers(tab.id) },
       onCloseToRight: { onCloseToRight(tab.id) },
       onCloseAll: onCloseAll,
-      onRenameRequested: { onRenameRequested(tab.id) },
-      onChangeColor: { onChangeColorRequested(tab.id) },
-      onChangeIcon: { onChangeIconRequested(tab.id) },
       onCopyID: { onCopyID(tab.id) },
-      tabColor: tab.color,
       sliceWidth: slice?.width,
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
@@ -625,11 +618,7 @@ private struct ResolvingTabChipView: View {
   let onCloseOthers: () -> Void
   let onCloseToRight: () -> Void
   let onCloseAll: () -> Void
-  let onRenameRequested: () -> Void
-  let onChangeColor: () -> Void
-  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
-  let tabColor: TabColor?
   var sliceWidth: CGFloat?
   var contentShift: CGFloat = 0
   var onStackClick: (() -> Void)?
@@ -643,7 +632,9 @@ private struct ResolvingTabChipView: View {
 
   var body: some View {
     let live = liveResolvedTitle
-    let selectedPane = self.selectedPane
+    let glyph = PaneGlyph.resolve(
+      pane: selectedPane, settings: settingsStore?.settings ?? .default,
+      isBusy: selectedPane.map { hierarchyManager.paneIsBusy($0.id) } ?? false)
     TabChipView(
       title: resolvedTitle(live: live),
       isActive: isActive,
@@ -660,13 +651,9 @@ private struct ResolvingTabChipView: View {
       onCloseOthers: onCloseOthers,
       onCloseToRight: onCloseToRight,
       onCloseAll: onCloseAll,
-      onRenameRequested: onRenameRequested,
-      onChangeColor: onChangeColor,
-      onChangeIcon: onChangeIcon,
       onCopyID: onCopyID,
-      tabColor: tabColor,
-      icon: tab.resolvedIcon(selectedPane: selectedPane),
-      iconTint: runningScriptIconTint(selectedPane: selectedPane),
+      icon: glyph.icon,
+      iconTint: glyph.tint.map(ScriptTintColorPalette.color(for:)),
       sliceWidth: sliceWidth,
       contentShift: contentShift,
       onStackClick: onStackClick,
@@ -685,29 +672,11 @@ private struct ResolvingTabChipView: View {
   }
 
   /// The pane whose header the chip mirrors: the tab's focused pane, or its
-  /// first pane before any pane took focus. The live title reads the same
-  /// pane, so glyph and title always describe one pane.
+  /// first pane before any pane took focus. The chip shows this pane's
+  /// `PaneGlyph` and live title, so glyph and title describe one pane.
   private var selectedPane: Pane? {
     let focusedID = hierarchyManager.lastFocusedPane(in: tab.id)
     return tab.panes.first { $0.id == focusedID } ?? tab.panes.first
-  }
-
-  /// Script tint for the chip's icon while the selected pane is a run pane
-  /// that is executing. Run panes are skipped by `tabIsDirty`, so a running
-  /// script never swaps the chip's glyph for the spinner — the glyph picking
-  /// up the script's colour is the running affordance instead. Other panes
-  /// never tint the chip: the glyph describes the selected pane only.
-  /// Reads `HierarchyManager.paneIsBusy` (@Observable) so the tint tracks
-  /// start/stop automatically.
-  private func runningScriptIconTint(selectedPane: Pane?) -> Color? {
-    guard let settings = settingsStore?.settings,
-      let pane = selectedPane, let scriptID = pane.runScriptID,
-      hierarchyManager.paneIsBusy(pane.id)
-    else { return nil }
-    let script =
-      settings.general.globalScripts.first(where: { $0.id == scriptID })
-      ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
-    return script.map { ScriptTintColorPalette.color(for: $0.resolvedTintColor) }
   }
 
   /// Whether to render the chip's running spinner. A working coding agent

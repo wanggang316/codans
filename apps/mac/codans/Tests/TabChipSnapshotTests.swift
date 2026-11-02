@@ -93,9 +93,6 @@ struct TabChipSnapshotTests {
       onCloseOthers: { _ in },
       onCloseToRight: { _ in },
       onCloseAll: {},
-      onRenameRequested: { _ in },
-      onChangeColorRequested: { _ in },
-      onChangeIconRequested: { _ in },
       onCopyID: { _ in },
       onReorder: { _ in }
     )

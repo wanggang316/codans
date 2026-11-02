@@ -336,20 +336,6 @@ struct MainWindowCommands: Commands {
 
       Divider()
 
-      Button("Rename Tab…") {
-        store()?.send(.renameActiveTabForCurrentWorktreeRequested)
-      }
-      .appKeyboardShortcut(.renameActiveTab, in: shortcuts)
-      .disabled(!hasActiveWorktree)
-
-      Button("Change Tab Color…") {
-        store()?.send(.changeActiveTabColorForCurrentWorktreeRequested)
-      }
-      .appKeyboardShortcut(.changeActiveTabColor, in: shortcuts)
-      .disabled(!hasActiveWorktree)
-
-      Divider()
-
       Button("Previous Tab") {
         store()?.send(.selectAdjacentTabForCurrentWorktree(.previous))
       }

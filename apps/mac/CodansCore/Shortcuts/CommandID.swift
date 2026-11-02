@@ -62,8 +62,6 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   // Window — tabs.
   case newTab
   case closeTab
-  case renameActiveTab
-  case changeActiveTabColor
   case previousTab
   case nextTab
   case switchToTab1
