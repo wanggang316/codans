@@ -40,6 +40,11 @@ and the project does not yet follow semantic versioning — every release until
   comes back when the panel opens again on the same pane, after Escape, ⌘L,
   opening the queue on another pane, or opening New Agent. Sending the entry
   or closing the pane clears it. The text is not kept after a restart.
+- **Toggle Sidebar is now ⌘/, and the sidebar button shows it.** The default
+  shortcut moves from ⌥⌘S to ⌘/ in the main window and the Diff window. A
+  shortcut you set yourself stays. Hover the sidebar button to see the
+  current shortcut ("Hide Sidebar ⌘ /"); the tooltip follows changes in
+  Settings at once. Toggle Sidebar moves to Settings → Shortcuts → General.
 
 ### Deprecated
 
