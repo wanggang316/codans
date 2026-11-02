@@ -112,6 +112,30 @@ struct RootFeatureTests {
   }
 
   @Test
+  func closingThePaneOfAnOpenCommandQueueClosesItAndKeepsNoDraft() async {
+    let closed = PaneID()
+    let other = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [closed, other])
+
+    await store.send(.commandQueueToggle(closed))
+    await store.send(.commandQueue(.presented(.draftChanged("half typed"))))
+    #expect(store.state.commandQueueDrafts[closed] == "half typed")
+
+    await store.send(.livePanesChanged([other]))
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.commandQueueDrafts.isEmpty)
+  }
+
+  @Test
+  func closingAnotherPaneLeavesTheOpenCommandQueue() async {
+    let open = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [open, PaneID()])
+    await store.send(.commandQueueToggle(open))
+    await store.send(.livePanesChanged([open]))
+    #expect(store.state.commandQueue?.paneID == open)
+  }
+
+  @Test
   func launchPrunesCommandQueueDraftsFromThePaneMembershipStream() async {
     let kept = PaneID()
     let closed = PaneID()

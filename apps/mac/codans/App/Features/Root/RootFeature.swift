@@ -1270,7 +1270,12 @@ struct RootFeature {
         return .none
 
       case .livePanesChanged(let paneIDs):
-        // A closed pane's draft goes at once, whichever path closed it.
+        // A closed pane's draft goes at once, whichever path closed it. An
+        // open panel on that pane closes too, or its next edit would save
+        // the draft again.
+        if let paneID = state.commandQueue?.paneID, !paneIDs.contains(paneID) {
+          state.commandQueue = nil
+        }
         if state.commandQueueDrafts.keys.contains(where: { !paneIDs.contains($0) }) {
           state.commandQueueDrafts = state.commandQueueDrafts.filter { paneIDs.contains($0.key) }
         }
