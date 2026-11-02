@@ -78,9 +78,8 @@ struct ComposerPathInsertionTests {
   @Test
   func emptyAndNonFileSelectionsReturnNil() {
     #expect(ComposerPathInsertion.insert([], into: "keep", selection: 0..<0) == nil)
-    #expect(
-      ComposerPathInsertion.insert(
-        [URL(string: "https://example.com/file")!], into: "keep", selection: nil) == nil)
+    let web = [URL(string: "https://example.com/file")!]
+    #expect(ComposerPathInsertion.insert(web, into: "keep", selection: nil) == nil)
   }
 }
 
@@ -96,9 +95,10 @@ struct ComposerSelectionTests {
     selection.textSelection = TextSelection(range: start..<end)
 
     var received: Range<Int>?
-    selection.edit({ text }) { range in
+    selection.edit(text) { range in
       received = range
       text = "open '/tmp/a.txt' now"
+      return text
     }
 
     #expect(received == 5..<9)
@@ -115,13 +115,19 @@ struct ComposerSelectionTests {
     guard #available(macOS 15, *) else { return }
     let selection = ComposerSelection()
     var received: Range<Int>? = 0..<0
-    selection.edit({ "abc" }) { received = $0 }
+    selection.edit("abc") { range in
+      received = range
+      return "abc"
+    }
     #expect(received == nil)
 
     let text = "abc"
     selection.textSelection = TextSelection(insertionPoint: text.endIndex)
     selection.textSelection = nil
-    selection.edit({ text }) { received = $0 }
+    selection.edit(text) { range in
+      received = range
+      return text
+    }
     #expect(received == 3..<3)
   }
 
@@ -132,7 +138,10 @@ struct ComposerSelectionTests {
     let selection = ComposerSelection()
     selection.textSelection = TextSelection(insertionPoint: long.endIndex)
     var received: Range<Int>? = 0..<0
-    selection.edit({ "ab" }) { received = $0 }
+    selection.edit("ab") { range in
+      received = range
+      return "ab"
+    }
     #expect(received == nil)
   }
 }

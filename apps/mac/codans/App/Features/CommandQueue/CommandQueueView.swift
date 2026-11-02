@@ -37,7 +37,10 @@ struct CommandQueueView: View {
     .onAppear { draftFocused = true }
     .onExitCommand(perform: onDismiss)
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
-      draftSelection.edit({ store.draft }) { store.send(.filesSelected(urls, selection: $0)) }
+      draftSelection.edit(store.draft) { range in
+        store.send(.filesSelected(urls, selection: range))
+        return store.draft
+      }
       draftFocused = true
     }
   }

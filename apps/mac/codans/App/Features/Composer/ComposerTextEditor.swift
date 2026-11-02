@@ -25,14 +25,13 @@ final class ComposerSelection {
   }
 
   /// Runs `edit` with the caret or selection as UTF-16 offsets into
-  /// `text()`, or `nil` when there is none, then puts the caret after the
-  /// edited range. Text after the selection is unchanged by an insertion,
-  /// so the caret goes in front of that text.
-  func edit(_ text: () -> String, _ edit: (Range<Int>?) -> Void) {
-    let before = text()
+  /// `text`, or `nil` when there is none. `edit` returns the new text; the
+  /// caret then goes after the edited range. Text after the selection is
+  /// unchanged by an insertion, so the caret goes in front of that text.
+  func edit(_ text: String, _ edit: (Range<Int>?) -> String) {
+    let before = text
     let range = utf16Range(in: before)
-    edit(range)
-    let after = text()
+    let after = edit(range)
     guard after != before else { return }
     let suffix = before.utf16.count - (range?.upperBound ?? before.utf16.count)
     moveCaret(toUTF16Offset: after.utf16.count - suffix, in: after)
@@ -49,8 +48,9 @@ final class ComposerSelection {
     // A selection from older text can point past the end of this one.
     guard let range, range.upperBound <= text.endIndex else { return nil }
     let utf16 = text.utf16
-    return utf16.distance(from: utf16.startIndex, to: range.lowerBound)
-      ..< utf16.distance(from: utf16.startIndex, to: range.upperBound)
+    let lower = utf16.distance(from: utf16.startIndex, to: range.lowerBound)
+    let upper = utf16.distance(from: utf16.startIndex, to: range.upperBound)
+    return lower..<upper
   }
 
   private func moveCaret(toUTF16Offset offset: Int, in text: String) {
