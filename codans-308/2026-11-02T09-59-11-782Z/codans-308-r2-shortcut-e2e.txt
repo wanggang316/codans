@@ -1,0 +1,31 @@
+## 1 customized binding kept
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar ⌃ ⌘ B"
+menu "Toggle Sidebar" cmdChar=B modifiers=4 enabled=true
+## 2 Settings -> Shortcuts
+9:            AXStaticText = "General" @589,338 73x18
+18:            AXStaticText = "Terminal" @588,434 78x16
+56:            AXStaticText = "General" @773,368 49x16
+83:            AXStaticText = "Check for Updates" @786,495 113x16
+90:            AXStaticText = "Toggle Sidebar" @786,528 91x16
+98:            AXStaticText = "Project & Worktree" @773,557 119x16
+104:            AXStaticText = "Add Project…" @786,585 81x16
+279:            AXStaticText = "Terminal" @0,1080 0x0
+## 3 Restore default -> live tooltip
+AXButton "Restore Defaults" #arrow.counterclockwise {Increment,Decrement,Delete,ShowMenu,Cancel,Press,Move previous,Move next,Remove from toolbar} @1085,279 36x52
+AXButton "Restore Defaults" #action-button-1 {Press} @845,562 230x30
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar ⌘ /"
+menu "Toggle Sidebar" cmdChar=/ modifiers=0 enabled=true
+{
+  "overrides" : {
+
+  },
+  "version" : 1
+}
+## 4 Disable -> title only
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar"
+menu "Toggle Sidebar" cmdChar= modifiers=8 enabled=true
+## 5 Enable again
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar ⌘ /"
+## 6 View > Toggle Sidebar menu item toggles with slide
+AXButton desc="Show Sidebar" title="" help="Show Sidebar ⌘ /"
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar ⌘ /"
