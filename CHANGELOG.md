@@ -10,6 +10,9 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9
+  focus the pane of the first nine agents in the list. Rebind them under
+  Settings → Shortcuts → Agents.
 - **Hidden panes give memory back sooner, and you can turn it off.** When
   macOS reports memory pressure, Codans releases the terminal views of
   hidden panes at once instead of after 20 minutes. Panes in the selected
@@ -28,6 +31,10 @@ and the project does not yet follow semantic versioning — every release until
   nobody is reading.
 
 ### Changed
+
+- **Shortcut hints look and move like the system's.** Holding ⌘ now shows
+  each tab, sidebar row, and agent row's shortcut as plain grey text, without
+  a key frame, and the hints fade in and out instead of popping.
 
 ### Deprecated
 

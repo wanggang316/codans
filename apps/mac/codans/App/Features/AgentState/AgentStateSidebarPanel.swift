@@ -75,6 +75,10 @@ struct AgentStateSidebarPanel: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorkflowCatalogStore.self) private var workflowCatalog
 
+  /// Drives the `⌥N` row hints and the row hotkeys (`focusAgentAtN`).
+  @Environment(CommandKeyObserver.self) private var commandKeyObserver
+  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+
   /// Suppresses the reorder animation for users who opt out of motion.
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -122,6 +126,7 @@ struct AgentStateSidebarPanel: View {
     .background(shape.fill(.quinary))
     .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
     .clipShape(shape)
+    .background(rowHotkeys)
     .padding([.horizontal, .bottom], Self.edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
@@ -247,7 +252,7 @@ struct AgentStateSidebarPanel: View {
     if !rows.isEmpty {
       Group {
         LazyVStack(spacing: 0) {
-          ForEach(rows, id: \.paneID) { item in
+          ForEach(Array(rows.enumerated()), id: \.element.paneID) { offset, item in
             let resolved = resolveSourcePath(item.paneID)
             AgentStateRowView(
               paneID: item.paneID,
@@ -262,6 +267,7 @@ struct AgentStateSidebarPanel: View {
               paneTitle: { registry.activityText(for: item.paneID) },
               worktreePath: resolved?.worktreePath,
               remoteHost: resolved?.remoteHost,
+              hotkeyHint: hotkeyHint(forRowAt: offset + 1),
               onTap: { onTapRow(item.paneID) },
               onHandOff: { onHandOffRow(item.paneID) },
               workflows: workflowRows(worktreePath: resolved?.remoteHost == nil ? resolved?.worktreePath : nil),
@@ -277,6 +283,36 @@ struct AgentStateSidebarPanel: View {
         .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: order.orderedIDs)
       }
     }
+  }
+
+  /// The focus chord for the row at 1-based `index`, while ⌘ is held. Read from the
+  /// registry so a rebind or a disabled binding shows as such.
+  private func hotkeyHint(forRowAt index: Int) -> String? {
+    guard commandKeyObserver.isCommandHeld, let id = CommandID.focusAgentAt(index: index)
+    else { return nil }
+    return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
+  }
+
+  /// One zero-size Button per hotkey slot, bound to `focusAgentAtN`. They live outside the
+  /// lazy list so a row scrolled out of view keeps its hotkey, and they exist only while
+  /// the panel is mounted, so `⌥N` reaches the terminal when the panel is closed.
+  private var rowHotkeys: some View {
+    let paneIDs = orderedRows.prefix(9).map(\.paneID)
+    return ZStack {
+      ForEach(Array(paneIDs.enumerated()), id: \.element) { offset, paneID in
+        if let id = CommandID.focusAgentAt(index: offset + 1) {
+          Button {
+            onTapRow(paneID)
+          } label: {
+            EmptyView()
+          }
+          .appKeyboardShortcut(id, in: resolvedShortcuts)
+        }
+      }
+    }
+    .frame(width: 0, height: 0)
+    .opacity(0)
+    .accessibilityHidden(true)
   }
 
   /// The workflows a run started from a row in `worktreePath` could use —

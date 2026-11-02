@@ -61,6 +61,8 @@ struct AgentStateRowView: View {
   /// block.
   var worktreePath: String?
   var remoteHost: RemoteHost?
+  /// The row's focus chord (`⌥N`), shown at the trailing edge while ⌘ is held.
+  var hotkeyHint: String?
   let onTap: () -> Void
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
   /// sites and tests render the row without a menu.
@@ -107,6 +109,9 @@ struct AgentStateRowView: View {
           sleepGlyph
         }
         statusColumn
+        if let hotkeyHint {
+          ShortcutHintLabel(chord: hotkeyHint)
+        }
       }
       .padding(.horizontal, 12)
       // Compact mode tightens the row to roughly two-thirds of the
