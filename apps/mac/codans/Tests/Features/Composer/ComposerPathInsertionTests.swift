@@ -85,50 +85,76 @@ struct ComposerPathInsertionTests {
 
 @MainActor
 struct ComposerSelectionTests {
+  private static let file = URL(fileURLWithPath: "/tmp/a.txt")
+
+  /// UTF-16 offset of a single caret, or `nil` for no caret or a range.
+  @available(macOS 15, *)
+  private func caretOffset(_ selection: ComposerSelection, in text: String) -> Int? {
+    guard case .selection(let range) = selection.textSelection?.indices, range.isEmpty else { return nil }
+    return text.utf16.distance(from: text.startIndex, to: range.lowerBound)
+  }
+
   @Test
-  func editPassesTheSelectionAndPutsTheCaretAfterTheInsertedText() throws {
+  func insertPassesTheSelectionAndPutsTheCaretAfterTheInsertedText() {
     guard #available(macOS 15, *) else { return }
-    var text = "open FILE now"
+    let text = "open FILE now"
     let selection = ComposerSelection()
     let start = text.index(text.startIndex, offsetBy: 5)
     let end = text.index(text.startIndex, offsetBy: 9)
     selection.textSelection = TextSelection(range: start..<end)
 
-    var received: Range<Int>?
-    selection.edit(text) { range in
-      received = range
-      text = "open '/tmp/a.txt' now"
-      return text
-    }
+    var sent: Range<Int>?
+    selection.insertPaths([Self.file], into: text) { sent = $0 }
 
-    #expect(received == 5..<9)
-    guard case .selection(let caret) = try #require(selection.textSelection).indices else {
-      Issue.record("expected a single selection")
-      return
-    }
-    #expect(caret.isEmpty)
-    #expect(text.utf16.distance(from: text.startIndex, to: caret.lowerBound) == 17)
+    #expect(sent == 5..<9)
+    #expect(caretOffset(selection, in: "open '/tmp/a.txt' now") == 17)
+  }
+
+  @Test
+  func replacingASelectedPathWithTheSamePathStillMovesTheCaret() {
+    guard #available(macOS 15, *) else { return }
+    // The selection is the quoted path itself, so the text does not change.
+    let text = "x '/tmp/a.txt' y"
+    let selection = ComposerSelection()
+    let start = text.index(text.startIndex, offsetBy: 2)
+    let end = text.index(text.startIndex, offsetBy: 14)
+    selection.textSelection = TextSelection(range: start..<end)
+
+    var sent: Range<Int>?
+    selection.insertPaths([Self.file], into: text) { sent = $0 }
+
+    #expect(sent == 2..<14)
+    #expect(ComposerPathInsertion.insert([Self.file], into: text, selection: 2..<14)?.text == text)
+    #expect(caretOffset(selection, in: text) == 14)
+  }
+
+  @Test
+  func emptyPickSendsNothingAndKeepsTheSelection() {
+    guard #available(macOS 15, *) else { return }
+    let text = "abc"
+    let selection = ComposerSelection()
+    let original = TextSelection(range: text.startIndex..<text.endIndex)
+    selection.textSelection = original
+    var sent = false
+    selection.insertPaths([], into: text) { _ in sent = true }
+    #expect(!sent)
+    #expect(selection.textSelection == original)
   }
 
   @Test
   func noCaretPassesNilAndNilDoesNotClearARecordedCaret() {
     guard #available(macOS 15, *) else { return }
     let selection = ComposerSelection()
-    var received: Range<Int>? = 0..<0
-    selection.edit("abc") { range in
-      received = range
-      return "abc"
-    }
-    #expect(received == nil)
+    var sent: Range<Int>? = 0..<0
+    selection.insertPaths([Self.file], into: "abc") { sent = $0 }
+    #expect(sent == nil)
+    #expect(caretOffset(selection, in: "abc '/tmp/a.txt'") == 16)
 
     let text = "abc"
     selection.textSelection = TextSelection(insertionPoint: text.endIndex)
     selection.textSelection = nil
-    selection.edit(text) { range in
-      received = range
-      return text
-    }
-    #expect(received == 3..<3)
+    selection.insertPaths([Self.file], into: text) { sent = $0 }
+    #expect(sent == 3..<3)
   }
 
   @Test
@@ -137,11 +163,8 @@ struct ComposerSelectionTests {
     let long = "abcdef"
     let selection = ComposerSelection()
     selection.textSelection = TextSelection(insertionPoint: long.endIndex)
-    var received: Range<Int>? = 0..<0
-    selection.edit("ab") { range in
-      received = range
-      return "ab"
-    }
-    #expect(received == nil)
+    var sent: Range<Int>? = 0..<0
+    selection.insertPaths([Self.file], into: "ab") { sent = $0 }
+    #expect(sent == nil)
   }
 }

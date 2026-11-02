@@ -24,17 +24,16 @@ final class ComposerSelection {
     set { if let newValue { value = newValue } }
   }
 
-  /// Runs `edit` with the caret or selection as UTF-16 offsets into
-  /// `text`, or `nil` when there is none. `edit` returns the new text; the
-  /// caret then goes after the edited range. Text after the selection is
-  /// unchanged by an insertion, so the caret goes in front of that text.
-  func edit(_ text: String, _ edit: (Range<Int>?) -> String) {
-    let before = text
-    let range = utf16Range(in: before)
-    let after = edit(range)
-    guard after != before else { return }
-    let suffix = before.utf16.count - (range?.upperBound ?? before.utf16.count)
-    moveCaret(toUTF16Offset: after.utf16.count - suffix, in: after)
+  /// Inserts picked file paths at the caret or selection of `text` by the
+  /// shared rule. `send` gets the caret or selection as UTF-16 offsets
+  /// (`nil` when there is none) and makes the reducer apply the same rule.
+  /// The caret then goes after the inserted text, also when the new text
+  /// equals the old one (a selection replaced by the same path).
+  func insertPaths(_ urls: [URL], into text: String, send: (Range<Int>?) -> Void) {
+    let range = utf16Range(in: text)
+    guard let result = ComposerPathInsertion.insert(urls, into: text, selection: range) else { return }
+    send(range)
+    moveCaret(toUTF16Offset: result.selection.upperBound, in: result.text)
   }
 
   private func utf16Range(in text: String) -> Range<Int>? {

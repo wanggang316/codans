@@ -54,10 +54,7 @@ struct NewAgentView: View {
     .task(id: profiles) { store.send(.agentProfilesChanged(profiles)) }
     .onExitCommand { store.send(.cancelTapped) }
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
-      promptSelection.edit(store.prompt) { range in
-        store.send(.filesSelected(urls, selection: range))
-        return store.prompt
-      }
+      promptSelection.insertPaths(urls, into: store.prompt) { store.send(.filesSelected(urls, selection: $0)) }
       focus = .prompt
     }
   }

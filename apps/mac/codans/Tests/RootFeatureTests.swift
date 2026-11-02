@@ -96,35 +96,44 @@ struct RootFeatureTests {
   }
 
   @Test
-  func closedPaneLosesItsCommandQueueDraft() async {
+  func closedPaneLosesItsCommandQueueDraftAtOnce() async {
     let kept = PaneID()
-    let exited = PaneID()
-    let removed = PaneID()
+    let closed = PaneID()
     var state = RootFeature.State()
-    state.commandQueueDrafts = [kept: "a", exited: "b", removed: "c"]
-    let catalog = Catalog(projects: [
-      Project(
-        name: "p", rootPath: "/tmp",
-        worktrees: [
-          Worktree(
-            name: "w", path: "/tmp",
-            tabs: [Tab(panes: [Pane(id: kept, workingDirectory: "/tmp")])])
-        ])
-    ])
-    let store = TestStore(initialState: state) {
-      RootFeature()
-    } withDependencies: {
-      $0.hierarchyClient.snapshot = { catalog }
-      $0.hierarchyClient.addressOf = { _ in nil }
+    state.commandQueueDrafts = [kept: "a", closed: "b"]
+    let store = TestStore(initialState: state) { RootFeature() }
+
+    // Any close path drops the pane from the catalog; the membership
+    // stream reports the rest.
+    await store.send(.livePanesChanged([kept])) {
+      $0.commandQueueDrafts = [kept: "a"]
+    }
+    await store.send(.livePanesChanged([kept, PaneID()]))
+  }
+
+  @Test
+  func launchPrunesCommandQueueDraftsFromThePaneMembershipStream() async {
+    let kept = PaneID()
+    let closed = PaneID()
+    let (paneStream, paneContinuation) = AsyncStream<Set<PaneID>>.makeStream()
+    var state = RootFeature.State()
+    state.commandQueueDrafts = [kept: "a", closed: "b"]
+    let store = TestStore(initialState: state) { RootFeature() } withDependencies: {
+      $0.hierarchyClient.paneMembershipChanges = { paneStream }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.continuousClock = ImmediateClock()
     }
     store.exhaustivity = .off(showSkippedAssertions: false)
 
-    await store.send(.paneLifecycleExited(exited))
-    #expect(store.state.commandQueueDrafts == [kept: "a", removed: "c"])
-    // A pane closed without an exit event is pruned on the next open.
-    await store.send(.commandQueueToggle(kept))
+    await store.send(.onLaunch)
+    paneContinuation.yield([kept])
+    await store.receive(\.livePanesChanged)
     #expect(store.state.commandQueueDrafts == [kept: "a"])
-    #expect(store.state.commandQueue?.draft == "a")
+
+    paneContinuation.finish()
+    await store.send(.onQuit)
   }
 
   @Test

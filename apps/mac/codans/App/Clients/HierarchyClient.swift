@@ -310,6 +310,13 @@ nonisolated struct HierarchyClient: Sendable {
   /// `HierarchyManager`. The stream finishes only when the engine shuts down.
   var selectionChanges: @MainActor @Sendable () -> AsyncStream<HierarchySelection>
 
+  /// Emits the set of every pane in the catalog (archived worktrees
+  /// included), first at once and then whenever it changes. Panes leave
+  /// the catalog on many paths (pane or tab close, worktree or project
+  /// removal) and not all of them emit an engine event, so state kept per
+  /// pane outside the catalog prunes against this.
+  var paneMembershipChanges: @MainActor @Sendable () -> AsyncStream<Set<PaneID>>
+
   // MARK: - Worktree Management additions
 
   /// Flips `Worktree.archived` for the given Worktree.
@@ -997,6 +1004,7 @@ extension HierarchyClient {
       },
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
+      paneMembershipChanges: { makeObservedStream(manager: manager) { $0.catalog.allPaneIDs() } },
       setWorktreeArchived: { worktreeID, archived in
         try manager.setWorktreeArchived(worktreeID: worktreeID, archived: archived)
       },
@@ -2290,35 +2298,44 @@ extension HierarchyClient {
     return keptWarning
   }
 
-  /// AsyncStream backed by Swift Observation — samples `manager.catalog`'s
-  /// selection chain and yields a new `HierarchySelection` whenever any of
-  /// the IDs changes. Closes the re-arm race window by sampling
-  /// `currentSelection` BEFORE arming the next `withObservationTracking`
-  /// block: any mutation that landed between the prior yield and the next
-  /// arm is caught on the pre-arm compare; `withObservationTracking` then
-  /// only waits for mutations that land after the new snapshot.
+  /// Yields a new `HierarchySelection` whenever the catalog's selection
+  /// chain changes.
   @MainActor
   private static func makeSelectionStream(manager: HierarchyManager) -> AsyncStream<HierarchySelection> {
+    makeObservedStream(manager: manager, sample: currentSelection(for:))
+  }
+
+  /// AsyncStream backed by Swift Observation — yields `sample(manager)` at
+  /// once and again whenever it changes. Closes the re-arm race window by
+  /// sampling BEFORE arming the next `withObservationTracking` block: any
+  /// mutation that landed between the prior yield and the next arm is
+  /// caught on the pre-arm compare; `withObservationTracking` then only
+  /// waits for mutations that land after the new snapshot.
+  @MainActor
+  private static func makeObservedStream<Value: Equatable & Sendable>(
+    manager: HierarchyManager,
+    sample: @escaping @MainActor (HierarchyManager) -> Value
+  ) -> AsyncStream<Value> {
     AsyncStream { continuation in
       let task = Task { @MainActor in
-        var last = currentSelection(for: manager)
+        var last = sample(manager)
         continuation.yield(last)
         while !Task.isCancelled {
           // Sample FIRST — catches any mutation that landed during the
           // gap between yield and re-arm.
-          let preArm = currentSelection(for: manager)
+          let preArm = sample(manager)
           if preArm != last {
             continuation.yield(preArm)
             last = preArm
           }
           await withCheckedContinuation { (observationContinuation: CheckedContinuation<Void, Never>) in
             withObservationTracking {
-              _ = currentSelection(for: manager)
+              _ = sample(manager)
             } onChange: {
               observationContinuation.resume()
             }
           }
-          let current = currentSelection(for: manager)
+          let current = sample(manager)
           if current != last {
             continuation.yield(current)
             last = current
@@ -2402,6 +2419,7 @@ extension HierarchyClient: DependencyKey {
     resizeSplit: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     snapshot: { fatalError("HierarchyClient.liveValue not configured") },
     selectionChanges: { AsyncStream { $0.finish() } },
+    paneMembershipChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreePinned: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeIsNew: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2521,6 +2539,9 @@ extension HierarchyClient: DependencyKey {
       "HierarchyClient.selectionChanges",
       placeholder: AsyncStream { $0.finish() }
     ),
+    // Only pruning listens to it, and `onLaunch` subscribes in every root
+    // test; an `unimplemented` here would turn those into stub farms.
+    paneMembershipChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: unimplemented("HierarchyClient.setWorktreeArchived"),
     setWorktreePinned: unimplemented("HierarchyClient.setWorktreePinned"),
     setWorktreeIsNew: unimplemented("HierarchyClient.setWorktreeIsNew"),

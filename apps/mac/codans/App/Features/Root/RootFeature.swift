@@ -234,6 +234,8 @@ struct RootFeature {
     /// binding, or crash). The root reducer resolves the pane's address
     /// and calls `hierarchyClient.closePane` to drop the catalog entry.
     case paneLifecycleExited(PaneID)
+    /// Every pane now in the catalog, from `hierarchyClient.paneMembershipChanges`.
+    case livePanesChanged(Set<PaneID>)
     /// Forwarded from `paneInfoChanged + .progress(...)` in the engine
     /// event stream. `isBusy` is true for any non-`REMOVE` OSC 9;4
     /// state. Drives the tab-chip running spinner (via
@@ -490,7 +492,7 @@ struct RootFeature {
   }
 
   nonisolated enum CancelID: Hashable, Sendable {
-    case events, selectionChanges, projectReconcileFocus, worktreeHeadWatcher
+    case events, selectionChanges, paneMembership, projectReconcileFocus, worktreeHeadWatcher
     /// FSEvents working-tree observation that refreshes the `+N −M` chip
     /// after in-pane / in-editor edits (separate from the HEAD watcher).
     case worktreeWorkingTreeWatcher
@@ -682,6 +684,7 @@ struct RootFeature {
       case .onLaunch:
         let eventStream = terminalClient.events()
         let selectionStream = hierarchyClient.selectionChanges()
+        let paneMembershipStream = hierarchyClient.paneMembershipChanges()
         // `didBecomeActive` fires every time the app window re-gains focus;
         // per-run debounce lives inside `ProjectReconciler.reconcileAll`, so
         // click storms collapse into a single scan. The notification stream
@@ -775,6 +778,13 @@ struct RootFeature {
             }
           }
           .cancellable(id: CancelID.selectionChanges, cancelInFlight: true),
+
+          .run { send in
+            for await paneIDs in paneMembershipStream {
+              await send(.livePanesChanged(paneIDs))
+            }
+          }
+          .cancellable(id: CancelID.paneMembership, cancelInFlight: true),
 
           // Initial sweep: every persisted Project transitions out of .loading
           // once the reconciler fans out against the current snapshot.
@@ -920,6 +930,7 @@ struct RootFeature {
         return .merge(
           .cancel(id: CancelID.events),
           .cancel(id: CancelID.selectionChanges),
+          .cancel(id: CancelID.paneMembership),
           .cancel(id: CancelID.projectReconcileFocus),
           .cancel(id: CancelID.periodicCleanup),
           .cancel(id: CancelID.worktreeHeadWatcher),
@@ -1085,7 +1096,6 @@ struct RootFeature {
 
       case .catalogMembershipChanged:
         let catalog = hierarchyClient.snapshot()
-        pruneCommandQueueDrafts(&state, in: catalog)
         // Live keys are Projects plus every fetch unit a workspace derives
         // from its member repositories; the prune must keep those too.
         var projectIDs = Set(catalog.projects.map(\.id))
@@ -1259,11 +1269,17 @@ struct RootFeature {
         hierarchyClient.updatePaneWorkingDirectory(paneID, path)
         return .none
 
+      case .livePanesChanged(let paneIDs):
+        // A closed pane's draft goes at once, whichever path closed it.
+        if state.commandQueueDrafts.keys.contains(where: { !paneIDs.contains($0) }) {
+          state.commandQueueDrafts = state.commandQueueDrafts.filter { paneIDs.contains($0.key) }
+        }
+        return .none
+
       case .paneLifecycleExited(let paneID):
         // A pane that exits mid-command never emits its trailing git-edge,
         // so drop any tracked running-state to keep the set bounded.
         state.panesRunningGitCommand.remove(paneID)
-        state.commandQueueDrafts[paneID] = nil
         // Resolve the pane's address from the live catalog (the engine
         // already unregistered the surface, but the catalog still holds
         // the Pane entity here). Address can be nil if a racing teardown
@@ -2017,7 +2033,6 @@ struct RootFeature {
         if state.commandQueue?.paneID == paneID {
           state.commandQueue = nil
         } else {
-          pruneCommandQueueDrafts(&state)
           var queue = CommandQueueFeature.State(paneID: paneID)
           queue.draft = state.commandQueueDrafts[paneID] ?? ""
           state.commandQueue = queue
@@ -3158,17 +3173,6 @@ struct RootFeature {
       }
       await send(.worktreeAgentLaunchFinished(worktreeID, failure: failure))
     }
-  }
-
-  /// Drops Command Queue drafts of panes that are gone. A pane can close
-  /// in many ways (exit, tab close, worktree removal) and not all of them
-  /// reach this reducer, so the drafts are also checked against the catalog.
-  private func pruneCommandQueueDrafts(_ state: inout State, in catalog: Catalog? = nil) {
-    guard !state.commandQueueDrafts.isEmpty else { return }
-    let catalog = catalog ?? hierarchyClient.snapshot()
-    let livePaneIDs = Set(
-      catalog.projects.flatMap { $0.worktrees.flatMap { $0.tabs.flatMap { $0.panes.map(\.id) } } })
-    state.commandQueueDrafts = state.commandQueueDrafts.filter { livePaneIDs.contains($0.key) }
   }
 
   /// Opens the New Agent dialog on the selected project, or closes it.
