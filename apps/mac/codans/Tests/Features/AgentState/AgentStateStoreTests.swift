@@ -459,6 +459,22 @@ struct AgentStateStoreTests {
   }
 
   @Test
+  func titleIsStoredWithoutBidiOverridesOrInvisibleFormatting() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    let entry = f.registry.entries[f.paneID]
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("\u{202E}gnidaeR\u{202C} a\u{200B}b\u{FEFF}")))
+    #expect(f.registry.title(for: f.paneID) == "gnidaeR ab")
+    #expect(f.registry.activityText(for: f.paneID) == "gnidaeR ab")
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("\u{2066}\u{200F}")))
+    #expect(f.registry.title(for: f.paneID) == nil)
+    // Titles are display-only: no state, transition time, or source change.
+    #expect(f.registry.entries[f.paneID] == entry)
+  }
+
+  @Test
   func titleObservedBeforeBindSurvivesTheBind() {
     let f = Fixture()
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("early title")))
