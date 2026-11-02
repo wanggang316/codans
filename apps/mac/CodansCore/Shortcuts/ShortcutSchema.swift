@@ -98,6 +98,13 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_U), modifiers: [.command, .shift])
     ),
+    .init(
+      id: .toggleSidebar,
+      title: "Toggle Sidebar",
+      category: .general,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_Slash), modifiers: .command)
+    ),
   ]
 
   private static let projectAndWorktreeEntries: [Entry] = [
@@ -173,13 +180,6 @@ extension ShortcutSchema {
       category: .projectAndWorktree,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_C), modifiers: [.command, .shift])
-    ),
-    .init(
-      id: .toggleSidebar,
-      title: "Toggle Sidebar",
-      category: .projectAndWorktree,
-      scope: .configurable,
-      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_S), modifiers: [.command, .option])
     ),
     .init(
       id: .revealCurrentWorktreeInSidebar,
