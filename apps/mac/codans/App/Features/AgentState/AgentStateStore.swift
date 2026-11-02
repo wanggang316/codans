@@ -508,6 +508,15 @@ final class AgentStateStore {
     entries[paneID] != nil && !attachedPaneIDs.contains(paneID)
   }
 
+  /// Whether `paneID`'s agent is mid-turn and only its screen tells when the
+  /// turn ends. Detaching such a pane would freeze its state as cached. An
+  /// agent that reports program status keeps reporting through the passive
+  /// watcher, so its pane can give its surface back.
+  func needsSurfaceToTrackTurn(_ paneID: PaneID) -> Bool {
+    guard let entry = entries[paneID] else { return false }
+    return entry.state.isMidTask && entry.source != .programStatus
+  }
+
   /// Latest OSC title observed for `paneID` — the terminal title agents
   /// push as they work, which doubles as a one-line "what is the agent
   /// doing" cue — or nil when none has arrived (or the pane has been

@@ -156,6 +156,26 @@ struct TerminalEngineMemoryPressureTests {
   }
 
   @Test
+  func disabledReclaimDetachesNothing() async throws {
+    let harness = Harness()
+    harness.engine.reclaimPolicy = SurfaceReclaimPolicy(hiddenThreshold: 0, quietThreshold: 0)
+    var enabled = false
+    harness.engine.isReclaimEnabled = { enabled }
+    let panes = try await harness.seedPanes(2)
+    harness.addSurface(panes[0], job: Self.job("zsh"))
+    harness.addSurface(panes[1], job: Self.job("claude", "claude --resume"))
+
+    #expect(harness.engine.reclaimIdleSurfaces().isEmpty)
+    #expect(harness.engine.handleMemoryPressure(.critical).isEmpty)
+    #expect(harness.host.detached.isEmpty)
+    #expect(harness.detachedNotices.isEmpty)
+
+    // Turning it back on applies at the next sweep, with no restart.
+    enabled = true
+    #expect(Set(harness.engine.reclaimIdleSurfaces()) == Set(panes))
+  }
+
+  @Test
   func paneWhoseSurfaceIsGoneIsNotCountedAsReclaimed() async throws {
     let harness = Harness()
     let panes = try await harness.seedPanes(2)

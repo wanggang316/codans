@@ -125,6 +125,9 @@ final class TerminalEngine {
   /// Thresholds for detaching long-hidden pane surfaces; see
   /// `SurfaceReclaimPolicy`.
   var reclaimPolicy = SurfaceReclaimPolicy()
+  /// Whether sweeps may reclaim at all, read at every sweep so a settings
+  /// change applies without a relaunch. The app injects the user setting.
+  var isReclaimEnabled: @MainActor () -> Bool = { true }
   /// App-level veto, consulted per candidate: the agent store and command
   /// queue live above the Runtime layer, so the app injects what it knows.
   var reclaimVeto: @MainActor (PaneID) -> Bool = { _ in false }
@@ -1233,6 +1236,7 @@ final class TerminalEngine {
 
   private func sweepReclaimableSurfaces(ignoringThresholds: Bool) -> [PaneID] {
     let now = clock()
+    let isEnabled = isReclaimEnabled()
     let selectedTabRecency = selectedTabRecencyByPane()
     var reclaimed: [PaneID] = []
     for sample in reclaimHost?.reclaimableSurfaces() ?? [] {
@@ -1244,6 +1248,9 @@ final class TerminalEngine {
         lastDisplayedAt[paneID] = now
         continue
       }
+      // Off still records display times above, so turning reclaim back on
+      // measures hidden time from the real moment a pane left the screen.
+      guard isEnabled else { continue }
       let hiddenSince = lastDisplayedAt[paneID] ?? now
       lastDisplayedAt[paneID] = hiddenSince
       let candidate = SurfaceReclaimPolicy.Candidate(

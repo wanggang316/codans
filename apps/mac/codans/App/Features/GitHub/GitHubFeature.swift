@@ -73,18 +73,36 @@ struct GitHubFeature {
     /// the gitRoot. Not yet cleared when the Project is removed from the catalog.
     var projectGitRoots: [ProjectID: URL] = [:]
 
-    // MARK: - active-Project liveness poll
+    // MARK: - liveness poll
 
-    /// Project the foreground liveness poll currently refreshes; `nil` ⇒ paused (app not
-    /// active, or no active Project). Set by `pollTargetChanged`; the loop re-issues a
-    /// forced `projectRefreshRequested` for this Project on an adaptive cadence while the
-    /// app is foreground.
-    var pollTarget: ProjectID?
+    /// Fetch units the foreground poll covers: every unit of every Project in the
+    /// catalog. Replaced whole by `pollUnitsChanged`.
+    var pollUnits: Set<ProjectID> = []
+
+    /// Units of the selected Project. They poll on the faster selected-tier cadence.
+    var selectedUnits: Set<ProjectID> = []
+
+    /// `true` while the app is frontmost. The poll timer runs only then.
+    var isPolling = false
+
+    /// When the latest batched fetch for a unit started. Drives the per-unit cadence and
+    /// the focus-gained catch-up debounce. Written whenever a fetch starts, whatever
+    /// asked for it, so an event-driven fetch also resets the unit's poll clock.
+    var lastFetchStartedAt: [ProjectID: Date] = [:]
+
+    /// Units owed a fetch regardless of cadence (focus-gained catch-up, refresh-all).
+    /// Drained by the scheduler at most `maxConcurrentPollFetches` at a time.
+    var pendingPollRefresh: Set<ProjectID> = []
+
+    /// Units that poll as `.hot` until the stored time, whatever their batch says.
+    /// Set when a unit's remote-tracking refs move: a push is often followed by
+    /// `gh pr create` and CI starting, which a settled-tier cadence would show late.
+    var hotUntil: [ProjectID: Date] = [:]
 
     /// Last-known branch pairs per Project, so a poll tick — or a post-mutation /
     /// manual-retry refresh — can re-issue a fetch without the caller re-supplying them.
     /// Written everywhere `projectGitRoots[P]` is written (inside `enqueueProjectFetch`)
-    /// and on `pollTargetChanged`.
+    /// and on `pollUnitsChanged`.
     var projectWorktreePairs: [ProjectID: [Action.WorktreeBranchPair]] = [:]
 
     /// Worktree → owning Project. Lets `postMutationRefresh` + the badge/popover retry
@@ -180,21 +198,29 @@ struct GitHubFeature {
       TaskResult<BatchedPullRequests>
     )
 
-    // MARK: - active-Project liveness poll
+    // MARK: - liveness poll
 
-    /// Retarget or pause the foreground liveness poll. A non-nil ProjectID arms the loop
-    /// for that Project; `nil` pauses it (app resigned active, or no active Project).
-    /// Retargeting does not fetch immediately — `projectActivated` / focus-gained already
-    /// issue the immediate refresh; the poll only maintains freshness afterward.
-    case pollTargetChanged(
-      ProjectID?,
-      gitRoot: URL?,
-      worktreeBranches: [WorktreeBranchPair]
-    )
+    /// Replace the set of units the foreground poll covers, and mark which belong to the
+    /// selected Project. Also refreshes each unit's stashed gitRoot and branch pairs, so
+    /// later event-driven refreshes use the current branch set. Starts any fetch that is
+    /// already due when the poll is running.
+    case pollUnitsChanged([FetchUnit], selected: Set<ProjectID>)
 
-    /// One beat of the liveness poll. Re-issues a forced fetch for the target Project and
-    /// re-arms the next tick at the current adaptive cadence.
-    case pollTick(ProjectID)
+    /// The app became frontmost (`true`) or resigned (`false`). Resuming queues a
+    /// catch-up fetch for each unit not fetched within `focusRefreshDebounce`; pausing
+    /// cancels the timer so a background app runs no `gh` subprocess.
+    case appActiveChanged(Bool)
+
+    /// One beat of the poll timer. Starts the due fetches and re-arms the timer.
+    case pollTick
+
+    /// Queue a fetch for every polled unit, drained through the concurrency cap.
+    case refreshAllRequested
+
+    /// The unit's remote-tracking refs changed on disk (`git push` / `git fetch`
+    /// from any process). Schedules a short-delay refresh and polls the unit as
+    /// `.hot` for `remoteRefsHotWindow`.
+    case remoteRefsChanged(ProjectID)
 
     /// Project-level refresh keyed by a single Worktree. Resolves the owning Project from
     /// `projectByWorktree` and runs the batched fetch. Backs the badge / popover
@@ -251,6 +277,15 @@ struct GitHubFeature {
     }
   }
 
+  /// One batched GitHub fetch: the repository to ask about and the rows whose branches
+  /// to ask for. A git Project is one unit keyed by its own id; a workspace has one unit
+  /// per member repository (see `RootFeature.gitHubFetchUnits`).
+  nonisolated struct FetchUnit: Equatable, Sendable {
+    let projectID: ProjectID
+    let gitRoot: URL
+    let pairs: [Action.WorktreeBranchPair]
+  }
+
   nonisolated enum CancelID: Hashable, Sendable {
     case availabilityRefresh
     case workflowRun(prNumber: Int)
@@ -260,13 +295,13 @@ struct GitHubFeature {
     /// Per-Project batched fetch. Re-dispatching `projectRefreshRequested`
     /// for an in-flight Project cancels the prior fetch and replaces it.
     case projectFetch(ProjectID)
-    /// Delayed post-mutation refresh — merge / close / markReady / rerun all
-    /// schedule this 2 s after a successful write.
+    /// Delayed refresh — merge / close / markReady / rerun schedule it 2 s after a
+    /// successful write; a remote-refs change schedules it too.
     case delayedProjectRefresh(ProjectID)
     /// `gh` availability recovery heartbeat — retries every 15 s after an outage.
     case availabilityRecovery
-    /// Single re-arm slot for the active-Project liveness poll. Retargeting or
-    /// pausing cancels the prior loop so at most one timer is ever live.
+    /// Single re-arm slot for the liveness poll timer. Every re-arm and the pause
+    /// cancel the prior timer so at most one is ever live.
     case poll
   }
 
@@ -274,15 +309,47 @@ struct GitHubFeature {
   /// dispatches within the window skip the probe.
   static let availabilityFreshness: TimeInterval = 30
 
-  // MARK: - active-Project liveness poll cadence
+  // MARK: - liveness poll cadence
 
-  /// Fast cadence — used while the target Project has at least one open PR with CI in
-  /// flight or an unsettled merge state. Keeps the check overlay near-live.
-  static let pollCadenceActive: Duration = .seconds(15)
+  /// How much a unit has in motion, judged from its latest batch. Picks the poll cadence.
+  enum PollTier: Equatable {
+    /// An open PR has CI in flight or an unsettled merge state.
+    case hot
+    /// Open PRs, all settled.
+    case warm
+    /// No open PR, or nothing fetched yet.
+    case cold
+  }
 
-  /// Slow cadence — used when everything is settled (or there is no open PR). Still runs
-  /// while foreground so a remote merge / close / new PR surfaces within ~60 s.
-  static let pollCadenceIdle: Duration = .seconds(60)
+  /// Poll cadence per tier. The selected Project polls fastest; other Projects still
+  /// poll while the app is frontmost, so a PR an agent opens or CI finishing in another
+  /// Project shows without a switch to it.
+  static func pollInterval(_ tier: PollTier, selected: Bool) -> TimeInterval {
+    switch (tier, selected) {
+    case (.hot, true): 10
+    case (.warm, true): 30
+    case (.cold, true): 60
+    case (.hot, false): 30
+    case (.warm, false): 120
+    case (.cold, false): 300
+    }
+  }
+
+  /// On focus gained, units not fetched within this window get a catch-up fetch.
+  static let focusRefreshDebounce: TimeInterval = 30
+
+  /// Most poll-started fetches in flight at once. Event-driven fetches do not count
+  /// against it; the cap only spreads a catch-up across many Projects.
+  static let maxConcurrentPollFetches = 2
+
+  /// How long a remote-refs change keeps a unit on the `.hot` cadence. Long enough
+  /// to cover an agent opening the PR some time after its push.
+  static let remoteRefsHotWindow: TimeInterval = 180
+
+  /// Bounds on the timer delay. The floor stops a busy loop; the ceiling bounds how
+  /// late a cadence change is noticed.
+  static let minPollDelay: TimeInterval = 1
+  static let maxPollDelay: TimeInterval = 60
 
   @Dependency(GitHubClient.self) var gitHub
   /// Resolves `(host, owner, repo)` for batched fetches via `git remote get-url origin`.
@@ -554,13 +621,16 @@ struct GitHubFeature {
           // `projectByWorktree` and `loading` — after which the next
           // result sails past the guards above and restores it.
           let currentPairs = state.projectWorktreePairs[projectID] ?? []
-          return .send(
-            .projectRefreshRequested(
-              projectID, gitRoot: gitRoot, worktreeBranches: currentPairs
-            )
+          return .merge(
+            .send(
+              .projectRefreshRequested(
+                projectID, gitRoot: gitRoot, worktreeBranches: currentPairs
+              )
+            ),
+            drainPollSlot(state: &state)
           )
         }
-        return .none
+        return drainPollSlot(state: &state)
 
       case .projectBatchLoaded(let projectID, let pairs, .failure(let error)):
         Self.logger.error(
@@ -570,22 +640,47 @@ struct GitHubFeature {
         state.loading.subtract(pairs.map(\.worktreeID))
         guard state.projectGitRoots[projectID] != nil else { return .none }
         state.lastErrorByProject[projectID] = (error as? GitHubError) ?? .other(String(describing: error))
-        return .none
+        return drainPollSlot(state: &state)
 
       // MARK: - active-Project liveness poll
 
-      case .pollTargetChanged(let projectID, let gitRoot, let pairs):
-        state.pollTarget = projectID
-        guard let projectID else {
-          return .cancel(id: CancelID.poll)
+      case .pollUnitsChanged(let units, let selected):
+        state.pollUnits = Set(units.map(\.projectID))
+        state.selectedUnits = selected.intersection(state.pollUnits)
+        state.pendingPollRefresh.formIntersection(state.pollUnits)
+        for unit in units {
+          state.projectGitRoots[unit.projectID] = unit.gitRoot
+          state.projectWorktreePairs[unit.projectID] = unit.pairs
+          for pair in unit.pairs { state.projectByWorktree[pair.worktreeID] = unit.projectID }
+          Self.reprojectCachedSnapshots(unit.projectID, pairs: unit.pairs, state: &state)
         }
-        if let gitRoot { state.projectGitRoots[projectID] = gitRoot }
-        state.projectWorktreePairs[projectID] = pairs
-        for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
-        // Arm only — the immediate refresh is owned by projectActivated / focus-gained.
-        return schedulePollTick(
-          projectID, after: Self.pollCadence(for: state.snapshotsByProject[projectID])
-        )
+        return state.isPolling ? runPollScheduler(state: &state) : .none
+
+      case .appActiveChanged(let isActive):
+        state.isPolling = isActive
+        guard isActive else { return .cancel(id: CancelID.poll) }
+        for projectID in state.pollUnits {
+          let started = state.lastFetchStartedAt[projectID] ?? .distantPast
+          if now.timeIntervalSince(started) >= Self.focusRefreshDebounce {
+            state.pendingPollRefresh.insert(projectID)
+          }
+        }
+        return runPollScheduler(state: &state)
+
+      case .pollTick:
+        guard state.isPolling else { return .none }
+        return runPollScheduler(state: &state)
+
+      case .refreshAllRequested:
+        state.pendingPollRefresh = state.pollUnits
+        return runPollScheduler(state: &state)
+
+      case .remoteRefsChanged(let projectID):
+        guard state.pollUnits.contains(projectID) else { return .none }
+        state.hotUntil[projectID] = now.addingTimeInterval(Self.remoteRefsHotWindow)
+        // The ref moves when the push lands; a `gh pr create` wrapping it opens
+        // the PR right after, so give GitHub a moment before reading back.
+        return scheduleDelayedRefresh(projectID)
 
       case .delayedProjectRefreshFired(let projectID):
         guard let gitRoot = state.projectGitRoots[projectID],
@@ -597,22 +692,6 @@ struct GitHubFeature {
         return enqueueProjectFetch(
           projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
         )
-
-      case .pollTick(let projectID):
-        // Defensive: cancellation normally prevents a stale tick from a prior target.
-        guard state.pollTarget == projectID else { return .none }
-        let cadence = Self.pollCadence(for: state.snapshotsByProject[projectID])
-        guard let gitRoot = state.projectGitRoots[projectID],
-          let pairs = state.projectWorktreePairs[projectID]
-        else {
-          // Lost the context to fetch (should not happen once a target is armed); keep
-          // the loop alive so a later context write is picked up.
-          return schedulePollTick(projectID, after: cadence)
-        }
-        let fetch = enqueueProjectFetch(
-          projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
-        )
-        return .merge(fetch, schedulePollTick(projectID, after: cadence))
 
       case .pruneToCatalog(let projectIDs, let worktreeIDs):
         let hadProjects = state.snapshotsByProject.count
@@ -638,6 +717,11 @@ struct GitHubFeature {
           .mapValues { $0.filter { worktreeIDs.contains($0.worktreeID) } }
         state.inFlightFetchProjects.formIntersection(projectIDs)
         state.queuedRefreshByProject.formIntersection(projectIDs)
+        state.pollUnits.formIntersection(projectIDs)
+        state.selectedUnits.formIntersection(projectIDs)
+        state.pendingPollRefresh.formIntersection(projectIDs)
+        state.lastFetchStartedAt = state.lastFetchStartedAt.filter { projectIDs.contains($0.key) }
+        state.hotUntil = state.hotUntil.filter { projectIDs.contains($0.key) }
         // Persist the pruned map so the removal survives a relaunch even if no
         // fetch succeeds before quit.
         if state.snapshotsByProject.count != hadProjects {
@@ -648,16 +732,10 @@ struct GitHubFeature {
             cache.save(snapshotOnDisk, sequence)
           }
         }
-        // A poll aimed at a Project that just left the catalog would keep
-        // shelling out `git remote get-url` + `gh api graphql` against a
-        // repository the user unregistered, and each success would write the
-        // dead Project straight back into the on-disk cache.
-        var effects = departedInFlight.map { Effect<Action>.cancel(id: CancelID.projectFetch($0)) }
-        if let target = state.pollTarget, !projectIDs.contains(target) {
-          state.pollTarget = nil
-          effects.append(.cancel(id: CancelID.poll))
-        }
-        return .merge(effects)
+        // Dropping a departed unit from `pollUnits` above stops the poll from
+        // shelling out `gh api graphql` against a repository the user
+        // unregistered, and each success writing it back into the disk cache.
+        return .merge(departedInFlight.map { Effect<Action>.cancel(id: CancelID.projectFetch($0)) })
 
       case .worktreeRefreshRequested(let worktreeID):
         guard let projectID = state.projectByWorktree[worktreeID],
@@ -693,6 +771,7 @@ struct GitHubFeature {
     // current even when this call collapses into the queued-refresh slot.
     state.projectWorktreePairs[projectID] = pairs
     for pair in pairs { state.projectByWorktree[pair.worktreeID] = projectID }
+    Self.reprojectCachedSnapshots(projectID, pairs: pairs, state: &state)
     // The popover's spinner means "nothing known yet", so only a Project's
     // first fetch marks its Worktrees. A refresh over a cached batch — poll
     // ticks, the post-mutation refetch, a fresh-on-activation miss — runs
@@ -709,6 +788,8 @@ struct GitHubFeature {
     }
     state.inFlightFetchProjects.insert(projectID)
     let fetchedAt = now
+    state.lastFetchStartedAt[projectID] = fetchedAt
+    state.pendingPollRefresh.remove(projectID)
     Self.logger.info(
       "enqueueProjectFetch project=\(projectID.raw.uuidString, privacy: .public) pairs=\(pairs.count, privacy: .public)"
     )
@@ -747,29 +828,115 @@ struct GitHubFeature {
     .cancellable(id: CancelID.projectFetch(projectID), cancelInFlight: true)
   }
 
-  /// Adaptive poll cadence for the active-Project liveness loop. Fast while any
-  /// open PR has CI in flight or an unsettled merge state; slow otherwise. `nil` (no
-  /// cached batch yet) is treated as settled — the first real fetch reclassifies it.
-  static func pollCadence(for batched: BatchedPullRequests?) -> Duration {
-    guard let batched else { return pollCadenceIdle }
-    let inFlight = batched.byBranch.values.contains { snap in
-      snap.state == .open
-        && (snap.mergeStateStatus == .unknown
-          || snap.checkRollup.contains { $0.status != .completed })
+  /// Classifies a unit's latest batch. `nil` (nothing fetched yet) is cold; the first
+  /// real fetch reclassifies it.
+  static func pollTier(for batched: BatchedPullRequests?) -> PollTier {
+    let open = batched?.byBranch.values.filter { $0.state == .open } ?? []
+    if open.isEmpty { return .cold }
+    let inFlight = open.contains { snap in
+      snap.mergeStateStatus == .unknown || snap.checkRollup.contains { $0.status != .completed }
     }
-    return inFlight ? pollCadenceActive : pollCadenceIdle
+    return inFlight ? .hot : .warm
   }
 
-  /// Single-slot re-arm timer for the liveness poll. `cancelInFlight: true` guarantees at
-  /// most one live timer per app; a retarget / pause cancels the prior loop.
-  private func schedulePollTick(
-    _ projectID: ProjectID, after cadence: Duration
-  ) -> Effect<Action> {
+  private static func pollInterval(_ projectID: ProjectID, state: State, now: Date) -> TimeInterval {
+    let hot = state.hotUntil[projectID].map { now < $0 } ?? false
+    return pollInterval(
+      hot ? .hot : pollTier(for: state.snapshotsByProject[projectID]),
+      selected: state.selectedUnits.contains(projectID))
+  }
+
+  /// Starts the due poll fetches, then re-arms the timer for the next due unit. A unit
+  /// is due when it is owed a catch-up (`pendingPollRefresh`) or its cadence elapsed
+  /// since its last fetch started. Selected units go first, then the least recently
+  /// fetched; at most `maxConcurrentPollFetches` fetches run at once.
+  private func runPollScheduler(state: inout State) -> Effect<Action> {
+    let fetches = startDuePollFetches(state: &state)
+    // No unit, no timer: `pollUnitsChanged` re-runs the scheduler when units arrive.
+    guard state.isPolling, !state.pollUnits.isEmpty else { return fetches }
+    return .merge(fetches, schedulePollTick(after: nextPollDelay(state: state)))
+  }
+
+  /// A fetch finished and freed a slot. Hands the slot to the next due unit so a
+  /// catch-up over many Projects does not wait for the timer.
+  private func drainPollSlot(state: inout State) -> Effect<Action> {
+    guard state.isPolling || !state.pendingPollRefresh.isEmpty else { return .none }
+    return runPollScheduler(state: &state)
+  }
+
+  private func startDuePollFetches(state: inout State) -> Effect<Action> {
+    let polling = state.isPolling
+    let due = state.pollUnits.filter { projectID in
+      guard !state.inFlightFetchProjects.contains(projectID) else { return false }
+      if state.pendingPollRefresh.contains(projectID) { return true }
+      guard polling else { return false }
+      let started = state.lastFetchStartedAt[projectID] ?? .distantPast
+      return now.timeIntervalSince(started) >= Self.pollInterval(projectID, state: state, now: now)
+    }
+    let ordered = due.sorted { lhs, rhs in
+      let lhsSelected = state.selectedUnits.contains(lhs)
+      let rhsSelected = state.selectedUnits.contains(rhs)
+      if lhsSelected != rhsSelected { return lhsSelected }
+      let lhsStarted = state.lastFetchStartedAt[lhs] ?? .distantPast
+      let rhsStarted = state.lastFetchStartedAt[rhs] ?? .distantPast
+      if lhsStarted != rhsStarted { return lhsStarted < rhsStarted }
+      return lhs.raw.uuidString < rhs.raw.uuidString
+    }
+    let pollInFlight = state.inFlightFetchProjects.intersection(state.pollUnits).count
+    let slots = max(0, Self.maxConcurrentPollFetches - pollInFlight)
+    var effects: [Effect<Action>] = []
+    for projectID in ordered.prefix(slots) {
+      guard let gitRoot = state.projectGitRoots[projectID],
+        let pairs = state.projectWorktreePairs[projectID]
+      else {
+        state.pendingPollRefresh.remove(projectID)
+        continue
+      }
+      effects.append(
+        enqueueProjectFetch(projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state))
+    }
+    return .merge(effects)
+  }
+
+  /// Delay until the earliest idle unit is due, clamped to `minPollDelay ...
+  /// maxPollDelay`. In-flight units are skipped: their completion re-runs the scheduler.
+  private func nextPollDelay(state: State) -> TimeInterval {
+    var delay = Self.maxPollDelay
+    for projectID in state.pollUnits where !state.inFlightFetchProjects.contains(projectID) {
+      if state.pendingPollRefresh.contains(projectID) {
+        delay = Self.minPollDelay
+        break
+      }
+      let started = state.lastFetchStartedAt[projectID] ?? .distantPast
+      let remaining = Self.pollInterval(projectID, state: state, now: now) - now.timeIntervalSince(started)
+      delay = min(delay, remaining)
+    }
+    return min(max(delay, Self.minPollDelay), Self.maxPollDelay)
+  }
+
+  /// Single-slot re-arm timer for the liveness poll. `cancelInFlight: true` keeps at
+  /// most one live timer per app; a re-arm or pause cancels the prior one.
+  private func schedulePollTick(after delay: TimeInterval) -> Effect<Action> {
     .run { [clock] send in
-      try await clock.sleep(for: cadence)
-      await send(.pollTick(projectID))
+      try await clock.sleep(for: .milliseconds(Int((delay * 1000).rounded(.up))))
+      await send(.pollTick)
     }
     .cancellable(id: CancelID.poll, cancelInFlight: true)
+  }
+
+  /// Keeps each row's PR badge on its current branch before the next fetch lands. A
+  /// row whose snapshot names a different branch (the worktree switched branches)
+  /// takes the cached batch's entry for the new branch, or no badge.
+  private static func reprojectCachedSnapshots(
+    _ projectID: ProjectID, pairs: [Action.WorktreeBranchPair], state: inout State
+  ) {
+    let cached = state.snapshotsByProject[projectID]
+    for pair in pairs {
+      guard let current = state.snapshots[pair.worktreeID],
+        current.headRefName != pair.branch
+      else { continue }
+      state.snapshots[pair.worktreeID] = cached?.byBranch[pair.branch]
+    }
   }
 
   /// TTL for in-memory freshness. Under this window, repeat `projectActivated`
@@ -830,7 +997,13 @@ struct GitHubFeature {
     worktreeID: WorktreeID, state: inout State
   ) -> Effect<Action> {
     guard let projectID = state.projectByWorktree[worktreeID] else { return .none }
-    return .run { [clock] send in
+    return scheduleDelayedRefresh(projectID)
+  }
+
+  /// Fetches the unit 2 s from now, so GitHub has settled a write before it is read
+  /// back. A second request within the window restarts it.
+  private func scheduleDelayedRefresh(_ projectID: ProjectID) -> Effect<Action> {
+    .run { [clock] send in
       try await clock.sleep(for: .seconds(2))
       await send(.delayedProjectRefreshFired(projectID))
     }

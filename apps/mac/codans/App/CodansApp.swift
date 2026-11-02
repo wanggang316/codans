@@ -637,6 +637,8 @@ final class AppState {
   /// the catalog-sync task lives inside `bringUp`.
   let worktreeWorkingTreeWatcher: WorktreeWorkingTreeWatcher
   private var worktreeWorkingTreeWatcherSyncTask: Task<Void, Never>?
+  let remoteRefsWatcher: RemoteRefsWatcher
+  private var remoteRefsWatcherSyncTask: Task<Void, Never>?
 
   private var socketServer: SocketServer?
   // EditorClient is built inside bringUp() alongside the TCA dependency
@@ -688,6 +690,7 @@ final class AppState {
     self.worktreeLocalDiffMonitor = .live()
     self.worktreeHeadWatcher = WorktreeHeadWatcher()
     self.worktreeWorkingTreeWatcher = WorktreeWorkingTreeWatcher()
+    self.remoteRefsWatcher = RemoteRefsWatcher()
   }
 
   /// Idempotent: subsequent calls while `store` is already set are no-ops.
@@ -725,6 +728,9 @@ final class AppState {
     // SettingsStore loads itself (and migrates legacy formats) during `init(fileURL:)`.
     let manager = hierarchyManager
     let settings = settingsStore
+    engine.isReclaimEnabled = { [weak settings] in
+      settings?.settings.general.reclaimHiddenSurfaces ?? true
+    }
 
     // Build the editor + hierarchy clients once so the reducer stack AND the IPC
     // handlers share the exact same live instances — avoids two parallel
@@ -912,6 +918,7 @@ final class AppState {
       $0.projectReconciler = ProjectReconciler(client: hierarchy)
       $0.worktreeHeadWatcher = self.worktreeHeadWatcher
       $0.worktreeWorkingTreeWatcher = self.worktreeWorkingTreeWatcher
+      $0.remoteRefsWatcher = self.remoteRefsWatcher
       $0.worktreeLocalDiffMonitor = self.worktreeLocalDiffMonitor
       // Built-in TCA dependencies (`\.date`, `\.continuousClock`, `\.uuid`) are
       // always swapped to `unimplemented` under XCTest regardless of any
@@ -929,6 +936,7 @@ final class AppState {
 
     startHeadWatcherSync()
     startWorkingTreeWatcherSync()
+    startRemoteRefsWatcherSync()
 
     self.settingsWindowStore = Store(initialState: SettingsWindowFeature.State()) {
       SettingsWindowFeature()
@@ -1936,6 +1944,8 @@ final class AppState {
     worktreeHeadWatcher.stopAll()
     worktreeWorkingTreeWatcherSyncTask?.cancel()
     worktreeWorkingTreeWatcher.stopAll()
+    remoteRefsWatcherSyncTask?.cancel()
+    remoteRefsWatcher.stopAll()
 
     settingsStore.flush()
     shortcutsStore.flush()
@@ -2200,6 +2210,43 @@ final class AppState {
     }
   }
 
+  /// Mirror task that keeps `RemoteRefsWatcher`'s set in sync with the
+  /// catalog's GitHub fetch units (unit id → repository root). Same
+  /// pre-arm-sample / re-arm pattern as `startHeadWatcherSync`.
+  private func startRemoteRefsWatcherSync() {
+    remoteRefsWatcherSyncTask?.cancel()
+    let manager = hierarchyManager
+    let watcher = remoteRefsWatcher
+    remoteRefsWatcherSyncTask = Task { @MainActor in
+      var last: [ProjectID: String] = [:]
+      while !Task.isCancelled {
+        let current = Self.remoteRefsRepositories(from: manager.catalog)
+        if current != last {
+          watcher.setRepositories(current)
+          last = current
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+          withObservationTracking {
+            _ = Self.remoteRefsRepositories(from: manager.catalog)
+          } onChange: {
+            cont.resume()
+          }
+        }
+      }
+    }
+  }
+
+  /// Fetch unit id → repository root for every GitHub fetch unit.
+  fileprivate static func remoteRefsRepositories(from catalog: Catalog) -> [ProjectID: String] {
+    var repositories: [ProjectID: String] = [:]
+    for project in catalog.projects {
+      for unit in RootFeature.gitHubFetchUnits(in: project) {
+        repositories[unit.projectID] = unit.gitRoot.path(percentEncoded: false)
+      }
+    }
+    return repositories
+  }
+
   /// Long-running mirror: routes every `store.unreadCount` change through
   /// `coordinator.recomputeDockBadge()` so the badge honours the
   /// `inAppEnabled` + `dockBadgeEnabled` gates regardless of which path
@@ -2373,10 +2420,11 @@ final class AppState {
   /// signal for an agent pane.
   private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
     guard commandQueueRunner == nil else { return }
-    // A pane mid-turn or holding queued commands must keep its surface: the
-    // idle-surface reclaim would otherwise detach it while work is pending.
+    // A pane whose turn only its screen tracks, or that holds queued
+    // commands, must keep its surface: queued commands go out only through
+    // a live surface.
     engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] paneID in
-      registry?.entries[paneID]?.state.isMidTask == true
+      registry?.needsSurfaceToTrackTurn(paneID) == true
         || manager?.catalog.pane(paneID)?.commandQueue.isEmpty == false
     }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command

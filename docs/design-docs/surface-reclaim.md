@@ -27,7 +27,7 @@ pane 的 shell 由 zmx daemon 持有，surface 只是一个 `zmx attach` 客户�
 | 前台是 shell 提示符或 agent，不是运行中的命令 | 命令在跑时输出由 surface 消费 |
 | 不是远程 pane | 其 surface 下是 ssh 隧道，回收收益小、风险大 |
 | surface 处于 ready | 不碰 crashed / exited 状态 |
-| 无 veto：agent 不在回合中，没有排队命令 | 排队命令只在有 surface 时才会发出 |
+| 无 veto：没有只靠屏幕判断状态、且处于回合中的 agent，没有排队命令 | 无 surface 时屏幕不被读取，这类 agent 的状态会停在 cached；排队命令只在有 surface 时才会发出 |
 
 ### 最近选中的 worktree
 
@@ -51,7 +51,16 @@ pane 的 shell 由 zmx daemon 持有，surface 只是一个 `zmx attach` 客户�
 
 Debug 构建另外监听 Darwin 通知 `dev.codans.debug.memory-pressure`，`notifyutil -p dev.codans.debug.memory-pressure` 注入一次 `.warning` 事件。`memory_pressure -S` 需要 root，此入口用于不提权测量回收前后的内存。
 
-veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态和命令队列位于 Runtime 层之上。窗口被遮挡或最小化时 surface 仍视为「在窗口内」，用户回来时不会遇到重新 attach。
+veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态和命令队列位于 Runtime 层之上。agent 是否需要 surface 由 `AgentStateStore.needsSurfaceToTrackTurn` 判断：处于 `working` / `blocked`，且状态不来自 OSC 7501 program status。上报 program status 的 agent 在 detach 后仍由被动 watcher 观察，回合结束时状态照常更新，所以回合中也可以被回收。这类 pane 的屏幕在 program status 生效期间不被读取，「画面静止」从最后一次屏幕变化算起，转圈动画不会阻止回收。窗口被遮挡或最小化时 surface 仍视为「在窗口内」，用户回来时不会遇到重新 attach。
+
+### 开关
+
+Settings → General → Memory 的「Release terminal views of hidden panes」（`GeneralSettings.reclaimHiddenSurfaces`，默认开）控制回收：
+
+- 关闭时，定时扫描与内存压力扫描都不回收任何 surface。扫描仍刷新显示中 pane 的 `lastDisplayedAt`，重新打开后隐藏时长从 pane 真正离开屏幕时算起。
+- 已回收的 pane 保持 detach，直到再次显示时按原路径重新 attach。
+- 引擎在每次扫描时读取 `TerminalEngine.isReclaimEnabled`（app 层注入，读 `SettingsStore`），因此修改即时生效，不需要重启。
+- 开启时 `CODANS_SURFACE_RECLAIM_SECONDS` 照常覆盖阈值；关闭时该变量不起作用。
 
 ### 重新 attach 与已回收状态
 
@@ -67,11 +76,13 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 - 重新挂接时 watcher 先停、surface 再连上 daemon；这之间写出的 OSC 信号两边都收不到。agent 的下一份报告会纠正状态，见 [active-agents-view.md](active-agents-view.md#未挂接-pane-的观测)。
 - 已回收 pane 不计入 `runningPaneCount`（force-remove 确认文案中的进程数），会少算。
 - 发往已回收 pane 的排队命令要等 pane 再次显示后才发出，与「从未打开过的 pane」一致。
-- 阈值是常量，没有设置项。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。
+- 阈值是常量，不能在设置里调整，只能整体开关（见[开关](#开关)）。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。
 
 ## 验证
 
+- `TerminalEngineMemoryPressureTests.disabledReclaimDetachesNothing` 覆盖开关：关闭时定时与压力扫描都不回收，重新开启后下一次扫描即回收。`ReclaimHiddenSurfacesCodableTests` 与 `SettingsWriterPhase2Tests` 覆盖默认值与持久化。
 - `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值与最近度、其余规则仍生效。
+- `AgentStateStoreDetachedTests` 覆盖 `needsSurfaceToTrackTurn`：上报 program status 的回合中 agent 不需要 surface；靠屏幕判断（含 detach 后的 cached）的回合中 agent 需要；回合之间的 agent 不需要。
 - `WorktreeSelectionHistoryTests` 覆盖最近度记录：最新在前、重选不重复、超过 3 个时最旧的移出。`TerminalEngineMemoryPressureTests` 覆盖引擎侧：最近 3 个 worktree 的选中 tab 不被定时扫描回收，后台 tab 与较旧 worktree 照常回收，第 4 个 worktree 被选中后最旧的选中 tab 被回收；压力扫描忽略最近度；选择变化被记录。
 - `TerminalEngineMemoryPressureTests` 用假的 `ReclaimableSurfaceHost`（生产中是 `GhosttyRuntime`）注入 surface 与压力事件：隐藏且空闲的 shell / agent 被 detach，并记为已回收、发出解除挂接通知、启动被动 watcher；显示中、被 veto、运行命令、前台未知的 pane 保留；detach 失败的 pane 不计入回收数。远程 pane 的规则由策略测试覆盖。
 - 隔离 Debug 实例，11 个 tab 各一个空闲 shell（1 个显示、10 个隐藏），注入一次压力事件：phys footprint 858 MB → 228 MB，线程 51 → 11，挂接的 surface 11 → 1，日志 `reclaimed=10`；再显示被回收的 tab，原 shell 会话照常可用。

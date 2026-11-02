@@ -22,7 +22,7 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
 - 无直连 GitHub REST/GraphQL HTTP——继续委托 `gh`（具体是 `gh api graphql`，跑在 `gh` 已认证的 HTTP 栈上）；唯一变化的是 query body。
 - 无应用内 OAuth。`gh auth login` 是唯一认证路径；token 住在 `gh` 自己的 config store，我们从不读取。
-- 无 webhook / 服务端推送 / 后台轮询。失效是事件驱动（见下），非时间驱动。
+- 无 webhook / 服务端推送 / app 在后台时的轮询。本地变化走事件驱动失效（见下）；GitHub 侧变化由 app 在前台时的分档轮询补充。
 - 无 review 线程 / 评论 / issues / discussions / actions 仪表盘。范围限于 PR 元数据 + 聚合 check rollup。
 - 无 PR 状态落盘。快照仅在内存，应用启动即重置。
 - 无 partial-result 渲染：GraphQL query 失败则整 chunk 失败，绝不渲染半填充的侧栏状态（避免「半合并」的视觉混淆）。
@@ -371,7 +371,7 @@ public struct BatchedPullRequests: Equatable, Sendable {
 
 ### 缓存与失效
 
-**缓存键是取数单元的 `ProjectID`。** 普通 Git Project 使用自身 ID；Workspace 按成员的源仓库分组，每组用 Workspace ID 与规范化仓库根路径派生稳定 ID。缓存、取消和排队刷新都按这个单元隔离，不会把不同成员仓库的同名分支配成同一 PR。Workspace 激活时刷新各组，持续轮询只跟随选中 Worktree 所属组；没有匹配组时回退到第一组。
+**缓存键是取数单元的 `ProjectID`。** 普通 Git Project 使用自身 ID；Workspace 按成员的源仓库分组，每组用 Workspace ID 与规范化仓库根路径派生稳定 ID。缓存、取消和排队刷新都按这个单元隔离，不会把不同成员仓库的同名分支配成同一 PR。Workspace 激活时刷新各组；轮询覆盖每个组，选中 Workspace 的所有组都按选中档节奏。
 
 无基于 TTL 的过期策略；本地事件负责失效，应用处于前台时的自适应轮询补充 GitHub 服务端变更。磁盘快照可用于启动时预填，catalog 清理同时保留仍存活的 Workspace 取数单元。
 
@@ -384,18 +384,33 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | Project 激活（从另一 Project 切入） | `HierarchyManager.selectedProjectID` 增量 | 缓存分支集 ≠ 当前 Worktree 分支则刷新 |
 | Worktree added | `HierarchyManager` catalog 增量 | 刷新 Project |
 | Worktree removed | `HierarchyManager` catalog 增量 | 从缓存移除；不取数 |
-| Worktree 分支变更 | `WorktreeBranchWatcher`（`.git/HEAD` 监听） | 刷新 Project |
+| Worktree 分支变更 / commit | `WorktreeHeadWatcher`（`.git/HEAD` + reflog 监听） | 刷新该 Worktree 所属取数单元（不是选中 Project）；取数返回前，分支已变的行按缓存改投新分支的 PR 或清空徽标 |
 | Merge / close / markReady 完成 | `GitHubFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
 | 手动刷新 | 用户动作（面板、popover 刷新按钮） | 立即刷新 Project |
+| 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
+| pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
+| 远端跟踪 ref 变更 | `RemoteRefsWatcher`（FSEvents 监听公共 git 目录下的 `refs/remotes/` 与 `packed-refs`） | 2 s 后刷新该取数单元，并在 3 min 内按 hot 档轮询。覆盖任意进程的 `git push` / `gh pr create` / `git fetch`，包括前台作业检测看不到的 agent |
 | `gh` 从 `.unavailable` 恢复 | `GhAvailabilityCache` | 刷新每个有排队请求的 Project |
-| App 变为活跃（可选，behind setting） | `NSApp.didBecomeActiveNotification` | 刷新所有打开的 Project，每 Project 限速 60s |
-| 活跃 Project liveness 轮询 | 前台 timer，gated on `NSApp.isActive` × 活跃 Project | 自适应节奏强制刷新活跃 Project（CI 在飞或 merge 未定时 ~15s，settle 后 ~60s）；app resign active 即刻取消，故后台 app 零轮询 |
+| App 变为活跃 | `NSApp.didBecomeActiveNotification` | reconcile 后，所有超过 30 s（`focusRefreshDebounce`）未取数的单元排队补刷，选中 Project 优先 |
+| liveness 轮询 | 前台 timer，gated on `NSApp.isActive` × 所有取数单元 | 按单元分档节奏强制刷新（见下表）；app resign active 即刻取消，故后台 app 零轮询 |
 
 **重入模型。** 每 Project 三个状态槽：`snapshotsByProject[P]`（当前缓存，未取过为 nil）、`inFlightFetchProjects`（有活跃子进程链的 Project 集）、`queuedRefreshByProject`（取数在飞时又请求刷新的 Project，排队请求在进行中那次完成后跑）。失效事件检查是否在飞：是则标 queued 并 no-op，否则起取数并加入 in-flight 集；完成时清 in-flight，若 queued 则补发一次。这干净处理 merge-close-markReady-merge 快速连击：首次跑完，后续坍缩成一次最后跑的 queued 取数。
 
 **取消。** queued 刷新在 Project 关闭或用户导航离开时丢弃；in-flight 取数在 Project 失活时经 `.cancellable(id: CancelID.projectFetch(P), cancelInFlight: true)` 取消。
 
-**关于轮询的取舍。** 纯事件驱动的「用户交互时同等新鲜」前提只对*本地*状态成立——用户在终端 pane 打字不是 GitHub 失效事件，故源自 GitHub 侧的 check 完成、review、merge/close 在纯事件驱动下无新鲜保证。补的信号是单条轮询：**只刷活跃 Project**、**只在 app 为前台时**（resign-active 即取消）、**自适应节奏**（仅在真有东西在飞时快）。应用失去前台状态时停止轮询；仅离开键盘但应用仍为前台时，轮询继续。
+**关于轮询的取舍。** 纯事件驱动的「用户交互时同等新鲜」前提只对*本地*状态成立——用户在终端 pane 打字不是 GitHub 失效事件，agent 在 pane 里跑的 `git push` / `gh pr create` 只能靠远端跟踪 ref 监听发现，故源自 GitHub 侧的 check 完成、review、merge/close、新 PR 在纯事件驱动下无新鲜保证。补的信号是一个调度器：**覆盖所有 Project 的取数单元**、**只在 app 为前台时**（resign-active 即取消）、**按单元分档**（选中 Project 更快，有东西在飞时更快）。应用失去前台状态时停止轮询；仅离开键盘但应用仍为前台时，轮询继续。
+
+| 档位（按最近一次批量结果） | 选中 Project | 其他 Project |
+|---|---|---|
+| hot：有 open PR 的 check 在跑或 merge 状态 unknown | 10 s | 30 s |
+| warm：有 open PR，均已 settle | 30 s | 2 min |
+| cold：无 open PR，或尚未取数 | 60 s | 5 min |
+
+远端跟踪 ref 变更后 3 min（`remoteRefsHotWindow`）内，该单元不论批量结果如何都按 hot 档：push 之后 agent 常隔一段时间才 `gh pr create`，CI 也随后才启动。
+
+调度器单 timer：睡到最早到期的单元（夹在 1–60 s），到期单元按「选中优先、上次取数最早优先」启动，轮询发起的取数最多 2 个并发；某次取数完成即把空出的槽交给下一个到期单元。节奏以「上次取数开始时间」计，任何来源的取数（事件、手动、轮询）都会重置该单元的节奏。
+
+Source: [GitHubFeature.swift](../../apps/mac/codans/App/Features/GitHub/GitHubFeature.swift) (`pollInterval`, `runPollScheduler`).
 
 ### 取数排程（reducer）
 
@@ -500,7 +515,7 @@ public struct RemoteInfo: Equatable, Sendable {
 - **A — per-Worktree 取数（每行 `gh pr view <branch>` + `gh pr checks <number>`），加 3 路 in-flight cap + `statusCheckRollup` 合并。** 否决：成本随 Worktree 数而非仓库数缩放。合并 pr view + pr checks 把子进程从 2N 降到 N 是增量优化，但仍 O(N)——20 个 Worktree 仍要 20 × 150 ms 冷启动；且逐行 `.task(id:)` 依赖 SwiftUI 视图生命周期，当行解析为不挂载的 `EmptyView()` 时无缓存行的取数根本不发生。repository-batched 模型把成本降到 O(Repositories) 并把取数从视图生命周期解耦，故采纳。
 - **B — 用 `gh pr list --json ... --state all`。** 否决：`gh pr list --json statusCheckRollup` 受支持，但 gh 内部对每个 PR 另发一次 GraphQL，实为 N 次往返、只是被隐藏，总墙钟与 N-分支最坏情形相同。「直接用 gh pr list」的简洁是个泄漏抽象。
 - **C — `URLSession` 直连 GraphQL + Keychain 存 OAuth。** 否决：`gh api graphql` 每 chunk 加 ~100–150 ms 子进程成本，3 并发 chunk 约 200 ms/刷新；付 ~1500 行工程账（OAuth device flow、token 存储/刷新、rate-limit 退避、错误分类、Enterprise host 切换、re-auth 面）去省 ~200 ms 是错的权衡，且重复 `gh` 已正确做的事。仅当 codans 需要实时 PR 更新 / review 线程 / 跨仓聚合时再考虑。
-- **D — 全 Project 后台轮询。** 本地事件能触发分支与 Worktree 变动的刷新，但不能覆盖 GitHub 侧独立发生的 checks、review、merge/close。因此采用事件驱动与前台活跃 Project 自适应轮询的组合；后台或未激活 Project 不持续轮询，降低子进程和 API 请求成本。前台判定是 `NSApp.isActive`，不是用户是否正在操作；应用保持前台时，用户离开键盘不会自动停止轮询。
+- **D — app 在后台时也轮询。** 否决：后台 app 无人看徽标，轮询只付子进程与 API 成本；回到前台时的 30 s 防抖补刷足以在用户看到前更新。前台时所有 Project 都按分档节奏轮询——只轮询选中 Project 会让其他 Project 的徽标在切换前一直陈旧，而 agent 正在其他 Project 里开 PR 是常态。前台判定是 `NSApp.isActive`，不是用户是否正在操作。
 - **E — 落盘最后快照以启动即显。** 否决：当前「启动后 ~500 ms 空侧栏再填充」可接受。落盘会带来 stale 数据、「显示 X 又变 Y」类 bug、翻倍文件 IO 面。待用户反馈再议。
 
 ## 风险

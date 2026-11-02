@@ -114,7 +114,7 @@ fi
 ZIG_GLOBAL_CACHE_DIR="${ghostty_global_cache_dir}" "${script_dir}/prime-zig-cache.sh"
 
 # Xcode 26.4+ SDKs break zig 0.15.2 links; see xcode-compat/activate.sh.
-xcode_compat_activate
+xcode_compat_activate "${srcroot}/.build/xcode-compat"
 
 cd "${ghostty_dir}"
 # -Dxcframework-target=native produces a single-arch slice matching the

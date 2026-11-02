@@ -43,6 +43,41 @@ struct AgentStateStoreDetachedTests {
   }
 
   @Test
+  func midTaskAgentReportingProgramStatusDoesNotNeedItsSurface() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.apply([ProgramStatusReport(state: .working, app: "claude-code")])
+    #expect(f.registry.entries[f.paneID]?.source == .programStatus)
+    #expect(!f.registry.needsSurfaceToTrackTurn(f.paneID))
+
+    f.apply([ProgramStatusReport(state: .blocked, app: "claude-code")])
+    #expect(!f.registry.needsSurfaceToTrackTurn(f.paneID))
+  }
+
+  @Test
+  func midTaskAgentReadFromTheScreenNeedsItsSurface() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.entries[f.paneID]?.source == .screen)
+    #expect(f.registry.needsSurfaceToTrackTurn(f.paneID))
+
+    // Once detached the state is cached, and still not observed.
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: false)
+    #expect(f.registry.entries[f.paneID]?.source == .cached)
+    #expect(f.registry.needsSurfaceToTrackTurn(f.paneID))
+  }
+
+  @Test
+  func agentBetweenTurnsDoesNotNeedItsSurface() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.entries[f.paneID]?.state == .idle)
+    #expect(!f.registry.needsSurfaceToTrackTurn(f.paneID))
+    #expect(!f.registry.needsSurfaceToTrackTurn(PaneID()))
+  }
+
+  @Test
   func reclaimTurnsAScreenStateIntoACachedOne() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
