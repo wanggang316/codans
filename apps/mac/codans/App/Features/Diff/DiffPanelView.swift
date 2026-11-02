@@ -37,7 +37,7 @@ struct DiffPanelView: View {
     ) {
       DiffFileSidebar(store: store)
         // App-owned toggle in place of the native one, so the tooltip can show the live
-        // Toggle Sidebar chord (#308). It trails the sidebar's toolbar section like the
+        // Toggle Sidebar chord. It trails the sidebar's toolbar section like the
         // native one.
         .toolbar(removing: .sidebarToggle)
         .toolbar {

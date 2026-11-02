@@ -122,7 +122,7 @@ struct ContentView: View {
         onToggleSidebar: toggleSidebar,
       )
       // App-owned toggle in place of the native one, so the tooltip can
-      // show the live Toggle Sidebar chord (#308). The sidebar view places
+      // show the live Toggle Sidebar chord. The sidebar view places
       // it after its own toolbar items, where the native one sat.
       .toolbar(removing: .sidebarToggle)
       // Outermost: the column reads its width from the view it is given.
