@@ -65,6 +65,10 @@ struct HierarchySidebarView: View {
   /// Row context-menu "Run Workflow" dispatcher — routes to
   /// `RootFeature.agentState(.runWorkflowTapped)`.
   var onAgentStateRowRunWorkflow: (PaneID, String) -> Void = { _, _ in }
+  /// Drives the sidebar toggle at the trailing end of this column's toolbar.
+  /// The host removes the native toggle; nil (previews, tests) shows none.
+  var isSidebarVisible: Bool = true
+  var onToggleSidebar: (() -> Void)?
   /// Whether the AgentState bottom panel is currently expanded.
   /// Persisted so the footer toggle's last state survives a relaunch —
   /// users who keep the panel open during long sessions should not
@@ -510,6 +514,12 @@ struct HierarchySidebarView: View {
 
   @ToolbarContentBuilder
   private var sidebarToolbarContent: some ToolbarContent {
+    // Without the native toggle nothing pins this section to the sidebar's
+    // trailing edge; the spacer does, so `+` and the toggle stay where the
+    // native layout put them.
+    if onToggleSidebar != nil, #available(macOS 26.0, *) {
+      ToolbarSpacer(.flexible, placement: .primaryAction)
+    }
     // Persistent update reminder, left of "Add Project". Visible whenever the
     // appcast advertises a newer build for the active channel — and kept
     // visible after "Skip This Version" — so the user always knows an update
@@ -547,6 +557,18 @@ struct HierarchySidebarView: View {
       // binding belongs to "Open Project…", the first item, which shows it
       // as its key equivalent.
       .help("Add Project")
+    }
+    // Declared after `+` so it keeps the native toggle's slot: last in the
+    // expanded sidebar's toolbar section. The host places it next to the
+    // traffic lights while the sidebar is collapsed.
+    if isSidebarVisible, let onToggleSidebar {
+      if #available(macOS 26.0, *) {
+        // Separate glass capsule, as the native toggle had.
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+      }
+      ToolbarItem(placement: .primaryAction) {
+        SidebarToggleButton(isSidebarVisible: true, toggle: onToggleSidebar)
+      }
     }
   }
 

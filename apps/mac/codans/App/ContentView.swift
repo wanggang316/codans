@@ -46,25 +46,27 @@ struct ContentView: View {
   @Dependency(UpdatesClient.self) private var updatesClient
 
   /// Bridges `RootFeature.State.sidebarVisible` (a Bool) to
-  /// `NavigationSplitViewVisibility` so the chord, the system disclosure
-  /// chevron, and the bound state stay in lockstep.
+  /// `NavigationSplitViewVisibility` so the chord, the toolbar toggle, and
+  /// the bound state stay in lockstep.
   private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility> {
     Binding(
       get: { store.sidebarVisible ? .all : .detailOnly },
       set: { newValue in
         let visible = (newValue != .detailOnly)
         if visible != store.sidebarVisible {
-          // Wrap the store dispatch in withAnimation so the sidebar
-          // slides instead of snapping. The native `.sidebarToggle`
-          // click animates the binding update internally, but routing
-          // through `store.send` lands the reducer mutation outside
-          // that transaction — explicit withAnimation here restores it.
-          _ = withAnimation(.easeOut(duration: 0.2)) {
-            store.send(.toggleSidebarRequested)
-          }
+          toggleSidebar()
         }
       },
     )
+  }
+
+  /// Routes every sidebar toggle (toolbar button, split-view drag collapse)
+  /// through the reducer. `withAnimation` makes the sidebar slide instead of
+  /// snap: the reducer mutation lands outside any transaction AppKit opens.
+  private func toggleSidebar() {
+    _ = withAnimation(.easeOut(duration: 0.2)) {
+      store.send(.toggleSidebarRequested)
+    }
   }
 
   enum EditorToast: Equatable {
@@ -116,7 +118,14 @@ struct ContentView: View {
         onAgentStateRowRunWorkflow: { paneID, workflowID in
           store.send(.agentState(.runWorkflowTapped(paneID, workflowID: workflowID)))
         },
+        isSidebarVisible: store.sidebarVisible,
+        onToggleSidebar: toggleSidebar,
       )
+      // App-owned toggle in place of the native one, so the tooltip can
+      // show the live Toggle Sidebar chord (#308). The sidebar view places
+      // it after its own toolbar items, where the native one sat.
+      .toolbar(removing: .sidebarToggle)
+      // Outermost: the column reads its width from the view it is given.
       .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
     } detail: {
       WorktreeDetailView(
@@ -147,6 +156,15 @@ struct ContentView: View {
         item: $store.scope(state: \.tagManagerSheet, action: \.tagManagerSheet)
       ) { tagStore in
         TagManagerSheet(store: tagStore)
+      }
+    }
+    .toolbar {
+      // Collapsed sidebar: the toggle sits next to the traffic lights, where
+      // the native one goes. Expanded, `HierarchySidebarView` shows it.
+      if !store.sidebarVisible {
+        ToolbarItem(placement: .navigation) {
+          SidebarToggleButton(isSidebarVisible: false, toggle: toggleSidebar)
+        }
       }
     }
     .environment(hierarchyManager)
