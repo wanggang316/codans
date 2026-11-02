@@ -192,10 +192,15 @@ struct CommandQueueFeatureTests {
   func selectedFilesAppendQuotedPathsWithoutSending() async {
     let recorder = Recorder()
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review" }
-    await store.send(.filesSelected([
-      URL(fileURLWithPath: "/tmp/my file.txt"),
-      URL(fileURLWithPath: "/tmp/it's.txt"),
-    ])) {
+    await store.send(
+      .filesSelected(
+        [
+          URL(fileURLWithPath: "/tmp/my file.txt"),
+          URL(fileURLWithPath: "/tmp/it's.txt"),
+        ],
+        selection: nil
+      )
+    ) {
       $0.draft = "Review '/tmp/my file.txt' '/tmp/it'\\''s.txt'"
     }
     #expect(recorder.sent.isEmpty)
@@ -206,7 +211,7 @@ struct CommandQueueFeatureTests {
   func fileSelectionPreservesTrailingNewline() async {
     let recorder = Recorder()
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review\n" }
-    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")])) {
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")], selection: nil)) {
       $0.draft = "Review\n'/tmp/报告.txt'"
     }
   }
@@ -214,7 +219,15 @@ struct CommandQueueFeatureTests {
   @Test
   func emptyAndNonFileSelectionsDoNotChangeDraft() async {
     let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Keep this" }
-    await store.send(.filesSelected([]))
-    await store.send(.filesSelected([URL(string: "https://example.com/file")!]))
+    await store.send(.filesSelected([], selection: 0..<0))
+    await store.send(.filesSelected([URL(string: "https://example.com/file")!], selection: nil))
+  }
+
+  @Test
+  func selectedFilesReplaceTheSelection() async {
+    let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Open FILE now" }
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a.txt")], selection: 5..<9)) {
+      $0.draft = "Open '/tmp/a.txt' now"
+    }
   }
 }

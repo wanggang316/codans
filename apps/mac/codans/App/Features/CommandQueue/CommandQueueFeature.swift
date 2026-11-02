@@ -98,7 +98,9 @@ struct CommandQueueFeature {
 
   enum Action: Equatable {
     case draftChanged(String)
-    case filesSelected([URL])
+    /// Picked files, and the editor's caret or selection as UTF-16 offsets
+    /// (`nil` appends to the end).
+    case filesSelected([URL], selection: Range<Int>?)
     case modeChanged(State.Mode)
     case scheduledAtChanged(Date)
     case repeatEnabledChanged(Bool)
@@ -126,15 +128,10 @@ struct CommandQueueFeature {
         state.draft = text
         return .none
 
-      case .filesSelected(let urls):
-        let paths = urls.filter(\.isFileURL)
-          .map { ShellQuoting.quoted($0.path(percentEncoded: false)) }
-          .joined(separator: " ")
-        guard !paths.isEmpty else { return .none }
-        if let last = state.draft.last, !last.isWhitespace {
-          state.draft += " "
+      case .filesSelected(let urls, let selection):
+        if let result = ComposerPathInsertion.insert(urls, into: state.draft, selection: selection) {
+          state.draft = result.text
         }
-        state.draft += paths
         return .none
 
       case .modeChanged(let mode):

@@ -119,6 +119,9 @@ struct RootFeature {
     /// than re-targeting it, so a half-typed draft can never land in a pane
     /// the user did not mean.
     @Presents var commandQueue: CommandQueueFeature.State?
+    /// Unsent Command Queue text per pane, kept while the panel is closed
+    /// and restored when it opens again on the same pane. In memory only.
+    var commandQueueDrafts: [PaneID: String] = [:]
     /// New Agent dialog (⌘⇧N, or the header's New Agent button). `nil` =
     /// hidden.
     @Presents var newAgent: NewAgentFeature.State?
@@ -231,6 +234,8 @@ struct RootFeature {
     /// binding, or crash). The root reducer resolves the pane's address
     /// and calls `hierarchyClient.closePane` to drop the catalog entry.
     case paneLifecycleExited(PaneID)
+    /// Every pane now in the catalog, from `hierarchyClient.paneMembershipChanges`.
+    case livePanesChanged(Set<PaneID>)
     /// Forwarded from `paneInfoChanged + .progress(...)` in the engine
     /// event stream. `isBusy` is true for any non-`REMOVE` OSC 9;4
     /// state. Drives the tab-chip running spinner (via
@@ -487,7 +492,7 @@ struct RootFeature {
   }
 
   nonisolated enum CancelID: Hashable, Sendable {
-    case events, selectionChanges, projectReconcileFocus, worktreeHeadWatcher
+    case events, selectionChanges, paneMembership, projectReconcileFocus, worktreeHeadWatcher
     /// FSEvents working-tree observation that refreshes the `+N −M` chip
     /// after in-pane / in-editor edits (separate from the HEAD watcher).
     case worktreeWorkingTreeWatcher
@@ -679,6 +684,7 @@ struct RootFeature {
       case .onLaunch:
         let eventStream = terminalClient.events()
         let selectionStream = hierarchyClient.selectionChanges()
+        let paneMembershipStream = hierarchyClient.paneMembershipChanges()
         // `didBecomeActive` fires every time the app window re-gains focus;
         // per-run debounce lives inside `ProjectReconciler.reconcileAll`, so
         // click storms collapse into a single scan. The notification stream
@@ -772,6 +778,13 @@ struct RootFeature {
             }
           }
           .cancellable(id: CancelID.selectionChanges, cancelInFlight: true),
+
+          .run { send in
+            for await paneIDs in paneMembershipStream {
+              await send(.livePanesChanged(paneIDs))
+            }
+          }
+          .cancellable(id: CancelID.paneMembership, cancelInFlight: true),
 
           // Initial sweep: every persisted Project transitions out of .loading
           // once the reconciler fans out against the current snapshot.
@@ -917,6 +930,7 @@ struct RootFeature {
         return .merge(
           .cancel(id: CancelID.events),
           .cancel(id: CancelID.selectionChanges),
+          .cancel(id: CancelID.paneMembership),
           .cancel(id: CancelID.projectReconcileFocus),
           .cancel(id: CancelID.periodicCleanup),
           .cancel(id: CancelID.worktreeHeadWatcher),
@@ -1253,6 +1267,18 @@ struct RootFeature {
         // No reducer state mutation — the manager writes through to the
         // catalog directly and debounces the disk save via `scheduleSave`.
         hierarchyClient.updatePaneWorkingDirectory(paneID, path)
+        return .none
+
+      case .livePanesChanged(let paneIDs):
+        // A closed pane's draft goes at once, whichever path closed it. An
+        // open panel on that pane closes too, or its next edit would save
+        // the draft again.
+        if let paneID = state.commandQueue?.paneID, !paneIDs.contains(paneID) {
+          state.commandQueue = nil
+        }
+        if state.commandQueueDrafts.keys.contains(where: { !paneIDs.contains($0) }) {
+          state.commandQueueDrafts = state.commandQueueDrafts.filter { paneIDs.contains($0.key) }
+        }
         return .none
 
       case .paneLifecycleExited(let paneID):
@@ -2012,15 +2038,29 @@ struct RootFeature {
         if state.commandQueue?.paneID == paneID {
           state.commandQueue = nil
         } else {
-          state.commandQueue = CommandQueueFeature.State(paneID: paneID)
+          var queue = CommandQueueFeature.State(paneID: paneID)
+          queue.draft = state.commandQueueDrafts[paneID] ?? ""
+          state.commandQueue = queue
         }
         return .none
 
-      case .commandQueue(.presented(.delegate(.submitted))), .commandQueue(.dismiss):
+      case .commandQueue(.presented(.delegate(.submitted))):
+        if let paneID = state.commandQueue?.paneID {
+          state.commandQueueDrafts[paneID] = nil
+        }
         state.commandQueue = nil
         return .none
 
-      case .commandQueue:
+      case .commandQueue(.dismiss):
+        state.commandQueue = nil
+        return .none
+
+      case .commandQueue(.presented):
+        // The child reducer has run, so this is the edited text. Saving on
+        // every edit covers each way the panel closes.
+        if let queue = state.commandQueue {
+          state.commandQueueDrafts[queue.paneID] = queue.draft.isEmpty ? nil : queue.draft
+        }
         return .none
 
       case .newAgentRequested, .newAgent:

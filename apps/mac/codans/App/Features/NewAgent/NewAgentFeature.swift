@@ -180,6 +180,9 @@ struct NewAgentFeature {
     case agentProfilesChanged([AgentProfile])
     case agentSelected(UUID)
     case promptChanged(String)
+    /// Picked files, and the prompt's caret or selection as UTF-16 offsets
+    /// (`nil` appends to the end).
+    case filesSelected([URL], selection: Range<Int>?)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -248,6 +251,12 @@ struct NewAgentFeature {
 
       case .promptChanged(let prompt):
         state.prompt = prompt
+        return .none
+
+      case .filesSelected(let urls, let selection):
+        if let result = ComposerPathInsertion.insert(urls, into: state.prompt, selection: selection) {
+          state.prompt = result.text
+        }
         return .none
 
       case .sendTapped:
