@@ -25,10 +25,9 @@ struct HierarchySidebarView: View {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
   let currentSelection: HierarchySelection
   /// The creation the detail pane is following (`RootFeature.
-  /// activePendingWorktreeID`). The matching pending row paints a manual
-  /// accent "selected" background — pending rows carry no `.tag`, so the
-  /// native List selection can't highlight them, but the sidebar must
-  /// still show WHERE the focus is while the loading view is up.
+  /// activePendingWorktreeID`). Feeds the native List selection (see
+  /// `nativeSelectionBinding`) so the matching pending row shows WHERE the
+  /// focus is while the loading view is up.
   /// Nil when no creation is being followed (previews / tests included).
   var activePendingWorktreeID: PendingWorktreeID?
   /// Bumped by `RootFeature.revealCurrentWorktreeInSidebarRequested` (⌘⇧J).
@@ -144,7 +143,7 @@ struct HierarchySidebarView: View {
   /// instead of painting `.listRowBackground` ourselves. Setter dispatches
   /// the existing `worktreeRowTapped` action so all the side-effects
   /// (selectedProjectID propagation, hooks, etc.) fire identically to a tap.
-  private var nativeSelectionBinding: Binding<WorktreeID?> {
+  private var nativeSelectionBinding: Binding<SidebarSelection?> {
     Binding(
       get: {
         // Read live from `hierarchyManager.catalog` rather than from the
@@ -160,13 +159,26 @@ struct HierarchySidebarView: View {
         // `worktreeRowTapped` land in the same tick the binding's `get`
         // is re-evaluated.
         let catalog = hierarchyManager.catalog
-        guard let pid = catalog.selectedProjectID,
-          let project = catalog.projects.first(where: { $0.id == pid })
-        else { return nil }
-        return project.selectedWorktreeID
+        let selectedWorktreeID = catalog.selectedProjectID.flatMap { pid in
+          catalog.projects.first(where: { $0.id == pid })?.selectedWorktreeID
+        }
+        return SidebarSelection.resolve(
+          selectedWorktreeID: selectedWorktreeID,
+          activePendingWorktreeID: activePendingWorktreeID
+        )
       },
-      set: { newValue in
-        guard let newValue else { return }
+      set: { selection in
+        let newValue: WorktreeID
+        switch selection {
+        case nil:
+          return
+        case .pending(let pendingID):
+          // RootFeature re-arms the loading focus for the creation.
+          store.send(.pendingWorktreeRowTapped(pendingID))
+          return
+        case .worktree(let worktreeID):
+          newValue = worktreeID
+        }
         guard
           let project = hierarchyManager.catalog.projects
             .first(where: { project in
@@ -937,7 +949,7 @@ struct HierarchySidebarView: View {
       }
       // Tagged like a worktree row: the native List selection paints its
       // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
-      .tag(root.id)
+      .tag(SidebarSelection.worktree(root.id))
       .id(root.id)
       .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
       .listRowSeparator(.hidden)
@@ -1030,7 +1042,7 @@ struct HierarchySidebarView: View {
         .background(alignment: .topLeading) {
           hotkeyChord(hotkeyNumber, worktreeID: terminal.id, projectID: project.id)
         }
-        .tag(terminal.id)
+        .tag(SidebarSelection.worktree(terminal.id))
         .id(terminal.id)
         .contextMenu { worktreeContextMenu(worktree: terminal, project: project) }
     } else {
@@ -1079,44 +1091,25 @@ struct HierarchySidebarView: View {
 
   // MARK: - Pending row
 
-  /// Wires task03's `PendingWorktreeRow` into the segment ForEach with
+  /// Wires `PendingWorktreeRow` into the segment ForEach with
   /// Cancel / Retry / Discard handlers dispatched to the lifecycle reducer.
-  @ViewBuilder
   private func pendingRow(_ pending: PendingWorktree) -> some View {
-    let isHighlighted = pending.id == activePendingWorktreeID
     PendingWorktreeRow(
       pending: pending,
-      isHighlighted: isHighlighted,
       onCancel: { store.send(.pendingWorktreeCancelTapped(pending.id)) },
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
-    // Pending rows carry no `.tag`, so the native List selection can't
-    // bring the user back to a creation they navigated away from — this
-    // gesture is that way back (RootFeature re-arms the loading focus).
-    // Right-click still opens the row's context menu. `.isButton` tells
-    // assistive tech the row is activatable despite not being a Button.
-    .onTapGesture { store.send(.pendingWorktreeRowTapped(pending.id)) }
-    .accessibilityAddTraits(.isButton)
+    // Selectable like a worktree row: the native source-list selection paints
+    // the highlight (same inset, corner radius, and focus-aware emphasis), and
+    // selecting the row brings the user back to the creation.
+    .tag(SidebarSelection.pending(pending.id))
     // Match the worktree row's `listRowInsets` so the spinner + name line up
     // with sibling worktree rows. Without this the row renders flush-left:
     // the child indent lives in `leading: 14` (see `worktreeRow`), not in
     // the outline view, whose own indentation is zeroed.
     .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
-    // Manual "selected" pill while the detail pane follows this creation.
-    // Approximates the native source-list emphasized selection (accent
-    // fill, rounded, inset from the row edges); `PendingWorktreeRow` flips
-    // its content to the light selected-row tones via `isHighlighted`.
-    .listRowBackground(
-      Group {
-        if isHighlighted {
-          RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(Color.accentColor)
-            .padding(.horizontal, 4)
-        }
-      }
-    )
   }
 
   // MARK: - Worktree row
@@ -1180,7 +1173,7 @@ struct HierarchySidebarView: View {
     // Leading 14 is the +8pt visual indent over the project row's own
     // leading inset, so worktree content reads as a child level under the
     // (left-aligned) project header.
-    .tag(worktree.id)
+    .tag(SidebarSelection.worktree(worktree.id))
     .listRowInsets(EdgeInsets(top: 2, leading: indent, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     .contextMenu { worktreeContextMenu(worktree: worktree, project: project) }
