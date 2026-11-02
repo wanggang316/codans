@@ -25,7 +25,10 @@ struct AgentRuntimeAdapterTests {
 
   @Test
   func programStatusAppCoversVerifiedProducersOnly() {
-    let verified: [AgentKind: String] = [.claudeCode: "claude-code", .pi: "pi", .omp: "omp"]
+    let verified: [AgentKind: String] = [
+      .claudeCode: "claude-code", .codex: "codex", .pi: "pi", .omp: "omp",
+      .opencode: "opencode", .droid: "droid",
+    ]
     for kind in AgentKind.allCases {
       #expect(AgentRuntimeAdapters.adapter(for: kind).programStatusApp == verified[kind])
     }
