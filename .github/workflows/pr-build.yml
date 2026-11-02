@@ -1,0 +1,89 @@
+name: pr-build
+
+# Build every pull request with the same Xcode as the release pipelines
+# (Xcode 26.0, the supported floor), so a change that only the floor
+# toolchain rejects fails on the PR instead of on main. Local development
+# uses a newer Xcode, which accepts code that Xcode 26.0 does not (for
+# example, expressions that time out in the Swift 6.2 type checker).
+#
+# The build matches `release.sh archive` (Release, arm64, generic macOS)
+# without signing, so it needs no secrets.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/mac/**"
+      - "mise.toml"
+      - ".github/workflows/pr-build.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      # Same pin and reason as release.yml.
+      - name: Pin Xcode 26.0
+        run: |
+          XCODE_DEV=/Applications/Xcode_26.0.app/Contents/Developer
+          [ -d "$XCODE_DEV" ] || { echo "::error::$XCODE_DEV missing on this runner image"; exit 1; }
+          sudo xcode-select -s "$XCODE_DEV"
+          echo "DEVELOPER_DIR=$XCODE_DEV" >> "$GITHUB_ENV"
+          xcodebuild -version
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+          experimental: true
+
+      - name: Capture Xcode version for cache keys
+        run: |
+          XCODE_VERSION="$(xcodebuild -version | tr '\n' '-' | sed 's/[^A-Za-z0-9._-]/_/g; s/-$//')"
+          GHOSTTY_SHA="$(git -C apps/mac/ThirdParty/ghostty rev-parse HEAD)"
+          echo "XCODE_VERSION=$XCODE_VERSION" >> "$GITHUB_ENV"
+          echo "GHOSTTY_SHA=$GHOSTTY_SHA"     >> "$GITHUB_ENV"
+
+      # Same keys as release-tip.yml, so a PR reuses the caches that main
+      # builds wrote.
+      - name: Cache GhosttyKit XCFramework
+        uses: actions/cache@v4
+        with:
+          path: apps/mac/.build/ghostty
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ env.GHOSTTY_SHA }}-${{ hashFiles('apps/mac/scripts/build-ghostty.sh', 'apps/mac/scripts/xcode-compat/**', 'mise.toml') }}
+
+      - name: Cache Tuist SPM checkouts
+        uses: actions/cache@v4
+        with:
+          path: apps/mac/Tuist/.build
+          key: tuist-spm-${{ runner.os }}-${{ hashFiles('apps/mac/Tuist/Package.swift', 'apps/mac/Tuist/Package.resolved') }}
+
+      - name: Generate project and build zmx
+        run: make mac-generate mac-build-zmx
+
+      - name: Build Codans (Release, unsigned)
+        working-directory: apps/mac
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace codans.xcworkspace \
+            -scheme Codans \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | mise exec -- xcbeautify
