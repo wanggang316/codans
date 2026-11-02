@@ -10,41 +10,7 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **Hidden panes give memory back sooner, and you can turn it off.** When
-  macOS reports memory pressure, Codans releases the terminal views of
-  hidden panes at once instead of after 20 minutes. Panes in the selected
-  tab of the three most recently used worktrees stay ready. Settings →
-  General → Memory → "Release terminal views of hidden panes" turns the
-  release off. The shell keeps running either way.
-- **Agents in panes you have not opened stay current.** An agent in a pane
-  restored at launch, or in a hidden pane whose terminal was released, still
-  updates its Agents View row when it reports its own state (OSC 7501), and
-  its notifications and title still arrive. Such an agent's hidden pane can
-  release its terminal mid-task too; an agent that does not report its own
-  state keeps its terminal until its turn ends. When such a
-  pane's session ends, its row goes away within about two seconds, so a
-  sleeping row is always a running agent. `agent status` reports
-  `source: cached` for a sleeping row whose state comes from a screen
-  nobody is reading.
-- **Attach files in New Agent.** The New Agent sheet has the same paperclip
-  button as the Command Queue. It inserts the shell-quoted paths of the
-  picked files into the prompt.
-
 ### Changed
-
-- **Picked file paths go where you type.** In New Agent and the Command
-  Queue, picked paths go in at the caret or replace the selected text, with
-  a space added where a neighbor is not whitespace. On macOS 14 they still
-  go at the end.
-- **The Command Queue keeps unsent text.** Text typed in the Command Queue
-  comes back when the panel opens again on the same pane, after Escape, ⌘L,
-  opening the queue on another pane, or opening New Agent. Sending the entry
-  or closing the pane clears it. The text is not kept after a restart.
-- **Toggle Sidebar is now ⌘/, and the sidebar button shows it.** The default
-  shortcut moves from ⌥⌘S to ⌘/ in the main window and the Diff window. A
-  shortcut you set yourself stays. Hover the sidebar button to see the
-  current shortcut ("Hide Sidebar ⌘ /"); the tooltip follows changes in
-  Settings at once. Toggle Sidebar moves to Settings → Shortcuts → General.
 
 ### Deprecated
 
@@ -52,32 +18,37 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
-- **A sleeping agent's last known state no longer looks live.** When the
-  Agents View cannot observe an agent (its pane has no terminal view and the
-  agent does not report its own status), the state icon is dimmed and does
-  not animate, so a restored "working" does not read as work in progress.
-- **`pane send` / `pane capture` reach agents in tabs that are not open.**
-  A pane restored from the last session whose tab was not opened yet, or a
-  pane hidden long enough to have its terminal view released, still runs.
-  Terminal commands now attach it first instead of failing with
-  `NOT_FOUND`, and `pane read` / `pane info` answer for it too.
-  `pane send --capture` on such a pane compares the pane's own screen
-  before and after, so the old screen never shows up as output.
-  If that screen cannot be read, nothing is sent; if it cannot be read
-  after the command ran, the error says the text was sent.
-- **Agents View shows sleeping agents.** An agent whose pane has no
-  terminal view (restored and not opened yet, or idle long enough to have
-  its view released) still runs, but Codans does not watch it. Its row now
-  shows a sleep glyph next to its last known state; clicking the row wakes
-  it.
-- **`agent status` and `pane show` tell which panes are observed.** Rows
-  now have `isLive` (the terminal runs) and `isAttached` (Codans shows and
-  watches it). A sleeping row keeps its last known state and shows
-  `(sleeping)`. A pane whose terminal no longer runs shows `(not live)`, and
-  terminal commands on it fail with `PANE_NOT_LIVE` (exit 3); an unknown id
-  is still `NOT_FOUND`.
-
 ### Security
+
+## [0.9.2] - 2026-11-02
+
+### Added
+
+- **Hidden panes give memory back sooner, and you can turn it off.** Under
+  memory pressure, terminal views of hidden panes are released at once; recent
+  worktrees stay ready. Settings → General → Memory turns this off.
+- **Sleeping agents stay visible and reachable.** An agent whose pane has no
+  terminal view keeps its Agents View row with a sleep glyph; click to wake it.
+  `pane send`, `pane capture`, and `agent status` work on it too.
+- **Attach files in New Agent.** It has the Command Queue's paperclip, picked
+  paths go in at the caret, and the Command Queue keeps unsent text until you
+  send it or close the pane.
+
+### Changed
+
+- **Toggle Sidebar is now ⌘/.** The sidebar button's tooltip shows the
+  current shortcut. A shortcut you set yourself stays.
+- **The selected tab looks like a system tab.** On macOS 26 it is drawn with
+  the system tab glass and matches Safari's height, hover, and drag.
+
+### Fixed
+
+- **PR badges stay current in every project.** All projects refresh while
+  the app is in front, and a PR an agent pushes or opens shows in seconds.
+- **Closing panes and tabs is steadier.** A crash after closing a pane is
+  gone, and closing the shown tab no longer flashes the window.
+- **Back and Forward always show where you land.** The sidebar switches to
+  All when the current category does not list that worktree.
 
 ## [0.9.1] - 2026-10-31
 
