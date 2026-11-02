@@ -32,3 +32,10 @@ status, or from the screen when the agent does not report.
 OSC 7501 `message`, or the pane's OSC 0/2 title when there is no message. It is
 for display only and does not change the runtime state.
 _Avoid_: OSC status, because OSC 7501 also carries the runtime state.
+
+## Sidebar
+
+**Project order**: The user-curated sequence of Projects in the sidebar. It is
+the order of `catalog.projects`; the user changes it by dragging a Project
+block. See [ADR 0001](docs/adr/0001-project-order-is-manual-only.md).
+_Avoid_: sort mode, join order, manual order.
