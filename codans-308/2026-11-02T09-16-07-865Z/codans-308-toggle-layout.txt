@@ -1,0 +1,39 @@
+# Main window sidebar toggle — native baseline (main @ older Debug build)
+== visible
+AXMenuButton desc="Add Project" title="Add Project" help="Add Project" id=plus @194,38 36x36
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar" id= @234,30 44x52
+== hidden
+AXMenuButton desc="Add Project" title="Add Project" help="Add Project" id=plus @92,38 36x36
+AXButton desc="Show Sidebar" title="" help="Show Sidebar" id= @132,30 44x52
+
+# Main window sidebar toggle — this branch (e5e6584a)
+== visible
+AXMenuButton desc="Add Project" title="Add Project" help="Add Project" id=plus @194,38 36x36
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar ⌘ /" id=sidebar.toggle @238,30 40x52
+== hidden
+AXMenuButton desc="Add Project" title="Add Project" help="Add Project" id=plus @92,38 36x36
+AXButton desc="Show Sidebar" title="" help="Show Sidebar ⌘ /" id=sidebar.toggle @128,30 44x52
+
+# Diff window — native baseline
+9040 310 118 1300 700 fixture — feat/header-redesign
+9038 0 30 1341 1050 Codans
+== diff visible
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar" id= @522,118 44x52
+AXButton desc="Show Sidebar" title="" help="Show Sidebar" id= @132,30 44x52
+AXRadioGroup desc="Diff Layout" title="" help="Diff layout" id=diff-layout @1477,126 81x36
+== diff hidden
+AXButton desc="Show Sidebar" title="" help="Show Sidebar" id= @132,30 44x52
+AXButton desc="Show Sidebar" title="" help="Show Sidebar" id= @402,118 44x52
+AXRadioGroup desc="Diff Layout" title="" help="Diff layout" id=diff-layout @1477,126 81x36
+
+# Diff window — this branch
+9055 310 118 1300 700 fixture — feat/header-redesign
+9052 0 30 1341 1050 Codans
+== diff visible
+AXButton desc="Hide Sidebar" title="" help="Hide Sidebar ⌘ /" id=sidebar.toggle @522,118 44x52
+AXButton desc="Show Sidebar" title="" help="Show Sidebar ⌘ /" id=sidebar.toggle @128,30 44x52
+AXRadioGroup desc="Diff Layout" title="" help="Diff layout" id=diff-layout @1477,126 81x36
+== diff hidden
+AXButton desc="Show Sidebar" title="" help="Show Sidebar ⌘ /" id=sidebar.toggle @128,30 44x52
+AXButton desc="Show Sidebar" title="" help="Show Sidebar ⌘ /" id=sidebar.toggle @402,118 44x52
+AXRadioGroup desc="Diff Layout" title="" help="Diff layout" id=diff-layout @1477,126 81x36
