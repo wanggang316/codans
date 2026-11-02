@@ -288,6 +288,41 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_0), modifiers: [.control])
     ),
+    .init(
+      id: .selectSidebarFilterAll,
+      title: "Show All in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_1), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterRemote,
+      title: "Show Remote in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_2), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterWorkspace,
+      title: "Show Workspace in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_3), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterPullRequests,
+      title: "Show PRs in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_4), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterUnread,
+      title: "Show Unread in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_5), modifiers: [.command, .control])
+    ),
   ]
 
   private static let terminalEntries: [Entry] = [

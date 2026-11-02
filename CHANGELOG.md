@@ -10,6 +10,8 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **Switch the sidebar filter with ⌃⌘1…⌃⌘5.** All, Remote, Workspace, PR,
+  and Unread, in the order the filter bar shows them.
 - **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9
   focus the pane of the first nine agents in the list. Rebind them under
   Settings → Shortcuts → Agents.

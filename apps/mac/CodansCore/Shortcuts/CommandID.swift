@@ -92,6 +92,13 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case selectWorktreeAt9
   case selectWorktreeAt10
 
+  // Sidebar filter bar, in `SidebarFilter.allCases` order.
+  case selectSidebarFilterAll
+  case selectSidebarFilterRemote
+  case selectSidebarFilterWorkspace
+  case selectSidebarFilterPullRequests
+  case selectSidebarFilterUnread
+
   // Agents View row hotkeys.
   case focusAgentAt1
   case focusAgentAt2
@@ -158,6 +165,17 @@ extension CommandID {
     case 8: return .focusAgentAt8
     case 9: return .focusAgentAt9
     default: return nil
+    }
+  }
+
+  /// The command that selects `filter` in the sidebar filter bar.
+  public static func selectSidebarFilter(_ filter: SidebarFilter) -> CommandID {
+    switch filter {
+    case .all: return .selectSidebarFilterAll
+    case .remote: return .selectSidebarFilterRemote
+    case .workspace: return .selectSidebarFilterWorkspace
+    case .pullRequests: return .selectSidebarFilterPullRequests
+    case .notifications: return .selectSidebarFilterUnread
     }
   }
 }

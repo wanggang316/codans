@@ -2651,6 +2651,7 @@ private struct SidebarFilterBar: View {
   var onSelect: (SidebarFilter) -> Void
   var onMarkAllNotificationsRead: () -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   @State private var hoveredFilter: SidebarFilter?
 
@@ -2739,8 +2740,9 @@ private struct SidebarFilterBar: View {
           .disabled(!hasUnreadNotifications)
       }
     }
+    .appKeyboardShortcut(CommandID.selectSidebarFilter(filter), in: resolvedShortcuts)
     .onHover { hoveredFilter = $0 ? filter : nil }
-    .help(title)
+    .help(ShortcutDisplay.tooltip(title, for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts))
     .accessibilityLabel(title)
     .accessibilityAddTraits(selected ? .isSelected : [])
   }

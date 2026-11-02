@@ -5,7 +5,7 @@
 
 ## 背景与范围
 
-codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
+codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
 
 按住 ⌘ 约 1 秒后，Tab、侧栏行与 Agents View 行在尾部显示各自的和弦（`ShortcutHintLabel`：系统字体 `.caption`、`.secondary` 纯文本、无键帽边框）。和弦从解析后的绑定读取，改键或禁用会同步反映。`CommandKeyObserver` 在 `Animation.shortcutHint`（0.16 s easeOut）中翻转标志，提示以 `.blurReplace` 过渡出现与消失；侧栏与 Agents View 一次出现整列提示，用更快的 `shortcutHintFast`（0.08 s）；开启“减弱动态效果”时不做动画。
 
