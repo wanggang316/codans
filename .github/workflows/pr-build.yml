@@ -99,6 +99,34 @@ jobs:
       - name: Generate project and build zmx
         run: make mac-generate mac-build-zmx
 
+      # Xcode compilation caching keeps compiler outputs in a content-
+      # addressed store (CAS) under DerivedData. Restoring it lets a run
+      # reuse every unchanged module (measured locally: cold 368 s, warm
+      # 35 s, one app file changed 112 s). Only runs on main save it: one
+      # entry is about 1 GB, and per-PR entries would push the GhosttyKit
+      # cache out of the repository cache quota.
+      - name: Restore compilation cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/DerivedData/CompilationCache.noindex
+          key: xcode-cas-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            xcode-cas-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-
+
+      # The store only grows. Start again when it passes 3 GB, so the saved
+      # entry stays small enough to restore quickly.
+      - name: Limit compilation cache size
+        run: |
+          CAS="$RUNNER_TEMP/DerivedData/CompilationCache.noindex"
+          if [ -d "$CAS" ]; then
+            SIZE_KB="$(du -sk "$CAS" | awk '{print $1}')"
+            echo "Compilation cache: $((SIZE_KB / 1024)) MB"
+            if [ "$SIZE_KB" -gt $((3 * 1024 * 1024)) ]; then
+              echo "Compilation cache is over 3 GB; starting from empty."
+              rm -rf "$CAS"
+            fi
+          fi
+
       - name: Build Codans (Release, unsigned)
         working-directory: apps/mac
         # xcbeautify drops some failures (for example a compiler crash) with
@@ -111,12 +139,21 @@ jobs:
             -scheme Codans \
             -configuration Release \
             -destination "generic/platform=macOS" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
+            COMPILATION_CACHE_ENABLE_CACHING=YES \
             | tee "$RAW_LOG" | mise exec -- xcbeautify || {
               echo "::group::Errors from the raw xcodebuild log"
               grep -nE -B2 -A12 "error:|Stack dump|PLEASE submit a bug report|Command SwiftCompile failed|signal" "$RAW_LOG" | head -400
               echo "::endgroup::"
               exit 1
             }
+
+      - name: Save compilation cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/DerivedData/CompilationCache.noindex
+          key: xcode-cas-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODE_VERSION }}-${{ github.sha }}
