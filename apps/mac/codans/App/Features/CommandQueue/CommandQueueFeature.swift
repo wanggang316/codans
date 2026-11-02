@@ -16,6 +16,9 @@ struct CommandQueueFeature {
     /// re-opening on another pane replaces the whole state.
     let paneID: PaneID
     var draft: String = ""
+    /// Last caret or selection in the editor, as UTF-16 offsets. `nil`
+    /// until the editor reports one; picked files then go at the end.
+    var draftSelection: Range<Int>?
     var mode: Mode = .afterCurrentTask
     /// First (or only) fire time for `.scheduled`. Seeded a few minutes out
     /// so the date picker opens on a plausible value rather than "now",
@@ -98,6 +101,7 @@ struct CommandQueueFeature {
 
   enum Action: Equatable {
     case draftChanged(String)
+    case draftSelectionChanged(Range<Int>)
     case filesSelected([URL])
     case modeChanged(State.Mode)
     case scheduledAtChanged(Date)
@@ -126,15 +130,17 @@ struct CommandQueueFeature {
         state.draft = text
         return .none
 
+      case .draftSelectionChanged(let range):
+        state.draftSelection = range
+        return .none
+
       case .filesSelected(let urls):
-        let paths = urls.filter(\.isFileURL)
-          .map { ShellQuoting.quoted($0.path(percentEncoded: false)) }
-          .joined(separator: " ")
-        guard !paths.isEmpty else { return .none }
-        if let last = state.draft.last, !last.isWhitespace {
-          state.draft += " "
-        }
-        state.draft += paths
+        guard
+          let result = ComposerPathInsertion.insert(
+            urls, into: state.draft, selection: state.draftSelection)
+        else { return .none }
+        state.draft = result.text
+        state.draftSelection = result.selection
         return .none
 
       case .modeChanged(let mode):
@@ -187,6 +193,7 @@ struct CommandQueueFeature {
           )
         }
         state.draft = ""
+        state.draftSelection = nil
         return .send(.delegate(.submitted))
 
       case .delegate:

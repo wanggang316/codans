@@ -119,6 +119,9 @@ struct RootFeature {
     /// than re-targeting it, so a half-typed draft can never land in a pane
     /// the user did not mean.
     @Presents var commandQueue: CommandQueueFeature.State?
+    /// Unsent Command Queue text per pane, kept while the panel is closed
+    /// and restored when it opens again on the same pane. In memory only.
+    var commandQueueDrafts: [PaneID: String] = [:]
     /// New Agent dialog (⌘⇧N, or the header's New Agent button). `nil` =
     /// hidden.
     @Presents var newAgent: NewAgentFeature.State?
@@ -1082,6 +1085,7 @@ struct RootFeature {
 
       case .catalogMembershipChanged:
         let catalog = hierarchyClient.snapshot()
+        pruneCommandQueueDrafts(&state, in: catalog)
         // Live keys are Projects plus every fetch unit a workspace derives
         // from its member repositories; the prune must keep those too.
         var projectIDs = Set(catalog.projects.map(\.id))
@@ -1259,6 +1263,7 @@ struct RootFeature {
         // A pane that exits mid-command never emits its trailing git-edge,
         // so drop any tracked running-state to keep the set bounded.
         state.panesRunningGitCommand.remove(paneID)
+        state.commandQueueDrafts[paneID] = nil
         // Resolve the pane's address from the live catalog (the engine
         // already unregistered the surface, but the catalog still holds
         // the Pane entity here). Address can be nil if a racing teardown
@@ -2012,15 +2017,30 @@ struct RootFeature {
         if state.commandQueue?.paneID == paneID {
           state.commandQueue = nil
         } else {
-          state.commandQueue = CommandQueueFeature.State(paneID: paneID)
+          pruneCommandQueueDrafts(&state)
+          var queue = CommandQueueFeature.State(paneID: paneID)
+          queue.draft = state.commandQueueDrafts[paneID] ?? ""
+          state.commandQueue = queue
         }
         return .none
 
-      case .commandQueue(.presented(.delegate(.submitted))), .commandQueue(.dismiss):
+      case .commandQueue(.presented(.delegate(.submitted))):
+        if let paneID = state.commandQueue?.paneID {
+          state.commandQueueDrafts[paneID] = nil
+        }
         state.commandQueue = nil
         return .none
 
-      case .commandQueue:
+      case .commandQueue(.dismiss):
+        state.commandQueue = nil
+        return .none
+
+      case .commandQueue(.presented):
+        // The child reducer has run, so this is the edited text. Saving on
+        // every edit covers each way the panel closes.
+        if let queue = state.commandQueue {
+          state.commandQueueDrafts[queue.paneID] = queue.draft.isEmpty ? nil : queue.draft
+        }
         return .none
 
       case .newAgentRequested, .newAgent:
@@ -3138,6 +3158,17 @@ struct RootFeature {
       }
       await send(.worktreeAgentLaunchFinished(worktreeID, failure: failure))
     }
+  }
+
+  /// Drops Command Queue drafts of panes that are gone. A pane can close
+  /// in many ways (exit, tab close, worktree removal) and not all of them
+  /// reach this reducer, so the drafts are also checked against the catalog.
+  private func pruneCommandQueueDrafts(_ state: inout State, in catalog: Catalog? = nil) {
+    guard !state.commandQueueDrafts.isEmpty else { return }
+    let catalog = catalog ?? hierarchyClient.snapshot()
+    let livePaneIDs = Set(
+      catalog.projects.flatMap { $0.worktrees.flatMap { $0.tabs.flatMap { $0.panes.map(\.id) } } })
+    state.commandQueueDrafts = state.commandQueueDrafts.filter { livePaneIDs.contains($0.key) }
   }
 
   /// Opens the New Agent dialog on the selected project, or closes it.

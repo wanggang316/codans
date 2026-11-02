@@ -197,6 +197,7 @@ struct CommandQueueFeatureTests {
       URL(fileURLWithPath: "/tmp/it's.txt"),
     ])) {
       $0.draft = "Review '/tmp/my file.txt' '/tmp/it'\\''s.txt'"
+      $0.draftSelection = $0.draft.utf16.count..<$0.draft.utf16.count
     }
     #expect(recorder.sent.isEmpty)
     #expect(recorder.queue.isEmpty)
@@ -208,6 +209,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review\n" }
     await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")])) {
       $0.draft = "Review\n'/tmp/报告.txt'"
+      $0.draftSelection = $0.draft.utf16.count..<$0.draft.utf16.count
     }
   }
 
@@ -216,5 +218,32 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Keep this" }
     await store.send(.filesSelected([]))
     await store.send(.filesSelected([URL(string: "https://example.com/file")!]))
+  }
+
+  @Test
+  func selectedFilesReplaceSelectionAndMoveCaret() async {
+    let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Open FILE now" }
+    await store.send(.draftSelectionChanged(5..<9)) {
+      $0.draftSelection = 5..<9
+    }
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a.txt")])) {
+      $0.draft = "Open '/tmp/a.txt' now"
+      $0.draftSelection = 17..<17
+    }
+  }
+
+  @Test
+  func submitClearsRecordedCaret() async {
+    let paneID = PaneID()
+    let recorder = Recorder()
+    let store = Self.makeStore(paneID: paneID, recorder: recorder) {
+      $0.draft = "echo hi"
+      $0.draftSelection = 7..<7
+    }
+    await store.send(.submitted) {
+      $0.draft = ""
+      $0.draftSelection = nil
+    }
+    await store.receive(.delegate(.submitted))
   }
 }
