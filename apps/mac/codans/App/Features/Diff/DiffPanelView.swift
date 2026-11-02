@@ -37,19 +37,15 @@ struct DiffPanelView: View {
     ) {
       DiffFileSidebar(store: store)
         // App-owned toggle in place of the native one, so the tooltip can show the live
-        // Toggle Sidebar chord (#308). Expanded, it trails the sidebar's toolbar section
-        // like the native one.
+        // Toggle Sidebar chord (#308). It trails the sidebar's toolbar section like the
+        // native one.
         .toolbar(removing: .sidebarToggle)
         .toolbar {
           // Nothing else pins this section to the sidebar's trailing edge.
-          if store.sidebarVisible, #available(macOS 26.0, *) {
+          if #available(macOS 26.0, *) {
             ToolbarSpacer(.flexible, placement: .primaryAction)
           }
-          if store.sidebarVisible {
-            ToolbarItem(placement: .primaryAction) {
-              SidebarToggleButton(isSidebarVisible: true, toggle: toggleSidebar)
-            }
-          }
+          SidebarToggleToolbarItem(isSidebarVisible: store.sidebarVisible, toggle: toggleSidebar)
         }
         // Outermost: the column reads its width from the view it is given.
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 600)
@@ -65,14 +61,6 @@ struct DiffPanelView: View {
         }
       }
       .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-    }
-    .toolbar {
-      // Collapsed sidebar: next to the traffic lights, where the native toggle goes.
-      if !store.sidebarVisible {
-        ToolbarItem(placement: .navigation) {
-          SidebarToggleButton(isSidebarVisible: false, toggle: toggleSidebar)
-        }
-      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .toolbar { DiffWindowToolbar(store: store) }

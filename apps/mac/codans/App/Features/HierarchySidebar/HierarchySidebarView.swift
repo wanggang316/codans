@@ -559,16 +559,9 @@ struct HierarchySidebarView: View {
       .help("Add Project")
     }
     // Declared after `+` so it keeps the native toggle's slot: last in the
-    // expanded sidebar's toolbar section. The host places it next to the
-    // traffic lights while the sidebar is collapsed.
-    if isSidebarVisible, let onToggleSidebar {
-      if #available(macOS 26.0, *) {
-        // Separate glass capsule, as the native toggle had.
-        ToolbarSpacer(.fixed, placement: .primaryAction)
-      }
-      ToolbarItem(placement: .primaryAction) {
-        SidebarToggleButton(isSidebarVisible: true, toggle: onToggleSidebar)
-      }
+    // sidebar's toolbar section, in both sidebar states.
+    if let onToggleSidebar {
+      SidebarToggleToolbarItem(isSidebarVisible: isSidebarVisible, toggle: onToggleSidebar)
     }
   }
 

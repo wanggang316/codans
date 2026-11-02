@@ -158,20 +158,6 @@ struct ContentView: View {
         TagManagerSheet(store: tagStore)
       }
     }
-    .toolbar {
-      // Collapsed sidebar: the toggle sits next to the traffic lights, where
-      // the native one goes. Expanded, `HierarchySidebarView` shows it.
-      // The native toggle keeps a wider gap after `+`; a fixed spacer
-      // matches it.
-      if !store.sidebarVisible, #available(macOS 26.0, *) {
-        ToolbarSpacer(.fixed)
-      }
-      if !store.sidebarVisible {
-        ToolbarItem(placement: .navigation) {
-          SidebarToggleButton(isSidebarVisible: false, toggle: toggleSidebar)
-        }
-      }
-    }
     .environment(hierarchyManager)
     .environment(agentStateStore)
     .environment(
