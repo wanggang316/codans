@@ -77,6 +77,10 @@ final class FSEventsTreeWatcher<Key: Hashable & Sendable> {
     self.streamStarter = streamStarter
   }
 
+  // Swift 6.2 (Xcode 26.0) crashes in IRGen on the synthesized deinit of
+  // this generic main-actor class. An explicit deinit avoids that path.
+  deinit {}
+
   /// Single subscriber. Each call replaces the prior stream; the previous
   /// one finishes so the consuming `for await` loop exits.
   func events() -> AsyncStream<Key> {
