@@ -144,7 +144,7 @@ struct PaneShow: AsyncParsableCommand {
   }
 
   private static func lines(_ d: IPC.PaneDescription) -> [(String, String)] {
-    [
+    var lines: [(String, String)] = [
       ("pane", d.id + (d.handle.map { "  (\($0))" } ?? "")),
       ("cwd", d.workingDirectory),
       ("command", d.initialCommand ?? "(default shell)"),
@@ -156,7 +156,11 @@ struct PaneShow: AsyncParsableCommand {
       ("project", d.projectID),
       ("focused", d.isFocused ? "yes" : "no"),
       ("live", d.isLive ? "yes" : "no"),
-    ] + (d.isAttached.map { [("attached", $0 ? "yes" : "no")] } ?? [])
+    ]
+    if let isAttached = d.isAttached {
+      lines.append(("attached", isAttached ? "yes" : "no"))
+    }
+    return lines
   }
 }
 
