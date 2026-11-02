@@ -277,7 +277,7 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 每行：
 - 左侧 20pt agent logo（资源缺失回落到 SF Symbol）；右侧是睡眠标记（见「IPC 与 CLI」）与状态图标。
 - **身份行**：worktree 名 + project 名（project 色、Server 项目的 remote 标记），两者中段截断；解析不到来源时显示 em-dash `—`（catalog 已移除该 Pane 的「ghost」行）。
-- **`normal`（两行）**：第一行是活动文本，第二行是身份行。**`compact`（一行）** 只显示身份行，不显示活动文本。
+- **`normal`（两行）**：第一行是活动文本，第二行是身份行。两行都是常规字重；第二行的 worktree 名比第一行小一号、用次级色。**`compact`（一行）** 只显示身份行，不显示活动文本。
 - **活动文本**取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 Pane 的 OSC 0/2 标题（存储前已净化，见「程序状态（OSC 7501）」）。空白、或仅为 agent 名称的文本（`AgentActivityFormat.isRedundantActivityTitle`）视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
 - **更新节奏。** 只有 `AgentActivityLine` 读取活动文本，所以变化只重绘这一行。每行经 `AgentActivityPresentation` 合并一秒内的变化，只交付最新值；行出现时的首个值立即显示。活动文本只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
 - **睡眠与缓存行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示活动文本；`source: cached` 的行，活动文本与状态图标一样调淡。

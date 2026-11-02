@@ -164,10 +164,10 @@ struct AgentStateRowView: View {
         // the fallback name and the redundant-title check follow the kind.
         .id(entry.kind)
         .opacity(isStateCached ? Self.cachedOpacity : 1)
-        identityLine
+        identityLine(isSecondary: true)
       }
     case .compact:
-      identityLine
+      identityLine(isSecondary: false)
     }
   }
 
@@ -179,11 +179,15 @@ struct AgentStateRowView: View {
   /// stay readable. The worktree text carries the
   /// `agentState.row.<paneID>.headline` identifier (the user-test contract
   /// surface) in both densities.
-  private var identityLine: some View {
+  ///
+  /// `isSecondary` is the `normal` second line: the worktree text drops to
+  /// a smaller, lighter style so the activity line above reads first.
+  private func identityLine(isSecondary: Bool) -> some View {
     HStack(spacing: 8) {
       Text(worktreeName)
-        .font(.subheadline)
-        .foregroundStyle(.primary)
+        .font(isSecondary ? .caption : .subheadline)
+        .fontWeight(.regular)
+        .foregroundStyle(isSecondary ? .secondary : .primary)
         .lineLimit(1)
         .truncationMode(.middle)
         .accessibilityIdentifier("agentState.row.\(paneID).headline")

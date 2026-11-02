@@ -16,6 +16,7 @@ struct AgentActivityLine: View {
   var body: some View {
     Text(activity.rowText)
       .font(.subheadline)
+      .fontWeight(.regular)
       .foregroundStyle(.primary)
       .lineLimit(1)
       .truncationMode(.tail)
