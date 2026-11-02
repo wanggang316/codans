@@ -3,49 +3,25 @@ import Testing
 
 @testable import CodansCore
 
-/// Tab icon write-precedence and Codable migration. The `.auto` ≤
-/// `.script` ≤ `.user` ordering is load-bearing for write paths; older
-/// catalog payloads with no icon fields must decode into a clean
-/// `.auto` / `nil` baseline.
+/// Tab icon write-precedence, resolution and Codable migration. A tab
+/// shows its selected pane's glyph unless the user picked an icon; older
+/// catalog payloads must decode into a clean `.auto` / `nil` baseline.
 struct TabIconTests {
   // MARK: - Write precedence
 
   @Test
-  func userOverridesScript() {
-    let original = Tab(icon: "hammer", iconLock: .script)
+  func userOverridesAuto() {
+    let original = Tab(icon: nil, iconLock: .auto)
     let updated = original.applyingIcon("paintbrush", lock: .user)
     #expect(updated?.icon == "paintbrush")
     #expect(updated?.iconLock == .user)
   }
 
   @Test
-  func scriptCanOverrideAuto() {
-    let original = Tab(icon: "terminal", iconLock: .auto)
-    let updated = original.applyingIcon("hammer", lock: .script)
-    #expect(updated?.icon == "hammer")
-    #expect(updated?.iconLock == .script)
-  }
-
-  @Test
-  func scriptCannotOverrideUser() {
+  func autoCannotOverrideUser() {
     let original = Tab(icon: "paintbrush", iconLock: .user)
-    let updated = original.applyingIcon("hammer", lock: .script)
+    let updated = original.applyingIcon("hammer", lock: .auto)
     #expect(updated == nil)
-  }
-
-  @Test
-  func autoCannotOverrideScript() {
-    let original = Tab(icon: "hammer", iconLock: .script)
-    let updated = original.applyingIcon("terminal", lock: .auto)
-    #expect(updated == nil)
-  }
-
-  @Test
-  func sameLockAlwaysUpdates() {
-    let original = Tab(icon: "hammer", iconLock: .script)
-    let updated = original.applyingIcon("wrench", lock: .script)
-    #expect(updated?.icon == "wrench")
-    #expect(updated?.iconLock == .script)
   }
 
   @Test
@@ -59,21 +35,42 @@ struct TabIconTests {
   // MARK: - Resolved icon
 
   @Test
-  func resolvedIconPrefersLockedOverFallback() {
-    let tab = Tab(icon: "paintbrush", iconLock: .user)
-    #expect(tab.resolvedIcon(autoFallback: "terminal") == "paintbrush")
+  func resolvedIconPrefersUserPick() {
+    let agentPane = Pane(workingDirectory: "/tmp", agentKind: .claudeCode)
+    let tab = Tab(icon: "paintbrush", iconLock: .user, panes: [agentPane])
+    #expect(tab.resolvedIcon(selectedPane: agentPane) == "paintbrush")
   }
 
   @Test
-  func resolvedIconFallsBackForAutoLock() {
+  func resolvedIconFollowsSelectedAgentPane() {
+    let agentPane = Pane(workingDirectory: "/tmp", agentKind: .codex)
+    let tab = Tab(panes: [agentPane])
+    #expect(tab.resolvedIcon(selectedPane: agentPane) == TabIconRef.icon(for: .codex))
+  }
+
+  @Test
+  func resolvedIconIgnoresAgentInUnselectedPane() {
+    let agentPane = Pane(workingDirectory: "/tmp", agentKind: .claudeCode)
+    let shellPane = Pane(workingDirectory: "/tmp")
+    let tab = Tab(panes: [agentPane, shellPane])
+    #expect(tab.resolvedIcon(selectedPane: shellPane) == TabIconRef.terminal)
+  }
+
+  @Test
+  func resolvedIconIsTerminalWithoutSelectedPane() {
+    #expect(Tab().resolvedIcon(selectedPane: nil) == TabIconRef.terminal)
+  }
+
+  @Test
+  func resolvedIconIgnoresUnlockedStoredIcon() {
     let tab = Tab(icon: "stale-cache", iconLock: .auto)
-    #expect(tab.resolvedIcon(autoFallback: "terminal") == "terminal")
+    #expect(tab.resolvedIcon(selectedPane: nil) == TabIconRef.terminal)
   }
 
   @Test
-  func resolvedIconReturnsFallbackWhenIconEmpty() {
+  func resolvedIconIgnoresEmptyUserPick() {
     let tab = Tab(icon: "", iconLock: .user)
-    #expect(tab.resolvedIcon(autoFallback: "terminal") == "terminal")
+    #expect(tab.resolvedIcon(selectedPane: nil) == TabIconRef.terminal)
   }
 
   // MARK: - Codable migration
@@ -93,6 +90,26 @@ struct TabIconTests {
       """
     let data = Data(json.utf8)
     let decoded = try JSONDecoder().decode(Tab.self, from: data)
+    #expect(decoded.icon == nil)
+    #expect(decoded.iconLock == .auto)
+  }
+
+  @Test
+  func decodesLegacyScriptLockAsAuto() throws {
+    let pane = Pane(workingDirectory: "/tmp")
+    let json = """
+      {
+        "id": { "raw": "\(TabID().raw.uuidString)" },
+        "icon": "agent:claude-code",
+        "iconLock": "script",
+        "splitTree": { "root": { "leaf": { "_0": { "raw": "\(pane.id.raw.uuidString)" } } } },
+        "panes": [{
+          "id": { "raw": "\(pane.id.raw.uuidString)" },
+          "workingDirectory": "/tmp"
+        }]
+      }
+      """
+    let decoded = try JSONDecoder().decode(Tab.self, from: Data(json.utf8))
     #expect(decoded.icon == nil)
     #expect(decoded.iconLock == .auto)
   }

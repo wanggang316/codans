@@ -157,15 +157,12 @@ struct PaneCardHeader: View {
     }
   }
 
-  @ViewBuilder
+  /// Same glyph the tab chip shows while this pane is the tab's selected
+  /// pane (see `Tab.resolvedIcon(selectedPane:)`).
   private var glyph: some View {
-    if let kind = pane?.agentKind {
-      StoredIconGlyph(icon: TabIconRef.icon(for: kind), markSize: PaneCardMetrics.headerIconSize)
-    } else {
-      Image(systemName: "terminal")
-        .font(.system(size: PaneCardMetrics.headerIconSize - 2))
-        .accessibilityHidden(true)
-    }
+    StoredIconGlyph(icon: TabIconRef.icon(for: pane), markSize: PaneCardMetrics.headerIconSize)
+      .font(.system(size: PaneCardMetrics.headerIconSize - 2))
+      .accessibilityHidden(true)
   }
 
   private var pane: Pane? {

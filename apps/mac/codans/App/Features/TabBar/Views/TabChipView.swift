@@ -42,11 +42,10 @@ struct TabChipView: View {
   let onChangeIcon: () -> Void
   let onCopyID: () -> Void
   let tabColor: TabColor?
-  /// SF Symbol resolved by `Tab.resolvedIcon(autoFallback:)` — `nil`
-  /// hides the leading slot so unlocked tabs without a runtime fallback
-  /// keep the chip clean.
+  /// Glyph resolved by `Tab.resolvedIcon(selectedPane:)` — `nil` hides the
+  /// leading slot.
   var icon: String?
-  /// Script-tint colour for `icon` while the tab's run pane executes; see
+  /// Script-tint colour for `icon` while the selected run pane executes; see
   /// `TabChipLabel.iconTint`.
   var iconTint: Color?
   /// Overflow stacking (`TabStackLayout`): the visible width of this chip

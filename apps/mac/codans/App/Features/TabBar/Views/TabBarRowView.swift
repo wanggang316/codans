@@ -255,11 +255,6 @@ struct TabBarRowView: View {
       onChangeIcon: { onChangeIconRequested(tab.id) },
       onCopyID: { onCopyID(tab.id) },
       tabColor: tab.color,
-      // Every chip leads with a glyph: the agent's mark for an agent tab,
-      // a terminal otherwise.
-      icon: tab.resolvedIcon(
-        autoFallback: tab.panes.lazy.compactMap(\.agentKind).first.map(TabIconRef.icon(for:))
-          ?? "terminal"),
       sliceWidth: slice?.width,
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
@@ -635,7 +630,6 @@ private struct ResolvingTabChipView: View {
   let onChangeIcon: () -> Void
   let onCopyID: () -> Void
   let tabColor: TabColor?
-  let icon: String?
   var sliceWidth: CGFloat?
   var contentShift: CGFloat = 0
   var onStackClick: (() -> Void)?
@@ -649,6 +643,7 @@ private struct ResolvingTabChipView: View {
 
   var body: some View {
     let live = liveResolvedTitle
+    let selectedPane = self.selectedPane
     TabChipView(
       title: resolvedTitle(live: live),
       isActive: isActive,
@@ -670,8 +665,8 @@ private struct ResolvingTabChipView: View {
       onChangeIcon: onChangeIcon,
       onCopyID: onCopyID,
       tabColor: tabColor,
-      icon: icon,
-      iconTint: runningScriptIconTint,
+      icon: tab.resolvedIcon(selectedPane: selectedPane),
+      iconTint: runningScriptIconTint(selectedPane: selectedPane),
       sliceWidth: sliceWidth,
       contentShift: contentShift,
       onStackClick: onStackClick,
@@ -689,24 +684,30 @@ private struct ResolvingTabChipView: View {
     }
   }
 
-  /// Script tint for the chip's icon while this tab's dedicated run pane is
-  /// executing. Run panes are skipped by `tabIsDirty`, so a running script
-  /// never swaps the chip's glyph for the spinner — the glyph picking up the
-  /// script's colour is the running affordance instead. `nil` when no run
-  /// pane in this tab is busy, or its script no longer exists in Settings.
+  /// The pane whose header the chip mirrors: the tab's focused pane, or its
+  /// first pane before any pane took focus. The live title reads the same
+  /// pane, so glyph and title always describe one pane.
+  private var selectedPane: Pane? {
+    let focusedID = hierarchyManager.lastFocusedPane(in: tab.id)
+    return tab.panes.first { $0.id == focusedID } ?? tab.panes.first
+  }
+
+  /// Script tint for the chip's icon while the selected pane is a run pane
+  /// that is executing. Run panes are skipped by `tabIsDirty`, so a running
+  /// script never swaps the chip's glyph for the spinner — the glyph picking
+  /// up the script's colour is the running affordance instead. Other panes
+  /// never tint the chip: the glyph describes the selected pane only.
   /// Reads `HierarchyManager.paneIsBusy` (@Observable) so the tint tracks
   /// start/stop automatically.
-  private var runningScriptIconTint: Color? {
-    guard let settings = settingsStore?.settings else { return nil }
-    for pane in tab.panes {
-      guard let scriptID = pane.runScriptID, hierarchyManager.paneIsBusy(pane.id) else { continue }
-      let script =
-        settings.general.globalScripts.first(where: { $0.id == scriptID })
-        ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
-      guard let script else { return nil }
-      return ScriptTintColorPalette.color(for: script.resolvedTintColor)
-    }
-    return nil
+  private func runningScriptIconTint(selectedPane: Pane?) -> Color? {
+    guard let settings = settingsStore?.settings,
+      let pane = selectedPane, let scriptID = pane.runScriptID,
+      hierarchyManager.paneIsBusy(pane.id)
+    else { return nil }
+    let script =
+      settings.general.globalScripts.first(where: { $0.id == scriptID })
+      ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
+    return script.map { ScriptTintColorPalette.color(for: $0.resolvedTintColor) }
   }
 
   /// Whether to render the chip's running spinner. A working coding agent
@@ -732,8 +733,9 @@ private struct ResolvingTabChipView: View {
   /// hasn't pushed any of OSC 2 / OSC 0 / OSC 7 — letting the caller
   /// decide whether to fall back to the persisted cache or "Tab N".
   private var liveResolvedTitle: String? {
-    let paneID = hierarchyManager.lastFocusedPane(in: tab.id) ?? tab.panes.first?.id
-    guard let paneID, let surface = terminalClient.surface(paneID) else { return nil }
+    guard let paneID = selectedPane?.id, let surface = terminalClient.surface(paneID) else {
+      return nil
+    }
     let info = surface.info
     // Read all observable properties up-front so SwiftUI registers
     // observation on every one — `if let` short-circuits would skip
@@ -754,10 +756,7 @@ private struct ResolvingTabChipView: View {
     if let name = tab.name, !name.isEmpty { return name }
     if let live { return live }
     if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
-    let pane =
-      tab.panes.first { $0.id == hierarchyManager.lastFocusedPane(in: tab.id) }
-      ?? tab.panes.first
-    if let pane {
+    if let pane = selectedPane {
       let basename = (pane.workingDirectory as NSString).lastPathComponent
       if !basename.isEmpty { return basename }
     }

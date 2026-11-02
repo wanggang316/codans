@@ -25,8 +25,8 @@ struct TabChipLabel: View {
   /// prefixes the title only when those quieter signals are absent so the
   /// chip never tries to render three leading glyphs at once.
   var icon: String?
-  /// Tint applied to `icon` while this tab's dedicated run-script pane is
-  /// executing. A run tab keeps its script glyph instead of swapping to
+  /// Tint applied to `icon` while the tab's selected pane is a run-script
+  /// pane that is executing. A run tab keeps its script glyph instead of swapping to
   /// the spinner (`tabIsDirty` skips run panes); the colour flipping on is
   /// what reads as "running". `nil` = idle, monochrome icon.
   var iconTint: Color?

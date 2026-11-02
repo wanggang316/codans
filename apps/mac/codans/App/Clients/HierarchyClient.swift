@@ -204,7 +204,7 @@ nonisolated struct HierarchyClient: Sendable {
       _ color: TabColor?
     ) throws -> Void
   /// Updates the tab's SF Symbol icon under the `TabIconLock` rules
-  /// (`.auto` ≤ `.script` ≤ `.user`). A write whose `lock` cannot
+  /// (`.auto` < `.user`). A write whose `lock` cannot
   /// override the tab's current lock is a silent no-op — UI consumers
   /// re-read the tab afterwards if they need to confirm the result.
   var setTabIcon:
@@ -1331,9 +1331,6 @@ extension HierarchyClient {
       kind: .custom,
       name: spec.tabName ?? profile.displayName,
       command: command,
-      // Brand mark rather than a generic glyph: the tab chip resolves the
-      // `agent:` reference to the same asset the Agents pane and the
-      // toolbar menu show, so one agent reads the same across surfaces.
       systemImage: profile.tabIcon,
       target: spec.target ?? profile.target,
       direction: spec.direction ?? profile.direction,
@@ -1649,15 +1646,6 @@ extension HierarchyClient {
         name: nil,
         initialTitle: script.displayName,
         select: script.focus
-      )
-      // Carry the script's resolved SF Symbol onto the spawned tab under
-      // the .script lock. A later auto re-derivation cannot displace it;
-      // a user pick still can. Failures are non-fatal — the tab keeps
-      // running with its default icon.
-      try? manager.setTabIcon(
-        tabID, in: worktreeID, in: projectID,
-        icon: script.resolvedSystemImage,
-        lock: .script
       )
       return try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
