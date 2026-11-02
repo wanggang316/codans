@@ -37,7 +37,7 @@ extension Animation {
   /// Timing of the hint show/hide. Short and decelerating: the hints answer a held key, so
   /// they must settle before the eye reaches them.
   static let shortcutHint: Animation = .easeOut(duration: 0.16)
-  /// Faster variant for the sidebar, where a column of hints appears at once and a slower
-  /// fade reads as lag.
+  /// Faster variant for lists (sidebar rows, Agents View rows), where a column of hints
+  /// appears at once and a slower fade reads as lag.
   static let shortcutHintFast: Animation = .easeOut(duration: 0.08)
 }

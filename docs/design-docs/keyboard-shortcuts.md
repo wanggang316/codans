@@ -7,7 +7,7 @@
 
 codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
 
-按住 ⌘ 约 1 秒后，Tab、侧栏行与 Agents View 行在尾部显示各自的和弦（`ShortcutHintLabel`：系统字体 `.caption`、`.secondary` 纯文本、无键帽边框）。和弦从解析后的绑定读取，改键或禁用会同步反映。`CommandKeyObserver` 在 `Animation.shortcutHint`（0.16 s easeOut）中翻转标志，提示以 `.blurReplace` 过渡出现与消失；侧栏一次出现整列提示，用更快的 `shortcutHintFast`（0.08 s）；开启“减弱动态效果”时不做动画。
+按住 ⌘ 约 1 秒后，Tab、侧栏行与 Agents View 行在尾部显示各自的和弦（`ShortcutHintLabel`：系统字体 `.caption`、`.secondary` 纯文本、无键帽边框）。和弦从解析后的绑定读取，改键或禁用会同步反映。`CommandKeyObserver` 在 `Animation.shortcutHint`（0.16 s easeOut）中翻转标志，提示以 `.blurReplace` 过渡出现与消失；侧栏与 Agents View 一次出现整列提示，用更快的 `shortcutHintFast`（0.08 s）；开启“减弱动态效果”时不做动画。
 
 本设计以一个**单一 registry** 统管全部应用内快捷键：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
 

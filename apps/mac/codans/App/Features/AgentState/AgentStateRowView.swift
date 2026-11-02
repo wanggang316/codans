@@ -110,7 +110,7 @@ struct AgentStateRowView: View {
         }
         statusColumn
         if let hotkeyHint {
-          ShortcutHintLabel(chord: hotkeyHint)
+          ShortcutHintLabel(chord: hotkeyHint, animation: .shortcutHintFast)
         }
       }
       .padding(.horizontal, 12)
