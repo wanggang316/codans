@@ -1158,12 +1158,6 @@ struct HierarchySidebarView: View {
       SidebarWorktreeDiffStats(worktreeID: worktree.id)
       gitHubBadge(for: worktree, in: project)
       runScriptPingAccessory(for: worktree, in: project)
-      // Trailing chord hint, after both the row content and the optional PR pill so it
-      // always pins to the right edge of the row instead of being shoved leftwards by
-      // the pill's intrinsic width. Visible only while ⌘ is held.
-      if let hint = hotkeyHint(hotkeyNumber) {
-        SidebarHotkeyHint(chord: hint)
-      }
     }
     // Worktree rows are real List children. Selection chrome is owned by
     // SwiftUI's native `List(selection:)` (see `nativeSelectionBinding`):
@@ -1264,6 +1258,7 @@ struct HierarchySidebarView: View {
         glyph: leadingGlyph, isDefaultBranch: isMainCheckout && !isSyntheticWorktree,
         hasLifecycle: lifecycle != nil
       )
+      .shortcutHintReplacing(hotkeyHint(hotkeyNumber))
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
           Text(rowTitle)
@@ -1316,12 +1311,6 @@ struct HierarchySidebarView: View {
         }
       }
       Spacer()
-      // The chord hint used to sit here, but the GitHub PR badge is a *sibling* HStack
-      // member outside `rowSelectionButton` (so the badge's Button isn't a child of the
-      // row Button); rendering the hint inline meant the trailing PR pill always pushed
-      // the hint left of itself. Hint moved to the outer HStack — see
-      // `worktreeRow(...)` in this file — so it sticks to the trailing edge regardless
-      // of whether a PR pill is present.
     }
     .contentShape(Rectangle())
 
@@ -2107,6 +2096,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         }
       }
       .frame(width: 14, alignment: .center)
+      .shortcutHintReplacing(hotkeyHint)
       Text(project.name)
         // Semibold, though the row sits a size below its worktrees: the
         // Project is the heading of the rows under it, and at subheadline
@@ -2186,9 +2176,6 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         }
       }
       .opacity(isHovering ? 1 : 0)
-      if let hotkeyHint {
-        SidebarHotkeyHint(chord: hotkeyHint)
-      }
     }
     .contentShape(Rectangle())
     .onHover { isHovering = $0 }
@@ -2370,6 +2357,7 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   var body: some View {
     HStack(spacing: 6) {
       leadingIcon
+        .shortcutHintReplacing(hotkeyHint)
       VStack(alignment: .leading, spacing: 0) {
         Text(group.name)
           .lineLimit(1)
@@ -2402,9 +2390,6 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
       .help(group.isExpanded ? "Collapse" : "Expand")
       // Opacity, not conditional rendering, so the row width stays put.
       .opacity(isHovering ? 1 : 0)
-      if let hotkeyHint {
-        SidebarHotkeyHint(chord: hotkeyHint)
-      }
     }
     .contentShape(Rectangle())
     .onHover { isHovering = $0 }
@@ -2442,16 +2427,6 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
         isDefaultBranch: group.kind == .default
       )
     }
-  }
-}
-
-/// The chord a sidebar row answers to (`⌃N`), shown at its trailing edge while
-/// ⌘ is held.
-private struct SidebarHotkeyHint: View {
-  let chord: String
-
-  var body: some View {
-    ShortcutHintLabel(chord: chord, leadingGap: 6, animation: .shortcutHintFast)
   }
 }
 
@@ -2742,12 +2717,11 @@ private struct SidebarFilterBar: View {
           )
           .scaleEffect(labelScale)
           .opacity(chord == nil ? 1 : 0)
-          .animation(reduceMotion ? nil : .shortcutHintFast, value: chord == nil)
         }
         .overlay {
           Group {
             if let chord {
-              ShortcutHintLabel(chord: chord, animation: .shortcutHintFast, onTint: selected)
+              ShortcutHintLabel(chord: chord, onTint: selected)
             }
           }
           .scaleEffect(chordScale)

@@ -34,9 +34,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
-- **Shortcut hints look and move like the system's.** Holding ⌘ now shows
-  each tab, sidebar row, and agent row's shortcut as plain grey text, without
-  a key frame, and the hints fade in and out instead of popping.
+- **Shortcut hints take the icon's place.** Holding ⌘ now cross-fades the
+  leading icon of each tab, sidebar row, and agent row into its shortcut, as
+  plain grey text without a key frame, so nothing in the row moves. The
+  sidebar filter buttons show theirs the same way.
 
 ### Deprecated
 
