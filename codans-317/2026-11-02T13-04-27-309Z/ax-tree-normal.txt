@@ -1,0 +1,18 @@
+20:    AXScrollArea #agentState.sidebarPanel.list {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage} @8,888 266x154
+21-      AXOpaqueProviderGroup (AXOpaqueProviderList) {ScrollToTop,ScrollToBottom} @8,888 266x92
+22-        AXButton "Claude Code, feat/header-redesign, fixture, idle" #agentState.row.C5C9B536-3152-4454-9267-6237E6C18442 {Press} @8,888 266x46
+23-          AXStaticText = "Claude Code" #agentState.row.C5C9B536-3152-4454-9267-6237E6C18442.activity {ShowMenu} @50,896 67x14
+24-          AXStaticText = "feat/header-redesign" #agentState.row.C5C9B536-3152-4454-9267-6237E6C18442.headline {ShowMenu} @50,912 110x14
+25-          AXStaticText = "fixture" {ShowMenu} @168,912 32x13
+26-          AXUnknown "idle" #agentState.row.C5C9B536-3152-4454-9267-6237E6C18442.state {ShowMenu} @251,906 10x10
+27-        AXButton "Codex, feat/header-redesign, fixture, idle" #agentState.row.EB890DF7-F738-4C35-93B9-670628DCF0E6 {Press} @8,934 266x46
+28-          AXStaticText = "Running unit tests for AgentStateStore" #agentState.row.EB890DF7-F738-4C35-93B9-670628DCF0E6.activity {ShowMenu} @50,942 167x14
+29-          AXStaticText = "feat/header-redesign" #agentState.row.EB890DF7-F738-4C35-93B9-670628DCF0E6.headline {ShowMenu} @50,958 110x14
+30-          AXStaticText = "fixture" {ShowMenu} @168,958 32x13
+31-          AXUnknown "idle" #agentState.row.EB890DF7-F738-4C35-93B9-670628DCF0E6.state {ShowMenu} @251,952 10x10
+32-    AXButton "Reorder projects" {Press} @8,1052 18x18
+focused before: codex
+ok press AXButton "Claude Code, feat/header-redesign, fixture, idle" #agentState.row.C5C9B536-3152-4454-9267-6237E6C18442 {Press} @8,888 266x46
+focused after AX press on claude row: claude-code
+ok click 105,965 window=9732 previous=1515
+focused after click on codex row: codex
