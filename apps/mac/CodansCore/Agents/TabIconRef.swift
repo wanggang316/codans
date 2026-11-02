@@ -9,11 +9,10 @@ public nonisolated enum AgentIconRef: Equatable, Sendable, Hashable {
   case symbol(String)
 }
 
-/// `Tab.icon` normally holds an SF Symbol name. A tab spawned by an agent
-/// profile instead stores `agent:<AgentKind.rawValue>`, which the tab chip
-/// resolves to the agent's bundled brand glyph — the same mark the Agents
-/// settings pane and the toolbar menu show, so one agent reads the same
-/// everywhere.
+/// A stored icon string is an SF Symbol name or `agent:<AgentKind.rawValue>`,
+/// which glyph views resolve to the agent's bundled brand mark — the same
+/// mark the Agents settings pane and the toolbar menu show, so one agent
+/// reads the same everywhere.
 ///
 /// Parsing lives here rather than at the render site because the string is
 /// persisted in `catalog.json`: the prefix is a wire format, and anything
@@ -24,6 +23,15 @@ public nonisolated enum TabIconRef {
   /// Value to store in `Tab.icon` for a tab running `kind`.
   public static func icon(for kind: AgentKind) -> String {
     agentPrefix + kind.rawValue
+  }
+
+  /// Glyph for a pane without an agent.
+  public static let terminal = "terminal"
+
+  /// Glyph for `pane`, shared by its card header and its tab chip: the
+  /// agent's mark while an agent runs in it, a terminal otherwise.
+  public static func icon(for pane: Pane?) -> String {
+    pane?.agentKind.map { icon(for: $0) } ?? terminal
   }
 
   /// The agent an icon string names, or `nil` when it is a plain SF Symbol.

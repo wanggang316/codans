@@ -1977,7 +1977,7 @@ final class HierarchyManager {
   }
 
   /// Update the tab's SF Symbol icon, subject to the lock precedence in
-  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
+  /// `TabIconLock` (`.auto` < `.user`). A lower-priority write
   /// against a higher lock is a silent no-op; a `.user` write with `nil`
   /// drops the lock back to `.auto` so the runtime fallback takes over
   /// again. Persists through the same debounced save path as the other

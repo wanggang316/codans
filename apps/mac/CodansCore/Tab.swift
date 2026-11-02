@@ -11,15 +11,12 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
   public var cachedDisplayTitle: String?
   /// Per-tab accent color for the active underline stripe. `nil` = system accent.
   public var color: TabColor?
-  /// Glyph shown in the tab chip: an SF Symbol name, or an
+  /// Icon the user picked for the tab chip: an SF Symbol name, or an
   /// `agent:<kind>` reference to a bundled brand mark (see `TabIconRef`).
-  /// `nil` means "let the auto fallback decide" — the runtime computes a
-  /// default from the foreground job. See `iconLock` for who last wrote
-  /// the icon.
+  /// Rendered only under `.user`; otherwise the chip shows the selected
+  /// pane's glyph (see `resolvedIcon(selectedPane:)`).
   public var icon: String?
-  /// Authority of the most recent icon write. `.user` and `.script`
-  /// stick across auto re-derivation; `.auto` writes are best-effort
-  /// suggestions from the runtime. See `applyingIcon(_:lock:)`.
+  /// Authority of the most recent icon write. See `applyingIcon(_:lock:)`.
   public var iconLock: TabIconLock
   public var splitTree: SplitTree<PaneID>
   public var panes: [Pane]
@@ -50,18 +47,17 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
   /// The set of PaneIDs stored in the flat panes array.
   public var flatPaneIDs: Set<PaneID> { Set(panes.map(\.id)) }
 
-  /// Resolves the SF Symbol to render for this tab. A locked write
-  /// (`.user` / `.script`) wins outright; `.auto` defers to the caller's
-  /// derived fallback so the runtime stays the source of truth for
-  /// unlocked tabs.
-  public func resolvedIcon(autoFallback: String?) -> String? {
-    if iconLock != .auto, let icon, !icon.isEmpty { return icon }
-    return autoFallback
+  /// Glyph for the tab chip. A user pick wins; otherwise the chip shows the
+  /// same glyph as the selected pane's header, so the chip always describes
+  /// the pane its title comes from.
+  public func resolvedIcon(selectedPane: Pane?) -> String {
+    if iconLock == .user, let icon, !icon.isEmpty { return icon }
+    return TabIconRef.icon(for: selectedPane)
   }
 
   /// Returns a copy of this tab with the icon updated, or `nil` when the
-  /// incoming `lock` cannot override the current `iconLock`. `.auto` ≤
-  /// `.script` ≤ `.user` (see `TabIconLock`). A `.user` write with a
+  /// incoming `lock` cannot override the current `iconLock`. `.auto` <
+  /// `.user` (see `TabIconLock`). A `.user` write with a
   /// nil icon is treated as an explicit reset back to `.auto`.
   public func applyingIcon(_ icon: String?, lock: TabIconLock) -> Tab? {
     guard lock >= iconLock else { return nil }
@@ -95,14 +91,30 @@ extension Tab: Codable {
     case id, name, cachedDisplayTitle, color, icon, iconLock, splitTree, panes
   }
 
+  /// Lock value older catalogs wrote for a tab spawned by a run script or an
+  /// agent profile.
+  private static let legacyScriptLock = "script"
+
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     self.id = try c.decode(TabID.self, forKey: .id)
     self.name = try c.decodeIfPresent(String.self, forKey: .name)
     self.cachedDisplayTitle = try c.decodeIfPresent(String.self, forKey: .cachedDisplayTitle)
     self.color = try c.decodeIfPresent(TabColor.self, forKey: .color)
-    self.icon = try c.decodeIfPresent(String.self, forKey: .icon)
-    self.iconLock = try c.decodeIfPresent(TabIconLock.self, forKey: .iconLock) ?? .auto
+    let icon = try c.decodeIfPresent(String.self, forKey: .icon)
+    switch try c.decodeIfPresent(String.self, forKey: .iconLock) {
+    case TabIconLock.user.rawValue?:
+      self.icon = icon
+      self.iconLock = .user
+    case nil, TabIconLock.auto.rawValue?, Self.legacyScriptLock?:
+      // Only a user pick is ever rendered, so any other stored icon is
+      // dropped and the next save removes it from the catalog.
+      self.icon = nil
+      self.iconLock = .auto
+    case let raw?:
+      throw DecodingError.dataCorruptedError(
+        forKey: .iconLock, in: c, debugDescription: "Unknown tab icon lock \(raw)")
+    }
     self.splitTree = try c.decode(SplitTree<PaneID>.self, forKey: .splitTree)
     self.panes = try c.decode([Pane].self, forKey: .panes)
   }
