@@ -1,0 +1,9 @@
+rows: codex=2B509FE5-416E-41F8-BDD2-ED8AD683A566 claude=6715F022-5EE0-4484-8DE9-39ECB9097A57
+Tab 12 -> AXUnknown "idle" #agentState.row.6715F022-5EE0-4484-8DE9-39ECB9097A57.state
+Tab next row -> AXUnknown "idle" #agentState.row.2B509FE5-416E-41F8-BDD2-ED8AD683A566.state
+after Return: focused agent pane [codex ] -> AXTextArea "Terminal pane" #-
+Tab 12 -> AXUnknown "idle" #agentState.row.6715F022-5EE0-4484-8DE9-39ECB9097A57.state
+after AX Press on claude row: focused agent pane [codex ]
+Tab 12 -> AXUnknown "idle" #agentState.row.6715F022-5EE0-4484-8DE9-39ECB9097A57.state
+before Space -> AXUnknown "idle" #agentState.row.6715F022-5EE0-4484-8DE9-39ECB9097A57.state
+after Space: focused agent pane [claude-code ] -> AXTextArea "Terminal pane" #-
