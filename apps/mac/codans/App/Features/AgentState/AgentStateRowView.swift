@@ -61,7 +61,7 @@ struct AgentStateRowView: View {
   /// block.
   var worktreePath: String?
   var remoteHost: RemoteHost?
-  /// The row's select chord (`⌥N`), shown in place of the agent logo while ⌘ is held.
+  /// The row's focus chord (`⌥N`), shown at the trailing edge while ⌘ is held.
   var hotkeyHint: String?
   let onTap: () -> Void
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
@@ -99,7 +99,6 @@ struct AgentStateRowView: View {
         // Logo tint darkens to `.primary` on the selected row — the
         // primary visual signal that this row is the current focus.
         AgentLogoView(kind: entry.kind, size: 20, tint: isSelected ? .primary : .secondary)
-          .shortcutHintReplacing(hotkeyHint, font: .callout)
         identityColumn
         // A greedy spacer pins the status icon to the row's trailing
         // edge in both densities, so the state glyph reads as a single
@@ -110,6 +109,9 @@ struct AgentStateRowView: View {
           sleepGlyph
         }
         statusColumn
+        if let hotkeyHint {
+          ShortcutHintLabel(chord: hotkeyHint, animation: .shortcutHintFast)
+        }
       }
       .padding(.horizontal, 12)
       // Compact mode tightens the row to roughly two-thirds of the

@@ -30,9 +30,6 @@ struct TabChipLabel: View {
   /// the spinner (`tabIsDirty` skips run panes); the colour flipping on is
   /// what reads as "running". `nil` = idle, monochrome icon.
   var iconTint: Color?
-  /// The tab's select chord (`⌘N`), while ⌘ is held. Takes the leading
-  /// glyph's place, or adds the leading slot when the chip has no glyph.
-  var chordHint: String?
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -47,33 +44,6 @@ struct TabChipLabel: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      if hasLeadingGlyph {
-        leadingGlyph
-          .shortcutHintReplacing(chordHint)
-      } else if let chordHint {
-        ShortcutHintLabel(chord: chordHint, font: .system(size: 11))
-      }
-      Text(title)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .font(.system(size: TabBarMetrics.titleFontSize))
-        // A chip resizing in an add / close reflow re-truncates its title;
-        // swap the truncation outright instead of cross-fading the two
-        // strings, which leaves a ghost ellipsis behind the text.
-        .contentTransition(.identity)
-        .foregroundStyle(TabBarColors.activeText)
-        .opacity(textOpacity)
-    }
-  }
-
-  private var hasLeadingGlyph: Bool {
-    isDirty || hasUnreadNotification || !(icon ?? "").isEmpty
-  }
-
-  /// Spinner, unread bell, or the tab's icon, in that order of priority.
-  @ViewBuilder
-  private var leadingGlyph: some View {
-    Group {
       if isDirty {
         ProgressView()
           .controlSize(.mini)
@@ -90,6 +60,16 @@ struct TabChipLabel: View {
           .opacity(iconTint == nil ? textOpacity : 1)
           .accessibilityHidden(true)
       }
+      Text(title)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .font(.system(size: TabBarMetrics.titleFontSize))
+        // A chip resizing in an add / close reflow re-truncates its title;
+        // swap the truncation outright instead of cross-fading the two
+        // strings, which leaves a ghost ellipsis behind the text.
+        .contentTransition(.identity)
+        .foregroundStyle(TabBarColors.activeText)
+        .opacity(textOpacity)
     }
   }
 

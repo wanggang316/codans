@@ -146,8 +146,7 @@ struct TabChipView: View {
         isDirty: isDirty,
         hasUnreadNotification: hasUnreadNotification,
         icon: icon,
-        iconTint: iconTint,
-        chordHint: chordHint
+        iconTint: iconTint
       )
       // `maxHeight: .infinity` is the load-bearing piece — without
       // it the label collapses to its intrinsic text height (~16pt)
@@ -173,10 +172,12 @@ struct TabChipView: View {
         .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
-      // The tab's color dot (when set). The chord hint shows in the label's
-      // leading slot instead (`TabChipLabel.chordHint`).
+      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
+      // tab's color dot (when set) sits there.
       Group {
-        if let tabColor {
+        if let chordHint {
+          ShortcutHintLabel(chord: chordHint, trailingGap: TabBarMetrics.chordHintExtraInset)
+        } else if let tabColor {
           Circle()
             .fill(tabColor.swiftUIColor)
             .frame(width: 8, height: 8)
