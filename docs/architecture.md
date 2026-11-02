@@ -251,10 +251,11 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 
 ### Accessibility (probeable contracts)
 
-User-observable accessibility values are a stable probe contract — validation keys on them, and renaming a vocabulary string breaks a unit test. Two SwiftUI traps to avoid (both bit the worktree-creation in-progress UI):
+User-observable accessibility values are a stable probe contract — validation keys on them, and renaming a vocabulary string breaks a unit test. SwiftUI traps to avoid:
 
-- `.accessibilityValue(_:)` / `.accessibilityLabel(_:)` applied to a view that is also `.accessibilityElement(children: .contain)` is a **no-op** — the container exposes its children, not its own value. Put the value on a **leaf child** (e.g. the row's name `Text` carries the in-progress/settled value; the status `Text` carries the stage value) so it provably reaches the accessibility tree.
+- `.accessibilityValue(_:)` applied to a view that is also `.accessibilityElement(children: .contain)` is a **no-op** (seen in the worktree-creation in-progress UI) — the container exposes its children, not its own value. Put the value on a **leaf child** (e.g. the row's name `Text` carries the in-progress/settled value; the status `Text` carries the stage value) so it provably reaches the accessibility tree. `.accessibilityLabel(_:)`, `.accessibilityAddTraits(.isButton)`, and `.accessibilityAction(.default)` on a `.contain` group do reach the tree: the Agents View row shows as an `AXButton` with its label, a Press action, and its leaves as children.
 - `.accessibilityRepresentation { … }` replaces the modified subtree's accessibility entirely (per Apple's docs), so it can shadow contained leaves. Use it only where the element has no children to probe (e.g. a settled failure announced as one element), not to bolt a value onto a `.contain` row whose leaves must stay individually probeable.
+- A `Button` merges the texts of its label into one element (its label joins them, and its identifier joins theirs). A row whose leaves must stay probeable cannot be a `Button`: use a `.contain` group with `onTapGesture`, the button trait and default action above, and `.focusable(interactions: .activate)` with `onKeyPress(.space / .return)` so keyboard navigation can still focus and activate it.
 
 `AgentStateRowView` and `PendingWorktreeRow` are the worked examples; decorative spinners/glyphs/shimmer stay `.accessibilityHidden(true)` since the value/label carries the meaning.
 

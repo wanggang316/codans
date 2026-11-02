@@ -94,8 +94,15 @@ struct AgentStateRowView: View {
     .contentShape(Rectangle())
     .background(rowBackground)
     // Not a `Button`: a button merges its label's texts into one element,
-    // which hides the `.headline` / `.activity` / `.state` leaves.
+    // which hides the `.headline` / `.activity` / `.state` leaves. Keep what
+    // the button gave keyboard users: with keyboard navigation on, Tab
+    // focuses the row (a click does not) and Space or Return activates it.
     .onTapGesture(perform: handleTap)
+    .focusable(interactions: .activate)
+    .onKeyPress(keys: [.space, .return]) { _ in
+      handleTap()
+      return .handled
+    }
     .contextMenu {
       if let onHandOff {
         Button {
