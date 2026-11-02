@@ -26,8 +26,25 @@ and the project does not yet follow semantic versioning — every release until
   sleeping row is always a running agent. `agent status` reports
   `source: cached` for a sleeping row whose state comes from a screen
   nobody is reading.
+- **Attach files in New Agent.** The New Agent sheet has the same paperclip
+  button as the Command Queue. It inserts the shell-quoted paths of the
+  picked files into the prompt.
 
 ### Changed
+
+- **Picked file paths go where you type.** In New Agent and the Command
+  Queue, picked paths go in at the caret or replace the selected text, with
+  a space added where a neighbor is not whitespace. On macOS 14 they still
+  go at the end.
+- **The Command Queue keeps unsent text.** Text typed in the Command Queue
+  comes back when the panel opens again on the same pane, after Escape, ⌘L,
+  opening the queue on another pane, or opening New Agent. Sending the entry
+  or closing the pane clears it. The text is not kept after a restart.
+- **Toggle Sidebar is now ⌘/, and the sidebar button shows it.** The default
+  shortcut moves from ⌥⌘S to ⌘/ in the main window and the Diff window. A
+  shortcut you set yourself stays. Hover the sidebar button to see the
+  current shortcut ("Hide Sidebar ⌘ /"); the tooltip follows changes in
+  Settings at once. Toggle Sidebar moves to Settings → Shortcuts → General.
 
 ### Deprecated
 

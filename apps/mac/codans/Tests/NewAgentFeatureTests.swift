@@ -279,4 +279,27 @@ struct NewAgentFeatureTests {
     }
     return captured.value
   }
+
+  @Test
+  func pickedFilesGoAtTheCaret() async {
+    let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: nil)) {
+      NewAgentFeature()
+    }
+    await store.send(.promptChanged("Fix bug")) { $0.prompt = "Fix bug" }
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a b.txt")], selection: 3..<3)) {
+      $0.prompt = "Fix '/tmp/a b.txt' bug"
+    }
+  }
+
+  @Test
+  func pickedFilesWithoutCaretAppendAndEmptyPickKeepsPrompt() async {
+    let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: nil)) {
+      NewAgentFeature()
+    }
+    await store.send(.promptChanged("Read")) { $0.prompt = "Read" }
+    await store.send(.filesSelected([], selection: 4..<4))
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a.txt")], selection: nil)) {
+      $0.prompt = "Read '/tmp/a.txt'"
+    }
+  }
 }

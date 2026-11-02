@@ -684,7 +684,9 @@ final class AppState {
     manager.onProjectRemoved = { [weak settingsStore] projectID in
       settingsStore?.removeProjectSettings(projectID)
     }
-    self.shortcutsStore = ShortcutsStore()
+    let shortcutsStore = ShortcutsStore()
+    self.shortcutsStore = shortcutsStore
+    DiffWindowManager.shared.shortcutsStore = shortcutsStore
     self.notificationStore = NotificationStore()
     self.worktreeStatusMonitor = .live()
     self.worktreeLocalDiffMonitor = .live()

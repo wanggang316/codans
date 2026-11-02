@@ -5,6 +5,9 @@ import SwiftUI
 
 struct DiffPanelView: View {
   @Bindable var store: StoreOf<DiffFeature>
+  /// Source of the live Toggle Sidebar chord for the sidebar button's tooltip. The window is
+  /// hosted outside the app's SwiftUI scene, so it does not inherit `\.resolvedShortcuts`.
+  var shortcutsStore: ShortcutsStore?
   @Environment(\.colorScheme) private var colorScheme
   /// Set once the renderer has drawn a document and kept while it swaps to the next one, so a
   /// stale or blank renderer never flashes between two screens.
@@ -28,13 +31,23 @@ struct DiffPanelView: View {
       columnVisibility: Binding(
         get: { store.sidebarVisible ? .all : .detailOnly },
         set: { visibility in
-          if (visibility != .detailOnly) != store.sidebarVisible {
-            _ = withAnimation { store.send(.toggleSidebar) }
-          }
+          if (visibility != .detailOnly) != store.sidebarVisible { toggleSidebar() }
         }
       )
     ) {
       DiffFileSidebar(store: store)
+        // App-owned toggle in place of the native one, so the tooltip can show the live
+        // Toggle Sidebar chord. It trails the sidebar's toolbar section like the
+        // native one.
+        .toolbar(removing: .sidebarToggle)
+        .toolbar {
+          // Nothing else pins this section to the sidebar's trailing edge.
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
+          }
+          SidebarToggleToolbarItem(isSidebarVisible: store.sidebarVisible, toggle: toggleSidebar)
+        }
+        // Outermost: the column reads its width from the view it is given.
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 600)
     } detail: {
       VStack(spacing: 0) {
@@ -51,7 +64,12 @@ struct DiffPanelView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .toolbar { DiffWindowToolbar(store: store) }
+    .environment(\.resolvedShortcuts, shortcutsStore?.resolved ?? [:])
     .accessibilityIdentifier("diff-panel")
+  }
+
+  private func toggleSidebar() {
+    _ = withAnimation { store.send(.toggleSidebar) }
   }
 
   private var fileHeader: some View {

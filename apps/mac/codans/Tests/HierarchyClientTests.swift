@@ -96,6 +96,29 @@ struct HierarchyClientTests {
   }
 
   @Test
+  func paneMembershipChangesFollowsAPaneClosedWithoutAnEngineEvent() async throws {
+    let (client, _) = makeLiveClient()
+    let projectID = client.addProject("p", "/tmp", "/tmp")
+    // The worktree path must exist: `createPaneRow` checks it.
+    let worktreeID = try client.createWorktree(projectID, "w", "/tmp", "main")
+    let keptTab = try client.createTab(worktreeID, projectID, nil)
+    let closedTab = try client.createTab(worktreeID, projectID, nil)
+    let kept = try client.createPaneRow(keptTab, worktreeID, projectID, "/tmp", nil)
+    let closed = try client.createPaneRow(closedTab, worktreeID, projectID, "/tmp", nil)
+
+    var iterator = client.paneMembershipChanges().makeAsyncIterator()
+    let initial = await iterator.next()
+    #expect(initial?.isSuperset(of: [kept, closed]) == true)
+
+    // `FakeHierarchyRuntime` emits no engine events, like a pane whose
+    // surface was already reclaimed.
+    try client.closeTab(closedTab, worktreeID, projectID)
+    let next = await iterator.next()
+    #expect(next?.contains(kept) == true)
+    #expect(next?.contains(closed) == false)
+  }
+
+  @Test
   func selectProjectClearedOnRemoveProject() throws {
     let (client, manager) = makeLiveClient()
     let p = client.addProject("p", "/tmp", "/tmp")
