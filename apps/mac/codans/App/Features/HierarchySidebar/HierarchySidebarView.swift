@@ -2451,7 +2451,7 @@ private struct SidebarHotkeyHint: View {
   let chord: String
 
   var body: some View {
-    ShortcutHintLabel(chord: chord, leadingGap: 6)
+    ShortcutHintLabel(chord: chord, leadingGap: 6, animation: .shortcutHintFast)
   }
 }
 

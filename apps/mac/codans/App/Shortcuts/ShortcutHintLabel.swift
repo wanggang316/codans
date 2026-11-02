@@ -16,6 +16,9 @@ struct ShortcutHintLabel: View {
   /// transition stays on the outermost view that the caller inserts.
   var leadingGap: CGFloat = 0
   var trailingGap: CGFloat = 0
+  /// Timing of this hint's own transition. The flag flip in `CommandKeyObserver` starts
+  /// it; this value overrides that flip's animation for this hint only.
+  var animation: Animation = .shortcutHint
 
   var body: some View {
     Text(chord)
@@ -26,7 +29,7 @@ struct ShortcutHintLabel: View {
       .padding(.leading, leadingGap)
       .padding(.trailing, trailingGap)
       .accessibilityHidden(true)
-      .transition(.blurReplace)
+      .transition(AnyTransition(.blurReplace).animation(animation))
   }
 }
 
@@ -34,4 +37,7 @@ extension Animation {
   /// Timing of the hint show/hide. Short and decelerating: the hints answer a held key, so
   /// they must settle before the eye reaches them.
   static let shortcutHint: Animation = .easeOut(duration: 0.16)
+  /// Faster variant for the sidebar, where a column of hints appears at once and a slower
+  /// fade reads as lag.
+  static let shortcutHintFast: Animation = .easeOut(duration: 0.08)
 }
