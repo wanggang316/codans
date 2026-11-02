@@ -12,9 +12,10 @@ struct ShortcutHintLabel: View {
   /// `.caption` suits a row or a tab title. A hint beside a 13–16pt toolbar glyph passes a
   /// larger font so it does not read as a footnote.
   var font: Font = .caption
-  /// Gap before the chord. Inside the view, not padded on by the caller, so the
+  /// Gaps around the chord. Inside the view, not padded on by the caller, so the
   /// transition stays on the outermost view that the caller inserts.
   var leadingGap: CGFloat = 0
+  var trailingGap: CGFloat = 0
 
   var body: some View {
     Text(chord)
@@ -23,6 +24,7 @@ struct ShortcutHintLabel: View {
       .lineLimit(1)
       .fixedSize()
       .padding(.leading, leadingGap)
+      .padding(.trailing, trailingGap)
       .accessibilityHidden(true)
       .transition(.blurReplace)
   }
