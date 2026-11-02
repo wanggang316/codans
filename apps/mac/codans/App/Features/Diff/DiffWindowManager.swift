@@ -18,6 +18,9 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
   static let windowIdentifier = NSUserInterfaceItemIdentifier("diff")
 
   private var session: Session?
+  /// Live shortcut map source for the window's sidebar-toggle tooltip. Set once at app
+  /// bring-up; nil in tests, where the tooltip shows the title only.
+  var shortcutsStore: ShortcutsStore?
   private var preferences: [WorktreeID: DiffFeature.Preference] = [:]
 
   func open(
@@ -60,7 +63,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     window.isReleasedWhenClosed = false
     window.tabbingMode = .disallowed
     window.delegate = self
-    let controller = NSHostingController(rootView: DiffPanelView(store: store))
+    let controller = NSHostingController(rootView: DiffPanelView(store: store, shortcutsStore: shortcutsStore))
     // The window owns its initial and restored frame, not SwiftUI's fitting size.
     controller.sizingOptions = []
     window.contentViewController = controller

@@ -40,6 +40,23 @@ struct ShortcutSchemaAuditTests {
   }
 
   @Test
+  func toggleSidebarIsListedUnderGeneral() {
+    #expect(ShortcutSchema.app.entry(for: .toggleSidebar)?.category == .general)
+  }
+
+  /// ⌘/ must stay free: no other default claims it, and AppKit reserves only ⌘⇧/ (Help).
+  @Test
+  func toggleSidebarDefaultClashesWithNothing() throws {
+    let binding = try #require(ShortcutSchema.app.entry(for: .toggleSidebar)?.defaultBinding)
+    let clashes = ShortcutSchema.app.entries.filter {
+      $0.id != .toggleSidebar && $0.defaultBinding?.keyCode == binding.keyCode
+        && $0.defaultBinding?.modifiers == binding.modifiers
+    }
+    #expect(clashes.isEmpty, "Toggle Sidebar default clashes with \(clashes.map(\.id)).")
+    #expect(!AppKitReservedDetector.isReserved(keyCode: binding.keyCode, modifiers: binding.modifiers))
+  }
+
+  @Test
   func goldenCoversEveryCommandID() {
     let coveredIDs = Set(Self.golden.map(\.0))
     for id in CommandID.allCases {
@@ -58,6 +75,7 @@ struct ShortcutSchemaAuditTests {
     (.commandPaletteToggle, (0x23, [.command])),  // p
     (.showUnread, (0x20, [.command])),  // ⌘U
     (.checkForUpdates, (0x20, [.command, .shift])),  // ⌘⇧U
+    (.toggleSidebar, (0x2C, [.command])),  // ⌘/
     (.openInEditor, (0x1F, [.command])),  // o
     (.toggleDiffInspector, (0x05, [.command])),  // g (HAN-51)
     (.addProject, (0x1F, [.command, .shift])),  // ⇧O
@@ -77,7 +95,6 @@ struct ShortcutSchemaAuditTests {
     (.deleteCurrentWorktree, (0x33, [.command, .shift])),  // ⌘⇧⌫
     (.showArchivedWorktrees, (0x00, [.command, .control])),  // ⌃A
     (.copyCurrentWorktreePath, (0x08, [.command, .shift])),  // ⌘⇧C
-    (.toggleSidebar, (0x01, [.command, .option])),  // ⌘⌥S
     (.revealCurrentWorktreeInSidebar, (0x26, [.command, .shift])),  // ⌘⇧J
     (.selectPreviousWorktree, (0x7E, [.command, .control])),  // ⌘⌃↑
     (.selectNextWorktree, (0x7D, [.command, .control])),  // ⌘⌃↓
