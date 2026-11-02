@@ -159,7 +159,7 @@ struct CatalogSidebarTests {
   func selectionOrderFollowsTheRowsOnScreen() {
     var collapsedWorkspace = workspace
     collapsedWorkspace.isExpanded = false
-    var catalog = Catalog(projects: [folder, collapsedWorkspace, repository], projectSortMode: .manual)
+    var catalog = Catalog(projects: [folder, collapsedWorkspace, repository])
     #expect(
       catalog.sidebarSelectionOrder.map(\.worktreeID)
         == [folderRoot.id, main.id, pinned.id, feature.id])
@@ -179,11 +179,11 @@ struct CatalogSidebarTests {
     var failed = repository
     failed.loadState = .failed(reason: "gone")
     let catalog = Catalog(
-      projects: [tagged, workspace, failed], activeTagFilter: .tags([tag]), projectSortMode: .manual)
+      projects: [tagged, workspace, failed], activeTagFilter: .tags([tag]))
     #expect(catalog.sidebarProjects.map(\.id) == [tagged.id])
     #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [folderRoot.id])
 
-    let unfiltered = Catalog(projects: [tagged, workspace, failed], projectSortMode: .manual)
+    let unfiltered = Catalog(projects: [tagged, workspace, failed])
     #expect(
       unfiltered.sidebarSelectionOrder.map(\.worktreeID)
         == [folderRoot.id, defaultTerminal.id, fixTerminal.id, checkout.id, libCheckout.id])
@@ -195,7 +195,7 @@ struct CatalogSidebarTests {
     let workspace = self.workspace
     var remote = folder
     remote.remoteHost = RemoteHost(alias: "server")
-    var catalog = Catalog(projects: [repository, remote, workspace], projectSortMode: .manual)
+    var catalog = Catalog(projects: [repository, remote, workspace])
     catalog.sidebarFilter = .remote
     #expect(catalog.sidebarProjects.map(\.id) == [remote.id])
     catalog.sidebarFilter = .workspace
@@ -204,7 +204,7 @@ struct CatalogSidebarTests {
 
   @Test
   func notificationFilterUsesLiveMatchesAndExcludesArchivedRows() {
-    var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
+    var catalog = Catalog(projects: [repository, workspace])
     catalog.sidebarFilter = .notifications
     #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: []).isEmpty)
     let notified: Set<WorktreeID> = [pinned.id, checkout.id]
@@ -222,7 +222,7 @@ struct CatalogSidebarTests {
 
   @Test
   func notificationFilterListsOnlyNotifiedRows() {
-    var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
+    var catalog = Catalog(projects: [repository, workspace])
     catalog.sidebarFilter = .notifications
     catalog.selectedProjectID = repository.id
     catalog.projects[0].selectedWorktreeID = feature.id
@@ -277,7 +277,7 @@ struct CatalogSidebarTests {
 
   @Test
   func pullRequestFilterUsesLiveMatchesAndExcludesArchivedRows() {
-    var catalog = Catalog(projects: [repository, workspace], projectSortMode: .manual)
+    var catalog = Catalog(projects: [repository, workspace])
     catalog.sidebarFilter = .pullRequests
     #expect(catalog.sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: []).isEmpty)
     let matches: Set<WorktreeID> = [feature.id, checkout.id]

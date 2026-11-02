@@ -43,25 +43,16 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// empty — projects start untagged.
   public var tagIDs: Set<TagID>
   /// Wall-clock timestamp at which this Project was added to the catalog.
-  /// Used by `ProjectSortMode.joinOrder` to render an ordering stable
-  /// across manual reordering — i.e. so the user can switch back from
-  /// `.manual` to `.joinOrder` and get the original insertion order.
-  /// Legacy catalogs that predate this field decode to `.distantPast`;
-  /// they tie and fall back to array-position order, which equals
-  /// insertion order at the time the file was first written.
+  /// A catalog that still stores the retired `joinOrder` sort is sorted by
+  /// this field one time at load (see `LegacyProjectOrder`). Legacy catalogs
+  /// that predate this field decode to `.distantPast`.
   public var addedAt: Date
   /// Most-recent activity timestamp. Bumped on (a) inbox-notification
   /// arrival for any worktree of this Project, and (b) any input the
-  /// app dispatches into a pane of this Project. `nil` = never active;
-  /// `ProjectSortMode.activeFirst` puts these at the bottom.
+  /// app dispatches into a pane of this Project. `nil` = never active.
+  /// A catalog that still stores the retired `activeFirst` sort is sorted by
+  /// this field one time at load (see `LegacyProjectOrder`).
   public var lastActiveAt: Date?
-  /// User-curated ordering key consumed by `ProjectSortMode.manual`.
-  /// Auto-incremented at `addProject` time so new projects land at the
-  /// end of the manual list; rewritten en bloc when the user confirms
-  /// the manual-sort sheet. Legacy projects decode to `0` and tie-break
-  /// on their `catalog.projects` array position, which equals their
-  /// historical sidebar order — i.e. a no-op upgrade.
-  public var manualOrder: Int
   /// User-assigned Project accent. `nil` = no color (system accent).
   /// Edited via Settings → Projects → General. Encoded only when set so
   /// catalogs without a color stay byte-identical on round-trip.
@@ -110,7 +101,6 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     tagIDs: Set<TagID> = [],
     addedAt: Date = Date(),
     lastActiveAt: Date? = nil,
-    manualOrder: Int = 0,
     color: ProjectColor? = nil,
     icon: ProjectIcon? = nil,
     isWorkspace: Bool = false,
@@ -134,7 +124,6 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.tagIDs = tagIDs
     self.addedAt = addedAt
     self.lastActiveAt = lastActiveAt
-    self.manualOrder = manualOrder
     self.color = color
     self.icon = icon
     self.isWorkspace = isWorkspace
@@ -186,7 +175,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
-      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon, isWorkspace, workspaceGroups
+      isExpanded, tagIDs, addedAt, lastActiveAt, color, icon, isWorkspace, workspaceGroups
   }
 
   public init(from decoder: Decoder) throws {
@@ -213,11 +202,9 @@ extension Project: Codable {
     let tagIDArray = try container.decodeIfPresent([TagID].self, forKey: .tagIDs) ?? []
     self.tagIDs = Set(tagIDArray)
     // Legacy catalogs ship without `addedAt`; fall back to `.distantPast`
-    // so joinOrder sorts produce a stable result (ties broken by array
-    // position, which equals the original insertion order).
+    // so the load-time `joinOrder` sort ties on array position.
     self.addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? .distantPast
     self.lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
-    self.manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
     self.color = try container.decodeIfPresent(ProjectColor.self, forKey: .color)
     // Deliberately lenient, unlike every sibling field: a malformed `icon`
     // degrades to the default folder glyph instead of throwing, because a
@@ -265,12 +252,6 @@ extension Project: Codable {
       try container.encode(addedAt, forKey: .addedAt)
     }
     try container.encodeIfPresent(lastActiveAt, forKey: .lastActiveAt)
-    // Sentinel manualOrder (legacy decode or never-stamped) is omitted
-    // so unmigrated catalogs stay byte-identical until something writes
-    // a real value.
-    if manualOrder != 0 {
-      try container.encode(manualOrder, forKey: .manualOrder)
-    }
     try container.encodeIfPresent(color, forKey: .color)
     try container.encodeIfPresent(icon, forKey: .icon)
     // Omit `isWorkspace` when false so every non-workspace catalog stays

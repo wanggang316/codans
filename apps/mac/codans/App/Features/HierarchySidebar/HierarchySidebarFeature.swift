@@ -171,14 +171,6 @@ struct HierarchySidebarFeature {
     /// existing reconcile path picks up any worktree that did make it to
     /// disk before the crash.
     var pendingWorktrees: IdentifiedArrayOf<PendingWorktree> = []
-    /// Transient "reorder projects inline" editing session. When `true`,
-    /// the sidebar collapses every Project to a header-only row, prefixes
-    /// each with a drag handle, and enables `ForEach.onMove` so Projects
-    /// can be dragged directly in the list. Session-scoped — never
-    /// persisted; the resulting order is saved live through
-    /// `reorderProjects`. Entered from the footer sort menu's
-    /// "Manual Order…" item, dismissed by the inline "Done" control.
-    var isReorderingProjects: Bool = false
     /// Machine-wide `git` availability, filled by the probe on first appear.
     /// `nil` until the probe answers — the banner stays hidden meanwhile so a
     /// healthy launch never flashes a warning. Only `.blocked` renders.
@@ -226,8 +218,9 @@ struct HierarchySidebarFeature {
     /// remote-connection sheet seeded from the project, in edit mode.
     case projectEditConnectionTapped(projectID: ProjectID)
 
-    // Reorder Projects (ForEach.onMove forwarder).
-    case reorderProjects(from: IndexSet, to: Int)
+    /// A Project block was dropped in the sidebar. The view resolves the
+    /// drop to a placement relative to a visible Project (ADR 0001).
+    case moveProject(ProjectID, to: ProjectPlacement)
 
     // Reorder Worktrees within a single sidebar segment under a Project
     // (ForEach.onMove forwarder for the pinned / unpinned segments).
@@ -360,20 +353,6 @@ struct HierarchySidebarFeature {
     /// creation they navigated away from. Handled by `RootFeature` (it
     /// owns the loading-overlay focus); a no-op at this level.
     case pendingWorktreeRowTapped(PendingWorktreeID)
-
-    // Sidebar bottom-bar sort mode.
-    /// User picked a non-manual sort from the sort popover. Persists and
-    /// keeps `catalog.projects` (the manual order) untouched.
-    case projectSortModeChanged(ProjectSortMode)
-    /// User picked "Manual Order…" — enter the inline reorder session.
-    /// Seeds `manualOrder` from the currently displayed order (so the
-    /// list doesn't reshuffle), flips `projectSortMode` to `.manual`,
-    /// and sets `isReorderingProjects`.
-    case beginProjectReorder
-    /// User tapped the inline "Done" control — leaves the reorder
-    /// session. The order is already persisted, so this only clears the
-    /// transient UI flag.
-    case endProjectReorder
 
     // Tag chip footer at the sidebar's safe-area bottom.
     /// Toggle membership of `id` in `Catalog.activeTagFilter`. If filter is
@@ -914,8 +893,8 @@ struct HierarchySidebarFeature {
 
     // MARK: Project hover chrome
 
-    case .reorderProjects(let source, let destination):
-      hierarchyClient.reorderProjects(source, destination)
+    case .moveProject(let projectID, let placement):
+      hierarchyClient.moveProject(projectID, placement)
       return .none
 
     case .reorderWorktrees(let projectID, let segment, let source, let destination):
@@ -943,28 +922,6 @@ struct HierarchySidebarFeature {
 
     case .refreshAllProjectsTapped:
       return .send(.delegate(.refreshAllProjectsRequested))
-
-    // MARK: Project sort mode
-
-    case .projectSortModeChanged(let mode):
-      hierarchyClient.setProjectSortMode(mode)
-      // Switching to a computed order leaves no manual session to edit.
-      if mode != .manual { state.isReorderingProjects = false }
-      return .none
-
-    case .beginProjectReorder:
-      // Seed `manualOrder` from the order the user currently sees (the
-      // full, unfiltered list under the active mode) and flip to
-      // `.manual` in one step, so entering the session doesn't reshuffle
-      // rows. The inline `.onMove` then maps 1:1 onto `catalog.projects`.
-      let catalog = hierarchyClient.snapshot()
-      hierarchyClient.applyManualProjectOrder(catalog.sorted(catalog.projects).map(\.id))
-      state.isReorderingProjects = true
-      return .none
-
-    case .endProjectReorder:
-      state.isReorderingProjects = false
-      return .none
 
     case .projectAddWorktreeTapped(let projectID):
       // The Add-Worktree "+" row is hidden for non-git Projects, so a

@@ -213,7 +213,7 @@ struct NewAgentFeature {
       switch action {
       case .onAppear:
         let catalog = hierarchyClient.snapshot()
-        state.projects = catalog.sorted(catalog.projects).map(ProjectOption.init)
+        state.projects = catalog.projects.map(ProjectOption.init)
         if let draft = state.restoring,
           state.projects.contains(where: { $0.id == draft.projectID })
         {
