@@ -572,11 +572,9 @@ struct TabBarRowView: View {
   /// chord; returns nil and the chip keeps its close-button slot.
   private func chordHint(for tabIndex: Int) -> String? {
     guard commandKeyObserver.isCommandHeld,
-      let id = CommandID.switchToTab(index: tabIndex),
-      let resolved = resolvedShortcuts[id], resolved.isEnabled,
-      let binding = resolved.binding
+      let id = CommandID.switchToTab(index: tabIndex)
     else { return nil }
-    return ShortcutDisplay.chord(for: binding)
+    return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }
 }
 

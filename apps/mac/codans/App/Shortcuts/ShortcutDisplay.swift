@@ -43,6 +43,14 @@ public enum ShortcutDisplay {
     modifiersDisplay(binding.modifiers) + keycap(for: binding.keyCode)
   }
 
+  /// The display chord bound to `id`, or `nil` when the command has no binding or the user
+  /// disabled it.
+  public static func chord(for id: CommandID, in shortcuts: ResolvedShortcutMap) -> String? {
+    guard let resolved = shortcuts[id], resolved.isEnabled, let binding = resolved.binding
+    else { return nil }
+    return chord(for: binding)
+  }
+
   /// Tooltip text for a control that triggers `id`: `description` followed by the resolved
   /// chord with a space between its glyphs, e.g. `Back ⌘ [`. Plain `description` when the
   /// command has no binding or the user disabled it.

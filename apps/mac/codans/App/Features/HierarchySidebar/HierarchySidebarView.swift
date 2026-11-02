@@ -912,7 +912,7 @@ struct HierarchySidebarView: View {
         rowWorktree: root,
         isRowSelected: currentSelection.worktreeID == root.id,
         agentStateStore: agentStateStore,
-        hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
+        hotkeyHint: hotkeyHint(hotkeyNumber),
         onToggleExpansion: toggleExpansion
       ) {
         runScriptPingAccessory(for: root, in: project)
@@ -996,7 +996,7 @@ struct HierarchySidebarView: View {
       pullRequestSummary: pullRequestSummary(over: project.workspaceGroupMembers(group.id)),
       isSelected: terminal.map { currentSelection.worktreeID == $0.id } ?? false,
       agentStateStore: agentStateStore,
-      hotkeyHint: commandKeyObserver.isCommandHeld ? hotkeyNumber : nil,
+      hotkeyHint: hotkeyHint(hotkeyNumber),
       deletionFailures: store.workspaceGroupDeletionFailures[group.id] ?? [],
       onToggleExpansion: toggleExpansion,
       onRetryDeletion: {
@@ -1037,6 +1037,15 @@ struct HierarchySidebarView: View {
     if open > 0 { parts.append(open == 1 ? "1 PR" : "\(open) PRs") }
     if merged > 0 { parts.append("\(merged) merged") }
     return parts.joined(separator: " · ")
+  }
+
+  /// The select chord for sidebar slot `hotkeyNumber`, while ⌘ is held. Read from the
+  /// registry so a rebind or a disabled binding shows as such.
+  private func hotkeyHint(_ hotkeyNumber: Int?) -> String? {
+    guard commandKeyObserver.isCommandHeld, let hotkeyNumber,
+      let id = CommandID.selectWorktreeAt(index: hotkeyNumber)
+    else { return nil }
+    return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }
 
   /// The per-row hotkey still requires a Button to bind to. Mounted as a 0×0
@@ -1152,8 +1161,8 @@ struct HierarchySidebarView: View {
       // Trailing chord hint, after both the row content and the optional PR pill so it
       // always pins to the right edge of the row instead of being shoved leftwards by
       // the pill's intrinsic width. Visible only while ⌘ is held.
-      if let hotkeyNumber, commandKeyObserver.isCommandHeld {
-        SidebarHotkeyHint(number: hotkeyNumber)
+      if let hint = hotkeyHint(hotkeyNumber) {
+        SidebarHotkeyHint(chord: hint)
       }
     }
     // Worktree rows are real List children. Selection chrome is owned by
@@ -2019,8 +2028,8 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         tab.panes.contains { agentStateStore?.workingPaneIDs.contains($0.id) == true }
       }
   }
-  /// The ⌃N number to show, while ⌘ is held.
-  var hotkeyHint: Int?
+  /// The row's select chord (`⌃N`), while ⌘ is held.
+  var hotkeyHint: String?
   let onToggleExpansion: () -> Void
   /// Trailing indicators for `rowWorktree`, ahead of the hover controls.
   @ViewBuilder let accessory: () -> Accessory
@@ -2178,7 +2187,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
       }
       .opacity(isHovering ? 1 : 0)
       if let hotkeyHint {
-        SidebarHotkeyHint(number: hotkeyHint)
+        SidebarHotkeyHint(chord: hotkeyHint)
       }
     }
     .contentShape(Rectangle())
@@ -2330,7 +2339,8 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   let pullRequestSummary: String?
   let isSelected: Bool
   let agentStateStore: AgentStateStore?
-  var hotkeyHint: Int?
+  /// The row's select chord (`⌃N`), while ⌘ is held.
+  var hotkeyHint: String?
   /// Items the last delete could not remove; known only until a restart.
   let deletionFailures: [GroupDeletionOutcome.Failure]
   let onToggleExpansion: () -> Void
@@ -2393,7 +2403,7 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
       // Opacity, not conditional rendering, so the row width stays put.
       .opacity(isHovering ? 1 : 0)
       if let hotkeyHint {
-        SidebarHotkeyHint(number: hotkeyHint)
+        SidebarHotkeyHint(chord: hotkeyHint)
       }
     }
     .contentShape(Rectangle())
@@ -2435,23 +2445,13 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   }
 }
 
-/// The `⌃N` chord a sidebar row answers to, shown at its trailing edge while
-/// ⌘ is held. Slot 10 reads `⌃0`.
+/// The chord a sidebar row answers to (`⌃N`), shown at its trailing edge while
+/// ⌘ is held.
 private struct SidebarHotkeyHint: View {
-  let number: Int
+  let chord: String
 
   var body: some View {
-    Text("⌃\(number == 10 ? "0" : String(number))")
-      .font(.caption2.monospaced())
-      .foregroundStyle(.secondary)
-      .padding(.horizontal, 4)
-      .padding(.vertical, 1)
-      .overlay(
-        RoundedRectangle(cornerRadius: 3)
-          .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-      )
-      .padding(.leading, 6)
-      .accessibilityHidden(true)
+    ShortcutHintLabel(chord: chord, leadingGap: 6)
   }
 }
 

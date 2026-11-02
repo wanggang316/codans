@@ -176,10 +176,7 @@ struct TabChipView: View {
       // tab's color dot (when set) sits there.
       Group {
         if let chordHint {
-          Text(chordHint)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
+          ShortcutHintLabel(chord: chordHint)
         } else if let tabColor {
           Circle()
             .fill(tabColor.swiftUIColor)

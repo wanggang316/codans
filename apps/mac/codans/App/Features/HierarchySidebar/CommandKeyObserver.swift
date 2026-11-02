@@ -90,14 +90,24 @@ final class CommandKeyObserver {
       activationTask = Task { @MainActor [weak self] in
         try? await Task.sleep(for: delay)
         guard !Task.isCancelled else { return }
-        self?.isCommandHeld = true
+        self?.setCommandHeld(true)
       }
     } else {
       activationTask?.cancel()
       activationTask = nil
       if isCommandHeld {
-        isCommandHeld = false
+        setCommandHeld(false)
       }
+    }
+  }
+
+  /// Every hint keyed on this flag inserts or removes itself in the same transaction, so
+  /// one animation here drives all of their transitions (`ShortcutHintLabel`).
+  private func setCommandHeld(_ held: Bool) {
+    let animation: Animation? =
+      NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .shortcutHint
+    withAnimation(animation) {
+      isCommandHeld = held
     }
   }
 }

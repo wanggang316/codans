@@ -36,22 +36,6 @@ extension View {
   }
 }
 
-/// The chord glyphs themselves, shared by both modifiers so every ⌘-hint in
-/// the app has the same size and tracking. 12pt sits beside the 13–16pt icons
-/// these decorate without shrinking into a footnote; the extra tracking is
-/// there because SF Mono packs ⌘⇧D into tight cells and the symbols touch.
-private struct CommandKeyHintText: View {
-  let chord: String
-
-  var body: some View {
-    Text(chord)
-      .font(.callout.monospaced())
-      .tracking(1)
-      .foregroundStyle(.secondary)
-      .accessibilityHidden(true)
-  }
-}
-
 private struct CommandKeyChordHintModifier: ViewModifier {
   let chord: String?
   let spacing: CGFloat
@@ -61,7 +45,7 @@ private struct CommandKeyChordHintModifier: ViewModifier {
     HStack(spacing: spacing) {
       content
       if observer.isCommandHeld, let chord {
-        CommandKeyHintText(chord: chord)
+        ShortcutHintLabel(chord: chord, font: .callout)
       }
     }
   }
@@ -77,16 +61,13 @@ private struct CommandKeyHintModifier: ViewModifier {
     HStack(spacing: spacing) {
       content
       if let chord = chordText {
-        CommandKeyHintText(chord: chord)
+        ShortcutHintLabel(chord: chord, font: .callout)
       }
     }
   }
 
   private var chordText: String? {
-    guard observer.isCommandHeld,
-      let resolved = shortcuts[id], resolved.isEnabled,
-      let binding = resolved.binding
-    else { return nil }
-    return ShortcutDisplay.chord(for: binding)
+    guard observer.isCommandHeld else { return nil }
+    return ShortcutDisplay.chord(for: id, in: shortcuts)
   }
 }
