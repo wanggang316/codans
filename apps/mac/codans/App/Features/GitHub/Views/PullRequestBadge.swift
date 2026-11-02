@@ -7,13 +7,15 @@ import SwiftUI
 ///
 /// Two render states surfaced via `BadgeState`:
 ///   - `.loaded(snapshot, rollup)` — full render
-///   - `.error(GitHubError)` — tertiary-label exclamation with tooltip
+///   - `.error(GitHubError)` — tertiary-label exclamation
 ///
 /// There is deliberately no loading state: a fetch in flight renders nothing in the row.
 ///
 /// `onTap` runs the badge's primary action. Hover-triggered behavior (such as opening the
 /// PR popover after a 150 ms dwell) lives at the call site — this view intentionally does
 /// not manage its own timers so a parent can coordinate hover across badge + popover.
+/// No `.help` tooltip: the hover popover already shows the same details, and the system
+/// tooltip would draw on top of it.
 struct PullRequestBadge: View {
   enum BadgeState: Equatable {
     case loaded(PullRequestSnapshot, rollup: CheckRollup)
@@ -37,7 +39,6 @@ struct PullRequestBadge: View {
     }
     .buttonStyle(.plain)
     .accessibilityLabel(accessibilityLabel)
-    .help(tooltip)
   }
 
   @ViewBuilder
@@ -89,17 +90,6 @@ struct PullRequestBadge: View {
       )
     case .error(let error):
       return Text("GitHub error: \(error.userFacingMessage)")
-    }
-  }
-
-  private var tooltip: String {
-    switch state {
-    case .loaded(let snapshot, _):
-      let draftTag = snapshot.isDraft ? " (draft)" : ""
-      let conflictLine = snapshot.hasMergeConflict ? "\n⚠︎ Has merge conflicts" : ""
-      return "#\(snapshot.number)\(draftTag) \(snapshot.title)\n@\(snapshot.author)\(conflictLine)"
-    case .error(let error):
-      return error.userFacingMessage
     }
   }
 }
