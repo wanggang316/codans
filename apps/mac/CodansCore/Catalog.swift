@@ -1,15 +1,20 @@
 import Foundation
 
 public nonisolated struct Catalog: Equatable, Sendable {
-  public static let currentVersion = 4
+  public static let currentVersion = 5
   /// Oldest version this build still reads; it is migrated on load.
   public static let oldestReadableVersion = 3
 
-  /// Version of the decoded file. Lower than `currentVersion` until
-  /// `CatalogMigrationV3ToV4` has run; always `currentVersion` when built in
+  /// Version of the decoded file. Lower than `currentVersion` until the
+  /// catalog migrations have run; always `currentVersion` when built in
   /// memory.
   public var version: Int
   public var projects: [Project]
+  /// The Host list: every Host that Server projects can refer to, in the
+  /// order of addition. `HierarchyManager` is its only writer; change it
+  /// through the `Catalog+Hosts` operations so `Project.remoteHost` stays
+  /// resolved. See ADR 0003.
+  public var hosts: [HostRecord]
   public var tags: [Tag]
   public var sidebarFilter: SidebarFilter = .all
   public var activeTagFilter: TagFilter
@@ -27,6 +32,7 @@ public nonisolated struct Catalog: Equatable, Sendable {
   public init(
     version: Int = Catalog.currentVersion,
     projects: [Project] = [],
+    hosts: [HostRecord] = [],
     tags: [Tag] = [],
     activeTagFilter: TagFilter = .all,
     projectSortMode: ProjectSortMode = .default,
@@ -34,6 +40,7 @@ public nonisolated struct Catalog: Equatable, Sendable {
   ) {
     self.version = version
     self.projects = projects
+    self.hosts = hosts
     self.tags = tags
     self.activeTagFilter = activeTagFilter
     self.projectSortMode = projectSortMode
@@ -60,7 +67,7 @@ extension Catalog: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, projects, tags, activeTagFilter, sidebarFilter, projectSortMode, selectedProjectID
+    case version, projects, hosts, tags, activeTagFilter, sidebarFilter, projectSortMode, selectedProjectID
   }
 
   public init(from decoder: Decoder) throws {
@@ -72,10 +79,12 @@ extension Catalog: Codable {
     guard version >= Catalog.oldestReadableVersion else {
       throw DecodingIssue.unsupportedVersion(version)
     }
-    // Version 3 has the same shape minus the Workspace group fields, which
-    // decode to their defaults; the store then runs the migration.
+    // Versions 3 and 4 have the same shape minus later fields (Workspace
+    // groups, the Host list), which decode to their defaults; the store then
+    // runs the migrations.
     self.version = version
     self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
+    self.hosts = try container.decodeIfPresent([HostRecord].self, forKey: .hosts) ?? []
     self.sidebarFilter = try container.decodeIfPresent(SidebarFilter.self, forKey: .sidebarFilter) ?? .all
     self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
     self.activeTagFilter =
@@ -84,6 +93,7 @@ extension Catalog: Codable {
       try container.decodeIfPresent(ProjectSortMode.self, forKey: .projectSortMode) ?? .default
     self.selectedProjectID =
       try container.decodeIfPresent(ProjectID.self, forKey: .selectedProjectID)
+    resolveHostReferences()
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -93,6 +103,7 @@ extension Catalog: Codable {
     }
     try container.encode(version, forKey: .version)
     try container.encode(projects, forKey: .projects)
+    try container.encode(hosts, forKey: .hosts)
     try container.encode(tags, forKey: .tags)
     // Omit `activeTagFilter` when it's the default `.all` — keeps the
     // common no-filter case from churning the on-disk JSON.
