@@ -183,15 +183,33 @@ struct ProjectOrderTests {
     #expect(object["projectOrder"] as? String == "array")
   }
 
+  // A present order field must be valid: guessing on a bad value would sort
+  // the array and persist that order on the next save.
+
+  @Test(arguments: [#""byName""#, "7"])
+  func anInvalidSortModeFailsTheDecode(value: String) throws {
+    #expect(throws: DecodingError.self) {
+      _ = try decodeEdited { object in object["projectSortMode"] = json(value) }
+    }
+  }
+
+  @Test(arguments: [#""stack""#, "true"])
+  func anInvalidOrderMarkerFailsTheDecode(value: String) throws {
+    #expect(throws: DecodingError.self) {
+      _ = try decodeEdited { object in object["projectOrder"] = json(value) }
+    }
+  }
+
   @Test
-  func unknownSortModeKeepsArrayOrderAndStillLoads() throws {
-    let projects = [
-      Project(name: "c", rootPath: "/c", addedAt: date(3)),
-      Project(name: "a", rootPath: "/a", addedAt: date(1)),
-    ]
-    let catalog = try decodeLegacy(projects, sortMode: "byName")
-    #expect(catalog.projects.map(\.name) == ["c", "a"])
-    // An unknown mode is not `joinOrder`; only a missing one is.
+  func anInvalidManualOrderFailsTheDecode() throws {
+    #expect(throws: DecodingError.self) {
+      _ = try decodeEdited(legacy: true) { object in
+        object["projectSortMode"] = "manual"
+        var projects = object["projects"] as? [[String: Any]] ?? []
+        projects[0]["manualOrder"] = "first"
+        object["projects"] = projects
+      }
+    }
   }
 
   @Test(arguments: ["joinOrder", "activeFirst", "manual"])
@@ -237,6 +255,20 @@ struct ProjectOrderTests {
   private func folderProject(_ name: String, addedAt: Date) -> Project {
     let root = Worktree(name: name, path: "/\(name)")
     return Project(name: name, rootPath: "/\(name)", worktrees: [root], addedAt: addedAt, loadState: .ready)
+  }
+
+  /// Encodes a two-Project catalog, edits its JSON, and decodes it.
+  /// `legacy` drops the `projectOrder` marker first.
+  private func decodeEdited(legacy: Bool = false, _ edit: (inout [String: Any]) -> Void) throws -> Catalog {
+    let data = try JSONEncoder().encode(Catalog(projects: [a, b]))
+    var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    if legacy { object.removeValue(forKey: "projectOrder") }
+    edit(&object)
+    return try JSONDecoder().decode(Catalog.self, from: JSONSerialization.data(withJSONObject: object))
+  }
+
+  private func json(_ fragment: String) -> Any {
+    (try? JSONSerialization.jsonObject(with: Data(fragment.utf8), options: .fragmentsAllowed)) ?? NSNull()
   }
 
   private func date(_ secondsSince1970: TimeInterval) -> Date {

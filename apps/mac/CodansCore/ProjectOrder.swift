@@ -58,12 +58,16 @@ extension Catalog {
 /// stored), so the order the user sees does not change. Neither key is
 /// written again.
 nonisolated enum LegacyProjectOrder {
-  static let joinOrder = "joinOrder"
-  static let activeFirst = "activeFirst"
-  static let manual = "manual"
-  /// Value of the catalog's `projectOrder` key in a file written under
-  /// ADR 0001. Without it, the file comes from an older build.
-  static let arrayMarker = "array"
+  /// The catalog's `projectOrder` value in a file written under ADR 0001.
+  /// Without it, the file comes from an older build.
+  enum Marker: String, Codable {
+    case array
+  }
+
+  /// The retired `projectSortMode` values.
+  enum SortMode: String, Decodable {
+    case joinOrder, activeFirst, manual
+  }
 
   /// The one legacy key a Project carried for ordering.
   struct Fields: Decodable {
@@ -78,16 +82,16 @@ nonisolated enum LegacyProjectOrder {
   }
 
   /// Sorts `projects` the way the retired `sortMode` displayed them. Ties
-  /// keep the array order. `nil` (a file with the `projectOrder` marker) or an
-  /// unknown mode keeps the array as is.
-  static func materialize(_ projects: [Project], sortMode: String?, manualOrders: [Int]) -> [Project] {
+  /// keep the array order. `nil` (a file with the `projectOrder` marker)
+  /// keeps the array as is.
+  static func materialize(_ projects: [Project], sortMode: SortMode?, manualOrders: [Int]) -> [Project] {
     let areInIncreasingOrder: (Project, Project) -> Bool?
     switch sortMode {
-    case joinOrder:
+    case .joinOrder:
       areInIncreasingOrder = { lhs, rhs in
         lhs.addedAt == rhs.addedAt ? nil : lhs.addedAt < rhs.addedAt
       }
-    case activeFirst:
+    case .activeFirst:
       // Most recent activity first; never-active Projects follow, by addedAt.
       areInIncreasingOrder = { lhs, rhs in
         switch (lhs.lastActiveAt, rhs.lastActiveAt) {
@@ -97,14 +101,14 @@ nonisolated enum LegacyProjectOrder {
         default: return lhs.addedAt == rhs.addedAt ? nil : lhs.addedAt < rhs.addedAt
         }
       }
-    case manual:
+    case .manual:
       guard manualOrders.count == projects.count else { return projects }
       return zip(projects, manualOrders).enumerated()
         .sorted { lhs, rhs in
           lhs.element.1 != rhs.element.1 ? lhs.element.1 < rhs.element.1 : lhs.offset < rhs.offset
         }
         .map(\.element.0)
-    default:
+    case nil:
       return projects
     }
     return projects.enumerated()

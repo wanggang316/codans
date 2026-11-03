@@ -92,16 +92,14 @@ extension Catalog: Codable {
     // sidebar sorted the array with the stored mode, and a missing mode meant
     // the default `joinOrder`. Sort one time so the user sees the same order;
     // the next save writes the marker and drops the mode.
-    let isArrayOrder =
-      (try? container.decodeIfPresent(String.self, forKey: .projectOrder)) == LegacyProjectOrder.arrayMarker
-    let legacySortMode: String? =
-      isArrayOrder
-      ? nil
-      : (try? container.decodeIfPresent(String.self, forKey: .projectSortMode)) ?? LegacyProjectOrder.joinOrder
+    // Present values are decoded strictly: guessing on a bad value would
+    // sort the array, and the next save would keep that order.
+    let marker = try container.decodeIfPresent(LegacyProjectOrder.Marker.self, forKey: .projectOrder)
+    let storedSortMode = try container.decodeIfPresent(LegacyProjectOrder.SortMode.self, forKey: .projectSortMode)
+    let legacySortMode = marker == .array ? nil : storedSortMode ?? .joinOrder
     let manualOrders =
-      legacySortMode == LegacyProjectOrder.manual
-      ? (try? container.decodeIfPresent([LegacyProjectOrder.Fields].self, forKey: .projects))?
-        .map(\.manualOrder)
+      legacySortMode == .manual
+      ? try container.decodeIfPresent([LegacyProjectOrder.Fields].self, forKey: .projects)?.map(\.manualOrder)
       : nil
     self.projects = LegacyProjectOrder.materialize(
       projects, sortMode: legacySortMode, manualOrders: manualOrders ?? [])
@@ -125,7 +123,7 @@ extension Catalog: Codable {
     try container.encode(version, forKey: .version)
     try container.encode(projects, forKey: .projects)
     // Older builds ignore this key, so they still read the file.
-    try container.encode(LegacyProjectOrder.arrayMarker, forKey: .projectOrder)
+    try container.encode(LegacyProjectOrder.Marker.array, forKey: .projectOrder)
     try container.encode(hosts, forKey: .hosts)
     // Omitted while every Host is open; sorted so the file is order-stable.
     if !collapsedSidebarHosts.isEmpty {
