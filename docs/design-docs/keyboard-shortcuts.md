@@ -9,7 +9,7 @@ codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`Shortc
 
 按住 ⌘ 约 1 秒后，各控件显示自己的快捷键提示（`ShortcutHintLabel`：系统字体、`.secondary` 纯文本、无键帽边框）。提示从解析后的绑定读取，改键或禁用会同步反映。两种放置方式都只切换透明度，周围布局不动：
 
-- **原位替换图标**（Tab、侧栏筛选栏按钮，`shortcutHintReplacing(_:font:onTint:)`）：前导图标交叉淡化成和弦的按键本身（`ShortcutDisplay.keycap(for:in:)`，如 `⌘1` 显示 `1`），完整和弦写在 tooltip 里。完整和弦比图标宽，会压到标题。没有图标的 Tab 把按键显示在关闭按钮的槽位，此时隐藏关闭按钮。时长取 `Animation.shortcutHint`（0.08 s easeOut），由 `CommandKeyObserver` 翻转标志时带入。
+- **控件内快捷键**（Tab、侧栏筛选栏按钮）：Tab 的快捷键在 chip 尾部槽位，替换颜色点；筛选栏按钮的快捷键与图标、标题叠放，替换整组标签，两者始终都在布局中。两处都只做透明度过渡，在原位交叉淡化，不位移、不模糊。时长取 `Animation.shortcutHint`（0.08 s easeOut），由 `CommandKeyObserver` 翻转标志时带入。
 - **替换尾部附件**（侧栏 worktree / Project / Group 行、Agents View 行，`ShortcutHintTrailing`）：完整和弦与行尾附件（diff 统计、PR 徽标、状态点、悬停按钮）叠在同一个尾对齐的 ZStack 里，按住 ⌘ 时附件淡出、和弦淡入，隐藏的附件不响应点击。一列行同时切换，用 0.15 s easeInOut，比单个控件稍柔和。
 
 开启“减弱动态效果”时不做动画。

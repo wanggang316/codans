@@ -30,9 +30,6 @@ struct TabChipLabel: View {
   /// the spinner (`tabIsDirty` skips run panes); the colour flipping on is
   /// what reads as "running". `nil` = idle, monochrome icon.
   var iconTint: Color?
-  /// The key of the tab's select chord (`1` for `⌘1`) while ⌘ is held. Takes
-  /// the leading glyph's place; `TabChipView` shows it for a chip with no glyph.
-  var shortcutKey: String?
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -47,31 +44,6 @@ struct TabChipLabel: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      if hasLeadingGlyph {
-        leadingGlyph
-          .shortcutHintReplacing(shortcutKey)
-      }
-      Text(title)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .font(.system(size: TabBarMetrics.titleFontSize))
-        // A chip resizing in an add / close reflow re-truncates its title;
-        // swap the truncation outright instead of cross-fading the two
-        // strings, which leaves a ghost ellipsis behind the text.
-        .contentTransition(.identity)
-        .foregroundStyle(TabBarColors.activeText)
-        .opacity(textOpacity)
-    }
-  }
-
-  var hasLeadingGlyph: Bool {
-    isDirty || hasUnreadNotification || !(icon ?? "").isEmpty
-  }
-
-  /// Spinner, unread bell, or the tab's icon, in that order of priority.
-  @ViewBuilder
-  private var leadingGlyph: some View {
-    Group {
       if isDirty {
         ProgressView()
           .controlSize(.mini)
@@ -88,6 +60,16 @@ struct TabChipLabel: View {
           .opacity(iconTint == nil ? textOpacity : 1)
           .accessibilityHidden(true)
       }
+      Text(title)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .font(.system(size: TabBarMetrics.titleFontSize))
+        // A chip resizing in an add / close reflow re-truncates its title;
+        // swap the truncation outright instead of cross-fading the two
+        // strings, which leaves a ghost ellipsis behind the text.
+        .contentTransition(.identity)
+        .foregroundStyle(TabBarColors.activeText)
+        .opacity(textOpacity)
     }
   }
 

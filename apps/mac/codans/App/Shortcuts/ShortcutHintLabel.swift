@@ -7,11 +7,8 @@ import SwiftUI
 /// carries its own insertion/removal transition; `CommandKeyObserver` flips its flag inside
 /// `Animation.shortcutHint`, so a hint inserted under that flag cross-fades in and out.
 ///
-/// Two placements use it:
-/// - `shortcutHintReplacing(_:font:onTint:)`: a control with a leading glyph (a tab, a
-///   sidebar filter) shows the bare key in the glyph's place.
-/// - `ShortcutHintTrailing`: a list row shows the full chord in place of its trailing
-///   accessories.
+/// A list row (sidebar, Agents View) instead stacks its chord with its trailing accessories
+/// through `ShortcutHintTrailing`.
 struct ShortcutHintLabel: View {
   let chord: String
   /// `.caption` suits a row or a tab title. A hint beside a 13–16pt toolbar glyph passes a
@@ -35,22 +32,6 @@ struct ShortcutHintLabel: View {
       .padding(.trailing, trailingGap)
       .accessibilityHidden(true)
       .transition(.opacity)
-  }
-}
-
-extension View {
-  /// Cross-fades this glyph into `key` in place while `key` is non-nil. The glyph keeps its
-  /// frame, so the control around it does not move; the key is centered on that frame. Pass
-  /// the bare key (`ShortcutDisplay.keycap(for:in:)`): a full chord is wider than a glyph.
-  func shortcutHintReplacing(
-    _ key: String?, font: Font = .system(size: 12), onTint: Bool = false
-  ) -> some View {
-    opacity(key == nil ? 1 : 0)
-      .overlay {
-        if let key {
-          ShortcutHintLabel(chord: key, font: font, onTint: onTint)
-        }
-      }
   }
 }
 

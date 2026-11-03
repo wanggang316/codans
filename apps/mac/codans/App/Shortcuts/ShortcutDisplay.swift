@@ -51,15 +51,6 @@ public enum ShortcutDisplay {
     return chord(for: binding)
   }
 
-  /// The keycap alone (`1` for `⌃⌘1`) of the binding of `id`, or `nil` when the command has
-  /// no binding or the user disabled it. For a hint that takes a glyph's place, where the
-  /// full chord does not fit and the held modifiers are implied.
-  public static func keycap(for id: CommandID, in shortcuts: ResolvedShortcutMap) -> String? {
-    guard let resolved = shortcuts[id], resolved.isEnabled, let binding = resolved.binding
-    else { return nil }
-    return keycap(for: binding.keyCode)
-  }
-
   /// Tooltip text for a control that triggers `id`: `description` followed by the resolved
   /// chord with a space between its glyphs, e.g. `Back ⌘ [`. Plain `description` when the
   /// command has no binding or the user disabled it.
