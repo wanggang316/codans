@@ -860,6 +860,11 @@ final class AppState {
         // already exists by this point (built earlier in `bringUp`).
         self.openSettingsWindowAction?()
         self.settingsWindowStore?.send(.selectionChanged(section))
+      },
+      editHost: { [weak self] hostID in
+        guard let self else { return }
+        self.openSettingsWindowAction?()
+        self.settingsWindowStore?.send(.editHostRequested(hostID))
       }
     )
     // Handoff transition core, shared by the `handoff.*` IPC handler and the

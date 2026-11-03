@@ -53,6 +53,8 @@ struct SettingsWindowFeature {
     /// Project-scoped selection whose backing Project has disappeared from the catalog,
     /// and re-seeds `kind` on surviving panes to pick up `git init` / `rm -rf .git` flips.
     case projectsChanged(Set<ProjectID>)
+    /// Show the Hosts page with the Host's edit form open.
+    case editHostRequested(HostID)
   }
 
   @Dependency(HierarchyClient.self) var hierarchyClient
@@ -95,6 +97,10 @@ struct SettingsWindowFeature {
       case .windowClosed:
         state.selection = nil
         return .none
+      case .editHostRequested(let id):
+        state.selection = .hosts
+        guard let record = hierarchyClient.hosts().first(where: { $0.id == id }) else { return .none }
+        return .send(.hosts(.editButtonTapped(record)))
       case .projectsChanged(let currentIDs):
         // Prune panes for projects that no longer exist.
         state.projectPanes.removeAll { !currentIDs.contains($0.id) }

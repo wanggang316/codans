@@ -106,4 +106,20 @@ struct HierarchyManagerHostsTests {
     #expect(manager.catalog.hosts.map(\.endpoint) == [Self.box])
     #expect(manager.catalog.projects[0].hostID == manager.catalog.hosts[0].id)
   }
+
+  @Test
+  func closedHostRowsPersist() throws {
+    let (manager, store, url) = makeManager()
+    let id = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    let hostID = try #require(manager.catalog.projects.first { $0.id == id }?.hostID)
+
+    manager.setSidebarHostExpanded(.host(hostID), isExpanded: false)
+    manager.setSidebarHostExpanded(.thisMac, isExpanded: false)
+    store.flushPending()
+    #expect(try CatalogStore(fileURL: url).load().collapsedSidebarHosts == [.host(hostID), .thisMac])
+
+    manager.setSidebarHostExpanded(.thisMac, isExpanded: true)
+    store.flushPending()
+    #expect(try CatalogStore(fileURL: url).load().collapsedSidebarHosts == [.host(hostID)])
+  }
 }

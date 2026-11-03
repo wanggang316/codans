@@ -2549,15 +2549,21 @@ struct RootFeature {
     )
   }
 
-  /// Brings a worktree's row on screen: opens its Project unless the
-  /// worktree is the Project row itself, which shows either way, and opens
-  /// the Workspace group the row is listed under.
+  /// Brings a worktree's row on screen: opens its Host row, opens its
+  /// Project unless the worktree is the Project row itself, which shows
+  /// either way, and opens the Workspace group the row is listed under.
   private func revealWorktreeInSidebar(
     _ worktreeID: WorktreeID, in projectID: ProjectID, state: inout State
   ) {
     let catalog = hierarchyClient.snapshot()
     showAllFilterIfUnlisted(worktreeID, catalog: catalog, state: state)
     let project = catalog.projects.first { $0.id == projectID }
+    if let project {
+      let host = SidebarHostLevel.host(of: project)
+      if catalog.collapsedSidebarHosts.contains(host) {
+        hierarchyClient.setSidebarHostExpanded(host, true)
+      }
+    }
     if project?.rowWorktree?.id != worktreeID {
       hierarchyClient.setProjectExpanded(projectID, true)
     }

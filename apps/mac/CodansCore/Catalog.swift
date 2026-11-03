@@ -16,6 +16,9 @@ public nonisolated struct Catalog: Equatable, Sendable {
   /// resolved. See ADR 0003.
   public var hosts: [HostRecord]
   public var tags: [Tag]
+  /// Sidebar Host rows the user closed (ADR 0003, decision 7). A Host that
+  /// is not in the set is open, so a new Host shows its Projects.
+  public var collapsedSidebarHosts: Set<SidebarHost> = []
   public var sidebarFilter: SidebarFilter = .all
   public var activeTagFilter: TagFilter
   /// Sidebar-wide project ordering policy. The `projects` array always
@@ -67,7 +70,8 @@ extension Catalog: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, projects, hosts, tags, activeTagFilter, sidebarFilter, projectSortMode, selectedProjectID
+    case version, projects, hosts, collapsedSidebarHosts, tags, activeTagFilter, sidebarFilter, projectSortMode
+    case selectedProjectID
   }
 
   public init(from decoder: Decoder) throws {
@@ -85,6 +89,8 @@ extension Catalog: Codable {
     self.version = version
     self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
     self.hosts = try container.decodeIfPresent([HostRecord].self, forKey: .hosts) ?? []
+    self.collapsedSidebarHosts = Set(
+      try container.decodeIfPresent([SidebarHost].self, forKey: .collapsedSidebarHosts) ?? [])
     self.sidebarFilter = try container.decodeIfPresent(SidebarFilter.self, forKey: .sidebarFilter) ?? .all
     self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
     self.activeTagFilter =
@@ -104,6 +110,10 @@ extension Catalog: Codable {
     try container.encode(version, forKey: .version)
     try container.encode(projects, forKey: .projects)
     try container.encode(hosts, forKey: .hosts)
+    // Omitted while every Host is open; sorted so the file is order-stable.
+    if !collapsedSidebarHosts.isEmpty {
+      try container.encode(collapsedSidebarHosts.sorted { $0.key < $1.key }, forKey: .collapsedSidebarHosts)
+    }
     try container.encode(tags, forKey: .tags)
     // Omit `activeTagFilter` when it's the default `.all` — keeps the
     // common no-filter case from churning the on-disk JSON.

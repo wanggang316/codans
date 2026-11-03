@@ -975,6 +975,18 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Opens or closes a sidebar Host row (ADR 0003, decision 7). Persists so
+  /// the choice survives restart. Silent no-op for unchanged values.
+  func setSidebarHostExpanded(_ host: SidebarHost, isExpanded: Bool) {
+    guard catalog.collapsedSidebarHosts.contains(host) == isExpanded else { return }
+    if isExpanded {
+      catalog.collapsedSidebarHosts.remove(host)
+    } else {
+      catalog.collapsedSidebarHosts.insert(host)
+    }
+    store.scheduleSave(catalog)
+  }
+
   /// Updates the Project's resolved git root. Called by the reconciler when a
   /// folder Project becomes a git repo (`git init` / `git clone` from the
   /// terminal) — flipping `gitRoot` from nil → discovered path lights up the

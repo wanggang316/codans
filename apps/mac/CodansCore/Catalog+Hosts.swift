@@ -58,6 +58,7 @@ extension Catalog {
     let count = projectCount(onHost: id)
     guard count == 0 else { throw .inUse(projectCount: count) }
     hosts.remove(at: index)
+    collapsedSidebarHosts.remove(.host(id))
   }
 
   /// The id of the record for `endpoint`: an existing record with the same
