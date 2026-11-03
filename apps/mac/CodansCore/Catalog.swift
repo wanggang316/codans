@@ -57,6 +57,8 @@ extension Catalog: Codable {
 
   private enum CodingKeys: String, CodingKey {
     case version, projects, tags, activeTagFilter, sidebarFilter, selectedProjectID
+    /// Marks a file whose `projects` array is the Project order (ADR 0001).
+    case projectOrder
     /// Retired (ADR 0001). Read only to materialize the order one time.
     case projectSortMode
   }
@@ -74,9 +76,16 @@ extension Catalog: Codable {
     // decode to their defaults; the store then runs the migration.
     self.version = version
     let projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
-    // A catalog written before ADR 0001 can still name a sort mode. Sort
-    // one time so the user sees the same order; the next save drops it.
-    let legacySortMode = try? container.decodeIfPresent(String.self, forKey: .projectSortMode)
+    // A catalog written before ADR 0001 has no `projectOrder` marker: its
+    // sidebar sorted the array with the stored mode, and a missing mode meant
+    // the default `joinOrder`. Sort one time so the user sees the same order;
+    // the next save writes the marker and drops the mode.
+    let isArrayOrder =
+      (try? container.decodeIfPresent(String.self, forKey: .projectOrder)) == LegacyProjectOrder.arrayMarker
+    let legacySortMode: String? =
+      isArrayOrder
+      ? nil
+      : (try? container.decodeIfPresent(String.self, forKey: .projectSortMode)) ?? LegacyProjectOrder.joinOrder
     let manualOrders =
       legacySortMode == LegacyProjectOrder.manual
       ? (try? container.decodeIfPresent([LegacyProjectOrder.Fields].self, forKey: .projects))?
@@ -99,6 +108,8 @@ extension Catalog: Codable {
     }
     try container.encode(version, forKey: .version)
     try container.encode(projects, forKey: .projects)
+    // Older builds ignore this key, so they still read the file.
+    try container.encode(LegacyProjectOrder.arrayMarker, forKey: .projectOrder)
     try container.encode(tags, forKey: .tags)
     // Omit `activeTagFilter` when it's the default `.all` — keeps the
     // common no-filter case from churning the on-disk JSON.
