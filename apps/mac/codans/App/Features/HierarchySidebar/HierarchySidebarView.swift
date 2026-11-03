@@ -763,10 +763,7 @@ struct HierarchySidebarView: View {
               ))
           }
         )
-        // Same row metrics as the healthy Project header below — without
-        // them the failed row falls back to the sidebar's default insets and
-        // sits at a different indent than its siblings.
-        .listRowInsets(Self.projectRowInsets)
+        .listRowInsets(Self.plainProjectRowInsets)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       case .loading, .ready:
@@ -780,11 +777,11 @@ struct HierarchySidebarView: View {
           } header: {
             // A Section header row ignores `listRowInsets` and is shorter
             // than a plain row; pad it to the plain Project row height.
-            projectRow(project, hotkeySlot: hotkeySlot)
+            projectRow(project, hotkeySlot: hotkeySlot, rowInsets: Self.projectRowInsets)
               .padding(.vertical, Self.sectionHeaderPadding)
           }
         } else {
-          projectRow(project, hotkeySlot: hotkeySlot)
+          projectRow(project, hotkeySlot: hotkeySlot, rowInsets: Self.plainProjectRowInsets)
         }
       }
     }
@@ -872,6 +869,17 @@ struct HierarchySidebarView: View {
   private static let projectRowInsets = EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0)
   private static let sectionHeaderPadding: CGFloat = 5
 
+  /// Insets of a Project block that is one plain row (a Project without
+  /// child rows, or one that failed to load). A Section header draws its
+  /// content left of a plain row; without this shift a plain row sits at a
+  /// child's indent and reads as part of the block above.
+  private static let plainProjectRowInsets = EdgeInsets(
+    top: projectRowInsets.top, leading: projectRowInsets.leading - sectionHeaderLeadingShift,
+    bottom: projectRowInsets.bottom, trailing: projectRowInsets.trailing)
+
+  /// How far left of a plain row a Section header draws its content.
+  private static let sectionHeaderLeadingShift: CGFloat = 3
+
   // MARK: - Project row
 
   /// A Project's own row. When the Project stands for a folder of its own
@@ -887,7 +895,7 @@ struct HierarchySidebarView: View {
   /// expand / collapse, visibly jittering the Project name. Siblings let
   /// NSTableView handle expansion as plain row insert / remove instead.
   @ViewBuilder
-  private func projectRow(_ project: Project, hotkeySlot: Int?) -> some View {
+  private func projectRow(_ project: Project, hotkeySlot: Int?, rowInsets: EdgeInsets) -> some View {
     let toggleExpansion = {
       var txn = Transaction()
       txn.disablesAnimations = true
@@ -916,7 +924,7 @@ struct HierarchySidebarView: View {
       // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
       .tag(root.id)
       .id(root.id)
-      .listRowInsets(Self.projectRowInsets)
+      .listRowInsets(rowInsets)
       .listRowSeparator(.hidden)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
@@ -945,7 +953,7 @@ struct HierarchySidebarView: View {
           }
         }
       }
-      .listRowInsets(Self.projectRowInsets)
+      .listRowInsets(rowInsets)
       .listRowBackground(Color.clear)
       .listRowSeparator(.hidden)
     }

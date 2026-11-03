@@ -26,7 +26,7 @@
 
 ### 不变量
 
-- **Project 块必须是一个 outline item。** 有子行的 Project 必须用带 `isExpanded:` 绑定的 `Section`：没有绑定时外层 `ForEach.onMove` 不会触发。git Project 的 header 用 `.simultaneousGesture(TapGesture())` 开合，不用 `Button` 或 `.onTapGesture`——两者都会独占 mouse-down，饿死原生拖拽。Section header 不认 `listRowInsets`，靠垂直 padding 补到普通 Project 行高；子行的缩进来自 Section 本身，行内 leading inset 只放额外缩进。
+- **Project 块必须是一个 outline item。** 有子行的 Project 必须用带 `isExpanded:` 绑定的 `Section`：没有绑定时外层 `ForEach.onMove` 不会触发。git Project 的 header 用 `.simultaneousGesture(TapGesture())` 开合，不用 `Button` 或 `.onTapGesture`——两者都会独占 mouse-down，饿死原生拖拽。Section header 不认 `listRowInsets`，靠垂直 padding 补到普通 Project 行高；子行的缩进来自 Section 本身，行内 leading inset 只放额外缩进。普通 Project 行（无子行、加载失败）用 `plainProjectRowInsets` 左移到 Section header 的起始位置，否则它落在子行缩进上，看起来像上一个块的子行；它得不到 Section 上方的间距。Section header 不能点击选中（点击只开合），所以能被选中的 Project 行只有没有子行的普通行。
 
 - **结构数据直读 `@Environment(HierarchyManager.self)`，不进 TCA state。** `HierarchySidebarView` 从 `@Observable` 的 `HierarchyManager.catalog` 直接读 Project / Worktree 树，而非把它镜像进 reducer state。这是一个刻意的状态归属权衡：结构数据有单一事实来源（catalog），catalog 任意变更都经普通 SwiftUI observation 触发重渲染，reducer 不需要平行的 `.catalogChanged` 派发。reducer 只持有**交互意图**与瞬态 UI 状态。未读点的读取同理——直读 `InboxStore`（`@Observable`），它在每次 inbox 变更时 republish。
 

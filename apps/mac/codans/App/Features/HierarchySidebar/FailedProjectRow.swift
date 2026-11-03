@@ -19,13 +19,11 @@ struct FailedProjectRow: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      // Reserve the healthy Project header's leading disclosure slot (a
-      // 10pt-wide chevron followed by the same 6pt spacing). A failed
-      // Project has nothing to expand, so the slot stays empty — drawing
-      // no chevron at all would pull the name a glyph's width left of
-      // every sibling Project.
+      // Reserve the healthy Project header's leading icon slot (14pt wide,
+      // then the same 6pt spacing), so the name lines up with every sibling
+      // Project name. A failed Project shows no icon.
       Color.clear
-        .frame(width: 10, height: 1)
+        .frame(width: 14, height: 1)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 4) {
