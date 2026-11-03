@@ -614,12 +614,13 @@ struct HierarchySidebarView: View {
         revealTrigger: revealTrigger,
         bottomInset: bottomInsetHeight,
         allowsWorktreeDrag: !SidebarOutlineModel.isLiveMatch(catalog.sidebarFilter),
-        environment: SidebarRowEnvironment(
+        decorateRow: SidebarRowEnvironment(
           hierarchyManager: hierarchyManager, settingsStore: settingsStore,
           worktreeStatusMonitor: worktreeStatusMonitor, worktreeLocalDiffMonitor: worktreeLocalDiffMonitor,
           notificationStore: inbox, rollup: rollup, agentStateStore: agentStateStore,
           updatesModel: updatesModel, commandKeyObserver: commandKeyObserver,
-          resolvedShortcuts: resolvedShortcuts),
+          resolvedShortcuts: resolvedShortcuts
+        ).apply,
         rowContent: { node in rowContent(node, hotkeyIndex: hotkeyIndex) },
         onSelect: { selectRow($0) },
         onMoveWorktrees: { move in

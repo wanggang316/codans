@@ -22,8 +22,9 @@ struct SidebarOutline: NSViewRepresentable {
   /// Worktrees move inside their segment only while every row of the segment
   /// shows.
   let allowsWorktreeDrag: Bool
-  /// What the hosted rows read from the environment.
-  let environment: SidebarRowEnvironment
+  /// Gives a hosted row what it reads from the environment
+  /// (`SidebarRowEnvironment.apply`).
+  let decorateRow: (AnyView) -> AnyView
   let rowContent: (SidebarOutlineNode) -> AnyView
   let onSelect: (SidebarSelection) -> Void
   let onMoveWorktrees: (SidebarOutlineModel.WorktreeMove) -> Void
@@ -189,7 +190,7 @@ struct SidebarOutline: NSViewRepresentable {
       let node = item.node
       cell.show(
         AnyView(SidebarOutlineRowHost(node: node, content: config.rowContent)),
-        environment: config.environment)
+        decorate: config.decorateRow)
       cell.onSizeChange = { [weak self] in self?.scheduleHeightUpdate() }
     }
 
@@ -305,7 +306,7 @@ struct SidebarOutline: NSViewRepresentable {
       guard let item = item as? SidebarOutlineItem, let config else { return SidebarOutlineView.minimumRowHeight }
       if let height = heights[item.id] { return height }
       sizingCell.show(
-        AnyView(SidebarOutlineRowHost(node: item.node, content: config.rowContent)), environment: config.environment)
+        AnyView(SidebarOutlineRowHost(node: item.node, content: config.rowContent)), decorate: config.decorateRow)
       let height = sizingCell.contentHeight
       heights[item.id] = height
       return height
@@ -473,7 +474,7 @@ final class SidebarOutlineCell: NSTableCellView {
 
   private let hosting = SidebarRowHostingView(rootView: AnyView(EmptyView()))
   private var content = AnyView(EmptyView())
-  private var environment: SidebarRowEnvironment?
+  private var decorate: ((AnyView) -> AnyView)?
   /// True while the cell has dropped its row (see `viewDidMoveToWindow`).
   private var isCleared = false
   /// Called when the content's size can have changed.
@@ -513,9 +514,9 @@ final class SidebarOutlineCell: NSTableCellView {
     [hosting]
   }
 
-  func show(_ content: AnyView, environment: SidebarRowEnvironment) {
+  func show(_ content: AnyView, decorate: @escaping (AnyView) -> AnyView) {
     self.content = content
-    self.environment = environment
+    self.decorate = decorate
     render()
   }
 
@@ -542,10 +543,10 @@ final class SidebarOutlineCell: NSTableCellView {
   /// Renders before the cell joins the outline, so the outline measures the
   /// row's real height when it lays the row out.
   private func render() {
-    guard let environment else { return }
+    guard let decorate else { return }
     isCleared = false
-    hosting.rootView = environment.apply(
-      to: AnyView(
+    hosting.rootView = decorate(
+      AnyView(
         content
           .environment(\.backgroundProminence, backgroundStyle == .emphasized ? .increased : .standard)))
   }
