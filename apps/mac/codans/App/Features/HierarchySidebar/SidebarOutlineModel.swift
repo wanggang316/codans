@@ -8,8 +8,6 @@ enum SidebarOutlineRow {
   case host(SidebarHostGroup)
   /// A Project's own row. A Project that failed to load has only this row.
   case project(Project)
-  /// A Project row in the reorder session: a drag handle and the name.
-  case reorderProject(Project)
   /// A worktree under a git or folder Project. `segment` is nil for the main
   /// checkout, which cannot move.
   case worktree(Worktree, project: Project, segment: WorktreeSegment?)
@@ -32,14 +30,13 @@ struct SidebarOutlineNode {
 
   /// The selection a click on this row makes, nil for a row that cannot be
   /// selected (a Host row, a git Project row, a failed Project, a group
-  /// without its directory row, a reorder row).
+  /// without its directory row).
   var selection: SidebarSelection? {
     switch row {
     case .host: return nil
     case .project(let project):
       if case .failed = project.loadState { return nil }
       return project.rowWorktree.map { .worktree($0.id) }
-    case .reorderProject: return nil
     case .worktree(let worktree, _, _), .workspaceMember(let worktree, _): return .worktree(worktree.id)
     case .pending(let pending): return .pending(pending.id)
     case .workspaceGroup(_, let terminal, _): return terminal.map { .worktree($0.id) }
@@ -50,7 +47,7 @@ struct SidebarOutlineNode {
   var projectID: ProjectID? {
     switch row {
     case .host: nil
-    case .project(let project), .reorderProject(let project): project.id
+    case .project(let project): project.id
     case .worktree(_, let project, _), .workspaceGroup(_, _, let project), .workspaceMember(_, let project):
       project.id
     case .pending(let pending): pending.projectID
@@ -69,18 +66,13 @@ enum SidebarOutlineModel {
 
   /// The outline for `projects` (already filtered and sorted, see
   /// `Catalog.sidebarProjects`). With a `hostLevel` the top level is the
-  /// Host rows, each over its Projects (ADR 0002, decision 2). In the reorder
-  /// session every Project is one row with nothing under it.
+  /// Host rows, each over its Projects (ADR 0002, decision 2).
   static func nodes(
     projects: [Project],
     hostLevel: SidebarHostLevel? = nil,
     pendingWorktrees: [PendingWorktree],
-    filter: SidebarFilter,
-    isReordering: Bool
+    filter: SidebarFilter
   ) -> [SidebarOutlineNode] {
-    if isReordering {
-      return projects.map { SidebarOutlineNode(id: "reorder:\($0.id.raw)", row: .reorderProject($0)) }
-    }
     let pendings = isLiveMatch(filter) ? [] : pendingWorktrees
     guard let hostLevel else { return projects.map { projectNode($0, pendings: pendings) } }
     return hostLevel.groups(projects).map { group in
@@ -167,15 +159,33 @@ enum SidebarOutlineModel {
       destination: childIndex - start)
   }
 
-  /// The move for dropping the reorder row `draggedID` at `childIndex` of the
-  /// top level, nil for a drop on a row.
-  static func projectMove(
-    roots: [SidebarOutlineNode], draggedID: String, childIndex: Int
-  ) -> (source: IndexSet, destination: Int)? {
-    guard childIndex >= 0, childIndex <= roots.count,
-      let from = roots.firstIndex(where: { $0.id == draggedID }),
-      case .reorderProject = roots[from].row
+  /// A Project drop between Projects of one parent. `placement` is nil for a
+  /// drop next to the dragged Project itself: valid, but nothing moves.
+  struct ProjectDrop: Equatable {
+    let projectID: ProjectID
+    let placement: ProjectPlacement?
+  }
+
+  /// The drop of the Project row `draggedID` at `childIndex` among
+  /// `siblings`, nil where it cannot land. A Project stays under its own
+  /// parent (its Host, or the top level without Host rows), so a drop among
+  /// other siblings (another Host's Projects, the Host rows, a Project's
+  /// worktrees) or on a row is refused (ADR 0002, decision 5). The placement
+  /// is by `ProjectID` among the visible siblings, so Projects hidden by a
+  /// filter keep their places in the full order (ADR 0001, decision 4).
+  static func projectDrop(
+    siblings: [SidebarOutlineNode], draggedID: String, childIndex: Int
+  ) -> ProjectDrop? {
+    guard childIndex >= 0, childIndex <= siblings.count,
+      let dragged = siblings.first(where: { $0.id == draggedID }),
+      case .project(let project) = dragged.row
     else { return nil }
-    return (IndexSet(integer: from), childIndex)
+    let visible = siblings.compactMap { node -> ProjectID? in
+      guard case .project(let sibling) = node.row else { return nil }
+      return sibling.id
+    }
+    return ProjectDrop(
+      projectID: project.id,
+      placement: ProjectPlacement.resolve(moving: project.id, visible: visible, boundary: childIndex))
   }
 }

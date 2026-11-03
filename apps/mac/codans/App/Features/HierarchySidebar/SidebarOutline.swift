@@ -28,7 +28,10 @@ struct SidebarOutline: NSViewRepresentable {
   let rowContent: (SidebarOutlineNode) -> AnyView
   let onSelect: (SidebarSelection) -> Void
   let onMoveWorktrees: (SidebarOutlineModel.WorktreeMove) -> Void
-  let onMoveProjects: (IndexSet, Int) -> Void
+  /// A click on a Project row that cannot be selected (a git Project or a
+  /// Workspace) opens or closes it.
+  let onToggleProject: (ProjectID) -> Void
+  let onMoveProject: (ProjectID, ProjectPlacement) -> Void
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -62,6 +65,9 @@ struct SidebarOutline: NSViewRepresentable {
     outline.focusRingType = .none
     outline.dataSource = coordinator
     outline.delegate = coordinator
+    // Fires on a click, not at the end of a drag.
+    outline.target = coordinator
+    outline.action = #selector(Coordinator.rowClicked(_:))
     outline.registerForDraggedTypes([Coordinator.dragType])
     outline.setDraggingSourceOperationMask(.move, forLocal: true)
     outline.draggingDestinationFeedbackStyle = .sourceList
@@ -322,6 +328,14 @@ struct SidebarOutline: NSViewRepresentable {
 
     func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { applying }
 
+    @objc func rowClicked(_ sender: NSOutlineView) {
+      guard let item = sender.item(atRow: sender.clickedRow) as? SidebarOutlineItem,
+        case .project(let project) = item.node.row, item.node.selection == nil
+      else { return }
+      if case .failed = project.loadState { return }
+      config?.onToggleProject(project.id)
+    }
+
     func outlineViewSelectionDidChange(_ notification: Notification) {
       guard !applying, let outline,
         let selection = (outline.item(atRow: outline.selectedRow) as? SidebarOutlineItem)?.node.selection
@@ -334,7 +348,8 @@ struct SidebarOutline: NSViewRepresentable {
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
       guard let item = item as? SidebarOutlineItem, let config else { return nil }
       switch item.node.row {
-      case .worktree(_, _, .some) where config.allowsWorktreeDrag, .reorderProject:
+      // A drag starts anywhere on a Project row, under every filter.
+      case .worktree(_, _, .some) where config.allowsWorktreeDrag, .project:
         let writer = NSPasteboardItem()
         writer.setString(item.id, forType: Self.dragType)
         return writer
@@ -359,17 +374,19 @@ struct SidebarOutline: NSViewRepresentable {
     }
 
     /// What a drop at this place does, nil where it cannot land: a worktree
-    /// stays in its segment of its Project, a Project in the top level.
+    /// stays in its segment of its Project, a Project under its own parent.
     private func dropAction(_ info: any NSDraggingInfo, parent: Any?, childIndex: Int) -> (() -> Void)? {
       guard let config, let id = info.draggingPasteboard.string(forType: Self.dragType),
         let dragged = itemsByID[id]
       else { return nil }
-      if case .reorderProject = dragged.node.row {
-        guard parent == nil,
-          let move = SidebarOutlineModel.projectMove(
-            roots: roots.map(\.node), draggedID: id, childIndex: childIndex)
+      if case .project = dragged.node.row {
+        let siblings = (parent as? SidebarOutlineItem)?.children ?? roots
+        guard
+          let drop = SidebarOutlineModel.projectDrop(
+            siblings: siblings.map(\.node), draggedID: id, childIndex: childIndex)
         else { return nil }
-        return { config.onMoveProjects(move.source, move.destination) }
+        guard let placement = drop.placement else { return {} }
+        return { config.onMoveProject(drop.projectID, placement) }
       }
       guard let parent = parent as? SidebarOutlineItem, parent.children.contains(where: { $0 === dragged }),
         let move = SidebarOutlineModel.worktreeMove(

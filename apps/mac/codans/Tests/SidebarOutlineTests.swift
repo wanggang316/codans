@@ -35,12 +35,12 @@ struct SidebarOutlineTests {
       coordinator.update(
         with: SidebarOutline(
           nodes: SidebarOutlineModel.nodes(
-            projects: projects, pendingWorktrees: [], filter: .all, isReordering: false),
+            projects: projects, pendingWorktrees: [], filter: .all),
           selection: selection, selectedProjectID: selectedProjectID, revealTrigger: reveal, bottomInset: 0,
           allowsWorktreeDrag: true, decorateRow: { $0 },
           rowContent: { node in AnyView(Text(node.id).frame(height: 20)) },
           onSelect: { [weak self] in self?.selections.append($0) },
-          onMoveWorktrees: { _ in }, onMoveProjects: { _, _ in }))
+          onMoveWorktrees: { _ in }, onToggleProject: { _ in }, onMoveProject: { _, _ in }))
       outline.layoutSubtreeIfNeeded()
     }
 

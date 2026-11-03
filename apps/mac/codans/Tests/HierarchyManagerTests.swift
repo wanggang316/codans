@@ -273,19 +273,6 @@ struct HierarchyManagerTests {
   // MARK: - P0.2: Project Management mutations
 
   @Test
-  func reorderProjectsMovesInPlaceAndPersists() throws {
-    let a = manager.addProject(name: "a", rootPath: "/tmp/a")
-    let b = manager.addProject(name: "b", rootPath: "/tmp/b")
-    let c = manager.addProject(name: "c", rootPath: "/tmp/c")
-
-    // Move the third entry ("c") to the front.
-    try manager.reorderProjects(from: IndexSet(integer: 2), to: 0)
-
-    let order = manager.catalog.projects.map(\.id)
-    #expect(order == [c, a, b])
-  }
-
-  @Test
   func setProjectLoadStateUpdatesAndHandlesEqualValue() throws {
     let projectID = manager.addProject(name: "p", rootPath: "/tmp/p")
     #expect(manager.catalog.projects[0].loadState == .loading)

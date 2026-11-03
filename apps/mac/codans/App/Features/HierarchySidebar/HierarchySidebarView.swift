@@ -179,7 +179,7 @@ struct HierarchySidebarView: View {
     pendings: [PendingWorktree]
   ) -> [SidebarRow] {
     let nodes = SidebarOutlineModel.nodes(
-      projects: [project], pendingWorktrees: pendings, filter: .all, isReordering: false)
+      projects: [project], pendingWorktrees: pendings, filter: .all)
     return (nodes.first?.children ?? []).compactMap { node in
       switch node.row {
       case .worktree(let worktree, _, _): .worktree(worktree)
@@ -217,12 +217,6 @@ struct HierarchySidebarView: View {
       pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
     let untaggedExists = catalog.projects.contains { $0.tagIDs.isEmpty }
 
-    let isReordering = store.isReorderingProjects
-    // The reorder session always shows the full, unfiltered Project set:
-    // a filtered subset would desync `ForEach.onMove`'s indices from the
-    // `catalog.projects` array that `reorderProjects` mutates.
-    let displayedProjects = isReordering ? catalog.sorted(catalog.projects) : visibleProjects
-
     // Sidebar body: the upper ZStack is the only area the
     // AgentState panel may draw into. Clipping this region is
     // essential on macOS 26: scroll-view overlays can paint past their
@@ -243,14 +237,9 @@ struct HierarchySidebarView: View {
         onSelect: { store.send(.sidebarFilterSelected($0)) },
         onMarkAllNotificationsRead: { inbox?.markAllRead() }
       )
-      .disabled(isReordering)
-      if isReordering {
-        reorderBanner
-      }
       ZStack(alignment: .bottom) {
         treeBody(
-          projects: displayedProjects,
-          isReordering: isReordering,
+          projects: visibleProjects,
           bottomInsetHeight: agentStatePanelVisible ? clampedAgentStatePanelHeight : 0
         )
         .background(
@@ -322,10 +311,6 @@ struct HierarchySidebarView: View {
         onUntaggedTapped: { store.send(.untaggedChipTapped) },
         onEditTagsTapped: { store.send(.delegate(.openTagManager)) },
         onRefreshTapped: { store.send(.refreshAllProjectsTapped) },
-        onReorderToggle: {
-          store.send(store.isReorderingProjects ? .endProjectReorder : .beginProjectReorder)
-        },
-        isReordering: isReordering,
         onAgentStateTapped: !agentStatePanelAvailable
           ? nil
           : {
@@ -577,7 +562,7 @@ struct HierarchySidebarView: View {
   // MARK: - Tree
 
   @ViewBuilder
-  private func treeBody(projects: [Project], isReordering: Bool, bottomInsetHeight: Double)
+  private func treeBody(projects: [Project], bottomInsetHeight: Double)
     -> some View
   {
     if projects.isEmpty && !hierarchyManager.catalog.projects.isEmpty {
@@ -609,7 +594,7 @@ struct HierarchySidebarView: View {
       SidebarOutline(
         nodes: SidebarOutlineModel.nodes(
           projects: projects, hostLevel: catalog.sidebarHostLevel, pendingWorktrees: Array(store.pendingWorktrees),
-          filter: catalog.sidebarFilter, isReordering: isReordering),
+          filter: catalog.sidebarFilter),
         selection: outlineSelection,
         selectedProjectID: catalog.selectedProjectID,
         revealTrigger: revealTrigger,
@@ -629,8 +614,15 @@ struct HierarchySidebarView: View {
             .reorderWorktrees(
               projectID: move.projectID, segment: move.segment, from: move.source, to: move.destination))
         },
-        onMoveProjects: { source, destination in
-          store.send(.reorderProjects(from: source, to: destination))
+        onToggleProject: { projectID in
+          var txn = Transaction()
+          txn.disablesAnimations = true
+          _ = withTransaction(txn) {
+            store.send(.toggleProjectExpansion(projectID))
+          }
+        },
+        onMoveProject: { projectID, placement in
+          store.send(.moveProject(projectID, to: placement))
         }
       )
       // The chords live here, not in the rows: the outline makes views only
@@ -657,8 +649,6 @@ struct HierarchySidebarView: View {
         return AnyView(failedProjectRow(project, reason: reason))
       }
       return AnyView(projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] }))
-    case .reorderProject(let project):
-      return AnyView(reorderProjectRow(project))
     case .worktree(let worktree, let project, _):
       return AnyView(worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id]))
     case .pending(let pending):
@@ -729,51 +719,6 @@ struct HierarchySidebarView: View {
       return ShortcutDisplay.chord(for: fallback)
     }
     return nil
-  }
-
-  // MARK: - Project reorder session
-
-  /// Inline edit-mode banner shown above the list while reordering. Tells
-  /// the user how to act and carries the only way out of the session.
-  private var reorderBanner: some View {
-    HStack(spacing: 8) {
-      Text("Drag to reorder projects")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-      Spacer(minLength: 8)
-      Button("Done") { store.send(.endProjectReorder) }
-        .keyboardShortcut(.defaultAction)
-        .controlSize(.small)
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 6)
-    .background(.bar)
-    .overlay(alignment: .bottom) { Divider() }
-  }
-
-  /// Header-only Project row rendered during the reorder session: a
-  /// leading drag handle plus the Project name. No disclosure chevron,
-  /// hover chrome, or selection — the row exists only to be dragged.
-  private func reorderProjectRow(_ project: Project) -> some View {
-    HStack(spacing: 8) {
-      Image(systemName: "line.3.horizontal")
-        .font(.system(size: 12, weight: .regular))
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
-      // The reorder sheet strips the row to a handle and a name; the icon
-      // earns its place here because scanning a drag list is exactly when
-      // recognizing a Project at a glance matters.
-      ProjectIconView(icon: project.icon, color: project.color)
-      Text(project.name)
-        .font(.body)
-        .lineLimit(1)
-        .truncationMode(.middle)
-      Spacer(minLength: 0)
-    }
-    .padding(.vertical, 2)
-    .contentShape(Rectangle())
-    .padding(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
-    .accessibilityLabel(project.name)
   }
 
   // MARK: - Failed Project row
@@ -871,17 +816,20 @@ struct HierarchySidebarView: View {
       .padding(Self.projectRowInsets)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
-      Button(action: toggleExpansion) {
-        ProjectHeaderRow(
-          project: project,
-          store: store,
-          codeHostStore: codeHostStore,
-          onToggleExpansion: toggleExpansion
-        ) {
-          EmptyView()
-        }
+      // Plain content, not a Button: a Button takes the mouse-down, so the
+      // outline could not start the Project drag from the row. The outline
+      // owns the click and opens or closes the row (`onToggleProject`).
+      ProjectHeaderRow(
+        project: project,
+        store: store,
+        codeHostStore: codeHostStore,
+        onToggleExpansion: toggleExpansion
+      ) {
+        EmptyView()
       }
-      .buttonStyle(.plain)
+      .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(.isButton)
+      .accessibilityAction { toggleExpansion() }
       // The Workspace header's `+` and `⋯` show only on hover, which also
       // hides them from accessibility; the row offers their entries.
       .accessibilityActions {

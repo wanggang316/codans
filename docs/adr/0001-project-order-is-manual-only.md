@@ -18,17 +18,24 @@ is `joinOrder`, so a user who never reorders sees Projects sorted by `addedAt`.
 
 1. **One order.** The Project order is the order of the `catalog.projects`
    array. There is no sort mode and no `manualOrder` field.
-2. **Load-time materialization.** When a catalog has `projectSortMode` set to
-   `joinOrder` or `activeFirst`, the load sorts `catalog.projects` one time
-   with that mode. The order the user sees does not change. The decoder ignores
-   `projectSortMode` and `manualOrder`. The encoder does not write them.
+2. **Load-time materialization.** The encoder writes `"projectOrder": "array"`
+   to mark a catalog whose array is the Project order. A catalog without the
+   marker comes from an older build: the load sorts `catalog.projects` one time
+   with its `projectSortMode` (`joinOrder` when the key is missing, because the
+   older encoder omitted the default; ties keep the array order). The order the
+   user sees does not change. The encoder does not write `projectSortMode` or
+   `manualOrder`.
 3. **Direct drag.** The user drags a Project row in the normal sidebar. There
    is no reorder session and no footer sort button.
    - A drag starts from any point on the Project row. There is no drag handle.
    - The drag moves the full Project block. Its worktree rows move with it. The
      expanded or collapsed state does not change.
    - The insertion indicator shows only between Project blocks. Over a worktree
-     row, it snaps to the nearest Project block boundary.
+     row, it snaps to the nearest Project block boundary. *Superseded by
+     [ADR 0002](0002-sidebar-outline-with-host-level.md), decision 5: a drop
+     is valid only between Projects of the same Host; elsewhere, including
+     over a worktree row, the native outline shows no indicator and refuses
+     the drop.*
    - Workspace Projects and Projects that failed to load are draggable.
 4. **Drag under filters.** A drop resolves to "before or after visible Project
    X" by `ProjectID`, then applies to the full `catalog.projects` array. Drag
@@ -52,13 +59,18 @@ is `joinOrder`, so a user who never reorders sees Projects sorted by `addedAt`.
 
 ## Trade-offs
 
-- An older build that reads a catalog written under this decision finds no
-  `projectSortMode`, uses `joinOrder`, and shows Projects in `addedAt` order.
-  The array order on disk stays correct.
+- An older build that reads a catalog written under this decision ignores the
+  `projectOrder` marker, finds no `projectSortMode`, uses `joinOrder`, and
+  shows Projects in `addedAt` order. The array order on disk stays correct.
+  When the older build saves, the marker is gone, and the next load here sorts
+  by `addedAt` again: the order that build showed.
 - Projects move as blocks of sibling rows, so `ForEach.onMove` does not apply.
   The drag uses `.draggable` / `.dropDestination` and draws its own insertion
   indicator. Before the implementation, a prototype must show that this
-  indicator matches the native sidebar indicator.
+  indicator matches the native sidebar indicator. *Superseded by
+  [ADR 0002](0002-sidebar-outline-with-host-level.md): the prototype failed,
+  and the sidebar is an `NSOutlineView` whose native drag moves the block and
+  draws the native indicator.*
 - A drop under a filter can put a visible Project next to hidden Projects in a
   position that the user did not see.
 - Users who use only the keyboard cannot reorder Projects.
