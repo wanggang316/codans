@@ -18,6 +18,8 @@ struct PullRequestPopover: View {
   let content: Content
   /// UI name of the Code Host ("GitHub"), for the "Open on …" labels.
   let codeHostName: String
+  /// UI name of a Pull Request on the Code Host ("pull request" / "merge request").
+  var pullRequestName: String = "pull request"
   let defaultMergeStrategy: MergeStrategy
   let canMerge: Bool
   let mergeDisabledReason: String?
@@ -270,7 +272,7 @@ struct PullRequestPopover: View {
 
   private func noPullRequestBody(branch: String) -> some View {
     VStack(spacing: 8) {
-      Text("No pull request for branch \(branch)")
+      Text("No \(pullRequestName) for branch \(branch)")
         .font(.callout)
         .foregroundStyle(.secondary)
       Button("Create on \(codeHostName)") { onOpenOnWeb() }

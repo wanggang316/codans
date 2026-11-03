@@ -42,6 +42,7 @@ struct WorktreePullRequestBadge<PopoverContent: View>: View {
         let rollup = PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
         PullRequestBadge(
           state: .loaded(snapshot, rollup: rollup),
+          pullRequestName: (store.state.codeHostKind(for: worktreeID) ?? .github).pullRequestName,
           onTap: { store.send(.delegate(.openURL(snapshot.url))) }
         )
       } else if let lastError {

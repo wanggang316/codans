@@ -569,10 +569,10 @@ struct CodeHostFeature {
         // Same reasoning one level down: the Project can survive while one of
         // its Worktrees is removed, and `pairs` was captured before that.
         for pair in pairs where state.projectByWorktree[pair.worktreeID] != nil {
+          state.lastError[pair.worktreeID] = nil
           if let snap = batched.byBranch[pair.branch] {
             state.snapshots[pair.worktreeID] = snap
             state.snapshotLoadedAt[pair.worktreeID] = now
-            state.lastError[pair.worktreeID] = nil
           } else {
             state.snapshots[pair.worktreeID] = nil
           }
@@ -605,7 +605,16 @@ struct CodeHostFeature {
         state.inFlightFetchProjects.remove(projectID)
         state.loading.subtract(pairs.map(\.worktreeID))
         guard state.projectGitRoots[projectID] != nil else { return .none }
-        state.lastErrorByProject[projectID] = Self.codeHostError(error)
+        let codeHostError = Self.codeHostError(error)
+        state.lastErrorByProject[projectID] = codeHostError
+        // The user can fix a CLI error (install, log in, upgrade), so each row shows it at
+        // its badge position, as the popover's actionable message (ADR 0004 item 15).
+        // Other batch errors are transient; the rows keep what they show.
+        if codeHostError.isCLIError {
+          for pair in pairs where state.projectByWorktree[pair.worktreeID] != nil {
+            state.lastError[pair.worktreeID] = codeHostError
+          }
+        }
         return drainPollSlot(state: &state)
 
       case .codeHostUnresolved(let projectID, let pairs):

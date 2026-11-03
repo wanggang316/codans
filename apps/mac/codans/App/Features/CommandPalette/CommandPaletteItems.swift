@@ -23,7 +23,8 @@ enum CommandPaletteItems {
     catalog: Catalog,
     editorDescriptors: [EditorDescriptor] = [],
     focusedPaneID: PaneID? = nil,
-    paneFocusPrecise: Bool = false
+    paneFocusPrecise: Bool = false,
+    codeHost: CodeHostKind? = nil
   ) -> [CommandPaletteItem] {
     var items = appItems()
     items.append(contentsOf: cancelWorkflowItems())
@@ -40,7 +41,7 @@ enum CommandPaletteItems {
           worktreeName: worktree.name, isPinned: worktree.isPinned, project: project))
       items.append(
         contentsOf: worktreeLifecycleItems(
-          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace))
+          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace, codeHost: codeHost))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
       // Tab commands act on the current Worktree's active tab, so they're
       // gated on the Worktree selection rather than on precise pane focus.
@@ -336,14 +337,15 @@ enum CommandPaletteItems {
   /// repo operations the workspace flow owns instead.
   private static func worktreeLifecycleItems(
     worktreeName: String,
-    isWorkspaceRow: Bool
+    isWorkspaceRow: Bool,
+    codeHost: CodeHostKind?
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = [
       CommandPaletteItem(
         id: "worktree.open-pr",
-        title: "Open PR on GitHub",
+        title: CodeHostLabels.openPullRequest(codeHost),
         subtitle: worktreeName,
-        searchText: "worktree github pull request pr",
+        searchText: "worktree github gitlab pull request pr merge request mr",
         icon: "arrow.up.right.square",
         commandID: .openCurrentPR,
         kind: .openCurrentPR
@@ -353,8 +355,8 @@ enum CommandPaletteItems {
       items.append(
         CommandPaletteItem(
           id: "worktree.open-project-on-github",
-          title: "Open Project on GitHub",
-          searchText: "worktree project github repository",
+          title: CodeHostLabels.openProject(codeHost),
+          searchText: "worktree project github gitlab repository",
           icon: "arrow.up.right.square",
           commandID: .openProjectOnGitHub,
           kind: .openCurrentProjectOnCodeHost

@@ -14,14 +14,16 @@ struct CodeHostFeatureTests {
   @Test
   func onAppearProbesAvailabilityAndStoresResult() async {
     let store = Self.makeStore { client in
-      client.availability = { _ in .available(host: "github.com", user: "gump") }
+      client.availability = { kind in .available(host: kind.publicHost, user: "gump") }
     }
     await store.send(.onAppear)
     await store.receive {
       if case .availabilityProbed(let result, _) = $0, result[.github]?.isAvailable == true { return true }
       return false
     } assert: {
-      $0.availability = [.github: .available(host: "github.com", user: "gump")]
+      $0.availability = [
+        .github: .available(host: "github.com", user: "gump"), .gitlab: .available(host: "gitlab.com", user: "gump"),
+      ]
       $0.availabilityProbedAt = Self.fixedDate
     }
   }
@@ -29,7 +31,9 @@ struct CodeHostFeatureTests {
   @Test
   func onAppearWithinFreshnessWindowSkipsProbe() async {
     var seed = CodeHostFeature.State()
-    seed.availability = [.github: .available(host: "github.com", user: "gump")]
+    seed.availability = [
+      .github: .available(host: "github.com", user: "gump"), .gitlab: .available(host: "gitlab.com", user: "gump"),
+    ]
     seed.availabilityProbedAt = Self.fixedDate
     let store = Self.makeStore(initialState: seed) { client in
       client.availability = { _ in
@@ -46,7 +50,7 @@ struct CodeHostFeatureTests {
     seed.availability = [.github: .available(host: "github.com", user: "gump")]
     seed.availabilityProbedAt = Self.fixedDate
     let store = Self.makeStore(initialState: seed) { client in
-      client.availability = { _ in .unavailable(reason: "gh missing") }
+      client.availability = { kind in .unavailable(reason: "\(kind.cliName) missing") }
     }
     await store.send(.refreshAvailabilityRequested) {
       $0.availabilityProbedAt = nil
@@ -55,7 +59,7 @@ struct CodeHostFeatureTests {
       if case .availabilityProbed(let result, _) = $0, result[.github]?.isAvailable == false { return true }
       return false
     } assert: {
-      $0.availability = [.github: .unavailable(reason: "gh missing")]
+      $0.availability = [.github: .unavailable(reason: "gh missing"), .gitlab: .unavailable(reason: "glab missing")]
       $0.availabilityProbedAt = Self.fixedDate
     }
   }
@@ -443,6 +447,63 @@ struct CodeHostFeatureTests {
     ) {
       $0.inFlightFetchProjects.remove(projectID)
       $0.lastErrorByProject[projectID] = .network("DNS")
+    }
+  }
+
+  /// A missing, logged-out, or outdated CLI shows its actionable message at each row's
+  /// badge position (ADR 0004 item 15); the next successful fetch clears it.
+  @Test(arguments: [
+    CodeHostError.cliNotInstalled(.gitlab), .notAuthenticated(.gitlab, host: "gitlab.com"),
+    .cliOutdated(.gitlab, minVersion: "1.122.0"), .cliNotInstalled(.github),
+  ])
+  func cliErrorOfABatchShowsAtEveryRow(error: CodeHostError) async {
+    let projectID = ProjectID()
+    let withPR = WorktreeID()
+    let withoutPR = WorktreeID()
+    let pairs = [
+      CodeHostFeature.Action.WorktreeBranchPair(worktreeID: withPR, branch: "feat-open"),
+      CodeHostFeature.Action.WorktreeBranchPair(worktreeID: withoutPR, branch: "feat-none"),
+    ]
+    var seed = CodeHostFeature.State()
+    seed.inFlightFetchProjects.insert(projectID)
+    seed.projectGitRoots[projectID] = URL(fileURLWithPath: "/repo")
+    seed.projectByWorktree = [withPR: projectID, withoutPR: projectID]
+    let store = Self.makeStore(initialState: seed)
+    await store.send(.projectBatchLoaded(projectID, worktreeBranches: pairs, .failure(error))) {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.lastErrorByProject[projectID] = error
+      $0.lastError[withPR] = error
+      $0.lastError[withoutPR] = error
+    }
+    let batch = BatchedPullRequests(
+      repository: CodeHostRepository(kind: .gitlab, host: "gitlab.com", path: "g/app"),
+      byBranch: ["feat-open": Self.stubSnapshot(number: 1, headRefName: "feat-open")],
+      seenBranches: ["feat-open", "feat-none"], fetchedAt: Self.fixedDate)
+    await store.send(.projectBatchLoaded(projectID, worktreeBranches: pairs, .success(batch))) {
+      $0.lastErrorByProject[projectID] = nil
+      $0.lastError = [:]
+      $0.snapshotsByProject[projectID] = batch
+      $0.snapshots[withPR] = batch.byBranch["feat-open"]
+      $0.snapshotLoadedAt[withPR] = Self.fixedDate
+    }
+  }
+
+  /// Other batch errors stay on the unit; rows show no badge for them.
+  @Test
+  func nonCLIBatchErrorDoesNotReachTheRows() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    var seed = CodeHostFeature.State()
+    seed.inFlightFetchProjects.insert(projectID)
+    seed.projectGitRoots[projectID] = URL(fileURLWithPath: "/repo")
+    seed.projectByWorktree = [worktreeID: projectID]
+    let store = Self.makeStore(initialState: seed)
+    await store.send(
+      .projectBatchLoaded(
+        projectID, worktreeBranches: [.init(worktreeID: worktreeID, branch: "b")], .failure(CodeHostError.timeout))
+    ) {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.lastErrorByProject[projectID] = .timeout
     }
   }
 

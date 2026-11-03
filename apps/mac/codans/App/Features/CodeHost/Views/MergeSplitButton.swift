@@ -33,7 +33,7 @@ struct MergeSplitButton: View {
       }
       .buttonStyle(.borderedProminent)
       .disabled(isDisabled)
-      .help(isDisabled ? (disabledReason ?? "") : "Merge with \(defaultStrategy.displayName)")
+      .help(isDisabled ? (disabledReason ?? "") : "Merge with \(defaultOptionName)")
 
       // Self-drawn caret with a clear-label Menu overlaid as the click target.
       // The borderless-button menu style renders its label through AppKit, so
@@ -52,7 +52,7 @@ struct MergeSplitButton: View {
         .overlay {
           Menu {
             ForEach(menuOptions) { option in
-              Button(option.strategy.displayName) { onMerge(option.strategy) }
+              Button(option.displayName) { onMerge(option.strategy) }
                 .disabled(!option.isEnabled)
                 .help(option.disabledReason ?? "")
             }
@@ -79,6 +79,10 @@ struct MergeSplitButton: View {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
     )
+  }
+
+  private var defaultOptionName: String {
+    options.first { $0.strategy == defaultStrategy }?.displayName ?? defaultStrategy.displayName
   }
 
   private var menuOptions: [PullRequestMergeOption] {

@@ -53,11 +53,9 @@ struct CodeHostEnumTests {
     #expect(CodeHostKind.gitlab.displayName == "GitLab")
     #expect(CodeHostKind.gitlab.pullRequestLabel == "MR")
     #expect(CodeHostKind.gitlab.pullRequestName == "merge request")
-    #expect(CodeHostKind.gitlab.repositoryName == "Project")
     #expect(CodeHostKind.gitlab.publicHost == "gitlab.com")
     #expect(CodeHostKind.gitlab.cliName == "glab")
     #expect(CodeHostKind.github.pullRequestName == "pull request")
-    #expect(CodeHostKind.github.repositoryName == "Repository")
   }
 
   /// GitHub is tried first, so a host known to both CLIs resolves to GitHub.

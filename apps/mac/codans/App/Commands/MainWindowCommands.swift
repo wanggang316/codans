@@ -187,13 +187,13 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.toggleDiffInspector, in: shortcuts)
       .disabled(!hasActiveWorktree)
 
-      Button("Open PR on GitHub") {
+      Button(CodeHostLabels.openPullRequest(currentCodeHost)) {
         store()?.send(.openCurrentPRRequested)
       }
       .appKeyboardShortcut(.openCurrentPR, in: shortcuts)
       .disabled(!hasPRForCurrentWorktree)
 
-      Button("Open Project on GitHub") {
+      Button(CodeHostLabels.openProject(currentCodeHost)) {
         store()?.send(.openCurrentProjectOnCodeHostRequested)
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: shortcuts)
@@ -464,6 +464,13 @@ struct MainWindowCommands: Commands {
   }
 
   // MARK: - Enablement
+
+  /// Code Host of the selected Worktree; names the "Open PR on GitHub" items.
+  private var currentCodeHost: CodeHostKind? {
+    guard let state = store()?.state else { return nil }
+    return state.codeHost.codeHostKind(
+      forProject: state.selection.projectID, worktreeID: state.selection.worktreeID)
+  }
 
   private var hasActiveWorktree: Bool {
     store()?.state.selection.worktreeID != nil

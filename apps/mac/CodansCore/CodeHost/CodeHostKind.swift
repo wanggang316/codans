@@ -56,12 +56,4 @@ public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, H
     case .gitlab: return "merge request"
     }
   }
-
-  /// UI name of a repository on this Code Host, for "Open … on" labels.
-  public var repositoryName: String {
-    switch self {
-    case .github: return "Repository"
-    case .gitlab: return "Project"
-    }
-  }
 }
