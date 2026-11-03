@@ -9,7 +9,7 @@ codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`Shortc
 
 按住 ⌘ 约 1 秒后，各控件显示自己的快捷键提示（`ShortcutHintLabel`：系统字体、`.secondary` 纯文本、无键帽边框）。提示从解析后的绑定读取，改键或禁用会同步反映。两种放置方式都只切换透明度，周围布局不动：
 
-- **原位替换**（侧栏筛选栏按钮、Tab、Worktree 工具栏的 Open In 按钮）：Open In 按钮的完整和弦替换编辑器图标（`commandKeyHintReplacing(_:)`）。工具栏 `Menu(primaryAction:)` 的 label 由 AppKit 画成分段控件的图像，不保留 SwiftUI 的透明度与叠放，所以按住 ⌘ 时 label 整体换成按筛选栏样式（`.caption`、secondary）绘制的和弦图像，没有过渡动画；筛选栏按钮的完整和弦（如 `⌃⌘1`）替换整组图标与标题，过窄时等比缩小；Tab 的完整和弦在 chip 尾部槽位，替换颜色点。被替换的内容用 `shortcutHintOutgoing(_:)` 缩小到 0.7、模糊并淡出，和弦用 `shortcutHintIncoming(_:)` 只淡入；两者始终都在布局中，控件不动。出现用 0.04 s easeOut，几乎即时；消失用 0.1 s easeOut，图形放大回原尺寸。
+- **原位替换**（侧栏筛选栏按钮、Tab、Worktree 工具栏的 Open In 按钮）：Open In 按钮的完整和弦替换编辑器图标。工具栏 `Menu(primaryAction:)` 的 label 由 AppKit 按其图像与文字重绘，不保留 SwiftUI 的样式，所以 Open In 用 `OpenInSplitButton` 直接构建同一个 AppKit 分段控件：按住 ⌘ 时主分段的图像换成按筛选栏样式（`.caption`、secondary）绘制的和弦（`ShortcutHintImage`），以图层淡入淡出切换（出现 0.04 s，消失 0.1 s）；筛选栏按钮的完整和弦（如 `⌃⌘1`）替换整组图标与标题，过窄时等比缩小；Tab 的完整和弦在 chip 尾部槽位，替换颜色点。被替换的内容用 `shortcutHintOutgoing(_:)` 缩小到 0.7、模糊并淡出，和弦用 `shortcutHintIncoming(_:)` 只淡入；两者始终都在布局中，控件不动。出现用 0.04 s easeOut，几乎即时；消失用 0.1 s easeOut，图形放大回原尺寸。
 - **替换尾部附件**（侧栏 worktree / Project / Group 行、Agents View 行，`ShortcutHintTrailing`）：完整和弦与行尾附件（diff 统计、PR 徽标、状态点、悬停按钮）叠在同一个尾对齐的 ZStack 里，按住 ⌘ 时附件淡出、和弦淡入，隐藏的附件不响应点击。一列行同时切换，用 0.15 s easeInOut，比单个控件稍柔和。
 
 开启“减弱动态效果”时不做动画。
