@@ -34,6 +34,75 @@ struct HierarchySidebarFeatureTests {
   }
 
   @Test
+  func toggleHostExpansionFlipsTheCollapsedSet() async {
+    let host = HostRecord(address: "box")
+    var catalog = Catalog(hosts: [host])
+    catalog.collapsedSidebarHosts = [.thisMac]
+    let received = LockIsolated<[(SidebarHost, Bool)]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.setSidebarHostExpanded = { host, expanded in
+        received.withValue { $0.append((host, expanded)) }
+      }
+    }
+
+    await store.send(.toggleHostExpansion(.thisMac))
+    await store.send(.toggleHostExpansion(.host(host.id)))
+    #expect(received.value.map(\.0) == [.thisMac, .host(host.id)])
+    #expect(received.value.map(\.1) == [true, false])
+  }
+
+  @Test
+  func connectProjectOnAHostOpensTheSheetWithTheHostChosen() async {
+    let first = HostRecord(address: "box")
+    let second = HostRecord(address: "mini")
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.hosts = { [first, second] }
+    }
+
+    await store.send(.hostConnectProjectTapped(second.id)) {
+      $0.remoteConnectionSheet = RemoteConnectionFeature.State(
+        hosts: [first, second], hostChoice: .existing(second.id))
+    }
+  }
+
+  @Test
+  func editHostOpensSettingsOnTheHost() async {
+    let host = HostRecord(address: "box")
+    let opened = LockIsolated<[HostID]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.settingsWindowPresenter.editHost = { id in opened.withValue { $0.append(id) } }
+    }
+
+    await store.send(.hostEditTapped(host.id))
+    await store.finish()
+    #expect(opened.value == [host.id])
+  }
+
+  @Test
+  func settingsWindowOpensTheHostEditor() async {
+    let host = HostRecord(address: "box", username: "dev")
+    let store = TestStore(initialState: SettingsWindowFeature.State()) {
+      SettingsWindowFeature()
+    } withDependencies: {
+      $0.hierarchyClient.hosts = { [host] }
+    }
+
+    await store.send(.editHostRequested(host.id)) {
+      $0.selection = .hosts
+    }
+    await store.receive(.hosts(.editButtonTapped(host))) {
+      $0.hosts.editor = .init(mode: .edit(host.id), draft: HostDraft(record: host))
+    }
+  }
+
+  @Test
   func worktreeRevealInFinderEmitsDelegate() async {
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()

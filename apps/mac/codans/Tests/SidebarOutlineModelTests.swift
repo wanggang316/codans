@@ -70,16 +70,18 @@ struct SidebarOutlineModelTests {
   }
 
   private func nodes(
-    _ projects: [Project], pendings: [PendingWorktree] = [], filter: SidebarFilter = .all,
-    isReordering: Bool = false
+    _ projects: [Project], hostLevel: SidebarHostLevel? = nil, pendings: [PendingWorktree] = [],
+    filter: SidebarFilter = .all, isReordering: Bool = false
   ) -> [SidebarOutlineNode] {
     SidebarOutlineModel.nodes(
-      projects: projects, pendingWorktrees: pendings, filter: filter, isReordering: isReordering)
+      projects: projects, hostLevel: hostLevel, pendingWorktrees: pendings, filter: filter,
+      isReordering: isReordering)
   }
 
   /// A row's kind and name, so a test reads as the sidebar does.
   private func label(_ node: SidebarOutlineNode) -> String {
     switch node.row {
+    case .host(let group): "host \(group.displayName)"
     case .project(let project): "project \(project.name)"
     case .reorderProject(let project): "reorder \(project.name)"
     case .worktree(let worktree, _, let segment): "worktree \(worktree.name) \(segment.map { "\($0)" } ?? "main")"
@@ -205,6 +207,78 @@ struct SidebarOutlineModelTests {
     #expect(tree[1].children[0].children.isEmpty)
     #expect(tree[1].children[1].isExpanded)
     #expect(tree[1].children[1].children.map(label) == ["member app /ws/fix/app"])
+  }
+
+  // MARK: - Host level
+
+  private static let box = HostRecord(address: "box")
+  private static let mini = HostRecord(address: "mini", name: "Mac mini")
+
+  private func remote(_ project: Project, on host: HostRecord) -> Project {
+    var project = project
+    project.hostID = host.id
+    project.remoteHost = host.endpoint
+    return project
+  }
+
+  @Test
+  func onlyLocalProjectsKeepProjectsAtTheTop() {
+    let catalog = Catalog(projects: [repository, folder], hosts: [Self.box])
+    #expect(catalog.sidebarHostLevel == nil)
+    let tree = nodes(catalog.sidebarProjects, hostLevel: catalog.sidebarHostLevel)
+    #expect(tree.map(label) == ["project repo", "project notes"])
+  }
+
+  @Test
+  func hostRowsGroupProjectsThisMacFirst() throws {
+    let catalog = Catalog(
+      projects: [remote(folder, on: Self.mini), repository, remote(workspace, on: Self.box)],
+      hosts: [Self.box, Self.mini])
+    let tree = nodes(catalog.sidebarProjects, hostLevel: catalog.sidebarHostLevel)
+    #expect(tree.map(label) == ["host This Mac", "host box", "host Mac mini"])
+    #expect(tree.map { $0.children.map(label) } == [["project repo"], ["project flow"], ["project notes"]])
+    #expect(tree.allSatisfy { $0.selection == nil && $0.projectID == nil && $0.isExpanded })
+    #expect(tree[0].id == "host:this-mac")
+    // The rows under a Project stay as they are without Hosts.
+    #expect(tree[0].children[0].children.count == 5)
+  }
+
+  @Test
+  func aClosedHostKeepsItsRowsClosed() throws {
+    var catalog = Catalog(projects: [repository, remote(folder, on: Self.box)], hosts: [Self.box])
+    catalog.collapsedSidebarHosts = [.host(Self.box.id)]
+    let tree = nodes(catalog.sidebarProjects, hostLevel: catalog.sidebarHostLevel)
+    #expect(tree.map(\.isExpanded) == [true, false])
+    #expect(tree[1].children.map(label) == ["project notes"])
+  }
+
+  @Test
+  func filtersHideHostsWithNoMatchButNotTheLevel() throws {
+    let tag = Tag(name: "web", color: .blue)
+    var tagged = repository
+    tagged.tagIDs = [tag.id]
+    var catalog = Catalog(
+      projects: [tagged, remote(folder, on: Self.box), remote(workspace, on: Self.mini)],
+      hosts: [Self.box, Self.mini], tags: [tag])
+
+    catalog.sidebarFilter = .remote
+    #expect(
+      nodes(catalog.sidebarProjects, hostLevel: catalog.sidebarHostLevel).map(label) == [
+        "host box", "host Mac mini",
+      ])
+
+    catalog.sidebarFilter = .all
+    catalog.activeTagFilter = .tags([tag.id])
+    let tree = nodes(catalog.sidebarProjects, hostLevel: catalog.sidebarHostLevel)
+    #expect(tree.map(label) == ["host This Mac"])
+    #expect(tree[0].children.map(label) == ["project repo"])
+  }
+
+  @Test
+  func theReorderSessionHasNoHostRows() {
+    let catalog = Catalog(projects: [repository, remote(folder, on: Self.box)], hosts: [Self.box])
+    let tree = nodes(catalog.projects, hostLevel: catalog.sidebarHostLevel, isReordering: true)
+    #expect(tree.map(label) == ["reorder repo", "reorder notes"])
   }
 
   // MARK: - Drops

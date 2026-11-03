@@ -595,8 +595,9 @@ struct HierarchySidebarView: View {
     } else {
       // `⌃1`…`⌃9` plus `⌃0` (10th slot) go to the first ten selectable rows on
       // screen, top-down (`Catalog.sidebarSelectionOrder`: Project rows that
-      // stand for a folder, and the rows of expanded Projects); matching hints
-      // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
+      // stand for a folder, and the rows of expanded Projects under expanded
+      // Hosts); matching hints show while ⌘ is held. Host, archived, pending,
+      // and collapsed rows claim none.
       let slots = Array(
         hierarchyManager.catalog.sidebarSelectionOrder(
           pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs
@@ -607,8 +608,8 @@ struct HierarchySidebarView: View {
       let catalog = hierarchyManager.catalog
       SidebarOutline(
         nodes: SidebarOutlineModel.nodes(
-          projects: projects, pendingWorktrees: Array(store.pendingWorktrees), filter: catalog.sidebarFilter,
-          isReordering: isReordering),
+          projects: projects, hostLevel: catalog.sidebarHostLevel, pendingWorktrees: Array(store.pendingWorktrees),
+          filter: catalog.sidebarFilter, isReordering: isReordering),
         selection: outlineSelection,
         selectedProjectID: catalog.selectedProjectID,
         revealTrigger: revealTrigger,
@@ -649,6 +650,8 @@ struct HierarchySidebarView: View {
   /// the outline adds no indent and no spacing.
   private func rowContent(_ node: SidebarOutlineNode, hotkeyIndex: [WorktreeID: Int]) -> AnyView {
     switch node.row {
+    case .host(let group):
+      return AnyView(hostRow(group))
     case .project(let project):
       if case .failed(let reason) = project.loadState {
         return AnyView(failedProjectRow(project, reason: reason))
@@ -795,6 +798,40 @@ struct HierarchySidebarView: View {
     // Same row metrics as the healthy Project header — without them the
     // failed row sits at a different indent than its siblings.
     .padding(Self.projectRowInsets)
+  }
+
+  // MARK: - Host row
+
+  private func hostRow(_ group: SidebarHostGroup) -> some View {
+    SidebarHostRow(group: group) {
+      var txn = Transaction()
+      txn.disablesAnimations = true
+      _ = withTransaction(txn) {
+        store.send(.toggleHostExpansion(group.host))
+      }
+    }
+    .padding(Self.projectRowInsets)
+    .contextMenu {
+      switch group.host {
+      case .thisMac:
+        Button {
+          store.send(.toolbarAddProjectTapped)
+        } label: {
+          Label("Open Project…", systemImage: "folder")
+        }
+      case .host(let id):
+        Button {
+          store.send(.hostConnectProjectTapped(id))
+        } label: {
+          Label("Connect Project on This Host…", systemImage: "tv.badge.wifi")
+        }
+        Button {
+          store.send(.hostEditTapped(id))
+        } label: {
+          Label("Edit Host…", systemImage: "pencil")
+        }
+      }
+    }
   }
 
   // MARK: - Project row

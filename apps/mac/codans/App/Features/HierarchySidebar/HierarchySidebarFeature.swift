@@ -225,6 +225,13 @@ struct HierarchySidebarFeature {
     /// Server project's options menu → "Edit Connection…". Opens the
     /// remote-connection sheet seeded from the project, in edit mode.
     case projectEditConnectionTapped(projectID: ProjectID)
+    /// Host row click or chevron. Opens or closes the Host's Projects.
+    case toggleHostExpansion(SidebarHost)
+    /// Host row menu → "Connect Project on This Host…". Opens the
+    /// remote-connection sheet with the Host chosen.
+    case hostConnectProjectTapped(HostID)
+    /// Host row menu → "Edit Host…". Opens Settings › Hosts on the Host.
+    case hostEditTapped(HostID)
 
     // Reorder Projects (ForEach.onMove forwarder).
     case reorderProjects(from: IndexSet, to: Int)
@@ -873,6 +880,23 @@ struct HierarchySidebarFeature {
     case .connectServerTapped:
       state.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: hierarchyClient.hosts())
       return .none
+
+    case .toggleHostExpansion(let host):
+      let collapsed = hierarchyClient.snapshot().collapsedSidebarHosts.contains(host)
+      hierarchyClient.setSidebarHostExpanded(host, collapsed)
+      return .none
+
+    case .hostConnectProjectTapped(let hostID):
+      let hosts = hierarchyClient.hosts()
+      guard hosts.contains(where: { $0.id == hostID }) else { return .none }
+      state.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: hosts, hostChoice: .existing(hostID))
+      return .none
+
+    case .hostEditTapped(let hostID):
+      let presenter = settingsWindowPresenter
+      return .run { _ in
+        await MainActor.run { presenter.editHost(hostID) }
+      }
 
     case .projectEditConnectionTapped(let projectID):
       guard

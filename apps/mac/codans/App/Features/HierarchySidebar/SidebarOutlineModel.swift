@@ -3,6 +3,9 @@ import Foundation
 
 /// What one row of the sidebar outline shows.
 enum SidebarOutlineRow {
+  /// A Host row (This Mac or a Host record) above its Projects. Not
+  /// selectable: a click opens or closes it.
+  case host(SidebarHostGroup)
   /// A Project's own row. A Project that failed to load has only this row.
   case project(Project)
   /// A Project row in the reorder session: a drag handle and the name.
@@ -28,10 +31,11 @@ struct SidebarOutlineNode {
   var isExpanded = false
 
   /// The selection a click on this row makes, nil for a row that cannot be
-  /// selected (a git Project row, a failed Project, a group without its
-  /// directory row, a reorder row).
+  /// selected (a Host row, a git Project row, a failed Project, a group
+  /// without its directory row, a reorder row).
   var selection: SidebarSelection? {
     switch row {
+    case .host: return nil
     case .project(let project):
       if case .failed = project.loadState { return nil }
       return project.rowWorktree.map { .worktree($0.id) }
@@ -45,6 +49,7 @@ struct SidebarOutlineNode {
   /// The Project this row is listed under.
   var projectID: ProjectID? {
     switch row {
+    case .host: nil
     case .project(let project), .reorderProject(let project): project.id
     case .worktree(_, let project, _), .workspaceGroup(_, _, let project), .workspaceMember(_, let project):
       project.id
@@ -63,10 +68,12 @@ enum SidebarOutlineModel {
   }
 
   /// The outline for `projects` (already filtered and sorted, see
-  /// `Catalog.sidebarProjects`). In the reorder session every Project is one
-  /// row with nothing under it.
+  /// `Catalog.sidebarProjects`). With a `hostLevel` the top level is the
+  /// Host rows, each over its Projects (ADR 0002, decision 2). In the reorder
+  /// session every Project is one row with nothing under it.
   static func nodes(
     projects: [Project],
+    hostLevel: SidebarHostLevel? = nil,
     pendingWorktrees: [PendingWorktree],
     filter: SidebarFilter,
     isReordering: Bool
@@ -75,7 +82,20 @@ enum SidebarOutlineModel {
       return projects.map { SidebarOutlineNode(id: "reorder:\($0.id.raw)", row: .reorderProject($0)) }
     }
     let pendings = isLiveMatch(filter) ? [] : pendingWorktrees
-    return projects.map { projectNode($0, pendings: pendings) }
+    guard let hostLevel else { return projects.map { projectNode($0, pendings: pendings) } }
+    return hostLevel.groups(projects).map { group in
+      var node = SidebarOutlineNode(id: hostNodeID(group.host), row: .host(group))
+      node.isExpanded = group.isExpanded
+      node.children = group.projects.map { projectNode($0, pendings: pendings) }
+      return node
+    }
+  }
+
+  static func hostNodeID(_ host: SidebarHost) -> String {
+    switch host {
+    case .thisMac: "host:this-mac"
+    case .host(let id): "host:\(id.raw)"
+    }
   }
 
   private static func projectNode(_ project: Project, pendings: [PendingWorktree]) -> SidebarOutlineNode {
