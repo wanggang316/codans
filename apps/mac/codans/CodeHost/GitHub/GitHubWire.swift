@@ -90,6 +90,36 @@ nonisolated enum GitHubWire {
     return PullRequestMergeState(status: status, reason: reason)
   }
 
+  /// One check of a pull request's `statusCheckRollup`, reduced to what decides whether
+  /// `gh run rerun --failed` applies to it.
+  struct RollupCheck: Equatable, Sendable {
+    /// `true` for a `CheckRun`, `false` for a `StatusContext` from an outside CI.
+    var isCheckRun: Bool
+    var conclusion: String?
+    var detailsURL: String?
+  }
+
+  /// GitHub Actions run ids of the failed CheckRuns in a pull request head's rollup,
+  /// ascending and without duplicates. "Rerun failed" shows when this is not empty and
+  /// reruns exactly these runs, so the button and its target always agree. A CheckRun's
+  /// `detailsUrl` is `https://<host>/<owner>/<repo>/actions/runs/<run id>/job/<job id>` for
+  /// Actions; a CheckRun from another app or a StatusContext has no run `gh` can rerun.
+  static func failedWorkflowRunIDs(_ checks: [RollupCheck]) -> [Int64] {
+    let ids = checks.compactMap { check -> Int64? in
+      guard check.isCheckRun, checkConclusion(check.conclusion) == .failure else { return nil }
+      return actionsRunID(detailsURL: check.detailsURL)
+    }
+    return Array(Set(ids)).sorted()
+  }
+
+  private static func actionsRunID(detailsURL: String?) -> Int64? {
+    guard let detailsURL, let url = URL(string: detailsURL) else { return nil }
+    let parts = url.pathComponents
+    guard let index = parts.firstIndex(of: "actions"), parts.count > index + 2, parts[index + 1] == "runs"
+    else { return nil }
+    return Int64(parts[index + 2])
+  }
+
   /// GitHub offers every strategy; `mergeable == MERGEABLE` decides whether merge is
   /// possible now. The repository's allowed merge methods are not fetched, so a
   /// strategy the repository forbids fails at `gh pr merge` time.

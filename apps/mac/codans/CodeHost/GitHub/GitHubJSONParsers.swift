@@ -14,8 +14,6 @@ import Foundation
 /// - `gh pr checks` returns a single `state` field that conflates status + conclusion
 ///   (`SUCCESS` / `FAILURE` / `PENDING` / `SKIPPING`) — the DTO carries a split
 ///   `status: CheckStatus` + `conclusion: CheckConclusion?` pair.
-/// - `gh run list` emits lowercase status + conclusion strings (`completed`, `success`) —
-///   they are upper-cased before `GitHubWire` maps them.
 ///
 /// Keeping the translation here keeps the CodansCore model free of GitHub wire values.
 nonisolated enum GitHubJSONParsers {
@@ -137,74 +135,30 @@ nonisolated enum GitHubJSONParsers {
     }
   }
 
-  // MARK: - gh pr view
+  // MARK: - gh pr view --json statusCheckRollup
 
-  /// Parses `gh pr view --json headRefName`.
-  static func parseHeadRefName(_ data: Data) throws -> String {
-    struct Wire: Decodable { var headRefName: String? }
+  /// Parses `gh pr view --json statusCheckRollup` into the Actions run ids
+  /// `GitHubWire.failedWorkflowRunIDs` selects.
+  static func parseFailedWorkflowRunIDs(_ data: Data) throws -> [Int64] {
+    struct Wire: Decodable {
+      var statusCheckRollup: [Check]?
+    }
+    struct Check: Decodable {
+      var __typename: String?
+      var conclusion: String?
+      var detailsUrl: String?
+    }
     let wire: Wire
     do {
       wire = try JSONDecoder().decode(Wire.self, from: data)
     } catch {
       throw CodeHostError.other("pr view decode: \(error)")
     }
-    guard let name = wire.headRefName, !name.isEmpty else {
-      throw CodeHostError.other("pr view: missing headRefName")
-    }
-    return name
-  }
-
-  // MARK: - gh run list
-
-  /// Parses `gh run list --limit 1 --json ...`. Returns the first (and only) element,
-  /// or `nil` when the branch has never run a workflow. Normalizes gh's lowercase
-  /// status / conclusion strings through `GitHubWire`.
-  static func parseLatestWorkflowRun(_ data: Data) throws -> WorkflowRun? {
-    struct Wire: Decodable {
-      var databaseId: Int64?
-      var name: String?
-      var status: String?
-      var conclusion: String?
-      var headBranch: String?
-      var headSha: String?
-      var number: Int?
-      var updatedAt: Date?
-      var url: URL?
-    }
-    do {
-      let decoder = JSONDecoder()
-      decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
-      let wires = try decoder.decode([Wire].self, from: data)
-      guard let wire = wires.first,
-        let dbid = wire.databaseId, let name = wire.name, let statusRaw = wire.status,
-        let headBranch = wire.headBranch, let headSha = wire.headSha,
-        let number = wire.number, let updatedAt = wire.updatedAt, let url = wire.url
-      else {
-        return nil
-      }
-      guard let status = GitHubWire.checkStatus(statusRaw.uppercased()) else {
-        throw CodeHostError.other("run list: unknown status '\(statusRaw)'")
-      }
-      let conclusion: CheckConclusion? = wire.conclusion.flatMap { raw -> CheckConclusion? in
-        guard !raw.isEmpty else { return nil }
-        return GitHubWire.checkConclusion(raw.uppercased())
-      }
-      return WorkflowRun(
-        databaseID: dbid,
-        name: name,
-        status: status,
-        conclusion: conclusion,
-        headBranch: headBranch,
-        headSHA: headSha,
-        runNumber: number,
-        updatedAt: updatedAt,
-        url: url
-      )
-    } catch let error as CodeHostError {
-      throw error
-    } catch {
-      throw CodeHostError.other("run list decode: \(error)")
-    }
+    return GitHubWire.failedWorkflowRunIDs(
+      (wire.statusCheckRollup ?? []).map {
+        GitHubWire.RollupCheck(
+          isCheckRun: $0.__typename == "CheckRun", conclusion: $0.conclusion, detailsURL: $0.detailsUrl)
+      })
   }
 
   // MARK: - gh api graphql (batched PR fetch)
@@ -279,12 +233,13 @@ nonisolated enum GitHubJSONParsers {
     let checks = checkNodes.compactMap(convertCheckNode)
     let mergeState = GitHubWire.mergeState(
       mergeable: node.mergeable, mergeStateStatus: node.mergeStateStatus)
-    // `gh run rerun --failed` reruns failed GitHub Actions jobs, which reach the rollup
-    // as CheckRuns (a node with `status`). A failed StatusContext comes from an outside
-    // CI that `gh` cannot rerun.
-    let canRerunFailedChecks = checkNodes.contains { check in
-      check.status != nil && GitHubWire.checkConclusion(check.conclusion) == .failure
-    }
+    // Same predicate `GitHubCodeHost.rerunFailedChecks` uses to pick its targets. A
+    // CheckRun is the union member that carries `status`.
+    let canRerunFailedChecks = !GitHubWire.failedWorkflowRunIDs(
+      checkNodes.map {
+        GitHubWire.RollupCheck(isCheckRun: $0.status != nil, conclusion: $0.conclusion, detailsURL: $0.detailsUrl)
+      }
+    ).isEmpty
     return PullRequestSnapshot(
       number: node.number ?? 0,
       title: node.title ?? "",

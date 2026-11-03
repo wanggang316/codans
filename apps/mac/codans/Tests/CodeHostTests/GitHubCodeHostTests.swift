@@ -66,20 +66,7 @@ struct GitHubCodeHostTests {
     #expect(await service.authenticatedHosts() == ["github.com", "ghe.example.com"])
   }
 
-  // MARK: - latestWorkflowRun
-
-  @Test
-  func latestWorkflowRunReturnsNilOnEmptyList() async throws {
-    let data = try Self.loadFixture("gh-run-list-empty")
-    let runner = RecordingCommandRunner(outcomes: [
-      .exited(code: 0, stdout: data, stderr: Data(), stdoutOverflow: false)
-    ])
-    let service = Self.makeService(runner: runner)
-    let run = try await service.latestWorkflowRun(branch: "main", repo: Self.repoArgument)
-    #expect(run == nil)
-  }
-
-  // MARK: - merge / close / markReady / rerunFailedJobs
+  // MARK: - merge / close / markReady / rerunFailedChecks
 
   @Test
   func mergeSendsCorrectArgvWithStrategyFlag() async throws {
@@ -128,23 +115,47 @@ struct GitHubCodeHostTests {
     #expect(calls.first?.arguments == ["pr", "ready", "11", "--repo", Self.repoArgument])
   }
 
+  /// Workflow A failed (run 111); workflow B ran later and passed (run 222). The rerun
+  /// must target A — the run whose failure made the button appear — not B.
   @Test
-  func rerunFailedChecksRerunsTheLatestRunOfTheSourceBranch() async throws {
+  func rerunFailedChecksTargetsTheFailedRunOfThePullRequestHead() async throws {
+    let rollup = Data(
+      #"""
+      {"statusCheckRollup":[
+        {"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE",
+         "detailsUrl":"https://github.com/wanggang316/codans/actions/runs/111/job/1"},
+        {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS",
+         "detailsUrl":"https://github.com/wanggang316/codans/actions/runs/222/job/2"},
+        {"__typename":"StatusContext","context":"ci/external","state":"FAILURE",
+         "targetUrl":"https://ci.example.com/build/3"}
+      ]}
+      """#.utf8)
     let runner = RecordingCommandRunner(outcomes: [
-      .exited(
-        code: 0, stdout: Data(#"{"headRefName":"feature/github01"}"#.utf8), stderr: Data(),
-        stdoutOverflow: false),
-      .exited(
-        code: 0, stdout: try Self.loadFixture("gh-run-list-success"), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: rollup, stderr: Data(), stdoutOverflow: false),
       .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false),
     ])
     let service = Self.makeService(runner: runner)
     try await service.rerunFailedChecks(Self.reference(42))
     let calls = await runner.calls
-    #expect(calls.count == 3)
-    #expect(calls[0].arguments == ["pr", "view", "42", "--repo", Self.repoArgument, "--json", "headRefName"])
-    #expect(Array(calls[1].arguments.prefix(4)) == ["run", "list", "--branch", "feature/github01"])
-    #expect(Array(calls[2].arguments) == ["run", "rerun", "123456789", "--failed", "--repo", Self.repoArgument])
+    #expect(calls.count == 2)
+    #expect(
+      calls[0].arguments == ["pr", "view", "42", "--repo", Self.repoArgument, "--json", "statusCheckRollup"])
+    #expect(calls[1].arguments == ["run", "rerun", "111", "--failed", "--repo", Self.repoArgument])
+  }
+
+  @Test
+  func rerunFailedChecksWithoutAFailedWorkflowRunRerunsNothing() async throws {
+    let rollup = Data(
+      #"{"statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/o/r/actions/runs/222/job/2"}]}"#
+        .utf8)
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: rollup, stderr: Data(), stdoutOverflow: false)
+    ])
+    let service = Self.makeService(runner: runner)
+    await #expect(throws: CodeHostError.self) {
+      try await service.rerunFailedChecks(Self.reference(42))
+    }
+    #expect(await runner.calls.count == 1)
   }
 
   // MARK: - web URLs
@@ -163,15 +174,12 @@ struct GitHubCodeHostTests {
 
   @Test
   func envIsAllowlistedToPathHomeAndForcedLC() async throws {
-    // Exercises the env-filter via any `runExpecting` call — latestWorkflowRun is
-    // convenient because gh-run-list-success is already a first-class fixture.
+    // Exercises the env filter via any `runExpecting` call.
     let runner = RecordingCommandRunner(outcomes: [
-      .exited(
-        code: 0, stdout: try Self.loadFixture("gh-run-list-success"),
-        stderr: Data(), stdoutOverflow: false)
+      .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false)
     ])
     let service = Self.makeService(runner: runner)
-    _ = try await service.latestWorkflowRun(branch: "feature/github01", repo: Self.repoArgument)
+    try await service.close(Self.reference(7))
     let calls = await runner.calls
     let env = try #require(calls.first?.env)
     #expect(env["LC_ALL"] == "en_US.UTF-8")

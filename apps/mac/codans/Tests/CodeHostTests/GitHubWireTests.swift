@@ -92,15 +92,23 @@ struct GitHubWireTests {
   }
 
   @Test
-  func workflowRunRoundTrip() throws {
-    let run = WorkflowRun(
-      databaseID: 123_456_789, name: "CI", status: .completed, conclusion: .failure,
-      headBranch: "feature/github01", headSHA: "aeafe6f012345", runNumber: 42,
-      updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
-      url: URL(string: "https://github.com/owner/repo/actions/runs/123456789")!
-    )
-    let decoded = try JSONDecoder().decode(WorkflowRun.self, from: JSONEncoder().encode(run))
-    #expect(decoded == run)
-    #expect(decoded.id == run.databaseID)
+  func failedWorkflowRunIDsComeOnlyFromFailedActionsCheckRuns() {
+    let checks: [GitHubWire.RollupCheck] = [
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/o/r/actions/runs/111/job/1"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/o/r/actions/runs/111/job/2"),
+      .init(isCheckRun: true, conclusion: "SUCCESS", detailsURL: "https://github.com/o/r/actions/runs/222/job/3"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://app.example.com/checks/9"),
+      .init(isCheckRun: false, conclusion: "FAILURE", detailsURL: "https://github.com/o/r/actions/runs/333/job/4"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://ghe.example.com/o/r/actions/runs/444/job/5"),
+    ]
+    #expect(GitHubWire.failedWorkflowRunIDs(checks) == [111, 444])
+  }
+
+  @Test
+  func noFailedWorkflowRunMeansNoRerun() {
+    let checks: [GitHubWire.RollupCheck] = [
+      .init(isCheckRun: true, conclusion: "SUCCESS", detailsURL: "https://github.com/o/r/actions/runs/222/job/3")
+    ]
+    #expect(GitHubWire.failedWorkflowRunIDs(checks).isEmpty)
   }
 }

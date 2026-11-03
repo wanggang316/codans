@@ -20,27 +20,12 @@ nonisolated enum GhCommand {
     (["auth", "status", "--json", "hosts"], [0, 1])
   }
 
-  /// `gh pr view <number> --repo <repo> --json headRefName`. Gives the source branch of a
-  /// Pull Request, which `runListLatest` needs.
-  static func pullRequestHeadRef(
+  /// `gh pr view <number> --repo <repo> --json statusCheckRollup`. The checks of the pull
+  /// request's head commit; `rerunFailedChecks` reads the failed Actions runs from them.
+  static func pullRequestCheckRollup(
     number: Int, repo: String
   ) -> (arguments: [String], expectedExitCodes: Set<Int32>) {
-    (["pr", "view", String(number), "--repo", repo, "--json", "headRefName"], [0])
-  }
-
-  /// `gh run list --branch <branch> --limit 1 --json <fields> --repo <repo>`. Returns the
-  /// latest workflow run for the branch. Empty array → no runs yet (caller returns nil).
-  static func runListLatest(
-    branch: String, repo: String
-  ) -> (arguments: [String], expectedExitCodes: Set<Int32>) {
-    let fields = [
-      "databaseId", "name", "status", "conclusion",
-      "headBranch", "headSha", "number", "updatedAt", "url",
-    ].joined(separator: ",")
-    return (
-      ["run", "list", "--branch", branch, "--limit", "1", "--json", fields, "--repo", repo],
-      [0]
-    )
+    (["pr", "view", String(number), "--repo", repo, "--json", "statusCheckRollup"], [0])
   }
 
   /// `gh pr merge <number> <flag> --repo <repo>`.

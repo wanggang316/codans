@@ -103,6 +103,30 @@ struct BatchedPullRequestsTests {
     #expect(snap.checkRollup[0].status == .completed)
     #expect(snap.checkRollup[0].conclusion == .success)
     #expect(snap.checkRollup[1].conclusion == .failure)
+    // The failed `tests` job belongs to Actions run 1, so it can be rerun.
+    #expect(snap.canRerunFailedChecks)
+  }
+
+  /// "Rerun failed" shows only for a failed GitHub Actions CheckRun on the PR head — the
+  /// same runs `GitHubCodeHost.rerunFailedChecks` targets. A failed outside status
+  /// context does not count: `gh run rerun` cannot rerun it.
+  @Test
+  func rerunCapabilityFollowsFailedActionsRunsOnly() throws {
+    func snapshot(_ contexts: String) throws -> PullRequestSnapshot? {
+      let json = """
+        {"data":{"repository":{"branch0":{"nodes":[{"number":7,"state":"OPEN","headRefName":"f",
+        "baseRefName":"main","headRepository":{"owner":{"login":"o"}},
+        "statusCheckRollup":{"contexts":{"nodes":[\(contexts)]}}}]}}}}
+        """
+      return try GitHubJSONParsers.parseBatchedPullRequests(
+        Data(json.utf8), aliasMap: ["branch0": "f"], remoteOwner: "o")["f"]
+    }
+    let failedA = #"{"name":"lint","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/111/job/1"}"#
+    let passedB = #"{"name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/o/r/actions/runs/222/job/2"}"#
+    let failedStatus = #"{"context":"ci/external","state":"FAILURE","targetUrl":"https://ci.example.com/3"}"#
+    #expect(try snapshot("\(failedA),\(passedB)")?.canRerunFailedChecks == true)
+    #expect(try snapshot(passedB)?.canRerunFailedChecks == false)
+    #expect(try snapshot("\(passedB),\(failedStatus)")?.canRerunFailedChecks == false)
   }
 
   // MARK: - Fork-PR filter

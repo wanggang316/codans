@@ -15,7 +15,7 @@ GitHub 现在是 Code Host 层（[ADR 0004](../adr/0004-gitlab-support-through-g
 
 - 每个 fetch unit 先由 `CodeHostResolver` 解析出 Code Host 仓库（`github.com` 或 `gh` 已登录的 host → GitHub；否则无 Code Host，不取数、无徽标、无错误）。仓库是 (kind, host, full path)。
 - 写操作接收 `PullRequestReference`（仓库 + 编号），`gh` 以 `--repo HOST/OWNER/REPO` 定位仓库，不再依赖 Worktree 工作目录。
-- "Rerun failed" 是否显示取自快照的 `canRerunFailedChecks`（rollup 中有失败的 CheckRun）；执行时 `GitHubCodeHost.rerunFailedChecks` 依次调用 `gh pr view --json headRefName`、`gh run list --branch … --limit 1`、`gh run rerun <id> --failed`。popover 打开时不再单独取 workflow run。
+- "Rerun failed" 的显示条件与执行目标来自同一份数据：PR head commit 的 `statusCheckRollup` 中失败的 GitHub Actions CheckRun（`detailsUrl` 含 `/actions/runs/<id>/`），由 `GitHubWire.failedWorkflowRunIDs` 选出。快照的 `canRerunFailedChecks` 为该集合非空；执行时 `GitHubCodeHost.rerunFailedChecks` 重新读取 `gh pr view <n> --json statusCheckRollup`，对每个失败的 run 调用 `gh run rerun <id> --failed`。这样即使另一个 workflow 在分支上有更新且成功的 run，也不会重跑错的 run。外部 CI 的 StatusContext 失败不显示该按钮。popover 打开时不再单独取 workflow run。
 - merge 状态是中立的 `PullRequestMergeState`（clean / conflicted / behind / blocked / draft / unknown + 原因），合并选项是快照上的 `mergeOptions`。
 
 ## 目标与非目标

@@ -111,29 +111,23 @@ nonisolated struct GitHubCodeHost: CodeHost {
     _ = try await runExpecting(cmd)
   }
 
-  /// Finds the latest workflow run on the Pull Request's source branch and reruns its
-  /// failed jobs (`gh run rerun --failed`).
+  /// Reruns the failed jobs (`gh run rerun --failed`) of every GitHub Actions run with a
+  /// failed CheckRun on the pull request's head commit — the runs that made
+  /// `canRerunFailedChecks` true. Reading the rollup again here, not a branch's latest run,
+  /// keeps the target on the pull request head even when a newer run of another workflow
+  /// passed.
   func rerunFailedChecks(_ pullRequest: PullRequestReference) async throws {
     let repo = GitHub.repoArgument(pullRequest.repository)
-    let branch: String
-    switch try await runExpecting(GhCommand.pullRequestHeadRef(number: pullRequest.number, repo: repo)) {
-    case .success(let data): branch = try GitHubJSONParsers.parseHeadRefName(data)
+    let runIDs: [Int64]
+    switch try await runExpecting(GhCommand.pullRequestCheckRollup(number: pullRequest.number, repo: repo)) {
+    case .success(let data): runIDs = try GitHubJSONParsers.parseFailedWorkflowRunIDs(data)
     case .noResult: throw CodeHostError.notAPullRequest
     }
-    guard let run = try await latestWorkflowRun(branch: branch, repo: repo) else {
-      throw CodeHostError.other("no workflow run found for branch \(branch)")
+    guard !runIDs.isEmpty else {
+      throw CodeHostError.other("no failed workflow run on pull request #\(pullRequest.number)")
     }
-    _ = try await runExpecting(GhCommand.runRerunFailed(runID: run.databaseID, repo: repo))
-  }
-
-  /// The most-recent workflow run for the branch, or `nil` when no run exists.
-  func latestWorkflowRun(branch: String, repo: String) async throws -> WorkflowRun? {
-    let cmd = GhCommand.runListLatest(branch: branch, repo: repo)
-    switch try await runExpecting(cmd) {
-    case .success(let data):
-      return try GitHubJSONParsers.parseLatestWorkflowRun(data)
-    case .noResult:
-      return nil
+    for runID in runIDs {
+      _ = try await runExpecting(GhCommand.runRerunFailed(runID: runID, repo: repo))
     }
   }
 

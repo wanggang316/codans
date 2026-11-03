@@ -17,18 +17,10 @@ struct GhCommandTests {
   }
 
   @Test
-  func runListLatestArgv() {
-    let result = GhCommand.runListLatest(branch: "main", repo: "github.com/o/r")
-    #expect(result.arguments[0..<6] == ["run", "list", "--branch", "main", "--limit", "1"])
-    #expect(result.arguments.suffix(2) == ["--repo", "github.com/o/r"])
-    #expect(result.arguments[6] == "--json")
-    let fields = result.arguments[7]
-    for required in [
-      "databaseId", "name", "status", "conclusion",
-      "headBranch", "headSha", "number", "updatedAt", "url",
-    ] {
-      #expect(fields.contains(required))
-    }
+  func pullRequestCheckRollupArgv() {
+    let result = GhCommand.pullRequestCheckRollup(number: 42, repo: "github.com/o/r")
+    #expect(result.arguments == ["pr", "view", "42", "--repo", "github.com/o/r", "--json", "statusCheckRollup"])
+    #expect(result.expectedExitCodes == [0])
   }
 
   @Test
