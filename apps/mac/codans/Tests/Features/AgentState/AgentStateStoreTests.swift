@@ -475,12 +475,72 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func titleObservedBeforeBindSurvivesTheBind() {
+  func titleSetBeforeTheAgentStartsIsNotActivity() {
     let f = Fixture()
-    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("early title")))
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
-    #expect(f.registry.title(for: f.paneID) == "early title")
+    #expect(f.registry.title(for: f.paneID) == nil)
+    #expect(f.registry.activityText(for: f.paneID) == nil)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Reading files")))
+    #expect(f.registry.activityText(for: f.paneID) == "Reading files")
+  }
+
+  @Test
+  func titleOfThePreviousAgentDoesNotCarryToTheNextAgent() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.registry.onAgentUnbound(f.paneID)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.activityText(for: f.paneID) == nil)
+  }
+
+  @Test
+  func rebindToAnotherKindDropsTheTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.activityText(for: f.paneID) == nil)
+  }
+
+  @Test
+  func restoredAgentIgnoresTitlesUntilItsBind() {
+    let f = Fixture()
+    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
+    #expect(f.registry.activityText(for: f.paneID) == nil)
+    // The binder identifies the restored agent at launch.
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.activityText(for: f.paneID) == nil)
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
+    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+  }
+
+  @Test
+  func rebindOfTheSameAgentKeepsItsTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
+    // The binder materializes the same agent again, for example after the
+    // pane was archived and unarchived.
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil, assumeUserInputSeen: true)
+    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+  }
+
+  @Test
+  func programStatusMessageHasPriorityOverTheTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, message: "Running tests")
+    #expect(f.registry.activityText(for: f.paneID) == "Running tests")
+    f.report(.working)
+    #expect(f.registry.activityText(for: f.paneID) == "✳ Claude task")
   }
 
   // MARK: - Attention observation (notification suppression)
