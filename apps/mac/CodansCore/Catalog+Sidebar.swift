@@ -189,8 +189,7 @@ extension Catalog {
   public func sidebarProjects(
     pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
   ) -> [Project] {
-    sorted(
-      tagFilteredProjects.compactMap { project in
+    tagFilteredProjects.compactMap { project in
         let matches: (Worktree) -> Bool
         switch sidebarFilter {
         case .all: return project
@@ -208,7 +207,7 @@ extension Catalog {
           filtered.worktrees = project.worktrees.filter { !$0.archived && matches($0) }
         }
         return filtered.worktrees.isEmpty ? nil : filtered
-      })
+      }
   }
 
   /// Every row a user can select, in the order the sidebar shows them: a

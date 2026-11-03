@@ -25,12 +25,10 @@ struct NewAgentFeatureTests {
           Worktree(id: mainWorktreeID, name: "repo", path: "/tmp/new-agent/repo", branch: "main"),
           Worktree(
             name: "old", path: "/tmp/new-agent/old", branch: "feature/old", archived: true),
-        ],
-        manualOrder: 0),
+        ]),
       Project(
         id: folderProjectID, name: "notes", rootPath: "/tmp/new-agent/notes",
-        worktrees: [Worktree(id: folderWorktreeID, name: "notes", path: "/tmp/new-agent/notes")],
-        manualOrder: 1),
+        worktrees: [Worktree(id: folderWorktreeID, name: "notes", path: "/tmp/new-agent/notes")]),
     ])
   }
 

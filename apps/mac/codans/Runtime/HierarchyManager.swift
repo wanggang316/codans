@@ -350,10 +350,6 @@ final class HierarchyManager {
       selectedWorktreeID = synthetic.id
     }
 
-    // Manual-order auto-increment: new projects land at the end of the
-    // manual list. `max + 1` works on a sparse field too — legacy zeros
-    // simply get bumped past as users add new entries.
-    let nextManualOrder = (catalog.projects.map(\.manualOrder).max() ?? -1) + 1
     let project = Project(
       id: projectID,
       name: name,
@@ -362,9 +358,9 @@ final class HierarchyManager {
       worktrees: worktrees,
       selectedWorktreeID: selectedWorktreeID,
       addedAt: Date(),
-      manualOrder: nextManualOrder,
       isWorkspace: isWorkspace
     )
+    // New Projects go to the end of the Project order (ADR 0001).
     catalog.projects.append(project)
     store.scheduleSave(catalog)
     return projectID
@@ -399,7 +395,6 @@ final class HierarchyManager {
       worktrees = [synthetic]
       selectedWorktreeID = synthetic.id
     }
-    let nextManualOrder = (catalog.projects.map(\.manualOrder).max() ?? -1) + 1
     let project = Project(
       id: projectID,
       name: name,
@@ -408,8 +403,7 @@ final class HierarchyManager {
       remoteHost: remoteHost,
       worktrees: worktrees,
       selectedWorktreeID: selectedWorktreeID,
-      addedAt: Date(),
-      manualOrder: nextManualOrder
+      addedAt: Date()
     )
     catalog.projects.append(project)
     attachServerProject(at: catalog.projects.count - 1, to: remoteHost)
@@ -460,55 +454,6 @@ final class HierarchyManager {
         catalog.projects[index].selectedWorktreeID = nil
       }
     }
-    store.scheduleSave(catalog)
-  }
-
-  // MARK: - Project sort mode (sidebar bottom bar)
-
-  /// Replaces the catalog-wide `projectSortMode`. Unchanged values are
-  /// silent no-ops. Switching modes never reorders `catalog.projects` —
-  /// the array stays the manual order; non-manual modes derive their
-  /// display order at render time.
-  func setProjectSortMode(_ mode: ProjectSortMode) {
-    guard catalog.projectSortMode != mode else { return }
-    catalog.projectSortMode = mode
-    store.scheduleSave(catalog)
-  }
-
-  /// Commit the result of the manual-sort sheet. Stamps each
-  /// project's `manualOrder` to match its position in `orderedIDs`,
-  /// rewrites `catalog.projects` in the same order so the on-disk
-  /// array stays aligned with the field (cheap consistency for code
-  /// that iterates `catalog.projects` directly), and flips
-  /// `projectSortMode` to `.manual`. Unknown ids in the input are
-  /// dropped; projects missing from the input keep their existing
-  /// `manualOrder` and are appended at the end of the array so a
-  /// partial / stale list can't lose data.
-  func applyManualProjectOrder(_ orderedIDs: [ProjectID]) {
-    guard !catalog.projects.isEmpty else {
-      if catalog.projectSortMode != .manual {
-        catalog.projectSortMode = .manual
-        store.scheduleSave(catalog)
-      }
-      return
-    }
-    let byID = Dictionary(uniqueKeysWithValues: catalog.projects.map { ($0.id, $0) })
-    var seen: Set<ProjectID> = []
-    var rebuilt: [Project] = []
-    rebuilt.reserveCapacity(catalog.projects.count)
-    for id in orderedIDs {
-      guard var project = byID[id], !seen.contains(id) else { continue }
-      project.manualOrder = rebuilt.count
-      rebuilt.append(project)
-      seen.insert(id)
-    }
-    for project in catalog.projects where !seen.contains(project.id) {
-      var copy = project
-      copy.manualOrder = rebuilt.count
-      rebuilt.append(copy)
-    }
-    catalog.projects = rebuilt
-    catalog.projectSortMode = .manual
     store.scheduleSave(catalog)
   }
 
@@ -688,23 +633,11 @@ final class HierarchyManager {
     // No scheduleSave — transient.
   }
 
-  /// Reorder Projects at the catalog top level. Mirrors SwiftUI
-  /// `ForEach.onMove`'s `(IndexSet, Int)` signature so the sidebar can
-  /// forward directly. Array's `move(fromOffsets:toOffset:)` already handles
-  /// out-of-range destinations by trapping — callers must pass a valid
-  /// index. Persists.
-  func reorderProjects(
-    from source: IndexSet,
-    to destination: Int
-  ) {
-    guard !source.isEmpty else { return }
-    catalog.projects.move(fromOffsets: source, toOffset: destination)
-    // Inline drag is also a manual-ordering gesture; stamp
-    // `manualOrder` to match the new array layout so the user-curated
-    // sequence survives a switch to a non-manual mode and back.
-    for index in catalog.projects.indices {
-      catalog.projects[index].manualOrder = index
-    }
+  /// Moves one Project in the Project order (the sidebar block drag).
+  /// Resolved by `ProjectID`, so Projects hidden by a filter keep their
+  /// relative positions. Persists only when the order changed.
+  func moveProject(_ projectID: ProjectID, to placement: ProjectPlacement) {
+    guard catalog.moveProject(projectID, to: placement) else { return }
     store.scheduleSave(catalog)
   }
 

@@ -9,6 +9,8 @@ public nonisolated struct Catalog: Equatable, Sendable {
   /// catalog migrations have run; always `currentVersion` when built in
   /// memory.
   public var version: Int
+  /// The Project order: the sidebar shows Projects in this array order
+  /// (ADR 0001).
   public var projects: [Project]
   /// The Host list: every Host that Server projects can refer to, in the
   /// order of addition. `HierarchyManager` is its only writer; change it
@@ -21,10 +23,6 @@ public nonisolated struct Catalog: Equatable, Sendable {
   public var collapsedSidebarHosts: Set<SidebarHost> = []
   public var sidebarFilter: SidebarFilter = .all
   public var activeTagFilter: TagFilter
-  /// Sidebar-wide project ordering policy. The `projects` array always
-  /// stores the manual order; `.joinOrder` and `.activeFirst` are
-  /// derived sorts applied at render time.
-  public var projectSortMode: ProjectSortMode
   /// Authoritative top-level "the user's current Project". Single-window
   /// simplification means there is exactly one such selection per app.
   /// The selection-stream resolver in `HierarchyClient` reads this first;
@@ -38,7 +36,6 @@ public nonisolated struct Catalog: Equatable, Sendable {
     hosts: [HostRecord] = [],
     tags: [Tag] = [],
     activeTagFilter: TagFilter = .all,
-    projectSortMode: ProjectSortMode = .default,
     selectedProjectID: ProjectID? = nil
   ) {
     self.version = version
@@ -46,7 +43,6 @@ public nonisolated struct Catalog: Equatable, Sendable {
     self.hosts = hosts
     self.tags = tags
     self.activeTagFilter = activeTagFilter
-    self.projectSortMode = projectSortMode
     self.selectedProjectID = selectedProjectID
   }
 
@@ -70,8 +66,10 @@ extension Catalog: Codable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case version, projects, hosts, collapsedSidebarHosts, tags, activeTagFilter, sidebarFilter, projectSortMode
+    case version, projects, hosts, collapsedSidebarHosts, tags, activeTagFilter, sidebarFilter
     case selectedProjectID
+    /// Retired (ADR 0001). Read only to materialize the order one time.
+    case projectSortMode
   }
 
   public init(from decoder: Decoder) throws {
@@ -87,7 +85,17 @@ extension Catalog: Codable {
     // groups, the Host list), which decode to their defaults; the store then
     // runs the migrations.
     self.version = version
-    self.projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
+    let projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
+    // A catalog written before ADR 0001 can still name a sort mode. Sort
+    // one time so the user sees the same order; the next save drops it.
+    let legacySortMode = try? container.decodeIfPresent(String.self, forKey: .projectSortMode)
+    let manualOrders =
+      legacySortMode == LegacyProjectOrder.manual
+      ? (try? container.decodeIfPresent([LegacyProjectOrder.Fields].self, forKey: .projects))?
+        .map(\.manualOrder)
+      : nil
+    self.projects = LegacyProjectOrder.materialize(
+      projects, sortMode: legacySortMode, manualOrders: manualOrders ?? [])
     self.hosts = try container.decodeIfPresent([HostRecord].self, forKey: .hosts) ?? []
     self.collapsedSidebarHosts = Set(
       try container.decodeIfPresent([SidebarHost].self, forKey: .collapsedSidebarHosts) ?? [])
@@ -95,8 +103,6 @@ extension Catalog: Codable {
     self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
     self.activeTagFilter =
       try container.decodeIfPresent(TagFilter.self, forKey: .activeTagFilter) ?? .all
-    self.projectSortMode =
-      try container.decodeIfPresent(ProjectSortMode.self, forKey: .projectSortMode) ?? .default
     self.selectedProjectID =
       try container.decodeIfPresent(ProjectID.self, forKey: .selectedProjectID)
     resolveHostReferences()
@@ -120,71 +126,11 @@ extension Catalog: Codable {
     if activeTagFilter != .all {
       try container.encode(activeTagFilter, forKey: .activeTagFilter)
     }
-    // Same rationale: omit when default so existing catalogs stay
-    // byte-identical on round-trip.
-    if projectSortMode != .default {
-      try container.encode(projectSortMode, forKey: .projectSortMode)
-    }
     try container.encodeIfPresent(selectedProjectID, forKey: .selectedProjectID)
   }
 }
 
 extension Catalog {
-  /// Apply `projectSortMode` to a (possibly pre-filtered) Project list.
-  /// Each mode sorts by its dedicated field — `addedAt` for
-  /// `.joinOrder`, `lastActiveAt` for `.activeFirst`, `manualOrder`
-  /// for `.manual` — with the incoming array order as the stable
-  /// tiebreaker so the result is fully deterministic.
-  public func sorted(_ projects: [Project]) -> [Project] {
-    switch projectSortMode {
-    case .manual:
-      // Sort by the user-curated `manualOrder` field ASC. Legacy /
-      // never-stamped projects all carry `0` and tie-break on incoming
-      // array position, which equals the historical sidebar order.
-      return projects.enumerated()
-        .sorted { lhs, rhs in
-          if lhs.element.manualOrder != rhs.element.manualOrder {
-            return lhs.element.manualOrder < rhs.element.manualOrder
-          }
-          return lhs.offset < rhs.offset
-        }
-        .map { $0.element }
-    case .joinOrder:
-      // Stable sort by addedAt ASC; ties (including the `.distantPast`
-      // legacy bucket) preserve incoming array order.
-      return projects.enumerated()
-        .sorted { lhs, rhs in
-          if lhs.element.addedAt != rhs.element.addedAt {
-            return lhs.element.addedAt < rhs.element.addedAt
-          }
-          return lhs.offset < rhs.offset
-        }
-        .map { $0.element }
-    case .activeFirst:
-      // Most-recently-active first. Projects with `nil` lastActiveAt
-      // sink to the bottom and break ties by addedAt ASC (so the user
-      // sees a sensible "everything else, oldest first" tail).
-      return projects.enumerated()
-        .sorted { lhs, rhs in
-          switch (lhs.element.lastActiveAt, rhs.element.lastActiveAt) {
-          case (let l?, let r?):
-            if l != r { return l > r }
-          case (.some, .none):
-            return true
-          case (.none, .some):
-            return false
-          case (.none, .none):
-            break
-          }
-          if lhs.element.addedAt != rhs.element.addedAt {
-            return lhs.element.addedAt < rhs.element.addedAt
-          }
-          return lhs.offset < rhs.offset
-        }
-        .map { $0.element }
-    }
-  }
-
   /// Resolve a `PaneID` to the Project that currently hosts it, if any.
   /// Walks `projects → worktrees → tabs → panes` and returns the first
   /// match. Linear in the total pane count.

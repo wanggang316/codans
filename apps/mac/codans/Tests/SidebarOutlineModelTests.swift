@@ -71,11 +71,10 @@ struct SidebarOutlineModelTests {
 
   private func nodes(
     _ projects: [Project], hostLevel: SidebarHostLevel? = nil, pendings: [PendingWorktree] = [],
-    filter: SidebarFilter = .all, isReordering: Bool = false
+    filter: SidebarFilter = .all
   ) -> [SidebarOutlineNode] {
     SidebarOutlineModel.nodes(
-      projects: projects, hostLevel: hostLevel, pendingWorktrees: pendings, filter: filter,
-      isReordering: isReordering)
+      projects: projects, hostLevel: hostLevel, pendingWorktrees: pendings, filter: filter)
   }
 
   /// A row's kind and name, so a test reads as the sidebar does.
@@ -83,7 +82,6 @@ struct SidebarOutlineModelTests {
     switch node.row {
     case .host(let group): "host \(group.displayName)"
     case .project(let project): "project \(project.name)"
-    case .reorderProject(let project): "reorder \(project.name)"
     case .worktree(let worktree, _, let segment): "worktree \(worktree.name) \(segment.map { "\($0)" } ?? "main")"
     case .pending(let pending): "pending \(pending.displayName)"
     case .workspaceGroup(let group, _, _): "group \(group.name)"
@@ -155,13 +153,6 @@ struct SidebarOutlineModelTests {
     collect(nodes([repository, folder, failed, workspace], pendings: [pending(in: repository)]))
     #expect(ids.count == 14)
     #expect(Set(ids).count == ids.count)
-  }
-
-  @Test
-  func theReorderSessionShowsOneRowPerProjectAndNothingUnderIt() {
-    let tree = nodes([repository, failed, workspace], isReordering: true)
-    #expect(tree.map(label) == ["reorder repo", "reorder gone", "reorder flow"])
-    #expect(tree.allSatisfy { $0.children.isEmpty && $0.selection == nil })
   }
 
   // MARK: - Filter result
@@ -283,13 +274,6 @@ struct SidebarOutlineModelTests {
     #expect(tree[0].children.map(label) == ["project repo"])
   }
 
-  @Test
-  func theReorderSessionHasNoHostRows() {
-    let catalog = Catalog(projects: [repository, remote(folder, on: Self.box)], hosts: [Self.box])
-    let tree = nodes(catalog.projects, hostLevel: catalog.sidebarHostLevel, isReordering: true)
-    #expect(tree.map(label) == ["reorder repo", "reorder notes"])
-  }
-
   // MARK: - Drops
 
   @Test
@@ -319,14 +303,76 @@ struct SidebarOutlineModelTests {
   }
 
   @Test
-  func aProjectMovesInTheTopLevelOfTheReorderSession() throws {
-    let roots = nodes([repository, folder, workspace], isReordering: true)
-    let move = try #require(SidebarOutlineModel.projectMove(roots: roots, draggedID: roots[2].id, childIndex: 0))
-    #expect(move.source == [2])
-    #expect(move.destination == 0)
-    #expect(SidebarOutlineModel.projectMove(roots: roots, draggedID: roots[0].id, childIndex: -1) == nil)
-    // Outside the reorder session a Project row does not move.
-    let rows = nodes([repository, folder])
-    #expect(SidebarOutlineModel.projectMove(roots: rows, draggedID: rows[0].id, childIndex: 2) == nil)
+  func aProjectDropResolvesToAVisibleNeighborInItsOwnParent() throws {
+    let roots = nodes([repository, folder, failed, workspace])
+    // Before the first, between two, and after the last Project.
+    #expect(
+      SidebarOutlineModel.projectDrop(siblings: roots, draggedID: roots[3].id, childIndex: 0)
+        == .init(projectID: workspace.id, placement: .before(repository.id)))
+    #expect(
+      SidebarOutlineModel.projectDrop(siblings: roots, draggedID: roots[0].id, childIndex: 3)
+        == .init(projectID: repository.id, placement: .before(workspace.id)))
+    #expect(
+      SidebarOutlineModel.projectDrop(siblings: roots, draggedID: roots[1].id, childIndex: 4)
+        == .init(projectID: folder.id, placement: .after(workspace.id)))
+  }
+
+  @Test
+  func aProjectDropNextToItselfIsValidButMovesNothing() throws {
+    let roots = nodes([repository, folder, workspace])
+    for index in [1, 2] {
+      #expect(
+        SidebarOutlineModel.projectDrop(siblings: roots, draggedID: roots[1].id, childIndex: index)
+          == .init(projectID: folder.id, placement: nil))
+    }
+  }
+
+  @Test
+  func aProjectDropOnARowIntoWorktreesOrAtTheHostLevelIsRefused() throws {
+    let roots = nodes([repository, folder])
+    #expect(SidebarOutlineModel.projectDrop(siblings: roots, draggedID: roots[0].id, childIndex: -1) == nil)
+    // Into the worktree segment of a Project.
+    #expect(
+      SidebarOutlineModel.projectDrop(siblings: roots[0].children, draggedID: roots[1].id, childIndex: 1) == nil)
+    // Among the Host rows, with a Host level.
+    let catalog = Catalog(projects: [repository, remote(folder, on: Self.box)], hosts: [Self.box])
+    let hosts = nodes(catalog.projects, hostLevel: catalog.sidebarHostLevel)
+    let local = try #require(hosts.first?.children.first)
+    #expect(SidebarOutlineModel.projectDrop(siblings: hosts, draggedID: local.id, childIndex: 0) == nil)
+  }
+
+  @Test
+  func aProjectDropUnderAnotherHostIsRefused() throws {
+    let catalog = Catalog(
+      projects: [repository, remote(folder, on: Self.box), remote(workspace, on: Self.box)], hosts: [Self.box])
+    let hosts = nodes(catalog.projects, hostLevel: catalog.sidebarHostLevel)
+    let thisMac = try #require(hosts.first { $0.id == SidebarOutlineModel.hostNodeID(.thisMac) })
+    let box = try #require(hosts.first { $0.id != thisMac.id })
+    let local = try #require(thisMac.children.first)
+    #expect(SidebarOutlineModel.projectDrop(siblings: box.children, draggedID: local.id, childIndex: 0) == nil)
+    // Inside its own Host the same drag is valid.
+    let boxFirst = box.children[0]
+    #expect(
+      SidebarOutlineModel.projectDrop(siblings: box.children, draggedID: box.children[1].id, childIndex: 0)?
+        .placement == .before(projectID(of: boxFirst)))
+  }
+
+  @Test
+  func aProjectDropUnderAFilterResolvesInTheFullOrder() throws {
+    // `failed` and `folder` are hidden; the drop lands next to the visible
+    // `workspace`, and the hidden Projects keep their places.
+    let gone = failed
+    var catalog = Catalog(projects: [repository, gone, folder, workspace])
+    let roots = nodes([repository, workspace])
+    let drop = try #require(
+      SidebarOutlineModel.projectDrop(siblings: roots, draggedID: roots[0].id, childIndex: 2))
+    let placement = try #require(drop.placement)
+    catalog.moveProject(drop.projectID, to: placement)
+    #expect(catalog.projects.map(\.id) == [gone.id, folder.id, workspace.id, repository.id])
+  }
+
+  private func projectID(of node: SidebarOutlineNode) -> ProjectID {
+    guard case .project(let project) = node.row else { return ProjectID() }
+    return project.id
   }
 }

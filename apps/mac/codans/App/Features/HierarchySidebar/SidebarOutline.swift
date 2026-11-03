@@ -28,7 +28,7 @@ struct SidebarOutline: NSViewRepresentable {
   let rowContent: (SidebarOutlineNode) -> AnyView
   let onSelect: (SidebarSelection) -> Void
   let onMoveWorktrees: (SidebarOutlineModel.WorktreeMove) -> Void
-  let onMoveProjects: (IndexSet, Int) -> Void
+  let onMoveProject: (ProjectID, ProjectPlacement) -> Void
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -334,7 +334,8 @@ struct SidebarOutline: NSViewRepresentable {
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
       guard let item = item as? SidebarOutlineItem, let config else { return nil }
       switch item.node.row {
-      case .worktree(_, _, .some) where config.allowsWorktreeDrag, .reorderProject:
+      // A drag starts anywhere on a Project row, under every filter.
+      case .worktree(_, _, .some) where config.allowsWorktreeDrag, .project:
         let writer = NSPasteboardItem()
         writer.setString(item.id, forType: Self.dragType)
         return writer
@@ -359,17 +360,19 @@ struct SidebarOutline: NSViewRepresentable {
     }
 
     /// What a drop at this place does, nil where it cannot land: a worktree
-    /// stays in its segment of its Project, a Project in the top level.
+    /// stays in its segment of its Project, a Project under its own parent.
     private func dropAction(_ info: any NSDraggingInfo, parent: Any?, childIndex: Int) -> (() -> Void)? {
       guard let config, let id = info.draggingPasteboard.string(forType: Self.dragType),
         let dragged = itemsByID[id]
       else { return nil }
-      if case .reorderProject = dragged.node.row {
-        guard parent == nil,
-          let move = SidebarOutlineModel.projectMove(
-            roots: roots.map(\.node), draggedID: id, childIndex: childIndex)
+      if case .project = dragged.node.row {
+        let siblings = (parent as? SidebarOutlineItem)?.children ?? roots
+        guard
+          let drop = SidebarOutlineModel.projectDrop(
+            siblings: siblings.map(\.node), draggedID: id, childIndex: childIndex)
         else { return nil }
-        return { config.onMoveProjects(move.source, move.destination) }
+        guard let placement = drop.placement else { return {} }
+        return { config.onMoveProject(drop.projectID, placement) }
       }
       guard let parent = parent as? SidebarOutlineItem, parent.children.contains(where: { $0 === dragged }),
         let move = SidebarOutlineModel.worktreeMove(

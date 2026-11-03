@@ -23,12 +23,12 @@ struct CatalogSidebarHostTests {
   private var catalog: Catalog {
     Catalog(
       projects: [remote("web", on: mini, root: miniRoot), local, remote("api", on: box, root: boxRoot)],
-      hosts: [box, mini], projectSortMode: .manual)
+      hosts: [box, mini])
   }
 
   @Test
   func onlyLocalProjectsHaveNoHostLevel() {
-    let catalog = Catalog(projects: [local], hosts: [box], projectSortMode: .manual)
+    let catalog = Catalog(projects: [local], hosts: [box])
     #expect(catalog.sidebarHostLevel == nil)
   }
 
@@ -45,8 +45,7 @@ struct CatalogSidebarHostTests {
 
   @Test
   func aHostWithoutProjectsHasNoGroup() throws {
-    var catalog = Catalog(projects: [local, remote("api", on: box, root: boxRoot)], hosts: [box, mini])
-    catalog.projectSortMode = .manual
+    let catalog = Catalog(projects: [local, remote("api", on: box, root: boxRoot)], hosts: [box, mini])
     let level = try #require(catalog.sidebarHostLevel)
     #expect(level.groups(catalog.sidebarProjects).map(\.host) == [.thisMac, .host(box.id)])
   }
@@ -103,7 +102,7 @@ struct CatalogSidebarHostTests {
 
   @Test
   func withoutAHostLevelTheCollapsedSetIsIgnored() {
-    var catalog = Catalog(projects: [local], projectSortMode: .manual)
+    var catalog = Catalog(projects: [local])
     catalog.collapsedSidebarHosts = [.thisMac]
     #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [localRoot.id])
   }
