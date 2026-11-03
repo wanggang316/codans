@@ -23,7 +23,9 @@ struct WorkspaceCreationBar: View {
         }
         .keyboardShortcut(.cancelAction)
         .disabled(!canCancel)
-        .help(store.creation.isBusy ? "Stop and remove what was created (Esc)" : "Cancel (Esc)")
+        .help(
+          ShortcutDisplay.tooltip(
+            store.creation.isBusy ? "Stop and remove what was created" : "Cancel", chord: "⎋"))
         Button(store.createButtonTitle) {
           store.send(.createButtonTapped)
         }

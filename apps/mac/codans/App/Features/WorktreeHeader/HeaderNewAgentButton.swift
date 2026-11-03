@@ -10,7 +10,6 @@ import SwiftUI
 /// so the entry point reads apart from the neutral toolbar glyphs.
 struct HeaderNewAgentButton: View {
   let action: () -> Void
-  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   /// Warm top-left to cool bottom-right, sampled once — a static fill, not
   /// an animation, so it never animates late toolbar layout.
@@ -27,16 +26,7 @@ struct HeaderNewAgentButton: View {
         .frame(width: 16, height: 16)
         .accessibilityHidden(true)
     }
-    .help(help)
+    .helpWithShortcut("New Agent", .newAgent)
     .accessibilityLabel("New Agent")
-  }
-
-  /// Live chord for the `.newAgent` registry entry, so the tooltip follows a
-  /// rebind or a disable.
-  private var help: String {
-    guard let resolved = resolvedShortcuts[.newAgent], resolved.isEnabled,
-      let binding = resolved.binding
-    else { return "New Agent" }
-    return "New Agent (\(ShortcutDisplay.chord(for: binding)))"
   }
 }

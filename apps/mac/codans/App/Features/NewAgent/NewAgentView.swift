@@ -442,6 +442,6 @@ struct NewAgentView: View {
     {
       return "Name the new worktree's branch"
     }
-    return "Send (⌘↩)"
+    return ShortcutDisplay.tooltip("Send", chord: "⌘↩")
   }
 }

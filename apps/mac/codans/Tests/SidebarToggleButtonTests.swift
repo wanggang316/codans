@@ -9,8 +9,8 @@ struct SidebarToggleButtonTests {
   @Test
   func defaultTooltipNamesTheActionAndTheDefaultChord() {
     let shortcuts = ShortcutResolver.resolve(overrides: .empty)
-    #expect(SidebarToggleButton.tooltip(isSidebarVisible: true, shortcuts: shortcuts) == "Hide Sidebar \u{2318} /")
-    #expect(SidebarToggleButton.tooltip(isSidebarVisible: false, shortcuts: shortcuts) == "Show Sidebar \u{2318} /")
+    #expect(SidebarToggleButton.tooltip(isSidebarVisible: true, shortcuts: shortcuts) == "Hide Sidebar (\u{2318}/)")
+    #expect(SidebarToggleButton.tooltip(isSidebarVisible: false, shortcuts: shortcuts) == "Show Sidebar (\u{2318}/)")
   }
 
   @Test
@@ -24,7 +24,7 @@ struct SidebarToggleButtonTests {
       )
     ]
     #expect(
-      SidebarToggleButton.tooltip(isSidebarVisible: true, shortcuts: shortcuts) == "Hide Sidebar \u{2303} \u{2318} B")
+      SidebarToggleButton.tooltip(isSidebarVisible: true, shortcuts: shortcuts) == "Hide Sidebar (\u{2303}\u{2318}B)")
   }
 
   @Test

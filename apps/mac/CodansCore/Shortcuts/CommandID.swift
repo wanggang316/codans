@@ -91,6 +91,24 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
   case selectWorktreeAt8
   case selectWorktreeAt9
   case selectWorktreeAt10
+
+  // Sidebar filter bar, in `SidebarFilter.allCases` order.
+  case selectSidebarFilterAll
+  case selectSidebarFilterRemote
+  case selectSidebarFilterWorkspace
+  case selectSidebarFilterPullRequests
+  case selectSidebarFilterUnread
+
+  // Agents View row hotkeys.
+  case focusAgentAt1
+  case focusAgentAt2
+  case focusAgentAt3
+  case focusAgentAt4
+  case focusAgentAt5
+  case focusAgentAt6
+  case focusAgentAt7
+  case focusAgentAt8
+  case focusAgentAt9
 }
 
 extension CommandID {
@@ -130,6 +148,34 @@ extension CommandID {
     case 9: return .selectWorktreeAt9
     case 10: return .selectWorktreeAt10
     default: return nil
+    }
+  }
+
+  /// Maps a 1-based Agents View row index to the matching `focusAgentAtN` case. Rows beyond
+  /// 9 receive no hotkey: the row hotkeys use the digits `1`–`9` only.
+  public static func focusAgentAt(index: Int) -> CommandID? {
+    switch index {
+    case 1: return .focusAgentAt1
+    case 2: return .focusAgentAt2
+    case 3: return .focusAgentAt3
+    case 4: return .focusAgentAt4
+    case 5: return .focusAgentAt5
+    case 6: return .focusAgentAt6
+    case 7: return .focusAgentAt7
+    case 8: return .focusAgentAt8
+    case 9: return .focusAgentAt9
+    default: return nil
+    }
+  }
+
+  /// The command that selects `filter` in the sidebar filter bar.
+  public static func selectSidebarFilter(_ filter: SidebarFilter) -> CommandID {
+    switch filter {
+    case .all: return .selectSidebarFilterAll
+    case .remote: return .selectSidebarFilterRemote
+    case .workspace: return .selectSidebarFilterWorkspace
+    case .pullRequests: return .selectSidebarFilterPullRequests
+    case .notifications: return .selectSidebarFilterUnread
     }
   }
 }

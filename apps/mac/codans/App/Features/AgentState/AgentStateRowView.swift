@@ -56,6 +56,9 @@ struct AgentStateRowView: View {
   /// Defaults to nil-returning so legacy call sites (popover variant,
   /// tests) show the agent display name.
   var activityText: () -> String? = { nil }
+  /// The row's focus chord (`⌥N`) while ⌘ is held. Takes the trailing status
+  /// glyphs' place.
+  var hotkeyHint: String?
   let onTap: () -> Void
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
   /// sites and tests render the row without a menu.
@@ -79,10 +82,14 @@ struct AgentStateRowView: View {
       // right-aligned column down the list rather than floating at a
       // variable offset after each project name.
       Spacer(minLength: 8)
-      if isSleeping {
-        sleepGlyph
+      ShortcutHintTrailing(chord: hotkeyHint) {
+        HStack(alignment: .center, spacing: 10) {
+          if isSleeping {
+            sleepGlyph
+          }
+          statusColumn
+        }
       }
-      statusColumn
     }
     .padding(.horizontal, 12)
     // Compact mode tightens the row to roughly two-thirds of the

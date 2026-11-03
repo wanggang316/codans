@@ -121,9 +121,9 @@ struct ShortcutDisplayTests {
   // MARK: - tooltip(_:for:in:)
 
   @Test
-  func spacedChordSeparatesEveryGlyph() {
-    let binding = ShortcutBinding(keyCode: UInt16(kVK_F12), modifiers: [.command, .shift])
-    #expect(ShortcutDisplay.spacedChord(for: binding) == "\u{21E7} \u{2318} F12")
+  func tooltipPutsAChordInParentheses() {
+    #expect(ShortcutDisplay.tooltip("Send", chord: "\u{2318}\u{21A9}") == "Send (\u{2318}\u{21A9})")
+    #expect(ShortcutDisplay.tooltip("Send", chord: nil) == "Send")
   }
 
   @Test
@@ -131,11 +131,11 @@ struct ShortcutDisplayTests {
     let shortcuts = ShortcutResolver.resolve(overrides: .empty)
     #expect(
       ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: shortcuts)
-        == "Back \u{2318} ["
+        == "Back (\u{2318}[)"
     )
     #expect(
       ShortcutDisplay.tooltip("Forward", for: .worktreeHistoryForward, in: shortcuts)
-        == "Forward \u{2318} ]"
+        == "Forward (\u{2318}])"
     )
   }
 
@@ -150,7 +150,7 @@ struct ShortcutDisplayTests {
     let shortcuts: ResolvedShortcutMap = [.worktreeHistoryBack: rebound]
     #expect(
       ShortcutDisplay.tooltip("Back", for: .worktreeHistoryBack, in: shortcuts)
-        == "Back \u{2318} \u{2190}"
+        == "Back (\u{2318}\u{2190})"
     )
   }
 

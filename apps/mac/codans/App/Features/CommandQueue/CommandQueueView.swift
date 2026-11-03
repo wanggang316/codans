@@ -205,7 +205,7 @@ struct CommandQueueView: View {
     // schedule fields too.
     .keyboardShortcut(.return, modifiers: .command)
     .disabled(!store.canSubmit || showsScheduleEditor)
-    .help("\(sendTitle) (⌘↩)")
+    .help(ShortcutDisplay.tooltip(sendTitle, chord: "⌘↩"))
     .accessibilityLabel(sendTitle)
   }
 
