@@ -44,6 +44,11 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
   /// from the archived list skips this script entirely.
   public var deleteScript: ScriptDefinition?
 
+  /// Code Host of the Project's repository when neither `gh` nor `glab` knows the
+  /// `origin` host. `nil` is Auto. The resolver applies it after the CLI steps
+  /// (ADR 0004 item 2), so it cannot move a host that a CLI knows to another kind.
+  public var codeHost: CodeHostKind?
+
   public init(
     worktreeBaseRef: String? = nil,
     copyIgnoredOnWorktreeCreate: Bool? = nil,
@@ -55,7 +60,8 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     launchAgentProfileOnWorktreeCreate: UUID? = nil,
     createScript: ScriptDefinition? = nil,
     archiveScript: ScriptDefinition? = nil,
-    deleteScript: ScriptDefinition? = nil
+    deleteScript: ScriptDefinition? = nil,
+    codeHost: CodeHostKind? = nil
   ) {
     self.worktreeBaseRef = worktreeBaseRef
     self.copyIgnoredOnWorktreeCreate = copyIgnoredOnWorktreeCreate
@@ -68,6 +74,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.createScript = createScript
     self.archiveScript = archiveScript
     self.deleteScript = deleteScript
+    self.codeHost = codeHost
   }
 
   /// True when every field is at its default. `ProjectSettings` clears
@@ -87,6 +94,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
       && (createScript?.command.isEmpty ?? true)
       && (archiveScript?.command.isEmpty ?? true)
       && (deleteScript?.command.isEmpty ?? true)
+      && codeHost == nil
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -101,6 +109,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     case createScript
     case archiveScript
     case deleteScript
+    case codeHost
   }
 
   public init(from decoder: Decoder) throws {
@@ -117,6 +126,9 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.createScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .createScript)
     self.archiveScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .archiveScript)
     self.deleteScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .deleteScript)
+    // An unknown kind (written by a later version) reads as Auto instead of failing the
+    // whole settings file.
+    self.codeHost = (try? c.decodeIfPresent(String.self, forKey: .codeHost)).flatMap(CodeHostKind.init(rawValue:))
   }
 
   /// Omit-when-default encoding. A lifecycle script with an empty
@@ -144,5 +156,6 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     if let deleteScript, !deleteScript.command.isEmpty {
       try c.encode(deleteScript, forKey: .deleteScript)
     }
+    try c.encodeIfPresent(codeHost, forKey: .codeHost)
   }
 }
