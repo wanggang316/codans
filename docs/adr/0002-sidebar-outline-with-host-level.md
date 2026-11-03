@@ -31,8 +31,10 @@ Sections cannot nest, and `List(children:)` / `OutlineGroup` do not support
 2. **Host level.** The top level is the **Host**: **This Mac** for local
    Projects, and one row per Host that has Projects. Hosts come from the Host
    list in Settings (see the [glossary](../../GLOSSARY.md)).
-3. **Only This Mac → no Host level.** When every Project is on This Mac, the
-   sidebar shows no Host rows. Projects are then the top level.
+3. **Only This Mac → no Host level.** When every Project in the catalog is on
+   This Mac, the sidebar shows no Host rows. Projects are then the top level.
+   This check uses all Projects, not the filtered Projects, so a sidebar filter
+   or Tag filter does not add or remove the Host level.
 4. **Host order is fixed.** The user cannot drag Hosts.
 5. **Project drag stays inside its Host.** The native outline drag moves a
    Project block. A drop is valid only between Projects of the same Host. Other
@@ -40,6 +42,17 @@ Sections cannot nest, and `List(children:)` / `OutlineGroup` do not support
    `catalog.projects` array (ADR 0001, decision 1).
 6. **A Workspace belongs to one Host.** Its member projects cannot be on
    different Hosts.
+7. **Filters.** The Remote filter stays. Under a filter, a Host row shows only
+   when at least one of its Projects matches. Thus the Remote filter hides
+   This Mac.
+8. **Keyboard.** The ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓ skip Host rows, because Host
+   rows are not selectable. Rows under a collapsed Host get no slot, as rows
+   under a collapsed Project do now.
+9. **Delivery order.** Three changes, each mergeable alone:
+   1. Move the sidebar to `NSOutlineView` with no change in look or behavior.
+   2. Add Hosts: the Host record and migration (ADR 0003), the Settings Hosts
+      page, and the sidebar Host level.
+   3. Add Project drag (ticket #320).
 
 ## Reasons
 
@@ -52,13 +65,20 @@ Sections cannot nest, and `List(children:)` / `OutlineGroup` do not support
   the native drag indicator.
 - The diff file outline already uses `NSOutlineView`, so the app has a working
   pattern for it.
+- A Host level that depends on the filter would make the tree change shape
+  when the user changes the filter.
+- A migration with no behavior change can be checked row by row against
+  screenshots of the current sidebar, so its risk is low.
 
 ## Trade-offs
 
 - The sidebar view moves from SwiftUI `List` to an outline data source and
   delegate. Selection, context menus, the ⌃1…⌃0 slots, scroll-to-selection,
   worktree segment drag, and accessibility must be wired again.
-- Until the migration lands, Project drag (ticket #320) cannot ship.
+- Until the migration lands, Project drag (ticket #320) cannot ship. Three
+  changes take longer to deliver than one.
+- With only local Projects, the Remote filter shows an empty list.
+- No shortcut goes directly to a Host.
 
 ## Reconsider when
 

@@ -28,10 +28,11 @@ Projects.
 3. **Settings owns the Host list.** A Hosts page in Settings adds, edits, and
    deletes Hosts.
 4. **Connect to Server picks a Host.** The sheet has a Host picker with a
-   "New Host…" entry. "New Host…" has a **Save** checkbox at the bottom left,
-   on by default; a saved Host goes to the Host list with the same validation
-   as the Settings page. A Project's Edit Connection changes its Host choice
-   and its path, not the Host fields.
+   "New Host…" entry. A Host made from "New Host…" always goes to the Host
+   list, with the same validation as the Settings page. There is no temporary
+   Host. When the fields are equal to an existing Host, the sheet uses that
+   Host. A Project's Edit Connection changes its Host choice and its path, not
+   the Host fields.
 5. **No delete of a Host in use.** Delete is disabled while Projects refer to
    the Host, and the page shows how many.
 6. **Order.** This Mac is first. Other Hosts follow the Host list order, which
@@ -46,6 +47,11 @@ Projects.
 9. **Storage.** The Host list is in `catalog.json` (`hosts`), beside the
    Projects that refer to it, with `HierarchyManager` as its single writer.
    The Settings page reads and writes it through `HierarchyClient`.
+10. **CLI and IPC.** `codans tree` and the describe output show the Host (ID
+    and display name) of each Project. The CLI has no command to add, edit, or
+    delete Hosts.
+11. **No Host connection state.** A Host row shows no connection status. Each
+    Project shows its own connection error, as before.
 
 ## Reasons
 
@@ -62,6 +68,9 @@ Projects.
 - Host is configuration but is not in `settings.json`.
 - Recent hosts with no Project are lost at migration.
 - Users cannot put a frequently used Host first.
+- A Host used once stays in the Host list until the user deletes it.
+- Scripts cannot manage Hosts.
+- When a Host is down, each of its Projects reports its own error.
 
 ## Reconsider when
 
