@@ -62,34 +62,60 @@ nonisolated enum GitLabJSONParsers {
 
   // MARK: - glab api graphql (batched read)
 
-  /// Parses one chunk's response. Returns `[branch: snapshot]` for every branch in
-  /// `branches` that has a merge request after the fork filter.
-  ///
-  /// - `projectPath`: full path of the fetch unit's project; the fork filter prefers
-  ///   merge requests whose source project is this project.
+  /// One page of a GraphQL connection: its nodes and where the next page starts.
+  struct Page<Node: Sendable>: Sendable {
+    var nodes: [Node]
+    /// `endCursor` of this page when GitLab has another page; `nil` on the last page.
+    var nextCursor: String?
+  }
+
+  /// Parses one page of the batched merge request read (`GitLabMergeRequestQuery.query`).
   ///
   /// Throws `.graphQLError` for an `errors` body, `.notAuthenticated` when GitLab
-  /// answered anonymously (`currentUser == null`), `.other` on a decode failure. A
-  /// project the user cannot see (`project == null`) has no merge requests.
-  static func parseBatchedMergeRequests(
-    _ data: Data, branches: [String], projectPath: String, host: String
-  ) throws -> [String: PullRequestSnapshot] {
-    let envelope: Envelope
-    do {
-      let decoder = JSONDecoder()
-      decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
-      envelope = try decoder.decode(Envelope.self, from: data)
-    } catch {
-      throw CodeHostError.other("batched merge request decode: \(error)")
-    }
+  /// answered anonymously (`currentUser == null`), and `.other` on a decode failure or
+  /// a connection without `pageInfo` (the read could not tell whether it is complete).
+  /// A project the user cannot see (`project == null`) has no merge requests.
+  static func parseMergeRequestPage(_ data: Data, host: String) throws -> Page<MergeRequestNode> {
+    let envelope = try decode(Envelope.self, from: data, what: "batched merge request")
     if let message = envelope.errors?.first?.message {
       throw CodeHostError.graphQLError(message)
     }
-    guard let payload = envelope.data else { return [:] }
+    guard let payload = envelope.data else { throw CodeHostError.other("batched merge request: no data") }
     guard payload.currentUser != nil else {
       throw CodeHostError.notAuthenticated(.gitlab, host: host)
     }
-    let nodes = payload.project?.mergeRequests?.nodes ?? []
+    guard let connection = payload.project?.mergeRequests else { return Page(nodes: [], nextCursor: nil) }
+    for node in connection.nodes ?? [] where node.headPipeline?.jobs != nil {
+      _ = try nextCursor(of: node.headPipeline?.jobs, what: "pipeline jobs")
+    }
+    return Page(nodes: connection.nodes ?? [], nextCursor: try nextCursor(of: connection, what: "merge requests"))
+  }
+
+  /// Parses one page of `GitLabMergeRequestQuery.jobsQuery`.
+  static func parseJobPage(_ data: Data) throws -> Page<Job> {
+    struct Wire: Decodable {
+      struct MergeRequest: Decodable { var headPipeline: Pipeline? }
+      struct Project: Decodable { var mergeRequest: MergeRequest? }
+      struct Payload: Decodable { var project: Project? }
+      var data: Payload?
+      var errors: [ErrorEntry]?
+    }
+    let wire = try decode(Wire.self, from: data, what: "pipeline jobs")
+    if let message = wire.errors?.first?.message { throw CodeHostError.graphQLError(message) }
+    guard let jobs = wire.data?.project?.mergeRequest?.headPipeline?.jobs else {
+      throw CodeHostError.other("pipeline jobs: no job list in the response")
+    }
+    return Page(nodes: jobs.nodes ?? [], nextCursor: try nextCursor(of: jobs, what: "pipeline jobs"))
+  }
+
+  /// `[branch: snapshot]` for every branch in `branches` that has a merge request
+  /// after the fork filter. `nodes` must be the complete list for these branches.
+  ///
+  /// - `projectPath`: full path of the fetch unit's project; the fork filter prefers
+  ///   merge requests whose source project is this project.
+  static func snapshots(
+    from nodes: [MergeRequestNode], branches: [String], projectPath: String
+  ) -> [String: PullRequestSnapshot] {
     var result: [String: PullRequestSnapshot] = [:]
     for branch in branches {
       let candidates = nodes.filter { $0.sourceBranch == branch }
@@ -98,6 +124,27 @@ nonisolated enum GitLabJSONParsers {
       }
     }
     return result
+  }
+
+  private static func nextCursor<Node>(of connection: Connection<Node>?, what: String) throws -> String? {
+    guard let pageInfo = connection?.pageInfo, let hasNextPage = pageInfo.hasNextPage else {
+      throw CodeHostError.other("\(what): response has no pageInfo")
+    }
+    guard hasNextPage else { return nil }
+    guard let cursor = pageInfo.endCursor, !cursor.isEmpty else {
+      throw CodeHostError.other("\(what): next page without endCursor")
+    }
+    return cursor
+  }
+
+  private static func decode<T: Decodable>(_ type: T.Type, from data: Data, what: String) throws -> T {
+    do {
+      let decoder = JSONDecoder()
+      decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
+      return try decoder.decode(type, from: data)
+    } catch {
+      throw CodeHostError.other("\(what) decode: \(error)")
+    }
   }
 
   /// The GitHub fork filter with the source project path in place of the head
@@ -192,22 +239,29 @@ nonisolated enum GitLabJSONParsers {
     }
   }
 
-  /// Throws when the mark-ready mutation reports an error (top-level or in the payload).
+  /// Succeeds only when the mark-ready mutation returned its payload with no errors and
+  /// the merge request is no longer a draft. Anything else (an `errors` body, a null or
+  /// partial payload) throws, so the UI never reports a success GitLab did not confirm.
   static func checkMarkReadyResponse(_ data: Data) throws {
-    struct Mutation: Decodable { var errors: [String]? }
+    struct MergeRequest: Decodable { var draft: Bool? }
+    struct Mutation: Decodable {
+      var errors: [String]?
+      var mergeRequest: MergeRequest?
+    }
     struct Payload: Decodable { var mergeRequestSetDraft: Mutation? }
     struct Wire: Decodable {
       var data: Payload?
       var errors: [ErrorEntry]?
     }
-    let wire: Wire
-    do {
-      wire = try JSONDecoder().decode(Wire.self, from: data)
-    } catch {
-      throw CodeHostError.other("mark ready decode: \(error)")
-    }
+    let wire = try decode(Wire.self, from: data, what: "mark ready")
     if let message = wire.errors?.first?.message { throw CodeHostError.graphQLError(message) }
-    if let message = wire.data?.mergeRequestSetDraft?.errors?.first { throw CodeHostError.other(message) }
+    guard let mutation = wire.data?.mergeRequestSetDraft, let errors = mutation.errors else {
+      throw CodeHostError.other("mark ready: GitLab returned no mutation result")
+    }
+    if let message = errors.first { throw CodeHostError.other(message) }
+    guard mutation.mergeRequest?.draft == false else {
+      throw CodeHostError.other("mark ready: the merge request is still a draft")
+    }
   }
 
   /// The first `errors[].message` of a GraphQL body, or `nil` when `data` is not one.
@@ -221,6 +275,11 @@ nonisolated enum GitLabJSONParsers {
 
   private struct ErrorEntry: Decodable { var message: String? }
 
+  struct PageInfo: Decodable, Sendable {
+    var hasNextPage: Bool?
+    var endCursor: String?
+  }
+
   private struct Envelope: Decodable {
     var data: Payload?
     var errors: [ErrorEntry]?
@@ -231,15 +290,19 @@ nonisolated enum GitLabJSONParsers {
     var project: Project?
   }
 
-  private struct User: Decodable { var username: String? }
+  struct User: Decodable, Sendable { var username: String? }
 
   private struct Project: Decodable {
     var mergeRequests: Connection<MergeRequestNode>?
   }
 
-  private struct Connection<Node: Decodable>: Decodable { var nodes: [Node]? }
+  struct Connection<Node: Decodable & Sendable>: Decodable, Sendable {
+    var pageInfo: PageInfo?
+    var nodes: [Node]?
+  }
 
-  private struct MergeRequestNode: Decodable {
+  /// One merge request as the batched read decodes it. Only this file reads its fields.
+  struct MergeRequestNode: Decodable, Sendable {
     var iid: String?
     var title: String?
     var state: String?
@@ -262,27 +325,27 @@ nonisolated enum GitLabJSONParsers {
     var headPipeline: Pipeline?
   }
 
-  private struct Reviewer: Decodable {
-    struct Interaction: Decodable { var reviewState: String? }
+  struct Reviewer: Decodable, Sendable {
+    struct Interaction: Decodable, Sendable { var reviewState: String? }
     var mergeRequestInteraction: Interaction?
   }
 
-  private struct DiffStat: Decodable {
+  struct DiffStat: Decodable, Sendable {
     var additions: Int?
     var deletions: Int?
   }
 
-  private struct ProjectPath: Decodable {
+  struct ProjectPath: Decodable, Sendable {
     var fullPath: String?
     var webUrl: String?
   }
 
-  private struct Pipeline: Decodable {
+  struct Pipeline: Decodable, Sendable {
     var status: String?
     var jobs: Connection<Job>?
   }
 
-  private struct Job: Decodable {
+  struct Job: Decodable, Sendable {
     var name: String?
     var status: String?
     var allowFailure: Bool?

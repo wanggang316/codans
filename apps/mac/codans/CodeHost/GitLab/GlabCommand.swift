@@ -88,6 +88,7 @@ nonisolated enum GlabCommand {
     mutation($projectPath: ID!, $iid: String!) {
       mergeRequestSetDraft(input: {projectPath: $projectPath, iid: $iid, draft: false}) {
         errors
+        mergeRequest { draft }
       }
     }
     """

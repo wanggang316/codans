@@ -17,7 +17,7 @@ struct GitLabDecodingTests {
   ]
 
   private static func app() throws -> [String: PullRequestSnapshot] {
-    try GitLabJSONParsers.parseBatchedMergeRequests(
+    try Self.parse(
       loadFixture("gitlab-graphql-batch-app"), branches: appBranches, projectPath: "codans-e2e/app", host: host)
   }
 
@@ -103,7 +103,7 @@ struct GitLabDecodingTests {
   /// A fast-forward project with squash "never": behind, and squash off with its reason.
   @Test
   func behindMergeRequestInANoSquashProject() throws {
-    let result = try GitLabJSONParsers.parseBatchedMergeRequests(
+    let result = try Self.parse(
       Self.loadFixture("gitlab-graphql-batch-no-squash"), branches: ["feat-behind", "feat-no-squash"],
       projectPath: "codans-e2e/no-squash", host: Self.host)
     let snapshot = try #require(result["feat-behind"])
@@ -200,7 +200,7 @@ struct GitLabDecodingTests {
   /// fork, the fork's MR is the unit's own.
   @Test
   func forkFilterComparesTheSourceProjectPath() throws {
-    let result = try GitLabJSONParsers.parseBatchedMergeRequests(
+    let result = try Self.parse(
       Self.loadFixture("gitlab-graphql-batch-app"), branches: ["feat-open"], projectPath: "codans-forker/app",
       host: Self.host)
     #expect(result["feat-open"]?.number == 13)
@@ -208,7 +208,7 @@ struct GitLabDecodingTests {
 
   @Test
   func nestedGroupProject() throws {
-    let result = try GitLabJSONParsers.parseBatchedMergeRequests(
+    let result = try Self.parse(
       Self.loadFixture("gitlab-graphql-batch-nested"), branches: ["feat-nested"],
       projectPath: "codans-e2e/nested/deep-app", host: Self.host)
     let snapshot = try #require(result["feat-nested"])
@@ -223,7 +223,7 @@ struct GitLabDecodingTests {
   @Test
   func anonymousAnswerMeansNotLoggedIn() {
     #expect(throws: CodeHostError.notAuthenticated(.gitlab, host: "gitlab.com")) {
-      _ = try GitLabJSONParsers.parseBatchedMergeRequests(
+      _ = try Self.parse(
         Self.loadFixture("gitlab-graphql-batch-anonymous"), branches: ["main"], projectPath: "gitlab-org/cli",
         host: "gitlab.com")
     }
@@ -234,7 +234,7 @@ struct GitLabDecodingTests {
     #expect(
       throws: CodeHostError.graphQLError("Field 'approvalsLeft' doesn't exist on type 'MergeRequest' (Did you mean `approved`?)")
     ) {
-      _ = try GitLabJSONParsers.parseBatchedMergeRequests(
+      _ = try Self.parse(
         Self.loadFixture("gitlab-graphql-error"), branches: ["x"], projectPath: "codans-e2e/app", host: Self.host)
     }
   }
@@ -242,7 +242,7 @@ struct GitLabDecodingTests {
   @Test
   func unreadableBodyThrowsOther() {
     #expect(throws: CodeHostError.self) {
-      _ = try GitLabJSONParsers.parseBatchedMergeRequests(
+      _ = try Self.parse(
         Data("not json".utf8), branches: ["x"], projectPath: "a/b", host: Self.host)
     }
   }
@@ -294,6 +294,68 @@ struct GitLabDecodingTests {
     #expect(GitLabWire.pullRequestState("merged") == .merged)
     #expect(GitLabWire.pullRequestState("closed") == .closed)
     #expect(GitLabWire.pullRequestState("other") == nil)
+  }
+
+  /// Decodes one complete page of the batched read into snapshots.
+  nonisolated static func parse(
+    _ data: Data, branches: [String], projectPath: String, host: String
+  ) throws -> [String: PullRequestSnapshot] {
+    let page = try GitLabJSONParsers.parseMergeRequestPage(data, host: host)
+    #expect(page.nextCursor == nil)
+    return GitLabJSONParsers.snapshots(from: page.nodes, branches: branches, projectPath: projectPath)
+  }
+
+  // MARK: - pages
+
+  /// Page 1 of a 7-per-page read holds only the fork's newer MR !13 for `feat-open`; the
+  /// project's own !1 is on page 2. Snapshots built from page 1 alone would pick the
+  /// fork's MR, so the service reads every page first.
+  @Test
+  func pageCarriesItsNextCursor() throws {
+    let first = try GitLabJSONParsers.parseMergeRequestPage(
+      Self.loadFixture("gitlab-graphql-batch-app-page1"), host: Self.host)
+    #expect(first.nodes.count == 7)
+    #expect(first.nextCursor == "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMyAxNjo0OTozNy4yNDgwMjgwMDAgKzAwMDAiLCJpZCI6IjcifQ")
+    let second = try GitLabJSONParsers.parseMergeRequestPage(
+      Self.loadFixture("gitlab-graphql-batch-app-page2"), host: Self.host)
+    #expect(second.nextCursor == nil)
+    let onlyFirst = GitLabJSONParsers.snapshots(
+      from: first.nodes, branches: ["feat-open"], projectPath: "codans-e2e/app")
+    #expect(onlyFirst["feat-open"]?.number == 13)
+    let all = GitLabJSONParsers.snapshots(
+      from: first.nodes + second.nodes, branches: ["feat-open"], projectPath: "codans-e2e/app")
+    #expect(all["feat-open"]?.number == 1)
+  }
+
+  @Test
+  func connectionWithoutPageInfoIsAnError() {
+    let noPageInfo = #"{"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"nodes":[]}}}}"#
+    #expect(throws: CodeHostError.other("merge requests: response has no pageInfo")) {
+      _ = try GitLabJSONParsers.parseMergeRequestPage(Data(noPageInfo.utf8), host: Self.host)
+    }
+    let jobsWithoutPageInfo =
+      #"{"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"pageInfo":{"hasNextPage":false},"nodes":[{"iid":"1","headPipeline":{"jobs":{"nodes":[]}}}]}}}}"#
+    #expect(throws: CodeHostError.other("pipeline jobs: response has no pageInfo")) {
+      _ = try GitLabJSONParsers.parseMergeRequestPage(Data(jobsWithoutPageInfo.utf8), host: Self.host)
+    }
+    let nextWithoutCursor =
+      #"{"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}"#
+    #expect(throws: CodeHostError.other("merge requests: next page without endCursor")) {
+      _ = try GitLabJSONParsers.parseMergeRequestPage(Data(nextWithoutCursor.utf8), host: Self.host)
+    }
+  }
+
+  @Test
+  func jobPageDecodes() throws {
+    let first = try GitLabJSONParsers.parseJobPage(Self.loadFixture("gitlab-graphql-jobs-page1"))
+    #expect(first.nodes.map(\.name) == ["fail"])
+    #expect(first.nextCursor == "eyJpZCI6IjQzIn0")
+    let last = try GitLabJSONParsers.parseJobPage(Self.loadFixture("gitlab-graphql-jobs-page2"))
+    #expect(last.nodes.map(\.name) == ["pass"])
+    #expect(last.nextCursor == nil)
+    #expect(throws: CodeHostError.self) {
+      _ = try GitLabJSONParsers.parseJobPage(Data(#"{"data":{"project":{"mergeRequest":null}}}"#.utf8))
+    }
   }
 
   nonisolated static func loadFixture(_ name: String) throws -> Data {

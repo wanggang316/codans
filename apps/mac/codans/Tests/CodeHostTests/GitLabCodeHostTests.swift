@@ -123,7 +123,7 @@ struct GitLabCodeHostTests {
 
   @Test
   func batchReadChunksBranches() async throws {
-    let empty = Self.ok(#"{"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"nodes":[]}}}}"#)
+    let empty = Self.ok(Self.emptyPage)
     let runner = RecordingCommandRunner(outcomes: [Self.version, empty, empty])
     let branches = (0..<25).map { "b\($0)" }
     _ = try await Self.makeService(runner).batchPullRequests(repository: Self.withPort, branches: branches)
@@ -279,10 +279,82 @@ struct GitLabCodeHostTests {
       ])
   }
 
+  private static let emptyPage =
+    #"{"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}"#
+
+  // MARK: - pagination
+
+  /// The read follows `endCursor` until the last page and builds snapshots from all of
+  /// them: page 1 holds only the fork's !13 for `feat-open`, the project's !1 is on page 2.
+  @Test
+  func batchReadFollowsEveryMergeRequestPage() async throws {
+    let page1 = try GitLabDecodingTests.loadFixture("gitlab-graphql-batch-app-page1")
+    let page2 = try GitLabDecodingTests.loadFixture("gitlab-graphql-batch-app-page2")
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, .exited(code: 0, stdout: page1, stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: page2, stderr: Data(), stdoutOverflow: false),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.withPort, branches: ["feat-open", "feat-ci-fail", "feat-draft"])
+    #expect(result["feat-open"]?.number == 1)
+    #expect(result["feat-ci-fail"]?.number == 4)
+    #expect(result["feat-draft"]?.number == 12)
+    let reads = await runner.calls.filter { $0.arguments.starts(with: ["api", "graphql"]) }.map(\.arguments)
+    #expect(reads.count == 2)
+    #expect(!reads[0].contains { $0.hasPrefix("after=") })
+    #expect(reads[1].contains("after=eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMyAxNjo0OTozNy4yNDgwMjgwMDAgKzAwMDAiLCJpZCI6IjcifQ"))
+  }
+
+  /// A head pipeline with more jobs than the first page: the rest is read per merge
+  /// request, so a failed job on a later page reaches the rollup and "Rerun failed".
+  @Test
+  func batchReadFollowsEveryJobPage() async throws {
+    let truncated = #"""
+      {"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"pageInfo":{"hasNextPage":false,"endCursor":"m"},"nodes":[
+        {"iid":"4","state":"opened","sourceBranch":"feat-ci-fail","targetBranch":"main","sourceProject":{"fullPath":"codans-e2e/app"},
+         "webUrl":"http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/4","detailedMergeStatus":"CI_MUST_PASS",
+         "headPipeline":{"status":"FAILED","jobs":{"pageInfo":{"hasNextPage":true,"endCursor":"c0"},"nodes":[]}}}]}}}}
+      """#
+    let jobs1 = try GitLabDecodingTests.loadFixture("gitlab-graphql-jobs-page1")
+    let jobs2 = try GitLabDecodingTests.loadFixture("gitlab-graphql-jobs-page2")
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(truncated),
+      .exited(code: 0, stdout: jobs1, stderr: Data(), stdoutOverflow: false),
+      .exited(code: 0, stdout: jobs2, stderr: Data(), stdoutOverflow: false),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.withPort, branches: ["feat-ci-fail"])
+    let snapshot = try #require(result["feat-ci-fail"])
+    #expect(snapshot.checkRollup.map(\.name) == ["fail", "pass"])
+    #expect(snapshot.canRerunFailedChecks)
+    let calls = await runner.calls.map(\.arguments)
+    #expect(
+      calls[2] == [
+        "api", "graphql", "-f", "query=\(GitLabMergeRequestQuery.jobsQuery)", "-f", "after=c0",
+        "-f", "fullPath=codans-e2e/app", "-f", "iid=4",
+      ])
+    #expect(calls[3].contains("after=eyJpZCI6IjQzIn0"))
+  }
+
+  /// A read that would need more than `maxPages` pages fails instead of showing a
+  /// partial list.
+  @Test
+  func batchReadStopsAtThePageCap() async {
+    let endless = Self.ok(
+      #"{"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"pageInfo":{"hasNextPage":true,"endCursor":"c"},"nodes":[]}}}}"#
+    )
+    let runner = RecordingCommandRunner(
+      outcomes: [Self.version] + Array(repeating: endless, count: GitLabMergeRequestQuery.maxPages))
+    await #expect(throws: CodeHostError.other("more than 2000 merge requests for 1 branches")) {
+      _ = try await Self.makeService(runner).batchPullRequests(repository: Self.withPort, branches: ["main"])
+    }
+    #expect(await runner.calls.count == 1 + GitLabMergeRequestQuery.maxPages)
+  }
+
   @Test
   func markReadyArgvAndMutationErrors() async throws {
     let runner = RecordingCommandRunner(outcomes: [
-      Self.version, Self.ok(#"{"data":{"mergeRequestSetDraft":{"errors":[]}}}"#),
+      Self.version, Self.ok(#"{"data":{"mergeRequestSetDraft":{"errors":[],"mergeRequest":{"draft":false}}}}"#),
     ])
     let service = Self.makeService(runner)
     try await service.markReady(PullRequestReference(repository: Self.selfManaged, number: 12))
@@ -296,6 +368,21 @@ struct GitLabCodeHostTests {
     ])
     await #expect(throws: CodeHostError.other("not allowed")) {
       try await Self.makeService(failing).markReady(PullRequestReference(repository: Self.selfManaged, number: 12))
+    }
+  }
+
+  /// Only a payload that confirms the merge request is no longer a draft is a success.
+  @Test(arguments: [
+    (#"{}"#, "mark ready: GitLab returned no mutation result"),
+    (#"{"data":{"mergeRequestSetDraft":null}}"#, "mark ready: GitLab returned no mutation result"),
+    (#"{"data":{"mergeRequestSetDraft":{"mergeRequest":{"draft":false}}}}"#, "mark ready: GitLab returned no mutation result"),
+    (#"{"data":{"mergeRequestSetDraft":{"errors":[]}}}"#, "mark ready: the merge request is still a draft"),
+    (#"{"data":{"mergeRequestSetDraft":{"errors":[],"mergeRequest":{"draft":true}}}}"#, "mark ready: the merge request is still a draft"),
+  ])
+  func markReadyRejectsAnUnconfirmedResponse(body: String, message: String) async {
+    let runner = RecordingCommandRunner(outcomes: [Self.version, Self.ok(body)])
+    await #expect(throws: CodeHostError.other(message)) {
+      try await Self.makeService(runner).markReady(PullRequestReference(repository: Self.selfManaged, number: 12))
     }
   }
 

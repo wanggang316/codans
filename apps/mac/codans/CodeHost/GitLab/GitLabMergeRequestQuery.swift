@@ -17,21 +17,29 @@ import Foundation
 /// - `currentUser` is `null` when `glab` has no token for the host. GitLab answers an
 ///   anonymous query without an error, so this is how the read detects "not logged in".
 nonisolated enum GitLabMergeRequestQuery {
-  /// Branches per request. Each request reads at most `pageSize` merge requests, newest
-  /// first; 20 branches leave room for several merge requests per branch.
+  /// Branches per request chain.
   static let chunkSize = 20
 
-  /// Merge requests per request (GitLab's maximum page size).
+  /// Merge requests, and jobs of one pipeline, per page (GitLab's maximum page size).
   static let pageSize = 100
+
+  /// Most pages one read follows, for the merge request list of a chunk and for the jobs
+  /// of one head pipeline. A read that needs more fails with an error instead of showing
+  /// a partial list: a dropped merge request would remove a badge, a dropped job could
+  /// hide a failure.
+  static let maxPages = 20
 
   /// Concurrent requests when a fetch needs more than one chunk.
   static let maxConcurrentChunks = 3
 
+  /// One page of merge requests. `$after` is the previous page's `endCursor`; it is
+  /// absent (null) for the first page.
   static let query = """
-    query($fullPath: ID!, $branches: [String!]) {
+    query($fullPath: ID!, $branches: [String!], $after: String) {
       currentUser { username }
       project(fullPath: $fullPath) {
-        mergeRequests(sourceBranches: $branches, first: \(pageSize), sort: UPDATED_DESC) {
+        mergeRequests(sourceBranches: $branches, first: \(pageSize), after: $after, sort: UPDATED_DESC) {
+          pageInfo { hasNextPage endCursor }
           nodes {
             iid
             title
@@ -54,8 +62,9 @@ nonisolated enum GitLabMergeRequestQuery {
             targetProject { fullPath webUrl }
             headPipeline {
               status
-              jobs(first: 100, retried: false) {
-                nodes { name status allowFailure manualJob startedAt finishedAt webPath }
+              jobs(first: \(pageSize), retried: false) {
+                pageInfo { hasNextPage endCursor }
+                nodes { \(jobFields) }
               }
             }
           }
@@ -63,6 +72,25 @@ nonisolated enum GitLabMergeRequestQuery {
       }
     }
     """
+
+  /// The next page of one merge request's head-pipeline jobs, when the first page in
+  /// `query` was not the last.
+  static let jobsQuery = """
+    query($fullPath: ID!, $iid: String!, $after: String) {
+      project(fullPath: $fullPath) {
+        mergeRequest(iid: $iid) {
+          headPipeline {
+            jobs(first: \(pageSize), after: $after, retried: false) {
+              pageInfo { hasNextPage endCursor }
+              nodes { \(jobFields) }
+            }
+          }
+        }
+      }
+    }
+    """
+
+  private static let jobFields = "name status allowFailure manualJob startedAt finishedAt webPath"
 
   /// The `branches` variable: a JSON array of the branch names.
   static func branchesVariable(_ branches: [String]) -> String {

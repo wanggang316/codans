@@ -5,6 +5,10 @@
     },
     "project": {
       "mergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMyAxNjo0OTo0Mi44NzIxNzkwMDAgKzAwMDAiLCJpZCI6IjE1In0"
+        },
         "nodes": [
           {
             "iid": "1",
@@ -45,6 +49,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjIzIn0"
+                },
                 "nodes": [
                   {
                     "name": "pass",

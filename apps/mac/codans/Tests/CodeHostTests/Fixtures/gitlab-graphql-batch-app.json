@@ -5,7 +5,68 @@
     },
     "project": {
       "mergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMyAxNjo0OTozNC42NDE1MDcwMDAgKzAwMDAiLCJpZCI6IjEifQ"
+        },
         "nodes": [
+          {
+            "iid": "12",
+            "title": "Draft: Draft MR",
+            "state": "opened",
+            "draft": true,
+            "sourceBranch": "feat-draft",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/12",
+            "updatedAt": "2026-11-03T19:25:21Z",
+            "detailedMergeStatus": "DRAFT_STATUS",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjMifQ"
+                },
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:31Z",
+                    "finishedAt": "2026-11-03T16:49:33Z",
+                    "webPath": "/codans-e2e/app/-/jobs/3"
+                  }
+                ]
+              }
+            }
+          },
           {
             "iid": "15",
             "title": "Merged MR",
@@ -45,6 +106,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjI5In0"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -104,6 +169,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjMzIn0"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -167,6 +236,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjMxIn0"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -220,6 +293,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjI3In0"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -277,6 +354,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjI1In0"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -286,59 +367,6 @@
                     "startedAt": "2026-11-03T16:49:52Z",
                     "finishedAt": "2026-11-03T16:49:52Z",
                     "webPath": "/codans-forker/app/-/jobs/25"
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "iid": "12",
-            "title": "Draft: Draft MR",
-            "state": "opened",
-            "draft": true,
-            "sourceBranch": "feat-draft",
-            "targetBranch": "main",
-            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/12",
-            "updatedAt": "2026-11-03T16:49:39Z",
-            "detailedMergeStatus": "DRAFT_STATUS",
-            "squashReadOnly": false,
-            "squashOnMerge": false,
-            "approved": false,
-            "approvedBy": {
-              "nodes": []
-            },
-            "reviewers": {
-              "nodes": []
-            },
-            "diffStats": [
-              {
-                "additions": 1,
-                "deletions": 0
-              }
-            ],
-            "commitCount": 1,
-            "author": {
-              "username": "codans-dev"
-            },
-            "sourceProject": {
-              "fullPath": "codans-e2e/app"
-            },
-            "targetProject": {
-              "fullPath": "codans-e2e/app",
-              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
-            },
-            "headPipeline": {
-              "status": "SUCCESS",
-              "jobs": {
-                "nodes": [
-                  {
-                    "name": "pass",
-                    "status": "SUCCESS",
-                    "allowFailure": false,
-                    "manualJob": false,
-                    "startedAt": "2026-11-03T16:49:31Z",
-                    "finishedAt": "2026-11-03T16:49:33Z",
-                    "webPath": "/codans-e2e/app/-/jobs/3"
                   }
                 ]
               }
@@ -383,6 +411,10 @@
             "headPipeline": {
               "status": "MANUAL",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjEyIn0"
+                },
                 "nodes": [
                   {
                     "name": "deploy",
@@ -445,6 +477,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjEwIn0"
+                },
                 "nodes": [
                   {
                     "name": "optional",
@@ -507,6 +543,10 @@
             "headPipeline": {
               "status": "RUNNING",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjgifQ"
+                },
                 "nodes": [
                   {
                     "name": "slow",
@@ -569,15 +609,19 @@
             "headPipeline": {
               "status": "FAILED",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjYifQ"
+                },
                 "nodes": [
                   {
                     "name": "fail",
                     "status": "FAILED",
                     "allowFailure": false,
                     "manualJob": false,
-                    "startedAt": "2026-11-03T16:49:33Z",
-                    "finishedAt": "2026-11-03T16:49:34Z",
-                    "webPath": "/codans-e2e/app/-/jobs/7"
+                    "startedAt": "2026-11-03T19:20:11Z",
+                    "finishedAt": "2026-11-03T19:20:11Z",
+                    "webPath": "/codans-e2e/app/-/jobs/43"
                   },
                   {
                     "name": "pass",
@@ -631,6 +675,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjQifQ"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -684,6 +732,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjUifQ"
+                },
                 "nodes": [
                   {
                     "name": "pass",
@@ -737,6 +789,10 @@
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjEifQ"
+                },
                 "nodes": [
                   {
                     "name": "pass",

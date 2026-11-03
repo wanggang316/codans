@@ -23,7 +23,7 @@ GitHub 是 Code Host 层（[ADR 0004](../adr/0004-gitlab-support-through-glab.md
 
 `codans/CodeHost/GitLab/` 通过 `glab` 实现同一个 `CodeHost` 协议；UI 标签为 "MR"（`CodeHostKind.pullRequestLabel`），菜单 / 命令面板 / 侧栏右键菜单写作 "Open MR on GitLab" / "Open Project on GitLab"。
 
-- **读取**：每个 chunk（20 个分支）一次 `glab api graphql`，query 为 `project(fullPath:) { mergeRequests(sourceBranches: $branches, first: 100, sort: UPDATED_DESC) }`（`GitLabMergeRequestQuery`）。分支名以 JSON 数组变量传入（`-F branches=[...]`），不进入 query 文本，因此无需转义。
+- **读取**：每个 chunk（20 个分支）用 `glab api graphql` 读 `project(fullPath:) { mergeRequests(sourceBranches: $branches, first: 100, after: $after, sort: UPDATED_DESC) }`（`GitLabMergeRequestQuery`），按 `pageInfo.endCursor` 读完所有页后才生成快照：后一页可能有某分支自己的 MR（前一页只有 fork 的同名 MR）。head pipeline 的 job 也分页，首页之外的 job 按 MR 用 `jobsQuery` 补读，后续页里失败的 job 也能进 rollup 和 "Rerun failed"。每个列表最多读 `maxPages`（20）页，超出就报错，不显示不完整的列表；响应缺 `pageInfo` 同样报错。分支名以 JSON 数组变量传入（`-F branches=[...]`），不进入 query 文本，因此无需转义。
 - **CE 兼容**：只用 CE 有的字段。CE 没有 `approvalsLeft` / `approvalsRequired` / `squashOption`；"还需审批" 来自 `detailedMergeStatus == NOT_APPROVED`，squash 规则来自 MR 的 `squashReadOnly` + `squashOnMerge`。
 - **GitLab 已知问题**：列表中选 `diffStatsSummary` 会让 GitLab 把可合并 MR 的 `detailedMergeStatus` 报为 `CONFLICT`，所以加减行由 `diffStats` 逐文件求和。重试过的 job 仍在 `jobs` 里，所以用 `jobs(retried: false)`。
 - **未登录检测**：GitLab 对匿名 GraphQL 请求也正常应答，所以 query 带 `currentUser`；为 `null` 即抛 `.notAuthenticated(.gitlab, host:)`。
@@ -34,7 +34,7 @@ GitHub 是 Code Host 层（[ADR 0004](../adr/0004-gitlab-support-through-glab.md
   - 合并选项："Merge"（`mergeCommit`，项目的 merge method 生效）与 "Squash and merge"。项目 squash 为 never 时后者禁用并给原因；为 always 时前者禁用。默认策略 `mergeCommit` / `rebase` → Merge，`squash` → Squash and merge（`PullRequestSnapshot.mergeStrategy(preferring:)`）。
   - fork 过滤：与 GitHub 规则相同，以 source project 的 full path 代替 head repository owner；在保留的 MR 中 open / merged 优先于 closed。
   - Diff Viewer：`baseRefName` = target branch，`baseRepositoryURL` = target project 的 web URL。
-- **写操作**：merge 为 `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool>`；close 为 `... -f state_event=close`；mark ready 为 GraphQL mutation `mergeRequestSetDraft(draft: false)`；rerun 先读 MR 的 `head_pipeline.id`，再 `POST projects/<id>/pipelines/<id>/retry`（GitLab 只重跑失败和取消的 job）。`<id>` 是 URL 编码的 full path，嵌套 group 可用。
+- **写操作**：merge 为 `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool>`；close 为 `... -f state_event=close`；mark ready 为 GraphQL mutation `mergeRequestSetDraft(draft: false)`，只有返回的 payload 无 errors 且 `mergeRequest.draft == false` 才算成功；rerun 先读 MR 的 `head_pipeline.id`，再 `POST projects/<id>/pipelines/<id>/retry`（GitLab 只重跑失败和取消的 job）。`<id>` 是 URL 编码的 full path，嵌套 group 可用。
 - **Web URL**：scheme 取自 `glab auth status` 报告的 `api_protocol`（自托管实例可能是 `http`），未知时用 `https`。
 
 ### glab 子进程契约

@@ -3,6 +3,10 @@
     "currentUser": null,
     "project": {
       "mergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "eyJ1cGRhdGVkX2F0IjoiMjAyMi0xMC0xOSAxNTozOTozMC4zNjAzMTAwMDAgKzAwMDAiLCJpZCI6IjE4MzQwOTgwMyJ9"
+        },
         "nodes": [
           {
             "iid": "4138",

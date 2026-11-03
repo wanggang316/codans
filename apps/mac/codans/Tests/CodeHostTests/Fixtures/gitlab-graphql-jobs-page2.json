@@ -1,0 +1,27 @@
+{
+  "data": {
+    "project": {
+      "mergeRequest": {
+        "headPipeline": {
+          "jobs": {
+            "pageInfo": {
+              "hasNextPage": false,
+              "endCursor": "eyJpZCI6IjYifQ"
+            },
+            "nodes": [
+              {
+                "name": "pass",
+                "status": "SUCCESS",
+                "allowFailure": false,
+                "manualJob": false,
+                "startedAt": "2026-11-03T16:49:33Z",
+                "finishedAt": "2026-11-03T16:49:34Z",
+                "webPath": "/codans-e2e/app/-/jobs/6"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

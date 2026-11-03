@@ -98,16 +98,69 @@ nonisolated struct GitLabCodeHost: CodeHost {
     if let bad = branches.first(where: { $0.unicodeScalars.contains { $0.value < 0x20 } }) {
       throw CodeHostError.malformedBranchName(bad)
     }
-    let cmd = GlabCommand.apiGraphQL(
-      query: GitLabMergeRequestQuery.query,
-      host: repository.host,
-      stringVariables: ["fullPath": repository.path],
-      jsonVariables: ["branches": GitLabMergeRequestQuery.branchesVariable(branches)]
-    )
-    let data = try await run(
-      cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
-    return try GitLabJSONParsers.parseBatchedMergeRequests(
-      data, branches: branches, projectPath: repository.path, host: repository.host)
+    // Every page is read before any snapshot is built: a merge request on a later page
+    // can be the newest one of its branch, and a partial list must not drop a badge.
+    var nodes: [GitLabJSONParsers.MergeRequestNode] = []
+    var cursor: String?
+    var pages = 0
+    repeat {
+      pages += 1
+      guard pages <= GitLabMergeRequestQuery.maxPages else {
+        throw CodeHostError.other(
+          "more than \(GitLabMergeRequestQuery.maxPages * GitLabMergeRequestQuery.pageSize) merge requests for \(branches.count) branches"
+        )
+      }
+      var variables = ["fullPath": repository.path]
+      if let cursor { variables["after"] = cursor }
+      let cmd = GlabCommand.apiGraphQL(
+        query: GitLabMergeRequestQuery.query,
+        host: repository.host,
+        stringVariables: variables,
+        jsonVariables: ["branches": GitLabMergeRequestQuery.branchesVariable(branches)]
+      )
+      let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
+      let page = try GitLabJSONParsers.parseMergeRequestPage(data, host: repository.host)
+      nodes += page.nodes
+      cursor = page.nextCursor
+    } while cursor != nil
+    for index in nodes.indices {
+      nodes[index] = try await completingJobs(of: nodes[index], exec: exec, repository: repository)
+    }
+    return GitLabJSONParsers.snapshots(from: nodes, branches: branches, projectPath: repository.path)
+  }
+
+  /// The merge request with every job of its head pipeline. The batched read returns the
+  /// first page of jobs; a pipeline with more reads the rest here, so a failed job on a
+  /// later page still reaches the check rollup and "Rerun failed".
+  private func completingJobs(
+    of node: GitLabJSONParsers.MergeRequestNode, exec: URL, repository: CodeHostRepository
+  ) async throws -> GitLabJSONParsers.MergeRequestNode {
+    guard var jobs = node.headPipeline?.jobs, var cursor = jobs.pageInfo?.hasNextPage == true ? jobs.pageInfo?.endCursor : nil,
+      let iid = node.iid
+    else { return node }
+    var pages = 1
+    while true {
+      pages += 1
+      guard pages <= GitLabMergeRequestQuery.maxPages else {
+        throw CodeHostError.other(
+          "merge request !\(iid): more than \(GitLabMergeRequestQuery.maxPages * GitLabMergeRequestQuery.pageSize) pipeline jobs"
+        )
+      }
+      let cmd = GlabCommand.apiGraphQL(
+        query: GitLabMergeRequestQuery.jobsQuery,
+        host: repository.host,
+        stringVariables: ["fullPath": repository.path, "iid": iid, "after": cursor]
+      )
+      let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
+      let page = try GitLabJSONParsers.parseJobPage(data)
+      jobs.nodes = (jobs.nodes ?? []) + page.nodes
+      guard let next = page.nextCursor else { break }
+      cursor = next
+    }
+    jobs.pageInfo = GitLabJSONParsers.PageInfo(hasNextPage: false, endCursor: nil)
+    var completed = node
+    completed.headPipeline?.jobs = jobs
+    return completed
   }
 
   // MARK: - writes
