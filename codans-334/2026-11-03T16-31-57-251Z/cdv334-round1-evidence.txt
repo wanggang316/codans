@@ -1,0 +1,25 @@
+self-verify: instance pid 85744 on /tmp/cdv-sv-501.sock
+== on-disk catalog: version, hosts, project host fields
+{"version":5,"hosts":[{"address":"127.0.0.1","username":"wanggang","port":22334}],"projects":[{"name":"cdv334-remote","hostID":"7EF2C689-6B1A-4045-8545-A9C7B3C0B625","remoteHost":null},{"name":"local-app","hostID":null,"remoteHost":null}]}
+== new CLI: project list --json (kind)
+{"name":"cdv334-remote","kind":"server"}
+{"name":"local-app","kind":"git_repo"}
+== new CLI: tree (project + host lines)
+cdv334-remote  AAAAAAAA-0000-0000-0000-000000000001  [server]
+  host: 127.0.0.1  7EF2C689-6B1A-4045-8545-A9C7B3C0B625
+local-app  AAAAAAAA-0000-0000-0000-000000000003
+  host: This Mac
+== new CLI: tree --json host
+{"name":"cdv334-remote","kind":"server","host":{"id":"7EF2C689-6B1A-4045-8545-A9C7B3C0B625","name":"127.0.0.1"}}
+{"name":"local-app","kind":"git_repo","host":{"id":null,"name":"This Mac"}}
+== new CLI: project show
+project:           AAAAAAAA-0000-0000-0000-000000000001
+host:              127.0.0.1  7EF2C689-6B1A-4045-8545-A9C7B3C0B625
+== older CLI (pre-change build): tree project lines
+cdv334-remote  AAAAAAAA-0000-0000-0000-000000000001  [server]
+local-app  AAAAAAAA-0000-0000-0000-000000000003
+== older CLI: project list --json (kind)
+{"name":"cdv334-remote","kind":"server"}
+{"name":"local-app","kind":"git_repo"}
+defaults restored: NSSplitView Subview Frames main, SidebarNavigationSplitView
+self-verify: cleanup done
