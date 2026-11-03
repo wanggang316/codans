@@ -38,8 +38,6 @@ struct HostWireContractTests {
     let sent = IPC.ProjectListPayload(projects: Self.catalogProjects(), hosts: [Self.box])
     let payload = try await listProjects(responding: try JSONValue.encoded(sent))
 
-    // On the wire a Server project carries only its Host id.
-    #expect(payload.projects[1].remoteHost == nil)
     let projects = payload.resolvedProjects
     #expect(projects[1].remoteHost == Self.box.endpoint)
     #expect(projects[1].kind == .server)
@@ -49,6 +47,42 @@ struct HostWireContractTests {
     #expect(
       IPC.HostRef(project: projects[1], hosts: hosts)
         == IPC.HostRef(id: Self.box.id.description, name: "Build box"))
+  }
+
+  /// The `Project` shape of a CLI that predates Host records: it tells a
+  /// Server project by `remoteHost` alone.
+  private struct OldCLIProject: Decodable {
+    let id: ProjectID
+    let remoteHost: RemoteHost?
+  }
+
+  private struct OldCLIPayload: Decodable {
+    let projects: [OldCLIProject]
+  }
+
+  @Test
+  func listStillTellsAnOlderCLIWhichProjectsAreServerProjects() throws {
+    let sent = IPC.ProjectListPayload(projects: Self.catalogProjects(), hosts: [Self.box])
+    let data = try JSONEncoder().encode(sent)
+
+    let old = try JSONDecoder().decode(OldCLIPayload.self, from: data)
+    #expect(old.projects.map(\.remoteHost) == [nil, Self.box.endpoint])
+
+    // `catalog.json` itself keeps only the Host id.
+    let stored = try #require(
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(Self.catalogProjects()[1])) as? [String: Any])
+    #expect(stored["remoteHost"] == nil)
+    #expect(stored["hostID"] != nil)
+  }
+
+  @Test
+  func editedHostWinsOverTheWireCopyOfTheFields() throws {
+    // The list is resolved from `hosts`, so the record is the source of truth.
+    var moved = Self.box
+    moved.port = 2200
+    let sent = IPC.ProjectListPayload(projects: Self.catalogProjects(), hosts: [moved])
+    let payload = try JSONDecoder().decode(IPC.ProjectListPayload.self, from: JSONEncoder().encode(sent))
+    #expect(payload.resolvedProjects[1].remoteHost == moved.endpoint)
   }
 
   @Test

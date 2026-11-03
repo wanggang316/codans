@@ -218,10 +218,10 @@ extension Project: Codable {
     }
     self.gitRoot = try container.decodeIfPresent(String.self, forKey: .gitRoot)
     self.hostID = try container.decodeIfPresent(HostID.self, forKey: .hostID)
-    // Legacy (catalog v4 and older): the host fields live on the Project.
-    // With a `hostID` the catalog fills this from the Host list instead.
-    self.remoteHost =
-      hostID == nil ? try container.decodeIfPresent(RemoteHost.self, forKey: .remoteHost) : nil
+    // Legacy (catalog v4 and older) and the IPC project list carry the host
+    // fields on the Project. With a `hostID` the catalog replaces them with
+    // the endpoint of the Host record (`Catalog.resolveHostReferences`).
+    self.remoteHost = try container.decodeIfPresent(RemoteHost.self, forKey: .remoteHost)
     self.worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
     self.selectedWorktreeID = try container.decodeIfPresent(WorktreeID.self, forKey: .selectedWorktreeID)
     self.isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true

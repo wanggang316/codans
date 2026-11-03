@@ -16,12 +16,13 @@ struct ProjectList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      struct Result: Codable { let projects: [Project] }
-      let result: Result = try await client.call(
+      let result: IPC.ProjectListPayload = try await client.call(
         .hierarchyListProjects,
         params: EmptyParams()
       )
-      try Renderer.emit(ProjectListRenderable(projects: result.projects), mode: globals.renderMode)
+      // A Server project on the wire may carry only its Host id; resolve it
+      // so `kind` reads `server`.
+      try Renderer.emit(ProjectListRenderable(projects: result.resolvedProjects), mode: globals.renderMode)
     }
   }
 }
@@ -400,41 +401,6 @@ struct ProjectRemove: AsyncParsableCommand {
       try Renderer.emit(
         IDMessage(id: uuid.uuidString, message: "removed project \(uuid.uuidString)"), mode: globals.renderMode)
     }
-  }
-}
-
-struct ProjectListRenderable: Encodable, CustomStringConvertible {
-  let projects: [Project]
-  private enum Key: String, CodingKey { case projects }
-
-  func encode(to encoder: Encoder) throws {
-    var container = encoder.container(keyedBy: Key.self)
-    try container.encode(projects.map(ProjectDTO.init(project:)), forKey: .projects)
-  }
-
-  var description: String {
-    projects.isEmpty
-      ? "(no projects)"
-      : projects.map { "\($0.id)  \($0.name)  \($0.rootPath)" }.joined(separator: "\n")
-  }
-}
-
-struct ProjectDTO: Encodable {
-  let id: String
-  let name: String
-  let rootPath: String
-  let gitRoot: String?
-  /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
-  let kind: String
-  let selectedWorktreeID: String?
-
-  init(project: Project) {
-    self.id = project.id.description
-    self.name = project.name
-    self.rootPath = project.rootPath
-    self.gitRoot = project.gitRoot
-    self.kind = project.kind.rawValue
-    self.selectedWorktreeID = project.selectedWorktreeID?.description
   }
 }
 

@@ -20,6 +20,32 @@ extension IPC {
       self.hosts = hosts
     }
 
+    private enum CodingKeys: String, CodingKey { case projects, handles, hosts }
+
+    /// Each Server project also carries its resolved `remoteHost`, which
+    /// `catalog.json` no longer stores. A CLI that predates Host records
+    /// reads only that field to tell a Server project from a local one.
+    public func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(projects.map(LegacyHostFields.init), forKey: .projects)
+      try container.encodeIfPresent(handles, forKey: .handles)
+      try container.encodeIfPresent(hosts, forKey: .hosts)
+    }
+
+    /// A Project encoded as usual, plus `remoteHost`.
+    private struct LegacyHostFields: Encodable {
+      let project: Project
+
+      private enum CodingKeys: String, CodingKey { case remoteHost }
+
+      func encode(to encoder: Encoder) throws {
+        try project.encode(to: encoder)
+        guard project.hostID != nil, let endpoint = project.remoteHost else { return }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(endpoint, forKey: .remoteHost)
+      }
+    }
+
     /// `projects` with each Server project's `remoteHost` filled from
     /// `hosts`, so `Project.kind` / `isRemote` read the same as in the app.
     public var resolvedProjects: [Project] {
