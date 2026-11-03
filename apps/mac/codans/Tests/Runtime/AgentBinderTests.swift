@@ -106,20 +106,65 @@ struct AgentBinderTests {
   }
 
   @Test
+  func sameKindAgentInANewProcessGroupStartsAsANewAgent() {
+    let f = Fixture()
+    f.binder.consider(
+      paneID: f.paneID,
+      trigger: .foregroundJobChanged(Self.job(argv0: "codex", commandLine: "codex"))
+    )
+    // The first agent exits; a second codex starts before the binding is
+    // released.
+    f.binder.consider(
+      paneID: f.paneID,
+      trigger: .foregroundJobChanged(Self.job(argv0: "-zsh", commandLine: "-zsh", processGroupID: 200))
+    )
+    f.binder.consider(
+      paneID: f.paneID,
+      trigger: .foregroundJobChanged(Self.job(argv0: "codex", commandLine: "codex", processGroupID: 300))
+    )
+    #expect(f.calls.value == [.init(paneID: f.paneID, kind: .codex)])
+    #expect(f.unboundCalls.value == [f.paneID])
+    #expect(
+      f.boundCalls.value == [
+        .init(paneID: f.paneID, kind: .codex, assumeUserInputSeen: false),
+        .init(paneID: f.paneID, kind: .codex, assumeUserInputSeen: false),
+      ]
+    )
+  }
+
+  @Test
+  func sameAgentBackAfterATransientMissIsNoOp() {
+    let f = Fixture()
+    let agent = Self.job(argv0: "codex", commandLine: "codex")
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(agent))
+    f.binder.consider(
+      paneID: f.paneID,
+      trigger: .foregroundJobChanged(Self.job(argv0: "git", commandLine: "git status", processGroupID: 200))
+    )
+    f.binder.consider(paneID: f.paneID, trigger: .foregroundJobChanged(agent))
+    #expect(f.unboundCalls.value.isEmpty)
+    #expect(f.boundCalls.value.count == 1)
+  }
+
+  @Test
   func unbindAlwaysCallsThroughWithNil() {
     let f = Fixture(initialAgentKind: .claudeCode)
     f.binder.unbind(f.paneID)
     #expect(f.calls.value == [.init(paneID: f.paneID, kind: nil)])
   }
 
-  private static func job(argv0: String, commandLine: String) -> ForegroundJob {
+  private static func job(
+    argv0: String,
+    commandLine: String,
+    processGroupID: Int32 = 123
+  ) -> ForegroundJob {
     ForegroundJob(
-      processGroupID: 123,
+      processGroupID: processGroupID,
       processes: [
         ForegroundProcess(
-          pid: 123,
+          pid: processGroupID,
           parentPID: 122,
-          processGroupID: 123,
+          processGroupID: processGroupID,
           argv0: argv0,
           commandLine: commandLine
         )
@@ -132,6 +177,7 @@ struct AgentBinderTests {
     let paneID = PaneID()
     let calls = LockIsolated<[RecordedCall]>([])
     let boundCalls = LockIsolated<[RecordedBoundCall]>([])
+    let unboundCalls = LockIsolated<[PaneID]>([])
     let agentKind: LockIsolated<AgentKind?>
     let binder: AgentBinder
 
@@ -147,6 +193,7 @@ struct AgentBinderTests {
       }
 
       let boundCalls = self.boundCalls
+      let unboundCalls = self.unboundCalls
       self.binder = AgentBinder(
         client: hierarchyClient,
         currentAgentKind: { _ in agentKind.value },
@@ -160,6 +207,9 @@ struct AgentBinderTests {
               )
             )
           }
+        },
+        agentUnboundHandler: { paneID in
+          unboundCalls.withValue { $0.append(paneID) }
         }
       )
     }

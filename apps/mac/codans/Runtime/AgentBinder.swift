@@ -51,6 +51,10 @@ final class AgentBinder {
   private let agentUnboundHandler: @MainActor (PaneID) -> Void
   private var presenceByPane: [PaneID: Presence] = [:]
   private var materializedBindings: Set<PaneID> = []
+  /// Process group of the bound agent's foreground job. The binding retains
+  /// across short non-agent intervals, so a same-kind agent started in that
+  /// window is told apart from the previous one only by its process group.
+  private var agentProcessGroups: [PaneID: Int32] = [:]
 
   init(
     client: HierarchyClient,
@@ -93,11 +97,22 @@ final class AgentBinder {
         _ = presence.shouldRelease(afterMiss: classified)
       }
       if classified == existing {
+        let previousGroup = agentProcessGroups.updateValue(job.processGroupID, forKey: paneID)
         if let kind = classified, !materializedBindings.contains(paneID) {
           materializedBindings.insert(paneID)
           agentBoundHandler(paneID, kind, nil, true)
           logTransition(
             action: "materialize", paneID: paneID, existing: existing,
+            classified: classified, job: job, misses: presence.misses
+          )
+        } else if let kind = classified, let previousGroup, previousGroup != job.processGroupID {
+          // A new agent of the same kind replaced the bound one before the
+          // binding was released. The catalog binding stays; the store
+          // starts the new agent from a clean entry.
+          agentUnboundHandler(paneID)
+          agentBoundHandler(paneID, kind, nil, false)
+          logTransition(
+            action: "restart", paneID: paneID, existing: existing,
             classified: classified, job: job, misses: presence.misses
           )
         } else {
@@ -123,6 +138,7 @@ final class AgentBinder {
     let existing = currentAgentKind(paneID)
     presenceByPane.removeValue(forKey: paneID)
     materializedBindings.remove(paneID)
+    agentProcessGroups.removeValue(forKey: paneID)
     client.setPaneAgentKind(paneID, nil)
     agentUnboundHandler(paneID)
     logTransition(
@@ -130,7 +146,7 @@ final class AgentBinder {
     )
   }
 
-  /// Catalog-membership backstop for the two per-pane maps.
+  /// Catalog-membership backstop for the per-pane maps.
   ///
   /// `unbind` is the only other cleaner and it rides on `.paneExited` /
   /// `.paneCrashed` / `.paneClosedByTab`. Archive and project removal use
@@ -149,6 +165,7 @@ final class AgentBinder {
   func reconcileMembership(livePaneIDs: Set<PaneID>) {
     presenceByPane = presenceByPane.filter { livePaneIDs.contains($0.key) }
     materializedBindings.formIntersection(livePaneIDs)
+    agentProcessGroups = agentProcessGroups.filter { livePaneIDs.contains($0.key) }
   }
 
   // MARK: - Helpers
@@ -184,9 +201,11 @@ final class AgentBinder {
     // up, plumb a third channel down through this hook.
     if let kind = next {
       materializedBindings.insert(paneID)
+      if let job { agentProcessGroups[paneID] = job.processGroupID }
       agentBoundHandler(paneID, kind, nil, assumeUserInputSeen)
     } else {
       materializedBindings.remove(paneID)
+      agentProcessGroups.removeValue(forKey: paneID)
       agentUnboundHandler(paneID)
     }
   }

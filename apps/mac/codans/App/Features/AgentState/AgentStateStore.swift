@@ -149,6 +149,9 @@ final class AgentStateStore {
     /// cache for the Agents View row's activity text — never an input to
     /// state derivation (see the reaction table).
     var lastTitle: String?
+    /// True once `onAgentBound` confirmed an agent in the pane. A restored
+    /// seed has an entry but no confirmed agent yet, so titles wait for it.
+    var agentBound = false
     /// True only for a pane seeded from the persisted quit snapshot that
     /// has not yet received a live viewport classification. While set,
     /// `refresh` holds the restored display state instead of deriving a
@@ -305,7 +308,7 @@ final class AgentStateStore {
       // cwd) or a previous program's, not the agent's activity. The title
       // is untrusted program text: sanitize it like the OSC 7501
       // `message`, and never log it.
-      guard entries[paneID] != nil, var s = scratch[paneID] else { break }
+      guard var s = scratch[paneID], s.agentBound else { break }
       s.lastTitle = UntrustedDisplayText.sanitized(title)
       scratch[paneID] = s
 
@@ -401,11 +404,14 @@ final class AgentStateStore {
     if var existing = scratch[paneID] {
       existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
       // A new agent starts without a title: one cached for another agent
-      // kind is not this agent's activity.
+      // kind is not this agent's activity. An unbound pane caches none.
       if seeded?.kind != kind { existing.lastTitle = nil }
+      existing.agentBound = true
       scratch[paneID] = existing
     } else {
-      scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
+      var fresh = Scratch.fresh(userInputSeen: effectiveUserInputSeen)
+      fresh.agentBound = true
+      scratch[paneID] = fresh
     }
     entries[paneID] = AgentEntry(
       kind: kind,

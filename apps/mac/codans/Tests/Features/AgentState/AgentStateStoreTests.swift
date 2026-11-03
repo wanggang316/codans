@@ -508,11 +508,26 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func rebindOfTheSameAgentKeepsItsTitle() {
+  func restoredAgentIgnoresTitlesUntilItsBind() {
     let f = Fixture()
     f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
+    #expect(f.registry.activityText(for: f.paneID) == nil)
+    // The binder identifies the restored agent at launch.
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.activityText(for: f.paneID) == nil)
+
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
-    // The binder re-identifies the restored agent at launch.
+    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+  }
+
+  @Test
+  func rebindOfTheSameAgentKeepsItsTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
+    // The binder materializes the same agent again, for example after the
+    // pane was archived and unarchived.
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil, assumeUserInputSeen: true)
     #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
   }
