@@ -104,6 +104,29 @@ struct GitHubWireTests {
     #expect(GitHubWire.failedWorkflowRunIDs(checks) == [111, 444])
   }
 
+  /// The run id sits at a fixed place after `<owner>/<repo>`, so an owner or a repository
+  /// named `actions` must not be taken for the `actions/runs` segment.
+  @Test
+  func failedWorkflowRunIDsAcceptAnOwnerOrRepositoryNamedActions() {
+    let checks: [GitHubWire.RollupCheck] = [
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/actions/checkout/actions/runs/123/job/4"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/acme/actions/actions/runs/456/job/7"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/actions/actions/actions/runs/789/job/1"),
+    ]
+    #expect(GitHubWire.failedWorkflowRunIDs(checks) == [123, 456, 789])
+  }
+
+  @Test
+  func failedWorkflowRunIDsRejectOtherPathShapes() {
+    let checks: [GitHubWire.RollupCheck] = [
+      // `actions/runs` not right after owner/repo.
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/o/r/pull/1/actions/runs/5"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/actions/runs/9/job/1"),
+      .init(isCheckRun: true, conclusion: "FAILURE", detailsURL: "https://github.com/o/r/actions/runs/abc/job/1"),
+    ]
+    #expect(GitHubWire.failedWorkflowRunIDs(checks).isEmpty)
+  }
+
   @Test
   func noFailedWorkflowRunMeansNoRerun() {
     let checks: [GitHubWire.RollupCheck] = [

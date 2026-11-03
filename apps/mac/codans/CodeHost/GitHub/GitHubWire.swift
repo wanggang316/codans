@@ -112,12 +112,15 @@ nonisolated enum GitHubWire {
     return Array(Set(ids)).sorted()
   }
 
+  /// The run id of `/<owner>/<repo>/actions/runs/<id>/…`. The segments are read at fixed
+  /// positions after owner and repository, because either can itself be named `actions`
+  /// (`github.com/actions/checkout/actions/runs/123/job/4`).
   private static func actionsRunID(detailsURL: String?) -> Int64? {
     guard let detailsURL, let url = URL(string: detailsURL) else { return nil }
+    // `pathComponents` starts with "/": ["/", owner, repo, "actions", "runs", id, …].
     let parts = url.pathComponents
-    guard let index = parts.firstIndex(of: "actions"), parts.count > index + 2, parts[index + 1] == "runs"
-    else { return nil }
-    return Int64(parts[index + 2])
+    guard parts.count > 5, parts[3] == "actions", parts[4] == "runs" else { return nil }
+    return Int64(parts[5])
   }
 
   /// GitHub offers every strategy; `mergeable == MERGEABLE` decides whether merge is
