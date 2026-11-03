@@ -2693,20 +2693,10 @@ private struct SidebarFilterBar: View {
     let titleScale = min(1, max(0, metrics.expanded - 12) / (14 + 5 + titleWidth))
     let showsTitle = selected && titleScale >= 0.8
     let labelScale = showsTitle ? titleScale : min(1, max(0, metrics.diameter - 8) / 14)
-    // While ⌘ is held the chord replaces the label. Both stay in the layout and
-    // only their opacity changes, so the swap is a cross-fade in place: an
-    // inserted chord would animate in from the label's moving geometry. The
-    // chord shrinks to fit a narrow collapsed capsule rather than run past its
-    // rounded ends.
-    let chord = ShortcutDisplay.chord(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts)
-    let showsChord = commandKeyObserver.isCommandHeld && chord != nil
-    let chordWidth = chord.map {
-      ceil(
-        ($0 as NSString).size(withAttributes: [
-          .font: NSFont.systemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize)
-        ]).width)
-    }
-    let chordScale = chordWidth.map { min(1, max(0, metrics.collapsed - 10) / max($0, 1)) } ?? 1
+    // While ⌘ is held the icon turns into the chord's key in its own place; the
+    // title and the capsule do not move. The full chord is in the tooltip.
+    let key = ShortcutDisplay.keycap(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts)
+    let showsKey = commandKeyObserver.isCommandHeld && key != nil
 
     return Button {
       onSelect(filter)
@@ -2725,6 +2715,16 @@ private struct SidebarFilterBar: View {
             Image(systemName: symbol(for: filter))
               .frame(width: 14)
               .accessibilityHidden(true)
+              .shortcutHintOutgoing(showsKey)
+              .overlay {
+                if let key {
+                  ShortcutHintLabel(
+                    chord: key, font: .system(size: TabBarMetrics.titleFontSize, weight: .medium),
+                    onTint: selected
+                  )
+                  .shortcutHintIncoming(showsKey)
+                }
+              }
             Text(title)
               .fixedSize()
               .opacity(showsTitle ? 1 : 0)
@@ -2746,14 +2746,6 @@ private struct SidebarFilterBar: View {
             value: showsTitle
           )
           .scaleEffect(labelScale)
-          .opacity(showsChord ? 0 : 1)
-        }
-        .overlay {
-          if let chord {
-            ShortcutHintLabel(chord: chord, onTint: selected)
-              .scaleEffect(chordScale)
-              .opacity(showsChord ? 1 : 0)
-          }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(Capsule())

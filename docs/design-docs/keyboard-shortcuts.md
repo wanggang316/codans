@@ -5,11 +5,11 @@
 
 ## 背景与范围
 
-codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦；按住 ⌘ 时和弦替换按钮的图标与标题，过窄时等比缩小）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
+codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦；按住 ⌘ 时按钮图标原位变成和弦的按键）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
 
 按住 ⌘ 约 1 秒后，各控件显示自己的快捷键提示（`ShortcutHintLabel`：系统字体、`.secondary` 纯文本、无键帽边框）。提示从解析后的绑定读取，改键或禁用会同步反映。两种放置方式都只切换透明度，周围布局不动：
 
-- **控件内快捷键**（Tab、侧栏筛选栏按钮）：Tab 的快捷键在 chip 尾部槽位，替换颜色点；筛选栏按钮的快捷键与图标、标题叠放，替换整组标签，两者始终都在布局中。两处都只做透明度过渡，在原位交叉淡化，不位移、不模糊。时长取 `Animation.shortcutHint`（0.08 s easeOut），由 `CommandKeyObserver` 翻转标志时带入。
+- **原位替换**（侧栏筛选栏按钮、Tab）：筛选栏按钮的图标原位变成和弦的按键本身（`ShortcutDisplay.keycap(for:in:)`，如 `⌃⌘1` 显示 `1`，完整和弦在 tooltip）；Tab 的完整和弦在 chip 尾部槽位，替换颜色点。被替换的图形用 `shortcutHintOutgoing(_:)` 缩小到 0.7、模糊并淡出，提示用 `shortcutHintIncoming(_:)` 只淡入；两者始终都在布局中，标题与控件不动。出现用 0.04 s easeOut，几乎即时；消失用 0.1 s easeOut，图形放大回原尺寸。
 - **替换尾部附件**（侧栏 worktree / Project / Group 行、Agents View 行，`ShortcutHintTrailing`）：完整和弦与行尾附件（diff 统计、PR 徽标、状态点、悬停按钮）叠在同一个尾对齐的 ZStack 里，按住 ⌘ 时附件淡出、和弦淡入，隐藏的附件不响应点击。一列行同时切换，用 0.15 s easeInOut，比单个控件稍柔和。
 
 开启“减弱动态效果”时不做动画。

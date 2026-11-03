@@ -69,8 +69,45 @@ struct ShortcutHintTrailing<Accessories: View>: View {
   }
 }
 
+extension View {
+  /// The glyph a hint replaces in place (a filter icon, a tab's color dot). While `isShown`
+  /// it shrinks, blurs, and fades out; pair it with `shortcutHintIncoming(_:)` on the hint
+  /// that takes its place. Both views stay in the layout, so nothing around them moves.
+  func shortcutHintOutgoing(_ isShown: Bool) -> some View {
+    modifier(ShortcutHintSwap(isShown: isShown, isOutgoing: true))
+  }
+
+  /// The hint that takes a glyph's place while `isShown`. It only fades, with the same
+  /// timing as `shortcutHintOutgoing(_:)`.
+  func shortcutHintIncoming(_ isShown: Bool) -> some View {
+    modifier(ShortcutHintSwap(isShown: isShown, isOutgoing: false))
+  }
+}
+
+private struct ShortcutHintSwap: ViewModifier {
+  let isShown: Bool
+  let isOutgoing: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    let isHidden = isOutgoing == isShown
+    let morphs = isOutgoing && isShown && !reduceMotion
+    content
+      .scaleEffect(morphs ? 0.7 : 1)
+      .blur(radius: morphs ? 2 : 0)
+      .opacity(isHidden ? 0 : 1)
+      .animation(
+        reduceMotion ? nil : isShown ? .shortcutHintSwapIn : .shortcutHintSwapOut,
+        value: isShown)
+  }
+}
+
 extension Animation {
-  /// Timing of the hint show/hide: a quick cross-fade with no motion or blur, so the hints
-  /// answer the held key at once.
+  /// Timing of a hint inserted or removed under the ⌘ flag: a quick cross-fade with no
+  /// motion or blur, so the hints answer the held key at once.
   static let shortcutHint: Animation = .easeOut(duration: 0.08)
+  /// An in-place swap shows its hint almost at once when ⌘ goes down…
+  static let shortcutHintSwapIn: Animation = .easeOut(duration: 0.04)
+  /// …and lets the glyph grow back into view more slowly when ⌘ comes up.
+  static let shortcutHintSwapOut: Animation = .easeOut(duration: 0.1)
 }
