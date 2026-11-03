@@ -30,6 +30,8 @@ struct PullRequestBadge: View {
   }
 
   let state: BadgeState
+  /// "pull request" / "merge request", for the accessibility label.
+  var pullRequestName: String = "pull request"
   let onTap: () -> Void
 
   var body: some View {
@@ -85,7 +87,7 @@ struct PullRequestBadge: View {
       }()
       let conflictWord = snapshot.hasMergeConflict ? ", merge conflicts" : ""
       return Text(
-        "Pull request \(snapshot.number), \(stateWord), \(rollupWord)\(conflictWord). "
+        "\(CodeHostLabels.pullRequestSentence(pullRequestName)) \(snapshot.number), \(stateWord), \(rollupWord)\(conflictWord). "
           + "Activate to see details."
       )
     case .error(let error):

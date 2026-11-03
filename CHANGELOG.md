@@ -10,6 +10,17 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **GitLab merge requests.** A Project whose `origin` is on gitlab.com, or
+  on a self-managed GitLab that `glab` is logged in to, shows its merge
+  requests as GitHub Projects show pull requests: the "MR" badge, popover,
+  status bar, and worktree header. The popover can merge (the project's
+  merge method applies), squash and merge, close, mark ready, and rerun
+  failed jobs. "Open MR on GitLab" and "Open Project on GitLab" open the
+  GitLab pages. Needs `glab` 1.122.0 or later.
+- **CLI problems show at the badge.** When `gh` or `glab` is missing, not
+  logged in, or too old, each Worktree row shows the message with the
+  command that fixes it.
+
 - **Switch the sidebar filter with ⌃⌘1…⌃⌘5.** All, Remote, Workspace, PR,
   and Unread, in the order the filter bar shows them.
 - **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9

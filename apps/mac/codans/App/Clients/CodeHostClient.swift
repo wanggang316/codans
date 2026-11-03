@@ -11,7 +11,8 @@ import Foundation
 nonisolated struct CodeHostClient: Sendable {
   var availability: @Sendable (_ kind: CodeHostKind) async -> CodeHostAvailability
   /// The Code Host repository behind a remote, or `nil` when no Code Host serves its host
-  /// (`github.com` or a host `gh` is logged in to → GitHub; otherwise none).
+  /// (`github.com` or a host `gh` is logged in to → GitHub; `gitlab.com` or a host `glab`
+  /// is logged in to → GitLab; otherwise none).
   var resolveRepository: @Sendable (_ remote: RemoteInfo) async -> CodeHostRepository?
   /// Drops cached resolver input (the hosts each CLI is logged in to), so the next
   /// resolution sees a fresh `auth login`.
@@ -29,10 +30,13 @@ nonisolated struct CodeHostClient: Sendable {
 
 extension CodeHostClient {
   /// Constructs a client that dispatches each call to the implementation of its kind.
-  static func live(github: any CodeHost = GitHubCodeHost()) -> CodeHostClient {
+  static func live(
+    github: any CodeHost = GitHubCodeHost(), gitlab: any CodeHost = GitLabCodeHost()
+  ) -> CodeHostClient {
     let implementation: @Sendable (CodeHostKind) -> any CodeHost = { kind in
       switch kind {
       case .github: return github
+      case .gitlab: return gitlab
       }
     }
     let resolver = CodeHostResolver { kind in await implementation(kind).authenticatedHosts() }

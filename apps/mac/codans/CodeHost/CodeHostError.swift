@@ -56,12 +56,21 @@ enum CodeHostError: Error, Equatable, Sendable {
   /// other characters unsafe in a query string literal).
   case malformedBranchName(String)
 
+  /// `true` for the errors the user fixes on the CLI itself: install it, log in, or
+  /// upgrade it.
+  var isCLIError: Bool {
+    switch self {
+    case .cliNotInstalled, .notAuthenticated, .cliOutdated: return true
+    default: return false
+    }
+  }
+
   /// One-line, user-facing string suitable for tooltip + popover banner.
   var userFacingMessage: String {
     switch self {
     case .cliNotInstalled(let kind):
       return
-        "\(kind.cliDisplayName) is not installed. Run `brew install \(kind.cliName)` in a terminal to enable pull-request features."
+        "\(kind.cliDisplayName) is not installed. Run `brew install \(kind.cliName)` in a terminal to enable \(kind.pullRequestName.replacingOccurrences(of: " ", with: "-")) features."
     case .notAuthenticated(let kind, let host):
       return "Sign in to \(host ?? kind.displayName) by running `\(kind.cliName) auth login` in a terminal."
     case .cliOutdated(let kind, let minVersion):

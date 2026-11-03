@@ -13,7 +13,8 @@ nonisolated struct LiveEnvironment: EnvironmentVariableProvider {
   }
 }
 
-/// Resolves the absolute path of the `gh` CLI once per app session and caches the result.
+/// Resolves the absolute path of a Code Host CLI (`gh`, `glab`) once per app session and
+/// caches the result.
 ///
 /// Concurrent callers share a single resolution via a single-flight `Task`: the first
 /// `resolve()` starts the probe, subsequent callers `await` the in-flight task. Subsequent
@@ -24,9 +25,10 @@ nonisolated struct LiveEnvironment: EnvironmentVariableProvider {
 ///
 /// The prober is injected at init time so tests can assert single-flight behaviour by
 /// counting invocations. The production path uses `Self.livePathProbe()` which iterates
-/// `$PATH` components and checks each for an executable `gh` file.
-actor GhExecutableResolver {
-  static let shared = GhExecutableResolver()
+/// `$PATH` components and checks each for an executable file of the command's name.
+actor CLIExecutableResolver {
+  static let gh = CLIExecutableResolver(prober: livePathProbe(command: "gh"))
+  static let glab = CLIExecutableResolver(prober: livePathProbe(command: "glab"))
 
   typealias Prober = @Sendable () async -> URL?
 
@@ -39,11 +41,11 @@ actor GhExecutableResolver {
   private let prober: Prober
   private var cache: CacheState = .empty
 
-  init(prober: @escaping Prober = GhExecutableResolver.livePathProbe()) {
+  init(prober: @escaping Prober) {
     self.prober = prober
   }
 
-  /// Returns the cached `gh` path, resolving on first call. Concurrent callers share the
+  /// Returns the cached executable path, resolving on first call. Concurrent callers share the
   /// resolution task so the prober runs at most once per cache generation.
   func resolve() async -> URL? {
     switch cache {
@@ -76,16 +78,17 @@ actor GhExecutableResolver {
   ///   1. `$PATH` walk — cheapest, but GUI apps inherit a stripped PATH
   ///      (`/usr/bin:/bin:/usr/sbin:/sbin`) that almost never contains Homebrew
   ///      or user-added directories, so this usually misses on a real user box.
-  ///   2. Known Homebrew install paths (`/opt/homebrew/bin/gh` on Apple Silicon,
-  ///      `/usr/local/bin/gh` on Intel). Covers the 99% `brew install gh` case
+  ///   2. Known Homebrew install paths (`/opt/homebrew/bin/<command>` on Apple Silicon,
+  ///      `/usr/local/bin/<command>` on Intel). Covers the `brew install` case
   ///      without spawning a subprocess.
-  ///   3. Login-shell `which gh`. Loads the user's shell startup files
+  ///   3. Login-shell `which <command>`. Loads the user's shell startup files
   ///      (`.zprofile`, `.bash_profile`, …), so any custom PATH entries
   ///      resolve. Final catch-all.
   ///
   /// `FileManager` is constructed inside the closure rather than captured, because
   /// `FileManager` is not `Sendable` in Swift 6 strict-concurrency mode.
   static func livePathProbe(
+    command: String,
     env: any EnvironmentVariableProvider = LiveEnvironment()
   ) -> Prober {
     return {
@@ -95,7 +98,7 @@ actor GhExecutableResolver {
       if let pathValue = env.value(for: "PATH"), !pathValue.isEmpty {
         for component in pathValue.split(separator: ":", omittingEmptySubsequences: true) {
           let candidate = URL(fileURLWithPath: String(component))
-            .appendingPathComponent("gh")
+            .appendingPathComponent(command)
           if fileManager.isExecutableFile(atPath: candidate.path) {
             return candidate
           }
@@ -103,13 +106,13 @@ actor GhExecutableResolver {
       }
 
       // 2. Hardcoded Homebrew paths — GUI-launched apps rarely inherit these in $PATH.
-      for hardcoded in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+      for hardcoded in ["/opt/homebrew/bin/\(command)", "/usr/local/bin/\(command)"]
       where fileManager.isExecutableFile(atPath: hardcoded) {
         return URL(fileURLWithPath: hardcoded)
       }
 
       // 3. Login-shell fallback. Final catch-all for non-standard installs.
-      return await Self.loginShellWhich("gh")
+      return await Self.loginShellWhich(command)
     }
   }
 

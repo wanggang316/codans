@@ -54,7 +54,7 @@ struct StatusPullRequestView: View {
     }
     .buttonStyle(.plain)
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("Pull request #\(snapshot.number)")
+    .accessibilityLabel("\(CodeHostLabels.pullRequestSentence(pullRequestName)) #\(snapshot.number)")
     .accessibilityValue(Self.summaryText(snapshot: snapshot))
     .accessibilityAddTraits(.isButton)
     .accessibilityHint("Opens on \(codeHostName)")
@@ -115,6 +115,11 @@ struct StatusPullRequestView: View {
       Text(Self.summaryText(snapshot: snapshot))
         .lineLimit(1)
     }
+  }
+
+  /// "pull request" / "merge request" for the active Worktree's Code Host.
+  private var pullRequestName: String {
+    (store.state.codeHostKind(for: worktreeID) ?? .github).pullRequestName
   }
 
   /// UI name of the active Worktree's Code Host, for the "Open on …" labels.

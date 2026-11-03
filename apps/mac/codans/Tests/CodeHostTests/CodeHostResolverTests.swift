@@ -27,23 +27,61 @@ struct CodeHostResolverTests {
 
   @Test
   func anUnknownHostResolvesToNone() async {
-    let resolver = CodeHostResolver { _ in ["github.com"] }
-    #expect(await resolver.resolve(RemoteInfo(host: "gitlab.example.com", path: "group/sub/repo")) == nil)
+    let resolver = CodeHostResolver { kind in kind == .github ? ["github.com"] : ["gitlab.com"] }
+    #expect(await resolver.resolve(RemoteInfo(host: "git.example.com", path: "group/sub/repo")) == nil)
+  }
+
+  // MARK: - glab step
+
+  @Test
+  func gitlabDotComResolvesToGitLabWhenGhDoesNotKnowIt() async {
+    let resolver = CodeHostResolver { kind in
+      #expect(kind == .github, "gitlab.com must not need glab's logged-in hosts")
+      return ["github.com"]
+    }
+    let repository = await resolver.resolve(RemoteInfo(host: "gitlab.com", path: "group/sub/repo"))
+    #expect(repository == CodeHostRepository(kind: .gitlab, host: "gitlab.com", path: "group/sub/repo"))
+  }
+
+  /// A self-managed instance with a port, as `glab auth status` lists it.
+  @Test
+  func aHostThatGlabIsLoggedInToResolvesToGitLab() async {
+    let resolver = CodeHostResolver { kind in
+      kind == .github ? ["github.com"] : ["gitlab.com", "192.168.2.158:8929"]
+    }
+    let repository = await resolver.resolve(RemoteInfo(host: "192.168.2.158:8929", path: "codans-e2e/nested/deep-app"))
+    #expect(
+      repository
+        == CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/nested/deep-app"))
+  }
+
+  /// GitHub is tried first (ADR 0004 item 2): a host both CLIs know is a GitHub host.
+  @Test
+  func aHostKnownToBothCLIsResolvesToGitHub() async {
+    let resolver = CodeHostResolver { _ in ["code.example.com"] }
+    let repository = await resolver.resolve(RemoteInfo(host: "code.example.com", path: "team/repo"))
+    #expect(repository?.kind == .github)
   }
 
   @Test
-  func loggedInHostsAreAskedOnceUntilInvalidated() async {
-    let calls = LockIsolated(0)
-    let resolver = CodeHostResolver { _ in
-      calls.withValue { $0 += 1 }
+  func aHostGhIsLoggedInToWinsOverGitLabDotCom() async {
+    let resolver = CodeHostResolver { kind in kind == .github ? ["gitlab.com"] : [] }
+    #expect(await resolver.resolve(RemoteInfo(host: "gitlab.com", path: "group/repo"))?.kind == .github)
+  }
+
+  @Test
+  func loggedInHostsAreAskedOncePerKindUntilInvalidated() async {
+    let calls = LockIsolated<[CodeHostKind: Int]>([:])
+    let resolver = CodeHostResolver { kind in
+      calls.withValue { $0[kind, default: 0] += 1 }
       return []
     }
-    let remote = RemoteInfo(host: "gitlab.example.com", path: "group/repo")
+    let remote = RemoteInfo(host: "git.example.com", path: "group/repo")
     _ = await resolver.resolve(remote)
     _ = await resolver.resolve(remote)
-    #expect(calls.value == 1)
+    #expect(calls.value == [.github: 1, .gitlab: 1])
     await resolver.invalidate()
     _ = await resolver.resolve(remote)
-    #expect(calls.value == 2)
+    #expect(calls.value == [.github: 2, .gitlab: 2])
   }
 }

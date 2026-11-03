@@ -268,7 +268,7 @@ struct BatchedPullRequestsTests {
 
   /// Resolver that pretends a gh executable exists at a fixed path. Bypasses the real
   /// which / login-shell probe so tests run without a `gh` install.
-  private static func stubResolver() -> GhExecutableResolver {
-    GhExecutableResolver(prober: { URL(fileURLWithPath: "/opt/homebrew/bin/gh") })
+  private static func stubResolver() -> CLIExecutableResolver {
+    CLIExecutableResolver(prober: { URL(fileURLWithPath: "/opt/homebrew/bin/gh") })
   }
 }

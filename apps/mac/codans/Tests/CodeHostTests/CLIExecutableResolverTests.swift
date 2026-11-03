@@ -3,7 +3,7 @@ import Testing
 
 @testable import Codans
 
-/// Covers the four behaviours of `GhExecutableResolver`:
+/// Covers the four behaviours of `CLIExecutableResolver`:
 ///   - missing binary returns nil
 ///   - present binary is cached across calls
 ///   - concurrent callers share a single resolution (single-flight)
@@ -11,7 +11,7 @@ import Testing
 ///
 /// Tests inject a counting prober closure rather than hitting the filesystem. The
 /// live-FS path is exercised indirectly by the integration tests against real `gh`.
-struct GhExecutableResolverTests {
+struct CLIExecutableResolverTests {
   /// Counts how many times the prober was invoked so tests can assert caching / single-flight.
   actor ProbeCounter {
     private(set) var count = 0
@@ -22,7 +22,7 @@ struct GhExecutableResolverTests {
     counter: ProbeCounter,
     returning url: URL?,
     delay: Duration = .zero
-  ) -> GhExecutableResolver.Prober {
+  ) -> CLIExecutableResolver.Prober {
     { @Sendable in
       await counter.increment()
       if delay > .zero {
@@ -35,7 +35,7 @@ struct GhExecutableResolverTests {
   @Test
   func missingBinaryReturnsNil() async {
     let counter = ProbeCounter()
-    let resolver = GhExecutableResolver(prober: makeProber(counter: counter, returning: nil))
+    let resolver = CLIExecutableResolver(prober: makeProber(counter: counter, returning: nil))
     let result = await resolver.resolve()
     #expect(result == nil)
     await #expect(counter.count == 1)
@@ -45,7 +45,7 @@ struct GhExecutableResolverTests {
   func resolvedValueCachesAcrossCalls() async {
     let counter = ProbeCounter()
     let stubURL = URL(fileURLWithPath: "/opt/homebrew/bin/gh")
-    let resolver = GhExecutableResolver(prober: makeProber(counter: counter, returning: stubURL))
+    let resolver = CLIExecutableResolver(prober: makeProber(counter: counter, returning: stubURL))
 
     let first = await resolver.resolve()
     let second = await resolver.resolve()
@@ -63,7 +63,7 @@ struct GhExecutableResolverTests {
     let stubURL = URL(fileURLWithPath: "/opt/homebrew/bin/gh")
     // A non-zero delay widens the in-flight window so concurrent callers reliably catch the
     // `.resolving` state rather than racing through to `.resolved`.
-    let resolver = GhExecutableResolver(
+    let resolver = CLIExecutableResolver(
       prober: makeProber(counter: counter, returning: stubURL, delay: .milliseconds(50))
     )
 
@@ -87,7 +87,7 @@ struct GhExecutableResolverTests {
   func invalidationForcesReprobe() async {
     let counter = ProbeCounter()
     let stubURL = URL(fileURLWithPath: "/opt/homebrew/bin/gh")
-    let resolver = GhExecutableResolver(prober: makeProber(counter: counter, returning: stubURL))
+    let resolver = CLIExecutableResolver(prober: makeProber(counter: counter, returning: stubURL))
 
     _ = await resolver.resolve()
     _ = await resolver.resolve()

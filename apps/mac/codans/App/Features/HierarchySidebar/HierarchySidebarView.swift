@@ -1314,11 +1314,16 @@ struct HierarchySidebarView: View {
   private func worktreeGitHubAndChangesItems(
     worktree: Worktree, project: Project
   ) -> some View {
+    let codeHost = codeHostStore?.state.codeHostKind(forProject: project.id, worktreeID: worktree.id)
     if project.repoRoot(for: worktree) != nil {
       Button {
         store.send(.delegate(.openOnCodeHost(projectID: project.id, worktreeID: worktree.id)))
       } label: {
-        Label("Open in GitHub", image: "github")
+        if codeHost == .gitlab {
+          Label(CodeHostLabels.openIn(codeHost), systemImage: "arrow.up.right.square")
+        } else {
+          Label(CodeHostLabels.openIn(codeHost), image: "github")
+        }
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: resolvedShortcuts)
     }
@@ -1328,7 +1333,7 @@ struct HierarchySidebarView: View {
       } label: {
         // Same PR-state octicon the row leads with (WorktreeRowIcon).
         Label(
-          "Open Pull Request",
+          CodeHostLabels.openPullRequestLong(codeHost),
           image: pullRequest.state.rowIconName(isDraft: pullRequest.isDraft))
       }
       .appKeyboardShortcut(.openCurrentPR, in: resolvedShortcuts)

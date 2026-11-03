@@ -40,10 +40,19 @@ public nonisolated struct PullRequestMergeOption: Equatable, Codable, Sendable, 
   public var isEnabled: Bool
   /// Why the option is disabled. `nil` when it is enabled.
   public var disabledReason: String?
+  /// Name the Code Host gives this option ("Merge" on GitLab, where the project's merge
+  /// method applies). `nil` uses `strategy.displayName`.
+  public var label: String?
 
-  public init(strategy: MergeStrategy, isEnabled: Bool, disabledReason: String? = nil) {
+  public init(
+    strategy: MergeStrategy, isEnabled: Bool, disabledReason: String? = nil, label: String? = nil
+  ) {
     self.strategy = strategy
     self.isEnabled = isEnabled
     self.disabledReason = disabledReason
+    self.label = label
   }
+
+  /// UI name of the option.
+  public var displayName: String { label ?? strategy.displayName }
 }

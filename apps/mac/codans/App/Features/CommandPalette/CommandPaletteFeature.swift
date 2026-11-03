@@ -32,6 +32,9 @@ struct CommandPaletteFeature {
     /// `.appeared` payload so `RootFeature.route` can target the right
     /// pane without re-reading the catalog.
     var focusedPaneID: PaneID?
+    /// Code Host of the selected Worktree, set by the parent on open. Picks the labels of
+    /// the "Open PR on GitHub" / "Open MR on GitLab" items; `nil` keeps the GitHub labels.
+    var codeHost: CodeHostKind?
   }
 
   enum Action: Equatable {
@@ -69,6 +72,7 @@ struct CommandPaletteFeature {
       switch action {
       case .appeared(let selection, let catalog, let descriptors, let recency, let paneID, let precise):
         state.focusedPaneID = paneID
+        let codeHost = state.codeHost
         state.recency = recency
         state.isIndexed = false
         state.items = []
@@ -86,7 +90,8 @@ struct CommandPaletteFeature {
               catalog: catalog,
               editorDescriptors: descriptors,
               focusedPaneID: paneID,
-              paneFocusPrecise: precise
+              paneFocusPrecise: precise,
+              codeHost: codeHost
             )
           }
           await send(.indexed(items))

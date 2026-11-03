@@ -1,0 +1,14 @@
+{
+  "hosts": [
+    {
+      "host": "gitlab.com",
+      "state": "error",
+      "error": "GET https://gitlab.com/api/v4/user: 401 {message: 401 Unauthorized}",
+      "token_source": "none",
+      "git_protocol": "ssh",
+      "api_protocol": "https",
+      "api_endpoint": "https://gitlab.com/api/v4/",
+      "graphql_endpoint": "https://gitlab.com/api/graphql/"
+    }
+  ]
+}

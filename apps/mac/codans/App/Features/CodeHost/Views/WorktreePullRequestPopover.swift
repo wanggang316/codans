@@ -25,7 +25,9 @@ struct WorktreePullRequestPopover: View {
     let error = store.lastError[worktreeID]
     let isLoading = store.loading.contains(worktreeID)
     let pullRequest = store.state.pullRequestReference(for: worktreeID)
-    let codeHostName = store.state.repository(for: worktreeID)?.kind.displayName ?? "Code Host"
+    let kind = store.state.codeHostKind(for: worktreeID)
+    let codeHostName = kind?.displayName ?? "Code Host"
+    let pullRequestName = (kind ?? .github).pullRequestName
 
     let content: PullRequestPopover.Content = {
       if let error { return .error(error) }
@@ -34,12 +36,16 @@ struct WorktreePullRequestPopover: View {
       return .noPullRequest(branch: branch)
     }()
 
-    let defaultStrategy = settingsStore.settings.general.defaultMergeStrategy ?? .squash
+    // A Code Host that does not offer the preferred strategy merges with its plain merge
+    // (GitLab: `rebase` → "Merge"; ADR 0004 item 6).
+    let preferredStrategy = settingsStore.settings.general.defaultMergeStrategy ?? .squash
+    let defaultStrategy = snapshot?.mergeStrategy(preferring: preferredStrategy) ?? preferredStrategy
     let isMutating = store.mutating.contains(worktreeID)
 
     PullRequestPopover(
       content: content,
       codeHostName: codeHostName,
+      pullRequestName: pullRequestName,
       defaultMergeStrategy: defaultStrategy,
       canMerge: !isMutating
         && pullRequest != nil
@@ -48,7 +54,7 @@ struct WorktreePullRequestPopover: View {
         && snapshot?.isDraft == false,
       mergeDisabledReason: isMutating
         ? "Another \(codeHostName) operation is in flight"
-        : Self.mergeDisabledReason(for: snapshot, strategy: defaultStrategy),
+        : Self.mergeDisabledReason(for: snapshot, strategy: defaultStrategy, pullRequestName: pullRequestName),
       onMerge: { strategy in
         if let pullRequest {
           store.send(.mergeRequested(worktreeID, pullRequest, strategy: strategy))
@@ -84,12 +90,13 @@ struct WorktreePullRequestPopover: View {
   /// Why the merge button is off: the Pull Request's lifecycle first, then the Code
   /// Host's own explanation (merge state reason, then the option's reason).
   static func mergeDisabledReason(
-    for snapshot: PullRequestSnapshot?, strategy: MergeStrategy
+    for snapshot: PullRequestSnapshot?, strategy: MergeStrategy, pullRequestName: String = "pull request"
   ) -> String? {
-    guard let snapshot else { return "No pull request for this Worktree" }
-    if snapshot.state == .merged { return "Pull request already merged" }
-    if snapshot.state == .closed { return "Pull request closed" }
-    if snapshot.isDraft { return "Pull request is a draft" }
+    let name = CodeHostLabels.pullRequestSentence(pullRequestName)
+    guard let snapshot else { return "No \(pullRequestName) for this Worktree" }
+    if snapshot.state == .merged { return "\(name) already merged" }
+    if snapshot.state == .closed { return "\(name) closed" }
+    if snapshot.isDraft { return "\(name) is a draft" }
     if let reason = snapshot.mergeState.reason { return reason }
     guard let option = snapshot.mergeOption(for: strategy) else {
       return "\(strategy.displayName) is not available"

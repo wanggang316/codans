@@ -1756,12 +1756,15 @@ struct RootFeature {
       // `Scope(state: \.codeHost, ...)` has already updated `mutating` / `lastError`;
       // we only fan a toast out. Message format mirrors the sidebar popover's
       // verb so cross-surface language stays consistent.
-      case .codeHost(.mergeCompleted(_, let prNumber, .success)):
-        return .send(.statusBar(.push(.success("PR #\(prNumber) merged"))))
-      case .codeHost(.closeCompleted(_, .success)):
-        return .send(.statusBar(.push(.success("PR closed"))))
-      case .codeHost(.markReadyCompleted(_, .success)):
-        return .send(.statusBar(.push(.success("PR marked ready"))))
+      case .codeHost(.mergeCompleted(let worktreeID, let prNumber, .success)):
+        let label = CodeHostLabels.pullRequest(state.codeHost.codeHostKind(for: worktreeID))
+        return .send(.statusBar(.push(.success("\(label) #\(prNumber) merged"))))
+      case .codeHost(.closeCompleted(let worktreeID, .success)):
+        let label = CodeHostLabels.pullRequest(state.codeHost.codeHostKind(for: worktreeID))
+        return .send(.statusBar(.push(.success("\(label) closed"))))
+      case .codeHost(.markReadyCompleted(let worktreeID, .success)):
+        let label = CodeHostLabels.pullRequest(state.codeHost.codeHostKind(for: worktreeID))
+        return .send(.statusBar(.push(.success("\(label) marked ready"))))
       case .codeHost(.rerunFailedChecksCompleted(_, .success)):
         return .send(.statusBar(.push(.success("Re-ran failed jobs"))))
 
@@ -1888,7 +1891,9 @@ struct RootFeature {
 
       case .commandPaletteToggle(let sourcePaneID):
         if state.commandPalette == nil {
-          state.commandPalette = CommandPaletteFeature.State()
+          state.commandPalette = CommandPaletteFeature.State(
+            codeHost: state.codeHost.codeHostKind(
+              forProject: state.selection.projectID, worktreeID: state.selection.worktreeID))
           let selection = state.selection
           let catalog = hierarchyClient.snapshot()
           let descriptors = state.editor.descriptors
