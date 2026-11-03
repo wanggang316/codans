@@ -11,12 +11,40 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
 ### Code Host 层
 
-GitHub 现在是 Code Host 层（[ADR 0004](../adr/0004-gitlab-support-through-glab.md)）的第一个实现。reducer（`CodeHostFeature`）、快照缓存和视图只用 `CodeHost` 协议和 `CodansCore/CodeHost/` 的 provider-neutral 模型；只有 `codans/CodeHost/GitHub/` 知道 GitHub 的 wire 值（`GitHubWire`）。与本文其余部分的差异：
+GitHub 是 Code Host 层（[ADR 0004](../adr/0004-gitlab-support-through-glab.md)）的第一个实现，GitLab 是第二个（见 [GitLab 实现](#gitlab-实现)）。reducer（`CodeHostFeature`）、快照缓存和视图只用 `CodeHost` 协议和 `CodansCore/CodeHost/` 的 provider-neutral 模型；只有 `codans/CodeHost/GitHub/` 知道 GitHub 的 wire 值（`GitHubWire`）。与本文其余部分的差异：
 
-- 每个 fetch unit 先由 `CodeHostResolver` 解析出 Code Host 仓库（`github.com` 或 `gh` 已登录的 host → GitHub；否则无 Code Host，不取数、无徽标、无错误）。仓库是 (kind, host, full path)。
+- 每个 fetch unit 先由 `CodeHostResolver` 解析出 Code Host 仓库（`github.com` 或 `gh` 已登录的 host → GitHub；`gitlab.com` 或 `glab` 已登录的 host → GitLab；否则无 Code Host，不取数、无徽标、无错误）。两个 CLI 都认识的 host 归 GitHub。仓库是 (kind, host, full path)。
+- 批量读取因 CLI 缺失、未登录或过旧而失败时，该 unit 的每一行在徽标位置显示可操作的错误（`CodeHostError.isCLIError`），popover 给出 `brew install` / `auth login` / `brew upgrade` 提示；其余批量错误只记在 unit 上。下一次成功取数清除所有行的错误。
 - 写操作接收 `PullRequestReference`（仓库 + 编号），`gh` 以 `--repo HOST/OWNER/REPO` 定位仓库，不再依赖 Worktree 工作目录。
 - "Rerun failed" 的显示条件与执行目标来自同一份数据：PR head commit 的 `statusCheckRollup` 中失败的 GitHub Actions CheckRun（`detailsUrl` 含 `/actions/runs/<id>/`），由 `GitHubWire.failedWorkflowRunIDs` 选出。快照的 `canRerunFailedChecks` 为该集合非空；执行时 `GitHubCodeHost.rerunFailedChecks` 重新读取 `gh pr view <n> --json statusCheckRollup`，对每个失败的 run 调用 `gh run rerun <id> --failed`。这样即使另一个 workflow 在分支上有更新且成功的 run，也不会重跑错的 run。外部 CI 的 StatusContext 失败不显示该按钮。popover 打开时不再单独取 workflow run。
 - merge 状态是中立的 `PullRequestMergeState`（clean / conflicted / behind / blocked / draft / unknown + 原因），合并选项是快照上的 `mergeOptions`。
+
+### GitLab 实现
+
+`codans/CodeHost/GitLab/` 通过 `glab` 实现同一个 `CodeHost` 协议；UI 标签为 "MR"（`CodeHostKind.pullRequestLabel`），菜单 / 命令面板 / 侧栏右键菜单写作 "Open MR on GitLab" / "Open Project on GitLab"。
+
+- **读取**：每个 chunk（20 个分支）一次 `glab api graphql`，query 为 `project(fullPath:) { mergeRequests(sourceBranches: $branches, first: 100, sort: UPDATED_DESC) }`（`GitLabMergeRequestQuery`）。分支名以 JSON 数组变量传入（`-F branches=[...]`），不进入 query 文本，因此无需转义。
+- **CE 兼容**：只用 CE 有的字段。CE 没有 `approvalsLeft` / `approvalsRequired` / `squashOption`；"还需审批" 来自 `detailedMergeStatus == NOT_APPROVED`，squash 规则来自 MR 的 `squashReadOnly` + `squashOnMerge`。
+- **GitLab 已知问题**：列表中选 `diffStatsSummary` 会让 GitLab 把可合并 MR 的 `detailedMergeStatus` 报为 `CONFLICT`，所以加减行由 `diffStats` 逐文件求和。重试过的 job 仍在 `jobs` 里，所以用 `jobs(retried: false)`。
+- **未登录检测**：GitLab 对匿名 GraphQL 请求也正常应答，所以 query 带 `currentUser`；为 `null` 即抛 `.notAuthenticated(.gitlab, host:)`。
+- **映射**（`GitLabWire`）：
+  - `detailedMergeStatus`：`MERGEABLE` → clean；`CONFLICT` → conflicted；`NEED_REBASE` → behind；`DRAFT_STATUS` → draft；`NOT_APPROVED` / `DISCUSSIONS_NOT_RESOLVED` / `CI_MUST_PASS` / `CI_STILL_RUNNING` / `BLOCKED_STATUS` 等 → blocked + 原因；`CHECKING` / `UNCHECKED` / `PREPARING` → unknown；`NOT_OPEN` → unknown 无原因；未知值 → blocked。
+  - head pipeline 的 job → check：失败且 `allow_failure` → neutral；`MANUAL`（未运行的手动 job）→ skipped；`SCHEDULED` → waiting。
+  - review decision：有 reviewer `REQUESTED_CHANGES` → changes requested；`NOT_APPROVED` → review required；`approved` 且有审批人 → approved；否则无。
+  - 合并选项："Merge"（`mergeCommit`，项目的 merge method 生效）与 "Squash and merge"。项目 squash 为 never 时后者禁用并给原因；为 always 时前者禁用。默认策略 `mergeCommit` / `rebase` → Merge，`squash` → Squash and merge（`PullRequestSnapshot.mergeStrategy(preferring:)`）。
+  - fork 过滤：与 GitHub 规则相同，以 source project 的 full path 代替 head repository owner；在保留的 MR 中 open / merged 优先于 closed。
+  - Diff Viewer：`baseRefName` = target branch，`baseRepositoryURL` = target project 的 web URL。
+- **写操作**：merge 为 `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool>`；close 为 `... -f state_event=close`；mark ready 为 GraphQL mutation `mergeRequestSetDraft(draft: false)`；rerun 先读 MR 的 `head_pipeline.id`，再 `POST projects/<id>/pipelines/<id>/retry`（GitLab 只重跑失败和取消的 job）。`<id>` 是 URL 编码的 full path，嵌套 group 可用。
+- **Web URL**：scheme 取自 `glab auth status` 报告的 `api_protocol`（自托管实例可能是 `http`），未知时用 `https`。
+
+### glab 子进程契约
+
+- 与 `gh` 相同：共享 `CommandRunner`，只用 argv，cwd 为 home 目录，超时 20 s，读取 output cap 8 MiB、写操作 2 MiB。
+- **host**：每次调用都设置 `GITLAB_HOST=<host>`；host 不含端口时另加 `--hostname <host>`。`glab --hostname` 不接受 `host:port`，所以带端口的自托管实例只走环境变量。
+- **env allowlist** 转发 `PATH`、`HOME`、`GLAB_CONFIG_DIR`、`XDG_CONFIG_HOME`，强制 `LC_ALL`、`NO_COLOR`、`GLAB_NO_PROMPT`、`GLAB_CHECK_UPDATE=false`、`GLAB_SEND_TELEMETRY=false`、`GLAB_SHOW_WHATS_NEW=false`；剥除 `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` 及用户自设的 `GITLAB_HOST` / `GITLAB_REPO`。
+- **最低 `glab` 版本 1.122.0**：首个带 `glab auth status --output json` 的版本（resolver 与可用性探针依赖它）。每个可执行文件（按路径 + 修改时间）只跑一次 `glab version`；过旧抛 `.cliOutdated`。`glab auth status --all --output json` 在任一 host 校验失败时退出码为 1，stdout 仍是 JSON，两者都解析。
+- **错误**：`glab api` 在 GraphQL `errors` 或 REST 错误时退出 1，body 在 stdout。GraphQL errors → `.graphQLError`；401 → `.notAuthenticated`；`dial tcp` / TLS / 解析失败 → `.network`；merge 的 405 / 406 / 409 → `.mergeConflict`。
+- 已知限制：`glab` 过旧或未装时无法得知它登录过的自托管 host，此类 remote 解析为无 Code Host（无徽标）；`gitlab.com` 仍解析为 GitLab 并显示可操作错误。
 
 ## 目标与非目标
 
