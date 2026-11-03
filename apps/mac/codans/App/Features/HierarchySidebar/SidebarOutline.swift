@@ -28,6 +28,9 @@ struct SidebarOutline: NSViewRepresentable {
   let rowContent: (SidebarOutlineNode) -> AnyView
   let onSelect: (SidebarSelection) -> Void
   let onMoveWorktrees: (SidebarOutlineModel.WorktreeMove) -> Void
+  /// A click on a Project row that cannot be selected (a git Project or a
+  /// Workspace) opens or closes it.
+  let onToggleProject: (ProjectID) -> Void
   let onMoveProject: (ProjectID, ProjectPlacement) -> Void
 
   func makeCoordinator() -> Coordinator { Coordinator() }
@@ -62,6 +65,9 @@ struct SidebarOutline: NSViewRepresentable {
     outline.focusRingType = .none
     outline.dataSource = coordinator
     outline.delegate = coordinator
+    // Fires on a click, not at the end of a drag.
+    outline.target = coordinator
+    outline.action = #selector(Coordinator.rowClicked(_:))
     outline.registerForDraggedTypes([Coordinator.dragType])
     outline.setDraggingSourceOperationMask(.move, forLocal: true)
     outline.draggingDestinationFeedbackStyle = .sourceList
@@ -321,6 +327,14 @@ struct SidebarOutline: NSViewRepresentable {
     func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool { applying }
 
     func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { applying }
+
+    @objc func rowClicked(_ sender: NSOutlineView) {
+      guard let item = sender.item(atRow: sender.clickedRow) as? SidebarOutlineItem,
+        case .project(let project) = item.node.row, item.node.selection == nil
+      else { return }
+      if case .failed = project.loadState { return }
+      config?.onToggleProject(project.id)
+    }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
       guard !applying, let outline,

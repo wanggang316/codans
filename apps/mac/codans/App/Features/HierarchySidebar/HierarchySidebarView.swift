@@ -614,6 +614,13 @@ struct HierarchySidebarView: View {
             .reorderWorktrees(
               projectID: move.projectID, segment: move.segment, from: move.source, to: move.destination))
         },
+        onToggleProject: { projectID in
+          var txn = Transaction()
+          txn.disablesAnimations = true
+          _ = withTransaction(txn) {
+            store.send(.toggleProjectExpansion(projectID))
+          }
+        },
         onMoveProject: { projectID, placement in
           store.send(.moveProject(projectID, to: placement))
         }
@@ -809,17 +816,20 @@ struct HierarchySidebarView: View {
       .padding(Self.projectRowInsets)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
-      Button(action: toggleExpansion) {
-        ProjectHeaderRow(
-          project: project,
-          store: store,
-          codeHostStore: codeHostStore,
-          onToggleExpansion: toggleExpansion
-        ) {
-          EmptyView()
-        }
+      // Plain content, not a Button: a Button takes the mouse-down, so the
+      // outline could not start the Project drag from the row. The outline
+      // owns the click and opens or closes the row (`onToggleProject`).
+      ProjectHeaderRow(
+        project: project,
+        store: store,
+        codeHostStore: codeHostStore,
+        onToggleExpansion: toggleExpansion
+      ) {
+        EmptyView()
       }
-      .buttonStyle(.plain)
+      .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(.isButton)
+      .accessibilityAction { toggleExpansion() }
       // The Workspace header's `+` and `⋯` show only on hover, which also
       // hides them from accessibility; the row offers their entries.
       .accessibilityActions {
