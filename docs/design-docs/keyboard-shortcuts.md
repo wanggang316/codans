@@ -14,6 +14,8 @@ codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`Shortc
 
 Worktree 工具栏的 Open In 按钮按住 ⌘ 时不显示快捷键，和弦只在 tooltip 中。
 
+带快捷键的 tooltip 统一为 `名称 (和弦)`，如 `Back (⌘[)`、`Send (⌘↩)`，和弦用菜单栏的紧凑写法。系统 tooltip 只能绘制纯文本，和弦无法单独设色，所以用括号区分。所有调用方经 `ShortcutDisplay.tooltip(_:for:in:)`（注册表命令）或 `ShortcutDisplay.tooltip(_:chord:)`（脚本自身绑定、固定的 `⌘↩` / `⎋`）生成，SwiftUI 视图可用 `helpWithShortcut(_:_:)`；不在文案里手写和弦。
+
 开启“减弱动态效果”时不做动画。
 
 本设计以一个**单一 registry** 统管全部应用内快捷键：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
