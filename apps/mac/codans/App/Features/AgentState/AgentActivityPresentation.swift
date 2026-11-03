@@ -2,34 +2,36 @@ import CodansCore
 import Foundation
 import Observation
 
-/// Presentation-only coalescing of one row's activity text. Agents retitle
-/// their pane many times per second; the row shows at most one change per
-/// `interval`, and always the latest value. The text never drives runtime
-/// state, `lastTransitionAt`, or row order.
+/// Presentation-only coalescing of one row's activity text. A change after
+/// a quiet period is delivered at once and opens a window of `interval`;
+/// later changes in the window coalesce, and the latest value is delivered
+/// when the window ends (which opens the next window). Agents that retitle
+/// their pane many times per second so redraw the row at most once per
+/// `interval`, and the row always ends on the latest value. The text never
+/// drives runtime state, `lastTransitionAt`, or row order.
 @MainActor
 @Observable
 final class AgentActivityPresentation {
+  static let defaultInterval: Duration = .milliseconds(250)
+
   /// The delivered activity text, or nil when the agent reports nothing
   /// beyond its own name.
   private(set) var text: String?
 
   @ObservationIgnored private var latestText: String?
-  @ObservationIgnored private var pendingUpdate: Task<Void, Never>?
-  /// False until the first value arrives. The first value is delivered at
-  /// once, so a row that appears does not show the agent name for a
-  /// window before its activity.
-  @ObservationIgnored private var hasDelivered = false
+  /// Non-nil while a coalescing window is open.
+  @ObservationIgnored private var window: Task<Void, Never>?
   private let interval: Duration
   private let kind: AgentKind
 
-  init(kind: AgentKind, interval: Duration = .seconds(1)) {
+  init(kind: AgentKind, interval: Duration = defaultInterval) {
     self.kind = kind
     self.interval = interval
   }
 
   // Keep teardown synchronous when SwiftUI destroys the row's state.
   deinit {
-    pendingUpdate?.cancel()
+    window?.cancel()
   }
 
   /// The row's first line: the activity text, else the agent display name.
@@ -37,32 +39,38 @@ final class AgentActivityPresentation {
 
   func update(activity: String?) {
     latestText = AgentActivityFormat.activityLine(from: activity, kind: kind)
-    guard hasDelivered else {
-      hasDelivered = true
-      text = latestText
-      return
-    }
-    guard pendingUpdate == nil, latestText != text else { return }
-    let delay = interval
-    pendingUpdate = Task { @MainActor [weak self] in
-      do {
-        try await Task.sleep(for: delay)
-      } catch {
-        return
-      }
-      guard !Task.isCancelled, let self else { return }
-      self.text = self.latestText
-      self.pendingUpdate = nil
-    }
+    guard window == nil, latestText != text else { return }
+    text = latestText
+    openWindow()
   }
 
   func cancel() {
-    pendingUpdate?.cancel()
-    pendingUpdate = nil
+    window?.cancel()
+    window = nil
     latestText = text
   }
 
+  /// Waits until the open window, and any window its delivery opens, ends.
   func awaitPendingUpdateForTests() async {
-    await pendingUpdate?.value
+    await window?.value
+  }
+
+  private func openWindow() {
+    let delay = interval
+    window = Task { @MainActor [weak self] in
+      while true {
+        do {
+          try await Task.sleep(for: delay)
+        } catch {
+          return
+        }
+        guard !Task.isCancelled, let self else { return }
+        guard self.latestText != self.text else {
+          self.window = nil
+          return
+        }
+        self.text = self.latestText
+      }
+    }
   }
 }
