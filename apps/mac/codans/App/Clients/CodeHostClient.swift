@@ -12,8 +12,9 @@ nonisolated struct CodeHostClient: Sendable {
   var availability: @Sendable (_ kind: CodeHostKind) async -> CodeHostAvailability
   /// The Code Host repository behind a remote, or `nil` when no Code Host serves its host
   /// (`github.com` or a host `gh` is logged in to → GitHub; `gitlab.com` or a host `glab`
-  /// is logged in to → GitLab; otherwise none).
-  var resolveRepository: @Sendable (_ remote: RemoteInfo) async -> CodeHostRepository?
+  /// is logged in to → GitLab; then `choice`, the Project's Code Host setting, `nil` for
+  /// Auto; otherwise none).
+  var resolveRepository: @Sendable (_ remote: RemoteInfo, _ choice: CodeHostKind?) async -> CodeHostRepository?
   /// Drops cached resolver input (the hosts each CLI is logged in to), so the next
   /// resolution sees a fresh `auth login`.
   var invalidateResolution: @Sendable () async -> Void
@@ -42,7 +43,7 @@ extension CodeHostClient {
     let resolver = CodeHostResolver { kind in await implementation(kind).authenticatedHosts() }
     return CodeHostClient(
       availability: { kind in await implementation(kind).availability() },
-      resolveRepository: { remote in await resolver.resolve(remote) },
+      resolveRepository: { remote, choice in await resolver.resolve(remote, choice: choice) },
       invalidateResolution: { await resolver.invalidate() },
       batchPullRequests: { repository, branches in
         try await implementation(repository.kind).batchPullRequests(repository: repository, branches: branches)

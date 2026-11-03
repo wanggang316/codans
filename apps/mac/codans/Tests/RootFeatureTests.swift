@@ -275,7 +275,7 @@ struct RootFeatureTests {
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
       $0.editorClient = EditorClient.testValue
       // `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`, which spawns a
       // pane in the active tab when it has none. The fixture tab is empty so
@@ -1313,7 +1313,7 @@ struct RootFeatureTests {
       RemoteInfo(host: "github.com", path: "w/r")
     }
     values[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-    values[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+    values[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
   }
 
   // MARK: - Agents-panel row tap reveals the worktree
@@ -2110,7 +2110,7 @@ struct RootFeatureTests {
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
       $0.editorClient = EditorClient.testValue
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
@@ -2149,7 +2149,7 @@ struct RootFeatureTests {
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
       $0.editorClient = EditorClient.testValue
     }
     store.exhaustivity = .off
@@ -2248,7 +2248,7 @@ struct RootFeatureTests {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
       $0.continuousClock = ImmediateClock()
@@ -2363,7 +2363,7 @@ struct RootFeatureTests {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }
@@ -2414,7 +2414,7 @@ struct RootFeatureTests {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }

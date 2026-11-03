@@ -84,4 +84,30 @@ struct CodeHostResolverTests {
     _ = await resolver.resolve(remote)
     #expect(calls.value == [.github: 2, .gitlab: 2])
   }
+
+  // MARK: - Project choice
+
+  /// An SSH alias (`Host gl` in `~/.ssh/config`) that neither CLI knows: the Project
+  /// choice gives the Code Host.
+  @Test(arguments: CodeHostKind.allCases)
+  func theProjectChoiceGivesTheCodeHostOfAHostNoCLIKnows(choice: CodeHostKind) async {
+    let resolver = CodeHostResolver { kind in kind == .github ? ["github.com"] : ["192.168.2.158:8929"] }
+    let repository = await resolver.resolve(RemoteInfo(host: "gl", path: "codans-e2e/app"), choice: choice)
+    #expect(repository == CodeHostRepository(kind: choice, host: "gl", path: "codans-e2e/app"))
+  }
+
+  /// The choice comes after the CLI steps (ADR 0004 item 2).
+  @Test
+  func theCLIStepsWinOverTheProjectChoice() async {
+    let resolver = CodeHostResolver { kind in kind == .github ? [] : ["192.168.2.158:8929"] }
+    #expect(await resolver.resolve(RemoteInfo(host: "github.com", path: "w/r"), choice: .gitlab)?.kind == .github)
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "192.168.2.158:8929", path: "g/r"), choice: .github)?.kind == .gitlab)
+  }
+
+  @Test
+  func autoWithNoMatchResolvesToNone() async {
+    let resolver = CodeHostResolver { _ in [] }
+    #expect(await resolver.resolve(RemoteInfo(host: "gl", path: "codans-e2e/app"), choice: nil) == nil)
+  }
 }

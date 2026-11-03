@@ -56,8 +56,9 @@ nonisolated protocol CodeHost: Sendable {
 }
 
 /// Gives the Code Host of a remote: `publicHost` of a kind, or a host that kind's CLI is
-/// logged in to; otherwise none. Kinds are tried in `CodeHostKind.allCases` order, so a
-/// host known to two CLIs resolves to the first kind. See ADR 0004 item 2.
+/// logged in to; then the Project's Code Host choice; otherwise none. Kinds are tried in
+/// `CodeHostKind.allCases` order, so a host known to two CLIs resolves to the first kind.
+/// See ADR 0004 item 2.
 ///
 /// The logged-in hosts of each kind are asked once and cached; `invalidate()` drops the
 /// cache so a `gh auth login` is seen after the Settings "Re-check".
@@ -72,7 +73,9 @@ actor CodeHostResolver {
   }
 
   /// The Code Host repository for `remote`, or `nil` when no Code Host serves its host.
-  func resolve(_ remote: RemoteInfo) async -> CodeHostRepository? {
+  /// `choice` is the Project's Code Host setting (`nil` is Auto). It applies only when
+  /// neither CLI step matches, so it cannot move a known host to another kind.
+  func resolve(_ remote: RemoteInfo, choice: CodeHostKind? = nil) async -> CodeHostRepository? {
     let host = remote.host.lowercased()
     for kind in CodeHostKind.allCases {
       if host == kind.publicHost {
@@ -83,7 +86,7 @@ actor CodeHostResolver {
         return CodeHostRepository(kind: kind, host: remote.host, path: remote.path)
       }
     }
-    return nil
+    return choice.map { CodeHostRepository(kind: $0, host: remote.host, path: remote.path) }
   }
 
   func invalidate() {
