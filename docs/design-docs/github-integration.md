@@ -9,6 +9,15 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
 取数模型是 **repository-batched GraphQL**：成本随 **O(Repositories)**（用户开着的仓库数，实践中 ≤ 1）而非 **O(Worktrees)** 缩放。一次 `gh api graphql` 用 per-branch GraphQL alias 覆盖一个 Project 内的全部分支，PR 元数据 + CI rollup 在**一次网络往返**里取回。取数生命周期由 reducer 拥有的 Project 级 effect 驱动，经显式失效事件触发，不依赖 SwiftUI 视图生命周期。
 
+### Code Host 层
+
+GitHub 现在是 Code Host 层（[ADR 0004](../adr/0004-gitlab-support-through-glab.md)）的第一个实现。reducer（`CodeHostFeature`）、快照缓存和视图只用 `CodeHost` 协议和 `CodansCore/CodeHost/` 的 provider-neutral 模型；只有 `codans/CodeHost/GitHub/` 知道 GitHub 的 wire 值（`GitHubWire`）。与本文其余部分的差异：
+
+- 每个 fetch unit 先由 `CodeHostResolver` 解析出 Code Host 仓库（`github.com` 或 `gh` 已登录的 host → GitHub；否则无 Code Host，不取数、无徽标、无错误）。仓库是 (kind, host, full path)。
+- 写操作接收 `PullRequestReference`（仓库 + 编号），`gh` 以 `--repo HOST/OWNER/REPO` 定位仓库，不再依赖 Worktree 工作目录。
+- "Rerun failed" 是否显示取自快照的 `canRerunFailedChecks`（rollup 中有失败的 CheckRun）；执行时 `GitHubCodeHost.rerunFailedChecks` 依次调用 `gh pr view --json headRefName`、`gh run list --branch … --limit 1`、`gh run rerun <id> --failed`。popover 打开时不再单独取 workflow run。
+- merge 状态是中立的 `PullRequestMergeState`（clean / conflicted / behind / blocked / draft / unknown + 原因），合并选项是快照上的 `mergeOptions`。
+
 ## 目标与非目标
 
 **目标**
@@ -31,9 +40,9 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
 执行模型：
 
-1. **reducer 拥有取数生命周期。** `GitHubFeature` reducer 监听失效事件（Worktree added/removed/branch-changed/post-mutation、Project activated、Manual refresh），对任一事件**只**发一个 effect，请客户端**一次性**取该 Project 下全部 Worktree 的 PR 数据。
+1. **reducer 拥有取数生命周期。** `CodeHostFeature` reducer 监听失效事件（Worktree added/removed/branch-changed/post-mutation、Project activated、Manual refresh），对任一事件**只**发一个 effect，请客户端**一次性**取该 Project 下全部 Worktree 的 PR 数据。
 
-2. **客户端发批量 GraphQL query。** `GitHubClient.batchPullRequests(host, owner, repo, branches)` 调一次 `gh api graphql`，传入每分支一个 GraphQL alias 的 query 串（每 chunk ≤ 25 分支，多 chunk 以并发上限 3 并行）。响应在一个 payload 里带回每个分支的 PR 数据，客户端解码为 `[branch: PullRequestSnapshot]` 返回。
+2. **客户端发批量 GraphQL query。** `CodeHostClient.batchPullRequests(repository, branches)` 调一次 `gh api graphql`，传入每分支一个 GraphQL alias 的 query 串（每 chunk ≤ 25 分支，多 chunk 以并发上限 3 并行）。响应在一个 payload 里带回每个分支的 PR 数据，客户端解码为 `[branch: PullRequestSnapshot]` 返回。
 
 3. **reducer 逐 Worktree 分发。** 成功后经本地 catalog 把 `branch → WorktreeID` 映射，写入 `state.snapshotsByProject[P]`，视图照旧从中读取。
 
@@ -56,7 +65,7 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
       │  codans app window                                                 │
       │                                                                    │
       │  ┌──────────────────┐   ┌───────────────────────────────────┐     │
-      │  │  Sidebar         │   │  GitHubFeature (TCA reducer)      │     │
+      │  │  Sidebar         │   │  CodeHostFeature (TCA reducer)      │     │
       │  │  Worktree rows   │──▶│   state:                          │     │
       │  │   + PR badge     │   │   · snapshotsByProject            │     │
       │  │   + overlay      │   │   · inFlightFetchProjects         │     │
@@ -65,19 +74,19 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
       │         │    │hover     │   · refreshProject(projectID)     │     │
       │         │    ▼          │   · delayedFullRefresh(postWrite) │     │
       │         │  popover      └────────────────┬──────────────────┘     │
-      │         │               ┌─ GitHubClient (DI) ─                    │
+      │         │               ┌─ CodeHostClient (DI) ─                    │
       │         │               ▼                                         │
       │  ┌──────────────────┐   ┌────────────────────────────────┐        │
-      │  │  Branch watcher  │──▶│  codans/GitHub/                │        │
+      │  │  Branch watcher  │──▶│  codans/CodeHost/GitHub/                │        │
       │  │  (HEAD filesys)  │   │    · GitHubService (proto)     │        │
-      │  └──────────────────┘   │    · LiveGitHubService         │ ───────┼──┐
+      │  └──────────────────┘   │    · GitHubCodeHost         │ ───────┼──┐
       │                         │      ├ buildBatchedQuery()     │        │  │
       │                         │      ├ chunk(branches, n=25)   │        │  │
       │                         │      └ TaskGroup (cap=3)       │        │  │
       │  HierarchyManager.catalog                                 │        │  │
       │  (Worktree add/remove,  │    · DynamicKeyedDecoder        │        │  │
       │   selection changes)    │    · PullRequestSnapshot (ext)  │        │  │
-      │                         │    · GitHubError (ext)          │        │  │
+      │                         │    · CodeHostError (ext)          │        │  │
       │                         └────────────────────────────────┘        │  │
       └──────────────────────────────────────────────────────────────────┘  │
                                                                               │
@@ -115,7 +124,7 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
  1. 用户在侧栏选中 Project P。
     HierarchyManager.selectedProjectID 翻转，RootFeature 观察到。
 
- 2. RootFeature 派发 GitHubFeature.Action.projectActivated(P)。
+ 2. RootFeature 派发 CodeHostFeature.Action.projectActivated(P)。
 
  3. reducer 检查 state.snapshotsByProject[P]:
     - 已缓存 + 分支集匹配当前 catalog → no-op。
@@ -128,14 +137,14 @@ GitHub 集成在侧栏把每个 Worktree 关联的 PR 状态（编号、标题�
 
  5. reducer 解析 host/owner/repo:
       let remote = try await gitClient.remoteInfo(project.gitRoot)
-    （不属于 GitHubClient——这是纯 git-local 操作。）
+    （不属于 CodeHostClient——这是纯 git-local 操作。）
 
  6. reducer 调客户端:
       let result = try await gitHubClient.batchPullRequests(
         remote.host, remote.owner, remote.repo, branches
       )
 
- 7. LiveGitHubService.batchPullRequests:
+ 7. GitHubCodeHost.batchPullRequests:
      a. 把 branches 切成 ≤ 25 的 chunk。
      b. 起一个 TaskGroup，并发上限 3。
      c. 每个 chunk:
@@ -326,7 +335,7 @@ struct CheckNode: Decodable, Equatable, Hashable {
 3. 从幸存者里挑第一个（按 `orderBy` 即最近更新）。
 4. 零幸存者 → 该分支无 PR。
 
-过滤在 `LiveGitHubService.batchPullRequests` 内、返回 `[branch: PullRequestSnapshot]` 前完成；reducer 看到干净映射，不知 fork 存在。`headRepositoryOwner` 为 null（fork 被删）时按「fork，仅当 base ≠ head 才保留」处理。
+过滤在 `GitHubCodeHost.batchPullRequests` 内、返回 `[branch: PullRequestSnapshot]` 前完成；reducer 看到干净映射，不知 fork 存在。`headRepositoryOwner` 为 null（fork 被删）时按「fork，仅当 base ≠ head 才保留」处理。
 
 ### 数据模型
 
@@ -375,7 +384,7 @@ public struct BatchedPullRequests: Equatable, Sendable {
 
 无基于 TTL 的过期策略；本地事件负责失效，应用处于前台时的自适应轮询补充 GitHub 服务端变更。磁盘快照可用于启动时预填，catalog 清理同时保留仍存活的 Workspace 取数单元。
 
-Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.swift) (`gitHubFetchUnits`, `workspaceFetchGroupID`) and [GitHubFeature.swift](../../apps/mac/codans/App/Features/GitHub/GitHubFeature.swift).
+Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.swift) (`codeHostFetchUnits`, `workspaceFetchGroupID`) and [CodeHostFeature.swift](../../apps/mac/codans/App/Features/CodeHost/CodeHostFeature.swift).
 
 **失效事件枚举：**
 
@@ -385,7 +394,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | Worktree added | `HierarchyManager` catalog 增量 | 刷新 Project |
 | Worktree removed | `HierarchyManager` catalog 增量 | 从缓存移除；不取数 |
 | Worktree 分支变更 / commit | `WorktreeHeadWatcher`（`.git/HEAD` + reflog 监听） | 刷新该 Worktree 所属取数单元（不是选中 Project）；取数返回前，分支已变的行按缓存改投新分支的 PR 或清空徽标 |
-| Merge / close / markReady 完成 | `GitHubFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
+| Merge / close / markReady 完成 | `CodeHostFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
 | 手动刷新 | 用户动作（面板、popover 刷新按钮） | 立即刷新 Project |
 | 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
 | pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
@@ -410,7 +419,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 
 调度器单 timer：睡到最早到期的单元（夹在 1–60 s），到期单元按「选中优先、上次取数最早优先」启动，轮询发起的取数最多 2 个并发；某次取数完成即把空出的槽交给下一个到期单元。节奏以「上次取数开始时间」计，任何来源的取数（事件、手动、轮询）都会重置该单元的节奏。
 
-Source: [GitHubFeature.swift](../../apps/mac/codans/App/Features/GitHub/GitHubFeature.swift) (`pollInterval`, `runPollScheduler`).
+Source: [CodeHostFeature.swift](../../apps/mac/codans/App/Features/CodeHost/CodeHostFeature.swift) (`pollInterval`, `runPollScheduler`).
 
 ### 取数排程（reducer）
 
@@ -442,7 +451,7 @@ case .projectRefreshRequested(let projectID):
                             byBranch: byBranch, fetchedAt: .now)
       )))
     } catch {
-      await send(.projectBatchLoaded(projectID, .failure(error as? GitHubError ?? .other(...))))
+      await send(.projectBatchLoaded(projectID, .failure(error as? CodeHostError ?? .other(...))))
     }
   }
   .cancellable(id: CancelID.projectFetch(projectID), cancelInFlight: true)
@@ -460,7 +469,7 @@ case .projectBatchLoaded(let projectID, .success(let batched)):
 
 ### `GitService.remoteInfo` 辅助
 
-host/owner/repo 从 `git remote get-url origin` 解析。这是纯 git 操作，**属于 `GitService`，不属于 `GitHubClient`**。
+host/owner/repo 从 `git remote get-url origin` 解析。这是纯 git 操作，**属于 `GitService`，不属于 `CodeHostClient`**。
 
 ```swift
 extension GitService {
