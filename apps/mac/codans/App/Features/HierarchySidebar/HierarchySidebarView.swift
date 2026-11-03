@@ -39,7 +39,7 @@ struct HierarchySidebarView: View {
   /// Optional GitHub integration store. When non-nil, each Worktree row renders a PR
   /// badge (silent when no PR is matched) and the row hosts the PR popover. Nil in
   /// previews / tests that don't exercise the integration.
-  var gitHubStore: StoreOf<GitHubFeature>?
+  var codeHostStore: StoreOf<CodeHostFeature>?
   /// Rows the notification filter lists (`RootFeature.State.notifiedWorktreeIDs`).
   var notifiedWorktreeIDs: Set<WorktreeID> = []
   /// Optional editor store. Drives the worktree context menu's "Open in
@@ -231,8 +231,8 @@ struct HierarchySidebarView: View {
   }
 
   private var pullRequestWorktreeIDs: Set<WorktreeID> {
-    guard let gitHubStore else { return [] }
-    return Set(gitHubStore.snapshots.keys)
+    guard let codeHostStore else { return [] }
+    return Set(codeHostStore.snapshots.keys)
   }
 
   var body: some View {
@@ -935,7 +935,7 @@ struct HierarchySidebarView: View {
       ProjectHeaderRow(
         project: project,
         store: store,
-        gitHubStore: gitHubStore,
+        codeHostStore: codeHostStore,
         rowWorktree: root,
         isRowSelected: currentSelection.worktreeID == root.id,
         agentStateStore: agentStateStore,
@@ -959,7 +959,7 @@ struct HierarchySidebarView: View {
         ProjectHeaderRow(
           project: project,
           store: store,
-          gitHubStore: gitHubStore,
+          codeHostStore: codeHostStore,
           onToggleExpansion: toggleExpansion
         ) {
           EmptyView()
@@ -1055,8 +1055,8 @@ struct HierarchySidebarView: View {
   /// Open and merged pull-request counts over `rows`, nil when nothing is
   /// known yet: "3 PRs · 1 merged".
   private func pullRequestSummary(over rows: [Worktree]) -> String? {
-    guard let gitHubStore else { return nil }
-    let snapshots = rows.compactMap { gitHubStore.snapshots[$0.id] }
+    guard let codeHostStore else { return nil }
+    let snapshots = rows.compactMap { codeHostStore.snapshots[$0.id] }
     guard !snapshots.isEmpty else { return nil }
     let merged = snapshots.filter { $0.state == .merged }.count
     let open = snapshots.count - merged
@@ -1132,7 +1132,7 @@ struct HierarchySidebarView: View {
     indent: CGFloat = 14
   ) -> some View {
     let isSelected = currentSelection.worktreeID == worktree.id
-    let snapshot = gitHubStore?.snapshots[worktree.id]
+    let snapshot = codeHostStore?.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
       // rollup data travels with the snapshot now (filled by the batched
       // `gh api graphql` path in `parseBatchedPullRequests`). The v1 per-PR
@@ -1150,7 +1150,7 @@ struct HierarchySidebarView: View {
     // the Button; the trailing badge sits beside it.
     // `spacing: 0`, not 6: the trailing accessories own their own leading gap so the
     // row's rightmost *visible* element always sits flush at the trailing edge. With a
-    // shared HStack spacing, the no-PR rows' 0-pt `WorktreeGitHubBadge` anchor still
+    // shared HStack spacing, the no-PR rows' 0-pt `WorktreePullRequestBadge` anchor still
     // claimed 6 pt of spacing after the diff-stats chip, pushing that chip 6 pt inside
     // the edge while PR-pill rows stayed flush — a ragged right margin. Each accessory
     // pads its own leading edge; the empty badge anchor pads nothing, so the chip (or
@@ -1168,7 +1168,7 @@ struct HierarchySidebarView: View {
         HStack(spacing: 0) {
           newBadgePill(for: worktree)
           SidebarWorktreeDiffStats(worktreeID: worktree.id)
-          gitHubBadge(for: worktree, in: project)
+          pullRequestBadge(for: worktree, in: project)
           runScriptPingAccessory(for: worktree, in: project)
         }
       }
@@ -1492,15 +1492,15 @@ struct HierarchySidebarView: View {
   ) -> some View {
     if project.repoRoot(for: worktree) != nil {
       Button {
-        store.send(.delegate(.openOnGitHub(projectID: project.id, worktreeID: worktree.id)))
+        store.send(.delegate(.openOnCodeHost(projectID: project.id, worktreeID: worktree.id)))
       } label: {
         Label("Open in GitHub", image: "github")
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: resolvedShortcuts)
     }
-    if let gitHubStore, let pullRequest = gitHubStore.snapshots[worktree.id] {
+    if let codeHostStore, let pullRequest = codeHostStore.snapshots[worktree.id] {
       Button {
-        gitHubStore.send(.delegate(.openURL(pullRequest.url)))
+        codeHostStore.send(.delegate(.openURL(pullRequest.url)))
       } label: {
         // Same PR-state octicon the row leads with (WorktreeRowIcon).
         Label(
@@ -1857,130 +1857,26 @@ struct HierarchySidebarView: View {
     }
   }
 
-  // MARK: - GitHub badge + popover
+  // MARK: - Pull Request badge + popover
 
   @ViewBuilder
-  fileprivate func gitHubBadge(for worktree: Worktree, in project: Project) -> some View {
-    if let gitHubStore, let branch = worktree.branch {
-      let path = URL(fileURLWithPath: worktree.path)
-      WorktreeGitHubBadge(
-        store: gitHubStore,
+  fileprivate func pullRequestBadge(for worktree: Worktree, in project: Project) -> some View {
+    if let codeHostStore, let branch = worktree.branch {
+      WorktreePullRequestBadge(
+        store: codeHostStore,
         worktreeID: worktree.id,
         branch: branch,
-        worktreePath: path,
         popoverContent: {
-          gitHubPopoverContent(
-            store: gitHubStore,
+          WorktreePullRequestPopover(
+            store: codeHostStore,
             worktreeID: worktree.id,
-            branch: branch,
-            worktreePath: path
+            branch: branch
           )
         }
       )
     } else {
       EmptyView()
     }
-  }
-
-  @ViewBuilder
-  private func gitHubPopoverContent(
-    store: StoreOf<GitHubFeature>,
-    worktreeID: WorktreeID,
-    branch: String,
-    worktreePath: URL
-  ) -> some View {
-    let snapshot = store.snapshots[worktreeID]
-    let error = store.lastError[worktreeID]
-    let isLoading = store.loading.contains(worktreeID)
-
-    let content: PullRequestPopover.Content = {
-      if let error { return .error(error) }
-      if let snapshot {
-        // checks now travel inside the snapshot (see the comment on
-        // `snapshot.checkRollup`). `latestWorkflowRuns` remains a separately-fetched
-        // lazy load on popover-open — the batched query does not include workflow-run
-        // IDs yet (Open Question 4 in the design doc).
-        let run = store.latestWorkflowRuns[snapshot.number]
-        return .loaded(snapshot, checks: snapshot.checkRollup, workflowRun: run)
-      }
-      if isLoading { return .loading }
-      return .noPullRequest(branch: branch)
-    }()
-
-    let defaultStrategy = settingsStore.settings.general.defaultMergeStrategy ?? .squash
-
-    let isMutating = store.mutating.contains(worktreeID)
-
-    PullRequestPopover(
-      content: content,
-      defaultMergeStrategy: defaultStrategy,
-      canMerge: !isMutating
-        && snapshot?.mergeable == .mergeable
-        && snapshot?.state == .open
-        && snapshot?.isDraft == false,
-      mergeDisabledReason: isMutating
-        ? "Another GitHub operation is in flight"
-        : Self.mergeDisabledReason(for: snapshot),
-      onMerge: { strategy in
-        if let pr = snapshot {
-          store.send(
-            .mergeRequested(
-              worktreeID, prNumber: pr.number, strategy: strategy, worktreePath: worktreePath)
-          )
-        }
-      },
-      onClose: {
-        if let pr = snapshot {
-          store.send(.closeRequested(worktreeID, prNumber: pr.number, worktreePath: worktreePath))
-        }
-      },
-      onMarkReady: {
-        if let pr = snapshot {
-          store.send(
-            .markReadyRequested(worktreeID, prNumber: pr.number, worktreePath: worktreePath))
-        }
-      },
-      onRerunFailedJobs: {
-        if let pr = snapshot, let run = store.latestWorkflowRuns[pr.number] {
-          store.send(
-            .rerunFailedJobsRequested(worktreeID, runID: run.databaseID, worktreePath: worktreePath)
-          )
-        }
-      },
-      onOpenOnWeb: {
-        if let url = snapshot?.url {
-          store.send(.delegate(.openURL(url)))
-        }
-      },
-      onOpenCheckLog: { url in store.send(.delegate(.openURL(url))) },
-      onSetProjectDefaultStrategy: { [settingsStore] strategy in
-        // Per-Project override UI is deferred to a follow-up; writing to the *global*
-        // default is a useful intermediate behavior — "Set as default" means "use this
-        // strategy everywhere". When per-Project lands, this callback splits into two.
-        settingsStore.mutateGeneral { $0.defaultMergeStrategy = strategy }
-      },
-      onRetry: {
-        store.send(.worktreeRefreshRequested(worktreeID))
-      }
-    )
-  }
-
-  private static func mergeDisabledReason(for snapshot: PullRequestSnapshot?) -> String? {
-    guard let snapshot else { return "No pull request for this Worktree" }
-    if snapshot.state == .merged { return "Pull request already merged" }
-    if snapshot.state == .closed { return "Pull request closed" }
-    if snapshot.isDraft { return "Pull request is a draft" }
-    // Prefer the richer `mergeStateStatus` reason when GitHub computed it; the legacy
-    // `mergeable` only distinguishes mergeable/conflicting/unknown.
-    switch snapshot.mergeStateStatus {
-    case .dirty: return "Pull request has merge conflicts"
-    case .blocked: return "Merge blocked by required checks or reviews"
-    case .behind: return "Behind base branch — update required before merge"
-    case .clean, .hasHooks, .unstable, .draft, .unknown: break
-    }
-    if snapshot.mergeable == .conflicting { return "Pull request has merge conflicts" }
-    if snapshot.mergeable == .unknown { return "Merge status unknown — try refresh" }
-    return nil
   }
 
   /// True iff any bound agent currently demands the user's attention —
@@ -2021,7 +1917,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
   /// the project's merged Worktrees for the "… All Merged Worktrees" items.
   /// Nil in previews — the items then render disabled.
-  var gitHubStore: StoreOf<GitHubFeature>?
+  var codeHostStore: StoreOf<CodeHostFeature>?
   /// The folder this row stands for (`Project.rowWorktree`), nil for a git
   /// Project. The row then carries that worktree's selection, busy state,
   /// unread bell, and ⌃N hint, the way a worktree row does.
@@ -2058,11 +1954,11 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// `git branch --merged`. A checkout a workspace still lists as a child is
   /// left out: it is the workspace's to remove.
   private var mergedWorktreeIDs: [WorktreeID] {
-    guard let gitHubStore else { return [] }
+    guard let codeHostStore else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
       .filter { hierarchyManager.workspaceMemberships[$0.id] == nil }
-      .filter { gitHubStore.snapshots[$0.id]?.state == .merged }
+      .filter { codeHostStore.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
 

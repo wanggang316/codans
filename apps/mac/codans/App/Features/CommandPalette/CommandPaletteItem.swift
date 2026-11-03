@@ -86,12 +86,12 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case archiveCurrentWorktree
     case toggleCurrentWorktreePinned
     case openCurrentPR
-    case openCurrentProjectOnGitHub
+    case openCurrentProjectOnCodeHost
     case showArchivedWorktrees
 
     // Project — current-selection batch / maintenance actions. `route`
     // resolves `state.selection.projectID`; the merged-batch variants also
-    // compute their target worktree IDs from the catalog + GitHub snapshots.
+    // compute their target worktree IDs from the catalog + Pull Request snapshots.
     case openProjectSettings
     case pruneStaleWorktrees
     case archiveAllMergedWorktrees

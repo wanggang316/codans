@@ -60,20 +60,49 @@ struct PersistenceVersioningTests {
     let url = directory.appendingPathComponent("github-snapshots.json")
     try Data(#"[{"raw":"00000000-0000-0000-0000-000000000001"},null]"#.utf8).write(to: url)
 
-    let cache = GitHubSnapshotCache(fileURL: url)
+    let cache = PullRequestSnapshotCache(fileURL: url)
     #expect(cache.load().isEmpty)
     #expect(!FileManager.default.fileExists(atPath: url.path))
 
     let id = ProjectID()
     let snapshot = BatchedPullRequests(
-      host: "github.com", owner: "w", repo: "r",
+      repository: CodeHostRepository(kind: .github, host: "github.com", path: "w/r"),
       byBranch: [:], seenBranches: ["main"], fetchedAt: Date(timeIntervalSince1970: 1)
     )
     cache.save([id: snapshot], sequence: 1)
     let object = try jsonObject(at: url)
-    #expect(object?["version"] as? Int == GitHubSnapshotCache.currentVersion)
+    #expect(object?["version"] as? Int == PullRequestSnapshotCache.currentVersion)
     #expect((object?["entries"] as? [String: Any])?.keys.contains(id.raw.uuidString) == true)
     #expect(cache.load().keys.contains(id))
+  }
+
+  @Test
+  func pullRequestSnapshotEntryThatDoesNotDecodeIsDropped() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("github-snapshots.json")
+    let current = ProjectID()
+    let cache = PullRequestSnapshotCache(fileURL: url)
+    cache.save(
+      [
+        current: BatchedPullRequests(
+          repository: CodeHostRepository(kind: .github, host: "github.com", path: "w/r"),
+          byBranch: [:], seenBranches: ["main"], fetchedAt: Date(timeIntervalSince1970: 1))
+      ], sequence: 1)
+    // Add a v1-shaped entry (owner/repo, no repository) next to the current one.
+    var object = try #require(try jsonObject(at: url))
+    var entries = try #require(object["entries"] as? [String: Any])
+    let stale = ProjectID()
+    entries[stale.raw.uuidString] = [
+      "host": "github.com", "owner": "w", "repo": "r", "byBranch": [:], "seenBranches": ["main"],
+      "fetchedAt": 1,
+    ]
+    object["entries"] = entries
+    try JSONSerialization.data(withJSONObject: object).write(to: url)
+
+    let loaded = PullRequestSnapshotCache(fileURL: url).load()
+    #expect(loaded.keys.contains(current))
+    #expect(loaded[stale] == nil)
   }
 
   @Test

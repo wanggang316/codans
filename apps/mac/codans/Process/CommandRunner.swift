@@ -7,7 +7,7 @@ import Foundation
 ///
 /// The runner intentionally does not know about any domain error type — it reports a
 /// mechanical `CommandOutcome`, and each caller translates that into its own richer error
-/// (`GitError`, `GitHubError`, …).
+/// (`GitError`, `CodeHostError`, …).
 nonisolated protocol CommandRunner: Sendable {
   func run(
     executable: URL,
