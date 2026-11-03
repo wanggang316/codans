@@ -92,10 +92,10 @@ extension Catalog: Codable {
     // sidebar sorted the array with the stored mode, and a missing mode meant
     // the default `joinOrder`. Sort one time so the user sees the same order;
     // the next save writes the marker and drops the mode.
-    // Present values are decoded strictly: guessing on a bad value would
-    // sort the array, and the next save would keep that order.
-    let marker = try container.decodeIfPresent(LegacyProjectOrder.Marker.self, forKey: .projectOrder)
-    let storedSortMode = try container.decodeIfPresent(LegacyProjectOrder.SortMode.self, forKey: .projectSortMode)
+    // Present values are decoded strictly, `null` included: guessing on a
+    // bad value would sort the array, and the next save would keep that order.
+    let marker = try container.decodeIfKeyPresent(LegacyProjectOrder.Marker.self, forKey: .projectOrder)
+    let storedSortMode = try container.decodeIfKeyPresent(LegacyProjectOrder.SortMode.self, forKey: .projectSortMode)
     let legacySortMode = marker == .array ? nil : storedSortMode ?? .joinOrder
     let manualOrders =
       legacySortMode == .manual

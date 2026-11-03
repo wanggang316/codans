@@ -186,27 +186,27 @@ struct ProjectOrderTests {
   // A present order field must be valid: guessing on a bad value would sort
   // the array and persist that order on the next save.
 
-  @Test(arguments: [#""byName""#, "7"])
+  @Test(arguments: [#""byName""#, "7", "null"])
   func anInvalidSortModeFailsTheDecode(value: String) throws {
     #expect(throws: DecodingError.self) {
       _ = try decodeEdited { object in object["projectSortMode"] = json(value) }
     }
   }
 
-  @Test(arguments: [#""stack""#, "true"])
+  @Test(arguments: [#""stack""#, "true", "null"])
   func anInvalidOrderMarkerFailsTheDecode(value: String) throws {
     #expect(throws: DecodingError.self) {
       _ = try decodeEdited { object in object["projectOrder"] = json(value) }
     }
   }
 
-  @Test
-  func anInvalidManualOrderFailsTheDecode() throws {
+  @Test(arguments: [#""first""#, "null"])
+  func anInvalidManualOrderFailsTheDecode(value: String) throws {
     #expect(throws: DecodingError.self) {
       _ = try decodeEdited(legacy: true) { object in
         object["projectSortMode"] = "manual"
         var projects = object["projects"] as? [[String: Any]] ?? []
-        projects[0]["manualOrder"] = "first"
+        projects[0]["manualOrder"] = json(value)
         object["projects"] = projects
       }
     }

@@ -77,7 +77,7 @@ nonisolated enum LegacyProjectOrder {
 
     init(from decoder: Decoder) throws {
       let container = try decoder.container(keyedBy: CodingKeys.self)
-      manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
+      manualOrder = try container.decodeIfKeyPresent(Int.self, forKey: .manualOrder) ?? 0
     }
   }
 
@@ -116,5 +116,14 @@ nonisolated enum LegacyProjectOrder {
         areInIncreasingOrder(lhs.element, rhs.element) ?? (lhs.offset < rhs.offset)
       }
       .map(\.element)
+  }
+}
+
+extension KeyedDecodingContainer {
+  /// Like `decodeIfPresent`, but only a missing key is absent: a present
+  /// `null` fails the decode. The order fields need this, because reading a
+  /// bad value as absent sorts the array, and the next save keeps that order.
+  nonisolated func decodeIfKeyPresent<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> T? {
+    contains(key) ? try decode(type, forKey: key) : nil
   }
 }
