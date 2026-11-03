@@ -615,8 +615,15 @@ struct HierarchySidebarView: View {
       // posture is fine for source-list-style sidebars.
       ScrollViewReader { proxy in
         List(selection: nativeSelectionBinding) {
+          // One outline item per Project block (a Section, or one plain row
+          // for a Project without child rows), so the native drag moves the
+          // whole block and the native indicator shows only between blocks
+          // (ADR 0001).
           ForEach(projects) { project in
             projectSection(project, hotkeyIndex: hotkeyIndex)
+          }
+          .onMove { source, destination in
+            moveProject(from: source, to: destination, visible: projects.map(\.id))
           }
         }
         .listStyle(.sidebar)
@@ -737,7 +744,6 @@ struct HierarchySidebarView: View {
     _ project: Project,
     hotkeyIndex: [WorktreeID: Int]
   ) -> some View {
-    let isExpanded = project.isExpanded
     return Group {
       switch project.loadState {
       case .failed(let reason):
@@ -760,65 +766,111 @@ struct HierarchySidebarView: View {
         // Same row metrics as the healthy Project header below — without
         // them the failed row falls back to the sidebar's default insets and
         // sits at a different indent than its siblings.
-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+        .listRowInsets(Self.projectRowInsets)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
       case .loading, .ready:
-        projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] })
-        if isExpanded, project.isWorkspace {
-          workspaceRows(project, hotkeyIndex: hotkeyIndex)
-        } else if isExpanded {
-          // Render the four segments individually so pinned and unpinned
-          // each own their own ForEach + .onMove (per design doc §渲染合并
-          // / 拖拽). Pending rows render in source order between pinned
-          // and unpinned; main and pending segments do not admit reorder.
-          let children = project.childWorktrees
-          let mainRows = children.filter { $0.path == project.rootPath }
-          let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
-          let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
-          // The live-match filters show a subset of each segment, so its
-          // indices cannot drive a reorder.
-          let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
-            .contains(hierarchyManager.catalog.sidebarFilter)
-          let pendingRows = store.pendingWorktrees.filter {
-            $0.projectID == project.id && !isLiveMatchFilter
+        let hotkeySlot = project.rowWorktree.flatMap { hotkeyIndex[$0.id] }
+        if project.hasChildRows {
+          // `Section(isExpanded:)` makes the block one outline item: the
+          // outer `ForEach.onMove` fires only with the binding form. Its
+          // system chevron is the block's disclosure control.
+          Section(isExpanded: expansionBinding(for: project)) {
+            projectChildRows(project, hotkeyIndex: hotkeyIndex)
+          } header: {
+            // A Section header row ignores `listRowInsets` and is shorter
+            // than a plain row; pad it to the plain Project row height.
+            projectRow(project, hotkeySlot: hotkeySlot)
+              .padding(.vertical, Self.sectionHeaderPadding)
           }
-          ForEach(mainRows) { worktree in
-            worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-          }
-          ForEach(pinnedRows) { worktree in
-            worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(isLiveMatchFilter)
-          }
-          .onMove { source, destination in
-            guard !isLiveMatchFilter else { return }
-            store.send(
-              .reorderWorktrees(
-                projectID: project.id,
-                segment: .pinned, from: source, to: destination
-              )
-            )
-          }
-          ForEach(pendingRows) { pending in
-            pendingRow(pending)
-          }
-          ForEach(unpinnedRows) { worktree in
-            worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(isLiveMatchFilter)
-          }
-          .onMove { source, destination in
-            guard !isLiveMatchFilter else { return }
-            store.send(
-              .reorderWorktrees(
-                projectID: project.id,
-                segment: .unpinned, from: source, to: destination
-              )
-            )
-          }
+        } else {
+          projectRow(project, hotkeySlot: hotkeySlot)
         }
       }
     }
   }
+
+  /// The rows under a Project header. The Section hides them while the
+  /// Project is collapsed.
+  @ViewBuilder
+  private func projectChildRows(_ project: Project, hotkeyIndex: [WorktreeID: Int]) -> some View {
+    if project.isWorkspace {
+      workspaceRows(project, hotkeyIndex: hotkeyIndex)
+    } else {
+      // Render the four segments individually so pinned and unpinned
+      // each own their own ForEach + .onMove (per design doc §渲染合并
+      // / 拖拽). Pending rows render in source order between pinned
+      // and unpinned; main and pending segments do not admit reorder.
+      let children = project.childWorktrees
+      let mainRows = children.filter { $0.path == project.rootPath }
+      let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
+      let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
+      // The live-match filters show a subset of each segment, so its
+      // indices cannot drive a reorder.
+      let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
+        .contains(hierarchyManager.catalog.sidebarFilter)
+      let pendingRows = store.pendingWorktrees.filter {
+        $0.projectID == project.id && !isLiveMatchFilter
+      }
+      ForEach(mainRows) { worktree in
+        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+      }
+      ForEach(pinnedRows) { worktree in
+        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+      }
+      .onMove(perform: worktreeMove(project.id, .pinned, rows: pinnedRows.count, isLiveMatchFilter))
+      ForEach(pendingRows) { pending in
+        pendingRow(pending)
+      }
+      ForEach(unpinnedRows) { worktree in
+        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
+      }
+      .onMove(perform: worktreeMove(project.id, .unpinned, rows: unpinnedRows.count, isLiveMatchFilter))
+    }
+  }
+
+  /// The `.onMove` action of a worktree segment, or nil when the segment
+  /// cannot reorder. A segment with fewer than two rows gets no `.onMove`:
+  /// an attached no-op still claims the drag and starves the Project drag.
+  private func worktreeMove(
+    _ projectID: ProjectID, _ segment: WorktreeSegment, rows: Int, _ isLiveMatchFilter: Bool
+  ) -> ((IndexSet, Int) -> Void)? {
+    guard rows > 1, !isLiveMatchFilter else { return nil }
+    return { source, destination in
+      store.send(.reorderWorktrees(projectID: projectID, segment: segment, from: source, to: destination))
+    }
+  }
+
+  /// Applies a Project block move from the outer `ForEach.onMove`. The
+  /// offsets index the visible Projects; the move goes to the full Project
+  /// order by `ProjectID`, so Projects hidden by a filter keep their places.
+  private func moveProject(from source: IndexSet, to destination: Int, visible: [ProjectID]) {
+    guard let index = source.first, visible.indices.contains(index) else { return }
+    let projectID = visible[index]
+    guard
+      let placement = ProjectPlacement.resolve(moving: projectID, visible: visible, boundary: destination)
+    else { return }
+    store.send(.moveProject(projectID, to: placement))
+  }
+
+  /// Two-way binding for `Project.isExpanded`. The catalog stays the
+  /// source of truth; the action runs only when the value changes.
+  private func expansionBinding(for project: Project) -> Binding<Bool> {
+    Binding(
+      get: { project.isExpanded },
+      set: { newValue in
+        guard newValue != project.isExpanded else { return }
+        var txn = Transaction()
+        txn.disablesAnimations = true
+        withTransaction(txn) {
+          _ = store.send(.toggleProjectExpansion(project.id))
+        }
+      }
+    )
+  }
+
+  private static let projectRowInsets = EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0)
+  private static let sectionHeaderPadding: CGFloat = 5
 
   // MARK: - Project row
 
@@ -864,21 +916,23 @@ struct HierarchySidebarView: View {
       // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
       .tag(root.id)
       .id(root.id)
-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+      .listRowInsets(Self.projectRowInsets)
       .listRowSeparator(.hidden)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
-      Button(action: toggleExpansion) {
-        ProjectHeaderRow(
-          project: project,
-          store: store,
-          gitHubStore: gitHubStore,
-          onToggleExpansion: toggleExpansion
-        ) {
-          EmptyView()
-        }
+      // Not a `Button` or `.onTapGesture`: both take the mouse-down and
+      // starve the native drag. A simultaneous tap leaves it to the outline.
+      ProjectHeaderRow(
+        project: project,
+        store: store,
+        gitHubStore: gitHubStore,
+        onToggleExpansion: toggleExpansion
+      ) {
+        EmptyView()
       }
-      .buttonStyle(.plain)
+      .contentShape(Rectangle())
+      .simultaneousGesture(TapGesture().onEnded(toggleExpansion))
+      .accessibilityAddTraits(.isButton)
       // The Workspace header's `+` and `⋯` show only on hover, which also
       // hides them from accessibility; the row offers their entries.
       .accessibilityActions {
@@ -891,7 +945,7 @@ struct HierarchySidebarView: View {
           }
         }
       }
-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
+      .listRowInsets(Self.projectRowInsets)
       .listRowBackground(Color.clear)
       .listRowSeparator(.hidden)
     }
@@ -909,7 +963,7 @@ struct HierarchySidebarView: View {
         workspaceGroupRow(
           group, terminal: terminal, in: project, hotkeySlot: terminal.flatMap { hotkeyIndex[$0.id] })
       case .member(let worktree, _):
-        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id], indent: 28)
+        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id], indent: 14)
       }
     }
   }
@@ -948,7 +1002,7 @@ struct HierarchySidebarView: View {
         }
       }
     )
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
+    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     if let terminal {
       row
@@ -1024,10 +1078,9 @@ struct HierarchySidebarView: View {
     .onTapGesture { store.send(.pendingWorktreeRowTapped(pending.id)) }
     .accessibilityAddTraits(.isButton)
     // Match the worktree row's `listRowInsets` so the spinner + name line up
-    // with sibling worktree rows. Without this the row renders flush-left:
-    // the child indent lives in `leading: 14` (see `worktreeRow`), not in
-    // the outline view, whose own indentation is zeroed.
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
+    // with sibling worktree rows. The child indent comes from the Project
+    // Section (see `worktreeRow`); the outline's own indentation is zeroed.
+    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
     .listRowSeparator(.hidden)
     // Manual "selected" pill while the detail pane follows this creation.
     // Approximates the native source-list emphasized selection (accent
@@ -1046,13 +1099,13 @@ struct HierarchySidebarView: View {
 
   // MARK: - Worktree row
 
-  /// `indent` is the row's leading inset: 14 under a Project, 28 under a
-  /// Workspace group.
+  /// `indent` is the row's leading inset on top of the Project Section's
+  /// child indent: 0 under a Project, 14 under a Workspace group.
   private func worktreeRow(
     _ worktree: Worktree,
     in project: Project,
     hotkeySlot: Int?,
-    indent: CGFloat = 14
+    indent: CGFloat = 0
   ) -> some View {
     let isSelected = currentSelection.worktreeID == worktree.id
     let snapshot = gitHubStore?.snapshots[worktree.id]
@@ -1971,7 +2024,6 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   @State private var isHovering = false
   @State private var isPlusHovering = false
   @State private var isMenuHovering = false
-  @State private var isChevronHovering = false
 
   /// Non-archived, non-main Worktrees in this project whose GitHub PR is
   /// merged. Drives the Project ⋯ menu's "Archive / Remove All Merged
@@ -2100,21 +2152,6 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .onHover { isMenuHovering = $0 }
-        // Opens and closes the rows under the Project. The only way to do so
-        // on a row that stands for a folder, where a click selects instead.
-        if project.hasChildRows {
-          Button(action: onToggleExpansion) {
-            iconLabel(
-              systemName: "chevron.right",
-              label: project.isExpanded ? "Collapse" : "Expand",
-              isHovering: isChevronHovering
-            )
-            .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
-          }
-          .buttonStyle(.plain)
-          .onHover { isChevronHovering = $0 }
-          .help(project.isExpanded ? "Collapse" : "Expand")
-        }
       }
       .opacity(isHovering ? 1 : 0)
       if let hotkeyHint {
