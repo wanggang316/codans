@@ -593,9 +593,13 @@ struct HierarchySidebarFeature {
         // one, named by the remote path's leaf (falling back to the Host) so
         // the sidebar reads a recognizable label before the first SSH
         // reconcile fills in worktrees. Both re-reconcile.
-        let mode = state.remoteConnectionSheet?.mode ?? .add
+        guard let sheet = state.remoteConnectionSheet else { return .none }
+        guard let endpoint = registerHost(host, isNewHost: sheet.isNewHost) else {
+          state.remoteConnectionSheet?.hostChangedWhileConnecting(currentHosts: hierarchyClient.hosts())
+          return .none
+        }
+        let mode = sheet.mode
         state.remoteConnectionSheet = nil
-        let endpoint = registerHost(host)
         switch mode {
         case .edit(let projectID):
           hierarchyClient.updateServerProject(projectID, endpoint, remotePath, gitRoot)
@@ -637,18 +641,19 @@ struct HierarchySidebarFeature {
     }
   }
 
-  /// Put the Host of a validated connection in the Host list and return its
-  /// current endpoint. A record from "New Host…" is added with its Name
-  /// (ADR 0003: no temporary Host). A record already in the list may have
-  /// changed in Settings while the sheet was open, so its current fields win.
-  /// `addServerProject` / `updateServerProject` then attach the Project to
-  /// the record with these fields.
-  private func registerHost(_ host: HostRecord) -> RemoteHost {
+  /// Put the Host of a validated connection in the Host list and return the
+  /// endpoint to save. A record from "New Host…" is added with its Name
+  /// (ADR 0003: no temporary Host). Returns `nil` when the picked Host was
+  /// edited or deleted in Settings while the SSH check ran: the check proved
+  /// the old address only, so the Project must not get the new one unchecked.
+  private func registerHost(_ host: HostRecord, isNewHost: Bool) -> RemoteHost? {
     if let current = hierarchyClient.hosts().first(where: { $0.id == host.id }) {
-      return current.endpoint
+      return current.endpoint == host.endpoint ? host.endpoint : nil
     }
+    guard isNewHost else { return nil }
     // A failure (a record with the same fields was added meanwhile) is not
-    // fatal: the manager reuses or adds the record by fields.
+    // fatal: the manager reuses or adds the record by fields, which are the
+    // validated ones.
     try? hierarchyClient.addHost(host)
     return host.endpoint
   }

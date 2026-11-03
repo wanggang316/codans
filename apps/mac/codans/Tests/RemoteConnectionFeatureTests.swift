@@ -258,17 +258,67 @@ struct RemoteConnectionSidebarFlowTests {
   }
 
   @Test
-  func connectUsesTheCurrentFieldsOfAHostEditedMeanwhile() async throws {
+  func connectDoesNotSaveWhenTheHostChangedWhileConnecting() async {
+    // SSH validated `box`; Settings changed its address before the result
+    // came back. The validated path and git root belong to the old address,
+    // so nothing is saved and the sheet asks for a new check.
     var edited = Self.box
     edited.address = "10.0.0.5"
     let fake = HostListFake(hosts: [edited])
     let recorder = Recorder()
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: .init()))
+    let store = Self.makeStore(
+      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box]))
+    )
     await store.send(
       .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
-    )
+    ) {
+      $0.remoteConnectionSheet?.hosts = [edited]
+      $0.remoteConnectionSheet?.errorMessage = RemoteConnectionFeature.State.hostChangedMessage
+    }
+    #expect(store.state.remoteConnectionSheet?.hostChoice == .existing(Self.box.id))
+    #expect(recorder.added.isEmpty)
+    #expect(recorder.updated.isEmpty)
     #expect(fake.catalog.hosts == [edited])
-    #expect(recorder.added.first?.endpoint == edited.endpoint)
+  }
+
+  @Test
+  func connectDoesNotSaveWhenThePickedHostWasDeletedWhileConnecting() async {
+    let fake = HostListFake(hosts: [Self.mini])
+    let recorder = Recorder()
+    let store = Self.makeStore(
+      fake, recorder,
+      state: .init(remoteConnectionSheet: .init(hosts: [Self.box, Self.mini]))
+    )
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet?.hosts = [Self.mini]
+      $0.remoteConnectionSheet?.hostChoice = .existing(Self.mini.id)
+      $0.remoteConnectionSheet?.errorMessage = RemoteConnectionFeature.State.hostChangedMessage
+    }
+    // The deleted Host is not added back.
+    #expect(fake.catalog.hosts == [Self.mini])
+    #expect(recorder.added.isEmpty)
+  }
+
+  @Test
+  func editConnectionDoesNotSaveWhenTheHostChangedWhileConnecting() async {
+    let project = Project(
+      name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
+    )
+    var edited = Self.mini
+    edited.port = 2200
+    let fake = HostListFake(hosts: [Self.box, edited], projects: [project])
+    let recorder = Recorder()
+    let sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
+    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/app", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet?.hosts = [Self.box, edited]
+      $0.remoteConnectionSheet?.errorMessage = RemoteConnectionFeature.State.hostChangedMessage
+    }
+    #expect(recorder.updated.isEmpty)
   }
 
   @Test

@@ -96,6 +96,22 @@ struct RemoteConnectionFeature {
       return state
     }
 
+    static let hostChangedMessage =
+      "The host changed while connecting. Check the host and connect again."
+
+    /// Show the current Host list after the validated Host changed or was
+    /// deleted while the SSH check ran. The result of that check is dropped:
+    /// it belongs to the old address. A deleted choice falls back to the
+    /// first Host, or "New Host…".
+    mutating func hostChangedWhileConnecting(currentHosts: [HostRecord]) {
+      hosts = currentHosts
+      if case .existing(let id) = hostChoice, !currentHosts.contains(where: { $0.id == id }) {
+        hostChoice = currentHosts.first.map { .existing($0.id) } ?? .newHost
+      }
+      isConnecting = false
+      errorMessage = Self.hostChangedMessage
+    }
+
     /// The Host to connect to. "New Host…" fields equal to an existing Host
     /// resolve to that Host.
     func selectedHost() throws(HostRecordError) -> HostRecord {
