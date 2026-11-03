@@ -23,6 +23,7 @@ extension HierarchyHandlers {
         rootPath: project.rootPath,
         gitRoot: project.gitRoot,
         remoteHost: project.remoteHost?.alias,
+        host: IPC.HostRef(project: project, hosts: catalog.hosts),
         isSelected: catalog.selectedProjectID == project.id,
         selectedWorktreeID: project.selectedWorktreeID?.description,
         worktreeCount: project.worktrees.filter { !$0.archived }.count,

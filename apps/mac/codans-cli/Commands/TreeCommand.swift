@@ -35,7 +35,7 @@ struct TreeCommand: AsyncParsableCommand {
         projects = tree.projects
       }
       try Renderer.emit(
-        HierarchyTreeRenderable(projects: projects, handles: tree.handles),
+        HierarchyTreeRenderable(projects: projects, handles: tree.handles, hosts: tree.hosts),
         mode: globals.renderMode
       )
     }
@@ -43,16 +43,20 @@ struct TreeCommand: AsyncParsableCommand {
 }
 
 struct HierarchyTree: Codable, Sendable {
+  /// Server projects carry a resolved `remoteHost`.
   let projects: [Project]
   let handles: IPC.TargetHandles?
+  /// The app's Host list; empty from an app that predates Host records.
+  let hosts: [HostRecord]
 
   static func load(client: RPCClient, timeout: Duration = .seconds(10)) async throws -> HierarchyTree {
-    let payload: ProjectListPayload = try await client.call(
+    let payload: IPC.ProjectListPayload = try await client.call(
       .hierarchyListProjects,
       params: EmptyParams(),
       timeout: timeout
     )
-    return HierarchyTree(projects: payload.projects, handles: payload.handles)
+    return HierarchyTree(
+      projects: payload.resolvedProjects, handles: payload.handles, hosts: payload.hosts ?? [])
   }
 
   func locateWorktree(_ worktreeID: WorktreeID) -> WorktreePath? {
@@ -109,13 +113,15 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
   /// positional numbering. JSON mode carries them as `handle` next to the
   /// UUID (null from an older app).
   let handles: IPC.TargetHandles?
+  /// Resolves each Project's Host name. Empty from an older app.
+  let hosts: [HostRecord]
 
   private enum Key: String, CodingKey { case projects }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: Key.self)
     try container.encode(
-      projects.map { HierarchyProjectDTO(project: $0, handles: handles) }, forKey: .projects)
+      projects.map { HierarchyProjectDTO(project: $0, handles: handles, hosts: hosts) }, forKey: .projects)
   }
 
   var description: String {
@@ -127,6 +133,7 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
       // case and reads cleaner bare.
       let kindSuffix = project.kind == .gitRepo ? "" : "  [\(project.kind.rawValue)]"
       lines.append("\(project.name)  \(project.id)\(kindSuffix)")
+      lines.append("  host: \(Self.label(for: IPC.HostRef(project: project, hosts: hosts)))")
       lines.append("  path: \(project.rootPath)")
 
       for (worktreeIndex, row) in Self.rows(of: project).enumerated() {
@@ -189,6 +196,11 @@ struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
     return rows
   }
 
+  /// `name  id`, or the name alone for This Mac.
+  static func label(for host: IPC.HostRef) -> String {
+    host.id.map { "\(host.name)  \($0)" } ?? host.name
+  }
+
   private static func label(for ref: IPC.WorkspaceGroupRef) -> String {
     switch ref.role {
     case .groupTerminal: return "  (group \(ref.name))"
@@ -205,15 +217,18 @@ struct HierarchyProjectDTO: Encodable {
   let gitRoot: String?
   /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
   let kind: String
+  /// `{id, name}` of the Project's Host; `id` is null for This Mac.
+  let host: IPC.HostRef
   let selectedWorktreeID: String?
   let worktrees: [HierarchyWorktreeDTO]
 
-  init(project: Project, handles: IPC.TargetHandles?) {
+  init(project: Project, handles: IPC.TargetHandles?, hosts: [HostRecord]) {
     self.id = project.id.description
     self.name = project.name
     self.rootPath = project.rootPath
     self.gitRoot = project.gitRoot
     self.kind = project.kind.rawValue
+    self.host = IPC.HostRef(project: project, hosts: hosts)
     self.selectedWorktreeID = project.selectedWorktreeID?.description
     self.worktrees = HierarchyTreeRenderable.rows(of: project)
       .map { HierarchyWorktreeDTO(worktree: $0.worktree, project: project, handles: handles) }

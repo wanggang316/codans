@@ -35,7 +35,7 @@ struct ProjectShow: AsyncParsableCommand {
       ("name", d.name + (d.name == d.canonicalName ? "" : " (folder: \(d.canonicalName))")),
       ("root", d.rootPath),
       ("git root", d.gitRoot ?? "(none: folder project)"),
-      ("remote", d.remoteHost ?? "-"),
+      ("host", d.host.map(HierarchyTreeRenderable.label(for:)) ?? d.remoteHost ?? "-"),
       ("selected", d.isSelected ? "yes" : "no"),
       ("worktrees", "\(d.worktreeCount) active, \(d.archivedWorktreeCount) archived"),
       ("selected worktree", d.selectedWorktreeID ?? "-"),

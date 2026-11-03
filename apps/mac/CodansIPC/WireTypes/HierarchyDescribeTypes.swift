@@ -20,7 +20,12 @@ extension IPC {
     public let canonicalName: String
     public let rootPath: String
     public let gitRoot: String?
+    /// The Server project's SSH host address; nil on This Mac. Kept for
+    /// older CLIs; `host` names the Host record.
     public let remoteHost: String?
+    /// The Host the Project is on. Nil from an app that predates Host
+    /// records.
+    public let host: HostRef?
     public let isSelected: Bool
     public let selectedWorktreeID: String?
     public let worktreeCount: Int
@@ -34,6 +39,7 @@ extension IPC {
       rootPath: String,
       gitRoot: String?,
       remoteHost: String?,
+      host: HostRef? = nil,
       isSelected: Bool,
       selectedWorktreeID: String?,
       worktreeCount: Int,
@@ -46,6 +52,7 @@ extension IPC {
       self.rootPath = rootPath
       self.gitRoot = gitRoot
       self.remoteHost = remoteHost
+      self.host = host
       self.isSelected = isSelected
       self.selectedWorktreeID = selectedWorktreeID
       self.worktreeCount = worktreeCount
