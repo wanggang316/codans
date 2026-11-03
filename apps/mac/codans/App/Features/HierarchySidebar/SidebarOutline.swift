@@ -296,6 +296,8 @@ struct SidebarOutline: NSViewRepresentable {
         outlineView.makeView(withIdentifier: SidebarOutlineCell.identifier, owner: nil) as? SidebarOutlineCell
         ?? SidebarOutlineCell()
       show(item, in: cell)
+      // A row that scrolls in may have changed while it was off screen.
+      scheduleHeightUpdate()
       return cell
     }
 

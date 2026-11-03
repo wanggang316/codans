@@ -634,7 +634,10 @@ struct HierarchySidebarView: View {
       // The chords live here, not in the rows: the outline makes views only
       // for the rows on screen, and a slot must work while its row is not.
       .background(alignment: .topLeading) {
-        ForEach(Array(slots.enumerated()), id: \.offset) { offset, address in
+        // Identity is the row, not the slot: a Button keeps the action its
+        // shortcut was registered with, so a slot that moves to another row
+        // (a Project that fails to load leaves the order) needs a new Button.
+        ForEach(Array(slots.enumerated()), id: \.element.worktreeID) { offset, address in
           hotkeyChord(offset + 1, worktreeID: address.worktreeID, projectID: address.projectID)
         }
       }
