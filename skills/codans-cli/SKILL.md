@@ -90,6 +90,10 @@ independent repos: `git -C <path>` per row, never `git worktree` commands
 against the workspace root. Create and delete groups with `codans workspace
 group …`, never with `codans worktree new` / `rm`, which refuse workspace rows.
 
+Each Project in `codans tree --json` and `codans project show --json` carries
+`host {id, name}`: the Host (machine) it lives on. A local Project is on
+`This Mac` with `id: null`; a Server project names its Host record.
+
 `codans` is on `PATH` automatically inside every codans Pane, and the app
 auto-detects which Project / Worktree / Tab / Pane that Pane belongs to —
 so most commands default to the surrounding context and you rarely need
@@ -252,7 +256,7 @@ carries full UUIDs plus the same handles as `handle` (`"t3"` / `"p7"`).
 codans project list                          # all projects
 codans project add ~/code/api                # register an existing directory
 codans project add --name "API" ~/code/api   # custom display name
-codans project show <project>                # paths, git root, selection, worktree counts
+codans project show <project>                # paths, git root, Host, selection, worktree counts
 codans project rename <project> "API v2"     # sidebar name ('' clears the override)
 codans project rm <project>                  # remove (id, name, or 'current')
 ```

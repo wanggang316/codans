@@ -15,8 +15,17 @@ and the project does not yet follow semantic versioning — every release until
 - **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9
   focus the pane of the first nine agents in the list. Rebind them under
   Settings → Shortcuts → Agents.
+- **`codans tree` and `codans project show` show the Host of each Project.**
+  A Server project shows its Host's name and ID; a local Project shows
+  This Mac. The JSON output has `host {id, name}`.
 
 ### Changed
+
+- **Server projects share Host records.** The catalog now keeps one record
+  per host, username, and port, and each Server project refers to it. On
+  first launch, existing Server projects are moved to these records; the
+  original catalog is kept in `backups/`. Connecting with the fields of a
+  known Host reuses it. An older build cannot open the new catalog.
 
 - **Shortcut hints are plain grey text and fade in place.** Holding ⌘ shows
   each shortcut without a key frame. On a sidebar filter button the shortcut
