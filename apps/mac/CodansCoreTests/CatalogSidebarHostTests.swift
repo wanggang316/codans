@@ -52,6 +52,29 @@ struct CatalogSidebarHostTests {
   }
 
   @Test
+  func aRemoteOnlyCatalogStillListsThisMacFirst() throws {
+    let catalog = Catalog(projects: [remote("api", on: box, root: boxRoot)], hosts: [box])
+    let level = try #require(catalog.sidebarHostLevel)
+    let groups = level.groups(catalog.sidebarProjects)
+    #expect(groups.map(\.host) == [.thisMac, .host(box.id)])
+    #expect(groups[0].projects.isEmpty)
+    #expect(catalog.sidebarSelectionOrder.map(\.worktreeID) == [boxRoot.id])
+  }
+
+  @Test
+  func anEmptyThisMacHidesUnderAFilter() throws {
+    var catalog = Catalog(projects: [remote("api", on: box, root: boxRoot)], hosts: [box])
+    catalog.sidebarFilter = .remote
+    #expect(try #require(catalog.sidebarHostLevel).groups(catalog.sidebarProjects).map(\.host) == [.host(box.id)])
+
+    catalog.sidebarFilter = .all
+    let tag = TagID()
+    catalog.projects[0].tagIDs = [tag]
+    catalog.activeTagFilter = .tags([tag])
+    #expect(try #require(catalog.sidebarHostLevel).groups(catalog.sidebarProjects).map(\.host) == [.host(box.id)])
+  }
+
+  @Test
   func filtersHideHostsWithoutMatchesButKeepTheLevel() throws {
     var catalog = self.catalog
     catalog.sidebarFilter = .remote

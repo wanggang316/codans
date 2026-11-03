@@ -244,6 +244,15 @@ struct SidebarOutlineModelTests {
   }
 
   @Test
+  func aRemoteOnlyCatalogShowsAnEmptyThisMacRow() {
+    let catalog = Catalog(projects: [remote(folder, on: Self.box)], hosts: [Self.box])
+    let tree = nodes(catalog.sidebarProjects, hostLevel: catalog.sidebarHostLevel)
+    #expect(tree.map(label) == ["host This Mac", "host box"])
+    #expect(tree[0].children.isEmpty)
+    #expect(tree[1].children.map(label) == ["project notes"])
+  }
+
+  @Test
   func aClosedHostKeepsItsRowsClosed() throws {
     var catalog = Catalog(projects: [repository, remote(folder, on: Self.box)], hosts: [Self.box])
     catalog.collapsedSidebarHosts = [.host(Self.box.id)]

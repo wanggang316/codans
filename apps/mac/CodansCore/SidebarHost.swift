@@ -55,16 +55,21 @@ public nonisolated struct SidebarHostGroup: Equatable, Sendable {
 public nonisolated struct SidebarHostLevel: Equatable, Sendable {
   public let records: [HostRecord]
   public let collapsed: Set<SidebarHost>
+  /// This Mac keeps its row with no Project in it. True while no filter is
+  /// on: This Mac is not a Host record, so a catalog with only remote
+  /// Projects still shows it (issue #336). A filter hides it like any Host.
+  public let keepsThisMac: Bool
 
-  public init(records: [HostRecord], collapsed: Set<SidebarHost>) {
+  public init(records: [HostRecord], collapsed: Set<SidebarHost>, keepsThisMac: Bool = false) {
     self.records = records
     self.collapsed = collapsed
+    self.keepsThisMac = keepsThisMac
   }
 
   /// `projects` (already filtered and sorted) grouped by Host: This Mac
   /// first, then the Host list order (ADR 0003, decision 6). A Host with no
-  /// Project in `projects` has no group, so a filter hides it. Projects keep
-  /// their order inside a group.
+  /// Project in `projects` has no group, so a filter hides it; This Mac
+  /// stays when `keepsThisMac`. Projects keep their order inside a group.
   public func groups(_ projects: [Project]) -> [SidebarHostGroup] {
     var byHost: [SidebarHost: [Project]] = [:]
     for project in projects {
@@ -78,7 +83,8 @@ public nonisolated struct SidebarHostLevel: Equatable, Sendable {
       if !order.contains(host) { order.append(host) }
     }
     return order.compactMap { host in
-      guard let projects = byHost[host] else { return nil }
+      let projects = byHost[host] ?? []
+      guard !projects.isEmpty || (host == .thisMac && keepsThisMac) else { return nil }
       let record: HostRecord? =
         switch host {
         case .thisMac: nil

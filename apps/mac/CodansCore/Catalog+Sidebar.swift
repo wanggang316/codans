@@ -246,7 +246,14 @@ extension Catalog {
   /// so a filter does not add or remove the level.
   public var sidebarHostLevel: SidebarHostLevel? {
     guard projects.contains(where: { $0.hostID != nil }) else { return nil }
-    return SidebarHostLevel(records: hosts, collapsed: collapsedSidebarHosts)
+    return SidebarHostLevel(records: hosts, collapsed: collapsedSidebarHosts, keepsThisMac: !isSidebarFiltered)
+  }
+
+  /// A category or Tag filter is on, so the sidebar lists a subset.
+  var isSidebarFiltered: Bool {
+    if sidebarFilter != .all { return true }
+    if case .tags(let set) = activeTagFilter { return !set.isEmpty }
+    return activeTagFilter == .untagged
   }
 
   /// Rows hidden inside a collapsed Workspace group, each mapped to the
