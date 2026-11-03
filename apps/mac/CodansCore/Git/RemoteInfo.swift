@@ -27,10 +27,14 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
   /// Full repository path without a leading slash or a `.git` suffix, for example
   /// `owner/repo` or `group/sub/repo`. Always has at least two segments.
   public let path: String
+  /// `true` for SCP-style (`git@host:path`) and `ssh://` remotes. Their `host` is an SSH
+  /// host, which can be an alias from `~/.ssh/config`, and their port is the SSH port.
+  public let isSSH: Bool
 
-  public init(host: String, path: String) {
+  public init(host: String, path: String, isSSH: Bool = false) {
     self.host = host
     self.path = path
+    self.isSSH = isSSH
   }
 
   /// Parses a git remote URL into a `RemoteInfo`. Throws `RemoteInfo.ParseError.malformed` on
@@ -76,7 +80,7 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
       throw ParseError.malformed(input)
     }
     let host = String(head[head.index(after: atIndex)...])
-    return try Self.makeInfo(host: host, path: String(afterColon), original: input)
+    return try Self.makeInfo(host: host, path: String(afterColon), isSSH: true, original: input)
   }
 
   /// Parses `<scheme>://[user@]<host>/<path>[.git]` where scheme is https, http, or
@@ -104,12 +108,12 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
     }
     let host = String(remainder[..<firstSlash])
     let path = String(remainder[remainder.index(after: firstSlash)...])
-    return try Self.makeInfo(host: host, path: path, original: input)
+    return try Self.makeInfo(host: host, path: path, isSSH: lower.hasPrefix("ssh://"), original: input)
   }
 
   /// Builds a `RemoteInfo` from a separated `host` and remainder `path` string. Trims a
   /// trailing `.git`; rejects any remainder that does not have at least two path segments.
-  private static func makeInfo(host: String, path: String, original: String) throws -> RemoteInfo {
+  private static func makeInfo(host: String, path: String, isSSH: Bool, original: String) throws -> RemoteInfo {
     guard !host.isEmpty else { throw ParseError.malformed(original) }
     var components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     guard components.count >= 2 else { throw ParseError.malformed(original) }
@@ -119,6 +123,6 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
     guard components.allSatisfy({ !$0.isEmpty }) else {
       throw ParseError.malformed(original)
     }
-    return RemoteInfo(host: host, path: components.joined(separator: "/"))
+    return RemoteInfo(host: host, path: components.joined(separator: "/"), isSSH: isSSH)
   }
 }

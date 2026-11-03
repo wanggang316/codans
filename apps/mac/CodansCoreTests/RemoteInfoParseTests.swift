@@ -150,4 +150,19 @@ struct RemoteInfoParseTests {
     #expect(info.host == "github.com")
     #expect(info.path == "wanggang316/codans")
   }
+
+  // MARK: - Transport
+
+  /// SSH remotes name an SSH host, which can be an alias from `~/.ssh/config`; the Code
+  /// Host resolver needs to know that (ADR 0004 item 2).
+  @Test(arguments: [
+    ("git@gl:codans-e2e/app.git", true),
+    ("ssh://git@192.168.2.158:2222/codans-e2e/app.git", true),
+    ("https://github.com/wanggang316/codans.git", false),
+    ("http://192.168.2.158:8929/codans-e2e/app.git", false),
+    ("git://example.com/group/repo.git", false),
+  ])
+  func marksSSHRemotes(url: String, isSSH: Bool) throws {
+    #expect(try RemoteInfo.parse(url).isSSH == isSSH)
+  }
 }

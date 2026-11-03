@@ -40,7 +40,10 @@ extension CodeHostClient {
       case .gitlab: return gitlab
       }
     }
-    let resolver = CodeHostResolver { kind in await implementation(kind).authenticatedHosts() }
+    let sshHostName = SSHHostName()
+    let resolver = CodeHostResolver(
+      hostsProvider: { kind in await implementation(kind).authenticatedHosts() },
+      sshHostName: { host in await sshHostName.resolve(host) })
     return CodeHostClient(
       availability: { kind in await implementation(kind).availability() },
       resolveRepository: { remote, choice in await resolver.resolve(remote, choice: choice) },

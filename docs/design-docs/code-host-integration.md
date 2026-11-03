@@ -72,7 +72,9 @@ reducer（`CodeHostFeature`）、快照缓存和视图只用 `CodeHost` 协议�
 3. Project 设置里的 "Code Host" 选择（`GitProjectSettings.codeHost`：Auto / GitHub / GitLab）。
 4. 否则无 Code Host：不取数、无徽标、无错误；该单元记入 `unitsWithoutCodeHost`，轮询跳过它。
 
-两个 CLI 都认识的 host 归 GitHub。Project 选择只在两个 CLI 都不认识 host 时生效（例如 `~/.ssh/config` 里的 SSH 别名），所以它不能把一个 CLI 认识的 host 改成另一种 Code Host。各 CLI 登录过的 host 每个 kind 只问一次并缓存；Settings 的 Re-check 清除缓存（`CodeHostClient.invalidateResolution`）。
+两个 CLI 都认识的 host 归 GitHub。Project 选择只在两个 CLI 都不认识 host 时生效（例如 `~/.ssh/config` 里的 SSH 别名），所以它不能把一个 CLI 认识的 host 改成另一种 Code Host。
+
+SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 host 可能是 `~/.ssh/config` 的别名，或带 SSH 端口，CLI 无法用它访问 API。Project 选择生效时，`CodeHostResolver` 用 `ssh -G -- <host>`（`SSHHostName`，只打印配置、不建连接）读出别名的 `HostName`，再在该 kind 已登录的 host 和公共 host 中找名字（去掉端口）等于它的那一个，用它作为仓库的 host；没有唯一匹配时保留 remote 的 host。例：`git@github-work:org/repo`（`HostName github.com`）→ `github.com`；`ssh://git@192.168.2.158:2222/g/r` → `glab` 已登录的 `192.168.2.158:8929`。HTTPS remote 的端口就是 API 端口，不做映射。Auto 不做映射，解析顺序不变。各 CLI 登录过的 host 每个 kind 只问一次并缓存；Settings 的 Re-check 清除缓存（`CodeHostClient.invalidateResolution`）。
 
 `ProjectCodeHostChoiceClient` 在取数时给出单元的选择：
 
@@ -81,7 +83,7 @@ reducer（`CodeHostFeature`）、快照缓存和视图只用 `CodeHost` 协议�
 
 因为每个单元各自解析 Code Host，一个 Workspace 可以同时有 GitHub 成员和 GitLab 成员（ADR 0004 item 16）。每个成员只显示自己 Code Host 的 Pull Request；不同成员上同名的分支不会混淆，因为单元的缓存、取消、排队和写操作都按单元的仓库隔离。
 
-选择变更时 `CodansApp` 发送 `refreshAllRequested`，所以下一次取数立即使用新选择。"Open Project on Code Host" 命令走同一个解析顺序。
+选择变更时 `CodansApp` 发送 `refreshAllRequested`，所以下一次取数立即使用新选择。解析出的仓库与单元缓存的仓库不同时，effect 在读取前发送 `codeHostRepositoryChanged`，reducer 丢弃旧批次和各行的旧 Pull Request；即使新仓库的读取失败，也不会留下旧 Code Host 的徽标和写操作目标。"Open Project on Code Host" 命令走同一个解析顺序。
 
 ### Settings
 
