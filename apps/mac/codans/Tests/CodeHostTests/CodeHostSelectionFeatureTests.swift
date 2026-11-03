@@ -95,6 +95,63 @@ struct CodeHostSelectionFeatureTests {
     #expect(store.state.repository(for: gitlabUnit.pairs[0].worktreeID)?.kind == .gitlab)
   }
 
+  /// A changed Code Host choice resolves the unit to another repository. When the new
+  /// read fails with a non-CLI error, the rows must not keep the old Code Host's Pull
+  /// Request: its badge would stay, and write actions would target the old repository.
+  @Test
+  func aNewRepositoryDropsTheOldSnapshotsEvenWhenItsReadFails() async {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-open")
+    let worktreeID = unit.pairs[0].worktreeID
+    let old = CodeHostRepository(kind: .github, host: "gl", path: "codans-e2e/app")
+    var seed = CodeHostFeature.State()
+    seed.snapshotsByProject[unit.projectID] = BatchedPullRequests(
+      repository: old, byBranch: ["feat-open": FakeCodeHost.snapshot(kind: .github, branch: "feat-open")],
+      seenBranches: ["feat-open"], fetchedAt: .distantPast)
+    seed.snapshots[worktreeID] = FakeCodeHost.snapshot(kind: .github, branch: "feat-open")
+    seed.projectByWorktree[worktreeID] = unit.projectID
+    let gitlab = FakeCodeHost(kind: .gitlab, hosts: [], failure: .network("dial tcp: lookup gl"))
+    let store = Self.makeStore(
+      initialState: seed,
+      github: FakeCodeHost(kind: .github, hosts: ["github.com"]), gitlab: gitlab,
+      remotes: ["/repos/app": RemoteInfo(host: "gl", path: "codans-e2e/app")],
+      choices: [unit.projectID: .gitlab])
+
+    await store.send(.projectRefreshRequested(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.codeHostRepositoryChanged)
+    await store.receive(\.projectBatchLoaded)
+
+    #expect(gitlab.requests.value == [CodeHostRepository(kind: .gitlab, host: "gl", path: "codans-e2e/app")])
+    #expect(store.state.snapshots[worktreeID] == nil)
+    #expect(store.state.snapshotsByProject[unit.projectID] == nil)
+    #expect(store.state.pullRequestReference(for: worktreeID) == nil)
+    #expect(store.state.lastErrorByProject[unit.projectID] == .network("dial tcp: lookup gl"))
+  }
+
+  /// The same repository and a transient failure: the rows keep what they show.
+  @Test
+  func theSameRepositoryKeepsItsSnapshotsWhenAReadFails() async {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-open")
+    let worktreeID = unit.pairs[0].worktreeID
+    let repository = CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app")
+    let snapshot = FakeCodeHost.snapshot(kind: .gitlab, branch: "feat-open")
+    var seed = CodeHostFeature.State()
+    seed.snapshotsByProject[unit.projectID] = BatchedPullRequests(
+      repository: repository, byBranch: ["feat-open": snapshot], seenBranches: ["feat-open"], fetchedAt: .distantPast)
+    seed.snapshots[worktreeID] = snapshot
+    let store = Self.makeStore(
+      initialState: seed,
+      github: FakeCodeHost(kind: .github, hosts: ["github.com"]),
+      gitlab: FakeCodeHost(kind: .gitlab, hosts: ["192.168.2.158:8929"], failure: .timeout),
+      remotes: ["/repos/app": RemoteInfo(host: "192.168.2.158:8929", path: "codans-e2e/app")],
+      choices: [:])
+
+    await store.send(.projectRefreshRequested(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+
+    #expect(store.state.snapshots[worktreeID] == snapshot)
+    #expect(store.state.snapshotsByProject[unit.projectID]?.repository == repository)
+  }
+
   // MARK: - Fixtures
 
   private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
@@ -106,9 +163,10 @@ struct CodeHostSelectionFeatureTests {
   }
 
   private static func makeStore(
+    initialState: CodeHostFeature.State = .init(),
     github: FakeCodeHost, gitlab: FakeCodeHost, remotes: [String: RemoteInfo], choices: [ProjectID: CodeHostKind]
   ) -> TestStoreOf<CodeHostFeature> {
-    let store = TestStore(initialState: CodeHostFeature.State()) {
+    let store = TestStore(initialState: initialState) {
       CodeHostFeature()
     } withDependencies: {
       $0.date = .constant(fixedDate)
@@ -132,11 +190,13 @@ struct CodeHostSelectionFeatureTests {
 nonisolated private final class FakeCodeHost: CodeHost {
   let kind: CodeHostKind
   let hosts: Set<String>
+  let failure: CodeHostError?
   let requests = LockIsolated<[CodeHostRepository]>([])
 
-  init(kind: CodeHostKind, hosts: Set<String>) {
+  init(kind: CodeHostKind, hosts: Set<String>, failure: CodeHostError? = nil) {
     self.kind = kind
     self.hosts = hosts
+    self.failure = failure
   }
 
   static func snapshot(kind: CodeHostKind, branch: String) -> PullRequestSnapshot {
@@ -154,6 +214,7 @@ nonisolated private final class FakeCodeHost: CodeHost {
 
   func batchPullRequests(repository: CodeHostRepository, branches: [String]) async throws -> [String: PullRequestSnapshot] {
     requests.withValue { $0.append(repository) }
+    if let failure { throw failure }
     return Dictionary(uniqueKeysWithValues: branches.map { ($0, Self.snapshot(kind: kind, branch: $0)) })
   }
 
