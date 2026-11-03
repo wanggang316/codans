@@ -1,6 +1,7 @@
 # 0001. Project order is manual only
 
-Status: Accepted
+Status: Accepted. Decisions 3 and 4 are superseded by
+[ADR 0002](0002-sidebar-outline-with-host-level.md).
 
 ## Context
 
