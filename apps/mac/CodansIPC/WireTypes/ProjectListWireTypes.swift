@@ -32,20 +32,6 @@ extension IPC {
       try container.encodeIfPresent(hosts, forKey: .hosts)
     }
 
-    /// A Project encoded as usual, plus `remoteHost`.
-    private struct LegacyHostFields: Encodable {
-      let project: Project
-
-      private enum CodingKeys: String, CodingKey { case remoteHost }
-
-      func encode(to encoder: Encoder) throws {
-        try project.encode(to: encoder)
-        guard project.hostID != nil, let endpoint = project.remoteHost else { return }
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(endpoint, forKey: .remoteHost)
-      }
-    }
-
     /// `projects` with each Server project's `remoteHost` filled from
     /// `hosts`, so `Project.kind` / `isRemote` read the same as in the app.
     public var resolvedProjects: [Project] {
@@ -90,5 +76,20 @@ extension IPC {
         self = .thisMac
       }
     }
+  }
+}
+
+/// A Project encoded as usual, plus `remoteHost` for a Server project with a
+/// Host id (see `IPC.ProjectListPayload.encode(to:)`).
+private struct LegacyHostFields: Encodable {
+  let project: Project
+
+  private enum CodingKeys: String, CodingKey { case remoteHost }
+
+  func encode(to encoder: Encoder) throws {
+    try project.encode(to: encoder)
+    guard project.hostID != nil, let endpoint = project.remoteHost else { return }
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(endpoint, forKey: .remoteHost)
   }
 }
