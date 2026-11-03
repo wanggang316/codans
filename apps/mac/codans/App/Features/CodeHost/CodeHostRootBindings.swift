@@ -26,7 +26,7 @@ struct CodeHostRootBindings: Reducer {
       case .delegate(.showCodeHostSettings):
         let presenter = settingsWindowPresenter
         return .run { _ in
-          await MainActor.run { presenter.open() }
+          await MainActor.run { presenter.openAt(.codeHosts) }
         }
 
       case .delegate(.pullRequestMerged):

@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import Testing
-import CodansCore
 
 @testable import Codans
 
@@ -111,6 +111,23 @@ struct ProjectGeneralSettingsViewWriteRoutingTests {
     #expect(captured.value.contains(.defaultMergeStrategy(.squash)))
     #expect(captured.value.contains(.postMergeAction(.archive)))
     #expect(captured.value.contains(.githubDisabled(true)))
+  }
+
+  @Test
+  func writeCodeHostRoutesTheChoiceAndAuto() async {
+    let captured = LockIsolated<[SettingsWriter.GitFieldUpdate]>([])
+    var writer = SettingsWriter.testValue
+    writer.setProjectGitField = { _, update in
+      captured.withValue { $0.append(update) }
+    }
+
+    let routes = ProjectGeneralSettingsView.WriteRoutes(projectID: ProjectID(), writer: writer)
+    routes.writeCodeHost(.gitlab)
+    routes.writeCodeHost(nil)
+    await waitForCount(captured, expected: 2)
+
+    #expect(captured.value.contains(.codeHost(.gitlab)))
+    #expect(captured.value.contains(.codeHost(nil)))
   }
 
   // MARK: - Environment

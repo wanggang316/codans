@@ -147,6 +147,8 @@ nonisolated private final class FakeCodeHost: CodeHost {
       mergeState: PullRequestMergeState(status: .clean))
   }
 
+  // The protocol requires `async`; a fake answers at once.
+  // swiftlint:disable async_without_await
   func availability() async -> CodeHostAvailability { .unknown }
   func authenticatedHosts() async -> Set<String> { hosts }
 
@@ -159,6 +161,7 @@ nonisolated private final class FakeCodeHost: CodeHost {
   func close(_ pullRequest: PullRequestReference) async throws {}
   func markReady(_ pullRequest: PullRequestReference) async throws {}
   func rerunFailedChecks(_ pullRequest: PullRequestReference) async throws {}
+  // swiftlint:enable async_without_await
   func repositoryWebURL(_ repository: CodeHostRepository) -> URL? { nil }
   func pullRequestWebURL(_ pullRequest: PullRequestReference) -> URL? { nil }
 }

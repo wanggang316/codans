@@ -5,8 +5,8 @@ import SwiftUI
 
 /// Project General detail pane.
 ///
-/// Sibling Sections rendered in fixed order: Editor, Worktree, GitHub,
-/// Environment. Worktree and GitHub render only when
+/// Sibling Sections rendered in fixed order: Editor, Worktree, Code Host,
+/// Environment. Worktree and Code Host render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
 /// the sections simply appear or don't.
@@ -46,12 +46,12 @@ struct ProjectGeneralSettingsView: View {
     case workspace
     case editor
     case worktree
-    case github
+    case codeHost
     case environment
     case lifecycle
   }
 
-  /// Pure visibility logic. Worktree / GitHub / Lifecycle gate
+  /// Pure visibility logic. Worktree / Code Host / Lifecycle gate
   /// on `kind == .gitRepo`, Workspace on `kind == .workspace`; everything
   /// else is always visible.
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
@@ -59,7 +59,7 @@ struct ProjectGeneralSettingsView: View {
     case .dir:
       return [.general, .editor, .environment]
     case .workspace:
-      // A workspace root has no repository of its own: the worktree, GitHub,
+      // A workspace root has no repository of its own: the worktree, Code Host,
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
       // construction. Its own section lists its source projects.
       return [.general, .workspace, .editor, .environment]
@@ -117,6 +117,11 @@ struct ProjectGeneralSettingsView: View {
       Task { await setter(projectID, .postMergeAction(value)) }
     }
 
+    func writeCodeHost(_ value: CodeHostKind?) {
+      let setter = writer.setProjectGitField
+      Task { await setter(projectID, .codeHost(value)) }
+    }
+
     func writeGithubDisabled(_ value: Bool) {
       let setter = writer.setProjectGitField
       Task { await setter(projectID, .githubDisabled(value)) }
@@ -162,8 +167,8 @@ struct ProjectGeneralSettingsView: View {
       if visible.contains(.worktree) {
         worktreeSection
       }
-      if visible.contains(.github) {
-        githubSection
+      if visible.contains(.codeHost) {
+        codeHostSection
       }
       if visible.contains(.environment) {
         environmentSection
@@ -656,11 +661,18 @@ struct ProjectGeneralSettingsView: View {
     )
   }
 
-  // MARK: - GitHub
+  // MARK: - Code Host
 
   @ViewBuilder
-  private var githubSection: some View {
-    Section("GitHub") {
+  private var codeHostSection: some View {
+    Section {
+      Picker("Code Host", selection: codeHostBinding) {
+        Text("Auto").tag(CodeHostKind?.none)
+        ForEach(CodeHostKind.allCases, id: \.self) { kind in
+          Text(kind.displayName).tag(Optional(kind))
+        }
+      }
+
       OptionalOverridePicker<MergeStrategy>(
         title: "Merge strategy",
         selection: mergeStrategyBinding,
@@ -674,7 +686,7 @@ struct ProjectGeneralSettingsView: View {
       )
 
       OptionalOverridePicker<MergedWorktreeAction>(
-        title: "After merging a PR",
+        title: "After merging",
         selection: postMergeActionBinding,
         inheritedValue: general.postMergeAction,
         options: MergedWorktreeAction.allCases.map {
@@ -686,7 +698,25 @@ struct ProjectGeneralSettingsView: View {
       )
 
       Toggle("Disable GitHub integration for this Project", isOn: githubDisabledBinding)
+    } header: {
+      Text("Code Host")
+    } footer: {
+      Text(
+        "Auto finds the Code Host from the origin remote: github.com or a host gh is logged in to "
+          + "is GitHub; gitlab.com or a host glab is logged in to is GitLab. Choose GitHub or GitLab "
+          + "for a host that neither CLI knows, such as an SSH alias. A host that a CLI knows keeps "
+          + "its Code Host."
+      )
+      .font(.footnote)
+      .foregroundStyle(.secondary)
     }
+  }
+
+  private var codeHostBinding: Binding<CodeHostKind?> {
+    Binding(
+      get: { entry?.git?.codeHost },
+      set: { routes.writeCodeHost($0) }
+    )
   }
 
   private var mergeStrategyBinding: Binding<MergeStrategy?> {
