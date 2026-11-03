@@ -5,7 +5,7 @@
 
 ## Context and Scope
 
-主窗口是两栏布局：左 **Sidebar**（扁平 Project 树 + 底部 footer），右 **Detail**（窗口工具栏 **Header**，内容区为 **Tab 条** + 分屏 **Pane**）。
+主窗口是两栏布局：左 **Sidebar**（Project 树，有远程 Project 时按 Host 分组 + 底部 footer），右 **Detail**（窗口工具栏 **Header**，内容区为 **Tab 条** + 分屏 **Pane**）。
 
 层级为 `Catalog → Project → Worktree → Tab → Pane`（四级）。本文记录三个主窗口子系统——Sidebar、Header、Tab 条——各自的**耐久不变量与边界**，即"为什么这样拆、什么绝不能反过来做"。具体 SwiftUI 布局、像素值、reducer 全量 action 表不在此固化（实现可演进）。
 
@@ -21,6 +21,8 @@
 `HierarchySidebarView` 渲染当前 Catalog 的**扁平 Project 列表**，每个 Project 是一个 section，其下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），当前露出排序（reorder）与刷新两个动作。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
 
 **Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与排序，只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
+
+**Host 行。** 只要 Catalog 中有一个 Project 不在本机，顶层就是 Host 行：先 **This Mac**，再按 Host 列表顺序，每个有 Project 的 Host 一行，Project 列在其下（`Catalog.sidebarHostLevel` / `SidebarHostLevel.groups`）。是否出现这一层看全部 Project，不看过滤结果，所以切换过滤不会增减这一层；过滤下某 Host 没有匹配的 Project 时该行隐藏（Remote 因此隐藏 This Mac）。Host 行不可选中，点击开合，开合状态存于 `catalog.json` 的 `collapsedSidebarHosts`；折叠 Host 下的行不占 ⌃N 槽位，⌘⌃↑ / ⌘⌃↓ 也跳过它们，揭示会先展开所在 Host。右键菜单：This Mac 为 "Open Project…"；其他 Host 为 "Connect Project on This Host…"（Connect to Server 选中该 Host）与 "Edit Host…"（Settings › Hosts 打开该 Host 的编辑表单）。Host 行不显示连接状态。见 [ADR 0002](../adr/0002-sidebar-outline-with-host-level.md) 与 [ADR 0003](../adr/0003-hosts-are-managed-records.md)。
 
 ### 不变量
 
