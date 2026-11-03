@@ -61,9 +61,9 @@ struct CatalogMigrationV3ToV4Tests {
   }
 
   @Test
-  func currentVersionIsFour() {
-    #expect(Catalog.currentVersion == 4)
-    #expect(Catalog().version == 4)
+  func currentVersionIsFive() {
+    #expect(Catalog.currentVersion == 5)
+    #expect(Catalog().version == 5)
   }
 
   @Test
@@ -75,8 +75,8 @@ struct CatalogMigrationV3ToV4Tests {
 
   @Test
   func newerVersionIsReportedSeparatelyFromRetiredVersions() {
-    #expect(throws: Catalog.DecodingIssue.newerVersion(5)) {
-      _ = try JSONDecoder().decode(Catalog.self, from: Data(#"{"version": 5}"#.utf8))
+    #expect(throws: Catalog.DecodingIssue.newerVersion(6)) {
+      _ = try JSONDecoder().decode(Catalog.self, from: Data(#"{"version": 6}"#.utf8))
     }
     #expect(throws: Catalog.DecodingIssue.unsupportedVersion(2)) {
       _ = try JSONDecoder().decode(Catalog.self, from: Data(#"{"version": 2}"#.utf8))

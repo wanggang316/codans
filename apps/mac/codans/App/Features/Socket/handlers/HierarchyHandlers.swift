@@ -1285,8 +1285,9 @@ final class HierarchyHandlers {
     // filtered listing never shifts handle assignment order.
     handleRegistry.sync(with: manager.catalog)
     let handles = handleRegistry.snapshot()
+    let hosts = manager.catalog.hosts
     return await Self.encodeOffMain("listProjects") {
-      try JSONValue.encoded(ListProjectsPayload(projects: filtered, handles: handles))
+      try JSONValue.encoded(ListProjectsPayload(projects: filtered, handles: handles, hosts: hosts))
     }
   }
 
@@ -1561,17 +1562,7 @@ final class HierarchyHandlers {
 // `nonisolated` on the conformance so `encodeOffMain` can call `encode(to:)`
 // from a detached Task without tripping `InferIsolatedConformances` —
 // the file otherwise infers `@MainActor` for every type defined in it.
-nonisolated struct ListProjectsPayload: Codable, Sendable {
-  let projects: [Project]
-  /// Short-handle map for the CLI's text renderer. Optional so the
-  /// payload keeps decoding fixtures and responses that predate handles.
-  let handles: IPC.TargetHandles?
-
-  init(projects: [Project], handles: IPC.TargetHandles? = nil) {
-    self.projects = projects
-    self.handles = handles
-  }
-}
+typealias ListProjectsPayload = IPC.ProjectListPayload
 nonisolated struct ListWorktreesPayload: Codable, Sendable { let worktrees: [Worktree] }
 nonisolated struct ListTabsPayload: Codable, Sendable { let tabs: [Tab] }
 nonisolated struct ListPanesPayload: Codable, Sendable { let panes: [Pane] }

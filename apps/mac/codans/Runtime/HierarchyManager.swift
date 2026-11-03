@@ -115,9 +115,13 @@ final class HierarchyManager {
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
+    // `CatalogStore.load` already attaches every Server project to a Host;
+    // this covers catalogs built in memory, so every write below starts
+    // from Projects that refer to a Host by id.
+    let didAdoptHosts = self.catalog.adoptHostReferences()
     rebuildRunScriptPanes()
     refreshWorkspaceMemberships()
-    if didStampLegacyTimestamps || didClearAgentBindings {
+    if didStampLegacyTimestamps || didClearAgentBindings || didAdoptHosts {
       // Persist the migration so successive launches start from the
       // backfilled timestamps rather than re-deriving them on every
       // open (and so the user-visible order is deterministic the
@@ -191,6 +195,46 @@ final class HierarchyManager {
       else { continue }
       catalog.projects[projectIndex].selectedWorktreeID =
         project.worktrees.first(where: { !$0.archived })?.id
+    }
+  }
+
+  // MARK: - Host list
+
+  /// Append a Host record. Throws `HostRecordError` for invalid fields or a
+  /// duplicate (Host, Username, Port).
+  func addHost(_ record: HostRecord) throws {
+    try catalog.addHost(record)
+    store.scheduleSave(catalog)
+  }
+
+  /// Edit a Host record in place. Every Project on the Host gets the new
+  /// connection; open terminals keep their current SSH session.
+  func updateHost(_ record: HostRecord) throws {
+    guard catalog.host(id: record.id) != record else { return }
+    try catalog.updateHost(record)
+    store.scheduleSave(catalog)
+  }
+
+  /// Delete a Host record. Throws `HostRecordError.inUse` while a Project
+  /// refers to it.
+  func removeHost(_ id: HostID) throws {
+    try catalog.removeHost(id: id)
+    store.scheduleSave(catalog)
+  }
+
+  /// Point the Server project at `index` to the Host for `endpoint`: an
+  /// existing record with the same fields, else a new one. The callers
+  /// validate the fields first; if they still do not make a valid record,
+  /// the Project keeps the fields without a Host id, and the next load
+  /// attaches it.
+  private func attachServerProject(at index: Int, to endpoint: RemoteHost) {
+    do {
+      let hostID = try catalog.hostID(for: endpoint)
+      catalog.attachProject(at: index, toHost: hostID)
+    } catch {
+      reconcileLogger.error("server project host not recorded: \(error.localizedDescription, privacy: .public)")
+      catalog.projects[index].hostID = nil
+      catalog.projects[index].remoteHost = endpoint
     }
   }
 
@@ -326,8 +370,9 @@ final class HierarchyManager {
     return projectID
   }
 
-  /// Add a Server (remote SSH) project. Mirrors `addProject` but stamps
-  /// `remoteHost` so the project is `.server`-kind, and `rootPath` / `gitRoot`
+  /// Add a Server (remote SSH) project. Mirrors `addProject` but attaches the
+  /// Project to the Host for `remoteHost` (an existing record with the same
+  /// fields, else a new one) so the project is `.server`-kind, and `rootPath` / `gitRoot`
   /// hold **remote** path strings. When `gitRoot` is nil a synthetic worktree
   /// seeds the row (same as a local folder project) so the sidebar has
   /// something to show before the first SSH reconcile discovers the real
@@ -367,11 +412,14 @@ final class HierarchyManager {
       manualOrder: nextManualOrder
     )
     catalog.projects.append(project)
+    attachServerProject(at: catalog.projects.count - 1, to: remoteHost)
     store.scheduleSave(catalog)
     return projectID
   }
 
-  /// Apply an edited Server-project connection in place. Host-only changes
+  /// Apply an edited Server-project connection in place. The entered host
+  /// fields select the Host the same way `addServerProject` does; the Host
+  /// it leaves stays in the Host list. Host-only changes
   /// (alias / user / port to the same machine) keep the worktree rows — their
   /// remote paths are still valid. A `rootPath` change re-points the project
   /// at a different remote directory, so every existing row's path is stale:
@@ -389,7 +437,7 @@ final class HierarchyManager {
     let pathChanged =
       Self.normalizeRemotePath(catalog.projects[index].rootPath)
       != Self.normalizeRemotePath(rootPath)
-    catalog.projects[index].remoteHost = remoteHost
+    attachServerProject(at: index, to: remoteHost)
     catalog.projects[index].rootPath = rootPath
     catalog.projects[index].gitRoot = gitRoot
     if pathChanged {

@@ -116,7 +116,7 @@
 | `codans status` | `system.status` | server 标识、uptime、connected-clients 数 |
 | `codans launch [--wait N]` | *(本地)* | 若未运行则 `open -g Codans.app` 并最多等 N 秒（默认 10）等 socket 出现；唯一会拉起应用的命令。CLI 自己环境里的 `CODANS_SOCKET_PATH` / `CODANS_CONFIG_DIR` / `CODANS_STATE_DIR` 经 `open --env` 转交给应用，等待的 socket 与应用绑定的是同一个 |
 | `codans doctor` | *(本地)* | 检查 socket 路径、可达性、是否来自环境变量、CLI 版本；不做应用往返 |
-| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；`--json` 的 project 带 `kind`（`ProjectKind` raw value），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null）与 `workspaceGroup`（workspace 行的 `{id, name, role}`，`role` 为 `groupTerminal` / `reference` / `member`，其余省略），tab / pane 带 `handle`（`t<n>` / `p<n>`）。workspace 的行按组排列（`default` 在前），文本输出把成员行缩进在组行之下 |
+| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；每个 Project 有一行 `host:`（Host 显示名与 ID；本地 Project 为 `This Mac`）。`--json` 的 project 带 `kind`（`ProjectKind` raw value）与 `host`（`{id, name}`，This Mac 的 `id` 为 null），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null）与 `workspaceGroup`（workspace 行的 `{id, name, role}`，`role` 为 `groupTerminal` / `reference` / `member`，其余省略），tab / pane 带 `handle`（`t<n>` / `p<n>`）。workspace 的行按组排列（`default` 在前），文本输出把成员行缩进在组行之下 |
 | `codans broadcast` | `terminal.broadcastInput` | 见 [send / broadcast](#codans-pane-send--codans-broadcast) |
 
 > `codans --version` 印 `Codans <version>`（ArgumentParser 内建）。
@@ -129,7 +129,7 @@
 |---|---|---|---|
 | `codans project list` | `hierarchy.listProjects` | `HierarchyHandlers.listProjects` | 无 |
 | `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]`。`PATH` 下存在 `.codans/workspace-groups.json`（或旧版 `.codans/workspace.json`）时注册为 workspace（见 [Workspace](workspace.md)） |
-| `codans project show [ID]` | `hierarchy.describeProject` | `HierarchyHandlers.describeProject` | `[ID]`；回带 `{id, name, canonicalName, rootPath, gitRoot, remoteHost, isSelected, selectedWorktreeID, worktreeCount, archivedWorktreeCount, tagIDs}` |
+| `codans project show [ID]` | `hierarchy.describeProject` | `HierarchyHandlers.describeProject` | `[ID]`；回带 `{id, name, canonicalName, rootPath, gitRoot, remoteHost, host, isSelected, selectedWorktreeID, worktreeCount, archivedWorktreeCount, tagIDs}` |
 | `codans project rename ID NAME` | `hierarchy.renameProject` | `HierarchyManager.renameProject` | `ID`，`NAME`（空串或等于文件夹名 → 清除覆盖） |
 | `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（id/名字/`current`） |
 

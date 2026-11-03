@@ -1208,6 +1208,26 @@
       ],
       "additionalProperties": false
     },
+    "hostRef": {
+      "description": "The Host a Project is on. `id` is null for This Mac.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
     "treeProject": {
       "type": "object",
       "properties": {
@@ -1234,6 +1254,9 @@
             "workspace"
           ]
         },
+        "host": {
+          "$ref": "#/$defs/hostRef"
+        },
         "selectedWorktreeID": {
           "type": [
             "string",
@@ -1252,6 +1275,7 @@
         "name",
         "rootPath",
         "kind",
+        "host",
         "worktrees"
       ],
       "additionalProperties": false
@@ -1346,6 +1370,9 @@
             "string",
             "null"
           ]
+        },
+        "host": {
+          "$ref": "#/$defs/hostRef"
         },
         "isSelected": {
           "type": "boolean"

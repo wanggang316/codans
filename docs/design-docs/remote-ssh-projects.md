@@ -65,9 +65,14 @@ codans never collects or stores a password or key.
 Representation reuses the existing string-path plumbing rather than forking the
 model:
 
-- `Project.remoteHost: RemoteHost?` — non-nil ⇒ a Server project. `RemoteHost`
-  is `{ alias, username?, port? }` and derives the `ssh` destination + option
-  argv. It carries no secret.
+- `Catalog.hosts: [HostRecord]` — the Host list (ADR 0003). A `HostRecord` is
+  `{ id, address, username?, port?, name? }`; no two records share
+  (address, username, port), with no port equal to 22.
+- `Project.hostID: HostID?` — non-nil ⇒ a Server project, persisted in place of
+  host fields. `Project.remoteHost: RemoteHost?` is the endpoint resolved from
+  the Host record (`Catalog.resolveHostReferences`), so runtime code reads the
+  connection without a lookup. `RemoteHost` is `{ alias, username?, port? }`
+  and derives the `ssh` destination + option argv. It carries no secret.
 - For a Server project, `rootPath` / `gitRoot` / each `Worktree.path` hold
   **remote** path strings. The existing `worktree.path → workingDirectory` flow
   is preserved; the SSH layer applies `cd` on the remote.
@@ -156,9 +161,17 @@ terminal (commit/push in a pane refreshes the chip immediately).
 
 ### Data Storage
 
-`RemoteHost` is `Codable`, and `Project.remoteHost` is `encodeIfPresent` — it is
-omitted from the encoded form when nil, so existing local catalogs are
-byte-identical on round-trip and need no migration. A Server project's
+`catalog.json` v5 stores the Host list as `hosts`, and each Server project
+stores only `hostID`. `HierarchyManager` is the single writer: Connect to
+Server and Edit Connection reuse the Host whose fields equal the entered ones,
+else add a record (`Catalog.hostID(for:)`). Edit and delete of a Host go
+through `HierarchyClient`; delete is refused while a Project refers to it.
+
+`CatalogMigrationV4ToV5` moves the `remoteHost` fields of a v4 catalog into
+the Host list: each distinct (address, username, port) becomes one record, in
+Project order. A Server project without a valid `hostID` (a connection restored
+from the sidecar) gets a record the same way on every load
+(`Catalog.adoptHostReferences`). A Server project's
 `rootPath`/`gitRoot`/worktree paths are stored verbatim (remote strings), never
 passed through the local canonicalizer.
 
@@ -170,7 +183,8 @@ Two small sibling files live beside the catalog:
 - `saved-server-hosts.json` (`SavedServerHosts`) — MRU list of successfully
   validated hosts (address + username + port, capped) feeding the Connect to
   Server sheet's host-field picker. Connection info only; auth never leaves the
-  user's SSH config + agent.
+  user's SSH config + agent. Not migrated into the Host list; the Host picker
+  replaces it (ADR 0003).
 
 ### Agent Detection Parity
 
@@ -215,7 +229,8 @@ whenever one is installed; the header button hides when none is.
 
 ### Component Boundaries
 
-- `CodansCore` — `RemoteHost`, `Project.remoteHost`, `ProjectKind.server`
+- `CodansCore` — `RemoteHost`, `HostRecord`, `Catalog.hosts` operations,
+  `Project.hostID` / `remoteHost`, `ProjectKind.server`
   (pure domain, no SSH knowledge).
 - `Process/` — `SSHCommand`, `RemoteGitService`, `RemoteReachabilityProbe`
   (pure builders + git-over-SSH; no UI, no catalog).

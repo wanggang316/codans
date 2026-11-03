@@ -35,6 +35,13 @@ public nonisolated struct TagID: HierarchyID {
   public init(raw: UUID) { self.raw = raw }
 }
 
+/// Identifier of a `HostRecord` in the catalog's Host list. Server projects
+/// refer to their Host by this id (ADR 0003).
+public nonisolated struct HostID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
+}
+
 /// Identifier for a `Notification` row in the inbox. Distinct from
 /// `HierarchyID` because notifications are time-series records, not nodes
 /// in the project tree — keeping them separate avoids accidental mixing

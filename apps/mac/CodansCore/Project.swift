@@ -27,9 +27,18 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Resolved git repository root. For a Server project this is a **remote** path
   /// string (discovered over SSH), `nil` when the remote root is a plain folder.
   public var gitRoot: String?
+  /// The Host record (`Catalog.hosts`) this Server project is on. `nil` = a
+  /// local Project, on This Mac. Persisted in place of the host fields
+  /// (ADR 0003).
+  public var hostID: HostID?
   /// SSH destination this project lives on. `nil` = local. When set, `rootPath` /
   /// `gitRoot` / each `Worktree.path` are remote path strings and terminals/git
   /// run over SSH. See `RemoteHost`.
+  ///
+  /// Resolved from `hostID` by the catalog (`Catalog.resolveHostReferences`)
+  /// so runtime code reads the connection without a Host lookup. Not
+  /// persisted when `hostID` is set; a value without a `hostID` comes from a
+  /// legacy catalog and is turned into a Host record on load.
   public var remoteHost: RemoteHost?
   public var worktrees: [Worktree]
   public var selectedWorktreeID: WorktreeID?
@@ -103,6 +112,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     name: String,
     rootPath: String,
     gitRoot: String? = nil,
+    hostID: HostID? = nil,
     remoteHost: RemoteHost? = nil,
     worktrees: [Worktree] = [],
     selectedWorktreeID: WorktreeID? = nil,
@@ -127,6 +137,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     let canonical = (rootPath as NSString).lastPathComponent
     self.displayName = (name.isEmpty || name == canonical) ? nil : name
     self.gitRoot = gitRoot
+    self.hostID = hostID
     self.remoteHost = remoteHost
     self.worktrees = worktrees
     self.selectedWorktreeID = selectedWorktreeID
@@ -185,7 +196,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
+    case id, name, displayName, rootPath, gitRoot, hostID, remoteHost, worktrees, selectedWorktreeID,
       isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon, isWorkspace, workspaceGroups
   }
 
@@ -206,6 +217,10 @@ extension Project: Codable {
       self.displayName = nil
     }
     self.gitRoot = try container.decodeIfPresent(String.self, forKey: .gitRoot)
+    self.hostID = try container.decodeIfPresent(HostID.self, forKey: .hostID)
+    // Legacy (catalog v4 and older) and the IPC project list carry the host
+    // fields on the Project. With a `hostID` the catalog replaces them with
+    // the endpoint of the Host record (`Catalog.resolveHostReferences`).
     self.remoteHost = try container.decodeIfPresent(RemoteHost.self, forKey: .remoteHost)
     self.worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
     self.selectedWorktreeID = try container.decodeIfPresent(WorktreeID.self, forKey: .selectedWorktreeID)
@@ -242,9 +257,15 @@ extension Project: Codable {
     try container.encodeIfPresent(displayName, forKey: .displayName)
     try container.encode(rootPath, forKey: .rootPath)
     try container.encodeIfPresent(gitRoot, forKey: .gitRoot)
-    // Only emit `remoteHost` for Server projects — keeps existing local catalogs
-    // byte-identical on round-trip.
-    try container.encodeIfPresent(remoteHost, forKey: .remoteHost)
+    // A Server project stores only its Host id; the Host fields live in
+    // `Catalog.hosts`. A Server project without a Host id (not yet attached
+    // to a record) keeps the legacy fields so the connection is never lost;
+    // the next load turns them into a Host record.
+    if let hostID {
+      try container.encode(hostID, forKey: .hostID)
+    } else {
+      try container.encodeIfPresent(remoteHost, forKey: .remoteHost)
+    }
     try container.encode(worktrees, forKey: .worktrees)
     try container.encodeIfPresent(selectedWorktreeID, forKey: .selectedWorktreeID)
     // Only emit `isExpanded` when collapsed — keeps the common case

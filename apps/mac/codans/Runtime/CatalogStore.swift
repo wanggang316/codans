@@ -83,9 +83,18 @@ class CatalogStore {
       logger.notice("restored isWorkspace flags from workspace manifests")
       needsSave = true
     }
+    // A connection restored from the sidecar has host fields but no Host
+    // record yet. On an older version the migration below attaches it.
+    if existing.version == Catalog.currentVersion, existing.adoptHostReferences() {
+      logger.notice("attached restored connections to Host records")
+      needsSave = true
+    }
     if existing.version < Catalog.currentVersion {
       let fromVersion = existing.version
-      existing = CatalogMigrationV3ToV4.migrate(existing)
+      if existing.version < 4 {
+        existing = CatalogMigrationV3ToV4.migrate(existing)
+      }
+      existing = CatalogMigrationV4ToV5.migrate(existing)
       do {
         try StoreBackup.copyAside(fileURL, reason: .migrated(fromVersion: fromVersion))
       } catch {
