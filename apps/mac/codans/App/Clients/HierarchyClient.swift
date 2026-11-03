@@ -57,6 +57,21 @@ nonisolated struct HierarchyClient: Sendable {
       _ projectID: ProjectID, _ tags: Set<TagID>
     ) -> Void
   var setSidebarFilter: @MainActor @Sendable (SidebarFilter) -> Void
+
+  // MARK: - Host list (ADR 0003)
+
+  /// The Host list, in the order of addition. This Mac is not in it.
+  var hosts: @MainActor @Sendable () -> [HostRecord]
+  /// Appends a Host record. Throws `HostRecordError` for invalid fields or a
+  /// duplicate (Host, Username, Port).
+  var addHost: @MainActor @Sendable (_ record: HostRecord) throws -> Void
+  /// Replaces the Host record with the same id; every Project on it gets
+  /// the new connection. Throws `HostRecordError` like `addHost`.
+  var updateHost: @MainActor @Sendable (_ record: HostRecord) throws -> Void
+  /// Deletes a Host record. Throws `HostRecordError.inUse` while a Project
+  /// refers to it.
+  var removeHost: @MainActor @Sendable (_ id: HostID) throws -> Void
+
   /// Replaces the catalog-wide active tag filter. Empty `.tags(set)` is
   /// normalized to `.all`.
   var setActiveTagFilter: @MainActor @Sendable (_ filter: TagFilter) -> Void
@@ -814,6 +829,10 @@ extension HierarchyClient {
         manager.setProjectTags(projectID, tags: tags)
       },
       setSidebarFilter: { manager.setSidebarFilter($0) },
+      hosts: { manager.catalog.hosts },
+      addHost: { try manager.addHost($0) },
+      updateHost: { try manager.updateHost($0) },
+      removeHost: { try manager.removeHost($0) },
       setActiveTagFilter: { filter in manager.setActiveTagFilter(filter) },
       addProject: { name, rootPath, gitRoot in
         manager.addProject(name: name, rootPath: rootPath, gitRoot: gitRoot)
@@ -2373,6 +2392,10 @@ extension HierarchyClient: DependencyKey {
     removeTag: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectTags: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setSidebarFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    hosts: { fatalError("HierarchyClient.liveValue not configured") },
+    addHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    updateHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    removeHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2484,6 +2507,10 @@ extension HierarchyClient: DependencyKey {
     removeTag: unimplemented("HierarchyClient.removeTag"),
     setProjectTags: unimplemented("HierarchyClient.setProjectTags"),
     setSidebarFilter: unimplemented("HierarchyClient.setSidebarFilter"),
+    hosts: unimplemented("HierarchyClient.hosts", placeholder: []),
+    addHost: unimplemented("HierarchyClient.addHost"),
+    updateHost: unimplemented("HierarchyClient.updateHost"),
+    removeHost: unimplemented("HierarchyClient.removeHost"),
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
     addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),
