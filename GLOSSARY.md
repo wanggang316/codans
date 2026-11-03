@@ -40,3 +40,13 @@ _Avoid_: OSC status, because OSC 7501 also carries the runtime state.
 the order of `catalog.projects`; the user changes it by dragging a Project
 block. See [ADR 0001](docs/adr/0001-project-order-is-manual-only.md).
 _Avoid_: sort mode, join order, manual order.
+
+**Host**: A machine on which Projects live: This Mac, or a record in the Host
+list in Settings (Host address, Username, optional Port, optional Name). Every
+Project refers to exactly one Host. A Workspace and its member projects are on
+one Host. See [ADR 0002](docs/adr/0002-sidebar-outline-with-host-level.md) and
+[ADR 0003](docs/adr/0003-hosts-are-managed-records.md).
+_Avoid_: server (except in "Server project"), SSH alias.
+
+**This Mac**: The Host of all local Projects. The sidebar shows Host rows only
+when at least one Project is on another Host.
