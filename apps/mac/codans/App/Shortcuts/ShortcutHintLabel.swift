@@ -70,7 +70,7 @@ struct ShortcutHintTrailing<Accessories: View>: View {
 }
 
 extension View {
-  /// The glyph a hint replaces in place (a filter icon, a tab's color dot). While `isShown`
+  /// The content a hint replaces in place (a filter button's label, a tab's color dot). While `isShown`
   /// it shrinks, blurs, and fades out; pair it with `shortcutHintIncoming(_:)` on the hint
   /// that takes its place. Both views stay in the layout, so nothing around them moves.
   func shortcutHintOutgoing(_ isShown: Bool) -> some View {

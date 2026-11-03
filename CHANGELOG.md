@@ -35,10 +35,10 @@ and the project does not yet follow semantic versioning — every release until
 ### Changed
 
 - **Shortcut hints are plain grey text and fade in place.** Holding ⌘ shows
-  each shortcut without a key frame. A sidebar filter button's icon turns into
-  its shortcut key (`1` for ⌃⌘1), and a tab's color dot turns into its
-  shortcut: the icon or dot shrinks and fades out at once, and grows back when
-  you let go. On a sidebar row and an agent row, the shortcut fades in where
+  each shortcut without a key frame. On a sidebar filter button the shortcut
+  takes the place of the label, and on a tab it takes the place of the color
+  dot: the label or dot shrinks and fades out at once, and grows back when you
+  let go. On a sidebar row and an agent row, the shortcut fades in where
   the row's trailing badges are. Nothing around a hint moves.
 
 ### Deprecated
