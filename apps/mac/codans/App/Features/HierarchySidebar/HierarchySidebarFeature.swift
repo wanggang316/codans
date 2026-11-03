@@ -590,19 +590,24 @@ struct HierarchySidebarFeature {
       case .remoteConnectionSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
         // Connection validated. Read the mode BEFORE dismissing: edit applies
         // the change to the existing project in place; add registers a new
-        // one, named by the remote path's leaf (falling back to the host) so
+        // one, named by the remote path's leaf (falling back to the Host) so
         // the sidebar reads a recognizable label before the first SSH
         // reconcile fills in worktrees. Both re-reconcile.
-        let mode = state.remoteConnectionSheet?.mode ?? .add
+        guard let sheet = state.remoteConnectionSheet else { return .none }
+        guard let endpoint = registerHost(host, isNewHost: sheet.isNewHost) else {
+          state.remoteConnectionSheet?.hostChangedWhileConnecting(currentHosts: hierarchyClient.hosts())
+          return .none
+        }
+        let mode = sheet.mode
         state.remoteConnectionSheet = nil
         switch mode {
         case .edit(let projectID):
-          hierarchyClient.updateServerProject(projectID, host, remotePath, gitRoot)
+          hierarchyClient.updateServerProject(projectID, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         case .add:
           let leaf = (remotePath as NSString).lastPathComponent
-          let name = leaf.isEmpty ? host.displayAuthority : leaf
-          let projectID = hierarchyClient.addServerProject(name, host, remotePath, gitRoot)
+          let name = leaf.isEmpty ? host.displayName : leaf
+          let projectID = hierarchyClient.addServerProject(name, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         }
       case .remoteConnectionSheet:
@@ -634,6 +639,23 @@ struct HierarchySidebarFeature {
     .ifLet(\.archivedWorktreesSheet, action: \.archivedWorktreesSheet) {
       ArchivedWorktreesFeature()
     }
+  }
+
+  /// Put the Host of a validated connection in the Host list and return the
+  /// endpoint to save. A record from "New Host…" is added with its Name
+  /// (ADR 0003: no temporary Host). Returns `nil` when the picked Host was
+  /// edited or deleted in Settings while the SSH check ran: the check proved
+  /// the old address only, so the Project must not get the new one unchecked.
+  private func registerHost(_ host: HostRecord, isNewHost: Bool) -> RemoteHost? {
+    if let current = hierarchyClient.hosts().first(where: { $0.id == host.id }) {
+      return current.endpoint == host.endpoint ? host.endpoint : nil
+    }
+    guard isNewHost else { return nil }
+    // A failure (a record with the same fields was added meanwhile) is not
+    // fatal: the manager reuses or adds the record by fields, which are the
+    // validated ones.
+    try? hierarchyClient.addHost(host)
+    return host.endpoint
   }
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length
@@ -849,13 +871,14 @@ struct HierarchySidebarFeature {
       return .none
 
     case .connectServerTapped:
-      state.remoteConnectionSheet = RemoteConnectionFeature.State()
+      state.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: hierarchyClient.hosts())
       return .none
 
     case .projectEditConnectionTapped(let projectID):
       guard
         let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
-        let seeded = RemoteConnectionFeature.State.editing(project: project)
+        let seeded = RemoteConnectionFeature.State.editing(
+          project: project, hosts: hierarchyClient.hosts())
       else { return .none }
       state.remoteConnectionSheet = seeded
       return .none

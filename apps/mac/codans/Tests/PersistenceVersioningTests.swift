@@ -39,21 +39,6 @@ struct PersistenceVersioningTests {
   }
 
   @Test
-  func savedServerHostsReadsLegacyArrayAndWritesEnvelope() throws {
-    let directory = try tempDirectory()
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let url = directory.appendingPathComponent("saved-server-hosts.json")
-    let old = RemoteHost(alias: "old.local")
-    try AtomicFileStore.write([old], to: url)
-
-    let new = RemoteHost(alias: "new.local")
-    SavedServerHosts.record(new, at: url)
-
-    #expect(try jsonObject(at: url)?["version"] as? Int == SavedServerHosts.currentVersion)
-    #expect(SavedServerHosts.read(at: url) == [new, old])
-  }
-
-  @Test
   func githubSnapshotsUseStringKeysAndDropTheOldShape() throws {
     let directory = try tempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }

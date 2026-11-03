@@ -44,9 +44,14 @@ codans never collects or stores a password or key.
   removal path routes `git worktree remove --force` + branch cleanup over SSH
   ("is not a working tree" still maps to idempotent success). No local trash
   relocation on a host.
-- **Edit Connection** on a Server project (host / port / user / path),
-  re-validated like an add; a path change reseeds the worktree rows, a
-  host-only change keeps them.
+- **Connect to Server** picks a Host from the Host list, or "New Host…"
+  (Host, Username, Port, Name), which always adds a record to the Host list.
+  Fields equal to an existing Host use that Host.
+- **Edit Connection** on a Server project changes its Host choice and path,
+  never the Host fields, re-validated like an add; a path change reseeds the
+  worktree rows, a Host-only change keeps them.
+- **Settings › Hosts** adds, edits, and deletes Host records. An edit applies
+  to all Projects on the Host; delete is disabled while Projects use it.
 
 **Non-Goals**
 
@@ -175,16 +180,14 @@ from the sidecar) gets a record the same way on every load
 `rootPath`/`gitRoot`/worktree paths are stored verbatim (remote strings), never
 passed through the local canonicalizer.
 
-Two small sibling files live beside the catalog:
+A small sibling file lives beside the catalog:
 
 - `remote-hosts.json` (`RemoteHostSidecar`) — project-id → host mirror written on
   every save; heals `remoteHost` fields stripped by older builds sharing the
   catalog.
-- `saved-server-hosts.json` (`SavedServerHosts`) — MRU list of successfully
-  validated hosts (address + username + port, capped) feeding the Connect to
-  Server sheet's host-field picker. Connection info only; auth never leaves the
-  user's SSH config + agent. Not migrated into the Host list; the Host picker
-  replaces it (ADR 0003).
+
+The old `saved-server-hosts.json` recent-hosts list is no longer read or
+written; the Host list replaces it (ADR 0003).
 
 ### Agent Detection Parity
 

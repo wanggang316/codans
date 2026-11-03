@@ -3,12 +3,16 @@ import ComposableArchitecture
 import Foundation
 
 /// Reducer backing the "Connect to Server" sheet reached from the sidebar's
-/// Add Project menu. Collects the SSH host / port / username / remote path,
-/// validates the connection (reachability → path exists → git detection) over
-/// SSH, and on success emits `delegate(.connected(host:remotePath:gitRoot:))`.
-/// Its responsibility ends there — the parent sidebar reducer runs the
-/// `addServerProject` → reconcile path, mirroring how `CloneRepoFeature` hands
-/// off a cloned folder.
+/// Add Project menu, and its Edit Connection form. The user picks a Host from
+/// the Host list or enters a new one ("New Host…"), and a remote path. The
+/// sheet validates the connection over SSH (reachability → path exists → git
+/// detection) and on success emits `delegate(.connected(host:remotePath:gitRoot:))`.
+/// Its responsibility ends there — the parent sidebar reducer adds a new Host
+/// to the Host list and runs the `addServerProject` → reconcile path.
+///
+/// ADR 0003: a Host from "New Host…" always goes to the Host list; fields
+/// equal to an existing Host use that Host. Edit Connection changes the Host
+/// choice and the path, never the fields of a Host (Settings › Hosts does).
 ///
 /// Authentication is delegated to the user's `~/.ssh/config` + agent; the sheet
 /// never collects a password or key.
@@ -17,135 +21,179 @@ struct RemoteConnectionFeature {
   @ObservableState
   struct State: Equatable {
     /// Add a new Server project, or edit an existing one's connection in
-    /// place (host / port / user / path). Edit re-validates like an add and
-    /// the parent applies the result to the existing project.
+    /// place (Host choice / path). Edit re-validates like an add and the
+    /// parent applies the result to the existing project.
     enum Mode: Equatable {
       case add
       case edit(projectID: ProjectID)
     }
 
-    var mode: Mode = .add
-    /// Host or `~/.ssh/config` alias. Required.
-    var hostDraft: String = ""
-    /// Optional SSH port override. Empty = ssh default (or config alias's port).
-    var portDraft: String = ""
-    /// Optional username override. Empty = current user (or config alias's user).
-    var usernameDraft: String = ""
+    /// The entry selected in the Host picker.
+    enum HostChoice: Hashable {
+      case existing(HostID)
+      /// "New Host…": the Host fields show and make a new record.
+      case newHost
+    }
+
+    var mode: Mode
+    /// The Host list, in its order, read when the sheet opens.
+    var hosts: [HostRecord]
+    var hostChoice: HostChoice
+    /// Fields of the "New Host…" entry.
+    var newHost: HostDraft
     /// Remote absolute path (or `~/…`). Required.
-    var pathDraft: String = ""
-    var isConnecting: Bool = false
+    var pathDraft: String
+    var isConnecting: Bool
     /// Validation / connection failure, rendered in the sheet header.
     var errorMessage: String?
-    /// Previously validated hosts offered by the host-field picker (loaded on
-    /// appear). Picking one fills host / username / port — never the path.
-    var savedHosts: [RemoteHost] = []
+
+    /// `hostChoice` defaults to the first Host, or "New Host…" when the Host
+    /// list is empty.
+    init(
+      mode: Mode = .add,
+      hosts: [HostRecord] = [],
+      hostChoice: HostChoice? = nil,
+      newHost: HostDraft = HostDraft(),
+      pathDraft: String = "",
+      isConnecting: Bool = false,
+      errorMessage: String? = nil
+    ) {
+      self.mode = mode
+      self.hosts = hosts
+      self.hostChoice = hostChoice ?? hosts.first.map { .existing($0.id) } ?? .newHost
+      self.newHost = newHost
+      self.pathDraft = pathDraft
+      self.isConnecting = isConnecting
+      self.errorMessage = errorMessage
+    }
 
     var isEditing: Bool {
       if case .edit = mode { return true }
       return false
     }
 
-    /// Seed an edit form from an existing Server project's connection.
-    static func editing(project: Project) -> State? {
-      guard let host = project.remoteHost else { return nil }
-      return State(
-        mode: .edit(projectID: project.id),
-        hostDraft: host.alias,
-        portDraft: host.port.map(String.init) ?? "",
-        usernameDraft: host.username ?? "",
-        pathDraft: project.rootPath
-      )
+    var isNewHost: Bool { hostChoice == .newHost }
+
+    /// Whether Connect / Save can run: a path, and a Host or Host field.
+    var canConnect: Bool {
+      guard !isConnecting, !pathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else { return false }
+      return !isNewHost || !newHost.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Seed an edit form from an existing Server project: its Host and path.
+    static func editing(project: Project, hosts: [HostRecord]) -> State? {
+      guard let endpoint = project.remoteHost else { return nil }
+      var state = State(mode: .edit(projectID: project.id), hosts: hosts, pathDraft: project.rootPath)
+      if let hostID = project.hostID, hosts.contains(where: { $0.id == hostID }) {
+        state.hostChoice = .existing(hostID)
+      } else {
+        // No record yet (the next catalog load attaches one): show the
+        // Project's fields as a new Host, which reuses a record they equal.
+        state.hostChoice = .newHost
+        state.newHost = HostDraft(record: HostRecord(endpoint: endpoint))
+      }
+      return state
+    }
+
+    static let hostChangedMessage =
+      "The host changed while connecting. Check the host and connect again."
+
+    /// Show the current Host list after the validated Host changed or was
+    /// deleted while the SSH check ran. The result of that check is dropped:
+    /// it belongs to the old address. A deleted choice falls back to the
+    /// first Host, or "New Host…".
+    mutating func hostChangedWhileConnecting(currentHosts: [HostRecord]) {
+      hosts = currentHosts
+      if case .existing(let id) = hostChoice, !currentHosts.contains(where: { $0.id == id }) {
+        hostChoice = currentHosts.first.map { .existing($0.id) } ?? .newHost
+      }
+      isConnecting = false
+      errorMessage = Self.hostChangedMessage
+    }
+
+    /// The Host to connect to. "New Host…" fields equal to an existing Host
+    /// resolve to that Host.
+    func selectedHost() throws(HostRecordError) -> HostRecord {
+      switch hostChoice {
+      case .existing(let id):
+        guard let record = hosts.first(where: { $0.id == id }) else { throw .notFound(id) }
+        return record
+      case .newHost:
+        let record = try newHost.record()
+        return hosts.first { $0.identity == record.identity } ?? record
+      }
     }
   }
 
   enum Action: Equatable {
-    case hostChanged(String)
-    case portChanged(String)
+    case hostChoiceChanged(State.HostChoice)
+    case addressChanged(String)
     case usernameChanged(String)
+    case portChanged(String)
+    case nameChanged(String)
     case pathChanged(String)
-    case savedHostsRequested
-    case savedHostsLoaded([RemoteHost])
-    case savedHostSelected(RemoteHost)
     case connectButtonTapped
     case connectFailed(String)
-    case connectSucceeded(host: RemoteHost, remotePath: String, gitRoot: String?)
+    case connectSucceeded(host: HostRecord, remotePath: String, gitRoot: String?)
     case cancelButtonTapped
     case delegate(Delegate)
 
     @CasePathable
     enum Delegate: Equatable {
       case dismissed
-      /// Validated connection. Parent registers it via `addServerProject`.
-      case connected(host: RemoteHost, remotePath: String, gitRoot: String?)
+      /// Validated connection. `host` is a record of the Host list, or a new
+      /// record the parent adds to it. Parent registers the project via
+      /// `addServerProject`.
+      case connected(host: HostRecord, remotePath: String, gitRoot: String?)
     }
   }
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .hostChanged(let value):
-        state.hostDraft = value
+      case .hostChoiceChanged(let choice):
+        state.hostChoice = choice
+        state.errorMessage = nil
         return .none
 
-      case .portChanged(let value):
-        // Keep digits only so the field can't hold a non-numeric port.
-        state.portDraft = value.filter(\.isNumber)
+      case .addressChanged(let value):
+        state.newHost.address = value
         return .none
 
       case .usernameChanged(let value):
-        state.usernameDraft = value
+        state.newHost.username = value
+        return .none
+
+      case .portChanged(let value):
+        state.newHost.port = HostDraft.sanitizedPort(value)
+        return .none
+
+      case .nameChanged(let value):
+        state.newHost.name = value
         return .none
 
       case .pathChanged(let value):
         state.pathDraft = value
         return .none
 
-      case .savedHostsRequested:
-        return .run { send in
-          await send(.savedHostsLoaded(SavedServerHosts.read()))
-        }
-
-      case .savedHostsLoaded(let hosts):
-        state.savedHosts = hosts
-        return .none
-
-      case .savedHostSelected(let host):
-        state.hostDraft = host.alias
-        state.usernameDraft = host.username ?? ""
-        state.portDraft = host.port.map(String.init) ?? ""
-        state.errorMessage = nil
-        return .none
-
       case .connectButtonTapped:
-        let host = state.hostDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let path = state.pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else {
-          state.errorMessage = "Enter a host or SSH alias."
+        let host: HostRecord
+        do {
+          host = try state.selectedHost()
+        } catch {
+          state.errorMessage = error.localizedDescription
           return .none
         }
+        let path = state.pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
           state.errorMessage = "Enter the remote path to open."
           return .none
         }
-        let portString = state.portDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        var port: Int?
-        if !portString.isEmpty {
-          guard let parsed = Int(portString), (1...65535).contains(parsed) else {
-            state.errorMessage = "Port must be between 1 and 65535."
-            return .none
-          }
-          port = parsed
-        }
-        let username = state.usernameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let remoteHost = RemoteHost(
-          alias: host,
-          username: username.isEmpty ? nil : username,
-          port: port
-        )
         state.errorMessage = nil
         state.isConnecting = true
         return .run { send in
-          await Self.validate(host: remoteHost, path: path, send: send)
+          await Self.validate(host: host, path: path, send: send)
         }
 
       case .connectFailed(let message):
@@ -172,10 +220,11 @@ struct RemoteConnectionFeature {
   /// `connectFailed`; success carries the resolved absolute remote path and
   /// the (optional) remote git root.
   private static func validate(
-    host: RemoteHost,
+    host record: HostRecord,
     path: String,
     send: Send<Action>
   ) async {
+    let host = record.endpoint
     guard await RemoteReachabilityProbe.isReachable(host: host) else {
       await send(
         .connectFailed("Cannot reach \(host.displayAuthority). Check the host and your SSH config.")
@@ -188,9 +237,6 @@ struct RemoteConnectionFeature {
       return
     }
     let gitRoot = await service.discoverGitRoot(candidatePath: resolved)
-    // A validated host is worth remembering (add and edit alike) — it becomes
-    // a one-click prefill in the host-field picker next time.
-    SavedServerHosts.record(host)
-    await send(.connectSucceeded(host: host, remotePath: resolved, gitRoot: gitRoot))
+    await send(.connectSucceeded(host: record, remotePath: resolved, gitRoot: gitRoot))
   }
 }

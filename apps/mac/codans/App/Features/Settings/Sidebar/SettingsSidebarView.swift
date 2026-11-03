@@ -192,6 +192,7 @@ struct SettingsSidebarView: View {
     // so the glyph reads the same wherever a run shows up.
     case .workflows: return "arrow.triangle.branch"
     case .github: return "arrow.triangle.pull"
+    case .hosts: return "server.rack"
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"
     case .notifications: return "bell"

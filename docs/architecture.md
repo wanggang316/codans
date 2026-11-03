@@ -178,12 +178,11 @@ Four roots per channel. Debug builds use `~/.codans-dev/` and `~/Library/Caches/
 | `<worktree>/.codans/workflow-runs/<run>/run.json`, `index.json` (`CodansCore/Workflow/WorkflowRunStore.swift`) | worktree | v1 | One directory per Agent Workflow run: the record (status, bindings, inputs, state, steps, deliveries — never tokens), `log.md`, the definition copy, materialized instructions, deliveries, and `run:` step output; `index.json` lists the worktree's runs and keeps the last 20. Definitions themselves are `*.workflow.yaml` files discovered from the app bundle, `~/.codans/workflows/` (shared by both channels), and `<repo>/.codans/workflows/` — see [Workflow](design-docs/workflow.md). |
 | `notifications.json` (`CodansCore/Notifications/InboxFile.swift`) | state | v1 | Inbox entries; `notifications.quarantine-shown` marks the last forward-version backup already announced. |
 | `remote-hosts.json` | state | v1 | Server projects' connection info, used to restore a `remoteHost` an older build stripped from the catalog. |
-| `saved-server-hosts.json` | state | v1 | Most-recently-used server hosts for the Connect to Server sheet. |
 | `project-icons/`, `agent-homes/` | state | — | Copied custom project icons; per-profile `HOME`s for dedicated-home agent profiles. |
 | `backups/` | state, config | — | Files set aside by `StoreBackup` (see below), plus `legacy-config-<ts>/` from the one-time migration. |
 | `github-snapshots.json` | cache | v1 | Per-Project PR snapshots for the first sidebar paint; deleted if unreadable. |
 
-The three small stores without a version field of their own (`remote-hosts`, `saved-server-hosts`, `github-snapshots`) use a `{ version, entries }` envelope (`CodansCore/Persistence/VersionedFile.swift`).
+The two small stores without a version field of their own (`remote-hosts`, `github-snapshots`) use a `{ version, entries }` envelope (`CodansCore/Persistence/VersionedFile.swift`).
 
 The shared JSON write primitive is atomic-rename persistence (`CodansCore/AtomicFileStore.swift`):
 1. Encode to temp file in the same directory

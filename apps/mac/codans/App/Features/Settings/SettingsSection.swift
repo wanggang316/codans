@@ -10,6 +10,7 @@ public enum SettingsSection: Hashable, Sendable {
   case agents
   case workflows
   case github
+  case hosts
   case worktree
   case terminal
   case notifications
@@ -29,7 +30,7 @@ public enum SettingsSection: Hashable, Sendable {
 
   /// Canonical iteration order for global sidebar rows.
   public static let globals: [SettingsSection] = [
-    .general, .github, .worktree, .terminal, .agents, .workflows, .notifications, .developer, .globalCommands,
+    .general, .github, .hosts, .worktree, .terminal, .agents, .workflows, .notifications, .developer, .globalCommands,
     .shortcuts, .updates, .about,
   ]
 
@@ -43,6 +44,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .agents: return "Agents"
     case .workflows: return "Workflows"
     case .github: return "GitHub"
+    case .hosts: return "Hosts"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"
     case .notifications: return "Notifications"

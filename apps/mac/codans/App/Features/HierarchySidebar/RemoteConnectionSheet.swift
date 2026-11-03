@@ -1,3 +1,4 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
@@ -20,11 +21,12 @@ struct RemoteConnectionSheetPresenter: ViewModifier {
   }
 }
 
-/// SwiftUI sheet for `RemoteConnectionFeature`. Header error banner, host /
-/// port / username / remote-path fields, an in-flight spinner, and a Cancel /
-/// Connect footer. Mirrors `CloneRepoSheet`'s shape so the two Add Project
-/// surfaces feel consistent. Auth is delegated to the user's SSH config +
-/// agent — the sheet never asks for a password or key.
+/// SwiftUI sheet for `RemoteConnectionFeature`. Header error banner, the Host
+/// picker (Host list + "New Host…"), the Host fields when "New Host…" is
+/// selected, the remote path, an in-flight spinner, and a Cancel / Connect
+/// footer. Mirrors `CloneRepoSheet`'s shape so the two Add Project surfaces
+/// feel consistent. Auth is delegated to the user's SSH config + agent — the
+/// sheet never asks for a password or key.
 struct RemoteConnectionSheet: View {
   @Bindable var store: StoreOf<RemoteConnectionFeature>
 
@@ -43,49 +45,19 @@ struct RemoteConnectionSheet: View {
 
       VStack(alignment: .leading, spacing: 4) {
         Text("Host").font(.callout)
-        HStack(spacing: 6) {
-          TextField(
-            "IP, hostname, or ~/.ssh/config alias",
-            text: Binding(
-              get: { store.hostDraft },
-              set: { store.send(.hostChanged($0)) }
-            )
-          )
-          .textFieldStyle(.roundedBorder)
-          .disabled(store.isConnecting)
-
-          if !store.savedHosts.isEmpty {
-            savedHostsMenu
-          }
-        }
+        hostPicker
       }
 
-      HStack(alignment: .top, spacing: 12) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Username").font(.callout)
-          TextField(
-            "optional",
-            text: Binding(
-              get: { store.usernameDraft },
-              set: { store.send(.usernameChanged($0)) }
-            )
-          )
-          .textFieldStyle(.roundedBorder)
-          .disabled(store.isConnecting)
-        }
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Port").font(.callout)
-          TextField(
-            "22",
-            text: Binding(
-              get: { store.portDraft },
-              set: { store.send(.portChanged($0)) }
-            )
-          )
-          .textFieldStyle(.roundedBorder)
-          .frame(width: 80)
-          .disabled(store.isConnecting)
-        }
+      if store.isNewHost {
+        HostFieldsEditor(
+          draft: store.newHost,
+          isDisabled: store.isConnecting,
+          onAddressChanged: { store.send(.addressChanged($0)) },
+          onUsernameChanged: { store.send(.usernameChanged($0)) },
+          onPortChanged: { store.send(.portChanged($0)) },
+          onNameChanged: { store.send(.nameChanged($0)) }
+        )
+        .padding(.leading, 12)
       }
 
       VStack(alignment: .leading, spacing: 4) {
@@ -101,7 +73,7 @@ struct RemoteConnectionSheet: View {
         .disabled(store.isConnecting)
       }
 
-      Text("Authentication uses your SSH config and agent.")
+      Text(footnote)
         .font(.caption)
         .foregroundStyle(.secondary)
 
@@ -126,34 +98,44 @@ struct RemoteConnectionSheet: View {
           store.send(.connectButtonTapped)
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(
-          store.isConnecting
-            || store.hostDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || store.pathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        )
+        .disabled(!store.canConnect)
       }
     }
     .padding(20)
     .frame(width: 460)
-    .task { store.send(.savedHostsRequested) }
   }
 
-  /// Host-field picker: previously validated hosts (MRU order). Picking one
-  /// fills host / username / port; the path field is left alone.
-  private var savedHostsMenu: some View {
-    Menu {
-      ForEach(store.savedHosts, id: \.self) { host in
-        Button(host.displayAuthority) {
-          store.send(.savedHostSelected(host))
-        }
+  private var footnote: String {
+    let auth = "Authentication uses your SSH config and agent."
+    return store.isNewHost ? "The new host is added to Settings › Hosts. \(auth)" : auth
+  }
+
+  /// The Host list in its order, then "New Host…".
+  private var hostPicker: some View {
+    Picker(
+      "Host",
+      selection: Binding(
+        get: { store.hostChoice },
+        set: { store.send(.hostChoiceChanged($0)) }
+      )
+    ) {
+      ForEach(store.hosts) { host in
+        Text(Self.pickerTitle(for: host))
+          .tag(RemoteConnectionFeature.State.HostChoice.existing(host.id))
       }
-    } label: {
-      Image(systemName: "clock.arrow.circlepath")
-        .accessibilityLabel("Previously used servers")
+      if !store.hosts.isEmpty {
+        Divider()
+      }
+      Text("New Host…")
+        .tag(RemoteConnectionFeature.State.HostChoice.newHost)
     }
-    .menuStyle(.borderlessButton)
-    .fixedSize()
+    .labelsHidden()
     .disabled(store.isConnecting)
-    .help("Previously used servers")
+  }
+
+  /// The display name, plus the address when a Name hides it.
+  static func pickerTitle(for host: HostRecord) -> String {
+    let authority = host.endpoint.displayAuthority
+    return host.displayName == authority ? authority : "\(host.displayName) — \(authority)"
   }
 }

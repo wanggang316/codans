@@ -28,7 +28,7 @@ extension Catalog {
   /// Append `record` to the Host list. Refuses an empty Host field, a port
   /// outside 1...65535, and a duplicate identity.
   public mutating func addHost(_ record: HostRecord) throws(HostRecordError) {
-    let record = try Self.validated(record)
+    let record = try record.validated()
     if let existing = hosts.first(where: { $0.identity == record.identity }) {
       throw .duplicate(existing: existing.id)
     }
@@ -41,7 +41,7 @@ extension Catalog {
     guard let index = hosts.firstIndex(where: { $0.id == record.id }) else {
       throw .notFound(record.id)
     }
-    let record = try Self.validated(record)
+    let record = try record.validated()
     if let other = hosts.first(where: { $0.id != record.id && $0.identity == record.identity }) {
       throw .duplicate(existing: other.id)
     }
@@ -64,7 +64,7 @@ extension Catalog {
   /// identity, else a new record appended to the list. This is how Connect
   /// to Server and Edit Connection turn entered fields into a Host.
   public mutating func hostID(for endpoint: RemoteHost) throws(HostRecordError) -> HostID {
-    let record = try Self.validated(HostRecord(endpoint: endpoint))
+    let record = try HostRecord(endpoint: endpoint).validated()
     if let existing = hosts.first(where: { $0.identity == record.identity }) {
       return existing.id
     }
@@ -104,7 +104,7 @@ extension Catalog {
         id = existing.id
       } else {
         // Legacy fields are kept as they are, even when they would not pass
-        // `validated`: the Project connected with them before.
+        // `HostRecord.validated()`: the Project connected with them before.
         let record = HostRecord(endpoint: endpoint)
         hosts.append(record)
         id = record.id
@@ -113,19 +113,5 @@ extension Catalog {
       changed = true
     }
     return changed
-  }
-
-  private static func validated(_ record: HostRecord) throws(HostRecordError) -> HostRecord {
-    var record = record
-    record.address = record.address.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !record.address.isEmpty else { throw .missingAddress }
-    let username = record.username?.trimmingCharacters(in: .whitespacesAndNewlines)
-    record.username = (username?.isEmpty ?? true) ? nil : username
-    let name = record.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-    record.name = (name?.isEmpty ?? true) ? nil : name
-    if let port = record.port, !(1...65535).contains(port) {
-      throw .invalidPort(port)
-    }
-    return record
   }
 }

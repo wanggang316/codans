@@ -119,6 +119,8 @@ struct SettingsWindowView: View {
       WorkflowsSettingsView()
     case .github:
       GitHubSettingsView(settingsStore: settingsStore)
+    case .hosts:
+      HostsSettingsView(store: store.scope(state: \.hosts, action: \.hosts))
     case .worktree:
       SettingsWorktreeView(settingsStore: settingsStore)
     case .terminal:
