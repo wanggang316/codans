@@ -39,10 +39,10 @@ struct SidebarHostRow: View {
     }
     .buttonStyle(.plain)
     .onHover { isHovering = $0 }
-    .accessibilityElement(children: .ignore)
+    // A label on the Button keeps its press action for VoiceOver.
     .accessibilityLabel(group.displayName)
     .accessibilityValue(group.isExpanded ? "Expanded" : "Collapsed")
-    .accessibilityAddTraits([.isHeader, .isButton])
+    .accessibilityAddTraits(.isHeader)
     .accessibilityHint(group.isExpanded ? "Collapse" : "Expand")
   }
 }
