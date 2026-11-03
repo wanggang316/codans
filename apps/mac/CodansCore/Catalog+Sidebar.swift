@@ -213,9 +213,9 @@ extension Catalog {
 
   /// Every row a user can select, in the order the sidebar shows them: a
   /// Project row that stands for a worktree, then — while the Project is
-  /// expanded — its child rows. Rows inside a collapsed Project and the rows
-  /// of a Project that failed to load are not on screen, so they are left
-  /// out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
+  /// expanded — its child rows. Host rows cannot be selected. Rows inside a
+  /// collapsed Host or Project and the rows of a Project that failed to load
+  /// are not on screen, so they are left out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
   public var sidebarSelectionOrder: [SidebarRowAddress] {
     sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
   }
@@ -223,7 +223,11 @@ extension Catalog {
   public func sidebarSelectionOrder(
     pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
   ) -> [SidebarRowAddress] {
-    sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs).flatMap { project -> [SidebarRowAddress] in
+    let listed = sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
+    // The Host level lists Projects in Host order, and a closed Host hides
+    // its rows (ADR 0002, decision 8).
+    let shown = sidebarHostLevel.map { $0.groups(listed).filter(\.isExpanded).flatMap(\.projects) } ?? listed
+    return shown.flatMap { project -> [SidebarRowAddress] in
       if case .failed = project.loadState { return [] }
       var rows: [WorktreeID] = []
       if let row = project.rowWorktree { rows.append(row.id) }
@@ -235,6 +239,14 @@ extension Catalog {
       }
       return rows.map { SidebarRowAddress(projectID: project.id, worktreeID: $0) }
     }
+  }
+
+  /// The Host level of the sidebar, `nil` when every Project is on This Mac
+  /// (ADR 0002, decision 3). It reads all Projects, not the filtered ones,
+  /// so a filter does not add or remove the level.
+  public var sidebarHostLevel: SidebarHostLevel? {
+    guard projects.contains(where: { $0.hostID != nil }) else { return nil }
+    return SidebarHostLevel(records: hosts, collapsed: collapsedSidebarHosts)
   }
 
   /// Rows hidden inside a collapsed Workspace group, each mapped to the
