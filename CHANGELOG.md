@@ -38,9 +38,13 @@ and the project does not yet follow semantic versioning — every release until
   each shortcut without a key frame. On a sidebar filter button the shortcut
   takes the place of the label, and on a tab it takes the place of the color
   dot: the label or dot shrinks and fades out at once, and grows back when you
-  let go. The toolbar's Open In button no longer shows its shortcut while ⌘
-  is held; its tooltip still names it. On a sidebar row and an agent row, the shortcut fades in where
-  the row's trailing badges are. Nothing around a hint moves.
+  let go. On a sidebar row and an agent row, the shortcut fades in where the
+  row's trailing badges are. Nothing around a hint moves. The toolbar's Open
+  In button no longer shows its shortcut while ⌘ is held; its tooltip still
+  names it.
+- **Tooltips name shortcuts the same way everywhere.** A tooltip shows the
+  shortcut after the name in parentheses, for example "Back (⌘[)" and
+  "Cancel (⎋)".
 
 ### Deprecated
 
