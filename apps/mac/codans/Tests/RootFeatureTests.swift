@@ -1360,6 +1360,46 @@ struct RootFeatureTests {
     #expect(expandCalls.value.contains { $0.0 == project.id && $0.1 == true })
   }
 
+  @Test
+  func revealOpensAClosedHostRow() async {
+    let pane = Pane(workingDirectory: "/srv/api")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/srv/api", tabs: [tab], selectedTabID: tab.id)
+    let host = HostRecord(address: "box")
+    var project = Project(
+      name: "api", rootPath: "/srv/api", gitRoot: "/srv/api", hostID: host.id, remoteHost: host.endpoint)
+    project.worktrees = [worktree]
+    var catalog = Catalog(projects: [project], hosts: [host])
+    catalog.collapsedSidebarHosts = [.host(host.id)]
+    let address = PaneAddress(projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: pane.id)
+    let hostCalls = LockIsolated<[(SidebarHost, Bool)]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.addressOf = { _ in address }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      $0.hierarchyClient.selectTab = { _, _, _ in }
+      $0.hierarchyClient.focusPane = { _, _, _, _ in }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
+      $0.hierarchyClient.setProjectExpanded = { _, _ in }
+      $0.hierarchyClient.setSidebarHostExpanded = { host, expanded in
+        hostCalls.withValue { $0.append((host, expanded)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.agentState(.rowTapped(pane.id)))
+    await store.finish()
+
+    #expect(hostCalls.value.count == 1)
+    #expect(hostCalls.value.first?.0 == .host(host.id))
+    #expect(hostCalls.value.first?.1 == true)
+  }
+
   // MARK: - Post-completion switch gate (worktreeMaterialized)
 
   /// Recorder for the gate's selection and badge side-effects. Captures the

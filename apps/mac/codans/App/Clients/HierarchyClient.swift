@@ -362,6 +362,9 @@ nonisolated struct HierarchyClient: Sendable {
       _ projectID: ProjectID, _ isExpanded: Bool
     ) -> Void
 
+  /// Opens or closes a sidebar Host row. Persists like `setProjectExpanded`.
+  var setSidebarHostExpanded: @MainActor @Sendable (_ host: SidebarHost, _ isExpanded: Bool) -> Void
+
   /// Reads the Project's git root, calls `GitWorktreeClient.lsWorktrees`
   /// off the main actor, and merges on-disk worktrees into the catalog.
   /// Append-only — never removes catalog rows. Swallows errors. Consumed
@@ -1035,6 +1038,9 @@ extension HierarchyClient {
       },
       setProjectExpanded: { projectID, isExpanded in
         manager.setProjectExpanded(projectID: projectID, isExpanded: isExpanded)
+      },
+      setSidebarHostExpanded: { host, isExpanded in
+        manager.setSidebarHostExpanded(host, isExpanded: isExpanded)
       },
       reconcileDiscoveredWorktrees: { [weak settings] projectID in
         await reconcile(
@@ -2447,6 +2453,7 @@ extension HierarchyClient: DependencyKey {
     setWorktreePinned: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeIsNew: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setSidebarHostExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reconcileDiscoveredWorktrees: { _ in fatalError("HierarchyClient.liveValue not configured") },
     createWorktreeWithGit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeWorktreeWithGit: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2573,6 +2580,7 @@ extension HierarchyClient: DependencyKey {
     setWorktreePinned: unimplemented("HierarchyClient.setWorktreePinned"),
     setWorktreeIsNew: unimplemented("HierarchyClient.setWorktreeIsNew"),
     setProjectExpanded: unimplemented("HierarchyClient.setProjectExpanded"),
+    setSidebarHostExpanded: unimplemented("HierarchyClient.setSidebarHostExpanded"),
     reconcileDiscoveredWorktrees: unimplemented("HierarchyClient.reconcileDiscoveredWorktrees"),
     createWorktreeWithGit: unimplemented(
       "HierarchyClient.createWorktreeWithGit", placeholder: WorktreeID()
