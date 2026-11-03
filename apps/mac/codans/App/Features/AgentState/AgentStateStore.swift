@@ -243,9 +243,9 @@ final class AgentStateStore {
   //    on the screen path, optimistically clear a blocked state until the
   //    next snapshot re-derives it. A program status report is not
   //    second-guessed: the agent reports the end of its own prompt.
-  //  - onTerminalEvent(.paneInfoChanged(.title)): cache the pane's
-  //    latest sanitized OSC title for the row's activity text.
-  //    Display-only — never an input to state derivation.
+  //  - onTerminalEvent(.paneInfoChanged(.title)): while an agent is
+  //    bound, cache the pane's latest sanitized OSC title for the row's
+  //    activity text. Display-only — never an input to state derivation.
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.
   //  - onAgentUnbound: drop entry and scratch.
@@ -300,12 +300,12 @@ final class AgentStateStore {
     case .paneInfoChanged(let paneID, .title(let title)):
       // Display-only title cache — no refresh: the title never feeds
       // derivation (a "Working…" title must not flip state; see
-      // `titleChangesDoNotDriveWorkingAfterInput`). Scratch is created
-      // if absent so a title observed before the agent binds is already
-      // available when the row first renders. The title is untrusted
-      // program text: sanitize it like the OSC 7501 `message`, and never
-      // log it.
-      var s = scratch[paneID] ?? .fresh()
+      // `titleChangesDoNotDriveWorkingAfterInput`). Only a bound agent's
+      // titles count: before the bind the title is the shell's (often the
+      // cwd) or a previous program's, not the agent's activity. The title
+      // is untrusted program text: sanitize it like the OSC 7501
+      // `message`, and never log it.
+      guard entries[paneID] != nil, var s = scratch[paneID] else { break }
       s.lastTitle = UntrustedDisplayText.sanitized(title)
       scratch[paneID] = s
 
@@ -392,18 +392,21 @@ final class AgentStateStore {
     }()
     let effectiveUserInputSeen = assumeUserInputSeen || viewportImpliesActive
 
-    if var existing = scratch[paneID] {
-      existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
-      scratch[paneID] = existing
-    } else {
-      scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
-    }
     // Preserve a state seeded from the persisted quit snapshot
     // (`seedRestored`). The binder re-identifies the restored agent and
     // calls this on launch; hardcoding `.idle` here dropped the resumed
     // working/blocked badge before any live viewport arrived. Fresh
     // bindings have no prior entry and correctly start `.idle`.
     let seeded = entries[paneID]
+    if var existing = scratch[paneID] {
+      existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
+      // A new agent starts without a title: one cached for another agent
+      // kind is not this agent's activity.
+      if seeded?.kind != kind { existing.lastTitle = nil }
+      scratch[paneID] = existing
+    } else {
+      scratch[paneID] = .fresh(userInputSeen: effectiveUserInputSeen)
+    }
     entries[paneID] = AgentEntry(
       kind: kind,
       sessionID: sessionID,
@@ -519,10 +522,10 @@ final class AgentStateStore {
     return entry.state.isMidTask && entry.source != .programStatus
   }
 
-  /// Latest OSC title observed for `paneID` — the terminal title agents
-  /// push as they work, which doubles as a one-line "what is the agent
-  /// doing" cue — or nil when none has arrived (or the pane has been
-  /// torn down). Reading `scratch` inside a SwiftUI body registers
+  /// Latest OSC title the bound agent in `paneID` set — the terminal title
+  /// agents push as they work, which doubles as a one-line "what is the
+  /// agent doing" cue — or nil when the agent has set none since its bind
+  /// (or the pane has been torn down). Reading `scratch` inside a SwiftUI body registers
   /// `@Observable` tracking, so the reading view re-renders as the agent
   /// retitles the pane.
   func title(for paneID: PaneID) -> String? {
