@@ -357,7 +357,7 @@ enum CommandPaletteItems {
           searchText: "worktree project github repository",
           icon: "arrow.up.right.square",
           commandID: .openProjectOnGitHub,
-          kind: .openCurrentProjectOnGitHub
+          kind: .openCurrentProjectOnCodeHost
         ))
     }
     items.append(contentsOf: [

@@ -4,8 +4,8 @@ import SwiftUI
 import CodansCore
 
 /// GitHub section of the Settings window. Three blocks:
-///   - Availability: banner driven by a local `GitHubAvailability` state, probed on
-///     appear and on an explicit Re-check tap via the `GitHubClient` dependency.
+///   - Availability: banner driven by a local `CodeHostAvailability` state, probed on
+///     appear and on an explicit Re-check tap via the `CodeHostClient` dependency.
 ///   - Defaults: global merge strategy + post-merge Worktree action pickers, written
 ///     through `SettingsStore.mutateGeneral`.
 ///   - Per-Project overrides: deferred to a follow-up commit — `RepositorySettings`
@@ -13,13 +13,13 @@ import CodansCore
 ///
 /// Settings window is a separate scene from the main window with its own TCA store, so
 /// this view holds its own availability state rather than sharing RootFeature's
-/// `GitHubFeature` store. A future refactor can consolidate the two once a shared
+/// `CodeHostFeature` store. A future refactor can consolidate the two once a shared
 /// app-level store emerges.
 struct GitHubSettingsView: View {
   let settingsStore: SettingsStore
 
-  @Dependency(GitHubClient.self) private var gitHub
-  @State private var availability: GitHubAvailability = .unknown
+  @Dependency(CodeHostClient.self) private var codeHost
+  @State private var availability: CodeHostAvailability = .unknown
   @State private var isChecking: Bool = false
 
   var body: some View {
@@ -28,7 +28,10 @@ struct GitHubSettingsView: View {
         availabilityRow
         HStack {
           Button("Re-check") {
-            Task { await probe() }
+            Task {
+              await codeHost.invalidateResolution()
+              await probe()
+            }
           }
           .disabled(isChecking)
           Button("Open gh docs") {
@@ -106,7 +109,7 @@ struct GitHubSettingsView: View {
 
   private func probe() async {
     isChecking = true
-    let result = await gitHub.availability()
+    let result = await codeHost.availability(.github)
     availability = result
     isChecking = false
   }

@@ -16,14 +16,14 @@ import SwiftUI
 struct WorktreeHeaderInfoLabel: View {
   let worktree: Worktree
   let project: Project
-  let gitHubStore: StoreOf<GitHubFeature>
+  let codeHostStore: StoreOf<CodeHostFeature>
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
 
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @State private var isBranchRowHovered = false
 
   var body: some View {
-    let snapshot = gitHubStore.snapshots[worktree.id]
+    let snapshot = codeHostStore.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
       guard let snapshot else { return .noChecks }
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)

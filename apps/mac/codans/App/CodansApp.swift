@@ -25,11 +25,11 @@ struct CodansApp: App {
       $0.continuousClock = ContinuousClock()
       $0.suspendingClock = SuspendingClock()
       $0.uuid = .init { UUID() }
-      // GitHubClient + GitServiceClient have no engine/state dependency, so
+      // CodeHostClient + GitServiceClient have no engine/state dependency, so
       // wire them here too — both are touched by background tasks (PR
       // batch fetch, sidebar status monitor) that the running host app spins
       // up before `bringUp()` reaches its own `prepareDependencies` block.
-      $0.gitHub = .live()
+      $0.codeHost = .live()
       $0.gitService = .live()
     }
 
@@ -2213,7 +2213,7 @@ final class AppState {
   }
 
   /// Mirror task that keeps `RemoteRefsWatcher`'s set in sync with the
-  /// catalog's GitHub fetch units (unit id → repository root). Same
+  /// catalog's Code Host fetch units (unit id → repository root). Same
   /// pre-arm-sample / re-arm pattern as `startHeadWatcherSync`.
   private func startRemoteRefsWatcherSync() {
     remoteRefsWatcherSyncTask?.cancel()
@@ -2242,7 +2242,7 @@ final class AppState {
   fileprivate static func remoteRefsRepositories(from catalog: Catalog) -> [ProjectID: String] {
     var repositories: [ProjectID: String] = [:]
     for project in catalog.projects {
-      for unit in RootFeature.gitHubFetchUnits(in: project) {
+      for unit in RootFeature.codeHostFetchUnits(in: project) {
         repositories[unit.projectID] = unit.gitRoot.path(percentEncoded: false)
       }
     }

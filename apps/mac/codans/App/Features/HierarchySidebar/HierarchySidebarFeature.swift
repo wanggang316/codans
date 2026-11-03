@@ -78,10 +78,10 @@ struct WorktreeLifecycleProgress: Equatable {
 
 /// Batch confirmation payload for the Project ⋯ menu's "Archive / Remove All
 /// Merged Worktrees" items. The set of merged worktrees is resolved in the
-/// view (which holds the GitHub PR snapshots the sidebar reducer does not),
+/// view (which holds the Pull Request snapshots the sidebar reducer does not),
 /// so the IDs are captured here at tap-time and the confirmed handler fans
 /// them out to the per-worktree archive / remove lifecycle without re-walking
-/// GitHub state.
+/// Code Host state.
 struct PendingMergedBatch: Equatable {
   var projectID: ProjectID
   var worktreeIDs: [WorktreeID]
@@ -304,7 +304,7 @@ struct HierarchySidebarFeature {
     case projectPruneCompleted(pruned: Int, error: String?)
     case pruneToastDismissed
     /// Project ⋯ menu: batch archive every merged Worktree. The view
-    /// resolves the merged set from GitHub PR snapshots and passes the IDs.
+    /// resolves the merged set from Pull Request snapshots and passes the IDs.
     case projectArchiveAllMergedTapped(projectID: ProjectID, worktreeIDs: [WorktreeID])
     case projectArchiveAllMergedConfirmed
     case projectArchiveAllMergedCancelled
@@ -441,7 +441,7 @@ struct HierarchySidebarFeature {
       /// Context-menu "Open in GitHub" — RootFeature resolves the row's
       /// repository the same way as the ⌘⇧G command, but for the
       /// right-clicked row instead of the selection.
-      case openOnGitHub(projectID: ProjectID, worktreeID: WorktreeID)
+      case openOnCodeHost(projectID: ProjectID, worktreeID: WorktreeID)
       case openInDefaultEditor(worktreePath: String, projectID: ProjectID?)
       /// Sidebar's "Open in <Editor>" submenu — RootFeature dispatches
       /// `.editor(.openRequested)` directly with the explicit editor ID
