@@ -53,13 +53,17 @@ extension Catalog {
 }
 
 /// The retired sort modes (`joinOrder`, `activeFirst`, `manual`) and the
-/// per-Project `manualOrder` key. A catalog that still names a mode is sorted
-/// with it one time at load, so the order the user sees does not change.
-/// Neither key is written again.
+/// per-Project `manualOrder` key. A catalog without the `projectOrder` marker
+/// is sorted one time at load with its stored mode (`joinOrder` when none is
+/// stored), so the order the user sees does not change. Neither key is
+/// written again.
 nonisolated enum LegacyProjectOrder {
   static let joinOrder = "joinOrder"
   static let activeFirst = "activeFirst"
   static let manual = "manual"
+  /// Value of the catalog's `projectOrder` key in a file written under
+  /// ADR 0001. Without it, the file comes from an older build.
+  static let arrayMarker = "array"
 
   /// The one legacy key a Project carried for ordering.
   struct Fields: Decodable {
@@ -74,8 +78,8 @@ nonisolated enum LegacyProjectOrder {
   }
 
   /// Sorts `projects` the way the retired `sortMode` displayed them. Ties
-  /// keep the array order. A missing or unknown mode keeps the array as is:
-  /// without a stored mode the array is already the order on screen.
+  /// keep the array order. `nil` (a file with the `projectOrder` marker) or an
+  /// unknown mode keeps the array as is.
   static func materialize(_ projects: [Project], sortMode: String?, manualOrders: [Int]) -> [Project] {
     let areInIncreasingOrder: (Project, Project) -> Bool?
     switch sortMode {

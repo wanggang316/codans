@@ -152,13 +152,35 @@ struct ProjectOrderTests {
   }
 
   @Test
-  func catalogWithoutSortModeKeepsArrayOrder() throws {
+  func legacyCatalogWithoutSortModeLoadsSortedByAddedAt() throws {
+    // The old encoder omitted the default `joinOrder`, and the old sidebar
+    // still sorted by `addedAt`: the array alone was not the visible order.
     let projects = [
       Project(name: "c", rootPath: "/c", addedAt: date(3)),
       Project(name: "a", rootPath: "/a", addedAt: date(1)),
+      Project(name: "b", rootPath: "/b", addedAt: date(2)),
     ]
-    let catalog = try decodeLegacy(projects, sortMode: nil, manualOrders: [5, 1])
-    #expect(catalog.projects.map(\.name) == ["c", "a"])
+    let catalog = try decodeLegacy(projects, sortMode: nil)
+    #expect(catalog.projects.map(\.name) == ["a", "b", "c"])
+  }
+
+  @Test
+  func catalogWrittenUnderADR0001KeepsArrayOrderAgainstAddedAt() throws {
+    var catalog = Catalog(projects: [
+      Project(name: "a", rootPath: "/a", addedAt: date(1)),
+      Project(name: "b", rootPath: "/b", addedAt: date(2)),
+    ])
+    let b = catalog.projects[1].id
+    catalog.moveProject(b, to: .before(catalog.projects[0].id))
+    let decoded = try JSONDecoder().decode(Catalog.self, from: JSONEncoder().encode(catalog))
+    #expect(decoded.projects.map(\.name) == ["b", "a"])
+  }
+
+  @Test
+  func encoderMarksTheArrayAsTheProjectOrder() throws {
+    let object = try #require(
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(Catalog())) as? [String: Any])
+    #expect(object["projectOrder"] as? String == "array")
   }
 
   @Test
@@ -169,6 +191,7 @@ struct ProjectOrderTests {
     ]
     let catalog = try decodeLegacy(projects, sortMode: "byName")
     #expect(catalog.projects.map(\.name) == ["c", "a"])
+    // An unknown mode is not `joinOrder`; only a missing one is.
   }
 
   @Test(arguments: ["joinOrder", "activeFirst", "manual"])
@@ -177,6 +200,7 @@ struct ProjectOrderTests {
     let json = String(bytes: try JSONEncoder().encode(catalog), encoding: .utf8) ?? ""
     #expect(!json.contains("projectSortMode"))
     #expect(!json.contains("manualOrder"))
+    #expect(json.contains(#""projectOrder":"array""#))
     #expect(try JSONDecoder().decode(Catalog.self, from: JSONEncoder().encode(catalog)) == catalog)
   }
 
@@ -190,13 +214,15 @@ struct ProjectOrderTests {
 
   // MARK: - Helpers
 
-  /// Encodes `projects` the way a pre-ADR-0001 build wrote them: the catalog
-  /// names `sortMode` and each Project carries its `manualOrder`.
+  /// Encodes `projects` the way a pre-ADR-0001 build wrote them: no
+  /// `projectOrder` marker, the catalog names `sortMode` (or omits the default
+  /// `joinOrder`), and each Project carries its `manualOrder`.
   private func decodeLegacy(
     _ projects: [Project], sortMode: String?, manualOrders: [Int]? = nil
   ) throws -> Catalog {
     let data = try JSONEncoder().encode(Catalog(projects: projects))
     var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    object.removeValue(forKey: "projectOrder")
     if let sortMode { object["projectSortMode"] = sortMode }
     if let manualOrders {
       var encoded = try #require(object["projects"] as? [[String: Any]])
