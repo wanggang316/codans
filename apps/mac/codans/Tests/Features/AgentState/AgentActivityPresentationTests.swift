@@ -18,6 +18,49 @@ struct AgentActivityPresentationTests {
   }
 
   @Test
+  func defaultWindowIsQuarterSecond() {
+    #expect(AgentActivityPresentation.defaultInterval == .milliseconds(250))
+  }
+
+  @Test
+  func singleChangeAfterQuietPeriodIsDeliveredAtOnce() async {
+    let activity = AgentActivityPresentation(kind: .codex, interval: .zero)
+    activity.update(activity: "Reading")
+    await activity.awaitPendingUpdateForTests()
+    activity.update(activity: "Editing")
+    #expect(activity.text == "Editing")
+  }
+
+  @Test
+  func leadingChangeOpensWindowThatDeliversLatestAtItsEnd() async throws {
+    let activity = AgentActivityPresentation(kind: .codex, interval: .milliseconds(200))
+    activity.update(activity: "Reading")
+    try await Task.sleep(for: .milliseconds(300))
+    activity.update(activity: "Editing")
+    #expect(activity.text == "Editing")
+    activity.update(activity: "Testing")
+    activity.update(activity: "Reviewing")
+    #expect(activity.text == "Editing")
+    await activity.awaitPendingUpdateForTests()
+    #expect(activity.text == "Reviewing")
+  }
+
+  @Test
+  func deliveryAtWindowEndOpensNextWindow() async throws {
+    let activity = AgentActivityPresentation(kind: .codex, interval: .milliseconds(200))
+    activity.update(activity: "Reading")
+    activity.update(activity: "Editing")
+    // The first window ends near 200 ms and delivers "Editing"; that
+    // delivery opens a second window, so a change at 300 ms waits.
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(activity.text == "Editing")
+    activity.update(activity: "Testing")
+    #expect(activity.text == "Editing")
+    await activity.awaitPendingUpdateForTests()
+    #expect(activity.text == "Testing")
+  }
+
+  @Test
   func burstsDeliverLatestTextWithoutRestartingTheWindow() async {
     let activity = AgentActivityPresentation(kind: .codex, interval: .zero)
     activity.update(activity: "Reading")
