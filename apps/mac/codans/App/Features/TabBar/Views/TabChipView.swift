@@ -28,6 +28,9 @@ struct TabChipView: View {
   /// rectangle rather than crowding the inter-chip gap. Resolved at the row level so
   /// `TabChipView` stays free of environment-key dependencies.
   var chordHint: String?
+  /// ⌘ is held, so `chordHint` shows. Separate from `chordHint` so the chord stays
+  /// laid out while it fades out.
+  var showsChordHint = false
   let onSelect: () -> Void
   let onClose: () -> Void
   let onMiddleClick: () -> Void
@@ -172,19 +175,20 @@ struct TabChipView: View {
         .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
-      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
-      // tab's color dot (when set) sits there.
-      Group {
-        if let chordHint {
-          Text(chordHint)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
-        } else if let tabColor {
+      // The chord takes the trailing slot while ⌘ is held, in place of the
+      // tab's color dot (when set).
+      let showsChord = showsChordHint && chordHint != nil
+      ZStack(alignment: .trailing) {
+        if let tabColor {
           Circle()
             .fill(tabColor.swiftUIColor)
             .frame(width: 8, height: 8)
+            .shortcutHintOutgoing(showsChord)
             .frame(width: TabBarMetrics.closeButtonSize)
+        }
+        if let chordHint {
+          ShortcutHintLabel(chord: chordHint, trailingGap: TabBarMetrics.chordHintExtraInset)
+            .shortcutHintIncoming(showsChord)
         }
       }
       .padding(.trailing, TabBarMetrics.chipSlotInset)

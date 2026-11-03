@@ -2,9 +2,9 @@ import SwiftUI
 import CodansCore
 
 extension View {
-  /// Tooltip that appends the resolved chord for `id` after `description`,
-  /// rendered in macOS-conventional glyph form. When the command has no
-  /// resolved binding (or the user disabled it), falls back to plain
+  /// Tooltip that appends the resolved chord for `id` after `description`, in
+  /// the shared `ShortcutDisplay.tooltip(_:for:in:)` form. When the command has
+  /// no resolved binding (or the user disabled it), falls back to plain
   /// `.help(description)`. Reads `\.resolvedShortcuts` from the
   /// environment, already injected at the main scene root.
   ///
@@ -25,9 +25,6 @@ private struct HelpWithShortcutModifier: ViewModifier {
   }
 
   private var tooltip: String {
-    guard let resolved = shortcuts[id], resolved.isEnabled,
-      let binding = resolved.binding
-    else { return description }
-    return "\(description) (\(ShortcutDisplay.chord(for: binding)))"
+    ShortcutDisplay.tooltip(description, for: id, in: shortcuts)
   }
 }

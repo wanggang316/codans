@@ -64,6 +64,27 @@ struct ShortcutSchemaAuditTests {
     }
   }
 
+  @Test
+  func focusAgentAtCoversDigitsOneThroughNine() {
+    let expected: [CommandID] = [
+      .focusAgentAt1, .focusAgentAt2, .focusAgentAt3, .focusAgentAt4, .focusAgentAt5,
+      .focusAgentAt6, .focusAgentAt7, .focusAgentAt8, .focusAgentAt9,
+    ]
+    #expect((1...9).map { CommandID.focusAgentAt(index: $0) } == expected)
+    #expect(CommandID.focusAgentAt(index: 0) == nil)
+    #expect(CommandID.focusAgentAt(index: 10) == nil)
+  }
+
+  @Test
+  func sidebarFiltersMapToDistinctCommandsInBarOrder() {
+    let ids = SidebarFilter.allCases.map(CommandID.selectSidebarFilter)
+    #expect(
+      ids == [
+        .selectSidebarFilterAll, .selectSidebarFilterRemote, .selectSidebarFilterWorkspace,
+        .selectSidebarFilterPullRequests, .selectSidebarFilterUnread,
+      ])
+  }
+
   /// Pinned chord defaults. Numeric `keyCode` literals are deliberate — using `kVK_ANSI_*`
   /// would make the audit a tautology against the production schema. The values are taken
   /// from `Carbon.HIToolbox.Events.h` and from the call sites that lived inline before the
@@ -127,5 +148,19 @@ struct ShortcutSchemaAuditTests {
     (.selectWorktreeAt9, (0x19, [.control])),
     (.selectWorktreeAt10, (0x1D, [.control])),  // 0
     (.toggleCommandQueue, (0x25, [.command])),  // ⌘L
+    (.selectSidebarFilterAll, (0x12, [.command, .control])),
+    (.selectSidebarFilterRemote, (0x13, [.command, .control])),
+    (.selectSidebarFilterWorkspace, (0x14, [.command, .control])),
+    (.selectSidebarFilterPullRequests, (0x15, [.command, .control])),
+    (.selectSidebarFilterUnread, (0x17, [.command, .control])),
+    (.focusAgentAt1, (0x12, [.option])),
+    (.focusAgentAt2, (0x13, [.option])),
+    (.focusAgentAt3, (0x14, [.option])),
+    (.focusAgentAt4, (0x15, [.option])),
+    (.focusAgentAt5, (0x17, [.option])),
+    (.focusAgentAt6, (0x16, [.option])),
+    (.focusAgentAt7, (0x1A, [.option])),
+    (.focusAgentAt8, (0x1C, [.option])),
+    (.focusAgentAt9, (0x19, [.option])),
   ]
 }

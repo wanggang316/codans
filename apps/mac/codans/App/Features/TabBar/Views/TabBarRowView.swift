@@ -243,6 +243,7 @@ struct TabBarRowView: View {
       isLastTab: index == count - 1,
       // A narrowed chip shows only its edge, which the hint would cover.
       chordHint: slice == nil ? chordHint(for: index + 1) : nil,
+      showsChordHint: commandKeyObserver.isCommandHeld,
       onSelect: { onSelect(tab.id) },
       onClose: { onClose(tab.id) },
       onMiddleClick: { onMiddleClick(tab.id) },
@@ -566,17 +567,13 @@ struct TabBarRowView: View {
     DispatchQueue.main.async { scroller?.scroll(to: target, animated: false) }
   }
 
-  /// Resolves the registry chord (`switchToTabN`) to a display string while ⌘ is held.
-  /// Returned to `TabChipView.chordHint` so the chord renders inside the chip's trailing
-  /// slot (replacing the close button while held). Beyond ten tabs the schema has no
-  /// chord; returns nil and the chip keeps its close-button slot.
+  /// Resolves the registry chord (`switchToTabN`) to a display string for
+  /// `TabChipView.chordHint`, which shows it in the chip's trailing slot while ⌘ is held.
+  /// Beyond ten tabs the schema has no chord; returns nil.
   private func chordHint(for tabIndex: Int) -> String? {
-    guard commandKeyObserver.isCommandHeld,
-      let id = CommandID.switchToTab(index: tabIndex),
-      let resolved = resolvedShortcuts[id], resolved.isEnabled,
-      let binding = resolved.binding
+    guard let id = CommandID.switchToTab(index: tabIndex)
     else { return nil }
-    return ShortcutDisplay.chord(for: binding)
+    return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }
 }
 
@@ -626,6 +623,7 @@ private struct ResolvingTabChipView: View {
   /// Forwarded to `TabChipView.chordHint`. Resolved at the row level so this view stays
   /// out of the shortcut-environment plumbing.
   let chordHint: String?
+  let showsChordHint: Bool
   let onSelect: () -> Void
   let onClose: () -> Void
   let onMiddleClick: () -> Void
@@ -660,6 +658,7 @@ private struct ResolvingTabChipView: View {
       hasUnreadNotification: notificationRollup?.current.unreadTabs.contains(tab.id) == true
         && settingsStore?.settings.notifications.tabBellEnabled != false,
       chordHint: chordHint,
+      showsChordHint: showsChordHint,
       onSelect: onSelect,
       onClose: onClose,
       onMiddleClick: onMiddleClick,

@@ -45,6 +45,7 @@ public struct ShortcutSchema: Sendable {
     case projectAndWorktree
     case terminal
     case actions
+    case agents
   }
 }
 
@@ -66,6 +67,7 @@ extension ShortcutSchema {
   /// `.init(...)` shorthand; partitioning keeps each sub-expression small enough to resolve.
   public static let app: ShortcutSchema = .init(
     entries: generalEntries + projectAndWorktreeEntries + terminalEntries + actionEntries
+      + agentEntries
   )
 
   private static let generalEntries: [Entry] = [
@@ -286,6 +288,41 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_0), modifiers: [.control])
     ),
+    .init(
+      id: .selectSidebarFilterAll,
+      title: "Show All in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_1), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterRemote,
+      title: "Show Remote in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_2), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterWorkspace,
+      title: "Show Workspace in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_3), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterPullRequests,
+      title: "Show PRs in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_4), modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterUnread,
+      title: "Show Unread in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_5), modifiers: [.command, .control])
+    ),
   ]
 
   private static let terminalEntries: [Entry] = [
@@ -475,6 +512,73 @@ extension ShortcutSchema {
       category: .actions,
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_G), modifiers: [.command, .shift])
+    ),
+  ]
+
+  private static let agentEntries: [Entry] = [
+    // Agents View — select the pane of the Nth listed agent while the panel is open.
+    .init(
+      id: .focusAgentAt1,
+      title: "Select Agent 1",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_1), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt2,
+      title: "Select Agent 2",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_2), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt3,
+      title: "Select Agent 3",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_3), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt4,
+      title: "Select Agent 4",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_4), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt5,
+      title: "Select Agent 5",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_5), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt6,
+      title: "Select Agent 6",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_6), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt7,
+      title: "Select Agent 7",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_7), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt8,
+      title: "Select Agent 8",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_8), modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt9,
+      title: "Select Agent 9",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_9), modifiers: [.option])
     ),
   ]
 }
