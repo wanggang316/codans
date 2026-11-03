@@ -18,11 +18,13 @@
 
 ## Sidebar
 
-`HierarchySidebarView` 渲染当前 Catalog 的**扁平 Project 列表**，每个 Project 是一个 section，其下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），当前露出排序（reorder）与刷新两个动作。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
+`HierarchySidebarView` 把当前 Catalog 渲染成一棵 `NSOutlineView` 树（`SidebarOutline`，[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md)）：有远程 Project 时顶层是 Host 行，其下是 Project 行，Project 行下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），露出 Agents View 与刷新两个动作，没有排序按钮。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
 
-**Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与排序，只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
+**Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与 Project order（`catalog.projects` 的数组顺序），只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
 
 **Host 行。** 只要 Catalog 中有一个 Project 不在本机，顶层就是 Host 行：先 **This Mac**（无过滤时即使本机没有 Project 也显示），再按 Host 列表顺序，每个有 Project 的 Host 一行，Project 列在其下（`Catalog.sidebarHostLevel` / `SidebarHostLevel.groups`）。是否出现这一层看全部 Project，不看过滤结果，所以切换过滤不会增减这一层；过滤下某 Host 没有匹配的 Project 时该行隐藏（Remote 因此隐藏 This Mac）。Host 行不可选中，点击开合，开合状态存于 `catalog.json` 的 `collapsedSidebarHosts`；折叠 Host 下的行不占 ⌃N 槽位，⌘⌃↑ / ⌘⌃↓ 也跳过它们，揭示会先展开所在 Host。右键菜单：This Mac 为 "Open Project…"；其他 Host 为 "Connect Project on This Host…"（Connect to Server 选中该 Host）与 "Edit Host…"（Settings › Hosts 打开该 Host 的编辑表单）。Host 行不显示连接状态。见 [ADR 0002](../adr/0002-sidebar-outline-with-host-level.md) 与 [ADR 0003](../adr/0003-hosts-are-managed-records.md)。
+
+**Project 拖拽排序。** 用户直接拖动 Project 行（行上任意位置，无拖拽手柄、无排序会话）调整 Project order（[ADR 0001](../adr/0001-project-order-is-manual-only.md)）。outline 的原生拖拽移动整个 Project 块：Project 行及其 Worktree 行一起移动，展开 / 折叠状态不变；workspace 与加载失败的 Project 同样可拖。落点只在同一 Host 的 Project 之间有效（没有 Host 行时是顶层）：落在行上、Host 行之间、另一个 Host 下或 Worktree 段内时不显示指示线、也不接受（[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md) 决定 5）；Host 不能拖。`SidebarOutlineModel.projectDrop` 把落点解析成"可见 Project X 之前 / 之后"（`ProjectPlacement`，按 `ProjectID`），再作用于完整的 `catalog.projects`，所以任意分类与 Tag 过滤下都能拖，被隐藏的 Project 保持相对位置。新 Project 追加到末尾。Worktree 段内拖拽不变（Unread / PR 过滤下禁用）。
 
 ### 不变量
 
@@ -38,7 +40,7 @@
 
 ### 快速分类过滤
 
-侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、PR、Unread。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及其父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。项目排序期间展示完整列表并禁用分类切换。
+侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、PR、Unread。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及其父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序（Project 拖拽不受影响）。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。
 
 ### Tag filter（已实现，当前隐藏）
 
