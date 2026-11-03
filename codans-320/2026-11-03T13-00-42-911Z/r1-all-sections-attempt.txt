@@ -1,0 +1,115 @@
+diff --git a/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift b/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift
+index 6955f6b4..84c304fe 100644
+--- a/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift
++++ b/apps/mac/codans/App/Features/HierarchySidebar/HierarchySidebarView.swift
+@@ -744,49 +744,51 @@ struct HierarchySidebarView: View {
+     _ project: Project,
+     hotkeyIndex: [WorktreeID: Int]
+   ) -> some View {
+-    return Group {
+-      switch project.loadState {
+-      case .failed(let reason):
+-        FailedProjectRow(
+-          name: project.name,
+-          rootPath: project.rootPath,
+-          remoteAuthority: project.remoteHost?.displayAuthority,
+-          reason: reason,
+-          retry: {
+-            store.send(.retryProjectTapped(projectID: project.id))
+-          },
+-          remove: {
+-            store.send(
+-              .projectRemoveTapped(
+-                projectID: project.id,
+-                name: project.name
+-              ))
+-          }
+-        )
+-        // Same row metrics as the healthy Project header below — without
+-        // them the failed row falls back to the sidebar's default insets and
+-        // sits at a different indent than its siblings.
+-        .listRowInsets(Self.projectRowInsets)
+-        .listRowBackground(Color.clear)
+-        .listRowSeparator(.hidden)
+-      case .loading, .ready:
+-        let hotkeySlot = project.rowWorktree.flatMap { hotkeyIndex[$0.id] }
+-        if project.hasChildRows {
+-          // `Section(isExpanded:)` makes the block one outline item: the
+-          // outer `ForEach.onMove` fires only with the binding form. Its
+-          // system chevron is the block's disclosure control.
+-          Section(isExpanded: expansionBinding(for: project)) {
+-            projectChildRows(project, hotkeyIndex: hotkeyIndex)
+-          } header: {
+-            // A Section header row ignores `listRowInsets` and is shorter
+-            // than a plain row; pad it to the plain Project row height.
+-            projectRow(project, hotkeySlot: hotkeySlot)
+-              .padding(.vertical, Self.sectionHeaderPadding)
+-          }
+-        } else {
+-          projectRow(project, hotkeySlot: hotkeySlot)
+-        }
++    // Every Project is one Section, so every block starts at the same
++    // leading position and gets the same separation from the block above. A
++    // Project without child rows is a Section with no content.
++    let hotkeySlot = project.rowWorktree.flatMap { hotkeyIndex[$0.id] }
++    let hasChildRows: Bool = {
++      if case .failed = project.loadState { return false }
++      return project.hasChildRows
++    }()
++    return Section(isExpanded: expansionBinding(for: project, hasChildRows: hasChildRows)) {
++      if hasChildRows {
++        projectChildRows(project, hotkeyIndex: hotkeyIndex)
+       }
++    } header: {
++      // A Section header row ignores `listRowInsets` and is shorter than a
++      // plain row; pad it to the plain Project row height.
++      projectHeader(project, hotkeySlot: hotkeySlot)
++        .padding(.vertical, Self.sectionHeaderPadding)
++    }
++  }
++
++  /// The header of a Project block: the failed-load row, or the Project row.
++  @ViewBuilder
++  private func projectHeader(_ project: Project, hotkeySlot: Int?) -> some View {
++    switch project.loadState {
++    case .failed(let reason):
++      FailedProjectRow(
++        name: project.name,
++        rootPath: project.rootPath,
++        remoteAuthority: project.remoteHost?.displayAuthority,
++        reason: reason,
++        retry: {
++          store.send(.retryProjectTapped(projectID: project.id))
++        },
++        remove: {
++          store.send(
++            .projectRemoveTapped(
++              projectID: project.id,
++              name: project.name
++            ))
++        }
++      )
++      .listRowBackground(Color.clear)
++      .listRowSeparator(.hidden)
++    case .loading, .ready:
++      projectRow(project, hotkeySlot: hotkeySlot)
+     }
+   }
+ 
+@@ -855,11 +857,13 @@ struct HierarchySidebarView: View {
+ 
+   /// Two-way binding for `Project.isExpanded`. The catalog stays the
+   /// source of truth; the action runs only when the value changes.
+-  private func expansionBinding(for project: Project) -> Binding<Bool> {
++  /// A Project without child rows reads as collapsed, so its Section shows
++  /// no disclosure state of its own.
++  private func expansionBinding(for project: Project, hasChildRows: Bool) -> Binding<Bool> {
+     Binding(
+-      get: { project.isExpanded },
++      get: { hasChildRows && project.isExpanded },
+       set: { newValue in
+-        guard newValue != project.isExpanded else { return }
++        guard hasChildRows, newValue != project.isExpanded else { return }
+         var txn = Transaction()
+         txn.disablesAnimations = true
+         withTransaction(txn) {
