@@ -48,8 +48,8 @@ struct SidebarOutline: NSViewRepresentable {
     outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
     outline.headerView = nil
     outline.style = .sourceList
-    // Rows size to their SwiftUI content, as the `List` rows did.
-    outline.usesAutomaticRowHeights = true
+    // Rows size to their SwiftUI content, as the `List` rows did (see
+    // `heightOfRowByItem`).
     outline.rowHeight = SidebarOutlineView.minimumRowHeight
     outline.backgroundColor = .clear
     outline.intercellSpacing = .zero
@@ -88,6 +88,11 @@ struct SidebarOutline: NSViewRepresentable {
     private var shownStructure: [String] = []
     private var shownRevealTrigger: UUID?
     private var heightUpdateScheduled = false
+    /// Each row's measured height, by row id. Kept across updates, so a
+    /// reload measures only the rows it has not seen.
+    private var heights: [String: CGFloat] = [:]
+    /// Measures rows that have no cell yet.
+    private lazy var sizingCell = SidebarOutlineCell()
     /// True while the outline is changed from `update`, so its delegate
     /// callbacks do not echo those changes back as user actions.
     private var applying = false
@@ -109,6 +114,7 @@ struct SidebarOutline: NSViewRepresentable {
       if structure != shownStructure {
         shownStructure = structure
         outline.reloadData()
+        scheduleHeightUpdate()
       } else {
         refreshVisibleRows()
       }
@@ -139,6 +145,7 @@ struct SidebarOutline: NSViewRepresentable {
       }
       roots = make(nodes, parent: "")
       itemsByID = items
+      heights = heights.filter { items[$0.key] != nil }
       return structure
     }
 
@@ -174,6 +181,7 @@ struct SidebarOutline: NSViewRepresentable {
         else { continue }
         show(item, in: cell)
       }
+      scheduleHeightUpdate()
     }
 
     private func show(_ item: SidebarOutlineItem, in cell: SidebarOutlineCell) {
@@ -248,12 +256,20 @@ struct SidebarOutline: NSViewRepresentable {
         let rows = outline.rows(in: outline.visibleRect)
         var changed = IndexSet()
         for row in rows.location..<(rows.location + rows.length) {
-          guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCell
+          guard let item = outline.item(atRow: row) as? SidebarOutlineItem,
+            let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCell
           else { continue }
-          let height = max(cell.fittingSize.height, SidebarOutlineView.minimumRowHeight)
-          if abs(height - outline.rect(ofRow: row).height) > 0.5 { changed.insert(row) }
+          let height = cell.contentHeight
+          if abs(height - (heights[item.id] ?? 0)) > 0.5 {
+            heights[item.id] = height
+            changed.insert(row)
+          }
         }
-        if !changed.isEmpty { outline.noteHeightOfRows(withIndexesChanged: changed) }
+        guard !changed.isEmpty else { return }
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        outline.noteHeightOfRows(withIndexesChanged: changed)
+        NSAnimationContext.endGrouping()
       }
     }
 
@@ -281,6 +297,16 @@ struct SidebarOutline: NSViewRepresentable {
         ?? SidebarOutlineCell()
       show(item, in: cell)
       return cell
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+      guard let item = item as? SidebarOutlineItem, let config else { return SidebarOutlineView.minimumRowHeight }
+      if let height = heights[item.id] { return height }
+      sizingCell.show(
+        AnyView(SidebarOutlineRowHost(node: item.node, content: config.rowContent)), environment: config.environment)
+      let height = sizingCell.contentHeight
+      heights[item.id] = height
+      return height
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
@@ -388,9 +414,13 @@ struct SidebarRowEnvironment {
 private struct SidebarOutlineRowHost: View {
   let node: SidebarOutlineNode
   let content: (SidebarOutlineNode) -> AnyView
+  @Environment(\.controlActiveState) private var activeState
 
   var body: some View {
     content(node)
+      // The sidebar `List` dimmed unstyled text while its window was not
+      // active, to the secondary tone.
+      .foregroundStyle(activeState == .inactive ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
   }
 }
 
@@ -442,6 +472,8 @@ final class SidebarOutlineCell: NSTableCellView {
   private let hosting = SidebarRowHostingView(rootView: AnyView(EmptyView()))
   private var content = AnyView(EmptyView())
   private var environment: SidebarRowEnvironment?
+  /// True while the cell has dropped its row (see `viewDidMoveToWindow`).
+  private var isCleared = false
   /// Called when the content's size can have changed.
   var onSizeChange: (() -> Void)? {
     get { hosting.onInvalidate }
@@ -453,18 +485,13 @@ final class SidebarOutlineCell: NSTableCellView {
     identifier = Self.identifier
     hosting.translatesAutoresizingMaskIntoConstraints = false
     addSubview(hosting)
-    let minimumHeight = heightAnchor.constraint(greaterThanOrEqualToConstant: SidebarOutlineView.minimumRowHeight)
+    // The row is as tall as the content (`contentHeight`); the content sits
+    // in its middle.
     NSLayoutConstraint.activate([
       hosting.leadingAnchor.constraint(equalTo: leadingAnchor),
       hosting.trailingAnchor.constraint(equalTo: trailingAnchor),
       hosting.centerYAnchor.constraint(equalTo: centerYAnchor),
-      hosting.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
-      minimumHeight
     ])
-    // The cell is as tall as its content, and never shorter than a row.
-    let hug = heightAnchor.constraint(equalTo: hosting.heightAnchor)
-    hug.priority = .defaultHigh
-    hug.isActive = true
   }
 
   @available(*, unavailable)
@@ -472,6 +499,11 @@ final class SidebarOutlineCell: NSTableCellView {
 
   // Explicit, so releasing the cell during a SwiftUI teardown skips the isolated-deinit hop.
   deinit {}
+
+  /// The height the row needs.
+  var contentHeight: CGFloat {
+    max(hosting.fittingSize.height, SidebarOutlineView.minimumRowHeight)
+  }
 
   /// The row's SwiftUI elements, read as the cell's own (row → cell →
   /// content), as VoiceOver read the `List` rows.
@@ -497,22 +529,23 @@ final class SidebarOutlineCell: NSTableCellView {
     // refresh, remote polling) stop as they did when a `List` row left.
     if window == nil {
       hosting.rootView = AnyView(EmptyView())
-    } else {
+      isCleared = true
+    } else if isCleared {
       render()
     }
   }
 
   /// On the emphasized selection the row's styles turn light, as they did
   /// in the `List`, which set the same prominence.
+  /// Renders before the cell joins the outline, so the outline measures the
+  /// row's real height when it lays the row out.
   private func render() {
-    guard window != nil else { return }
     guard let environment else { return }
+    isCleared = false
     hosting.rootView = environment.apply(
       to: AnyView(
         content
-          .environment(\.backgroundProminence, backgroundStyle == .emphasized ? .increased : .standard)
-          // The sidebar `List` drew unstyled text in the secondary style.
-          .foregroundStyle(.secondary)))
+          .environment(\.backgroundProminence, backgroundStyle == .emphasized ? .increased : .standard)))
   }
 }
 
