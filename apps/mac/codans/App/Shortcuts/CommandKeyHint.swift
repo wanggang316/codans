@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import CodansCore
 
@@ -36,9 +37,11 @@ extension View {
   }
 
   /// While the user holds ⌘, hide this glyph and show the chord bound to `id` in its
-  /// place: the glyph shrinks, blurs, and fades out (`shortcutHintOutgoing(_:)`) and the
-  /// chord fades in, centered on it. The label is as wide as the chord while it shows.
-  /// Apply it on the *label* of a Button / Menu, like `commandKeyHint(_:spacing:)`.
+  /// place, in the hint style of the sidebar filter buttons (`.caption`, secondary).
+  /// Apply it on the *label* of a toolbar `Menu(primaryAction:)`. AppKit draws that
+  /// label as the image of a segmented control and drops SwiftUI opacity and layering,
+  /// so the label swaps its whole content: the glyph while ⌘ is up, an image of the
+  /// chord while ⌘ is held.
   func commandKeyHintReplacing(_ id: CommandID) -> some View {
     modifier(CommandKeyHintReplacingModifier(id: id))
   }
@@ -50,14 +53,28 @@ private struct CommandKeyHintReplacingModifier: ViewModifier {
   @Environment(\.resolvedShortcuts) private var shortcuts
 
   func body(content: Content) -> some View {
-    let chord = observer.isCommandHeld ? ShortcutDisplay.chord(for: id, in: shortcuts) : nil
-    ZStack {
+    if observer.isCommandHeld, let chord = ShortcutDisplay.chord(for: id, in: shortcuts) {
+      Image(nsImage: Self.image(of: chord))
+        .renderingMode(.original)
+        .accessibilityHidden(true)
+    } else {
       content
-        .shortcutHintOutgoing(chord != nil)
-      if let chord {
-        ShortcutHintLabel(chord: chord, font: .callout)
-      }
     }
+  }
+
+  /// The chord drawn as `ShortcutHintLabel` draws it. The color resolves when AppKit
+  /// draws the image, so it follows the window's light or dark appearance.
+  private static func image(of chord: String) -> NSImage {
+    let font = NSFont.preferredFont(forTextStyle: .caption1)
+    let measured = (chord as NSString).size(withAttributes: [.font: font])
+    let size = NSSize(width: ceil(measured.width), height: ceil(measured.height))
+    let image = NSImage(size: size, flipped: false) { rect in
+      (chord as NSString).draw(
+        in: rect, withAttributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])
+      return true
+    }
+    image.accessibilityDescription = chord
+    return image
   }
 }
 
