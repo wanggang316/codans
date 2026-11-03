@@ -29,8 +29,9 @@ These terms define what an Agents View row shows. See the
 status, or from the screen when the agent does not report.
 
 **Agent activity text**: One line that tells what the agent is doing. It is the
-OSC 7501 `message`, or the pane's OSC 0/2 title when there is no message. It is
-for display only and does not change the runtime state.
+OSC 7501 `message`, or the OSC 0/2 title that the agent set after it started
+when there is no message. A title from before the agent started is not agent
+activity text. It is for display only and does not change the runtime state.
 _Avoid_: OSC status, because OSC 7501 also carries the runtime state.
 
 ## Sidebar
