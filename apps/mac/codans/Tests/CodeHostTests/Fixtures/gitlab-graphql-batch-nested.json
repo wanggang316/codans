@@ -1,0 +1,66 @@
+{
+  "data": {
+    "currentUser": {
+      "username": "codans-dev"
+    },
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "1",
+            "title": "Nested group MR",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-nested",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/nested/deep-app/-/merge_requests/1",
+            "updatedAt": "2026-11-03T16:49:42Z",
+            "detailedMergeStatus": "MERGEABLE",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/nested/deep-app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/nested/deep-app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/nested/deep-app"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:46Z",
+                    "finishedAt": "2026-11-03T16:49:46Z",
+                    "webPath": "/codans-e2e/nested/deep-app/-/jobs/23"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

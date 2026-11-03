@@ -6,18 +6,21 @@ import Foundation
 /// Raw values are written to the Pull Request snapshot cache, so they must stay stable.
 public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, Hashable {
   case github
+  case gitlab
 
   /// Name of the Code Host as the UI shows it.
   public var displayName: String {
     switch self {
     case .github: return "GitHub"
+    case .gitlab: return "GitLab"
     }
   }
 
-  /// Short UI label of a Pull Request on this Code Host.
+  /// Short UI label of a Pull Request on this Code Host ("PR" / "MR").
   public var pullRequestLabel: String {
     switch self {
     case .github: return "PR"
+    case .gitlab: return "MR"
     }
   }
 
@@ -26,6 +29,7 @@ public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, H
   public var publicHost: String {
     switch self {
     case .github: return "github.com"
+    case .gitlab: return "gitlab.com"
     }
   }
 
@@ -33,6 +37,7 @@ public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, H
   public var cliName: String {
     switch self {
     case .github: return "gh"
+    case .gitlab: return "glab"
     }
   }
 
@@ -40,6 +45,23 @@ public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, H
   public var cliDisplayName: String {
     switch self {
     case .github: return "GitHub CLI"
+    case .gitlab: return "GitLab CLI"
+    }
+  }
+
+  /// Long UI name of a Pull Request on this Code Host, for sentences.
+  public var pullRequestName: String {
+    switch self {
+    case .github: return "pull request"
+    case .gitlab: return "merge request"
+    }
+  }
+
+  /// UI name of a repository on this Code Host, for "Open … on" labels.
+  public var repositoryName: String {
+    switch self {
+    case .github: return "Repository"
+    case .gitlab: return "Project"
     }
   }
 }

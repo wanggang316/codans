@@ -1,0 +1,55 @@
+{
+  "data": {
+    "currentUser": null,
+    "project": {
+      "mergeRequests": {
+        "nodes": [
+          {
+            "iid": "4138",
+            "title": "Draft: Add new directory",
+            "state": "closed",
+            "draft": true,
+            "sourceBranch": "main",
+            "targetBranch": "main",
+            "webUrl": "https://gitlab.com/gitlab-org/cli/-/merge_requests/4138",
+            "updatedAt": "2026-10-30T09:11:16Z",
+            "detailedMergeStatus": "NOT_OPEN",
+            "squashReadOnly": false,
+            "squashOnMerge": true,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 6,
+                "deletions": 0
+              },
+              {
+                "additions": 0,
+                "deletions": 0
+              },
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 3,
+            "author": {
+              "username": "wmhcarter1"
+            },
+            "sourceProject": null,
+            "targetProject": {
+              "fullPath": "gitlab-org/cli",
+              "webUrl": "https://gitlab.com/gitlab-org/cli"
+            },
+            "headPipeline": null
+          }
+        ]
+      }
+    }
+  }
+}

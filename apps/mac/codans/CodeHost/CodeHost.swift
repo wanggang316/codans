@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// One Code Host implementation (GitHub today; GitLab next). All Code Host behavior that
+/// One Code Host implementation (`GitHubCodeHost`, `GitLabCodeHost`). All Code Host behavior that
 /// the reducer and the views use goes through this protocol, so they do not branch on the
 /// Code Host kind. See ADR 0004 items 5 and 11.
 ///
@@ -44,7 +44,8 @@ nonisolated protocol CodeHost: Sendable {
   /// Promotes a draft Pull Request to ready for review.
   func markReady(_ pullRequest: PullRequestReference) async throws
 
-  /// Reruns the failed checks of the Pull Request's latest CI run.
+  /// Reruns the failed checks of the Pull Request's latest CI run (GitHub: the failed
+  /// Actions runs on the head commit; GitLab: a retry of the head pipeline).
   func rerunFailedChecks(_ pullRequest: PullRequestReference) async throws
 
   /// Web page of the repository.

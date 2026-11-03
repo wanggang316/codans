@@ -21,13 +21,13 @@ nonisolated struct GitHubCodeHost: CodeHost {
   private static let defaultMaxOutputBytes: Int = 2 * 1024 * 1024
 
   let runner: any CommandRunner
-  let resolver: GhExecutableResolver
+  let resolver: CLIExecutableResolver
   let timeout: Duration
   let maxOutputBytes: Int
 
   init(
     runner: any CommandRunner = FoundationCommandRunner(),
-    resolver: GhExecutableResolver = .shared,
+    resolver: CLIExecutableResolver = .gh,
     timeout: Duration = GitHubCodeHost.defaultTimeout,
     maxOutputBytes: Int = GitHubCodeHost.defaultMaxOutputBytes
   ) {

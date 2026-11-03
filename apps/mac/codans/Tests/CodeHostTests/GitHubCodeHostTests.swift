@@ -13,7 +13,7 @@ struct GitHubCodeHostTests {
   @Test
   func availabilityReturnsUnavailableWhenGhMissing() async throws {
     let runner = RecordingCommandRunner()
-    let resolver = GhExecutableResolver(prober: { nil })
+    let resolver = CLIExecutableResolver(prober: { nil })
     let service = GitHubCodeHost(runner: runner, resolver: resolver)
     let result = await service.availability()
     if case .unavailable = result { /* expected */
@@ -201,7 +201,7 @@ struct GitHubCodeHostTests {
   }
 
   private static func makeService(runner: any CommandRunner) -> GitHubCodeHost {
-    let resolver = GhExecutableResolver(prober: {
+    let resolver = CLIExecutableResolver(prober: {
       URL(fileURLWithPath: "/opt/homebrew/bin/gh")
     })
     return GitHubCodeHost(runner: runner, resolver: resolver)

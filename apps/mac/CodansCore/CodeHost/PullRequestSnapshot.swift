@@ -103,6 +103,15 @@ extension PullRequestSnapshot {
   public func mergeOption(for strategy: MergeStrategy) -> PullRequestMergeOption? {
     mergeOptions.first { $0.strategy == strategy }
   }
+
+  /// The strategy a merge uses when the user prefers `preferred`. A Code Host that does
+  /// not offer `preferred` merges with its plain merge instead (GitLab has no `rebase`
+  /// option: the project's merge method applies to "Merge"). See ADR 0004 item 6.
+  public func mergeStrategy(preferring preferred: MergeStrategy) -> MergeStrategy {
+    if mergeOptions.isEmpty || mergeOption(for: preferred) != nil { return preferred }
+    if mergeOption(for: .mergeCommit) != nil { return .mergeCommit }
+    return mergeOptions[0].strategy
+  }
 }
 
 /// Lifecycle state of a Pull Request. Provider-neutral; raw values are the
