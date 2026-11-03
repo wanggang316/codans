@@ -1,0 +1,11 @@
+app=/tmp/codans339-base-dd/Build/Products/Debug/Codans.app
+Codans.debug.dylib sha256=2c178a4e953b4366e5d8eee4396425740dcb3bb1a3eea48bdcf4dd0c8974a09b
+AXButton "Pull request 1, open, checks failing. Activate to see details." {ShowMenu,Press} @245,195 22x15
+AXButton "Pull request 2, open, checks passing. Activate to see details." {ShowMenu,Press} @245,227 22x15
+--- PR #2 (all checks pass) popover buttons:
+--- PR #1 (one failing job) popover buttons:
+AXButton "Merge (squash)" {Press} @292,258 133x23
+AXButton "Close" {Press} @456,256 55x26
+AXButton "Rerun failed" {Press} @519,256 93x26
+--- runs before the click:
+run 41692156735 attempt=2 status=completed conclusion=failure

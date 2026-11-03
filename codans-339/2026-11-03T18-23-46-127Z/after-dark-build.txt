@@ -1,0 +1,9 @@
+label=after appearance=dark captured=2026-11-03T18:14:50Z
+app=/Users/wanggang/Library/Developer/Xcode/DerivedData/codans-fmlkufzyehaidtelbkizhocxzeev/Build/Products/Debug/Codans.app
+pid=92810 executable=/Users/wanggang/Library/Developer/Xcode/DerivedData/codans-fmlkufzyehaidtelbkizhocxzeev/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+Codans mtime=Nov  4 02:11:37 2026 sha256=353ea9120503004bc5ab46c27700a6f83d8fc55cb9af635b110ad625a598b6c0
+Codans.debug.dylib mtime=Nov  4 02:11:37 2026 sha256=a9507ce5a43871dbebeca7ae0ed61ce9c3e45b3e5e6479838efba2a2f2d817b2
+contains codeHostUnresolved symbol: 2
+2026-11-04 02:14:51.092914 [com.gumpw.codans.codehost:feature] repository resolved kind=github host=github.com path=cli/cli
+2026-11-04 02:15:13.214220 [com.gumpw.codans.codehost:feature] codeHostUnresolved project=F5D5DEB7-FA6A-4B49-B998-70953AFBC338
+2026-11-04 02:15:15.679379 [com.gumpw.codans.codehost:feature] codeHostUnresolved project=F5D5DEB7-FA6A-4B49-B998-70953AFBC338

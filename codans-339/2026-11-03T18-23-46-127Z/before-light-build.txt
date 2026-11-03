@@ -1,0 +1,11 @@
+label=before appearance=light captured=2026-11-03T18:12:05Z
+app=/tmp/codans339-base-dd/Build/Products/Debug/Codans.app
+pid=85278 executable=/tmp/codans339-base-dd/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+Codans mtime=Nov  4 00:00:02 2026 sha256=7d7cbfad9b886406ca5aec878f4b44e0170f96b709b8f49904a948502c9a3ec0
+Codans.debug.dylib mtime=Nov  4 00:00:01 2026 sha256=2c178a4e953b4366e5d8eee4396425740dcb3bb1a3eea48bdcf4dd0c8974a09b
+contains codeHostUnresolved symbol: 0
+2026-11-04 02:12:06.226831 [com.gumpw.codans.github:feature] remoteInfo resolved host=github.com owner=cli repo=cli
+2026-11-04 02:12:28.970942 [com.gumpw.codans.github:feature] remoteInfo resolved host=gitlab.com owner=gitlab-org repo=sub
+2026-11-04 02:12:30.667773 [com.gumpw.codans.github:feature] projectBatchLoaded failure project=594185F6-5F88-4013-BDDE-F92DDBBAB050 error=other("gh: field \'repository\' doesn\'t exist on type \'query\'")
+2026-11-04 02:12:33.041598 [com.gumpw.codans.github:feature] remoteInfo resolved host=gitlab.com owner=gitlab-org repo=sub
+2026-11-04 02:12:34.285797 [com.gumpw.codans.github:feature] projectBatchLoaded failure project=594185F6-5F88-4013-BDDE-F92DDBBAB050 error=other("gh: field \'repository\' doesn\'t exist on type \'query\'")
