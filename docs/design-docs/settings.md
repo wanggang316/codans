@@ -252,7 +252,7 @@ Durable shell decisions:
   through `HierarchyClient` / the catalog (the storage-unification core).
 - **Kind-specific content.** Project sidebar sub-rows are **General** and
   **Commands**. General, Editor, and Environment sections apply to every kind.
-  Git projects and Servers also expose Worktree, GitHub, and Lifecycle sections;
+  Git projects and Servers also expose Worktree, Code Host, and Lifecycle sections;
   Workspaces instead expose their member Projects. Default icons reflect the
   Project kind and can be replaced by user-selected symbols, emoji, or images.
 
