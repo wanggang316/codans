@@ -47,19 +47,6 @@ enum EditorPickerRow {
     }
   }
 
-  /// `icon(for:)` as an `NSImage`, for an AppKit `NSMenuItem`.
-  static func menuImage(for descriptor: EditorDescriptor) -> NSImage? {
-    switch descriptor.launchMode {
-    case .shellEditor:
-      return NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
-    case .directory, .applicationWithArguments:
-      if let appURL = descriptor.appURL {
-        return EditorAppIcons.resizedIcon(atPath: appURL.path, side: 16)
-      }
-      return NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
-    }
-  }
-
   /// Standard row content for every editor dropdown — a SwiftUI `Label`
   /// whose `Text` + `Image` slots AppKit recognizes when the row is
   /// hosted inside a native `Menu` (i.e. the Worktree-header Open-in

@@ -2,12 +2,12 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Toolbar split button: primary action opens the resolved default editor;
-/// the chevron half lists every installed editor. Drawn by
-/// `OpenInSplitButton`, the same AppKit control as SwiftUI's toolbar
-/// `Menu(primaryAction:)`, so that the chord can take the icon's place while
-/// ⌘ is held. Resolution + delegate routing flow through
-/// `WorktreeHeaderFeature`, keeping the open side-effect on `RootFeature`.
+/// Native toolbar split button: primary action opens the resolved
+/// default editor; the chevron half lists every installed editor. Uses
+/// SwiftUI's `Menu(content:label:primaryAction:)` so macOS provides the
+/// system split-button chrome, hover state, and chevron. Resolution +
+/// delegate routing flow through `WorktreeHeaderFeature`, keeping the
+/// open side-effect on `RootFeature`.
 struct HeaderOpenSplitButton: View {
   @Bindable var store: StoreOf<WorktreeHeaderFeature>
   @Bindable var editorStore: StoreOf<EditorFeature>
@@ -15,8 +15,6 @@ struct HeaderOpenSplitButton: View {
   let worktreePath: String
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
-  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   var body: some View {
     // Server (remote) worktrees open through an editor's SSH remoting CLI —
@@ -36,30 +34,24 @@ struct HeaderOpenSplitButton: View {
       .first(where: { $0.id == projectID })?.remoteHost
   }
 
+  @ViewBuilder
   private var openButton: some View {
-    // Icon only; the editor name lives in the tooltip and accessibility label.
-    OpenInSplitButton(
-      icon: primaryImage,
-      chordHint: chordHint,
-      toolTip: ShortcutDisplay.tooltip(primaryDescription, for: .openInEditor, in: resolvedShortcuts),
-      accessibilityLabel: primaryDescription,
-      onPrimary: openDefaultEditor,
-      makeMenu: { openInMenu }
-    )
+    Menu {
+      openInMenu
+    } label: {
+      // Icon only; the editor name lives in the tooltip and accessibility
+      // label, which also carries the chord. Holding ⌘ shows no hint here.
+      primaryIcon
+    } primaryAction: {
+      store.send(
+        .openDefaultEditorTapped(
+          worktreePath: worktreePath,
+          projectID: projectID
+        ))
+    }
+    .accessibilityLabel(primaryDescription)
+    .helpWithShortcut(primaryDescription, .openInEditor)
     .task { editorStore.send(.onAppear) }
-  }
-
-  /// The Open In chord while ⌘ is held. It takes the icon's place.
-  private var chordHint: String? {
-    commandKeyObserver.isCommandHeld ? ShortcutDisplay.chord(for: .openInEditor, in: resolvedShortcuts) : nil
-  }
-
-  private func openDefaultEditor() {
-    store.send(
-      .openDefaultEditorTapped(
-        worktreePath: worktreePath,
-        projectID: projectID
-      ))
   }
 
   // MARK: - Remote (Server-project) variant
@@ -75,55 +67,63 @@ struct HeaderOpenSplitButton: View {
     )
   }
 
+  @ViewBuilder
   private func remoteOpenButton(host: RemoteHost, primary: EditorDescriptor) -> some View {
-    let description = "Open in \(primary.displayName) over SSH"
-    return OpenInSplitButton(
-      icon: Self.appIcon(bundleIdentifier: primary.bundleIdentifier, fallbackSystemName: "arrow.up.right.square"),
-      chordHint: chordHint,
-      toolTip: ShortcutDisplay.tooltip(description, for: .openInEditor, in: resolvedShortcuts),
-      accessibilityLabel: description,
-      onPrimary: openDefaultEditor,
-      makeMenu: { [remoteOpenInMenu(host: host)] }
-    )
+    Menu {
+      remoteOpenInMenu(host: host)
+    } label: {
+      AppIconImage(
+        bundleIdentifier: primary.bundleIdentifier,
+        fallbackSystemName: "arrow.up.right.square"
+      )
+    } primaryAction: {
+      store.send(
+        .openDefaultEditorTapped(
+          worktreePath: worktreePath,
+          projectID: projectID
+        ))
+    }
+    .accessibilityLabel("Open in \(primary.displayName) over SSH")
+    .helpWithShortcut("Open in \(primary.displayName) over SSH", .openInEditor)
     .task { editorStore.send(.onAppear) }
   }
 
   /// Remote dropdown: only editors with an SSH remoting CLI. A row that
   /// cannot express this host (VS Code family on a non-default port) renders
   /// disabled with the reason as its tooltip.
-  private func remoteOpenInMenu(host: RemoteHost) -> [OpenInMenuEntry] {
-    editorStore.state.descriptors
-      .filter { RemoteEditorOpen.supportsRemote($0.id) }
-      .map { descriptor in
-        let reason = RemoteEditorOpen.disabledReason(
-          editorID: descriptor.id, host: host, displayName: descriptor.displayName
-        )
-        return OpenInMenuEntry(
-          title: descriptor.displayName,
-          image: EditorPickerRow.menuImage(for: descriptor),
-          toolTip: reason ?? descriptor.displayName,
-          isEnabled: reason == nil,
-          action: { store.send(.pickEditorFromMenuTapped(descriptor.id)) }
-        )
+  @ViewBuilder
+  private func remoteOpenInMenu(host: RemoteHost) -> some View {
+    let capable = editorStore.state.descriptors.filter {
+      RemoteEditorOpen.supportsRemote($0.id)
+    }
+    ForEach(capable, id: \.id) { descriptor in
+      let reason = RemoteEditorOpen.disabledReason(
+        editorID: descriptor.id, host: host, displayName: descriptor.displayName
+      )
+      Button {
+        store.send(.pickEditorFromMenuTapped(descriptor.id))
+      } label: {
+        EditorPickerRow.row(for: descriptor)
       }
+      .disabled(reason != nil)
+      .help(reason ?? descriptor.displayName)
+    }
   }
 
-  private var primaryImage: NSImage? {
+  @ViewBuilder
+  private var primaryIcon: some View {
     switch resolvedDefault {
     case .editor(let descriptor):
-      Self.appIcon(bundleIdentifier: descriptor.bundleIdentifier, fallbackSystemName: "arrow.up.right.square")
+      AppIconImage(
+        bundleIdentifier: descriptor.bundleIdentifier,
+        fallbackSystemName: "arrow.up.right.square"
+      )
     case .finder:
-      Self.appIcon(bundleIdentifier: "com.apple.finder", fallbackSystemName: "folder")
+      AppIconImage(
+        bundleIdentifier: "com.apple.finder",
+        fallbackSystemName: "folder"
+      )
     }
-  }
-
-  /// The app's icon at the toolbar glyph size, or the fallback symbol when the
-  /// app is not installed (see `AppIconImage`).
-  private static func appIcon(bundleIdentifier: String, fallbackSystemName: String) -> NSImage? {
-    if let url = EditorAppIcons.appURL(bundleIdentifier: bundleIdentifier) {
-      return EditorAppIcons.resizedIcon(atPath: url.path, side: 16)
-    }
-    return NSImage(systemSymbolName: fallbackSystemName, accessibilityDescription: nil)
   }
 
   /// Accessibility + help tooltip text. The button itself is icon-only, so
@@ -149,22 +149,30 @@ struct HeaderOpenSplitButton: View {
     settingsStore.settings.projects[projectID]?.defaultEditor
   }
 
-  private var openInMenu: [[OpenInMenuEntry]] {
+  @ViewBuilder
+  private var openInMenu: some View {
     // `EditorService.describe()` already filters to installed entries, so every
     // descriptor is launch-ready. `EditorPickerRow.sortedGroups` groups the
-    // priority-ordered list by category, with a separator between groups.
-    EditorPickerRow.sortedGroups(editorStore.state.descriptors).map { group in
-      group.map { descriptor in
-        OpenInMenuEntry(
-          title: descriptor.displayName,
-          image: EditorPickerRow.menuImage(for: descriptor),
-          toolTip: descriptor.displayName,
+    // priority-ordered list by category — AppKit renders one `Divider()` between
+    // adjacent groups, mirroring the section separators in Settings → General /
+    // Repository. `row(for:)` keeps the icon + displayName row visuals in sync
+    // with every other Open-in dropdown.
+    let groups = EditorPickerRow.sortedGroups(editorStore.state.descriptors)
+    ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+      if index > 0 { Divider() }
+      ForEach(group, id: \.id) { descriptor in
+        Button {
           // Single action: parent resolves the live worktree path from
           // `state.selection`, persists the pick as the per-Project default,
-          // then opens, so a pick never routes to a worktree path captured
-          // before the user switched worktrees.
-          action: { store.send(.pickEditorFromMenuTapped(descriptor.id)) }
-        )
+          // then opens. Avoids the SwiftUI Menu / NSMenuItem stale-closure
+          // trap where `worktreePath` captured at view-render time would
+          // route the open to the originally-selected worktree (often the
+          // project root) after the user switched worktrees.
+          store.send(.pickEditorFromMenuTapped(descriptor.id))
+        } label: {
+          EditorPickerRow.row(for: descriptor)
+        }
+        .help(descriptor.displayName)
       }
     }
   }
