@@ -50,6 +50,23 @@ public nonisolated struct HostRecord: Codable, Equatable, Hashable, Sendable, Id
     RemoteHost(alias: address, username: username, port: port)
   }
 
+  /// The record with trimmed fields and blank optional fields set to `nil`.
+  /// Throws for an empty Host field or a port outside 1...65535. Every Host
+  /// list change and every Host form use this, so they refuse the same input.
+  public func validated() throws(HostRecordError) -> HostRecord {
+    var record = self
+    record.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !record.address.isEmpty else { throw .missingAddress }
+    let username = username?.trimmingCharacters(in: .whitespacesAndNewlines)
+    record.username = (username?.isEmpty ?? true) ? nil : username
+    let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+    record.name = (name?.isEmpty ?? true) ? nil : name
+    if let port, !(1...65535).contains(port) {
+      throw .invalidPort(port)
+    }
+    return record
+  }
+
   /// The (Host, Username, Port) triple that must be unique in the Host list.
   /// An empty username equals no username, and no port equals port 22,
   /// because `ssh` reaches the same account in both cases.

@@ -17,6 +17,7 @@ struct SettingsWindowFeature {
     var general: EditorFeature.State = .init()
     var terminal: SettingsTerminalFeature.State = .init()
     var globalCommands: GlobalCommandsFeature.State = .init()
+    var hosts: HostsSettingsFeature.State = .init()
     var projectPanes: IdentifiedArrayOf<ProjectSettingsFeature.State> = []
 
     init(
@@ -44,6 +45,7 @@ struct SettingsWindowFeature {
     case general(EditorFeature.Action)
     case terminal(SettingsTerminalFeature.Action)
     case globalCommands(GlobalCommandsFeature.Action)
+    case hosts(HostsSettingsFeature.Action)
     case projectPanes(IdentifiedActionOf<ProjectSettingsFeature>)
     /// Fired by `SettingsWindowView`'s `.onDisappear`. Clears sidebar selection on close.
     case windowClosed
@@ -65,6 +67,9 @@ struct SettingsWindowFeature {
     Scope(state: \.globalCommands, action: \.globalCommands) {
       GlobalCommandsFeature()
     }
+    Scope(state: \.hosts, action: \.hosts) {
+      HostsSettingsFeature()
+    }
     Reduce { state, action in
       switch action {
       case .selectionChanged(let next):
@@ -82,6 +87,8 @@ struct SettingsWindowFeature {
       case .terminal:
         return .none
       case .globalCommands:
+        return .none
+      case .hosts:
         return .none
       case .projectPanes:
         return .none
