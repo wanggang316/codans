@@ -50,3 +50,23 @@ _Avoid_: server (except in "Server project"), SSH alias.
 
 **This Mac**: The Host of all local Projects. The sidebar shows Host rows only
 when at least one Project is on another Host.
+
+## Code hosts
+
+These terms define how codans relates a Worktree to a hosted review. See
+[ADR 0004](docs/adr/0004-gitlab-support-through-glab.md).
+
+**Code Host**: The service that hosts the `origin` remote of a source
+repository and its reviews. codans supports GitHub and GitLab, on their
+public sites and on self-managed instances. codans calls the CLI of each Code
+Host (`gh`, `glab`).
+A Code Host is not a Host: a Host is a machine on which Projects live. Do not
+shorten Code Host to "host".
+_Avoid_: Forge, Provider, Platform, host.
+
+**Pull Request**: A hosted review that asks to merge a source branch into a
+target branch. It is the provider-neutral concept: a GitHub pull request and a
+GitLab merge request are both Pull Requests. The UI shows the Code Host's own
+label: "PR" for GitHub and "MR" for GitLab.
+_Avoid_: Merge Request, MR, and Change Request as domain terms. Use Merge
+Request and MR only in GitLab UI text and GitLab API code.
