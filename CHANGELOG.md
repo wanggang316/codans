@@ -15,6 +15,13 @@ and the project does not yet follow semantic versioning — every release until
 - **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9
   focus the pane of the first nine agents in the list. Rebind them under
   Settings → Shortcuts → Agents.
+- **Settings › Hosts.** Add, edit, and delete the Hosts that Server
+  projects connect to. An edit applies to all Projects on the Host. A Host
+  that Projects use cannot be deleted; the page shows how many use it.
+- **Connect to Server picks a Host.** The sheet lists your Hosts, plus
+  "New Host…" with Host, Username, Port, and Name fields. A new Host is
+  added to Settings › Hosts. Edit Connection can move a Project to another
+  Host.
 - **`codans tree` and `codans project show` show the Host of each Project.**
   A Server project shows its Host's name and ID; a local Project shows
   This Mac. The JSON output has `host {id, name}`.
@@ -26,6 +33,8 @@ and the project does not yet follow semantic versioning — every release until
   first launch, existing Server projects are moved to these records; the
   original catalog is kept in `backups/`. Connecting with the fields of a
   known Host reuses it. An older build cannot open the new catalog.
+- **The Host list replaces the recent-servers menu** in Connect to Server.
+  `saved-server-hosts.json` is no longer used.
 
 - **Shortcut hints are plain grey text and fade in place.** Holding ⌘ shows
   each shortcut without a key frame. On a sidebar filter button the shortcut
