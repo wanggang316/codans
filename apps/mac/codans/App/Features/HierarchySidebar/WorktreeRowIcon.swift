@@ -52,9 +52,9 @@ struct WorktreeRowIcon: View {
   /// when a PR snapshot is present — PR-state still wins the icon slot.
   var isDefaultBranch: Bool = false
 
-  /// Native `List(selection:)` paints the selection chrome via NSTableView's
-  /// `.sourceList` mode and sets `\.backgroundProminence = .increased` on
-  /// the row content only while the selection is *emphasized* (sidebar
+  /// The sidebar outline paints the selection chrome via NSTableView's
+  /// `.sourceList` mode, and `SidebarOutlineCell` sets
+  /// `\.backgroundProminence = .increased` on the row content only while the selection is *emphasized* (sidebar
   /// holds first-responder, blue fill, white text). The instant focus
   /// moves to a terminal pane the fill becomes unemphasized grey, the
   /// system text color flips to dark, and `backgroundProminence` returns

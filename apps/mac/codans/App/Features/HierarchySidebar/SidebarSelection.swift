@@ -1,6 +1,6 @@
 import CodansCore
 
-/// Value the sidebar's native `List(selection:)` binds to. Pending rows are
+/// The selection the sidebar outline (`SidebarOutline`) shows and reports. Pending rows are
 /// selectable targets too, so the system source-list renderer paints their
 /// highlight with the same geometry and focus-aware emphasis as worktree rows.
 nonisolated enum SidebarSelection: Hashable, Sendable {

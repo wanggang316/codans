@@ -15,7 +15,7 @@ import SwiftUI
 /// `.keyDown` event with the chord modifier.
 ///
 /// **Sidebar identification.** The main window contains exactly one `NSTableView` (the
-/// `NavigationSplitView` sidebar's `List(selection:)`); other tables in the app live in
+/// sidebar's `SidebarOutline`, an `NSOutlineView`); other tables in the app live in
 /// Settings (its own window) or in modal sheets (which present as separate child windows
 /// and are filtered out via `window.parent != nil` and `SettingsWindowTagger.matches`).
 @Observable

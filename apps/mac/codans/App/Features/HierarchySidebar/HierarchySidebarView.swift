@@ -25,14 +25,14 @@ struct HierarchySidebarView: View {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
   let currentSelection: HierarchySelection
   /// The creation the detail pane is following (`RootFeature.
-  /// activePendingWorktreeID`). Feeds the native List selection (see
-  /// `nativeSelectionBinding`) so the matching pending row shows WHERE the
+  /// activePendingWorktreeID`). Feeds the outline selection (see
+  /// `outlineSelection`) so the matching pending row shows WHERE the
   /// focus is while the loading view is up.
   /// Nil when no creation is being followed (previews / tests included).
   var activePendingWorktreeID: PendingWorktreeID?
   /// Bumped by `RootFeature.revealCurrentWorktreeInSidebarRequested` (⌘⇧J).
-  /// `.onChange(of:)` on this UUID triggers a `proxy.scrollTo` so the
-  /// selected row comes back into view even when the user has scrolled
+  /// A change makes `SidebarOutline` scroll the
+  /// selected row to the center, so it comes back into view even when the user has scrolled
   /// elsewhere. Defaults to a fixed UUID for previews so the no-op render
   /// path is deterministic.
   var revealTrigger: UUID = UUID()
@@ -92,17 +92,13 @@ struct HierarchySidebarView: View {
 
   /// Min / max height bounds for the AgentState panel. Kept as a
   /// type-level constant so both `AgentStateSidebarPanel`'s own clamp
-  /// and the List's bottom spacer-row height share one source.
+  /// and the outline's bottom inset share one source.
   private static let agentStatePanelMinHeight: Double = 140
 
   /// Effective panel height after clamping to `[minHeight, 0.5 *
   /// sidebarHeight]`. Mirrors the clamp inside
-  /// `AgentStateSidebarPanel.clampedHeight` so the spacer row inside
-  /// the List can reserve exactly the height the panel occupies. Note:
-  /// `.contentMargins(.bottom, _, for: .scrollContent)` is the
-  /// ScrollView-native modifier for this purpose but `List(.sidebar)`
-  /// on macOS 26 ignores it — see commit 6c1c3631. The invisible
-  /// `Color.clear` row inside `treeBody`'s List is the workaround.
+  /// `AgentStateSidebarPanel.clampedHeight` so the outline's bottom inset
+  /// reserves exactly the height the panel occupies.
   private var clampedAgentStatePanelHeight: Double {
     let minH = Self.agentStatePanelMinHeight
     let maxH = max(minH, sidebarHeightObservation * 0.5)
@@ -113,6 +109,7 @@ struct HierarchySidebarView: View {
   @Environment(WorktreeStatusMonitor.self) private var worktreeStatusMonitor
   @Environment(WorktreeLocalDiffMonitor.self) private var worktreeLocalDiffMonitor
   @Environment(NotificationStore.self) private var inbox: NotificationStore?
+  @Environment(RollupIndexProvider.self) private var rollup: RollupIndexProvider?
 
   /// Tracks whether the `.command` modifier is currently pressed. When held the sidebar
   /// reveals per-row `⌃N` hotkey hints (and the matching `⌃1`–`⌃9` / `⌃0` bindings).
@@ -133,91 +130,63 @@ struct HierarchySidebarView: View {
   /// skipped ("...unless they initiate an update check themselves").
   @Dependency(UpdatesClient.self) private var updatesClient
 
-  /// Bridges TCA-owned `currentSelection.worktreeID` ↔ SwiftUI's native
-  /// `List(selection:)`. Native binding is what gets us Finder-/Mail-style
-  /// selection chrome for free: emphasized blue + white text when the
-  /// sidebar holds first-responder, unemphasized grey + dark text the
-  /// instant focus moves to a terminal pane (or anywhere else inside or
-  /// outside the window). `NSTableView.selectionHighlightStyle = .sourceList`
-  /// owns that transition; we just have to feed it a selection binding
-  /// instead of painting `.listRowBackground` ourselves. Setter dispatches
-  /// the existing `worktreeRowTapped` action so all the side-effects
-  /// (selectedProjectID propagation, hooks, etc.) fire identically to a tap.
-  private var nativeSelectionBinding: Binding<SidebarSelection?> {
-    Binding(
-      get: {
-        // Read live from `hierarchyManager.catalog` rather than from the
-        // `currentSelection` prop. The prop trails state by one render
-        // cycle (parent feature observes a stream → re-renders → re-passes
-        // the value), so cross-Project clicks see a one-frame revert: the
-        // setter mutates the manager synchronously, but on the immediate
-        // next render `currentSelection` is still the previous value.
-        // NSTableView snaps the highlight back to the old row for one
-        // frame before the prop catches up — visible as the flicker
-        // (A.main → B.main → A.main → B.main) the user reported. Reading
-        // the @Observable manager directly closes the gap; mutations from
-        // `worktreeRowTapped` land in the same tick the binding's `get`
-        // is re-evaluated.
-        let catalog = hierarchyManager.catalog
-        let selectedWorktreeID = catalog.selectedProjectID.flatMap { pid in
-          catalog.projects.first(where: { $0.id == pid })?.selectedWorktreeID
-        }
-        return SidebarSelection.resolve(
-          selectedWorktreeID: selectedWorktreeID,
-          activePendingWorktreeID: activePendingWorktreeID
-        )
-      },
-      set: { selection in
-        let newValue: WorktreeID
-        switch selection {
-        case nil:
-          return
-        case .pending(let pendingID):
-          // RootFeature re-arms the loading focus for the creation.
-          store.send(.pendingWorktreeRowTapped(pendingID))
-          return
-        case .worktree(let worktreeID):
-          newValue = worktreeID
-        }
-        guard
-          let project = hierarchyManager.catalog.projects
-            .first(where: { project in
-              project.worktrees.contains(where: { $0.id == newValue })
-            })
-        else { return }
-        // Drop the no-op guard. Cross-Project clicks where the same
-        // WorktreeID happens to be selected in both Projects (rare but
-        // possible after a copy / reattach) would otherwise be filtered
-        // out and the active Project would never flip.
-        store.send(.worktreeRowTapped(newValue, inProject: project.id))
-      }
+  /// The row the outline shows as selected. Read live from
+  /// `hierarchyManager.catalog` rather than from the `currentSelection` prop:
+  /// the prop trails state by one render cycle (the parent feature observes a
+  /// stream, re-renders, and passes the value again), so a cross-Project click
+  /// would put the highlight back on the old row for one frame before the prop
+  /// catches up. `worktreeRowTapped` mutates the manager in the same tick this
+  /// is read again.
+  private var outlineSelection: SidebarSelection? {
+    let catalog = hierarchyManager.catalog
+    let selectedWorktreeID = catalog.selectedProjectID.flatMap { pid in
+      catalog.projects.first(where: { $0.id == pid })?.selectedWorktreeID
+    }
+    return SidebarSelection.resolve(
+      selectedWorktreeID: selectedWorktreeID,
+      activePendingWorktreeID: activePendingWorktreeID
     )
   }
 
-  /// Flips to true once the outline view's own indentation has been zeroed.
-  /// Until then the List renders at `opacity(0)` so the user never sees the
-  /// per-level indent the AppKit introspection retries paper over.
-  @State private var sidebarIndentReady = false
+  /// A row the user selected in the outline. Dispatches the same actions a
+  /// tap does, so every side effect (selected Project, hooks) fires the same.
+  private func selectRow(_ selection: SidebarSelection) {
+    let worktreeID: WorktreeID
+    switch selection {
+    case .pending(let pendingID):
+      // RootFeature re-arms the loading focus for the creation.
+      store.send(.pendingWorktreeRowTapped(pendingID))
+      return
+    case .worktree(let id):
+      worktreeID = id
+    }
+    guard
+      let project = hierarchyManager.catalog.projects
+        .first(where: { project in project.worktrees.contains(where: { $0.id == worktreeID }) })
+    else { return }
+    // No no-op guard: the same WorktreeID can be selected in two Projects
+    // (after a copy / reattach), and the active Project must still flip.
+    store.send(.worktreeRowTapped(worktreeID, inProject: project.id))
+  }
 
   /// Heterogeneous rows under a Project row, in render order: main → pinned →
   /// pending → unpinned (`Project.childWorktrees` plus the Project's pending
   /// creations). `pendings` is filtered to the given project (caller passes
-  /// the full sidebar-wide list). Used by ordering tests; the production view
-  /// splits the segments across separate ForEach blocks so each can own its
-  /// own .onMove.
+  /// the full sidebar-wide list). Reads the outline model, so ordering tests
+  /// cover the rows the outline shows.
   static func orderedSidebarRows(
     project: Project,
     pendings: [PendingWorktree]
   ) -> [SidebarRow] {
-    let children = project.childWorktrees
-    let main = children.filter { $0.path == project.rootPath }
-    let pinned = children.filter { $0.isPinned && $0.path != project.rootPath }
-    let rest = children.filter { !$0.isPinned && $0.path != project.rootPath }
-    let projectPending = pendings.filter { $0.projectID == project.id }
-    return main.map(SidebarRow.worktree)
-      + pinned.map(SidebarRow.worktree)
-      + projectPending.map(SidebarRow.pending)
-      + rest.map(SidebarRow.worktree)
+    let nodes = SidebarOutlineModel.nodes(
+      projects: [project], pendingWorktrees: pendings, filter: .all, isReordering: false)
+    return (nodes.first?.children ?? []).compactMap { node in
+      switch node.row {
+      case .worktree(let worktree, _, _): .worktree(worktree)
+      case .pending(let pending): .pending(pending)
+      default: nil
+      }
+    }
   }
 
   /// The selected row when it belongs to a Workspace, read live like
@@ -256,7 +225,7 @@ struct HierarchySidebarView: View {
 
     // Sidebar body: the upper ZStack is the only area the
     // AgentState panel may draw into. Clipping this region is
-    // essential on macOS 26: List overlays can paint past their
+    // essential on macOS 26: scroll-view overlays can paint past their
     // allocated frame while a bottom move transition is entering, so
     // an unclipped panel visually covers the footer sibling below.
     // With the panel mounted inside this clipped slot, its bottom
@@ -628,87 +597,75 @@ struct HierarchySidebarView: View {
       // screen, top-down (`Catalog.sidebarSelectionOrder`: Project rows that
       // stand for a folder, and the rows of expanded Projects); matching hints
       // show while ⌘ is held. Archived, pending, and collapsed rows claim none.
-      let hotkeyIndex: [WorktreeID: Int] = Dictionary(
+      let slots = Array(
         hierarchyManager.catalog.sidebarSelectionOrder(
-          pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
-          .prefix(10).enumerated()
-          .map { ($0.element.worktreeID, $0.offset) },
+          pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs
+        ).prefix(10))
+      let hotkeyIndex: [WorktreeID: Int] = Dictionary(
+        slots.enumerated().map { ($0.element.worktreeID, $0.offset) },
         uniquingKeysWith: { first, _ in first })
-      // List + .listStyle(.sidebar) with NO `.scrollIndicators(.*)` modifier.
-      // On macOS 26 / NavigationSplitView sidebar columns, both `.hidden` and
-      // `.never` silently collapse the List's top titlebar safe area — the
-      // first row then draws at y=0, overlapping with the traffic lights.
-      // Accepting the scroller-when-needed trade-off; the default indicator
-      // posture is fine for source-list-style sidebars.
-      ScrollViewReader { proxy in
-        List(selection: nativeSelectionBinding) {
-          if isReordering {
-            // Reorder session: one draggable header-only row per Project
-            // (worktrees hidden). A single row per ForEach element is what
-            // makes `.onMove` valid here — it forwards to `reorderProjects`,
-            // which moves `catalog.projects` and restamps `manualOrder`.
-            ForEach(projects) { project in
-              reorderProjectRow(project)
-            }
-            .onMove { source, destination in
-              store.send(.reorderProjects(from: source, to: destination))
-            }
-          } else {
-            ForEach(projects) { project in
-              projectSection(project, hotkeyIndex: hotkeyIndex)
-            }
-          }
+      let catalog = hierarchyManager.catalog
+      SidebarOutline(
+        nodes: SidebarOutlineModel.nodes(
+          projects: projects, pendingWorktrees: Array(store.pendingWorktrees), filter: catalog.sidebarFilter,
+          isReordering: isReordering),
+        selection: outlineSelection,
+        selectedProjectID: catalog.selectedProjectID,
+        revealTrigger: revealTrigger,
+        bottomInset: bottomInsetHeight,
+        allowsWorktreeDrag: !SidebarOutlineModel.isLiveMatch(catalog.sidebarFilter),
+        decorateRow: SidebarRowEnvironment(
+          hierarchyManager: hierarchyManager, settingsStore: settingsStore,
+          worktreeStatusMonitor: worktreeStatusMonitor, worktreeLocalDiffMonitor: worktreeLocalDiffMonitor,
+          notificationStore: inbox, rollup: rollup, agentStateStore: agentStateStore,
+          updatesModel: updatesModel, commandKeyObserver: commandKeyObserver,
+          resolvedShortcuts: resolvedShortcuts
+        ).apply,
+        rowContent: { node in rowContent(node, hotkeyIndex: hotkeyIndex) },
+        onSelect: { selectRow($0) },
+        onMoveWorktrees: { move in
+          store.send(
+            .reorderWorktrees(
+              projectID: move.projectID, segment: move.segment, from: move.source, to: move.destination))
+        },
+        onMoveProjects: { source, destination in
+          store.send(.reorderProjects(from: source, to: destination))
         }
-        .listStyle(.sidebar)
-        // Bottom safe-area-inset sized to the live AgentState panel
-        // height (when expanded). Unlike a spacer row, the inset
-        // shrinks the List's underlying `NSScrollView` safe area — so
-        // both the scrollable content AND the overlay scroller stop
-        // above the panel. A spacer row would instead inflate
-        // content-size and leave the scroller trailing behind the
-        // panel (its drag range covers the spacer's blank tail and
-        // the scroller's track is still the full List height).
-        // `.contentMargins(.bottom, _, for: .scrollContent)` is the
-        // ScrollView-native version but `List(.sidebar)` on macOS 26
-        // ignores it — see 6c1c3631. We don't worry about
-        // bleed-through here because the panel (a ZStack sibling) is
-        // a translucent popover material; rows showing through the
-        // inset region are exactly the behind-glass effect we want.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-          if bottomInsetHeight > 0 {
-            Color.clear
-              .frame(height: bottomInsetHeight)
-              .accessibilityHidden(true)
-          }
-        }
-        // Hide the List's own opaque content background so the sidebar
-        // column's system glass overlay shows through — same surface
-        // the floating sidebar samples, so the footer below (rendered
-        // as a sibling in the outer VStack) reads as one continuous
-        // material with the list above it.
-        .scrollContentBackground(.hidden)
-        .opacity(sidebarIndentReady ? 1 : 0)
-        .background(SidebarIndentZeroer(onReady: { sidebarIndentReady = true }))
-        .onChange(of: revealTrigger) { _, _ in
-          // Resolve the reveal target from the *live* catalog, not the
-          // `currentSelection` prop — the prop trails state by a render
-          // cycle (see `nativeSelectionBinding`). Palette-driven reveals bump
-          // this trigger in the same tick they switch worktrees (and may
-          // expand a collapsed parent), so the prop still points at the
-          // previous, already-visible row and `scrollTo` looks like a no-op.
-          // Defer one runloop so the selection mutation and any just-expanded
-          // rows have landed before we scroll.
-          Task { @MainActor in
-            let catalog = hierarchyManager.catalog
-            guard
-              let projectID = catalog.selectedProjectID,
-              let worktreeID = catalog.projects
-                .first(where: { $0.id == projectID })?.selectedWorktreeID
-            else { return }
-            withAnimation { proxy.scrollTo(worktreeID, anchor: .center) }
-          }
+      )
+      // The chords live here, not in the rows: the outline makes views only
+      // for the rows on screen, and a slot must work while its row is not.
+      .background(alignment: .topLeading) {
+        // Identity is the row, not the slot: a Button keeps the action its
+        // shortcut was registered with, so a slot that moves to another row
+        // (a Project that fails to load leaves the order) needs a new Button.
+        ForEach(Array(slots.enumerated()), id: \.element.worktreeID) { offset, address in
+          hotkeyChord(offset + 1, worktreeID: address.worktreeID, projectID: address.projectID)
         }
       }
+    }
+  }
+
+  /// The SwiftUI content of one outline row. Each row carries its own insets:
+  /// the outline adds no indent and no spacing.
+  private func rowContent(_ node: SidebarOutlineNode, hotkeyIndex: [WorktreeID: Int]) -> AnyView {
+    switch node.row {
+    case .project(let project):
+      if case .failed(let reason) = project.loadState {
+        return AnyView(failedProjectRow(project, reason: reason))
+      }
+      return AnyView(projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] }))
+    case .reorderProject(let project):
+      return AnyView(reorderProjectRow(project))
+    case .worktree(let worktree, let project, _):
+      return AnyView(worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id]))
+    case .pending(let pending):
+      return AnyView(pendingRow(pending))
+    case .workspaceGroup(let group, let terminal, let project):
+      return AnyView(
+        workspaceGroupRow(
+          group, terminal: terminal, in: project, hotkeySlot: terminal.flatMap { hotkeyIndex[$0.id] }))
+    case .workspaceMember(let worktree, let project):
+      return AnyView(worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id], indent: 28))
     }
   }
 
@@ -812,99 +769,32 @@ struct HierarchySidebarView: View {
     }
     .padding(.vertical, 2)
     .contentShape(Rectangle())
-    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
-    .listRowBackground(Color.clear)
-    .listRowSeparator(.hidden)
+    .padding(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
     .accessibilityLabel(project.name)
   }
 
-  // MARK: - Project section
+  // MARK: - Failed Project row
 
-  private func projectSection(
-    _ project: Project,
-    hotkeyIndex: [WorktreeID: Int]
-  ) -> some View {
-    let isExpanded = project.isExpanded
-    return Group {
-      switch project.loadState {
-      case .failed(let reason):
-        FailedProjectRow(
-          name: project.name,
-          rootPath: project.rootPath,
-          remoteAuthority: project.remoteHost?.displayAuthority,
-          reason: reason,
-          retry: {
-            store.send(.retryProjectTapped(projectID: project.id))
-          },
-          remove: {
-            store.send(
-              .projectRemoveTapped(
-                projectID: project.id,
-                name: project.name
-              ))
-          }
-        )
-        // Same row metrics as the healthy Project header below — without
-        // them the failed row falls back to the sidebar's default insets and
-        // sits at a different indent than its siblings.
-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-      case .loading, .ready:
-        projectRow(project, hotkeySlot: project.rowWorktree.flatMap { hotkeyIndex[$0.id] })
-        if isExpanded, project.isWorkspace {
-          workspaceRows(project, hotkeyIndex: hotkeyIndex)
-        } else if isExpanded {
-          // Render the four segments individually so pinned and unpinned
-          // each own their own ForEach + .onMove (per design doc §渲染合并
-          // / 拖拽). Pending rows render in source order between pinned
-          // and unpinned; main and pending segments do not admit reorder.
-          let children = project.childWorktrees
-          let mainRows = children.filter { $0.path == project.rootPath }
-          let pinnedRows = children.filter { $0.isPinned && $0.path != project.rootPath }
-          let unpinnedRows = children.filter { !$0.isPinned && $0.path != project.rootPath }
-          // The live-match filters show a subset of each segment, so its
-          // indices cannot drive a reorder.
-          let isLiveMatchFilter = [SidebarFilter.notifications, .pullRequests]
-            .contains(hierarchyManager.catalog.sidebarFilter)
-          let pendingRows = store.pendingWorktrees.filter {
-            $0.projectID == project.id && !isLiveMatchFilter
-          }
-          ForEach(mainRows) { worktree in
-            worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-          }
-          ForEach(pinnedRows) { worktree in
-            worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(isLiveMatchFilter)
-          }
-          .onMove { source, destination in
-            guard !isLiveMatchFilter else { return }
-            store.send(
-              .reorderWorktrees(
-                projectID: project.id,
-                segment: .pinned, from: source, to: destination
-              )
-            )
-          }
-          ForEach(pendingRows) { pending in
-            pendingRow(pending)
-          }
-          ForEach(unpinnedRows) { worktree in
-            worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id])
-              .moveDisabled(isLiveMatchFilter)
-          }
-          .onMove { source, destination in
-            guard !isLiveMatchFilter else { return }
-            store.send(
-              .reorderWorktrees(
-                projectID: project.id,
-                segment: .unpinned, from: source, to: destination
-              )
-            )
-          }
-        }
+  /// A Project row's insets. The `List` asked for 2 at the bottom but laid
+  /// the row out with 4; the outline keeps the rows where they were.
+  private static let projectRowInsets = EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
+
+  private func failedProjectRow(_ project: Project, reason: String) -> some View {
+    FailedProjectRow(
+      name: project.name,
+      rootPath: project.rootPath,
+      remoteAuthority: project.remoteHost?.displayAuthority,
+      reason: reason,
+      retry: {
+        store.send(.retryProjectTapped(projectID: project.id))
+      },
+      remove: {
+        store.send(.projectRemoveTapped(projectID: project.id, name: project.name))
       }
-    }
+    )
+    // Same row metrics as the healthy Project header — without them the
+    // failed row sits at a different indent than its siblings.
+    .padding(Self.projectRowInsets)
   }
 
   // MARK: - Project row
@@ -916,11 +806,8 @@ struct HierarchySidebarView: View {
   /// under it. A git Project's row is not selectable: a click anywhere on it
   /// opens or closes its worktrees, as the chevron does.
   ///
-  /// The row and the rows under it are separate sibling List rows.
-  /// DisclosureGroup used to nest the worktree rows inside the Project row —
-  /// that made AppKit animate the single wrapping row's height on every
-  /// expand / collapse, visibly jittering the Project name. Siblings let
-  /// NSTableView handle expansion as plain row insert / remove instead.
+  /// The rows under it are outline children that open and close with it,
+  /// as plain row inserts and removals.
   @ViewBuilder
   private func projectRow(_ project: Project, hotkeySlot: Int?) -> some View {
     let toggleExpansion = {
@@ -944,15 +831,7 @@ struct HierarchySidebarView: View {
       ) {
         runScriptPingAccessory(for: root, in: project)
       }
-      .background(alignment: .topLeading) {
-        hotkeyChord(hotkeyNumber, worktreeID: root.id, projectID: project.id)
-      }
-      // Tagged like a worktree row: the native List selection paints its
-      // highlight and arrow keys stop on it. `.id` is what a reveal scrolls to.
-      .tag(SidebarSelection.worktree(root.id))
-      .id(root.id)
-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
-      .listRowSeparator(.hidden)
+      .padding(Self.projectRowInsets)
       .contextMenu { worktreeContextMenu(worktree: root, project: project) }
     } else {
       Button(action: toggleExpansion) {
@@ -978,31 +857,14 @@ struct HierarchySidebarView: View {
           }
         }
       }
-      .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 2, trailing: 0))
-      .listRowBackground(Color.clear)
-      .listRowSeparator(.hidden)
+      .padding(Self.projectRowInsets)
     }
   }
 
   // MARK: - Workspace rows
 
-  /// The rows under an expanded Workspace header: each group, followed by
-  /// the references or members of an open group. Flat sibling List rows,
-  /// like a Project's worktree rows, so a group opens as plain row inserts.
-  private func workspaceRows(_ project: Project, hotkeyIndex: [WorktreeID: Int]) -> some View {
-    ForEach(project.workspaceSidebarRows, id: \.listID) { row in
-      switch row {
-      case .group(let group, let terminal):
-        workspaceGroupRow(
-          group, terminal: terminal, in: project, hotkeySlot: terminal.flatMap { hotkeyIndex[$0.id] })
-      case .member(let worktree, _):
-        worktreeRow(worktree, in: project, hotkeySlot: hotkeyIndex[worktree.id], indent: 28)
-      }
-    }
-  }
-
-  /// A group row. Selecting it selects the group directory's row (List tag
-  /// = the terminal row), so the group opens a terminal like any row; only
+  /// A group row. Selecting it selects the group directory's row (the outline
+  /// selection is the terminal row), so the group opens a terminal like any row; only
   /// the chevron opens and closes the group.
   @ViewBuilder
   private func workspaceGroupRow(
@@ -1035,20 +897,13 @@ struct HierarchySidebarView: View {
         }
       }
     )
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
-    .listRowSeparator(.hidden)
+    .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
     if let terminal {
-      row
-        .background(alignment: .topLeading) {
-          hotkeyChord(hotkeyNumber, worktreeID: terminal.id, projectID: project.id)
-        }
-        .tag(SidebarSelection.worktree(terminal.id))
-        .id(terminal.id)
-        .contextMenu { worktreeContextMenu(worktree: terminal, project: project) }
+      row.contextMenu { worktreeContextMenu(worktree: terminal, project: project) }
     } else {
       // The reconcile has not added the group directory's row yet: nothing
       // to select or open.
-      row.listRowBackground(Color.clear)
+      row
     }
   }
 
@@ -1075,10 +930,9 @@ struct HierarchySidebarView: View {
     return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }
 
-  /// The per-row hotkey still requires a Button to bind to. Mounted as a 0×0
-  /// invisible background so the shortcut lives in the responder chain
-  /// without painting pixels or competing with List's hit-test for clicks
-  /// (zero frame == zero hit area). The chord itself comes from the shortcut
+  /// A sidebar slot's hotkey still requires a Button to bind to. Mounted as a
+  /// 0×0 invisible background so the shortcut lives in the responder chain
+  /// without painting pixels or taking clicks (zero frame == zero hit area). The chord itself comes from the shortcut
   /// registry — defaults are ⌃1..⌃9 / ⌃0 but a user rebind takes effect here
   /// without restart.
   @ViewBuilder
@@ -1109,16 +963,10 @@ struct HierarchySidebarView: View {
       onRetry: { store.send(.pendingWorktreeRetryTapped(pending.id)) },
       onDiscard: { store.send(.pendingWorktreeDiscardTapped(pending.id)) }
     )
-    // Selectable like a worktree row: the native source-list selection paints
-    // the highlight (same inset, corner radius, and focus-aware emphasis), and
-    // selecting the row brings the user back to the creation.
-    .tag(SidebarSelection.pending(pending.id))
-    // Match the worktree row's `listRowInsets` so the spinner + name line up
-    // with sibling worktree rows. Without this the row renders flush-left:
-    // the child indent lives in `leading: 14` (see `worktreeRow`), not in
-    // the outline view, whose own indentation is zeroed.
-    .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
-    .listRowSeparator(.hidden)
+    // Match the worktree row's insets so the spinner + name line up with
+    // sibling worktree rows: the child indent lives in `leading: 14` (see
+    // `worktreeRow`), not in the outline view, which adds none.
+    .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 0))
   }
 
   // MARK: - Worktree row
@@ -1173,18 +1021,11 @@ struct HierarchySidebarView: View {
         }
       }
     }
-    // Worktree rows are real List children. Selection chrome is owned by
-    // SwiftUI's native `List(selection:)` (see `nativeSelectionBinding`):
-    // `.tag(worktree.id)` makes the row a selectable target so AppKit's
-    // sourceList renderer paints the focus-aware highlight (emphasized blue
-    // when sidebar holds first-responder, unemphasized grey when focus
-    // moves to a terminal pane), with the matching white / dark text.
-    // Leading 14 is the +8pt visual indent over the project row's own
-    // leading inset, so worktree content reads as a child level under the
-    // (left-aligned) project header.
-    .tag(SidebarSelection.worktree(worktree.id))
-    .listRowInsets(EdgeInsets(top: 2, leading: indent, bottom: 2, trailing: 0))
-    .listRowSeparator(.hidden)
+    // Selection chrome is the outline's (see `SidebarOutline`): its
+    // source-list rows paint the focus-aware highlight. Leading 14 is the
+    // visual indent over the project row's own leading inset, so worktree
+    // content reads as a child level under the (left-aligned) project header.
+    .padding(EdgeInsets(top: 2, leading: indent, bottom: 2, trailing: 0))
     .contextMenu { worktreeContextMenu(worktree: worktree, project: project) }
     .task(id: worktree.path) {
       // Refresh the "dirty" dot on mount / path change. The monitor enforces a 30 s
@@ -1257,8 +1098,8 @@ struct HierarchySidebarView: View {
     let isSyntheticWorktree = isMainCheckout && project.gitRoot == nil
     let (rowTitle, rowCaption) = rowLabels(for: worktree, in: project)
     let leadingGlyph: WorktreeRowIcon.LeadingGlyph = isSyntheticWorktree ? .folder : .gitAnchor
-    // Plain content (no Button wrapping). With native `List(selection:)`,
-    // the row's tap is owned by AppKit's NSTableView so the click also
+    // Plain content (no Button wrapping). The row's tap is owned by the
+    // outline (`SidebarOutline`) so the click also
     // promotes the table to first responder — that's what flips the
     // selection chrome from unemphasized grey to emphasized blue. A
     // SwiftUI Button at the row's leading area would intercept the
@@ -1333,9 +1174,7 @@ struct HierarchySidebarView: View {
     }
     .contentShape(Rectangle())
 
-    content.background(alignment: .topLeading) {
-      hotkeyChord(hotkeyNumber, worktreeID: worktree.id, projectID: project.id)
-    }
+    content
   }
 
   // Main-checkout guard: the row whose path is the Project's rootPath is the main checkout
@@ -2326,16 +2165,6 @@ private struct ProjectHeaderRow<Accessory: View>: View {
 
 // MARK: - Workspace group row
 
-extension WorkspaceSidebarRow {
-  /// Stable List identity: a group by its id, a member by its row.
-  fileprivate var listID: String {
-    switch self {
-    case .group(let group, _): "group:\(group.id.raw)"
-    case .member(let worktree, _): "row:\(worktree.id.raw)"
-    }
-  }
-}
-
 /// One Workspace group: a star in the leading slot for `default` (a folder
 /// for a named group), the name, and a caption with the member count, the
 /// branch summary, and the group's pull requests. Own view so hover state is
@@ -2463,75 +2292,6 @@ private struct SidebarHotkeyHint<Accessories: View>: View {
 
   var body: some View {
     ShortcutHintTrailing(chord: chord, leadingGap: 6, accessories: accessories)
-  }
-}
-
-/// Transparent helper that hunts down the AppKit `NSOutlineView` backing
-/// `List(.sidebar)` and zeroes its built-in indentation / intercell spacing,
-/// so rows carry no per-level offset on top of the scroll-view gutter and
-/// the indent each row wants lives in its own `listRowInsets`.
-///
-/// Retries a few times because the List may not be attached when
-/// `viewDidMoveToWindow` first fires. Fires `onReady` once any outline has
-/// been patched so the SwiftUI parent can gate visibility on install — the
-/// indent would otherwise visibly snap rows left mid-launch.
-private struct SidebarIndentZeroer: NSViewRepresentable {
-  var onReady: () -> Void = {}
-  func makeNSView(context: Context) -> NSView {
-    let view = _IndentZeroerView()
-    view.onReady = onReady
-    return view
-  }
-  func updateNSView(_ nsView: NSView, context: Context) {
-    (nsView as? _IndentZeroerView)?.onReady = onReady
-  }
-}
-
-private final class _IndentZeroerView: NSView {
-  var onReady: (() -> Void)?
-  private var attempts = 0
-  private var didFireReady = false
-
-  override func viewDidMoveToWindow() {
-    super.viewDidMoveToWindow()
-    attempts = 0
-    patch()
-  }
-
-  private func patch() {
-    guard let root = window?.contentView else { return }
-    let outlines = findOutlineViews(in: root)
-    if outlines.isEmpty, attempts < 60 {
-      attempts += 1
-      // First handful of retries fire next-runloop (≈1 frame) so the gate
-      // flips before the user can perceive the unshifted rows; fall back
-      // to 100ms after that in case the List takes longer than expected.
-      let delay: DispatchTime = attempts < 10 ? .now() : .now() + 0.1
-      DispatchQueue.main.asyncAfter(deadline: delay) { [weak self] in
-        self?.patch()
-      }
-      return
-    }
-    for outline in outlines {
-      outline.indentationPerLevel = 0
-      outline.intercellSpacing = NSSize(width: 0, height: outline.intercellSpacing.height)
-      outline.outlineTableColumn?.minWidth = 0
-    }
-    if !outlines.isEmpty, !didFireReady {
-      didFireReady = true
-      onReady?()
-    }
-  }
-
-  private func findOutlineViews(in root: NSView) -> [NSOutlineView] {
-    var result: [NSOutlineView] = []
-    var queue: [NSView] = [root]
-    while let v = queue.first {
-      queue.removeFirst()
-      if let outline = v as? NSOutlineView { result.append(outline) }
-      queue.append(contentsOf: v.subviews)
-    }
-    return result
   }
 }
 
@@ -2744,7 +2504,8 @@ private struct SidebarFilterBar: View {
           .foregroundStyle(
             selected
               ? Color.white
-              : filter == .notifications && hasUnreadNotifications ? tint(for: filter) : Color.secondary)
+              : filter == .notifications && hasUnreadNotifications ? tint(for: filter) : Color.secondary
+          )
           .fixedSize()
           .offset(x: showsTitle ? 0 : (titleWidth + 5) / 2)
           .animation(
