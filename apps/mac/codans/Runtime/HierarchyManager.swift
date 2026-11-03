@@ -1312,7 +1312,7 @@ final class HierarchyManager {
         // 2. In-place branch change — user ran `git checkout` /
         //    `git switch` inside the worktree pane. The row's `branch`
         //    must follow HEAD so the sidebar subtitle, WorktreeHeader
-        //    label, and GitHubFeature's PR fetch all see the new value.
+        //    label, and CodeHostFeature's PR fetch all see the new value.
         // 3. Unchanged — no-op.
         //
         // Tabs, panes, pin/archive flags, and the row id are preserved

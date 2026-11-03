@@ -194,7 +194,7 @@ struct MainWindowCommands: Commands {
       .disabled(!hasPRForCurrentWorktree)
 
       Button("Open Project on GitHub") {
-        store()?.send(.openCurrentProjectOnGitHubRequested)
+        store()?.send(.openCurrentProjectOnCodeHostRequested)
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: shortcuts)
       .disabled(!hasCurrentProject)
@@ -476,7 +476,7 @@ struct MainWindowCommands: Commands {
   private var hasPRForCurrentWorktree: Bool {
     guard
       let worktreeID = store()?.state.selection.worktreeID,
-      store()?.state.gitHub.snapshots[worktreeID] != nil
+      store()?.state.codeHost.snapshots[worktreeID] != nil
     else { return false }
     return true
   }

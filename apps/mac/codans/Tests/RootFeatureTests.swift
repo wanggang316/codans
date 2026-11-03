@@ -269,12 +269,13 @@ struct RootFeatureTests {
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
       $0.gitService = GitServiceClient.testValue
-      // A `.gitHub(.projectActivated)` dispatch fires on projectID transitions.
-      // This test is exhaustivity=off and not about GitHub, but the fetch effect still
+      // A `.codeHost(.projectActivated)` dispatch fires on projectID transitions.
+      // This test is exhaustivity=off and not about the Code Host, but the fetch effect still
       // runs and touches .date + remoteInfo + batchPullRequests — stub each to no-op.
       $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
       $0.editorClient = EditorClient.testValue
       // `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`, which spawns a
       // pane in the active tab when it has none. The fixture tab is empty so
@@ -706,11 +707,11 @@ struct RootFeatureTests {
     // app is frontmost. An empty Catalog has no units, so no fetch or timer
     // starts. Receiving them before yielding the selection keeps the
     // merged-effect action order deterministic.
-    await store.receive(\.gitHub.pollUnitsChanged)
+    await store.receive(\.codeHost.pollUnitsChanged)
     if NSApplication.shared.isActive {
-      await store.receive(\.gitHub.appActiveChanged) { $0.gitHub.isPolling = true }
+      await store.receive(\.codeHost.appActiveChanged) { $0.codeHost.isPolling = true }
     } else {
-      await store.receive(\.gitHub.appActiveChanged)
+      await store.receive(\.codeHost.appActiveChanged)
     }
 
     // `worktreeID: nil` is the key: the all-nil selection leaves State at its
@@ -769,7 +770,7 @@ struct RootFeatureTests {
   // MARK: - status-bar toast routing
 
   /// The multi-line / over-80-char scrubber that the `.editor(.openFailed)`
-  /// and `.gitHub(...Completed)` branches pipe through before constructing a
+  /// and `.codeHost(...Completed)` branches pipe through before constructing a
   /// warning toast. Kept as a pure function so the message-shape invariants
   /// are locked in without spinning up a `RootFeature` TestStore — a full
   /// multi-scope TestStore interacts badly with the StatusBarFeature suite's
@@ -1228,7 +1229,7 @@ struct RootFeatureTests {
       // `git diff` subprocess first and blow the receive window under
       // parallel suite load. A no-op fetch keeps the effect deterministic.
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
-      Self.stubGitHubFetch(&$0)
+      Self.stubCodeHostFetch(&$0)
     }
     store.exhaustivity = .off
 
@@ -1259,7 +1260,7 @@ struct RootFeatureTests {
       // Same no-op fetch as the match-arm test: keep the effect free of
       // real `git diff` subprocesses so finish() returns promptly.
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
-      Self.stubGitHubFetch(&$0)
+      Self.stubCodeHostFetch(&$0)
     }
     store.exhaustivity = .off
 
@@ -1292,13 +1293,13 @@ struct RootFeatureTests {
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
-      Self.stubGitHubFetch(&$0)
+      Self.stubCodeHostFetch(&$0)
     }
     store.exhaustivity = .off
 
     await store.send(.worktreeHeadChanged(worktreeB))
     await store.receive {
-      guard case .gitHub(.projectActivated(let refreshed, _, _)) = $0 else { return false }
+      guard case .codeHost(.projectActivated(let refreshed, _, _)) = $0 else { return false }
       return refreshed == projectID
     }
     await store.finish()
@@ -1306,12 +1307,13 @@ struct RootFeatureTests {
 
   /// A HEAD change now refreshes the owning Project's PR data; stub the fetch
   /// chain so it resolves without a live `git` / `gh` subprocess.
-  private static func stubGitHubFetch(_ values: inout DependencyValues) {
+  private static func stubCodeHostFetch(_ values: inout DependencyValues) {
     values.date = .constant(Date(timeIntervalSince1970: 1_700_000_000))
     values[GitServiceClient.self].remoteInfo = { _ in
-      RemoteInfo(host: "github.com", owner: "w", repo: "r")
+      RemoteInfo(host: "github.com", path: "w/r")
     }
-    values[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+    values[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+    values[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
   }
 
   // MARK: - Agents-panel row tap reveals the worktree
@@ -2106,8 +2108,9 @@ struct RootFeatureTests {
       $0.hierarchyClient.snapshot = { catalog }
       $0.gitService = GitServiceClient.testValue
       $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
       $0.editorClient = EditorClient.testValue
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
@@ -2144,8 +2147,9 @@ struct RootFeatureTests {
       $0.hierarchyClient.snapshot = { Catalog() }
       $0.gitService = GitServiceClient.testValue
       $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
       $0.editorClient = EditorClient.testValue
     }
     store.exhaustivity = .off
@@ -2238,12 +2242,13 @@ struct RootFeatureTests {
         return PaneID()
       }
       // `.selectionChanged` with a real project transition fans into
-      // `.gitHub(.projectActivated)`, which touches `.date` + remoteInfo +
+      // `.codeHost(.projectActivated)`, which touches `.date` + remoteInfo +
       // batchPullRequests; stub each so the chain completes (mirrors
       // `selectionChangedMirrorsActiveTabFromSnapshot`).
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
       $0.continuousClock = ImmediateClock()
@@ -2356,8 +2361,9 @@ struct RootFeatureTests {
       }
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }
@@ -2406,8 +2412,9 @@ struct RootFeatureTests {
       }
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { CodeHostRepository(kind: .github, host: $0.host, path: $0.path) }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }

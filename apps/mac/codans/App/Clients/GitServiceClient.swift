@@ -140,7 +140,7 @@ extension GitServiceClient: DependencyKey {
     ),
     remoteInfo: unimplemented(
       "GitServiceClient.remoteInfo",
-      placeholder: RemoteInfo(host: "github.com", owner: "example", repo: "example")
+      placeholder: RemoteInfo(host: "github.com", path: "example/example")
     ),
     diffNumstat: unimplemented(
       "GitServiceClient.diffNumstat",

@@ -24,8 +24,7 @@ struct LiveGitServiceRemoteInfoTests {
     let service = LiveGitService(runner: runner)
     let info = try await service.remoteInfo(at: URL(fileURLWithPath: "/tmp"))
     #expect(info.host == "github.com")
-    #expect(info.owner == "wanggang316")
-    #expect(info.repo == "codans")
+    #expect(info.path == "wanggang316/codans")
   }
 
   @Test

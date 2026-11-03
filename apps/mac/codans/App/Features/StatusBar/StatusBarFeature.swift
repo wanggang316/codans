@@ -6,7 +6,7 @@ import CodansCore
 /// transient `toast` value and its auto-clear lifecycle.
 ///
 /// PR and motivational forms are view-level projections of other state
-/// (`GitHubFeature.snapshots`, time of day) — not managed here. This reducer
+/// (`CodeHostFeature.snapshots`, time of day) — not managed here. This reducer
 /// only decides which toast (if any) is active and when it expires.
 ///
 /// Auto-clear windows:

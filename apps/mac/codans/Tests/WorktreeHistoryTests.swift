@@ -275,7 +275,7 @@ struct WorktreeHistoryTests {
     ]
     let pullRequest = PullRequestSnapshot(
       number: 7, title: "Review", state: .merged, isDraft: false, headRefName: "review",
-      author: "me", additions: 1, deletions: 0, commitCount: 1, mergeable: .unknown,
+      author: "me", additions: 1, deletions: 0, commitCount: 1,
       url: URL(string: "https://example.com/pr/7")!, updatedAt: Date()
     )
 

@@ -4,10 +4,10 @@ import CodansCore
 
 /// Root SwiftUI view for the Worktree Status Bar's center slot. Picks a
 /// form by priority: toast (reducer-owned) → PR (derived from
-/// GitHubFeature.snapshots) → motivational / empty.
+/// CodeHostFeature.snapshots) → motivational / empty.
 struct StatusBarView: View {
   @Bindable var store: StoreOf<StatusBarFeature>
-  let gitHubStore: StoreOf<GitHubFeature>
+  let codeHostStore: StoreOf<CodeHostFeature>
   /// Active Worktree identifier, nil when selection doesn't resolve one
   /// (sidebar placeholder state). Drives the PR form's snapshot lookup.
   let worktreeID: WorktreeID?
@@ -48,7 +48,7 @@ struct StatusBarView: View {
     case .pullRequest(let snapshot):
       StatusPullRequestView(
         snapshot: snapshot,
-        store: gitHubStore,
+        store: codeHostStore,
         worktreeID: worktreeID,
         worktreePath: worktreePath,
         branch: branch,
@@ -72,7 +72,7 @@ struct StatusBarView: View {
   private var form: Form {
     if let toast = store.toast { return .toast(toast) }
     if let wt = worktreeID,
-      let snapshot = gitHubStore.snapshots[wt],
+      let snapshot = codeHostStore.snapshots[wt],
       snapshot.state != .closed
     {
       return .pullRequest(snapshot)
@@ -86,7 +86,7 @@ struct StatusBarView: View {
   /// every refresh without changing rendered content).
   ///
   /// Includes every field that visibly affects the rendered PR row —
-  /// number, state, draft, mergeStateStatus, and the breakdown signature
+  /// number, state, draft, merge state, and the breakdown signature
   /// — so transitions like "checks failing → all passing" or
   /// "blocked → clean" do animate instead of snapping.
   private var formIdentity: String {
@@ -100,7 +100,7 @@ struct StatusBarView: View {
         "\(pr.number)",
         pr.state.rawValue,
         pr.isDraft ? "draft" : "ready",
-        pr.mergeStateStatus.rawValue,
+        pr.mergeState.status.rawValue,
         "\(breakdown.passing)/\(breakdown.failing)/\(breakdown.pending)/\(breakdown.neutral)",
       ].joined(separator: "-")
     case .motivational:

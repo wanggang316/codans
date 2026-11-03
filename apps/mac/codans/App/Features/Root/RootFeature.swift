@@ -53,8 +53,8 @@ struct RootFeature {
     var editor: EditorFeature.State = .init()
     /// Header feature (bell + Open-in split button + GV toggle).
     var worktreeHeader: WorktreeHeaderFeature.State = .init()
-    /// GitHub integration — per-Worktree PR snapshots + popover state.
-    var gitHub: GitHubFeature.State = .init()
+    /// Code Host layer — per-Worktree Pull Request snapshots + popover state.
+    var codeHost: CodeHostFeature.State = .init()
     /// Titlebar-center Worktree Status Bar — owns only the transient
     /// toast slot; PR / motivational forms are view-level projections.
     var statusBar: StatusBarFeature.State = .init()
@@ -226,7 +226,7 @@ struct RootFeature {
     /// is the status-bar message when it did not start.
     case worktreeAgentLaunchFinished(WorktreeID, failure: String?)
     /// A structural hierarchy mutation landed (Project / Worktree removal,
-    /// archive, auto-archive). Re-derives GitHub state from the live catalog.
+    /// archive, auto-archive). Re-derives Code Host state from the live catalog.
     case catalogMembershipChanged
     case engineEventReceived(LastEventMarker)
     /// Emitted from the event stream when libghostty reports a surface
@@ -265,7 +265,7 @@ struct RootFeature {
     /// file changes — typically a `git checkout` / `git switch` inside
     /// a codans pane. The reducer reconciles that worktree's
     /// Project so the catalog's `Worktree.branch` follows HEAD, then
-    /// pokes GitHubFeature so the PR badge re-fetches against the new
+    /// pokes CodeHostFeature so the PR badge re-fetches against the new
     /// branch set. Without this, branch flips that happen while the
     /// app stays focused never reach the sidebar / header / PR cache
     /// (the focus-driven reconcile path requires a `didBecomeActive`
@@ -290,19 +290,18 @@ struct RootFeature {
     /// dispatches `.editor(.openDefaultInCurrentWorktreeRequested)`.
     case openDefaultForCurrentWorktreeRequested
     /// ⌘⇧G entry point. Looks up the current Worktree's PR snapshot in
-    /// `state.gitHub.snapshots` and forwards the URL through
-    /// `.gitHub(.delegate(.openURL(...)))` — the same hop the status-bar
+    /// `state.codeHost.snapshots` and forwards the URL through
+    /// `.codeHost(.delegate(.openURL(...)))` — the same hop the status-bar
     /// PR badge uses on click. No-op when no Worktree is selected or no
-    /// PR snapshot has been fetched for it yet (typical for non-GitHub
-    /// repos or freshly created branches).
+    /// PR snapshot has been fetched for it yet (typical for repos no Code
+    /// Host serves, or freshly created branches).
     case openCurrentPRRequested
-    /// ⌘⇧G entry point. Resolves the current Project's gitRoot from
-    /// the catalog, asks `gitService.remoteInfo` to parse the origin remote,
-    /// and forwards `https://<host>/<owner>/<repo>` through the GitHub
+    /// ⌘⇧G entry point. Resolves the current Project's repository on its
+    /// Code Host and forwards the repository web URL through the Code Host
     /// delegate's `openURL` hop. Silent no-op when no Project is selected,
-    /// the Project has no gitRoot (plain directory Project), or the remote
-    /// cannot be parsed (no origin, malformed URL).
-    case openCurrentProjectOnGitHubRequested
+    /// the Project has no gitRoot (plain directory Project), the remote
+    /// cannot be parsed, or no Code Host serves the remote's host.
+    case openCurrentProjectOnCodeHostRequested
     /// ⌘N entry point. Looks up the current Project from `state.selection`
     /// and forwards `.sidebar(.projectAddWorktreeTapped(projectID:))` so
     /// `HierarchySidebarFeature` opens its `CreateWorktreeFeature` sheet —
@@ -464,7 +463,7 @@ struct RootFeature {
     case openDiffRequested
     case editor(EditorFeature.Action)
     case worktreeHeader(WorktreeHeaderFeature.Action)
-    case gitHub(GitHubFeature.Action)
+    case codeHost(CodeHostFeature.Action)
     case statusBar(StatusBarFeature.Action)
     case paneActionRouter(PaneActionRouterFeature.Action)
     case windowActionRouter(WindowActionRouterFeature.Action)
@@ -499,7 +498,7 @@ struct RootFeature {
     /// FSEvents observation of each repository's remote-tracking refs, which
     /// a `git push` from any process (an agent included) updates.
     case remoteRefsWatcher
-    /// `NSApplication.didResignActiveNotification` observation — pauses the GitHub
+    /// `NSApplication.didResignActiveNotification` observation — pauses the Code Host
     /// liveness poll when the app is no longer frontmost.
     case appResignActive
     /// Debounces the immediate git + PR refresh kicked when a `git` / `gh`
@@ -533,7 +532,8 @@ struct RootFeature {
 
   @Dependency(WorkflowClient.self) private var workflowClient
   @Dependency(\.uuid) private var uuid
-  @Dependency(GitHubSnapshotCacheClient.self) private var gitHubSnapshotCache
+  @Dependency(PullRequestSnapshotCacheClient.self) private var pullRequestSnapshotCache
+  @Dependency(CodeHostClient.self) private var codeHost
   @Dependency(GitServiceClient.self) private var gitServiceClient
 
   /// Child-feature scopes. Split from `body` so Swift's type inference budget stays under
@@ -551,9 +551,9 @@ struct RootFeature {
   private var headerAndEditorScopes: some Reducer<State, Action> {
     Scope(state: \.editor, action: \.editor) { EditorFeature() }
     Scope(state: \.worktreeHeader, action: \.worktreeHeader) { WorktreeHeaderFeature() }
-    Scope(state: \.gitHub, action: \.gitHub) {
-      GitHubFeature()
-      GitHubRootBindings()
+    Scope(state: \.codeHost, action: \.codeHost) {
+      CodeHostFeature()
+      CodeHostRootBindings()
     }
     Scope(state: \.statusBar, action: \.statusBar) { StatusBarFeature() }
   }
@@ -603,8 +603,8 @@ struct RootFeature {
   private var diffBindings: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .gitHub(.projectBatchLoaded), .gitHub(.seedFromCache):
-        let snapshots = state.gitHub.snapshots
+      case .codeHost(.projectBatchLoaded), .codeHost(.seedFromCache):
+        let snapshots = state.codeHost.snapshots
         return .run { _ in
           await MainActor.run {
             for (worktreeID, snapshot) in snapshots {
@@ -666,7 +666,7 @@ struct RootFeature {
     guard let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return .none }
-    let snapshot = state.gitHub.snapshots[worktreeID]
+    let snapshot = state.codeHost.snapshots[worktreeID]
     return .run { _ in
       await DiffWindowManager.shared.open(
         projectID: projectID, worktreeID: worktreeID, path: worktree.path,
@@ -693,7 +693,7 @@ struct RootFeature {
         let focusStream = NotificationCenter.default.notifications(
           named: NSApplication.didBecomeActiveNotification
         )
-        // The GitHub liveness poll is gated on the app being frontmost. Resign
+        // The Code Host liveness poll is gated on the app being frontmost. Resign
         // pauses the loop (target → nil); become-active re-points it at the active
         // Project. Held for the app lifetime; `CancelID.appResignActive` stops it at quit.
         let resignStream = NotificationCenter.default.notifications(
@@ -789,33 +789,33 @@ struct RootFeature {
           // Initial sweep: every persisted Project transitions out of .loading
           // once the reconciler fans out against the current snapshot.
           // After the sweep settles any branch changes that happened while
-          // the app was closed, poke GitHubFeature so the PR badges reflect
+          // the app was closed, poke CodeHostFeature so the PR badges reflect
           // the post-reconcile branch set.
           .run { [projectReconciler, client = hierarchyClient] send in
             await projectReconciler.reconcileAll()
-            let actions: [GitHubFeature.Action] = await MainActor.run {
-              var result: [GitHubFeature.Action] = Self.makeActiveProjectGitHubRefresh(client: client)
+            let actions: [CodeHostFeature.Action] = await MainActor.run {
+              var result: [CodeHostFeature.Action] = Self.makeActiveProjectCodeHostRefresh(client: client)
               // Register every fetch unit with the liveness poll, then start it if
               // the app launched frontmost.
               result.append(Self.makePollUnitsChange(catalog: client.snapshot()))
               result.append(.appActiveChanged(NSApplication.shared.isActive))
               return result
             }
-            for action in actions { await send(.gitHub(action)) }
+            for action in actions { await send(.codeHost(action)) }
           },
 
           // Re-sync on window focus. Debounced inside the actor. Resuming the
           // poll after the reconcile covers the canonical flow: the user runs
           // `git checkout` in a pane, switches back to the app — focus fires,
           // reconcile picks up the new branch, and every Project not fetched
-          // within `GitHubFeature.focusRefreshDebounce` gets a catch-up fetch
+          // within `CodeHostFeature.focusRefreshDebounce` gets a catch-up fetch
           // against the updated branch set, the selected Project first.
           .run { [projectReconciler, client = hierarchyClient] send in
             for await _ in focusStream {
               await projectReconciler.reconcileAll()
               let units = await MainActor.run { Self.makePollUnitsChange(catalog: client.snapshot()) }
-              await send(.gitHub(units))
-              await send(.gitHub(.appActiveChanged(true)))
+              await send(.codeHost(units))
+              await send(.codeHost(.appActiveChanged(true)))
             }
           }
           .cancellable(id: CancelID.projectReconcileFocus, cancelInFlight: true),
@@ -839,7 +839,7 @@ struct RootFeature {
           // backgrounded / idle app fires zero `gh api graphql` subprocesses.
           .run { send in
             for await _ in resignStream {
-              await send(.gitHub(.appActiveChanged(false)))
+              await send(.codeHost(.appActiveChanged(false)))
             }
           }
           .cancellable(id: CancelID.appResignActive, cancelInFlight: true),
@@ -849,7 +849,7 @@ struct RootFeature {
           // path alone wouldn't pick up the new branch.
           // `WorktreeHeadWatcher` taps `.git/HEAD` via DispatchSource and
           // yields the changed `WorktreeID`; we forward into the reducer
-          // for a targeted reconcile + GitHub refresh.
+          // for a targeted reconcile + Code Host refresh.
           .run { [worktreeHeadWatcher] send in
             let stream = await MainActor.run { worktreeHeadWatcher.events() }
             for await worktreeID in stream {
@@ -878,22 +878,22 @@ struct RootFeature {
           .run { [remoteRefsWatcher] send in
             let stream = await MainActor.run { remoteRefsWatcher.events() }
             for await unitID in stream {
-              await send(.gitHub(.remoteRefsChanged(unitID)))
+              await send(.codeHost(.remoteRefsChanged(unitID)))
             }
           }
           .cancellable(id: CancelID.remoteRefsWatcher, cancelInFlight: true),
 
-          // Hydrate the GitHub integration's in-memory state from its on-disk
+          // Hydrate the Code Host layer's in-memory state from its on-disk
           // snapshot cache so the sidebar paints PR badges on the first render
           // pass, without the blank-then-populated flash the user sees when
           // the first `gh api graphql` round-trip is the only data source. Walks the
           // live catalog once to build the branch→worktreeID map the reducer needs
           // to project cached branches into per-Worktree snapshot state.
-          .run { [cache = gitHubSnapshotCache, client = hierarchyClient] send in
+          .run { [cache = pullRequestSnapshotCache, client = hierarchyClient] send in
             let cached = cache.load()
             guard !cached.isEmpty else { return }
             let catalog = await MainActor.run { client.snapshot() }
-            var pairsByProject: [ProjectID: [GitHubFeature.Action.WorktreeBranchPair]] = [:]
+            var pairsByProject: [ProjectID: [CodeHostFeature.Action.WorktreeBranchPair]] = [:]
             // The live set is every Project and every fetch unit, not just
             // those with branch pairs: a Project whose worktrees are all
             // archived or detached still owns its cache entry and must not be
@@ -901,13 +901,13 @@ struct RootFeature {
             // repository, keyed by its derived group id.
             var liveIDs = Set(catalog.projects.map(\.id))
             for project in catalog.projects {
-              for unit in Self.gitHubFetchUnits(in: project) {
+              for unit in Self.codeHostFetchUnits(in: project) {
                 liveIDs.insert(unit.projectID)
                 if !unit.pairs.isEmpty { pairsByProject[unit.projectID] = unit.pairs }
               }
             }
             await send(
-              .gitHub(
+              .codeHost(
                 .seedFromCache(
                   cached: cached,
                   branchPairsByProject: pairsByProject,
@@ -1068,7 +1068,7 @@ struct RootFeature {
                 blockedBranches: blockedBranches
               )))
         )
-        // When the active Project changes, ask GitHubFeature to batch-fetch PR
+        // When the active Project changes, ask CodeHostFeature to batch-fetch PR
         // data for every branch in that Project. The reducer runs one
         // `gh api graphql` for the whole repo instead of N per-Worktree calls.
         if selection.projectID != priorProjectID,
@@ -1078,11 +1078,11 @@ struct RootFeature {
           // One batched fetch per repository the Project's rows belong to —
           // a single unit for a git Project, one per member repository for a
           // workspace.
-          let units = Self.gitHubFetchUnits(in: project)
+          let units = Self.codeHostFetchUnits(in: project)
           for unit in units {
             effects.append(
               .send(
-                .gitHub(
+                .codeHost(
                   .projectActivated(
                     unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
                 ))
@@ -1090,7 +1090,7 @@ struct RootFeature {
           }
           // Move the selected-tier cadence to the newly-activated Project.
           // `projectActivated` above owns the immediate refresh.
-          effects.append(.send(.gitHub(Self.makePollUnitsChange(catalog: hierarchyClient.snapshot()))))
+          effects.append(.send(.codeHost(Self.makePollUnitsChange(catalog: hierarchyClient.snapshot()))))
         }
         return .merge(effects)
 
@@ -1100,26 +1100,26 @@ struct RootFeature {
         // from its member repositories; the prune must keep those too.
         var projectIDs = Set(catalog.projects.map(\.id))
         let unitsByProject = Dictionary(
-          uniqueKeysWithValues: catalog.projects.map { ($0.id, Self.gitHubFetchUnits(in: $0)) })
+          uniqueKeysWithValues: catalog.projects.map { ($0.id, Self.codeHostFetchUnits(in: $0)) })
         for units in unitsByProject.values {
           for unit in units { projectIDs.insert(unit.projectID) }
         }
         let worktreeIDs = Set(catalog.projects.flatMap { $0.worktrees.map(\.id) })
         var effects: [Effect<Action>] = [
-          .send(.gitHub(.pruneToCatalog(projectIDs: projectIDs, worktreeIDs: worktreeIDs)))
+          .send(.codeHost(.pruneToCatalog(projectIDs: projectIDs, worktreeIDs: worktreeIDs)))
         ]
         // Rebuild the poll context from the live catalog. `projectWorktreePairs`
         // is otherwise only written by a fetch, so an unarchived Worktree never
         // re-enters it: the poll keeps fetching the branch set captured while
         // the row was hidden. `pruneToCatalog` above already drops departed units.
-        effects.append(.send(.gitHub(Self.makePollUnitsChange(catalog: catalog))))
+        effects.append(.send(.codeHost(Self.makePollUnitsChange(catalog: catalog))))
         return .merge(effects)
 
       case .worktreeHeadChanged(let worktreeID):
         // HEAD-file change fired by `WorktreeHeadWatcher`. Resolve the owning
         // Project so the reconciler can rerun `git worktree list --porcelain`
         // for that repo only — cheap, and `reconcileDiscoveredWorktrees`
-        // updates `Worktree.branch` in place. The trailing GitHub refresh
+        // updates `Worktree.branch` in place. The trailing Code Host refresh
         // re-evaluates the PR cache of the Project the HEAD moved in — not the
         // selected one — against whatever branch set the reconcile settled on.
         let catalog = hierarchyClient.snapshot()
@@ -1151,9 +1151,9 @@ struct RootFeature {
           }
           await projectReconciler.reconcile(projectID: projectID)
           for action in await MainActor.run(body: {
-            Self.makeProjectGitHubRefresh(projectID: projectID, client: client)
+            Self.makeProjectCodeHostRefresh(projectID: projectID, client: client)
           }) {
-            await send(.gitHub(action))
+            await send(.codeHost(action))
           }
           if shouldForwardToBranchSwitcher {
             await send(.branchSwitcher(.headChangedForCurrentWorktree))
@@ -1162,7 +1162,7 @@ struct RootFeature {
 
       case .worktreeWorkingTreeChanged(let worktreeID):
         // FSEvents fired for a working-tree edit. Branch / HEAD are
-        // unaffected, so skip the reconcile + GitHub refresh the HEAD path
+        // unaffected, so skip the reconcile + Code Host refresh the HEAD path
         // runs — only the uncommitted line counts can have moved.
         // Drop the freshness stamp and re-fetch so the chip tracks the edit
         // instead of waiting for the row to remount.
@@ -1230,7 +1230,7 @@ struct RootFeature {
           }),
           // The fetch unit the pane's row belongs to: the Project's repository,
           // or — in a workspace — the member repository this checkout came from.
-          let unit = Self.gitHubFetchUnit(in: project, worktreeID: worktree.id, fallback: nil)
+          let unit = Self.codeHostFetchUnit(in: project, worktreeID: worktree.id, fallback: nil)
         else { return .none }
         let projectID = project.id
         let worktreeID = worktree.id
@@ -1246,7 +1246,7 @@ struct RootFeature {
             path: URL(fileURLWithPath: worktreePath)
           )
           await projectReconciler.reconcile(projectID: projectID)
-          // PR state lives server-side. Give GitHub ~1.5 s to settle the write
+          // PR state lives server-side. Give the Code Host ~1.5 s to settle the write
           // (mirrors the 2 s post-mutation delay), then force a batched fetch.
           // `projectRefreshRequested` bypasses the 30 s freshness gate so a
           // just-created PR surfaces in seconds, not on the next 60 s poll tick.
@@ -1254,7 +1254,7 @@ struct RootFeature {
           // per-Project cancellable id.
           try? await Task.sleep(for: .milliseconds(1500))
           await send(
-            .gitHub(
+            .codeHost(
               .projectRefreshRequested(
                 unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs
               )
@@ -1362,8 +1362,8 @@ struct RootFeature {
               projectID: projectID
             )))
 
-      case .sidebar(.delegate(.openOnGitHub(let projectID, let worktreeID))):
-        return openProjectOnGitHub(projectID: projectID, worktreeID: worktreeID, state: state)
+      case .sidebar(.delegate(.openOnCodeHost(let projectID, let worktreeID))):
+        return openProjectOnCodeHost(projectID: projectID, worktreeID: worktreeID, state: state)
 
       case .sidebar(.delegate(.revealInFinder(let path))):
         let client = finderClient
@@ -1378,9 +1378,9 @@ struct RootFeature {
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcile(projectID: projectID)
           for action in await MainActor.run(body: {
-            Self.makeProjectGitHubRefresh(projectID: projectID, client: client)
+            Self.makeProjectCodeHostRefresh(projectID: projectID, client: client)
           }) {
-            await send(.gitHub(action))
+            await send(.codeHost(action))
           }
         }
 
@@ -1388,13 +1388,13 @@ struct RootFeature {
         // Manual refresh from the sidebar bottom-bar. `force: true` bypasses
         // the reconciler's focus-driven debounce so the click takes effect
         // immediately even when a focus-triggered pass just ran. Follow up
-        // with a GitHub refresh of every Project, so out-of-band branch and
+        // with a Code Host refresh of every Project, so out-of-band branch and
         // server-side changes reach all PR badges, not just the selected ones.
         return .run { [client = hierarchyClient] send in
           await projectReconciler.reconcileAll(force: true)
           let units = await MainActor.run { Self.makePollUnitsChange(catalog: client.snapshot()) }
-          await send(.gitHub(units))
-          await send(.gitHub(.refreshAllRequested))
+          await send(.codeHost(units))
+          await send(.codeHost(.refreshAllRequested))
         }
 
       // Group creation streams every checkout, the registration, and the
@@ -1752,41 +1752,41 @@ struct RootFeature {
       case .worktreeHeader:
         return .none
 
-      // Surface gh mutation outcomes in the status bar. The child
-      // `Scope(state: \.gitHub, ...)` has already updated `mutating` / `lastError`;
+      // Surface Code Host mutation outcomes in the status bar. The child
+      // `Scope(state: \.codeHost, ...)` has already updated `mutating` / `lastError`;
       // we only fan a toast out. Message format mirrors the sidebar popover's
       // verb so cross-surface language stays consistent.
-      case .gitHub(.mergeCompleted(_, let prNumber, .success)):
+      case .codeHost(.mergeCompleted(_, let prNumber, .success)):
         return .send(.statusBar(.push(.success("PR #\(prNumber) merged"))))
-      case .gitHub(.closeCompleted(_, .success)):
+      case .codeHost(.closeCompleted(_, .success)):
         return .send(.statusBar(.push(.success("PR closed"))))
-      case .gitHub(.markReadyCompleted(_, .success)):
+      case .codeHost(.markReadyCompleted(_, .success)):
         return .send(.statusBar(.push(.success("PR marked ready"))))
-      case .gitHub(.rerunFailedJobsCompleted(_, .success)):
+      case .codeHost(.rerunFailedChecksCompleted(_, .success)):
         return .send(.statusBar(.push(.success("Re-ran failed jobs"))))
 
       // Failure cases keep the verb prefix so the user can tell merge / close /
       // mark-ready / rerun-failed-jobs apart in the warning toast.
-      case .gitHub(.mergeCompleted(_, _, .failure(let error))):
+      case .codeHost(.mergeCompleted(_, _, .failure(let error))):
         let reason = Self.shortToastMessage(String(describing: error))
         return .send(.statusBar(.push(.warning("Merge failed: \(reason)"))))
-      case .gitHub(.closeCompleted(_, .failure(let error))):
+      case .codeHost(.closeCompleted(_, .failure(let error))):
         let reason = Self.shortToastMessage(String(describing: error))
         return .send(.statusBar(.push(.warning("Close failed: \(reason)"))))
-      case .gitHub(.markReadyCompleted(_, .failure(let error))):
+      case .codeHost(.markReadyCompleted(_, .failure(let error))):
         let reason = Self.shortToastMessage(String(describing: error))
         return .send(.statusBar(.push(.warning("Mark ready failed: \(reason)"))))
-      case .gitHub(.rerunFailedJobsCompleted(_, .failure(let error))):
+      case .codeHost(.rerunFailedChecksCompleted(_, .failure(let error))):
         let reason = Self.shortToastMessage(String(describing: error))
         return .send(.statusBar(.push(.warning("Rerun failed: \(reason)"))))
 
-      // GitHub integration delegate actions. Detailed handling (openURL →
-      // NSWorkspace.open, showSettingsGitHub → SettingsWindowPresenter,
+      // Code Host delegate actions. Detailed handling (openURL →
+      // NSWorkspace.open, showCodeHostSettings → SettingsWindowPresenter,
       // pullRequestMerged → post-merge Worktree action) lives in
-      // `GitHubRootBindings` stacked under the gitHub scope — leaving the
+      // `CodeHostRootBindings` stacked under the codeHost scope — leaving the
       // inline case a no-op keeps this reducer's switch-body small enough
       // for Swift's type-inference budget.
-      case .gitHub:
+      case .codeHost:
         return .none
 
       // Status-bar child scope is self-contained (toast slot + timers).
@@ -2095,13 +2095,13 @@ struct RootFeature {
       case .openCurrentPRRequested:
         guard
           let worktreeID = state.selection.worktreeID,
-          let snapshot = state.gitHub.snapshots[worktreeID]
+          let snapshot = state.codeHost.snapshots[worktreeID]
         else { return .none }
-        return .send(.gitHub(.delegate(.openURL(snapshot.url))))
+        return .send(.codeHost(.delegate(.openURL(snapshot.url))))
 
-      case .openCurrentProjectOnGitHubRequested:
+      case .openCurrentProjectOnCodeHostRequested:
         guard let projectID = state.selection.projectID else { return .none }
-        return openProjectOnGitHub(
+        return openProjectOnCodeHost(
           projectID: projectID, worktreeID: state.selection.worktreeID, state: state)
 
       case .newWorktreeForCurrentProjectRequested:
@@ -2479,7 +2479,7 @@ struct RootFeature {
       case .selectAdjacentWorktreeRequested(let direction):
         let catalog = hierarchyClient.snapshot()
         let order = catalog.sidebarSelectionOrder(
-          pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs)
+          pullRequestWorktreeIDs: Set(state.codeHost.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs)
         guard !order.isEmpty else { return .none }
         let currentIndex =
           order.firstIndex(where: { $0.worktreeID == state.selection.worktreeID }) ?? -1
@@ -2582,7 +2582,7 @@ struct RootFeature {
   ) {
     guard catalog.sidebarFilter != .all else { return }
     let listed = catalog.sidebarProjects(
-      pullRequestWorktreeIDs: Set(state.gitHub.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs
+      pullRequestWorktreeIDs: Set(state.codeHost.snapshots.keys), notifiedWorktreeIDs: state.notifiedWorktreeIDs
     ).contains { project in
       project.worktrees.contains { $0.id == worktreeID }
     }
@@ -2654,9 +2654,9 @@ struct RootFeature {
       return .run { [projectReconciler, client = hierarchyClient] send in
         await projectReconciler.reconcile(projectID: projectID)
         for action in await MainActor.run(body: {
-          Self.makeActiveProjectGitHubRefresh(client: client)
+          Self.makeActiveProjectCodeHostRefresh(client: client)
         }) {
-          await send(.gitHub(action))
+          await send(.codeHost(action))
         }
       }
     case .toggleChanges:
@@ -2686,8 +2686,8 @@ struct RootFeature {
       )
     case .openCurrentPR:
       return .send(.openCurrentPRRequested)
-    case .openCurrentProjectOnGitHub:
-      return .send(.openCurrentProjectOnGitHubRequested)
+    case .openCurrentProjectOnCodeHost:
+      return .send(.openCurrentProjectOnCodeHostRequested)
     case .showArchivedWorktrees:
       return .send(.showArchivedWorktreesForCurrentProjectRequested)
 
@@ -2701,7 +2701,7 @@ struct RootFeature {
     case .archiveAllMergedWorktrees:
       guard let projectID = state.selection.projectID else { return .none }
       let ids = Self.mergedWorktreeIDs(
-        projectID: projectID, catalog: hierarchyClient.snapshot(), gitHub: state.gitHub
+        projectID: projectID, catalog: hierarchyClient.snapshot(), codeHost: state.codeHost
       )
       return .send(
         .sidebar(.projectArchiveAllMergedTapped(projectID: projectID, worktreeIDs: ids))
@@ -2709,7 +2709,7 @@ struct RootFeature {
     case .removeAllMergedWorktrees:
       guard let projectID = state.selection.projectID else { return .none }
       let ids = Self.mergedWorktreeIDs(
-        projectID: projectID, catalog: hierarchyClient.snapshot(), gitHub: state.gitHub
+        projectID: projectID, catalog: hierarchyClient.snapshot(), codeHost: state.codeHost
       )
       return .send(
         .sidebar(.projectRemoveAllMergedTapped(projectID: projectID, worktreeIDs: ids))
@@ -2831,17 +2831,17 @@ struct RootFeature {
   /// `HierarchySidebarView.mergedWorktreeIDs` so the palette's batch commands
   /// target an identical set; an empty result makes the downstream sidebar
   /// action a safe no-op (it guards on `!targets.isEmpty`).
-  /// Live, non-archived branch pairs for a Project — the shape every GitHub
+  /// Live, non-archived branch pairs for a Project — the shape every Code Host
   /// batched fetch is parameterised by. Archived rows are excluded because
   /// their daemons are dead and their badges are not rendered.
   private nonisolated static func branchPairs(
     in project: Project
-  ) -> [GitHubFeature.Action.WorktreeBranchPair] {
+  ) -> [CodeHostFeature.Action.WorktreeBranchPair] {
     project.worktrees.compactMap { worktree in
       guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty else {
         return nil
       }
-      return GitHubFeature.Action.WorktreeBranchPair(
+      return CodeHostFeature.Action.WorktreeBranchPair(
         worktreeID: worktree.id, branch: branch
       )
     }
@@ -2850,7 +2850,7 @@ struct RootFeature {
   private static func mergedWorktreeIDs(
     projectID: ProjectID,
     catalog: Catalog,
-    gitHub: GitHubFeature.State
+    codeHost: CodeHostFeature.State
   ) -> [WorktreeID] {
     guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
     return project.worktrees
@@ -2862,7 +2862,7 @@ struct RootFeature {
           canonicalize: HierarchyManager.canonicalPath
         ) == nil
       }
-      .filter { gitHub.snapshots[$0.id]?.state == .merged }
+      .filter { codeHost.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
 
@@ -3299,41 +3299,41 @@ struct RootFeature {
     return catalog.projects.first(where: { $0.id == projectID })
   }
 
-  /// Opens `https://<host>/<owner>/<repo>` for the repository behind
-  /// `worktreeID` (or the Project's first repository) through the GitHub
-  /// delegate's `openURL` hop. Silent no-op for a plain directory Project or
-  /// an unparseable origin remote.
-  private func openProjectOnGitHub(
+  /// Opens the Code Host web page of the repository behind `worktreeID` (or the
+  /// Project's first repository) through the Code Host delegate's `openURL` hop.
+  /// Silent no-op for a plain directory Project, an unparseable origin remote, or a
+  /// remote no Code Host serves.
+  private func openProjectOnCodeHost(
     projectID: ProjectID, worktreeID: WorktreeID?, state: State
   ) -> Effect<Action> {
     guard let project = lookupProject(projectID: projectID),
       // In a workspace "the project's repository" is the member's
       // repository; a git Project has exactly one unit.
-      let unit = Self.gitHubFetchUnit(
+      let unit = Self.codeHostFetchUnit(
         in: project, worktreeID: worktreeID,
-        fallback: Self.gitHubFetchUnits(in: project).first)
+        fallback: Self.codeHostFetchUnits(in: project).first)
     else { return .none }
-    // Prefer the cached batched-PR snapshot when present — it already holds
-    // a parsed `(host, owner, repo)` triple, so we skip the subprocess.
-    if let cached = state.gitHub.snapshotsByProject[unit.projectID],
-      let url = URL(string: "https://\(cached.host)/\(cached.owner)/\(cached.repo)")
+    // Prefer the cached batch when present — it already holds the resolved
+    // repository, so we skip the subprocess.
+    if let cached = state.codeHost.snapshotsByProject[unit.projectID],
+      let url = codeHost.repositoryWebURL(cached.repository)
     {
-      return .send(.gitHub(.delegate(.openURL(url))))
+      return .send(.codeHost(.delegate(.openURL(url))))
     }
     let gitRoot = unit.gitRoot
-    return .run { [gitService = gitServiceClient] send in
-      guard let info = try? await gitService.remoteInfo(gitRoot) else { return }
-      guard
-        let url = URL(string: "https://\(info.host)/\(info.owner)/\(info.repo)")
+    return .run { [gitService = gitServiceClient, codeHost] send in
+      guard let remote = try? await gitService.remoteInfo(gitRoot),
+        let repository = await codeHost.resolveRepository(remote),
+        let url = codeHost.repositoryWebURL(repository)
       else { return }
-      await send(.gitHub(.delegate(.openURL(url))))
+      await send(.codeHost(.delegate(.openURL(url))))
     }
   }
 
-  /// Builds the `.gitHub(.projectActivated)` follow-up that runs after a
+  /// Builds the `.codeHost(.projectActivated)` follow-up that runs after a
   /// reconcile sweep so PR data tracks worktree-branch changes.
   /// Reconcile updates `Worktree.branch` when `git checkout` lands inside
-  /// a pane; GitHubFeature's internal freshness check (30s) plus branch-
+  /// a pane; CodeHostFeature's internal freshness check (30s) plus branch-
   /// set diff (`isCacheFreshAndComplete`) decides whether the dispatch
   /// triggers a fetch or no-ops. Returns nil when there is no active
   /// project or the active project has no git root yet.
@@ -3341,38 +3341,38 @@ struct RootFeature {
   /// `@MainActor` because `hierarchyClient.snapshot()` is main-isolated;
   /// callers in `.run` closures bridge via `MainActor.run`.
   @MainActor
-  static func makeActiveProjectGitHubRefresh(
+  static func makeActiveProjectCodeHostRefresh(
     client: HierarchyClient
-  ) -> [GitHubFeature.Action] {
+  ) -> [CodeHostFeature.Action] {
     let catalog = client.snapshot()
     guard let projectID = catalog.selectedProjectID,
       let project = catalog.projects.first(where: { $0.id == projectID })
     else { return [] }
-    return gitHubFetchUnits(in: project).map { unit in
+    return codeHostFetchUnits(in: project).map { unit in
       .projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
     }
   }
 
-  /// One batched GitHub fetch: the repository to ask about and the rows
+  /// One batched Pull Request fetch: the repository to ask about and the rows
   /// whose branches to ask for. A git Project is one unit keyed by its own
   /// id. A workspace is one unit per repository of its references and
   /// members (group rows are plain folders), each keyed by a fetch-group id
   /// derived from the workspace id and the repository root — a
-  /// `ProjectID` in shape, so `GitHubFeature`'s per-project maps, cancel
+  /// `ProjectID` in shape, so `CodeHostFeature`'s per-project maps, cancel
   /// ids, and on-disk cache carry it unchanged.
-  typealias GitHubFetchUnit = GitHubFeature.FetchUnit
+  typealias CodeHostFetchUnit = CodeHostFeature.FetchUnit
 
-  nonisolated static func gitHubFetchUnits(in project: Project) -> [GitHubFetchUnit] {
+  nonisolated static func codeHostFetchUnits(in project: Project) -> [CodeHostFetchUnit] {
     guard project.isWorkspace else {
       guard let gitRoot = project.gitRoot else { return [] }
       return [
-        GitHubFetchUnit(
+        CodeHostFetchUnit(
           projectID: project.id, gitRoot: URL(fileURLWithPath: gitRoot),
           pairs: branchPairs(in: project))
       ]
     }
     var order: [String] = []
-    var pairsByRoot: [String: [GitHubFeature.Action.WorktreeBranchPair]] = [:]
+    var pairsByRoot: [String: [CodeHostFeature.Action.WorktreeBranchPair]] = [:]
     for worktree in project.worktrees where worktree.workspaceSlot?.role != .groupTerminal {
       guard !worktree.archived, let branch = worktree.branch, !branch.isEmpty,
         let root = project.repoRoot(for: worktree)
@@ -3380,10 +3380,10 @@ struct RootFeature {
       let canonical = HierarchyManager.canonicalPath(root)
       if pairsByRoot[canonical] == nil { order.append(canonical) }
       pairsByRoot[canonical, default: []].append(
-        GitHubFeature.Action.WorktreeBranchPair(worktreeID: worktree.id, branch: branch))
+        CodeHostFeature.Action.WorktreeBranchPair(worktreeID: worktree.id, branch: branch))
     }
     return order.map { root in
-      GitHubFetchUnit(
+      CodeHostFetchUnit(
         projectID: workspaceFetchGroupID(workspace: project.id, gitRoot: root),
         gitRoot: URL(fileURLWithPath: root),
         pairs: pairsByRoot[root] ?? [])
@@ -3391,10 +3391,10 @@ struct RootFeature {
   }
 
   /// The unit `worktreeID`'s row belongs to, else `fallback`.
-  nonisolated static func gitHubFetchUnit(
-    in project: Project, worktreeID: WorktreeID?, fallback: GitHubFetchUnit?
-  ) -> GitHubFetchUnit? {
-    let units = gitHubFetchUnits(in: project)
+  nonisolated static func codeHostFetchUnit(
+    in project: Project, worktreeID: WorktreeID?, fallback: CodeHostFetchUnit?
+  ) -> CodeHostFetchUnit? {
+    let units = codeHostFetchUnits(in: project)
     guard let worktreeID else { return fallback }
     return units.first { $0.pairs.contains { $0.worktreeID == worktreeID } } ?? fallback
   }
@@ -3414,14 +3414,14 @@ struct RootFeature {
     return ProjectID(raw: uuid)
   }
 
-  /// Builds the `.gitHub(.pollUnitsChanged)` that tells the liveness poll which fetch
+  /// Builds the `.codeHost(.pollUnitsChanged)` that tells the liveness poll which fetch
   /// units exist and which belong to the selected Project. Every unit of every Project
   /// is polled while the app is frontmost; the selected Project's units poll fastest.
-  nonisolated static func makePollUnitsChange(catalog: Catalog) -> GitHubFeature.Action {
-    var units: [GitHubFetchUnit] = []
+  nonisolated static func makePollUnitsChange(catalog: Catalog) -> CodeHostFeature.Action {
+    var units: [CodeHostFetchUnit] = []
     var selected: Set<ProjectID> = []
     for project in catalog.projects {
-      let projectUnits = gitHubFetchUnits(in: project)
+      let projectUnits = codeHostFetchUnits(in: project)
       units.append(contentsOf: projectUnits)
       if project.id == catalog.selectedProjectID {
         selected.formUnion(projectUnits.map(\.projectID))
@@ -3434,12 +3434,12 @@ struct RootFeature {
   /// refreshes. Used after a targeted reconcile so the refresh follows the Project the
   /// event came from, not whichever Project is selected.
   @MainActor
-  static func makeProjectGitHubRefresh(
+  static func makeProjectCodeHostRefresh(
     projectID: ProjectID, client: HierarchyClient
-  ) -> [GitHubFeature.Action] {
+  ) -> [CodeHostFeature.Action] {
     guard let project = client.snapshot().projects.first(where: { $0.id == projectID })
     else { return [] }
-    return gitHubFetchUnits(in: project).map { unit in
+    return codeHostFetchUnits(in: project).map { unit in
       .projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)
     }
   }
