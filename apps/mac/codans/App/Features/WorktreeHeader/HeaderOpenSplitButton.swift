@@ -40,11 +40,11 @@ struct HeaderOpenSplitButton: View {
       openInMenu
     } label: {
       // Icon only; the editor name lives in the tooltip and accessibility
-      // label. The chord hint hangs off the icon itself so it sits right
-      // after the glyph, well left of the system chevron, and reads as the
-      // primary "Open in <Editor>" action's chord rather than the dropdown's.
+      // label. While ⌘ is held the chord takes the icon's place, so it reads
+      // as the primary "Open in <Editor>" action's chord rather than the
+      // dropdown's.
       primaryIcon
-        .commandKeyHint(.openInEditor)
+        .commandKeyHintReplacing(.openInEditor)
     } primaryAction: {
       store.send(
         .openDefaultEditorTapped(
@@ -79,7 +79,7 @@ struct HeaderOpenSplitButton: View {
         bundleIdentifier: primary.bundleIdentifier,
         fallbackSystemName: "arrow.up.right.square"
       )
-      .commandKeyHint(.openInEditor)
+      .commandKeyHintReplacing(.openInEditor)
     } primaryAction: {
       store.send(
         .openDefaultEditorTapped(

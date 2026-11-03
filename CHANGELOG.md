@@ -37,8 +37,9 @@ and the project does not yet follow semantic versioning — every release until
 - **Shortcut hints are plain grey text and fade in place.** Holding ⌘ shows
   each shortcut without a key frame. On a sidebar filter button the shortcut
   takes the place of the label, and on a tab it takes the place of the color
-  dot: the label or dot shrinks and fades out at once, and grows back when you
-  let go. On a sidebar row and an agent row, the shortcut fades in where
+  dot, and on the toolbar's Open In button it takes the place of the editor
+  icon: the label, dot, or icon shrinks and fades out at once, and grows back
+  when you let go. On a sidebar row and an agent row, the shortcut fades in where
   the row's trailing badges are. Nothing around a hint moves.
 
 ### Deprecated

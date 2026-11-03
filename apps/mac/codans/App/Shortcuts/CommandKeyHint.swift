@@ -34,6 +34,31 @@ extension View {
   func commandKeyHint(chord: String?, spacing: CGFloat = 6) -> some View {
     modifier(CommandKeyChordHintModifier(chord: chord, spacing: spacing))
   }
+
+  /// While the user holds ⌘, hide this glyph and show the chord bound to `id` in its
+  /// place: the glyph shrinks, blurs, and fades out (`shortcutHintOutgoing(_:)`) and the
+  /// chord fades in, centered on it. The label is as wide as the chord while it shows.
+  /// Apply it on the *label* of a Button / Menu, like `commandKeyHint(_:spacing:)`.
+  func commandKeyHintReplacing(_ id: CommandID) -> some View {
+    modifier(CommandKeyHintReplacingModifier(id: id))
+  }
+}
+
+private struct CommandKeyHintReplacingModifier: ViewModifier {
+  let id: CommandID
+  @Environment(CommandKeyObserver.self) private var observer
+  @Environment(\.resolvedShortcuts) private var shortcuts
+
+  func body(content: Content) -> some View {
+    let chord = observer.isCommandHeld ? ShortcutDisplay.chord(for: id, in: shortcuts) : nil
+    ZStack {
+      content
+        .shortcutHintOutgoing(chord != nil)
+      if let chord {
+        ShortcutHintLabel(chord: chord, font: .callout)
+      }
+    }
+  }
 }
 
 private struct CommandKeyChordHintModifier: ViewModifier {
