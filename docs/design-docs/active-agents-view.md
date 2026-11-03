@@ -286,6 +286,13 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 - **无障碍。** `agentState.row.<paneID>.headline` 在 worktree 文本上；活动文本标识为 `agentState.row.<paneID>.activity`。整行 VoiceOver label（agent 名、worktree、project、状态）不含活动文本，因为它变化频繁。
 - 行没有 hover 摘要卡（见「技术决策」）。session 扫描器仍服务于 `AgentSessionHistoryPopover`、PaneHUD 与空 Pane 视图。
 
+#### 活动文本的来源与刷新（已设计未实现）
+
+本节是已确认、尚未实现的行为；实现后替换上文「活动文本」与「更新节奏」两条。
+
+- **只取 agent 启动后的标题。** Pane 在 agent 启动前的 OSC 0/2 标题（shell 设置的 cwd、上一个程序的标题）不是 agent 的活动，不作为活动文本。agent 还没有设置标题时，第一行显示 agent 显示名。同一 Pane 中前一个 agent 的标题也不带到下一个 agent 的行。分界以 agent 绑定（前台 job 检测到 agent）为准；agent 在被检测到之前发出的标题会丢失，直到它下一次改标题。OSC 7501 `message` 仍优先于标题。
+- **先显示后合并。** 标题与 `message` 由终端事件推送，到 `AgentStateStore` 没有延迟。`AgentActivityPresentation` 在窗口开始时立即交付一次变化，之后 250 ms 窗口内的变化合并，窗口结束时交付最新值。孤立的一次变化立即显示；连续变化每秒最多显示 4 次，最终停在最新值。
+
 **无项目与空状态**：完整 catalog 没有项目时，隐藏面板、底部入口及列表占位，不修改已保存的开关偏好。按标签筛选后没有匹配项目不影响面板可用性。有项目但没有 agent 时，面板只显示居中的提示文字，不显示装饰图标。
 
 排序由 `SortedEntriesProvider` 给出：先按状态优先级桶（triage 顺序），桶内按 `lastTransitionAt` 降序；`AgentStateOrderCoordinator` 对状态驱动的重排做防抖，使列表不随 agent 状态翻动而闪烁（reduce-motion 用户拿到无动画的重排）。
@@ -325,6 +332,8 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 **为何与 notifications 共享原始信号但输出永不交叉。** 通知检测器从结构化终端事件派生候选，AgentState 结合前台进程与渲染区派生活动状态；两者回答不同问题——「刚发生了什么」vs「现在正在发生什么」。强迫一方消费另一方的输出（如「AgentState 读 `InboxStore` 来定 `done` 态」）会把 mute 策略、去重窗口与规则语法耦合进一个本不该关心它们的层。因此两者各自从原始信号派生，`AgentStateStore` 不 import `NotificationStore`。
 
 **为何把实时活动放进行内并删除 hover 摘要卡。** 用户扫一眼列表要回答的是「每个 agent 正在做什么」；把它藏在 500ms hover 之后，只能逐行查看。行内显示让所有 agent 的活动同时可见。卡片剩下的内容（session 任务标题、面包屑、session id）使用频率低，却要求 popover 在展示期间尺寸固定、session 扫描先于弹出、点击与关闭的拆解顺序错开（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。取舍：失去 session 任务标题的速览。若用户需要在行内装不下的 session 信息，再考虑恢复一个不改变尺寸的卡片。
+
+**为何活动文本先显示后合并。** 只有 `AgentActivityLine` 读取活动文本，一次变化只重绘这一行，所以逐次刷新的成本低。只在窗口结束时交付的一秒合并让每次变化都晚一秒，与即时更新的 Tab 标题并排时显得滞后。先显示后合并让孤立变化没有延迟，250 ms 窗口仍限制 agent 高频改标题（如 spinner 字形）时的重绘次数。取舍：标题持续变化时，行最多落后最新值 250 ms。若多 agent 同时高频改标题造成可见的卡顿，再加大窗口。
 
 ## 备选方案（Alternatives）
 
