@@ -1,7 +1,6 @@
 import CodansCore
 import ComposableArchitecture
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Sheet-hosted command composer. Queued commands appear in the pane overlay.
 /// Return submits; Shift-Return inserts a line break; Escape closes the sheet.
@@ -14,8 +13,7 @@ struct CommandQueueView: View {
   @FocusState private var draftFocused: Bool
   @State private var showsScheduleEditor = false
   @State private var showsFilePicker = false
-  @State private var showsFileError = false
-  @State private var fileError = ""
+  @State private var draftSelection = ComposerSelection()
 
   private static let width: CGFloat = 560
   private static let editorHeight: CGFloat = 110
@@ -38,20 +36,9 @@ struct CommandQueueView: View {
     .frame(width: Self.width)
     .onAppear { draftFocused = true }
     .onExitCommand(perform: onDismiss)
-    .fileImporter(isPresented: $showsFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-      switch result {
-      case .success(let urls):
-        store.send(.filesSelected(urls))
-        draftFocused = true
-      case .failure(let error):
-        fileError = error.localizedDescription
-        showsFileError = true
-      }
-    }
-    .alert("Could Not Select Files", isPresented: $showsFileError) {
-      Button("OK", role: .cancel) {}
-    } message: {
-      Text(fileError)
+    .composerFilePicker(isPresented: $showsFilePicker) { urls in
+      draftSelection.insertPaths(urls, into: store.draft) { store.send(.filesSelected(urls, selection: $0)) }
+      draftFocused = true
     }
   }
 
@@ -63,16 +50,7 @@ struct CommandQueueView: View {
     VStack(alignment: .leading, spacing: 4) {
       editor
       HStack(spacing: 8) {
-        Button {
-          showsFilePicker = true
-        } label: {
-          Image(systemName: "paperclip")
-            .frame(width: 28, height: 28)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .help("Insert file paths")
-        .accessibilityLabel("Select files")
+        ComposerFilePickerButton { showsFilePicker = true }
         Spacer()
         HStack(spacing: 8) {
           if store.mode == .scheduled {
@@ -104,7 +82,7 @@ struct CommandQueueView: View {
   }
 
   private var editor: some View {
-    TextEditor(text: $store.draft.sending(\.draftChanged))
+    ComposerTextEditor(text: $store.draft.sending(\.draftChanged), selection: draftSelection)
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()

@@ -19,6 +19,147 @@ struct RootFeatureTests {
     }
   }
 
+  /// Two live panes, so the draft prune on open keeps both.
+  private static func commandQueueStore(paneIDs: [PaneID]) -> TestStoreOf<RootFeature> {
+    let panes = paneIDs.map { Pane(id: $0, workingDirectory: "/tmp") }
+    let catalog = Catalog(projects: [
+      Project(
+        name: "p", rootPath: "/tmp",
+        worktrees: [Worktree(name: "w", path: "/tmp", tabs: [Tab(panes: panes)])])
+    ])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    // `CommandQueueFeature.State` seeds its schedule from the wall clock.
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    return store
+  }
+
+  @Test
+  func commandQueueDraftSurvivesEveryClosePathForItsPaneOnly() async {
+    let first = PaneID()
+    let second = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [first, second])
+
+    await store.send(.commandQueueToggle(first))
+    await store.send(.commandQueue(.presented(.draftChanged("draft one"))))
+    // Escape.
+    await store.send(.commandQueue(.dismiss))
+    #expect(store.state.commandQueue == nil)
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue?.draft == "draft one")
+
+    // ⌘L again on the same pane.
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue == nil)
+
+    // Opening on another pane does not carry the text over, then switching
+    // back restores it.
+    await store.send(.commandQueueToggle(second))
+    #expect(store.state.commandQueue?.paneID == second)
+    #expect(store.state.commandQueue?.draft == "")
+    await store.send(.commandQueue(.presented(.draftChanged("draft two"))))
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue?.draft == "draft one")
+
+    // Opening New Agent closes the queue.
+    await store.send(.newAgentRequested)
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.newAgent != nil)
+    await store.send(.newAgentRequested)
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue?.draft == "draft one")
+    await store.send(.commandQueueToggle(second))
+    #expect(store.state.commandQueue?.draft == "draft two")
+    #expect(store.state.commandQueueDrafts == [first: "draft one", second: "draft two"])
+  }
+
+  @Test
+  func commandQueueSubmitClearsThatPanesDraft() async {
+    let paneID = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [paneID])
+    store.dependencies.hierarchyClient.commandQueue = { _ in [] }
+    store.dependencies.hierarchyClient.setCommandQueue = { _, _ in }
+    store.dependencies.date = .constant(Date(timeIntervalSinceReferenceDate: 0))
+
+    await store.send(.commandQueueToggle(paneID))
+    await store.send(.commandQueue(.presented(.draftChanged("echo hi"))))
+    #expect(store.state.commandQueueDrafts[paneID] == "echo hi")
+    await store.send(.commandQueue(.presented(.submitted)))
+    await store.receive(.commandQueue(.presented(.delegate(.submitted))))
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.commandQueueDrafts.isEmpty)
+    await store.send(.commandQueueToggle(paneID))
+    #expect(store.state.commandQueue?.draft == "")
+  }
+
+  @Test
+  func closedPaneLosesItsCommandQueueDraftAtOnce() async {
+    let kept = PaneID()
+    let closed = PaneID()
+    var state = RootFeature.State()
+    state.commandQueueDrafts = [kept: "a", closed: "b"]
+    let store = TestStore(initialState: state) { RootFeature() }
+
+    // Any close path drops the pane from the catalog; the membership
+    // stream reports the rest.
+    await store.send(.livePanesChanged([kept])) {
+      $0.commandQueueDrafts = [kept: "a"]
+    }
+    await store.send(.livePanesChanged([kept, PaneID()]))
+  }
+
+  @Test
+  func closingThePaneOfAnOpenCommandQueueClosesItAndKeepsNoDraft() async {
+    let closed = PaneID()
+    let other = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [closed, other])
+
+    await store.send(.commandQueueToggle(closed))
+    await store.send(.commandQueue(.presented(.draftChanged("half typed"))))
+    #expect(store.state.commandQueueDrafts[closed] == "half typed")
+
+    await store.send(.livePanesChanged([other]))
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.commandQueueDrafts.isEmpty)
+  }
+
+  @Test
+  func closingAnotherPaneLeavesTheOpenCommandQueue() async {
+    let open = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [open, PaneID()])
+    await store.send(.commandQueueToggle(open))
+    await store.send(.livePanesChanged([open]))
+    #expect(store.state.commandQueue?.paneID == open)
+  }
+
+  @Test
+  func launchPrunesCommandQueueDraftsFromThePaneMembershipStream() async {
+    let kept = PaneID()
+    let closed = PaneID()
+    let (paneStream, paneContinuation) = AsyncStream<Set<PaneID>>.makeStream()
+    var state = RootFeature.State()
+    state.commandQueueDrafts = [kept: "a", closed: "b"]
+    let store = TestStore(initialState: state) { RootFeature() } withDependencies: {
+      $0.hierarchyClient.paneMembershipChanges = { paneStream }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.onLaunch)
+    paneContinuation.yield([kept])
+    await store.receive(\.livePanesChanged)
+    #expect(store.state.commandQueueDrafts == [kept: "a"])
+
+    paneContinuation.finish()
+    await store.send(.onQuit)
+  }
+
   @Test
   func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
     var initial = RootFeature.State()

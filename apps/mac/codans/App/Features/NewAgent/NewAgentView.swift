@@ -14,6 +14,8 @@ struct NewAgentView: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(AgentInstallationStore.self) private var installation
   @FocusState private var focus: Field?
+  @State private var showsFilePicker = false
+  @State private var promptSelection = ComposerSelection()
 
   private enum Field: Hashable {
     case branchName
@@ -51,6 +53,10 @@ struct NewAgentView: View {
     // the profile list doubles as the task identity.
     .task(id: profiles) { store.send(.agentProfilesChanged(profiles)) }
     .onExitCommand { store.send(.cancelTapped) }
+    .composerFilePicker(isPresented: $showsFilePicker) { urls in
+      promptSelection.insertPaths(urls, into: store.prompt) { store.send(.filesSelected(urls, selection: $0)) }
+      focus = .prompt
+    }
   }
 
   /// Enabled profiles whose CLI the shell can resolve — the same set the
@@ -305,6 +311,7 @@ struct NewAgentView: View {
       VStack(alignment: .leading, spacing: 4) {
         editor
         HStack(spacing: 8) {
+          ComposerFilePickerButton { showsFilePicker = true }
           Spacer()
           agentMenu
           sendButton
@@ -327,7 +334,7 @@ struct NewAgentView: View {
   }
 
   private var editor: some View {
-    TextEditor(text: $store.prompt.sending(\.promptChanged))
+    ComposerTextEditor(text: $store.prompt.sending(\.promptChanged), selection: promptSelection)
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()

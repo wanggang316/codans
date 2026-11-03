@@ -145,9 +145,9 @@ final class AgentStateStore {
     var userInputSeen: Bool
     var lastViewportText: String?
     var lastWorkingAt: Date?
-    /// Latest OSC title the pane's terminal pushed. Display-only cache
-    /// for the hover summary card's "what is the agent doing" line —
-    /// never an input to state derivation (see the reaction table).
+    /// Latest sanitized OSC title the pane's terminal pushed. Display-only
+    /// cache for the Agents View row's activity text — never an input to
+    /// state derivation (see the reaction table).
     var lastTitle: String?
     /// True only for a pane seeded from the persisted quit snapshot that
     /// has not yet received a live viewport classification. While set,
@@ -244,7 +244,7 @@ final class AgentStateStore {
   //    next snapshot re-derives it. A program status report is not
   //    second-guessed: the agent reports the end of its own prompt.
   //  - onTerminalEvent(.paneInfoChanged(.title)): cache the pane's
-  //    latest OSC title for the hover summary card's activity line.
+  //    latest sanitized OSC title for the row's activity text.
   //    Display-only — never an input to state derivation.
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.
@@ -302,9 +302,11 @@ final class AgentStateStore {
       // derivation (a "Working…" title must not flip state; see
       // `titleChangesDoNotDriveWorkingAfterInput`). Scratch is created
       // if absent so a title observed before the agent binds is already
-      // available when the card first opens.
+      // available when the row first renders. The title is untrusted
+      // program text: sanitize it like the OSC 7501 `message`, and never
+      // log it.
       var s = scratch[paneID] ?? .fresh()
-      s.lastTitle = title
+      s.lastTitle = UntrustedDisplayText.sanitized(title)
       scratch[paneID] = s
 
     case .paneInfoChanged,
@@ -520,9 +522,9 @@ final class AgentStateStore {
   /// Latest OSC title observed for `paneID` — the terminal title agents
   /// push as they work, which doubles as a one-line "what is the agent
   /// doing" cue — or nil when none has arrived (or the pane has been
-  /// torn down). Read by the hover summary card. Reading `scratch`
-  /// inside a SwiftUI body registers `@Observable` tracking, so an open
-  /// card re-renders as the agent retitles the pane.
+  /// torn down). Reading `scratch` inside a SwiftUI body registers
+  /// `@Observable` tracking, so the reading view re-renders as the agent
+  /// retitles the pane.
   func title(for paneID: PaneID) -> String? {
     scratch[paneID]?.lastTitle
   }
