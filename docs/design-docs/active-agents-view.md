@@ -278,7 +278,7 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 - 左侧 20pt agent logo（资源缺失回落到 SF Symbol）；右侧是睡眠标记（见「IPC 与 CLI」）与状态图标。
 - **身份行**：worktree 名 + project 名（project 色、Server 项目的 remote 标记），两者中段截断；解析不到来源时显示 em-dash `—`（catalog 已移除该 Pane 的「ghost」行）。
 - **`normal`（两行）**：第一行是活动文本，第二行是身份行。两行都是常规字重；第二行的 worktree 名比第一行小一号、用次级色。**`compact`（一行）** 只显示身份行，不显示活动文本。
-- **活动文本**取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 Pane 的 OSC 0/2 标题（存储前已净化，见「程序状态（OSC 7501）」）。空白、或仅为 agent 名称的文本（`AgentActivityFormat.isRedundantActivityTitle`）视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
+- **活动文本**取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 agent 启动后 Pane 的 OSC 0/2 标题（存储前已净化，见「程序状态（OSC 7501）」）。只取 agent 启动后的标题：Pane 在 agent 启动前的标题（shell 设置的 cwd、上一个程序的标题）不是 agent 的活动，同一 Pane 中前一个 agent 的标题也不带到下一个 agent 的行。分界以 agent 绑定（前台 job 检测到 agent）为准；agent 在被检测到之前发出的标题会丢失，直到它下一次改标题。重新识别同一 kind 的 agent（如启动时恢复的 agent）保留已有标题。空白、或仅为 agent 名称的文本（`AgentActivityFormat.isRedundantActivityTitle`）视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
 - **更新节奏。** 只有 `AgentActivityLine` 读取活动文本，所以变化只重绘这一行。每行经 `AgentActivityPresentation` 合并一秒内的变化，只交付最新值；行出现时的首个值立即显示。活动文本只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
 - **睡眠与缓存行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示活动文本；`source: cached` 的行，活动文本与状态图标一样调淡。
 - 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.done` → 绿勾；`.error` → 红色三角；`.idle` → 次级灰圈。
@@ -286,11 +286,10 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 - **无障碍。** `agentState.row.<paneID>.headline` 在 worktree 文本上；活动文本标识为 `agentState.row.<paneID>.activity`。整行 VoiceOver label（agent 名、worktree、project、状态）不含活动文本，因为它变化频繁。
 - 行没有 hover 摘要卡（见「技术决策」）。session 扫描器仍服务于 `AgentSessionHistoryPopover`、PaneHUD 与空 Pane 视图。
 
-#### 活动文本的来源与刷新（已设计未实现）
+#### 活动文本的刷新（已设计未实现）
 
-本节是已确认、尚未实现的行为；实现后替换上文「活动文本」与「更新节奏」两条。
+本节是已确认、尚未实现的行为；实现后替换上文「更新节奏」一条。
 
-- **只取 agent 启动后的标题。** Pane 在 agent 启动前的 OSC 0/2 标题（shell 设置的 cwd、上一个程序的标题）不是 agent 的活动，不作为活动文本。agent 还没有设置标题时，第一行显示 agent 显示名。同一 Pane 中前一个 agent 的标题也不带到下一个 agent 的行。分界以 agent 绑定（前台 job 检测到 agent）为准；agent 在被检测到之前发出的标题会丢失，直到它下一次改标题。OSC 7501 `message` 仍优先于标题。
 - **先显示后合并。** 标题与 `message` 由终端事件推送，到 `AgentStateStore` 没有延迟。`AgentActivityPresentation` 在窗口开始时立即交付一次变化，之后 250 ms 窗口内的变化合并，窗口结束时交付最新值。孤立的一次变化立即显示；连续变化每秒最多显示 4 次，最终停在最新值。
 
 **无项目与空状态**：完整 catalog 没有项目时，隐藏面板、底部入口及列表占位，不修改已保存的开关偏好。按标签筛选后没有匹配项目不影响面板可用性。有项目但没有 agent 时，面板只显示居中的提示文字，不显示装饰图标。
