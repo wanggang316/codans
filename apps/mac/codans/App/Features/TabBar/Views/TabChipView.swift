@@ -22,12 +22,11 @@ struct TabChipView: View {
   /// L2 unread dot — set when this Tab's id appears in
   /// `RollupIndexProvider.current.unreadTabs`.
   let hasUnreadNotification: Bool
-  /// Pre-resolved chord text to display in the chip's trailing slot while ⌘ is held —
-  /// e.g. `"⌘1"` for the first chip, `"⌘0"` for the tenth, `nil` for the rest. The chord
-  /// temporarily takes the close-button slot so the hint sits inside the chip's rounded
-  /// rectangle rather than crowding the inter-chip gap. Resolved at the row level so
-  /// `TabChipView` stays free of environment-key dependencies.
-  var chordHint: String?
+  /// The key of the tab's select chord while ⌘ is held — e.g. `"1"` for `⌘1`, `nil`
+  /// for chips past the tenth. Takes the leading glyph's place; a chip with no glyph
+  /// shows it in the close button's slot. Resolved at the row level so `TabChipView`
+  /// stays free of environment-key dependencies.
+  var shortcutKey: String?
   let onSelect: () -> Void
   let onClose: () -> Void
   let onMiddleClick: () -> Void
@@ -139,15 +138,18 @@ struct TabChipView: View {
     // system tab bar. The Button action only fires for a chip that is still
     // unselected on release — i.e. an accessibility / keyboard press — so a
     // mouse click never dispatches select twice.
-    Button(action: selectIfInactive) {
-      TabChipLabel(
-        title: title,
-        isActive: isActive,
-        isDirty: isDirty,
-        hasUnreadNotification: hasUnreadNotification,
-        icon: icon,
-        iconTint: iconTint
-      )
+    let label = TabChipLabel(
+      title: title,
+      isActive: isActive,
+      isDirty: isDirty,
+      hasUnreadNotification: hasUnreadNotification,
+      icon: icon,
+      iconTint: iconTint,
+      shortcutKey: shortcutKey
+    )
+    let slotKey = label.hasLeadingGlyph ? nil : shortcutKey
+    return Button(action: selectIfInactive) {
+      label
       // `maxHeight: .infinity` is the load-bearing piece — without
       // it the label collapses to its intrinsic text height (~16pt)
       // and the Button's hit region only covers that strip,
@@ -168,16 +170,20 @@ struct TabChipView: View {
       maxWidth: .infinity, minHeight: TabBarMetrics.chipHeight, maxHeight: TabBarMetrics.chipHeight
     )
     .overlay(alignment: .leading) {
-      TabChipCloseButton(isVisible: showsHover, action: onClose)
-        .padding(.leading, TabBarMetrics.chipSlotInset)
+      ZStack {
+        TabChipCloseButton(isVisible: showsHover && slotKey == nil, action: onClose)
+        if let slotKey {
+          ShortcutHintLabel(chord: slotKey, font: .system(size: 12))
+            .allowsHitTesting(false)
+        }
+      }
+      .frame(width: TabBarMetrics.closeButtonSize)
+      .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
-      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
-      // tab's color dot (when set) sits there.
+      // The tab's color dot (when set).
       Group {
-        if let chordHint {
-          ShortcutHintLabel(chord: chordHint, trailingGap: TabBarMetrics.chordHintExtraInset)
-        } else if let tabColor {
+        if let tabColor {
           Circle()
             .fill(tabColor.swiftUIColor)
             .frame(width: 8, height: 8)

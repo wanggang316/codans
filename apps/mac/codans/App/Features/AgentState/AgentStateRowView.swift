@@ -61,7 +61,8 @@ struct AgentStateRowView: View {
   /// block.
   var worktreePath: String?
   var remoteHost: RemoteHost?
-  /// The row's focus chord (`⌥N`), shown at the trailing edge while ⌘ is held.
+  /// The row's focus chord (`⌥N`) while ⌘ is held. Takes the trailing status
+  /// glyphs' place.
   var hotkeyHint: String?
   let onTap: () -> Void
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
@@ -105,12 +106,13 @@ struct AgentStateRowView: View {
         // right-aligned column down the list rather than floating at a
         // variable offset after each project name.
         Spacer(minLength: 8)
-        if isSleeping {
-          sleepGlyph
-        }
-        statusColumn
-        if let hotkeyHint {
-          ShortcutHintLabel(chord: hotkeyHint)
+        ShortcutHintTrailing(chord: hotkeyHint) {
+          HStack(alignment: .center, spacing: 10) {
+            if isSleeping {
+              sleepGlyph
+            }
+            statusColumn
+          }
         }
       }
       .padding(.horizontal, 12)

@@ -7,7 +7,12 @@
 
 codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦；按住 ⌘ 时和弦替换按钮的图标与标题，过窄时等比缩小）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
 
-按住 ⌘ 约 1 秒后，Tab、侧栏行与 Agents View 行在尾部显示各自的和弦（`ShortcutHintLabel`：系统字体 `.caption`、`.secondary` 纯文本、无键帽边框）。和弦从解析后的绑定读取，改键或禁用会同步反映。`CommandKeyObserver` 在 `Animation.shortcutHint`（0.08 s easeOut）中翻转标志，提示以透明度交叉淡化出现与消失，无位移与模糊；筛选栏按钮的和弦与图标标题始终在布局中，只切换透明度，原位交叉淡化；开启“减弱动态效果”时不做动画。
+按住 ⌘ 约 1 秒后，各控件显示自己的快捷键提示（`ShortcutHintLabel`：系统字体、`.secondary` 纯文本、无键帽边框）。提示从解析后的绑定读取，改键或禁用会同步反映。两种放置方式都只切换透明度，周围布局不动：
+
+- **原位替换图标**（Tab、侧栏筛选栏按钮，`shortcutHintReplacing(_:font:onTint:)`）：前导图标交叉淡化成和弦的按键本身（`ShortcutDisplay.keycap(for:in:)`，如 `⌘1` 显示 `1`），完整和弦写在 tooltip 里。完整和弦比图标宽，会压到标题。没有图标的 Tab 把按键显示在关闭按钮的槽位，此时隐藏关闭按钮。时长取 `Animation.shortcutHint`（0.08 s easeOut），由 `CommandKeyObserver` 翻转标志时带入。
+- **替换尾部附件**（侧栏 worktree / Project / Group 行、Agents View 行，`ShortcutHintTrailing`）：完整和弦与行尾附件（diff 统计、PR 徽标、状态点、悬停按钮）叠在同一个尾对齐的 ZStack 里，按住 ⌘ 时附件淡出、和弦淡入，隐藏的附件不响应点击。一列行同时切换，用 0.15 s easeInOut，比单个控件稍柔和。
+
+开启“减弱动态效果”时不做动画。
 
 本设计以一个**单一 registry** 统管全部应用内快捷键：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
 

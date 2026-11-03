@@ -1154,15 +1154,15 @@ struct HierarchySidebarView: View {
         hotkeyNumber: hotkeyNumber,
         isSelected: isSelected
       )
-      newBadgePill(for: worktree)
-      SidebarWorktreeDiffStats(worktreeID: worktree.id)
-      gitHubBadge(for: worktree, in: project)
-      runScriptPingAccessory(for: worktree, in: project)
-      // Trailing chord hint, after both the row content and the optional PR pill so it
-      // always pins to the right edge of the row instead of being shoved leftwards by
-      // the pill's intrinsic width. Visible only while ⌘ is held.
-      if let hint = hotkeyHint(hotkeyNumber) {
-        SidebarHotkeyHint(chord: hint)
+      // While ⌘ is held the chord takes the trailing accessories' place, pinned to the
+      // row's right edge.
+      SidebarHotkeyHint(chord: hotkeyHint(hotkeyNumber)) {
+        HStack(spacing: 0) {
+          newBadgePill(for: worktree)
+          SidebarWorktreeDiffStats(worktreeID: worktree.id)
+          gitHubBadge(for: worktree, in: project)
+          runScriptPingAccessory(for: worktree, in: project)
+        }
       }
     }
     // Worktree rows are real List children. Selection chrome is owned by
@@ -2125,69 +2125,70 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           .accessibilityLabel("Remote server \(host.displayAuthority)")
       }
       Spacer(minLength: 4)
-      accessory()
-      // Keep the hover chrome from collapsing row width when hidden —
-      // use opacity, not conditional rendering.
-      HStack(spacing: 2) {
-        // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
-        // Worktrees are a git-only concept; a scratch folder renders with a
-        // single synthetic Worktree and nothing to add. Server (remote)
-        // projects create over SSH (`git worktree add` on the host).
-        if project.supportsWorktrees {
-          Button {
-            store.send(.projectAddWorktreeTapped(projectID: project.id))
-          } label: {
-            iconLabel(systemName: "plus", label: "Add Worktree under this Project", isHovering: isPlusHovering)
+      SidebarHotkeyHint(chord: hotkeyHint) {
+        HStack(spacing: 6) {
+          accessory()
+          // Keep the hover chrome from collapsing row width when hidden —
+          // use opacity, not conditional rendering.
+          HStack(spacing: 2) {
+            // Non-git Projects (P-Q4 = a): suppress the Add Worktree affordance.
+            // Worktrees are a git-only concept; a scratch folder renders with a
+            // single synthetic Worktree and nothing to add. Server (remote)
+            // projects create over SSH (`git worktree add` on the host).
+            if project.supportsWorktrees {
+              Button {
+                store.send(.projectAddWorktreeTapped(projectID: project.id))
+              } label: {
+                iconLabel(systemName: "plus", label: "Add Worktree under this Project", isHovering: isPlusHovering)
+              }
+              .buttonStyle(.plain)
+              .onHover { isPlusHovering = $0 }
+            } else if project.isWorkspace {
+              // A workspace's `+` adds a group: one branch checked out in every
+              // source project.
+              Button {
+                store.send(.workspaceNewGroupTapped(projectID: project.id))
+              } label: {
+                iconLabel(systemName: "plus", label: "New Group", isHovering: isPlusHovering)
+              }
+              .buttonStyle(.plain)
+              .onHover { isPlusHovering = $0 }
+              .help("New Group…")
+            }
+            Menu {
+              if project.isWorkspace {
+                workspaceMenuItems
+              } else {
+                projectMenuItems
+              }
+            } label: {
+              iconLabel(
+                systemName: "ellipsis", label: project.isWorkspace ? "Workspace options" : "Project options",
+                isHovering: isMenuHovering)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .onHover { isMenuHovering = $0 }
+            // Opens and closes the rows under the Project. The only way to do so
+            // on a row that stands for a folder, where a click selects instead.
+            if project.hasChildRows {
+              Button(action: onToggleExpansion) {
+                iconLabel(
+                  systemName: "chevron.right",
+                  label: project.isExpanded ? "Collapse" : "Expand",
+                  isHovering: isChevronHovering
+                )
+                .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
+              }
+              .buttonStyle(.plain)
+              .onHover { isChevronHovering = $0 }
+              .help(project.isExpanded ? "Collapse" : "Expand")
+            }
           }
-          .buttonStyle(.plain)
-          .onHover { isPlusHovering = $0 }
-        } else if project.isWorkspace {
-          // A workspace's `+` adds a group: one branch checked out in every
-          // source project.
-          Button {
-            store.send(.workspaceNewGroupTapped(projectID: project.id))
-          } label: {
-            iconLabel(systemName: "plus", label: "New Group", isHovering: isPlusHovering)
-          }
-          .buttonStyle(.plain)
-          .onHover { isPlusHovering = $0 }
-          .help("New Group…")
+          .opacity(isHovering ? 1 : 0)
         }
-        Menu {
-          if project.isWorkspace {
-            workspaceMenuItems
-          } else {
-            projectMenuItems
-          }
-        } label: {
-          iconLabel(
-            systemName: "ellipsis", label: project.isWorkspace ? "Workspace options" : "Project options",
-            isHovering: isMenuHovering)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { isMenuHovering = $0 }
-        // Opens and closes the rows under the Project. The only way to do so
-        // on a row that stands for a folder, where a click selects instead.
-        if project.hasChildRows {
-          Button(action: onToggleExpansion) {
-            iconLabel(
-              systemName: "chevron.right",
-              label: project.isExpanded ? "Collapse" : "Expand",
-              isHovering: isChevronHovering
-            )
-            .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
-          }
-          .buttonStyle(.plain)
-          .onHover { isChevronHovering = $0 }
-          .help(project.isExpanded ? "Collapse" : "Expand")
-        }
-      }
-      .opacity(isHovering ? 1 : 0)
-      if let hotkeyHint {
-        SidebarHotkeyHint(chord: hotkeyHint)
       }
     }
     .contentShape(Rectangle())
@@ -2380,30 +2381,31 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
           .help(deletionHelp)
       }
       Spacer(minLength: 4)
-      accessory()
-      if group.deletion != nil {
-        Button("Retry", action: onRetryDeletion)
-          .buttonStyle(.borderless)
-          .controlSize(.small)
-          .help("Check the group again and finish deleting it")
-      }
-      Button(action: onToggleExpansion) {
-        Image(systemName: "chevron.right")
-          .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(isChevronHovering ? .primary : .secondary)
-          .rotationEffect(.degrees(group.isExpanded ? 90 : 0))
-          .frame(width: 22, height: 22)
-          .background(Circle().fill(Color.primary.opacity(isChevronHovering ? 0.08 : 0)))
-          .contentShape(Circle())
-          .accessibilityLabel(group.isExpanded ? "Collapse Group" : "Expand Group")
-      }
-      .buttonStyle(.plain)
-      .onHover { isChevronHovering = $0 }
-      .help(group.isExpanded ? "Collapse" : "Expand")
-      // Opacity, not conditional rendering, so the row width stays put.
-      .opacity(isHovering ? 1 : 0)
-      if let hotkeyHint {
-        SidebarHotkeyHint(chord: hotkeyHint)
+      SidebarHotkeyHint(chord: hotkeyHint) {
+        HStack(spacing: 6) {
+          accessory()
+          if group.deletion != nil {
+            Button("Retry", action: onRetryDeletion)
+              .buttonStyle(.borderless)
+              .controlSize(.small)
+              .help("Check the group again and finish deleting it")
+          }
+          Button(action: onToggleExpansion) {
+            Image(systemName: "chevron.right")
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(isChevronHovering ? .primary : .secondary)
+              .rotationEffect(.degrees(group.isExpanded ? 90 : 0))
+              .frame(width: 22, height: 22)
+              .background(Circle().fill(Color.primary.opacity(isChevronHovering ? 0.08 : 0)))
+              .contentShape(Circle())
+              .accessibilityLabel(group.isExpanded ? "Collapse Group" : "Expand Group")
+          }
+          .buttonStyle(.plain)
+          .onHover { isChevronHovering = $0 }
+          .help(group.isExpanded ? "Collapse" : "Expand")
+          // Opacity, not conditional rendering, so the row width stays put.
+          .opacity(isHovering ? 1 : 0)
+        }
       }
     }
     .contentShape(Rectangle())
@@ -2445,13 +2447,14 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   }
 }
 
-/// The chord a sidebar row answers to (`⌃N`), shown at its trailing edge while
-/// ⌘ is held.
-private struct SidebarHotkeyHint: View {
-  let chord: String
+/// A sidebar row's trailing accessories that give way to the row's chord (`⌃N`)
+/// while ⌘ is held.
+private struct SidebarHotkeyHint<Accessories: View>: View {
+  let chord: String?
+  @ViewBuilder let accessories: () -> Accessories
 
   var body: some View {
-    ShortcutHintLabel(chord: chord, leadingGap: 6)
+    ShortcutHintTrailing(chord: chord, leadingGap: 6, accessories: accessories)
   }
 }
 
@@ -2690,20 +2693,11 @@ private struct SidebarFilterBar: View {
     let titleScale = min(1, max(0, metrics.expanded - 12) / (14 + 5 + titleWidth))
     let showsTitle = selected && titleScale >= 0.8
     let labelScale = showsTitle ? titleScale : min(1, max(0, metrics.diameter - 8) / 14)
-    // While ⌘ is held the chord replaces the label. Both stay in the layout and
-    // only their opacity changes, so the swap is a cross-fade in place: an
-    // inserted chord would animate in from the label's moving geometry. The
-    // chord shrinks to fit a narrow collapsed capsule rather than run past its
-    // rounded ends.
-    let chord = ShortcutDisplay.chord(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts)
-    let showsChord = commandKeyObserver.isCommandHeld && chord != nil
-    let chordWidth = chord.map {
-      ceil(
-        ($0 as NSString).size(withAttributes: [
-          .font: NSFont.systemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize)
-        ]).width)
-    }
-    let chordScale = chordWidth.map { min(1, max(0, metrics.collapsed - 10) / max($0, 1)) } ?? 1
+    // While ⌘ is held the icon cross-fades into the chord's key in place; the
+    // title and the capsule do not move. The full chord is in the tooltip.
+    let key =
+      commandKeyObserver.isCommandHeld
+      ? ShortcutDisplay.keycap(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts) : nil
 
     return Button {
       onSelect(filter)
@@ -2722,6 +2716,8 @@ private struct SidebarFilterBar: View {
             Image(systemName: symbol(for: filter))
               .frame(width: 14)
               .accessibilityHidden(true)
+              .shortcutHintReplacing(
+                key, font: .system(size: TabBarMetrics.titleFontSize, weight: .semibold), onTint: selected)
             Text(title)
               .fixedSize()
               .opacity(showsTitle ? 1 : 0)
@@ -2743,14 +2739,6 @@ private struct SidebarFilterBar: View {
             value: showsTitle
           )
           .scaleEffect(labelScale)
-          .opacity(showsChord ? 0 : 1)
-        }
-        .overlay {
-          if let chord {
-            ShortcutHintLabel(chord: chord, onTint: selected)
-              .scaleEffect(chordScale)
-              .opacity(showsChord ? 1 : 0)
-          }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(Capsule())

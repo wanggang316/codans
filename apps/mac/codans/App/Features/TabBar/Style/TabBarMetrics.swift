@@ -40,10 +40,6 @@ enum TabBarMetrics {
   /// slot + 8-pt gap — so the title stays centered and never runs under
   /// the close button or the trailing slot.
   static let chipTitleInset: CGFloat = chipSlotInset + closeButtonSize + 8
-  /// Extra inset of the chord hint inside the trailing slot. Text runs to its
-  /// edge, unlike the centered color dot, so without it the chord crowds the
-  /// chip's rounded end. Still clear of `chipTitleInset` for a two-glyph chord.
-  static let chordHintExtraInset: CGFloat = 5
 
   /// Point size of the chip title and the close glyph.
   static let titleFontSize: CGFloat = 13
