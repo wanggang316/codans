@@ -5,36 +5,83 @@ import Testing
 
 @testable import Codans
 
-/// Reducer-level coverage for `RemoteConnectionFeature`'s pure paths — draft
-/// edits and the pre-flight field validation that runs *before* any SSH probe.
-/// The network validation pipeline (`connectButtonTapped` → `.run`) is not
-/// exercised here; it depends on a reachable host.
+/// Reducer-level coverage for `RemoteConnectionFeature`'s pure paths — the
+/// Host picker, "New Host…" fields, and the pre-flight validation that runs
+/// *before* any SSH probe. The network validation pipeline
+/// (`connectButtonTapped` → `.run`) is not exercised here; it depends on a
+/// reachable host.
 @MainActor
 struct RemoteConnectionFeatureTests {
+  private static let box = HostRecord(address: "box.local", username: "alice", port: 2222, name: "Box")
+  private static let mini = HostRecord(address: "mini.local")
+
   @Test
-  func portFieldKeepsDigitsOnly() async {
-    let store = TestStore(initialState: RemoteConnectionFeature.State()) {
+  func pickerDefaultsToTheFirstHostOrNewHost() {
+    let withHosts = RemoteConnectionFeature.State(hosts: [Self.box, Self.mini])
+    #expect(withHosts.hostChoice == .existing(Self.box.id))
+    #expect(!withHosts.isNewHost)
+    let empty = RemoteConnectionFeature.State()
+    #expect(empty.hostChoice == .newHost)
+    #expect(empty.isNewHost)
+  }
+
+  @Test
+  func choosingAHostClearsTheError() async {
+    let store = TestStore(
+      initialState: RemoteConnectionFeature.State(hosts: [Self.box, Self.mini], errorMessage: "old")
+    ) {
       RemoteConnectionFeature()
     }
-    await store.send(.portChanged("2a2b2")) {
-      $0.portDraft = "222"
+    await store.send(.hostChoiceChanged(.existing(Self.mini.id))) {
+      $0.hostChoice = .existing(Self.mini.id)
+      $0.errorMessage = nil
+    }
+    await store.send(.hostChoiceChanged(.newHost)) {
+      $0.hostChoice = .newHost
     }
   }
 
   @Test
-  func connectRejectsEmptyHost() async {
+  func newHostFieldsEditTheDraft() async {
+    let store = TestStore(initialState: RemoteConnectionFeature.State()) {
+      RemoteConnectionFeature()
+    }
+    await store.send(.addressChanged("example.com")) {
+      $0.newHost.address = "example.com"
+    }
+    await store.send(.usernameChanged("alice")) {
+      $0.newHost.username = "alice"
+    }
+    await store.send(.portChanged("2a2b2")) {
+      $0.newHost.port = "222"
+    }
+    await store.send(.portChanged("1234567")) {
+      $0.newHost.port = "12345"
+    }
+    await store.send(.nameChanged("Example")) {
+      $0.newHost.name = "Example"
+    }
+    #expect(store.state.canConnect == false)
+    await store.send(.pathChanged("/srv/app")) {
+      $0.pathDraft = "/srv/app"
+    }
+    #expect(store.state.canConnect)
+  }
+
+  @Test
+  func connectRejectsEmptyNewHost() async {
     let store = TestStore(initialState: RemoteConnectionFeature.State(pathDraft: "/srv/app")) {
       RemoteConnectionFeature()
     }
     // No host → validation error, no effect (no SSH probe launched).
     await store.send(.connectButtonTapped) {
-      $0.errorMessage = "Enter a host or SSH alias."
+      $0.errorMessage = "Enter a host."
     }
   }
 
   @Test
   func connectRejectsEmptyPath() async {
-    let store = TestStore(initialState: RemoteConnectionFeature.State(hostDraft: "example.com")) {
+    let store = TestStore(initialState: RemoteConnectionFeature.State(hosts: [Self.box])) {
       RemoteConnectionFeature()
     }
     await store.send(.connectButtonTapped) {
@@ -46,63 +93,206 @@ struct RemoteConnectionFeatureTests {
   func connectRejectsOutOfRangePort() async {
     let store = TestStore(
       initialState: RemoteConnectionFeature.State(
-        hostDraft: "example.com", portDraft: "70000", pathDraft: "/srv/app"
+        newHost: HostDraft(address: "example.com", port: "70000"), pathDraft: "/srv/app"
       )
     ) {
       RemoteConnectionFeature()
     }
     await store.send(.connectButtonTapped) {
-      $0.errorMessage = "Port must be between 1 and 65535."
+      $0.errorMessage = "Port 70000 is not valid. Enter a number from 1 to 65535."
     }
   }
 
   @Test
-  func editingSeedsFormFromServerProject() {
-    let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
-    let project = Project(
-      name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", remoteHost: host
+  func selectedHostIsThePickedRecord() throws {
+    let state = RemoteConnectionFeature.State(
+      hosts: [Self.box, Self.mini], hostChoice: .existing(Self.mini.id)
     )
-    let seeded = RemoteConnectionFeature.State.editing(project: project)
+    #expect(try state.selectedHost() == Self.mini)
+    let stale = RemoteConnectionFeature.State(hosts: [Self.box], hostChoice: .existing(HostID()))
+    #expect(throws: HostRecordError.self) { try stale.selectedHost() }
+  }
+
+  @Test
+  func newHostEqualToAnExistingHostUsesThatHost() throws {
+    // Same (Host, Username, Port) as `box`; the Name is not part of identity.
+    let state = RemoteConnectionFeature.State(
+      hosts: [Self.box],
+      hostChoice: .newHost,
+      newHost: HostDraft(address: " box.local ", username: "alice", port: "2222", name: "Other")
+    )
+    #expect(try state.selectedHost() == Self.box)
+  }
+
+  @Test
+  func newHostMakesANewRecordWithItsName() throws {
+    let state = RemoteConnectionFeature.State(
+      hosts: [Self.box],
+      hostChoice: .newHost,
+      newHost: HostDraft(address: "new.local", username: "", port: "", name: "New")
+    )
+    let record = try state.selectedHost()
+    #expect(record.id != Self.box.id)
+    #expect(record.address == "new.local")
+    #expect(record.username == nil)
+    #expect(record.port == nil)
+    #expect(record.name == "New")
+  }
+
+  @Test
+  func editingSeedsHostChoiceAndPathFromServerProject() {
+    let project = Project(
+      name: "app", rootPath: "/srv/app", gitRoot: "/srv/app",
+      hostID: Self.mini.id, remoteHost: Self.mini.endpoint
+    )
+    let seeded = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
     #expect(seeded?.mode == .edit(projectID: project.id))
     #expect(seeded?.isEditing == true)
-    #expect(seeded?.hostDraft == "example.com")
-    #expect(seeded?.portDraft == "2222")
-    #expect(seeded?.usernameDraft == "alice")
+    #expect(seeded?.hostChoice == .existing(Self.mini.id))
+    #expect(seeded?.newHost == HostDraft())
     #expect(seeded?.pathDraft == "/srv/app")
     // A local project has no connection to edit.
     let local = Project(name: "local", rootPath: "/tmp/x")
-    #expect(RemoteConnectionFeature.State.editing(project: local) == nil)
+    #expect(RemoteConnectionFeature.State.editing(project: local, hosts: [Self.box]) == nil)
   }
 
   @Test
-  func savedHostSelectedFillsConnectionFieldsButNotThePath() async {
-    let host = RemoteHost(alias: "mini.local", username: "alice", port: 2222)
-    let store = TestStore(
-      initialState: RemoteConnectionFeature.State(
-        pathDraft: "/srv/keep", errorMessage: "old error"
-      )
-    ) {
-      RemoteConnectionFeature()
-    }
-    await store.send(.savedHostSelected(host)) {
-      $0.hostDraft = "mini.local"
-      $0.usernameDraft = "alice"
-      $0.portDraft = "2222"
-      // The path belongs to the project being added, not the host.
-      $0.pathDraft = "/srv/keep"
-      $0.errorMessage = nil
-    }
+  func editingAProjectWithoutAHostRecordSeedsNewHostFields() {
+    let endpoint = RemoteHost(alias: "legacy.local", username: "bob", port: 2200)
+    let project = Project(name: "app", rootPath: "/srv/app", remoteHost: endpoint)
+    let seeded = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box])
+    #expect(seeded?.hostChoice == .newHost)
+    #expect(seeded?.newHost == HostDraft(address: "legacy.local", username: "bob", port: "2200"))
   }
 
   @Test
   func connectSucceededDelegatesConnected() async {
-    let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
-    let store = TestStore(initialState: RemoteConnectionFeature.State(isConnecting: true)) {
+    let store = TestStore(
+      initialState: RemoteConnectionFeature.State(hosts: [Self.box], isConnecting: true)
+    ) {
       RemoteConnectionFeature()
     }
-    await store.send(.connectSucceeded(host: host, remotePath: "/srv/app", gitRoot: "/srv/app")) {
+    await store.send(.connectSucceeded(host: Self.box, remotePath: "/srv/app", gitRoot: "/srv/app")) {
       $0.isConnecting = false
     }
     await store.receive(\.delegate.connected)
+  }
+}
+
+/// The sidebar side of the picker flows: what `HierarchySidebarFeature` writes
+/// through `HierarchyClient` when the sheet opens and when it connects.
+@MainActor
+struct RemoteConnectionSidebarFlowTests {
+  private static let box = HostRecord(address: "box.local", username: "alice", port: 2222, name: "Box")
+  private static let mini = HostRecord(address: "mini.local")
+
+  @MainActor
+  final class Recorder {
+    var added: [(name: String, endpoint: RemoteHost, path: String)] = []
+    var updated: [(projectID: ProjectID, endpoint: RemoteHost, path: String)] = []
+  }
+
+  private static func makeStore(
+    _ fake: HostListFake,
+    _ recorder: Recorder,
+    state: HierarchySidebarFeature.State = .init()
+  ) -> TestStoreOf<HierarchySidebarFeature> {
+    let store = TestStore(initialState: state) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      fake.install(into: &$0)
+      $0.hierarchyClient.snapshot = { fake.catalog }
+      $0.hierarchyClient.addServerProject = { name, endpoint, path, _ in
+        recorder.added.append((name, endpoint, path))
+        return ProjectID()
+      }
+      $0.hierarchyClient.updateServerProject = { projectID, endpoint, path, _ in
+        recorder.updated.append((projectID, endpoint, path))
+      }
+    }
+    store.exhaustivity = .off
+    return store
+  }
+
+  @Test
+  func connectServerOpensThePickerWithTheHostList() async {
+    let fake = HostListFake(hosts: [Self.box, Self.mini])
+    let store = Self.makeStore(fake, Recorder())
+    await store.send(.connectServerTapped) {
+      $0.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: [Self.box, Self.mini])
+    }
+  }
+
+  @Test
+  func connectWithAnExistingHostAddsNoHost() async {
+    let fake = HostListFake(hosts: [Self.box])
+    let recorder = Recorder()
+    let store = Self.makeStore(
+      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box]))
+    )
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet = nil
+    }
+    #expect(fake.catalog.hosts == [Self.box])
+    #expect(recorder.added.count == 1)
+    #expect(recorder.added.first?.name == "app")
+    #expect(recorder.added.first?.endpoint == Self.box.endpoint)
+  }
+
+  @Test
+  func connectWithANewHostAddsItToTheHostList() async {
+    let fake = HostListFake(hosts: [Self.box])
+    let recorder = Recorder()
+    let newHost = HostRecord(address: "new.local", name: "New")
+    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: .init()))
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: newHost, remotePath: "/srv/web", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet = nil
+    }
+    #expect(fake.catalog.hosts == [Self.box, newHost])
+    #expect(recorder.added.first?.name == "web")
+    #expect(recorder.added.first?.endpoint == newHost.endpoint)
+  }
+
+  @Test
+  func connectUsesTheCurrentFieldsOfAHostEditedMeanwhile() async throws {
+    var edited = Self.box
+    edited.address = "10.0.0.5"
+    let fake = HostListFake(hosts: [edited])
+    let recorder = Recorder()
+    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: .init()))
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+    )
+    #expect(fake.catalog.hosts == [edited])
+    #expect(recorder.added.first?.endpoint == edited.endpoint)
+  }
+
+  @Test
+  func editConnectionMovesTheProjectToAnotherHost() async {
+    let project = Project(
+      name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
+    )
+    let fake = HostListFake(hosts: [Self.box, Self.mini], projects: [project])
+    let recorder = Recorder()
+    let store = Self.makeStore(fake, recorder)
+    await store.send(.projectEditConnectionTapped(projectID: project.id)) {
+      $0.remoteConnectionSheet = .editing(project: project, hosts: [Self.box, Self.mini])
+    }
+    #expect(store.state.remoteConnectionSheet?.hostChoice == .existing(Self.box.id))
+    await store.send(.remoteConnectionSheet(.hostChoiceChanged(.existing(Self.mini.id))))
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/app", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet = nil
+    }
+    #expect(recorder.updated.count == 1)
+    #expect(recorder.updated.first?.projectID == project.id)
+    #expect(recorder.updated.first?.endpoint == Self.mini.endpoint)
+    // Edit Connection never changes a Host's fields.
+    #expect(fake.catalog.hosts == [Self.box, Self.mini])
   }
 }
