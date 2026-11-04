@@ -101,13 +101,14 @@ struct BranchSwitcherFeatureTests {
   func gitCallsNameTheWorktreeHost() async {
     let hostID = HostID()
     let urls = LockIsolated<[URL]>([])
+    let inventory = Self.sampleInventory()
     let store = TestStore(initialState: BranchSwitcherFeature.State()) {
       BranchSwitcherFeature()
     } withDependencies: {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.listAllBranches = { url in
         urls.withValue { $0.append(url) }
-        return Self.sampleInventory()
+        return inventory
       }
       $0.gitService.log = { url, _ in
         urls.withValue { $0.append(url) }
