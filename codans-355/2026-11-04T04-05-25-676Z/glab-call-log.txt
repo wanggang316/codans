@@ -1,0 +1,17 @@
+# glab calls made by the isolated codans instance (logging wrapper on PATH), 2026-11-04
+# Unit not selected: hot tier = 30 s, warm tier = 120 s.
+12:01:34 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["e2e-355-feat"] [GITLAB_HOST=192.168.2.158:8929]
+12:01:34 glab api projects/codans-e2e%2Fapp/merge_requests/130?with_merge_status_recheck=true --method GET [GITLAB_HOST=192.168.2.158:8929]
+12:02:04 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["e2e-355-feat"] [GITLAB_HOST=192.168.2.158:8929]
+--- move10 at 12:02:08
+12:04:04 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["e2e-355-feat"] [GITLAB_HOST=192.168.2.158:8929]
+12:04:05 glab api projects/codans-e2e%2Fapp/merge_requests/130?with_merge_status_recheck=true --method GET [GITLAB_HOST=192.168.2.158:8929]
+12:04:34 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["e2e-355-feat"] [GITLAB_HOST=192.168.2.158:8929]
+
+# os_log (subsystem com.gumpw.codans.gitlab), instance pid 66867
+2026-11-04 11:57:03.934 I  Codans[66867:340c36c] [com.gumpw.codans.gitlab:service] asked GitLab to recheck the merge status of codans-e2e/app!130 (UNCHECKED)
+2026-11-04 12:01:34.980 I  Codans[66867:3413422] [com.gumpw.codans.gitlab:service] asked GitLab to recheck the merge status of codans-e2e/app!130 (UNCHECKED)
+2026-11-04 12:04:05.127 I  Codans[66867:34157f8] [com.gumpw.codans.gitlab:service] asked GitLab to recheck the merge status of codans-e2e/app!130 (UNCHECKED)
+
+# control without codans: GraphQL reads of !130 after the target moved
+11:28:40..11:29:42 detailedMergeStatus=UNCHECKED (7 reads, 10 s apart)
