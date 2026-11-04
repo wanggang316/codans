@@ -11,11 +11,12 @@ struct TreeCommand: AsyncParsableCommand {
     discussion: """
       Use 'codans tree' as the first discovery command. It prints the full hierarchy so
       you do not have to walk projects, worktrees, tabs, and panes one command at
-      a time.
+      a time. --host keeps the Projects on one Host.
       """
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Restrict output to one project id, name, or 'current'.")
   var project: String?
 
@@ -26,11 +27,17 @@ struct TreeCommand: AsyncParsableCommand {
       let tree = try await HierarchyTree.load(client: client, timeout: globals.rpcTimeout)
       let projects: [Project]
       if let project {
-        let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+        let uuid = try await hostOptions.resolveProject(project, client: client)
         projects = tree.projects.filter { $0.id.raw == uuid }
         if projects.isEmpty {
           throw CLIError(code: .notFound, message: "project \(uuid.uuidString) not found")
         }
+      } else if let host = try hostOptions.selector() {
+        if case .host(let id) = host, !tree.hosts.contains(where: { $0.id == id }) {
+          throw CLIError(
+            code: .notFound, message: "host not found: \(host)", details: ["kind": "host", "id": host.description])
+        }
+        projects = tree.projects.filter(host.matches)
       } else {
         projects = tree.projects
       }

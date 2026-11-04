@@ -103,9 +103,9 @@ public struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
     return rows
   }
 
-  /// `name  id`, or the name alone for This Mac.
+  /// `name  host=<id|0>`; the id is the `--host` value that selects it.
   public static func label(for host: IPC.HostRef) -> String {
-    host.id.map { "\(host.name)  \($0)" } ?? host.name
+    "\(host.name)  host=\(host.id)"
   }
 
   private static func label(for ref: IPC.WorkspaceGroupRef) -> String {
@@ -124,7 +124,7 @@ public struct HierarchyProjectDTO: Encodable {
   public let gitRoot: String?
   /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
   public let kind: String
-  /// `{id, name}` of the Project's Host; `id` is null for This Mac.
+  /// `{id, name}` of the Project's Host; `id` is `"0"` for This Mac.
   public let host: IPC.HostRef
   public let selectedWorktreeID: String?
   public let worktrees: [HierarchyWorktreeDTO]
@@ -210,22 +210,26 @@ public struct HierarchyPaneDTO: Encodable {
 
 public struct ProjectListRenderable: Encodable, CustomStringConvertible {
   public let projects: [Project]
+  /// Resolves each Project's Host name.
+  public let hosts: [HostRecord]
 
-  public init(projects: [Project]) {
+  public init(projects: [Project], hosts: [HostRecord]) {
     self.projects = projects
+    self.hosts = hosts
   }
 
   private enum Key: String, CodingKey { case projects }
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: Key.self)
-    try container.encode(projects.map(ProjectDTO.init(project:)), forKey: .projects)
+    try container.encode(projects.map { ProjectDTO(project: $0, hosts: hosts) }, forKey: .projects)
   }
 
   public var description: String {
     projects.isEmpty
       ? "(no projects)"
-      : projects.map { "\($0.id)  \($0.name)  \($0.rootPath)" }.joined(separator: "\n")
+      : projects.map { "\($0.id)  \($0.name)  \($0.rootPath)  host=\(IPC.HostSelector(project: $0))" }
+        .joined(separator: "\n")
   }
 }
 
@@ -236,14 +240,17 @@ public struct ProjectDTO: Encodable {
   public let gitRoot: String?
   /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
   public let kind: String
+  /// `{id, name}` of the Project's Host; `id` is `"0"` for This Mac.
+  public let host: IPC.HostRef
   public let selectedWorktreeID: String?
 
-  public init(project: Project) {
+  public init(project: Project, hosts: [HostRecord]) {
     self.id = project.id.description
     self.name = project.name
     self.rootPath = project.rootPath
     self.gitRoot = project.gitRoot
     self.kind = project.kind.rawValue
+    self.host = IPC.HostRef(project: project, hosts: hosts)
     self.selectedWorktreeID = project.selectedWorktreeID?.description
   }
 }

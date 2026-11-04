@@ -64,6 +64,7 @@ struct WorkspaceCreate: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace title.")
   var title: String
   @Option(name: .long, help: "Registered project to include (repeatable).")
@@ -88,7 +89,8 @@ struct WorkspaceCreate: AsyncParsableCommand {
       defer { Task { await client.shutdown() } }
       var requests: [IPC.WorkspaceSourceRequest] = []
       for source in sources {
-        requests.append(try await WorkspaceCommandSupport.source(for: source, client: client))
+        requests.append(
+          try await WorkspaceCommandSupport.source(for: source, host: hostOptions.selector(), client: client))
       }
       let request = IPC.WorkspaceCreateRequest(
         title: title,
@@ -116,6 +118,7 @@ struct WorkspaceAdd: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String
   @Argument(help: "Local repository path to add.")
@@ -138,8 +141,8 @@ struct WorkspaceAdd: AsyncParsableCommand {
         projects: project, repos: repo + (path.map { [$0] } ?? []), remotes: remote, minimum: 1, maximum: 1)[0]
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
-      let base = try await WorkspaceCommandSupport.source(for: source, client: client)
+      let workspaceUUID = try await hostOptions.resolveProject(workspace, client: client)
+      let base = try await WorkspaceCommandSupport.source(for: source, host: hostOptions.selector(), client: client)
       let added: IPC.WorkspaceProjectSummary = try await client.call(
         .workspaceAdd,
         params: IPC.WorkspaceAddRequest(
@@ -165,6 +168,7 @@ struct WorkspaceDrop: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String
   @Argument(help: "Source project name, as `workspace show` lists it, or its path.")
@@ -182,7 +186,7 @@ struct WorkspaceDrop: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
+      let workspaceUUID = try await hostOptions.resolveProject(workspace, client: client)
       let looksLikePath = project.contains("/") || project.hasPrefix("~") || project == "."
       let response: IPC.WorkspaceDropResponse = try await client.call(
         .workspaceDrop,
@@ -213,6 +217,7 @@ struct WorkspaceRemove: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String
   @Flag(name: .long, help: "Delete the groups, links, and workspace folder.")
@@ -231,7 +236,7 @@ struct WorkspaceRemove: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
+      let workspaceUUID = try await hostOptions.resolveProject(workspace, client: client)
       let response: IPC.WorkspaceRemoveResponse = try await WorkspaceCommandSupport.withDiscardHint(discard) {
         try await client.call(
           .workspaceRemove,
@@ -282,6 +287,7 @@ struct WorkspaceShow: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String = "current"
 
@@ -289,7 +295,7 @@ struct WorkspaceShow: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
+      let workspaceUUID = try await hostOptions.resolveProject(workspace, client: client)
       let summary: IPC.WorkspaceSummary = try await client.call(
         .workspaceDescribe,
         params: IPC.WorkspaceDescribeRequest(projectID: ProjectID(raw: workspaceUUID)),
@@ -329,6 +335,7 @@ struct WorkspaceGroupCreate: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String
   @Argument(help: "Group display name. A safe folder name is derived from it.")
@@ -351,7 +358,7 @@ struct WorkspaceGroupCreate: AsyncParsableCommand {
       let baseRefs = try CLIKeyValuePairs.parse(base, option: "--base")
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let workspaceUUID = try await AliasResolver.resolve(workspace, kind: .project, client: client)
+      let workspaceUUID = try await hostOptions.resolveProject(workspace, client: client)
       // Checked before the group exists, so a typo cannot leave a group
       // without its agents.
       let profile: IPC.AgentProfileSummary?
@@ -406,6 +413,7 @@ struct WorkspaceGroupDelete: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Workspace project id, name, or 'current'.")
   var workspace: String
   @Argument(help: "Group name or id.")
@@ -421,7 +429,7 @@ struct WorkspaceGroupDelete: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectID = ProjectID(raw: try await AliasResolver.resolve(workspace, kind: .project, client: client))
+      let projectID = ProjectID(raw: try await hostOptions.resolveProject(workspace, client: client))
       if dryRun {
         let check: GroupDeletionCheck = try await client.call(
           .workspaceCheckGroupDeletion, params: IPC.WorkspaceGroupRequest(projectID: projectID, group: group),
@@ -450,11 +458,12 @@ enum WorkspaceCommandSupport {
   /// destination.
   static func source(
     for source: CLIWorkspaceMemberSource,
+    host: IPC.HostSelector?,
     client: RPCClient
   ) async throws -> IPC.WorkspaceSourceRequest {
     switch source {
     case .project(let alias):
-      let uuid = try await AliasResolver.resolve(alias, kind: .project, client: client)
+      let uuid = try await AliasResolver.resolve(alias, kind: .project, host: host, client: client)
       return IPC.WorkspaceSourceRequest(projectID: ProjectID(raw: uuid))
     case .repo(let path):
       return IPC.WorkspaceSourceRequest(path: PathResolver.absolute(path))

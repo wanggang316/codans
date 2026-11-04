@@ -30,14 +30,20 @@ public enum AliasResolver {
   /// value is not a UUID and not a context pronoun — callers avoid the
   /// round trip for the common agent-scripting case by passing a
   /// pre-formed UUID string.
+  ///
+  /// `host` limits a Project to one Host (ADR 0006). With it, every
+  /// Project value goes to the server, a UUID included: the app checks
+  /// that the Project is on that Host instead of the CLI ignoring `--host`.
   public static func resolve(
     _ value: String,
     kind: IPC.AliasResolveRequest.Kind,
+    host: IPC.HostSelector? = nil,
     env: [String: String] = ProcessInfo.processInfo.environment,
     client: @autoclosure () throws -> RPCClient
   ) async throws -> UUID {
+    let host = kind == .project ? host : nil
     // 1. UUID fast path.
-    if let uuid = UUID(uuidString: value) {
+    if host == nil, let uuid = UUID(uuidString: value) {
       return uuid
     }
 
@@ -47,7 +53,7 @@ public enum AliasResolver {
     // (kernel peer PID plus an ancestor walk, or `contextPaneID`) when the
     // variable is absent, which also covers a subshell or wrapper that
     // dropped `CODANS_PANE_ID`.
-    if value == "current" || value == ".",
+    if host == nil, value == "current" || value == ".",
       let envValue = env[envKey(for: kind)], let uuid = UUID(uuidString: envValue)
     {
       return uuid
@@ -61,7 +67,8 @@ public enum AliasResolver {
     let request = IPC.AliasResolveRequest(
       kind: kind,
       value: kind == .worktree ? Self.absolutePathIfPathShaped(value) : value,
-      contextPaneID: contextPaneID
+      contextPaneID: contextPaneID,
+      hostID: host?.description
     )
     do {
       let result: IPC.AliasResolveResult = try await rpc.call(
@@ -106,5 +113,18 @@ public enum AliasResolver {
       case .tag: .tagID
       }
     return key.rawValue
+  }
+}
+
+/// `--host`, parsed at the CLI edge (ADR 0006): `0` for This Mac or a Host
+/// id. Any other value, the empty string included, is a usage error, so an
+/// unset shell variable does not quietly select This Mac.
+public enum HostArgument {
+  public static func parse(_ value: String?) throws(CLIArgumentError) -> IPC.HostSelector? {
+    guard let value else { return nil }
+    guard let host = IPC.HostSelector(value) else {
+      throw .invalidValue(message: "invalid --host \"\(value)\"; pass a Host id or 0 for This Mac")
+    }
+    return host
   }
 }
