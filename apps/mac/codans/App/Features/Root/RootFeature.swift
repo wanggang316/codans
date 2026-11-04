@@ -1143,8 +1143,13 @@ struct RootFeature {
             project.worktrees.contains(where: { $0.id == worktreeID })
           })?.id
         else { return .none }
-        let worktreePath = catalog.projects.first(where: { $0.id == projectID })?
-          .worktrees.first(where: { $0.id == worktreeID })?.path
+        // The URL names the owning Project's Host, so a Server worktree with
+        // the same path as a local one is never refreshed from This Mac
+        // (ADR 0006).
+        let worktreeURL = catalog.projects.first(where: { $0.id == projectID })
+          .flatMap { project in
+            project.worktrees.first(where: { $0.id == worktreeID }).map { project.gitURL($0.path) }
+          }
         // Route the HEAD-change into the branch switcher ONLY when
         // the watched worktree matches the one the popover currently
         // backs. Reducers run on the main actor, so reading
@@ -1157,12 +1162,9 @@ struct RootFeature {
           // stale by definition. Drop the freshness stamp and immediately
           // re-fetch so the sidebar chip updates in the same tick the
           // reconciler runs, instead of waiting for the row to remount.
-          if let worktreePath {
+          if let worktreeURL {
             await MainActor.run { monitor.invalidate(worktreeID: worktreeID) }
-            await monitor.refresh(
-              worktreeID: worktreeID,
-              path: URL(fileURLWithPath: worktreePath)
-            )
+            await monitor.refresh(worktreeID: worktreeID, path: worktreeURL)
           }
           await projectReconciler.reconcile(projectID: projectID)
           for action in await MainActor.run(body: {
@@ -1183,16 +1185,13 @@ struct RootFeature {
         // instead of waiting for the row to remount.
         let catalog = hierarchyClient.snapshot()
         guard
-          let worktreePath = catalog.projects
-            .flatMap(\.worktrees)
-            .first(where: { $0.id == worktreeID })?.path
+          let worktreeURL = catalog.projects.lazy.compactMap({ project in
+            project.worktrees.first(where: { $0.id == worktreeID }).map { project.gitURL($0.path) }
+          }).first
         else { return .none }
         return .run { [monitor = worktreeLocalDiffMonitor] _ in
           await MainActor.run { monitor.invalidate(worktreeID: worktreeID) }
-          await monitor.refresh(
-            worktreeID: worktreeID,
-            path: URL(fileURLWithPath: worktreePath)
-          )
+          await monitor.refresh(worktreeID: worktreeID, path: worktreeURL)
         }
 
       case .engineEventReceived(let marker):
@@ -1249,17 +1248,14 @@ struct RootFeature {
         else { return .none }
         let projectID = project.id
         let worktreeID = worktree.id
-        let worktreePath = worktree.path
+        let worktreeURL = project.gitURL(worktree.path)
         return .run { [projectReconciler, monitor = worktreeLocalDiffMonitor] send in
           // `git commit` / `git push` move the working-tree diff and the
           // ahead/behind counts but NOT `.git/HEAD`, so neither the HEAD
           // watcher nor the working-tree watcher reliably fires for a push —
           // drop the freshness stamp, refresh the chip, and reconcile now.
           await MainActor.run { monitor.invalidate(worktreeID: worktreeID) }
-          await monitor.refresh(
-            worktreeID: worktreeID,
-            path: URL(fileURLWithPath: worktreePath)
-          )
+          await monitor.refresh(worktreeID: worktreeID, path: worktreeURL)
           await projectReconciler.reconcile(projectID: projectID)
           // PR state lives server-side. Give the Code Host ~1.5 s to settle the write
           // (mirrors the 2 s post-mutation delay), then force a batched fetch.
