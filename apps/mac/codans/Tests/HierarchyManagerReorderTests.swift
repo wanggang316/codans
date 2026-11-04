@@ -24,6 +24,19 @@ struct HierarchyManagerReorderTests {
 
   // MARK: - createWorktree insertion
 
+  /// A pending creation registers its worktree without taking the
+  /// selection: only RootFeature's completion gate may move the user.
+  @Test
+  func createWorktreeCanLeaveTheSelectionAlone() throws {
+    let pid = try makeProject()
+    let selected = try manager.createWorktree(in: pid, name: "u1", path: "/repo/u1", branch: "u1")
+    #expect(manager.catalog.projects.first { $0.id == pid }?.selectedWorktreeID == selected)
+
+    _ = try manager.createWorktree(
+      in: pid, name: "u2", path: "/repo/u2", branch: "u2", selectsNewWorktree: false)
+    #expect(manager.catalog.projects.first { $0.id == pid }?.selectedWorktreeID == selected)
+  }
+
   @Test
   func createWorktreeLandsAtUnpinnedSegmentTop() throws {
     let pid = try makeProject()

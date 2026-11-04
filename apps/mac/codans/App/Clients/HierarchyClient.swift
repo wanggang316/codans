@@ -353,7 +353,8 @@ nonisolated struct HierarchyClient: Sendable {
 
   /// Catalog-append step for Create Worktree. Idempotent on path: when a
   /// reconcile pulse already adopted the materialized worktree mid-stream,
-  /// this returns the adopted row's id instead of throwing.
+  /// this returns the adopted row's id instead of throwing. It never
+  /// selects the worktree: RootFeature's completion gate does.
   var createWorktreeWithGit:
     @MainActor @Sendable (
       _ projectID: ProjectID,
@@ -1036,7 +1037,11 @@ extension HierarchyClient {
         try manager.createWorktree(
           in: projectID,
           name: name, path: path, branch: branch,
-          reuseExisting: true
+          reuseExisting: true,
+          // The completion gate in RootFeature decides whether the user
+          // lands on the new worktree; selecting here would move a user
+          // who is not following the creation.
+          selectsNewWorktree: false
         )
       },
       removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
