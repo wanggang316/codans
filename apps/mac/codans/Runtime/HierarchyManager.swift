@@ -641,41 +641,20 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  /// Resolves a canonical path to its registered `ProjectID` if any
-  /// Project's `rootPath` canonicalizes to the same form. Caller canonicalizes
-  /// its input via `HierarchyManager.canonicalPath(_:)` before querying.
-  /// Linear in total Project count — acceptable at the low cardinality we
-  /// support (Projects per user, not per repo).
+  /// The Project on This Mac whose root is `path` (ADR 0006). Server
+  /// projects never match, also when their remote path is the same string.
+  /// When existing duplicates match, the first in Project order wins.
   func isPathRegistered(canonical path: String) -> ProjectID? {
-    for project in catalog.projects where Self.canonicalPath(project.rootPath) == path {
-      return project.id
-    }
-    return nil
+    catalog.localProject(rootPath: path, canonicalize: Self.canonicalPath)?.id
   }
 
-  /// Resolves a canonical path to the `ProjectID` whose `rootPath`
-  /// **contains** `path` — i.e. the path is the root itself or a descendant.
-  /// Used by the `editor.open` IPC so `codans open` inside a subdirectory of a
-  /// registered Project still honors the Project's `defaultEditor` override;
-  /// `isPathRegistered` only matches the exact root.
-  ///
-  /// Matching is on path-segment boundaries: `/repo` matches `/repo` and
-  /// `/repo/src/` but not `/repository`. When Projects nest (rare but legal —
-  /// a monorepo Project with a sub-repo Project under it), the deepest match
-  /// wins so the closest override is applied.
-  ///
-  /// Caller canonicalizes via `HierarchyManager.canonicalPath(_:)` before
-  /// querying. Linear in total Project count like `isPathRegistered`.
+  /// The Project on This Mac whose root **contains** `path` — the root
+  /// itself or a descendant, on path-segment boundaries. Used by the
+  /// `editor.open` IPC so `codans open` inside a subdirectory of a
+  /// registered Project still honors the Project's `defaultEditor`
+  /// override. When Projects nest, the deepest match wins.
   func project(containing path: String) -> ProjectID? {
-    var best: (ProjectID, Int)?  // (project, root length)
-    for project in catalog.projects {
-      let root = Self.canonicalPath(project.rootPath)
-      guard path == root || path.hasPrefix(root + "/") else { continue }
-      if best == nil || root.count > best!.1 {
-        best = (project.id, root.count)
-      }
-    }
-    return best.map { $0.0 }
+    catalog.localProject(containing: path, canonicalize: Self.canonicalPath)?.id
   }
 
   // MARK: - Worktree mutations
@@ -1703,35 +1682,21 @@ final class HierarchyManager {
   /// path through `canonicalPath` would resolve it against *this* machine's
   /// symlink table (`/tmp` → `/private/tmp`, etc.), corrupting the identity.
   nonisolated static func normalizeRemotePath(_ path: String) -> String {
-    var trimmed = path
-    while trimmed.count > 1, trimmed.hasSuffix("/") {
-      trimmed.removeLast()
-    }
-    return trimmed
+    Project.normalizeRemotePath(path)
   }
 
-  /// The SSH host owning `path`, or `nil` for a local path. Backs the
-  /// `GitService` transport seam: a path that matches a Server project's
-  /// rootPath / gitRoot / any worktree path (exact match after string-only
-  /// normalization — remote paths never go through the local symlink
-  /// resolver) routes that git invocation over SSH. Every `GitService`
-  /// consumer — the sidebar diff chip, the PR badge's remote-URL probe, the
-  /// branch switcher, the diff inspector — receives worktree-level paths, so
-  /// exact matching is sufficient; subpaths inside a worktree are not
-  /// resolved (none of those callers pass one today).
+  /// The SSH host a git call on `url` runs on, or `nil` for This Mac.
+  /// Backs the `GitService` / `GitWorktreeClient` transport seam. A
+  /// Host-form URL (`Project.gitURL`) runs on its Host; a plain path runs on
+  /// This Mac when a Project on This Mac owns it, else on the Server project
+  /// that owns it (ADR 0006, `Catalog.gitRemoteHost(for:canonicalizeLocal:)`).
+  func remoteHost(forGitURL url: URL) -> RemoteHost? {
+    catalog.gitRemoteHost(for: url, canonicalizeLocal: Self.canonicalPath)
+  }
+
+  /// `remoteHost(forGitURL:)` for a plain path.
   func remoteHost(forPath path: String) -> RemoteHost? {
-    let normalized = Self.normalizeRemotePath(path)
-    for project in catalog.projects {
-      guard let host = project.remoteHost else { continue }
-      if Self.normalizeRemotePath(project.rootPath) == normalized { return host }
-      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == normalized {
-        return host
-      }
-      if project.worktrees.contains(where: { Self.normalizeRemotePath($0.path) == normalized }) {
-        return host
-      }
-    }
-    return nil
+    remoteHost(forGitURL: URL(fileURLWithPath: path))
   }
 
   /// Tears down every terminal surface attached to the Worktree without

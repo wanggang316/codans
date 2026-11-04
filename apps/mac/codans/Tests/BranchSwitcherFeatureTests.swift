@@ -95,6 +95,40 @@ struct BranchSwitcherFeatureTests {
     }
   }
 
+  /// A worktree of a Server project: git calls carry its Host, so they run
+  /// there even when This Mac has the same path (ADR 0006).
+  @Test
+  func gitCallsNameTheWorktreeHost() async {
+    let hostID = HostID()
+    let urls = LockIsolated<[URL]>([])
+    let inventory = Self.sampleInventory()
+    let store = TestStore(initialState: BranchSwitcherFeature.State()) {
+      BranchSwitcherFeature()
+    } withDependencies: {
+      $0.gitService = GitServiceClient.testValue
+      $0.gitService.listAllBranches = { url in
+        urls.withValue { $0.append(url) }
+        return inventory
+      }
+      $0.gitService.log = { url, _ in
+        urls.withValue { $0.append(url) }
+        return LogPage(cursor: .init(offset: 0, limit: 10), commits: [], hasMore: false)
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .worktreeChanged(
+        projectID: ProjectID(), worktreeID: WorktreeID(), path: "/srv/app", hostID: hostID,
+        blockedBranches: [:]))
+    await store.send(.popoverTapped)
+    await store.finish()
+
+    #expect(urls.value.count == 2)
+    #expect(urls.value.allSatisfy { GitLocation.hostID(of: $0) == hostID })
+    #expect(urls.value.allSatisfy { $0.path(percentEncoded: false) == "/srv/app" })
+  }
+
   // MARK: - 2. popoverTapped skips loads when caches are populated
 
   @Test

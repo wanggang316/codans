@@ -179,4 +179,21 @@ struct WorkspaceSourcesTests {
       try await fx.client.removeSource(projectID, other)
     }
   }
+
+  /// The Workspace root is a path on This Mac: a Server project with the
+  /// same root path does not make it "already registered" (ADR 0006).
+  @Test
+  func rootPreflightIgnoresServerProjectWithSamePath() async throws {
+    let fx = try WorkspaceClientFixture()
+    defer { fx.cleanUp() }
+    let root = fx.path("ws")
+    _ = fx.manager.addServerProject(name: "ws", remoteHost: RemoteHost(alias: "mini"), rootPath: root)
+
+    let remoteOnly = await fx.client.preflightWorkspace(WorkspaceSourcePlan(title: "ws", rootPath: root, sources: []))
+    #expect(!remoteOnly.rootIssues.contains { $0.kind == .rootAlreadyRegistered })
+
+    _ = fx.manager.addProject(name: "ws", rootPath: root)
+    let local = await fx.client.preflightWorkspace(WorkspaceSourcePlan(title: "ws", rootPath: root, sources: []))
+    #expect(local.rootIssues.contains { $0.kind == .rootAlreadyRegistered })
+  }
 }

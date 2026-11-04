@@ -1353,6 +1353,60 @@ struct RootFeatureTests {
     await store.finish()
   }
 
+  /// A local and a Server worktree at the same path (ADR 0006): watcher and
+  /// HEAD events refresh each row's diff stats on its own machine.
+  @Test
+  func watcherRefreshesNameTheOwningProjectsHost() async {
+    let hostID = HostID()
+    let localRow = Worktree(name: "app", path: "/srv/app", branch: "main")
+    let serverRow = Worktree(name: "app", path: "/srv/app", branch: "main")
+    let local = Project(name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", worktrees: [localRow])
+    let server = Project(
+      name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", hostID: hostID,
+      remoteHost: RemoteHost(alias: "mini"), worktrees: [serverRow])
+    let catalog = Catalog(projects: [local, server])
+    let fetched = LockIsolated<[URL]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { url in
+        fetched.withValue { $0.append(url) }
+        return nil
+      })
+      Self.stubCodeHostFetch(&$0)
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeWorkingTreeChanged(serverRow.id))
+    await store.send(.worktreeWorkingTreeChanged(localRow.id))
+    await store.send(.worktreeHeadChanged(serverRow.id))
+    await store.finish()
+
+    #expect(fetched.value.count == 3)
+    #expect(GitLocation.hostID(of: fetched.value[0]) == hostID)
+    #expect(fetched.value[1].isFileURL)
+    #expect(GitLocation.hostID(of: fetched.value[2]) == hostID)
+  }
+
+  /// Local file-system watchers cover Projects on This Mac only; the monitor
+  /// cache keeps every live row, Server rows included.
+  @Test
+  @MainActor
+  func localWatchersSkipServerWorktreesButRetentionKeepsThem() {
+    let localRow = Worktree(name: "app", path: "/srv/app")
+    let serverRow = Worktree(name: "app", path: "/srv/app")
+    let archived = Worktree(name: "old", path: "/srv/old", archived: true)
+    let catalog = Catalog(projects: [
+      Project(name: "app", rootPath: "/srv/app", worktrees: [localRow, archived]),
+      Project(
+        name: "app", rootPath: "/srv/app", hostID: HostID(), remoteHost: RemoteHost(alias: "mini"),
+        worktrees: [serverRow]),
+    ])
+    #expect(AppState.headWatcherPairs(from: catalog) == [localRow.id: "/srv/app"])
+    #expect(AppState.liveWorktreeIDs(from: catalog) == [localRow.id, serverRow.id])
+  }
+
   /// A HEAD change now refreshes the owning Project's PR data; stub the fetch
   /// chain so it resolves without a live `git` / `gh` subprocess.
   private static func stubCodeHostFetch(_ values: inout DependencyValues) {

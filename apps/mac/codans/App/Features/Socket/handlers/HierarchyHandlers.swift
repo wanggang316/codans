@@ -339,12 +339,14 @@ final class HierarchyHandlers {
     }
   }
 
-  /// Non-archived worktrees whose directory is `path` or contains it; when
-  /// one nests under another, only the deepest is returned.
+  /// Non-archived worktrees on This Mac whose directory is `path` or
+  /// contains it; when one nests under another, only the deepest is
+  /// returned. `path` is a local path, so Server projects never match
+  /// (ADR 0006).
   static func worktreesMatchingPath(_ path: String, in catalog: Catalog) -> [UUID] {
     let canonical = HierarchyManager.canonicalPath(path)
     var deepest: Worktree?
-    for project in catalog.projects {
+    for project in catalog.projects where project.isOnThisMac {
       for worktree in project.worktrees where !worktree.archived {
         let root = HierarchyManager.canonicalPath(worktree.path)
         guard canonical == root || canonical.hasPrefix(root + "/") else { continue }
@@ -923,7 +925,9 @@ final class HierarchyHandlers {
             reason: "\(worktree.name) is a row of workspace \(project.name); use `codans workspace drop` "
               + "for a source project or `codans workspace group delete` for a group"))
       }
-      if !project.isWorkspace, let membership = manager.workspaceMembership(forPath: worktree.path) {
+      if !project.isWorkspace, project.isOnThisMac,
+        let membership = manager.workspaceMembership(forPath: worktree.path)
+      {
         return .failed(
           .conflict(
             reason:

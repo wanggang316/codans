@@ -190,6 +190,22 @@ struct HierarchyHandlersResolveAliasTests {
     #expect(message.contains("echo"))
   }
 
+  /// A worktree path target is a path on This Mac, so a Server project's
+  /// worktree with a deeper matching path string never wins (ADR 0006).
+  @Test
+  func worktreePathTargetIgnoresServerProjects() {
+    let localMain = Worktree(name: "main", path: "/srv/repo", branch: "main")
+    let local = Project(name: "repo", rootPath: "/srv/repo", gitRoot: "/srv/repo", worktrees: [localMain])
+    let remoteFeature = Worktree(name: "feature", path: "/srv/repo/feature", branch: "feature")
+    let remote = Project(
+      name: "repo", rootPath: "/srv/repo/feature", remoteHost: RemoteHost(alias: "mini"),
+      worktrees: [remoteFeature])
+    let catalog = Catalog(projects: [remote, local])
+
+    #expect(HierarchyHandlers.worktreesMatchingPath("/srv/repo/feature/src", in: catalog) == [localMain.id.raw])
+    #expect(HierarchyHandlers.worktreesMatchingPath("/srv/repo/feature", in: Catalog(projects: [remote])).isEmpty)
+  }
+
   // MARK: - Helpers
 
   private static func makeHandlers(

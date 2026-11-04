@@ -288,6 +288,28 @@ struct DiffFeatureTests {
     }
   }
 
+  /// A Server worktree's git calls carry its Host (ADR 0006).
+  @Test func branchChoicesNameTheWorktreeHost() async {
+    let hostID = HostID()
+    var state = DiffFeature.State()
+    state.isVisible = true
+    state.path = "/tmp/repository"
+    state.hostID = hostID
+    let inventory = BranchInventory(current: "main", local: [], remote: [])
+    let store = TestStore(initialState: state) {
+      DiffFeature()
+    } withDependencies: {
+      $0.gitService.listAllBranches = { url in
+        #expect(GitLocation.hostID(of: url) == hostID)
+        #expect(url.path(percentEncoded: false) == "/tmp/repository")
+        return inventory
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.loadBaseBranches)
+    await store.receive(.baseBranchesLoaded(1, inventory))
+  }
+
   @Test func branchChoicesReportFailureAndCanRetry() async {
     var state = DiffFeature.State()
     state.isVisible = true

@@ -747,8 +747,8 @@ final class AppState {
     // the HierarchyClient (reconcile + removal) and the root store (create
     // sheet option loading) so both sides agree on the transport.
     let worktreeClient = GitWorktreeClient.makeLive(
-      remoteHostResolver: { [weak manager] path in
-        await MainActor.run { manager?.remoteHost(forPath: path) }
+      remoteHostResolver: { [weak manager] url in
+        await MainActor.run { manager?.remoteHost(forGitURL: url) }
       }
     )
     let hierarchy = HierarchyClient.live(
@@ -770,7 +770,7 @@ final class AppState {
     // be re-prepared, and no view-side reader needs the remote route.
     let routedGitClient = GitServiceClient.live(
       service: Git.makeService(remoteHostResolver: { [weak manager] url in
-        await MainActor.run { manager?.remoteHost(forPath: url.path) }
+        await MainActor.run { manager?.remoteHost(forGitURL: url) }
       })
     )
     worktreeStatusMonitor.rebindFetch(routedGitClient.status)
@@ -2176,20 +2176,28 @@ final class AppState {
     }
   }
 
-  /// `(worktreeID → path)` for every non-archived Worktree across all
-  /// Projects. Drives both `WorktreeHeadWatcher.setWorktrees(_:)` and
+  /// `(worktreeID → path)` for every non-archived Worktree of a Project on
+  /// This Mac. Server worktrees are not on the local file system: a local
+  /// folder at the same path belongs to another Project (ADR 0006), and the
+  /// sidebar polls Server rows instead. Drives both `WorktreeHeadWatcher.setWorktrees(_:)` and
   /// `WorktreeWorkingTreeWatcher.setWorktrees(_:)` (identical watched set);
   /// archived rows are filtered out because they are hidden in the sidebar
   /// and any on-disk change in their path is irrelevant until the user
   /// un-archives. Path is the canonical form already stored on the row.
-  fileprivate static func headWatcherPairs(from catalog: Catalog) -> [WorktreeID: String] {
+  static func headWatcherPairs(from catalog: Catalog) -> [WorktreeID: String] {
     var pairs: [WorktreeID: String] = [:]
-    for project in catalog.projects {
+    for project in catalog.projects where project.isOnThisMac {
       for worktree in project.worktrees where !worktree.archived {
         pairs[worktree.id] = worktree.path
       }
     }
     return pairs
+  }
+
+  /// Every non-archived Worktree on any Host: the rows the sidebar monitors
+  /// may hold a cached chip for.
+  static func liveWorktreeIDs(from catalog: Catalog) -> Set<WorktreeID> {
+    Set(catalog.projects.flatMap { $0.worktrees.filter { !$0.archived }.map(\.id) })
   }
 
   /// Starts the long-running mirror task that keeps the `WorktreeHeadWatcher`'s
@@ -2206,21 +2214,27 @@ final class AppState {
     let diffMonitor = worktreeLocalDiffMonitor
     worktreeHeadWatcherSyncTask = Task { @MainActor in
       var last: [WorktreeID: String] = [:]
+      var lastLive: Set<WorktreeID> = []
       while !Task.isCancelled {
         let current = Self.headWatcherPairs(from: manager.catalog)
         if current != last {
           watcher.setWorktrees(current.map { (id: $0.key, path: $0.value) })
-          // The two sidebar monitors cache lazily and had no removal path,
-          // so a removed or archived Worktree kept its chip data forever.
-          // This projection is already exactly the live, non-archived set.
-          let live = Set(current.keys)
+          last = current
+        }
+        // The two sidebar monitors cache lazily and had no removal path,
+        // so a removed or archived Worktree kept its chip data forever.
+        // Server rows are not watched but keep their (polled) chips, so
+        // retention uses every live row, not the watched set.
+        let live = Self.liveWorktreeIDs(from: manager.catalog)
+        if live != lastLive {
           statusMonitor.retain(liveWorktreeIDs: live)
           diffMonitor.retain(liveWorktreeIDs: live)
-          last = current
+          lastLive = live
         }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
           withObservationTracking {
             _ = Self.headWatcherPairs(from: manager.catalog)
+            _ = Self.liveWorktreeIDs(from: manager.catalog)
           } onChange: {
             cont.resume()
           }

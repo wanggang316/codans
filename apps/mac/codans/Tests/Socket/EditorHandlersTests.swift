@@ -128,6 +128,48 @@ struct EditorHandlersTests {
     #expect(response.choice.id == "vscode")
   }
 
+  /// `codans open` takes a path on This Mac: a Server project with the
+  /// same root path never supplies its editor override (ADR 0006).
+  @Test
+  func openIgnoresServerProjectOverrideForSamePath() async throws {
+    let dir = try makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let canonical = HierarchyManager.canonicalPath(dir.path)
+
+    let observedPreferred = LockIsolated<EditorID??>(nil)
+    var editor = EditorClient.testValue
+    editor.describe = { [Self.sampleDescriptor] }
+    editor.clearCache = {}
+    editor.open = { _, preferred in
+      observedPreferred.withValue { $0 = .some(preferred) }
+      return EditorChoice(id: "vscode", displayName: "Visual Studio Code", binaryPath: nil)
+    }
+    let manager = HierarchyManager(
+      catalog: Catalog(),
+      store: CatalogStore(
+        fileURL: FileManager.default.temporaryDirectory
+          .appendingPathComponent("EditorHandlersTests-\(UUID().uuidString).json")),
+      runtime: FakeHierarchyRuntime()
+    )
+    let store = makeStore()
+    let serverID = manager.addServerProject(
+      name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    store.mutateProject(serverID) { $0.defaultEditor = "vscode" }
+    let handlers = EditorHandlers(
+      editor: editor,
+      hierarchy: HierarchyClient.live(manager: manager),
+      settings: store
+    )
+
+    _ = try await handlers.open(EditorOpenRequest(path: dir.path + "/", preferred: nil))
+    #expect(observedPreferred.value == .some(nil))
+
+    let localID = manager.addProject(name: "repo", rootPath: canonical)
+    store.mutateProject(localID) { $0.defaultEditor = "vscode" }
+    _ = try await handlers.open(EditorOpenRequest(path: dir.path, preferred: nil))
+    #expect(observedPreferred.value == .some("vscode"))
+  }
+
   @Test
   func openMapsEditorErrorToIPCError() async throws {
     let dir = try makeTempDirectory()

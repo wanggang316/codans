@@ -154,10 +154,15 @@ the same `remoteHostResolver` seam, so the worktree-management surface
 
 **Transport seam (worktree status parity).** `LiveGitService` funnels every git
 invocation through one `invoke(arguments:cwd:)`, parameterized by a
-`resolveRemoteHost: (URL) async -> RemoteHost?` closure. When the repository
-path belongs to a Server project (resolved live against the catalog via
-`HierarchyManager.remoteHost(forPath:)` — exact string match, never the local
-symlink resolver), the invocation becomes `ssh <controlopts> host 'cd <repo> &&
+`resolveRemoteHost: (URL) async -> RemoteHost?` closure, backed by
+`HierarchyManager.remoteHost(forGitURL:)` (`Catalog.gitRemoteHost`). A local
+Project and a Server project can have the same path (ADR 0006), so a caller
+that acts on a Project builds the URL with `Project.gitURL(_:)`: a file URL on
+This Mac, a `codans-host://<host-id>/<path>` URL on a Host. A Host-form URL
+runs on that Host. A plain path runs on This Mac when a Project on This Mac
+owns it; otherwise it runs on the Server project that owns it (exact string
+match, never the local symlink resolver). When the call runs on a Host, the
+invocation becomes `ssh <controlopts> host 'cd <repo> &&
 git …'` under the host's login shell (bare `git`, PATH-resolved); otherwise it
 is the unchanged local `/usr/bin/git`. The parsers never see the transport, so
 the current status consumers — sidebar `+N −M` chip, dirty flag, the PR

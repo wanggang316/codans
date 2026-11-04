@@ -33,6 +33,63 @@ struct HierarchySidebarFeatureTests {
     #expect(received.value[0].1 == false)
   }
 
+  // MARK: - Add Project identity (ADR 0006)
+
+  private func makeAddProjectFixture() throws -> (HierarchyManager, URL) {
+    let folder = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-sidebar-add-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let manager = HierarchyManager(
+      catalog: Catalog(),
+      store: CatalogStore(fileURL: folder.appendingPathComponent("catalog.json")),
+      runtime: FakeHierarchyRuntime()
+    )
+    return (manager, folder)
+  }
+
+  @Test
+  func addProjectAddsLocalProjectBesideServerProjectWithSamePath() async throws {
+    let (manager, folder) = try makeAddProjectFixture()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let canonical = HierarchyManager.canonicalPath(folder.path)
+    let serverID = manager.addServerProject(
+      name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.live(manager: manager)
+      $0[GitWorktreeCLI.self] = GitWorktreeCLI()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.addProjectFolderPicked(folder))
+    await store.receive(\.addProjectGitRootResolved)
+    await store.finish()
+
+    #expect(manager.catalog.projects.count == 2)
+    let added = manager.catalog.projects.first { $0.id != serverID }
+    #expect(added?.isOnThisMac == true)
+    #expect(added?.rootPath == canonical)
+  }
+
+  @Test
+  func addProjectRevealsExistingLocalProjectAndAddsNothing() async throws {
+    let (manager, folder) = try makeAddProjectFixture()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let canonical = HierarchyManager.canonicalPath(folder.path)
+    _ = manager.addServerProject(name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    let localID = manager.addProject(name: "repo", rootPath: canonical)
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.live(manager: manager)
+    }
+
+    await store.send(.addProjectFolderPicked(folder))
+    await store.receive(\.delegate.revealExistingProject, localID)
+    #expect(manager.catalog.projects.count == 2)
+  }
+
   @Test
   func toggleHostExpansionFlipsTheCollapsedSet() async {
     let host = HostRecord(address: "box")
