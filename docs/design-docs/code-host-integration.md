@@ -65,30 +65,30 @@ reducer（`CodeHostFeature`）、快照缓存和视图只用 `CodeHost` 协议�
 
 ### Code Host 选择
 
-每个取数单元在取数开始时读 `origin`，由 `CodeHostResolver` 按以下顺序解析 Code Host（ADR 0004 item 2）：
+每个取数单元在取数开始时读 `origin`，由 `CodeHostResolver` 按以下顺序解析 Code Host（[ADR 0005](../adr/0005-code-host-aliases.md) item 3）：
 
-1. `github.com` 或 `gh` 已登录的 host → GitHub。
-2. `gitlab.com` 或 `glab` 已登录的 host → GitLab。
-3. Project 设置里的 "Code Host" 选择（`GitProjectSettings.codeHost`：Auto / GitHub / GitLab）。
-4. 否则无 Code Host：不取数、无徽标、无错误；该单元记入 `unitsWithoutCodeHost`，轮询跳过它。
+1. Code Host alias（`GeneralSettings.codeHostAliases`，Settings › Code Hosts）：remote host 有 alias 时，用 alias 的 kind 和 API host。SSH remote 的端口是 SSH 端口，所以没有端口的 alias 也匹配它（alias `127.0.0.1` 匹配 `ssh://git@127.0.0.1:2224/…`）。
+2. `github.com` 或 `gh` 已登录的 host → GitHub。
+3. `gitlab.com` 或 `glab` 已登录的 host → GitLab。
+4. 只对 SSH remote：`ssh -G` 读出的 `HostName`，去掉端口后与第 2、3 步已登录或公共的 host 比较；恰有一个匹配时用它的 kind 和 host。
+5. 否则无 Code Host：不取数、无徽标、无错误；该单元记入 `unitsWithoutCodeHost`，轮询跳过它。
 
-两个 CLI 都认识的 host 归 GitHub。Project 选择只在两个 CLI 都不认识 host 时生效（例如 `~/.ssh/config` 里的 SSH 别名），所以它不能把一个 CLI 认识的 host 改成另一种 Code Host。
+alias 最先检查，所以用户可以改正一个错误的自动结果。两个 CLI 都认识的 host 归 GitHub。alias 的 API host 没有登录时 alias 仍然生效：读取失败，徽标位置显示与缺少登录时相同的可操作消息。一个 alias 对 `origin` 有该 host 的每个 Project 和 Workspace 成员生效。
 
-SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 host 可能是 `~/.ssh/config` 的别名，或带 SSH 端口，CLI 无法用它访问 API。Project 选择生效时，`CodeHostResolver` 用 `ssh -G -- <host>`（`SSHHostName`，只打印配置、不建连接）读出别名的 `HostName`，再在该 kind 已登录的 host 和公共 host 中找名字（去掉端口）等于它的那一个，用它作为仓库的 host；没有唯一匹配时保留 remote 的 host。例：`git@github-work:org/repo`（`HostName github.com`）→ `github.com`；`ssh://git@192.168.2.158:2222/g/r` → `glab` 已登录的 `192.168.2.158:8929`。HTTPS remote 的端口就是 API 端口，不做映射。Auto 不做映射，解析顺序不变。各 CLI 登录过的 host 每个 kind 只问一次并缓存；Settings 的 Re-check 清除缓存（`CodeHostClient.invalidateResolution`）。
+SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 host 可能是 `~/.ssh/config` 的别名，或带 SSH 端口，CLI 无法用它访问 API。第 4 步对每个 SSH remote 运行，不需要用户设置：`CodeHostResolver` 用 `ssh -G -- <host>`（`SSHHostName`，只打印配置、不建连接）读出 `HostName`，再在两种 kind 已登录的 host 和公共 host 中找名字（去掉端口）等于它的那一个。例：`git@github-work:org/repo`（`HostName github.com`）→ GitHub、`github.com`；`ssh://git@192.168.2.158:2222/g/r` → GitLab、`glab` 已登录的 `192.168.2.158:8929`。没有唯一匹配时无 Code Host。HTTPS remote 的端口就是 API 端口，不运行 `ssh -G`。SSH host 名与 API host 不同（`ssh.gitlab.example.com` 对 `gitlab.example.com`）时需要 alias。
 
-`ProjectCodeHostChoiceClient` 在取数时给出单元的选择：
+各 CLI 登录过的 host 每个 kind 只问一次，`ssh -G` 结果每个 SSH host 只问一次，都缓存；Settings 的 Re-check 清除两者（`CodeHostClient.invalidateResolution`），所以 `auth login` 或 `~/.ssh/config` 的变更在 Re-check 后生效。
 
-- git Project 的单元以 Project ID 为键，用该 Project 自己的设置。
-- Workspace 的单元以派生 ID 为键，用单元仓库所对应的已注册 Project（本地、非 Workspace、规范化 `gitRoot` 相同）的设置；没有对应 Project 时为 Auto。
+`CodeHostAliasesClient` 在取数时给出当前的 alias 列表。
 
 因为每个单元各自解析 Code Host，一个 Workspace 可以同时有 GitHub 成员和 GitLab 成员（ADR 0004 item 16）。每个成员只显示自己 Code Host 的 Pull Request；不同成员上同名的分支不会混淆，因为单元的缓存、取消、排队和写操作都按单元的仓库隔离。
 
-选择变更时 `CodansApp` 发送 `refreshAllRequested`，所以下一次取数立即使用新选择。解析出的仓库与单元缓存的仓库不同时，effect 在读取前发送 `codeHostRepositoryChanged`，reducer 丢弃旧批次和各行的旧 Pull Request；即使新仓库的读取失败，也不会留下旧 Code Host 的徽标和写操作目标。"Open Project on Code Host" 命令走同一个解析顺序。
+alias 列表变更时 `CodansApp` 发送 `refreshAllRequested`，所以每个单元（包括轮询跳过的无 Code Host 单元）立即用新列表重新解析。解析出的仓库与单元缓存的仓库不同时，effect 在读取前发送 `codeHostRepositoryChanged`，reducer 丢弃旧批次和各行的旧 Pull Request；即使新仓库的读取失败，也不会留下旧 Code Host 的徽标和写操作目标。"Open Project on Code Host" 命令走同一个解析顺序。
 
 ### Settings
 
-- 全局 "Code Hosts" 面板（`CodeHostsSettingsView`）：`gh` 和 `glab` 各一块，显示可用性（已连接的 host 和用户，或可操作的原因）、Re-check 和文档链接；下面是所有 Code Host 共用的默认值：默认 merge 策略和 merge 后的 Worktree 动作。GitLab 上项目的 merge method 生效，`rebase` 策略按 Merge 处理（ADR 0004 item 6）。面板文字说明 Code Host 与 "Hosts" 面板（运行 Project 的机器，ADR 0003）不同。
-- Project 设置的 "Code Host" 区：Code Host 选择（Auto / GitHub / GitLab）以及 merge 策略、merge 后动作的 Project 覆盖。只对 git Project 显示；Workspace 成员使用其 Project 的选择。
+- 全局 "Code Hosts" 面板（`CodeHostsSettingsView`）：`gh` 和 `glab` 各一块，显示可用性（已连接的 host 和用户，或可操作的原因）、Re-check 和文档链接；然后是 "Code Host aliases" 列表：每行一个 alias（remote host → kind、API host），可添加、编辑、删除，remote host 在列表中唯一（`GeneralSettings.saveCodeHostAlias`）。每行显示该 kind 的 CLI 是否登录了 API host；未登录时显示与徽标位置相同的 `auth login` 消息。下面是所有 Code Host 共用的默认值：默认 merge 策略和 merge 后的 Worktree 动作。GitLab 上项目的 merge method 生效，`rebase` 策略按 Merge 处理（ADR 0004 item 6）。面板文字说明 Code Host 与 "Hosts" 面板（运行 Project 的机器，ADR 0003）不同。
+- Project 设置的 "Code Host" 区：merge 策略和 merge 后动作的 Project 覆盖。只对 git Project 显示。Project 没有 Code Host 选择（ADR 0005 item 2）；含 `projects[pid].git.codeHost` 的旧设置文件可以加载，该键被忽略且不再写回。
 
 ### 执行流
 
@@ -107,9 +107,9 @@ SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 
  4. effect 读 remote:  gitService.remoteInfo(gitRoot) → RemoteInfo(host, path)
     （纯 git-local 操作，不属于 CodeHostClient。失败 → .remoteInfoUnavailable）
 
- 5. effect 读 Project 选择:  codeHostChoice.choice(unit, gitRoot) → CodeHostKind?
+ 5. effect 读 alias:  codeHostAliases.aliases() → [CodeHostAlias]
 
- 6. effect 解析:  codeHost.resolveRepository(remote, choice) → CodeHostRepository?
+ 6. effect 解析:  codeHost.resolveRepository(remote, aliases) → CodeHostRepository?
     nil → .codeHostUnresolved(unit)：清掉该单元的快照和错误，不取数。
 
  7. effect 取数:  codeHost.batchPullRequests(repository, branches)
@@ -156,7 +156,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
 | pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
 | 远端跟踪 ref 变更 | `RemoteRefsWatcher`（FSEvents 监听公共 git 目录下的 `refs/remotes/` 与 `packed-refs`） | 2 s 后刷新该取数单元，并在 3 min 内按 hot 档轮询。覆盖任意进程的 `git push` / `gh pr create` / `git fetch`，包括前台作业检测看不到的 agent |
-| Project 的 Code Host 选择变更 | `SettingsStore` 观察（`CodansApp.observeCodeHostChoices`） | 所有取数单元排队刷新；无 Code Host 的单元（轮询跳过）立即重新解析 |
+| Code Host alias 列表变更 | `SettingsStore` 观察（`CodansApp.observeCodeHostAliases`） | 所有取数单元排队刷新；无 Code Host 的单元（轮询跳过）立即重新解析 |
 | App 变为活跃 | `NSApp.didBecomeActiveNotification` | reconcile 后，所有超过 30 s（`focusRefreshDebounce`）未取数的单元排队补刷，选中 Project 优先 |
 | liveness 轮询 | 前台 timer，gated on `NSApp.isActive` × 所有取数单元 | 按单元分档节奏强制刷新（见下表）；app resign active 即刻取消，故后台 app 零轮询 |
 

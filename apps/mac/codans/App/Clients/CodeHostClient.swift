@@ -10,13 +10,16 @@ import Foundation
 /// `@Sendable` — safe to call from any reducer effect.
 nonisolated struct CodeHostClient: Sendable {
   var availability: @Sendable (_ kind: CodeHostKind) async -> CodeHostAvailability
-  /// The Code Host repository behind a remote, or `nil` when no Code Host serves its host
-  /// (`github.com` or a host `gh` is logged in to → GitHub; `gitlab.com` or a host `glab`
-  /// is logged in to → GitLab; then `choice`, the Project's Code Host setting, `nil` for
-  /// Auto; otherwise none).
-  var resolveRepository: @Sendable (_ remote: RemoteInfo, _ choice: CodeHostKind?) async -> CodeHostRepository?
-  /// Drops cached resolver input (the hosts each CLI is logged in to), so the next
-  /// resolution sees a fresh `auth login`.
+  /// The Code Host repository behind a remote, or `nil` when no Code Host serves its host.
+  /// Order: an alias from `aliases`; `github.com` or a host `gh` is logged in to → GitHub;
+  /// `gitlab.com` or a host `glab` is logged in to → GitLab; for an SSH remote, its
+  /// `ssh -G` HostName matched to one of those hosts; otherwise none (ADR 0005).
+  var resolveRepository: @Sendable (_ remote: RemoteInfo, _ aliases: [CodeHostAlias]) async -> CodeHostRepository?
+  /// Hosts the CLI of `kind` is logged in to. The Code Hosts pane uses it for the status
+  /// of each alias.
+  var authenticatedHosts: @Sendable (_ kind: CodeHostKind) async -> Set<String>
+  /// Drops cached resolver input (the hosts each CLI is logged in to and the `ssh -G`
+  /// results), so the next resolution sees a fresh `auth login` or `~/.ssh/config`.
   var invalidateResolution: @Sendable () async -> Void
   /// Batched Pull Request lookup for one repository, keyed by source branch name.
   var batchPullRequests:
@@ -32,7 +35,8 @@ nonisolated struct CodeHostClient: Sendable {
 extension CodeHostClient {
   /// Constructs a client that dispatches each call to the implementation of its kind.
   static func live(
-    github: any CodeHost = GitHubCodeHost(), gitlab: any CodeHost = GitLabCodeHost()
+    github: any CodeHost = GitHubCodeHost(), gitlab: any CodeHost = GitLabCodeHost(),
+    sshHostName: @escaping CodeHostResolver.SSHHostNameProvider = { await SSHHostName().resolve($0) }
   ) -> CodeHostClient {
     let implementation: @Sendable (CodeHostKind) -> any CodeHost = { kind in
       switch kind {
@@ -40,13 +44,13 @@ extension CodeHostClient {
       case .gitlab: return gitlab
       }
     }
-    let sshHostName = SSHHostName()
     let resolver = CodeHostResolver(
       hostsProvider: { kind in await implementation(kind).authenticatedHosts() },
-      sshHostName: { host in await sshHostName.resolve(host) })
+      sshHostName: sshHostName)
     return CodeHostClient(
       availability: { kind in await implementation(kind).availability() },
-      resolveRepository: { remote, choice in await resolver.resolve(remote, choice: choice) },
+      resolveRepository: { remote, aliases in await resolver.resolve(remote, aliases: aliases) },
+      authenticatedHosts: { kind in await implementation(kind).authenticatedHosts() },
       invalidateResolution: { await resolver.invalidate() },
       batchPullRequests: { repository, branches in
         try await implementation(repository.kind).batchPullRequests(repository: repository, branches: branches)
@@ -76,6 +80,7 @@ extension CodeHostClient: DependencyKey {
     // (CodeHostFeature.onAppear).
     availability: { _ in .unknown },
     resolveRepository: unimplemented("CodeHostClient.resolveRepository", placeholder: nil),
+    authenticatedHosts: { _ in [] },
     invalidateResolution: {},
     batchPullRequests: unimplemented("CodeHostClient.batchPullRequests", placeholder: [:]),
     merge: unimplemented("CodeHostClient.merge"),

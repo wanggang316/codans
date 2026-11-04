@@ -21,9 +21,16 @@ and the project does not yet follow semantic versioning — every release until
   whether `gh` and `glab` are installed and logged in, with the host and
   user, Re-check, and a docs link for each, and the merge defaults that
   apply to both.
-- **Project Code Host setting.** Set a Project to Auto, GitHub, or GitLab
-  in its settings. Use it for a remote host that neither `gh` nor `glab`
-  knows, such as an SSH alias. Auto with no match shows no badge.
+- **Code Host aliases.** Settings › Code Hosts has a list of aliases: a
+  remote host as it appears in the `origin` URL, GitHub or GitLab, and the
+  API host the CLI is logged in to. Use one for a remote host that neither
+  `gh` nor `glab` knows, such as an SSH host name that is not the API host.
+  Each alias shows whether its API host is logged in. With no match there
+  is no badge.
+- **SSH aliases and SSH ports work with no setting.** For an SSH remote,
+  codans reads the host name from `ssh -G` and uses the one logged-in host
+  with that name, so `git@github-work:…` and `ssh://git@host:2222/…` show
+  their badges.
 - **Mixed Workspaces.** A Workspace with GitHub and GitLab members shows
   the PRs and MRs of each member from its own Code Host.
 - **CLI problems show at the badge.** When `gh` or `glab` is missing, not

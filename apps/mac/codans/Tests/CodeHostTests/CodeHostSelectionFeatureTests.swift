@@ -5,27 +5,27 @@ import Testing
 
 @testable import Codans
 
-/// The reducer selects the Code Host implementation per fetch unit (ADR 0004 items 2, 13,
-/// 16). These tests run the real `CodeHostClient.live` dispatch and resolver over one
+/// The reducer selects the Code Host implementation per fetch unit (ADR 0004 items 13, 16;
+/// ADR 0005). These tests run the real `CodeHostClient.live` dispatch and resolver over one
 /// fake implementation per kind, so they observe which implementation answered.
 @MainActor
 struct CodeHostSelectionFeatureTests {
-  /// A Project set to GitLab whose `origin` is an SSH alias neither CLI knows gets its
-  /// Merge Requests from the GitLab implementation.
+  /// A Code Host alias for a host neither CLI knows: the unit gets its Merge Requests from
+  /// the GitLab implementation at the alias's API host.
   @Test
-  func aProjectChoiceSelectsTheImplementationForAHostNeitherCLIKnows() async {
+  func anAliasSelectsTheImplementationForAHostNeitherCLIKnows() async {
     let unit = Self.unit(root: "/repos/app", branch: "feat-open")
     let github = FakeCodeHost(kind: .github, hosts: ["github.com"])
     let gitlab = FakeCodeHost(kind: .gitlab, hosts: ["192.168.2.158:8929"])
     let store = Self.makeStore(
       github: github, gitlab: gitlab,
       remotes: ["/repos/app": RemoteInfo(host: "gl", path: "codans-e2e/app")],
-      choices: [unit.projectID: .gitlab])
+      aliases: LockIsolated([Self.glAlias]))
 
     await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
     await store.receive(\.projectBatchLoaded)
 
-    let repository = CodeHostRepository(kind: .gitlab, host: "gl", path: "codans-e2e/app")
+    let repository = CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app")
     #expect(store.state.snapshotsByProject[unit.projectID]?.repository == repository)
     #expect(store.state.snapshots[unit.pairs[0].worktreeID] == FakeCodeHost.snapshot(kind: .gitlab, branch: "feat-open"))
     #expect(gitlab.requests.value == [repository])
@@ -33,7 +33,7 @@ struct CodeHostSelectionFeatureTests {
     #expect(store.state.unitsWithoutCodeHost.isEmpty)
   }
 
-  /// Auto and a host neither CLI knows: no fetch, no badge, no error.
+  /// No alias and a host neither CLI knows: no fetch, no badge, no error.
   @Test
   func autoWithNoMatchStartsNoFetch() async {
     let unit = Self.unit(root: "/repos/app", branch: "feat-open")
@@ -41,8 +41,7 @@ struct CodeHostSelectionFeatureTests {
     let gitlab = FakeCodeHost(kind: .gitlab, hosts: ["192.168.2.158:8929"])
     let store = Self.makeStore(
       github: github, gitlab: gitlab,
-      remotes: ["/repos/app": RemoteInfo(host: "gl", path: "codans-e2e/app")],
-      choices: [:])
+      remotes: ["/repos/app": RemoteInfo(host: "gl", path: "codans-e2e/app")])
 
     await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
     await store.receive(.codeHostUnresolved(unit.projectID, worktreeBranches: unit.pairs))
@@ -73,8 +72,7 @@ struct CodeHostSelectionFeatureTests {
       remotes: [
         "/repos/gh": RemoteInfo(host: "github.com", path: "wanggang316/codans"),
         "/repos/gl": RemoteInfo(host: "192.168.2.158:8929", path: "codans-e2e/nested/deep-app"),
-      ],
-      choices: [:])
+      ])
 
     for unit in [githubUnit, gitlabUnit] {
       await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
@@ -95,7 +93,7 @@ struct CodeHostSelectionFeatureTests {
     #expect(store.state.repository(for: gitlabUnit.pairs[0].worktreeID)?.kind == .gitlab)
   }
 
-  /// A changed Code Host choice resolves the unit to another repository. When the new
+  /// A changed alias resolves the unit to another repository. When the new
   /// read fails with a non-CLI error, the rows must not keep the old Code Host's Pull
   /// Request: its badge would stay, and write actions would target the old repository.
   @Test
@@ -114,13 +112,14 @@ struct CodeHostSelectionFeatureTests {
       initialState: seed,
       github: FakeCodeHost(kind: .github, hosts: ["github.com"]), gitlab: gitlab,
       remotes: ["/repos/app": RemoteInfo(host: "gl", path: "codans-e2e/app")],
-      choices: [unit.projectID: .gitlab])
+      aliases: LockIsolated([Self.glAlias]))
 
     await store.send(.projectRefreshRequested(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
     await store.receive(\.codeHostRepositoryChanged)
     await store.receive(\.projectBatchLoaded)
 
-    #expect(gitlab.requests.value == [CodeHostRepository(kind: .gitlab, host: "gl", path: "codans-e2e/app")])
+    #expect(
+      gitlab.requests.value == [CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app")])
     #expect(store.state.snapshots[worktreeID] == nil)
     #expect(store.state.snapshotsByProject[unit.projectID] == nil)
     #expect(store.state.pullRequestReference(for: worktreeID) == nil)
@@ -142,8 +141,7 @@ struct CodeHostSelectionFeatureTests {
       initialState: seed,
       github: FakeCodeHost(kind: .github, hosts: ["github.com"]),
       gitlab: FakeCodeHost(kind: .gitlab, hosts: ["192.168.2.158:8929"], failure: .timeout),
-      remotes: ["/repos/app": RemoteInfo(host: "192.168.2.158:8929", path: "codans-e2e/app")],
-      choices: [:])
+      remotes: ["/repos/app": RemoteInfo(host: "192.168.2.158:8929", path: "codans-e2e/app")])
 
     await store.send(.projectRefreshRequested(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
     await store.receive(\.projectBatchLoaded)
@@ -152,7 +150,70 @@ struct CodeHostSelectionFeatureTests {
     #expect(store.state.snapshotsByProject[unit.projectID]?.repository == repository)
   }
 
+  /// A unit with no Code Host is skipped by the poll. A change to the alias list sends
+  /// `refreshAllRequested` (`CodansApp.observeCodeHostAliases`), and the unit resolves
+  /// again at once with the new alias.
+  @Test
+  func anAliasListChangeReResolvesAUnitThatHadNoCodeHost() async {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-open")
+    let gitlab = FakeCodeHost(kind: .gitlab, hosts: [])
+    let aliases = LockIsolated<[CodeHostAlias]>([])
+    let store = Self.makeStore(
+      github: FakeCodeHost(kind: .github, hosts: ["github.com"]), gitlab: gitlab,
+      remotes: ["/repos/app": RemoteInfo(host: "127.0.0.1:2224", path: "codans-e2e/app", isSSH: true)],
+      aliases: aliases)
+
+    await store.send(.pollUnitsChanged([unit], selected: [unit.projectID]))
+    await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(.codeHostUnresolved(unit.projectID, worktreeBranches: unit.pairs))
+    #expect(store.state.unitsWithoutCodeHost == [unit.projectID])
+    #expect(gitlab.requests.value.isEmpty)
+
+    aliases.setValue([CodeHostAlias(remoteHost: "127.0.0.1", kind: .gitlab, apiHost: "192.168.2.158:8929")])
+    await store.send(.refreshAllRequested)
+    await store.receive(\.projectBatchLoaded)
+
+    let repository = CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app")
+    #expect(gitlab.requests.value == [repository])
+    #expect(store.state.unitsWithoutCodeHost.isEmpty)
+    #expect(
+      store.state.snapshots[unit.pairs[0].worktreeID] == FakeCodeHost.snapshot(kind: .gitlab, branch: "feat-open"))
+  }
+
+  /// An alias to a GitHub API host that `gh` is not logged in to still resolves; the
+  /// real `gh` read then fails with its login prompt, and each row shows the login
+  /// message for that host at its badge position (ADR 0005 item 4).
+  @Test
+  func anAliasToANotLoggedInGitHubHostShowsTheLoginMessageAtEachRow() async {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-open")
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(
+        code: 4, stdout: Data(),
+        stderr: Data("To get started with GitHub CLI, please run:  gh auth login\n".utf8),
+        stdoutOverflow: false)
+    ])
+    let github = GitHubCodeHost(
+      runner: runner, resolver: CLIExecutableResolver(prober: { URL(fileURLWithPath: "/opt/homebrew/bin/gh") }))
+    let store = Self.makeStore(
+      github: github, gitlab: FakeCodeHost(kind: .gitlab, hosts: []),
+      remotes: ["/repos/app": RemoteInfo(host: "ssh.ghe.example.com", path: "platform/app", isSSH: true)],
+      aliases: LockIsolated([
+        CodeHostAlias(remoteHost: "ssh.ghe.example.com", kind: .github, apiHost: "ghe.example.com")
+      ]))
+
+    await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+
+    let error = CodeHostError.notAuthenticated(.github, host: "ghe.example.com")
+    #expect(store.state.lastError[unit.pairs[0].worktreeID] == error)
+    #expect(store.state.lastErrorByProject[unit.projectID] == error)
+    #expect(error.userFacingMessage.contains("gh auth login"))
+  }
+
   // MARK: - Fixtures
+
+  nonisolated private static let glAlias = CodeHostAlias(
+    remoteHost: "gl", kind: .gitlab, apiHost: "192.168.2.158:8929")
 
   private static let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -164,15 +225,16 @@ struct CodeHostSelectionFeatureTests {
 
   private static func makeStore(
     initialState: CodeHostFeature.State = .init(),
-    github: FakeCodeHost, gitlab: FakeCodeHost, remotes: [String: RemoteInfo], choices: [ProjectID: CodeHostKind]
+    github: any CodeHost, gitlab: any CodeHost, remotes: [String: RemoteInfo],
+    aliases: LockIsolated<[CodeHostAlias]> = LockIsolated([])
   ) -> TestStoreOf<CodeHostFeature> {
     let store = TestStore(initialState: initialState) {
       CodeHostFeature()
     } withDependencies: {
       $0.date = .constant(fixedDate)
       $0.continuousClock = ImmediateClock()
-      $0[CodeHostClient.self] = .live(github: github, gitlab: gitlab)
-      $0[ProjectCodeHostChoiceClient.self] = ProjectCodeHostChoiceClient { unitID, _ in choices[unitID] }
+      $0[CodeHostClient.self] = .live(github: github, gitlab: gitlab, sshHostName: { $0 })
+      $0[CodeHostAliasesClient.self] = CodeHostAliasesClient { aliases.value }
       var git = GitServiceClient.testValue
       git.remoteInfo = { root in
         guard let remote = remotes[root.path] else { throw CodeHostError.remoteInfoUnavailable }

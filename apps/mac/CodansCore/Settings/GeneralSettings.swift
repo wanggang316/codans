@@ -67,6 +67,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// per-Project override is set. `nil` means "no global default" — merging a PR presents
   /// the ask-each-time sheet.
   public var postMergeAction: MergedWorktreeAction?
+  /// Code Host aliases from Settings › Code Hosts (ADR 0005). The resolver checks them
+  /// before any other step. Edit through `saveCodeHostAlias` / `removeCodeHostAlias` so the
+  /// remote host stays unique. Omitted from the file when empty.
+  public var codeHostAliases: [CodeHostAlias]
 
   /// Sparkle release channel. Default `stable`. Drives `SPUUpdaterDelegate.allowedChannels(for:)`.
   /// The background-check cadence is a separate knob (`updateCheckInterval`) so flipping the
@@ -139,6 +143,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     defaultGitViewerID: EditorID? = nil,
     defaultMergeStrategy: MergeStrategy? = nil,
     postMergeAction: MergedWorktreeAction? = nil,
+    codeHostAliases: [CodeHostAlias] = [],
     updateChannel: UpdateChannel = .stable,
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
@@ -157,6 +162,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.defaultGitViewerID = defaultGitViewerID ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = defaultMergeStrategy
     self.postMergeAction = postMergeAction
+    self.codeHostAliases = codeHostAliases
     self.updateChannel = updateChannel
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
@@ -176,6 +182,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   // Internal and `CaseIterable` so tests can check that `encode(to:)` writes every live key.
   enum CodingKeys: String, CodingKey, CaseIterable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
+    case codeHostAliases
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case quitConfirmation, quitAction
@@ -213,6 +220,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = try container.decodeIfPresent(MergeStrategy.self, forKey: .defaultMergeStrategy)
     self.postMergeAction = try container.decodeIfPresent(MergedWorktreeAction.self, forKey: .postMergeAction)
+    // An entry that does not decode (for example a kind from a later version) is dropped,
+    // so the other aliases and the rest of the file still load.
+    self.codeHostAliases =
+      (try container.decodeIfPresent([LossyCodeHostAlias].self, forKey: .codeHostAliases) ?? [])
+      .compactMap(\.alias)
     self.updateChannel =
       try container.decodeIfPresent(UpdateChannel.self, forKey: .updateChannel) ?? .stable
     // Tolerate legacy files (key absent) and hand-edited invalid values: in either case we
@@ -297,6 +309,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encodeIfPresent(defaultGitViewerID, forKey: .defaultGitViewerID)
     try container.encodeIfPresent(defaultMergeStrategy, forKey: .defaultMergeStrategy)
     try container.encodeIfPresent(postMergeAction, forKey: .postMergeAction)
+    if !codeHostAliases.isEmpty {
+      try container.encode(codeHostAliases, forKey: .codeHostAliases)
+    }
     try container.encode(updateChannel, forKey: .updateChannel)
     try container.encode(updateCheckInterval, forKey: .updateCheckInterval)
     try container.encode(
@@ -315,5 +330,13 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     if !globalScripts.isEmpty {
       try container.encode(globalScripts, forKey: .globalScripts)
     }
+  }
+}
+
+private nonisolated struct LossyCodeHostAlias: Decodable {
+  let alias: CodeHostAlias?
+
+  init(from decoder: Decoder) throws {
+    alias = try? CodeHostAlias(from: decoder)
   }
 }

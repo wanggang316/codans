@@ -513,9 +513,9 @@ final class AppState {
   /// Mirrors `notificationStore.unreadCount` onto the macOS Dock tile badge
   /// via `withObservationTracking` re-registration.
   @ObservationIgnored private var dockBadgerTask: Task<Void, Never>?
-  /// Refetches Pull Requests when a Project "Code Host" choice changes, so a unit with no
-  /// Code Host (which the poll skips) resolves again at once.
-  @ObservationIgnored private var codeHostChoiceTask: Task<Void, Never>?
+  /// Refetches Pull Requests when the Code Host aliases change, so a unit with no Code
+  /// Host (which the poll skips) resolves again at once.
+  @ObservationIgnored private var codeHostAliasesTask: Task<Void, Never>?
   /// Re-marks unread entries as read whenever the user focuses the
   /// pane they belong to. Observes catalog focus state via Observation
   /// re-registration; held so shutdown can cancel cleanly.
@@ -921,7 +921,7 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.settingsWindowPresenter = presenter
-      $0[ProjectCodeHostChoiceClient.self] = .live(hierarchy: hierarchy, settings: settings)
+      $0[CodeHostAliasesClient.self] = .live(settings: settings)
       // Project Management: reconciler captures the live HierarchyClient so
       // `.reconcileDiscoveredWorktrees` flows through the real manager
       // binding. Default `now` is `Date.init`; tests override with a
@@ -944,8 +944,8 @@ final class AppState {
       $0.uuid = .init { UUID() }
     }
     profiler.mark("store")
-    self.codeHostChoiceTask = Task { @MainActor [weak self, settings] in
-      await Self.observeCodeHostChoices(settings: settings) {
+    self.codeHostAliasesTask = Task { @MainActor [weak self, settings] in
+      await Self.observeCodeHostAliases(settings: settings) {
         self?.store?.send(.codeHost(.refreshAllRequested))
       }
     }
@@ -1946,7 +1946,7 @@ final class AppState {
     // final flush by mutating store state mid-write.
     notificationDetectorTask?.cancel()
     dockBadgerTask?.cancel()
-    codeHostChoiceTask?.cancel()
+    codeHostAliasesTask?.cancel()
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
     agentStateFocusTask?.cancel()
@@ -2013,20 +2013,18 @@ final class AppState {
   /// reads the current focused pane id and re-arms a tracker that fires
   /// on any catalog mutation that could change that id (selectedProjectID
   /// / selectedWorktreeID / selectedTabID / lastFocusedPane).
-  /// Calls `changed` each time the set of Project "Code Host" choices changes. Other
-  /// settings writes do not call it.
+  /// Calls `changed` each time the Code Host aliases change. Other settings writes do
+  /// not call it.
   @MainActor
-  private static func observeCodeHostChoices(
+  private static func observeCodeHostAliases(
     settings: SettingsStore, changed: @escaping @MainActor () -> Void
   ) async {
-    func choices() -> [ProjectID: CodeHostKind] {
-      settings.settings.projects.compactMapValues { $0.git?.codeHost }
-    }
-    var last = choices()
+    func aliases() -> [CodeHostAlias] { settings.settings.general.codeHostAliases }
+    var last = aliases()
     while !Task.isCancelled {
       let stream = AsyncStream<Void> { continuation in
         withObservationTracking {
-          _ = settings.settings.projects
+          _ = settings.settings.general
         } onChange: {
           Task { @MainActor [continuation] in
             continuation.yield(())
@@ -2036,7 +2034,7 @@ final class AppState {
       for await _ in stream {
         break
       }
-      let next = choices()
+      let next = aliases()
       if next != last {
         last = next
         changed()

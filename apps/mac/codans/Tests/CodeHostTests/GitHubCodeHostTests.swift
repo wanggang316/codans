@@ -190,6 +190,36 @@ struct GitHubCodeHostTests {
     #expect(env["EDITOR"] == nil)
   }
 
+  // MARK: - Not logged in to the repository's host
+
+  /// `gh` output when it has no token for the host: exit 4 and the login prompt
+  /// (no config), or HTTP 401 from a host it is not logged in to. Both must be a login
+  /// error that names the repository's host, so the row shows the actionable message
+  /// (ADR 0005 item 4: an alias whose API host is not logged in).
+  @Test(arguments: [
+    (Int32(4), "To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n"),
+    (Int32(1), "gh: Requires authentication (HTTP 401)\n"),
+    (Int32(1), "HTTP 401: Bad credentials (https://ghe.example.com/api/graphql)\n"),
+  ])
+  func aBatchReadWithoutALoginForTheHostIsALoginError(code: Int32, stderr: String) async {
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: code, stdout: Data(), stderr: Data(stderr.utf8), stdoutOverflow: false)
+    ])
+    let service = Self.makeService(runner: runner)
+    let repository = CodeHostRepository(kind: .github, host: "ghe.example.com", path: "platform/app")
+    await #expect(throws: CodeHostError.notAuthenticated(.github, host: "ghe.example.com")) {
+      _ = try await service.batchPullRequests(repository: repository, branches: ["feat"])
+    }
+  }
+
+  /// "to get started" must not read as the host "get".
+  @Test
+  func theLoginPromptGivesNoHostHint() {
+    #expect(
+      GitHubCodeHost.translateError(stderr: "To get started with GitHub CLI, please run:  gh auth login")
+        == .notAuthenticated(.github, host: nil))
+  }
+
   // MARK: - Helpers
 
   private static let repository = CodeHostRepository(

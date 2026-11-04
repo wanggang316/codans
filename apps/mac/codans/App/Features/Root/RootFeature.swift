@@ -533,7 +533,7 @@ struct RootFeature {
   @Dependency(PullRequestSnapshotCacheClient.self) private var pullRequestSnapshotCache
   @Dependency(CodeHostClient.self) private var codeHost
   @Dependency(GitServiceClient.self) private var gitServiceClient
-  @Dependency(ProjectCodeHostChoiceClient.self) private var codeHostChoice
+  @Dependency(CodeHostAliasesClient.self) private var codeHostAliases
 
   /// Child-feature scopes. Split from `body` so Swift's type inference budget stays under
   /// the single-expression limit — each additional top-level `Scope` in `body` adds to the
@@ -3283,10 +3283,9 @@ struct RootFeature {
       return .send(.codeHost(.delegate(.openURL(url))))
     }
     let gitRoot = unit.gitRoot
-    let unitID = unit.projectID
-    return .run { [gitService = gitServiceClient, codeHost, codeHostChoice] send in
+    return .run { [gitService = gitServiceClient, codeHost, codeHostAliases] send in
       guard let remote = try? await gitService.remoteInfo(gitRoot),
-        let repository = await codeHost.resolveRepository(remote, await codeHostChoice.choice(unitID, gitRoot)),
+        let repository = await codeHost.resolveRepository(remote, await codeHostAliases.aliases()),
         let url = codeHost.repositoryWebURL(repository)
       else { return }
       await send(.codeHost(.delegate(.openURL(url))))

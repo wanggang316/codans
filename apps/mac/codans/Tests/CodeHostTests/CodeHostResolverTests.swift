@@ -5,8 +5,9 @@ import Testing
 
 @testable import Codans
 
-/// The resolver gives each remote its Code Host: the public host of a kind, or a host
-/// that kind's CLI is logged in to; otherwise none (ADR 0004 item 2).
+/// The resolver gives each remote its Code Host: an alias, the public host of a kind or a
+/// host that kind's CLI is logged in to, the `ssh -G` HostName of an SSH remote; otherwise
+/// none (ADR 0005 item 3).
 struct CodeHostResolverTests {
   @Test
   func githubDotComResolvesToGitHubWithoutAskingTheCLI() async {
@@ -85,87 +86,135 @@ struct CodeHostResolverTests {
     #expect(calls.value == [.github: 2, .gitlab: 2])
   }
 
-  // MARK: - Project choice
+  // MARK: - Code Host aliases
 
-  /// An SSH alias (`Host gl` in `~/.ssh/config`) that neither CLI knows: the Project
-  /// choice gives the Code Host.
-  @Test(arguments: CodeHostKind.allCases)
-  func theProjectChoiceGivesTheCodeHostOfAHostNoCLIKnows(choice: CodeHostKind) async {
-    let resolver = CodeHostResolver { kind in kind == .github ? ["github.com"] : ["192.168.2.158:8929"] }
-    let repository = await resolver.resolve(RemoteInfo(host: "gl", path: "codans-e2e/app"), choice: choice)
-    #expect(repository == CodeHostRepository(kind: choice, host: "gl", path: "codans-e2e/app"))
-  }
-
-  /// The choice comes after the CLI steps (ADR 0004 item 2).
+  /// An alias is checked first, so the user can correct a host a CLI knows.
   @Test
-  func theCLIStepsWinOverTheProjectChoice() async {
-    let resolver = CodeHostResolver { kind in kind == .github ? [] : ["192.168.2.158:8929"] }
-    #expect(await resolver.resolve(RemoteInfo(host: "github.com", path: "w/r"), choice: .gitlab)?.kind == .github)
+  func anAliasWinsOverACLIHost() async {
+    let resolver = CodeHostResolver { kind in kind == .github ? ["code.example.com"] : ["gitlab.example.com"] }
+    let alias = CodeHostAlias(remoteHost: "code.example.com", kind: .gitlab, apiHost: "gitlab.example.com")
     #expect(
-      await resolver.resolve(RemoteInfo(host: "192.168.2.158:8929", path: "g/r"), choice: .github)?.kind == .gitlab)
+      await resolver.resolve(RemoteInfo(host: "Code.Example.com", path: "g/r"), aliases: [alias])
+        == CodeHostRepository(kind: .gitlab, host: "gitlab.example.com", path: "g/r"))
   }
 
+  /// The API host is not logged in: the alias still resolves, so the fetch fails with
+  /// the login message in the badge position.
   @Test
-  func autoWithNoMatchResolvesToNone() async {
+  func anAliasWithANotLoggedInAPIHostStillResolves() async {
+    let resolver = CodeHostResolver(
+      hostsProvider: { _ in [] },
+      sshHostName: { _ in
+        Issue.record("an alias must not need ssh")
+        return nil
+      })
+    let alias = CodeHostAlias(remoteHost: "ssh.gitlab.example.com", kind: .gitlab, apiHost: "gitlab.example.com")
+    #expect(
+      await resolver.resolve(
+        RemoteInfo(host: "ssh.gitlab.example.com", path: "g/r", isSSH: true), aliases: [alias])
+        == CodeHostRepository(kind: .gitlab, host: "gitlab.example.com", path: "g/r"))
+  }
+
+  /// `ssh://git@127.0.0.1:2224/…`: the port is the SSH port, so the alias `127.0.0.1`
+  /// matches. An HTTPS port is the API port, so there it does not.
+  @Test
+  func anAliasWithoutAPortMatchesAnSSHRemoteWithItsSSHPort() async {
     let resolver = CodeHostResolver { _ in [] }
-    #expect(await resolver.resolve(RemoteInfo(host: "gl", path: "codans-e2e/app"), choice: nil) == nil)
+    let alias = CodeHostAlias(remoteHost: "127.0.0.1", kind: .gitlab, apiHost: "192.168.2.158:8929")
+    #expect(
+      await resolver.resolve(
+        RemoteInfo(host: "127.0.0.1:2224", path: "codans-e2e/app", isSSH: true), aliases: [alias])
+        == CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app"))
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "127.0.0.1:2224", path: "codans-e2e/app"), aliases: [alias]) == nil)
   }
 
-  // MARK: - SSH alias under a Project choice
-
-  /// `git@github-work:org/repo` with `Host github-work → HostName github.com`: the choice
-  /// gives GitHub, and the repository is addressed at github.com, not at the alias.
   @Test
-  func anSSHAliasUnderAChoiceUsesTheLoggedInHostOfItsHostName() async {
+  func anAliasForAnotherHostDoesNotApply() async {
+    let resolver = CodeHostResolver { kind in kind == .github ? ["github.com"] : [] }
+    let alias = CodeHostAlias(remoteHost: "gl", kind: .gitlab, apiHost: "192.168.2.158:8929")
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "github.com", path: "w/r"), aliases: [alias])?.kind == .github)
+  }
+
+  // MARK: - ssh -G for every SSH remote
+
+  /// `git@github-work:org/repo` with `Host github-work → HostName github.com`: GitHub at
+  /// github.com, with no alias.
+  @Test
+  func anSSHConfigAliasResolvesUnderAutoToTheHostOfItsHostName() async {
     let resolver = CodeHostResolver(
       hostsProvider: { kind in kind == .github ? ["github.com"] : ["192.168.2.158:8929"] },
       sshHostName: { alias in ["github-work": "github.com", "gl": "192.168.2.158"][alias] })
     #expect(
-      await resolver.resolve(RemoteInfo(host: "github-work", path: "org/repo", isSSH: true), choice: .github)
+      await resolver.resolve(RemoteInfo(host: "github-work", path: "org/repo", isSSH: true))
         == CodeHostRepository(kind: .github, host: "github.com", path: "org/repo"))
     #expect(
-      await resolver.resolve(RemoteInfo(host: "gl", path: "codans-e2e/app", isSSH: true), choice: .gitlab)
+      await resolver.resolve(RemoteInfo(host: "gl", path: "codans-e2e/app", isSSH: true))
         == CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app"))
   }
 
   /// The SSH port of a self-managed instance is not its API port.
   @Test
-  func anSSHPortRemoteUnderAChoiceUsesTheLoggedInHostOfTheSameName() async {
+  func anSSHPortRemoteResolvesToTheGitLabHostWithItsAPIPort() async {
     let resolver = CodeHostResolver(
       hostsProvider: { kind in kind == .github ? ["github.com"] : ["192.168.2.158:8929"] },
       sshHostName: { $0 })
-    let remote = RemoteInfo(host: "192.168.2.158:2222", path: "codans-e2e/app", isSSH: true)
-    #expect(await resolver.resolve(remote) == nil)
     #expect(
-      await resolver.resolve(remote, choice: .gitlab)
+      await resolver.resolve(RemoteInfo(host: "192.168.2.158:2222", path: "codans-e2e/app", isSSH: true))
         == CodeHostRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/app"))
   }
 
-  /// No logged-in host or more than one with that host name: the remote host stays.
+  /// No logged-in host or more than one with that name: none.
   @Test
-  func anSSHAliasWithNoSingleMatchKeepsTheRemoteHost() async {
+  func anSSHHostWithNoSingleMatchResolvesToNone() async {
     let resolver = CodeHostResolver(
-      hostsProvider: { kind in kind == .gitlab ? ["code.example.com:8443", "code.example.com:9443"] : [] },
-      sshHostName: { _ in "code.example.com" })
-    #expect(
-      await resolver.resolve(RemoteInfo(host: "work", path: "g/r", isSSH: true), choice: .gitlab)
-        == CodeHostRepository(kind: .gitlab, host: "work", path: "g/r"))
-    #expect(
-      await resolver.resolve(RemoteInfo(host: "other", path: "g/r", isSSH: true), choice: .github)
-        == CodeHostRepository(kind: .github, host: "other", path: "g/r"))
+      hostsProvider: { kind in
+        kind == .gitlab ? ["code.example.com:8443", "code.example.com:9443"] : ["code.example.com"]
+      },
+      sshHostName: { alias in alias == "work" ? "code.example.com" : "nowhere.example.com" })
+    #expect(await resolver.resolve(RemoteInfo(host: "work", path: "g/r", isSSH: true)) == nil)
+    #expect(await resolver.resolve(RemoteInfo(host: "other", path: "g/r", isSSH: true)) == nil)
   }
 
-  /// An HTTPS port is the API port, so an HTTPS remote is never mapped.
+  /// A host both CLIs are logged in to counts once, as GitHub, like the CLI steps.
   @Test
-  func anHTTPSRemoteUnderAChoiceKeepsItsHost() async {
+  func anSSHHostNameKnownToBothCLIsIsOneMatch() async {
+    let resolver = CodeHostResolver(
+      hostsProvider: { _ in ["code.example.com"] },
+      sshHostName: { _ in "code.example.com" })
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "work", path: "g/r", isSSH: true))
+        == CodeHostRepository(kind: .github, host: "code.example.com", path: "g/r"))
+  }
+
+  /// An HTTPS port is the API port, so an HTTPS remote never runs `ssh -G`.
+  @Test
+  func anHTTPSRemoteDoesNotRunSSH() async {
     let resolver = CodeHostResolver(
       hostsProvider: { _ in ["192.168.2.158:8929"] },
       sshHostName: { _ in
         Issue.record("an HTTPS remote must not ask ssh")
         return nil
       })
-    #expect(
-      await resolver.resolve(RemoteInfo(host: "192.168.2.158:9000", path: "g/r"), choice: .gitlab)
-        == CodeHostRepository(kind: .gitlab, host: "192.168.2.158:9000", path: "g/r"))
+    #expect(await resolver.resolve(RemoteInfo(host: "192.168.2.158:9000", path: "g/r")) == nil)
+  }
+
+  @Test
+  func sshResultsAreCachedUntilInvalidated() async {
+    let calls = LockIsolated(0)
+    let resolver = CodeHostResolver(
+      hostsProvider: { _ in [] },
+      sshHostName: { host in
+        calls.withValue { $0 += 1 }
+        return host
+      })
+    let remote = RemoteInfo(host: "gl", path: "g/r", isSSH: true)
+    _ = await resolver.resolve(remote)
+    _ = await resolver.resolve(remote)
+    #expect(calls.value == 1)
+    await resolver.invalidate()
+    _ = await resolver.resolve(remote)
+    #expect(calls.value == 2)
   }
 }

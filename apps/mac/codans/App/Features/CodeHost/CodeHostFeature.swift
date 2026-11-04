@@ -367,8 +367,8 @@ struct CodeHostFeature {
   /// Reads `git remote get-url origin` for each fetch unit; the Code Host client resolves
   /// it to a Code Host repository.
   @Dependency(GitServiceClient.self) var gitServiceClient
-  /// The Project "Code Host" choice of each fetch unit, read when the fetch starts.
-  @Dependency(ProjectCodeHostChoiceClient.self) var codeHostChoice
+  /// The Code Host aliases from Settings, read when a fetch starts (ADR 0005).
+  @Dependency(CodeHostAliasesClient.self) var codeHostAliases
   /// Persists the project-batched PR cache across launches so the sidebar paints
   /// immediately instead of flashing empty → populated as fetches return.
   @Dependency(PullRequestSnapshotCacheClient.self) var pullRequestSnapshotCache
@@ -818,7 +818,7 @@ struct CodeHostFeature {
       "enqueueProjectFetch project=\(projectID.raw.uuidString, privacy: .public) pairs=\(pairs.count, privacy: .public)"
     )
     let cachedRepository = state.snapshotsByProject[projectID]?.repository
-    return .run { [codeHost, gitService = gitServiceClient, codeHostChoice] send in
+    return .run { [codeHost, gitService = gitServiceClient, codeHostAliases] send in
       let remote: RemoteInfo
       do {
         remote = try await gitService.remoteInfo(gitRoot)
@@ -831,8 +831,7 @@ struct CodeHostFeature {
             projectID, worktreeBranches: pairs, .failure(CodeHostError.remoteInfoUnavailable)))
         return
       }
-      let choice = await codeHostChoice.choice(projectID, gitRoot)
-      guard let repository = await codeHost.resolveRepository(remote, choice) else {
+      guard let repository = await codeHost.resolveRepository(remote, await codeHostAliases.aliases()) else {
         await send(.codeHostUnresolved(projectID, worktreeBranches: pairs))
         return
       }
