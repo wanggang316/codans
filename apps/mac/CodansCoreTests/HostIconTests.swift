@@ -44,12 +44,14 @@ struct HostIconTests {
 
   @Test
   func iconsAreOfferedInOrder() {
-    #expect(HostIcon.allCases.map(\.displayName) == [
-      "Globe", "Server", "Cloud", "MacBook", "Mac mini", "Mac Studio", "Desktop",
-    ])
-    #expect(HostIcon.allCases.map(\.systemImage) == [
-      "globe", "server.rack", "icloud", "laptopcomputer", "macmini", "macstudio", "desktopcomputer",
-    ])
+    #expect(
+      HostIcon.allCases.map(\.displayName) == [
+        "Globe", "Server", "Cloud", "MacBook", "Mac mini", "Mac Studio", "Desktop",
+      ])
+    #expect(
+      HostIcon.allCases.map(\.systemImage) == [
+        "globe", "server.rack", "icloud", "laptopcomputer", "macmini", "macstudio", "desktopcomputer",
+      ])
   }
 
   @Test(arguments: [

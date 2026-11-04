@@ -55,7 +55,8 @@ struct RemoteConnectionSheet: View {
           onAddressChanged: { store.send(.addressChanged($0)) },
           onUsernameChanged: { store.send(.usernameChanged($0)) },
           onPortChanged: { store.send(.portChanged($0)) },
-          onNameChanged: { store.send(.nameChanged($0)) }
+          onNameChanged: { store.send(.nameChanged($0)) },
+          onIconChanged: { store.send(.iconChanged($0)) }
         )
         .padding(.leading, 12)
       }

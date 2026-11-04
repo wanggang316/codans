@@ -46,6 +46,7 @@ struct HostsSettingsFeature {
     case usernameChanged(String)
     case portChanged(String)
     case nameChanged(String)
+    case iconChanged(HostIcon)
     case saveButtonTapped
     case cancelButtonTapped
   }
@@ -90,6 +91,8 @@ struct HostsSettingsFeature {
       state.editor?.draft.port = HostDraft.sanitizedPort(value)
     case .nameChanged(let value):
       state.editor?.draft.name = value
+    case .iconChanged(let icon):
+      state.editor?.draft.icon = icon
     case .cancelButtonTapped:
       state.editor = nil
     case .saveButtonTapped:
