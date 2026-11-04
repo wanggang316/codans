@@ -63,28 +63,25 @@ struct RootFeature {
     /// Router for window/app-level intents decoded from ghostty keybinds.
     var windowActionRouter: WindowActionRouterFeature.State = .init()
 
-    /// In-flight `wt sw` whose detail-pane WorktreeLoadingView should
-    /// take precedence over the resolved selection. Set when the user
-    /// triggers `beginPendingWorktreeCreation` (creation focus is
-    /// unconditional — the auto-switch setting only decides where focus
-    /// lands at completion); cleared when the resolved selection lands
-    /// on a real Worktree (success path, or the user clicking elsewhere
-    /// mid-creation) or when the user discards/cancels the row from the
-    /// sidebar (the pending entry leaves `sidebar.pendingWorktrees`, so
-    /// the resolver in `ContentView` falls back to the selection-based
-    /// render). `.failed` keeps the id around so the detail view can
-    /// surface the error until the user takes action.
+    /// The in-flight creation the user follows: its WorktreeLoadingView
+    /// takes precedence over the resolved selection, and its completion
+    /// lands on the new worktree. Set at kickoff only when the auto-switch
+    /// setting is ON, or when the user clicks the pending row. Cleared when
+    /// the user navigates away (a real Worktree lands, or another project
+    /// is selected), when the creation completes, or when the user
+    /// discards/cancels the row (the pending entry leaves
+    /// `sidebar.pendingWorktrees`, so the resolver in `ContentView` falls
+    /// back to the selection-based render). `.failed` keeps the id around
+    /// so the detail view can surface the error until the user takes
+    /// action.
     var activePendingWorktreeID: PendingWorktreeID?
 
-    /// The selection that was live when creation focus moved to the
-    /// pending worktree (`beginPendingWorktreeCreation`, which also NILs
-    /// the manager's worktree selection so the sidebar highlight moves
-    /// to the pending row). Restored when the followed creation ends
-    /// WITHOUT the new worktree taking focus: cancel, discard, or a
-    /// completion under auto-switch OFF (the setting's contract — OFF
-    /// means "when it's done, put me back where I was"). Cleared
-    /// whenever a real selection lands (the user navigated; bouncing
-    /// them back would be a yank).
+    /// The selection that was live when the user started following a
+    /// creation (`focusPendingCreation`, which also NILs the manager's
+    /// worktree selection so the sidebar highlight moves to the pending
+    /// row). Restored when the followed creation is abandoned (cancel or
+    /// discard), since nothing materializes to land on. Cleared whenever
+    /// the user navigates away (bouncing them back would be a yank).
     var pendingPriorSelection: HierarchySelection?
 
     /// New worktrees whose Create sheet picked an agent that is still being
@@ -977,13 +974,15 @@ struct RootFeature {
         // through this single site (sidebar click, keyboard nav, Back/Forward,
         // notification deep-link), so one guard here covers them all. Gate on
         // `isNew == true` so ordinary selections never issue a redundant write.
-        if let worktreeID = selection.worktreeID {
+        if leavesFollowedCreation(selection, state: state) {
+          // The user navigated away (or the completion landed them): stop
+          // following, and drop the restore point, since a later cancel or
+          // discard bouncing them BACK to the pre-create selection would be
+          // a yank.
           state.activePendingWorktreeID = nil
-          // A real landing also invalidates the pending-restore point: the
-          // user navigated (or the completion gate switched them); a later
-          // cancel/discard bouncing them BACK to the pre-create selection
-          // would be a yank.
           state.pendingPriorSelection = nil
+        }
+        if let worktreeID = selection.worktreeID {
           let snapshot = hierarchyClient.snapshot()
           let isBadged =
             snapshot.projects
@@ -1432,27 +1431,21 @@ struct RootFeature {
         state.tagManagerSheet = TagManagerFeature.State()
         return .none
 
-      // Pending-worktree focus: kicking off a creation ALWAYS moves focus
-      // to the creating worktree — the detail pane snaps to the
-      // WorktreeLoadingView (the child reducer appended the row first;
-      // marking it active makes `ContentView` resolve it ahead of the
-      // selection-based render), and the manager's worktree selection is
-      // NILed so the old row's native highlight retires and the pending
-      // row's manual highlight reads as the selection. The whole run
-      // stays async: the user can click any other row mid-creation and
-      // keep working (`selectionChanged` retires the overlay; the stream
-      // keeps feeding the background row).
-      //
-      // The auto-switch setting plays no part HERE — it decides where
-      // focus lands at COMPLETION (see `worktreeMaterialized`): ON keeps
-      // the user on the new worktree; OFF hands focus back to the
-      // pre-create selection stashed below and mints the "New" badge.
+      // Creation kickoff. The auto-switch setting decides whether the user
+      // follows the creation: ON moves focus to it (the detail pane shows
+      // the WorktreeLoadingView and the completion lands on the new
+      // worktree); OFF leaves the user exactly where they are and the
+      // creation runs in the background row. Either way the run stays
+      // async: the user can click any other row mid-creation (which stops
+      // following) or click the pending row (which starts following).
       case .sidebar(.beginPendingWorktreeCreation(let pending)):
         // The child reducer's pending-cap guard ran first (child-first
         // composition); a rejected creation never appended a row, and
         // moving focus to a row that doesn't exist would blank the
         // detail pane.
-        guard state.sidebar.pendingWorktrees[id: pending.id] != nil else { return .none }
+        guard state.sidebar.pendingWorktrees[id: pending.id] != nil,
+          settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
+        else { return .none }
         focusPendingCreation(pending, state: &state)
         return .none
 
@@ -1489,15 +1482,12 @@ struct RootFeature {
         restorePendingPriorSelection(&state)
         return .none
 
-      // Post-completion switch gate. The sidebar has already written the
+      // Post-completion landing. The sidebar has already written the
       // catalog and removed the pending row; it delegates the "switch to
-      // the new worktree" decision here. The setting is read LIVE at
-      // completion time so a mid-flight toggle decides the outcome.
-      //
-      // OFF means never auto-focus the new worktree — even when the user
-      // was still viewing the loading view. The setting is authoritative.
-      // OFF mints the "New" marker here (whether the user stayed on the
-      // loading view or navigated away); ON and failure never do.
+      // the new worktree" decision here. Only a user who still follows
+      // this creation lands on the new worktree; everyone else stays where
+      // they are and gets the "New" marker on the new row instead. The
+      // setting already decided at kickoff whether the user follows.
       //
       // A FAILED creation never reaches here (it routes through
       // `pendingWorktreeFailed`), so failure never switches and never
@@ -1514,28 +1504,15 @@ struct RootFeature {
               profileID: $0, prompt: agentPrompt, projectID: projectID, worktreeID: worktreeID,
               state: &state)
           } ?? .none
-        let autoSwitch =
-          settingsWriter.readSnapshotSync().worktree.autoSwitchToNewWorktree
-        let shouldSelect = autoSwitch
-        guard shouldSelect else {
+        guard isFollowing(pendingID, in: projectID, state: state) else {
           hierarchyClient.setWorktreeIsNew(worktreeID, true)
-          // OFF while the user is still following this creation: focus
-          // hands BACK to the pre-create selection (creation focus is
-          // unconditional at kickoff; the setting decides the landing).
-          // Without this the user would stay parked on a settled loading
-          // view with a nil selection. The badge above marks the new row
-          // for later. A user who navigated away mid-creation is left
-          // exactly where they are (active id no longer matches).
-          if state.activePendingWorktreeID == pendingID {
-            state.activePendingWorktreeID = nil
-            restorePendingPriorSelection(&state)
-          }
           return launch
         }
+        state.activePendingWorktreeID = nil
+        state.pendingPriorSelection = nil
         // Select the project too for cross-project correctness, then the
         // worktree. `selectWorktree` emits a `.selectionChanged` that runs
-        // `autoSeedTabAndPaneIfNeeded` (seeds the first tab/pane) and clears
-        // `activePendingWorktreeID`.
+        // `autoSeedTabAndPaneIfNeeded` (seeds the first tab/pane).
         hierarchyClient.selectProject(projectID)
         try? hierarchyClient.selectWorktree(worktreeID, projectID)
         return launch
@@ -2878,9 +2855,8 @@ struct RootFeature {
   /// while the first is live must not overwrite the last REAL selection
   /// with the intermediate nil), arm the loading overlay, and NIL the
   /// manager's worktree selection so the old row's native highlight
-  /// retires and the pending row's manual pill reads as the selection.
-  /// Shared by creation kickoff and by clicking a pending row to come
-  /// back to it after navigating away.
+  /// retires and the pending row reads as the selection. Shared by
+  /// creation kickoff under auto-switch ON and by clicking a pending row.
   private func focusPendingCreation(_ pending: PendingWorktree, state: inout State) {
     if state.pendingPriorSelection == nil {
       state.pendingPriorSelection = state.selection
@@ -2890,12 +2866,36 @@ struct RootFeature {
     try? hierarchyClient.selectWorktree(nil, pending.projectID)
   }
 
+  /// True when `selection` moves the user off the followed creation: a
+  /// real Worktree lands, or a different project is selected. The follow
+  /// move itself lands `(pending project, nil)`, and an empty selection
+  /// (no project shown) is not a navigation, so both keep following.
+  private func leavesFollowedCreation(_ selection: HierarchySelection, state: State) -> Bool {
+    guard let pendingID = state.activePendingWorktreeID else { return false }
+    if selection.worktreeID != nil { return true }
+    guard let projectID = selection.projectID else { return false }
+    return projectID != state.sidebar.pendingWorktrees[id: pendingID]?.projectID
+  }
+
+  /// True when the user still follows creation `pendingID` of `projectID`
+  /// at its completion. Reads the live catalog selection too: a click
+  /// elsewhere mutates the manager at once, but its `.selectionChanged`
+  /// can reach the reducer after the completion does.
+  private func isFollowing(
+    _ pendingID: PendingWorktreeID, in projectID: ProjectID, state: State
+  ) -> Bool {
+    guard state.activePendingWorktreeID == pendingID else { return false }
+    let catalog = hierarchyClient.snapshot()
+    guard catalog.displayedSelectedWorktreeID == nil else { return false }
+    let shownProjectID = catalog.displayedSelectedProjectID
+    return shownProjectID == nil || shownProjectID == projectID
+  }
+
   /// Puts the manager's selection back on the stashed pre-creation
   /// selection (see `pendingPriorSelection`) and clears the stash.
-  /// Consumed when a FOLLOWED creation ends without the new worktree
-  /// taking focus — cancel, discard, or completion under auto-switch
-  /// OFF — where the loading focus must hand back to wherever the user
-  /// was before clicking Create. The mutation emits `.selectionChanged`,
+  /// Consumed when a FOLLOWED creation is abandoned (cancel or discard),
+  /// where the loading focus must hand back to wherever the user was
+  /// before following it. The mutation emits `.selectionChanged`,
   /// which re-runs the normal landing side-effects (auto-seed, overlay
   /// clear).
   private func restorePendingPriorSelection(_ state: inout State) {
@@ -3223,8 +3223,9 @@ struct RootFeature {
     case .createWorktree(let pending):
       state.newAgent = nil
       // The sidebar's pending lifecycle runs it like a Create Worktree sheet
-      // submit: the user follows the creation, and the agent launches once
-      // the worktree exists (`worktreeMaterialized`).
+      // submit: the auto-switch setting decides whether the user follows
+      // the creation, and the agent launches once the worktree exists
+      // (`worktreeMaterialized`).
       return .send(.sidebar(.beginPendingWorktreeCreation(pending)))
     case .addProject(let kind):
       state.newAgent = nil

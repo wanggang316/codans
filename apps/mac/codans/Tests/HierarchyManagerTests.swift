@@ -33,6 +33,21 @@ struct HierarchyManagerTests {
     #expect(fakeRuntime.ensureSurfaceCalls.isEmpty)
   }
 
+  /// The pending-creation flow registers the worktree without selecting
+  /// it: `RootFeature` alone decides whether the user lands on it.
+  @Test
+  func createWorktreeWithoutSelectKeepsSelection() throws {
+    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
+    let current = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main")
+
+    let created = try manager.createWorktree(
+      in: projectID, name: "feat", path: "/repo-feat", branch: "feat", select: false)
+
+    #expect(manager.catalog.projects[0].worktrees.contains { $0.id == created })
+    #expect(manager.catalog.projects[0].selectedWorktreeID == current)
+  }
+
   @Test
   func removeNonExistentWorktreeThrows() throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")

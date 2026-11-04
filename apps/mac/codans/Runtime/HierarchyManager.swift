@@ -685,7 +685,8 @@ final class HierarchyManager {
     name: String,
     path: String,
     branch: String?,
-    reuseExisting: Bool = false
+    reuseExisting: Bool = false,
+    select: Bool = true
   ) throws -> WorktreeID {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else {
       throw HierarchyError.notFound("Project \(projectID)")
@@ -754,7 +755,9 @@ final class HierarchyManager {
       rootPath: catalog.projects[projectIndex].rootPath
     )
     catalog.projects[projectIndex].worktrees.insert(worktree, at: boundary)
-    catalog.projects[projectIndex].selectedWorktreeID = worktreeID
+    if select {
+      catalog.projects[projectIndex].selectedWorktreeID = worktreeID
+    }
     store.scheduleSave(catalog)
     return worktreeID
   }
