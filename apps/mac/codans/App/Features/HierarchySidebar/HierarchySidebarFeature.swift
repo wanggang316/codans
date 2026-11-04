@@ -575,7 +575,8 @@ struct HierarchySidebarFeature {
         return .none
       case .remoteConnectionSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
         // Connection validated. Read the mode BEFORE dismissing: edit applies
-        // the change to the existing project in place; add registers a new
+        // the change to the existing project in place; add selects the
+        // Project that already has this Host + path, or registers a new
         // one, named by the remote path's leaf (falling back to the Host) so
         // the sidebar reads a recognizable label before the first SSH
         // reconcile fills in worktrees. Both re-reconcile.
@@ -584,13 +585,34 @@ struct HierarchySidebarFeature {
           state.remoteConnectionSheet?.hostChangedWhileConnecting(currentHosts: hierarchyClient.hosts())
           return .none
         }
-        let mode = sheet.mode
-        state.remoteConnectionSheet = nil
-        switch mode {
+        // ADR 0006: a Host cannot have two Projects with the same root path.
+        // The Project write attaches to the Host whose fields equal
+        // `endpoint`. That is not always `host.id`: a "New Host…" record
+        // equal to a Host added in Settings while the SSH check ran is not
+        // added, so look up by the Host the write will use.
+        let catalog = hierarchyClient.snapshot()
+        let hostID = catalog.host(matching: endpoint)?.id ?? host.id
+        switch sheet.mode {
         case .edit(let projectID):
+          if let conflict = catalog.projectConflicting(
+            withEditOf: projectID, onHost: hostID, rootPath: remotePath,
+            canonicalizeLocal: HierarchyManager.canonicalPath)
+          {
+            state.remoteConnectionSheet?.errorMessage =
+              RemoteConnectionFeature.State.duplicateProjectMessage(name: conflict.name, host: host)
+            return .none
+          }
+          state.remoteConnectionSheet = nil
           hierarchyClient.updateServerProject(projectID, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         case .add:
+          state.remoteConnectionSheet = nil
+          // Like Add Project on This Mac: reveal the existing Project.
+          if let existing = catalog.project(
+            onHost: hostID, rootPath: remotePath, canonicalizeLocal: HierarchyManager.canonicalPath)
+          {
+            return .send(.delegate(.revealExistingProject(existing.id)))
+          }
           let leaf = (remotePath as NSString).lastPathComponent
           let name = leaf.isEmpty ? host.displayName : leaf
           let projectID = hierarchyClient.addServerProject(name, endpoint, remotePath, gitRoot)

@@ -46,10 +46,15 @@ codans never collects or stores a password or key.
   relocation on a host.
 - **Connect to Server** picks a Host from the Host list, or "New Host…"
   (Host, Username, Port, Name, Icon), which always adds a record to the Host list.
-  Fields equal to an existing Host use that Host.
+  Fields equal to an existing Host use that Host. When the Host and the
+  resolved path already are a Project, the sheet closes and selects that
+  Project; nothing is added (ADR 0006). A local Project with the same path is
+  not a conflict.
 - **Edit Connection** on a Server project changes its Host choice and path,
   never the Host fields, re-validated like an add; a path change reseeds the
-  worktree rows, a Host-only change keeps them.
+  worktree rows, a Host-only change keeps them. A Host and path equal to
+  another Project is an error in the sheet, and the change is not applied.
+  The Project's own Host and path always save.
 - **Settings › Hosts** adds, edits, and deletes Host records. An edit applies
   to all Projects on the Host; delete is disabled while Projects use it. Each
   row shows the Host's icon.

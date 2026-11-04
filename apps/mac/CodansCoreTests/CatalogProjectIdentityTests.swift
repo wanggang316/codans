@@ -86,6 +86,37 @@ struct CatalogProjectIdentityTests {
     #expect(catalog.project(onHost: nil, rootPath: "/a", canonicalizeLocal: Self.canonicalize)?.id == local.id)
   }
 
+  // MARK: - Edit conflict
+
+  @Test
+  func editConflictFindsAnotherProjectWithTheHostAndPath() {
+    let edited = server("/a")
+    let other = server("/b/")
+    let catalog = catalog([edited, other])
+    let conflict = catalog.projectConflicting(
+      withEditOf: edited.id, onHost: mini.id, rootPath: "/b", canonicalizeLocal: Self.canonicalize)
+    #expect(conflict?.id == other.id)
+  }
+
+  @Test
+  func editKeepingTheOwnHostAndPathIsNoConflictAlsoWithAnExistingDuplicate() {
+    let duplicate = server("/a")
+    let edited = server("/a")
+    let catalog = catalog([duplicate, edited])
+    let conflict = catalog.projectConflicting(
+      withEditOf: edited.id, onHost: mini.id, rootPath: "/a/", canonicalizeLocal: Self.canonicalize)
+    #expect(conflict == nil)
+  }
+
+  @Test
+  func editToAPathOnlyALocalProjectHasIsNoConflict() {
+    let edited = server("/a")
+    let catalog = catalog([edited, Project(name: "b", rootPath: "/b")])
+    let conflict = catalog.projectConflicting(
+      withEditOf: edited.id, onHost: mini.id, rootPath: "/b", canonicalizeLocal: Self.canonicalize)
+    #expect(conflict == nil)
+  }
+
   // MARK: - Contains path
 
   @Test
