@@ -36,13 +36,35 @@ public nonisolated struct CodeHostAlias: Equatable, Hashable, Codable, Sendable,
     host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   }
 
-  /// `host` or `host:port`, with no scheme, user, path, or white space. A bracketed IPv6
-  /// literal is accepted.
+  /// `name[:port]` or `[IPv6][:port]`, with no scheme, user, path, or white space. A name
+  /// is dot-separated labels of letters, digits, `-`, and `_`; a port is 1–65535. The API
+  /// host becomes part of an API URL, so a host that cannot form one is refused.
   public static func isValidHost(_ host: String) -> Bool {
-    guard !host.isEmpty else { return false }
-    return host.allSatisfy { char in
-      char.isASCII && (char.isLetter || char.isNumber || ".-_:[]".contains(char))
+    let port: Substring?
+    if host.hasPrefix("[") {
+      guard let close = host.firstIndex(of: "]") else { return false }
+      let literal = host[host.index(after: host.startIndex)..<close]
+      guard literal.contains(":"), literal.allSatisfy({ $0.isHexDigit || $0 == ":" || $0 == "." }) else {
+        return false
+      }
+      let rest = host[host.index(after: close)...]
+      guard rest.isEmpty || rest.hasPrefix(":") else { return false }
+      port = rest.isEmpty ? nil : rest.dropFirst()
+    } else {
+      let parts = host.split(separator: ":", omittingEmptySubsequences: false)
+      guard parts.count <= 2 else { return false }
+      let name = parts[0]
+      port = parts.count == 2 ? parts[1] : nil
+      let labels = name.split(separator: ".", omittingEmptySubsequences: false)
+      guard !name.isEmpty,
+        labels.allSatisfy({ label in
+          !label.isEmpty && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+        })
+      else { return false }
     }
+    guard let port else { return true }
+    guard !port.isEmpty, port.count <= 5, port.allSatisfy(\.isASCII), let number = Int(port) else { return false }
+    return (1...65535).contains(number)
   }
 }
 

@@ -52,7 +52,10 @@ struct CodeHostAliasSettingsTests {
     #expect(general.codeHostAliases == [Self.gitlab, second])
   }
 
-  @Test(arguments: ["", "  ", "https://gitlab.example.com", "git@host", "host/path"])
+  @Test(arguments: [
+    "", "  ", "https://gitlab.example.com", "git@host", "host/path", "host:abc", "host:", "host:0", "host:65536",
+    "a:1:2", "[]", "[::1", "[::1]x", "[::1]:", "[zz::1]", ".example.com", "example..com", "example.com.",
+  ])
   func anInvalidHostIsRefused(host: String) {
     var general = GeneralSettings()
     #expect(throws: CodeHostAliasError.invalidRemoteHost) {
@@ -62,6 +65,14 @@ struct CodeHostAliasSettingsTests {
       try general.saveCodeHostAlias(CodeHostAlias(remoteHost: "gl", kind: .gitlab, apiHost: host))
     }
     #expect(general.codeHostAliases.isEmpty)
+  }
+
+  @Test(arguments: [
+    "gitlab.example.com", "192.168.2.158:8929", "gl", "my_host-1.example.com:443", "[::1]", "[fe80::1]:8929",
+    "localhost:65535",
+  ])
+  func aValidHostIsAccepted(host: String) {
+    #expect(CodeHostAlias.isValidHost(host))
   }
 
   @Test
