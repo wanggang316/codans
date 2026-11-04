@@ -31,15 +31,16 @@ extension Worktree {
 
 extension Catalog {
   /// The Workspace member row whose directory is `canonicalPath`, if any.
-  /// Group rows, references, and rows the reconcile has not placed never
-  /// match. `canonicalize` is applied to every stored row path so callers
+  /// `canonicalPath` is a path on This Mac, so only Workspaces on This Mac
+  /// match (ADR 0006). Group rows, references, and rows the reconcile has
+  /// not placed never match. `canonicalize` is applied to every stored row path so callers
   /// can compare in the form they already hold (the app passes its symlink-
   /// resolving canonicalizer; tests may pass identity).
   public func workspaceMembership(
     forCanonicalPath canonicalPath: String,
     canonicalize: (String) -> String
   ) -> WorkspaceMembership? {
-    for project in projects where project.isWorkspace {
+    for project in projects where project.isWorkspace && project.isOnThisMac {
       for worktree in project.worktrees where worktree.isWorkspaceMember {
         guard canonicalize(worktree.path) == canonicalPath else { continue }
         return WorkspaceMembership(
@@ -72,12 +73,12 @@ public nonisolated struct WorkspaceMembershipIndex {
   public init() {}
 
   public mutating func update(catalog: Catalog, canonicalize: (String) -> String) {
-    guard catalog.projects.contains(where: { $0.isWorkspace && !$0.isRemote }) else {
+    guard catalog.projects.contains(where: { $0.isWorkspace && $0.isOnThisMac }) else {
       sources = []
       memberships = [:]
       return
     }
-    let next = catalog.projects.filter { !$0.isRemote }.map { project in
+    let next = catalog.projects.filter(\.isOnThisMac).map { project in
       Source(
         id: project.id,
         workspaceName: project.isWorkspace ? project.name : nil,
