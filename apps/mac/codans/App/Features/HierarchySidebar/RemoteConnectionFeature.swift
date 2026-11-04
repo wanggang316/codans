@@ -99,6 +99,12 @@ struct RemoteConnectionFeature {
     static let hostChangedMessage =
       "The host changed while connecting. Check the host and connect again."
 
+    /// Edit Connection error when another Project already has the chosen
+    /// Host and path (ADR 0006).
+    static func duplicateProjectMessage(name: String, host: HostRecord) -> String {
+      "\(name) on \(host.displayName) already uses this path. Choose another path or host."
+    }
+
     /// Show the current Host list after the validated Host changed or was
     /// deleted while the SSH check ran. The result of that check is dropped:
     /// it belongs to the old address. A deleted choice falls back to the
