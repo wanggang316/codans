@@ -117,8 +117,8 @@ struct SettingsWindowView: View {
       AgentsSettingsView()
     case .workflows:
       WorkflowsSettingsView()
-    case .github:
-      GitHubSettingsView(settingsStore: settingsStore)
+    case .codeHosts:
+      CodeHostsSettingsView(settingsStore: settingsStore)
     case .hosts:
       HostsSettingsView(store: store.scope(state: \.hosts, action: \.hosts))
     case .worktree:

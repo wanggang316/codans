@@ -21,13 +21,13 @@ Use [_template.md](_template.md) as a starting point.
 - [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 运行态（idle/working/blocked/done/error，agent 自报的 OSC 7501 程序状态优先、视口启发式兜底），独立于通知系统
 - [App Appearance & Terminal Theme](app-appearance.md) — Light/Dark/System 外观（单写者 `NSApp.appearance`）+ Ghostty 配置 managed-keys（theme/font/cursor）写入
 - [CLI (`codans`)](cli.md) — `codans` 动词集与 system/hierarchy/pane/terminal/editor RPC 契约；stateless RPC client、alias→UUID、`/usr/local/bin` 管理员授权安装；`open` / `help-json` / `workspace` 可用，`skill` 本地管理安装，hook 未实现
+- [Code Host Integration](code-host-integration.md) — GitHub（`gh`）与 GitLab（`glab`）共用一个 Code Host 接口：repository-batched Pull Request 取数（成本 O(Repositories)）、Code Host 解析顺序与 Project 选择、混合 Workspace、事件驱动失效；每个 Code Host 的 query 形态、字段映射、fork 过滤与 CLI 契约；零应用内 HTTP / 零 Keychain
 - [Command Palette](command-palette.md) — ⌘P 模糊搜索面板：分层评分 + recency 衰减 + 稳定 ID，按需从实时 Catalog 生成项
 - [Command Suggest](command-suggest.md) — 从项目清单（package.json / Makefile / justfile / Taskfile / mise / Cargo …，含 3 层内子目录）识别命令：Settings `+` 菜单一键加入；header Run 下拉（AppKit）点行执行、行尾 `+` 加入；`CommandSuggestionParser` 纯解析器 + registry 扩展点，本地 / SSH 共用一次读取；`CommandIconCatalog` 命令→图标映射（动作 SF Symbol 优先、56 个单色工具 mark 兜底，`mark:` 前缀存储）
 - [Editor Integration](editor-integration.md) — 在外部工具打开 Worktree：本地应用经 Launch Services，SSH 编辑器经内置 CLI，`$EDITOR` 经 Pane；默认解析、错误边界与外部 Git 客户端委托
 - [Environment](environment.md) — 构建通道（Debug/Release）、路径与环境变量的单一来源：`BuildChannel` 一处 `#if DEBUG`、`CodansEnvironment.Key` 变量名目录、`HandoffLayout`、`PaneEnvironment` 两阶段 pane 环境；写明通道隔离了什么与没隔离什么、两个 socket resolver 的故意不对称
 - [Ghostty Action Routing](ghostty-action-routing.md) — libghostty `action_cb` 两遍解码 + Info/Effect/Intent/Config 四桶路由，保持 Runtime TCA-free
 - [Git Diff Viewer](git-diff-viewer.md) — 独立只读 Uncommitted / Outgoing 窗口、DiffViewKit 渲染与当前文件编辑器跳转
-- [GitHub Integration](github-integration.md) — repository-batched `gh api graphql` PR 取数（成本 O(Repositories)）、事件驱动失效、fork-PR 过滤；零应用内 HTTP / 零 Keychain
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — 统一快捷键注册表：物理键持久化、三态模型、三级冲突 + 级联重置、独立 `shortcuts.json`
 - [Lifecycle Hooks](lifecycle-hooks.md) — **已设计未实现**：Pane/Tab/Worktree 生命周期 hook 的 out-of-process 执行模型 + 事件 wire schema + stdout DSL
 - [Main Window](main-window.md) — 主窗口三子系统（Sidebar / Header / Tab 条）的不变量与边界：env 直读 catalog、intent 侧选择编排、单一来源默认编辑器解析、runtime-only dirty 态

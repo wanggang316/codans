@@ -177,7 +177,6 @@ struct SettingsSidebarView: View {
   /// SF Symbol.
   private func assetIcon(for section: SettingsSection) -> String? {
     switch section {
-    case .github: return "github"
     case .worktree: return "git-branch"
     default: return nil
     }
@@ -191,7 +190,7 @@ struct SettingsSidebarView: View {
     // Matches the AgentState panel's "Workflows" run rows (`WorkflowRunsSection`)
     // so the glyph reads the same wherever a run shows up.
     case .workflows: return "arrow.triangle.branch"
-    case .github: return "arrow.triangle.pull"
+    case .codeHosts: return "arrow.triangle.pull"
     case .hosts: return "server.rack"
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"

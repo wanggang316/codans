@@ -269,7 +269,7 @@ struct CodeHostFeatureTests {
       var client = CodeHostClient.testValue
       // Resolves every remote like `github.com`; a test about unresolved remotes
       // overrides it.
-      client.resolveRepository = { remote in
+      client.resolveRepository = { remote, _ in
         CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
       }
       customize(&client)
@@ -371,7 +371,7 @@ struct CodeHostFeatureTests {
       seenBranches: ["feature/x"], fetchedAt: .distantPast
     )
     let store = Self.makeStore(initialState: seed) { client in
-      client.resolveRepository = { remote in
+      client.resolveRepository = { remote, _ in
         #expect(remote.path == "group/sub/repo")
         return nil
       }

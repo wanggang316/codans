@@ -8,7 +8,7 @@ codans shows the Pull Request of each Worktree in the sidebar badge, the
 popover, the status bar, and the worktree header. It also runs write actions
 (merge, close, mark ready, rerun failed jobs) and opens the Pull Request or the
 Project on the Code Host. Only GitHub supports this, through the `gh` CLI. See
-[GitHub Integration](../design-docs/github-integration.md).
+[Code Host Integration](../design-docs/code-host-integration.md) (formerly GitHub Integration).
 
 `RemoteInfo` does not check the host, so the app sends a GitLab `origin` to
 `gh`, and the fetch fails. `RemoteInfo` also keeps only the first two path

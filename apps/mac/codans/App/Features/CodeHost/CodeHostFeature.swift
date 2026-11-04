@@ -208,6 +208,11 @@ struct CodeHostFeature {
     /// Code Host call; the unit's rows show no badge and no error.
     case codeHostUnresolved(ProjectID, worktreeBranches: [WorktreeBranchPair])
 
+    /// The unit resolved to another Code Host repository than its cached batch (a changed
+    /// Project Code Host choice, a CLI login, or a new `origin`). Sent before the read, so
+    /// the old Pull Requests go even when the read of the new repository fails.
+    case codeHostRepositoryChanged(ProjectID, worktreeBranches: [WorktreeBranchPair])
+
     // MARK: - liveness poll
 
     /// Replace the set of units the foreground poll covers, and mark which belong to the
@@ -362,6 +367,8 @@ struct CodeHostFeature {
   /// Reads `git remote get-url origin` for each fetch unit; the Code Host client resolves
   /// it to a Code Host repository.
   @Dependency(GitServiceClient.self) var gitServiceClient
+  /// The Project "Code Host" choice of each fetch unit, read when the fetch starts.
+  @Dependency(ProjectCodeHostChoiceClient.self) var codeHostChoice
   /// Persists the project-batched PR cache across launches so the sidebar paints
   /// immediately instead of flashing empty → populated as fetches return.
   @Dependency(PullRequestSnapshotCacheClient.self) var pullRequestSnapshotCache
@@ -625,23 +632,19 @@ struct CodeHostFeature {
         state.loading.subtract(pairs.map(\.worktreeID))
         guard state.projectGitRoots[projectID] != nil else { return .none }
         state.unitsWithoutCodeHost.insert(projectID)
-        state.lastErrorByProject[projectID] = nil
         state.queuedRefreshByProject.remove(projectID)
-        for pair in pairs {
-          state.snapshots[pair.worktreeID] = nil
-          state.snapshotLoadedAt[pair.worktreeID] = nil
-          state.lastError[pair.worktreeID] = nil
-        }
-        guard state.snapshotsByProject.removeValue(forKey: projectID) != nil else {
-          return drainPollSlot(state: &state)
-        }
-        let snapshotOnDisk = state.snapshotsByProject
-        let cache = pullRequestSnapshotCache
-        let sequence = Self.cacheWriteSequence.next()
-        Task.detached(priority: .utility) {
-          cache.save(snapshotOnDisk, sequence)
-        }
+        dropUnitSnapshots(projectID, pairs: pairs, state: &state)
         return drainPollSlot(state: &state)
+
+      case .codeHostRepositoryChanged(let projectID, let pairs):
+        Self.logger.info(
+          "codeHostRepositoryChanged project=\(projectID.raw.uuidString, privacy: .public)"
+        )
+        // The fetch for the new repository is still in flight; only what belongs to the
+        // old repository goes.
+        guard state.projectGitRoots[projectID] != nil else { return .none }
+        dropUnitSnapshots(projectID, pairs: pairs, state: &state)
+        return .none
 
       // MARK: - active-Project liveness poll
 
@@ -755,6 +758,26 @@ struct CodeHostFeature {
     }
   }
 
+  /// Forgets the unit's batch and its rows' Pull Requests and errors, and writes the
+  /// snapshot cache without the unit.
+  private func dropUnitSnapshots(
+    _ projectID: ProjectID, pairs: [Action.WorktreeBranchPair], state: inout State
+  ) {
+    state.lastErrorByProject[projectID] = nil
+    for pair in pairs {
+      state.snapshots[pair.worktreeID] = nil
+      state.snapshotLoadedAt[pair.worktreeID] = nil
+      state.lastError[pair.worktreeID] = nil
+    }
+    guard state.snapshotsByProject.removeValue(forKey: projectID) != nil else { return }
+    let snapshotOnDisk = state.snapshotsByProject
+    let cache = pullRequestSnapshotCache
+    let sequence = Self.cacheWriteSequence.next()
+    Task.detached(priority: .utility) {
+      cache.save(snapshotOnDisk, sequence)
+    }
+  }
+
   /// Kicks a batched fetch for the Project, honouring the in-flight guard. If another
   /// fetch is already running for the same Project, records a queue flag so the in-flight
   /// completion can dispatch a follow-up. Otherwise starts the subprocess chain, tagged
@@ -794,7 +817,8 @@ struct CodeHostFeature {
     Self.logger.info(
       "enqueueProjectFetch project=\(projectID.raw.uuidString, privacy: .public) pairs=\(pairs.count, privacy: .public)"
     )
-    return .run { [codeHost, gitService = gitServiceClient] send in
+    let cachedRepository = state.snapshotsByProject[projectID]?.repository
+    return .run { [codeHost, gitService = gitServiceClient, codeHostChoice] send in
       let remote: RemoteInfo
       do {
         remote = try await gitService.remoteInfo(gitRoot)
@@ -807,13 +831,17 @@ struct CodeHostFeature {
             projectID, worktreeBranches: pairs, .failure(CodeHostError.remoteInfoUnavailable)))
         return
       }
-      guard let repository = await codeHost.resolveRepository(remote) else {
+      let choice = await codeHostChoice.choice(projectID, gitRoot)
+      guard let repository = await codeHost.resolveRepository(remote, choice) else {
         await send(.codeHostUnresolved(projectID, worktreeBranches: pairs))
         return
       }
       Self.logger.info(
         "repository resolved kind=\(repository.kind.rawValue, privacy: .public) host=\(repository.host, privacy: .public) path=\(repository.path, privacy: .public)"
       )
+      if let cachedRepository, cachedRepository != repository {
+        await send(.codeHostRepositoryChanged(projectID, worktreeBranches: pairs))
+      }
       let result = await TaskResult<BatchedPullRequests> {
         let branches = pairs.map(\.branch)
         let seen = Set(branches)

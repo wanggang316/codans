@@ -17,6 +17,15 @@ and the project does not yet follow semantic versioning — every release until
   merge method applies), squash and merge, close, mark ready, and rerun
   failed jobs. "Open MR on GitLab" and "Open Project on GitLab" open the
   GitLab pages. Needs `glab` 1.122.0 or later.
+- **Settings › Code Hosts.** The GitHub pane is now Code Hosts. It shows
+  whether `gh` and `glab` are installed and logged in, with the host and
+  user, Re-check, and a docs link for each, and the merge defaults that
+  apply to both.
+- **Project Code Host setting.** Set a Project to Auto, GitHub, or GitLab
+  in its settings. Use it for a remote host that neither `gh` nor `glab`
+  knows, such as an SSH alias. Auto with no match shows no badge.
+- **Mixed Workspaces.** A Workspace with GitHub and GitLab members shows
+  the PRs and MRs of each member from its own Code Host.
 - **CLI problems show at the badge.** When `gh` or `glab` is missing, not
   logged in, or too old, each Worktree row shows the message with the
   command that fixes it.
