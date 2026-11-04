@@ -123,7 +123,7 @@ struct RootFeature {
     /// and restored when it opens again on the same pane. In memory only.
     var commandQueueDrafts: [PaneID: String] = [:]
     /// The latest ⌘Y request for the Session History popover. The popover
-    /// is view state on its anchor (the pane's actions button, or the empty
+    /// is view state on its anchor (the pane's header button, or the empty
     /// page's Resume Session button), so the reducer only names the target;
     /// `serial` makes every press a new value the anchor reacts to.
     var sessionHistoryRequest: SessionHistoryRequest?
