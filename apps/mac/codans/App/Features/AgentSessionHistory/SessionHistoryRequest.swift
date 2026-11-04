@@ -5,7 +5,7 @@ import SwiftUI
 /// command through `RootFeature.sessionHistoryToggle`.
 ///
 /// The popover's presentation is view state on its anchor, so the request
-/// only names the target: a pane opens it on its actions button, and `nil`
+/// only names the target: a pane opens it on its header button, and `nil`
 /// opens it on the empty page of a worktree that has no tab. Each press has
 /// a new `serial`, so the anchor sees a change even when the target repeats.
 struct SessionHistoryRequest: Equatable, Sendable {

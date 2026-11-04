@@ -8,8 +8,7 @@ import SwiftUI
 /// The menu is a native `NSMenu`, pulled down under the button and built
 /// when it opens, so every row reflects the pane as it is at that moment
 /// (Copy needs a live selection). The first rows are the pane's own affairs:
-/// handing its agent's task off, opening its command queue, and resuming a
-/// recorded agent session from the Session History popover. Under them sits
+/// handing its agent's task off and opening its command queue. Under them sits
 /// every action the terminal surface offers, added by the surface itself
 /// (`GhosttySurfaceView.addPaneActionItems(to:)`), so this menu and the
 /// right-click menu can never offer different surface actions. The header
@@ -31,9 +30,6 @@ struct PaneActionsMenuButton: View {
 
   @State private var isHovered = false
   @State private var isMenuOpen = false
-  /// The Session History popover, anchored to the button once the menu
-  /// has closed.
-  @State private var sessionHistoryShown = false
   @State private var anchor = PaneMenuAnchor()
 
   var body: some View {
@@ -54,8 +50,6 @@ struct PaneActionsMenuButton: View {
     .buttonStyle(.plain)
     .background(PaneMenuAnchorView(anchor: anchor))
     .onHover { isHovered = $0 }
-    .modifier(SessionHistoryAnchor(paneID: paneID, isPresented: $sessionHistoryShown))
-    .onSessionHistoryRequest(for: paneID, isPresented: $sessionHistoryShown)
     .help("Pane Actions")
     .accessibilityIdentifier("pane_hud.toggle")
     .accessibilityLabel("Pane Actions")
@@ -99,16 +93,6 @@ struct PaneActionsMenuButton: View {
     showShortcut(.toggleCommandQueue, on: queue)
     queue.setAccessibilityIdentifier("pane_hud.command_queue")
     menu.addItem(queue)
-
-    if SessionHistoryAnchor.worktree(of: paneID, in: hierarchyManager) != nil {
-      let history = NSMenuItem.closure(title: "Session History…") {
-        sessionHistoryShown = true
-      }
-      history.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
-      showShortcut(.showSessionHistory, on: history)
-      history.setAccessibilityIdentifier("pane_hud.session_history")
-      menu.addItem(history)
-    }
 
     if let surfaceView = surface?.view {
       menu.addItem(.separator())
@@ -165,47 +149,5 @@ private struct PaneMenuAnchorView: NSViewRepresentable {
   /// Takes no clicks: the SwiftUI button above it owns them.
   private final class PassThroughView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
-  }
-}
-
-/// Hosts the Session History popover on the menu button. Resolves the
-/// pane's worktree at presentation time, so a moved or pruned pane shows
-/// nothing rather than a stale list.
-private struct SessionHistoryAnchor: ViewModifier {
-  let paneID: PaneID
-  @Binding var isPresented: Bool
-
-  @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(\.paneHUDActions) private var actions
-
-  func body(content: Content) -> some View {
-    if let worktree = Self.worktree(of: paneID, in: hierarchyManager) {
-      content.agentSessionHistoryPopover(
-        isPresented: $isPresented,
-        worktreePath: worktree.path,
-        remoteHost: project(of: worktree)?.remoteHost,
-        resumeContext: AgentResumePlacement.Context(worktree: worktree) {
-          hierarchyManager.lastFocusedPane(in: $0)
-        },
-        onResume: { session, placement in
-          actions.resumeSession(paneID, session, placement)
-        },
-      )
-    } else {
-      content
-    }
-  }
-
-  private func project(of worktree: Worktree) -> Project? {
-    hierarchyManager.catalog.projects.first { $0.worktrees.contains { $0.id == worktree.id } }
-  }
-
-  @MainActor
-  static func worktree(of paneID: PaneID, in hierarchyManager: HierarchyManager) -> Worktree? {
-    guard let (projectID, worktreeID, _) = hierarchyManager.addressOf(paneID: paneID) else {
-      return nil
-    }
-    return hierarchyManager.catalog.projects.first { $0.id == projectID }?
-      .worktrees.first { $0.id == worktreeID }
   }
 }

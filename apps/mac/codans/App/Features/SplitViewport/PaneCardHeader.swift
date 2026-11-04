@@ -3,7 +3,8 @@ import ComposableArchitecture
 import SwiftUI
 
 /// Title row at the top of a pane card: the pane's glyph and live title on
-/// the leading side, split / close actions on the trailing side.
+/// the leading side, session history / split / close actions on the trailing
+/// side.
 ///
 /// The header is also the pane's grab handle: in a multi-pane Tab a drag
 /// that starts on it moves the pane, the same drag the drop targets in
@@ -138,6 +139,9 @@ struct PaneCardHeader: View {
 
   private var actions: some View {
     HStack(spacing: PaneCardMetrics.actionSpacing) {
+      if let worktree = SessionHistoryButton.worktree(of: paneID, in: hierarchyManager) {
+        SessionHistoryButton(paneID: paneID, worktree: worktree, onPress: onFocus)
+      }
       PaneCardHeaderButton(
         systemImage: "square.split.2x1", hoverSystemImage: "square.righthalf.filled",
         help: "Split Right"
@@ -239,8 +243,11 @@ private struct PaneCardHeaderButton: View {
   let systemImage: String
   var hoverSystemImage: String?
   let help: String
+  /// Command whose chord the tooltip appends.
+  var shortcut: CommandID?
   let action: () -> Void
 
+  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var isHovering = false
 
   var body: some View {
@@ -256,8 +263,65 @@ private struct PaneCardHeaderButton: View {
         .contentShape(.rect)
     }
     .buttonStyle(.plain)
-    .help(help)
+    .help(tooltip)
     .accessibilityLabel(help)
     .onHover { isHovering = $0 }
+  }
+
+  private var tooltip: String {
+    guard let shortcut else { return help }
+    return ShortcutDisplay.tooltip(help, for: shortcut, in: resolvedShortcuts)
+  }
+}
+
+/// Opens the pane's agent Session History popover, anchored to the button.
+/// ⌘Y toggles the same popover on the focused pane. A press also focuses
+/// the pane, so the header actions stay up while the popover is open and
+/// In Place / New Split resume into this pane.
+private struct SessionHistoryButton: View {
+  let paneID: PaneID
+  let worktree: Worktree
+  let onPress: () -> Void
+
+  @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(\.paneHUDActions) private var actions
+  @State private var isPresented = false
+
+  var body: some View {
+    PaneCardHeaderButton(
+      systemImage: "clock.arrow.circlepath", help: "Session History",
+      shortcut: .showSessionHistory
+    ) {
+      onPress()
+      isPresented.toggle()
+    }
+    .accessibilityIdentifier("pane_hud.session_history")
+    .agentSessionHistoryPopover(
+      isPresented: $isPresented,
+      worktreePath: worktree.path,
+      remoteHost: project?.remoteHost,
+      resumeContext: AgentResumePlacement.Context(worktree: worktree) {
+        hierarchyManager.lastFocusedPane(in: $0)
+      },
+      onResume: { session, placement in
+        actions.resumeSession(paneID, session, placement)
+      },
+    )
+    .onSessionHistoryRequest(for: paneID, isPresented: $isPresented)
+  }
+
+  private var project: Project? {
+    hierarchyManager.catalog.projects.first { $0.worktrees.contains { $0.id == worktree.id } }
+  }
+
+  /// Resolved on every render, so a moved or pruned pane shows no button
+  /// rather than a stale list.
+  @MainActor
+  static func worktree(of paneID: PaneID, in hierarchyManager: HierarchyManager) -> Worktree? {
+    guard let (projectID, worktreeID, _) = hierarchyManager.addressOf(paneID: paneID) else {
+      return nil
+    }
+    return hierarchyManager.catalog.projects.first { $0.id == projectID }?
+      .worktrees.first { $0.id == worktreeID }
   }
 }
