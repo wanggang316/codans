@@ -10,6 +10,11 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **`--host` selects a Project by its Host.** Every CLI command that takes
+  a Project (project, worktree, tab, pane, tree, show, workspace) takes
+  `--host <id>`: a Host id, or `0` for This Mac. A name that matches
+  Projects on two Hosts is a conflict that lists each match as
+  `<project-id> host=<id|0>`. `codans tree --host <id>` lists one Host.
 - **Session History in the pane header, and on ⌘Y.** The pane header has a
   Session History button left of the split buttons; it replaces the row in
   the pane actions menu. Tab › Session History… (⌘Y) opens the same popover
@@ -60,6 +65,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **CLI output shows the Host of each Project.** `tree`, `project list`,
+  `project show`, and `project add` show `host=<id|0>`. In `--json`,
+  `host.id` is `"0"` for This Mac (it was `null`), and `project list` and
+  `project add` now carry `host`.
 - **Install command of a missing Code Host CLI.** When `gh` or `glab` is
   missing, Settings › Code Hosts says only which CLI is missing, shows
   `brew install <cli>` on its own line in a code style, and puts a copy

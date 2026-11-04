@@ -116,7 +116,7 @@
 | `codans status` | `system.status` | server 标识、uptime、connected-clients 数 |
 | `codans launch [--wait N]` | *(本地)* | 若未运行则 `open -g Codans.app` 并最多等 N 秒（默认 10）等 socket 出现；唯一会拉起应用的命令。CLI 自己环境里的 `CODANS_SOCKET_PATH` / `CODANS_CONFIG_DIR` / `CODANS_STATE_DIR` 经 `open --env` 转交给应用，等待的 socket 与应用绑定的是同一个 |
 | `codans doctor` | *(本地)* | 检查 socket 路径、可达性、是否来自环境变量、CLI 版本；不做应用往返 |
-| `codans tree [--project P]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；每个 Project 有一行 `host:`（Host 显示名与 ID；本地 Project 为 `This Mac`）。`--json` 的 project 带 `kind`（`ProjectKind` raw value）与 `host`（`{id, name}`，This Mac 的 `id` 为 null），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null）与 `workspaceGroup`（workspace 行的 `{id, name, role}`，`role` 为 `groupTerminal` / `reference` / `member`，其余省略），tab / pane 带 `handle`（`t<n>` / `p<n>`）。workspace 的行按组排列（`default` 在前），文本输出把成员行缩进在组行之下 |
+| `codans tree [--project P] [--host H]` | `hierarchy.listProjects` | **首选发现命令**：一次打印 Project→Worktree→Tab→Pane 全层级。Project 行对非 git 仓库带 `[dir]` / `[server]` / `[workspace]`；每个 Project 有一行 `host:`（Host 显示名与 ID；本地 Project 为 `This Mac`）。`--json` 的 project 带 `kind`（`ProjectKind` raw value）与 `host`（`{id, name}`，This Mac 的 `id` 为 `"0"`），worktree 带 `sourceGitRoot`（workspace 子仓库的所属仓库，其余为 null）与 `workspaceGroup`（workspace 行的 `{id, name, role}`，`role` 为 `groupTerminal` / `reference` / `member`，其余省略），tab / pane 带 `handle`（`t<n>` / `p<n>`）。workspace 的行按组排列（`default` 在前），文本输出把成员行缩进在组行之下 |
 | `codans broadcast` | `terminal.broadcastInput` | 见 [send / broadcast](#codans-pane-send--codans-broadcast) |
 
 > `codans --version` 印 `Codans <version>`（ArgumentParser 内建）。
@@ -127,8 +127,8 @@
 
 | Subcommand | IPC method | Anchors to | Args |
 |---|---|---|---|
-| `codans project list` | `hierarchy.listProjects` | `HierarchyHandlers.listProjects` | 无 |
-| `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]`。`PATH` 下存在 `.codans/workspace-groups.json`（或旧版 `.codans/workspace.json`）时注册为 workspace（见 [Workspace](workspace.md)） |
+| `codans project list` | `hierarchy.listProjects` | `HierarchyHandlers.listProjects` | 无；每行带 `host=<id\|0>`，`--json` 每个 project 带 `host {id, name}` |
+| `codans project add PATH` | `hierarchy.addProject` | `HierarchyHandlers.addProject` → `HierarchyManager.addProject` | `PATH`，`[--name NAME]`；结果带 `host`（总是 This Mac，`id` 为 `"0"`）。`PATH` 下存在 `.codans/workspace-groups.json`（或旧版 `.codans/workspace.json`）时注册为 workspace（见 [Workspace](workspace.md)） |
 | `codans project show [ID]` | `hierarchy.describeProject` | `HierarchyHandlers.describeProject` | `[ID]`；回带 `{id, name, canonicalName, rootPath, gitRoot, remoteHost, host, isSelected, selectedWorktreeID, worktreeCount, archivedWorktreeCount, tagIDs}` |
 | `codans project rename ID NAME` | `hierarchy.renameProject` | `HierarchyManager.renameProject` | `ID`，`NAME`（空串或等于文件夹名 → 清除覆盖） |
 | `codans project rm ID` | `hierarchy.removeProject` | `HierarchyManager.removeProject` | `ID`（id/名字/`current`） |
@@ -297,6 +297,8 @@ bundled 目录由 `scripts/embed-skills.sh` 在构建时从仓库根 `skills/` �
 3. **`@label`** —— 仅 Pane：匹配 `Pane.labels`；多于一个匹配则报 conflict。
 4. **`t<n>` / `p<n>`** —— `TargetHandleRegistry` 的稳定短句柄。
 5. **名字** —— project 按 name / canonicalName；worktree 按 name 或 branch，调用方在 pane 里时限定在该 pane 的 project 内；tab 按 title，限定在该 pane 的 worktree 内；均不区分大小写。唯一命中即返回，多个命中 → `conflict`（请传 id），零命中 → `notFound`。pane 没有名字：裸词按 `invalidParams` 拒绝并提示引号（常见于未加引号的 `pane send echo hi`）。
+**Host 过滤（ADR 0006）**：解析 Project 标识的命令共用一个 `--host` 选项（`HostOptions`，`CommonCommandSupport.swift`），值为 Host 记录 id 或 `0`（This Mac）；不给则不过滤。CLI 边缘先校验（空串或其他值 → `invalidParams` 等价的 usage error，exit 1），再作为 `hostID` 随 `hierarchy.resolveAlias` 发出；给了 `--host` 时 UUID 与 `current` 也走服务端，不走本地快速路径。服务端只对 `kind == project` 生效：未知 Host id → `notFound(host)`；名字只匹配该 Host 上的 Project；UUID / `current` 所指 Project 不在该 Host → `conflict`。不带 `--host` 时，一个名字命中多个 Project 的 `conflict` 消息逐个列出 `<project-id> host=<id|0>`。`ScopeResolver` 从 tree 定位到的 Project 也用同一请求核对 Host。`codans tree --host H` 不带 `--project` 时只列该 Host 上的 Project。
+
 6. **路径**（仅 worktree）—— `/abs`、`~/x`、`./x`、`../x`、`..` 视为路径（分支名也含 `/`，故只认这些前缀）：CLI 先相对 `$PWD` 变成绝对路径（`AliasResolver.absolutePathIfPathShaped`），服务端按规范化路径匹配"等于 worktree 根或位于其下"的 worktree，跨 project；嵌套时取最深的一个。
 
 **位置参数只承载目标**：每个动词最多一个位置目标，容器用 `--project/--worktree/--tab`；文本、命令、新对象的名字不与目标争位（`pane send` 的一参/二参形式是唯一例外，`pane split` 的命令走 `--command`）。早先设想的 index 与 path glob 形式未实现。所有非 UUID 解析是一次到 `hierarchy.resolveAlias` 的往返，先于真正的方法调用。结果只在单次 `codans` 调用内缓存，绝不跨调用。
