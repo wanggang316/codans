@@ -50,6 +50,9 @@ public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, H
     }
   }
 
+  /// Shell command that installs the CLI through Homebrew.
+  public var installCommand: String { "brew install \(cliName)" }
+
   /// Name of the CLI as the UI shows it.
   public var cliDisplayName: String {
     switch self {

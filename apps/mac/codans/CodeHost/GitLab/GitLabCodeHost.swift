@@ -55,7 +55,7 @@ nonisolated struct GitLabCodeHost: CodeHost {
       }
       return .available(host: host.host, user: host.user ?? "")
     } catch {
-      return .unavailable(reason: Self.codeHostError(error).userFacingMessage)
+      return Self.codeHostError(error).availability
     }
   }
 

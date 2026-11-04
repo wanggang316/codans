@@ -11,15 +11,11 @@ struct GitHubCodeHostTests {
   // MARK: - availability
 
   @Test
-  func availabilityReturnsUnavailableWhenGhMissing() async throws {
+  func availabilityReturnsNotInstalledWhenGhMissing() async throws {
     let runner = RecordingCommandRunner()
     let resolver = CLIExecutableResolver(prober: { nil })
     let service = GitHubCodeHost(runner: runner, resolver: resolver)
-    let result = await service.availability()
-    if case .unavailable = result { /* expected */
-    } else {
-      Issue.record("expected .unavailable, got \(result)")
-    }
+    #expect(await service.availability() == .notInstalled)
   }
 
   @Test

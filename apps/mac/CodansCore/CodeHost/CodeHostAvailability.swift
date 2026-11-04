@@ -10,13 +10,17 @@ import Foundation
 /// Settings pane surfaces both so a user with a multi-host configuration can see which
 /// host the integration is talking to.
 ///
-/// `.unavailable(reason)` carries a user-facing string. Rich error detail (install /
+/// `.notInstalled` means the CLI executable was not found. It is a separate case so the
+/// Settings pane can show the install command on its own row, apart from the warning text.
+///
+/// `.unavailable(reason)` carries a user-facing string for every other failure. Rich error detail (install /
 /// auth / network) stays at the app tier in `CodeHostError`; this enum only surfaces what
 /// the UI needs to paint the banner, so `CodansCore` does not depend on the app-layer
 /// error type.
 public enum CodeHostAvailability: Equatable, Sendable {
   case unknown
   case available(host: String, user: String)
+  case notInstalled
   case unavailable(reason: String)
 
   public var isAvailable: Bool {

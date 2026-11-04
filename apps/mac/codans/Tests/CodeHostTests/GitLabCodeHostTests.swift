@@ -31,8 +31,7 @@ struct GitLabCodeHostTests {
   @Test
   func availabilityReportsMissingGlab() async {
     let service = GitLabCodeHost(runner: RecordingCommandRunner(outcomes: []), resolver: .init(prober: { nil }))
-    #expect(
-      await service.availability() == .unavailable(reason: CodeHostError.cliNotInstalled(.gitlab).userFacingMessage))
+    #expect(await service.availability() == .notInstalled)
     #expect(CodeHostError.cliNotInstalled(.gitlab).userFacingMessage.contains("brew install glab"))
   }
 

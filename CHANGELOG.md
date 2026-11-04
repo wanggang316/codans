@@ -60,6 +60,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **Install command of a missing Code Host CLI.** When `gh` or `glab` is
+  missing, Settings › Code Hosts says only which CLI is missing, shows
+  `brew install <cli>` on its own line in a code style, and puts a copy
+  button next to it. The button shows a checkmark after a click.
 - **Server projects share Host records.** The catalog now keeps one record
   per host, username, and port, and each Server project refers to it. On
   first launch, existing Server projects are moved to these records; the

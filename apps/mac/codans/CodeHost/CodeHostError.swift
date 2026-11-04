@@ -65,12 +65,18 @@ enum CodeHostError: Error, Equatable, Sendable {
     }
   }
 
+  /// The availability that a probe reports when it fails with this error.
+  var availability: CodeHostAvailability {
+    if case .cliNotInstalled = self { return .notInstalled }
+    return .unavailable(reason: userFacingMessage)
+  }
+
   /// One-line, user-facing string suitable for tooltip + popover banner.
   var userFacingMessage: String {
     switch self {
     case .cliNotInstalled(let kind):
       return
-        "\(kind.cliDisplayName) is not installed. Run `brew install \(kind.cliName)` in a terminal to enable \(kind.pullRequestName.replacingOccurrences(of: " ", with: "-")) features."
+        "\(kind.cliDisplayName) is not installed. Run `\(kind.installCommand)` in a terminal to enable \(kind.pullRequestName.replacingOccurrences(of: " ", with: "-")) features."
     case .notAuthenticated(let kind, let host):
       return "Sign in to \(host ?? kind.displayName) by running `\(kind.cliName) auth login` in a terminal."
     case .cliOutdated(let kind, let minVersion):
