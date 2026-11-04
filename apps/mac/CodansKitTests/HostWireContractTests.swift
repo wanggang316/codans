@@ -96,16 +96,14 @@ struct HostWireContractTests {
     #expect(payload.hosts == nil)
     let project = try #require(payload.resolvedProjects.first)
     #expect(project.kind == .server)
-    #expect(IPC.HostRef(project: project, hosts: []) == IPC.HostRef(id: nil, name: "box:2200"))
   }
 
   @Test
-  func hostRefAlwaysWritesItsID() throws {
+  func thisMacHostRefIDIsZero() throws {
     let object = try #require(
       try JSONSerialization.jsonObject(with: JSONEncoder().encode(IPC.HostRef.thisMac)) as? [String: Any])
     #expect(object["name"] as? String == "This Mac")
-    #expect(object.keys.contains("id"))
-    #expect(object["id"] is NSNull)
+    #expect(object["id"] as? String == "0")
   }
 
   @Test
@@ -137,6 +135,15 @@ struct HostWireContractTests {
     let defs = try #require(schema["$defs"] as? [String: Any])
     let hostRef = try #require(defs["hostRef"] as? [String: Any])
     #expect(hostRef["required"] as? [String] == ["id", "name"])
+    let hostID = try #require(defs["hostID"] as? [String: Any])
+    let pattern = try Regex(try #require(hostID["pattern"] as? String))
+    #expect(try pattern.wholeMatch(in: "0") != nil)
+    #expect(try pattern.wholeMatch(in: Self.box.id.description) != nil)
+    #expect(try pattern.wholeMatch(in: "") == nil)
+    for def in ["projectAdd", "projectListItem"] {
+      let object = try #require(defs[def] as? [String: Any])
+      #expect((object["required"] as? [String])?.contains("host") == true, "\(def) requires host")
+    }
     let treeProject = try #require(defs["treeProject"] as? [String: Any])
     #expect((treeProject["required"] as? [String])?.contains("host") == true)
     let projectShow = try #require(defs["projectShow"] as? [String: Any])

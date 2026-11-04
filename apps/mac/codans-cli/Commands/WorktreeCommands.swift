@@ -11,6 +11,7 @@ struct WorktreeList: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
 
@@ -18,7 +19,7 @@ struct WorktreeList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await hostOptions.resolveProject(project, client: client)
       struct Params: Codable { let projectID: ProjectID }
       let result: WorktreeListPayload = try await client.call(
         .hierarchyListWorktrees,
@@ -55,6 +56,7 @@ struct WorktreeRename: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Worktree id, name, branch, or 'current'.")
   var worktree: String
   @Argument(help: "New display name.")
@@ -66,7 +68,8 @@ struct WorktreeRename: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(
+        project: project, worktree: worktree, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let id: WorktreeID
         let projectID: ProjectID
@@ -96,6 +99,7 @@ struct WorktreePrune: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
 
@@ -103,7 +107,7 @@ struct WorktreePrune: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let uuid = try await hostOptions.resolveProject(project, client: client)
       struct Params: Codable { let projectID: ProjectID }
       struct Result: Decodable { let pruned: Int }
       let result: Result = try await client.call(
@@ -139,6 +143,7 @@ struct WorktreeNew: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Branch name.")
   var branch: String
   @Option(name: .long, help: "Committish a new branch starts from (e.g. origin/main).")
@@ -170,7 +175,7 @@ struct WorktreeNew: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await hostOptions.resolveProject(project, client: client)
       let explicitPath = path.map { PathResolver.absolute($0) }
       let displayName = name ?? branch
       struct Params: Codable {
@@ -262,6 +267,7 @@ struct WorktreeRemove: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Worktree id, name, branch, or 'current'. Omit when using --by-path.")
   var worktree: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
@@ -291,7 +297,7 @@ struct WorktreeRemove: AsyncParsableCommand {
       defer { Task { await client.shutdown() } }
 
       if let byPath {
-        let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+        let projectUUID = try await hostOptions.resolveProject(project, client: client)
         // Cleanup mode — list the project's worktrees, filter by
         // canonical path, then issue per-row removes. Done client-side to
         // keep the server's `hierarchy.removeWorktree` surface unchanged.
@@ -352,7 +358,8 @@ struct WorktreeRemove: AsyncParsableCommand {
           message: "codans worktree rm: missing worktree id (or pass --by-path <path>)"
         )
       }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(
+        project: project, worktree: worktree, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let id: WorktreeID
         let projectID: ProjectID

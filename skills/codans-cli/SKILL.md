@@ -90,9 +90,10 @@ independent repos: `git -C <path>` per row, never `git worktree` commands
 against the workspace root. Create and delete groups with `codans workspace
 group …`, never with `codans worktree new` / `rm`, which refuse workspace rows.
 
-Each Project in `codans tree --json` and `codans project show --json` carries
-`host {id, name}`: the Host (machine) it lives on. A local Project is on
-`This Mac` with `id: null`; a Server project names its Host record.
+Each Project in `codans tree`, `codans project list`, `codans project show`,
+and `codans project add` carries its Host (machine). JSON has
+`host {id, name}`; text shows `host=<id>`. The id is the Host record id, or
+`"0"` for a Project on This Mac.
 
 `codans` is on `PATH` automatically inside every codans Pane, and the app
 auto-detects which Project / Worktree / Tab / Pane that Pane belongs to —
@@ -128,6 +129,23 @@ there is one (`--worktree main` means "this project's main"); an
 ambiguous name is a conflict (exit 3, `CONFLICT`) — pass the id. Panes
 have no name: a bare word where a pane is expected is a usage error,
 which is usually unquoted text (`codans pane send echo hi` — quote it).
+
+A Project name can exist on more than one Host (for example `agents` on
+This Mac and on a Server). Every command that takes a Project also takes
+`--host <id>`: a Host id from `codans tree`, or `0` for This Mac. It keeps
+Project resolution to that Host:
+
+```bash
+codans tree --host 0                          # Projects on This Mac only
+codans worktree list --project agents --host 0
+codans project show agents --host 6F1C…       # the `agents` on that Host
+```
+
+Without `--host`, a name that matches Projects on two Hosts is a conflict
+(exit 3) that lists each match as `<project-id> host=<id|0>`. A Project id
+with a `--host` it is not on also fails (exit 3). An empty or other
+`--host` value is a usage error (exit 1); an unknown Host id is not found
+(exit 2).
 
 `current` for a project / worktree / tab is derived from the pane the
 command runs in, so it works from any subshell or wrapper inside a pane.

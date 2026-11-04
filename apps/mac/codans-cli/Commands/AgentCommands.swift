@@ -219,6 +219,7 @@ struct AgentLaunch: AsyncParsableCommand {
   }
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Profile name or id. Omit with --agent to use that agent's first enabled profile.")
   var profile: String?
   @Option(name: .long, help: "Agent token (claude, codex, gemini, …) when no profile is named.")
@@ -247,7 +248,8 @@ struct AgentLaunch: AsyncParsableCommand {
       let resolvedPrompt = try Self.resolvePrompt(prompt)
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(
+        project: project, worktree: worktree, host: hostOptions.selector(), client: client)
       let response: IPC.AgentLaunchResponse = try await client.call(
         .agentLaunch,
         params: IPC.AgentLaunchRequest(

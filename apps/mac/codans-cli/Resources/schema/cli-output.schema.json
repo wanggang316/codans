@@ -982,12 +982,37 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.project.list.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/projectList"
+          }
+        }
+      }
     }
   ],
   "$defs": {
     "uuid": {
       "type": "string",
       "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "hostID": {
+      "description": "A Host id, or `\"0\"` for This Mac.",
+      "type": "string",
+      "pattern": "^(0|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$"
     },
     "error": {
       "type": "object",
@@ -1209,14 +1234,11 @@
       "additionalProperties": false
     },
     "hostRef": {
-      "description": "The Host a Project is on. `id` is null for This Mac.",
+      "description": "The Host a Project is on. `id` is the Host id, or `\"0\"` for This Mac: the value `--host` takes.",
       "type": "object",
       "properties": {
         "id": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "$ref": "#/$defs/hostID"
         },
         "name": {
           "type": "string"
@@ -2080,12 +2102,16 @@
             "string",
             "null"
           ]
+        },
+        "host": {
+          "$ref": "#/$defs/hostRef"
         }
       },
       "required": [
         "id",
         "name",
-        "path"
+        "path",
+        "host"
       ],
       "additionalProperties": false
     },
@@ -3046,6 +3072,66 @@
         "path",
         "isValid",
         "diagnostics"
+      ],
+      "additionalProperties": false
+    },
+    "projectList": {
+      "type": "object",
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectListItem"
+          }
+        }
+      },
+      "required": [
+        "projects"
+      ],
+      "additionalProperties": false
+    },
+    "projectListItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rootPath": {
+          "type": "string"
+        },
+        "gitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "git_repo",
+            "dir",
+            "server",
+            "workspace"
+          ]
+        },
+        "host": {
+          "$ref": "#/$defs/hostRef"
+        },
+        "selectedWorktreeID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "rootPath",
+        "kind",
+        "host"
       ],
       "additionalProperties": false
     }

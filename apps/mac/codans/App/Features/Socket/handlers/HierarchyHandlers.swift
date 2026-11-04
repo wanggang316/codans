@@ -177,7 +177,8 @@ final class HierarchyHandlers {
   /// containers), pane labels (`@label`), short target handles (`t<n>` /
   /// `p<n>`), and names — a project's name, a worktree's name or branch, a
   /// tab's title — scoped to the calling pane's containers when there is
-  /// one.
+  /// one. A Project request may carry a `hostID` that limits the result to
+  /// one Host (ADR 0006).
   public func resolveAlias(_ params: JSONValue, peerPID: pid_t? = nil) async -> RouterOutcome {
     await Task.yield()
     let request: IPC.AliasResolveRequest
@@ -185,6 +186,12 @@ final class HierarchyHandlers {
       request = try params.decoded(as: IPC.AliasResolveRequest.self)
     } catch {
       return .failed(.invalidParams(message: "resolveAlias requires {kind, value}", path: nil))
+    }
+    if request.kind == .project, let rawHost = request.hostID {
+      switch hostFilter(rawHost) {
+      case .success(let host): return resolveProject(request, on: host, peerPID: peerPID)
+      case .failure(let error): return .failed(error)
+      }
     }
     if let uuid = UUID(uuidString: request.value) {
       return resolved(request.kind, uuid)
@@ -218,6 +225,58 @@ final class HierarchyHandlers {
       return resolved(.pane, id.raw)
     }
     return resolveByName(request, peerPID: peerPID)
+  }
+
+  /// Parses a `hostID` param: `0` or the id of a Host in the catalog.
+  private func hostFilter(_ raw: String) -> Result<IPC.HostSelector, IPCError> {
+    guard let host = IPC.HostSelector(raw) else {
+      return .failure(
+        .invalidParams(message: "invalid host \"\(raw)\"; pass a Host id or 0 for This Mac", path: ["hostID"]))
+    }
+    if case .host(let id) = host, manager.catalog.host(id: id) == nil {
+      return .failure(.notFound(kind: "host", id: raw))
+    }
+    return .success(host)
+  }
+
+  /// A Project alias resolved on one Host. An id or `current` must name a
+  /// Project on that Host, so a script that passes both learns of the
+  /// mismatch instead of acting on the wrong Project; a name matches only
+  /// that Host's Projects.
+  private func resolveProject(
+    _ request: IPC.AliasResolveRequest, on host: IPC.HostSelector, peerPID: pid_t?,
+  ) -> RouterOutcome {
+    let catalog = manager.catalog
+    let id: ProjectID
+    if let uuid = UUID(uuidString: request.value) {
+      id = ProjectID(raw: uuid)
+    } else if request.value == "current" || request.value == "." {
+      guard let current = callerPane(request, peerPID: peerPID).flatMap({ catalog.projectID(forPane: $0) })
+      else {
+        return .failed(.notFound(kind: "project", id: request.value))
+      }
+      id = current
+    } else {
+      return outcome(for: projectsMatchingName(request.value, on: host), request: request)
+    }
+    guard let project = catalog.projects.first(where: { $0.id == id }) else {
+      return .failed(.notFound(kind: "project", id: id.description))
+    }
+    guard host.matches(project) else {
+      return .failed(
+        .conflict(reason: "project \(id) host=\(IPC.HostSelector(project: project)) is not on host=\(host)"))
+    }
+    return resolved(.project, id.raw)
+  }
+
+  /// Projects whose name or folder name is `name` (case-insensitive), on
+  /// `host` when one is given.
+  private func projectsMatchingName(_ name: String, on host: IPC.HostSelector?) -> [Project] {
+    let needle = name.lowercased()
+    return manager.catalog.projects.filter { project in
+      (host?.matches(project) ?? true)
+        && (project.name.lowercased() == needle || project.canonicalName.lowercased() == needle)
+    }
   }
 
   private func resolved(_ kind: IPC.AliasResolveRequest.Kind, _ id: UUID) -> RouterOutcome {
@@ -277,9 +336,7 @@ final class HierarchyHandlers {
     var matches: [UUID] = []
     switch request.kind {
     case .project:
-      matches = catalog.projects
-        .filter { $0.name.lowercased() == needle || $0.canonicalName.lowercased() == needle }
-        .map(\.id.raw)
+      return outcome(for: projectsMatchingName(request.value, on: nil), request: request)
     case .worktree:
       // A path (absolute; the CLI resolves relative ones against its cwd
       // before calling) matches project-wide; names and branches stay
@@ -321,6 +378,18 @@ final class HierarchyHandlers {
         .map(\.id.raw)
     }
     return outcome(for: matches, request: request)
+  }
+
+  /// A Project name: one match resolves; none is not-found; several is a
+  /// conflict that lists each match with its Host, so the caller can pass
+  /// `--host` or the id (ADR 0006).
+  private func outcome(for matches: [Project], request: IPC.AliasResolveRequest) -> RouterOutcome {
+    guard matches.count > 1 else { return outcome(for: matches.map(\.id.raw), request: request) }
+    let listed = matches.map { "\($0.id) host=\(IPC.HostSelector(project: $0))" }.joined(separator: ", ")
+    return .failed(
+      .conflict(
+        reason:
+          "project \"\(request.value)\" matches \(matches.count) projects: \(listed); pass --host or an id"))
   }
 
   /// One match resolves; none is not-found; several is a conflict the
@@ -414,6 +483,8 @@ final class HierarchyHandlers {
     public let id: ProjectID
     public let rootPath: String
     public let gitRoot: String?
+    /// Always This Mac: the CLI adds local directories only.
+    public let host: IPC.HostRef
   }
   /// `hierarchy.addProject` — the CLI's Add Project. Validates at the edge
   /// the way the sidebar's folder picker does implicitly: the directory
@@ -456,7 +527,7 @@ final class HierarchyHandlers {
     await reconcileWorktrees(id)
     do {
       return .unary(
-        try JSONValue.encoded(AddProjectResult(id: id, rootPath: canonical, gitRoot: gitRoot)))
+        try JSONValue.encoded(AddProjectResult(id: id, rootPath: canonical, gitRoot: gitRoot, host: .thisMac)))
     } catch {
       return .failed(.internal("encode addProject result: \(error)"))
     }

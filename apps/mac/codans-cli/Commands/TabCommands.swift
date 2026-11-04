@@ -11,6 +11,7 @@ struct TabList: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
   @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
@@ -20,7 +21,8 @@ struct TabList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(
+        project: project, worktree: worktree, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let worktreeID: WorktreeID
         let projectID: ProjectID
@@ -61,6 +63,7 @@ struct TabRename: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String
   @Argument(help: "New title; omit or pass '' to clear.")
@@ -74,7 +77,8 @@ struct TabRename: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      let scope = try await ScopeResolver.tab(
+        project: project, worktree: worktree, tab: tab, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let id: TabID
         let worktreeID: WorktreeID
@@ -103,6 +107,7 @@ struct TabNew: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Tab name.")
   var name: String?
   @Option(name: .long, help: "Project id, name, or 'current'.")
@@ -114,7 +119,8 @@ struct TabNew: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(
+        project: project, worktree: worktree, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let projectID: ProjectID
         let worktreeID: WorktreeID
@@ -165,6 +171,7 @@ struct TabClose: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Tab id, t<n> handle, title, or 'current'.")
   var tab: String
   @Option(name: .long, help: "Project id, name, or 'current'.")
@@ -176,7 +183,8 @@ struct TabClose: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      let scope = try await ScopeResolver.tab(
+        project: project, worktree: worktree, tab: tab, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let id: TabID
         let worktreeID: WorktreeID

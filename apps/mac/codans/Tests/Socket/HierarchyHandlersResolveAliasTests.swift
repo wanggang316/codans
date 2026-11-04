@@ -206,7 +206,136 @@ struct HierarchyHandlersResolveAliasTests {
     #expect(HierarchyHandlers.worktreesMatchingPath("/srv/repo/feature", in: Catalog(projects: [remote])).isEmpty)
   }
 
+  // MARK: - Host filter (ADR 0006)
+
+  @Test
+  func projectNameOnTwoHostsIsAConflictListingEachHost() async throws {
+    let fixture = Self.makeTwoHostCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in nil }
+
+    let outcome = await handlers.resolveAlias(
+      try JSONValue.encoded(IPC.AliasResolveRequest(kind: .project, value: "agents")), peerPID: nil)
+
+    guard case .failed(.conflict(let reason)) = outcome else {
+      Issue.record("expected .conflict, got \(outcome)")
+      return
+    }
+    #expect(reason.contains("\(fixture.local) host=0"))
+    #expect(reason.contains("\(fixture.remote) host=\(fixture.host.id)"))
+  }
+
+  @Test
+  func hostFilterSelectsTheProjectOnThatHost() async throws {
+    let fixture = Self.makeTwoHostCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in nil }
+
+    let onThisMac: IPC.AliasResolveResult = try Self.decodeUnary(
+      await handlers.resolveAlias(
+        try JSONValue.encoded(IPC.AliasResolveRequest(kind: .project, value: "agents", hostID: "0")), peerPID: nil))
+    let onMini: IPC.AliasResolveResult = try Self.decodeUnary(
+      await handlers.resolveAlias(
+        try JSONValue.encoded(
+          IPC.AliasResolveRequest(kind: .project, value: "agents", hostID: fixture.host.id.description.lowercased())),
+        peerPID: nil))
+
+    #expect(onThisMac.id == fixture.local.raw)
+    #expect(onMini.id == fixture.remote.raw)
+  }
+
+  @Test
+  func projectIDMustBeOnTheGivenHost() async throws {
+    let fixture = Self.makeTwoHostCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in nil }
+    func resolve(_ id: ProjectID, host: String) async throws -> RouterOutcome {
+      await handlers.resolveAlias(
+        try JSONValue.encoded(IPC.AliasResolveRequest(kind: .project, value: id.description, hostID: host)),
+        peerPID: nil)
+    }
+
+    let matching: IPC.AliasResolveResult = try Self.decodeUnary(
+      try await resolve(fixture.remote, host: fixture.host.id.description))
+    #expect(matching.id == fixture.remote.raw)
+
+    guard case .failed(.conflict(let reason)) = try await resolve(fixture.local, host: fixture.host.id.description)
+    else {
+      Issue.record("expected .conflict for a Project on another Host")
+      return
+    }
+    #expect(reason.contains("host=0"))
+    guard case .failed(.notFound) = try await resolve(ProjectID(), host: "0") else {
+      Issue.record("expected .notFound for an unknown Project id")
+      return
+    }
+  }
+
+  @Test
+  func currentProjectMustBeOnTheGivenHost() async throws {
+    let fixture = Self.makeCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in fixture.pane }
+    func resolve(host: String) async throws -> RouterOutcome {
+      await handlers.resolveAlias(
+        try JSONValue.encoded(IPC.AliasResolveRequest(kind: .project, value: "current", hostID: host)), peerPID: 1)
+    }
+
+    let result: IPC.AliasResolveResult = try Self.decodeUnary(try await resolve(host: "0"))
+    #expect(result.id == fixture.project.raw)
+  }
+
+  @Test
+  func invalidHostIsInvalidParamsAndUnknownHostIsNotFound() async throws {
+    let fixture = Self.makeTwoHostCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in nil }
+    func resolve(host: String) async throws -> RouterOutcome {
+      await handlers.resolveAlias(
+        try JSONValue.encoded(IPC.AliasResolveRequest(kind: .project, value: "agents", hostID: host)), peerPID: nil)
+    }
+
+    for invalid in ["", "mini", "1", " 0"] {
+      guard case .failed(.invalidParams(_, let path)) = try await resolve(host: invalid) else {
+        Issue.record("expected .invalidParams for host \"\(invalid)\"")
+        continue
+      }
+      #expect(path == ["hostID"])
+    }
+    let unknown = UUID().uuidString
+    guard case .failed(.notFound(let kind, let id)) = try await resolve(host: unknown) else {
+      Issue.record("expected .notFound for an unknown Host")
+      return
+    }
+    #expect(kind == "host")
+    #expect(id == unknown)
+  }
+
+  @Test
+  func hostFilterDoesNotApplyToOtherKinds() async throws {
+    let fixture = Self.makeCatalog()
+    let handlers = Self.makeHandlers(catalog: fixture.catalog) { _ in nil }
+
+    let result: IPC.AliasResolveResult = try Self.decodeUnary(
+      await handlers.resolveAlias(
+        try JSONValue.encoded(IPC.AliasResolveRequest(kind: .tab, value: "dev server", hostID: "not-a-host")),
+        peerPID: nil))
+
+    #expect(result.id == fixture.tab.raw)
+  }
+
   // MARK: - Helpers
+
+  private struct TwoHostFixture {
+    let catalog: Catalog
+    let host: HostRecord
+    let local: ProjectID
+    let remote: ProjectID
+  }
+
+  /// `agents` on This Mac and on the Host `mini`, at the same path.
+  private static func makeTwoHostCatalog() -> TwoHostFixture {
+    let mini = HostRecord(address: "mini.local", username: "me", name: "mini")
+    let local = Project(name: "agents", rootPath: "/Users/me/agents")
+    let remote = Project(name: "agents", rootPath: "/Users/me/agents", hostID: mini.id, remoteHost: mini.endpoint)
+    return TwoHostFixture(
+      catalog: Catalog(projects: [local, remote], hosts: [mini]), host: mini, local: local.id, remote: remote.id)
+  }
 
   private static func makeHandlers(
     catalog: Catalog = Catalog(projects: []),

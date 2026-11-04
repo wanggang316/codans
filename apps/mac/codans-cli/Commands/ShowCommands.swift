@@ -15,6 +15,7 @@ struct ProjectShow: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Project id, name, or 'current'.")
   var project: String = "current"
 
@@ -22,7 +23,7 @@ struct ProjectShow: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let uuid = try await hostOptions.resolveProject(project, client: client)
       let description: IPC.ProjectDescription = try await client.call(
         .hierarchyDescribeProject, params: IPC.DescribeRequest(id: uuid))
       try Renderer.emit(KeyValueRenderable(description, lines: ProjectShowLines.lines), mode: globals.renderMode)

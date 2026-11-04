@@ -25,6 +25,7 @@ struct HierarchyHandlersAddProjectTests {
     let result: HierarchyHandlers.AddProjectResult = try Self.decodeUnary(outcome)
 
     #expect(result.gitRoot == "/discovered")
+    #expect(result.host == .thisMac)
     #expect(result.rootPath == HierarchyManager.canonicalPath(directory.path))
     #expect(fixture.manager.catalog.projects.first?.gitRoot == "/discovered")
     #expect(reconciled == [result.id])

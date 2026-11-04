@@ -43,8 +43,8 @@ struct HierarchyRenderablesHostTests {
       HierarchyTreeRenderable(projects: projects, handles: nil, hosts: hosts), command: "tree", mode: .text(useColor: false))
     let lines = text.split(separator: "\n").map(String.init)
 
-    #expect(lines.contains("  host: This Mac"))
-    #expect(lines.contains("  host: Build box  \(Self.box.id)"))
+    #expect(lines.contains("  host: This Mac  host=0"))
+    #expect(lines.contains("  host: Build box  host=\(Self.box.id)"))
     #expect(lines.contains { $0.hasPrefix("srv  ") && $0.hasSuffix("[server]") })
   }
 
@@ -56,7 +56,7 @@ struct HierarchyRenderablesHostTests {
     let rows = try #require(try data(json)["projects"] as? [[String: Any]])
 
     let localHost = try #require(rows[0]["host"] as? [String: Any])
-    #expect(localHost["id"] is NSNull)
+    #expect(localHost["id"] as? String == "0")
     #expect(localHost["name"] as? String == "This Mac")
     let serverHost = try #require(rows[1]["host"] as? [String: Any])
     #expect(serverHost["id"] as? String == Self.box.id.description)
@@ -66,10 +66,24 @@ struct HierarchyRenderablesHostTests {
 
   @Test
   func projectListJSONReportsServerKind() throws {
-    let (projects, _) = try Self.listedProjects()
-    let json = try emit(ProjectListRenderable(projects: projects), command: "project.list", mode: .json)
+    let (projects, hosts) = try Self.listedProjects()
+    let json = try emit(ProjectListRenderable(projects: projects, hosts: hosts), command: "project.list", mode: .json)
     let rows = try #require(try data(json)["projects"] as? [[String: Any]])
     #expect(rows.map { $0["kind"] as? String } == ["git_repo", "server"])
+  }
+
+  @Test
+  func projectListCarriesTheHostOfEachProject() throws {
+    let (projects, hosts) = try Self.listedProjects()
+    let renderable = ProjectListRenderable(projects: projects, hosts: hosts)
+
+    let rows = try #require(
+      try data(emit(renderable, command: "project.list", mode: .json))["projects"] as? [[String: Any]])
+    #expect(rows.map { ($0["host"] as? [String: Any])?["id"] as? String } == ["0", Self.box.id.description])
+
+    let lines = try emit(renderable, command: "project.list", mode: .text(useColor: false)).split(separator: "\n")
+    #expect(lines[0].hasSuffix("  host=0"))
+    #expect(lines[1].hasSuffix("  host=\(Self.box.id)"))
   }
 
   @Test
@@ -87,8 +101,8 @@ struct HierarchyRenderablesHostTests {
 
     let server = describe(
       host: IPC.HostRef(id: Self.box.id.description, name: "Build box"), remoteHost: "box.example.com")
-    #expect(try hostLine(server)?.hasSuffix(" Build box  \(Self.box.id)") == true)
-    #expect(try hostLine(describe(host: .thisMac, remoteHost: nil))?.hasSuffix(" This Mac") == true)
+    #expect(try hostLine(server)?.hasSuffix(" Build box  host=\(Self.box.id)") == true)
+    #expect(try hostLine(describe(host: .thisMac, remoteHost: nil))?.hasSuffix(" This Mac  host=0") == true)
     // An app that predates Host records sends only the address.
     #expect(try hostLine(describe(host: nil, remoteHost: "box.example.com"))?.hasSuffix(" box.example.com") == true)
 
