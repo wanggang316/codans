@@ -108,6 +108,12 @@ struct CodeHostsSettingsView: View {
     }
   }
 
+  /// Warning text of a missing CLI. It names only what is missing; the install command
+  /// shows on its own row so the text and the copy action stay separate.
+  static func notInstalledMessage(_ kind: CodeHostKind) -> String {
+    "\(kind.cliDisplayName) (\(kind.cliName)) is not installed."
+  }
+
   @ViewBuilder
   private func availabilityRow(_ kind: CodeHostKind) -> some View {
     switch availability[kind] ?? .unknown {
@@ -118,23 +124,22 @@ struct CodeHostsSettingsView: View {
         Text(
           user.isEmpty ? "\(kind.cliName): connected to \(host)" : "\(kind.cliName): connected to \(host) as @\(user)")
       }
+    case .notInstalled:
+      HStack(alignment: .top) {
+        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 6) {
+          Text(Self.notInstalledMessage(kind))
+            .multilineTextAlignment(.leading)
+          CLIInstallCommandRow(command: kind.installCommand)
+        }
+      }
     case .unavailable(let reason):
       HStack(alignment: .top) {
         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
           .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 4) {
-          Text(reason)
-            .multilineTextAlignment(.leading)
-          let install = "brew install \(kind.cliName)"
-          if reason.contains(install) {
-            Button("Copy `\(install)`") {
-              NSPasteboard.general.clearContents()
-              NSPasteboard.general.setString(install, forType: .string)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-          }
-        }
+        Text(reason)
+          .multilineTextAlignment(.leading)
       }
     case .unknown:
       HStack {
@@ -364,5 +369,45 @@ private struct CodeHostAliasEditorSheet: View {
       kind = alias.kind
       apiHost = alias.apiHost
     }
+  }
+}
+
+/// Install command of a missing CLI: the command in a monospaced, selectable code style,
+/// with a trailing icon-only copy button. The icon changes to a checkmark for a short
+/// time after a click, as in `GitEnvironmentBanner`.
+struct CLIInstallCommandRow: View {
+  let command: String
+
+  @State private var didCopy = false
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Text(command)
+        .font(.callout.monospaced())
+        .textSelection(.enabled)
+        .lineLimit(1)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+      Button {
+        Self.copy(command)
+        didCopy = true
+        // Revert the checkmark so a second copy still reads as a fresh confirmation.
+        Task {
+          try? await Task.sleep(for: .seconds(2))
+          didCopy = false
+        }
+      } label: {
+        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+      }
+      .buttonStyle(.borderless)
+      .help("Copy install command")
+      .accessibilityLabel("Copy install command")
+    }
+  }
+
+  static func copy(_ command: String, to pasteboard: NSPasteboard = .general) {
+    pasteboard.clearContents()
+    pasteboard.setString(command, forType: .string)
   }
 }
