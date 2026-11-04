@@ -451,9 +451,9 @@ struct HierarchySidebarFeature {
       /// A pending creation finished and its catalog row now exists. The
       /// sidebar has already written the catalog and removed the pending
       /// row; it delegates the post-completion "switch to the new worktree"
-      /// decision UP to `RootFeature`, which gates it on the auto-switch
-      /// setting and on whether the user is still viewing this pending
-      /// creation (`activePendingWorktreeID`, which only RootFeature owns).
+      /// decision UP to `RootFeature`, which gates it on whether the user
+      /// still follows this pending creation (`activePendingWorktreeID`,
+      /// which only RootFeature owns).
       /// The sidebar no longer selects or seeds panes itself.
       ///
       /// `agentProfileID` is the sheet's "Launch agent" pick (or the New
