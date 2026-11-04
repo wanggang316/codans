@@ -586,21 +586,17 @@ struct HierarchySidebarFeature {
           return .none
         }
         // ADR 0006: a Host cannot have two Projects with the same root path.
+        // The Project write attaches to the Host whose fields equal
+        // `endpoint`. That is not always `host.id`: a "New Host…" record
+        // equal to a Host added in Settings while the SSH check ran is not
+        // added, so look up by the Host the write will use.
         let catalog = hierarchyClient.snapshot()
+        let hostID = catalog.host(matching: endpoint)?.id ?? host.id
         switch sheet.mode {
         case .edit(let projectID):
-          // Keeping the Project's own Host + path is never a conflict, also
-          // when an existing duplicate shares it (duplicates stay as they are).
-          let isOwnIdentity =
-            catalog.projects.first { $0.id == projectID }.map {
-              $0.hostID == host.id
-                && Project.normalizeRemotePath($0.rootPath) == Project.normalizeRemotePath(remotePath)
-            } ?? false
-          var others = catalog
-          others.projects.removeAll { $0.id == projectID }
-          if !isOwnIdentity,
-            let conflict = others.project(
-              onHost: host.id, rootPath: remotePath, canonicalizeLocal: HierarchyManager.canonicalPath)
+          if let conflict = catalog.projectConflicting(
+            withEditOf: projectID, onHost: hostID, rootPath: remotePath,
+            canonicalizeLocal: HierarchyManager.canonicalPath)
           {
             state.remoteConnectionSheet?.errorMessage =
               RemoteConnectionFeature.State.duplicateProjectMessage(name: conflict.name, host: host)
@@ -613,7 +609,7 @@ struct HierarchySidebarFeature {
           state.remoteConnectionSheet = nil
           // Like Add Project on This Mac: reveal the existing Project.
           if let existing = catalog.project(
-            onHost: host.id, rootPath: remotePath, canonicalizeLocal: HierarchyManager.canonicalPath)
+            onHost: hostID, rootPath: remotePath, canonicalizeLocal: HierarchyManager.canonicalPath)
           {
             return .send(.delegate(.revealExistingProject(existing.id)))
           }

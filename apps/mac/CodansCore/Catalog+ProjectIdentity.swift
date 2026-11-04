@@ -39,6 +39,28 @@ extension Catalog {
     }
   }
 
+  /// The other Project that `projectID` would duplicate if its Host and
+  /// root became `hostID` and `path` (Edit Connection). `nil` when the
+  /// Project already has that Host and root: keeping its own identity is
+  /// never a conflict, also when an existing duplicate shares it, because
+  /// existing duplicates stay as they are (ADR 0006).
+  public func projectConflicting(
+    withEditOf projectID: ProjectID,
+    onHost hostID: HostID?,
+    rootPath path: String,
+    canonicalizeLocal: (String) -> String
+  ) -> Project? {
+    var others = self
+    others.projects.removeAll { $0.id == projectID }
+    guard let conflict = others.project(onHost: hostID, rootPath: path, canonicalizeLocal: canonicalizeLocal)
+    else { return nil }
+    var edited = self
+    edited.projects.removeAll { $0.id != projectID }
+    let keepsOwnIdentity =
+      edited.project(onHost: hostID, rootPath: path, canonicalizeLocal: canonicalizeLocal) != nil
+    return keepsOwnIdentity ? nil : conflict
+  }
+
   /// The Project on This Mac whose root is `path`. Server projects never
   /// match, also when their remote path is the same string.
   public func localProject(

@@ -304,6 +304,50 @@ struct RemoteConnectionSidebarFlowTests {
   }
 
   @Test
+  func connectWithANewHostThatSettingsAddedMeanwhileSelectsTheExistingProject() async {
+    // "New Host…" fields equal to Box, but Box was added in Settings while
+    // the SSH check ran: the record from the sheet has another ID.
+    let entered = HostRecord(address: Self.box.address, username: Self.box.username, port: Self.box.port)
+    let existing = Project(
+      name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
+    )
+    let fake = HostListFake(hosts: [Self.box], projects: [existing])
+    let recorder = Recorder()
+    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: .init()))
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: entered, remotePath: "/srv/app", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet = nil
+    }
+    await store.receive(\.delegate.revealExistingProject, existing.id)
+    #expect(recorder.added.isEmpty)
+    #expect(fake.catalog.hosts == [Self.box])
+  }
+
+  @Test
+  func editConnectionWithANewHostThatSettingsAddedMeanwhileShowsTheConflict() async {
+    let entered = HostRecord(address: Self.box.address, username: Self.box.username, port: Self.box.port)
+    let project = Project(
+      name: "app", rootPath: "/srv/app", hostID: Self.mini.id, remoteHost: Self.mini.endpoint
+    )
+    let other = Project(
+      name: "web", rootPath: "/srv/web", hostID: Self.box.id, remoteHost: Self.box.endpoint
+    )
+    let fake = HostListFake(hosts: [Self.mini, Self.box], projects: [project, other])
+    let recorder = Recorder()
+    var sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.mini])
+    sheet?.hostChoice = .newHost
+    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    await store.send(
+      .remoteConnectionSheet(.delegate(.connected(host: entered, remotePath: "/srv/web", gitRoot: nil)))
+    ) {
+      $0.remoteConnectionSheet?.errorMessage =
+        RemoteConnectionFeature.State.duplicateProjectMessage(name: "web", host: entered)
+    }
+    #expect(recorder.updated.isEmpty)
+  }
+
+  @Test
   func editConnectionToAnotherProjectsHostAndPathShowsAnErrorAndKeepsTheProject() async {
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
