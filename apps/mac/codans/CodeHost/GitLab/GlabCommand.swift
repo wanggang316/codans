@@ -74,6 +74,15 @@ nonisolated enum GlabCommand {
     rest(method: "GET", path: mergeRequestPath(repository, iid: iid), host: repository.host, fields: [])
   }
 
+  /// `glab api projects/<id>/merge_requests/<iid>?with_merge_status_recheck=true`: asks
+  /// GitLab to check the merge status of a merge request it marked `UNCHECKED` again.
+  /// The response body is not read; the next batched read sees the new status.
+  static func mergeRequestRecheck(repository: CodeHostRepository, iid: Int) -> Command {
+    rest(
+      method: "GET", path: "\(mergeRequestPath(repository, iid: iid))?with_merge_status_recheck=true",
+      host: repository.host, fields: [])
+  }
+
   /// `glab api --method POST projects/<id>/pipelines/<pipeline id>/retry`. GitLab
   /// retries the failed and canceled jobs of the pipeline only.
   static func pipelineRetry(repository: CodeHostRepository, pipelineID: Int64) -> Command {

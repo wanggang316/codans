@@ -116,11 +116,18 @@ nonisolated enum GitLabJSONParsers {
   static func snapshots(
     from nodes: [MergeRequestNode], branches: [String], projectPath: String
   ) -> [String: PullRequestSnapshot] {
-    var result: [String: PullRequestSnapshot] = [:]
+    selectedMergeRequests(from: nodes, branches: branches, projectPath: projectPath).mapValues(snapshot)
+  }
+
+  /// `[branch: merge request]` that `snapshots` shows, before the mapping to snapshots.
+  static func selectedMergeRequests(
+    from nodes: [MergeRequestNode], branches: [String], projectPath: String
+  ) -> [String: MergeRequestNode] {
+    var result: [String: MergeRequestNode] = [:]
     for branch in branches {
       let candidates = nodes.filter { $0.sourceBranch == branch }
       if let pick = selectMergeRequest(from: candidates, projectPath: projectPath) {
-        result[branch] = snapshot(pick)
+        result[branch] = pick
       }
     }
     return result
@@ -160,7 +167,7 @@ nonisolated enum GitLabJSONParsers {
     return survivors.first { $0.state != "closed" } ?? survivors.first
   }
 
-  private static func snapshot(_ node: MergeRequestNode) -> PullRequestSnapshot {
+  static func snapshot(_ node: MergeRequestNode) -> PullRequestSnapshot {
     let webURL = node.webUrl.flatMap(URL.init(string:))
     let jobs = node.headPipeline?.jobs?.nodes ?? []
     let wireJobs = jobs.map {
