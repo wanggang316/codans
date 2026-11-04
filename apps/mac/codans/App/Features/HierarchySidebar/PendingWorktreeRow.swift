@@ -3,10 +3,9 @@ import SwiftUI
 /// Sidebar row for an in-flight worktree creation. Renders a spinner +
 /// latest progress line while running; a red dot + truncated error
 /// caption after failure. Right-click exposes Cancel (running) or
-/// Retry / Discard (failed). The container tags the row for the native
-/// List selection, so selecting it re-focuses the creation (loading view +
-/// highlight) after the user navigated away, and the system paints the
-/// same selection chrome as for worktree rows.
+/// Retry / Discard (failed). The sidebar outline makes the row selectable,
+/// so selecting it follows the creation (loading view + highlight), and the
+/// system paints the same selection chrome as for worktree rows.
 /// See `docs/design-docs/worktree-sidebar-ordering.md` §pending 段.
 struct PendingWorktreeRow: View {
   let pending: PendingWorktree

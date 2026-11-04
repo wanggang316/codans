@@ -730,6 +730,24 @@ nonisolated struct HierarchySelection: Equatable, Sendable {
   let worktreeID: WorktreeID?
 
   static let empty = HierarchySelection(projectID: nil, worktreeID: nil)
+
+  /// The selection `catalog` shows: `Catalog.displayedSelectedProjectID` and
+  /// that project's selected worktree. Reducers read it from a live
+  /// `snapshot()` when `selectionChanged` may not have reached them yet.
+  init(catalog: Catalog) {
+    guard let pid = catalog.displayedSelectedProjectID,
+      let project = catalog.projects.first(where: { $0.id == pid })
+    else {
+      self = .empty
+      return
+    }
+    self.init(projectID: project.id, worktreeID: project.selectedWorktreeID)
+  }
+
+  init(projectID: ProjectID?, worktreeID: WorktreeID?) {
+    self.projectID = projectID
+    self.worktreeID = worktreeID
+  }
 }
 
 // MARK: - Live bridge
@@ -2318,11 +2336,7 @@ extension HierarchyClient {
   /// app launch lands on a sensible default without a UI poke.
   @MainActor
   private static func currentSelection(for manager: HierarchyManager) -> HierarchySelection {
-    let catalog = manager.catalog
-    guard let pid = catalog.displayedSelectedProjectID,
-      let project = catalog.projects.first(where: { $0.id == pid })
-    else { return .empty }
-    return HierarchySelection(projectID: project.id, worktreeID: project.selectedWorktreeID)
+    HierarchySelection(catalog: manager.catalog)
   }
 }
 

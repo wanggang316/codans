@@ -190,7 +190,9 @@ struct RootFeatureTests {
     let (paneStream, paneContinuation) = AsyncStream<Set<PaneID>>.makeStream()
     var state = RootFeature.State()
     state.commandQueueDrafts = [kept: "a", closed: "b"]
-    let store = TestStore(initialState: state) { RootFeature() } withDependencies: {
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
       $0.hierarchyClient.paneMembershipChanges = { paneStream }
       $0.hierarchyClient.snapshot = { Catalog() }
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
@@ -212,7 +214,9 @@ struct RootFeatureTests {
   func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
-    let store = TestStore(initialState: initial) { RootFeature() } withDependencies: {
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
       $0.hierarchyClient.snapshot = { Catalog() }
     }
     await store.send(.openDiffRequested)
@@ -323,7 +327,9 @@ struct RootFeatureTests {
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.editorClient = EditorClient.testValue
       // `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`, which spawns a
       // pane in the active tab when it has none. The fixture tab is empty so
@@ -428,7 +434,8 @@ struct RootFeatureTests {
     if acrossProjects {
       let target = catalog.projects[0].worktrees.removeLast()
       catalog.projects.append(
-        Project(id: targetProjectID, name: "other", rootPath: "/other", gitRoot: "/other",
+        Project(
+          id: targetProjectID, name: "other", rootPath: "/other", gitRoot: "/other",
           worktrees: [target], selectedWorktreeID: worktreeB))
       catalog.selectedProjectID = targetProjectID
     } else {
@@ -1361,7 +1368,9 @@ struct RootFeatureTests {
       RemoteInfo(host: "github.com", path: "w/r")
     }
     values[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-    values[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+    values[CodeHostClient.self].resolveRepository = { remote, _ in
+      CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+    }
   }
 
   // MARK: - Agents-panel row tap reveals the worktree
@@ -1464,34 +1473,91 @@ struct RootFeatureTests {
     var didSelect: Bool { project.value != nil || worktree.value != nil }
   }
 
+  /// Stands in for `HierarchyManager`'s live selection: `selectProject` /
+  /// `selectWorktree` write it and `snapshot()` reads it back. A test moves
+  /// the user with `select(…)` and no `selectionChanged`, which is the async
+  /// ordering the reducer's follow checks guard.
+  private struct LiveSelection: Sendable {
+    let catalog = LockIsolated(Catalog())
+
+    var selection: HierarchySelection { HierarchySelection(catalog: catalog.value) }
+
+    func select(project: ProjectID?) {
+      catalog.withValue { catalog in
+        if let project { Self.ensure(project, in: &catalog) }
+        catalog.selectedProjectID = project
+      }
+    }
+
+    func select(worktree: WorktreeID?, in project: ProjectID) {
+      catalog.withValue { catalog in
+        Self.ensure(project, in: &catalog)
+        if let index = catalog.projects.firstIndex(where: { $0.id == project }) {
+          catalog.projects[index].selectedWorktreeID = worktree
+        }
+      }
+    }
+
+    func select(_ selection: HierarchySelection) {
+      select(project: selection.projectID)
+      if let project = selection.projectID { select(worktree: selection.worktreeID, in: project) }
+    }
+
+    private static func ensure(_ project: ProjectID, in catalog: inout Catalog) {
+      guard !catalog.projects.contains(where: { $0.id == project }) else { return }
+      catalog.projects.append(Project(id: project, name: "p", rootPath: "/p-\(project)"))
+    }
+  }
+
+  /// Seeds `state` and `live` as if the user followed `pendingID` in
+  /// `projectID` from `prior`: the follow selection is live.
+  private static func seedFollowing(
+    _ pendingID: PendingWorktreeID, in projectID: ProjectID, prior: HierarchySelection? = nil,
+    state: inout RootFeature.State, live: LiveSelection
+  ) {
+    let followed = HierarchySelection(projectID: projectID, worktreeID: nil)
+    state.activePendingWorktreeID = pendingID
+    state.pendingFollowSelection = followed
+    state.pendingPriorSelection = prior
+    state.selection = followed
+    live.select(followed)
+  }
+
   /// Builds a gate TestStore with `selectProject`/`selectWorktree` and
-  /// `setWorktreeIsNew` wired into `recorder`. `autoSwitch` sets the LIVE
-  /// settings snapshot read at completion; `activePendingWorktreeID` seeds
-  /// the state field (used by the loading-view resolver, independent of the
-  /// switch gate). `selectionChanges` finishes immediately so the post-select
-  /// stream does not feed back a `.selectionChanged` (the gate's switch
-  /// decision is what these tests assert, not the downstream auto-seed).
+  /// `setWorktreeIsNew` wired into `recorder` and `live`. `autoSwitch` sets
+  /// the LIVE settings snapshot; `followingIn` seeds the user as still
+  /// following `activePendingWorktreeID` in that project. `selectionChanges`
+  /// finishes immediately so the post-select stream does not feed back a
+  /// `.selectionChanged` (the gate's switch decision is what these tests
+  /// assert, not the downstream auto-seed).
   @MainActor
   private func makeGateStore(
     autoSwitch: Bool,
     activePendingWorktreeID: PendingWorktreeID?,
-    recorder: SelectRecorder
+    followingIn followedProjectID: ProjectID? = nil,
+    recorder: SelectRecorder,
+    live: LiveSelection = LiveSelection()
   ) -> TestStore<RootFeature.State, RootFeature.Action> {
     var initial = RootFeature.State()
     initial.activePendingWorktreeID = activePendingWorktreeID
+    if let activePendingWorktreeID, let followedProjectID {
+      Self.seedFollowing(activePendingWorktreeID, in: followedProjectID, state: &initial, live: live)
+    }
     let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: autoSwitch))
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
-      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.snapshot = { live.catalog.value }
       $0[SettingsWriter.self].readSnapshotSync = { settings }
       $0.hierarchyClient.selectProject = { pid in
         recorder.project.withValue { $0 = pid }
+        live.select(project: pid)
       }
-      $0.hierarchyClient.selectWorktree = { wt, _ in
+      $0.hierarchyClient.selectWorktree = { wt, pid in
         recorder.worktree.withValue { $0 = wt }
+        live.select(worktree: wt, in: pid)
       }
       $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
         recorder.isNewCalls.withValue { $0.append((wt, isNew)) }
@@ -1501,14 +1567,18 @@ struct RootFeatureTests {
     return store
   }
 
-  @Test
-  func gateOnWatchingSwitches() async {
-    // VAL-SWITCH-001: auto-switch ON + still viewing this pending → switch.
+  /// A user still following the creation lands on the new worktree, under
+  /// either setting (OFF follows only after a pending-row click). Following
+  /// ends, and no "New" marker is minted: the user is looking at it.
+  @Test(arguments: [true, false])
+  func gateFollowingSwitches(autoSwitch: Bool) async {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+    let store = makeGateStore(
+      autoSwitch: autoSwitch, activePendingWorktreeID: pendingID, followingIn: projectID,
+      recorder: rec)
 
     await store.send(
       .sidebar(
@@ -1518,6 +1588,42 @@ struct RootFeatureTests {
     await store.finish()
     #expect(rec.project.value == projectID)
     #expect(rec.worktree.value == worktreeID)
+    #expect(rec.isNewCalls.value.isEmpty)
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingFollowSelection == nil)
+    #expect(store.state.pendingPriorSelection == nil)
+  }
+
+  /// The user navigated away, but the `selectionChanged` for it has not
+  /// reached the reducer when completion runs. The live selection decides:
+  /// no switch, a "New" marker, and following ends. Covers a real worktree
+  /// and a non-worktree target (another project with no worktree selected).
+  @Test(arguments: [true, false])
+  func gateNavigatedAwayBeforeSelectionChangedStays(toWorktree: Bool) async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let rec = SelectRecorder()
+    let live = LiveSelection()
+    let store = makeGateStore(
+      autoSwitch: true, activePendingWorktreeID: pendingID, followingIn: projectID,
+      recorder: rec, live: live)
+    let elsewhere = HierarchySelection(
+      projectID: ProjectID(), worktreeID: toWorktree ? WorktreeID() : nil)
+    live.select(elsewhere)
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(!rec.didSelect)
+    #expect(live.selection == elsewhere)
+    #expect(rec.isNewCalls.value.count == 1)
+    #expect(rec.isNewCalls.value.first?.0 == worktreeID)
+    #expect(rec.isNewCalls.value.first?.1 == true)
+    #expect(store.state.activePendingWorktreeID == nil)
   }
 
   /// The Create sheet's agent launches once the worktree materializes (the
@@ -1740,39 +1846,20 @@ struct RootFeatureTests {
     #expect(store.state.agentLaunchWorktreeIDs.isEmpty)
   }
 
-  @Test
-  func gateOnAwaySwitches() async {
-    // VAL-SWITCH-002: auto-switch ON + user navigated away (active id is a
-    // different pending) → still switch, because the setting forces it.
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    let pendingID = PendingWorktreeID()
-    let rec = SelectRecorder()
-    let store = makeGateStore(
-      autoSwitch: true, activePendingWorktreeID: PendingWorktreeID(), recorder: rec)
-
-    await store.send(
-      .sidebar(
-        .delegate(
-          .worktreeMaterialized(
-            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
-    await store.finish()
-    #expect(rec.project.value == projectID)
-    #expect(rec.worktree.value == worktreeID)
-  }
-
-  @Test
-  func gateOffAwayStays() async {
-    // VAL-SWITCH-003: auto-switch OFF + away (active id is a *different*
-    // pending) → do not switch. Selection is untouched, and the dangling
-    // active id (a different pending) is left as-is.
+  /// The user follows a DIFFERENT creation: this completion does not move
+  /// them, badges its worktree, and leaves the other creation followed.
+  /// Under ON this is also the "navigated away" case: the setting no longer
+  /// forces a switch.
+  @Test(arguments: [true, false])
+  func gateFollowingAnotherCreationStays(autoSwitch: Bool) async {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let otherPending = PendingWorktreeID()
     let rec = SelectRecorder()
     let store = makeGateStore(
-      autoSwitch: false, activePendingWorktreeID: otherPending, recorder: rec)
+      autoSwitch: autoSwitch, activePendingWorktreeID: otherPending, followingIn: projectID,
+      recorder: rec)
 
     await store.send(
       .sidebar(
@@ -1781,21 +1868,19 @@ struct RootFeatureTests {
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
     #expect(!rec.didSelect)
+    #expect(rec.isNewCalls.value.map(\.0) == [worktreeID])
     #expect(store.state.activePendingWorktreeID == otherPending)
   }
 
+  /// Under ON a user who navigated away (following already ended) is left
+  /// where they are, and the new worktree gets the "New" marker.
   @Test
-  func gateOffWatchingStays() async {
-    // VAL-SWITCH-004: auto-switch OFF + still viewing this pending creation
-    // → the NEW worktree never takes focus. With no pre-create selection
-    // stashed (this harness seeds none) there is nothing to restore, so no
-    // selection movement happens at all; the stashed-prior landing is
-    // covered by `gateOffWatchingRestoresPriorSelection`.
+  func gateOnAwayStaysAndMintsIsNew() async {
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
+    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: nil, recorder: rec)
 
     await store.send(
       .sidebar(
@@ -1804,29 +1889,9 @@ struct RootFeatureTests {
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
     #expect(!rec.didSelect)
-  }
-
-  @Test
-  func gateReadsLiveSettingAtCompletion() async {
-    // VAL-SWITCH-006: a mid-flight toggle decides the outcome — the gate
-    // reads the LIVE snapshot at completion, not a value captured at
-    // kickoff. Here the snapshot reads OFF and the user is away, so the
-    // late-flipped-OFF value makes the gate stay even though kickoff may
-    // have happened while ON.
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    let pendingID = PendingWorktreeID()
-    let rec = SelectRecorder()
-    let store = makeGateStore(
-      autoSwitch: false, activePendingWorktreeID: PendingWorktreeID(), recorder: rec)
-
-    await store.send(
-      .sidebar(
-        .delegate(
-          .worktreeMaterialized(
-            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
-    await store.finish()
-    #expect(!rec.didSelect)
+    #expect(rec.isNewCalls.value.count == 1)
+    #expect(rec.isNewCalls.value.first?.0 == worktreeID)
+    #expect(rec.isNewCalls.value.first?.1 == true)
   }
 
   @Test
@@ -1838,7 +1903,11 @@ struct RootFeatureTests {
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+    let live = LiveSelection()
+    live.select(HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID()))
+    let store = makeGateStore(
+      autoSwitch: true, activePendingWorktreeID: pendingID, followingIn: projectID,
+      recorder: rec, live: live)
 
     await store.send(
       .sidebar(
@@ -1848,20 +1917,21 @@ struct RootFeatureTests {
     await store.finish()
     #expect(rec.project.value == projectID)
     #expect(rec.worktree.value == worktreeID)
+    #expect(live.selection == HierarchySelection(projectID: projectID, worktreeID: worktreeID))
   }
 
   // MARK: - badge-set-on-complete (M3): isNew marker
 
   @Test
   func gateOffMintsIsNewMarkerOnMaterializedWorktree() async {
-    // badge-set-on-complete M3: auto-switch OFF → reducer calls
-    // `setWorktreeIsNew(worktreeID, true)` on the just-materialized worktree.
-    // The user stays put (unfocused new worktree) and a badge must land.
+    // badge-set-on-complete M3: a background creation under OFF (never
+    // followed) → reducer calls `setWorktreeIsNew(worktreeID, true)` on the
+    // just-materialized worktree. The user stays put and a badge must land.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: nil, recorder: rec)
 
     await store.send(
       .sidebar(
@@ -1880,13 +1950,14 @@ struct RootFeatureTests {
 
   @Test
   func gateOnDoesNotMintIsNewMarkerOnMaterializedWorktree() async {
-    // badge-set-on-complete M3: auto-switch ON → reducer switches focus but
-    // must NOT call `setWorktreeIsNew`. The focused worktree is already visible.
+    // badge-set-on-complete M3: auto-switch ON and still following → reducer
+    // switches focus but must NOT call `setWorktreeIsNew`.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+    let store = makeGateStore(
+      autoSwitch: true, activePendingWorktreeID: pendingID, followingIn: projectID, recorder: rec)
 
     await store.send(
       .sidebar(
@@ -1921,7 +1992,8 @@ struct RootFeatureTests {
   private func makeKickoffStore(
     autoSwitch: Bool,
     initial: RootFeature.State,
-    recorder: SelectCallRecorder
+    recorder: SelectCallRecorder,
+    live: LiveSelection = LiveSelection()
   ) -> TestStore<RootFeature.State, RootFeature.Action> {
     let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: autoSwitch))
     let store = TestStore(initialState: initial) {
@@ -1929,16 +2001,18 @@ struct RootFeatureTests {
     } withDependencies: {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
-      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.snapshot = { live.catalog.value }
       $0[SettingsWriter.self].readSnapshotSync = { settings }
       $0.gitWorktreeClient.createWorktreeStream = { _ in
         AsyncThrowingStream { $0.finish() }
       }
       $0.hierarchyClient.selectProject = { pid in
         recorder.projects.withValue { $0.append(pid) }
+        live.select(project: pid)
       }
-      $0.hierarchyClient.selectWorktree = { wt, _ in
+      $0.hierarchyClient.selectWorktree = { wt, pid in
         recorder.worktrees.withValue { $0.append(wt) }
+        live.select(worktree: wt, in: pid)
       }
       $0.hierarchyClient.setWorktreeIsNew = { wt, isNew in
         recorder.isNewCalls.withValue { $0.append((wt, isNew)) }
@@ -1968,104 +2042,103 @@ struct RootFeatureTests {
     )
   }
 
-  /// Clicking Create moves focus to the creation right away — the
-  /// pre-create selection is stashed for the completion landing, the
-  /// loading overlay arms, and the manager selection deselects the old
-  /// row (project selected, worktree nil) so the sidebar highlight lands
-  /// on the pending row's manual pill.
+  /// Under ON, clicking Create follows the creation right away — the live
+  /// selection is stashed as the restore point, the loading overlay arms,
+  /// and the manager selection deselects the old row (project selected,
+  /// worktree nil) so the sidebar highlight lands on the pending row.
   @Test
-  func beginPendingOnFocusesCreationAndStashesPrior() async {
+  func beginPendingOnFollowsCreationAndStashesPrior() async {
     let projectID = ProjectID()
     let prior = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
     let pending = Self.makeRootPending(projectID: projectID)
     let rec = SelectCallRecorder()
+    let live = LiveSelection()
+    live.select(prior)
     var initial = RootFeature.State()
     initial.selection = prior
-    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec)
+    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec, live: live)
 
     await store.send(.sidebar(.beginPendingWorktreeCreation(pending)))
     await store.finish()
 
     #expect(store.state.activePendingWorktreeID == pending.id)
     #expect(store.state.pendingPriorSelection == prior)
+    #expect(
+      store.state.pendingFollowSelection
+        == HierarchySelection(projectID: projectID, worktreeID: nil))
     #expect(rec.projects.value == [projectID])
     #expect(
-      rec.worktrees.value == [nil], "old row must deselect so the pending pill reads as focus")
+      rec.worktrees.value == [nil], "old row must deselect so the pending row reads as focus")
   }
 
-  /// Creation focus at kickoff is UNCONDITIONAL — the auto-switch
-  /// setting only decides where focus lands at COMPLETION. OFF must
-  /// behave identically to ON at the click: overlay armed, prior
-  /// stashed, old row deselected.
+  /// Under OFF the creation runs in the background: the row appears, but
+  /// no loading view arms and the selection does not move.
   @Test
-  func beginPendingOffAlsoFocusesCreationAtKickoff() async {
+  func beginPendingOffRunsInBackground() async {
     let projectID = ProjectID()
-    let prior = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
+    let prior = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
     let pending = Self.makeRootPending(projectID: projectID)
     let rec = SelectCallRecorder()
+    let live = LiveSelection()
+    live.select(prior)
     var initial = RootFeature.State()
     initial.selection = prior
-    let store = makeKickoffStore(autoSwitch: false, initial: initial, recorder: rec)
+    let store = makeKickoffStore(autoSwitch: false, initial: initial, recorder: rec, live: live)
 
     await store.send(.sidebar(.beginPendingWorktreeCreation(pending)))
     await store.finish()
 
-    #expect(store.state.activePendingWorktreeID == pending.id)
-    #expect(store.state.pendingPriorSelection == prior)
-    #expect(rec.projects.value == [projectID])
-    #expect(rec.worktrees.value == [nil])
-  }
-
-  /// Auto-switch OFF landing while still following the creation:
-  /// completion mints the badge AND hands focus back to the stashed
-  /// pre-create selection — OFF's contract is "when it's done, put me
-  /// back where I was", never "leave me parked on a settled loading
-  /// view with nothing selected".
-  @Test
-  func gateOffWatchingRestoresPriorSelection() async {
-    let priorProject = ProjectID()
-    let priorWorktree = WorktreeID()
-    let prior = HierarchySelection(projectID: priorProject, worktreeID: priorWorktree)
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    let pendingID = PendingWorktreeID()
-    let rec = SelectCallRecorder()
-    var initial = RootFeature.State()
-    initial.activePendingWorktreeID = pendingID
-    initial.pendingPriorSelection = prior
-    let store = makeKickoffStore(autoSwitch: false, initial: initial, recorder: rec)
-
-    await store.send(
-      .sidebar(
-        .delegate(
-          .worktreeMaterialized(
-            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
-    await store.finish()
-
-    #expect(rec.isNewCalls.value.count == 1)
-    #expect(rec.isNewCalls.value.first?.1 == true)
+    #expect(store.state.sidebar.pendingWorktrees[id: pending.id] != nil)
     #expect(store.state.activePendingWorktreeID == nil)
     #expect(store.state.pendingPriorSelection == nil)
-    #expect(rec.projects.value == [priorProject])
-    #expect(rec.worktrees.value == [priorWorktree])
+    #expect(store.state.pendingFollowSelection == nil)
+    #expect(rec.projects.value.isEmpty)
+    #expect(rec.worktrees.value.isEmpty)
+    #expect(live.selection == prior)
   }
 
-  /// Clicking the pending row after navigating away re-arms the creation
-  /// focus — the overlay, the pending pill, and the deselect all return,
-  /// and the just-left selection becomes the new restore point. This is
-  /// the "switch back" half of arbitrary switching during a creation.
+  /// The New Agent dialog's "new worktree + agent" follows the same rule:
+  /// under OFF the creation (and later its agent) runs in the background.
   @Test
-  func pendingRowTapRefocusesCreationAfterNavigatingAway() async {
+  func newAgentCreateWorktreeOffRunsInBackground() async {
+    let projectID = ProjectID()
+    let prior = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    let pending = Self.makeRootPending(projectID: projectID)
+    let rec = SelectCallRecorder()
+    let live = LiveSelection()
+    live.select(prior)
+    var initial = RootFeature.State()
+    initial.selection = prior
+    initial.newAgent = NewAgentFeature.State(preferredProjectID: projectID)
+    let store = makeKickoffStore(autoSwitch: false, initial: initial, recorder: rec, live: live)
+
+    await store.send(.newAgent(.presented(.delegate(.createWorktree(pending)))))
+    await store.receive(\.sidebar.beginPendingWorktreeCreation)
+    await store.finish()
+
+    #expect(store.state.newAgent == nil)
+    #expect(store.state.sidebar.pendingWorktrees[id: pending.id] != nil)
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(rec.projects.value.isEmpty)
+    #expect(rec.worktrees.value.isEmpty)
+  }
+
+  /// Clicking a pending row follows that creation under either setting:
+  /// the overlay arms, the old row deselects, and the just-left selection
+  /// becomes the restore point.
+  @Test(arguments: [true, false])
+  func pendingRowTapFollowsCreation(autoSwitch: Bool) async {
     let projectID = ProjectID()
     let pending = Self.makeRootPending(projectID: projectID)
     let elsewhere = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
     let rec = SelectCallRecorder()
+    let live = LiveSelection()
+    live.select(elsewhere)
     var initial = RootFeature.State()
-    // As after navigating away mid-creation: row still streaming, overlay
-    // and stash both cleared by the real-worktree landing.
     initial.sidebar.pendingWorktrees.append(pending)
     initial.selection = elsewhere
-    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec)
+    let store = makeKickoffStore(
+      autoSwitch: autoSwitch, initial: initial, recorder: rec, live: live)
 
     await store.send(.sidebar(.pendingWorktreeRowTapped(pending.id)))
     await store.finish()
@@ -2092,30 +2165,54 @@ struct RootFeatureTests {
     #expect(rec.projects.value.isEmpty)
   }
 
-  /// Cancelling the FOLLOWED creation while still in the git-add leg
-  /// (row discarded, nothing materializes) bounces focus back to the
-  /// stashed pre-create selection.
-  @Test
-  func cancelOfFollowedCreationRestoresPrior() async {
-    let priorProject = ProjectID()
-    let priorWorktree = WorktreeID()
-    let prior = HierarchySelection(projectID: priorProject, worktreeID: priorWorktree)
-    let pending = Self.makeRootPending(projectID: ProjectID())
+  /// Cancelling (git-add leg, row removed) or discarding the FOLLOWED
+  /// creation returns the user to the selection from before following.
+  @Test(arguments: [true, false])
+  func abandoningFollowedCreationRestoresPrior(cancel: Bool) async {
+    let prior = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    let projectID = ProjectID()
+    var pending = Self.makeRootPending(projectID: projectID)
+    if !cancel { pending.status = .failed(.commandFailed(command: "git", stderr: "boom")) }
     let rec = SelectCallRecorder()
+    let live = LiveSelection()
     var initial = RootFeature.State()
     initial.sidebar.pendingWorktrees.append(pending)
-    initial.activePendingWorktreeID = pending.id
-    initial.pendingPriorSelection = prior
-    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec)
+    Self.seedFollowing(pending.id, in: projectID, prior: prior, state: &initial, live: live)
+    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec, live: live)
 
-    await store.send(.sidebar(.pendingWorktreeCancelTapped(pending.id)))
+    await store.send(
+      .sidebar(cancel ? .pendingWorktreeCancelTapped(pending.id) : .pendingWorktreeDiscardTapped(pending.id)))
     await store.finish()
 
     #expect(store.state.sidebar.pendingWorktrees.isEmpty)
     #expect(store.state.activePendingWorktreeID == nil)
     #expect(store.state.pendingPriorSelection == nil)
-    #expect(rec.projects.value == [priorProject])
-    #expect(rec.worktrees.value == [priorWorktree])
+    #expect(store.state.pendingFollowSelection == nil)
+    #expect(live.selection == prior)
+  }
+
+  /// A cancel that lands after the user navigated away (their
+  /// `selectionChanged` not yet in the reducer) restores nothing.
+  @Test
+  func cancelAfterNavigatingAwayRestoresNothing() async {
+    let prior = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    let projectID = ProjectID()
+    let pending = Self.makeRootPending(projectID: projectID)
+    let rec = SelectCallRecorder()
+    let live = LiveSelection()
+    var initial = RootFeature.State()
+    initial.sidebar.pendingWorktrees.append(pending)
+    Self.seedFollowing(pending.id, in: projectID, prior: prior, state: &initial, live: live)
+    let store = makeKickoffStore(autoSwitch: true, initial: initial, recorder: rec, live: live)
+    let elsewhere = HierarchySelection(projectID: ProjectID(), worktreeID: nil)
+    live.select(elsewhere)
+
+    await store.send(.sidebar(.pendingWorktreeCancelTapped(pending.id)))
+    await store.finish()
+
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingPriorSelection == nil)
+    #expect(live.selection == elsewhere)
   }
 
   // MARK: - Loading-view selection scoping (VAL-DETAIL-005 / VAL-DETAIL-006)
@@ -2158,7 +2255,9 @@ struct RootFeatureTests {
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.editorClient = EditorClient.testValue
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
@@ -2173,48 +2272,82 @@ struct RootFeatureTests {
     )
   }
 
-  /// VAL-DETAIL-006: navigating to a NON-worktree selection (a project-only
-  /// row, or empty selection) does NOT clear `activePendingWorktreeID`.
-  /// Combined with the resolver reading the live `pendingWorktrees` row, this
-  /// is what keeps the loading view up while the creation is focused (the
-  /// focus move itself lands a nil-worktree selection) — only a REAL
-  /// worktree landing retires the overlay.
-  @Test
-  func selectingNonWorktreeKeepsActivePendingOverlay() async {
+  /// VAL-DETAIL-006: the `selectionChanged` that following itself caused
+  /// (the pending row's project, no worktree) keeps the loading view up.
+  /// Any other target — another project with no worktree selected, or an
+  /// empty selection — ends following, so no later completion, cancel, or
+  /// discard moves the user.
+  @Test(arguments: [false, true])
+  func selectionChangedEndsFollowingOnlyWhenLeavingTheCreation(emptySelection: Bool) async {
     let projectID = ProjectID()
     let pendingID = PendingWorktreeID()
-
+    let prior = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    let live = LiveSelection()
     var initial = RootFeature.State()
-    initial.activePendingWorktreeID = pendingID
+    Self.seedFollowing(pendingID, in: projectID, prior: prior, state: &initial, live: live)
 
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
-      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.snapshot = { live.catalog.value }
       $0.gitService = GitServiceClient.testValue
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.editorClient = EditorClient.testValue
     }
     store.exhaustivity = .off
 
-    // Project-only selection (worktreeID == nil): the overlay must survive.
-    await store.send(.selectionChanged(HierarchySelection(projectID: projectID, worktreeID: nil)))
+    let followed = HierarchySelection(projectID: projectID, worktreeID: nil)
+    await store.send(.selectionChanged(followed))
     #expect(
       store.state.activePendingWorktreeID == pendingID,
-      "a project-only selection must not retire the loading overlay"
+      "the follow's own selection must not retire the loading overlay"
     )
 
-    // Empty selection (e.g. an aux window took focus): still survives.
-    await store.send(.selectionChanged(HierarchySelection(projectID: nil, worktreeID: nil)))
-    #expect(
-      store.state.activePendingWorktreeID == pendingID,
-      "an empty selection must not retire the loading overlay"
-    )
+    let away =
+      emptySelection ? HierarchySelection.empty : HierarchySelection(projectID: ProjectID(), worktreeID: nil)
+    live.select(away)
+    await store.send(.selectionChanged(away))
+    #expect(store.state.activePendingWorktreeID == nil, "navigating away must end following")
+    #expect(store.state.pendingPriorSelection == nil)
+    #expect(store.state.pendingFollowSelection == nil)
+  }
+
+  /// A stale `selectionChanged` that arrives while the live selection is
+  /// still the followed one does not end following.
+  @Test
+  func staleSelectionChangedKeepsFollowing() async {
+    let projectID = ProjectID()
+    let pendingID = PendingWorktreeID()
+    let live = LiveSelection()
+    var initial = RootFeature.State()
+    Self.seedFollowing(pendingID, in: projectID, state: &initial, live: live)
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { live.catalog.value }
+      $0.gitService = GitServiceClient.testValue
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
+      $0.editorClient = EditorClient.testValue
+    }
+    store.exhaustivity = .off
+
+    await store.send(.selectionChanged(HierarchySelection(projectID: ProjectID(), worktreeID: nil)))
+    #expect(store.state.activePendingWorktreeID == pendingID)
   }
 
   @Test
@@ -2247,7 +2380,13 @@ struct RootFeatureTests {
       id: projectID, name: "p", rootPath: "/repo", gitRoot: "/repo",
       worktrees: [worktree], selectedWorktreeID: worktreeID
     )
-    let catalog = Catalog(projects: [project])
+    let live = LiveSelection()
+    live.catalog.setValue(
+      Catalog(
+        projects: [
+          Project(
+            id: projectID, name: "p", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+        ], selectedProjectID: projectID))
 
     let settings = Settings(worktree: WorktreeSettings(autoSwitchToNewWorktree: true))
 
@@ -2262,21 +2401,23 @@ struct RootFeatureTests {
     let openPaneCalls = LockIsolated<[OpenPaneCall]>([])
 
     var initial = RootFeature.State()
-    initial.activePendingWorktreeID = pendingID
+    Self.seedFollowing(pendingID, in: projectID, state: &initial, live: live)
 
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
-      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.snapshot = { live.catalog.value }
       $0[SettingsWriter.self].readSnapshotSync = { settings }
       // Gate side-effects — record that the switch actually happened.
       $0.hierarchyClient.selectProject = { pid in
         selectRecorder.project.withValue { $0 = pid }
+        live.select(project: pid)
       }
-      $0.hierarchyClient.selectWorktree = { wt, _ in
+      $0.hierarchyClient.selectWorktree = { wt, pid in
         selectRecorder.worktree.withValue { $0 = wt }
+        live.select(worktree: wt, in: pid)
       }
       // The seed chain we are pinning.
       $0.hierarchyClient.createTab = { _, _, _ in
@@ -2296,7 +2437,9 @@ struct RootFeatureTests {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
       $0.continuousClock = ImmediateClock()
@@ -2411,7 +2554,9 @@ struct RootFeatureTests {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }
@@ -2462,7 +2607,9 @@ struct RootFeatureTests {
       $0.gitService = GitServiceClient.testValue
       $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
       $0[CodeHostClient.self].batchPullRequests = { _, _ in [:] }
-      $0[CodeHostClient.self].resolveRepository = { remote, _ in CodeHostRepository(kind: .github, host: remote.host, path: remote.path) }
+      $0[CodeHostClient.self].resolveRepository = { remote, _ in
+        CodeHostRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }

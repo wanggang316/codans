@@ -29,13 +29,13 @@ struct SidebarOutlineTests {
     var outline: SidebarOutlineView { coordinator.outline! }
 
     func show(
-      _ projects: [Project], selection: SidebarSelection? = nil, selectedProjectID: ProjectID? = nil,
-      reveal: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+      _ projects: [Project], pending: [PendingWorktree] = [], selection: SidebarSelection? = nil,
+      selectedProjectID: ProjectID? = nil, reveal: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
     ) {
       coordinator.update(
         with: SidebarOutline(
           nodes: SidebarOutlineModel.nodes(
-            projects: projects, pendingWorktrees: [], filter: .all),
+            projects: projects, pendingWorktrees: pending, filter: .all),
           selection: selection, selectedProjectID: selectedProjectID, revealTrigger: reveal, bottomInset: 0,
           allowsWorktreeDrag: true, decorateRow: { $0 },
           rowContent: { node in AnyView(Text(node.id).frame(height: 20)) },
@@ -111,6 +111,35 @@ struct SidebarOutlineTests {
     #expect(harness.selections.isEmpty)
     harness.outline.selectRowIndexes(IndexSet(integer: 2), byExtendingSelection: false)
     #expect(harness.selections == [.worktree(repo.worktrees[1].id)])
+  }
+
+  /// A creation completing while its pending row is selected: the row
+  /// leaves and the new worktree row takes its place. The outline must not
+  /// report the row that slides under the old selection as a user pick,
+  /// or completion would move a user who is not following the creation.
+  @Test(arguments: [true, false])
+  func removingTheSelectedPendingRowReportsNoSelection(stillFollowed: Bool) {
+    let harness = Harness()
+    var repo = repository("repo", worktrees: 1)
+    let pending = PendingWorktree(
+      id: PendingWorktreeID(), projectID: repo.id,
+      spec: CreateWorktreeSpec(
+        repoRoot: URL(fileURLWithPath: "/repo"), baseDirectory: URL(fileURLWithPath: "/repo/.worktrees"),
+        name: "feat-x", baseRef: "origin/main", fetchOrigin: false, copyIgnored: false, copyUntracked: false),
+      displayName: "feat/x", status: .running, lastProgressLine: nil,
+      startedAt: Date(timeIntervalSince1970: 0))
+    harness.show([repo], pending: [pending], selection: .pending(pending.id), selectedProjectID: repo.id)
+    #expect(harness.selectedID?.contains(pending.id.raw.uuidString) == true)
+
+    let created = Worktree(name: "feat/x", path: "/repo/.worktrees/feat-x", branch: "feat-x")
+    repo.worktrees.append(created)
+    // The sidebar removes the row before RootFeature ends following, so one
+    // render can still name the removed row.
+    harness.show(
+      [repo], selection: stillFollowed ? .pending(pending.id) : nil, selectedProjectID: repo.id)
+
+    #expect(harness.outline.selectedRow == -1)
+    #expect(harness.selections.isEmpty)
   }
 
   @Test

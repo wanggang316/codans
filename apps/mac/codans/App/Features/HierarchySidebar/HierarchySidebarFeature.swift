@@ -356,9 +356,10 @@ struct HierarchySidebarFeature {
     case pendingWorktreeRetryTapped(PendingWorktreeID)
     case pendingWorktreeDiscardTapped(PendingWorktreeID)
     case pendingWorktreeCancelTapped(PendingWorktreeID)
-    /// Left-click on a pending row — the user wants to come BACK to the
-    /// creation they navigated away from. Handled by `RootFeature` (it
-    /// owns the loading-overlay focus); a no-op at this level.
+    /// Left-click on a pending row — the user wants to follow that
+    /// creation (one started in the background, or one they navigated away
+    /// from). Handled by `RootFeature` (it owns the loading-overlay focus);
+    /// a no-op at this level.
     case pendingWorktreeRowTapped(PendingWorktreeID)
 
     // Tag chip footer at the sidebar's safe-area bottom.
@@ -451,9 +452,9 @@ struct HierarchySidebarFeature {
       /// A pending creation finished and its catalog row now exists. The
       /// sidebar has already written the catalog and removed the pending
       /// row; it delegates the post-completion "switch to the new worktree"
-      /// decision UP to `RootFeature`, which gates it on the auto-switch
-      /// setting and on whether the user is still viewing this pending
-      /// creation (`activePendingWorktreeID`, which only RootFeature owns).
+      /// decision UP to `RootFeature`, which switches only when the user
+      /// still follows this pending creation (`activePendingWorktreeID`,
+      /// which only RootFeature owns).
       /// The sidebar no longer selects or seeds panes itself.
       ///
       /// `agentProfileID` is the sheet's "Launch agent" pick (or the New
@@ -1312,8 +1313,8 @@ struct HierarchySidebarFeature {
       // are cosmetic side-effects and must not roll back this removal.
       state.pendingWorktrees.remove(id: id)
       // The post-completion "switch to the new worktree" decision is owned
-      // by `RootFeature`: it gates on the auto-switch setting, read live at
-      // completion. Delegate up; the sidebar no longer selects the worktree
+      // by `RootFeature`: it switches only a user who still follows the
+      // creation. Delegate up; the sidebar no longer selects the worktree
       // or seeds its first tab/pane. When RootFeature decides to switch, the
       // resulting `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`,
       // which seeds the first pane.
