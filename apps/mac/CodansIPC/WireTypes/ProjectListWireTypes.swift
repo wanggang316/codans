@@ -42,38 +42,28 @@ extension IPC {
     }
   }
 
-  /// The Host a Project is on: its Host record's id and display name, or
-  /// This Mac (no id) for a local Project.
+  /// The Host a Project is on: its `HostSelector` string (`"0"` for This
+  /// Mac) and its display name.
   public struct HostRef: Codable, Equatable, Sendable {
-    /// `HostID` as a plain UUID string; nil for This Mac, and for a Server
-    /// project reported by an app that predates Host records.
-    public let id: String?
+    public let id: String
     public let name: String
 
-    public init(id: String?, name: String) {
+    public init(id: String, name: String) {
       self.id = id
       self.name = name
     }
 
-    public static let thisMac = HostRef(id: nil, name: HostRecord.thisMacName)
-
-    private enum CodingKeys: String, CodingKey { case id, name }
-
-    /// Writes `"id": null` for This Mac instead of dropping the key, so
-    /// `--json` output always has both fields.
-    public func encode(to encoder: Encoder) throws {
-      var container = encoder.container(keyedBy: CodingKeys.self)
-      try container.encode(id, forKey: .id)
-      try container.encode(name, forKey: .name)
-    }
+    public static let thisMac = HostRef(id: HostSelector.thisMacValue, name: HostRecord.thisMacName)
 
     public init(project: Project, hosts: [HostRecord]) {
-      if let hostID = project.hostID, let record = hosts.first(where: { $0.id == hostID }) {
-        self.init(id: hostID.description, name: record.displayName)
-      } else if let endpoint = project.remoteHost {
-        self.init(id: project.hostID?.description, name: endpoint.displayAuthority)
-      } else {
+      switch HostSelector(project: project) {
+      case .thisMac:
         self = .thisMac
+      case .host(let hostID):
+        let name =
+          hosts.first(where: { $0.id == hostID })?.displayName ?? project.remoteHost?.displayAuthority
+          ?? hostID.description
+        self.init(id: HostSelector.host(hostID).description, name: name)
       }
     }
   }

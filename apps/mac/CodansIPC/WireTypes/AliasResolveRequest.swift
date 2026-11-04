@@ -13,11 +13,15 @@ extension IPC {
     public let kind: Kind
     public let value: String
     public let contextPaneID: PaneID?
+    /// `HostSelector` string (`0` or a Host UUID) that limits Project
+    /// resolution to one Host; nil does not filter. Other kinds ignore it.
+    public let hostID: String?
 
-    public init(kind: Kind, value: String, contextPaneID: PaneID? = nil) {
+    public init(kind: Kind, value: String, contextPaneID: PaneID? = nil, hostID: String? = nil) {
       self.kind = kind
       self.value = value
       self.contextPaneID = contextPaneID
+      self.hostID = hostID
     }
   }
 
