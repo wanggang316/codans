@@ -61,8 +61,9 @@ struct HostsSettingsView: View {
   private func row(for host: HostRecord) -> some View {
     let projectCount = hierarchyManager.catalog.projectCount(onHost: host.id)
     return HStack(spacing: 10) {
-      Image(systemName: "server.rack")
+      Image(systemName: host.displayIcon.systemImage)
         .foregroundStyle(.secondary)
+        .frame(width: 18)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(host.displayName)
@@ -132,7 +133,8 @@ private struct HostEditorSheet: View {
         onAddressChanged: { send(.addressChanged($0)) },
         onUsernameChanged: { send(.usernameChanged($0)) },
         onPortChanged: { send(.portChanged($0)) },
-        onNameChanged: { send(.nameChanged($0)) }
+        onNameChanged: { send(.nameChanged($0)) },
+        onIconChanged: { send(.iconChanged($0)) }
       )
 
       if editor.isEditing {

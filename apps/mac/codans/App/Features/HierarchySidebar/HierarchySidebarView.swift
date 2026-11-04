@@ -642,8 +642,8 @@ struct HierarchySidebarView: View {
   /// the outline adds no indent and no spacing.
   private func rowContent(_ node: SidebarOutlineNode, hotkeyIndex: [WorktreeID: Int]) -> AnyView {
     switch node.row {
-    case .host(let group):
-      return AnyView(hostRow(group))
+    case .host(let group, let separated):
+      return AnyView(hostRow(group, separated: separated))
     case .project(let project):
       if case .failed(let reason) = project.loadState {
         return AnyView(failedProjectRow(project, reason: reason))
@@ -747,7 +747,13 @@ struct HierarchySidebarView: View {
 
   // MARK: - Host row
 
-  private func hostRow(_ group: SidebarHostGroup) -> some View {
+  /// The top inset of a Host row after the first. 8 pt more than a Project
+  /// row's, so the row grows from 32 to 38 pt and the Host blocks separate
+  /// without an indent. The first Host row and the rows under a Host keep
+  /// their metrics.
+  private static let separatedHostRowInsets = EdgeInsets(top: 12, leading: 0, bottom: 4, trailing: 0)
+
+  private func hostRow(_ group: SidebarHostGroup, separated: Bool) -> some View {
     SidebarHostRow(group: group) {
       var txn = Transaction()
       txn.disablesAnimations = true
@@ -755,7 +761,7 @@ struct HierarchySidebarView: View {
         store.send(.toggleHostExpansion(group.host))
       }
     }
-    .padding(Self.projectRowInsets)
+    .padding(separated ? Self.separatedHostRowInsets : Self.projectRowInsets)
     .contextMenu {
       switch group.host {
       case .thisMac:

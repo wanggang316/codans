@@ -132,6 +132,7 @@ struct RemoteConnectionFeature {
     case usernameChanged(String)
     case portChanged(String)
     case nameChanged(String)
+    case iconChanged(HostIcon)
     case pathChanged(String)
     case connectButtonTapped
     case connectFailed(String)
@@ -171,6 +172,10 @@ struct RemoteConnectionFeature {
 
       case .nameChanged(let value):
         state.newHost.name = value
+        return .none
+
+      case .iconChanged(let icon):
+        state.newHost.icon = icon
         return .none
 
       case .pathChanged(let value):

@@ -61,6 +61,9 @@ struct RemoteConnectionFeatureTests {
     await store.send(.nameChanged("Example")) {
       $0.newHost.name = "Example"
     }
+    await store.send(.iconChanged(.cloud)) {
+      $0.newHost.icon = .cloud
+    }
     #expect(store.state.canConnect == false)
     await store.send(.pathChanged("/srv/app")) {
       $0.pathDraft = "/srv/app"
@@ -129,7 +132,7 @@ struct RemoteConnectionFeatureTests {
     let state = RemoteConnectionFeature.State(
       hosts: [Self.box],
       hostChoice: .newHost,
-      newHost: HostDraft(address: "new.local", username: "", port: "", name: "New")
+      newHost: HostDraft(address: "new.local", username: "", port: "", name: "New", icon: .macStudio)
     )
     let record = try state.selectedHost()
     #expect(record.id != Self.box.id)
@@ -137,6 +140,7 @@ struct RemoteConnectionFeatureTests {
     #expect(record.username == nil)
     #expect(record.port == nil)
     #expect(record.name == "New")
+    #expect(record.icon == .macStudio)
   }
 
   @Test

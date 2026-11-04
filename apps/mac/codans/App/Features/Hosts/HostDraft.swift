@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// The text fields of a Host form (Settings › Hosts editor and the
+/// The fields of a Host form (Settings › Hosts editor and the
 /// "New Host…" entry of Connect to Server). `record(id:)` turns them into a
 /// `HostRecord` with the same validation as the Host list (ADR 0003).
 nonisolated struct HostDraft: Equatable, Sendable {
@@ -13,12 +13,17 @@ nonisolated struct HostDraft: Equatable, Sendable {
   var username: String = ""
   var port: String = ""
   var name: String = ""
+  /// `nil` keeps the record without an icon (it shows `HostIcon.fallback`).
+  var icon: HostIcon?
 
-  init(address: String = "", username: String = "", port: String = "", name: String = "") {
+  init(
+    address: String = "", username: String = "", port: String = "", name: String = "", icon: HostIcon? = nil
+  ) {
     self.address = address
     self.username = username
     self.port = port
     self.name = name
+    self.icon = icon
   }
 
   init(record: HostRecord) {
@@ -26,7 +31,8 @@ nonisolated struct HostDraft: Equatable, Sendable {
       address: record.address,
       username: record.username ?? "",
       port: record.port.map(String.init) ?? "",
-      name: record.name ?? ""
+      name: record.name ?? "",
+      icon: record.icon
     )
   }
 
@@ -48,7 +54,7 @@ nonisolated struct HostDraft: Equatable, Sendable {
       throw .invalidPort(0)
     }
     return try HostRecord(
-      id: id, address: address, username: username, port: portNumber, name: name
+      id: id, address: address, username: username, port: portNumber, name: name, icon: icon
     ).validated()
   }
 }

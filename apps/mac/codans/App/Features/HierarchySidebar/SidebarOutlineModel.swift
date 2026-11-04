@@ -4,8 +4,9 @@ import Foundation
 /// What one row of the sidebar outline shows.
 enum SidebarOutlineRow {
   /// A Host row (This Mac or a Host record) above its Projects. Not
-  /// selectable: a click opens or closes it.
-  case host(SidebarHostGroup)
+  /// selectable: a click opens or closes it. `separated` is true for every
+  /// Host row after the first: it has a larger gap above it.
+  case host(SidebarHostGroup, separated: Bool)
   /// A Project's own row. A Project that failed to load has only this row.
   case project(Project)
   /// A worktree under a git or folder Project. `segment` is nil for the main
@@ -75,8 +76,8 @@ enum SidebarOutlineModel {
   ) -> [SidebarOutlineNode] {
     let pendings = isLiveMatch(filter) ? [] : pendingWorktrees
     guard let hostLevel else { return projects.map { projectNode($0, pendings: pendings) } }
-    return hostLevel.groups(projects).map { group in
-      var node = SidebarOutlineNode(id: hostNodeID(group.host), row: .host(group))
+    return hostLevel.groups(projects).enumerated().map { index, group in
+      var node = SidebarOutlineNode(id: hostNodeID(group.host), row: .host(group, separated: index > 0))
       node.isExpanded = group.isExpanded
       node.children = group.projects.map { projectNode($0, pendings: pendings) }
       return node

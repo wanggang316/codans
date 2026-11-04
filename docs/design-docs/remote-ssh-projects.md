@@ -45,13 +45,18 @@ codans never collects or stores a password or key.
   ("is not a working tree" still maps to idempotent success). No local trash
   relocation on a host.
 - **Connect to Server** picks a Host from the Host list, or "New Host…"
-  (Host, Username, Port, Name), which always adds a record to the Host list.
+  (Host, Username, Port, Name, Icon), which always adds a record to the Host list.
   Fields equal to an existing Host use that Host.
 - **Edit Connection** on a Server project changes its Host choice and path,
   never the Host fields, re-validated like an add; a path change reseeds the
   worktree rows, a Host-only change keeps them.
 - **Settings › Hosts** adds, edits, and deletes Host records. An edit applies
-  to all Projects on the Host; delete is disabled while Projects use it.
+  to all Projects on the Host; delete is disabled while Projects use it. Each
+  row shows the Host's icon.
+- **Host icon.** A record has an optional icon (`HostIcon`), picked from a menu
+  in the shared Host form: Globe, Server, Cloud, MacBook, Mac mini, Mac Studio,
+  Desktop. A record with no icon shows Server. This Mac has no record and shows
+  the symbol of the machine model (`ThisMacIcon`); it is not editable.
 
 **Non-Goals**
 
@@ -71,7 +76,7 @@ Representation reuses the existing string-path plumbing rather than forking the
 model:
 
 - `Catalog.hosts: [HostRecord]` — the Host list (ADR 0003). A `HostRecord` is
-  `{ id, address, username?, port?, name? }`; no two records share
+  `{ id, address, username?, port?, name?, icon? }`; no two records share
   (address, username, port), with no port equal to 22.
 - `Project.hostID: HostID?` — non-nil ⇒ a Server project, persisted in place of
   host fields. `Project.remoteHost: RemoteHost?` is the endpoint resolved from

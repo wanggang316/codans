@@ -1,6 +1,7 @@
+import CodansCore
 import SwiftUI
 
-/// The Host, Username, Port, and Name fields of a Host form. Shared by the
+/// The Host, Username, Port, Name, and Icon fields of a Host form. Shared by the
 /// Settings › Hosts editor and the "New Host…" entry of Connect to Server, so
 /// both forms show the same fields in the same order.
 struct HostFieldsEditor: View {
@@ -10,6 +11,7 @@ struct HostFieldsEditor: View {
   let onUsernameChanged: (String) -> Void
   let onPortChanged: (String) -> Void
   let onNameChanged: (String) -> Void
+  let onIconChanged: (HostIcon) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -28,6 +30,12 @@ struct HostFieldsEditor: View {
         "Name", prompt: "optional, shown in the sidebar",
         text: draft.name, onChange: onNameChanged
       )
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Icon").font(.callout)
+        HostIconPicker(icon: draft.icon ?? .fallback, onChange: onIconChanged)
+          .disabled(isDisabled)
+      }
     }
   }
 
@@ -43,5 +51,23 @@ struct HostFieldsEditor: View {
         .textFieldStyle(.roundedBorder)
         .disabled(isDisabled)
     }
+  }
+}
+
+/// A native menu of the Host icons, with a checkmark on `icon` and each
+/// item's symbol next to its name.
+struct HostIconPicker: View {
+  let icon: HostIcon
+  let onChange: (HostIcon) -> Void
+
+  var body: some View {
+    Picker("Icon", selection: Binding(get: { icon }, set: onChange)) {
+      ForEach(HostIcon.allCases) { icon in
+        Label(icon.displayName, systemImage: icon.systemImage).tag(icon)
+      }
+    }
+    .pickerStyle(.menu)
+    .labelsHidden()
+    .fixedSize()
   }
 }

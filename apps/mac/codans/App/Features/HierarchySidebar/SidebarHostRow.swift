@@ -13,7 +13,7 @@ struct SidebarHostRow: View {
   var body: some View {
     Button(action: onToggleExpansion) {
       HStack(spacing: 6) {
-        Image(systemName: group.record == nil ? "laptopcomputer" : "server.rack")
+        Image(systemName: (group.record?.displayIcon ?? ThisMacIcon.current).systemImage)
           .font(.system(size: 11, weight: .medium))
           .frame(width: 14, alignment: .center)
           .accessibilityHidden(true)

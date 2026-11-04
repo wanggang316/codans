@@ -54,6 +54,9 @@ struct HostsSettingsFeatureTests {
     await store.send(.editor(.nameChanged("Mini"))) {
       $0.editor?.draft.name = "Mini"
     }
+    await store.send(.editor(.iconChanged(.macMini))) {
+      $0.editor?.draft.icon = .macMini
+    }
     await store.send(.editor(.saveButtonTapped)) {
       $0.editor = nil
     }
@@ -63,6 +66,7 @@ struct HostsSettingsFeatureTests {
     #expect(added.username == nil)
     #expect(added.port == 2222)
     #expect(added.name == "Mini")
+    #expect(added.icon == .macMini)
   }
 
   @Test
@@ -121,6 +125,23 @@ struct HostsSettingsFeatureTests {
     let moved = RemoteHost(alias: "10.0.0.5", username: "alice", port: 2222)
     #expect(fake.catalog.hosts.map(\.id) == [Self.box.id])
     #expect(fake.catalog.projects.map(\.remoteHost) == [moved, moved])
+  }
+
+  @Test
+  func editKeepsAndChangesTheIcon() async throws {
+    let cloud = HostRecord(address: "cloud.local", icon: .cloud)
+    let fake = HostListFake(hosts: [cloud])
+    let store = Self.makeStore(fake)
+    await store.send(.editButtonTapped(cloud)) {
+      $0.editor = .init(mode: .edit(cloud.id), draft: HostDraft(address: "cloud.local", icon: .cloud))
+    }
+    await store.send(.editor(.iconChanged(.globe))) {
+      $0.editor?.draft.icon = .globe
+    }
+    await store.send(.editor(.saveButtonTapped)) {
+      $0.editor = nil
+    }
+    #expect(fake.catalog.hosts.map(\.icon) == [.globe])
   }
 
   @Test

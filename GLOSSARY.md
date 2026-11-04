@@ -42,7 +42,8 @@ block. See [ADR 0001](docs/adr/0001-project-order-is-manual-only.md).
 _Avoid_: sort mode, join order, manual order.
 
 **Host**: A machine on which Projects live: This Mac, or a record in the Host
-list in Settings (Host address, Username, optional Port, optional Name). Every
+list in Settings (Host address, Username, optional Port, optional Name,
+optional Icon). Every
 Project refers to exactly one Host. A Workspace and its member projects are on
 one Host. See [ADR 0002](docs/adr/0002-sidebar-outline-with-host-level.md) and
 [ADR 0003](docs/adr/0003-hosts-are-managed-records.md).

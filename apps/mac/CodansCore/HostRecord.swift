@@ -19,20 +19,43 @@ public nonisolated struct HostRecord: Codable, Equatable, Hashable, Sendable, Id
   public var port: Int?
   /// Optional display name. `displayName` falls back to `address`.
   public var name: String?
+  /// Optional icon of the Host row. `nil` shows `HostIcon.fallback`.
+  public var icon: HostIcon?
 
   public init(
     id: HostID = HostID(),
     address: String,
     username: String? = nil,
     port: Int? = nil,
-    name: String? = nil
+    name: String? = nil,
+    icon: HostIcon? = nil
   ) {
     self.id = id
     self.address = address
     self.username = username
     self.port = port
     self.name = name
+    self.icon = icon
   }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, address, username, port, name, icon
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(HostID.self, forKey: .id)
+    address = try container.decode(String.self, forKey: .address)
+    username = try container.decodeIfPresent(String.self, forKey: .username)
+    port = try container.decodeIfPresent(Int.self, forKey: .port)
+    name = try container.decodeIfPresent(String.self, forKey: .name)
+    // An icon this build does not know (a newer build wrote it) is no icon,
+    // so the record still loads.
+    icon = try container.decodeIfPresent(String.self, forKey: .icon).flatMap(HostIcon.init(rawValue:))
+  }
+
+  /// The icon the Host row shows.
+  public var displayIcon: HostIcon { icon ?? .fallback }
 
   /// A record for the connection fields of `endpoint`, without a name.
   public init(id: HostID = HostID(), endpoint: RemoteHost) {
