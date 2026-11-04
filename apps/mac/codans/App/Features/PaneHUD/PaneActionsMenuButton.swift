@@ -55,6 +55,7 @@ struct PaneActionsMenuButton: View {
     .background(PaneMenuAnchorView(anchor: anchor))
     .onHover { isHovered = $0 }
     .modifier(SessionHistoryAnchor(paneID: paneID, isPresented: $sessionHistoryShown))
+    .onSessionHistoryRequest(for: paneID, isPresented: $sessionHistoryShown)
     .help("Pane Actions")
     .accessibilityIdentifier("pane_hud.toggle")
     .accessibilityLabel("Pane Actions")
@@ -95,15 +96,7 @@ struct PaneActionsMenuButton: View {
       actions.commandQueue(paneID)
     }
     queue.image = NSImage(systemSymbolName: CommandQueueStyle.symbol, accessibilityDescription: nil)
-    if let shortcut = resolvedShortcuts[.toggleCommandQueue], shortcut.isEnabled,
-      let binding = shortcut.binding,
-      let key = ShortcutDisplay.keyEquivalent(for: binding.keyCode)
-    {
-      // Display only: an item of a pop-up menu answers its key equivalent
-      // only while the menu is open.
-      queue.keyEquivalent = String(key.character)
-      queue.keyEquivalentModifierMask = Self.modifierFlags(binding.modifiers)
-    }
+    showShortcut(.toggleCommandQueue, on: queue)
     queue.setAccessibilityIdentifier("pane_hud.command_queue")
     menu.addItem(queue)
 
@@ -112,6 +105,7 @@ struct PaneActionsMenuButton: View {
         sessionHistoryShown = true
       }
       history.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
+      showShortcut(.showSessionHistory, on: history)
       history.setAccessibilityIdentifier("pane_hud.session_history")
       menu.addItem(history)
     }
@@ -121,6 +115,17 @@ struct PaneActionsMenuButton: View {
       surfaceView.addPaneActionItems(to: menu)
     }
     return menu
+  }
+
+  /// Display only: an item of a pop-up menu answers its key equivalent
+  /// only while the menu is open. The main menu's item does the work.
+  private func showShortcut(_ command: CommandID, on item: NSMenuItem) {
+    guard let shortcut = resolvedShortcuts[command], shortcut.isEnabled,
+      let binding = shortcut.binding,
+      let key = ShortcutDisplay.keyEquivalent(for: binding.keyCode)
+    else { return }
+    item.keyEquivalent = String(key.character)
+    item.keyEquivalentModifierMask = Self.modifierFlags(binding.modifiers)
   }
 
   private static func modifierFlags(_ mask: ModifierMask) -> NSEvent.ModifierFlags {

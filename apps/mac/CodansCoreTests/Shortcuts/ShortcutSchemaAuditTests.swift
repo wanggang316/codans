@@ -146,6 +146,7 @@ struct ShortcutSchemaAuditTests {
     (.selectWorktreeAt9, (0x19, [.control])),
     (.selectWorktreeAt10, (0x1D, [.control])),  // 0
     (.toggleCommandQueue, (0x25, [.command])),  // ⌘L
+    (.showSessionHistory, (0x10, [.command])),  // ⌘Y
     (.selectSidebarFilterAll, (0x12, [.command, .control])),
     (.selectSidebarFilterRemote, (0x13, [.command, .control])),
     (.selectSidebarFilterWorkspace, (0x14, [.command, .control])),

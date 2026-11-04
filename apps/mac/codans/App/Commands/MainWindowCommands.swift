@@ -334,6 +334,14 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.toggleCommandQueue, in: shortcuts)
       .disabled(!hasActiveWorktree)
 
+      // Pane-scoped like Command Queue: opens the focused pane's Session
+      // History popover, or the empty page's when the worktree has no tab.
+      Button("Session History…") {
+        store()?.send(.sessionHistoryToggle)
+      }
+      .appKeyboardShortcut(.showSessionHistory, in: shortcuts)
+      .disabled(!hasActiveWorktree)
+
       Divider()
 
       Button("Previous Tab") {

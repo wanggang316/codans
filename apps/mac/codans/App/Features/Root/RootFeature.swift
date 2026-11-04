@@ -122,6 +122,11 @@ struct RootFeature {
     /// Unsent Command Queue text per pane, kept while the panel is closed
     /// and restored when it opens again on the same pane. In memory only.
     var commandQueueDrafts: [PaneID: String] = [:]
+    /// The latest ⌘Y request for the Session History popover. The popover
+    /// is view state on its anchor (the pane's actions button, or the empty
+    /// page's Resume Session button), so the reducer only names the target;
+    /// `serial` makes every press a new value the anchor reacts to.
+    var sessionHistoryRequest: SessionHistoryRequest?
     /// New Agent dialog (⌘⇧N, or the header's New Agent button). `nil` =
     /// hidden.
     @Presents var newAgent: NewAgentFeature.State?
@@ -440,6 +445,10 @@ struct RootFeature {
     /// re-targets rather than closing — the user asked for that pane.
     case commandQueueToggle(PaneID?)
     case commandQueue(PresentationAction<CommandQueueFeature.Action>)
+    /// Toggle the Session History popover for the active worktree. It
+    /// targets the active tab's focused pane, the same pane ⌘L resolves, or
+    /// the empty page when the worktree has no tab.
+    case sessionHistoryToggle
     /// Toggle the New Agent dialog. Opens on the selected project.
     case newAgentRequested
     case newAgent(PresentationAction<NewAgentFeature.Action>)
@@ -2048,6 +2057,13 @@ struct RootFeature {
           queue.draft = state.commandQueueDrafts[paneID] ?? ""
           state.commandQueue = queue
         }
+        return .none
+
+      case .sessionHistoryToggle:
+        guard state.selection.worktreeID != nil else { return .none }
+        state.sessionHistoryRequest = SessionHistoryRequest(
+          paneID: focusedPaneID(state: state),
+          serial: (state.sessionHistoryRequest?.serial ?? 0) + 1)
         return .none
 
       case .commandQueue(.presented(.delegate(.submitted))):
