@@ -258,6 +258,14 @@ Durable shell decisions:
 
 ## General defaults and agent launch preferences
 
+`general.codeHostAliases` lists the Code Host aliases of Settings › Code Hosts
+(remote host, kind, API host; [ADR 0005](../adr/0005-code-host-aliases.md)).
+It is omitted when empty; an entry that does not decode (an unknown kind) is
+dropped and the rest load. Writes go through `saveCodeHostAlias` /
+`removeCodeHostAlias`, which keep the remote host unique. The Project "Code
+Host" section has only the merge strategy and post-merge overrides: an older
+`projects[pid].git.codeHost` key loads, is ignored, and is not written again.
+
 `general.defaultGitViewerID` defaults to `"built-in"`, including when the JSON
 key is missing or null. This value opens the app-owned diff window and is not
 an installed-editor registry entry. Registry cleanup preserves `"built-in"`
