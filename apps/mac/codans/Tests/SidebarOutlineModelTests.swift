@@ -80,7 +80,7 @@ struct SidebarOutlineModelTests {
   /// A row's kind and name, so a test reads as the sidebar does.
   private func label(_ node: SidebarOutlineNode) -> String {
     switch node.row {
-    case .host(let group): "host \(group.displayName)"
+    case .host(let group, _): "host \(group.displayName)"
     case .project(let project): "project \(project.name)"
     case .worktree(let worktree, _, let segment): "worktree \(worktree.name) \(segment.map { "\($0)" } ?? "main")"
     case .pending(let pending): "pending \(pending.displayName)"
@@ -230,6 +230,12 @@ struct SidebarOutlineModelTests {
     #expect(tree.map { $0.children.map(label) } == [["project repo"], ["project flow"], ["project notes"]])
     #expect(tree.allSatisfy { $0.selection == nil && $0.projectID == nil && $0.isExpanded })
     #expect(tree[0].id == "host:this-mac")
+    // Every Host row after the first has the larger gap above it.
+    #expect(
+      tree.map { node -> Bool in
+        guard case .host(_, let separated) = node.row else { return false }
+        return separated
+      } == [false, true, true])
     // The rows under a Project stay as they are without Hosts.
     #expect(tree[0].children[0].children.count == 5)
   }
