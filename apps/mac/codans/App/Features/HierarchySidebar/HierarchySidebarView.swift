@@ -1021,7 +1021,9 @@ struct HierarchySidebarView: View {
     .task(id: worktree.path) {
       // Refresh the "dirty" dot on mount / path change. The monitor enforces a 30 s
       // freshness window internally so list-rerenders don't spawn redundant fetches.
-      let url = URL(fileURLWithPath: worktree.path)
+      // The URL names the Project's Host, so a Server worktree with the
+      // same path as a local one is probed on its Host (ADR 0006).
+      let url = project.gitURL(worktree.path)
       await worktreeStatusMonitor.refresh(worktreeID: worktree.id, path: url)
       // Uncommitted-edit line counts ride the same trigger so every row
       // (PR-matched or not) can surface `+N −M` without a separate poll loop.

@@ -747,8 +747,8 @@ final class AppState {
     // the HierarchyClient (reconcile + removal) and the root store (create
     // sheet option loading) so both sides agree on the transport.
     let worktreeClient = GitWorktreeClient.makeLive(
-      remoteHostResolver: { [weak manager] path in
-        await MainActor.run { manager?.remoteHost(forPath: path) }
+      remoteHostResolver: { [weak manager] url in
+        await MainActor.run { manager?.remoteHost(forGitURL: url) }
       }
     )
     let hierarchy = HierarchyClient.live(
@@ -770,7 +770,7 @@ final class AppState {
     // be re-prepared, and no view-side reader needs the remote route.
     let routedGitClient = GitServiceClient.live(
       service: Git.makeService(remoteHostResolver: { [weak manager] url in
-        await MainActor.run { manager?.remoteHost(forPath: url.path) }
+        await MainActor.run { manager?.remoteHost(forGitURL: url) }
       })
     )
     worktreeStatusMonitor.rebindFetch(routedGitClient.status)

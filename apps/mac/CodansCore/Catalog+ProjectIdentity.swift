@@ -82,3 +82,75 @@ extension Catalog {
     }
   }
 }
+
+// MARK: - Git transport
+
+/// The URL form a git call uses for a repository path. A path on This Mac is
+/// a file URL. A path on a Host is a `codans-host://<host-id>/<path>` URL, so
+/// the git transport picks the Host from the Project, not from the path
+/// string: a local Project and a Server project can have the same path
+/// (ADR 0006). `URL.path` of both forms is the repository path.
+public enum GitLocation {
+  public static let hostScheme = "codans-host"
+
+  public static func url(path: String, hostID: HostID?) -> URL {
+    guard let hostID, path.hasPrefix("/") else { return URL(fileURLWithPath: path) }
+    var components = URLComponents()
+    components.scheme = hostScheme
+    components.host = hostID.raw.uuidString.lowercased()
+    components.path = path
+    return components.url ?? URL(fileURLWithPath: path)
+  }
+
+  /// The Host a Host-form URL names, or `nil` for any other URL.
+  public static func hostID(of url: URL) -> HostID? {
+    guard url.scheme == hostScheme, let host = url.host(), let raw = UUID(uuidString: host) else { return nil }
+    return HostID(raw: raw)
+  }
+}
+
+extension Project {
+  /// The URL for a git call on `path` of this Project: a file URL on This
+  /// Mac, a Host-form URL on a Host. A legacy Server project without a Host
+  /// record keeps a file URL and is routed by path.
+  public func gitURL(_ path: String) -> URL {
+    GitLocation.url(path: path, hostID: isOnThisMac ? nil : hostID)
+  }
+
+  /// `true` when `path` is this Project's root, git root, or a worktree.
+  fileprivate func ownsGitPath(_ path: String, normalize: (String) -> String) -> Bool {
+    if normalize(rootPath) == path { return true }
+    if let gitRoot, normalize(gitRoot) == path { return true }
+    return worktrees.contains { normalize($0.path) == path }
+  }
+}
+
+extension Catalog {
+  /// The SSH endpoint a git call on `url` runs on, or `nil` for This Mac.
+  ///
+  /// - A Host-form URL (`GitLocation`) runs on that Host.
+  /// - A file URL runs on This Mac when a Project on This Mac owns the
+  ///   path (root, git root, or worktree), also when a Server project has
+  ///   the same path. Otherwise a Server project that owns the path gives
+  ///   its Host; this keeps callers that pass a plain path for a Server
+  ///   project working.
+  ///
+  /// Stored local paths are already canonical, so only the input goes
+  /// through `canonicalizeLocal`; this keeps the lookup free of file-system
+  /// calls per stored path.
+  public func gitRemoteHost(for url: URL, canonicalizeLocal: (String) -> String) -> RemoteHost? {
+    if let hostID = GitLocation.hostID(of: url) {
+      return host(id: hostID)?.endpoint ?? projects.first { $0.hostID == hostID }?.remoteHost
+    }
+    let path = url.path(percentEncoded: false)
+    let local = canonicalizeLocal(path)
+    let onThisMac = projects.contains {
+      $0.isOnThisMac && $0.ownsGitPath(local, normalize: Project.normalizeRemotePath)
+    }
+    if onThisMac { return nil }
+    let remote = Project.normalizeRemotePath(path)
+    return projects.first {
+      $0.remoteHost != nil && $0.ownsGitPath(remote, normalize: Project.normalizeRemotePath)
+    }?.remoteHost
+  }
+}

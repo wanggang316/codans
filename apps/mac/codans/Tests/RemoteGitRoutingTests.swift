@@ -133,4 +133,52 @@ struct RemoteGitRoutingTests {
     #expect(manager.remoteHost(forPath: "/srv/app") == nil)
     #expect(manager.remoteHost(forPath: "/elsewhere") == nil)
   }
+
+  /// A local Project and a Server project at the same path (ADR 0006): git
+  /// for each Project runs on its own machine, in both catalog orders.
+  @Test
+  @MainActor
+  func samePathProjectsRouteGitToTheirOwnMachine() async throws {
+    for serverFirst in [true, false] {
+      let manager = HierarchyManager(
+        catalog: .default,
+        store: CatalogStore(
+          fileURL: FileManager.default.temporaryDirectory.appending(component: UUID().uuidString + ".json")),
+        runtime: FakeHierarchyRuntime()
+      )
+      var serverID: ProjectID?
+      if serverFirst {
+        serverID = manager.addServerProject(
+          name: "server", remoteHost: Self.host, rootPath: "/srv/app", gitRoot: "/srv/app")
+      }
+      let localID = manager.addProject(name: "local", rootPath: "/srv/app", gitRoot: "/srv/app")
+      if !serverFirst {
+        serverID = manager.addServerProject(
+          name: "server", remoteHost: Self.host, rootPath: "/srv/app", gitRoot: "/srv/app")
+      }
+      let local = try #require(manager.catalog.projects.first { $0.id == localID })
+      let server = try #require(manager.catalog.projects.first { $0.id == serverID })
+
+      #expect(manager.remoteHost(forGitURL: local.gitURL("/srv/app")) == nil)
+      #expect(manager.remoteHost(forGitURL: server.gitURL("/srv/app")) == Self.host)
+      // A plain path from This Mac is the local Project's.
+      #expect(manager.remoteHost(forPath: "/srv/app") == nil)
+
+      let runner = RecordingCommandRunner(outcomes: Array(
+        repeating: .exited(code: 0, stdout: Data("true\n".utf8), stderr: Data(), stdoutOverflow: false),
+        count: 4))
+      let service = LiveGitService(
+        runner: runner,
+        resolveRemoteHost: { url in await MainActor.run { manager.remoteHost(forGitURL: url) } }
+      )
+      _ = try? await service.status(at: local.gitURL("/srv/app"))
+      _ = try? await service.status(at: server.gitURL("/srv/app"))
+      let calls = await runner.calls
+      #expect(calls.count == 4)
+      #expect(calls.prefix(2).allSatisfy { $0.executable.path != "/usr/bin/ssh" })
+      #expect(calls.prefix(2).allSatisfy { $0.cwd.path == "/srv/app" })
+      #expect(calls.suffix(2).allSatisfy { $0.executable.path == "/usr/bin/ssh" })
+      #expect(calls.suffix(2).allSatisfy { $0.arguments.last?.contains("/srv/app") == true })
+    }
+  }
 }

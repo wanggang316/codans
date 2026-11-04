@@ -206,10 +206,10 @@ struct ProjectGeneralSettingsView: View {
   /// on dir Projects keeps non-git Projects from shelling out.
   private func loadBaseRefOptionsIfNeeded() async {
     guard visible.contains(.worktree),
-      let gitRoot = hierarchyManager.catalog.projects
-        .first(where: { $0.id == projectID })?.gitRoot
+      let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),
+      let gitRoot = project.gitRoot
     else { return }
-    let repoRoot = URL(fileURLWithPath: gitRoot)
+    let repoRoot = project.gitURL(gitRoot)
     async let refs = (try? gitWorktreeClient.branchRefs(repoRoot)) ?? []
     async let auto = (try? gitWorktreeClient.defaultRemoteBranchRef(repoRoot)) ?? nil
     let loadedRefs = await refs

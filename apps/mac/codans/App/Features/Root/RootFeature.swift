@@ -675,6 +675,7 @@ struct RootFeature {
     return .run { _ in
       await DiffWindowManager.shared.open(
         projectID: projectID, worktreeID: worktreeID, path: worktree.path,
+        hostID: project.isOnThisMac ? nil : project.hostID,
         title: "\(project.name) — \(worktree.branch ?? worktree.name)",
         prBase: snapshot?.baseRefName, prRepository: snapshot?.baseRepositoryURL, scope: scope)
     }
@@ -1031,6 +1032,12 @@ struct RootFeature {
             .projects.first(where: { $0.id == projectID })?
             .worktrees.first(where: { $0.id == worktreeID })?.path
         }()
+        // The selected Project's Host names the git transport for the
+        // branch switcher (ADR 0006); `nil` = This Mac.
+        let selectedProjectHostID: HostID? = selection.projectID.flatMap { projectID in
+          hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })
+            .flatMap { $0.isOnThisMac ? nil : $0.hostID }
+        }
         // Forward the selection delta into the branch switcher so the
         // next popover open re-fetches against the new worktree path.
         // `resolvedWorktreePath` already resolves to nil when either id is
@@ -1072,6 +1079,7 @@ struct RootFeature {
                 projectID: selection.projectID,
                 worktreeID: selection.worktreeID,
                 path: resolvedWorktreePath,
+                hostID: selectedProjectHostID,
                 blockedBranches: blockedBranches
               )))
         )
@@ -3348,7 +3356,7 @@ struct RootFeature {
       guard let gitRoot = project.gitRoot else { return [] }
       return [
         CodeHostFetchUnit(
-          projectID: project.id, gitRoot: URL(fileURLWithPath: gitRoot),
+          projectID: project.id, gitRoot: project.gitURL(gitRoot),
           pairs: branchPairs(in: project))
       ]
     }

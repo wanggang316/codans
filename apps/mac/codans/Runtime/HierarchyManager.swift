@@ -1685,28 +1685,18 @@ final class HierarchyManager {
     Project.normalizeRemotePath(path)
   }
 
-  /// The SSH host owning `path`, or `nil` for a local path. Backs the
-  /// `GitService` transport seam: a path that matches a Server project's
-  /// rootPath / gitRoot / any worktree path (exact match after string-only
-  /// normalization — remote paths never go through the local symlink
-  /// resolver) routes that git invocation over SSH. Every `GitService`
-  /// consumer — the sidebar diff chip, the PR badge's remote-URL probe, the
-  /// branch switcher, the diff inspector — receives worktree-level paths, so
-  /// exact matching is sufficient; subpaths inside a worktree are not
-  /// resolved (none of those callers pass one today).
+  /// The SSH host a git call on `url` runs on, or `nil` for This Mac.
+  /// Backs the `GitService` / `GitWorktreeClient` transport seam. A
+  /// Host-form URL (`Project.gitURL`) runs on its Host; a plain path runs on
+  /// This Mac when a Project on This Mac owns it, else on the Server project
+  /// that owns it (ADR 0006, `Catalog.gitRemoteHost(for:canonicalizeLocal:)`).
+  func remoteHost(forGitURL url: URL) -> RemoteHost? {
+    catalog.gitRemoteHost(for: url, canonicalizeLocal: Self.canonicalPath)
+  }
+
+  /// `remoteHost(forGitURL:)` for a plain path.
   func remoteHost(forPath path: String) -> RemoteHost? {
-    let normalized = Self.normalizeRemotePath(path)
-    for project in catalog.projects {
-      guard let host = project.remoteHost else { continue }
-      if Self.normalizeRemotePath(project.rootPath) == normalized { return host }
-      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == normalized {
-        return host
-      }
-      if project.worktrees.contains(where: { Self.normalizeRemotePath($0.path) == normalized }) {
-        return host
-      }
-    }
-    return nil
+    remoteHost(forGitURL: URL(fileURLWithPath: path))
   }
 
   /// Tears down every terminal surface attached to the Worktree without

@@ -135,4 +135,59 @@ struct CatalogProjectIdentityTests {
     let catalog = catalog([remote])
     #expect(catalog.workspaceMembership(forCanonicalPath: "/ws/app", canonicalize: Self.canonicalize) == nil)
   }
+
+  // MARK: - Git transport
+
+  @Test
+  func gitURLKeepsThePathAndNamesTheHost() {
+    let remote = server("/Users/me/dev/a b")
+    let url = remote.gitURL("/Users/me/dev/a b")
+    #expect(url.path(percentEncoded: false) == "/Users/me/dev/a b")
+    #expect(GitLocation.hostID(of: url) == mini.id)
+
+    let local = Project(name: "a", rootPath: "/Users/me/dev/a")
+    let localURL = local.gitURL("/Users/me/dev/a")
+    #expect(localURL.isFileURL)
+    #expect(GitLocation.hostID(of: localURL) == nil)
+  }
+
+  /// A local Project and a Server project at the same path: each git call
+  /// runs on its own machine.
+  @Test
+  func gitTransportFollowsProjectIdentityForSamePath() {
+    var remote = server("/Users/me/dev/a")
+    remote.gitRoot = "/Users/me/dev/a"
+    let local = Project(name: "a", rootPath: "/Users/me/dev/a", gitRoot: "/Users/me/dev/a")
+    for catalog in [catalog([remote, local]), catalog([local, remote])] {
+      let localHost = catalog.gitRemoteHost(
+        for: local.gitURL("/Users/me/dev/a"), canonicalizeLocal: Self.canonicalize)
+      let remoteHost = catalog.gitRemoteHost(
+        for: remote.gitURL("/Users/me/dev/a"), canonicalizeLocal: Self.canonicalize)
+      #expect(localHost == nil)
+      #expect(remoteHost == mini.endpoint)
+    }
+  }
+
+  @Test
+  func plainPathOfServerProjectStillRoutesToItsHost() {
+    let feature = Worktree(name: "f", path: "/tmp/app-feature")
+    var remote = server("/tmp/app")
+    remote.worktrees = [feature]
+    let catalog = catalog([remote])
+    let url = URL(fileURLWithPath: "/tmp/app-feature/")
+    #expect(catalog.gitRemoteHost(for: url, canonicalizeLocal: Self.canonicalize) == mini.endpoint)
+    #expect(
+      catalog.gitRemoteHost(for: URL(fileURLWithPath: "/elsewhere"), canonicalizeLocal: Self.canonicalize) == nil)
+  }
+
+  @Test
+  func plainPathOwnedByThisMacProjectNeverRoutesToAHost() {
+    let local = Project(
+      name: "a", rootPath: "/private/tmp/a",
+      worktrees: [Worktree(name: "f", path: "/private/tmp/a-f")])
+    let catalog = catalog([server("/tmp/a-f"), local])
+    // `/tmp/a-f` is the local worktree in its symlink form.
+    let url = URL(fileURLWithPath: "/tmp/a-f")
+    #expect(catalog.gitRemoteHost(for: url, canonicalizeLocal: Self.canonicalize) == nil)
+  }
 }

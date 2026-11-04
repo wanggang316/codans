@@ -539,7 +539,7 @@ extension CreateWorktreeFeature.State {
     )
     return Self(
       projectID: project.id,
-      repoRoot: URL(fileURLWithPath: gitRoot),
+      repoRoot: project.gitURL(gitRoot),
       worktreesDirectory: worktreesDirectory,
       currentPendingCountForProject: pendingCount,
       remoteHost: project.remoteHost,

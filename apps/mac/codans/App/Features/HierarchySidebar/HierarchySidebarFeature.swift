@@ -1104,7 +1104,7 @@ struct HierarchySidebarFeature {
       guard let project = snapshot.projects.first(where: { $0.id == projectID }),
         let gitRoot = project.gitRoot
       else { return .none }
-      let gitRootURL = URL(fileURLWithPath: gitRoot)
+      let gitRootURL = project.gitURL(gitRoot)
       @Dependency(GitWorktreeClient.self) var gitClient
       let client = gitClient
       return .run { send in

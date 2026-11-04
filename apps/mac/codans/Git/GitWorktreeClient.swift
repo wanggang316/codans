@@ -709,11 +709,11 @@ nonisolated extension GitWorktreeClient {
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func makeLive(
     onCreateWorktreeSpawn: (@Sendable (Process) -> Void)? = nil,
-    remoteHostResolver: @escaping @Sendable (String) async -> RemoteHost? = { _ in nil }
+    remoteHostResolver: @escaping @Sendable (URL) async -> RemoteHost? = { _ in nil }
   ) -> GitWorktreeClient {
     GitWorktreeClient(
       lsWorktrees: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           let entries = try await remoteListEntries(host: host, gitRoot: repoRoot.path)
           return entries
         }
@@ -742,7 +742,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       localBranchNames: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return try await remoteMapped(host: host) {
             try await $0.localBranchNames(gitRoot: repoRoot.path)
           }
@@ -771,7 +771,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       branchRefs: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return try await remoteMapped(host: host) {
             try await $0.branchRefs(gitRoot: repoRoot.path)
           }
@@ -802,14 +802,14 @@ nonisolated extension GitWorktreeClient {
       },
 
       defaultRemoteBranchRef: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return await RemoteGitService(host: host).defaultRemoteBranchRef(gitRoot: repoRoot.path)
         }
         return await localDefaultRemoteBranchRef(repoRoot: repoRoot)
       },
 
       isValidBranchName: { repoRoot, name in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return await RemoteGitService(host: host)
             .isValidBranchName(gitRoot: repoRoot.path, name: name)
         }
@@ -916,7 +916,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       removeWorktree: { repoRoot, path in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           // No local trash to relocate into on a remote host — removal is the
           // plain forced git command. "is not a working tree" still maps to
           // idempotent success like the local path.
@@ -938,7 +938,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       deleteBranchIfExists: { repoRoot, branch in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return await RemoteGitService(host: host)
             .deleteBranchIfExists(gitRoot: repoRoot.path, branch: branch)
         }
@@ -946,7 +946,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       deleteRemoteBranchIfExists: { repoRoot, branch in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           await RemoteGitService(host: host)
             .deleteRemoteBranchIfExists(gitRoot: repoRoot.path, branch: branch)
           return
@@ -955,7 +955,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       pruneWorktrees: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return try await remoteMapped(host: host) {
             try await $0.pruneWorktrees(gitRoot: repoRoot.path)
           }
@@ -964,7 +964,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       fetchRemote: { repoRoot, remote in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           do {
             try await RemoteGitService(host: host).fetchRemote(gitRoot: repoRoot.path, remote: remote)
           } catch let error as RemoteGitError {
@@ -979,7 +979,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       changedFiles: { worktreeRoot in
-        if let host = await remoteHostResolver(worktreeRoot.path) {
+        if let host = await remoteHostResolver(worktreeRoot) {
           return try await remoteMapped(host: host) {
             try await $0.changedFiles(worktreeRoot: worktreeRoot.path)
           }

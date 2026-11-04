@@ -2218,7 +2218,9 @@ extension HierarchyClient {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
     manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
-    let gitRootURL = URL(fileURLWithPath: gitRoot)
+    // The URL names the Project's Host, so git runs on the machine that
+    // owns this Project even when another Host has the same path.
+    let gitRootURL = project.gitURL(gitRoot)
     // Resolve the branch authoritatively from git BEFORE removal —
     // `worktree.branch` can be empty/stale (reconciled rows, legacy
     // catalog entries), and a missed branch deletion is exactly what
@@ -2240,7 +2242,7 @@ extension HierarchyClient {
 
     try await gitWorktreeClient.removeWorktree(
       gitRootURL,
-      URL(fileURLWithPath: worktree.path)
+      project.gitURL(worktree.path)
     )
     // Drop the branch the worktree was tracking. `git worktree remove`
     // intentionally leaves the ref behind, so re-creating a worktree
