@@ -1,6 +1,6 @@
 # 0004. GitLab support through glab
 
-Status: Accepted
+Status: Accepted. Superseded in part by [ADR 0005](0005-code-host-aliases.md): item 2 (the Project settings step) and item 10 (the Project Code Host choice).
 
 ## Context
 
