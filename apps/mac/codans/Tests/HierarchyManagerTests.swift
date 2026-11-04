@@ -395,11 +395,25 @@ struct HierarchyManagerTests {
     let match = manager.isPathRegistered(canonical: HierarchyManager.canonicalPath("/tmp/p"))
     #expect(match == projectID)
 
-    // The canonical form strips symlinks and trailing slashes — callers always
-    // pass canonical paths. Passing a non-canonical form intentionally does NOT
-    // match, enforcing the contract.
-    let absent = manager.isPathRegistered(canonical: "/tmp/p/")
-    #expect(absent == nil)
+    // The symlink and trailing-slash forms of the same local path match.
+    #expect(manager.isPathRegistered(canonical: "/tmp/p/") == projectID)
+  }
+
+  @Test
+  func isPathRegisteredIgnoresServerProjectWithSamePath() {
+    let path = HierarchyManager.canonicalPath("/tmp/p")
+    _ = manager.addServerProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
+    #expect(manager.isPathRegistered(canonical: path) == nil)
+
+    let localID = manager.addProject(name: "p", rootPath: path)
+    #expect(manager.isPathRegistered(canonical: path) == localID)
+  }
+
+  @Test
+  func projectContainingIgnoresServerProject() {
+    let path = HierarchyManager.canonicalPath("/tmp/p")
+    _ = manager.addServerProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
+    #expect(manager.project(containing: path + "/src") == nil)
   }
 
   @Test

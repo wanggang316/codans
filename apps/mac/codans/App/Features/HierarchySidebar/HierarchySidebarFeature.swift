@@ -1521,7 +1521,7 @@ struct HierarchySidebarFeature {
   /// Local git Projects a workspace can check out from.
   private static func workspaceCandidates(in snapshot: Catalog) -> [CreateWorkspaceFeature.Candidate] {
     snapshot.projects.compactMap { project -> CreateWorkspaceFeature.Candidate? in
-      guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else {
+      guard project.isOnThisMac, !project.isWorkspace, let gitRoot = project.gitRoot else {
         return nil
       }
       return CreateWorkspaceFeature.Candidate(
@@ -1563,7 +1563,7 @@ struct HierarchySidebarFeature {
     let snapshot = hierarchyClient.snapshot()
     guard
       let project = snapshot.projects.first(where: { $0.id == projectID }),
-      !project.isWorkspace,
+      !project.isWorkspace, project.isOnThisMac,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return false }
     // Answered from the snapshot the reducer already holds, so every

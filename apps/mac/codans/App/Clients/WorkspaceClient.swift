@@ -364,7 +364,7 @@ extension WorkspaceClient {
   /// folder that is gone until the next stale sweep archives it.
   @MainActor
   static func removeMirrorRows(forCanonicalPath path: String, hierarchy: HierarchyClient) {
-    for project in hierarchy.snapshot().projects where !project.isWorkspace {
+    for project in hierarchy.snapshot().projects where !project.isWorkspace && project.isOnThisMac {
       for worktree in project.worktrees
       where HierarchyManager.canonicalPath(worktree.path) == path && worktree.path != project.rootPath {
         try? hierarchy.removeWorktree(worktree.id, project.id)

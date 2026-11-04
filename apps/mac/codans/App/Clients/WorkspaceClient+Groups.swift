@@ -14,16 +14,11 @@ extension WorkspaceClient {
       let manifest = try? loadManifest(rootPath: project.rootPath)
     else { return [] }
     let settings = context.settings()
-    let projects = context.hierarchy.snapshot().projects
+    let catalog = context.hierarchy.snapshot()
     var result: [MemberCreationOptions] = []
     for source in manifest.projects {
       let sourceGitRoot = canonical(source.sourceGitRoot)
-      let sourceProject = projects.first { candidate in
-        guard !candidate.isWorkspace, candidate.remoteHost == nil, let gitRoot = candidate.gitRoot else {
-          return false
-        }
-        return canonical(gitRoot) == sourceGitRoot
-      }
+      let sourceProject = catalog.localProject(gitRoot: sourceGitRoot, canonicalize: canonical)
       let git = sourceProject.flatMap { settings.projects[$0.id]?.git }
       var baseRef = git?.worktreeBaseRef.flatMap { $0.isEmpty ? nil : $0 }
       if baseRef == nil {

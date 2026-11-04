@@ -419,9 +419,10 @@ struct ProjectGeneralSettingsView: View {
     .foregroundStyle(.primary)
   }
 
-  /// The open project a reference points at, when its repository is one.
+  /// The open project on This Mac a reference points at, when its
+  /// repository is one. A Server project with the same path never matches.
   private func sourceProject(for gitRoot: String) -> Project? {
-    hierarchyManager.catalog.projects.first { $0.gitRoot == gitRoot }
+    hierarchyManager.catalog.localProject(gitRoot: gitRoot, canonicalize: HierarchyManager.canonicalPath)
   }
 
   private var workspaceProject: Project? {
@@ -441,7 +442,7 @@ struct ProjectGeneralSettingsView: View {
   private var workspaceSourceCandidates: [Project] {
     let listed = Set(workspaceSources.map { $0.sourceGitRoot ?? $0.path })
     return hierarchyManager.catalog.projects.filter { project in
-      guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else { return false }
+      guard project.isOnThisMac, !project.isWorkspace, let gitRoot = project.gitRoot else { return false }
       return !listed.contains(gitRoot)
     }
   }

@@ -2811,11 +2811,13 @@ struct RootFeature {
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
       // A checkout a workspace still names is that workspace's to remove.
+      // Membership is keyed by a path on This Mac (ADR 0006).
       .filter {
-        catalog.workspaceMembership(
-          forCanonicalPath: HierarchyManager.canonicalPath($0.path),
-          canonicalize: HierarchyManager.canonicalPath
-        ) == nil
+        !project.isOnThisMac
+          || catalog.workspaceMembership(
+            forCanonicalPath: HierarchyManager.canonicalPath($0.path),
+            canonicalize: HierarchyManager.canonicalPath
+          ) == nil
       }
       .filter { codeHost.snapshots[$0.id]?.state == .merged }
       .map(\.id)

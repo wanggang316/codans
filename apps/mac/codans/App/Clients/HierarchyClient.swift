@@ -399,11 +399,13 @@ nonisolated struct HierarchyClient: Sendable {
   /// (`TerminalInputSink.sendInput` → pane's host project).
   var bumpProjectActivity: @MainActor @Sendable (_ projectID: ProjectID) -> Void
 
-  /// Duplicate-add guard. Caller canonicalizes before querying.
+  /// Duplicate-add guard: the Project on This Mac at a local path. Server
+  /// projects never match (ADR 0006). Caller canonicalizes before querying.
   var isPathRegistered: @MainActor @Sendable (_ canonicalPath: String) -> ProjectID?
 
   /// Containing-project lookup (subdirectory-aware). Returns the deepest
-  /// Project whose `rootPath` contains the canonical path (root or descendant).
+  /// Project on This Mac whose `rootPath` contains the canonical path (root
+  /// or descendant); Server projects never match (ADR 0006).
   /// Used by the `editor.open` IPC so `codans open` inside a subdirectory still
   /// resolves the parent Project's default editor. Caller canonicalizes.
   var projectContaining: @MainActor @Sendable (_ canonicalPath: String) -> ProjectID?
@@ -2152,13 +2154,16 @@ extension HierarchyClient {
     let ttl = TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
     let deleteRemoteBranch = worktreeSettings.deleteRemoteBranchWithWorktree
     let due = manager.archivedWorktreesDue(in: projectID, now: Date(), ttl: ttl)
-    let rows = manager.catalog.projects.first(where: { $0.id == projectID })?.worktrees ?? []
+    let project = manager.catalog.projects.first(where: { $0.id == projectID })
+    let rows = project?.worktrees ?? []
     for worktreeID in due {
       // A row that is also a workspace member's checkout belongs to that
       // workspace: removing it here would pull the folder out from under
       // the workspace's own row. Membership changes go through the
-      // workspace flow, never the sweep.
-      if let path = rows.first(where: { $0.id == worktreeID })?.path,
+      // workspace flow, never the sweep. Membership is keyed by a path on
+      // This Mac, so a Server project's rows are never members (ADR 0006).
+      if project?.isOnThisMac == true,
+        let path = rows.first(where: { $0.id == worktreeID })?.path,
         manager.workspaceMembership(forPath: path) != nil
       {
         continue
@@ -2203,7 +2208,9 @@ extension HierarchyClient {
     // Workspace rows and the source-side mirrors of member checkouts belong
     // to the workspace flow, which removes them through its own checks.
     // Every caller of this path is refused here, not only the sidebar.
-    if project.isWorkspace || manager.workspaceMembership(forPath: worktree.path) != nil {
+    if project.isWorkspace
+      || (project.isOnThisMac && manager.workspaceMembership(forPath: worktree.path) != nil)
+    {
       throw HierarchyError.invariantViolation(
         "\(worktree.path) belongs to a workspace; remove it through the workspace")
     }
