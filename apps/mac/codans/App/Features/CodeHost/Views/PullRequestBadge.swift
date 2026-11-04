@@ -32,6 +32,8 @@ struct PullRequestBadge: View {
   let state: BadgeState
   /// "pull request" / "merge request", for the accessibility label.
   var pullRequestName: String = "pull request"
+  /// Code Host of the Worktree; picks the reference prefix (`#` / `!`).
+  var codeHostKind: CodeHostKind?
   let onTap: () -> Void
 
   var body: some View {
@@ -56,7 +58,7 @@ struct PullRequestBadge: View {
   private func loadedBody(snapshot: PullRequestSnapshot, rollup: CheckRollup) -> some View {
     // Shared with the titlebar via `PullRequestNumberPill` so the `#N` chip — and its
     // red merge-conflict styling — stays identical across the sidebar and the status bar.
-    PullRequestNumberPill(snapshot: snapshot)
+    PullRequestNumberPill(snapshot: snapshot, codeHostKind: codeHostKind)
   }
 
   private var errorBody: some View {
@@ -87,7 +89,7 @@ struct PullRequestBadge: View {
       }()
       let conflictWord = snapshot.hasMergeConflict ? ", merge conflicts" : ""
       return Text(
-        "\(CodeHostLabels.pullRequestSentence(pullRequestName)) \(snapshot.number), \(stateWord), \(rollupWord)\(conflictWord). "
+        "\(CodeHostLabels.pullRequestSentence(pullRequestName)) \(CodeHostLabels.reference(codeHostKind, number: snapshot.number)), \(stateWord), \(rollupWord)\(conflictWord). "
           + "Activate to see details."
       )
     case .error(let error):

@@ -54,7 +54,9 @@ struct StatusPullRequestView: View {
     }
     .buttonStyle(.plain)
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(CodeHostLabels.pullRequestSentence(pullRequestName)) #\(snapshot.number)")
+    .accessibilityLabel(
+      "\(CodeHostLabels.pullRequestSentence(pullRequestName)) \(CodeHostLabels.referencePrefix(codeHostKind))\(snapshot.number)"
+    )
     .accessibilityValue(Self.summaryText(snapshot: snapshot))
     .accessibilityAddTraits(.isButton)
     .accessibilityHint("Opens on \(codeHostName)")
@@ -81,7 +83,7 @@ struct StatusPullRequestView: View {
   /// pixel-identical to the sidebar row badge — same bordered capsule, same state tint,
   /// same red merge-conflict treatment — and the two can't drift apart.
   private var badge: some View {
-    PullRequestNumberPill(snapshot: snapshot)
+    PullRequestNumberPill(snapshot: snapshot, codeHostKind: codeHostKind)
   }
 
   /// `+N −M` patch-size indicator next to the `#NN` badge. Gated on
@@ -119,7 +121,11 @@ struct StatusPullRequestView: View {
 
   /// "pull request" / "merge request" for the active Worktree's Code Host.
   private var pullRequestName: String {
-    (store.state.codeHostKind(for: worktreeID) ?? .github).pullRequestName
+    (codeHostKind ?? .github).pullRequestName
+  }
+
+  private var codeHostKind: CodeHostKind? {
+    store.state.codeHostKind(for: worktreeID)
   }
 
   /// UI name of the active Worktree's Code Host, for the "Open on …" labels.

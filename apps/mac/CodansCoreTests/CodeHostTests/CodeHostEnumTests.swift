@@ -45,6 +45,7 @@ struct CodeHostEnumTests {
     #expect(CodeHostKind.github.pullRequestLabel == "PR")
     #expect(CodeHostKind.github.publicHost == "github.com")
     #expect(CodeHostKind.github.cliName == "gh")
+    #expect(CodeHostKind.github.referencePrefix == "#")
   }
 
   @Test
@@ -55,6 +56,7 @@ struct CodeHostEnumTests {
     #expect(CodeHostKind.gitlab.pullRequestName == "merge request")
     #expect(CodeHostKind.gitlab.publicHost == "gitlab.com")
     #expect(CodeHostKind.gitlab.cliName == "glab")
+    #expect(CodeHostKind.gitlab.referencePrefix == "!")
     #expect(CodeHostKind.github.pullRequestName == "pull request")
   }
 

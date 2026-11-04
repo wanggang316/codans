@@ -55,7 +55,8 @@ struct WorktreeHeaderInfoLabel: View {
           isSelected: false,
           glyph: glyph,
           hasUnreadNotification: hasUnread,
-          isDefaultBranch: isDefaultGlyph
+          isDefaultBranch: isDefaultGlyph,
+          codeHostKind: codeHostStore.state.codeHostKind(for: worktree.id)
         )
       }
       VStack(alignment: .leading, spacing: 0) {

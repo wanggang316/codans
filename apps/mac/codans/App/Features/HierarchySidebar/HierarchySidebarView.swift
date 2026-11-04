@@ -1096,7 +1096,8 @@ struct HierarchySidebarView: View {
         worktree: worktree, agentStateStore: agentStateStore,
         snapshot: snapshot, rollup: rollup, isSelected: isSelected,
         glyph: leadingGlyph, isDefaultBranch: isMainCheckout && !isSyntheticWorktree,
-        hasLifecycle: lifecycle != nil
+        hasLifecycle: lifecycle != nil,
+        codeHostKind: codeHostStore?.state.codeHostKind(for: worktree.id)
       )
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {

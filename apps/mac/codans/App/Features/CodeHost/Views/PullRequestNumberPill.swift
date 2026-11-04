@@ -1,7 +1,7 @@
 import SwiftUI
 import CodansCore
 
-/// The `#N` PR-number pill shared by the sidebar `PullRequestBadge` and the titlebar
+/// The `#N` / `!N` PR-number pill shared by the sidebar `PullRequestBadge` and the titlebar
 /// `StatusPullRequestView`. Extracted so the two surfaces render the number identically
 /// — bordered capsule, state-tinted digits — and never drift apart. The corner radius
 /// matches both call sites so the pill reads as one component regardless of host.
@@ -12,6 +12,8 @@ import CodansCore
 /// draft / purple merged / red closed) via `rowTint`.
 struct PullRequestNumberPill: View {
   let snapshot: PullRequestSnapshot
+  /// Code Host of the Worktree; picks the reference prefix (`#` / `!`).
+  var codeHostKind: CodeHostKind?
 
   var body: some View {
     let hasConflict = snapshot.hasMergeConflict
@@ -25,7 +27,7 @@ struct PullRequestNumberPill: View {
           .foregroundStyle(.red)
           .accessibilityHidden(true)
       }
-      Text("#\(snapshot.number)")
+      Text("\(CodeHostLabels.referencePrefix(codeHostKind))\(snapshot.number)")
         .font(.system(size: 10, weight: .semibold).monospacedDigit())
         .foregroundStyle(tint)
     }
