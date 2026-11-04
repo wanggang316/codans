@@ -64,6 +64,11 @@ A Code Host is not a Host: a Host is a machine on which Projects live. Do not
 shorten Code Host to "host".
 _Avoid_: Forge, Provider, Platform, host.
 
+**Code Host alias**: A Settings entry that maps a remote host, as it appears
+in an `origin` URL, to a Code Host kind and the API host that its CLI uses.
+See [ADR 0005](docs/adr/0005-code-host-aliases.md).
+_Avoid_: Host alias, because a Host is a machine.
+
 **Pull Request**: A hosted review that asks to merge a source branch into a
 target branch. It is the provider-neutral concept: a GitHub pull request and a
 GitLab merge request are both Pull Requests. The UI shows the Code Host's own
