@@ -60,6 +60,14 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Changed
 
+- **New worktrees follow "Switch to the new worktree when it's ready".**
+  With the setting off, a worktree created from the Create Worktree sheet
+  or New Agent is made in the background: the detail pane and the sidebar
+  selection do not change, and the new worktree gets the "New" badge.
+  Click its row in the sidebar to watch the creation; if you are still
+  watching when it finishes, you land on the new worktree. With the
+  setting on, you watch the creation from the start and land on the new
+  worktree only if you are still watching it.
 - **Install command of a missing Code Host CLI.** When `gh` or `glab` is
   missing, Settings › Code Hosts says only which CLI is missing, shows
   `brew install <cli>` on its own line in a code style, and puts a copy
@@ -97,6 +105,9 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Fixed
 
+- **Creating a worktree no longer moves you when it finishes.** If you
+  went to another worktree, a project, or a Workspace during the creation,
+  you stay there, and the new worktree gets the "New" badge.
 - **A tab's icon now matches the header of its selected pane.** It shows the
   agent's mark only while an agent runs in that pane, the script's icon for
   a pane that runs a script, and a terminal otherwise. A tab opened by an
