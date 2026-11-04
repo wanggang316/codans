@@ -177,6 +177,7 @@ struct ContentView: View {
         },
       ),
     )
+    .environment(\.sessionHistoryRequest, store.sessionHistoryRequest)
     .environment(settingsStore)
     .environment(UpdatesEnvironment.model)
     .environment(worktreeStatusMonitor)

@@ -127,6 +127,54 @@ struct RootFeatureTests {
   }
 
   @Test
+  func sessionHistoryToggleTargetsTheFocusedPaneOfTheActiveTab() async {
+    let first = PaneID()
+    let focused = PaneID()
+    let tab = Tab(panes: [Pane(id: first, workingDirectory: "/tmp"), Pane(id: focused, workingDirectory: "/tmp")])
+    let worktree = Worktree(name: "w", path: "/tmp", tabs: [tab], selectedTabID: tab.id)
+    let project = Project(name: "p", rootPath: "/tmp", worktrees: [worktree])
+    var state = RootFeature.State()
+    state.selection = HierarchySelection(projectID: project.id, worktreeID: worktree.id)
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0.hierarchyClient.lastFocusedPane = { _ in focused }
+    }
+
+    await store.send(.sessionHistoryToggle) {
+      $0.sessionHistoryRequest = .init(paneID: focused, serial: 1)
+    }
+    // A second press is a new request, so the popover toggles again.
+    await store.send(.sessionHistoryToggle) {
+      $0.sessionHistoryRequest = .init(paneID: focused, serial: 2)
+    }
+  }
+
+  @Test
+  func sessionHistoryToggleWithoutATabTargetsTheEmptyPage() async {
+    let worktree = Worktree(name: "w", path: "/tmp")
+    let project = Project(name: "p", rootPath: "/tmp", worktrees: [worktree])
+    var state = RootFeature.State()
+    state.selection = HierarchySelection(projectID: project.id, worktreeID: worktree.id)
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+    }
+
+    await store.send(.sessionHistoryToggle) {
+      $0.sessionHistoryRequest = .init(paneID: nil, serial: 1)
+    }
+  }
+
+  @Test
+  func sessionHistoryToggleWithoutAWorktreeDoesNothing() async {
+    let store = TestStore(initialState: RootFeature.State()) { RootFeature() }
+    await store.send(.sessionHistoryToggle)
+  }
+
+  @Test
   func closingAnotherPaneLeavesTheOpenCommandQueue() async {
     let open = PaneID()
     let store = Self.commandQueueStore(paneIDs: [open, PaneID()])

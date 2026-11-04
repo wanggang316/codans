@@ -61,7 +61,8 @@ struct EmptyTerminalPaneView: View {
         } label: {
           Label("Resume Session", systemImage: "clock.arrow.circlepath")
         }
-        .help("Agent Session History")
+        .helpWithShortcut("Agent Session History", .showSessionHistory)
+        .onSessionHistoryRequest(for: nil, isPresented: $sessionHistoryShown)
         .agentSessionHistoryPopover(
           isPresented: $sessionHistoryShown,
           worktreePath: worktreePath,

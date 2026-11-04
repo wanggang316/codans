@@ -10,6 +10,10 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
+- **⌘Y opens Session History.** Tab › Session History… opens the agent
+  session history of the focused pane, or of the empty page when the
+  worktree has no tab. Press ⌘Y again to close it. Rebind it in
+  Settings › Shortcuts.
 - **GitLab merge requests.** A Project whose `origin` is on gitlab.com, or
   on a self-managed GitLab that `glab` is logged in to, shows its merge
   requests as GitHub Projects show pull requests: the "MR" badge, popover,

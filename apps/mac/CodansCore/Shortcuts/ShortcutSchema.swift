@@ -488,6 +488,13 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_L), modifiers: .command)
     ),
+    .init(
+      id: .showSessionHistory,
+      title: "Session History…",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_Y), modifiers: .command)
+    ),
   ]
 
   private static let actionEntries: [Entry] = [

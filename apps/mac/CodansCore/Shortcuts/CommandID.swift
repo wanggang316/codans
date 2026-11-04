@@ -79,6 +79,7 @@ public enum CommandID: String, CaseIterable, Hashable, Sendable, Codable, Coding
 
   // Window — pane.
   case toggleCommandQueue
+  case showSessionHistory
 
   // Sidebar row hotkeys.
   case selectWorktreeAt1
