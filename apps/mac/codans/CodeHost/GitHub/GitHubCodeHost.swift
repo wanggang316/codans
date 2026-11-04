@@ -236,7 +236,7 @@ nonisolated struct GitHubCodeHost: CodeHost {
       // `gh api` propagates a non-zero exit with the error body in stderr. GraphQL
       // schema errors (unknown fields, type mismatches) look like a shell-level failure
       // here; translateError catches the common auth / network / outdated patterns.
-      throw Self.translateError(stderr: stderrString)
+      throw Self.translateError(stderr: stderrString, host: host)
     case .timedOut:
       throw CodeHostError.timeout
     case .spawnFailed:
@@ -332,20 +332,25 @@ nonisolated struct GitHubCodeHost: CodeHost {
   }
 
   /// Maps gh stderr into a rich `CodeHostError`. Order matters — more specific patterns
-  /// first, catch-all last.
-  nonisolated static func translateError(stderr: Any) -> CodeHostError {
+  /// first, catch-all last. `host` is the host the command addressed; a login error names
+  /// it, so a Code Host alias whose API host is not logged in gets the message for that
+  /// host (ADR 0005 item 4).
+  nonisolated static func translateError(stderr: Any, host: String? = nil) -> CodeHostError {
     let text: String = {
       if let s = stderr as? String { return s }
       if let d = stderr as? Data { return String(data: d, encoding: .utf8) ?? "" }
       return String(describing: stderr)
     }().lowercased()
 
+    // gh with no token for the host prints its login prompt ("gh auth login", exit 4);
+    // a host it is not logged in to answers HTTP 401.
     if text.contains("not logged") || text.contains("auth required")
-      || text.contains("authentication required")
+      || text.contains("authentication required") || text.contains("requires authentication")
+      || text.contains("gh auth login") || text.contains("http 401") || text.contains("bad credentials")
       || text.contains("token")
         && text.contains("expired")
     {
-      return .notAuthenticated(.github, host: Self.parseHostHint(text))
+      return .notAuthenticated(.github, host: host ?? Self.parseHostHint(text))
     }
     if text.contains("rate limit") {
       return .rateLimited(retryAfter: nil)
@@ -386,7 +391,8 @@ nonisolated struct GitHubCodeHost: CodeHost {
     let tail = text[range.upperBound...]
     let token = tail.prefix { !$0.isWhitespace && $0 != "," && $0 != ")" && $0 != "\"" }
     let host = String(token).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:"))
-    return host.isEmpty ? nil : host
+    // A host name has a dot ("github.com"); "to get started" must not give "get".
+    return host.contains(".") ? host : nil
   }
 
   nonisolated static func firstLine(_ text: String) -> String {

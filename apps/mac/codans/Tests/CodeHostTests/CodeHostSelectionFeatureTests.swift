@@ -180,6 +180,36 @@ struct CodeHostSelectionFeatureTests {
       store.state.snapshots[unit.pairs[0].worktreeID] == FakeCodeHost.snapshot(kind: .gitlab, branch: "feat-open"))
   }
 
+  /// An alias to a GitHub API host that `gh` is not logged in to still resolves; the
+  /// real `gh` read then fails with its login prompt, and each row shows the login
+  /// message for that host at its badge position (ADR 0005 item 4).
+  @Test
+  func anAliasToANotLoggedInGitHubHostShowsTheLoginMessageAtEachRow() async {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-open")
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(
+        code: 4, stdout: Data(),
+        stderr: Data("To get started with GitHub CLI, please run:  gh auth login\n".utf8),
+        stdoutOverflow: false)
+    ])
+    let github = GitHubCodeHost(
+      runner: runner, resolver: CLIExecutableResolver(prober: { URL(fileURLWithPath: "/opt/homebrew/bin/gh") }))
+    let store = Self.makeStore(
+      github: github, gitlab: FakeCodeHost(kind: .gitlab, hosts: []),
+      remotes: ["/repos/app": RemoteInfo(host: "ssh.ghe.example.com", path: "platform/app", isSSH: true)],
+      aliases: LockIsolated([
+        CodeHostAlias(remoteHost: "ssh.ghe.example.com", kind: .github, apiHost: "ghe.example.com")
+      ]))
+
+    await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+
+    let error = CodeHostError.notAuthenticated(.github, host: "ghe.example.com")
+    #expect(store.state.lastError[unit.pairs[0].worktreeID] == error)
+    #expect(store.state.lastErrorByProject[unit.projectID] == error)
+    #expect(error.userFacingMessage.contains("gh auth login"))
+  }
+
   // MARK: - Fixtures
 
   nonisolated private static let glAlias = CodeHostAlias(
@@ -195,7 +225,7 @@ struct CodeHostSelectionFeatureTests {
 
   private static func makeStore(
     initialState: CodeHostFeature.State = .init(),
-    github: FakeCodeHost, gitlab: FakeCodeHost, remotes: [String: RemoteInfo],
+    github: any CodeHost, gitlab: any CodeHost, remotes: [String: RemoteInfo],
     aliases: LockIsolated<[CodeHostAlias]> = LockIsolated([])
   ) -> TestStoreOf<CodeHostFeature> {
     let store = TestStore(initialState: initialState) {
