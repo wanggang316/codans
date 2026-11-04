@@ -299,6 +299,7 @@ struct GeneralSettingsCodableTests {
     defaultGitViewerID: "fork",
     defaultMergeStrategy: .rebase,
     postMergeAction: .archive,
+    codeHostAliases: [CodeHostAlias(remoteHost: "ssh.gitlab.example.com", kind: .gitlab, apiHost: "gitlab.example.com")],
     updateChannel: .tip,
     updateCheckInterval: .threeHours,
     updatesAutomaticallyCheckForUpdates: false,

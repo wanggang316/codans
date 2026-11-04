@@ -55,18 +55,21 @@ nonisolated protocol CodeHost: Sendable {
   func pullRequestWebURL(_ pullRequest: PullRequestReference) -> URL?
 }
 
-/// Gives the Code Host of a remote: `publicHost` of a kind, or a host that kind's CLI is
-/// logged in to; then the Project's Code Host choice; otherwise none. Kinds are tried in
-/// `CodeHostKind.allCases` order, so a host known to two CLIs resolves to the first kind.
-/// See ADR 0004 item 2.
+/// Gives the Code Host of a remote (ADR 0005 item 3):
+/// 1. A Code Host alias for its host: the alias's kind and API host.
+/// 2. `github.com` or a host `gh` is logged in to: GitHub.
+/// 3. `gitlab.com` or a host `glab` is logged in to: GitLab.
+/// 4. For an SSH remote only: the `HostName` from `ssh -G`, matched without the port to the
+///    one logged-in or public host of steps 2 and 3. This covers an alias from
+///    `~/.ssh/config` (`git@github-work:…`) and an SSH port that is not the API port.
+/// 5. Otherwise: none.
 ///
-/// When the Project choice applies to an SSH remote, its host can be an alias from
-/// `~/.ssh/config` or carry the SSH port, and the CLI cannot reach it. The repository is
-/// then addressed at the one host of that kind (logged in, or the public host) whose name,
-/// without port, is the alias's `HostName`. With no single match the remote host stays.
+/// An alias resolves even when its API host is not logged in, so the fetch fails with the
+/// login message in the badge position.
 ///
-/// The logged-in hosts of each kind are asked once and cached; `invalidate()` drops the
-/// cache so a `gh auth login` is seen after the Settings "Re-check".
+/// The logged-in hosts of each kind and the `ssh -G` results are asked once and cached;
+/// `invalidate()` drops both, so a `gh auth login` or a change to `~/.ssh/config` is seen
+/// after the Settings "Re-check".
 actor CodeHostResolver {
   typealias HostsProvider = @Sendable (CodeHostKind) async -> Set<String>
   typealias SSHHostNameProvider = @Sendable (String) async -> String?
@@ -82,11 +85,11 @@ actor CodeHostResolver {
   }
 
   /// The Code Host repository for `remote`, or `nil` when no Code Host serves its host.
-  /// `choice` is the Project's Code Host setting (`nil` is Auto). It applies only when
-  /// neither CLI step matches, so it cannot move a known host to another kind. For an SSH
-  /// remote it also maps the SSH host to the API host (see the type comment).
-  func resolve(_ remote: RemoteInfo, choice: CodeHostKind? = nil) async -> CodeHostRepository? {
+  func resolve(_ remote: RemoteInfo, aliases: [CodeHostAlias] = []) async -> CodeHostRepository? {
     let host = remote.host.lowercased()
+    if let alias = Self.alias(for: remote, in: aliases) {
+      return CodeHostRepository(kind: alias.kind, host: alias.apiHost, path: remote.path)
+    }
     for kind in CodeHostKind.allCases {
       if host == kind.publicHost {
         return CodeHostRepository(kind: kind, host: remote.host, path: remote.path)
@@ -96,9 +99,18 @@ actor CodeHostResolver {
         return CodeHostRepository(kind: kind, host: remote.host, path: remote.path)
       }
     }
-    guard let choice else { return nil }
-    let apiHost = remote.isSSH ? await apiHost(forSSHHost: remote.host, kind: choice) : nil
-    return CodeHostRepository(kind: choice, host: apiHost ?? remote.host, path: remote.path)
+    guard remote.isSSH, let (kind, apiHost) = await apiHost(forSSHHost: host) else { return nil }
+    return CodeHostRepository(kind: kind, host: apiHost, path: remote.path)
+  }
+
+  /// The alias whose remote host is the remote's host. For an SSH remote the port is the
+  /// SSH port, so an alias without a port also matches.
+  static func alias(for remote: RemoteInfo, in aliases: [CodeHostAlias]) -> CodeHostAlias? {
+    let host = CodeHostAlias.normalizedHost(remote.host)
+    if let exact = aliases.first(where: { $0.remoteHost == host }) { return exact }
+    guard remote.isSSH else { return nil }
+    let name = nameWithoutPort(host)
+    return aliases.first { $0.remoteHost == name }
   }
 
   func invalidate() {
@@ -106,9 +118,11 @@ actor CodeHostResolver {
     cachedSSHHostNames = [:]
   }
 
-  /// The single host of `kind` whose name is the `HostName` of `sshHost`, or `nil`.
-  private func apiHost(forSSHHost sshHost: String, kind: CodeHostKind) async -> String? {
-    let alias = Self.nameWithoutPort(sshHost.lowercased())
+  /// The one logged-in or public host, of any kind, whose name without port is the
+  /// `HostName` of `sshHost`, or `nil`. A host that both CLIs know counts once, as
+  /// GitHub, like steps 2 and 3.
+  private func apiHost(forSSHHost sshHost: String) async -> (CodeHostKind, String)? {
+    let alias = Self.nameWithoutPort(sshHost)
     let resolved: String?
     if let cached = cachedSSHHostNames[alias] {
       resolved = cached
@@ -117,10 +131,16 @@ actor CodeHostResolver {
       cachedSSHHostNames[alias] = resolved
     }
     let name = resolved ?? alias
-    var candidates = await authenticatedHosts(for: kind)
-    candidates.insert(kind.publicHost)
-    let matches = candidates.filter { Self.nameWithoutPort($0) == name }
-    return matches.count == 1 ? matches.first : nil
+    var matches: [String: CodeHostKind] = [:]
+    for kind in CodeHostKind.allCases {
+      var candidates = await authenticatedHosts(for: kind)
+      candidates.insert(kind.publicHost)
+      for candidate in candidates where Self.nameWithoutPort(candidate) == name && matches[candidate] == nil {
+        matches[candidate] = kind
+      }
+    }
+    guard matches.count == 1, let (host, kind) = matches.first else { return nil }
+    return (kind, host)
   }
 
   /// `host:port` → `host`. A bracketed IPv6 literal keeps its colons.

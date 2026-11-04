@@ -117,11 +117,6 @@ struct ProjectGeneralSettingsView: View {
       Task { await setter(projectID, .postMergeAction(value)) }
     }
 
-    func writeCodeHost(_ value: CodeHostKind?) {
-      let setter = writer.setProjectGitField
-      Task { await setter(projectID, .codeHost(value)) }
-    }
-
     func writeGithubDisabled(_ value: Bool) {
       let setter = writer.setProjectGitField
       Task { await setter(projectID, .githubDisabled(value)) }
@@ -666,13 +661,6 @@ struct ProjectGeneralSettingsView: View {
   @ViewBuilder
   private var codeHostSection: some View {
     Section {
-      Picker("Code Host", selection: codeHostBinding) {
-        Text("Auto").tag(CodeHostKind?.none)
-        ForEach(CodeHostKind.allCases, id: \.self) { kind in
-          Text(kind.displayName).tag(Optional(kind))
-        }
-      }
-
       OptionalOverridePicker<MergeStrategy>(
         title: "Merge strategy",
         selection: mergeStrategyBinding,
@@ -702,21 +690,12 @@ struct ProjectGeneralSettingsView: View {
       Text("Code Host")
     } footer: {
       Text(
-        "Auto finds the Code Host from the origin remote: github.com or a host gh is logged in to "
-          + "is GitHub; gitlab.com or a host glab is logged in to is GitLab. Choose GitHub or GitLab "
-          + "for a host that neither CLI knows, such as an SSH alias. A host that a CLI knows keeps "
-          + "its Code Host."
+        "codans finds the Code Host from the origin remote. For a host that neither gh nor glab "
+          + "knows, add a Code Host alias in Settings › Code Hosts."
       )
       .font(.footnote)
       .foregroundStyle(.secondary)
     }
-  }
-
-  private var codeHostBinding: Binding<CodeHostKind?> {
-    Binding(
-      get: { entry?.git?.codeHost },
-      set: { routes.writeCodeHost($0) }
-    )
   }
 
   private var mergeStrategyBinding: Binding<MergeStrategy?> {
