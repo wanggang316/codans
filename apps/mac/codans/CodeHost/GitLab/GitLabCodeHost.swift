@@ -95,16 +95,19 @@ nonisolated struct GitLabCodeHost: CodeHost {
       }
       return merged
     }
-    await recheckUnsettledMergeStatus(of: Array(selected.values), exec: exec, repository: repository)
+    recheckUnsettledMergeStatus(of: Array(selected.values), exec: exec, repository: repository)
     return selected.mapValues(GitLabJSONParsers.snapshot)
   }
 
   /// Asks GitLab to recheck open merge requests it left `UNCHECKED` (or `CHECKING` that
-  /// does not settle), within the limits of `GitLabMergeStatusRecheck`. Best effort: a
-  /// failed recheck is logged and does not fail the read.
+  /// does not settle), within the limits of `GitLabMergeStatusRecheck`.
+  ///
+  /// The read does not wait for the rechecks: its snapshots are already complete, and
+  /// the next poll reads the result. The rechecks run concurrently in a task that each
+  /// call's `timeout` bounds. Best effort: a failed recheck is logged only.
   private func recheckUnsettledMergeStatus(
     of nodes: [GitLabJSONParsers.MergeRequestNode], exec: URL, repository: CodeHostRepository
-  ) async {
+  ) {
     // An iid is unique within the merge request's target project.
     let candidates = nodes.compactMap { node -> GitLabMergeStatusRecheck.Candidate? in
       guard node.state == "opened", let iid = node.iid.flatMap(Int.init) else { return nil }
@@ -113,19 +116,35 @@ nonisolated struct GitLabCodeHost: CodeHost {
         detailedMergeStatus: node.detailedMergeStatus)
     }
     .sorted { ($0.projectPath, $0.iid) < ($1.projectPath, $1.iid) }
-    for candidate in recheck.claim(candidates, now: now()) {
-      let target = CodeHostRepository(kind: repository.kind, host: repository.host, path: candidate.projectPath)
-      do {
-        _ = try await run(GlabCommand.mergeRequestRecheck(repository: target, iid: candidate.iid), exec: exec, host: target.host)
-        Self.logger.info(
-          "asked GitLab to recheck the merge status of \(target.path, privacy: .public)!\(candidate.iid, privacy: .public) (\(candidate.detailedMergeStatus ?? "nil", privacy: .public))"
-        )
-      } catch {
-        Self.logger.error(
-          "merge status recheck of \(target.path, privacy: .public)!\(candidate.iid, privacy: .public) failed: \(String(describing: error), privacy: .public)"
-        )
+    let claimed = recheck.claim(candidates, now: now())
+    guard !claimed.isEmpty else { return }
+    let task = Task { [self] in
+      await withTaskGroup(of: Void.self) { group in
+        for candidate in claimed {
+          group.addTask { [self] in await recheckMergeStatus(candidate, exec: exec, kind: repository.kind) }
+        }
       }
     }
+    state.setPendingRecheck(task)
+  }
+
+  private func recheckMergeStatus(_ candidate: GitLabMergeStatusRecheck.Candidate, exec: URL, kind: CodeHostKind) async {
+    let target = CodeHostRepository(kind: kind, host: candidate.host, path: candidate.projectPath)
+    do {
+      _ = try await run(GlabCommand.mergeRequestRecheck(repository: target, iid: candidate.iid), exec: exec, host: target.host)
+      Self.logger.info(
+        "asked GitLab to recheck the merge status of \(target.path, privacy: .public)!\(candidate.iid, privacy: .public) (\(candidate.detailedMergeStatus ?? "nil", privacy: .public))"
+      )
+    } catch {
+      Self.logger.error(
+        "merge status recheck of \(target.path, privacy: .public)!\(candidate.iid, privacy: .public) failed: \(String(describing: error), privacy: .public)"
+      )
+    }
+  }
+
+  /// Waits for the rechecks the last batched read started. Tests use it to observe them.
+  func waitForPendingRechecks() async {
+    await state.pendingRecheck()?.value
   }
 
   private func fetchChunk(
@@ -413,12 +432,21 @@ nonisolated struct GitLabCodeHost: CodeHost {
   }
 
   /// State the value-type implementation shares across copies: the `glab` version per
-  /// executable (keyed by path and modification date, so an upgrade is seen) and the API
-  /// protocol per host.
+  /// executable (keyed by path and modification date, so an upgrade is seen), the API
+  /// protocol per host, and the merge status rechecks the last read started.
   private final class SharedState: @unchecked Sendable {
     private let lock = NSLock()
     private var versions: [String: String?] = [:]
     private var protocols: [String: String] = [:]
+    private var recheckTask: Task<Void, Never>?
+
+    func pendingRecheck() -> Task<Void, Never>? {
+      lock.withLock { recheckTask }
+    }
+
+    func setPendingRecheck(_ task: Task<Void, Never>) {
+      lock.withLock { recheckTask = task }
+    }
 
     func version(for exec: URL) -> String?? {
       lock.withLock { versions[Self.key(exec)] }

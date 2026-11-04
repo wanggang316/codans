@@ -40,11 +40,13 @@ nonisolated final class GitLabMergeStatusRecheck: @unchecked Sendable {
   private var entries: [Key: Entry] = [:]
 
   /// The merge requests to recheck now, at most `maxPerBatch`, and records the recheck
-  /// time for each. A merge request that is no longer unsettled is forgotten, so a later
-  /// target branch move starts a new cycle.
+  /// time for each. The least recently rechecked go first (never rechecked before any
+  /// other), so a project with more unchecked merge requests than the cap rechecks
+  /// every one of them in turn. A merge request that is no longer unsettled is
+  /// forgotten, so a later target branch move starts a new cycle.
   func claim(_ candidates: [Candidate], now: Date) -> [Candidate] {
     lock.withLock {
-      var claimed: [Candidate] = []
+      var due: [(candidate: Candidate, key: Key, lastRecheck: Date)] = []
       for candidate in candidates {
         let key = Key(
           host: candidate.host.lowercased(), projectPath: candidate.projectPath.lowercased(), iid: candidate.iid)
@@ -53,17 +55,23 @@ nonisolated final class GitLabMergeStatusRecheck: @unchecked Sendable {
           entries[key] = nil
           continue
         }
-        var entry = entries[key] ?? Entry(unsettledSince: now)
-        defer { entries[key] = entry }
-        guard claimed.count < Self.maxPerBatch else { continue }
+        let entry = entries[key] ?? Entry(unsettledSince: now)
+        entries[key] = entry
         if let last = entry.lastRecheck, now.timeIntervalSince(last) < Self.cooldown { continue }
         if status == "CHECKING", entry.lastRecheck == nil, now.timeIntervalSince(entry.unsettledSince) < Self.cooldown {
           continue
         }
-        entry.lastRecheck = now
-        claimed.append(candidate)
+        due.append((candidate, key, entry.lastRecheck ?? .distantPast))
       }
-      return claimed
+      // Least recently rechecked first; the caller's order breaks ties.
+      let claimed = due.enumerated()
+        .sorted { ($0.element.lastRecheck, $0.offset) < ($1.element.lastRecheck, $1.offset) }
+        .prefix(Self.maxPerBatch)
+        .map(\.element)
+      for item in claimed {
+        entries[item.key]?.lastRecheck = now
+      }
+      return claimed.map(\.candidate)
     }
   }
 }

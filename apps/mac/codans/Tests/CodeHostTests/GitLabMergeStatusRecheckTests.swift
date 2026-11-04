@@ -52,7 +52,7 @@ struct GitLabMergeStatusRecheckTests {
     let runner = RecordingCommandRunner(outcomes: [
       Self.version, Self.page([("feat", 7, "UNCHECKED", "opened")], project: "group/sub/app"), Self.recheckOK,
     ])
-    let result = try await Self.makeService(runner).batchPullRequests(repository: Self.nested, branches: ["feat"])
+    let result = try await Self.makeService(runner).readAndRecheck(repository: Self.nested, branches: ["feat"])
     #expect(result["feat"]?.mergeState.status == .unknown)
     let call = try #require(await Self.rechecks(runner).first)
     #expect(
@@ -69,7 +69,7 @@ struct GitLabMergeStatusRecheckTests {
     let runner = RecordingCommandRunner(outcomes: [
       Self.version, Self.page([("feat-open", 1, "UNCHECKED", "opened")]), Self.recheckOK,
     ])
-    _ = try await Self.makeService(runner).batchPullRequests(repository: Self.withPort, branches: ["feat-open"])
+    _ = try await Self.makeService(runner).readAndRecheck(repository: Self.withPort, branches: ["feat-open"])
     let call = try #require(await Self.rechecks(runner).first)
     #expect(
       call.arguments == [
@@ -88,7 +88,7 @@ struct GitLabMergeStatusRecheckTests {
         ("d", 4, "UNCHECKED", "closed"),
       ]),
     ])
-    _ = try await Self.makeService(runner).batchPullRequests(
+    _ = try await Self.makeService(runner).readAndRecheck(
       repository: Self.withPort, branches: ["a", "b", "c", "d"])
     #expect(await Self.rechecks(runner).isEmpty)
   }
@@ -102,12 +102,12 @@ struct GitLabMergeStatusRecheckTests {
     ])
     let clock = Clock()
     let service = Self.makeService(runner, clock: clock)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat-open"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat-open"])
     clock.advance(10)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat-open"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat-open"])
     #expect(await Self.rechecks(runner).count == 1)
     clock.advance(GitLabMergeStatusRecheck.cooldown)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat-open"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat-open"])
     #expect(await Self.rechecks(runner).count == 2)
   }
 
@@ -123,7 +123,7 @@ struct GitLabMergeStatusRecheckTests {
       ])
     let clock = Clock()
     let service = Self.makeService(runner, clock: clock)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: branches)
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: branches)
     let first = await Self.rechecks(runner).map(\.arguments[1])
     #expect(first.count == GitLabMergeStatusRecheck.maxPerBatch)
     #expect(
@@ -131,7 +131,7 @@ struct GitLabMergeStatusRecheckTests {
         $0.contains("/merge_requests/1?") || $0.contains("/merge_requests/2?") || $0.contains("/merge_requests/3?")
       })
     clock.advance(5)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: branches)
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: branches)
     let second = await Self.rechecks(runner).map(\.arguments[1]).dropFirst(3)
     #expect(
       second.sorted()
@@ -145,10 +145,10 @@ struct GitLabMergeStatusRecheckTests {
     let runner = RecordingCommandRunner(outcomes: [Self.version, checking, checking, Self.recheckOK])
     let clock = Clock()
     let service = Self.makeService(runner, clock: clock)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat"])
     #expect(await Self.rechecks(runner).isEmpty)
     clock.advance(GitLabMergeStatusRecheck.cooldown)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat"])
     #expect(await Self.rechecks(runner).count == 1)
   }
 
@@ -162,12 +162,12 @@ struct GitLabMergeStatusRecheckTests {
     ])
     let clock = Clock()
     let service = Self.makeService(runner, clock: clock)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat"])
     clock.advance(10)
-    let settled = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat"])
+    let settled = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat"])
     #expect(settled["feat"]?.mergeState.status == .clean)
     clock.advance(10)
-    _ = try await service.batchPullRequests(repository: Self.withPort, branches: ["feat"])
+    _ = try await service.readAndRecheck(repository: Self.withPort, branches: ["feat"])
     // Inside the cooldown of the first recheck, but the merge request settled in between.
     #expect(await Self.rechecks(runner).count == 2)
   }
@@ -184,9 +184,90 @@ struct GitLabMergeStatusRecheckTests {
       Self.version, Self.page([("feat-open", 1, "UNCHECKED", "opened"), ("feat-b", 2, "UNCHECKED", "opened")]),
       outcome, Self.recheckOK,
     ])
-    let result = try await Self.makeService(runner).batchPullRequests(
+    let result = try await Self.makeService(runner).readAndRecheck(
       repository: Self.withPort, branches: ["feat-open", "feat-b"])
     #expect(result.keys.sorted() == ["feat-b", "feat-open"])
     #expect(await Self.rechecks(runner).count == 2)
+  }
+
+  /// More unchecked merge requests than the per-read cap: each read takes the least
+  /// recently rechecked, so none of them waits forever.
+  @Test
+  func rechecksRotateThroughMoreMergeRequestsThanTheCap() async throws {
+    let iids = Array(1...7)
+    let page = Self.page(iids.map { ("b\($0)", $0, "UNCHECKED", "opened") })
+    let runner = RecordingCommandRunner(outcomes: [Self.version, page])
+    let clock = Clock()
+    let service = Self.makeService(runner, clock: clock)
+    var perRead: [[Int]] = []
+    for read in 0..<3 {
+      let before = await Self.rechecks(runner).count
+      _ = try await service.readAndRecheck(repository: Self.withPort, branches: iids.map { "b\($0)" })
+      perRead.append(await Self.rechecks(runner).dropFirst(before).map { Self.iid(of: $0) }.sorted())
+      if read < 2 { clock.advance(30) }
+    }
+    // t=0: 1-3; t=30: 1-3 cool down, 4-6; t=60: 7 never rechecked goes first, then 1-2.
+    #expect(perRead == [[1, 2, 3], [4, 5, 6], [1, 2, 7]])
+  }
+
+  /// The read returns its snapshots without waiting for the rechecks, which run
+  /// concurrently.
+  @Test
+  func readDoesNotWaitForSlowRechecks() async throws {
+    let runner = SlowRecheckRunner(
+      page: Self.page((1...3).map { ("b\($0)", $0, "UNCHECKED", "opened") }), recheckDelay: .seconds(2))
+    let service = GitLabCodeHost(runner: runner, resolver: CLIExecutableResolver(prober: { Self.exec }))
+    let clock = ContinuousClock()
+    let start = clock.now
+    let result = try await service.batchPullRequests(repository: Self.withPort, branches: ["b1", "b2", "b3"])
+    #expect(result.count == 3)
+    #expect(clock.now - start < .seconds(1))
+    await service.waitForPendingRechecks()
+    #expect(await runner.recheckCount == 3)
+    // Three 2 s rechecks, concurrent.
+    #expect(clock.now - start < .seconds(4))
+  }
+
+  private static func iid(of call: RecordingCommandRunner.Recorded) -> Int {
+    let path = call.arguments[1]
+    let tail = path.split(separator: "/").last.map(String.init) ?? ""
+    return Int(tail.prefix { $0.isNumber }) ?? -1
+  }
+}
+
+/// Answers the batched read at once and each recheck after `recheckDelay`.
+private actor SlowRecheckRunner: CommandRunner {
+  let page: CommandOutcome
+  let recheckDelay: Duration
+  private(set) var recheckCount = 0
+
+  init(page: CommandOutcome, recheckDelay: Duration) {
+    self.page = page
+    self.recheckDelay = recheckDelay
+  }
+
+  nonisolated func run(
+    executable: URL, arguments: [String], env: [String: String], cwd: URL, timeout: Duration, maxOutputBytes: Int
+  ) async -> CommandOutcome {
+    if arguments == ["version"] { return .exited(code: 0, stdout: Data("glab 1.128.0 (x)\n".utf8), stderr: Data(), stdoutOverflow: false) }
+    if arguments.contains(where: { $0.contains("with_merge_status_recheck=true") }) {
+      try? await Task.sleep(for: recheckDelay)
+      await countRecheck()
+      return .exited(code: 0, stdout: Data("{}".utf8), stderr: Data(), stdoutOverflow: false)
+    }
+    return page
+  }
+
+  private func countRecheck() { recheckCount += 1 }
+}
+
+extension GitLabCodeHost {
+  /// A batched read followed by the rechecks it started, so a test sees both in order.
+  fileprivate func readAndRecheck(
+    repository: CodeHostRepository, branches: [String]
+  ) async throws -> [String: PullRequestSnapshot] {
+    let result = try await batchPullRequests(repository: repository, branches: branches)
+    await waitForPendingRechecks()
+    return result
   }
 }
