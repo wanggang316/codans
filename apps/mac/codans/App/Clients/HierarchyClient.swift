@@ -353,7 +353,8 @@ nonisolated struct HierarchyClient: Sendable {
 
   /// Catalog-append step for Create Worktree. Idempotent on path: when a
   /// reconcile pulse already adopted the materialized worktree mid-stream,
-  /// this returns the adopted row's id instead of throwing.
+  /// this returns the adopted row's id instead of throwing. Leaves the
+  /// selection alone.
   var createWorktreeWithGit:
     @MainActor @Sendable (
       _ projectID: ProjectID,
@@ -1015,10 +1016,11 @@ extension HierarchyClient {
         // the catalog while the creation stream is still running its setup
         // phase. Without it the finish path throws invariantViolation
         // ("worktree with path … already exists") against its own worktree.
+        // `select: false`: RootFeature decides whether the user lands on it.
         try manager.createWorktree(
           in: projectID,
           name: name, path: path, branch: branch,
-          reuseExisting: true
+          reuseExisting: true, select: false
         )
       },
       removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
