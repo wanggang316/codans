@@ -50,7 +50,13 @@ one Host. See [ADR 0002](docs/adr/0002-sidebar-outline-with-host-level.md) and
 _Avoid_: server (except in "Server project"), SSH alias.
 
 **This Mac**: The Host of all local Projects. The sidebar shows Host rows only
-when at least one Project is on another Host.
+when at least one Project is on another Host. The CLI writes it as Host ID `0`.
+
+**Project identity**: A Project is identified by its Host and its root path.
+Two Projects on different Hosts can have the same root path; two Projects on
+the same Host cannot. A path from this Mac matches only Projects on This Mac.
+See [ADR 0006](docs/adr/0006-project-identity-is-host-and-path.md).
+_Avoid_: identifying a Project by its name or by its path alone.
 
 ## Code hosts
 
