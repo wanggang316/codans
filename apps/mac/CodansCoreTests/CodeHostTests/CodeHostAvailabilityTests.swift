@@ -21,6 +21,17 @@ struct CodeHostAvailabilityTests {
   }
 
   @Test
+  func notInstalledReportsFalse() {
+    #expect(CodeHostAvailability.notInstalled.isAvailable == false)
+  }
+
+  @Test
+  func installCommandUsesHomebrewAndTheCLIName() {
+    #expect(CodeHostKind.github.installCommand == "brew install gh")
+    #expect(CodeHostKind.gitlab.installCommand == "brew install glab")
+  }
+
+  @Test
   func equalityDiscriminatesCases() {
     #expect(CodeHostAvailability.unknown == CodeHostAvailability.unknown)
     #expect(

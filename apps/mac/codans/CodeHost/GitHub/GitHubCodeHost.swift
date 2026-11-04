@@ -41,7 +41,7 @@ nonisolated struct GitHubCodeHost: CodeHost {
 
   func availability() async -> CodeHostAvailability {
     guard let exec = await resolver.resolve() else {
-      return .unavailable(reason: CodeHostError.cliNotInstalled(.github).userFacingMessage)
+      return .notInstalled
     }
     let cmd = GhCommand.authStatus()
     let outcome = await runner.run(
@@ -62,7 +62,7 @@ nonisolated struct GitHubCodeHost: CodeHost {
         }
         return .available(host: result.host, user: result.user)
       } catch let error as CodeHostError {
-        return .unavailable(reason: error.userFacingMessage)
+        return error.availability
       } catch {
         return .unavailable(reason: CodeHostError.other(String(describing: error)).userFacingMessage)
       }
@@ -71,7 +71,7 @@ nonisolated struct GitHubCodeHost: CodeHost {
     case .timedOut:
       return .unavailable(reason: CodeHostError.timeout.userFacingMessage)
     case .spawnFailed:
-      return .unavailable(reason: CodeHostError.cliNotInstalled(.github).userFacingMessage)
+      return .notInstalled
     }
   }
 
