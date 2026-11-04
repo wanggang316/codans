@@ -1,0 +1,10 @@
+# Round 1 E2E, 2026-11-04: glab calls of the isolated codans instance (logging wrapper on PATH)
+# Worktree feat-open -> codans-e2e/app!1. Unit not selected: hot tier 30 s, warm tier 120 s.
+--- main moved at 12:21:56
+12:23:40 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["feat-open"] [GITLAB_HOST=192.168.2.158:8929]
+12:23:41 glab api projects/codans-e2e%2Fapp/merge_requests/1?with_merge_status_recheck=true --method GET [GITLAB_HOST=192.168.2.158:8929]
+12:24:10 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["feat-open"] [GITLAB_HOST=192.168.2.158:8929]
+12:26:11 glab api graphql -f query=<…> -f fullPath=codans-e2e/app -F branches=["feat-open"] [GITLAB_HOST=192.168.2.158:8929]
+
+# os_log (subsystem com.gumpw.codans.gitlab)
+2026-11-04 12:23:41.402 I  Codans[82687:34369d0] [com.gumpw.codans.gitlab:service] asked GitLab to recheck the merge status of codans-e2e/app!1 (UNCHECKED)
