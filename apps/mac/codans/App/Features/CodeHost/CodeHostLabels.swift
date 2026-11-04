@@ -34,6 +34,17 @@ enum CodeHostLabels {
   static func pullRequest(_ kind: CodeHostKind?) -> String {
     (kind ?? .github).pullRequestLabel
   }
+
+  /// "#" / "!". SwiftUI `Text` call sites interpolate the number after this prefix
+  /// themselves, so the number keeps its locale grouping (`#14,846`).
+  static func referencePrefix(_ kind: CodeHostKind?) -> String {
+    (kind ?? .github).referencePrefix
+  }
+
+  /// "#6" / "!6", for plain strings such as toasts.
+  static func reference(_ kind: CodeHostKind?, number: Int) -> String {
+    "\(referencePrefix(kind))\(number)"
+  }
 }
 
 extension CodeHostFeature.State {

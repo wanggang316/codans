@@ -40,9 +40,11 @@ struct WorktreePullRequestBadge<PopoverContent: View>: View {
         // `HierarchySidebarView.diffStatsChip` so PR-less rows can surface
         // the same widget against `WorktreeBranchDiffMonitor`.
         let rollup = PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
+        let kind = store.state.codeHostKind(for: worktreeID)
         PullRequestBadge(
           state: .loaded(snapshot, rollup: rollup),
-          pullRequestName: (store.state.codeHostKind(for: worktreeID) ?? .github).pullRequestName,
+          pullRequestName: (kind ?? .github).pullRequestName,
+          codeHostKind: kind,
           onTap: { store.send(.delegate(.openURL(snapshot.url))) }
         )
       } else if let lastError {

@@ -46,6 +46,7 @@ struct WorktreePullRequestPopover: View {
       content: content,
       codeHostName: codeHostName,
       pullRequestName: pullRequestName,
+      codeHostKind: kind,
       defaultMergeStrategy: defaultStrategy,
       canMerge: !isMutating
         && pullRequest != nil

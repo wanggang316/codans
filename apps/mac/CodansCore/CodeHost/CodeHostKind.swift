@@ -24,6 +24,15 @@ public nonisolated enum CodeHostKind: String, Codable, Sendable, CaseIterable, H
     }
   }
 
+  /// Prefix of a Pull Request reference on this Code Host: `#6` on GitHub, `!6` on
+  /// GitLab.
+  public var referencePrefix: String {
+    switch self {
+    case .github: return "#"
+    case .gitlab: return "!"
+    }
+  }
+
   /// Host of the public instance. A remote on this host resolves to this kind without
   /// asking the CLI which hosts it is logged in to.
   public var publicHost: String {

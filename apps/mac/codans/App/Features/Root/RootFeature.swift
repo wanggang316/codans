@@ -1758,8 +1758,10 @@ struct RootFeature {
       // we only fan a toast out. Message format mirrors the sidebar popover's
       // verb so cross-surface language stays consistent.
       case .codeHost(.mergeCompleted(let worktreeID, let prNumber, .success)):
-        let label = CodeHostLabels.pullRequest(state.codeHost.codeHostKind(for: worktreeID))
-        return .send(.statusBar(.push(.success("\(label) #\(prNumber) merged"))))
+        let kind = state.codeHost.codeHostKind(for: worktreeID)
+        let label = CodeHostLabels.pullRequest(kind)
+        let reference = CodeHostLabels.reference(kind, number: prNumber)
+        return .send(.statusBar(.push(.success("\(label) \(reference) merged"))))
       case .codeHost(.closeCompleted(let worktreeID, .success)):
         let label = CodeHostLabels.pullRequest(state.codeHost.codeHostKind(for: worktreeID))
         return .send(.statusBar(.push(.success("\(label) closed"))))

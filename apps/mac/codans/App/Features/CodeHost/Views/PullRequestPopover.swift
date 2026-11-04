@@ -20,6 +20,8 @@ struct PullRequestPopover: View {
   let codeHostName: String
   /// UI name of a Pull Request on the Code Host ("pull request" / "merge request").
   var pullRequestName: String = "pull request"
+  /// Code Host of the Worktree; picks the reference prefix (`#` / `!`).
+  var codeHostKind: CodeHostKind?
   let defaultMergeStrategy: MergeStrategy
   let canMerge: Bool
   let mergeDisabledReason: String?
@@ -110,7 +112,7 @@ struct PullRequestPopover: View {
   private func header(snapshot: PullRequestSnapshot) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Text("#\(snapshot.number)")
+        Text("\(CodeHostLabels.referencePrefix(codeHostKind))\(snapshot.number)")
           .font(.callout.monospacedDigit())
           .foregroundStyle(.secondary)
         Text(snapshot.title)
