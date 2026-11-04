@@ -149,8 +149,9 @@ final class AgentStateStore {
     /// cache for the Agents View row's activity text — never an input to
     /// state derivation (see the reaction table).
     var lastTitle: String?
-    /// True once `onAgentBound` confirmed an agent in the pane. A restored
-    /// seed has an entry but no confirmed agent yet, so titles wait for it.
+    /// True once an agent is confirmed in the pane: by `onAgentBound`, or
+    /// by `seedRestored` for an agent whose daemon survived the quit. Titles
+    /// before that belong to the shell or a previous program.
     var agentBound = false
     /// True only for a pane seeded from the persisted quit snapshot that
     /// has not yet received a live viewport classification. While set,
@@ -486,10 +487,12 @@ final class AgentStateStore {
         lastTransitionAt: now(),
         source: observedSource(.screen, paneID: record.paneID)
       )
-      scratch[record.paneID] = .fresh(
-        userInputSeen: true,
-        awaitingFirstClassification: true
-      )
+      // The persisted binding and the live daemon confirm the agent. A
+      // restored pane without a surface is not bound until it is shown, but
+      // the passive watcher already delivers the agent's titles.
+      var fresh = Scratch.fresh(userInputSeen: true, awaitingFirstClassification: true)
+      fresh.agentBound = true
+      scratch[record.paneID] = fresh
     }
   }
 

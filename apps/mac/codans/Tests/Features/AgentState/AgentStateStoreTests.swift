@@ -508,16 +508,17 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func restoredAgentIgnoresTitlesUntilItsBind() {
+  func restoredAgentShowsTitlesBeforeItsBind() {
     let f = Fixture()
     f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
-    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
     #expect(f.registry.activityText(for: f.paneID) == nil)
-    // The binder identifies the restored agent at launch.
-    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
-    #expect(f.registry.activityText(for: f.paneID) == nil)
-
+    // A restored pane without a surface is never bound, because the binder
+    // reads the foreground job from the surface. Its titles come from the
+    // passive watcher, and the agent survived the quit with its daemon.
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
+    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+    // The binder identifies the restored agent when its surface attaches.
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
     #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
   }
 
