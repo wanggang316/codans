@@ -616,11 +616,7 @@ struct HierarchySidebarView: View {
               projectID: move.projectID, segment: move.segment, from: move.source, to: move.destination))
         },
         onToggleProject: { projectID in
-          var txn = Transaction()
-          txn.disablesAnimations = true
-          _ = withTransaction(txn) {
-            store.send(.toggleProjectExpansion(projectID))
-          }
+          store.send(.toggleProjectExpansion(projectID))
         },
         onMoveProject: { projectID, placement in
           store.send(.moveProject(projectID, to: placement))
@@ -756,11 +752,7 @@ struct HierarchySidebarView: View {
 
   private func hostRow(_ group: SidebarHostGroup, separated: Bool) -> some View {
     SidebarHostRow(group: group) {
-      var txn = Transaction()
-      txn.disablesAnimations = true
-      _ = withTransaction(txn) {
-        store.send(.toggleHostExpansion(group.host))
-      }
+      store.send(.toggleHostExpansion(group.host))
     }
     .padding(separated ? Self.separatedHostRowInsets : Self.projectRowInsets)
     .contextMenu {
@@ -799,12 +791,8 @@ struct HierarchySidebarView: View {
   /// as plain row inserts and removals.
   @ViewBuilder
   private func projectRow(_ project: Project, hotkeySlot: Int?) -> some View {
-    let toggleExpansion = {
-      var txn = Transaction()
-      txn.disablesAnimations = true
-      _ = withTransaction(txn) {
-        store.send(.toggleProjectExpansion(project.id))
-      }
+    let toggleExpansion: () -> Void = {
+      _ = store.send(.toggleProjectExpansion(project.id))
     }
     if let root = project.rowWorktree {
       let hotkeyNumber = hotkeySlot.map { $0 + 1 }
@@ -863,12 +851,8 @@ struct HierarchySidebarView: View {
     _ group: WorkspaceGroupRecord, terminal: Worktree?, in project: Project, hotkeySlot: Int?
   ) -> some View {
     let hotkeyNumber = hotkeySlot.map { $0 + 1 }
-    let toggleExpansion = {
-      var txn = Transaction()
-      txn.disablesAnimations = true
-      _ = withTransaction(txn) {
-        store.send(.toggleWorkspaceGroupExpansion(projectID: project.id, groupID: group.id))
-      }
+    let toggleExpansion: () -> Void = {
+      _ = store.send(.toggleWorkspaceGroupExpansion(projectID: project.id, groupID: group.id))
     }
     let row = WorkspaceGroupRow(
       group: group,
