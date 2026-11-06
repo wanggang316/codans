@@ -7,6 +7,9 @@ public nonisolated enum WorkflowWatchdogSignal: Equatable, Sendable {
   case idleGraceElapsed
   /// `expect.timeout-minutes` ran out.
   case deadlineReached
+  /// The role's pane is still open but its agent is not: it exited, or a
+  /// launched agent never came up.
+  case agentExited
 }
 
 /// What the outside world reports back. Each answers an effect; stale or
