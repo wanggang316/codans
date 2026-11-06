@@ -442,7 +442,8 @@ private struct ExpansionAnimation {
 extension EnvironmentValues {
   /// How a row's chevron turns when the row opens or closes: set only for
   /// the row of a user toggle, nil (at once) for every other change
-  /// (ADR 0007, decision 4).
+  /// (ADR 0007, decision 4). Do not send a toggle in a transaction that
+  /// disables animations: that also stops this one.
   @Entry var sidebarDisclosureAnimation: Animation?
 }
 
