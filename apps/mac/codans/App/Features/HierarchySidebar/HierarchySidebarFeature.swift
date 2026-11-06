@@ -108,6 +108,9 @@ struct HierarchySidebarFeature {
     // directly from the catalog, mirroring how `Worktree.isPinned` is
     // consumed.
 
+    /// The last row the user opened or closed. The outline animates that
+    /// row once; other changes of the open state are instant (ADR 0007).
+    var expansionToggle: SidebarExpansionToggle?
     var addWorktreeSheet: AddWorktreeSheet?
     var createWorktreeSheet: CreateWorktreeFeature.State?
     /// "Clone Repository" sheet reached from the Add Project menu. Drives
@@ -696,6 +699,7 @@ struct HierarchySidebarFeature {
         .first(where: { $0.id == projectID })?
         .isExpanded ?? true
       hierarchyClient.setProjectExpanded(projectID, !current)
+      state.expansionToggle = .next(.project(projectID), after: state.expansionToggle)
       return .none
 
     case .toggleWorkspaceGroupExpansion(let projectID, let groupID):
@@ -704,6 +708,8 @@ struct HierarchySidebarFeature {
           .workspaceGroups.first(where: { $0.id == groupID })
       else { return .none }
       hierarchyClient.setWorkspaceGroupExpanded(projectID, groupID, !group.isExpanded)
+      state.expansionToggle = .next(
+        .workspaceGroup(projectID: projectID, groupID: groupID), after: state.expansionToggle)
       return .none
 
     case .revealWorkspaceRow(let worktreeID, let projectID):
@@ -885,6 +891,7 @@ struct HierarchySidebarFeature {
     case .toggleHostExpansion(let host):
       let collapsed = hierarchyClient.snapshot().collapsedSidebarHosts.contains(host)
       hierarchyClient.setSidebarHostExpanded(host, collapsed)
+      state.expansionToggle = .next(.host(host), after: state.expansionToggle)
       return .none
 
     case .hostConnectProjectTapped(let hostID):

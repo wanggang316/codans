@@ -30,13 +30,15 @@ struct SidebarOutlineTests {
 
     func show(
       _ projects: [Project], selection: SidebarSelection? = nil, selectedProjectID: ProjectID? = nil,
-      reveal: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+      reveal: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+      toggle: SidebarExpansionToggle? = nil
     ) {
       coordinator.update(
         with: SidebarOutline(
           nodes: SidebarOutlineModel.nodes(
             projects: projects, pendingWorktrees: [], filter: .all),
-          selection: selection, selectedProjectID: selectedProjectID, revealTrigger: reveal, bottomInset: 0,
+          selection: selection, selectedProjectID: selectedProjectID, revealTrigger: reveal,
+          expansionToggle: toggle, bottomInset: 0,
           allowsWorktreeDrag: true, decorateRow: { $0 },
           rowContent: { node in AnyView(Text(node.id).frame(height: 20)) },
           onSelect: { [weak self] in self?.selections.append($0) },
@@ -75,6 +77,41 @@ struct SidebarOutlineTests {
 
     repo.isExpanded = true
     harness.show([repo])
+    #expect(harness.rowIDs.count == 4)
+  }
+
+  @Test
+  func onlyANewUserToggleAnimatesItsRow() async throws {
+    let harness = Harness()
+    var repo = repository("repo", worktrees: 2, expanded: false)
+    // Reduce Motion turns the animation off for user toggles too.
+    let projectNode =
+      NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : "project:\(repo.id.raw)"
+    let earlier = SidebarExpansionToggle(target: .project(repo.id), sequence: 1)
+
+    // A toggle that is in the store before the outline shows (a filter
+    // change rebuilt the view) does not animate.
+    harness.show([repo], toggle: earlier)
+    #expect(harness.coordinator.animatedNodeID == nil)
+
+    // A catalog change with no new toggle (a reveal, the CLI) is instant.
+    repo.isExpanded = true
+    harness.show([repo], toggle: earlier)
+    #expect(harness.coordinator.animatedNodeID == nil)
+    #expect(harness.rowIDs.count == 4)
+
+    // The user closes the row: it animates, and the outline ends in the
+    // catalog state.
+    repo.isExpanded = false
+    let close = SidebarExpansionToggle.next(.project(repo.id), after: earlier)
+    harness.show([repo], toggle: close)
+    #expect(harness.coordinator.animatedNodeID == projectNode)
+
+    // The user opens it again during the animation: it turns around.
+    repo.isExpanded = true
+    harness.show([repo], toggle: .next(.project(repo.id), after: close))
+    #expect(harness.coordinator.animatedNodeID == projectNode)
+    try await Task.sleep(for: .milliseconds(600))
     #expect(harness.rowIDs.count == 4)
   }
 

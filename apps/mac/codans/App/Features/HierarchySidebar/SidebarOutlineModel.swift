@@ -91,8 +91,14 @@ enum SidebarOutlineModel {
     }
   }
 
+  static func projectNodeID(_ projectID: ProjectID) -> String { "project:\(projectID.raw)" }
+
+  static func workspaceGroupNodeID(_ projectID: ProjectID, _ groupID: WorkspaceGroupID) -> String {
+    "group:\(projectID.raw):\(groupID.raw)"
+  }
+
   private static func projectNode(_ project: Project, pendings: [PendingWorktree]) -> SidebarOutlineNode {
-    var node = SidebarOutlineNode(id: "project:\(project.id.raw)", row: .project(project))
+    var node = SidebarOutlineNode(id: projectNodeID(project.id), row: .project(project))
     if case .failed = project.loadState { return node }
     node.isExpanded = project.isExpanded
     node.children = project.isWorkspace ? workspaceNodes(project) : worktreeNodes(project, pendings: pendings)
@@ -119,7 +125,7 @@ enum SidebarOutlineModel {
     project.workspaceSidebarRows.compactMap { row -> SidebarOutlineNode? in
       guard case .group(let group, let terminal) = row else { return nil }
       var node = SidebarOutlineNode(
-        id: "group:\(project.id.raw):\(group.id.raw)",
+        id: workspaceGroupNodeID(project.id, group.id),
         row: .workspaceGroup(group, terminal: terminal, project: project))
       node.isExpanded = group.isExpanded
       node.children = project.workspaceGroupMembers(group.id).map {
