@@ -100,14 +100,6 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 
 ## Agent skills
 
-### Issue tracker
-
-GitHub Issues on `wanggang316/codans`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
-
 ### Domain docs
 
 Single-context. See `docs/agents/domain.md`.
