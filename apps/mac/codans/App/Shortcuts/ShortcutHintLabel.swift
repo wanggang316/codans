@@ -63,9 +63,7 @@ struct ShortcutHintTrailing<Accessories: View>: View {
         .opacity(isShown ? 1 : 0)
         .accessibilityHidden(true)
     }
-    // Slower than `Animation.shortcutHint`: a column of rows swaps at once, and a soft
-    // fade reads calmer there than a snap.
-    .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: isShown)
+    .animation(reduceMotion ? nil : .shortcutHint, value: isShown)
   }
 }
 
@@ -96,18 +94,13 @@ private struct ShortcutHintSwap: ViewModifier {
       .scaleEffect(morphs ? 0.7 : 1)
       .blur(radius: morphs ? 2 : 0)
       .opacity(isHidden ? 0 : 1)
-      .animation(
-        reduceMotion ? nil : isShown ? .shortcutHintSwapIn : .shortcutHintSwapOut,
-        value: isShown)
+      .animation(reduceMotion ? nil : .shortcutHint, value: isShown)
   }
 }
 
 extension Animation {
-  /// Timing of a hint inserted or removed under the ⌘ flag: a quick cross-fade with no
-  /// motion or blur, so the hints answer the held key at once.
-  static let shortcutHint: Animation = .easeOut(duration: 0.08)
-  /// An in-place swap shows its hint almost at once when ⌘ goes down…
-  static let shortcutHintSwapIn: Animation = .easeOut(duration: 0.04)
-  /// …and lets the glyph grow back into view more slowly when ⌘ comes up.
-  static let shortcutHintSwapOut: Animation = .easeOut(duration: 0.1)
+  /// The one timing of every ⌘ hint: inserted labels, in-place swaps, and row accessories
+  /// all use it, so the sidebar rows, the filter bar, the Agents View, and the tab bar
+  /// change together when ⌘ goes down or up.
+  static let shortcutHint: Animation = .easeInOut(duration: 0.15)
 }
