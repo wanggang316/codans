@@ -2,57 +2,70 @@ import CodansCore
 import CodansKit
 import SwiftUI
 
-/// "Agent skills" section of the Developer pane: one `InstallTargetRow`
-/// per agent target with the agent's mark and an Install / Uninstall
-/// button. Installing is the user's call per agent; nothing is linked
-/// automatically. Mirrors `codans skill install --target <agent>`. The
-/// footer reveals the bundled skill for anyone who prefers to copy it by
-/// hand.
-struct SkillInstallSection: View {
-  @State var model: SkillInstallModel
+/// The Developer pane's skill sections: one grouped-form `Section` per
+/// bundled skill, titled by the skill id (the folder name it is linked
+/// as), with a one-line description, one `InstallTargetRow` per agent
+/// target, and a Reveal in Finder button for that skill's bundled folder.
+/// Installing is the user's call per skill and agent; nothing is linked
+/// automatically. Mirrors `codans skill install <id> --target <agent>`.
+/// Must be placed directly inside a `Form` so each section is a peer of
+/// the pane's other sections.
+struct SkillInstallSections: View {
+  let model: SkillInstallModel
   @Environment(DeveloperPaneDependencies.self) private var deps
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text(
-        "Install the bundled skill into an agent's skill folder so it learns the `codans` CLI; updating the app updates the skill."
-      )
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      VStack(alignment: .leading, spacing: 8) {
-        ForEach(model.rows) { row in
+    ForEach(model.groups) { group in
+      Section(group.id) {
+        if let description = group.description {
+          Text(LocalizedStringKey(description))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        ForEach(group.rows) { row in
           SkillTargetRow(
             row: row,
             install: { model.install(row) },
             uninstall: { model.uninstall(row) }
           )
         }
+        if let error = model.lastError, error.skillID == group.id {
+          SkillErrorRow(message: error.message)
+        }
+        RevealInFinderButton {
+          deps.revealInFinder(group.bundledFolder)
+        }
+        .help("Show the bundled \(group.id) folder, for installing it by hand.")
       }
-      if model.rows.isEmpty, model.lastError == nil {
-        Text("No skills are bundled with this build.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      if let error = model.lastError {
-        HStack(alignment: .top, spacing: 6) {
-          Image(systemName: "exclamationmark.circle.fill")
-            .foregroundStyle(.red)
-            .accessibilityHidden(true)
-          Text(error)
+    }
+    if model.groups.isEmpty {
+      Section {
+        if let error = model.lastError {
+          SkillErrorRow(message: error.message)
+        } else {
+          Text("No skills are bundled with this build.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(8)
-        .background(Color.red.opacity(0.08), in: .rect(cornerRadius: 6))
-      }
-      if let bundled = model.rows.first?.skill.path {
-        RevealInFinderButton {
-          deps.revealInFinder(URL(fileURLWithPath: bundled, isDirectory: true))
-        }
-        .help("Show the bundled skill folder, for installing it by hand.")
       }
     }
-    .task { model.refresh() }
+  }
+}
+
+private struct SkillErrorRow: View {
+  let message: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 6) {
+      Image(systemName: "exclamationmark.circle.fill")
+        .foregroundStyle(.red)
+        .accessibilityHidden(true)
+      Text(message)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .padding(8)
+    .background(Color.red.opacity(0.08), in: .rect(cornerRadius: 6))
   }
 }
 

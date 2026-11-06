@@ -1,7 +1,7 @@
 import CodansCore
 import SwiftUI
 
-/// `codans` CLI install status card, laid out like the Agent skills rows
+/// `codans` CLI install status card, laid out like the skill rows
 /// below it: one `InstallTargetRow` for the symlink with an Install /
 /// Uninstall button. No mark: the row is the command itself.
 /// Hosts its own state because the view owns transient install/uninstall

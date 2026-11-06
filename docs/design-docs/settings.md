@@ -286,20 +286,31 @@ sheet preference.
 
 ## Developer pane
 
-Two sections use `DeveloperPaneDependencies` (`@Environment`): the `codans`
-CLI symlink (`CLIInstallerClient`, privileged) and **Agent skills**. App version
-information belongs to the About pane.
+The pane uses `DeveloperPaneDependencies` (`@Environment`). Its grouped form
+has a **CLI** section for the `codans` CLI symlink (`CLIInstallerClient`,
+privileged) and, as peers, one section per bundled skill, ordered by skill id
+(`codans-cli`, `codans-workflow`). App version information belongs to the
+About pane.
 
-Both sections render through `InstallTargetRow`: the target's mark (24pt,
+A skill section's title is the skill id, the folder name it is linked as in
+an agent's skill directory. Its first line is a one-sentence description from
+`SkillInstallModel.descriptions`, a static map keyed by skill id; SKILL.md
+frontmatter is written for agent triggering and is too long for this caption.
+A skill with no entry shows only its title and rows. Then come the skill's
+three target rows, and the section ends with a Reveal in Finder button for
+that skill's own bundled folder. An install or uninstall error shows in the
+section of the skill that caused it; an empty bundle, or a bundle that cannot
+be read, shows one untitled section with the message.
+
+All rows render through `InstallTargetRow`: the target's mark (24pt,
 `AgentLogoView` — brand SVG for Claude Code / Codex, an SF Symbol for the
 shared folder; the CLI row has none), its name, the path it lands at, a
 status dot (green linked, grey absent, orange needs attention, no text),
 and an Install / Uninstall button. A link to another build is offered
-Install again in both sections; there is no separate Reinstall. Agent
-skills ends with a Reveal in Finder button for the bundled skill; the CLI
+Install again in every section; there is no separate Reinstall. The CLI
 card's status wording lives in button tooltips rather than a caption.
 
-Agent skills is opt-in per agent. `SkillInstallModel` wraps the same
+Skills are opt-in per skill and agent. `SkillInstallModel` wraps the same
 `SkillInstaller` (`CodansKit/Skills`) that `codans skill` uses, over the
 bundle's `Resources/skills` (embedded from the repo's `skills/` at build
 time); it offers every bundled skill × every target (Claude Code
