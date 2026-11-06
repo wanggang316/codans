@@ -17,6 +17,8 @@ struct SidebarOutline: NSViewRepresentable {
   let selectedProjectID: ProjectID?
   /// A change scrolls the selected row to the center.
   let revealTrigger: UUID
+  /// A new value animates the row the user opened or closed (ADR 0007).
+  let expansionToggle: SidebarExpansionToggle?
   /// Space the AgentState panel covers at the bottom.
   let bottomInset: CGFloat
   /// Worktrees move inside their segment only while every row of the segment
@@ -94,6 +96,11 @@ struct SidebarOutline: NSViewRepresentable {
     private var itemsByID: [String: SidebarOutlineItem] = [:]
     private var shownStructure: [String] = []
     private var shownRevealTrigger: UUID?
+    /// The last toggle applied. Nil before the first update, so a toggle
+    /// that is already in the store when the outline appears does not animate.
+    private var shownExpansionToggle: SidebarExpansionToggle??
+    /// The row the last update animated, nil when it changed rows at once.
+    private(set) var animatedNodeID: String?
     private var heightUpdateScheduled = false
     /// Each row's measured height, by row id. Kept across updates, so a
     /// reload measures only the rows it has not seen.
@@ -117,15 +124,19 @@ struct SidebarOutline: NSViewRepresentable {
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: config.bottomInset, right: 0)
       }
 
+      let animation = expansionAnimation(for: config.expansionToggle)
+      shownExpansionToggle = .some(config.expansionToggle)
+      animatedNodeID = animation?.nodeID
+
       let structure = rebuild(config.nodes)
       if structure != shownStructure {
         shownStructure = structure
         outline.reloadData()
         scheduleHeightUpdate()
       } else {
-        refreshVisibleRows()
+        refreshVisibleRows(animating: animation)
       }
-      applyExpansion()
+      applyExpansion(animating: animation)
       syncSelection()
       if let shown = shownRevealTrigger, shown != config.revealTrigger {
         // After this update lands: the reveal may have switched worktrees and
@@ -156,46 +167,68 @@ struct SidebarOutline: NSViewRepresentable {
       return structure
     }
 
+    /// The animation for a toggle the outline has not applied yet, nil for
+    /// every other update: those open and close rows at once (ADR 0007).
+    private func expansionAnimation(for toggle: SidebarExpansionToggle?) -> ExpansionAnimation? {
+      guard let shown = shownExpansionToggle, let toggle, toggle != shown,
+        !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+      else { return nil }
+      // A new group starts with the system duration.
+      NSAnimationContext.beginGrouping()
+      let duration = NSAnimationContext.current.duration
+      NSAnimationContext.endGrouping()
+      return ExpansionAnimation(nodeID: toggle.nodeID, duration: duration)
+    }
+
     /// Opens and closes rows to match the catalog, parents first, so a row
-    /// that opens shows its children as they are now. No animation: the
-    /// sidebar has always opened at once.
-    private func applyExpansion() {
+    /// that opens shows its children as they are now. Only the row of a user
+    /// toggle animates, with the outline's own animation; a toggle during
+    /// that animation turns it around.
+    private func applyExpansion(animating animation: ExpansionAnimation?) {
       guard let outline else { return }
       NSAnimationContext.beginGrouping()
       NSAnimationContext.current.duration = 0
       NSAnimationContext.current.allowsImplicitAnimation = false
       defer { NSAnimationContext.endGrouping() }
+      func change(_ item: SidebarOutlineItem, expand: Bool) {
+        guard let animation, animation.nodeID == item.id else {
+          if expand { outline.expandItem(item) } else { outline.collapseItem(item) }
+          return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = animation.duration
+          if expand { outline.animator().expandItem(item) } else { outline.animator().collapseItem(item) }
+        }
+      }
       func apply(_ items: [SidebarOutlineItem]) {
         for item in items where !item.children.isEmpty {
           let expanded = item.node.isExpanded
-          if expanded, !outline.isItemExpanded(item) {
-            outline.expandItem(item)
-          } else if !expanded, outline.isItemExpanded(item) {
-            outline.collapseItem(item)
-          }
+          if expanded != outline.isItemExpanded(item) { change(item, expand: expanded) }
           if expanded { apply(item.children) }
         }
       }
       apply(roots)
     }
 
-    private func refreshVisibleRows() {
+    private func refreshVisibleRows(animating animation: ExpansionAnimation?) {
       guard let outline else { return }
       let rows = outline.rows(in: outline.visibleRect)
       for row in rows.location..<(rows.location + rows.length) {
         guard let item = outline.item(atRow: row) as? SidebarOutlineItem,
           let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCell
         else { continue }
-        show(item, in: cell)
+        show(item, in: cell, disclosureAnimation: animation?.nodeID == item.id ? animation?.chevron : nil)
       }
       scheduleHeightUpdate()
     }
 
-    private func show(_ item: SidebarOutlineItem, in cell: SidebarOutlineCell) {
+    private func show(_ item: SidebarOutlineItem, in cell: SidebarOutlineCell, disclosureAnimation: Animation? = nil) {
       guard let config else { return }
       let node = item.node
       cell.show(
-        AnyView(SidebarOutlineRowHost(node: node, content: config.rowContent)),
+        AnyView(
+          SidebarOutlineRowHost(node: node, content: config.rowContent)
+            .environment(\.sidebarDisclosureAnimation, disclosureAnimation)),
         decorate: config.decorateRow)
       cell.onSizeChange = { [weak self] in self?.scheduleHeightUpdate() }
     }
@@ -395,6 +428,22 @@ struct SidebarOutline: NSViewRepresentable {
       return { config.onMoveWorktrees(move) }
     }
   }
+}
+
+/// How the outline animates the row of a user toggle.
+private struct ExpansionAnimation {
+  let nodeID: String
+  let duration: TimeInterval
+
+  /// The chevron turns with the rows, over the same time.
+  var chevron: Animation { .easeInOut(duration: duration) }
+}
+
+extension EnvironmentValues {
+  /// How a row's chevron turns when the row opens or closes: set only for
+  /// the row of a user toggle, nil (at once) for every other change
+  /// (ADR 0007, decision 4).
+  @Entry var sidebarDisclosureAnimation: Animation?
 }
 
 /// The environment the sidebar's rows read, passed into each hosted cell.

@@ -7,6 +7,7 @@ import SwiftUI
 struct SidebarHostRow: View {
   let group: SidebarHostGroup
   let onToggleExpansion: () -> Void
+  @Environment(\.sidebarDisclosureAnimation) private var disclosureAnimation
   @State private var isHovering = false
   @State private var isChevronHovering = false
 
@@ -33,6 +34,7 @@ struct SidebarHostRow: View {
           // Same as the Project rows: the chevron shows on hover.
           .opacity(isHovering ? 1 : 0)
           .accessibilityHidden(true)
+          .animation(disclosureAnimation, value: group.isExpanded)
       }
       .foregroundStyle(isHovering ? .primary : .secondary)
       .contentShape(Rectangle())

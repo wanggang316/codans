@@ -27,7 +27,9 @@ struct HierarchySidebarFeatureTests {
       }
     }
 
-    await store.send(.toggleProjectExpansion(projectID))
+    await store.send(.toggleProjectExpansion(projectID)) {
+      $0.expansionToggle = SidebarExpansionToggle(target: .project(projectID), sequence: 1)
+    }
     #expect(received.value.count == 1)
     #expect(received.value[0].0 == projectID)
     #expect(received.value[0].1 == false)
@@ -105,8 +107,12 @@ struct HierarchySidebarFeatureTests {
       }
     }
 
-    await store.send(.toggleHostExpansion(.thisMac))
-    await store.send(.toggleHostExpansion(.host(host.id)))
+    await store.send(.toggleHostExpansion(.thisMac)) {
+      $0.expansionToggle = SidebarExpansionToggle(target: .host(.thisMac), sequence: 1)
+    }
+    await store.send(.toggleHostExpansion(.host(host.id))) {
+      $0.expansionToggle = SidebarExpansionToggle(target: .host(.host(host.id)), sequence: 2)
+    }
     #expect(received.value.map(\.0) == [.thisMac, .host(host.id)])
     #expect(received.value.map(\.1) == [true, false])
   }
@@ -1139,8 +1145,14 @@ extension HierarchySidebarFeatureTests {
       }
     }
 
-    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.defaultGroup))
-    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.existingGroup))
+    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.defaultGroup)) {
+      $0.expansionToggle = SidebarExpansionToggle(
+        target: .workspaceGroup(projectID: f.project.id, groupID: f.defaultGroup), sequence: 1)
+    }
+    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.existingGroup)) {
+      $0.expansionToggle = SidebarExpansionToggle(
+        target: .workspaceGroup(projectID: f.project.id, groupID: f.existingGroup), sequence: 2)
+    }
     #expect(received.value.map(\.0) == [f.defaultGroup, f.existingGroup])
     #expect(received.value.map(\.1) == [true, false])
   }
@@ -1165,6 +1177,27 @@ extension HierarchySidebarFeatureTests {
     await store.send(.revealWorkspaceRow(f.reference.id, inProject: f.project.id))
     #expect(received.value.map(\.0) == [f.defaultGroup])
     #expect(received.value.map(\.1) == [true])
+  }
+
+  /// A reveal opens the group for the program, not the user: the last user
+  /// toggle stays as it was, so the outline opens the group at once (ADR 0007).
+  @Test
+  func revealingARowDoesNotMarkAnExpansionToggle() async {
+    let f = WorkspaceFixture()
+    var initial = HierarchySidebarFeature.State()
+    initial.expansionToggle = SidebarExpansionToggle(target: .project(f.project.id), sequence: 3)
+    let received = LockIsolated<[(WorkspaceGroupID, Bool)]>([])
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+      $0.hierarchyClient.setWorkspaceGroupExpanded = { _, groupID, isExpanded in
+        received.withValue { $0.append((groupID, isExpanded)) }
+      }
+    }
+
+    await store.send(.revealWorkspaceRow(f.reference.id, inProject: f.project.id))
+    #expect(received.value.map(\.0) == [f.defaultGroup])
   }
 
   @Test

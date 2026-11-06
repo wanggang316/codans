@@ -598,6 +598,7 @@ struct HierarchySidebarView: View {
         selection: outlineSelection,
         selectedProjectID: catalog.selectedProjectID,
         revealTrigger: revealTrigger,
+        expansionToggle: store.expansionToggle,
         bottomInset: bottomInsetHeight,
         allowsWorktreeDrag: !SidebarOutlineModel.isLiveMatch(catalog.sidebarFilter),
         decorateRow: SidebarRowEnvironment(
@@ -1779,6 +1780,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+  @Environment(\.sidebarDisclosureAnimation) private var disclosureAnimation
   @State private var isHovering = false
   @State private var isPlusHovering = false
   @State private var isMenuHovering = false
@@ -1923,6 +1925,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
                   isHovering: isChevronHovering
                 )
                 .rotationEffect(.degrees(project.isExpanded ? 90 : 0))
+                .animation(disclosureAnimation, value: project.isExpanded)
               }
               .buttonStyle(.plain)
               .onHover { isChevronHovering = $0 }
@@ -2079,6 +2082,7 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   let onToggleExpansion: () -> Void
   let onRetryDeletion: () -> Void
   @ViewBuilder let accessory: () -> Accessory
+  @Environment(\.sidebarDisclosureAnimation) private var disclosureAnimation
   @State private var isHovering = false
   @State private var isChevronHovering = false
 
@@ -2127,6 +2131,7 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
               .font(.system(size: 11, weight: .medium))
               .foregroundStyle(isChevronHovering ? .primary : .secondary)
               .rotationEffect(.degrees(group.isExpanded ? 90 : 0))
+              .animation(disclosureAnimation, value: group.isExpanded)
               .frame(width: 22, height: 22)
               .background(Circle().fill(Color.primary.opacity(isChevronHovering ? 0.08 : 0)))
               .contentShape(Circle())
