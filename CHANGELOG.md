@@ -10,116 +10,65 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Added
 
-- **`--host` selects a Project by its Host.** Every CLI command that takes
-  a Project (project, worktree, tab, pane, tree, show, workspace) takes
-  `--host <id>`: a Host id, or `0` for This Mac. A name that matches
-  Projects on two Hosts is a conflict that lists each match as
-  `<project-id> host=<id|0>`. `codans tree --host <id>` lists one Host.
-- **Session History in the pane header, and on ⌘Y.** The pane header has a
-  Session History button left of the split buttons; it replaces the row in
-  the pane actions menu. Tab › Session History… (⌘Y) opens the same popover
-  on the focused pane, or on the empty page when the worktree has no tab.
-  Press ⌘Y again to close it. Rebind it in Settings › Shortcuts.
-- **GitLab merge requests.** A Project whose `origin` is on gitlab.com, or
-  on a self-managed GitLab that `glab` is logged in to, shows its merge
-  requests as GitHub Projects show pull requests: the "MR" badge, popover,
-  status bar, and worktree header. The popover can merge (the project's
-  merge method applies), squash and merge, close, mark ready, and rerun
-  failed jobs. "Open MR on GitLab" and "Open Project on GitLab" open the
-  GitLab pages. Needs `glab` 1.122.0 or later.
-- **Settings › Git Platforms.** The GitHub pane is now Git Platforms. It shows
-  whether `gh` and `glab` are installed and logged in, with the host and
-  user, Re-check, and a docs link for each, and the merge defaults that
-  apply to both.
-- **Git Platform aliases.** Settings › Git Platforms has a list of aliases: a
-  remote host as it appears in the `origin` URL, GitHub or GitLab, and the
-  API host the CLI is logged in to. Use one for a remote host that neither
-  `gh` nor `glab` knows, such as an SSH host name that is not the API host.
-  Each alias shows whether its API host is logged in. With no match there
-  is no badge.
-- **SSH aliases and SSH ports work with no setting.** For an SSH remote,
-  codans reads the host name from `ssh -G` and uses the one logged-in host
-  with that name, so `git@github-work:…` and `ssh://git@host:2222/…` show
-  their badges.
-- **Mixed Workspaces.** A Workspace with GitHub and GitLab members shows
-  the PRs and MRs of each member from its own Git Platform.
-- **CLI problems show at the badge.** When `gh` or `glab` is missing, not
-  logged in, or too old, each Worktree row shows the message with the
-  command that fixes it.
-
-- **Switch the sidebar filter with ⌃⌘1…⌃⌘5.** All, Remote, Workspace, PR,
-  and Unread, in the order the filter bar shows them.
-- **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9
-  focus the pane of the first nine agents in the list. Rebind them under
-  Settings → Shortcuts → Agents.
-- **Settings › Hosts.** Add, edit, and delete the Hosts that remote
-  projects run on. An edit applies to all Projects on the Host. A Host
-  that Projects use cannot be deleted; the page shows how many use it.
-- **Open Remote Project picks a Host.** The sheet lists your Hosts, plus
-  "New Host…" with Host, Username, Port, and Name fields. A new Host is
-  added to Settings › Hosts. Edit Remote Project can move a Project to another
-  Host.
-- **`codans tree` and `codans project show` show the Host of each Project.**
-  A remote project shows its Host's name and ID; a local Project shows
-  This Mac. The JSON output has `host {id, name}`.
-
 ### Changed
-
-- **One name for remote projects.** The Add Project menu item Connect to
-  Server is now Open Remote Project…, and its sheet button is Open. The
-  project menu item Edit Connection is now Edit Remote Project…, and the Host
-  row item Connect Project on This Host is now Open Remote Project on This
-  Host…. Messages and Settings say "remote project". `codans tree --json`
-  still writes the kind as `server`.
-- **CLI output shows the Host of each Project.** `tree`, `project list`,
-  `project show`, and `project add` show `host=<id|0>`. In `--json`,
-  `host.id` is `"0"` for This Mac (it was `null`), and `project list` and
-  `project add` now carry `host`.
-- **Install command of a missing Git Platform CLI.** When `gh` or `glab` is
-  missing, Settings › Git Platforms says only which CLI is missing, shows
-  `brew install <cli>` on its own line in a code style, and puts a copy
-  button next to it. The button shows a checkmark after a click.
-- **Remote projects share Host records.** The catalog now keeps one record
-  per host, username, and port, and each remote project refers to it. On
-  first launch, existing remote projects are moved to these records; the
-  original catalog is kept in `backups/`. Connecting with the fields of a
-  known Host reuses it. An older build cannot open the new catalog.
-- **The Host list replaces the recent-servers menu** in Open Remote Project.
-  `saved-server-hosts.json` is no longer used.
-
-- **Shortcut hints are plain grey text and fade in place.** Holding ⌘ shows
-  each shortcut without a key frame. On a sidebar filter button the shortcut
-  takes the place of the label, and on a tab it takes the place of the color
-  dot: the label or dot shrinks and fades out at once, and grows back when you
-  let go. On a sidebar row and an agent row, the shortcut fades in where the
-  row's trailing badges are. Nothing around a hint moves. The toolbar's Open
-  In button no longer shows its shortcut while ⌘ is held; its tooltip still
-  names it.
-- **Tooltips name shortcuts the same way everywhere.** A tooltip shows the
-  shortcut after the name in parentheses, for example "Back (⌘[)" and
-  "Cancel (⎋)".
 
 ### Deprecated
 
 ### Removed
 
-- **Tabs no longer have Rename, Change Color or Change Icon.** The tab
-  context menu, the Tab menu, the command palette and the ⌥⌘R / ⌥⌘C
-  shortcuts no longer offer them, and tabs no longer show a color dot.
-  `codans tab rename` still sets a tab's title, and `codans tab show` no
-  longer prints an icon. Shortcut overrides you set for the two commands
-  are ignored.
+### Fixed
+
+### Security
+
+## [0.10.0] - 2026-11-07
+
+### Added
+
+- **Remote projects are grouped by Host.** The sidebar lists Projects under
+  This Mac and each remote Host, and you can drag to reorder them inside a
+  Host. Manage Hosts in Settings › Hosts, or pick one in Open Remote Project.
+- **GitLab merge requests.** Projects on gitlab.com, or on a GitLab that
+  `glab` 1.122.0+ is logged in to, show merge requests like pull requests,
+  with merge, close, and rerun actions. A Workspace can mix both platforms.
+- **Settings › Git Platforms.** See whether `gh` and `glab` are installed
+  and logged in, and how to fix it. SSH aliases and ports are matched
+  automatically; add an alias for any other remote host.
+- **Session History in the pane header, and on ⌘Y.** A button next to the
+  split buttons opens it for that pane; ⌘Y opens it for the focused pane
+  and closes it again.
+- **More keyboard shortcuts.** ⌃⌘1…⌃⌘5 switch the sidebar filter, and while
+  the Agents View is open, ⌥1…⌥9 jump to the first nine agents.
+- **The CLI shows each Project's Host.** `codans tree` and the project
+  commands print it, and `--host` picks a Project when two Hosts have one
+  with the same name.
+
+### Changed
+
+- **Agents View rows show what each agent is doing.** The first line is the
+  agent's live activity or the title it set, also for restored sleeping
+  agents.
+- **"Remote project" everywhere.** Connect to Server is now Open Remote
+  Project… and Edit Connection is Edit Remote Project…. On first launch,
+  remote projects move to shared Host records; older builds cannot open the
+  migrated catalog, and a backup is kept.
+- **Calmer shortcut hints, animated sidebar.** Holding ⌘ alone shows each
+  shortcut as grey text in place, with nothing moving, and tooltips read
+  "Back (⌘[)". Sidebar rows animate as you expand and collapse them.
+
+### Removed
+
+- **Tab Rename, Change Color, and Change Icon.** Tabs no longer have a color
+  dot or a custom icon; `codans tab rename` still sets a tab's title.
 
 ### Fixed
 
-- **A tab's icon now matches the header of its selected pane.** It shows the
-  agent's mark only while an agent runs in that pane, the script's icon for
-  a pane that runs a script, and a terminal otherwise. A tab opened by an
-  agent profile no longer keeps the agent's icon after the agent exits or
-  after a restart. A script that runs in another pane of the tab no longer
-  colors the tab's icon.
-
-### Security
+- **A tab's icon matches its selected pane.** It shows the agent's mark only
+  while that agent runs, a script's icon for a script pane, and a terminal
+  otherwise.
+- **New worktrees respect auto-switch off.** Creating one no longer moves
+  your selection; the new row gets the New badge.
+- **Workflows no longer hang when an agent exits early.** The run asks you
+  to relaunch, skip, or cancel that role.
 
 ## [0.9.2] - 2026-11-02
 
