@@ -192,6 +192,56 @@ struct SidebarOutlineTests {
     }
   }
 
+  /// The outline drops the fade and move of each child row, and the views
+  /// a close faded out, once the animation has ended.
+  @Test
+  func anEndedAnimationLeavesNoAnimationState() async throws {
+    let harness = Harness()
+    var repo = repository("repo", worktrees: 2)
+    harness.show([repo])
+    let children = Set(harness.rowIDs.dropFirst())
+    let animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    repo.isExpanded = false
+    let close = SidebarExpansionToggle.next(.project(repo.id), after: nil)
+    harness.show([repo], toggle: close)
+    #expect(Set(harness.coordinator.childPlans.keys) == (animates ? children : []))
+    #expect(Set(harness.coordinator.closingViews.keys) == (animates ? children : []))
+    try await Task.sleep(for: .milliseconds(600))
+    #expect(harness.coordinator.childPlans.isEmpty)
+    #expect(harness.coordinator.closingViews.isEmpty)
+
+    repo.isExpanded = true
+    harness.show([repo], toggle: .next(.project(repo.id), after: close))
+    #expect(Set(harness.coordinator.childPlans.keys) == (animates ? children : []))
+    try await Task.sleep(for: .milliseconds(600))
+    #expect(harness.coordinator.childPlans.isEmpty)
+    #expect(harness.coordinator.closingViews.isEmpty)
+  }
+
+  /// A rebuild that removes an animated row (a filter change, a catalog
+  /// write) drops its animation state at once.
+  @Test
+  func aRebuildDropsTheAnimationStateOfRemovedRows() {
+    let harness = Harness()
+    var gone = repository("gone", worktrees: 1)
+    let kept = repository("kept", worktrees: 1)
+    harness.show([gone, kept])
+    let goneChildren = Set(harness.rowIDs.prefix { $0 != SidebarOutlineModel.projectNodeID(kept.id) }.dropFirst())
+    #expect(goneChildren.count == 2)
+    let animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    gone.isExpanded = false
+    let close = SidebarExpansionToggle.next(.project(gone.id), after: nil)
+    harness.show([gone, kept], toggle: close)
+    #expect(Set(harness.coordinator.childPlans.keys) == (animates ? goneChildren : []))
+    #expect(Set(harness.coordinator.closingViews.keys) == (animates ? goneChildren : []))
+
+    harness.show([kept], toggle: close)
+    #expect(harness.coordinator.childPlans.isEmpty)
+    #expect(harness.coordinator.closingViews.isEmpty)
+  }
+
   @Test
   func theOutlineDoesNotOpenOrCloseRowsOnItsOwn() throws {
     let harness = Harness()
