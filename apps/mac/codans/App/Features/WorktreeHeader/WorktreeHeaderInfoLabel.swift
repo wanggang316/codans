@@ -220,12 +220,9 @@ struct WorktreeHeaderInfoLabel: View {
       }
       // Remote Project marker — same glyph + tooltip as the sidebar
       // project row, so the header names the host the worktree lives on.
-      // `.small` image scale keeps the wide glyph proportionate to the
-      // caption-sized neighbor text.
       if let host = project.remoteHost {
         Image(systemName: RemoteProjectMarker.symbol)
           .font(.caption2)
-          .imageScale(.small)
           .foregroundStyle(.secondary)
           .help(host.displayAuthority)
           .accessibilityLabel("Remote host \(host.displayAuthority)")

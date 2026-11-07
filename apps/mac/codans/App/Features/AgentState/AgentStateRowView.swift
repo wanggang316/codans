@@ -210,14 +210,11 @@ struct AgentStateRowView: View {
   }
 
   /// Remote Project marker after the project name. Empty for local projects.
-  /// `.small` image scale keeps the wide glyph proportionate to the
-  /// caption2-sized project text.
   @ViewBuilder
   private var remoteGlyph: some View {
     if let authority = projectRemoteAuthority {
       Image(systemName: RemoteProjectMarker.symbol)
         .font(.caption2)
-        .imageScale(.small)
         .foregroundStyle(.secondary)
         .help(authority)
         .accessibilityLabel("Remote host \(authority)")
