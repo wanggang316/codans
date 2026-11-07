@@ -8,8 +8,9 @@ import SwiftUI
 /// carries its own insertion/removal transition; `CommandKeyObserver` flips its flag inside
 /// `Animation.shortcutHint`, so a hint inserted under that flag cross-fades in and out.
 ///
-/// A list row (sidebar, Agents View) instead stacks its chord with its trailing accessories
-/// through `ShortcutHintTrailing`.
+/// An Agents View row instead stacks its chord with its trailing accessories through
+/// `ShortcutHintTrailing`. A sidebar row appends its chord after its accessories through
+/// `commandKeyHint(chord:spacing:font:)`.
 struct ShortcutHintLabel: View {
   let chord: String
   /// `.caption` suits a row or a tab title. A hint beside a 13–16pt toolbar glyph passes a
@@ -49,8 +50,6 @@ struct ShortcutHintTrailing<Accessories: View>: View {
   /// The chord bound to this row, or `nil` when it has none. The text stays in the view
   /// while the hint fades out, so it fades with the accessories instead of vanishing.
   let chord: String?
-  /// Gap between the chord and the row content before it.
-  var leadingGap: CGFloat = 0
   @ViewBuilder let accessories: () -> Accessories
   @Environment(CommandKeyObserver.self) private var commandKeyObserver: CommandKeyObserver?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -66,7 +65,6 @@ struct ShortcutHintTrailing<Accessories: View>: View {
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .fixedSize()
-        .padding(.leading, isShown ? leadingGap : 0)
         // Hidden, the chord takes no width, so a row whose accessories are narrower than
         // its chord keeps its layout. It draws past the zero-width frame toward the
         // leading edge while it fades.

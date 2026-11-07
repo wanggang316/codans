@@ -7,10 +7,13 @@
 
 codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦；按住 ⌘ 时和弦替换按钮的图标与标题，过窄时等比缩小）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
 
-按住 ⌘ 约 1 秒后，各控件显示自己的快捷键提示（`ShortcutHintLabel`：系统字体、`.secondary` 纯文本、无键帽边框）。提示从解析后的绑定读取，改键或禁用会同步反映。两种放置方式都只切换透明度，周围布局不动：
+按住 ⌘ 约 1 秒后，各控件显示自己的快捷键提示（`ShortcutHintLabel`：系统字体、`.secondary` 纯文本、无键帽边框）。提示从解析后的绑定读取，改键或禁用会同步反映。有三种放置方式：
 
 - **原位替换**（侧栏筛选栏按钮、Tab）：筛选栏按钮的完整和弦（如 `⌃⌘1`）替换整组图标与标题，过窄时等比缩小；Tab 的完整和弦在 chip 尾部槽位，替换颜色点。被替换的内容用 `shortcutHintOutgoing(to:)` 缩小到 0.7、模糊并淡出，和弦用 `shortcutHintIncoming()` 只淡入；两者始终都在布局中，控件不动。
-- **替换尾部附件**（侧栏 worktree / Project / Group 行、Agents View 行，`ShortcutHintTrailing`）：完整和弦与行尾附件（diff 统计、PR 徽标、状态点、悬停按钮）叠在同一个尾对齐的 ZStack 里，按住 ⌘ 时附件淡出、和弦淡入，隐藏的附件不响应点击。和弦淡出时文字保留，与附件一同淡出，不会立即消失；隐藏时和弦不占宽度，行布局与无提示时相同。
+- **追加在尾部附件之后**（侧栏 worktree / Project / Group 行，`commandKeyHint(chord:spacing:font:)`）：按住 ⌘ 时完整和弦（如 `⌃1`）淡入，排在行尾附件（新建标记、diff 统计、PR 徽标、运行脚本点、悬停按钮）之后，贴住行的右边缘。附件保持可见、可点击；行标题让出和弦的宽度，可能截断得更多。松开时和弦淡出后移除。
+- **替换尾部附件**（Agents View 行，`ShortcutHintTrailing`）：完整和弦与行尾的睡眠图标和状态图标叠在同一个尾对齐的 ZStack 里，按住 ⌘ 时图标淡出、和弦淡入，隐藏的图标不响应点击。和弦淡出时文字保留，与图标一同淡出，不会立即消失；隐藏时和弦不占宽度，行布局与无提示时相同。
+
+原位替换和替换尾部附件只切换透明度，周围布局不动。
 
 所有提示共用一个时序 `Animation.shortcutHint`（0.15 s easeInOut），工具栏和 Tab 也一样。每个提示视图（`ShortcutHintTrailing`、`shortcutHintOutgoing(to:)` / `shortcutHintIncoming()`、`commandKeyHint`）自己从环境读取 `CommandKeyObserver`，调用方只传绑定的和弦，不替它判断 ⌘ 是否按住。在 `GeometryReader` 或 `LazyVStack` 的闭包里读取该状态再传给行，会让这些闭包延迟、逐行更新，筛选栏和 Agents View 行会比 worktree 行晚 0.2–1.2 s 才变化。
 
