@@ -128,10 +128,10 @@ struct EditorHandlersTests {
     #expect(response.choice.id == "vscode")
   }
 
-  /// `codans open` takes a path on This Mac: a Server project with the
+  /// `codans open` takes a path on This Mac: a Remote Project with the
   /// same root path never supplies its editor override (ADR 0006).
   @Test
-  func openIgnoresServerProjectOverrideForSamePath() async throws {
+  func openIgnoresRemoteProjectOverrideForSamePath() async throws {
     let dir = try makeTempDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
     let canonical = HierarchyManager.canonicalPath(dir.path)
@@ -152,7 +152,7 @@ struct EditorHandlersTests {
       runtime: FakeHierarchyRuntime()
     )
     let store = makeStore()
-    let serverID = manager.addServerProject(
+    let serverID = manager.addRemoteProject(
       name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
     store.mutateProject(serverID) { $0.defaultEditor = "vscode" }
     let handlers = EditorHandlers(

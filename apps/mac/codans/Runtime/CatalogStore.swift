@@ -65,7 +65,7 @@ class CatalogStore {
       throw error
     }
     guard var existing = decoded else { return .default }
-    // Self-heal Server projects whose `remoteHost` was stripped by an older
+    // Self-heal Remote Projects whose `remoteHost` was stripped by an older
     // build sharing this catalog (tolerant decode + full re-encode drops
     // unknown keys). The sidecar is invisible to those builds, so it
     // survives; persist the healed catalog immediately so a crash before
@@ -172,7 +172,7 @@ class CatalogStore {
   func saveNow(_ catalog: Catalog) throws {
     guard persistenceEnabled else { return }
     try AtomicFileStore.write(catalog, to: fileURL)
-    // Mirror Server-project connections into the sidecar on every save, so
+    // Mirror Remote Project connections into the sidecar on every save, so
     // the repair source stays current without a separate write path.
     RemoteHostSidecar.sync(from: catalog, to: sidecarURL)
   }

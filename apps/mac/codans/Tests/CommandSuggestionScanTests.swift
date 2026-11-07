@@ -54,7 +54,7 @@ struct CommandSuggestionScanTests {
   }
 
   @Test
-  func serverProjectScansItsRootOnTheHost() async {
+  func remoteProjectScansItsRootOnTheHost() async {
     let host = RemoteHost(alias: "devbox")
     let project = Project(name: "app", rootPath: "/srv/app", remoteHost: host)
     let scanned = LockIsolated<[ManifestLocation]>([])

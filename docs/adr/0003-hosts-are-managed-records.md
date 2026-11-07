@@ -5,9 +5,9 @@ Status: Accepted
 ## Context
 
 [ADR 0002](0002-sidebar-outline-with-host-level.md) groups the sidebar by
-**Host**. Each Server project stores its own `RemoteHost { alias, username?,
+**Host**. Each Remote Project stores its own `RemoteHost { alias, username?,
 port? }`. There is no shared host entity. `saved-server-hosts.json` is only a
-recent-hosts list for the Connect to Server sheet. A sidebar group needs a
+recent-hosts list for the Open Remote Project sheet. A sidebar group needs a
 stable identity, and a change to a host address must apply to all its
 Projects.
 
@@ -27,11 +27,11 @@ Projects.
    its Projects.
 3. **Settings owns the Host list.** A Hosts page in Settings adds, edits, and
    deletes Hosts.
-4. **Connect to Server picks a Host.** The sheet has a Host picker with a
+4. **Open Remote Project picks a Host.** The sheet has a Host picker with a
    "New Host…" entry. A Host made from "New Host…" always goes to the Host
    list, with the same validation as the Settings page. There is no temporary
    Host. When the fields are equal to an existing Host, the sheet uses that
-   Host. A Project's Edit Connection changes its Host choice and its path, not
+   Host. A Project's Edit Remote Project changes its Host choice and its path, not
    the Host fields.
 5. **No delete of a Host in use.** Delete is disabled while Projects refer to
    the Host, and the page shows how many.
@@ -39,10 +39,10 @@ Projects.
    is the order of addition. Neither the sidebar nor Settings reorders Hosts.
 7. **Host row.** A Host row is not selectable. A click expands or collapses
    it, and the expansion state persists. The context menu has
-   "Connect Project on This Host…" and "Edit Host…"; on This Mac it has
+   "Open Remote Project on This Host…" and "Edit Host…"; on This Mac it has
    "Open Project…". A Host with no Projects has no sidebar row.
 8. **Migration.** On upgrade, each distinct (Host, Username, Port) of the
-   existing Server projects becomes a Host record, and those Projects refer to
+   existing Remote Projects becomes a Host record, and those Projects refer to
    it. The recent-hosts list is not migrated; the Host list replaces it.
 9. **Storage.** The Host list is in `catalog.json` (`hosts`), beside the
    Projects that refer to it, with `HierarchyManager` as its single writer.

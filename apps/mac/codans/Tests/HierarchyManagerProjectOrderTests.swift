@@ -27,7 +27,7 @@ struct HierarchyManagerProjectOrderTests {
   func addProjectStampsAddedAtAndAppends() {
     let before = Date()
     let pidA = manager.addProject(name: "a", rootPath: "/a", gitRoot: nil)
-    let pidB = manager.addServerProject(
+    let pidB = manager.addRemoteProject(
       name: "b", remoteHost: RemoteHost(alias: "box"), rootPath: "/srv/b")
     let pidC = manager.addProject(name: "c", rootPath: "/c", gitRoot: nil)
     let after = Date()

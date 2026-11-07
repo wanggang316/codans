@@ -699,7 +699,7 @@ nonisolated extension GitWorktreeClient {
   // that captures a weak reference to the Process so they can assert
   // `!process.isRunning` after cancelling the stream (issue #24 (a)).
   //
-  // `remoteHostResolver` is the Server-project transport seam (the same
+  // `remoteHostResolver` is the Remote Project transport seam (the same
   // pattern as `LiveGitService`): when it maps a repo root to a `RemoteHost`,
   // the plain-git closures (listing, branch queries, removal, prune, status)
   // run on that host over SSH via `RemoteGitService` instead of locally. The

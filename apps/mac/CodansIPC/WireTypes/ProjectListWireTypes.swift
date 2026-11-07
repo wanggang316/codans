@@ -9,7 +9,7 @@ extension IPC {
     public let projects: [Project]
     /// Short-handle map printed by `codans tree` in text mode.
     public let handles: TargetHandles?
-    /// The Host list. A Server project on the wire carries only its Host id
+    /// The Host list. A Remote Project on the wire carries only its Host id
     /// (catalog v5); this list resolves it. Nil from an older app, whose
     /// Projects carry their host fields inline.
     public let hosts: [HostRecord]?
@@ -22,9 +22,9 @@ extension IPC {
 
     private enum CodingKeys: String, CodingKey { case projects, handles, hosts }
 
-    /// Each Server project also carries its resolved `remoteHost`, which
+    /// Each Remote Project also carries its resolved `remoteHost`, which
     /// `catalog.json` no longer stores. A CLI that predates Host records
-    /// reads only that field to tell a Server project from a local one.
+    /// reads only that field to tell a Remote Project from a local one.
     public func encode(to encoder: Encoder) throws {
       var container = encoder.container(keyedBy: CodingKeys.self)
       try container.encode(projects.map(LegacyHostFields.init), forKey: .projects)
@@ -32,7 +32,7 @@ extension IPC {
       try container.encodeIfPresent(hosts, forKey: .hosts)
     }
 
-    /// `projects` with each Server project's `remoteHost` filled from
+    /// `projects` with each Remote Project's `remoteHost` filled from
     /// `hosts`, so `Project.kind` / `isRemote` read the same as in the app.
     public var resolvedProjects: [Project] {
       guard let hosts else { return projects }
@@ -69,7 +69,7 @@ extension IPC {
   }
 }
 
-/// A Project encoded as usual, plus `remoteHost` for a Server project with a
+/// A Project encoded as usual, plus `remoteHost` for a Remote Project with a
 /// Host id (see `IPC.ProjectListPayload.encode(to:)`).
 private struct LegacyHostFields: Encodable {
   let project: Project

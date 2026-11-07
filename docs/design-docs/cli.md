@@ -257,7 +257,7 @@
 - 接收方按 `AgentCatalog` 的 `promptStyle` 决定 kickoff 方式：有则作为命令行参数，无则由 app 在 agent 出现后注入。注入路径使用画面稳定与文本回显启发式，并在匹配后自动发送 Enter；不能据此确认焦点一定处于输入框。具体等待时限与失败行为见 [Agent Profiles 与 Handoff](agent-handoff.md#agent-profile-数据模型)。`--no-launch` 只保存工件，不启动接收方。
 - 放置：默认在同一 worktree 的后台新 tab；`--split <方向>` 以**源 pane** 为锚分屏（不是当前聚焦的 pane），`--tab` 显式选新 tab。`.focused` 不可用——交接绝不覆盖源 agent 的 pane。
 - briefing 缺失 → `invalidParams` 并附可直接粘贴的 heredoc；不合格（缺 `## Objective` / `## Current State` / `## Next Steps`）→ `invalidParams` 且零副作用。
-- Server 项目 → `unsupported`（工件目录在远端）。
+- Remote Project → `unsupported`（工件目录在远端）。
 - 环境变量 `CODANS_HANDOFF_REQUEST_ID`（仅应用内面板注入的请求会设置）随请求上送；已被处理或被面板回退取代的请求以 `conflict` 拒绝。
 - 响应回带 `artifactPath`、`outgoingAgent`、`receiver`、`branch`、`changedFileCount`、`archivedPath`、`sessionExcerptPath`、`briefing`（`inline`/`none`）、`hasBriefing`、`launchedPane`。`archivedPath` / `sessionExcerptPath` 相对 worktree 根（形如 `.codans/handoff/archive/…`），与 kickoff 提示词、`context.md` 同一基准；`artifactPath` 是绝对路径。
 

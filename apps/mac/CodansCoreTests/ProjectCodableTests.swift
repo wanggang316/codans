@@ -121,7 +121,7 @@ struct ProjectCodableTests {
   }
 
   @Test
-  func serverProjectRoundTripsRemoteHost() throws {
+  func remoteProjectRoundTripsRemoteHost() throws {
     let host = RemoteHost(alias: "example.com", username: "alice", port: 2222)
     let project = Project(
       name: "app",
@@ -133,7 +133,7 @@ struct ProjectCodableTests {
     let decoded = try JSONDecoder().decode(Project.self, from: data)
     #expect(decoded.remoteHost == host)
     #expect(decoded.isRemote)
-    #expect(decoded.kind == .server)
+    #expect(decoded.kind == .remote)
     #expect(decoded.rootPath == "/srv/app")
   }
 }

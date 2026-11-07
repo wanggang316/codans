@@ -136,9 +136,9 @@ struct NewAgentView: View {
           Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
         }
         Button {
-          store.send(.addProjectTapped(.connectServer))
+          store.send(.addProjectTapped(.openRemoteProject))
         } label: {
-          Label("Connect to Server…", systemImage: "tv.badge.wifi")
+          Label("Open Remote Project…", systemImage: "tv.badge.wifi")
         }
         Button {
           store.send(.addProjectTapped(.newWorkspace))

@@ -15,7 +15,7 @@ import CodansCore
 ///   shell, injects its shell integration and applies the macOS login(1)
 ///   wrapping, then prepends this argv, so `zmx attach` runs that resolved
 ///   command as the new session's program.
-/// - `build` for a pane that runs a fixed command (a Server project's SSH
+/// - `build` for a pane that runs a fixed command (a Remote Project's SSH
 ///   loop): one shell string libghostty wraps as `/bin/sh -c "<value>"`.
 nonisolated enum ZmxAttachCommand {
   /// The zmx session name for a Pane. zmx names its control socket

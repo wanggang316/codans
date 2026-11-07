@@ -741,7 +741,7 @@ final class AppState {
     // handlers share the exact same live instances — avoids two parallel
     // `LiveEditorService`s with divergent settings captures.
     let editor = EditorClient.live(settings: settings)
-    // Server-project transport seam for the worktree-management surface:
+    // Remote Project transport seam for the worktree-management surface:
     // paths owned by a remote project route their plain-git operations
     // (listing, branch queries, removal, prune, status) over SSH. Shared by
     // the HierarchyClient (reconcile + removal) and the root store (create
@@ -760,7 +760,7 @@ final class AppState {
     self.editorClient = editor
     self.hierarchyClient = hierarchy
 
-    // Server-project git transport: a GitService whose invocations route over
+    // Remote Project git transport: a GitService whose invocations route over
     // SSH whenever the repository path belongs to a remote project (resolved
     // live against the manager's catalog). Installed on the root store (below)
     // and rebound into the two sidebar monitors, so the `+N −M` chip, dirty
@@ -911,7 +911,7 @@ final class AppState {
       $0.workflowClient = .live(engine: workflowEngine)
       $0.terminalClient = .live(engine: engine)
       // SSH-routing git clients (see construction above) so every reducer-side
-      // git consumer transparently reaches Server-project repositories.
+      // git consumer transparently reaches Remote Project repositories.
       $0.gitService = routedGitClient
       $0.gitWorktreeClient = worktreeClient
       // Without these overrides, `EditorClient.liveValue` and

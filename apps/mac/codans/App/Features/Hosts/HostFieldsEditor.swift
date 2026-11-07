@@ -2,8 +2,8 @@ import CodansCore
 import SwiftUI
 
 /// The Host, Username, Port, Name, and Icon rows of a grouped Host form.
-/// Shared by the Settings › Hosts editor and the "New Host…" entry of Connect
-/// to Server, so both forms show the same rows in the same order. Place it
+/// Shared by the Settings › Hosts editor and the "New Host…" entry of Open
+/// Remote Project, so both forms show the same rows in the same order. Place it
 /// inside a `Section` of a `.grouped` `Form`.
 struct HostFieldsEditor: View {
   let draft: HostDraft

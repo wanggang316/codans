@@ -354,7 +354,7 @@ struct HierarchySidebarView: View {
     }
     .toolbar { sidebarToolbarContent }
     .modifier(SidebarSheetPresenter(store: store))
-    .modifier(RemoteConnectionSheetPresenter(store: store))
+    .modifier(RemoteProjectSheetPresenter(store: store))
     .modifier(CreateWorkspaceSheetPresenter(store: store))
     .modifier(WorkspaceRemovalDialogs(store: store))
     .confirmationDialog(
@@ -533,7 +533,7 @@ struct HierarchySidebarView: View {
 
   /// Shared Add Project menu: open an existing local folder (the current
   /// flow, also bound to the `.addProject` shortcut), clone a remote
-  /// repository into a new local path, or connect to a server over SSH.
+  /// repository into a new local path, or open a Remote Project over SSH.
   @ViewBuilder
   private var addProjectMenuItems: some View {
     Button {
@@ -548,9 +548,9 @@ struct HierarchySidebarView: View {
       Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
     }
     Button {
-      store.send(.connectServerTapped)
+      store.send(.openRemoteProjectTapped)
     } label: {
-      Label("Connect to Server…", systemImage: "tv.badge.wifi")
+      Label("Open Remote Project…", systemImage: "tv.badge.wifi")
     }
     Button {
       store.send(.newWorkspaceTapped)
@@ -774,7 +774,7 @@ struct HierarchySidebarView: View {
         Button {
           store.send(.hostConnectProjectTapped(id))
         } label: {
-          Label("Connect Project on This Host…", systemImage: "tv.badge.wifi")
+          Label("Open Remote Project on This Host…", systemImage: "tv.badge.wifi")
         }
         Button {
           store.send(.hostEditTapped(id))
@@ -1856,7 +1856,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(projectNameColor)
         .lineLimit(1)
-      // Server projects carry a small network glyph so a remote repo is
+      // Remote Projects carry a small network glyph so a remote repo is
       // distinguishable from a local one at a glance; the tooltip names the
       // SSH destination.
       if let host = project.remoteHost {
@@ -1864,7 +1864,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
           .font(.caption2)
           .foregroundStyle(.secondary)
           .help(host.displayAuthority)
-          .accessibilityLabel("Remote server \(host.displayAuthority)")
+          .accessibilityLabel("Remote host \(host.displayAuthority)")
       }
       Spacer(minLength: 4)
       SidebarHotkeyHint(chord: hotkeyHint) {
@@ -1968,9 +1968,9 @@ private struct ProjectHeaderRow<Accessory: View>: View {
     }
     if project.isRemote {
       Button {
-        store.send(.projectEditConnectionTapped(projectID: project.id))
+        store.send(.editRemoteProjectTapped(projectID: project.id))
       } label: {
-        Label("Edit Connection…", systemImage: "tv.badge.wifi")
+        Label("Edit Remote Project…", systemImage: "tv.badge.wifi")
       }
     }
     Divider()
@@ -2244,7 +2244,7 @@ private struct SidebarHeightPreferenceKey: PreferenceKey {
 /// Walks the catalog for a paneID and returns the source tuple the
 /// AgentState row needs: names + color for the identity line, the
 /// worktree path that keys the row's workflow menu, and the remote host
-/// whose `displayAuthority` badges a Server project. `projectColor` mirrors the
+/// whose `displayAuthority` badges a Remote Project. `projectColor` mirrors the
 /// project's configured color so the row's project name renders in the
 /// same hue as the sidebar header and worktree-header label (`nil` =
 /// No Color → caption secondary).

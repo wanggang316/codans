@@ -34,7 +34,7 @@ Use [_template.md](_template.md) as a starting point.
 - [Notifications](notifications.md) — 运行时事件 → 持久 inbox + 四级上卷徽标 + 侧栏 Unread 过滤；策略闸 `NotificationCoordinator` 统一门控设置与授权
 - [Pane Shell Integration](pane-shell-integration.md) — Ghostty fork 增加 command-wrapper，本地 pane 由 libghostty 解析并集成真实 shell、zmx 作外层监管；默认开 `ssh-env`/`sudo`、关 `title`/`path`（默认值落在 fork）；远端 pane 只对 `xterm-ghostty` 做 terminfo 回退
 - [Project Tags + Single-Window](project-tags.md) — 单窗口强制（已上线）+ Project `Tag` 分类模型与持久化（过滤与分配 UI 隐藏，Tag CLI 未提供）
-- [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；已接线远程 worktree 创建/删除与连接编辑
+- [Remote Projects over SSH](remote-ssh-projects.md) — Remote Project（`ProjectKind.remote`）：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；已接线远程 worktree 创建/删除与连接编辑
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、版本读取与恢复、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
 - [Workflow](workflow.md) — **实现中**：YAML 声明的多 agent 编排（GitHub Actions 风格语法 + 角色 / 显式 `deliver` 交付 / 循环与状态；activation token、attention 而非失败、`CodansCore` 纯状态机 + app 层 effect 解释、worktree 内 run 目录、`~/.codans/workflows/`）

@@ -148,7 +148,7 @@ struct SplitViewportView: View {
   }
 
   /// The Worktree path when its folder no longer exists locally, else `nil`.
-  /// Server projects never qualify: their paths are remote.
+  /// Remote Projects never qualify: their paths are remote.
   private func missingWorktreeFolder() -> String? {
     guard
       let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),

@@ -89,7 +89,7 @@ final class TerminalEngine {
   private let foregroundJobReader: ForegroundJobReader
   private var foregroundJobPollTask: Task<Void, Never>?
   private var foregroundJobPaneIDs: Set<PaneID> = []
-  /// Remote (Server-project) panes and their hosts. These skip the local
+  /// Remote Project panes and their hosts. These skip the local
   /// poller — their local foreground is permanently the `ssh` tunnel — and
   /// are sampled by the host-side foreground probe instead, which feeds the
   /// SAME snapshot / binder / viewport pipeline as local panes.
@@ -280,7 +280,7 @@ final class TerminalEngine {
       )
     }
     let session = ZmxAttachCommand.session(for: pane.id)
-    // A Server-project pane runs its shell on the remote host: libghostty
+    // A Remote Project pane runs its shell on the remote host: libghostty
     // spawns a local `zmx attach` (quit-persistence of the tunnel) wrapping an
     // SSH reconnect loop that lands in the remote worktree. The remote `cd`
     // owns the directory, so libghostty's local `working_directory` (which it

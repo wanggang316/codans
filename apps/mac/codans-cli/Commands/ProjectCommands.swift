@@ -20,7 +20,7 @@ struct ProjectList: AsyncParsableCommand {
         .hierarchyListProjects,
         params: EmptyParams()
       )
-      // A Server project on the wire may carry only its Host id; resolve it
+      // A Remote Project on the wire may carry only its Host id; resolve it
       // so `kind` reads `server`.
       try Renderer.emit(
         ProjectListRenderable(projects: result.resolvedProjects, hosts: result.hosts ?? []),

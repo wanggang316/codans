@@ -81,7 +81,7 @@ final class WorktreeStatusMonitor {
 
   /// Swap the fetch closure after construction. `AppState.init` builds the
   /// monitor before the `HierarchyManager` exists; `bringUp` calls this once
-  /// with the SSH-routing `GitServiceClient` so Server-project worktrees get
+  /// with the SSH-routing `GitServiceClient` so Remote Project worktrees get
   /// a live dirty flag too. Cached flags are untouched.
   func rebindFetch(_ fetch: @escaping @Sendable (URL) async throws -> WorkingTreeStatus) {
     self.fetch = fetch

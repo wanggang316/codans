@@ -410,7 +410,7 @@ final class HierarchyHandlers {
 
   /// Non-archived worktrees on This Mac whose directory is `path` or
   /// contains it; when one nests under another, only the deepest is
-  /// returned. `path` is a local path, so Server projects never match
+  /// returned. `path` is a local path, so Remote Projects never match
   /// (ADR 0006).
   static func worktreesMatchingPath(_ path: String, in catalog: Catalog) -> [UUID] {
     let canonical = HierarchyManager.canonicalPath(path)

@@ -86,7 +86,7 @@ private struct AgentSessionHistoryPopover: View {
     }
     .task {
       let path = worktreePath
-      // Server-project worktrees keep their agent session stores in the
+      // Remote Project worktrees keep their agent session stores in the
       // HOST's home — scan over SSH; local worktrees read the local stores
       // on a detached task (dozens of file stats + prefix reads).
       if let host = remoteHost {

@@ -78,15 +78,15 @@ struct HierarchyHandlersAddProjectTests {
     #expect(fixture.manager.catalog.projects.count == 1)
   }
 
-  /// Project identity is `(hostID, rootPath)` (ADR 0006): a Server project
+  /// Project identity is `(hostID, rootPath)` (ADR 0006): a Remote Project
   /// with the same path string is on another Host and does not block a
   /// local Project.
   @Test
-  func addProjectSucceedsBesideAServerProjectWithTheSamePath() async throws {
+  func addProjectSucceedsBesideARemoteProjectWithTheSamePath() async throws {
     let directory = Self.tempDirectory()
     let canonical = HierarchyManager.canonicalPath(directory.path)
     let fixture = Fixture()
-    let serverID = fixture.manager.addServerProject(
+    let serverID = fixture.manager.addRemoteProject(
       name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
     let params = try JSONValue.encoded(
       AddProjectRequest(name: "repo", rootPath: directory.path, gitRoot: nil))

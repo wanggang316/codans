@@ -83,16 +83,16 @@ nonisolated struct HierarchyClient: Sendable {
       _ name: String, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
   /// Add a Server (remote SSH) project. `rootPath` / `gitRoot` are remote
-  /// path strings; `remoteHost` marks the project `.server`-kind. Forwards to
-  /// `HierarchyManager.addServerProject`.
-  var addServerProject:
+  /// path strings; `remoteHost` marks the project `.remote`-kind. Forwards to
+  /// `HierarchyManager.addRemoteProject`.
+  var addRemoteProject:
     @MainActor @Sendable (
       _ name: String, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
-  /// Apply an edited Server-project connection in place. A rootPath change
+  /// Apply an edited Remote Project connection in place. A rootPath change
   /// reseeds the worktree rows (the old remote paths are stale). Forwards to
-  /// `HierarchyManager.updateServerProject`.
-  var updateServerProject:
+  /// `HierarchyManager.updateRemoteProject`.
+  var updateRemoteProject:
     @MainActor @Sendable (
       _ projectID: ProjectID, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
     ) -> Void
@@ -405,7 +405,7 @@ nonisolated struct HierarchyClient: Sendable {
 
   /// Containing-project lookup (subdirectory-aware). Returns the deepest
   /// Project on This Mac whose `rootPath` contains the canonical path (root
-  /// or descendant); Server projects never match (ADR 0006).
+  /// or descendant); Remote Projects never match (ADR 0006).
   /// Used by the `editor.open` IPC so `codans open` inside a subdirectory still
   /// resolves the parent Project's default editor. Caller canonicalizes.
   var projectContaining: @MainActor @Sendable (_ canonicalPath: String) -> ProjectID?
@@ -812,13 +812,13 @@ extension HierarchyClient {
       addProject: { name, rootPath, gitRoot in
         manager.addProject(name: name, rootPath: rootPath, gitRoot: gitRoot)
       },
-      addServerProject: { name, remoteHost, rootPath, gitRoot in
-        manager.addServerProject(
+      addRemoteProject: { name, remoteHost, rootPath, gitRoot in
+        manager.addRemoteProject(
           name: name, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
         )
       },
-      updateServerProject: { projectID, remoteHost, rootPath, gitRoot in
-        manager.updateServerProject(
+      updateRemoteProject: { projectID, remoteHost, rootPath, gitRoot in
+        manager.updateRemoteProject(
           projectID: projectID, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
         )
       },
@@ -1912,7 +1912,7 @@ extension HierarchyClient {
   ) async {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID })
     else { return }
-    // Server projects discover + reconcile entirely over SSH (no bundled `wt`,
+    // Remote Projects discover + reconcile entirely over SSH (no bundled `wt`,
     // no local `wt ls`, no local symlink canonicalization). Branch off before
     // any local-filesystem git path runs.
     if project.isRemote {
@@ -2084,12 +2084,12 @@ extension HierarchyClient {
     return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
   }
 
-  /// Server-project counterpart of `reconcile`: discovers the remote git root
+  /// Remote Project counterpart of `reconcile`: discovers the remote git root
   /// and worktree list over SSH via `RemoteGitService`, normalizes each path
   /// string-only (`normalizeRemotePath` — never the local symlink resolver),
   /// and hands the result to the shared append-only merge. Mirrors the local
   /// path's "re-detect gitRoot when nil" auto-promotion so a plain remote
-  /// folder becomes a git Server project once the user runs `git init` on the
+  /// folder becomes a git Remote Project once the user runs `git init` on the
   /// host. Swallows and logs errors — reconcile is idempotent and must never
   /// crash, and a transient SSH failure must not archive live worktree rows
   /// (the merge only appends / upgrades; the stale-sweep runs against the
@@ -2161,7 +2161,7 @@ extension HierarchyClient {
       // workspace: removing it here would pull the folder out from under
       // the workspace's own row. Membership changes go through the
       // workspace flow, never the sweep. Membership is keyed by a path on
-      // This Mac, so a Server project's rows are never members (ADR 0006).
+      // This Mac, so a Remote Project's rows are never members (ADR 0006).
       if project?.isOnThisMac == true,
         let path = rows.first(where: { $0.id == worktreeID })?.path,
         manager.workspaceMembership(forPath: path) != nil
@@ -2355,8 +2355,8 @@ extension HierarchyClient: DependencyKey {
     removeHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    updateServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    addRemoteProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    updateRemoteProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addWorkspaceProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     workspaceMembership: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorkspaceGroupExpanded: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2466,8 +2466,8 @@ extension HierarchyClient: DependencyKey {
     removeHost: unimplemented("HierarchyClient.removeHost"),
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
-    addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),
-    updateServerProject: unimplemented("HierarchyClient.updateServerProject"),
+    addRemoteProject: unimplemented("HierarchyClient.addRemoteProject", placeholder: ProjectID()),
+    updateRemoteProject: unimplemented("HierarchyClient.updateRemoteProject"),
     addWorkspaceProject: unimplemented("HierarchyClient.addWorkspaceProject", placeholder: ProjectID()),
     workspaceMembership: unimplemented("HierarchyClient.workspaceMembership", placeholder: nil),
     setWorkspaceGroupExpanded: unimplemented("HierarchyClient.setWorkspaceGroupExpanded"),

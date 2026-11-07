@@ -92,7 +92,7 @@ protocol CommandSuggestionParser: Sendable {
 
 - **位置**：Settings pane 的 `lastFocusedWorktreeID` → Project 的 `selectedWorktreeID` → `rootPath`。分支可能带不同的清单，所以优先用户正在用的 checkout。
 - **本地**：按 `ManifestScope` 广度优先遍历，每个目录只 `contentsOfDirectory` 一次，不跟随符号链接目录；单文件上限 1 MiB。
-- **Server 项目**：一次 SSH 调用（共享 ControlMaster，`BatchMode`）。远端 `/bin/sh` 以 `find -maxdepth … -prune` 按同样规则遍历（目录经 `$1` 传入，文件名为自有常量并单引号包裹），输出 `===CODANS-MANIFEST <path>===` / `===CODANS-PRESENT <path>===` 标记分隔的流；首个标记前的登录 shell 横幅被忽略。超时、非零退出或输出溢出都得到空 snapshot——表现为"无建议"，不报错。测试把远端脚本在本机 `/bin/sh` 上对真实目录树实跑，并与本地读取器结果逐项比对。
+- **Remote Project**：一次 SSH 调用（共享 ControlMaster，`BatchMode`）。远端 `/bin/sh` 以 `find -maxdepth … -prune` 按同样规则遍历（目录经 `$1` 传入，文件名为自有常量并单引号包裹），输出 `===CODANS-MANIFEST <path>===` / `===CODANS-PRESENT <path>===` 标记分隔的流；首个标记前的登录 shell 横幅被忽略。超时、非零退出或输出溢出都得到空 snapshot——表现为"无建议"，不报错。测试把远端脚本在本机 `/bin/sh` 上对真实目录树实跑，并与本地读取器结果逐项比对。
 - **时机**：Commands pane 每次出现时扫描（`.task(id: projectID)`）；header 在切换 worktree 时扫描（`.task(id: worktreeID)`，挂在 Menu 的 `.id` 之外，脚本编辑触发的 Menu 重建不会重扫）。两处菜单内都有 Refresh。无文件监听。新扫描取消在途扫描；header 的结果带上扫描时的 worktree，切走后迟到的结果直接丢弃。
 - 位置解析统一在 `ManifestLocation.resolve`：指定 worktree → Project 选中的 worktree → Project 根目录。
 
@@ -146,7 +146,7 @@ protocol CommandSuggestionParser: Sendable {
 
 - `CodansCoreTests`：各解析器、registry 合并 / 分组、类型推断、采纳不变量；`CommandIconCatalogTests` / `CommandIconRefTests`（优先级、`mark:` 往返、未知 mark 回退、每个 `ToolMark` 都可由映射表到达）。
 - `CodansTests`：`ToolMarkAssetTests`（每个 mark 都随包带模板资源）、`WorktreeProcessIconTests`（进程列表走同一映射）。
-- `CodansTests`：`CommandSuggestionScanTests`（扫描位置解析、Server 项目走 host、项目缺失清空）、`RemoteManifestReaderTests`（流解析、远端脚本在本机 `/bin/sh` 实跑往返、失败得空）、`LocalManifestReaderTests`。
+- `CodansTests`：`CommandSuggestionScanTests`（扫描位置解析、Remote Project走 host、项目缺失清空）、`RemoteManifestReaderTests`（流解析、远端脚本在本机 `/bin/sh` 实跑往返、失败得空）、`LocalManifestReaderTests`。
 - `CodansTests`：`WorktreeHeaderCommandSuggestionTests`（按 header 的 worktree 扫描、切换后丢弃迟到结果、加入只写 Project 命令、已加入的不重复写；执行时已加入的走保存的脚本、未加入的走 id 稳定的临时脚本）；`RunMenuRowViewTests`（点行执行、点 `+` 加入、`✓` 区域不加入、Return / AXPress 执行、加入的无障碍自定义动作）。
 - 隔离实例上检查过 header 下拉：按钮外观与相邻 SwiftUI split button 一致；行高与图标尺寸；高亮颜色与标准项像素一致；子目录清单的完整路径与 `cd` 前缀；点行（AXPress）在新 tab 执行且不加入；键盘 ↓/Return 执行；真实鼠标点 `+` 加入且不产生 tab；`+` 悬停反馈。
 - 隔离实例上检查过菜单外观（含映射图标）、"点 dev → 填入内置 Run"、采纳后写入 `mark:docker` / `mark:prisma`、图标弹窗 Tools 网格，以及打开弹窗不会冲掉已选 mark。

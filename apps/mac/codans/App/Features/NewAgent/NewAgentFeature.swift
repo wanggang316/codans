@@ -52,7 +52,7 @@ struct NewAgentFeature {
   enum AddProjectKind: Equatable, CaseIterable {
     case openFolder
     case cloneRepository
-    case connectServer
+    case openRemoteProject
     case newWorkspace
   }
 
@@ -426,7 +426,7 @@ struct NewAgentFeature {
       return .none
     }
     if remoteRef == nil && form.isRemote {
-      state.submitError = "Checking out an existing branch is not supported on a server project."
+      state.submitError = "Checking out an existing branch is not supported on a remote project."
       return .none
     }
     guard form.currentPendingCountForProject < 8 else {

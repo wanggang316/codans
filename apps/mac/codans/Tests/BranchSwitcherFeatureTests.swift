@@ -95,7 +95,7 @@ struct BranchSwitcherFeatureTests {
     }
   }
 
-  /// A worktree of a Server project: git calls carry its Host, so they run
+  /// A worktree of a Remote Project: git calls carry its Host, so they run
   /// there even when This Mac has the same path (ADR 0006).
   @Test
   func gitCallsNameTheWorktreeHost() async {

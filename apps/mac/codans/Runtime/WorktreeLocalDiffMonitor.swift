@@ -86,7 +86,7 @@ final class WorktreeLocalDiffMonitor {
 
   /// Swap the fetch closure after construction. `AppState.init` builds the
   /// monitor before the `HierarchyManager` exists; `bringUp` calls this once
-  /// with the SSH-routing `GitServiceClient` so Server-project worktrees get
+  /// with the SSH-routing `GitServiceClient` so Remote Project worktrees get
   /// their `+N −M` chip too. Cached stats are untouched — only future
   /// fetches use the new closure.
   func rebindFetch(_ fetch: @escaping @Sendable (URL) async throws -> LocalDiffStats?) {

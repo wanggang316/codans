@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// Builds the libghostty surface command for a **remote** (Server-project) pane.
+/// Builds the libghostty surface command for a **remote** (Remote Project) pane.
 ///
 /// Shape (outermost → innermost), mirroring how local panes gain quit-persistence
 /// via `ZmxAttachCommand`, extended with an SSH reconnect loop:

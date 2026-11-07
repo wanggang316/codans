@@ -12,7 +12,7 @@ nonisolated struct HandoffSource: Sendable, Equatable {
   let worktreeID: WorktreeID
   let tabID: TabID
   let worktreePath: String
-  /// Server projects keep their worktree on the remote host; the artifact
+  /// Remote Projects keep their worktree on the remote host; the artifact
   /// cannot be written there from this process.
   let isRemote: Bool
   let agentKind: AgentKind?
@@ -230,7 +230,7 @@ final class HandoffHandlers {
     }
     guard !source.isRemote else {
       throw IPCError.unsupported(
-        reason: "handoff writes .codans/handoff/ under the worktree, which lives on a remote host for Server projects"
+        reason: "handoff writes .codans/handoff/ under the worktree, which lives on a remote host for remote projects"
       )
     }
     return source

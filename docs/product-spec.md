@@ -46,9 +46,9 @@ and external-tool delegation. Agents View and notifications consume runtime
 signals independently; neither depends on the unimplemented lifecycle hook
 runtime. The Agent Skill documents the callable CLI and has no app runtime role.
 
-SSH Server Projects provide remote worktree discovery, creation/removal, and
+SSH Remote Projects provide remote worktree discovery, creation/removal, and
 terminal sessions. Authentication stays with SSH config and the user's agent.
-See [Remote SSH Projects](design-docs/remote-ssh-projects.md) for supported
+See [Remote Projects over SSH](design-docs/remote-ssh-projects.md) for supported
 operations and remote editor limitations.
 
 ## Product Boundaries
@@ -84,7 +84,7 @@ operations and remote editor limitations.
 | Code Host issues, review threads, pipeline dashboards, auto-merge; Code Hosts other than GitHub and GitLab | C12 covers Pull Request status and the review loop only; the browser and the Code Host CLIs cover the rest ([ADR 0004](adr/0004-gitlab-support-through-glab.md)) |
 | Team collaboration / shared sessions / co-editing | Individual power-user tool; collaboration is a different product with different architectural constraints |
 | Windows-native support (v1) | Author and primary target are macOS users; covering Windows natively before validating the concept is premature |
-| Browser-hosted workspace / dev-container orchestration | The current app supports local directories and SSH Server Projects; these additional environments have no first-class implementation |
+| Browser-hosted workspace / dev-container orchestration | The current app supports local directories and SSH Remote Projects; these additional environments have no first-class implementation |
 | Building our own terminal emulator | libghostty exists and is excellent; reinventing tty/GPU rendering is a multi-year distraction |
 | Package manager / dependency management | Out of scope — users invoke `npm`, `cargo`, `uv`, etc. inside Panes like they always have |
 

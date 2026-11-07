@@ -52,19 +52,25 @@ and the project does not yet follow semantic versioning — every release until
 - **Jump to an agent with ⌥1…⌥9.** While the Agents View is open, ⌥1…⌥9
   focus the pane of the first nine agents in the list. Rebind them under
   Settings → Shortcuts → Agents.
-- **Settings › Hosts.** Add, edit, and delete the Hosts that Server
-  projects connect to. An edit applies to all Projects on the Host. A Host
+- **Settings › Hosts.** Add, edit, and delete the Hosts that remote
+  projects run on. An edit applies to all Projects on the Host. A Host
   that Projects use cannot be deleted; the page shows how many use it.
-- **Connect to Server picks a Host.** The sheet lists your Hosts, plus
+- **Open Remote Project picks a Host.** The sheet lists your Hosts, plus
   "New Host…" with Host, Username, Port, and Name fields. A new Host is
-  added to Settings › Hosts. Edit Connection can move a Project to another
+  added to Settings › Hosts. Edit Remote Project can move a Project to another
   Host.
 - **`codans tree` and `codans project show` show the Host of each Project.**
-  A Server project shows its Host's name and ID; a local Project shows
+  A remote project shows its Host's name and ID; a local Project shows
   This Mac. The JSON output has `host {id, name}`.
 
 ### Changed
 
+- **One name for remote projects.** The Add Project menu item Connect to
+  Server is now Open Remote Project…, and its sheet button is Open. The
+  project menu item Edit Connection is now Edit Remote Project…, and the Host
+  row item Connect Project on This Host is now Open Remote Project on This
+  Host…. Messages and Settings say "remote project". `codans tree --json`
+  still writes the kind as `server`.
 - **CLI output shows the Host of each Project.** `tree`, `project list`,
   `project show`, and `project add` show `host=<id|0>`. In `--json`,
   `host.id` is `"0"` for This Mac (it was `null`), and `project list` and
@@ -73,12 +79,12 @@ and the project does not yet follow semantic versioning — every release until
   missing, Settings › Code Hosts says only which CLI is missing, shows
   `brew install <cli>` on its own line in a code style, and puts a copy
   button next to it. The button shows a checkmark after a click.
-- **Server projects share Host records.** The catalog now keeps one record
-  per host, username, and port, and each Server project refers to it. On
-  first launch, existing Server projects are moved to these records; the
+- **Remote projects share Host records.** The catalog now keeps one record
+  per host, username, and port, and each remote project refers to it. On
+  first launch, existing remote projects are moved to these records; the
   original catalog is kept in `backups/`. Connecting with the fields of a
   known Host reuses it. An older build cannot open the new catalog.
-- **The Host list replaces the recent-servers menu** in Connect to Server.
+- **The Host list replaces the recent-servers menu** in Open Remote Project.
   `saved-server-hosts.json` is no longer used.
 
 - **Shortcut hints are plain grey text and fade in place.** Holding ⌘ shows

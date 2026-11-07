@@ -34,11 +34,11 @@ struct CatalogHostsTests {
     #expect(decoded.hosts == [record])
     #expect(decoded.projects[0].remoteHost == record.endpoint)
     #expect(decoded.projects[0].isRemote)
-    #expect(decoded.projects[0].kind == .server)
+    #expect(decoded.projects[0].kind == .remote)
   }
 
   @Test
-  func serverProjectWithoutHostIDKeepsLegacyFieldsOnEncode() throws {
+  func remoteProjectWithoutHostIDKeepsLegacyFieldsOnEncode() throws {
     let project = Project(name: "srv", rootPath: "/srv", remoteHost: box)
     let object = try #require(
       try JSONSerialization.jsonObject(with: JSONEncoder().encode(project)) as? [String: Any])

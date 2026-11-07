@@ -48,11 +48,11 @@ struct HierarchySidebarFeatureTests {
   }
 
   @Test
-  func addProjectAddsLocalProjectBesideServerProjectWithSamePath() async throws {
+  func addProjectAddsLocalProjectBesideRemoteProjectWithSamePath() async throws {
     let (manager, folder) = try makeAddProjectFixture()
     defer { try? FileManager.default.removeItem(at: folder) }
     let canonical = HierarchyManager.canonicalPath(folder.path)
-    let serverID = manager.addServerProject(
+    let serverID = manager.addRemoteProject(
       name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
@@ -77,7 +77,7 @@ struct HierarchySidebarFeatureTests {
     let (manager, folder) = try makeAddProjectFixture()
     defer { try? FileManager.default.removeItem(at: folder) }
     let canonical = HierarchyManager.canonicalPath(folder.path)
-    _ = manager.addServerProject(name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    _ = manager.addRemoteProject(name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
     let localID = manager.addProject(name: "repo", rootPath: canonical)
     let store = TestStore(initialState: HierarchySidebarFeature.State()) {
       HierarchySidebarFeature()
@@ -122,7 +122,7 @@ struct HierarchySidebarFeatureTests {
     }
 
     await store.send(.hostConnectProjectTapped(second.id)) {
-      $0.remoteConnectionSheet = RemoteConnectionFeature.State(
+      $0.remoteProjectSheet = RemoteProjectFeature.State(
         hosts: [first, second], hostChoice: .existing(second.id))
     }
   }

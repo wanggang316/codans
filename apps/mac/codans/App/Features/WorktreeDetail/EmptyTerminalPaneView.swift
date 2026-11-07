@@ -16,7 +16,7 @@ struct EmptyTerminalPaneView: View {
   /// Path of the active worktree, scanned by the session-history popover.
   /// `nil` hides "Resume Session" — there is nothing to scan against.
   var worktreePath: String?
-  /// SSH host of the worktree's project for Server projects, `nil` for local.
+  /// SSH host of the worktree's project for Remote Projects, `nil` for local.
   var remoteHost: RemoteHost?
   let onNewTab: () -> Void
   /// The worktree has no active tab, so there is no pane to type into or

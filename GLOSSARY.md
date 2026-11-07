@@ -47,7 +47,14 @@ optional Icon). Every
 Project refers to exactly one Host. A Workspace and its member projects are on
 one Host. See [ADR 0002](docs/adr/0002-sidebar-outline-with-host-level.md) and
 [ADR 0003](docs/adr/0003-hosts-are-managed-records.md).
-_Avoid_: server (except in "Server project"), SSH alias.
+_Avoid_: server, SSH alias.
+
+**Remote Project**: A Project whose root is on a Host other than This Mac.
+codans reaches it over SSH. The Add Project menu opens one with "Open Remote
+Project…", and the Project's menu changes its Host and path with "Edit Remote
+Project…". Its `ProjectKind` is `.remote`; the CLI JSON writes the kind as
+`server`. See [Remote Projects over SSH](docs/design-docs/remote-ssh-projects.md).
+_Avoid_: Server project, remote connection, Connect to Server.
 
 **This Mac**: The Host of all local Projects. The sidebar shows Host rows only
 when at least one Project is on another Host. The CLI writes it as Host ID `0`.

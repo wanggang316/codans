@@ -363,7 +363,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 1. **M1 — 核心（无 GUI）**：`CodansCore/Workflow/*`（定义、解析、校验、表达式、机器、store）+ Yams；`workflow.*` IPC；`WorkflowEngine` / registry / discovery / handlers；CLI `list / validate / run / status / deliver / resolve / cancel / runs`；inbox 通知；AgentState 面板一行只读状态。验收：`review-loop` 用两个真实 agent 从 CLI 跑通一轮循环，attention 通过 `resolve` 处理。
 2. **M2 — GUI**：启动面板、面板 popover 与 attention 按钮、Settings → Workflows（列表 / 启用 / 诊断 / 绑定 / 信任）、Command Palette 项。
 3. **M3 — 内建与 skill**：`review-loop`、`handoff`、`advisor`；`skills/codans-workflow`（authoring / running / participating 三段，随 app 嵌入并由 `codans skill install` 链接）；`.codans/.gitignore` 按需放行（D9）。
-4. **V2 预留**（各自另写设计）：`wait: {all|any: [...]}` 并行分支与败者取消；脚本 action 包（目录 + JSON Schema）；`expect.status: idle` + `capture` 的观察模式；Server 项目。
+4. **V2 预留**（各自另写设计）：`wait: {all|any: [...]}` 并行分支与败者取消；脚本 action 包（目录 + JSON Schema）；`expect.status: idle` + `capture` 的观察模式；Remote Project。
 
 ## 风险
 

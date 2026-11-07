@@ -2,38 +2,38 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Presents `RemoteConnectionSheet` off the sidebar store. Extracted into a
+/// Presents `RemoteProjectSheet` off the sidebar store. Extracted into a
 /// `ViewModifier` (applied as a single `.modifier(...)`) so the sidebar's
 /// large `body` stays within the Swift type-checker's inference budget — an
 /// inline `.sheet` with binding + scope closures pushed it over the limit.
-struct RemoteConnectionSheetPresenter: ViewModifier {
+struct RemoteProjectSheetPresenter: ViewModifier {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
 
   func body(content: Content) -> some View {
     content.childSheet(
-      store.scope(state: \.remoteConnectionSheet, action: \.remoteConnectionSheet),
-      onDismiss: { store.send(.remoteConnectionSheet(.cancelButtonTapped)) },
+      store.scope(state: \.remoteProjectSheet, action: \.remoteProjectSheet),
+      onDismiss: { store.send(.remoteProjectSheet(.cancelButtonTapped)) },
       content: { childStore in
-        RemoteConnectionSheet(store: childStore)
-          .interactiveDismissDisabled(store.remoteConnectionSheet?.isConnecting ?? false)
+        RemoteProjectSheet(store: childStore)
+          .interactiveDismissDisabled(store.remoteProjectSheet?.isConnecting ?? false)
       },
     )
   }
 }
 
-/// SwiftUI sheet for `RemoteConnectionFeature`, on the shared `FormSheet`
+/// SwiftUI sheet for `RemoteProjectFeature`, on the shared `FormSheet`
 /// frame. With an existing Host, one section holds the Host picker and the
 /// path; with "New Host…", the picker, the shared Host field rows, and the
 /// path are three sections. The last footer holds the connection error, and
 /// "Connecting…" shows in the bottom bar. Auth is delegated to the user's SSH
 /// config + agent — the sheet never asks for a password or key.
-struct RemoteConnectionSheet: View {
-  @Bindable var store: StoreOf<RemoteConnectionFeature>
+struct RemoteProjectSheet: View {
+  @Bindable var store: StoreOf<RemoteProjectFeature>
 
   var body: some View {
     FormSheet(
-      store.isEditing ? "Edit Server Connection" : "Connect to Server",
-      primaryTitle: store.isEditing ? "Save" : "Connect",
+      store.isEditing ? "Edit Remote Project" : "Open Remote Project",
+      primaryTitle: store.isEditing ? "Save" : "Open",
       canSubmit: store.canConnect,
       canCancel: !store.isConnecting,
       onCancel: { store.send(.cancelButtonTapped) },
@@ -120,13 +120,13 @@ struct RemoteConnectionSheet: View {
     ) {
       ForEach(store.hosts) { host in
         Text(Self.pickerTitle(for: host))
-          .tag(RemoteConnectionFeature.State.HostChoice.existing(host.id))
+          .tag(RemoteProjectFeature.State.HostChoice.existing(host.id))
       }
       if !store.hosts.isEmpty {
         Divider()
       }
       Text("New Host…")
-        .tag(RemoteConnectionFeature.State.HostChoice.newHost)
+        .tag(RemoteProjectFeature.State.HostChoice.newHost)
     }
     .disabled(store.isConnecting)
   }

@@ -35,7 +35,7 @@ public nonisolated struct TagID: HierarchyID {
   public init(raw: UUID) { self.raw = raw }
 }
 
-/// Identifier of a `HostRecord` in the catalog's Host list. Server projects
+/// Identifier of a `HostRecord` in the catalog's Host list. Remote Projects
 /// refer to their Host by this id (ADR 0003).
 public nonisolated struct HostID: HierarchyID {
   public let raw: UUID

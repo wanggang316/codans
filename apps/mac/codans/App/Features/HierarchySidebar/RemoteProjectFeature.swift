@@ -2,25 +2,25 @@ import CodansCore
 import ComposableArchitecture
 import Foundation
 
-/// Reducer backing the "Connect to Server" sheet reached from the sidebar's
-/// Add Project menu, and its Edit Connection form. The user picks a Host from
+/// Reducer backing the "Open Remote Project" sheet reached from the sidebar's
+/// Add Project menu, and its Edit Remote Project form. The user picks a Host from
 /// the Host list or enters a new one ("New Host…"), and a remote path. The
 /// sheet validates the connection over SSH (reachability → path exists → git
 /// detection) and on success emits `delegate(.connected(host:remotePath:gitRoot:))`.
 /// Its responsibility ends there — the parent sidebar reducer adds a new Host
-/// to the Host list and runs the `addServerProject` → reconcile path.
+/// to the Host list and runs the `addRemoteProject` → reconcile path.
 ///
 /// ADR 0003: a Host from "New Host…" always goes to the Host list; fields
-/// equal to an existing Host use that Host. Edit Connection changes the Host
+/// equal to an existing Host use that Host. Edit Remote Project changes the Host
 /// choice and the path, never the fields of a Host (Settings › Hosts does).
 ///
 /// Authentication is delegated to the user's `~/.ssh/config` + agent; the sheet
 /// never collects a password or key.
 @Reducer
-struct RemoteConnectionFeature {
+struct RemoteProjectFeature {
   @ObservableState
   struct State: Equatable {
-    /// Add a new Server project, or edit an existing one's connection in
+    /// Add a new Remote Project, or edit an existing one's connection in
     /// place (Host choice / path). Edit re-validates like an add and the
     /// parent applies the result to the existing project.
     enum Mode: Equatable {
@@ -81,7 +81,7 @@ struct RemoteConnectionFeature {
       return !isNewHost || !newHost.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Seed an edit form from an existing Server project: its Host and path.
+    /// Seed an edit form from an existing Remote Project: its Host and path.
     static func editing(project: Project, hosts: [HostRecord]) -> State? {
       guard let endpoint = project.remoteHost else { return nil }
       var state = State(mode: .edit(projectID: project.id), hosts: hosts, pathDraft: project.rootPath)
@@ -99,7 +99,7 @@ struct RemoteConnectionFeature {
     static let hostChangedMessage =
       "The host changed while connecting. Check the host and connect again."
 
-    /// Edit Connection error when another Project already has the chosen
+    /// Edit Remote Project error when another Project already has the chosen
     /// Host and path (ADR 0006).
     static func duplicateProjectMessage(name: String, host: HostRecord) -> String {
       "\(name) on \(host.displayName) already uses this path. Choose another path or host."
@@ -151,7 +151,7 @@ struct RemoteConnectionFeature {
       case dismissed
       /// Validated connection. `host` is a record of the Host list, or a new
       /// record the parent adds to it. Parent registers the project via
-      /// `addServerProject`.
+      /// `addRemoteProject`.
       case connected(host: HostRecord, remotePath: String, gitRoot: String?)
     }
   }

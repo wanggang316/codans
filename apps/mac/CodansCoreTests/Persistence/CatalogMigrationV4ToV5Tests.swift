@@ -3,7 +3,7 @@ import Testing
 
 @testable import CodansCore
 
-/// Catalog version 5 moves host fields from Server projects into the Host
+/// Catalog version 5 moves host fields from Remote Projects into the Host
 /// list (ADR 0003). Version 4 files decode with the fields on each Project
 /// and migrate in memory.
 struct CatalogMigrationV4ToV5Tests {
@@ -14,7 +14,7 @@ struct CatalogMigrationV4ToV5Tests {
   private let local = "55555555-5555-5555-5555-555555555555"
   private let buildPort22 = "66666666-6666-6666-6666-666666666666"
 
-  /// Server projects on two machines: `build.example.com` reached as `ci`
+  /// Remote Projects on two machines: `build.example.com` reached as `ci`
   /// (three Projects, one of them with an explicit port 22) and as `root`,
   /// and `gpu-box` (an SSH config alias without a username). One local
   /// Project.

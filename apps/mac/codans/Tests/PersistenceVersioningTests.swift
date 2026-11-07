@@ -180,7 +180,7 @@ struct PersistenceVersioningTests {
   // MARK: - Catalog 4 → 5 (Host list)
 
   @Test
-  func versionFourServerProjectsMigrateToHostRecordsThatSurviveReload() throws {
+  func versionFourRemoteProjectsMigrateToHostRecordsThatSurviveReload() throws {
     let directory = try tempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("catalog.json")
