@@ -1,3 +1,4 @@
+import QuartzCore
 import SwiftUI
 
 /// The chord a control answers to (`⌘1`, `⌃2`, `⌥3`), shown while ⌘ is held.
@@ -117,5 +118,19 @@ extension Animation {
   /// The one timing of every ⌘ hint: inserted labels, in-place swaps, and row accessories
   /// all use it, so the sidebar rows, the filter bar, the Agents View, and the tab bar
   /// change together when ⌘ goes down or up.
-  static let shortcutHint: Animation = .easeInOut(duration: 0.15)
+  static let shortcutHint: Animation = .easeInOut(duration: shortcutHintDuration)
+  static let shortcutHintDuration: TimeInterval = 0.15
+}
+
+extension CATransition {
+  /// `Animation.shortcutHint` for an AppKit control that swaps its chord in place (the Run
+  /// toolbar button), where no SwiftUI animation reaches. SwiftUI's `easeInOut` is the
+  /// same curve as Core Animation's `easeInEaseOut`.
+  static func shortcutHintFade() -> CATransition {
+    let transition = CATransition()
+    transition.type = .fade
+    transition.duration = Animation.shortcutHintDuration
+    transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    return transition
+  }
 }

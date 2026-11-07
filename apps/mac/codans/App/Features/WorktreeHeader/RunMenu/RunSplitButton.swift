@@ -26,6 +26,8 @@ struct RunSplitButton: NSViewRepresentable {
 
   func makeNSView(context: Context) -> RunSegmentedControl {
     let control = RunSegmentedControl()
+    // Layer-backed so a chord swap can cross-fade (`CATransition.shortcutHintFade()`).
+    control.wantsLayer = true
     control.segmentCount = 2
     control.segmentStyle = .texturedRounded
     control.trackingMode = .momentary
@@ -47,7 +49,14 @@ struct RunSplitButton: NSViewRepresentable {
     context.coordinator.makeMenu = makeMenu
     control.setImage(image, forSegment: 0)
     let showsChord = commandKeyObserver?.isCommandHeld == true
-    control.setLabel(showsChord ? chordHint ?? "" : "", forSegment: 0)
+    let label = showsChord ? chordHint ?? "" : ""
+    if control.label(forSegment: 0) != label {
+      // Fade the chord in and out with the timing every other ⌘ hint uses.
+      if !context.environment.accessibilityReduceMotion {
+        control.layer?.add(CATransition.shortcutHintFade(), forKey: "shortcutHint")
+      }
+      control.setLabel(label, forSegment: 0)
+    }
     control.setImageScaling(.scaleNone, forSegment: 0)
     control.setToolTip(toolTip, forSegment: 0)
     control.setToolTip("More Commands", forSegment: 1)
