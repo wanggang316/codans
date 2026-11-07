@@ -7,7 +7,7 @@ import os.log
 
 /// Opens a link ⌘-clicked in terminal output. Scheme URLs go to
 /// LaunchServices; files open in the project's editor at the parsed line,
-/// over SSH for Server projects. Plain directories open in Finder, rendered
+/// over SSH for Remote Projects. Plain directories open in Finder, rendered
 /// documents (images, PDF, HTML) in their default app, and anything that
 /// could launch or execute (bundles, or a file the editor refuses) is only
 /// revealed in Finder.

@@ -54,7 +54,7 @@ struct HeaderOpenSplitButton: View {
     .task { editorStore.send(.onAppear) }
   }
 
-  // MARK: - Remote (Server-project) variant
+  // MARK: - Remote Project variant
 
   /// The editor a remote open will land on, mirroring the service cascade so
   /// the label matches the primary tap. nil = no SSH-capable editor installed.

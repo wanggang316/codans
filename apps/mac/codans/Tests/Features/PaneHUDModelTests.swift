@@ -110,7 +110,7 @@ struct PaneHUDModelTests {
   }
 
   @Test
-  func handOffIsBlockedOnServerProjects() {
+  func handOffIsBlockedOnRemoteProjects() {
     let paneID = PaneID()
     let model = PaneHUDModel.resolve(
       paneID: paneID,
@@ -122,6 +122,6 @@ struct PaneHUDModelTests {
       agent: .claudeCode
     )
     #expect(model?.canHandOff == false)
-    #expect(model?.handOffBlockedReason?.contains("Server") == true)
+    #expect(model?.handOffBlockedReason?.contains("remote project") == true)
   }
 }

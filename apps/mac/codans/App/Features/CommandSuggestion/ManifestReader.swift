@@ -2,14 +2,14 @@ import CodansCore
 import Foundation
 
 /// Directory a manifest scan reads from: a local path, or a path on an SSH
-/// host for Server projects.
+/// host for Remote Projects.
 nonisolated struct ManifestLocation: Equatable, Sendable {
   var directory: String
   var host: RemoteHost?
 
   /// The checkout to scan for a Project: `worktreeID` when it belongs to the
   /// Project, else the Project's selected worktree — branches can carry
-  /// different manifests — else the Project root. Server projects read on
+  /// different manifests — else the Project root. Remote Projects read on
   /// their host. nil when the Project is gone.
   static func resolve(projectID: ProjectID, worktreeID: WorktreeID?, in catalog: Catalog) -> ManifestLocation? {
     guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return nil }

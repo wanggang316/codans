@@ -20,7 +20,7 @@ extension IPC {
     public let canonicalName: String
     public let rootPath: String
     public let gitRoot: String?
-    /// The Server project's SSH host address; nil on This Mac. Kept for
+    /// The Remote Project's SSH host address; nil on This Mac. Kept for
     /// older CLIs; `host` names the Host record.
     public let remoteHost: String?
     /// The Host the Project is on. Nil from an app that predates Host

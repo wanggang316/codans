@@ -26,7 +26,7 @@ nonisolated final class LiveGitService: GitService {
   /// `nil` for a local path. Non-nil routes the invocation through
   /// `ssh` (`SSHCommand.invocation`), running `git` under the host's login
   /// shell in that remote directory — every `GitService` method then works
-  /// unchanged against Server-project worktrees because the parsers never see
+  /// unchanged against Remote Project worktrees because the parsers never see
   /// the transport. Default always-`nil` keeps existing construction sites and
   /// tests purely local.
   let resolveRemoteHost: @Sendable (URL) async -> RemoteHost?

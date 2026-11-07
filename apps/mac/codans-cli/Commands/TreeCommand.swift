@@ -50,7 +50,7 @@ struct TreeCommand: AsyncParsableCommand {
 }
 
 struct HierarchyTree: Codable, Sendable {
-  /// Server projects carry a resolved `remoteHost`.
+  /// Remote Projects carry a resolved `remoteHost`.
   let projects: [Project]
   let handles: IPC.TargetHandles?
   /// The app's Host list; empty from an app that predates Host records.

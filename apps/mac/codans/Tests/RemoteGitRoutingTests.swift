@@ -4,7 +4,7 @@ import Testing
 
 @testable import Codans
 
-/// Coverage for the Server-project git transport seam: `LiveGitService`
+/// Coverage for the Remote Project git transport seam: `LiveGitService`
 /// routes an invocation over SSH when the path resolver returns a host, and
 /// `HierarchyManager.remoteHost(forPath:)` is that resolver's live backing.
 struct RemoteGitRoutingTests {
@@ -67,7 +67,7 @@ struct RemoteGitRoutingTests {
 
   @Test
   @MainActor
-  func updateServerProjectReseedsRowsOnlyOnPathChange() {
+  func updateRemoteProjectReseedsRowsOnlyOnPathChange() {
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")
     let manager = HierarchyManager(
@@ -75,7 +75,7 @@ struct RemoteGitRoutingTests {
       store: CatalogStore(fileURL: tempURL),
       runtime: FakeHierarchyRuntime()
     )
-    let projectID = manager.addServerProject(
+    let projectID = manager.addRemoteProject(
       name: "app", remoteHost: Self.host, rootPath: "/data/app", gitRoot: "/data/app"
     )
     _ = manager.reconcileDiscoveredWorktrees(
@@ -89,7 +89,7 @@ struct RemoteGitRoutingTests {
     // Host-only change (e.g. new port): rows keep their identity — the paths
     // are still valid on the same machine.
     let movedHost = RemoteHost(alias: "example.com", username: "alice", port: 2200)
-    manager.updateServerProject(
+    manager.updateRemoteProject(
       projectID: projectID, remoteHost: movedHost, rootPath: "/data/app", gitRoot: "/data/app"
     )
     #expect(manager.catalog.projects[0].remoteHost == movedHost)
@@ -97,7 +97,7 @@ struct RemoteGitRoutingTests {
 
     // Path change: every row's remote path is stale — reseed (empty for a git
     // root; the next reconcile discovers the real worktrees).
-    manager.updateServerProject(
+    manager.updateRemoteProject(
       projectID: projectID, remoteHost: movedHost, rootPath: "/data/other", gitRoot: "/data/other"
     )
     #expect(manager.catalog.projects[0].rootPath == "/data/other")
@@ -107,7 +107,7 @@ struct RemoteGitRoutingTests {
 
   @Test
   @MainActor
-  func managerResolvesRemoteHostForServerProjectPathsOnly() {
+  func managerResolvesRemoteHostForRemoteProjectPathsOnly() {
     let tempURL = FileManager.default.temporaryDirectory
       .appending(component: UUID().uuidString + ".json")
     let manager = HierarchyManager(
@@ -116,7 +116,7 @@ struct RemoteGitRoutingTests {
       runtime: FakeHierarchyRuntime()
     )
     _ = manager.addProject(name: "local", rootPath: "/srv/app", gitRoot: "/srv/app")
-    let serverID = manager.addServerProject(
+    let serverID = manager.addRemoteProject(
       name: "server", remoteHost: Self.host, rootPath: "/data/app", gitRoot: "/data/app"
     )
     _ = manager.reconcileDiscoveredWorktrees(
@@ -134,7 +134,7 @@ struct RemoteGitRoutingTests {
     #expect(manager.remoteHost(forPath: "/elsewhere") == nil)
   }
 
-  /// A local Project and a Server project at the same path (ADR 0006): git
+  /// A local Project and a Remote Project at the same path (ADR 0006): git
   /// for each Project runs on its own machine, in both catalog orders.
   @Test
   @MainActor
@@ -148,12 +148,12 @@ struct RemoteGitRoutingTests {
       )
       var serverID: ProjectID?
       if serverFirst {
-        serverID = manager.addServerProject(
+        serverID = manager.addRemoteProject(
           name: "server", remoteHost: Self.host, rootPath: "/srv/app", gitRoot: "/srv/app")
       }
       let localID = manager.addProject(name: "local", rootPath: "/srv/app", gitRoot: "/srv/app")
       if !serverFirst {
-        serverID = manager.addServerProject(
+        serverID = manager.addRemoteProject(
           name: "server", remoteHost: Self.host, rootPath: "/srv/app", gitRoot: "/srv/app")
       }
       let local = try #require(manager.catalog.projects.first { $0.id == localID })

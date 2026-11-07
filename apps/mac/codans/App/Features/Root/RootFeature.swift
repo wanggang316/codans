@@ -1956,7 +1956,7 @@ struct RootFeature {
         }
         guard !source.isRemote else {
           return .send(
-            .statusBar(.push(.warning("Hand off is not available for Server projects"))))
+            .statusBar(.push(.warning("Hand off is not available for remote projects"))))
         }
         state.handoff = HandoffFeature.State.make(
           source: HandoffFeature.Source(
@@ -3238,7 +3238,7 @@ struct RootFeature {
       switch kind {
       case .openFolder: return .send(.sidebar(.toolbarAddProjectTapped))
       case .cloneRepository: return .send(.sidebar(.cloneRepoTapped))
-      case .connectServer: return .send(.sidebar(.connectServerTapped))
+      case .openRemoteProject: return .send(.sidebar(.openRemoteProjectTapped))
       case .newWorkspace: return .send(.sidebar(.newWorkspaceTapped))
       }
     case .manageAgents:

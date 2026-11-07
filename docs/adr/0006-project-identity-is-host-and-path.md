@@ -4,20 +4,20 @@ Status: Accepted
 
 ## Context
 
-A Project stores a root path. A Server project stores a path on its Host, not
+A Project stores a root path. A Remote Project stores a path on its Host, not
 on This Mac. Two machines often have the same layout and the same username, so
-a local Project and a Server project can have the same root path string, for
+a local Project and a Remote Project can have the same root path string, for
 example `/Users/me/dev/app` on This Mac and on a Host named `mini`.
 
 codans compared Projects by root path only. Each lookup that took a path
 matched every Project, on any Host:
 
-- Add Project on This Mac found the Server project with the same path and
+- Add Project on This Mac found the Remote Project with the same path and
   selected it. The user could not add the local Project.
 - The CLI `hierarchy.addProject` returned a conflict for the same reason.
 - `codans open`, path targets in the CLI, Workspace membership, and the
-  source-project match of a Workspace could resolve to a Server project.
-- Connect to Server had no duplicate check, so the same path on the same Host
+  source-project match of a Workspace could resolve to a Remote Project.
+- Open Remote Project had no duplicate check, so the same path on the same Host
   could be added two times.
 
 [ADR 0003](0003-hosts-are-managed-records.md) gives each Host a record ID, and
@@ -40,12 +40,12 @@ every Project refers to exactly one Host.
    (the folder picker, `hierarchy.addProject`, `codans open`, a CLI path
    target, Workspace membership, the source project of a Workspace) matches
    only Projects on This Mac. Workspaces and their members are local, so they
-   never match a Server project.
+   never match a Remote Project.
 5. **Duplicates.**
-   - Connect to Server: when the Host and the resolved path are already a
+   - Open Remote Project: when the Host and the resolved path are already a
      Project, the sheet closes and that Project is selected, the same as Add
      Project on This Mac.
-   - Edit Connection: a Host or path that makes the Project equal to another
+   - Edit Remote Project: a Host or path that makes the Project equal to another
      Project is an error in the sheet. The change is not applied.
    - Existing duplicates in a catalog are not merged or migrated.
 6. **CLI Host field.**
@@ -68,7 +68,7 @@ every Project refers to exactly one Host.
 - One lookup keeps the rule in one place, so a new caller cannot compare paths
   without the Host.
 - A local path from this Mac cannot refer to a directory on another machine,
-  so a local-path lookup must not match a Server project.
+  so a local-path lookup must not match a Remote Project.
 - A Host ID does not change when the Host name or address changes, so scripts
   that pass `--host` keep working.
 - `0` is one value for input and output. A script can copy the `hostID` of an

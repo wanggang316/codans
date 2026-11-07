@@ -5,7 +5,7 @@ import Foundation
 /// root paths without the Host.
 extension Project {
   /// `true` for a Project on This Mac: no Host record and no SSH endpoint.
-  /// A legacy Server project can carry an endpoint before it gets a Host
+  /// A legacy Remote Project can carry an endpoint before it gets a Host
   /// record, so both fields are checked.
   public var isOnThisMac: Bool { hostID == nil && remoteHost == nil }
 
@@ -40,7 +40,7 @@ extension Catalog {
   }
 
   /// The other Project that `projectID` would duplicate if its Host and
-  /// root became `hostID` and `path` (Edit Connection). `nil` when the
+  /// root became `hostID` and `path` (Edit Remote Project). `nil` when the
   /// Project already has that Host and root: keeping its own identity is
   /// never a conflict, also when an existing duplicate shares it, because
   /// existing duplicates stay as they are (ADR 0006).
@@ -61,7 +61,7 @@ extension Catalog {
     return keepsOwnIdentity ? nil : conflict
   }
 
-  /// The Project on This Mac whose root is `path`. Server projects never
+  /// The Project on This Mac whose root is `path`. Remote Projects never
   /// match, also when their remote path is the same string.
   public func localProject(
     rootPath path: String,
@@ -74,7 +74,7 @@ extension Catalog {
   /// The Project on This Mac whose root is `path` or an ancestor of it, on
   /// path-segment boundaries (`/repo` contains `/repo/src`, not
   /// `/repository`). When roots nest, the deepest root wins; on equal roots
-  /// the first in Project order wins. Server projects never match.
+  /// the first in Project order wins. Remote Projects never match.
   public func localProject(
     containing path: String,
     canonicalize: (String) -> String
@@ -110,7 +110,7 @@ extension Catalog {
 /// The URL form a git call uses for a repository path. A path on This Mac is
 /// a file URL. A path on a Host is a `codans-host://<host-id>/<path>` URL, so
 /// the git transport picks the Host from the Project, not from the path
-/// string: a local Project and a Server project can have the same path
+/// string: a local Project and a Remote Project can have the same path
 /// (ADR 0006). `URL.path` of both forms is the repository path.
 public enum GitLocation {
   public static let hostScheme = "codans-host"
@@ -133,7 +133,7 @@ public enum GitLocation {
 
 extension Project {
   /// The URL for a git call on `path` of this Project: a file URL on This
-  /// Mac, a Host-form URL on a Host. A legacy Server project without a Host
+  /// Mac, a Host-form URL on a Host. A legacy Remote Project without a Host
   /// record keeps a file URL and is routed by path.
   public func gitURL(_ path: String) -> URL {
     GitLocation.url(path: path, hostID: isOnThisMac ? nil : hostID)
@@ -152,8 +152,8 @@ extension Catalog {
   ///
   /// - A Host-form URL (`GitLocation`) runs on that Host.
   /// - A file URL runs on This Mac when a Project on This Mac owns the
-  ///   path (root, git root, or worktree), also when a Server project has
-  ///   the same path. Otherwise a Server project that owns the path gives
+  ///   path (root, git root, or worktree), also when a Remote Project has
+  ///   the same path. Otherwise a Remote Project that owns the path gives
   ///   its Host; this keeps callers that pass a plain path for a Server
   ///   project working.
   ///

@@ -19,15 +19,15 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Settings → General → Name writes here; clearing the field writes `nil`.
   /// Persistence-only; `name` is still the right thing to read at call sites.
   public var displayName: String?
-  /// For a local project, the canonical local root path. For a Server project
+  /// For a local project, the canonical local root path. For a Remote Project
   /// (`remoteHost != nil`), the **remote** absolute path on the host — the same
   /// string plumbing carries it, but it is never a valid local filesystem path,
   /// so local-FS operations must be gated on `isRemote`.
   public var rootPath: String
-  /// Resolved git repository root. For a Server project this is a **remote** path
+  /// Resolved git repository root. For a Remote Project this is a **remote** path
   /// string (discovered over SSH), `nil` when the remote root is a plain folder.
   public var gitRoot: String?
-  /// The Host record (`Catalog.hosts`) this Server project is on. `nil` = a
+  /// The Host record (`Catalog.hosts`) this Remote Project is on. `nil` = a
   /// local Project, on This Mac. Persisted in place of the host fields
   /// (ADR 0003).
   public var hostID: HostID?
@@ -146,7 +146,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// A Project supports Git-backed Worktree operations only when it has a resolved git root.
   /// For non-git Projects, the UI presents a single synthetic Worktree (`Project.rootPath`)
   /// and the "Add Worktree" affordance is suppressed. Holds for remote git repos too — a
-  /// Server project with a resolved (remote) git root supports worktree operations over SSH.
+  /// Remote Project with a resolved (remote) git root supports worktree operations over SSH.
   /// A workspace answers `false`: its rows are checkouts of *other* repositories, added
   /// through the workspace flow rather than `git worktree add` on a project root.
   public var supportsWorktrees: Bool { gitRoot != nil }
@@ -164,7 +164,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     worktree.path == rootPath
   }
 
-  /// True for a Server project — its `rootPath` / `gitRoot` / worktree paths are
+  /// True for a Remote Project — its `rootPath` / `gitRoot` / worktree paths are
   /// remote, and terminals / git run over SSH. Local-filesystem operations
   /// (`FileManager`, `URL(fileURLWithPath:)`, symlink resolution, reveal-in-Finder)
   /// must be gated on this being `false`.
@@ -244,8 +244,8 @@ extension Project: Codable {
     try container.encodeIfPresent(displayName, forKey: .displayName)
     try container.encode(rootPath, forKey: .rootPath)
     try container.encodeIfPresent(gitRoot, forKey: .gitRoot)
-    // A Server project stores only its Host id; the Host fields live in
-    // `Catalog.hosts`. A Server project without a Host id (not yet attached
+    // A Remote Project stores only its Host id; the Host fields live in
+    // `Catalog.hosts`. A Remote Project without a Host id (not yet attached
     // to a record) keeps the legacy fields so the connection is never lost;
     // the next load turns them into a Host record.
     if let hostID {

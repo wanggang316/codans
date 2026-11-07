@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Settings window sidebar. Fixed-order global sections at the top, then the open
 /// Projects grouped by where they live: a "Local" section for on-disk projects and one
-/// section per server host (titled with its hostname / IP). With no Server projects the
+/// section per server host (titled with its hostname / IP). With no Remote Projects the
 /// single group keeps the plain "Projects" title. Each project row is a
 /// `DisclosureGroup` exposing the Project's `General` and `Commands` sub-rows.
 ///
@@ -130,7 +130,7 @@ struct SettingsSidebarView: View {
   /// Group the open projects by where they live. Local projects come first;
   /// server hosts follow alphabetically, titled by hostname / IP (the address
   /// alone — user and port stay out of the section header). A catalog with no
-  /// Server projects keeps the familiar single "Projects" title.
+  /// Remote Projects keeps the familiar single "Projects" title.
   private func projectGroups(in catalog: Catalog) -> [ProjectGroup] {
     let sorted = sortedProjects(in: catalog)
     let locals = sorted.filter { $0.remoteHost == nil }

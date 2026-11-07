@@ -62,7 +62,7 @@ enum CommandPaletteItems {
         )
         items.append(handOffItem(worktreeName: worktree.name))
         // Workflows are scoped to a local worktree (the run directory lives
-        // under it), so a Server project offers none.
+        // under it), so a Remote Project offers none.
         if !project.isRemote {
           items.append(
             contentsOf: workflowItems(

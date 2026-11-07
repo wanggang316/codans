@@ -19,7 +19,7 @@
 
    Ghostty 用集成里的 `ssh()` 包装来解决这个问题（`ssh-env` 选项），前提是集成已加载。
 
-Server 项目的远端 pane 走另一条路径：本地 zmx 包着 SSH 重连循环，见 [remote-ssh-projects.md](remote-ssh-projects.md)。远端 shell 不经过本地的 shell 解析，所以它的 TERM 兼容由远端脚本自己处理（见下文"远端 pane"）。
+Remote Project的远端 pane 走另一条路径：本地 zmx 包着 SSH 重连循环，见 [remote-ssh-projects.md](remote-ssh-projects.md)。远端 shell 不经过本地的 shell 解析，所以它的 TERM 兼容由远端脚本自己处理（见下文"远端 pane"）。
 
 codans 自己维护 Ghostty fork（`wanggang316/ghostty`，分支 `v1.3.1-tc`，补丁清单见 fork 内的 `README.tc.md`），可以携带小而独立的补丁。
 

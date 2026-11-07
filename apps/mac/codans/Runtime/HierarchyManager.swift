@@ -115,7 +115,7 @@ final class HierarchyManager {
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
-    // `CatalogStore.load` already attaches every Server project to a Host;
+    // `CatalogStore.load` already attaches every Remote Project to a Host;
     // this covers catalogs built in memory, so every write below starts
     // from Projects that refer to a Host by id.
     let didAdoptHosts = self.catalog.adoptHostReferences()
@@ -222,17 +222,17 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  /// Point the Server project at `index` to the Host for `endpoint`: an
+  /// Point the Remote Project at `index` to the Host for `endpoint`: an
   /// existing record with the same fields, else a new one. The callers
   /// validate the fields first; if they still do not make a valid record,
   /// the Project keeps the fields without a Host id, and the next load
   /// attaches it.
-  private func attachServerProject(at index: Int, to endpoint: RemoteHost) {
+  private func attachRemoteProject(at index: Int, to endpoint: RemoteHost) {
     do {
       let hostID = try catalog.hostID(for: endpoint)
       catalog.attachProject(at: index, toHost: hostID)
     } catch {
-      reconcileLogger.error("server project host not recorded: \(error.localizedDescription, privacy: .public)")
+      reconcileLogger.error("remote project host not recorded: \(error.localizedDescription, privacy: .public)")
       catalog.projects[index].hostID = nil
       catalog.projects[index].remoteHost = endpoint
     }
@@ -368,13 +368,13 @@ final class HierarchyManager {
 
   /// Add a Server (remote SSH) project. Mirrors `addProject` but attaches the
   /// Project to the Host for `remoteHost` (an existing record with the same
-  /// fields, else a new one) so the project is `.server`-kind, and `rootPath` / `gitRoot`
+  /// fields, else a new one) so the project is `.remote`-kind, and `rootPath` / `gitRoot`
   /// hold **remote** path strings. When `gitRoot` is nil a synthetic worktree
   /// seeds the row (same as a local folder project) so the sidebar has
   /// something to show before the first SSH reconcile discovers the real
   /// worktrees. `rootPath` is stored verbatim — remote paths must never pass
   /// through the local symlink canonicalizer.
-  func addServerProject(
+  func addRemoteProject(
     name: String,
     remoteHost: RemoteHost,
     rootPath: String,
@@ -406,20 +406,20 @@ final class HierarchyManager {
       addedAt: Date()
     )
     catalog.projects.append(project)
-    attachServerProject(at: catalog.projects.count - 1, to: remoteHost)
+    attachRemoteProject(at: catalog.projects.count - 1, to: remoteHost)
     store.scheduleSave(catalog)
     return projectID
   }
 
-  /// Apply an edited Server-project connection in place. The entered host
-  /// fields select the Host the same way `addServerProject` does; the Host
+  /// Apply an edited Remote Project connection in place. The entered host
+  /// fields select the Host the same way `addRemoteProject` does; the Host
   /// it leaves stays in the Host list. Host-only changes
   /// (alias / user / port to the same machine) keep the worktree rows — their
   /// remote paths are still valid. A `rootPath` change re-points the project
   /// at a different remote directory, so every existing row's path is stale:
   /// tear down their surfaces and reseed (synthetic row for a folder, empty
   /// for a git root — the next reconcile discovers the real worktrees).
-  func updateServerProject(
+  func updateRemoteProject(
     projectID: ProjectID,
     remoteHost: RemoteHost,
     rootPath: String,
@@ -431,7 +431,7 @@ final class HierarchyManager {
     let pathChanged =
       Self.normalizeRemotePath(catalog.projects[index].rootPath)
       != Self.normalizeRemotePath(rootPath)
-    attachServerProject(at: index, to: remoteHost)
+    attachRemoteProject(at: index, to: remoteHost)
     catalog.projects[index].rootPath = rootPath
     catalog.projects[index].gitRoot = gitRoot
     if pathChanged {
@@ -608,7 +608,7 @@ final class HierarchyManager {
   /// Tab or Pane is created that cannot start. A missing project root also
   /// flags the Project failed: reconcile runs on focus changes only, so a
   /// root folder moved from inside a pane would otherwise stay "ready".
-  /// Server projects always pass: their paths are remote.
+  /// Remote Projects always pass: their paths are remote.
   func requireLocalDirectory(_ path: String, in projectID: ProjectID) throws {
     let project = catalog.projects.first(where: { $0.id == projectID })
     guard project?.isRemote != true else { return }
@@ -1673,7 +1673,7 @@ final class HierarchyManager {
       .path
   }
 
-  /// String-only canonicalization for **remote** (Server-project) paths. Unlike
+  /// String-only canonicalization for **remote** (Remote Project) paths. Unlike
   /// `canonicalPath`, it never touches the local filesystem — `git rev-parse
   /// --show-toplevel` and `git worktree list --porcelain` already emit absolute
   /// canonical paths on the host, so the only normalization needed is trimming
@@ -1688,7 +1688,7 @@ final class HierarchyManager {
   /// The SSH host a git call on `url` runs on, or `nil` for This Mac.
   /// Backs the `GitService` / `GitWorktreeClient` transport seam. A
   /// Host-form URL (`Project.gitURL`) runs on its Host; a plain path runs on
-  /// This Mac when a Project on This Mac owns it, else on the Server project
+  /// This Mac when a Project on This Mac owns it, else on the Remote Project
   /// that owns it (ADR 0006, `Catalog.gitRemoteHost(for:canonicalizeLocal:)`).
   func remoteHost(forGitURL url: URL) -> RemoteHost? {
     catalog.gitRemoteHost(for: url, canonicalizeLocal: Self.canonicalPath)

@@ -38,19 +38,19 @@ struct CatalogProjectIdentityTests {
   }
 
   @Test
-  func localLookupIgnoresServerProjectWithSamePath() {
+  func localLookupIgnoresRemoteProjectWithSamePath() {
     let catalog = catalog([server("/Users/me/dev/a")])
     #expect(catalog.localProject(rootPath: "/Users/me/dev/a", canonicalize: Self.canonicalize) == nil)
   }
 
   @Test
-  func localLookupIgnoresLegacyServerProjectWithoutHostRecord() {
+  func localLookupIgnoresLegacyRemoteProjectWithoutHostRecord() {
     let legacy = Project(name: "srv", rootPath: "/a", remoteHost: RemoteHost(alias: "box"))
     #expect(catalog([legacy]).localProject(rootPath: "/a", canonicalize: Self.canonicalize) == nil)
   }
 
   @Test
-  func localLookupFindsLocalProjectBesideServerProject() {
+  func localLookupFindsLocalProjectBesideRemoteProject() {
     let local = Project(name: "a", rootPath: "/Users/me/dev/a")
     let catalog = catalog([server("/Users/me/dev/a"), local])
     #expect(catalog.localProject(rootPath: "/Users/me/dev/a", canonicalize: Self.canonicalize)?.id == local.id)
@@ -120,7 +120,7 @@ struct CatalogProjectIdentityTests {
   // MARK: - Contains path
 
   @Test
-  func containsReturnsDeepestLocalRootAndNeverServerProject() {
+  func containsReturnsDeepestLocalRootAndNeverRemoteProject() {
     let outer = Project(name: "repo", rootPath: "/repo")
     let inner = Project(name: "sub", rootPath: "/repo/sub")
     let deeperServer = server("/repo/sub/pkg")
@@ -136,7 +136,7 @@ struct CatalogProjectIdentityTests {
   }
 
   @Test
-  func containsNeverReturnsServerProject() {
+  func containsNeverReturnsRemoteProject() {
     let catalog = catalog([server("/repo")])
     #expect(catalog.localProject(containing: "/repo/src", canonicalize: Self.canonicalize) == nil)
   }
@@ -182,7 +182,7 @@ struct CatalogProjectIdentityTests {
     #expect(GitLocation.hostID(of: localURL) == nil)
   }
 
-  /// A local Project and a Server project at the same path: each git call
+  /// A local Project and a Remote Project at the same path: each git call
   /// runs on its own machine.
   @Test
   func gitTransportFollowsProjectIdentityForSamePath() {
@@ -200,7 +200,7 @@ struct CatalogProjectIdentityTests {
   }
 
   @Test
-  func plainPathOfServerProjectStillRoutesToItsHost() {
+  func plainPathOfRemoteProjectStillRoutesToItsHost() {
     let feature = Worktree(name: "f", path: "/tmp/app-feature")
     var remote = server("/tmp/app")
     remote.worktrees = [feature]

@@ -12,13 +12,13 @@ import Foundation
 public nonisolated enum ProjectKind: String, Codable, Hashable, Sendable {
   case gitRepo = "git_repo"
   case dir = "dir"
-  case server = "server"
+  case remote = "server"
   case workspace = "workspace"
 }
 
 extension Project {
-  /// Derived kind. A Server project (`remoteHost != nil`) always classifies as
-  /// `.server` regardless of whether its remote root is a git repo — the
+  /// Derived kind. A Remote Project (`remoteHost != nil`) always classifies as
+  /// `.remote` regardless of whether its remote root is a git repo — the
   /// remote/local split is the primary axis that gates local-FS operations.
   /// A workspace outranks `gitRoot` next: its root is a plain folder by
   /// construction, and the flag — not the absence of a git root — is what
@@ -27,7 +27,7 @@ extension Project {
   /// surfaced by the next catalog refresh flips `.dir` → `.gitRepo` without a
   /// separate migration.
   public var kind: ProjectKind {
-    if remoteHost != nil { return .server }
+    if remoteHost != nil { return .remote }
     if isWorkspace { return .workspace }
     return gitRoot == nil ? .dir : .gitRepo
   }

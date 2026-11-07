@@ -118,10 +118,10 @@ struct HierarchySidebarFeature {
     /// palette. `WorkspaceClient` registers and reconciles the result, so
     /// the parent only selects it on success.
     var createWorkspaceSheet: CreateWorkspaceFeature.State?
-    /// "Connect to Server" sheet reached from the Add Project menu. Validates
+    /// "Open Remote Project" sheet reached from the Add Project menu. Validates
     /// an SSH connection and, on success, routes the destination back through
-    /// `addServerProject` + reconcile.
-    var remoteConnectionSheet: RemoteConnectionFeature.State?
+    /// `addRemoteProject` + reconcile.
+    var remoteProjectSheet: RemoteProjectFeature.State?
     var archivedWorktreesSheet: ArchivedWorktreesFeature.State?
     var pendingWorktreeRemoval: PendingWorktreeRemoval?
     var pendingProjectRemoval: PendingProjectRemoval?
@@ -212,15 +212,15 @@ struct HierarchySidebarFeature {
     case addWorkspaceFolderResolved(canonicalPath: String)
     /// Add Project menu → "Clone Repository…". Opens the clone sheet.
     case cloneRepoTapped
-    /// Add Project menu → "Connect to Server…". Opens the remote-connection sheet.
-    case connectServerTapped
-    /// Server project's options menu → "Edit Connection…". Opens the
-    /// remote-connection sheet seeded from the project, in edit mode.
-    case projectEditConnectionTapped(projectID: ProjectID)
+    /// Add Project menu → "Open Remote Project…". Opens the Remote Project sheet.
+    case openRemoteProjectTapped
+    /// Remote Project's options menu → "Edit Remote Project…". Opens the
+    /// Remote Project sheet seeded from the project, in edit mode.
+    case editRemoteProjectTapped(projectID: ProjectID)
     /// Host row click or chevron. Opens or closes the Host's Projects.
     case toggleHostExpansion(SidebarHost)
-    /// Host row menu → "Connect Project on This Host…". Opens the
-    /// remote-connection sheet with the Host chosen.
+    /// Host row menu → "Open Remote Project on This Host…". Opens the
+    /// Remote Project sheet with the Host chosen.
     case hostConnectProjectTapped(HostID)
     /// Host row menu → "Edit Host…". Opens Settings › Hosts on the Host.
     case hostEditTapped(HostID)
@@ -416,8 +416,8 @@ struct HierarchySidebarFeature {
     case workspaceRemoveConfirmed(deleteFiles: Bool)
     case workspaceRemoveCancelled
     case workspaceRemoveFinished(message: String?)
-    /// Child-feature actions for the Connect to Server sheet.
-    case remoteConnectionSheet(RemoteConnectionFeature.Action)
+    /// Child-feature actions for the Open Remote Project sheet.
+    case remoteProjectSheet(RemoteProjectFeature.Action)
 
     // Delegate up to RootFeature for effects that cross feature boundaries.
     case delegate(Delegate)
@@ -570,19 +570,19 @@ struct HierarchySidebarFeature {
         return .send(.delegate(.workspaceGroupCreated(result)))
       case .createWorkspaceSheet:
         return .none
-      case .remoteConnectionSheet(.delegate(.dismissed)):
-        state.remoteConnectionSheet = nil
+      case .remoteProjectSheet(.delegate(.dismissed)):
+        state.remoteProjectSheet = nil
         return .none
-      case .remoteConnectionSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
+      case .remoteProjectSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
         // Connection validated. Read the mode BEFORE dismissing: edit applies
         // the change to the existing project in place; add selects the
         // Project that already has this Host + path, or registers a new
         // one, named by the remote path's leaf (falling back to the Host) so
         // the sidebar reads a recognizable label before the first SSH
         // reconcile fills in worktrees. Both re-reconcile.
-        guard let sheet = state.remoteConnectionSheet else { return .none }
+        guard let sheet = state.remoteProjectSheet else { return .none }
         guard let endpoint = registerHost(host, isNewHost: sheet.isNewHost) else {
-          state.remoteConnectionSheet?.hostChangedWhileConnecting(currentHosts: hierarchyClient.hosts())
+          state.remoteProjectSheet?.hostChangedWhileConnecting(currentHosts: hierarchyClient.hosts())
           return .none
         }
         // ADR 0006: a Host cannot have two Projects with the same root path.
@@ -598,15 +598,15 @@ struct HierarchySidebarFeature {
             withEditOf: projectID, onHost: hostID, rootPath: remotePath,
             canonicalizeLocal: HierarchyManager.canonicalPath)
           {
-            state.remoteConnectionSheet?.errorMessage =
-              RemoteConnectionFeature.State.duplicateProjectMessage(name: conflict.name, host: host)
+            state.remoteProjectSheet?.errorMessage =
+              RemoteProjectFeature.State.duplicateProjectMessage(name: conflict.name, host: host)
             return .none
           }
-          state.remoteConnectionSheet = nil
-          hierarchyClient.updateServerProject(projectID, endpoint, remotePath, gitRoot)
+          state.remoteProjectSheet = nil
+          hierarchyClient.updateRemoteProject(projectID, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         case .add:
-          state.remoteConnectionSheet = nil
+          state.remoteProjectSheet = nil
           // Like Add Project on This Mac: reveal the existing Project.
           if let existing = catalog.project(
             onHost: hostID, rootPath: remotePath, canonicalizeLocal: HierarchyManager.canonicalPath)
@@ -615,10 +615,10 @@ struct HierarchySidebarFeature {
           }
           let leaf = (remotePath as NSString).lastPathComponent
           let name = leaf.isEmpty ? host.displayName : leaf
-          let projectID = hierarchyClient.addServerProject(name, endpoint, remotePath, gitRoot)
+          let projectID = hierarchyClient.addRemoteProject(name, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         }
-      case .remoteConnectionSheet:
+      case .remoteProjectSheet:
         return .none
       case .archivedWorktreesSheet(.delegate(.dismissed)):
         state.archivedWorktreesSheet = nil
@@ -641,8 +641,8 @@ struct HierarchySidebarFeature {
     .ifLet(\.createWorkspaceSheet, action: \.createWorkspaceSheet) {
       CreateWorkspaceFeature()
     }
-    .ifLet(\.remoteConnectionSheet, action: \.remoteConnectionSheet) {
-      RemoteConnectionFeature()
+    .ifLet(\.remoteProjectSheet, action: \.remoteProjectSheet) {
+      RemoteProjectFeature()
     }
     .ifLet(\.archivedWorktreesSheet, action: \.archivedWorktreesSheet) {
       ArchivedWorktreesFeature()
@@ -878,8 +878,8 @@ struct HierarchySidebarFeature {
       if let message { state.lifecycleErrorToast = message }
       return .none
 
-    case .connectServerTapped:
-      state.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: hierarchyClient.hosts())
+    case .openRemoteProjectTapped:
+      state.remoteProjectSheet = RemoteProjectFeature.State(hosts: hierarchyClient.hosts())
       return .none
 
     case .toggleHostExpansion(let host):
@@ -890,7 +890,7 @@ struct HierarchySidebarFeature {
     case .hostConnectProjectTapped(let hostID):
       let hosts = hierarchyClient.hosts()
       guard hosts.contains(where: { $0.id == hostID }) else { return .none }
-      state.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: hosts, hostChoice: .existing(hostID))
+      state.remoteProjectSheet = RemoteProjectFeature.State(hosts: hosts, hostChoice: .existing(hostID))
       return .none
 
     case .hostEditTapped(let hostID):
@@ -899,13 +899,13 @@ struct HierarchySidebarFeature {
         await MainActor.run { presenter.editHost(hostID) }
       }
 
-    case .projectEditConnectionTapped(let projectID):
+    case .editRemoteProjectTapped(let projectID):
       guard
         let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
-        let seeded = RemoteConnectionFeature.State.editing(
+        let seeded = RemoteProjectFeature.State.editing(
           project: project, hosts: hierarchyClient.hosts())
       else { return .none }
-      state.remoteConnectionSheet = seeded
+      state.remoteProjectSheet = seeded
       return .none
 
     // MARK: Tag filter chip footer
@@ -1415,7 +1415,7 @@ struct HierarchySidebarFeature {
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
-    case .remoteConnectionSheet:
+    case .remoteProjectSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
     }

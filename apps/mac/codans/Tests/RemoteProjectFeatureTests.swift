@@ -5,22 +5,22 @@ import Testing
 
 @testable import Codans
 
-/// Reducer-level coverage for `RemoteConnectionFeature`'s pure paths — the
+/// Reducer-level coverage for `RemoteProjectFeature`'s pure paths — the
 /// Host picker, "New Host…" fields, and the pre-flight validation that runs
 /// *before* any SSH probe. The network validation pipeline
 /// (`connectButtonTapped` → `.run`) is not exercised here; it depends on a
 /// reachable host.
 @MainActor
-struct RemoteConnectionFeatureTests {
+struct RemoteProjectFeatureTests {
   private static let box = HostRecord(address: "box.local", username: "alice", port: 2222, name: "Box")
   private static let mini = HostRecord(address: "mini.local")
 
   @Test
   func pickerDefaultsToTheFirstHostOrNewHost() {
-    let withHosts = RemoteConnectionFeature.State(hosts: [Self.box, Self.mini])
+    let withHosts = RemoteProjectFeature.State(hosts: [Self.box, Self.mini])
     #expect(withHosts.hostChoice == .existing(Self.box.id))
     #expect(!withHosts.isNewHost)
-    let empty = RemoteConnectionFeature.State()
+    let empty = RemoteProjectFeature.State()
     #expect(empty.hostChoice == .newHost)
     #expect(empty.isNewHost)
   }
@@ -28,9 +28,9 @@ struct RemoteConnectionFeatureTests {
   @Test
   func choosingAHostClearsTheError() async {
     let store = TestStore(
-      initialState: RemoteConnectionFeature.State(hosts: [Self.box, Self.mini], errorMessage: "old")
+      initialState: RemoteProjectFeature.State(hosts: [Self.box, Self.mini], errorMessage: "old")
     ) {
-      RemoteConnectionFeature()
+      RemoteProjectFeature()
     }
     await store.send(.hostChoiceChanged(.existing(Self.mini.id))) {
       $0.hostChoice = .existing(Self.mini.id)
@@ -43,8 +43,8 @@ struct RemoteConnectionFeatureTests {
 
   @Test
   func newHostFieldsEditTheDraft() async {
-    let store = TestStore(initialState: RemoteConnectionFeature.State()) {
-      RemoteConnectionFeature()
+    let store = TestStore(initialState: RemoteProjectFeature.State()) {
+      RemoteProjectFeature()
     }
     await store.send(.addressChanged("example.com")) {
       $0.newHost.address = "example.com"
@@ -73,8 +73,8 @@ struct RemoteConnectionFeatureTests {
 
   @Test
   func connectRejectsEmptyNewHost() async {
-    let store = TestStore(initialState: RemoteConnectionFeature.State(pathDraft: "/srv/app")) {
-      RemoteConnectionFeature()
+    let store = TestStore(initialState: RemoteProjectFeature.State(pathDraft: "/srv/app")) {
+      RemoteProjectFeature()
     }
     // No host → validation error, no effect (no SSH probe launched).
     await store.send(.connectButtonTapped) {
@@ -84,8 +84,8 @@ struct RemoteConnectionFeatureTests {
 
   @Test
   func connectRejectsEmptyPath() async {
-    let store = TestStore(initialState: RemoteConnectionFeature.State(hosts: [Self.box])) {
-      RemoteConnectionFeature()
+    let store = TestStore(initialState: RemoteProjectFeature.State(hosts: [Self.box])) {
+      RemoteProjectFeature()
     }
     await store.send(.connectButtonTapped) {
       $0.errorMessage = "Enter the remote path to open."
@@ -95,11 +95,11 @@ struct RemoteConnectionFeatureTests {
   @Test
   func connectRejectsOutOfRangePort() async {
     let store = TestStore(
-      initialState: RemoteConnectionFeature.State(
+      initialState: RemoteProjectFeature.State(
         newHost: HostDraft(address: "example.com", port: "70000"), pathDraft: "/srv/app"
       )
     ) {
-      RemoteConnectionFeature()
+      RemoteProjectFeature()
     }
     await store.send(.connectButtonTapped) {
       $0.errorMessage = "Port 70000 is not valid. Enter a number from 1 to 65535."
@@ -108,18 +108,18 @@ struct RemoteConnectionFeatureTests {
 
   @Test
   func selectedHostIsThePickedRecord() throws {
-    let state = RemoteConnectionFeature.State(
+    let state = RemoteProjectFeature.State(
       hosts: [Self.box, Self.mini], hostChoice: .existing(Self.mini.id)
     )
     #expect(try state.selectedHost() == Self.mini)
-    let stale = RemoteConnectionFeature.State(hosts: [Self.box], hostChoice: .existing(HostID()))
+    let stale = RemoteProjectFeature.State(hosts: [Self.box], hostChoice: .existing(HostID()))
     #expect(throws: HostRecordError.self) { try stale.selectedHost() }
   }
 
   @Test
   func newHostEqualToAnExistingHostUsesThatHost() throws {
     // Same (Host, Username, Port) as `box`; the Name is not part of identity.
-    let state = RemoteConnectionFeature.State(
+    let state = RemoteProjectFeature.State(
       hosts: [Self.box],
       hostChoice: .newHost,
       newHost: HostDraft(address: " box.local ", username: "alice", port: "2222", name: "Other")
@@ -129,7 +129,7 @@ struct RemoteConnectionFeatureTests {
 
   @Test
   func newHostMakesANewRecordWithItsName() throws {
-    let state = RemoteConnectionFeature.State(
+    let state = RemoteProjectFeature.State(
       hosts: [Self.box],
       hostChoice: .newHost,
       newHost: HostDraft(address: "new.local", username: "", port: "", name: "New", icon: .macStudio)
@@ -144,12 +144,12 @@ struct RemoteConnectionFeatureTests {
   }
 
   @Test
-  func editingSeedsHostChoiceAndPathFromServerProject() {
+  func editingSeedsHostChoiceAndPathFromRemoteProject() {
     let project = Project(
       name: "app", rootPath: "/srv/app", gitRoot: "/srv/app",
       hostID: Self.mini.id, remoteHost: Self.mini.endpoint
     )
-    let seeded = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
+    let seeded = RemoteProjectFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
     #expect(seeded?.mode == .edit(projectID: project.id))
     #expect(seeded?.isEditing == true)
     #expect(seeded?.hostChoice == .existing(Self.mini.id))
@@ -157,14 +157,14 @@ struct RemoteConnectionFeatureTests {
     #expect(seeded?.pathDraft == "/srv/app")
     // A local project has no connection to edit.
     let local = Project(name: "local", rootPath: "/tmp/x")
-    #expect(RemoteConnectionFeature.State.editing(project: local, hosts: [Self.box]) == nil)
+    #expect(RemoteProjectFeature.State.editing(project: local, hosts: [Self.box]) == nil)
   }
 
   @Test
   func editingAProjectWithoutAHostRecordSeedsNewHostFields() {
     let endpoint = RemoteHost(alias: "legacy.local", username: "bob", port: 2200)
     let project = Project(name: "app", rootPath: "/srv/app", remoteHost: endpoint)
-    let seeded = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box])
+    let seeded = RemoteProjectFeature.State.editing(project: project, hosts: [Self.box])
     #expect(seeded?.hostChoice == .newHost)
     #expect(seeded?.newHost == HostDraft(address: "legacy.local", username: "bob", port: "2200"))
   }
@@ -172,9 +172,9 @@ struct RemoteConnectionFeatureTests {
   @Test
   func connectSucceededDelegatesConnected() async {
     let store = TestStore(
-      initialState: RemoteConnectionFeature.State(hosts: [Self.box], isConnecting: true)
+      initialState: RemoteProjectFeature.State(hosts: [Self.box], isConnecting: true)
     ) {
-      RemoteConnectionFeature()
+      RemoteProjectFeature()
     }
     await store.send(.connectSucceeded(host: Self.box, remotePath: "/srv/app", gitRoot: "/srv/app")) {
       $0.isConnecting = false
@@ -186,7 +186,7 @@ struct RemoteConnectionFeatureTests {
 /// The sidebar side of the picker flows: what `HierarchySidebarFeature` writes
 /// through `HierarchyClient` when the sheet opens and when it connects.
 @MainActor
-struct RemoteConnectionSidebarFlowTests {
+struct RemoteProjectSidebarFlowTests {
   private static let box = HostRecord(address: "box.local", username: "alice", port: 2222, name: "Box")
   private static let mini = HostRecord(address: "mini.local")
 
@@ -206,11 +206,11 @@ struct RemoteConnectionSidebarFlowTests {
     } withDependencies: {
       fake.install(into: &$0)
       $0.hierarchyClient.snapshot = { fake.catalog }
-      $0.hierarchyClient.addServerProject = { name, endpoint, path, _ in
+      $0.hierarchyClient.addRemoteProject = { name, endpoint, path, _ in
         recorder.added.append((name, endpoint, path))
         return ProjectID()
       }
-      $0.hierarchyClient.updateServerProject = { projectID, endpoint, path, _ in
+      $0.hierarchyClient.updateRemoteProject = { projectID, endpoint, path, _ in
         recorder.updated.append((projectID, endpoint, path))
       }
     }
@@ -219,11 +219,11 @@ struct RemoteConnectionSidebarFlowTests {
   }
 
   @Test
-  func connectServerOpensThePickerWithTheHostList() async {
+  func openRemoteProjectOpensThePickerWithTheHostList() async {
     let fake = HostListFake(hosts: [Self.box, Self.mini])
     let store = Self.makeStore(fake, Recorder())
-    await store.send(.connectServerTapped) {
-      $0.remoteConnectionSheet = RemoteConnectionFeature.State(hosts: [Self.box, Self.mini])
+    await store.send(.openRemoteProjectTapped) {
+      $0.remoteProjectSheet = RemoteProjectFeature.State(hosts: [Self.box, Self.mini])
     }
   }
 
@@ -232,12 +232,12 @@ struct RemoteConnectionSidebarFlowTests {
     let fake = HostListFake(hosts: [Self.box])
     let recorder = Recorder()
     let store = Self.makeStore(
-      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box]))
+      fake, recorder, state: .init(remoteProjectSheet: .init(hosts: [Self.box]))
     )
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(fake.catalog.hosts == [Self.box])
     #expect(recorder.added.count == 1)
@@ -255,30 +255,30 @@ struct RemoteConnectionSidebarFlowTests {
     let fake = HostListFake(hosts: [Self.box], projects: [existing])
     let recorder = Recorder()
     let store = Self.makeStore(
-      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box]))
+      fake, recorder, state: .init(remoteProjectSheet: .init(hosts: [Self.box]))
     )
     // The remote form ignores a trailing slash.
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app/", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app/", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     await store.receive(\.delegate.revealExistingProject, existing.id)
     #expect(recorder.added.isEmpty)
   }
 
   @Test
-  func connectToAPathThatOnlyALocalProjectHasAddsAServerProject() async {
+  func connectToAPathThatOnlyALocalProjectHasAddsARemoteProject() async {
     let local = Project(name: "app", rootPath: "/srv/app")
     let fake = HostListFake(hosts: [Self.box], projects: [local])
     let recorder = Recorder()
     let store = Self.makeStore(
-      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box]))
+      fake, recorder, state: .init(remoteProjectSheet: .init(hosts: [Self.box]))
     )
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(recorder.added.count == 1)
     #expect(recorder.added.first?.endpoint == Self.box.endpoint)
@@ -286,19 +286,19 @@ struct RemoteConnectionSidebarFlowTests {
   }
 
   @Test
-  func connectToTheSamePathOnAnotherHostAddsAServerProject() async {
+  func connectToTheSamePathOnAnotherHostAddsARemoteProject() async {
     let onMini = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.mini.id, remoteHost: Self.mini.endpoint
     )
     let fake = HostListFake(hosts: [Self.box, Self.mini], projects: [onMini])
     let recorder = Recorder()
     let store = Self.makeStore(
-      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box, Self.mini]))
+      fake, recorder, state: .init(remoteProjectSheet: .init(hosts: [Self.box, Self.mini]))
     )
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(recorder.added.count == 1)
   }
@@ -313,11 +313,11 @@ struct RemoteConnectionSidebarFlowTests {
     )
     let fake = HostListFake(hosts: [Self.box], projects: [existing])
     let recorder = Recorder()
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: .init()))
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: .init()))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: entered, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: entered, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     await store.receive(\.delegate.revealExistingProject, existing.id)
     #expect(recorder.added.isEmpty)
@@ -325,7 +325,7 @@ struct RemoteConnectionSidebarFlowTests {
   }
 
   @Test
-  func editConnectionWithANewHostThatSettingsAddedMeanwhileShowsTheConflict() async {
+  func editRemoteProjectWithANewHostThatSettingsAddedMeanwhileShowsTheConflict() async {
     let entered = HostRecord(address: Self.box.address, username: Self.box.username, port: Self.box.port)
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.mini.id, remoteHost: Self.mini.endpoint
@@ -335,20 +335,20 @@ struct RemoteConnectionSidebarFlowTests {
     )
     let fake = HostListFake(hosts: [Self.mini, Self.box], projects: [project, other])
     let recorder = Recorder()
-    var sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.mini])
+    var sheet = RemoteProjectFeature.State.editing(project: project, hosts: [Self.mini])
     sheet?.hostChoice = .newHost
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: sheet))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: entered, remotePath: "/srv/web", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: entered, remotePath: "/srv/web", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet?.errorMessage =
-        RemoteConnectionFeature.State.duplicateProjectMessage(name: "web", host: entered)
+      $0.remoteProjectSheet?.errorMessage =
+        RemoteProjectFeature.State.duplicateProjectMessage(name: "web", host: entered)
     }
     #expect(recorder.updated.isEmpty)
   }
 
   @Test
-  func editConnectionToAnotherProjectsHostAndPathShowsAnErrorAndKeepsTheProject() async {
+  func editRemoteProjectToAnotherProjectsHostAndPathShowsAnErrorAndKeepsTheProject() async {
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
     )
@@ -357,22 +357,22 @@ struct RemoteConnectionSidebarFlowTests {
     )
     let fake = HostListFake(hosts: [Self.box, Self.mini], projects: [project, other])
     let recorder = Recorder()
-    var sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
+    var sheet = RemoteProjectFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
     sheet?.hostChoice = .existing(Self.mini.id)
     sheet?.pathDraft = "/srv/web/"
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: sheet))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/web", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/web", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet?.errorMessage =
-        RemoteConnectionFeature.State.duplicateProjectMessage(name: "web", host: Self.mini)
+      $0.remoteProjectSheet?.errorMessage =
+        RemoteProjectFeature.State.duplicateProjectMessage(name: "web", host: Self.mini)
     }
-    #expect(store.state.remoteConnectionSheet != nil)
+    #expect(store.state.remoteProjectSheet != nil)
     #expect(recorder.updated.isEmpty)
   }
 
   @Test
-  func editConnectionThatKeepsTheProjectsOwnHostAndPathSaves() async {
+  func editRemoteProjectThatKeepsTheProjectsOwnHostAndPathSaves() async {
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
     )
@@ -382,30 +382,30 @@ struct RemoteConnectionSidebarFlowTests {
     )
     let fake = HostListFake(hosts: [Self.box], projects: [duplicate, project])
     let recorder = Recorder()
-    let sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box])
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    let sheet = RemoteProjectFeature.State.editing(project: project, hosts: [Self.box])
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: sheet))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(recorder.updated.first?.projectID == project.id)
   }
 
   @Test
-  func editConnectionToAFreePathSaves() async {
+  func editRemoteProjectToAFreePathSaves() async {
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
     )
     let local = Project(name: "web", rootPath: "/srv/web")
     let fake = HostListFake(hosts: [Self.box], projects: [project, local])
     let recorder = Recorder()
-    let sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box])
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    let sheet = RemoteProjectFeature.State.editing(project: project, hosts: [Self.box])
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: sheet))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/web", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/web", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(recorder.updated.first?.projectID == project.id)
     #expect(recorder.updated.first?.path == "/srv/web")
@@ -416,11 +416,11 @@ struct RemoteConnectionSidebarFlowTests {
     let fake = HostListFake(hosts: [Self.box])
     let recorder = Recorder()
     let newHost = HostRecord(address: "new.local", name: "New")
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: .init()))
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: .init()))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: newHost, remotePath: "/srv/web", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: newHost, remotePath: "/srv/web", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(fake.catalog.hosts == [Self.box, newHost])
     #expect(recorder.added.first?.name == "web")
@@ -437,15 +437,15 @@ struct RemoteConnectionSidebarFlowTests {
     let fake = HostListFake(hosts: [edited])
     let recorder = Recorder()
     let store = Self.makeStore(
-      fake, recorder, state: .init(remoteConnectionSheet: .init(hosts: [Self.box]))
+      fake, recorder, state: .init(remoteProjectSheet: .init(hosts: [Self.box]))
     )
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet?.hosts = [edited]
-      $0.remoteConnectionSheet?.errorMessage = RemoteConnectionFeature.State.hostChangedMessage
+      $0.remoteProjectSheet?.hosts = [edited]
+      $0.remoteProjectSheet?.errorMessage = RemoteProjectFeature.State.hostChangedMessage
     }
-    #expect(store.state.remoteConnectionSheet?.hostChoice == .existing(Self.box.id))
+    #expect(store.state.remoteProjectSheet?.hostChoice == .existing(Self.box.id))
     #expect(recorder.added.isEmpty)
     #expect(recorder.updated.isEmpty)
     #expect(fake.catalog.hosts == [edited])
@@ -457,14 +457,14 @@ struct RemoteConnectionSidebarFlowTests {
     let recorder = Recorder()
     let store = Self.makeStore(
       fake, recorder,
-      state: .init(remoteConnectionSheet: .init(hosts: [Self.box, Self.mini]))
+      state: .init(remoteProjectSheet: .init(hosts: [Self.box, Self.mini]))
     )
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.box, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet?.hosts = [Self.mini]
-      $0.remoteConnectionSheet?.hostChoice = .existing(Self.mini.id)
-      $0.remoteConnectionSheet?.errorMessage = RemoteConnectionFeature.State.hostChangedMessage
+      $0.remoteProjectSheet?.hosts = [Self.mini]
+      $0.remoteProjectSheet?.hostChoice = .existing(Self.mini.id)
+      $0.remoteProjectSheet?.errorMessage = RemoteProjectFeature.State.hostChangedMessage
     }
     // The deleted Host is not added back.
     #expect(fake.catalog.hosts == [Self.mini])
@@ -472,7 +472,7 @@ struct RemoteConnectionSidebarFlowTests {
   }
 
   @Test
-  func editConnectionDoesNotSaveWhenTheHostChangedWhileConnecting() async {
+  func editRemoteProjectDoesNotSaveWhenTheHostChangedWhileConnecting() async {
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
     )
@@ -480,39 +480,39 @@ struct RemoteConnectionSidebarFlowTests {
     edited.port = 2200
     let fake = HostListFake(hosts: [Self.box, edited], projects: [project])
     let recorder = Recorder()
-    let sheet = RemoteConnectionFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
-    let store = Self.makeStore(fake, recorder, state: .init(remoteConnectionSheet: sheet))
+    let sheet = RemoteProjectFeature.State.editing(project: project, hosts: [Self.box, Self.mini])
+    let store = Self.makeStore(fake, recorder, state: .init(remoteProjectSheet: sheet))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet?.hosts = [Self.box, edited]
-      $0.remoteConnectionSheet?.errorMessage = RemoteConnectionFeature.State.hostChangedMessage
+      $0.remoteProjectSheet?.hosts = [Self.box, edited]
+      $0.remoteProjectSheet?.errorMessage = RemoteProjectFeature.State.hostChangedMessage
     }
     #expect(recorder.updated.isEmpty)
   }
 
   @Test
-  func editConnectionMovesTheProjectToAnotherHost() async {
+  func editRemoteProjectMovesTheProjectToAnotherHost() async {
     let project = Project(
       name: "app", rootPath: "/srv/app", hostID: Self.box.id, remoteHost: Self.box.endpoint
     )
     let fake = HostListFake(hosts: [Self.box, Self.mini], projects: [project])
     let recorder = Recorder()
     let store = Self.makeStore(fake, recorder)
-    await store.send(.projectEditConnectionTapped(projectID: project.id)) {
-      $0.remoteConnectionSheet = .editing(project: project, hosts: [Self.box, Self.mini])
+    await store.send(.editRemoteProjectTapped(projectID: project.id)) {
+      $0.remoteProjectSheet = .editing(project: project, hosts: [Self.box, Self.mini])
     }
-    #expect(store.state.remoteConnectionSheet?.hostChoice == .existing(Self.box.id))
-    await store.send(.remoteConnectionSheet(.hostChoiceChanged(.existing(Self.mini.id))))
+    #expect(store.state.remoteProjectSheet?.hostChoice == .existing(Self.box.id))
+    await store.send(.remoteProjectSheet(.hostChoiceChanged(.existing(Self.mini.id))))
     await store.send(
-      .remoteConnectionSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/app", gitRoot: nil)))
+      .remoteProjectSheet(.delegate(.connected(host: Self.mini, remotePath: "/srv/app", gitRoot: nil)))
     ) {
-      $0.remoteConnectionSheet = nil
+      $0.remoteProjectSheet = nil
     }
     #expect(recorder.updated.count == 1)
     #expect(recorder.updated.first?.projectID == project.id)
     #expect(recorder.updated.first?.endpoint == Self.mini.endpoint)
-    // Edit Connection never changes a Host's fields.
+    // Edit Remote Project never changes a Host's fields.
     #expect(fake.catalog.hosts == [Self.box, Self.mini])
   }
 }

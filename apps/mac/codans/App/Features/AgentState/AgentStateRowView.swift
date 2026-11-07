@@ -209,7 +209,7 @@ struct AgentStateRowView: View {
     }
   }
 
-  /// Server-project marker after the project name. Empty for local projects.
+  /// Remote Project marker after the project name. Empty for local projects.
   /// `.small` image scale keeps the wide glyph proportionate to the
   /// caption2-sized project text.
   @ViewBuilder
@@ -220,7 +220,7 @@ struct AgentStateRowView: View {
         .imageScale(.small)
         .foregroundStyle(.secondary)
         .help(authority)
-        .accessibilityLabel("Remote server \(authority)")
+        .accessibilityLabel("Remote host \(authority)")
     }
   }
 

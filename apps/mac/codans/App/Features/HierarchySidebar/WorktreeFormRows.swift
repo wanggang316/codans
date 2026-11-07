@@ -104,7 +104,7 @@ struct WorktreeOptionRows: View {
         set: { form.send(.fetchOriginToggled($0)) },
       ),
     )
-    // Copying is a local streaming-create capability; a server project
+    // Copying is a local streaming-create capability; a Remote Project
     // runs plain `git worktree add` on the host, so the toggles would be
     // silent no-ops there.
     if !form.isRemote {

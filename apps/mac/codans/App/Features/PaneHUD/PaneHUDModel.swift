@@ -49,7 +49,7 @@ nonisolated struct PaneHUDModel: Equatable, Sendable {
   /// the refusal up front instead of opening the panel and failing.
   private static func handOffBlockedReason(project: Project, agent: AgentKind?) -> String? {
     if project.remoteHost != nil {
-      return "Hand off is not available for Server projects"
+      return "Hand off is not available for remote projects"
     }
     if agent == nil {
       return "No agent detected in this pane"

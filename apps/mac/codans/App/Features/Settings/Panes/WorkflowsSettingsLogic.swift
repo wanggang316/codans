@@ -86,7 +86,7 @@ nonisolated enum WorkflowsSettingsLogic {
   }
 
   /// Local git projects eligible to show a repository scope section:
-  /// git-backed and local (excludes Server projects, whose `.codans/`
+  /// git-backed and local (excludes Remote Projects, whose `.codans/`
   /// lives on a remote host, and workspace roots, which are plain folders),
   /// with a main checkout that is not archived.
   static func eligibleRepositoryProjects(_ projects: [Project]) -> [Project] {

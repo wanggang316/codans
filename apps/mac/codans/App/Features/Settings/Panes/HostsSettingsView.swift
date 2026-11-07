@@ -7,7 +7,7 @@ import SwiftUI
 /// Projects use the Host, and the row shows how many.
 ///
 /// Reads come from `@Environment(HierarchyManager.self)` so a Host added from
-/// Connect to Server shows at once; writes go through `HostsSettingsFeature`.
+/// Open Remote Project shows at once; writes go through `HostsSettingsFeature`.
 struct HostsSettingsView: View {
   @Bindable var store: StoreOf<HostsSettingsFeature>
 
@@ -26,7 +26,7 @@ struct HostsSettingsView: View {
             .foregroundStyle(.red)
         }
         if hosts.isEmpty {
-          Text("No hosts yet. Add one here, or connect to a server.")
+          Text("No hosts yet. Add one here, or open a remote project.")
             .foregroundStyle(.secondary)
         }
         ForEach(hosts) { host in
@@ -40,7 +40,7 @@ struct HostsSettingsView: View {
         .buttonStyle(.borderless)
       } footer: {
         Text(
-          "Servers that Server projects connect to. A change to a host applies to all its "
+          "Machines that remote projects run on. A change to a host applies to all its "
             + "projects. A host that projects use cannot be deleted."
         )
       }

@@ -1,6 +1,6 @@
-# Design Doc: Remote SSH "Server" Projects
+# Design Doc: Remote Projects over SSH
 
-**Status:** Implemented (discovery, terminal, status parity, worktree create/remove, edit connection)
+**Status:** Implemented (discovery, terminal, status parity, worktree create/remove, edit remote project)
 **Author:** Gump
 **Date:** 2026-07-24
 
@@ -11,7 +11,7 @@ hierarchy. Every git operation shells out to `/usr/bin/git` (or the bundled `wt`
 script) with a local `cwd`, and every Pane spawns `zmx attach <uuid>` with a
 local `working_directory` handed to libghostty.
 
-A **Server** project adds a new source for that hierarchy: the user enters an SSH
+A **Remote Project** adds a new source for that hierarchy: the user enters an SSH
 host / port / username / remote path; codans connects over SSH, lands in that
 path, and from then on Worktree/Tab/Pane management is the same as local — the
 worktree list is discovered over SSH and each Pane's shell runs on the host.
@@ -23,7 +23,7 @@ codans never collects or stores a password or key.
 
 **Goals**
 
-- A `.server` project type: connect over SSH, browse the remote git worktree
+- A Remote Project kind (`ProjectKind.remote`): connect over SSH, browse the remote git worktree
   list, and open persistent terminals that land in the remote worktree.
 - Terminal persistence across app quit *and* connection drops: a local `zmx`
   session wraps an SSH reconnect loop, with an optional host-side `zmx` session
@@ -44,13 +44,13 @@ codans never collects or stores a password or key.
   removal path routes `git worktree remove --force` + branch cleanup over SSH
   ("is not a working tree" still maps to idempotent success). No local trash
   relocation on a host.
-- **Connect to Server** picks a Host from the Host list, or "New Host…"
+- **Open Remote Project** picks a Host from the Host list, or "New Host…"
   (Host, Username, Port, Name, Icon), which always adds a record to the Host list.
   Fields equal to an existing Host use that Host. When the Host and the
   resolved path already are a Project, the sheet closes and selects that
   Project; nothing is added (ADR 0006). A local Project with the same path is
   not a conflict.
-- **Edit Connection** on a Server project changes its Host choice and path,
+- **Edit Remote Project** on a Remote Project changes its Host choice and path,
   never the Host fields, re-validated like an add; a path change reseeds the
   worktree rows, a Host-only change keeps them. A Host and path equal to
   another Project is an error in the sheet, and the change is not applied.
@@ -83,15 +83,15 @@ model:
 - `Catalog.hosts: [HostRecord]` — the Host list (ADR 0003). A `HostRecord` is
   `{ id, address, username?, port?, name?, icon? }`; no two records share
   (address, username, port), with no port equal to 22.
-- `Project.hostID: HostID?` — non-nil ⇒ a Server project, persisted in place of
+- `Project.hostID: HostID?` — non-nil ⇒ a Remote Project, persisted in place of
   host fields. `Project.remoteHost: RemoteHost?` is the endpoint resolved from
   the Host record (`Catalog.resolveHostReferences`), so runtime code reads the
   connection without a lookup. `RemoteHost` is `{ alias, username?, port? }`
   and derives the `ssh` destination + option argv. It carries no secret.
-- For a Server project, `rootPath` / `gitRoot` / each `Worktree.path` hold
+- For a Remote Project, `rootPath` / `gitRoot` / each `Worktree.path` hold
   **remote** path strings. The existing `worktree.path → workingDirectory` flow
   is preserved; the SSH layer applies `cd` on the remote.
-- `ProjectKind` derives `.server` from `remoteHost != nil`.
+- `ProjectKind` derives `.remote` from `remoteHost != nil`.
 
 The single hard rule: **local-filesystem operations are gated on
 `remoteHost == nil`.** `FileManager.fileExists`, `URL(fileURLWithPath:)`, and
@@ -102,8 +102,8 @@ for a remote path — remote paths use a string-only normalization
 ### System Context Diagram
 
 ```
-  ┌────────────┐   RemoteConnectionSheet    ┌──────────────────┐
-  │   User      │──────── host/path ───────→│  addServerProject │
+  ┌────────────┐   RemoteProjectSheet       ┌──────────────────┐
+  │   User      │──────── host/path ───────→│  addRemoteProject │
   └────────────┘                            └────────┬─────────┘
                                                       │ Project(remoteHost:…)
                              reconcile                ▼
@@ -161,11 +161,11 @@ the same `remoteHostResolver` seam, so the worktree-management surface
 invocation through one `invoke(arguments:cwd:)`, parameterized by a
 `resolveRemoteHost: (URL) async -> RemoteHost?` closure, backed by
 `HierarchyManager.remoteHost(forGitURL:)` (`Catalog.gitRemoteHost`). A local
-Project and a Server project can have the same path (ADR 0006), so a caller
+Project and a Remote Project can have the same path (ADR 0006), so a caller
 that acts on a Project builds the URL with `Project.gitURL(_:)`: a file URL on
 This Mac, a `codans-host://<host-id>/<path>` URL on a Host. A Host-form URL
 runs on that Host. A plain path runs on This Mac when a Project on This Mac
-owns it; otherwise it runs on the Server project that owns it (exact string
+owns it; otherwise it runs on the Remote Project that owns it (exact string
 match, never the local symlink resolver). When the call runs on a Host, the
 invocation becomes `ssh <controlopts> host 'cd <repo> &&
 git …'` under the host's login shell (bare `git`, PATH-resolved); otherwise it
@@ -181,17 +181,17 @@ terminal (commit/push in a pane refreshes the chip immediately).
 
 ### Data Storage
 
-`catalog.json` v5 stores the Host list as `hosts`, and each Server project
-stores only `hostID`. `HierarchyManager` is the single writer: Connect to
-Server and Edit Connection reuse the Host whose fields equal the entered ones,
+`catalog.json` v5 stores the Host list as `hosts`, and each Remote Project
+stores only `hostID`. `HierarchyManager` is the single writer: Open
+Remote Project and Edit Remote Project reuse the Host whose fields equal the entered ones,
 else add a record (`Catalog.hostID(for:)`). Edit and delete of a Host go
 through `HierarchyClient`; delete is refused while a Project refers to it.
 
 `CatalogMigrationV4ToV5` moves the `remoteHost` fields of a v4 catalog into
 the Host list: each distinct (address, username, port) becomes one record, in
-Project order. A Server project without a valid `hostID` (a connection restored
+Project order. A Remote Project without a valid `hostID` (a connection restored
 from the sidecar) gets a record the same way on every load
-(`Catalog.adoptHostReferences`). A Server project's
+(`Catalog.adoptHostReferences`). A Remote Project's
 `rootPath`/`gitRoot`/worktree paths are stored verbatim (remote strings), never
 passed through the local canonicalizer.
 
@@ -248,14 +248,14 @@ whenever one is installed; the header button hides when none is.
 ### Component Boundaries
 
 - `CodansCore` — `RemoteHost`, `HostRecord`, `Catalog.hosts` operations,
-  `Project.hostID` / `remoteHost`, `ProjectKind.server`
+  `Project.hostID` / `remoteHost`, `ProjectKind.remote`
   (pure domain, no SSH knowledge).
 - `Process/` — `SSHCommand`, `RemoteGitService`, `RemoteReachabilityProbe`
   (pure builders + git-over-SSH; no UI, no catalog).
 - `Runtime/` — `HierarchyClient.reconcileRemote` (discovery), `ProjectReconciler`
   (reachability), `TerminalEngine.ensureSurface` (remote surface),
-  `HierarchyManager.addServerProject` / `normalizeRemotePath`.
-- `App/Features/HierarchySidebar/` — `RemoteConnectionFeature` + Sheet, the
+  `HierarchyManager.addRemoteProject` / `normalizeRemotePath`.
+- `App/Features/HierarchySidebar/` — `RemoteProjectFeature` + Sheet, the
   Add Project menu item, and the local-affordance guards.
 
 ## Alternatives Considered
@@ -280,13 +280,13 @@ whenever one is installed; the header button hides when none is.
 ## Cross-Cutting Concerns
 
 - **Security / auth.** No secret is ever collected or stored. The
-  `RemoteConnectionSheet` states auth uses the SSH config + agent. Probes use
+  `RemoteProjectSheet` states auth uses the SSH config + agent. Probes use
   `BatchMode=yes` so they fail fast rather than hanging on a prompt; the
   interactive terminal allows a first-connect prompt (no BatchMode).
 - **Connection reuse.** A shared `ControlMaster` multiplexes N git probes plus
   the terminal onto one connection — one auth per host, no per-call handshake.
 - **Testing.** `SSHCommand`, `RemoteSurfaceCommand`, and `RemoteGitService`'s
-  parser/normalization are pure and unit-tested; `RemoteConnectionFeature`'s
+  parser/normalization are pure and unit-tested; `RemoteProjectFeature`'s
   validation paths are covered by reducer tests. The live SSH path requires a
   reachable host and is verified manually.
 - **Guards.** Reveal in Finder is hidden from remote worktree context menus,

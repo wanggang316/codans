@@ -379,10 +379,10 @@ struct TabBarFeatureTests {
     #expect(split.target == .newTab)
   }
 
-  /// A Server-project pane's shell already runs on the host, so every
+  /// A Remote Project pane's shell already runs on the host, so every
   /// placement sends the same plain resume command through the pipeline.
   @Test
-  func resumeInAServerProjectRunsTheSameCommandInEveryPlacement() async throws {
+  func resumeInARemoteProjectRunsTheSameCommandInEveryPlacement() async throws {
     let fixture = ResumeFixture(remote: true)
     for placement in [AgentResumePlacement.newTab, .inPlace, .split(.right)] {
       let (script, _, _) = try #require(await resume(placement, fixture: fixture))

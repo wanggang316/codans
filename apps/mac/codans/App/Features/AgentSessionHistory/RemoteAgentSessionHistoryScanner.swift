@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// Agent-session history for a **Server-project** worktree: the agent CLIs'
+/// Agent-session history for a **Remote Project** worktree: the agent CLIs'
 /// session stores live in the HOST's home directory, so the local scanner
 /// finds nothing. This scanner gathers the same facts over SSH — one call per
 /// agent store, riding the shared ControlMaster — and reuses the local

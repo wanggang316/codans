@@ -53,7 +53,7 @@ actor ProjectReconciler {
 
     await client.setProjectLoadState(projectID, .loading)
 
-    // Health check. A remote path can't be stat'd locally, so a Server project
+    // Health check. A remote path can't be stat'd locally, so a Remote Project
     // substitutes SSH probes for the local `FileManager.fileExists`, with the
     // two failure modes kept distinct so the row names the actual problem:
     // host unreachable ("Cannot reach …") vs host answered but the configured

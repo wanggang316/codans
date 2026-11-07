@@ -63,8 +63,8 @@ struct ProjectGeneralSettingsView: View {
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
       // construction. Its own section lists its source projects.
       return [.general, .workspace, .editor, .environment]
-    case .gitRepo, .server:
-      // Server projects manage worktrees over SSH just like a local git repo,
+    case .gitRepo, .remote:
+      // Remote Projects manage worktrees over SSH just like a local git repo,
       // so they surface the full section set — keeping remote management
       // consistent with local.
       return Set(SectionID.allCases).subtracting([.workspace])
@@ -254,23 +254,23 @@ struct ProjectGeneralSettingsView: View {
     }
 
     // Server (remote) connection facts, read-only: the connection is edited
-    // through the sidebar's "Edit Connection…" (which re-validates over SSH),
+    // through the sidebar's "Edit Remote Project…" (which re-validates over SSH),
     // not through free-form fields here.
     if let host = projectRemoteHost {
-      Section("Server") {
+      Section("Remote") {
         LabeledContent("Host", value: host.alias)
         LabeledContent("User", value: host.username ?? "default")
         LabeledContent("Port", value: host.port.map(String.init) ?? "22")
         LabeledContent("Remote path", value: projectRemotePath)
           .truncationMode(.middle)
-        Text("Edit via the project's ⋯ menu → Edit Connection…. Authentication uses your SSH config and agent.")
+        Text("Edit via the project's ⋯ menu → Edit Remote Project…. Authentication uses your SSH config and agent.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
   }
 
-  /// The SSH host for a Server project, `nil` for local ones — gates the
+  /// The SSH host for a Remote Project, `nil` for local ones — gates the
   /// read-only Server section above.
   private var projectRemoteHost: RemoteHost? {
     hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.remoteHost
@@ -420,7 +420,7 @@ struct ProjectGeneralSettingsView: View {
   }
 
   /// The open project on This Mac a reference points at, when its
-  /// repository is one. A Server project with the same path never matches.
+  /// repository is one. A Remote Project with the same path never matches.
   private func sourceProject(for gitRoot: String) -> Project? {
     hierarchyManager.catalog.localProject(gitRoot: gitRoot, canonicalize: HierarchyManager.canonicalPath)
   }

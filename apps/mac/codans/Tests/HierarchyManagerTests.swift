@@ -400,9 +400,9 @@ struct HierarchyManagerTests {
   }
 
   @Test
-  func isPathRegisteredIgnoresServerProjectWithSamePath() {
+  func isPathRegisteredIgnoresRemoteProjectWithSamePath() {
     let path = HierarchyManager.canonicalPath("/tmp/p")
-    _ = manager.addServerProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
+    _ = manager.addRemoteProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
     #expect(manager.isPathRegistered(canonical: path) == nil)
 
     let localID = manager.addProject(name: "p", rootPath: path)
@@ -410,9 +410,9 @@ struct HierarchyManagerTests {
   }
 
   @Test
-  func projectContainingIgnoresServerProject() {
+  func projectContainingIgnoresRemoteProject() {
     let path = HierarchyManager.canonicalPath("/tmp/p")
-    _ = manager.addServerProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
+    _ = manager.addRemoteProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
     #expect(manager.project(containing: path + "/src") == nil)
   }
 

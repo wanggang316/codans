@@ -5,7 +5,7 @@ import Testing
 @testable import Codans
 
 /// `HierarchyManager` as the single writer of the Host list (ADR 0003):
-/// Connect to Server and Edit Connection reuse a Host with the same fields,
+/// Open Remote Project and Edit Remote Project reuse a Host with the same fields,
 /// and the Host operations keep every reference valid.
 @MainActor
 struct HierarchyManagerHostsTests {
@@ -25,8 +25,8 @@ struct HierarchyManagerHostsTests {
     let named = HostRecord(address: "box.example.com", username: "me", name: "Box")
     try manager.addHost(named)
 
-    let first = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
-    let second = manager.addServerProject(
+    let first = manager.addRemoteProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    let second = manager.addRemoteProject(
       name: "b", remoteHost: RemoteHost(alias: "box.example.com", username: "me", port: 22), rootPath: "/srv/b")
 
     #expect(manager.catalog.hosts == [named])
@@ -39,19 +39,19 @@ struct HierarchyManagerHostsTests {
   @Test
   func connectingWithNewFieldsAddsAHost() {
     let (manager, _, _) = makeManager()
-    let id = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    let id = manager.addRemoteProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
     #expect(manager.catalog.hosts.map(\.endpoint) == [Self.box])
     #expect(manager.catalog.projects.first { $0.id == id }?.hostID == manager.catalog.hosts[0].id)
   }
 
   @Test
-  func editConnectionSwitchesHostAndKeepsTheOldRecord() throws {
+  func editRemoteProjectSwitchesHostAndKeepsTheOldRecord() throws {
     let (manager, _, _) = makeManager()
-    let id = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    let id = manager.addRemoteProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
     let oldHost = try #require(manager.catalog.hosts.first)
     let moved = RemoteHost(alias: "box.example.com", username: "me", port: 2200)
 
-    manager.updateServerProject(projectID: id, remoteHost: moved, rootPath: "/srv/a", gitRoot: nil)
+    manager.updateRemoteProject(projectID: id, remoteHost: moved, rootPath: "/srv/a", gitRoot: nil)
 
     #expect(manager.catalog.hosts.map(\.endpoint) == [Self.box, moved])
     let project = try #require(manager.catalog.projects.first { $0.id == id })
@@ -63,7 +63,7 @@ struct HierarchyManagerHostsTests {
   @Test
   func duplicateAddAndInUseDeleteAreRefused() throws {
     let (manager, _, _) = makeManager()
-    _ = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    _ = manager.addRemoteProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
     let host = try #require(manager.catalog.hosts.first)
 
     #expect(throws: HostRecordError.duplicate(existing: host.id)) {
@@ -76,7 +76,7 @@ struct HierarchyManagerHostsTests {
   @Test
   func editingAHostReachesItsProjectsAndPersists() throws {
     let (manager, store, url) = makeManager()
-    let id = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    let id = manager.addRemoteProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
     var host = try #require(manager.catalog.hosts.first)
     host.name = "Build box"
     host.port = 2222
@@ -100,7 +100,7 @@ struct HierarchyManagerHostsTests {
   }
 
   @Test
-  func inMemoryServerProjectsAreAttachedAtInit() {
+  func inMemoryRemoteProjectsAreAttachedAtInit() {
     let catalog = Catalog(projects: [Project(name: "a", rootPath: "/srv/a", remoteHost: Self.box)])
     let (manager, _, _) = makeManager(catalog: catalog)
     #expect(manager.catalog.hosts.map(\.endpoint) == [Self.box])
@@ -110,7 +110,7 @@ struct HierarchyManagerHostsTests {
   @Test
   func closedHostRowsPersist() throws {
     let (manager, store, url) = makeManager()
-    let id = manager.addServerProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
+    let id = manager.addRemoteProject(name: "a", remoteHost: Self.box, rootPath: "/srv/a")
     let hostID = try #require(manager.catalog.projects.first { $0.id == id }?.hostID)
 
     manager.setSidebarHostExpanded(.host(hostID), isExpanded: false)

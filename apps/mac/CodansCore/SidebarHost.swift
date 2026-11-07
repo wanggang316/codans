@@ -1,7 +1,7 @@
 import Foundation
 
 /// A top-level group of the sidebar (ADR 0002, decision 2): This Mac for
-/// local Projects, or a Host record for Server projects.
+/// local Projects, or a Host record for Remote Projects.
 ///
 /// Encoded as one string, `this-mac` or the Host's UUID, so the collapsed
 /// set in `catalog.json` stays a plain string list.

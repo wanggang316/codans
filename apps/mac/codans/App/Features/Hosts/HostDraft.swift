@@ -2,7 +2,7 @@ import CodansCore
 import Foundation
 
 /// The fields of a Host form (Settings › Hosts editor and the
-/// "New Host…" entry of Connect to Server). `record(id:)` turns them into a
+/// "New Host…" entry of Open Remote Project). `record(id:)` turns them into a
 /// `HostRecord` with the same validation as the Host list (ADR 0003).
 nonisolated struct HostDraft: Equatable, Sendable {
   /// Longest text the Port field keeps. Five digits hold every valid port, so

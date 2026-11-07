@@ -40,7 +40,7 @@ struct HostWireContractTests {
 
     let projects = payload.resolvedProjects
     #expect(projects[1].remoteHost == Self.box.endpoint)
-    #expect(projects[1].kind == .server)
+    #expect(projects[1].kind == .remote)
 
     let hosts = try #require(payload.hosts)
     #expect(IPC.HostRef(project: projects[0], hosts: hosts) == .thisMac)
@@ -50,7 +50,7 @@ struct HostWireContractTests {
   }
 
   /// The `Project` shape of a CLI that predates Host records: it tells a
-  /// Server project by `remoteHost` alone.
+  /// Remote Project by `remoteHost` alone.
   private struct OldCLIProject: Decodable {
     let id: ProjectID
     let remoteHost: RemoteHost?
@@ -61,7 +61,7 @@ struct HostWireContractTests {
   }
 
   @Test
-  func listStillTellsAnOlderCLIWhichProjectsAreServerProjects() throws {
+  func listStillTellsAnOlderCLIWhichProjectsAreRemoteProjects() throws {
     let sent = IPC.ProjectListPayload(projects: Self.catalogProjects(), hosts: [Self.box])
     let data = try JSONEncoder().encode(sent)
 
@@ -95,7 +95,7 @@ struct HostWireContractTests {
 
     #expect(payload.hosts == nil)
     let project = try #require(payload.resolvedProjects.first)
-    #expect(project.kind == .server)
+    #expect(project.kind == .remote)
   }
 
   @Test

@@ -1,7 +1,7 @@
 import Foundation
 
-/// A machine on which Server projects live, kept in the catalog's Host list
-/// (`Catalog.hosts`). Server projects refer to it by `id`, so a change to the
+/// A machine on which Remote Projects live, kept in the catalog's Host list
+/// (`Catalog.hosts`). Remote Projects refer to it by `id`, so a change to the
 /// record applies to all of them. Local Projects have no record: they are on
 /// This Mac. See ADR 0003.
 ///

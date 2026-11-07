@@ -151,11 +151,11 @@ struct WorkflowsSettingsLogicTests {
   func eligibleRepositoryProjectsExcludesNonGitServerAndWorkspaceProjects() {
     let gitProject = Project(name: "repo", rootPath: "/tmp/repo", gitRoot: "/tmp/repo")
     let dirProject = Project(name: "dir", rootPath: "/tmp/dir")
-    let serverProject = Project(
+    let remoteProject = Project(
       name: "srv", rootPath: "/srv/repo", gitRoot: "/srv/repo", remoteHost: RemoteHost(alias: "box"))
     let workspaceProject = Project(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
     let eligible = WorkflowsSettingsLogic.eligibleRepositoryProjects([
-      gitProject, dirProject, serverProject, workspaceProject,
+      gitProject, dirProject, remoteProject, workspaceProject,
     ])
     #expect(eligible.map(\.name) == ["repo"])
   }

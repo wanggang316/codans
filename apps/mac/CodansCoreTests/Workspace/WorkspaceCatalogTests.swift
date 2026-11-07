@@ -21,7 +21,7 @@ struct WorkspaceCatalogTests {
 
     let host = RemoteHost(alias: "example.com", username: "alice", port: 22)
     let remote = Project(name: "ws", rootPath: "/srv/ws", remoteHost: host, isWorkspace: true)
-    #expect(remote.kind == .server)
+    #expect(remote.kind == .remote)
     #expect(ProjectKind.workspace.rawValue == "workspace")
   }
 

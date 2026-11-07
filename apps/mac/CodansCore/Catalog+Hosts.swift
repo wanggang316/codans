@@ -3,7 +3,7 @@ import Foundation
 /// Host list operations. Every change to `hosts` or to a Project's `hostID`
 /// goes through here so two invariants hold:
 /// - no two records share a (Host, Username, Port) identity;
-/// - each Server project's `remoteHost` equals the endpoint of its Host.
+/// - each Remote Project's `remoteHost` equals the endpoint of its Host.
 extension Catalog {
   public func host(id: HostID) -> HostRecord? {
     hosts.first { $0.id == id }
@@ -62,8 +62,8 @@ extension Catalog {
   }
 
   /// The id of the record for `endpoint`: an existing record with the same
-  /// identity, else a new record appended to the list. This is how Connect
-  /// to Server and Edit Connection turn entered fields into a Host.
+  /// identity, else a new record appended to the list. This is how Open
+  /// Remote Project and Edit Remote Project turn entered fields into a Host.
   public mutating func hostID(for endpoint: RemoteHost) throws(HostRecordError) -> HostID {
     let record = try HostRecord(endpoint: endpoint).validated()
     if let existing = hosts.first(where: { $0.identity == record.identity }) {
@@ -89,7 +89,7 @@ extension Catalog {
     }
   }
 
-  /// Give a Host record to every Server project that has host fields but no
+  /// Give a Host record to every Remote Project that has host fields but no
   /// valid `hostID` (a legacy catalog, or a connection restored from the
   /// sidecar). Projects with the same identity share one record; records
   /// are added in Project order. Idempotent. Returns whether anything

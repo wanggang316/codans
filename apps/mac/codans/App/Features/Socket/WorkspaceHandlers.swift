@@ -263,7 +263,7 @@ final class WorkspaceHandlers {
       }
       guard project.remoteHost == nil else {
         throw IPCError.invalidParams(
-          message: "\(project.name) is a Server project; workspaces are local only", path: ["projects", "projectID"])
+          message: "\(project.name) is a remote project; workspaces are local only", path: ["projects", "projectID"])
       }
       guard let gitRoot = project.gitRoot else {
         throw IPCError.invalidParams(

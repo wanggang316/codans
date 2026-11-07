@@ -5,7 +5,7 @@ import SwiftUI
 /// Archived Worktrees, and the Workspace delete sheet — off the sidebar
 /// store. Extracted into a `ViewModifier` (applied as a single
 /// `.modifier(...)`) for the same reason as
-/// `RemoteConnectionSheetPresenter`: inline `.sheet` modifiers with their
+/// `RemoteProjectSheetPresenter`: inline `.sheet` modifiers with their
 /// binding and scope closures push the sidebar's `body` past the Swift
 /// type-checker's inference budget.
 ///

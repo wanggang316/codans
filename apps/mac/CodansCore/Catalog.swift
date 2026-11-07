@@ -12,7 +12,7 @@ public nonisolated struct Catalog: Equatable, Sendable {
   /// The Project order: the sidebar shows Projects in this array order
   /// (ADR 0001).
   public var projects: [Project]
-  /// The Host list: every Host that Server projects can refer to, in the
+  /// The Host list: every Host that Remote Projects can refer to, in the
   /// order of addition. `HierarchyManager` is its only writer; change it
   /// through the `Catalog+Hosts` operations so `Project.remoteHost` stays
   /// resolved. See ADR 0003.
