@@ -1,7 +1,7 @@
 import Foundation
 
-/// Host and full repository path parsed from a git remote URL. The Code Host layer turns
-/// it into a `CodeHostRepository` once the resolver knows which Code Host serves `host`.
+/// Host and full repository path parsed from a git remote URL. The Git Platform layer turns
+/// it into a `GitPlatformRepository` once the resolver knows which Git Platform serves `host`.
 /// A pure parser with fixture-backed tests keeps this free of any remote API.
 ///
 /// Recognised URL shapes (all are emitted by `git remote get-url origin` depending on
@@ -17,7 +17,7 @@ import Foundation
 /// nested groups (ADR 0004 item 12). A trailing `.git` is removed.
 ///
 /// The parser does not filter on the host: GitHub Enterprise Server and self-managed
-/// GitLab expose the same schemes at other hosts. The Code Host resolver decides whether
+/// GitLab expose the same schemes at other hosts. The Git Platform resolver decides whether
 /// the host is one codans supports.
 ///
 /// `nonisolated` because the type + parser are pure value-construction work with no actor

@@ -65,27 +65,27 @@ the same Host cannot. A path from this Mac matches only Projects on This Mac.
 See [ADR 0006](docs/adr/0006-project-identity-is-host-and-path.md).
 _Avoid_: identifying a Project by its name or by its path alone.
 
-## Code hosts
+## Git platforms
 
 These terms define how codans relates a Worktree to a hosted review. See
 [ADR 0004](docs/adr/0004-gitlab-support-through-glab.md).
 
-**Code Host**: The service that hosts the `origin` remote of a source
+**Git Platform**: The service that hosts the `origin` remote of a source
 repository and its reviews. codans supports GitHub and GitLab, on their
-public sites and on self-managed instances. codans calls the CLI of each Code
-Host (`gh`, `glab`).
-A Code Host is not a Host: a Host is a machine on which Projects live. Do not
-shorten Code Host to "host".
-_Avoid_: Forge, Provider, Platform, host.
+public sites and on self-managed instances. codans calls the CLI of each Git
+Platform (`gh`, `glab`).
+A Git Platform is not a Host: a Host is a machine on which Projects live. Do not
+shorten Git Platform to "host" or "platform".
+_Avoid_: Code Host, Forge, Provider, host.
 
-**Code Host alias**: A Settings entry that maps a remote host, as it appears
-in an `origin` URL, to a Code Host kind and the API host that its CLI uses.
-See [ADR 0005](docs/adr/0005-code-host-aliases.md).
+**Git Platform alias**: A Settings entry that maps a remote host, as it appears
+in an `origin` URL, to a Git Platform kind and the API host that its CLI uses.
+See [ADR 0005](docs/adr/0005-git-platform-aliases.md).
 _Avoid_: Host alias, because a Host is a machine.
 
 **Pull Request**: A hosted review that asks to merge a source branch into a
 target branch. It is the provider-neutral concept: a GitHub pull request and a
-GitLab merge request are both Pull Requests. The UI shows the Code Host's own
+GitLab merge request are both Pull Requests. The UI shows the Git Platform's own
 label: "PR" for GitHub and "MR" for GitLab.
 _Avoid_: Merge Request, MR, and Change Request as domain terms. Use Merge
 Request and MR only in GitLab UI text and GitLab API code.

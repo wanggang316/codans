@@ -6,18 +6,18 @@ import CodansCore
 /// ChecksRollupRing + one-line summary.
 ///
 /// Interactions:
-///   * plain click → opens the PR on its Code Host (same dispatch the sidebar
+///   * plain click → opens the PR on its Git Platform (same dispatch the sidebar
 ///     badge uses)
-///   * ⌘-hold → summary text swaps to `Open on <Code Host> <chord>`, hinting the
+///   * ⌘-hold → summary text swaps to `Open on <Git Platform> <chord>`, hinting the
 ///     keyboard binding registered for `.openCurrentPR` (registry default
 ///     ⌘⇧G; respects user override).
 ///   * hover dwell (150 ms) → shows the rich `WorktreePullRequestPopover`,
 ///     same view the sidebar badge uses. Independent of the sidebar's
-///     `CodeHostFeature.popoverTarget` so the two surfaces don't mount a
+///     `GitPlatformFeature.popoverTarget` so the two surfaces don't mount a
 ///     popover at each other's anchor.
 struct StatusPullRequestView: View {
   let snapshot: PullRequestSnapshot
-  let store: StoreOf<CodeHostFeature>
+  let store: StoreOf<GitPlatformFeature>
   /// Active Worktree, needed by the hover popover to address its Pull Request.
   /// When nil (e.g. a hypothetical preview path with no real selection)
   /// the popover is suppressed but click-to-open still works.
@@ -55,11 +55,11 @@ struct StatusPullRequestView: View {
     .buttonStyle(.plain)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(
-      "\(CodeHostLabels.pullRequestSentence(pullRequestName)) \(CodeHostLabels.referencePrefix(codeHostKind))\(snapshot.number)"
+      "\(GitPlatformLabels.pullRequestSentence(pullRequestName)) \(GitPlatformLabels.referencePrefix(gitPlatformKind))\(snapshot.number)"
     )
     .accessibilityValue(Self.summaryText(snapshot: snapshot))
     .accessibilityAddTraits(.isButton)
-    .accessibilityHint("Opens on \(codeHostName)")
+    .accessibilityHint("Opens on \(gitPlatformName)")
     .onHover { hovering in
       isBadgeHovered = hovering
       reconcileHover()
@@ -83,7 +83,7 @@ struct StatusPullRequestView: View {
   /// pixel-identical to the sidebar row badge — same bordered capsule, same state tint,
   /// same red merge-conflict treatment — and the two can't drift apart.
   private var badge: some View {
-    PullRequestNumberPill(snapshot: snapshot, codeHostKind: codeHostKind)
+    PullRequestNumberPill(snapshot: snapshot, gitPlatformKind: gitPlatformKind)
   }
 
   /// `+N −M` patch-size indicator next to the `#NN` badge. Gated on
@@ -111,7 +111,7 @@ struct StatusPullRequestView: View {
   @ViewBuilder
   private var detailText: some View {
     if commandKeyObserver.isCommandHeld {
-      Text("Open on \(codeHostName) \(openPRHintChord)")
+      Text("Open on \(gitPlatformName) \(openPRHintChord)")
         .lineLimit(1)
     } else {
       Text(Self.summaryText(snapshot: snapshot))
@@ -119,18 +119,18 @@ struct StatusPullRequestView: View {
     }
   }
 
-  /// "pull request" / "merge request" for the active Worktree's Code Host.
+  /// "pull request" / "merge request" for the active Worktree's Git Platform.
   private var pullRequestName: String {
-    (codeHostKind ?? .github).pullRequestName
+    (gitPlatformKind ?? .github).pullRequestName
   }
 
-  private var codeHostKind: CodeHostKind? {
-    store.state.codeHostKind(for: worktreeID)
+  private var gitPlatformKind: GitPlatformKind? {
+    store.state.gitPlatformKind(for: worktreeID)
   }
 
-  /// UI name of the active Worktree's Code Host, for the "Open on …" labels.
-  private var codeHostName: String {
-    worktreeID.flatMap { store.state.repository(for: $0)?.kind.displayName } ?? "Code Host"
+  /// UI name of the active Worktree's Git Platform, for the "Open on …" labels.
+  private var gitPlatformName: String {
+    worktreeID.flatMap { store.state.repository(for: $0)?.kind.displayName } ?? "Git Platform"
   }
 
   /// Live chord display for the `.openCurrentPR` registry entry — falls back to the schema

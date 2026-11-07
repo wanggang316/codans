@@ -25,11 +25,11 @@ struct CodansApp: App {
       $0.continuousClock = ContinuousClock()
       $0.suspendingClock = SuspendingClock()
       $0.uuid = .init { UUID() }
-      // CodeHostClient + GitServiceClient have no engine/state dependency, so
+      // GitPlatformClient + GitServiceClient have no engine/state dependency, so
       // wire them here too — both are touched by background tasks (PR
       // batch fetch, sidebar status monitor) that the running host app spins
       // up before `bringUp()` reaches its own `prepareDependencies` block.
-      $0.codeHost = .live()
+      $0.gitPlatform = .live()
       $0.gitService = .live()
     }
 
@@ -513,9 +513,9 @@ final class AppState {
   /// Mirrors `notificationStore.unreadCount` onto the macOS Dock tile badge
   /// via `withObservationTracking` re-registration.
   @ObservationIgnored private var dockBadgerTask: Task<Void, Never>?
-  /// Refetches Pull Requests when the Code Host aliases change, so a unit with no Code
-  /// Host (which the poll skips) resolves again at once.
-  @ObservationIgnored private var codeHostAliasesTask: Task<Void, Never>?
+  /// Refetches Pull Requests when the Git Platform aliases change, so a unit with no Git
+  /// Platform (which the poll skips) resolves again at once.
+  @ObservationIgnored private var gitPlatformAliasesTask: Task<Void, Never>?
   /// Re-marks unread entries as read whenever the user focuses the
   /// pane they belong to. Observes catalog focus state via Observation
   /// re-registration; held so shutdown can cancel cleanly.
@@ -921,7 +921,7 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.settingsWindowPresenter = presenter
-      $0[CodeHostAliasesClient.self] = .live(settings: settings)
+      $0[GitPlatformAliasesClient.self] = .live(settings: settings)
       // Project Management: reconciler captures the live HierarchyClient so
       // `.reconcileDiscoveredWorktrees` flows through the real manager
       // binding. Default `now` is `Date.init`; tests override with a
@@ -944,9 +944,9 @@ final class AppState {
       $0.uuid = .init { UUID() }
     }
     profiler.mark("store")
-    self.codeHostAliasesTask = Task { @MainActor [weak self, settings] in
-      await Self.observeCodeHostAliases(settings: settings) {
-        self?.store?.send(.codeHost(.refreshAllRequested))
+    self.gitPlatformAliasesTask = Task { @MainActor [weak self, settings] in
+      await Self.observeGitPlatformAliases(settings: settings) {
+        self?.store?.send(.gitPlatform(.refreshAllRequested))
       }
     }
 
@@ -1946,7 +1946,7 @@ final class AppState {
     // final flush by mutating store state mid-write.
     notificationDetectorTask?.cancel()
     dockBadgerTask?.cancel()
-    codeHostAliasesTask?.cancel()
+    gitPlatformAliasesTask?.cancel()
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
     agentStateFocusTask?.cancel()
@@ -2013,13 +2013,13 @@ final class AppState {
   /// reads the current focused pane id and re-arms a tracker that fires
   /// on any catalog mutation that could change that id (selectedProjectID
   /// / selectedWorktreeID / selectedTabID / lastFocusedPane).
-  /// Calls `changed` each time the Code Host aliases change. Other settings writes do
+  /// Calls `changed` each time the Git Platform aliases change. Other settings writes do
   /// not call it.
   @MainActor
-  private static func observeCodeHostAliases(
+  private static func observeGitPlatformAliases(
     settings: SettingsStore, changed: @escaping @MainActor () -> Void
   ) async {
-    func aliases() -> [CodeHostAlias] { settings.settings.general.codeHostAliases }
+    func aliases() -> [GitPlatformAlias] { settings.settings.general.gitPlatformAliases }
     var last = aliases()
     while !Task.isCancelled {
       let stream = AsyncStream<Void> { continuation in
@@ -2271,7 +2271,7 @@ final class AppState {
   }
 
   /// Mirror task that keeps `RemoteRefsWatcher`'s set in sync with the
-  /// catalog's Code Host fetch units (unit id → repository root). Same
+  /// catalog's Git Platform fetch units (unit id → repository root). Same
   /// pre-arm-sample / re-arm pattern as `startHeadWatcherSync`.
   private func startRemoteRefsWatcherSync() {
     remoteRefsWatcherSyncTask?.cancel()
@@ -2300,7 +2300,7 @@ final class AppState {
   fileprivate static func remoteRefsRepositories(from catalog: Catalog) -> [ProjectID: String] {
     var repositories: [ProjectID: String] = [:]
     for project in catalog.projects {
-      for unit in RootFeature.codeHostFetchUnits(in: project) {
+      for unit in RootFeature.gitPlatformFetchUnits(in: project) {
         repositories[unit.projectID] = unit.gitRoot.path(percentEncoded: false)
       }
     }

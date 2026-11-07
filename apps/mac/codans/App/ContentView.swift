@@ -108,7 +108,7 @@ struct ContentView: View {
         currentSelection: store.selection,
         activePendingWorktreeID: store.activePendingWorktreeID,
         revealTrigger: store.revealSelectionTrigger,
-        codeHostStore: store.scope(state: \.codeHost, action: \.codeHost),
+        gitPlatformStore: store.scope(state: \.gitPlatform, action: \.gitPlatform),
         notifiedWorktreeIDs: store.notifiedWorktreeIDs,
         editorStore: store.scope(state: \.editor, action: \.editor),
         agentStateStore: agentStateStore,
@@ -135,7 +135,7 @@ struct ContentView: View {
         agentStateStore: agentStateStore,
         headerStore: store.scope(state: \.worktreeHeader, action: \.worktreeHeader),
         statusBarStore: store.scope(state: \.statusBar, action: \.statusBar),
-        codeHostStore: store.scope(state: \.codeHost, action: \.codeHost),
+        gitPlatformStore: store.scope(state: \.gitPlatform, action: \.gitPlatform),
         branchSwitcherStore: store.scope(state: \.branchSwitcher, action: \.branchSwitcher),
         onAddProject: { store.send(.sidebar(.toolbarAddProjectTapped)) },
         onNewAgent: { store.send(.newAgentRequested) },
@@ -188,7 +188,7 @@ struct ContentView: View {
     .task {
       store.send(.onLaunch)
       store.send(.worktreeHeader(.onAppear))
-      store.send(.codeHost(.onAppear))
+      store.send(.gitPlatform(.onAppear))
       // Load editor descriptors up front. The header Open button's own
       // `.task` used to be the only kick, but a Server worktree renders NO
       // button until an SSH-capable descriptor exists — a cold launch landing

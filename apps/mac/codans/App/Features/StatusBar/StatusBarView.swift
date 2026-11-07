@@ -4,10 +4,10 @@ import CodansCore
 
 /// Root SwiftUI view for the Worktree Status Bar's center slot. Picks a
 /// form by priority: toast (reducer-owned) → PR (derived from
-/// CodeHostFeature.snapshots) → motivational / empty.
+/// GitPlatformFeature.snapshots) → motivational / empty.
 struct StatusBarView: View {
   @Bindable var store: StoreOf<StatusBarFeature>
-  let codeHostStore: StoreOf<CodeHostFeature>
+  let gitPlatformStore: StoreOf<GitPlatformFeature>
   /// Active Worktree identifier, nil when selection doesn't resolve one
   /// (sidebar placeholder state). Drives the PR form's snapshot lookup.
   let worktreeID: WorktreeID?
@@ -48,7 +48,7 @@ struct StatusBarView: View {
     case .pullRequest(let snapshot):
       StatusPullRequestView(
         snapshot: snapshot,
-        store: codeHostStore,
+        store: gitPlatformStore,
         worktreeID: worktreeID,
         worktreePath: worktreePath,
         branch: branch,
@@ -72,7 +72,7 @@ struct StatusBarView: View {
   private var form: Form {
     if let toast = store.toast { return .toast(toast) }
     if let wt = worktreeID,
-      let snapshot = codeHostStore.snapshots[wt],
+      let snapshot = gitPlatformStore.snapshots[wt],
       snapshot.state != .closed
     {
       return .pullRequest(snapshot)

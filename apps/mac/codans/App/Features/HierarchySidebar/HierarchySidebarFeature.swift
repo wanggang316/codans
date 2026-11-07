@@ -81,7 +81,7 @@ struct WorktreeLifecycleProgress: Equatable {
 /// view (which holds the Pull Request snapshots the sidebar reducer does not),
 /// so the IDs are captured here at tap-time and the confirmed handler fans
 /// them out to the per-worktree archive / remove lifecycle without re-walking
-/// Code Host state.
+/// Git Platform state.
 struct PendingMergedBatch: Equatable {
   var projectID: ProjectID
   var worktreeIDs: [WorktreeID]
@@ -427,7 +427,7 @@ struct HierarchySidebarFeature {
       /// Context-menu "Open in GitHub" — RootFeature resolves the row's
       /// repository the same way as the ⌘⇧G command, but for the
       /// right-clicked row instead of the selection.
-      case openOnCodeHost(projectID: ProjectID, worktreeID: WorktreeID)
+      case openOnGitPlatform(projectID: ProjectID, worktreeID: WorktreeID)
       case openInDefaultEditor(worktreePath: String, projectID: ProjectID?)
       /// Sidebar's "Open in <Editor>" submenu — RootFeature dispatches
       /// `.editor(.openRequested)` directly with the explicit editor ID

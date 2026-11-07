@@ -17,7 +17,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this ty
     #expect(visible.contains(.editor))
     #expect(visible.contains(.environment))
     #expect(!visible.contains(.worktree))
-    #expect(!visible.contains(.codeHost))
+    #expect(!visible.contains(.gitPlatform))
     #expect(!visible.contains(.lifecycle))
     #expect(!visible.contains(.workspace))
   }
@@ -47,7 +47,7 @@ struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this ty
     // test pins the canonical order so a future refactor cannot silently
     // shuffle sections. Lifecycle scripts render last.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .general, .workspace, .editor, .worktree, .codeHost, .environment, .lifecycle,
+      .general, .workspace, .editor, .worktree, .gitPlatform, .environment, .lifecycle,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }

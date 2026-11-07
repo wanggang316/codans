@@ -31,7 +31,7 @@ struct WorktreeDetailView: View {
   /// Scoped GitHub feature store; read for the PR form's
   /// `snapshots[worktreeID]` lookup. Same store the sidebar badge reads so
   /// the two surfaces stay in sync by construction.
-  let codeHostStore: StoreOf<CodeHostFeature>
+  let gitPlatformStore: StoreOf<GitPlatformFeature>
   /// Branch popover + switch state. Threaded through to the leading
   /// toolbar `WorktreeHeaderInfoLabel` (popover anchor) and to the inline
   /// `BranchSwitcherErrorBannerView` rendered under the toolbar.
@@ -383,7 +383,7 @@ struct WorktreeDetailView: View {
     return WorktreeHistoryEntry.resolve(
       stack: stack,
       catalog: hierarchyManager.catalog,
-      pullRequests: codeHostStore.snapshots
+      pullRequests: gitPlatformStore.snapshots
     )
   }
 
@@ -434,7 +434,7 @@ struct WorktreeDetailView: View {
         WorktreeHeaderInfoLabel(
           worktree: info.worktree,
           project: info.project,
-          codeHostStore: codeHostStore,
+          gitPlatformStore: gitPlatformStore,
           branchSwitcherStore: branchSwitcherStore
         )
       }
@@ -452,7 +452,7 @@ struct WorktreeDetailView: View {
       if let info {
         StatusBarView(
           store: statusBarStore,
-          codeHostStore: codeHostStore,
+          gitPlatformStore: gitPlatformStore,
           worktreeID: address.worktree,
           worktreePath: URL(fileURLWithPath: info.worktree.path),
           branch: info.worktree.branch

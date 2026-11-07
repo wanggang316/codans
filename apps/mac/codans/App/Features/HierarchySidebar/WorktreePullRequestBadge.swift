@@ -3,7 +3,7 @@ import ComposableArchitecture
 import SwiftUI
 
 /// Sidebar-row Pull Request badge with hover-triggered popover. Click on the badge opens
-/// the Pull Request on its Code Host; dwelling the cursor over the badge for 150 ms opens the rich
+/// the Pull Request on its Git Platform; dwelling the cursor over the badge for 150 ms opens the rich
 /// `PullRequestPopover` in place. The popover stays visible while the cursor is over
 /// either the badge or the popover content — a 150 ms grace period covers the hand-off
 /// between them so the popover does not flash away when the cursor transitions.
@@ -13,7 +13,7 @@ import SwiftUI
 /// closure so the rich action surface keeps its dependency on `SettingsStore` without
 /// this view needing to know.
 struct WorktreePullRequestBadge<PopoverContent: View>: View {
-  let store: StoreOf<CodeHostFeature>
+  let store: StoreOf<GitPlatformFeature>
   let worktreeID: WorktreeID
   let branch: String
   @ViewBuilder let popoverContent: () -> PopoverContent
@@ -40,11 +40,11 @@ struct WorktreePullRequestBadge<PopoverContent: View>: View {
         // `HierarchySidebarView.diffStatsChip` so PR-less rows can surface
         // the same widget against `WorktreeBranchDiffMonitor`.
         let rollup = PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
-        let kind = store.state.codeHostKind(for: worktreeID)
+        let kind = store.state.gitPlatformKind(for: worktreeID)
         PullRequestBadge(
           state: .loaded(snapshot, rollup: rollup),
           pullRequestName: (kind ?? .github).pullRequestName,
-          codeHostKind: kind,
+          gitPlatformKind: kind,
           onTap: { store.send(.delegate(.openURL(snapshot.url))) }
         )
       } else if let lastError {
@@ -74,7 +74,7 @@ struct WorktreePullRequestBadge<PopoverContent: View>: View {
       reconcileHover()
     }
     // Per-row fetch dispatch is retired. `RootFeature.selectionChanged` dispatches
-    // `CodeHostFeature.Action.projectActivated` once per Project activation, which kicks
+    // `GitPlatformFeature.Action.projectActivated` once per Project activation, which kicks
     // a single batched `gh api graphql` call. Restoring the `.task(id:)` here as a
     // fallback hit rate-limits: 20+ worktrees each firing `gh pr view` in parallel
     // chewed through the REST/GraphQL budget on every app relaunch.

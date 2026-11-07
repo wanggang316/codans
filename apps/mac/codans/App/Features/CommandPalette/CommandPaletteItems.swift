@@ -24,7 +24,7 @@ enum CommandPaletteItems {
     editorDescriptors: [EditorDescriptor] = [],
     focusedPaneID: PaneID? = nil,
     paneFocusPrecise: Bool = false,
-    codeHost: CodeHostKind? = nil
+    gitPlatform: GitPlatformKind? = nil
   ) -> [CommandPaletteItem] {
     var items = appItems()
     items.append(contentsOf: cancelWorkflowItems())
@@ -41,7 +41,7 @@ enum CommandPaletteItems {
           worktreeName: worktree.name, isPinned: worktree.isPinned, project: project))
       items.append(
         contentsOf: worktreeLifecycleItems(
-          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace, codeHost: codeHost))
+          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace, gitPlatform: gitPlatform))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
       // Surface user-defined `ProjectSettings.scripts` for the active
       // Project. Reads through the SettingsWriter dependency so the palette
@@ -335,12 +335,12 @@ enum CommandPaletteItems {
   private static func worktreeLifecycleItems(
     worktreeName: String,
     isWorkspaceRow: Bool,
-    codeHost: CodeHostKind?
+    gitPlatform: GitPlatformKind?
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = [
       CommandPaletteItem(
         id: "worktree.open-pr",
-        title: CodeHostLabels.openPullRequest(codeHost),
+        title: GitPlatformLabels.openPullRequest(gitPlatform),
         subtitle: worktreeName,
         searchText: "worktree github gitlab pull request pr merge request mr",
         icon: "arrow.up.right.square",
@@ -352,11 +352,11 @@ enum CommandPaletteItems {
       items.append(
         CommandPaletteItem(
           id: "worktree.open-project-on-github",
-          title: CodeHostLabels.openProject(codeHost),
+          title: GitPlatformLabels.openProject(gitPlatform),
           searchText: "worktree project github gitlab repository",
           icon: "arrow.up.right.square",
           commandID: .openProjectOnGitHub,
-          kind: .openCurrentProjectOnCodeHost
+          kind: .openCurrentProjectOnGitPlatform
         ))
     }
     items.append(contentsOf: [

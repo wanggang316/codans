@@ -5,8 +5,8 @@ import SwiftUI
 
 /// Project General detail pane.
 ///
-/// Sibling Sections rendered in fixed order: Editor, Worktree, Code Host,
-/// Environment. Worktree and Code Host render only when
+/// Sibling Sections rendered in fixed order: Editor, Worktree, Git Platform,
+/// Environment. Worktree and Git Platform render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
 /// the sections simply appear or don't.
@@ -46,12 +46,12 @@ struct ProjectGeneralSettingsView: View {
     case workspace
     case editor
     case worktree
-    case codeHost
+    case gitPlatform
     case environment
     case lifecycle
   }
 
-  /// Pure visibility logic. Worktree / Code Host / Lifecycle gate
+  /// Pure visibility logic. Worktree / Git Platform / Lifecycle gate
   /// on `kind == .gitRepo`, Workspace on `kind == .workspace`; everything
   /// else is always visible.
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
@@ -59,7 +59,7 @@ struct ProjectGeneralSettingsView: View {
     case .dir:
       return [.general, .editor, .environment]
     case .workspace:
-      // A workspace root has no repository of its own: the worktree, Code Host,
+      // A workspace root has no repository of its own: the worktree, Git Platform,
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
       // construction. Its own section lists its source projects.
       return [.general, .workspace, .editor, .environment]
@@ -162,8 +162,8 @@ struct ProjectGeneralSettingsView: View {
       if visible.contains(.worktree) {
         worktreeSection
       }
-      if visible.contains(.codeHost) {
-        codeHostSection
+      if visible.contains(.gitPlatform) {
+        gitPlatformSection
       }
       if visible.contains(.environment) {
         environmentSection
@@ -657,10 +657,10 @@ struct ProjectGeneralSettingsView: View {
     )
   }
 
-  // MARK: - Code Host
+  // MARK: - Git Platform
 
   @ViewBuilder
-  private var codeHostSection: some View {
+  private var gitPlatformSection: some View {
     Section {
       OptionalOverridePicker<MergeStrategy>(
         title: "Merge strategy",
@@ -688,11 +688,11 @@ struct ProjectGeneralSettingsView: View {
 
       Toggle("Disable GitHub integration for this Project", isOn: githubDisabledBinding)
     } header: {
-      Text("Code Host")
+      Text("Git Platform")
     } footer: {
       Text(
-        "codans finds the Code Host from the origin remote. For a host that neither gh nor glab "
-          + "knows, add a Code Host alias in Settings › Code Hosts."
+        "codans finds the Git Platform from the origin remote. For a host that neither gh nor glab "
+          + "knows, add a Git Platform alias in Settings › Git Platforms."
       )
       .font(.footnote)
       .foregroundStyle(.secondary)

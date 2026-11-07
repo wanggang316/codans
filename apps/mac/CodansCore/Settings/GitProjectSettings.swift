@@ -117,7 +117,7 @@ public nonisolated struct GitProjectSettings: Equatable, Codable, Sendable {
     self.createScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .createScript)
     self.archiveScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .archiveScript)
     self.deleteScript = try c.decodeIfPresent(ScriptDefinition.self, forKey: .deleteScript)
-    // A `codeHost` key (the Project Code Host choice before ADR 0005) is ignored, and
+    // A `codeHost` key (the Project Git Platform choice before ADR 0005) is ignored, and
     // `encode(to:)` does not write it again.
   }
 

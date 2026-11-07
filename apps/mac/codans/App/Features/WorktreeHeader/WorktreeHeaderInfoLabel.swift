@@ -16,14 +16,14 @@ import SwiftUI
 struct WorktreeHeaderInfoLabel: View {
   let worktree: Worktree
   let project: Project
-  let codeHostStore: StoreOf<CodeHostFeature>
+  let gitPlatformStore: StoreOf<GitPlatformFeature>
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
 
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @State private var isBranchRowHovered = false
 
   var body: some View {
-    let snapshot = codeHostStore.snapshots[worktree.id]
+    let snapshot = gitPlatformStore.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
       guard let snapshot else { return .noChecks }
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
@@ -56,7 +56,7 @@ struct WorktreeHeaderInfoLabel: View {
           glyph: glyph,
           hasUnreadNotification: hasUnread,
           isDefaultBranch: isDefaultGlyph,
-          codeHostKind: codeHostStore.state.codeHostKind(for: worktree.id)
+          gitPlatformKind: gitPlatformStore.state.gitPlatformKind(for: worktree.id)
         )
       }
       VStack(alignment: .leading, spacing: 0) {

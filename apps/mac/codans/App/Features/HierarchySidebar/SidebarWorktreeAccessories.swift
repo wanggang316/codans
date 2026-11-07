@@ -11,7 +11,7 @@ struct SidebarWorktreeActivityIcon: View {
   let glyph: WorktreeRowIcon.LeadingGlyph
   let isDefaultBranch: Bool
   let hasLifecycle: Bool
-  var codeHostKind: CodeHostKind?
+  var gitPlatformKind: GitPlatformKind?
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(SettingsStore.self) private var settingsStore
@@ -36,7 +36,7 @@ struct SidebarWorktreeActivityIcon: View {
         hasUnreadNotification: notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
           && settingsStore.settings.notifications.worktreeBellEnabled,
         isDefaultBranch: isDefaultBranch,
-        codeHostKind: codeHostKind
+        gitPlatformKind: gitPlatformKind
       )
     }
   }

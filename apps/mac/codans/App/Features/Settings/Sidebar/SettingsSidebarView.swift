@@ -190,7 +190,7 @@ struct SettingsSidebarView: View {
     // Matches the AgentState panel's "Workflows" run rows (`WorkflowRunsSection`)
     // so the glyph reads the same wherever a run shows up.
     case .workflows: return "arrow.triangle.branch"
-    case .codeHosts: return "arrow.triangle.pull"
+    case .gitPlatforms: return "checkmark.icloud"
     case .hosts: return "server.rack"
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"

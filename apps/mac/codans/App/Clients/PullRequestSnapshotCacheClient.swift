@@ -4,7 +4,7 @@ import Foundation
 
 /// TCA-side bridge over `PullRequestSnapshotCache`. The reducer reads on seed and writes
 /// after every successful `projectBatchLoaded` so the next relaunch paints the sidebar
-/// from disk before any Code Host round-trip returns.
+/// from disk before any Git Platform round-trip returns.
 nonisolated struct PullRequestSnapshotCacheClient: Sendable {
   var load: @Sendable () -> [ProjectID: BatchedPullRequests]
   var save: @Sendable ([ProjectID: BatchedPullRequests], UInt64) -> Void
