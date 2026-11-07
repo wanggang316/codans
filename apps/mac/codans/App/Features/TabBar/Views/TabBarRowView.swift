@@ -73,7 +73,6 @@ struct TabBarRowView: View {
   /// don't care about cross-launch titles compiling without changes.
   var onCacheLiveTitle: (TabID, String) -> Void = { _, _ in }
 
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   /// Name of the row's coordinate space — drag location, chip frames, and
@@ -240,7 +239,6 @@ struct TabBarRowView: View {
       isLastTab: index == count - 1,
       // A narrowed chip shows only its edge, which the hint would cover.
       chordHint: slice == nil ? chordHint(for: index + 1) : nil,
-      showsChordHint: commandKeyObserver.isCommandHeld,
       onSelect: { onSelect(tab.id) },
       onClose: { onClose(tab.id) },
       onMiddleClick: { onMiddleClick(tab.id) },
@@ -611,7 +609,6 @@ private struct ResolvingTabChipView: View {
   /// Forwarded to `TabChipView.chordHint`. Resolved at the row level so this view stays
   /// out of the shortcut-environment plumbing.
   let chordHint: String?
-  let showsChordHint: Bool
   let onSelect: () -> Void
   let onClose: () -> Void
   let onMiddleClick: () -> Void
@@ -644,7 +641,6 @@ private struct ResolvingTabChipView: View {
       hasUnreadNotification: notificationRollup?.current.unreadTabs.contains(tab.id) == true
         && settingsStore?.settings.notifications.tabBellEnabled != false,
       chordHint: chordHint,
-      showsChordHint: showsChordHint,
       onSelect: onSelect,
       onClose: onClose,
       onMiddleClick: onMiddleClick,
