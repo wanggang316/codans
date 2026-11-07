@@ -14,7 +14,7 @@ codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`Shortc
 
 原位替换只切换透明度，周围布局不动。
 
-所有提示共用一个时序 `Animation.shortcutHint`（0.15 s easeInOut），工具栏和 Tab 也一样。每个提示视图（`shortcutHintOutgoing(to:)` / `shortcutHintIncoming()`、`commandKeyHint`）自己从环境读取 `CommandKeyObserver`，调用方只传绑定的和弦，不替它判断 ⌘ 是否按住。在 `GeometryReader` 或 `LazyVStack` 的闭包里读取该状态再传给行，会让这些闭包延迟、逐行更新，筛选栏和 Agents View 行会比 worktree 行晚 0.2–1.2 s 才变化。
+所有提示共用一个时序 `Animation.shortcutHint`（0.1 s easeInOut），工具栏和 Tab 也一样。每个提示视图（`shortcutHintOutgoing(to:)` / `shortcutHintIncoming()`、`commandKeyHint`）自己从环境读取 `CommandKeyObserver`，调用方只传绑定的和弦，不替它判断 ⌘ 是否按住。在 `GeometryReader` 或 `LazyVStack` 的闭包里读取该状态再传给行，会让这些闭包延迟、逐行更新，筛选栏和 Agents View 行会比 worktree 行晚 0.2–1.2 s 才变化。
 
 Worktree 工具栏的 Open In 按钮按住 ⌘ 时不显示快捷键，和弦只在 tooltip 中。
 
