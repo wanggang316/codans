@@ -33,7 +33,6 @@ struct HeaderRunScriptSplitButton: View {
   /// `body` re-render the button when a run pane starts/stops executing —
   /// same source the tab busy spinner reads.
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
 
   var body: some View {
     // Read in body so Observation re-renders the button when the primary
@@ -63,7 +62,7 @@ struct HeaderRunScriptSplitButton: View {
       ? "Manage Scripts…" : (isRunning ? "Stop \(primaryName)" : "Run \(primaryName)")
     // While ⌘ is held the button surfaces its chord (the macOS menu
     // convention). Idle → the primary script's configured shortcut; running →
-    // the fixed ⌘. stop chord. `commandKeyHint` gates the actual display on ⌘.
+    // the fixed ⌘. stop chord. `RunSplitButton` gates the actual display on ⌘.
     let primaryChord: String? =
       isRunning
       ? "⌘."
@@ -74,7 +73,7 @@ struct HeaderRunScriptSplitButton: View {
       image: CommandIconImage.tinted(primaryIcon, color: NSColor(primaryTint), pointSize: RunMenuMetrics.iconPointSize),
       // Beside the glyph while ⌘ is held (the macOS menu convention): the
       // primary script's shortcut, or the fixed ⌘. while it runs.
-      chordHint: commandKeyObserver.isCommandHeld ? primaryChord : nil,
+      chordHint: primaryChord,
       toolTip: primaryHelp,
       accessibilityLabel: isRunning ? "Stop \(primaryName)" : primaryName,
       onPrimary: {

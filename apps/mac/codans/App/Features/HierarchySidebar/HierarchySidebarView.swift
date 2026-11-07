@@ -897,10 +897,10 @@ struct HierarchySidebarView: View {
     return parts.joined(separator: " · ")
   }
 
-  /// The select chord for sidebar slot `hotkeyNumber`, while ⌘ is held. Read from the
-  /// registry so a rebind or a disabled binding shows as such.
+  /// The select chord bound to sidebar slot `hotkeyNumber`. Read from the registry so a
+  /// rebind or a disabled binding shows as such. The hint shows it only while ⌘ is held.
   private func hotkeyHint(_ hotkeyNumber: Int?) -> String? {
-    guard commandKeyObserver.isCommandHeld, let hotkeyNumber,
+    guard let hotkeyNumber,
       let id = CommandID.selectWorktreeAt(index: hotkeyNumber)
     else { return nil }
     return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
@@ -2306,7 +2306,6 @@ private struct SidebarFilterBar: View {
   var onMarkAllNotificationsRead: () -> Void
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
 
   @State private var hoveredFilter: SidebarFilter?
 
@@ -2349,7 +2348,6 @@ private struct SidebarFilterBar: View {
     // nothing moves. The chord shrinks to fit a narrow collapsed capsule rather
     // than run past its rounded ends.
     let chord = ShortcutDisplay.chord(for: CommandID.selectSidebarFilter(filter), in: resolvedShortcuts)
-    let showsChord = commandKeyObserver.isCommandHeld && chord != nil
     let chordWidth = chord.map {
       ceil(
         ($0 as NSString).size(withAttributes: [
@@ -2397,13 +2395,13 @@ private struct SidebarFilterBar: View {
             value: showsTitle
           )
           .scaleEffect(labelScale)
-          .shortcutHintOutgoing(showsChord)
+          .shortcutHintOutgoing(to: chord)
         }
         .overlay {
           if let chord {
             ShortcutHintLabel(chord: chord, onTint: selected)
               .scaleEffect(chordScale)
-              .shortcutHintIncoming(showsChord)
+              .shortcutHintIncoming()
           }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

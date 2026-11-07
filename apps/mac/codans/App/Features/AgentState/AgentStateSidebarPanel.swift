@@ -76,7 +76,6 @@ struct AgentStateSidebarPanel: View {
   @Environment(WorkflowCatalogStore.self) private var workflowCatalog
 
   /// Drives the `⌥N` row hints and the row hotkeys (`focusAgentAtN`).
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   /// Suppresses the reorder animation for users who opt out of motion.
@@ -283,10 +282,10 @@ struct AgentStateSidebarPanel: View {
     }
   }
 
-  /// The focus chord for the row at 1-based `index`, while ⌘ is held. Read from the
-  /// registry so a rebind or a disabled binding shows as such.
+  /// The focus chord bound to the row at 1-based `index`. Read from the registry so a
+  /// rebind or a disabled binding shows as such. The row shows it only while ⌘ is held.
   private func hotkeyHint(forRowAt index: Int) -> String? {
-    guard commandKeyObserver.isCommandHeld, let id = CommandID.focusAgentAt(index: index)
+    guard let id = CommandID.focusAgentAt(index: index)
     else { return nil }
     return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }

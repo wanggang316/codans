@@ -19,12 +19,9 @@ struct TabChipView: View {
   /// Pre-resolved chord text to display in the chip's trailing slot while ⌘ is held —
   /// e.g. `"⌘1"` for the first chip, `"⌘0"` for the tenth, `nil` for the rest. The chord
   /// temporarily takes the close-button slot so the hint sits inside the chip's rounded
-  /// rectangle rather than crowding the inter-chip gap. Resolved at the row level so
-  /// `TabChipView` stays free of environment-key dependencies.
+  /// rectangle rather than crowding the inter-chip gap. Resolved at the row level; the
+  /// hint itself reads whether ⌘ is held.
   var chordHint: String?
-  /// ⌘ is held, so `chordHint` shows. Separate from `chordHint` so the chord stays
-  /// laid out while it fades out.
-  var showsChordHint = false
   let onSelect: () -> Void
   let onClose: () -> Void
   let onMiddleClick: () -> Void
@@ -162,11 +159,10 @@ struct TabChipView: View {
     }
     .overlay(alignment: .trailing) {
       // The chord takes the trailing slot while ⌘ is held.
-      let showsChord = showsChordHint && chordHint != nil
       ZStack(alignment: .trailing) {
         if let chordHint {
           ShortcutHintLabel(chord: chordHint, trailingGap: TabBarMetrics.chordHintExtraInset)
-            .shortcutHintIncoming(showsChord)
+            .shortcutHintIncoming()
         }
       }
     }

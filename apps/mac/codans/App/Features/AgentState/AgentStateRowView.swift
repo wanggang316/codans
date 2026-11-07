@@ -56,8 +56,8 @@ struct AgentStateRowView: View {
   /// Defaults to nil-returning so legacy call sites (popover variant,
   /// tests) show the agent display name.
   var activityText: () -> String? = { nil }
-  /// The row's focus chord (`⌥N`) while ⌘ is held. Takes the trailing status
-  /// glyphs' place.
+  /// The row's bound focus chord (`⌥N`). Takes the trailing status glyphs' place
+  /// while ⌘ is held.
   var hotkeyHint: String?
   let onTap: () -> Void
   /// Context-menu "Hand Off…" for this row's pane. Optional so legacy call
