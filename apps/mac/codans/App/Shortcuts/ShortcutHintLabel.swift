@@ -8,9 +8,8 @@ import SwiftUI
 /// carries its own insertion/removal transition; `CommandKeyObserver` flips its flag inside
 /// `Animation.shortcutHint`, so a hint inserted under that flag cross-fades in and out.
 ///
-/// An Agents View row instead stacks its chord with its trailing accessories through
-/// `ShortcutHintTrailing`. A sidebar row appends its chord after its accessories through
-/// `commandKeyHint(chord:spacing:font:)`.
+/// A list row (sidebar, Agents View) appends its chord after its trailing accessories
+/// through `commandKeyHint(chord:spacing:font:)`.
 struct ShortcutHintLabel: View {
   let chord: String
   /// `.caption` suits a row or a tab title. A hint beside a 13–16pt toolbar glyph passes a
@@ -37,46 +36,6 @@ struct ShortcutHintLabel: View {
   }
 }
 
-/// A row's trailing accessories that give way to its chord while ⌘ is held.
-///
-/// The chord and the accessories share one trailing-aligned stack and only their opacity
-/// changes, so the chord takes the accessories' place and the row does not reflow around
-/// it. Hidden accessories stop taking clicks.
-///
-/// The view reads `CommandKeyObserver` itself rather than taking a "⌘ held" flag: a flag
-/// computed by the caller inside a lazy stack or geometry-reader closure updates late and
-/// row by row, so the rows would not change together.
-struct ShortcutHintTrailing<Accessories: View>: View {
-  /// The chord bound to this row, or `nil` when it has none. The text stays in the view
-  /// while the hint fades out, so it fades with the accessories instead of vanishing.
-  let chord: String?
-  @ViewBuilder let accessories: () -> Accessories
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver: CommandKeyObserver?
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  var body: some View {
-    let isShown = commandKeyObserver?.isCommandHeld == true && chord != nil
-    ZStack(alignment: .trailing) {
-      accessories()
-        .opacity(isShown ? 0 : 1)
-        .allowsHitTesting(!isShown)
-      Text(chord ?? "")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .fixedSize()
-        // Hidden, the chord takes no width, so a row whose accessories are narrower than
-        // its chord keeps its layout. It draws past the zero-width frame toward the
-        // leading edge while it fades.
-        .frame(width: isShown ? nil : 0, alignment: .trailing)
-        .opacity(isShown ? 1 : 0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-    .animation(reduceMotion ? nil : .shortcutHint, value: isShown)
-  }
-}
-
 extension View {
   /// The content a hint replaces in place (a filter button's label, a tab's color dot). While ⌘
   /// is held and `chord` is non-nil it shrinks, blurs, and fades out; pair it with
@@ -93,7 +52,9 @@ extension View {
   }
 }
 
-/// Reads `CommandKeyObserver` itself, for the reason given on `ShortcutHintTrailing`.
+/// Reads `CommandKeyObserver` itself rather than taking a "⌘ held" flag: a flag computed by
+/// the caller inside a lazy stack or geometry-reader closure updates late and row by row, so
+/// the hints would not change together.
 private struct ShortcutHintSwap: ViewModifier {
   let hasChord: Bool
   let isOutgoing: Bool

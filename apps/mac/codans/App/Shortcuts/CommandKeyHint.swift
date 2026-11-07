@@ -30,8 +30,8 @@ extension View {
   /// `commandKeyHint(_:spacing:)` convention. The observer dependency lives in
   /// the modifier, so the hint appears/disappears live even inside a toolbar
   /// Menu label (where reads in the `label:` closure itself would escape
-  /// tracking). A sidebar row passes `.caption` to append its `⌃N` after its
-  /// trailing accessories.
+  /// tracking). A sidebar or Agents View row passes `.caption` to append its
+  /// chord (`⌃N`, `⌥N`) after its trailing accessories.
   func commandKeyHint(chord: String?, spacing: CGFloat = 6, font: Font = .callout) -> some View {
     modifier(CommandKeyChordHintModifier(chord: chord, spacing: spacing, font: font))
   }

@@ -56,7 +56,7 @@ struct AgentStateRowView: View {
   /// Defaults to nil-returning so legacy call sites (popover variant,
   /// tests) show the agent display name.
   var activityText: () -> String? = { nil }
-  /// The row's bound focus chord (`⌥N`). Takes the trailing status glyphs' place
+  /// The row's bound focus chord (`⌥N`), shown after the trailing status glyphs
   /// while ⌘ is held.
   var hotkeyHint: String?
   let onTap: () -> Void
@@ -82,14 +82,15 @@ struct AgentStateRowView: View {
       // right-aligned column down the list rather than floating at a
       // variable offset after each project name.
       Spacer(minLength: 8)
-      ShortcutHintTrailing(chord: hotkeyHint) {
-        HStack(alignment: .center, spacing: 10) {
-          if isSleeping {
-            sleepGlyph
-          }
-          statusColumn
+      // While ⌘ is held the chord follows the status glyphs, which stay visible and
+      // clickable; the identity column gives up the room the chord takes.
+      HStack(alignment: .center, spacing: 10) {
+        if isSleeping {
+          sleepGlyph
         }
+        statusColumn
       }
+      .commandKeyHint(chord: hotkeyHint, spacing: 8, font: .caption)
     }
     .padding(.horizontal, 12)
     // Compact mode tightens the row to roughly two-thirds of the
