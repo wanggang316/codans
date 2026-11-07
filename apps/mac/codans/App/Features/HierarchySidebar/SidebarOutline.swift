@@ -103,11 +103,12 @@ struct SidebarOutline: NSViewRepresentable {
     private(set) var animatedNodeID: String?
     /// The child rows the last animated open or close moved and faded.
     private(set) var animatedChildIDs: [String] = []
-    /// The fade and move of each child row of the last animated toggles,
-    /// by row id (see `animate`).
-    private var childPlans: [String: ChildRowPlan] = [:]
-    /// The views of the rows the last animated close is fading out.
-    private var closingViews: [String: NSTableRowView] = [:]
+    /// The fade and move of each child row of the running animated toggles,
+    /// by row id (see `animate`). A plan goes when it ends or its row goes.
+    private(set) var childPlans: [String: ChildRowPlan] = [:]
+    /// The views of the rows the running animated close is fading out.
+    private(set) var closingViews: [String: NSTableRowView] = [:]
+    private var releaseScheduled = false
     private var heightUpdateScheduled = false
     /// Each row's measured height, by row id. Kept across updates, so a
     /// reload measures only the rows it has not seen.
@@ -140,6 +141,7 @@ struct SidebarOutline: NSViewRepresentable {
       animatedNodeID = animation?.nodeID
 
       let structure = rebuild(config.nodes)
+      releaseAnimationState(at: CACurrentMediaTime())
       if structure != shownStructure {
         shownStructure = structure
         outline.reloadData()
@@ -324,6 +326,30 @@ struct SidebarOutline: NSViewRepresentable {
         DispatchQueue.main.async { [weak self] in self?.reapplyChildPlans(alignToTable: false) }
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in self?.reapplyChildPlans(alignToTable: true) }
+      scheduleRelease()
+    }
+
+    /// Drops the plans that have ended or whose row the outline no longer
+    /// has, and the views their close faded out: the table no longer shows
+    /// those views, and a toggle starts from a running plan only.
+    private func releaseAnimationState(at now: CFTimeInterval) {
+      childPlans = childPlans.filter { itemsByID[$0.key] != nil && $0.value.isRunning(at: now) }
+      closingViews = closingViews.filter { childPlans[$0.key] != nil }
+    }
+
+    /// Releases the state when the last plan ends. A plan can move onto
+    /// the table's clock, or a later toggle can add one, after this is
+    /// scheduled, so each release schedules the next.
+    private func scheduleRelease() {
+      guard !releaseScheduled, let end = childPlans.values.map({ $0.start + $0.duration }).max() else { return }
+      releaseScheduled = true
+      let delay = max(end - CACurrentMediaTime(), 0) + 0.02
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self else { return }
+        releaseScheduled = false
+        releaseAnimationState(at: CACurrentMediaTime())
+        scheduleRelease()
+      }
     }
 
     /// When the table's own fade of `view` started, in `CACurrentMediaTime`,
