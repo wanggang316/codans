@@ -294,6 +294,69 @@ struct SidebarOutlineTests {
     #expect(abs(rowMid - (clip.bounds.minY + clip.bounds.height / 2)) < 1)
   }
 
+  /// A Project that failed to load is a child row like any other: a user
+  /// toggle of its Host fades and moves it with the same plan as its
+  /// siblings, on open, on close, and on a toggle during the animation. A
+  /// catalog update that leaves the failed row as it is (a sweep that finds
+  /// it still failed) keeps the running animations.
+  @Test
+  func aFailedProjectRowFadesLikeTheOtherChildRows() async throws {
+    try #require(!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    let harness = Harness(height: 400)
+    let healthy = repository("healthy", worktrees: 1, expanded: false)
+    let failed = Project(name: "failed", rootPath: "/failed", loadState: .failed(reason: "Cannot reach host"))
+    let failedID = SidebarOutlineModel.projectNodeID(failed.id)
+    func show(collapsed: Set<SidebarHost>, toggle: SidebarExpansionToggle?, failed: Project = failed) {
+      harness.show(
+        [healthy, failed], toggle: toggle,
+        hostLevel: SidebarHostLevel(records: [], collapsed: collapsed, keepsThisMac: true))
+    }
+    /// The cell fade and the row move on each child row view.
+    func animations() throws -> [String: (fade: CAKeyframeAnimation, move: CAKeyframeAnimation)] {
+      var result: [String: (fade: CAKeyframeAnimation, move: CAKeyframeAnimation)] = [:]
+      for row in 1..<harness.outline.numberOfRows {
+        let item = try #require(harness.outline.item(atRow: row) as? SidebarOutlineItem)
+        let view = try #require(harness.outline.rowView(atRow: row, makeIfNecessary: false))
+        let cell = try #require(view.subviews.first?.layer)
+        let fade = try #require(cell.animation(forKey: "sidebar.childFade") as? CAKeyframeAnimation)
+        let move = try #require(view.layer?.animation(forKey: "sidebar.childMove") as? CAKeyframeAnimation)
+        result[item.id] = (fade, move)
+      }
+      return result
+    }
+    func expectSameAnimation(_ shown: [String: (fade: CAKeyframeAnimation, move: CAKeyframeAnimation)]) throws {
+      let failedRow = try #require(shown[failedID])
+      let sibling = try #require(shown[SidebarOutlineModel.projectNodeID(healthy.id)])
+      for (a, b) in [(failedRow.fade, sibling.fade), (failedRow.move, sibling.move)] {
+        #expect(a.values as? [Double] == b.values as? [Double])
+        #expect(a.keyTimes == b.keyTimes)
+        #expect(abs(a.beginTime - b.beginTime) < 1e-6)
+      }
+    }
+
+    show(collapsed: [.thisMac], toggle: nil)
+    let open = SidebarExpansionToggle.next(.host(.thisMac), after: nil)
+    show(collapsed: [], toggle: open)
+    #expect(harness.coordinator.animatedChildIDs.contains(failedID))
+    try expectSameAnimation(animations())
+
+    // A sweep finds the Project still failed: the row stays, with its fade.
+    let failedRow = try #require(harness.rowIDs.firstIndex(of: failedID))
+    let failedView = harness.outline.rowView(atRow: failedRow, makeIfNecessary: false)
+    var stillFailed = failed
+    stillFailed.loadState = .failed(reason: "Cannot reach host again")
+    show(collapsed: [], toggle: open, failed: stillFailed)
+    #expect(harness.outline.rowView(atRow: failedRow, makeIfNecessary: false) === failedView)
+    try expectSameAnimation(animations())
+
+    // The user closes the Host during the open: both rows turn around alike.
+    try await Task.sleep(for: .milliseconds(60))
+    let close = SidebarExpansionToggle.next(.host(.thisMac), after: open)
+    show(collapsed: [.thisMac], toggle: close, failed: stillFailed)
+    #expect(harness.coordinator.animatedChildIDs.contains(failedID))
+    #expect(harness.rowIDs == [SidebarOutlineModel.hostNodeID(.thisMac)])
+  }
+
   // MARK: Child row fade and move (ADR 0008)
 
   /// The largest change in one 1/60 s frame of what shows of a row: the
