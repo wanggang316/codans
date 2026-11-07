@@ -142,23 +142,29 @@ struct SidebarOutlineTests {
     #expect(harness.rowIDs == all)
   }
 
-  /// On an animated close the child rows move up a few points while they
-  /// fade (ADR 0008): the table's own `.slideUp` would move them by their
-  /// whole height, so the outline adds the move to their layers.
+  /// The table's own fade of inserted and removed rows runs over the whole
+  /// row animation, so the outline adds the reference's fade and move to
+  /// every child row on screen, on close and on open (ADR 0008).
   @Test
-  func anAnimatedCloseLiftsTheChildRows() {
+  func anAnimatedToggleAnimatesTheChildRowsOnScreen() {
     let harness = Harness()
     var repo = repository("repo", worktrees: 2)
     harness.show([repo])
     let children = Array(harness.rowIDs.dropFirst())
     #expect(children.count == 3)
+    // Reduce Motion opens and closes at once, with no row to animate.
+    let animated = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? [] : children
 
     repo.isExpanded = false
-    harness.show([repo], toggle: .next(.project(repo.id), after: nil))
-    // Reduce Motion closes the row at once, with nothing to lift.
-    let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    #expect(harness.coordinator.liftedNodeIDs == (reduceMotion ? [] : children))
+    let close = SidebarExpansionToggle.next(.project(repo.id), after: nil)
+    harness.show([repo], toggle: close)
+    #expect(harness.coordinator.animatedChildIDs == animated)
     #expect(harness.rowIDs == ["project:\(repo.id.raw)"])
+
+    repo.isExpanded = true
+    harness.show([repo], toggle: .next(.project(repo.id), after: close))
+    #expect(harness.coordinator.animatedChildIDs == animated)
+    #expect(harness.rowIDs == ["project:\(repo.id.raw)"] + children)
   }
 
   @Test
