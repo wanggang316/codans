@@ -101,8 +101,8 @@ struct SidebarOutline: NSViewRepresentable {
     private var shownExpansionToggle: SidebarExpansionToggle??
     /// The row the last update animated, nil when it changed rows at once.
     private(set) var animatedNodeID: String?
-    /// The rows the last animated close moved up.
-    private(set) var liftedNodeIDs: [String] = []
+    /// The child rows the last animated open or close moved and faded.
+    private(set) var animatedChildIDs: [String] = []
     private var heightUpdateScheduled = false
     /// Each row's measured height, by row id. Kept across updates, so a
     /// reload measures only the rows it has not seen.
@@ -209,19 +209,22 @@ struct SidebarOutline: NSViewRepresentable {
       apply(roots)
     }
 
-    /// Child rows fade in where they end; the rows below slide down.
-    /// `NSOutlineView` has no such expand animation, so the row opens with
-    /// no children and then they are inserted, with the open rows under them.
+    /// Child rows slide down into place and fade in; the rows below slide
+    /// down. `NSOutlineView` has no such expand animation, so the row opens
+    /// with no children and then they are inserted, with the open rows under
+    /// them. The table moves the rows below; the child rows get their own
+    /// layer animations (ADR 0008).
     private func animateOpen(_ item: SidebarOutlineItem, in outline: NSOutlineView) {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = SidebarDisclosureTiming.open
-        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        context.duration = SidebarDisclosureTiming.rows
+        context.timingFunction = SidebarDisclosureTiming.rowCurve
         outline.beginUpdates()
         childlessIDs.insert(item.id)
         outline.expandItem(item)
         insertChildren(of: item, in: outline)
         outline.endUpdates()
       }
+      animateChildRows(under: item, in: outline, opening: true)
     }
 
     private func insertChildren(of item: SidebarOutlineItem, in outline: NSOutlineView) {
@@ -241,48 +244,98 @@ struct SidebarOutline: NSViewRepresentable {
       }
     }
 
-    /// Moves the rows on screen under `item` up by `SidebarDisclosureTiming.closeLift`
-    /// while the table fades them out. `.slideUp` would move them by their
-    /// whole height. Not kept on the layer: the table reuses row views.
-    private func liftRows(under item: SidebarOutlineItem, in outline: NSOutlineView) {
-      let parentRow = outline.row(forItem: item)
-      guard parentRow >= 0 else { return }
-      let level = outline.level(forRow: parentRow)
-      let lift = CABasicAnimation(keyPath: "transform.translation.y")
-      lift.fromValue = 0
-      // The outline is flipped: a negative offset moves the row up.
-      lift.toValue = -SidebarDisclosureTiming.closeLift
-      lift.duration = SidebarDisclosureTiming.close
-      lift.timingFunction = CAMediaTimingFunction(name: .easeOut)
-      liftedNodeIDs = []
-      var row = parentRow + 1
-      while row < outline.numberOfRows, outline.level(forRow: row) > level {
-        if let rowView = outline.rowView(atRow: row, makeIfNecessary: false),
-          let child = outline.item(atRow: row) as? SidebarOutlineItem
-        {
-          rowView.wantsLayer = true
-          rowView.layer?.add(lift, forKey: "sidebar.closeLift")
-          liftedNodeIDs.append(child.id)
-        }
-        row += 1
-      }
-    }
-
-    /// Child rows fade out while they move up a little; the rows below
+    /// Child rows fade out fast while they move up a little; the rows below
     /// slide up over them.
     private func animateClose(_ item: SidebarOutlineItem, in outline: NSOutlineView) {
       let count = outline.numberOfChildren(ofItem: item)
-      liftRows(under: item, in: outline)
+      let rows = childRowViews(under: item, in: outline, make: false)
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = SidebarDisclosureTiming.close
-        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        context.duration = SidebarDisclosureTiming.rows
+        context.timingFunction = SidebarDisclosureTiming.rowCurve
         outline.beginUpdates()
         childlessIDs.insert(item.id)
         outline.removeItems(at: IndexSet(integersIn: 0..<count), inParent: item, withAnimation: .effectFade)
         outline.endUpdates()
       }
+      animate(rows, opening: false)
       outline.collapseItem(item)
       childlessIDs.remove(item.id)
+    }
+
+    /// The row views on screen under `item`, with their row ids.
+    private func childRowViews(
+      under item: SidebarOutlineItem, in outline: NSOutlineView, make: Bool
+    ) -> [(id: String, view: NSTableRowView)] {
+      let parentRow = outline.row(forItem: item)
+      guard parentRow >= 0 else { return [] }
+      let level = outline.level(forRow: parentRow)
+      let visible = outline.rows(in: outline.visibleRect)
+      var rows: [(id: String, view: NSTableRowView)] = []
+      var row = parentRow + 1
+      while row < outline.numberOfRows, outline.level(forRow: row) > level {
+        if row >= visible.location, row < visible.location + visible.length,
+          let view = outline.rowView(atRow: row, makeIfNecessary: make),
+          let child = outline.item(atRow: row) as? SidebarOutlineItem
+        {
+          rows.append((child.id, view))
+        }
+        row += 1
+      }
+      return rows
+    }
+
+    private func animateChildRows(under item: SidebarOutlineItem, in outline: NSOutlineView, opening: Bool) {
+      animate(childRowViews(under: item, in: outline, make: true), opening: opening)
+    }
+
+    /// Replaces the table's own fade of the child rows, which runs over the
+    /// whole row animation, with the reference's: a short fade, and a small
+    /// move. Added after the table's animations, so these win. Not kept on
+    /// the layer when they end, because the table reuses row views.
+    private func animate(_ rows: [(id: String, view: NSTableRowView)], opening: Bool) {
+      animatedChildIDs = rows.map(\.id)
+      let timing = SidebarDisclosureTiming.self
+      let total = timing.rows
+      for (_, view) in rows {
+        view.wantsLayer = true
+        guard let layer = view.layer else { continue }
+        let now = layer.convertTime(CACurrentMediaTime(), from: nil)
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.duration = total
+        fade.calculationMode = .linear
+        // The outline is flipped: a negative offset is above the row's place.
+        let move: CAAnimation
+        if opening {
+          fade.values = [0, 0, 1, 1]
+          fade.keyTimes = [0, timing.openFadeDelay / total, (timing.openFadeDelay + timing.openFade) / total, 1]
+            .map { NSNumber(value: $0) }
+          fade.timingFunctions = [.init(name: .linear), .init(name: .easeOut), .init(name: .linear)]
+          // Waits above the row's place, hidden, then follows the rows below.
+          let slide = CABasicAnimation(keyPath: "transform.translation.y")
+          slide.fromValue = -timing.openOffset
+          slide.toValue = 0
+          slide.duration = total
+          slide.timingFunction = timing.rowCurve
+          slide.beginTime = now + timing.openMoveDelay
+          slide.fillMode = .backwards
+          move = slide
+        } else {
+          // From where an open that is still running has got to, so a
+          // quick second toggle turns it around without a jump.
+          let from = layer.presentation()?.opacity ?? layer.opacity
+          fade.values = [from, from * timing.closeFadeEnd, 0, 0]
+          fade.keyTimes = [0, timing.closeFade / total, timing.closeGone / total, 1].map { NSNumber(value: $0) }
+          let offset = (layer.presentation()?.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
+          let lift = CABasicAnimation(keyPath: "transform.translation.y")
+          lift.fromValue = offset
+          lift.toValue = offset - timing.closeLift
+          lift.duration = timing.closeLiftTime
+          lift.timingFunction = timing.closeLiftCurve
+          move = lift
+        }
+        layer.add(fade, forKey: "sidebar.childFade")
+        layer.add(move, forKey: "sidebar.childMove")
+      }
     }
 
     private func refreshVisibleRows(animating animation: ExpansionAnimation?) {
@@ -512,16 +565,33 @@ private struct ExpansionAnimation {
   let nodeID: String
 }
 
-/// The times of a user toggle's animation, as in the sidebar `List` the
-/// owner's reference shows (ADR 0008).
+/// The times and curves of a user toggle's animation, measured from the
+/// owner's reference recording (ADR 0008).
 enum SidebarDisclosureTiming {
-  /// Child rows fade in, rows below slide down.
-  static let open: TimeInterval = 0.25
-  /// Child rows fade out, rows below slide up.
-  static let close: TimeInterval = 0.2
-  /// How far closing child rows move up while they fade: a few points, as
-  /// in the reference.
-  static let closeLift: CGFloat = 10
+  /// The rows move like a critically damped spring with a response of about
+  /// 0.27 s: most of the way in the first 0.1 s, then a long tail. The
+  /// table animates rows with a duration and a cubic curve, so this curve
+  /// over `rows` is the closest fit to that spring (about 0.6 % off).
+  static let rows: TimeInterval = 0.32
+  static let rowCurve = CAMediaTimingFunction(controlPoints: 0.30, 0.40, 0.15, 0.98)
+  /// On open, the child rows wait `openOffset` above their place, hidden,
+  /// for `openMoveDelay`, then slide down on `rowCurve`. They fade in from
+  /// `openFadeDelay` over `openFade` (ease-out), so they show when they are
+  /// about 14 pt above their place.
+  static let openOffset: CGFloat = 16
+  static let openMoveDelay: TimeInterval = 0.055
+  static let openFadeDelay: TimeInterval = 0.05
+  static let openFade: TimeInterval = 0.11
+  /// On close, the child rows fade out linearly to `closeFadeEnd` of their
+  /// opacity in `closeFade`, and are gone at `closeGone`. Meanwhile they
+  /// speed up as they move up (quadratic ease-in, about 1 pt after 45 ms and
+  /// 7 pt after 110 ms), and the rows below slide over them.
+  static let closeFade: TimeInterval = 0.11
+  static let closeFadeEnd: Float = 0.1
+  static let closeGone: TimeInterval = 0.12
+  static let closeLift: CGFloat = 11
+  static let closeLiftTime: TimeInterval = 0.14
+  static let closeLiftCurve = CAMediaTimingFunction(controlPoints: 1 / 3, 0, 2 / 3, 1 / 3)
   /// The chevron turns at the start of the row animation, much faster.
   static let chevron: TimeInterval = 0.06
   static let chevronAnimation = Animation.easeOut(duration: chevron)
