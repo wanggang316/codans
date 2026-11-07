@@ -215,7 +215,7 @@ struct AgentStateRowView: View {
   @ViewBuilder
   private var remoteGlyph: some View {
     if let authority = projectRemoteAuthority {
-      Image(systemName: "tv.badge.wifi")
+      Image(systemName: RemoteProjectMarker.symbol)
         .font(.caption2)
         .imageScale(.small)
         .foregroundStyle(.secondary)

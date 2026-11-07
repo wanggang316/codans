@@ -138,7 +138,7 @@ struct NewAgentView: View {
         Button {
           store.send(.addProjectTapped(.openRemoteProject))
         } label: {
-          Label("Open Remote Project…", systemImage: "tv.badge.wifi")
+          Label("Open Remote Project…", systemImage: RemoteProjectMarker.symbol)
         }
         Button {
           store.send(.addProjectTapped(.newWorkspace))
