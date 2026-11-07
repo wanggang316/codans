@@ -30,24 +30,31 @@ extension View {
   /// `commandKeyHint(_:spacing:)` convention. The observer dependency lives in
   /// the modifier, so the hint appears/disappears live even inside a toolbar
   /// Menu label (where reads in the `label:` closure itself would escape
-  /// tracking).
-  func commandKeyHint(chord: String?, spacing: CGFloat = 6) -> some View {
-    modifier(CommandKeyChordHintModifier(chord: chord, spacing: spacing))
+  /// tracking). A sidebar row passes `.caption` to append its `⌃N` after its
+  /// trailing accessories.
+  func commandKeyHint(chord: String?, spacing: CGFloat = 6, font: Font = .callout) -> some View {
+    modifier(CommandKeyChordHintModifier(chord: chord, spacing: spacing, font: font))
   }
 }
 
 private struct CommandKeyChordHintModifier: ViewModifier {
   let chord: String?
   let spacing: CGFloat
+  let font: Font
   @Environment(CommandKeyObserver.self) private var observer
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
+    let isShown = observer.isCommandHeld && chord != nil
     HStack(spacing: spacing) {
       content
-      if observer.isCommandHeld, let chord {
-        ShortcutHintLabel(chord: chord, font: .callout)
+      if isShown, let chord {
+        ShortcutHintLabel(chord: chord, font: font)
       }
     }
+    // Explicit, so the chord fades with the shared timing even when the
+    // update does not run inside the observer's `withAnimation` transaction.
+    .animation(reduceMotion ? nil : .shortcutHint, value: isShown)
   }
 }
 
@@ -56,14 +63,17 @@ private struct CommandKeyHintModifier: ViewModifier {
   let spacing: CGFloat
   @Environment(CommandKeyObserver.self) private var observer
   @Environment(\.resolvedShortcuts) private var shortcuts
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
+    let chord = chordText
     HStack(spacing: spacing) {
       content
-      if let chord = chordText {
+      if let chord {
         ShortcutHintLabel(chord: chord, font: .callout)
       }
     }
+    .animation(reduceMotion ? nil : .shortcutHint, value: chord != nil)
   }
 
   private var chordText: String? {

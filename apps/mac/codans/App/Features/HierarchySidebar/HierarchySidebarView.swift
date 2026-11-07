@@ -1001,8 +1001,8 @@ struct HierarchySidebarView: View {
         hotkeyNumber: hotkeyNumber,
         isSelected: isSelected
       )
-      // While ⌘ is held the chord takes the trailing accessories' place, pinned to the
-      // row's right edge.
+      // While ⌘ is held the chord follows the trailing accessories, pinned to the row's
+      // right edge.
       SidebarHotkeyHint(chord: hotkeyHint(hotkeyNumber)) {
         HStack(spacing: 0) {
           newBadgePill(for: worktree)
@@ -2179,14 +2179,16 @@ private struct WorkspaceGroupRow<Accessory: View>: View {
   }
 }
 
-/// A sidebar row's trailing accessories that give way to the row's chord (`⌃N`)
-/// while ⌘ is held.
+/// A sidebar row's trailing accessories, followed by the row's chord (`⌃N`) while ⌘ is
+/// held. The accessories stay visible and clickable; the row title gives up the room
+/// the chord takes.
 private struct SidebarHotkeyHint<Accessories: View>: View {
   let chord: String?
   @ViewBuilder let accessories: () -> Accessories
 
   var body: some View {
-    ShortcutHintTrailing(chord: chord, leadingGap: 6, accessories: accessories)
+    accessories()
+      .commandKeyHint(chord: chord, font: .caption)
   }
 }
 
