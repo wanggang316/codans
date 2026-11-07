@@ -550,7 +550,7 @@ struct HierarchySidebarView: View {
     Button {
       store.send(.openRemoteProjectTapped)
     } label: {
-      Label("Open Remote Project…", systemImage: "tv.badge.wifi")
+      Label("Open Remote Project…", systemImage: RemoteProjectMarker.symbol)
     }
     Button {
       store.send(.newWorkspaceTapped)
@@ -774,7 +774,7 @@ struct HierarchySidebarView: View {
         Button {
           store.send(.hostConnectProjectTapped(id))
         } label: {
-          Label("Open Remote Project on This Host…", systemImage: "tv.badge.wifi")
+          Label("Open Remote Project on This Host…", systemImage: RemoteProjectMarker.symbol)
         }
         Button {
           store.send(.hostEditTapped(id))
@@ -1860,7 +1860,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
       // distinguishable from a local one at a glance; the tooltip names the
       // SSH destination.
       if let host = project.remoteHost {
-        Image(systemName: "tv.badge.wifi")
+        Image(systemName: RemoteProjectMarker.symbol)
           .font(.caption2)
           .foregroundStyle(.secondary)
           .help(host.displayAuthority)
@@ -1970,7 +1970,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
       Button {
         store.send(.editRemoteProjectTapped(projectID: project.id))
       } label: {
-        Label("Edit Remote Project…", systemImage: "tv.badge.wifi")
+        Label("Edit Remote Project…", systemImage: RemoteProjectMarker.symbol)
       }
     }
     Divider()
@@ -2448,7 +2448,7 @@ private struct SidebarFilterBar: View {
   private func symbol(for filter: SidebarFilter) -> String {
     switch filter {
     case .all: "square.grid.2x2.fill"
-    case .remote: "wifi"
+    case .remote: RemoteProjectMarker.symbol
     case .workspace: "square.stack.3d.up.fill"
     case .notifications: "bell.fill"
     case .pullRequests: "arrow.triangle.pull"

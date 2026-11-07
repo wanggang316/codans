@@ -223,7 +223,7 @@ struct WorktreeHeaderInfoLabel: View {
       // `.small` image scale keeps the wide glyph proportionate to the
       // caption-sized neighbor text.
       if let host = project.remoteHost {
-        Image(systemName: "tv.badge.wifi")
+        Image(systemName: RemoteProjectMarker.symbol)
           .font(.caption2)
           .imageScale(.small)
           .foregroundStyle(.secondary)
