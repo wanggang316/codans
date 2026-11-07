@@ -1,0 +1,12 @@
+ROI counts: {'a_worktrees': (5, 5), 'b_filters': (5, 5), 'c_tab': (5, 5), 'd_agent1': (5, 5), 'd_agent2': (5, 5), 'd_agent3': (5, 5), 'd_agent4': (5, 5), 'd_agent5': (5, 5), 'd_agent6': (5, 5)}
+press 1 @ 2.572s spread=26ms lag_vs_worktrees_ms={'b_filters': -22, 'c_tab': 1, 'd_agent1': 4, 'd_agent2': 3, 'd_agent3': 2, 'd_agent4': 3, 'd_agent5': 1, 'd_agent6': 2}
+press 2 @ 6.243s spread=24ms lag_vs_worktrees_ms={'b_filters': -21, 'c_tab': 0, 'd_agent1': 3, 'd_agent2': 2, 'd_agent3': 2, 'd_agent4': 2, 'd_agent5': 2, 'd_agent6': 2}
+press 3 @ 9.896s spread=24ms lag_vs_worktrees_ms={'b_filters': -21, 'c_tab': 0, 'd_agent1': 3, 'd_agent2': 3, 'd_agent3': 3, 'd_agent4': 3, 'd_agent5': 2, 'd_agent6': 3}
+press 4 @ 13.581s spread=19ms lag_vs_worktrees_ms={'b_filters': -16, 'c_tab': 0, 'd_agent1': 3, 'd_agent2': 2, 'd_agent3': 2, 'd_agent4': 2, 'd_agent5': 2, 'd_agent6': 2}
+press 5 @ 17.220s spread=22ms lag_vs_worktrees_ms={'b_filters': -18, 'c_tab': -1, 'd_agent1': 4, 'd_agent2': 2, 'd_agent3': 2, 'd_agent4': 3, 'd_agent5': 2, 'd_agent6': 2}
+release 1 @ 3.825s spread=22ms lag_vs_worktrees_ms={'b_filters': 21, 'c_tab': 0, 'd_agent1': -2, 'd_agent2': -2, 'd_agent3': -1, 'd_agent4': -2, 'd_agent5': -1, 'd_agent6': -1}
+release 2 @ 7.506s spread=24ms lag_vs_worktrees_ms={'b_filters': 21, 'c_tab': 0, 'd_agent1': -3, 'd_agent2': -2, 'd_agent3': -2, 'd_agent4': -2, 'd_agent5': -1, 'd_agent6': -2}
+release 3 @ 11.120s spread=25ms lag_vs_worktrees_ms={'b_filters': 22, 'c_tab': 0, 'd_agent1': -3, 'd_agent2': -2, 'd_agent3': -2, 'd_agent4': -3, 'd_agent5': -2, 'd_agent6': -3}
+release 4 @ 14.789s spread=24ms lag_vs_worktrees_ms={'b_filters': 20, 'c_tab': 0, 'd_agent1': -3, 'd_agent2': -2, 'd_agent3': -2, 'd_agent4': -2, 'd_agent5': -1, 'd_agent6': -2}
+release 5 @ 18.443s spread=23ms lag_vs_worktrees_ms={'b_filters': 20, 'c_tab': 0, 'd_agent1': -3, 'd_agent2': -2, 'd_agent3': -2, 'd_agent4': -2, 'd_agent5': -1, 'd_agent6': -2}
+worst spread 26 ms
