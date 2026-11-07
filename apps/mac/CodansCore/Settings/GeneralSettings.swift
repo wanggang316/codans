@@ -67,10 +67,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// per-Project override is set. `nil` means "no global default" — merging a PR presents
   /// the ask-each-time sheet.
   public var postMergeAction: MergedWorktreeAction?
-  /// Code Host aliases from Settings › Code Hosts (ADR 0005). The resolver checks them
-  /// before any other step. Edit through `saveCodeHostAlias` / `removeCodeHostAlias` so the
+  /// Git Platform aliases from Settings › Git Platforms (ADR 0005). The resolver checks them
+  /// before any other step. Edit through `saveGitPlatformAlias` / `removeGitPlatformAlias` so the
   /// remote host stays unique. Omitted from the file when empty.
-  public var codeHostAliases: [CodeHostAlias]
+  public var gitPlatformAliases: [GitPlatformAlias]
 
   /// Sparkle release channel. Default `stable`. Drives `SPUUpdaterDelegate.allowedChannels(for:)`.
   /// The background-check cadence is a separate knob (`updateCheckInterval`) so flipping the
@@ -143,7 +143,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     defaultGitViewerID: EditorID? = nil,
     defaultMergeStrategy: MergeStrategy? = nil,
     postMergeAction: MergedWorktreeAction? = nil,
-    codeHostAliases: [CodeHostAlias] = [],
+    gitPlatformAliases: [GitPlatformAlias] = [],
     updateChannel: UpdateChannel = .stable,
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
@@ -162,7 +162,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.defaultGitViewerID = defaultGitViewerID ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = defaultMergeStrategy
     self.postMergeAction = postMergeAction
-    self.codeHostAliases = codeHostAliases
+    self.gitPlatformAliases = gitPlatformAliases
     self.updateChannel = updateChannel
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
@@ -182,7 +182,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   // Internal and `CaseIterable` so tests can check that `encode(to:)` writes every live key.
   enum CodingKeys: String, CodingKey, CaseIterable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
-    case codeHostAliases
+    case gitPlatformAliases
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case quitConfirmation, quitAction
@@ -222,8 +222,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.postMergeAction = try container.decodeIfPresent(MergedWorktreeAction.self, forKey: .postMergeAction)
     // An entry that does not decode (for example a kind from a later version) is dropped,
     // so the other aliases and the rest of the file still load.
-    self.codeHostAliases =
-      (try container.decodeIfPresent([LossyCodeHostAlias].self, forKey: .codeHostAliases) ?? [])
+    self.gitPlatformAliases =
+      (try container.decodeIfPresent([LossyGitPlatformAlias].self, forKey: .gitPlatformAliases) ?? [])
       .compactMap(\.alias)
     self.updateChannel =
       try container.decodeIfPresent(UpdateChannel.self, forKey: .updateChannel) ?? .stable
@@ -309,8 +309,8 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encodeIfPresent(defaultGitViewerID, forKey: .defaultGitViewerID)
     try container.encodeIfPresent(defaultMergeStrategy, forKey: .defaultMergeStrategy)
     try container.encodeIfPresent(postMergeAction, forKey: .postMergeAction)
-    if !codeHostAliases.isEmpty {
-      try container.encode(codeHostAliases, forKey: .codeHostAliases)
+    if !gitPlatformAliases.isEmpty {
+      try container.encode(gitPlatformAliases, forKey: .gitPlatformAliases)
     }
     try container.encode(updateChannel, forKey: .updateChannel)
     try container.encode(updateCheckInterval, forKey: .updateCheckInterval)
@@ -333,10 +333,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   }
 }
 
-private nonisolated struct LossyCodeHostAlias: Decodable {
-  let alias: CodeHostAlias?
+private nonisolated struct LossyGitPlatformAlias: Decodable {
+  let alias: GitPlatformAlias?
 
   init(from decoder: Decoder) throws {
-    alias = try? CodeHostAlias(from: decoder)
+    alias = try? GitPlatformAlias(from: decoder)
   }
 }

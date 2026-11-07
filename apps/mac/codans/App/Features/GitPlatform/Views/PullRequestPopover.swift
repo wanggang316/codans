@@ -1,0 +1,324 @@
+import SwiftUI
+import CodansCore
+
+/// The 360 pt popover anchored to a `PullRequestBadge`. Owns four sections — header,
+/// checks, actions, footer link — and swaps between loaded / loading / error / no-PR
+/// bodies based on the data it was given.
+///
+/// The popover is a pure consumer of state: all actions are callbacks bubbled up to the
+/// parent feature. That keeps the view testable in previews without a TCA store.
+struct PullRequestPopover: View {
+  enum Content: Equatable {
+    case loaded(PullRequestSnapshot)
+    case loading
+    case error(GitPlatformError)
+    case noPullRequest(branch: String)
+  }
+
+  let content: Content
+  /// UI name of the Git Platform ("GitHub"), for the "Open on …" labels.
+  let gitPlatformName: String
+  /// UI name of a Pull Request on the Git Platform ("pull request" / "merge request").
+  var pullRequestName: String = "pull request"
+  /// Git Platform of the Worktree; picks the reference prefix (`#` / `!`).
+  var gitPlatformKind: GitPlatformKind?
+  let defaultMergeStrategy: MergeStrategy
+  let canMerge: Bool
+  let mergeDisabledReason: String?
+  let onMerge: (MergeStrategy) -> Void
+  let onClose: () -> Void
+  let onMarkReady: () -> Void
+  let onRerunFailedChecks: () -> Void
+  let onOpenOnWeb: () -> Void
+  let onOpenCheckLog: (URL) -> Void
+  let onSetProjectDefaultStrategy: (MergeStrategy) -> Void
+  let onRetry: () -> Void
+
+  var body: some View {
+    contentView
+      .frame(width: 360)
+      .padding(12)
+      // Toolbar-anchored hosts (status bar) ship a smaller default
+      // `controlSize` into the popover than List-row hosts (sidebar),
+      // so the same popover otherwise rendered at two different sizes
+      // depending on which surface opened it. Pinning `.regular` here
+      // normalises both surfaces.
+      .controlSize(.regular)
+  }
+
+  @ViewBuilder
+  private var contentView: some View {
+    switch content {
+    case .loaded(let snapshot):
+      loadedBody(snapshot: snapshot)
+    case .loading:
+      loadingBody
+    case .error(let err):
+      errorBody(err)
+    case .noPullRequest(let branch):
+      noPullRequestBody(branch: branch)
+    }
+  }
+
+  // MARK: - Loaded
+
+  private func loadedBody(snapshot: PullRequestSnapshot) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      header(snapshot: snapshot)
+      if snapshot.hasMergeConflict {
+        conflictBanner
+      }
+      if !snapshot.checkRollup.isEmpty {
+        Divider()
+        checksSection(snapshot.checkRollup)
+      }
+      Divider()
+      actions(snapshot: snapshot)
+    }
+  }
+
+  /// Inline merge-conflict notice. The disabled merge button's tooltip already explains
+  /// *why* merge is off, but that's only discoverable on hover — surfacing the conflict
+  /// as a persistent banner makes the blocker visible the moment the popover opens.
+  /// Gated on `PullRequestSnapshot.hasMergeConflict` (the same predicate the sidebar /
+  /// titlebar pills redden on), so all three surfaces agree on what "conflicted" means.
+  private var conflictBanner: some View {
+    // Wrap via `lineLimit`, exactly like the header title (which wraps reliably in this
+    // popover). `fixedSize(vertical:)` does NOT work here: inside the HStack the Text is
+    // sized at its single-line width first, so its "ideal height" is one line and it
+    // truncates ("…resol…") instead of wrapping. `lineLimit(3)` instead tells the layout
+    // the Text may reflow across up to three lines, so it wraps within the available
+    // width. `.top` keeps the icon level with the first line.
+    HStack(alignment: .top, spacing: 6) {
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
+        .accessibilityHidden(true)
+      Text("Merge conflicts — this branch can't be merged until they're resolved.")
+        .font(.caption)
+        .foregroundStyle(.primary)
+        .multilineTextAlignment(.leading)
+        .lineLimit(3)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 6)
+    .background(
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .fill(Color.red.opacity(0.12))
+    )
+    .accessibilityElement(children: .combine)
+  }
+
+  private func header(snapshot: PullRequestSnapshot) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text("\(GitPlatformLabels.referencePrefix(gitPlatformKind))\(snapshot.number)")
+          .font(.callout.monospacedDigit())
+          .foregroundStyle(.secondary)
+        Text(snapshot.title)
+          .font(.callout.weight(.semibold))
+          .lineLimit(2)
+      }
+      HStack(spacing: 6) {
+        statePill(snapshot)
+        Text("opened by @\(snapshot.author)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text("·")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text("+\(snapshot.additions) −\(snapshot.deletions)")
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+        Text("·")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text("\(snapshot.commitCount) commit\(snapshot.commitCount == 1 ? "" : "s")")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private func statePill(_ snapshot: PullRequestSnapshot) -> some View {
+    let label: String = {
+      if snapshot.isDraft && snapshot.state == .open { return "Draft" }
+      switch snapshot.state {
+      case .open: return "Open"
+      case .merged: return "Merged"
+      case .closed: return "Closed"
+      }
+    }()
+    let fill: Color = snapshot.isDraft ? PullRequestStateColor.draftFill : snapshot.state.badgeFill
+    return Text(label)
+      .font(.caption2.weight(.semibold))
+      .foregroundStyle(PullRequestStateColor.onFillPrimary)
+      .padding(.horizontal, 6)
+      .padding(.vertical, 2)
+      .background(Capsule(style: .continuous).fill(fill))
+  }
+
+  private func checksSection(_ checks: [CheckResult]) -> some View {
+    let (passed, failed, pending) = classify(checks)
+    let sorted = sortedByFailingFirst(checks)
+    let visible = Array(sorted.prefix(5))
+    let hidden = sorted.count - visible.count
+    return VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        Text("Checks").font(.caption.weight(.semibold))
+        Spacer()
+        Text(summary(passed: passed, failed: failed, pending: pending))
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+      ForEach(visible, id: \.id) { check in
+        CheckRow(check: check, onOpenLog: onOpenCheckLog)
+      }
+      if hidden > 0 {
+        Text("… \(hidden) more")
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+      }
+    }
+  }
+
+  private func actions(snapshot: PullRequestSnapshot) -> some View {
+    HStack(spacing: 8) {
+      MergeSplitButton(
+        defaultStrategy: defaultMergeStrategy,
+        options: snapshot.mergeOptions,
+        isDisabled: !canMerge,
+        disabledReason: mergeDisabledReason,
+        onMerge: onMerge,
+        onSetProjectDefault: onSetProjectDefaultStrategy
+      )
+      if snapshot.state == .open {
+        secondaryActionButton("Close") { onClose() }
+      }
+      if snapshot.isDraft && snapshot.state == .open {
+        secondaryActionButton("Mark ready") { onMarkReady() }
+      }
+      if snapshot.canRerunFailedChecks {
+        secondaryActionButton("Rerun failed") { onRerunFailedChecks() }
+      }
+      Spacer()
+      Button {
+        onOpenOnWeb()
+      } label: {
+        Image(systemName: "arrow.up.right.square")
+          .accessibilityLabel("Open on \(gitPlatformName)")
+      }
+      .buttonStyle(.borderless)
+      .help("Open on \(gitPlatformName)")
+    }
+  }
+
+  /// Grey secondary-action capsule. `.borderedProminent` derives its label colour from
+  /// the tint's raw luminance, and the translucent grey tint reads as "light" — so the
+  /// style forces dark text even in dark mode, overriding any `foregroundStyle` on the
+  /// label. Drawing the capsule ourselves keeps the label on SwiftUI's adaptive
+  /// `.primary` in both schemes; metrics mirror the `.borderedProminent` pill so the
+  /// row still reads as uniformly-shaped capsules next to the Merge split button.
+  private func secondaryActionButton(_ title: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Text(title)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule(style: .continuous).fill(Color.secondary.opacity(0.25)))
+        .contentShape(Capsule(style: .continuous))
+    }
+    .buttonStyle(.plain)
+  }
+
+  // MARK: - loading / error / no-PR
+
+  private var loadingBody: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(0..<3, id: \.self) { _ in
+        RoundedRectangle(cornerRadius: 4)
+          .fill(Color.secondary.opacity(0.2))
+          .frame(height: 14)
+      }
+    }
+  }
+
+  private func errorBody(_ error: GitPlatformError) -> some View {
+    VStack(spacing: 10) {
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.yellow)
+        .font(.title2)
+        .accessibilityHidden(true)
+      Text(error.userFacingMessage)
+        .font(.callout)
+        .multilineTextAlignment(.center)
+      retryButton(for: error)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  @ViewBuilder
+  private func retryButton(for error: GitPlatformError) -> some View {
+    switch error {
+    case .cliNotInstalled(let kind):
+      Button("Install \(kind.cliName)") { onRetry() }
+        .buttonStyle(.borderedProminent)
+    case .notAuthenticated(let kind, _):
+      Button("Run \(kind.cliName) auth login") { onRetry() }
+        .buttonStyle(.borderedProminent)
+    default:
+      Button("Retry") { onRetry() }
+        .buttonStyle(.bordered)
+    }
+  }
+
+  private func noPullRequestBody(branch: String) -> some View {
+    VStack(spacing: 8) {
+      Text("No \(pullRequestName) for branch \(branch)")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+      Button("Create on \(gitPlatformName)") { onOpenOnWeb() }
+        .buttonStyle(.bordered)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  // MARK: - Helpers
+
+  private func classify(_ checks: [CheckResult]) -> (passed: Int, failed: Int, pending: Int) {
+    var passed = 0
+    var failed = 0
+    var pending = 0
+    for c in checks {
+      switch c.status {
+      case .completed:
+        if c.conclusion == .success { passed += 1 } else if c.conclusion == .failure { failed += 1 }
+      case .inProgress, .queued, .waiting, .pending:
+        pending += 1
+      }
+    }
+    return (passed, failed, pending)
+  }
+
+  private func sortedByFailingFirst(_ checks: [CheckResult]) -> [CheckResult] {
+    checks.sorted { a, b in
+      rank(a) < rank(b)
+    }
+  }
+
+  private func rank(_ check: CheckResult) -> Int {
+    switch (check.status, check.conclusion) {
+    case (.completed, .failure): return 0
+    case (.inProgress, _), (.queued, _), (.waiting, _), (.pending, _): return 1
+    default: return 2
+    }
+  }
+
+  private func summary(passed: Int, failed: Int, pending: Int) -> String {
+    var parts: [String] = []
+    if passed > 0 { parts.append("\(passed) passed") }
+    if failed > 0 { parts.append("\(failed) failed") }
+    if pending > 0 { parts.append("\(pending) pending") }
+    return parts.joined(separator: " · ")
+  }
+}

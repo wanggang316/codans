@@ -2,19 +2,19 @@ import Foundation
 import CodansCore
 import os.log
 
-/// Persists the Code Host layer's per-fetch-unit Pull Request snapshots to disk so the
-/// sidebar can paint badges on the first render pass after launch, before any Code Host
+/// Persists the Git Platform layer's per-fetch-unit Pull Request snapshots to disk so the
+/// sidebar can paint badges on the first render pass after launch, before any Git Platform
 /// round-trip has completed. The reducer state is hydrated from this cache on
-/// `CodeHostFeature.Action.seedFromCache`, and written back on every
+/// `GitPlatformFeature.Action.seedFromCache`, and written back on every
 /// `projectBatchLoaded(.success)`.
 ///
 /// On-disk shape: one JSON file at `~/Library/Caches/codans/github-snapshots.json` (the
-/// name predates the Code Host layer; keeping it avoids an orphaned file), a
+/// name predates the Git Platform layer; keeping it avoids an orphaned file), a
 /// `VersionedEnvelope` whose entries map fetch-unit UUID strings to
 /// `BatchedPullRequests`. An unreadable file is deleted, and an entry that does not
 /// decode with the current model is dropped — the next fetch refills it. There is no
 /// migration. Stale Projects (no longer in the catalog) are dropped by
-/// `CodeHostFeature` when it seeds from the cache.
+/// `GitPlatformFeature` when it seeds from the cache.
 ///
 /// Writes atomic via `AtomicFileStore.write`; a crash mid-write leaves the previous
 /// file intact. Failures are logged and swallowed — a stale cache is a UX
@@ -25,7 +25,7 @@ nonisolated final class PullRequestSnapshotCache: Sendable {
   /// Highest `sequence` committed to disk. Guarded by `writeLock`.
   private nonisolated(unsafe) var lastWrittenSequence: UInt64 = 0
   private static let logger = Logger(
-    subsystem: "com.gumpw.codans.codehost", category: "snapshot-cache"
+    subsystem: "com.gumpw.codans.gitplatform", category: "snapshot-cache"
   )
 
   /// Envelope version. v0 (unversioned, keyed by `ProjectID` objects) is dropped whole.

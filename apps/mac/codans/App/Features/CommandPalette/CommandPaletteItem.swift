@@ -86,7 +86,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     case archiveCurrentWorktree
     case toggleCurrentWorktreePinned
     case openCurrentPR
-    case openCurrentProjectOnCodeHost
+    case openCurrentProjectOnGitPlatform
     case showArchivedWorktrees
 
     // Project — current-selection batch / maintenance actions. `route`

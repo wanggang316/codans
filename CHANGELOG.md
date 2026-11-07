@@ -27,11 +27,11 @@ and the project does not yet follow semantic versioning — every release until
   merge method applies), squash and merge, close, mark ready, and rerun
   failed jobs. "Open MR on GitLab" and "Open Project on GitLab" open the
   GitLab pages. Needs `glab` 1.122.0 or later.
-- **Settings › Code Hosts.** The GitHub pane is now Code Hosts. It shows
+- **Settings › Git Platforms.** The GitHub pane is now Git Platforms. It shows
   whether `gh` and `glab` are installed and logged in, with the host and
   user, Re-check, and a docs link for each, and the merge defaults that
   apply to both.
-- **Code Host aliases.** Settings › Code Hosts has a list of aliases: a
+- **Git Platform aliases.** Settings › Git Platforms has a list of aliases: a
   remote host as it appears in the `origin` URL, GitHub or GitLab, and the
   API host the CLI is logged in to. Use one for a remote host that neither
   `gh` nor `glab` knows, such as an SSH host name that is not the API host.
@@ -42,7 +42,7 @@ and the project does not yet follow semantic versioning — every release until
   with that name, so `git@github-work:…` and `ssh://git@host:2222/…` show
   their badges.
 - **Mixed Workspaces.** A Workspace with GitHub and GitLab members shows
-  the PRs and MRs of each member from its own Code Host.
+  the PRs and MRs of each member from its own Git Platform.
 - **CLI problems show at the badge.** When `gh` or `glab` is missing, not
   logged in, or too old, each Worktree row shows the message with the
   command that fixes it.
@@ -75,8 +75,8 @@ and the project does not yet follow semantic versioning — every release until
   `project show`, and `project add` show `host=<id|0>`. In `--json`,
   `host.id` is `"0"` for This Mac (it was `null`), and `project list` and
   `project add` now carry `host`.
-- **Install command of a missing Code Host CLI.** When `gh` or `glab` is
-  missing, Settings › Code Hosts says only which CLI is missing, shows
+- **Install command of a missing Git Platform CLI.** When `gh` or `glab` is
+  missing, Settings › Git Platforms says only which CLI is missing, shows
   `brew install <cli>` on its own line in a code style, and puts a copy
   button next to it. The button shows a checkmark after a click.
 - **Remote projects share Host records.** The catalog now keeps one record

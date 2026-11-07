@@ -153,8 +153,8 @@ struct RemoteInfoParseTests {
 
   // MARK: - Transport
 
-  /// SSH remotes name an SSH host, which can be an alias from `~/.ssh/config`; the Code
-  /// Host resolver needs to know that (ADR 0004 item 2).
+  /// SSH remotes name an SSH host, which can be an alias from `~/.ssh/config`; the Git
+  /// Platform resolver needs to know that (ADR 0004 item 2).
   @Test(arguments: [
     ("git@gl:codans-e2e/app.git", true),
     ("ssh://git@192.168.2.158:2222/codans-e2e/app.git", true),

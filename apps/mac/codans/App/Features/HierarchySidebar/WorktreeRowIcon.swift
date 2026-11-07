@@ -51,9 +51,9 @@ struct WorktreeRowIcon: View {
   /// used to sit inline next to the name now leads the row. Suppressed
   /// when a PR snapshot is present — PR-state still wins the icon slot.
   var isDefaultBranch: Bool = false
-  /// Code Host of the Worktree; names the Pull Request in the accessibility label
+  /// Git Platform of the Worktree; names the Pull Request in the accessibility label
   /// ("merge request !6" on GitLab).
-  var codeHostKind: CodeHostKind?
+  var gitPlatformKind: GitPlatformKind?
 
   /// The sidebar outline paints the selection chrome via NSTableView's
   /// `.sourceList` mode, and `SidebarOutlineCell` sets
@@ -199,7 +199,7 @@ struct WorktreeRowIcon: View {
       case .closed: return "closed"
       }
     }()
-    let kind = codeHostKind ?? .github
+    let kind = gitPlatformKind ?? .github
     return Text("\(stateWord) \(kind.pullRequestName) \(kind.referencePrefix)\(snapshot.number)")
   }
 }

@@ -51,7 +51,7 @@ struct PersistenceVersioningTests {
 
     let id = ProjectID()
     let snapshot = BatchedPullRequests(
-      repository: CodeHostRepository(kind: .github, host: "github.com", path: "w/r"),
+      repository: GitPlatformRepository(kind: .github, host: "github.com", path: "w/r"),
       byBranch: [:], seenBranches: ["main"], fetchedAt: Date(timeIntervalSince1970: 1)
     )
     cache.save([id: snapshot], sequence: 1)
@@ -71,7 +71,7 @@ struct PersistenceVersioningTests {
     cache.save(
       [
         current: BatchedPullRequests(
-          repository: CodeHostRepository(kind: .github, host: "github.com", path: "w/r"),
+          repository: GitPlatformRepository(kind: .github, host: "github.com", path: "w/r"),
           byBranch: [:], seenBranches: ["main"], fetchedAt: Date(timeIntervalSince1970: 1))
       ], sequence: 1)
     // Add a v1-shaped entry (owner/repo, no repository) next to the current one.

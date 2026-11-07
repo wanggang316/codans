@@ -9,9 +9,9 @@ public enum SettingsSection: Hashable, Sendable {
   case globalCommands
   case agents
   case workflows
-  /// Code Hosts (GitHub, GitLab): CLI availability and shared Pull Request defaults.
+  /// Git Platforms (GitHub, GitLab): CLI availability and shared Pull Request defaults.
   /// Not the "Hosts" pane, which lists machines.
-  case codeHosts
+  case gitPlatforms
   case hosts
   case worktree
   case terminal
@@ -24,7 +24,7 @@ public enum SettingsSection: Hashable, Sendable {
   // MARK: - Project-scoped sub-panes
 
   /// Project-universal settings: editor, git viewer (git-only), worktree
-  /// (git-only), Code Host (git-only), environment variables. Sections render
+  /// (git-only), Git Platform (git-only), environment variables. Sections render
   /// conditionally on `ProjectKind` inside `ProjectGeneralSettingsView`.
   case projectGeneral(ProjectID)
   /// User-defined custom commands (the inline command table).
@@ -32,7 +32,8 @@ public enum SettingsSection: Hashable, Sendable {
 
   /// Canonical iteration order for global sidebar rows.
   public static let globals: [SettingsSection] = [
-    .general, .codeHosts, .hosts, .worktree, .terminal, .agents, .workflows, .notifications, .developer, .globalCommands,
+    .general, .gitPlatforms, .hosts, .worktree, .terminal, .agents, .workflows, .notifications, .developer,
+    .globalCommands,
     .shortcuts, .updates, .about,
   ]
 
@@ -45,7 +46,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .globalCommands: return "Global Commands"
     case .agents: return "Agents"
     case .workflows: return "Workflows"
-    case .codeHosts: return "Code Hosts"
+    case .gitPlatforms: return "Git Platforms"
     case .hosts: return "Hosts"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"

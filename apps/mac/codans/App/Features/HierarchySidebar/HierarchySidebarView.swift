@@ -39,7 +39,7 @@ struct HierarchySidebarView: View {
   /// Optional GitHub integration store. When non-nil, each Worktree row renders a PR
   /// badge (silent when no PR is matched) and the row hosts the PR popover. Nil in
   /// previews / tests that don't exercise the integration.
-  var codeHostStore: StoreOf<CodeHostFeature>?
+  var gitPlatformStore: StoreOf<GitPlatformFeature>?
   /// Rows the notification filter lists (`RootFeature.State.notifiedWorktreeIDs`).
   var notifiedWorktreeIDs: Set<WorktreeID> = []
   /// Optional editor store. Drives the worktree context menu's "Open in
@@ -200,8 +200,8 @@ struct HierarchySidebarView: View {
   }
 
   private var pullRequestWorktreeIDs: Set<WorktreeID> {
-    guard let codeHostStore else { return [] }
-    return Set(codeHostStore.snapshots.keys)
+    guard let gitPlatformStore else { return [] }
+    return Set(gitPlatformStore.snapshots.keys)
   }
 
   var body: some View {
@@ -810,7 +810,7 @@ struct HierarchySidebarView: View {
       ProjectHeaderRow(
         project: project,
         store: store,
-        codeHostStore: codeHostStore,
+        gitPlatformStore: gitPlatformStore,
         rowWorktree: root,
         isRowSelected: currentSelection.worktreeID == root.id,
         agentStateStore: agentStateStore,
@@ -828,7 +828,7 @@ struct HierarchySidebarView: View {
       ProjectHeaderRow(
         project: project,
         store: store,
-        codeHostStore: codeHostStore,
+        gitPlatformStore: gitPlatformStore,
         onToggleExpansion: toggleExpansion
       ) {
         EmptyView()
@@ -901,8 +901,8 @@ struct HierarchySidebarView: View {
   /// Open and merged pull-request counts over `rows`, nil when nothing is
   /// known yet: "3 PRs · 1 merged".
   private func pullRequestSummary(over rows: [Worktree]) -> String? {
-    guard let codeHostStore else { return nil }
-    let snapshots = rows.compactMap { codeHostStore.snapshots[$0.id] }
+    guard let gitPlatformStore else { return nil }
+    let snapshots = rows.compactMap { gitPlatformStore.snapshots[$0.id] }
     guard !snapshots.isEmpty else { return nil }
     let merged = snapshots.filter { $0.state == .merged }.count
     let open = snapshots.count - merged
@@ -971,7 +971,7 @@ struct HierarchySidebarView: View {
     indent: CGFloat = 14
   ) -> some View {
     let isSelected = currentSelection.worktreeID == worktree.id
-    let snapshot = codeHostStore?.snapshots[worktree.id]
+    let snapshot = gitPlatformStore?.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
       // rollup data travels with the snapshot now (filled by the batched
       // `gh api graphql` path in `parseBatchedPullRequests`). The v1 per-PR
@@ -1105,7 +1105,7 @@ struct HierarchySidebarView: View {
         snapshot: snapshot, rollup: rollup, isSelected: isSelected,
         glyph: leadingGlyph, isDefaultBranch: isMainCheckout && !isSyntheticWorktree,
         hasLifecycle: lifecycle != nil,
-        codeHostKind: codeHostStore?.state.codeHostKind(for: worktree.id)
+        gitPlatformKind: gitPlatformStore?.state.gitPlatformKind(for: worktree.id)
       )
       VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 4) {
@@ -1323,26 +1323,26 @@ struct HierarchySidebarView: View {
   private func worktreeGitHubAndChangesItems(
     worktree: Worktree, project: Project
   ) -> some View {
-    let codeHost = codeHostStore?.state.codeHostKind(forProject: project.id, worktreeID: worktree.id)
+    let gitPlatform = gitPlatformStore?.state.gitPlatformKind(forProject: project.id, worktreeID: worktree.id)
     if project.repoRoot(for: worktree) != nil {
       Button {
-        store.send(.delegate(.openOnCodeHost(projectID: project.id, worktreeID: worktree.id)))
+        store.send(.delegate(.openOnGitPlatform(projectID: project.id, worktreeID: worktree.id)))
       } label: {
-        if codeHost == .gitlab {
-          Label(CodeHostLabels.openIn(codeHost), systemImage: "arrow.up.right.square")
+        if gitPlatform == .gitlab {
+          Label(GitPlatformLabels.openIn(gitPlatform), systemImage: "arrow.up.right.square")
         } else {
-          Label(CodeHostLabels.openIn(codeHost), image: "github")
+          Label(GitPlatformLabels.openIn(gitPlatform), image: "github")
         }
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: resolvedShortcuts)
     }
-    if let codeHostStore, let pullRequest = codeHostStore.snapshots[worktree.id] {
+    if let gitPlatformStore, let pullRequest = gitPlatformStore.snapshots[worktree.id] {
       Button {
-        codeHostStore.send(.delegate(.openURL(pullRequest.url)))
+        gitPlatformStore.send(.delegate(.openURL(pullRequest.url)))
       } label: {
         // Same PR-state octicon the row leads with (WorktreeRowIcon).
         Label(
-          CodeHostLabels.openPullRequestLong(codeHost),
+          GitPlatformLabels.openPullRequestLong(gitPlatform),
           image: pullRequest.state.rowIconName(isDraft: pullRequest.isDraft))
       }
       .appKeyboardShortcut(.openCurrentPR, in: resolvedShortcuts)
@@ -1699,14 +1699,14 @@ struct HierarchySidebarView: View {
 
   @ViewBuilder
   fileprivate func pullRequestBadge(for worktree: Worktree, in project: Project) -> some View {
-    if let codeHostStore, let branch = worktree.branch {
+    if let gitPlatformStore, let branch = worktree.branch {
       WorktreePullRequestBadge(
-        store: codeHostStore,
+        store: gitPlatformStore,
         worktreeID: worktree.id,
         branch: branch,
         popoverContent: {
           WorktreePullRequestPopover(
-            store: codeHostStore,
+            store: gitPlatformStore,
             worktreeID: worktree.id,
             branch: branch
           )
@@ -1755,7 +1755,7 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// Read-only access to per-Worktree PR snapshots so the ⋯ menu can resolve
   /// the project's merged Worktrees for the "… All Merged Worktrees" items.
   /// Nil in previews — the items then render disabled.
-  var codeHostStore: StoreOf<CodeHostFeature>?
+  var gitPlatformStore: StoreOf<GitPlatformFeature>?
   /// The folder this row stands for (`Project.rowWorktree`), nil for a git
   /// Project. The row then carries that worktree's selection, busy state,
   /// unread bell, and ⌃N hint, the way a worktree row does.
@@ -1792,11 +1792,11 @@ private struct ProjectHeaderRow<Accessory: View>: View {
   /// `git branch --merged`. A checkout a workspace still lists as a child is
   /// left out: it is the workspace's to remove.
   private var mergedWorktreeIDs: [WorktreeID] {
-    guard let codeHostStore else { return [] }
+    guard let gitPlatformStore else { return [] }
     return project.worktrees
       .filter { !$0.archived && $0.path != project.rootPath }
       .filter { hierarchyManager.workspaceMemberships[$0.id] == nil }
-      .filter { codeHostStore.snapshots[$0.id]?.state == .merged }
+      .filter { gitPlatformStore.snapshots[$0.id]?.state == .merged }
       .map(\.id)
   }
 

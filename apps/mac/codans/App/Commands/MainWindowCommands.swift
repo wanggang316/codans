@@ -187,14 +187,14 @@ struct MainWindowCommands: Commands {
       .appKeyboardShortcut(.toggleDiffInspector, in: shortcuts)
       .disabled(!hasActiveWorktree)
 
-      Button(CodeHostLabels.openPullRequest(currentCodeHost)) {
+      Button(GitPlatformLabels.openPullRequest(currentGitPlatform)) {
         store()?.send(.openCurrentPRRequested)
       }
       .appKeyboardShortcut(.openCurrentPR, in: shortcuts)
       .disabled(!hasPRForCurrentWorktree)
 
-      Button(CodeHostLabels.openProject(currentCodeHost)) {
-        store()?.send(.openCurrentProjectOnCodeHostRequested)
+      Button(GitPlatformLabels.openProject(currentGitPlatform)) {
+        store()?.send(.openCurrentProjectOnGitPlatformRequested)
       }
       .appKeyboardShortcut(.openProjectOnGitHub, in: shortcuts)
       .disabled(!hasCurrentProject)
@@ -459,10 +459,10 @@ struct MainWindowCommands: Commands {
 
   // MARK: - Enablement
 
-  /// Code Host of the selected Worktree; names the "Open PR on GitHub" items.
-  private var currentCodeHost: CodeHostKind? {
+  /// Git Platform of the selected Worktree; names the "Open PR on GitHub" items.
+  private var currentGitPlatform: GitPlatformKind? {
     guard let state = store()?.state else { return nil }
-    return state.codeHost.codeHostKind(
+    return state.gitPlatform.gitPlatformKind(
       forProject: state.selection.projectID, worktreeID: state.selection.worktreeID)
   }
 
@@ -477,7 +477,7 @@ struct MainWindowCommands: Commands {
   private var hasPRForCurrentWorktree: Bool {
     guard
       let worktreeID = store()?.state.selection.worktreeID,
-      store()?.state.codeHost.snapshots[worktreeID] != nil
+      store()?.state.gitPlatform.snapshots[worktreeID] != nil
     else { return false }
     return true
   }
