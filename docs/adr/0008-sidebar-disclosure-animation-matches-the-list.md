@@ -22,10 +22,10 @@ background, which grows in step with opacity).
   their place. Then they fade in (about 30 % at 60 ms, 65 % at 95 ms, 95 % at
   145 ms) while they slide down on the same spring (about 10 pt above at 95 ms,
   4.5 pt at 145 ms, 1 pt at 245 ms).
-- **Collapse, child rows.** They fade out about linearly (about 80 % at 45 ms,
-  50 % at 95 ms) while they move up faster and faster (about 1 pt at 45 ms,
-  2 pt at 60 ms, 5 pt at 95 ms, 7 pt at 110 ms). They are gone at about
-  125 ms. The rows below slide up over them.
+- **Collapse, child rows.** They fade out about linearly (about 90 % at
+  45 ms, 55 % at 95 ms, 45 % at 110 ms) while they move up faster and faster
+  (about 1 pt at 45 ms, 2 pt at 60 ms, 5 pt at 95 ms, 7 pt at 110 ms). They
+  are gone at about 125 ms. The rows below slide up over them.
 - **Chevron.** It turns at the start, in about 50–60 ms.
 
 ## Decision
