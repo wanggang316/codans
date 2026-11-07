@@ -587,7 +587,7 @@ enum SidebarDisclosureTiming {
   /// speed up as they move up (quadratic ease-in, about 1 pt after 45 ms and
   /// 7 pt after 110 ms), and the rows below slide over them.
   static let closeFade: TimeInterval = 0.11
-  static let closeFadeEnd: Float = 0.1
+  static let closeFadeEnd: Float = 0.3
   static let closeGone: TimeInterval = 0.12
   static let closeLift: CGFloat = 11
   static let closeLiftTime: TimeInterval = 0.14
