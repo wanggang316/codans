@@ -276,6 +276,28 @@ struct SidebarOutlineTests {
     abs(a.opacity - b.opacity) < 1e-6 && abs(a.offset - b.offset) < 1e-6
   }
 
+  /// The eye sees most in the faint range, so both ends of the fade stay
+  /// there a while: an expand is under 0.25 for the first 50 ms of its fade,
+  /// and a collapse for the last 50 ms before it is gone.
+  @Test
+  func childRowsStayFaintAtBothEndsOfTheFade() {
+    let timing = SidebarDisclosureTiming.self
+    let open = ChildRowPlan.open(at: 0)
+    func shownOpen(_ time: TimeInterval) -> Double {
+      ChildRowPlan.shown(cell: open.state(at: time).opacity, at: time, opening: true)
+    }
+    #expect(shownOpen(timing.openFadeDelay + 0.05) <= 0.25)
+    #expect(shownOpen(timing.openFadeDelay + 0.2) > 0.85)
+
+    let close = ChildRowPlan.close(from: ChildRowState(opacity: 1, offset: 0), at: 0)
+    func shownClose(_ time: TimeInterval) -> Double {
+      ChildRowPlan.shown(cell: close.state(at: time).opacity, at: time, opening: false)
+    }
+    let gone = stride(from: 0.0, to: close.duration, by: 0.001).first { shownClose($0) < 0.001 } ?? close.duration
+    #expect(shownClose(gone - 0.05) <= 0.25)
+    #expect(shownClose(0.02) > 0.85)
+  }
+
   /// A second toggle starts from where the first has got to, in both
   /// directions, so the opacity and the offset do not jump.
   @Test

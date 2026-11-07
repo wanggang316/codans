@@ -29,6 +29,9 @@ opacity).
   The rows below slide up over them.
 - **No step.** The largest change of a child row's opacity in one 1/60 s
   frame is about 0.22.
+- **Faint ends.** The eye sees most in the faint range. By eye, the
+  reference's child rows stay very faint for about three frames before they
+  become solid on expand, and stay faint for the last frames of a collapse.
 - **Chevron.** It turns at the start, in about 50–60 ms.
 
 ## Decision
@@ -42,14 +45,16 @@ opacity).
    whole update, on the row curve, and keeps that fade on the row view: an
    animation the outline puts on the row view's opacity does not stay on
    top. So the outline leaves that fade alone and shapes what shows from the
-   row's cell: the cell's opacity is the measured target divided by the
-   table's fade, capped at its start value, so the product follows the
-   reference where the table is ahead of it, and follows the table where
-   the table is behind (the end of an expand). Each factor is continuous, so
-   what shows has no step. The move is a layer animation on the row view.
-   The times and distances are in `SidebarDisclosureTiming`. A child row's
-   fade and move are a plan in time (`ChildRowPlan`), not a property of a
-   view: a view the table shows the row in later takes the same plan at the
+   row's cell: the cell's opacity is the target divided by the table's fade,
+   capped at its start value. The target is a fixed curve, one value per
+   1/60 s (`SidebarDisclosureTiming.openFadeCurve` and `closeFadeCurve`): on
+   expand the first four frames stay at most 0.25, on collapse the last four
+   are under 0.25, and no frame changes by more than 0.18. The table starts
+   its fade when it next draws, so a plan from rest moves onto the table's
+   clock once the table's fade shows. Each factor is continuous, so what
+   shows has no step. The move is a layer animation on the row view. A child
+   row's fade and move are a plan in time (`ChildRowPlan`), not a property of
+   a view: a view the table shows the row in later takes the same plan at the
    same point. A second toggle starts from where the running plan has got
    to; if the row comes back in another view, the old view keeps fading out
    while the new one fades in.
