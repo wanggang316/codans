@@ -167,6 +167,31 @@ struct SidebarOutlineTests {
     #expect(harness.rowIDs == ["project:\(repo.id.raw)"] + children)
   }
 
+  /// After an animated close and a later animated open, every row shows:
+  /// no row view the table reuses keeps an opacity the animation set. (An
+  /// offscreen window does not run the animations to their end, so this
+  /// checks the layers' own values.)
+  @Test
+  func everyRowShowsAfterAnAnimatedCloseAndOpen() async throws {
+    let harness = Harness()
+    var repo = repository("repo", worktrees: 2)
+    harness.show([repo])
+    repo.isExpanded = false
+    let close = SidebarExpansionToggle.next(.project(repo.id), after: nil)
+    harness.show([repo], toggle: close)
+    try await Task.sleep(for: .milliseconds(500))
+    repo.isExpanded = true
+    harness.show([repo], toggle: .next(.project(repo.id), after: close))
+    try await Task.sleep(for: .milliseconds(500))
+    harness.outline.layoutSubtreeIfNeeded()
+    #expect(harness.rowIDs.count == 4)
+    for row in 0..<harness.outline.numberOfRows {
+      let view = try #require(harness.outline.rowView(atRow: row, makeIfNecessary: false))
+      #expect(view.alphaValue == 1)
+      #expect((view.layer?.opacity ?? 1) == 1)
+    }
+  }
+
   @Test
   func theOutlineDoesNotOpenOrCloseRowsOnItsOwn() throws {
     let harness = Harness()
@@ -217,5 +242,67 @@ struct SidebarOutlineTests {
     let row = harness.outline.row(forItem: try #require(harness.outline.item(atRow: harness.outline.selectedRow)))
     let rowMid = harness.outline.rect(ofRow: row).midY
     #expect(abs(rowMid - (clip.bounds.minY + clip.bounds.height / 2)) < 1)
+  }
+
+  // MARK: Child row fade and move (ADR 0008)
+
+  /// The largest change in one 1/60 s frame of what shows of a row: the
+  /// table's fade of the row view times the plan's fade of the cell.
+  private func largestStep(_ plan: ChildRowPlan, opening: Bool) -> Double {
+    func shown(_ frame: Int) -> Double {
+      let time = Double(frame) / 60
+      return ChildRowPlan.shown(cell: plan.state(at: plan.start + time).opacity, at: time, opening: opening)
+    }
+    let frames = Int(plan.duration * 60) + 1
+    return (1...frames).map { abs(shown($0) - shown($0 - 1)) }.max() ?? 0
+  }
+
+  @Test
+  func childRowsFadeInFromNothingAndOutToNothingWithNoStep() {
+    let open = ChildRowPlan.open(at: 10)
+    #expect(open.state(at: 10).opacity == 0)
+    #expect(open.state(at: 10 + open.duration).opacity == 1)
+    #expect(open.state(at: 10 + open.duration).offset == 0)
+    // No larger than the largest step of the reference recording.
+    #expect(largestStep(open, opening: true) < 0.217)
+
+    let close = ChildRowPlan.close(from: ChildRowState(opacity: 1, offset: 0), at: 10)
+    #expect(close.state(at: 10).opacity == 1)
+    #expect(close.state(at: 10 + close.duration).opacity == 0)
+    #expect(largestStep(close, opening: false) < 0.222)
+  }
+
+  private func isClose(_ a: ChildRowState, _ b: ChildRowState) -> Bool {
+    abs(a.opacity - b.opacity) < 1e-6 && abs(a.offset - b.offset) < 1e-6
+  }
+
+  /// A second toggle starts from where the first has got to, in both
+  /// directions, so the opacity and the offset do not jump.
+  @Test
+  func aSecondToggleContinuesFromTheRunningOne() {
+    let close = ChildRowPlan.close(from: ChildRowState(opacity: 1, offset: 0), at: 10)
+    let closed = close.state(at: 10.08)
+    let reopen = ChildRowPlan.reopen(from: closed, at: 10.08)
+    #expect(isClose(reopen.state(at: 10.08), closed))
+    #expect(isClose(reopen.state(at: 10.08 + reopen.duration), ChildRowState(opacity: 1, offset: 0)))
+
+    let open = ChildRowPlan.open(at: 20)
+    let opened = open.state(at: 20.12)
+    let closeAgain = ChildRowPlan.close(from: opened, at: 20.12)
+    #expect(isClose(closeAgain.state(at: 20.12), opened))
+    #expect(closeAgain.state(at: 20.12 + closeAgain.duration).opacity == 0)
+  }
+
+  /// The layer animation runs the same curves the plan works out.
+  @Test
+  func theLayerAnimationMatchesThePlan() throws {
+    let plan = ChildRowPlan.open(at: 0)
+    let animation = plan.opacity.animation("opacity")
+    let values = try #require(animation.values as? [Double])
+    let times = try #require(animation.keyTimes).map(\.doubleValue)
+    #expect(values.count == times.count)
+    #expect(values.first == 0 && values.last == 1)
+    #expect(times.first == 0 && times.last == 1)
+    #expect(abs(animation.duration - plan.opacity.duration) < 1e-9)
   }
 }

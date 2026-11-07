@@ -12,20 +12,23 @@ same duration. In the Debug build the owner found that it did not feel right.
 The owner gave a reference recording of the sidebar animation they want. The
 recording was measured frame by frame, at its real frame times: the position
 of a row's text (2 px = 1 pt) and its ink (the sum of its contrast with the
-background, which grows in step with opacity).
+background over a fixed window around the row, which grows in step with
+opacity).
 
 - **Rows below the toggled row** move like a critically damped spring with
   ω ≈ 23 /s (a response of about 0.27 s), in both directions: half of the
   distance after about 85 ms, 90 % after 180 ms, 99 % after 300 ms. The fit is
   within 1 % at every frame.
 - **Expand, child rows.** They are hidden for about 55 ms, about 14 pt above
-  their place. Then they fade in (about 30 % at 60 ms, 65 % at 95 ms, 95 % at
-  145 ms) while they slide down on the same spring (about 10 pt above at 95 ms,
-  4.5 pt at 145 ms, 1 pt at 245 ms).
-- **Collapse, child rows.** They fade out about linearly (about 90 % at
-  45 ms, 55 % at 95 ms, 45 % at 110 ms) while they move up faster and faster
-  (about 1 pt at 45 ms, 2 pt at 60 ms, 5 pt at 95 ms, 7 pt at 110 ms). They
-  are gone at about 125 ms. The rows below slide up over them.
+  their place. Then they fade in without a step (about 2 % at 60 ms, 35 % at
+  95 ms, 75 % at 130 ms, 99 % at 180 ms) while they slide down on the same
+  spring (about 10 pt above at 95 ms, 4.5 pt at 145 ms, 1 pt at 245 ms).
+- **Collapse, child rows.** They fade out without a step (about 80 % at
+  45 ms, 25 % at 95 ms, gone at about 125 ms) while they move up faster and
+  faster (about 1 pt at 45 ms, 2 pt at 60 ms, 5 pt at 95 ms, 7 pt at 110 ms).
+  The rows below slide up over them.
+- **No step.** The largest change of a child row's opacity in one 1/60 s
+  frame is about 0.22.
 - **Chevron.** It turns at the start, in about 50–60 ms.
 
 ## Decision
@@ -35,12 +38,21 @@ background, which grows in step with opacity).
    (0.30, 0.40, 0.15, 0.98), the closest fit to the spring above (within
    about 0.6 %). `NSTableView` animates rows with a duration and a curve, not
    a spring.
-2. **Child rows.** The table's own fade of inserted and removed rows runs over
-   the whole update, so the outline adds its own fade and move to the child
-   row layers after the table's, with the shapes measured above. The times
-   and distances are in `SidebarDisclosureTiming`. A close starts from the
-   opacity and offset an open that is still running has reached, so a fast
-   second toggle turns the animation around without a jump.
+2. **Child rows.** The table fades the rows it inserts and removes over the
+   whole update, on the row curve, and keeps that fade on the row view: an
+   animation the outline puts on the row view's opacity does not stay on
+   top. So the outline leaves that fade alone and shapes what shows from the
+   row's cell: the cell's opacity is the measured target divided by the
+   table's fade, capped at its start value, so the product follows the
+   reference where the table is ahead of it, and follows the table where
+   the table is behind (the end of an expand). Each factor is continuous, so
+   what shows has no step. The move is a layer animation on the row view.
+   The times and distances are in `SidebarDisclosureTiming`. A child row's
+   fade and move are a plan in time (`ChildRowPlan`), not a property of a
+   view: a view the table shows the row in later takes the same plan at the
+   same point. A second toggle starts from where the running plan has got
+   to; if the row comes back in another view, the old view keeps fading out
+   while the new one fades in.
 3. **How rows open.** `NSOutlineView` has no expand animation like this. For
    an animated open, the outline opens the row while its data source reports
    no children, then inserts the children, and the children of each open
@@ -69,8 +81,11 @@ background, which grows in step with opacity).
   the reference changes.
 - The rows below follow a cubic curve, not a real spring, so they differ from
   the reference by up to about 0.6 % of the distance.
+- The child row fade works through the table's own fade, which the outline
+  cannot change, so the end of an expand follows the table's slower tail
+  (about 0.88 where the reference is at 0.93 at 160 ms).
 - The child row animations are layer animations next to the table's own. They
-  are not kept on the layer when they end, because the table reuses row
+  are not kept on the layers when they end, because the table reuses row
   views.
 
 ## Reconsider when
