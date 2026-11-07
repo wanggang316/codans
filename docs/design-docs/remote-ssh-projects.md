@@ -62,6 +62,14 @@ codans never collects or stores a password or key.
   in the shared Host form: Globe, Server, Cloud, MacBook, Mac mini, Mac Studio,
   Desktop. A record with no icon shows Server. This Mac has no record and shows
   the symbol of the machine model (`ThisMacIcon`); it is not editable.
+- **Remote Project marker.** Every place that marks a Project as remote uses
+  the `wifi` symbol, the same symbol as the sidebar's Remote filter button:
+  the sidebar Project row, the failed Project row, the worktree header, the
+  Agent State row, and the menu items that act on Remote Projects ("Open
+  Remote Project…", "Open Remote Project on This Host…", "Edit Remote
+  Project…"). One shared constant holds the symbol name, so the marker and
+  the filter cannot drift apart. The marker is not a Host icon: Host rows keep
+  `HostIcon`, and a remote clone source in Create Workspace keeps `globe`.
 
 **Non-Goals**
 
