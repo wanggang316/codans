@@ -22,11 +22,11 @@ struct RemoteConnectionSheetPresenter: ViewModifier {
 }
 
 /// SwiftUI sheet for `RemoteConnectionFeature`, on the shared `FormSheet`
-/// frame: a Host section (Host list + "New Host…"), the shared Host field rows
-/// when "New Host…" is selected, and a Path section whose footer holds the
-/// connection error. "Connecting…" shows in the bottom bar. Auth is delegated
-/// to the user's SSH config + agent — the sheet never asks for a password or
-/// key.
+/// frame. With an existing Host, one section holds the Host picker and the
+/// path; with "New Host…", the picker, the shared Host field rows, and the
+/// path are three sections. The last footer holds the connection error, and
+/// "Connecting…" shows in the bottom bar. Auth is delegated to the user's SSH
+/// config + agent — the sheet never asks for a password or key.
 struct RemoteConnectionSheet: View {
   @Bindable var store: StoreOf<RemoteConnectionFeature>
 
@@ -39,11 +39,10 @@ struct RemoteConnectionSheet: View {
       onCancel: { store.send(.cancelButtonTapped) },
       onSubmit: { store.send(.connectButtonTapped) },
       content: {
-        Section {
-          hostPicker
-        }
-
         if store.isNewHost {
+          Section {
+            hostPicker
+          }
           Section {
             HostFieldsEditor(
               draft: store.newHost,
@@ -52,33 +51,23 @@ struct RemoteConnectionSheet: View {
               onUsernameChanged: { store.send(.usernameChanged($0)) },
               onPortChanged: { store.send(.portChanged($0)) },
               onNameChanged: { store.send(.nameChanged($0)) },
-              onIconChanged: { store.send(.iconChanged($0)) },
+              onIconChanged: { store.send(.iconChanged($0)) }
             )
           } footer: {
             footnote("The new host is added to Settings › Hosts.")
           }
-        }
-
-        Section {
-          TextField(
-            "Path",
-            text: Binding(
-              get: { store.pathDraft },
-              set: { store.send(.pathChanged($0)) },
-            ),
-            prompt: Text(verbatim: "~/project or /srv/app"),
-          )
-          .disabled(store.isConnecting)
-        } footer: {
-          VStack(alignment: .leading, spacing: 4) {
-            if let error = store.errorMessage {
-              Text(error)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
-            }
-            footnote("Authentication uses your SSH config and agent.")
+          Section {
+            pathField
+          } footer: {
+            connectionFooter
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+          Section {
+            hostPicker
+            pathField
+          } footer: {
+            connectionFooter
+          }
         }
       },
       status: {
@@ -87,6 +76,31 @@ struct RemoteConnectionSheet: View {
         }
       },
     )
+  }
+
+  private var pathField: some View {
+    TextField(
+      "Path",
+      text: Binding(
+        get: { store.pathDraft },
+        set: { store.send(.pathChanged($0)) }
+      ),
+      prompt: Text(verbatim: "~/project or /srv/app")
+    )
+    .disabled(store.isConnecting)
+  }
+
+  /// The connection error, selectable, above the auth note.
+  private var connectionFooter: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      if let error = store.errorMessage {
+        Text(error)
+          .foregroundStyle(.red)
+          .textSelection(.enabled)
+      }
+      footnote("Authentication uses your SSH config and agent.")
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private func footnote(_ text: String) -> some View {
