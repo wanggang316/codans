@@ -103,6 +103,11 @@ struct SidebarOutline: NSViewRepresentable {
     private(set) var animatedNodeID: String?
     /// The child rows the last animated open or close moved and faded.
     private(set) var animatedChildIDs: [String] = []
+    /// The fade and move of each child row of the last animated toggles,
+    /// by row id (see `animate`).
+    private var childPlans: [String: ChildRowPlan] = [:]
+    /// The views of the rows the last animated close is fading out.
+    private var closingViews: [String: NSTableRowView] = [:]
     private var heightUpdateScheduled = false
     /// Each row's measured height, by row id. Kept across updates, so a
     /// reload measures only the rows it has not seen.
@@ -224,7 +229,7 @@ struct SidebarOutline: NSViewRepresentable {
         insertChildren(of: item, in: outline)
         outline.endUpdates()
       }
-      animateChildRows(under: item, in: outline, opening: true)
+      animate(childRowViews(under: item, in: outline, make: true), opening: true)
     }
 
     private func insertChildren(of item: SidebarOutlineItem, in outline: NSOutlineView) {
@@ -284,57 +289,54 @@ struct SidebarOutline: NSViewRepresentable {
       return rows
     }
 
-    private func animateChildRows(under item: SidebarOutlineItem, in outline: NSOutlineView, opening: Bool) {
-      animate(childRowViews(under: item, in: outline, make: true), opening: opening)
-    }
-
-    /// Replaces the table's own fade of the child rows, which runs over the
-    /// whole row animation, with the reference's: a short fade, and a small
-    /// move. Added after the table's animations, so these win. Not kept on
-    /// the layer when they end, because the table reuses row views.
+    /// Starts the reference's fade and move on each child row (ADR 0008).
+    /// The table fades the row view with the row curve and keeps that fade
+    /// on top; the plan shapes what shows from the row's cell and moves the
+    /// row view (`ChildRowPlan`). A row's animation is a plan in time, not a
+    /// property of a view: the table can show a row in another view part
+    /// way through, and `didAdd` gives that view the same animation, at the
+    /// same point. A second toggle during a plan starts from where the plan
+    /// has got to, so the opacity and the offset stay continuous.
     private func animate(_ rows: [(id: String, view: NSTableRowView)], opening: Bool) {
       animatedChildIDs = rows.map(\.id)
-      let timing = SidebarDisclosureTiming.self
-      let total = timing.rows
-      for (_, view) in rows {
-        view.wantsLayer = true
-        guard let layer = view.layer else { continue }
-        let now = layer.convertTime(CACurrentMediaTime(), from: nil)
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.duration = total
-        fade.calculationMode = .linear
-        // The outline is flipped: a negative offset is above the row's place.
-        let move: CAAnimation
-        if opening {
-          fade.values = [0, 0, 1, 1]
-          fade.keyTimes = [0, timing.openFadeDelay / total, (timing.openFadeDelay + timing.openFade) / total, 1]
-            .map { NSNumber(value: $0) }
-          fade.timingFunctions = [.init(name: .linear), .init(name: .easeOut), .init(name: .linear)]
-          // Waits above the row's place, hidden, then follows the rows below.
-          let slide = CABasicAnimation(keyPath: "transform.translation.y")
-          slide.fromValue = -timing.openOffset
-          slide.toValue = 0
-          slide.duration = total
-          slide.timingFunction = timing.rowCurve
-          slide.beginTime = now + timing.openMoveDelay
-          slide.fillMode = .backwards
-          move = slide
-        } else {
-          // From where an open that is still running has got to, so a
-          // quick second toggle turns it around without a jump.
-          let from = layer.presentation()?.opacity ?? layer.opacity
-          fade.values = [from, from * timing.closeFadeEnd, 0, 0]
-          fade.keyTimes = [0, timing.closeFade / total, timing.closeGone / total, 1].map { NSNumber(value: $0) }
-          let offset = (layer.presentation()?.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
-          let lift = CABasicAnimation(keyPath: "transform.translation.y")
-          lift.fromValue = offset
-          lift.toValue = offset - timing.closeLift
-          lift.duration = timing.closeLiftTime
-          lift.timingFunction = timing.closeLiftCurve
-          move = lift
+      let now = CACurrentMediaTime()
+      for (id, view) in rows {
+        let running = childPlans[id].flatMap { $0.isRunning(at: now) ? $0 : nil }
+        let plan: ChildRowPlan
+        switch (opening, running) {
+        case (true, nil): plan = .open(at: now)
+        case (true, let running?): plan = .reopen(from: running.state(at: now), at: now)
+        case (false, nil): plan = .close(from: ChildRowState(opacity: 1, offset: 0), at: now)
+        case (false, let running?): plan = .close(from: running.state(at: now), at: now)
         }
-        layer.add(fade, forKey: "sidebar.childFade")
-        layer.add(move, forKey: "sidebar.childMove")
+        childPlans[id] = plan
+        // When the row comes back in another view, the view that showed it
+        // while it closed keeps fading out: the two fades overlap, so what
+        // shows has no step.
+        plan.apply(to: view)
+      }
+      closingViews = opening ? [:] : Dictionary(rows.map { ($0.id, $0.view) }, uniquingKeysWith: { first, _ in first })
+      // The table can show a row in another view after this, as it lays
+      // the rows out: apply the plans again once it has. They are dated
+      // from their start, so this does not change what shows.
+      DispatchQueue.main.async { [weak self] in
+        self?.reapplyChildPlans()
+        DispatchQueue.main.async { [weak self] in self?.reapplyChildPlans() }
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in self?.reapplyChildPlans() }
+    }
+
+    private func reapplyChildPlans() {
+      guard let outline else { return }
+      let now = CACurrentMediaTime()
+      for (id, plan) in childPlans where plan.isRunning(at: now) {
+        guard let item = itemsByID[id] else { continue }
+        let row = outline.row(forItem: item)
+        guard row >= 0, let view = outline.rowView(atRow: row, makeIfNecessary: false) else { continue }
+        plan.apply(to: view)
+      }
+      for (id, view) in closingViews where childPlans[id]?.isRunning(at: now) == true {
+        childPlans[id]?.apply(to: view)
       }
     }
 
@@ -460,6 +462,17 @@ struct SidebarOutline: NSViewRepresentable {
 
     // MARK: Delegate
 
+    /// A view that starts to show a row takes the row's running fade and
+    /// move, at the point they have got to; a reused view drops any other.
+    func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
+      guard let item = outlineView.item(atRow: row) as? SidebarOutlineItem else { return }
+      if let plan = childPlans[item.id], plan.isRunning(at: CACurrentMediaTime()) {
+        plan.apply(to: rowView)
+      } else {
+        ChildRowPlan.clear(rowView)
+      }
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
       guard let item = item as? SidebarOutlineItem else { return nil }
       let cell =
@@ -560,6 +573,210 @@ struct SidebarOutline: NSViewRepresentable {
   }
 }
 
+/// The opacity and offset a child row shows. The outline is flipped: a
+/// negative offset is above the row's place.
+struct ChildRowState: Equatable {
+  let opacity: Double
+  let offset: Double
+}
+
+/// One value of a child row over time: pieces of curves, end to end, from
+/// the plan's start.
+struct ChildRowTrack {
+  struct Piece {
+    let end: TimeInterval
+    let to: Double
+    let curve: CAMediaTimingFunction
+  }
+
+  let from: Double
+  let pieces: [Piece]
+
+  var duration: TimeInterval { pieces.last?.end ?? 0 }
+
+  func value(at time: TimeInterval) -> Double {
+    var start: TimeInterval = 0
+    var value = from
+    for piece in pieces {
+      if time < piece.end {
+        let length = piece.end - start
+        let progress = length > 0 ? piece.curve.progress(at: (time - start) / length) : 1
+        return value + (piece.to - value) * progress
+      }
+      start = piece.end
+      value = piece.to
+    }
+    return value
+  }
+
+  func animation(_ keyPath: String) -> CAKeyframeAnimation {
+    let animation = CAKeyframeAnimation(keyPath: keyPath)
+    animation.duration = duration
+    animation.values = [from] + pieces.map(\.to)
+    animation.keyTimes = ([0] + pieces.map { $0.end / duration }).map { NSNumber(value: $0) }
+    animation.timingFunctions = pieces.map(\.curve)
+    return animation
+  }
+}
+
+/// The fade and move of one child row for one toggle, from `start`
+/// (`CACurrentMediaTime`).
+struct ChildRowPlan {
+  let start: CFTimeInterval
+  /// The opacity of the row's cell. The table fades the row view itself
+  /// with the row curve; the two multiply.
+  let opacity: ChildRowTrack
+  /// Where the row shows, against its place.
+  let offset: ChildRowTrack
+
+  private static let linear = CAMediaTimingFunction(name: .linear)
+  private static let easeInOut = CAMediaTimingFunction(name: .easeInEaseOut)
+  private static let fadeKey = "sidebar.childFade"
+  private static let moveKey = "sidebar.childMove"
+
+  var duration: TimeInterval { max(opacity.duration, offset.duration) }
+
+  func isRunning(at time: CFTimeInterval) -> Bool { time - start < duration }
+
+  func state(at time: CFTimeInterval) -> ChildRowState {
+    ChildRowState(opacity: opacity.value(at: time - start), offset: offset.value(at: time - start))
+  }
+
+  /// What shows of a row: the table's fade of the row view times the
+  /// plan's fade of its cell.
+  static func shown(cell: Double, at time: TimeInterval, opening: Bool) -> Double {
+    let table = SidebarDisclosureTiming.rowCurve.progress(at: time / SidebarDisclosureTiming.rows)
+    return cell * (opening ? table : 1 - table)
+  }
+
+  /// The cell's fade, sampled, that makes the table's fade times it follow
+  /// `target`: the cell holds back where the table is ahead of the target,
+  /// and stays at `start` where the table is behind.
+  private static func cellFade(
+    from start: Double, opening: Bool, _ target: (TimeInterval) -> Double
+  ) -> ChildRowTrack {
+    let timing = SidebarDisclosureTiming.self
+    let step = 0.01
+    let count = Int((timing.rows / step).rounded())
+    let pieces = (1...count).map { index -> ChildRowTrack.Piece in
+      let time = Double(index) * step
+      let table = timing.rowCurve.progress(at: time / timing.rows)
+      let fade = opening ? table : 1 - table
+      let value = fade > 0.001 ? min(start, target(time) / fade) : (opening ? start : 0)
+      return .init(end: time, to: max(value, 0), curve: linear)
+    }
+    return ChildRowTrack(from: opening ? 0 : start, pieces: pieces)
+  }
+
+  private static func smoothstep(_ value: Double) -> Double {
+    let x = min(max(value, 0), 1)
+    return x * x * (3 - 2 * x)
+  }
+
+  /// Fades in from nothing, slowly at first; waits above the row's place,
+  /// then follows the rows below.
+  static func open(at start: CFTimeInterval) -> Self {
+    let timing = SidebarDisclosureTiming.self
+    let offset = -Double(timing.openOffset)
+    return Self(
+      start: start,
+      opacity: cellFade(from: 1, opening: true) {
+        smoothstep(($0 - timing.openFadeDelay) / timing.openFade)
+      },
+      offset: ChildRowTrack(
+        from: offset,
+        pieces: [
+          .init(end: timing.openMoveDelay, to: offset, curve: linear),
+          .init(end: timing.openMoveDelay + timing.rows, to: 0, curve: timing.rowCurve),
+        ]))
+  }
+
+  /// From where a close has got to, back in and down to the row's place.
+  static func reopen(from state: ChildRowState, at start: CFTimeInterval) -> Self {
+    let timing = SidebarDisclosureTiming.self
+    return Self(
+      start: start,
+      opacity: ChildRowTrack(
+        from: state.opacity,
+        pieces: [
+          .init(end: max(timing.openFade * (1 - state.opacity), 0.05), to: 1, curve: easeInOut),
+          .init(end: timing.rows, to: 1, curve: linear),
+        ]),
+      offset: ChildRowTrack(from: state.offset, pieces: [.init(end: timing.rows, to: 0, curve: timing.rowCurve)]))
+  }
+
+  /// Out to nothing from where the row is, while it speeds up as it moves
+  /// up; hidden until the table drops the row.
+  static func close(from state: ChildRowState, at start: CFTimeInterval) -> Self {
+    let timing = SidebarDisclosureTiming.self
+    let top = state.offset - Double(timing.closeLift)
+    return Self(
+      start: start,
+      opacity: cellFade(from: state.opacity, opening: false) {
+        1 - smoothstep(($0 - timing.closeFadeDelay) / timing.closeFade)
+      },
+      offset: ChildRowTrack(
+        from: state.offset,
+        pieces: [
+          .init(end: timing.closeLiftTime, to: top, curve: timing.closeLiftCurve),
+          .init(end: timing.rows, to: top, curve: linear),
+        ]))
+  }
+
+  /// Runs the plan on `view` from its start, so a view added late joins it
+  /// part way through: the fade on the row's cell, the move on the row
+  /// view. Not kept on the layers when it ends, because the table reuses
+  /// row views.
+  func apply(to view: NSTableRowView) {
+    view.wantsLayer = true
+    guard let rowLayer = view.layer, let cellLayer = Self.cellLayer(of: view) else { return }
+    let begin = rowLayer.convertTime(start, from: nil)
+    let fade = opacity.animation("opacity")
+    let move = offset.animation("transform.translation.y")
+    for animation in [fade, move] {
+      animation.beginTime = begin
+      animation.fillMode = .backwards
+    }
+    cellLayer.add(fade, forKey: Self.fadeKey)
+    rowLayer.add(move, forKey: Self.moveKey)
+  }
+
+  /// The layer of the row's cell: the table animates the row view's
+  /// opacity, not the cell's.
+  private static func cellLayer(of view: NSTableRowView) -> CALayer? {
+    guard let cell = view.subviews.first else { return nil }
+    cell.wantsLayer = true
+    return cell.layer
+  }
+
+  static func clear(_ view: NSTableRowView) {
+    cellLayer(of: view)?.removeAnimation(forKey: fadeKey)
+    view.layer?.removeAnimation(forKey: moveKey)
+  }
+}
+
+extension CAMediaTimingFunction {
+  /// The curve's value at `time`, both from 0 to 1.
+  func progress(at time: Double) -> Double {
+    let x = min(max(time, 0), 1)
+    var first: [Float] = [0, 0]
+    var second: [Float] = [0, 0]
+    getControlPoint(at: 1, values: &first)
+    getControlPoint(at: 2, values: &second)
+    func bezier(_ s: Double, _ p1: Float, _ p2: Float) -> Double {
+      let u = 1 - s
+      return 3 * u * u * s * Double(p1) + 3 * u * s * s * Double(p2) + s * s * s
+    }
+    var low = 0.0
+    var high = 1.0
+    for _ in 0..<30 {
+      let mid = (low + high) / 2
+      if bezier(mid, first[0], second[0]) < x { low = mid } else { high = mid }
+    }
+    return bezier((low + high) / 2, first[1], second[1])
+  }
+}
+
 /// The row a user toggle animates.
 private struct ExpansionAnimation {
   let nodeID: String
@@ -574,21 +791,21 @@ enum SidebarDisclosureTiming {
   /// over `rows` is the closest fit to that spring (about 0.6 % off).
   static let rows: TimeInterval = 0.32
   static let rowCurve = CAMediaTimingFunction(controlPoints: 0.30, 0.40, 0.15, 0.98)
-  /// On open, the child rows wait `openOffset` above their place, hidden,
-  /// for `openMoveDelay`, then slide down on `rowCurve`. They fade in from
-  /// `openFadeDelay` over `openFade` (ease-out), so they show when they are
-  /// about 14 pt above their place.
+  /// On open, the child rows wait `openOffset` above their place for
+  /// `openMoveDelay`, then slide down on `rowCurve`. Their opacity rises from
+  /// 0 from `openFadeDelay` over `openFade` (ease-in-out): slowly at first,
+  /// so the rows show from nothing, with no step.
   static let openOffset: CGFloat = 16
   static let openMoveDelay: TimeInterval = 0.055
-  static let openFadeDelay: TimeInterval = 0.05
-  static let openFade: TimeInterval = 0.11
-  /// On close, the child rows fade out linearly to `closeFadeEnd` of their
-  /// opacity in `closeFade`, and are gone at `closeGone`. Meanwhile they
-  /// speed up as they move up (quadratic ease-in, about 1 pt after 45 ms and
-  /// 7 pt after 110 ms), and the rows below slide over them.
-  static let closeFade: TimeInterval = 0.11
-  static let closeFadeEnd: Float = 0.3
-  static let closeGone: TimeInterval = 0.12
+  static let openFadeDelay: TimeInterval = 0.065
+  static let openFade: TimeInterval = 0.13
+  /// On close, the child rows keep their opacity for `closeFadeDelay`, then
+  /// fade to 0 over `closeFade` (ease-in-out). Meanwhile they speed up as
+  /// they move up `closeLift` over `closeLiftTime` (quadratic ease-in, about
+  /// 1 pt after 45 ms and 7 pt after 110 ms), and the rows below slide over
+  /// them.
+  static let closeFadeDelay: TimeInterval = 0.02
+  static let closeFade: TimeInterval = 0.145
   static let closeLift: CGFloat = 11
   static let closeLiftTime: TimeInterval = 0.14
   static let closeLiftCurve = CAMediaTimingFunction(controlPoints: 1 / 3, 0, 2 / 3, 1 / 3)
