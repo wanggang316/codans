@@ -1,0 +1,35 @@
+# Acceptance round 2 recording (cycles4.mov): Agents View chord appended after the status glyphs.
+# Agents View rows: agent1 blocked + sleeping (breathing icon, excluded from start detection), agent2-3 working (animated icon, not measured), agent4 idle + sleeping, agent5 idle, agent6 idle + sleeping.
+# Other regions: wt00-wt09 worktree rows, filter1-5, tab1.
+
+## First changed frame and start spread per press and release
+press 1: F0=2.533s  not started at F0: none; not started at F0+1 (2.567s): none  | agent4=92.2% agent5=63.7% agent6=69.2% filter1=23.3% filter2=12.1% filter3=15.5% filter4=10.1% filter5=13.7% tab1=7.8% wt00=8.9% wt01=8.9% wt02=8.9% wt03=9.0% wt04=9.1% wt05=8.9% wt06=8.6% wt07=9.3% wt08=9.1% wt09=8.9%
+release 1: F0=3.683s  not started at F0: none; not started at F0+1 (3.700s): none  | agent4=0.6% agent5=3.3% agent6=4.3% filter1=1.5% filter2=4.0% filter3=2.0% filter4=4.0% filter5=2.3% tab1=4.9% wt00=6.6% wt01=9.0% wt02=11.2% wt03=6.2% wt04=5.7% wt05=10.8% wt06=7.4% wt07=10.5% wt08=7.8% wt09=10.5%
+press 2: F0=6.083s  not started at F0: none; not started at F0+1 (6.100s): none  | agent4=41.9% agent5=29.6% agent6=30.1% filter1=4.7% filter2=0.6% filter3=1.6% filter4=0.8% filter5=1.8% tab1=1.5% wt00=1.8% wt01=2.1% wt02=2.3% wt03=1.9% wt04=2.4% wt05=2.4% wt06=2.1% wt07=2.0% wt08=2.1% wt09=2.3%
+release 2: F0=7.383s  not started at F0: ['filter1', 'filter3', 'filter5', 'wt00', 'wt02', 'wt03', 'wt06', 'wt07']; not started at F0+1 (7.400s): none  | agent4=1.4% agent5=0.5% agent6=1.1% filter1=0.0% filter2=0.6% filter3=0.0% filter4=0.9% filter5=0.3% tab1=1.7% wt00=0.3% wt01=3.0% wt02=0.0% wt03=0.2% wt04=2.6% wt05=2.1% wt06=0.5% wt07=0.0% wt08=3.1% wt09=2.7%
+press 3: F0=9.850s  not started at F0: ['filter1', 'filter2', 'filter3', 'filter4', 'tab1', 'wt00', 'wt01', 'wt02', 'wt03', 'wt04', 'wt05', 'wt06', 'wt07', 'wt08', 'wt09']; not started at F0+1 (9.867s): ['filter1', 'filter2', 'filter3', 'filter4', 'tab1', 'wt00', 'wt01', 'wt02', 'wt03', 'wt04', 'wt05', 'wt06', 'wt07', 'wt08', 'wt09']  | agent4=8.5% agent5=6.1% agent6=5.8% filter1=0.4% filter2=0.0% filter3=0.2% filter4=0.0% filter5=0.6% tab1=0.2% wt00=0.0% wt01=0.0% wt02=0.0% wt03=0.0% wt04=0.0% wt05=0.0% wt06=0.0% wt07=0.0% wt08=0.0% wt09=0.0%
+release 3: F0=11.033s  not started at F0: none; not started at F0+1 (11.067s): none  | agent4=1.4% agent5=4.6% agent6=5.0% filter1=1.8% filter2=6.3% filter3=4.7% filter4=6.0% filter5=3.0% tab1=7.3% wt00=13.0% wt01=8.6% wt02=9.5% wt03=17.0% wt04=7.9% wt05=8.8% wt06=11.2% wt07=17.8% wt08=13.3% wt09=16.2%
+press 4: F0=13.517s  not started at F0: ['filter2', 'filter4']; not started at F0+1 (13.533s): none  | agent4=34.9% agent5=25.1% agent6=24.8% filter1=3.5% filter2=0.3% filter3=1.0% filter4=0.3% filter5=1.3% tab1=1.9% wt00=0.8% wt01=0.7% wt02=0.9% wt03=1.3% wt04=0.9% wt05=1.4% wt06=1.1% wt07=1.4% wt08=1.4% wt09=0.7%
+release 4: F0=14.700s  not started at F0: ['agent5', 'filter1', 'filter3', 'filter5', 'wt08']; not started at F0+1 (14.717s): ['agent5', 'filter1', 'filter3', 'wt08']  | agent4=1.5% agent5=0.4% agent6=1.2% filter1=0.1% filter2=0.8% filter3=0.3% filter4=1.2% filter5=0.5% tab1=2.1% wt00=1.5% wt01=3.1% wt02=3.3% wt03=3.0% wt04=2.7% wt05=2.5% wt06=2.2% wt07=2.3% wt08=0.5% wt09=2.7%
+press 5: F0=17.185s  not started at F0: none; not started at F0+1 (17.202s): none  | agent4=43.5% agent5=30.9% agent6=31.6% filter1=5.9% filter2=2.2% filter3=2.3% filter4=1.6% filter5=2.6% tab1=2.0% wt00=4.0% wt01=3.4% wt02=3.6% wt03=3.6% wt04=3.6% wt05=3.6% wt06=3.8% wt07=3.7% wt08=3.3% wt09=3.5%
+release 5: F0=18.368s  not started at F0: none; not started at F0+1 (18.385s): none  | agent4=0.7% agent5=4.5% agent6=4.3% filter1=1.8% filter2=2.9% filter3=3.5% filter4=4.8% filter5=3.6% tab1=4.9% wt00=10.9% wt01=9.2% wt02=8.9% wt03=12.0% wt04=7.4% wt05=7.7% wt06=9.6% wt07=9.4% wt08=10.2% wt09=7.9%
+
+press 1: start spread 0 ms (first 2.533s, last agent4)
+release 1: start spread 33 ms (first 3.650s, last agent4)
+press 2: start spread 0 ms (first 6.083s, last agent4)
+release 2: start spread 17 ms (first 7.383s, last filter1)
+press 3: start spread 33 ms (first 9.850s, last filter1)
+release 3: start spread 17 ms (first 11.017s, last agent4)
+press 4: start spread 17 ms (first 13.517s, last filter2)
+release 4: start spread 33 ms (first 14.700s, last agent5)
+press 5: start spread 0 ms (first 17.185s, last agent4)
+release 5: start spread 50 ms (first 18.318s, last filter1)
+worst start spread: 50 ms
+
+## Raw frames around release 5 (mean luma difference from the first frame)
+18.3017 agent4=4.788 agent5=4.144 agent6=4.317 filter1=12.599 filter2=14.825 filter3=19.078 filter4=12.388 filter5=16.286 tab1=6.725 wt00=1.823 wt01=2.435 wt02=2.528 wt03=2.489 wt04=2.613 wt05=2.859 wt06=2.038 wt07=2.907 wt08=2.818 wt09=2.630
+18.3183 agent4=4.788 agent5=4.142 agent6=4.318 filter1=12.599 filter2=14.825 filter3=19.083 filter4=12.388 filter5=16.283 tab1=6.725 wt00=1.823 wt01=2.434 wt02=2.528 wt03=2.489 wt04=2.613 wt05=2.856 wt06=2.038 wt07=2.907 wt08=2.818 wt09=2.630
+18.3350 agent4=4.768 agent5=4.142 agent6=4.308 filter1=12.588 filter2=14.808 filter3=19.061 filter4=12.349 filter5=16.256 tab1=6.708 wt00=1.805 wt01=2.425 wt02=2.514 wt03=2.484 wt04=2.608 wt05=2.846 wt06=2.017 wt07=2.902 wt08=2.813 wt09=2.625
+18.3517 agent4=4.738 agent5=4.134 agent6=4.271 filter1=12.588 filter2=14.715 filter3=19.061 filter4=12.249 filter5=16.223 tab1=6.607 wt00=1.805 wt01=2.356 wt02=2.449 wt03=2.478 wt04=2.540 wt05=2.783 wt06=2.016 wt07=2.901 wt08=2.812 wt09=2.553
+18.3683 agent4=4.819 agent5=3.977 agent6=4.125 filter1=12.318 filter2=14.331 filter3=18.393 filter4=11.776 filter5=15.733 tab1=6.260 wt00=1.620 wt01=2.193 wt02=2.276 wt03=2.139 wt04=2.382 wt05=2.601 wt06=1.829 wt07=2.551 wt08=2.551 wt09=2.395
+18.3850 agent4=4.239 agent5=3.778 agent6=3.556 filter1=11.677 filter2=12.986 filter3=17.123 filter4=10.346 filter5=14.329 tab1=5.076 wt00=1.340 wt01=1.804 wt02=1.867 wt03=1.787 wt04=1.924 wt05=2.118 wt06=1.508 wt07=2.101 wt08=2.094 wt09=1.939
