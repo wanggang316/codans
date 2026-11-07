@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shared frame for the add-project and worktree sheets: a headline title,
+/// Shared frame for the add-project, Host, and worktree sheets: a headline title,
 /// a grouped form, and a bottom bar with status on the leading side and
 /// Cancel / the primary button on the trailing side. Shape and insets match
 /// the New Agent title and the Create Workspace bottom bar.

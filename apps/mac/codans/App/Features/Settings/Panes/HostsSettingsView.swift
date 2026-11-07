@@ -49,7 +49,7 @@ struct HostsSettingsView: View {
     .sheet(
       isPresented: Binding(
         get: { store.editor != nil },
-        set: { if !$0 { store.send(.editor(.cancelButtonTapped)) } }
+        set: { if !$0 { store.send(.editor(.cancelButtonTapped)) } },
       )
     ) {
       if let editor = store.editor {
@@ -109,50 +109,46 @@ struct HostsSettingsView: View {
   }
 }
 
-/// Add / edit form for one Host record.
+/// Add / edit form for one Host record, on the shared `FormSheet` frame: one
+/// section of the shared Host field rows, with the error and the edit-mode
+/// note in its footer.
 private struct HostEditorSheet: View {
   let editor: HostsSettingsFeature.Editor
   let send: (HostsSettingsFeature.EditorAction) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text(editor.isEditing ? "Edit Host" : "Add Host")
-        .font(.headline)
-
-      if let error = editor.errorMessage {
-        Text(error)
-          .font(.caption)
-          .foregroundStyle(.red)
-          .textSelection(.enabled)
+    FormSheet(
+      editor.isEditing ? "Edit Host" : "Add Host",
+      primaryTitle: editor.isEditing ? "Save" : "Add",
+      canSubmit: !editor.draft.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      onCancel: { send(.cancelButtonTapped) },
+      onSubmit: { send(.saveButtonTapped) },
+      content: {
+        Section {
+          HostFieldsEditor(
+            draft: editor.draft,
+            isDisabled: false,
+            onAddressChanged: { send(.addressChanged($0)) },
+            onUsernameChanged: { send(.usernameChanged($0)) },
+            onPortChanged: { send(.portChanged($0)) },
+            onNameChanged: { send(.nameChanged($0)) },
+            onIconChanged: { send(.iconChanged($0)) },
+          )
+        } footer: {
+          VStack(alignment: .leading, spacing: 4) {
+            if let error = editor.errorMessage {
+              Text(error)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+            }
+            if editor.isEditing {
+              Text("The change applies to all projects on this host.")
+                .foregroundStyle(.secondary)
+            }
+          }
           .frame(maxWidth: .infinity, alignment: .leading)
-      }
-
-      HostFieldsEditor(
-        draft: editor.draft,
-        isDisabled: false,
-        onAddressChanged: { send(.addressChanged($0)) },
-        onUsernameChanged: { send(.usernameChanged($0)) },
-        onPortChanged: { send(.portChanged($0)) },
-        onNameChanged: { send(.nameChanged($0)) },
-        onIconChanged: { send(.iconChanged($0)) }
-      )
-
-      if editor.isEditing {
-        Text("The change applies to all projects on this host.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-
-      HStack {
-        Spacer()
-        Button("Cancel") { send(.cancelButtonTapped) }
-          .keyboardShortcut(.cancelAction)
-        Button(editor.isEditing ? "Save" : "Add") { send(.saveButtonTapped) }
-          .keyboardShortcut(.defaultAction)
-          .disabled(editor.draft.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-      }
-    }
-    .padding(20)
-    .frame(width: 420)
+        }
+      },
+    )
   }
 }
