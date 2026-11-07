@@ -165,6 +165,13 @@ the same `remoteHostResolver` seam, so the worktree-management surface
 (listing, create-sheet options, removal, prune) routes per call exactly like
 `LiveGitService` does for status.
 
+A reconciler sweep (launch, window focus, Refresh All) keeps a failed Project
+`.failed` while it checks it again; only a request for one Project (Retry, a
+new Project) shows it as `.loading`. A loading Project shows as a healthy
+Project row with its saved worktrees, so the sidebar row would change shape
+twice, and the focus sweep runs on the same click that starts a Host row's
+expand or collapse animation.
+
 **Transport seam (worktree status parity).** `LiveGitService` funnels every git
 invocation through one `invoke(arguments:cwd:)`, parameterized by a
 `resolveRemoteHost: (URL) async -> RemoteHost?` closure, backed by
