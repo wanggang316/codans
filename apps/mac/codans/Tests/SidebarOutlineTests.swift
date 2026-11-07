@@ -142,6 +142,25 @@ struct SidebarOutlineTests {
     #expect(harness.rowIDs == all)
   }
 
+  /// On an animated close the child rows move up a few points while they
+  /// fade (ADR 0008): the table's own `.slideUp` would move them by their
+  /// whole height, so the outline adds the move to their layers.
+  @Test
+  func anAnimatedCloseLiftsTheChildRows() {
+    let harness = Harness()
+    var repo = repository("repo", worktrees: 2)
+    harness.show([repo])
+    let children = Array(harness.rowIDs.dropFirst())
+    #expect(children.count == 3)
+
+    repo.isExpanded = false
+    harness.show([repo], toggle: .next(.project(repo.id), after: nil))
+    // Reduce Motion closes the row at once, with nothing to lift.
+    let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    #expect(harness.coordinator.liftedNodeIDs == (reduceMotion ? [] : children))
+    #expect(harness.rowIDs == ["project:\(repo.id.raw)"])
+  }
+
   @Test
   func theOutlineDoesNotOpenOrCloseRowsOnItsOwn() throws {
     let harness = Harness()

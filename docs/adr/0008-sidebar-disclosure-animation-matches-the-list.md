@@ -17,8 +17,8 @@ frames show this:
 - **Expand, about 0.25 s.** The child rows fade in (opacity 0 → 1) at their
   final positions. The rows below slide down with an ease-out curve: fast at
   the start, slow at the end, no overshoot.
-- **Collapse, about 0.2 s.** The child rows fade out. The rows below slide up
-  over them.
+- **Collapse, about 0.2 s.** The child rows fade out while they move up a few
+  points. The rows below slide up over them.
 - **Chevron, about 0.05 s.** It turns at the start, much faster than the rows.
 
 This is the row animation of a SwiftUI `List` on macOS, which inserts and
@@ -28,8 +28,10 @@ removes table rows with a fade.
 
 1. **Rows.** A user toggle inserts or removes the child rows with the table's
    fade animation (`NSTableView.AnimationOptions.effectFade`). The other rows
-   move with the same animation. Expand runs 0.25 s and collapse 0.2 s, both
-   ease-out.
+   move with the same animation. On collapse, the child rows also move up
+   10 pt while they fade: the outline adds that move to their layers, because
+   the table's `.slideUp` moves them by their whole height. Expand runs
+   0.25 s and collapse 0.2 s, both ease-out.
 2. **How.** `NSOutlineView` has no fade expand. For an animated open, the
    outline opens the row while its data source reports no children, then
    inserts the children, and the children of each open child. For an
@@ -56,8 +58,8 @@ removes table rows with a fade.
 
 - The times are constants in code (`SidebarDisclosureTiming`), not the
   system values. They need a change if the reference changes.
-- Collapsing rows fade in place; in the reference they also move up a few
-  points.
+- The 10 pt lift is a layer animation the outline adds next to the table's
+  own fade. It is not kept on the layer, because the table reuses row views.
 
 ## Reconsider when
 
