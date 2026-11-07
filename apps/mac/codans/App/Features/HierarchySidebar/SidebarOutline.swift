@@ -17,7 +17,7 @@ struct SidebarOutline: NSViewRepresentable {
   let selectedProjectID: ProjectID?
   /// A change scrolls the selected row to the center.
   let revealTrigger: UUID
-  /// A new value animates the row the user opened or closed (ADR 0007).
+  /// A new value animates the row the user opened or closed (ADR 0007, ADR 0008).
   let expansionToggle: SidebarExpansionToggle?
   /// Space the AgentState panel covers at the bottom.
   let bottomInset: CGFloat
@@ -110,6 +110,10 @@ struct SidebarOutline: NSViewRepresentable {
     /// True while the outline is changed from `update`, so its delegate
     /// callbacks do not echo those changes back as user actions.
     private var applying = false
+    /// Rows whose children the data source reports as none for a moment:
+    /// an animated open first opens the row with no children, then inserts
+    /// them, so they fade in (see `animateOpen`).
+    private var childlessIDs: Set<String> = []
 
     // Explicit, so releasing the coordinator during a SwiftUI teardown skips the isolated-deinit hop.
     deinit {}
@@ -173,41 +177,81 @@ struct SidebarOutline: NSViewRepresentable {
       guard let shown = shownExpansionToggle, let toggle, toggle != shown,
         !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
       else { return nil }
-      // A new group starts with the system duration.
-      NSAnimationContext.beginGrouping()
-      let duration = NSAnimationContext.current.duration
-      NSAnimationContext.endGrouping()
-      return ExpansionAnimation(nodeID: toggle.nodeID, duration: duration)
+      return ExpansionAnimation(nodeID: toggle.nodeID)
     }
 
     /// Opens and closes rows to match the catalog, parents first, so a row
     /// that opens shows its children as they are now. Only the row of a user
-    /// toggle animates, with the outline's own animation; a toggle during
-    /// that animation turns it around.
+    /// toggle animates (ADR 0008); a toggle during that animation starts
+    /// from the outline's current rows, so it turns the animation around.
     private func applyExpansion(animating animation: ExpansionAnimation?) {
       guard let outline else { return }
       NSAnimationContext.beginGrouping()
       NSAnimationContext.current.duration = 0
       NSAnimationContext.current.allowsImplicitAnimation = false
       defer { NSAnimationContext.endGrouping() }
-      func change(_ item: SidebarOutlineItem, expand: Bool) {
-        guard let animation, animation.nodeID == item.id else {
-          if expand { outline.expandItem(item) } else { outline.collapseItem(item) }
-          return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-          context.duration = animation.duration
-          if expand { outline.animator().expandItem(item) } else { outline.animator().collapseItem(item) }
-        }
-      }
       func apply(_ items: [SidebarOutlineItem]) {
         for item in items where !item.children.isEmpty {
           let expanded = item.node.isExpanded
-          if expanded != outline.isItemExpanded(item) { change(item, expand: expanded) }
+          if expanded != outline.isItemExpanded(item) {
+            switch (animation?.nodeID == item.id, expanded) {
+            case (true, true): animateOpen(item, in: outline)
+            case (true, false): animateClose(item, in: outline)
+            case (false, true): outline.expandItem(item)
+            case (false, false): outline.collapseItem(item)
+            }
+          }
           if expanded { apply(item.children) }
         }
       }
       apply(roots)
+    }
+
+    /// Child rows fade in where they end; the rows below slide down.
+    /// `NSOutlineView` has no such expand animation, so the row opens with
+    /// no children and then they are inserted, with the open rows under them.
+    private func animateOpen(_ item: SidebarOutlineItem, in outline: NSOutlineView) {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = SidebarDisclosureTiming.open
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        outline.beginUpdates()
+        childlessIDs.insert(item.id)
+        outline.expandItem(item)
+        insertChildren(of: item, in: outline)
+        outline.endUpdates()
+      }
+    }
+
+    private func insertChildren(of item: SidebarOutlineItem, in outline: NSOutlineView) {
+      let parents = item.children.filter { !$0.children.isEmpty }
+      childlessIDs.formUnion(parents.map(\.id))
+      childlessIDs.remove(item.id)
+      outline.insertItems(at: IndexSet(integersIn: 0..<item.children.count), inParent: item, withAnimation: .effectFade)
+      for child in parents {
+        if child.node.isExpanded {
+          outline.expandItem(child)
+          insertChildren(of: child, in: outline)
+        } else {
+          // The outline can remember a row it removed as open.
+          outline.collapseItem(child)
+          childlessIDs.remove(child.id)
+        }
+      }
+    }
+
+    /// Child rows fade out; the rows below slide up over them.
+    private func animateClose(_ item: SidebarOutlineItem, in outline: NSOutlineView) {
+      let count = outline.numberOfChildren(ofItem: item)
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = SidebarDisclosureTiming.close
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        outline.beginUpdates()
+        childlessIDs.insert(item.id)
+        outline.removeItems(at: IndexSet(integersIn: 0..<count), inParent: item, withAnimation: .effectFade)
+        outline.endUpdates()
+      }
+      outline.collapseItem(item)
+      childlessIDs.remove(item.id)
     }
 
     private func refreshVisibleRows(animating animation: ExpansionAnimation?) {
@@ -217,7 +261,9 @@ struct SidebarOutline: NSViewRepresentable {
         guard let item = outline.item(atRow: row) as? SidebarOutlineItem,
           let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarOutlineCell
         else { continue }
-        show(item, in: cell, disclosureAnimation: animation?.nodeID == item.id ? animation?.chevron : nil)
+        show(
+          item, in: cell,
+          disclosureAnimation: animation?.nodeID == item.id ? SidebarDisclosureTiming.chevronAnimation : nil)
       }
       scheduleHeightUpdate()
     }
@@ -317,7 +363,7 @@ struct SidebarOutline: NSViewRepresentable {
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
       guard let item = item as? SidebarOutlineItem else { return roots.count }
-      return item.children.count
+      return childlessIDs.contains(item.id) ? 0 : item.children.count
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
@@ -430,19 +476,27 @@ struct SidebarOutline: NSViewRepresentable {
   }
 }
 
-/// How the outline animates the row of a user toggle.
+/// The row a user toggle animates.
 private struct ExpansionAnimation {
   let nodeID: String
-  let duration: TimeInterval
+}
 
-  /// The chevron turns with the rows, over the same time.
-  var chevron: Animation { .easeInOut(duration: duration) }
+/// The times of a user toggle's animation, as in the sidebar `List` the
+/// owner's reference shows (ADR 0008).
+enum SidebarDisclosureTiming {
+  /// Child rows fade in, rows below slide down.
+  static let open: TimeInterval = 0.25
+  /// Child rows fade out, rows below slide up.
+  static let close: TimeInterval = 0.2
+  /// The chevron turns at the start of the row animation, much faster.
+  static let chevron: TimeInterval = 0.06
+  static let chevronAnimation = Animation.easeOut(duration: chevron)
 }
 
 extension EnvironmentValues {
   /// How a row's chevron turns when the row opens or closes: set only for
   /// the row of a user toggle, nil (at once) for every other change
-  /// (ADR 0007, decision 4). Do not send a toggle in a transaction that
+  /// (ADR 0008, decision 3). Do not send a toggle in a transaction that
   /// disables animations: that also stops this one.
   @Entry var sidebarDisclosureAnimation: Animation?
 }

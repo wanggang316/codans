@@ -31,12 +31,12 @@ struct SidebarOutlineTests {
     func show(
       _ projects: [Project], selection: SidebarSelection? = nil, selectedProjectID: ProjectID? = nil,
       reveal: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
-      toggle: SidebarExpansionToggle? = nil
+      toggle: SidebarExpansionToggle? = nil, hostLevel: SidebarHostLevel? = nil
     ) {
       coordinator.update(
         with: SidebarOutline(
           nodes: SidebarOutlineModel.nodes(
-            projects: projects, pendingWorktrees: [], filter: .all),
+            projects: projects, hostLevel: hostLevel, pendingWorktrees: [], filter: .all),
           selection: selection, selectedProjectID: selectedProjectID, revealTrigger: reveal,
           expansionToggle: toggle, bottomInset: 0,
           allowsWorktreeDrag: true, decorateRow: { $0 },
@@ -113,6 +113,33 @@ struct SidebarOutlineTests {
     #expect(harness.coordinator.animatedNodeID == projectNode)
     try await Task.sleep(for: .milliseconds(600))
     #expect(harness.rowIDs.count == 4)
+  }
+
+  /// An animated toggle opens a row with no children and inserts them, so
+  /// the rows under an open child must come back too, and a closed child
+  /// must stay closed.
+  @Test
+  func anAnimatedToggleEndsWithTheCatalogRowsAtEveryLevel() async throws {
+    let harness = Harness()
+    let open = repository("open", worktrees: 1)
+    let closed = repository("closed", worktrees: 1, expanded: false)
+    func show(collapsed: Set<SidebarHost>, toggle: SidebarExpansionToggle?) {
+      harness.show(
+        [open, closed], toggle: toggle,
+        hostLevel: SidebarHostLevel(records: [], collapsed: collapsed, keepsThisMac: true))
+    }
+    show(collapsed: [], toggle: nil)
+    let all = harness.rowIDs
+    #expect(all.count == 5)
+
+    let close = SidebarExpansionToggle.next(.host(.thisMac), after: nil)
+    show(collapsed: [.thisMac], toggle: close)
+    #expect(harness.rowIDs == [SidebarOutlineModel.hostNodeID(.thisMac)])
+
+    show(collapsed: [], toggle: .next(.host(.thisMac), after: close))
+    #expect(harness.rowIDs == all)
+    try await Task.sleep(for: .milliseconds(600))
+    #expect(harness.rowIDs == all)
   }
 
   @Test

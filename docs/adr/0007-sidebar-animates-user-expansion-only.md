@@ -1,6 +1,7 @@
 # 0007. The sidebar animates expand and collapse only when the user asks
 
-Status: Accepted
+Status: Accepted. Decisions 3 and 4 are superseded by
+[ADR 0008](0008-sidebar-disclosure-animation-matches-the-list.md).
 
 ## Context
 
