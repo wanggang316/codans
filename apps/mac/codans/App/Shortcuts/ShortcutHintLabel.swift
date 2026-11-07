@@ -78,7 +78,7 @@ extension Animation {
   /// all use it, so the sidebar rows, the filter bar, the Agents View, and the tab bar
   /// change together when ⌘ goes down or up.
   static let shortcutHint: Animation = .easeInOut(duration: shortcutHintDuration)
-  static let shortcutHintDuration: TimeInterval = 0.15
+  static let shortcutHintDuration: TimeInterval = 0.1
 }
 
 extension CATransition {
