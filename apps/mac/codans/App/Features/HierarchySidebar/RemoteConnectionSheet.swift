@@ -16,99 +16,83 @@ struct RemoteConnectionSheetPresenter: ViewModifier {
       content: { childStore in
         RemoteConnectionSheet(store: childStore)
           .interactiveDismissDisabled(store.remoteConnectionSheet?.isConnecting ?? false)
-      }
+      },
     )
   }
 }
 
-/// SwiftUI sheet for `RemoteConnectionFeature`. Header error banner, the Host
-/// picker (Host list + "New Host…"), the Host fields when "New Host…" is
-/// selected, the remote path, an in-flight spinner, and a Cancel / Connect
-/// footer. Mirrors `CloneRepoSheet`'s shape so the two Add Project surfaces
-/// feel consistent. Auth is delegated to the user's SSH config + agent — the
-/// sheet never asks for a password or key.
+/// SwiftUI sheet for `RemoteConnectionFeature`, on the shared `FormSheet`
+/// frame: a Host section (Host list + "New Host…"), the shared Host field rows
+/// when "New Host…" is selected, and a Path section whose footer holds the
+/// connection error. "Connecting…" shows in the bottom bar. Auth is delegated
+/// to the user's SSH config + agent — the sheet never asks for a password or
+/// key.
 struct RemoteConnectionSheet: View {
   @Bindable var store: StoreOf<RemoteConnectionFeature>
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text(store.isEditing ? "Edit Server Connection" : "Connect to Server")
-        .font(.headline)
+    FormSheet(
+      store.isEditing ? "Edit Server Connection" : "Connect to Server",
+      primaryTitle: store.isEditing ? "Save" : "Connect",
+      canSubmit: store.canConnect,
+      canCancel: !store.isConnecting,
+      onCancel: { store.send(.cancelButtonTapped) },
+      onSubmit: { store.send(.connectButtonTapped) },
+      content: {
+        Section {
+          hostPicker
+        }
 
-      if let error = store.errorMessage {
-        Text(error)
-          .font(.caption)
-          .foregroundStyle(.red)
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
+        if store.isNewHost {
+          Section {
+            HostFieldsEditor(
+              draft: store.newHost,
+              isDisabled: store.isConnecting,
+              onAddressChanged: { store.send(.addressChanged($0)) },
+              onUsernameChanged: { store.send(.usernameChanged($0)) },
+              onPortChanged: { store.send(.portChanged($0)) },
+              onNameChanged: { store.send(.nameChanged($0)) },
+              onIconChanged: { store.send(.iconChanged($0)) },
+            )
+          } footer: {
+            footnote("The new host is added to Settings › Hosts.")
+          }
+        }
 
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Host").font(.callout)
-        hostPicker
-      }
-
-      if store.isNewHost {
-        HostFieldsEditor(
-          draft: store.newHost,
-          isDisabled: store.isConnecting,
-          onAddressChanged: { store.send(.addressChanged($0)) },
-          onUsernameChanged: { store.send(.usernameChanged($0)) },
-          onPortChanged: { store.send(.portChanged($0)) },
-          onNameChanged: { store.send(.nameChanged($0)) },
-          onIconChanged: { store.send(.iconChanged($0)) }
-        )
-        .padding(.leading, 12)
-      }
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Path").font(.callout)
-        TextField(
-          "~/project or /srv/app",
-          text: Binding(
-            get: { store.pathDraft },
-            set: { store.send(.pathChanged($0)) }
+        Section {
+          TextField(
+            "Path",
+            text: Binding(
+              get: { store.pathDraft },
+              set: { store.send(.pathChanged($0)) },
+            ),
+            prompt: Text(verbatim: "~/project or /srv/app"),
           )
-        )
-        .textFieldStyle(.roundedBorder)
-        .disabled(store.isConnecting)
-      }
-
-      Text(footnote)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-
-      if store.isConnecting {
-        HStack(spacing: 8) {
-          ProgressView().controlSize(.small)
-          Text("Connecting…")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          .disabled(store.isConnecting)
+        } footer: {
+          VStack(alignment: .leading, spacing: 4) {
+            if let error = store.errorMessage {
+              Text(error)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+            }
+            footnote("Authentication uses your SSH config and agent.")
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
         }
-      }
-
-      HStack {
-        Spacer()
-        Button("Cancel") {
-          store.send(.cancelButtonTapped)
+      },
+      status: {
+        if store.isConnecting {
+          FormSheetProgress(text: "Connecting…")
         }
-        .keyboardShortcut(.cancelAction)
-        .disabled(store.isConnecting)
-
-        Button(store.isEditing ? "Save" : "Connect") {
-          store.send(.connectButtonTapped)
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(!store.canConnect)
-      }
-    }
-    .padding(20)
-    .frame(width: 460)
+      },
+    )
   }
 
-  private var footnote: String {
-    let auth = "Authentication uses your SSH config and agent."
-    return store.isNewHost ? "The new host is added to Settings › Hosts. \(auth)" : auth
+  private func footnote(_ text: String) -> some View {
+    Text(text)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   /// The Host list in its order, then "New Host…".
@@ -117,8 +101,8 @@ struct RemoteConnectionSheet: View {
       "Host",
       selection: Binding(
         get: { store.hostChoice },
-        set: { store.send(.hostChoiceChanged($0)) }
-      )
+        set: { store.send(.hostChoiceChanged($0)) },
+      ),
     ) {
       ForEach(store.hosts) { host in
         Text(Self.pickerTitle(for: host))
@@ -130,7 +114,6 @@ struct RemoteConnectionSheet: View {
       Text("New Host…")
         .tag(RemoteConnectionFeature.State.HostChoice.newHost)
     }
-    .labelsHidden()
     .disabled(store.isConnecting)
   }
 

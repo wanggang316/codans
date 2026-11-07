@@ -1,9 +1,10 @@
 import CodansCore
 import SwiftUI
 
-/// The Host, Username, Port, Name, and Icon fields of a Host form. Shared by the
-/// Settings › Hosts editor and the "New Host…" entry of Connect to Server, so
-/// both forms show the same fields in the same order.
+/// The Host, Username, Port, Name, and Icon rows of a grouped Host form.
+/// Shared by the Settings › Hosts editor and the "New Host…" entry of Connect
+/// to Server, so both forms show the same rows in the same order. Place it
+/// inside a `Section` of a `.grouped` `Form`.
 struct HostFieldsEditor: View {
   let draft: HostDraft
   let isDisabled: Bool
@@ -14,47 +15,27 @@ struct HostFieldsEditor: View {
   let onIconChanged: (HostIcon) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      field(
-        "Host", prompt: "IP, hostname, or ~/.ssh/config alias",
-        text: draft.address, onChange: onAddressChanged
-      )
-
-      HStack(alignment: .top, spacing: 12) {
-        field("Username", prompt: "optional", text: draft.username, onChange: onUsernameChanged)
-        field("Port", prompt: "22", text: draft.port, onChange: onPortChanged)
-          .frame(width: 80)
-      }
-
-      field(
-        "Name", prompt: "optional, shown in the sidebar",
-        text: draft.name, onChange: onNameChanged
-      )
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Icon").font(.callout)
-        HostIconPicker(icon: draft.icon ?? .fallback, onChange: onIconChanged)
-          .disabled(isDisabled)
-      }
+    Group {
+      field("Host", prompt: "IP, hostname, or ssh alias", text: draft.address, onChange: onAddressChanged)
+      field("Username", prompt: "optional", text: draft.username, onChange: onUsernameChanged)
+      field("Port", prompt: "22", text: draft.port, onChange: onPortChanged)
+      field("Name", prompt: "optional, shown in sidebar", text: draft.name, onChange: onNameChanged)
+      HostIconPicker(icon: draft.icon ?? .fallback, onChange: onIconChanged)
     }
+    .disabled(isDisabled)
   }
 
   private func field(
     _ title: String,
     prompt: String,
     text: String,
-    onChange: @escaping (String) -> Void
+    onChange: @escaping (String) -> Void,
   ) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(title).font(.callout)
-      TextField(prompt, text: Binding(get: { text }, set: onChange))
-        .textFieldStyle(.roundedBorder)
-        .disabled(isDisabled)
-    }
+    TextField(title, text: Binding(get: { text }, set: onChange), prompt: Text(verbatim: prompt))
   }
 }
 
-/// A native menu of the Host icons, with a checkmark on `icon` and each
+/// A native "Icon" menu of the Host icons, with a checkmark on `icon` and each
 /// item's symbol next to its name.
 struct HostIconPicker: View {
   let icon: HostIcon
@@ -67,7 +48,5 @@ struct HostIconPicker: View {
       }
     }
     .pickerStyle(.menu)
-    .labelsHidden()
-    .fixedSize()
   }
 }
