@@ -57,8 +57,9 @@ of what the program works on (192 bytes or less). Codans parses and stores it
    and does not shorten the working directory to its last component. The
    tab's cached title is used only while the selected pane has no surface,
    and it caches the pane title.
-8. **The pane title survives a restart.** The zmx daemon keeps the last OSC
-   0/2 title of its session and replays it on attach. The daemon sees all
+8. **The pane title survives a restart.** The zmx daemon keeps the last
+   non-empty OSC 0/2 title of its session (decision 4 applies) and replays it
+   on attach. The daemon sees all
    output while the app is closed, so the replayed title is current. The
    daemon does not replay the working directory (OSC 7): until the shell
    reports it again, the pane title at the prompt uses the working directory
