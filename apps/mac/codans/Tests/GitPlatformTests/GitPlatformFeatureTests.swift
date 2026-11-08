@@ -104,12 +104,13 @@ struct GitPlatformFeatureTests {
     var seed = GitPlatformFeature.State()
     seed.snapshots[wid] = snap
     let store = Self.makeStore(initialState: seed) { client in
-      client.merge = { pullRequest, strategy in
+      client.merge = { pullRequest, strategy, headSHA in
         #expect(pullRequest == Self.reference(99))
         #expect(strategy == .squash)
+        #expect(headSHA == "abc123")
       }
     }
-    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash)) {
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: "abc123")) {
       $0.mutating.insert(wid)
     }
     await store.receive(.mergeCompleted(wid, prNumber: 99, .success(.init()))) {
@@ -122,9 +123,9 @@ struct GitPlatformFeatureTests {
   func mergeFailureSurfacesMergeConflict() async {
     let wid = WorktreeID()
     let store = Self.makeStore { client in
-      client.merge = { _, _ in throw GitPlatformError.mergeConflict }
+      client.merge = { _, _, _ in throw GitPlatformError.mergeConflict }
     }
-    await store.send(.mergeRequested(wid, Self.reference(1), strategy: .squash)) {
+    await store.send(.mergeRequested(wid, Self.reference(1), strategy: .squash, headSHA: "abc123")) {
       $0.mutating.insert(wid)
     }
     await store.receive {
@@ -142,11 +143,11 @@ struct GitPlatformFeatureTests {
     var seed = GitPlatformFeature.State()
     seed.mutating.insert(wid)
     let store = Self.makeStore(initialState: seed) { client in
-      client.merge = { _, _ in
+      client.merge = { _, _, _ in
         Issue.record("merge must not be called when another mutation is in flight")
       }
     }
-    await store.send(.mergeRequested(wid, Self.reference(1), strategy: .squash))
+    await store.send(.mergeRequested(wid, Self.reference(1), strategy: .squash, headSHA: "abc123"))
   }
 
   @Test
@@ -209,6 +210,137 @@ struct GitPlatformFeatureTests {
     }
   }
 
+  // MARK: - head commit guard (ADR 0004 item 17)
+
+  @Test
+  func mergeWithoutHeadSHARefreshesTheUnitAndDoesNotMerge() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let old = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: nil)
+    let fresh = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "def456")
+    var seed = Self.unitSeed(projectID: projectID, pair: pair)
+    seed.snapshots[wid] = old
+    let store = Self.makeStore(initialState: seed) { client in
+      client.merge = { _, _, _ in Issue.record("a merge without a head commit must not run") }
+      client.batchPullRequests = { _, _ in ["feature/x": fresh] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
+    }
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: nil)) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: fresh)
+  }
+
+  @Test
+  func headMovedRejectionShowsItsErrorAndRefreshesTheUnitAtOnce() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let seen = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "abc123")
+    let moved = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "def456")
+    var seed = Self.unitSeed(projectID: projectID, pair: pair)
+    seed.snapshots[wid] = seen
+    let store = Self.makeStore(initialState: seed) { client in
+      client.merge = { _, _, _ in throw GitPlatformError.headMoved }
+      client.batchPullRequests = { _, _ in ["feature/x": moved] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
+    }
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: "abc123")) {
+      $0.mutating.insert(wid)
+    }
+    // No 2 s delay: the fetch starts with the failure.
+    await store.receive {
+      if case .mergeCompleted(let w, 99, .failure) = $0, w == wid { return true }
+      return false
+    } assert: {
+      $0.mutating.remove(wid)
+      $0.lastError[wid] = .headMoved
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    // The error stays through the refresh; the new head is underneath it.
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: moved)
+    #expect(store.state.lastError[wid] == .headMoved)
+    #expect(
+      GitPlatformError.headMoved.userFacingMessage == "The branch has new commits. Review them, then merge again.")
+    await store.send(.headMovedReviewed(wid)) {
+      $0.lastError[wid] = nil
+    }
+  }
+
+  @Test
+  func headMovedReviewedKeepsOtherErrors() async {
+    let wid = WorktreeID()
+    var seed = GitPlatformFeature.State()
+    seed.lastError[wid] = .mergeConflict
+    let store = Self.makeStore(initialState: seed)
+    await store.send(.headMovedReviewed(wid))
+  }
+
+  @Test
+  func presentPopoverOverASnapshotWithoutHeadSHARefreshesTheUnit() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let fresh = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "def456")
+    var seed = Self.unitSeed(projectID: projectID, pair: pair)
+    seed.snapshots[wid] = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: nil)
+    let store = Self.makeStore(initialState: seed) { client in
+      client.batchPullRequests = { _, _ in ["feature/x": fresh] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
+    }
+    await store.send(.presentPopover(wid)) {
+      $0.popoverTarget = wid
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: fresh)
+  }
+
+  @Test
+  func mergeIsOffUntilTheSnapshotHasAHeadCommit() {
+    let snapshot = Self.stubSnapshot(headSHA: nil)
+    #expect(
+      WorktreePullRequestPopover.mergeDisabledReason(for: snapshot, strategy: .squash) == "Reading the head commit")
+  }
+
+  private static func unitSeed(
+    projectID: ProjectID, pair: GitPlatformFeature.Action.WorktreeBranchPair
+  ) -> GitPlatformFeature.State {
+    var seed = GitPlatformFeature.State()
+    seed.projectByWorktree[pair.worktreeID] = projectID
+    seed.projectGitRoots[projectID] = URL(fileURLWithPath: "/tmp/r")
+    seed.projectWorktreePairs[projectID] = [pair]
+    return seed
+  }
+
+  private static func receiveBatch(
+    _ store: TestStoreOf<GitPlatformFeature>, projectID: ProjectID, wid: WorktreeID, branch: String,
+    snapshot: PullRequestSnapshot
+  ) async {
+    await store.receive { action in
+      guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
+      return pid == projectID
+    } assert: {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(wid)
+      $0.snapshotsByProject[projectID] = BatchedPullRequests(
+        repository: GitPlatformRepository(kind: .github, host: "github.com", path: "w/r"),
+        byBranch: [branch: snapshot], seenBranches: [branch], fetchedAt: Self.fixedDate
+      )
+      $0.snapshots[wid] = snapshot
+      $0.snapshotLoadedAt[wid] = Self.fixedDate
+    }
+  }
+
   // MARK: - state helper
 
   @Test
@@ -229,7 +361,8 @@ struct GitPlatformFeatureTests {
     number: Int = 1,
     title: String = "Test PR",
     state: PullRequestState = .open,
-    headRefName: String = "feature/test"
+    headRefName: String = "feature/test",
+    headSHA: String? = "abc123"
   ) -> PullRequestSnapshot {
     PullRequestSnapshot(
       number: number,
@@ -237,6 +370,7 @@ struct GitPlatformFeatureTests {
       state: state,
       isDraft: false,
       headRefName: headRefName,
+      headSHA: headSHA,
       author: "gump",
       additions: 0,
       deletions: 0,
@@ -895,12 +1029,12 @@ struct GitPlatformFeatureTests {
     seed.projectGitRoots[projectID] = gitRoot
     seed.projectWorktreePairs[projectID] = [pair]
     let store = Self.makeStore(initialState: seed, clock: clock) { client in
-      client.merge = { _, _ in }
+      client.merge = { _, _, _ in }
       client.batchPullRequests = { _, _ in ["feature/x": snap] }
     } customizeGit: { git in
       git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
     }
-    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash)) {
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: "abc123")) {
       $0.mutating.insert(wid)
     }
     await store.receive(.mergeCompleted(wid, prNumber: 99, .success(.init()))) {
@@ -943,11 +1077,11 @@ struct GitPlatformFeatureTests {
     seed.projectGitRoots[projectID] = gitRoot
     seed.projectWorktreePairs[projectID] = [pair]
     let store = Self.makeStore(initialState: seed, clock: clock) { client in
-      client.merge = { _, _ in }
+      client.merge = { _, _, _ in }
     } customizeGit: { git in
       git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
     }
-    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash)) {
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: "abc123")) {
       $0.mutating.insert(wid)
     }
     await store.receive(.mergeCompleted(wid, prNumber: 99, .success(.init()))) {
@@ -987,13 +1121,13 @@ struct GitPlatformFeatureTests {
     seed.projectGitRoots[projectID] = gitRoot
     seed.projectWorktreePairs[projectID] = [kept, gone]
     let store = Self.makeStore(initialState: seed, clock: clock) { client in
-      client.merge = { _, _ in }
+      client.merge = { _, _, _ in }
       client.batchPullRequests = { _, _ in ["main": snap] }
     } customizeGit: { git in
       git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
     }
     await store.send(
-      .mergeRequested(goneWID, Self.reference(99), strategy: .squash)
+      .mergeRequested(goneWID, Self.reference(99), strategy: .squash, headSHA: "abc123")
     ) {
       $0.mutating.insert(goneWID)
     }

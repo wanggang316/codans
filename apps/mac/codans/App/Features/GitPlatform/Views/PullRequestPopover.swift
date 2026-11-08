@@ -266,6 +266,9 @@ struct PullRequestPopover: View {
     case .notAuthenticated(let kind, _):
       Button("Run \(kind.cliName) auth login") { onRetry() }
         .buttonStyle(.borderedProminent)
+    case .headMoved:
+      Button("Review") { onRetry() }
+        .buttonStyle(.borderedProminent)
     default:
       Button("Retry") { onRetry() }
         .buttonStyle(.bordered)
