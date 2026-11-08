@@ -2116,6 +2116,16 @@ extension HierarchyClient {
     guard let host = project.remoteHost else { return }
     let projectID = project.id
     let service = RemoteGitService(host: host)
+    // The host decides which string names the root (#402): a root entered
+    // through a symlink is re-keyed onto git's form before discovery, so the
+    // main checkout git reports matches the existing row.
+    var adopted: Project?
+    if let canonicalRoot = await service.canonicalWorkTreeRoot(of: project.rootPath),
+      manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: canonicalRoot)
+    {
+      adopted = manager.catalog.projects.first { $0.id == projectID }
+    }
+    let project = adopted ?? project
     let gitRoot: String? = await {
       if let existing = project.gitRoot { return existing }
       if let discovered = await service.discoverGitRoot(candidatePath: project.rootPath),

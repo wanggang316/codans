@@ -118,6 +118,37 @@ nonisolated struct RemoteGitService: Sendable {
     return resolved.isEmpty ? nil : resolved
   }
 
+  /// POSIX script behind `canonicalWorkTreeRoot`: print git's top-level path
+  /// only when `$1` is the root of a work tree (`--show-prefix` is empty).
+  /// git reports the physical path with the on-disk case, which is the form
+  /// `git worktree list` uses. `pwd -P` keeps the typed case on a
+  /// case-insensitive host, so it cannot decide the identity. Exposed for the
+  /// script tests.
+  static let workTreeRootScript = """
+    cd -- "$1" 2>/dev/null || exit 1
+    top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+    prefix=$(git rev-parse --show-prefix 2>/dev/null) || exit 1
+    [ -z "$prefix" ] || exit 1
+    printf '%s\\n' "$top"
+    """
+
+  /// The host git's form of `path` when `path` is the root of a work tree,
+  /// else `nil` (not a repository, a subdirectory, or a failed probe). A
+  /// Remote Project root entered through a symlink (`/tmp` on macOS, a
+  /// symlinked home on Linux) differs as a string from the paths
+  /// `git worktree list` reports; this is the host's answer for which string
+  /// is the same directory. It never touches this Mac's filesystem.
+  func canonicalWorkTreeRoot(of path: String) async -> String? {
+    let outcome = await run(
+      executable: "/bin/sh",
+      arguments: ["-c", Self.workTreeRootScript, "sh", path],
+      workingDirectory: nil
+    )
+    guard case .exited(let code, let stdout, _, _) = outcome, code == 0 else { return nil }
+    let root = Self.lastNonEmptyLine(of: decode(stdout))
+    return root.hasPrefix("/") ? root : nil
+  }
+
   /// The last non-empty line of `output`, trimmed. A login shell sources
   /// dotfiles before running a probe, so any banner they print precedes the
   /// command's own output; the real result is the final line.
