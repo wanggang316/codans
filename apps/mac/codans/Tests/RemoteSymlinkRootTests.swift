@@ -63,7 +63,7 @@ struct RemoteSymlinkRootTests {
     let projectID = manager.addRemoteProject(
       name: "linko", remoteHost: Self.host, rootPath: Self.entered, gitRoot: Self.resolved)
 
-    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved))
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved) == .adopted)
     Self.reconcile(manager, projectID)
     #expect(manager.catalog.projects[0].rootPath == Self.resolved)
     #expect(Self.mainRows(manager).count == 1)
@@ -72,7 +72,7 @@ struct RemoteSymlinkRootTests {
     #expect(project.childWorktrees.first.map(project.isMainCheckout) == true)
 
     // A later reconcile: the host still answers the same root, nothing changes.
-    #expect(!manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved))
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved) == .unchanged)
     Self.reconcile(manager, projectID)
     #expect(Self.mainRows(manager).count == 1)
     #expect(manager.catalog.projects[0].worktrees.count == 2)
@@ -87,7 +87,7 @@ struct RemoteSymlinkRootTests {
     let projectID = manager.addRemoteProject(name: "linko", remoteHost: Self.host, rootPath: Self.entered)
     let syntheticID = manager.catalog.projects[0].worktrees[0].id
 
-    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved))
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved) == .adopted)
     manager.setProjectGitRoot(projectID: projectID, gitRoot: Self.resolved)
     Self.reconcile(manager, projectID)
 
@@ -111,7 +111,7 @@ struct RemoteSymlinkRootTests {
     manager.setWorktreePinned(worktreeID: duplicate.id, isPinned: true)
     try manager.selectWorktree(duplicate.id, in: projectID)
 
-    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved))
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved) == .adopted)
     Self.reconcile(manager, projectID)
 
     let project = manager.catalog.projects[0]
@@ -122,7 +122,61 @@ struct RemoteSymlinkRootTests {
     #expect(rows.first?.isPinned == true)
     #expect(rows.first?.branch == "feat/header-redesign")
     #expect(project.selectedWorktreeID == original.id)
+    // The removed row was the selected one, so its active tab stays active.
+    #expect(rows.first?.selectedTabID == duplicateTab)
     #expect(project.worktrees.count == 2)
+  }
+
+  @Test
+  @MainActor
+  func mergeKeepsTheKeptRowsActiveTabWhenItWasSelected() throws {
+    let manager = Self.makeManager()
+    let projectID = manager.addRemoteProject(name: "linko", remoteHost: Self.host, rootPath: Self.entered)
+    manager.setProjectGitRoot(projectID: projectID, gitRoot: Self.entered)
+    Self.reconcile(manager, projectID)
+    let before = manager.catalog.projects[0].worktrees
+    let original = try #require(before.first { $0.path == Self.entered })
+    let duplicate = try #require(before.first { $0.path == Self.resolved })
+    let originalTab = try manager.createTab(in: original.id, in: projectID, name: "a")
+    _ = try manager.createTab(in: duplicate.id, in: projectID, name: "b")
+    try manager.selectWorktree(original.id, in: projectID)
+
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved) == .adopted)
+
+    let kept = manager.catalog.projects[0].worktrees.first { $0.id == original.id }
+    #expect(kept?.selectedTabID == originalTab)
+    #expect(manager.catalog.projects[0].selectedWorktreeID == original.id)
+  }
+
+  @Test
+  @MainActor
+  func rootOwnedByAnotherProjectOnTheHostIsNotAdopted() {
+    // ADR 0006: two Projects on one Host never share a root. When the host
+    // form of this root is already another Project's root, the root stays.
+    let manager = Self.makeManager()
+    let entered = manager.addRemoteProject(
+      name: "linko", remoteHost: Self.host, rootPath: Self.entered, gitRoot: Self.resolved)
+    let owner = manager.addRemoteProject(
+      name: "linko", remoteHost: Self.host, rootPath: Self.resolved, gitRoot: Self.resolved)
+    let before = manager.catalog
+
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: entered, canonicalRoot: Self.resolved) == .conflict(owner))
+    #expect(manager.catalog == before)
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: owner, canonicalRoot: Self.resolved) == .unchanged)
+  }
+
+  @Test
+  @MainActor
+  func sameRootOnAnotherHostIsNoConflict() {
+    let manager = Self.makeManager()
+    let projectID = manager.addRemoteProject(
+      name: "linko", remoteHost: Self.host, rootPath: Self.entered, gitRoot: Self.resolved)
+    _ = manager.addRemoteProject(
+      name: "linko", remoteHost: RemoteHost(alias: "other"), rootPath: Self.resolved, gitRoot: Self.resolved)
+    _ = manager.addProject(name: "linko", rootPath: Self.resolved, gitRoot: Self.resolved)
+
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: Self.resolved) == .adopted)
+    #expect(manager.catalog.projects[0].rootPath == Self.resolved)
   }
 
   @Test
@@ -132,8 +186,8 @@ struct RemoteSymlinkRootTests {
     let projectID = manager.addRemoteProject(
       name: "app", remoteHost: Self.host, rootPath: "/srv/app", gitRoot: "/srv/app")
     let before = manager.catalog
-    #expect(!manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: "/srv/app"))
-    #expect(!manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: "/srv/app/"))
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: "/srv/app") == .unchanged)
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: "/srv/app/") == .unchanged)
     #expect(manager.catalog == before)
   }
 
@@ -142,7 +196,7 @@ struct RemoteSymlinkRootTests {
   func localProjectIsNeverRekeyed() {
     let manager = Self.makeManager()
     let projectID = manager.addProject(name: "app", rootPath: "/srv/app", gitRoot: "/srv/app")
-    #expect(!manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: "/private/srv/app"))
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: "/private/srv/app") == .unchanged)
     #expect(manager.catalog.projects[0].rootPath == "/srv/app")
   }
 
