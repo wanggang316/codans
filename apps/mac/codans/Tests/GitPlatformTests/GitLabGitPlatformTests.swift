@@ -476,6 +476,30 @@ struct GitLabGitPlatformTests {
     #expect(result["feat-approved"]?.reviewDecision == .approved)
   }
 
+  /// A later reviewer page without usable `pageInfo` leaves the list incomplete: the
+  /// snapshot keeps its badge, rollup, and merge state, and the decision is none. A
+  /// requested change on that page still counts.
+  @Test(arguments: [
+    (#"{"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}"#, nil),
+    (#"{"pageInfo":{"hasNextPage":true,"endCursor":null},"nodes":[]}"#, nil),
+    (#"{"nodes":[{"mergeRequestInteraction":{"reviewState":"REQUESTED_CHANGES"}}]}"#, ReviewDecision.changesRequested),
+  ])
+  func laterReviewerPageWithoutPageInfoKeepsTheSnapshot(reviewers: String, decision: ReviewDecision?) async throws {
+    let first = GitLabDecodingTests.approvedPage(
+      reviewers: #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":[]}"#)
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(first),
+      Self.ok(#"{"data":{"project":{"mergeRequest":{"reviewers":\#(reviewers)}}}}"#),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    let snapshot = try #require(result["feat-approved"])
+    #expect(snapshot.number == 16)
+    #expect(snapshot.mergeState == PullRequestMergeState(status: .clean))
+    #expect(snapshot.reviewDecision == decision)
+    #expect(await Self.graphQLReads(runner).count == 2)
+  }
+
   /// A reviewer list longer than `maxPages` pages stays incomplete: the read succeeds
   /// and the decision is none, not approved.
   @Test

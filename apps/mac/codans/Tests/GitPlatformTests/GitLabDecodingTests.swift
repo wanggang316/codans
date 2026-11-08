@@ -286,8 +286,12 @@ struct GitLabDecodingTests {
       Data(
         #"{"data":{"project":{"mergeRequest":{"reviewers":{"pageInfo":{"hasNextPage":true,"endCursor":"r2"},"nodes":[{"mergeRequestInteraction":{"reviewState":"REQUESTED_CHANGES"}}]}}}}}"#
           .utf8))
-    #expect(page.nextCursor == "r2")
-    #expect(page.nodes.map { $0.mergeRequestInteraction?.reviewState } == ["REQUESTED_CHANGES"])
+    #expect(page.pageInfo?.hasNextPage == true)
+    #expect(page.pageInfo?.endCursor == "r2")
+    #expect(page.nodes?.map { $0.mergeRequestInteraction?.reviewState } == ["REQUESTED_CHANGES"])
+    let noPageInfo = try GitLabJSONParsers.parseReviewerPage(
+      Data(#"{"data":{"project":{"mergeRequest":{"reviewers":{"nodes":[]}}}}}"#.utf8))
+    #expect(noPageInfo.pageInfo == nil)
     #expect(throws: GitPlatformError.other("reviewers: no reviewer list in the response")) {
       _ = try GitLabJSONParsers.parseReviewerPage(Data(#"{"data":{"project":null}}"#.utf8))
     }
