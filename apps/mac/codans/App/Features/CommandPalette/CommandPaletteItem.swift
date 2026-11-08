@@ -17,6 +17,12 @@ struct CommandPaletteItem: Equatable, Identifiable {
   /// Project name here so a Project-name query surfaces it instead of
   /// burying it in the lower subtitle band. `nil` matches the title only.
   let searchText: String?
+  /// Extra whole terms matched like `searchText`, each scored on its own so a
+  /// term match does not depend on the rest of the item's text. A worktree
+  /// switch item carries its Project name (so all of one Project's items tie
+  /// on a Project-name query) and, for a Remote Project, the host's display
+  /// authority (so a host query lists that host's worktrees).
+  let searchTerms: [String]
   let icon: String
   /// Hardcoded display hint, used as a fallback when `commandID` is unset or the env-injected
   /// resolved-shortcut map has no binding for that ID. Registry-tracked actions should pass
@@ -31,29 +37,50 @@ struct CommandPaletteItem: Equatable, Identifiable {
   /// for sharp-edge commands (e.g. "Close Current Worktree") that should
   /// not surface by accident the moment the user opens the palette.
   let hiddenWhenQueryEmpty: Bool
+  /// Host display authority (`user@host[:port]`) of the Remote Project this
+  /// item switches to. When set, the row shows the Remote Project marker.
+  let remoteAuthority: String?
+  /// Position in the catalog (sidebar order). Breaks ties between same-score
+  /// items so one Project's items stay together.
+  let catalogOrder: CatalogOrder?
   let kind: Kind
+
+  struct CatalogOrder: Comparable {
+    let project: Int
+    let worktree: Int
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+      (lhs.project, lhs.worktree) < (rhs.project, rhs.worktree)
+    }
+  }
 
   init(
     id: String,
     title: String,
     subtitle: String? = nil,
     searchText: String? = nil,
+    searchTerms: [String] = [],
     icon: String,
     shortcut: KeyEquivalentDescriptor? = nil,
     commandID: CommandID? = nil,
     priorityTier: Int = 100,
     hiddenWhenQueryEmpty: Bool = false,
+    remoteAuthority: String? = nil,
+    catalogOrder: CatalogOrder? = nil,
     kind: Kind
   ) {
     self.id = id
     self.title = title
     self.subtitle = subtitle
     self.searchText = searchText
+    self.searchTerms = searchTerms
     self.icon = icon
     self.shortcut = shortcut
     self.commandID = commandID
     self.priorityTier = priorityTier
     self.hiddenWhenQueryEmpty = hiddenWhenQueryEmpty
+    self.remoteAuthority = remoteAuthority
+    self.catalogOrder = catalogOrder
     self.kind = kind
   }
 

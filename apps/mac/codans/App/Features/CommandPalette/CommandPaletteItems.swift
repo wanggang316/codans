@@ -99,8 +99,9 @@ enum CommandPaletteItems {
     catalog: Catalog
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = []
-    for project in catalog.projects {
-      for worktree in project.worktrees
+    for (projectIndex, project) in catalog.projects.enumerated() {
+      let authority = project.remoteHost?.displayAuthority
+      for (worktreeIndex, worktree) in project.worktrees.enumerated()
       where worktree.id != selection.worktreeID && !worktree.archived {
         items.append(
           CommandPaletteItem(
@@ -112,7 +113,13 @@ enum CommandPaletteItems {
             // it still matches without the decorative "Switch to Worktree:"
             // prefix that otherwise pollutes fuzzy matching.
             searchText: "\(project.name) \(worktree.name)",
+            // The Project name as its own term scores the same for every
+            // worktree of the Project, so a Project-name query ties them and
+            // the catalog-order tie-break keeps them grouped.
+            searchTerms: [project.name] + (authority.map { [$0] } ?? []),
             icon: "arrow.triangle.branch",
+            remoteAuthority: authority,
+            catalogOrder: .init(project: projectIndex, worktree: worktreeIndex),
             kind: .selectWorktree(project.id, worktree.id)
           )
         )
