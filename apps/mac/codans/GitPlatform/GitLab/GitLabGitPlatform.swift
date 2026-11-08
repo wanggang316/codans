@@ -23,6 +23,7 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   let timeout: Duration
   let maxOutputBytes: Int
   private let now: @Sendable () -> Date
+  private let configHosts: @Sendable () -> [GlabConfig.Host]
   private let state: SharedState
   private let recheck: GitLabMergeStatusRecheck
 
@@ -31,13 +32,15 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     resolver: CLIExecutableResolver = .glab,
     timeout: Duration = GitLabGitPlatform.defaultTimeout,
     maxOutputBytes: Int = GitLabGitPlatform.defaultMaxOutputBytes,
-    now: @escaping @Sendable () -> Date = { Date() }
+    now: @escaping @Sendable () -> Date = { Date() },
+    configHosts: @escaping @Sendable () -> [GlabConfig.Host] = { GlabConfig.loggedInHosts() }
   ) {
     self.runner = runner
     self.resolver = resolver
     self.timeout = timeout
     self.maxOutputBytes = maxOutputBytes
     self.now = now
+    self.configHosts = configHosts
     self.state = SharedState()
     self.recheck = GitLabMergeStatusRecheck()
   }
@@ -59,13 +62,20 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     }
   }
 
-  /// Hosts `glab` is logged in to. Also remembers each host's API protocol, so the web
-  /// URLs of a self-managed `http` instance keep their scheme.
-  func authenticatedHosts() async -> Set<String> {
-    guard let exec = try? await checkedExecutable(), let hosts = try? await authStatus(exec) else {
-      return []
+  /// Hosts `glab` is logged in to, from its config file (`GlabConfig`): no network and no
+  /// version gate, so an old or missing `glab` still lets a self-managed host resolve and
+  /// show the actionable error. Also remembers each host's API protocol, so the web URLs
+  /// of a self-managed `http` instance keep their scheme.
+  func authenticatedHosts() async -> Set<String> {  // swiftlint:disable:this async_without_await
+    let hosts = configHosts()
+    for host in hosts {
+      state.setAPIProtocol(host.apiProtocol, for: host.host)
     }
-    return Set(hosts.filter(\.isLoggedIn).map(\.host))
+    return Set(hosts.map(\.host))
+  }
+
+  func invalidateExecutable() async {
+    await resolver.invalidate()
   }
 
   // MARK: - batched read
