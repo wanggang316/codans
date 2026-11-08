@@ -1,3 +1,4 @@
+import ComposableArchitecture
 import Foundation
 import Testing
 
@@ -108,5 +109,31 @@ struct CLIExecutableResolverTests {
     _ = await resolver.resolve()
     _ = await resolver.resolve()
     await #expect(counter.count == 2, "invalidate() clears the cache so the next resolve re-probes")
+  }
+
+  /// A probe that started before `invalidate()` must not overwrite the cache of a newer
+  /// probe that is still in flight: the stale path would stay cached.
+  @Test
+  func aProbeFromBeforeInvalidationDoesNotOverwriteANewerProbe() async throws {
+    let calls = LockIsolated(0)
+    let old = URL(fileURLWithPath: "/usr/local/bin/gh")
+    let new = URL(fileURLWithPath: "/opt/homebrew/bin/gh")
+    let resolver = CLIExecutableResolver(prober: {
+      let call = calls.withValue { count in
+        count += 1
+        return count
+      }
+      try? await Task.sleep(for: call == 1 ? .milliseconds(50) : .milliseconds(200))
+      return call == 1 ? old : new
+    })
+
+    let first = Task { await resolver.resolve() }
+    try await Task.sleep(for: .milliseconds(10))
+    await resolver.invalidate()
+    let second = Task { await resolver.resolve() }
+    #expect(await first.value == old)
+    #expect(await second.value == new)
+    #expect(await resolver.resolve() == new)
+    #expect(calls.value == 2)
   }
 }
