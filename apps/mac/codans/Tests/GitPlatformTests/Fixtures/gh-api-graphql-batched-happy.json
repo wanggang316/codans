@@ -16,6 +16,7 @@
             "url": "https://github.com/wanggang316/codans/pull/39",
             "updatedAt": "2026-04-23T10:00:00Z",
             "headRefName": "feature/github01",
+            "headRefOid": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432",
             "baseRefName": "main",
             "commits": { "totalCount": 12 },
             "author": { "login": "wanggang316" },

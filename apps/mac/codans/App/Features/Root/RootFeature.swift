@@ -34,13 +34,17 @@ struct RootFeature {
     /// stream directly via child-feature subscriptions.
     var lastEvent: LastEventMarker?
 
-    /// Panes whose foreground process group is currently a `git` / `gh`
+    /// Panes whose foreground process group is currently a `git` / `gh` / `glab`
     /// command (see `ForegroundJobClassifier.indicatesGitCommand`). A pane
     /// leaving this set is the trailing edge of a prompt-run VCS command —
     /// the moment we kick an immediate git + PR refresh for its Project so a
     /// `gh pr create` / `git push` surfaces in the sidebar within seconds
     /// instead of waiting for the 60 s liveness poll.
     var panesRunningGitCommand: Set<PaneID> = []
+    /// The subset of `panesRunningGitCommand` whose command is a Git Platform CLI
+    /// (`gh`, `glab`). Its trailing edge also drops the cached CLI paths and
+    /// logged-in hosts: the command can be an install check or an `auth login`.
+    var panesRunningGitPlatformCLI: Set<PaneID> = []
 
     var sidebar: HierarchySidebarFeature.State = .init()
     var detail: WorktreeDetailFeature.State = .init()
@@ -255,11 +259,12 @@ struct RootFeature {
     case paneCommandBusyChanged(PaneID, Bool)
     /// Forwarded from `foregroundJobChanged` in the engine event stream.
     /// `running` is true when the pane's foreground process group is a
-    /// `git` / `gh` command (see `ForegroundJobClassifier.indicatesGitCommand`).
+    /// `git` / `gh` / `glab` command (see `ForegroundJobClassifier.indicatesGitCommand`);
+    /// `gitPlatformCLI` when it is a `gh` / `glab` command.
     /// The reducer tracks the running set and, on the trailing edge (a
     /// prompt-run VCS command finishing), kicks an immediate git + PR refresh
     /// for the pane's Project.
-    case paneGitCommandActivity(PaneID, running: Bool)
+    case paneGitCommandActivity(PaneID, running: Bool, gitPlatformCLI: Bool)
     /// Forwarded from `paneInfoChanged + .pwd(path)` in the engine event
     /// stream. Persists the pane's live cwd so a restart restores it at the
     /// directory the user last `cd`'d to rather than its creation-time cwd.
@@ -753,12 +758,13 @@ struct RootFeature {
                 await send(
                   .paneCommandBusyChanged(
                     paneID, ForegroundJobClassifier.indicatesBusyCommand(job)))
-                // Same source, narrower predicate: track `git` / `gh` commands
-                // so a finishing `gh pr create` / `git push` triggers an
+                // Same source, narrower predicate: track `git` / `gh` / `glab`
+                // commands so a finishing `gh pr create` / `git push` triggers an
                 // immediate PR + diff refresh.
                 await send(
                   .paneGitCommandActivity(
-                    paneID, running: ForegroundJobClassifier.indicatesGitCommand(job)))
+                    paneID, running: ForegroundJobClassifier.indicatesGitCommand(job),
+                    gitPlatformCLI: ForegroundJobClassifier.indicatesGitPlatformCLI(job)))
               case .paneInfoChanged(let paneID, .pwd(let pwd)):
                 // libghostty OSC 7 → persist the live cwd so a restart
                 // restores the pane at the directory the user last `cd`'d
@@ -1229,16 +1235,23 @@ struct RootFeature {
         hierarchyClient.setPaneCommandBusy(paneID, isBusy)
         return .none
 
-      case .paneGitCommandActivity(let paneID, let running):
-        // Edge-triggered on the foreground `git` / `gh` set. We act ONLY on
-        // the trailing edge (a command the user ran at the prompt finishing)
+      case .paneGitCommandActivity(let paneID, let running, let gitPlatformCLI):
+        // Edge-triggered on the foreground `git` / `gh` / `glab` set. We act ONLY
+        // on the trailing edge (a command the user ran at the prompt finishing)
         // and ONLY for panes we previously saw running one — so an idle
         // shell's unrelated job churn never triggers a fetch.
         if running {
           state.panesRunningGitCommand.insert(paneID)
+          if gitPlatformCLI { state.panesRunningGitPlatformCLI.insert(paneID) }
           return .none
         }
+        let finishedGitPlatformCLI = state.panesRunningGitPlatformCLI.remove(paneID) != nil
         guard state.panesRunningGitCommand.remove(paneID) != nil else { return .none }
+        // A `gh` / `glab` command can install or log in the CLI: drop the cached CLI
+        // paths and logged-in hosts (and re-resolve units without a Git Platform)
+        // before the refresh below reads them, so no "Re-check" is needed.
+        let invalidateGitPlatformCLI: Effect<Action> =
+          finishedGitPlatformCLI ? .send(.gitPlatform(.refreshAvailabilityRequested)) : .none
         // Resolve the pane's owning Project + Worktree from the live catalog
         // (same walk as `worktreeHeadChanged`).
         let catalog = hierarchyClient.snapshot()
@@ -1255,11 +1268,11 @@ struct RootFeature {
           // The fetch unit the pane's row belongs to: the Project's repository,
           // or — in a workspace — the member repository this checkout came from.
           let unit = Self.gitPlatformFetchUnit(in: project, worktreeID: worktree.id, fallback: nil)
-        else { return .none }
+        else { return invalidateGitPlatformCLI }
         let projectID = project.id
         let worktreeID = worktree.id
         let worktreeURL = project.gitURL(worktree.path)
-        return .run { [projectReconciler, monitor = worktreeLocalDiffMonitor] send in
+        let refresh: Effect<Action> = .run { [projectReconciler, monitor = worktreeLocalDiffMonitor] send in
           // `git commit` / `git push` move the working-tree diff and the
           // ahead/behind counts but NOT `.git/HEAD`, so neither the HEAD
           // watcher nor the working-tree watcher reliably fires for a push —
@@ -1283,6 +1296,7 @@ struct RootFeature {
           )
         }
         .cancellable(id: CancelID.gitCommandRefresh(unit.projectID), cancelInFlight: true)
+        return .merge(invalidateGitPlatformCLI, refresh)
 
       case .paneLivePwdChanged(let paneID, let path):
         // No reducer state mutation — the manager writes through to the

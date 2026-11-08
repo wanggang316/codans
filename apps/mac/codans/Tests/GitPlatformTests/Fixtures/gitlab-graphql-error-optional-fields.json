@@ -1,0 +1,49 @@
+{
+  "errors": [
+    {
+      "message": "Field 'squashReadOnly' doesn't exist on type 'MergeRequest'",
+      "locations": [
+        {
+          "line": 16,
+          "column": 13
+        }
+      ],
+      "path": [
+        "query",
+        "project",
+        "mergeRequests",
+        "nodes",
+        "squashReadOnly"
+      ],
+      "extensions": {
+        "code": "undefinedField",
+        "typeName": "MergeRequest",
+        "fieldName": "squashReadOnly"
+      }
+    },
+    {
+      "message": "Field 'reviewState' doesn't exist on type 'UserMergeRequestInteraction'",
+      "locations": [
+        {
+          "line": 23,
+          "column": 43
+        }
+      ],
+      "path": [
+        "query",
+        "project",
+        "mergeRequests",
+        "nodes",
+        "reviewers",
+        "nodes",
+        "mergeRequestInteraction",
+        "reviewState"
+      ],
+      "extensions": {
+        "code": "undefinedField",
+        "typeName": "UserMergeRequestInteraction",
+        "fieldName": "reviewState"
+      }
+    }
+  ]
+}

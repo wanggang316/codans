@@ -13,18 +13,22 @@ nonisolated struct GitPlatformClient: Sendable {
   /// The Git Platform repository behind a remote, or `nil` when no Git Platform serves its host.
   /// Order: an alias from `aliases`; `github.com` or a host `gh` is logged in to → GitHub;
   /// `gitlab.com` or a host `glab` is logged in to → GitLab; for an SSH remote, its
-  /// `ssh -G` HostName matched to one of those hosts; otherwise none (ADR 0005).
+  /// `ssh -G` HostName matched to one of those hosts; a host name that contains `github` or
+  /// `gitlab`; otherwise none (ADR 0004 item 2, ADR 0005).
   var resolveRepository: @Sendable (_ remote: RemoteInfo, _ aliases: [GitPlatformAlias]) async -> GitPlatformRepository?
   /// Hosts the CLI of `kind` is logged in to. The Git Platforms pane uses it for the status
   /// of each alias.
   var authenticatedHosts: @Sendable (_ kind: GitPlatformKind) async -> Set<String>
-  /// Drops cached resolver input (the hosts each CLI is logged in to and the `ssh -G`
-  /// results), so the next resolution sees a fresh `auth login` or `~/.ssh/config`.
+  /// Drops cached resolver input (the CLI paths, the hosts each CLI is logged in to, and
+  /// the `ssh -G` results), so the next resolution and fetch see a fresh install,
+  /// `auth login`, or `~/.ssh/config`.
   var invalidateResolution: @Sendable () async -> Void
   /// Batched Pull Request lookup for one repository, keyed by source branch name.
   var batchPullRequests:
     @Sendable (_ repository: GitPlatformRepository, _ branches: [String]) async throws -> [String: PullRequestSnapshot]
-  var merge: @Sendable (_ pullRequest: PullRequestReference, _ strategy: MergeStrategy) async throws -> Void
+  /// Merges only when the head of the Pull Request is still `headSHA` (ADR 0004 item 17).
+  var merge:
+    @Sendable (_ pullRequest: PullRequestReference, _ strategy: MergeStrategy, _ headSHA: String) async throws -> Void
   var close: @Sendable (_ pullRequest: PullRequestReference) async throws -> Void
   var markReady: @Sendable (_ pullRequest: PullRequestReference) async throws -> Void
   var rerunFailedChecks: @Sendable (_ pullRequest: PullRequestReference) async throws -> Void
@@ -51,12 +55,17 @@ extension GitPlatformClient {
       availability: { kind in await implementation(kind).availability() },
       resolveRepository: { remote, aliases in await resolver.resolve(remote, aliases: aliases) },
       authenticatedHosts: { kind in await implementation(kind).authenticatedHosts() },
-      invalidateResolution: { await resolver.invalidate() },
+      invalidateResolution: {
+        await resolver.invalidate()
+        for kind in GitPlatformKind.allCases {
+          await implementation(kind).invalidateExecutable()
+        }
+      },
       batchPullRequests: { repository, branches in
         try await implementation(repository.kind).batchPullRequests(repository: repository, branches: branches)
       },
-      merge: { pullRequest, strategy in
-        try await implementation(pullRequest.repository.kind).merge(pullRequest, strategy: strategy)
+      merge: { pullRequest, strategy, headSHA in
+        try await implementation(pullRequest.repository.kind).merge(pullRequest, strategy: strategy, headSHA: headSHA)
       },
       close: { pullRequest in try await implementation(pullRequest.repository.kind).close(pullRequest) },
       markReady: { pullRequest in try await implementation(pullRequest.repository.kind).markReady(pullRequest) },

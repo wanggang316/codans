@@ -1,6 +1,6 @@
 # 0004. GitLab support through glab
 
-Status: Accepted. Superseded in part by [ADR 0005](0005-git-platform-aliases.md): item 2 (the Project settings step) and item 10 (the Project Git Platform choice).
+Status: Accepted. Superseded in part by [ADR 0005](0005-git-platform-aliases.md): item 2 (the Project settings step) and item 10 (the Project Git Platform choice). Item 2 amended 2026-11: the host-name step, the `glab` config file, and cache invalidation. Amended 2026-11-08: item 17 (merge only the head commit the user saw).
 
 ## Context
 
@@ -23,11 +23,29 @@ GitLab users run a self-managed instance.
    GitLab-only feature (issues, comment threads, pipeline dashboards).
 2. **Hosts.** codans supports gitlab.com and self-managed GitLab instances.
    It resolves the Git Platform of a source repository from its `origin` host in
-   this order:
+   this order (amended 2026-11; the alias and `ssh -G` steps come from
+   [ADR 0005](0005-git-platform-aliases.md) item 3):
+   - A Git Platform alias for the host: its kind and API host.
    - `github.com` or a host that `gh` is logged in to: GitHub.
-   - `gitlab.com` or a host that `glab` is logged in to: GitLab.
-   - A Git Platform that the user sets in the Project settings.
+   - `gitlab.com` or a host that `glab` is logged in to: GitLab. codans reads
+     these hosts from the local `glab` config file (`config.yml` in
+     `GLAB_CONFIG_DIR`, the XDG config home, `~/.config/glab-cli`, or
+     `~/Library/Application Support/glab-cli`). It reads only the host names,
+     whether each has a token, and the API protocol. This needs no network
+     and works with every `glab` version.
+   - For an SSH remote: the `ssh -G` HostName, matched to one of those hosts.
+   - The host name: a host that contains `gitlab` is GitLab, and one that
+     contains `github` is GitHub (`gitlab.corp.example.com`). For an SSH remote
+     the name is its `ssh -G` HostName without the SSH port. A name that
+     contains both resolves to no Git Platform. When the CLI of that kind is
+     missing or not logged in to the host, the badge position shows the
+     install or `auth login` message (item 15). An alias corrects a wrong guess.
    - Otherwise: no Git Platform. codans shows no badge and no error.
+
+   The cached CLI paths and logged-in hosts are dropped when a `gh` or `glab`
+   command finishes in a pane, and by the Settings "Re-check". A missing CLI is
+   not cached. Thus an install or an `auth login` in a pane shows the badge
+   without a Re-check.
 3. **Transport.** codans calls the `glab` CLI (`glab api graphql` for reads).
    codans sends no HTTP request itself and stores or forwards no token. This is
    the same rule as for `gh`.
@@ -85,6 +103,24 @@ GitLab users run a self-managed instance.
     for a missing `gh`.
 16. **Mixed Workspaces.** Each fetch unit resolves its own Git Platform, so one
     Workspace can have GitHub and GitLab members.
+17. **Head commit guard.** A merge from codans merges only the commit that the
+    user saw in the badge and the popover:
+    - The Pull Request snapshot carries the head commit SHA of the source
+      branch (GitHub `headRefOid`, GitLab `diffHeadSha`).
+    - The merge write action requires this SHA. GitHub gets it as
+      `gh pr merge --match-head-commit`; GitLab gets it as the `sha` of the
+      merge API.
+    - When the Git Platform refuses the merge because the head moved, codans
+      shows its own error ("The branch has new commits. Review them, then
+      merge again.") and refreshes the fetch unit at once. The error belongs
+      to that Pull Request: it goes when the Worktree changes branch or shows
+      a different Pull Request. Otherwise it stays until the user selects
+      "Review", also when a failed read shows a CLI error in between. "Review" shows the new head only after a successful read of
+      it; before that read, or after a failed read, the button reads it
+      again. There is no "merge anyway" action.
+    - A snapshot without a SHA (an older cache entry) does not merge. The
+      Merge button is disabled, and opening the popover refreshes the fetch
+      unit. The user merges after the refresh.
 
 ## Reasons
 
@@ -108,6 +144,10 @@ GitLab users run a self-managed instance.
   the rules of the project.
 - Without the CI mapping, an optional failed job turns the badge red, and a
   manual job keeps it in progress for all time.
+- Agents often push new commits after the user looked at a Pull Request. A
+  merge without the head SHA merges commits that nobody reviewed. The Git
+  Platform compares the SHA when it merges, so no check in codans can race
+  with a push. Some GitLab namespaces also refuse a merge without the SHA.
 
 ## Trade-offs
 
@@ -119,10 +159,13 @@ GitLab users run a self-managed instance.
   show an open manual deployment.
 - Instances that do not report requested changes show fewer review states.
 - One default merge strategy applies to both Git Platforms.
+- A push between the read and the merge makes the merge fail. The user must
+  look at the new commits and merge again.
 - Settings has a "Hosts" pane (machines, ADR 0003) and a "Git Platforms" pane.
   The names are close, so the pane text must keep the two concepts apart.
-- Host detection needs an auth-status probe of both CLIs and a Project setting
-  for hosts that neither CLI knows.
+- Host detection needs an auth-status probe of `gh` and a read of the `glab`
+  config file. A host whose name contains `gitlab` or `github` but runs another
+  Git Platform needs an alias.
 
 ## Reconsider when
 

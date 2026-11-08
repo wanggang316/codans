@@ -65,19 +65,27 @@ reducer（`GitPlatformFeature`）、快照缓存和视图只用 `GitPlatform` �
 
 ### Git Platform 选择
 
-每个取数单元在取数开始时读 `origin`，由 `GitPlatformResolver` 按以下顺序解析 Git Platform（[ADR 0005](../adr/0005-git-platform-aliases.md) item 3）：
+每个取数单元在取数开始时读 `origin`，由 `GitPlatformResolver` 按以下顺序解析 Git Platform（[ADR 0005](../adr/0005-git-platform-aliases.md) item 3，[ADR 0004](../adr/0004-gitlab-support-through-glab.md) item 2）：
 
 1. Git Platform alias（`GeneralSettings.gitPlatformAliases`，Settings › Git Platforms）：remote host 有 alias 时，用 alias 的 kind 和 API host。SSH remote 的端口是 SSH 端口，所以没有端口的 alias 也匹配它（alias `127.0.0.1` 匹配 `ssh://git@127.0.0.1:2224/…`）。
 2. `github.com` 或 `gh` 已登录的 host → GitHub。
-3. `gitlab.com` 或 `glab` 已登录的 host → GitLab。
+3. `gitlab.com` 或 `glab` 已登录的 host → GitLab。`glab` 已登录的 host 读自 `glab` 的本地配置文件（见下），不调用 `glab`。
 4. 只对 SSH remote：`ssh -G` 读出的 `HostName`，去掉端口后与第 2、3 步已登录或公共的 host 比较；恰有一个匹配时用它的 kind 和 host。
-5. 否则无 Git Platform：不取数、无徽标、无错误；该单元记入 `unitsWithoutGitPlatform`，轮询跳过它。
+5. host 名：含 `gitlab` 的 host → GitLab，含 `github` 的 host → GitHub（例：`gitlab.corp.example.com`）。SSH remote 用第 4 步的 `HostName`（去掉 SSH 端口）作名字和 API host；HTTPS remote 用 remote host（含端口）。两者都含时无 Git Platform。
+6. 否则无 Git Platform：不取数、无徽标、无错误；该单元记入 `unitsWithoutGitPlatform`，轮询跳过它。
 
-alias 最先检查，所以用户可以改正一个错误的自动结果。两个 CLI 都认识的 host 归 GitHub。alias 的 API host 没有登录时 alias 仍然生效：读取失败，徽标位置显示与缺少登录时相同的可操作消息。一个 alias 对 `origin` 有该 host 的每个 Project 和 Workspace 成员生效。
+alias 最先检查，所以用户可以改正一个错误的自动结果（包括第 5 步按名字的猜测）。两个 CLI 都认识的 host 归 GitHub。alias 的 API host 没有登录时 alias 仍然生效：读取失败，徽标位置显示与缺少登录时相同的可操作消息。第 5 步同理：该 kind 的 CLI 未安装或未登录该 host 时，徽标位置显示 `brew install` 或 `auth login` 消息。一个 alias 对 `origin` 有该 host 的每个 Project 和 Workspace 成员生效。
+
+`glab` 已登录的 host（`GlabConfig`）：读 `config.yml` 顶层 `hosts:` 下的条目，有 `token` 或 `use_keyring: true` 的 host 算已登录，同时记下 `api_protocol`（供 web URL 的 scheme）。目录按 `glab` 的查找顺序：设置了 `GLAB_CONFIG_DIR` 时只用它；否则依次 `$XDG_CONFIG_HOME/glab-cli`、`~/.config/glab-cli`、`~/Library/Application Support/glab-cli`，用第一个存在的文件。不走网络、不依赖 `glab` 版本，所以 `glab` 低于最低版本时自托管 host 也能解析，徽标位置显示 `brew upgrade` 消息。缩进宽度不限（2 或 4 空格）。codans 只读 host 名、是否有 token 和 `api_protocol`，不读取或转发 token 的值。Settings 面板仍用 `glab auth status` 显示已连接的 host 和用户。
 
 SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 host 可能是 `~/.ssh/config` 的别名，或带 SSH 端口，CLI 无法用它访问 API。第 4 步对每个 SSH remote 运行，不需要用户设置：`GitPlatformResolver` 用 `ssh -G -- <host>`（`SSHHostName`，只打印配置、不建连接）读出 `HostName`，再在两种 kind 已登录的 host 和公共 host 中找名字（去掉端口）等于它的那一个。例：`git@github-work:org/repo`（`HostName github.com`）→ GitHub、`github.com`；`ssh://git@192.168.2.158:2222/g/r` → GitLab、`glab` 已登录的 `192.168.2.158:8929`。没有唯一匹配时无 Git Platform。HTTPS remote 的端口就是 API 端口，不运行 `ssh -G`。SSH host 名与 API host 不同（`ssh.gitlab.example.com` 对 `gitlab.example.com`）时需要 alias。
 
-各 CLI 登录过的 host 每个 kind 只问一次，`ssh -G` 结果每个 SSH host 只问一次，都缓存；Settings 的 Re-check 清除两者（`GitPlatformClient.invalidateResolution`），所以 `auth login` 或 `~/.ssh/config` 的变更在 Re-check 后生效。
+各 CLI 登录过的 host 每个 kind 只问一次，`ssh -G` 结果每个 SSH host 只问一次，CLI 路径（`CLIExecutableResolver`）找到后也缓存；未找到的 CLI 不缓存，下次调用重新查找。`GitPlatformClient.invalidateResolution` 清除这三者，以下两处调用它：
+
+- pane 内 `gh` / `glab` 命令结束（前台作业 trailing edge，见[失效事件](#缓存与失效)）：`RootFeature` 发送 `refreshAvailabilityRequested`，再刷新该 pane 的取数单元。所以在 pane 里安装 CLI 后运行 `glab auth login`（或 `gh auth login`），徽标无需 Re-check 即出现。
+- Settings 的 Re-check。
+
+`refreshAvailabilityRequested` 先等清除完成再探测可用性（否则探测可能读到旧的 CLI 路径或登录状态并缓存 30 s），并清空 `unitsWithoutGitPlatform`，轮询跳过的单元也会重新解析。`CLIExecutableResolver` 只在探测仍拥有缓存时写入结果，失效前开始的探测不会覆盖之后的探测。`~/.ssh/config` 的变更在下一次失效后生效。
 
 `GitPlatformAliasesClient` 在取数时给出当前的 alias 列表。
 
@@ -87,7 +95,7 @@ alias 列表变更时 `CodansApp` 发送 `refreshAllRequested`，所以每个单
 
 ### Settings
 
-- 全局 "Git Platforms" 面板（`GitPlatformsSettingsView`）：`gh` 和 `glab` 各一块，显示可用性（已连接的 host 和用户，或可操作的原因）、Re-check 和文档链接；然后是 "Git Platform aliases" 列表：每行一个 alias（remote host → kind、API host），可添加、编辑、删除，remote host 在列表中唯一（`GeneralSettings.saveGitPlatformAlias`）。每行显示该 kind 的 CLI 是否登录了 API host；未登录时显示与徽标位置相同的 `auth login` 消息。下面是所有 Git Platform 共用的默认值：默认 merge 策略和 merge 后的 Worktree 动作。GitLab 上项目的 merge method 生效，`rebase` 策略按 Merge 处理（ADR 0004 item 6）。面板文字说明 Git Platform 与 "Hosts" 面板（运行 Project 的机器，ADR 0003）不同。
+- 全局 "Git Platforms" 面板（`GitPlatformsSettingsView`，详见 [Settings › Git Platforms pane](settings.md#git-platforms-pane)）：GitHub 和 GitLab 各一块，显示官方标志、CLI 状态（检查中、已连接的 host 和用户、未安装时的安装命令、未登录时的 `auth login` 命令）、Re-check、文档链接，以及来自 `GitPlatformKind.capabilities` 的能力列表（不支持的项变暗并写明原因）；然后是 "Git Platform aliases" 列表：每行一个 alias（remote host → kind、API host），可添加、编辑、删除，remote host 在列表中唯一（`GeneralSettings.saveGitPlatformAlias`）。每行显示该 kind 的 CLI 是否登录了 API host；未登录时显示与徽标位置相同的 `auth login` 消息。下面是所有 Git Platform 共用的默认值：默认 merge 策略和 merge 后的 Worktree 动作。GitLab 上项目的 merge method 生效，`rebase` 策略按 Merge 处理（ADR 0004 item 6）。这条说明在 merge 策略 picker 的副标题里。面板底部的脚注说明 Git Platform 与 "Remote Hosts" 面板（运行 Project 的机器，ADR 0003）不同。
 - Project 设置的 "Git Platform" 区：merge 策略和 merge 后动作的 Project 覆盖。只对 git Project 显示。Project 没有 Git Platform 选择（ADR 0005 item 2）；含 `projects[pid].git.gitPlatform` 的旧设置文件可以加载，该键被忽略且不再写回。
 
 ### 执行流
@@ -130,8 +138,10 @@ alias 列表变更时 `CodansApp` 发送 `refreshAllRequested`，所以每个单
 
 ### 数据模型
 
-- **`PullRequestSnapshot`**（`CodansCore/GitPlatform/`）是 provider-neutral 快照：编号、标题、state、draft、head / base ref、作者、加减行、commit 数、URL、更新时间、`checkRollup`、`mergeState`（`PullRequestMergeState`）、`reviewDecision`、`mergeOptions`、`canRerunFailedChecks`、`baseRepositoryURL`。check 结果随元数据在同一 query 取回。
+- **`PullRequestSnapshot`**（`CodansCore/GitPlatform/`）是 provider-neutral 快照：编号、标题、state、draft、head / base ref、head commit（`headSHA`：GitHub `headRefOid`，GitLab `diffHeadSha`）、作者、加减行、commit 数、URL、更新时间、`checkRollup`、`mergeState`（`PullRequestMergeState`）、`reviewDecision`、`mergeOptions`、`canRerunFailedChecks`、`baseRepositoryURL`。check 结果随元数据在同一 query 取回。
 - **`BatchedPullRequests`** 是 `batchPullRequests` 的返回包络，reducer 每单元存一份：解析出的 `repository`、`byBranch`（无 Pull Request 的分支不出现）、`seenBranches`、`fetchedAt`。写操作和 web URL 从这里的 `repository` 得到目标仓库。
+
+`headSHA` 是读取快照时源分支的 head commit，merge 用它做 [head commit 保护](#merge-的-head-commit-保护)。旧缓存条目没有该字段，解码为 `nil`。
 
 `baseRefName` 与 `baseRepositoryURL` 一起描述 Pull Request 的目标仓库和分支，供内置 Diff Viewer 定位本地 remote-tracking ref。两字段可选，缺失时不能仅凭分支名猜测目标仓库，尤其是 fork PR。快照更新经 `RootFeature` 同步到已打开的 Diff 窗口，见 [Git Diff Viewer](git-diff-viewer.md)。
 
@@ -153,9 +163,11 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | Worktree removed | `HierarchyManager` catalog 增量 | 从缓存移除；不取数 |
 | Worktree 分支变更 / commit | `WorktreeHeadWatcher`（`.git/HEAD` + reflog 监听） | 刷新该 Worktree 所属取数单元（不是选中 Project）；取数返回前，分支已变的行按缓存改投新分支的 PR 或清空徽标 |
 | Merge / close / markReady 完成 | `GitPlatformFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
+| Merge 因 head 移动被拒（`.headMoved`） | `GitPlatformFeature.mergeCompleted(.failure)` | 立即刷新取数单元 |
+| Merge 时快照无 `headSHA`，或打开无 `headSHA` 的 open PR 的 popover | `mergeRequested` / `popoverOpened` | 立即刷新取数单元，不 merge |
 | 手动刷新 | 用户动作（面板、popover 刷新按钮） | 立即刷新 Project |
 | 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
-| pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
+| pane 内 `git` / `gh` / `glab` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元。`gh` / `glab` 命令另外立即清除 CLI 路径和已登录 host 缓存，并让无 Git Platform 的单元重新解析 |
 | 远端跟踪 ref 变更 | `RemoteRefsWatcher`（FSEvents 监听公共 git 目录下的 `refs/remotes/` 与 `packed-refs`） | 2 s 后刷新该取数单元，并在 3 min 内按 hot 档轮询。覆盖任意进程的 `git push` / `gh pr create` / `git fetch`，包括前台作业检测看不到的 agent |
 | Git Platform alias 列表变更 | `SettingsStore` 观察（`CodansApp.observeGitPlatformAliases`） | 所有取数单元排队刷新；无 Git Platform 的单元（轮询跳过）立即重新解析 |
 | App 变为活跃 | `NSApp.didBecomeActiveNotification` | reconcile 后，所有超过 30 s（`focusRefreshDebounce`）未取数的单元排队补刷，选中 Project 优先 |
@@ -185,6 +197,17 @@ Source: [GitPlatformFeature.swift](../../apps/mac/codans/App/Features/GitPlatfor
 
 **写动作完成**派发 `.delegate(.pullRequestMerged(...))` + 一次延迟刷新。2 秒延迟是显式的：Git Platform API 在 merge 后与自身 UI 非强一致，立即取数可能返回 merge 前状态。
 
+### Merge 的 head commit 保护
+
+agent 常在用户看过 Pull Request 之后继续向分支 push。codans 只 merge 用户在徽标和 popover 里看到的 commit（ADR 0004 item 17）：
+
+- popover 发出的 `mergeRequested(worktreeID, pullRequest, strategy:, headSHA:)` 带屏幕上快照的 `headSHA`。`GitPlatform.merge(_:strategy:headSHA:)` 的 `headSHA` 不可为空，没有不带 SHA 的 merge 路径。
+- GitHub：`gh pr merge <n> <flag> --match-head-commit <sha> --repo <repo>`。GitLab：merge API 带 `sha=<sha>`（`-f sha=<sha>`）；要求 SHA 的 GitLab namespace 因此也能 merge。
+- head 已移动时 Git Platform 拒绝 merge：GitHub 报 "Head branch was modified"，GitLab 报 409 "SHA does not match HEAD of source branch"。两者都映射为 `GitPlatformError.headMoved`，消息为 "The branch has new commits. Review them, then merge again."，并在 merge-conflict 映射之前判断（GitLab 的 409 也用于其他拒绝）。
+- `.headMoved` 时 reducer 记录该错误和 `headMovedMerges[worktree]`（PR 编号、分支、拒绝时间），并立即刷新取数单元（不等 2 秒）。成功的刷新通常会清除行错误，但不清除 `.headMoved`：它是对 merge 的回答，不是对读取的回答。其间一次失败的取数可能用 CLI 错误覆盖该行的 `.headMoved`；之后成功的取数只要仍含该 PR，就把行错误恢复为 `.headMoved`。该错误只属于被拒的 PR：刷新结果里该行是另一个 PR 编号或没有 PR，或 Worktree 切换了分支（`reprojectCachedSnapshots`，不等取数），就清除。
+- 拒绝之后开始的一次取数成功且仍含该 PR 时，`isNewHeadRead` 置为 true。popover 显示错误和按钮：已读到新 head 时为 "Review"，按下派发 `headMovedReviewed`，清除错误，popover 显示新的 head；未读到（刷新进行中或失败）时为 "Retry"，同一 action 只重新刷新，不显示旧快照。没有 "merge anyway"。
+- 快照没有 `headSHA`（旧缓存条目）时，popover 禁用 Merge，原因为 "Reading the head commit"。`WorktreePullRequestPopover` 出现时派发 `popoverOpened`，所以侧栏徽标和状态栏两个入口都会刷新该 open PR 的取数单元。若仍收到无 SHA 的 `mergeRequested`，reducer 只刷新，不 merge；用户在刷新后的 popover 中再次 merge。
+
 ### `GitService.remoteInfo` 辅助
 
 `RemoteInfo(host, path)` 从 `git remote get-url origin` 解析，接受 SCP（`git@host:group/sub/repo.git`）、HTTPS 和 `ssh://` 形式，保留 path 的每一段；host 可带端口。这是纯 git 操作，**属于 `GitService`，不属于 `GitPlatformClient`**。解析失败抛 `.remoteInfoUnavailable`，记为单元错误。host 归哪个 Git Platform 由 [Git Platform 选择](#git-platform-选择) 决定，不由 parser 决定。
@@ -194,7 +217,7 @@ Source: [GitPlatformFeature.swift](../../apps/mac/codans/App/Features/GitPlatfor
 视图层接线：
 
 - `WorktreeRowIcon` 的 `rollup` 来源是 `PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)`。
-- `PullRequestPopover` 读 `snapshot.checkRollup` + `snapshot.mergeStateStatus` / `snapshot.reviewDecision`，精确解释 merge-disabled 原因。
+- `PullRequestPopover` 读 `snapshot.checkRollup` + `snapshot.mergeStateStatus` / `snapshot.reviewDecision`，精确解释 merge-disabled 原因。快照无 `headSHA` 时 Merge 禁用。`.headMoved` 错误在读到新 head 后显示 "Review"，之前显示 "Retry"；其他错误显示 "Retry"（或 CLI 的修复动作）。
 - `WorktreePullRequestBadge` 读 `store.snapshots[worktreeID]`，该字典由 reducer 从 `state.snapshotsByProject[P]` 派生。
 - 侧栏行不持有发起取数的逐行 `.task`；取数由 reducer 经取数单元事件发起。侧栏 PR 徽标不显示取数 spinner；popover 在有无缓存的刷新期间均可显示 loading。
 
@@ -250,6 +273,7 @@ reviewDecision
 url
 updatedAt
 headRefName
+headRefOid
 baseRefName
 baseRepository { url }
 commits { totalCount }
@@ -385,25 +409,27 @@ struct CheckNode: Decodable, Equatable, Hashable {
 - **env allowlist** 转发 `PATH`、`HOME`、`GH_CONFIG_DIR`、`XDG_CONFIG_HOME`（重定位的 auth store）+ 强制 `LC_ALL`，**剥除 `GH_TOKEN` / `GITHUB_TOKEN`**——codans 不携带、不转发任何 token material。
 - 子进程 argv 是 `(executable, [args])`，无 shell 解释。GraphQL query 作为单个 `-f query=<body>` 传（gh 处理 HTTP POST body）；body 内的用户派生分支名在插值前已 GraphQL-字符串转义，转义失败的分支名被丢弃并记日志。
 - 超时 20 s；**output cap 8 MiB**（25 分支 × 5 PR × 完整 check rollup 在病态大仓可达 ~4–6 MB；超限抛 `.oversizeResponse`）。
+- 写操作用 `--repo HOST/OWNER/REPO` 寻址。merge 为 `gh pr merge <n> <flag> --match-head-commit <sha>`；stderr 含 "Head branch was modified" → `.headMoved`，"not mergeable" 等 → `.mergeConflict`。
 - 最低 `gh` 版本 **2.20+**（稳定 GraphQL + `--hostname` 行为）；可用性探针解析 `gh --version`，过旧则显示 `brew upgrade gh` 横幅。
 
 ## GitLab 实现
 
 `codans/GitPlatform/GitLab/` 通过 `glab` 实现同一个 `GitPlatform` 协议；UI 标签为 "MR"（`GitPlatformKind.pullRequestLabel`），菜单 / 命令面板 / 侧栏右键菜单写作 "Open MR on GitLab" / "Open Project on GitLab"。
 
-- **读取**：每个 chunk（20 个分支）用 `glab api graphql` 读 `project(fullPath:) { mergeRequests(sourceBranches: $branches, first: 100, after: $after, sort: UPDATED_DESC) }`（`GitLabMergeRequestQuery`），按 `pageInfo.endCursor` 读完所有页后才生成快照：后一页可能有某分支自己的 MR（前一页只有 fork 的同名 MR）。head pipeline 的 job 也分页，首页之外的 job 按 MR 用 `jobsQuery` 补读，后续页里失败的 job 也能进 rollup 和 "Rerun failed"。每个列表最多读 `maxPages`（20）页，超出就报错，不显示不完整的列表；响应缺 `pageInfo` 同样报错。分支名以 JSON 数组变量传入（`-F branches=[...]`），不进入 query 文本，因此无需转义。
+- **读取**：每个 chunk（20 个分支）用 `glab api graphql` 读 `project(fullPath:) { mergeRequests(sourceBranches: $branches, first: 100, after: $after, sort: UPDATED_DESC) }`（`GitLabMergeRequestQuery`），按 `pageInfo.endCursor` 读完所有页后才生成快照：后一页可能有某分支自己的 MR（前一页只有 fork 的同名 MR）。head pipeline 的 job 也分页，首页之外的 job 按 MR 用 `jobsQuery` 补读，后续页里失败的 job 也能进 rollup 和 "Rerun failed"。reviewer 同样分页，首页之外的按 MR 用 `reviewersQuery` 补读。MR 和 job 列表最多读 `maxPages`（20）页，超出就报错，不显示不完整的列表；响应缺 `pageInfo` 同样报错。reviewer 列表超出 `maxPages`、或某页缺 `pageInfo` 或 `nodes` 时不报错，只标为不完整，review decision 不会是 approved（见下方映射）。分支名以 JSON 数组变量传入（`-F branches=[...]`），不进入 query 文本，因此无需转义。
 - **CE 兼容**：只用 CE 有的字段。CE 没有 `approvalsLeft` / `approvalsRequired` / `squashOption`；"还需审批" 来自 `detailedMergeStatus == NOT_APPROVED`，squash 规则来自 MR 的 `squashReadOnly` + `squashOnMerge`。
 - **GitLab 已知问题**：列表中选 `diffStatsSummary` 会让 GitLab 把可合并 MR 的 `detailedMergeStatus` 报为 `CONFLICT`，所以加减行由 `diffStats` 逐文件求和。重试过的 job 仍在 `jobs` 里，所以用 `jobs(retried: false)`。
 - **merge 状态重新检查**：目标分支移动后，GitLab 把 open MR 标为 `UNCHECKED`，直到有请求让它重新检查（例如浏览器打开 MR 页面）。批量读取之后，对显示的 open MR 中 `UNCHECKED`（或 `CHECKING` 持续 60 s 未结束）的，调用 `glab api projects/<id>/merge_requests/<iid>?with_merge_status_recheck=true`，下一次轮询读到真实状态，单元随之离开 hot 档。限流（`GitLabMergeStatusRecheck`）：每个 MR 60 s 内最多一次，每次批量读取最多 3 次，最久未重新检查的 MR 优先（从未检查过的最先），所以超过 3 个的 MR 也会轮流检查；MR 状态稳定后清除记录，下次目标分支移动重新计时。读取不等待重新检查：快照先返回，重新检查在后台并发执行，每次调用受 `glab` 超时限制；失败只记日志，不影响读取结果。
+- **字段降级**：较旧的自托管实例可能不认识只用于 review decision 和 squash 规则的字段（`GitLabMergeRequestQuery.optionalFieldNames`：`squashReadOnly`、`squashOnMerge`、`approved`、`approvedBy`、`reviewers`、`mergeRequestInteraction`、`reviewState`）。批量 query 的 `errors` 中每一条都是这些字段的 unknown field 错误（`extensions.code == "undefinedField"`，或消息 `Field 'x' doesn't exist on type 'T'`）时，该 chunk 改用不含这些字段的 `degradedQuery` 重读一次，只重读一次。徽标、CI rollup、merge 状态照常显示；review decision 为无，合并选项两个都随 merge 状态启用，项目的 squash 规则由 GitLab 在 merge 时执行。其他 GraphQL 错误（包括混有其他错误的情况）仍让该 chunk 失败。每个 host 只记一次降级日志。
 - **未登录检测**：GitLab 对匿名 GraphQL 请求也正常应答，所以 query 带 `currentUser`；为 `null` 即抛 `.notAuthenticated(.gitlab, host:)`。
 - **映射**（`GitLabWire`）：
   - `detailedMergeStatus`：`MERGEABLE` → clean；`CONFLICT` → conflicted；`NEED_REBASE` → behind；`DRAFT_STATUS` → draft；`NOT_APPROVED` / `DISCUSSIONS_NOT_RESOLVED` / `CI_MUST_PASS` / `CI_STILL_RUNNING` / `BLOCKED_STATUS` 等 → blocked + 原因；`CHECKING` / `UNCHECKED` / `PREPARING` → unknown；`NOT_OPEN` → unknown 无原因；未知值 → blocked。
   - head pipeline 的 job → check：失败且 `allow_failure` → neutral；`MANUAL`（未运行的手动 job）→ skipped；`SCHEDULED` → waiting。
-  - review decision：有 reviewer `REQUESTED_CHANGES` → changes requested；`NOT_APPROVED` → review required；`approved` 且有审批人 → approved；否则无。
+  - review decision：有 reviewer `REQUESTED_CHANGES` → changes requested（即使 reviewer 列表不完整）；`NOT_APPROVED` → review required；`approved` 且有审批人，并且 reviewer 数据完整（所有页已读、每个 reviewer 都有 `reviewState`）→ approved；否则无。未读到的或无状态的 reviewer 可能要求了修改，所以数据不完整时不报 approved。降级读取（无 review 字段）时无。
   - 合并选项："Merge"（`mergeCommit`，项目的 merge method 生效）与 "Squash and merge"。项目 squash 为 never 时后者禁用并给原因；为 always 时前者禁用。默认策略 `mergeCommit` / `rebase` → Merge，`squash` → Squash and merge（`PullRequestSnapshot.mergeStrategy(preferring:)`）。
   - fork 过滤：与 GitHub 规则相同，以 source project 的 full path 代替 head repository owner；在保留的 MR 中 open / merged 优先于 closed。
   - Diff Viewer：`baseRefName` = target branch，`baseRepositoryURL` = target project 的 web URL。
-- **写操作**：merge 为 `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool>`；close 为 `... -f state_event=close`；mark ready 为 GraphQL mutation `mergeRequestSetDraft(draft: false)`，只有返回的 payload 无 errors 且 `mergeRequest.draft == false` 才算成功；rerun 先读 MR 的 `head_pipeline.id`，再 `POST projects/<id>/pipelines/<id>/retry`（GitLab 只重跑失败和取消的 job）。`<id>` 是 URL 编码的 full path，嵌套 group 可用。
+- **写操作**：merge 为 `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool> -f sha=<head sha>`；close 为 `... -f state_event=close`；mark ready 为 GraphQL mutation `mergeRequestSetDraft(draft: false)`，只有返回的 payload 无 errors 且 `mergeRequest.draft == false` 才算成功；rerun 先读 MR 的 `head_pipeline.id`，再 `POST projects/<id>/pipelines/<id>/retry`（GitLab 只重跑失败和取消的 job）。`<id>` 是 URL 编码的 full path，嵌套 group 可用。
 - **Web URL**：scheme 取自 `glab auth status` 报告的 `api_protocol`（自托管实例可能是 `http`），未知时用 `https`。
 
 ### glab 子进程契约
@@ -411,9 +437,9 @@ struct CheckNode: Decodable, Equatable, Hashable {
 - 与 `gh` 相同：共享 `CommandRunner`，只用 argv，cwd 为 home 目录，超时 20 s，读取 output cap 8 MiB、写操作 2 MiB。
 - **host**：每次调用都设置 `GITLAB_HOST=<host>`；host 不含端口时另加 `--hostname <host>`。`glab --hostname` 不接受 `host:port`，所以带端口的自托管实例只走环境变量。
 - **env allowlist** 转发 `PATH`、`HOME`、`GLAB_CONFIG_DIR`、`XDG_CONFIG_HOME`，强制 `LC_ALL`、`NO_COLOR`、`GLAB_NO_PROMPT`、`GLAB_CHECK_UPDATE=false`、`GLAB_SEND_TELEMETRY=false`、`GLAB_SHOW_WHATS_NEW=false`；剥除 `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` 及用户自设的 `GITLAB_HOST` / `GITLAB_REPO`。
-- **最低 `glab` 版本 1.122.0**：首个带 `glab auth status --output json` 的版本（resolver 与可用性探针依赖它）。每个可执行文件（按路径 + 修改时间）只跑一次 `glab version`；过旧抛 `.cliOutdated`。`glab auth status --all --output json` 在任一 host 校验失败时退出码为 1，stdout 仍是 JSON，两者都解析。
-- **错误**：`glab api` 在 GraphQL `errors` 或 REST 错误时退出 1，body 在 stdout。GraphQL errors → `.graphQLError`；401 → `.notAuthenticated`；`dial tcp` / TLS / 解析失败 → `.network`；merge 的 405 / 406 / 409 → `.mergeConflict`。
-- 已知限制：`glab` 过旧或未装时无法得知它登录过的自托管 host，此类 remote 解析为无 Git Platform（无徽标）；`gitlab.com` 仍解析为 GitLab 并显示可操作错误。
+- **最低 `glab` 版本 1.122.0**：首个带 `glab auth status --output json` 的版本（可用性探针依赖它；resolver 读配置文件，不依赖它）。每个可执行文件（按路径 + 修改时间）只跑一次 `glab version`；过旧抛 `.cliOutdated`。`glab auth status --all --output json` 在任一 host 校验失败时退出码为 1，stdout 仍是 JSON，两者都解析。
+- **错误**：`glab api` 在 GraphQL `errors` 或 REST 错误时退出 1，body 在 stdout。GraphQL errors → `.graphQLError`；401 → `.notAuthenticated`；`dial tcp` / TLS / 解析失败 → `.network`；merge 的 "SHA does not match HEAD of source branch"（409）→ `.headMoved`；merge 的其他 405 / 406 / 409 → `.mergeConflict`。
+- `glab` 过旧或未装时，自托管 host 仍由配置文件或 host 名（第 5 步）解析为 GitLab，徽标位置显示 `brew upgrade` / `brew install` 消息。已知限制：名字不含 `gitlab`、`glab` 配置里也没有登录的自托管 host 解析为无 Git Platform（无徽标），需要 alias。
 
 ## 备选方案
 

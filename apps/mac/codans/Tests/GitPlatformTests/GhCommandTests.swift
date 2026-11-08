@@ -24,16 +24,16 @@ struct GhCommandTests {
   }
 
   @Test
-  func pullRequestMergeArgvUsesStrategyCLIFlag() {
+  func pullRequestMergeArgvUsesStrategyCLIFlagAndHeadCommit() {
     #expect(
-      GhCommand.pullRequestMerge(number: 1, strategy: .mergeCommit, repo: "h/o/r").arguments
-        == ["pr", "merge", "1", "--merge", "--repo", "h/o/r"])
+      GhCommand.pullRequestMerge(number: 1, strategy: .mergeCommit, headSHA: "abc1", repo: "h/o/r").arguments
+        == ["pr", "merge", "1", "--merge", "--match-head-commit", "abc1", "--repo", "h/o/r"])
     #expect(
-      GhCommand.pullRequestMerge(number: 2, strategy: .squash, repo: "h/o/r").arguments
-        == ["pr", "merge", "2", "--squash", "--repo", "h/o/r"])
+      GhCommand.pullRequestMerge(number: 2, strategy: .squash, headSHA: "abc2", repo: "h/o/r").arguments
+        == ["pr", "merge", "2", "--squash", "--match-head-commit", "abc2", "--repo", "h/o/r"])
     #expect(
-      GhCommand.pullRequestMerge(number: 3, strategy: .rebase, repo: "h/o/r").arguments
-        == ["pr", "merge", "3", "--rebase", "--repo", "h/o/r"])
+      GhCommand.pullRequestMerge(number: 3, strategy: .rebase, headSHA: "abc3", repo: "h/o/r").arguments
+        == ["pr", "merge", "3", "--rebase", "--match-head-commit", "abc3", "--repo", "h/o/r"])
   }
 
   @Test

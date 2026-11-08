@@ -26,6 +26,20 @@ struct GitPlatformAvailabilityTests {
   }
 
   @Test
+  func notLoggedInReportsFalse() {
+    #expect(GitPlatformAvailability.notLoggedIn(host: nil).isAvailable == false)
+  }
+
+  @Test
+  func loginCommandUsesTheCLIName() {
+    #expect(GitPlatformKind.github.loginCommand == "gh auth login")
+    #expect(GitPlatformKind.gitlab.loginCommand == "glab auth login")
+    #expect(
+      GitPlatformKind.gitlab.loginCommand(host: "gitlab.example.com")
+        == "glab auth login --hostname gitlab.example.com")
+  }
+
+  @Test
   func installCommandUsesHomebrewAndTheCLIName() {
     #expect(GitPlatformKind.github.installCommand == "brew install gh")
     #expect(GitPlatformKind.gitlab.installCommand == "brew install glab")
