@@ -28,7 +28,7 @@ nonisolated enum GlabConfig {
   /// Empty when no file exists or it cannot be read.
   static func loggedInHosts(
     environment: [String: String] = ProcessInfo.processInfo.environment,
-    home: String = NSHomeDirectory()
+    home: String = NSHomeDirectory(),
   ) -> [Host] {
     for directory in directories(environment: environment, home: home) {
       let file = directory.appendingPathComponent("config.yml")
@@ -63,15 +63,13 @@ nonisolated enum GlabConfig {
     var inHosts = false
     var hostIndent: Int?
     var fieldIndent: Int?
-    var current: (name: String, fields: [String: String])?
+    var current: Entry?
 
     func flush() {
       guard let entry = current else { return }
       current = nil
-      let token = entry.fields["token"] ?? ""
-      let keyring = entry.fields["use_keyring"]?.lowercased() == "true"
-      guard !token.isEmpty || keyring else { return }
-      hosts.append(Host(host: entry.name, apiProtocol: entry.fields["api_protocol"].flatMap { $0.isEmpty ? nil : $0 }))
+      guard entry.hasToken || entry.usesKeyring else { return }
+      hosts.append(Host(host: entry.name, apiProtocol: entry.apiProtocol))
     }
 
     for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -92,16 +90,34 @@ nonisolated enum GlabConfig {
         flush()
         fieldIndent = nil
         guard trimmed.hasSuffix(":") else { continue }
-        current = (unquoted(String(trimmed.dropLast())), [:])
+        current = Entry(name: unquoted(String(trimmed.dropLast())))
       } else if indent > level, current != nil {
         let fieldLevel = fieldIndent ?? indent
         fieldIndent = fieldLevel
         guard indent == fieldLevel, let (key, value) = field(trimmed) else { continue }
-        current?.fields[key] = value
+        current?.record(key: key, value: value)
       }
     }
     flush()
     return hosts
+  }
+
+  /// What the parser keeps of one host entry. Only whether a token is set, never its
+  /// value: codans does not hold `glab` tokens.
+  private struct Entry {
+    var name: String
+    var hasToken = false
+    var usesKeyring = false
+    var apiProtocol: String?
+
+    mutating func record(key: String, value: String) {
+      switch key {
+      case "token": hasToken = !value.isEmpty
+      case "use_keyring": usesKeyring = value.lowercased() == "true"
+      case "api_protocol": apiProtocol = value.isEmpty ? nil : value
+      default: break
+      }
+    }
   }
 
   /// `key: value` or `key:` → (key, value). `nil` for a list item or a line without a key.
