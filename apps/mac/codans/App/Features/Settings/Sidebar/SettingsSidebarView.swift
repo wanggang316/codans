@@ -172,24 +172,26 @@ struct SettingsSidebarView: View {
 
   private func iconStyle(for section: SettingsSection) -> SettingsIconTile.Style {
     switch section {
-    case .general: return .init(.symbol("gearshape.fill", size: 13), .gray)
+    case .general: return .init(.symbol("gearshape.fill", size: 12), .gray)
     // The badge sits low left, so the glyph moves right a little to look centered.
     case .gitPlatforms:
-      return .init(.symbol("externaldrive.badge.timemachine", size: 15, nudge: .init(width: -0.25, height: 0)), .indigo)
-    case .worktree: return .init(.asset("git-branch", size: 13), .orange)
+      return .init(.symbol("externaldrive.badge.timemachine", size: 16, nudge: .init(width: -0.5, height: 0)), .indigo)
+    case .worktree: return .init(.asset("git-branch", size: 12), .orange)
     case .terminal: return .init(.prompt, .graphite, glyphColor: SettingsIconTile.promptGreen)
     // The badge widens the box upward, which leaves the bell low; lift it.
-    case .notifications: return .init(.symbol("bell.badge.fill", size: 12.5, nudge: .init(width: 0, height: -0.6)), .red)
+    case .notifications:
+      return .init(.symbol("bell.badge.fill", size: 12, nudge: .init(width: 0, height: -0.5)), .red)
     // A triangle's mass sits left of its box center; shift it right.
-    case .globalCommands: return .init(.symbol("play.fill", size: 10, nudge: .init(width: 0.7, height: 0)), .green)
-    case .shortcuts: return .init(.symbol("command", size: 11.5), .gray)
-    case .updates: return .init(.symbol("arrow.down", size: 11.5), .blue)
-    case .about: return .init(.symbol("info", size: 11.5), .gray)
-    case .agents: return .init(.symbol("sparkles", size: 12.5), .sunset)
+    case .globalCommands: return .init(.symbol("play.fill", size: 10, nudge: .init(width: 0.5, height: 0)), .green)
+    case .shortcuts: return .init(.symbol("command", size: 12), .gray)
+    case .updates: return .init(.symbol("arrow.down", size: 12), .blue)
+    case .about: return .init(.symbol("info", size: 12), .gray)
+    case .agents: return .init(.symbol("sparkles", size: 12), .sunset)
     // The tab on the right pulls the mass left of the box center.
-    case .developer: return .init(.symbol("puzzlepiece.extension.fill", size: 13, nudge: .init(width: 0.35, height: 0)), .blue)
-    case .workflows: return .init(.symbol("app.connected.to.app.below.fill", size: 12.5), .teal)
-    case .hosts: return .init(.symbol("globe", size: 12.5), .purple)
+    case .developer:
+      return .init(.symbol("puzzlepiece.extension.fill", size: 14, nudge: .init(width: 0.5, height: 0)), .magenta)
+    case .workflows: return .init(.symbol("app.connected.to.app.below.fill", size: 12), .teal)
+    case .hosts: return .init(.symbol("globe", size: 12), .purple)
     case .projectGeneral, .projectScripts: return .init(.symbol("questionmark", size: 12), .gray)
     }
   }
@@ -212,7 +214,9 @@ struct SettingsSidebarView: View {
 private struct SettingsIconTile: View {
   enum Glyph {
     /// An SF Symbol fit in a `size`-point box, moved by `nudge` points when
-    /// its visual mass is off its box center.
+    /// its visual mass is off its box center. Keep `size` even and `nudge` a
+    /// multiple of 0.5 so the glyph lands on the pixel grid: an odd size
+    /// centers the box on a half point, and the glyph renders a pixel low.
     case symbol(String, size: CGFloat, nudge: CGSize = .zero)
     /// A shell prompt, `>_`. SF Symbols draws it only inside a window frame.
     case prompt
@@ -227,9 +231,9 @@ private struct SettingsIconTile: View {
     let bottom: Color
     var diagonal = false
 
-    init(_ top: UInt32, _ bottom: UInt32, diagonal: Bool = false) {
-      self.top = Color(rgb: top)
-      self.bottom = Color(rgb: bottom)
+    init(_ top: UInt32, _ bottom: UInt32, diagonal: Bool = false, space: Color.RGBColorSpace = .sRGB) {
+      self.top = Color(rgb: top, space: space)
+      self.bottom = Color(rgb: bottom, space: space)
       self.diagonal = diagonal
     }
 
@@ -240,7 +244,9 @@ private struct SettingsIconTile: View {
     static let red = Palette(0xFF6B6B, 0xF02D3A)
     static let green = Palette(0x5EDB7A, 0x28B446)
     static let blue = Palette(0x4DA3FF, 0x0A6CFF)
-    static let sunset = Palette(0xF45ED6, 0xFFB65A, diagonal: true)
+    /// Display P3: the pink-to-amber of a vivid app icon lies outside sRGB.
+    static let sunset = Palette(0xE22FE4, 0xFFC03C, diagonal: true, space: .displayP3)
+    static let magenta = Palette(0xF06BD0, 0xA53BF0)
     static let teal = Palette(0x4FD8E0, 0x12A5B8)
     static let purple = Palette(0xB57BFF, 0x8A3FFC)
   }
@@ -284,7 +290,7 @@ private struct SettingsIconTile: View {
       .overlay {
         glyph
           .foregroundStyle(style.glyphColor)
-          .shadow(color: .black.opacity(0.18), radius: 0.4, y: 0.4)
+          .shadow(color: .black.opacity(0.18), radius: 0.5)
       }
       .frame(width: Self.side, height: Self.side)
       .shadow(color: .black.opacity(0.22), radius: 0.6, y: 0.5)
@@ -331,10 +337,10 @@ nonisolated private struct PromptShape: Shape {
 }
 
 extension Color {
-  /// An sRGB color from `0xRRGGBB`.
-  fileprivate init(rgb: UInt32) {
+  /// A color from `0xRRGGBB` in `space`.
+  fileprivate init(rgb: UInt32, space: RGBColorSpace = .sRGB) {
     self.init(
-      .sRGB,
+      space,
       red: Double((rgb >> 16) & 0xFF) / 255,
       green: Double((rgb >> 8) & 0xFF) / 255,
       blue: Double(rgb & 0xFF) / 255
