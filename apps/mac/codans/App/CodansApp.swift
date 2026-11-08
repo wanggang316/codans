@@ -759,6 +759,12 @@ final class AppState {
     )
     self.editorClient = editor
     self.hierarchyClient = hierarchy
+    // Wired on the manager, not the client, so the IPC `hierarchy.createWorktree`
+    // path triggers it too. While a creation lease held, reconcile skipped new
+    // paths; this pass picks up any worktree made outside the app meanwhile.
+    manager.onCreationLeasesReleased = { projectID in
+      Task { await hierarchy.reconcileDiscoveredWorktrees(projectID) }
+    }
 
     // Remote Project git transport: a GitService whose invocations route over
     // SSH whenever the repository path belongs to a remote project (resolved
