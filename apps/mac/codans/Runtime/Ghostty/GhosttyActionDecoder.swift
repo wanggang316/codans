@@ -447,7 +447,8 @@ extension GhosttyActionDecoder {
 
     // Bucket 3 — Surface info
     case .setTitle(let title):
-      return emitInfo(.title(title), pane: pane, paneID: paneID, runtime: runtime)
+      let reported = reportedTitle(title, pwd: pane.info.pwd)
+      return emitInfo(.title(reported), pane: pane, paneID: paneID, runtime: runtime)
     case .setTabTitle(let title):
       return emitInfo(.tabTitle(title), pane: pane, paneID: paneID, runtime: runtime)
     case .promptTitle(let raw):
@@ -651,6 +652,17 @@ extension GhosttyActionDecoder {
 // MARK: - C enum decoders (pure, any thread)
 
 extension GhosttyActionDecoder {
+  /// The OSC 0/2 title the program set. libghostty reports an empty title,
+  /// and a working directory change before any title, as a title equal to
+  /// the pwd (`StreamHandler.windowTitle`, after the pwd change). That is
+  /// libghostty's stand-in for "no title", so it is reported as an empty
+  /// title: the pane title keeps the last title or shows the directory
+  /// (ADR 0009), and the pwd is not taken as an agent title.
+  nonisolated static func reportedTitle(_ title: String?, pwd: String?) -> String? {
+    guard let title, let pwd, !pwd.isEmpty, title == pwd else { return title }
+    return ""
+  }
+
   /// Copy an OSC 7501 report out of libghostty. Nil for a state this build
   /// does not know, so a future state is never mistaken for another.
   nonisolated static func decodeProgramStatus(
