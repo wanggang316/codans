@@ -1406,13 +1406,17 @@ struct HierarchySidebarFeature {
       // Cancel during the setup phase: `git worktree add` already
       // SUCCEEDED (we hold the materialized path), so discarding now would
       // orphan an on-disk worktree dir that never reaches the catalog.
-      // Kill the running setup script via the stream's cancel token, then
-      // materialize from the stashed path through the SAME finish path
-      // (`pendingWorktreeFinished` writes the catalog + removes the row).
+      // Materialize from the stashed path through the SAME finish path
+      // (`pendingWorktreeFinished` writes the catalog + removes the row),
+      // then kill the running setup script via the stream's cancel token.
       if pending.phase == .runningSetupScript, let path = pending.materializedPath {
-        return .merge(
-          .cancel(id: CancelID.pending(id)),
-          .send(.pendingWorktreeFinished(id, path))
+        // Finish first, cancel second, in this order by contract: canceling
+        // the effect releases this attempt's lease (`runCreationAttempt`),
+        // and a release before the catalog write would let the reconcile it
+        // triggers append the new path at the list tail.
+        return .concatenate(
+          .send(.pendingWorktreeFinished(id, path)),
+          .cancel(id: CancelID.pending(id))
         )
       }
       // Cancel during git-add (not yet materialized): discard cleanly —

@@ -109,6 +109,72 @@ struct HierarchySidebarCreationLeaseTests {
     #expect(releasedProjects == [projectID])
   }
 
+  /// Cancel during the setup script, with the creation effect running: the
+  /// catalog row must be written before the lease is released. A reconcile
+  /// that the release triggers must find the row already in place, or it
+  /// appends the new path at the list tail.
+  @Test
+  func cancelDuringRunningSetupWritesTheRowBeforeReleasingTheLease() async throws {
+    let manager = HierarchyManager(
+      catalog: Catalog(),
+      store: CatalogStore(
+        fileURL: FileManager.default.temporaryDirectory
+          .appending(component: "codans-lease-\(UUID().uuidString).json")),
+      runtime: FakeHierarchyRuntime()
+    )
+    let projectID = manager.addProject(name: "repo", rootPath: "/repo", gitRoot: "/repo")
+    _ = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    _ = try manager.createWorktree(
+      in: projectID, name: "older", path: "/repo/.worktrees/older", branch: "older")
+    let materialized = URL(fileURLWithPath: "/repo/.worktrees/feat-x")
+    var rowExistedAtRelease: Bool?
+    // Stands in for the app's post-release reconcile, run at once so any
+    // release that precedes the catalog write shows up as a tail append.
+    manager.onCreationLeasesReleased = { pid in
+      rowExistedAtRelease = manager.catalog.projects[0].worktrees.contains {
+        $0.path == materialized.path
+      }
+      _ = manager.reconcileDiscoveredWorktrees(
+        projectID: pid,
+        entries: [
+          (path: "/repo", branch: "main", head: nil),
+          (path: "/repo/.worktrees/older", branch: "older", head: nil),
+          (path: materialized.path, branch: "feat-x", head: nil),
+        ]
+      )
+    }
+    let streamTerminated = LockIsolated(false)
+
+    let pending = Self.makePending(projectID: projectID)
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.live(manager: manager)
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      // Enters the setup phase, then runs until canceled.
+      $0.gitWorktreeClient.createWorktreeStream = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.onTermination = { _ in streamTerminated.setValue(true) }
+          continuation.yield(.setupPhaseBegan(worktreePath: materialized))
+        }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.beginPendingWorktreeCreation(pending))
+    await store.receive(\.pendingWorktreeSetupPhaseBegan)
+    await store.send(.pendingWorktreeCancelTapped(pending.id))
+    await store.receive(\.pendingWorktreeFinished)
+    await store.finish()
+
+    #expect(rowExistedAtRelease == true)
+    #expect(
+      manager.catalog.projects[0].worktrees.map(\.path)
+        == ["/repo", materialized.path, "/repo/.worktrees/older"])
+    #expect(!manager.holdsCreationLease(projectID))
+    #expect(streamTerminated.value)
+  }
+
   // MARK: - Release on every exit path
 
   @Test
