@@ -65,19 +65,27 @@ reducer（`GitPlatformFeature`）、快照缓存和视图只用 `GitPlatform` �
 
 ### Git Platform 选择
 
-每个取数单元在取数开始时读 `origin`，由 `GitPlatformResolver` 按以下顺序解析 Git Platform（[ADR 0005](../adr/0005-git-platform-aliases.md) item 3）：
+每个取数单元在取数开始时读 `origin`，由 `GitPlatformResolver` 按以下顺序解析 Git Platform（[ADR 0005](../adr/0005-git-platform-aliases.md) item 3，[ADR 0004](../adr/0004-gitlab-support-through-glab.md) item 2）：
 
 1. Git Platform alias（`GeneralSettings.gitPlatformAliases`，Settings › Git Platforms）：remote host 有 alias 时，用 alias 的 kind 和 API host。SSH remote 的端口是 SSH 端口，所以没有端口的 alias 也匹配它（alias `127.0.0.1` 匹配 `ssh://git@127.0.0.1:2224/…`）。
 2. `github.com` 或 `gh` 已登录的 host → GitHub。
-3. `gitlab.com` 或 `glab` 已登录的 host → GitLab。
+3. `gitlab.com` 或 `glab` 已登录的 host → GitLab。`glab` 已登录的 host 读自 `glab` 的本地配置文件（见下），不调用 `glab`。
 4. 只对 SSH remote：`ssh -G` 读出的 `HostName`，去掉端口后与第 2、3 步已登录或公共的 host 比较；恰有一个匹配时用它的 kind 和 host。
-5. 否则无 Git Platform：不取数、无徽标、无错误；该单元记入 `unitsWithoutGitPlatform`，轮询跳过它。
+5. host 名：含 `gitlab` 的 host → GitLab，含 `github` 的 host → GitHub（例：`gitlab.corp.example.com`）。SSH remote 用第 4 步的 `HostName`（去掉 SSH 端口）作名字和 API host；HTTPS remote 用 remote host（含端口）。两者都含时无 Git Platform。
+6. 否则无 Git Platform：不取数、无徽标、无错误；该单元记入 `unitsWithoutGitPlatform`，轮询跳过它。
 
-alias 最先检查，所以用户可以改正一个错误的自动结果。两个 CLI 都认识的 host 归 GitHub。alias 的 API host 没有登录时 alias 仍然生效：读取失败，徽标位置显示与缺少登录时相同的可操作消息。一个 alias 对 `origin` 有该 host 的每个 Project 和 Workspace 成员生效。
+alias 最先检查，所以用户可以改正一个错误的自动结果（包括第 5 步按名字的猜测）。两个 CLI 都认识的 host 归 GitHub。alias 的 API host 没有登录时 alias 仍然生效：读取失败，徽标位置显示与缺少登录时相同的可操作消息。第 5 步同理：该 kind 的 CLI 未安装或未登录该 host 时，徽标位置显示 `brew install` 或 `auth login` 消息。一个 alias 对 `origin` 有该 host 的每个 Project 和 Workspace 成员生效。
+
+`glab` 已登录的 host（`GlabConfig`）：读 `config.yml` 顶层 `hosts:` 下的条目，有 `token` 或 `use_keyring: true` 的 host 算已登录，同时记下 `api_protocol`（供 web URL 的 scheme）。目录按 `glab` 的查找顺序：设置了 `GLAB_CONFIG_DIR` 时只用它；否则依次 `$XDG_CONFIG_HOME/glab-cli`、`~/.config/glab-cli`、`~/Library/Application Support/glab-cli`，用第一个存在的文件。不走网络、不依赖 `glab` 版本，所以 `glab` 低于最低版本时自托管 host 也能解析，徽标位置显示 `brew upgrade` 消息。缩进宽度不限（2 或 4 空格）。codans 只读 host 名、是否有 token 和 `api_protocol`，不读取或转发 token 的值。Settings 面板仍用 `glab auth status` 显示已连接的 host 和用户。
 
 SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 host 可能是 `~/.ssh/config` 的别名，或带 SSH 端口，CLI 无法用它访问 API。第 4 步对每个 SSH remote 运行，不需要用户设置：`GitPlatformResolver` 用 `ssh -G -- <host>`（`SSHHostName`，只打印配置、不建连接）读出 `HostName`，再在两种 kind 已登录的 host 和公共 host 中找名字（去掉端口）等于它的那一个。例：`git@github-work:org/repo`（`HostName github.com`）→ GitHub、`github.com`；`ssh://git@192.168.2.158:2222/g/r` → GitLab、`glab` 已登录的 `192.168.2.158:8929`。没有唯一匹配时无 Git Platform。HTTPS remote 的端口就是 API 端口，不运行 `ssh -G`。SSH host 名与 API host 不同（`ssh.gitlab.example.com` 对 `gitlab.example.com`）时需要 alias。
 
-各 CLI 登录过的 host 每个 kind 只问一次，`ssh -G` 结果每个 SSH host 只问一次，都缓存；Settings 的 Re-check 清除两者（`GitPlatformClient.invalidateResolution`），所以 `auth login` 或 `~/.ssh/config` 的变更在 Re-check 后生效。
+各 CLI 登录过的 host 每个 kind 只问一次，`ssh -G` 结果每个 SSH host 只问一次，CLI 路径（`CLIExecutableResolver`）找到后也缓存；未找到的 CLI 不缓存，下次调用重新查找。`GitPlatformClient.invalidateResolution` 清除这三者，以下两处调用它：
+
+- pane 内 `gh` / `glab` 命令结束（前台作业 trailing edge，见[失效事件](#缓存与失效)）：`RootFeature` 发送 `refreshAvailabilityRequested`，再刷新该 pane 的取数单元。所以在 pane 里安装 CLI 后运行 `glab auth login`（或 `gh auth login`），徽标无需 Re-check 即出现。
+- Settings 的 Re-check。
+
+`refreshAvailabilityRequested` 同时清空 `unitsWithoutGitPlatform`，轮询跳过的单元也会重新解析。`~/.ssh/config` 的变更在下一次失效后生效。
 
 `GitPlatformAliasesClient` 在取数时给出当前的 alias 列表。
 
@@ -154,7 +162,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | Merge / close / markReady 完成 | `GitPlatformFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
 | 手动刷新 | 用户动作（面板、popover 刷新按钮） | 立即刷新 Project |
 | 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
-| pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
+| pane 内 `git` / `gh` / `glab` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元。`gh` / `glab` 命令另外立即清除 CLI 路径和已登录 host 缓存，并让无 Git Platform 的单元重新解析 |
 | 远端跟踪 ref 变更 | `RemoteRefsWatcher`（FSEvents 监听公共 git 目录下的 `refs/remotes/` 与 `packed-refs`） | 2 s 后刷新该取数单元，并在 3 min 内按 hot 档轮询。覆盖任意进程的 `git push` / `gh pr create` / `git fetch`，包括前台作业检测看不到的 agent |
 | Git Platform alias 列表变更 | `SettingsStore` 观察（`CodansApp.observeGitPlatformAliases`） | 所有取数单元排队刷新；无 Git Platform 的单元（轮询跳过）立即重新解析 |
 | App 变为活跃 | `NSApp.didBecomeActiveNotification` | reconcile 后，所有超过 30 s（`focusRefreshDebounce`）未取数的单元排队补刷，选中 Project 优先 |
@@ -410,9 +418,9 @@ struct CheckNode: Decodable, Equatable, Hashable {
 - 与 `gh` 相同：共享 `CommandRunner`，只用 argv，cwd 为 home 目录，超时 20 s，读取 output cap 8 MiB、写操作 2 MiB。
 - **host**：每次调用都设置 `GITLAB_HOST=<host>`；host 不含端口时另加 `--hostname <host>`。`glab --hostname` 不接受 `host:port`，所以带端口的自托管实例只走环境变量。
 - **env allowlist** 转发 `PATH`、`HOME`、`GLAB_CONFIG_DIR`、`XDG_CONFIG_HOME`，强制 `LC_ALL`、`NO_COLOR`、`GLAB_NO_PROMPT`、`GLAB_CHECK_UPDATE=false`、`GLAB_SEND_TELEMETRY=false`、`GLAB_SHOW_WHATS_NEW=false`；剥除 `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` 及用户自设的 `GITLAB_HOST` / `GITLAB_REPO`。
-- **最低 `glab` 版本 1.122.0**：首个带 `glab auth status --output json` 的版本（resolver 与可用性探针依赖它）。每个可执行文件（按路径 + 修改时间）只跑一次 `glab version`；过旧抛 `.cliOutdated`。`glab auth status --all --output json` 在任一 host 校验失败时退出码为 1，stdout 仍是 JSON，两者都解析。
+- **最低 `glab` 版本 1.122.0**：首个带 `glab auth status --output json` 的版本（可用性探针依赖它；resolver 读配置文件，不依赖它）。每个可执行文件（按路径 + 修改时间）只跑一次 `glab version`；过旧抛 `.cliOutdated`。`glab auth status --all --output json` 在任一 host 校验失败时退出码为 1，stdout 仍是 JSON，两者都解析。
 - **错误**：`glab api` 在 GraphQL `errors` 或 REST 错误时退出 1，body 在 stdout。GraphQL errors → `.graphQLError`；401 → `.notAuthenticated`；`dial tcp` / TLS / 解析失败 → `.network`；merge 的 405 / 406 / 409 → `.mergeConflict`。
-- 已知限制：`glab` 过旧或未装时无法得知它登录过的自托管 host，此类 remote 解析为无 Git Platform（无徽标）；`gitlab.com` 仍解析为 GitLab 并显示可操作错误。
+- `glab` 过旧或未装时，自托管 host 仍由配置文件或 host 名（第 5 步）解析为 GitLab，徽标位置显示 `brew upgrade` / `brew install` 消息。已知限制：名字不含 `gitlab`、`glab` 配置里也没有登录的自托管 host 解析为无 Git Platform（无徽标），需要 alias。
 
 ## 备选方案
 
