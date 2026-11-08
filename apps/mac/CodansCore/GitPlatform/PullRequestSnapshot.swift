@@ -23,6 +23,11 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
   public var state: PullRequestState
   public var isDraft: Bool
   public var headRefName: String
+  /// The commit at the head of the source branch when the snapshot was read. A merge
+  /// passes it to the Git Platform, so the Git Platform merges only the commit the user saw
+  /// and refuses when the branch has new commits. `nil` in a snapshot from an older cache
+  /// entry; such a snapshot is refreshed before a merge.
+  public var headSHA: String?
   /// Pull Request destination. Both values are needed before mapping a base branch to a
   /// local remote-tracking ref, especially when the Pull Request comes from a fork.
   public var baseRefName: String?
@@ -54,6 +59,7 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
     state: PullRequestState,
     isDraft: Bool,
     headRefName: String,
+    headSHA: String? = nil,
     author: String,
     additions: Int,
     deletions: Int,
@@ -74,6 +80,7 @@ public struct PullRequestSnapshot: Equatable, Codable, Sendable, Identifiable {
     self.state = state
     self.isDraft = isDraft
     self.headRefName = headRefName
+    self.headSHA = headSHA
     self.baseRefName = baseRefName
     self.baseRepositoryURL = baseRepositoryURL
     self.author = author

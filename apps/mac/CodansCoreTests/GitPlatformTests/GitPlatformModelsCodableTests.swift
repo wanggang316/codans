@@ -131,6 +131,26 @@ struct GitPlatformModelsCodableTests {
   }
 
   @Test
+  func headSHARoundTrips() throws {
+    var snapshot = Self.makeSnapshot()
+    snapshot.headSHA = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
+    #expect(try Self.roundTrip(snapshot).headSHA == "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432")
+  }
+
+  /// A cache entry written before the snapshot had `headSHA` still decodes. Its head is
+  /// unknown, so a merge refreshes it first.
+  @Test
+  func cacheEntryWithoutHeadSHADecodesWithNil() throws {
+    var json = try #require(
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(Self.makeSnapshot())) as? [String: Any])
+    json["headSHA"] = nil
+    let data = try JSONSerialization.data(withJSONObject: json)
+    let decoded = try JSONDecoder().decode(PullRequestSnapshot.self, from: data)
+    #expect(decoded.headSHA == nil)
+    #expect(decoded.number == 1234)
+  }
+
+  @Test
   func hasMergeConflictFollowsMergeState() {
     var snapshot = Self.makeSnapshot()
     snapshot.mergeState = PullRequestMergeState(status: .conflicted, reason: "conflicts")

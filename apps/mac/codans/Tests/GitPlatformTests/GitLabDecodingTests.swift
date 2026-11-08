@@ -35,6 +35,7 @@ struct GitLabDecodingTests {
     #expect(snapshot.state == .open)
     #expect(!snapshot.isDraft)
     #expect(snapshot.headRefName == "feat-open")
+    #expect(snapshot.headSHA == "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d")
     #expect(snapshot.author == "codans-dev")
     #expect(snapshot.additions == 1)
     #expect(snapshot.deletions == 0)

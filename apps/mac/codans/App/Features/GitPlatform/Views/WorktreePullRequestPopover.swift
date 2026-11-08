@@ -47,18 +47,21 @@ struct WorktreePullRequestPopover: View {
       gitPlatformName: gitPlatformName,
       pullRequestName: pullRequestName,
       gitPlatformKind: kind,
+      isNewHeadRead: store.headMovedMerges[worktreeID]?.isNewHeadRead ?? true,
       defaultMergeStrategy: defaultStrategy,
       canMerge: !isMutating
         && pullRequest != nil
         && snapshot?.mergeOption(for: defaultStrategy)?.isEnabled == true
         && snapshot?.state == .open
-        && snapshot?.isDraft == false,
+        && snapshot?.isDraft == false
+        && snapshot?.headSHA != nil,
       mergeDisabledReason: isMutating
         ? "Another \(gitPlatformName) operation is in flight"
         : Self.mergeDisabledReason(for: snapshot, strategy: defaultStrategy, pullRequestName: pullRequestName),
       onMerge: { strategy in
+        // The head commit of the snapshot on screen: the Git Platform merges only it.
         if let pullRequest {
-          store.send(.mergeRequested(worktreeID, pullRequest, strategy: strategy))
+          store.send(.mergeRequested(worktreeID, pullRequest, strategy: strategy, headSHA: snapshot?.headSHA))
         }
       },
       onClose: {
@@ -83,9 +86,17 @@ struct WorktreePullRequestPopover: View {
         settingsStore.mutateGeneral { $0.defaultMergeStrategy = strategy }
       },
       onRetry: {
-        store.send(.worktreeRefreshRequested(worktreeID))
+        // "Review" shows the new head once it is read; before that it reads it again.
+        if error == .headMoved {
+          store.send(.headMovedReviewed(worktreeID))
+        } else {
+          store.send(.worktreeRefreshRequested(worktreeID))
+        }
       }
     )
+    // Both surfaces (sidebar badge, status bar) mount this view, so the no-SHA read
+    // starts here and not in one surface's presentation code.
+    .onAppear { store.send(.popoverOpened(worktreeID)) }
   }
 
   /// Why the merge button is off: the Pull Request's lifecycle first, then the Git
@@ -98,6 +109,8 @@ struct WorktreePullRequestPopover: View {
     if snapshot.state == .merged { return "\(name) already merged" }
     if snapshot.state == .closed { return "\(name) closed" }
     if snapshot.isDraft { return "\(name) is a draft" }
+    // A snapshot from an older cache entry: opening the popover refreshes it.
+    if snapshot.headSHA == nil { return "Reading the head commit" }
     if let reason = snapshot.mergeState.reason { return reason }
     guard let option = snapshot.mergeOption(for: strategy) else {
       return "\(strategy.displayName) is not available"

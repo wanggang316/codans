@@ -28,13 +28,15 @@ nonisolated enum GhCommand {
     (["pr", "view", String(number), "--repo", repo, "--json", "statusCheckRollup"], [0])
   }
 
-  /// `gh pr merge <number> <flag> --repo <repo>`.
+  /// `gh pr merge <number> <flag> --match-head-commit <sha> --repo <repo>`. GitHub refuses
+  /// the merge when the head of the pull request is no longer `headSHA`.
   static func pullRequestMerge(
     number: Int,
     strategy: MergeStrategy,
+    headSHA: String,
     repo: String
   ) -> (arguments: [String], expectedExitCodes: Set<Int32>) {
-    (["pr", "merge", String(number), mergeFlag(strategy), "--repo", repo], [0])
+    (["pr", "merge", String(number), mergeFlag(strategy), "--match-head-commit", headSHA, "--repo", repo], [0])
   }
 
   /// `gh pr close <number> --repo <repo>`.

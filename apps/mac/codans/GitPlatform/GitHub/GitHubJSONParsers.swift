@@ -246,6 +246,7 @@ nonisolated enum GitHubJSONParsers {
       state: GitHubWire.pullRequestState(node.state) ?? .open,
       isDraft: node.isDraft ?? false,
       headRefName: node.headRefName ?? "",
+      headSHA: node.headRefOid,
       author: node.author?.login ?? "",
       additions: node.additions ?? 0,
       deletions: node.deletions ?? 0,
@@ -358,6 +359,7 @@ nonisolated enum GitHubJSONParsers {
     var url: String?
     var updatedAt: Date?
     var headRefName: String?
+    var headRefOid: String?
     var baseRefName: String?
     var baseRepository: GraphQLRepositoryURL?
     var commits: GraphQLTotalCount?

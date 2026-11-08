@@ -305,10 +305,10 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   // MARK: - writes
 
   /// `mergeCommit` and `rebase` merge with the project's merge method; `squash` squashes.
-  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy) async throws {
+  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy, headSHA: String) async throws {
     let exec = try await checkedExecutable()
     let cmd = GlabCommand.mergeRequestMerge(
-      repository: pullRequest.repository, iid: pullRequest.number, squash: strategy == .squash)
+      repository: pullRequest.repository, iid: pullRequest.number, squash: strategy == .squash, sha: headSHA)
     _ = try await run(cmd, exec: exec, host: pullRequest.repository.host, isMerge: true)
   }
 
@@ -501,9 +501,12 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   }
 
   /// A merge GitLab refuses (`405 Method Not Allowed`, `406`, `409`, "cannot be merged")
-  /// is a merge conflict in the neutral model: the merge request cannot merge now.
+  /// is a merge conflict in the neutral model: the merge request cannot merge now. The
+  /// `409` for a `sha` that is not the source branch head is checked first: it is
+  /// `.headMoved`, not a conflict.
   nonisolated static func translateMergeError(stderr: String) -> GitPlatformError? {
     let text = stderr.lowercased()
+    if text.contains("sha does not match head") { return .headMoved }
     if text.contains("405") || text.contains("406") || text.contains("409")
       || text.contains("cannot be merged") || text.contains("not mergeable") || text.contains("conflict")
     {

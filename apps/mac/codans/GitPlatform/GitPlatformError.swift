@@ -34,6 +34,10 @@ enum GitPlatformError: Error, Equatable, Sendable {
   /// The Git Platform reported the Pull Request cannot be merged (conflicts, protection).
   case mergeConflict
 
+  /// The Git Platform refused a merge because the head of the source branch is no longer
+  /// the commit the user saw: someone pushed new commits. See ADR 0004 item 17.
+  case headMoved
+
   /// The CLI subprocess did not complete within the configured timeout.
   case timeout
 
@@ -93,6 +97,8 @@ enum GitPlatformError: Error, Equatable, Sendable {
       return "Git Platform rate limit hit. Try again in a few minutes."
     case .mergeConflict:
       return "This pull request cannot be merged cleanly. Resolve conflicts on the Git Platform first."
+    case .headMoved:
+      return "The branch has new commits. Review them, then merge again."
     case .timeout:
       return "The Git Platform CLI took too long to respond. Check your network and try again."
     case .other(let detail):

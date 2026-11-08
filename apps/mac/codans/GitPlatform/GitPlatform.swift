@@ -38,9 +38,11 @@ nonisolated protocol GitPlatform: Sendable {
     repository: GitPlatformRepository, branches: [String]
   ) async throws -> [String: PullRequestSnapshot]
 
-  /// Merges the Pull Request with the given strategy. Throws `.mergeConflict` when the
-  /// Git Platform reports it cannot merge cleanly.
-  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy) async throws
+  /// Merges the Pull Request with the given strategy, only when its head is still
+  /// `headSHA`: the commit of the snapshot the user saw. Throws `.headMoved` when the
+  /// branch has new commits, and `.mergeConflict` when the Git Platform reports it cannot
+  /// merge cleanly. There is no merge without a head commit (ADR 0004 item 17).
+  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy, headSHA: String) async throws
 
   /// Closes the Pull Request without merging.
   func close(_ pullRequest: PullRequestReference) async throws
