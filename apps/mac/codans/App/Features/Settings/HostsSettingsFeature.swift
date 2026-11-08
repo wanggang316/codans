@@ -2,7 +2,7 @@ import CodansCore
 import ComposableArchitecture
 import Foundation
 
-/// Reducer backing Settings › Hosts (ADR 0003, decisions 3 and 5). The pane
+/// Reducer backing Settings › Remote Hosts (ADR 0003, decisions 3 and 5). The pane
 /// reads the Host list and Project counts live from `HierarchyManager`; this
 /// reducer owns the add / edit form and every write, which goes through
 /// `HierarchyClient` so the catalog keeps its single writer and its

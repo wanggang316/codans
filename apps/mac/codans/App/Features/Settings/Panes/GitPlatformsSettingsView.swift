@@ -14,7 +14,7 @@ import SwiftUI
 ///   - Defaults that apply to every Git Platform: merge strategy and post-merge Worktree
 ///     action, written through `SettingsStore.mutateGeneral`.
 ///
-/// A Git Platform serves repositories; the "Hosts" pane lists machines (ADR 0003). The pane
+/// A Git Platform serves repositories; the "Remote Hosts" pane lists machines (ADR 0003). The pane
 /// text names both so the two are not confused.
 ///
 /// The Settings window is a separate scene with its own TCA store, so this view keeps its
@@ -35,7 +35,7 @@ struct GitPlatformsSettingsView: View {
         Text(
           "codans reads pull requests and merge requests through the CLI of each Git Platform. "
             + "A Project uses the Git Platform of its origin remote; add a Git Platform alias "
-            + "when neither CLI knows the host. Machines that run Projects are in Hosts."
+            + "when neither CLI knows the host. Machines that run Projects are in Remote Hosts."
         )
         .font(.callout)
         .foregroundStyle(.secondary)

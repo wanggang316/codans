@@ -10,7 +10,7 @@ public enum SettingsSection: Hashable, Sendable {
   case agents
   case workflows
   /// Git Platforms (GitHub, GitLab): CLI availability and shared Pull Request defaults.
-  /// Not the "Hosts" pane, which lists machines.
+  /// Not the "Remote Hosts" pane, which lists machines.
   case gitPlatforms
   case hosts
   case worktree
@@ -47,7 +47,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .agents: return "Agents"
     case .workflows: return "Workflows"
     case .gitPlatforms: return "Git Platforms"
-    case .hosts: return "Hosts"
+    case .hosts: return "Remote Hosts"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"
     case .notifications: return "Notifications"

@@ -225,7 +225,7 @@ struct HierarchySidebarFeature {
     /// Host row menu → "Open Remote Project on This Host…". Opens the
     /// Remote Project sheet with the Host chosen.
     case hostConnectProjectTapped(HostID)
-    /// Host row menu → "Edit Host…". Opens Settings › Hosts on the Host.
+    /// Host row menu → "Edit Host…". Opens Settings › Remote Hosts on the Host.
     case hostEditTapped(HostID)
 
     /// A Project block was dropped in the sidebar. The view resolves the
