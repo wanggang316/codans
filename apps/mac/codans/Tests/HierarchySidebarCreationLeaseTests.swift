@@ -39,7 +39,7 @@ struct HierarchySidebarCreationLeaseTests {
   }
 
   private static func lease(for pending: PendingWorktree) -> WorktreeCreationLease {
-    WorktreeCreationLease(projectID: pending.projectID, token: pending.id.raw)
+    HierarchySidebarFeature.creationLease(for: pending)
   }
 
   private static func record(
@@ -227,6 +227,32 @@ struct HierarchySidebarCreationLeaseTests {
     #expect(events.value == [.end(Self.lease(for: pending))])
   }
 
+  /// The effect can end without the user's Cancel (store or parent
+  /// teardown). A canceled effect sends no action, so the effect itself
+  /// must release the lease.
+  @Test
+  func effectTeardownReleasesTheLease() async {
+    let pending = Self.makePending(projectID: ProjectID())
+    let events = LockIsolated<[LeaseEvent]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      Self.record(events, into: &$0)
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      // Never ends on its own.
+      $0.gitWorktreeClient.createWorktreeStream = { _ in AsyncThrowingStream { _ in } }
+    }
+    store.exhaustivity = .off
+
+    let task = await store.send(.beginPendingWorktreeCreation(pending))
+    await task.cancel()
+    // `cancel()` returns before the canceled effect has run to its end.
+    await store.finish()
+
+    let lease = Self.lease(for: pending)
+    #expect(events.value == [.begin(lease), .end(lease)])
+  }
+
   @Test
   func retryRetakesTheLeaseAndDiscardReleasesIt() async {
     let pending = Self.makePending(
@@ -250,7 +276,12 @@ struct HierarchySidebarCreationLeaseTests {
     await store.receive(\.pendingWorktreeFailed)
     await store.send(.pendingWorktreeDiscardTapped(pending.id))
 
-    let lease = Self.lease(for: pending)
+    // Retry is a new attempt with its own lease, so a late teardown of the
+    // first attempt's effect cannot release it.
+    var retried = pending
+    retried.attempt = 1
+    let lease = Self.lease(for: retried)
+    #expect(lease != Self.lease(for: pending))
     #expect(events.value == [.begin(lease), .end(lease), .end(lease)])
     #expect(store.state.pendingWorktrees[id: pending.id] == nil)
   }
