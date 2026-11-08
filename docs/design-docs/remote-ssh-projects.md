@@ -105,7 +105,15 @@ The single hard rule: **local-filesystem operations are gated on
 `remoteHost == nil`.** `FileManager.fileExists`, `URL(fileURLWithPath:)`, and
 `resolvingSymlinksInPath` all resolve against the *local* FS and are meaningless
 for a remote path — remote paths use a string-only normalization
-(`HierarchyManager.normalizeRemotePath`) and an SSH probe instead.
+(`HierarchyManager.normalizeRemotePath`) and an SSH probe instead. A string
+compare cannot see that `/tmp/x` and `/private/tmp/x` (or a typed-case path on
+a case-insensitive host) are one directory, so the host decides: each remote
+reconcile first asks the host git for its form of the root
+(`RemoteGitService.canonicalWorkTreeRoot`) and, when it differs, re-keys the
+Project onto it (`HierarchyManager.adoptCanonicalRemoteRoot`). Rows that then
+share a path merge into the first one, tabs included. `pwd -P` does not decide
+this: it keeps the typed case, while `git worktree list` reports the on-disk
+case.
 
 ### System Context Diagram
 
