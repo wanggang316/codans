@@ -68,9 +68,12 @@ enum WorktreePromotionMode: Sendable, Equatable {
 /// `HierarchyManager.beginWorktreeCreation(in:)`.
 nonisolated struct WorktreeCreationLease: Hashable, Sendable {
   let projectID: ProjectID
-  let token: UUID
+  /// Unique per creation attempt. A caller with a stable id for the
+  /// attempt (the sidebar's pending row + retry count) derives it from
+  /// that id.
+  let token: String
 
-  init(projectID: ProjectID, token: UUID = UUID()) {
+  init(projectID: ProjectID, token: String = UUID().uuidString) {
     self.projectID = projectID
     self.token = token
   }
@@ -130,7 +133,7 @@ final class HierarchyManager {
   /// Open creation leases, by Project. A set of tokens, not a counter, so a
   /// second release of the same lease is a no-op and cannot drop a lease
   /// that a concurrent creation still holds.
-  @ObservationIgnored private var creationLeases: [ProjectID: Set<UUID>] = [:]
+  @ObservationIgnored private var creationLeases: [ProjectID: Set<String>] = [:]
 
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog

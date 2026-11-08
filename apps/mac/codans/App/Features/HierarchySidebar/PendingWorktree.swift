@@ -47,6 +47,9 @@ struct PendingWorktree: Equatable, Identifiable {
   /// Stashed here so a future cancel can materialize-on-cancel; this
   /// feature only sets it, it does not yet act on it.
   var materializedPath: URL?
+  /// Count of Retry taps. Part of the creation lease token, so the effect
+  /// of an earlier attempt can never release the lease of a later one.
+  var attempt = 0
   /// Agent profile to launch in the new worktree after it materializes —
   /// i.e. after the setup script, which runs inside the creation stream.
   /// `nil` launches nothing.

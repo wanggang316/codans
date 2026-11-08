@@ -1378,6 +1378,7 @@ struct HierarchySidebarFeature {
       // detail-pane WorktreeLoadingView (the user is looking at the
       // *current* attempt, not the failed one).
       state.pendingWorktrees[id: id]?.progressLines = []
+      state.pendingWorktrees[id: id]?.attempt += 1
       // Re-read the (now-updated) row so the effect sees `status == .running`.
       guard let restarted = state.pendingWorktrees[id: id] else { return .none }
       hierarchyClient.beginWorktreeCreation(Self.creationLease(for: restarted))
@@ -1441,10 +1442,35 @@ struct HierarchySidebarFeature {
     }
   }
 
-  /// The creation lease of a pending row. Keyed by the row id, so every
-  /// lifecycle arm can release it without storing it in state.
-  private static func creationLease(for pending: PendingWorktree) -> WorktreeCreationLease {
-    WorktreeCreationLease(projectID: pending.projectID, token: pending.id.raw)
+  /// The creation lease of a pending row's current attempt. Derived from
+  /// the row id and retry count, so every lifecycle arm and the effect can
+  /// release it without storing it in state.
+  static func creationLease(for pending: PendingWorktree) -> WorktreeCreationLease {
+    WorktreeCreationLease(
+      projectID: pending.projectID, token: "\(pending.id.raw.uuidString)/\(pending.attempt)")
+  }
+
+  /// Runs one creation attempt as the cancellable pending effect.
+  ///
+  /// The reducer releases the lease on the action that ends the attempt
+  /// (finished, failed, Cancel, Discard). A canceled effect sends no
+  /// actions (`Send` is a no-op after cancellation), so when the effect is
+  /// torn down by anything else — store or parent teardown — it releases
+  /// the lease itself. Release is idempotent, so a cancel the reducer
+  /// already handled is harmless.
+  private func runCreationAttempt(
+    _ pending: PendingWorktree,
+    _ operation: @escaping @Sendable (Send<Action>) async -> Void
+  ) -> Effect<Action> {
+    let hierarchy = hierarchyClient
+    let lease = Self.creationLease(for: pending)
+    return .run { send in
+      await operation(send)
+      if Task.isCancelled {
+        await hierarchy.endWorktreeCreation(lease)
+      }
+    }
+    .cancellable(id: CancelID.pending(pending.id), cancelInFlight: true)
   }
 
   /// Cancellable streaming effect that consumes `createWorktreeStream`
@@ -1462,7 +1488,7 @@ struct HierarchySidebarFeature {
     }
     let client = gitWorktreeClient
     let id = pending.id
-    return .run { send in
+    return runCreationAttempt(pending) { send in
       do {
         for try await event in client.createWorktreeStream(pending.spec) {
           switch event {
@@ -1492,7 +1518,6 @@ struct HierarchySidebarFeature {
             id, .commandFailed(command: "wt sw", stderr: error.localizedDescription)))
       }
     }
-    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
   }
 
   /// Remote counterpart of `runPendingStream`: create the worktree on the
@@ -1504,7 +1529,7 @@ struct HierarchySidebarFeature {
   private func runRemoteCreate(_ pending: PendingWorktree, host: RemoteHost) -> Effect<Action> {
     let id = pending.id
     let spec = pending.spec
-    return .run { send in
+    return runCreationAttempt(pending) { send in
       let service = RemoteGitService(host: host)
       let gitRoot = spec.repoRoot.path
       let path = spec.baseDirectory.appending(path: spec.name).path
@@ -1536,7 +1561,6 @@ struct HierarchySidebarFeature {
             id, .commandFailed(command: "git worktree add", stderr: error.localizedDescription)))
       }
     }
-    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
   }
 
   /// After the delete sheet closed: a group that kept items lists them on
