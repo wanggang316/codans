@@ -58,9 +58,11 @@ of what the program works on (192 bytes or less). Codans parses and stores it
    tab's cached title is used only while the selected pane has no surface,
    and it caches the pane title.
 8. **The pane title survives a restart.** The zmx daemon keeps the last OSC
-   0/2 title of its session and replays it on attach, after the working
-   directory (OSC 7) that it already replays. The daemon sees all output
-   while the app is closed, so the replayed title is current.
+   0/2 title of its session and replays it on attach. The daemon sees all
+   output while the app is closed, so the replayed title is current. The
+   daemon does not replay the working directory (OSC 7): until the shell
+   reports it again, the pane title at the prompt uses the working directory
+   that the app persisted for the pane.
 9. **The agent title survives a restart.** The state snapshot that
    `AgentStateStore` saves at quit includes the OSC 7501 `title` and the
    agent's OSC 0/2 title. A restored row shows them dimmed, with the same
@@ -78,15 +80,16 @@ of what the program works on (192 bytes or less). Codans parses and stores it
   7501, or that report it without a `title`.
 - At the prompt, shell frameworks set titles in many formats (oh-my-zsh sets
   `user@host:~/path`). The working directory gives the same title for every
-  shell setup, and the zmx daemon already replays it after a restart.
+  shell setup, and the app persists it for each pane, so it is known after a
+  restart.
   Ghostty's own shell integration gives the same result: the directory at the
   prompt, the command while it runs.
 - When the chip and the header resolve the title in different ways, they show
   different text for the same pane, for example a cached "Claude Code" on the
   chip and a directory on the header after a restart.
 - Before this decision, the zmx daemon dropped the title (its terminal ignores
-  `window_title`) and replayed only the working directory, so every pane lost
-  its title on restart until the program set it again. A title kept by the
+  `window_title`), so every pane lost its title on restart until the program
+  set it again. A title kept by the
   daemon is current; a title cached by the app can be stale.
 
 ## Trade-offs
