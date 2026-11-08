@@ -3,8 +3,8 @@
 All notable changes to codans are documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project does not yet follow semantic versioning — every release until
-1.0 is a developer build. Releases are dated.
+and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Before 1.0, a breaking change bumps the minor version. Releases are dated.
 
 ## [Unreleased]
 
