@@ -27,6 +27,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -84,6 +88,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [

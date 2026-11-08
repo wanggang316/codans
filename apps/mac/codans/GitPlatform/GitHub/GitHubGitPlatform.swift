@@ -58,7 +58,7 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
     case .exited(let code, let stdout, _, _) where cmd.expectedExitCodes.contains(code):
       do {
         guard let result = try GitHubJSONParsers.parseAuthStatus(stdout) else {
-          return .unavailable(reason: GitPlatformError.notAuthenticated(.github, host: nil).userFacingMessage)
+          return .notLoggedIn(host: nil)
         }
         return .available(host: result.host, user: result.user)
       } catch let error as GitPlatformError {
@@ -67,7 +67,7 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
         return .unavailable(reason: GitPlatformError.other(String(describing: error)).userFacingMessage)
       }
     case .exited(_, _, let stderr, _):
-      return .unavailable(reason: Self.translateError(stderr: stderr).userFacingMessage)
+      return Self.translateError(stderr: stderr).availability
     case .timedOut:
       return .unavailable(reason: GitPlatformError.timeout.userFacingMessage)
     case .spawnFailed:
@@ -91,11 +91,16 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
     return GitHubJSONParsers.parseAuthenticatedHosts(stdout)
   }
 
+  func invalidateExecutable() async {
+    await resolver.invalidate()
+  }
+
   // MARK: - writes
 
-  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy) async throws {
+  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy, headSHA: String) async throws {
     let cmd = GhCommand.pullRequestMerge(
-      number: pullRequest.number, strategy: strategy, repo: GitHub.repoArgument(pullRequest.repository))
+      number: pullRequest.number, strategy: strategy, headSHA: headSHA,
+      repo: GitHub.repoArgument(pullRequest.repository))
     _ = try await runExpecting(cmd, stderrOverride: Self.translateMergeError)
   }
 
@@ -372,8 +377,12 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
 
   /// `gh pr merge` has a narrower error surface than the generic translator assumes.
   /// This override fires first for merge calls so "not mergeable" reports cleanly.
+  /// A head that is not the `--match-head-commit` SHA is "Head branch was modified".
   nonisolated static func translateMergeError(stderr: String) -> GitPlatformError? {
     let lowered = stderr.lowercased()
+    if lowered.contains("head branch was modified") || lowered.contains("expected head") {
+      return .headMoved
+    }
     if lowered.contains("not mergeable") || lowered.contains("cannot be merged")
       || lowered.contains("merge conflict")
     {

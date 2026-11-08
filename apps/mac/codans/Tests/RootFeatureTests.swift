@@ -1355,6 +1355,71 @@ struct RootFeatureTests {
     await store.finish()
   }
 
+  // MARK: - Git commands that finish in a pane
+
+  /// A `glab mr create` (or `glab auth login`) that finishes in a pane drops the cached
+  /// CLI paths and logged-in hosts and refreshes the pane's fetch unit, as `gh` does.
+  @Test
+  func aGlabCommandThatFinishesInAPaneInvalidatesAndRefreshesItsUnit() async {
+    let (catalog, projectID, paneID) = Self.paneCatalog()
+    let invalidations = LockIsolated(0)
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitPlatformClient.self].invalidateResolution = { invalidations.withValue { $0 += 1 } }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.paneGitCommandActivity(paneID, running: true, gitPlatformCLI: true))
+    await store.send(.paneGitCommandActivity(paneID, running: false, gitPlatformCLI: false))
+    await store.receive(\.gitPlatform.refreshAvailabilityRequested)
+    await store.receive(
+      { action in
+        guard case .gitPlatform(.projectRefreshRequested(let refreshed, _, _)) = action else { return false }
+        return refreshed == projectID
+      }, timeout: .seconds(5))
+    await store.finish()
+    #expect(invalidations.value == 1)
+    #expect(store.state.panesRunningGitPlatformCLI.isEmpty)
+  }
+
+  /// A plain `git` command refreshes the unit but keeps the CLI caches.
+  @Test
+  func aGitCommandThatFinishesInAPaneRefreshesWithoutInvalidating() async {
+    let (catalog, projectID, paneID) = Self.paneCatalog()
+    let invalidations = LockIsolated(0)
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitPlatformClient.self].invalidateResolution = { invalidations.withValue { $0 += 1 } }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.paneGitCommandActivity(paneID, running: true, gitPlatformCLI: false))
+    await store.send(.paneGitCommandActivity(paneID, running: false, gitPlatformCLI: false))
+    await store.receive(
+      { action in
+        guard case .gitPlatform(.projectRefreshRequested(let refreshed, _, _)) = action else { return false }
+        return refreshed == projectID
+      }, timeout: .seconds(5))
+    await store.finish()
+    #expect(invalidations.value == 0)
+  }
+
+  private static func paneCatalog() -> (Catalog, ProjectID, PaneID) {
+    let pane = Pane(workingDirectory: "/repo")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab], selectedTabID: tab.id)
+    let project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+    return (Catalog(projects: [project]), project.id, pane.id)
+  }
+
   /// A local and a Server worktree at the same path (ADR 0006): watcher and
   /// HEAD events refresh each row's diff stats on its own machine.
   @Test

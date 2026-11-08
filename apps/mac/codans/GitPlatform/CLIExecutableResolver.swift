@@ -13,15 +13,15 @@ nonisolated struct LiveEnvironment: EnvironmentVariableProvider {
   }
 }
 
-/// Resolves the absolute path of a Git Platform CLI (`gh`, `glab`) once per app session and
-/// caches the result.
+/// Resolves the absolute path of a Git Platform CLI (`gh`, `glab`) and caches it. A missing
+/// CLI is not cached: each call probes again until the CLI is found.
 ///
 /// Concurrent callers share a single resolution via a single-flight `Task`: the first
 /// `resolve()` starts the probe, subsequent callers `await` the in-flight task. Subsequent
 /// calls after resolution return the cached `URL?` without any filesystem activity.
 ///
 /// `invalidate()` clears the cache so the next `resolve()` re-probes — used by the Settings
-/// pane's "Re-check" button.
+/// pane's "Re-check" button and when a `gh` / `glab` command finishes in a pane.
 ///
 /// The prober is injected at init time so tests can assert single-flight behaviour by
 /// counting invocations. The production path uses `Self.livePathProbe()` which iterates
@@ -35,7 +35,7 @@ actor CLIExecutableResolver {
   private enum CacheState {
     case empty
     case resolving(Task<URL?, Never>)
-    case resolved(URL?)
+    case resolved(URL)
   }
 
   private let prober: Prober
@@ -58,10 +58,12 @@ actor CLIExecutableResolver {
       let task = Task<URL?, Never> { await prober() }
       cache = .resolving(task)
       let result = await task.value
-      // Re-check cache: if `invalidate()` fired while the probe ran, don't clobber the
-      // subsequent .empty state with a stale .resolved value.
-      if case .resolving = cache {
-        cache = .resolved(result)
+      // Write the result only when this probe still owns the cache. After `invalidate()`
+      // the cache is empty or owned by a newer probe; a stale path must not replace
+      // either. A missing CLI is not cached, so a CLI installed while the app runs is
+      // found by the next call.
+      if case .resolving(let current) = cache, current == task {
+        cache = result.map(CacheState.resolved) ?? .empty
       }
       return result
     }

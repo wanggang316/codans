@@ -126,11 +126,15 @@ public nonisolated enum ForegroundJobClassifier {
   /// VCS / forge CLIs whose completion at the shell prompt should kick an
   /// immediate git + PR status refresh. A finishing `git push` / `git commit`
   /// moves the diff and ahead/behind counts; a finishing `gh pr create` /
-  /// `gh pr merge` changes server-side PR state — both of which the liveness
+  /// `glab mr create` changes server-side PR state — both of which the liveness
   /// poll would otherwise surface up to a minute later.
-  public static let gitCommandNames: Set<String> = ["git", "gh"]
+  public static let gitCommandNames: Set<String> = Set(["git"]).union(gitPlatformCLINames)
 
-  /// True when the foreground group is a shell-launched `git` / `gh` command.
+  /// Git Platform CLIs. A finishing command of one of them can also be an install
+  /// check or an `auth login`, so it drops the cached CLI path and logged-in hosts.
+  public static let gitPlatformCLINames: Set<String> = ["gh", "glab"]
+
+  /// True when the foreground group is a shell-launched `git` / `gh` / `glab` command.
   /// Agent jobs are excluded for the same reason as `indicatesRunningCommand`:
   /// an agent stays foreground for its whole session and its own git
   /// subprocesses are render-derived, not a discrete prompt command — so this
@@ -139,5 +143,11 @@ public nonisolated enum ForegroundJobClassifier {
     guard !job.isEmpty else { return false }
     guard AgentKindPatterns.classify(foregroundJob: job) == nil else { return false }
     return job.processes.contains { gitCommandNames.contains($0.processName) }
+  }
+
+  /// True when the foreground group is a shell-launched `gh` / `glab` command. Agent jobs
+  /// are excluded, as for `indicatesGitCommand`.
+  public static func indicatesGitPlatformCLI(_ job: ForegroundJob) -> Bool {
+    indicatesGitCommand(job) && job.processes.contains { gitPlatformCLINames.contains($0.processName) }
   }
 }

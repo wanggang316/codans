@@ -27,6 +27,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -84,6 +88,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -141,6 +149,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": [
                 {
                   "mergeRequestInteraction": {
@@ -208,6 +220,10 @@
               ]
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": [
                 {
                   "mergeRequestInteraction": {
@@ -271,6 +287,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -328,6 +348,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -389,6 +413,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -455,6 +483,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -521,6 +553,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -587,6 +623,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -653,6 +693,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -710,6 +754,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [
@@ -757,6 +805,7 @@
             "draft": false,
             "sourceBranch": "feat-open",
             "targetBranch": "main",
+            "diffHeadSha": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
             "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/1",
             "updatedAt": "2026-11-03T16:49:34Z",
             "detailedMergeStatus": "MERGEABLE",
@@ -767,6 +816,10 @@
               "nodes": []
             },
             "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
               "nodes": []
             },
             "diffStats": [

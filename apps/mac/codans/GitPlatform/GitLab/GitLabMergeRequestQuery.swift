@@ -24,9 +24,10 @@ nonisolated enum GitLabMergeRequestQuery {
   static let pageSize = 100
 
   /// Most pages one read follows, for the merge request list of a chunk and for the jobs
-  /// of one head pipeline. A read that needs more fails with an error instead of showing
-  /// a partial list: a dropped merge request would remove a badge, a dropped job could
-  /// hide a failure.
+  /// and reviewers of one merge request. A read that needs more merge requests or jobs
+  /// fails with an error instead of showing a partial list: a dropped merge request would
+  /// remove a badge, a dropped job could hide a failure. A reviewer list that needs more
+  /// stays incomplete, and the review decision is never "approved" for it.
   static let maxPages = 20
 
   /// Concurrent requests when a fetch needs more than one chunk.
@@ -34,7 +35,33 @@ nonisolated enum GitLabMergeRequestQuery {
 
   /// One page of merge requests. `$after` is the previous page's `endCursor`; it is
   /// absent (null) for the first page.
-  static let query = """
+  static let query = mergeRequestsQuery(optionalFields: optionalFields)
+
+  /// `query` without `optionalFields`, for an instance that does not know one of them.
+  /// Snapshots from it have no review decision and use the default merge options.
+  static let degradedQuery = mergeRequestsQuery(optionalFields: "")
+
+  /// Fields that only the review decision and the squash rule read. An older
+  /// self-managed instance can lack some of them (for example `reviewState`); the read
+  /// then retries with `degradedQuery` instead of failing the chunk.
+  static let optionalFieldNames: Set<String> = [
+    "squashReadOnly", "squashOnMerge", "approved", "approvedBy", "reviewers", "mergeRequestInteraction",
+    "reviewState",
+  ]
+
+  private static let optionalFields = """
+    squashReadOnly
+                squashOnMerge
+                approved
+                approvedBy { nodes { username } }
+                reviewers(first: \(pageSize)) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { \(reviewerFields) }
+                }
+    """
+
+  private static func mergeRequestsQuery(optionalFields: String) -> String {
+    """
     query($fullPath: ID!, $branches: [String!], $after: String) {
       currentUser { username }
       project(fullPath: $fullPath) {
@@ -47,14 +74,11 @@ nonisolated enum GitLabMergeRequestQuery {
             draft
             sourceBranch
             targetBranch
+            diffHeadSha
             webUrl
             updatedAt
             detailedMergeStatus
-            squashReadOnly
-            squashOnMerge
-            approved
-            approvedBy { nodes { username } }
-            reviewers { nodes { mergeRequestInteraction { reviewState } } }
+            \(optionalFields)
             diffStats { additions deletions }
             commitCount
             author { username }
@@ -72,6 +96,7 @@ nonisolated enum GitLabMergeRequestQuery {
       }
     }
     """
+  }
 
   /// The next page of one merge request's head-pipeline jobs, when the first page in
   /// `query` was not the last.
@@ -90,7 +115,23 @@ nonisolated enum GitLabMergeRequestQuery {
     }
     """
 
+  /// The next page of one merge request's reviewers, when the first page in `query` was
+  /// not the last.
+  static let reviewersQuery = """
+    query($fullPath: ID!, $iid: String!, $after: String) {
+      project(fullPath: $fullPath) {
+        mergeRequest(iid: $iid) {
+          reviewers(first: \(pageSize), after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes { \(reviewerFields) }
+          }
+        }
+      }
+    }
+    """
+
   private static let jobFields = "name status allowFailure manualJob startedAt finishedAt webPath"
+  private static let reviewerFields = "mergeRequestInteraction { reviewState }"
 
   /// The `branches` variable: a JSON array of the branch names.
   static func branchesVariable(_ branches: [String]) -> String {

@@ -101,13 +101,17 @@ nonisolated enum GitLabWire {
   /// Review decision from what CE and EE both report:
   /// - a reviewer requested changes → changes requested;
   /// - `NOT_APPROVED` (approval rules not met; EE) → review required;
-  /// - approved with at least one approver → approved;
-  /// - otherwise none (no approval rules, nobody approved).
+  /// - approved with at least one approver → approved, only when the reviewer data is
+  ///   complete: every reviewer page was read and every reviewer has a state. A reviewer
+  ///   codans did not see could have requested changes;
+  /// - otherwise none (no approval rules, nobody approved, reviewer data incomplete).
   static func reviewDecision(
-    detailedMergeStatus: String?, approved: Bool, approverCount: Int, reviewerStates: [String]
+    detailedMergeStatus: String?, approved: Bool, approverCount: Int, reviewerStates: [String?],
+    reviewersComplete: Bool
   ) -> ReviewDecision? {
     if reviewerStates.contains("REQUESTED_CHANGES") { return .changesRequested }
     if detailedMergeStatus == "NOT_APPROVED" { return .reviewRequired }
+    guard reviewersComplete, !reviewerStates.contains(nil) else { return nil }
     if approved && approverCount > 0 { return .approved }
     return nil
   }

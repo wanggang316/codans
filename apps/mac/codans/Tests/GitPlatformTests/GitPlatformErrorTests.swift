@@ -35,6 +35,12 @@ struct GitPlatformErrorTests {
   }
 
   @Test
+  func headMovedAsksForAReview() {
+    #expect(
+      GitPlatformError.headMoved.userFacingMessage == "The branch has new commits. Review them, then merge again.")
+  }
+
+  @Test
   func otherCaseEmbedsDetail() {
     let msg = GitPlatformError.other("unexpected json at key 'foo'").userFacingMessage
     #expect(msg.contains("unexpected json at key 'foo'"))

@@ -23,6 +23,7 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   let timeout: Duration
   let maxOutputBytes: Int
   private let now: @Sendable () -> Date
+  private let configHosts: @Sendable () -> [GlabConfig.Host]
   private let state: SharedState
   private let recheck: GitLabMergeStatusRecheck
 
@@ -31,13 +32,15 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     resolver: CLIExecutableResolver = .glab,
     timeout: Duration = GitLabGitPlatform.defaultTimeout,
     maxOutputBytes: Int = GitLabGitPlatform.defaultMaxOutputBytes,
-    now: @escaping @Sendable () -> Date = { Date() }
+    now: @escaping @Sendable () -> Date = { Date() },
+    configHosts: @escaping @Sendable () -> [GlabConfig.Host] = { GlabConfig.loggedInHosts() }
   ) {
     self.runner = runner
     self.resolver = resolver
     self.timeout = timeout
     self.maxOutputBytes = maxOutputBytes
     self.now = now
+    self.configHosts = configHosts
     self.state = SharedState()
     self.recheck = GitLabMergeStatusRecheck()
   }
@@ -51,7 +54,7 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       let exec = try await checkedExecutable()
       let hosts = try await authStatus(exec)
       guard let host = hosts.first(where: \.isLoggedIn) else {
-        return .unavailable(reason: GitPlatformError.notAuthenticated(.gitlab, host: nil).userFacingMessage)
+        return .notLoggedIn(host: nil)
       }
       return .available(host: host.host, user: host.user ?? "")
     } catch {
@@ -59,13 +62,20 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     }
   }
 
-  /// Hosts `glab` is logged in to. Also remembers each host's API protocol, so the web
-  /// URLs of a self-managed `http` instance keep their scheme.
-  func authenticatedHosts() async -> Set<String> {
-    guard let exec = try? await checkedExecutable(), let hosts = try? await authStatus(exec) else {
-      return []
+  /// Hosts `glab` is logged in to, from its config file (`GlabConfig`): no network and no
+  /// version gate, so an old or missing `glab` still lets a self-managed host resolve and
+  /// show the actionable error. Also remembers each host's API protocol, so the web URLs
+  /// of a self-managed `http` instance keep their scheme.
+  func authenticatedHosts() async -> Set<String> {  // swiftlint:disable:this async_without_await
+    let hosts = configHosts()
+    for host in hosts {
+      state.setAPIProtocol(host.apiProtocol, for: host.host)
     }
-    return Set(hosts.filter(\.isLoggedIn).map(\.host))
+    return Set(hosts.map(\.host))
+  }
+
+  func invalidateExecutable() async {
+    await resolver.invalidate()
   }
 
   // MARK: - batched read
@@ -155,8 +165,41 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     if let bad = branches.first(where: { $0.unicodeScalars.contains { $0.value < 0x20 } }) {
       throw GitPlatformError.malformedBranchName(bad)
     }
-    // Every page is read before any snapshot is built: a merge request on a later page
-    // can be the newest one of its branch, and a partial list must not drop a badge.
+    var nodes: [GitLabJSONParsers.MergeRequestNode]
+    do {
+      nodes = try await readMergeRequests(
+        query: GitLabMergeRequestQuery.query, degradable: true, exec: exec, repository: repository,
+        branches: branches)
+    } catch is OptionalFieldUnknown {
+      if state.markDegraded(host: repository.host) {
+        Self.logger.notice(
+          "\(repository.host, privacy: .public) does not know a review or squash field; reading merge requests without them"
+        )
+      }
+      nodes = try await readMergeRequests(
+        query: GitLabMergeRequestQuery.degradedQuery, degradable: false, exec: exec, repository: repository,
+        branches: branches)
+    }
+    for index in nodes.indices {
+      nodes[index] = try await completingJobs(of: nodes[index], exec: exec, repository: repository)
+      nodes[index] = try await completingReviewers(of: nodes[index], exec: exec, repository: repository)
+    }
+    return GitLabJSONParsers.selectedMergeRequests(from: nodes, branches: branches, projectPath: repository.path)
+  }
+
+  /// The batched query failed only because the instance does not know one of
+  /// `GitLabMergeRequestQuery.optionalFieldNames`.
+  private struct OptionalFieldUnknown: Error {}
+
+  /// Every page of the merge requests for `branches`. Every page is read before any
+  /// snapshot is built: a merge request on a later page can be the newest one of its
+  /// branch, and a partial list must not drop a badge.
+  ///
+  /// With `degradable`, an `errors` body that only names unknown optional fields throws
+  /// `OptionalFieldUnknown`, so the caller can read again with `degradedQuery`.
+  private func readMergeRequests(
+    query: String, degradable: Bool, exec: URL, repository: GitPlatformRepository, branches: [String]
+  ) async throws -> [GitLabJSONParsers.MergeRequestNode] {
     var nodes: [GitLabJSONParsers.MergeRequestNode] = []
     var cursor: String?
     var pages = 0
@@ -170,20 +213,19 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       var variables = ["fullPath": repository.path]
       if let cursor { variables["after"] = cursor }
       let cmd = GlabCommand.apiGraphQL(
-        query: GitLabMergeRequestQuery.query,
+        query: query,
         host: repository.host,
         stringVariables: variables,
         jsonVariables: ["branches": GitLabMergeRequestQuery.branchesVariable(branches)]
       )
-      let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
+      let data = try await run(
+        cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes, returnsGraphQLErrors: true)
+      if degradable, GitLabJSONParsers.isOptionalFieldError(data) { throw OptionalFieldUnknown() }
       let page = try GitLabJSONParsers.parseMergeRequestPage(data, host: repository.host)
       nodes += page.nodes
       cursor = page.nextCursor
     } while cursor != nil
-    for index in nodes.indices {
-      nodes[index] = try await completingJobs(of: nodes[index], exec: exec, repository: repository)
-    }
-    return GitLabJSONParsers.selectedMergeRequests(from: nodes, branches: branches, projectPath: repository.path)
+    return nodes
   }
 
   /// The merge request with every job of its head pipeline. The batched read returns the
@@ -220,13 +262,53 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     return completed
   }
 
+  /// The merge request with every reviewer, read like `completingJobs`, so a requested
+  /// change on a later page reaches the review decision. A list longer than `maxPages`
+  /// pages, or a page without `nodes` or usable `pageInfo`, stays incomplete: it only
+  /// withholds "approved", so it does not fail the read.
+  private func completingReviewers(
+    of node: GitLabJSONParsers.MergeRequestNode, exec: URL, repository: GitPlatformRepository
+  ) async throws -> GitLabJSONParsers.MergeRequestNode {
+    // A first page without `nodes` is unknown: later pages cannot make the list
+    // complete, so it stays as decoded (incomplete).
+    guard var reviewers = node.reviewers, var known = reviewers.nodes,
+      var cursor = reviewers.pageInfo?.hasNextPage == true ? reviewers.pageInfo?.endCursor : nil,
+      let iid = node.iid
+    else { return node }
+    var pages = 1
+    while pages < GitLabMergeRequestQuery.maxPages {
+      pages += 1
+      let cmd = GlabCommand.apiGraphQL(
+        query: GitLabMergeRequestQuery.reviewersQuery,
+        host: repository.host,
+        stringVariables: ["fullPath": repository.path, "iid": iid, "after": cursor]
+      )
+      let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
+      let page = try GitLabJSONParsers.parseReviewerPage(data)
+      guard let pageNodes = page.nodes else {
+        // The reviewers of this page are unknown: without `pageInfo` the list is incomplete.
+        reviewers.pageInfo = nil
+        break
+      }
+      known += pageNodes
+      reviewers.nodes = known
+      // `nil`, or a next page without a cursor, keeps the list incomplete.
+      reviewers.pageInfo = page.pageInfo
+      guard page.pageInfo?.hasNextPage == true, let next = page.pageInfo?.endCursor, !next.isEmpty else { break }
+      cursor = next
+    }
+    var completed = node
+    completed.reviewers = reviewers
+    return completed
+  }
+
   // MARK: - writes
 
   /// `mergeCommit` and `rebase` merge with the project's merge method; `squash` squashes.
-  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy) async throws {
+  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy, headSHA: String) async throws {
     let exec = try await checkedExecutable()
     let cmd = GlabCommand.mergeRequestMerge(
-      repository: pullRequest.repository, iid: pullRequest.number, squash: strategy == .squash)
+      repository: pullRequest.repository, iid: pullRequest.number, squash: strategy == .squash, sha: headSHA)
     _ = try await run(cmd, exec: exec, host: pullRequest.repository.host, isMerge: true)
   }
 
@@ -329,13 +411,16 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   }
 
   /// Runs one `glab` command and returns its stdout on exit 0. `host` names the
-  /// instance for `GITLAB_HOST`; `nil` for host-independent commands.
+  /// instance for `GITLAB_HOST`; `nil` for host-independent commands. With
+  /// `returnsGraphQLErrors`, a GraphQL `errors` body on a failed exit is also returned,
+  /// so the caller can read every error in it.
   private func run(
     _ command: GlabCommand.Command,
     exec: URL,
     host: String?,
     maxOutputBytes: Int? = nil,
-    isMerge: Bool = false
+    isMerge: Bool = false,
+    returnsGraphQLErrors: Bool = false
   ) async throws -> Data {
     let cap = maxOutputBytes ?? self.maxOutputBytes
     let outcome = await runner.run(
@@ -348,6 +433,7 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       // `glab api` prints a GraphQL `errors` body or a REST error body on stdout and a
       // summary on stderr.
       if let message = GitLabJSONParsers.graphQLErrorMessage(stdout) {
+        if returnsGraphQLErrors { return stdout }
         throw GitPlatformError.graphQLError(message)
       }
       let text = [String(data: stderr, encoding: .utf8), String(data: stdout, encoding: .utf8)]
@@ -415,9 +501,12 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   }
 
   /// A merge GitLab refuses (`405 Method Not Allowed`, `406`, `409`, "cannot be merged")
-  /// is a merge conflict in the neutral model: the merge request cannot merge now.
+  /// is a merge conflict in the neutral model: the merge request cannot merge now. The
+  /// `409` for a `sha` that is not the source branch head is checked first: it is
+  /// `.headMoved`, not a conflict.
   nonisolated static func translateMergeError(stderr: String) -> GitPlatformError? {
     let text = stderr.lowercased()
+    if text.contains("sha does not match head") { return .headMoved }
     if text.contains("405") || text.contains("406") || text.contains("409")
       || text.contains("cannot be merged") || text.contains("not mergeable") || text.contains("conflict")
     {
@@ -435,12 +524,19 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
 
   /// State the value-type implementation shares across copies: the `glab` version per
   /// executable (keyed by path and modification date, so an upgrade is seen), the API
-  /// protocol per host, and the merge status rechecks the last read started.
+  /// protocol per host, the merge status rechecks the last read started, and the hosts
+  /// whose degraded read was already logged.
   private final class SharedState: @unchecked Sendable {
     private let lock = NSLock()
     private var versions: [String: String?] = [:]
     private var protocols: [String: String] = [:]
     private var recheckTask: Task<Void, Never>?
+    private var degradedHosts: Set<String> = []
+
+    /// `true` the first time `host` is marked.
+    func markDegraded(host: String) -> Bool {
+      lock.withLock { degradedHosts.insert(host.lowercased()).inserted }
+    }
 
     func pendingRecheck() -> Task<Void, Never>? {
       lock.withLock { recheckTask }

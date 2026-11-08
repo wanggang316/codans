@@ -17,6 +17,16 @@ import os.log
 /// refresh to pick up the new server state without hammering the Git Platform.
 @Reducer
 struct GitPlatformFeature {
+  /// A merge refused because the head moved, and whether the new head has been read.
+  struct HeadMovedMerge: Equatable, Sendable {
+    var pullRequestNumber: Int
+    var branch: String
+    var refusedAt: Date
+    /// `true` after a successful fetch that started after the refusal and still has this
+    /// Pull Request. Only then does "Review" show the new head.
+    var isNewHeadRead = false
+  }
+
   @ObservableState
   struct State: Equatable {
     var availability: [GitPlatformKind: GitPlatformAvailability] = [:]
@@ -39,6 +49,12 @@ struct GitPlatformFeature {
 
     /// Per-Worktree last-seen error, cleared on successful refresh.
     var lastError: [WorktreeID: GitPlatformError] = [:]
+
+    /// Merges the Git Platform refused because the head moved, per Worktree. While one is
+    /// here, `lastError` is `.headMoved` and a refresh does not clear it. It goes when the
+    /// user reviews the new head, or when the Worktree no longer shows that Pull Request
+    /// (other branch, other number). See ADR 0004 item 17.
+    var headMovedMerges: [WorktreeID: HeadMovedMerge] = [:]
 
     // MARK: - v2 project-batched fetch
 
@@ -162,9 +178,16 @@ struct GitPlatformFeature {
 
     case presentPopover(WorktreeID)
     case dismissPopover
+    /// A Pull Request popover appeared, from any surface (sidebar badge or status bar).
+    case popoverOpened(WorktreeID)
 
-    case mergeRequested(WorktreeID, PullRequestReference, strategy: MergeStrategy)
+    /// `headSHA` is the head commit of the snapshot the user saw. `nil` (a snapshot from
+    /// an older cache entry) refreshes the unit and does not merge (ADR 0004 item 17).
+    case mergeRequested(WorktreeID, PullRequestReference, strategy: MergeStrategy, headSHA: String?)
     case mergeCompleted(WorktreeID, prNumber: Int, TaskResult<VoidSuccess>)
+    /// The user selected "Review" on the `.headMoved` error. Shows the new head when it
+    /// has been read; otherwise reads it again.
+    case headMovedReviewed(WorktreeID)
 
     case closeRequested(WorktreeID, PullRequestReference)
     case closeCompleted(WorktreeID, TaskResult<VoidSuccess>)
@@ -429,10 +452,9 @@ struct GitPlatformFeature {
         state.availabilityProbedAt = nil  // bypass cache
         // A fresh `auth login` can make a self-managed host resolvable.
         state.unitsWithoutGitPlatform = []
-        return .merge(
-          .run { [gitPlatform] _ in await gitPlatform.invalidateResolution() },
-          probeAvailabilityEffect()
-        )
+        // The probe waits for the invalidation, or it can read and cache for 30 s the
+        // CLI path and logged-in hosts from before an install or `auth login`.
+        return probeAvailabilityEffect(invalidatingFirst: true)
 
       case .availabilityProbed(let result, let probedAt):
         state.availability = result
@@ -445,18 +467,27 @@ struct GitPlatformFeature {
         state.popoverTarget = worktreeID
         return .none
 
+      case .popoverOpened(let worktreeID):
+        // A snapshot without a head commit cannot merge; read the head now.
+        guard let snapshot = state.snapshots[worktreeID], snapshot.state == .open, snapshot.headSHA == nil
+        else { return .none }
+        return refreshUnit(of: worktreeID, state: &state)
+
       case .dismissPopover:
         state.popoverTarget = nil
         return .none
 
       // MARK: - merge
 
-      case .mergeRequested(let worktreeID, let pullRequest, let strategy):
+      case .mergeRequested(let worktreeID, let pullRequest, let strategy, let headSHA):
         if state.mutating.contains(worktreeID) { return .none }  // already running
+        // Never merge a head the user did not see: read it first, then the user merges
+        // again from the refreshed popover.
+        guard let headSHA else { return refreshUnit(of: worktreeID, state: &state) }
         state.mutating.insert(worktreeID)
         return .run { [gitPlatform] send in
           let result = await TaskResult<Action.VoidSuccess> {
-            try await gitPlatform.merge(pullRequest, strategy)
+            try await gitPlatform.merge(pullRequest, strategy, headSHA)
             return Action.VoidSuccess()
           }
           await send(.mergeCompleted(worktreeID, prNumber: pullRequest.number, result))
@@ -465,6 +496,7 @@ struct GitPlatformFeature {
 
       case .mergeCompleted(let worktreeID, _, .success):
         state.mutating.remove(worktreeID)
+        state.headMovedMerges[worktreeID] = nil
         // Delegate pullRequestMerged so RootFeature can trigger the post-merge action,
         // then kick off a refresh so the badge flips to merged on its own.
         let refresh = postMutationRefresh(worktreeID: worktreeID, state: &state)
@@ -473,9 +505,29 @@ struct GitPlatformFeature {
         }
         return refresh
 
-      case .mergeCompleted(let worktreeID, _, .failure(let error)):
+      case .mergeCompleted(let worktreeID, let prNumber, .failure(let error)):
         state.mutating.remove(worktreeID)
-        state.lastError[worktreeID] = Self.gitPlatformError(error)
+        let gitPlatformError = Self.gitPlatformError(error)
+        state.lastError[worktreeID] = gitPlatformError
+        guard gitPlatformError == .headMoved, let snapshot = state.snapshots[worktreeID] else {
+          state.headMovedMerges[worktreeID] = nil
+          return .none
+        }
+        // Read the new head at once. The error stays through this refresh, so the user
+        // reads it first (see `projectBatchLoaded`).
+        state.headMovedMerges[worktreeID] = HeadMovedMerge(
+          pullRequestNumber: prNumber, branch: snapshot.headRefName, refusedAt: now)
+        return refreshUnit(of: worktreeID, state: &state)
+
+      case .headMovedReviewed(let worktreeID):
+        guard let merge = state.headMovedMerges[worktreeID] else {
+          Self.clearHeadMoved(worktreeID, state: &state)
+          return .none
+        }
+        // Before the new head is read (refresh pending or failed), the old snapshot is all
+        // there is to show: read again instead.
+        guard merge.isNewHeadRead else { return refreshUnit(of: worktreeID, state: &state) }
+        Self.clearHeadMoved(worktreeID, state: &state)
         return .none
 
       // MARK: - close
@@ -575,8 +627,20 @@ struct GitPlatformFeature {
         // `snapshots` so a PR that was closed between fetches doesn't linger as stale.
         // Same reasoning one level down: the Project can survive while one of
         // its Worktrees is removed, and `pairs` was captured before that.
+        let fetchStartedAt = state.lastFetchStartedAt[projectID] ?? .distantPast
         for pair in pairs where state.projectByWorktree[pair.worktreeID] != nil {
-          state.lastError[pair.worktreeID] = nil
+          // `.headMoved` is the answer to a merge, not to a read: it stays until the user
+          // reviews the new head, while the row still shows the refused Pull Request.
+          if let merge = state.headMovedMerges[pair.worktreeID], merge.branch == pair.branch,
+            batched.byBranch[pair.branch]?.number == merge.pullRequestNumber
+          {
+            if fetchStartedAt >= merge.refusedAt { state.headMovedMerges[pair.worktreeID]?.isNewHeadRead = true }
+            // A failed read in between can have put a CLI error in its place.
+            state.lastError[pair.worktreeID] = .headMoved
+          } else {
+            state.headMovedMerges[pair.worktreeID] = nil
+            state.lastError[pair.worktreeID] = nil
+          }
           if let snap = batched.byBranch[pair.branch] {
             state.snapshots[pair.worktreeID] = snap
             state.snapshotLoadedAt[pair.worktreeID] = now
@@ -706,6 +770,7 @@ struct GitPlatformFeature {
         state.snapshots = state.snapshots.filter { worktreeIDs.contains($0.key) }
         state.snapshotLoadedAt = state.snapshotLoadedAt.filter { worktreeIDs.contains($0.key) }
         state.lastError = state.lastError.filter { worktreeIDs.contains($0.key) }
+        state.headMovedMerges = state.headMovedMerges.filter { worktreeIDs.contains($0.key) }
         state.projectByWorktree = state.projectByWorktree.filter { worktreeIDs.contains($0.key) }
         state.loading.formIntersection(worktreeIDs)
         state.mutating.formIntersection(worktreeIDs)
@@ -742,13 +807,7 @@ struct GitPlatformFeature {
         return .merge(departedInFlight.map { Effect<Action>.cancel(id: CancelID.projectFetch($0)) })
 
       case .worktreeRefreshRequested(let worktreeID):
-        guard let projectID = state.projectByWorktree[worktreeID],
-          let gitRoot = state.projectGitRoots[projectID],
-          let pairs = state.projectWorktreePairs[projectID]
-        else { return .none }
-        return enqueueProjectFetch(
-          projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state
-        )
+        return refreshUnit(of: worktreeID, state: &state)
 
       // MARK: - delegate
 
@@ -768,6 +827,7 @@ struct GitPlatformFeature {
       state.snapshots[pair.worktreeID] = nil
       state.snapshotLoadedAt[pair.worktreeID] = nil
       state.lastError[pair.worktreeID] = nil
+      state.headMovedMerges[pair.worktreeID] = nil
     }
     guard state.snapshotsByProject.removeValue(forKey: projectID) != nil else { return }
     let snapshotOnDisk = state.snapshotsByProject
@@ -965,6 +1025,10 @@ struct GitPlatformFeature {
   ) {
     let cached = state.snapshotsByProject[projectID]
     for pair in pairs {
+      // A branch switch: the refused merge belonged to the old branch's Pull Request.
+      if let merge = state.headMovedMerges[pair.worktreeID], merge.branch != pair.branch {
+        clearHeadMoved(pair.worktreeID, state: &state)
+      }
       guard let current = state.snapshots[pair.worktreeID],
         current.headRefName != pair.branch
       else { continue }
@@ -1000,8 +1064,9 @@ struct GitPlatformFeature {
 
   // MARK: - Effect builders
 
-  private func probeAvailabilityEffect() -> Effect<Action> {
+  private func probeAvailabilityEffect(invalidatingFirst: Bool = false) -> Effect<Action> {
     .run { [gitPlatform] send in
+      if invalidatingFirst { await gitPlatform.invalidateResolution() }
       var result: [GitPlatformKind: GitPlatformAvailability] = [:]
       for kind in GitPlatformKind.allCases {
         result[kind] = await gitPlatform.availability(kind)
@@ -1029,6 +1094,22 @@ struct GitPlatformFeature {
       await send(completed(result))
     }
     .cancellable(id: CancelID.mutation(worktreeID), cancelInFlight: true)
+  }
+
+  /// Forgets the refused merge of `worktreeID` and its `.headMoved` error.
+  private static func clearHeadMoved(_ worktreeID: WorktreeID, state: inout State) {
+    state.headMovedMerges[worktreeID] = nil
+    if state.lastError[worktreeID] == .headMoved { state.lastError[worktreeID] = nil }
+  }
+
+  /// Fetches the unit that owns `worktreeID` now. `.none` when the Worktree has not been
+  /// part of a batched fetch yet.
+  private func refreshUnit(of worktreeID: WorktreeID, state: inout State) -> Effect<Action> {
+    guard let projectID = state.projectByWorktree[worktreeID],
+      let gitRoot = state.projectGitRoots[projectID],
+      let pairs = state.projectWorktreePairs[projectID]
+    else { return .none }
+    return enqueueProjectFetch(projectID: projectID, gitRoot: gitRoot, pairs: pairs, state: &state)
   }
 
   private static func gitPlatformError(_ error: any Error) -> GitPlatformError {
