@@ -13,21 +13,15 @@ import SwiftUI
 struct RunSplitButton: NSViewRepresentable {
   /// Tinted, non-template glyph for the primary segment.
   let image: NSImage?
-  /// Shortcut bound to the primary segment (`⌘R`, `⌘.`), shown beside the glyph while ⌘
-  /// is held.
-  let chordHint: String?
   let toolTip: String
   let accessibilityLabel: String
   let onPrimary: () -> Void
   let makeMenu: () -> RunMenuModel
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver: CommandKeyObserver?
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
   func makeNSView(context: Context) -> RunSegmentedControl {
     let control = RunSegmentedControl()
-    // Layer-backed so a chord swap can cross-fade (`CATransition.shortcutHintFade()`).
-    control.wantsLayer = true
     control.segmentCount = 2
     control.segmentStyle = .texturedRounded
     control.trackingMode = .momentary
@@ -48,15 +42,6 @@ struct RunSplitButton: NSViewRepresentable {
     context.coordinator.onPrimary = onPrimary
     context.coordinator.makeMenu = makeMenu
     control.setImage(image, forSegment: 0)
-    let showsChord = commandKeyObserver?.isCommandHeld == true
-    let label = showsChord ? chordHint ?? "" : ""
-    if control.label(forSegment: 0) != label {
-      // Fade the chord in and out with the timing every other ⌘ hint uses.
-      if !context.environment.accessibilityReduceMotion {
-        control.layer?.add(CATransition.shortcutHintFade(), forKey: "shortcutHint")
-      }
-      control.setLabel(label, forSegment: 0)
-    }
     control.setImageScaling(.scaleNone, forSegment: 0)
     control.setToolTip(toolTip, forSegment: 0)
     control.setToolTip("More Commands", forSegment: 1)
