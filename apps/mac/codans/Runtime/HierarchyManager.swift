@@ -2180,6 +2180,13 @@ final class HierarchyManager {
     runningPanes.contains(paneID) || commandBusyPanes.contains(paneID)
   }
 
+  /// True when the latest foreground-job sample of `paneID` holds only the
+  /// shell. The pane title is then the working directory (ADR 0009).
+  func paneIsAtShellPrompt(_ paneID: PaneID) -> Bool {
+    processRegistry.foregroundJobs[paneID].map(ForegroundJobClassifier.indicatesShellPrompt)
+      ?? false
+  }
+
   /// True when any pane inside `worktreeID` (any tab, any leaf) is
   /// currently marked running. Sidebar uses this to surface a busy
   /// glyph on the worktree row even when its tab is unfocused.

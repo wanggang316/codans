@@ -54,6 +54,22 @@ struct ForegroundJobClassifierTests {
     #expect(ForegroundJobClassifier.indicatesRunningCommand(job))
   }
 
+  // MARK: - indicatesShellPrompt
+
+  @Test
+  func shellOnlyGroupIsAtThePrompt() {
+    #expect(ForegroundJobClassifier.indicatesShellPrompt(Self.job("zsh")))
+    #expect(ForegroundJobClassifier.indicatesShellPrompt(Self.job("-zsh")))
+  }
+
+  @Test
+  func runningProgramOrPollMissIsNotThePrompt() {
+    #expect(!ForegroundJobClassifier.indicatesShellPrompt(Self.job("make")))
+    #expect(!ForegroundJobClassifier.indicatesShellPrompt(Self.job("claude")))
+    #expect(
+      !ForegroundJobClassifier.indicatesShellPrompt(ForegroundJob(processGroupID: 0, processes: [])))
+  }
+
   // MARK: - indicatesBusyCommand
 
   @Test

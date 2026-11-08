@@ -30,6 +30,13 @@ public nonisolated enum ForegroundJobClassifier {
     return job.processes.contains { !isShell($0.processName) }
   }
 
+  /// True when the foreground process group holds only the shell: the shell
+  /// is at its prompt. `false` for an empty job (poll miss), because nothing
+  /// says the prompt is back.
+  public static func indicatesShellPrompt(_ job: ForegroundJob) -> Bool {
+    !job.isEmpty && job.processes.allSatisfy { isShell($0.processName) }
+  }
+
   /// True when `job` should light the pane's busy spinner: a running
   /// command (see `indicatesRunningCommand`) that is not an interactive
   /// remote session. A session like `ssh host` holds the foreground until

@@ -180,24 +180,13 @@ struct PaneCardHeader: View {
     hierarchyManager.catalog.pane(paneID)
   }
 
-  /// Live OSC title first, then the live working directory, then the
+  /// The pane title (ADR 0009). A pane without a surface shows its
   /// persisted working directory, so a cold pane is never untitled.
   private var title: String {
-    if let surface = terminalClient.surface(paneID) {
-      let info = surface.info
-      // Read every observable property so a later push on any of them
-      // re-renders the header.
-      let titleValue = info.title
-      let pwdValue = info.pwd
-      if let titleValue, !titleValue.isEmpty { return titleValue }
-      if let pwdValue, !pwdValue.isEmpty {
-        return (pwdValue as NSString).abbreviatingWithTildeInPath
-      }
-    }
-    if let directory = pane?.workingDirectory, !directory.isEmpty {
-      return (directory as NSString).abbreviatingWithTildeInPath
-    }
-    return "Terminal"
+    PaneTitleReader.headerTitle(
+      live: PaneTitleReader.liveTitle(
+        paneID: paneID, hierarchyManager: hierarchyManager, terminalClient: terminalClient),
+      stored: PaneTitleReader.storedTitle(pane: pane))
   }
 }
 

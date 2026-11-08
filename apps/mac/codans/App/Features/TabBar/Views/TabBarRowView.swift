@@ -66,10 +66,9 @@ struct TabBarRowView: View {
   /// Title for a tab that has no pane yet — the worktree directory's name,
   /// which is where its first pane will start.
   var emptyTabTitle: String = ""
-  /// Fires whenever a chip resolves a non-empty live title (OSC tabTitle
-  /// / title / pwd basename). The parent persists this onto the tab so
-  /// the chip can fall back to it across app launches before the
-  /// surface respawns. Default no-op keeps previews / call sites that
+  /// Fires whenever a chip resolves the live pane title of its selected
+  /// pane. The parent persists this onto the tab so the chip can fall back
+  /// to it across app launches before the surface respawns. Default no-op keeps previews / call sites that
   /// don't care about cross-launch titles compiling without changes.
   var onCacheLiveTitle: (TabID, String) -> Void = { _, _ in }
 
@@ -572,25 +571,22 @@ struct TabBarRowView: View {
 /// being dropped because the access happened inside a `ForEach` builder
 /// of an upstream view that didn't establish its own tracking context.
 ///
-/// Title priority:
+/// Title priority (ADR 0009):
 /// 1. `tab.name` (manual rename — sticky, ignores OSC).
-/// 2. focused pane's `info.tabTitle` (OSC 2 / set_tab_title).
-/// 3. focused pane's `info.title` (OSC 0 / set_title).
-/// 4. focused pane's `info.pwd` basename.
-/// 5. `tab.cachedDisplayTitle` (last live value persisted to the catalog).
-/// 6. focused (or first) pane's `workingDirectory` basename — always
-///    present on the persisted catalog, so even cold-launched chips
-///    have a meaningful label before the surface respawns.
-/// 7. `emptyTabTitle` (the worktree directory's name) for a tab whose first
+/// 2. the pane title of the selected pane while it has a surface — the same
+///    text as that pane's header (`PaneTitleReader`).
+/// 3. `tab.cachedDisplayTitle` (the last pane title, persisted to the
+///    catalog) while the selected pane has no surface.
+/// 4. the selected pane's persisted working directory, as its header shows
+///    it without a surface.
+/// 5. `emptyTabTitle` (the worktree directory's name) for a tab whose first
 ///    pane is not open yet — a tab added from the UI opens it only after
 ///    its insertion animation, and must not show up untitled meanwhile.
-/// 8. Empty string as a last-resort defensive default.
 ///
 /// The cache exists because surfaces are spawned lazily — on cold launch
 /// inactive tabs have no live `SurfaceInfo` yet, so without the cache
-/// every previously-named tab would briefly read as the workingDirectory
-/// basename until the shell re-emits an OSC title (and stay there, for
-/// tabs the user does not re-open during the session).
+/// every previously-titled tab would read as its directory until the user
+/// opens it.
 private struct ResolvingTabChipView: View {
   let tab: CodansCore.Tab
   let isActive: Bool
@@ -693,39 +689,18 @@ private struct ResolvingTabChipView: View {
     return terminalBusy || agentWorking
   }
 
-  /// Title sourced strictly from the live focused-pane `SurfaceInfo`.
-  /// Returns `nil` when the surface hasn't been spawned yet or the shell
-  /// hasn't pushed any of OSC 2 / OSC 0 / OSC 7 — letting the caller
-  /// decide whether to fall back to the persisted cache or "Tab N".
+  /// The pane title of the selected pane, or `nil` while it has no surface
+  /// — letting the caller fall back to the persisted cache.
   private var liveResolvedTitle: String? {
-    guard let paneID = selectedPane?.id, let surface = terminalClient.surface(paneID) else {
-      return nil
-    }
-    let info = surface.info
-    // Read all observable properties up-front so SwiftUI registers
-    // observation on every one — `if let` short-circuits would skip
-    // subsequent reads and miss future updates on those keypaths.
-    let tabTitleValue = info.tabTitle
-    let titleValue = info.title
-    let pwdValue = info.pwd
-    if let t = tabTitleValue, !t.isEmpty { return t }
-    if let t = titleValue, !t.isEmpty { return t }
-    if let pwd = pwdValue {
-      let basename = (pwd as NSString).lastPathComponent
-      if !basename.isEmpty { return basename }
-    }
-    return nil
+    guard let paneID = selectedPane?.id else { return nil }
+    return PaneTitleReader.liveTitle(
+      paneID: paneID, hierarchyManager: hierarchyManager, terminalClient: terminalClient)
   }
 
   private func resolvedTitle(live: String?) -> String {
-    if let name = tab.name, !name.isEmpty { return name }
-    if let live { return live }
-    if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
-    if let pane = selectedPane {
-      let basename = (pane.workingDirectory as NSString).lastPathComponent
-      if !basename.isEmpty { return basename }
-    }
-    return emptyTabTitle
+    PaneTitleReader.chipTitle(
+      tabName: tab.name, live: live, cached: tab.cachedDisplayTitle,
+      stored: PaneTitleReader.storedTitle(pane: selectedPane), emptyTabTitle: emptyTabTitle)
   }
 }
 
