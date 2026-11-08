@@ -217,4 +217,62 @@ struct GitPlatformResolverTests {
     _ = await resolver.resolve(remote)
     #expect(calls.value == 2)
   }
+
+  // MARK: - host name
+
+  /// No alias, no public host, no logged-in host: a host that contains `gitlab` is GitLab,
+  /// so the fetch can show the `glab auth login` message in the badge position.
+  @Test
+  func aHostThatContainsGitLabResolvesToGitLabWithoutALogin() async {
+    let resolver = GitPlatformResolver { _ in [] }
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "gitlab.corp.example.com", path: "g/sub/r"))
+        == GitPlatformRepository(kind: .gitlab, host: "gitlab.corp.example.com", path: "g/sub/r"))
+  }
+
+  @Test
+  func aHostThatContainsGitHubResolvesToGitHubWithoutALogin() async {
+    let resolver = GitPlatformResolver { _ in [] }
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "GitHub.Corp.example.com:8443", path: "o/r"))
+        == GitPlatformRepository(kind: .github, host: "GitHub.Corp.example.com:8443", path: "o/r"))
+  }
+
+  /// An alias comes first, so a wrong guess by name can be corrected.
+  @Test
+  func anAliasWinsOverTheHostName() async {
+    let resolver = GitPlatformResolver { _ in [] }
+    let alias = GitPlatformAlias(remoteHost: "gitlab.corp.example.com", kind: .github, apiHost: "ghe.example.com")
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "gitlab.corp.example.com", path: "o/r"), aliases: [alias])
+        == GitPlatformRepository(kind: .github, host: "ghe.example.com", path: "o/r"))
+  }
+
+  /// A logged-in host wins over the name: a `gitlab` host that `gh` knows is GitHub.
+  @Test
+  func aLoggedInHostWinsOverTheHostName() async {
+    let resolver = GitPlatformResolver { kind in kind == .github ? ["gitlab-mirror.example.com"] : [] }
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "gitlab-mirror.example.com", path: "o/r"))?.kind == .github)
+  }
+
+  /// An SSH remote uses its `ssh -G` HostName without the SSH port as the API host.
+  @Test
+  func anSSHRemoteResolvesByTheNameOfItsHostName() async {
+    let resolver = GitPlatformResolver(
+      hostsProvider: { _ in [] },
+      sshHostName: { alias in ["work": "gitlab.corp.example.com"][alias] })
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "work", path: "g/r", isSSH: true))
+        == GitPlatformRepository(kind: .gitlab, host: "gitlab.corp.example.com", path: "g/r"))
+    #expect(
+      await resolver.resolve(RemoteInfo(host: "gitlab.corp.example.com:2222", path: "g/r", isSSH: true))
+        == GitPlatformRepository(kind: .gitlab, host: "gitlab.corp.example.com", path: "g/r"))
+  }
+
+  @Test
+  func aHostThatContainsBothNamesResolvesToNone() async {
+    let resolver = GitPlatformResolver { _ in [] }
+    #expect(await resolver.resolve(RemoteInfo(host: "github-to-gitlab.example.com", path: "o/r")) == nil)
+  }
 }
