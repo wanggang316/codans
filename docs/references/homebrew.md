@@ -8,10 +8,10 @@ brew install --cask wanggang316/tap/codans
 
 ## Pipeline
 
-1. `release.yml` cuts a notarized `Codans-<version>.dmg` + `.sha256` and attaches them to a **draft** GitHub Release. Manual review / publication remains the safety gate.
-2. When the maintainer flips the release to **published**, `update-cask.yml` fires on the `release: published` event.
+1. `release.yml` cuts a notarized `Codans-<version>.dmg` + `.sha256` and attaches them to a **draft** GitHub Release.
+2. After a release PR merges, `release-merge.yml` publishes the draft and calls `update-cask.yml` (`workflow_call`); a publish by `GITHUB_TOKEN` fires no `release: published` event. A release published by hand fires `update-cask.yml` through that event. The release PR is the safety gate.
 3. The workflow downloads the DMG asset, cross-checks the published `.sha256` against a fresh `shasum -a 256` of the downloaded bytes, then runs `scripts/render-cask.sh` against the in-repo template at `Casks/codans.rb`.
-4. The rendered cask is pushed as a single commit to `wanggang316/homebrew-tap` at `Casks/codans.rb` over HTTPS using `HOMEBREW_TAP_TOKEN`.
+4. The rendered cask is pushed as a single commit to `wanggang316/homebrew-tap` at `Casks/codans.rb` over HTTPS using `HOMEBREW_TAP_TOKEN`. The push never moves the cask to an older version, and a rejected push (another release pushed first) is retried on a fresh clone.
 
 `tip`-channel releases (`release-tip.yml`) are tagged `tip` and marked prerelease — `update-cask.yml` filters both out so Homebrew users stay on the stable channel. Sparkle still handles in-app tip-channel updates for opted-in clients.
 
@@ -53,7 +53,7 @@ brew install --cask /tmp/codans.rb   # optional: smoke-test the install
 
 - **`brew install` fails with `Cask 'codans' is unavailable`** — the user forgot to tap. Both `brew install --cask wanggang316/tap/codans` and `brew tap wanggang316/tap && brew install --cask codans` work; the former is the recommended one-liner.
 - **Workflow exits "cask already at v… in tap — nothing to push"** — the rendered cask matched the tap copy byte-for-byte. Usually means the workflow was re-run after a successful push; harmless.
-- **`sha256 mismatch`** — the DMG attached to the Release does not match its `.sha256` sidecar. Indicates a corrupted or swapped asset. Re-run `release.yml` against the same tag and re-publish.
+- **`sha256 mismatch`** — the DMG attached to the Release does not match its `.sha256` sidecar. Indicates a corrupted or swapped asset. Delete the release, then re-run the `release-merge.yml` run (all jobs).
 - **Tap push 403** — `HOMEBREW_TAP_TOKEN` expired or lacks `contents:write` on the tap repo. Rotate the PAT and `gh secret set` it again.
 
 ## Future: official `homebrew-cask`

@@ -1,15 +1,17 @@
 ---
 name: release
-description: Cut a codans stable release through a pull request. Write the release notes into CHANGELOG, pick the Semantic Versioning bump from them, bump MARKETING_VERSION, open a release PR, and after it merges tag the merged commit vX.Y.Z to trigger the GitHub Actions Developer-ID release pipeline, and publish the release once it passes. Use when shipping a new stable build.
+description: Cut a codans stable release through a pull request. Write the release notes into CHANGELOG, pick the Semantic Versioning bump from them, bump MARKETING_VERSION, and open a release PR; merging it makes CI tag, build, notarize, publish the release, and update the Homebrew cask. Use when shipping a new stable build.
 ---
 
 # release: Cut a codans stable release
 
-A stable release is **a release PR, then a tag push**. The PR lands the
-version bump and the release notes on `main`. The tag `vX.Y.Z` on the merged
-commit fires `.github/workflows/release.yml`: it builds, signs, notarizes,
-writes a Sparkle `appcast.xml`, and opens a **draft** GitHub Release with the
-DMG, which this skill publishes once the run passes. The contract CI enforces:
+A stable release is **a release PR**. The PR (head branch `release/vX.Y.Z`)
+lands the version bump and the release notes on `main`. Its merge starts
+`.github/workflows/release-merge.yml`, which tags the merged commit `vX.Y.Z`,
+builds, signs, and notarizes through `release.yml`, assigns the build number,
+publishes the GitHub Release with the DMG and the Sparkle `appcast.xml`, and
+updates the Homebrew cask. **Merging the release PR ships the release.** The
+contract CI enforces:
 
 > tag `vX.Y.Z` ⇔ `MARKETING_VERSION = X.Y.Z` in
 > `apps/mac/Configurations/Project.xcconfig` ⇔ `CHANGELOG.md` has
@@ -25,7 +27,7 @@ Never push to `main` directly; every release change goes through a PR.
 
 The release PR is the single gate. Run steps 1–6 without stopping: they
 write only to a release branch and an open PR, which is the review surface.
-After the user approves the merge in step 7, run steps 7–9 without stopping,
+After the user approves the merge in step 7, run steps 7–8 without stopping,
 up to the published release.
 
 ### 1. Pre-flight
@@ -112,9 +114,10 @@ In `CHANGELOG.md`, put the notes of step 2 under `## [X.Y.Z] - YYYY-MM-DD`
 make mac-bump-version VERSION=X.Y.Z   # BUILD=N overrides the build number (rare)
 ```
 
-The script owns `Project.xcconfig` — validates the version, takes the next
-build number from the published appcast, writes atomically, and syncs the
-CLI version string. Never hand-edit the file.
+The script owns `Project.xcconfig` — validates the version, writes
+atomically, and syncs the CLI version string. Never hand-edit the file. The
+build number it writes is only a local floor: CI assigns the shipped build
+number when it builds.
 
 Skip a local build; the PR check and the release pipeline build it.
 
@@ -134,12 +137,13 @@ git push -u origin release/vX.Y.Z
 ```bash
 gh pr create --base main --head release/vX.Y.Z \
   --title "chore(release): bump to X.Y.Z" --body-file - <<'EOF'
-Release X.Y.Z (build N): <bump> because <row of step 3>.
+Release X.Y.Z: <bump> because <row of step 3>.
 
 <the new CHANGELOG section, verbatim>
 
-Merging this PR does not release. After merge, tag the merged commit
-`vX.Y.Z` to start the release pipeline.
+Merging this PR ships X.Y.Z: release-merge.yml tags the merged commit,
+builds and notarizes it, publishes the release, and updates the Homebrew
+cask.
 EOF
 ```
 
@@ -149,9 +153,10 @@ Not a draft. No agent names in the title or body. Then wait for the
 ### 7. Merge — the only gate
 
 Report the PR URL, the version, and the check result, and wait for the user
-to approve the merge. Edits the user asks for go onto the release branch as
-new commits. If `main` gained user-visible changes since step 2, update the
-notes (and, if the bump row changed, the version) before the merge.
+to approve the merge (or to merge it themselves). Edits the user asks for go
+onto the release branch as new commits. If `main` gained user-visible
+changes since step 2, update the notes (and, if the bump row changed, the
+version) before the merge.
 
 ```bash
 gh pr merge <PR> --rebase
@@ -159,48 +164,31 @@ git push origin --delete release/vX.Y.Z
 ```
 
 Rebase keeps the bump commit as is on `main`. Don't pass `--delete-branch`:
-it fails when `main` is checked out in another worktree.
+it fails when `main` is checked out in another worktree. Never tag by hand:
+`release-merge.yml` tags the merged commit.
 
-### 8. Tag the merged commit and push the tag
-
-The user's merge approval covers this step and step 9.
-
-```bash
-SHA=$(gh pr view <PR> --json mergeCommit --jq .mergeCommit.oid)
-git fetch origin
-git merge-base --is-ancestor "$SHA" origin/main                   # on main
-git show "$SHA:apps/mac/Configurations/Project.xcconfig" | grep '^MARKETING_VERSION = X.Y.Z$'
-git tag -a vX.Y.Z -m "vX.Y.Z" "$SHA"
-git push origin vX.Y.Z                                            # triggers release.yml
-```
-
-Always an annotated tag on the merged commit — never on the local branch
-commit, which the rebase replaced. Its message is only CI's fallback when
-the CHANGELOG section is missing.
-
-### 9. Wait for CI, then publish the release
+### 8. Follow the release run
 
 ```bash
-RUN=$(gh run list --workflow=release.yml --event push --branch vX.Y.Z \
+RUN=$(gh run list --workflow=release-merge.yml --branch release/vX.Y.Z \
   --limit 1 --json databaseId --jq '.[0].databaseId')
 gh run watch "$RUN" --exit-status
-gh release view vX.Y.Z --json isDraft,assets --jq '{isDraft, assets: [.assets[].name]}'
-gh release edit vX.Y.Z --draft=false --latest
+gh release view vX.Y.Z --json url,isDraft
 ```
 
-The merge also starts `release-tip.yml`; both share the `release`
-concurrency group, so the stable run can queue behind it.
+The run first waits for tip builds in flight (up to 60 minutes), then takes
+about 30 minutes to build and notarize. It publishes the release only when
+the build passed and all four assets exist (`Codans-X.Y.Z.dmg`, its
+`.sha256`, `Codans.dmg`, `appcast.xml`); otherwise it leaves a draft and
+fails. Report the release URL and the cask job result.
 
-Publish only when the run passed and the draft has all four assets:
-`Codans-X.Y.Z.dmg`, `Codans-X.Y.Z.dmg.sha256`, `Codans.dmg`, and
-`appcast.xml`. Otherwise leave the draft and go to Recovery. Keep the draft
-only when the user asked for it.
+Then free the worktree for the next release:
 
-Publish from this session, not from CI: a release that the workflow's
-`GITHUB_TOKEN` publishes does not trigger `update-cask.yml`. After
-publishing, confirm the cask run started
-(`gh run list --workflow=update-cask.yml --limit 1`) and report the release
-URL.
+```bash
+git fetch origin
+git switch --detach origin/main
+git branch -D release/vX.Y.Z
+```
 
 ## Recovery
 
@@ -209,11 +197,13 @@ Roll forward; never force-push `main` or rewrite its history. Fixes to
 
 | Symptom | Fix |
 |---|---|
-| CI: tag ≠ `MARKETING_VERSION` | Tag points at the wrong commit: with approval, delete it (`git tag -d vX.Y.Z; git push origin :refs/tags/vX.Y.Z`) and tag the merged bump commit. |
-| Tag pushed without a CHANGELOG section | Add it in a `docs(changelog): record vX.Y.Z` PR; don't retag. |
+| `tag` job fails on version, CHANGELOG, or branch name | Nothing was tagged. Fix it in a new `release/vX.Y.Z` PR; its merge starts a new run. |
+| `tag` job: tag exists at another commit | With approval, delete it (`git push origin :refs/tags/vX.Y.Z`), then `gh run rerun <RUN> --failed`. |
+| Notarization or other transient failure in `build` | Delete the draft release if one exists, then `gh run rerun <RUN> --failed`. The `tag` job accepts the existing tag. |
+| `publish` fails: an asset is missing | Delete the draft, then re-run all jobs (`gh run rerun <RUN>`) so `build` runs again. The `tag` job accepts the existing tag. |
+| `cask` fails | `gh run rerun <RUN> --failed`, or `gh workflow run update-cask.yml -f tag=vX.Y.Z`. |
 | Release PR closed without merge | Delete the branch; nothing was released. |
-| Notarization or other transient CI failure | `gh run view --log-failed`, then re-run via `workflow_dispatch` on the existing tag. |
-| Release run passed but an asset is missing | Leave the draft; re-run via `workflow_dispatch` on the existing tag after deleting the draft. |
+| CI is down and a release must ship | Fallback: push the annotated tag on the merged commit by hand (starts `release.yml`), then publish the draft by hand, which fires `update-cask.yml`. |
 | Wrong version shipped | Supersede it with the next version. |
 | Published release is broken | Mark its header `## [X.Y.Z] - YYYY-MM-DD [YANKED]` with a one-line reason; ship the fix as a new version. |
 
