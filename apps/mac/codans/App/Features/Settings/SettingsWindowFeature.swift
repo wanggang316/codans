@@ -55,6 +55,8 @@ struct SettingsWindowFeature {
     case projectsChanged(Set<ProjectID>)
     /// Show the Hosts page with the Host's edit form open.
     case editHostRequested(HostID)
+    /// Show the Project's page scrolled to its Commands section.
+    case projectCommandsRequested(ProjectID)
   }
 
   @Dependency(HierarchyClient.self) var hierarchyClient
@@ -101,6 +103,11 @@ struct SettingsWindowFeature {
         state.selection = .hosts
         guard let record = hierarchyClient.hosts().first(where: { $0.id == id }) else { return .none }
         return .send(.hosts(.editButtonTapped(record)))
+      case .projectCommandsRequested(let pid):
+        state.selection = .project(pid)
+        ensureProjectPane(&state, for: pid)
+        state.projectPanes[id: pid]?.revealsCommands = true
+        return .none
       case .projectsChanged(let currentIDs):
         // Prune panes for projects that no longer exist.
         state.projectPanes.removeAll { !currentIDs.contains($0.id) }
@@ -113,18 +120,9 @@ struct SettingsWindowFeature {
             state.projectPanes[index].kind = freshKind
           }
         }
-        // Clear selection if it points to a disappeared project OR to a sub-pane that the
-        // project's current kind no longer exposes (e.g. the user was on Git & Worktree when
-        // `.git` was removed and the Project flipped to dir). Falling back to
-        // General keeps the pane consistent with the sidebar's kind-conditional row set.
-        if let selection = state.selection, let pid = selection.projectID {
-          if !currentIDs.contains(pid) {
-            state.selection = nil
-          } else if let pane = state.projectPanes[id: pid],
-            !SettingsSection.subrows(for: pane.kind, projectID: pid).contains(selection)
-          {
-            state.selection = .projectGeneral(pid)
-          }
+        // Clear the selection when it points to a disappeared project.
+        if let pid = state.selection?.projectID, !currentIDs.contains(pid) {
+          state.selection = nil
         }
         return .none
       }

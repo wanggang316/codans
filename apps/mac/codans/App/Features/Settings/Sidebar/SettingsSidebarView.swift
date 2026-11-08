@@ -5,27 +5,15 @@ import SwiftUI
 /// Settings window sidebar. Fixed-order global sections at the top, then the open
 /// Projects grouped by where they live: a "Local" section for on-disk projects and one
 /// section per server host (titled with its hostname / IP). With no Remote Projects the
-/// single group keeps the plain "Projects" title. Each project row is a
-/// `DisclosureGroup` exposing the Project's `General` and `Commands` sub-rows.
+/// single group keeps the plain "Projects" title. Each project row opens the Project's
+/// single Settings page.
 ///
 /// The Project list comes from the live `HierarchyManager` catalog; adding or removing a
 /// Project in the main window reflects here without any explicit refresh (@Observable
 /// subscription).
-///
-/// Disclosure open/close state lives in a local `@State` dictionary so Projects keep their
-/// expansion across sidebar selection changes. This state is intentionally *not* persisted —
-/// closing the window drops session state.
 struct SettingsSidebarView: View {
   @Binding var selection: SettingsSection?
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @State private var expandedProjects: [ProjectID: Bool] = [:]
-
-  /// The sidebar List is an outline (the Project rows disclose), so it indents every
-  /// top-level row by the disclosure-triangle width, leaf rows too. The global rows
-  /// have no triangle; pull them back so their icons start at the section-header and
-  /// disclosure-triangle edge.
-  private static let outlineIndent: CGFloat = 12
-
   var body: some View {
     ScrollViewReader { proxy in
       List(selection: $selection) {
@@ -33,7 +21,6 @@ struct SettingsSidebarView: View {
           Section {
             ForEach(group, id: \.self) { section in
               globalRow(for: section)
-                .padding(.leading, -Self.outlineIndent)
                 .tag(Optional(section))
                 .id(section)
             }
@@ -51,7 +38,9 @@ struct SettingsSidebarView: View {
           ForEach(groups, id: \.title) { group in
             Section(group.title) {
               ForEach(group.projects) { project in
-                projectDisclosure(project: project)
+                projectRow(project: project)
+                  .tag(Optional(SettingsSection.project(project.id)))
+                  .id(SettingsSection.project(project.id))
               }
             }
           }
@@ -59,19 +48,11 @@ struct SettingsSidebarView: View {
       }
       .listStyle(.sidebar)
       .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-      // Whenever the selection lands on a Project sub-row — including the
-      // initial render when the window is opened via "Project Settings…" —
-      // expand that Project's disclosure so the selected child is visible
-      // and scroll the row into view. Sibling Projects keep whatever
-      // expansion the user set previously. The scroll is deferred to the
-      // next runloop tick so the disclosure expansion has been applied to
-      // the layout tree before `scrollTo` runs — scrolling to a row that
-      // is still inside a collapsed `DisclosureGroup` is a no-op.
+      // Scroll the selected row into view, including on the first render when
+      // the window opens through "Project Settings…" on a Project far down the
+      // list. Deferred a runloop tick so the List has laid the row out.
       .onChange(of: selection, initial: true) { _, newValue in
         guard let section = newValue else { return }
-        if let pid = section.projectID {
-          expandedProjects[pid] = true
-        }
         Task { @MainActor in
           proxy.scrollTo(section, anchor: .center)
         }
@@ -81,43 +62,15 @@ struct SettingsSidebarView: View {
 
   // MARK: - Rows
 
-  @ViewBuilder
-  private func projectDisclosure(project: Project) -> some View {
-    let binding = Binding<Bool>(
-      get: { expandedProjects[project.id] ?? false },
-      set: { expandedProjects[project.id] = $0 }
-    )
-    let subrows = SettingsSection.subrows(for: project.kind, projectID: project.id)
-    DisclosureGroup(isExpanded: binding) {
-      ForEach(subrows, id: \.self) { subrow in
-        Label(subrow.projectSubrowTitle ?? "", systemImage: subrowIcon(for: subrow))
-          .tag(Optional(subrow))
-          .id(subrow)
-      }
-    } label: {
-      // A tap on the Project name selects its General pane when the disclosure is
-      // currently collapsed (and expand it to reveal the sub-rows). `simultaneousGesture`
-      // runs alongside DisclosureGroup's built-in label tap so the expansion toggle still
-      // happens — we only add the selection write.
-      // The Project's own icon, not a hardcoded `folder`, so a re-iconed
-      // Project is recognizable here too and the row lines up with the
-      // glyph-bearing global rows above it.
-      Label {
-        Text(project.name)
-      } icon: {
-        ProjectIconView(
-          icon: project.icon, color: project.color,
-          defaultSymbol: ProjectIconView.defaultSymbol(for: project.kind)
-        )
-      }
-      .contentShape(Rectangle())
-      .accessibilityAddTraits(.isButton)
-      .simultaneousGesture(
-        TapGesture().onEnded {
-          if !(expandedProjects[project.id] ?? false) {
-            selection = .projectGeneral(project.id)
-          }
-        }
+  /// The Project's own icon, not a hardcoded `folder`, so a re-iconed Project
+  /// is recognizable here too.
+  private func projectRow(project: Project) -> some View {
+    Label {
+      Text(project.name)
+    } icon: {
+      ProjectIconView(
+        icon: project.icon, color: project.color,
+        defaultSymbol: ProjectIconView.defaultSymbol(for: project.kind)
       )
     }
   }
@@ -194,18 +147,7 @@ struct SettingsSidebarView: View {
       return .init(.symbol("puzzlepiece.extension.fill", size: 14, nudge: .init(width: 0.5, height: 0)), .magenta)
     case .workflows: return .init(.symbol("app.connected.to.app.below.fill", size: 12), .teal)
     case .hosts: return .init(.symbol("globe", size: 12), .purple)
-    case .projectGeneral, .projectScripts: return .init(.symbol("questionmark", size: 12), .gray)
-    }
-  }
-
-  /// Leading icon for Project sub-rows. Matches the global-section icon language where
-  /// intuitive (Commands → terminal) and drops to a blank for rows whose
-  /// icon would add noise rather than signal.
-  private func subrowIcon(for section: SettingsSection) -> String {
-    switch section {
-    case .projectGeneral: return "slider.horizontal.3"
-    case .projectScripts: return "terminal"
-    default: return ""
+    case .project: return .init(.symbol("questionmark", size: 12), .gray)
     }
   }
 }

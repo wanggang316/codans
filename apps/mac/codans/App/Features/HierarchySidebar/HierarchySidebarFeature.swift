@@ -262,8 +262,8 @@ struct HierarchySidebarFeature {
     // Project section hover chrome
     case projectAddWorktreeTapped(projectID: ProjectID)
     /// `⋯` menu → "Project Settings…". Opens the Settings window and lands
-    /// the selection on this Project's General pane via
-    /// `SettingsWindowPresenter.openAt(.projectGeneral(_))`.
+    /// the selection on this Project's page via
+    /// `SettingsWindowPresenter.openAt(.project(_))`.
     case projectSettingsTapped(projectID: ProjectID)
     case projectRemoveTapped(projectID: ProjectID, name: String)
     case projectRemoveConfirmed
@@ -1018,7 +1018,7 @@ struct HierarchySidebarFeature {
       let presenter = settingsWindowPresenter
       return .run { _ in
         await MainActor.run {
-          presenter.openAt(.projectGeneral(projectID))
+          presenter.openAt(.project(projectID))
         }
       }
 

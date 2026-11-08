@@ -2,17 +2,19 @@ import ComposableArchitecture
 import SwiftUI
 import CodansCore
 
-/// Project Commands sub-pane — the user-defined `[ScriptDefinition]`
-/// rendered as an inline, spreadsheet-style table (`ScriptCommandTable`):
-/// every field is edited in place via per-cell popovers, no modal sheet.
+/// The Commands section of a Project's Settings page — the user-defined
+/// `[ScriptDefinition]` rendered as an inline, spreadsheet-style table
+/// (`ScriptCommandTable`): every field is edited in place via per-cell
+/// popovers, no modal sheet. The page's `Form` scrolls, so the table rows
+/// take their natural height.
 ///
-/// Worktree-lifecycle scripts (Setup / Archive / Delete) live at the bottom
-/// of the General pane, not here.
+/// Worktree-lifecycle scripts (Setup / Archive / Delete) are separate
+/// sections below this one.
 ///
 /// Reads come from `@Environment(SettingsStore.self)` for live updates;
 /// writes always go through the TCA reducer so test stores can spy on
 /// individual writes without instantiating the SwiftUI view.
-struct ProjectScriptsSettingsView: View {
+struct ProjectCommandsSection: View {
   let projectID: ProjectID
   @Bindable var store: StoreOf<ProjectSettingsFeature>
 
@@ -49,13 +51,7 @@ struct ProjectScriptsSettingsView: View {
   // MARK: - Body
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      if let error = store.state.lastWriteFailure, !error.isEmpty {
-        Label(error, systemImage: "exclamationmark.circle.fill")
-          .font(.callout)
-          .foregroundStyle(.red)
-      }
-
+    Section("Commands") {
       ScriptCommandTable(
         scripts: displayedScripts,
         selectedID: $selectedScriptID,
@@ -69,13 +65,12 @@ struct ProjectScriptsSettingsView: View {
         suggestionGroups: store.commandSuggestions,
         isScanningSuggestions: store.isScanningCommandSuggestions,
         onAddSuggestion: addSuggestion,
-        onRefreshSuggestions: { store.send(.scanCommandSuggestions) }
+        onRefreshSuggestions: { store.send(.scanCommandSuggestions) },
+        scrollsRows: false
       )
     }
-    .padding(20)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
     // Scan on every appearance so edits made outside codans (a new npm
-    // script) show up the next time the pane is opened.
+    // script) show up the next time the page is opened.
     .task(id: projectID) { store.send(.scanCommandSuggestions) }
   }
 

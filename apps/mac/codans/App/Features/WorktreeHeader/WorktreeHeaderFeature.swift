@@ -63,7 +63,7 @@ struct WorktreeHeaderFeature {
     case stopScriptTapped(scriptID: UUID)
     /// "Manage Project Commands…" menu footer or primary click on an empty
     /// script list. Carries the source `projectID` so the parent can deep-link
-    /// into the Settings window's Project Commands pane for that project.
+    /// into the Commands section of that project's Settings page.
     case manageScriptsTapped(projectID: ProjectID)
     /// "Manage Global Commands…" menu footer. Deep-links into the Settings
     /// window's Global Commands pane (no project context needed).
@@ -120,7 +120,7 @@ struct WorktreeHeaderFeature {
       /// `runScriptRequested`) and dispatches to `HierarchyClient.stopScript`.
       case stopScriptRequested(scriptID: UUID)
       /// User asked to manage scripts — open the Settings window AND
-      /// deep-link into the Project Scripts pane for the given project.
+      /// deep-link into the Commands section of the given project's Settings page.
       /// (Earlier shipped a no-deep-link variant; restored after the
       /// scripts pane redesign so the footer button lands users where
       /// they expect.)
