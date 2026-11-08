@@ -64,6 +64,21 @@ enum WorktreePromotionMode: Sendable, Equatable {
   case moveToFrontWithinUnpinned
 }
 
+/// One in-flight worktree creation in a Project. See
+/// `HierarchyManager.beginWorktreeCreation(in:)`.
+nonisolated struct WorktreeCreationLease: Hashable, Sendable {
+  let projectID: ProjectID
+  /// Unique per creation attempt. A caller with a stable id for the
+  /// attempt (the sidebar's pending row + retry count) derives it from
+  /// that id.
+  let token: String
+
+  init(projectID: ProjectID, token: String = UUID().uuidString) {
+    self.projectID = projectID
+    self.token = token
+  }
+}
+
 @MainActor
 @Observable
 final class HierarchyManager {
@@ -107,6 +122,18 @@ final class HierarchyManager {
   /// `SettingsStore` exists; a closure rather than a direct reference so the
   /// Runtime layer keeps its Settings independence.
   var onProjectRemoved: (@MainActor (ProjectID) -> Void)?
+
+  /// Fired when the last creation lease of a Project is released, with its
+  /// id. The app runs one reconcile of that Project here: a worktree made
+  /// outside the app while the lease held back appends would otherwise wait
+  /// for the next reconcile pulse. Settable for the same reason as
+  /// `onProjectRemoved`.
+  var onCreationLeasesReleased: (@MainActor (ProjectID) -> Void)?
+
+  /// Open creation leases, by Project. A set of tokens, not a counter, so a
+  /// second release of the same lease is a no-op and cannot drop a lease
+  /// that a concurrent creation still holds.
+  @ObservationIgnored private var creationLeases: [ProjectID: Set<String>] = [:]
 
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
@@ -657,6 +684,43 @@ final class HierarchyManager {
     catalog.localProject(containing: path, canonicalize: Self.canonicalPath)?.id
   }
 
+  // MARK: - Worktree creation lease
+
+  /// Holds back reconcile appends for `projectID` while a creation runs.
+  ///
+  /// Creation runs `git worktree add` first and writes the catalog row only
+  /// after its stream ends. A reconcile in that window sees the new path in
+  /// `git worktree list` and appends it at the list tail, and the create
+  /// path then adopts that row through `reuseExisting` instead of inserting
+  /// at the unpinned boundary. Leases stack: concurrent creations in one
+  /// Project each hold their own. Every lease must reach
+  /// `endWorktreeCreation`, on every exit path of the creation.
+  func beginWorktreeCreation(in projectID: ProjectID) -> WorktreeCreationLease {
+    let lease = WorktreeCreationLease(projectID: projectID)
+    beginWorktreeCreation(lease)
+    return lease
+  }
+
+  /// Takes `lease` with a token the caller chose, so a caller that already
+  /// has a stable id for the creation (the sidebar's pending row) can
+  /// release it without storing the lease. Idempotent.
+  func beginWorktreeCreation(_ lease: WorktreeCreationLease) {
+    creationLeases[lease.projectID, default: []].insert(lease.token)
+  }
+
+  /// Releases `lease`. Idempotent. Releasing the last lease of a Project
+  /// fires `onCreationLeasesReleased`.
+  func endWorktreeCreation(_ lease: WorktreeCreationLease) {
+    guard creationLeases[lease.projectID]?.remove(lease.token) != nil else { return }
+    guard creationLeases[lease.projectID]?.isEmpty == true else { return }
+    creationLeases[lease.projectID] = nil
+    onCreationLeasesReleased?(lease.projectID)
+  }
+
+  func holdsCreationLease(_ projectID: ProjectID) -> Bool {
+    creationLeases[projectID] != nil
+  }
+
   // MARK: - Worktree mutations
 
   func createWorktree(
@@ -913,6 +977,102 @@ final class HierarchyManager {
     guard catalog.projects[projectIndex].gitRoot != gitRoot else { return }
     catalog.projects[projectIndex].gitRoot = gitRoot
     store.scheduleSave(catalog)
+  }
+
+  /// Re-keys a Remote Project onto the host git's form of its root
+  /// (`RemoteGitService.canonicalWorkTreeRoot`). A root entered through a
+  /// symlink stays a different string from the paths `git worktree list`
+  /// reports, so reconcile appended the main checkout a second time (#402).
+  /// Rewrites `rootPath`, a `gitRoot` equal to the old root, and the rows at
+  /// the old root. A row that then shares its path with an earlier row (the
+  /// duplicate an earlier reconcile appended) is merged into the earlier row:
+  /// its tabs move over, so no Pane is lost, and the row is removed. When the
+  /// removed row was the selected one, its active tab stays active.
+  ///
+  /// A root that another Project on the same Host already has is not
+  /// adopted: two Projects never share `(hostID, rootPath)` (ADR 0006). The
+  /// Project keeps its root, rows at either form still merge under it, and
+  /// the caller gets the owner back.
+  @discardableResult
+  func adoptCanonicalRemoteRoot(projectID: ProjectID, canonicalRoot: String) -> RemoteRootAdoption {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[projectIndex].remoteHost != nil
+    else { return .unchanged }
+    let canonical = Self.normalizeRemotePath(canonicalRoot)
+    let oldRoot = Self.normalizeRemotePath(catalog.projects[projectIndex].rootPath)
+    guard canonical != oldRoot else { return .unchanged }
+    var owner: ProjectID?
+    if let hostID = catalog.projects[projectIndex].hostID {
+      owner =
+        catalog.projectConflicting(
+          withEditOf: projectID, onHost: hostID, rootPath: canonical,
+          canonicalizeLocal: { Self.canonicalPath($0) }
+        )?.id
+    }
+    var project = catalog.projects[projectIndex]
+    // On a conflict the Project keeps its root, but rows at either form are
+    // still one folder: they merge under the kept root.
+    let rowRoot = owner == nil ? canonical : project.rootPath
+    if owner == nil {
+      project.rootPath = canonical
+      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == oldRoot {
+        project.gitRoot = canonical
+      }
+    }
+    for index in project.worktrees.indices {
+      let path = Self.normalizeRemotePath(project.worktrees[index].path)
+      if path == oldRoot || path == canonical {
+        project.worktrees[index].path = rowRoot
+      }
+    }
+    var merged: [Worktree] = []
+    for worktree in project.worktrees {
+      let path = Self.normalizeRemotePath(worktree.path)
+      guard let keeperIndex = merged.firstIndex(where: { Self.normalizeRemotePath($0.path) == path })
+      else {
+        merged.append(worktree)
+        continue
+      }
+      merged[keeperIndex].tabs += worktree.tabs
+      if merged[keeperIndex].selectedTabID == nil {
+        merged[keeperIndex].selectedTabID = worktree.selectedTabID
+      }
+      merged[keeperIndex].isPinned = merged[keeperIndex].isPinned || worktree.isPinned
+      if !worktree.archived {
+        merged[keeperIndex].archived = false
+        merged[keeperIndex].archivedAt = nil
+      }
+      if project.selectedWorktreeID == worktree.id {
+        project.selectedWorktreeID = merged[keeperIndex].id
+        if let selectedTabID = worktree.selectedTabID {
+          merged[keeperIndex].selectedTabID = selectedTabID
+        }
+      }
+    }
+    let removedRows = project.worktrees.count - merged.count
+    project.worktrees = merged
+    guard project != catalog.projects[projectIndex] else { return owner.map { .conflict($0) } ?? .unchanged }
+    catalog.projects[projectIndex] = project
+    reconcileLogger.notice(
+      "host root form: project=\(projectID.raw.uuidString, privacy: .public) adopted=\(owner == nil, privacy: .public) mergedRows=\(removedRows, privacy: .public)"
+    )
+    store.scheduleSave(catalog)
+    if removedRows > 0 {
+      // Run-script Panes moved to the kept row; re-key them by its id.
+      rebuildRunScriptPanes()
+      runtime.announceHierarchyMutated()
+    }
+    return owner.map { .conflict($0) } ?? .adopted
+  }
+
+  /// Outcome of `adoptCanonicalRemoteRoot`.
+  enum RemoteRootAdoption: Equatable, Sendable {
+    /// The root already has the host form, or the Project is not remote.
+    case unchanged
+    /// The Project now uses the host form of its root.
+    case adopted
+    /// Another Project on the same Host already has the host form as its root.
+    case conflict(ProjectID)
   }
 
   /// Flips the Worktree's pinned flag and repositions the row in the catalog
@@ -1183,7 +1343,9 @@ final class HierarchyManager {
   /// stale rows are surfaced in the view layer and only deleted by the
   /// user-initiated Prune action. Idempotent across repeated calls
   /// with the same entries. Returns the count of appended rows so the
-  /// caller can surface a toast.
+  /// caller can surface a toast. While the Project holds a creation lease
+  /// (`beginWorktreeCreation`), new paths are not appended; existing rows
+  /// still sync and the stale sweep still runs.
   ///
   /// - Parameters:
   ///   - projectID: target Project.
@@ -1251,6 +1413,10 @@ final class HierarchyManager {
         }
         continue
       }
+      // A creation in flight owns the placement of its own row (top of the
+      // unpinned segment). The path reappears on the reconcile that runs
+      // when the last lease is released, if no creation claimed it.
+      guard !holdsCreationLease(projectID) else { continue }
       let name = entryBranch ?? (canonical as NSString).lastPathComponent
       let worktree = Worktree(
         id: WorktreeID(),

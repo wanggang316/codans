@@ -1042,4 +1042,113 @@ struct HierarchyManagerWorktreeMgmtTests {
     let row = manager.catalog.projects[0].worktrees.first { $0.id == replayed }
     #expect(row?.name == "my custom name")
   }
+
+  // MARK: - Creation lease
+
+  /// Reproduces the create-vs-reconcile race: a reconcile runs between
+  /// `git worktree add` and the catalog write. Without the lease it appends
+  /// the new path at the list tail, and the create path's `reuseExisting`
+  /// keeps it there.
+  @Test
+  func reconcileDuringCreationLeaseLeavesNewRowToTheCreatePath() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    _ = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let olderID = try manager.createWorktree(
+      in: projectID, name: "older", path: "/repo/older", branch: "older")
+
+    let lease = manager.beginWorktreeCreation(in: projectID)
+    _ = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [
+        (path: "/repo", branch: "main", head: nil),
+        (path: "/repo/older", branch: "older", head: nil),
+        (path: "/repo/new", branch: "new", head: nil),
+      ]
+    )
+    #expect(!manager.catalog.projects[0].worktrees.contains { $0.path == "/repo/new" })
+
+    let newID = try manager.createWorktree(
+      in: projectID, name: "new", path: "/repo/new", branch: "new",
+      reuseExisting: true, select: false)
+    manager.endWorktreeCreation(lease)
+
+    let ids = manager.catalog.projects[0].worktrees.map(\.id)
+    #expect(ids.dropFirst().first == newID)
+    #expect(ids.last == olderID)
+  }
+
+  @Test
+  func reconcileDuringCreationLeaseStillUpdatesAndSweepsExistingRows() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    _ = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let renamedID = try manager.createWorktree(
+      in: projectID, name: "feature", path: "/repo/feat", branch: "feature")
+    let goneID = try manager.createWorktree(
+      in: projectID, name: "gone", path: "/repo/gone", branch: "gone")
+
+    _ = manager.beginWorktreeCreation(in: projectID)
+    let appended = manager.reconcileDiscoveredWorktrees(
+      projectID: projectID,
+      entries: [
+        (path: "/repo", branch: "main", head: nil),
+        (path: "/repo/feat", branch: "feature-2", head: "abc"),
+        (path: "/repo/new", branch: "new", head: nil),
+      ]
+    )
+
+    #expect(appended == 0)
+    let rows = manager.catalog.projects[0].worktrees
+    let renamed = rows.first { $0.id == renamedID }
+    #expect(renamed?.branch == "feature-2")
+    #expect(renamed?.headSHA == "abc")
+    #expect(rows.first { $0.id == goneID }?.archived == true)
+    #expect(rows.count == 3)
+  }
+
+  @Test
+  func creationLeasesStackPerProjectAndFireOnceWhenTheLastIsReleased() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    let otherID = manager.addProject(name: "q", rootPath: "/other", gitRoot: "/other")
+    var released: [ProjectID] = []
+    manager.onCreationLeasesReleased = { released.append($0) }
+
+    let first = manager.beginWorktreeCreation(in: projectID)
+    let second = manager.beginWorktreeCreation(in: projectID)
+    let other = manager.beginWorktreeCreation(in: otherID)
+    #expect(manager.holdsCreationLease(projectID))
+
+    manager.endWorktreeCreation(first)
+    // Releasing the same lease twice must not drop the second one.
+    manager.endWorktreeCreation(first)
+    #expect(manager.holdsCreationLease(projectID))
+    #expect(released.isEmpty)
+
+    manager.endWorktreeCreation(second)
+    #expect(!manager.holdsCreationLease(projectID))
+    #expect(released == [projectID])
+    manager.endWorktreeCreation(second)
+    #expect(released == [projectID])
+
+    #expect(manager.holdsCreationLease(otherID))
+    manager.endWorktreeCreation(other)
+    #expect(released == [projectID, otherID])
+  }
+
+  @Test
+  func reconcileAfterLastLeaseReleaseAppendsWorktreeAddedOutsideTheApp() throws {
+    let projectID = manager.addProject(name: "p", rootPath: "/repo", gitRoot: "/repo")
+    _ = try manager.createWorktree(in: projectID, name: "main", path: "/repo", branch: "main")
+    let entries: [(path: String, branch: String?, head: String?)] = [
+      (path: "/repo", branch: "main", head: nil),
+      (path: "/repo/outside", branch: "outside", head: nil),
+    ]
+    let lease = manager.beginWorktreeCreation(in: projectID)
+    _ = manager.reconcileDiscoveredWorktrees(projectID: projectID, entries: entries)
+    #expect(!manager.catalog.projects[0].worktrees.contains { $0.path == "/repo/outside" })
+
+    manager.endWorktreeCreation(lease)
+    let appended = manager.reconcileDiscoveredWorktrees(projectID: projectID, entries: entries)
+    #expect(appended == 1)
+    #expect(manager.catalog.projects[0].worktrees.contains { $0.path == "/repo/outside" })
+  }
 }

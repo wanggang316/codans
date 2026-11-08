@@ -153,7 +153,14 @@ struct CommandPaletteFeature {
       scored
       .sorted { lhs, rhs in
         if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
-        return lhs.0.title < rhs.0.title
+        // Same score: items without a sidebar position first (by title),
+        // then the others in sidebar order so each Project stays grouped.
+        switch (lhs.0.sidebarOrder, rhs.0.sidebarOrder) {
+        case (let l?, let r?) where l != r: return l < r
+        case (nil, _?): return true
+        case (_?, nil): return false
+        default: return lhs.0.title < rhs.0.title
+        }
       }
       .map(\.0)
   }

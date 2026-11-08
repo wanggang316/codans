@@ -63,7 +63,7 @@ Command Palette 是一个键盘优先的浮层：以 `⌘P` 从主窗口任意�
 
 ### `CommandPaletteItem` 与 `Kind`
 
-`CommandPaletteItem` 携带 `id`（跨重启稳定，recency 键）、`title`、可选 `subtitle`、可选 `searchText`（被模糊评分以 title 级优先级匹配但**不在行内显示**——让一项能凭可见标题里没有的词上浮，例如 "Switch to Worktree: <name>" 把 Project 名放进 `searchText`，使 Project 名查询命中它而非沉到 subtitle 带）、`icon`、可选 `shortcut`（展示用提示）、可选 `commandID`（接入快捷键 registry，使行内和弦显示随用户改键流动）、`priorityTier`，以及 `hiddenWhenQueryEmpty`。
+`CommandPaletteItem` 携带 `id`（跨重启稳定，recency 键）、`title`、可选 `subtitle`、可选 `searchText`（被模糊评分以 title 级优先级匹配但**不在行内显示**——让一项能凭可见标题里没有的词上浮，例如 "Switch to Worktree: <name>" 把 Project 名放进 `searchText`，使 Project 名查询命中它而非沉到 subtitle 带）、`searchTerms`（同样以 title 级优先级匹配、不显示，但每个词**单独评分**：Switch to Worktree 项放入 Project 名，使同一 Project 的各项在 Project 名查询下同分；Remote Project 的项再放入 host 的 `displayAuthority`，使 host 查询列出该 host 上的 worktree）、`icon`、可选 `shortcut`（展示用提示）、可选 `commandID`（接入快捷键 registry，使行内和弦显示随用户改键流动）、`priorityTier`、`hiddenWhenQueryEmpty`、可选 `remoteAuthority`（Remote Project 的 Switch to Worktree 项填 host 的 `displayAuthority`；行内在 Project 名 subtitle 后显示 Remote Project 标记 `RemoteProjectMarker.symbol`，tooltip 与无障碍标签给出该 authority），以及可选 `sidebarOrder`（Switch to Worktree 项在侧栏中的 `(project, worktree)` 位置，用于同分排序：Project 按 `Catalog.sidebarOrderedProjects`，即按 Host 分组、This Mac 在前；Worktree 按 `Project.sidebarRowWorktreeIDs`，即 main checkout、pinned、其余；侧栏未列出的行，如折叠 workspace group 的成员，排在后面）。
 
 `Kind` 枚举覆盖各域命令：App（`openSettings` / `checkForUpdates` / `quit`）、Worktree（`selectWorktree(ProjectID, WorktreeID)` / `closeCurrentWorktree` / `refreshCurrentWorktree` / `toggleDiffInspector`）、Editor（`openCurrentWorktreeInDefaultEditor` / `openCurrentWorktreeIn(EditorID)` / `revealCurrentWorktreeInFinder`）、Project / Global 脚本（`runProjectScript` / `runGlobalScript`，各携 `(ProjectID, WorktreeID, ScriptDefinition.ID)`），以及 Pane / Window 的薄包装 `paneAction(PaneActionRequest)` / `windowAction(WindowActionRequest)`。
 
@@ -97,7 +97,7 @@ Recency 写重（每次激活写）、过滤时只读。提升到 `@Shared(.appS
 3. **Recency 项：** `recencyScore = K · 0.5^(ageDays / 7)`，**限 30 天**封顶；K 选得使 recency 能在**同一分数桶内重排、但不能把一个 contiguous 命中翻到 subsequence 命中之下**——即只在桶内、不跨层。
 4. **优先级层：** 项可设 `priorityTier < 100` 上浮（默认 100）；该层加一个常量增量，同样停留在桶内。
 
-Tiebreak 按序：更高分 → 更短标题 → 更早匹配位置 → 字母序。相同输入下确定性。
+同分时（recency 已计入分数）：无 `sidebarOrder` 的项在前、按标题字母序；有 `sidebarOrder` 的项在后、按侧栏的 Project 顺序再按 Worktree 顺序，使每个 Project 的 Switch to Worktree 项连在一起、不与同名 Project 的项交错。相同输入下确定性。
 
 分层 + 桶内 recency 的设计要点：**层级边界由分数基底（`0x2_0000` / `0x1_0000` / `0x0_8000`）硬隔开**，recency 与 priority 的增量都被 K 钳在远小于一个基底差的范围，故"最近用过"与"优先上浮"只重排同质命中，绝不让一个弱匹配越过一个强匹配。这是排序可预测的根因，不可"简化"成单一加权和。
 

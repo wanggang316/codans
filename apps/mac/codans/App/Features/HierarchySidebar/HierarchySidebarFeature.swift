@@ -1284,6 +1284,9 @@ struct HierarchySidebarFeature {
         .readSnapshotSync()
         .projects[pending.projectID]?.git?.createScript?.command
       state.pendingWorktrees.append(pending)
+      // Held until the catalog write (or the row's discard), so a reconcile
+      // racing the stream cannot append the new path at the list tail.
+      hierarchyClient.beginWorktreeCreation(Self.creationLease(for: pending))
       return runPendingStream(pending)
 
     case .pendingWorktreeProgress(let id, let line):
@@ -1313,6 +1316,9 @@ struct HierarchySidebarFeature {
 
     case .pendingWorktreeFinished(let id, let path):
       guard let pending = state.pendingWorktrees[id: id] else { return .none }
+      // Released after the catalog write on every exit, success or failure.
+      // A failed write moves the row to a new lease first (see `failCatalogWrite`).
+      defer { hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending)) }
       let pid = pending.projectID
       let displayName = pending.displayName
       let branch = pending.spec.name
@@ -1327,11 +1333,12 @@ struct HierarchySidebarFeature {
         worktreeID = try hierarchyClient.createWorktreeWithGit(
           pid, displayName, branch, pathString)
       } catch let err as GitWorktreeError {
-        state.pendingWorktrees[id: id]?.status = .failed(err)
+        failCatalogWrite(&state, id: id, path: path, error: err)
         return .none
       } catch {
-        state.pendingWorktrees[id: id]?.status = .failed(
-          .commandFailed(command: "catalog", stderr: error.localizedDescription))
+        failCatalogWrite(
+          &state, id: id, path: path,
+          error: .commandFailed(command: "catalog", stderr: error.localizedDescription))
         return .none
       }
 
@@ -1357,13 +1364,19 @@ struct HierarchySidebarFeature {
       // Race guard symmetric with progress / finished arms: a Cancel
       // that lands before the stream's failure event drains drops the
       // late .failed without spuriously logging or mutating state.
-      guard state.pendingWorktrees[id: id] != nil else { return .none }
+      guard let pending = state.pendingWorktrees[id: id] else { return .none }
       state.pendingWorktrees[id: id]?.status = .failed(err)
+      hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
       return .none
 
     case .pendingWorktreeRetryTapped(let id):
       guard let pending = state.pendingWorktrees[id: id] else { return .none }
       guard case .failed = pending.status else { return .none }
+      // The worktree is already on disk: retry only the catalog write, under
+      // the lease the row still holds.
+      if let path = pending.catalogWriteFailedPath {
+        return .send(.pendingWorktreeFinished(id, path))
+      }
       state.pendingWorktrees[id: id]?.status = .running
       state.pendingWorktrees[id: id]?.lastProgressLine = nil
       // Streaming tail is rebuilt from the new attempt's stdout/stderr;
@@ -1371,12 +1384,20 @@ struct HierarchySidebarFeature {
       // detail-pane WorktreeLoadingView (the user is looking at the
       // *current* attempt, not the failed one).
       state.pendingWorktrees[id: id]?.progressLines = []
+      state.pendingWorktrees[id: id]?.attempt += 1
       // Re-read the (now-updated) row so the effect sees `status == .running`.
       guard let restarted = state.pendingWorktrees[id: id] else { return .none }
+      hierarchyClient.beginWorktreeCreation(Self.creationLease(for: restarted))
       return runPendingStream(restarted)
 
     case .pendingWorktreeDiscardTapped(let id):
-      state.pendingWorktrees.remove(id: id)
+      // A row whose catalog write failed still holds its lease; the release
+      // lets the reconcile that follows adopt the on-disk worktree as one
+      // row. Discard never deletes it. Other failed rows already released
+      // their lease, and releasing again is a no-op.
+      if let pending = state.pendingWorktrees.remove(id: id) {
+        hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
+      }
       return .none
 
     case .pendingWorktreeRowTapped:
@@ -1393,19 +1414,24 @@ struct HierarchySidebarFeature {
       // Cancel during the setup phase: `git worktree add` already
       // SUCCEEDED (we hold the materialized path), so discarding now would
       // orphan an on-disk worktree dir that never reaches the catalog.
-      // Kill the running setup script via the stream's cancel token, then
-      // materialize from the stashed path through the SAME finish path
-      // (`pendingWorktreeFinished` writes the catalog + removes the row).
+      // Materialize from the stashed path through the SAME finish path
+      // (`pendingWorktreeFinished` writes the catalog + removes the row),
+      // then kill the running setup script via the stream's cancel token.
       if pending.phase == .runningSetupScript, let path = pending.materializedPath {
-        return .merge(
-          .cancel(id: CancelID.pending(id)),
-          .send(.pendingWorktreeFinished(id, path))
+        // Finish first, cancel second, in this order by contract: canceling
+        // the effect releases this attempt's lease (`runCreationAttempt`),
+        // and a release before the catalog write would let the reconcile it
+        // triggers append the new path at the list tail.
+        return .concatenate(
+          .send(.pendingWorktreeFinished(id, path)),
+          .cancel(id: CancelID.pending(id))
         )
       }
       // Cancel during git-add (not yet materialized): discard cleanly —
       // remove the row and cancel the stream, whose `onTermination`
       // terminates the spawned git child. Nothing reaches the catalog.
       state.pendingWorktrees.remove(id: id)
+      hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
       return .cancel(id: CancelID.pending(id))
 
     // MARK: Delegate
@@ -1428,6 +1454,57 @@ struct HierarchySidebarFeature {
     }
   }
 
+  /// The creation lease of a pending row's current attempt. Derived from
+  /// the row id and retry count, so every lifecycle arm and the effect can
+  /// release it without storing it in state.
+  static func creationLease(for pending: PendingWorktree) -> WorktreeCreationLease {
+    WorktreeCreationLease(
+      projectID: pending.projectID, token: "\(pending.id.raw.uuidString)/\(pending.attempt)")
+  }
+
+  /// Marks a row whose catalog write failed after `git worktree add`
+  /// succeeded. The row keeps the project's creation lease until Retry or
+  /// Discard, so a reconcile cannot adopt the path as a second row.
+  ///
+  /// The lease moves to a new attempt token that no effect owns: the caller
+  /// then releases the old token, and a later teardown of this attempt's
+  /// effect (Cancel during the setup script) releases nothing. The new
+  /// token is taken before the old one is released, so the project never
+  /// has zero leases in between.
+  private func failCatalogWrite(
+    _ state: inout State, id: PendingWorktreeID, path: URL, error: GitWorktreeError
+  ) {
+    guard var pending = state.pendingWorktrees[id: id] else { return }
+    pending.status = .failed(error)
+    pending.catalogWriteFailedPath = path
+    pending.attempt += 1
+    state.pendingWorktrees[id: id] = pending
+    hierarchyClient.beginWorktreeCreation(Self.creationLease(for: pending))
+  }
+
+  /// Runs one creation attempt as the cancellable pending effect.
+  ///
+  /// The reducer releases the lease on the action that ends the attempt
+  /// (finished, failed, Cancel, Discard). A canceled effect sends no
+  /// actions (`Send` is a no-op after cancellation), so when the effect is
+  /// torn down by anything else — store or parent teardown — it releases
+  /// the lease itself. Release is idempotent, so a cancel the reducer
+  /// already handled is harmless.
+  private func runCreationAttempt(
+    _ pending: PendingWorktree,
+    _ operation: @escaping @Sendable (Send<Action>) async -> Void
+  ) -> Effect<Action> {
+    let hierarchy = hierarchyClient
+    let lease = Self.creationLease(for: pending)
+    return .run { send in
+      await operation(send)
+      if Task.isCancelled {
+        await hierarchy.endWorktreeCreation(lease)
+      }
+    }
+    .cancellable(id: CancelID.pending(pending.id), cancelInFlight: true)
+  }
+
   /// Cancellable streaming effect that consumes `createWorktreeStream`
   /// for a single pending creation. Cancel-in-flight protects Retry from
   /// overlapping a zombie effect (edge case — by the time Retry fires
@@ -1443,7 +1520,7 @@ struct HierarchySidebarFeature {
     }
     let client = gitWorktreeClient
     let id = pending.id
-    return .run { send in
+    return runCreationAttempt(pending) { send in
       do {
         for try await event in client.createWorktreeStream(pending.spec) {
           switch event {
@@ -1473,7 +1550,6 @@ struct HierarchySidebarFeature {
             id, .commandFailed(command: "wt sw", stderr: error.localizedDescription)))
       }
     }
-    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
   }
 
   /// Remote counterpart of `runPendingStream`: create the worktree on the
@@ -1485,7 +1561,7 @@ struct HierarchySidebarFeature {
   private func runRemoteCreate(_ pending: PendingWorktree, host: RemoteHost) -> Effect<Action> {
     let id = pending.id
     let spec = pending.spec
-    return .run { send in
+    return runCreationAttempt(pending) { send in
       let service = RemoteGitService(host: host)
       let gitRoot = spec.repoRoot.path
       let path = spec.baseDirectory.appending(path: spec.name).path
@@ -1517,7 +1593,6 @@ struct HierarchySidebarFeature {
             id, .commandFailed(command: "git worktree add", stderr: error.localizedDescription)))
       }
     }
-    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
   }
 
   /// After the delete sheet closed: a group that kept items lists them on

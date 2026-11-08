@@ -656,15 +656,63 @@ final class HierarchyHandlers {
       resolvedPath = baseDirectory.appending(path: sanitized).path(percentEncoded: false)
     }
 
+    let registered: RegisteredWorktree
+    switch await registerWorktree(req, in: project, path: resolvedPath, settings: settings) {
+    case .success(let worktree): registered = worktree
+    case .failure(let failure): return failure.outcome
+    }
+    let launch = await launchCreateAgent(
+      agentProfile, projectID: req.projectID, worktreeID: registered.id, path: registered.path)
+    let launched: IPC.AgentLaunchResponse?
+    switch launch {
+    case .success(let response): launched = response
+    case .failure(let error): return .failed(error)
+    }
+    do {
+      return .unary(
+        try JSONValue.encoded(
+          CreateWorktreeResult(
+            id: registered.id, path: registered.path, created: registered.created, agent: launched)))
+    } catch {
+      return failure(for: error, fallbackKind: "project", fallbackID: req.projectID.description)
+    }
+  }
+
+  private struct RegisteredWorktree {
+    let id: WorktreeID
+    /// Canonical path of the row.
+    let path: String
+    let created: Bool
+  }
+
+  private struct RegistrationFailure: Error {
+    let outcome: RouterOutcome
+  }
+
+  /// `hierarchy.createWorktree`'s materialize + catalog write. A missing
+  /// worktree is put on disk first, under a creation lease held until the
+  /// row is written: a reconcile that runs while `git worktree add` streams
+  /// then does not append the new path at the list tail, and the row lands
+  /// at the top of the unpinned segment. The lease is released on every exit
+  /// of this function, before the caller launches an agent.
+  private func registerWorktree(
+    _ req: CreateWorktreeParams, in project: Project, path resolvedPath: String,
+    settings: Settings
+  ) async -> Result<RegisteredWorktree, RegistrationFailure> {
     var materializedPath = resolvedPath
     var created = false
     let alreadyRegistered = project.worktrees.contains {
       HierarchyManager.canonicalPath($0.path) == HierarchyManager.canonicalPath(resolvedPath)
     }
+    var creationLease: WorktreeCreationLease?
+    defer {
+      if let creationLease { manager.endWorktreeCreation(creationLease) }
+    }
     if let worktreeCreator, !project.isRemote, !alreadyRegistered,
       let gitRoot = project.gitRoot, let branch = req.branch, !branch.isEmpty,
       !FileManager.default.fileExists(atPath: resolvedPath)
     {
+      creationLease = manager.beginWorktreeCreation(in: req.projectID)
       let spec = await materializeSpec(
         req, branch: branch, gitRoot: gitRoot, path: resolvedPath,
         projectGit: settings.projects[project.id]?.git, worktree: settings.worktree)
@@ -672,9 +720,10 @@ final class HierarchyHandlers {
         materializedPath = try await worktreeCreator(spec).path(percentEncoded: false)
         created = true
       } catch let error as GitWorktreeError {
-        return .failed(Self.ipcError(for: error))
+        return .failure(RegistrationFailure(outcome: .failed(Self.ipcError(for: error))))
       } catch {
-        return .failed(.internal("git worktree add failed: \(error)"))
+        return .failure(
+          RegistrationFailure(outcome: .failed(.internal("git worktree add failed: \(error)"))))
       }
     }
     do {
@@ -683,24 +732,20 @@ final class HierarchyHandlers {
         name: req.name,
         path: materializedPath,
         branch: req.branch,
-        // A worktree this call just materialised may already have been
-        // adopted by a reconcile pulse racing the stream; return that row
-        // rather than failing against our own worktree.
+        // The creation lease keeps a reconcile pulse from adopting the
+        // worktree this call just materialised; if a row for the path
+        // exists anyway, return it rather than failing against our own
+        // worktree.
         reuseExisting: (req.reuseExisting ?? false) || created
       )
-      let canonical = HierarchyManager.canonicalPath(materializedPath)
-      let launch = await launchCreateAgent(
-        agentProfile, projectID: req.projectID, worktreeID: id, path: canonical)
-      let launched: IPC.AgentLaunchResponse?
-      switch launch {
-      case .success(let response): launched = response
-      case .failure(let error): return .failed(error)
-      }
-      return .unary(
-        try JSONValue.encoded(
-          CreateWorktreeResult(id: id, path: canonical, created: created, agent: launched)))
+      return .success(
+        RegisteredWorktree(
+          id: id, path: HierarchyManager.canonicalPath(materializedPath), created: created))
     } catch {
-      return failure(for: error, fallbackKind: "project", fallbackID: req.projectID.description)
+      return .failure(
+        RegistrationFailure(
+          outcome: failure(
+            for: error, fallbackKind: "project", fallbackID: req.projectID.description)))
     }
   }
 

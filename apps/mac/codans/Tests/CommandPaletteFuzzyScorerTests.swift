@@ -15,6 +15,7 @@ struct CommandPaletteFuzzyScorerTests {
     title: String,
     subtitle: String? = nil,
     searchText: String? = nil,
+    searchTerms: [String] = [],
     priorityTier: Int = 100,
     hiddenWhenQueryEmpty: Bool = false
   ) -> CommandPaletteItem {
@@ -23,6 +24,7 @@ struct CommandPaletteFuzzyScorerTests {
       title: title,
       subtitle: subtitle,
       searchText: searchText,
+      searchTerms: searchTerms,
       icon: "circle",
       priorityTier: priorityTier,
       hiddenWhenQueryEmpty: hiddenWhenQueryEmpty,
@@ -201,6 +203,40 @@ struct CommandPaletteFuzzyScorerTests {
     let d = Self.score(decoy, query: "shes")
     #expect(t != nil)
     #expect(d == nil || t! > d!)
+  }
+
+  // MARK: - searchTerms (hidden whole terms)
+
+  @Test
+  func searchTermMatchesHostAuthorityInTitleBand() {
+    // A host query matches only the Remote Project item's host term.
+    let remote = Self.item(
+      id: "r", title: "Switch to Worktree: main", subtitle: "linko",
+      searchText: "linko main", searchTerms: ["linko", "dev@box:2222"]
+    )
+    let local = Self.item(
+      id: "l", title: "Switch to Worktree: main", subtitle: "linko",
+      searchText: "linko main", searchTerms: ["linko"]
+    )
+    let score = Self.score(remote, query: "dev@box")
+    #expect(score != nil)
+    #expect(score! >= CommandPaletteFuzzyScorer.contiguousBase)
+    #expect(Self.score(local, query: "dev@box") == nil)
+  }
+
+  @Test
+  func projectNameTermScoresEqualAcrossWorktreeNames() {
+    // The Project-name term scores the same whatever the worktree name is,
+    // so one Project's items tie and the sidebar-order tie-break groups them.
+    let short = Self.item(
+      id: "s", title: "Switch to Worktree: main", subtitle: "linko",
+      searchText: "linko main", searchTerms: ["linko"]
+    )
+    let long = Self.item(
+      id: "l", title: "Switch to Worktree: feature-long-name", subtitle: "linko",
+      searchText: "linko feature-long-name", searchTerms: ["linko"]
+    )
+    #expect(Self.score(short, query: "linko") == Self.score(long, query: "linko"))
   }
 
   @Test
