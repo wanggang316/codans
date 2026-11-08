@@ -65,6 +65,7 @@ Settings → General → Memory 的「Release terminal views of hidden panes」�
 ### 重新 attach 与已回收状态
 
 - 重新 attach 以回收时 surface view 的尺寸起步。libghostty 在 `ghostty_surface_new` 内就按 surface 的初始尺寸 fork `zmx attach`，此时还没有任何布局；`zmx attach` 把这个尺寸作为 Init 发给 daemon。若用占位尺寸（libghostty 默认 800×600 px，或 view 的 800×600 pt 占位 frame），正在运行的 TUI 会先被 resize 到窄宽度再回到真实宽度，有时停在窄宽度直到用户改变窗口尺寸。因此 fork 的 `ghostty_surface_config_s` 增加了 `initial_width` / `initial_height`。初始尺寸取自将要显示该 pane 的槽位：`LeafView` 把 `GeometryReader` 量到的尺寸随 `PaneHostFeature.task(slotSize:)` 传给 `ensureSurface`。回收时记下的 view 尺寸只在没有槽位尺寸时兜底：只靠它时，实测仍有重新 attach 从 800×600 pt 占位起步（zmx 日志 `init resize rows=42 cols=113`，随后才是真实的 229 列），Claude Code 停在约一半宽度。
+- 回收期间的外观切换由重新 attach 补报。跟随终端外观的程序（如 `theme: auto` 的 Claude Code）通过 mode 2031 订阅 color scheme 报告；pane 隐藏时没有 surface，外观切换不会送达程序。重新 attach 时 zmx 把保存的终端状态（含 mode 2031 的开启）重放进新 surface，fork 的 libghostty 在 mode 2031 开启时立即按 surface 当前外观回一次 `CSI ? 997 ; 1 n`（dark）/ `CSI ? 997 ; 2 n`（light），程序随之切换主题。新 surface 从 app 的 conditional state 继承当前外观，所以这次报告即是当前外观。只在启动时查询 OSC 10/11、不订阅 mode 2031 的程序（如 Codex）不受益。
 - 重新 attach 不重放 `initialCommand`：那会把 `claude` 之类的命令当作键入送进正在运行的 TUI。也不再发 `.paneCreated` / `.paneReady`，pane 从未消失。
 - 回收时保留前台快照与进程行，重新 attach 后轮询继续，不会产生一次假的「agent 解绑 / 重绑」。
 - 已回收 pane 被关闭或归档时，除了 kill daemon，还补做 `handleSurfaceClose` 的清理。
