@@ -74,6 +74,51 @@ struct CommandPaletteFeatureTests {
     #expect(store.state.selectionID == "a")
   }
 
+  /// Same-score switch items sort by catalog order (Project, then Worktree),
+  /// not by title, so each Project's items stay together.
+  @Test
+  func sameScoreItemsSortByCatalogOrder() async {
+    func switchItem(_ id: String, _ worktree: String, project: Int, index: Int) -> CommandPaletteItem {
+      CommandPaletteItem(
+        id: id, title: "Switch to Worktree: \(worktree)", subtitle: "linko",
+        searchText: "linko \(worktree)", searchTerms: ["linko"], icon: "circle",
+        catalogOrder: .init(project: project, worktree: index),
+        kind: .openSettings
+      )
+    }
+    var state = CommandPaletteFeature.State()
+    state.items = [
+      switchItem("r1", "zeta", project: 1, index: 1),
+      switchItem("l0", "main", project: 0, index: 0),
+      switchItem("r0", "alpha", project: 1, index: 0),
+      switchItem("l1", "beta", project: 0, index: 1),
+    ]
+    let store = TestStore(initialState: state) { CommandPaletteFeature() }
+    store.exhaustivity = .off
+    await store.send(.queryChanged("linko"))
+    #expect(store.state.filtered.map(\.id) == ["l0", "l1", "r0", "r1"])
+  }
+
+  /// Recency still applies before the catalog-order tie-break.
+  @Test
+  func recencyRanksAboveCatalogOrderTie() async {
+    func switchItem(_ id: String, project: Int) -> CommandPaletteItem {
+      CommandPaletteItem(
+        id: id, title: "Switch to Worktree: main", subtitle: "linko",
+        searchText: "linko main", searchTerms: ["linko"], icon: "circle",
+        catalogOrder: .init(project: project, worktree: 0),
+        kind: .openSettings
+      )
+    }
+    var state = CommandPaletteFeature.State()
+    state.items = [switchItem("first", project: 0), switchItem("used", project: 1)]
+    state.recency = ["used": Date().timeIntervalSince1970]
+    let store = TestStore(initialState: state) { CommandPaletteFeature() }
+    store.exhaustivity = .off
+    await store.send(.queryChanged("linko"))
+    #expect(store.state.filtered.map(\.id) == ["used", "first"])
+  }
+
   // MARK: - Activation + recency write
 
   @Test

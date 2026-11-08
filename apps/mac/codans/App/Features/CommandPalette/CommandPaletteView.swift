@@ -119,7 +119,7 @@ struct CommandPaletteView: View {
                 .onTapGesture { store.send(.rowTapped(item.id)) }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel(item.title)
-                .accessibilityHint(item.subtitle ?? "")
+                .accessibilityHint(accessibilityHint(for: item))
             }
           }
           .padding(.horizontal, 6)
@@ -148,7 +148,19 @@ struct CommandPaletteView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(item.title).font(.system(size: 13))
         if let subtitle = item.subtitle {
-          Text(subtitle).font(.caption).foregroundStyle(.secondary)
+          HStack(spacing: 4) {
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            // Same Remote Project marker as the sidebar Project row and the
+            // Agents View row, so a remote worktree reads apart from a local
+            // one with the same Project name.
+            if let authority = item.remoteAuthority {
+              Image(systemName: RemoteProjectMarker.symbol)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(authority)
+                .accessibilityLabel("Remote host \(authority)")
+            }
+          }
         }
       }
       Spacer()
@@ -171,6 +183,13 @@ struct CommandPaletteView: View {
           .fill(Color.gray.opacity(0.16))
       }
     }
+  }
+
+  /// The row's own accessibility label hides the marker's, so the hint names
+  /// the remote host after the subtitle.
+  private func accessibilityHint(for item: CommandPaletteItem) -> String {
+    let parts = [item.subtitle, item.remoteAuthority.map { "Remote host \($0)" }]
+    return parts.compactMap { $0 }.joined(separator: ", ")
   }
 
   /// Prefer the registry-derived chord when the item declares a `commandID` and the resolved
