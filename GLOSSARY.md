@@ -28,11 +28,20 @@ These terms define what an Agents View row shows. See the
 `working`, `blocked`, `done`, or `error`. It comes from the OSC 7501 program
 status, or from the screen when the agent does not report.
 
-**Agent activity text**: One line that tells what the agent is doing. It is the
-OSC 7501 `message`, or the OSC 0/2 title that the agent set after it started
-when there is no message. A title from before the agent started is not agent
-activity text. It is for display only and does not change the runtime state.
-_Avoid_: OSC status, because OSC 7501 also carries the runtime state.
+**Agent title**: The first line of an Agents View row. It is the OSC 7501
+`title` of the agent's root record, else the OSC 0/2 title that the agent set
+after it started, else the agent display name. A title from before the agent
+started, or one that says only the agent's name, is not an agent title. It is
+for display only and does not change the runtime state. See
+[ADR 0009](docs/adr/0009-agent-title-and-pane-title-follow-separate-standards.md).
+_Avoid_: agent activity text (the earlier name, which also showed the OSC 7501
+`message`); OSC status, because OSC 7501 also carries the runtime state.
+
+**Pane title**: The title of a pane card header, also shown by the tab chip of
+the pane's tab. At the shell prompt it is the working directory with `~` for
+the home directory; while a program runs it is the pane's OSC 0/2 title. It
+never comes from OSC 7501, so it can differ from the agent title of the same
+pane.
 
 ## Sidebar
 
