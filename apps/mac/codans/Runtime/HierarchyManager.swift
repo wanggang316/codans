@@ -915,6 +915,68 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Re-keys a Remote Project onto the host git's form of its root
+  /// (`RemoteGitService.canonicalWorkTreeRoot`). A root entered through a
+  /// symlink stays a different string from the paths `git worktree list`
+  /// reports, so reconcile appended the main checkout a second time (#402).
+  /// Rewrites `rootPath`, a `gitRoot` equal to the old root, and the rows at
+  /// the old root. A row that then shares its path with an earlier row (the
+  /// duplicate an earlier reconcile appended) is merged into the earlier row:
+  /// its tabs move over, so no Pane is lost, and the row is removed. Returns
+  /// `true` when the catalog changed.
+  @discardableResult
+  func adoptCanonicalRemoteRoot(projectID: ProjectID, canonicalRoot: String) -> Bool {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[projectIndex].remoteHost != nil
+    else { return false }
+    let canonical = Self.normalizeRemotePath(canonicalRoot)
+    let oldRoot = Self.normalizeRemotePath(catalog.projects[projectIndex].rootPath)
+    guard canonical != oldRoot else { return false }
+    var project = catalog.projects[projectIndex]
+    project.rootPath = canonical
+    if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == oldRoot {
+      project.gitRoot = canonical
+    }
+    for index in project.worktrees.indices
+    where Self.normalizeRemotePath(project.worktrees[index].path) == oldRoot {
+      project.worktrees[index].path = canonical
+    }
+    var merged: [Worktree] = []
+    for worktree in project.worktrees {
+      let path = Self.normalizeRemotePath(worktree.path)
+      guard let keeperIndex = merged.firstIndex(where: { Self.normalizeRemotePath($0.path) == path })
+      else {
+        merged.append(worktree)
+        continue
+      }
+      merged[keeperIndex].tabs += worktree.tabs
+      if merged[keeperIndex].selectedTabID == nil {
+        merged[keeperIndex].selectedTabID = worktree.selectedTabID
+      }
+      merged[keeperIndex].isPinned = merged[keeperIndex].isPinned || worktree.isPinned
+      if !worktree.archived {
+        merged[keeperIndex].archived = false
+        merged[keeperIndex].archivedAt = nil
+      }
+      if project.selectedWorktreeID == worktree.id {
+        project.selectedWorktreeID = merged[keeperIndex].id
+      }
+    }
+    let removedRows = project.worktrees.count - merged.count
+    project.worktrees = merged
+    catalog.projects[projectIndex] = project
+    reconcileLogger.notice(
+      "adopted host root form: project=\(projectID.raw.uuidString, privacy: .public) mergedRows=\(removedRows, privacy: .public)"
+    )
+    store.scheduleSave(catalog)
+    if removedRows > 0 {
+      // Run-script Panes moved to the kept row; re-key them by its id.
+      rebuildRunScriptPanes()
+      runtime.announceHierarchyMutated()
+    }
+    return true
+  }
+
   /// Flips the Worktree's pinned flag and repositions the row in the catalog
   /// array so segment-internal order matches the sidebar. Pin moves the row to
   /// the end of the pinned segment (last visible pinned); Unpin moves it to
