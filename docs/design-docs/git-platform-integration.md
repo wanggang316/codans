@@ -95,7 +95,7 @@ alias 列表变更时 `CodansApp` 发送 `refreshAllRequested`，所以每个单
 
 ### Settings
 
-- 全局 "Git Platforms" 面板（`GitPlatformsSettingsView`，详见 [Settings › Git Platforms pane](settings.md#git-platforms-pane)）：GitHub 和 GitLab 各一块，显示官方标志、CLI 状态（检查中、已连接的 host 和用户、未安装时的安装命令、未登录时的 `auth login` 命令）、Re-check、文档链接，以及来自 `GitPlatformKind.capabilities` 的能力列表（不支持的项变暗并写明原因）；然后是 "Git Platform aliases" 列表：每行一个 alias（remote host → kind、API host），可添加、编辑、删除，remote host 在列表中唯一（`GeneralSettings.saveGitPlatformAlias`）。每行显示该 kind 的 CLI 是否登录了 API host；未登录时显示与徽标位置相同的 `auth login` 消息。下面是所有 Git Platform 共用的默认值：默认 merge 策略和 merge 后的 Worktree 动作。GitLab 上项目的 merge method 生效，`rebase` 策略按 Merge 处理（ADR 0004 item 6）。这条说明在 merge 策略 picker 的副标题里。面板底部的脚注说明 Git Platform 与 "Hosts" 面板（运行 Project 的机器，ADR 0003）不同。
+- 全局 "Git Platforms" 面板（`GitPlatformsSettingsView`，详见 [Settings › Git Platforms pane](settings.md#git-platforms-pane)）：GitHub 和 GitLab 各一块，显示官方标志、CLI 状态（检查中、已连接的 host 和用户、未安装时的安装命令、未登录时的 `auth login` 命令）、Re-check、文档链接，以及来自 `GitPlatformKind.capabilities` 的能力列表（不支持的项变暗并写明原因）；然后是 "Git Platform aliases" 列表：每行一个 alias（remote host → kind、API host），可添加、编辑、删除，remote host 在列表中唯一（`GeneralSettings.saveGitPlatformAlias`）。每行显示该 kind 的 CLI 是否登录了 API host；未登录时显示与徽标位置相同的 `auth login` 消息。下面是所有 Git Platform 共用的默认值：默认 merge 策略和 merge 后的 Worktree 动作。GitLab 上项目的 merge method 生效，`rebase` 策略按 Merge 处理（ADR 0004 item 6）。这条说明在 merge 策略 picker 的副标题里。面板底部的脚注说明 Git Platform 与 "Remote Hosts" 面板（运行 Project 的机器，ADR 0003）不同。
 - Project 设置的 "Git Platform" 区：merge 策略和 merge 后动作的 Project 覆盖。只对 git Project 显示。Project 没有 Git Platform 选择（ADR 0005 item 2）；含 `projects[pid].git.gitPlatform` 的旧设置文件可以加载，该键被忽略且不再写回。
 
 ### 执行流

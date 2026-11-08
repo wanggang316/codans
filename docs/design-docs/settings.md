@@ -238,8 +238,11 @@ Durable shell decisions:
 - **Sidebar `selection` is transient, never persisted.** Closing the window
   resets it; reopening defaults to General so each Settings session starts
   from the global preferences.
-- **The sidebar group of Projects, and per-Project sub-rows, are driven by the
-  live catalog**, not stored on the window — the catalog is the single source of
+- **Global sidebar rows form three untitled groups** (`SettingsSection.globalGroups`):
+  app preferences; agent tooling (Agents, Integrations, Workflows); Remote
+  Hosts. Each group is a headerless `Section`, so only the section gap
+  separates them.
+- **The sidebar's Project rows are driven by the live catalog**, not stored on the window — the catalog is the single source of
   truth for "what exists". `HierarchyClient.kind(of:)` returns `nil` for a gone
   Project; callers treat that as "this pane will be pruned next
   `.projectsChanged`".
@@ -250,8 +253,12 @@ Durable shell decisions:
   `setProjectLifecycleScript`), whose live implementations chain into
   `SettingsStore.mutateProject(pid) { … }`. Per-Project writes do **not** route
   through `HierarchyClient` / the catalog (the storage-unification core).
-- **Kind-specific content.** Project sidebar sub-rows are **General** and
-  **Commands**. General, Editor, and Environment sections apply to every kind.
+- **One page per Project.** A Project's sidebar row opens a single page
+  (`SettingsSection.project`); its custom commands are a Commands section on
+  that page, at its bottom below the lifecycle scripts. "Manage Project Commands…" opens the page
+  scrolled to that section.
+- **Kind-specific content.** General, Editor, Environment, and Commands
+  sections apply to every kind.
   Git projects and Servers also expose Worktree, Git Platform, and Lifecycle sections;
   Workspaces instead expose their member Projects. Default icons reflect the
   Project kind and can be replaced by user-selected symbols, emoji, or images.
@@ -286,7 +293,7 @@ custom chrome and no per-platform enable switch.
 - **Defaults.** The merge strategy and post-merge pickers carry their
   explanations as subtitles (GitLab applies the project's merge method, and
   Rebase and merge uses Merge there). The section footer is a short note that
-  machines that run Projects are in Hosts.
+  machines that run Projects are in Remote Hosts.
 
 ## General defaults and agent launch preferences
 
@@ -316,7 +323,7 @@ registration; a launch failure does not undo worktree creation. CLI creation
 uses the profile explicitly requested by that command, not this remembered
 sheet preference.
 
-## Developer pane
+## Integrations pane
 
 The pane uses `DeveloperPaneDependencies` (`@Environment`). Its grouped form
 has a **CLI** section for the `codans` CLI symlink (`CLIInstallerClient`,
@@ -395,7 +402,7 @@ creation phases are documented in [worktree.md](./worktree.md).
 | Reader bypasses per-Project preferences. | Resolve editor and worktrees-directory values via `settings.projects[pid]`. |
 | Migration failure leaves the original settings at risk of overwrite. | Preserve the source/backup and disable persistence on migration or backup failure. |
 | Catalog-only overrides are expected to appear in settings. | Bootstrap does not supply `catalogOverrides`; the loader parameter is not an automatic catalog migration. |
-| `kind` drift (stale `gitRoot` snapshot shows wrong sub-rows). | Re-derived on `.projectsChanged`; acceptable to show wrong rows for one catalog-refresh tick. |
+| `kind` drift (stale `gitRoot` snapshot shows wrong sections). | Re-derived on `.projectsChanged`; acceptable to show wrong rows for one catalog-refresh tick. |
 
 ## References
 

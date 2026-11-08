@@ -225,7 +225,7 @@ struct HierarchySidebarFeature {
     /// Host row menu → "Open Remote Project on This Host…". Opens the
     /// Remote Project sheet with the Host chosen.
     case hostConnectProjectTapped(HostID)
-    /// Host row menu → "Edit Host…". Opens Settings › Hosts on the Host.
+    /// Host row menu → "Edit Host…". Opens Settings › Remote Hosts on the Host.
     case hostEditTapped(HostID)
 
     /// A Project block was dropped in the sidebar. The view resolves the
@@ -262,8 +262,8 @@ struct HierarchySidebarFeature {
     // Project section hover chrome
     case projectAddWorktreeTapped(projectID: ProjectID)
     /// `⋯` menu → "Project Settings…". Opens the Settings window and lands
-    /// the selection on this Project's General pane via
-    /// `SettingsWindowPresenter.openAt(.projectGeneral(_))`.
+    /// the selection on this Project's page via
+    /// `SettingsWindowPresenter.openAt(.project(_))`.
     case projectSettingsTapped(projectID: ProjectID)
     case projectRemoveTapped(projectID: ProjectID, name: String)
     case projectRemoveConfirmed
@@ -1018,7 +1018,7 @@ struct HierarchySidebarFeature {
       let presenter = settingsWindowPresenter
       return .run { _ in
         await MainActor.run {
-          presenter.openAt(.projectGeneral(projectID))
+          presenter.openAt(.project(projectID))
         }
       }
 

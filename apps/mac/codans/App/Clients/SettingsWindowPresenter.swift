@@ -9,12 +9,13 @@ import CodansCore
 /// so the closure captures the live `@Environment(\.openWindow)` value.
 nonisolated struct SettingsWindowPresenter: Sendable {
   var open: @MainActor @Sendable () -> Void
-  /// Open the Settings window AND select the given section. Used by
-  /// "Manage Scripts…" in the worktree-header split button to land
-  /// the user directly on the Project Scripts pane for the active
-  /// Project rather than wherever the sidebar was last left.
+  /// Open the Settings window AND select the given section, rather than
+  /// wherever the sidebar was last left.
   var openAt: @MainActor @Sendable (SettingsSection) -> Void
-  /// Open the Settings window on the Hosts page with the Host's edit form
+  /// Open the Settings window on the Project's page scrolled to its Commands
+  /// section ("Manage Project Commands…").
+  var openProjectCommands: @MainActor @Sendable (ProjectID) -> Void = { _ in }
+  /// Open the Settings window on the Remote Hosts page with the Host's edit form
   /// (the sidebar Host row's "Edit Host…").
   var editHost: @MainActor @Sendable (HostID) -> Void = { _ in }
 }
@@ -33,6 +34,11 @@ extension SettingsWindowPresenter: DependencyKey {
         "SettingsWindowPresenter.liveValue not configured; wire via `.withDependencies` with { $0.settingsWindowPresenter = ... } in CodansApp"
       )
     },
+    openProjectCommands: { _ in
+      fatalError(
+        "SettingsWindowPresenter.liveValue not configured; wire via `.withDependencies` with { $0.settingsWindowPresenter = ... } in CodansApp"
+      )
+    },
     editHost: { _ in
       fatalError(
         "SettingsWindowPresenter.liveValue not configured; wire via `.withDependencies` with { $0.settingsWindowPresenter = ... } in CodansApp"
@@ -43,6 +49,7 @@ extension SettingsWindowPresenter: DependencyKey {
   static let testValue: SettingsWindowPresenter = SettingsWindowPresenter(
     open: unimplemented("SettingsWindowPresenter.open"),
     openAt: unimplemented("SettingsWindowPresenter.openAt"),
+    openProjectCommands: unimplemented("SettingsWindowPresenter.openProjectCommands"),
     editHost: unimplemented("SettingsWindowPresenter.editHost")
   )
 }

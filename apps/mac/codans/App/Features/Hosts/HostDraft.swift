@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// The fields of a Host form (Settings › Hosts editor and the
+/// The fields of a Host form (Settings › Remote Hosts editor and the
 /// "New Host…" entry of Open Remote Project). `record(id:)` turns them into a
 /// `HostRecord` with the same validation as the Host list (ADR 0003).
 nonisolated struct HostDraft: Equatable, Sendable {

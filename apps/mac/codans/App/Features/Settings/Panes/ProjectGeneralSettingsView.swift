@@ -3,10 +3,11 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Project General detail pane.
+/// A Project's Settings page.
 ///
-/// Sibling Sections rendered in fixed order: Editor, Worktree, Git Platform,
-/// Environment. Worktree and Git Platform render only when
+/// Sibling Sections rendered in fixed order: General, Workspace, Editor,
+/// Worktree, Git Platform, Environment, the lifecycle scripts, then Commands.
+/// Worktree, Git Platform, and the lifecycle scripts render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
 /// the sections simply appear or don't.
@@ -49,6 +50,7 @@ struct ProjectGeneralSettingsView: View {
     case gitPlatform
     case environment
     case lifecycle
+    case commands
   }
 
   /// Pure visibility logic. Worktree / Git Platform / Lifecycle gate
@@ -57,12 +59,12 @@ struct ProjectGeneralSettingsView: View {
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
-      return [.general, .editor, .environment]
+      return [.general, .editor, .environment, .commands]
     case .workspace:
       // A workspace root has no repository of its own: the worktree, Git Platform,
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
       // construction. Its own section lists its source projects.
-      return [.general, .workspace, .editor, .environment]
+      return [.general, .workspace, .editor, .environment, .commands]
     case .gitRepo, .remote:
       // Remote Projects manage worktrees over SSH just like a local git repo,
       // so they surface the full section set — keeping remote management
@@ -149,6 +151,20 @@ struct ProjectGeneralSettingsView: View {
   }
 
   var body: some View {
+    ScrollViewReader { proxy in
+      form
+        .onChange(of: store.revealsCommands, initial: true) { _, reveals in
+          guard reveals else { return }
+          // Next runloop tick, so the Form has laid out the section first.
+          Task { @MainActor in
+            proxy.scrollTo(SectionID.commands, anchor: .top)
+            store.send(.commandsRevealed)
+          }
+        }
+    }
+  }
+
+  private var form: some View {
     Form {
       if visible.contains(.general) {
         generalSection
@@ -170,6 +186,10 @@ struct ProjectGeneralSettingsView: View {
       }
       if visible.contains(.lifecycle) {
         lifecycleSections
+      }
+      if visible.contains(.commands) {
+        ProjectCommandsSection(projectID: projectID, store: store)
+          .id(SectionID.commands)
       }
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {

@@ -91,21 +91,23 @@ release model.
 
 | Channel | `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` |
 |---|---|---|
-| Stable | `X.Y.Z` in `Project.xcconfig`, matched by the release tag | Assigned by `bump-version.sh` from the shared date/sequence scheme |
-| Tip | Read from the workflow checkout's `Project.xcconfig` | Assigned by the workflow from the shared date/sequence scheme |
+| Stable | `X.Y.Z` in `Project.xcconfig`, matched by the release tag | Assigned by `release.yml` at build time from the shared date/sequence scheme |
+| Tip | Read from the workflow checkout's `Project.xcconfig` | Assigned by `release-tip.yml` at build time from the shared date/sequence scheme |
 
-Both channels use `YYYYMMDD` followed by a sequence starting at `001`. The
-published appcast supplies the highest build across both channels. If that
-build is at least today's `YYYYMMDD000`, the next Tip build is that value + 1;
-otherwise it starts at today's `YYYYMMDD001`. The stable bump script applies
-the same rule and also uses the local configured build as a floor.
+Both channels use `YYYYMMDD` followed by a sequence starting at `001`, computed
+by `bump-version.sh --next-build`. The published appcast supplies the highest
+build across both channels; the checkout's `CURRENT_PROJECT_VERSION` is a
+floor. If the higher of the two is at least today's `YYYYMMDD000`, the next
+build is that value + 1; otherwise it starts at today's `YYYYMMDD001`. Both
+workflows write the result into the ephemeral checkout before archiving; the
+value committed by `bump-version.sh` is only a local floor.
 
-The shared sequence keeps a stable release above preceding Tip builds when
-assigned through the bump script. Tip numbers do not depend on
-`github.run_number` or multiplication of a stable build. If the appcast lookup
-fails, Tip falls back to today's `001`; the stable script retains its local
-build floor. A successful lookup is therefore needed to preserve ordering
-against published builds that are not reflected locally.
+Stable takes its number at build time, not at version-bump time, because Tip
+builds keep publishing while a release PR is open. A stable run and a Tip run
+never compute numbers at the same time: `release-merge.yml` waits for Tip runs
+in flight before it builds, and the Tip check job skips while a stable run is
+in flight. If the appcast lookup fails, the number falls back to the floor
+rule, so a successful lookup is needed to preserve ordering.
 
 Sparkle compares build numbers, so each published build must be greater than
 its predecessor even when `MARKETING_VERSION` is unchanged.
@@ -135,7 +137,25 @@ A preliminary job attempts to skip a commit already targeted by the `tip` tag.
 7. Smoke check: `curl -fsSL releases/latest/download/appcast.xml` and grep for
    `<sparkle:channel>tip</sparkle:channel>`.
 
-### Stable workflow flow (`.github/workflows/release.yml`)
+### Stable workflow flow (`.github/workflows/release-merge.yml` → `release.yml`)
+
+The `release` skill opens a release PR from `release/vX.Y.Z` with the version
+bump and the CHANGELOG section. The merge of that PR is the only human gate;
+`release-merge.yml` then runs:
+
+1. **tag** — verify the merged commit (`MARKETING_VERSION` and the CHANGELOG
+   section match the branch name), wait for Tip runs in flight, and push the
+   annotated tag `vX.Y.Z` on the merged commit.
+2. **build** — call `release.yml`: assign the build number, archive, sign,
+   notarize, generate `appcast.xml`, and create a draft release.
+3. **publish** — check the four assets (versioned DMG, its `.sha256`,
+   `Codans.dmg`, `appcast.xml`) and publish the draft as the latest release.
+4. **cask** — call `update-cask.yml`.
+
+The tag push and the publish use `GITHUB_TOKEN`, which fires no other
+workflow, so `release.yml` and `update-cask.yml` are called with
+`workflow_call`. A hand-pushed `v*` tag still starts `release.yml` directly
+as a fallback; that path leaves a draft to publish by hand.
 
 The stable `generate_appcast` invocation produces a 1-item appcast with the new DMG; that
 file becomes the new canonical feed when the release is published. Tip items left over
@@ -205,10 +225,13 @@ None. `ChannelUpdaterDelegate.allowedChannels(for:)` already returns `[]` for st
 
 Behavior for the operational edge cases:
 
-- **Releasing a stable while a tip is pending** — both workflows share
-  `concurrency: release` to serialise. If stable lands during a tip workflow's merge step,
-  the merge picks up the fresh stable's appcast (which has no tip items yet), correctly
-  re-injects the tip item, and uploads. No race. Documented in `release-tip.yml` comments.
+- **Releasing a stable while a tip is pending** — stable runs do not join the
+  `release` concurrency group of `release-tip.yml`: GitHub cancels a pending run when a
+  newer one queues, and a stable run must not be dropped. Instead `release-merge.yml`
+  waits until no Tip run is in flight, and the Tip check job skips while a stable run is
+  in flight or when the push bumps `MARKETING_VERSION`. A skipped Tip is rebuilt by the
+  next push to `main`. If a Tip merge step runs after the stable publish, it merges into
+  the fresh stable's appcast (which has no tip items yet).
 - **Demoting from tip to stable client-side** — Sparkle re-prompts on every check; no
   built-in downgrade path. Manual: switch channel in Settings, then delete
   `~/Library/Caches/Sparkle*` and reinstall the stable DMG. Out of scope for the pipeline.
@@ -227,4 +250,5 @@ Behavior for the operational edge cases:
 - Channel type: `apps/mac/CodansCore/Settings/UpdateChannel.swift`
 - Feed URL: `apps/mac/Configurations/mac-Info.plist` (`SUFeedURL`)
 - Release skill / build-number bump: `release` skill
-- Workflows: `.github/workflows/release.yml`, `.github/workflows/release-tip.yml`
+- Workflows: `.github/workflows/release-merge.yml`, `.github/workflows/release.yml`,
+  `.github/workflows/release-tip.yml`, `.github/workflows/update-cask.yml`

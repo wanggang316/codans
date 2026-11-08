@@ -44,6 +44,10 @@ struct ScriptCommandTable: View {
   /// Adopt a detected command. nil hides the suggestion section entirely.
   var onAddSuggestion: ((CommandSuggestion) -> Void)?
   var onRefreshSuggestions: (() -> Void)?
+  /// `false` when a host that scrolls already (a Settings `Form`) embeds the
+  /// table: the rows then take their natural height instead of a nested
+  /// scroll view that fills the pane.
+  var scrollsRows = true
 
   private let iconColumnWidth: CGFloat = 48
   private let nameColumnWidth: CGFloat = 130
@@ -54,26 +58,18 @@ struct ScriptCommandTable: View {
       VStack(spacing: 0) {
         headerRow
         Divider()
-        ScrollView {
-          LazyVStack(spacing: 4) {
-            ForEach(scripts) { script in
-              ScriptCommandRow(
-                script: script,
-                isSelected: selectedID == script.id,
-                iconColumnWidth: iconColumnWidth,
-                nameColumnWidth: nameColumnWidth,
-                shortcutColumnWidth: shortcutColumnWidth,
-                onSelect: { selectedID = script.id },
-                onUpdate: onUpdate,
-                validateChord: { binding in validateChord(binding, script.id) }
-              )
-              .id(script.id)
-            }
+        if scrollsRows {
+          ScrollView {
+            LazyVStack(spacing: 4) { rows }
+              .padding(.horizontal, 6)
+              .padding(.vertical, 6)
           }
-          .padding(.horizontal, 6)
-          .padding(.vertical, 6)
+          .frame(maxHeight: .infinity)
+        } else {
+          VStack(spacing: 4) { rows }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
         }
-        .frame(maxHeight: .infinity)
       }
       .clipShape(RoundedRectangle(cornerRadius: 8))
 
@@ -81,7 +77,23 @@ struct ScriptCommandTable: View {
       bottomBar
         .padding(.top, 6)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .frame(maxWidth: .infinity, maxHeight: scrollsRows ? .infinity : nil)
+  }
+
+  private var rows: some View {
+    ForEach(scripts) { script in
+      ScriptCommandRow(
+        script: script,
+        isSelected: selectedID == script.id,
+        iconColumnWidth: iconColumnWidth,
+        nameColumnWidth: nameColumnWidth,
+        shortcutColumnWidth: shortcutColumnWidth,
+        onSelect: { selectedID = script.id },
+        onUpdate: onUpdate,
+        validateChord: { binding in validateChord(binding, script.id) }
+      )
+      .id(script.id)
+    }
   }
 
   // MARK: - Header

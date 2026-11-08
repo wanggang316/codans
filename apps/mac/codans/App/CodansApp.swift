@@ -873,6 +873,11 @@ final class AppState {
         self.openSettingsWindowAction?()
         self.settingsWindowStore?.send(.selectionChanged(section))
       },
+      openProjectCommands: { [weak self] projectID in
+        guard let self else { return }
+        self.openSettingsWindowAction?()
+        self.settingsWindowStore?.send(.projectCommandsRequested(projectID))
+      },
       editHost: { [weak self] hostID in
         guard let self else { return }
         self.openSettingsWindowAction?()

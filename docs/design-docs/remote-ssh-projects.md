@@ -55,7 +55,7 @@ codans never collects or stores a password or key.
   worktree rows, a Host-only change keeps them. A Host and path equal to
   another Project is an error in the sheet, and the change is not applied.
   The Project's own Host and path always save.
-- **Settings › Hosts** adds, edits, and deletes Host records. An edit applies
+- **Settings › Remote Hosts** adds, edits, and deletes Host records. An edit applies
   to all Projects on the Host; delete is disabled while Projects use it. Each
   row shows the Host's icon.
 - **Host icon.** A record has an optional icon (`HostIcon`), picked from a menu

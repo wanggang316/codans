@@ -26,6 +26,9 @@ struct ProjectSettingsFeature {
     var isScanningCommandSuggestions = false
     /// Workspace pane: a source project awaiting the Remove confirmation.
     var pendingSourceRemoval: PendingWorkspaceSourceRemoval?
+    /// Set by "Manage Project Commands…": the page scrolls to its Commands section,
+    /// then clears the flag with `commandsRevealed`.
+    var revealsCommands = false
 
     var id: ProjectID { projectID }
   }
@@ -34,7 +37,7 @@ struct ProjectSettingsFeature {
     case setDefaultEditorOverride(EditorID?)
     case setWorktreeBaseDirectory(String?)
     case writeFailed(String)
-    /// Replace the entire `scripts` array. The Scripts pane writes
+    /// Replace the entire `scripts` array. The Commands section writes
     /// after every edit / reorder / delete; full-array semantics match
     /// `ForEach.onMove` and `SettingsWriter.setProjectScripts`.
     case setProjectScripts([ScriptDefinition])
@@ -45,7 +48,7 @@ struct ProjectSettingsFeature {
     /// existing failure banner displays it.
     case runScriptTapped(scriptID: UUID, worktreeID: WorktreeID)
     /// (Re)scan the Project's manifests for command suggestions. Sent when
-    /// the Commands pane appears and from the menu's Refresh item.
+    /// the Commands section appears and from the menu's Refresh item.
     case scanCommandSuggestions
     case commandSuggestionsScanned([CommandSuggestionGroup])
     /// Workspace pane: Remove on a source project's row.
@@ -58,6 +61,8 @@ struct ProjectSettingsFeature {
     case workspaceAddFolderTapped
     /// A source add or remove ended; `error` is shown in the failure banner.
     case workspaceSourcesChanged(error: String?)
+    /// The page scrolled to its Commands section; clears `revealsCommands`.
+    case commandsRevealed
   }
 
   nonisolated enum CancelID: Sendable { case commandSuggestionScan }
@@ -128,6 +133,10 @@ struct ProjectSettingsFeature {
           await send(.commandSuggestionsScanned(await scan(location)))
         }
         .cancellable(id: CancelID.commandSuggestionScan, cancelInFlight: true)
+
+      case .commandsRevealed:
+        state.revealsCommands = false
+        return .none
 
       case .commandSuggestionsScanned(let groups):
         state.commandSuggestions = groups

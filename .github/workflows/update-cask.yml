@@ -1,7 +1,10 @@
 name: update-homebrew-cask
 
 # Publishes codans's Homebrew cask to wanggang316/homebrew-tap whenever
-# a stable GitHub Release is published. We trigger on `release: published`
+# a stable GitHub Release is published. release-merge.yml publishes with
+# GITHUB_TOKEN, which does not fire `release: published`, so it calls this
+# workflow through workflow_call; a release published by hand fires the
+# event. We trigger on `release: published`
 # (not on tag push) so the cask only updates after the DMG asset is
 # publicly downloadable — the cask's `url` would otherwise 404 until the
 # draft release in release.yml is manually undrafted.
@@ -26,6 +29,12 @@ on:
       tag:
         description: 'Tag to publish (vX.Y.Z, must be an existing published release)'
         required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to publish (vX.Y.Z, must be an existing published release)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -38,7 +47,7 @@ jobs:
       - name: Resolve target tag
         id: meta
         env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_TAG: ${{ inputs.tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           IS_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
@@ -61,6 +70,8 @@ jobs:
 
       - uses: actions/checkout@v4
         if: steps.meta.outputs.skip != 'true'
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
 
       - name: Download DMG and verify SHA256
         if: steps.meta.outputs.skip != 'true'
@@ -110,28 +121,55 @@ jobs:
           set -euo pipefail
           : "${TAP_TOKEN:?secret HOMEBREW_TAP_TOKEN is not set on this repo (see workflow header)}"
 
-          TAP_DIR="$RUNNER_TEMP/tap"
-          git clone --depth 1 \
-            "https://x-access-token:${TAP_TOKEN}@github.com/wanggang316/homebrew-tap.git" \
-            "$TAP_DIR"
+          # Releases published together run this job in parallel and push
+          # the same file. A rejected push means another run pushed first:
+          # clone again, so the version check below sees its push. The
+          # function runs in an `if`, where `set -e` is off, so each step
+          # returns on failure itself.
+          push_cask() {
+            local tap_dir="$1"
+            rm -rf "$tap_dir"
+            git clone --depth 1 \
+              "https://x-access-token:${TAP_TOKEN}@github.com/wanggang316/homebrew-tap.git" \
+              "$tap_dir" || return 1
 
-          mkdir -p "$TAP_DIR/Casks"
-          /bin/cp -f "$RUNNER_TEMP/codans.rb" "$TAP_DIR/Casks/codans.rb"
+            mkdir -p "$tap_dir/Casks"
+            # Never move the cask back to an older version.
+            if [ -f "$tap_dir/Casks/codans.rb" ]; then
+              local current
+              current=$(sed -nE 's/^[[:space:]]*version "([^"]+)".*/\1/p' "$tap_dir/Casks/codans.rb" | head -1)
+              if [ -n "$current" ] && [ "$current" != "$VERSION" ] \
+                && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)" = "$current" ]; then
+                echo "::notice::tap already has codans ${current}, newer than ${VERSION} — nothing to push"
+                return 0
+              fi
+            fi
+            /bin/cp -f "$RUNNER_TEMP/codans.rb" "$tap_dir/Casks/codans.rb" || return 1
 
-          cd "$TAP_DIR"
-          git config user.name  "codans release bot"
-          git config user.email "noreply@codans.app"
-          # Stage first, then diff against HEAD. `git diff --quiet -- <path>`
-          # alone only sees changes to *tracked* files, so a brand-new file
-          # in a freshly bootstrapped (empty) tap would silently exit 0 and
-          # the cask would never get pushed. Stage-then-diff treats untracked
-          # additions as a real change. `--cached` against a missing HEAD
-          # also works: on an empty repo with no commits the diff is always
-          # non-empty, so the first push commits the bootstrap file.
-          git add Casks/codans.rb
-          if git diff --cached --quiet -- Casks/codans.rb 2>/dev/null; then
-            echo "::notice::cask already at ${TAG} in tap — nothing to push"
-            exit 0
-          fi
-          git commit -m "codans ${VERSION}"
-          git push origin HEAD
+            git -C "$tap_dir" config user.name  "codans release bot"
+            git -C "$tap_dir" config user.email "noreply@codans.app"
+            # Stage first, then diff against HEAD. `git diff --quiet -- <path>`
+            # alone only sees changes to *tracked* files, so a brand-new file
+            # in a freshly bootstrapped (empty) tap would silently exit 0 and
+            # the cask would never get pushed. Stage-then-diff treats untracked
+            # additions as a real change. `--cached` against a missing HEAD
+            # also works: on an empty repo with no commits the diff is always
+            # non-empty, so the first push commits the bootstrap file.
+            git -C "$tap_dir" add Casks/codans.rb || return 1
+            if git -C "$tap_dir" diff --cached --quiet -- Casks/codans.rb 2>/dev/null; then
+              echo "::notice::cask already at ${TAG} in tap — nothing to push"
+              return 0
+            fi
+            git -C "$tap_dir" commit -m "codans ${VERSION}" || return 1
+            git -C "$tap_dir" push origin HEAD
+          }
+
+          for attempt in 1 2 3; do
+            if push_cask "$RUNNER_TEMP/tap"; then
+              exit 0
+            fi
+            echo "::warning::push attempt ${attempt} rejected; retrying with a fresh clone"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push the cask after 3 attempts" >&2
+          exit 1
