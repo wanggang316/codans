@@ -51,7 +51,7 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       let exec = try await checkedExecutable()
       let hosts = try await authStatus(exec)
       guard let host = hosts.first(where: \.isLoggedIn) else {
-        return .unavailable(reason: GitPlatformError.notAuthenticated(.gitlab, host: nil).userFacingMessage)
+        return .notLoggedIn(host: nil)
       }
       return .available(host: host.host, user: host.user ?? "")
     } catch {

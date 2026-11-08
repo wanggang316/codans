@@ -51,7 +51,7 @@ struct GitLabGitPlatformTests {
       Self.version, .exited(code: 1, stdout: none, stderr: Data(), stdoutOverflow: false),
     ])
     let result = await Self.makeService(runner).availability()
-    #expect(result == .unavailable(reason: GitPlatformError.notAuthenticated(.gitlab, host: nil).userFacingMessage))
+    #expect(result == .notLoggedIn(host: nil))
     #expect(GitPlatformError.notAuthenticated(.gitlab, host: nil).userFacingMessage.contains("glab auth login"))
   }
 

@@ -4,9 +4,11 @@ import ComposableArchitecture
 import SwiftUI
 
 /// "Git Platforms" section of the Settings window (ADR 0004 item 10):
-///   - One block per Git Platform: the availability of its CLI (`gh`, `glab`), the host and
-///     user it is logged in as, Re-check, and a docs link. Probed on appear and on
-///     Re-check through the `GitPlatformClient` dependency.
+///   - One section per Git Platform: its official mark (a template image), the status of
+///     its CLI (`gh`, `glab`) with the install or `auth login` command when one is
+///     missing, Re-check, a docs link, and the capability list from
+///     `GitPlatformKind.capabilities`. Probed on appear and on Re-check through the
+///     `GitPlatformClient` dependency.
 ///   - Git Platform aliases (ADR 0005): remote host → kind and API host, with add, edit,
 ///     delete, and whether the CLI of the kind is logged in to the API host. Written
 ///     through `SettingsStore.mutateGeneral`; `GeneralSettings.saveGitPlatformAlias` keeps
@@ -14,8 +16,8 @@ import SwiftUI
 ///   - Defaults that apply to every Git Platform: merge strategy and post-merge Worktree
 ///     action, written through `SettingsStore.mutateGeneral`.
 ///
-/// A Git Platform serves repositories; the "Hosts" pane lists machines (ADR 0003). The pane
-/// text names both so the two are not confused.
+/// A Git Platform serves repositories; the "Hosts" pane lists machines (ADR 0003). A
+/// footer note names both so the two are not confused.
 ///
 /// The Settings window is a separate scene with its own TCA store, so this view keeps its
 /// own availability state instead of sharing RootFeature's `GitPlatformFeature` store.
@@ -32,60 +34,47 @@ struct GitPlatformsSettingsView: View {
   var body: some View {
     Form {
       Section {
-        Text(
-          "codans reads pull requests and merge requests through the CLI of each Git Platform. "
-            + "A Project uses the Git Platform of its origin remote; add a Git Platform alias "
-            + "when neither CLI knows the host. Machines that run Projects are in Hosts."
-        )
-        .font(.callout)
-        .foregroundStyle(.secondary)
+        Text("codans reads Pull Requests through the CLI of each Git Platform.")
+          .foregroundStyle(.secondary)
       }
 
       ForEach(GitPlatformKind.allCases, id: \.self) { kind in
-        Section(kind.displayName) {
-          availabilityRow(kind)
-          HStack {
-            Button("Re-check") {
-              Task {
-                await gitPlatform.invalidateResolution()
-                await probe(kind)
-              }
-            }
-            .disabled(checking.contains(kind))
-            Button("Open \(kind.cliName) docs") {
-              if let url = Self.docsURL(kind) {
-                NSWorkspace.shared.open(url)
-              }
-            }
-          }
+        Section {
+          platformRow(kind)
+          capabilityList(kind)
         }
       }
 
       aliasesSection
 
       Section {
-        Picker("Default merge strategy", selection: mergeStrategyBinding) {
+        Picker(selection: mergeStrategyBinding) {
           Text("Default (\(MergeStrategy.squash.displayName))").tag(MergeStrategy?.none)
           ForEach(MergeStrategy.allCases, id: \.self) { strategy in
             Text(strategy.displayName).tag(Optional(strategy))
           }
+        } label: {
+          Text("Default merge strategy")
+          Text(
+            "Applies to GitHub and GitLab. On GitLab, the project's merge method applies, "
+              + "and \(MergeStrategy.rebase.displayName) uses Merge.")
         }
 
-        Picker("After merging", selection: postMergeActionBinding) {
+        Picker(selection: postMergeActionBinding) {
           Text("Ask each time").tag(MergedWorktreeAction?.none)
           ForEach(MergedWorktreeAction.allCases.filter { $0 != .ask }, id: \.self) { action in
             Text(action.displayName).tag(Optional(action))
           }
+        } label: {
+          Text("After merging")
+          Text("What codans does with the Worktree of a merged Pull Request.")
         }
       } header: {
         Text("Defaults")
       } footer: {
-        Text(
-          "These apply to GitHub and GitLab. On GitLab, the project's merge method applies, "
-            + "and \(MergeStrategy.rebase.displayName) uses Merge."
-        )
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+        Text("A Git Platform serves repositories. Machines that run Projects are in Hosts.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
       }
     }
     .formStyle(.grouped)
@@ -108,45 +97,125 @@ struct GitPlatformsSettingsView: View {
     }
   }
 
+  /// Asset name of the official mark of the Git Platform, a template image.
+  static func markImageName(_ kind: GitPlatformKind) -> String {
+    switch kind {
+    case .github: return "github-mark"
+    case .gitlab: return "gitlab-mark"
+    }
+  }
+
   /// Warning text of a missing CLI. It names only what is missing; the install command
   /// shows on its own row so the text and the copy action stay separate.
   static func notInstalledMessage(_ kind: GitPlatformKind) -> String {
     "\(kind.cliDisplayName) (\(kind.cliName)) is not installed."
   }
 
-  @ViewBuilder
-  private func availabilityRow(_ kind: GitPlatformKind) -> some View {
-    switch availability[kind] ?? .unknown {
-    case .available(let host, let user):
-      HStack {
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-          .accessibilityHidden(true)
-        Text(
-          user.isEmpty ? "\(kind.cliName): connected to \(host)" : "\(kind.cliName): connected to \(host) as @\(user)")
+  /// Warning text of a CLI that is not logged in. The `auth login` command shows on its
+  /// own row, as the install command does.
+  static func notLoggedInMessage(_ kind: GitPlatformKind, host: String?) -> String {
+    "\(kind.cliName) is not logged in to \(host ?? kind.displayName)."
+  }
+
+  /// The mark, the name, and the CLI status, with Re-check and the docs link at the end.
+  private func platformRow(_ kind: GitPlatformKind) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(Self.markImageName(kind))
+        .renderingMode(.template)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 24, height: 24)
+        .foregroundStyle(.primary)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(kind.displayName)
+          .font(.headline)
+        availabilityView(kind)
       }
-    case .notInstalled:
-      HStack(alignment: .top) {
-        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-          .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 6) {
-          Text(Self.notInstalledMessage(kind))
-            .multilineTextAlignment(.leading)
-          CLIInstallCommandRow(command: kind.installCommand)
+      Spacer(minLength: 12)
+      Button("Re-check") {
+        Task {
+          await gitPlatform.invalidateResolution()
+          await probe(kind)
         }
       }
-    case .unavailable(let reason):
-      HStack(alignment: .top) {
-        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-          .accessibilityHidden(true)
-        Text(reason)
-          .multilineTextAlignment(.leading)
+      .disabled(checking.contains(kind))
+      HelpLink {
+        if let url = Self.docsURL(kind) {
+          NSWorkspace.shared.open(url)
+        }
       }
+      .help("Open \(kind.cliName) docs")
+      .accessibilityLabel("Open \(kind.cliName) docs")
+    }
+  }
+
+  @ViewBuilder
+  private func availabilityView(_ kind: GitPlatformKind) -> some View {
+    switch availability[kind] ?? .unknown {
+    case .available(let host, let user):
+      Label {
+        Text(user.isEmpty ? "\(kind.cliName) connected to \(host)" : "\(kind.cliName) connected to \(host) as @\(user)")
+      } icon: {
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+      }
+      .font(.callout)
+    case .notInstalled:
+      warning(Self.notInstalledMessage(kind), command: kind.installCommand, copyLabel: "Copy install command")
+    case .notLoggedIn(let host):
+      warning(
+        Self.notLoggedInMessage(kind, host: host), command: kind.loginCommand(host: host),
+        copyLabel: "Copy login command")
+    case .unavailable(let reason):
+      warning(reason, command: nil, copyLabel: "")
     case .unknown:
-      HStack {
+      HStack(spacing: 6) {
         ProgressView().controlSize(.small)
         Text("Checking \(kind.cliDisplayName)…")
       }
+      .font(.callout)
+      .foregroundStyle(.secondary)
     }
+  }
+
+  private func warning(_ message: String, command: String?, copyLabel: String) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Label {
+        Text(message)
+          .multilineTextAlignment(.leading)
+          .textSelection(.enabled)
+      } icon: {
+        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+      }
+      .font(.callout)
+      if let command {
+        CLIInstallCommandRow(command: command, copyLabel: copyLabel)
+      }
+    }
+  }
+
+  /// What codans can do with the Git Platform. An unsupported item is dimmed and says why.
+  private func capabilityList(_ kind: GitPlatformKind) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(kind.capabilities) { capability in
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Image(systemName: capability.isSupported ? "checkmark" : "minus")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(capability.isSupported ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
+            .frame(width: 14)
+            .accessibilityHidden(true)
+          Text(capability.title)
+            .foregroundStyle(capability.isSupported ? .primary : .secondary)
+          if let reason = capability.unsupportedReason {
+            Text("— \(reason)")
+              .foregroundStyle(.secondary)
+          }
+        }
+        .font(.callout)
+        .accessibilityElement(children: .combine)
+      }
+    }
+    .padding(.leading, 34)
   }
 
   private func probe(_ kind: GitPlatformKind) async {
@@ -184,9 +253,9 @@ struct GitPlatformsSettingsView: View {
       Text("Git Platform aliases")
     } footer: {
       Text(
-        "An alias gives the Git Platform and API host of a remote host that neither CLI knows, "
-          + "for example an SSH host name that is not the API host. It applies to every Project "
-          + "whose origin has that host, and it comes before the CLI hosts."
+        "A Project uses the Git Platform of its origin remote. Add an alias when neither CLI "
+          + "knows the host, for example an SSH host name that is not the API host. An alias "
+          + "applies to every Project whose origin has that host, and it comes before the CLI hosts."
       )
       .font(.footnote)
       .foregroundStyle(.secondary)
@@ -372,11 +441,12 @@ private struct GitPlatformAliasEditorSheet: View {
   }
 }
 
-/// Install command of a missing CLI: the command in a monospaced, selectable code style,
+/// Install or `auth login` command of a CLI: the command in a monospaced, selectable code style,
 /// with a trailing icon-only copy button. The icon changes to a checkmark for a short
 /// time after a click, as in `GitEnvironmentBanner`.
 struct CLIInstallCommandRow: View {
   let command: String
+  var copyLabel = "Copy install command"
 
   @State private var didCopy = false
 
@@ -401,8 +471,8 @@ struct CLIInstallCommandRow: View {
         Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
       }
       .buttonStyle(.borderless)
-      .help("Copy install command")
-      .accessibilityLabel("Copy install command")
+      .help(copyLabel)
+      .accessibilityLabel(copyLabel)
     }
   }
 
