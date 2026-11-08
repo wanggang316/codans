@@ -121,7 +121,7 @@ enum CommandPaletteItems {
             searchText: "\(project.name) \(worktree.name)",
             // The Project name as its own term scores the same for every
             // worktree of the Project, so a Project-name query ties them and
-            // the catalog-order tie-break keeps them grouped.
+            // the sidebar-order tie-break keeps them grouped.
             searchTerms: [project.name] + (authority.map { [$0] } ?? []),
             icon: "arrow.triangle.branch",
             remoteAuthority: authority,

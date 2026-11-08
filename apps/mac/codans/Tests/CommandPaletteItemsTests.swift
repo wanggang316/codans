@@ -182,7 +182,7 @@ struct CommandPaletteItemsTests {
     #expect(others.allSatisfy { $0.remoteAuthority == nil && $0.sidebarOrder == nil })
   }
 
-  /// Switch items record their catalog position (Project, then Worktree) so
+  /// Switch items record their sidebar position (Project, then Worktree) so
   /// same-score ties sort in sidebar order.
   @Test
   func switchItemsCarrySidebarOrder() {

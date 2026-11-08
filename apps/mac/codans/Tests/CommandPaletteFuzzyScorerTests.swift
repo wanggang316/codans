@@ -227,7 +227,7 @@ struct CommandPaletteFuzzyScorerTests {
   @Test
   func projectNameTermScoresEqualAcrossWorktreeNames() {
     // The Project-name term scores the same whatever the worktree name is,
-    // so one Project's items tie and the catalog-order tie-break groups them.
+    // so one Project's items tie and the sidebar-order tie-break groups them.
     let short = Self.item(
       id: "s", title: "Switch to Worktree: main", subtitle: "linko",
       searchText: "linko main", searchTerms: ["linko"]

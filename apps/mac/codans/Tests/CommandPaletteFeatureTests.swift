@@ -74,7 +74,7 @@ struct CommandPaletteFeatureTests {
     #expect(store.state.selectionID == "a")
   }
 
-  /// Same-score switch items sort by catalog order (Project, then Worktree),
+  /// Same-score switch items sort by sidebar order (Project, then Worktree),
   /// not by title, so each Project's items stay together.
   @Test
   func sameScoreItemsSortBySidebarOrder() async {
@@ -99,7 +99,7 @@ struct CommandPaletteFeatureTests {
     #expect(store.state.filtered.map(\.id) == ["l0", "l1", "r0", "r1"])
   }
 
-  /// Recency still applies before the catalog-order tie-break.
+  /// Recency still applies before the sidebar-order tie-break.
   @Test
   func recencyRanksAboveSidebarOrderTie() async {
     func switchItem(_ id: String, project: Int) -> CommandPaletteItem {

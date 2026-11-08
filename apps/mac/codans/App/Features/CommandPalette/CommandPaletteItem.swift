@@ -40,8 +40,8 @@ struct CommandPaletteItem: Equatable, Identifiable {
   /// Host display authority (`user@host[:port]`) of the Remote Project this
   /// item switches to. When set, the row shows the Remote Project marker.
   let remoteAuthority: String?
-  /// Position in the catalog (sidebar order). Breaks ties between same-score
-  /// items so one Project's items stay together.
+  /// Position in the sidebar (Project, then Worktree row). Breaks ties
+  /// between same-score items so one Project's items stay together.
   let sidebarOrder: SidebarOrder?
   let kind: Kind
 
