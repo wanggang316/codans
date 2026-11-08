@@ -896,7 +896,8 @@ final class AppState {
     let workspaceClient = WorkspaceClient.live(
       hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI(),
       fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate },
-      settings: { [settings] in settings.settings })
+      settings: { [settings] in settings.settings },
+      repositoriesAdded: { [weak self] projectID in self?.store?.send(.projectAdded(projectID)) })
     let workflowEngine = makeWorkflowEngine(
       hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
     self.workflowEngine = workflowEngine
@@ -1205,10 +1206,12 @@ final class AppState {
       gitRootDiscovery: { path in
         try? await GitWorktreeCLI().discoverGitRoot(candidatePath: path)
       },
-      reconcileWorktrees: { projectID in
+      reconcileWorktrees: { [weak self] projectID in
         // Same follow-up the sidebar's Add Project triggers: populate the
-        // worktree list from `git worktree list` and settle the load state.
+        // worktree list from `git worktree list` and settle the load state,
+        // then fetch its Pull Requests without waiting for selection.
         await hierarchyClient.reconcileDiscoveredWorktrees(projectID)
+        self?.store?.send(.projectAdded(projectID))
       },
       worktreeCreator: { spec in
         // Drive the sheet's streaming pipeline to completion; progress lines

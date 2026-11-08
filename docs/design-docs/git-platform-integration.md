@@ -33,7 +33,7 @@ Git Platform 集成在侧栏把每个 Worktree 关联的 Pull Request 状态（�
 
 执行模型：
 
-1. **reducer 拥有取数生命周期。** `GitPlatformFeature` reducer 监听失效事件（Worktree added/removed/branch-changed/post-mutation、Project activated、Manual refresh），对任一事件**只**发一个 effect，请客户端**一次性**取该 Project 下全部 Worktree 的 PR 数据。
+1. **reducer 拥有取数生命周期。** `GitPlatformFeature` reducer 监听失效事件（Project added、Worktree added/removed/branch-changed/post-mutation、Project activated、Manual refresh），对任一事件**只**发一个 effect，请客户端**一次性**取该 Project 下全部 Worktree 的 PR 数据。
 
 2. **客户端发批量 query。** `GitPlatformClient.batchPullRequests(repository, branches)` 选择该仓库 kind 的实现，由它调用自己的 CLI（GitHub：每 chunk 一次 `gh api graphql`，见 [GitHub 实现](#github-实现)；GitLab：每 chunk 一次 `glab api graphql`，见 [GitLab 实现](#gitlab-实现)）。实现把响应解码为 `[branch: PullRequestSnapshot]` 返回。
 
@@ -159,6 +159,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 |---|---|---|
 | Project 激活（从另一 Project 切入） | `HierarchyManager.selectedProjectID` 增量 | 缓存分支集 ≠ 当前 Worktree 分支则刷新 |
 | Worktree added | `HierarchyManager` catalog 增量 | 刷新 Project |
+| Project added / Workspace 新增仓库 | reconcile 完成后：`codans project add`、Workspace 创建或添加仓库发 `RootFeature.projectAdded`；侧栏添加 / 重试 / 编辑发 `RootFeature.sidebarProjectReconciled`。两者都把从未取过数的单元交给 `GitPlatformFeature.fetchUnitsAdded` | 取数单元注册进轮询；从未取过数的单元排队首次取数，经并发上限执行，不等选中或轮询 tick，app 不在前台时也执行。侧栏重试 / 编辑时已取过数的单元按 Project 激活处理（缓存不新鲜或分支集不符则立即刷新）。无 Git Platform 的单元照常解析一次，之后轮询跳过 |
 | Worktree removed | `HierarchyManager` catalog 增量 | 从缓存移除；不取数 |
 | Worktree 分支变更 / commit | `WorktreeHeadWatcher`（`.git/HEAD` + reflog 监听） | 刷新该 Worktree 所属取数单元（不是选中 Project）；取数返回前，分支已变的行按缓存改投新分支的 PR 或清空徽标 |
 | Merge / close / markReady 完成 | `GitPlatformFeature.*Completed(.success)` | 2 秒延迟刷新 Project |

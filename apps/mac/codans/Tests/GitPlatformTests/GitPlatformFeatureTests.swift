@@ -1131,6 +1131,106 @@ struct GitPlatformFeatureTests {
     }
   }
 
+  // MARK: - fetch units added
+
+  /// `codans project add` runs from any terminal, so the app is often not frontmost and the
+  /// poll is paused. The new unit is still fetched at once, without a selection change or a
+  /// poll tick, and joins the poll at the unselected cadence.
+  @Test
+  func anAddedUnitIsFetchedAtOnceWithoutSelectionOrTick() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let (selected, added) = (Self.pollUnit(1), Self.pollUnit(2))
+    let seed = Self.pollState(
+      [selected], selected: [selected.projectID], lastStarted: [selected.projectID: Self.fixedDate],
+      isPolling: false)
+    let store = Self.makePollStore(initialState: seed, clock: clock, calls: calls)
+
+    await store.send(.fetchUnitsAdded([added]))
+    #expect(store.state.inFlightFetchProjects == [added.projectID])
+    #expect(store.state.pollUnits == [selected.projectID, added.projectID])
+    #expect(store.state.selectedUnits == [selected.projectID])
+    #expect(store.state.projectByWorktree[added.pairs[0].worktreeID] == added.projectID)
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r2"])
+    #expect(store.state.pendingPollRefresh.isEmpty)
+  }
+
+  /// A repository added to a Workspace adds one unit; the Workspace's other units were
+  /// fetched before and are not fetched again.
+  @Test
+  func aRepositoryAddedToAWorkspaceFetchesOnlyItsNewUnit() async {
+    let clock = TestClock()
+    let calls = LockIsolated<[String]>([])
+    let (existing, added) = (Self.pollUnit(1), Self.pollUnit(2))
+    let seed = Self.pollState(
+      [existing], selected: [], lastStarted: [existing.projectID: Self.fixedDate], isPolling: false)
+    let store = Self.makePollStore(initialState: seed, clock: clock, calls: calls)
+
+    await store.send(.fetchUnitsAdded([existing, added]))
+    #expect(store.state.inFlightFetchProjects == [added.projectID])
+    await store.receive(\.projectBatchLoaded)
+    #expect(calls.value == ["r2"])
+  }
+
+  @Test
+  func addedUnitsShareThePollConcurrencyCap() async {
+    let clock = TestClock()
+    let gate = Gate()
+    let calls = LockIsolated<[String]>([])
+    let (a, b, c) = (Self.pollUnit(1), Self.pollUnit(2), Self.pollUnit(3))
+    let store = Self.makePollStore(clock: clock, gate: gate, calls: calls)
+
+    await store.send(.fetchUnitsAdded([a, b, c]))
+    #expect(store.state.inFlightFetchProjects == [a.projectID, b.projectID])
+    #expect(store.state.pendingPollRefresh == [c.projectID])
+
+    gate.open()
+    await store.receive(\.projectBatchLoaded)
+    await store.receive(\.projectBatchLoaded)
+    await store.receive(\.projectBatchLoaded)
+    #expect(Set(calls.value) == ["r1", "r2", "r3"])
+    #expect(store.state.pendingPollRefresh.isEmpty)
+  }
+
+  /// An added unit whose `origin` no Git Platform serves resolves once, like any other
+  /// fetch, and the poll then skips it.
+  @Test
+  func anAddedUnitWithoutAGitPlatformResolvesOnceThenThePollSkipsIt() async {
+    let clock = TestClock()
+    let base = Self.fixedDate
+    let now = LockIsolated(base)
+    let resolutions = LockIsolated(0)
+    let unit = Self.pollUnit(1)
+    let store = Self.makeStore(clock: clock, date: DateGenerator { now.value }) { client in
+      client.resolveRepository = { _, _ in
+        resolutions.withValue { $0 += 1 }
+        return nil
+      }
+      client.batchPullRequests = { _, _ in
+        Issue.record("a unit without a Git Platform must not be read")
+        return [:]
+      }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "git.example.com", path: "w/r1") }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.fetchUnitsAdded([unit]))
+    await store.receive(.gitPlatformUnresolved(unit.projectID, worktreeBranches: unit.pairs))
+    #expect(store.state.unitsWithoutGitPlatform == [unit.projectID])
+    #expect(resolutions.value == 1)
+
+    await store.send(.appActiveChanged(true))
+    now.setValue(base.addingTimeInterval(600))
+    await clock.advance(by: .seconds(600))
+    await store.send(.pollTick)
+    #expect(store.state.inFlightFetchProjects.isEmpty)
+    #expect(resolutions.value == 1)
+
+    await store.send(.appActiveChanged(false))
+  }
+
   @Test
   func remoteRefsChangeRefreshesTheUnitAndPollsItHot() async {
     let clock = TestClock()
@@ -1702,37 +1802,6 @@ struct GitPlatformFeatureTests {
     let store = Self.makeStore(initialState: seed)
 
     await store.send(.pruneToCatalog(projectIDs: [live], worktreeIDs: []))
-  }
-
-  /// One-shot gate so a test can hold a stubbed fetch open across other
-  /// actions, then release it. Models a `gh api graphql` still running when
-  /// the catalog mutates underneath it.
-  private final class Gate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuations: [CheckedContinuation<Void, Never>] = []
-    private var opened = false
-
-    func wait() async {
-      await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-        lock.lock()
-        if opened {
-          lock.unlock()
-          c.resume()
-          return
-        }
-        continuations.append(c)
-        lock.unlock()
-      }
-    }
-
-    func open() {
-      lock.lock()
-      opened = true
-      let pending = continuations
-      continuations = []
-      lock.unlock()
-      for continuation in pending { continuation.resume() }
-    }
   }
 
   /// Cadence-predicate fixture: an open/settled/in-flight snapshot in one line.

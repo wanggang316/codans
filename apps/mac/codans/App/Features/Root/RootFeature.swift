@@ -234,6 +234,14 @@ struct RootFeature {
     /// A structural hierarchy mutation landed (Project / Worktree removal,
     /// archive, auto-archive). Re-derives Git Platform state from the live catalog.
     case catalogMembershipChanged
+    /// A Project was added, or a repository was added to a Workspace, and its
+    /// reconcile settled. Queues the first Pull Request fetch of its fetch units, so an
+    /// unselected Project shows badges without a selection change or a poll tick.
+    case projectAdded(ProjectID)
+    /// The sidebar's add, retry, or edit reconcile of a Project settled. Units never
+    /// fetched take the capped first fetch of `projectAdded`; units fetched before
+    /// refresh as on activation, so an edited remote re-reads its Pull Requests.
+    case sidebarProjectReconciled(ProjectID)
     case engineEventReceived(LastEventMarker)
     /// Emitted from the event stream when libghostty reports a surface
     /// has exited (child died, user-initiated close via `close_surface`
@@ -1136,6 +1144,26 @@ struct RootFeature {
         effects.append(.send(.gitPlatform(Self.makePollUnitsChange(catalog: catalog))))
         return .merge(effects)
 
+      case .projectAdded(let projectID):
+        guard let project = lookupProject(projectID: projectID) else { return .none }
+        let units = Self.gitPlatformFetchUnits(in: project)
+        guard !units.isEmpty else { return .none }
+        return .send(.gitPlatform(.fetchUnitsAdded(units)))
+
+      case .sidebarProjectReconciled(let projectID):
+        guard let project = lookupProject(projectID: projectID) else { return .none }
+        let units = Self.gitPlatformFetchUnits(in: project)
+        let fetchedBefore = units.filter { state.gitPlatform.lastFetchStartedAt[$0.projectID] != nil }
+        let added = units.filter { state.gitPlatform.lastFetchStartedAt[$0.projectID] == nil }
+        var effects: [Effect<Action>] = fetchedBefore.map { unit in
+          .send(
+            .gitPlatform(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs)))
+        }
+        if !added.isEmpty {
+          effects.append(.send(.gitPlatform(.fetchUnitsAdded(added))))
+        }
+        return .merge(effects)
+
       case .worktreeHeadChanged(let worktreeID):
         // HEAD-file change fired by `WorktreeHeadWatcher`. Resolve the owning
         // Project so the reconciler can rerun `git worktree list --porcelain`
@@ -1400,13 +1428,11 @@ struct RootFeature {
         // Kick the ProjectReconciler so the newly-added (or retried)
         // Project transitions through .loading → .ready (or .failed) and the
         // worktree list populates via the reconcileDiscoveredWorktrees closure.
-        return .run { [client = hierarchyClient] send in
+        return .run { send in
           await projectReconciler.reconcile(projectID: projectID)
-          for action in await MainActor.run(body: {
-            Self.makeProjectGitPlatformRefresh(projectID: projectID, client: client)
-          }) {
-            await send(.gitPlatform(action))
-          }
+          // An activation fetch starts at once, outside the poll cap, so a
+          // Workspace added with many repositories would start them all.
+          await send(.sidebarProjectReconciled(projectID))
         }
 
       case .sidebar(.delegate(.refreshAllProjectsRequested)):
