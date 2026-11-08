@@ -361,6 +361,16 @@ nonisolated struct HierarchyClient: Sendable {
       _ name: String, _ branch: String, _ path: String
     ) throws -> WorktreeID
 
+  /// Holds back reconcile appends for the lease's Project while a sidebar
+  /// creation runs, so the create path inserts the new row at the top of
+  /// the unpinned segment (`HierarchyManager.beginWorktreeCreation`).
+  /// Idempotent per token.
+  var beginWorktreeCreation: @MainActor @Sendable (_ lease: WorktreeCreationLease) -> Void
+
+  /// Releases a lease taken through `beginWorktreeCreation`. Idempotent.
+  /// The last release of a Project triggers one reconcile of it.
+  var endWorktreeCreation: @MainActor @Sendable (_ lease: WorktreeCreationLease) -> Void
+
   /// End-to-end Remove Worktree. Tears down all surfaces (panes /
   /// notifications) for the worktree, runs the git client's
   /// relocate-then-prune removal, then drops the catalog row. The git
@@ -1013,11 +1023,12 @@ extension HierarchyClient {
         )
       },
       createWorktreeWithGit: { projectID, name, branch, path in
-        // reuseExisting heals the create-vs-reconcile race: a window-focus
-        // reconcile pulse can adopt the freshly materialized worktree into
-        // the catalog while the creation stream is still running its setup
-        // phase. Without it the finish path throws invariantViolation
-        // ("worktree with path … already exists") against its own worktree.
+        // The sidebar's creation lease keeps a reconcile pulse from adopting
+        // the freshly materialized worktree mid-stream, so this normally
+        // inserts at the unpinned boundary. reuseExisting stays as the
+        // fallback when a row for the path already exists: without it the
+        // finish path throws invariantViolation ("worktree with path …
+        // already exists") against its own worktree.
         // `select: false`: RootFeature decides whether the user lands on it.
         try manager.createWorktree(
           in: projectID,
@@ -1025,6 +1036,8 @@ extension HierarchyClient {
           reuseExisting: true, select: false
         )
       },
+      beginWorktreeCreation: { lease in manager.beginWorktreeCreation(lease) },
+      endWorktreeCreation: { lease in manager.endWorktreeCreation(lease) },
       removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
         let deleteRemote = (settings?.settings ?? .default).worktree.deleteRemoteBranchWithWorktree
         return try await removeWorktreeWithGit(
@@ -2404,6 +2417,8 @@ extension HierarchyClient: DependencyKey {
     setSidebarHostExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reconcileDiscoveredWorktrees: { _ in fatalError("HierarchyClient.liveValue not configured") },
     createWorktreeWithGit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    beginWorktreeCreation: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    endWorktreeCreation: { _ in fatalError("HierarchyClient.liveValue not configured") },
     removeWorktreeWithGit: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runningPaneCount: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectLoadState: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2528,6 +2543,11 @@ extension HierarchyClient: DependencyKey {
     createWorktreeWithGit: unimplemented(
       "HierarchyClient.createWorktreeWithGit", placeholder: WorktreeID()
     ),
+    // Every sidebar creation path takes and releases a lease; no-ops here
+    // keep the many creation tests free of lease stubs. Lease tests
+    // override both.
+    beginWorktreeCreation: { _ in },
+    endWorktreeCreation: { _ in },
     removeWorktreeWithGit: unimplemented(
       "HierarchyClient.removeWorktreeWithGit", placeholder: nil
     ),

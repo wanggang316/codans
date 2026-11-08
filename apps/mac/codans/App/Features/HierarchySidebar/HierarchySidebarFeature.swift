@@ -1284,6 +1284,9 @@ struct HierarchySidebarFeature {
         .readSnapshotSync()
         .projects[pending.projectID]?.git?.createScript?.command
       state.pendingWorktrees.append(pending)
+      // Held until the catalog write (or the row's discard), so a reconcile
+      // racing the stream cannot append the new path at the list tail.
+      hierarchyClient.beginWorktreeCreation(Self.creationLease(for: pending))
       return runPendingStream(pending)
 
     case .pendingWorktreeProgress(let id, let line):
@@ -1313,6 +1316,9 @@ struct HierarchySidebarFeature {
 
     case .pendingWorktreeFinished(let id, let path):
       guard let pending = state.pendingWorktrees[id: id] else { return .none }
+      // Released after the catalog write on every exit, success or failure.
+      // A failed write leaves the row for Retry, which takes a new lease.
+      defer { hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending)) }
       let pid = pending.projectID
       let displayName = pending.displayName
       let branch = pending.spec.name
@@ -1357,8 +1363,9 @@ struct HierarchySidebarFeature {
       // Race guard symmetric with progress / finished arms: a Cancel
       // that lands before the stream's failure event drains drops the
       // late .failed without spuriously logging or mutating state.
-      guard state.pendingWorktrees[id: id] != nil else { return .none }
+      guard let pending = state.pendingWorktrees[id: id] else { return .none }
       state.pendingWorktrees[id: id]?.status = .failed(err)
+      hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
       return .none
 
     case .pendingWorktreeRetryTapped(let id):
@@ -1373,10 +1380,15 @@ struct HierarchySidebarFeature {
       state.pendingWorktrees[id: id]?.progressLines = []
       // Re-read the (now-updated) row so the effect sees `status == .running`.
       guard let restarted = state.pendingWorktrees[id: id] else { return .none }
+      hierarchyClient.beginWorktreeCreation(Self.creationLease(for: restarted))
       return runPendingStream(restarted)
 
     case .pendingWorktreeDiscardTapped(let id):
-      state.pendingWorktrees.remove(id: id)
+      // A failed row has already released its lease; releasing again is a
+      // no-op, and covers a discard that reaches a row still holding one.
+      if let pending = state.pendingWorktrees.remove(id: id) {
+        hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
+      }
       return .none
 
     case .pendingWorktreeRowTapped:
@@ -1406,6 +1418,7 @@ struct HierarchySidebarFeature {
       // remove the row and cancel the stream, whose `onTermination`
       // terminates the spawned git child. Nothing reaches the catalog.
       state.pendingWorktrees.remove(id: id)
+      hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
       return .cancel(id: CancelID.pending(id))
 
     // MARK: Delegate
@@ -1426,6 +1439,12 @@ struct HierarchySidebarFeature {
       // Routed through the top-level Reducer; unreachable here.
       return .none
     }
+  }
+
+  /// The creation lease of a pending row. Keyed by the row id, so every
+  /// lifecycle arm can release it without storing it in state.
+  private static func creationLease(for pending: PendingWorktree) -> WorktreeCreationLease {
+    WorktreeCreationLease(projectID: pending.projectID, token: pending.id.raw)
   }
 
   /// Cancellable streaming effect that consumes `createWorktreeStream`
