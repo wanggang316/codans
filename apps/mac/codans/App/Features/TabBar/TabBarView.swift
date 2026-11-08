@@ -121,7 +121,7 @@ struct TabBarView: View {
           ))
       },
       emptyTabTitle: (worktree.path as NSString).lastPathComponent,
-      onCacheLiveTitle: { tabID, title in
+      onCacheLiveTitle: { tabID, title, paneID in
         // Direct manager call rather than a TCA action: the cache is a
         // persistence side-effect of rendering, not a user intent, so
         // routing through reducer + effect would add noise without
@@ -129,6 +129,7 @@ struct TabBarView: View {
         // on identical values, so a hot OSC stream is cheap.
         hierarchyManager.setCachedTabTitle(
           title,
+          paneID: paneID,
           for: tabID,
           in: worktreeID,
           in: projectID,

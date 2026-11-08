@@ -33,6 +33,19 @@ enum PaneTitleReader {
       isAtShellPrompt: false, lastTitle: nil, workingDirectories: [pane?.workingDirectory])
   }
 
+  /// The tab's cached title when it is the title of `selectedPaneID`. In a
+  /// split tab the chip can mirror another pane after a restart (focus is
+  /// not persisted), and that pane's header does not show the cached text.
+  /// A cache from before the pane ID was stored counts only in a one-pane
+  /// tab.
+  nonisolated static func cachedTitle(of tab: Tab, selectedPaneID: PaneID?) -> String? {
+    guard let selectedPaneID else { return nil }
+    if let owner = tab.cachedDisplayTitlePaneID {
+      return owner == selectedPaneID ? tab.cachedDisplayTitle : nil
+    }
+    return tab.panes.count <= 1 ? tab.cachedDisplayTitle : nil
+  }
+
   /// What a pane card header shows.
   nonisolated static func headerTitle(live: String?, stored: String?) -> String {
     live ?? stored ?? PaneTitle.placeholder

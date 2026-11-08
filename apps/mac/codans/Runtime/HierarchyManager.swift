@@ -2089,6 +2089,7 @@ final class HierarchyManager {
   /// are silent — the cache is best-effort, never load-bearing.
   func setCachedTabTitle(
     _ title: String?,
+    paneID: PaneID?,
     for tabID: TabID,
     in worktreeID: WorktreeID,
     in projectID: ProjectID
@@ -2102,12 +2103,12 @@ final class HierarchyManager {
       let tabIndex = catalog.projects[projectIndex]
         .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == tabID })
     else { return }
-    guard
-      catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitle != title
-    else { return }
+    let tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+    guard tab.cachedDisplayTitle != title || tab.cachedDisplayTitlePaneID != paneID else { return }
     catalog.projects[projectIndex]
       .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitle = title
+    catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitlePaneID = paneID
     store.scheduleSave(catalog)
   }
 
