@@ -172,22 +172,24 @@ struct SettingsSidebarView: View {
 
   private func iconStyle(for section: SettingsSection) -> SettingsIconTile.Style {
     switch section {
-    case .general: return .init(.symbol("gearshape.fill"), .gray)
-    case .gitPlatforms: return .init(.symbol("externaldrive.badge.timemachine"), .indigo)
-    case .worktree: return .init(.asset("git-branch"), .orange)
-    case .terminal: return .init(.prompt, .black, glyph: .green)
-    case .notifications: return .init(.symbol("bell.badge.fill"), .red)
-    case .globalCommands: return .init(.symbol("play.fill"), .green, glyphSize: 10)
-    case .shortcuts: return .init(.symbol("command"), .gray)
-    case .updates: return .init(.symbol("arrow.down"), .blue)
-    case .about: return .init(.symbol("info"), .gray)
-    case .agents: return .init(.symbol("sparkles"), .orange, gradientEnd: .pink)
-    case .developer: return .init(.symbol("puzzlepiece.extension.fill"), .pink, gradientEnd: .purple)
-    // Matches the AgentState panel's "Workflows" run rows (`WorkflowRunsSection`)
-    // so the glyph reads the same wherever a run shows up.
-    case .workflows: return .init(.symbol("arrow.triangle.branch"), .teal)
-    case .hosts: return .init(.symbol("globe"), .purple)
-    case .projectGeneral, .projectScripts: return .init(.symbol("questionmark"), .gray)
+    case .general: return .init(.symbol("gearshape.fill", size: 13), .gray)
+    // The badge sits low left, so the glyph moves right a little to look centered.
+    case .gitPlatforms:
+      return .init(.symbol("externaldrive.badge.timemachine", size: 15, nudge: -0.25), .indigo)
+    case .worktree: return .init(.asset("git-branch", size: 13), .orange)
+    case .terminal: return .init(.prompt, .graphite, glyphColor: SettingsIconTile.promptGreen)
+    case .notifications: return .init(.symbol("bell.badge.fill", size: 12.5), .red)
+    // A triangle's mass sits left of its box center; shift it right.
+    case .globalCommands: return .init(.symbol("play.fill", size: 10, nudge: 0.7), .green)
+    case .shortcuts: return .init(.symbol("command", size: 11.5), .gray)
+    case .updates: return .init(.symbol("arrow.down", size: 11.5), .blue)
+    case .about: return .init(.symbol("info", size: 11.5), .gray)
+    case .agents: return .init(.symbol("sparkles", size: 12.5), .sunset)
+    // The tab on the right pulls the mass left of the box center.
+    case .developer: return .init(.symbol("puzzlepiece.extension.fill", size: 13, nudge: 0.35), .magenta)
+    case .workflows: return .init(.symbol("app.connected.to.app.below.fill", size: 12.5), .teal)
+    case .hosts: return .init(.symbol("globe", size: 12.5), .purple)
+    case .projectGeneral, .projectScripts: return .init(.symbol("questionmark", size: 12), .gray)
     }
   }
 
@@ -203,89 +205,130 @@ struct SettingsSidebarView: View {
   }
 }
 
-/// A rounded-square tile with a white glyph on a gradient fill, as System
-/// Settings draws its sidebar icons. The fill is the tile color's system
-/// gradient; `gradientEnd` gives a two-color tile.
+/// A rounded-square tile with a glyph on a vertical gradient, as System
+/// Settings draws its sidebar icons. Each symbol is fit in a box sized for its
+/// shape, so glyphs of different proportions read at the same weight.
 private struct SettingsIconTile: View {
   enum Glyph {
-    case symbol(String)
+    /// An SF Symbol fit in a `size`-point box, moved `nudge` points right when
+    /// its visual mass is off its box center.
+    case symbol(String, size: CGFloat, nudge: CGFloat = 0)
     /// A shell prompt, `>_`. SF Symbols draws it only inside a window frame.
     case prompt
     /// A template-rendered SVG in the asset catalog.
-    case asset(String)
+    case asset(String, size: CGFloat)
+  }
+
+  /// Top and bottom colors of the tile fill.
+  struct Palette {
+    let top: Color
+    let bottom: Color
+
+    init(_ top: UInt32, _ bottom: UInt32) {
+      self.top = Color(rgb: top)
+      self.bottom = Color(rgb: bottom)
+    }
+
+    static let gray = Palette(0xA1A1A6, 0x6E6E73)
+    static let indigo = Palette(0x8E8CF8, 0x5856D6)
+    static let orange = Palette(0xFFB443, 0xFF8A00)
+    static let graphite = Palette(0x48484A, 0x1C1C1E)
+    static let red = Palette(0xFF6B6B, 0xF02D3A)
+    static let green = Palette(0x5EDB7A, 0x28B446)
+    static let blue = Palette(0x4DA3FF, 0x0A6CFF)
+    static let sunset = Palette(0xFF9F45, 0xFF3B6B)
+    static let magenta = Palette(0xF06BD0, 0xA53BF0)
+    static let teal = Palette(0x4FD8E0, 0x12A5B8)
+    static let purple = Palette(0xB57BFF, 0x8A3FFC)
   }
 
   struct Style {
     let glyph: Glyph
-    let color: Color
-    var gradientEnd: Color?
+    let palette: Palette
     var glyphColor: Color = .white
-    /// A solid glyph (a filled triangle) reads larger than an outlined one
-    /// of the same size, so it can ask for a smaller box.
-    var glyphSize: CGFloat = SettingsIconTile.defaultGlyphSize
 
-    init(
-      _ glyph: Glyph, _ color: Color, gradientEnd: Color? = nil, glyph glyphColor: Color = .white,
-      glyphSize: CGFloat = SettingsIconTile.defaultGlyphSize
-    ) {
+    init(_ glyph: Glyph, _ palette: Palette, glyphColor: Color = .white) {
       self.glyph = glyph
-      self.color = color
-      self.gradientEnd = gradientEnd
+      self.palette = palette
       self.glyphColor = glyphColor
-      self.glyphSize = glyphSize
     }
   }
+
+  static let promptGreen = Color(rgb: 0x4CE07A)
 
   let style: Style
 
   private static let side: CGFloat = 20
-  private static let cornerRadius: CGFloat = 5
-  static let defaultGlyphSize: CGFloat = 12
-  /// Lets a wide symbol (a drive with a badge) grow past its glyph size so it
-  /// does not read smaller than the square ones.
-  private static let wideGlyphExtra: CGFloat = 2
+  private static let cornerRadius: CGFloat = 4.75
 
   var body: some View {
-    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-      .fill(fill)
+    let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+    shape
+      .fill(LinearGradient(colors: [style.palette.top, style.palette.bottom], startPoint: .top, endPoint: .bottom))
       .overlay {
-        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-          .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+        // A light inner edge, brighter at the top, gives the tile its lift.
+        shape.strokeBorder(
+          LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.06)], startPoint: .top, endPoint: .bottom),
+          lineWidth: 0.5
+        )
       }
-      .overlay { glyph.foregroundStyle(style.glyphColor) }
+      .overlay {
+        glyph
+          .foregroundStyle(style.glyphColor)
+          .shadow(color: .black.opacity(0.18), radius: 0.4, y: 0.4)
+      }
       .frame(width: Self.side, height: Self.side)
-  }
-
-  private var fill: AnyShapeStyle {
-    if let end = style.gradientEnd {
-      return AnyShapeStyle(
-        LinearGradient(colors: [style.color, end], startPoint: .topLeading, endPoint: .bottomTrailing))
-    }
-    return AnyShapeStyle(style.color.gradient)
+      .shadow(color: .black.opacity(0.22), radius: 0.6, y: 0.5)
   }
 
   @ViewBuilder
   private var glyph: some View {
     switch style.glyph {
-    // Fit every glyph in the same box: the sidebar Label scales a bare
-    // symbol up to its row icon size, which fills the tile.
-    case .symbol(let name):
+    // `resizable()` fits the glyph's own bounds in the box; a font-sized symbol
+    // keeps uneven side bearings and the sidebar Label scales it up.
+    case .symbol(let name, let size, let nudge):
       Image(systemName: name)
         .resizable()
         .fontWeight(.semibold)
-        .symbolRenderingMode(.monochrome)
         .scaledToFit()
-        .frame(width: style.glyphSize + Self.wideGlyphExtra, height: style.glyphSize)
+        .frame(width: size, height: size)
+        .offset(x: nudge)
     case .prompt:
-      Text(">_")
-        .font(.system(size: 10, weight: .heavy, design: .monospaced))
-        .fixedSize()
-    case .asset(let name):
+      PromptShape()
+        .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+        .frame(width: 9, height: 7.5)
+    case .asset(let name, let size):
       Image(name)
         .renderingMode(.template)
         .resizable()
         .scaledToFit()
-        .frame(width: style.glyphSize, height: style.glyphSize)
+        .frame(width: size, height: size)
     }
+  }
+}
+
+/// `>_` drawn as strokes so it centers on its own bounds, unlike text, which
+/// sits on a baseline.
+nonisolated private struct PromptShape: Shape {
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.minY + rect.height * 0.42))
+    path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + rect.height * 0.84))
+    path.move(to: CGPoint(x: rect.minX + rect.width * 0.55, y: rect.maxY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    return path
+  }
+}
+
+extension Color {
+  /// An sRGB color from `0xRRGGBB`.
+  fileprivate init(rgb: UInt32) {
+    self.init(
+      .sRGB,
+      red: Double((rgb >> 16) & 0xFF) / 255,
+      green: Double((rgb >> 8) & 0xFF) / 255,
+      blue: Double(rgb & 0xFF) / 255
+    )
   }
 }
