@@ -1,0 +1,20 @@
+# pane C zmx log (9538E8C3-6B47-4968-AAFB-F95B2E1FA072), real Claude Code 2.1.319 (theme: auto)
+# startup under light appearance: Claude enables mode 2031 -> report 997;2n
+38:[1794158968017] [debug] (default): buffering pty input data=1b5b3f3939373b326e
+# C hidden, surface reclaimed
+239:[1794159052340] [info] (default): unsetting leader session=9538E8C3-6B47-4968-AAFB-F95B2E1FA072 fd=9
+# appearance flipped to dark while hidden; C shown again: reattach, replay, report 997;1n (dark)
+[1794159058768] [info] (default): client disconnected fd=9 remaining=0
+[1794159058778] [info] (default): client connected fd=9 total=1
+[1794159058778] [info] (default): client connected fd=10 total=2
+[1794159058778] [info] (default): client disconnected fd=9 remaining=1
+[1794159058778] [debug] (default): cursor before serialize: x=2 y=58 pending_wrap=false
+[1794159058778] [debug] (default): serialize terminal state
+[1794159058778] [info] (default): setting new leader client_fd=10
+[1794159058778] [info] (default): sending ipc message tag=Resize
+[1794159058778] [debug] (default): init resize rows=65 cols=192
+[1794159058778] [debug] (default): resize rows=65 cols=192
+[1794159058778] [debug] (default): buffering pty input data=1b5b4f
+[1794159058778] [debug] (default): buffering pty input data=1b5b4f
+[1794159058778] [debug] (default): buffering pty input data=1b5b3f3939373b316e
+[1794159058778] [debug] (default): buffering pty input data=1b5b3f3939373b316e

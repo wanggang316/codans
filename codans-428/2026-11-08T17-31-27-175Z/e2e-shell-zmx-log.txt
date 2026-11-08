@@ -1,0 +1,32 @@
+# pane A zmx log (10F5516C-359B-4E29-836C-A5B8BAB75BAC), mode 2031 enabled at the shell prompt
+# appearance light -> enable -> report 997;2n
+[1794158914226] [info] (stream): OSC 1 (change icon) received and ignored icon=..v-428/fixture
+[1794158914226] [info] (default): sending ipc message tag=Output
+[1794158914226] [debug] (default): buffering pty input data=1b5b3f3939373b326e
+[1794158914226] [debug] (default): buffering pty input data=1b5b3f3939373b326e
+[1794158914226] [info] (default): sending ipc message tag=Output
+# A hidden, surface reclaimed (leader client disconnects)
+[1794158923983] [info] (default): unsetting leader session=10F5516C-359B-4E29-836C-A5B8BAB75BAC fd=9
+[1794158923983] [info] (default): client disconnected fd=9 remaining=0
+[1794158924039] [info] (default): client connected fd=9 total=1
+# appearance flipped to dark at 17941589343N (no report: no surface)
+# A shown again: reattach, replay, report 997;1n (dark)
+[1794158938913] [info] (default): client disconnected fd=9 remaining=0
+[1794158938921] [info] (default): client connected fd=9 total=1
+[1794158938921] [info] (default): client connected fd=10 total=2
+[1794158938921] [info] (default): client disconnected fd=9 remaining=1
+[1794158938921] [debug] (default): cursor before serialize: x=8 y=11 pending_wrap=false
+[1794158938921] [debug] (default): serialize terminal state
+[1794158938921] [info] (default): setting new leader client_fd=10
+[1794158938921] [info] (default): sending ipc message tag=Resize
+[1794158938921] [debug] (default): init resize rows=65 cols=192
+[1794158938921] [debug] (default): resize rows=65 cols=192
+[1794158938921] [debug] (default): buffering pty input data=1b5b3f3939373b316e
+[1794158938921] [debug] (default): buffering pty input data=1b5b3f3939373b316e
+# live: A visible, appearance flipped dark -> light
+[1794158953894] [debug] (default): buffering pty input data=1b5b3f3939373b316e
+[1794158953894] [debug] (default): buffering pty input data=1b5b3f3939373b316e
+[1794158953896] [debug] (default): buffering pty input data=1b5b3f3939373b326e
+[1794158953896] [debug] (default): buffering pty input data=1b5b3f3939373b326e
+[1794158953896] [debug] (default): buffering pty input data=1b5b3f3939373b326e
+[1794158953896] [debug] (default): buffering pty input data=1b5b3f3939373b326e
