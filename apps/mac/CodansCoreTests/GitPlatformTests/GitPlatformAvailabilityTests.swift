@@ -34,7 +34,9 @@ struct GitPlatformAvailabilityTests {
   func loginCommandUsesTheCLIName() {
     #expect(GitPlatformKind.github.loginCommand == "gh auth login")
     #expect(GitPlatformKind.gitlab.loginCommand == "glab auth login")
-    #expect(GitPlatformKind.gitlab.loginCommand(host: "gitlab.example.com") == "glab auth login --hostname gitlab.example.com")
+    #expect(
+      GitPlatformKind.gitlab.loginCommand(host: "gitlab.example.com")
+        == "glab auth login --hostname gitlab.example.com")
   }
 
   @Test

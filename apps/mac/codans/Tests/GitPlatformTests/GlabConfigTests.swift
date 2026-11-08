@@ -76,10 +76,13 @@ struct GlabConfigTests {
     let root = try Self.temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     try Self.writeConfig(host: "gitlab.home.example.com", in: root.appendingPathComponent("custom"))
-    try Self.writeConfig(host: "gitlab.app-support.example.com", in: root.appendingPathComponent("Library/Application Support/glab-cli"))
+    try Self.writeConfig(
+      host: "gitlab.app-support.example.com",
+      in: root.appendingPathComponent("Library/Application Support/glab-cli"))
 
     let env = ["GLAB_CONFIG_DIR": root.appendingPathComponent("custom").path]
-    #expect(GlabConfig.loggedInHosts(environment: env, home: root.path).map(\.host) == ["gitlab.home.example.com"])
+    #expect(
+      GlabConfig.loggedInHosts(environment: env, home: root.path).map(\.host) == ["gitlab.home.example.com"])
     #expect(GlabConfig.directories(environment: env, home: root.path).count == 1)
   }
 
@@ -88,7 +91,9 @@ struct GlabConfigTests {
     let root = try Self.temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     try Self.writeConfig(host: "gitlab.xdg.example.com", in: root.appendingPathComponent("xdg/glab-cli"))
-    try Self.writeConfig(host: "gitlab.app-support.example.com", in: root.appendingPathComponent("Library/Application Support/glab-cli"))
+    try Self.writeConfig(
+      host: "gitlab.app-support.example.com",
+      in: root.appendingPathComponent("Library/Application Support/glab-cli"))
 
     let env = ["XDG_CONFIG_HOME": root.appendingPathComponent("xdg").path]
     #expect(GlabConfig.loggedInHosts(environment: env, home: root.path).map(\.host) == ["gitlab.xdg.example.com"])
@@ -98,7 +103,9 @@ struct GlabConfigTests {
   func theMacOSLocationIsUsedWhenNoOtherFileExists() throws {
     let root = try Self.temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
-    try Self.writeConfig(host: "gitlab.app-support.example.com", in: root.appendingPathComponent("Library/Application Support/glab-cli"))
+    try Self.writeConfig(
+      host: "gitlab.app-support.example.com",
+      in: root.appendingPathComponent("Library/Application Support/glab-cli"))
 
     #expect(
       GlabConfig.loggedInHosts(environment: [:], home: root.path).map(\.host) == ["gitlab.app-support.example.com"])
@@ -109,9 +116,8 @@ struct GlabConfigTests {
     let root = try Self.temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     #expect(GlabConfig.loggedInHosts(environment: [:], home: root.path).isEmpty)
-    #expect(
-      GlabConfig.loggedInHosts(environment: ["GLAB_CONFIG_DIR": root.appendingPathComponent("none").path], home: root.path)
-        .isEmpty)
+    let env = ["GLAB_CONFIG_DIR": root.appendingPathComponent("none").path]
+    #expect(GlabConfig.loggedInHosts(environment: env, home: root.path).isEmpty)
   }
 
   /// `GitLabGitPlatform.authenticatedHosts` comes from the file and needs no `glab`.

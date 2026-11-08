@@ -266,7 +266,8 @@ struct GitLabDecodingTests {
     // Unknown field outside the optional set.
     #expect(!GitLabJSONParsers.isOptionalFieldError(try Self.loadFixture("gitlab-graphql-error")))
     // Message only, without `extensions`.
-    let messageOnly = #"{"errors":[{"message":"Field 'reviewState' doesn't exist on type 'UserMergeRequestInteraction'"}]}"#
+    let messageOnly =
+      #"{"errors":[{"message":"Field 'reviewState' doesn't exist on type 'UserMergeRequestInteraction'"}]}"#
     #expect(GitLabJSONParsers.isOptionalFieldError(Data(messageOnly.utf8)))
     // An optional field error next to another error.
     #expect(
