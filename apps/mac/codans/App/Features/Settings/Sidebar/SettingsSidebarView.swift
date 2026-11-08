@@ -20,12 +20,19 @@ struct SettingsSidebarView: View {
   @Environment(HierarchyManager.self) private var hierarchyManager
   @State private var expandedProjects: [ProjectID: Bool] = [:]
 
+  /// The sidebar List is an outline (the Project rows disclose), so it indents every
+  /// top-level row by the disclosure-triangle width, leaf rows too. The global rows
+  /// have no triangle; pull them back so their icons start at the section-header and
+  /// disclosure-triangle edge.
+  private static let outlineIndent: CGFloat = 12
+
   var body: some View {
     ScrollViewReader { proxy in
       List(selection: $selection) {
         Section {
           ForEach(SettingsSection.globals, id: \.self) { section in
             globalRow(for: section)
+              .padding(.leading, -Self.outlineIndent)
               .tag(Optional(section))
               .id(section)
           }
