@@ -20,6 +20,32 @@ Before 1.0, a breaking change bumps the minor version. Releases are dated.
 
 ### Security
 
+## [0.11.0] - 2026-11-09
+
+### Changed
+
+- **Settings has a new sidebar.** Panes show colored icon tiles in three
+  groups, Hosts is now Remote Hosts and Developer is now Integrations, and
+  each Project has one page, with its commands last.
+- **Pane and agent titles follow one set of rules.** The pane header and its
+  tab show the title the running program sets, Agents View rows show the
+  agent's own title, and both keep their title across a restart.
+- **The Command Palette tells Remote Project worktrees apart.** Their rows
+  show the remote marker, search matches the host name, and rows follow the
+  sidebar order.
+
+### Fixed
+
+- **New worktrees stay at the top of the list.** A worktree created in codans
+  no longer lands at the end of its Project's list, and a failed creation no
+  longer leaves two rows.
+- **Remote Projects no longer list a folder twice.** A path through a symlink
+  or typed in another letter case now matches the Project that already holds
+  the folder, and existing duplicate rows merge.
+- **Shortcut hints follow the ⌘ key again.** Some hints showed while ⌘ was up
+  and hid while it was held; the Run button's hint moved to its tooltip, so
+  the toolbar no longer shifts.
+
 ## [0.10.0] - 2026-11-07
 
 ### Added
