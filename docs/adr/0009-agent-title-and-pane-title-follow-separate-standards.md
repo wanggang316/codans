@@ -113,3 +113,8 @@ of what the program works on (192 bytes or less). Codans parses and stores it
 - The OSC 7501 specification changes the meaning of `title` or `msg`.
 - Verified OSC 7501 producers send no `title`, so the row always shows the
   OSC 0/2 fallback.
+  Checked on 2026-11-08 (#408): Claude Code and Codex send no OSC 7501
+  `title`, so this condition is met. The owner reviewed it and kept the
+  agent title order of decision 2. The `title` step costs nothing today and
+  applies when a producer sends `title`. Do not reopen this question until a
+  producer changes what it sends.
