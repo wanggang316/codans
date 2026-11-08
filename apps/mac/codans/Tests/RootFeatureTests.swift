@@ -1436,6 +1436,73 @@ struct RootFeatureTests {
     await store.finish()
   }
 
+  /// A Workspace added from the sidebar with three repositories starts at most two
+  /// first fetches at once; the third waits for a slot.
+  @Test
+  func aWorkspaceAddedFromTheSidebarFetchesUnderTheConcurrencyCap() async {
+    let members = ["a", "b", "c"].map { name in
+      Worktree(name: name, path: "/tmp/ws/\(name)", branch: "feat", sourceGitRoot: "/src/\(name)")
+    }
+    let workspace = Project(
+      name: "ws", rootPath: "/tmp/ws", worktrees: [Worktree(name: "ws", path: "/tmp/ws")] + members,
+      isWorkspace: true)
+    let catalog = Catalog(projects: [workspace])
+    let gate = Gate()
+    let reads = LockIsolated(0)
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in
+        reads.withValue { $0 += 1 }
+        await gate.wait()
+        return [:]
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.sidebar(.delegate(.reconcileProjectRequested(workspace.id))))
+    await store.receive(\.sidebarProjectReconciled)
+    await store.receive(\.gitPlatform.fetchUnitsAdded)
+    #expect(store.state.gitPlatform.inFlightFetchProjects.count == 2)
+    #expect(store.state.gitPlatform.pendingPollRefresh.count == 1)
+
+    gate.open()
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    #expect(reads.value == 3)
+    #expect(store.state.gitPlatform.pendingPollRefresh.isEmpty)
+    await store.finish()
+  }
+
+  /// A sidebar retry or edit of a Project fetched before refreshes it as on activation.
+  @Test
+  func aSidebarReconcileOfAFetchedProjectRefreshesAsOnActivation() async {
+    let main = Worktree(name: "main", path: "/repo", branch: "main")
+    let project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo", worktrees: [main])
+    var initial = RootFeature.State()
+    initial.gitPlatform.pollUnits = [project.id]
+    initial.gitPlatform.lastFetchStartedAt[project.id] = Date(timeIntervalSince1970: 1_699_999_000)
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      Self.stubGitPlatformFetch(&$0)
+    }
+    store.exhaustivity = .off
+
+    await store.send(.sidebarProjectReconciled(project.id))
+    await store.receive(
+      .gitPlatform(
+        .projectActivated(
+          project.id, gitRoot: URL(fileURLWithPath: "/repo"),
+          worktreeBranches: [.init(worktreeID: main.id, branch: "main")])))
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    await store.finish()
+  }
+
   /// A folder Project has no fetch unit, so adding it sends nothing.
   @Test
   func addingAProjectWithoutARepositorySendsNoFetch() async {

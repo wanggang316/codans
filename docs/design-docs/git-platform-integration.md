@@ -159,7 +159,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 |---|---|---|
 | Project 激活（从另一 Project 切入） | `HierarchyManager.selectedProjectID` 增量 | 缓存分支集 ≠ 当前 Worktree 分支则刷新 |
 | Worktree added | `HierarchyManager` catalog 增量 | 刷新 Project |
-| Project added / Workspace 新增仓库 | 侧栏添加、`codans project add`、Workspace 创建或添加仓库，reconcile 完成后发 `RootFeature.projectAdded` → `GitPlatformFeature.fetchUnitsAdded` | 取数单元注册进轮询；从未取过数的单元排队首次取数，经并发上限执行，不等选中或轮询 tick，app 不在前台时也执行。无 Git Platform 的单元照常解析一次，之后轮询跳过 |
+| Project added / Workspace 新增仓库 | reconcile 完成后：`codans project add`、Workspace 创建或添加仓库发 `RootFeature.projectAdded`；侧栏添加 / 重试 / 编辑发 `RootFeature.sidebarProjectReconciled`。两者都把从未取过数的单元交给 `GitPlatformFeature.fetchUnitsAdded` | 取数单元注册进轮询；从未取过数的单元排队首次取数，经并发上限执行，不等选中或轮询 tick，app 不在前台时也执行。侧栏重试 / 编辑时已取过数的单元按 Project 激活处理（缓存不新鲜或分支集不符则立即刷新）。无 Git Platform 的单元照常解析一次，之后轮询跳过 |
 | Worktree removed | `HierarchyManager` catalog 增量 | 从缓存移除；不取数 |
 | Worktree 分支变更 / commit | `WorktreeHeadWatcher`（`.git/HEAD` + reflog 监听） | 刷新该 Worktree 所属取数单元（不是选中 Project）；取数返回前，分支已变的行按缓存改投新分支的 PR 或清空徽标 |
 | Merge / close / markReady 完成 | `GitPlatformFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
