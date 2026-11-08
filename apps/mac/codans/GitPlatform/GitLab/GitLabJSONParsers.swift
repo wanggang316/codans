@@ -108,8 +108,10 @@ nonisolated enum GitLabJSONParsers {
     return Page(nodes: jobs.nodes ?? [], nextCursor: try nextCursor(of: jobs, what: "pipeline jobs"))
   }
 
-  /// Parses one page of `GitLabMergeRequestQuery.reviewersQuery`.
-  static func parseReviewerPage(_ data: Data) throws -> Page<Reviewer> {
+  /// Parses one page of `GitLabMergeRequestQuery.reviewersQuery`. The connection keeps
+  /// its `pageInfo` as sent: a page without it leaves the reviewer list incomplete, which
+  /// withholds "approved" but does not fail the read.
+  static func parseReviewerPage(_ data: Data) throws -> Connection<Reviewer> {
     struct Wire: Decodable {
       struct MergeRequest: Decodable { var reviewers: Connection<Reviewer>? }
       struct Project: Decodable { var mergeRequest: MergeRequest? }
@@ -122,7 +124,7 @@ nonisolated enum GitLabJSONParsers {
     guard let reviewers = wire.data?.project?.mergeRequest?.reviewers else {
       throw GitPlatformError.other("reviewers: no reviewer list in the response")
     }
-    return Page(nodes: reviewers.nodes ?? [], nextCursor: try nextCursor(of: reviewers, what: "reviewers"))
+    return reviewers
   }
 
   /// `true` when `data` is a GraphQL `errors` body and every error is an unknown field

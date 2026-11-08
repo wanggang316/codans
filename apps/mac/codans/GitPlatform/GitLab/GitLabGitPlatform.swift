@@ -254,8 +254,8 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
 
   /// The merge request with every reviewer, read like `completingJobs`, so a requested
   /// change on a later page reaches the review decision. A list longer than `maxPages`
-  /// pages stays incomplete (`hasNextPage` true): it only withholds "approved", so it does
-  /// not fail the read.
+  /// pages, or a page without usable `pageInfo`, stays incomplete: it only withholds
+  /// "approved", so it does not fail the read.
   private func completingReviewers(
     of node: GitLabJSONParsers.MergeRequestNode, exec: URL, repository: GitPlatformRepository
   ) async throws -> GitLabJSONParsers.MergeRequestNode {
@@ -273,13 +273,11 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       )
       let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
       let page = try GitLabJSONParsers.parseReviewerPage(data)
-      reviewers.nodes = (reviewers.nodes ?? []) + page.nodes
-      guard let next = page.nextCursor else {
-        reviewers.pageInfo = GitLabJSONParsers.PageInfo(hasNextPage: false, endCursor: nil)
-        break
-      }
+      reviewers.nodes = (reviewers.nodes ?? []) + (page.nodes ?? [])
+      // `nil`, or a next page without a cursor, keeps the list incomplete.
+      reviewers.pageInfo = page.pageInfo
+      guard page.pageInfo?.hasNextPage == true, let next = page.pageInfo?.endCursor, !next.isEmpty else { break }
       cursor = next
-      reviewers.pageInfo = GitLabJSONParsers.PageInfo(hasNextPage: true, endCursor: next)
     }
     var completed = node
     completed.reviewers = reviewers
