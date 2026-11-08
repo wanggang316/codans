@@ -259,7 +259,9 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   private func completingReviewers(
     of node: GitLabJSONParsers.MergeRequestNode, exec: URL, repository: GitPlatformRepository
   ) async throws -> GitLabJSONParsers.MergeRequestNode {
-    guard var reviewers = node.reviewers,
+    // A first page without `nodes` is unknown: later pages cannot make the list
+    // complete, so it stays as decoded (incomplete).
+    guard var reviewers = node.reviewers, var known = reviewers.nodes,
       var cursor = reviewers.pageInfo?.hasNextPage == true ? reviewers.pageInfo?.endCursor : nil,
       let iid = node.iid
     else { return node }
@@ -278,7 +280,8 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
         reviewers.pageInfo = nil
         break
       }
-      reviewers.nodes = (reviewers.nodes ?? []) + pageNodes
+      known += pageNodes
+      reviewers.nodes = known
       // `nil`, or a next page without a cursor, keeps the list incomplete.
       reviewers.pageInfo = page.pageInfo
       guard page.pageInfo?.hasNextPage == true, let next = page.pageInfo?.endCursor, !next.isEmpty else { break }
