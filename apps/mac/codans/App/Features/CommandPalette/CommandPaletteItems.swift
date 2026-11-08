@@ -99,9 +99,15 @@ enum CommandPaletteItems {
     catalog: Catalog
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = []
-    for (projectIndex, project) in catalog.projects.enumerated() {
+    for (projectIndex, project) in catalog.sidebarOrderedProjects.enumerated() {
       let authority = project.remoteHost?.displayAuthority
-      for (worktreeIndex, worktree) in project.worktrees.enumerated()
+      // Rows the sidebar does not list (members of a collapsed workspace
+      // group) sort after the listed ones, in catalog order.
+      let rowIDs = project.sidebarRowWorktreeIDs
+      let listed = rowIDs.compactMap { id in project.worktrees.first { $0.id == id } }
+      let listedIDs = Set(rowIDs)
+      let unlisted = project.worktrees.filter { !listedIDs.contains($0.id) }
+      for (worktreeIndex, worktree) in (listed + unlisted).enumerated()
       where worktree.id != selection.worktreeID && !worktree.archived {
         items.append(
           CommandPaletteItem(
@@ -119,7 +125,7 @@ enum CommandPaletteItems {
             searchTerms: [project.name] + (authority.map { [$0] } ?? []),
             icon: "arrow.triangle.branch",
             remoteAuthority: authority,
-            catalogOrder: .init(project: projectIndex, worktree: worktreeIndex),
+            sidebarOrder: .init(project: projectIndex, worktree: worktreeIndex),
             kind: .selectWorktree(project.id, worktree.id)
           )
         )

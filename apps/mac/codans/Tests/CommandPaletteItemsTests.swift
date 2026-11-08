@@ -179,13 +179,13 @@ struct CommandPaletteItemsTests {
     #expect(localItem?.searchTerms.contains("dev@box:2222") == false)
     let others = items.filter { !$0.id.hasPrefix("worktree.select.") }
     #expect(!others.isEmpty)
-    #expect(others.allSatisfy { $0.remoteAuthority == nil && $0.catalogOrder == nil })
+    #expect(others.allSatisfy { $0.remoteAuthority == nil && $0.sidebarOrder == nil })
   }
 
   /// Switch items record their catalog position (Project, then Worktree) so
   /// same-score ties sort in sidebar order.
   @Test
-  func switchItemsCarryCatalogOrder() {
+  func switchItemsCarrySidebarOrder() {
     var catalog = Catalog()
     var first = Project(name: "a", rootPath: "/tmp/a", gitRoot: "/tmp/a")
     let a0 = Worktree(name: "zeta", path: "/tmp/a/zeta", branch: "zeta")
@@ -198,12 +198,42 @@ struct CommandPaletteItemsTests {
     let items = Self.withEmptySettings {
       CommandPaletteItems.build(selection: Self.emptySelection, catalog: catalog)
     }
-    func order(_ worktree: Worktree) -> CommandPaletteItem.CatalogOrder? {
-      items.first { $0.id == "worktree.select.\(worktree.id.raw.uuidString)" }?.catalogOrder
+    func order(_ worktree: Worktree) -> CommandPaletteItem.SidebarOrder? {
+      items.first { $0.id == "worktree.select.\(worktree.id.raw.uuidString)" }?.sidebarOrder
     }
     #expect(order(a0) == .init(project: 0, worktree: 0))
     #expect(order(a1) == .init(project: 0, worktree: 1))
     #expect(order(b0) == .init(project: 1, worktree: 0))
+  }
+
+  /// The order key follows the sidebar, not the catalog array: Projects
+  /// grouped by Host with This Mac first, then the main checkout, pinned
+  /// worktrees, and the rest.
+  @Test
+  func switchItemsFollowSidebarHostAndWorktreeOrder() {
+    let host = HostRecord(address: "box")
+    var remote = Project(
+      name: "linko", rootPath: "/srv/linko", gitRoot: "/srv/linko",
+      hostID: host.id, remoteHost: host.endpoint)
+    let remoteMain = Worktree(name: "main", path: "/srv/linko", branch: "main")
+    remote.worktrees = [remoteMain]
+    var local = Project(name: "linko", rootPath: "/tmp/linko", gitRoot: "/tmp/linko")
+    let rest = Worktree(name: "rest", path: "/tmp/linko-rest", branch: "rest")
+    let pinned = Worktree(name: "pinned", path: "/tmp/linko-pinned", branch: "pinned", isPinned: true)
+    let main = Worktree(name: "main", path: "/tmp/linko", branch: "main")
+    local.worktrees = [rest, pinned, main]
+    // Catalog order puts the Remote Project first; the sidebar shows This Mac first.
+    let catalog = Catalog(projects: [remote, local], hosts: [host])
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(selection: Self.emptySelection, catalog: catalog)
+    }
+    func order(_ worktree: Worktree) -> CommandPaletteItem.SidebarOrder? {
+      items.first { $0.id == "worktree.select.\(worktree.id.raw.uuidString)" }?.sidebarOrder
+    }
+    #expect(order(main) == .init(project: 0, worktree: 0))
+    #expect(order(pinned) == .init(project: 0, worktree: 1))
+    #expect(order(rest) == .init(project: 0, worktree: 2))
+    #expect(order(remoteMain) == .init(project: 1, worktree: 0))
   }
 
   // MARK: - Focused pane resolution

@@ -155,7 +155,7 @@ struct CommandPaletteFeature {
         if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
         // Same score: items without a catalog position first (by title),
         // then catalog items in sidebar order so each Project stays grouped.
-        switch (lhs.0.catalogOrder, rhs.0.catalogOrder) {
+        switch (lhs.0.sidebarOrder, rhs.0.sidebarOrder) {
         case (let l?, let r?) where l != r: return l < r
         case (nil, _?): return true
         case (_?, nil): return false

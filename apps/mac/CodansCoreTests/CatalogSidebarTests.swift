@@ -139,6 +139,13 @@ struct CatalogSidebarTests {
     #expect(catalog.workspaceRowStandIns == [reference.id: defaultTerminal.id])
   }
 
+  /// The expanded row list: the Project's own row first, then its children.
+  @Test
+  func sidebarRowWorktreeIDsListTheOwnRowThenChildren() {
+    #expect(folder.sidebarRowWorktreeIDs == [folderRoot.id])
+    #expect(repository.sidebarRowWorktreeIDs == [main.id, pinned.id, feature.id])
+  }
+
   @Test
   func aRepositoryKeepsItsMainCheckoutAsARow() {
     #expect(repository.rowWorktree == nil)

@@ -43,6 +43,17 @@ struct CatalogSidebarHostTests {
     #expect(groups.allSatisfy { $0.isExpanded })
   }
 
+  /// The unfiltered order ignores a collapsed Host and the sidebar filter:
+  /// it lists every Project in Host order.
+  @Test
+  func sidebarOrderedProjectsGroupByHostIgnoringCollapseAndFilter() {
+    var catalog = self.catalog
+    catalog.collapsedSidebarHosts = [.host(box.id)]
+    catalog.sidebarFilter = .workspace
+    #expect(catalog.sidebarOrderedProjects.map(\.name) == ["notes", "api", "web"])
+    #expect(Catalog(projects: [local]).sidebarOrderedProjects.map(\.name) == ["notes"])
+  }
+
   @Test
   func aHostWithoutProjectsHasNoGroup() throws {
     let catalog = Catalog(projects: [local, remote("api", on: box, root: boxRoot)], hosts: [box, mini])

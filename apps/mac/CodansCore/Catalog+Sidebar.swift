@@ -40,6 +40,15 @@ extension Project {
     return main + pinned + rest
   }
 
+  /// The worktree rows of the Project in sidebar order as if it were
+  /// expanded: the row the Project itself stands for, then its child rows.
+  public var sidebarRowWorktreeIDs: [WorktreeID] {
+    var rows: [WorktreeID] = []
+    if let row = rowWorktree { rows.append(row.id) }
+    rows += isWorkspace ? workspaceSidebarRows.compactMap(\.worktreeID) : childWorktrees.map(\.id)
+    return rows
+  }
+
   /// Whether the Project row can open onto child rows: always for a git
   /// Project, whose worktrees come and go; for a folder, only once it has
   /// rows besides its own; for a workspace, once it has a group row.
@@ -228,16 +237,17 @@ extension Catalog {
     let shown = sidebarHostLevel.map { $0.groups(listed).filter(\.isExpanded).flatMap(\.projects) } ?? listed
     return shown.flatMap { project -> [SidebarRowAddress] in
       if case .failed = project.loadState { return [] }
-      var rows: [WorktreeID] = []
-      if let row = project.rowWorktree { rows.append(row.id) }
-      if project.isExpanded {
-        rows +=
-          project.isWorkspace
-          ? project.workspaceSidebarRows.compactMap(\.worktreeID)
-          : project.childWorktrees.map(\.id)
-      }
+      let rows = project.isExpanded ? project.sidebarRowWorktreeIDs : project.rowWorktree.map { [$0.id] } ?? []
       return rows.map { SidebarRowAddress(projectID: project.id, worktreeID: $0) }
     }
+  }
+
+  /// Every Project in sidebar order, with no filter and no Host collapsed:
+  /// grouped by Host (This Mac first) while the Host level shows, else the
+  /// catalog order.
+  public var sidebarOrderedProjects: [Project] {
+    guard let level = sidebarHostLevel else { return projects }
+    return level.groups(projects).flatMap(\.projects)
   }
 
   /// The Host level of the sidebar, `nil` when every Project is on This Mac
