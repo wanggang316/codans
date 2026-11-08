@@ -2107,10 +2107,21 @@ extension HierarchyClient {
     // through a symlink is re-keyed onto git's form before discovery, so the
     // main checkout git reports matches the existing row.
     var adopted: Project?
-    if let canonicalRoot = await service.canonicalWorkTreeRoot(of: project.rootPath),
-      manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: canonicalRoot)
-    {
-      adopted = manager.catalog.projects.first { $0.id == projectID }
+    if let canonicalRoot = await service.canonicalWorkTreeRoot(of: project.rootPath) {
+      switch manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: canonicalRoot) {
+      case .unchanged:
+        break
+      case .adopted:
+        adopted = manager.catalog.projects.first { $0.id == projectID }
+      case .conflict(let owner):
+        // Another Project on this Host owns the same folder (ADR 0006).
+        // Discovery here would only add that Project's worktrees a second
+        // time, so this Project keeps its rows as they are.
+        reconcileLogger.error(
+          "remote root owned by another project: project=\(projectID.raw.uuidString, privacy: .public) owner=\(owner.raw.uuidString, privacy: .public)"
+        )
+        return
+      }
     }
     let project = adopted ?? project
     let gitRoot: String? = await {

@@ -922,16 +922,27 @@ final class HierarchyManager {
   /// Rewrites `rootPath`, a `gitRoot` equal to the old root, and the rows at
   /// the old root. A row that then shares its path with an earlier row (the
   /// duplicate an earlier reconcile appended) is merged into the earlier row:
-  /// its tabs move over, so no Pane is lost, and the row is removed. Returns
-  /// `true` when the catalog changed.
+  /// its tabs move over, so no Pane is lost, and the row is removed. When the
+  /// removed row was the selected one, its active tab stays active.
+  ///
+  /// A root that another Project on the same Host already has is not
+  /// adopted: two Projects never share `(hostID, rootPath)` (ADR 0006). The
+  /// caller gets the owner back and leaves this Project as it is.
   @discardableResult
-  func adoptCanonicalRemoteRoot(projectID: ProjectID, canonicalRoot: String) -> Bool {
+  func adoptCanonicalRemoteRoot(projectID: ProjectID, canonicalRoot: String) -> RemoteRootAdoption {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
       catalog.projects[projectIndex].remoteHost != nil
-    else { return false }
+    else { return .unchanged }
     let canonical = Self.normalizeRemotePath(canonicalRoot)
     let oldRoot = Self.normalizeRemotePath(catalog.projects[projectIndex].rootPath)
-    guard canonical != oldRoot else { return false }
+    guard canonical != oldRoot else { return .unchanged }
+    if let hostID = catalog.projects[projectIndex].hostID,
+      let owner = catalog.projectConflicting(
+        withEditOf: projectID, onHost: hostID, rootPath: canonical,
+        canonicalizeLocal: { Self.canonicalPath($0) })
+    {
+      return .conflict(owner.id)
+    }
     var project = catalog.projects[projectIndex]
     project.rootPath = canonical
     if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == oldRoot {
@@ -960,6 +971,9 @@ final class HierarchyManager {
       }
       if project.selectedWorktreeID == worktree.id {
         project.selectedWorktreeID = merged[keeperIndex].id
+        if let selectedTabID = worktree.selectedTabID {
+          merged[keeperIndex].selectedTabID = selectedTabID
+        }
       }
     }
     let removedRows = project.worktrees.count - merged.count
@@ -974,7 +988,17 @@ final class HierarchyManager {
       rebuildRunScriptPanes()
       runtime.announceHierarchyMutated()
     }
-    return true
+    return .adopted
+  }
+
+  /// Outcome of `adoptCanonicalRemoteRoot`.
+  enum RemoteRootAdoption: Equatable, Sendable {
+    /// The root already has the host form, or the Project is not remote.
+    case unchanged
+    /// The Project now uses the host form of its root.
+    case adopted
+    /// Another Project on the same Host already has the host form as its root.
+    case conflict(ProjectID)
   }
 
   /// Flips the Worktree's pinned flag and repositions the row in the catalog
