@@ -58,10 +58,11 @@ actor CLIExecutableResolver {
       let task = Task<URL?, Never> { await prober() }
       cache = .resolving(task)
       let result = await task.value
-      // Re-check cache: if `invalidate()` fired while the probe ran, don't clobber the
-      // subsequent .empty state with a stale .resolved value. A missing CLI is not
-      // cached, so a CLI installed while the app runs is found by the next call.
-      if case .resolving = cache {
+      // Write the result only when this probe still owns the cache. After `invalidate()`
+      // the cache is empty or owned by a newer probe; a stale path must not replace
+      // either. A missing CLI is not cached, so a CLI installed while the app runs is
+      // found by the next call.
+      if case .resolving(let current) = cache, current == task {
         cache = result.map(CacheState.resolved) ?? .empty
       }
       return result
