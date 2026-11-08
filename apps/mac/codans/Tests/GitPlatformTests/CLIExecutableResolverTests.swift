@@ -4,7 +4,7 @@ import Testing
 @testable import Codans
 
 /// Covers the four behaviours of `CLIExecutableResolver`:
-///   - missing binary returns nil
+///   - missing binary returns nil and is not cached
 ///   - present binary is cached across calls
 ///   - concurrent callers share a single resolution (single-flight)
 ///   - explicit invalidation forces re-probe
@@ -39,6 +39,16 @@ struct CLIExecutableResolverTests {
     let result = await resolver.resolve()
     #expect(result == nil)
     await #expect(counter.count == 1)
+  }
+
+  /// A CLI installed while the app runs is found without a "Re-check".
+  @Test
+  func missingBinaryIsNotCached() async {
+    let counter = ProbeCounter()
+    let resolver = CLIExecutableResolver(prober: makeProber(counter: counter, returning: nil))
+    _ = await resolver.resolve()
+    _ = await resolver.resolve()
+    await #expect(counter.count == 2)
   }
 
   @Test
