@@ -69,6 +69,72 @@ struct RemoteGitServiceTests {
     #expect(RemoteGitService.lastNonEmptyLine(of: "\n \n") == "")
   }
 
+  /// Runs `resolvePathScript` under local `/bin/sh`, which matches the host's
+  /// POSIX sh contract. `path` replaces `PATH` when set.
+  private static func runResolveScript(
+    _ argument: String, path: String? = nil
+  ) -> (status: Int32, resolved: String) {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+    proc.arguments = ["-c", RemoteGitService.resolvePathScript, "sh", argument]
+    if let path {
+      var environment = ProcessInfo.processInfo.environment
+      environment["PATH"] = path
+      proc.environment = environment
+    }
+    let out = Pipe()
+    proc.standardOutput = out
+    proc.standardError = Pipe()
+    try? proc.run()
+    proc.waitUntilExit()
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    let stdout = String(data: data, encoding: .utf8) ?? ""
+    return (proc.terminationStatus, RemoteGitService.lastNonEmptyLine(of: stdout))
+  }
+
+  /// A fresh temporary directory that holds `Alpha/beta`, or `nil` when its
+  /// file system is case sensitive (the case tests then have nothing to
+  /// check).
+  private static func makeCaseInsensitiveBase() throws -> URL? {
+    let fm = FileManager.default
+    let base = fm.temporaryDirectory.appendingPathComponent("codans-rp-\(UUID().uuidString)")
+    try fm.createDirectory(
+      at: base.appendingPathComponent("Alpha/beta"), withIntermediateDirectories: true)
+    guard fm.fileExists(atPath: base.appendingPathComponent("ALPHA/BETA").path) else {
+      try? fm.removeItem(at: base)
+      return nil
+    }
+    return base
+  }
+
+  @Test
+  func resolvePathScriptReturnsTheOnDiskCaseOfEveryComponent() throws {
+    guard let base = try Self.makeCaseInsensitiveBase() else { return }
+    defer { try? FileManager.default.removeItem(at: base) }
+    let exact = Self.runResolveScript(base.appendingPathComponent("Alpha/beta").path)
+    #expect(exact.status == 0)
+    #expect(exact.resolved.hasSuffix("/Alpha/beta"))
+
+    let typed = Self.runResolveScript(base.appendingPathComponent("ALPHA/BETA").path)
+    #expect(typed.status == 0)
+    #expect(typed.resolved == exact.resolved)
+  }
+
+  @Test
+  func resolvePathScriptFallsBackToTheBuiltinWithoutAnExternalPwd() throws {
+    // A `PATH` with no binaries hides `env` and `pwd`: the builtin still
+    // resolves the directory (with the typed case, as before).
+    guard let base = try Self.makeCaseInsensitiveBase() else { return }
+    defer { try? FileManager.default.removeItem(at: base) }
+    let noBinaries = base.appendingPathComponent("no-bin").path
+    let typed = Self.runResolveScript(base.appendingPathComponent("ALPHA/BETA").path, path: noBinaries)
+    #expect(typed.status == 0)
+    #expect(typed.resolved.hasSuffix("/ALPHA/BETA"))
+
+    let missing = Self.runResolveScript(base.appendingPathComponent("nope").path, path: noBinaries)
+    #expect(missing.status != 0)
+  }
+
   @Test
   func resolvePathScriptExpandsTildeAndCanonicalizes() throws {
     // The script runs under POSIX sh on the host; local /bin/sh matches that
