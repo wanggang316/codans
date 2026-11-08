@@ -232,6 +232,12 @@ struct GitPlatformFeature {
     /// Queue a fetch for every polled unit, drained through the concurrency cap.
     case refreshAllRequested
 
+    /// A Project was added, or a repository was added to a Workspace. Registers the
+    /// units with the poll and queues a fetch of each unit not fetched yet, drained
+    /// through the concurrency cap. Selection and the poll are not involved: an added
+    /// Project is often not selected, and the poll treats a unit never fetched as cold.
+    case fetchUnitsAdded([FetchUnit])
+
     /// The unit's remote-tracking refs changed on disk (`git push` / `git fetch`
     /// from any process). Schedules a short-delay refresh and polls the unit as
     /// `.hot` for `remoteRefsHotWindow`.
@@ -677,6 +683,23 @@ struct GitPlatformFeature {
 
       case .refreshAllRequested:
         state.pendingPollRefresh = state.pollUnits
+        return runPollScheduler(state: &state)
+
+      case .fetchUnitsAdded(let units):
+        for unit in units {
+          state.pollUnits.insert(unit.projectID)
+          state.projectGitRoots[unit.projectID] = unit.gitRoot
+          state.projectWorktreePairs[unit.projectID] = unit.pairs
+          for pair in unit.pairs { state.projectByWorktree[pair.worktreeID] = unit.projectID }
+          Self.reprojectCachedSnapshots(unit.projectID, pairs: unit.pairs, state: &state)
+          // A unit fetched before (a Workspace's other repositories, or a sidebar add
+          // whose activation already started one) keeps its cadence.
+          if state.lastFetchStartedAt[unit.projectID] == nil {
+            state.pendingPollRefresh.insert(unit.projectID)
+          }
+        }
+        // Pending units start whether or not the app is frontmost; the timer arms only
+        // while it is.
         return runPollScheduler(state: &state)
 
       case .remoteRefsChanged(let projectID):

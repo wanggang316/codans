@@ -255,6 +255,9 @@ extension WorkspaceClient {
     /// Current settings, for the per-project defaults of a new group.
     let settings: @MainActor @Sendable () -> Settings
     let registry: WorkspaceCreationRegistry
+    /// A workspace was registered or gained a source repository, and its reconcile
+    /// settled. The app queues the first Pull Request fetch of the new repositories.
+    var repositoriesAdded: @MainActor @Sendable (ProjectID) -> Void = { _ in }
   }
 
   static func live(
@@ -262,11 +265,13 @@ extension WorkspaceClient {
     gitWorktreeClient: GitWorktreeClient,
     gitCLI: GitWorktreeCLI,
     fetchRemoteOnCreate: @escaping @MainActor @Sendable () -> Bool = { true },
-    settings: @escaping @MainActor @Sendable () -> Settings = { .default }
+    settings: @escaping @MainActor @Sendable () -> Settings = { .default },
+    repositoriesAdded: @escaping @MainActor @Sendable (ProjectID) -> Void = { _ in }
   ) -> WorkspaceClient {
     let context = Context(
       hierarchy: hierarchy, git: gitWorktreeClient, cli: gitCLI,
-      fetchRemoteOnCreate: fetchRemoteOnCreate, settings: settings, registry: WorkspaceCreationRegistry())
+      fetchRemoteOnCreate: fetchRemoteOnCreate, settings: settings, registry: WorkspaceCreationRegistry(),
+      repositoriesAdded: repositoriesAdded)
     return WorkspaceClient(
       createWorkspace: { plan in try await createWorkspace(plan, context: context) },
       preflightWorkspace: { plan in await preflightWorkspace(plan, context: context) },

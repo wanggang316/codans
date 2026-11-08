@@ -230,6 +230,10 @@ struct RootFeature {
     /// A structural hierarchy mutation landed (Project / Worktree removal,
     /// archive, auto-archive). Re-derives Git Platform state from the live catalog.
     case catalogMembershipChanged
+    /// A Project was added, or a repository was added to a Workspace, and its
+    /// reconcile settled. Queues the first Pull Request fetch of its fetch units, so an
+    /// unselected Project shows badges without a selection change or a poll tick.
+    case projectAdded(ProjectID)
     case engineEventReceived(LastEventMarker)
     /// Emitted from the event stream when libghostty reports a surface
     /// has exited (child died, user-initiated close via `close_surface`
@@ -1130,6 +1134,12 @@ struct RootFeature {
         effects.append(.send(.gitPlatform(Self.makePollUnitsChange(catalog: catalog))))
         return .merge(effects)
 
+      case .projectAdded(let projectID):
+        guard let project = lookupProject(projectID: projectID) else { return .none }
+        let units = Self.gitPlatformFetchUnits(in: project)
+        guard !units.isEmpty else { return .none }
+        return .send(.gitPlatform(.fetchUnitsAdded(units)))
+
       case .worktreeHeadChanged(let worktreeID):
         // HEAD-file change fired by `WorktreeHeadWatcher`. Resolve the owning
         // Project so the reconciler can rerun `git worktree list --porcelain`
@@ -1393,6 +1403,9 @@ struct RootFeature {
           }) {
             await send(.gitPlatform(action))
           }
+          // Registers the units with the poll; a unit the refresh above did not
+          // start is queued for its first fetch.
+          await send(.projectAdded(projectID))
         }
 
       case .sidebar(.delegate(.refreshAllProjectsRequested)):

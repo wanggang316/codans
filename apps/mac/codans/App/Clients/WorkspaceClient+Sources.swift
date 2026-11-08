@@ -83,6 +83,7 @@ extension WorkspaceClient {
 
     let projectID = context.hierarchy.addWorkspaceProject(title, rootPath)
     await context.hierarchy.reconcileDiscoveredWorktrees(projectID)
+    context.repositoriesAdded(projectID)
     return projectID
   }
 
@@ -155,6 +156,7 @@ extension WorkspaceClient {
     }
     syncLinks(rootPath: rootPath, manifest: manifest)
     await context.hierarchy.reconcileDiscoveredWorktrees(projectID)
+    context.repositoriesAdded(projectID)
     guard let row = referenceRows(in: projectID, sourceGitRoot: entry.sourceGitRoot, context: context).first
     else { throw WorkspaceError.memberNotRegistered(name: entry.name) }
     return row
