@@ -47,6 +47,11 @@ struct PendingWorktree: Equatable, Identifiable {
   /// Stashed here so a future cancel can materialize-on-cancel; this
   /// feature only sets it, it does not yet act on it.
   var materializedPath: URL?
+  /// The on-disk path whose catalog write failed after `git worktree add`
+  /// succeeded. While set, the row holds the project's creation lease, so
+  /// a reconcile does not adopt the path as a second row, and Retry writes
+  /// only the catalog row for it. Nil for every other state.
+  var catalogWriteFailedPath: URL?
   /// Count of Retry taps. Part of the creation lease token, so the effect
   /// of an earlier attempt can never release the lease of a later one.
   var attempt = 0
