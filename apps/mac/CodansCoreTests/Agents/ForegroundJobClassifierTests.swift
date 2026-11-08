@@ -160,6 +160,24 @@ struct ForegroundJobClassifierTests {
   }
 
   @Test
+  func glabIsAGitCommand() {
+    #expect(ForegroundJobClassifier.indicatesGitCommand(Self.job("glab")))
+  }
+
+  @Test
+  func ghAndGlabAreGitPlatformCLIs() {
+    #expect(ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("gh")))
+    #expect(ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("glab")))
+    #expect(!ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("git")))
+    #expect(!ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("zsh")))
+    let agent = ForegroundJob(
+      processGroupID: 300,
+      processes: [Self.process("claude", pid: 300), Self.process("glab", pid: 301)]
+    )
+    #expect(!ForegroundJobClassifier.indicatesGitPlatformCLI(agent))
+  }
+
+  @Test
   func shellAndPlainCommandsAreNotGitCommands() {
     #expect(!ForegroundJobClassifier.indicatesGitCommand(Self.job("zsh")))
     #expect(!ForegroundJobClassifier.indicatesGitCommand(Self.job("-zsh")))
