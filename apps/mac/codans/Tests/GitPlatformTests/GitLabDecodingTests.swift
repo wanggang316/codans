@@ -173,16 +173,124 @@ struct GitLabDecodingTests {
 
   @Test
   func reviewDecisionRules() {
-    #expect(
-      GitLabWire.reviewDecision(detailedMergeStatus: "NOT_APPROVED", approved: false, approverCount: 0, reviewerStates: [])
-        == .reviewRequired)
-    #expect(
-      GitLabWire.reviewDecision(detailedMergeStatus: "MERGEABLE", approved: true, approverCount: 0, reviewerStates: [])
-        == nil)
-    #expect(
+    func decide(
+      _ status: String = "MERGEABLE", approved: Bool = true, approvers: Int = 1, states: [String?] = [],
+      complete: Bool = true
+    ) -> ReviewDecision? {
       GitLabWire.reviewDecision(
-        detailedMergeStatus: "MERGEABLE", approved: true, approverCount: 1, reviewerStates: ["REQUESTED_CHANGES"])
-        == .changesRequested)
+        detailedMergeStatus: status, approved: approved, approverCount: approvers, reviewerStates: states,
+        reviewersComplete: complete)
+    }
+    #expect(decide("NOT_APPROVED", approved: false, approvers: 0) == .reviewRequired)
+    #expect(decide(approvers: 0) == nil)
+    #expect(decide(states: ["APPROVED"]) == .approved)
+    #expect(decide(states: ["REQUESTED_CHANGES"]) == .changesRequested)
+    // A requested change stands even when other reviewers are missing.
+    #expect(decide(states: [nil, "REQUESTED_CHANGES"], complete: false) == .changesRequested)
+  }
+
+  /// "Approved" needs complete reviewer data: a reviewer codans did not read, or one
+  /// without a state, could have requested changes.
+  @Test
+  func incompleteReviewerDataIsNeverApproved() {
+    func decide(states: [String?], complete: Bool) -> ReviewDecision? {
+      GitLabWire.reviewDecision(
+        detailedMergeStatus: "MERGEABLE", approved: true, approverCount: 1, reviewerStates: states,
+        reviewersComplete: complete)
+    }
+    #expect(decide(states: ["APPROVED"], complete: false) == nil)
+    #expect(decide(states: ["APPROVED", nil], complete: true) == nil)
+    #expect(decide(states: [], complete: false) == nil)
+  }
+
+  /// The decoder reads completeness from the reviewer connection: a next page, a missing
+  /// `pageInfo`, or a reviewer without `mergeRequestInteraction` withholds "approved".
+  @Test(arguments: [
+    #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}"#,
+    #"{"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}"#,
+    #"{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"mergeRequestInteraction":null}]}"#,
+    #"{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"mergeRequestInteraction":{"reviewState":null}}]}"#,
+  ])
+  func approvedMergeRequestWithIncompleteReviewersHasNoDecision(reviewers: String) throws {
+    let body = Self.approvedPage(reviewers: reviewers)
+    let result = try Self.parse(Data(body.utf8), branches: ["feat-approved"], projectPath: "g/app", host: Self.host)
+    #expect(try #require(result["feat-approved"]).reviewDecision == nil)
+    let complete = Self.approvedPage(
+      reviewers: #"{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}"#)
+    let approved = try Self.parse(
+      Data(complete.utf8), branches: ["feat-approved"], projectPath: "g/app", host: Self.host)
+    #expect(approved["feat-approved"]?.reviewDecision == .approved)
+  }
+
+  nonisolated static func approvedPage(reviewers: String) -> String {
+    """
+    {"data":{"currentUser":{"username":"u"},"project":{"mergeRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+      {"iid":"16","state":"opened","sourceBranch":"feat-approved","targetBranch":"main","sourceProject":{"fullPath":"g/app"},
+       "webUrl":"https://gitlab.example.com/g/app/-/merge_requests/16","detailedMergeStatus":"MERGEABLE",
+       "approved":true,"approvedBy":{"nodes":[{"username":"r"}]},"reviewers":\(reviewers)}]}}}}
+    """
+  }
+
+  // MARK: - degraded read
+
+  /// The read without review and squash fields (`degradedQuery`) still gives the badge,
+  /// the rollup, and the merge state; the review decision is absent and both merge
+  /// options follow the merge state.
+  @Test
+  func degradedResponseDecodesWithoutReviewAndSquashFields() throws {
+    let result = try Self.parse(
+      Self.loadFixture("gitlab-graphql-batch-degraded"), branches: Self.appBranches, projectPath: "codans-e2e/app",
+      host: Self.host)
+    let full = try Self.app()
+    #expect(Set(result.keys) == Set(full.keys))
+    for (branch, snapshot) in result {
+      #expect(snapshot.reviewDecision == nil, "\(branch)")
+      #expect(snapshot.mergeState == full[branch]?.mergeState, "\(branch)")
+      #expect(snapshot.checkRollup == full[branch]?.checkRollup, "\(branch)")
+      #expect(snapshot.number == full[branch]?.number, "\(branch)")
+    }
+    let open = try #require(result["feat-open"])
+    #expect(
+      open.mergeOptions == [
+        PullRequestMergeOption(strategy: .mergeCommit, isEnabled: true, label: "Merge"),
+        PullRequestMergeOption(strategy: .squash, isEnabled: true),
+      ])
+  }
+
+  /// Only an `errors` body whose every error is an unknown review or squash field asks
+  /// for the degraded read.
+  @Test
+  func optionalFieldErrorDetection() throws {
+    #expect(GitLabJSONParsers.isOptionalFieldError(try Self.loadFixture("gitlab-graphql-error-optional-fields")))
+    // Unknown field outside the optional set.
+    #expect(!GitLabJSONParsers.isOptionalFieldError(try Self.loadFixture("gitlab-graphql-error")))
+    // Message only, without `extensions`.
+    let messageOnly = #"{"errors":[{"message":"Field 'reviewState' doesn't exist on type 'UserMergeRequestInteraction'"}]}"#
+    #expect(GitLabJSONParsers.isOptionalFieldError(Data(messageOnly.utf8)))
+    // An optional field error next to another error.
+    #expect(
+      !GitLabJSONParsers.isOptionalFieldError(
+        Data(
+          #"{"errors":[{"message":"Field 'reviewState' doesn't exist on type 'X'","extensions":{"code":"undefinedField","fieldName":"reviewState"}},{"message":"Internal server error"}]}"#
+            .utf8)))
+    let timeout = #"{"errors":[{"message":"Timeout on validation of query"}]}"#
+    #expect(!GitLabJSONParsers.isOptionalFieldError(Data(timeout.utf8)))
+    #expect(!GitLabJSONParsers.isOptionalFieldError(Data(#"{"errors":[]}"#.utf8)))
+    #expect(!GitLabJSONParsers.isOptionalFieldError(try Self.loadFixture("gitlab-graphql-batch-app")))
+  }
+
+  /// A later reviewer page decodes like the jobs page.
+  @Test
+  func reviewerPageCarriesItsNextCursor() throws {
+    let page = try GitLabJSONParsers.parseReviewerPage(
+      Data(
+        #"{"data":{"project":{"mergeRequest":{"reviewers":{"pageInfo":{"hasNextPage":true,"endCursor":"r2"},"nodes":[{"mergeRequestInteraction":{"reviewState":"REQUESTED_CHANGES"}}]}}}}}"#
+          .utf8))
+    #expect(page.nextCursor == "r2")
+    #expect(page.nodes.map { $0.mergeRequestInteraction?.reviewState } == ["REQUESTED_CHANGES"])
+    #expect(throws: GitPlatformError.other("reviewers: no reviewer list in the response")) {
+      _ = try GitLabJSONParsers.parseReviewerPage(Data(#"{"data":{"project":null}}"#.utf8))
+    }
   }
 
   // MARK: - fork filter, nested group

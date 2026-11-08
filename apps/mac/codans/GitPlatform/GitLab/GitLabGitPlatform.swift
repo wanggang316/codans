@@ -165,8 +165,41 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     if let bad = branches.first(where: { $0.unicodeScalars.contains { $0.value < 0x20 } }) {
       throw GitPlatformError.malformedBranchName(bad)
     }
-    // Every page is read before any snapshot is built: a merge request on a later page
-    // can be the newest one of its branch, and a partial list must not drop a badge.
+    var nodes: [GitLabJSONParsers.MergeRequestNode]
+    do {
+      nodes = try await readMergeRequests(
+        query: GitLabMergeRequestQuery.query, degradable: true, exec: exec, repository: repository,
+        branches: branches)
+    } catch is OptionalFieldUnknown {
+      if state.markDegraded(host: repository.host) {
+        Self.logger.notice(
+          "\(repository.host, privacy: .public) does not know a review or squash field; reading merge requests without them"
+        )
+      }
+      nodes = try await readMergeRequests(
+        query: GitLabMergeRequestQuery.degradedQuery, degradable: false, exec: exec, repository: repository,
+        branches: branches)
+    }
+    for index in nodes.indices {
+      nodes[index] = try await completingJobs(of: nodes[index], exec: exec, repository: repository)
+      nodes[index] = try await completingReviewers(of: nodes[index], exec: exec, repository: repository)
+    }
+    return GitLabJSONParsers.selectedMergeRequests(from: nodes, branches: branches, projectPath: repository.path)
+  }
+
+  /// The batched query failed only because the instance does not know one of
+  /// `GitLabMergeRequestQuery.optionalFieldNames`.
+  private struct OptionalFieldUnknown: Error {}
+
+  /// Every page of the merge requests for `branches`. Every page is read before any
+  /// snapshot is built: a merge request on a later page can be the newest one of its
+  /// branch, and a partial list must not drop a badge.
+  ///
+  /// With `degradable`, an `errors` body that only names unknown optional fields throws
+  /// `OptionalFieldUnknown`, so the caller can read again with `degradedQuery`.
+  private func readMergeRequests(
+    query: String, degradable: Bool, exec: URL, repository: GitPlatformRepository, branches: [String]
+  ) async throws -> [GitLabJSONParsers.MergeRequestNode] {
     var nodes: [GitLabJSONParsers.MergeRequestNode] = []
     var cursor: String?
     var pages = 0
@@ -180,20 +213,19 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       var variables = ["fullPath": repository.path]
       if let cursor { variables["after"] = cursor }
       let cmd = GlabCommand.apiGraphQL(
-        query: GitLabMergeRequestQuery.query,
+        query: query,
         host: repository.host,
         stringVariables: variables,
         jsonVariables: ["branches": GitLabMergeRequestQuery.branchesVariable(branches)]
       )
-      let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
+      let data = try await run(
+        cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes, returnsGraphQLErrors: true)
+      if degradable, GitLabJSONParsers.isOptionalFieldError(data) { throw OptionalFieldUnknown() }
       let page = try GitLabJSONParsers.parseMergeRequestPage(data, host: repository.host)
       nodes += page.nodes
       cursor = page.nextCursor
     } while cursor != nil
-    for index in nodes.indices {
-      nodes[index] = try await completingJobs(of: nodes[index], exec: exec, repository: repository)
-    }
-    return GitLabJSONParsers.selectedMergeRequests(from: nodes, branches: branches, projectPath: repository.path)
+    return nodes
   }
 
   /// The merge request with every job of its head pipeline. The batched read returns the
@@ -227,6 +259,40 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
     jobs.pageInfo = GitLabJSONParsers.PageInfo(hasNextPage: false, endCursor: nil)
     var completed = node
     completed.headPipeline?.jobs = jobs
+    return completed
+  }
+
+  /// The merge request with every reviewer, read like `completingJobs`, so a requested
+  /// change on a later page reaches the review decision. A list longer than `maxPages`
+  /// pages stays incomplete (`hasNextPage` true): it only withholds "approved", so it does
+  /// not fail the read.
+  private func completingReviewers(
+    of node: GitLabJSONParsers.MergeRequestNode, exec: URL, repository: GitPlatformRepository
+  ) async throws -> GitLabJSONParsers.MergeRequestNode {
+    guard var reviewers = node.reviewers,
+      var cursor = reviewers.pageInfo?.hasNextPage == true ? reviewers.pageInfo?.endCursor : nil,
+      let iid = node.iid
+    else { return node }
+    var pages = 1
+    while pages < GitLabMergeRequestQuery.maxPages {
+      pages += 1
+      let cmd = GlabCommand.apiGraphQL(
+        query: GitLabMergeRequestQuery.reviewersQuery,
+        host: repository.host,
+        stringVariables: ["fullPath": repository.path, "iid": iid, "after": cursor]
+      )
+      let data = try await run(cmd, exec: exec, host: repository.host, maxOutputBytes: Self.readMaxOutputBytes)
+      let page = try GitLabJSONParsers.parseReviewerPage(data)
+      reviewers.nodes = (reviewers.nodes ?? []) + page.nodes
+      guard let next = page.nextCursor else {
+        reviewers.pageInfo = GitLabJSONParsers.PageInfo(hasNextPage: false, endCursor: nil)
+        break
+      }
+      cursor = next
+      reviewers.pageInfo = GitLabJSONParsers.PageInfo(hasNextPage: true, endCursor: next)
+    }
+    var completed = node
+    completed.reviewers = reviewers
     return completed
   }
 
@@ -339,13 +405,16 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
   }
 
   /// Runs one `glab` command and returns its stdout on exit 0. `host` names the
-  /// instance for `GITLAB_HOST`; `nil` for host-independent commands.
+  /// instance for `GITLAB_HOST`; `nil` for host-independent commands. With
+  /// `returnsGraphQLErrors`, a GraphQL `errors` body on a failed exit is also returned,
+  /// so the caller can read every error in it.
   private func run(
     _ command: GlabCommand.Command,
     exec: URL,
     host: String?,
     maxOutputBytes: Int? = nil,
-    isMerge: Bool = false
+    isMerge: Bool = false,
+    returnsGraphQLErrors: Bool = false
   ) async throws -> Data {
     let cap = maxOutputBytes ?? self.maxOutputBytes
     let outcome = await runner.run(
@@ -358,6 +427,7 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
       // `glab api` prints a GraphQL `errors` body or a REST error body on stdout and a
       // summary on stderr.
       if let message = GitLabJSONParsers.graphQLErrorMessage(stdout) {
+        if returnsGraphQLErrors { return stdout }
         throw GitPlatformError.graphQLError(message)
       }
       let text = [String(data: stderr, encoding: .utf8), String(data: stdout, encoding: .utf8)]
@@ -445,12 +515,19 @@ nonisolated struct GitLabGitPlatform: GitPlatform {
 
   /// State the value-type implementation shares across copies: the `glab` version per
   /// executable (keyed by path and modification date, so an upgrade is seen), the API
-  /// protocol per host, and the merge status rechecks the last read started.
+  /// protocol per host, the merge status rechecks the last read started, and the hosts
+  /// whose degraded read was already logged.
   private final class SharedState: @unchecked Sendable {
     private let lock = NSLock()
     private var versions: [String: String?] = [:]
     private var protocols: [String: String] = [:]
     private var recheckTask: Task<Void, Never>?
+    private var degradedHosts: Set<String> = []
+
+    /// `true` the first time `host` is marked.
+    func markDegraded(host: String) -> Bool {
+      lock.withLock { degradedHosts.insert(host.lowercased()).inserted }
+    }
 
     func pendingRecheck() -> Task<Void, Never>? {
       lock.withLock { recheckTask }
