@@ -118,8 +118,8 @@ struct CommandPaletteView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { store.send(.rowTapped(item.id)) }
                 .accessibilityAddTraits(.isButton)
-                .accessibilityLabel(item.title)
-                .accessibilityHint(accessibilityHint(for: item))
+                .accessibilityLabel(accessibilityLabel(for: item))
+                .accessibilityHint(item.subtitle ?? "")
             }
           }
           .padding(.horizontal, 6)
@@ -185,11 +185,11 @@ struct CommandPaletteView: View {
     }
   }
 
-  /// The row's own accessibility label hides the marker's, so the hint names
-  /// the remote host after the subtitle.
-  private func accessibilityHint(for item: CommandPaletteItem) -> String {
-    let parts = [item.subtitle, item.remoteAuthority.map { "Remote host \($0)" }]
-    return parts.compactMap { $0 }.joined(separator: ", ")
+  /// The row label overrides the label of each child, the Remote Project
+  /// marker included, so a remote row names its host in the row label.
+  private func accessibilityLabel(for item: CommandPaletteItem) -> String {
+    guard let authority = item.remoteAuthority else { return item.title }
+    return "\(item.title), Remote host \(authority)"
   }
 
   /// Prefer the registry-derived chord when the item declares a `commandID` and the resolved
