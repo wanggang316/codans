@@ -31,7 +31,19 @@ import SwiftUI
 @MainActor
 final class CommandKeyObserver {
   /// `true` once ⌘ has been held alone for `pressActivationDelay`.
-  private(set) var isCommandHeld: Bool = false
+  ///
+  /// Hand-rolled instead of a stored property: Observation notifies before a stored property
+  /// changes, and a hint that re-renders inside that notification (a view in a geometry
+  /// reader or a lazy stack, when another reader lays the window out synchronously) reads
+  /// the old state. It then keeps it until the next change, so it shows while ⌘ is up and hides
+  /// while ⌘ is held. `setCommandHeld(_:)` stores the state first and notifies after.
+  var isCommandHeld: Bool {
+    access(keyPath: \.isCommandHeld)
+    return heldState
+  }
+
+  @ObservationIgnored
+  private var heldState = false
 
   @ObservationIgnored
   private var gesture = CommandHoldGesture()
@@ -108,11 +120,14 @@ final class CommandKeyObserver {
 
   /// Every hint keyed on this flag inserts or removes itself in the same transaction, so
   /// one animation here drives all of their transitions (`ShortcutHintLabel`).
-  private func setCommandHeld(_ held: Bool) {
+  func setCommandHeld(_ held: Bool) {
+    guard held != heldState else { return }
+    heldState = held
     let animation: Animation? =
       NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .shortcutHint
     withAnimation(animation) {
-      isCommandHeld = held
+      // Notify only after the store, so a reader in the notification sees the new state.
+      withMutation(keyPath: \.isCommandHeld) {}
     }
   }
 }
