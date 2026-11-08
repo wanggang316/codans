@@ -1,7 +1,6 @@
 ---
 name: self-verify
 description: Explicitly verify a codans change end to end in an isolated Debug instance (private config, cache, and socket) through the bundled codans-dev CLI, PID-scoped Accessibility, and window screenshots. Use only when the user asks for self-verify, end-to-end verification against a running Debug build, or to drive and check codans UI behavior (Settings, popovers, menus, toolbar, sidebar). Do not invoke after ordinary implementation work, and do not use it in place of unit tests, make mac-check, or make mac-build.
-disable-model-invocation: true
 ---
 
 # Self Verify
