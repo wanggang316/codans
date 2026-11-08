@@ -991,7 +991,8 @@ final class HierarchyManager {
   ///
   /// A root that another Project on the same Host already has is not
   /// adopted: two Projects never share `(hostID, rootPath)` (ADR 0006). The
-  /// caller gets the owner back and leaves this Project as it is.
+  /// Project keeps its root, rows at either form still merge under it, and
+  /// the caller gets the owner back.
   @discardableResult
   func adoptCanonicalRemoteRoot(projectID: ProjectID, canonicalRoot: String) -> RemoteRootAdoption {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
@@ -1000,21 +1001,29 @@ final class HierarchyManager {
     let canonical = Self.normalizeRemotePath(canonicalRoot)
     let oldRoot = Self.normalizeRemotePath(catalog.projects[projectIndex].rootPath)
     guard canonical != oldRoot else { return .unchanged }
-    if let hostID = catalog.projects[projectIndex].hostID,
-      let owner = catalog.projectConflicting(
-        withEditOf: projectID, onHost: hostID, rootPath: canonical,
-        canonicalizeLocal: { Self.canonicalPath($0) })
-    {
-      return .conflict(owner.id)
+    var owner: ProjectID?
+    if let hostID = catalog.projects[projectIndex].hostID {
+      owner =
+        catalog.projectConflicting(
+          withEditOf: projectID, onHost: hostID, rootPath: canonical,
+          canonicalizeLocal: { Self.canonicalPath($0) }
+        )?.id
     }
     var project = catalog.projects[projectIndex]
-    project.rootPath = canonical
-    if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == oldRoot {
-      project.gitRoot = canonical
+    // On a conflict the Project keeps its root, but rows at either form are
+    // still one folder: they merge under the kept root.
+    let rowRoot = owner == nil ? canonical : project.rootPath
+    if owner == nil {
+      project.rootPath = canonical
+      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == oldRoot {
+        project.gitRoot = canonical
+      }
     }
-    for index in project.worktrees.indices
-    where Self.normalizeRemotePath(project.worktrees[index].path) == oldRoot {
-      project.worktrees[index].path = canonical
+    for index in project.worktrees.indices {
+      let path = Self.normalizeRemotePath(project.worktrees[index].path)
+      if path == oldRoot || path == canonical {
+        project.worktrees[index].path = rowRoot
+      }
     }
     var merged: [Worktree] = []
     for worktree in project.worktrees {
@@ -1042,9 +1051,10 @@ final class HierarchyManager {
     }
     let removedRows = project.worktrees.count - merged.count
     project.worktrees = merged
+    guard project != catalog.projects[projectIndex] else { return owner.map { .conflict($0) } ?? .unchanged }
     catalog.projects[projectIndex] = project
     reconcileLogger.notice(
-      "adopted host root form: project=\(projectID.raw.uuidString, privacy: .public) mergedRows=\(removedRows, privacy: .public)"
+      "host root form: project=\(projectID.raw.uuidString, privacy: .public) adopted=\(owner == nil, privacy: .public) mergedRows=\(removedRows, privacy: .public)"
     )
     store.scheduleSave(catalog)
     if removedRows > 0 {
@@ -1052,7 +1062,7 @@ final class HierarchyManager {
       rebuildRunScriptPanes()
       runtime.announceHierarchyMutated()
     }
-    return .adopted
+    return owner.map { .conflict($0) } ?? .adopted
   }
 
   /// Outcome of `adoptCanonicalRemoteRoot`.

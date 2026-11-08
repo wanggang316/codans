@@ -112,8 +112,9 @@ reconcile first asks the host git for its form of the root
 (`RemoteGitService.canonicalWorkTreeRoot`) and, when it differs, re-keys the
 Project onto it (`HierarchyManager.adoptCanonicalRemoteRoot`). Rows that then
 share a path merge into the first one, tabs included. When another Project on
-the same Host already has that root (ADR 0006), the root stays and the
-reconcile skips discovery for this Project. `pwd -P` does not decide
+the same Host already has that root (ADR 0006), the root stays, rows at
+either form still merge under it, and the reconcile skips discovery for this
+Project. `pwd -P` does not decide
 this: it keeps the typed case, while `git worktree list` reports the on-disk
 case.
 
