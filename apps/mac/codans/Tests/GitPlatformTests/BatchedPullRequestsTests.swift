@@ -96,6 +96,7 @@ struct BatchedPullRequestsTests {
     #expect(snap.state == .merged)
     #expect(snap.mergeState.status == .clean)
     #expect(snap.headRepositoryOwner == "wanggang316")
+    #expect(snap.headSHA == "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432")
     #expect(snap.additions == 5759)
     #expect(snap.deletions == 73)
     #expect(snap.checkRollup.count == 2)

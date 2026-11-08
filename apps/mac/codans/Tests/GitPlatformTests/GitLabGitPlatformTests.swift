@@ -247,12 +247,13 @@ struct GitLabGitPlatformTests {
   func mergeArgvUsesTheProjectMergeMethod() async throws {
     for (strategy, squash) in [(MergeStrategy.mergeCommit, "false"), (.rebase, "false"), (.squash, "true")] {
       let runner = RecordingCommandRunner(outcomes: [Self.version, Self.ok("{}")])
-      try await Self.makeService(runner).merge(PullRequestReference(repository: Self.selfManaged, number: 7), strategy: strategy)
+      try await Self.makeService(runner).merge(
+        PullRequestReference(repository: Self.selfManaged, number: 7), strategy: strategy, headSHA: "abc123")
       let call = try #require(await runner.calls.last)
       #expect(
         call.arguments == [
           "api", "projects/group%2Fsub%2Fapp/merge_requests/7/merge", "--method", "PUT", "--hostname",
-          "gitlab.example.com", "-F", "squash=\(squash)",
+          "gitlab.example.com", "-F", "squash=\(squash)", "-f", "sha=abc123",
         ])
       #expect(call.env["GITLAB_HOST"] == "gitlab.example.com")
       #expect(call.cwd == GitLabGitPlatform.homeDirectory)
@@ -265,7 +266,24 @@ struct GitLabGitPlatformTests {
       Self.version, Self.failed(stdout: #"{"message":"405 Method Not Allowed"}"#, stderr: "glab: 405 Method Not Allowed (HTTP 405)"),
     ])
     await #expect(throws: GitPlatformError.mergeConflict) {
-      try await Self.makeService(runner).merge(PullRequestReference(repository: Self.withPort, number: 1), strategy: .squash)
+      try await Self.makeService(runner).merge(
+        PullRequestReference(repository: Self.withPort, number: 1), strategy: .squash, headSHA: "abc123")
+    }
+  }
+
+  /// GitLab refuses a merge whose `sha` is not the source branch head with HTTP 409. It
+  /// is not a merge conflict: the branch has new commits.
+  @Test
+  func mergeWithAMovedHeadThrowsHeadMoved() async {
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version,
+      Self.failed(
+        stdout: #"{"message":"SHA does not match HEAD of source branch: 9f8e7d6c5b4a"}"#,
+        stderr: "glab: SHA does not match HEAD of source branch: 9f8e7d6c5b4a (HTTP 409)"),
+    ])
+    await #expect(throws: GitPlatformError.headMoved) {
+      try await Self.makeService(runner).merge(
+        PullRequestReference(repository: Self.withPort, number: 1), strategy: .squash, headSHA: "abc123")
     }
   }
 

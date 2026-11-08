@@ -70,9 +70,12 @@ struct GitHubGitPlatformTests {
       .exited(code: 0, stdout: Data(), stderr: Data(), stdoutOverflow: false)
     ])
     let service = Self.makeService(runner: runner)
-    try await service.merge(Self.reference(42), strategy: .squash)
+    try await service.merge(Self.reference(42), strategy: .squash, headSHA: "abc123")
     let calls = await runner.calls
-    #expect(calls.first?.arguments == ["pr", "merge", "42", "--squash", "--repo", Self.repoArgument])
+    #expect(
+      calls.first?.arguments == [
+        "pr", "merge", "42", "--squash", "--match-head-commit", "abc123", "--repo", Self.repoArgument,
+      ])
     // The repository comes from the reference, never from a working directory.
     #expect(calls.first?.cwd == GitHubGitPlatform.homeDirectory)
   }
@@ -85,7 +88,22 @@ struct GitHubGitPlatformTests {
     ])
     let service = Self.makeService(runner: runner)
     await #expect(throws: GitPlatformError.mergeConflict) {
-      try await service.merge(Self.reference(42), strategy: .squash)
+      try await service.merge(Self.reference(42), strategy: .squash, headSHA: "abc123")
+    }
+  }
+
+  /// GitHub refuses a merge whose expected head is not the current head with HTTP 409
+  /// "Head branch was modified".
+  @Test
+  func mergeThrowsHeadMovedWhenTheHeadCommitChanged() async {
+    let stderr = Data(
+      "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)\n".utf8)
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 1, stdout: Data(), stderr: stderr, stdoutOverflow: false)
+    ])
+    let service = Self.makeService(runner: runner)
+    await #expect(throws: GitPlatformError.headMoved) {
+      try await service.merge(Self.reference(42), strategy: .squash, headSHA: "abc123")
     }
   }
 

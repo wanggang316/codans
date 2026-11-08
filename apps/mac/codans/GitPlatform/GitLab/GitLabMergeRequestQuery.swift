@@ -47,6 +47,7 @@ nonisolated enum GitLabMergeRequestQuery {
             draft
             sourceBranch
             targetBranch
+            diffHeadSha
             webUrl
             updatedAt
             detailedMergeStatus

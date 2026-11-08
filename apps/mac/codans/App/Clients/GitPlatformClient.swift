@@ -24,7 +24,9 @@ nonisolated struct GitPlatformClient: Sendable {
   /// Batched Pull Request lookup for one repository, keyed by source branch name.
   var batchPullRequests:
     @Sendable (_ repository: GitPlatformRepository, _ branches: [String]) async throws -> [String: PullRequestSnapshot]
-  var merge: @Sendable (_ pullRequest: PullRequestReference, _ strategy: MergeStrategy) async throws -> Void
+  /// Merges only when the head of the Pull Request is still `headSHA` (ADR 0004 item 17).
+  var merge:
+    @Sendable (_ pullRequest: PullRequestReference, _ strategy: MergeStrategy, _ headSHA: String) async throws -> Void
   var close: @Sendable (_ pullRequest: PullRequestReference) async throws -> Void
   var markReady: @Sendable (_ pullRequest: PullRequestReference) async throws -> Void
   var rerunFailedChecks: @Sendable (_ pullRequest: PullRequestReference) async throws -> Void
@@ -55,8 +57,8 @@ extension GitPlatformClient {
       batchPullRequests: { repository, branches in
         try await implementation(repository.kind).batchPullRequests(repository: repository, branches: branches)
       },
-      merge: { pullRequest, strategy in
-        try await implementation(pullRequest.repository.kind).merge(pullRequest, strategy: strategy)
+      merge: { pullRequest, strategy, headSHA in
+        try await implementation(pullRequest.repository.kind).merge(pullRequest, strategy: strategy, headSHA: headSHA)
       },
       close: { pullRequest in try await implementation(pullRequest.repository.kind).close(pullRequest) },
       markReady: { pullRequest in try await implementation(pullRequest.repository.kind).markReady(pullRequest) },

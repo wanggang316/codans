@@ -282,7 +282,7 @@ nonisolated private final class FakeGitPlatform: GitPlatform {
     return Dictionary(uniqueKeysWithValues: branches.map { ($0, Self.snapshot(kind: kind, branch: $0)) })
   }
 
-  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy) async throws {}
+  func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy, headSHA: String) async throws {}
   func close(_ pullRequest: PullRequestReference) async throws {}
   func markReady(_ pullRequest: PullRequestReference) async throws {}
   func rerunFailedChecks(_ pullRequest: PullRequestReference) async throws {}

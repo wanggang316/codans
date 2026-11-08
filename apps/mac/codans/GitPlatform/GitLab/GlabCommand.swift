@@ -51,14 +51,15 @@ nonisolated enum GlabCommand {
     return (args, [0])
   }
 
-  /// `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool>`.
-  /// The project's merge method applies; codans only chooses whether to squash.
+  /// `glab api --method PUT projects/<id>/merge_requests/<iid>/merge -F squash=<bool> -f sha=<sha>`.
+  /// The project's merge method applies; codans only chooses whether to squash. GitLab
+  /// refuses the merge when the source branch head is no longer `sha`.
   static func mergeRequestMerge(
-    repository: GitPlatformRepository, iid: Int, squash: Bool
+    repository: GitPlatformRepository, iid: Int, squash: Bool, sha: String
   ) -> Command {
     rest(
       method: "PUT", path: "\(mergeRequestPath(repository, iid: iid))/merge", host: repository.host,
-      fields: ["-F", "squash=\(squash)"])
+      fields: ["-F", "squash=\(squash)", "-f", "sha=\(sha)"])
   }
 
   /// `glab api --method PUT projects/<id>/merge_requests/<iid> -f state_event=close`.

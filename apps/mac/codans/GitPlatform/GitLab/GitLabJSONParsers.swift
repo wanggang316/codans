@@ -196,6 +196,7 @@ nonisolated enum GitLabJSONParsers {
       state: GitLabWire.pullRequestState(node.state) ?? .open,
       isDraft: node.draft ?? false,
       headRefName: node.sourceBranch ?? "",
+      headSHA: node.diffHeadSha,
       author: node.author?.username ?? "",
       additions: diffStats.reduce(0) { $0 + ($1.additions ?? 0) },
       deletions: diffStats.reduce(0) { $0 + ($1.deletions ?? 0) },
@@ -316,6 +317,7 @@ nonisolated enum GitLabJSONParsers {
     var draft: Bool?
     var sourceBranch: String?
     var targetBranch: String?
+    var diffHeadSha: String?
     var webUrl: String?
     var updatedAt: Date?
     var detailedMergeStatus: String?
