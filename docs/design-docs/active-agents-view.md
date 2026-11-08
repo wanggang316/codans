@@ -111,11 +111,11 @@ raw value 是持久进 `catalog.json` 的稳定标识符；`displayName` 是面�
 
 **Codable 向前兼容。** 两字段都可选、仅非 nil 时写出——旧 `catalog.json` 原样解码（`decodeIfPresent`），降级到旧 codans build 静默丢弃这两个字段。无需迁移脚本。
 
-**运行态退出快照。** `AgentStateStore` 在内存里维护最近的 idle / working / blocked / done / error 状态，不保存跃迁历史。退出时，`AppState` 的 `agentSnapshotProvider` 从 registry 生成 `PersistedAgentRecord`（pane ID、kind/state 的 raw value、PID、采集时间），交给 `SessionLifecycle` 写入 `sessions.json` 的 `SessionCatalog.agents`。`catalog.json` 中的 Pane 绑定字段不承担运行态快照存储。
+**运行态退出快照。** `AgentStateStore` 在内存里维护最近的 idle / working / blocked / done / error 状态，不保存跃迁历史。退出时，`AppState` 的 `agentSnapshotProvider` 从 registry 生成 `PersistedAgentRecord`（pane ID、kind/state 的 raw value、PID、采集时间，以及 agent 标题的两个来源：root 记录的 OSC 7501 `title` 与 agent 设的 OSC 0/2 标题，取自 `AgentStateStore.snapshotTitles(for:)`；旧快照没有这两个字段，按 nil 解码），交给 `SessionLifecycle` 写入 `sessions.json` 的 `SessionCatalog.agents`。`catalog.json` 中的 Pane 绑定字段不承担运行态快照存储。
 
 启动恢复由 `SessionCoordinator.restoredAgents` 提供记录。`selectAgentSeeds` 只保留 **daemon 存活且 kind/state raw value 均可解码**的记录：优先复用启动扫描的 liveness 结果，未覆盖的 Pane 直接探测 daemon socket；`.dead` 和仅有磁盘快照的 `.snapshot` 都不播种 agent 状态。存活检测以 daemon 为单位，不以退出快照中的 PID 为准；daemon 存活也不替代后续前台进程组对 agent 身份的确认。
 
-旧版本写入的 `finished` 按 `done` 解码（`AgentRuntimeState(persistedRaw:)`），新版本只写新词表。满足条件的记录交给 `seedRestored` 预填，scratch 的 `userInputSeen` 初始化为 `true`。后续真实视口事件接管状态派生；未通过恢复门槛的 Pane 等待实时识别，不显示由退出快照推断的 agent badge。
+旧版本写入的 `finished` 按 `done` 解码（`AgentRuntimeState(persistedRaw:)`），新版本只写新词表。满足条件的记录交给 `seedRestored` 预填（`AgentStateStore.RestoredAgent`），scratch 的 `userInputSeen` 初始化为 `true`，两个标题记为「恢复的」：行按缓存态的规则调淡显示，直到 agent 再次报告（OSC 7501 报告替换恢复的 `title`；新的 OSC 0/2 标题替换恢复的标题，zmx 挂接时重放的标题也算）。后续真实视口事件接管状态派生；未通过恢复门槛的 Pane 等待实时识别，不显示由退出快照推断的 agent badge。
 
 ### Agent 识别
 
@@ -150,7 +150,7 @@ struct AgentEntry {
     var lastTransitionAt: Date
     var source: AgentStateSource      // .programStatus | .screen
     var blockedKind: ProgramStatusKind? // permission | question | auth
-    var message: String?              // agent's own one-line text, untrusted
+    var message: String?              // agent's own one-line text, untrusted; `codans agent status` only
 }
 
 enum AgentRuntimeState: String, CaseIterable, Equatable, Sendable {
@@ -254,7 +254,7 @@ agent ──OSC 7501──▶ zmx daemon ──bytes──▶ libghostty (fork)
 
 归属成立时：按键和聚焦不再乐观清除 `blocked`（agent 自己会报告提示结束）；`TerminalEngine` 跳过该 Pane 的 `readText`（不再发 viewport / idle nudge）；该 Pane 的 OSC 9;4 进度被当作 REMOVE，不再点亮终端忙碌（Claude 在工具调用时会发 9;4）。归属失效（记录被丢弃或 `clear`）时，状态回到视口路径，并丢弃过期的视口缓存与 raw 态，不把报告结束误读成一轮完成。
 
-报告里的 `message` / `title` 是不可信的程序文本：存储前去掉双向覆盖与不可见格式字符，只用于显示（`normal` 行的活动文本优先显示 `message`，否则显示 OSC 标题），不写入持久日志；日志只记 state / kind / app。OSC 0/2 标题同样按此净化（`UntrustedDisplayText`）后才存入 `AgentStateStore`。
+报告里的 `message` / `title` 是不可信的程序文本：存储前去掉双向覆盖与不可见格式字符，只用于显示（`normal` 行的 agent 标题取 root 记录的 `title`，见「Agents View」；`message` 只由 `codans agent status` 输出，不在行里显示），不写入持久日志；日志只记 state / kind / app。OSC 0/2 标题同样按此净化（`UntrustedDisplayText`）后才存入 `AgentStateStore`。
 
 Source: [ProgramStatusRecords.swift](../../apps/mac/CodansCore/Agents/ProgramStatusRecords.swift), [ProgramStatusReport.swift](../../apps/mac/CodansCore/Agents/ProgramStatusReport.swift), [TerminalEngine.swift](../../apps/mac/codans/Runtime/TerminalEngine.swift), [AgentStateStore.swift](../../apps/mac/codans/App/Features/AgentState/AgentStateStore.swift).
 
@@ -277,13 +277,13 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 每行：
 - 左侧 20pt agent logo（资源缺失回落到 SF Symbol）；右侧是睡眠标记（见「IPC 与 CLI」）与状态图标。
 - **身份行**：worktree 名 + project 名（project 色、Remote Project的 remote 标记），两者中段截断；解析不到来源时显示 em-dash `—`（catalog 已移除该 Pane 的「ghost」行）。
-- **`normal`（两行）**：第一行是活动文本，第二行是身份行。两行都是常规字重；第二行的 worktree 名比第一行小一号、用次级色。**`compact`（一行）** 只显示身份行，不显示活动文本。
-- **活动文本**取 `AgentStateStore.activityText(for:)`：agent 的 OSC 7501 `message`，没有时取 agent 启动后 Pane 的 OSC 0/2 标题（存储前已净化，见「程序状态（OSC 7501）」）。只取 agent 启动后的标题：Pane 在 agent 启动前的标题（shell 设置的 cwd、上一个程序的标题）不是 agent 的活动，同一 Pane 中前一个 agent 的标题也不带到下一个 agent 的行。分界以 agent 绑定（前台 job 检测到 agent）为准；agent 在被检测到之前发出的标题会丢失，直到它下一次改标题。启动时恢复的 agent（持久化的绑定加仍在运行的 daemon）视为已绑定：没有 surface 的恢复 Pane 在显示前不会被绑定，但被动 watcher 送来的标题照常显示。前一个 agent 退出后、绑定释放前又启动的同 kind agent，由前台 job 的进程组不同识别为新 agent（`AgentBinder` 先解绑再绑定），不继承前一个的标题与状态。空白、或仅为 agent 名称的文本（`AgentActivityFormat.isRedundantActivityTitle`）视为没有活动文本，此时显示 agent 显示名（`AgentKind.displayName`），样式与活动文本相同。
-- **更新节奏：先显示后合并。** 只有 `AgentActivityLine` 读取活动文本，所以变化只重绘这一行。标题与 `message` 由终端事件推送，到 `AgentStateStore` 没有延迟。`AgentActivityPresentation` 在窗口开始时立即交付一次变化，之后 250 ms 窗口内的变化合并，窗口结束时交付最新值（交付即开始下一个窗口）。孤立的一次变化与行出现时的首个值立即显示；连续变化每秒最多显示 4 次，最终停在最新值。活动文本只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
-- **睡眠与缓存行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示活动文本；`source: cached` 的行，活动文本与状态图标一样调淡。
+- **`normal`（两行）**：第一行是 agent 标题，第二行是身份行。两行都是常规字重；第二行的 worktree 名比第一行小一号、用次级色。**`compact`（一行）** 只显示身份行，不显示 agent 标题。
+- **agent 标题**（ADR 0009）取 `AgentStateStore.agentTitle(for:)`：归属成立时 root 记录的 OSC 7501 `title`，没有时取 agent 启动后 Pane 的 OSC 0/2 标题（存储前已净化，见「程序状态（OSC 7501）」），都没有时显示 agent 显示名。OSC 7501 `message` 一轮内变化很多次，作为行首太细，不显示。agent 标题与 Pane 标题（Pane 卡片 Header，见 [main-window.md](main-window.md)）各按自己的标准取，同一 Pane 可以不同。只取 agent 启动后的标题：Pane 在 agent 启动前的标题（shell 设置的 cwd、上一个程序的标题）不是 agent 标题，同一 Pane 中前一个 agent 的标题也不带到下一个 agent 的行。分界以 agent 绑定（前台 job 检测到 agent）为准；agent 在被检测到之前发出的标题会丢失，直到它下一次改标题。启动时恢复的 agent（持久化的绑定加仍在运行的 daemon）视为已绑定：没有 surface 的恢复 Pane 在显示前不会被绑定，但被动 watcher 送来的标题照常显示。前一个 agent 退出后、绑定释放前又启动的同 kind agent，由前台 job 的进程组不同识别为新 agent（`AgentBinder` 先解绑再绑定），不继承前一个的标题与状态。空白、或仅为 agent 名称的文本（`AgentTitleFormat.isRedundantTitle`，如 `✳ Claude Code`）视为没有标题，按顺序取下一个来源；都没有时显示 agent 显示名（`AgentKind.displayName`），样式与 agent 标题相同。
+- **更新节奏：先显示后合并。** 只有 `AgentTitleLine` 读取 agent 标题，所以变化只重绘这一行。两个标题由终端事件推送，到 `AgentStateStore` 没有延迟。`AgentTitlePresentation` 在窗口开始时立即交付一次变化，之后 250 ms 窗口内的变化合并，窗口结束时交付最新值（交付即开始下一个窗口）。孤立的一次变化与行出现时的首个值立即显示；连续变化每秒最多显示 4 次，最终停在最新值。agent 标题只用于显示：不改变运行态、`lastTransitionAt`、行排序与行高；长文本单行截尾。
+- **睡眠、缓存与恢复行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示 agent 标题；`source: cached` 的行，agent 标题与状态图标一样调淡。从退出快照恢复的标题（`AgentTitle.isRestored`）同样调淡，直到 agent 再次报告（见「运行态退出快照」）。
 - 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.done` → 绿勾；`.error` → 红色三角；`.idle` → 次级灰圈。
 - 行密度（两行 `normal` / 一行 `compact`）与 auto-sort 由 `Settings → General → Agents View` 控制。
-- **无障碍。** `agentState.row.<paneID>.headline` 在 worktree 文本上；活动文本标识为 `agentState.row.<paneID>.activity`。整行 VoiceOver label（agent 名、worktree、project、状态）不含活动文本，因为它变化频繁。
+- **无障碍。** `agentState.row.<paneID>.headline` 在 worktree 文本上；agent 标题标识为 `agentState.row.<paneID>.title`。整行 VoiceOver label（agent 名、worktree、project、状态）不含 agent 标题，因为它变化频繁。
 - 行没有 hover 摘要卡（见「技术决策」）。session 扫描器仍服务于 `AgentSessionHistoryPopover`、PaneHUD 与空 Pane 视图。
 
 **无项目与空状态**：完整 catalog 没有项目时，隐藏面板、底部入口及列表占位，不修改已保存的开关偏好。按标签筛选后没有匹配项目不影响面板可用性。有项目但没有 agent 时，面板只显示居中的提示文字，不显示装饰图标。
@@ -326,7 +326,7 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 
 **为何把实时活动放进行内并删除 hover 摘要卡。** 用户扫一眼列表要回答的是「每个 agent 正在做什么」；把它藏在 500ms hover 之后，只能逐行查看。行内显示让所有 agent 的活动同时可见。卡片剩下的内容（session 任务标题、面包屑、session id）使用频率低，却要求 popover 在展示期间尺寸固定、session 扫描先于弹出、点击与关闭的拆解顺序错开（见 [lessons-learned](../lessons-learned/2026-08-20-agents-view-row-click-segfault-in-popover.md)）。取舍：失去 session 任务标题的速览。若用户需要在行内装不下的 session 信息，再考虑恢复一个不改变尺寸的卡片。
 
-**为何活动文本先显示后合并。** 只有 `AgentActivityLine` 读取活动文本，一次变化只重绘这一行，所以逐次刷新的成本低。只在窗口结束时交付的一秒合并让每次变化都晚一秒，与即时更新的 Tab 标题并排时显得滞后。先显示后合并让孤立变化没有延迟，250 ms 窗口仍限制 agent 高频改标题（如 spinner 字形）时的重绘次数。取舍：标题持续变化时，行最多落后最新值 250 ms。若多 agent 同时高频改标题造成可见的卡顿，再加大窗口。
+**为何 agent 标题先显示后合并。** 只有 `AgentTitleLine` 读取 agent 标题，一次变化只重绘这一行，所以逐次刷新的成本低。只在窗口结束时交付的一秒合并让每次变化都晚一秒，与即时更新的 Tab 标题并排时显得滞后。先显示后合并让孤立变化没有延迟，250 ms 窗口仍限制 agent 高频改标题（如 spinner 字形）时的重绘次数。取舍：标题持续变化时，行最多落后最新值 250 ms。若多 agent 同时高频改标题造成可见的卡顿，再加大窗口。
 
 ## 备选方案（Alternatives）
 
