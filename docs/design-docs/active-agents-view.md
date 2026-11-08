@@ -209,6 +209,15 @@ derive(pane) =
 
 Droid 已核实官方 0.245.0 发布包：终端探测成功后以 `app=droid` 报告状态，取消回到 `idle`，结束与失败分别报告 `done` / `error`。OpenCode 已核实上游 2026-10-19 合入的实现：`app=opencode`，root 汇总 pending sessions，并为每个 pending session 发送子记录；截至 2026-10-20，稳定版 1.19.3 尚未包含此实现。两者只有收到匹配报告后才接管状态，旧版本继续使用视口兜底。
 
+**`title` 字段实测（2026-11-08，隔离实例，`script` 录下 Pane 的原始输出）。** agent 标题优先取 root 记录的 `title`（ADR 0009），但两个主要生产者目前都不发送它，行显示的是它们的 OSC 0/2 标题：
+
+| 生产者 | OSC 7501 报告 | `title` | 同一轮的 OSC 0/2 标题 |
+|---|---|---|---|
+| Claude Code 2.1.319 | `?`（探测）→ `state=working:app=claude-code` → `state=done:app=claude-code` → 退出时 `state=clear` | 不发送（本轮也没有 `message`） | `✳ Claude Code` → `Claude Code` → 任务标题（`Single word greeting`），退出时清空 |
+| Codex CLI 0.167.0 | `state=idle:app=codex` → `state=working:app=codex` → `state=done:app=codex` | 不发送 | 目录名加 spinner 字形（`⠙ codans-408`），结束后为 `Reply hi \| codans-408` |
+
+生产者开始发送 `title` 后无需改动：它优先于 OSC 0/2 标题。
+
 **链路。**
 
 ```
