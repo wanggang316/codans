@@ -42,10 +42,10 @@ struct CommandPaletteItem: Equatable, Identifiable {
   let remoteAuthority: String?
   /// Position in the catalog (sidebar order). Breaks ties between same-score
   /// items so one Project's items stay together.
-  let catalogOrder: CatalogOrder?
+  let sidebarOrder: SidebarOrder?
   let kind: Kind
 
-  struct CatalogOrder: Comparable {
+  struct SidebarOrder: Comparable {
     let project: Int
     let worktree: Int
 
@@ -66,7 +66,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     priorityTier: Int = 100,
     hiddenWhenQueryEmpty: Bool = false,
     remoteAuthority: String? = nil,
-    catalogOrder: CatalogOrder? = nil,
+    sidebarOrder: SidebarOrder? = nil,
     kind: Kind
   ) {
     self.id = id
@@ -80,7 +80,7 @@ struct CommandPaletteItem: Equatable, Identifiable {
     self.priorityTier = priorityTier
     self.hiddenWhenQueryEmpty = hiddenWhenQueryEmpty
     self.remoteAuthority = remoteAuthority
-    self.catalogOrder = catalogOrder
+    self.sidebarOrder = sidebarOrder
     self.kind = kind
   }
 

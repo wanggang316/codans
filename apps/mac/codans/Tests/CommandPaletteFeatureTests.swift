@@ -77,12 +77,12 @@ struct CommandPaletteFeatureTests {
   /// Same-score switch items sort by catalog order (Project, then Worktree),
   /// not by title, so each Project's items stay together.
   @Test
-  func sameScoreItemsSortByCatalogOrder() async {
+  func sameScoreItemsSortBySidebarOrder() async {
     func switchItem(_ id: String, _ worktree: String, project: Int, index: Int) -> CommandPaletteItem {
       CommandPaletteItem(
         id: id, title: "Switch to Worktree: \(worktree)", subtitle: "linko",
         searchText: "linko \(worktree)", searchTerms: ["linko"], icon: "circle",
-        catalogOrder: .init(project: project, worktree: index),
+        sidebarOrder: .init(project: project, worktree: index),
         kind: .openSettings
       )
     }
@@ -101,12 +101,12 @@ struct CommandPaletteFeatureTests {
 
   /// Recency still applies before the catalog-order tie-break.
   @Test
-  func recencyRanksAboveCatalogOrderTie() async {
+  func recencyRanksAboveSidebarOrderTie() async {
     func switchItem(_ id: String, project: Int) -> CommandPaletteItem {
       CommandPaletteItem(
         id: id, title: "Switch to Worktree: main", subtitle: "linko",
         searchText: "linko main", searchTerms: ["linko"], icon: "circle",
-        catalogOrder: .init(project: project, worktree: 0),
+        sidebarOrder: .init(project: project, worktree: 0),
         kind: .openSettings
       )
     }
