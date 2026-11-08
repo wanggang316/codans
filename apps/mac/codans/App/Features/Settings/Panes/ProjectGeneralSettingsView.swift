@@ -6,7 +6,7 @@ import SwiftUI
 /// A Project's Settings page.
 ///
 /// Sibling Sections rendered in fixed order: General, Workspace, Editor,
-/// Worktree, Git Platform, Environment, Commands, then the lifecycle scripts.
+/// Worktree, Git Platform, Environment, the lifecycle scripts, then Commands.
 /// Worktree, Git Platform, and the lifecycle scripts render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
@@ -49,8 +49,8 @@ struct ProjectGeneralSettingsView: View {
     case worktree
     case gitPlatform
     case environment
-    case commands
     case lifecycle
+    case commands
   }
 
   /// Pure visibility logic. Worktree / Git Platform / Lifecycle gate
@@ -184,12 +184,12 @@ struct ProjectGeneralSettingsView: View {
       if visible.contains(.environment) {
         environmentSection
       }
+      if visible.contains(.lifecycle) {
+        lifecycleSections
+      }
       if visible.contains(.commands) {
         ProjectCommandsSection(projectID: projectID, store: store)
           .id(SectionID.commands)
-      }
-      if visible.contains(.lifecycle) {
-        lifecycleSections
       }
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {

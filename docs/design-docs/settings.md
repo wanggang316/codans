@@ -255,7 +255,7 @@ Durable shell decisions:
   through `HierarchyClient` / the catalog (the storage-unification core).
 - **One page per Project.** A Project's sidebar row opens a single page
   (`SettingsSection.project`); its custom commands are a Commands section on
-  that page, above the lifecycle scripts. "Manage Project Commands…" opens the page
+  that page, at its bottom below the lifecycle scripts. "Manage Project Commands…" opens the page
   scrolled to that section.
 - **Kind-specific content.** General, Editor, Environment, and Commands
   sections apply to every kind.

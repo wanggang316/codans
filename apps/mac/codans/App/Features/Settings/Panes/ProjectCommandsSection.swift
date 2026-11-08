@@ -9,7 +9,7 @@ import CodansCore
 /// take their natural height.
 ///
 /// Worktree-lifecycle scripts (Setup / Archive / Delete) are separate
-/// sections below this one.
+/// sections above this one.
 ///
 /// Reads come from `@Environment(SettingsStore.self)` for live updates;
 /// writes always go through the TCA reducer so test stores can spy on

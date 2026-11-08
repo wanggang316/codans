@@ -46,10 +46,9 @@ struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this ty
   func sectionOrderingIsStableAcrossKinds() {
     // The Form renders Sections in declaration order, not Set order; this
     // test pins the canonical order so a future refactor cannot silently
-    // shuffle sections. Commands sit just above the lifecycle scripts, which
-    // render last.
+    // shuffle sections. Commands render last, below the lifecycle scripts.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .general, .workspace, .editor, .worktree, .gitPlatform, .environment, .commands, .lifecycle,
+      .general, .workspace, .editor, .worktree, .gitPlatform, .environment, .lifecycle, .commands,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }
