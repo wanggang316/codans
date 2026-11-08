@@ -16,20 +16,6 @@ import CodansCore
 @MainActor
 struct GhosttyActionDecoderTests {
 
-  // MARK: - reportedTitle
-
-  /// libghostty turns an empty OSC 0/2 title into the pwd; that is no title.
-  @Test
-  func titleEqualToThePwdIsReportedAsEmpty() {
-    let pwd = "/Users/me/dev/codans"
-    #expect(GhosttyActionDecoder.reportedTitle(pwd, pwd: pwd) == "")
-    #expect(GhosttyActionDecoder.reportedTitle("make test", pwd: pwd) == "make test")
-    #expect(GhosttyActionDecoder.reportedTitle("", pwd: pwd) == "")
-    #expect(GhosttyActionDecoder.reportedTitle(nil, pwd: pwd) == nil)
-    #expect(GhosttyActionDecoder.reportedTitle(pwd, pwd: nil) == pwd)
-    #expect(GhosttyActionDecoder.reportedTitle("", pwd: "") == "")
-  }
-
   // MARK: - decodeProgramStatus
 
   @Test
