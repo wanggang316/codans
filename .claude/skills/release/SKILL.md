@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a codans stable release through a pull request. Write the release notes into CHANGELOG, pick the Semantic Versioning bump from them, bump MARKETING_VERSION, open a release PR, and after it merges tag the merged commit vX.Y.Z to trigger the GitHub Actions Developer-ID release pipeline. Use when shipping a new stable build.
+description: Cut a codans stable release through a pull request. Write the release notes into CHANGELOG, pick the Semantic Versioning bump from them, bump MARKETING_VERSION, open a release PR, and after it merges tag the merged commit vX.Y.Z to trigger the GitHub Actions Developer-ID release pipeline, and publish the release once it passes. Use when shipping a new stable build.
 ---
 
 # release: Cut a codans stable release
@@ -9,7 +9,7 @@ A stable release is **a release PR, then a tag push**. The PR lands the
 version bump and the release notes on `main`. The tag `vX.Y.Z` on the merged
 commit fires `.github/workflows/release.yml`: it builds, signs, notarizes,
 writes a Sparkle `appcast.xml`, and opens a **draft** GitHub Release with the
-DMG. The contract CI enforces:
+DMG, which this skill publishes once the run passes. The contract CI enforces:
 
 > tag `vX.Y.Z` ⇔ `MARKETING_VERSION = X.Y.Z` in
 > `apps/mac/Configurations/Project.xcconfig` ⇔ `CHANGELOG.md` has
@@ -23,8 +23,10 @@ Never push to `main` directly; every release change goes through a PR.
 
 ## Process
 
-Run steps 1–6 without stopping: they write only to a release branch and an
-open PR, which is the review surface. The single gate is the merge in step 7.
+The release PR is the single gate. Run steps 1–6 without stopping: they
+write only to a release branch and an open PR, which is the review surface.
+After the user approves the merge in step 7, run steps 7–9 without stopping,
+up to the published release.
 
 ### 1. Pre-flight
 
@@ -161,7 +163,7 @@ it fails when `main` is checked out in another worktree.
 
 ### 8. Tag the merged commit and push the tag
 
-The user's merge approval covers this step.
+The user's merge approval covers this step and step 9.
 
 ```bash
 SHA=$(gh pr view <PR> --json mergeCommit --jq .mergeCommit.oid)
@@ -176,16 +178,29 @@ Always an annotated tag on the merged commit — never on the local branch
 commit, which the rebase replaced. Its message is only CI's fallback when
 the CHANGELOG section is missing.
 
-### 9. Confirm CI started
+### 9. Wait for CI, then publish the release
 
 ```bash
-gh run list --workflow=release.yml --limit 1
+RUN=$(gh run list --workflow=release.yml --event push --branch vX.Y.Z \
+  --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$RUN" --exit-status
+gh release view vX.Y.Z --json isDraft,assets --jq '{isDraft, assets: [.assets[].name]}'
+gh release edit vX.Y.Z --draft=false --latest
 ```
 
 The merge also starts `release-tip.yml`; both share the `release`
-concurrency group, so the stable run can queue behind it. Report the run
-status and remind the user the release is a **draft** to publish by hand
-(`gh release edit vX.Y.Z --draft=false`). Never publish it yourself.
+concurrency group, so the stable run can queue behind it.
+
+Publish only when the run passed and the draft has all four assets:
+`Codans-X.Y.Z.dmg`, `Codans-X.Y.Z.dmg.sha256`, `Codans.dmg`, and
+`appcast.xml`. Otherwise leave the draft and go to Recovery. Keep the draft
+only when the user asked for it.
+
+Publish from this session, not from CI: a release that the workflow's
+`GITHUB_TOKEN` publishes does not trigger `update-cask.yml`. After
+publishing, confirm the cask run started
+(`gh run list --workflow=update-cask.yml --limit 1`) and report the release
+URL.
 
 ## Recovery
 
@@ -198,6 +213,7 @@ Roll forward; never force-push `main` or rewrite its history. Fixes to
 | Tag pushed without a CHANGELOG section | Add it in a `docs(changelog): record vX.Y.Z` PR; don't retag. |
 | Release PR closed without merge | Delete the branch; nothing was released. |
 | Notarization or other transient CI failure | `gh run view --log-failed`, then re-run via `workflow_dispatch` on the existing tag. |
+| Release run passed but an asset is missing | Leave the draft; re-run via `workflow_dispatch` on the existing tag after deleting the draft. |
 | Wrong version shipped | Supersede it with the next version. |
 | Published release is broken | Mark its header `## [X.Y.Z] - YYYY-MM-DD [YANKED]` with a one-line reason; ship the fix as a new version. |
 
