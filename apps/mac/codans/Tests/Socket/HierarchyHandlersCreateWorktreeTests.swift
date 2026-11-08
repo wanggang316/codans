@@ -384,6 +384,112 @@ struct HierarchyHandlersCreateWorktreeTests {
     }
   }
 
+  // MARK: - Creation lease
+
+  /// A reconcile that runs while `git worktree add` streams must not append
+  /// the new path; the catalog write then places it at the top of the
+  /// unpinned segment.
+  @Test
+  func reconcileDuringMaterializeDoesNotMoveTheNewRowToTheTail() async throws {
+    let base = Self.tempDirectory()
+    let spy = CreatorSpy()
+    let fixture = Self.makeFixture(globalWorktreesDirectory: base.path, creator: spy)
+    let manager = fixture.manager
+    _ = try manager.createWorktree(in: fixture.projectID, name: "main", path: "/repo", branch: "main")
+    let olderID = try manager.createWorktree(
+      in: fixture.projectID, name: "older", path: "/repo/older", branch: "older")
+    var leasedDuringCreate = false
+    spy.onCreate = { spec in
+      leasedDuringCreate = manager.holdsCreationLease(fixture.projectID)
+      let newPath = (spec.pathOverride ?? spec.baseDirectory.appending(path: spec.name)).path
+      _ = manager.reconcileDiscoveredWorktrees(
+        projectID: fixture.projectID,
+        entries: [
+          (path: "/repo", branch: "main", head: nil),
+          (path: "/repo/older", branch: "older", head: nil),
+          (path: newPath, branch: "x", head: nil),
+        ]
+      )
+    }
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: nil, branch: "x", reuseExisting: nil))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    let ids = manager.catalog.projects[0].worktrees.map(\.id)
+    #expect(result.created)
+    #expect(leasedDuringCreate)
+    #expect(ids.count == 3)
+    #expect(ids[1] == result.id)
+    #expect(ids.last == olderID)
+    #expect(!manager.holdsCreationLease(fixture.projectID))
+  }
+
+  @Test
+  func creatorFailureReleasesTheLease() async throws {
+    let spy = CreatorSpy(failure: .commandFailed(command: "git", stderr: "boom"))
+    let fixture = Self.makeFixture(globalWorktreesDirectory: Self.tempDirectory().path, creator: spy)
+    var released: [ProjectID] = []
+    fixture.manager.onCreationLeasesReleased = { released.append($0) }
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: nil, branch: "x", reuseExisting: nil))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+
+    guard case .failed = outcome else {
+      Issue.record("expected .failed, got \(outcome)")
+      return
+    }
+    #expect(spy.specs.count == 1)
+    #expect(!fixture.manager.holdsCreationLease(fixture.projectID))
+    #expect(released == [fixture.projectID])
+  }
+
+  @Test
+  func catalogWriteFailureReleasesTheLease() async throws {
+    let spy = CreatorSpy()
+    let fixture = Self.makeFixture(globalWorktreesDirectory: Self.tempDirectory().path, creator: spy)
+    // Same name, other path: the catalog write throws after the creator ran.
+    _ = try fixture.manager.createWorktree(
+      in: fixture.projectID, name: "x", path: "/elsewhere/x", branch: "y")
+    var released: [ProjectID] = []
+    fixture.manager.onCreationLeasesReleased = { released.append($0) }
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: nil, branch: "x", reuseExisting: nil))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+
+    guard case .failed = outcome else {
+      Issue.record("expected .failed, got \(outcome)")
+      return
+    }
+    #expect(spy.specs.count == 1)
+    #expect(!fixture.manager.holdsCreationLease(fixture.projectID))
+    #expect(released == [fixture.projectID])
+  }
+
+  @Test
+  func reuseExistingStillReturnsTheRegisteredRow() async throws {
+    let spy = CreatorSpy()
+    let fixture = Self.makeFixture(creator: spy)
+    let existing = try fixture.manager.createWorktree(
+      in: fixture.projectID, name: "x", path: "/repo/x", branch: "x")
+    let params = try JSONValue.encoded(
+      HierarchyHandlers.CreateWorktreeParams(
+        projectID: fixture.projectID, name: "x", path: "/repo/x", branch: "x", reuseExisting: true))
+
+    let outcome = await fixture.handlers.createWorktree(params)
+    let result: HierarchyHandlers.CreateWorktreeResult = try Self.decodeUnary(outcome)
+
+    #expect(result.id == existing)
+    #expect(!result.created)
+    #expect(spy.specs.isEmpty)
+  }
+
   /// Records every launch and answers with a fixed pane.
   @MainActor
   private final class LauncherSpy {
@@ -402,9 +508,12 @@ struct HierarchyHandlersCreateWorktreeTests {
   private final class CreatorSpy {
     var specs: [CreateWorktreeSpec] = []
     let failure: GitWorktreeError?
+    /// Runs while the worktree is "being created", e.g. a racing reconcile.
+    var onCreate: (@MainActor (CreateWorktreeSpec) -> Void)?
     init(failure: GitWorktreeError? = nil) { self.failure = failure }
     func create(_ spec: CreateWorktreeSpec) throws -> URL {
       specs.append(spec)
+      onCreate?(spec)
       if let failure { throw failure }
       return spec.pathOverride ?? spec.baseDirectory.appending(path: spec.name)
     }
@@ -462,7 +571,7 @@ struct HierarchyHandlersCreateWorktreeTests {
       },
       agentLauncher: launcher.map { spy in { @MainActor @Sendable spec in spy.launch(spec) } }
     )
-    return Fixture(handlers: handlers, projectID: projectID, removedBox: removed)
+    return Fixture(handlers: handlers, projectID: projectID, manager: manager, removedBox: removed)
   }
 
   private static func decodeUnary<T: Decodable>(_ outcome: RouterOutcome) throws -> T {
@@ -487,6 +596,7 @@ struct HierarchyHandlersCreateWorktreeTests {
   private struct Fixture {
     let handlers: HierarchyHandlers
     let projectID: ProjectID
+    let manager: HierarchyManager
     var removedBox: RemovedBox?
     var removed: [WorktreeID] { removedBox?.ids ?? [] }
   }
