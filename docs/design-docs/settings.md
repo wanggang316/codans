@@ -238,6 +238,10 @@ Durable shell decisions:
 - **Sidebar `selection` is transient, never persisted.** Closing the window
   resets it; reopening defaults to General so each Settings session starts
   from the global preferences.
+- **Global sidebar rows form three untitled groups** (`SettingsSection.globalGroups`):
+  app preferences; agent tooling (Agents, Integrations, Workflows); Remote
+  Hosts. Each group is a headerless `Section`, so only the section gap
+  separates them.
 - **The sidebar group of Projects, and per-Project sub-rows, are driven by the
   live catalog**, not stored on the window — the catalog is the single source of
   truth for "what exists". `HierarchyClient.kind(of:)` returns `nil` for a gone
@@ -284,7 +288,7 @@ registration; a launch failure does not undo worktree creation. CLI creation
 uses the profile explicitly requested by that command, not this remembered
 sheet preference.
 
-## Developer pane
+## Integrations pane
 
 The pane uses `DeveloperPaneDependencies` (`@Environment`). Its grouped form
 has a **CLI** section for the `codans` CLI symlink (`CLIInstallerClient`,

@@ -19,7 +19,7 @@
 主要契约：
 
 - **CLI 二进制名。** Release 为 `codans`，Debug 为 `codans-dev`；安装时做碰撞检查，不提供自动后备名。见 [Decisions](#decisions) §D1。
-- **CLI 二进制分发。** 从 Settings → Developer 面板，经单次 macOS 管理员授权对话框，把 bundle 内嵌的已签名二进制 symlink 进 `/usr/local/bin`。见 [Decisions](#decisions) §D2 与 [CLI 安装](#cli-安装)。
+- **CLI 二进制分发。** 从 Settings → Integrations 面板，经单次 macOS 管理员授权对话框，把 bundle 内嵌的已签名二进制 symlink 进 `/usr/local/bin`。见 [Decisions](#decisions) §D2 与 [CLI 安装](#cli-安装)。
 - **IPC 请求调度。** 每连接串行处理请求。`inflightLimit` 默认为 64，但当前串行循环的在飞计数最多为 1；保留的溢出分支立即返回 `IPCError.overloaded`（CLI 退出码 5），没有 2 s 等待。见 [Decisions](#decisions) §D9。
 
 不在范围（归属别处）：
@@ -374,7 +374,7 @@ Dependencies:
 
 ## CLI 安装
 
-> CLI 安装由 Settings → Developer 管理。GUI 进程的 `PATH` 不能代表调用方 shell 的配置，因此安装器不据此判断 CLI 是否可从每个 shell 访问。
+> CLI 安装由 Settings → Integrations 管理。GUI 进程的 `PATH` 不能代表调用方 shell 的配置，因此安装器不据此判断 CLI 是否可从每个 shell 访问。
 
 CLI 二进制已由 `scripts/embed-codans.sh` 内嵌到应用 bundle 的 `Contents/Resources/bin/<名字>`——Debug 为 `codans-dev`，Release 为 `codans`，名字来自 `Project.swift` 的 `CODANS_CLI_NAME` 构建设置并与 `BuildChannel.slug` 一致——release 构建随应用一起签名，故 symlink 目标已是稳定、已签名、已公证的产物。
 
