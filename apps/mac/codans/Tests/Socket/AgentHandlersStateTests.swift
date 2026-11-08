@@ -31,8 +31,8 @@ struct AgentHandlersStateTests {
     let catalog = Catalog(projects: [project])
     let store = AgentStateStore(focusedPane: { focused })
     store.seedRestored([
-      (paneID: pane.id, kind: .claudeCode, state: .working),
-      (paneID: idlePane.id, kind: .amp, state: .idle),
+      .init(paneID: pane.id, kind: .claudeCode, state: .working),
+      .init(paneID: idlePane.id, kind: .amp, state: .idle),
     ])
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
       "AgentHandlersStateTests-\(UUID().uuidString).json")
@@ -128,7 +128,7 @@ struct AgentHandlersStateTests {
     let store = fixture.store
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(60))
-      store.seedRestored([(paneID: pane.id, kind: .claudeCode, state: .idle)])
+      store.seedRestored([.init(paneID: pane.id, kind: .claudeCode, state: .idle)])
     }
 
     let response = try await fixture.handlers.wait(
@@ -169,7 +169,7 @@ struct AgentHandlersStateTests {
     let store = fixture.store
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(40))
-      store.seedRestored([(paneID: pane.id, kind: .claudeCode, state: .blocked)])
+      store.seedRestored([.init(paneID: pane.id, kind: .claudeCode, state: .blocked)])
     }
     let changed = try await fixture.handlers.wait(
       IPC.AgentWaitRequest(paneID: pane.id, until: .changed, timeoutMillis: 3000))

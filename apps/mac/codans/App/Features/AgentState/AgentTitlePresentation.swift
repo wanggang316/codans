@@ -2,7 +2,7 @@ import CodansCore
 import Foundation
 import Observation
 
-/// Presentation-only coalescing of one row's activity text. A change after
+/// Presentation-only coalescing of one row's agent title. A change after
 /// a quiet period is delivered at once and opens a window of `interval`;
 /// later changes in the window coalesce, and the latest value is delivered
 /// when the window ends (which opens the next window). Agents that retitle
@@ -11,10 +11,10 @@ import Observation
 /// drives runtime state, `lastTransitionAt`, or row order.
 @MainActor
 @Observable
-final class AgentActivityPresentation {
+final class AgentTitlePresentation {
   static let defaultInterval: Duration = .milliseconds(250)
 
-  /// The delivered activity text, or nil when the agent reports nothing
+  /// The delivered agent title, or nil when the agent reports nothing
   /// beyond its own name.
   private(set) var text: String?
 
@@ -34,11 +34,11 @@ final class AgentActivityPresentation {
     window?.cancel()
   }
 
-  /// The row's first line: the activity text, else the agent display name.
+  /// The row's first line: the agent title, else the agent display name.
   var rowText: String { text ?? kind.displayName }
 
-  func update(activity: String?) {
-    latestText = AgentActivityFormat.activityLine(from: activity, kind: kind)
+  func update(title: String?) {
+    latestText = AgentTitleFormat.titleLine(from: title, kind: kind)
     guard window == nil, latestText != text else { return }
     text = latestText
     openWindow()

@@ -803,12 +803,15 @@ final class AppState {
         guard let registry else { return [] }
         let now = Date()
         return registry.entries.map { paneID, entry in
-          PersistedAgentRecord(
+          let titles = registry.snapshotTitles(for: paneID)
+          return PersistedAgentRecord(
             paneID: paneID,
             kindRaw: entry.kind.rawValue,
             stateRaw: entry.state.rawValue,
             pid: engine?.foregroundProcessGroupID(for: paneID) ?? 0,
-            capturedAt: now
+            capturedAt: now,
+            programStatusTitle: titles.programStatusTitle,
+            terminalTitle: titles.terminalTitle
           )
         }
       }
@@ -2594,8 +2597,8 @@ final class AppState {
     restored: [PaneID: PersistedAgentRecord],
     knownLiveness: [PaneID: Bool] = [:],
     isDaemonAlive: (PaneID) -> Bool
-  ) -> [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] {
-    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
+  ) -> [AgentStateStore.RestoredAgent] {
+    var seeds: [AgentStateStore.RestoredAgent] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
       // Reuse the launch sweep's verdict when it covered this pane; only
@@ -2607,7 +2610,10 @@ final class AppState {
         let kind = AgentKind(rawValue: record.kindRaw),
         let state = AgentStateStore.AgentRuntimeState(persistedRaw: record.stateRaw)
       else { continue }
-      seeds.append((paneID: paneID, kind: kind, state: state))
+      seeds.append(
+        .init(
+          paneID: paneID, kind: kind, state: state,
+          programStatusTitle: record.programStatusTitle, terminalTitle: record.terminalTitle))
     }
     return seeds
   }

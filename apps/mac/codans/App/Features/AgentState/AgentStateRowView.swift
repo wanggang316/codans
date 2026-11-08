@@ -6,7 +6,7 @@ import SwiftUI
 /// Layout:
 /// - Leading: 20pt agent logo (per-kind brand glyph via `AgentLogoView`).
 /// - Center, by density:
-///     · `normal`: the agent activity text (else the agent display name)
+///     · `normal`: the agent title (else the agent display name)
 ///       over the identity line `<WorktreeName> <ProjectName>`.
 ///     · `compact`: the identity line alone.
 /// - Trailing: sleep glyph (when sleeping) + state icon.
@@ -50,12 +50,12 @@ struct AgentStateRowView: View {
   /// vertical padding. Defaults to `.normal` so the legacy default
   /// caller and tests render unchanged without opt-in.
   var displayMode: AgentsViewDisplayMode = .normal
-  /// Live agent activity text of this row's pane (OSC 7501 `message`, else
-  /// the OSC 0/2 title), shown on the first line in `normal` density. Read
-  /// only inside `AgentActivityLine` so updates re-render that line alone.
+  /// Live agent title of this row's pane (OSC 7501 `title`, else the agent's
+  /// OSC 0/2 title; ADR 0009), shown on the first line in `normal` density.
+  /// Read only inside `AgentTitleLine` so updates re-render that line alone.
   /// Defaults to nil-returning so legacy call sites (popover variant,
   /// tests) show the agent display name.
-  var activityText: () -> String? = { nil }
+  var agentTitle: () -> AgentStateStore.AgentTitle? = { nil }
   /// The row's bound focus chord (`⌥N`), shown after the trailing status glyphs
   /// while ⌘ is held.
   var hotkeyHint: String?
@@ -102,7 +102,7 @@ struct AgentStateRowView: View {
     .contentShape(Rectangle())
     .background(rowBackground)
     // Not a `Button`: a button merges its label's texts into one element,
-    // which hides the `.headline` / `.activity` / `.state` leaves. Keep what
+    // which hides the `.headline` / `.title` / `.state` leaves. Keep what
     // the button gave keyboard users: with keyboard navigation on, Tab
     // focuses the row (a click does not) and Space or Return activates it.
     .onTapGesture(perform: handleTap)
@@ -133,10 +133,10 @@ struct AgentStateRowView: View {
       }
     }
     .onHover { isHovering = $0 }
-    // `.contain` keeps the `.headline` / `.activity` texts and `.state` icon
+    // `.contain` keeps the `.headline` / `.title` texts and `.state` icon
     // individually addressable by their sub-element identifiers (the
     // user-test contract surface). The row group itself carries the
-    // full-sentence label (without the activity text) and the press action.
+    // full-sentence label (without the agent title) and the press action.
     // No `.accessibilityRepresentation`: it replaces the whole subtree and
     // would hide those leaves.
     .accessibilityElement(children: .contain)
@@ -154,24 +154,24 @@ struct AgentStateRowView: View {
     Task { @MainActor in onTap() }
   }
 
-  /// Center column. `normal` puts the live activity line over the identity
+  /// Center column. `normal` puts the live agent title over the identity
   /// line; `compact` shows the identity line alone. A cached state dims the
-  /// activity text the same as the state icon: both are the last value
-  /// seen, not a live one.
+  /// agent title the same as the state icon: both are the last value seen,
+  /// not a live one.
   @ViewBuilder
   private var identityColumn: some View {
     switch displayMode {
     case .normal:
       VStack(alignment: .leading, spacing: 2) {
-        AgentActivityLine(
+        AgentTitleLine(
           paneID: paneID,
-          activityText: activityText,
-          activity: AgentActivityPresentation(kind: entry.kind)
+          agentTitle: agentTitle,
+          isStateCached: isStateCached,
+          presentation: AgentTitlePresentation(kind: entry.kind)
         )
         // A rebind to another agent kind starts a fresh presentation, so
         // the fallback name and the redundant-title check follow the kind.
         .id(entry.kind)
-        .opacity(isStateCached ? Self.cachedOpacity : 1)
         identityLine(isSecondary: true)
       }
     case .compact:
@@ -189,7 +189,7 @@ struct AgentStateRowView: View {
   /// surface) in both densities.
   ///
   /// `isSecondary` is the `normal` second line: the worktree text drops to
-  /// a smaller, lighter style so the activity line above reads first.
+  /// a smaller, lighter style so the agent title above reads first.
   private func identityLine(isSecondary: Bool) -> some View {
     HStack(spacing: 8) {
       Text(worktreeName)
@@ -266,7 +266,7 @@ struct AgentStateRowView: View {
   }
 
   private var isStateCached: Bool { entry.source == .cached }
-  private static let cachedOpacity = 0.45
+  static let cachedOpacity = 0.45
 
   /// Trailing status column — state icon + short verb, in a single
   /// HStack that the outer row's `alignment: .center` keeps vertically
@@ -355,7 +355,7 @@ struct AgentStateRowView: View {
   }
 
   /// Full-sentence accessibility label combining display name, worktree,
-  /// project, and state. The activity text is left out: it changes too
+  /// project, and state. The agent title is left out: it changes too
   /// often for a label VoiceOver reads on focus.
   private var accessibilityLabelText: String {
     "\(entry.kind.displayName), \(worktreeName), \(projectName), \(sentenceVerb)" + (isSleeping ? ", sleeping" : "")
