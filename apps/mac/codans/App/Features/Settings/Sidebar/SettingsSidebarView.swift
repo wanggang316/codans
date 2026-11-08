@@ -173,19 +173,21 @@ struct SettingsSidebarView: View {
   private func iconStyle(for section: SettingsSection) -> SettingsIconTile.Style {
     switch section {
     case .general: return .init(.symbol("gearshape.fill", size: 12), .gray)
-    // The badge sits low left, so the glyph moves right a little to look centered.
+    // The filled drive outweighs the badge at its left, so shift the glyph left.
     case .gitPlatforms:
-      return .init(.symbol("externaldrive.badge.timemachine", size: 16, nudge: .init(width: -0.5, height: 0)), .indigo)
+      return .init(.symbol("externaldrive.fill.badge.timemachine", size: 16, nudge: .init(width: -0.5, height: 0.5)), .indigo)
     case .worktree: return .init(.asset("git-branch", size: 12), .orange)
     case .terminal: return .init(.prompt, .graphite, glyphColor: SettingsIconTile.promptGreen)
     // The badge widens the box upward, which leaves the bell low; lift it.
     case .notifications:
       return .init(.symbol("bell.badge.fill", size: 12, nudge: .init(width: 0, height: -0.5)), .red)
     // A triangle's mass sits left of its box center; shift it right.
-    case .globalCommands: return .init(.symbol("play.fill", size: 10, nudge: .init(width: 0.5, height: 0)), .green)
+    case .globalCommands:
+      return .init(.symbol("play.fill", size: 10, nudge: .init(width: 0.5, height: 0)), .green)
     case .shortcuts: return .init(.symbol("command", size: 12), .gray)
     case .updates: return .init(.symbol("arrow.down", size: 12), .blue)
-    case .about: return .init(.symbol("info", size: 12), .gray)
+    // The light dot over a heavy stem puts the mass low; lift it.
+    case .about: return .init(.symbol("info", size: 12, nudge: .init(width: 0, height: -0.5)), .gray)
     case .agents: return .init(.symbol("sparkles", size: 12), .sunset)
     // The tab on the right pulls the mass left of the box center.
     case .developer:
@@ -215,8 +217,8 @@ private struct SettingsIconTile: View {
   enum Glyph {
     /// An SF Symbol fit in a `size`-point box, moved by `nudge` points when
     /// its visual mass is off its box center. Keep `size` even and `nudge` a
-    /// multiple of 0.5 so the glyph lands on the pixel grid: an odd size
-    /// centers the box on a half point, and the glyph renders a pixel low.
+    /// multiple of 0.5 (one pixel at 2x; smaller offsets round away): an odd size
+    /// centers the box on a half point.
     case symbol(String, size: CGFloat, nudge: CGSize = .zero)
     /// A shell prompt, `>_`. SF Symbols draws it only inside a window frame.
     case prompt
@@ -291,6 +293,9 @@ private struct SettingsIconTile: View {
         glyph
           .foregroundStyle(style.glyphColor)
           .shadow(color: .black.opacity(0.18), radius: 0.5)
+          // Rasterize offscreen so the glyph keeps its fractional position;
+          // drawn in place, a symbol snaps half a pixel low at 2x.
+          .drawingGroup()
       }
       .frame(width: Self.side, height: Self.side)
       .shadow(color: .black.opacity(0.22), radius: 0.6, y: 0.5)
