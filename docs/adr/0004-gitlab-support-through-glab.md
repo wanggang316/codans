@@ -94,9 +94,12 @@ GitLab users run a self-managed instance.
       merge API.
     - When the Git Platform refuses the merge because the head moved, codans
       shows its own error ("The branch has new commits. Review them, then
-      merge again.") and refreshes the fetch unit at once. The error stays
-      until the user selects "Review"; then the popover shows the new head.
-      There is no "merge anyway" action.
+      merge again.") and refreshes the fetch unit at once. The error belongs
+      to that Pull Request: it goes when the Worktree changes branch or shows
+      a different Pull Request. Otherwise it stays until the user selects
+      "Review". "Review" shows the new head only after a successful read of
+      it; before that read, or after a failed read, the button reads it
+      again. There is no "merge anyway" action.
     - A snapshot without a SHA (an older cache entry) does not merge. The
       Merge button is disabled, and opening the popover refreshes the fetch
       unit. The user merges after the refresh.

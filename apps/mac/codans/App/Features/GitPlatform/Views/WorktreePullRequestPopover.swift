@@ -47,6 +47,7 @@ struct WorktreePullRequestPopover: View {
       gitPlatformName: gitPlatformName,
       pullRequestName: pullRequestName,
       gitPlatformKind: kind,
+      isNewHeadRead: store.headMovedMerges[worktreeID]?.isNewHeadRead ?? true,
       defaultMergeStrategy: defaultStrategy,
       canMerge: !isMutating
         && pullRequest != nil
@@ -85,7 +86,7 @@ struct WorktreePullRequestPopover: View {
         settingsStore.mutateGeneral { $0.defaultMergeStrategy = strategy }
       },
       onRetry: {
-        // The unit was refreshed when the merge failed; "Review" shows the new head.
+        // "Review" shows the new head once it is read; before that it reads it again.
         if error == .headMoved {
           store.send(.headMovedReviewed(worktreeID))
         } else {
@@ -93,6 +94,9 @@ struct WorktreePullRequestPopover: View {
         }
       }
     )
+    // Both surfaces (sidebar badge, status bar) mount this view, so the no-SHA read
+    // starts here and not in one surface's presentation code.
+    .onAppear { store.send(.popoverOpened(worktreeID)) }
   }
 
   /// Why the merge button is off: the Pull Request's lifecycle first, then the Git

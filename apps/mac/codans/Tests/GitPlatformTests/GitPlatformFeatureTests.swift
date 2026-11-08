@@ -260,17 +260,136 @@ struct GitPlatformFeatureTests {
     } assert: {
       $0.mutating.remove(wid)
       $0.lastError[wid] = .headMoved
+      $0.headMovedMerges[wid] = .init(pullRequestNumber: 99, branch: "feature/x", refusedAt: Self.fixedDate)
       $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.inFlightFetchProjects.insert(projectID)
       $0.loading.insert(wid)
     }
     // The error stays through the refresh; the new head is underneath it.
-    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: moved)
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: moved) {
+      $0.headMovedMerges[wid]?.isNewHeadRead = true
+    }
     #expect(store.state.lastError[wid] == .headMoved)
     #expect(
       GitPlatformError.headMoved.userFacingMessage == "The branch has new commits. Review them, then merge again.")
     await store.send(.headMovedReviewed(wid)) {
       $0.lastError[wid] = nil
+      $0.headMovedMerges[wid] = nil
+    }
+  }
+
+  /// "Review" before the new head is read (the refresh failed or is still running) does
+  /// not show the old snapshot: it reads the head again.
+  @Test
+  func reviewBeforeTheNewHeadIsReadReadsItAgain() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let moved = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "def456")
+    var seed = Self.unitSeed(projectID: projectID, pair: pair)
+    seed.snapshots[wid] = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "abc123")
+    let reads = LockIsolated(0)
+    let store = Self.makeStore(initialState: seed) { client in
+      client.merge = { _, _, _ in throw GitPlatformError.headMoved }
+      client.batchPullRequests = { _, _ in
+        reads.withValue { $0 += 1 }
+        if reads.value == 1 { throw GitPlatformError.network("offline") }
+        return ["feature/x": moved]
+      }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
+    }
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: "abc123")) {
+      $0.mutating.insert(wid)
+    }
+    await store.receive {
+      if case .mergeCompleted(_, 99, .failure) = $0 { return true }
+      return false
+    } assert: {
+      $0.mutating.remove(wid)
+      $0.lastError[wid] = .headMoved
+      $0.headMovedMerges[wid] = .init(pullRequestNumber: 99, branch: "feature/x", refusedAt: Self.fixedDate)
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    await store.receive {
+      if case .projectBatchLoaded(_, _, .failure) = $0 { return true }
+      return false
+    } assert: {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(wid)
+      $0.lastErrorByProject[projectID] = .network("offline")
+    }
+    // The read failed: the error and the old snapshot stay, and "Review" retries.
+    #expect(store.state.headMovedMerges[wid]?.isNewHeadRead == false)
+    await store.send(.headMovedReviewed(wid)) {
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: moved) {
+      $0.lastErrorByProject[projectID] = nil
+      $0.headMovedMerges[wid]?.isNewHeadRead = true
+    }
+    await store.send(.headMovedReviewed(wid)) {
+      $0.lastError[wid] = nil
+      $0.headMovedMerges[wid] = nil
+    }
+  }
+
+  /// The refused merge belongs to one Pull Request: a refresh that shows another one (a
+  /// new number on the branch) drops the error.
+  @Test
+  func aRefreshWithAnotherPullRequestDropsTheHeadMovedError() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let other = Self.stubSnapshot(number: 100, headRefName: "feature/x", headSHA: "def456")
+    var seed = Self.unitSeed(projectID: projectID, pair: pair)
+    seed.snapshots[wid] = Self.stubSnapshot(number: 99, headRefName: "feature/x")
+    seed.lastError[wid] = .headMoved
+    seed.headMovedMerges[wid] = .init(pullRequestNumber: 99, branch: "feature/x", refusedAt: Self.fixedDate)
+    let store = Self.makeStore(initialState: seed) { client in
+      client.batchPullRequests = { _, _ in ["feature/x": other] }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
+    }
+    await store.send(.worktreeRefreshRequested(wid)) {
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: other) {
+      $0.lastError[wid] = nil
+      $0.headMovedMerges[wid] = nil
+    }
+  }
+
+  /// A branch switch drops the error at once, before any read: it must not hide the
+  /// Pull Request of the new branch.
+  @Test
+  func aBranchSwitchDropsTheHeadMovedError() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let old = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let new = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/y")
+    let snapY = Self.stubSnapshot(number: 7, headRefName: "feature/y")
+    var seed = Self.unitSeed(projectID: projectID, pair: old)
+    seed.snapshots[wid] = Self.stubSnapshot(number: 99, headRefName: "feature/x")
+    seed.snapshotsByProject[projectID] = BatchedPullRequests(
+      repository: GitPlatformRepository(kind: .github, host: "github.com", path: "w/r"),
+      byBranch: ["feature/y": snapY], seenBranches: ["feature/x", "feature/y"], fetchedAt: Self.fixedDate)
+    seed.lastError[wid] = .headMoved
+    seed.headMovedMerges[wid] = .init(pullRequestNumber: 99, branch: "feature/x", refusedAt: Self.fixedDate)
+    let store = Self.makeStore(initialState: seed)
+    let unit = GitPlatformFeature.FetchUnit(
+      projectID: projectID, gitRoot: URL(fileURLWithPath: "/tmp/r"), pairs: [new])
+    await store.send(.pollUnitsChanged([unit], selected: [])) {
+      $0.pollUnits = [projectID]
+      $0.projectWorktreePairs[projectID] = [new]
+      $0.snapshots[wid] = snapY
+      $0.lastError[wid] = nil
+      $0.headMovedMerges[wid] = nil
     }
   }
 
@@ -284,7 +403,7 @@ struct GitPlatformFeatureTests {
   }
 
   @Test
-  func presentPopoverOverASnapshotWithoutHeadSHARefreshesTheUnit() async {
+  func popoverOpenedOverASnapshotWithoutHeadSHARefreshesTheUnit() async {
     let projectID = ProjectID()
     let wid = WorktreeID()
     let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
@@ -296,8 +415,8 @@ struct GitPlatformFeatureTests {
     } customizeGit: { git in
       git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
     }
-    await store.send(.presentPopover(wid)) {
-      $0.popoverTarget = wid
+    // Sent by the popover view itself, so the sidebar and the status bar both reach it.
+    await store.send(.popoverOpened(wid)) {
       $0.lastFetchStartedAt[projectID] = Self.fixedDate
       $0.inFlightFetchProjects.insert(projectID)
       $0.loading.insert(wid)
@@ -324,7 +443,7 @@ struct GitPlatformFeatureTests {
 
   private static func receiveBatch(
     _ store: TestStoreOf<GitPlatformFeature>, projectID: ProjectID, wid: WorktreeID, branch: String,
-    snapshot: PullRequestSnapshot
+    snapshot: PullRequestSnapshot, also: @escaping (inout GitPlatformFeature.State) -> Void = { _ in }
   ) async {
     await store.receive { action in
       guard case .projectBatchLoaded(let pid, _, .success) = action else { return false }
@@ -338,6 +457,7 @@ struct GitPlatformFeatureTests {
       )
       $0.snapshots[wid] = snapshot
       $0.snapshotLoadedAt[wid] = Self.fixedDate
+      also(&$0)
     }
   }
 

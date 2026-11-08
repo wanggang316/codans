@@ -22,6 +22,9 @@ struct PullRequestPopover: View {
   var pullRequestName: String = "pull request"
   /// Git Platform of the Worktree; picks the reference prefix (`#` / `!`).
   var gitPlatformKind: GitPlatformKind?
+  /// For a `.headMoved` error: `true` when the new head has been read, so "Review" can
+  /// show it. `false` makes the button read it again.
+  var isNewHeadRead = true
   let defaultMergeStrategy: MergeStrategy
   let canMerge: Bool
   let mergeDisabledReason: String?
@@ -267,7 +270,7 @@ struct PullRequestPopover: View {
       Button("Run \(kind.cliName) auth login") { onRetry() }
         .buttonStyle(.borderedProminent)
     case .headMoved:
-      Button("Review") { onRetry() }
+      Button(isNewHeadRead ? "Review" : "Retry") { onRetry() }
         .buttonStyle(.borderedProminent)
     default:
       Button("Retry") { onRetry() }

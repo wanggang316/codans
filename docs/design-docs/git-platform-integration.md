@@ -155,7 +155,7 @@ Source: [RootFeature.swift](../../apps/mac/codans/App/Features/Root/RootFeature.
 | Worktree 分支变更 / commit | `WorktreeHeadWatcher`（`.git/HEAD` + reflog 监听） | 刷新该 Worktree 所属取数单元（不是选中 Project）；取数返回前，分支已变的行按缓存改投新分支的 PR 或清空徽标 |
 | Merge / close / markReady 完成 | `GitPlatformFeature.*Completed(.success)` | 2 秒延迟刷新 Project |
 | Merge 因 head 移动被拒（`.headMoved`） | `GitPlatformFeature.mergeCompleted(.failure)` | 立即刷新取数单元 |
-| Merge 时快照无 `headSHA`，或打开无 `headSHA` 的 open PR 的 popover | `mergeRequested` / `presentPopover` | 立即刷新取数单元，不 merge |
+| Merge 时快照无 `headSHA`，或打开无 `headSHA` 的 open PR 的 popover | `mergeRequested` / `popoverOpened` | 立即刷新取数单元，不 merge |
 | 手动刷新 | 用户动作（面板、popover 刷新按钮） | 立即刷新 Project |
 | 侧栏「刷新全部」 | `refreshAllProjectsRequested` | 所有取数单元排队刷新，经并发上限依次执行 |
 | pane 内 `git` / `gh` 命令结束 | 前台作业 trailing edge（不含 agent） | 1.5 s 后刷新该 pane 所属取数单元 |
@@ -195,8 +195,9 @@ agent 常在用户看过 Pull Request 之后继续向分支 push。codans 只 me
 - popover 发出的 `mergeRequested(worktreeID, pullRequest, strategy:, headSHA:)` 带屏幕上快照的 `headSHA`。`GitPlatform.merge(_:strategy:headSHA:)` 的 `headSHA` 不可为空，没有不带 SHA 的 merge 路径。
 - GitHub：`gh pr merge <n> <flag> --match-head-commit <sha> --repo <repo>`。GitLab：merge API 带 `sha=<sha>`（`-f sha=<sha>`）；要求 SHA 的 GitLab namespace 因此也能 merge。
 - head 已移动时 Git Platform 拒绝 merge：GitHub 报 "Head branch was modified"，GitLab 报 409 "SHA does not match HEAD of source branch"。两者都映射为 `GitPlatformError.headMoved`，消息为 "The branch has new commits. Review them, then merge again."，并在 merge-conflict 映射之前判断（GitLab 的 409 也用于其他拒绝）。
-- `.headMoved` 时 reducer 记录该错误并立即刷新取数单元（不等 2 秒）。成功的刷新通常会清除行错误，但不清除 `.headMoved`：它是对 merge 的回答，不是对读取的回答。popover 显示错误和 "Review" 按钮；按下后派发 `headMovedReviewed` 清除错误，popover 显示新的 head。没有 "merge anyway"。
-- 快照没有 `headSHA`（旧缓存条目）时，popover 禁用 Merge，原因为 "Reading the head commit"；打开该 open PR 的 popover 即刷新取数单元。若仍收到无 SHA 的 `mergeRequested`，reducer 只刷新，不 merge；用户在刷新后的 popover 中再次 merge。
+- `.headMoved` 时 reducer 记录该错误和 `headMovedMerges[worktree]`（PR 编号、分支、拒绝时间），并立即刷新取数单元（不等 2 秒）。成功的刷新通常会清除行错误，但不清除 `.headMoved`：它是对 merge 的回答，不是对读取的回答。该错误只属于被拒的 PR：刷新结果里该行是另一个 PR 编号或没有 PR，或 Worktree 切换了分支（`reprojectCachedSnapshots`，不等取数），就清除。
+- 拒绝之后开始的一次取数成功且仍含该 PR 时，`isNewHeadRead` 置为 true。popover 显示错误和按钮：已读到新 head 时为 "Review"，按下派发 `headMovedReviewed`，清除错误，popover 显示新的 head；未读到（刷新进行中或失败）时为 "Retry"，同一 action 只重新刷新，不显示旧快照。没有 "merge anyway"。
+- 快照没有 `headSHA`（旧缓存条目）时，popover 禁用 Merge，原因为 "Reading the head commit"。`WorktreePullRequestPopover` 出现时派发 `popoverOpened`，所以侧栏徽标和状态栏两个入口都会刷新该 open PR 的取数单元。若仍收到无 SHA 的 `mergeRequested`，reducer 只刷新，不 merge；用户在刷新后的 popover 中再次 merge。
 
 ### `GitService.remoteInfo` 辅助
 
@@ -207,7 +208,7 @@ agent 常在用户看过 Pull Request 之后继续向分支 push。codans 只 me
 视图层接线：
 
 - `WorktreeRowIcon` 的 `rollup` 来源是 `PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)`。
-- `PullRequestPopover` 读 `snapshot.checkRollup` + `snapshot.mergeStateStatus` / `snapshot.reviewDecision`，精确解释 merge-disabled 原因。快照无 `headSHA` 时 Merge 禁用。`.headMoved` 错误显示 "Review" 按钮，其他错误显示 "Retry"（或 CLI 的修复动作）。
+- `PullRequestPopover` 读 `snapshot.checkRollup` + `snapshot.mergeStateStatus` / `snapshot.reviewDecision`，精确解释 merge-disabled 原因。快照无 `headSHA` 时 Merge 禁用。`.headMoved` 错误在读到新 head 后显示 "Review"，之前显示 "Retry"；其他错误显示 "Retry"（或 CLI 的修复动作）。
 - `WorktreePullRequestBadge` 读 `store.snapshots[worktreeID]`，该字典由 reducer 从 `state.snapshotsByProject[P]` 派生。
 - 侧栏行不持有发起取数的逐行 `.task`；取数由 reducer 经取数单元事件发起。侧栏 PR 徽标不显示取数 spinner；popover 在有无缓存的刷新期间均可显示 loading。
 
