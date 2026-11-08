@@ -30,11 +30,16 @@ public enum SettingsSection: Hashable, Sendable {
   /// User-defined custom commands (the inline command table).
   case projectScripts(ProjectID)
 
-  /// Canonical iteration order for global sidebar rows.
-  public static let globals: [SettingsSection] = [
-    .general, .gitPlatforms, .hosts, .worktree, .terminal, .agents, .workflows, .notifications, .developer,
-    .globalCommands,
-    .shortcuts, .updates, .about,
+  /// Global sidebar rows in display order, split into untitled groups: app
+  /// preferences, agent tooling, then remote machines. The sidebar separates
+  /// the groups with space only.
+  public static let globalGroups: [[SettingsSection]] = [
+    [
+      .general, .gitPlatforms, .worktree, .terminal, .notifications, .globalCommands, .shortcuts,
+      .updates, .about,
+    ],
+    [.agents, .developer, .workflows],
+    [.hosts],
   ]
 
   /// Display name for global sidebar rows. Project-scoped cases return `nil` because
@@ -51,7 +56,7 @@ public enum SettingsSection: Hashable, Sendable {
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"
     case .notifications: return "Notifications"
-    case .developer: return "Developer"
+    case .developer: return "Integrations"
     case .shortcuts: return "Shortcuts"
     case .updates: return "Updates"
     case .about: return "About"

@@ -29,12 +29,14 @@ struct SettingsSidebarView: View {
   var body: some View {
     ScrollViewReader { proxy in
       List(selection: $selection) {
-        Section {
-          ForEach(SettingsSection.globals, id: \.self) { section in
-            globalRow(for: section)
-              .padding(.leading, -Self.outlineIndent)
-              .tag(Optional(section))
-              .id(section)
+        ForEach(SettingsSection.globalGroups, id: \.self) { group in
+          Section {
+            ForEach(group, id: \.self) { section in
+              globalRow(for: section)
+                .padding(.leading, -Self.outlineIndent)
+                .tag(Optional(section))
+                .id(section)
+            }
           }
         }
 
@@ -202,7 +204,7 @@ struct SettingsSidebarView: View {
     case .worktree: return "square.dashed"
     case .terminal: return "terminal"
     case .notifications: return "bell"
-    case .developer: return "hammer"
+    case .developer: return "puzzlepiece.extension"
     case .shortcuts: return "keyboard"
     case .updates: return "arrow.down.circle"
     case .about: return "info.circle"
