@@ -85,7 +85,7 @@ SSH remote（SCP 形式 `git@host:path` 或 `ssh://`，`RemoteInfo.isSSH`）的 
 - pane 内 `gh` / `glab` 命令结束（前台作业 trailing edge，见[失效事件](#缓存与失效)）：`RootFeature` 发送 `refreshAvailabilityRequested`，再刷新该 pane 的取数单元。所以在 pane 里安装 CLI 后运行 `glab auth login`（或 `gh auth login`），徽标无需 Re-check 即出现。
 - Settings 的 Re-check。
 
-`refreshAvailabilityRequested` 同时清空 `unitsWithoutGitPlatform`，轮询跳过的单元也会重新解析。`~/.ssh/config` 的变更在下一次失效后生效。
+`refreshAvailabilityRequested` 先等清除完成再探测可用性（否则探测可能读到旧的 CLI 路径或登录状态并缓存 30 s），并清空 `unitsWithoutGitPlatform`，轮询跳过的单元也会重新解析。`CLIExecutableResolver` 只在探测仍拥有缓存时写入结果，失效前开始的探测不会覆盖之后的探测。`~/.ssh/config` 的变更在下一次失效后生效。
 
 `GitPlatformAliasesClient` 在取数时给出当前的 alias 列表。
 

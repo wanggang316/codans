@@ -429,10 +429,9 @@ struct GitPlatformFeature {
         state.availabilityProbedAt = nil  // bypass cache
         // A fresh `auth login` can make a self-managed host resolvable.
         state.unitsWithoutGitPlatform = []
-        return .merge(
-          .run { [gitPlatform] _ in await gitPlatform.invalidateResolution() },
-          probeAvailabilityEffect()
-        )
+        // The probe waits for the invalidation, or it can read and cache for 30 s the
+        // CLI path and logged-in hosts from before an install or `auth login`.
+        return probeAvailabilityEffect(invalidatingFirst: true)
 
       case .availabilityProbed(let result, let probedAt):
         state.availability = result
@@ -1000,8 +999,9 @@ struct GitPlatformFeature {
 
   // MARK: - Effect builders
 
-  private func probeAvailabilityEffect() -> Effect<Action> {
+  private func probeAvailabilityEffect(invalidatingFirst: Bool = false) -> Effect<Action> {
     .run { [gitPlatform] send in
+      if invalidatingFirst { await gitPlatform.invalidateResolution() }
       var result: [GitPlatformKind: GitPlatformAvailability] = [:]
       for kind in GitPlatformKind.allCases {
         result[kind] = await gitPlatform.availability(kind)

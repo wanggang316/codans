@@ -64,6 +64,29 @@ struct GitPlatformFeatureTests {
     }
   }
 
+  /// The probe runs after the invalidation finishes; otherwise it can read the CLI path
+  /// and logged-in hosts from before a `glab auth login` and cache them for 30 s.
+  @Test
+  func refreshAvailabilityProbesAfterTheInvalidationFinishes() async {
+    let invalidated = LockIsolated(false)
+    let probedBeforeInvalidation = LockIsolated(false)
+    let store = Self.makeStore { client in
+      client.invalidateResolution = {
+        try? await Task.sleep(for: .milliseconds(100))
+        invalidated.setValue(true)
+      }
+      client.availability = { _ in
+        if !invalidated.value { probedBeforeInvalidation.setValue(true) }
+        return .unknown
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.refreshAvailabilityRequested)
+    await store.receive(\.availabilityProbed, timeout: .seconds(5))
+    #expect(invalidated.value)
+    #expect(!probedBeforeInvalidation.value)
+  }
+
   // MARK: - popover
 
   @Test
