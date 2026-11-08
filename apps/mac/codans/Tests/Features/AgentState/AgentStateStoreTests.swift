@@ -77,7 +77,7 @@ struct AgentStateStoreTests {
     // and fires `onAgentBound`; it must not collapse the seeded state to
     // `.idle` before any live viewport classification arrives.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
@@ -92,7 +92,7 @@ struct AgentStateStoreTests {
     let f = Fixture(attached: false)
     #expect(!f.registry.isSleeping(f.paneID))
 
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .idle)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .idle)])
     #expect(f.registry.isSleeping(f.paneID))
 
     f.registry.onSurfaceAttachmentChanged(f.paneID, attached: true)
@@ -105,7 +105,7 @@ struct AgentStateStoreTests {
   @Test
   func seededBlockedSurvivesLaunchRebind() {
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .blocked)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .blocked)])
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
     #expect(f.registry.entries[f.paneID]?.state == .blocked)
   }
@@ -116,7 +116,7 @@ struct AgentStateStoreTests {
     // viewport classification lands it governs — here the restored agent
     // has finished, so its idle prompt drives the badge back to idle.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
 
     f.viewport("codex> ")
@@ -128,7 +128,7 @@ struct AgentStateStoreTests {
     // A genuinely still-working restored agent keeps `.working` once its
     // live working cue re-renders.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
 
     f.viewport("• Working (10s)")
@@ -428,7 +428,7 @@ struct AgentStateStoreTests {
     // a late viewport for the dropped pane must not resurrect a row, proving
     // the scratch was dropped alongside the entry.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.registry.reconcileMembership(livePaneIDs: [])
@@ -466,7 +466,7 @@ struct AgentStateStoreTests {
 
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("\u{202E}gnidaeR\u{202C} a\u{200B}b\u{FEFF}")))
     #expect(f.registry.title(for: f.paneID) == "gnidaeR ab")
-    #expect(f.registry.activityText(for: f.paneID) == "gnidaeR ab")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "gnidaeR ab")
 
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("\u{2066}\u{200F}")))
     #expect(f.registry.title(for: f.paneID) == nil)
@@ -480,11 +480,11 @@ struct AgentStateStoreTests {
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     #expect(f.registry.title(for: f.paneID) == nil)
-    #expect(f.registry.activityText(for: f.paneID) == nil)
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
 
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Reading files")))
-    #expect(f.registry.activityText(for: f.paneID) == "Reading files")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "Reading files")
   }
 
   @Test
@@ -495,7 +495,7 @@ struct AgentStateStoreTests {
     f.registry.onAgentUnbound(f.paneID)
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
-    #expect(f.registry.activityText(for: f.paneID) == nil)
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
   }
 
   @Test
@@ -504,22 +504,22 @@ struct AgentStateStoreTests {
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
-    #expect(f.registry.activityText(for: f.paneID) == nil)
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
   }
 
   @Test
   func restoredAgentShowsTitlesBeforeItsBind() {
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
-    #expect(f.registry.activityText(for: f.paneID) == nil)
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
     // A restored pane without a surface is never bound, because the binder
     // reads the foreground job from the surface. Its titles come from the
     // passive watcher, and the agent survived the quit with its daemon.
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
-    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Running tests")
     // The binder identifies the restored agent when its surface attaches.
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
-    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Running tests")
   }
 
   @Test
@@ -530,18 +530,91 @@ struct AgentStateStoreTests {
     // The binder materializes the same agent again, for example after the
     // pane was archived and unarchived.
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil, assumeUserInputSeen: true)
-    #expect(f.registry.activityText(for: f.paneID) == "✳ Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Running tests")
   }
 
   @Test
-  func programStatusMessageHasPriorityOverTheTitle() {
+  func programStatusTitleHasPriorityOverTheTerminalTitle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
     f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
-    f.report(.working, message: "Running tests")
-    #expect(f.registry.activityText(for: f.paneID) == "Running tests")
+    f.report(.working, title: "Fix the login flow")
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Fix the login flow", isRestored: false))
     f.report(.working)
-    #expect(f.registry.activityText(for: f.paneID) == "✳ Claude task")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Claude task")
+  }
+
+  @Test
+  func programStatusMessageIsNeverTheAgentTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.report(.working, message: "Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Fix the login flow", message: "Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "Fix the login flow")
+  }
+
+  @Test
+  func redundantProgramStatusTitleFallsBackToTheTerminalTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Claude Code")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Claude task")
+    f.report(.working, title: "   ")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Claude task")
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude Code")))
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+  }
+
+  @Test
+  func programStatusTitleOfAnotherProgramIsIgnored() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.apply([ProgramStatusReport(state: .working, app: "codex", title: "Other task")])
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+  }
+
+  @Test
+  func restoredTitlesShowDimmedUntilTheAgentReportsAgain() {
+    let f = Fixture()
+    f.registry.seedRestored([
+      .init(
+        paneID: f.paneID, kind: .claudeCode, state: .idle,
+        programStatusTitle: "Fix the login flow", terminalTitle: "✳ Claude task")
+    ])
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Fix the login flow", isRestored: true))
+    // The zmx daemon replays the OSC 0/2 title on attach: that title is
+    // live, but the OSC 7501 title still waits for the next report.
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Fix the login flow", isRestored: true))
+    f.report(.working, title: "Write the tests")
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Write the tests", isRestored: false))
+  }
+
+  @Test
+  func restoredTerminalTitleShowsDimmedUntilTheNextTitle() {
+    let f = Fixture()
+    f.registry.seedRestored([
+      .init(paneID: f.paneID, kind: .codex, state: .idle, terminalTitle: "\u{202E}Reading files")
+    ])
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Reading files", isRestored: true))
+    f.report(.working)
+    #expect(f.registry.agentTitle(for: f.paneID)?.isRestored == true)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Editing files")))
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Editing files", isRestored: false))
+  }
+
+  @Test
+  func snapshotTitlesCarryTheLiveTitles() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Fix the login flow", message: "Running tests")
+    let titles = f.registry.snapshotTitles(for: f.paneID)
+    #expect(titles.programStatusTitle == "Fix the login flow")
+    #expect(titles.terminalTitle == "✳ Claude task")
   }
 
   // MARK: - Attention observation (notification suppression)

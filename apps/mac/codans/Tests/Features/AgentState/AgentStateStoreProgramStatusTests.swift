@@ -241,7 +241,7 @@ struct AgentStateStoreProgramStatusTests {
   @Test
   func sidebarActivityTracksRestoredAndRetiredAgents() {
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .working)])
     #expect(f.registry.workingPaneIDs == [f.paneID])
     #expect(f.registry.needsAttention)
     f.registry.reconcileMembership(livePaneIDs: [])
@@ -250,16 +250,15 @@ struct AgentStateStoreProgramStatusTests {
   }
 
   @Test
-  func messageChangeKeepsTheTransitionTime() {
+  func titleChangeKeepsTheTransitionTime() {
     let f = Fixture()
     bindClaude(f)
-    f.report(.working, message: "Reading files")
+    f.report(.working, title: "Reading files")
     let first = f.registry.entries[f.paneID]?.lastTransitionAt
     f.nowBox.setValue(f.nowBox.value.addingTimeInterval(5))
-    f.report(.working, message: "Running tests")
-    let entry = f.registry.entries[f.paneID]
-    #expect(entry?.message == "Running tests")
-    #expect(entry?.lastTransitionAt == first)
+    f.report(.working, title: "Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "Running tests")
+    #expect(f.registry.entries[f.paneID]?.lastTransitionAt == first)
   }
 }
 
@@ -268,9 +267,13 @@ extension AgentStateStoreTests.Fixture {
   func report(
     _ state: ProgramStatusState,
     kind: ProgramStatusKind? = nil,
+    title: String? = nil,
     message: String? = nil
   ) {
-    apply([ProgramStatusReport(state: state, kind: kind, app: "claude-code", message: message)])
+    apply([
+      ProgramStatusReport(
+        state: state, kind: kind, app: "claude-code", title: title, message: message)
+    ])
   }
 
   /// Deliver the summary of these reports applied to empty records.

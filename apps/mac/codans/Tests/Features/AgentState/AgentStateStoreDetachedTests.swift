@@ -14,7 +14,7 @@ struct AgentStateStoreDetachedTests {
   @Test
   func restoredSeedOfADetachedPaneIsCached() {
     let f = Fixture(attached: false)
-    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .working)])
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
     #expect(f.registry.entries[f.paneID]?.source == .cached)
     #expect(f.registry.entries[f.paneID]?.state == .working)
@@ -28,7 +28,7 @@ struct AgentStateStoreDetachedTests {
   @Test
   func programStatusOfADetachedPaneIsObserved() {
     let f = Fixture(attached: false)
-    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .idle)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .idle)])
 
     f.apply([ProgramStatusReport(state: .working, app: "claude-code")])
     #expect(f.registry.entries[f.paneID]?.state == .working)
@@ -57,7 +57,7 @@ struct AgentStateStoreDetachedTests {
   @Test
   func midTaskAgentReadFromTheScreenNeedsItsSurface() {
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .working)])
     f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
     #expect(f.registry.entries[f.paneID]?.source == .screen)
     #expect(f.registry.needsSurfaceToTrackTurn(f.paneID))
@@ -94,7 +94,7 @@ struct AgentStateStoreDetachedTests {
   @Test
   func unbindAfterADaemonExitRemovesTheSleepingRow() {
     let f = Fixture(attached: false)
-    f.registry.seedRestored([(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .working)])
     #expect(f.registry.isSleeping(f.paneID))
 
     f.registry.onAgentUnbound(f.paneID)

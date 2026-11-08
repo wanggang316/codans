@@ -263,7 +263,7 @@ struct AgentStateSidebarPanel: View {
               isSelected: item.paneID == focusedPaneID,
               isSleeping: registry.isSleeping(item.paneID),
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
-              activityText: { registry.activityText(for: item.paneID) },
+              agentTitle: { registry.agentTitle(for: item.paneID) },
               hotkeyHint: hotkeyHint(forRowAt: offset + 1),
               onTap: { onTapRow(item.paneID) },
               onHandOff: { onHandOffRow(item.paneID) },

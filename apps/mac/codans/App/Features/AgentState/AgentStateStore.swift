@@ -63,9 +63,30 @@ final class AgentStateStore {
     /// What a blocked agent needs, when its program status report says so.
     var blockedKind: ProgramStatusKind?
     /// The agent's own one-line description of the current state, from its
-    /// program status report. Untrusted program text: display it, never
-    /// interpret it, keep it out of logs.
+    /// program status report. Reported by `codans agent status`; the
+    /// Agents View row does not show it (ADR 0009). Untrusted program text:
+    /// display it, never interpret it, keep it out of logs.
     var message: String?
+  }
+
+  /// The first line of an Agents View row (ADR 0009). Untrusted program
+  /// text: display it, never interpret it, keep it out of logs.
+  struct AgentTitle: Equatable, Sendable {
+    let text: String
+    /// The text comes from the quit snapshot, not from a live report. The
+    /// row dims it like a cached state until the agent reports again.
+    let isRestored: Bool
+  }
+
+  /// One agent from the quit snapshot, handed to `seedRestored` at launch.
+  struct RestoredAgent: Equatable, Sendable {
+    let paneID: PaneID
+    let kind: AgentKind
+    let state: AgentRuntimeState
+    /// The OSC 7501 `title` of the agent's root record at quit.
+    var programStatusTitle: String?
+    /// The OSC 0/2 title that the agent set, at quit.
+    var terminalTitle: String?
   }
 
   /// Derived runtime state surfaced to UI. The vocabulary follows the
@@ -146,9 +167,15 @@ final class AgentStateStore {
     var lastViewportText: String?
     var lastWorkingAt: Date?
     /// Latest sanitized OSC title the pane's terminal pushed. Display-only
-    /// cache for the Agents View row's activity text — never an input to
+    /// cache for the Agents View row's agent title — never an input to
     /// state derivation (see the reaction table).
     var lastTitle: String?
+    /// `lastTitle` comes from the quit snapshot. Cleared by the next title.
+    var lastTitleIsRestored = false
+    /// The OSC 7501 `title` from the quit snapshot. The live records start
+    /// empty after a restart, so this stands in until the agent sends its
+    /// next report.
+    var restoredProgramStatusTitle: String?
     /// True once an agent is confirmed in the pane: by `onAgentBound`, or
     /// by `seedRestored` for an agent whose daemon survived the quit. Titles
     /// before that belong to the shell or a previous program.
@@ -249,7 +276,7 @@ final class AgentStateStore {
   //    second-guessed: the agent reports the end of its own prompt.
   //  - onTerminalEvent(.paneInfoChanged(.title)): while an agent is
   //    bound, cache the pane's latest sanitized OSC title for the row's
-  //    activity text. Display-only — never an input to state derivation.
+  //    agent title. Display-only — never an input to state derivation.
   //  - onAgentBound: ensure scratch exists, derive current state,
   //    materialise an entry.
   //  - onAgentUnbound: drop entry and scratch.
@@ -306,11 +333,12 @@ final class AgentStateStore {
       // derivation (a "Working…" title must not flip state; see
       // `titleChangesDoNotDriveWorkingAfterInput`). Only a bound agent's
       // titles count: before the bind the title is the shell's (often the
-      // cwd) or a previous program's, not the agent's activity. The title
-      // is untrusted program text: sanitize it like the OSC 7501
-      // `message`, and never log it.
+      // cwd) or a previous program's, not the agent's. The title is
+      // untrusted program text: sanitize it like the OSC 7501 `title`, and
+      // never log it.
       guard var s = scratch[paneID], s.agentBound else { break }
       s.lastTitle = UntrustedDisplayText.sanitized(title)
+      s.lastTitleIsRestored = false
       scratch[paneID] = s
 
     case .paneInfoChanged,
@@ -405,8 +433,12 @@ final class AgentStateStore {
     if var existing = scratch[paneID] {
       existing.userInputSeen = existing.userInputSeen || effectiveUserInputSeen
       // A new agent starts without a title: one cached for another agent
-      // kind is not this agent's activity. An unbound pane caches none.
-      if seeded?.kind != kind { existing.lastTitle = nil }
+      // kind is not this agent's title. An unbound pane caches none.
+      if seeded?.kind != kind {
+        existing.lastTitle = nil
+        existing.lastTitleIsRestored = false
+        existing.restoredProgramStatusTitle = nil
+      }
       existing.agentBound = true
       scratch[paneID] = existing
     } else {
@@ -477,8 +509,9 @@ final class AgentStateStore {
   ///
   /// Scratch is initialised with `userInputSeen = true` so the
   /// restored state cannot be flipped to a synthetic "done" cue
-  /// before any user interaction; the next real event refines it.
-  func seedRestored(_ records: [(paneID: PaneID, kind: AgentKind, state: AgentRuntimeState)]) {
+  /// before any user interaction; the next real event refines it. The
+  /// restored titles show as restored until the agent reports again.
+  func seedRestored(_ records: [RestoredAgent]) {
     for record in records {
       entries[record.paneID] = AgentEntry(
         kind: record.kind,
@@ -492,6 +525,9 @@ final class AgentStateStore {
       // the passive watcher already delivers the agent's titles.
       var fresh = Scratch.fresh(userInputSeen: true, awaitingFirstClassification: true)
       fresh.agentBound = true
+      fresh.lastTitle = UntrustedDisplayText.sanitized(record.terminalTitle)
+      fresh.lastTitleIsRestored = fresh.lastTitle != nil
+      fresh.restoredProgramStatusTitle = UntrustedDisplayText.sanitized(record.programStatusTitle)
       scratch[record.paneID] = fresh
     }
   }
@@ -541,10 +577,38 @@ final class AgentStateStore {
     scratch[paneID]?.lastTitle
   }
 
-  /// One line on what the agent in `paneID` is doing: its own program
-  /// status message when it sent one, otherwise the pane's OSC title.
-  func activityText(for paneID: PaneID) -> String? {
-    entries[paneID]?.message ?? title(for: paneID)
+  /// The agent title of `paneID` (ADR 0009): the OSC 7501 `title` of the
+  /// agent's root record, else the OSC 0/2 title that the agent set after it
+  /// started. A blank title, or one that says only the agent's name, counts
+  /// as no title. Nil when neither has one: the row shows the agent name.
+  /// The OSC 7501 `message` is never the title.
+  func agentTitle(for paneID: PaneID) -> AgentTitle? {
+    guard let s = scratch[paneID], let kind = entries[paneID]?.kind else { return nil }
+    let candidates: [(text: String?, isRestored: Bool)] = [
+      (liveProgramStatusTitle(s, kind: kind), false),
+      (s.restoredProgramStatusTitle, true),
+      (s.lastTitle, s.lastTitleIsRestored)
+    ]
+    for candidate in candidates {
+      if let text = AgentTitleFormat.titleLine(from: candidate.text, kind: kind) {
+        return AgentTitle(text: text, isRestored: candidate.isRestored)
+      }
+    }
+    return nil
+  }
+
+  /// The titles to save in the quit snapshot, so the row shows them after a
+  /// restart until the agent reports again.
+  func snapshotTitles(for paneID: PaneID) -> (programStatusTitle: String?, terminalTitle: String?) {
+    guard let s = scratch[paneID], let kind = entries[paneID]?.kind else { return (nil, nil) }
+    return (liveProgramStatusTitle(s, kind: kind) ?? s.restoredProgramStatusTitle, s.lastTitle)
+  }
+
+  /// The OSC 7501 `title` of the root record, when the root comes from the
+  /// bound agent.
+  private func liveProgramStatusTitle(_ s: Scratch, kind: AgentKind) -> String? {
+    guard let summary = s.programStatus, summary.governs(kind) else { return nil }
+    return summary.root?.title
   }
 
   /// True when the agent in `paneID` has stopped for the user (blocked or
@@ -592,6 +656,8 @@ final class AgentStateStore {
     var s = scratch[paneID] ?? .fresh()
     let wasGoverned = isGoverned(s, paneID: paneID)
     s.programStatus = summary
+    // A report replaces the title restored from the quit snapshot.
+    if summary != nil { s.restoredProgramStatusTitle = nil }
     if wasGoverned, !isGoverned(s, paneID: paneID) {
       // The screen was not read while the report governed, so the cached
       // text is stale. Derive from the next live snapshot instead, and do
