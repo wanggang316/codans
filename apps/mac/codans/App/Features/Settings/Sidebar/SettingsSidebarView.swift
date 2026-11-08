@@ -14,9 +14,14 @@ import SwiftUI
 struct SettingsSidebarView: View {
   @Binding var selection: SettingsSection?
   @Environment(HierarchyManager.self) private var hierarchyManager
+  /// The last selection the List made itself (a click or an arrow key). The
+  /// List already keeps that row visible; scrolling it again to the center
+  /// made the sidebar jump.
+  @State private var listSelection: SettingsSection?
+
   var body: some View {
     ScrollViewReader { proxy in
-      List(selection: $selection) {
+      List(selection: listSelectionBinding) {
         ForEach(SettingsSection.globalGroups, id: \.self) { group in
           Section {
             ForEach(group, id: \.self) { section in
@@ -48,16 +53,27 @@ struct SettingsSidebarView: View {
       }
       .listStyle(.sidebar)
       .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-      // Scroll the selected row into view, including on the first render when
-      // the window opens through "Project Settings…" on a Project far down the
-      // list. Deferred a runloop tick so the List has laid the row out.
+      // Scroll a selection made outside the List into view, including on the
+      // first render when the window opens through "Project Settings…" on a
+      // Project far down the list. Deferred a runloop tick so the List has
+      // laid the row out.
       .onChange(of: selection, initial: true) { _, newValue in
-        guard let section = newValue else { return }
+        guard let section = newValue, section != listSelection else { return }
         Task { @MainActor in
           proxy.scrollTo(section, anchor: .center)
         }
       }
     }
+  }
+
+  private var listSelectionBinding: Binding<SettingsSection?> {
+    Binding(
+      get: { selection },
+      set: { newValue in
+        listSelection = newValue
+        selection = newValue
+      }
+    )
   }
 
   // MARK: - Rows
