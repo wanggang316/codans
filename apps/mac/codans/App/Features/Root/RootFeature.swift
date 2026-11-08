@@ -1705,7 +1705,7 @@ struct RootFeature {
           let presenter = settingsWindowPresenter
           return .run { _ in
             await MainActor.run {
-              presenter.openAt(.projectScripts(projectID))
+              presenter.openProjectCommands(projectID)
             }
           }
 

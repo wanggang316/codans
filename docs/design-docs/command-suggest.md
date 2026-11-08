@@ -93,7 +93,7 @@ protocol CommandSuggestionParser: Sendable {
 - **位置**：Settings pane 的 `lastFocusedWorktreeID` → Project 的 `selectedWorktreeID` → `rootPath`。分支可能带不同的清单，所以优先用户正在用的 checkout。
 - **本地**：按 `ManifestScope` 广度优先遍历，每个目录只 `contentsOfDirectory` 一次，不跟随符号链接目录；单文件上限 1 MiB。
 - **Remote Project**：一次 SSH 调用（共享 ControlMaster，`BatchMode`）。远端 `/bin/sh` 以 `find -maxdepth … -prune` 按同样规则遍历（目录经 `$1` 传入，文件名为自有常量并单引号包裹），输出 `===CODANS-MANIFEST <path>===` / `===CODANS-PRESENT <path>===` 标记分隔的流；首个标记前的登录 shell 横幅被忽略。超时、非零退出或输出溢出都得到空 snapshot——表现为"无建议"，不报错。测试把远端脚本在本机 `/bin/sh` 上对真实目录树实跑，并与本地读取器结果逐项比对。
-- **时机**：Commands pane 每次出现时扫描（`.task(id: projectID)`）；header 在切换 worktree 时扫描（`.task(id: worktreeID)`，挂在 Menu 的 `.id` 之外，脚本编辑触发的 Menu 重建不会重扫）。两处菜单内都有 Refresh。无文件监听。新扫描取消在途扫描；header 的结果带上扫描时的 worktree，切走后迟到的结果直接丢弃。
+- **时机**：Project 设置页的 Commands section 每次出现时扫描（`.task(id: projectID)`）；header 在切换 worktree 时扫描（`.task(id: worktreeID)`，挂在 Menu 的 `.id` 之外，脚本编辑触发的 Menu 重建不会重扫）。两处菜单内都有 Refresh。无文件监听。新扫描取消在途扫描；header 的结果带上扫描时的 worktree，切走后迟到的结果直接丢弃。
 - 位置解析统一在 `ManifestLocation.resolve`：指定 worktree → Project 选中的 worktree → Project 根目录。
 
 ### 采纳（`CommandSuggestionAdoption`）
