@@ -363,6 +363,197 @@ struct GitLabGitPlatformTests {
     #expect(await runner.calls.count == 1 + GitLabMergeRequestQuery.maxPages)
   }
 
+  // MARK: - degraded read
+
+  private static func fixtureText(_ name: String) throws -> String {
+    try #require(String(bytes: GitLabDecodingTests.loadFixture(name), encoding: .utf8))
+  }
+
+  private static func graphQLReads(_ runner: RecordingCommandRunner) async -> [[String]] {
+    await runner.calls.map(\.arguments).filter { $0.starts(with: ["api", "graphql"]) }
+  }
+
+  /// An instance that does not know a review or squash field answers the batched query
+  /// with an `errors` body (exit 1). The read runs once more without those fields; the
+  /// badge, rollup, and merge state show, the review decision is absent.
+  @Test
+  func unknownOptionalFieldRetriesOnceWithoutReviewAndSquashFields() async throws {
+    let error = try Self.fixtureText("gitlab-graphql-error-optional-fields")
+    let degraded = try GitLabDecodingTests.loadFixture("gitlab-graphql-batch-degraded")
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.failed(stdout: error, stderr: "glab: graphql error"),
+      .exited(code: 0, stdout: degraded, stderr: Data(), stdoutOverflow: false),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.withPort, branches: ["feat-open", "feat-fixture-approved", "feat-fixture-changes"])
+    let reads = await Self.graphQLReads(runner)
+    #expect(reads.count == 2)
+    #expect(reads[0].contains("query=\(GitLabMergeRequestQuery.query)"))
+    #expect(reads[1].contains("query=\(GitLabMergeRequestQuery.degradedQuery)"))
+    for field in GitLabMergeRequestQuery.optionalFieldNames {
+      #expect(GitLabMergeRequestQuery.query.contains(field))
+      #expect(!GitLabMergeRequestQuery.degradedQuery.contains(field))
+    }
+    let open = try #require(result["feat-open"])
+    #expect(open.mergeState == PullRequestMergeState(status: .clean))
+    #expect(open.checkRollup.map(\.name) == ["pass"])
+    #expect(open.mergeOptions.allSatisfy { $0.isEnabled })
+    #expect(result["feat-fixture-approved"]?.reviewDecision == nil)
+    #expect(result["feat-fixture-changes"]?.reviewDecision == nil)
+  }
+
+  /// Exactly one retry: when the degraded query fails too, the chunk fails.
+  @Test
+  func degradedQueryIsNotRetriedAgain() async throws {
+    let error = try Self.fixtureText("gitlab-graphql-error-optional-fields")
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.failed(stdout: error, stderr: ""), Self.failed(stdout: error, stderr: ""),
+      Self.ok(Self.emptyPage),
+    ])
+    let message = "Field 'squashReadOnly' doesn't exist on type 'MergeRequest'"
+    await #expect(throws: GitPlatformError.graphQLError(message)) {
+      _ = try await Self.makeService(runner).batchPullRequests(repository: Self.withPort, branches: ["main"])
+    }
+    #expect(await Self.graphQLReads(runner).count == 2)
+  }
+
+  /// The same unknown-field body on exit 0 also degrades.
+  @Test
+  func unknownOptionalFieldOnExitZeroAlsoDegrades() async throws {
+    let error = try Self.fixtureText("gitlab-graphql-error-optional-fields")
+    let runner = RecordingCommandRunner(outcomes: [Self.version, Self.ok(error), Self.ok(Self.emptyPage)])
+    let result = try await Self.makeService(runner).batchPullRequests(repository: Self.withPort, branches: ["main"])
+    #expect(result.isEmpty)
+    let reads = await Self.graphQLReads(runner)
+    #expect(reads.count == 2)
+    #expect(reads[1].contains("query=\(GitLabMergeRequestQuery.degradedQuery)"))
+  }
+
+  /// Other GraphQL errors fail the chunk without a retry.
+  @Test(arguments: [
+    "gitlab-graphql-error",
+    #"{"errors":[{"message":"Internal server error"}]}"#,
+    #"{"errors":[{"message":"Field 'reviewState' doesn't exist on type 'X'","extensions":{"code":"undefinedField","fieldName":"reviewState"}},{"message":"Internal server error"}]}"#,
+  ])
+  func otherGraphQLErrorsAreNotRetried(body: String) async throws {
+    let stdout = body.hasPrefix("{") ? body : try Self.fixtureText(body)
+    for outcome in [Self.failed(stdout: stdout, stderr: ""), Self.ok(stdout)] {
+      let runner = RecordingCommandRunner(outcomes: [Self.version, outcome, Self.ok(Self.emptyPage)])
+      await #expect(throws: GitPlatformError.self) {
+        _ = try await Self.makeService(runner).batchPullRequests(repository: Self.withPort, branches: ["main"])
+      }
+      #expect(await Self.graphQLReads(runner).count == 1)
+    }
+  }
+
+  // MARK: - reviewers
+
+  private static func reviewerPage(_ states: [String], next: String?) -> CommandOutcome {
+    let nodes = states.map { #"{"mergeRequestInteraction":{"reviewState":"\#($0)"}}"# }.joined(separator: ",")
+    let pageInfo =
+      next.map { #"{"hasNextPage":true,"endCursor":"\#($0)"}"# } ?? #"{"hasNextPage":false,"endCursor":null}"#
+    return ok(
+      #"{"data":{"project":{"mergeRequest":{"reviewers":{"pageInfo":\#(pageInfo),"nodes":[\#(nodes)]}}}}}"#)
+  }
+
+  /// An approved merge request whose first reviewer page approves; the rest is read per
+  /// merge request, and a requested change on a later page wins.
+  @Test
+  func batchReadFollowsEveryReviewerPage() async throws {
+    let first = GitLabDecodingTests.approvedPage(
+      reviewers:
+        #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}"#
+    )
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(first), Self.reviewerPage(["APPROVED"], next: "r2"),
+      Self.reviewerPage(["REQUESTED_CHANGES"], next: nil),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    #expect(result["feat-approved"]?.reviewDecision == .changesRequested)
+    let reads = await Self.graphQLReads(runner)
+    #expect(reads.count == 3)
+    #expect(
+      reads[1] == [
+        "api", "graphql", "--hostname", "gitlab.example.com", "-f", "query=\(GitLabMergeRequestQuery.reviewersQuery)",
+        "-f", "after=r1", "-f", "fullPath=group/sub/app", "-f", "iid=16",
+      ])
+    #expect(reads[2].contains("after=r2"))
+  }
+
+  /// Every reviewer page read and every reviewer approving → approved.
+  @Test
+  func completeReviewerPagesKeepApproved() async throws {
+    let first = GitLabDecodingTests.approvedPage(
+      reviewers: #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":[]}"#)
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(first), Self.reviewerPage(["APPROVED"], next: nil),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    #expect(result["feat-approved"]?.reviewDecision == .approved)
+  }
+
+  /// A later reviewer page without `nodes` or usable `pageInfo` leaves the list
+  /// incomplete: the snapshot keeps its badge, rollup, and merge state, and the decision
+  /// is none. A requested change on that page still counts.
+  @Test(arguments: [
+    (#"{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":null}"#, nil),
+    (#"{"pageInfo":{"hasNextPage":false,"endCursor":null}}"#, nil),
+    (#"{"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}"#, nil),
+    (#"{"pageInfo":{"hasNextPage":true,"endCursor":null},"nodes":[]}"#, nil),
+    (#"{"nodes":[{"mergeRequestInteraction":{"reviewState":"REQUESTED_CHANGES"}}]}"#, ReviewDecision.changesRequested),
+  ])
+  func laterReviewerPageWithoutPageInfoKeepsTheSnapshot(reviewers: String, decision: ReviewDecision?) async throws {
+    let first = GitLabDecodingTests.approvedPage(
+      reviewers: #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":[]}"#)
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(first),
+      Self.ok(#"{"data":{"project":{"mergeRequest":{"reviewers":\#(reviewers)}}}}"#),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    let snapshot = try #require(result["feat-approved"])
+    #expect(snapshot.number == 16)
+    #expect(snapshot.mergeState == PullRequestMergeState(status: .clean))
+    #expect(snapshot.reviewDecision == decision)
+    #expect(await Self.graphQLReads(runner).count == 2)
+  }
+
+  /// A first reviewer page without `nodes` is unknown: a complete later page must not
+  /// make the list complete. The read does not follow the next page.
+  @Test(arguments: [
+    #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":null}"#,
+    #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"}}"#,
+  ])
+  func firstReviewerPageWithoutNodesIsNotApproved(reviewers: String) async throws {
+    let first = GitLabDecodingTests.approvedPage(reviewers: reviewers)
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(first), Self.reviewerPage(["APPROVED"], next: nil),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    let snapshot = try #require(result["feat-approved"])
+    #expect(snapshot.mergeState == PullRequestMergeState(status: .clean))
+    #expect(snapshot.reviewDecision == nil)
+  }
+
+  /// A reviewer list longer than `maxPages` pages stays incomplete: the read succeeds
+  /// and the decision is none, not approved.
+  @Test
+  func reviewerListBeyondThePageCapIsNotApproved() async throws {
+    let first = GitLabDecodingTests.approvedPage(
+      reviewers: #"{"pageInfo":{"hasNextPage":true,"endCursor":"r"},"nodes":[]}"#)
+    let endless = Self.reviewerPage(["APPROVED"], next: "r")
+    let runner = RecordingCommandRunner(
+      outcomes: [Self.version, Self.ok(first)] + Array(repeating: endless, count: GitLabMergeRequestQuery.maxPages))
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    #expect(result["feat-approved"] != nil)
+    #expect(result["feat-approved"]?.reviewDecision == nil)
+    #expect(await Self.graphQLReads(runner).count == GitLabMergeRequestQuery.maxPages)
+  }
+
   @Test
   func markReadyArgvAndMutationErrors() async throws {
     let runner = RecordingCommandRunner(outcomes: [

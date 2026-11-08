@@ -108,6 +108,40 @@ nonisolated enum GitLabJSONParsers {
     return Page(nodes: jobs.nodes ?? [], nextCursor: try nextCursor(of: jobs, what: "pipeline jobs"))
   }
 
+  /// Parses one page of `GitLabMergeRequestQuery.reviewersQuery`. The connection keeps
+  /// its `pageInfo` as sent: a page without it leaves the reviewer list incomplete, which
+  /// withholds "approved" but does not fail the read.
+  static func parseReviewerPage(_ data: Data) throws -> Connection<Reviewer> {
+    struct Wire: Decodable {
+      struct MergeRequest: Decodable { var reviewers: Connection<Reviewer>? }
+      struct Project: Decodable { var mergeRequest: MergeRequest? }
+      struct Payload: Decodable { var project: Project? }
+      var data: Payload?
+      var errors: [ErrorEntry]?
+    }
+    let wire = try decode(Wire.self, from: data, what: "reviewers")
+    if let message = wire.errors?.first?.message { throw GitPlatformError.graphQLError(message) }
+    guard let reviewers = wire.data?.project?.mergeRequest?.reviewers else {
+      throw GitPlatformError.other("reviewers: no reviewer list in the response")
+    }
+    return reviewers
+  }
+
+  /// `true` when `data` is a GraphQL `errors` body and every error is an unknown field
+  /// from `GitLabMergeRequestQuery.optionalFieldNames`. GitLab reports an unknown field
+  /// with `extensions.code == "undefinedField"` and the message
+  /// `Field 'x' doesn't exist on type 'T'`; either one identifies it.
+  static func isOptionalFieldError(_ data: Data) -> Bool {
+    struct Wire: Decodable { var errors: [ErrorEntry]? }
+    guard let errors = (try? JSONDecoder().decode(Wire.self, from: data))?.errors, !errors.isEmpty else {
+      return false
+    }
+    return errors.allSatisfy { error in
+      guard let field = error.undefinedFieldName else { return false }
+      return GitLabMergeRequestQuery.optionalFieldNames.contains(field)
+    }
+  }
+
   /// `[branch: snapshot]` for every branch in `branches` that has a merge request
   /// after the fork filter. `nodes` must be the complete list for these branches.
   ///
@@ -209,14 +243,22 @@ nonisolated enum GitLabJSONParsers {
         mergeState: mergeState, squashReadOnly: node.squashReadOnly ?? false,
         squashOnMerge: node.squashOnMerge ?? false),
       canRerunFailedChecks: GitLabWire.canRetryPipeline(wireJobs),
-      reviewDecision: GitLabWire.reviewDecision(
-        detailedMergeStatus: node.detailedMergeStatus, approved: node.approved ?? false,
-        approverCount: node.approvedBy?.nodes?.count ?? 0,
-        reviewerStates: (node.reviewers?.nodes ?? []).compactMap { $0.mergeRequestInteraction?.reviewState }),
+      reviewDecision: reviewDecision(node),
       headRepositoryOwner: node.sourceProject?.fullPath ?? "",
       baseRefName: node.targetBranch,
       baseRepositoryURL: node.targetProject?.webUrl.flatMap(URL.init(string:))
     )
+  }
+
+  /// `nil` when the read had no review fields (`GitLabMergeRequestQuery.degradedQuery`).
+  /// The reviewer list is complete only when its last page was read.
+  private static func reviewDecision(_ node: MergeRequestNode) -> ReviewDecision? {
+    guard let reviewers = node.reviewers else { return nil }
+    return GitLabWire.reviewDecision(
+      detailedMergeStatus: node.detailedMergeStatus, approved: node.approved ?? false,
+      approverCount: node.approvedBy?.nodes?.count ?? 0,
+      reviewerStates: (reviewers.nodes ?? []).map { $0.mergeRequestInteraction?.reviewState },
+      reviewersComplete: reviewers.nodes != nil && reviewers.pageInfo?.hasNextPage == false)
   }
 
   /// A job's `webPath` (`/group/app/-/jobs/25`) on the instance that serves the merge
@@ -281,7 +323,23 @@ nonisolated enum GitLabJSONParsers {
 
   // MARK: - Wire types
 
-  private struct ErrorEntry: Decodable { var message: String? }
+  private struct ErrorEntry: Decodable {
+    struct Extensions: Decodable {
+      var code: String?
+      var fieldName: String?
+    }
+    var message: String?
+    var extensions: Extensions?
+
+    /// The field name of an unknown-field error, else `nil`.
+    var undefinedFieldName: String? {
+      if extensions?.code == "undefinedField", let name = extensions?.fieldName { return name }
+      guard let message, let match = message.firstMatch(of: #/^Field '(\w+)' doesn't exist on type/#) else {
+        return nil
+      }
+      return String(match.1)
+    }
+  }
 
   struct PageInfo: Decodable, Sendable {
     var hasNextPage: Bool?
