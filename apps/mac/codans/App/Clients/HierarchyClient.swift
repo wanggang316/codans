@@ -2115,8 +2115,8 @@ extension HierarchyClient {
         adopted = manager.catalog.projects.first { $0.id == projectID }
       case .conflict(let owner):
         // Another Project on this Host owns the same folder (ADR 0006).
-        // Discovery here would only add that Project's worktrees a second
-        // time, so this Project keeps its rows as they are.
+        // The adopt step already merged this Project's rows for that folder;
+        // discovery here would only add the owner's worktrees a second time.
         reconcileLogger.error(
           "remote root owned by another project: project=\(projectID.raw.uuidString, privacy: .public) owner=\(owner.raw.uuidString, privacy: .public)"
         )

@@ -167,6 +167,44 @@ struct RemoteSymlinkRootTests {
 
   @Test
   @MainActor
+  func conflictStillMergesTheExistingDuplicateUnderTheKeptRoot() throws {
+    // Case-insensitive host: the Project entered as `repo` already has a
+    // duplicate row at git's `Repo`, and a second Project was added as `Repo`.
+    // The root stays (ADR 0006), but the two rows for one folder merge.
+    let typed = "/data/repo"
+    let onDisk = "/data/Repo"
+    let manager = Self.makeManager()
+    let projectID = manager.addRemoteProject(name: "repo", remoteHost: Self.host, rootPath: typed)
+    manager.setProjectGitRoot(projectID: projectID, gitRoot: typed)
+    manager.reconcileDiscoveredWorktrees(
+      projectID: projectID, entries: [(path: onDisk, branch: "main", head: Self.sha)],
+      normalizePath: HierarchyManager.normalizeRemotePath)
+    let before = manager.catalog.projects[0].worktrees
+    let original = try #require(before.first { $0.path == typed })
+    let duplicate = try #require(before.first { $0.path == onDisk })
+    let originalTab = try manager.createTab(in: original.id, in: projectID, name: "a")
+    let duplicateTab = try manager.createTab(in: duplicate.id, in: projectID, name: "b")
+    let owner = manager.addRemoteProject(name: "Repo", remoteHost: Self.host, rootPath: onDisk, gitRoot: onDisk)
+    let ownerBefore = manager.catalog.projects[1]
+
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: onDisk) == .conflict(owner))
+
+    let project = manager.catalog.projects[0]
+    #expect(project.rootPath == typed)
+    #expect(project.gitRoot == typed)
+    #expect(project.worktrees.map(\.id) == [original.id])
+    #expect(project.worktrees.first?.path == typed)
+    #expect(project.worktrees.first?.tabs.map(\.id) == [originalTab, duplicateTab])
+    #expect(manager.catalog.projects[1] == ownerBefore)
+
+    // A later reconcile finds nothing more to merge.
+    let merged = manager.catalog
+    #expect(manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: onDisk) == .conflict(owner))
+    #expect(manager.catalog == merged)
+  }
+
+  @Test
+  @MainActor
   func sameRootOnAnotherHostIsNoConflict() {
     let manager = Self.makeManager()
     let projectID = manager.addRemoteProject(
