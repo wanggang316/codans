@@ -337,6 +337,68 @@ struct GitPlatformFeatureTests {
     }
   }
 
+  /// A CLI error from the read after the refusal replaces `.headMoved` at the row. When
+  /// the user fixes the CLI and the read succeeds, the row is back on `.headMoved` with the
+  /// new head read, so "Review" shows it.
+  @Test
+  func aReadAfterACLIErrorRestoresTheHeadMovedReview() async {
+    let projectID = ProjectID()
+    let wid = WorktreeID()
+    let pair = GitPlatformFeature.Action.WorktreeBranchPair(worktreeID: wid, branch: "feature/x")
+    let moved = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "def456")
+    var seed = Self.unitSeed(projectID: projectID, pair: pair)
+    seed.snapshots[wid] = Self.stubSnapshot(number: 99, headRefName: "feature/x", headSHA: "abc123")
+    let reads = LockIsolated(0)
+    let store = Self.makeStore(initialState: seed) { client in
+      client.merge = { _, _, _ in throw GitPlatformError.headMoved }
+      client.batchPullRequests = { _, _ in
+        reads.withValue { $0 += 1 }
+        if reads.value == 1 { throw GitPlatformError.notAuthenticated(.github, host: "github.com") }
+        return ["feature/x": moved]
+      }
+    } customizeGit: { git in
+      git.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "w/r") }
+    }
+    await store.send(.mergeRequested(wid, Self.reference(99), strategy: .squash, headSHA: "abc123")) {
+      $0.mutating.insert(wid)
+    }
+    await store.receive {
+      if case .mergeCompleted(_, 99, .failure) = $0 { return true }
+      return false
+    } assert: {
+      $0.mutating.remove(wid)
+      $0.lastError[wid] = .headMoved
+      $0.headMovedMerges[wid] = .init(pullRequestNumber: 99, branch: "feature/x", refusedAt: Self.fixedDate)
+      $0.lastFetchStartedAt[projectID] = Self.fixedDate
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    let cliError = GitPlatformError.notAuthenticated(.github, host: "github.com")
+    await store.receive {
+      if case .projectBatchLoaded(_, _, .failure) = $0 { return true }
+      return false
+    } assert: {
+      $0.inFlightFetchProjects.remove(projectID)
+      $0.loading.remove(wid)
+      $0.lastErrorByProject[projectID] = cliError
+      $0.lastError[wid] = cliError
+    }
+    // The CLI error's own button ("Run gh auth login") retries the read.
+    await store.send(.worktreeRefreshRequested(wid)) {
+      $0.inFlightFetchProjects.insert(projectID)
+      $0.loading.insert(wid)
+    }
+    await Self.receiveBatch(store, projectID: projectID, wid: wid, branch: "feature/x", snapshot: moved) {
+      $0.lastErrorByProject[projectID] = nil
+      $0.lastError[wid] = .headMoved
+      $0.headMovedMerges[wid]?.isNewHeadRead = true
+    }
+    await store.send(.headMovedReviewed(wid)) {
+      $0.lastError[wid] = nil
+      $0.headMovedMerges[wid] = nil
+    }
+  }
+
   /// The refused merge belongs to one Pull Request: a refresh that shows another one (a
   /// new number on the branch) drops the error.
   @Test

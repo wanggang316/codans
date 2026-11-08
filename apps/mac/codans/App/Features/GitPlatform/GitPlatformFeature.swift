@@ -636,6 +636,8 @@ struct GitPlatformFeature {
             batched.byBranch[pair.branch]?.number == merge.pullRequestNumber
           {
             if fetchStartedAt >= merge.refusedAt { state.headMovedMerges[pair.worktreeID]?.isNewHeadRead = true }
+            // A failed read in between can have put a CLI error in its place.
+            state.lastError[pair.worktreeID] = .headMoved
           } else {
             state.headMovedMerges[pair.worktreeID] = nil
             state.lastError[pair.worktreeID] = nil

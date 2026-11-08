@@ -97,7 +97,7 @@ GitLab users run a self-managed instance.
       merge again.") and refreshes the fetch unit at once. The error belongs
       to that Pull Request: it goes when the Worktree changes branch or shows
       a different Pull Request. Otherwise it stays until the user selects
-      "Review". "Review" shows the new head only after a successful read of
+      "Review", also when a failed read shows a CLI error in between. "Review" shows the new head only after a successful read of
       it; before that read, or after a failed read, the button reads it
       again. There is no "merge anyway" action.
     - A snapshot without a SHA (an older cache entry) does not merge. The

@@ -195,7 +195,7 @@ agent 常在用户看过 Pull Request 之后继续向分支 push。codans 只 me
 - popover 发出的 `mergeRequested(worktreeID, pullRequest, strategy:, headSHA:)` 带屏幕上快照的 `headSHA`。`GitPlatform.merge(_:strategy:headSHA:)` 的 `headSHA` 不可为空，没有不带 SHA 的 merge 路径。
 - GitHub：`gh pr merge <n> <flag> --match-head-commit <sha> --repo <repo>`。GitLab：merge API 带 `sha=<sha>`（`-f sha=<sha>`）；要求 SHA 的 GitLab namespace 因此也能 merge。
 - head 已移动时 Git Platform 拒绝 merge：GitHub 报 "Head branch was modified"，GitLab 报 409 "SHA does not match HEAD of source branch"。两者都映射为 `GitPlatformError.headMoved`，消息为 "The branch has new commits. Review them, then merge again."，并在 merge-conflict 映射之前判断（GitLab 的 409 也用于其他拒绝）。
-- `.headMoved` 时 reducer 记录该错误和 `headMovedMerges[worktree]`（PR 编号、分支、拒绝时间），并立即刷新取数单元（不等 2 秒）。成功的刷新通常会清除行错误，但不清除 `.headMoved`：它是对 merge 的回答，不是对读取的回答。该错误只属于被拒的 PR：刷新结果里该行是另一个 PR 编号或没有 PR，或 Worktree 切换了分支（`reprojectCachedSnapshots`，不等取数），就清除。
+- `.headMoved` 时 reducer 记录该错误和 `headMovedMerges[worktree]`（PR 编号、分支、拒绝时间），并立即刷新取数单元（不等 2 秒）。成功的刷新通常会清除行错误，但不清除 `.headMoved`：它是对 merge 的回答，不是对读取的回答。其间一次失败的取数可能用 CLI 错误覆盖该行的 `.headMoved`；之后成功的取数只要仍含该 PR，就把行错误恢复为 `.headMoved`。该错误只属于被拒的 PR：刷新结果里该行是另一个 PR 编号或没有 PR，或 Worktree 切换了分支（`reprojectCachedSnapshots`，不等取数），就清除。
 - 拒绝之后开始的一次取数成功且仍含该 PR 时，`isNewHeadRead` 置为 true。popover 显示错误和按钮：已读到新 head 时为 "Review"，按下派发 `headMovedReviewed`，清除错误，popover 显示新的 head；未读到（刷新进行中或失败）时为 "Retry"，同一 action 只重新刷新，不显示旧快照。没有 "merge anyway"。
 - 快照没有 `headSHA`（旧缓存条目）时，popover 禁用 Merge，原因为 "Reading the head commit"。`WorktreePullRequestPopover` 出现时派发 `popoverOpened`，所以侧栏徽标和状态栏两个入口都会刷新该 open PR 的取数单元。若仍收到无 SHA 的 `mergeRequested`，reducer 只刷新，不 merge；用户在刷新后的 popover 中再次 merge。
 
