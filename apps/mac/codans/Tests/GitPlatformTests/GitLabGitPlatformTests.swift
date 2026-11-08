@@ -482,10 +482,12 @@ struct GitLabGitPlatformTests {
     #expect(result["feat-approved"]?.reviewDecision == .approved)
   }
 
-  /// A later reviewer page without usable `pageInfo` leaves the list incomplete: the
-  /// snapshot keeps its badge, rollup, and merge state, and the decision is none. A
-  /// requested change on that page still counts.
+  /// A later reviewer page without `nodes` or usable `pageInfo` leaves the list
+  /// incomplete: the snapshot keeps its badge, rollup, and merge state, and the decision
+  /// is none. A requested change on that page still counts.
   @Test(arguments: [
+    (#"{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":null}"#, nil),
+    (#"{"pageInfo":{"hasNextPage":false,"endCursor":null}}"#, nil),
     (#"{"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}"#, nil),
     (#"{"pageInfo":{"hasNextPage":true,"endCursor":null},"nodes":[]}"#, nil),
     (#"{"nodes":[{"mergeRequestInteraction":{"reviewState":"REQUESTED_CHANGES"}}]}"#, ReviewDecision.changesRequested),
