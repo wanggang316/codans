@@ -71,8 +71,11 @@ enum GitPlatformError: Error, Equatable, Sendable {
 
   /// The availability that a probe reports when it fails with this error.
   var availability: GitPlatformAvailability {
-    if case .cliNotInstalled = self { return .notInstalled }
-    return .unavailable(reason: userFacingMessage)
+    switch self {
+    case .cliNotInstalled: return .notInstalled
+    case .notAuthenticated(_, let host): return .notLoggedIn(host: host)
+    default: return .unavailable(reason: userFacingMessage)
+    }
   }
 
   /// One-line, user-facing string suitable for tooltip + popover banner.

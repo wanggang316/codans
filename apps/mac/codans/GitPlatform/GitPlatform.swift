@@ -26,6 +26,10 @@ nonisolated protocol GitPlatform: Sendable {
   /// instances. Empty when the CLI is missing or logged in nowhere.
   func authenticatedHosts() async -> Set<String>
 
+  /// Drops the cached CLI path, so the next call finds a CLI that was installed, moved, or
+  /// upgraded while the app runs.
+  func invalidateExecutable() async
+
   /// Batched Pull Request lookup for one repository and a list of source branch names.
   /// Returns `[branch: PullRequestSnapshot]` for every branch that resolves to a Pull
   /// Request after the fork filter. Branches with no Pull Request are absent (never
@@ -64,14 +68,17 @@ nonisolated protocol GitPlatform: Sendable {
 /// 4. For an SSH remote only: the `HostName` from `ssh -G`, matched without the port to the
 ///    one logged-in or public host of steps 2 and 3. This covers an alias from
 ///    `~/.ssh/config` (`git@github-work:…`) and an SSH port that is not the API port.
-/// 5. Otherwise: none.
+/// 5. The host name: a host that contains `gitlab` is GitLab, one that contains `github` is
+///    GitHub (`gitlab.corp.example.com`). For an SSH remote the name is its `ssh -G`
+///    HostName without the SSH port. A name that contains both resolves to none.
+/// 6. Otherwise: none.
 ///
-/// An alias resolves even when its API host is not logged in, so the fetch fails with the
-/// login message in the badge position.
+/// An alias or a name match resolves even when its API host is not logged in, so the fetch
+/// fails with the install or login message in the badge position.
 ///
 /// The logged-in hosts of each kind and the `ssh -G` results are asked once and cached;
 /// `invalidate()` drops both, so a `gh auth login` or a change to `~/.ssh/config` is seen
-/// after the Settings "Re-check".
+/// after a `gh` / `glab` command finishes in a pane or after the Settings "Re-check".
 actor GitPlatformResolver {
   typealias HostsProvider = @Sendable (GitPlatformKind) async -> Set<String>
   typealias SSHHostNameProvider = @Sendable (String) async -> String?
@@ -101,8 +108,27 @@ actor GitPlatformResolver {
         return GitPlatformRepository(kind: kind, host: remote.host, path: remote.path)
       }
     }
-    guard remote.isSSH, let (kind, apiHost) = await apiHost(forSSHHost: host) else { return nil }
-    return GitPlatformRepository(kind: kind, host: apiHost, path: remote.path)
+    var name = remote.host
+    if remote.isSSH {
+      name = await sshHostName(of: host)
+      if let (kind, apiHost) = await apiHost(forSSHName: name) {
+        return GitPlatformRepository(kind: kind, host: apiHost, path: remote.path)
+      }
+    }
+    guard let kind = Self.kind(byName: name) else { return nil }
+    return GitPlatformRepository(kind: kind, host: name, path: remote.path)
+  }
+
+  /// The one kind whose name (`github`, `gitlab`) the host contains, or `nil`.
+  static func kind(byName host: String) -> GitPlatformKind? {
+    let host = host.lowercased()
+    let matches = GitPlatformKind.allCases.filter { kind in
+      switch kind {
+      case .github: host.contains("github")
+      case .gitlab: host.contains("gitlab")
+      }
+    }
+    return matches.count == 1 ? matches.first : nil
   }
 
   /// The alias whose remote host is the remote's host. For an SSH remote the port is the
@@ -120,10 +146,9 @@ actor GitPlatformResolver {
     cachedSSHHostNames = [:]
   }
 
-  /// The one logged-in or public host, of any kind, whose name without port is the
-  /// `HostName` of `sshHost`, or `nil`. A host that both CLIs know counts once, as
-  /// GitHub, like steps 2 and 3.
-  private func apiHost(forSSHHost sshHost: String) async -> (GitPlatformKind, String)? {
+  /// The `HostName` of `sshHost` from `ssh -G`, lowercased and without the SSH port. The
+  /// host without port when `ssh -G` gives nothing.
+  private func sshHostName(of sshHost: String) async -> String {
     let alias = Self.nameWithoutPort(sshHost)
     let resolved: String?
     if let cached = cachedSSHHostNames[alias] {
@@ -132,7 +157,12 @@ actor GitPlatformResolver {
       resolved = await sshHostName(alias)?.lowercased()
       cachedSSHHostNames[alias] = resolved
     }
-    let name = resolved ?? alias
+    return resolved ?? alias
+  }
+
+  /// The one logged-in or public host, of any kind, whose name without port is `name`, or
+  /// `nil`. A host that both CLIs know counts once, as GitHub, like steps 2 and 3.
+  private func apiHost(forSSHName name: String) async -> (GitPlatformKind, String)? {
     var matches: [String: GitPlatformKind] = [:]
     for kind in GitPlatformKind.allCases {
       var candidates = await authenticatedHosts(for: kind)

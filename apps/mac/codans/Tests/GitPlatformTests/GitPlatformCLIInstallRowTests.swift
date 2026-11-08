@@ -33,3 +33,21 @@ struct GitPlatformCLIInstallRowTests {
     #expect(pasteboard.pasteboardItems?.count == 1)
   }
 }
+
+/// The not-logged-in row: the text names the host, and the command is the `auth login`
+/// of the CLI for that host.
+@MainActor
+struct GitPlatformCLILoginRowTests {
+  @Test
+  func messageNamesTheHostOrTheGitPlatform() {
+    #expect(
+      GitPlatformsSettingsView.notLoggedInMessage(.gitlab, host: "gitlab.example.com")
+        == "glab is not logged in to gitlab.example.com.")
+    #expect(GitPlatformsSettingsView.notLoggedInMessage(.github, host: nil) == "gh is not logged in to GitHub.")
+  }
+
+  @Test(arguments: GitPlatformKind.allCases)
+  func messageDoesNotContainTheLoginCommand(_ kind: GitPlatformKind) {
+    #expect(!GitPlatformsSettingsView.notLoggedInMessage(kind, host: nil).contains(kind.loginCommand))
+  }
+}

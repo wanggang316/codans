@@ -53,6 +53,16 @@ public nonisolated enum GitPlatformKind: String, Codable, Sendable, CaseIterable
   /// Shell command that installs the CLI through Homebrew.
   public var installCommand: String { "brew install \(cliName)" }
 
+  /// Shell command that logs the CLI in.
+  public var loginCommand: String { loginCommand(host: nil) }
+
+  /// Shell command that logs the CLI in to `host`, or to the host the CLI asks for when
+  /// `nil`.
+  public func loginCommand(host: String?) -> String {
+    guard let host else { return "\(cliName) auth login" }
+    return "\(cliName) auth login --hostname \(host)"
+  }
+
   /// Name of the CLI as the UI shows it.
   public var cliDisplayName: String {
     switch self {

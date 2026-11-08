@@ -37,17 +37,13 @@ struct GitHubGitPlatformTests {
   }
 
   @Test
-  func availabilityReportsUnavailableOnEmptyHosts() async throws {
+  func availabilityReportsNotLoggedInOnEmptyHosts() async throws {
     let data = try Self.loadFixture("gh-auth-status-unauth")
     let runner = RecordingCommandRunner(outcomes: [
       .exited(code: 1, stdout: data, stderr: Data(), stdoutOverflow: false)
     ])
     let service = Self.makeService(runner: runner)
-    let result = await service.availability()
-    if case .unavailable = result { /* ok */
-    } else {
-      Issue.record("expected .unavailable, got \(result)")
-    }
+    #expect(await service.availability() == .notLoggedIn(host: nil))
   }
 
   @Test

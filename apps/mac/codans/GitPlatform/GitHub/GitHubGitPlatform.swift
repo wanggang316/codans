@@ -58,7 +58,7 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
     case .exited(let code, let stdout, _, _) where cmd.expectedExitCodes.contains(code):
       do {
         guard let result = try GitHubJSONParsers.parseAuthStatus(stdout) else {
-          return .unavailable(reason: GitPlatformError.notAuthenticated(.github, host: nil).userFacingMessage)
+          return .notLoggedIn(host: nil)
         }
         return .available(host: result.host, user: result.user)
       } catch let error as GitPlatformError {
@@ -67,7 +67,7 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
         return .unavailable(reason: GitPlatformError.other(String(describing: error)).userFacingMessage)
       }
     case .exited(_, _, let stderr, _):
-      return .unavailable(reason: Self.translateError(stderr: stderr).userFacingMessage)
+      return Self.translateError(stderr: stderr).availability
     case .timedOut:
       return .unavailable(reason: GitPlatformError.timeout.userFacingMessage)
     case .spawnFailed:
@@ -89,6 +89,10 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
     guard case .exited(let code, let stdout, _, _) = outcome, cmd.expectedExitCodes.contains(code)
     else { return [] }
     return GitHubJSONParsers.parseAuthenticatedHosts(stdout)
+  }
+
+  func invalidateExecutable() async {
+    await resolver.invalidate()
   }
 
   // MARK: - writes

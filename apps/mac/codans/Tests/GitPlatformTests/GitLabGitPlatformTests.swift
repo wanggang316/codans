@@ -24,7 +24,7 @@ struct GitLabGitPlatformTests {
   private static let version = ok("glab 1.128.0 (519ea19f7)\n")
 
   private static func makeService(_ runner: RecordingCommandRunner) -> GitLabGitPlatform {
-    GitLabGitPlatform(runner: runner, resolver: CLIExecutableResolver(prober: { exec }))
+    GitLabGitPlatform(runner: runner, resolver: CLIExecutableResolver(prober: { exec }), configHosts: { [] })
   }
 
   // MARK: - availability
@@ -51,13 +51,13 @@ struct GitLabGitPlatformTests {
       Self.version, .exited(code: 1, stdout: none, stderr: Data(), stdoutOverflow: false),
     ])
     let result = await Self.makeService(runner).availability()
-    #expect(result == .unavailable(reason: GitPlatformError.notAuthenticated(.gitlab, host: nil).userFacingMessage))
+    #expect(result == .notLoggedIn(host: nil))
     #expect(GitPlatformError.notAuthenticated(.gitlab, host: nil).userFacingMessage.contains("glab auth login"))
   }
 
   /// Exit 1 because gitlab.com fails its check; the self-managed host is logged in.
   @Test
-  func availabilityAndHostsFromAMixedAuthStatus() async throws {
+  func availabilityFromAMixedAuthStatus() async throws {
     let mixed = try GitLabDecodingTests.loadFixture("glab-auth-status-mixed")
     let runner = RecordingCommandRunner(outcomes: [
       Self.version, .exited(code: 1, stdout: mixed, stderr: Data(), stdoutOverflow: false),
@@ -65,18 +65,12 @@ struct GitLabGitPlatformTests {
     ])
     let service = Self.makeService(runner)
     #expect(await service.availability() == .available(host: "192.168.2.158:8929", user: "codans-dev"))
-    #expect(await service.authenticatedHosts() == ["192.168.2.158:8929"])
+    #expect(await service.availability() == .available(host: "192.168.2.158:8929", user: "codans-dev"))
     let calls = await runner.calls
     #expect(calls.map(\.arguments) == [["version"], ["auth", "status", "--all", "--output", "json"], ["auth", "status", "--all", "--output", "json"]])
     // The version is checked once per executable.
     #expect(calls.filter { $0.arguments == ["version"] }.count == 1)
     #expect(calls.allSatisfy { $0.cwd == GitLabGitPlatform.homeDirectory })
-  }
-
-  @Test
-  func authenticatedHostsIsEmptyWithoutGlab() async {
-    let service = GitLabGitPlatform(runner: RecordingCommandRunner(outcomes: []), resolver: .init(prober: { nil }))
-    #expect(await service.authenticatedHosts().isEmpty)
   }
 
   // MARK: - batched read
@@ -454,7 +448,7 @@ struct GitLabGitPlatformTests {
       Self.version, .exited(code: 1, stdout: mixed, stderr: Data(), stdoutOverflow: false),
     ])
     let service = Self.makeService(runner)
-    _ = await service.authenticatedHosts()
+    _ = await service.availability()
     let nested = GitPlatformRepository(kind: .gitlab, host: "192.168.2.158:8929", path: "codans-e2e/nested/deep-app")
     #expect(service.repositoryWebURL(nested) == URL(string: "http://192.168.2.158:8929/codans-e2e/nested/deep-app"))
     #expect(

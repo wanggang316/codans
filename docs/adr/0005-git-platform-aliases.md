@@ -44,6 +44,10 @@ set the same choice on each Project of that host.
       port to the one logged-in or public host of steps 2 and 3. This step
       runs in every case; it does not need a user setting.
    5. Otherwise: no Git Platform. codans shows no badge and no error.
+
+   [ADR 0004](0004-gitlab-support-through-glab.md) item 2 (amended 2026-11)
+   adds a host-name step before step 5 and reads the `glab` hosts from its
+   config file.
 4. **Alias status.** The pane shows, for each alias, whether the CLI of its
    kind is logged in to its API host, with the same actionable message as for
    a missing login. An alias whose API host is not logged in still resolves,
