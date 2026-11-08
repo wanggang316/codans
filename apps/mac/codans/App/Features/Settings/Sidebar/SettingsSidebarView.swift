@@ -205,7 +205,7 @@ struct SettingsSidebarView: View {
     case .terminal: return "terminal"
     case .notifications: return "bell"
     case .developer: return "puzzlepiece.extension"
-    case .shortcuts: return "keyboard"
+    case .shortcuts: return "command"
     case .updates: return "arrow.down.circle"
     case .about: return "info.circle"
     case .projectGeneral, .projectScripts:
