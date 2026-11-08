@@ -111,7 +111,7 @@ Codable 模式（与 `isPinned` 同形）：`decodeIfPresent ?? false` 保读兼
 
 - `beginWorktreeCreation` / `endWorktreeCreation`；同一 Project 的并发创建各持一份（按 token 计，重复释放为 no-op）。
 - 持租约期间 reconcile **不追加**新发现的行；已有行的 branch / HEAD 同步与失效扫描照常。
-- 两个入口从物化开始持有到 catalog 行写入：侧栏 pending 流（token = pending 行 id + Retry 次数，每次尝试一份；成功、失败、Cancel、Retry 重取、Discard 由 reducer 释放；effect 被拆除时不再发送 action，由 effect 自己在结束时释放；setup 阶段 Cancel 先走 finished 写 catalog、再取消 effect，保证释放晚于写入）与 IPC `hierarchy.createWorktree`（`defer` 释放，覆盖成功与各错误出口）。
+- 两个入口从物化开始持有到 catalog 行写入：侧栏 pending 流（token = pending 行 id + Retry 次数，每次尝试一份；成功、失败、Cancel、Retry 重取、Discard 由 reducer 释放；effect 被拆除时不再发送 action，由 effect 自己在结束时释放；setup 阶段 Cancel 先走 finished 写 catalog、再取消 effect，保证释放晚于写入；物化后 catalog 写入失败（如重名）时，行先取一份新 token、再释放本次尝试的 token，`failed` 行持有它直到用户操作——其间 reconcile 不会把磁盘上的路径再采纳为第二行，Retry 只重写 catalog 行（不再跑 `git worktree add`），Discard 释放租约、保留磁盘目录，由随后的 reconcile 采纳为一行）与 IPC `hierarchy.createWorktree`（`defer` 释放，覆盖成功与各错误出口）。
 - Project 最后一份租约释放时触发 `onCreationLeasesReleased`，app 对该 Project 跑一次 reconcile，补上窗口内在 app 外创建的 worktree。
 - `reuseExisting` 保留为兜底：路径已有行时返回该行。Workspace 分组创建不持租约（其行按设计由 reconcile 写入）。
 
