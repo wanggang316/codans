@@ -175,18 +175,19 @@ struct SettingsSidebarView: View {
     case .general: return .init(.symbol("gearshape.fill", size: 13), .gray)
     // The badge sits low left, so the glyph moves right a little to look centered.
     case .gitPlatforms:
-      return .init(.symbol("externaldrive.badge.timemachine", size: 15, nudge: -0.25), .indigo)
+      return .init(.symbol("externaldrive.badge.timemachine", size: 15, nudge: .init(width: -0.25, height: 0)), .indigo)
     case .worktree: return .init(.asset("git-branch", size: 13), .orange)
     case .terminal: return .init(.prompt, .graphite, glyphColor: SettingsIconTile.promptGreen)
-    case .notifications: return .init(.symbol("bell.badge.fill", size: 12.5), .red)
+    // The badge widens the box upward, which leaves the bell low; lift it.
+    case .notifications: return .init(.symbol("bell.badge.fill", size: 12.5, nudge: .init(width: 0, height: -0.6)), .red)
     // A triangle's mass sits left of its box center; shift it right.
-    case .globalCommands: return .init(.symbol("play.fill", size: 10, nudge: 0.7), .green)
+    case .globalCommands: return .init(.symbol("play.fill", size: 10, nudge: .init(width: 0.7, height: 0)), .green)
     case .shortcuts: return .init(.symbol("command", size: 11.5), .gray)
     case .updates: return .init(.symbol("arrow.down", size: 11.5), .blue)
     case .about: return .init(.symbol("info", size: 11.5), .gray)
     case .agents: return .init(.symbol("sparkles", size: 12.5), .sunset)
     // The tab on the right pulls the mass left of the box center.
-    case .developer: return .init(.symbol("puzzlepiece.extension.fill", size: 13, nudge: 0.35), .magenta)
+    case .developer: return .init(.symbol("puzzlepiece.extension.fill", size: 13, nudge: .init(width: 0.35, height: 0)), .blue)
     case .workflows: return .init(.symbol("app.connected.to.app.below.fill", size: 12.5), .teal)
     case .hosts: return .init(.symbol("globe", size: 12.5), .purple)
     case .projectGeneral, .projectScripts: return .init(.symbol("questionmark", size: 12), .gray)
@@ -210,23 +211,26 @@ struct SettingsSidebarView: View {
 /// shape, so glyphs of different proportions read at the same weight.
 private struct SettingsIconTile: View {
   enum Glyph {
-    /// An SF Symbol fit in a `size`-point box, moved `nudge` points right when
+    /// An SF Symbol fit in a `size`-point box, moved by `nudge` points when
     /// its visual mass is off its box center.
-    case symbol(String, size: CGFloat, nudge: CGFloat = 0)
+    case symbol(String, size: CGFloat, nudge: CGSize = .zero)
     /// A shell prompt, `>_`. SF Symbols draws it only inside a window frame.
     case prompt
     /// A template-rendered SVG in the asset catalog.
     case asset(String, size: CGFloat)
   }
 
-  /// Top and bottom colors of the tile fill.
+  /// The two stops of the tile fill, top to bottom unless `diagonal`, which
+  /// runs from the top-left corner to the bottom-right one.
   struct Palette {
     let top: Color
     let bottom: Color
+    var diagonal = false
 
-    init(_ top: UInt32, _ bottom: UInt32) {
+    init(_ top: UInt32, _ bottom: UInt32, diagonal: Bool = false) {
       self.top = Color(rgb: top)
       self.bottom = Color(rgb: bottom)
+      self.diagonal = diagonal
     }
 
     static let gray = Palette(0xA1A1A6, 0x6E6E73)
@@ -236,8 +240,7 @@ private struct SettingsIconTile: View {
     static let red = Palette(0xFF6B6B, 0xF02D3A)
     static let green = Palette(0x5EDB7A, 0x28B446)
     static let blue = Palette(0x4DA3FF, 0x0A6CFF)
-    static let sunset = Palette(0xFF9F45, 0xFF3B6B)
-    static let magenta = Palette(0xF06BD0, 0xA53BF0)
+    static let sunset = Palette(0xF45ED6, 0xFFB65A, diagonal: true)
     static let teal = Palette(0x4FD8E0, 0x12A5B8)
     static let purple = Palette(0xB57BFF, 0x8A3FFC)
   }
@@ -264,7 +267,13 @@ private struct SettingsIconTile: View {
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
     shape
-      .fill(LinearGradient(colors: [style.palette.top, style.palette.bottom], startPoint: .top, endPoint: .bottom))
+      .fill(
+        LinearGradient(
+          colors: [style.palette.top, style.palette.bottom],
+          startPoint: style.palette.diagonal ? .topLeading : .top,
+          endPoint: style.palette.diagonal ? .bottomTrailing : .bottom
+        )
+      )
       .overlay {
         // A light inner edge, brighter at the top, gives the tile its lift.
         shape.strokeBorder(
@@ -292,7 +301,7 @@ private struct SettingsIconTile: View {
         .fontWeight(.semibold)
         .scaledToFit()
         .frame(width: size, height: size)
-        .offset(x: nudge)
+        .offset(nudge)
     case .prompt:
       PromptShape()
         .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
