@@ -1,0 +1,144 @@
+name: release-merge
+
+# Ships a stable release when its release PR merges. The release PR (head
+# branch `release/vX.Y.Z`, opened by the `release` skill) is the only human
+# gate; this workflow does the rest:
+#
+#   tag      verify the merged commit, wait for tip runs in flight, push the
+#            annotated tag vX.Y.Z on the merged commit
+#   build    release.yml (workflow_call): build, notarize, draft release
+#   publish  check the draft's assets, publish it as the latest release
+#   cask     update-cask.yml (workflow_call): Homebrew cask
+#
+# The tag push and the publish use GITHUB_TOKEN, which fires no other
+# workflow; that is why build and cask are called here, and why the tag push
+# does not start a second release.yml run.
+#
+# Recovery: re-run the failed jobs of this run. The tag job accepts a tag
+# that already points at the merged commit.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write   # tag push, release create / publish
+  actions: read     # tag job: find tip runs in flight
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 1
+
+      - name: Verify the merged release commit
+        id: meta
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          TAG="${HEAD_REF#release/}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::head branch '$HEAD_REF' is not release/vX.Y.Z" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          MV=$(awk -F'=' '/^MARKETING_VERSION/ {gsub(/[ \t\r]/,"",$2); print $2}' apps/mac/Configurations/Project.xcconfig)
+          if [[ "$MV" != "$VERSION" ]]; then
+            echo "::error::$SHA has MARKETING_VERSION $MV, branch names $VERSION" >&2
+            exit 1
+          fi
+          if ! grep -q "^## \[${VERSION}\] - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${VERSION}] - YYYY-MM-DD' section" >&2
+            exit 1
+          fi
+          # The last line is the peeled commit of an annotated tag.
+          EXISTING=$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" | tail -1 | awk '{print $1}')
+          if [[ -n "$EXISTING" && "$EXISTING" != "$SHA" ]]; then
+            echo "::error::tag $TAG already exists at $EXISTING, not at the merged commit $SHA" >&2
+            exit 1
+          fi
+          echo "tag=$TAG"                         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"                 >> "$GITHUB_OUTPUT"
+          echo "exists=$([[ -n "$EXISTING" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # release.yml assigns the build number from the published appcast. A
+      # tip run in flight would publish the same number, so wait for it. Tip
+      # runs that start from now on see this run and skip (release-tip.yml
+      # check job).
+      - name: Wait for tip runs in flight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            ACTIVE=$(gh run list -R "$REPO" --workflow release-tip.yml --limit 20 --json status \
+              --jq '[.[] | select(.status != "completed")] | length')
+            if [[ "$ACTIVE" == "0" ]]; then
+              exit 0
+            fi
+            echo "$ACTIVE tip run(s) in flight; waiting ($i/120)"
+            sleep 30
+          done
+          echo "::error::tip runs still in flight after 60 minutes" >&2
+          exit 1
+
+      - name: Push the release tag
+        if: steps.meta.outputs.exists != 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name  "codans release bot"
+          git config user.email "noreply@codans.app"
+          git tag -a "$TAG" -m "$TAG" "$SHA"
+          git push origin "refs/tags/$TAG"
+
+  build:
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+
+  publish:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          ASSETS=$(gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[].name')
+          for asset in "Codans-${VERSION}.dmg" "Codans-${VERSION}.dmg.sha256" "Codans.dmg" "appcast.xml"; do
+            if ! grep -qxF "$asset" <<<"$ASSETS"; then
+              echo "::error::release $TAG is missing $asset; leaving it as a draft" >&2
+              exit 1
+            fi
+          done
+          gh release edit "$TAG" -R "$REPO" --draft=false --latest
+          gh release view "$TAG" -R "$REPO" --json url,isDraft --jq '"\(.url) draft=\(.isDraft)"'
+
+  cask:
+    needs: [tag, publish]
+    uses: ./.github/workflows/update-cask.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit

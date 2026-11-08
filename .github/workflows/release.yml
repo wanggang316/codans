@@ -1,8 +1,12 @@
 name: release
 
-# Tag-triggered Developer ID release pipeline. Pushing a `v*` tag (e.g.
-# `v0.1.0`) produces a notarized + stapled `Codans-<version>.dmg`
-# attached to a draft GitHub Release.
+# Developer ID release pipeline. It builds a notarized + stapled
+# `Codans-<version>.dmg` for an existing `vX.Y.Z` tag and attaches it to a
+# draft GitHub Release. Callers:
+#   - release-merge.yml (workflow_call) after a release PR merges: the normal
+#     path. It also publishes the draft and updates the Homebrew cask.
+#   - a manual `v*` tag push or workflow_dispatch: the fallback. The draft is
+#     then published by hand.
 #
 # Required GitHub repository secrets (set via `gh secret set` or web UI):
 #   DEVELOPER_ID_CERT_P12_BASE64  - base64 -i path/to/devid.p12
@@ -46,6 +50,12 @@ on:
       tag:
         description: 'Tag to release (must already exist, format vX.Y.Z)'
         required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to release (must already exist, format vX.Y.Z)'
+        required: true
+        type: string
 
 permissions:
   contents: write   # needed for gh release create
@@ -74,7 +84,7 @@ jobs:
       - name: Resolve tag and version
         id: meta
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::tag '$TAG' does not match vX.Y.Z" >&2
             exit 1
@@ -96,6 +106,18 @@ jobs:
             echo "::error::tag ${{ steps.meta.outputs.tag }} != Project.xcconfig MARKETING_VERSION ($MV); bump-version before tagging" >&2
             exit 1
           fi
+
+      # The build number is assigned here, not taken from the commit: Tip
+      # builds published after the version bump use the same date/sequence
+      # scheme, and Sparkle needs every published build to be unique and
+      # increasing. The checkout is ephemeral, so this edit is never committed.
+      - name: Assign build number
+        run: |
+          set -euo pipefail
+          BUILD="$(./apps/mac/scripts/bump-version.sh --next-build)"
+          sed -i.bak "s/^CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $BUILD/" apps/mac/Configurations/Project.xcconfig
+          rm apps/mac/Configurations/Project.xcconfig.bak
+          grep "^CURRENT_PROJECT_VERSION = $BUILD$" apps/mac/Configurations/Project.xcconfig
 
       - uses: jdx/mise-action@v2
         with:

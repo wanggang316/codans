@@ -9,8 +9,9 @@ name: release-tip
 # `allowedChannels = ["tip"]`.
 #
 # Trigger: every push to main (continuous/nightly) + manual workflow_dispatch.
-# A check job skips the build if the tip tag already points at this commit
-# with all assets present.
+# A check job skips the build while a stable release run is in flight, when
+# the push bumps MARKETING_VERSION (a release PR merge), or when the tip tag
+# already points at this commit.
 #
 # Required secrets: identical set to release.yml — Developer ID cert,
 # notary creds, Sparkle private key. Optional: SENTRY_DSN_REST +
@@ -21,15 +22,17 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-# Serialise with the stable release pipeline. If a stable cut lands
-# during the tip workflow's merge step, the loser re-runs against the
-# winner's appcast — no lost items either way.
+# Serialise tip runs. Stable runs do not join this group: GitHub cancels a
+# pending run when a newer one queues, and a stable run must never be
+# dropped. Stable and tip coordinate in the check job and in
+# release-merge.yml instead.
 concurrency:
   group: release
   cancel-in-progress: false
 
 permissions:
   contents: write   # tag push + release create + appcast asset clobber
+  actions: read     # check job: find stable release runs in flight
 
 jobs:
   check:
@@ -39,8 +42,44 @@ jobs:
     steps:
       - name: Skip if tip already points at this commit
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          # A stable release owns the next build number until it is
+          # published; a tip built meanwhile would take the same number.
+          # The stable run waits for tip runs in flight, so one side always
+          # sees the other. A tip skipped here is rebuilt by the next push.
+          ACTIVE_STABLE=$(
+            {
+              gh run list -R "$REPO" --workflow release-merge.yml --limit 20 --json status,headBranch \
+                --jq '.[] | select(.status != "completed" and (.headBranch | startswith("release/v"))) | .headBranch'
+              gh run list -R "$REPO" --workflow release.yml --limit 20 --json status,headBranch \
+                --jq '.[] | select(.status != "completed") | .headBranch'
+            } | head -1
+          )
+          if [ -n "$ACTIVE_STABLE" ]; then
+            echo "stable release run in flight ($ACTIVE_STABLE) — skipping tip build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The release PR's merge bumps MARKETING_VERSION; the stable
+          # release of that commit replaces a tip build of it.
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            mv_at() {
+              gh api "repos/$REPO/contents/apps/mac/Configurations/Project.xcconfig?ref=$1" --jq .content \
+                | base64 -d | awk -F'=' '/^MARKETING_VERSION/ {gsub(/[ \t\r]/,"",$2); print $2}'
+            }
+            MV_BEFORE=$(mv_at "$BEFORE")
+            MV_AFTER=$(mv_at "${{ github.sha }}")
+            if [ "$MV_BEFORE" != "$MV_AFTER" ]; then
+              echo "push bumps MARKETING_VERSION $MV_BEFORE -> $MV_AFTER — release-merge.yml ships it; skipping tip build."
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           # Fetch the current tip tag's target commit
           TIP_SHA=$(git ls-remote origin refs/tags/tip 2>/dev/null | awk '{print $1}' || echo "")
           if [ -z "$TIP_SHA" ]; then
@@ -89,25 +128,13 @@ jobs:
             echo "::error::Could not parse MARKETING_VERSION from Project.xcconfig"
             exit 1
           fi
-          TODAY=$(date +%Y%m%d)
-          TODAY_BASE="${TODAY}000"
-          # Derive build number from the published appcast (same scheme as
-          # bump-version.sh's next_build): highest build + 1, or today+001.
-          MAX_BUILD=$(curl -fsSL --max-time 15 \
-            "https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml" 2>/dev/null \
-            | grep -oE '<sparkle:version>[^<]+' \
-            | sed 's/<sparkle:version>//' \
-            | sort -n | tail -1 || echo "")
-          if [ -n "$MAX_BUILD" ] && [ "$MAX_BUILD" -ge "$TODAY_BASE" ]; then
-            BUILD_NUMBER=$((MAX_BUILD + 1))
-          else
-            BUILD_NUMBER="${TODAY}001"
-          fi
+          # Same date/sequence scheme as the stable build (release.yml).
+          BUILD_NUMBER="$(./apps/mac/scripts/bump-version.sh --next-build)"
           SHORT_SHA=$(git rev-parse --short HEAD)
           echo "marketing=$MV"           >> "$GITHUB_OUTPUT"
           echo "build=$BUILD_NUMBER"     >> "$GITHUB_OUTPUT"
           echo "short_sha=$SHORT_SHA"    >> "$GITHUB_OUTPUT"
-          echo "Build number: $BUILD_NUMBER (max published: ${MAX_BUILD:-<none>})"
+          echo "Build number: $BUILD_NUMBER"
 
       - uses: jdx/mise-action@v2
         with:

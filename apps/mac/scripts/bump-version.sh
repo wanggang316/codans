@@ -22,6 +22,7 @@
 #   bump-version.sh <X.Y.Z>          # marketing version; build = today (or todayN if same day)
 #   bump-version.sh <X.Y.Z> <BUILD>  # set both explicitly (BUILD must be > current)
 #   bump-version.sh --print          # show current values + next patch / minor / major
+#   bump-version.sh --next-build     # print only the next build number (used by the release workflows)
 #   bump-version.sh --help
 #
 # Examples:
@@ -46,6 +47,7 @@ Usage:
   bump-version.sh <X.Y.Z>          set marketing version, take the next date-based build
   bump-version.sh <X.Y.Z> <BUILD>  set both explicitly
   bump-version.sh --print          show current values + next patch / minor / major
+  bump-version.sh --next-build     print only the next build number
   bump-version.sh --help
 EOF
 }
@@ -211,6 +213,9 @@ main() {
       ;;
     --print)
       cmd_print
+      ;;
+    --next-build)
+      next_build "$(read_field CURRENT_PROJECT_VERSION)"
       ;;
     *)
       cmd_bump "$@"
