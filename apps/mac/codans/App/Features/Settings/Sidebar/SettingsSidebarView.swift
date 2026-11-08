@@ -160,56 +160,34 @@ struct SettingsSidebarView: View {
     return groups
   }
 
-  /// Per-section sidebar row. GitHub and Worktrees both render their leading
-  /// icon from a bundled SVG asset (template-rendered) so the dropdown picker
-  /// stays visually consistent with the rest of the app's Worktree affordances
-  /// (the sidebar `WorktreeRowIcon` reuses the same `git-branch` asset).
-  @ViewBuilder
+  /// Global sidebar row: the title with a colored icon tile, in the style of
+  /// System Settings. Project rows keep their own Project icons.
   private func globalRow(for section: SettingsSection) -> some View {
-    let title = section.globalTitle ?? ""
-    if let assetName = assetIcon(for: section) {
-      Label {
-        Text(title)
-      } icon: {
-        Image(assetName)
-          .renderingMode(.template)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 16, height: 16)
-      }
-    } else {
-      Label(title, systemImage: icon(for: section))
+    Label {
+      Text(section.globalTitle ?? "")
+    } icon: {
+      SettingsIconTile(style: iconStyle(for: section))
     }
   }
 
-  /// Sections whose leading icon comes from a bundled SVG asset instead of an
-  /// SF Symbol.
-  private func assetIcon(for section: SettingsSection) -> String? {
+  private func iconStyle(for section: SettingsSection) -> SettingsIconTile.Style {
     switch section {
-    case .worktree: return "git-branch"
-    default: return nil
-    }
-  }
-
-  private func icon(for section: SettingsSection) -> String {
-    switch section {
-    case .general: return "gearshape"
-    case .globalCommands: return "play"
-    case .agents: return "sparkles"
+    case .general: return .init(.symbol("gearshape.fill"), .gray)
+    case .gitPlatforms: return .init(.symbol("externaldrive.badge.timemachine"), .indigo)
+    case .worktree: return .init(.asset("git-branch"), .orange)
+    case .terminal: return .init(.prompt, .black, glyph: .green)
+    case .notifications: return .init(.symbol("bell.badge.fill"), .red)
+    case .globalCommands: return .init(.symbol("play.fill"), .green, glyphSize: 10)
+    case .shortcuts: return .init(.symbol("command"), .gray)
+    case .updates: return .init(.symbol("arrow.down"), .blue)
+    case .about: return .init(.symbol("info"), .gray)
+    case .agents: return .init(.symbol("sparkles"), .orange, gradientEnd: .pink)
+    case .developer: return .init(.symbol("puzzlepiece.extension.fill"), .pink, gradientEnd: .purple)
     // Matches the AgentState panel's "Workflows" run rows (`WorkflowRunsSection`)
     // so the glyph reads the same wherever a run shows up.
-    case .workflows: return "arrow.triangle.branch"
-    case .gitPlatforms: return "externaldrive.badge.timemachine"
-    case .hosts: return "globe"
-    case .worktree: return "square.dashed"
-    case .terminal: return "terminal"
-    case .notifications: return "bell"
-    case .developer: return "puzzlepiece.extension"
-    case .shortcuts: return "command"
-    case .updates: return "arrow.down.circle"
-    case .about: return "info.circle"
-    case .projectGeneral, .projectScripts:
-      return ""
+    case .workflows: return .init(.symbol("arrow.triangle.branch"), .teal)
+    case .hosts: return .init(.symbol("globe"), .purple)
+    case .projectGeneral, .projectScripts: return .init(.symbol("questionmark"), .gray)
     }
   }
 
@@ -221,6 +199,93 @@ struct SettingsSidebarView: View {
     case .projectGeneral: return "slider.horizontal.3"
     case .projectScripts: return "terminal"
     default: return ""
+    }
+  }
+}
+
+/// A rounded-square tile with a white glyph on a gradient fill, as System
+/// Settings draws its sidebar icons. The fill is the tile color's system
+/// gradient; `gradientEnd` gives a two-color tile.
+private struct SettingsIconTile: View {
+  enum Glyph {
+    case symbol(String)
+    /// A shell prompt, `>_`. SF Symbols draws it only inside a window frame.
+    case prompt
+    /// A template-rendered SVG in the asset catalog.
+    case asset(String)
+  }
+
+  struct Style {
+    let glyph: Glyph
+    let color: Color
+    var gradientEnd: Color?
+    var glyphColor: Color = .white
+    /// A solid glyph (a filled triangle) reads larger than an outlined one
+    /// of the same size, so it can ask for a smaller box.
+    var glyphSize: CGFloat = SettingsIconTile.defaultGlyphSize
+
+    init(
+      _ glyph: Glyph, _ color: Color, gradientEnd: Color? = nil, glyph glyphColor: Color = .white,
+      glyphSize: CGFloat = SettingsIconTile.defaultGlyphSize
+    ) {
+      self.glyph = glyph
+      self.color = color
+      self.gradientEnd = gradientEnd
+      self.glyphColor = glyphColor
+      self.glyphSize = glyphSize
+    }
+  }
+
+  let style: Style
+
+  private static let side: CGFloat = 20
+  private static let cornerRadius: CGFloat = 5
+  static let defaultGlyphSize: CGFloat = 12
+  /// Lets a wide symbol (a drive with a badge) grow past its glyph size so it
+  /// does not read smaller than the square ones.
+  private static let wideGlyphExtra: CGFloat = 2
+
+  var body: some View {
+    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+      .fill(fill)
+      .overlay {
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+          .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+      }
+      .overlay { glyph.foregroundStyle(style.glyphColor) }
+      .frame(width: Self.side, height: Self.side)
+  }
+
+  private var fill: AnyShapeStyle {
+    if let end = style.gradientEnd {
+      return AnyShapeStyle(
+        LinearGradient(colors: [style.color, end], startPoint: .topLeading, endPoint: .bottomTrailing))
+    }
+    return AnyShapeStyle(style.color.gradient)
+  }
+
+  @ViewBuilder
+  private var glyph: some View {
+    switch style.glyph {
+    // Fit every glyph in the same box: the sidebar Label scales a bare
+    // symbol up to its row icon size, which fills the tile.
+    case .symbol(let name):
+      Image(systemName: name)
+        .resizable()
+        .fontWeight(.semibold)
+        .symbolRenderingMode(.monochrome)
+        .scaledToFit()
+        .frame(width: style.glyphSize + Self.wideGlyphExtra, height: style.glyphSize)
+    case .prompt:
+      Text(">_")
+        .font(.system(size: 10, weight: .heavy, design: .monospaced))
+        .fixedSize()
+    case .asset(let name):
+      Image(name)
+        .renderingMode(.template)
+        .resizable()
+        .scaledToFit()
+        .frame(width: style.glyphSize, height: style.glyphSize)
     }
   }
 }
