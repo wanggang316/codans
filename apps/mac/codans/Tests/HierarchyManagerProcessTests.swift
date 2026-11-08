@@ -32,6 +32,20 @@ struct HierarchyManagerProcessTests {
     #expect(f.manager.processEntries(in: f.worktree.id).isEmpty)
   }
 
+  /// ADR 0009: the pane title follows the prompt state of the last sample.
+  @Test func shellPromptFollowsTheLatestSample() {
+    let f = fixture()
+    #expect(!f.manager.paneIsAtShellPrompt(f.pane.id))
+    sample(f, name: "zsh")
+    #expect(f.manager.paneIsAtShellPrompt(f.pane.id))
+    sample(f, name: "claude")
+    #expect(!f.manager.paneIsAtShellPrompt(f.pane.id))
+    sample(f, name: "zsh")
+    f.manager.updateProcessSample(
+      paneID: f.pane.id, job: .init(processGroupID: 0, processes: []), now: time)
+    #expect(!f.manager.paneIsAtShellPrompt(f.pane.id))
+  }
+
   @Test func launchTimeoutDoesNotAttributeAnUnrelatedCommand() {
     let f = fixture()
     f.manager.recordProcessLaunch(

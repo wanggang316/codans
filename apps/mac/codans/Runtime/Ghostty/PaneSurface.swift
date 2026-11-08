@@ -1,8 +1,8 @@
 import AppKit
-import Foundation
-import GhosttyKit
 import CodansCore
 import CodansIPC
+import Foundation
+import GhosttyKit
 
 /// Owns one `ghostty_surface_t` and its hosting `GhosttySurfaceView`. One
 /// PaneSurface corresponds to one `Pane` while alive; when the surface
@@ -699,7 +699,7 @@ final class PaneSurface {
   func apply(_ delta: PaneInfoDelta) {  // swiftlint:disable:this cyclomatic_complexity
     switch delta {
     case .title(let t):
-      info.title = t
+      info.applyTitle(t)
     case .tabTitle(let t):
       info.tabTitle = t
     case .promptTitle(let tag):

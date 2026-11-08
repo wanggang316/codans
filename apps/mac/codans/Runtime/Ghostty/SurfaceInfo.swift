@@ -1,6 +1,6 @@
+import CodansCore
 import Foundation
 import GhosttyKit
-import CodansCore
 
 /// Most recent color-change report emitted by libghostty for a surface.
 /// Kept flat (not a tuple) so `@Observable`'s per-property change tracking
@@ -30,6 +30,9 @@ final class SurfaceInfo {
   // MARK: - Titles / prompt / pwd
 
   var title: String?
+  /// The last non-empty `title`. Shells clear the title while a command
+  /// runs; the pane title keeps the last one (ADR 0009).
+  var lastTitle: String?
   var tabTitle: String?
   /// Raw `ghostty_action_prompt_title_e` tag forwarded from libghostty;
   /// kept as UInt32 to avoid pinning this type to ghostty's C enum layout.
@@ -113,6 +116,12 @@ final class SurfaceInfo {
   var lastChildExitCode: Int32?
 
   init() {}
+
+  /// Records an OSC 0/2 title. An empty title keeps `lastTitle`.
+  func applyTitle(_ value: String?) {
+    title = value
+    if let value, !value.isEmpty { lastTitle = value }
+  }
 
   // Explicit empty deinit on a MainActor @Observable class to opt out of
   // the implicitly-synthesized isolated deinit. When PaneSurface (whose
