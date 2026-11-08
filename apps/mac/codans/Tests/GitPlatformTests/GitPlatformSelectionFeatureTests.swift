@@ -210,6 +210,74 @@ struct GitPlatformSelectionFeatureTests {
     #expect(error.userFacingMessage.contains("gh auth login"))
   }
 
+  /// A remote on a host that contains `gitlab`, with no alias and no `glab`: the unit
+  /// resolves to GitLab by name and each row shows the install message. After `glab` is
+  /// installed, the row shows the `glab auth login` message. After the login, the badge
+  /// appears. No "Re-check" is needed: a missing CLI is not cached.
+  @Test
+  func aGitLabNamedHostShowsInstallThenLoginMessageThenTheBadgeWithoutReCheck() async throws {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-draft")
+    let worktreeID = unit.pairs[0].worktreeID
+    let host = "gitlab.corp.example.com"
+    let installed = LockIsolated(false)
+    let configHosts = LockIsolated<[GlabConfig.Host]>([])
+    let page = try GitLabDecodingTests.loadFixture("gitlab-graphql-batch-app")
+    let runner = RecordingCommandRunner(outcomes: [
+      .exited(code: 0, stdout: Data("glab 1.128.0 (519ea19f7)\n".utf8), stderr: Data(), stdoutOverflow: false),
+      .exited(code: 1, stdout: Data(), stderr: Data("ERROR: 401 Unauthorized\n".utf8), stdoutOverflow: false),
+      .exited(code: 0, stdout: page, stderr: Data(), stdoutOverflow: false),
+    ])
+    let gitlab = GitLabGitPlatform(
+      runner: runner,
+      resolver: CLIExecutableResolver(prober: {
+        installed.value ? URL(fileURLWithPath: "/opt/homebrew/bin/glab") : nil
+      }),
+      configHosts: { configHosts.value })
+    let store = Self.makeStore(
+      github: FakeGitPlatform(kind: .github, hosts: ["github.com"]), gitlab: gitlab,
+      remotes: ["/repos/app": RemoteInfo(host: host, path: "codans-e2e/app")])
+
+    await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+    #expect(store.state.lastError[worktreeID] == .cliNotInstalled(.gitlab))
+
+    installed.setValue(true)
+    await store.send(.projectRefreshRequested(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+    let notLoggedIn = GitPlatformError.notAuthenticated(.gitlab, host: host)
+    #expect(store.state.lastError[worktreeID] == notLoggedIn)
+    #expect(notLoggedIn.userFacingMessage.contains("glab auth login"))
+
+    configHosts.setValue([GlabConfig.Host(host: host, apiProtocol: "https")])
+    await store.send(.projectRefreshRequested(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+    #expect(store.state.lastError[worktreeID] == nil)
+    #expect(store.state.snapshots[worktreeID]?.headRefName == "feat-draft")
+    #expect(
+      store.state.snapshotsByProject[unit.projectID]?.repository
+        == GitPlatformRepository(kind: .gitlab, host: host, path: "codans-e2e/app"))
+  }
+
+  /// An alias for a `gitlab`-named host wins over the name rule.
+  @Test
+  func anAliasForAGitLabNamedHostWinsOverTheName() async {
+    let unit = Self.unit(root: "/repos/app", branch: "feat-open")
+    let github = FakeGitPlatform(kind: .github, hosts: [])
+    let gitlab = FakeGitPlatform(kind: .gitlab, hosts: [])
+    let store = Self.makeStore(
+      github: github, gitlab: gitlab,
+      remotes: ["/repos/app": RemoteInfo(host: "gitlab.corp.example.com", path: "o/r")],
+      aliases: LockIsolated([
+        GitPlatformAlias(remoteHost: "gitlab.corp.example.com", kind: .github, apiHost: "ghe.example.com")
+      ]))
+
+    await store.send(.projectActivated(unit.projectID, gitRoot: unit.gitRoot, worktreeBranches: unit.pairs))
+    await store.receive(\.projectBatchLoaded)
+
+    #expect(github.requests.value == [GitPlatformRepository(kind: .github, host: "ghe.example.com", path: "o/r")])
+    #expect(gitlab.requests.value.isEmpty)
+  }
+
   // MARK: - Fixtures
 
   nonisolated private static let glAlias = GitPlatformAlias(
@@ -273,6 +341,7 @@ nonisolated private final class FakeGitPlatform: GitPlatform {
   // swiftlint:disable async_without_await
   func availability() async -> GitPlatformAvailability { .unknown }
   func authenticatedHosts() async -> Set<String> { hosts }
+  func invalidateExecutable() async {}
 
   func batchPullRequests(
     repository: GitPlatformRepository, branches: [String]

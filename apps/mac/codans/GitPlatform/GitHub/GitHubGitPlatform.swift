@@ -91,6 +91,10 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
     return GitHubJSONParsers.parseAuthenticatedHosts(stdout)
   }
 
+  func invalidateExecutable() async {
+    await resolver.invalidate()
+  }
+
   // MARK: - writes
 
   func merge(_ pullRequest: PullRequestReference, strategy: MergeStrategy) async throws {
