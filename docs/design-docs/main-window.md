@@ -117,7 +117,7 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 - **chip 的图标与标题来自同一个 pane，图标与该 pane 卡片 Header 一致。** 选中 pane = Tab 最后获得焦点的 pane，没有时取第一个 pane。图标由 `PaneGlyph.resolve`（`apps/mac/CodansCore/PaneGlyph.swift`）算出，Header 与 chip 共用：pane 里有 agent → agent 标记；pane 是运行脚本的 run pane → 脚本图标，脚本运行时取脚本的 tint；否则 terminal。图标不持久化在 `Tab` 上，也没有用户覆盖；Tab 不提供改名、改色、改图标的界面（`codans tab rename` 仍可设标题）。旧 catalog 里的 `color` / `icon` / `iconLock` 键在解码时忽略，下次保存时丢弃。
 - **Pane 标题按 ADR 0009 取，Header 与 chip 显示同一文本。** Pane 标题（`PaneTitle.resolve`，`apps/mac/CodansCore/PaneTitle.swift`；视图经 `PaneTitleReader` 读取）只来自终端，从不来自 OSC 7501：
   - **shell 在提示符**（最近一次前台 job 采样里只有 shell，`ForegroundJobClassifier.indicatesShellPrompt`，经 `HierarchyManager.paneIsAtShellPrompt` 读取）→ 工作目录，home 显示为 `~`。shell 设的标题不用：oh-my-zsh 设 `user@host:~/path`，各家格式不同，目录对所有 shell 设置给出同一文本。
-  - **其他进程占着前台** → Pane 的 OSC 0/2 标题，经 `UntrustedDisplayText` 净化。空标题不擦掉标题：`SurfaceInfo.lastTitle` 保留最后一个非空标题，shell 在命令运行时清空标题，Header 不会闪回目录。只有 Pane 从未有过标题时才退回工作目录。
+  - **其他进程占着前台** → Pane 的 OSC 0/2 标题，经 `UntrustedDisplayText` 净化。空标题不擦掉标题：`SurfaceInfo.lastTitle` 保留最后一个非空标题，shell 在命令运行时清空标题，Header 不会闪回目录。只有 Pane 从未有过标题时才退回工作目录。libghostty 把空标题、以及从未设标题时的目录变化，报告成等于 pwd 的标题（`StreamHandler.windowTitle`）；`GhosttyActionDecoder.reportedTitle` 把它还原为空标题，否则 Header 会在命令运行中闪成未缩写的绝对路径。
   - **工作目录**先取 shell 报告的实时 pwd，没有时取 Pane 持久化的工作目录。重启后 zmx daemon 重放标题，但不重放工作目录（OSC 7），所以 shell 下一次报告前，提示符处显示持久化的目录。
   - 提示符判断依赖前台 job 轮询，标题在命令开始或结束后一个轮询周期内切换。
   - **chip**：用户设了 tab 名（`codans tab rename`）时显示 tab 名，否则显示选中 pane 的 Pane 标题，即该 pane Header 的文本（`PaneTitleReader.chipTitle`）。chip 不读 Ghostty 的 tab 标题，也不把目录缩成最后一段。`Tab.cachedDisplayTitle` 缓存 Pane 标题，只在选中 pane 没有 surface（冷启动后未打开的 tab）时使用；没有缓存时取持久化工作目录，与没有 surface 的 Header 相同。
