@@ -502,6 +502,24 @@ struct GitLabGitPlatformTests {
     #expect(await Self.graphQLReads(runner).count == 2)
   }
 
+  /// A first reviewer page without `nodes` is unknown: a complete later page must not
+  /// make the list complete. The read does not follow the next page.
+  @Test(arguments: [
+    #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"},"nodes":null}"#,
+    #"{"pageInfo":{"hasNextPage":true,"endCursor":"r1"}}"#,
+  ])
+  func firstReviewerPageWithoutNodesIsNotApproved(reviewers: String) async throws {
+    let first = GitLabDecodingTests.approvedPage(reviewers: reviewers)
+    let runner = RecordingCommandRunner(outcomes: [
+      Self.version, Self.ok(first), Self.reviewerPage(["APPROVED"], next: nil),
+    ])
+    let result = try await Self.makeService(runner).batchPullRequests(
+      repository: Self.selfManaged, branches: ["feat-approved"])
+    let snapshot = try #require(result["feat-approved"])
+    #expect(snapshot.mergeState == PullRequestMergeState(status: .clean))
+    #expect(snapshot.reviewDecision == nil)
+  }
+
   /// A reviewer list longer than `maxPages` pages stays incomplete: the read succeeds
   /// and the decision is none, not approved.
   @Test
