@@ -54,7 +54,7 @@ struct RemoteProjectSheet: View {
               onIconChanged: { store.send(.iconChanged($0)) }
             )
           } footer: {
-            footnote("The new host is added to Settings › Hosts.")
+            footnote("The new host is added to Settings › Remote Hosts.")
           }
           Section {
             pathField

@@ -12,7 +12,7 @@ import Foundation
 ///
 /// ADR 0003: a Host from "New Host…" always goes to the Host list; fields
 /// equal to an existing Host use that Host. Edit Remote Project changes the Host
-/// choice and the path, never the fields of a Host (Settings › Hosts does).
+/// choice and the path, never the fields of a Host (Settings › Remote Hosts does).
 ///
 /// Authentication is delegated to the user's `~/.ssh/config` + agent; the sheet
 /// never collects a password or key.

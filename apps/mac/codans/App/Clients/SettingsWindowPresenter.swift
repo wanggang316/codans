@@ -14,7 +14,7 @@ nonisolated struct SettingsWindowPresenter: Sendable {
   /// the user directly on the Project Scripts pane for the active
   /// Project rather than wherever the sidebar was last left.
   var openAt: @MainActor @Sendable (SettingsSection) -> Void
-  /// Open the Settings window on the Hosts page with the Host's edit form
+  /// Open the Settings window on the Remote Hosts page with the Host's edit form
   /// (the sidebar Host row's "Edit Host…").
   var editHost: @MainActor @Sendable (HostID) -> Void = { _ in }
 }
