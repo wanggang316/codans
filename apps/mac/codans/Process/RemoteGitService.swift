@@ -86,23 +86,29 @@ nonisolated struct RemoteGitService: Sendable {
 
   /// POSIX script behind `resolveAbsolutePath`: expand an intended leading `~`
   /// (double-quoted `$1` never tilde-expands, so the expansion is explicit and
-  /// nothing else in the path is interpreted), then `cd && pwd -P`. Exposed for
-  /// the command-shape tests.
+  /// nothing else in the path is interpreted), then `cd` and print the
+  /// physical path. The shell builtin `pwd -P` keeps the typed case on a
+  /// case-insensitive host (`~/Repo` for the folder `repo`), so the duplicate
+  /// check (ADR 0006) would see two folders. The external `pwd` calls
+  /// `getcwd`, which returns the on-disk names; `env` runs it through `PATH`.
+  /// A host without it falls back to the builtin. Exposed for the script tests.
   static let resolvePathScript = """
     case "$1" in
       "~") target=$HOME ;;
       "~/"*) target=$HOME/${1#"~/"} ;;
       *) target=$1 ;;
     esac
-    cd -- "$target" 2>/dev/null && pwd -P
+    cd -- "$target" 2>/dev/null || exit 1
+    env pwd -P 2>/dev/null || pwd -P
     """
 
-  /// Resolve a typed remote path to an absolute, canonical (`pwd -P`) path on
-  /// the host in a single round trip — expanding a leading `~`, verifying the
-  /// directory exists, and normalizing symlinks, all at once. The path travels
-  /// as a positional argument (never interpolated into the script), so spaces
-  /// and shell metacharacters are inert. Returns `nil` when the host is
-  /// unreachable or the path does not exist, so the caller can reject the add.
+  /// Resolve a typed remote path to an absolute, physical path with the
+  /// on-disk case on the host in a single round trip — expanding a leading
+  /// `~`, verifying the directory exists, and normalizing symlinks, all at
+  /// once. The path travels as a positional argument (never interpolated
+  /// into the script), so spaces and shell metacharacters are inert. Returns
+  /// `nil` when the host is unreachable or the path does not exist, so the
+  /// caller can reject the add.
   /// A login shell may print banners before the probe; the result is the last
   /// non-empty stdout line.
   func resolveAbsolutePath(_ path: String) async -> String? {
