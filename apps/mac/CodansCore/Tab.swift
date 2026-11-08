@@ -9,6 +9,10 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
   /// the previous session's title instead of falling back to "Tab N".
   /// Cleared / overwritten as soon as a live title is observed again.
   public var cachedDisplayTitle: String?
+  /// The pane whose title `cachedDisplayTitle` holds. The tab chip mirrors
+  /// its selected pane, so it uses the cache only for that pane. Nil in
+  /// catalogs written before ADR 0009.
+  public var cachedDisplayTitlePaneID: PaneID?
   public var splitTree: SplitTree<PaneID>
   public var panes: [Pane]
 
@@ -16,12 +20,14 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
     id: TabID = TabID(),
     name: String? = nil,
     cachedDisplayTitle: String? = nil,
+    cachedDisplayTitlePaneID: PaneID? = nil,
     splitTree: SplitTree<PaneID> = SplitTree(),
     panes: [Pane] = []
   ) {
     self.id = id
     self.name = name
     self.cachedDisplayTitle = cachedDisplayTitle
+    self.cachedDisplayTitlePaneID = cachedDisplayTitlePaneID
     self.splitTree = splitTree
     self.panes = panes
   }
@@ -48,7 +54,7 @@ public nonisolated struct Tab: Equatable, Sendable, Identifiable {
 
 extension Tab: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, cachedDisplayTitle, splitTree, panes
+    case id, name, cachedDisplayTitle, cachedDisplayTitlePaneID, splitTree, panes
   }
 
   public init(from decoder: Decoder) throws {
@@ -56,6 +62,8 @@ extension Tab: Codable {
     self.id = try c.decode(TabID.self, forKey: .id)
     self.name = try c.decodeIfPresent(String.self, forKey: .name)
     self.cachedDisplayTitle = try c.decodeIfPresent(String.self, forKey: .cachedDisplayTitle)
+    self.cachedDisplayTitlePaneID = try c.decodeIfPresent(
+      PaneID.self, forKey: .cachedDisplayTitlePaneID)
     self.splitTree = try c.decode(SplitTree<PaneID>.self, forKey: .splitTree)
     self.panes = try c.decode([Pane].self, forKey: .panes)
   }
@@ -68,6 +76,7 @@ extension Tab: Codable {
     try c.encode(id, forKey: .id)
     try c.encodeIfPresent(name, forKey: .name)
     try c.encodeIfPresent(cachedDisplayTitle, forKey: .cachedDisplayTitle)
+    try c.encodeIfPresent(cachedDisplayTitlePaneID, forKey: .cachedDisplayTitlePaneID)
     try c.encode(splitTree, forKey: .splitTree)
     try c.encode(panes, forKey: .panes)
   }

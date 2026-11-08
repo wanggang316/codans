@@ -41,5 +41,17 @@ struct TabCodableTests {
     let body = try #require(String(bytes: JSONEncoder().encode(tab), encoding: .utf8))
     #expect(!body.contains("\"name\""))
     #expect(!body.contains("\"cachedDisplayTitle\""))
+    #expect(!body.contains("\"cachedDisplayTitlePaneID\""))
+  }
+
+  @Test
+  func cachedTitlePaneRoundTrips() throws {
+    let pane = Pane(workingDirectory: "/tmp")
+    let tab = Tab(
+      cachedDisplayTitle: "vim", cachedDisplayTitlePaneID: pane.id,
+      splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let decoded = try JSONDecoder().decode(Tab.self, from: JSONEncoder().encode(tab))
+    #expect(decoded.cachedDisplayTitle == "vim")
+    #expect(decoded.cachedDisplayTitlePaneID == pane.id)
   }
 }

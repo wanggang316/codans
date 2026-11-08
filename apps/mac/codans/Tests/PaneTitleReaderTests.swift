@@ -38,6 +38,36 @@ struct PaneTitleReaderTests {
     #expect(chip == "✳ Claude Code")
   }
 
+  /// A split tab after a restart: focus is not persisted, so the chip
+  /// mirrors the first pane, while the cache may hold the second pane's
+  /// title.
+  @Test
+  func cacheOfAnotherPaneIsNotUsed() {
+    let first = Pane(workingDirectory: "/tmp/a")
+    let second = Pane(workingDirectory: "/tmp/b")
+    let tab = Tab(
+      cachedDisplayTitle: "✳ Claude Code", cachedDisplayTitlePaneID: second.id,
+      splitTree: SplitTree(leaf: first.id), panes: [first, second])
+    #expect(PaneTitleReader.cachedTitle(of: tab, selectedPaneID: first.id) == nil)
+    #expect(PaneTitleReader.cachedTitle(of: tab, selectedPaneID: second.id) == "✳ Claude Code")
+    let chip = PaneTitleReader.chipTitle(
+      tabName: nil, live: nil,
+      cached: PaneTitleReader.cachedTitle(of: tab, selectedPaneID: first.id),
+      stored: PaneTitleReader.storedTitle(pane: first), emptyTabTitle: "repo")
+    #expect(chip == PaneTitleReader.headerTitle(live: nil, stored: PaneTitleReader.storedTitle(pane: first)))
+  }
+
+  @Test
+  func cacheWithoutPaneCountsOnlyInAOnePaneTab() {
+    let first = Pane(workingDirectory: "/tmp/a")
+    let second = Pane(workingDirectory: "/tmp/b")
+    let single = Tab(cachedDisplayTitle: "vim", splitTree: SplitTree(leaf: first.id), panes: [first])
+    #expect(PaneTitleReader.cachedTitle(of: single, selectedPaneID: first.id) == "vim")
+    let split = Tab(cachedDisplayTitle: "vim", splitTree: SplitTree(leaf: first.id), panes: [first, second])
+    #expect(PaneTitleReader.cachedTitle(of: split, selectedPaneID: first.id) == nil)
+    #expect(PaneTitleReader.cachedTitle(of: single, selectedPaneID: nil) == nil)
+  }
+
   @Test
   func tabNameWins() {
     let chip = PaneTitleReader.chipTitle(

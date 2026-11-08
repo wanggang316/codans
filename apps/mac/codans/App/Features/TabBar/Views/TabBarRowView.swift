@@ -68,9 +68,10 @@ struct TabBarRowView: View {
   var emptyTabTitle: String = ""
   /// Fires whenever a chip resolves the live pane title of its selected
   /// pane. The parent persists this onto the tab so the chip can fall back
-  /// to it across app launches before the surface respawns. Default no-op keeps previews / call sites that
+  /// to it across app launches before the surface respawns. The pane ID
+  /// says whose title it is. Default no-op keeps previews / call sites that
   /// don't care about cross-launch titles compiling without changes.
-  var onCacheLiveTitle: (TabID, String) -> Void = { _, _ in }
+  var onCacheLiveTitle: (TabID, String, PaneID) -> Void = { _, _, _ in }
 
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
@@ -249,7 +250,7 @@ struct TabBarRowView: View {
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
       emptyTabTitle: emptyTabTitle,
-      onCacheLiveTitle: { title in onCacheLiveTitle(tab.id, title) }
+      onCacheLiveTitle: { title, paneID in onCacheLiveTitle(tab.id, title, paneID) }
     )
     .id(tab.id)
   }
@@ -576,7 +577,8 @@ struct TabBarRowView: View {
 /// 2. the pane title of the selected pane while it has a surface — the same
 ///    text as that pane's header (`PaneTitleReader`).
 /// 3. `tab.cachedDisplayTitle` (the last pane title, persisted to the
-///    catalog) while the selected pane has no surface.
+///    catalog) while the selected pane has no surface, and only when the
+///    cache holds that pane's title (`PaneTitleReader.cachedTitle`).
 /// 4. the selected pane's persisted working directory, as its header shows
 ///    it without a surface.
 /// 5. `emptyTabTitle` (the worktree directory's name) for a tab whose first
@@ -616,7 +618,7 @@ private struct ResolvingTabChipView: View {
   var contentShift: CGFloat = 0
   var onStackClick: (() -> Void)?
   let emptyTabTitle: String
-  let onCacheLiveTitle: (String) -> Void
+  let onCacheLiveTitle: (String, PaneID) -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
@@ -658,8 +660,10 @@ private struct ResolvingTabChipView: View {
       // title — never overwrite the cache with `nil` (e.g. surface not
       // yet spawned on cold launch), otherwise a freshly-loaded catalog
       // would clobber its own cache before the shell pushes anything.
-      guard let newLive, newLive != tab.cachedDisplayTitle else { return }
-      onCacheLiveTitle(newLive)
+      guard let newLive, let paneID = selectedPane?.id,
+        newLive != tab.cachedDisplayTitle || paneID != tab.cachedDisplayTitlePaneID
+      else { return }
+      onCacheLiveTitle(newLive, paneID)
     }
   }
 
@@ -699,7 +703,8 @@ private struct ResolvingTabChipView: View {
 
   private func resolvedTitle(live: String?) -> String {
     PaneTitleReader.chipTitle(
-      tabName: tab.name, live: live, cached: tab.cachedDisplayTitle,
+      tabName: tab.name, live: live,
+      cached: PaneTitleReader.cachedTitle(of: tab, selectedPaneID: selectedPane?.id),
       stored: PaneTitleReader.storedTitle(pane: selectedPane), emptyTabTitle: emptyTabTitle)
   }
 }
