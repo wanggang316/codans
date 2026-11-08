@@ -194,7 +194,7 @@ struct SettingsSidebarView: View {
   private func icon(for section: SettingsSection) -> String {
     switch section {
     case .general: return "gearshape"
-    case .globalCommands: return "chevron.left.forwardslash.chevron.right"
+    case .globalCommands: return "play"
     case .agents: return "sparkles"
     // Matches the AgentState panel's "Workflows" run rows (`WorkflowRunsSection`)
     // so the glyph reads the same wherever a run shows up.
