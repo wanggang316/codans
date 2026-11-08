@@ -64,6 +64,18 @@ enum WorktreePromotionMode: Sendable, Equatable {
   case moveToFrontWithinUnpinned
 }
 
+/// One in-flight worktree creation in a Project. See
+/// `HierarchyManager.beginWorktreeCreation(in:)`.
+nonisolated struct WorktreeCreationLease: Hashable, Sendable {
+  let projectID: ProjectID
+  let token: UUID
+
+  init(projectID: ProjectID, token: UUID = UUID()) {
+    self.projectID = projectID
+    self.token = token
+  }
+}
+
 @MainActor
 @Observable
 final class HierarchyManager {
@@ -107,6 +119,18 @@ final class HierarchyManager {
   /// `SettingsStore` exists; a closure rather than a direct reference so the
   /// Runtime layer keeps its Settings independence.
   var onProjectRemoved: (@MainActor (ProjectID) -> Void)?
+
+  /// Fired when the last creation lease of a Project is released, with its
+  /// id. The app runs one reconcile of that Project here: a worktree made
+  /// outside the app while the lease held back appends would otherwise wait
+  /// for the next reconcile pulse. Settable for the same reason as
+  /// `onProjectRemoved`.
+  var onCreationLeasesReleased: (@MainActor (ProjectID) -> Void)?
+
+  /// Open creation leases, by Project. A set of tokens, not a counter, so a
+  /// second release of the same lease is a no-op and cannot drop a lease
+  /// that a concurrent creation still holds.
+  @ObservationIgnored private var creationLeases: [ProjectID: Set<UUID>] = [:]
 
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
@@ -657,6 +681,43 @@ final class HierarchyManager {
     catalog.localProject(containing: path, canonicalize: Self.canonicalPath)?.id
   }
 
+  // MARK: - Worktree creation lease
+
+  /// Holds back reconcile appends for `projectID` while a creation runs.
+  ///
+  /// Creation runs `git worktree add` first and writes the catalog row only
+  /// after its stream ends. A reconcile in that window sees the new path in
+  /// `git worktree list` and appends it at the list tail, and the create
+  /// path then adopts that row through `reuseExisting` instead of inserting
+  /// at the unpinned boundary. Leases stack: concurrent creations in one
+  /// Project each hold their own. Every lease must reach
+  /// `endWorktreeCreation`, on every exit path of the creation.
+  func beginWorktreeCreation(in projectID: ProjectID) -> WorktreeCreationLease {
+    let lease = WorktreeCreationLease(projectID: projectID)
+    beginWorktreeCreation(lease)
+    return lease
+  }
+
+  /// Takes `lease` with a token the caller chose, so a caller that already
+  /// has a stable id for the creation (the sidebar's pending row) can
+  /// release it without storing the lease. Idempotent.
+  func beginWorktreeCreation(_ lease: WorktreeCreationLease) {
+    creationLeases[lease.projectID, default: []].insert(lease.token)
+  }
+
+  /// Releases `lease`. Idempotent. Releasing the last lease of a Project
+  /// fires `onCreationLeasesReleased`.
+  func endWorktreeCreation(_ lease: WorktreeCreationLease) {
+    guard creationLeases[lease.projectID]?.remove(lease.token) != nil else { return }
+    guard creationLeases[lease.projectID]?.isEmpty == true else { return }
+    creationLeases[lease.projectID] = nil
+    onCreationLeasesReleased?(lease.projectID)
+  }
+
+  func holdsCreationLease(_ projectID: ProjectID) -> Bool {
+    creationLeases[projectID] != nil
+  }
+
   // MARK: - Worktree mutations
 
   func createWorktree(
@@ -1183,7 +1244,9 @@ final class HierarchyManager {
   /// stale rows are surfaced in the view layer and only deleted by the
   /// user-initiated Prune action. Idempotent across repeated calls
   /// with the same entries. Returns the count of appended rows so the
-  /// caller can surface a toast.
+  /// caller can surface a toast. While the Project holds a creation lease
+  /// (`beginWorktreeCreation`), new paths are not appended; existing rows
+  /// still sync and the stale sweep still runs.
   ///
   /// - Parameters:
   ///   - projectID: target Project.
@@ -1251,6 +1314,10 @@ final class HierarchyManager {
         }
         continue
       }
+      // A creation in flight owns the placement of its own row (top of the
+      // unpinned segment). The path reappears on the reconcile that runs
+      // when the last lease is released, if no creation claimed it.
+      guard !holdsCreationLease(projectID) else { continue }
       let name = entryBranch ?? (canonical as NSString).lastPathComponent
       let worktree = Worktree(
         id: WorktreeID(),
