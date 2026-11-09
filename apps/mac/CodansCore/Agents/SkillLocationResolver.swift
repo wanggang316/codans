@@ -72,9 +72,9 @@ public nonisolated enum SkillLocationResolver {
     switch plugins {
     case .claudeCode:
       let launchSettings: URL?
-      switch ClaudePluginRegistry.launchSettings(
+      let flags = ClaudePluginRegistry.launchSettings(
         extraArguments: profile.extraArguments, projectDirectory: projectDirectory, userHome: userHome)
-      {
+      switch flags {
       case .none: launchSettings = nil
       case .file(let url): launchSettings = url
       case .unknown: return []
