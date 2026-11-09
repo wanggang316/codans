@@ -1,0 +1,90 @@
+import Foundation
+import Testing
+
+@testable import CodansCore
+
+struct SkillScannerTests {
+  private let root: URL
+
+  init() throws {
+    root = FileManager.default.temporaryDirectory
+      .appending(path: "skill-scanner-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  }
+
+  private func write(_ folder: String, in directory: String = "skills", _ text: String) throws {
+    let url = root.appending(path: "\(directory)/\(folder)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    try text.write(to: url.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
+  }
+
+  private func directory(_ name: String = "skills") -> SkillDirectory {
+    SkillDirectory(url: root.appending(path: name, directoryHint: .isDirectory), source: .user)
+  }
+
+  @Test
+  func readsNameAndTheFirstDescriptionLine() async throws {
+    try write(
+      "review",
+      """
+      ---
+      name: code-review
+      description: |
+        Review a change.
+        Second line.
+      ---
+      Body
+      """)
+    try write("tdd", "---\nname: tdd\ndescription: \"Write tests first.\"\n---\n")
+    let entries = await SkillScanner.scan([directory()])
+    #expect(entries.map(\.name) == ["code-review", "tdd"])
+    #expect(entries.map(\.summary) == ["Review a change.", "Write tests first."])
+    #expect(entries.allSatisfy { $0.source == .user })
+  }
+
+  @Test
+  func brokenFrontmatterIsListedByFolderNameWithoutDescription() async throws {
+    try write("unclosed", "---\nname: other\ndescription: never closed\n")
+    try write("bad-yaml", "---\nname: [unclosed\ndescription: x\n---\n")
+    try write("no-frontmatter", "# Just a body\n")
+    let entries = await SkillScanner.scan([directory()])
+    #expect(entries.map(\.name) == ["bad-yaml", "no-frontmatter", "unclosed"])
+    #expect(entries.allSatisfy { $0.summary == nil })
+  }
+
+  @Test
+  func missingNameFallsBackToTheFolderName() async throws {
+    try write("helper", "---\ndescription: Helps.\n---\n")
+    let entries = await SkillScanner.scan([directory()])
+    #expect(entries == [AgentSkillEntry(name: "helper", summary: "Helps.", source: .user, url: entries[0].url)])
+  }
+
+  @Test
+  func foldersWithoutSkillFileAndMissingDirectoriesAreSkipped() async throws {
+    try FileManager.default.createDirectory(
+      at: root.appending(path: "skills/empty"), withIntermediateDirectories: true)
+    try write("real", "---\nname: real\n---\n")
+    let entries = await SkillScanner.scan([directory(), directory("missing")])
+    #expect(entries.map(\.name) == ["real"])
+  }
+
+  @Test
+  func symlinkedSkillFolderIsRead() async throws {
+    try write("target", in: "source", "---\nname: linked\n---\n")
+    try FileManager.default.createDirectory(
+      at: root.appending(path: "skills"), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(
+      at: root.appending(path: "skills/linked"),
+      withDestinationURL: root.appending(path: "source/target"))
+    let entries = await SkillScanner.scan([directory()])
+    #expect(entries.map(\.name) == ["linked"])
+  }
+
+  @Test
+  func firstDirectoryWinsForOneName() async throws {
+    try write("dup", in: "a", "---\nname: dup\ndescription: from a\n---\n")
+    try write("dup", in: "b", "---\nname: dup\ndescription: from b\n---\n")
+    let entries = await SkillScanner.scan([directory("a"), directory("b")])
+    #expect(entries.map(\.summary) == ["from a"])
+  }
+}
