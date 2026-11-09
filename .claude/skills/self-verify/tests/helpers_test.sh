@@ -98,6 +98,36 @@ check "matches the exact executable" sv_is_instance_executable /a/Codans.app/Con
 check_not "rejects another Codans build" sv_is_instance_executable /Applications/Codans.app/Contents/MacOS/Codans /a/Codans.app/Contents/MacOS/Codans
 check_not "rejects an empty executable" sv_is_instance_executable "" /a/Codans.app/Contents/MacOS/Codans
 
+# ---------- app path resolution ----------
+# Two worktrees share one SELF_VERIFY_DIR. A fake xcodebuild reports a build
+# dir inside the worktree it runs in and counts its calls.
+mkdir -p "$scratch/bin"
+cat >"$scratch/bin/xcodebuild" <<'SH'
+#!/bin/sh
+echo x >>"$XCODEBUILD_CALLS"
+printf '    BUILT_PRODUCTS_DIR = %s/build\n    FULL_PRODUCT_NAME = Codans.app\n' "$PWD"
+SH
+chmod +x "$scratch/bin/xcodebuild"
+for wt in wt-a wt-b; do
+  mkdir -p "$scratch/$wt/apps/mac/build/Codans.app"
+  git -C "$scratch/$wt" init -q
+done
+wt_a="$(cd "$scratch/wt-a" && pwd -P)"
+wt_b="$(cd "$scratch/wt-b" && pwd -P)"
+export XCODEBUILD_CALLS="$scratch/xcodebuild-calls"
+app_in() ( # app_in <worktree>: sv_app with default settings, run from <worktree>
+  unset SELF_VERIFY_APP
+  cd "$1" && PATH="$scratch/bin:$PATH" sv_app
+)
+calls() { wc -l <"$XCODEBUILD_CALLS" 2>/dev/null | tr -d ' ' || echo 0; }
+check "resolves worktree A's app" test "$(app_in "$wt_a")" = "$wt_a/apps/mac/build/Codans.app"
+calls_before="$(calls)"
+check "reuses the cache in the same worktree" test "$(app_in "$wt_a")" = "$wt_a/apps/mac/build/Codans.app"
+check "a cache hit skips xcodebuild" test "$(calls)" = "$calls_before"
+check "worktree B ignores A's cached app" test "$(app_in "$wt_b")" = "$wt_b/apps/mac/build/Codans.app"
+check "worktree A gets its own app again" test "$(app_in "$wt_a")" = "$wt_a/apps/mac/build/Codans.app"
+check "explicit SELF_VERIFY_APP wins" test "$(cd "$wt_b" && SELF_VERIFY_APP=/x/Override.app sv_app)" = /x/Override.app
+
 # ---------- environment scrubbing ----------
 CODANS_PANE_ID=leak CODANS_SOCKET_PATH=/tmp/codans-$uid.sock ZMX_SESSION=leak TERM_PROGRAM=codans \
   CODANS_STATE_DIR="$HOME/.codans-dev/state" codans_debug tree --json >/dev/null
