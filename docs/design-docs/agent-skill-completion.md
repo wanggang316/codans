@@ -1,6 +1,6 @@
 # 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
 
-**Availability:** Partly available: New Agent completion of Claude Code user-level skills and the Skills button. Project-level skills, plugin skills, and other agents are planned.
+**Availability:** Partly available: New Agent completion of Claude Code user-level and project-level skills, and the Skills button. Plugin skills and other agents are planned.
 **Author:** Gump（与 Claude）
 **Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
 
@@ -84,7 +84,9 @@ struct SkillLocation {
 
 - **有效 HOME**：`usesDedicatedHome` 时为 `AgentLaunchCommand.dedicatedHomeURL(for:)`，否则为用户 HOME。
 - **配置根变量**：profile 的 `envVars` 含该 agent 的 `configRootEnvVar` 时，以其值替换对应的默认配置根（例如 `CLAUDE_CONFIG_DIR` 替换 `~/.claude`）。
-- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录；选 New Worktree 时目录尚不存在，用项目主仓库根；Folder 或 Workspace 项目用其唯一工作目录。查找范围按 `projectSearch`。
+- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录；选 New Worktree 时目录尚不存在，用项目主仓库根（选中的分支没有 worktree 持有时同样会新建 worktree，也用主仓库根）；Folder 或 Workspace 项目用其唯一工作目录（与启动时一致：选中的行，否则第一个未归档的行）。查找范围按 `projectSearch`。
+- **向上查找**：`walkUpToRepoRoot` 从起点逐级向上，到第一个含 `.git`（目录或 worktree 的 `.git` 文件）的目录为止，近的在前；一路找不到仓库根时只读起点目录。
+- **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill）；同一来源内近的目录优先。
 - **远程项目**：不解析，补全关闭。
 
 ### 插件 Skill

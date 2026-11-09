@@ -18,7 +18,7 @@ Use [_template.md](_template.md) as a starting point.
 <!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Feature availability belongs in each doc; see ../README.md for metadata conventions. -->
 
 - [Agent Profiles 与 Handoff](agent-handoff.md) — 命名 agent 启动预设（Settings → Agents / toolbar / palette / `codans agent`）+ agent 到 agent 的任务交接：worktree 内 `.codans/handoff/` 工件、archive-first 迁移、源 agent 自写 briefing 的 `codans handoff`、应用内 Hand Off 面板
-- [Agent Skill Completion](agent-skill-completion.md) — **部分可用**（Claude Code 用户级 Skill 与 Skills 按钮）：New Agent 对话框 prompt 内按选中 agent 的 Skill Location 表补全 Agent Skill（用户级 / 项目级 / 已启用插件，有效 HOME 解析），插入该 agent 的调用 token；只列 agent 实际能解析的 Skill（ADR 0010），未实测 agent 与远程项目不提供，Skills 按钮置灰并说明原因
+- [Agent Skill Completion](agent-skill-completion.md) — **部分可用**（Claude Code 用户级与项目级 Skill、Skills 按钮）：New Agent 对话框 prompt 内按选中 agent 的 Skill Location 表补全 Agent Skill（用户级 / 项目级 / 已启用插件，有效 HOME 解析），插入该 agent 的调用 token；只列 agent 实际能解析的 Skill（ADR 0010），未实测 agent 与远程项目不提供，Skills 按钮置灰并说明原因
 - [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 运行态（idle/working/blocked/done/error，agent 自报的 OSC 7501 程序状态优先、视口启发式兜底），独立于通知系统
 - [App Appearance & Terminal Theme](app-appearance.md) — Light/Dark/System 外观（单写者 `NSApp.appearance`）+ Ghostty 配置 managed-keys（theme/font/cursor）写入
 - [CLI (`codans`)](cli.md) — `codans` 动词集与 system/hierarchy/pane/terminal/editor RPC 契约；stateless RPC client、alias→UUID、`/usr/local/bin` 管理员授权安装；`open` / `help-json` / `workspace` 可用，`skill` 本地管理安装，hook 未实现

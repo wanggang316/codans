@@ -45,6 +45,14 @@ public nonisolated struct SkillConfigRoot: Equatable, Sendable, Hashable {
   }
 }
 
+/// How far an agent searches for project-level skill directories.
+public nonisolated enum SkillProjectSearch: Equatable, Sendable, Hashable {
+  /// The working directory and each parent up to the repository root.
+  case walkUpToRepositoryRoot
+  /// The working directory only.
+  case workingDirectoryOnly
+}
+
 /// The rule by which one `AgentKind` finds its Agent Skills and calls them.
 /// See GLOSSARY → Agent Skills and the Agent Skill Completion design doc.
 public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
@@ -53,17 +61,29 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
   /// moves with the config root.
   public let userDirectories: [String]
   public let configRoot: SkillConfigRoot?
+  /// Project-level skill directories, relative to each searched project
+  /// directory (`.claude/skills`).
+  public let projectDirectories: [String]
+  public let projectSearch: SkillProjectSearch
+  /// Which source keeps a name that more than one source has, first wins.
+  public let precedence: [AgentSkillSource]
   public let invocationStyle: SkillInvocationStyle
   public let invocationPosition: SkillInvocationPosition
 
   public init(
     userDirectories: [String] = [],
     configRoot: SkillConfigRoot? = nil,
+    projectDirectories: [String] = [],
+    projectSearch: SkillProjectSearch = .workingDirectoryOnly,
+    precedence: [AgentSkillSource] = [.project, .user],
     invocationStyle: SkillInvocationStyle = .none,
     invocationPosition: SkillInvocationPosition = .leading
   ) {
     self.userDirectories = userDirectories
     self.configRoot = configRoot
+    self.projectDirectories = projectDirectories
+    self.projectSearch = projectSearch
+    self.precedence = precedence
     self.invocationStyle = invocationStyle
     self.invocationPosition = invocationPosition
   }
@@ -76,11 +96,16 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
 
 extension SkillLocation {
   /// Claude Code reads `~/.claude/skills`; `CLAUDE_CONFIG_DIR` replaces
-  /// `~/.claude`. The probe in the design doc showed that `/name` runs at
+  /// `~/.claude`. In a project it reads `.claude/skills` from the working
+  /// directory up to the repository root. A personal skill wins over a
+  /// project skill with the same name. The probe in the design doc showed that `/name` runs at
   /// the prompt start and in the middle of the first prompt.
   public static let claudeCode = SkillLocation(
     userDirectories: [".claude/skills"],
     configRoot: SkillConfigRoot(environmentVariable: "CLAUDE_CONFIG_DIR", defaultDirectory: ".claude"),
+    projectDirectories: [".claude/skills"],
+    projectSearch: .walkUpToRepositoryRoot,
+    precedence: [.user, .project],
     invocationStyle: .slash,
     invocationPosition: .anywhere
   )

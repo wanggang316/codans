@@ -164,6 +164,14 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     worktree.path == rootPath
   }
 
+  /// The worktree an agent starts in when the Project has one place to
+  /// work (a folder or a workspace): the selected row, else the first one
+  /// that is not archived.
+  public var soleWorkingWorktree: Worktree? {
+    worktrees.first { $0.id == selectedWorktreeID && !$0.archived }
+      ?? worktrees.first { !$0.archived }
+  }
+
   /// True for a Remote Project — its `rootPath` / `gitRoot` / worktree paths are
   /// remote, and terminals / git run over SSH. Local-filesystem operations
   /// (`FileManager`, `URL(fileURLWithPath:)`, symlink resolution, reveal-in-Finder)
