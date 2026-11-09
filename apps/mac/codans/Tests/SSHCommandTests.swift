@@ -17,6 +17,14 @@ struct SSHCommandTests {
   }
 
   @Test
+  func masterControlPathsStartWithThePrimary() {
+    #expect(
+      SSHCommand.masterControlPaths()
+        == ["~/.ssh/codans-%C", "~/.ssh/codans-%C-1", "~/.ssh/codans-%C-2", "~/.ssh/codans-%C-3"]
+    )
+  }
+
+  @Test
   func remoteCommandPrependsCdAndExec() {
     let script = SSHCommand.remoteCommand(
       executable: "/usr/bin/git",
@@ -59,7 +67,7 @@ struct SSHCommandTests {
       extraOptions: SSHCommand.backgroundProbeOptions
     )
     #expect(executable.path == SSHCommand.guardShellPath)
-    #expect(arguments.contains(SSHCommand.sshExecutablePath))
+    #expect(arguments[1].contains("'\(SSHCommand.sshExecutablePath)'"))
     #expect(arguments.contains("BatchMode=yes"))
     #expect(arguments.contains("-p"))
     #expect(arguments.contains("2222"))
@@ -91,11 +99,11 @@ struct SSHCommandTests {
   @Test
   func commandLineDoubleQuotesForLocalShell() {
     let line = SSHCommand.commandLine(host: host, remoteCommand: "exec \"$SHELL\" -l")
-    #expect(line.contains("; /usr/bin/ssh "))
+    #expect(line.contains("'/usr/bin/ssh' -o ControlMaster=no "))
     #expect(line.contains("ConnectTimeout=30"))
     #expect(line.contains("-tt"))
     #expect(line.contains("alice@example.com"))
-    // ControlPath option token stays unquoted so ssh expands ~ and %C.
-    #expect(line.contains("ControlPath=~/.ssh/codans-%C"))
+    // ControlPaths stay literal for the local shell so ssh expands ~ and %C.
+    #expect(line.contains("for codans_cpath in '~/.ssh/codans-%C' '~/.ssh/codans-%C-1' "))
   }
 }
