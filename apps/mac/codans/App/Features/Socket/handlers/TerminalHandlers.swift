@@ -141,8 +141,15 @@ public final class TerminalHandlers {
           .internal("pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry"))
       }
       before = dump
-    } else if req.capture == true {
-      before = sink.readText(paneID: req.paneID, extent: .screen)
+    }
+    // The wait compares the surface with this pre-send screen: only a change
+    // after the send is evidence that the shell took the text.
+    let surfaceBefore = req.wait != nil ? sink.readText(paneID: req.paneID, extent: .screen) : nil
+    if req.capture == true, !captureFromDaemon {
+      guard let surfaceBefore else {
+        return .failed(.internal("pane.send --capture: cannot read the pane's screen; nothing was sent, retry"))
+      }
+      before = surfaceBefore
     }
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
@@ -150,7 +157,8 @@ public final class TerminalHandlers {
     }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
-      let outcome = await waitForCompletion(paneID: req.paneID, wait: wait, sink: sink)
+      let outcome = await waitForCompletion(
+        paneID: req.paneID, wait: wait, sink: sink, before: surfaceBefore, sent: req.text)
       var after = outcome.text
       if captureFromDaemon {
         guard let dump = await readDaemonScreen(req.paneID) else {
@@ -179,8 +187,12 @@ public final class TerminalHandlers {
     let text: String
   }
 
+  /// Completion needs a still screen and evidence that the shell ran the
+  /// text (see `screenShowsTheSendRan`). A still screen alone is not enough:
+  /// a prompt that draws slowly under load leaves the screen still with only
+  /// the terminal's echo of the typed line, before anything ran (#444).
   private func waitForCompletion(
-    paneID: PaneID, wait: SendWaitParams, sink: InputSink
+    paneID: PaneID, wait: SendWaitParams, sink: InputSink, before: String?, sent: String
   ) async -> CompletionOutcome {
     let timeout = max(wait.timeoutMillis, 1)
     let stable = max(wait.stableMillis ?? 500, 1)
@@ -194,14 +206,16 @@ public final class TerminalHandlers {
       let now = clock.nowMillis()
       let busy = paneIsBusy(paneID)
       if busy { busyObserved = true }
-      let text = sink.readText(paneID: paneID, extent: .screen) ?? ""
+      let read = sink.readText(paneID: paneID, extent: .screen)
+      let text = read ?? ""
       if text != lastText {
         lastText = text
         stableSince = now
       }
       let elapsed = now - start
       let quiet = now - stableSince
-      if !busy, quiet >= stable, busyObserved || elapsed >= grace {
+      let ran = read.map { Self.screenShowsTheSendRan(screen: $0, before: before, sent: sent) } ?? false
+      if !busy, quiet >= stable, ran, busyObserved || elapsed >= grace {
         return CompletionOutcome(completed: true, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
       }
       if elapsed >= timeout {
@@ -213,6 +227,31 @@ public final class TerminalHandlers {
         return CompletionOutcome(completed: false, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
       }
     }
+  }
+
+  /// Whether `screen` shows that the shell took the sent text: the screen
+  /// differs from the pre-send `before`, and, when the text ends with Enter,
+  /// its last non-blank row does not end with the last sent line. That row
+  /// is the echo of a typed line that has not run yet; after a run, the
+  /// shell draws its prompt below it.
+  static func screenShowsTheSendRan(screen: String, before: String?, sent: String) -> Bool {
+    if let before, screen == before { return false }
+    guard sent.last?.isNewline == true, let line = lastSentLine(sent) else { return true }
+    let lastRow = screen.split(whereSeparator: \.isNewline).last { !$0.allSatisfy(\.isWhitespace) }
+    guard let lastRow else { return true }
+    return !trimmingTrailingWhitespace(lastRow).hasSuffix(line)
+  }
+
+  /// The last non-blank line of the sent text, without surrounding whitespace.
+  static func lastSentLine(_ sent: String) -> String? {
+    sent.split(whereSeparator: \.isNewline)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .last { !$0.isEmpty }
+  }
+
+  private static func trimmingTrailingWhitespace(_ row: Substring) -> Substring {
+    guard let last = row.lastIndex(where: { !$0.isWhitespace }) else { return row[row.startIndex..<row.startIndex] }
+    return row[...last]
   }
 
   /// The screen lines that appeared after the send: everything past the
