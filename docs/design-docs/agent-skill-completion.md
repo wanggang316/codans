@@ -1,8 +1,8 @@
 # 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
 
-**Availability:** Partly available: New Agent completion of Claude Code user-level, project-level, and enabled plugin skills, and the Skills button. Codex plugin skills and other agents are planned.
+**Availability:** Partly available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button. Other agents are `none` (see "探针实测").
 **Author:** Gump（与 Claude）
-**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
+**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
 
 ## 背景与范围
 
@@ -50,11 +50,11 @@ AgentProfile + target dir ──► SkillLocationResolver ──► [SkillDirect
 ```swift
 struct SkillLocation {
   var userDirectories: [String]        // relative to the effective home, e.g. ".claude/skills"
-  var projectDirectories: [String]     // relative to a project dir, e.g. ".claude/skills"
-  var projectSearch: ProjectSearch     // .walkUpToRepoRoot | .workingDirectoryOnly
+  var projectDirectories: [(path: String, search: ProjectSearch)]
+                                       // e.g. (".claude/skills", .walkUpToRepoRoot); search per directory
   var configRootEnvVar: String?        // e.g. "CLAUDE_CONFIG_DIR" replaces "~/.claude"
   var plugins: PluginSource?           // .claudeCode | .codex
-  var invocationStyle: InvocationStyle // .slash | .slashSkill | .dollar | .at | .none
+  var invocationStyle: InvocationStyle // .slash | .slashSkill | .dollar | .none
   var invocationPosition: InvocationPosition // .leading | .anywhere
   var precedence: [SkillSource]        // dedupe order for one name
 }
@@ -65,8 +65,8 @@ struct SkillLocation {
 | AgentKind | 用户级目录 | 项目级目录（查找范围） | 候选调用写法 |
 |---|---|---|---|
 | claude-code | `.claude/skills` | `.claude/skills`（向上到仓库根） | `/name`，插件 `/plugin:skill` |
-| codex | `.agents/skills`、`.codex/skills` | `.agents/skills`（向上到仓库根） | `$name`，插件 `$plugin:skill` |
-| pi | `.pi/agent/skills`、`.agents/skills` | `.pi/skills`（仅 cwd）、`.agents/skills`（向上到仓库根） | `/skill:name` |
+| codex | `.agents/skills`、`.codex/skills`（`CODEX_HOME` 替换 `~/.codex`） | `.agents/skills`（向上到仓库根） | `$name`，插件 `$plugin:skill` |
+| pi | `.pi/agent/skills`（`PI_CODING_AGENT_DIR` 替换 `~/.pi/agent`）、`.agents/skills` | `.pi/skills`（仅 cwd）、`.agents/skills`（向上到仓库根；均需项目已信任） | `/skill:name` |
 | opencode | `.config/opencode/skills`、`.claude/skills`、`.agents/skills` | `.opencode/skills`、`.claude/skills`、`.agents/skills`（向上） | `@id` |
 | gemini | `.gemini/skills`、`.agents/skills` | `.gemini/skills`、`.agents/skills`（仅 cwd） | `/name` |
 | cursor-agent | `.agents/skills`、`.cursor/skills`、`.claude/skills`、`.codex/skills` | 同名四处 | `/name` |
@@ -84,9 +84,9 @@ struct SkillLocation {
 
 - **有效 HOME**：`usesDedicatedHome` 时为 `AgentLaunchCommand.dedicatedHomeURL(for:)`，否则为用户 HOME。
 - **配置根变量**：profile 的 `envVars` 含该 agent 的 `configRootEnvVar` 时，以其值替换对应的默认配置根（例如 `CLAUDE_CONFIG_DIR` 替换 `~/.claude`）。
-- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录（分支名与发送时同一规则：本地分支名优先，否则按 `<remote>/<branch>` 解析）；选 New Worktree 时目录尚不存在，用项目主仓库根（选中的分支没有 worktree 持有时同样会新建 worktree，也用主仓库根）；Folder 或 Workspace 项目用其唯一工作目录（与启动时一致：选中的行，否则第一个未归档的行）。查找范围按 `projectSearch`。
+- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录（分支名与发送时同一规则：本地分支名优先，否则按 `<remote>/<branch>` 解析）；选 New Worktree 时目录尚不存在，用项目主仓库根（选中的分支没有 worktree 持有时同样会新建 worktree，也用主仓库根）；Folder 或 Workspace 项目用其唯一工作目录（与启动时一致：选中的行，否则第一个未归档的行）。查找范围按每个项目目录各自的 `search`（例如 Pi 的 `.pi/skills` 只读起点，`.agents/skills` 向上查找）；同一层的目录列完再到上一层。
 - **向上查找**：`walkUpToRepoRoot` 从起点逐级向上，到第一个含 `.git`（目录或 worktree 的 `.git` 文件）的目录为止，近的在前；一路找不到仓库根时只读起点目录。
-- **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill），Plugin 最后（插件 Skill 名带 `<plugin>:` 前缀，不与其他来源同名）；同一来源内近的目录优先。
+- **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill），Plugin 最后（插件 Skill 名带 `<plugin>:` 前缀，不与其他来源同名）；Pi 先找到的保留（Project 优先于 User），Codex 同为 Project、User、Plugin；同一来源内近的目录优先。
 - **远程项目**：不解析，补全关闭。
 
 ### 插件 Skill
@@ -101,7 +101,11 @@ struct SkillLocation {
   - 项目起点见"目录解析"。切换目标（分支）会改变起点，因此重新扫描。
   - 注册表缺失、不是 JSON、结构不符时，不列插件 Skill；某个 settings 文件缺失或无法解析时跳过该文件（Claude Code 也忽略无效的 settings 文件）。用户级与项目级 Skill 不受影响。
   - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。
-- **Codex**：`<config root>/plugins/cache/<marketplace>/<plugin>/<version>/skills/*/SKILL.md`，以 `config.toml` 的 `[plugins."<plugin>@<marketplace>"] enabled = true` 过滤。调用名为 `<plugin>:<skill>`。
+- **Codex**：`<config root>/plugins/cache/<marketplace>/<plugin>/<version>/skills/*/SKILL.md`，以 `<config root>/config.toml` 的 `[plugins."<plugin>@<marketplace>"] enabled = true` 过滤。调用名为 `<plugin>:<skill>`，插入 `$<plugin>:<skill> `。
+  - Config root 为有效 HOME 下的 `.codex`，或 `CODEX_HOME` 的值（相对路径时不列插件）。
+  - 只认表头形式 `[plugins."<key>"]` 下的 `enabled = true`；没有 `enabled`、值不是 `true`、或 key 中的插件名或 marketplace 不是单个目录名的，不列。`config.toml` 缺失或不可读时不列插件 Skill，用户级与项目级不受影响。
+  - 同一插件缓存了多个版本时都扫，版本号大的在前，同名时保留新版本。
+  - 远程安装的插件（`.codex-remote-plugin-install.json`）如果 `config.toml` 中没有对应表，同样不列：codans 读不到它们是否启用（ADR 0010）。
 
 ### 扫描与条目
 
@@ -129,16 +133,22 @@ struct SkillLocation {
 
 对本机已装的 Claude Code、Codex、Pi、Gemini、OpenCode：在隔离实例的临时项目里放一个探针 Skill（执行时输出固定标记），用 New Agent 的实际启动路径带调用 token 作为首条 prompt 启动，检查标记是否出现，分别测 prompt 开头和中间两种位置。结果写入 Skill Location 表的 `invocationStyle` / `invocationPosition` 及本节。未通过或未安装的 agent 保持 `none`。
 
-结果（2026-11-09，Claude Code 2.1.319）：
+结果（2026-11-09）：
 
-| Agent | 写法 | prompt 开头 | prompt 中间 | 结论 |
-|---|---|---|---|---|
-| Claude Code | `/name` | 通过：CLI 直接展开 Skill，输出标记 | 通过：模型调用 `Skill(name)` 加载后输出标记 | `.slash`，`.anywhere` |
-| 其余 agent | — | 未测 | 未测 | `none` |
+| Agent | 版本 | 写法 | prompt 开头 | prompt 中间 | 结论 |
+|---|---|---|---|---|---|
+| Claude Code | 2.1.319 | `/name` | 通过：CLI 直接展开 Skill，输出标记 | 通过：模型调用 `Skill(name)` 加载后输出标记 | `.slash`，`.anywhere` |
+| Codex | codex-cli 0.167.0 | `$name` | 通过：输出标记 | 通过：输出标记 | `.dollar`，`.anywhere` |
+| Pi | 1.5.0 | `/skill:name` | 通过：Pi 展开 `[skill] codans-probe-459` 后输出标记 | 通过（项目已信任时）：模型读取 Skill 后输出标记 | `.slashSkill`，`.anywhere` |
+| OpenCode | 1.18.15 | `@name` | 未通过：`opencode --prompt` 只填入输入框，不发送 | 同左 | `none` |
+| Gemini CLI | — | `/name` | 未测：本机未安装；临时安装的 0.67.0 首次运行要求浏览器 OAuth 登录，无人值守会话无法完成 | 未测 | `none` |
 
-- 探针：`~/.claude/skills/codans-probe-455/SKILL.md`，正文要求只回复 `PROBE-MARKER-7F3A`（标记只在正文，描述里没有）。
-- 实测两次：直接运行 `claude '/codans-probe-455'` 与 `claude 'Run this for me: /codans-probe-455 and nothing more'`；再在隔离 Debug 实例里经 New Agent 对话框（New Worktree 目标）发送同样两条 prompt，pane 中均出现标记。
-- 中间位置靠模型调用 Skill 工具，所以 frontmatter 含 `disable-model-invocation: true` 的 Skill 只在开头生效。Claude Code 保持 `.anywhere`，这类 Skill 由补全过滤，见"交互"。
+- 探针：项目内 `.agents/skills/codans-probe-459/SKILL.md`（Codex、Pi、OpenCode 共用的目录），正文要求只回复 `PROBE-MARKER-9C2E`（标记只在正文）。
+- 两种实测：先直接运行 CLI（`codex exec`、`pi -p`、`opencode run`）；再在隔离 Debug 实例里经 New Agent 对话框（选中已有 worktree）用补全列表插入调用 token 后发送，读 pane 内容找标记。
+- Codex：首次进入目录时 TUI 先询问是否信任该目录，信任后执行首条 prompt。另用临时 `CODEX_HOME` 验证 `$CODEX_HOME/skills` 可用、已启用插件的 `$probeplug:hello` 输出标记、`enabled = false` 的插件不可用。
+- Pi：TUI 启动时先询问是否信任项目目录；只有信任后才加载项目级 Skill（`pi -p` 在未信任目录中，中间位置的调用失败，因为模型的 Skill 列表里没有项目 Skill；开头的 `/skill:name` 仍由 Pi 直接展开）。中间位置靠模型读取 Skill，所以 `disable-model-invocation: true` 的 Skill 只在开头生效，由补全过滤（见"交互"）。
+- OpenCode：`opencode run` 中 `@name` 与 `/name` 在开头和中间都由模型调用 Skill 工具后输出标记；但 OpenCode 的交互式 TUI 没有带首条 prompt 并发送的参数（`--prompt` 只预填输入框），New Agent 因此无法给 OpenCode 发首条 prompt（`AgentDescriptor.promptStyle` 为 `nil`）。等有可发送的启动参数后再启用。调研值保留在上表：用户级 `.config/opencode/skills`、`.claude/skills`、`.agents/skills`，项目级 `.opencode/skills`、`.claude/skills`、`.agents/skills`（向上到仓库根）。
+- 切换 agent：同一草稿中从 Codex 切到 Pi，`$` 不再弹出，`/` 弹出 Pi 的列表，插入 `/skill:codans-probe-459`。
 
 ## 备选方案
 
@@ -158,3 +168,5 @@ struct SkillLocation {
 - 远程项目：经 SSH 读取远端 Skill 目录。
 - Command Queue 输入框接入 `ComposerSkillCompletion`。
 - `SkillInstaller.Target` 改为从 Skill Location 表推导。
+- OpenCode：交互式启动能带首条 prompt 并发送后，重跑探针。
+- Gemini CLI：在已登录的机器上跑探针。
