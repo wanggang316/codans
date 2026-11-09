@@ -93,7 +93,7 @@ struct SkillLocation {
   4. 没有保存决定时按 `settings.json` 的 `defaultProjectTrust`：只有 `always` 列；默认 `ask` 会在启动时询问，结果未知，不列。
   - 目标会新建 worktree 时，新 worktree 的路径还不存在，没有可对应的保存决定，只有 `--approve` 时列出。
   - `<agent dir>` 为 `~/.pi/agent` 或 `PI_CODING_AGENT_DIR`（相对路径时不列）。用户级 Skill 不受影响。
-  - `-ns` / `--no-skills`：Pi 不加载任何 Skill，也不展开 `/skill:name`（实测：调用未展开，模型自己去磁盘找文件），所以用户级与项目级都不列。`enableSkillCommands: false` 只去掉交互模式里 `/skill:` 的自动补全项，首条 prompt 仍会展开（实测：输出标记，会话记录中为展开后的 `<skill>` 块），不影响列表。
+  - `-ns` / `--no-skills`：Pi 不加载任何 Skill，也不展开 `/skill:name`（实测：调用未展开，模型自己去磁盘找文件），所以用户级与项目级都不列。额外参数不全是普通词时（如 `--no-skills --theme 'dark'`、`--no-skills 2>/dev/null`），shell 仍会把 `--no-skills` 传给 Pi 而 codans 读不准，所以 Pi 的 Skill 一律不列。`enableSkillCommands: false` 只去掉交互模式里 `/skill:` 的自动补全项，首条 prompt 仍会展开（实测：输出标记，会话记录中为展开后的 `<skill>` 块），不影响列表。
 - **向上查找**：`walkUpToRepoRoot` 从起点逐级向上，到第一个含 `.git`（目录或 worktree 的 `.git` 文件）的目录为止，近的在前；一路找不到仓库根时只读起点目录。
 - **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill），Plugin 最后（插件 Skill 名带 `<plugin>:` 前缀，不与其他来源同名）；Pi 先找到的保留（Project 优先于 User），Codex 同为 Project、User、Plugin；同一来源内近的目录优先。
 - **远程项目**：不解析，补全关闭。

@@ -155,11 +155,15 @@ public nonisolated enum SkillLocationResolver {
   }
 
   /// `false` when the profile's launch flags turn skills off: Pi's
-  /// `--no-skills` loads none and expands no `/skill:name` call.
+  /// `--no-skills` loads none and expands no `/skill:name` call. Pi
+  /// arguments that are not plain words can hide that flag from codans
+  /// (`--no-skills 2>/dev/null`), so they give no skills (ADR 0010).
   static func loadsSkills(_ profile: AgentProfile) -> Bool {
     switch profile.descriptor.skillLocation.projectTrust {
     case nil: return true
-    case .pi: return PiLaunchArguments(profile.extraArguments)?.noSkills != true
+    case .pi:
+      guard let launch = PiLaunchArguments(profile.extraArguments) else { return false }
+      return !launch.noSkills
     }
   }
 

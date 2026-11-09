@@ -143,6 +143,10 @@ struct PiProjectTrustTests {
     #expect(names("") == ["mine"])
     #expect(names("-ns").isEmpty)
     #expect(names("--approve --no-skills").isEmpty)
+    // The shell passes `--no-skills` on, but codans cannot read the rest.
+    #expect(names("--no-skills --theme 'dark'").isEmpty)
+    #expect(names("--no-skills 2>/dev/null").isEmpty)
+    #expect(names("--theme 'dark'").isEmpty)
   }
 
   @Test
