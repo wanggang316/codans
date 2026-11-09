@@ -162,6 +162,13 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
     connection-error code) with capped exponential backoff; every other exit
     passes through and closes the surface like a local shell exit. Ctrl-C during
     the backoff is the escape hatch.
+  - After every ssh line returns, before any notice, the loop resets the
+    terminal modes a dropped remote program cannot turn off (mouse tracking
+    and encodings, focus reporting, bracketed paste, synchronized output, the
+    alternate screen, cursor and keypad modes, kitty keyboard, modifyOtherKeys,
+    SGR). Without it the fresh shell echoes mouse reports as typed input. It
+    is a targeted reset, not RIS, so the output and the notices stay. A
+    re-attached host `zmx` session replays the modes its program still holds.
   - With a host-side `zmx`, the worktree shell runs inside `zmx attach
     <codans-paneUUID>` so remote work survives disconnects; otherwise it falls
     back to a plain login shell in the worktree.
