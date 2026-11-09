@@ -201,7 +201,8 @@ struct CodexPluginSkillTests {
       try write(Self.enabledConfig + "\n" + extra + "\n", to: root.appending(path: "config.toml"))
       #expect(pluginNames("").isEmpty, "\(extra)")
     }
-    try write("plugins.\"docs@market\".enabled = false\n" + Self.enabledConfig, to: root.appending(path: "config.toml"))
+    try write(
+      "plugins.\"docs@market\".enabled = false\n" + Self.enabledConfig, to: root.appending(path: "config.toml"))
     #expect(pluginNames("").isEmpty)
   }
 
