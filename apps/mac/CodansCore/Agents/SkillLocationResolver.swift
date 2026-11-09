@@ -42,7 +42,8 @@ public nonisolated enum SkillLocationResolver {
   /// Skill directories of the plugins that `profile`'s agent, launched in
   /// `projectStart`, has enabled. The registry lives under its config
   /// root. For Claude Code the user, project, local, `--settings`, and
-  /// managed settings decide which plugins are on; for Codex `config.toml`. A file that is missing or cannot be read
+  /// managed settings decide which plugins are on; for Codex `config.toml`,
+  /// the `--profile` layer, and the plugin flags (`CodexPluginRegistry`). A file that is missing or cannot be read
   /// gives no plugins (registry) or no say (settings). Settings flags in the
   /// profile's extra arguments that cannot be read give no plugins.
   static func pluginDirectories(
@@ -50,7 +51,8 @@ public nonisolated enum SkillLocationResolver {
     projectStart: URL?,
     userHome: URL,
     stateDirectory: URL,
-    managedSettings: URL = ClaudePluginRegistry.managedSettings
+    managedSettings: URL = ClaudePluginRegistry.managedSettings,
+    isRepositoryRoot: (URL) -> Bool = hasGitEntry
   ) -> [SkillDirectory] {
     let location = profile.descriptor.skillLocation
     guard location.supportsCompletion, let plugins = location.plugins,
@@ -71,7 +73,9 @@ public nonisolated enum SkillLocationResolver {
         configRoot: root, home: home, projectStart: projectStart,
         launchSettings: launchSettings, managedSettings: managedSettings)
     case .codex:
-      return CodexPluginRegistry.skillDirectories(configRoot: root)
+      let searched = projectStart.map { searchedDirectories(from: $0, isRepositoryRoot: isRepositoryRoot) } ?? []
+      return CodexPluginRegistry.skillDirectories(
+        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched)
     }
   }
 
@@ -131,7 +135,8 @@ public nonisolated enum SkillLocationResolver {
       } ?? []
     return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
-        for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory)
+        for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory,
+        isRepositoryRoot: isRepositoryRoot)
   }
 
   /// The directory an agent launched in `project` starts in, from which it
@@ -175,10 +180,9 @@ public nonisolated enum SkillLocationResolver {
     in location: SkillLocation, startDirectory: URL, isRepositoryRoot: (URL) -> Bool
   ) -> [SkillDirectory] {
     guard location.supportsCompletion, !location.projectDirectories.isEmpty else { return [] }
-    let start = startDirectory.standardizedFileURL
-    var searched = [start]
+    var searched = [startDirectory.standardizedFileURL]
     if location.projectDirectories.contains(where: { $0.search == .walkUpToRepositoryRoot }) {
-      searched = walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
+      searched = searchedDirectories(from: startDirectory, isRepositoryRoot: isRepositoryRoot)
     }
     return searched.enumerated().flatMap { depth, directory in
       location.projectDirectories
@@ -189,6 +193,13 @@ public nonisolated enum SkillLocationResolver {
             source: .project)
         }
     }
+  }
+
+  /// `start` and its parents up to the repository root, nearest first, or
+  /// `start` alone when no parent is a repository root.
+  static func searchedDirectories(from start: URL, isRepositoryRoot: (URL) -> Bool) -> [URL] {
+    let start = start.standardizedFileURL
+    return walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
   }
 
   /// `true` when `directory` holds a `.git` folder or a worktree's `.git`
