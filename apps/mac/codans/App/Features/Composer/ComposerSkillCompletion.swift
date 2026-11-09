@@ -205,6 +205,28 @@ final class ComposerSkillCompletion {
     return ranked.sorted { ($0.rank, $0.offset) < ($1.rank, $1.offset) }.map(\.skill)
   }
 
+  /// The text after the Skills button put `prefix` where a call can start,
+  /// and the caret just after it, so `update` opens the list there. The
+  /// prefix replaces `selection` (`nil` is the end of the text) and gets a
+  /// space before it after a word. A `leading` call goes at the prompt
+  /// start instead. `nil` when `selection` is outside `text`.
+  nonisolated static func insertingPrefix(
+    _ prefix: Character, into text: String, selection: Range<Int>?,
+    position: SkillInvocationPosition
+  ) -> (text: String, caret: Int)? {
+    let utf16 = text.utf16
+    let range = selection ?? utf16.count..<utf16.count
+    guard range.lowerBound >= 0, range.upperBound <= utf16.count else { return nil }
+    if position == .leading {
+      let start = text.prefix { $0.isWhitespace }.utf16.count
+      return replacing(start..<start, in: text, with: String(prefix))
+    }
+    let lower = utf16.index(utf16.startIndex, offsetBy: range.lowerBound)
+    guard let lowerIndex = lower.samePosition(in: text) else { return nil }
+    let atTokenStart = text[..<lowerIndex].last?.isWhitespace ?? true
+    return replacing(range, in: text, with: atTokenStart ? String(prefix) : " \(prefix)")
+  }
+
   nonisolated static func replacing(
     _ range: Range<Int>, in text: String, with replacement: String
   ) -> (text: String, caret: Int) {

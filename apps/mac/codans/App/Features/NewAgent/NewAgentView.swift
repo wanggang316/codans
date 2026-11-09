@@ -264,6 +264,9 @@ struct NewAgentView: View {
         }
         HStack(spacing: 8) {
           ComposerFilePickerButton { showsFilePicker = true }
+          ComposerSkillsButton(unavailableReason: store.skillsUnavailableReason) {
+            insertSkillPrefix()
+          }
           Spacer()
           agentMenu
           sendButton
@@ -283,6 +286,17 @@ struct NewAgentView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
+  }
+
+  /// Puts the agent's call prefix at the caret and gives the editor focus,
+  /// so the skill list opens as if the user typed the prefix.
+  private func insertSkillPrefix() {
+    let location = store.skillLocation
+    guard let prefix = location.invocationStyle.prefix else { return }
+    promptSelection.insertSkillPrefix(
+      prefix, position: location.invocationPosition, into: store.prompt
+    ) { store.send(.skillsButtonTapped(selection: $0)) }
+    focus = .prompt
   }
 
   private var editor: some View {

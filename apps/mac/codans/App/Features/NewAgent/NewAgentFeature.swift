@@ -148,6 +148,20 @@ struct NewAgentFeature {
       return agent.descriptor.skillLocation
     }
 
+    /// Why the prompt offers no skills, for the Skills button's tooltip.
+    /// `nil` when typing the call prefix opens the list.
+    var skillsUnavailableReason: String? {
+      guard selectedProject != nil else { return "Add a project to see its skills" }
+      guard let agent = selectedAgent else { return "Choose an agent to see its skills" }
+      if selectedProject?.isRemote == true {
+        return "Skill suggestions are not available for remote projects"
+      }
+      guard agent.descriptor.skillLocation.supportsCompletion else {
+        return "Skill suggestions are not available for \(agent.descriptor.displayName)"
+      }
+      return nil
+    }
+
     /// The branch-name field and the worktree options apply.
     var isCreatingWorktree: Bool {
       worktree != nil && target == .newWorktree
@@ -199,6 +213,9 @@ struct NewAgentFeature {
     /// (`nil` appends to the end).
     case filesSelected([URL], selection: Range<Int>?)
     case skillsLoaded([AgentSkillEntry], for: AgentProfile)
+    /// The Skills button: put the call prefix at the prompt's caret or
+    /// selection (UTF-16 offsets, `nil` for the end), so the list opens.
+    case skillsButtonTapped(selection: Range<Int>?)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -283,6 +300,15 @@ struct NewAgentFeature {
         }
         state.skills = skills
         state.skillsProfile = profile
+        return .none
+
+      case .skillsButtonTapped(let selection):
+        let location = state.skillLocation
+        guard state.skillsUnavailableReason == nil, let prefix = location.invocationStyle.prefix,
+          let result = ComposerSkillCompletion.insertingPrefix(
+            prefix, into: state.prompt, selection: selection, position: location.invocationPosition)
+        else { return .none }
+        state.prompt = result.text
         return .none
 
       case .sendTapped:
