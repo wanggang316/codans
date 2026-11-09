@@ -1,0 +1,34 @@
+# Tabs the default browser opened (CDP /json/list, newest first), after 3 sidebar-menu presses then 3 menubar Help presses
+D79208F0FFE80A35C55F8C65AC3C01CC https://codans.dev/changelog
+C924EC41B910E689567508A5FB3D4282 https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2Fwanggang316%2Fcodans%2Fissues%2Fnew%3Fbody%3D%253C%2521--%2520Des
+ACE83A39E13C2A40BD53DCF7D8FA10E9 https://codans.dev/
+8116D47D61287522A6ACD24F076630F5 https://codans.dev/changelog
+99A0EE39ABFEF7357587204561453D21 https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2Fwanggang316%2Fcodans%2Fissues%2Fnew%3Fbody%3D%253C%2521--%2520Des
+79A5C2F6C18DBADEA39B70E8BFF9730B https://codans.dev/
+E5E196C843D1FAA358E30F6A61A69E8B https://codans.dev/
+
+# Report issue: return_to decoded
+tab C924EC41B910E689567508A5FB3D4282
+issue URL path: https://github.com/wanggang316/codans/issues/new query keys: ['body']
+body:
+<!-- Describe the issue: what happened, what you expected, and the steps to reproduce it. -->
+
+
+
+---
+- codans: 0.11.0 (20261109001)
+- macOS: 27.0.1
+- Architecture: arm64
+----
+tab 99A0EE39ABFEF7357587204561453D21
+issue URL path: https://github.com/wanggang316/codans/issues/new query keys: ['body']
+body:
+<!-- Describe the issue: what happened, what you expected, and the steps to reproduce it. -->
+
+
+
+---
+- codans: 0.11.0 (20261109001)
+- macOS: 27.0.1
+- Architecture: arm64
+----
