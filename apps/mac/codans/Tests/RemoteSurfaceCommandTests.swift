@@ -33,6 +33,59 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
+  func reconnectLoopResetsTerminalModesBeforeEachNotice() throws {
+    let script = SSHReconnectLoop.script(connect: "CONNECT", reconnect: "RECONNECT")
+    let reset = SSHReconnectLoop.terminalModeResetCommand
+    let lines = script.components(separatedBy: "\n")
+    let rcCapture = try #require(lines.firstIndex(of: "codans_rc=$?"))
+    let resetLine = try #require(lines.firstIndex(of: reset))
+    let dropNotice = try #require(lines.firstIndex { $0.contains("Disconnected.") })
+    let retryNotice = try #require(lines.firstIndex { $0.contains("Connection ended (exit %s)") })
+    // After the ssh line returns (its status is kept first), before each notice.
+    #expect(rcCapture < resetLine)
+    #expect(resetLine < dropNotice)
+    #expect(resetLine < retryNotice)
+    #expect(lines.filter { $0 == reset }.count == 1)
+  }
+
+  @Test
+  func terminalModeResetTurnsOffInputModesWithoutAFullReset() {
+    let sequence = SSHReconnectLoop.terminalModeResetSequence
+    for mode in [9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016, 1004, 2004, 2026, 1049, 1] {
+      #expect(sequence.contains("\u{1B}[?\(mode)l"), "mode \(mode) is not reset")
+    }
+    #expect(sequence.contains("\u{1B}[?25h"))  // show cursor
+    #expect(sequence.contains("\u{1B}>"))  // normal keypad
+    #expect(sequence.contains("\u{1B}[<99u"))  // pop the kitty keyboard stack
+    #expect(sequence.contains("\u{1B}[>4;0m"))  // modifyOtherKeys off
+    #expect(sequence.hasSuffix("\u{1B}[0m"))  // SGR reset
+    // No RIS: the screen, the scrollback, and the notices must stay.
+    #expect(!sequence.contains("\u{1B}c"))
+  }
+
+  @Test
+  func fastFailurePrintsTheResetBeforeTheRetryNotice() throws {
+    let marker = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-loop-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: marker) }
+    // First attempt fails fast (retry path); the second ends the script.
+    let connect = "[ -f '\(marker.path)' ] && exit 7; : > '\(marker.path)'; (exit 255)"
+    let script = SSHReconnectLoop.script(connect: connect, reconnect: "exit 9")
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+    proc.arguments = ["-c", script]
+    let out = Pipe()
+    proc.standardOutput = out
+    try proc.run()
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    proc.waitUntilExit()
+    let output = String(data: data, encoding: .utf8) ?? ""
+    #expect(proc.terminationStatus == 7)
+    #expect(output.hasPrefix(SSHReconnectLoop.terminalModeResetSequence))
+    #expect(output.contains("Connection ended (exit 255)"))
+  }
+
+  @Test
   func buildProducesSyntacticallyValidShellAcrossVariants() throws {
     // Guards the four-level nested quoting: a regression there would make the
     // outer `/bin/sh -c` fail to parse, and the pane would flash-and-close.
