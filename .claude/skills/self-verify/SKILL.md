@@ -70,14 +70,16 @@ running.
 Default paths are private to the session, so parallel sessions in the same or different worktrees each run their
 own instance, and one session's `sv_cleanup` never touches another session's files or processes:
 `SELF_VERIFY_DIR` is `$TMPDIR/codans-self-verify-<uid>-<token>`, the socket is `/tmp/cdv-sv-<uid>-<token>.sock`,
-and the cache is `/tmp/cdv-sv-cache-<uid>-<token>`. The token is a hash of the worktree root and the session id,
-which is the first one set of `SELF_VERIFY_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CODANS_PANE_ID`, and
-`TERM_SESSION_ID`. These variables are inherited, so every shell and script of one session sources the helpers to
-the same paths. If none is set (an agent that exports no session id), export a unique `SELF_VERIFY_SESSION` before
-you source the helpers; otherwise sessions in one worktree share paths and the second `sv_launch` refuses the busy
-socket. Socket and cache paths stay short: zmx puts one socket per pane in the cache dir and AF_UNIX paths are
-capped at 104 bytes. Explicit `SELF_VERIFY_DIR`, `SELF_VERIFY_SOCKET`, and `SELF_VERIFY_CACHE` override the
-defaults; set them before sourcing.
+and the cache is `/tmp/cdv-sv-cache-<uid>-<token>`. The token is a hash of the worktree root and the session id:
+`SELF_VERIFY_SESSION` if set, else `CLAUDE_CODE_SESSION_ID`, else the session's anchor process. The anchor is the
+nearest ancestor that is not a shell or a command wrapper (`env`, `nohup`, `make`, ...), taken as PID plus start
+time: the agent process for an agent (each Bash call is a child shell of it), the terminal's `login` for a person.
+So every shell and script of one session sources the helpers to the same paths, and two sessions never do, with no
+setup. Terminal and pane ids (`TERM_SESSION_ID`, `CODANS_PANE_ID`) are not used: every agent that an engine starts
+from one pane inherits them. Set `SELF_VERIFY_SESSION` when steps of one session run under different anchors, for
+example a step detached to launchd. Socket and cache paths stay short: zmx puts one socket per pane in the cache
+dir and AF_UNIX paths are capped at 104 bytes. Explicit `SELF_VERIFY_DIR`, `SELF_VERIFY_SOCKET`, and
+`SELF_VERIFY_CACHE` override the defaults; set them before sourcing.
 
 The helpers launch the Debug `Codans.app` of the worktree you source them in. `sv_app` asks
 `xcodebuild -showBuildSettings` (Debug, scheme `Codans`) for the app path from `git rev-parse --show-toplevel`, and

@@ -195,35 +195,51 @@ check "array is restored" test "$(defaults read "$test_domain" "NSSplitView Subv
 check "array keeps its type" test "$(defaults read-type "$test_domain" "NSSplitView Subview Frames main")" = "Type is array"
 
 # ---------- per-session defaults ----------
+# Run a command with no session variable and no explicit path variable.
+no_session_env() {
+  env -u SELF_VERIFY_DIR -u SELF_VERIFY_SOCKET -u SELF_VERIFY_CACHE -u SELF_VERIFY_SESSION \
+    -u CLAUDE_CODE_SESSION_ID -u SELF_VERIFY_KEEP_DIR TMPDIR="$scratch/tmp/" "$@"
+}
+print_paths='. "$1" && printf "SELF_VERIFY_DIR=%s\nSELF_VERIFY_SOCKET=%s\nSELF_VERIFY_CACHE=%s\n" "$SELF_VERIFY_DIR" "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"'
 # Print the default paths a fresh shell gets in <dir> for session id <id>
-# (empty: no session variable at all). Explicit path variables are unset.
+# (empty: no session variable, so the anchor process decides).
 session_paths() ( # session_paths <dir> <id> [extra env...]
   dir="$1" id="$2"
   shift 2
-  cd "$dir" && env -u SELF_VERIFY_DIR -u SELF_VERIFY_SOCKET -u SELF_VERIFY_CACHE -u SELF_VERIFY_SESSION \
-    -u CLAUDE_CODE_SESSION_ID -u CODANS_PANE_ID -u TERM_SESSION_ID TMPDIR="$scratch/tmp/" \
-    ${id:+SELF_VERIFY_SESSION="$id"} "$@" \
-    bash -c '. "$1" && printf "SELF_VERIFY_DIR=%s\nSELF_VERIFY_SOCKET=%s\nSELF_VERIFY_CACHE=%s\n" \
-      "$SELF_VERIFY_DIR" "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"' _ "$scripts_dir/helpers.sh"
+  cd "$dir" && no_session_env ${id:+SELF_VERIFY_SESSION="$id"} "$@" bash -c "$print_paths" _ "$scripts_dir/helpers.sh"
 )
+# A stand-in for an agent process: not a shell, and it runs each argument in
+# its own fresh `bash -c`, one after another, as an agent runs Bash calls.
+printf '%s\n' 'import subprocess, sys' 'for step in sys.argv[1:]:' '    subprocess.call(["bash", "-c", step])' \
+  >"$scratch/anchor.py"
+anchor() { no_session_env python3 "$scratch/anchor.py" "$@"; }
 mkdir -p "$scratch/tmp"
 session_paths "$wt_a" "a$$" >"$scratch/paths-a1"
 session_paths "$wt_a" "a$$" >"$scratch/paths-a2"
 session_paths "$wt_a" "b$$" >"$scratch/paths-b"
 session_paths "$wt_b" "a$$" >"$scratch/paths-wt-b"
 session_paths "$wt_a" "" CLAUDE_CODE_SESSION_ID="claude$$" >"$scratch/paths-claude"
-session_paths "$wt_a" "" CODANS_PANE_ID="pane$$" >"$scratch/paths-pane"
 session_paths "$wt_a" "" >"$scratch/paths-none"
+# One agent, two shells: the second goes through env and nohup wrappers.
+printf 'cd "$1" && shift && %s\n' "$print_paths" >"$scratch/print-paths.sh"
+step="bash '$scratch/print-paths.sh' '$wt_a' '$scripts_dir/helpers.sh'"
+anchor "$step" "env nohup $step" >"$scratch/paths-agent-x" 2>/dev/null
+anchor "$step" >"$scratch/paths-agent-y"
+sed -n 1,3p "$scratch/paths-agent-x" >"$scratch/paths-agent-x1"
+sed -n 4,6p "$scratch/paths-agent-x" >"$scratch/paths-agent-x2"
 no_shared_path() { # no_shared_path <file> <file>: no line is the same in both
   [ -s "$1" ] && [ -s "$2" ] && [ -z "$(sort "$1" "$2" | uniq -d)" ]
 }
+same_paths() { [ -s "$1" ] && cmp -s "$1" "$2"; }
 check "a session gets the same paths in every shell" cmp -s "$scratch/paths-a1" "$scratch/paths-a2"
 check "two sessions in one worktree share no path" no_shared_path "$scratch/paths-a1" "$scratch/paths-b"
 check "one session id in two worktrees shares no path" no_shared_path "$scratch/paths-a1" "$scratch/paths-wt-b"
 check "CLAUDE_CODE_SESSION_ID scopes the defaults" no_shared_path "$scratch/paths-claude" "$scratch/paths-none"
-check "CODANS_PANE_ID scopes the defaults" no_shared_path "$scratch/paths-pane" "$scratch/paths-none"
 check "SELF_VERIFY_SESSION wins over CLAUDE_CODE_SESSION_ID" cmp -s "$scratch/paths-a1" \
   <(session_paths "$wt_a" "a$$" CLAUDE_CODE_SESSION_ID="claude$$")
+check "no session id: each shell of one agent gets the same paths" same_paths "$scratch/paths-agent-x1" "$scratch/paths-agent-x2"
+check "no session id: two agents share no path" no_shared_path "$scratch/paths-agent-x1" "$scratch/paths-agent-y"
+check "no session id: an agent differs from its parent session" no_shared_path "$scratch/paths-agent-y" "$scratch/paths-none"
 check "the default dir is under TMPDIR" grep -q "^SELF_VERIFY_DIR=$scratch/tmp/codans-self-verify-$uid-" "$scratch/paths-a1"
 check "the default paths pass validation" sh -c '. "$1" && . "$2" && sv_validate_paths "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"' \
   _ "$scratch/paths-a1" "$scripts_dir/helpers.sh"
@@ -233,40 +249,47 @@ check "explicit path variables override the defaults" test "$(cd "$wt_a" && SELF
   SELF_VERIFY_DIR=/x/d SELF_VERIFY_SOCKET=/tmp/x.sock SELF_VERIFY_CACHE=/tmp/x-c bash -c \
   '. "$1" && echo "$SELF_VERIFY_DIR $SELF_VERIFY_SOCKET $SELF_VERIFY_CACHE"' _ "$scripts_dir/helpers.sh")" = "/x/d /tmp/x.sock /tmp/x-c"
 
-# ---------- two concurrent sessions ----------
-# Both use the default paths of their session; neither sees a busy socket,
-# and cleanup in one leaves the other running.
+# ---------- two concurrent agents, no session id ----------
+# Two agents in one worktree, neither with a session variable, each in its
+# own shells: launch; find the instance again; on "go", clean up. Neither
+# sees a busy socket, and cleanup in one leaves the other running.
+src="cd '$wt_a' && . '$scripts_dir/helpers.sh'"
 for s in one two; do
-  session_paths "$wt_a" "$s$$" >"$scratch/session-$s.env"
-  (. "$scratch/session-$s.env" && mkdir -p "$SELF_VERIFY_DIR" && cp "$scratch/sv/sv-tool" "$SELF_VERIFY_DIR/")
+  anchor "$src && mkdir -p \"\$SELF_VERIFY_DIR\" && cp '$scratch/sv/sv-tool' \"\$SELF_VERIFY_DIR/\" &&
+      printf 'SELF_VERIFY_DIR=%s\nSELF_VERIFY_SOCKET=%s\nSELF_VERIFY_CACHE=%s\n' \"\$SELF_VERIFY_DIR\" \
+        \"\$SELF_VERIFY_SOCKET\" \"\$SELF_VERIFY_CACHE\" >'$scratch/session-$s.env'
+      sv_launch >'$scratch/launch-$s' 2>&1; echo \$? >'$scratch/launched-$s'" \
+    "$src && sv_pid >'$scratch/pid-$s'; touch '$scratch/ready-$s'" \
+    "until [ -e '$scratch/go-$s' ]; do sleep 0.1; done; $src && sv_cleanup >'$scratch/cleanup-$s' 2>&1" &
+  eval "agent_$s=\$!"
 done
-in_session() { # in_session <name> <command...>: a fresh shell of that session
-  local name="$1"
-  shift
-  (set -a && . "$scratch/session-$name.env" && set +a && unset SELF_VERIFY_KEEP_DIR && . "$scripts_dir/helpers.sh" && "$@")
-}
-in_session one sv_launch >"$scratch/launch-one" 2>&1 &
-launch_one=$!
-in_session two sv_launch >"$scratch/launch-two" 2>&1 &
-launch_two=$!
-wait "$launch_one"; check "session one launches" test $? -eq 0
-wait "$launch_two"; check "session two launches while one runs" test $? -eq 0
-pid_one="$(in_session one sv_pid)"
-pid_two="$(in_session two sv_pid)"
-check "the sessions run two instances" sh -c '[ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]' _ "$pid_one" "$pid_two"
+for i in $(seq 1 300); do
+  [ -e "$scratch/ready-one" ] && [ -e "$scratch/ready-two" ] && break
+  sleep 0.1
+done
+check "agent one launches" test "$(cat "$scratch/launched-one" 2>/dev/null)" = 0
+check "agent two launches while one runs" test "$(cat "$scratch/launched-two" 2>/dev/null)" = 0
+pid_one="$(cat "$scratch/pid-one" 2>/dev/null)"
+pid_two="$(cat "$scratch/pid-two" 2>/dev/null)"
+check "a later shell of each agent finds its instance" sh -c '[ -n "$1" ] && [ -n "$2" ]' _ "$pid_one" "$pid_two"
+check "the agents run two instances" test "$pid_one" != "$pid_two"
+check "the agents share no path" no_shared_path "$scratch/session-one.env" "$scratch/session-two.env"
 (. "$scratch/session-two.env" && cd "$SELF_VERIFY_CACHE" && exec sleep 300) &
 daemon_two=$!
 sleep 0.2
-in_session one sv_cleanup >"$scratch/cleanup-one" 2>&1; check "session one cleans up" test $? -eq 0
-check_not "session one's instance is gone" kill -0 "$pid_one"
-check "session two's instance still runs" kill -0 "$pid_two"
-check "session two's daemon still runs" kill -0 "$daemon_two"
-check "session two still answers on its socket" in_session two sv_pid
-check "session two's dir, socket, and cache are intact" sh -c '. "$1" && test -f "$SELF_VERIFY_DIR/conf/settings.json" &&
+touch "$scratch/go-one"
+wait "$agent_one"
+check "agent one cleans up" grep -q 'cleanup done' "$scratch/cleanup-one"
+check_not "agent one's instance is gone" kill -0 "$pid_one"
+check "agent two's instance still runs" kill -0 "$pid_two"
+check "agent two's daemon still runs" kill -0 "$daemon_two"
+check "agent two's dir, socket, and cache are intact" sh -c '. "$1" && test -f "$SELF_VERIFY_DIR/conf/settings.json" &&
   test -S "$SELF_VERIFY_SOCKET" && test -d "$SELF_VERIFY_CACHE"' _ "$scratch/session-two.env"
-in_session two sv_cleanup >"$scratch/cleanup-two" 2>&1; check "session two cleans up" test $? -eq 0
-check_not "session two's instance is gone" kill -0 "$pid_two"
-check_not "session two's daemon is gone" kill -0 "$daemon_two"
+touch "$scratch/go-two"
+wait "$agent_two"
+check "agent two cleans up" grep -q 'cleanup done' "$scratch/cleanup-two"
+check_not "agent two's instance is gone" kill -0 "$pid_two"
+check_not "agent two's daemon is gone" kill -0 "$daemon_two"
 
 printf '\n%s failure(s)\n' "$failures"
 [ "$failures" -eq 0 ]
