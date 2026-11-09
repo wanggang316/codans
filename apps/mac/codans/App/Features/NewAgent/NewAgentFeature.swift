@@ -51,20 +51,19 @@ struct NewAgentFeature {
     case branch(String)
   }
 
+  /// The agent and the directory a skill scan reads for.
+  struct SkillScope: Equatable {
+    let profile: AgentProfile
+    /// Where the agent starts, for its project-level skills.
+    let projectStart: URL?
+  }
+
   /// The sidebar's Add Project menu, offered while no project exists.
   enum AddProjectKind: Equatable, CaseIterable {
     case openFolder
     case cloneRepository
     case openRemoteProject
     case newWorkspace
-  }
-
-  /// What one skill scan reads for: the profile, whose home and environment
-  /// decide the user and plugin skills, and the directory the agent starts
-  /// in, whose Claude Code settings can turn plugins on or off.
-  struct SkillScope: Equatable, Sendable {
-    var profile: AgentProfile
-    var projectDirectory: URL?
   }
 
   /// What the user set in a dialog they closed without sending. The next
@@ -105,11 +104,10 @@ struct NewAgentFeature {
     var prompt = ""
     /// Agent Skills the selected agent can call, for prompt completion.
     var skills: [AgentSkillEntry] = []
-    /// The scope `skills` were read for. Skills of another profile or
-    /// directory are never shown.
+    /// What `skills` were read for. The profile's home and environment and
+    /// the directory the agent starts in decide which skills exist, so the
+    /// skills of another scope are never shown.
     var skillsScope: SkillScope?
-    /// The scope of the latest scan. Only its result is taken.
-    var skillsRequest: SkillScope?
     var submitError: String?
     /// Draft to restore on appear. The worktree part waits until the form's
     /// options load: the base ref, the branch-name checks, and the branch
@@ -156,6 +154,20 @@ struct NewAgentFeature {
     var skillLocation: SkillLocation {
       guard let agent = selectedAgent, selectedProject?.isRemote == false else { return .none }
       return agent.descriptor.skillLocation
+    }
+
+    /// Why the prompt offers no skills, for the Skills button's tooltip.
+    /// `nil` when typing the call prefix opens the list.
+    var skillsUnavailableReason: String? {
+      guard selectedProject != nil else { return "Add a project to see its skills" }
+      guard let agent = selectedAgent else { return "Choose an agent to see its skills" }
+      if selectedProject?.isRemote == true {
+        return "Skill suggestions are not available for remote projects"
+      }
+      guard agent.descriptor.skillLocation.supportsCompletion else {
+        return "Skill suggestions are not available for \(agent.descriptor.displayName)"
+      }
+      return nil
     }
 
     /// The branch-name field and the worktree options apply.
@@ -209,6 +221,9 @@ struct NewAgentFeature {
     /// (`nil` appends to the end).
     case filesSelected([URL], selection: Range<Int>?)
     case skillsLoaded([AgentSkillEntry], for: SkillScope)
+    /// The Skills button: put the call prefix at the prompt's caret or
+    /// selection (UTF-16 offsets, `nil` for the end), so the list opens.
+    case skillsButtonTapped(selection: Range<Int>?)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -287,13 +302,22 @@ struct NewAgentFeature {
         return .none
 
       case .skillsLoaded(let skills, let scope):
-        // A scan that finished after the agent or the target changed is
-        // dropped.
-        guard state.skillLocation.supportsCompletion, state.skillsRequest == scope else {
+        // A scan that finished after the agent, project, or target changed
+        // is dropped.
+        guard state.skillLocation.supportsCompletion, skillScope(state: state) == scope else {
           return .none
         }
         state.skills = skills
         state.skillsScope = scope
+        return .none
+
+      case .skillsButtonTapped(let selection):
+        let location = state.skillLocation
+        guard state.skillsUnavailableReason == nil, let prefix = location.invocationStyle.prefix,
+          let result = ComposerSkillCompletion.insertingPrefix(
+            prefix, into: state.prompt, selection: selection, position: location.invocationPosition)
+        else { return .none }
+        state.prompt = result.text
         return .none
 
       case .sendTapped:
@@ -357,65 +381,40 @@ struct NewAgentFeature {
   private nonisolated enum CancelID { case skills }
 
   /// Reads the selected agent's skills again. The agent's home and
-  /// environment, and the directory it starts in, decide which skills it
-  /// resolves, so the skills of another scope go at once instead of when
-  /// the new scan ends (ADR 0010).
+  /// environment come from the profile, so a profile edit reloads too.
+  /// When the profile or the start directory changes, the old skills go at
+  /// once instead of when the scan ends (ADR 0010).
   private func loadSkills(state: inout State) -> Effect<Action> {
-    guard state.skillLocation.supportsCompletion, let profile = state.selectedAgent else {
+    guard state.skillLocation.supportsCompletion, let scope = skillScope(state: state) else {
       state.skills = []
       state.skillsScope = nil
-      state.skillsRequest = nil
       return .cancel(id: CancelID.skills)
     }
-    let scope = SkillScope(profile: profile, projectDirectory: skillProjectDirectory(state: state))
     if state.skillsScope != scope {
       state.skills = []
       state.skillsScope = nil
     }
-    state.skillsRequest = scope
     let client = agentSkillClient
     return .run { send in
-      await send(.skillsLoaded(client.load(scope.profile, scope.projectDirectory), for: scope))
+      await send(.skillsLoaded(client.load(scope.profile, scope.projectStart), for: scope))
     }
     .cancellable(id: CancelID.skills, cancelInFlight: true)
   }
 
-  /// The directory the agent starts in, by the rules of `send`: the one
-  /// folder of a folder or workspace project, the worktree that holds the
-  /// chosen branch, or else the repository root. A new worktree does not
-  /// exist yet; its checkout comes from the same repository.
-  private func skillProjectDirectory(state: State) -> URL? {
-    guard let projectID = state.projectID,
-      let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
-      !project.isRemote
-    else { return nil }
-    let live = project.worktrees.filter { !$0.archived }
-    let path: String
-    if state.worktree == nil {
-      path = (live.first { $0.id == project.selectedWorktreeID } ?? live.first)?.path ?? project.rootPath
-    } else if case .branch(let ref) = state.target, let form = state.worktree,
-      let (branch, _) = Self.branch(for: ref, form: form),
-      let worktree = live.first(where: { $0.branch == branch })
-    {
-      path = worktree.path
-    } else {
-      path = project.gitRoot ?? project.rootPath
+  /// The selected agent and the directory it would start in for the
+  /// selected project and target.
+  private func skillScope(state: State) -> SkillScope? {
+    guard let profile = state.selectedAgent else { return nil }
+    let project = hierarchyClient.snapshot().projects.first { $0.id == state.projectID }
+    var branch: String?
+    if case .branch(let ref) = state.target, let form = state.worktree {
+      branch = Self.branch(for: ref, locals: Set(form.localBranchNamesByLower.values))?.name
     }
-    return URL(fileURLWithPath: path, isDirectory: true)
-  }
-
-  /// The local branch a target `ref` sends the agent to, and the
-  /// remote-tracking ref to create it from when it has no local copy. A
-  /// local branch name wins over reading `ref` as `<remote>/<branch>`, so
-  /// `feature/foo` stays `feature/foo`. `nil` when `ref` is neither.
-  private static func branch(
-    for ref: String, form: CreateWorktreeFeature.State
-  ) -> (branch: String, remoteRef: String?)? {
-    let locals = Set(form.localBranchNamesByLower.values)
-    if locals.contains(ref) { return (ref, nil) }
-    guard let slash = ref.firstIndex(of: "/") else { return nil }
-    let branch = String(ref[ref.index(after: slash)...])
-    return (branch, locals.contains(branch) ? nil : ref)
+    return SkillScope(
+      profile: profile,
+      projectStart: project.flatMap {
+        SkillLocationResolver.projectStartDirectory(in: $0, branch: branch)
+      })
   }
 
   /// Puts back what `onAppear` can set at once. The form is seeded fresh, so
@@ -465,10 +464,7 @@ struct NewAgentFeature {
     }
     guard let form = state.worktree else {
       // A folder or workspace project: its one worktree.
-      let worktree =
-        project.worktrees.first { $0.id == project.selectedWorktreeID && !$0.archived }
-        ?? project.worktrees.first { !$0.archived }
-      guard let worktree else {
+      guard let worktree = project.soleWorkingWorktree else {
         state.submitError = "This project has no folder to start the agent in."
         return .none
       }
@@ -494,7 +490,8 @@ struct NewAgentFeature {
     _ ref: String, in project: Project, form: CreateWorktreeFeature.State,
     profileID: UUID, prompt: String?, state: inout State
   ) -> Effect<Action> {
-    guard let (branch, remoteRef) = Self.branch(for: ref, form: form) else {
+    guard let (branch, remoteRef) = Self.branch(for: ref, locals: Set(form.localBranchNamesByLower.values))
+    else {
       state.submitError = "\"\(ref)\" is not a branch of this project."
       return .none
     }
@@ -557,6 +554,16 @@ struct NewAgentFeature {
       launchAgentPrompt: prompt
     )
     return .send(.delegate(.createWorktree(pending)))
+  }
+
+  /// The local branch `ref` names, and the remote-tracking ref to create it
+  /// from when no local copy exists. `nil` when `ref` is neither a local
+  /// branch nor a remote-tracking ref.
+  static func branch(for ref: String, locals: Set<String>) -> (name: String, remoteRef: String?)? {
+    if locals.contains(ref) { return (ref, nil) }
+    guard let slash = ref.firstIndex(of: "/") else { return nil }
+    let name = String(ref[ref.index(after: slash)...])
+    return (name, locals.contains(name) ? nil : ref)
   }
 
   /// The prompt as the agent receives it; blank means none.

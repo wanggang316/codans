@@ -12,40 +12,48 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
   public let source: AgentSkillSource
   /// The skill folder.
   public let url: URL
+  /// The frontmatter sets `disable-model-invocation: true`: the model may
+  /// not call the skill, so only a call the agent itself expands runs it.
+  /// `false` when the frontmatter cannot be read.
+  public let disablesModelInvocation: Bool
 
   public var id: String { name }
 
-  public init(name: String, summary: String?, source: AgentSkillSource, url: URL) {
+  public init(
+    name: String, summary: String?, source: AgentSkillSource, url: URL,
+    disablesModelInvocation: Bool = false
+  ) {
     self.name = name
     self.summary = summary
     self.source = source
     self.url = url
+    self.disablesModelInvocation = disablesModelInvocation
   }
 }
 
 /// Reads the `*/SKILL.md` files in skill directories.
 public nonisolated enum SkillScanner {
-  /// Resolves and scans every skill directory of `profile` launched in
-  /// `projectDirectory`, off the caller's actor.
+  /// Scans `directories` off the caller's actor. A missing directory
+  /// contributes nothing. For one name the source that comes first in
+  /// `precedence` wins, then the earlier directory; a source not in
+  /// `precedence` comes last. The result is sorted by name.
   @concurrent
   public static func scan(
-    for profile: AgentProfile, projectDirectory: URL?
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
   ) async -> [AgentSkillEntry] {
-    scanSync(SkillLocationResolver.directories(for: profile, projectDirectory: projectDirectory))
+    scanSync(directories, precedence: precedence)
   }
 
-  /// Scans `directories` in order, off the caller's actor. A missing
-  /// directory contributes nothing. For one name the first directory wins,
-  /// and the result is sorted by name.
-  @concurrent
-  public static func scan(_ directories: [SkillDirectory]) async -> [AgentSkillEntry] {
-    scanSync(directories)
-  }
-
-  static func scanSync(_ directories: [SkillDirectory]) -> [AgentSkillEntry] {
+  static func scanSync(
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+  ) -> [AgentSkillEntry] {
+    let rank = { (source: AgentSkillSource) in precedence.firstIndex(of: source) ?? precedence.count }
+    let ordered = directories.enumerated()
+      .sorted { (rank($0.element.source), $0.offset) < (rank($1.element.source), $1.offset) }
+      .map(\.element)
     var seen = Set<String>()
     var entries: [AgentSkillEntry] = []
-    for directory in directories {
+    for directory in ordered {
       for entry in skills(in: directory) where seen.insert(entry.name).inserted {
         entries.append(entry)
       }
@@ -79,16 +87,19 @@ public nonisolated enum SkillScanner {
         name: directory.namespace.map { "\($0):\(name)" } ?? name,
         summary: frontmatter?.summary,
         source: directory.source,
-        url: folder
+        url: folder,
+        disablesModelInvocation: frontmatter?.disablesModelInvocation ?? false
       )
     }
   }
 }
 
-/// `name` and `description` from the YAML frontmatter of a `SKILL.md`.
+/// `name`, `description`, and `disable-model-invocation` from the YAML
+/// frontmatter of a `SKILL.md`.
 nonisolated struct SkillFrontmatter: Equatable {
   var name: String?
   var summary: String?
+  var disablesModelInvocation = false
 
   /// `nil` when the file has no frontmatter block or the block is not a
   /// YAML mapping. Then the skill is listed by its folder name alone.
@@ -101,7 +112,9 @@ nonisolated struct SkillFrontmatter: Equatable {
     let summary = mapping["description"]?.string.flatMap { description in
       description.split(whereSeparator: { $0.isNewline }).lazy.map(trimmed).first { !$0.isEmpty }
     }
-    return SkillFrontmatter(name: name, summary: summary)
+    let disablesModelInvocation = mapping["disable-model-invocation"]?.bool ?? false
+    return SkillFrontmatter(
+      name: name, summary: summary, disablesModelInvocation: disablesModelInvocation)
   }
 
   /// The text between a leading `---` line and the next `---` line.

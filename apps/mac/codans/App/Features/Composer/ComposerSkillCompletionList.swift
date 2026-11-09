@@ -73,6 +73,28 @@ struct ComposerSkillCompletionList: View {
   }
 }
 
+/// Button a composer keeps beside its file picker: puts the selected
+/// agent's skill call prefix at the caret, so the skill list opens there.
+/// Disabled with `unavailableReason` as its tooltip when the composer
+/// offers no skills.
+struct ComposerSkillsButton: View {
+  let unavailableReason: String?
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: "sparkles")
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.borderless)
+    .disabled(unavailableReason != nil)
+    .help(unavailableReason ?? "Insert a skill")
+    .accessibilityLabel("Skills")
+    .accessibilityHint(unavailableReason ?? "")
+  }
+}
+
 extension View {
   /// Drives `completion` from a composer editor and owns the editor's
   /// Return and Escape. The open list takes Return, Tab, the arrows, and

@@ -2,6 +2,7 @@ import Foundation
 
 /// Where a skill comes from, shown on its completion row.
 public nonisolated enum AgentSkillSource: String, Equatable, Sendable, Hashable {
+  case project = "Project"
   case user = "User"
   case plugin = "Plugin"
 }
@@ -35,32 +36,18 @@ public nonisolated struct SkillDirectory: Equatable, Sendable, Hashable {
 
 /// Turns a profile's Skill Location into the directories its launched agent
 /// reads. The user's home and the state root are inputs, so tests do not
-/// touch the real ones. Only `pluginDirectories` reads files.
+/// touch the real ones. The repository walk and the plugin registry read
+/// files, so call `directories` off the main actor.
 public nonisolated enum SkillLocationResolver {
-  /// Every directory to scan for `profile` launched in `projectDirectory`:
-  /// user skills, then plugin skills. Reads plugin registry and settings
-  /// files, so call it off the main actor.
-  public static func directories(
-    for profile: AgentProfile,
-    projectDirectory: URL?,
-    userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
-    stateDirectory: URL = AppDirectories.stateDirectory()
-  ) -> [SkillDirectory] {
-    userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
-      + pluginDirectories(
-        for: profile, projectDirectory: projectDirectory, userHome: userHome,
-        stateDirectory: stateDirectory)
-  }
-
   /// Skill directories of the plugins that `profile`'s agent, launched in
-  /// `projectDirectory`, has enabled. The registry lives under its config
+  /// `projectStart`, has enabled. The registry lives under its config
   /// root; the user, project, local, `--settings`, and managed settings
   /// decide which plugins are on. A file that is missing or cannot be read
   /// gives no plugins (registry) or no say (settings). Settings flags in the
   /// profile's extra arguments that cannot be read give no plugins.
   static func pluginDirectories(
     for profile: AgentProfile,
-    projectDirectory: URL?,
+    projectStart: URL?,
     userHome: URL,
     stateDirectory: URL,
     managedSettings: URL = ClaudePluginRegistry.managedSettings
@@ -73,7 +60,7 @@ public nonisolated enum SkillLocationResolver {
     case .claudeCode:
       let launchSettings: URL?
       let flags = ClaudePluginRegistry.launchSettings(
-        extraArguments: profile.extraArguments, projectDirectory: projectDirectory, userHome: userHome)
+        extraArguments: profile.extraArguments, projectStart: projectStart, userHome: userHome)
       switch flags {
       case .none: launchSettings = nil
       case .file(let url): launchSettings = url
@@ -81,7 +68,7 @@ public nonisolated enum SkillLocationResolver {
       }
       let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       return ClaudePluginRegistry.skillDirectories(
-        configRoot: root, home: home, projectDirectory: projectDirectory,
+        configRoot: root, home: home, projectStart: projectStart,
         launchSettings: launchSettings, managedSettings: managedSettings)
     }
   }
@@ -122,6 +109,105 @@ public nonisolated enum SkillLocationResolver {
       }
       let url = path.isEmpty ? base : base.appending(path: path, directoryHint: .isDirectory)
       return SkillDirectory(url: url.standardizedFileURL, source: .user)
+    }
+  }
+
+  /// Project-level, user-level, and enabled plugin skill directories for
+  /// `profile`, in that order. `projectStart` is the directory the agent
+  /// starts in (see `projectStartDirectory(in:branch:)`), `nil` when there
+  /// is none.
+  public static func directories(
+    for profile: AgentProfile,
+    projectStart: URL?,
+    userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
+    stateDirectory: URL = AppDirectories.stateDirectory(),
+    isRepositoryRoot: (URL) -> Bool = hasGitEntry
+  ) -> [SkillDirectory] {
+    let project =
+      projectStart.map {
+        projectDirectories(for: profile, startDirectory: $0, isRepositoryRoot: isRepositoryRoot)
+      } ?? []
+    return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
+      + pluginDirectories(
+        for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory)
+  }
+
+  /// The directory an agent launched in `project` starts in, from which it
+  /// searches project-level skills. `branch` is the branch the agent works
+  /// on, `nil` for a new worktree.
+  ///
+  /// - An existing worktree that holds `branch`: that worktree.
+  /// - A new worktree, or a branch no worktree holds: the worktree does not
+  ///   exist yet, so the project's main checkout stands in for it.
+  /// - A folder or a workspace project: its one working directory.
+  /// - A remote project: `nil`. codans cannot read the other host.
+  public static func projectStartDirectory(in project: Project, branch: String?) -> URL? {
+    guard !project.isRemote else { return nil }
+    let path: String?
+    if !project.supportsWorktrees || project.isWorkspace {
+      path = project.soleWorkingWorktree?.path
+    } else if let branch,
+      let worktree = project.worktrees.first(where: { !$0.archived && $0.branch == branch })
+    {
+      path = worktree.path
+    } else {
+      path = project.gitRoot ?? project.rootPath
+    }
+    return path.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+  }
+
+  /// Project-level skill directories for `profile`, searched from
+  /// `startDirectory` by the agent's `projectSearch`, nearest first. A walk
+  /// that finds no repository root reads the start directory only.
+  public static func projectDirectories(
+    for profile: AgentProfile,
+    startDirectory: URL,
+    isRepositoryRoot: (URL) -> Bool = hasGitEntry
+  ) -> [SkillDirectory] {
+    projectDirectories(
+      in: profile.descriptor.skillLocation, startDirectory: startDirectory,
+      isRepositoryRoot: isRepositoryRoot)
+  }
+
+  static func projectDirectories(
+    in location: SkillLocation, startDirectory: URL, isRepositoryRoot: (URL) -> Bool
+  ) -> [SkillDirectory] {
+    guard location.supportsCompletion, !location.projectDirectories.isEmpty else { return [] }
+    let start = startDirectory.standardizedFileURL
+    var searched = [start]
+    if location.projectSearch == .walkUpToRepositoryRoot {
+      searched = walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
+    }
+    return searched.flatMap { directory in
+      location.projectDirectories.map { relative in
+        SkillDirectory(
+          url: directory.appending(path: relative, directoryHint: .isDirectory).standardizedFileURL,
+          source: .project)
+      }
+    }
+  }
+
+  /// `true` when `directory` holds a `.git` folder or a worktree's `.git`
+  /// file.
+  public static func hasGitEntry(_ directory: URL) -> Bool {
+    FileManager.default.fileExists(
+      atPath: directory.appending(path: ".git", directoryHint: .notDirectory).path(
+        percentEncoded: false))
+  }
+
+  /// `start` and its parents up to the first repository root, or `nil`
+  /// when no parent is one.
+  private static func walkUp(from start: URL, isRepositoryRoot: (URL) -> Bool) -> [URL]? {
+    var path = start.path(percentEncoded: false)
+    if path.count > 1, path.hasSuffix("/") { path.removeLast() }
+    var chain: [URL] = []
+    while true {
+      let directory = URL(fileURLWithPath: path, isDirectory: true)
+      chain.append(directory)
+      if isRepositoryRoot(directory) { return chain }
+      let parent = (path as NSString).deletingLastPathComponent
+      if parent == path || parent.isEmpty { return nil }
+      path = parent
     }
   }
 

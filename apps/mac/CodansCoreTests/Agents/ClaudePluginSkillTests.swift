@@ -60,16 +60,16 @@ struct ClaudePluginSkillTests {
       to: configRoot.appending(path: "settings.json"))
   }
 
-  private func plugins(_ profile: AgentProfile, in projectDirectory: URL? = nil) -> [SkillDirectory] {
+  private func plugins(_ profile: AgentProfile, in projectStart: URL? = nil) -> [SkillDirectory] {
     SkillLocationResolver.pluginDirectories(
-      for: profile, projectDirectory: projectDirectory, userHome: home, stateDirectory: stateRoot,
+      for: profile, projectStart: projectStart, userHome: home, stateDirectory: stateRoot,
       managedSettings: managed)
   }
 
-  private func scan(_ profile: AgentProfile, in projectDirectory: URL? = nil) -> [AgentSkillEntry] {
+  private func scan(_ profile: AgentProfile, in projectStart: URL? = nil) -> [AgentSkillEntry] {
     SkillScanner.scanSync(
       SkillLocationResolver.userDirectories(for: profile, userHome: home, stateDirectory: stateRoot)
-        + plugins(profile, in: projectDirectory))
+        + plugins(profile, in: projectStart))
   }
 
   private func enable(_ flags: String, in file: URL) throws {
@@ -249,7 +249,7 @@ struct ClaudePluginSkillTests {
     let user = URL(fileURLWithPath: "/Users/me", isDirectory: true)
     func read(_ arguments: String, in directory: URL? = project) -> ClaudePluginRegistry.LaunchSettings {
       ClaudePluginRegistry.launchSettings(
-        extraArguments: arguments, projectDirectory: directory, userHome: user)
+        extraArguments: arguments, projectStart: directory, userHome: user)
     }
     #expect(read("") == .none)
     #expect(read("--model opus --verbose") == .none)
@@ -296,7 +296,7 @@ struct ClaudePluginSkillTests {
     for fragment in fragments {
       #expect(
         ClaudePluginRegistry.launchSettings(
-          extraArguments: fragment, projectDirectory: project, userHome: home) == .unknown,
+          extraArguments: fragment, projectStart: project, userHome: home) == .unknown,
         "\(fragment)")
       let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
       #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(fragment)")
@@ -322,7 +322,7 @@ struct ClaudePluginSkillTests {
     for fragment in fragments {
       #expect(
         ClaudePluginRegistry.launchSettings(
-          extraArguments: fragment, projectDirectory: project, userHome: home) == .unknown,
+          extraArguments: fragment, projectStart: project, userHome: home) == .unknown,
         "\(fragment)")
       let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
       #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(fragment)")
@@ -335,11 +335,34 @@ struct ClaudePluginSkillTests {
     for fragment in ["", "--verbose", "--model opus --permission-mode=plan", "--add-dir ~/notes a=b"] {
       #expect(
         ClaudePluginRegistry.launchSettings(
-          extraArguments: fragment, projectDirectory: project, userHome: home) == .none,
+          extraArguments: fragment, projectStart: project, userHome: home) == .none,
         "\(fragment)")
       let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
       #expect(scan(profile, in: project).map(\.name) == ["docs:pdf", "mine", "pro:design"], "\(fragment)")
     }
+  }
+
+  @Test
+  func projectAndUserSkillsStayWhenTheRegistryIsMalformed() throws {
+    let root = home.appending(path: ".claude")
+    try fixture(root: root)
+    try skill("team", in: project.appending(path: ".claude/skills"))
+    let profile = AgentProfile(kind: .claudeCode)
+    let all = SkillScanner.scanSync(
+      SkillLocationResolver.directories(
+        for: profile, projectStart: project, userHome: home, stateDirectory: stateRoot,
+        isRepositoryRoot: { $0.standardizedFileURL == project.standardizedFileURL }),
+      precedence: profile.descriptor.skillLocation.precedence)
+    #expect(all.map(\.name) == ["docs:pdf", "mine", "pro:design", "team"])
+    #expect(all.map(\.source) == [.plugin, .user, .plugin, .project])
+
+    try write("{not json", to: root.appending(path: "plugins/installed_plugins.json"))
+    let left = SkillScanner.scanSync(
+      SkillLocationResolver.directories(
+        for: profile, projectStart: project, userHome: home, stateDirectory: stateRoot,
+        isRepositoryRoot: { $0.standardizedFileURL == project.standardizedFileURL }),
+      precedence: profile.descriptor.skillLocation.precedence)
+    #expect(left.map(\.name) == ["mine", "team"])
   }
 
   @Test

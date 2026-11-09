@@ -35,7 +35,7 @@ nonisolated enum ClaudePluginRegistry {
   /// profile with any shell syntax in its extra arguments gets no plugin
   /// skills; user and project skills stay (ADR 0010).
   static func launchSettings(
-    extraArguments: String, projectDirectory: URL?, userHome: URL
+    extraArguments: String, projectStart: URL?, userHome: URL
   ) -> LaunchSettings {
     let tokens = extraArguments.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
     guard extraArguments.allSatisfy(isPlainShellCharacter), tokens.allSatisfy(isPlainWord) else {
@@ -62,8 +62,8 @@ nonisolated enum ClaudePluginRegistry {
     if value.hasPrefix("~/") {
       return .file(userHome.appending(path: String(value.dropFirst(2))).standardizedFileURL)
     }
-    guard let projectDirectory else { return .unknown }
-    return .file(projectDirectory.appending(path: value).standardizedFileURL)
+    guard let projectStart else { return .unknown }
+    return .file(projectStart.appending(path: value).standardizedFileURL)
   }
 
   /// A character the shell keeps as it is inside a word, or a blank between
@@ -86,12 +86,12 @@ nonisolated enum ClaudePluginRegistry {
   /// first: user, project, local project, `--settings`, managed. Claude Code
   /// reads the project files in the directory it starts in.
   static func settingsFiles(
-    configRoot: URL, projectDirectory: URL?, launchSettings: URL?, managedSettings: URL
+    configRoot: URL, projectStart: URL?, launchSettings: URL?, managedSettings: URL
   ) -> [URL] {
     var files = [configRoot.appending(path: "settings.json", directoryHint: .notDirectory)]
-    if let projectDirectory {
-      files.append(projectDirectory.appending(path: ".claude/settings.json", directoryHint: .notDirectory))
-      files.append(projectDirectory.appending(path: ".claude/settings.local.json", directoryHint: .notDirectory))
+    if let projectStart {
+      files.append(projectStart.appending(path: ".claude/settings.json", directoryHint: .notDirectory))
+      files.append(projectStart.appending(path: ".claude/settings.local.json", directoryHint: .notDirectory))
     }
     if let launchSettings { files.append(launchSettings) }
     files.append(managedSettings)
@@ -99,10 +99,10 @@ nonisolated enum ClaudePluginRegistry {
   }
 
   /// The skill directories of every enabled plugin under `configRoot`, as
-  /// enabled for an agent that starts in `projectDirectory` with the
+  /// enabled for an agent that starts in `projectStart` with the
   /// `--settings` file `launchSettings`.
   static func skillDirectories(
-    configRoot: URL, home: URL, projectDirectory: URL?, launchSettings: URL? = nil,
+    configRoot: URL, home: URL, projectStart: URL?, launchSettings: URL? = nil,
     managedSettings: URL = managedSettings
   ) -> [SkillDirectory] {
     let registry = configRoot.appending(path: "plugins/installed_plugins.json", directoryHint: .notDirectory)
@@ -111,7 +111,7 @@ nonisolated enum ClaudePluginRegistry {
       return []
     }
     let settings = settingsFiles(
-      configRoot: configRoot, projectDirectory: projectDirectory, launchSettings: launchSettings,
+      configRoot: configRoot, projectStart: projectStart, launchSettings: launchSettings,
       managedSettings: managedSettings
     ).compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
     return enabledPlugins(registry: registryData, settings: settings, home: home).flatMap { plugin in

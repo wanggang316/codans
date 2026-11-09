@@ -46,6 +46,8 @@ final class ComposerSkillCompletion {
   private(set) var query: Query?
   private(set) var matches: [AgentSkillEntry] = []
   private(set) var highlightedIndex = 0
+  /// Only whitespace comes before the call being typed.
+  private var callIsAtPromptStart = false
   /// Start of the call the user closed with Escape. The list stays closed
   /// for that call until the caret leaves it.
   private var dismissedStart: Int?
@@ -75,6 +77,7 @@ final class ComposerSkillCompletion {
       highlightedIndex = 0
     }
     query = found
+    callIsAtPromptStart = Self.isAtPromptStart(found.range.lowerBound, in: text)
     refilter()
   }
 
@@ -133,7 +136,11 @@ final class ComposerSkillCompletion {
   /// load later can still match the call being typed.
   private func refilter() {
     guard let query else { return }
-    matches = Self.filter(skills, query: query.text)
+    // A call after other text runs only when the model calls the skill
+    // (Claude Code's Skill tool), so a skill the model may not call is
+    // offered only at the prompt start (ADR 0010).
+    let callable = callIsAtPromptStart ? skills : skills.filter { !$0.disablesModelInvocation }
+    matches = Self.filter(callable, query: query.text)
     if highlightedIndex >= matches.count {
       highlightedIndex = 0
     }
@@ -164,6 +171,13 @@ final class ComposerSkillCompletion {
     return Query(range: lower..<caret, text: queryText)
   }
 
+  /// Whether only whitespace comes before the UTF-16 `offset`.
+  nonisolated static func isAtPromptStart(_ offset: Int, in text: String) -> Bool {
+    text.utf16.prefix(offset).allSatisfy { unit in
+      Unicode.Scalar(unit).map(Character.init)?.isWhitespace ?? false
+    }
+  }
+
   /// Fuzzy match on name and description. Order: name prefix, name
   /// substring, name subsequence, then description match; ties keep the
   /// input order. An empty query keeps every skill.
@@ -189,6 +203,28 @@ final class ComposerSkillCompletion {
       return (rank, offset, skill)
     }
     return ranked.sorted { ($0.rank, $0.offset) < ($1.rank, $1.offset) }.map(\.skill)
+  }
+
+  /// The text after the Skills button put `prefix` where a call can start,
+  /// and the caret just after it, so `update` opens the list there. The
+  /// prefix replaces `selection` (`nil` is the end of the text) and gets a
+  /// space before it after a word. A `leading` call goes at the prompt
+  /// start instead. `nil` when `selection` is outside `text`.
+  nonisolated static func insertingPrefix(
+    _ prefix: Character, into text: String, selection: Range<Int>?,
+    position: SkillInvocationPosition
+  ) -> (text: String, caret: Int)? {
+    let utf16 = text.utf16
+    let range = selection ?? utf16.count..<utf16.count
+    guard range.lowerBound >= 0, range.upperBound <= utf16.count else { return nil }
+    if position == .leading {
+      let start = text.prefix { $0.isWhitespace }.utf16.count
+      return replacing(start..<start, in: text, with: String(prefix))
+    }
+    let lower = utf16.index(utf16.startIndex, offsetBy: range.lowerBound)
+    guard let lowerIndex = lower.samePosition(in: text) else { return nil }
+    let atTokenStart = text[..<lowerIndex].last?.isWhitespace ?? true
+    return replacing(range, in: text, with: atTokenStart ? String(prefix) : " \(prefix)")
   }
 
   nonisolated static func replacing(
