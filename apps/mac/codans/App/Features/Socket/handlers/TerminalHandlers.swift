@@ -135,15 +135,23 @@ public final class TerminalHandlers {
     // daemon cannot be read before the send, nothing is sent.
     var before: String?
     let captureFromDaemon = req.capture == true && attached
-    if captureFromDaemon {
-      guard let dump = await readDaemonScreen(req.paneID) else {
-        return .failed(
-          .internal("pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry"))
+    // On a surface this call attached, replayed rows keep landing after the
+    // send, so a surface change proves nothing: the wait takes its evidence
+    // that the shell ran the text from the daemon screen instead.
+    var daemonBefore: String?
+    if attached, req.wait != nil {
+      daemonBefore = await readDaemonScreen(req.paneID)
+      if captureFromDaemon {
+        guard let daemonBefore else {
+          return .failed(
+            .internal("pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry"))
+        }
+        before = daemonBefore
       }
-      before = dump
     }
-    // The wait compares the surface with this pre-send screen: only a change
-    // after the send is evidence that the shell took the text.
+    // Without a daemon baseline the wait compares the surface with this
+    // pre-send screen: only a change after the send is evidence that the
+    // shell took the text.
     let surfaceBefore = req.wait != nil ? sink.readText(paneID: req.paneID, extent: .screen) : nil
     if req.capture == true, !captureFromDaemon {
       guard let surfaceBefore else {
@@ -157,8 +165,10 @@ public final class TerminalHandlers {
     }
     var result = SendInputResult(delivered: true)
     if let wait = req.wait {
+      let evidence: ProgressEvidence =
+        daemonBefore.map { .daemon(before: $0) } ?? .surface(before: surfaceBefore)
       let outcome = await waitForCompletion(
-        paneID: req.paneID, wait: wait, sink: sink, before: surfaceBefore, sent: req.text)
+        paneID: req.paneID, wait: wait, sink: sink, evidence: evidence, sent: req.text)
       var after = outcome.text
       if captureFromDaemon {
         guard let dump = await readDaemonScreen(req.paneID) else {
@@ -187,12 +197,21 @@ public final class TerminalHandlers {
     let text: String
   }
 
+  /// Where the wait reads its evidence that the shell ran the sent text,
+  /// with the screen of that source before the send.
+  enum ProgressEvidence {
+    case surface(before: String?)
+    case daemon(before: String)
+  }
+
   /// Completion needs a still screen and evidence that the shell ran the
   /// text (see `screenShowsTheSendRan`). A still screen alone is not enough:
   /// a prompt that draws slowly under load leaves the screen still with only
-  /// the terminal's echo of the typed line, before anything ran (#444).
+  /// the terminal's echo of the typed line, before anything ran (#444). The
+  /// evidence is read only once the other conditions hold, so a daemon
+  /// source is not read on every poll.
   private func waitForCompletion(
-    paneID: PaneID, wait: SendWaitParams, sink: InputSink, before: String?, sent: String
+    paneID: PaneID, wait: SendWaitParams, sink: InputSink, evidence: ProgressEvidence, sent: String
   ) async -> CompletionOutcome {
     let timeout = max(wait.timeoutMillis, 1)
     let stable = max(wait.stableMillis ?? 500, 1)
@@ -214,8 +233,9 @@ public final class TerminalHandlers {
       }
       let elapsed = now - start
       let quiet = now - stableSince
-      let ran = read.map { Self.screenShowsTheSendRan(screen: $0, before: before, sent: sent) } ?? false
-      if !busy, quiet >= stable, ran, busyObserved || elapsed >= grace {
+      if !busy, quiet >= stable, busyObserved || elapsed >= grace,
+        await sendRan(paneID: paneID, surface: read, evidence: evidence, sent: sent)
+      {
         return CompletionOutcome(completed: true, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
       }
       if elapsed >= timeout {
@@ -226,6 +246,19 @@ public final class TerminalHandlers {
       } catch {
         return CompletionOutcome(completed: false, waitedMillis: elapsed, busyObserved: busyObserved, text: text)
       }
+    }
+  }
+
+  private func sendRan(
+    paneID: PaneID, surface: String?, evidence: ProgressEvidence, sent: String
+  ) async -> Bool {
+    switch evidence {
+    case .surface(let before):
+      guard let surface else { return false }
+      return Self.screenShowsTheSendRan(screen: surface, before: before, sent: sent)
+    case .daemon(let before):
+      guard let screen = await daemonScreen(paneID) else { return false }
+      return Self.screenShowsTheSendRan(screen: screen, before: before, sent: sent)
     }
   }
 

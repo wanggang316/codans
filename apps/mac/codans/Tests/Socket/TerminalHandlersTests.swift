@@ -433,6 +433,38 @@ struct TerminalHandlersTests {
     #expect(result.output == "ok")
   }
 
+  /// On a pane this call attached, replayed rows that land after the send
+  /// change the surface but prove nothing ran. While the daemon screen does
+  /// not move, the wait does not complete, so `--capture` reports a timeout
+  /// instead of an empty success (#444).
+  @Test
+  func sendWithCaptureAfterAnAttachDoesNotTakeReplayAsProgress() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    let rowsA = Array(repeating: "A", count: 20)
+    let oldScreen = (rowsA + Array(repeating: "B", count: 5) + rowsA).joined(separator: "\n")
+    let partial = rowsA.joined(separator: "\n")
+    sink.textScript[pane.raw] = [partial, partial, partial, oldScreen]
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      attachDetached: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      },
+      daemonScreen: { _ in oldScreen })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(IPC.Request(id: "rp", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == nil)
+    let result = try #require(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self))
+    #expect(result.completed == false)
+    #expect(sink.delivered.count == 1)
+  }
+
   /// A just-attached pane's capture must come from the daemon only. When
   /// the daemon cannot be read before the send, the call fails and types
   /// nothing; it never falls back to the replaying surface.
