@@ -303,6 +303,11 @@ struct NewAgentFeatureTests {
 
   // MARK: - Skills
 
+  private nonisolated static func notesScope(_ profile: AgentProfile) -> NewAgentFeature.SkillScope {
+    NewAgentFeature.SkillScope(
+      profile: profile, projectStart: URL(fileURLWithPath: "/tmp/new-agent/notes", isDirectory: true))
+  }
+
   private nonisolated static let reviewSkill = AgentSkillEntry(
     name: "review", summary: "Review a change", source: .user,
     url: URL(fileURLWithPath: "/tmp/skills/review"))
@@ -310,16 +315,39 @@ struct NewAgentFeatureTests {
     name: "deploy", summary: nil, source: .user,
     url: URL(fileURLWithPath: "/srv/work-claude/skills/deploy"))
 
+  private nonisolated static func projectSkill(at path: String) -> AgentSkillEntry {
+    AgentSkillEntry(
+      name: "local", summary: path, source: .project,
+      url: URL(fileURLWithPath: "\(path)/.claude/skills/local"))
+  }
+
   private func makeSkillStore(
-    catalog: Catalog, loaded: LockIsolated<[AgentKind]>
+    catalog: Catalog, loaded: LockIsolated<[AgentKind]>,
+    starts: LockIsolated<[String?]> = LockIsolated([]),
+    preferredProjectID: ProjectID? = nil
   ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
-    let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: nil)) {
+    let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: preferredProjectID)) {
       NewAgentFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
-      $0[AgentSkillClient.self].load = { profile in
+      $0.gitWorktreeClient.branchRefs = { _ in ["feature/live", "main", "origin/main"] }
+      $0.gitWorktreeClient.localBranchNames = { _ in ["feature/live", "main"] }
+      $0.gitWorktreeClient.lsWorktrees = { _ in
+        [
+          GitWtEntry(branch: "main", path: "/tmp/new-agent/repo", head: "abc", isBare: false),
+          GitWtEntry(branch: "feature/live", path: "/tmp/new-agent/live", head: "def", isBare: false)
+        ]
+      }
+      $0.gitWorktreeClient.defaultRemoteBranchRef = { _ in "origin/main" }
+      $0[AgentSkillClient.self].load = { profile, start in
         loaded.withValue { $0.append(profile.kind) }
+        let path = start.map { url in
+          let path = url.path(percentEncoded: false)
+          return path.hasSuffix("/") ? String(path.dropLast()) : path
+        }
+        starts.withValue { $0.append(path) }
+        if let path, path != "/tmp/new-agent/notes" { return [Self.projectSkill(at: path)] }
         return profile.envVars.isEmpty ? [Self.reviewSkill] : [Self.workSkill]
       }
     }
@@ -337,7 +365,7 @@ struct NewAgentFeatureTests {
     await store.send(.agentProfilesChanged([profile, codex]))
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.reviewSkill]
-      $0.skillsProfile = profile
+      $0.skillsScope = Self.notesScope(profile)
     }
     #expect(store.state.skillLocation == .claudeCode)
 
@@ -371,23 +399,23 @@ struct NewAgentFeatureTests {
     await store.send(.agentProfilesChanged([profile, work]))
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.reviewSkill]
-      $0.skillsProfile = profile
+      $0.skillsScope = Self.notesScope(profile)
     }
 
     // Same Skill Location, other home: nothing is offered until the scan
     // for the new profile ends.
     await store.send(.agentSelected(work.id)) {
       $0.skills = []
-      $0.skillsProfile = nil
+      $0.skillsScope = nil
     }
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.workSkill]
-      $0.skillsProfile = work
+      $0.skillsScope = Self.notesScope(work)
     }
     // A late result for the old profile is dropped.
-    await store.send(.skillsLoaded([Self.reviewSkill], for: profile))
+    await store.send(.skillsLoaded([Self.reviewSkill], for: Self.notesScope(profile)))
     #expect(store.state.skills == [Self.workSkill])
-    #expect(store.state.skillsProfile == work)
+    #expect(store.state.skillsScope == Self.notesScope(work))
   }
 
   @Test
@@ -401,5 +429,65 @@ struct NewAgentFeatureTests {
     await store.send(.agentSelected(profile.id))
     #expect(store.state.skills == [Self.reviewSkill])
     await store.receive(\.skillsLoaded)
+  }
+
+  private var skillCatalog: Catalog {
+    var catalog = catalog
+    catalog.projects[0].worktrees.append(
+      Worktree(name: "live", path: "/tmp/new-agent/live", branch: "feature/live"))
+    return catalog
+  }
+
+  @Test
+  func selectingAnotherProjectRescansAndReplacesTheList() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let starts = LockIsolated<[String?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, starts: starts, preferredProjectID: folderProjectID)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded) { $0.skills = [Self.reviewSkill] }
+
+    // Another project, another start directory: the old list goes at once.
+    await store.send(.projectSelected(gitProjectID)) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/repo")]
+    }
+    #expect(starts.value == ["/tmp/new-agent/notes", "/tmp/new-agent/repo"])
+  }
+
+  @Test
+  func selectingAnotherTargetRescansFromItsWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let starts = LockIsolated<[String?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, starts: starts, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    // A new worktree does not exist yet: the main checkout stands in.
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/repo")]
+    }
+
+    await store.send(.targetSelected(.branch("feature/live"))) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/live")]
+    }
+
+    // Back to a new worktree: the main checkout again.
+    await store.send(.targetSelected(.newWorktree))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skills == [Self.projectSkill(at: "/tmp/new-agent/repo")])
+    #expect(
+      starts.value == [
+        "/tmp/new-agent/repo", "/tmp/new-agent/live", "/tmp/new-agent/repo"
+      ])
   }
 }
