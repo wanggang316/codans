@@ -13,7 +13,7 @@ nonisolated enum NewWorktreeFiles {
     if copyIgnored && copyUntracked { return nil }
     var paths = Set<String>()
     if !copyIgnored {
-      guard let ignored = await list(["--ignored"], repoRoot: repoRoot) else {
+      guard let ignored = await list(["--ignored", "--directory"], repoRoot: repoRoot) else {
         return ProjectFileExclusion(root: repoRoot, paths: nil)
       }
       paths.formUnion(ignored)
@@ -27,13 +27,15 @@ nonisolated enum NewWorktreeFiles {
     return ProjectFileExclusion(root: repoRoot, paths: paths)
   }
 
-  /// Untracked paths, ignored ones too with `--ignored`. A directory with no
-  /// tracked file is one `dir/` entry. `nil` when git fails or the list is
-  /// cut off.
+  /// Untracked paths, or ignored ones with `--ignored`. With `--directory`,
+  /// a directory with no tracked file is one `dir/` entry. The untracked
+  /// list must not use it: git also lists a directory that holds ignored
+  /// files that way, and `wt` copies those with `--copy-ignored`. `nil` when
+  /// git fails or the list is cut off.
   private static func list(_ extra: [String], repoRoot: URL) async -> Set<String>? {
     let arguments =
       ["-C", repoRoot.path(percentEncoded: false), "ls-files", "--others"] + extra
-      + ["--exclude-standard", "--directory", "-z"]
+      + ["--exclude-standard", "-z"]
     let outcome = await GitWorktreeShell.run(
       executable: GitWorktreeShell.gitURL, arguments: arguments, cwd: repoRoot)
     guard case .exited(0, let stdout, _, false) = outcome else { return nil }
