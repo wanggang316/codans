@@ -148,13 +148,19 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
   - `backgroundProbeOptions` (`BatchMode`, `ConnectTimeout=10`) for git probes;
     `interactiveOptions` (`ConnectTimeout=30`) for the terminal.
   - `sharedMasterGuard(host,…)` — a POSIX `sh` fragment that runs before
-    every ssh line: if `ssh -O check` finds no master, it creates one with a
-    no-op `true` while it holds a `lockf` lock at `<ControlPath>.lock`.
+    an ssh line uses a master: if `ssh -O check` finds no master, it creates
+    one with a no-op `true` while it holds a `lockf` lock at
+    `<ControlPath>.lock`.
+  - `sharedMasterLine(host,…)` — the POSIX `sh` statement that runs every ssh
+    line over one of `masterSlotCount` (4) shared masters per host
+    (`masterControlPaths`: `codans-%C`, `codans-%C-1`, …). See Connection
+    reuse below.
   - `invocation(host,executable,arguments,workingDirectory,…)` → argv for
     `Process`/`CommandRunner` (one remote-shell quoting level): `/bin/sh -c`
-    runs the guard, then execs the ssh argv.
+    runs `sharedMasterLine` with the ssh argv as `$@`.
   - `commandLine(host,remoteCommand,…)` → a single string for libghostty's
-    `/bin/sh -c` surface command (two quoting levels), guard first.
+    `/bin/sh -c` surface command (two quoting levels), built by
+    `sharedMasterLine`.
   - `loginShellWrapped` runs the remote command under `exec "$SHELL" -l -c …`
     so a macOS host's Homebrew-augmented PATH is restored.
 
@@ -332,6 +338,20 @@ whenever one is installed; the header button hides when none is.
   serializes the creation per `ControlPath`, so one line creates the master and
   the others wait and then multiplex. The guard never removes a socket, so a
   live master is never touched.
+- **Full master (sshd `MaxSessions`).** sshd caps the sessions on one
+  connection (`MaxSessions`, default 10). A master that is full refuses a new
+  session, and with `ControlMaster=auto` ssh then connects and authenticates
+  on its own and prints the same "already exists" warning. So
+  `sharedMasterLine` runs each line with `ControlMaster=no` and a sentinel
+  `ProxyCommand`: ssh runs it only when it cannot use the master, before
+  anything runs on the host. When the sentinel fires and the master is live,
+  the line moves to the next shared master (created by the guard, one auth);
+  when no master could be created, the line runs with `ControlMaster=auto` as
+  before, so auth prompts and errors stay visible. When all 4 masters are
+  full, the line uses its own connection (`ControlPath=none`) and a terminal
+  prints a notice. Trade-off: each overflow master costs one auth, and a
+  probe that holds a session for a moment can make a new pane open the next
+  master instead of waiting.
 - **Testing.** `SSHCommand`, `RemoteSurfaceCommand`, and `RemoteGitService`'s
   parser/normalization are pure and unit-tested; `RemoteProjectFeature`'s
   validation paths are covered by reducer tests. The live SSH path requires a

@@ -12,9 +12,10 @@ import Foundation
 ///     (libghostty's surface command), so the remote command is additionally
 ///     quoted for the *local* shell (two quoting levels). Used by the terminal.
 ///
-/// Every call shares `controlOptions` and runs behind `sharedMasterGuard`, so
-/// N git probes plus the terminal reuse one multiplexed SSH connection that
-/// exactly one of them creates: one auth / prompt, and no per-call
+/// Every call runs through `sharedMasterLine`, so N git probes plus the
+/// terminals reuse one multiplexed SSH connection that exactly one of them
+/// creates (a few more when sshd `MaxSessions` fills one): one auth / prompt
+/// per shared connection, and no per-call
 /// TCP+handshake round-trip that would otherwise make a many-worktree sidebar
 /// crawl. Authentication is delegated entirely to the user's ssh config + agent.
 nonisolated enum SSHCommand {
@@ -71,8 +72,86 @@ nonisolated enum SSHCommand {
   /// whole group, so `lockf` and the creating `ssh` stop with the probe.
   static let masterLockTimeoutSeconds = 30
 
-  /// POSIX `sh` fragment that runs before an ssh line so that one shared
-  /// ControlMaster serves the host. `ControlMaster=auto` alone cannot do this:
+  /// Number of shared masters one host can have. sshd caps the sessions on
+  /// one connection (`MaxSessions`, default 10). A line that the full master
+  /// refuses moves to the next master, so each master costs one
+  /// authentication. Past the last one, the line opens its own connection.
+  static let masterSlotCount = 4
+
+  /// ControlPath of each shared master, primary first. `-<n>` follows `%C`,
+  /// so every path stays short and per connection.
+  static func masterControlPaths(controlPath: String = defaultControlPath) -> [String] {
+    (0..<masterSlotCount).map { $0 == 0 ? controlPath : "\(controlPath)-\($0)" }
+  }
+
+  /// Notice a terminal prints when every shared master refused it. No
+  /// apostrophes: it crosses several single-quoting layers.
+  static let mastersFullNotice =
+    #"printf '\033[2m── All shared SSH connections to this host are full (sshd MaxSessions). "#
+    + #"This line uses its own connection and can ask you to sign in again. ──\033[0m\r\n' >&2; "#
+
+  /// POSIX `sh` statement that runs one ssh line over a shared ControlMaster
+  /// of the host. `sshArguments` is the shell text that follows the control
+  /// options (extra options, host options, destination, remote command).
+  ///
+  /// For each master in `masterControlPaths`, in order:
+  ///
+  ///   1. `sharedMasterGuard` makes sure the master is live.
+  ///   2. The line runs with `ControlMaster=no` and a sentinel `ProxyCommand`.
+  ///      ssh runs `ProxyCommand` only when it cannot use the master, which is
+  ///      before anything runs on the host, so the line can safely run again.
+  ///      Without this, a master that refuses the session (sshd
+  ///      `MaxSessions`) makes ssh connect and authenticate on its own and
+  ///      print "ControlSocket … already exists, disabling multiplexing".
+  ///      `LogLevel=FATAL` hides ssh's "session request failed" error.
+  ///   3. No sentinel: the line ran, and its status is the statement's status.
+  ///      Sentinel and a live master: the master is full; go to the next one.
+  ///      Sentinel and no live master (the guard could not create one): run
+  ///      the line as before, with `ControlMaster=auto`, so auth prompts and
+  ///      errors stay visible.
+  ///
+  /// When every master refused, the line runs on its own connection
+  /// (`ControlPath=none`): no warning, and a terminal prints
+  /// `mastersFullNotice`. No master is ever removed or replaced.
+  ///
+  /// The statement is a subshell, so it composes in a terminal's reconnect
+  /// loop and `$?` is the status of ssh.
+  static func sharedMasterLine(
+    host: RemoteHost,
+    extraOptions: [String],
+    quiet: Bool,
+    sshArguments: String,
+    controlPath: String = defaultControlPath,
+    sshPath: String = sshExecutablePath
+  ) -> String {
+    let ssh = shellQuote(sshPath)
+    let target = (host.sshOptionArguments + [host.sshDestination]).map(shellQuote)
+      .joined(separator: " ")
+    let paths = masterControlPaths(controlPath: controlPath).map(shellQuote)
+      .joined(separator: " ")
+    let mux =
+      "\(ssh) -o ControlMaster=no -o \"ControlPath=$codans_cpath\" -o LogLevel=FATAL "
+      + "-o \"ProxyCommand=/usr/bin/touch '$codans_refused'\" \(sshArguments)"
+    let shared = "\(ssh) \(controlArguments) \(sshArguments)"
+    let own = "\(ssh) -o ControlMaster=no -o ControlPath=none \(sshArguments)"
+    return "( codans_refused=\"${TMPDIR:-/tmp}/codans-ssh-refused.$$\"; "
+      + "for codans_cpath in \(paths); do "
+      + sharedMasterGuard(host: host, extraOptions: extraOptions, quiet: quiet, sshPath: sshPath)
+      + "/bin/rm -f \"$codans_refused\"; \(mux); codans_rc=$?; "
+      + "[ -e \"$codans_refused\" ] || exit \"$codans_rc\"; /bin/rm -f \"$codans_refused\"; "
+      + "\(ssh) -o \"ControlPath=$codans_cpath\" -O check \(target) >/dev/null 2>&1 "
+      + "|| exec \(shared); done; "
+      + (quiet ? "" : mastersFullNotice)
+      + "exec \(own) )"
+  }
+
+  /// Control options of `controlOptions`, with the ControlPath of the master
+  /// that `sharedMasterLine` tries now (`$codans_cpath`).
+  private static let controlArguments =
+    controlOptions(controlPath: "$codans_cpath").map { "\"\($0)\"" }.joined(separator: " ")
+
+  /// POSIX `sh` fragment that makes sure the master at `$codans_cpath` is live
+  /// before an ssh line uses it. `ControlMaster=auto` alone cannot do this:
   /// when no master listens (it ended, or a killed one left a socket that ssh
   /// unlinks as stale), every line that starts in that window connects and
   /// authenticates on its own, the first to finish takes the ControlPath, and
@@ -95,11 +174,10 @@ nonisolated enum SSHCommand {
     host: RemoteHost,
     extraOptions: [String],
     quiet: Bool,
-    controlPath: String = defaultControlPath,
     sshPath: String = sshExecutablePath
   ) -> String {
     let ssh = shellQuote(sshPath)
-    let control = controlOptions(controlPath: controlPath).map(shellQuote).joined(separator: " ")
+    let control = controlArguments
     let target = (host.sshOptionArguments + [host.sshDestination]).map(shellQuote)
       .joined(separator: " ")
     var create =
@@ -152,9 +230,9 @@ nonisolated enum SSHCommand {
   }
 
   /// Local argv for `Process` / `CommandRunner`. `/bin/sh` runs
-  /// `sharedMasterGuard` and then execs `ssh` with the remaining arguments, so
-  /// the ssh argv stays one token per element: the remote command is the last
-  /// argument, and ssh hands it to the remote login shell verbatim.
+  /// `sharedMasterLine` with the ssh arguments after the control options as
+  /// `$@`, so the ssh argv stays one token per element: the remote command is
+  /// the last argument, and ssh hands it to the remote login shell verbatim.
   static func invocation(
     host: RemoteHost,
     executable: String,
@@ -164,8 +242,7 @@ nonisolated enum SSHCommand {
     controlPath: String = defaultControlPath,
     extraOptions: [String] = []
   ) -> (executableURL: URL, arguments: [String]) {
-    var sshArguments = controlOptions(controlPath: controlPath)
-    sshArguments += extraOptions
+    var sshArguments = extraOptions
     if allocateTTY {
       sshArguments.append("-tt")
     }
@@ -178,39 +255,38 @@ nonisolated enum SSHCommand {
         )
       )
     )
-    let guardScript = sharedMasterGuard(
-      host: host, extraOptions: extraOptions, quiet: true, controlPath: controlPath
+    let script = sharedMasterLine(
+      host: host, extraOptions: extraOptions, quiet: true, sshArguments: "\"$@\"",
+      controlPath: controlPath
     )
     return (
       URL(fileURLWithPath: guardShellPath),
-      ["-c", guardScript + "exec \"$@\"", guardShellName, sshExecutablePath] + sshArguments
+      ["-c", script, guardShellName] + sshArguments
     )
   }
 
   /// Full `ssh` line as a single string for a parent `/bin/sh -c` (libghostty's
-  /// surface command). The fixed option tokens are shell-safe and stay unquoted
-  /// (so ssh still expands `~` / `%C` in `ControlPath`); the login-shell-wrapped
-  /// remote command is quoted for the local shell. `sharedMasterGuard` comes
-  /// first on the same line, so a reconnect waits for (or creates) the shared
-  /// master instead of racing the probes for it.
+  /// surface command), built by `sharedMasterLine`, so a reconnect waits for
+  /// (or creates) a shared master instead of racing the probes for it, and
+  /// moves to the next master when one is full. The fixed option tokens are
+  /// shell-safe and stay unquoted; the login-shell-wrapped remote command is
+  /// quoted for the local shell.
   static func commandLine(
     host: RemoteHost,
     remoteCommand: String,
     allocateTTY: Bool = true,
     controlPath: String = defaultControlPath
   ) -> String {
-    let guardScript = sharedMasterGuard(
-      host: host, extraOptions: interactiveOptions, quiet: false, controlPath: controlPath
-    )
-    var tokens = [sshExecutablePath]
-    tokens += controlOptions(controlPath: controlPath)
-    tokens += interactiveOptions
+    var tokens = interactiveOptions
     if allocateTTY {
       tokens.append("-tt")
     }
     tokens += host.sshOptionArguments
     tokens.append(host.sshDestination)
     tokens.append(shellQuote(loginShellWrapped(remoteCommand)))
-    return guardScript + tokens.joined(separator: " ")
+    return sharedMasterLine(
+      host: host, extraOptions: interactiveOptions, quiet: false,
+      sshArguments: tokens.joined(separator: " "), controlPath: controlPath
+    )
   }
 }
