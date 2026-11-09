@@ -191,8 +191,11 @@ public nonisolated enum AgentCatalog {
   public static func skillLocation(for kind: AgentKind) -> SkillLocation {
     switch kind {
     case .claudeCode: return .claudeCode
-    case .codex, .gemini, .cursorAgent, .opencode, .copilot, .droid, .amp, .grok, .pi, .omp,
-      .cline, .kimi:
+    case .codex: return .codex
+    case .pi: return .pi
+    // Gemini and OpenCode: the probe could not run or failed, see the
+    // design doc.
+    case .gemini, .opencode, .cursorAgent, .copilot, .droid, .amp, .grok, .omp, .cline, .kimi:
       return .none
     }
   }

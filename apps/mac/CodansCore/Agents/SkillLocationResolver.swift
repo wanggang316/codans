@@ -41,18 +41,21 @@ public nonisolated struct SkillDirectory: Equatable, Sendable, Hashable {
 public nonisolated enum SkillLocationResolver {
   /// Skill directories of the plugins that `profile`'s agent, launched in
   /// `projectStart`, has enabled. The registry lives under its config
-  /// root; the user, project, local, `--settings`, and managed settings
-  /// decide which plugins are on. A file that is missing or cannot be read
-  /// gives no plugins (registry) or no say (settings). Settings flags in the
+  /// root. For Claude Code the user, project, local, `--settings`, and
+  /// managed settings decide which plugins are on; for Codex `config.toml`,
+  /// the `--profile` layer, and the plugin flags (`CodexPluginRegistry`). A
+  /// file that is missing or cannot be read gives no plugins (registry) or
+  /// no say (settings). Settings flags in the
   /// profile's extra arguments that cannot be read give no plugins. A
-  /// settings file that `exclusion` excludes has no say.
+  /// settings or project config file that `exclusion` excludes has no say.
   static func pluginDirectories(
     for profile: AgentProfile,
     projectStart: URL?,
     userHome: URL,
     stateDirectory: URL,
     managedSettings: URL = ClaudePluginRegistry.managedSettings,
-    excluding exclusion: ProjectFileExclusion? = nil
+    excluding exclusion: ProjectFileExclusion? = nil,
+    isRepositoryRoot: (URL) -> Bool = hasGitEntry
   ) -> [SkillDirectory] {
     let location = profile.descriptor.skillLocation
     guard location.supportsCompletion, let plugins = location.plugins,
@@ -72,6 +75,11 @@ public nonisolated enum SkillLocationResolver {
       return ClaudePluginRegistry.skillDirectories(
         configRoot: root, home: home, projectStart: projectStart,
         launchSettings: launchSettings, managedSettings: managedSettings, excluding: exclusion)
+    case .codex:
+      let searched = projectStart.map { searchedDirectories(from: $0, isRepositoryRoot: isRepositoryRoot) } ?? []
+      return CodexPluginRegistry.skillDirectories(
+        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched,
+        excluding: exclusion)
     }
   }
 
@@ -120,6 +128,8 @@ public nonisolated enum SkillLocationResolver {
   /// is none. `exclusion` lists the project files a new worktree will not
   /// have; the plugin settings skip them, and so must the scan of the
   /// project directories (`SkillScanner.scan(_:precedence:excluding:)`).
+  /// An agent with a project trust check (Pi) gets project directories only
+  /// in a project it trusts.
   public static func directories(
     for profile: AgentProfile,
     projectStart: URL?,
@@ -128,14 +138,52 @@ public nonisolated enum SkillLocationResolver {
     stateDirectory: URL = AppDirectories.stateDirectory(),
     isRepositoryRoot: (URL) -> Bool = hasGitEntry
   ) -> [SkillDirectory] {
-    let project =
-      projectStart.map {
-        projectDirectories(for: profile, startDirectory: $0, isRepositoryRoot: isRepositoryRoot)
+    guard loadsSkills(profile) else { return [] }
+    let project: [SkillDirectory] =
+      projectStart.map { start in
+        guard
+          trustsProject(
+            profile, start: start, startExists: exclusion == nil, userHome: userHome,
+            stateDirectory: stateDirectory)
+        else { return [] }
+        return projectDirectories(for: profile, startDirectory: start, isRepositoryRoot: isRepositoryRoot)
       } ?? []
     return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
         for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory,
-        excluding: exclusion)
+        excluding: exclusion, isRepositoryRoot: isRepositoryRoot)
+  }
+
+  /// `false` when the profile's launch flags turn skills off: Pi's
+  /// `--no-skills` loads none and expands no `/skill:name` call. Pi
+  /// arguments that are not plain words can hide that flag from codans
+  /// (`--no-skills 2>/dev/null`), so they give no skills (ADR 0010).
+  static func loadsSkills(_ profile: AgentProfile) -> Bool {
+    switch profile.descriptor.skillLocation.projectTrust {
+    case nil: return true
+    case .pi:
+      guard let launch = PiLaunchArguments(profile.extraArguments) else { return false }
+      return !launch.noSkills
+    }
+  }
+
+  /// `true` when the agent of `profile` reads project skills in `start`.
+  /// `startExists` is `false` when `start` (the main checkout) stands in
+  /// for a new worktree, which is when `directories` gets an exclusion.
+  static func trustsProject(
+    _ profile: AgentProfile, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL
+  ) -> Bool {
+    switch profile.descriptor.skillLocation.projectTrust {
+    case nil: return true
+    case .pi:
+      guard
+        let agentDirectory = configRootDirectory(
+          for: profile, userHome: userHome, stateDirectory: stateDirectory)
+      else { return false }
+      return PiProjectTrust.trusts(
+        agentDirectory: agentDirectory, extraArguments: profile.extraArguments, start: start,
+        startExists: startExists)
+    }
   }
 
   /// The directory an agent launched in `project` starts in, from which it
@@ -173,7 +221,7 @@ public nonisolated enum SkillLocationResolver {
   }
 
   /// Project-level skill directories for `profile`, searched from
-  /// `startDirectory` by the agent's `projectSearch`, nearest first. A walk
+  /// `startDirectory` by the search of each directory, nearest first. A walk
   /// that finds no repository root reads the start directory only.
   public static func projectDirectories(
     for profile: AgentProfile,
@@ -189,18 +237,26 @@ public nonisolated enum SkillLocationResolver {
     in location: SkillLocation, startDirectory: URL, isRepositoryRoot: (URL) -> Bool
   ) -> [SkillDirectory] {
     guard location.supportsCompletion, !location.projectDirectories.isEmpty else { return [] }
-    let start = startDirectory.standardizedFileURL
-    var searched = [start]
-    if location.projectSearch == .walkUpToRepositoryRoot {
-      searched = walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
+    var searched = [startDirectory.standardizedFileURL]
+    if location.projectDirectories.contains(where: { $0.search == .walkUpToRepositoryRoot }) {
+      searched = searchedDirectories(from: startDirectory, isRepositoryRoot: isRepositoryRoot)
     }
-    return searched.flatMap { directory in
-      location.projectDirectories.map { relative in
-        SkillDirectory(
-          url: directory.appending(path: relative, directoryHint: .isDirectory).standardizedFileURL,
-          source: .project)
-      }
+    return searched.enumerated().flatMap { depth, directory in
+      location.projectDirectories
+        .filter { depth == 0 || $0.search == .walkUpToRepositoryRoot }
+        .map { relative in
+          SkillDirectory(
+            url: directory.appending(path: relative.path, directoryHint: .isDirectory).standardizedFileURL,
+            source: .project)
+        }
     }
+  }
+
+  /// `start` and its parents up to the repository root, nearest first, or
+  /// `start` alone when no parent is a repository root.
+  static func searchedDirectories(from start: URL, isRepositoryRoot: (URL) -> Bool) -> [URL] {
+    let start = start.standardizedFileURL
+    return walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
   }
 
   /// `true` when `directory` holds a `.git` folder or a worktree's `.git`

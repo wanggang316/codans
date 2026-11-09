@@ -16,17 +16,15 @@ struct SkillLocationTests {
   }
 
   @Test
-  func everyAgentKindHasOneEntryAndOnlyClaudeCodeCallsSkills() {
+  func everyAgentKindHasOneEntryAndOnlyProbedAgentsCallSkills() {
+    let enabled: [AgentKind: SkillLocation] = [
+      .claudeCode: .claudeCode, .codex: .codex, .pi: .pi,
+    ]
     for kind in AgentKind.allCases {
       let location = AgentCatalog.descriptor(for: kind).skillLocation
-      if kind == .claudeCode {
-        #expect(location.userDirectories == [".claude/skills"])
-        #expect(location.configRoot?.environmentVariable == "CLAUDE_CONFIG_DIR")
-        #expect(location.projectDirectories == [".claude/skills"])
-        #expect(location.projectSearch == .walkUpToRepositoryRoot)
-        #expect(location.precedence == [.user, .project, .plugin])
-        #expect(location.invocationStyle == .slash)
-        #expect(location.invocationPosition == .anywhere)
+      if let expected = enabled[kind] {
+        #expect(location == expected, "\(kind)")
+        #expect(location.supportsCompletion)
       } else {
         #expect(location == .none, "\(kind)")
         #expect(!location.supportsCompletion)
@@ -35,8 +33,21 @@ struct SkillLocationTests {
   }
 
   @Test
+  func probedAgentsUseTheirInvocationStyleAndPosition() {
+    #expect(SkillLocation.claudeCode.invocationStyle == .slash)
+    #expect(SkillLocation.claudeCode.invocationPosition == .anywhere)
+    #expect(SkillLocation.claudeCode.precedence == [.user, .project, .plugin])
+    #expect(SkillLocation.codex.invocationStyle == .dollar)
+    #expect(SkillLocation.codex.invocationPosition == .anywhere)
+    #expect(SkillLocation.pi.invocationStyle == .slashSkill)
+    #expect(SkillLocation.pi.invocationPosition == .anywhere)
+  }
+
+  @Test
   func invocationStyleSpellsTheToken() {
     #expect(SkillInvocationStyle.slash.token(for: "review") == "/review")
+    #expect(SkillInvocationStyle.slashSkill.token(for: "review") == "/skill:review")
+    #expect(SkillInvocationStyle.dollar.token(for: "docs:pdf") == "$docs:pdf")
     #expect(SkillInvocationStyle.none.token(for: "review") == nil)
   }
 
@@ -87,7 +98,22 @@ struct SkillLocationTests {
 
   @Test
   func agentWithoutInvocationStyleResolvesNothing() {
-    #expect(Self.paths(AgentProfile(kind: .codex)).isEmpty)
+    #expect(Self.paths(AgentProfile(kind: .gemini)).isEmpty)
+    #expect(Self.paths(AgentProfile(kind: .opencode)).isEmpty)
+  }
+
+  @Test
+  func codexReadsTheSharedFolderAndItsHome() {
+    #expect(Self.paths(AgentProfile(kind: .codex)) == ["/Users/me/.agents/skills", "/Users/me/.codex/skills"])
+    let moved = AgentProfile(kind: .codex, envVars: ["CODEX_HOME": "/srv/codex"])
+    #expect(Self.paths(moved) == ["/Users/me/.agents/skills", "/srv/codex/skills"])
+  }
+
+  @Test
+  func piReadsItsAgentDirectoryAndTheSharedFolder() {
+    #expect(Self.paths(AgentProfile(kind: .pi)) == ["/Users/me/.pi/agent/skills", "/Users/me/.agents/skills"])
+    let moved = AgentProfile(kind: .pi, envVars: ["PI_CODING_AGENT_DIR": "~/pi-work"])
+    #expect(Self.paths(moved) == ["/Users/me/pi-work/skills", "/Users/me/.agents/skills"])
   }
 
   // MARK: - Project directories
@@ -204,8 +230,11 @@ struct SkillLocationTests {
   @Test
   func workingDirectoryOnlySearchDoesNotWalkUp() {
     let location = SkillLocation(
-      projectDirectories: [".gemini/skills", ".agents/skills"],
-      projectSearch: .workingDirectoryOnly, invocationStyle: .slash)
+      projectDirectories: [
+        SkillProjectDirectory(".gemini/skills", search: .workingDirectoryOnly),
+        SkillProjectDirectory(".agents/skills", search: .workingDirectoryOnly),
+      ],
+      invocationStyle: .slash)
     let directories = SkillLocationResolver.projectDirectories(
       in: location, startDirectory: URL(fileURLWithPath: "/code/repo/apps", isDirectory: true),
       isRepositoryRoot: { Self.path($0) == "/code/repo" })
@@ -228,6 +257,51 @@ struct SkillLocationTests {
 
   @Test
   func agentWithoutInvocationStyleHasNoProjectDirectories() {
-    #expect(Self.projectPaths(AgentProfile(kind: .codex), from: "/code/repo", repositoryRoots: ["/code/repo"]).isEmpty)
+    #expect(
+      Self.projectPaths(AgentProfile(kind: .gemini), from: "/code/repo", repositoryRoots: ["/code/repo"]).isEmpty)
+  }
+
+  @Test
+  func codexWalksTheSharedFolderUpToTheRepositoryRoot() {
+    #expect(
+      Self.projectPaths(AgentProfile(kind: .codex), from: "/code/repo/apps", repositoryRoots: ["/code/repo"]) == [
+        "/code/repo/apps/.agents/skills",
+        "/code/repo/.agents/skills",
+      ])
+  }
+
+  @Test
+  func piReadsItsOwnFolderInTheWorkingDirectoryOnly() {
+    #expect(
+      Self.projectPaths(AgentProfile(kind: .pi), from: "/code/repo/apps", repositoryRoots: ["/code/repo"]) == [
+        "/code/repo/apps/.pi/skills",
+        "/code/repo/apps/.agents/skills",
+        "/code/repo/.agents/skills",
+      ])
+  }
+
+  @Test
+  func sharedFolderSkillGoesToEveryAgentThatReadsIt() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appending(path: "shared-skills-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let repo = root.appending(path: "repo", directoryHint: .isDirectory)
+    let skill = repo.appending(path: ".agents/skills/shared/SKILL.md")
+    try FileManager.default.createDirectory(
+      at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "---\nname: shared\ndescription: Shared.\n---\n".write(to: skill, atomically: true, encoding: .utf8)
+    // `--approve`: Pi reads project skills only in a trusted project.
+    for profile in [AgentProfile(kind: .codex), AgentProfile(kind: .pi, extraArguments: "--approve")] {
+      let kind = profile.kind
+      let directories = SkillLocationResolver.directories(
+        for: profile, projectStart: repo,
+        userHome: root.appending(path: "home"), stateDirectory: root.appending(path: "state"),
+        isRepositoryRoot: { Self.path($0) == Self.path(repo) })
+      #expect(SkillScanner.scanSync(directories).map(\.name) == ["shared"], "\(kind)")
+    }
+    let claude = SkillLocationResolver.directories(
+      for: AgentProfile(kind: .claudeCode), projectStart: repo,
+      userHome: root.appending(path: "home"), stateDirectory: root.appending(path: "state"),
+      isRepositoryRoot: { Self.path($0) == Self.path(repo) })
+    #expect(SkillScanner.scanSync(claude).isEmpty)
   }
 }

@@ -79,7 +79,7 @@ struct ClaudePluginSkillTests {
   @Test
   func claudeCodeLocationUsesTheClaudeCodePluginSource() {
     #expect(AgentCatalog.descriptor(for: .claudeCode).skillLocation.plugins == .claudeCode)
-    for kind in AgentKind.allCases where kind != .claudeCode {
+    for kind in AgentKind.allCases where kind != .claudeCode && kind != .codex {
       #expect(AgentCatalog.descriptor(for: kind).skillLocation.plugins == nil, "\(kind)")
     }
   }
