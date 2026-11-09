@@ -34,9 +34,10 @@ struct NewAgentFeatureTests {
 
   private func makeStore(
     preferredProjectID: ProjectID?, pendingCounts: [ProjectID: Int] = [:],
-    restoring draft: NewAgentFeature.Draft? = nil
+    restoring draft: NewAgentFeature.Draft? = nil, catalog: Catalog? = nil,
+    loadSkills: (@Sendable (AgentProfile, URL?) async -> [AgentSkillEntry])? = nil
   ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
-    let catalog = catalog
+    let catalog = catalog ?? self.catalog
     let store = TestStore(
       initialState: NewAgentFeature.State(
         preferredProjectID: preferredProjectID, pendingCounts: pendingCounts, restoring: draft)
@@ -56,6 +57,7 @@ struct NewAgentFeatureTests {
         ]
       }
       $0.gitWorktreeClient.defaultRemoteBranchRef = { _ in "origin/main" }
+      if let loadSkills { $0[AgentSkillClient.self].load = loadSkills }
     }
     store.exhaustivity = .off
     return store
@@ -303,6 +305,9 @@ struct NewAgentFeatureTests {
 
   // MARK: - Skills
 
+  private nonisolated static let notesDirectory = URL(
+    fileURLWithPath: "/tmp/new-agent/notes", isDirectory: true)
+
   private nonisolated static let reviewSkill = AgentSkillEntry(
     name: "review", summary: "Review a change", source: .user,
     url: URL(fileURLWithPath: "/tmp/skills/review"))
@@ -318,7 +323,7 @@ struct NewAgentFeatureTests {
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
-      $0[AgentSkillClient.self].load = { profile in
+      $0[AgentSkillClient.self].load = { profile, _ in
         loaded.withValue { $0.append(profile.kind) }
         return profile.envVars.isEmpty ? [Self.reviewSkill] : [Self.workSkill]
       }
@@ -337,7 +342,7 @@ struct NewAgentFeatureTests {
     await store.send(.agentProfilesChanged([profile, codex]))
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.reviewSkill]
-      $0.skillsProfile = profile
+      $0.skillsScope = .init(profile: profile, projectDirectory: Self.notesDirectory)
     }
     #expect(store.state.skillLocation == .claudeCode)
 
@@ -371,23 +376,24 @@ struct NewAgentFeatureTests {
     await store.send(.agentProfilesChanged([profile, work]))
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.reviewSkill]
-      $0.skillsProfile = profile
+      $0.skillsScope = .init(profile: profile, projectDirectory: Self.notesDirectory)
     }
 
     // Same Skill Location, other home: nothing is offered until the scan
     // for the new profile ends.
     await store.send(.agentSelected(work.id)) {
       $0.skills = []
-      $0.skillsProfile = nil
+      $0.skillsScope = nil
     }
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.workSkill]
-      $0.skillsProfile = work
+      $0.skillsScope = .init(profile: work, projectDirectory: Self.notesDirectory)
     }
     // A late result for the old profile is dropped.
-    await store.send(.skillsLoaded([Self.reviewSkill], for: profile))
+    await store.send(
+      .skillsLoaded([Self.reviewSkill], for: .init(profile: profile, projectDirectory: Self.notesDirectory)))
     #expect(store.state.skills == [Self.workSkill])
-    #expect(store.state.skillsProfile == work)
+    #expect(store.state.skillsScope?.profile == work)
   }
 
   @Test
@@ -401,5 +407,51 @@ struct NewAgentFeatureTests {
     await store.send(.agentSelected(profile.id))
     #expect(store.state.skills == [Self.reviewSkill])
     await store.receive(\.skillsLoaded)
+  }
+
+  /// Claude Code reads project settings in the directory it starts in, and
+  /// they can turn plugins on or off, so the scan follows the target.
+  @Test
+  func skillsFollowTheDirectoryTheAgentStartsIn() async {
+    let requested = LockIsolated<[String?]>([])
+    var catalog = catalog
+    catalog.projects[0].worktrees.append(
+      Worktree(name: "dangling", path: "/tmp/new-agent/dangling", branch: "feature/dangling"))
+    let store = makeStore(
+      preferredProjectID: gitProjectID, catalog: catalog,
+      loadSkills: { _, directory in
+        requested.withValue { $0.append(directory?.path(percentEncoded: false)) }
+        return [Self.reviewSkill]
+      })
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+
+    await store.send(.targetSelected(.branch("feature/dangling"))) {
+      // Skills read for another directory go at once.
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsScope = .init(
+        profile: self.profile,
+        projectDirectory: URL(fileURLWithPath: "/tmp/new-agent/dangling", isDirectory: true))
+    }
+    // A branch no worktree holds starts in a new worktree of the repository.
+    await store.send(.targetSelected(.branch("origin/remote-only")))
+    await store.receive(\.skillsLoaded)
+    #expect(
+      requested.value == ["/tmp/new-agent/repo/", "/tmp/new-agent/dangling/", "/tmp/new-agent/repo/"])
+
+    // A late result for the old directory is dropped.
+    await store.send(
+      .skillsLoaded(
+        [Self.workSkill],
+        for: .init(
+          profile: profile,
+          projectDirectory: URL(fileURLWithPath: "/tmp/new-agent/dangling", isDirectory: true))))
+    #expect(store.state.skills == [Self.reviewSkill])
   }
 }

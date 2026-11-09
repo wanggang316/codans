@@ -1,19 +1,44 @@
 import Foundation
 
 /// Claude Code's plugin registry: which plugins are installed where, and
-/// which of them `settings.json` enables. Both formats are not public, so a
+/// which of them the settings enable. Both formats are not public, so a
 /// file that does not match gives no plugins and leaves other skill sources
 /// alone (design doc: Agent Skill Completion → Plugin Skill).
 nonisolated enum ClaudePluginRegistry {
-  /// The skill directories of every enabled plugin under `configRoot`.
-  static func skillDirectories(configRoot: URL, home: URL) -> [SkillDirectory] {
+  /// Managed (enterprise) settings on macOS. They override every other
+  /// settings file.
+  static let managedSettings = URL(
+    fileURLWithPath: "/Library/Application Support/ClaudeCode/managed-settings.json")
+
+  /// The settings files that can set `enabledPlugins`, lowest precedence
+  /// first: user, project, local project, managed. Claude Code reads the
+  /// project files in the directory it starts in.
+  static func settingsFiles(
+    configRoot: URL, projectDirectory: URL?, managedSettings: URL
+  ) -> [URL] {
+    var files = [configRoot.appending(path: "settings.json", directoryHint: .notDirectory)]
+    if let projectDirectory {
+      files.append(projectDirectory.appending(path: ".claude/settings.json", directoryHint: .notDirectory))
+      files.append(projectDirectory.appending(path: ".claude/settings.local.json", directoryHint: .notDirectory))
+    }
+    files.append(managedSettings)
+    return files
+  }
+
+  /// The skill directories of every enabled plugin under `configRoot`, as
+  /// enabled for an agent that starts in `projectDirectory`.
+  static func skillDirectories(
+    configRoot: URL, home: URL, projectDirectory: URL?, managedSettings: URL = managedSettings
+  ) -> [SkillDirectory] {
     let registry = configRoot.appending(path: "plugins/installed_plugins.json", directoryHint: .notDirectory)
-    let settings = configRoot.appending(path: "settings.json", directoryHint: .notDirectory)
     let fileManager = FileManager.default
-    guard let registryData = fileManager.contents(atPath: registry.path(percentEncoded: false)),
-      let settingsData = fileManager.contents(atPath: settings.path(percentEncoded: false))
-    else { return [] }
-    return enabledPlugins(registry: registryData, settings: settingsData, home: home).flatMap { plugin in
+    guard let registryData = fileManager.contents(atPath: registry.path(percentEncoded: false)) else {
+      return []
+    }
+    let settings = settingsFiles(
+      configRoot: configRoot, projectDirectory: projectDirectory, managedSettings: managedSettings
+    ).compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
+    return enabledPlugins(registry: registryData, settings: settings, home: home).flatMap { plugin in
       skillDirectories(of: plugin).map { url, layout in
         SkillDirectory(url: url, source: .plugin, namespace: plugin.name, layout: layout)
       }
@@ -71,14 +96,16 @@ nonisolated enum ClaudePluginRegistry {
     var installPath: URL
   }
 
-  /// Installed plugins whose `<plugin>@<marketplace>` key `enabledPlugins`
-  /// sets to `true`, in key order. A plugin installed more than once lists
-  /// each distinct install path.
-  static func enabledPlugins(registry: Data, settings: Data, home: URL) -> [Plugin] {
-    guard let enabled = enabledKeys(settings),
-      let object = try? JSONSerialization.jsonObject(with: registry) as? [String: Any],
+  /// Installed plugins whose `<plugin>@<marketplace>` key is enabled, in
+  /// key order. `settings` go from lowest to highest precedence; a later
+  /// file's `true` or `false` for a key wins, and a file that is not a JSON
+  /// object is skipped, as Claude Code skips an invalid settings file. A
+  /// plugin installed more than once lists each distinct install path.
+  static func enabledPlugins(registry: Data, settings: [Data], home: URL) -> [Plugin] {
+    guard let object = try? JSONSerialization.jsonObject(with: registry) as? [String: Any],
       let installs = object["plugins"] as? [String: Any]
     else { return [] }
+    let enabled = enabledKeys(settings)
     return installs.keys.sorted().filter(enabled.contains).flatMap { key -> [Plugin] in
       guard let name = key.split(separator: "@", maxSplits: 1).first.map(String.init), !name.isEmpty,
         let records = installs[key] as? [[String: Any]]
@@ -93,12 +120,17 @@ nonisolated enum ClaudePluginRegistry {
     }
   }
 
-  private static func enabledKeys(_ settings: Data) -> Set<String>? {
-    guard let object = try? JSONSerialization.jsonObject(with: settings) as? [String: Any] else {
-      return nil
+  private static func enabledKeys(_ settings: [Data]) -> Set<String> {
+    var flags: [String: Bool] = [:]
+    for data in settings {
+      guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let values = object["enabledPlugins"] as? [String: Any]
+      else { continue }
+      for (key, value) in values {
+        if let flag = value as? Bool { flags[key] = flag }
+      }
     }
-    let flags = object["enabledPlugins"] as? [String: Any] ?? [:]
-    return Set(flags.compactMap { key, value in (value as? Bool) == true ? key : nil })
+    return Set(flags.compactMap { key, flag in flag ? key : nil })
   }
 
   /// An absolute or `~`-relative install path. Claude Code writes absolute

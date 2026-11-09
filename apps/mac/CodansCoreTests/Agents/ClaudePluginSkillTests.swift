@@ -7,12 +7,17 @@ import Testing
 struct ClaudePluginSkillTests {
   private let home: URL
   private let stateRoot: URL
+  /// Stands in for the machine-wide managed settings file.
+  private let managed: URL
+  private let project: URL
 
   init() throws {
     let root = FileManager.default.temporaryDirectory
       .appending(path: "claude-plugin-skills-\(UUID().uuidString)", directoryHint: .isDirectory)
     home = root.appending(path: "home", directoryHint: .isDirectory)
     stateRoot = root.appending(path: "state", directoryHint: .isDirectory)
+    managed = root.appending(path: "managed/managed-settings.json")
+    project = root.appending(path: "repo", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
   }
 
@@ -55,9 +60,20 @@ struct ClaudePluginSkillTests {
       to: configRoot.appending(path: "settings.json"))
   }
 
-  private func scan(_ profile: AgentProfile) -> [AgentSkillEntry] {
+  private func plugins(_ profile: AgentProfile, in projectDirectory: URL? = nil) -> [SkillDirectory] {
+    SkillLocationResolver.pluginDirectories(
+      for: profile, projectDirectory: projectDirectory, userHome: home, stateDirectory: stateRoot,
+      managedSettings: managed)
+  }
+
+  private func scan(_ profile: AgentProfile, in projectDirectory: URL? = nil) -> [AgentSkillEntry] {
     SkillScanner.scanSync(
-      SkillLocationResolver.directories(for: profile, userHome: home, stateDirectory: stateRoot))
+      SkillLocationResolver.userDirectories(for: profile, userHome: home, stateDirectory: stateRoot)
+        + plugins(profile, in: projectDirectory))
+  }
+
+  private func enable(_ flags: String, in file: URL) throws {
+    try write(#"{"enabledPlugins": {\#(flags)}}"#, to: file)
   }
 
   @Test
@@ -125,15 +141,14 @@ struct ClaudePluginSkillTests {
     #expect(scan(profile).map(\.name) == ["docs:pdf", "mine", "pro:design"])
     #expect(scan(AgentProfile(kind: .claudeCode)).isEmpty)
     let relative = AgentProfile(kind: .claudeCode, envVars: ["CLAUDE_CONFIG_DIR": "work-claude"])
-    #expect(SkillLocationResolver.pluginDirectories(for: relative, userHome: home, stateDirectory: stateRoot).isEmpty)
+    #expect(plugins(relative).isEmpty)
   }
 
   @Test
   func pluginDirectoriesCoverBothLayoutsUnderTheResolvedRoot() throws {
     try fixture(root: home.appending(path: "alt"))
     let profile = AgentProfile(kind: .claudeCode, envVars: ["CLAUDE_CONFIG_DIR": "~/alt"])
-    let directories = SkillLocationResolver.pluginDirectories(
-      for: profile, userHome: home, stateDirectory: stateRoot)
+    let directories = plugins(profile)
     let docs = home.appending(path: "alt/plugins/cache/market/docs/1.0.0").standardizedFileURL
     #expect(
       directories.filter { $0.namespace == "docs" }.map(\.url) == [
@@ -169,11 +184,57 @@ struct ClaudePluginSkillTests {
   }
 
   @Test
+  func projectSettingsEnableAPluginTheUserDisabled() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    try enable(#""off@market": true"#, in: project.appending(path: ".claude/settings.json"))
+    let profile = AgentProfile(kind: .claudeCode)
+    #expect(scan(profile, in: project).map(\.name) == ["docs:pdf", "mine", "off:hidden", "pro:design"])
+    #expect(!scan(profile).contains { $0.name == "off:hidden" })
+  }
+
+  @Test
+  func projectSettingsDisableAPluginTheUserEnabled() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    try enable(#""docs@market": false"#, in: project.appending(path: ".claude/settings.json"))
+    #expect(scan(AgentProfile(kind: .claudeCode), in: project).map(\.name) == ["mine", "pro:design"])
+  }
+
+  @Test
+  func localSettingsWinOverProjectSettings() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    try enable(#""docs@market": false, "off@market": true"#, in: project.appending(path: ".claude/settings.json"))
+    try enable(#""docs@market": true, "off@market": false"#, in: project.appending(path: ".claude/settings.local.json"))
+    #expect(scan(AgentProfile(kind: .claudeCode), in: project).map(\.name) == ["docs:pdf", "mine", "pro:design"])
+  }
+
+  @Test
+  func managedSettingsWinOverEveryOtherFile() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    try enable(#""off@market": true"#, in: project.appending(path: ".claude/settings.local.json"))
+    try enable(#""off@market": false, "pro@other": false"#, in: managed)
+    #expect(scan(AgentProfile(kind: .claudeCode), in: project).map(\.name) == ["docs:pdf", "mine"])
+  }
+
+  @Test
+  func malformedProjectSettingsAreSkipped() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    try write("{not json", to: project.appending(path: ".claude/settings.json"))
+    try enable(#""off@market": true"#, in: project.appending(path: ".claude/settings.local.json"))
+    #expect(scan(AgentProfile(kind: .claudeCode), in: project).map(\.name) == ["docs:pdf", "mine", "off:hidden", "pro:design"])
+  }
+
+  @Test
+  func projectSettingsEnableAPluginWithoutUserSettings() throws {
+    let root = home.appending(path: ".claude")
+    try fixture(root: root)
+    try FileManager.default.removeItem(at: root.appending(path: "settings.json"))
+    try enable(#""docs@market": true"#, in: project.appending(path: ".claude/settings.json"))
+    #expect(scan(AgentProfile(kind: .claudeCode), in: project).map(\.name) == ["docs:pdf", "mine"])
+  }
+
+  @Test
   func agentWithoutPluginSourceReadsNoRegistry() throws {
     try fixture(root: home.appending(path: ".claude"))
-    #expect(
-      SkillLocationResolver.pluginDirectories(
-        for: AgentProfile(kind: .codex), userHome: home, stateDirectory: stateRoot
-      ).isEmpty)
+    #expect(plugins(AgentProfile(kind: .codex)).isEmpty)
   }
 }

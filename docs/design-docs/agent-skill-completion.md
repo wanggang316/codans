@@ -89,11 +89,12 @@ struct SkillLocation {
 
 ### 插件 Skill
 
-- **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `<config root>/settings.json` 中 `enabledPlugins` 为 true 的插件。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
+- **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `enabledPlugins` 合并结果为 true 的插件。合并顺序同 Claude Code 的 settings 优先级（后者覆盖前者）：`<config root>/settings.json`、项目起点下的 `.claude/settings.json`、`.claude/settings.local.json`、`/Library/Application Support/ClaudeCode/managed-settings.json`。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
   - Config root 与用户级目录同一规则：有效 HOME 下的 `.claude`，或 `CLAUDE_CONFIG_DIR` 的值（相对路径时不列插件）。
   - 插件清单 `.claude-plugin/plugin.json` 的 `skills` 字段声明了路径时，扫 `skills/` 与声明的路径（路径本身含 `SKILL.md` 则为单个 Skill），不再整体扫 `.claude/skills`：Claude Code 只加载声明的 Skill（例：ui-ux-pro-max 2.5.0 的 `.claude/skills` 有 7 个 Skill，只声明 1 个）。离开 install path 的路径丢弃。
   - 注册表 key 为 `<plugin>@<marketplace>`，`<plugin>` 取 `@` 之前部分。`installPath` 只接受绝对路径或 `~/` 开头的路径。
-  - 注册表或 settings 缺失、不是 JSON、结构不符时，不列插件 Skill；用户级与项目级 Skill 不受影响。
+  - 项目起点见"目录解析"。切换目标（分支）会改变起点，因此重新扫描。
+  - 注册表缺失、不是 JSON、结构不符时，不列插件 Skill；某个 settings 文件缺失或无法解析时跳过该文件（Claude Code 也忽略无效的 settings 文件）。用户级与项目级 Skill 不受影响。
   - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。
 - **Codex**：`<config root>/plugins/cache/<marketplace>/<plugin>/<version>/skills/*/SKILL.md`，以 `config.toml` 的 `[plugins."<plugin>@<marketplace>"] enabled = true` 过滤。调用名为 `<plugin>:<skill>`。
 
@@ -103,7 +104,7 @@ struct SkillLocation {
 
 `AgentSkillEntry`：调用名、描述首行、来源（Project / User / Plugin）、路径。同名条目按该 agent 的 `precedence` 去重。
 
-扫描时机：对话框打开、切换 agent、切换项目、切换目标。结果存在 `NewAgentFeature.State`；不监听文件，不跨会话缓存。
+扫描时机：对话框打开、切换 agent、切换项目、切换目标。结果按（profile，项目起点）对应，起点变化时先清空旧结果。结果存在 `NewAgentFeature.State`；不监听文件，不跨会话缓存。
 
 ### 交互
 

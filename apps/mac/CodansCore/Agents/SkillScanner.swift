@@ -25,11 +25,13 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
 
 /// Reads the `*/SKILL.md` files in skill directories.
 public nonisolated enum SkillScanner {
-  /// Resolves and scans every skill directory of `profile`, off the
-  /// caller's actor.
+  /// Resolves and scans every skill directory of `profile` launched in
+  /// `projectDirectory`, off the caller's actor.
   @concurrent
-  public static func scan(for profile: AgentProfile) async -> [AgentSkillEntry] {
-    scanSync(SkillLocationResolver.directories(for: profile))
+  public static func scan(
+    for profile: AgentProfile, projectDirectory: URL?
+  ) async -> [AgentSkillEntry] {
+    scanSync(SkillLocationResolver.directories(for: profile, projectDirectory: projectDirectory))
   }
 
   /// Scans `directories` in order, off the caller's actor. A missing

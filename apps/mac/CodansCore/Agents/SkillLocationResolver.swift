@@ -37,24 +37,32 @@ public nonisolated struct SkillDirectory: Equatable, Sendable, Hashable {
 /// reads. The user's home and the state root are inputs, so tests do not
 /// touch the real ones. Only `pluginDirectories` reads files.
 public nonisolated enum SkillLocationResolver {
-  /// Every directory to scan for `profile`: user skills, then plugin skills.
-  /// Reads the plugin registry, so call it off the main actor.
+  /// Every directory to scan for `profile` launched in `projectDirectory`:
+  /// user skills, then plugin skills. Reads plugin registry and settings
+  /// files, so call it off the main actor.
   public static func directories(
     for profile: AgentProfile,
+    projectDirectory: URL?,
     userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
     stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> [SkillDirectory] {
     userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
-      + pluginDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
+      + pluginDirectories(
+        for: profile, projectDirectory: projectDirectory, userHome: userHome,
+        stateDirectory: stateDirectory)
   }
 
-  /// Skill directories of the enabled plugins of `profile`'s agent, read
-  /// from the plugin registry under its config root. A registry or settings
-  /// file that is missing or cannot be read gives no plugin directories.
-  public static func pluginDirectories(
+  /// Skill directories of the plugins that `profile`'s agent, launched in
+  /// `projectDirectory`, has enabled. The registry lives under its config
+  /// root; the user, project, local, and managed settings decide which
+  /// plugins are on. A file that is missing or cannot be read gives no
+  /// plugins (registry) or no say (settings).
+  static func pluginDirectories(
     for profile: AgentProfile,
-    userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
-    stateDirectory: URL = AppDirectories.stateDirectory()
+    projectDirectory: URL?,
+    userHome: URL,
+    stateDirectory: URL,
+    managedSettings: URL = ClaudePluginRegistry.managedSettings
   ) -> [SkillDirectory] {
     let location = profile.descriptor.skillLocation
     guard location.supportsCompletion, let plugins = location.plugins,
@@ -63,7 +71,9 @@ public nonisolated enum SkillLocationResolver {
     switch plugins {
     case .claudeCode:
       let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
-      return ClaudePluginRegistry.skillDirectories(configRoot: root, home: home)
+      return ClaudePluginRegistry.skillDirectories(
+        configRoot: root, home: home, projectDirectory: projectDirectory,
+        managedSettings: managedSettings)
     }
   }
 

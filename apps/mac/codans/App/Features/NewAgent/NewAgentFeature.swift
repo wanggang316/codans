@@ -59,6 +59,14 @@ struct NewAgentFeature {
     case newWorkspace
   }
 
+  /// What one skill scan reads for: the profile, whose home and environment
+  /// decide the user and plugin skills, and the directory the agent starts
+  /// in, whose Claude Code settings can turn plugins on or off.
+  struct SkillScope: Equatable, Sendable {
+    var profile: AgentProfile
+    var projectDirectory: URL?
+  }
+
   /// What the user set in a dialog they closed without sending. The next
   /// open restores it, so a half-written prompt is not lost. Kept in memory
   /// only, for the app session.
@@ -97,9 +105,11 @@ struct NewAgentFeature {
     var prompt = ""
     /// Agent Skills the selected agent can call, for prompt completion.
     var skills: [AgentSkillEntry] = []
-    /// The profile `skills` were read for. Its home and environment decide
-    /// which skills exist, so the skills of another profile are never shown.
-    var skillsProfile: AgentProfile?
+    /// The scope `skills` were read for. Skills of another profile or
+    /// directory are never shown.
+    var skillsScope: SkillScope?
+    /// The scope of the latest scan. Only its result is taken.
+    var skillsRequest: SkillScope?
     var submitError: String?
     /// Draft to restore on appear. The worktree part waits until the form's
     /// options load: the base ref, the branch-name checks, and the branch
@@ -198,7 +208,7 @@ struct NewAgentFeature {
     /// Picked files, and the prompt's caret or selection as UTF-16 offsets
     /// (`nil` appends to the end).
     case filesSelected([URL], selection: Range<Int>?)
-    case skillsLoaded([AgentSkillEntry], for: AgentProfile)
+    case skillsLoaded([AgentSkillEntry], for: SkillScope)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -249,7 +259,7 @@ struct NewAgentFeature {
       case .targetSelected(let target):
         state.target = target
         state.submitError = nil
-        return .none
+        return loadSkills(state: &state)
 
       case .worktreeOptionsToggled:
         state.showsWorktreeOptions.toggle()
@@ -276,13 +286,14 @@ struct NewAgentFeature {
         }
         return .none
 
-      case .skillsLoaded(let skills, let profile):
-        // A scan that finished after the agent changed is dropped.
-        guard state.skillLocation.supportsCompletion, state.selectedAgent == profile else {
+      case .skillsLoaded(let skills, let scope):
+        // A scan that finished after the agent or the target changed is
+        // dropped.
+        guard state.skillLocation.supportsCompletion, state.skillsRequest == scope else {
           return .none
         }
         state.skills = skills
-        state.skillsProfile = profile
+        state.skillsScope = scope
         return .none
 
       case .sendTapped:
@@ -308,7 +319,7 @@ struct NewAgentFeature {
       case .worktree(.optionsLoaded):
         guard let draft = state.restoring else { return .none }
         state.restoring = nil
-        return restoreWorktree(draft, state: &state)
+        return .merge(restoreWorktree(draft, state: &state), loadSkills(state: &state))
 
       case .worktree:
         return .none
@@ -346,24 +357,57 @@ struct NewAgentFeature {
   private nonisolated enum CancelID { case skills }
 
   /// Reads the selected agent's skills again. The agent's home and
-  /// environment come from the profile, so a profile edit reloads too, and
-  /// the skills of the previous profile go at once instead of when the
-  /// scan ends (ADR 0010).
+  /// environment, and the directory it starts in, decide which skills it
+  /// resolves, so the skills of another scope go at once instead of when
+  /// the new scan ends (ADR 0010).
   private func loadSkills(state: inout State) -> Effect<Action> {
     guard state.skillLocation.supportsCompletion, let profile = state.selectedAgent else {
       state.skills = []
-      state.skillsProfile = nil
+      state.skillsScope = nil
+      state.skillsRequest = nil
       return .cancel(id: CancelID.skills)
     }
-    if state.skillsProfile != profile {
+    let scope = SkillScope(profile: profile, projectDirectory: skillProjectDirectory(state: state))
+    if state.skillsScope != scope {
       state.skills = []
-      state.skillsProfile = nil
+      state.skillsScope = nil
     }
+    state.skillsRequest = scope
     let client = agentSkillClient
     return .run { send in
-      await send(.skillsLoaded(client.load(profile), for: profile))
+      await send(.skillsLoaded(client.load(scope.profile, scope.projectDirectory), for: scope))
     }
     .cancellable(id: CancelID.skills, cancelInFlight: true)
+  }
+
+  /// The directory the agent starts in, by the rules of `send`: the one
+  /// folder of a folder or workspace project, the worktree that holds the
+  /// chosen branch, or else the repository root. A new worktree does not
+  /// exist yet; its checkout comes from the same repository.
+  private func skillProjectDirectory(state: State) -> URL? {
+    guard let projectID = state.projectID,
+      let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+      !project.isRemote
+    else { return nil }
+    let live = project.worktrees.filter { !$0.archived }
+    let path: String
+    if state.worktree == nil {
+      path = (live.first { $0.id == project.selectedWorktreeID } ?? live.first)?.path ?? project.rootPath
+    } else if case .branch(let ref) = state.target, let worktree = Self.worktree(holding: ref, in: live) {
+      path = worktree.path
+    } else {
+      path = project.gitRoot ?? project.rootPath
+    }
+    return URL(fileURLWithPath: path, isDirectory: true)
+  }
+
+  /// The worktree on `ref`, or on the branch of the remote-tracking ref
+  /// `ref` (`origin/feature` → `feature`).
+  private static func worktree(holding ref: String, in worktrees: [Worktree]) -> Worktree? {
+    if let worktree = worktrees.first(where: { $0.branch == ref }) { return worktree }
+    guard let slash = ref.firstIndex(of: "/") else { return nil }
+    let branch = String(ref[ref.index(after: slash)...])
+    return worktrees.first { $0.branch == branch }
   }
 
   /// Puts back what `onAppear` can set at once. The form is seeded fresh, so
