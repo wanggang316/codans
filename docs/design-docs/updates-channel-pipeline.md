@@ -124,8 +124,8 @@ A preliminary job attempts to skip a commit already targeted by the `tip` tag.
    `generate_appcast --channel tip --maximum-versions 1`. Sparkle stamps each item with
    `<sparkle:channel>tip</sparkle:channel>` automatically — no `sed` post-processing.
 4. Force-move the `tip` git tag to `${{ github.sha }}`, push.
-5. Create or update the `tip` GitHub Release with `--prerelease`, attach the DMG and the
-   raw tip-only `appcast.xml`. The tip release exists primarily as a download surface and
+5. Create or update the `tip` GitHub Release with `--prerelease`, attach the DMG, its
+   `.sha256`, and the raw tip-only feed as `appcast-tip.xml`. The tip release exists primarily as a download surface and
    a tag anchor; clients never read its `appcast.xml` directly.
 6. **Merge step** (the heart of the channel mechanism):
    - `gh release list --exclude-drafts --exclude-pre-releases` → latest stable tag.
@@ -136,6 +136,9 @@ A preliminary job attempts to skip a commit already targeted by the `tip` tag.
      the stable release.
 7. Smoke check: `curl -fsSL releases/latest/download/appcast.xml` and grep for
    `<sparkle:channel>tip</sparkle:channel>`.
+8. Delete every other asset of the `tip` release, so it holds only the current DMG,
+   its `.sha256`, and `appcast-tip.xml`. This runs after the merge step, because until
+   then the canonical feed points at the previous tip DMG.
 
 ### Stable workflow flow (`.github/workflows/release-merge.yml` → `release.yml`)
 
