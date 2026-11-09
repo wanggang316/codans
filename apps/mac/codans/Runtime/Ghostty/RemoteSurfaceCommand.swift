@@ -241,7 +241,12 @@ nonisolated enum SSHReconnectLoop {
       // Focus reporting, bracketed paste, synchronized output.
       "\u{1B}[?1004l", "\u{1B}[?2004l", "\u{1B}[?2026l",
       // Primary screen, visible cursor, normal cursor keys (DECCKM), normal keypad.
-      "\u{1B}[?1049l", "\u{1B}[?25h", "\u{1B}[?1l", "\u{1B}>",
+      // Leaving 1049 restores the primary screen's saved cursor, which is the
+      // top-left corner when none was saved, so the output would be written
+      // over. Save the cursor first: on the primary screen the restore then
+      // keeps it in place; on the alternate screen the save goes to that
+      // screen and the primary one gets its own cursor back.
+      "\u{1B}7", "\u{1B}[?1049l", "\u{1B}[?25h", "\u{1B}[?1l", "\u{1B}>",
       // Pop the whole kitty keyboard stack; modifyOtherKeys off.
       "\u{1B}[<99u", "\u{1B}[>4;0m",
       // SGR reset.

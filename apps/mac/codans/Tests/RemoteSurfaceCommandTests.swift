@@ -54,6 +54,8 @@ struct RemoteSurfaceCommandTests {
     for mode in [9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016, 1004, 2004, 2026, 1049, 1] {
       #expect(sequence.contains("\u{1B}[?\(mode)l"), "mode \(mode) is not reset")
     }
+    // Leaving 1049 on the primary screen must not move the cursor to the top-left.
+    #expect(sequence.contains("\u{1B}7\u{1B}[?1049l"))
     #expect(sequence.contains("\u{1B}[?25h"))  // show cursor
     #expect(sequence.contains("\u{1B}>"))  // normal keypad
     #expect(sequence.contains("\u{1B}[<99u"))  // pop the kitty keyboard stack
