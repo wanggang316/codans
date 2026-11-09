@@ -300,4 +300,57 @@ struct NewAgentFeatureTests {
       $0.prompt = "Read '/tmp/a.txt'"
     }
   }
+
+  // MARK: - Skills
+
+  private nonisolated static let reviewSkill = AgentSkillEntry(
+    name: "review", summary: "Review a change", source: .user,
+    url: URL(fileURLWithPath: "/tmp/skills/review"))
+
+  private func makeSkillStore(
+    catalog: Catalog, loaded: LockIsolated<[AgentKind]>
+  ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
+    let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: nil)) {
+      NewAgentFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      $0[AgentSkillClient.self].load = { profile in
+        loaded.withValue { $0.append(profile.kind) }
+        return [Self.reviewSkill]
+      }
+    }
+    store.exhaustivity = .off
+    return store
+  }
+
+  @Test
+  func claudeCodeProfileLoadsItsSkillsAndOtherAgentsLoadNone() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let codex = AgentProfile(kind: .codex, name: "Codex")
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, codex]))
+    await store.receive(\.skillsLoaded) { $0.skills = [Self.reviewSkill] }
+    #expect(store.state.skillLocation == .claudeCode)
+
+    await store.send(.agentSelected(codex.id)) { $0.skills = [] }
+    #expect(store.state.skillLocation == .none)
+    #expect(loaded.value == [.claudeCode])
+  }
+
+  @Test
+  func remoteProjectOffersNoSkills() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let remote = Project(
+      name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
+      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    #expect(store.state.skillLocation == .none)
+    #expect(store.state.skills.isEmpty)
+    #expect(loaded.value.isEmpty)
+  }
 }

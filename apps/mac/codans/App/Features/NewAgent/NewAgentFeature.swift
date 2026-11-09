@@ -25,10 +25,13 @@ struct NewAgentFeature {
     /// A git project offers a new worktree or a branch. A folder or a
     /// workspace has one place to work, so the dialog offers neither.
     let isGit: Bool
+    /// The agent runs on another host, where codans cannot read its skills.
+    let isRemote: Bool
 
     init(_ project: Project) {
       id = project.id
       name = project.name
+      isRemote = project.isRemote
       if case .symbol(let name) = project.icon {
         symbol = name
       } else {
@@ -92,6 +95,8 @@ struct NewAgentFeature {
     var agentProfiles: [AgentProfile] = []
     var agentProfileID: UUID?
     var prompt = ""
+    /// Agent Skills the selected agent can call, for prompt completion.
+    var skills: [AgentSkillEntry] = []
     var submitError: String?
     /// Draft to restore on appear. The worktree part waits until the form's
     /// options load: the base ref, the branch-name checks, and the branch
@@ -131,6 +136,13 @@ struct NewAgentFeature {
 
     var selectedAgent: AgentProfile? {
       agentProfiles.first { $0.id == agentProfileID }
+    }
+
+    /// How the prompt calls the selected agent's skills. `none` without an
+    /// agent and in a remote project (ADR 0010).
+    var skillLocation: SkillLocation {
+      guard let agent = selectedAgent, selectedProject?.isRemote == false else { return .none }
+      return agent.descriptor.skillLocation
     }
 
     /// The branch-name field and the worktree options apply.
@@ -183,6 +195,7 @@ struct NewAgentFeature {
     /// Picked files, and the prompt's caret or selection as UTF-16 offsets
     /// (`nil` appends to the end).
     case filesSelected([URL], selection: Range<Int>?)
+    case skillsLoaded([AgentSkillEntry])
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -205,6 +218,7 @@ struct NewAgentFeature {
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
+  @Dependency(AgentSkillClient.self) private var agentSkillClient
   @Dependency(SettingsWriter.self) private var settingsWriter
   @Dependency(\.dismiss) private var dismiss
 
@@ -227,7 +241,7 @@ struct NewAgentFeature {
 
       case .projectSelected(let projectID):
         guard projectID != state.projectID else { return .none }
-        return selectProject(projectID, state: &state)
+        return .merge(selectProject(projectID, state: &state), loadSkills(state: &state))
 
       case .targetSelected(let target):
         state.target = target
@@ -243,11 +257,11 @@ struct NewAgentFeature {
         if !profiles.contains(where: { $0.id == state.agentProfileID }) {
           state.agentProfileID = profiles.first?.id
         }
-        return .none
+        return loadSkills(state: &state)
 
       case .agentSelected(let profileID):
         state.agentProfileID = profileID
-        return .none
+        return loadSkills(state: &state)
 
       case .promptChanged(let prompt):
         state.prompt = prompt
@@ -257,6 +271,10 @@ struct NewAgentFeature {
         if let result = ComposerPathInsertion.insert(urls, into: state.prompt, selection: selection) {
           state.prompt = result.text
         }
+        return .none
+
+      case .skillsLoaded(let skills):
+        state.skills = skills
         return .none
 
       case .sendTapped:
@@ -315,6 +333,22 @@ struct NewAgentFeature {
     form?.launchAgentProfileID = nil
     state.worktree = form
     return form == nil ? .none : .send(.worktree(.onAppear))
+  }
+
+  private nonisolated enum CancelID { case skills }
+
+  /// Reads the selected agent's skills again. The agent's home and
+  /// environment come from the profile, so a profile edit reloads too.
+  private func loadSkills(state: inout State) -> Effect<Action> {
+    guard state.skillLocation.supportsCompletion, let profile = state.selectedAgent else {
+      state.skills = []
+      return .cancel(id: CancelID.skills)
+    }
+    let client = agentSkillClient
+    return .run { send in
+      await send(.skillsLoaded(client.load(profile)))
+    }
+    .cancellable(id: CancelID.skills, cancelInFlight: true)
   }
 
   /// Puts back what `onAppear` can set at once. The form is seeded fresh, so
