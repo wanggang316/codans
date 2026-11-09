@@ -111,6 +111,8 @@ struct SkillLocation {
 
 组件 `ComposerSkillCompletion` 与 `ComposerTextEditor` 并列放在 `App/Features/Composer/`，不依赖 New Agent，便于后续接入其他输入处。
 
+`.composerSkillCompletion` 修饰符同时接管输入框的 Return 和 Esc（`onSubmit` / `onCancel`）：SwiftUI 先把按键交给最外层的 `onKeyPress`，宿主另写的处理器会在弹窗之前拿走 Return。弹窗跟随文本与光标一起更新，光标移出调用 token（点击、方向键）即收起；扫描未完成时已输入的前缀保留，结果到达后弹出。切换 profile 时先清空旧结果，只接受属于当前 profile 的扫描结果。
+
 ### 探针实测
 
 对本机已装的 Claude Code、Codex、Pi、Gemini、OpenCode：在隔离实例的临时项目里放一个探针 Skill（执行时输出固定标记），用 New Agent 的实际启动路径带调用 token 作为首条 prompt 启动，检查标记是否出现，分别测 prompt 开头和中间两种位置。结果写入 Skill Location 表的 `invocationStyle` / `invocationPosition` 及本节。未通过或未安装的 agent 保持 `none`。

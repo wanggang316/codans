@@ -74,11 +74,33 @@ struct ComposerSkillCompletionTests {
   }
 
   @Test
-  func noCaretUsesTheEndOfTheText() {
+  func selectedRangeOpensNothing() {
     let completion = completion()
-    completion.update(text: "fix it /note", caret: nil)
-    #expect(completion.query == .init(range: 7..<12, text: "note"))
-    #expect(completion.matches.first?.name == "note")
+    completion.update(text: "/note", caret: 5)
+    #expect(completion.isOpen)
+    completion.update(text: "/note", caret: nil)
+    #expect(!completion.isOpen)
+    #expect(completion.query == nil)
+  }
+
+  @Test
+  func skillsThatLoadAfterThePrefixOpenTheList() {
+    let completion = completion(skills: [])
+    completion.update(text: "/td", caret: 3)
+    #expect(!completion.isOpen)
+    completion.skills = Self.skills
+    #expect(completion.isOpen)
+    #expect(completion.matches.map(\.name) == ["tdd"])
+  }
+
+  @Test
+  func pickingACallTheTextNoLongerHoldsChangesNothing() {
+    let completion = completion()
+    completion.update(text: "fix /td", caret: 7)
+    #expect(completion.isOpen)
+    // The text changed under the list without an update (the call is gone).
+    #expect(completion.select(Self.skills[1], text: "fix td") == .handled)
+    #expect(!completion.isOpen)
   }
 
   @Test

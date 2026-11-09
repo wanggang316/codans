@@ -306,6 +306,9 @@ struct NewAgentFeatureTests {
   private nonisolated static let reviewSkill = AgentSkillEntry(
     name: "review", summary: "Review a change", source: .user,
     url: URL(fileURLWithPath: "/tmp/skills/review"))
+  private nonisolated static let workSkill = AgentSkillEntry(
+    name: "deploy", summary: nil, source: .user,
+    url: URL(fileURLWithPath: "/srv/work-claude/skills/deploy"))
 
   private func makeSkillStore(
     catalog: Catalog, loaded: LockIsolated<[AgentKind]>
@@ -317,7 +320,7 @@ struct NewAgentFeatureTests {
       $0[SettingsWriter.self].readSnapshotSync = { Settings() }
       $0[AgentSkillClient.self].load = { profile in
         loaded.withValue { $0.append(profile.kind) }
-        return [Self.reviewSkill]
+        return profile.envVars.isEmpty ? [Self.reviewSkill] : [Self.workSkill]
       }
     }
     store.exhaustivity = .off
@@ -332,7 +335,10 @@ struct NewAgentFeatureTests {
     let store = makeSkillStore(catalog: catalog, loaded: loaded)
     await store.send(.onAppear)
     await store.send(.agentProfilesChanged([profile, codex]))
-    await store.receive(\.skillsLoaded) { $0.skills = [Self.reviewSkill] }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsProfile = profile
+    }
     #expect(store.state.skillLocation == .claudeCode)
 
     await store.send(.agentSelected(codex.id)) { $0.skills = [] }
@@ -352,5 +358,48 @@ struct NewAgentFeatureTests {
     #expect(store.state.skillLocation == .none)
     #expect(store.state.skills.isEmpty)
     #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func switchingClaudeProfilesDropsThePreviousSkillsAtOnce() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let work = AgentProfile(
+      kind: .claudeCode, name: "Work", envVars: ["CLAUDE_CONFIG_DIR": "/srv/work-claude"])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, work]))
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsProfile = profile
+    }
+
+    // Same Skill Location, other home: nothing is offered until the scan
+    // for the new profile ends.
+    await store.send(.agentSelected(work.id)) {
+      $0.skills = []
+      $0.skillsProfile = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.workSkill]
+      $0.skillsProfile = work
+    }
+    // A late result for the old profile is dropped.
+    await store.send(.skillsLoaded([Self.reviewSkill], for: profile))
+    #expect(store.state.skills == [Self.workSkill])
+    #expect(store.state.skillsProfile == work)
+  }
+
+  @Test
+  func reloadingTheSameProfileKeepsItsSkillsUntilTheScanEnds() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.agentSelected(profile.id))
+    #expect(store.state.skills == [Self.reviewSkill])
+    await store.receive(\.skillsLoaded)
   }
 }
