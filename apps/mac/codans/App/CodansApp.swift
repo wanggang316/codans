@@ -182,6 +182,10 @@ struct CodansApp: App {
         }
         .appKeyboardShortcut(.openSettings, in: appState.shortcutsStore.resolved)
       }
+      // Replaces the default "codans Help" item, which has no help book to open.
+      CommandGroup(replacing: .help) {
+        HelpMenuItems()
+      }
     }
 
     Window("Settings", id: CodansApp.settingsWindowID) {

@@ -2,12 +2,13 @@ import SwiftUI
 import CodansCore
 
 /// Compact footer mounted at the sidebar's `.safeAreaInset(edge: .bottom)`.
-/// Two glyphs anchored at opposite edges: a leading tag-filter button whose
-/// popover lists the available tag filters (`[All]`, one row per Tag, an
-/// optional `[Untagged]`, and an `Edit Tags…` shortcut), and a trailing
-/// refresh button that re-runs the project reconciler manually so the user
-/// can pick up out-of-band changes (e.g. a folder that just got `git init`)
-/// without waiting for the focus-driven cadence.
+/// A leading help button opens the help menu (Website / Report issue /
+/// Changelog). Trailing buttons toggle the Agents View panel and re-run the
+/// project reconciler manually, so the user can pick up out-of-band changes
+/// (e.g. a folder that just got `git init`) without waiting for the
+/// focus-driven cadence. The tag-filter button, whose popover lists the tag
+/// filters (`[All]`, one row per Tag, an optional `[Untagged]`, and an
+/// `Edit Tags…` shortcut), is hidden.
 ///
 /// The filter icon flips to its `.fill` variant tinted with
 /// `Color.accentColor` whenever the active filter is anything other than
@@ -40,6 +41,7 @@ struct TagFilterPopoverFooter: View {
       // wired callbacks stay around so the feature can be re-mounted
       // without rewiring the call site. Projects are reordered by direct
       // drag in the list (ADR 0001), so the footer has no sort control.
+      SidebarHelpMenuButton()
       Spacer()
       if let onAgentStateTapped {
         Button(action: onAgentStateTapped) {
