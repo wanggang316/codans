@@ -3,7 +3,8 @@ import ComposableArchitecture
 import Foundation
 
 /// Reads the Agent Skills a profile's launched agent can call: its Skill
-/// Location resolved against the profile's home and environment, then
+/// Location (user and enabled plugin skills) resolved against the profile's
+/// home and environment, then
 /// scanned off the main actor.
 nonisolated struct AgentSkillClient: Sendable {
   var load: @Sendable (_ profile: AgentProfile) async -> [AgentSkillEntry]
@@ -12,7 +13,7 @@ nonisolated struct AgentSkillClient: Sendable {
 extension AgentSkillClient: DependencyKey {
   static let liveValue = AgentSkillClient(
     load: { profile in
-      await SkillScanner.scan(SkillLocationResolver.userDirectories(for: profile))
+      await SkillScanner.scan(for: profile)
     }
   )
 

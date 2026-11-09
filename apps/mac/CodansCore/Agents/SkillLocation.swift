@@ -45,6 +45,14 @@ public nonisolated struct SkillConfigRoot: Equatable, Sendable, Hashable {
   }
 }
 
+/// The plugin system whose enabled plugins add skills, called as
+/// `<plugin>:<skill>`.
+public nonisolated enum SkillPluginSource: Equatable, Sendable, Hashable {
+  /// Claude Code: `plugins/installed_plugins.json` and the `enabledPlugins`
+  /// of `settings.json`, both under the config root.
+  case claudeCode
+}
+
 /// The rule by which one `AgentKind` finds its Agent Skills and calls them.
 /// See GLOSSARY → Agent Skills and the Agent Skill Completion design doc.
 public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
@@ -53,17 +61,21 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
   /// moves with the config root.
   public let userDirectories: [String]
   public let configRoot: SkillConfigRoot?
+  /// Plugins resolve under `configRoot`, so a source needs one.
+  public let plugins: SkillPluginSource?
   public let invocationStyle: SkillInvocationStyle
   public let invocationPosition: SkillInvocationPosition
 
   public init(
     userDirectories: [String] = [],
     configRoot: SkillConfigRoot? = nil,
+    plugins: SkillPluginSource? = nil,
     invocationStyle: SkillInvocationStyle = .none,
     invocationPosition: SkillInvocationPosition = .leading
   ) {
     self.userDirectories = userDirectories
     self.configRoot = configRoot
+    self.plugins = plugins
     self.invocationStyle = invocationStyle
     self.invocationPosition = invocationPosition
   }
@@ -76,11 +88,12 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
 
 extension SkillLocation {
   /// Claude Code reads `~/.claude/skills`; `CLAUDE_CONFIG_DIR` replaces
-  /// `~/.claude`. The probe in the design doc showed that `/name` runs at
+  /// `~/.claude`. Enabled plugins add `/<plugin>:<skill>`. The probe in the design doc showed that `/name` runs at
   /// the prompt start and in the middle of the first prompt.
   public static let claudeCode = SkillLocation(
     userDirectories: [".claude/skills"],
     configRoot: SkillConfigRoot(environmentVariable: "CLAUDE_CONFIG_DIR", defaultDirectory: ".claude"),
+    plugins: .claudeCode,
     invocationStyle: .slash,
     invocationPosition: .anywhere
   )

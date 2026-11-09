@@ -3,7 +3,8 @@ import Yams
 
 /// One Agent Skill the completion list offers.
 public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identifiable {
-  /// The name the agent calls the skill by.
+  /// The name the agent calls the skill by, `<plugin>:<skill>` for a
+  /// plugin skill.
   public let name: String
   /// First line of the frontmatter `description`, or `nil` when the
   /// frontmatter has none or cannot be read.
@@ -24,6 +25,13 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
 
 /// Reads the `*/SKILL.md` files in skill directories.
 public nonisolated enum SkillScanner {
+  /// Resolves and scans every skill directory of `profile`, off the
+  /// caller's actor.
+  @concurrent
+  public static func scan(for profile: AgentProfile) async -> [AgentSkillEntry] {
+    scanSync(SkillLocationResolver.directories(for: profile))
+  }
+
   /// Scans `directories` in order, off the caller's actor. A missing
   /// directory contributes nothing. For one name the first directory wins,
   /// and the result is sorted by name.
@@ -58,8 +66,9 @@ public nonisolated enum SkillScanner {
       }
       let folderName = folder.lastPathComponent
       let frontmatter = String(data: data, encoding: .utf8).flatMap(SkillFrontmatter.parse)
+      let name = frontmatter?.name ?? folderName
       return AgentSkillEntry(
-        name: frontmatter?.name ?? folderName,
+        name: directory.namespace.map { "\($0):\(name)" } ?? name,
         summary: frontmatter?.summary,
         source: directory.source,
         url: folder

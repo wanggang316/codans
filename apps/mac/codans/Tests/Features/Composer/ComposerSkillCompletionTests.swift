@@ -164,6 +164,18 @@ struct ComposerSkillCompletionTests {
   }
 
   @Test
+  func pluginSkillInsertsItsPluginColonSkillCall() {
+    let plugin = AgentSkillEntry(
+      name: "docs:pdf", summary: "Read PDFs", source: .plugin,
+      url: URL(fileURLWithPath: "/tmp/plugins/docs/skills/pdf"))
+    let completion = completion(skills: Self.skills + [plugin])
+    let text = "open /pd"
+    completion.update(text: text, caret: 8)
+    #expect(completion.matches.first == plugin)
+    #expect(completion.handle(.accept, text: text) == .insert(text: "open /docs:pdf ", caret: 15))
+  }
+
+  @Test
   func escapeClosesOnlyTheListUntilTheCallEnds() {
     let completion = completion()
     completion.update(text: "/t", caret: 2)
