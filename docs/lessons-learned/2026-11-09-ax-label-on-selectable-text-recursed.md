@@ -77,7 +77,8 @@ text. All other labels on the pane are unchanged.
   candidates, run `grep -rn 'textSelection(.enabled)' apps/mac/codans` and
   read each modifier chain.
 - To check a pane, walk its full AX tree on an isolated Debug instance
-  (`sv_tree` in the self-verify skill), wait a few seconds, then confirm
-  that the instance is still alive and that no new
-  `~/Library/Logs/DiagnosticReports/Codans-*.ips` exists. A complete tree
-  output alone does not prove the absence of the crash.
+  between `sv_crash_mark` and `sv_crash_check` (self-verify skill, "Crash
+  Check"). The check waits a few seconds, then fails when the instance is
+  gone or wrote a new `~/Library/Logs/DiagnosticReports/Codans-*.ips`, and
+  prints the crashed-thread frames. A complete tree output alone does not
+  prove the absence of the crash.
