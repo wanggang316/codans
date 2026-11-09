@@ -410,6 +410,111 @@ sv_hover() {
   sv_tool hover "$pid" "$1" "$2"
 }
 
+# Crash bracket for one UI step: sv_crash_mark, the step, sv_crash_check.
+# A complete AX walk does not prove the absence of a crash: the app can
+# crash a moment later (lessons-learned 2026-11-09). The check fails when
+# the instance is gone or ReportCrash wrote a new Codans-*.ips for the
+# instance PID. Release, dev, and test instances all write Codans-*.ips, so a
+# report counts only when its PID is the marked instance.
+sv_crash_dir() { printf '%s\n' "${SELF_VERIFY_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}"; }
+sv_crash_mark_file() { printf '%s\n' "$SELF_VERIFY_DIR/crash-mark"; }
+
+sv_crash_reports() {
+  find "$(sv_crash_dir)" -maxdepth 1 -name 'Codans-*.ips' 2>/dev/null | sort
+}
+
+# Record the instance PID (line 1) and the reports that exist now.
+sv_crash_mark() {
+  local pid
+  pid="$(sv_pid)" || {
+    printf 'self-verify: no running instance to mark\n' >&2
+    return 1
+  }
+  { printf '%s\n' "$pid"; sv_crash_reports; } >"$(sv_crash_mark_file)"
+}
+
+# Print each report written since the mark for <pid>: its path, the
+# exception, and the top frames of the crashed thread.
+# The script comes on stdin, so the report paths go in a file.
+sv_crash_new_reports() {
+  local list="$SELF_VERIFY_DIR/crash-reports"
+  sv_crash_reports >"$list"
+  python3 - "$(sv_crash_mark_file)" "$list" "$1" "${SELF_VERIFY_CRASH_FRAMES:-15}" <<'PY'
+import json, sys
+mark, listing, pid, limit = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+with open(mark) as f:
+    known = set(f.read().splitlines()[1:])
+with open(listing) as f:
+    paths = f.read().splitlines()
+for path in paths:
+    if path in known:
+        continue
+    try:
+        with open(path) as f:
+            body = json.loads(f.read().split("\n", 1)[1])
+    except (OSError, ValueError, IndexError):
+        continue  # Not a crash report, or still being written.
+    if body.get("pid") != pid:
+        continue
+    exc = body.get("exception", {})
+    print(f"crash report: {path}")
+    print(f"  {exc.get('type', '?')} ({exc.get('signal', '?')}) {exc.get('subtype', '')}".rstrip())
+    images = body.get("usedImages", [])
+    threads = body.get("threads", [])
+    crashed = next((t for t in threads if t.get("triggered")), None)
+    if crashed is None:
+        index = body.get("faultingThread")
+        crashed = threads[index] if isinstance(index, int) and index < len(threads) else {}
+    for i, frame in enumerate(crashed.get("frames", [])[:limit]):
+        index = frame.get("imageIndex")
+        image = images[index].get("name", "?") if isinstance(index, int) and index < len(images) else "?"
+        if "symbol" in frame:
+            where = f"{frame['symbol']} + {frame.get('symbolLocation', 0)}"
+        else:
+            where = hex(frame.get("imageOffset", 0))
+        print(f"  {i:>3} {image:<24} {where}")
+PY
+}
+
+# Wait SELF_VERIFY_CRASH_SETTLE seconds (default 3), then fail when the
+# marked instance is gone or a new report names its PID. A dead instance gets
+# up to SELF_VERIFY_CRASH_WAIT more seconds (default 15) for ReportCrash to
+# write the report.
+sv_crash_check() {
+  local mark pid reports gone=0 attempt
+  mark="$(sv_crash_mark_file)"
+  [ -s "$mark" ] || {
+    printf 'self-verify: call sv_crash_mark before sv_crash_check\n' >&2
+    return 1
+  }
+  pid="$(sed -n 1p "$mark")"
+  sleep "${SELF_VERIFY_CRASH_SETTLE:-3}"
+  [ "$(sv_pid 2>/dev/null)" = "$pid" ] || gone=1
+  reports="$(sv_crash_new_reports "$pid")"
+  if [ "$gone" = 1 ] && [ -z "$reports" ]; then
+    for attempt in $(seq 1 "$(awk -v w="${SELF_VERIFY_CRASH_WAIT:-15}" 'BEGIN { print int(w * 2) }')"); do
+      sleep 0.5
+      reports="$(sv_crash_new_reports "$pid")"
+      [ -z "$reports" ] || break
+    done
+  fi
+  if [ "$gone" = 0 ] && [ -z "$reports" ]; then
+    printf 'self-verify: crash check passed: pid %s is alive, no new crash report\n' "$pid"
+    return 0
+  fi
+  if [ "$gone" = 1 ]; then
+    printf 'self-verify: crash check FAILED: instance pid %s is gone\n' "$pid" >&2
+  else
+    printf 'self-verify: crash check FAILED: instance pid %s wrote a crash report\n' "$pid" >&2
+  fi
+  if [ -n "$reports" ]; then
+    printf '%s\n' "$reports" >&2
+  else
+    printf 'self-verify: no new Codans-*.ips report for pid %s in %s\n' "$pid" "$(sv_crash_dir)" >&2
+  fi
+  return 1
+}
+
 # PIDs that hold files under the private cache dir (zmx daemons and their
 # attach clients). Scoped by path so Gump's dev daemons are never matched.
 sv_cache_pids() {

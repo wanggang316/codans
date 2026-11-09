@@ -250,7 +250,7 @@ struct RemoteSymlinkRootTests {
     let root = await service.canonicalWorkTreeRoot(of: Self.entered)
     #expect(root == Self.resolved)
     let call = await runner.calls[0]
-    #expect(call.executable.path == "/usr/bin/ssh")
+    #expect(call.arguments.contains(SSHCommand.guardShellName))
     #expect(call.arguments.last?.contains("rev-parse") == true)
     #expect(call.arguments.last?.contains(Self.entered) == true)
   }

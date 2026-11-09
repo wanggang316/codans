@@ -226,6 +226,43 @@ nonisolated enum SSHReconnectLoop {
   static let maxDelaySeconds = 15
   static let minSessionSeconds = 3
 
+  /// Turns off the terminal modes a remote program can leave on when its
+  /// connection drops before it can clean up. Without this, a mouse mode
+  /// (e.g. Claude Code's any-event tracking with SGR encoding) stays on, and
+  /// the fresh shell after the reconnect echoes each report as typed input.
+  /// This is a targeted reset, not RIS (`ESC c`): the screen, the scrollback,
+  /// and the notices stay visible. A surviving host `zmx` session replays the
+  /// modes its program still holds when it re-attaches.
+  static let terminalModeResetSequence =
+    [
+      // Mouse tracking and encodings.
+      "\u{1B}[?9l", "\u{1B}[?1000l", "\u{1B}[?1001l", "\u{1B}[?1002l", "\u{1B}[?1003l",
+      "\u{1B}[?1005l", "\u{1B}[?1006l", "\u{1B}[?1015l", "\u{1B}[?1016l",
+      // Focus reporting, bracketed paste, synchronized output.
+      "\u{1B}[?1004l", "\u{1B}[?2004l", "\u{1B}[?2026l",
+      // Ghostty keeps one kitty keyboard stack per screen, and the alternate
+      // screen keeps its stack after 1049l, so the next program to enter it
+      // would inherit the flags. Pop the stack of the current screen before
+      // leaving it; the primary screen's stack is popped below.
+      "\u{1B}[<99u",
+      // Primary screen, visible cursor, normal cursor keys (DECCKM), normal keypad.
+      // Leaving 1049 restores the primary screen's saved cursor, which is the
+      // top-left corner when none was saved, so the output would be written
+      // over. Save the cursor first: on the primary screen the restore then
+      // keeps it in place; on the alternate screen the save goes to that
+      // screen and the primary one gets its own cursor back.
+      "\u{1B}7", "\u{1B}[?1049l", "\u{1B}[?25h", "\u{1B}[?1l", "\u{1B}>",
+      // Pop the primary screen's kitty keyboard stack; modifyOtherKeys off.
+      "\u{1B}[<99u", "\u{1B}[>4;0m",
+      // SGR reset.
+      "\u{1B}[0m",
+    ].joined()
+
+  /// `printf` line that writes `terminalModeResetSequence`. The format holds
+  /// no `%` and no `'`, so it crosses the outer single-quoting layers as is.
+  static let terminalModeResetCommand =
+    "printf '" + terminalModeResetSequence.replacingOccurrences(of: "\u{1B}", with: "\\033") + "'"
+
   static func script(connect: String, reconnect: String) -> String {
     let retryNotice =
       #"printf '\033[1;33m── Connection ended (exit %s). Retrying in %ss. Press Ctrl-C to stop. ──\033[0m\r\n' "$codans_rc" "$codans_delay""#
@@ -244,6 +281,7 @@ nonisolated enum SSHReconnectLoop {
       fi
       codans_rc=$?
       codans_dur=$((SECONDS - codans_t0))
+      \(terminalModeResetCommand)
       if [ "$codans_dur" -ge \(minSessionSeconds) ]; then
       [ "$codans_rc" -ne 255 ] && exit "$codans_rc"
       codans_mode=reconnect

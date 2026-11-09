@@ -292,6 +292,7 @@ Source: [AgentHandlers.swift](../../apps/mac/codans/App/Features/Socket/AgentHan
 - **睡眠、缓存与恢复行。** 被动 watcher 仍送来 OSC 7501 与标题，睡眠行照常显示 agent 标题；`source: cached` 的行，agent 标题与状态图标一样调淡。从退出快照恢复的标题（`AgentTitle.isRestored`）同样调淡，直到 agent 再次报告（见「运行态退出快照」）。
 - 状态图标集：`.blocked` → 琥珀；`.working` → accent 旋转；`.done` → 绿勾；`.error` → 红色三角；`.idle` → 次级灰圈。
 - 行密度（两行 `normal` / 一行 `compact`）与 auto-sort 由 `Settings → General → Agents View` 控制。
+- **显示模式切换按钮。** 标题行右端有一个常驻的小按钮，在 `normal` 与 `compact` 之间切换。它写入同一个全局设置 `agentsViewDisplayMode`（经 `SettingsStore.setAgentsViewDisplayMode`），所以切换会持久化，并与 Settings 中的 Picker 同步；面板不另存状态。图标表示点击后的目标模式：`normal` 时为 `rectangle.compress.vertical`，`compact` 时为 `rectangle.expand.vertical`；tooltip 与无障碍 label 为 "Switch to Compact" / "Switch to Normal"。按钮是原生 borderless SF Symbol，`.caption` 字号、次级色，不增加标题行高度；空状态下也显示。行高变化使用 `easeInOut(0.2)` 动画，`accessibilityReduceMotion` 时无动画。没有快捷键、菜单命令或 CLI 入口。
 - **无障碍。** `agentState.row.<paneID>.headline` 在 worktree 文本上；agent 标题标识为 `agentState.row.<paneID>.title`。整行 VoiceOver label（agent 名、worktree、project、状态）不含 agent 标题，因为它变化频繁。
 - 行没有 hover 摘要卡（见「技术决策」）。session 扫描器仍服务于 `AgentSessionHistoryPopover`、PaneHUD 与空 Pane 视图。
 
@@ -363,7 +364,7 @@ var setPaneAgentSessionID: @MainActor @Sendable (PaneID, String?) -> Void
 
 **持久化兼容性。** Pane 绑定字段是可选字段；文件中缺失时解码为 nil。关闭侧栏面板不改变绑定字段、运行态派生或 CLI 查询。
 
-**设置。** `Settings → General` 提供 Agents View 的 display mode（normal / compact）与 auto-sort 开关；无独立 enable/disable 开关（面板自身可折叠）。
+**设置。** `Settings → General` 提供 Agents View 的 display mode（normal / compact，面板标题行的切换按钮写同一设置）与 auto-sort 开关；无独立 enable/disable 开关（面板自身可折叠）。
 
 ## 风险
 

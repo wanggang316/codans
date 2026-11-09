@@ -112,18 +112,25 @@ struct NewAgentView: View {
   /// A selector drawn as its title and a chevron, with no bezel — the same
   /// borderless menu as the agent menu beside the send button. The inline
   /// picker gives the rows their checkmarks.
+  ///
+  /// The accessibility label goes on the menu's label content, not on the
+  /// `Menu`: AppKit takes the menu button's AX title from the label content
+  /// on every update, so a label on the `Menu` gives way to the visible
+  /// title (and the symbol's description) after a selection. The selection
+  /// is the value, on the `Menu`.
   private func selectorMenu<Content: View>(
-    _ title: String, systemImage: String, accessibilityLabel: String,
+    _ title: String, systemImage: String, accessibilityLabel: String, accessibilityValue: String? = nil,
     @ViewBuilder content: () -> Content
   ) -> some View {
     Menu {
       content()
     } label: {
       Label(title, systemImage: systemImage)
+        .accessibilityLabel(accessibilityLabel)
     }
     .menuStyle(.borderlessButton)
     .fixedSize()
-    .accessibilityLabel(accessibilityLabel)
+    .accessibilityValue(accessibilityValue ?? "")
   }
 
   @ViewBuilder
@@ -155,27 +162,75 @@ struct NewAgentView: View {
       }
     } else {
       let selected = store.selectedProject
-      selectorMenu(
-        selected?.name ?? "Project",
-        systemImage: selected?.symbol ?? ProjectIconView.folderSymbol,
-        accessibilityLabel: "Project"
-      ) {
-        Picker(
-          "Project",
-          selection: Binding(
-            get: { store.projectID },
-            set: { if let id = $0 { store.send(.projectSelected(id)) } }
-          )
-        ) {
-          ForEach(store.projects) { project in
-            Label(project.name, systemImage: project.symbol)
-              .tag(ProjectID?.some(project.id))
+      Menu {
+        projectPicker
+      } label: {
+        Label {
+          Text(selected?.name ?? "Project")
+        } icon: {
+          Image(nsImage: Self.projectIcon(selected))
+            .accessibilityHidden(true)
+        }
+        // On the label content, not the `Menu`: see `selectorMenu`.
+        .accessibilityLabel("Project")
+      }
+      .menuStyle(.borderlessButton)
+      .fixedSize()
+      .accessibilityValue(selected?.name ?? "")
+    }
+  }
+
+  /// Recent, then the project groups. A project in Recent is in its group
+  /// too; both rows carry its tag, so both select it and both show checked.
+  private var projectPicker: some View {
+    let menu = store.projectMenu
+    return Picker(
+      "Project",
+      selection: Binding(
+        get: { store.projectID },
+        set: { if let id = $0 { store.send(.projectSelected(id)) } }
+      )
+    ) {
+      if !menu.recent.isEmpty {
+        Section("Recent") {
+          ForEach(menu.recent) { project in
+            projectRow(project, marksRemote: true)
           }
         }
-        .pickerStyle(.inline)
-        .labelsHidden()
+      }
+      ForEach(menu.sections) { section in
+        Section(section.title) {
+          ForEach(section.projects) { project in
+            // The section title already names the Host.
+            projectRow(project, marksRemote: false)
+          }
+        }
       }
     }
+    .pickerStyle(.inline)
+    .labelsHidden()
+  }
+
+  private func projectRow(_ project: NewAgentFeature.ProjectOption, marksRemote: Bool) -> some View {
+    Label {
+      if marksRemote && project.isRemote {
+        Text("\(project.name) \(Image(systemName: RemoteProjectMarker.symbol))")
+          .accessibilityLabel("\(project.name), remote")
+      } else {
+        Text(project.name)
+      }
+    } icon: {
+      Image(nsImage: Self.projectIcon(project))
+        .accessibilityHidden(true)
+    }
+    .tag(ProjectID?.some(project.id))
+  }
+
+  /// The project's sidebar icon, pre-rendered for a menu row.
+  private static func projectIcon(_ project: NewAgentFeature.ProjectOption?) -> NSImage {
+    ProjectIconView.menuImage(
+      icon: project?.icon, color: project?.color,
+      defaultSymbol: project?.defaultSymbol ?? ProjectIconView.folderSymbol)
   }
 
   /// "New Worktree", then the project's local and remote branches.
@@ -190,7 +245,7 @@ struct NewAgentView: View {
       title = ref
       symbol = "point.3.connected.trianglepath.dotted"
     }
-    return selectorMenu(title, systemImage: symbol, accessibilityLabel: "Worktree") {
+    return selectorMenu(title, systemImage: symbol, accessibilityLabel: "Worktree", accessibilityValue: title) {
       Picker(
         "Worktree",
         selection: Binding(
@@ -357,24 +412,26 @@ struct NewAgentView: View {
       }
       Button("Manage Agents…") { store.send(.manageAgentsTapped) }
     } label: {
-      if let agent = store.selectedAgent {
-        Label {
-          Text(agent.displayName)
-        } icon: {
-          AgentMenuIcon.image(for: agent.icon)
+      Group {
+        if let agent = store.selectedAgent {
+          Label {
+            Text(agent.displayName)
+          } icon: {
+            AgentMenuIcon.image(for: agent.icon)
+          }
+        } else {
+          Text("No Agent")
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-      } else {
-        Text("No Agent")
-          .font(.callout)
-          .foregroundStyle(.secondary)
       }
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      // On the label content, not the `Menu`: see `selectorMenu`.
+      .accessibilityLabel("Agent")
     }
     .menuStyle(.borderlessButton)
     .fixedSize()
     .help("Agent")
-    .accessibilityLabel("Agent")
+    .accessibilityValue(store.selectedAgent?.displayName ?? "")
   }
 
   private var sendButton: some View {

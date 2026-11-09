@@ -261,6 +261,20 @@ struct SettingsTerminalFeatureTests {
       $0.errorMessage = "unwired"
     }
   }
+
+  @Test
+  func openConfigFileTappedOpensResolvedConfigPathOnce() async {
+    let configURL = URL(fileURLWithPath: "/tmp/codans-tests/xdg/ghostty/config")
+    let opened = LockIsolated<[URL]>([])
+    let store = TestStore(initialState: SettingsTerminalFeature.State()) {
+      SettingsTerminalFeature()
+    } withDependencies: {
+      $0.ghosttyConfigOpener.configURL = { configURL }
+      $0.ghosttyConfigOpener.open = { url in opened.withValue { $0.append(url) } }
+    }
+    await store.send(.openConfigFileTapped)
+    #expect(opened.value == [configURL])
+  }
 }
 
 @MainActor

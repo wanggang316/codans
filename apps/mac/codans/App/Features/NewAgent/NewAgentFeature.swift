@@ -19,26 +19,75 @@ struct NewAgentFeature {
   struct ProjectOption: Equatable, Identifiable {
     let id: ProjectID
     let name: String
-    /// SF Symbol for the project's menu row. Menus draw SF Symbols only, so a
-    /// custom project image falls back to the default glyph.
-    let symbol: String
+    /// The project's icon and color, drawn with the sidebar's rules
+    /// (`ProjectIconView`).
+    let icon: ProjectIcon?
+    let color: ProjectColor?
+    /// Glyph for a project with no icon, or whose custom icon file is gone.
+    let defaultSymbol: String
     /// A git project offers a new worktree or a branch. A folder or a
     /// workspace has one place to work, so the dialog offers neither.
     let isGit: Bool
-    /// The agent runs on another host, where codans cannot read its skills.
+    /// Lives on a Host, not on This Mac. A Recent row marks it, and codans
+    /// cannot read the agent's skills there.
     let isRemote: Bool
 
     init(_ project: Project) {
       id = project.id
       name = project.name
-      isRemote = project.isRemote
-      if case .symbol(let name) = project.icon {
-        symbol = name
-      } else {
-        symbol = project.isWorkspace ? "square.stack.3d.up" : ProjectIconView.folderSymbol
-      }
+      icon = project.icon
+      color = project.color
+      defaultSymbol = ProjectIconView.defaultSymbol(for: project.kind)
       isGit = project.supportsWorktrees && !project.isWorkspace
+      isRemote = project.isRemote
     }
+  }
+
+  /// The project menu's sections. Every project is in a group section;
+  /// a recently active one is also in Recent.
+  struct ProjectMenu: Equatable {
+    struct Section: Equatable, Identifiable {
+      let id: String
+      let title: String
+      let projects: [ProjectOption]
+    }
+
+    /// Recent shows only above this many projects; it holds this many.
+    static let recentLimit = 3
+
+    /// The projects with the latest activity, newest first. Empty when the
+    /// catalog has `recentLimit` projects or fewer.
+    let recent: [ProjectOption]
+    /// One "Projects" section, or one section per Host in sidebar Host order
+    /// when the sidebar shows the Host level. Filters and collapsed Hosts do
+    /// not apply: the dialog lists every project.
+    let sections: [Section]
+
+    init(_ catalog: Catalog) {
+      let projects = catalog.projects
+      if projects.count > Self.recentLimit {
+        recent =
+          projects
+          .compactMap { project in project.lastActiveAt.map { (project, $0) } }
+          .sorted { $0.1 > $1.1 }
+          .prefix(Self.recentLimit)
+          .map { ProjectOption($0.0) }
+      } else {
+        recent = []
+      }
+      guard catalog.sidebarHostLevel != nil else {
+        sections = [Section(id: "projects", title: "Projects", projects: projects.map(ProjectOption.init))]
+        return
+      }
+      let level = SidebarHostLevel(records: catalog.hosts, collapsed: [])
+      sections = level.groups(projects).map { group in
+        Section(
+          id: SidebarOutlineModel.hostNodeID(group.host), title: group.displayName,
+          projects: group.projects.map(ProjectOption.init))
+      }
+    }
+
+    static let empty = ProjectMenu(Catalog())
   }
 
   /// Where the agent works in a git project.
@@ -93,7 +142,9 @@ struct NewAgentFeature {
     /// In-flight worktree creations per project, for the 8-creation cap.
     let pendingCounts: [ProjectID: Int]
 
+    /// Every project, in catalog order.
     var projects: [ProjectOption] = []
+    var projectMenu = ProjectMenu.empty
     var projectID: ProjectID?
     var target: Target = .newWorktree
     /// The worktree options under the branch name (base ref, fetch, copy).
@@ -260,6 +311,7 @@ struct NewAgentFeature {
       case .onAppear:
         let catalog = hierarchyClient.snapshot()
         state.projects = catalog.projects.map(ProjectOption.init)
+        state.projectMenu = ProjectMenu(catalog)
         if let draft = state.restoring,
           state.projects.contains(where: { $0.id == draft.projectID })
         {

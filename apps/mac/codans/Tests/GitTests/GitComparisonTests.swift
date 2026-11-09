@@ -302,7 +302,7 @@ struct GitComparisonTests {
     let calls = await runner.calls
     #expect(calls.count == 1)
     let call = try #require(calls.first)
-    #expect(call.executable.path == "/usr/bin/ssh")
+    #expect(call.arguments.contains(SSHCommand.guardShellName))
     #expect(call.arguments.contains("fixture.example"))
     #expect(call.arguments.contains("BatchMode=yes"))
     #expect(call.cwd.path != "/srv/app")

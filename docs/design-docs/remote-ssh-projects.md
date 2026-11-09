@@ -147,10 +147,20 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
     master, so every path that can create one carries them).
   - `backgroundProbeOptions` (`BatchMode`, `ConnectTimeout=10`) for git probes;
     `interactiveOptions` (`ConnectTimeout=30`) for the terminal.
+  - `sharedMasterGuard(host,…)` — a POSIX `sh` fragment that runs before
+    an ssh line uses a master: if `ssh -O check` finds no master, it creates
+    one with a no-op `true` while it holds a `lockf` lock at
+    `<ControlPath>.lock`.
+  - `sharedMasterLine(host,…)` — the POSIX `sh` statement that runs every ssh
+    line over one of `masterSlotCount` (4) shared masters per host
+    (`masterControlPaths`: `codans-%C`, `codans-%C-1`, …). See Connection
+    reuse below.
   - `invocation(host,executable,arguments,workingDirectory,…)` → argv for
-    `Process`/`CommandRunner` (one remote-shell quoting level).
+    `Process`/`CommandRunner` (one remote-shell quoting level): `/bin/sh -c`
+    runs `sharedMasterLine` with the ssh argv as `$@`.
   - `commandLine(host,remoteCommand,…)` → a single string for libghostty's
-    `/bin/sh -c` surface command (two quoting levels).
+    `/bin/sh -c` surface command (two quoting levels), built by
+    `sharedMasterLine`.
   - `loginShellWrapped` runs the remote command under `exec "$SHELL" -l -c …`
     so a macOS host's Homebrew-augmented PATH is restored.
 
@@ -162,6 +172,13 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
     connection-error code) with capped exponential backoff; every other exit
     passes through and closes the surface like a local shell exit. Ctrl-C during
     the backoff is the escape hatch.
+  - After every ssh line returns, before any notice, the loop resets the
+    terminal modes a dropped remote program cannot turn off (mouse tracking
+    and encodings, focus reporting, bracketed paste, synchronized output, the
+    alternate screen, cursor and keypad modes, kitty keyboard, modifyOtherKeys,
+    SGR). Without it the fresh shell echoes mouse reports as typed input. It
+    is a targeted reset, not RIS, so the output and the notices stay. A
+    re-attached host `zmx` session replays the modes its program still holds.
   - With a host-side `zmx`, the worktree shell runs inside `zmx attach
     <codans-paneUUID>` so remote work survives disconnects; otherwise it falls
     back to a plain login shell in the worktree.
@@ -311,6 +328,31 @@ whenever one is installed; the header button hides when none is.
   interactive terminal allows a first-connect prompt (no BatchMode).
 - **Connection reuse.** A shared `ControlMaster` multiplexes N git probes plus
   the terminal onto one connection — one auth per host, no per-call handshake.
+  `ControlMaster=auto` alone does not coordinate the creation of the master:
+  when none listens (it ended, or a killed one left a socket that ssh unlinks
+  as stale), every line that starts in that window connects and authenticates
+  on its own, the first one takes the `ControlPath`, and each other one prints
+  `ControlSocket … already exists, disabling multiplexing` and keeps a private
+  connection (a terminal keeps it for the whole session). This occurs on each
+  reconnect, when panes and probes start together. `sharedMasterGuard`
+  serializes the creation per `ControlPath`, so one line creates the master and
+  the others wait and then multiplex. The guard never removes a socket, so a
+  live master is never touched.
+- **Full master (sshd `MaxSessions`).** sshd caps the sessions on one
+  connection (`MaxSessions`, default 10). A master that is full refuses a new
+  session, and with `ControlMaster=auto` ssh then connects and authenticates
+  on its own and prints the same "already exists" warning. So
+  `sharedMasterLine` runs each line with `ControlMaster=no` and a sentinel
+  `ProxyCommand`: ssh runs it only when it cannot use the master, before
+  anything runs on the host. When the sentinel fires and the master is live,
+  the line moves to the next shared master (created by the guard, one auth);
+  when no master could be created, the line runs with `ControlMaster=auto` as
+  before, so auth prompts and errors stay visible. When all 4 masters are
+  full, the line uses its own connection (`ControlPath=none`, with the
+  `ServerAlive*` keepalives, because it owns its transport) and a terminal
+  prints a notice. Trade-off: each overflow master costs one auth, and a
+  probe that holds a session for a moment can make a new pane open the next
+  master instead of waiting.
 - **Testing.** `SSHCommand`, `RemoteSurfaceCommand`, and `RemoteGitService`'s
   parser/normalization are pure and unit-tested; `RemoteProjectFeature`'s
   validation paths are covered by reducer tests. The live SSH path requires a
