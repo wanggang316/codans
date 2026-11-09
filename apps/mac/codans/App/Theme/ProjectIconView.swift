@@ -4,8 +4,9 @@ import SwiftUI
 
 /// The one place a `Project.icon` turns into pixels. Shared by the main
 /// sidebar's Project header row, the Settings sidebar, the manual-reorder
-/// sheet, and the Icon picker's own preview, so every surface agrees on the
-/// default glyph, the sizing, and the tint rule.
+/// sheet, the Icon picker's own preview, and (through `menuImage`) the New
+/// Agent dialog's project menu, so every surface agrees on the default glyph,
+/// the sizing, and the tint rule.
 ///
 /// Tint rule: SF Symbols always take the Project color; custom
 /// artwork only does so for vector formats, which are single-color line work
@@ -76,12 +77,66 @@ struct ProjectIconView: View {
       .accessibilityHidden(true)
   }
 
-  private var followsProjectColor: Bool {
+  /// Whether the Project color repaints `icon`. No icon means the default
+  /// SF Symbol, which follows the color.
+  static func followsProjectColor(_ icon: ProjectIcon?) -> Bool {
     icon?.followsProjectColor ?? true
+  }
+
+  private var followsProjectColor: Bool {
+    Self.followsProjectColor(icon)
   }
 
   private var tint: Color {
     color?.swiftUIColor ?? fallbackTint
+  }
+
+  // MARK: - Menu image
+
+  /// The icon as a non-template `NSImage` of `size` points with the tint
+  /// baked in, for native menu rows. A menu row draws only a plain image:
+  /// it drops SwiftUI's frame and foreground style, so an unsized custom
+  /// image breaks the menu layout and a template image loses its color.
+  /// Same rules as the view; the fallback tint is the secondary label gray.
+  static func menuImage(
+    icon: ProjectIcon?, color: ProjectColor?, defaultSymbol: String, size: CGFloat = AgentMenuIcon.size
+  ) -> NSImage {
+    let tint = color.map { NSColor($0.swiftUIColor) } ?? .secondaryLabelColor
+    func symbol(_ name: String) -> NSImage {
+      CommandIconImage.tinted(.symbol(name), color: tint, pointSize: size)
+        ?? CommandIconImage.tinted(.symbol(defaultSymbol), color: tint, pointSize: size)
+        ?? NSImage(size: NSSize(width: size, height: size))
+    }
+    switch icon {
+    case .none:
+      return symbol(defaultSymbol)
+    case .symbol(let name):
+      return symbol(name)
+    case .custom(let fileName):
+      guard let artwork = ProjectIconImageCache.image(forFileName: fileName) else {
+        return symbol(defaultSymbol)
+      }
+      let tinted = followsProjectColor(icon)
+      let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        artwork.draw(in: aspectFit(artwork.size, in: rect))
+        if tinted {
+          tint.set()
+          rect.fill(using: .sourceAtop)
+        }
+        return true
+      }
+      image.isTemplate = false
+      return image
+    }
+  }
+
+  private static func aspectFit(_ size: NSSize, in rect: NSRect) -> NSRect {
+    guard size.width > 0, size.height > 0 else { return rect }
+    let scale = min(rect.width / size.width, rect.height / size.height)
+    let fitted = NSSize(width: size.width * scale, height: size.height * scale)
+    return NSRect(
+      x: rect.midX - fitted.width / 2, y: rect.midY - fitted.height / 2,
+      width: fitted.width, height: fitted.height)
   }
 }
 
