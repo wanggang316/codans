@@ -7,20 +7,41 @@
 # sockets), and RPC socket. Gump's release and dev apps are never addressed
 # by name, by default socket, or by default directory.
 
-SELF_VERIFY_DIR="${SELF_VERIFY_DIR:-${TMPDIR%/}/codans-self-verify-$(id -u)}"
+# The session id that scopes the default paths: the first one set of
+# SELF_VERIFY_SESSION, the agent session (CLAUDE_CODE_SESSION_ID), the codans
+# pane the agent runs in (CODANS_PANE_ID), and the terminal session
+# (TERM_SESSION_ID). All are inherited, so every shell and script of one
+# session gets the same paths. Empty when none is set.
+sv_session_id() {
+  printf '%s\n' "${SELF_VERIFY_SESSION:-${CLAUDE_CODE_SESSION_ID:-${CODANS_PANE_ID:-${TERM_SESSION_ID:-}}}}"
+}
+
+# Short token for <worktree root> and <session id>. Pure: no environment.
+sv_session_token() {
+  printf '%s\n%s\n' "$1" "$2" | shasum -a 256 | cut -c1-8
+}
+
+# Parallel sessions on one machine must not share an instance: a shared
+# socket refuses the second launch, and a shared dir lets one session's
+# sv_cleanup delete the other's config and pid file. So the defaults are
+# scoped to the worktree and the session. Without a session id, sessions in
+# one worktree share paths, and the second launch refuses the busy socket.
+sv_token="$(sv_session_token "$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)" "$(sv_session_id)")"
+SELF_VERIFY_DIR="${SELF_VERIFY_DIR:-${TMPDIR%/}/codans-self-verify-$(id -u)-$sv_token}"
 # AF_UNIX paths are capped at 104 bytes. The RPC socket and the cache dir
 # (which holds one zmx socket per pane, named by a 36-char pane UUID) stay
 # short and outside SELF_VERIFY_DIR.
-SELF_VERIFY_SOCKET="${SELF_VERIFY_SOCKET:-/tmp/cdv-sv-$(id -u).sock}"
-SELF_VERIFY_CACHE="${SELF_VERIFY_CACHE:-/tmp/cdv-sv-cache-$(id -u)}"
+SELF_VERIFY_SOCKET="${SELF_VERIFY_SOCKET:-/tmp/cdv-sv-$(id -u)-$sv_token.sock}"
+SELF_VERIFY_CACHE="${SELF_VERIFY_CACHE:-/tmp/cdv-sv-cache-$(id -u)-$sv_token}"
+unset sv_token
 SELF_VERIFY_DEFAULTS_DOMAIN="${SELF_VERIFY_DEFAULTS_DOMAIN:-com.gumpw.codans}"
 
 sv_conf_dir() { printf '%s\n' "$SELF_VERIFY_DIR/conf"; }
 sv_pid_file() { printf '%s\n' "$SELF_VERIFY_DIR/app.pid"; }
 
 # Resolve the Debug Codans.app built from this worktree. Cache the answer:
-# `xcodebuild -showBuildSettings` takes several seconds. The default
-# SELF_VERIFY_DIR is shared by every worktree, so the cache holds the worktree
+# `xcodebuild -showBuildSettings` takes several seconds. An explicit
+# SELF_VERIFY_DIR can be shared by worktrees, so the cache holds the worktree
 # root on line 1 and the app on line 2, and only that worktree reuses it.
 sv_app() {
   if [ -n "${SELF_VERIFY_APP:-}" ]; then
@@ -197,7 +218,8 @@ sv_launch() {
   fi
   if [ -S "$SELF_VERIFY_SOCKET" ]; then
     if lsof -t "$SELF_VERIFY_SOCKET" >/dev/null 2>&1; then
-      printf 'self-verify: %s is held by another process\n' "$SELF_VERIFY_SOCKET" >&2
+      printf 'self-verify: %s is held by another process (set SELF_VERIFY_SESSION to a unique id)\n' \
+        "$SELF_VERIFY_SOCKET" >&2
       return 1
     fi
     rm -f "$SELF_VERIFY_SOCKET"

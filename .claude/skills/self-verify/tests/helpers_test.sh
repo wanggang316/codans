@@ -15,6 +15,11 @@ cleanup() {
   [ -s "$scratch/sv/app.pid" ] && kill -KILL "$(cat "$scratch/sv/app.pid")" 2>/dev/null
   [ -n "${holder_pid:-}" ] && kill -KILL "$holder_pid" 2>/dev/null
   defaults delete "$test_domain" >/dev/null 2>&1
+  for f in "$scratch"/session-*.env; do
+    [ -f "$f" ] || continue
+    (. "$f" && [ -s "$SELF_VERIFY_DIR/app.pid" ] && kill -KILL "$(cat "$SELF_VERIFY_DIR/app.pid")" 2>/dev/null
+      rm -rf "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE")
+  done
   rm -rf "$scratch" "/tmp/cdv-t$$.sock" "/tmp/cdv-t$$-c"
 }
 trap cleanup EXIT
@@ -188,6 +193,80 @@ check_not "new split-view key is removed" defaults read "$test_domain" "NSSplitV
 check "number is restored with its type" test "$(defaults read-type "$test_domain" keepCount) $(defaults read "$test_domain" keepCount)" = "Type is integer 1"
 check "array is restored" test "$(defaults read "$test_domain" "NSSplitView Subview Frames main" | tr -d ' \n')" = '("0,0,266,1050","0,0,192,1050")'
 check "array keeps its type" test "$(defaults read-type "$test_domain" "NSSplitView Subview Frames main")" = "Type is array"
+
+# ---------- per-session defaults ----------
+# Print the default paths a fresh shell gets in <dir> for session id <id>
+# (empty: no session variable at all). Explicit path variables are unset.
+session_paths() ( # session_paths <dir> <id> [extra env...]
+  dir="$1" id="$2"
+  shift 2
+  cd "$dir" && env -u SELF_VERIFY_DIR -u SELF_VERIFY_SOCKET -u SELF_VERIFY_CACHE -u SELF_VERIFY_SESSION \
+    -u CLAUDE_CODE_SESSION_ID -u CODANS_PANE_ID -u TERM_SESSION_ID TMPDIR="$scratch/tmp/" \
+    ${id:+SELF_VERIFY_SESSION="$id"} "$@" \
+    bash -c '. "$1" && printf "SELF_VERIFY_DIR=%s\nSELF_VERIFY_SOCKET=%s\nSELF_VERIFY_CACHE=%s\n" \
+      "$SELF_VERIFY_DIR" "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"' _ "$scripts_dir/helpers.sh"
+)
+mkdir -p "$scratch/tmp"
+session_paths "$wt_a" "a$$" >"$scratch/paths-a1"
+session_paths "$wt_a" "a$$" >"$scratch/paths-a2"
+session_paths "$wt_a" "b$$" >"$scratch/paths-b"
+session_paths "$wt_b" "a$$" >"$scratch/paths-wt-b"
+session_paths "$wt_a" "" CLAUDE_CODE_SESSION_ID="claude$$" >"$scratch/paths-claude"
+session_paths "$wt_a" "" CODANS_PANE_ID="pane$$" >"$scratch/paths-pane"
+session_paths "$wt_a" "" >"$scratch/paths-none"
+no_shared_path() { # no_shared_path <file> <file>: no line is the same in both
+  [ -s "$1" ] && [ -s "$2" ] && [ -z "$(sort "$1" "$2" | uniq -d)" ]
+}
+check "a session gets the same paths in every shell" cmp -s "$scratch/paths-a1" "$scratch/paths-a2"
+check "two sessions in one worktree share no path" no_shared_path "$scratch/paths-a1" "$scratch/paths-b"
+check "one session id in two worktrees shares no path" no_shared_path "$scratch/paths-a1" "$scratch/paths-wt-b"
+check "CLAUDE_CODE_SESSION_ID scopes the defaults" no_shared_path "$scratch/paths-claude" "$scratch/paths-none"
+check "CODANS_PANE_ID scopes the defaults" no_shared_path "$scratch/paths-pane" "$scratch/paths-none"
+check "SELF_VERIFY_SESSION wins over CLAUDE_CODE_SESSION_ID" cmp -s "$scratch/paths-a1" \
+  <(session_paths "$wt_a" "a$$" CLAUDE_CODE_SESSION_ID="claude$$")
+check "the default dir is under TMPDIR" grep -q "^SELF_VERIFY_DIR=$scratch/tmp/codans-self-verify-$uid-" "$scratch/paths-a1"
+check "the default paths pass validation" sh -c '. "$1" && . "$2" && sv_validate_paths "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"' \
+  _ "$scratch/paths-a1" "$scripts_dir/helpers.sh"
+check "a zmx socket in the default cache fits in 104 bytes" sh -c '. "$1" && test $((${#SELF_VERIFY_CACHE} + 37)) -lt 104' \
+  _ "$scratch/paths-a1"
+check "explicit path variables override the defaults" test "$(cd "$wt_a" && SELF_VERIFY_SESSION=x \
+  SELF_VERIFY_DIR=/x/d SELF_VERIFY_SOCKET=/tmp/x.sock SELF_VERIFY_CACHE=/tmp/x-c bash -c \
+  '. "$1" && echo "$SELF_VERIFY_DIR $SELF_VERIFY_SOCKET $SELF_VERIFY_CACHE"' _ "$scripts_dir/helpers.sh")" = "/x/d /tmp/x.sock /tmp/x-c"
+
+# ---------- two concurrent sessions ----------
+# Both use the default paths of their session; neither sees a busy socket,
+# and cleanup in one leaves the other running.
+for s in one two; do
+  session_paths "$wt_a" "$s$$" >"$scratch/session-$s.env"
+  (. "$scratch/session-$s.env" && mkdir -p "$SELF_VERIFY_DIR" && cp "$scratch/sv/sv-tool" "$SELF_VERIFY_DIR/")
+done
+in_session() { # in_session <name> <command...>: a fresh shell of that session
+  local name="$1"
+  shift
+  (set -a && . "$scratch/session-$name.env" && set +a && unset SELF_VERIFY_KEEP_DIR && . "$scripts_dir/helpers.sh" && "$@")
+}
+in_session one sv_launch >"$scratch/launch-one" 2>&1 &
+launch_one=$!
+in_session two sv_launch >"$scratch/launch-two" 2>&1 &
+launch_two=$!
+wait "$launch_one"; check "session one launches" test $? -eq 0
+wait "$launch_two"; check "session two launches while one runs" test $? -eq 0
+pid_one="$(in_session one sv_pid)"
+pid_two="$(in_session two sv_pid)"
+check "the sessions run two instances" sh -c '[ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]' _ "$pid_one" "$pid_two"
+(. "$scratch/session-two.env" && cd "$SELF_VERIFY_CACHE" && exec sleep 300) &
+daemon_two=$!
+sleep 0.2
+in_session one sv_cleanup >"$scratch/cleanup-one" 2>&1; check "session one cleans up" test $? -eq 0
+check_not "session one's instance is gone" kill -0 "$pid_one"
+check "session two's instance still runs" kill -0 "$pid_two"
+check "session two's daemon still runs" kill -0 "$daemon_two"
+check "session two still answers on its socket" in_session two sv_pid
+check "session two's dir, socket, and cache are intact" sh -c '. "$1" && test -f "$SELF_VERIFY_DIR/conf/settings.json" &&
+  test -S "$SELF_VERIFY_SOCKET" && test -d "$SELF_VERIFY_CACHE"' _ "$scratch/session-two.env"
+in_session two sv_cleanup >"$scratch/cleanup-two" 2>&1; check "session two cleans up" test $? -eq 0
+check_not "session two's instance is gone" kill -0 "$pid_two"
+check_not "session two's daemon is gone" kill -0 "$daemon_two"
 
 printf '\n%s failure(s)\n' "$failures"
 [ "$failures" -eq 0 ]
