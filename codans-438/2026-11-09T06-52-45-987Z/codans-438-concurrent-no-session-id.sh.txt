@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Two self-verify "agents" in one worktree with default paths and NO session
+# variable (SELF_VERIFY_SESSION and CLAUDE_CODE_SESSION_ID unset). Each agent
+# is a Python process that runs each step in its own fresh `bash -c`, as an
+# agent runs Bash calls. Usage: concurrent-no-id.sh <worktree> <out dir>
+wt="$1" out="$2" sync="$(mktemp -d /tmp/c438sync.XXXX)"
+cd "$wt" || exit 1
+printf '%s\n' 'import subprocess, sys' 'for step in sys.argv[1:]:' '    subprocess.call(["bash", "-c", step])' >"$sync/anchor.py"
+cat >"$sync/lib.sh" <<'LIB'
+cd "$WT" && . .claude/skills/self-verify/scripts/helpers.sh
+say() { printf '[agent %s, shell pid %s, anchor "%s"] %s\n' "$NAME" "$$" "$(sv_session_anchor)" "$*"; }
+LIB
+agent() { # agent <name> <steps...>
+  local name="$1"
+  shift
+  env -u SELF_VERIFY_SESSION -u CLAUDE_CODE_SESSION_ID -u SELF_VERIFY_DIR -u SELF_VERIFY_SOCKET \
+    -u SELF_VERIFY_CACHE WT="$wt" NAME="$name" python3 "$sync/anchor.py" "$@"
+}
+for n in A B; do
+  agent "$n" \
+    ". $sync/lib.sh; say \"dir=\$SELF_VERIFY_DIR\"; say \"socket=\$SELF_VERIFY_SOCKET (\${#SELF_VERIFY_SOCKET} bytes)\"; say \"cache=\$SELF_VERIFY_CACHE\"
+     sv_launch; say \"sv_launch exit=\$?\"" \
+    ". $sync/lib.sh; pid=\$(sv_pid); say \"new shell: sv_pid=\$pid exe=\$(ps -p \$pid -o comm=)\"
+     f=\$(sv_fixture_repo); p=\$(codans_debug project add \"\$f\" --json | jq -r .data.id)
+     w=\$(codans_debug tree --json | jq -r '.data.projects[0].worktrees[0].id')
+     t=\$(codans_debug tab new sv --project \$p --worktree \$w --json | jq -r .data.id)
+     pane=\$(codans_debug pane new --project \$p --worktree \$w --tab \$t --cwd \"\$f\" --json | jq -r .data.id)
+     say \"pane output: \$(codans_debug pane send \$pane 'printf \"AGENT-$n:%s\\n\" \"\$CODANS_SOCKET_PATH\"' --capture --json | jq -r .data.output | grep AGENT-$n:/)\"
+     for z in \$(find \"\$SELF_VERIFY_CACHE\" -type s); do say \"zmx socket \$z (\${#z} bytes)\"; done
+     sv_screenshot '$out/no-id-agent-$n.png' && say 'screenshot no-id-agent-$n.png'; touch $sync/ready-$n" \
+    "until [ -e $sync/check-$n ]; do sleep 0.2; done; . $sync/lib.sh; say check:; pid=\$(sv_pid) && say \"instance pid \$pid still runs: \$(kill -0 \$pid && echo alive)\"
+  for p in \"\$SELF_VERIFY_DIR/conf/settings.json\" \"\$SELF_VERIFY_DIR/app.log\" \"\$SELF_VERIFY_SOCKET\" \"\$SELF_VERIFY_CACHE\"; do [ -e \"\$p\" ] && say \"keeps \$p\"; done
+  say \"status uptime \$(codans_debug status --json | jq -r .data.uptimeSeconds) s\"
+  codans_debug tree --json | jq -r '.data.projects[] | \"tree: project \\(.name), panes \\([.worktrees[].tabs[].panes[]] | length)\"'; touch $sync/checked-$n" \
+    "until [ -e $sync/go-$n ]; do sleep 0.2; done; . $sync/lib.sh; say 'cleanup:'; sv_cleanup
+     for p in \"\$SELF_VERIFY_DIR\" \"\$SELF_VERIFY_SOCKET\" \"\$SELF_VERIFY_CACHE\"; do [ -e \"\$p\" ] && say \"still has \$p\" || say \"removed \$p\"; done
+     touch $sync/done-$n" >"$sync/log-$n" 2>&1 &
+done
+until [ -e "$sync/ready-A" ] && [ -e "$sync/ready-B" ]; do sleep 0.2; done
+echo "== both agents launched at the same time and are ready"
+cat "$sync/log-A" "$sync/log-B"
+echo "== cleanup in agent A"
+touch "$sync/check-A" "$sync/go-A"
+until [ -e "$sync/done-A" ]; do sleep 0.2; done
+sed -n '/cleanup:/,$p' "$sync/log-A"
+echo "== agent B, checked from a fresh shell of agent B's anchor"
+touch "$sync/check-B"
+until [ -e "$sync/checked-B" ]; do sleep 0.2; done
+sed -n '/check:/,$p' "$sync/log-B"
+echo "== cleanup in agent B"
+touch "$sync/go-B"
+until [ -e "$sync/done-B" ]; do sleep 0.2; done
+sed -n '/cleanup:/,$p' "$sync/log-B"
+rm -rf "$sync"

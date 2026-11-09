@@ -1,0 +1,40 @@
+== both agents launched at the same time and are ready
+[agent A, shell pid 88784, anchor "88739 Mon Nov 9 14:52:25 2026 "] dir=/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-1de7e85d
+[agent A, shell pid 88784, anchor "88739 Mon Nov 9 14:52:25 2026 "] socket=/tmp/cdv-sv-501-1de7e85d.sock (29 bytes)
+[agent A, shell pid 88784, anchor "88739 Mon Nov 9 14:52:25 2026 "] cache=/tmp/cdv-sv-cache-501-1de7e85d
+self-verify: instance pid 88984 on /tmp/cdv-sv-501-1de7e85d.sock
+[agent A, shell pid 88784, anchor "88739 Mon Nov 9 14:52:25 2026 "] sv_launch exit=0
+[agent A, shell pid 89191, anchor "88739 Mon Nov 9 14:52:25 2026 "] new shell: sv_pid=88984 exe=/Users/wanggang/Library/Developer/Xcode/DerivedData/codans-dmugigupokzcvjayywjrrerbpbok/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+[agent A, shell pid 89191, anchor "88739 Mon Nov 9 14:52:25 2026 "] pane output: AGENT-A:/tmp/cdv-sv-501-1de7e85d.sock
+[agent A, shell pid 89191, anchor "88739 Mon Nov 9 14:52:25 2026 "] zmx socket /tmp/cdv-sv-cache-501-1de7e85d/run/B9161FF7-CE06-4F15-A3F7-BA3CBA827F85 (71 bytes)
+[agent A, shell pid 89191, anchor "88739 Mon Nov 9 14:52:25 2026 "] screenshot no-id-agent-A.png
+[agent B, shell pid 88785, anchor "88740 Mon Nov 9 14:52:25 2026 "] dir=/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-6e561c2b
+[agent B, shell pid 88785, anchor "88740 Mon Nov 9 14:52:25 2026 "] socket=/tmp/cdv-sv-501-6e561c2b.sock (29 bytes)
+[agent B, shell pid 88785, anchor "88740 Mon Nov 9 14:52:25 2026 "] cache=/tmp/cdv-sv-cache-501-6e561c2b
+self-verify: instance pid 88983 on /tmp/cdv-sv-501-6e561c2b.sock
+[agent B, shell pid 88785, anchor "88740 Mon Nov 9 14:52:25 2026 "] sv_launch exit=0
+[agent B, shell pid 89218, anchor "88740 Mon Nov 9 14:52:25 2026 "] new shell: sv_pid=88983 exe=/Users/wanggang/Library/Developer/Xcode/DerivedData/codans-dmugigupokzcvjayywjrrerbpbok/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+[agent B, shell pid 89218, anchor "88740 Mon Nov 9 14:52:25 2026 "] pane output: AGENT-B:/tmp/cdv-sv-501-6e561c2b.sock
+[agent B, shell pid 89218, anchor "88740 Mon Nov 9 14:52:25 2026 "] zmx socket /tmp/cdv-sv-cache-501-6e561c2b/run/7191BEDA-AEC0-4AEB-AA39-74E9E59FCA36 (71 bytes)
+[agent B, shell pid 89218, anchor "88740 Mon Nov 9 14:52:25 2026 "] screenshot no-id-agent-B.png
+== cleanup in agent A
+[agent A, shell pid 91062, anchor "88739 Mon Nov 9 14:52:25 2026 "] cleanup:
+self-verify: cleanup done
+[agent A, shell pid 91062, anchor "88739 Mon Nov 9 14:52:25 2026 "] removed /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-1de7e85d
+[agent A, shell pid 91062, anchor "88739 Mon Nov 9 14:52:25 2026 "] removed /tmp/cdv-sv-501-1de7e85d.sock
+[agent A, shell pid 91062, anchor "88739 Mon Nov 9 14:52:25 2026 "] removed /tmp/cdv-sv-cache-501-1de7e85d
+== agent B, checked from a fresh shell of agent B's anchor
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] check:
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] instance pid 88983 still runs: alive
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] keeps /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-6e561c2b/conf/settings.json
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] keeps /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-6e561c2b/app.log
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] keeps /tmp/cdv-sv-501-6e561c2b.sock
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] keeps /tmp/cdv-sv-cache-501-6e561c2b
+[agent B, shell pid 90902, anchor "88740 Mon Nov 9 14:52:25 2026 "] status uptime 4.614575028419495 s
+tree: project fixture, panes 1
+== cleanup in agent B
+[agent B, shell pid 91334, anchor "88740 Mon Nov 9 14:52:25 2026 "] cleanup:
+self-verify: cleanup done
+[agent B, shell pid 91334, anchor "88740 Mon Nov 9 14:52:25 2026 "] removed /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-6e561c2b
+[agent B, shell pid 91334, anchor "88740 Mon Nov 9 14:52:25 2026 "] removed /tmp/cdv-sv-501-6e561c2b.sock
+[agent B, shell pid 91334, anchor "88740 Mon Nov 9 14:52:25 2026 "] removed /tmp/cdv-sv-cache-501-6e561c2b
