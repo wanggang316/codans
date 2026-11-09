@@ -33,6 +33,7 @@ struct SettingsTerminalFeature {
     case backgroundOpacitySelected(Double?)
     case backgroundBlurSelected(GhosttyBackgroundBlur?)
     case applyResult(Result<GhosttyTerminalSettings, ApplyError>)
+    case openConfigFileTapped
   }
 
   /// `Equatable`-wrapped error carrier. The underlying errors thrown by
@@ -51,10 +52,15 @@ struct SettingsTerminalFeature {
   nonisolated enum CancelID: Sendable { case apply }
 
   @Dependency(GhosttyTerminalSettingsClient.self) var client
+  @Dependency(GhosttyConfigOpenerClient.self) var configOpener
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
+      case .openConfigFileTapped:
+        configOpener.open(configOpener.configURL())
+        return .none
+
       case .onAppear:
         guard state.snapshot == nil, !state.isLoading else { return .none }
         state.isLoading = true

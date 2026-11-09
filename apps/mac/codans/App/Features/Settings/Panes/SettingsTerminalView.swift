@@ -1,7 +1,5 @@
-import AppKit
 import ComposableArchitecture
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Detail pane for Settings → Terminal. Presents two side-by-side theme pickers
 /// (Light / Dark) backed by the Ghostty theme catalog; writes flow through
@@ -213,7 +211,7 @@ struct SettingsTerminalView: View {
           .truncationMode(.middle)
           .frame(maxWidth: .infinity, alignment: .leading)
         Button {
-          openConfigFile(path)
+          store.send(.openConfigFileTapped)
         } label: {
           Label("Open in text editor", systemImage: "square.and.pencil")
             .labelStyle(.iconOnly)
@@ -228,26 +226,6 @@ struct SettingsTerminalView: View {
         "Codans reads and writes your Ghostty config, so changes here stay in sync "
           + "with Ghostty itself."
       )
-    }
-  }
-
-  /// Open the config file in the user's default plain-text editor. The file has
-  /// no extension, so we route through the plain-text handler rather than
-  /// `open(_:)` (which can fail to find an association for an extensionless
-  /// file). When the file doesn't exist yet — nothing has been saved — reveal
-  /// the directory instead.
-  private func openConfigFile(_ path: String) {
-    let url = URL(fileURLWithPath: path)
-    guard FileManager.default.fileExists(atPath: path) else {
-      NSWorkspace.shared.open(url.deletingLastPathComponent())
-      return
-    }
-    if let editor = NSWorkspace.shared.urlForApplication(toOpen: UTType.plainText) {
-      NSWorkspace.shared.open(
-        [url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration()
-      )
-    } else {
-      NSWorkspace.shared.open(url)
     }
   }
 
