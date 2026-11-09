@@ -1,0 +1,37 @@
+# AX check for codans-452: picks items in the New Agent selectors and reads
+# AXTitle / AXDescription / AXValue of the Project, Worktree, and Agent menu buttons after each pick.
+set -u
+cd /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-452
+. .claude/skills/self-verify/scripts/helpers.sh
+sv_launch >/dev/null 2>&1 || { echo "launch failed"; exit 1; }
+fails=0
+show() {
+  echo "== $1"
+  out=$(/tmp/cdx452/axmb "$(sv_pid)" | grep -v '"Help"\|"Add Project"')
+  printf '%s\n' "$out"
+  # Expected: exactly the three stable titles, in order, with the given values.
+  exp=$(printf 'AXMenuButton title="Project" description="nil" value="%s"\nAXMenuButton title="Worktree" description="nil" value="%s"\nAXMenuButton title="Agent" description="nil" value="%s"' "$2" "$3" "$4")
+  if [ "$out" = "$exp" ]; then echo "PASS"; else echo "FAIL (expected values: $2 / $3 / $4)"; fails=$((fails+1)); fi
+}
+pick() { # pick <button title> <item> [--after <section>]
+  local button=$1 item=$2; shift 2
+  sv_press AXMenuButton "$button" >/dev/null 2>&1
+  sv_wait AXMenuItem "$item" --timeout 3000 >/dev/null 2>&1 || true
+  sv_press AXMenuItem "$item" "$@" >/dev/null || { echo "could not pick $item"; sv_cancel_menu >/dev/null; return; }
+  sv_wait AXMenuItem "$item" --gone --timeout 3000 >/dev/null 2>&1; sleep 0.7
+}
+echo "projects: $(codans_debug tree --json | jq -c '[.data.projects[]|.name]')"
+sv_menu File "New Agent…" >/dev/null; sv_wait AXMenuButton Agent --timeout 5000 >/dev/null; sleep 0.5
+show "dialog open (alpha, SF Symbol icon)" alpha "New Worktree" "Claude Code"
+pick Project bravo --after "This Mac";        show "picked bravo (custom SVG icon), This Mac section" bravo "New Worktree" "Claude Code"
+pick Project charlie --after "Recent";        show "picked charlie (no icon), Recent section" charlie "New Worktree" "Claude Code"
+pick Project delta --after "lab-host";        show "picked delta (remote, no icon), lab-host Host section" delta "New Worktree" "Claude Code"
+pick Project delta --after "Recent";          show "picked delta from Recent" delta "New Worktree" "Claude Code"
+pick Project alpha --after "This Mac";        show "picked alpha (SF Symbol icon), This Mac section" alpha "New Worktree" "Claude Code"
+pick Worktree origin/main;                    show "picked worktree origin/main" alpha origin/main "Claude Code"
+pick Worktree "New Worktree";                 show "picked worktree New Worktree" alpha "New Worktree" "Claude Code"
+pick Agent Codex;                             show "picked agent Codex" alpha "New Worktree" Codex
+pick Agent "Claude Code";                     show "picked agent Claude Code" alpha "New Worktree" "Claude Code"
+sv_screenshot "${SHOT:-/tmp/cdx452/dialog.png}" >/dev/null 2>&1
+kill "$(sv_pid)"; sleep 1
+echo "failures: $fails"

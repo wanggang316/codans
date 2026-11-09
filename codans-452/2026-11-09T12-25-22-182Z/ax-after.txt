@@ -1,0 +1,52 @@
+projects: ["alpha","bravo","charlie","delta"]
+== dialog open (alpha, SF Symbol icon)
+AXMenuButton title="Project" description="nil" value="alpha"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked bravo (custom SVG icon), This Mac section
+AXMenuButton title="Project" description="nil" value="bravo"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked charlie (no icon), Recent section
+AXMenuButton title="Project" description="nil" value="charlie"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked delta (remote, no icon), lab-host Host section
+AXMenuButton title="Project" description="nil" value="delta"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked delta from Recent
+AXMenuButton title="Project" description="nil" value="delta"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked alpha (SF Symbol icon), This Mac section
+AXMenuButton title="Project" description="nil" value="alpha"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked worktree origin/main
+AXMenuButton title="Project" description="nil" value="alpha"
+AXMenuButton title="Worktree" description="nil" value="origin/main"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked worktree New Worktree
+AXMenuButton title="Project" description="nil" value="alpha"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+== picked agent Codex
+AXMenuButton title="Project" description="nil" value="alpha"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Codex"
+PASS
+== picked agent Claude Code
+AXMenuButton title="Project" description="nil" value="alpha"
+AXMenuButton title="Worktree" description="nil" value="New Worktree"
+AXMenuButton title="Agent" description="nil" value="Claude Code"
+PASS
+failures: 0

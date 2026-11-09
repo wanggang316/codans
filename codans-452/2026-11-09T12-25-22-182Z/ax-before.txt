@@ -1,0 +1,9 @@
+base f5df2b1a (before the fix)
+== dialog open
+AXMenuButton title="Project" description="favorite" value="nil"
+AXMenuButton title="Worktree" description="duplicate" value="nil"
+AXMenuButton title="Agent" description="" value="nil"
+== picked bravo (custom SVG icon)
+AXMenuButton title="bravo" description="" value="nil"
+AXMenuButton title="New Worktree" description="duplicate" value="nil"
+AXMenuButton title="Claude Code" description="" value="nil"
