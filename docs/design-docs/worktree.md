@@ -101,11 +101,19 @@ Codable 模式（与 `isPinned` 同形）：`decodeIfPresent ?? false` 保读兼
 
 1. 读 Project `gitRoot`，nil 则跳过（非 git Project）。
 2. `lsWorktrees(gitRoot)`。
-3. 每个磁盘上、catalog 里没有的条目（按 `URL.standardizedFileURL.path` 规范化路径匹配）追加一行新 `Worktree`（`archived = false`，detached HEAD 用目录末段当 name，并把 `git worktree list --porcelain` 的 HEAD SHA 记入 `headSHA`——就地条目每次 reconcile 同步刷新，detached HEAD 移动后侧栏随之下一次聚焦脉冲更新）。
+3. 每个磁盘上、catalog 里没有的条目（按 `URL.standardizedFileURL.path` 规范化路径匹配）追加一行新 `Worktree`（`archived = false`，detached HEAD 用目录末段当 name，并把 `git worktree list --porcelain` 的 HEAD SHA 记入 `headSHA`——就地条目每次 reconcile 同步刷新，detached HEAD 移动后侧栏随之下一次聚焦脉冲更新）。Project 持有创建租约（creation lease）期间跳过追加，见下文。
 4. 发现集合非空时，不在集合中的非 main、非 pinned、未归档行被软归档：暂停其终端，清理运行态，并写入 `archived` / `archivedAt`。空集合不执行失效条目扫描。
 5. reconcile 不删除 catalog 行；已归档条目仍可从归档列表检查。Workspace 的成员发现由 manifest 与各成员 Git 状态共同决定。
 
-幂等：重复调用结果相同。与并行 `createWorktreeWithGit` 的竞争由 main actor 串行化（append 与 reconcile 不交错）；规范化路径匹配正确去重刚创建的行。
+幂等：重复调用结果相同。
+
+**创建租约（creation lease）**：创建先跑 `git worktree add`（及 setup 脚本），流结束后才写 catalog 行。若此窗口内 reconcile 运行（窗口 `didBecomeActive`、任一兄弟 worktree 的 `.git/HEAD` 变化），它会在 `git worktree list` 里看到新目录并追加到列表**末尾**，随后创建路径经 `reuseExisting` 原样采纳该行，不再移到 unpinned 段顶部。故 `HierarchyManager` 持有按 Project 计数的租约：
+
+- `beginWorktreeCreation` / `endWorktreeCreation`；同一 Project 的并发创建各持一份（按 token 计，重复释放为 no-op）。
+- 持租约期间 reconcile **不追加**新发现的行；已有行的 branch / HEAD 同步与失效扫描照常。
+- 两个入口从物化开始持有到 catalog 行写入：侧栏 pending 流（token = pending 行 id + Retry 次数，每次尝试一份；成功、失败、Cancel、Retry 重取、Discard 由 reducer 释放；effect 被拆除时不再发送 action，由 effect 自己在结束时释放；setup 阶段 Cancel 先走 finished 写 catalog、再取消 effect，保证释放晚于写入；物化后 catalog 写入失败（如重名）时，行先取一份新 token、再释放本次尝试的 token，`failed` 行持有它直到用户操作——其间 reconcile 不会把磁盘上的路径再采纳为第二行，Retry 只重写 catalog 行（不再跑 `git worktree add`），Discard 释放租约、保留磁盘目录，由随后的 reconcile 采纳为一行）与 IPC `hierarchy.createWorktree`（`defer` 释放，覆盖成功与各错误出口）。
+- Project 最后一份租约释放时触发 `onCreationLeasesReleased`，app 对该 Project 跑一次 reconcile，补上窗口内在 app 外创建的 worktree。
+- `reuseExisting` 保留为兜底：路径已有行时返回该行。Workspace 分组创建不持租约（其行按设计由 reconcile 写入）。
 
 ### 删除流程与终端安全
 
@@ -380,7 +388,7 @@ apps/mac/scripts/{verify,embed}-git-wt.sh
 | `wt ls --json` 输出格式漂移。 | submodule 钉 commit SHA，谨慎 bump；`GitWtEntry` 解码容忍多余 key 但缺必需 key 时大声 fail（正确信号）。 |
 | 流式创建挂起（巨型 `node_modules`）。 | sheet/pending 行全程可 Cancel；取消经 `AsyncThrowingStream.onTermination` 在取消消费 Task **之前** terminate 子进程（否则 resumption 孤儿化、子进程泄漏）。写测试：长任务中途取消断言 `wt` 已退出。 |
 | 强制删除硬杀终端丢未保存工作。 | 确认对话框点名进程数 + 未提交改动单独警告；终端内容本就瞬态（不跨 session 持久化 scrollback）。 |
-| reconcile 与 create 竞争。 | 两路 catalog 写经 main actor 串行；规范化路径匹配去重刚创建行。 |
+| reconcile 与 create 竞争（新行被追加到末尾）。 | 创建租约期间 reconcile 不追加新行；创建路径插入 unpinned 段顶部；最后一份租约释放后补跑一次 reconcile。 |
 | 拖拽期间 catalog 突变使 `IndexSet→ID` 失效。 | `reorderWorktrees` 转 `WorktreeID` 列表后 manager 自检：任一 ID 不存在则整次丢弃、不部分应用。 |
 | `pendingFinished` 与 `pendingCancel` 竞争。 | 两者串行抵达 reducer；finished 步顶端 guard `pendingWorktrees[id] != nil`，cancel 先到则 finished 成 no-op。 |
 | pending 行堆叠失控。 | 每 project 软上限 8 条；第 9 次提交 sheet banner 拒绝。 |

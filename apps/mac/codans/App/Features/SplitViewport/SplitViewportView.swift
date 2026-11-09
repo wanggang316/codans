@@ -19,11 +19,10 @@ struct SplitViewportView: View {
   let worktreeID: WorktreeID
   let tabID: TabID
   @Environment(HierarchyManager.self) private var hierarchyManager
-  /// Shared drop-highlight state for the pane-move gesture, scoped to this
-  /// viewport. A single shared value (vs per-leaf state) so the highlight
-  /// follows the cursor across panes and always clears on drop — see
-  /// `PaneDropHighlight`.
-  @State private var dropHighlight = PaneDropHighlight()
+  /// The pane-move gesture state, scoped to this viewport. One shared value
+  /// (vs per-leaf state) so the highlight follows the pointer across panes
+  /// and always clears on drop — see `PaneMoveSession`.
+  @State private var moveSession = PaneMoveSession()
   /// The Tab whose `emptyStateGrace` has already elapsed, or nil before any
   /// has. It is compared against `tabID` *inside* the render pass, so a Tab
   /// the view has just been pointed at fails the check on its very first
@@ -50,10 +49,20 @@ struct SplitViewportView: View {
           store: store,
           tabID: tabID,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(dropHighlight)
+        .overlay(alignment: .topLeading) {
+          PaneMoveChip(session: moveSession)
+            .animation(.easeOut(duration: 0.12), value: moveSession.source == nil)
+        }
+        .coordinateSpace(.named(PaneMoveSession.coordinateSpace))
+        .onPreferenceChange(PaneFramesPreferenceKey.self) { moveSession.frames = $0 }
+        // No top gap: the toolbar already leaves one under its controls, and
+        // the tab bar adds its own when it shows. The leading gap depends on
+        // the sidebar; `WorktreeDetailView` owns it.
+        .padding([.trailing, .bottom], PaneCardMetrics.gap)
+        .environment(moveSession)
       } else if settledTabID == tabID {
         emptyPlaceholder
       } else {
@@ -107,7 +116,7 @@ struct SplitViewportView: View {
             .newPaneButtonTapped(
               inTab: tabID, inWorktree: worktreeID,
               inProject: projectID,
-              workingDirectory: currentWorktreePath() ?? NSHomeDirectory()
+              workingDirectory: currentWorktreePath() ?? NSHomeDirectory(),
             ))
         }
         .buttonStyle(.borderedProminent)
@@ -139,7 +148,7 @@ struct SplitViewportView: View {
   }
 
   /// The Worktree path when its folder no longer exists locally, else `nil`.
-  /// Server projects never qualify: their paths are remote.
+  /// Remote Projects never qualify: their paths are remote.
   private func missingWorktreeFolder() -> String? {
     guard
       let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),
@@ -186,7 +195,7 @@ struct SplitViewportView: View {
         paneID: pane.id,
         tabID: tabID,
         worktreeID: worktreeID,
-        projectID: projectID
+        projectID: projectID,
       )
     }
     store.send(.panesInActiveTabChanged(seeds))
@@ -231,7 +240,7 @@ private struct SubtreeView: View {
         tabID: tabID,
         worktreeID: worktreeID,
         projectID: projectID,
-        isSplit: !path.components.isEmpty
+        isSplit: !path.components.isEmpty,
       )
     case .split(let split):
       splitBody(split)
@@ -255,11 +264,16 @@ private struct SubtreeView: View {
               ratio: Double(newRatio),
               inTab: tabID,
               inWorktree: worktreeID,
-              inProject: projectID
+              inProject: projectID,
             ))
-        }
+        },
       ),
-      dividerColor: Color(nsColor: .separatorColor),
+      // The gap between two cards is the divider: the window backdrop shows
+      // through. The resize target reaches a little past the gap on both
+      // sides.
+      dividerColor: .clear,
+      dividerThickness: PaneCardMetrics.gap,
+      dividerHitOverhang: PaneCardMetrics.dividerHitOverhang,
       left: {
         SubtreeView(
           node: split.left,
@@ -267,7 +281,7 @@ private struct SubtreeView: View {
           store: store,
           tabID: tabID,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
         )
       },
       right: {
@@ -277,7 +291,7 @@ private struct SubtreeView: View {
           store: store,
           tabID: tabID,
           worktreeID: worktreeID,
-          projectID: projectID
+          projectID: projectID,
         )
       },
       onEqualize: {
@@ -287,9 +301,9 @@ private struct SubtreeView: View {
             ratio: 0.5,
             inTab: tabID,
             inWorktree: worktreeID,
-            inProject: projectID
+            inProject: projectID,
           ))
-      }
+      },
     )
   }
 }
@@ -301,92 +315,165 @@ private struct LeafView: View {
   let worktreeID: WorktreeID
   let projectID: ProjectID
   /// True when this leaf sits below at least one split node — i.e. the
-  /// active Tab has more than one pane. Single-pane Tabs skip the dim
-  /// overlay and the drag handle since there is nothing to re-arrange
-  /// against.
+  /// active Tab has more than one pane. Single-pane Tabs skip the
+  /// unfocused fade and the header drag since there is nothing to
+  /// re-arrange against.
   let isSplit: Bool
-  /// Shared drop-highlight state (one per viewport). This leaf renders the
-  /// edge overlay only while it is the active target — see `PaneDropHighlight`.
-  @Environment(PaneDropHighlight.self) private var dropHighlight
+  /// Shared pane-move state (one per viewport). This leaf renders the edge
+  /// overlay only while it is the active target — see `PaneMoveSession`.
+  @Environment(PaneMoveSession.self) private var moveSession
   @Environment(HierarchyManager.self) private var hierarchyManager
-  /// Pulled in so the dim overlay re-evaluates when the user flips Appearance
-  /// (or the OS auto-switches). `unfocusedSplitFill()` resolves against the
-  /// active ghostty palette, but without an observable dependency here SwiftUI
-  /// keeps the previous frame's overlay color until something else (focus
-  /// change, layout) forces a rebuild — which is what produced the stale
-  /// light/dark wash on unfocused panes after a theme switch.
+  /// Fallback for `terminalColorScheme` when the terminal background has no
+  /// perceived appearance.
   @Environment(\.colorScheme) private var colorScheme
-  /// Bumped on `.ghosttyRuntimeConfigApplied` so the overlay re-resolves when
-  /// the user picks a new ghostty theme (Settings → Terminal, or by editing
-  /// `~/.config/ghostty/config`). `colorScheme` only covers the appearance
-  /// flip path; without this tick the overlay stays on the previous theme's
-  /// fill colour until the user re-focuses the pane or triggers a layout pass.
+  @Environment(\.defersTerminalSurfaces) private var defersTerminalSurfaces
+  /// Bumped on `.ghosttyRuntimeConfigApplied` so the card re-reads the
+  /// terminal background when the user picks a new ghostty theme.
   @State private var configReloadTick: Int = 0
+  /// Pointer anywhere over the card: shows the header actions on an
+  /// unfocused pane.
+  @State private var isHoveringCard = false
+  /// The queued-commands list under the header. The header badge opens it.
+  @State private var isQueueListShown = false
   /// Used for the one-frame fallback on tab switch — see `paneContent`.
   /// Reducer state is the long-term source of truth; this lookup only fills
   /// the gap between catalog update and `.panesInActiveTabChanged` landing.
   @Dependency(TerminalClient.self) private var terminalClient
 
   var body: some View {
-    // Read the shared highlight in the body's OWN tracking scope (not only
-    // inside the nested `.overlay`/`GeometryReader` closures). Observation only
-    // re-renders this leaf for property reads it captured while evaluating
-    // `body`; reading it solely inside a child closure means the overlay shows
-    // during the drag (the active session forces re-renders) but never retracts
-    // when `clear()` runs on drop — the stuck-highlight bug.
-    let activeDropZone: PaneDropZone? = dropHighlight.target == paneID ? dropHighlight.zone : nil
-    return GeometryReader { geo in
-      paneContent
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Grab affordance — only meaningful when there is somewhere to move to.
-        .overlay(alignment: .top) {
-          if isSplit {
-            PaneDragHandle(paneID: paneID)
-          }
-        }
-        // Drop target. The custom `.touchCodePaneID` type (declared in the
-        // app's Info.plist `UTExportedTypeDeclarations`) is what makes
-        // `validateDrop` match the dragged item — without that declaration the
-        // pasteboard type is a dynamic UTI that never conforms, so the drop is
-        // silently rejected. `geo.size` feeds the edge-zone math.
-        .background {
-          Color.clear
-            .contentShape(.rect)
-            .onDrop(
-              of: [.touchCodePaneID],
-              delegate: PaneDropDelegate(
-                anchorID: paneID,
-                viewSize: geo.size,
-                highlight: dropHighlight,
-                commit: { sourceID, zone in
-                  store.send(
-                    .movePaneRequested(
-                      sourceID,
-                      anchor: paneID,
-                      direction: zone.splitDirection,
-                      inTab: tabID,
-                      inWorktree: worktreeID,
-                      inProject: projectID
-                    ))
-                }
-              )
-            )
-        }
-        // Drop-zone highlight, drawn above the surface but never hit-tested.
-        // Shown only while this leaf is the active drop target.
-        .overlay {
-          if let activeDropZone {
-            PaneDropOverlay(zone: activeDropZone)
-          }
-        }
+    // Read the move session in the body's OWN tracking scope (not only inside
+    // the nested `.overlay` closures). Observation only re-renders this leaf
+    // for property reads it captured while evaluating `body`; reading it
+    // solely inside a child closure can leave the overlay up after the drop.
+    let activeDropZone: PaneDropZone? = moveSession.target == paneID ? moveSession.zone : nil
+    let isMoving = moveSession.source == paneID
+    let shape = RoundedRectangle(cornerRadius: PaneCardMetrics.cornerRadius, style: .continuous)
+    // A lone pane is the focused one by definition.
+    let isFocusedCard = isFocused || !isSplit
+    let showsActions = isFocusedCard || isHoveringCard
+    return VStack(spacing: 0) {
+      // The header is drawn as an overlay, above the terminal, so the
+      // actions menu laid over it can unfold down across the terminal.
+      Color.clear.frame(height: PaneCardMetrics.headerHeight)
+      surfaceSlot
+    }
+    .background(Color(nsColor: terminalBackground))
+    .overlay(alignment: .top) {
+      PaneCardHeader(
+        paneID: paneID,
+        tabID: tabID,
+        isSplit: isSplit,
+        isFocused: isFocusedCard,
+        showsActions: showsActions,
+        onFocus: focus,
+        onSplit: split,
+        onClose: {
+          store.send(
+            .closePaneButtonTapped(
+              paneID, inTab: tabID, inWorktree: worktreeID, inProject: projectID))
+        },
+        onMove: { anchor, zone in
+          store.send(
+            .movePaneRequested(
+              paneID, anchor: anchor, direction: zone.splitDirection,
+              inTab: tabID, inWorktree: worktreeID, inProject: projectID))
+        },
+        isQueueListShown: $isQueueListShown,
+      )
+      // The header sits on the terminal background, so its text follows the
+      // terminal theme's tone rather than the app appearance.
+      .environment(\.colorScheme, terminalColorScheme)
+    }
+    // Actions menu (hand off, command queue, the surface's own actions) in
+    // the header's menu slot, and the command queue list under the header.
+    .overlay(alignment: .topTrailing) {
+      // Without a live surface yet, the surface's own rows show disabled.
+      PaneCommandQueueChrome(
+        paneID: paneID, surface: terminalClient.surface(paneID), showsMenu: showsActions,
+        onMenuInteraction: focus, isQueueListShown: $isQueueListShown,
+      )
+      .environment(\.colorScheme, terminalColorScheme)
+    }
+    .animation(.easeInOut(duration: 0.12), value: isHoveringCard)
+    .clipShape(shape)
+    .overlay {
+      shape
+        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: PaneCardMetrics.borderWidth)
+        .allowsHitTesting(false)
+    }
+    // Where a moved pane will land. Drawn over the whole card, header too.
+    .overlay {
+      if let activeDropZone {
+        PaneDropOverlay(zone: activeDropZone)
+      }
+    }
+    // An unfocused card lets the backdrop glass show through it, so it
+    // reads as set back from the focused one. The card being moved fades
+    // further.
+    .opacity(isMoving ? PaneCardMetrics.movingOpacity : isFocusedCard ? 1 : PaneCardMetrics.unfocusedOpacity)
+    .animation(.easeInOut(duration: 0.12), value: isFocused)
+    .animation(.easeInOut(duration: 0.12), value: isMoving)
+    .background {
+      GeometryReader { geo in
+        Color.clear.preference(
+          key: PaneFramesPreferenceKey.self,
+          value: [paneID: geo.frame(in: .named(PaneMoveSession.coordinateSpace))])
+      }
+    }
+    .onHover { isHoveringCard = $0 }
+    .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
+      configReloadTick &+= 1
     }
   }
 
+  /// The terminal under the card header.
+  private var surfaceSlot: some View {
+    GeometryReader { geo in
+      paneContent(slotSize: geo.size)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  private func focus() {
+    store.send(
+      .focusPaneRequested(paneID, inTab: tabID, inWorktree: worktreeID, inProject: projectID))
+    hierarchyManager.focusSurfaceView(for: paneID)
+  }
+
+  private func split(_ direction: SplitTree<PaneID>.NewDirection) {
+    let workingDirectory =
+      hierarchyManager.currentWorkingDirectory(for: paneID)
+      ?? hierarchyManager.catalog.pane(paneID)?.workingDirectory
+      ?? NSHomeDirectory()
+    store.send(
+      .splitButtonTapped(
+        paneID, direction: direction,
+        inTab: tabID, inWorktree: worktreeID, inProject: projectID,
+        workingDirectory: workingDirectory))
+  }
+
+  /// Read after `configReloadTick` so a ghostty theme reload repaints the
+  /// card.
+  private var terminalBackground: NSColor {
+    _ = configReloadTick
+    return GhosttyRuntime.shared?.backgroundColor() ?? .underPageBackgroundColor
+  }
+
+  private var terminalColorScheme: ColorScheme {
+    let perceived = terminalBackground.perceivedAppearance?.bestMatch(from: [.darkAqua, .aqua])
+    return perceived.map { $0 == .darkAqua ? .dark : .light } ?? colorScheme
+  }
+
   @ViewBuilder
-  private var paneContent: some View {
-    if let childStore = store.scope(
+  private func paneContent(slotSize: CGSize) -> some View {
+    if defersTerminalSurfaces {
+      // The card stands in on the terminal tone until the surface may enter
+      // the window — see `defersTerminalSurfaces`.
+      Color(nsColor: terminalBackground)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if let childStore = store.scope(
       state: \.paneHosts[id: paneID],
-      action: \.paneHosts[id: paneID]
+      action: \.paneHosts[id: paneID],
     ) {
       // `.id(paneID)` forces SwiftUI to rebuild the LazyPaneHost subtree when
       // the pane changes. Without it, two leaves at the same split-tree
@@ -406,12 +493,7 @@ private struct LeafView: View {
         // at send time (both run on MainActor, so no gap in between).
         .task(id: paneID) {
           guard store.paneHosts[id: paneID] != nil else { return }
-          store.send(.paneHosts(.element(id: paneID, action: .task)))
-        }
-        .overlay { unfocusedDimOverlay }
-        .animation(.easeInOut(duration: 0.12), value: isFocused)
-        .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-          configReloadTick &+= 1
+          store.send(.paneHosts(.element(id: paneID, action: .task(slotSize: slotSize))))
         }
     } else if let warmSurface = terminalClient.surface(paneID) {
       // Tab-switch fast path: the catalog already points at this pane but
@@ -423,11 +505,6 @@ private struct LeafView: View {
       // tick — same NSView the reducer would have given us.
       PaneHostView(surface: warmSurface)
         .id(paneID)
-        .overlay { unfocusedDimOverlay }
-        .animation(.easeInOut(duration: 0.12), value: isFocused)
-        .onReceive(NotificationCenter.default.publisher(for: .ghosttyRuntimeConfigApplied)) { _ in
-          configReloadTick &+= 1
-        }
     } else {
       // Truly cold pane: surface hasn't been spawned yet (first render
       // after creation). Background tracks Ghostty's terminal color so
@@ -447,39 +524,12 @@ private struct LeafView: View {
   private var isFocused: Bool {
     hierarchyManager.lastFocusedPane(in: tabID) == paneID
   }
+}
 
-  /// Wash on unfocused panes inside a multi-pane Tab. Matches ghostty's
-  /// `unfocused-split` exactly: a hit-test-disabled `Rectangle` filled with
-  /// `unfocused-split-fill` (defaults to terminal `background`) at
-  /// `1 - unfocused-split-opacity` (default 0.15). Single-pane Tabs and the
-  /// focused leaf get nothing.
-  @ViewBuilder
-  private var unfocusedDimOverlay: some View {
-    if shouldDimUnfocusedSplit {
-      let runtime = GhosttyRuntime.shared
-      let fill = runtime?.unfocusedSplitFill(colorScheme) ?? .windowBackgroundColor
-      let opacity = runtime?.unfocusedSplitOpacity() ?? 0.15
-      if opacity > 0 {
-        Rectangle()
-          .fill(Color(nsColor: fill))
-          .allowsHitTesting(false)
-          .opacity(opacity)
-      }
-    }
-  }
-
-  /// `isSplit && !isFocused`, evaluated after reading `configReloadTick` so
-  /// the overlay rebuilds on ghostty config-file theme reloads (Settings →
-  /// Terminal picker / manual config edit). `colorScheme` is read inside the
-  /// overlay via `unfocusedSplitFill(colorScheme)`, covering OS / Appearance
-  /// flips; this read covers the config-reload tick. Without it the overlay
-  /// keeps the previous theme's wash colour until a focus change or layout
-  /// pass forces a rebuild. Reading the tick in this plain computed Bool —
-  /// rather than an inline `let _ =` inside the `@ViewBuilder` — keeps the
-  /// discard out of the result builder (a bare `_ =` does not type-check as a
-  /// builder statement) while still registering the SwiftUI dependency.
-  private var shouldDimUnfocusedSplit: Bool {
-    _ = configReloadTick
-    return isSplit && !isFocused
-  }
+extension EnvironmentValues {
+  /// True while terminal surfaces must stay out of the window: pane cards
+  /// draw their chrome on the terminal tone and mount no surface. A surface
+  /// entering the window stalls compositing for a few frames, which would
+  /// freeze an animation in progress.
+  @Entry var defersTerminalSurfaces = false
 }

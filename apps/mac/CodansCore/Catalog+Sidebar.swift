@@ -1,14 +1,30 @@
 import Foundation
 
+public nonisolated enum SidebarFilter: String, Codable, CaseIterable, Sendable {
+  case all, remote, workspace, pullRequests, notifications
+
+  /// Unknown and retired values (`local`, `favorites`, `pin`) decode as `.all`.
+  public init(from decoder: Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    self = Self(rawValue: value) ?? .all
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+}
+
 extension Project {
   /// The worktree the Project's own sidebar row stands for, when the Project
-  /// has no repository of its own — a plain folder, a remote folder, or a
-  /// workspace: the synthetic worktree at `rootPath`. Such a Project opens by
-  /// selecting its row and lists no child row for its root. A git Project
-  /// answers nil: its main checkout stays a child row, like every other
-  /// worktree of the repository.
+  /// has no repository of its own — a plain folder or a remote folder: the
+  /// synthetic worktree at `rootPath`. Such a Project opens by selecting its
+  /// row and lists no child row for its root. A git Project answers nil: its
+  /// main checkout stays a child row, like every other worktree of the
+  /// repository. A workspace answers nil too: its header is not a terminal,
+  /// and every row of it belongs to a group.
   public var rowWorktree: Worktree? {
-    guard gitRoot == nil else { return nil }
+    guard gitRoot == nil, !isWorkspace else { return nil }
     return worktrees.first { !$0.archived && $0.path == rootPath }
   }
 
@@ -24,11 +40,138 @@ extension Project {
     return main + pinned + rest
   }
 
+  /// The worktree rows of the Project in sidebar order as if it were
+  /// expanded: the row the Project itself stands for, then its child rows.
+  public var sidebarRowWorktreeIDs: [WorktreeID] {
+    var rows: [WorktreeID] = []
+    if let row = rowWorktree { rows.append(row.id) }
+    rows += isWorkspace ? workspaceSidebarRows.compactMap(\.worktreeID) : childWorktrees.map(\.id)
+    return rows
+  }
+
   /// Whether the Project row can open onto child rows: always for a git
-  /// Project, whose worktrees come and go; for a folder or workspace, only
-  /// once it has rows besides its own.
+  /// Project, whose worktrees come and go; for a folder, only once it has
+  /// rows besides its own; for a workspace, once it has a group row.
   public var hasChildRows: Bool {
-    gitRoot != nil || !childWorktrees.isEmpty
+    if isWorkspace { return !workspaceSidebarRows.isEmpty }
+    return gitRoot != nil || !childWorktrees.isEmpty
+  }
+}
+
+/// One row under a Workspace header, in sidebar order.
+public nonisolated enum WorkspaceSidebarRow: Equatable, Sendable {
+  /// A group. `terminal` is the group directory's row, which selecting the
+  /// group selects; nil until the reconcile has added it.
+  case group(WorkspaceGroupRecord, terminal: Worktree?)
+  /// A reference or member row of an expanded group.
+  case member(Worktree, groupID: WorkspaceGroupID)
+
+  /// The catalog row a click on this sidebar row selects.
+  public var worktreeID: WorktreeID? {
+    switch self {
+    case .group(_, let terminal): terminal?.id
+    case .member(let worktree, _): worktree.id
+    }
+  }
+}
+
+/// What a group row says about its members.
+public nonisolated struct WorkspaceGroupSummary: Equatable, Sendable {
+  public enum Branch: Equatable, Sendable {
+    /// Every member is on this branch.
+    case single(String)
+    /// The members are on this many different branches.
+    case several(Int)
+  }
+
+  public let memberCount: Int
+  public let branch: Branch?
+
+  public init(memberCount: Int, branch: Branch?) {
+    self.memberCount = memberCount
+    self.branch = branch
+  }
+}
+
+extension Project {
+  /// The rows under a Workspace header: each group (`default` first, as
+  /// `workspaceGroups` orders them) followed, while it is expanded, by its
+  /// references or members. Archived rows and rows without a slot are left
+  /// out; `codans tree` still lists the latter.
+  public var workspaceSidebarRows: [WorkspaceSidebarRow] {
+    guard isWorkspace else { return [] }
+    return workspaceGroups.flatMap { group -> [WorkspaceSidebarRow] in
+      let terminal = listedWorkspaceRows(in: group.id).first { $0.workspaceSlot?.role == .groupTerminal }
+      var rows: [WorkspaceSidebarRow] = [.group(group, terminal: terminal)]
+      if group.isExpanded {
+        rows += workspaceGroupMembers(group.id).map { .member($0, groupID: group.id) }
+      }
+      return rows
+    }
+  }
+
+  /// The group whose folder `worktree` is, nil for any other row. Such a row
+  /// has no branch: it stands for its group, the way a folder row stands for
+  /// its Project.
+  public func workspaceGroup(standingFor worktree: Worktree) -> WorkspaceGroupRecord? {
+    guard let slot = worktree.workspaceSlot, slot.role == .groupTerminal else { return nil }
+    return workspaceGroups.first { $0.id == slot.groupID }
+  }
+
+  /// The listed references or members of one group, in catalog order.
+  public func workspaceGroupMembers(_ groupID: WorkspaceGroupID) -> [Worktree] {
+    listedWorkspaceRows(in: groupID).filter { $0.workspaceSlot?.role != .groupTerminal }
+  }
+
+  public func workspaceGroupSummary(_ groupID: WorkspaceGroupID) -> WorkspaceGroupSummary {
+    let members = workspaceGroupMembers(groupID)
+    var branches: [String] = []
+    for branch in members.compactMap(\.branch) where !branches.contains(branch) {
+      branches.append(branch)
+    }
+    let branch: WorkspaceGroupSummary.Branch? =
+      switch branches.count {
+      case 0: nil
+      case 1: .single(branches[0])
+      default: .several(branches.count)
+      }
+    return WorkspaceGroupSummary(memberCount: members.count, branch: branch)
+  }
+
+  /// The collapsed group to expand so `worktreeID` is on screen, if it is a
+  /// reference or member there. Group rows show while their group is
+  /// collapsed, so they need none.
+  public func collapsedWorkspaceGroup(revealing worktreeID: WorktreeID) -> WorkspaceGroupID? {
+    guard isWorkspace,
+      let slot = worktrees.first(where: { $0.id == worktreeID })?.workspaceSlot,
+      slot.role != .groupTerminal,
+      workspaceGroups.first(where: { $0.id == slot.groupID })?.isExpanded == false
+    else { return nil }
+    return slot.groupID
+  }
+
+  private func listedWorkspaceRows(in groupID: WorkspaceGroupID) -> [Worktree] {
+    worktrees.filter { !$0.archived && $0.workspaceSlot?.groupID == groupID }
+  }
+
+  /// The filtered copy of a Workspace for the notification and pull-request views:
+  /// matching rows, plus the row of every group with a match. A group with
+  /// a matching member opens in this copy only.
+  fileprivate func filteringWorkspaceRows(_ matches: (Worktree) -> Bool) -> Project {
+    var filtered = self
+    let matched = worktrees.filter { !$0.archived && $0.workspaceSlot != nil && matches($0) }
+    let openGroups = Set(
+      matched.compactMap { $0.workspaceSlot?.role == .groupTerminal ? nil : $0.workspaceSlot?.groupID })
+    let shownGroups = Set(matched.compactMap(\.workspaceSlot?.groupID))
+    let matchedIDs = Set(matched.map(\.id))
+    filtered.worktrees = worktrees.filter { row in
+      guard !row.archived, let slot = row.workspaceSlot else { return false }
+      return matchedIDs.contains(row.id) || (slot.role == .groupTerminal && shownGroups.contains(slot.groupID))
+    }
+    for index in filtered.workspaceGroups.indices where openGroups.contains(filtered.workspaceGroups[index].id) {
+      filtered.workspaceGroups[index].isExpanded = true
+    }
+    return filtered
   }
 }
 
@@ -44,25 +187,96 @@ public nonisolated struct SidebarRowAddress: Equatable, Sendable {
 }
 
 extension Catalog {
-  /// Projects in the order the sidebar lists them: the active tag filter
-  /// applied, then the chosen sort order.
+  /// Projects in sidebar order after category and tag filtering. The
+  /// notification and pull-request filters match no row here, because their
+  /// match sets are live app state; the catalog stays unchanged.
   public var sidebarProjects: [Project] {
-    sorted(tagFilteredProjects)
+    sidebarProjects(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
+  }
+
+  /// `notifiedWorktreeIDs` are the worktrees the notification filter lists.
+  public func sidebarProjects(
+    pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
+  ) -> [Project] {
+    tagFilteredProjects.compactMap { project in
+        let matches: (Worktree) -> Bool
+        switch sidebarFilter {
+        case .all: return project
+        case .remote: return project.isRemote ? project : nil
+        case .workspace: return project.isWorkspace ? project : nil
+        case .notifications:
+          matches = { notifiedWorktreeIDs.contains($0.id) }
+        case .pullRequests:
+          matches = { pullRequestWorktreeIDs.contains($0.id) }
+        }
+        var filtered = project
+        if project.isWorkspace {
+          filtered = project.filteringWorkspaceRows(matches)
+        } else {
+          filtered.worktrees = project.worktrees.filter { !$0.archived && matches($0) }
+        }
+        return filtered.worktrees.isEmpty ? nil : filtered
+      }
   }
 
   /// Every row a user can select, in the order the sidebar shows them: a
   /// Project row that stands for a worktree, then — while the Project is
-  /// expanded — its child rows. Rows inside a collapsed Project and the rows
-  /// of a Project that failed to load are not on screen, so they are left
-  /// out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
+  /// expanded — its child rows. Host rows cannot be selected. Rows inside a
+  /// collapsed Host or Project and the rows of a Project that failed to load
+  /// are not on screen, so they are left out. Drives the ⌃1…⌃0 slots and ⌘⌃↑ / ⌘⌃↓.
   public var sidebarSelectionOrder: [SidebarRowAddress] {
-    sidebarProjects.flatMap { project -> [SidebarRowAddress] in
+    sidebarSelectionOrder(pullRequestWorktreeIDs: [], notifiedWorktreeIDs: [])
+  }
+
+  public func sidebarSelectionOrder(
+    pullRequestWorktreeIDs: Set<WorktreeID>, notifiedWorktreeIDs: Set<WorktreeID>
+  ) -> [SidebarRowAddress] {
+    let listed = sidebarProjects(pullRequestWorktreeIDs: pullRequestWorktreeIDs, notifiedWorktreeIDs: notifiedWorktreeIDs)
+    // The Host level lists Projects in Host order, and a closed Host hides
+    // its rows (ADR 0002, decision 8).
+    let shown = sidebarHostLevel.map { $0.groups(listed).filter(\.isExpanded).flatMap(\.projects) } ?? listed
+    return shown.flatMap { project -> [SidebarRowAddress] in
       if case .failed = project.loadState { return [] }
-      var rows: [Worktree] = []
-      if let row = project.rowWorktree { rows.append(row) }
-      if project.isExpanded { rows += project.childWorktrees }
-      return rows.map { SidebarRowAddress(projectID: project.id, worktreeID: $0.id) }
+      let rows = project.isExpanded ? project.sidebarRowWorktreeIDs : project.rowWorktree.map { [$0.id] } ?? []
+      return rows.map { SidebarRowAddress(projectID: project.id, worktreeID: $0) }
     }
+  }
+
+  /// Every Project in sidebar order, with no filter and no Host collapsed:
+  /// grouped by Host (This Mac first) while the Host level shows, else the
+  /// catalog order.
+  public var sidebarOrderedProjects: [Project] {
+    guard let level = sidebarHostLevel else { return projects }
+    return level.groups(projects).flatMap(\.projects)
+  }
+
+  /// The Host level of the sidebar, `nil` when every Project is on This Mac
+  /// (ADR 0002, decision 3). It reads all Projects, not the filtered ones,
+  /// so a filter does not add or remove the level.
+  public var sidebarHostLevel: SidebarHostLevel? {
+    guard projects.contains(where: { $0.hostID != nil }) else { return nil }
+    return SidebarHostLevel(records: hosts, collapsed: collapsedSidebarHosts, keepsThisMac: !isSidebarFiltered)
+  }
+
+  /// A category or Tag filter is on, so the sidebar lists a subset.
+  var isSidebarFiltered: Bool {
+    if sidebarFilter != .all { return true }
+    if case .tags(let set) = activeTagFilter { return !set.isEmpty }
+    return activeTagFilter == .untagged
+  }
+
+  /// Rows hidden inside a collapsed Workspace group, each mapped to the
+  /// group row that stands in for it in the sidebar (unread roll-up).
+  public var workspaceRowStandIns: [WorktreeID: WorktreeID] {
+    var standIns: [WorktreeID: WorktreeID] = [:]
+    for project in projects where project.isWorkspace {
+      for case .group(let group, let terminal?) in project.workspaceSidebarRows where !group.isExpanded {
+        for member in project.workspaceGroupMembers(group.id) {
+          standIns[member.id] = terminal.id
+        }
+      }
+    }
+    return standIns
   }
 
   private var tagFilteredProjects: [Project] {

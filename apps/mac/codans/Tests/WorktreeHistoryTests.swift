@@ -47,18 +47,23 @@ struct WorktreeHistoryTests {
   private static func makeStore(
     _ fixture: Fixture,
     back: [Int] = [0, 1, 2],
-    forward: [Int] = []
+    forward: [Int] = [],
+    backTop: HierarchySelection? = nil,
+    catalog: Catalog? = nil,
+    filters: LockIsolated<[SidebarFilter]> = LockIsolated([])
   ) -> (TestStoreOf<RootFeature>, LockIsolated<WorktreeID?>) {
     var initial = RootFeature.State()
     initial.selection = fixture.selection(3)
-    initial.navigationHistoryBack = back.map { fixture.selection($0) }
+    initial.navigationHistoryBack = back.map { fixture.selection($0) } + [backTop].compactMap { $0 }
     initial.navigationHistoryForward = forward.map { fixture.selection($0) }
 
     let selected = LockIsolated<WorktreeID?>(nil)
+    let catalog = catalog ?? fixture.catalog
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      $0.hierarchyClient.snapshot = { fixture.catalog }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.setSidebarFilter = { filter in filters.withValue { $0.append(filter) } }
       $0.hierarchyClient.selectProject = { _ in }
       $0.hierarchyClient.selectWorktree = { worktreeID, _ in
         selected.withValue { $0 = worktreeID }
@@ -162,6 +167,48 @@ struct WorktreeHistoryTests {
     #expect(store.state.navigationHistoryBack == [fixture.selection(3), fixture.selection(2)])
   }
 
+  /// The Workspace category lists only the `other` Project, marked as a
+  /// workspace here; the `p` Worktrees are listed under All only.
+  private static func workspaceFilteredCatalog(_ fixture: Fixture) -> Catalog {
+    var catalog = fixture.catalog
+    catalog.projects[1].isWorkspace = true
+    catalog.sidebarFilter = .workspace
+    return catalog
+  }
+
+  @Test
+  func backToAWorktreeOutsideTheCategoryShowsAll() async {
+    let fixture = Fixture()
+    let filters = LockIsolated<[SidebarFilter]>([])
+    let (store, selected) = Self.makeStore(
+      fixture, catalog: Self.workspaceFilteredCatalog(fixture), filters: filters
+    )
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.ids[2])
+    #expect(filters.value == [.all])
+  }
+
+  @Test
+  func backToAWorktreeInsideTheCategoryKeepsIt() async {
+    let fixture = Fixture()
+    let filters = LockIsolated<[SidebarFilter]>([])
+    let (store, selected) = Self.makeStore(
+      fixture,
+      backTop: HierarchySelection(projectID: fixture.otherProjectID, worktreeID: fixture.otherWorktreeID),
+      catalog: Self.workspaceFilteredCatalog(fixture),
+      filters: filters
+    )
+
+    await store.send(.worktreeHistoryBackRequested)
+    await store.receive(\.sidebar.worktreeRowTapped)
+
+    #expect(selected.value == fixture.otherWorktreeID)
+    #expect(filters.value.isEmpty)
+  }
+
   @Test(arguments: [3, 99, -1])
   func jumpOutsideTheStackChangesNothing(offset: Int) async {
     let fixture = Fixture()
@@ -228,7 +275,7 @@ struct WorktreeHistoryTests {
     ]
     let pullRequest = PullRequestSnapshot(
       number: 7, title: "Review", state: .merged, isDraft: false, headRefName: "review",
-      author: "me", additions: 1, deletions: 0, commitCount: 1, mergeable: .unknown,
+      author: "me", additions: 1, deletions: 0, commitCount: 1,
       url: URL(string: "https://example.com/pr/7")!, updatedAt: Date()
     )
 

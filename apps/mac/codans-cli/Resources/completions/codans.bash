@@ -173,13 +173,13 @@ _codans() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|workspace|open|skill|help)
+    status|launch|doctor|tree|project|worktree|tab|pane|broadcast|agent|handoff|workspace|workflow|open|skill|help)
         # Offer subcommand argument completions
         "_codans_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'status launch doctor tree project worktree tab pane broadcast agent handoff workspace open skill help' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'status launch doctor tree project worktree tab pane broadcast agent handoff workspace workflow open skill help' -- "${cur}"))
         ;;
     esac
 }
@@ -245,7 +245,7 @@ _codans_tree() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project)
+    non_repeating_options=(--socket --timeout --host --project)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -254,6 +254,9 @@ _codans_tree() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -328,7 +331,7 @@ _codans_project_show() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout)
+    non_repeating_options=(--socket --timeout --host)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -339,6 +342,9 @@ _codans_project_show() {
     '--timeout')
         return
         ;;
+    '--host')
+        return
+        ;;
     esac
 }
 
@@ -346,7 +352,7 @@ _codans_project_rename() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout)
+    non_repeating_options=(--socket --timeout --host)
     __codans_offer_flags_options 2
 
     # Offer option value completions
@@ -357,6 +363,9 @@ _codans_project_rename() {
     '--timeout')
         return
         ;;
+    '--host')
+        return
+        ;;
     esac
 }
 
@@ -364,7 +373,7 @@ _codans_project_rm() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout)
+    non_repeating_options=(--socket --timeout --host)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -373,6 +382,9 @@ _codans_project_rm() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     esac
@@ -405,7 +417,7 @@ _codans_project_commands_list() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project)
+    non_repeating_options=(--socket --timeout --host --project)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -414,6 +426,9 @@ _codans_project_commands_list() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -426,7 +441,7 @@ _codans_project_commands_add() {
     repeating_flags=()
     non_repeating_flags=(--json --focus --no-focus --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --name --command --kind --target --direction --on-finished)
+    non_repeating_options=(--socket --timeout --host --project --name --command --kind --target --direction --on-finished)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -435,6 +450,9 @@ _codans_project_commands_add() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -469,7 +487,7 @@ _codans_project_commands_edit() {
     repeating_flags=()
     non_repeating_flags=(--json --focus --no-focus --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --name --command --kind --target --direction --on-finished)
+    non_repeating_options=(--socket --timeout --host --project --name --command --kind --target --direction --on-finished)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -478,6 +496,9 @@ _codans_project_commands_edit() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -512,7 +533,7 @@ _codans_project_commands_rm() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project)
+    non_repeating_options=(--socket --timeout --host --project)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -521,6 +542,9 @@ _codans_project_commands_rm() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -556,7 +580,7 @@ _codans_worktree_list() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project)
+    non_repeating_options=(--socket --timeout --host --project)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -565,6 +589,9 @@ _codans_worktree_list() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -577,7 +604,7 @@ _codans_worktree_new() {
     repeating_flags=()
     non_repeating_flags=(--json --reuse-existing --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --base --project --path --name)
+    non_repeating_options=(--socket --timeout --host --base --project --path --name --profile --agent)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -586,6 +613,9 @@ _codans_worktree_new() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--base')
@@ -598,6 +628,12 @@ _codans_worktree_new() {
         return
         ;;
     '--name')
+        return
+        ;;
+    '--profile')
+        return
+        ;;
+    '--agent')
         return
         ;;
     esac
@@ -643,7 +679,7 @@ _codans_worktree_rename() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project)
+    non_repeating_options=(--socket --timeout --host --project)
     __codans_offer_flags_options 2
 
     # Offer option value completions
@@ -652,6 +688,9 @@ _codans_worktree_rename() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -664,7 +703,7 @@ _codans_worktree_prune() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project)
+    non_repeating_options=(--socket --timeout --host --project)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -673,6 +712,9 @@ _codans_worktree_prune() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -685,7 +727,7 @@ _codans_worktree_rm() {
     repeating_flags=()
     non_repeating_flags=(--json --all --delete --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --by-path)
+    non_repeating_options=(--socket --timeout --host --project --by-path)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -694,6 +736,9 @@ _codans_worktree_rm() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -732,7 +777,7 @@ _codans_tab_list() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree)
+    non_repeating_options=(--socket --timeout --host --project --worktree)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -741,6 +786,9 @@ _codans_tab_list() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -756,7 +804,7 @@ _codans_tab_new() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree)
+    non_repeating_options=(--socket --timeout --host --project --worktree)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -765,6 +813,9 @@ _codans_tab_new() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -816,7 +867,7 @@ _codans_tab_rename() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree)
+    non_repeating_options=(--socket --timeout --host --project --worktree)
     __codans_offer_flags_options 2
 
     # Offer option value completions
@@ -825,6 +876,9 @@ _codans_tab_rename() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -840,7 +894,7 @@ _codans_tab_close() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree)
+    non_repeating_options=(--socket --timeout --host --project --worktree)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -849,6 +903,9 @@ _codans_tab_close() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -887,7 +944,7 @@ _codans_pane_list() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree --tab)
+    non_repeating_options=(--socket --timeout --host --project --worktree --tab)
     __codans_offer_flags_options 0
 
     # Offer option value completions
@@ -896,6 +953,9 @@ _codans_pane_list() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -914,7 +974,7 @@ _codans_pane_new() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=(--label)
-    non_repeating_options=(--socket --timeout --project --worktree --tab --cwd)
+    non_repeating_options=(--socket --timeout --host --project --worktree --tab --cwd)
     __codans_offer_flags_options -1
 
     # Offer option value completions
@@ -923,6 +983,9 @@ _codans_pane_new() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -996,7 +1059,7 @@ _codans_pane_focus() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree --tab)
+    non_repeating_options=(--socket --timeout --project --worktree --tab --host)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -1014,6 +1077,9 @@ _codans_pane_focus() {
         return
         ;;
     '--tab')
+        return
+        ;;
+    '--host')
         return
         ;;
     esac
@@ -1052,7 +1118,7 @@ _codans_pane_close() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --project --worktree --tab)
+    non_repeating_options=(--socket --timeout --project --worktree --tab --host)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -1070,6 +1136,9 @@ _codans_pane_close() {
         return
         ;;
     '--tab')
+        return
+        ;;
+    '--host')
         return
         ;;
     esac
@@ -1340,7 +1409,7 @@ _codans_agent_wait() {
         return
         ;;
     '--until')
-        __codans_add_completions -W 'idle'$'\n''working'$'\n''blocked'$'\n''finished'$'\n''changed'$'\n''exit'
+        __codans_add_completions -W 'idle'$'\n''working'$'\n''blocked'$'\n''done'$'\n''error'$'\n''changed'$'\n''exit'
         return
         ;;
     '--wait-timeout')
@@ -1353,7 +1422,7 @@ _codans_agent_launch() {
     repeating_flags=()
     non_repeating_flags=(--json --tab --background --version -h --help)
     repeating_options=()
-    non_repeating_options=(--socket --timeout --agent --project --worktree --prompt --split)
+    non_repeating_options=(--socket --timeout --host --agent --project --worktree --prompt --split)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -1362,6 +1431,9 @@ _codans_agent_launch() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--agent')
@@ -1479,22 +1551,22 @@ _codans_workspace() {
     unset 'unparsed_words[0]'
     unparsed_words=("${unparsed_words[@]}")
     case "${subcommand}" in
-    create|add|drop|remove|show)
+    create|add|drop|remove|show|group)
         # Offer subcommand argument completions
         "_codans_workspace_${subcommand}"
         ;;
     *)
         # Offer subcommand completions
-        COMPREPLY+=($(compgen -W 'create add drop remove show' -- "${cur}"))
+        COMPREPLY+=($(compgen -W 'create add drop remove show group' -- "${cur}"))
         ;;
     esac
 }
 
 _codans_workspace_create() {
     repeating_flags=()
-    non_repeating_flags=(--json --existing --track --reset-local --version -h --help)
+    non_repeating_flags=(--json --version -h --help)
     repeating_options=(--project --repo --remote)
-    non_repeating_options=(--socket --timeout --branch --base --clone-into --path --description)
+    non_repeating_options=(--socket --timeout --host --clone-into --path --description)
     __codans_offer_flags_options 1
 
     # Offer option value completions
@@ -1505,6 +1577,9 @@ _codans_workspace_create() {
     '--timeout')
         return
         ;;
+    '--host')
+        return
+        ;;
     '--project')
         return
         ;;
@@ -1512,12 +1587,6 @@ _codans_workspace_create() {
         return
         ;;
     '--remote')
-        return
-        ;;
-    '--branch')
-        return
-        ;;
-    '--base')
         return
         ;;
     '--clone-into')
@@ -1534,10 +1603,10 @@ _codans_workspace_create() {
 
 _codans_workspace_add() {
     repeating_flags=()
-    non_repeating_flags=(--json --existing --track --reset-local --version -h --help)
+    non_repeating_flags=(--json --version -h --help)
     repeating_options=(--project --repo --remote)
-    non_repeating_options=(--socket --timeout --name --branch --base --ref --clone-into --role)
-    __codans_offer_flags_options 1
+    non_repeating_options=(--socket --timeout --host --name --clone-into)
+    __codans_offer_flags_options 2
 
     # Offer option value completions
     case "${prev}" in
@@ -1545,6 +1614,9 @@ _codans_workspace_add() {
         return
         ;;
     '--timeout')
+        return
+        ;;
+    '--host')
         return
         ;;
     '--project')
@@ -1559,19 +1631,7 @@ _codans_workspace_add() {
     '--name')
         return
         ;;
-    '--branch')
-        return
-        ;;
-    '--base')
-        return
-        ;;
-    '--ref')
-        return
-        ;;
     '--clone-into')
-        return
-        ;;
-    '--role')
         return
         ;;
     esac
@@ -1579,8 +1639,189 @@ _codans_workspace_add() {
 
 _codans_workspace_drop() {
     repeating_flags=()
-    non_repeating_flags=(--json --keep-branch --version -h --help)
+    non_repeating_flags=(--json --version -h --help)
     repeating_options=()
+    non_repeating_options=(--socket --timeout --host)
+    __codans_offer_flags_options 2
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--host')
+        return
+        ;;
+    esac
+}
+
+_codans_workspace_remove() {
+    repeating_flags=()
+    non_repeating_flags=(--json --delete-files --delete-branches --discard --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --host)
+    __codans_offer_flags_options 1
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--host')
+        return
+        ;;
+    esac
+}
+
+_codans_workspace_show() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --host)
+    __codans_offer_flags_options 1
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--host')
+        return
+        ;;
+    esac
+}
+
+_codans_workspace_group() {
+    repeating_flags=()
+    non_repeating_flags=(--version -h --help)
+    repeating_options=()
+    non_repeating_options=()
+    __codans_offer_flags_options 0
+
+    # Offer subcommand / subcommand argument completions
+    local -r subcommand="${unparsed_words[0]}"
+    unset 'unparsed_words[0]'
+    unparsed_words=("${unparsed_words[@]}")
+    case "${subcommand}" in
+    create|delete)
+        # Offer subcommand argument completions
+        "_codans_workspace_group_${subcommand}"
+        ;;
+    *)
+        # Offer subcommand completions
+        COMPREPLY+=($(compgen -W 'create delete' -- "${cur}"))
+        ;;
+    esac
+}
+
+_codans_workspace_group_create() {
+    repeating_flags=()
+    non_repeating_flags=(--json --no-fetch --copy-ignored --copy-untracked --version -h --help)
+    repeating_options=(--base)
+    non_repeating_options=(--socket --timeout --host --branch --agent)
+    __codans_offer_flags_options 2
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--host')
+        return
+        ;;
+    '--branch')
+        return
+        ;;
+    '--base')
+        return
+        ;;
+    '--agent')
+        return
+        ;;
+    esac
+}
+
+_codans_workspace_group_delete() {
+    repeating_flags=()
+    non_repeating_flags=(--json --delete-branches --discard --dry-run --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --host)
+    __codans_offer_flags_options 2
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--host')
+        return
+        ;;
+    esac
+}
+
+_codans_workflow() {
+    repeating_flags=()
+    non_repeating_flags=(--version -h --help)
+    repeating_options=()
+    non_repeating_options=()
+    __codans_offer_flags_options 0
+
+    # Offer subcommand / subcommand argument completions
+    local -r subcommand="${unparsed_words[0]}"
+    unset 'unparsed_words[0]'
+    unparsed_words=("${unparsed_words[@]}")
+    case "${subcommand}" in
+    list|run|status|deliver|resolve|cancel|runs|validate)
+        # Offer subcommand argument completions
+        "_codans_workflow_${subcommand}"
+        ;;
+    *)
+        # Offer subcommand completions
+        COMPREPLY+=($(compgen -W 'list run status deliver resolve cancel runs validate' -- "${cur}"))
+        ;;
+    esac
+}
+
+_codans_workflow_list() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --worktree)
+    __codans_offer_flags_options 0
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--worktree')
+        return
+        ;;
+    esac
+}
+
+_codans_workflow_run() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=(--role --input --skip)
     non_repeating_options=(--socket --timeout)
     __codans_offer_flags_options 2
 
@@ -1592,12 +1833,21 @@ _codans_workspace_drop() {
     '--timeout')
         return
         ;;
+    '--role')
+        return
+        ;;
+    '--input')
+        return
+        ;;
+    '--skip')
+        return
+        ;;
     esac
 }
 
-_codans_workspace_remove() {
+_codans_workflow_status() {
     repeating_flags=()
-    non_repeating_flags=(--json --delete-files --delete-branches --version -h --help)
+    non_repeating_flags=(--json --version -h --help)
     repeating_options=()
     non_repeating_options=(--socket --timeout)
     __codans_offer_flags_options 1
@@ -1613,7 +1863,111 @@ _codans_workspace_remove() {
     esac
 }
 
-_codans_workspace_show() {
+_codans_workflow_deliver() {
+    repeating_flags=()
+    non_repeating_flags=(--json --force --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --file --verdict --token --run --step)
+    __codans_offer_flags_options 1
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--file')
+        return
+        ;;
+    '--verdict')
+        return
+        ;;
+    '--token')
+        return
+        ;;
+    '--run')
+        return
+        ;;
+    '--step')
+        return
+        ;;
+    esac
+}
+
+_codans_workflow_resolve() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --verdict)
+    __codans_offer_flags_options 2
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--verdict')
+        return
+        ;;
+    esac
+
+    # Offer positional completions
+    case "${positional_number}" in
+    2)
+        __codans_add_completions -W 'accept'$'\n''accept-with-verdict'$'\n''ask-again'$'\n''keep-waiting'$'\n''skip'$'\n''cancel'$'\n''relaunch'$'\n''retry'$'\n''focus-pane'
+        return
+        ;;
+    esac
+}
+
+_codans_workflow_cancel() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout)
+    __codans_offer_flags_options 1
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    esac
+}
+
+_codans_workflow_runs() {
+    repeating_flags=()
+    non_repeating_flags=(--json --version -h --help)
+    repeating_options=()
+    non_repeating_options=(--socket --timeout --worktree --limit)
+    __codans_offer_flags_options 0
+
+    # Offer option value completions
+    case "${prev}" in
+    '--socket')
+        return
+        ;;
+    '--timeout')
+        return
+        ;;
+    '--worktree')
+        return
+        ;;
+    '--limit')
+        return
+        ;;
+    esac
+}
+
+_codans_workflow_validate() {
     repeating_flags=()
     non_repeating_flags=(--json --version -h --help)
     repeating_options=()

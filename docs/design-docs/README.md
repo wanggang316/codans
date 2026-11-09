@@ -18,27 +18,27 @@ Use [_template.md](_template.md) as a starting point.
 <!-- One entry per doc, alphabetical: [Title](file) — one-line summary. Feature availability belongs in each doc; see ../README.md for metadata conventions. -->
 
 - [Agent Profiles 与 Handoff](agent-handoff.md) — 命名 agent 启动预设（Settings → Agents / toolbar / palette / `codans agent`）+ agent 到 agent 的任务交接：worktree 内 `.codans/handoff/` 工件、archive-first 迁移、源 agent 自写 briefing 的 `codans handoff`、应用内 Hand Off 面板
-- [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 派生运行态（idle/working/blocked/finished），独立于通知系统
+- [AgentState View](active-agents-view.md) — 侧栏底部 AgentState 面板：按前台进程组识别每个 Pane 的 agent（11 种 kind）+ 运行态（idle/working/blocked/done/error，agent 自报的 OSC 7501 程序状态优先、视口启发式兜底），独立于通知系统
 - [App Appearance & Terminal Theme](app-appearance.md) — Light/Dark/System 外观（单写者 `NSApp.appearance`）+ Ghostty 配置 managed-keys（theme/font/cursor）写入
 - [CLI (`codans`)](cli.md) — `codans` 动词集与 system/hierarchy/pane/terminal/editor RPC 契约；stateless RPC client、alias→UUID、`/usr/local/bin` 管理员授权安装；`open` / `help-json` / `workspace` 可用，`skill` 本地管理安装，hook 未实现
+- [Git Platform Integration](git-platform-integration.md) — GitHub（`gh`）与 GitLab（`glab`）共用一个 Git Platform 接口：repository-batched Pull Request 取数（成本 O(Repositories)）、Git Platform 解析顺序与 Project 选择、混合 Workspace、事件驱动失效；每个 Git Platform 的 query 形态、字段映射、fork 过滤与 CLI 契约；零应用内 HTTP / 零 Keychain
 - [Command Palette](command-palette.md) — ⌘P 模糊搜索面板：分层评分 + recency 衰减 + 稳定 ID，按需从实时 Catalog 生成项
 - [Command Suggest](command-suggest.md) — 从项目清单（package.json / Makefile / justfile / Taskfile / mise / Cargo …，含 3 层内子目录）识别命令：Settings `+` 菜单一键加入；header Run 下拉（AppKit）点行执行、行尾 `+` 加入；`CommandSuggestionParser` 纯解析器 + registry 扩展点，本地 / SSH 共用一次读取；`CommandIconCatalog` 命令→图标映射（动作 SF Symbol 优先、56 个单色工具 mark 兜底，`mark:` 前缀存储）
 - [Editor Integration](editor-integration.md) — 在外部工具打开 Worktree：本地应用经 Launch Services，SSH 编辑器经内置 CLI，`$EDITOR` 经 Pane；默认解析、错误边界与外部 Git 客户端委托
 - [Environment](environment.md) — 构建通道（Debug/Release）、路径与环境变量的单一来源：`BuildChannel` 一处 `#if DEBUG`、`CodansEnvironment.Key` 变量名目录、`HandoffLayout`、`PaneEnvironment` 两阶段 pane 环境；写明通道隔离了什么与没隔离什么、两个 socket resolver 的故意不对称
 - [Ghostty Action Routing](ghostty-action-routing.md) — libghostty `action_cb` 两遍解码 + Info/Effect/Intent/Config 四桶路由，保持 Runtime TCA-free
 - [Git Diff Viewer](git-diff-viewer.md) — 独立只读 Uncommitted / Outgoing 窗口、DiffViewKit 渲染与当前文件编辑器跳转
-- [GitHub Integration](github-integration.md) — repository-batched `gh api graphql` PR 取数（成本 O(Repositories)）、事件驱动失效、fork-PR 过滤；零应用内 HTTP / 零 Keychain
 - [iOS Companion (Codans Mobile)](ios-companion.md) — **设计中（M0–M2 实施，M3/中继仅设计）**：iPhone / iPad / iPhone Duo 远程伴侣；Mac 端默认关闭的 LAN 网关（Bonjour `_codans._tcp` + 每设备 TLS-PSK，密钥存 Keychain）复用同一 IPC 协议，按方法分级权限（readOnly / interactive / 永不远程），`events.subscribe` 快照 + 去抖增量，control + events 双连接，只按 size class 适配（完整 Duo 体验待 Xcode 27.1）
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — 统一快捷键注册表：物理键持久化、三态模型、三级冲突 + 级联重置、独立 `shortcuts.json`
 - [Lifecycle Hooks](lifecycle-hooks.md) — **已设计未实现**：Pane/Tab/Worktree 生命周期 hook 的 out-of-process 执行模型 + 事件 wire schema + stdout DSL
 - [Main Window](main-window.md) — 主窗口三子系统（Sidebar / Header / Tab 条）的不变量与边界：env 直读 catalog、intent 侧选择编排、单一来源默认编辑器解析、runtime-only dirty 态
-- [Notifications](notifications.md) — 运行时事件 → 持久 inbox + 四级上卷徽标 + 状态栏铃铛；策略闸 `NotificationCoordinator` 统一门控设置与授权
+- [Notifications](notifications.md) — 运行时事件 → 持久 inbox + 四级上卷徽标 + 侧栏 Unread 过滤；策略闸 `NotificationCoordinator` 统一门控设置与授权
 - [Pane Shell Integration](pane-shell-integration.md) — Ghostty fork 增加 command-wrapper，本地 pane 由 libghostty 解析并集成真实 shell、zmx 作外层监管；默认开 `ssh-env`/`sudo`、关 `title`/`path`（默认值落在 fork）；远端 pane 只对 `xterm-ghostty` 做 terminfo 回退
 - [Project Tags + Single-Window](project-tags.md) — 单窗口强制（已上线）+ Project `Tag` 分类模型与持久化（过滤与分配 UI 隐藏，Tag CLI 未提供）
-- [Remote SSH Projects](remote-ssh-projects.md) — `.server` 项目：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；已接线远程 worktree 创建/删除与连接编辑
+- [Remote Projects over SSH](remote-ssh-projects.md) — Remote Project（`ProjectKind.remote`）：`Project.remoteHost` 叠加、SSH 上发现远程 worktree + 运行持久化终端（本地 zmx 包裹 ssh 重连循环、共享 ControlMaster）；auth 委托给 ssh config/agent；已接线远程 worktree 创建/删除与连接编辑
 - [Settings](settings.md) — 独立 Settings 窗口 + `settings.json` v3 单写者模型（`projects[ProjectID]` + 嵌套 `git`、版本读取与恢复、四正交通知开关）
 - [Update Channel & Release Pipeline](updates-channel-pipeline.md) — Sparkle 更新通道：单一 feed + 客户端 channel 过滤；含 Developer-ID 签名/公证/CI 发布管线不变量
 - [Workflow](workflow.md) — **实现中**：YAML 声明的多 agent 编排（GitHub Actions 风格语法 + 角色 / 显式 `deliver` 交付 / 循环与状态；activation token、attention 而非失败、`CodansCore` 纯状态机 + app 层 effect 解释、worktree 内 run 目录、`~/.codans/workflows/`）
-- [Workspace](workspace.md) — 跨多仓库的 Project：根目录即侧栏上的 workspace 行、子仓库 checkout 为真正的 Worktree 行；`.codans/workspace.json` 定成员、git 定活体事实；reconcile 在 git 探测前短路；创建 / 添加 / 移除经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚）；PR 按成员仓库取数、workspace 行聚合
+- [Workspace](workspace.md) — 跨多仓库的 Project：`default` 组引用各源项目主工作区，命名组每项目一个同分支 checkout，组与成员都是真正的 Worktree 行；`.codans/workspace-groups.json` 定组与成员、git 定活体事实；reconcile 在 git 探测前短路；创建、源增删、建组与删组经 `WorkspaceClient`（GUI 与 `codans workspace` 共用，记账回滚、删除前检查风险）；PR 按成员仓库取数、组行汇总
 - [Worktree](worktree.md) — Worktree 全生命周期（`git-wt` 创建/发现/archive/remove/prune）+ 四段侧边栏排序 + titlebar 状态栏 + header 分支切换器
 - [Worktree Processes](worktree-processes.md) — 当前 Worktree 的实时前台任务、启动名称归属、采样失效规则与 Pane 跳转

@@ -38,6 +38,9 @@ public final class SessionReaper {
   private static let probeTimeoutMS: Int32 = 200
 
   private let coordinator: SessionCoordinator
+  /// Canonical `ZMX_DIR`; injected so tests can point the reaper at a
+  /// scratch directory.
+  private let socketDirectory: URL
   private let snapshotDirectory: URL
   private let staleAfter: TimeInterval
   private let clock: @MainActor () -> Date
@@ -50,13 +53,18 @@ public final class SessionReaper {
 
   public init(
     coordinator: SessionCoordinator,
+    socketDirectory: URL? = nil,
     snapshotDirectory: URL? = nil,
     staleAfter: TimeInterval = SessionConfig.defaultStaleAfter,
     clock: @escaping @MainActor () -> Date = { Date() },
     currentSessionEpoch: @escaping @MainActor () -> String? = { SessionEpoch.current() }
   ) {
     self.coordinator = coordinator
-    self.snapshotDirectory = snapshotDirectory ?? PaneDaemonBringup.canonicalSnapshotDirectory()
+    self.socketDirectory = socketDirectory ?? PaneDaemonBringup.canonicalSocketDirectory()
+    self.snapshotDirectory =
+      snapshotDirectory
+      ?? socketDirectory?.appendingPathComponent("snapshots", isDirectory: true)
+      ?? PaneDaemonBringup.canonicalSnapshotDirectory()
     self.staleAfter = staleAfter
     self.clock = clock
     self.currentSessionEpoch = currentSessionEpoch
@@ -190,6 +198,98 @@ public final class SessionReaper {
     return states
   }
 
+  /// Adopt the daemons an earlier build left in `legacy`, its `ZMX_DIR`,
+  /// by moving their sockets (and any quit-time snapshots) into the
+  /// canonical directories. A bound AF_UNIX socket stays connectable after
+  /// `rename(2)` — the kernel matches the vnode, not the path — so a daemon
+  /// that survived the upgrade is reached at its new path without a respawn,
+  /// exactly like one that survived a quit. Catalog rows that still name the
+  /// legacy path are rewritten so `sweep` probes the moved socket.
+  ///
+  /// Run BEFORE `sweep` and before any `ensureSurface`: bring-up attaches by
+  /// the canonical `ZMX_DIR`, and an empty directory there would make zmx
+  /// create a fresh session over a daemon that is still alive.
+  ///
+  /// A legacy socket whose pane already has a socket in the canonical
+  /// directory is an older duplicate nothing can reach any more; it is
+  /// killed and unlinked. The legacy directory itself stays: it still holds
+  /// zmx's `logs/` for the daemons spawned there, and a migrated daemon keeps
+  /// writing its quit-time snapshot into its own `ZMX_DIR`, which is why
+  /// this runs on every launch while the directory exists.
+  public func migrateLegacySocketDirectory(from legacy: URL) {
+    let fm = FileManager.default
+    guard legacy.standardizedFileURL.path != socketDirectory.standardizedFileURL.path,
+      fm.fileExists(atPath: legacy.path)
+    else { return }
+
+    try? fm.createDirectory(at: socketDirectory, withIntermediateDirectories: true)
+    for url in uuidNamedEntries(in: legacy, pathExtension: "") {
+      let target = socketDirectory.appendingPathComponent(url.lastPathComponent)
+      if fm.fileExists(atPath: target.path) {
+        logger.notice(
+          "Killing superseded legacy daemon at \(url.path, privacy: .public) (pane already has a socket at \(target.path, privacy: .public))"
+        )
+        Self.sendOneShotKill(socketPath: url.path)
+        _ = Darwin.unlink(url.path)
+        continue
+      }
+      // `rename(2)` directly: it is the one call that keeps a bound socket
+      // reachable, and `FileManager.moveItem` is not specified for sockets.
+      if Darwin.rename(url.path, target.path) == 0 {
+        logger.notice("Moved legacy daemon socket \(url.lastPathComponent, privacy: .public) to \(self.socketDirectory.path, privacy: .public)")
+      } else {
+        logger.warning("Failed to move legacy daemon socket \(url.path, privacy: .public): errno=\(errno)")
+      }
+    }
+
+    let legacySnapshots = legacy.appendingPathComponent("snapshots", isDirectory: true)
+    let snapshots = uuidNamedEntries(in: legacySnapshots, pathExtension: "snap")
+    if !snapshots.isEmpty {
+      try? fm.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+    }
+    for url in snapshots {
+      let target = snapshotDirectory.appendingPathComponent(url.lastPathComponent)
+      if fm.fileExists(atPath: target.path) {
+        _ = Darwin.unlink(url.path)
+      } else if Darwin.rename(url.path, target.path) != 0 {
+        logger.warning("Failed to move legacy snapshot \(url.path, privacy: .public): errno=\(errno)")
+      }
+    }
+
+    var catalog = coordinator.catalog
+    var changed = false
+    let legacyPrefix = legacy.standardizedFileURL.path + "/"
+    for (key, var session) in catalog.sessions where session.socketPath.hasPrefix(legacyPrefix) {
+      session.socketPath = socketDirectory.appendingPathComponent(session.paneID.raw.uuidString).path
+      catalog.sessions[key] = session
+      changed = true
+    }
+    guard changed else { return }
+    do {
+      try coordinator.replace(catalog)
+    } catch {
+      logger.error(
+        "Failed to persist sessions.json after socket directory migration: \(String(describing: error), privacy: .public)"
+      )
+    }
+  }
+
+  /// Non-directory entries of `directory` named `<uuid>` (`pathExtension`
+  /// empty) or `<uuid>.<pathExtension>`. Empty when the directory is missing.
+  private func uuidNamedEntries(in directory: URL, pathExtension: String) -> [URL] {
+    guard
+      let contents = try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+      )
+    else { return [] }
+    return contents.filter { url in
+      guard url.pathExtension == pathExtension,
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true
+      else { return false }
+      return UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil
+    }
+  }
+
   /// Scan the canonical socket directory for daemon files that have NO
   /// catalog row AND no matching pane in the hierarchy. These are
   /// filesystem orphans — typically the result of an app crash between
@@ -207,7 +307,6 @@ public final class SessionReaper {
   /// pass the empty set, which collapses the orphan check to "any
   /// socket with no catalog row".
   public func sweepFilesystemOrphans(livePaneIDs: Set<PaneID> = []) {
-    let socketDirectory = PaneDaemonBringup.canonicalSocketDirectory()
     let fm = FileManager.default
     guard fm.fileExists(atPath: socketDirectory.path) else { return }
 
@@ -220,7 +319,7 @@ public final class SessionReaper {
       )
     } catch {
       logger.error(
-        "FS orphan scan failed at \(socketDirectory.path, privacy: .public): \(String(describing: error), privacy: .public)"
+        "FS orphan scan failed at \(self.socketDirectory.path, privacy: .public): \(String(describing: error), privacy: .public)"
       )
       return
     }

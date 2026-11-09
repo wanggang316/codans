@@ -70,19 +70,29 @@ public nonisolated struct PersistedAgentRecord: Codable, Equatable, Sendable {
   /// `SessionReaper.isDaemonAlive`).
   public let pid: Int32
   public let capturedAt: Date
+  /// The OSC 7501 `title` of the agent's root record at capture time. Nil
+  /// in snapshots written before ADR 0009.
+  public let programStatusTitle: String?
+  /// The OSC 0/2 title that the agent set, at capture time. Nil in
+  /// snapshots written before ADR 0009.
+  public let terminalTitle: String?
 
   public init(
     paneID: PaneID,
     kindRaw: String,
     stateRaw: String,
     pid: Int32,
-    capturedAt: Date
+    capturedAt: Date,
+    programStatusTitle: String? = nil,
+    terminalTitle: String? = nil
   ) {
     self.paneID = paneID
     self.kindRaw = kindRaw
     self.stateRaw = stateRaw
     self.pid = pid
     self.capturedAt = capturedAt
+    self.programStatusTitle = programStatusTitle
+    self.terminalTitle = terminalTitle
   }
 }
 

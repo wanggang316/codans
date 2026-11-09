@@ -44,6 +44,7 @@ public struct ShortcutSchema: Sendable {
     case projectAndWorktree
     case terminal
     case actions
+    case agents
   }
 }
 
@@ -65,6 +66,7 @@ extension ShortcutSchema {
   /// `.init(...)` shorthand; partitioning keeps each sub-expression small enough to resolve.
   public static let app: ShortcutSchema = .init(
     entries: generalEntries + projectAndWorktreeEntries + terminalEntries + actionEntries
+      + agentEntries
   )
 
   private static let generalEntries: [Entry] = [
@@ -96,6 +98,13 @@ extension ShortcutSchema {
       category: .general,
       scope: .configurable,
       defaultBinding: .init(keyCode: KeyCode.ansiU, modifiers: [.command, .shift])
+    ),
+    .init(
+      id: .toggleSidebar,
+      title: "Toggle Sidebar",
+      category: .general,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansiSlash, modifiers: .command)
     ),
   ]
 
@@ -172,13 +181,6 @@ extension ShortcutSchema {
       category: .projectAndWorktree,
       scope: .configurable,
       defaultBinding: .init(keyCode: KeyCode.ansiC, modifiers: [.command, .shift])
-    ),
-    .init(
-      id: .toggleSidebar,
-      title: "Toggle Sidebar",
-      category: .projectAndWorktree,
-      scope: .configurable,
-      defaultBinding: .init(keyCode: KeyCode.ansiS, modifiers: [.command, .option])
     ),
     .init(
       id: .revealCurrentWorktreeInSidebar,
@@ -285,6 +287,41 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: KeyCode.ansi0, modifiers: [.control])
     ),
+    .init(
+      id: .selectSidebarFilterAll,
+      title: "Show All in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi1, modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterRemote,
+      title: "Show Remote in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi2, modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterWorkspace,
+      title: "Show Workspace in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi3, modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterPullRequests,
+      title: "Show PRs in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi4, modifiers: [.command, .control])
+    ),
+    .init(
+      id: .selectSidebarFilterUnread,
+      title: "Show Unread in Sidebar",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi5, modifiers: [.command, .control])
+    ),
   ]
 
   private static let terminalEntries: [Entry] = [
@@ -302,20 +339,6 @@ extension ShortcutSchema {
       category: .terminal,
       scope: .configurable,
       defaultBinding: .init(keyCode: KeyCode.ansiW, modifiers: .command)
-    ),
-    .init(
-      id: .renameActiveTab,
-      title: "Rename Tab…",
-      category: .terminal,
-      scope: .configurable,
-      defaultBinding: .init(keyCode: KeyCode.ansiR, modifiers: [.command, .option])
-    ),
-    .init(
-      id: .changeActiveTabColor,
-      title: "Change Tab Color…",
-      category: .terminal,
-      scope: .configurable,
-      defaultBinding: .init(keyCode: KeyCode.ansiC, modifiers: [.command, .option])
     ),
     .init(
       id: .previousTab,
@@ -443,15 +466,19 @@ extension ShortcutSchema {
       scope: .configurable,
       defaultBinding: .init(keyCode: KeyCode.ansi0, modifiers: .command)
     ),
-    // ⌘⌥L is unclaimed by AppKit and by ghostty's default keybinds, so the
-    // chord reaches the menu item even while a terminal pane holds
-    // first responder.
     .init(
       id: .toggleCommandQueue,
       title: "Command Queue…",
       category: .terminal,
       scope: .configurable,
-      defaultBinding: .init(keyCode: KeyCode.ansiL, modifiers: [.command, .option])
+      defaultBinding: .init(keyCode: KeyCode.ansiL, modifiers: .command)
+    ),
+    .init(
+      id: .showSessionHistory,
+      title: "Session History…",
+      category: .terminal,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansiY, modifiers: .command)
     ),
   ]
 
@@ -477,6 +504,73 @@ extension ShortcutSchema {
       category: .actions,
       scope: .configurable,
       defaultBinding: .init(keyCode: KeyCode.ansiG, modifiers: [.command, .shift])
+    ),
+  ]
+
+  private static let agentEntries: [Entry] = [
+    // Agents View — select the pane of the Nth listed agent while the panel is open.
+    .init(
+      id: .focusAgentAt1,
+      title: "Select Agent 1",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi1, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt2,
+      title: "Select Agent 2",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi2, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt3,
+      title: "Select Agent 3",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi3, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt4,
+      title: "Select Agent 4",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi4, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt5,
+      title: "Select Agent 5",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi5, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt6,
+      title: "Select Agent 6",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi6, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt7,
+      title: "Select Agent 7",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi7, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt8,
+      title: "Select Agent 8",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi8, modifiers: [.option])
+    ),
+    .init(
+      id: .focusAgentAt9,
+      title: "Select Agent 9",
+      category: .agents,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: KeyCode.ansi9, modifiers: [.option])
     ),
   ]
 }

@@ -81,12 +81,18 @@ Source: [HierarchyManager.swift](../../apps/mac/codans/Runtime/HierarchyManager.
 
 ## Sidebar and Tag Management
 
-The sidebar applies `Catalog.activeTagFilter` to its Project list. During
-manual reordering it displays the full Project set so movement indices refer
-to the same array that the reorder operation mutates.
+The sidebar applies `Catalog.activeTagFilter` to its Project list. With a
+remote Project in the catalog, the Projects sit under Host rows (see
+[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md)). The user reorders
+Projects by dragging a Project block in that filtered list, inside its Host. A
+drop means "before or after visible Project X": it resolves by `ProjectID` and
+applies to the full `catalog.projects` array, so hidden Projects keep their
+relative positions (see
+[ADR 0001](../adr/0001-project-order-is-manual-only.md) and
+[main-window.md](main-window.md)).
 
 The footer's Tag filter control and the Project context menu's `ProjectTagsMenu`
-are hidden. The footer exposes reordering, Agents View, and refresh controls.
+are hidden. The footer exposes the Agents View and refresh controls. It has no sort control.
 Stored filters still affect Project visibility even though the filter button
 is hidden.
 
@@ -133,7 +139,7 @@ Quit confirmation and terminal disposition are independent settings:
 
 - `quitConfirmation`: `never`, `always`, or `auto`; `auto` asks only when a
   live Pane is busy: a foreground command, OSC 9;4 progress, or an agent in
-  `working` / `blocked` state. Idle shells and idle / finished agents do not
+  `working` / `blocked` state. Idle shells and idle / done / error agents do not
   trigger the dialog.
 - `quitAction`: keep sessions running or snapshot them on exit. The confirmation
   dialog also offers cancellation.

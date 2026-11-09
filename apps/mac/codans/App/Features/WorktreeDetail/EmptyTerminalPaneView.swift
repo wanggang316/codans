@@ -16,10 +16,12 @@ struct EmptyTerminalPaneView: View {
   /// Path of the active worktree, scanned by the session-history popover.
   /// `nil` hides "Resume Session" — there is nothing to scan against.
   var worktreePath: String?
-  /// SSH host of the worktree's project for Server projects, `nil` for local.
+  /// SSH host of the worktree's project for Remote Projects, `nil` for local.
   var remoteHost: RemoteHost?
   let onNewTab: () -> Void
-  let onResumeSession: (AgentSessionSummary) -> Void
+  /// The worktree has no active tab, so there is no pane to type into or
+  /// split: In Place is disabled and New Split resumes in a new tab.
+  let onResumeSession: (AgentSessionSummary, AgentResumePlacement) -> Void
 
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
   @State private var sessionHistoryShown = false
@@ -42,8 +44,8 @@ struct EmptyTerminalPaneView: View {
         .padding(.top, 4)
     }
     .multilineTextAlignment(.center)
+    // No fill: the page sits on the window's sidebar-matching backdrop.
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(nsColor: .windowBackgroundColor))
   }
 
   private var actions: some View {
@@ -59,11 +61,13 @@ struct EmptyTerminalPaneView: View {
         } label: {
           Label("Resume Session", systemImage: "clock.arrow.circlepath")
         }
-        .help("Agent Session History")
+        .helpWithShortcut("Agent Session History", .showSessionHistory)
+        .onSessionHistoryRequest(for: nil, isPresented: $sessionHistoryShown)
         .agentSessionHistoryPopover(
           isPresented: $sessionHistoryShown,
           worktreePath: worktreePath,
           remoteHost: remoteHost,
+          resumeContext: .noFocusedPane,
           onResume: onResumeSession
         )
       }
@@ -71,12 +75,14 @@ struct EmptyTerminalPaneView: View {
     .controlSize(.large)
   }
 
+  /// The tab bar (and its `+`) is hidden while there is no tab, so the hint
+  /// points at the chord and the New Tab button below.
   @ViewBuilder
   private var hint: some View {
     if let chord = newTabChord {
-      Text("Press \(Text(chord).monospaced()) or click \(Text("+").bold()) to open a new terminal.")
+      Text("Press \(Text(chord).monospaced()) or click New Tab to open a new terminal.")
     } else {
-      Text("Click \(Text("+").bold()) to open a new terminal.")
+      Text("Click New Tab to open a new terminal.")
     }
   }
 
@@ -99,7 +105,7 @@ struct EmptyTerminalPaneView: View {
     message: "No terminals open",
     worktreePath: "/tmp",
     onNewTab: {},
-    onResumeSession: { _ in }
+    onResumeSession: { _, _ in }
   )
   .frame(width: 600, height: 400)
 }

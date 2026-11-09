@@ -1,14 +1,14 @@
+import AppKit
 import SwiftUI
 
 /// Background capsule for one tab chip. State-aware so chips share a single
 /// background type — future state expansion (e.g. dirty styling) lives here
 /// rather than being scattered across the chip view.
 ///
-/// Mirrors the macOS system tab bar: the selected chip is a raised capsule
-/// (fill + two 0.5-pt glass rims + a light-mode drop shadow); an idle chip
-/// is transparent and picks up a flat capsule only while hovered. Unlike the
-/// system bar, the selected capsule also darkens slightly under the pointer,
-/// so every chip acknowledges hover. There is
+/// Mirrors the macOS system tab bar: the selected chip is a raised glass
+/// capsule; an idle chip is transparent and picks up a flat capsule only
+/// while hovered. Unlike the system bar, the selected capsule also shifts
+/// slightly under the pointer, as Safari's does, so every chip acknowledges hover. There is
 /// no separate pressed look — like the system bar, a chip is selected on
 /// mouse-down, so a press renders as the selected capsule immediately.
 /// All tokens come from `TabBarMetrics` / `TabBarColors`.
@@ -17,18 +17,30 @@ struct TabChipBackground: View {
   let isHovering: Bool
 
   var body: some View {
-    // Both capsules stay in the tree so their geometry animates with the
-    // chip during an add / close reflow; only their visibility switches.
     ZStack {
+      // Stays in the tree so its geometry animates with the chip during an
+      // add / close reflow.
       Capsule().fill(isHovering && !isActive ? TabBarColors.chipHoverBackground : .clear)
-      selectedCapsule
-        // Selection moves at once, as in the system bar, even inside an
-        // animated add / close — no cross-fade between the two capsules.
-        .animation(nil) { $0.opacity(isActive ? 1 : 0) }
+      // Selection moves at once, as in the system bar, even inside an
+      // animated add / close — no cross-fade between the two capsules.
+      if isActive {
+        if #available(macOS 26.0, *) {
+          TabGlassCapsule()
+            .overlay {
+              Capsule()
+                .fill(isHovering ? TabBarColors.activeHoverOverlay : .clear)
+                .allowsHitTesting(false)
+            }
+        } else {
+          legacySelectedCapsule
+        }
+      }
     }
   }
 
-  private var selectedCapsule: some View {
+  /// Selected capsule before macOS 26: fill + two 0.5-pt rims + a
+  /// light-mode drop shadow.
+  private var legacySelectedCapsule: some View {
     Capsule()
       .fill(isHovering ? TabBarColors.activeHoverBackground : TabBarColors.activeBackground)
       .overlay(Capsule().strokeBorder(TabBarColors.activeRimOuter, lineWidth: 0.5))
@@ -40,4 +52,34 @@ struct TabChipBackground: View {
       .compositingGroup()
       .shadow(color: TabBarColors.activeShadow, radius: 1.5, y: 0.5)
   }
+}
+
+/// The glass of the system tab bar's selected tab: `NSGlassEffectView` in
+/// the configuration `NSTabButton` uses (read from a live window tab bar:
+/// `_variant` 1, `_subvariant` "tab", `_contentLensing` 1). It lenses the
+/// backdrop, so the chip takes on the window tone and carries the system's
+/// glass rim and shadow. The rim falls just past the view's bounds, so no
+/// ancestor may clip at the chip frame. Public API cannot select this look. The keys are guarded, so a
+/// system that drops them falls back to the public glass.
+@available(macOS 26.0, *)
+private struct TabGlassCapsule: NSViewRepresentable {
+  private static let variant = 1
+  private static let subvariant = "tab"
+
+  func makeNSView(context: Context) -> NSGlassEffectView {
+    let view = NSGlassEffectView()
+    view.cornerRadius = TabBarMetrics.chipHeight / 2
+    if view.responds(to: NSSelectorFromString("set_variant:")) {
+      view.setValue(Self.variant, forKey: "_variant")
+    }
+    if view.responds(to: NSSelectorFromString("set_subvariant:")) {
+      view.setValue(Self.subvariant, forKey: "_subvariant")
+    }
+    if view.responds(to: NSSelectorFromString("set_contentLensing:")) {
+      view.setValue(1, forKey: "_contentLensing")
+    }
+    return view
+  }
+
+  func updateNSView(_ view: NSGlassEffectView, context: Context) {}
 }

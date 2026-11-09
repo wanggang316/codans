@@ -20,9 +20,14 @@ struct PaneHUDActions {
   /// `RootFeature.handoffRequested`, which re-checks the pane's agent and
   /// project kind before presenting.
   var handOff: (PaneID) -> Void = { _ in }
-  /// Opens the Command Queue sheet for the given pane — the same one ⌘⌥L
+  /// Opens the Command Queue sheet for the given pane — the same one ⌘L
   /// summons. Routed to `RootFeature.commandQueueToggle`.
   var commandQueue: (PaneID) -> Void = { _ in }
+  /// Resumes a recorded agent session picked from the pane's Session
+  /// History popover. Routed to `TabBarFeature.resumeAgentSessionTapped`
+  /// for the pane's worktree; the pane is the focused one by then, so In
+  /// Place and New Split act on it.
+  var resumeSession: (PaneID, AgentSessionSummary, AgentResumePlacement) -> Void = { _, _, _ in }
 }
 
 extension EnvironmentValues {

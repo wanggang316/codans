@@ -5,22 +5,28 @@
 
 ## Context and Scope
 
-主窗口是两栏布局：左 **Sidebar**（扁平 Project 树 + 底部 footer），右 **Detail**（窗口工具栏 **Header**，内容区为 **Tab 条** + 分屏 **Pane**）。
+主窗口是两栏布局：左 **Sidebar**（Project 树，有远程 Project 时按 Host 分组 + 底部 footer），右 **Detail**（窗口工具栏 **Header**，内容区为 **Tab 条** + 分屏 **Pane**）。
 
 层级为 `Catalog → Project → Worktree → Tab → Pane`（四级）。本文记录三个主窗口子系统——Sidebar、Header、Tab 条——各自的**耐久不变量与边界**，即"为什么这样拆、什么绝不能反过来做"。具体 SwiftUI 布局、像素值、reducer 全量 action 表不在此固化（实现可演进）。
 
 相邻子系统的权威文档：
 
-- 通知 / 未读上卷 / 状态栏铃铛：[notifications.md](notifications.md)。
+- 通知 / 未读上卷 / Unread 过滤：[notifications.md](notifications.md)。
 - Tag 模型 / 单窗口 / Tag 过滤：[project-tags.md](project-tags.md)。
 - 内置只读 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)。
 - Git Viewer（内置或外部客户端）：[editor-integration.md](editor-integration.md) 的「Git Viewer」一节。
 
 ## Sidebar
 
-`HierarchySidebarView` 渲染当前 Catalog 的**扁平 Project 列表**，每个 Project 是一个 section，其下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），当前露出排序（reorder）与刷新两个动作。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
+`HierarchySidebarView` 把当前 Catalog 渲染成一棵 `NSOutlineView` 树（`SidebarOutline`，[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md)）：有远程 Project 时顶层是 Host 行，其下是 Project 行，Project 行下列出 Worktree；底部钉一条 footer（`TagFilterPopoverFooter`），露出 Agents View 与刷新两个动作，没有排序按钮。`HierarchySidebarFeature`（`@Reducer`）持有展开集合与瞬态 UI 状态（filter 状态、上下文菜单、确认对话框、stub sheet），并把行点击/变更经 `HierarchyClient` 转发。
 
-**Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与排序，只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
+**Project 行。** git Project 的行不可选中：点整行或行右侧悬停出现的 `>` 箭头开合其 Worktree 行，主检出（星标）是第一个子行。没有自己仓库的 Project——普通文件夹、远程文件夹、workspace——的行就是它的根目录（`Project.rowWorktree`：`path == rootPath` 的合成 worktree）：行打上该 worktree 的 tag，与 worktree 行一样可选中、打开终端，并承载它的忙碌转圈、未读铃铛、⌃N 与右键菜单；它下面不再列根目录行，于是文件夹没有子行，workspace 只列检出目录，开合只能用箭头。⌃1…⌃0 与 ⌘⌃↑ / ⌘⌃↓ 共用 `Catalog.sidebarSelectionOrder`：按侧栏的 Tag 过滤与 Project order（`catalog.projects` 的数组顺序），只数屏幕上的可选行（折叠 Project 的子行、加载失败的 Project 不计）；揭示（palette、通知跳转、Agents 面板）选中的若是 Project 行自身，不展开该 Project。
+
+**Host 行。** 只要 Catalog 中有一个 Project 不在本机，顶层就是 Host 行：先 **This Mac**（无过滤时即使本机没有 Project 也显示），再按 Host 列表顺序，每个有 Project 的 Host 一行，Project 列在其下（`Catalog.sidebarHostLevel` / `SidebarHostLevel.groups`）。是否出现这一层看全部 Project，不看过滤结果，所以切换过滤不会增减这一层；过滤下某 Host 没有匹配的 Project 时该行隐藏（Remote 因此隐藏 This Mac）。Host 行不可选中，点击开合，开合状态存于 `catalog.json` 的 `collapsedSidebarHosts`；折叠 Host 下的行不占 ⌃N 槽位，⌘⌃↑ / ⌘⌃↓ 也跳过它们，揭示会先展开所在 Host。右键菜单：This Mac 为 "Open Project…"；其他 Host 为 "Open Remote Project on This Host…"（Open Remote Project 选中该 Host）与 "Edit Host…"（Settings › Remote Hosts 打开该 Host 的编辑表单）。Host 行不显示连接状态。Host 行带图标：Host 记录的可选图标（`HostRecord.icon`，未设置时为 Server `server.rack`），This Mac 为本机机型的符号（MacBook → `laptopcomputer`、Mac mini → `macmini`、Mac Studio → `macstudio`、其他 → `desktopcomputer`）。Host 与 Project 同缩进，靠间距区分层级：第一个之后的每个 Host 行上边距 12 pt（Project 行为 4 pt），行高由 32 pt 变为 38 pt；第一个 Host 行、Project 行与 Worktree 行的行高不变。见 [ADR 0002](../adr/0002-sidebar-outline-with-host-level.md) 与 [ADR 0003](../adr/0003-hosts-are-managed-records.md)。
+
+**开合动画。** 只有用户的开合有动画：点击 Host 行、点击 Project 行或其箭头、点击 Workspace 分组行。曲线按 owner 的参考录屏逐帧测得（ADR 0008）：下面的行像临界阻尼弹簧（ω ≈ 23/s）那样移动，前 0.1 s 走完大半，之后长尾，约 0.3 s 停稳；表格用 0.32 s 的三次曲线 (0.30, 0.40, 0.15, 0.98) 拟合它。展开时子行先在其位置上方约 16 pt 处隐藏约 55 ms，然后淡入并随同一曲线下滑到位；折叠时子行近似线性淡出、加速上移（约 110 ms 上移 7 pt），约 120 ms 消失，下面的行上滑盖过它们。箭头在动画开头用 0.06 s 在 0° 与 90° 之间转动。实现：一次表格更新中插入或删除子行（动画展开时先在数据源不报子行的情况下打开该行，再插入子行以及其中已展开子项的子行；动画折叠时先删除子行，再关闭该行），表格移动其余行；表格对插入和删除的行做自己的淡入淡出（作用在 row view 上，outline 无法覆盖）；outline 在行的 cell 上再加一个透明度，使两者相乘后的结果按目标曲线变化，且没有突变；目标曲线逐帧给出（`openFadeCurve` / `closeFadeCurve`）：展开的前四帧不超过 0.25，折叠的最后四帧低于 0.25，眼睛最敏感的淡区停留更久；位移是 row view 上的 layer 动画。每个子行的淡入淡出和位移是按时间定义的计划（`ChildRowPlan`），表格换用别的 view 显示该行时，新 view 从同一时间点接上；第二次开合从当前计划进行到的值开始，快速连点不会跳。数值见 `SidebarDisclosureTiming`。揭示（palette、通知、Agents View）、启动时恢复、过滤切换重建树、CLI 或其他 catalog 写入都立即开合，没有动画。系统开启“减少动态效果”时，用户开合也立即完成。开合期间再次点击直接走向最新的 catalog 状态，可以反转进行中的动画，不排队，行始终可点。开合状态仍只存于 catalog；用户意图由 reducer 带给 outline（`HierarchySidebarFeature.State.expansionToggle`，`SidebarExpansionToggle`），outline 不从 catalog 的状态差异推断意图，也继续拒绝不来自 catalog 的开合。用户开合不得包在禁用动画的 SwiftUI transaction 里，否则箭头不转。见 [ADR 0007](../adr/0007-sidebar-animates-user-expansion-only.md) 与 [ADR 0008](../adr/0008-sidebar-disclosure-animation-matches-the-list.md)。
+
+**Project 拖拽排序。** 用户直接拖动 Project 行（行上任意位置，无拖拽手柄、无排序会话）调整 Project order（[ADR 0001](../adr/0001-project-order-is-manual-only.md)）。outline 的原生拖拽移动整个 Project 块：Project 行及其 Worktree 行一起移动，展开 / 折叠状态不变；workspace 与加载失败的 Project 同样可拖。落点只在同一 Host 的 Project 之间有效（没有 Host 行时是顶层）：落在行上、Host 行之间、另一个 Host 下或 Worktree 段内时不显示指示线、也不接受（[ADR 0002](../adr/0002-sidebar-outline-with-host-level.md) 决定 5）；Host 不能拖。`SidebarOutlineModel.projectDrop` 把落点解析成"可见 Project X 之前 / 之后"（`ProjectPlacement`，按 `ProjectID`），再作用于完整的 `catalog.projects`，所以任意分类与 Tag 过滤下都能拖，被隐藏的 Project 保持相对位置。新 Project 追加到末尾。Worktree 段内拖拽不变（Unread / PR 过滤下禁用）。
 
 ### 不变量
 
@@ -33,6 +39,10 @@
 - **结构变更经 `HierarchyClient`，AppKit 副作用经各自 client。** reducer 自身不做 AppKit/NSWorkspace 调用：Finder 揭示走一个极小的 `FinderClient`（`NSWorkspace.activateFileViewerSelecting`），编辑器打开**不**由侧栏直接调 `EditorClient`，而是 delegate 上抛给父级 → `EditorFeature.openRequested`（见 Header 一节的"resolveDefault 单一来源"）。这让 reducer 保持纯净、TestStore 可驱动，且 AppKit 不渗入 reducer。
 
 - **依赖方向：app → CodansCore，单向。** `FinderClient` 是 app 侧；`CodansCore` 永不 import AppKit。
+
+### 快速分类过滤
+
+侧栏顶部使用胶囊按钮提供 All、Remote、Workspace、PR、Unread。选中项显示图标和名称，其他项仅显示图标并提供 tooltip。Remote 包含 SSH 项目；Unread 仅显示 inbox 中有未读通知的未归档 Worktree 及其父项目（见 [notifications.md](notifications.md)）；PR 使用当前 GitHub 快照，仅显示已匹配到 PR 的未归档 Worktree 及其父项目。Unread 与 PR 的数据变化时同步更新列表和快捷键导航，筛选期间禁止 Worktree 拖拽排序（Project 拖拽不受影响）。旧配置中的 Pin 分类按 All 读取。分类与 Tag 过滤取交集，导航快捷键使用同一结果。分类保存在 Catalog，旧配置默认 All。
 
 ### Tag filter（已实现，当前隐藏）
 
@@ -98,13 +108,19 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 
 ## Tab Bar
 
-终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（居中标题 + hover 时在左侧出现的关闭按钮 + active 浮起底板），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / rename / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
+终端 Tab 条是 Header 与 Pane 视口之间的一行 per-tab chip。`TabBarView` 渲染 chip（居中标题 + hover 时在左侧出现的关闭按钮 + active 浮起底板），`TabBarFeature` 把每个 tab 操作（new / close / close-others / close-to-right / close-all / reorder / select-by-index / select-adjacent / split）一行转发经 `HierarchyClient`。视图只经 `@Environment(HierarchyManager.self)` 读 catalog，只经 `store.send(…)` 派发，绝不直接够到 `HierarchyClient`。
 
 ### 不变量
 
 - **`Tab` 保持 `Codable` 纯数据，分屏树用 `PaneID` 间接、不嵌 `NSView`。** `Tab`（`apps/mac/CodansCore/Tab.swift`）被逐字持久化进 `catalog.json`；`splitTree` 持有 `PaneID` 而非活的 `PaneView`/`NSView`。把 AppKit/SwiftUI 视图嵌进 `Tab` 会逼出一套独立持久化形态、把核心域模型耦合到 UI 类型，并堵死未来的 headless 用途。ID 间接每次渲染一次字典查找，在现实 tab 数下可忽略。
 
-- **`Tab.icon` / `Tab.isDirty` 是持久字段。** 它们与 `HierarchyManager` 上记录前台运行状态的非持久集合分属不同层；运行状态不能以持久字段替代。
+- **chip 的图标与标题来自同一个 pane，图标与该 pane 卡片 Header 一致。** 选中 pane = Tab 最后获得焦点的 pane，没有时取第一个 pane。图标由 `PaneGlyph.resolve`（`apps/mac/CodansCore/PaneGlyph.swift`）算出，Header 与 chip 共用：pane 里有 agent → agent 标记；pane 是运行脚本的 run pane → 脚本图标，脚本运行时取脚本的 tint；否则 terminal。图标不持久化在 `Tab` 上，也没有用户覆盖；Tab 不提供改名、改色、改图标的界面（`codans tab rename` 仍可设标题）。旧 catalog 里的 `color` / `icon` / `iconLock` 键在解码时忽略，下次保存时丢弃。
+- **Pane 标题按 ADR 0009 取，Header 与 chip 显示同一文本。** Pane 标题（`PaneTitle.resolve`，`apps/mac/CodansCore/PaneTitle.swift`；视图经 `PaneTitleReader` 读取）只来自终端，从不来自 OSC 7501：
+  - **shell 在提示符**（最近一次前台 job 采样里只有 shell，`ForegroundJobClassifier.indicatesShellPrompt`，经 `HierarchyManager.paneIsAtShellPrompt` 读取）→ 工作目录，home 显示为 `~`。shell 设的标题不用：oh-my-zsh 设 `user@host:~/path`，各家格式不同，目录对所有 shell 设置给出同一文本。
+  - **其他进程占着前台** → Pane 的 OSC 0/2 标题，经 `UntrustedDisplayText` 净化。空标题不擦掉标题：`SurfaceInfo.lastTitle` 保留最后一个非空标题，shell 在命令运行时清空标题，Header 不会闪回目录。只有 Pane 从未有过标题时才退回工作目录。上游 libghostty 把空标题、以及从未设标题时的目录变化，报告成等于 pwd 的标题；codans 的 Ghostty fork 改为只报告程序设的标题、空标题报告为空（fork 补丁 `fix(termio): report an empty window title as empty`），因为在 app 里无法把这个替身与「程序把标题设成 pwd」区分开。
+  - **工作目录**先取 shell 报告的实时 pwd，没有时取 Pane 持久化的工作目录。重启后 zmx daemon 重放最后一个非空标题（空标题不擦掉它，与 Header 规则相同），但不重放工作目录（OSC 7），所以 shell 下一次报告前，提示符处显示持久化的目录。
+  - 提示符判断依赖前台 job 轮询，标题在命令开始或结束后一个轮询周期内切换。
+  - **chip**：用户设了 tab 名（`codans tab rename`）时显示 tab 名，否则显示选中 pane 的 Pane 标题，即该 pane Header 的文本（`PaneTitleReader.chipTitle`）。chip 不读 Ghostty 的 tab 标题，也不把目录缩成最后一段。`Tab.cachedDisplayTitle` 缓存 Pane 标题，`Tab.cachedDisplayTitlePaneID` 记它属于哪个 pane。缓存只在选中 pane 没有 surface（冷启动后未打开的 tab）且缓存属于该 pane 时使用（`PaneTitleReader.cachedTitle`）：焦点不持久化，分屏 tab 冷启动时 chip 跟随第一个 pane，而缓存可能是另一个 pane 的标题。没有 pane ID 的旧缓存只在单 pane 的 tab 里使用。没有缓存时取持久化工作目录，与没有 surface 的 Header 相同。
 
 - **per-pane running/dirty 是 `HierarchyManager` 上的 runtime-only `Set<PaneID>`，永不持久化，各 teardown 路径清它。** chip 的"忙"指示源于该 wall-clock-live 的运行态集合；持久化它会泄漏陈旧的 spinner（重启后仍转）。每条拆除路径——`closePane` / `closeTab` / `tearDownWorktreeSurfaces`——都必须清理对应条目。同类的 `lastFocusedPaneByTab: [TabID: PaneID]`（`selectTab` 时据此恢复焦点，落到 split 树最左叶兜底）也是 runtime-only。
 - **"忙"只表示有一条会结束的命令在跑。** 两个来源取并集：OSC 9;4 进度上报，和前台进程组里的非 shell、非 agent 命令（`ForegroundJobClassifier.indicatesBusyCommand`）。交互式远程会话被排除——`ssh host`（无远程命令或带 `-t`）、`mosh`、`et` 会一直占着前台直到登出，转圈不传达任何信息；它们仍算作 worktree 进程列表里的运行中命令。判断 ssh 是否带远程命令要用真实 argv（`ForegroundProcess.arguments`），因为 shell 集成的 `ssh` 包装会传带空格的 `-o` 值。
@@ -115,13 +131,13 @@ prompt 经 profile 的 `promptStyle` 拼进启动命令；空 prompt 只启动 a
 
 - **重排用 snapshot-on-drop，不逐 tick 调 `moveTab`。** 拖拽重排在**落下**时一次性提交绝对顺序 `reorderTabs(orderedIDs:)`，而非每个指针 tick 调 `moveTab(offset:)`。后者每次触发一次持久化保存，且两个连续 tick 跨过同一中点时引入重排闪烁。snapshot-on-drop 更省、更易单测、且贴合 catalog 真正想要的变更形态。
 
-- **视觉与交互对齐 AppKit 的 macOS 26 window-tabbing tab 条（Finder / Safari 同款），用 SwiftUI 按实测复刻。** 原生 tab 条是私有 `NSTabBar` / `NSTabButton`，只服务 `NSWindowTabGroup`（每个 tab 是一个独立窗口、挂在标题栏下），无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 颜色 / 快捷键提示；公开 API 里也没有能在窗口内渲染它的控件。所有参数取自在进程内遍历原生 tab 条视图树（frame / 字体）与 2x 截图取色，集中在 `TabBarMetrics` / `TabBarColors`：胶囊轨道高 28pt、内容内缩 2pt、chip 高 24pt 且间隔 1pt（分隔线 1×18pt 画在间隔里）、最小宽 120pt、关闭按钮与右侧槽位 16pt 距边 5pt、标题两侧对称留 29pt、11pt 标题尾部截断。选中 tab 在原生里是私有 Liquid Glass variant，`.glassEffect(.regular/.clear)` 实测色值对不上，故用半透明填充 + 两道 0.5pt 亮边 + 浅色模式阴影落到同样的像素；hover 是扁平淡胶囊并隐藏两侧分隔线；与原生一致在**按下时即选中**（没有单独的 pressed 态）。
+- **视觉与交互对齐 AppKit 的 macOS 26 window-tabbing tab 条（Finder / Safari 同款），用 SwiftUI 按实测复刻。** 原生 tab 条是私有 `NSTabBar` / `NSTabButton`，只服务 `NSWindowTabGroup`（每个 tab 是一个独立窗口、挂在标题栏下），无法承载 per-Worktree 持久化的 tab、自定义拖拽与 spinner / 快捷键提示；公开 API 里也没有能在窗口内渲染它的控件。所有参数取自在进程内遍历原生 tab 条视图树（frame / 字体）与 2x 截图取色，集中在 `TabBarMetrics` / `TabBarColors`：胶囊轨道高 28pt、内容内缩 2pt、chip 高 24pt 且间隔 1pt（分隔线 1×18pt 画在间隔里）、最小宽 120pt、关闭按钮与右侧槽位 16pt 距边 5pt、标题两侧对称留 29pt、11pt 标题尾部截断。选中 tab 在原生里是私有 Liquid Glass variant，`.glassEffect(.regular/.clear)` 实测色值对不上，故用半透明填充 + 两道 0.5pt 亮边 + 浅色模式阴影落到同样的像素；hover 是扁平淡胶囊并隐藏两侧分隔线；与原生一致在**按下时即选中**（没有单独的 pressed 态）。
   - **溢出堆叠（`TabStackLayout`，纯函数、以原生采样为测试基准）**：tab 放不下时，`NSScrollView` 里只放一条与滚动范围等宽的空占位（提供偏移与 AppKit 滚动动画），chip 行画在它上面，由自定义 `Layout` 按视口坐标直接排到堆叠位置并裁成窄条（chip 若放在滚动内容里，SwiftUI 会按布局槽位剔除“不可见”的子视图，窗口变窄后选中 tab 会消失；只用 `.offset` 挪到堆叠位置则布局槽位不动，悬停、点击、分隔线、拖拽仍按旧位置走）——两端堆叠区宽 `min(视口/8, 128)`，只在该侧还有内容可滚时生效，越界的 tab 按 `(Z/2)·ln(1+d/(Z/2))` 压成窄条；选中 tab 不压缩，进入堆叠区后按双曲线减速，所在侧没有其他 tab 时一直滑到边缘钉住；首尾 tab 作为整摞的「底」贴边。压扁的 chip 仍按全宽排版再裁切（同原生 `mainContentClippingContainer`）：选中 tab 之前的内容贴左缘、之后的贴右缘，被堆叠区压缩的再向内推一段（按压缩来自哪一侧拟合），所以细窄条只露出空白边距、不露标题碎片，被选中 tab 盖住的部分裁掉（选中底板半透明，不能只靠重叠遮挡）。
   - **交互**：切换选中**不滚动**；点击堆叠窄条不选中，而是用 AppKit clip view 动画（0.25s ease-out cubic）滚动一页 `V − 2.5Z − W`；新建 tab 立即滚到可见；滚轮与触控板在 tab 条上的滚动都由本地监听直接驱动 clip view（主方向决定位移，垂直滚轮也横向滚动；每行 10pt，精确滚动 1:1），tab 放得下时不滚动、也不回弹。滚动偏移从 clip view 的 bounds 通知读取——SwiftUI 几何感知不到 AppKit 发起的滚动；定位 `NSScrollView` 的探针放在滚动内容之外，放在内容里会让 SwiftUI 不再绘制 chip。
   - **已知偏差**：帧位置与原生最多差 1pt（原生浮点舍入细节）；窄条内标题偏移是经验拟合，薄窄条里可能差几 pt；新建 / 关闭 tab 以 Safari 实测为准（60fps 录屏逐帧量取）：新 tab 贴着自身终位的右端从 0 宽长出、标题从第一帧就在、居中于已露出部分，其余 tab 同步收窄；关闭的 tab 立即消失、其余 tab 展开补位；曲线是无回弹的临界阻尼 spring（response 0.15s，约 0.1s 到位）。选中态在动画中瞬时切换，不交叉淡入淡出。（AppKit `NSTabBar` 在中间插入时是从中心长出、约 0.5s，与 Safari 不同，以 Safari 为准。）
   - **有意偏离原生**（按产品要求）：选中 tab 标题不加粗（原生 semibold）；选中 tab hover 时胶囊略微加深（原生不变）。
   - **实现陷阱**：SwiftUI 会把新插入的视图直接放在终位布局，所以“从右端长出”用 insertion transition（胶囊裁切 + 内容平移）实现，不用布局宽度动画；未选中标题用不透明度把 `labelColor` 压到 `secondaryLabelColor`（两者 RGB 相同、仅 alpha 不同，像素一致），而不是切换 `foregroundStyle`，因为动画中改 style 会让文本在终位重建，标题会跳到 chip 前面；标题用 `.contentTransition(.identity)` 并裁在 chip 内，避免截断变化时交叉淡化留下省略号残影、以及变宽时溢出到邻居；新 tab 的选中态可能比 tab 本身早一两帧到达，行视图会先保持上一个选中。
-  - **终端挂载避开动画**：终端 surface 进入窗口会让合成停顿约 4 帧（主线程空闲，停在合成侧），恰好落在 tab 动画中就是卡顿。所以 UI 新建的 tab（+ 按钮、⌘T）在 `TabBarMetrics.firstPaneDelay`（160ms）后才打开首个 pane；关闭当前 tab 时，新选中 tab 的终端同样延后挂载（`TerminalMountDeferral`），期间终端区域留空。普通切换 tab 不延后。
+  - **终端挂载避开动画**：终端 surface 进入窗口会让合成停顿约 4 帧（主线程空闲，停在合成侧），恰好落在 tab 动画中就是卡顿。所以 UI 新建的 tab（+ 按钮、⌘T）在 `TabBarMetrics.firstPaneDelay`（160ms）后才打开首个 pane；关闭当前 tab 且 tab 栏仍显示时，新选中 tab 的终端同样延后挂载（`TerminalMountDeferral`），期间 pane 卡片照常绘制、只是不挂 surface（`defersTerminalSurfaces`），区域不会闪空。关闭后只剩一个 tab 时 tab 栏直接隐藏、无动画，立即挂载。普通切换 tab 不延后。
   - **新 tab 标题**：首个 pane 打开前标题取 worktree 目录名，shell 回报自己的标题后再替换（与 Terminal / Ghostty 行为一致）。
 
 - **不建并行 `TabBarState`。** tab 是 hierarchy-scoped（每 Worktree）。另起一个 `@Observable TabBarState` 容器意味着同一数据两个事实来源，并在 create/close/select 周围引入同步危险。既有模式（视图读 `HierarchyManager`、reducer 经 `HierarchyClient` 转发）已可扩展；在 `HierarchyClient` 上多挂几个闭包的边际成本，低于长期协调两个 store 的成本。
@@ -149,7 +165,7 @@ tab-bar 的副作用是同步 `try?` 调进 `HierarchyClient`：`.notFound(...)`
 ## References
 
 - Tag / 单窗口：[project-tags.md](project-tags.md)
-- 通知 / 上卷 / 状态栏铃铛：[notifications.md](notifications.md)
+- 通知 / 上卷 / Unread 过滤：[notifications.md](notifications.md)
 - 内置 Changes / Outgoing：[git-diff-viewer.md](git-diff-viewer.md)
 - Git Viewer（外部 git 客户端）：[editor-integration.md](editor-integration.md)
 - 键盘快捷键统管：[keyboard-shortcuts.md](keyboard-shortcuts.md)

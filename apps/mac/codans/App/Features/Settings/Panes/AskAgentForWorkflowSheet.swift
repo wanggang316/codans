@@ -47,7 +47,7 @@ struct AskAgentForWorkflowSheet: View {
       .frame(height: 150)
       .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
       Label(
-        "The agent needs the codans-workflow skill — install it under Developer → Agent Skills.",
+        "The agent needs the codans-workflow skill — install it under Integrations → Agent Skills.",
         systemImage: "info.circle"
       )
       .font(.caption)

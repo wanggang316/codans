@@ -21,7 +21,8 @@
 # Usage:
 #   bump-version.sh <X.Y.Z>          # marketing version; build = today (or todayN if same day)
 #   bump-version.sh <X.Y.Z> <BUILD>  # set both explicitly (BUILD must be > current)
-#   bump-version.sh --print          # show current values + suggested next bump
+#   bump-version.sh --print          # show current values + next patch / minor / major
+#   bump-version.sh --next-build     # print only the next build number (used by the release workflows)
 #   bump-version.sh --help
 #
 # Examples:
@@ -43,9 +44,10 @@ print_usage() {
 bump-version.sh — bump MARKETING_VERSION + CURRENT_PROJECT_VERSION.
 
 Usage:
-  bump-version.sh <X.Y.Z>          set marketing version, increment build by 1
+  bump-version.sh <X.Y.Z>          set marketing version, take the next date-based build
   bump-version.sh <X.Y.Z> <BUILD>  set both explicitly
-  bump-version.sh --print          show current values + suggested patch bump
+  bump-version.sh --print          show current values + next patch / minor / major
+  bump-version.sh --next-build     print only the next build number
   bump-version.sh --help
 EOF
 }
@@ -77,6 +79,18 @@ next_patch() {
   local v="$1"
   IFS=. read -r x y z <<<"$v"
   echo "$x.$y.$((z + 1))"
+}
+
+next_minor() {
+  local v="$1"
+  IFS=. read -r x y _ <<<"$v"
+  echo "$x.$((y + 1)).0"
+}
+
+next_major() {
+  local v="$1"
+  IFS=. read -r x _ _ <<<"$v"
+  echo "$((x + 1)).0.0"
 }
 
 # Query the published appcast for the highest build number across all
@@ -117,10 +131,9 @@ next_build() {
 }
 
 cmd_print() {
-  local mv pv next_mv next_pv max_pub
+  local mv pv next_pv max_pub
   mv="$(read_field MARKETING_VERSION)"
   pv="$(read_field CURRENT_PROJECT_VERSION)"
-  next_mv="$(next_patch "$mv")"
   max_pub="$(max_published_build)"
   next_pv="$(next_build "$pv")"
   cat <<EOF
@@ -130,7 +143,10 @@ xcconfig: $xcconfig
   CURRENT_PROJECT_VERSION = $pv
   Published max build     = ${max_pub:-<none>}
 
-next patch: $next_mv (build $next_pv)
+next build: $next_pv
+next patch: $(next_patch "$mv")
+next minor: $(next_minor "$mv")
+next major: $(next_major "$mv")
 EOF
 }
 
@@ -197,6 +213,9 @@ main() {
       ;;
     --print)
       cmd_print
+      ;;
+    --next-build)
+      next_build "$(read_field CURRENT_PROJECT_VERSION)"
       ;;
     *)
       cmd_bump "$@"

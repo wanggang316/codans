@@ -20,7 +20,12 @@ extension IPC {
     public let canonicalName: String
     public let rootPath: String
     public let gitRoot: String?
+    /// The Remote Project's SSH host address; nil on This Mac. Kept for
+    /// older CLIs; `host` names the Host record.
     public let remoteHost: String?
+    /// The Host the Project is on. Nil from an app that predates Host
+    /// records.
+    public let host: HostRef?
     public let isSelected: Bool
     public let selectedWorktreeID: String?
     public let worktreeCount: Int
@@ -34,6 +39,7 @@ extension IPC {
       rootPath: String,
       gitRoot: String?,
       remoteHost: String?,
+      host: HostRef? = nil,
       isSelected: Bool,
       selectedWorktreeID: String?,
       worktreeCount: Int,
@@ -46,6 +52,7 @@ extension IPC {
       self.rootPath = rootPath
       self.gitRoot = gitRoot
       self.remoteHost = remoteHost
+      self.host = host
       self.isSelected = isSelected
       self.selectedWorktreeID = selectedWorktreeID
       self.worktreeCount = worktreeCount
@@ -67,6 +74,8 @@ extension IPC {
     public let isSelected: Bool
     public let selectedTabID: String?
     public let tabCount: Int
+    /// The row's group and role inside a workspace; nil elsewhere.
+    public let workspaceGroup: WorkspaceGroupRef?
 
     public init(
       id: String,
@@ -79,7 +88,8 @@ extension IPC {
       isPinned: Bool,
       isSelected: Bool,
       selectedTabID: String?,
-      tabCount: Int
+      tabCount: Int,
+      workspaceGroup: WorkspaceGroupRef? = nil
     ) {
       self.id = id
       self.projectID = projectID
@@ -92,6 +102,7 @@ extension IPC {
       self.isSelected = isSelected
       self.selectedTabID = selectedTabID
       self.tabCount = tabCount
+      self.workspaceGroup = workspaceGroup
     }
   }
 
@@ -104,7 +115,6 @@ extension IPC {
     public let worktreeID: String
     public let title: String?
     public let name: String?
-    public let icon: String?
     public let isSelected: Bool
     public let focusedPaneID: String?
     public let paneIDs: [String]
@@ -116,7 +126,6 @@ extension IPC {
       worktreeID: String,
       title: String?,
       name: String?,
-      icon: String?,
       isSelected: Bool,
       focusedPaneID: String?,
       paneIDs: [String]
@@ -127,7 +136,6 @@ extension IPC {
       self.worktreeID = worktreeID
       self.title = title
       self.name = name
-      self.icon = icon
       self.isSelected = isSelected
       self.focusedPaneID = focusedPaneID
       self.paneIDs = paneIDs
@@ -136,7 +144,8 @@ extension IPC {
 
   /// `hierarchy.describePane`. `workingDirectory` is the live shell
   /// directory when the surface has reported one, else the creation-time
-  /// one; `isLive` says whether a terminal surface is bound this session.
+  /// one. `isLive` says whether the pane's terminal (its daemon) runs;
+  /// `isAttached` says whether a surface renders it (absent from older apps).
   public struct PaneDescription: Codable, Equatable, Sendable {
     public let id: String
     public let handle: String?
@@ -150,6 +159,7 @@ extension IPC {
     public let agentSessionID: String?
     public let isLive: Bool
     public let isFocused: Bool
+    public let isAttached: Bool?
 
     public init(
       id: String,
@@ -163,7 +173,8 @@ extension IPC {
       agent: String?,
       agentSessionID: String?,
       isLive: Bool,
-      isFocused: Bool
+      isFocused: Bool,
+      isAttached: Bool? = nil
     ) {
       self.id = id
       self.handle = handle
@@ -177,6 +188,7 @@ extension IPC {
       self.agentSessionID = agentSessionID
       self.isLive = isLive
       self.isFocused = isFocused
+      self.isAttached = isAttached
     }
   }
 }

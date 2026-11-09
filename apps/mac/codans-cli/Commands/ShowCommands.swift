@@ -15,6 +15,7 @@ struct ProjectShow: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Project id, name, or 'current'.")
   var project: String = "current"
 
@@ -22,25 +23,11 @@ struct ProjectShow: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let uuid = try await hostOptions.resolveProject(project, client: client)
       let description: IPC.ProjectDescription = try await client.call(
         .hierarchyDescribeProject, params: IPC.DescribeRequest(id: uuid))
-      try Renderer.emit(KeyValueRenderable(description, lines: Self.lines), mode: globals.renderMode)
+      try Renderer.emit(KeyValueRenderable(description, lines: ProjectShowLines.lines), mode: globals.renderMode)
     }
-  }
-
-  private static func lines(_ d: IPC.ProjectDescription) -> [(String, String)] {
-    [
-      ("project", d.id),
-      ("name", d.name + (d.name == d.canonicalName ? "" : " (folder: \(d.canonicalName))")),
-      ("root", d.rootPath),
-      ("git root", d.gitRoot ?? "(none: folder project)"),
-      ("remote", d.remoteHost ?? "-"),
-      ("selected", d.isSelected ? "yes" : "no"),
-      ("worktrees", "\(d.worktreeCount) active, \(d.archivedWorktreeCount) archived"),
-      ("selected worktree", d.selectedWorktreeID ?? "-"),
-      ("tags", d.tagIDs.isEmpty ? "-" : d.tagIDs.joined(separator: ", ")),
-    ]
   }
 }
 
@@ -107,7 +94,6 @@ struct TabShow: AsyncParsableCommand {
       ("tab", d.id + (d.handle.map { "  (\($0))" } ?? "")),
       ("title", d.title ?? "(untitled)"),
       ("name", d.name ?? "(auto)"),
-      ("icon", d.icon ?? "(auto)"),
       ("worktree", d.worktreeID),
       ("project", d.projectID),
       ("selected", d.isSelected ? "yes" : "no"),
@@ -144,7 +130,7 @@ struct PaneShow: AsyncParsableCommand {
   }
 
   private static func lines(_ d: IPC.PaneDescription) -> [(String, String)] {
-    [
+    var lines: [(String, String)] = [
       ("pane", d.id + (d.handle.map { "  (\($0))" } ?? "")),
       ("cwd", d.workingDirectory),
       ("command", d.initialCommand ?? "(default shell)"),
@@ -157,28 +143,9 @@ struct PaneShow: AsyncParsableCommand {
       ("focused", d.isFocused ? "yes" : "no"),
       ("live", d.isLive ? "yes" : "no"),
     ]
-  }
-}
-
-/// JSON is the wire description as-is; text is aligned `key: value` rows.
-struct KeyValueRenderable<T: Encodable>: Encodable, CustomStringConvertible {
-  let value: T
-  let lines: (T) -> [(String, String)]
-
-  init(_ value: T, lines: @escaping (T) -> [(String, String)]) {
-    self.value = value
-    self.lines = lines
-  }
-
-  func encode(to encoder: Encoder) throws {
-    try value.encode(to: encoder)
-  }
-
-  var description: String {
-    let rows = lines(value)
-    let width = (rows.map(\.0.count).max() ?? 0) + 1
-    return rows.map { key, value in
-      (key + ":").padding(toLength: width, withPad: " ", startingAt: 0) + " " + value
-    }.joined(separator: "\n")
+    if let isAttached = d.isAttached {
+      lines.append(("attached", isAttached ? "yes" : "no"))
+    }
+    return lines
   }
 }

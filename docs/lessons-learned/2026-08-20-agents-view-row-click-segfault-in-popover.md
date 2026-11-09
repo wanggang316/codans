@@ -51,7 +51,7 @@ least one thing that changed the card's **height** while it was on screen:
 - the session-task iteration replaced that with an async `.task` scan whose
   result (`session`) lands *after* the popover opens, adding a divider, a
   2-line title and a footer in one step — a guaranteed resize on nearly every
-  card, typically 100 ms–seconds after it opens (SSH for Server projects);
+  card, typically 100 ms–seconds after it opens (SSH for Remote Projects);
 - the activity line followed the pane's OSC title live, appearing and
   disappearing as the agent worked;
 - a `TimelineView(.periodic(by: 1))` re-laid-out the card once a second.
@@ -78,7 +78,7 @@ Two changes, both in the AgentState feature:
    already complete, so its rendered size **cannot change** while it is up.
    The ticking `TimelineView` went with it; a per-second re-layout of a popover
    is the same hazard on a slower clock.
-   Cost: hovering a Server-project row now waits for the SSH scan before the
+   Cost: hovering a Remote Project row now waits for the SSH scan before the
    card appears, instead of opening an empty card that grows.
 2. **The focus cascade leaves the click's stack.** `handleTap` clears the card
    and hands `onTap()` to the next main-loop turn, so pane teardown/rebuild

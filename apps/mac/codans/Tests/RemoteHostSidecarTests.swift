@@ -25,7 +25,7 @@ struct RemoteHostSidecarTests {
     var catalog = Catalog()
     catalog.projects = [server, local]
 
-    // A save mirrors the server project into the sidecar…
+    // A save mirrors the Remote Project into the sidecar…
     RemoteHostSidecar.sync(from: catalog, to: url)
     // …then an old build strips the field (tolerant decode + re-encode).
     catalog.projects[0].remoteHost = nil
@@ -66,7 +66,7 @@ struct RemoteHostSidecarTests {
   }
 
   @Test
-  func syncRemovesFileWhenNoServerProjectsRemain() throws {
+  func syncRemovesFileWhenNoRemoteProjectsRemain() throws {
     let url = tempSidecar()
     try FileManager.default.createDirectory(
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

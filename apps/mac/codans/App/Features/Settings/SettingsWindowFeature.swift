@@ -17,6 +17,7 @@ struct SettingsWindowFeature {
     var general: EditorFeature.State = .init()
     var terminal: SettingsTerminalFeature.State = .init()
     var globalCommands: GlobalCommandsFeature.State = .init()
+    var hosts: HostsSettingsFeature.State = .init()
     var projectPanes: IdentifiedArrayOf<ProjectSettingsFeature.State> = []
 
     init(
@@ -44,6 +45,7 @@ struct SettingsWindowFeature {
     case general(EditorFeature.Action)
     case terminal(SettingsTerminalFeature.Action)
     case globalCommands(GlobalCommandsFeature.Action)
+    case hosts(HostsSettingsFeature.Action)
     case projectPanes(IdentifiedActionOf<ProjectSettingsFeature>)
     /// Fired by `SettingsWindowView`'s `.onDisappear`. Clears sidebar selection on close.
     case windowClosed
@@ -51,6 +53,10 @@ struct SettingsWindowFeature {
     /// Project-scoped selection whose backing Project has disappeared from the catalog,
     /// and re-seeds `kind` on surviving panes to pick up `git init` / `rm -rf .git` flips.
     case projectsChanged(Set<ProjectID>)
+    /// Show the Hosts page with the Host's edit form open.
+    case editHostRequested(HostID)
+    /// Show the Project's page scrolled to its Commands section.
+    case projectCommandsRequested(ProjectID)
   }
 
   @Dependency(HierarchyClient.self) var hierarchyClient
@@ -64,6 +70,9 @@ struct SettingsWindowFeature {
     }
     Scope(state: \.globalCommands, action: \.globalCommands) {
       GlobalCommandsFeature()
+    }
+    Scope(state: \.hosts, action: \.hosts) {
+      HostsSettingsFeature()
     }
     Reduce { state, action in
       switch action {
@@ -83,10 +92,21 @@ struct SettingsWindowFeature {
         return .none
       case .globalCommands:
         return .none
+      case .hosts:
+        return .none
       case .projectPanes:
         return .none
       case .windowClosed:
         state.selection = nil
+        return .none
+      case .editHostRequested(let id):
+        state.selection = .hosts
+        guard let record = hierarchyClient.hosts().first(where: { $0.id == id }) else { return .none }
+        return .send(.hosts(.editButtonTapped(record)))
+      case .projectCommandsRequested(let pid):
+        state.selection = .project(pid)
+        ensureProjectPane(&state, for: pid)
+        state.projectPanes[id: pid]?.revealsCommands = true
         return .none
       case .projectsChanged(let currentIDs):
         // Prune panes for projects that no longer exist.
@@ -100,18 +120,9 @@ struct SettingsWindowFeature {
             state.projectPanes[index].kind = freshKind
           }
         }
-        // Clear selection if it points to a disappeared project OR to a sub-pane that the
-        // project's current kind no longer exposes (e.g. the user was on Git & Worktree when
-        // `.git` was removed and the Project flipped to dir). Falling back to
-        // General keeps the pane consistent with the sidebar's kind-conditional row set.
-        if let selection = state.selection, let pid = selection.projectID {
-          if !currentIDs.contains(pid) {
-            state.selection = nil
-          } else if let pane = state.projectPanes[id: pid],
-            !SettingsSection.subrows(for: pane.kind, projectID: pid).contains(selection)
-          {
-            state.selection = .projectGeneral(pid)
-          }
+        // Clear the selection when it points to a disappeared project.
+        if let pid = state.selection?.projectID, !currentIDs.contains(pid) {
+          state.selection = nil
         }
         return .none
       }

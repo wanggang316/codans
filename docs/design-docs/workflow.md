@@ -8,7 +8,7 @@
 
 ## 背景与范围
 
-codans 已经具备"一个 agent 编排其它 agent"所需的全部**原语**：Agent Profiles 与统一的启动管线（`HierarchyClient.launchAgent`）、`AgentStateStore` 的逐 pane 运行态（`idle` / `working` / `blocked` / `finished`）、`codans agent wait --until`、`codans pane send --wait --capture`、`codans handoff` 与 worktree 内的 `.codans/handoff/` 工件、以及 `{schemaVersion, data | error}` 的 JSON 信封（见 [cli.md](cli.md)、[agent-handoff.md](agent-handoff.md)、[active-agents-view.md](active-agents-view.md)、[lessons-learned 2026-09-14](../lessons-learned/2026-09-14-cli-agent-orchestration-gaps.md)）。
+codans 已经具备"一个 agent 编排其它 agent"所需的全部**原语**：Agent Profiles 与统一的启动管线（`HierarchyClient.launchAgent`）、`AgentStateStore` 的逐 pane 运行态（`idle` / `working` / `blocked` / `done` / `error`）、`codans agent wait --until`、`codans pane send --wait --capture`、`codans handoff` 与 worktree 内的 `.codans/handoff/` 工件、以及 `{schemaVersion, data | error}` 的 JSON 信封（见 [cli.md](cli.md)、[agent-handoff.md](agent-handoff.md)、[active-agents-view.md](active-agents-view.md)、[lessons-learned 2026-09-14](../lessons-learned/2026-09-14-cli-agent-orchestration-gaps.md)）。
 
 但用户每天真正在跑的编排——"在旁边分屏起一个 reviewer，把 diff 交给它审，读它的结论，修，再让它复审，直到 clean"——今天只存在于手敲的 CLI 序列或 agent 自己临场拼出的 bash 循环里。它不可复现、不可分享、没有可观测的进度，出了问题（agent 卡在权限提示、忘了汇报、回答得不合格式）也没有一个地方能停下来问用户。Handoff 是这类编排里唯一被固化的一条，而它是写死的状态机：目标列表、briefing 章节、kickoff 文案都是字面量，第二条编排就得再写一遍。
 
@@ -128,7 +128,7 @@ steps:
     notify: Still has issues after ${{ state.round }} round(s); see ${{ deliveries.review.path }}.
 ```
 
-**发现与作用域**（按 id 后者遮蔽前者）：app bundle（`Resources/workflows/`，内建）→ 用户 `~/.codans/workflows/`（新增用户级目录一律在 `~/.codans/` 下，`~/.config/codans` 不再扩展）→ 仓库 `<repo root>/.codans/workflows/`。仓库作用域随分支走：每个 worktree 看到自己分支上的文件。这要求 `.codans/.gitignore` 从整目录 `*` 改为放行 `workflows/`（见 D9）。测试实例用 `CODANS_WORKFLOWS_DIR` 覆盖用户目录，与 `CODANS_CONFIG_DIR` 同一隔离思路。
+**发现与作用域**（按 id 后者遮蔽前者）：app bundle（`Resources/workflows/`，内建）→ 用户 `~/.codans/workflows/`（新增用户级目录一律在 `~/.codans/` 下，`~/.config/codans` 不再扩展）→ 仓库 `<repo root>/.codans/workflows/`。仓库作用域随分支走：每个 worktree 看到自己分支上的文件。这要求仓库已有 workflow 定义时 `.codans/.gitignore` 从整目录 `*` 改为放行 `workflows/`（见 D9）。测试实例用 `CODANS_WORKFLOWS_DIR` 覆盖用户目录，与 `CODANS_CONFIG_DIR` 同一隔离思路。
 
 **校验**分两段：`WorkflowDocumentParser`（YAML → 结构诊断：未知键、类型错误、缺必填、一步多个动词）与 `WorkflowValidator`（交叉引用：未定义角色、重复 step id、同一 `launch` 角色启动两次、循环体内 `launch`、表达式引用了不存在的命名空间或没有生产者的 delivery、`verdicts` 数量 2–4、`on-timeout` 无 `timeout-minutes`、`text` 里手写 `codans workflow deliver`）。诊断是 `{severity, code, message, location}`；有 error 的文件在 Settings 里可见但不可启动，`codans workflow validate <file>` 不需要 app 在线。
 
@@ -202,7 +202,7 @@ Provisional 使 run 进入 `needs_attention`，动作表：**Accept** / **Accept
 | `workflow` | `id`、`name` |
 | `run` | `id`、`path` |
 | `worktree` | `id`、`path`、`name`、`branch`（每步前刷新） |
-| `roles.<role>` | `pane-id`、`agent`、`name`、`state`（该步的快照，`idle` / `working` / `blocked` / `finished` / `gone`） |
+| `roles.<role>` | `pane-id`、`agent`、`name`、`state`（该步的快照，`idle` / `working` / `blocked` / `done` / `error` / `gone`；角色的 agent 退出记为 `gone`） |
 | `inputs.<name>` | 启动时的类型化输入 |
 | `state.<name>` | 声明过的可变状态 |
 | `steps.<id>` | `outcome`（`success` / `failure` / `skipped`）、`outputs.*`（`run` 步骤：`exit-code`、`stdout`、`stdout-path`） |
@@ -235,7 +235,7 @@ effect（engine 解释）：`awaitRole(role, until)`、`openActivation(ordinal, 
 
 **Idle 门控。** `message` 只在角色 idle 时注入。idle 的判定来自 `AgentStateStore`：`.idle` 需持续 2 s（分类器有 1.2 s 的 working→idle 迟滞，再叠一层稳定期避免在两个 tool call 之间注入）；`.blocked` 持续超过 30 s 升级为 attention（动作：Focus pane / Keep waiting / Skip / Cancel）；pane 消失是 `roleGone` → attention（Relaunch 仅对 `launch` 角色可用）。永远不往 `working` 的 pane 键入任何东西。
 
-**Watchdog。** 等待交付时不用墙钟而用角色状态：注入后角色曾 `working` 又回到 `idle` 且 `idle_grace`（默认 180 s）内没有交付 → 自动 nudge 一次（重键入完成命令，token 不变）→ 再等一个 `idle_grace` → attention。角色一直 `working` 就一直等——`expect.timeout-minutes` 是唯一会打断工作中 agent 的东西，而它没有默认值。
+**Watchdog。** 等待交付时不用墙钟而用角色状态：注入后角色曾 `working` 又回到 `idle` 且 `idle_grace`（默认 180 s）内没有交付 → 自动 nudge 一次（重键入完成命令，token 不变）→ 再等一个 `idle_grace` → attention。角色一直 `working` 就一直等——`expect.timeout-minutes` 是唯一会打断工作中 agent 的东西，而它没有默认值。例外是 agent 本身不在了：pane 还开着，但曾绑定的 agent 已退出，或 `launch` 角色在 60 s 启动宽限内一直没绑定上 agent（例如 agent CLI 启动即报错，只剩一个空 shell）→ 直接按 `roleGone` 升级为 attention（Relaunch / Skip / Cancel），不再无限等待。`current` / `pick` 角色从未出现 agent 时不触发——人可以在裸 shell 里手动交付。
 
 **取消 / 中断。** Cancel 吊销当前 activation、把活动步记 `failed`、结束 run；不关闭任何 pane、不终止 agent 的工作、不撤销副作用；正在跑的 `run:` 命令走 `CommandRunner` 的 SIGTERM→SIGKILL 阶梯。app 启动时把记录里仍是 `running` / `needs_attention` 的 run 标为 `interrupted`——只供查看，不恢复。
 
@@ -303,7 +303,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 - **AgentState 面板**新增一组 "Workflows" 行：`<name> · <step name> · running/needs attention · 已用时间`，点击弹出 popover：步骤列表、角色 pane（可跳转）、attention 动作按钮（**按 `attention.actions` 原样渲染，UI 不重新推导策略**）、log 与 run 目录链接。选择这里而不是 toolbar 中央状态槽：该槽已被 worktree 进程徽标与状态项占用，而 AgentState 本来就是用户分诊 agent 的唯一去处，run 就是 agent 的上下文。
 - **通知**：run 进入 `needs_attention` / 终态时进 inbox（`NotificationCoordinator` 门控），`notify:` 步骤同路。
 - **Command Palette**：`Run Workflow: <name>`（对当前 worktree 可见的定义）、`Cancel Workflow: <name>`（活动 run）。
-- **Settings → Agents → Workflows**（已实现；作为 Agents 的同级行而非嵌套子页——简化，见下）：三个作用域的列表、启用开关、校验诊断、每个 launch 角色的记忆绑定（可清除）、仓库作用域文件的信任状态（D8）；"New Workflow…" 在 User 或任一仓库下新建 `<id>.workflow.yaml`（空白起点或复制任一有效定义，经 `WorkflowScaffold` 写入、从不覆盖；仓库位置同时确保 `.codans/.gitignore` 放行 `workflows/`），建好后用默认编辑器打开。列表每行是导航行（启用勾选、名称与描述、状态：Ready / Ready · N warnings / Invalid · N errors / Disabled），点进独立的二级详情页（与 Agent Profile 详情同形：本地状态切换 + 窗口工具栏返回按钮，不嵌套 NavigationStack）：头部（状态、ID、作用域、启用开关）、Run（在主窗口当前选中的 worktree 打开启动面板；不能运行时说明原因，包括所选 worktree 用不到这份文件）、Roles（来源说明，launch 角色可直接选首选 profile，即写入记忆绑定）、Inputs、Validation（文件变动即重新校验）、Shell Commands 信任（仓库文件）、Source File。行右键与详情页提供同一组操作：Open in Editor（内置的为 View Source）/ Reveal in Finder / Duplicate…（预填的 New Workflow）/ Move to Trash…（仅 User 与仓库；带确认，可从废纸篓恢复）；内置定义只读，提示复制后再改。"Ask an Agent…" 生成一段指向 `codans-workflow` skill 的提示词供复制。列表同样来自 `WorkflowCatalogStore`，刷新按钮只是强制重扫。侧边栏里 Workflows 紧跟在 Agents 之后，与其平级，不是 Agents 下的子项。
+- **Settings → Agents → Workflows**（已实现；作为 Agents 的同级行而非嵌套子页——简化，见下）：三个作用域的列表、启用开关、校验诊断、每个 launch 角色的记忆绑定（可清除）、仓库作用域文件的信任状态（D8）；"New Workflow…" 在 User 或任一仓库下新建 `<id>.workflow.yaml`（空白起点或复制任一有效定义，经 `WorkflowScaffold` 写入、从不覆盖；仓库位置同时把 `.codans/.gitignore` 改为放行形式（D9）），建好后用默认编辑器打开。列表每行是导航行（启用勾选、名称与描述、状态：Ready / Ready · N warnings / Invalid · N errors / Disabled），点进独立的二级详情页（与 Agent Profile 详情同形：本地状态切换 + 窗口工具栏返回按钮，不嵌套 NavigationStack）：头部（状态、ID、作用域、启用开关）、Run（在主窗口当前选中的 worktree 打开启动面板；不能运行时说明原因，包括所选 worktree 用不到这份文件）、Roles（来源说明，launch 角色可直接选首选 profile，即写入记忆绑定）、Inputs、Validation（文件变动即重新校验）、Shell Commands 信任（仓库文件）、Source File。行右键与详情页提供同一组操作：Open in Editor（内置的为 View Source）/ Reveal in Finder / Duplicate…（预填的 New Workflow）/ Move to Trash…（仅 User 与仓库；带确认，可从废纸篓恢复）；内置定义只读，提示复制后再改。"Ask an Agent…" 生成一段指向 `codans-workflow` skill 的提示词供复制。列表同样来自 `WorkflowCatalogStore`，刷新按钮只是强制重扫。侧边栏里 Workflows 紧跟在 Agents 之后，与其平级，不是 Agents 下的子项。
 
 ### 组件边界
 
@@ -333,7 +333,7 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 - **D6 — `run:` 步骤代替 action 包。** codans 是终端编排器，"跑一条命令拿退出码与输出"已经是 `pane send --wait --capture` 与 `CommandRunner` 的日常；JSON Schema 化的输入输出契约留到有真实需求时再加。默认 headless（确定的退出码 + 完整 stdout）而不是键入 pane（best-effort），`in: <role>` 是给"让用户看见"的可选项。
 - **D7 — 引擎是 `@Observable` 运行态对象而不是 TCA reducer。** 与 `HierarchyManager` / `AgentStateStore` / `CommandQueueRunner` 同一模式：TCA 只持草稿与呈现，避免把长生命周期的 effect 队列塞进 reducer 的 `Effect` 生命周期里。
 - **D8 — 仓库作用域的 `run:` 需要一次性信任。** clone 一个仓库不应等于同意跑它 `.codans/workflows/` 里的 shell 命令。信任绑定 `(路径, 文件 SHA-256)`，存 `settings.json` `workflows.trusted`，只能在 app 里授予（Settings 或首次启动时的确认），CLI 不能；文件一改就要重新信任；只含 `message` / `launch` / `notify` 等步骤的文件不需要信任。用户作用域与内建隐式信任。
-- **D9 — `.codans/.gitignore` 从 `*` 改为放行 `workflows/`。** 仓库作用域必须能提交；`HandoffLayout` 写 gitignore 的地方改成写 `*` + `!.gitignore` + `!workflows/`，创建 `workflows/` 时幂等重写。已有仓库在首次发现到 `.codans/workflows/` 时也重写一次。
+- **D9 — 仓库有 workflow 定义时，`.codans/.gitignore` 才从 `*` 改为放行 `workflows/`。** 仓库作用域必须能提交，但没有定义的仓库里 `.codans/` 必须对 git 完全不可见。`.gitignore` 有两种由 app 写入的形式：自我忽略的 `*`，与放行形式 `/*` + `!/.gitignore` + `!/workflows/`（模式必须锚定：不锚定的 `*` 也会匹配 `workflows/` 内的每个文件，`!workflows/` 无法再放行它们）。启动 run 与 handoff 只在文件缺失时写 `*`；只有在仓库里新建 workflow（New Workflow 选仓库位置），或启动 run 时 `.codans/workflows/` 已存在，才改写为放行形式（`WorkflowRunStore.permitWorkflowDefinitions`）。早期构建每次启动 run 都写不锚定的放行形式 `*` + `!.gitignore` + `!workflows/`（它放行了自身，使 `.codans/` 显示为未跟踪，却仍忽略所有定义）；在没有 `workflows/` 的 worktree 里启动 run 会把它改回 `*`，有 `workflows/` 时改为锚定的放行形式。改写只替换 app 写过的内容；其他内容视为用户编辑，永不覆盖。run 工件与 handoff 文件仍留在 worktree 内（见上文"放在 worktree 内"的理由），不迁到 `~/.codans/`。
 - **D10 — run 目录在 worktree 内，无全局历史。** 见"运行目录"一节；避免一整套带作用域的读取命令与保留策略。
 - **D11 — 现有 `codans handoff` 不动。** `handoff` 内建工作流是它的工作流表达（author 写 briefing → `run:` 调 `codans handoff save --pane … --brief -` 保存 → 可选 launch receiver），两者并存到工作流稳定为止。
 - **D12 — 表达式语言故意小、拼写向 GitHub 靠拢。** 循环计数与 verdict 分支需要的只有比较、逻辑、整数加减与 `exists` / `??`；每多一个运算符都是校验器、求值器、文档三处的长期负担。GitHub 有的函数用 GitHub 的名字（`contains` / `startsWith` / `endsWith`）。
@@ -362,8 +362,8 @@ IPC 方法：`workflow.list` / `workflow.run` / `workflow.status` / `workflow.de
 
 1. **M1 — 核心（无 GUI）**：`CodansCore/Workflow/*`（定义、解析、校验、表达式、机器、store）+ Yams；`workflow.*` IPC；`WorkflowEngine` / registry / discovery / handlers；CLI `list / validate / run / status / deliver / resolve / cancel / runs`；inbox 通知；AgentState 面板一行只读状态。验收：`review-loop` 用两个真实 agent 从 CLI 跑通一轮循环，attention 通过 `resolve` 处理。
 2. **M2 — GUI**：启动面板、面板 popover 与 attention 按钮、Settings → Workflows（列表 / 启用 / 诊断 / 绑定 / 信任）、Command Palette 项。
-3. **M3 — 内建与 skill**：`review-loop`、`handoff`、`advisor`；`skills/codans-workflow`（authoring / running / participating 三段，随 app 嵌入并由 `codans skill install` 链接）；`.codans/.gitignore` 放行（D9）。
-4. **V2 预留**（各自另写设计）：`wait: {all|any: [...]}` 并行分支与败者取消；脚本 action 包（目录 + JSON Schema）；`expect.status: idle` + `capture` 的观察模式；Server 项目。
+3. **M3 — 内建与 skill**：`review-loop`、`handoff`、`advisor`；`skills/codans-workflow`（authoring / running / participating 三段，随 app 嵌入并由 `codans skill install` 链接）；`.codans/.gitignore` 按需放行（D9）。
+4. **V2 预留**（各自另写设计）：`wait: {all|any: [...]}` 并行分支与败者取消；脚本 action 包（目录 + JSON Schema）；`expect.status: idle` + `capture` 的观察模式；Remote Project。
 
 ## 风险
 

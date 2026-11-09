@@ -1,8 +1,8 @@
 import AppKit
-import Foundation
-import GhosttyKit
 import CodansCore
 import CodansIPC
+import Foundation
+import GhosttyKit
 
 /// Owns one `ghostty_surface_t` and its hosting `GhosttySurfaceView`. One
 /// PaneSurface corresponds to one `Pane` while alive; when the surface
@@ -109,7 +109,7 @@ final class PaneSurface {
     launch: SurfaceLaunch,
     workingDirectory: String,
     env: [String: String],
-    fontSize: Float32 = 13.0
+    initialSize: CGSize? = nil
   ) throws {
     guard let app = runtime.app else {
       throw GhosttyError.appInitFailed(
@@ -119,7 +119,7 @@ final class PaneSurface {
     self.runtime = runtime
     self.paneID = paneID
     self.session = session
-    self.view = GhosttySurfaceView(paneID: paneID)
+    self.view = GhosttySurfaceView(paneID: paneID, initialSize: initialSize)
 
     // Allocate 16 bytes to hold the PaneID's uuid bytes as surface userdata.
     self.paneIDUserdata = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
@@ -138,7 +138,15 @@ final class PaneSurface {
       )
     )
     config.scale_factor = view.backingScaleFactor()
-    config.font_size = fontSize
+    // libghostty forks the child at this size inside `ghostty_surface_new`,
+    // before `view.attach` can push one; see `GhosttySurfaceView.init`.
+    let initialPixels = view.initialPixelSize
+    config.initial_width = initialPixels.width
+    config.initial_height = initialPixels.height
+    // `font_size` stays 0 so the surface uses the configured `font-size`.
+    // libghostty applies a non-zero value only after init has built the
+    // grid and forked the child, so it resized every new child at once;
+    // a config reload then reset the font to the configured size anyway.
     config.context = GHOSTTY_SURFACE_CONTEXT_SPLIT
     // Per-surface userdata: opaque pointer to the 16 uuid-bytes of the
     // owning PaneID. The close_surface_cb copies these bytes into a local
@@ -148,9 +156,10 @@ final class PaneSurface {
     // Exec backend: libghostty forks the child under `zmx attach <session>`
     // (as the wrapper of the shell it resolves, or inside a fixed command —
     // see `SurfaceLaunch`) and owns the local PTY plus its sizing — it
-    // spawns the child only once a real post-layout size is known, so the
-    // shell never renders at a placeholder width. The attached shell itself
-    // lives in the resume-friendly daemon. ghostty injects TERM/COLORTERM
+    // spawns the child during `ghostty_surface_new` at `initial_width` /
+    // `initial_height`, then resizes it on every geometry push. The
+    // attached shell itself lives in the resume-friendly daemon. ghostty
+    // injects TERM/COLORTERM
     // and its shell-integration variables for the exec child, so only
     // project env + ZMX_DIR need threading through `env`.
     let commandC = launch.command.map { $0.withCString { strdup($0)! } }
@@ -835,7 +844,7 @@ final class PaneSurface {
   func apply(_ delta: PaneInfoDelta) {  // swiftlint:disable:this cyclomatic_complexity
     switch delta {
     case .title(let t):
-      info.title = t
+      info.applyTitle(t)
     case .tabTitle(let t):
       info.tabTitle = t
     case .promptTitle(let tag):

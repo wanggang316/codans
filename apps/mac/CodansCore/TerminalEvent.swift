@@ -50,6 +50,10 @@ public nonisolated enum TerminalEvent: Sendable {
   /// before emission so subscribers can choose between reading the
   /// `@Observable` state or reacting to the delta directly.
   case paneInfoChanged(PaneID, PaneInfoDelta)
+  /// The pane's OSC 7501 program status records changed. Carries the
+  /// summary the agent-state machine needs, nil when the pane has no
+  /// records left. The runtime owns the records (see `ProgramStatusRecords`).
+  case paneProgramStatusChanged(PaneID, ProgramStatusSummary?)
   case foregroundJobChanged(PaneID, ForegroundJob)
   /// Runtime decoded a tab / split intent. Consumed exclusively by
   /// `PaneActionRouterFeature` — other features must not subscribe.

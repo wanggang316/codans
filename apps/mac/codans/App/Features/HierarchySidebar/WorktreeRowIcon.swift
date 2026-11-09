@@ -51,10 +51,13 @@ struct WorktreeRowIcon: View {
   /// used to sit inline next to the name now leads the row. Suppressed
   /// when a PR snapshot is present — PR-state still wins the icon slot.
   var isDefaultBranch: Bool = false
+  /// Git Platform of the Worktree; names the Pull Request in the accessibility label
+  /// ("merge request !6" on GitLab).
+  var gitPlatformKind: GitPlatformKind?
 
-  /// Native `List(selection:)` paints the selection chrome via NSTableView's
-  /// `.sourceList` mode and sets `\.backgroundProminence = .increased` on
-  /// the row content only while the selection is *emphasized* (sidebar
+  /// The sidebar outline paints the selection chrome via NSTableView's
+  /// `.sourceList` mode, and `SidebarOutlineCell` sets
+  /// `\.backgroundProminence = .increased` on the row content only while the selection is *emphasized* (sidebar
   /// holds first-responder, blue fill, white text). The instant focus
   /// moves to a terminal pane the fill becomes unemphasized grey, the
   /// system text color flips to dark, and `backgroundProminence` returns
@@ -196,6 +199,7 @@ struct WorktreeRowIcon: View {
       case .closed: return "closed"
       }
     }()
-    return Text("\(stateWord) pull request #\(snapshot.number)")
+    let kind = gitPlatformKind ?? .github
+    return Text("\(stateWord) \(kind.pullRequestName) \(kind.referencePrefix)\(snapshot.number)")
   }
 }

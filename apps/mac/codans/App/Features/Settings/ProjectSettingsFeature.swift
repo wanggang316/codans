@@ -1,7 +1,7 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
 import SwiftUI
-import CodansCore
 
 @Reducer
 struct ProjectSettingsFeature {
@@ -24,6 +24,11 @@ struct ProjectSettingsFeature {
     /// pane's `+` menu. Derived on every scan, never persisted.
     var commandSuggestions: [CommandSuggestionGroup] = []
     var isScanningCommandSuggestions = false
+    /// Workspace pane: a source project awaiting the Remove confirmation.
+    var pendingSourceRemoval: PendingWorkspaceSourceRemoval?
+    /// Set by "Manage Project Commands…": the page scrolls to its Commands section,
+    /// then clears the flag with `commandsRevealed`.
+    var revealsCommands = false
 
     var id: ProjectID { projectID }
   }
@@ -32,7 +37,7 @@ struct ProjectSettingsFeature {
     case setDefaultEditorOverride(EditorID?)
     case setWorktreeBaseDirectory(String?)
     case writeFailed(String)
-    /// Replace the entire `scripts` array. The Scripts pane writes
+    /// Replace the entire `scripts` array. The Commands section writes
     /// after every edit / reorder / delete; full-array semantics match
     /// `ForEach.onMove` and `SettingsWriter.setProjectScripts`.
     case setProjectScripts([ScriptDefinition])
@@ -43,9 +48,21 @@ struct ProjectSettingsFeature {
     /// existing failure banner displays it.
     case runScriptTapped(scriptID: UUID, worktreeID: WorktreeID)
     /// (Re)scan the Project's manifests for command suggestions. Sent when
-    /// the Commands pane appears and from the menu's Refresh item.
+    /// the Commands section appears and from the menu's Refresh item.
     case scanCommandSuggestions
     case commandSuggestionsScanned([CommandSuggestionGroup])
+    /// Workspace pane: Remove on a source project's row.
+    case workspaceSourceRemoveTapped(WorktreeID)
+    case workspaceSourceRemoveConfirmed
+    case workspaceSourceRemoveCancelled
+    /// Workspace pane: Add Project menu (an open project) or the picked
+    /// folder of Add Folder….
+    case workspaceAddSourceTapped(path: String)
+    case workspaceAddFolderTapped
+    /// A source add or remove ended; `error` is shown in the failure banner.
+    case workspaceSourcesChanged(error: String?)
+    /// The page scrolled to its Commands section; clears `revealsCommands`.
+    case commandsRevealed
   }
 
   nonisolated enum CancelID: Sendable { case commandSuggestionScan }
@@ -54,6 +71,8 @@ struct ProjectSettingsFeature {
   @Dependency(FinderClient.self) var finderClient
   @Dependency(SettingsWriter.self) var settingsWriter
   @Dependency(CommandSuggestionClient.self) var commandSuggestionClient
+  @Dependency(WorkspaceClient.self) var workspaceClient
+  @Dependency(FolderPickerClient.self) var folderPickerClient
 
   var body: some Reducer<State, Action> {
     Reduce { state, action in
@@ -115,9 +134,60 @@ struct ProjectSettingsFeature {
         }
         .cancellable(id: CancelID.commandSuggestionScan, cancelInFlight: true)
 
+      case .commandsRevealed:
+        state.revealsCommands = false
+        return .none
+
       case .commandSuggestionsScanned(let groups):
         state.commandSuggestions = groups
         state.isScanningCommandSuggestions = false
+        return .none
+
+      case .workspaceSourceRemoveTapped(let worktreeID):
+        guard
+          let project = hierarchyClient.snapshot().projects.first(where: { $0.id == state.projectID }),
+          let pending = PendingWorkspaceSourceRemoval(
+            worktreeID: worktreeID, in: project, tabIsDirty: hierarchyClient.tabIsDirty)
+        else { return .none }
+        state.pendingSourceRemoval = pending
+        return .none
+
+      case .workspaceSourceRemoveConfirmed:
+        guard let pending = state.pendingSourceRemoval else { return .none }
+        state.pendingSourceRemoval = nil
+        // `removeSource` drops the reference row and the default link only;
+        // the source checkout and existing groups stay as they are.
+        return .run { [client = workspaceClient] send in
+          do {
+            try await client.removeSource(pending.projectID, pending.sourceGitRoot)
+            await send(.workspaceSourcesChanged(error: nil))
+          } catch {
+            await send(.workspaceSourcesChanged(error: error.localizedDescription))
+          }
+        }
+
+      case .workspaceSourceRemoveCancelled:
+        state.pendingSourceRemoval = nil
+        return .none
+
+      case .workspaceAddSourceTapped(let path):
+        return .run { [client = workspaceClient, projectID = state.projectID] send in
+          do {
+            _ = try await client.addSource(projectID, WorkspaceSource(location: .local(path: path)))
+            await send(.workspaceSourcesChanged(error: nil))
+          } catch {
+            await send(.workspaceSourcesChanged(error: error.localizedDescription))
+          }
+        }
+
+      case .workspaceAddFolderTapped:
+        return .run { [picker = folderPickerClient] send in
+          guard let url = await picker.pick("Add Project") else { return }
+          await send(.workspaceAddSourceTapped(path: url.path))
+        }
+
+      case .workspaceSourcesChanged(let error):
+        state.lastWriteFailure = error
         return .none
       }
     }

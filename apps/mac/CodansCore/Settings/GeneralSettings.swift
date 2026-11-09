@@ -54,6 +54,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   public static let builtInGitViewerID: EditorID = "built-in"
   /// Missing and legacy null values resolve to the built-in diff window.
   public var defaultGitViewerID: EditorID?
+  /// The configured external Git Viewer, or `nil` when the built-in diff window is used.
+  public var externalGitViewerID: EditorID? {
+    guard let id = defaultGitViewerID, id != Self.builtInGitViewerID else { return nil }
+    return id
+  }
   /// Global default merge strategy used by the GitHub popover's Merge split-button when no
   /// per-Project `RepositorySettings.defaultMergeStrategy` is set. `nil` means "no global
   /// default" — the picker falls back to `.squash` for its initial value.
@@ -62,6 +67,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// per-Project override is set. `nil` means "no global default" — merging a PR presents
   /// the ask-each-time sheet.
   public var postMergeAction: MergedWorktreeAction?
+  /// Git Platform aliases from Settings › Git Platforms (ADR 0005). The resolver checks them
+  /// before any other step. Edit through `saveGitPlatformAlias` / `removeGitPlatformAlias` so the
+  /// remote host stays unique. Omitted from the file when empty.
+  public var gitPlatformAliases: [GitPlatformAlias]
 
   /// Sparkle release channel. Default `stable`. Drives `SPUUpdaterDelegate.allowedChannels(for:)`.
   /// The background-check cadence is a separate knob (`updateCheckInterval`) so flipping the
@@ -114,6 +123,12 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
   /// re-enable starts a fresh anonymous id.
   public var crashReportsEnabled: Bool
 
+  /// Whether the app detaches the terminal surfaces of panes that stay
+  /// hidden, on a timer and on memory pressure (see `surface-reclaim.md`).
+  /// Default `true`. Off keeps every surface attached; panes already
+  /// detached stay detached until shown.
+  public var reclaimHiddenSurfaces: Bool
+
   /// User-defined commands that are available across every Project — the
   /// global counterpart to `ProjectSettings.scripts`. Surfaced in the
   /// worktree-header Command menu, the Command Palette, and the
@@ -128,6 +143,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     defaultGitViewerID: EditorID? = nil,
     defaultMergeStrategy: MergeStrategy? = nil,
     postMergeAction: MergedWorktreeAction? = nil,
+    gitPlatformAliases: [GitPlatformAlias] = [],
     updateChannel: UpdateChannel = .stable,
     updateCheckInterval: UpdateCheckInterval = .oneDay,
     updatesAutomaticallyCheckForUpdates: Bool = true,
@@ -138,6 +154,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     agentsViewDisplayMode: AgentsViewDisplayMode = .normal,
     agentsViewAutoSort: Bool = true,
     crashReportsEnabled: Bool = true,
+    reclaimHiddenSurfaces: Bool = true,
     globalScripts: [ScriptDefinition] = []
   ) {
     self.appearance = appearance
@@ -145,6 +162,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.defaultGitViewerID = defaultGitViewerID ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = defaultMergeStrategy
     self.postMergeAction = postMergeAction
+    self.gitPlatformAliases = gitPlatformAliases
     self.updateChannel = updateChannel
     self.updateCheckInterval = updateCheckInterval
     self.updatesAutomaticallyCheckForUpdates = updatesAutomaticallyCheckForUpdates
@@ -155,13 +173,16 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     self.agentsViewDisplayMode = agentsViewDisplayMode
     self.agentsViewAutoSort = agentsViewAutoSort
     self.crashReportsEnabled = crashReportsEnabled
+    self.reclaimHiddenSurfaces = reclaimHiddenSurfaces
     self.globalScripts = globalScripts
   }
 
   public static let `default` = GeneralSettings()
 
-  private enum CodingKeys: String, CodingKey {
+  // Internal and `CaseIterable` so tests can check that `encode(to:)` writes every live key.
+  enum CodingKeys: String, CodingKey, CaseIterable {
     case appearance, defaultEditorID, defaultGitViewerID, defaultMergeStrategy, postMergeAction
+    case gitPlatformAliases
     case updateChannel, updateCheckInterval
     case updatesAutomaticallyCheckForUpdates, updatesAutomaticallyDownloadUpdates
     case quitConfirmation, quitAction
@@ -169,6 +190,7 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     case agentsViewDisplayMode
     case agentsViewAutoSort
     case crashReportsEnabled
+    case reclaimHiddenSurfaces
     case globalScripts
     /// Retired in favour of `quitConfirmation` + `quitAction`. Still decoded by
     /// `init(from:)` so legacy settings files migrate transparently on first launch.
@@ -176,6 +198,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     /// Retired earlier than `quitStrategy`. Decoded by `init(from:)` as the last
     /// migration step so very old files still find their way to the new defaults.
     case resumePanesOnLaunch
+
+    /// Keys that `init(from:)` reads only to migrate legacy files; `encode(to:)` never writes them.
+    static let retired: Set<CodingKeys> = [.quitStrategy, .resumePanesOnLaunch]
   }
 
   /// Legacy enum kept private to drive the `quitStrategy` migration branch. The user-facing
@@ -195,6 +220,11 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
       ?? Self.builtInGitViewerID
     self.defaultMergeStrategy = try container.decodeIfPresent(MergeStrategy.self, forKey: .defaultMergeStrategy)
     self.postMergeAction = try container.decodeIfPresent(MergedWorktreeAction.self, forKey: .postMergeAction)
+    // An entry that does not decode (for example a kind from a later version) is dropped,
+    // so the other aliases and the rest of the file still load.
+    self.gitPlatformAliases =
+      (try container.decodeIfPresent([LossyGitPlatformAlias].self, forKey: .gitPlatformAliases) ?? [])
+      .compactMap(\.alias)
     self.updateChannel =
       try container.decodeIfPresent(UpdateChannel.self, forKey: .updateChannel) ?? .stable
     // Tolerate legacy files (key absent) and hand-edited invalid values: in either case we
@@ -257,6 +287,10 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     // with fresh installs; the user can opt out from Settings → General.
     self.crashReportsEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .crashReportsEnabled) ?? true
+    // Older settings files predate this field. Default to on: reclaim
+    // shipped before the setting existed.
+    self.reclaimHiddenSurfaces =
+      try container.decodeIfPresent(Bool.self, forKey: .reclaimHiddenSurfaces) ?? true
     // Older settings files predate this field. Absent → empty list; the
     // worktree-header Command menu and palette simply show no global
     // commands until the user adds one in Settings → Global Commands.
@@ -275,6 +309,9 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encodeIfPresent(defaultGitViewerID, forKey: .defaultGitViewerID)
     try container.encodeIfPresent(defaultMergeStrategy, forKey: .defaultMergeStrategy)
     try container.encodeIfPresent(postMergeAction, forKey: .postMergeAction)
+    if !gitPlatformAliases.isEmpty {
+      try container.encode(gitPlatformAliases, forKey: .gitPlatformAliases)
+    }
     try container.encode(updateChannel, forKey: .updateChannel)
     try container.encode(updateCheckInterval, forKey: .updateCheckInterval)
     try container.encode(
@@ -285,11 +322,21 @@ public nonisolated struct GeneralSettings: Equatable, Codable, Sendable {
     try container.encode(quitAction, forKey: .quitAction)
     try container.encode(agentsViewAutoOpen, forKey: .agentsViewAutoOpen)
     try container.encode(agentsViewDisplayMode, forKey: .agentsViewDisplayMode)
+    try container.encode(agentsViewAutoSort, forKey: .agentsViewAutoSort)
     try container.encode(crashReportsEnabled, forKey: .crashReportsEnabled)
+    try container.encode(reclaimHiddenSurfaces, forKey: .reclaimHiddenSurfaces)
     // Omit-when-empty: keep `general` free of an empty `globalScripts: []`
     // array on installs that never define a global command.
     if !globalScripts.isEmpty {
       try container.encode(globalScripts, forKey: .globalScripts)
     }
+  }
+}
+
+private nonisolated struct LossyGitPlatformAlias: Decodable {
+  let alias: GitPlatformAlias?
+
+  init(from decoder: Decoder) throws {
+    alias = try? GitPlatformAlias(from: decoder)
   }
 }

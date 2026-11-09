@@ -50,11 +50,13 @@ final class HierarchyHandlers {
   /// for tests that exercise the catalog-side mutation in isolation.
   private let daemonKiller: @MainActor (PaneID) async -> Void
   /// Probe surface for `pane.info` / `pane.read`. Returns a typed
-  /// `PaneRuntimeProbe` view of the live `ZmxClient` for `paneID`, or
-  /// `nil` when no surface is bound (no live daemon to talk to). Kept
-  /// behind a protocol so tests can inject a fake without dragging
-  /// `GhosttyRuntime` into the test target.
+  /// `PaneRuntimeProbe` over the pane's daemon control socket, or `nil`
+  /// when no daemon runs for it. Kept behind a protocol so tests can inject
+  /// a fake without dragging `GhosttyRuntime` into the test target.
   let runtimeProbe: @MainActor (PaneID) -> PaneRuntimeProbe?
+  /// Whether a surface renders the pane, for `pane.describe`'s
+  /// `isAttached`; nil leaves the field out.
+  let paneIsAttached: @MainActor (PaneID) -> Bool?
   /// Persistent zmx-session catalog accessor. The `pane.close` handler
   /// drops the closed pane's row synchronously through the coordinator
   /// so the on-disk state reflects the kill before the RPC returns.
@@ -112,6 +114,7 @@ final class HierarchyHandlers {
     settingsProvider: @escaping @MainActor () -> Settings = { Settings() },
     daemonKiller: @escaping @MainActor (PaneID) async -> Void = { _ in },
     runtimeProbe: @escaping @MainActor (PaneID) -> PaneRuntimeProbe? = { _ in nil },
+    paneIsAttached: @escaping @MainActor (PaneID) -> Bool? = { _ in nil },
     sessionCoordinator: SessionCoordinator? = nil,
     callerPaneResolver: @escaping @MainActor (pid_t) -> PaneID? = { _ in nil },
     gitRootDiscovery: @escaping @MainActor (String) async -> String? = { _ in nil },
@@ -128,6 +131,7 @@ final class HierarchyHandlers {
     self.settingsProvider = settingsProvider
     self.daemonKiller = daemonKiller
     self.runtimeProbe = runtimeProbe
+    self.paneIsAttached = paneIsAttached
     self.sessionCoordinator = sessionCoordinator
     self.callerPaneResolver = callerPaneResolver
     self.gitRootDiscovery = gitRootDiscovery
@@ -173,7 +177,8 @@ final class HierarchyHandlers {
   /// containers), pane labels (`@label`), short target handles (`t<n>` /
   /// `p<n>`), and names — a project's name, a worktree's name or branch, a
   /// tab's title — scoped to the calling pane's containers when there is
-  /// one.
+  /// one. A Project request may carry a `hostID` that limits the result to
+  /// one Host (ADR 0006).
   public func resolveAlias(_ params: JSONValue, peerPID: pid_t? = nil) async -> RouterOutcome {
     await Task.yield()
     let request: IPC.AliasResolveRequest
@@ -181,6 +186,12 @@ final class HierarchyHandlers {
       request = try params.decoded(as: IPC.AliasResolveRequest.self)
     } catch {
       return .failed(.invalidParams(message: "resolveAlias requires {kind, value}", path: nil))
+    }
+    if request.kind == .project, let rawHost = request.hostID {
+      switch hostFilter(rawHost) {
+      case .success(let host): return resolveProject(request, on: host, peerPID: peerPID)
+      case .failure(let error): return .failed(error)
+      }
     }
     if let uuid = UUID(uuidString: request.value) {
       return resolved(request.kind, uuid)
@@ -214,6 +225,58 @@ final class HierarchyHandlers {
       return resolved(.pane, id.raw)
     }
     return resolveByName(request, peerPID: peerPID)
+  }
+
+  /// Parses a `hostID` param: `0` or the id of a Host in the catalog.
+  private func hostFilter(_ raw: String) -> Result<IPC.HostSelector, IPCError> {
+    guard let host = IPC.HostSelector(raw) else {
+      return .failure(
+        .invalidParams(message: "invalid host \"\(raw)\"; pass a Host id or 0 for This Mac", path: ["hostID"]))
+    }
+    if case .host(let id) = host, manager.catalog.host(id: id) == nil {
+      return .failure(.notFound(kind: "host", id: raw))
+    }
+    return .success(host)
+  }
+
+  /// A Project alias resolved on one Host. An id or `current` must name a
+  /// Project on that Host, so a script that passes both learns of the
+  /// mismatch instead of acting on the wrong Project; a name matches only
+  /// that Host's Projects.
+  private func resolveProject(
+    _ request: IPC.AliasResolveRequest, on host: IPC.HostSelector, peerPID: pid_t?,
+  ) -> RouterOutcome {
+    let catalog = manager.catalog
+    let id: ProjectID
+    if let uuid = UUID(uuidString: request.value) {
+      id = ProjectID(raw: uuid)
+    } else if request.value == "current" || request.value == "." {
+      guard let current = callerPane(request, peerPID: peerPID).flatMap({ catalog.projectID(forPane: $0) })
+      else {
+        return .failed(.notFound(kind: "project", id: request.value))
+      }
+      id = current
+    } else {
+      return outcome(for: projectsMatchingName(request.value, on: host), request: request)
+    }
+    guard let project = catalog.projects.first(where: { $0.id == id }) else {
+      return .failed(.notFound(kind: "project", id: id.description))
+    }
+    guard host.matches(project) else {
+      return .failed(
+        .conflict(reason: "project \(id) host=\(IPC.HostSelector(project: project)) is not on host=\(host)"))
+    }
+    return resolved(.project, id.raw)
+  }
+
+  /// Projects whose name or folder name is `name` (case-insensitive), on
+  /// `host` when one is given.
+  private func projectsMatchingName(_ name: String, on host: IPC.HostSelector?) -> [Project] {
+    let needle = name.lowercased()
+    return manager.catalog.projects.filter { project in
+      (host?.matches(project) ?? true)
+        && (project.name.lowercased() == needle || project.canonicalName.lowercased() == needle)
+    }
   }
 
   private func resolved(_ kind: IPC.AliasResolveRequest.Kind, _ id: UUID) -> RouterOutcome {
@@ -273,9 +336,7 @@ final class HierarchyHandlers {
     var matches: [UUID] = []
     switch request.kind {
     case .project:
-      matches = catalog.projects
-        .filter { $0.name.lowercased() == needle || $0.canonicalName.lowercased() == needle }
-        .map(\.id.raw)
+      return outcome(for: projectsMatchingName(request.value, on: nil), request: request)
     case .worktree:
       // A path (absolute; the CLI resolves relative ones against its cwd
       // before calling) matches project-wide; names and branches stay
@@ -319,6 +380,18 @@ final class HierarchyHandlers {
     return outcome(for: matches, request: request)
   }
 
+  /// A Project name: one match resolves; none is not-found; several is a
+  /// conflict that lists each match with its Host, so the caller can pass
+  /// `--host` or the id (ADR 0006).
+  private func outcome(for matches: [Project], request: IPC.AliasResolveRequest) -> RouterOutcome {
+    guard matches.count > 1 else { return outcome(for: matches.map(\.id.raw), request: request) }
+    let listed = matches.map { "\($0.id) host=\(IPC.HostSelector(project: $0))" }.joined(separator: ", ")
+    return .failed(
+      .conflict(
+        reason:
+          "project \"\(request.value)\" matches \(matches.count) projects: \(listed); pass --host or an id"))
+  }
+
   /// One match resolves; none is not-found; several is a conflict the
   /// caller settles by passing an id.
   private func outcome(for matches: [UUID], request: IPC.AliasResolveRequest) -> RouterOutcome {
@@ -335,12 +408,14 @@ final class HierarchyHandlers {
     }
   }
 
-  /// Non-archived worktrees whose directory is `path` or contains it; when
-  /// one nests under another, only the deepest is returned.
+  /// Non-archived worktrees on This Mac whose directory is `path` or
+  /// contains it; when one nests under another, only the deepest is
+  /// returned. `path` is a local path, so Remote Projects never match
+  /// (ADR 0006).
   static func worktreesMatchingPath(_ path: String, in catalog: Catalog) -> [UUID] {
     let canonical = HierarchyManager.canonicalPath(path)
     var deepest: Worktree?
-    for project in catalog.projects {
+    for project in catalog.projects where project.isOnThisMac {
       for worktree in project.worktrees where !worktree.archived {
         let root = HierarchyManager.canonicalPath(worktree.path)
         guard canonical == root || canonical.hasPrefix(root + "/") else { continue }
@@ -408,6 +483,8 @@ final class HierarchyHandlers {
     public let id: ProjectID
     public let rootPath: String
     public let gitRoot: String?
+    /// Always This Mac: the CLI adds local directories only.
+    public let host: IPC.HostRef
   }
   /// `hierarchy.addProject` — the CLI's Add Project. Validates at the edge
   /// the way the sidebar's folder picker does implicitly: the directory
@@ -450,7 +527,7 @@ final class HierarchyHandlers {
     await reconcileWorktrees(id)
     do {
       return .unary(
-        try JSONValue.encoded(AddProjectResult(id: id, rootPath: canonical, gitRoot: gitRoot)))
+        try JSONValue.encoded(AddProjectResult(id: id, rootPath: canonical, gitRoot: gitRoot, host: .thisMac)))
     } catch {
       return .failed(.internal("encode addProject result: \(error)"))
     }
@@ -537,7 +614,8 @@ final class HierarchyHandlers {
     if project.isWorkspace {
       return .failed(
         .invalidParams(
-          message: "createWorktree is not available on a workspace; use `workspace add`",
+          message:
+            "createWorktree is not available on a workspace; create a group with `codans workspace group create`",
           path: nil
         ))
     }
@@ -578,15 +656,63 @@ final class HierarchyHandlers {
       resolvedPath = baseDirectory.appending(path: sanitized).path(percentEncoded: false)
     }
 
+    let registered: RegisteredWorktree
+    switch await registerWorktree(req, in: project, path: resolvedPath, settings: settings) {
+    case .success(let worktree): registered = worktree
+    case .failure(let failure): return failure.outcome
+    }
+    let launch = await launchCreateAgent(
+      agentProfile, projectID: req.projectID, worktreeID: registered.id, path: registered.path)
+    let launched: IPC.AgentLaunchResponse?
+    switch launch {
+    case .success(let response): launched = response
+    case .failure(let error): return .failed(error)
+    }
+    do {
+      return .unary(
+        try JSONValue.encoded(
+          CreateWorktreeResult(
+            id: registered.id, path: registered.path, created: registered.created, agent: launched)))
+    } catch {
+      return failure(for: error, fallbackKind: "project", fallbackID: req.projectID.description)
+    }
+  }
+
+  private struct RegisteredWorktree {
+    let id: WorktreeID
+    /// Canonical path of the row.
+    let path: String
+    let created: Bool
+  }
+
+  private struct RegistrationFailure: Error {
+    let outcome: RouterOutcome
+  }
+
+  /// `hierarchy.createWorktree`'s materialize + catalog write. A missing
+  /// worktree is put on disk first, under a creation lease held until the
+  /// row is written: a reconcile that runs while `git worktree add` streams
+  /// then does not append the new path at the list tail, and the row lands
+  /// at the top of the unpinned segment. The lease is released on every exit
+  /// of this function, before the caller launches an agent.
+  private func registerWorktree(
+    _ req: CreateWorktreeParams, in project: Project, path resolvedPath: String,
+    settings: Settings
+  ) async -> Result<RegisteredWorktree, RegistrationFailure> {
     var materializedPath = resolvedPath
     var created = false
     let alreadyRegistered = project.worktrees.contains {
       HierarchyManager.canonicalPath($0.path) == HierarchyManager.canonicalPath(resolvedPath)
     }
+    var creationLease: WorktreeCreationLease?
+    defer {
+      if let creationLease { manager.endWorktreeCreation(creationLease) }
+    }
     if let worktreeCreator, !project.isRemote, !alreadyRegistered,
       let gitRoot = project.gitRoot, let branch = req.branch, !branch.isEmpty,
       !FileManager.default.fileExists(atPath: resolvedPath)
     {
+      creationLease = manager.beginWorktreeCreation(in: req.projectID)
       let spec = await materializeSpec(
         req, branch: branch, gitRoot: gitRoot, path: resolvedPath,
         projectGit: settings.projects[project.id]?.git, worktree: settings.worktree)
@@ -594,9 +720,10 @@ final class HierarchyHandlers {
         materializedPath = try await worktreeCreator(spec).path(percentEncoded: false)
         created = true
       } catch let error as GitWorktreeError {
-        return .failed(Self.ipcError(for: error))
+        return .failure(RegistrationFailure(outcome: .failed(Self.ipcError(for: error))))
       } catch {
-        return .failed(.internal("git worktree add failed: \(error)"))
+        return .failure(
+          RegistrationFailure(outcome: .failed(.internal("git worktree add failed: \(error)"))))
       }
     }
     do {
@@ -605,24 +732,20 @@ final class HierarchyHandlers {
         name: req.name,
         path: materializedPath,
         branch: req.branch,
-        // A worktree this call just materialised may already have been
-        // adopted by a reconcile pulse racing the stream; return that row
-        // rather than failing against our own worktree.
+        // The creation lease keeps a reconcile pulse from adopting the
+        // worktree this call just materialised; if a row for the path
+        // exists anyway, return it rather than failing against our own
+        // worktree.
         reuseExisting: (req.reuseExisting ?? false) || created
       )
-      let canonical = HierarchyManager.canonicalPath(materializedPath)
-      let launch = await launchCreateAgent(
-        agentProfile, projectID: req.projectID, worktreeID: id, path: canonical)
-      let launched: IPC.AgentLaunchResponse?
-      switch launch {
-      case .success(let response): launched = response
-      case .failure(let error): return .failed(error)
-      }
-      return .unary(
-        try JSONValue.encoded(
-          CreateWorktreeResult(id: id, path: canonical, created: created, agent: launched)))
+      return .success(
+        RegisteredWorktree(
+          id: id, path: HierarchyManager.canonicalPath(materializedPath), created: created))
     } catch {
-      return failure(for: error, fallbackKind: "project", fallbackID: req.projectID.description)
+      return .failure(
+        RegistrationFailure(
+          outcome: failure(
+            for: error, fallbackKind: "project", fallbackID: req.projectID.description)))
     }
   }
 
@@ -908,17 +1031,21 @@ final class HierarchyHandlers {
     do { req = try params.decoded(as: RemoveWorktreeParams.self) } catch {
       return .failed(.invalidParams(message: "removeWorktree requires {id, projectID}", path: nil))
     }
-    // Workspace membership is edited through the workspace flow: a child row
-    // is a checkout the manifest still names, and the same folder listed
-    // under its source repository belongs to the workspace too.
+    // Workspace rows are edited through the workspace flow only: the
+    // manifest names every group and member row, and the same member folder
+    // listed under its source repository belongs to the workspace too.
     if let project = manager.catalog.projects.first(where: { $0.id == req.projectID }),
       let worktree = project.worktrees.first(where: { $0.id == req.id })
     {
-      if project.isWorkspace, worktree.path != project.rootPath {
+      if project.isWorkspace {
         return .failed(
-          .conflict(reason: "\(worktree.name) is a workspace repository; remove it from the workspace instead"))
+          .conflict(
+            reason: "\(worktree.name) is a row of workspace \(project.name); use `codans workspace drop` "
+              + "for a source project or `codans workspace group delete` for a group"))
       }
-      if !project.isWorkspace, let membership = manager.workspaceMembership(forPath: worktree.path) {
+      if !project.isWorkspace, project.isOnThisMac,
+        let membership = manager.workspaceMembership(forPath: worktree.path)
+      {
         return .failed(
           .conflict(
             reason:
@@ -1098,7 +1225,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "pane.info requires {paneID}", path: nil))
     }
     guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unprobeable(req.paneID))
     }
     let payload: ZmxInfoPayload
     do {
@@ -1115,6 +1242,14 @@ final class HierarchyHandlers {
     )
     return (try? JSONValue.encoded(response)).map(RouterOutcome.unary)
       ?? .failed(.internal("encode pane.info result"))
+  }
+
+  /// Why `pane.info` / `pane.read` have no probe: an unknown id is
+  /// `notFound`; a catalog pane with no running daemon is `PANE_NOT_LIVE`
+  /// (`pane.describe` reports it `isLive: false`).
+  private func unprobeable(_ paneID: PaneID) -> IPCError {
+    manager.catalog.pane(paneID) == nil
+      ? .notFound(kind: "pane", id: paneID.description) : .paneNotLive(paneID.description)
   }
 
   /// Handles `pane.read` — pull serialized terminal state from the
@@ -1134,7 +1269,7 @@ final class HierarchyHandlers {
       return .failed(.invalidParams(message: "tail must be a positive integer", path: ["tail"]))
     }
     guard let probe = runtimeProbe(req.paneID) else {
-      return .failed(.notFound(kind: "pane", id: req.paneID.description))
+      return .failed(unprobeable(req.paneID))
     }
     let format: ZmxHistoryFormat = req.raw ? .vt : .plain
     let dump: Data
@@ -1276,8 +1411,9 @@ final class HierarchyHandlers {
     // filtered listing never shifts handle assignment order.
     handleRegistry.sync(with: manager.catalog)
     let handles = handleRegistry.snapshot()
+    let hosts = manager.catalog.hosts
     return await Self.encodeOffMain("listProjects") {
-      try JSONValue.encoded(ListProjectsPayload(projects: filtered, handles: handles))
+      try JSONValue.encoded(ListProjectsPayload(projects: filtered, handles: handles, hosts: hosts))
     }
   }
 
@@ -1552,17 +1688,7 @@ final class HierarchyHandlers {
 // `nonisolated` on the conformance so `encodeOffMain` can call `encode(to:)`
 // from a detached Task without tripping `InferIsolatedConformances` —
 // the file otherwise infers `@MainActor` for every type defined in it.
-nonisolated struct ListProjectsPayload: Codable, Sendable {
-  let projects: [Project]
-  /// Short-handle map for the CLI's text renderer. Optional so the
-  /// payload keeps decoding fixtures and responses that predate handles.
-  let handles: IPC.TargetHandles?
-
-  init(projects: [Project], handles: IPC.TargetHandles? = nil) {
-    self.projects = projects
-    self.handles = handles
-  }
-}
+typealias ListProjectsPayload = IPC.ProjectListPayload
 nonisolated struct ListWorktreesPayload: Codable, Sendable { let worktrees: [Worktree] }
 nonisolated struct ListTabsPayload: Codable, Sendable { let tabs: [Tab] }
 nonisolated struct ListPanesPayload: Codable, Sendable { let panes: [Pane] }

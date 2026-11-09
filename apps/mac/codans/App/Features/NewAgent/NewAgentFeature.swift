@@ -52,7 +52,7 @@ struct NewAgentFeature {
   enum AddProjectKind: Equatable, CaseIterable {
     case openFolder
     case cloneRepository
-    case connectServer
+    case openRemoteProject
     case newWorkspace
   }
 
@@ -180,6 +180,9 @@ struct NewAgentFeature {
     case agentProfilesChanged([AgentProfile])
     case agentSelected(UUID)
     case promptChanged(String)
+    /// Picked files, and the prompt's caret or selection as UTF-16 offsets
+    /// (`nil` appends to the end).
+    case filesSelected([URL], selection: Range<Int>?)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -210,7 +213,7 @@ struct NewAgentFeature {
       switch action {
       case .onAppear:
         let catalog = hierarchyClient.snapshot()
-        state.projects = catalog.sorted(catalog.projects).map(ProjectOption.init)
+        state.projects = catalog.projects.map(ProjectOption.init)
         if let draft = state.restoring,
           state.projects.contains(where: { $0.id == draft.projectID })
         {
@@ -248,6 +251,12 @@ struct NewAgentFeature {
 
       case .promptChanged(let prompt):
         state.prompt = prompt
+        return .none
+
+      case .filesSelected(let urls, let selection):
+        if let result = ComposerPathInsertion.insert(urls, into: state.prompt, selection: selection) {
+          state.prompt = result.text
+        }
         return .none
 
       case .sendTapped:
@@ -417,7 +426,7 @@ struct NewAgentFeature {
       return .none
     }
     if remoteRef == nil && form.isRemote {
-      state.submitError = "Checking out an existing branch is not supported on a server project."
+      state.submitError = "Checking out an existing branch is not supported on a remote project."
       return .none
     }
     guard form.currentPendingCountForProject < 8 else {

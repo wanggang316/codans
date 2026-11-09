@@ -1,37 +1,43 @@
 import CodansCore
 import Foundation
 
-/// One row in the Settings window sidebar. The global cases are fixed-order; the
-/// Project-scoped cases carry the `ProjectID` they bind to and are surfaced under the
-/// sidebar's "Projects" DisclosureGroup.
+/// One row in the Settings window sidebar. The global cases are fixed-order; a
+/// `project` row carries the `ProjectID` it binds to and is listed under the
+/// sidebar's Project groups.
 public enum SettingsSection: Hashable, Sendable {
   case general
   case globalCommands
   case agents
   case workflows
-  case github
+  /// Git Platforms (GitHub, GitLab): CLI availability and shared Pull Request defaults.
+  /// Not the "Remote Hosts" pane, which lists machines.
+  case gitPlatforms
+  case hosts
   case worktree
   case terminal
   case notifications
+  /// The LAN gateway for paired iOS devices.
   case remoteAccess
   case developer
   case shortcuts
   case updates
   case about
 
-  // MARK: - Project-scoped sub-panes
+  /// One Project's settings on a single page: identity, editor, worktree,
+  /// Git Platform, environment, commands, and lifecycle scripts. Sections
+  /// render conditionally on `ProjectKind` inside `ProjectGeneralSettingsView`.
+  case project(ProjectID)
 
-  /// Project-universal settings: editor, git viewer (git-only), worktree
-  /// (git-only), GitHub (git-only), environment variables. Sections render
-  /// conditionally on `ProjectKind` inside `ProjectGeneralSettingsView`.
-  case projectGeneral(ProjectID)
-  /// User-defined custom commands (the inline command table).
-  case projectScripts(ProjectID)
-
-  /// Canonical iteration order for global sidebar rows.
-  public static let globals: [SettingsSection] = [
-    .general, .github, .worktree, .terminal, .agents, .workflows, .notifications, .remoteAccess, .developer,
-    .globalCommands, .shortcuts, .updates, .about,
+  /// Global sidebar rows in display order, split into untitled groups: app
+  /// preferences, agent tooling, then remote machines. The sidebar separates
+  /// the groups with space only.
+  public static let globalGroups: [[SettingsSection]] = [
+    [
+      .general, .gitPlatforms, .worktree, .terminal, .notifications, .globalCommands, .shortcuts,
+      .updates, .about,
+    ],
+    [.agents, .developer, .workflows],
+    [.hosts, .remoteAccess],
   ]
 
   /// Display name for global sidebar rows. Project-scoped cases return `nil` because
@@ -43,16 +49,17 @@ public enum SettingsSection: Hashable, Sendable {
     case .globalCommands: return "Global Commands"
     case .agents: return "Agents"
     case .workflows: return "Workflows"
-    case .github: return "GitHub"
+    case .gitPlatforms: return "Git Platforms"
+    case .hosts: return "Remote Hosts"
+    case .remoteAccess: return "Remote Access"
     case .worktree: return "Worktrees"
     case .terminal: return "Terminal"
     case .notifications: return "Notifications"
-    case .remoteAccess: return "Remote Access"
-    case .developer: return "Developer"
+    case .developer: return "Integrations"
     case .shortcuts: return "Shortcuts"
     case .updates: return "Updates"
     case .about: return "About"
-    case .projectGeneral, .projectScripts:
+    case .project:
       return nil
     }
   }
@@ -60,35 +67,10 @@ public enum SettingsSection: Hashable, Sendable {
   /// Extracts the backing `ProjectID` from any Project-scoped case; `nil` for globals.
   public var projectID: ProjectID? {
     switch self {
-    case .projectGeneral(let pid),
-      .projectScripts(let pid):
+    case .project(let pid):
       return pid
     default:
       return nil
-    }
-  }
-}
-
-extension SettingsSection {
-  /// Sub-rows rendered under a Project. Same set for `gitRepo` and `dir` —
-  /// kind difference is encoded as Section-level conditional rendering inside
-  /// `ProjectGeneralSettingsView`. The `kind` parameter is preserved so callers
-  /// do not need a signature change if the policy ever splits again.
-  public static func subrows(for kind: ProjectKind, projectID: ProjectID) -> [SettingsSection] {
-    _ = kind
-    return [
-      .projectGeneral(projectID),
-      .projectScripts(projectID),
-    ]
-  }
-
-  /// Human-readable row title for a Project-scoped sub-pane. Used by the sidebar row
-  /// builder. Returns `nil` for global sections.
-  public var projectSubrowTitle: String? {
-    switch self {
-    case .projectGeneral: return "General"
-    case .projectScripts: return "Commands"
-    default: return nil
     }
   }
 }

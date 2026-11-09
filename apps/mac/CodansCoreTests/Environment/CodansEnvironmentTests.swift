@@ -30,7 +30,10 @@ struct CodansEnvironmentTests {
     #expect(BuiltinEnvVar.workspaceRoot.key == CodansEnvironment.Key.workspaceRoot.rawValue)
     #expect(
       BuiltinEnvVar.reservedKeys
-        == ["CODANS_WORKTREE_PATH", "CODANS_ROOT_PATH", "CODANS_WORKSPACE_ROOT"])
+        == [
+          "CODANS_WORKTREE_PATH", "CODANS_ROOT_PATH", "CODANS_WORKSPACE_ROOT", "CODANS_WORKSPACE_GROUP",
+          "CODANS_WORKSPACE_GROUP_DIR",
+        ])
     #expect(TermProgramEnv.programKey == CodansEnvironment.Key.termProgram.rawValue)
     #expect(TermProgramEnv.versionKey == CodansEnvironment.Key.termProgramVersion.rawValue)
     #expect(CLIBundleLocator.EnvKey.binary == CodansEnvironment.Key.cliBinary.rawValue)

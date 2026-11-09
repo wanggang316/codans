@@ -95,10 +95,40 @@ public nonisolated enum AppDirectories {
     return userDirectory(home: home).appendingPathComponent("workflows", isDirectory: true)
   }
 
-  /// `~/Library/Caches/<name>` — the zmx `ZMX_DIR` (per-pane daemon control
-  /// sockets, `snapshots/`, and `logs/`). Falls back to `~/Library/Caches`
-  /// when the system cache directory can't be resolved, matching the prior
-  /// inline logic in `PaneDaemonBringup` / `ZmxControlClient`.
+  /// `~/.codans[-dev]/run` — the zmx `ZMX_DIR`: per-pane daemon control
+  /// sockets, `snapshots/`, and zmx's `logs/`. A daemon's socket is the only
+  /// way back to a pane's shell, so it lives under the channel root, which
+  /// nothing treats as disposable. Earlier builds kept it in
+  /// `~/Library/Caches/<name>`, and cache cleaners delete that directory as
+  /// a whole: every daemon kept running, unreachable, and the next
+  /// `zmx attach` created a fresh session in its place, so the pane's shell
+  /// and agent were gone. `SessionReaper.migrateLegacySocketDirectory` moves
+  /// the sockets of daemons that survived there into this directory.
+  ///
+  /// `$CODANS_RUNTIME_DIR` relocates it. When only `$CODANS_CACHE_DIR` is
+  /// set, the runtime root is `<cache>/run`, so an isolated instance that
+  /// predates this directory keeps its daemons private without a new
+  /// variable. Paths stay short: `<root>/<pane UUID>` must fit AF_UNIX's
+  /// 104-byte `sun_path`.
+  public static func runtimeDirectory(
+    home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+    override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.runtimeDirectory.rawValue],
+    cacheOverride: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.cacheDirectory.rawValue]
+  ) -> URL {
+    if let override, !override.isEmpty {
+      return URL(fileURLWithPath: override, isDirectory: true)
+    }
+    if let cacheOverride, !cacheOverride.isEmpty {
+      return URL(fileURLWithPath: cacheOverride, isDirectory: true)
+        .appendingPathComponent("run", isDirectory: true)
+    }
+    return channelDirectory(home: home).appendingPathComponent("run", isDirectory: true)
+  }
+
+  /// `~/Library/Caches/<name>` — refetchable data (`github-snapshots.json`).
+  /// Also the `ZMX_DIR` of earlier builds, which is why the launch-time
+  /// reaper still reads it (see `runtimeDirectory`). Falls back to
+  /// `~/Library/Caches` when the system cache directory can't be resolved.
   public static func cacheDirectory(
     fileManager: FileManager = .default,
     override: String? = ProcessInfo.processInfo.environment[CodansEnvironment.Key.cacheDirectory.rawValue]

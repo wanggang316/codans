@@ -32,4 +32,28 @@ public struct ShortcutOverrideStore: Equatable, Sendable, Codable {
   }
 
   public static let empty = ShortcutOverrideStore()
+
+  /// Raw values of commands that no longer exist. Their overrides are
+  /// dropped on decode so the rest of the file still loads; any other
+  /// unknown key is a decoding error.
+  static let retiredCommandIDs: Set<String> = ["renameActiveTab", "changeActiveTabColor"]
+
+  private enum CodingKeys: String, CodingKey {
+    case version, overrides
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.version = try container.decode(Int.self, forKey: .version)
+    let raw = try container.decode([String: ShortcutBinding].self, forKey: .overrides)
+    var overrides: [CommandID: ShortcutBinding] = [:]
+    for (key, binding) in raw where !Self.retiredCommandIDs.contains(key) {
+      guard let id = CommandID(rawValue: key) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .overrides, in: container, debugDescription: "Unknown command \(key)")
+      }
+      overrides[id] = binding
+    }
+    self.overrides = overrides
+  }
 }

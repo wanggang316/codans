@@ -89,6 +89,18 @@ struct RestoredAgentSeedSelectionTests {
     #expect(seeds.isEmpty)
   }
 
+  /// A snapshot written before `finished` was renamed restores as `done`.
+  @Test
+  func legacyFinishedStateRawRestoresAsDone() {
+    let pane = PaneID()
+    let seeds = AppState.selectAgentSeeds(
+      restored: [pane: Self.record(pane, state: "finished")],
+      isDaemonAlive: { _ in true }
+    )
+
+    #expect(seeds.map(\.state) == [.done])
+  }
+
   /// An unknown `stateRaw` from a future build is dropped, not crashed on.
   @Test
   func unknownStateRawIsSkipped() {
@@ -165,5 +177,19 @@ struct RestoredAgentSeedSelectionTests {
     // Only the pane absent from the sweep map hits the probe.
     #expect(probedPanes == [unseen])
     #expect(seeds.count == 2)
+  }
+
+  /// The saved agent titles reach the seed, so the row shows them dimmed
+  /// after a restart (ADR 0009).
+  @Test
+  func seedCarriesTheSavedTitles() {
+    let pane = PaneID()
+    let record = PersistedAgentRecord(
+      paneID: pane, kindRaw: "claude-code", stateRaw: "idle", pid: 0,
+      capturedAt: Date(timeIntervalSince1970: 0),
+      programStatusTitle: "Fix the login flow", terminalTitle: "✳ Claude task")
+    let seeds = AppState.selectAgentSeeds(restored: [pane: record], isDaemonAlive: { _ in true })
+    #expect(seeds.first?.programStatusTitle == "Fix the login flow")
+    #expect(seeds.first?.terminalTitle == "✳ Claude task")
   }
 }

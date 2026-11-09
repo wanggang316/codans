@@ -23,7 +23,8 @@ enum CommandPaletteItems {
     catalog: Catalog,
     editorDescriptors: [EditorDescriptor] = [],
     focusedPaneID: PaneID? = nil,
-    paneFocusPrecise: Bool = false
+    paneFocusPrecise: Bool = false,
+    gitPlatform: GitPlatformKind? = nil
   ) -> [CommandPaletteItem] {
     var items = appItems()
     items.append(contentsOf: cancelWorkflowItems())
@@ -40,11 +41,8 @@ enum CommandPaletteItems {
           worktreeName: worktree.name, isPinned: worktree.isPinned, project: project))
       items.append(
         contentsOf: worktreeLifecycleItems(
-          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace))
+          worktreeName: worktree.name, isWorkspaceRow: project.isWorkspace, gitPlatform: gitPlatform))
       items.append(contentsOf: editorItems(worktreeName: worktree.name, descriptors: editorDescriptors))
-      // Tab commands act on the current Worktree's active tab, so they're
-      // gated on the Worktree selection rather than on precise pane focus.
-      items.append(contentsOf: tabCommandItems(worktreeName: worktree.name))
       // Surface user-defined `ProjectSettings.scripts` for the active
       // Project. Reads through the SettingsWriter dependency so the palette
       // tracks the live `settings.json` snapshot — switching to a different
@@ -64,7 +62,7 @@ enum CommandPaletteItems {
         )
         items.append(handOffItem(worktreeName: worktree.name))
         // Workflows are scoped to a local worktree (the run directory lives
-        // under it), so a Server project offers none.
+        // under it), so a Remote Project offers none.
         if !project.isRemote {
           items.append(
             contentsOf: workflowItems(
@@ -101,8 +99,15 @@ enum CommandPaletteItems {
     catalog: Catalog
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = []
-    for project in catalog.projects {
-      for worktree in project.worktrees
+    for (projectIndex, project) in catalog.sidebarOrderedProjects.enumerated() {
+      let authority = project.remoteHost?.displayAuthority
+      // Rows the sidebar does not list (members of a collapsed workspace
+      // group) sort after the listed ones, in catalog order.
+      let rowIDs = project.sidebarRowWorktreeIDs
+      let listed = rowIDs.compactMap { id in project.worktrees.first { $0.id == id } }
+      let listedIDs = Set(rowIDs)
+      let unlisted = project.worktrees.filter { !listedIDs.contains($0.id) }
+      for (worktreeIndex, worktree) in (listed + unlisted).enumerated()
       where worktree.id != selection.worktreeID && !worktree.archived {
         items.append(
           CommandPaletteItem(
@@ -114,7 +119,13 @@ enum CommandPaletteItems {
             // it still matches without the decorative "Switch to Worktree:"
             // prefix that otherwise pollutes fuzzy matching.
             searchText: "\(project.name) \(worktree.name)",
+            // The Project name as its own term scores the same for every
+            // worktree of the Project, so a Project-name query ties them and
+            // the sidebar-order tie-break keeps them grouped.
+            searchTerms: [project.name] + (authority.map { [$0] } ?? []),
             icon: "arrow.triangle.branch",
+            remoteAuthority: authority,
+            sidebarOrder: .init(project: projectIndex, worktree: worktreeIndex),
             kind: .selectWorktree(project.id, worktree.id)
           )
         )
@@ -336,14 +347,15 @@ enum CommandPaletteItems {
   /// repo operations the workspace flow owns instead.
   private static func worktreeLifecycleItems(
     worktreeName: String,
-    isWorkspaceRow: Bool
+    isWorkspaceRow: Bool,
+    gitPlatform: GitPlatformKind?
   ) -> [CommandPaletteItem] {
     var items: [CommandPaletteItem] = [
       CommandPaletteItem(
         id: "worktree.open-pr",
-        title: "Open PR on GitHub",
+        title: GitPlatformLabels.openPullRequest(gitPlatform),
         subtitle: worktreeName,
-        searchText: "worktree github pull request pr",
+        searchText: "worktree github gitlab pull request pr merge request mr",
         icon: "arrow.up.right.square",
         commandID: .openCurrentPR,
         kind: .openCurrentPR
@@ -353,11 +365,11 @@ enum CommandPaletteItems {
       items.append(
         CommandPaletteItem(
           id: "worktree.open-project-on-github",
-          title: "Open Project on GitHub",
-          searchText: "worktree project github repository",
+          title: GitPlatformLabels.openProject(gitPlatform),
+          searchText: "worktree project github gitlab repository",
           icon: "arrow.up.right.square",
           commandID: .openProjectOnGitHub,
-          kind: .openCurrentProjectOnGitHub
+          kind: .openCurrentProjectOnGitPlatform
         ))
     }
     items.append(contentsOf: [
@@ -458,32 +470,6 @@ enum CommandPaletteItems {
         kind: .removeCurrentProject
       ))
     return items
-  }
-
-  /// Tab-scoped commands that act on the current Worktree's active tab.
-  /// Gated on the Worktree selection (not pane focus) because each routes
-  /// through a `…ForCurrentWorktree` action that resolves the active tab.
-  private static func tabCommandItems(worktreeName: String) -> [CommandPaletteItem] {
-    [
-      CommandPaletteItem(
-        id: "tab.rename",
-        title: "Rename Tab…",
-        subtitle: worktreeName,
-        searchText: "tab rename",
-        icon: "pencil",
-        commandID: .renameActiveTab,
-        kind: .renameCurrentTab
-      ),
-      CommandPaletteItem(
-        id: "tab.change-color",
-        title: "Change Tab Color…",
-        subtitle: worktreeName,
-        searchText: "tab color change",
-        icon: "paintpalette",
-        commandID: .changeActiveTabColor,
-        kind: .changeCurrentTabColor
-      ),
-    ]
   }
 
   private static func editorItems(

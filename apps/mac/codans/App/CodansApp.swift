@@ -25,11 +25,11 @@ struct CodansApp: App {
       $0.continuousClock = ContinuousClock()
       $0.suspendingClock = SuspendingClock()
       $0.uuid = .init { UUID() }
-      // GitHubClient + GitServiceClient have no engine/state dependency, so
+      // GitPlatformClient + GitServiceClient have no engine/state dependency, so
       // wire them here too — both are touched by background tasks (PR
       // batch fetch, sidebar status monitor) that the running host app spins
       // up before `bringUp()` reaches its own `prepareDependencies` block.
-      $0.gitHub = .live()
+      $0.gitPlatform = .live()
       $0.gitService = .live()
     }
 
@@ -518,6 +518,9 @@ final class AppState {
   /// Mirrors `notificationStore.unreadCount` onto the macOS Dock tile badge
   /// via `withObservationTracking` re-registration.
   @ObservationIgnored private var dockBadgerTask: Task<Void, Never>?
+  /// Refetches Pull Requests when the Git Platform aliases change, so a unit with no Git
+  /// Platform (which the poll skips) resolves again at once.
+  @ObservationIgnored private var gitPlatformAliasesTask: Task<Void, Never>?
   /// Re-marks unread entries as read whenever the user focuses the
   /// pane they belong to. Observes catalog focus state via Observation
   /// re-registration; held so shutdown can cancel cleanly.
@@ -642,6 +645,8 @@ final class AppState {
   /// the catalog-sync task lives inside `bringUp`.
   let worktreeWorkingTreeWatcher: WorktreeWorkingTreeWatcher
   private var worktreeWorkingTreeWatcherSyncTask: Task<Void, Never>?
+  let remoteRefsWatcher: RemoteRefsWatcher
+  private var remoteRefsWatcherSyncTask: Task<Void, Never>?
 
   private var socketServer: SocketServer?
   /// LAN gateway for the iOS companion; nil until IPC bring-up (and under
@@ -658,16 +663,20 @@ final class AppState {
     // `~/.codans[-dev]/{config,state}` and sweep crash-orphaned temp files. Skipped
     // as an XCTest host so a test run never relocates the developer's data.
     let environment = ProcessInfo.processInfo.environment
-    if environment["XCTestBundlePath"] == nil, environment["XCTestConfigurationFilePath"] == nil {
+    let isTestHost =
+      environment["XCTestBundlePath"] != nil || environment["XCTestConfigurationFilePath"] != nil
+    if !isTestHost {
       PersistenceLaunch.prepare(environment: environment)
     }
 
-    let catalogStore = CatalogStore()
+    // The XCTest host must not load the channel's catalog: loading migrates
+    // and writes it, and other builds of the channel share that file.
+    let catalogStore = isTestHost ? CatalogStore.detached() : CatalogStore()
     let runtime = GhosttyBackedHierarchyRuntime()
     // An unreadable catalog is either backed up (and reads as empty) or
     // leaves the store with saving disabled, so `.empty` here can never
     // overwrite the user's project list.
-    let catalog = (try? catalogStore.load()) ?? .empty
+    let catalog = isTestHost ? .empty : ((try? catalogStore.load()) ?? .empty)
 
     let manager = HierarchyManager(
       catalog: catalog,
@@ -686,12 +695,15 @@ final class AppState {
     manager.onProjectRemoved = { [weak settingsStore] projectID in
       settingsStore?.removeProjectSettings(projectID)
     }
-    self.shortcutsStore = ShortcutsStore()
+    let shortcutsStore = ShortcutsStore()
+    self.shortcutsStore = shortcutsStore
+    DiffWindowManager.shared.shortcutsStore = shortcutsStore
     self.notificationStore = NotificationStore()
     self.worktreeStatusMonitor = .live()
     self.worktreeLocalDiffMonitor = .live()
     self.worktreeHeadWatcher = WorktreeHeadWatcher()
     self.worktreeWorkingTreeWatcher = WorktreeWorkingTreeWatcher()
+    self.remoteRefsWatcher = RemoteRefsWatcher()
   }
 
   /// Idempotent: subsequent calls while `store` is already set are no-ops.
@@ -720,6 +732,8 @@ final class AppState {
     {
       engine.reclaimPolicy = policy
     }
+    engine.startMemoryPressureMonitoring()
+    engine.startWorktreeSelectionTracking()
     hierarchyRuntime.attach(engine: engine)
     profiler.mark("ghostty+engine")
     bootstrapSessionStack(ghostty: ghostty, engine: engine, profiler: profiler)
@@ -727,19 +741,22 @@ final class AppState {
     // SettingsStore loads itself (and migrates legacy formats) during `init(fileURL:)`.
     let manager = hierarchyManager
     let settings = settingsStore
+    engine.isReclaimEnabled = { [weak settings] in
+      settings?.settings.general.reclaimHiddenSurfaces ?? true
+    }
 
     // Build the editor + hierarchy clients once so the reducer stack AND the IPC
     // handlers share the exact same live instances — avoids two parallel
     // `LiveEditorService`s with divergent settings captures.
     let editor = EditorClient.live(settings: settings)
-    // Server-project transport seam for the worktree-management surface:
+    // Remote Project transport seam for the worktree-management surface:
     // paths owned by a remote project route their plain-git operations
     // (listing, branch queries, removal, prune, status) over SSH. Shared by
     // the HierarchyClient (reconcile + removal) and the root store (create
     // sheet option loading) so both sides agree on the transport.
     let worktreeClient = GitWorktreeClient.makeLive(
-      remoteHostResolver: { [weak manager] path in
-        await MainActor.run { manager?.remoteHost(forPath: path) }
+      remoteHostResolver: { [weak manager] url in
+        await MainActor.run { manager?.remoteHost(forGitURL: url) }
       }
     )
     let hierarchy = HierarchyClient.live(
@@ -750,8 +767,14 @@ final class AppState {
     )
     self.editorClient = editor
     self.hierarchyClient = hierarchy
+    // Wired on the manager, not the client, so the IPC `hierarchy.createWorktree`
+    // path triggers it too. While a creation lease held, reconcile skipped new
+    // paths; this pass picks up any worktree made outside the app meanwhile.
+    manager.onCreationLeasesReleased = { projectID in
+      Task { await hierarchy.reconcileDiscoveredWorktrees(projectID) }
+    }
 
-    // Server-project git transport: a GitService whose invocations route over
+    // Remote Project git transport: a GitService whose invocations route over
     // SSH whenever the repository path belongs to a remote project (resolved
     // live against the manager's catalog). Installed on the root store (below)
     // and rebound into the two sidebar monitors, so the `+N −M` chip, dirty
@@ -761,7 +784,7 @@ final class AppState {
     // be re-prepared, and no view-side reader needs the remote route.
     let routedGitClient = GitServiceClient.live(
       service: Git.makeService(remoteHostResolver: { [weak manager] url in
-        await MainActor.run { manager?.remoteHost(forPath: url.path) }
+        await MainActor.run { manager?.remoteHost(forGitURL: url) }
       })
     )
     worktreeStatusMonitor.rebindFetch(routedGitClient.status)
@@ -788,12 +811,15 @@ final class AppState {
         guard let registry else { return [] }
         let now = Date()
         return registry.entries.map { paneID, entry in
-          PersistedAgentRecord(
+          let titles = registry.snapshotTitles(for: paneID)
+          return PersistedAgentRecord(
             paneID: paneID,
             kindRaw: entry.kind.rawValue,
             stateRaw: entry.state.rawValue,
             pid: engine?.foregroundProcessGroupID(for: paneID) ?? 0,
-            capturedAt: now
+            capturedAt: now,
+            programStatusTitle: titles.programStatusTitle,
+            terminalTitle: titles.terminalTitle
           )
         }
       }
@@ -854,6 +880,16 @@ final class AppState {
         // already exists by this point (built earlier in `bringUp`).
         self.openSettingsWindowAction?()
         self.settingsWindowStore?.send(.selectionChanged(section))
+      },
+      openProjectCommands: { [weak self] projectID in
+        guard let self else { return }
+        self.openSettingsWindowAction?()
+        self.settingsWindowStore?.send(.projectCommandsRequested(projectID))
+      },
+      editHost: { [weak self] hostID in
+        guard let self else { return }
+        self.openSettingsWindowAction?()
+        self.settingsWindowStore?.send(.editHostRequested(hostID))
       }
     )
     // Handoff transition core, shared by the `handoff.*` IPC handler and the
@@ -867,7 +903,9 @@ final class AppState {
     // identically. Local-only: it never routes through the SSH seam.
     let workspaceClient = WorkspaceClient.live(
       hierarchy: hierarchy, gitWorktreeClient: worktreeClient, gitCLI: GitWorktreeCLI(),
-      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate })
+      fetchRemoteOnCreate: { [settings] in settings.settings.worktree.fetchRemoteOnCreate },
+      settings: { [settings] in settings.settings },
+      repositoriesAdded: { [weak self] projectID in self?.store?.send(.projectAdded(projectID)) })
     let workflowEngine = makeWorkflowEngine(
       hierarchy: manager, hierarchyClient: hierarchy, settingsStore: settings, engine: engine)
     self.workflowEngine = workflowEngine
@@ -896,7 +934,7 @@ final class AppState {
       $0.workflowClient = .live(engine: workflowEngine)
       $0.terminalClient = .live(engine: engine)
       // SSH-routing git clients (see construction above) so every reducer-side
-      // git consumer transparently reaches Server-project repositories.
+      // git consumer transparently reaches Remote Project repositories.
       $0.gitService = routedGitClient
       $0.gitWorktreeClient = worktreeClient
       // Without these overrides, `EditorClient.liveValue` and
@@ -906,6 +944,7 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.settingsWindowPresenter = presenter
+      $0[GitPlatformAliasesClient.self] = .live(settings: settings)
       // Project Management: reconciler captures the live HierarchyClient so
       // `.reconcileDiscoveredWorktrees` flows through the real manager
       // binding. Default `now` is `Date.init`; tests override with a
@@ -913,6 +952,7 @@ final class AppState {
       $0.projectReconciler = ProjectReconciler(client: hierarchy)
       $0.worktreeHeadWatcher = self.worktreeHeadWatcher
       $0.worktreeWorkingTreeWatcher = self.worktreeWorkingTreeWatcher
+      $0.remoteRefsWatcher = self.remoteRefsWatcher
       $0.worktreeLocalDiffMonitor = self.worktreeLocalDiffMonitor
       // Built-in TCA dependencies (`\.date`, `\.continuousClock`, `\.uuid`) are
       // always swapped to `unimplemented` under XCTest regardless of any
@@ -927,9 +967,15 @@ final class AppState {
       $0.uuid = .init { UUID() }
     }
     profiler.mark("store")
+    self.gitPlatformAliasesTask = Task { @MainActor [weak self, settings] in
+      await Self.observeGitPlatformAliases(settings: settings) {
+        self?.store?.send(.gitPlatform(.refreshAllRequested))
+      }
+    }
 
     startHeadWatcherSync()
     startWorkingTreeWatcherSync()
+    startRemoteRefsWatcherSync()
 
     self.settingsWindowStore = Store(initialState: SettingsWindowFeature.State()) {
       SettingsWindowFeature()
@@ -937,6 +983,9 @@ final class AppState {
       $0.editorClient = editor
       $0.settingsWriter = .live(settings)
       $0.hierarchyClient = hierarchy
+      // The Workspace pane adds and removes sources through the same client
+      // as the sidebar; it has no live default.
+      $0.workspaceClient = workspaceClient
       $0[GhosttyTerminalSettingsClient.self] = .appLive()
     }
 
@@ -952,6 +1001,12 @@ final class AppState {
     )
 
     profiler.mark("finish")
+
+    // Deferred one turn so the alert appears over the main window instead
+    // of blocking its first frame.
+    if let issue = catalogStore.loadIssue {
+      Task { @MainActor in CatalogLoadIssueAlert.present(issue) }
+    }
   }
 
   private func startNotificationObservers(
@@ -997,6 +1052,10 @@ final class AppState {
       settingsReader: settingsReader,
       catalogSnapshot: { manager.catalog },
       lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) },
+      isPaneFocused: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true },
+      hasObservedAttention: { [weak self] paneID in
+        self?.agentStateStore?.hasObservedAttention(paneID) == true
+      },
       onProjectActivity: { [weak manager] projectID in
         manager?.bumpProjectActivity(projectID)
       }
@@ -1049,8 +1108,16 @@ final class AppState {
     }
     self.didBecomeActiveObserverToken = NotificationCenter.default
       .publisher(for: NSApplication.didBecomeActiveNotification)
-      .sink { [weak coordinator] _ in
-        Task { @MainActor [weak coordinator] in
+      .sink { [weak self, weak coordinator, weak manager] _ in
+        Task { @MainActor [weak self, weak coordinator, weak manager] in
+          // Coming back to the app with an agent pane focused is a look at
+          // it, even though no focus change fires.
+          if let manager,
+            let paneID = Self.currentlyFocusedPane(
+              catalog: manager.catalog, lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) })
+          {
+            self?.agentStateStore?.markObserved(paneID)
+          }
           await coordinator?.refreshAuthorizationStatus()
         }
       }
@@ -1108,27 +1175,25 @@ final class AppState {
         HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings)
       },
       settingsProvider: { settingsStore.settings },
-      daemonKiller: { paneID in
+      daemonKiller: { [weak terminalEngine] paneID in
         // Killing a pane's daemon is an out-of-band control `.kill`,
         // addressable by PaneID alone, so it works whether or not a surface
         // is live this session (the live byte stream runs through the
         // in-surface `zmx attach` client, not a held handle). The daemon
         // removes its own socket on shutdown, so no manual unlink is needed.
+        // A detached pane's watcher stops first: this kill is not a daemon
+        // that exited on its own.
+        terminalEngine?.stopWatchingDetachedPane(paneID)
         ZmxControlClient.kill(for: paneID)
       },
       runtimeProbe: { [weak terminalEngine] paneID in
         // `pane.info` / `pane.read` probe the daemon out-of-band via its
-        // control socket. Gate on a live surface (or an idle-reclaimed one,
-        // whose daemon still runs) so we don't hand back a probe for a pane
-        // whose daemon isn't running this session.
-        guard
-          terminalEngine?.ghosttyRuntime?.surface(for: paneID) != nil
-            || terminalEngine?.isReclaimed(paneID) == true
-        else {
-          return nil
-        }
+        // control socket, with or without a surface. Gate on a running
+        // daemon so a stopped pane reports `PANE_NOT_LIVE`.
+        guard terminalEngine?.terminalState(for: paneID).isLive == true else { return nil }
         return ZmxControlProbe(paneID: paneID)
       },
+      paneIsAttached: { [weak terminalEngine] paneID in terminalEngine?.terminalState(for: paneID).isAttached },
       sessionCoordinator: sessionCoordinator,
       callerPaneResolver: { [weak terminalEngine] callerPID in
         // Ground-truth caller attribution: match the connecting process's
@@ -1149,10 +1214,12 @@ final class AppState {
       gitRootDiscovery: { path in
         try? await GitWorktreeCLI().discoverGitRoot(candidatePath: path)
       },
-      reconcileWorktrees: { projectID in
+      reconcileWorktrees: { [weak self] projectID in
         // Same follow-up the sidebar's Add Project triggers: populate the
-        // worktree list from `git worktree list` and settle the load state.
+        // worktree list from `git worktree list` and settle the load state,
+        // then fetch its Pull Requests without waiting for selection.
         await hierarchyClient.reconcileDiscoveredWorktrees(projectID)
+        self?.store?.send(.projectAdded(projectID))
       },
       worktreeCreator: { spec in
         // Drive the sheet's streaming pipeline to completion; progress lines
@@ -1174,6 +1241,53 @@ final class AppState {
       },
       agentLauncher: { spec in
         try await hierarchyClient.launchAgent(spec)
+      }
+    )
+  }
+
+  /// The `terminal.*` handler: input delivery through the engine's
+  /// surfaces, plus attaching a surface to a detached pane first.
+  private func makeTerminalHandlers(
+    hierarchy: HierarchyManager,
+    terminalEngine: TerminalEngine,
+    settingsStore: SettingsStore
+  ) -> TerminalHandlers {
+    let inputSink: TerminalInputSink? =
+      terminalEngine.ghosttyRuntime == nil
+      ? nil
+      : TerminalInputSink(
+        engine: terminalEngine,
+        onPaneInput: { [weak hierarchy] paneID in
+          guard let manager = hierarchy,
+            let projectID = manager.catalog.projectID(forPane: paneID)
+          else { return }
+          manager.bumpProjectActivity(projectID)
+        }
+      )
+    return TerminalHandlers(
+      sink: inputSink,
+      catalog: { hierarchy.catalog },
+      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false },
+      attachDetached: { [weak hierarchy, weak terminalEngine] paneID in
+        // The same attach the UI does when the tab is shown: the daemon runs,
+        // so this starts no new process and does not focus. Only a detached
+        // pane: on a stopped one the attach would start a new shell. A pane
+        // that was never shown has no known size, so its surface starts at
+        // the placeholder size until its tab is shown.
+        guard let hierarchy, terminalEngine?.terminalState(for: paneID) == .detached,
+          let (projectID, worktreeID, tabID) = hierarchy.addressOf(paneID: paneID)
+        else { return false }
+        try? await hierarchy.ensurePaneSurface(
+          paneID, in: tabID, in: worktreeID, in: projectID,
+          env: HierarchyManager.resolvedEnv(for: projectID, in: settingsStore.settings))
+        return terminalEngine?.terminalState(for: paneID) == .attached
+      },
+      daemonScreen: { paneID in
+        // The same plain dump `pane.read` returns; short timeout because
+        // the caller polls it.
+        guard let data = try? await ZmxControlClient.history(for: paneID, format: .plain, timeout: .seconds(1))
+        else { return nil }
+        return String(bytes: data, encoding: .utf8)
       }
     )
   }
@@ -1221,23 +1335,8 @@ final class AppState {
       sessionCoordinator: sessionCoordinator,
       gitWorktreeClient: gitWorktreeClient
     )
-    let inputSink: TerminalInputSink? =
-      terminalEngine.ghosttyRuntime == nil
-      ? nil
-      : TerminalInputSink(
-        engine: terminalEngine,
-        onPaneInput: { [weak hierarchy] paneID in
-          guard let manager = hierarchy,
-            let projectID = manager.catalog.projectID(forPane: paneID)
-          else { return }
-          manager.bumpProjectActivity(projectID)
-        }
-      )
-    let terminalHandlers = TerminalHandlers(
-      sink: inputSink,
-      catalog: { hierarchy.catalog },
-      paneIsBusy: { [weak hierarchy] paneID in hierarchy?.paneIsBusy(paneID) ?? false }
-    )
+    let terminalHandlers = makeTerminalHandlers(
+      hierarchy: hierarchy, terminalEngine: terminalEngine, settingsStore: settingsStore)
     let editorHandlers = EditorHandlers(
       editor: editor,
       hierarchy: hierarchyClient,
@@ -1259,7 +1358,8 @@ final class AppState {
           catalog: hierarchy.catalog,
           lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) }
         )
-      }
+      },
+      paneTerminalState: { [weak terminalEngine] paneID in terminalEngine?.terminalState(for: paneID) ?? .stopped }
     )
     let router = MethodRouter(
       systemHandlers: systemHandlers,
@@ -1478,9 +1578,10 @@ final class AppState {
     }
     let focused = Self.currentlyFocusedPane(
       catalog: catalog, lastFocusedPane: { tabID in hierarchy.lastFocusedPane(in: tabID) })
+    let sourceIsFocused = focused == sourcePane || terminalEngine?.isSurfaceFocused(sourcePane) == true
     Task { @MainActor in
       _ = await coordinator.handle(
-        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: focused == sourcePane))
+        NotificationCoordinator.Candidate(entry: entry, sourceIsFocused: sourceIsFocused))
     }
   }
 
@@ -1862,6 +1963,11 @@ final class AppState {
     )
 
     let reaper = SessionReaper(coordinator: coordinator)
+    // Earlier builds kept `ZMX_DIR` under `~/Library/Caches`, which cache
+    // cleaners wipe wholesale. Adopt any daemon that survived there before
+    // the sweep probes and bring-up attaches (see
+    // `AppDirectories.runtimeDirectory`).
+    reaper.migrateLegacySocketDirectory(from: PaneDaemonBringup.legacySocketDirectory())
     let livePaneIDs = hierarchyManager.catalog.allPaneIDs()
     do {
       // Pass the current hierarchy's pane ids so the reaper can kill any
@@ -1954,6 +2060,7 @@ final class AppState {
     // final flush by mutating store state mid-write.
     notificationDetectorTask?.cancel()
     dockBadgerTask?.cancel()
+    gitPlatformAliasesTask?.cancel()
     focusReadMarkerTask?.cancel()
     orphanSweepTask?.cancel()
     agentStateFocusTask?.cancel()
@@ -1968,6 +2075,8 @@ final class AppState {
     worktreeHeadWatcher.stopAll()
     worktreeWorkingTreeWatcherSyncTask?.cancel()
     worktreeWorkingTreeWatcher.stopAll()
+    remoteRefsWatcherSyncTask?.cancel()
+    remoteRefsWatcher.stopAll()
 
     settingsStore.flush()
     shortcutsStore.flush()
@@ -1990,6 +2099,7 @@ final class AppState {
   /// - focused pane = `lastFocusedPane(activeTabID)`
   /// - expanded projects = `Project.isExpanded` filtered to true
   /// - row worktrees = each Project's `rowWorktree`, visible even collapsed
+  /// - row stand-ins = rows in a collapsed Workspace group → the group row
   static func focusState(
     from catalog: Catalog,
     lastFocusedPane: @MainActor (TabID) -> PaneID?
@@ -2006,7 +2116,8 @@ final class AppState {
       activeWorktreeID: activeWorktree?.id,
       activeProjectID: activeProject?.id,
       expandedProjectIDs: expanded,
-      rowWorktreeIDs: Set(catalog.projects.compactMap { $0.rowWorktree?.id })
+      rowWorktreeIDs: Set(catalog.projects.compactMap { $0.rowWorktree?.id }),
+      rowStandIns: catalog.workspaceRowStandIns
     )
   }
 
@@ -2016,6 +2127,35 @@ final class AppState {
   /// reads the current focused pane id and re-arms a tracker that fires
   /// on any catalog mutation that could change that id (selectedProjectID
   /// / selectedWorktreeID / selectedTabID / lastFocusedPane).
+  /// Calls `changed` each time the Git Platform aliases change. Other settings writes do
+  /// not call it.
+  @MainActor
+  private static func observeGitPlatformAliases(
+    settings: SettingsStore, changed: @escaping @MainActor () -> Void
+  ) async {
+    func aliases() -> [GitPlatformAlias] { settings.settings.general.gitPlatformAliases }
+    var last = aliases()
+    while !Task.isCancelled {
+      let stream = AsyncStream<Void> { continuation in
+        withObservationTracking {
+          _ = settings.settings.general
+        } onChange: {
+          Task { @MainActor [continuation] in
+            continuation.yield(())
+          }
+        }
+      }
+      for await _ in stream {
+        break
+      }
+      let next = aliases()
+      if next != last {
+        last = next
+        changed()
+      }
+    }
+  }
+
   @MainActor
   private static func observeFocusedPaneForRead(
     catalog: @escaping @MainActor () -> Catalog,
@@ -2074,7 +2214,7 @@ final class AppState {
     catalog: Catalog,
     lastFocusedPane: @MainActor (TabID) -> PaneID?
   ) -> PaneID? {
-    guard let activeProjectID = catalog.selectedProjectID,
+    guard let activeProjectID = catalog.displayedSelectedProjectID,
       let project = catalog.projects.first(where: { $0.id == activeProjectID }),
       let worktreeID = project.selectedWorktreeID,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
@@ -2150,20 +2290,28 @@ final class AppState {
     }
   }
 
-  /// `(worktreeID → path)` for every non-archived Worktree across all
-  /// Projects. Drives both `WorktreeHeadWatcher.setWorktrees(_:)` and
+  /// `(worktreeID → path)` for every non-archived Worktree of a Project on
+  /// This Mac. Server worktrees are not on the local file system: a local
+  /// folder at the same path belongs to another Project (ADR 0006), and the
+  /// sidebar polls Server rows instead. Drives both `WorktreeHeadWatcher.setWorktrees(_:)` and
   /// `WorktreeWorkingTreeWatcher.setWorktrees(_:)` (identical watched set);
   /// archived rows are filtered out because they are hidden in the sidebar
   /// and any on-disk change in their path is irrelevant until the user
   /// un-archives. Path is the canonical form already stored on the row.
-  fileprivate static func headWatcherPairs(from catalog: Catalog) -> [WorktreeID: String] {
+  static func headWatcherPairs(from catalog: Catalog) -> [WorktreeID: String] {
     var pairs: [WorktreeID: String] = [:]
-    for project in catalog.projects {
+    for project in catalog.projects where project.isOnThisMac {
       for worktree in project.worktrees where !worktree.archived {
         pairs[worktree.id] = worktree.path
       }
     }
     return pairs
+  }
+
+  /// Every non-archived Worktree on any Host: the rows the sidebar monitors
+  /// may hold a cached chip for.
+  static func liveWorktreeIDs(from catalog: Catalog) -> Set<WorktreeID> {
+    Set(catalog.projects.flatMap { $0.worktrees.filter { !$0.archived }.map(\.id) })
   }
 
   /// Starts the long-running mirror task that keeps the `WorktreeHeadWatcher`'s
@@ -2180,21 +2328,27 @@ final class AppState {
     let diffMonitor = worktreeLocalDiffMonitor
     worktreeHeadWatcherSyncTask = Task { @MainActor in
       var last: [WorktreeID: String] = [:]
+      var lastLive: Set<WorktreeID> = []
       while !Task.isCancelled {
         let current = Self.headWatcherPairs(from: manager.catalog)
         if current != last {
           watcher.setWorktrees(current.map { (id: $0.key, path: $0.value) })
-          // The two sidebar monitors cache lazily and had no removal path,
-          // so a removed or archived Worktree kept its chip data forever.
-          // This projection is already exactly the live, non-archived set.
-          let live = Set(current.keys)
+          last = current
+        }
+        // The two sidebar monitors cache lazily and had no removal path,
+        // so a removed or archived Worktree kept its chip data forever.
+        // Server rows are not watched but keep their (polled) chips, so
+        // retention uses every live row, not the watched set.
+        let live = Self.liveWorktreeIDs(from: manager.catalog)
+        if live != lastLive {
           statusMonitor.retain(liveWorktreeIDs: live)
           diffMonitor.retain(liveWorktreeIDs: live)
-          last = current
+          lastLive = live
         }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
           withObservationTracking {
             _ = Self.headWatcherPairs(from: manager.catalog)
+            _ = Self.liveWorktreeIDs(from: manager.catalog)
           } onChange: {
             cont.resume()
           }
@@ -2228,6 +2382,43 @@ final class AppState {
         }
       }
     }
+  }
+
+  /// Mirror task that keeps `RemoteRefsWatcher`'s set in sync with the
+  /// catalog's Git Platform fetch units (unit id → repository root). Same
+  /// pre-arm-sample / re-arm pattern as `startHeadWatcherSync`.
+  private func startRemoteRefsWatcherSync() {
+    remoteRefsWatcherSyncTask?.cancel()
+    let manager = hierarchyManager
+    let watcher = remoteRefsWatcher
+    remoteRefsWatcherSyncTask = Task { @MainActor in
+      var last: [ProjectID: String] = [:]
+      while !Task.isCancelled {
+        let current = Self.remoteRefsRepositories(from: manager.catalog)
+        if current != last {
+          watcher.setRepositories(current)
+          last = current
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+          withObservationTracking {
+            _ = Self.remoteRefsRepositories(from: manager.catalog)
+          } onChange: {
+            cont.resume()
+          }
+        }
+      }
+    }
+  }
+
+  /// Fetch unit id → repository root for every GitHub fetch unit.
+  fileprivate static func remoteRefsRepositories(from catalog: Catalog) -> [ProjectID: String] {
+    var repositories: [ProjectID: String] = [:]
+    for project in catalog.projects {
+      for unit in RootFeature.gitPlatformFetchUnits(in: project) {
+        repositories[unit.projectID] = unit.gitRoot.path(percentEncoded: false)
+      }
+    }
+    return repositories
   }
 
   /// Long-running mirror: routes every `store.unreadCount` change through
@@ -2288,9 +2479,17 @@ final class AppState {
           catalog: manager.catalog,
           lastFocusedPane: { tabID in manager.lastFocusedPane(in: tabID) }
         )
-      }
+      },
+      isPaneInView: { [weak engine] paneID in engine?.isSurfaceFocused(paneID) == true }
     )
     self.agentStateStore = registry
+    engine.onSurfaceFocused = { [weak registry] paneID in registry?.markObserved(paneID) }
+    for paneID in engine.attachedPaneIDs {
+      registry.onSurfaceAttachmentChanged(paneID, attached: true)
+    }
+    engine.onSurfaceAttachmentChanged = { [weak registry] paneID, attached in
+      registry?.onSurfaceAttachmentChanged(paneID, attached: attached)
+    }
     // Pre-seed the registry from the last quit's agent snapshot so a
     // resumed working/blocked agent surfaces immediately instead of
     // waiting for the first live viewport. Each restored record is gated on
@@ -2332,6 +2531,19 @@ final class AppState {
       }
     )
     self.agentBinder = binder
+    // Detached panes (`PaneTerminalState.detached`: restored and not opened
+    // yet, or reclaimed while idle) are observed by a passive zmx watcher,
+    // which keeps their program status current. When a detached pane's
+    // daemon exits, its agent row goes with it, so it never shows as
+    // sleeping. Without the session catalog this instance does not own
+    // the panes' daemons (second instance, no resume), so it watches none.
+    engine.onDetachedDaemonExited = { [weak binder] paneID in
+      binder?.unbind(paneID)
+    }
+    if self.sessionCoordinator != nil {
+      engine.watchDetachedPanes(
+        manager.catalog.visiblePaneIDs().filter { engine.terminalState(for: $0) == .detached })
+    }
     // Wire 3: keystroke fan-out. The detector continues to read
     // `snapshot()` per-event; the new `onActivity` callback fires on
     // every recorded keystroke so the registry can clear waiting-for-
@@ -2382,10 +2594,11 @@ final class AppState {
   /// signal for an agent pane.
   private func startCommandQueueRunner(manager: HierarchyManager, engine: TerminalEngine) {
     guard commandQueueRunner == nil else { return }
-    // A pane mid-turn or holding queued commands must keep its surface: the
-    // idle-surface reclaim would otherwise detach it while work is pending.
+    // A pane whose turn only its screen tracks, or that holds queued
+    // commands, must keep its surface: queued commands go out only through
+    // a live surface.
     engine.reclaimVeto = { [weak manager, weak registry = self.agentStateStore] paneID in
-      registry?.entries[paneID]?.state.isMidTask == true
+      registry?.needsSurfaceToTrackTurn(paneID) == true
         || manager?.catalog.pane(paneID)?.commandQueue.isEmpty == false
     }
     // Delivery goes through `sendCommand`, not `sendInput`: a queued command
@@ -2489,8 +2702,8 @@ final class AppState {
     restored: [PaneID: PersistedAgentRecord],
     knownLiveness: [PaneID: Bool] = [:],
     isDaemonAlive: (PaneID) -> Bool
-  ) -> [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] {
-    var seeds: [(paneID: PaneID, kind: AgentKind, state: AgentStateStore.AgentRuntimeState)] = []
+  ) -> [AgentStateStore.RestoredAgent] {
+    var seeds: [AgentStateStore.RestoredAgent] = []
     seeds.reserveCapacity(restored.count)
     for (paneID, record) in restored {
       // Reuse the launch sweep's verdict when it covered this pane; only
@@ -2500,9 +2713,12 @@ final class AppState {
       guard alive else { continue }
       guard
         let kind = AgentKind(rawValue: record.kindRaw),
-        let state = AgentStateStore.AgentRuntimeState(rawValue: record.stateRaw)
+        let state = AgentStateStore.AgentRuntimeState(persistedRaw: record.stateRaw)
       else { continue }
-      seeds.append((paneID: paneID, kind: kind, state: state))
+      seeds.append(
+        .init(
+          paneID: paneID, kind: kind, state: state,
+          programStatusTitle: record.programStatusTitle, terminalTitle: record.terminalTitle))
     }
     return seeds
   }

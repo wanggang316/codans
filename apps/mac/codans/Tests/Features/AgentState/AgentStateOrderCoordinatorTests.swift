@@ -54,10 +54,10 @@ struct AgentStateOrderCoordinatorTests {
     #expect(coordinator.orderedIDs == [b, a])
   }
 
-  /// The core fix: a row promoted to `finished` then decaying to `idle`
+  /// The core fix: a row promoted to `done` then decaying to `idle`
   /// keeps its position — the decay does not trigger a re-sort.
   @Test
-  func finishedToIdleKeepsPosition() async {
+  func doneToIdleKeepsPosition() async {
     let coordinator = AgentStateOrderCoordinator(debounce: .zero)
     let a = PaneID()
     let b = PaneID()
@@ -66,11 +66,11 @@ struct AgentStateOrderCoordinatorTests {
     #expect(coordinator.orderedIDs == [a, b])
 
     // b finishes — significant, bubbles above the idle a.
-    coordinator.reconcile(entries: [a: entry(.idle), b: entry(.finished)], autoSort: true)
+    coordinator.reconcile(entries: [a: entry(.idle), b: entry(.done)], autoSort: true)
     await coordinator.awaitPendingResortForTests()
     #expect(coordinator.orderedIDs == [b, a])
 
-    // b decays finished → idle — NOT significant, so no re-sort: b stays put.
+    // b decays done → idle — NOT significant, so no re-sort: b stays put.
     coordinator.reconcile(entries: [a: entry(.idle), b: entry(.idle)], autoSort: true)
     await coordinator.awaitPendingResortForTests()
     #expect(coordinator.orderedIDs == [b, a])

@@ -5,12 +5,10 @@ import CodansCore
 ///
 /// Sort order:
 ///
-/// 1. Primary: state priority `blocked > finished > working > idle`.
+/// 1. Primary: state priority `blocked > error > done > working > idle`.
 ///    Note this is the *triage* order surfaced to users — the view answers
-///    "what needs attention" first, then "what just completed", then "what's
-///    still running". It is deliberately distinct from the registry's
-///    internal derive priority (`blocked > working > finished > idle`),
-///    which answers "what is this pane doing right now".
+///    "what needs attention" first (a prompt, then a failure), then "what
+///    just completed", then "what's still running".
 /// 2. Secondary: `lastTransitionAt` descending within the same state bucket
 ///    (most-recent transition first).
 /// 3. Tie-break: `PaneID.raw.uuidString` ascending. This keeps the order
@@ -45,9 +43,10 @@ nonisolated enum SortedEntriesProvider {
   private static func priority(_ state: AgentStateStore.AgentRuntimeState) -> Int {
     switch state {
     case .blocked: return 0
-    case .finished: return 1
-    case .working: return 2
-    case .idle: return 3
+    case .error: return 1
+    case .done: return 2
+    case .working: return 3
+    case .idle: return 4
     }
   }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import CodansCore
 import CodansIPC
 import ComposableArchitecture
@@ -9,8 +10,211 @@ import Testing
 @MainActor
 struct RootFeatureTests {
   @Test
-  func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
+  func submittedCommandClosesComposer() async {
+    var state = RootFeature.State()
+    state.commandQueue = CommandQueueFeature.State(paneID: PaneID())
+    let store = TestStore(initialState: state) { RootFeature() }
+    await store.send(.commandQueue(.presented(.delegate(.submitted)))) {
+      $0.commandQueue = nil
+    }
+  }
+
+  /// Two live panes, so the draft prune on open keeps both.
+  private static func commandQueueStore(paneIDs: [PaneID]) -> TestStoreOf<RootFeature> {
+    let panes = paneIDs.map { Pane(id: $0, workingDirectory: "/tmp") }
+    let catalog = Catalog(projects: [
+      Project(
+        name: "p", rootPath: "/tmp",
+        worktrees: [Worktree(name: "w", path: "/tmp", tabs: [Tab(panes: panes)])])
+    ])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+    }
+    // `CommandQueueFeature.State` seeds its schedule from the wall clock.
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    return store
+  }
+
+  @Test
+  func commandQueueDraftSurvivesEveryClosePathForItsPaneOnly() async {
+    let first = PaneID()
+    let second = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [first, second])
+
+    await store.send(.commandQueueToggle(first))
+    await store.send(.commandQueue(.presented(.draftChanged("draft one"))))
+    // Escape.
+    await store.send(.commandQueue(.dismiss))
+    #expect(store.state.commandQueue == nil)
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue?.draft == "draft one")
+
+    // ⌘L again on the same pane.
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue == nil)
+
+    // Opening on another pane does not carry the text over, then switching
+    // back restores it.
+    await store.send(.commandQueueToggle(second))
+    #expect(store.state.commandQueue?.paneID == second)
+    #expect(store.state.commandQueue?.draft == "")
+    await store.send(.commandQueue(.presented(.draftChanged("draft two"))))
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue?.draft == "draft one")
+
+    // Opening New Agent closes the queue.
+    await store.send(.newAgentRequested)
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.newAgent != nil)
+    await store.send(.newAgentRequested)
+    await store.send(.commandQueueToggle(first))
+    #expect(store.state.commandQueue?.draft == "draft one")
+    await store.send(.commandQueueToggle(second))
+    #expect(store.state.commandQueue?.draft == "draft two")
+    #expect(store.state.commandQueueDrafts == [first: "draft one", second: "draft two"])
+  }
+
+  @Test
+  func commandQueueSubmitClearsThatPanesDraft() async {
+    let paneID = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [paneID])
+    store.dependencies.hierarchyClient.commandQueue = { _ in [] }
+    store.dependencies.hierarchyClient.setCommandQueue = { _, _ in }
+    store.dependencies.date = .constant(Date(timeIntervalSinceReferenceDate: 0))
+
+    await store.send(.commandQueueToggle(paneID))
+    await store.send(.commandQueue(.presented(.draftChanged("echo hi"))))
+    #expect(store.state.commandQueueDrafts[paneID] == "echo hi")
+    await store.send(.commandQueue(.presented(.submitted)))
+    await store.receive(.commandQueue(.presented(.delegate(.submitted))))
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.commandQueueDrafts.isEmpty)
+    await store.send(.commandQueueToggle(paneID))
+    #expect(store.state.commandQueue?.draft == "")
+  }
+
+  @Test
+  func closedPaneLosesItsCommandQueueDraftAtOnce() async {
+    let kept = PaneID()
+    let closed = PaneID()
+    var state = RootFeature.State()
+    state.commandQueueDrafts = [kept: "a", closed: "b"]
+    let store = TestStore(initialState: state) { RootFeature() }
+
+    // Any close path drops the pane from the catalog; the membership
+    // stream reports the rest.
+    await store.send(.livePanesChanged([kept])) {
+      $0.commandQueueDrafts = [kept: "a"]
+    }
+    await store.send(.livePanesChanged([kept, PaneID()]))
+  }
+
+  @Test
+  func closingThePaneOfAnOpenCommandQueueClosesItAndKeepsNoDraft() async {
+    let closed = PaneID()
+    let other = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [closed, other])
+
+    await store.send(.commandQueueToggle(closed))
+    await store.send(.commandQueue(.presented(.draftChanged("half typed"))))
+    #expect(store.state.commandQueueDrafts[closed] == "half typed")
+
+    await store.send(.livePanesChanged([other]))
+    #expect(store.state.commandQueue == nil)
+    #expect(store.state.commandQueueDrafts.isEmpty)
+  }
+
+  @Test
+  func sessionHistoryToggleTargetsTheFocusedPaneOfTheActiveTab() async {
+    let first = PaneID()
+    let focused = PaneID()
+    let tab = Tab(panes: [Pane(id: first, workingDirectory: "/tmp"), Pane(id: focused, workingDirectory: "/tmp")])
+    let worktree = Worktree(name: "w", path: "/tmp", tabs: [tab], selectedTabID: tab.id)
+    let project = Project(name: "p", rootPath: "/tmp", worktrees: [worktree])
+    var state = RootFeature.State()
+    state.selection = HierarchySelection(projectID: project.id, worktreeID: worktree.id)
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0.hierarchyClient.lastFocusedPane = { _ in focused }
+    }
+
+    await store.send(.sessionHistoryToggle) {
+      $0.sessionHistoryRequest = .init(paneID: focused, serial: 1)
+    }
+    // A second press is a new request, so the popover toggles again.
+    await store.send(.sessionHistoryToggle) {
+      $0.sessionHistoryRequest = .init(paneID: focused, serial: 2)
+    }
+  }
+
+  @Test
+  func sessionHistoryToggleWithoutATabTargetsTheEmptyPage() async {
+    let worktree = Worktree(name: "w", path: "/tmp")
+    let project = Project(name: "p", rootPath: "/tmp", worktrees: [worktree])
+    var state = RootFeature.State()
+    state.selection = HierarchySelection(projectID: project.id, worktreeID: worktree.id)
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+    }
+
+    await store.send(.sessionHistoryToggle) {
+      $0.sessionHistoryRequest = .init(paneID: nil, serial: 1)
+    }
+  }
+
+  @Test
+  func sessionHistoryToggleWithoutAWorktreeDoesNothing() async {
     let store = TestStore(initialState: RootFeature.State()) { RootFeature() }
+    await store.send(.sessionHistoryToggle)
+  }
+
+  @Test
+  func closingAnotherPaneLeavesTheOpenCommandQueue() async {
+    let open = PaneID()
+    let store = Self.commandQueueStore(paneIDs: [open, PaneID()])
+    await store.send(.commandQueueToggle(open))
+    await store.send(.livePanesChanged([open]))
+    #expect(store.state.commandQueue?.paneID == open)
+  }
+
+  @Test
+  func launchPrunesCommandQueueDraftsFromThePaneMembershipStream() async {
+    let kept = PaneID()
+    let closed = PaneID()
+    let (paneStream, paneContinuation) = AsyncStream<Set<PaneID>>.makeStream()
+    var state = RootFeature.State()
+    state.commandQueueDrafts = [kept: "a", closed: "b"]
+    let store = TestStore(initialState: state) { RootFeature() } withDependencies: {
+      $0.hierarchyClient.paneMembershipChanges = { paneStream }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    await store.send(.onLaunch)
+    paneContinuation.yield([kept])
+    await store.receive(\.livePanesChanged)
+    #expect(store.state.commandQueueDrafts == [kept: "a"])
+
+    paneContinuation.finish()
+    await store.send(.onQuit)
+  }
+
+  @Test
+  func openingDiffWithoutSelectionDoesNotChangeMainWindow() async {
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
+    let store = TestStore(initialState: initial) { RootFeature() } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog() }
+    }
     await store.send(.openDiffRequested)
   }
 
@@ -113,12 +317,15 @@ struct RootFeatureTests {
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { catalog }
       $0.gitService = GitServiceClient.testValue
-      // A `.gitHub(.projectActivated)` dispatch fires on projectID transitions.
-      // This test is exhaustivity=off and not about GitHub, but the fetch effect still
+      // A `.gitPlatform(.projectActivated)` dispatch fires on projectID transitions.
+      // This test is exhaustivity=off and not about the Git Platform, but the fetch effect still
       // runs and touches .date + remoteInfo + batchPullRequests — stub each to no-op.
       $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.editorClient = EditorClient.testValue
       // `.selectionChanged` runs `autoSeedTabAndPaneIfNeeded`, which spawns a
       // pane in the active tab when it has none. The fixture tab is empty so
@@ -210,6 +417,66 @@ struct RootFeatureTests {
   }
 
   @Test(arguments: [false, true])
+  func gitViewerChordUsesLiveSelectionBeforeSelectionEventArrives(acrossProjects: Bool) async {
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    var catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB
+    )
+
+    let targetProjectID = acrossProjects ? ProjectID() : projectID
+    if acrossProjects {
+      let target = catalog.projects[0].worktrees.removeLast()
+      catalog.projects.append(
+        Project(id: targetProjectID, name: "other", rootPath: "/other", gitRoot: "/other",
+          worktrees: [target], selectedWorktreeID: worktreeB))
+      catalog.selectedProjectID = targetProjectID
+    } else {
+      catalog.projects[0].selectedWorktreeID = worktreeB
+    }
+    let liveCatalog = catalog
+
+    let descriptor = EditorDescriptor(
+      id: "fork",
+      displayName: "Fork",
+      bundleIdentifier: "com.DanPristupov.Fork",
+      launchMode: .directory,
+      appURL: URL(fileURLWithPath: "/Applications/Fork.app"),
+      alternateBundleIdentifiers: []
+    )
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(
+      projectID: projectID, worktreeID: worktreeA
+    )
+    initial.editor.descriptors = [descriptor]
+
+    let settings = Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { liveCatalog }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      // The resolved `.editor(.openRequested)` runs EditorFeature's open
+      // effect; stub the client + clock so the downstream chain completes
+      // without hitting unimplemented dependencies.
+      $0.editorClient = EditorClient.testValue
+      $0.editorClient.open = { _, id in
+        EditorChoice(id: id ?? "finder", displayName: "x", binaryPath: nil)
+      }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.diffInspectorToggledForCurrentWorktree)
+    await store.receive(
+      .editor(.openRequested(editorID: "fork", worktreePath: "/b", projectID: targetProjectID)))
+    await store.finish()
+  }
+
+  @Test(arguments: [false, true])
   func gitViewerChordRoutesBuiltInAndLegacyNilToDiffWindow(legacyNil: Bool) async {
     var initial = RootFeature.State()
     initial.selection = HierarchySelection(projectID: ProjectID(), worktreeID: WorktreeID())
@@ -219,12 +486,61 @@ struct RootFeatureTests {
     let store = TestStore(initialState: initial) {
       RootFeature()
     } withDependencies: {
-      // Isolate routing from live AppKit window creation: this worktree is no longer in the catalog.
-      $0.hierarchyClient.snapshot = { Catalog() }
+      // Keep a selected ID without a matching worktree to avoid creating an AppKit window.
+      $0.hierarchyClient.snapshot = {
+        Catalog(projects: [
+          Project(name: "p", rootPath: "/", gitRoot: "/", selectedWorktreeID: WorktreeID())
+        ])
+      }
       $0[SettingsWriter.self].readSnapshotSync = { snapshot }
     }
     await store.send(.diffInspectorToggledForCurrentWorktree)
     await store.receive(.openDiffRequested)
+    await store.finish()
+  }
+
+  @Test(arguments: [GitComparisonScope.all, .outgoing])
+  func sidebarShowChangesOpensConfiguredExternalClientForTheRow(scope: GitComparisonScope) async {
+    // The sidebar row's "Show Uncommitted" / "Show Outgoing" honor the Git
+    // Viewer setting like the chord does, and act on the clicked row (B),
+    // not the selection (A).
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    let catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB
+    )
+    let descriptor = EditorDescriptor(
+      id: "fork",
+      displayName: "Fork",
+      bundleIdentifier: "com.DanPristupov.Fork",
+      launchMode: .directory,
+      appURL: URL(fileURLWithPath: "/Applications/Fork.app"),
+      alternateBundleIdentifiers: []
+    )
+    var initial = RootFeature.State()
+    initial.selection = HierarchySelection(projectID: projectID, worktreeID: worktreeA)
+    initial.editor.descriptors = [descriptor]
+    let settings = Settings(general: GeneralSettings(defaultGitViewerID: "fork"))
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[SettingsWriter.self].readSnapshotSync = { settings }
+      $0.editorClient = EditorClient.testValue
+      $0.editorClient.open = { _, id in
+        EditorChoice(id: id ?? "finder", displayName: "x", binaryPath: nil)
+      }
+      $0.continuousClock = ImmediateClock()
+    }
+    store.exhaustivity = .off
+
+    await store.send(
+      .sidebar(.delegate(.showChanges(projectID: projectID, worktreeID: worktreeB, scope: scope))))
+    await store.receive(
+      .editor(.openRequested(editorID: "fork", worktreePath: "/b", projectID: projectID)))
     await store.finish()
   }
 
@@ -437,11 +753,16 @@ struct RootFeatureTests {
     }
 
     await store.send(.onLaunch)
-    // The launch sweep always arms the liveness poll. With an empty
-    // Catalog there is no active Project, so it fires the paused variant
-    // (`pollTargetChanged(nil, ...)`), a no-op state change. Receiving it before
-    // yielding the selection keeps the merged-effect action order deterministic.
-    await store.receive(\.gitHub.pollTargetChanged)
+    // The launch sweep always registers the poll units and reports whether the
+    // app is frontmost. An empty Catalog has no units, so no fetch or timer
+    // starts. Receiving them before yielding the selection keeps the
+    // merged-effect action order deterministic.
+    await store.receive(\.gitPlatform.pollUnitsChanged)
+    if NSApplication.shared.isActive {
+      await store.receive(\.gitPlatform.appActiveChanged) { $0.gitPlatform.isPolling = true }
+    } else {
+      await store.receive(\.gitPlatform.appActiveChanged)
+    }
 
     // `worktreeID: nil` is the key: the all-nil selection leaves State at its
     // defaults, so the test stays exhaustive without any downstream diff chain.
@@ -499,7 +820,7 @@ struct RootFeatureTests {
   // MARK: - status-bar toast routing
 
   /// The multi-line / over-80-char scrubber that the `.editor(.openFailed)`
-  /// and `.gitHub(...Completed)` branches pipe through before constructing a
+  /// and `.gitPlatform(...Completed)` branches pipe through before constructing a
   /// warning toast. Kept as a pure function so the message-shape invariants
   /// are locked in without spinning up a `RootFeature` TestStore — a full
   /// multi-scope TestStore interacts badly with the StatusBarFeature suite's
@@ -958,6 +1279,7 @@ struct RootFeatureTests {
       // `git diff` subprocess first and blow the receive window under
       // parallel suite load. A no-op fetch keeps the effect deterministic.
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
     }
     store.exhaustivity = .off
 
@@ -988,6 +1310,7 @@ struct RootFeatureTests {
       // Same no-op fetch as the match-arm test: keep the effect free of
       // real `git diff` subprocesses so finish() returns promptly.
       $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
     }
     store.exhaustivity = .off
 
@@ -996,6 +1319,332 @@ struct RootFeatureTests {
     // by asserting no leftover effects produced a `headChangedForCurrentWorktree`.
     await store.send(.worktreeHeadChanged(worktreeB))
     await store.finish()
+  }
+
+  @Test
+  func worktreeHeadChangedRefreshesTheOwningProjectNotTheSelectedOne() async {
+    // A HEAD move in a Project that is not selected must refresh that
+    // Project's PR data; refreshing the selected one leaves the moved row
+    // showing the old branch's PR.
+    let projectID = ProjectID()
+    let worktreeA = WorktreeID()
+    let worktreeB = WorktreeID()
+    var catalog = Self.gvFixtureCatalog(
+      projectID: projectID,
+      worktreeA: worktreeA, worktreeB: worktreeB
+    )
+    let selected = Project(
+      id: ProjectID(), name: "other", rootPath: "/other", gitRoot: "/other",
+      worktrees: [], selectedWorktreeID: nil)
+    catalog.projects.append(selected)
+    catalog.selectedProjectID = selected.id
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeHeadChanged(worktreeB))
+    await store.receive {
+      guard case .gitPlatform(.projectActivated(let refreshed, _, _)) = $0 else { return false }
+      return refreshed == projectID
+    }
+    await store.finish()
+  }
+
+  /// An added Project is often not selected (`codans project add`), and the poll
+  /// treats a unit never fetched as cold. Adding it alone starts its fetch.
+  @Test
+  func addingAnUnselectedGitProjectFetchesItsPullRequests() async {
+    let selected = Project(
+      name: "selected", rootPath: "/selected", gitRoot: "/selected",
+      worktrees: [Worktree(name: "main", path: "/selected", branch: "main")])
+    let main = Worktree(name: "main", path: "/added", branch: "main")
+    let added = Project(name: "added", rootPath: "/added", gitRoot: "/added", worktrees: [main])
+    var catalog = Catalog(projects: [selected, added])
+    catalog.selectedProjectID = selected.id
+    let fetched = LockIsolated<[URL]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitServiceClient.self].remoteInfo = { root in
+        fetched.withValue { $0.append(root) }
+        return RemoteInfo(host: "github.com", path: "w/added")
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.projectAdded(added.id))
+    await store.receive(
+      .gitPlatform(
+        .fetchUnitsAdded([
+          GitPlatformFeature.FetchUnit(
+            projectID: added.id, gitRoot: URL(fileURLWithPath: "/added"),
+            pairs: [.init(worktreeID: main.id, branch: "main")])
+        ])))
+    await store.receive {
+      guard case .gitPlatform(.projectBatchLoaded(let projectID, _, .success)) = $0 else { return false }
+      return projectID == added.id
+    }
+    #expect(fetched.value == [URL(fileURLWithPath: "/added")])
+    #expect(store.state.gitPlatform.pollUnits == [added.id])
+    #expect(store.state.gitPlatform.selectedUnits.isEmpty)
+    await store.finish()
+  }
+
+  /// A repository added to a Workspace is a new fetch unit; only it is fetched.
+  @Test
+  func addingARepositoryToAWorkspaceFetchesItsPullRequests() async {
+    let app = Worktree(name: "app", path: "/tmp/ws/app", branch: "feat", sourceGitRoot: "/src/app")
+    let api = Worktree(name: "api", path: "/tmp/ws/api", branch: "feat", sourceGitRoot: "/src/api")
+    let workspace = Project(
+      name: "ws", rootPath: "/tmp/ws", worktrees: [Worktree(name: "ws", path: "/tmp/ws"), app, api],
+      isWorkspace: true)
+    let catalog = Catalog(projects: [workspace])
+    let appUnit = RootFeature.workspaceFetchGroupID(workspace: workspace.id, gitRoot: "/src/app")
+    let apiUnit = RootFeature.workspaceFetchGroupID(workspace: workspace.id, gitRoot: "/src/api")
+    var initial = RootFeature.State()
+    // `app` was in the Workspace before; `api` is the repository just added.
+    initial.gitPlatform.pollUnits = [appUnit]
+    initial.gitPlatform.lastFetchStartedAt[appUnit] = Date(timeIntervalSince1970: 1_699_999_000)
+    let fetched = LockIsolated<[URL]>([])
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitServiceClient.self].remoteInfo = { root in
+        fetched.withValue { $0.append(root) }
+        return RemoteInfo(host: "github.com", path: "w/api")
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.projectAdded(workspace.id))
+    await store.receive(\.gitPlatform.fetchUnitsAdded)
+    await store.receive {
+      guard case .gitPlatform(.projectBatchLoaded(let projectID, _, .success)) = $0 else { return false }
+      return projectID == apiUnit
+    }
+    #expect(fetched.value == [URL(fileURLWithPath: "/src/api")])
+    #expect(store.state.gitPlatform.pollUnits == [appUnit, apiUnit])
+    await store.finish()
+  }
+
+  /// A Workspace added from the sidebar with three repositories starts at most two
+  /// first fetches at once; the third waits for a slot.
+  @Test
+  func aWorkspaceAddedFromTheSidebarFetchesUnderTheConcurrencyCap() async {
+    let members = ["a", "b", "c"].map { name in
+      Worktree(name: name, path: "/tmp/ws/\(name)", branch: "feat", sourceGitRoot: "/src/\(name)")
+    }
+    let workspace = Project(
+      name: "ws", rootPath: "/tmp/ws", worktrees: [Worktree(name: "ws", path: "/tmp/ws")] + members,
+      isWorkspace: true)
+    let catalog = Catalog(projects: [workspace])
+    let gate = Gate()
+    let reads = LockIsolated(0)
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in
+        reads.withValue { $0 += 1 }
+        await gate.wait()
+        return [:]
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.sidebar(.delegate(.reconcileProjectRequested(workspace.id))))
+    await store.receive(\.sidebarProjectReconciled)
+    await store.receive(\.gitPlatform.fetchUnitsAdded)
+    #expect(store.state.gitPlatform.inFlightFetchProjects.count == 2)
+    #expect(store.state.gitPlatform.pendingPollRefresh.count == 1)
+
+    gate.open()
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    #expect(reads.value == 3)
+    #expect(store.state.gitPlatform.pendingPollRefresh.isEmpty)
+    await store.finish()
+  }
+
+  /// A sidebar retry or edit of a Project fetched before refreshes it as on activation.
+  @Test
+  func aSidebarReconcileOfAFetchedProjectRefreshesAsOnActivation() async {
+    let main = Worktree(name: "main", path: "/repo", branch: "main")
+    let project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo", worktrees: [main])
+    var initial = RootFeature.State()
+    initial.gitPlatform.pollUnits = [project.id]
+    initial.gitPlatform.lastFetchStartedAt[project.id] = Date(timeIntervalSince1970: 1_699_999_000)
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      Self.stubGitPlatformFetch(&$0)
+    }
+    store.exhaustivity = .off
+
+    await store.send(.sidebarProjectReconciled(project.id))
+    await store.receive(
+      .gitPlatform(
+        .projectActivated(
+          project.id, gitRoot: URL(fileURLWithPath: "/repo"),
+          worktreeBranches: [.init(worktreeID: main.id, branch: "main")])))
+    await store.receive(\.gitPlatform.projectBatchLoaded)
+    await store.finish()
+  }
+
+  /// A folder Project has no fetch unit, so adding it sends nothing.
+  @Test
+  func addingAProjectWithoutARepositorySendsNoFetch() async {
+    let folder = Project(name: "d", rootPath: "/tmp/d", worktrees: [Worktree(name: "d", path: "/tmp/d")])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [folder]) }
+    }
+    await store.send(.projectAdded(folder.id))
+  }
+
+  // MARK: - Git commands that finish in a pane
+
+  /// A `glab mr create` (or `glab auth login`) that finishes in a pane drops the cached
+  /// CLI paths and logged-in hosts and refreshes the pane's fetch unit, as `gh` does.
+  @Test
+  func aGlabCommandThatFinishesInAPaneInvalidatesAndRefreshesItsUnit() async {
+    let (catalog, projectID, paneID) = Self.paneCatalog()
+    let invalidations = LockIsolated(0)
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitPlatformClient.self].invalidateResolution = { invalidations.withValue { $0 += 1 } }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.paneGitCommandActivity(paneID, running: true, gitPlatformCLI: true))
+    await store.send(.paneGitCommandActivity(paneID, running: false, gitPlatformCLI: false))
+    await store.receive(\.gitPlatform.refreshAvailabilityRequested)
+    await store.receive(
+      { action in
+        guard case .gitPlatform(.projectRefreshRequested(let refreshed, _, _)) = action else { return false }
+        return refreshed == projectID
+      }, timeout: .seconds(5))
+    await store.finish()
+    #expect(invalidations.value == 1)
+    #expect(store.state.panesRunningGitPlatformCLI.isEmpty)
+  }
+
+  /// A plain `git` command refreshes the unit but keeps the CLI caches.
+  @Test
+  func aGitCommandThatFinishesInAPaneRefreshesWithoutInvalidating() async {
+    let (catalog, projectID, paneID) = Self.paneCatalog()
+    let invalidations = LockIsolated(0)
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { _ in nil })
+      Self.stubGitPlatformFetch(&$0)
+      $0[GitPlatformClient.self].invalidateResolution = { invalidations.withValue { $0 += 1 } }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.paneGitCommandActivity(paneID, running: true, gitPlatformCLI: false))
+    await store.send(.paneGitCommandActivity(paneID, running: false, gitPlatformCLI: false))
+    await store.receive(
+      { action in
+        guard case .gitPlatform(.projectRefreshRequested(let refreshed, _, _)) = action else { return false }
+        return refreshed == projectID
+      }, timeout: .seconds(5))
+    await store.finish()
+    #expect(invalidations.value == 0)
+  }
+
+  private static func paneCatalog() -> (Catalog, ProjectID, PaneID) {
+    let pane = Pane(workingDirectory: "/repo")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/repo", branch: "main", tabs: [tab], selectedTabID: tab.id)
+    let project = Project(name: "p", rootPath: "/repo", gitRoot: "/repo", worktrees: [worktree])
+    return (Catalog(projects: [project]), project.id, pane.id)
+  }
+
+  /// A local and a Server worktree at the same path (ADR 0006): watcher and
+  /// HEAD events refresh each row's diff stats on its own machine.
+  @Test
+  func watcherRefreshesNameTheOwningProjectsHost() async {
+    let hostID = HostID()
+    let localRow = Worktree(name: "app", path: "/srv/app", branch: "main")
+    let serverRow = Worktree(name: "app", path: "/srv/app", branch: "main")
+    let local = Project(name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", worktrees: [localRow])
+    let server = Project(
+      name: "app", rootPath: "/srv/app", gitRoot: "/srv/app", hostID: hostID,
+      remoteHost: RemoteHost(alias: "mini"), worktrees: [serverRow])
+    let catalog = Catalog(projects: [local, server])
+    let fetched = LockIsolated<[URL]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[WorktreeLocalDiffMonitor.self] = WorktreeLocalDiffMonitor(fetch: { url in
+        fetched.withValue { $0.append(url) }
+        return nil
+      })
+      Self.stubGitPlatformFetch(&$0)
+    }
+    store.exhaustivity = .off
+
+    await store.send(.worktreeWorkingTreeChanged(serverRow.id))
+    await store.send(.worktreeWorkingTreeChanged(localRow.id))
+    await store.send(.worktreeHeadChanged(serverRow.id))
+    await store.finish()
+
+    #expect(fetched.value.count == 3)
+    #expect(GitLocation.hostID(of: fetched.value[0]) == hostID)
+    #expect(fetched.value[1].isFileURL)
+    #expect(GitLocation.hostID(of: fetched.value[2]) == hostID)
+  }
+
+  /// Local file-system watchers cover Projects on This Mac only; the monitor
+  /// cache keeps every live row, Server rows included.
+  @Test
+  @MainActor
+  func localWatchersSkipServerWorktreesButRetentionKeepsThem() {
+    let localRow = Worktree(name: "app", path: "/srv/app")
+    let serverRow = Worktree(name: "app", path: "/srv/app")
+    let archived = Worktree(name: "old", path: "/srv/old", archived: true)
+    let catalog = Catalog(projects: [
+      Project(name: "app", rootPath: "/srv/app", worktrees: [localRow, archived]),
+      Project(
+        name: "app", rootPath: "/srv/app", hostID: HostID(), remoteHost: RemoteHost(alias: "mini"),
+        worktrees: [serverRow]),
+    ])
+    #expect(AppState.headWatcherPairs(from: catalog) == [localRow.id: "/srv/app"])
+    #expect(AppState.liveWorktreeIDs(from: catalog) == [localRow.id, serverRow.id])
+  }
+
+  /// A HEAD change now refreshes the owning Project's PR data; stub the fetch
+  /// chain so it resolves without a live `git` / `gh` subprocess.
+  private static func stubGitPlatformFetch(_ values: inout DependencyValues) {
+    values.date = .constant(Date(timeIntervalSince1970: 1_700_000_000))
+    values[GitServiceClient.self].remoteInfo = { _ in
+      RemoteInfo(host: "github.com", path: "w/r")
+    }
+    values[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+    values[GitPlatformClient.self].resolveRepository = { remote, _ in
+      GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+    }
   }
 
   // MARK: - Agents-panel row tap reveals the worktree
@@ -1042,6 +1691,46 @@ struct RootFeatureTests {
     #expect(store.state.revealSelectionTrigger != before)
     #expect(store.state.sidebarVisible)
     #expect(expandCalls.value.contains { $0.0 == project.id && $0.1 == true })
+  }
+
+  @Test
+  func revealOpensAClosedHostRow() async {
+    let pane = Pane(workingDirectory: "/srv/api")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let worktree = Worktree(name: "main", path: "/srv/api", tabs: [tab], selectedTabID: tab.id)
+    let host = HostRecord(address: "box")
+    var project = Project(
+      name: "api", rootPath: "/srv/api", gitRoot: "/srv/api", hostID: host.id, remoteHost: host.endpoint)
+    project.worktrees = [worktree]
+    var catalog = Catalog(projects: [project], hosts: [host])
+    catalog.collapsedSidebarHosts = [.host(host.id)]
+    let address = PaneAddress(projectID: project.id, worktreeID: worktree.id, tabID: tab.id, paneID: pane.id)
+    let hostCalls = LockIsolated<[(SidebarHost, Bool)]>([])
+    let store = TestStore(initialState: RootFeature.State()) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.addressOf = { _ in address }
+      $0.hierarchyClient.selectProject = { _ in }
+      $0.hierarchyClient.selectWorktree = { _, _ in }
+      $0.hierarchyClient.selectTab = { _, _, _ in }
+      $0.hierarchyClient.focusPane = { _, _, _, _ in }
+      $0.hierarchyClient.focusSurfaceView = { _ in }
+      $0.hierarchyClient.setProjectExpanded = { _, _ in }
+      $0.hierarchyClient.setSidebarHostExpanded = { host, expanded in
+        hostCalls.withValue { $0.append((host, expanded)) }
+      }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.agentState(.rowTapped(pane.id)))
+    await store.finish()
+
+    #expect(hostCalls.value.count == 1)
+    #expect(hostCalls.value.first?.0 == .host(host.id))
+    #expect(hostCalls.value.first?.1 == true)
   }
 
   // MARK: - Post-completion switch gate (worktreeMaterialized)
@@ -1146,6 +1835,43 @@ struct RootFeatureTests {
     #expect(launched.value.first?.0 == profileID)
     #expect(launched.value.first?.1 == projectID)
     #expect(launched.value.first?.2 == worktreeID)
+  }
+
+  /// A new Workspace group starts the agents its result names, one per
+  /// member that has one, and lands on the group's own row.
+  @Test
+  func workspaceGroupCreatedLaunchesMemberAgentsAndSelectsTheGroup() async {
+    let projectID = ProjectID()
+    let groupRow = WorktreeID()
+    let withAgent = WorktreeID()
+    let withoutAgent = WorktreeID()
+    let profileID = UUID()
+    let launched = LockIsolated<[(UUID, ProjectID, WorktreeID, String?)]>([])
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: nil, recorder: rec)
+    store.dependencies.hierarchyClient.launchAgentProfile = { pid, proj, wt, prompt in
+      launched.withValue { $0.append((pid, proj, wt, prompt)) }
+    }
+    store.dependencies.hierarchyClient.setProjectExpanded = { _, _ in }
+    let result = GroupCreationResult(
+      projectID: projectID, groupID: WorkspaceGroupID(), groupWorktreeID: groupRow,
+      members: [
+        .init(name: "app", worktreeID: withAgent, agentProfileID: profileID),
+        .init(name: "api", worktreeID: withoutAgent),
+      ])
+
+    await store.send(.sidebar(.delegate(.workspaceGroupCreated(result)))) {
+      $0.agentLaunchWorktreeIDs = [withAgent]
+    }
+    await store.receive(\.worktreeAgentLaunchFinished) {
+      $0.agentLaunchWorktreeIDs = []
+    }
+    #expect(launched.value.map(\.0) == [profileID])
+    #expect(launched.value.map(\.1) == [projectID])
+    #expect(launched.value.map(\.2) == [withAgent])
+    #expect(launched.value.map(\.3) == [nil])
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == groupRow)
   }
 
   /// The New Agent dialog's prompt rides the pending creation and reaches
@@ -1298,9 +2024,9 @@ struct RootFeatureTests {
   }
 
   @Test
-  func gateOnAwaySwitches() async {
-    // VAL-SWITCH-002: auto-switch ON + user navigated away (active id is a
-    // different pending) → still switch, because the setting forces it.
+  func gateOnAwayStaysAndMintsNewMarker() async {
+    // Auto-switch ON + user navigated away (active id is a different
+    // pending) → do not yank them back; badge the new worktree instead.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
@@ -1314,8 +2040,39 @@ struct RootFeatureTests {
           .worktreeMaterialized(
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
-    #expect(rec.project.value == projectID)
-    #expect(rec.worktree.value == worktreeID)
+    #expect(!rec.didSelect)
+    #expect(rec.isNewCalls.value.count == 1)
+    #expect(rec.isNewCalls.value.first?.0 == worktreeID)
+    #expect(rec.isNewCalls.value.first?.1 == true)
+  }
+
+  /// The user clicked elsewhere, but that click's `.selectionChanged` has
+  /// not reached the reducer when the completion does: the live catalog
+  /// already shows a real worktree, so the completion must not switch.
+  @Test
+  func gateLiveSelectionElsewhereStays() async {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pendingID = PendingWorktreeID()
+    let elsewhere = WorktreeID()
+    let catalog = Catalog(projects: [
+      Project(
+        id: projectID, name: "p", rootPath: "/", gitRoot: "/",
+        worktrees: [Worktree(id: elsewhere, name: "w", path: "/w", branch: "w")],
+        selectedWorktreeID: elsewhere)
+    ])
+    let rec = SelectRecorder()
+    let store = makeGateStore(autoSwitch: true, activePendingWorktreeID: pendingID, recorder: rec)
+    store.dependencies.hierarchyClient.snapshot = { catalog }
+
+    await store.send(
+      .sidebar(
+        .delegate(
+          .worktreeMaterialized(
+            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
+    await store.finish()
+    #expect(!rec.didSelect)
+    #expect(rec.isNewCalls.value.first?.0 == worktreeID)
   }
 
   @Test
@@ -1342,12 +2099,10 @@ struct RootFeatureTests {
   }
 
   @Test
-  func gateOffWatchingStays() async {
-    // VAL-SWITCH-004: auto-switch OFF + still viewing this pending creation
-    // → the NEW worktree never takes focus. With no pre-create selection
-    // stashed (this harness seeds none) there is nothing to restore, so no
-    // selection movement happens at all; the stashed-prior landing is
-    // covered by `gateOffWatchingRestoresPriorSelection`.
+  func gateOffFollowingLandsOnNewWorktree() async {
+    // Auto-switch OFF, but the user clicked the pending row and still
+    // follows the creation → they asked to watch it, so the completion
+    // lands on the new worktree. The setting only decides kickoff focus.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
@@ -1360,30 +2115,10 @@ struct RootFeatureTests {
           .worktreeMaterialized(
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
-    #expect(!rec.didSelect)
-  }
-
-  @Test
-  func gateReadsLiveSettingAtCompletion() async {
-    // VAL-SWITCH-006: a mid-flight toggle decides the outcome — the gate
-    // reads the LIVE snapshot at completion, not a value captured at
-    // kickoff. Here the snapshot reads OFF and the user is away, so the
-    // late-flipped-OFF value makes the gate stay even though kickoff may
-    // have happened while ON.
-    let projectID = ProjectID()
-    let worktreeID = WorktreeID()
-    let pendingID = PendingWorktreeID()
-    let rec = SelectRecorder()
-    let store = makeGateStore(
-      autoSwitch: false, activePendingWorktreeID: PendingWorktreeID(), recorder: rec)
-
-    await store.send(
-      .sidebar(
-        .delegate(
-          .worktreeMaterialized(
-            worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
-    await store.finish()
-    #expect(!rec.didSelect)
+    #expect(rec.project.value == projectID)
+    #expect(rec.worktree.value == worktreeID)
+    #expect(rec.isNewCalls.value.isEmpty)
+    #expect(store.state.activePendingWorktreeID == nil)
   }
 
   @Test
@@ -1411,14 +2146,15 @@ struct RootFeatureTests {
 
   @Test
   func gateOffMintsIsNewMarkerOnMaterializedWorktree() async {
-    // badge-set-on-complete M3: auto-switch OFF → reducer calls
-    // `setWorktreeIsNew(worktreeID, true)` on the just-materialized worktree.
-    // The user stays put (unfocused new worktree) and a badge must land.
+    // badge-set-on-complete M3: auto-switch OFF and not followed → reducer
+    // calls `setWorktreeIsNew(worktreeID, true)` on the just-materialized
+    // worktree. The user stays put (unfocused new worktree) and a badge
+    // must land.
     let projectID = ProjectID()
     let worktreeID = WorktreeID()
     let pendingID = PendingWorktreeID()
     let rec = SelectRecorder()
-    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: pendingID, recorder: rec)
+    let store = makeGateStore(autoSwitch: false, activePendingWorktreeID: nil, recorder: rec)
 
     await store.send(
       .sidebar(
@@ -1550,12 +2286,10 @@ struct RootFeatureTests {
       rec.worktrees.value == [nil], "old row must deselect so the pending pill reads as focus")
   }
 
-  /// Creation focus at kickoff is UNCONDITIONAL — the auto-switch
-  /// setting only decides where focus lands at COMPLETION. OFF must
-  /// behave identically to ON at the click: overlay armed, prior
-  /// stashed, old row deselected.
+  /// Auto-switch OFF runs the creation in the background: no loading
+  /// overlay, no restore point, and no selection change at all.
   @Test
-  func beginPendingOffAlsoFocusesCreationAtKickoff() async {
+  func beginPendingOffLeavesSelectionUntouched() async {
     let projectID = ProjectID()
     let prior = HierarchySelection(projectID: projectID, worktreeID: WorktreeID())
     let pending = Self.makeRootPending(projectID: projectID)
@@ -1567,19 +2301,17 @@ struct RootFeatureTests {
     await store.send(.sidebar(.beginPendingWorktreeCreation(pending)))
     await store.finish()
 
-    #expect(store.state.activePendingWorktreeID == pending.id)
-    #expect(store.state.pendingPriorSelection == prior)
-    #expect(rec.projects.value == [projectID])
-    #expect(rec.worktrees.value == [nil])
+    #expect(store.state.sidebar.pendingWorktrees[id: pending.id] != nil)
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingPriorSelection == nil)
+    #expect(rec.projects.value.isEmpty)
+    #expect(rec.worktrees.value.isEmpty)
   }
 
-  /// Auto-switch OFF landing while still following the creation:
-  /// completion mints the badge AND hands focus back to the stashed
-  /// pre-create selection — OFF's contract is "when it's done, put me
-  /// back where I was", never "leave me parked on a settled loading
-  /// view with nothing selected".
+  /// A followed creation lands on the new worktree and drops the restore
+  /// point: the user is never bounced back to the pre-follow selection.
   @Test
-  func gateOffWatchingRestoresPriorSelection() async {
+  func gateFollowingLandsOnNewWorktreeAndDropsPrior() async {
     let priorProject = ProjectID()
     let priorWorktree = WorktreeID()
     let prior = HierarchySelection(projectID: priorProject, worktreeID: priorWorktree)
@@ -1599,12 +2331,11 @@ struct RootFeatureTests {
             worktreeID: worktreeID, projectID: projectID, pendingID: pendingID))))
     await store.finish()
 
-    #expect(rec.isNewCalls.value.count == 1)
-    #expect(rec.isNewCalls.value.first?.1 == true)
+    #expect(rec.isNewCalls.value.isEmpty)
     #expect(store.state.activePendingWorktreeID == nil)
     #expect(store.state.pendingPriorSelection == nil)
-    #expect(rec.projects.value == [priorProject])
-    #expect(rec.worktrees.value == [priorWorktree])
+    #expect(rec.projects.value == [projectID])
+    #expect(rec.worktrees.value == [worktreeID])
   }
 
   /// Clicking the pending row after navigating away re-arms the creation
@@ -1713,8 +2444,11 @@ struct RootFeatureTests {
       $0.hierarchyClient.snapshot = { catalog }
       $0.gitService = GitServiceClient.testValue
       $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.editorClient = EditorClient.testValue
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
     }
@@ -1738,9 +2472,11 @@ struct RootFeatureTests {
   @Test
   func selectingNonWorktreeKeepsActivePendingOverlay() async {
     let projectID = ProjectID()
-    let pendingID = PendingWorktreeID()
+    let pending = Self.makeRootPending(projectID: projectID)
+    let pendingID = pending.id
 
     var initial = RootFeature.State()
+    initial.sidebar.pendingWorktrees.append(pending)
     initial.activePendingWorktreeID = pendingID
 
     let store = TestStore(initialState: initial) {
@@ -1751,13 +2487,17 @@ struct RootFeatureTests {
       $0.hierarchyClient.snapshot = { Catalog() }
       $0.gitService = GitServiceClient.testValue
       $0.date = .constant(Date(timeIntervalSince1970: 0))
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.editorClient = EditorClient.testValue
     }
     store.exhaustivity = .off
 
-    // Project-only selection (worktreeID == nil): the overlay must survive.
+    // The pending project with no worktree (the follow move itself): the
+    // overlay must survive.
     await store.send(.selectionChanged(HierarchySelection(projectID: projectID, worktreeID: nil)))
     #expect(
       store.state.activePendingWorktreeID == pendingID,
@@ -1770,6 +2510,39 @@ struct RootFeatureTests {
       store.state.activePendingWorktreeID == pendingID,
       "an empty selection must not retire the loading overlay"
     )
+  }
+
+  /// Selecting a DIFFERENT project with no worktree is still navigating
+  /// away: following stops, so the completion will not yank the user and
+  /// a later cancel will not bounce them back.
+  @Test
+  func selectingOtherProjectStopsFollowing() async {
+    let pending = Self.makeRootPending(projectID: ProjectID())
+    var initial = RootFeature.State()
+    initial.sidebar.pendingWorktrees.append(pending)
+    initial.activePendingWorktreeID = pending.id
+    initial.pendingPriorSelection = HierarchySelection(projectID: ProjectID(), worktreeID: nil)
+
+    let store = TestStore(initialState: initial) {
+      RootFeature()
+    } withDependencies: {
+      $0.terminalClient.events = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
+      $0.hierarchyClient.snapshot = { Catalog() }
+      $0.gitService = GitServiceClient.testValue
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
+      $0.editorClient = EditorClient.testValue
+    }
+    store.exhaustivity = .off
+
+    await store.send(.selectionChanged(HierarchySelection(projectID: ProjectID(), worktreeID: nil)))
+    #expect(store.state.activePendingWorktreeID == nil)
+    #expect(store.state.pendingPriorSelection == nil)
   }
 
   @Test
@@ -1793,14 +2566,15 @@ struct RootFeatureTests {
     let newTabID = TabID()
 
     // Catalog whose new worktree has NO tabs — the precondition that makes
-    // the seed chain reach `createTab` + `openPane`.
+    // the seed chain reach `createTab` + `openPane`. No worktree is selected
+    // yet: following the creation nil'd the project's selection.
     let worktree = Worktree(
       id: worktreeID, name: "feat", path: "/repo/feat", branch: "feat",
       tabs: [], selectedTabID: nil
     )
     let project = Project(
       id: projectID, name: "p", rootPath: "/repo", gitRoot: "/repo",
-      worktrees: [worktree], selectedWorktreeID: worktreeID
+      worktrees: [worktree], selectedWorktreeID: nil
     )
     let catalog = Catalog(projects: [project])
 
@@ -1845,12 +2619,15 @@ struct RootFeatureTests {
         return PaneID()
       }
       // `.selectionChanged` with a real project transition fans into
-      // `.gitHub(.projectActivated)`, which touches `.date` + remoteInfo +
+      // `.gitPlatform(.projectActivated)`, which touches `.date` + remoteInfo +
       // batchPullRequests; stub each so the chain completes (mirrors
       // `selectionChangedMirrorsActiveTabFromSnapshot`).
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
       $0.continuousClock = ImmediateClock()
@@ -1963,8 +2740,11 @@ struct RootFeatureTests {
       }
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }
@@ -2013,8 +2793,11 @@ struct RootFeatureTests {
       }
       $0.hierarchyClient.openPane = { _, _, _, _, _ in PaneID() }
       $0.gitService = GitServiceClient.testValue
-      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", owner: "o", repo: "r") }
-      $0[GitHubClient.self].batchPullRequests = { _, _, _, _ in [:] }
+      $0.gitService.remoteInfo = { _ in RemoteInfo(host: "github.com", path: "o/r") }
+      $0[GitPlatformClient.self].batchPullRequests = { _, _ in [:] }
+      $0[GitPlatformClient.self].resolveRepository = { remote, _ in
+        GitPlatformRepository(kind: .github, host: remote.host, path: remote.path)
+      }
       $0.date = .constant(Date(timeIntervalSince1970: 0))
       $0.editorClient = EditorClient.testValue
     }
@@ -2075,7 +2858,8 @@ struct RootFeatureTests {
     #expect(typed.value.first?.0 == paneID)
     #expect(
       typed.value.first?.1
-        == HandoffKickoff.sourceInstruction(for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
+        == HandoffKickoff.sourceInstruction(
+          for: .checkpoint, requestID: requestID, sourcePaneID: paneID, cli: "codans")
         || typed.value.first?.1
           == HandoffKickoff.sourceInstruction(
             for: .handOff(to: .codex), requestID: requestID, sourcePaneID: paneID, cli: "codans")

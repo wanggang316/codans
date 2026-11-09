@@ -99,6 +99,7 @@ extension IPC.Method {
       .paneClose,
       .terminalResetPane, .terminalRetryPane,
       .workspaceCreate, .workspaceAdd, .workspaceDrop,
+      .workspaceCreateGroup, .workspaceDeleteGroup, .workspaceCheckGroupDeletion,
       .handoffSave, .handoffTo,
       .agentWait,
       .workflowList, .workflowRun, .workflowStatus, .workflowDeliver, .workflowResolve,

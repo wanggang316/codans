@@ -3,8 +3,8 @@
 All notable changes to codans are documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project does not yet follow semantic versioning — every release until
-1.0 is a developer build. Releases are dated.
+and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Before 1.0, a breaking change bumps the minor version. Releases are dated.
 
 ## [Unreleased]
 
@@ -16,13 +16,245 @@ and the project does not yet follow semantic versioning — every release until
 
 ### Removed
 
+### Fixed
+
+### Security
+
+## [0.11.0] - 2026-11-09
+
+### Changed
+
+- **Settings has a new sidebar.** Panes show colored icon tiles in three
+  groups, Hosts is now Remote Hosts and Developer is now Integrations, and
+  each Project has one page, with its commands last.
+- **Pane and agent titles follow one set of rules.** The pane header and its
+  tab show the title the running program sets, Agents View rows show the
+  agent's own title, and both keep their title across a restart.
+- **The Command Palette tells Remote Project worktrees apart.** Their rows
+  show the remote marker, search matches the host name, and rows follow the
+  sidebar order.
+
+### Fixed
+
+- **New worktrees stay at the top of the list.** A worktree created in codans
+  no longer lands at the end of its Project's list, and a failed creation no
+  longer leaves two rows.
+- **Remote Projects no longer list a folder twice.** A path through a symlink
+  or typed in another letter case now matches the Project that already holds
+  the folder, and existing duplicate rows merge.
+- **Shortcut hints follow the ⌘ key again.** Some hints showed while ⌘ was up
+  and hid while it was held; the Run button's hint moved to its tooltip, so
+  the toolbar no longer shifts.
+
+## [0.10.0] - 2026-11-07
+
+### Added
+
+- **Remote projects are grouped by Host.** The sidebar lists Projects under
+  This Mac and each remote Host, and you can drag to reorder them inside a
+  Host. Manage Hosts in Settings › Hosts, or pick one in Open Remote Project.
+- **GitLab merge requests.** Projects on gitlab.com, or on a GitLab that
+  `glab` 1.122.0+ is logged in to, show merge requests like pull requests,
+  with merge, close, and rerun actions. A Workspace can mix both platforms.
+- **Settings › Git Platforms.** See whether `gh` and `glab` are installed
+  and logged in, and how to fix it. SSH aliases and ports are matched
+  automatically; add an alias for any other remote host.
+- **Session History in the pane header, and on ⌘Y.** A button next to the
+  split buttons opens it for that pane; ⌘Y opens it for the focused pane
+  and closes it again.
+- **More keyboard shortcuts.** ⌃⌘1…⌃⌘5 switch the sidebar filter, and while
+  the Agents View is open, ⌥1…⌥9 jump to the first nine agents.
+- **The CLI shows each Project's Host.** `codans tree` and the project
+  commands print it, and `--host` picks a Project when two Hosts have one
+  with the same name.
+
+### Changed
+
+- **Agents View rows show what each agent is doing.** The first line is the
+  agent's live activity or the title it set, also for restored sleeping
+  agents.
+- **"Remote project" everywhere.** Connect to Server is now Open Remote
+  Project… and Edit Connection is Edit Remote Project…. On first launch,
+  remote projects move to shared Host records; older builds cannot open the
+  migrated catalog, and a backup is kept.
+- **Calmer shortcut hints, animated sidebar.** Holding ⌘ alone shows each
+  shortcut as grey text in place, with nothing moving, and tooltips read
+  "Back (⌘[)". Sidebar rows animate as you expand and collapse them.
+
+### Removed
+
+- **Tab Rename, Change Color, and Change Icon.** Tabs no longer have a color
+  dot or a custom icon; `codans tab rename` still sets a tab's title.
+
+### Fixed
+
+- **A tab's icon matches its selected pane.** It shows the agent's mark only
+  while that agent runs, a script's icon for a script pane, and a terminal
+  otherwise.
+- **New worktrees respect auto-switch off.** Creating one no longer moves
+  your selection; the new row gets the New badge.
+- **Workflows no longer hang when an agent exits early.** The run asks you
+  to relaunch, skip, or cancel that role.
+
+## [0.9.2] - 2026-11-02
+
+### Added
+
+- **Hidden panes give memory back sooner, and you can turn it off.** Under
+  memory pressure, terminal views of hidden panes are released at once; recent
+  worktrees stay ready. Settings → General → Memory turns this off.
+- **Sleeping agents stay visible and reachable.** An agent whose pane has no
+  terminal view keeps its Agents View row with a sleep glyph; click to wake it.
+  `pane send`, `pane capture`, and `agent status` work on it too.
+- **Attach files in New Agent.** It has the Command Queue's paperclip, picked
+  paths go in at the caret, and the Command Queue keeps unsent text until you
+  send it or close the pane.
+
+### Changed
+
+- **Toggle Sidebar is now ⌘/.** The sidebar button's tooltip shows the
+  current shortcut. A shortcut you set yourself stays.
+- **The selected tab looks like a system tab.** On macOS 26 it is drawn with
+  the system tab glass and matches Safari's height, hover, and drag.
+
+### Fixed
+
+- **PR badges stay current in every project.** All projects refresh while
+  the app is in front, and a PR an agent pushes or opens shows in seconds.
+- **Closing panes and tabs is steadier.** A crash after closing a pane is
+  gone, and closing the shown tab no longer flashes the window.
+- **Back and Forward always show where you land.** The sidebar switches to
+  All when the current category does not list that worktree.
+
+## [0.9.1] - 2026-10-31
+
+### Changed
+
+- **Moving a pane follows the pointer.** Drag a pane's title: its title chip
+  rides under the pointer and the drop target lights up as a half card. The
+  lagging drag image and the stray box inside the window are gone.
+- **Pane actions open a native menu.** The header's actions button now shows
+  the same items as the pane's right-click menu. Queued commands show as a
+  count badge in the header; click it to see and remove them.
+- **Pane cards read more clearly.** Unfocused cards fade back onto the
+  window glass, terminal text has even room inside the card, and the gap
+  between panes is easier to grab for resizing.
+
+### Fixed
+
+- **Sidebar filters stay round in a narrow sidebar.** They shrink to equal
+  circles instead of squashing.
+- **Sidebar rows no longer show through the Agents View card** when the list
+  scrolls under it.
+- **A dragged tab keeps its color** instead of turning into a gray capsule.
+
+## [0.9.0] - 2026-10-31
+
+### Added
+
+- **Choose where a resumed agent session opens.** Session History, now in
+  each pane's header menu, resumes a session in a new tab, in place in that
+  pane, or in a new split on any side. The last choice is kept app-wide.
+
+### Changed
+
+- **Panes are titled cards.** Each pane is a rounded card with a live title
+  and split and close buttons; drag the header to move it. A worktree with
+  one tab hides the tab bar, and new tabs come from ⌘T.
+- **Notifications moved to the sidebar filter bar.** The Unread filter
+  (bell) lists only worktrees with unread notifications and turns orange
+  while any are unread. Right-click it to mark all as read; ⌘U opens it.
+
+### Removed
+
+- **Header notification bell, its inbox popover, and the Pin filter.** The
+  "Show status-bar bell" setting is gone too. A saved Pin filter opens as
+  All; pinned worktrees still sort first.
+
+### Fixed
+
+- **Workspace groups accept branch-style names.** A name such as
+  `feat/login` now works; the group's folder gets a safe name derived from it.
+- **`.codans/` no longer shows as untracked** after a workflow run in a
+  repository that has no workflow definitions.
+
+## [0.8.0] - 2026-10-29
+
+### Added
+
+- **Agents report their own state.** Claude Code, Pi, and omp now tell
+  codans when they work, wait, or fail: the Agents View shows working as
+  soon as a prompt is sent, what a blocked agent needs, and a new error state.
+- **Workspaces hold branch groups.** A named group checks out one branch
+  in every project of a Workspace, each with its own terminal, and starts
+  agents once every checkout exists; create one from the header's `+`.
+- **The project sidebar has filters.** Capsules at the top of the sidebar
+  show All, Remote, Workspace, Pinned, or only worktrees with a pull
+  request.
+
+### Changed
+
+- **Breaking: the catalog moves to version 4.** The first launch backs up
+  and migrates it, putting each Workspace's checkouts and terminals into a
+  group named `existing`. Earlier builds cannot read the new catalog.
+- **The command queue lives in the pane.** ⌘L opens a composer that sends
+  now or on a schedule, once or repeating; queued commands float at the
+  top of their pane and fold into the queue button when hidden.
+- **The finished agent state is now called done.** `codans agent status`
+  reports `done`; `codans agent wait --until finished` still works.
+
+### Removed
+
+- **Breaking: `codans workspace` no longer takes branch flags.** Branches
+  belong to groups now: use `codans workspace group create` and `group
+  delete`.
+
+### Fixed
+
+- **Panes keep their shell and agent after a cache clean.** Pane sessions
+  moved from `~/Library/Caches/codans`, which cache cleaners wipe, to
+  `~/.codans/run`; reattached panes also open at full width again.
+- **Tabs and the Git viewer follow what you see.** A tab started by a
+  script or agent launch shows the live title, and the Git viewer opens
+  on the selected worktree.
+
+## [0.7.11] - 2026-10-15
+
+### Added
+
+- **Workflows run multi-agent routines.** Built-in review loop, handoff,
+  and advisor workflows start from the Command Palette or `codans
+  workflow`; create and manage your own in Settings → Workflows.
+- **A New Agent dialog replaces the header's agent menu.** The header
+  button or ⌘⇧N picks a project, a new worktree or branch, a prompt, and
+  an agent; an unsent draft is kept for the next open.
+- **The worktree context menu reaches GitHub and scoped changes.** Open
+  in GitHub, Open Pull Request, Show Uncommitted, and Show Outgoing act
+  on the right-clicked worktree.
+
+### Changed
+
+- **One diff window serves every worktree.** Opening another worktree's
+  changes retargets the open window instead of adding one; each
+  worktree's view settings still come back.
+
+### Removed
+
 - **The header no longer shows the worktree processes badge.** The
   terminal-count button and its process list popover are gone. A tab's
   running process still shows on tab hover.
 
 ### Fixed
 
-### Security
+- **Notifications skip what you already saw.** No banner comes from the
+  pane you are typing into or for an agent stop you already looked at;
+  a crash still notifies.
+- **Missing folders and remote-less repos no longer break creation.** A
+  moved project folder shows "Folder not found" instead of an empty tab,
+  and a new worktree in a repo without `origin` skips the fetch.
+- **Long sessions stay healthy.** Panes re-attach at their real size, the
+  sidebar no longer keeps an old branch after a checkout, and CLI calls
+  no longer time out after the app quits unexpectedly.
 
 ## [0.7.10] - 2026-10-09
 

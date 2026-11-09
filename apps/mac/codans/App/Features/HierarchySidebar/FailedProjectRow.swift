@@ -7,7 +7,7 @@ import SwiftUI
 struct FailedProjectRow: View {
   let name: String
   let rootPath: String
-  /// SSH destination for a Server project, `nil` for local. Renders the
+  /// SSH destination for a Remote Project, `nil` for local. Renders the
   /// network glyph next to the name and prefixes the subtitle so a failed
   /// remote row never reads like a missing *local* folder.
   var remoteAuthority: String?
@@ -32,11 +32,11 @@ struct FailedProjectRow: View {
           Text(name)
             .foregroundStyle(.secondary)
           if let remoteAuthority {
-            Image(systemName: "tv.badge.wifi")
+            Image(systemName: RemoteProjectMarker.symbol)
               .font(.caption2)
               .foregroundStyle(.tertiary)
               .help(remoteAuthority)
-              .accessibilityLabel("Remote server \(remoteAuthority)")
+              .accessibilityLabel("Remote host \(remoteAuthority)")
           }
         }
         Text(remoteAuthority.map { "\($0):\(rootPath)" } ?? rootPath)

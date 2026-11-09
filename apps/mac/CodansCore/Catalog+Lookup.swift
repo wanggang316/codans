@@ -27,4 +27,11 @@ extension Catalog {
     }
     return projects.first { $0.selectedWorktreeID != nil }?.id
   }
+
+  /// The worktree the detail area shows: the selected worktree of
+  /// `displayedSelectedProjectID`.
+  public var displayedSelectedWorktreeID: WorktreeID? {
+    guard let projectID = displayedSelectedProjectID else { return nil }
+    return projects.first { $0.id == projectID }?.selectedWorktreeID
+  }
 }

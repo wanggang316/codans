@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// Git-over-SSH for Server projects. Mirrors the local `GitWorktreeCLI` +
+/// Git-over-SSH for Remote Projects. Mirrors the local `GitWorktreeCLI` +
 /// reconcile discovery surface, but every `git` invocation is wrapped by
 /// `SSHCommand.invocation` and runs through the shared `CommandRunner`
 /// (executable = `/usr/bin/ssh`). A Server host has no bundled `wt` script, so
@@ -86,23 +86,29 @@ nonisolated struct RemoteGitService: Sendable {
 
   /// POSIX script behind `resolveAbsolutePath`: expand an intended leading `~`
   /// (double-quoted `$1` never tilde-expands, so the expansion is explicit and
-  /// nothing else in the path is interpreted), then `cd && pwd -P`. Exposed for
-  /// the command-shape tests.
+  /// nothing else in the path is interpreted), then `cd` and print the
+  /// physical path. The shell builtin `pwd -P` keeps the typed case on a
+  /// case-insensitive host (`~/Repo` for the folder `repo`), so the duplicate
+  /// check (ADR 0006) would see two folders. The external `pwd` calls
+  /// `getcwd`, which returns the on-disk names; `env` runs it through `PATH`.
+  /// A host without it falls back to the builtin. Exposed for the script tests.
   static let resolvePathScript = """
     case "$1" in
       "~") target=$HOME ;;
       "~/"*) target=$HOME/${1#"~/"} ;;
       *) target=$1 ;;
     esac
-    cd -- "$target" 2>/dev/null && pwd -P
+    cd -- "$target" 2>/dev/null || exit 1
+    env pwd -P 2>/dev/null || pwd -P
     """
 
-  /// Resolve a typed remote path to an absolute, canonical (`pwd -P`) path on
-  /// the host in a single round trip — expanding a leading `~`, verifying the
-  /// directory exists, and normalizing symlinks, all at once. The path travels
-  /// as a positional argument (never interpolated into the script), so spaces
-  /// and shell metacharacters are inert. Returns `nil` when the host is
-  /// unreachable or the path does not exist, so the caller can reject the add.
+  /// Resolve a typed remote path to an absolute, physical path with the
+  /// on-disk case on the host in a single round trip — expanding a leading
+  /// `~`, verifying the directory exists, and normalizing symlinks, all at
+  /// once. The path travels as a positional argument (never interpolated
+  /// into the script), so spaces and shell metacharacters are inert. Returns
+  /// `nil` when the host is unreachable or the path does not exist, so the
+  /// caller can reject the add.
   /// A login shell may print banners before the probe; the result is the last
   /// non-empty stdout line.
   func resolveAbsolutePath(_ path: String) async -> String? {
@@ -116,6 +122,37 @@ nonisolated struct RemoteGitService: Sendable {
     guard case .exited(let code, let stdout, _, _) = outcome, code == 0 else { return nil }
     let resolved = Self.lastNonEmptyLine(of: decode(stdout))
     return resolved.isEmpty ? nil : resolved
+  }
+
+  /// POSIX script behind `canonicalWorkTreeRoot`: print git's top-level path
+  /// only when `$1` is the root of a work tree (`--show-prefix` is empty).
+  /// git reports the physical path with the on-disk case, which is the form
+  /// `git worktree list` uses. `pwd -P` keeps the typed case on a
+  /// case-insensitive host, so it cannot decide the identity. Exposed for the
+  /// script tests.
+  static let workTreeRootScript = """
+    cd -- "$1" 2>/dev/null || exit 1
+    top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+    prefix=$(git rev-parse --show-prefix 2>/dev/null) || exit 1
+    [ -z "$prefix" ] || exit 1
+    printf '%s\\n' "$top"
+    """
+
+  /// The host git's form of `path` when `path` is the root of a work tree,
+  /// else `nil` (not a repository, a subdirectory, or a failed probe). A
+  /// Remote Project root entered through a symlink (`/tmp` on macOS, a
+  /// symlinked home on Linux) differs as a string from the paths
+  /// `git worktree list` reports; this is the host's answer for which string
+  /// is the same directory. It never touches this Mac's filesystem.
+  func canonicalWorkTreeRoot(of path: String) async -> String? {
+    let outcome = await run(
+      executable: "/bin/sh",
+      arguments: ["-c", Self.workTreeRootScript, "sh", path],
+      workingDirectory: nil
+    )
+    guard case .exited(let code, let stdout, _, _) = outcome, code == 0 else { return nil }
+    let root = Self.lastNonEmptyLine(of: decode(stdout))
+    return root.hasPrefix("/") ? root : nil
   }
 
   /// The last non-empty line of `output`, trimmed. A login shell sources

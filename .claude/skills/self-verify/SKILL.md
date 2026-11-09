@@ -1,7 +1,6 @@
 ---
 name: self-verify
 description: Explicitly verify a codans change end to end in an isolated Debug instance (private config, cache, and socket) through the bundled codans-dev CLI, PID-scoped Accessibility, and window screenshots. Use only when the user asks for self-verify, end-to-end verification against a running Debug build, or to drive and check codans UI behavior (Settings, popovers, menus, toolbar, sidebar). Do not invoke after ordinary implementation work, and do not use it in place of unit tests, make mac-check, or make mac-build.
-disable-model-invocation: true
 ---
 
 # Self Verify
@@ -45,6 +44,9 @@ Gump works in the release app and in dev builds while you test. These rules prot
 - Do not take focus. Semantic commands never activate the app. Use physical input only when no semantic action
   exists, and only through `sv_click` / `sv_hover`.
 - Never send bare keystrokes or key codes: they go to the frontmost app, which can be Gump's terminal.
+  A modifier gesture (hold ⌘) can go to the instance only: post a `flagsChanged` `CGEvent` with
+  `postToPid(<instance pid>)`. The inactive instance drops some of these events, so log what the app receives
+  and compare each screenshot with the received state, not with what you posted.
 - Do not launch a real agent, clone, or touch `~/.codans` unless the scenario requires it and restores it.
 - Preserve unrelated working-tree changes. Do not run `xcodebuild test` while an instance runs: it rewrites the
   Debug bundle under it.

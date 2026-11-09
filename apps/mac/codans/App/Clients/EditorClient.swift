@@ -14,7 +14,7 @@ nonisolated struct EditorClient: Sendable {
   var describe: @Sendable () async -> [EditorDescriptor]
   var resolve: @Sendable (_ preferred: EditorID?) async throws -> EditorDescriptor
   var open: @Sendable (_ directory: URL, _ preferred: EditorID?) async throws -> EditorChoice
-  /// Server-project worktrees: open `remotePath` on `host` via the resolved
+  /// Remote Project worktrees: open `remotePath` on `host` via the resolved
   /// editor's SSH remoting CLI (see `EditorService.openRemote`).
   var openRemote:
     @Sendable (_ host: RemoteHost, _ remotePath: String, _ preferred: EditorID?) async throws

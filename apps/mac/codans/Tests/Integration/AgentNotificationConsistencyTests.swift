@@ -102,7 +102,7 @@ struct AgentNotificationConsistencyTests {
     let idleViewport = TerminalEvent.paneViewportChanged(fixture.paneID, text: "codex> ")
     fixture.registry.onTerminalEvent(idleViewport)
     await fixture.detector.handle(idleViewport)
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .finished)
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .done)
 
     let idle = TerminalEvent.paneIdle(
       fixture.paneID,
@@ -111,7 +111,7 @@ struct AgentNotificationConsistencyTests {
     fixture.registry.onTerminalEvent(idle)
     await fixture.detector.handle(idle)
 
-    #expect(fixture.registry.entries[fixture.paneID]?.state == .finished)
+    #expect(fixture.registry.entries[fixture.paneID]?.state == .done)
     #expect(fixture.store.entries.count == 1)
     #expect(fixture.store.entries.first?.kind == .taskFinished)
     #expect(fixture.store.entries.first?.source.paneID == fixture.paneID)

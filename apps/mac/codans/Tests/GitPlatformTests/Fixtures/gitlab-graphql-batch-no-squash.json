@@ -1,0 +1,139 @@
+{
+  "data": {
+    "currentUser": {
+      "username": "codans-dev"
+    },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMyAxNjo0OTo0Mi4xMzA1MDAwMDAgKzAwMDAiLCJpZCI6IjEzIn0"
+        },
+        "nodes": [
+          {
+            "iid": "2",
+            "title": "Squash not allowed",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-no-squash",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/no-squash/-/merge_requests/2",
+            "updatedAt": "2026-11-03T19:08:22Z",
+            "detailedMergeStatus": "MERGEABLE",
+            "squashReadOnly": true,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/no-squash"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/no-squash",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/no-squash"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjM2In0"
+                },
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T19:08:25Z",
+                    "finishedAt": "2026-11-03T19:08:25Z",
+                    "webPath": "/codans-e2e/no-squash/-/jobs/36"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "1",
+            "title": "Behind target",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-behind",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/no-squash/-/merge_requests/1",
+            "updatedAt": "2026-11-03T16:49:42Z",
+            "detailedMergeStatus": "NEED_REBASE",
+            "squashReadOnly": true,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/no-squash"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/no-squash",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/no-squash"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjIwIn0"
+                },
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:45Z",
+                    "finishedAt": "2026-11-03T16:49:46Z",
+                    "webPath": "/codans-e2e/no-squash/-/jobs/20"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

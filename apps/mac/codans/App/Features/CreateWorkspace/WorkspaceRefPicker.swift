@@ -12,7 +12,7 @@ import SwiftUI
 /// choosing. A `Button` disables for real.
 struct WorkspaceRefPicker: View {
   let title: String
-  let refs: MemberDraft.RefsState
+  let refs: RefsState
   let selection: String?
   /// Title of the first item, which stands for a nil selection.
   let placeholder: String

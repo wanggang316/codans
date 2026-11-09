@@ -33,6 +33,21 @@ struct HierarchyManagerTests {
     #expect(fakeRuntime.ensureSurfaceCalls.isEmpty)
   }
 
+  /// The pending-creation flow registers the worktree without selecting
+  /// it: `RootFeature` alone decides whether the user lands on it.
+  @Test
+  func createWorktreeWithoutSelectKeepsSelection() throws {
+    let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
+    let current = try manager.createWorktree(
+      in: projectID, name: "main", path: "/repo", branch: "main")
+
+    let created = try manager.createWorktree(
+      in: projectID, name: "feat", path: "/repo-feat", branch: "feat", select: false)
+
+    #expect(manager.catalog.projects[0].worktrees.contains { $0.id == created })
+    #expect(manager.catalog.projects[0].selectedWorktreeID == current)
+  }
+
   @Test
   func removeNonExistentWorktreeThrows() throws {
     let projectID = manager.addProject(name: "project", rootPath: "/tmp", gitRoot: "/tmp")
@@ -273,19 +288,6 @@ struct HierarchyManagerTests {
   // MARK: - P0.2: Project Management mutations
 
   @Test
-  func reorderProjectsMovesInPlaceAndPersists() throws {
-    let a = manager.addProject(name: "a", rootPath: "/tmp/a")
-    let b = manager.addProject(name: "b", rootPath: "/tmp/b")
-    let c = manager.addProject(name: "c", rootPath: "/tmp/c")
-
-    // Move the third entry ("c") to the front.
-    try manager.reorderProjects(from: IndexSet(integer: 2), to: 0)
-
-    let order = manager.catalog.projects.map(\.id)
-    #expect(order == [c, a, b])
-  }
-
-  @Test
   func setProjectLoadStateUpdatesAndHandlesEqualValue() throws {
     let projectID = manager.addProject(name: "p", rootPath: "/tmp/p")
     #expect(manager.catalog.projects[0].loadState == .loading)
@@ -393,11 +395,25 @@ struct HierarchyManagerTests {
     let match = manager.isPathRegistered(canonical: HierarchyManager.canonicalPath("/tmp/p"))
     #expect(match == projectID)
 
-    // The canonical form strips symlinks and trailing slashes — callers always
-    // pass canonical paths. Passing a non-canonical form intentionally does NOT
-    // match, enforcing the contract.
-    let absent = manager.isPathRegistered(canonical: "/tmp/p/")
-    #expect(absent == nil)
+    // The symlink and trailing-slash forms of the same local path match.
+    #expect(manager.isPathRegistered(canonical: "/tmp/p/") == projectID)
+  }
+
+  @Test
+  func isPathRegisteredIgnoresRemoteProjectWithSamePath() {
+    let path = HierarchyManager.canonicalPath("/tmp/p")
+    _ = manager.addRemoteProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
+    #expect(manager.isPathRegistered(canonical: path) == nil)
+
+    let localID = manager.addProject(name: "p", rootPath: path)
+    #expect(manager.isPathRegistered(canonical: path) == localID)
+  }
+
+  @Test
+  func projectContainingIgnoresRemoteProject() {
+    let path = HierarchyManager.canonicalPath("/tmp/p")
+    _ = manager.addRemoteProject(name: "p", remoteHost: RemoteHost(alias: "mini"), rootPath: path)
+    #expect(manager.project(containing: path + "/src") == nil)
   }
 
   @Test

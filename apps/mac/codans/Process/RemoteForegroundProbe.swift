@@ -3,7 +3,7 @@ import Foundation
 
 /// Remote analogue of the local foreground-job poller: reads each remote
 /// pane's foreground process group over SSH so `AgentBinder` classifies and
-/// releases agents in Server-project panes exactly like local ones, and the
+/// releases agents in Remote Project panes exactly like local ones, and the
 /// busy-spinner classifier sees real commands instead of the local `ssh`
 /// tunnel.
 ///

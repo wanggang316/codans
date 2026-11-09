@@ -22,16 +22,50 @@ pane 的 shell 由 zmx daemon 持有，surface 只是一个 `zmx attach` 客户�
 | 条件 | 原因 |
 |---|---|
 | 不在任何窗口内已超过 20 分钟 | 避免来回切换 tab 时反复重建 |
+| 不在最近选中的 3 个 worktree 的选中 tab 内 | 切回常用 worktree 时免去重新 attach 与屏幕重放 |
 | 画面静止至少 60 秒 | 仍在重绘的 pane 可能有用户在等的输出 |
 | 前台是 shell 提示符或 agent，不是运行中的命令 | 命令在跑时输出由 surface 消费 |
 | 不是远程 pane | 其 surface 下是 ssh 隧道，回收收益小、风险大 |
 | surface 处于 ready | 不碰 crashed / exited 状态 |
-| 无 veto：agent 不在回合中，没有排队命令 | 排队命令只在有 surface 时才会发出 |
+| 无 veto：没有只靠屏幕判断状态、且处于回合中的 agent，没有排队命令 | 无 surface 时屏幕不被读取，这类 agent 的状态会停在 cached；排队命令只在有 surface 时才会发出 |
 
-veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态和命令队列位于 Runtime 层之上。窗口被遮挡或最小化时 surface 仍视为「在窗口内」，用户回来时不会遇到重新 attach。
+### 最近选中的 worktree
+
+最近选中的 3 个 worktree（`SurfaceReclaimPolicy.recentWorktreeCount`），其选中 tab 内的 pane 不被定时扫描回收，无论隐藏多久。切回这些 worktree 时，用户首先看到的就是这些 pane。
+
+- 最近度来自 worktree 选择：`TerminalEngine.startWorktreeSelectionTracking()` 观察 `Catalog.displayedSelectedWorktreeID`，每次变化记入 `WorktreeSelectionHistory`（最新在前，最多 3 个）。重新选中只把它移到最前，不重复记录。
+- 扫描时引擎把 pane 的排名（0 为当前选中）写入 `SurfaceReclaimPolicy.Candidate.selectedTabRecency`；只有 pane 在其 worktree 的选中 tab 内时才有排名。判定保持纯函数，可单独测试。
+- 同一 worktree 的后台 tab 不豁免。worktree 被挤出最近 3 个后，其选中 tab 按普通规则回收。
+- 内存压力扫描忽略最近度，只保留当前选中（它在窗口内，本就不回收）。
+
+### 内存压力触发
+
+除定时扫描外，`TerminalEngine.startMemoryPressureMonitoring()` 订阅进程的内存压力事件（`DispatchSource.makeMemoryPressureSource`，`.warning` 与 `.critical`，见 `MemoryPressureMonitor`）。每个事件立即跑一次扫描（`handleMemoryPressure`），把所有隐藏且符合条件的 surface 一次回收：
+
+- 跳过「隐藏 20 分钟」与「画面静止 60 秒」两条阈值（`SurfaceReclaimPolicy.shouldReclaim(_:ignoringThresholds:)`）。系统此刻要内存，等待阈值没有意义。
+- 也跳过最近 worktree 的豁免：只保留当前选中。
+- 其余条件全部照旧：不在窗口内、本地 pane、surface ready、前台不是运行中的命令、无 veto。
+- 每次压力扫描记一行日志 `surface.reclaim.pressure level=<warning|critical> reclaimed=<n>`。
+
+`.normal`（压力解除）不触发任何动作；已回收的 pane 在再次显示时按原路径重新 attach。
+
+Debug 构建另外监听 Darwin 通知 `dev.codans.debug.memory-pressure`，`notifyutil -p dev.codans.debug.memory-pressure` 注入一次 `.warning` 事件。`memory_pressure -S` 需要 root，此入口用于不提权测量回收前后的内存。
+
+veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态和命令队列位于 Runtime 层之上。agent 是否需要 surface 由 `AgentStateStore.needsSurfaceToTrackTurn` 判断：处于 `working` / `blocked`，且状态不来自 OSC 7501 program status。上报 program status 的 agent 在 detach 后仍由被动 watcher 观察，回合结束时状态照常更新，所以回合中也可以被回收。这类 pane 的屏幕在 program status 生效期间不被读取，「画面静止」从最后一次屏幕变化算起，转圈动画不会阻止回收。窗口被遮挡或最小化时 surface 仍视为「在窗口内」，用户回来时不会遇到重新 attach。
+
+### 开关
+
+Settings → General → Memory 的「Release terminal views of hidden panes」（`GeneralSettings.reclaimHiddenSurfaces`，默认开）控制回收：
+
+- 关闭时，定时扫描与内存压力扫描都不回收任何 surface。扫描仍刷新显示中 pane 的 `lastDisplayedAt`，重新打开后隐藏时长从 pane 真正离开屏幕时算起。
+- 已回收的 pane 保持 detach，直到再次显示时按原路径重新 attach。
+- 引擎在每次扫描时读取 `TerminalEngine.isReclaimEnabled`（app 层注入，读 `SettingsStore`），因此修改即时生效，不需要重启。
+- 开启时 `CODANS_SURFACE_RECLAIM_SECONDS` 照常覆盖阈值；关闭时该变量不起作用。
 
 ### 重新 attach 与已回收状态
 
+- 重新 attach 以回收时 surface view 的尺寸起步。libghostty 在 `ghostty_surface_new` 内就按 surface 的初始尺寸 fork `zmx attach`，此时还没有任何布局；`zmx attach` 把这个尺寸作为 Init 发给 daemon。若用占位尺寸（libghostty 默认 800×600 px，或 view 的 800×600 pt 占位 frame），正在运行的 TUI 会先被 resize 到窄宽度再回到真实宽度，有时停在窄宽度直到用户改变窗口尺寸。因此 fork 的 `ghostty_surface_config_s` 增加了 `initial_width` / `initial_height`。初始尺寸取自将要显示该 pane 的槽位：`LeafView` 把 `GeometryReader` 量到的尺寸随 `PaneHostFeature.task(slotSize:)` 传给 `ensureSurface`。回收时记下的 view 尺寸只在没有槽位尺寸时兜底：只靠它时，实测仍有重新 attach 从 800×600 pt 占位起步（zmx 日志 `init resize rows=42 cols=113`，随后才是真实的 229 列），Claude Code 停在约一半宽度。
+- 回收期间的外观切换由重新 attach 补报。跟随终端外观的程序（如 `theme: auto` 的 Claude Code）通过 mode 2031 订阅 color scheme 报告；pane 隐藏时没有 surface，外观切换不会送达程序。重新 attach 时 zmx 把保存的终端状态（含 mode 2031 的开启）重放进新 surface，fork 的 libghostty 在 mode 2031 开启时立即按 surface 当前外观回一次 `CSI ? 997 ; 1 n`（dark）/ `CSI ? 997 ; 2 n`（light），程序随之切换主题。新 surface 从 app 的 conditional state 继承当前外观，所以这次报告即是当前外观。只在启动时查询 OSC 10/11、不订阅 mode 2031 的程序（如 Codex）不受益。
 - 重新 attach 不重放 `initialCommand`：那会把 `claude` 之类的命令当作键入送进正在运行的 TUI。也不再发 `.paneCreated` / `.paneReady`，pane 从未消失。
 - 回收时保留前台快照与进程行，重新 attach 后轮询继续，不会产生一次假的「agent 解绑 / 重绑」。
 - 已回收 pane 被关闭或归档时，除了 kill daemon，还补做 `handleSurfaceClose` 的清理。
@@ -39,12 +73,18 @@ veto 由 app 层注入（`TerminalEngine.reclaimVeto`），因为 agent 状态�
 
 ## 已知取舍
 
-- 已回收期间，agent 若被定时任务唤醒，只有 hooks 能更新其状态；viewport 与 OSC 信号要等 pane 再次显示。
+- 已回收期间屏幕不被读取：viewport 推导的状态停在回收时（Agents View 标为 `source: cached`）。OSC 7501 / 9 / 标题由被动 zmx watcher 继续送达，daemon 退出时 agent 行随之删除，见 [active-agents-view.md](active-agents-view.md#未挂接-pane-的观测)。
+- 重新挂接时 watcher 先停、surface 再连上 daemon；这之间写出的 OSC 信号两边都收不到。agent 的下一份报告会纠正状态，见 [active-agents-view.md](active-agents-view.md#未挂接-pane-的观测)。
 - 已回收 pane 不计入 `runningPaneCount`（force-remove 确认文案中的进程数），会少算。
 - 发往已回收 pane 的排队命令要等 pane 再次显示后才发出，与「从未打开过的 pane」一致。
-- 阈值是常量，没有设置项。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。
+- 阈值是常量，不能在设置里调整，只能整体开关（见[开关](#开关)）。`CODANS_SURFACE_RECLAIM_SECONDS` 只用于冒烟测试（见 [environment.md](environment.md)）。
 
 ## 验证
 
-- `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析。
+- `TerminalEngineMemoryPressureTests.disabledReclaimDetachesNothing` 覆盖开关：关闭时定时与压力扫描都不回收，重新开启后下一次扫描即回收。`ReclaimHiddenSurfacesCodableTests` 与 `SettingsWriterPhase2Tests` 覆盖默认值与持久化。
+- `SurfaceReclaimPolicyTests` 覆盖判定与环境覆盖的解析，包括内存压力下忽略阈值与最近度、其余规则仍生效。
+- `AgentStateStoreDetachedTests` 覆盖 `needsSurfaceToTrackTurn`：上报 program status 的回合中 agent 不需要 surface；靠屏幕判断（含 detach 后的 cached）的回合中 agent 需要；回合之间的 agent 不需要。
+- `WorktreeSelectionHistoryTests` 覆盖最近度记录：最新在前、重选不重复、超过 3 个时最旧的移出。`TerminalEngineMemoryPressureTests` 覆盖引擎侧：最近 3 个 worktree 的选中 tab 不被定时扫描回收，后台 tab 与较旧 worktree 照常回收，第 4 个 worktree 被选中后最旧的选中 tab 被回收；压力扫描忽略最近度；选择变化被记录。
+- `TerminalEngineMemoryPressureTests` 用假的 `ReclaimableSurfaceHost`（生产中是 `GhosttyRuntime`）注入 surface 与压力事件：隐藏且空闲的 shell / agent 被 detach，并记为已回收、发出解除挂接通知、启动被动 watcher；显示中、被 veto、运行命令、前台未知的 pane 保留；detach 失败的 pane 不计入回收数。远程 pane 的规则由策略测试覆盖。
+- 隔离 Debug 实例，11 个 tab 各一个空闲 shell（1 个显示、10 个隐藏），注入一次压力事件：phys footprint 858 MB → 228 MB，线程 51 → 11，挂接的 surface 11 → 1，日志 `reclaimed=10`；再显示被回收的 tab，原 shell 会话照常可用。
 - 隔离 Debug 实例（`CODANS_SURFACE_RECLAIM_SECONDS=8`），两个 tab 各一个 pane，显示 B 以隐藏 A：线程 17 → 12，A 的 zmx socket 仍在，`pane read` 仍可用；再次显示 A：线程回到 17，shell 里导出的变量仍在，`initialCommand` 的副作用只出现一次。

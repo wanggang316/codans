@@ -7,12 +7,6 @@ import SwiftUI
 /// of the feature that drives it — future milestones bolt drag /
 /// middle-click affordances onto the same shape without widening that
 /// dependency.
-///
-/// Rename UX lives outside the chip: the context menu's Rename action
-/// fires `onRenameRequested`, and the parent (`TabBarView`) presents
-/// the editor as a window-attached sheet via `.sheet(item:)`. Keeping
-/// the editor at the bar level avoids per-chip popover state and gives
-/// rename a proper modal surface.
 struct TabChipView: View {
   let title: String
   let isActive: Bool
@@ -25,8 +19,8 @@ struct TabChipView: View {
   /// Pre-resolved chord text to display in the chip's trailing slot while ⌘ is held —
   /// e.g. `"⌘1"` for the first chip, `"⌘0"` for the tenth, `nil` for the rest. The chord
   /// temporarily takes the close-button slot so the hint sits inside the chip's rounded
-  /// rectangle rather than crowding the inter-chip gap. Resolved at the row level so
-  /// `TabChipView` stays free of environment-key dependencies.
+  /// rectangle rather than crowding the inter-chip gap. Resolved at the row level; the
+  /// hint itself reads whether ⌘ is held.
   var chordHint: String?
   let onSelect: () -> Void
   let onClose: () -> Void
@@ -34,16 +28,11 @@ struct TabChipView: View {
   let onCloseOthers: () -> Void
   let onCloseToRight: () -> Void
   let onCloseAll: () -> Void
-  let onRenameRequested: () -> Void
-  let onChangeColor: () -> Void
-  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
-  let tabColor: TabColor?
-  /// SF Symbol resolved by `Tab.resolvedIcon(autoFallback:)` — `nil`
-  /// hides the leading slot so unlocked tabs without a runtime fallback
-  /// keep the chip clean.
+  /// Glyph of the tab's selected pane (see `PaneGlyph`) — `nil` hides the
+  /// leading slot.
   var icon: String?
-  /// Script-tint colour for `icon` while the tab's run pane executes; see
+  /// Script-tint colour for `icon` while the selected run pane executes; see
   /// `TabChipLabel.iconTint`.
   var iconTint: Color?
   /// Overflow stacking (`TabStackLayout`): the visible width of this chip
@@ -109,9 +98,6 @@ struct TabChipView: View {
       TabChipContextMenu(
         isOnlyTab: isOnlyTab,
         isLastTab: isLastTab,
-        onRename: onRenameRequested,
-        onChangeColor: onChangeColor,
-        onChangeIcon: onChangeIcon,
         onCopyID: onCopyID,
         onClose: onClose,
         onCloseOthers: onCloseOthers,
@@ -128,7 +114,7 @@ struct TabChipView: View {
   private var chipContent: some View {
     // Hit layout: the select Button claims the whole chip rectangle so
     // a click anywhere on the chip selects it; the close button (leading)
-    // and the color dot / chord hint (trailing) are overlays on the same
+    // and the chord hint (trailing) are overlays on the same
     // rectangle so the close button intercepts its own taps without
     // forwarding to the outer Button. Without this, an HStack-of-Button-
     // plus-sibling layout leaves dead zones that swallow clicks.
@@ -172,23 +158,13 @@ struct TabChipView: View {
         .padding(.leading, TabBarMetrics.chipSlotInset)
     }
     .overlay(alignment: .trailing) {
-      // Chord hint takes the trailing slot while ⌘ is held; otherwise the
-      // tab's color dot (when set) sits there.
-      Group {
+      // The chord takes the trailing slot while ⌘ is held.
+      ZStack(alignment: .trailing) {
         if let chordHint {
-          Text(chordHint)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
-        } else if let tabColor {
-          Circle()
-            .fill(tabColor.swiftUIColor)
-            .frame(width: 8, height: 8)
-            .frame(width: TabBarMetrics.closeButtonSize)
+          ShortcutHintLabel(chord: chordHint, trailingGap: TabBarMetrics.chordHintExtraInset)
+            .shortcutHintIncoming()
         }
       }
-      .padding(.trailing, TabBarMetrics.chipSlotInset)
-      .allowsHitTesting(false)
     }
   }
 

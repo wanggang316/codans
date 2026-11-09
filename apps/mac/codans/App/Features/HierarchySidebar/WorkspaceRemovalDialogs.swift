@@ -1,23 +1,58 @@
+import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// The two workspace removal confirmations, extracted so the sidebar's
-/// modifier chain stays under the type-checker limit.
-///
-/// Removing a member is destructive the way Delete Worktree is: the
-/// checkout is moved out and its branch deleted. Removing a workspace
-/// offers the entry-only default (nothing on disk changes) and the
-/// delete-checkouts variant, which unregisters every member and deletes
-/// the folder only when all of them could be unregistered.
+/// A source project about to leave a Workspace. Captured when the user asks,
+/// so the confirmation names the row and the terminals it stops even if the
+/// catalog changes before the answer. Shared by the sidebar and Settings.
+struct PendingWorkspaceSourceRemoval: Equatable {
+  var projectID: ProjectID
+  var worktreeID: WorktreeID
+  var displayName: String
+  var sourceGitRoot: String
+  /// Busy tabs of the reference row. Removing the reference closes them;
+  /// the source project's own rows are not touched.
+  var runningTerminals: [String]
+
+  /// `nil` unless `worktreeID` is a reference row: only a source project
+  /// leaves a Workspace on its own; a group member goes with its group.
+  @MainActor
+  init?(worktreeID: WorktreeID, in project: Project, tabIsDirty: (TabID) -> Bool) {
+    guard let row = project.worktrees.first(where: { $0.id == worktreeID }),
+      row.workspaceSlot?.role == .reference
+    else { return nil }
+    self.projectID = project.id
+    self.worktreeID = worktreeID
+    self.displayName = row.name
+    self.sourceGitRoot = row.sourceGitRoot ?? row.path
+    self.runningTerminals = RunningTerminalNames.names(in: row) { tabIsDirty($0.id) }
+  }
+
+  var title: String { "Remove “\(displayName)” from the workspace?" }
+
+  var message: String {
+    var text =
+      "The project leaves the workspace and its default group. Its folder and branches do not change, and existing groups keep their checkouts."
+    if !runningTerminals.isEmpty {
+      text += " These terminals stop: \(runningTerminals.joined(separator: ", "))."
+    }
+    return text
+  }
+}
+
+/// The Workspace confirmations, extracted so the sidebar's modifier chain
+/// stays under the type-checker limit: a source project leaving the
+/// Workspace, and Remove Workspace (sidebar only, or on to the delete sheet
+/// that `SidebarSheetPresenter` shows).
 struct WorkspaceRemovalDialogs: ViewModifier {
   @Bindable var store: StoreOf<HierarchySidebarFeature>
 
   func body(content: Content) -> some View {
     content
       .confirmationDialog(
-        memberTitle,
+        store.pendingWorkspaceSourceRemoval?.title ?? "Remove from workspace?",
         isPresented: Binding(
-          get: { store.pendingWorkspaceMemberRemoval != nil },
+          get: { store.pendingWorkspaceSourceRemoval != nil },
           set: { if !$0 { store.send(.workspaceMemberRemoveCancelled) } }
         ),
         titleVisibility: .visible
@@ -29,9 +64,7 @@ struct WorkspaceRemovalDialogs: ViewModifier {
           store.send(.workspaceMemberRemoveCancelled)
         }
       } message: {
-        Text(
-          "Unregisters the checkout from its repository, deletes its branch, and removes it from the workspace manifest. Its panes are closed."
-        )
+        Text(store.pendingWorkspaceSourceRemoval?.message ?? "")
       }
       .confirmationDialog(
         workspaceTitle,
@@ -44,7 +77,7 @@ struct WorkspaceRemovalDialogs: ViewModifier {
         Button("Remove from Sidebar") {
           store.send(.workspaceRemoveConfirmed(deleteFiles: false))
         }
-        Button("Remove and Delete Checkouts", role: .destructive) {
+        Button("Delete Workspace Files…", role: .destructive) {
           store.send(.workspaceRemoveConfirmed(deleteFiles: true))
         }
         Button("Cancel", role: .cancel) {
@@ -52,16 +85,9 @@ struct WorkspaceRemovalDialogs: ViewModifier {
         }
       } message: {
         Text(
-          "Remove from Sidebar keeps every checkout and branch on disk. Remove and Delete Checkouts unregisters each member from its repository and deletes the workspace folder; branches are kept."
+          "Remove from Sidebar keeps every file on disk. Delete Workspace Files deletes the groups, their checkouts, and the workspace folder. Source projects are never deleted."
         )
       }
-  }
-
-  private var memberTitle: String {
-    if let name = store.pendingWorkspaceMemberRemoval?.displayName {
-      return "Remove “\(name)” from the workspace?"
-    }
-    return "Remove from workspace?"
   }
 
   private var workspaceTitle: String {

@@ -54,7 +54,7 @@ public nonisolated struct RollupIndex: Equatable, Sendable {
       case .project:
         unreadProjects.insert(entry.source.projectID)
       case .worktree:
-        unreadWorktrees.insert(entry.source.worktreeID)
+        unreadWorktrees.insert(focus.rowStandIns[entry.source.worktreeID] ?? entry.source.worktreeID)
       case .tab:
         unreadTabs.insert(entry.source.tabID)
       case .pane:
@@ -125,6 +125,9 @@ public nonisolated struct RollupFocusState: Equatable, Sendable {
   /// on screen whether or not the Project is expanded, so their unread
   /// events stay at worktree level.
   public let rowWorktreeIDs: Set<WorktreeID>
+  /// Rows hidden inside a collapsed Workspace group, mapped to the group
+  /// row on screen. Their worktree-level indicator shows on that row.
+  public let rowStandIns: [WorktreeID: WorktreeID]
 
   public init(
     focusedPaneID: PaneID? = nil,
@@ -132,7 +135,8 @@ public nonisolated struct RollupFocusState: Equatable, Sendable {
     activeWorktreeID: WorktreeID? = nil,
     activeProjectID: ProjectID? = nil,
     expandedProjectIDs: Set<ProjectID> = [],
-    rowWorktreeIDs: Set<WorktreeID> = []
+    rowWorktreeIDs: Set<WorktreeID> = [],
+    rowStandIns: [WorktreeID: WorktreeID] = [:]
   ) {
     self.focusedPaneID = focusedPaneID
     self.activeTabID = activeTabID
@@ -140,5 +144,6 @@ public nonisolated struct RollupFocusState: Equatable, Sendable {
     self.activeProjectID = activeProjectID
     self.expandedProjectIDs = expandedProjectIDs
     self.rowWorktreeIDs = rowWorktreeIDs
+    self.rowStandIns = rowStandIns
   }
 }

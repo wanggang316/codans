@@ -359,4 +359,29 @@ struct CreateWorktreeFeatureTests {
       await store.finish()
     }
   }
+
+  // MARK: - branchNote
+
+  /// The branch row shows at most one note, most specific first:
+  /// validation error, collision, pending cap, then submit error.
+  @Test
+  func branchNotePrefersMostSpecific() {
+    var state = initialState(currentPendingCountForProject: 8)
+    state.submitError = "boom"
+    state.branchCollisionKind = .checkedOut
+    state.checkedOutOwner = LiveBranchOwner(branch: "main", worktreeName: "repo")
+    state.validationError = "bad"
+
+    #expect(state.branchNote == WorktreeBranchNote(text: "bad", isError: true))
+    state.validationError = nil
+    #expect(state.branchNote == WorktreeBranchNote(text: state.collisionNote, isError: false))
+    #expect(state.collisionNote.hasPrefix("\"main\" is already checked out by the worktree \"repo\""))
+    state.branchCollisionKind = .none
+    #expect(state.branchNote == WorktreeBranchNote(text: CreateWorktreeFeature.capMessage, isError: false))
+    state = initialState()
+    state.submitError = "boom"
+    #expect(state.branchNote == WorktreeBranchNote(text: "boom", isError: true))
+    state.submitError = nil
+    #expect(state.branchNote == nil)
+  }
 }

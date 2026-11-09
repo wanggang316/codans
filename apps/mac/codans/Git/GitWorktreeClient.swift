@@ -207,6 +207,32 @@ nonisolated struct GitWorktreeClient: Sendable {
 
   var fetchRemote: @Sendable (_ repoRoot: URL, _ remote: String) async throws -> Void
   var changedFiles: @Sendable (_ worktreeRoot: URL) async throws -> [String]
+  /// Runs a project setup command (`bash -lc`) in `directory`, passing each
+  /// output line to `onLine`. The same runner `createWorktreeStream` uses
+  /// for its setup phase; callers that check out several worktrees first
+  /// run setup afterwards through this. Cancelling the calling task
+  /// terminates the child. Local only. Defaults to a stub that reports a
+  /// start failure so existing memberwise callers stay source-compatible.
+  var runSetupScript:
+    @Sendable (_ directory: URL, _ command: String, _ onLine: @escaping @Sendable (String) -> Void) async
+      -> SetupScriptOutcome = { _, _, _ in .failedToStart(reason: "not configured") }
+}
+
+/// How a project setup command ended. Setup is best-effort: no outcome
+/// throws or undoes the checkout it ran in.
+nonisolated enum SetupScriptOutcome: Equatable, Sendable {
+  case succeeded
+  case failedToStart(reason: String)
+  case exited(code: Int32)
+
+  /// One line for the user; nil on success.
+  var failureReason: String? {
+    switch self {
+    case .succeeded: return nil
+    case .failedToStart(let reason): return "setup script failed to start: \(reason)"
+    case .exited(let code): return "setup script exited with code \(code)"
+    }
+  }
 }
 
 // MARK: - Pure helpers (visible for tests)
@@ -576,8 +602,8 @@ nonisolated enum GitWorktreeShell {
       process.environment = environment
       process.standardInput = FileHandle.nullDevice
 
-      let stdoutPipe = Pipe()
-      let stderrPipe = Pipe()
+      let stdoutPipe = Pipe.closeOnExec()
+      let stderrPipe = Pipe.closeOnExec()
       process.standardOutput = stdoutPipe
       process.standardError = stderrPipe
 
@@ -586,46 +612,45 @@ nonisolated enum GitWorktreeShell {
       let stdoutLock = NSLock()
       let stderrLock = NSLock()
 
-      stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-        let lines = stdoutState.consume(
-          handle.availableData, lock: stdoutLock, splitOnCarriageReturn: splitOnCarriageReturn,
-          trackLastNonEmpty: true)
-        for line in lines { onStdout(line) }
-      }
-      stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-        let lines = stderrState.consume(
-          handle.availableData, lock: stderrLock, splitOnCarriageReturn: splitOnCarriageReturn,
-          trackLastNonEmpty: false, keepAll: true)
-        for line in lines { onStderr(line) }
-      }
+      let stdoutCollector = PipeCollector(
+        pipe: stdoutPipe,
+        maxBytes: 0,
+        onChunk: { chunk in
+          let lines = stdoutState.consume(
+            chunk, lock: stdoutLock, splitOnCarriageReturn: splitOnCarriageReturn,
+            trackLastNonEmpty: true)
+          for line in lines { onStdout(line) }
+        })
+      let stderrCollector = PipeCollector(
+        pipe: stderrPipe,
+        maxBytes: 0,
+        onChunk: { chunk in
+          let lines = stderrState.consume(
+            chunk, lock: stderrLock, splitOnCarriageReturn: splitOnCarriageReturn,
+            trackLastNonEmpty: false, keepAll: true)
+          for line in lines { onStderr(line) }
+        })
 
       process.terminationHandler = { proc in
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-        // Drain any trailing bytes that did not end in a newline.
-        let tailOut = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        if !tailOut.isEmpty, let str = String(data: tailOut, encoding: .utf8) {
-          stdoutLock.lock()
-          let combined = stdoutState.buffer + str
-          stdoutState.buffer = ""
-          let trimmed = combined.trimmingCharacters(in: .whitespacesAndNewlines)
-          if !trimmed.isEmpty { stdoutState.lastNonEmpty = trimmed }
-          stdoutLock.unlock()
-          onStdout(combined)
-        }
-        let tailErr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        if !tailErr.isEmpty, let str = String(data: tailErr, encoding: .utf8) {
-          stderrLock.lock()
-          stderrState.collected += str
-          stderrLock.unlock()
-          onStderr(str)
-        }
+        // Bounded wait for the remaining output: a forked process elsewhere
+        // can hold a write end, and EOF then never arrives.
+        _ = stdoutCollector.finishBlocking()
+        _ = stderrCollector.finishBlocking()
+        // Flush trailing bytes that did not end in a newline.
         stdoutLock.lock()
+        let tailOut = stdoutState.buffer
+        stdoutState.buffer = ""
+        let trimmed = tailOut.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { stdoutState.lastNonEmpty = trimmed }
         let finalLastNonEmpty = stdoutState.lastNonEmpty
         stdoutLock.unlock()
+        if !tailOut.isEmpty { onStdout(tailOut) }
         stderrLock.lock()
+        let tailErr = stderrState.buffer
+        stderrState.buffer = ""
         let finalStderr = stderrState.collected
         stderrLock.unlock()
+        if !tailErr.isEmpty { onStderr(tailErr) }
         cont.resume(
           returning: (
             exitCode: proc.terminationStatus,
@@ -643,6 +668,10 @@ nonisolated enum GitWorktreeShell {
       do {
         try process.run()
       } catch {
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        _ = stdoutCollector.finishBlocking()
+        _ = stderrCollector.finishBlocking()
         cont.resume(
           returning: (
             exitCode: -1,
@@ -670,7 +699,7 @@ nonisolated extension GitWorktreeClient {
   // that captures a weak reference to the Process so they can assert
   // `!process.isRunning` after cancelling the stream (issue #24 (a)).
   //
-  // `remoteHostResolver` is the Server-project transport seam (the same
+  // `remoteHostResolver` is the Remote Project transport seam (the same
   // pattern as `LiveGitService`): when it maps a repo root to a `RemoteHost`,
   // the plain-git closures (listing, branch queries, removal, prune, status)
   // run on that host over SSH via `RemoteGitService` instead of locally. The
@@ -680,11 +709,11 @@ nonisolated extension GitWorktreeClient {
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   static func makeLive(
     onCreateWorktreeSpawn: (@Sendable (Process) -> Void)? = nil,
-    remoteHostResolver: @escaping @Sendable (String) async -> RemoteHost? = { _ in nil }
+    remoteHostResolver: @escaping @Sendable (URL) async -> RemoteHost? = { _ in nil }
   ) -> GitWorktreeClient {
     GitWorktreeClient(
       lsWorktrees: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           let entries = try await remoteListEntries(host: host, gitRoot: repoRoot.path)
           return entries
         }
@@ -713,7 +742,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       localBranchNames: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return try await remoteMapped(host: host) {
             try await $0.localBranchNames(gitRoot: repoRoot.path)
           }
@@ -742,7 +771,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       branchRefs: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return try await remoteMapped(host: host) {
             try await $0.branchRefs(gitRoot: repoRoot.path)
           }
@@ -773,14 +802,14 @@ nonisolated extension GitWorktreeClient {
       },
 
       defaultRemoteBranchRef: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return await RemoteGitService(host: host).defaultRemoteBranchRef(gitRoot: repoRoot.path)
         }
         return await localDefaultRemoteBranchRef(repoRoot: repoRoot)
       },
 
       isValidBranchName: { repoRoot, name in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return await RemoteGitService(host: host)
             .isValidBranchName(gitRoot: repoRoot.path, name: name)
         }
@@ -887,7 +916,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       removeWorktree: { repoRoot, path in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           // No local trash to relocate into on a remote host — removal is the
           // plain forced git command. "is not a working tree" still maps to
           // idempotent success like the local path.
@@ -909,7 +938,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       deleteBranchIfExists: { repoRoot, branch in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return await RemoteGitService(host: host)
             .deleteBranchIfExists(gitRoot: repoRoot.path, branch: branch)
         }
@@ -917,7 +946,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       deleteRemoteBranchIfExists: { repoRoot, branch in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           await RemoteGitService(host: host)
             .deleteRemoteBranchIfExists(gitRoot: repoRoot.path, branch: branch)
           return
@@ -926,7 +955,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       pruneWorktrees: { repoRoot in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           return try await remoteMapped(host: host) {
             try await $0.pruneWorktrees(gitRoot: repoRoot.path)
           }
@@ -935,7 +964,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       fetchRemote: { repoRoot, remote in
-        if let host = await remoteHostResolver(repoRoot.path) {
+        if let host = await remoteHostResolver(repoRoot) {
           do {
             try await RemoteGitService(host: host).fetchRemote(gitRoot: repoRoot.path, remote: remote)
           } catch let error as RemoteGitError {
@@ -950,7 +979,7 @@ nonisolated extension GitWorktreeClient {
       },
 
       changedFiles: { worktreeRoot in
-        if let host = await remoteHostResolver(worktreeRoot.path) {
+        if let host = await remoteHostResolver(worktreeRoot) {
           return try await remoteMapped(host: host) {
             try await $0.changedFiles(worktreeRoot: worktreeRoot.path)
           }
@@ -965,8 +994,44 @@ nonisolated extension GitWorktreeClient {
         )
         let stdout = try extractStdout(outcome, command: "git status --porcelain")
         return parsePorcelainPaths(stdout)
+      },
+
+      runSetupScript: { directory, command, onLine in
+        let processBox = CreateWorktreeProcessBox()
+        return await withTaskCancellationHandler {
+          await runLocalSetupScript(
+            command: command, directory: directory,
+            onSpawn: { process in
+              processBox.set(process)
+              onCreateWorktreeSpawn?(process)
+            },
+            onLine: onLine)
+        } onCancel: {
+          processBox.terminateIfRunning()
+        }
       }
     )
+  }
+
+  /// `bash -lc <command>` in `directory`, every stdout and stderr line to
+  /// `onLine`. Shared by the setup phase of `createWorktreeStream` and
+  /// `runSetupScript`.
+  static func runLocalSetupScript(
+    command: String,
+    directory: URL,
+    onSpawn: @Sendable (Process) -> Void,
+    onLine: @escaping @Sendable (String) -> Void
+  ) async -> SetupScriptOutcome {
+    let outcome = await GitWorktreeShell.runStream(
+      executable: URL(fileURLWithPath: "/bin/bash"),
+      arguments: ["-lc", command],
+      cwd: directory,
+      onSpawn: onSpawn,
+      onStdout: onLine,
+      onStderr: onLine
+    )
+    if let reason = outcome.spawnFailedReason { return .failedToStart(reason: reason) }
+    return outcome.exitCode == 0 ? .succeeded : .exited(code: outcome.exitCode)
   }
 
   /// Remote worktree listing mapped into the local `GitWtEntry` shape so the
@@ -1099,7 +1164,6 @@ nonisolated extension GitWorktreeClient {
 
   // Local streaming `wt sw` creation body, extracted verbatim so the routed
   // `createWorktreeStream` closure stays readable.
-  // swiftlint:disable:next function_body_length
   private static func makeLocalCreateWorktreeStream(
     spec: CreateWorktreeSpec,
     onCreateWorktreeSpawn: (@Sendable (Process) -> Void)?
@@ -1206,26 +1270,20 @@ nonisolated extension GitWorktreeClient {
           let setup = spec.setupCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
           if let setup, !setup.isEmpty {
             continuation.yield(.setupPhaseBegan(worktreePath: worktreeURL))
-            let setupOutcome = await GitWorktreeShell.runStream(
-              executable: URL(fileURLWithPath: "/bin/bash"),
-              arguments: ["-lc", setup],
-              cwd: worktreeURL,
+            let setupOutcome = await runLocalSetupScript(
+              command: setup,
+              directory: worktreeURL,
               onSpawn: { process in
                 processBox.set(process)
                 onCreateWorktreeSpawn?(process)
               },
-              onStdout: { line in continuation.yield(.progressLine(line)) },
-              onStderr: { line in continuation.yield(.progressLine(line)) }
+              onLine: { line in continuation.yield(.progressLine(line)) }
             )
             // Best-effort: a spawn failure or non-zero exit from the
             // setup script must NOT throw or roll back the worktree.
             // We note it as a final progress line and still finish.
-            if let reason = setupOutcome.spawnFailedReason {
-              continuation.yield(
-                .progressLine("setup script failed to start: \(reason)"))
-            } else if setupOutcome.exitCode != 0 {
-              continuation.yield(
-                .progressLine("setup script exited with code \(setupOutcome.exitCode)"))
+            if let reason = setupOutcome.failureReason {
+              continuation.yield(.progressLine(reason))
             }
           }
 

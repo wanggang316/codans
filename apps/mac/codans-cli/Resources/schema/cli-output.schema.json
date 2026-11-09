@@ -982,12 +982,37 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": "codans.cli.project.list.v1"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "data"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/projectList"
+          }
+        }
+      }
     }
   ],
   "$defs": {
     "uuid": {
       "type": "string",
       "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "hostID": {
+      "description": "A Host id, or `\"0\"` for This Mac.",
+      "type": "string",
+      "pattern": "^(0|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$"
     },
     "error": {
       "type": "object",
@@ -1011,7 +1036,25 @@
             "NO_CURRENT_CONTEXT",
             "EMPTY_INPUT",
             "WAIT_TIMEOUT",
-            "CAPTURE_UNSUPPORTED"
+            "CAPTURE_UNSUPPORTED",
+            "PANE_NOT_LIVE",
+            "WORKFLOW_NOT_FOUND",
+            "WORKFLOW_INVALID",
+            "WORKFLOW_DISABLED",
+            "WORKFLOW_TRUST_REQUIRED",
+            "RUN_NOT_FOUND",
+            "SOURCE_REQUIRED",
+            "INPUT_REQUIRED",
+            "PROFILE_REQUIRED",
+            "PANE_BUSY",
+            "ROLE_MISMATCH",
+            "STEP_NOT_EXPECTING",
+            "TOKEN_REQUIRED",
+            "TOKEN_INVALID",
+            "OUTPUT_INVALID",
+            "OUTPUT_TOO_LARGE",
+            "VERDICT_REQUIRED",
+            "RENDERED_TEXT_INVALID"
           ]
         },
         "message": {
@@ -1139,6 +1182,36 @@
             "null"
           ]
         },
+        "sourceGitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceGroup": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "enum": [
+                "groupTerminal",
+                "reference",
+                "member"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "role"
+          ],
+          "additionalProperties": false
+        },
         "selectedTabID": {
           "type": [
             "string",
@@ -1157,6 +1230,23 @@
         "name",
         "path",
         "tabs"
+      ],
+      "additionalProperties": false
+    },
+    "hostRef": {
+      "description": "The Host a Project is on. `id` is the Host id, or `\"0\"` for This Mac: the value `--host` takes.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hostID"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
       ],
       "additionalProperties": false
     },
@@ -1186,6 +1276,9 @@
             "workspace"
           ]
         },
+        "host": {
+          "$ref": "#/$defs/hostRef"
+        },
         "selectedWorktreeID": {
           "type": [
             "string",
@@ -1204,6 +1297,7 @@
         "name",
         "rootPath",
         "kind",
+        "host",
         "worktrees"
       ],
       "additionalProperties": false
@@ -1298,6 +1392,9 @@
             "string",
             "null"
           ]
+        },
+        "host": {
+          "$ref": "#/$defs/hostRef"
         },
         "isSelected": {
           "type": "boolean"
@@ -1502,6 +1599,9 @@
           "type": "boolean"
         },
         "isFocused": {
+          "type": "boolean"
+        },
+        "isAttached": {
           "type": "boolean"
         }
       },
@@ -1818,10 +1918,28 @@
             "idle",
             "working",
             "blocked",
-            "finished"
+            "done",
+            "error"
           ]
         },
         "since": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "programStatus",
+            "screen",
+            "cached"
+          ]
+        },
+        "blockedKind": {
+          "enum": [
+            "permission",
+            "question",
+            "auth"
+          ]
+        },
+        "message": {
           "type": "string"
         },
         "sessionID": {
@@ -1858,6 +1976,12 @@
           ]
         },
         "isFocused": {
+          "type": "boolean"
+        },
+        "isLive": {
+          "type": "boolean"
+        },
+        "isAttached": {
           "type": "boolean"
         }
       },
@@ -1978,12 +2102,16 @@
             "string",
             "null"
           ]
+        },
+        "host": {
+          "$ref": "#/$defs/hostRef"
         }
       },
       "required": [
         "id",
         "name",
-        "path"
+        "path",
+        "host"
       ],
       "additionalProperties": false
     },
@@ -2944,6 +3072,66 @@
         "path",
         "isValid",
         "diagnostics"
+      ],
+      "additionalProperties": false
+    },
+    "projectList": {
+      "type": "object",
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectListItem"
+          }
+        }
+      },
+      "required": [
+        "projects"
+      ],
+      "additionalProperties": false
+    },
+    "projectListItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rootPath": {
+          "type": "string"
+        },
+        "gitRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "git_repo",
+            "dir",
+            "server",
+            "workspace"
+          ]
+        },
+        "host": {
+          "$ref": "#/$defs/hostRef"
+        },
+        "selectedWorktreeID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "rootPath",
+        "kind",
+        "host"
       ],
       "additionalProperties": false
     }

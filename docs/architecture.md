@@ -25,7 +25,7 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | `CodansKit` | static framework | `apps/mac/CodansKit/` | Shared CLI transport, `RPCClient`, `SocketDiscovery`, alias resolution, rendering, and exit codes. Depends on `CodansCore`, `CodansIPC`, and `ArgumentParser`; consumed by the CLI, app, and tests. |
 | `GhosttyKit` | static framework | `apps/mac/.build/ghostty/GhosttyKit.xcframework` | Tuist wrapper around the locally built libghostty XCFramework. |
 | `codans-cli` | command-line tool | `apps/mac/codans-cli/` | CLI binary (`PRODUCT_NAME=codans`). Depends on `CodansKit`, `CodansCore`, `CodansIPC`, and `ArgumentParser`. Runtime / Hooks / Git are intentionally off-limits — CLI is a thin RPC client. |
-| `Codans` | macOS app | `apps/mac/codans/{App,Runtime,Process,Git,GitHub}/` | Single app target. Internal dependencies: `CodansCore`, `CodansIPC`, `CodansKit`, `CodansRemote`, `GhosttyKit`, `DiffViewKit`, and `codans-cli`; external dependencies are declared in `Project.swift`. `embed-codans.sh` embeds the CLI under `Codans.app/Contents/Resources/bin/` as `codans` (Release) or `codans-dev` (Debug). |
+| `Codans` | macOS app | `apps/mac/codans/{App,Runtime,Process,Git,GitPlatform}/` | Single app target. Internal dependencies: `CodansCore`, `CodansIPC`, `CodansKit`, `CodansRemote`, `GhosttyKit`, `DiffViewKit`, and `codans-cli`; external dependencies are declared in `Project.swift`. `embed-codans.sh` embeds the CLI under `Codans.app/Contents/Resources/bin/` as `codans` (Release) or `codans-dev` (Debug). |
 
 ### In-app modules (subfolders of the `codans` target, not separate Tuist targets)
 
@@ -34,11 +34,10 @@ The mac platform (Tuist project, sources, ghostty submodule) lives under `apps/m
 | `codans/App/` | `@main CodansApp.swift`, root SwiftUI scene, TCA store construction |
 | `codans/Runtime/` | libghostty integration: GhosttyKit Swift bindings, Pane lifecycle, Surface rendering adapter, `@Observable` runtime state, and the live foreground [process registry](design-docs/worktree-processes.md) |
 | `codans/Hooks/` *(planned, not yet implemented)* | **Design intent, no code yet** — the `Hooks/` subfolder does not exist and `CodansIPC/Method.swift` has no `hook.*` methods. The intended subsystem: lifecycle event taxonomy (Pane created / ready / output match / idle / exit; Tab activated; Worktree activated), hook registration, out-of-process shell handler dispatch. See [Lifecycle hooks](design-docs/lifecycle-hooks.md). |
-| `codans/Process/` | Shared subprocess primitive — `CommandRunner` protocol + `FoundationCommandRunner` / `RecordingCommandRunner`. `Git/` and `GitHub/` depend on this common runner without taking a sibling-module import. Timeout + SIGTERM→SIGKILL ladder + pipe-drain backpressure live here; translation from `CommandOutcome` to a domain error type is each caller's responsibility. |
+| `codans/Process/` | Shared subprocess primitive — `CommandRunner` protocol + `FoundationCommandRunner` / `RecordingCommandRunner`. `Git/` and `GitPlatform/` depend on this common runner without taking a sibling-module import. Timeout + SIGTERM→SIGKILL ladder + pipe-drain backpressure live here; translation from `CommandOutcome` to a domain error type is each caller's responsibility. |
 | `codans/Git/` | Git queries and mutations: status/diff/log parsing, branch switching, and worktree creation/removal. Subprocess execution uses the shared `CommandRunner`; see [Worktree](design-docs/worktree.md). |
-| `codans/GitHub/` | gh-delegated GitHub integration data layer (0012). `GitHubService` protocol + `LiveGitHubService` wrapping `gh` via `CommandRunner`, `GhCommand` argv builder, `GhExecutableResolver` actor, `JSONOutputParsers` translating gh stdout → `CodansCore` DTOs, `GitHubError` taxonomy. Zero HTTP in-app; auth/tokens live entirely in gh's own config store. App-layer TCA bits live in `App/Clients/GitHubClient.swift` + `App/Features/GitHub/`. |
-| `codans/App/Features/GitHub/` | 0012/0013 GitHub integration TCA feature. `GitHubFeature` owns the fetch lifecycle as a **repository-batched** model: per-branch GraphQL aliases are grouped by repository and chunked at ≤25 branches with up to three concurrent requests. Workspace members use a stable fetch-group ID per source repository; ordinary Projects use their Project ID. PR data has **no TTL** — invalidation is event-driven (Worktree added/removed, branch change, post-write mutation, Project activated, manual refresh). The 30 s freshness window applies only to the `gh` *availability* probe (`availabilityFreshness`), not to PR data. `GitHubRootBindings` stacks under the Scope to fan delegate actions out to `NSWorkspace.open` / `SettingsWindowPresenter`. Data layer in `codans/GitHub/` (`BatchedPullRequestQuery`, `LiveGitHubService`). Views: `PullRequestBadge` (sidebar-row capsule), `PullRequestPopover` with split-button merge + checks list, `CheckRow`, `MergeSplitButton`, colour tokens in `Theme/`. See [GitHub integration](design-docs/github-integration.md). |
-| `codans/App/Clients/Editor/` | `EditorService`, built-in `EditorRegistry`, and `AppLauncher`. `LiveEditorService` discovers installed apps by bundle identifier through Launch Services and opens them through `NSWorkspace`; remote editor support has an explicit `RemoteEditorOpen` path. `$EDITOR` is a special terminal-pane launch. See [Editor integration](design-docs/editor-integration.md) for resolution and launch contracts. |
+| `codans/GitPlatform/` | Git Platform layer (ADR 0004). `GitPlatform` protocol — availability, logged-in hosts, a batched Pull Request read for one repository and its branches, merge / close / mark ready / rerun failed checks, web URLs for the repository and the Pull Request. No optional methods; capability differences are data on `PullRequestSnapshot` (`mergeOptions` with enabled state and reason, `canRerunFailedChecks`). `GitPlatformResolver` maps a remote's host to a Git Platform kind and API host (ADR 0005): a Git Platform alias from Settings; then `github.com` or a host `gh` is logged in to → GitHub; then `gitlab.com` or a host `glab` is logged in to → GitLab; then, for an SSH remote, the `ssh -G` HostName (`SSHHostName`) matched without the port to the one logged-in or public host, which covers an `~/.ssh/config` alias and an SSH port; then a host whose name contains `gitlab` or `github` (ADR 0004 item 2); otherwise none. `glab`'s logged-in hosts come from its `config.yml` (`GlabConfig`), not from a `glab` subprocess. `GitPlatformError` is provider-neutral; CLI-dependent cases carry the `GitPlatformKind`. Writes take a `PullRequestReference` (repository + number), never a working directory. **Boundary:** each implementation lives in its own subfolder (`GitPlatform/GitHub/`: `GitHubGitPlatform` wrapping `gh` via `CommandRunner`, `GhCommand`, `BatchedPullRequestQuery`, `GitHubJSONParsers`; `GitPlatform/GitLab/`: `GitLabGitPlatform` wrapping `glab`, `GlabCommand`, `GitLabMergeRequestQuery`, `GitLabJSONParsers`, `GlabConfig`; `CLIExecutableResolver` finds either CLI) and is the only code that knows its wire values (`GitHubWire`, `GitLabWire`). It returns the provider-neutral model from `CodansCore/GitPlatform/` (`GitPlatformKind`, `GitPlatformRepository`, `PullRequestSnapshot`, `PullRequestMergeState`, …). Nothing outside an implementation folder imports it except `App/Clients/GitPlatformClient.swift`, the one place that selects an implementation by kind. Zero HTTP in-app; auth/tokens live in each CLI's own config store. |
+| `codans/App/Features/GitPlatform/` | The one Git Platform TCA feature. `GitPlatformFeature` owns the fetch lifecycle for every Git Platform as a **repository-batched** model: one fetch per fetch unit (a git Project, or one source repository of a Workspace with a stable fetch-group ID). Each fetch reads `origin` and the Git Platform aliases (`GitPlatformAliasesClient`), resolves the unit's Git Platform repository through `GitPlatformClient`, and keeps it on the unit's batch (`BatchedPullRequests.repository`); a unit no Git Platform serves is marked `unitsWithoutGitPlatform` and shows no badge and no error. Units resolve independently, so one Workspace can mix GitHub and GitLab members. PR data has **no TTL** — invalidation is event-driven (Project or Workspace repository added, Worktree added/removed, branch change, post-write mutation, Project activated, remote refs moved, manual refresh) plus the tiered liveness poll. The reducer and views never branch on the Git Platform kind, except to pick a UI label. `GitPlatformRootBindings` fans delegate actions out to `NSWorkspace.open` / `SettingsWindowPresenter`. Views: `PullRequestBadge`, `PullRequestPopover` with split-button merge + checks list, `CheckRow`, `MergeSplitButton`, `WorktreePullRequestPopover` (shared by sidebar and status bar), colour tokens in `Theme/`. See [Git Platform integration](design-docs/git-platform-integration.md). |
 | `codans/App/Clients/Editor/` (external git viewing) | The external Git Viewer command is separate from the built-in diff window. "Toggle Git Viewer" (⌘ chord / menu / palette → `RootFeature.diffInspectorToggledForCurrentWorktree`) resolves `general.defaultGitViewerID` (an `EditorID?` into the registry's git-client category) and opens the current Worktree in an external client (Fork / Sourcetree / GitHub Desktop / …) through the same `EditorService` open path as the default editor; `nil` or the Built-in ID opens the built-in diff window; an external ID absent from the editor descriptors is a no-op. SSH targets follow remote editor resolution. See [Editor integration § Git Viewer](design-docs/editor-integration.md). |
 | `codans/App/Features/Diff/` | `DiffFeature` owns worktree-scoped Uncommitted / Outgoing selection, comparison loading, stale-result rejection, and a two-second refresh timer while visible. `DiffPanelView` hosts the independent `DiffViewKit` WKWebView renderer in a normal per-worktree NSWindow owned by DiffWindowManager. Git reads use `GitServiceClient`; current-file editor handoff uses `DiffEditorClient`. Scope/base/file preferences are session-local. No editing or Git write actions. See [Git diff viewer](design-docs/git-diff-viewer.md). |
 | `codans/App/Features/WorktreeHeader/` | Branch identity and editor, Run, and Agent controls. Editor intents delegate to `RootFeature`. The surrounding Worktree detail toolbar also presents status, live processes and notifications. Git Viewer uses the configurable ⌘G command; Worktree → Show Changes opens the independent read-only comparison window. See [Main window](design-docs/main-window.md). |
@@ -71,12 +70,15 @@ Module boundaries between `Runtime`, `Hooks`, `Git`, and `App` are enforced by *
 
 ### Workspace orchestration
 
-A Workspace is a local Project with a synthetic root Worktree and member
-checkouts from multiple repositories. Membership comes from
-`.codans/workspace.json`; Git supplies branch and repository identity.
-`WorkspaceClient` owns creation, addition, removal and rollback for both GUI
-and CLI. Reconcile handles Workspace before Git-root discovery, and destructive
-operations resolve each member's source repository. See [Workspace](design-docs/workspace.md).
+A Workspace is a local Project with no row of its own. Its rows are
+Worktrees in groups: a `default` group that references the main checkout of
+each source project, and named groups that own one checkout per project.
+Groups and members come from `.codans/workspace-groups.json`; Git supplies
+branch and repository identity. `WorkspaceClient` owns creation, source
+changes, group creation and deletion (with a risk check) and rollback for
+both GUI and CLI. Reconcile handles Workspace before Git-root discovery, and
+every deletion goes through `WorkspaceOwnership`. See
+[Workspace](design-docs/workspace.md).
 
 ### Agent Skill
 
@@ -93,7 +95,7 @@ CodansMobile (apps/ios)     -> CodansCore, CodansIPC, CodansRemote, TCA
 codans-cli                  -> CodansKit, CodansCore, CodansIPC, ArgumentParser
 Codans (app)                -> CodansCore, CodansIPC, CodansKit, CodansRemote, GhosttyKit, DiffViewKit,
                                codans-cli (embedded tool), external dependencies
-  in-app modules            codans/{App,Runtime,Process,Git,GitHub}
+  in-app modules            codans/{App,Runtime,Process,Git,GitPlatform}
                                (folder boundaries, not separate targets)
 skills/codans-cli/          (text-only, no Swift dependencies)
 ```
@@ -134,7 +136,7 @@ Rules not visible in code. Violating any of these will not fail tests immediatel
 
 **TCA (The Composable Architecture)** is used for:
 - App shell (root reducer, launch flow)
-- Feature flows: Settings, CommandPalette, GitHub, Diff, HierarchySidebar, WorktreeHeader, Updates
+- Feature flows: Settings, CommandPalette, GitPlatform, Diff, HierarchySidebar, WorktreeHeader, Updates
 - Socket server lifecycle
 - Deeplink dispatch
 
@@ -169,28 +171,28 @@ Rationale: agent-heavy panes produce thousands of output events per second; rout
 
 ### Persistence
 
-Three roots per channel. Debug builds use `~/.codans-dev/` and `~/Library/Caches/codans-dev/` in place of the Release paths below (see [Environment](design-docs/environment.md)). JSON is UTF-8, pretty-printed with sorted keys for determinism.
+Four roots per channel. Debug builds use `~/.codans-dev/` and `~/Library/Caches/codans-dev/` in place of the Release paths below (see [Environment](design-docs/environment.md)). JSON is UTF-8, pretty-printed with sorted keys for determinism.
 
 - **Config** — `~/.codans/config/`: files a user may edit by hand.
 - **State** — `~/.codans/state/`: files only the app writes.
-- **Cache** — `~/Library/Caches/codans/`: refetchable data, plus the zmx `ZMX_DIR`.
+- **Runtime** — `~/.codans/run/`: the zmx `ZMX_DIR` — per-pane daemon sockets, quit-time snapshots, zmx logs. Kept out of `~/Library/Caches` because cache cleaners wipe that tree wholesale and a daemon whose socket file is gone can never be reached again.
+- **Cache** — `~/Library/Caches/codans/`: refetchable data.
 
 | File | Root | Version | Contents |
 |---|---|---|---|
 | `settings.json` (`CodansCore/Settings/`) | config | v3 | User preferences — global (`general`, `notifications`, `developer`) plus per-Project (`projects[ProjectID]: ProjectSettings`). `ProjectSettings` carries shared fields and an optional `git: GitProjectSettings?` subtree for Git settings; applicability is determined by Project kind. |
 | `shortcuts.json` | config | v1 | Keybinding overrides. Persisted JSON keys are API: e.g. `CommandID.toggleDiffInspector` keeps the raw value `"toggleGitViewer"` so renaming the Swift identifier never orphans a user's keybinding. |
-| `catalog.json` (`CodansCore/Catalog.swift`) | state | v3 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `projectSortMode`, `selectedProjectID`. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
+| `catalog.json` (`CodansCore/Catalog.swift`) | state | v5 | Project → Worktree → Tab → Pane tree with UUIDs, split geometry, current selection at every level; `hosts: [HostRecord]` (the Host list; Remote Projects refer to it by `hostID`); `tags: [Tag]`, per-Project `tagIDs: Set<TagID>`, top-level `activeTagFilter`, `selectedProjectID`. The `projects` array order is the Project order (ADR 0001), marked by `projectOrder: "array"`; a file without the marker is sorted once at load with its legacy `projectSortMode` (default `joinOrder`), which is not written back. The schema has no `spaces` or `CatalogWindow` container. Per-Project `defaultEditor` / `worktreesDirectory` are resolved from `settings.json`, never the `Project` struct. |
 | `sessions.json` (`CodansCore/Session.swift`) | state | v1 | Live zmx daemon registry — per-Pane session id / pid / state, so a relaunch can rediscover, ping, and re-attach. Lock coordination is on a sidecar `sessions.json.lock`, not the file itself. Underpins the [Session lifecycle](#session-lifecycle-quit-snapshot--launch-restore) re-attach path. |
 | `<worktree>/.codans/workflow-runs/<run>/run.json`, `index.json` (`CodansCore/Workflow/WorkflowRunStore.swift`) | worktree | v1 | One directory per Agent Workflow run: the record (status, bindings, inputs, state, steps, deliveries — never tokens), `log.md`, the definition copy, materialized instructions, deliveries, and `run:` step output; `index.json` lists the worktree's runs and keeps the last 20. Definitions themselves are `*.workflow.yaml` files discovered from the app bundle, `~/.codans/workflows/` (shared by both channels), and `<repo>/.codans/workflows/` — see [Workflow](design-docs/workflow.md). |
 | `notifications.json` (`CodansCore/Notifications/InboxFile.swift`) | state | v1 | Inbox entries; `notifications.quarantine-shown` marks the last forward-version backup already announced. |
 | `remote-devices.json` (`App/Features/RemoteGateway/PairedDeviceStore.swift`) | state | v1 | Paired iOS devices for the LAN gateway: device ID, name, permission tier, pending/active, `createdAt`, `lastSeenAt`. Keys are **not** here — each device's PSK lives in the Keychain. See [iOS Companion](design-docs/ios-companion.md). |
-| `remote-hosts.json` | state | v1 | Server projects' connection info, used to restore a `remoteHost` an older build stripped from the catalog. |
-| `saved-server-hosts.json` | state | v1 | Most-recently-used server hosts for the Connect to Server sheet. |
+| `remote-hosts.json` | state | v1 | Remote Projects' connection info, used to restore a `remoteHost` an older build stripped from the catalog. |
 | `project-icons/`, `agent-homes/` | state | — | Copied custom project icons; per-profile `HOME`s for dedicated-home agent profiles. |
 | `backups/` | state, config | — | Files set aside by `StoreBackup` (see below), plus `legacy-config-<ts>/` from the one-time migration. |
-| `github-snapshots.json` | cache | v1 | Per-Project PR snapshots for the first sidebar paint; deleted if unreadable. |
+| `github-snapshots.json` | cache | v2 | Per-fetch-unit Pull Request snapshots (provider-neutral) for the first sidebar paint; deleted if unreadable, and an entry that does not decode is dropped. |
 
-The three small stores without a version field of their own (`remote-hosts`, `saved-server-hosts`, `github-snapshots`) use a `{ version, entries }` envelope (`CodansCore/Persistence/VersionedFile.swift`).
+The two small stores without a version field of their own (`remote-hosts`, `github-snapshots`) use a `{ version, entries }` envelope (`CodansCore/Persistence/VersionedFile.swift`).
 
 The shared JSON write primitive is atomic-rename persistence (`CodansCore/AtomicFileStore.swift`):
 1. Encode to temp file in the same directory
@@ -199,7 +201,7 @@ The shared JSON write primitive is atomic-rename persistence (`CodansCore/Atomic
 
 Temp files a crash leaves behind are swept at launch once they are an hour old (`AtomicFileStore.sweepOrphanedTemporaries`).
 
-Version handling belongs to each store, not `AtomicFileStore`, but every store follows one rule: **a file this build cannot read is never overwritten.** A corrupt file, a newer-version file, and the original of a migration are moved by `StoreBackup` (`CodansCore/Persistence/StoreBackup.swift`) to `<root>/backups/<stem>.<reason>-<yyyyMMdd'T'HHmmss'Z'>.json` (`reason` = `corrupt`, `unsupported-v<N>`, `migrated-v<N>`; newest five kept per file and reason) before the store starts empty. If that move fails the store disables saving for the session instead. `settings.json` migrates v1/v2 to v3 (see [Settings](design-docs/settings.md)); `InboxFile` also reads the legacy bare-array shape; `SessionStore` accepts any version up to its own. The planned Hooks subsystem would add `config/hooks.json`; it is not implemented.
+Version handling belongs to each store, not `AtomicFileStore`, but every store follows one rule: **a file this build cannot read is never overwritten.** A corrupt file, a newer-version file, and the original of a migration are moved by `StoreBackup` (`CodansCore/Persistence/StoreBackup.swift`) to `<root>/backups/<stem>.<reason>-<yyyyMMdd'T'HHmmss'Z'>.json` (`reason` = `corrupt`, `unsupported-v<N>`, `migrated-v<N>`; newest five kept per file and reason) before the store starts empty. If that move fails the store disables saving for the session instead. `catalog.json` migrates v3 to v4 (Workspace groups) and v4 to v5 (the Host list, ADR 0003); `settings.json` migrates v1/v2 to v3 (see [Settings](design-docs/settings.md)); `InboxFile` also reads the legacy bare-array shape; `SessionStore` accepts any version up to its own. The planned Hooks subsystem would add `config/hooks.json`; it is not implemented.
 
 Before any store opens a file, `PersistenceLaunch.prepare` migrates a pre-split `~/.config/codans[-dev]/` into the two roots once: live files move, litter is deleted, everything else is archived under `state/backups/legacy-config-<ts>/` (`CodansCore/Persistence/LegacyConfigMigrator.swift`). It is skipped when a root is overridden, as an XCTest host, when the state root already has a catalog, and while another process holds the legacy session lock.
 
@@ -258,10 +260,11 @@ cold start, live re-attach, and snapshot restore are all the *same* spawn, with
 
 ### Accessibility (probeable contracts)
 
-User-observable accessibility values are a stable probe contract — validation keys on them, and renaming a vocabulary string breaks a unit test. Two SwiftUI traps to avoid (both bit the worktree-creation in-progress UI):
+User-observable accessibility values are a stable probe contract — validation keys on them, and renaming a vocabulary string breaks a unit test. SwiftUI traps to avoid:
 
-- `.accessibilityValue(_:)` / `.accessibilityLabel(_:)` applied to a view that is also `.accessibilityElement(children: .contain)` is a **no-op** — the container exposes its children, not its own value. Put the value on a **leaf child** (e.g. the row's name `Text` carries the in-progress/settled value; the status `Text` carries the stage value) so it provably reaches the accessibility tree.
+- `.accessibilityValue(_:)` applied to a view that is also `.accessibilityElement(children: .contain)` is a **no-op** (seen in the worktree-creation in-progress UI) — the container exposes its children, not its own value. Put the value on a **leaf child** (e.g. the row's name `Text` carries the in-progress/settled value; the status `Text` carries the stage value) so it provably reaches the accessibility tree. `.accessibilityLabel(_:)`, `.accessibilityAddTraits(.isButton)`, and `.accessibilityAction(.default)` on a `.contain` group do reach the tree: the Agents View row shows as an `AXButton` with its label, a Press action, and its leaves as children.
 - `.accessibilityRepresentation { … }` replaces the modified subtree's accessibility entirely (per Apple's docs), so it can shadow contained leaves. Use it only where the element has no children to probe (e.g. a settled failure announced as one element), not to bolt a value onto a `.contain` row whose leaves must stay individually probeable.
+- A `Button` merges the texts of its label into one element (its label joins them, and its identifier joins theirs). A row whose leaves must stay probeable cannot be a `Button`: use a `.contain` group with `onTapGesture`, the button trait and default action above, and `.focusable(interactions: .activate)` with `onKeyPress(.space / .return)` so keyboard navigation can still focus and activate it.
 
 `AgentStateRowView` and `PendingWorktreeRow` are the worked examples; decorative spinners/glyphs/shimmer stay `.accessibilityHidden(true)` since the value/label carries the meaning.
 
@@ -291,7 +294,7 @@ Hard-won constraints that are invisible in the code but break the build or crash
 | SPM (via Tuist `Package.swift`) | workspace | External dependencies | Standard tool for fetching third-party libraries (TCA, ArgumentParser, Sparkle); integrated into Tuist |
 | mise | workspace | Tool version pinning | Committed `mise.toml` pins `tuist`, `zig`, `swiftlint`, `xcbeautify`; keeps supported tool versions explicit |
 | libghostty (via `ThirdParty/ghostty` submodule → Zig → `GhosttyKit.xcframework`) | `codans/Runtime (in-app module)` | Terminal emulator | Best macOS-native terminal renderer with a stable C API; building from submodule (not prebuilt XCFramework) matches supacode/supaterm and lets us patch Ghostty if needed |
-| The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitHub); proven in both reference projects |
+| The Composable Architecture | `apps/mac` | App/UI state | Testable unidirectional flows for features (Settings, CommandPalette, GitPlatform); proven in both reference projects |
 | Swift Observation (`@Observable`) | `codans/Runtime (in-app module)`, parts of `apps/mac` | Runtime state | Hybrid complement to TCA for high-frequency terminal state; native Swift 6 feature; proven in supacode |
 | ArgumentParser | `apps/mac/codans-cli/` | CLI parsing | Apple's official CLI framework; same as both reference projects |
 | Network.framework (`NWListener` / `NWConnection` / `NWBrowser`) | `CodansRemote`, `RemoteGateway`, `apps/ios` | LAN transport + Bonjour | First-party TLS-PSK support and Bonjour advertising/browsing in one API on both platforms; no third-party networking stack |
@@ -345,7 +348,7 @@ Hard-won constraints that are invisible in the code but break the build or crash
 
 ## Architectural Decisions
 
-1. **Internal Tuist target granularity in `apps/mac`.** the app is a single Tuist target with folder-level module organization (`App` / `Runtime` / `Process` / `Git` / `GitHub`); in-app boundaries are folder convention + code review, not target edges. Promote a subfolder to its own framework target only when it gains a test bundle, is consumed by another app, or needs to restrict its public API.
+1. **Internal Tuist target granularity in `apps/mac`.** the app is a single Tuist target with folder-level module organization (`App` / `Runtime` / `Process` / `Git` / `GitPlatform`); in-app boundaries are folder convention + code review, not target edges. Promote a subfolder to its own framework target only when it gains a test bundle, is consumed by another app, or needs to restrict its public API.
 
 2. **Single main window.** A single `Window(id:)` owns the main workspace; Settings has its own window. Close Tab and application quit have different effects. Confirmation and daemon disposition follow `quitConfirmation` and `quitAction`; see [Project Tags and Single Main Window](design-docs/project-tags.md).
 
@@ -357,4 +360,8 @@ Hard-won constraints that are invisible in the code but break the build or crash
 
 6. **Runtime failure recovery.** See the reported-pane-failure policy under "Architectural Invariants"; this is not isolation from native process crashes.
 
-7. **Worktree storage layout defaults.** Local creation resolves its base through `WorktreeSettings.resolveBaseDirectory`: per-Project `worktreesDirectory` verbatim → global `defaultWorktreesDirectory/<canonicalProjectName>` → `~/.codans/repos/<canonicalProjectName>`. The new worktree name is appended to that base. `HierarchySidebarFeature` uses the path-derived canonical project name, so renaming the display name does not change the suggested directory. Remote creation instead uses the parent of the remote git root. See [Worktree](design-docs/worktree.md) and [Remote SSH projects](design-docs/remote-ssh-projects.md).
+7. **Worktree storage layout defaults.** Local creation resolves its base through `WorktreeSettings.resolveBaseDirectory`: per-Project `worktreesDirectory` verbatim → global `defaultWorktreesDirectory/<canonicalProjectName>` → `~/.codans/repos/<canonicalProjectName>`. The new worktree name is appended to that base. `HierarchySidebarFeature` uses the path-derived canonical project name, so renaming the display name does not change the suggested directory. Remote creation instead uses the parent of the remote git root. See [Worktree](design-docs/worktree.md) and [Remote Projects over SSH](design-docs/remote-ssh-projects.md).
+
+### Command Queue presentation
+
+The command composer is a sheet; pending commands appear in a pane-local overlay. See [Command Queue Overlay](exec-plans/command-queue-overlay.md) for the interaction contract and validation.

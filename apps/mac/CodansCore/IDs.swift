@@ -35,6 +35,13 @@ public nonisolated struct TagID: HierarchyID {
   public init(raw: UUID) { self.raw = raw }
 }
 
+/// Identifier of a `HostRecord` in the catalog's Host list. Remote Projects
+/// refer to their Host by this id (ADR 0003).
+public nonisolated struct HostID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
+}
+
 /// Identifier for a `Notification` row in the inbox. Distinct from
 /// `HierarchyID` because notifications are time-series records, not nodes
 /// in the project tree — keeping them separate avoids accidental mixing
@@ -43,4 +50,17 @@ public nonisolated struct NotificationID: Codable, Hashable, Sendable, CustomStr
   public let raw: UUID
   public init(raw: UUID = UUID()) { self.raw = raw }
   public var description: String { raw.uuidString }
+}
+
+/// Identifier of a Workspace group. Not a `HierarchyID` node of its own:
+/// group rows are `Worktree`s that carry it in their `WorkspaceSlot`.
+public nonisolated struct WorkspaceGroupID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
+}
+
+/// Identifier of one member checkout inside a Workspace group manifest.
+public nonisolated struct WorkspaceMemberID: HierarchyID {
+  public let raw: UUID
+  public init(raw: UUID) { self.raw = raw }
 }

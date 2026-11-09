@@ -120,7 +120,7 @@ struct EditorFeature {
         // signature has no Pane/Tab context. Route the spawn out to `RootFeature`
         // via the delegate so it can call `hierarchyClient.openPane(...
         // initialCommand: "$EDITOR")` for the target worktree's tab. This path is
-        // transport-agnostic: a Server project's Pane runs the remote shell, so
+        // transport-agnostic: a Remote Project's Pane runs the remote shell, so
         // `$EDITOR` launches on the host natively.
         if editorID == EditorRegistry.shellEditorID {
           return .send(
@@ -129,7 +129,7 @@ struct EditorFeature {
             ))
         }
         let client = editorClient
-        // A Server project's worktree path lives on its host — a local file URL
+        // A Remote Project's worktree path lives on its host — a local file URL
         // can't express it, so route through the editor's SSH remoting CLI.
         if let projectID,
           let host = hierarchyClient.snapshot().projects

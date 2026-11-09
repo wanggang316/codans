@@ -1,6 +1,6 @@
+import CodansCore
 import ComposableArchitecture
 import Foundation
-import CodansCore
 
 /// Drives per-Project health reconciliation. Stats the `rootPath`, labels the
 /// Project `.failed(reason:)` when the folder is gone, otherwise hands off to
@@ -41,6 +41,10 @@ actor ProjectReconciler {
   /// (the Project may have been removed between the caller's snapshot and
   /// this call).
   func reconcile(projectID: ProjectID) async {
+    await reconcile(projectID: projectID, inSweep: false)
+  }
+
+  private func reconcile(projectID: ProjectID, inSweep: Bool) async {
     guard !inFlight.contains(projectID) else { return }
     inFlight.insert(projectID)
     defer { inFlight.remove(projectID) }
@@ -51,9 +55,18 @@ actor ProjectReconciler {
       return
     }
 
-    await client.setProjectLoadState(projectID, .loading)
+    // A sweep keeps a failed Project failed until the check has a result.
+    // A loading Project shows as a healthy row with its saved worktrees, so
+    // the sidebar row would change shape twice. The window-focus sweep runs
+    // when a click activates the window, which is also when a click on a
+    // Host row starts its expand or collapse animation.
+    let keepsFailed: Bool
+    if inSweep, case .failed = project.loadState { keepsFailed = true } else { keepsFailed = false }
+    if !keepsFailed {
+      await client.setProjectLoadState(projectID, .loading)
+    }
 
-    // Health check. A remote path can't be stat'd locally, so a Server project
+    // Health check. A remote path can't be stat'd locally, so a Remote Project
     // substitutes SSH probes for the local `FileManager.fileExists`, with the
     // two failure modes kept distinct so the row names the actual problem:
     // host unreachable ("Cannot reach …") vs host answered but the configured
@@ -82,14 +95,18 @@ actor ProjectReconciler {
           projectID, Self.missingFolderState(rootPath: project.rootPath))
         return
       }
-      // A workspace whose manifest is gone or unreadable stays a workspace
-      // (the flag is sticky — demoting it would re-open the folder-project
-      // git probe) and reports the problem on its row instead. The reconcile
-      // closure re-reads the manifest for its contents; this pass only
-      // decides whether the row is healthy.
+      // A workspace whose manifest is gone, unreadable, invalid, or newer
+      // than this build stays a workspace (the flag is sticky — demoting it
+      // would re-open the folder-project git probe) and reports the problem
+      // on its row instead, without a reconcile or any write. A version 1
+      // manifest migrates here, so the reconcile closure reads the group
+      // manifest; this pass only decides whether the row is healthy.
       if project.isWorkspace {
         do {
-          _ = try WorkspaceManifestStore.load(rootPath: project.rootPath)
+          _ = try WorkspaceManifestStore.loadOrMigrate(rootPath: project.rootPath)
+        } catch WorkspaceManifestStore.Failure.newerSchema {
+          await client.setProjectLoadState(projectID, .failed(reason: "Created by a newer Codans"))
+          return
         } catch {
           await client.setProjectLoadState(
             projectID,
@@ -136,7 +153,7 @@ actor ProjectReconciler {
       for project in snapshot.projects {
         let pid = project.id
         group.addTask { [self] in
-          await reconcile(projectID: pid)
+          await reconcile(projectID: pid, inSweep: true)
         }
       }
     }

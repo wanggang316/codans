@@ -10,6 +10,10 @@ struct DiffFeature {
     var projectID: ProjectID?
     var worktreeID: WorktreeID?
     var path: String?
+    /// Host of the worktree's Project; `nil` = This Mac. Git calls name it so
+    /// they run on that machine, also when another Host has the same path
+    /// (ADR 0006).
+    var hostID: HostID?
     var isVisible = false
     var sidebarVisible = true
     var filePresentation: FilePresentation = .tree
@@ -57,7 +61,7 @@ struct DiffFeature {
   enum FilePresentation: String, Equatable, Sendable { case tree, list }
 
   enum Action: Equatable {
-    case contextChanged(ProjectID?, WorktreeID?, String?)
+    case contextChanged(ProjectID?, WorktreeID?, String?, HostID? = nil)
     case prBaseChanged(WorktreeID, String?, URL?)
     case toggle
     case close
@@ -92,8 +96,8 @@ struct DiffFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .contextChanged(let project, let worktree, let path):
-        guard state.worktreeID != worktree || state.path != path else { return .none }
+      case .contextChanged(let project, let worktree, let path, let hostID):
+        guard state.worktreeID != worktree || state.path != path || state.hostID != hostID else { return .none }
         if let id = state.worktreeID {
           state.preferences[id] = Preference(
             scope: state.scope, base: state.base, selectedFileID: state.selectedFileID,
@@ -103,6 +107,7 @@ struct DiffFeature {
         state.projectID = project
         state.worktreeID = worktree
         state.path = path
+        state.hostID = hostID
         state.scope = preference?.scope ?? .all
         state.layout = preference?.layout ?? "unified"
         state.filePresentation = preference?.filePresentation ?? .tree
@@ -180,13 +185,14 @@ struct DiffFeature {
         return .none
       case .loadBaseBranches:
         guard state.isVisible, let path = state.path else { return .none }
+        let url = GitLocation.url(path: path, hostID: state.hostID)
         state.baseBranchesRequest += 1
         let request = state.baseBranchesRequest
         state.baseBranchesLoading = true
         state.baseBranchesError = nil
         return .run { [git] send in
           do {
-            let inventory = try await git.listAllBranches(URL(fileURLWithPath: path))
+            let inventory = try await git.listAllBranches(url)
             await send(.baseBranchesLoaded(request, inventory))
           } catch {
             await send(.baseBranchesFailed(request, Self.errorMessage(error)))
@@ -296,9 +302,9 @@ struct DiffFeature {
     // With nothing on screen for this scope, list the files first and read untracked files after;
     // otherwise swap in the complete comparison once, so the header totals never flicker.
     let listFirst = state.snapshot == nil
+    let url = GitLocation.url(path: path, hostID: state.hostID)
     return .run { [git] send in
       do {
-        let url = URL(fileURLWithPath: path)
         let selectedBase: String? = base.isEmpty ? nil : base
         guard listFirst else {
           let snapshot = try await git.comparison(url, scope, selectedBase)
@@ -321,9 +327,10 @@ struct DiffFeature {
     state.contentLoading = true
     // The previous file stays on screen until this one arrives, so switching files never blanks.
     if !silent { state.editorMessage = nil }
+    let url = GitLocation.url(path: path, hostID: state.hostID)
     return .run { [git] send in
       do {
-        let content = try await git.comparisonContent(URL(fileURLWithPath: path), snapshot, file)
+        let content = try await git.comparisonContent(url, snapshot, file)
         await send(.contentLoaded(request, file.path, content))
       } catch { await send(.contentFailed(request, Self.errorMessage(error))) }
     }.cancellable(id: CancelID.content, cancelInFlight: true)
@@ -378,11 +385,12 @@ struct DiffFeature {
     let displayedText = state.document?.newText
     let project = state.projectID
     let worktree = state.worktreeID
+    let url = GitLocation.url(path: path, hostID: state.hostID)
     return .run { [editor, git] send in
       do {
         var currentLine = location
         if currentLine != nil {
-          let current = try await git.comparisonContent(URL(fileURLWithPath: path), snapshot, file)
+          let current = try await git.comparisonContent(url, snapshot, file)
           if current.newText != displayedText || current.notice != nil { currentLine = nil }
         }
         try await editor.openFile(URL(fileURLWithPath: path), file.path, currentLine, project)

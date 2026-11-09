@@ -37,32 +37,66 @@ public nonisolated struct WorkflowRunStore: Sendable {
 
   // MARK: - Worktree layout
 
-  /// The `.gitignore` `.codans/` carries once workflows exist: the state
-  /// directory still ignores itself, but repository-scoped definitions
-  /// under `workflows/` can be committed.
-  public static let ignoreFileContents = "*\n!.gitignore\n!workflows/\n"
+  /// The `.gitignore` a `.codans/` without repository-scoped workflows
+  /// carries: the whole state directory, the ignore file included, stays
+  /// invisible to git.
+  public static let selfIgnoringFileContents = "*\n"
 
-  /// Creates `.codans/workflow-runs/` and upgrades `.codans/.gitignore`
-  /// when it is missing or still the pre-workflow `*`. Any other content
-  /// is the user's and is left alone.
+  /// The `.gitignore` `.codans/` carries once repository-scoped workflows
+  /// exist: the state directory still ignores itself, but definitions under
+  /// `workflows/` (and the ignore file that permits them) can be committed.
+  /// The patterns are anchored: an unanchored `*` also matches every file
+  /// inside `workflows/`, which a `!workflows/` cannot re-include.
+  public static let permittingIgnoreFileContents = "/*\n!/.gitignore\n!/workflows/\n"
+
+  /// The unanchored permitting form earlier builds wrote on every run
+  /// start. It un-ignored itself, so `.codans/` showed as untracked, and
+  /// still ignored every definition.
+  private static let legacyPermittingIgnoreFileContents = "*\n!.gitignore\n!workflows/"
+
+  /// Creates `.codans/workflow-runs/` and makes sure `.codans/` ignores
+  /// itself. A missing ignore file becomes the self-ignoring form (as does
+  /// the legacy permitting form); it moves to the permitting form only when
+  /// `.codans/workflows/` already exists. Any other content is the user's
+  /// and is left alone.
   public static func ensureWorktreeLayout(worktreeRoot: URL) throws {
     try FileManager.default.createDirectory(
       at: WorkflowRunLayout.runsDirectory(worktreeRoot: worktreeRoot), withIntermediateDirectories: true)
-    try ensureIgnoreFile(worktreeRoot: worktreeRoot)
+    let workflowsDirectory = WorkflowDiscovery.repositoryDirectory(worktreeRoot: worktreeRoot)
+    if FileManager.default.fileExists(atPath: workflowsDirectory.path(percentEncoded: false)) {
+      try permitWorkflowDefinitions(worktreeRoot: worktreeRoot)
+      return
+    }
+    let ignoreURL = ignoreFileURL(worktreeRoot: worktreeRoot)
+    let existing = try? String(contentsOf: ignoreURL, encoding: .utf8)
+    if existing.map({ trimmed($0) == legacyPermittingIgnoreFileContents }) ?? true {
+      try selfIgnoringFileContents.write(to: ignoreURL, atomically: true, encoding: .utf8)
+    }
   }
 
-  /// Writes `.codans/.gitignore` so `workflows/` can be committed, when it
-  /// is missing or still the pre-workflow `*`. Any other content is the
+  /// Writes the permitting `.codans/.gitignore` so `workflows/` can be
+  /// committed, when it is missing or holds a form this app wrote. Called
+  /// when a repository-scoped workflow is created. Any other content is the
   /// user's and is left alone.
-  public static func ensureIgnoreFile(worktreeRoot: URL) throws {
-    let stateDirectory = worktreeRoot.appending(path: WorkflowRunLayout.stateDirectoryName, directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
-    let ignoreURL = stateDirectory.appending(path: HandoffLayout.ignoreFileName)
+  public static func permitWorkflowDefinitions(worktreeRoot: URL) throws {
+    let ignoreURL = ignoreFileURL(worktreeRoot: worktreeRoot)
+    try FileManager.default.createDirectory(
+      at: ignoreURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     let existing = try? String(contentsOf: ignoreURL, encoding: .utf8)
-    let stillLegacy = existing?.trimmingCharacters(in: .whitespacesAndNewlines) == "*"
-    if existing == nil || stillLegacy {
-      try ignoreFileContents.write(to: ignoreURL, atomically: true, encoding: .utf8)
+    let replaceable = existing.map { ["*", legacyPermittingIgnoreFileContents].contains(trimmed($0)) }
+    if replaceable ?? true {
+      try permittingIgnoreFileContents.write(to: ignoreURL, atomically: true, encoding: .utf8)
     }
+  }
+
+  private static func trimmed(_ contents: String) -> String {
+    contents.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func ignoreFileURL(worktreeRoot: URL) -> URL {
+    worktreeRoot
+      .appending(path: WorkflowRunLayout.stateDirectoryName, directoryHint: .isDirectory)
+      .appending(path: HandoffLayout.ignoreFileName)
   }
 
   // MARK: - Run layout

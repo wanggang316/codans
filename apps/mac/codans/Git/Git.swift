@@ -8,7 +8,7 @@ public nonisolated enum Git {
   /// `/usr/bin/env` with `git` as argv[0], which resolves through `$PATH` rather than pinning
   /// to a specific install.
   ///
-  /// `remoteHostResolver` is the Server-project transport seam: when it maps a
+  /// `remoteHostResolver` is the Remote Project transport seam: when it maps a
   /// repository path to a `RemoteHost`, that invocation runs `git` over SSH on
   /// the host instead of locally. The default always-`nil` resolver keeps the
   /// service purely local.

@@ -28,6 +28,9 @@ struct WorkflowEngineDependencies {
   var idleHoldSeconds: TimeInterval = 2
   /// How long `blocked` must hold before it becomes an attention.
   var blockedHoldSeconds: TimeInterval = 30
+  /// How long a launched role may wait for its agent to appear before
+  /// the watchdog treats the agent as never started.
+  var agentStartupGraceSeconds: TimeInterval = 60
   var pollInterval: Duration = .milliseconds(200)
 }
 

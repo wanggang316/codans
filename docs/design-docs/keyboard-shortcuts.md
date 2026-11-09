@@ -5,7 +5,22 @@
 
 ## 背景与范围
 
-codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。
+codans 的应用内快捷键由 `ShortcutSchema` 注册表统一管理，`ShortcutsStore` 将默认值与用户覆盖解析为有效绑定。主菜单和侧栏消费绑定，Command Palette 与状态栏显示同一份和弦提示。默认 ⌘1…⌘0 选择第 1…10 个 Tab，⌃1…⌃0 选择侧栏第 1…10 个可选行；侧栏选择序列包含普通文件夹、远程文件夹和 workspace 的根行，并遵循过滤、排序及折叠状态。⌃⌘1…⌃⌘5 依次切换侧栏顶部筛选栏的 All / Remote / Workspace / PR / Unread（`CommandID.selectSidebarFilter(_:)`，绑定在筛选按钮上，tooltip 显示和弦；按住 ⌘ 时和弦替换按钮的图标与标题，过窄时等比缩小）。Agents View 打开时，⌥1…⌥9 聚焦面板中按显示顺序排列的第 1…9 个 Agent 的 Pane；面板关闭时这些绑定不挂载，⌥N 照常进入终端。AppKit 只把带 ⌘ 或 ⌃ 的按键先作为 key equivalent 分发，仅带 ⌥ 的按键直接作为 `keyDown` 交给第一响应者（终端 Pane 把它当文本输入），所以这组绑定不走 SwiftUI `.keyboardShortcut`，而由 `localHotkeys(_:)` 的本地 `keyDown` 监听按物理键匹配；文本框或文本视图持有焦点时放行。
+
+单独按住 ⌘ 约 0.5 秒后，各控件显示自己的快捷键提示。按住期间按下任何其他键或修饰键都视为组合键：提示立即隐藏，直到松开 ⌘ 前不再显示（`CommandHoldGesture`）。提示用 `ShortcutHintLabel` 绘制：系统字体、`.secondary` 纯文本、无键帽边框。提示从解析后的绑定读取，改键或禁用会同步反映。有两种放置方式：
+
+- **原位替换**（侧栏筛选栏按钮、Tab）：筛选栏按钮的完整和弦（如 `⌃⌘1`）替换整组图标与标题，过窄时等比缩小；Tab 的完整和弦在 chip 尾部槽位，替换颜色点。被替换的内容用 `shortcutHintOutgoing(to:)` 缩小到 0.7、模糊并淡出，和弦用 `shortcutHintIncoming()` 只淡入；两者始终都在布局中，控件不动。
+- **追加在尾部附件之后**（侧栏 worktree / Project / Group 行、Agents View 行，`commandKeyHint(chord:spacing:font:)`）：按住 ⌘ 时完整和弦（如 `⌃1`、`⌥1`）淡入，排在行尾附件之后，贴住行的右边缘。侧栏行的附件是新建标记、diff 统计、PR 徽标、运行脚本点和悬停按钮；Agents View 行的附件是睡眠图标和状态图标。附件保持可见、可点击；行标题（Agents View 行的标题和副标题）让出和弦的宽度，可能截断得更多。松开时和弦淡出后移除。
+
+原位替换只切换透明度，周围布局不动。
+
+所有提示共用一个时序 `Animation.shortcutHint`（0.1 s easeInOut），工具栏和 Tab 也一样。每个提示视图（`shortcutHintOutgoing(to:)` / `shortcutHintIncoming()`、`commandKeyHint`）自己从环境读取 `CommandKeyObserver`，调用方只传绑定的和弦，不替它判断 ⌘ 是否按住。在 `GeometryReader` 或 `LazyVStack` 的闭包里读取该状态再传给行，会让这些闭包延迟、逐行更新，筛选栏和 Agents View 行会比 worktree 行晚 0.2–1.2 s 才变化。`CommandKeyObserver.isCommandHeld` 先存新值、再发 Observation 通知：Observation 在存储属性变化前通知，若别的读者在通知里同步布局窗口，`GeometryReader` / `LazyVStack` 里的提示会读到旧值并一直保持，表现为松开 ⌘ 时显示、按住时隐藏。
+
+Worktree 工具栏的 Open In 按钮按住 ⌘ 时不显示快捷键，和弦只在 tooltip 中。
+
+带快捷键的 tooltip 统一为 `名称 (和弦)`，如 `Back (⌘[)`、`Send (⌘↩)`，和弦用菜单栏的紧凑写法。系统 tooltip 只能绘制纯文本，和弦无法单独设色，所以用括号区分。所有调用方经 `ShortcutDisplay.tooltip(_:for:in:)`（注册表命令）或 `ShortcutDisplay.tooltip(_:chord:)`（脚本自身绑定、固定的 `⌘↩` / `⎋`）生成，SwiftUI 视图可用 `helpWithShortcut(_:_:)`；不在文案里手写和弦。
+
+开启“减弱动态效果”时不做动画。
 
 本设计以一个**单一 registry** 统管全部应用内快捷键：以稳定 `CommandID` 为键、默认和弦只编码一次；一个持久化的覆盖存储；一个让用户改键 / 禁用 / 重置任意已注册命令的 Settings 面板。它刻意覆盖全部应用内快捷键，使未来新增都走同一条路径，而非再引入逐 feature 的漂移。
 
@@ -80,7 +95,7 @@ case toggleDiffInspector = "toggleGitViewer"
 case openInEditor = "openInDefaultEditor"
 ```
 
-编号 case（`switchToTab1`…、`selectWorktreeAt1`…）逐个拼出而非参数化，使它们成为一等 JSON 键、参与 `CaseIterable`、并在路由 switch 里保持编译期穷尽。
+编号 case（`switchToTab1`…、`selectWorktreeAt1`…、`focusAgentAt1`…）逐个拼出而非参数化，使它们成为一等 JSON 键、参与 `CaseIterable`、并在路由 switch 里保持编译期穷尽。
 
 「Toggle Git Viewer」的默认和弦为 **⌘G**，使用 `CommandID.toggleDiffInspector` / `"toggleGitViewer"`。它通过 `RootFeature.diffInspectorToggledForCurrentWorktree` 读取 Settings → General 的 Default Git Viewer：默认首项 Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立 Changes / Outgoing 窗口；已安装的外部选择打开对应 git 客户端。下拉不提供 None；设置缺省或 `null` 归一为 Built-in，未知 ID 归一为 Built-in。既有注册表内的外部选择保留；已知但未安装的外部目标不执行打开。
 

@@ -46,22 +46,23 @@ enum CommandPaletteFuzzyScorer {
     let needleChars = Array(needle)
 
     // Title-priority match against the visible title AND the hidden
-    // `searchText` (e.g. a worktree item's Project name); the higher of the
-    // two wins so a Project-name query ranks in the title band instead of
+    // `searchText` / `searchTerms` (e.g. a worktree item's Project name); the
+    // highest wins so a Project-name query ranks in the title band instead of
     // sinking to the subtitle band. A decorative title prefix can no longer
     // out-rank a real `searchText` match.
     var primary = primaryScore(
       text: item.title, needleChars: needleChars,
       forceContiguous: forceContiguous, priorityTier: item.priorityTier
     )
-    if let searchText = item.searchText,
-      let alt = primaryScore(
-        text: searchText, needleChars: needleChars,
+    for text in [item.searchText].compactMap({ $0 }) + item.searchTerms {
+      if let alt = primaryScore(
+        text: text, needleChars: needleChars,
         forceContiguous: forceContiguous, priorityTier: item.priorityTier
       ),
-      alt > (primary ?? Int.min)
-    {
-      primary = alt
+        alt > (primary ?? Int.min)
+      {
+        primary = alt
+      }
     }
     if let primary {
       return primary + recencyBonus(id: item.id, recency: recency, now: now)

@@ -253,6 +253,63 @@ struct ProjectReconcilerTests {
       }
     }
   }
+
+  /// A sweep (launch, window focus, refresh all) checks a failed Project
+  /// again without showing it as `.loading`: a loading Project shows as a
+  /// healthy row with its saved worktrees, so the sidebar row would change
+  /// shape twice, in the middle of a user's expand or collapse.
+  @Test
+  func reconcileAllKeepsAFailedProjectFailedWhileItChecksItAgain() async {
+    let missingPath = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pm-reconciler-absent-\(UUID().uuidString)").path
+    let failed = ProjectLoadState.failed(reason: "Cannot reach host")
+    let project = Project(name: "p", rootPath: missingPath, gitRoot: missingPath, loadState: failed)
+    let catalog = Catalog(projects: [project])
+    let recorder = Recorder()
+    let client = await Self.makeClient(catalog: { catalog }, recorder: recorder)
+    let reconciler = ProjectReconciler(client: client)
+
+    await reconciler.reconcileAll()
+
+    #expect(
+      recorder.events == [
+        .setLoadState(project.id, ProjectReconciler.missingFolderState(rootPath: missingPath))
+      ])
+  }
+
+  /// A failed Project that a sweep finds healthy again goes straight to
+  /// `.ready`.
+  @Test
+  func reconcileAllTakesARecoveredFailedProjectToReady() async throws {
+    try await Self.withTempDir { rootPath in
+      let project = Project(
+        name: "p", rootPath: rootPath, gitRoot: rootPath, loadState: .failed(reason: "Cannot reach host"))
+      let recorder = Recorder()
+      let client = await Self.makeClient(catalog: { Catalog(projects: [project]) }, recorder: recorder)
+      let reconciler = ProjectReconciler(client: client)
+
+      await reconciler.reconcileAll()
+
+      #expect(recorder.events == [.reconcileDiscovered(project.id), .setLoadState(project.id, .ready)])
+    }
+  }
+
+  /// A request for one Project (Retry, a new Project) still shows it as
+  /// loading while it is checked.
+  @Test
+  func reconcileOfOneFailedProjectShowsItAsLoading() async {
+    let missingPath = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pm-reconciler-absent-\(UUID().uuidString)").path
+    let project = Project(
+      name: "p", rootPath: missingPath, gitRoot: missingPath, loadState: .failed(reason: "Cannot reach host"))
+    let recorder = Recorder()
+    let client = await Self.makeClient(catalog: { Catalog(projects: [project]) }, recorder: recorder)
+    let reconciler = ProjectReconciler(client: client)
+
+    await reconciler.reconcile(projectID: project.id)
+
+    #expect(recorder.events.first == .setLoadState(project.id, .loading))
+  }
 }
 
 /// Tiny Date holder so tests can advance the reconciler's clock deterministically.

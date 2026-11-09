@@ -179,7 +179,8 @@ struct CommandQueueRunnerTests {
   @Test
   func agentPaneIgnoresRawTerminalBusy() {
     #expect(CommandQueueRunner.isReady(agentState: .idle, terminalBusy: true))
-    #expect(CommandQueueRunner.isReady(agentState: .finished, terminalBusy: true))
+    #expect(CommandQueueRunner.isReady(agentState: .done, terminalBusy: true))
+    #expect(CommandQueueRunner.isReady(agentState: .error, terminalBusy: true))
     #expect(!CommandQueueRunner.isReady(agentState: .working, terminalBusy: false))
   }
 

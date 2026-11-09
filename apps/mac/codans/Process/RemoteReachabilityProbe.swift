@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// One-shot SSH reachability check for a Server project's health reconcile.
+/// One-shot SSH reachability check for a Remote Project's health reconcile.
 /// Runs `ssh <BatchMode,ConnectTimeout> host true`: a live ControlMaster (an
 /// open terminal) makes this a near-instant no-auth round-trip; a cold host
 /// pays one TCP+handshake bounded by `ConnectTimeout`. `BatchMode=yes` fails

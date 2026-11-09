@@ -53,6 +53,10 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
   /// worktrees; the encode path omits the key so existing catalogs
   /// round-trip identically.
   public var sourceGitRoot: String?
+  /// Group and role of a Workspace row. `nil` for ordinary worktrees and for
+  /// Workspace rows the reconcile has not placed yet; the encode path omits
+  /// the key when `nil`.
+  public var workspaceSlot: WorkspaceSlot?
 
   public init(
     id: WorktreeID = WorktreeID(),
@@ -66,7 +70,8 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     archivedAt: Date? = nil,
     isPinned: Bool = false,
     isNew: Bool = false,
-    sourceGitRoot: String? = nil
+    sourceGitRoot: String? = nil,
+    workspaceSlot: WorkspaceSlot? = nil
   ) {
     self.id = id
     self.name = name
@@ -80,13 +85,14 @@ public nonisolated struct Worktree: Equatable, Sendable, Identifiable {
     self.isPinned = isPinned
     self.isNew = isNew
     self.sourceGitRoot = sourceGitRoot
+    self.workspaceSlot = workspaceSlot
   }
 }
 
 extension Worktree: Codable {
   private enum CodingKeys: String, CodingKey {
     case id, name, path, branch, headSHA, tabs, selectedTabID, archived, archivedAt, isPinned, isNew,
-      sourceGitRoot
+      sourceGitRoot, workspaceSlot
   }
 
   public init(from decoder: Decoder) throws {
@@ -103,6 +109,7 @@ extension Worktree: Codable {
     self.isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
     self.isNew = try container.decodeIfPresent(Bool.self, forKey: .isNew) ?? false
     self.sourceGitRoot = try container.decodeIfPresent(String.self, forKey: .sourceGitRoot)
+    self.workspaceSlot = try container.decodeIfPresent(WorkspaceSlot.self, forKey: .workspaceSlot)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -130,6 +137,7 @@ extension Worktree: Codable {
     }
     // Omit when nil so ordinary worktrees round-trip identically.
     try container.encodeIfPresent(sourceGitRoot, forKey: .sourceGitRoot)
+    try container.encodeIfPresent(workspaceSlot, forKey: .workspaceSlot)
   }
 }
 

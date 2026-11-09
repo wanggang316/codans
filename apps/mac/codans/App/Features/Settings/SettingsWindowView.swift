@@ -64,26 +64,21 @@ struct SettingsWindowView: View {
     Set(hierarchyManager.catalog.projects.map(\.id))
   }
 
-  /// Window-title binding. Global sections use `SettingsSection.globalTitle`; repository
-  /// sections resolve the owning Project's name through the live `HierarchyManager`
-  /// catalog and fall back to a bare section name when the project has been dropped
-  /// mid-flight (B8 handoff — `onChange(of: projectIDs)` will swap the selection back
-  /// to `.general` one frame later).
+  /// Window-title binding. Global sections use `SettingsSection.globalTitle`; a
+  /// Project page shows the Project's name from the live `HierarchyManager` catalog
+  /// and falls back to "Settings" when the project has been dropped mid-flight (B8
+  /// handoff — `onChange(of: projectIDs)` will swap the selection back to `.general`
+  /// one frame later).
   private func title(for section: SettingsSection) -> String {
     if let globalTitle = section.globalTitle {
       return globalTitle
     }
-    if let pid = section.projectID, let suffix = section.projectSubrowTitle {
-      return projectTitle(for: pid, suffix: suffix)
+    if let pid = section.projectID,
+      let project = hierarchyManager.catalog.projects.first(where: { $0.id == pid })
+    {
+      return project.name
     }
     return "Settings"
-  }
-
-  private func projectTitle(for projectID: ProjectID, suffix: String) -> String {
-    let project = hierarchyManager.catalog.projects
-      .first { $0.id == projectID }
-    guard let project else { return suffix }
-    return "\(project.name) — \(suffix)"
   }
 
   /// Window subtitle binding. Only project-scoped sections carry one — the
@@ -117,8 +112,10 @@ struct SettingsWindowView: View {
       AgentsSettingsView()
     case .workflows:
       WorkflowsSettingsView()
-    case .github:
-      GitHubSettingsView(settingsStore: settingsStore)
+    case .gitPlatforms:
+      GitPlatformsSettingsView(settingsStore: settingsStore)
+    case .hosts:
+      HostsSettingsView(store: store.scope(state: \.hosts, action: \.hosts))
     case .worktree:
       SettingsWorktreeView(settingsStore: settingsStore)
     case .terminal:
@@ -135,43 +132,28 @@ struct SettingsWindowView: View {
       UpdatesSettingsView()
     case .about:
       AboutSettingsView()
-    case .projectGeneral, .projectScripts:
-      // Split out so `detailView` itself stays under the complexity cap —
-      // these two cases are the only ones with a nested store-scope branch.
-      projectDetailView(for: section)
+    case .project(let projectID):
+      // Split out so `detailView` itself stays under the complexity cap.
+      projectDetailView(for: projectID)
     }
   }
 
   @ViewBuilder
-  private func projectDetailView(for section: SettingsSection) -> some View {
-    switch section {
-    case .projectGeneral(let projectID):
-      if let paneStore = store.scope(
-        state: \.projectPanes[id: projectID],
-        action: \.projectPanes[id: projectID]
-      ) {
-        ProjectGeneralSettingsView(
-          projectID: projectID,
-          store: paneStore,
-          descriptors: store.state.general.descriptors
-        )
-      } else {
-        // State entry is lazily instantiated in `selectionChanged`; this arm is a
-        // belt-and-suspenders placeholder for the single frame between a user click
-        // landing and the reducer run finishing.
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
-    case .projectScripts(let projectID):
-      if let paneStore = store.scope(
-        state: \.projectPanes[id: projectID],
-        action: \.projectPanes[id: projectID]
-      ) {
-        ProjectScriptsSettingsView(projectID: projectID, store: paneStore)
-      } else {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
-    default:
-      EmptyView()
+  private func projectDetailView(for projectID: ProjectID) -> some View {
+    if let paneStore = store.scope(
+      state: \.projectPanes[id: projectID],
+      action: \.projectPanes[id: projectID]
+    ) {
+      ProjectGeneralSettingsView(
+        projectID: projectID,
+        store: paneStore,
+        descriptors: store.state.general.descriptors
+      )
+    } else {
+      // State entry is lazily instantiated in `selectionChanged`; this arm is a
+      // belt-and-suspenders placeholder for the single frame between a user click
+      // landing and the reducer run finishing.
+      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 }

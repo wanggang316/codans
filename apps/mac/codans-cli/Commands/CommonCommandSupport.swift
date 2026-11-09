@@ -186,12 +186,20 @@ enum PathResolver {
 /// innermost target is named explicitly and its containers are left on
 /// `current`, the containers come from the tree rather than the calling pane,
 /// so `codans tab close t3` and `codans pane new --tab t3` work from any
-/// shell — the target already determines where it lives.
+/// shell — the target already determines where it lives. `host` is the
+/// command's `--host`; a Project found through the tree must be on it too.
 enum ScopeResolver {
   static func isCurrent(_ value: String) -> Bool { value == "current" || value == "." }
 
+  /// With `--host`, checks through the app that `projectID` is on that
+  /// Host, the same check an explicit Project id gets.
+  static func checkHost(of projectID: ProjectID, host: IPC.HostSelector?, client: RPCClient) async throws {
+    guard let host else { return }
+    _ = try await AliasResolver.resolve(projectID.description, kind: .project, host: host, client: client)
+  }
+
   static func worktree(
-    project: String, worktree: String, client: RPCClient
+    project: String, worktree: String, host: IPC.HostSelector? = nil, client: RPCClient
   ) async throws -> WorktreePath {
     let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
     if isCurrent(project), !isCurrent(worktree) {
@@ -201,14 +209,15 @@ enum ScopeResolver {
           code: .notFound, message: "worktree \(worktreeUUID.uuidString) not found",
           details: ["kind": "worktree", "id": worktreeUUID.uuidString])
       }
+      try await checkHost(of: located.projectID, host: host, client: client)
       return located
     }
-    let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+    let projectUUID = try await AliasResolver.resolve(project, kind: .project, host: host, client: client)
     return WorktreePath(projectID: ProjectID(raw: projectUUID), worktreeID: WorktreeID(raw: worktreeUUID))
   }
 
   static func tab(
-    project: String, worktree: String, tab: String, client: RPCClient
+    project: String, worktree: String, tab: String, host: IPC.HostSelector? = nil, client: RPCClient
   ) async throws -> TabPath {
     let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
     if isCurrent(project), isCurrent(worktree), !isCurrent(tab) {
@@ -218,9 +227,10 @@ enum ScopeResolver {
           code: .notFound, message: "tab \(tabUUID.uuidString) not found",
           details: ["kind": "tab", "id": tabUUID.uuidString])
       }
+      try await checkHost(of: located.projectID, host: host, client: client)
       return located
     }
-    let scope = try await Self.worktree(project: project, worktree: worktree, client: client)
+    let scope = try await Self.worktree(project: project, worktree: worktree, host: host, client: client)
     return TabPath(projectID: scope.projectID, worktreeID: scope.worktreeID, tabID: TabID(raw: tabUUID))
   }
 }
@@ -288,4 +298,19 @@ struct IDMessage: Encodable, CustomStringConvertible {
   let message: String
 
   var description: String { message }
+}
+
+/// `--host`, one option group for every command that resolves a Project
+/// identifier (ADR 0006). It applies to each Project the command resolves.
+struct HostOptions: ParsableArguments {
+  @Option(
+    name: .long,
+    help: "Host of the project: a Host id from `tree`, or 0 for This Mac. Default: any Host.")
+  var host: String?
+
+  func selector() throws -> IPC.HostSelector? { try HostArgument.parse(host) }
+
+  func resolveProject(_ value: String, client: RPCClient) async throws -> UUID {
+    try await AliasResolver.resolve(value, kind: .project, host: selector(), client: client)
+  }
 }

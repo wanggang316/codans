@@ -1,6 +1,6 @@
 ---
 name: codans
-description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, create a multi-repository workspace or add a repository to one, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
+description: Drive the codans Mac app from a terminal with the `codans` CLI — inspect the Project / Worktree / Tab / Pane hierarchy, create and switch worktrees, spawn tabs and panes, run a command in a pane and capture its output, send keystrokes or text, read back rendered output, broadcast input across panes, see which panes run agents and wait for their state, launch agent profiles, hand a task off to another agent, create a multi-repository workspace, add a project to one, or create and delete its branch groups, install this skill for agents, and check app health. Use this skill whenever the user is operating inside a codans Pane, references the `codans` command, asks how to script codans, or wants to coordinate panes / worktrees / agents from the shell. Prefer `codans tree` to discover state before issuing any other command.
 ---
 
 # codans CLI (`codans`)
@@ -74,11 +74,26 @@ Project       a tracked git repo (one Project per repo) — or a workspace
 ```
 
 A **workspace** Project (`"kind": "workspace"` in `codans tree --json`) is a
-plain folder holding checkouts of *several* repositories for one task, listed
-in `<root>/.codans/workspace.json`. Its first Worktree row is the folder
-itself; every other row is one member checkout, whose repository is reported
-as `sourceGitRoot`. Treat those rows as independent repos: `git -C <path>`
-per row, never `git worktree` commands against the workspace root.
+plain folder that groups *several* repositories (its source projects) for one
+task. Its rows come in groups, reported as `workspaceGroup {id, name, role}`
+in `codans tree --json`:
+
+- the `default` group links to each source project's main checkout
+  (`role: "reference"`);
+- each named group has one branch, checked out once per project under
+  `<root>/<group>/<project>` (`role: "member"`);
+- every group also has its own row for the group folder
+  (`role: "groupTerminal"`).
+
+A row's repository is reported as `sourceGitRoot`. Treat member rows as
+independent repos: `git -C <path>` per row, never `git worktree` commands
+against the workspace root. Create and delete groups with `codans workspace
+group …`, never with `codans worktree new` / `rm`, which refuse workspace rows.
+
+Each Project in `codans tree`, `codans project list`, `codans project show`,
+and `codans project add` carries its Host (machine). JSON has
+`host {id, name}`; text shows `host=<id>`. The id is the Host record id, or
+`"0"` for a Project on This Mac.
 
 `codans` is on `PATH` automatically inside every codans Pane, and the app
 auto-detects which Project / Worktree / Tab / Pane that Pane belongs to —
@@ -114,6 +129,23 @@ there is one (`--worktree main` means "this project's main"); an
 ambiguous name is a conflict (exit 3, `CONFLICT`) — pass the id. Panes
 have no name: a bare word where a pane is expected is a usage error,
 which is usually unquoted text (`codans pane send echo hi` — quote it).
+
+A Project name can exist on more than one Host (for example `agents` on
+This Mac and on a Server). Every command that takes a Project also takes
+`--host <id>`: a Host id from `codans tree`, or `0` for This Mac. It keeps
+Project resolution to that Host:
+
+```bash
+codans tree --host 0                          # Projects on This Mac only
+codans worktree list --project agents --host 0
+codans project show agents --host 6F1C…       # the `agents` on that Host
+```
+
+Without `--host`, a name that matches Projects on two Hosts is a conflict
+(exit 3) that lists each match as `<project-id> host=<id|0>`. A Project id
+with a `--host` it is not on also fails (exit 3). An empty or other
+`--host` value is a usage error (exit 1); an unknown Host id is not found
+(exit 2).
 
 `current` for a project / worktree / tab is derived from the pane the
 command runs in, so it works from any subshell or wrapper inside a pane.
@@ -242,7 +274,7 @@ carries full UUIDs plus the same handles as `handle` (`"t3"` / `"p7"`).
 codans project list                          # all projects
 codans project add ~/code/api                # register an existing directory
 codans project add --name "API" ~/code/api   # custom display name
-codans project show <project>                # paths, git root, selection, worktree counts
+codans project show <project>                # paths, git root, Host, selection, worktree counts
 codans project rename <project> "API v2"     # sidebar name ('' clears the override)
 codans project rm <project>                  # remove (id, name, or 'current')
 ```
@@ -286,38 +318,45 @@ Remove Worktree (directory removed, branch deleted per Settings).
 ### `codans workspace` — one task, several repositories
 
 ```bash
-codans workspace create "Checkout Flow" --project app --project api   # ≥ 2 members
-codans workspace create "Checkout Flow" --project app --repo ~/dev/shared-lib \
-  --branch feat/checkout --base origin/main --path ~/tmp/checkout-flow
-codans workspace create "Release" --project app --remote git@github.com:org/lib.git \
-  --branch release/1.2 --track                          # remote-tracking origin/release/1.2
-codans workspace add <workspace> --repo ~/dev/other --existing --branch main
-codans workspace add <workspace> --repo ~/dev/tool --ref origin/main   # remote-tracking ref
-codans workspace add <workspace> --remote https://host/team/svc --clone-into ~/src
-codans workspace drop <workspace> <member> [--keep-branch]   # unregister one checkout
-codans workspace remove <workspace> [--delete-files [--delete-branches]]
-codans workspace show [<workspace>]                    # manifest + live rows
+codans workspace create "Checkout Flow" --project app --project api   # sources only, no branch
+codans workspace create "Release" --project app --remote git@github.com:org/lib.git --path ~/tmp/release
+codans workspace add <workspace> ~/dev/other                 # or --project P / --remote URL
+codans workspace drop <workspace> <project>                  # name or path; disk unchanged
+codans workspace show [<workspace>] [--json]                 # projects + groups + rows
+codans workspace group create <workspace> feat --branch feat/checkout \
+  [--base app=origin/release] [--no-fetch] [--copy-ignored] [--copy-untracked] [--agent "Claude Code"]
+codans workspace group delete <workspace> feat --dry-run     # what would be lost
+codans workspace group delete <workspace> feat [--delete-branches] [--discard]
+codans workspace remove <workspace> [--delete-files [--discard] [--delete-branches]]
 ```
 
-`create` makes `<root>/<name>` for every member with `git worktree add`
-(new branch `--branch`, default: a slug of the title, from `--base`, default:
-the repository's default remote branch; `--existing` checks out an existing
-local branch instead; `--track` checks out the remote-tracking
-`origin/<branch>`), writes `<root>/.codans/workspace.json`, and registers the
-folder as a workspace Project. Members come from registered projects
-(`--project`), any local repository that is not bare (`--repo`), or a
-remote URL (`--remote`) — all repeatable. A remote is cloned once into
-`--clone-into` (default `~/.codans/sources/<name>`; an existing clone of the
-same remote there is reused) and then behaves like a local repository. With
-`--track` or `add --ref <remote>/<branch>`, a local branch of the same name is
-checked out as is; `--reset-local` points it at the remote tip instead and is
-never implied. The root defaults to `~/.codans/workspaces/<slug>` and must
-not sit inside a git repository. Both verbs really write to disk — a failure
-midway removes everything the call created, including a clone it made. `drop` moves one member's checkout out of the
-workspace and deletes its branch (unless `--keep-branch`); `remove` alone
-only de-registers, while `--delete-files` unregisters every member and
-deletes the folder — but keeps the folder if any member could not be
-unregistered, so a repository is never left pointing at a missing worktree.
+`create` registers the folder (default `~/.codans/workspaces/<slug>`, never
+inside a git repository) with its source projects: registered projects
+(`--project`), local repositories that are not bare (`--repo`), or remotes
+(`--remote`, cloned once into `--clone-into`, default `~/.codans/sources/<name>`).
+It creates no branch and checks nothing out; the `default` group links to each
+project's main checkout. `add` and `drop` change only the source list and the
+`default` group — named groups and every folder on disk stay as they are.
+
+`group create` checks out one branch in every project into
+`<root>/<name>/<project>`, using each project's Codans settings for base ref,
+fetch, and copy options unless a flag overrides them. A local branch of the
+same name in any project blocks it (exit 3, the project is named); a failed
+checkout removes every checkout the call made. Setup commands run after all
+checkouts exist; a failed one keeps the group and is reported. `--agent`
+starts that profile in each member once the group exists.
+
+`group delete` checks each member first. Uncommitted changes, unpushed
+commits, running terminals, or other files in the group folder fail it with
+the list (exit 3) unless `--discard` accepts losing them; a check that cannot
+run fails it too. A member that cannot be removed keeps the group with the rest
+deleted — run the same command again to retry. The `default` group cannot be
+deleted. `remove` alone only removes the sidebar entry; `--delete-files`
+deletes every named group, the links, and the workspace folder with the same
+checks. Source project folders are never deleted.
+
+Old branch flags on `create` / `add` (`--branch`, `--existing`, `--track`, …)
+and `drop --keep-branch` fail with a pointer to `group create`.
 
 ### `codans tab` — manage tabs inside a worktree
 
@@ -429,19 +468,34 @@ recognises as running an agent, with the derived state it shows there.
 ```bash
 codans agent status                                  # p7  claude-code  working  3m12s  api/main  "dev server"
 codans agent status --json | jq '.data.agents[] | select(.state=="blocked") | .paneID'
+codans agent status --json | jq '.data.agents[] | select(.isLive != false) | .paneID'   # panes whose terminal runs (send wakes sleeping ones)
 codans agent wait p7 --until idle --wait-timeout 300      # block until the agent is waiting for input
 codans agent wait p7 --until changed                 # …or until anything about it changes
 codans agent wait p7 --until exit --wait-timeout 600      # …or until no agent is bound to the pane
 ```
 
 States: `working` (producing output), `blocked` (asking the user
-something), `idle` (at its prompt), `finished` (went idle while in the
-background). The state is derived from the pane's screen and foreground
-process, so it can lag a moment behind the agent; `wait` resolves
+something; `blockedKind` says permission, question, or auth when known),
+`idle` (at its prompt), `done` (finished a turn you have not looked at),
+`error` (the agent reported a failure). An agent that reports OSC 7501
+program status (Claude Code, Pi, omp) sets its own state (`source:
+programStatus`, often with a `message`); for other agents the state is
+derived from the pane's screen (`source: screen`), so it can lag a moment
+behind the agent. `--until finished` still works as the old name of
+`done`. `wait` resolves
 server-side, so no polling loop is needed. Past `--wait-timeout` (1–600 s,
 default 60) it fails with exit 11 and `WAIT_TIMEOUT`; the JSON error's
 `details.state` is the last state seen. `pane show` reports the bound
 agent without the state.
+
+A pane in a tab that is not open (restored from the last session, or idle
+long enough to have its terminal view released) still runs, but no terminal
+view renders it: its row has `isAttached: false` and shows `(sleeping)`.
+Codans still receives the program status such an agent reports (`source:
+programStatus`); a state derived from the screen is the last one seen
+(`source: cached`). If its shell exits while sleeping, the row goes away
+within about two seconds. `pane send` / `capture` attach it first. A row
+with `isLive: false` shows `(not live)`: its shell no longer runs.
 
 Profiles are the launch presets from Settings > Agents (agent, model, effort,
 execution mode, placement, extra args, env). Launching one opens a fresh tab
@@ -548,7 +602,7 @@ editors in priority order, ending at Finder.
 The app bundles its agent skills; these commands link them into the
 folders agents read skills from, so each agent learns the CLI from the
 version that matches the installed app. Local file-system work — the app
-need not be running. The same switches live in Settings ▸ Developer ▸
+need not be running. The same switches live in Settings ▸ Integrations ▸
 Agent skills; installing is always the user's choice per agent.
 
 ```bash
@@ -598,12 +652,12 @@ codans pane new --tab "$TAB" --cwd "$(codans worktree show "$WT" --json | jq -r 
 ### Start a cross-repository task in a workspace
 
 ```bash
-codans workspace create "Checkout Flow" --project app --project api --branch feat/checkout
-# The workspace root is the new project's first worktree; each member is a row.
-WS=$(codans tree --json | jq -r '.projects[] | select(.kind == "workspace") | .id')
-codans workspace show "$WS"
-codans tab new --worktree "$(codans tree --json | jq -r --arg ws "$WS" '.projects[] | select(.id == $ws) | .worktrees[0].id')" "agent"
-codans pane new -- claude    # runs at the workspace root; `git -C app`, `git -C api` per member
+WS=$(codans workspace create "Checkout Flow" --project app --project api --json | jq -r '.data.id')
+codans workspace group create "$WS" checkout --branch feat/checkout
+# The group's own row is the group folder; each member is a row under it.
+GROUP_ROW=$(codans workspace show "$WS" --json | jq -r '.data.groups[] | select(.name == "checkout") | .worktreeID')
+codans tab new --worktree "$GROUP_ROW" "agent"
+codans pane new -- claude    # runs in <root>/checkout; `git -C app`, `git -C api` per member
 ```
 
 ### Take over a task from the previous agent
@@ -657,10 +711,13 @@ codans pane capture @worker --wait-stable --lines 40
 | `socket /tmp/codans-*.sock did not become reachable` | App isn't running. Run `codans launch` or open codans from the GUI.       |
 | `no current pane: this shell is not inside a Codans pane` (or project/worktree/tab) | You used `current` / `.` outside a codans Pane. Pass an explicit ID or name. |
 | `pane <uuid> not found`                             | The pane was closed, or the UUID came from a different app instance.     |
+| `pane terminal is not running: <uuid>` (`PANE_NOT_LIVE`, exit 3) | The pane is still in Codans, but its shell no longer runs; `agent status` shows it `(not live)`. `codans pane focus <pane>` opens it with a new shell. |
 | `unknown key "..."`                                 | `codans pane send-key` only knows the keys listed above. Use `--raw` for the rest. |
 | `--raw is exclusive of ...`                         | `codans pane send --raw` cannot combine with positional text, `--stdin`, or `--no-enter`. |
 | `unknown pane "echo"; pass a pane id, ...`           | The first word of an unquoted `pane send` was taken as the target. Quote the text. |
 | `pane p7 did not reach idle within 60s`             | `agent wait` hit its deadline (exit 11, `WAIT_TIMEOUT`). Raise `--wait-timeout`, or check `codans agent status` for what the agent is doing. |
+| `pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry` | `--capture` attached a pane that had no terminal view, and its daemon did not answer. Nothing was typed; retry. |
+| `pane.send --capture: the text was sent, but the pane daemon's screen could not be read …` | The command was sent and ran, but its output could not be captured. Do not resend; read the pane with `codans pane read` or `codans pane capture`. |
 | `command in pane … still running after 30s`        | `pane send --wait` hit its deadline. Raise `--wait-timeout`, or read the pane later with `codans pane capture`. |
 | Help shows fewer commands than expected             | Trust `codans --help` over external docs; `codans help-json` prints the whole tree. |
 

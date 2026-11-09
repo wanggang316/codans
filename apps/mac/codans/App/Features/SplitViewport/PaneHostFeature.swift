@@ -29,6 +29,9 @@ struct PaneHostFeature {
     /// `SurfaceBox`; the live surface is owned by `TerminalEngine`'s
     /// registry.
     var surface: SurfaceBox?
+    /// Size in points of the slot that shows this pane, from the last
+    /// `.task`. A retry reuses it.
+    var slotSize: CGSize?
 
     var id: PaneID { paneID }
 
@@ -62,8 +65,11 @@ struct PaneHostFeature {
   enum Action: Equatable {
     /// Fired from `LeafView`'s `.task` (routed through the parent store
     /// behind a membership check — see `LazyPaneHost`'s doc). Idempotent:
-    /// registry short-circuit keeps re-renders free.
-    case task
+    /// registry short-circuit keeps re-renders free. `slotSize` is the
+    /// laid-out size of the pane's slot: a new surface starts at it, so a
+    /// live session behind a re-attach is not resized through a
+    /// placeholder width first.
+    case task(slotSize: CGSize)
     case retryButtonTapped
     /// Internal: the async `ensureSurface` call returned successfully and
     /// the registry now holds a surface for this pane.
@@ -82,7 +88,10 @@ struct PaneHostFeature {
         state.phase = .loading
         state.surface = nil
         return resolveSurface(state: state)
-      case .task:
+      case .task(let slotSize):
+        if slotSize.width > 0, slotSize.height > 0 {
+          state.slotSize = slotSize
+        }
         return resolveSurface(state: state)
       case .resolveCompleted(let box):
         state.phase = .ready
@@ -113,9 +122,10 @@ struct PaneHostFeature {
     let tabID = state.tabID
     let worktreeID = state.worktreeID
     let projectID = state.projectID
+    let initialSize = state.slotSize
     return .run { [client = terminalClient] send in
       do {
-        try await client.ensureSurface(paneID, tabID, worktreeID, projectID)
+        try await client.ensureSurface(paneID, tabID, worktreeID, projectID, initialSize)
       } catch {
         await send(.resolveFailed(Failure(error: error)))
         return

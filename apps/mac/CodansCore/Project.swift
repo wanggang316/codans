@@ -19,17 +19,26 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Settings → General → Name writes here; clearing the field writes `nil`.
   /// Persistence-only; `name` is still the right thing to read at call sites.
   public var displayName: String?
-  /// For a local project, the canonical local root path. For a Server project
+  /// For a local project, the canonical local root path. For a Remote Project
   /// (`remoteHost != nil`), the **remote** absolute path on the host — the same
   /// string plumbing carries it, but it is never a valid local filesystem path,
   /// so local-FS operations must be gated on `isRemote`.
   public var rootPath: String
-  /// Resolved git repository root. For a Server project this is a **remote** path
+  /// Resolved git repository root. For a Remote Project this is a **remote** path
   /// string (discovered over SSH), `nil` when the remote root is a plain folder.
   public var gitRoot: String?
+  /// The Host record (`Catalog.hosts`) this Remote Project is on. `nil` = a
+  /// local Project, on This Mac. Persisted in place of the host fields
+  /// (ADR 0003).
+  public var hostID: HostID?
   /// SSH destination this project lives on. `nil` = local. When set, `rootPath` /
   /// `gitRoot` / each `Worktree.path` are remote path strings and terminals/git
   /// run over SSH. See `RemoteHost`.
+  ///
+  /// Resolved from `hostID` by the catalog (`Catalog.resolveHostReferences`)
+  /// so runtime code reads the connection without a Host lookup. Not
+  /// persisted when `hostID` is set; a value without a `hostID` comes from a
+  /// legacy catalog and is turned into a Host record on load.
   public var remoteHost: RemoteHost?
   public var worktrees: [Worktree]
   public var selectedWorktreeID: WorktreeID?
@@ -43,25 +52,16 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// empty — projects start untagged.
   public var tagIDs: Set<TagID>
   /// Wall-clock timestamp at which this Project was added to the catalog.
-  /// Used by `ProjectSortMode.joinOrder` to render an ordering stable
-  /// across manual reordering — i.e. so the user can switch back from
-  /// `.manual` to `.joinOrder` and get the original insertion order.
-  /// Legacy catalogs that predate this field decode to `.distantPast`;
-  /// they tie and fall back to array-position order, which equals
-  /// insertion order at the time the file was first written.
+  /// A catalog that still stores the retired `joinOrder` sort is sorted by
+  /// this field one time at load (see `LegacyProjectOrder`). Legacy catalogs
+  /// that predate this field decode to `.distantPast`.
   public var addedAt: Date
   /// Most-recent activity timestamp. Bumped on (a) inbox-notification
   /// arrival for any worktree of this Project, and (b) any input the
-  /// app dispatches into a pane of this Project. `nil` = never active;
-  /// `ProjectSortMode.activeFirst` puts these at the bottom.
+  /// app dispatches into a pane of this Project. `nil` = never active.
+  /// A catalog that still stores the retired `activeFirst` sort is sorted by
+  /// this field one time at load (see `LegacyProjectOrder`).
   public var lastActiveAt: Date?
-  /// User-curated ordering key consumed by `ProjectSortMode.manual`.
-  /// Auto-incremented at `addProject` time so new projects land at the
-  /// end of the manual list; rewritten en bloc when the user confirms
-  /// the manual-sort sheet. Legacy projects decode to `0` and tie-break
-  /// on their `catalog.projects` array position, which equals their
-  /// historical sidebar order — i.e. a no-op upgrade.
-  public var manualOrder: Int
   /// User-assigned Project accent. `nil` = no color (system accent).
   /// Edited via Settings → Projects → General. Encoded only when set so
   /// catalogs without a color stay byte-identical on round-trip.
@@ -71,19 +71,30 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// Encoded only when set so catalogs without an icon stay byte-identical
   /// on round-trip.
   public var icon: ProjectIcon?
-  /// `true` when `rootPath` is a workspace: a plain folder holding several
-  /// child checkouts described by `<root>/.codans/workspace.json`. The main
-  /// Worktree row is the root itself; every other row is one child checkout.
+  /// `true` when `rootPath` is a workspace: a plain folder holding groups of
+  /// checkouts described by `<root>/.codans/workspace-groups.json`. The
+  /// Project itself is the sidebar header and stands for no row; every row
+  /// carries a `workspaceSlot` (group terminal, reference, or member).
   /// Persisted (omitted when `false`) so the kind is known synchronously at
   /// launch and survives the root being temporarily unreachable; the
   /// catalog load path re-derives it from the manifest on disk when an older
   /// build has stripped the key. Sticky: it is never cleared because the
   /// manifest went missing — see `ProjectKind`.
   public var isWorkspace: Bool
-  /// Transient. The decoded manifest, filled by the workspace reconcile and
-  /// used for display only (title, description, roles). Nil until the first
-  /// reconcile after launch; no catalog logic may depend on it.
-  public var workspace: WorkspaceManifest?
+  /// Workspace groups, `default` first and then named groups in creation
+  /// order. A cache of the group manifest for synchronous launch rendering,
+  /// plus sidebar state (`isExpanded`, `deletion`). Empty for other
+  /// Projects; the encode path omits the key when empty.
+  public var workspaceGroups: [WorkspaceGroupRecord]
+  /// Transient. The decoded group manifest, filled by the workspace
+  /// reconcile and used for display only (title, sources, group details).
+  /// Nil until the first reconcile after launch; no catalog logic may depend
+  /// on it.
+  public var workspace: WorkspaceGroupsManifest?
+  /// Transient. Reference rows whose source main checkout is missing on
+  /// disk. The rows stay (the source is not the Workspace's to archive);
+  /// the reconcile fills this so the sidebar can show them as unavailable.
+  public var unavailableWorkspaceRows: Set<WorktreeID> = []
   /// Transient. See `ProjectLoadState` doc-comment.
   public var loadState: ProjectLoadState
 
@@ -92,6 +103,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     name: String,
     rootPath: String,
     gitRoot: String? = nil,
+    hostID: HostID? = nil,
     remoteHost: RemoteHost? = nil,
     worktrees: [Worktree] = [],
     selectedWorktreeID: WorktreeID? = nil,
@@ -99,11 +111,11 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     tagIDs: Set<TagID> = [],
     addedAt: Date = Date(),
     lastActiveAt: Date? = nil,
-    manualOrder: Int = 0,
     color: ProjectColor? = nil,
     icon: ProjectIcon? = nil,
     isWorkspace: Bool = false,
-    workspace: WorkspaceManifest? = nil,
+    workspaceGroups: [WorkspaceGroupRecord] = [],
+    workspace: WorkspaceGroupsManifest? = nil,
     loadState: ProjectLoadState = .loading
   ) {
     self.id = id
@@ -115,6 +127,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     let canonical = (rootPath as NSString).lastPathComponent
     self.displayName = (name.isEmpty || name == canonical) ? nil : name
     self.gitRoot = gitRoot
+    self.hostID = hostID
     self.remoteHost = remoteHost
     self.worktrees = worktrees
     self.selectedWorktreeID = selectedWorktreeID
@@ -122,10 +135,10 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     self.tagIDs = tagIDs
     self.addedAt = addedAt
     self.lastActiveAt = lastActiveAt
-    self.manualOrder = manualOrder
     self.color = color
     self.icon = icon
     self.isWorkspace = isWorkspace
+    self.workspaceGroups = workspaceGroups
     self.workspace = workspace
     self.loadState = loadState
   }
@@ -133,7 +146,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
   /// A Project supports Git-backed Worktree operations only when it has a resolved git root.
   /// For non-git Projects, the UI presents a single synthetic Worktree (`Project.rootPath`)
   /// and the "Add Worktree" affordance is suppressed. Holds for remote git repos too — a
-  /// Server project with a resolved (remote) git root supports worktree operations over SSH.
+  /// Remote Project with a resolved (remote) git root supports worktree operations over SSH.
   /// A workspace answers `false`: its rows are checkouts of *other* repositories, added
   /// through the workspace flow rather than `git worktree add` on a project root.
   public var supportsWorktrees: Bool { gitRoot != nil }
@@ -151,7 +164,7 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
     worktree.path == rootPath
   }
 
-  /// True for a Server project — its `rootPath` / `gitRoot` / worktree paths are
+  /// True for a Remote Project — its `rootPath` / `gitRoot` / worktree paths are
   /// remote, and terminals / git run over SSH. Local-filesystem operations
   /// (`FileManager`, `URL(fileURLWithPath:)`, symlink resolution, reveal-in-Finder)
   /// must be gated on this being `false`.
@@ -172,8 +185,8 @@ public nonisolated struct Project: Equatable, Sendable, Identifiable {
 
 extension Project: Codable {
   private enum CodingKeys: String, CodingKey {
-    case id, name, displayName, rootPath, gitRoot, remoteHost, worktrees, selectedWorktreeID,
-      isExpanded, tagIDs, addedAt, lastActiveAt, manualOrder, color, icon, isWorkspace
+    case id, name, displayName, rootPath, gitRoot, hostID, remoteHost, worktrees, selectedWorktreeID,
+      isExpanded, tagIDs, addedAt, lastActiveAt, color, icon, isWorkspace, workspaceGroups
   }
 
   public init(from decoder: Decoder) throws {
@@ -193,6 +206,10 @@ extension Project: Codable {
       self.displayName = nil
     }
     self.gitRoot = try container.decodeIfPresent(String.self, forKey: .gitRoot)
+    self.hostID = try container.decodeIfPresent(HostID.self, forKey: .hostID)
+    // Legacy (catalog v4 and older) and the IPC project list carry the host
+    // fields on the Project. With a `hostID` the catalog replaces them with
+    // the endpoint of the Host record (`Catalog.resolveHostReferences`).
     self.remoteHost = try container.decodeIfPresent(RemoteHost.self, forKey: .remoteHost)
     self.worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
     self.selectedWorktreeID = try container.decodeIfPresent(WorktreeID.self, forKey: .selectedWorktreeID)
@@ -200,11 +217,9 @@ extension Project: Codable {
     let tagIDArray = try container.decodeIfPresent([TagID].self, forKey: .tagIDs) ?? []
     self.tagIDs = Set(tagIDArray)
     // Legacy catalogs ship without `addedAt`; fall back to `.distantPast`
-    // so joinOrder sorts produce a stable result (ties broken by array
-    // position, which equals the original insertion order).
+    // so the load-time `joinOrder` sort ties on array position.
     self.addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? .distantPast
     self.lastActiveAt = try container.decodeIfPresent(Date.self, forKey: .lastActiveAt)
-    self.manualOrder = try container.decodeIfPresent(Int.self, forKey: .manualOrder) ?? 0
     self.color = try container.decodeIfPresent(ProjectColor.self, forKey: .color)
     // Deliberately lenient, unlike every sibling field: a malformed `icon`
     // degrades to the default folder glyph instead of throwing, because a
@@ -213,6 +228,8 @@ extension Project: Codable {
     // a future icon case written by a newer build both land in this branch.
     self.icon = try? container.decodeIfPresent(ProjectIcon.self, forKey: .icon)
     self.isWorkspace = try container.decodeIfPresent(Bool.self, forKey: .isWorkspace) ?? false
+    self.workspaceGroups =
+      try container.decodeIfPresent([WorkspaceGroupRecord].self, forKey: .workspaceGroups) ?? []
     self.workspace = nil
     self.loadState = .loading
   }
@@ -227,9 +244,15 @@ extension Project: Codable {
     try container.encodeIfPresent(displayName, forKey: .displayName)
     try container.encode(rootPath, forKey: .rootPath)
     try container.encodeIfPresent(gitRoot, forKey: .gitRoot)
-    // Only emit `remoteHost` for Server projects — keeps existing local catalogs
-    // byte-identical on round-trip.
-    try container.encodeIfPresent(remoteHost, forKey: .remoteHost)
+    // A Remote Project stores only its Host id; the Host fields live in
+    // `Catalog.hosts`. A Remote Project without a Host id (not yet attached
+    // to a record) keeps the legacy fields so the connection is never lost;
+    // the next load turns them into a Host record.
+    if let hostID {
+      try container.encode(hostID, forKey: .hostID)
+    } else {
+      try container.encodeIfPresent(remoteHost, forKey: .remoteHost)
+    }
     try container.encode(worktrees, forKey: .worktrees)
     try container.encodeIfPresent(selectedWorktreeID, forKey: .selectedWorktreeID)
     // Only emit `isExpanded` when collapsed — keeps the common case
@@ -250,18 +273,15 @@ extension Project: Codable {
       try container.encode(addedAt, forKey: .addedAt)
     }
     try container.encodeIfPresent(lastActiveAt, forKey: .lastActiveAt)
-    // Sentinel manualOrder (legacy decode or never-stamped) is omitted
-    // so unmigrated catalogs stay byte-identical until something writes
-    // a real value.
-    if manualOrder != 0 {
-      try container.encode(manualOrder, forKey: .manualOrder)
-    }
     try container.encodeIfPresent(color, forKey: .color)
     try container.encodeIfPresent(icon, forKey: .icon)
     // Omit `isWorkspace` when false so every non-workspace catalog stays
     // byte-identical on round-trip.
     if isWorkspace {
       try container.encode(true, forKey: .isWorkspace)
+    }
+    if !workspaceGroups.isEmpty {
+      try container.encode(workspaceGroups, forKey: .workspaceGroups)
     }
     // `workspace` and `loadState` intentionally not encoded (transient).
   }

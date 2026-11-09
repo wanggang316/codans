@@ -65,7 +65,8 @@ public nonisolated enum PaneAttentionInterpreter {
     case .paneOutput(let paneID, _):
       return Step(cue: nil, outputFlag: .markProduced(paneID))
 
-    case .paneViewportChanged:
+    // Live state, not an event: the agent-state machine owns it.
+    case .paneViewportChanged, .paneProgramStatusChanged:
       return Step(cue: nil, outputFlag: .unchanged)
 
     case .paneInfoChanged(let paneID, let delta):

@@ -16,12 +16,15 @@ struct ProjectList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      struct Result: Codable { let projects: [Project] }
-      let result: Result = try await client.call(
+      let result: IPC.ProjectListPayload = try await client.call(
         .hierarchyListProjects,
         params: EmptyParams()
       )
-      try Renderer.emit(ProjectListRenderable(projects: result.projects), mode: globals.renderMode)
+      // A Remote Project on the wire may carry only its Host id; resolve it
+      // so `kind` reads `server`.
+      try Renderer.emit(
+        ProjectListRenderable(projects: result.resolvedProjects, hosts: result.hosts ?? []),
+        mode: globals.renderMode)
     }
   }
 }
@@ -53,6 +56,7 @@ struct ProjectRename: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Project id, name, or 'current'.")
   var project: String
   @Argument(help: "New display name; empty clears the override.")
@@ -62,7 +66,7 @@ struct ProjectRename: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let uuid = try await hostOptions.resolveProject(project, client: client)
       struct Params: Codable {
         let id: ProjectID
         let name: String
@@ -111,6 +115,7 @@ struct ProjectCommandsList: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
 
@@ -118,7 +123,7 @@ struct ProjectCommandsList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await hostOptions.resolveProject(project, client: client)
       struct Params: Codable { let projectID: ProjectID }
       // Honor `--timeout` by threading `globals.rpcTimeout` (D21). Most
       // existing commands hardcode the 10s default; do NOT copy that here —
@@ -143,6 +148,7 @@ struct ProjectCommandsAdd: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
   @Option(name: .long, help: "Display name. Defaults to the kind's label.")
@@ -172,7 +178,7 @@ struct ProjectCommandsAdd: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await hostOptions.resolveProject(project, client: client)
       let script = ScriptDefinition(
         kind: kind,
         name: name ?? "",
@@ -206,6 +212,7 @@ struct ProjectCommandsEdit: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Command id to edit.")
   var id: String
   @Option(name: .long, help: "Project id, name, or 'current'.")
@@ -249,7 +256,7 @@ struct ProjectCommandsEdit: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await hostOptions.resolveProject(project, client: client)
       let projectID = ProjectID(raw: projectUUID)
       // Fetch the current entry, then overlay only the supplied flags (D3).
       struct ListParams: Codable { let projectID: ProjectID }
@@ -292,6 +299,7 @@ struct ProjectCommandsRemove: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Command id to remove.")
   var id: String
   @Option(name: .long, help: "Project id, name, or 'current'.")
@@ -306,7 +314,7 @@ struct ProjectCommandsRemove: AsyncParsableCommand {
       }
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await hostOptions.resolveProject(project, client: client)
       struct Params: Codable {
         let projectID: ProjectID
         let scriptID: UUID
@@ -356,6 +364,7 @@ struct ProjectAdd: AsyncParsableCommand {
         let id: ProjectID
         let rootPath: String?
         let gitRoot: String?
+        let host: IPC.HostRef
       }
       let result: Result = try await client.call(
         .hierarchyAddProject,
@@ -367,11 +376,12 @@ struct ProjectAdd: AsyncParsableCommand {
           "name": displayName,
           "path": result.rootPath ?? resolvedPath,
           "gitRoot": result.gitRoot.map { JSONValue.string($0) } ?? JSONValue.null,
+          "host": try JSONValue.encoded(result.host),
         ],
         mode: globals.renderMode
       ) { obj in
         let kind = (obj["gitRoot"] as? JSONValue) == .null ? "folder project" : "project"
-        return "added \(kind) \(obj["id"] ?? "?")  \(displayName)"
+        return "added \(kind) \(obj["id"] ?? "?")  \(displayName)  host=\(result.host.id)"
       }
     }
   }
@@ -384,6 +394,7 @@ struct ProjectRemove: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Project id, name, or 'current'.")
   var project: String
 
@@ -391,7 +402,7 @@ struct ProjectRemove: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let uuid = try await hostOptions.resolveProject(project, client: client)
       struct Params: Codable { let id: ProjectID }
       _ = try await client.callRaw(
         .hierarchyRemoveProject,
@@ -400,48 +411,6 @@ struct ProjectRemove: AsyncParsableCommand {
       try Renderer.emit(
         IDMessage(id: uuid.uuidString, message: "removed project \(uuid.uuidString)"), mode: globals.renderMode)
     }
-  }
-}
-
-struct ProjectListPayload: Codable {
-  let projects: [Project]
-  /// Short-handle map printed by `codans tree` in text mode. Optional:
-  /// an app that predates handles simply omits it.
-  let handles: IPC.TargetHandles?
-}
-
-struct ProjectListRenderable: Encodable, CustomStringConvertible {
-  let projects: [Project]
-  private enum Key: String, CodingKey { case projects }
-
-  func encode(to encoder: Encoder) throws {
-    var container = encoder.container(keyedBy: Key.self)
-    try container.encode(projects.map(ProjectDTO.init(project:)), forKey: .projects)
-  }
-
-  var description: String {
-    projects.isEmpty
-      ? "(no projects)"
-      : projects.map { "\($0.id)  \($0.name)  \($0.rootPath)" }.joined(separator: "\n")
-  }
-}
-
-struct ProjectDTO: Encodable {
-  let id: String
-  let name: String
-  let rootPath: String
-  let gitRoot: String?
-  /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
-  let kind: String
-  let selectedWorktreeID: String?
-
-  init(project: Project) {
-    self.id = project.id.description
-    self.name = project.name
-    self.rootPath = project.rootPath
-    self.gitRoot = project.gitRoot
-    self.kind = project.kind.rawValue
-    self.selectedWorktreeID = project.selectedWorktreeID?.description
   }
 }
 

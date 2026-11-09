@@ -19,16 +19,16 @@ struct TabChipLabel: View {
   /// Unread dot. Rendered as a 4 px filled circle immediately before
   /// the title text. Boolean only — no count, no kind distinction.
   var hasUnreadNotification: Bool = false
-  /// Resolved glyph from `Tab.resolvedIcon` — an SF Symbol name, or an
-  /// `agent:<kind>` brand reference (see `TabIconRef`). The
+  /// The selected pane's `PaneGlyph` icon — an SF Symbol name, a tool
+  /// mark, or an `agent:<kind>` brand reference (see `TabIconRef`). The
   /// running-spinner and bell still claim their slots first; the icon
   /// prefixes the title only when those quieter signals are absent so the
   /// chip never tries to render three leading glyphs at once.
   var icon: String?
-  /// Tint applied to `icon` while this tab's dedicated run-script pane is
-  /// executing. A run tab keeps its script glyph instead of swapping to
-  /// the spinner (`tabIsDirty` skips run panes); the colour flipping on is
-  /// what reads as "running". `nil` = idle, monochrome icon.
+  /// Tint applied to `icon` while the tab's selected pane is a run-script
+  /// pane that is executing. A run pane keeps its script glyph instead of
+  /// swapping to the spinner (`tabIsDirty` skips run panes); the colour
+  /// flipping on is what reads as "running". `nil` = idle, monochrome icon.
   var iconTint: Color?
 
   @Environment(\.colorScheme) private var colorScheme
@@ -43,7 +43,7 @@ struct TabChipLabel: View {
   }
 
   var body: some View {
-    HStack(spacing: 4) {
+    HStack(spacing: 6) {
       if isDirty {
         ProgressView()
           .controlSize(.mini)
@@ -55,7 +55,7 @@ struct TabChipLabel: View {
           .accessibilityLabel("Has unread notifications")
       } else if let icon, !icon.isEmpty {
         glyph(for: icon)
-          .font(.system(size: 11))
+          .font(.system(size: 12))
           .foregroundStyle(iconTint ?? TabBarColors.activeText)
           .opacity(iconTint == nil ? textOpacity : 1)
           .accessibilityHidden(true)
@@ -77,7 +77,7 @@ struct TabChipLabel: View {
   /// and boxed to the SF Symbol's optical size so every path sits on the same
   /// baseline and inherits the same tint.
   private func glyph(for icon: String) -> some View {
-    StoredIconGlyph(icon: icon, markSize: 11)
+    StoredIconGlyph(icon: icon, markSize: 14)
       .accessibilityHidden(true)
   }
 }

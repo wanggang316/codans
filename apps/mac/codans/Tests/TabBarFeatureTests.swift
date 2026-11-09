@@ -80,26 +80,6 @@ struct TabBarFeatureTests {
   // MARK: - Tab-bar uplift (M2-T2.10)
 
   @Test
-  func renameSubmittedCallsRenameTab() async {
-    let tabID = TabID()
-    let received = LockIsolated<(TabID, String?)?>(nil)
-    let store = TestStore(initialState: TabBarFeature.State()) {
-      TabBarFeature()
-    } withDependencies: {
-      $0.hierarchyClient.renameTab = { id, _, _, name in
-        received.withValue { $0 = (id, name) }
-      }
-    }
-    await store.send(
-      .renameSubmitted(
-        tabID, name: "new-title",
-        inWorktree: WorktreeID(), inProject: ProjectID()
-      ))
-    #expect(received.value?.0 == tabID)
-    #expect(received.value?.1 == "new-title")
-  }
-
-  @Test
   func contextMenuCloseOthersCallsClient() async {
     let tabID = TabID()
     let received = LockIsolated<TabID?>(nil)
@@ -306,6 +286,109 @@ struct TabBarFeatureTests {
         inWorktree: WorktreeID(), inProject: ProjectID()
       ))
     #expect(!splitCalled.value)
+  }
+
+  // MARK: - Agent session resume
+
+  /// One project / worktree / tab, so the reducer can resolve the focused pane.
+  private struct ResumeFixture {
+    let projectID = ProjectID()
+    let worktreeID = WorktreeID()
+    let pane: Pane
+    let catalog: Catalog
+
+    init(paneAgent: AgentKind? = nil, hasTab: Bool = true, remote: Bool = false) {
+      let pane = Pane(workingDirectory: "/repo", agentKind: paneAgent)
+      self.pane = pane
+      let tabs = hasTab ? [Tab(panes: [pane])] : []
+      let worktree = Worktree(
+        id: worktreeID, name: "main", path: "/repo", tabs: tabs, selectedTabID: tabs.first?.id)
+      let project = Project(
+        id: projectID, name: "repo", rootPath: "/repo",
+        remoteHost: remote ? RemoteHost(alias: "box") : nil, worktrees: [worktree])
+      catalog = Catalog(projects: [project])
+    }
+  }
+
+  private static let resumeCommand =
+    AgentRuntimeAdapters.adapter(for: .claudeCode).resumeCommand(sessionID: "abc-123")
+
+  /// Sends a resume and returns the script the reducer handed to the shared
+  /// pipeline, plus where it was asked to run.
+  private func resume(
+    _ placement: AgentResumePlacement, fixture: ResumeFixture
+  ) async -> (ScriptDefinition, ProjectID, WorktreeID)? {
+    let ran = LockIsolated<(ScriptDefinition, ProjectID, WorktreeID)?>(nil)
+    let store = TestStore(initialState: TabBarFeature.State()) {
+      TabBarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { fixture.catalog }
+      $0.hierarchyClient.lastFocusedPane = { _ in fixture.pane.id }
+      $0.hierarchyClient.runAgentCommand = { script, projectID, worktreeID in
+        ran.withValue { $0 = (script, projectID, worktreeID) }
+      }
+    }
+    await store.send(
+      .resumeAgentSessionTapped(
+        agent: .claudeCode, sessionID: "abc-123", placement: placement,
+        inWorktree: fixture.worktreeID, inProject: fixture.projectID))
+    await store.finish()
+    return ran.value
+  }
+
+  @Test
+  func resumeInNewTabRunsTheResumeCommandInANewTab() async throws {
+    let fixture = ResumeFixture()
+    let (script, projectID, worktreeID) = try #require(await resume(.newTab, fixture: fixture))
+    #expect(script.target == .newTab)
+    #expect(script.command == Self.resumeCommand)
+    #expect(script.onFinished == .none)
+    #expect(script.focus)
+    #expect(projectID == fixture.projectID)
+    #expect(worktreeID == fixture.worktreeID)
+  }
+
+  @Test
+  func resumeInPlaceTypesIntoTheFocusedPane() async throws {
+    let (script, _, _) = try #require(await resume(.inPlace, fixture: ResumeFixture()))
+    #expect(script.target == .focused)
+  }
+
+  @Test
+  func resumeInSplitUsesTheChosenDirection() async throws {
+    let (script, _, _) = try #require(await resume(.split(.up), fixture: ResumeFixture()))
+    #expect(script.target == .split)
+    #expect(script.direction == .up)
+  }
+
+  /// Typing over a live agent session would corrupt it.
+  @Test
+  func resumeInPlaceOverAnAgentPaneFallsBackToANewTab() async throws {
+    let fixture = ResumeFixture(paneAgent: .codex)
+    let (script, _, _) = try #require(await resume(.inPlace, fixture: fixture))
+    #expect(script.target == .newTab)
+  }
+
+  /// The empty-terminal entry: no tab, so nothing to type into or split.
+  @Test
+  func resumeWithoutAFocusedPaneFallsBackToANewTab() async throws {
+    let fixture = ResumeFixture(hasTab: false)
+    let (inPlace, _, _) = try #require(await resume(.inPlace, fixture: fixture))
+    #expect(inPlace.target == .newTab)
+    let (split, _, _) = try #require(await resume(.split(.left), fixture: fixture))
+    #expect(split.target == .newTab)
+  }
+
+  /// A Remote Project pane's shell already runs on the host, so every
+  /// placement sends the same plain resume command through the pipeline.
+  @Test
+  func resumeInARemoteProjectRunsTheSameCommandInEveryPlacement() async throws {
+    let fixture = ResumeFixture(remote: true)
+    for placement in [AgentResumePlacement.newTab, .inPlace, .split(.right)] {
+      let (script, _, _) = try #require(await resume(placement, fixture: fixture))
+      #expect(script.target == placement.target)
+      #expect(script.command == Self.resumeCommand)
+    }
   }
 
   // MARK: - `+` agent menu

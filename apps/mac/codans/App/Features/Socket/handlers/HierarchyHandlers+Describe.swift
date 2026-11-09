@@ -23,6 +23,7 @@ extension HierarchyHandlers {
         rootPath: project.rootPath,
         gitRoot: project.gitRoot,
         remoteHost: project.remoteHost?.alias,
+        host: IPC.HostRef(project: project, hosts: catalog.hosts),
         isSelected: catalog.selectedProjectID == project.id,
         selectedWorktreeID: project.selectedWorktreeID?.description,
         worktreeCount: project.worktrees.filter { !$0.archived }.count,
@@ -50,7 +51,8 @@ extension HierarchyHandlers {
           isPinned: worktree.isPinned,
           isSelected: project.selectedWorktreeID == worktree.id,
           selectedTabID: worktree.selectedTabID?.description,
-          tabCount: worktree.tabs.count
+          tabCount: worktree.tabs.count,
+          workspaceGroup: IPC.WorkspaceGroupRef(worktree: worktree, in: project)
         ))
     }
     return .failed(.notFound(kind: "worktree", id: req.id.uuidString))
@@ -75,7 +77,6 @@ extension HierarchyHandlers {
             worktreeID: worktree.id.description,
             title: tab.name ?? tab.cachedDisplayTitle,
             name: tab.name,
-            icon: tab.icon,
             isSelected: worktree.selectedTabID == tab.id,
             focusedPaneID: tab.splitTree.zoomed?.description,
             paneIDs: tab.panes.map(\.id.description)
@@ -111,7 +112,8 @@ extension HierarchyHandlers {
               agent: pane.agentKind?.rawValue,
               agentSessionID: pane.agentSessionID,
               isLive: runtimeProbe(pane.id) != nil,
-              isFocused: tab.splitTree.zoomed == pane.id
+              isFocused: tab.splitTree.zoomed == pane.id,
+              isAttached: paneIsAttached(pane.id)
             ))
         }
       }

@@ -1,7 +1,7 @@
 import CodansCore
 import Foundation
 
-/// How to open a remote (Server-project) worktree through an editor's own
+/// How to open a Remote Project worktree through an editor's own
 /// SSH remoting CLI. A local editor opens a local directory URL; a remote
 /// worktree instead needs the editor's remote entry point — Zed takes an
 /// `ssh://` URL, the VS Code family takes `--remote ssh-remote+<host>`.

@@ -26,16 +26,6 @@ struct TagFilterPopoverFooter: View {
   /// Right-side refresh glyph. Optional so previews / tests without a
   /// reconciler wired can drop it.
   var onRefreshTapped: (() -> Void)?
-  /// Sort button wiring. When nil, the button is hidden — preserves the
-  /// existing footer shape in previews / tests that don't thread it
-  /// through. There is only one ordering the UI exposes (manual), so the
-  /// button toggles the inline reorder session directly; the computed
-  /// `joinOrder` / `activeFirst` modes stay in the model but are no
-  /// longer surfaced.
-  var onReorderToggle: (() -> Void)?
-  /// Whether the inline reorder session is active. Tints the glyph and
-  /// flips its help / label so re-tapping reads as "exit".
-  var isReordering: Bool = false
   /// Sidebar-relocated AgentState toggle. nil = hide the button
   /// entirely (used in previews / contexts without a registry wired).
   var onAgentStateTapped: (() -> Void)?
@@ -48,27 +38,8 @@ struct TagFilterPopoverFooter: View {
     HStack(spacing: 0) {
       // Tag-filter button is intentionally hidden — TagFilterList and the
       // wired callbacks stay around so the feature can be re-mounted
-      // without rewiring the call site, but the footer currently only
-      // surfaces sort + refresh.
-      HStack(spacing: 6) {
-        if let onReorderToggle {
-          // Single-action sort: with the computed orders removed from the
-          // UI, the glyph toggles the inline reorder session — enter when
-          // idle, exit when already reordering. The accent tint marks the
-          // active state so the second tap reads as "exit".
-          Button(action: onReorderToggle) {
-            Image(systemName: "arrow.up.arrow.down")
-              .font(.system(size: 11, weight: .regular))
-              .foregroundStyle(isReordering ? Color.accentColor : .secondary)
-              .frame(width: 18, height: 18)
-              .contentShape(Rectangle())
-              .accessibilityHidden(true)
-          }
-          .buttonStyle(.plain)
-          .help(isReordering ? "Done reordering" : "Reorder projects")
-          .accessibilityLabel(isReordering ? "Done reordering" : "Reorder projects")
-        }
-      }
+      // without rewiring the call site. Projects are reordered by direct
+      // drag in the list (ADR 0001), so the footer has no sort control.
       Spacer()
       if let onAgentStateTapped {
         Button(action: onAgentStateTapped) {
@@ -106,8 +77,11 @@ struct TagFilterPopoverFooter: View {
         .accessibilityLabel("Refresh all projects")
       }
     }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 3)
+    // Same insets as the Agents View card. The gap below the buttons equals
+    // the one the card keeps above them, so they sit centered between the
+    // card and the sidebar's bottom edge.
+    .padding(.horizontal, AgentStateSidebarPanel.edgeInset)
+    .padding(.bottom, AgentStateSidebarPanel.edgeInset)
   }
 }
 

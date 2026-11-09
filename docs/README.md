@@ -8,7 +8,9 @@ This directory is the **system of record** for all project knowledge. If it's no
 |---|---|
 | [architecture.md](architecture.md) | System architecture, domains, layers, invariants |
 | [product-spec.md](product-spec.md) | What the product is, for whom, and its boundaries |
+| [GLOSSARY.md](../GLOSSARY.md) | Domain terms, including the planned Workspace group model |
 | [design-docs/](design-docs/) | Per-subsystem design: invariants and the *why* behind decisions |
+| [adr/](adr/) | Architecture decision records: one durable cross-cutting decision per file |
 | [references/](references/) | External references, API docs, integration notes |
 | [generated/](generated/) | Auto-generated artifacts — do not edit manually |
 

@@ -13,16 +13,23 @@ import CodansCore
 enum PaneDaemonBringup {
   /// Canonical zmx `ZMX_DIR`. The daemon places its control socket here
   /// and writes snapshots into `<ZMX_DIR>/snapshots/<paneID>.snap`. We
-  /// pin this to `~/Library/Caches/<AppDirectories.name>` (`codans`, or
-  /// `codans-dev` for Debug builds) so the socket path the daemon binds
-  /// lines up byte-for-byte with `ZmxControlClient.socketPath` and
-  /// `SessionReaper`'s launch-time scan — without a pin, zmx falls back to
-  /// `$TMPDIR/zmx-<uid>` (or `$XDG_RUNTIME_DIR/zmx`) which would scatter
-  /// sockets somewhere the reaper has no reason to look. The Debug suffix
-  /// keeps a locally-built dev instance's daemons isolated from the
-  /// installed Release's, which is what prevents pane-session crosstalk
-  /// when both run at once (see `AppDirectories`).
+  /// pin this to `~/.<AppDirectories.name>/run` (`codans`, or `codans-dev`
+  /// for Debug builds) so the socket path the daemon binds lines up
+  /// byte-for-byte with `ZmxControlClient.socketPath` and `SessionReaper`'s
+  /// launch-time scan — without a pin, zmx falls back to `$TMPDIR/zmx-<uid>`
+  /// (or `$XDG_RUNTIME_DIR/zmx`) which would scatter sockets somewhere the
+  /// reaper has no reason to look. The Debug suffix keeps a locally-built
+  /// dev instance's daemons isolated from the installed Release's, which is
+  /// what prevents pane-session crosstalk when both run at once (see
+  /// `AppDirectories`).
   static func canonicalSocketDirectory() -> URL {
+    AppDirectories.runtimeDirectory()
+  }
+
+  /// The `ZMX_DIR` of earlier builds: the channel's cache directory. Cache
+  /// cleaners wipe it wholesale, which is why the sockets moved; the reaper
+  /// adopts any daemon that survived there on launch.
+  static func legacySocketDirectory() -> URL {
     AppDirectories.cacheDirectory()
   }
 

@@ -1,8 +1,8 @@
 import ArgumentParser
-import Foundation
 import CodansCore
 import CodansIPC
 import CodansKit
+import Foundation
 
 struct TreeCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -11,11 +11,12 @@ struct TreeCommand: AsyncParsableCommand {
     discussion: """
       Use 'codans tree' as the first discovery command. It prints the full hierarchy so
       you do not have to walk projects, worktrees, tabs, and panes one command at
-      a time.
+      a time. --host keeps the Projects on one Host.
       """
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Restrict output to one project id, name, or 'current'.")
   var project: String?
 
@@ -26,16 +27,22 @@ struct TreeCommand: AsyncParsableCommand {
       let tree = try await HierarchyTree.load(client: client, timeout: globals.rpcTimeout)
       let projects: [Project]
       if let project {
-        let uuid = try await AliasResolver.resolve(project, kind: .project, client: client)
+        let uuid = try await hostOptions.resolveProject(project, client: client)
         projects = tree.projects.filter { $0.id.raw == uuid }
         if projects.isEmpty {
           throw CLIError(code: .notFound, message: "project \(uuid.uuidString) not found")
         }
+      } else if let host = try hostOptions.selector() {
+        if case .host(let id) = host, !tree.hosts.contains(where: { $0.id == id }) {
+          throw CLIError(
+            code: .notFound, message: "host not found: \(host)", details: ["kind": "host", "id": host.description])
+        }
+        projects = tree.projects.filter(host.matches)
       } else {
         projects = tree.projects
       }
       try Renderer.emit(
-        HierarchyTreeRenderable(projects: projects, handles: tree.handles),
+        HierarchyTreeRenderable(projects: projects, handles: tree.handles, hosts: tree.hosts),
         mode: globals.renderMode
       )
     }
@@ -43,16 +50,20 @@ struct TreeCommand: AsyncParsableCommand {
 }
 
 struct HierarchyTree: Codable, Sendable {
+  /// Remote Projects carry a resolved `remoteHost`.
   let projects: [Project]
   let handles: IPC.TargetHandles?
+  /// The app's Host list; empty from an app that predates Host records.
+  let hosts: [HostRecord]
 
   static func load(client: RPCClient, timeout: Duration = .seconds(10)) async throws -> HierarchyTree {
-    let payload: ProjectListPayload = try await client.call(
+    let payload: IPC.ProjectListPayload = try await client.call(
       .hierarchyListProjects,
       params: EmptyParams(),
       timeout: timeout
     )
-    return HierarchyTree(projects: payload.projects, handles: payload.handles)
+    return HierarchyTree(
+      projects: payload.resolvedProjects, handles: payload.handles, hosts: payload.hosts ?? [])
   }
 
   func locateWorktree(_ worktreeID: WorktreeID) -> WorktreePath? {
@@ -99,143 +110,4 @@ struct PanePath: Sendable {
   let worktreeID: WorktreeID
   let tabID: TabID
   let paneID: PaneID
-}
-
-struct HierarchyTreeRenderable: Encodable, CustomStringConvertible {
-  let projects: [Project]
-  /// Stable short handles from the app. Text mode prints them in place of
-  /// the positional index (`Tab t3:` / `Pane p7:`) so agents can copy a
-  /// selector that survives reordering; nil (older app) falls back to the
-  /// positional numbering. JSON mode carries them as `handle` next to the
-  /// UUID (null from an older app).
-  let handles: IPC.TargetHandles?
-
-  private enum Key: String, CodingKey { case projects }
-
-  func encode(to encoder: Encoder) throws {
-    var container = encoder.container(keyedBy: Key.self)
-    try container.encode(
-      projects.map { HierarchyProjectDTO(project: $0, handles: handles) }, forKey: .projects)
-  }
-
-  var description: String {
-    guard !projects.isEmpty else { return "(no projects)" }
-    var lines: [String] = []
-    for (projectIndex, project) in projects.enumerated() {
-      let isLastProject = projectIndex == projects.count - 1
-      // Only the non-default kinds are labelled: a git repo is the common
-      // case and reads cleaner bare.
-      let kindSuffix = project.kind == .gitRepo ? "" : "  [\(project.kind.rawValue)]"
-      lines.append("\(project.name)  \(project.id)\(kindSuffix)")
-      lines.append("  path: \(project.rootPath)")
-
-      let worktrees = project.worktrees.filter { !$0.archived }
-      for (worktreeIndex, worktree) in worktrees.enumerated() {
-        let selectedWorktree = worktree.id == project.selectedWorktreeID ? "*" : " "
-        let branch = worktree.branch ?? "no branch"
-        let pinned = worktree.isPinned ? " pinned" : ""
-
-        lines.append(
-          "  [\(selectedWorktree)] Worktree \(worktreeIndex + 1): \(worktree.name)  [\(branch)]\(pinned)  \(worktree.id)"
-        )
-        lines.append("      path: \(worktree.path)")
-
-        for (tabIndex, tab) in worktree.tabs.enumerated() {
-          let selectedTab = tab.id == worktree.selectedTabID ? "*" : " "
-          let title = tab.name ?? tab.cachedDisplayTitle ?? "untitled"
-          let tabLabel = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" } ?? "\(tabIndex + 1)"
-
-          lines.append("      [\(selectedTab)] Tab \(tabLabel): \(title)  \(tab.id)")
-
-          for (paneIndex, pane) in tab.panes.enumerated() {
-            let labels = pane.labels.sorted()
-            let labelSuffix = labels.isEmpty ? "" : "  @\(labels.joined(separator: ",@"))"
-            let paneLabel = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" } ?? "\(paneIndex + 1)"
-            lines.append("            Pane \(paneLabel): \(pane.workingDirectory)  \(pane.id)\(labelSuffix)")
-          }
-        }
-      }
-
-      if !isLastProject {
-        lines.append("")
-      }
-    }
-    return lines.joined(separator: "\n")
-  }
-}
-
-struct HierarchyProjectDTO: Encodable {
-  let id: String
-  let name: String
-  let rootPath: String
-  let gitRoot: String?
-  /// `git_repo` | `dir` | `server` | `workspace` — `ProjectKind` raw values.
-  let kind: String
-  let selectedWorktreeID: String?
-  let worktrees: [HierarchyWorktreeDTO]
-
-  init(project: Project, handles: IPC.TargetHandles?) {
-    self.id = project.id.description
-    self.name = project.name
-    self.rootPath = project.rootPath
-    self.gitRoot = project.gitRoot
-    self.kind = project.kind.rawValue
-    self.selectedWorktreeID = project.selectedWorktreeID?.description
-    self.worktrees = project.worktrees.filter { !$0.archived }
-      .map { HierarchyWorktreeDTO(worktree: $0, handles: handles) }
-  }
-}
-
-struct HierarchyWorktreeDTO: Encodable {
-  let id: String
-  let name: String
-  let path: String
-  let branch: String?
-  /// Repository root for a workspace child checkout; null otherwise (the
-  /// Project's `gitRoot` applies).
-  let sourceGitRoot: String?
-  let selectedTabID: String?
-  let tabs: [HierarchyTabDTO]
-
-  init(worktree: Worktree, handles: IPC.TargetHandles?) {
-    self.id = worktree.id.description
-    self.name = worktree.name
-    self.path = worktree.path
-    self.branch = worktree.branch
-    self.sourceGitRoot = worktree.sourceGitRoot
-    self.selectedTabID = worktree.selectedTabID?.description
-    self.tabs = worktree.tabs.map { HierarchyTabDTO(tab: $0, handles: handles) }
-  }
-}
-
-struct HierarchyTabDTO: Encodable {
-  let id: String
-  /// `t<n>` selector, the same one the text tree prints.
-  let handle: String?
-  let name: String?
-  let cachedDisplayTitle: String?
-  let panes: [HierarchyPaneDTO]
-
-  init(tab: Tab, handles: IPC.TargetHandles?) {
-    self.id = tab.id.description
-    self.handle = handles?.tabs[tab.id.raw.uuidString].map { "t\($0)" }
-    self.name = tab.name
-    self.cachedDisplayTitle = tab.cachedDisplayTitle
-    self.panes = tab.panes.map { HierarchyPaneDTO(pane: $0, handles: handles) }
-  }
-}
-
-struct HierarchyPaneDTO: Encodable {
-  let id: String
-  /// `p<n>` selector, the same one the text tree prints.
-  let handle: String?
-  let workingDirectory: String
-  let labels: [String]
-
-  init(pane: Pane, handles: IPC.TargetHandles?) {
-    self.id = pane.id.description
-    self.handle = handles?.panes[pane.id.raw.uuidString].map { "p\($0)" }
-    self.workingDirectory = pane.workingDirectory
-    self.labels = pane.labels.sorted()
-  }
 }

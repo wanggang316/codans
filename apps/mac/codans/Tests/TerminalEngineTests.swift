@@ -35,6 +35,68 @@ struct TerminalEngineTests {
     return (engine, manager, clock, temp)
   }
 
+  // MARK: - Terminal state
+
+  @MainActor
+  private final class ProbeLog {
+    var ids: [PaneID] = []
+  }
+
+  /// A pane with no surface runs only while its daemon answers: a restored
+  /// pane not opened yet and a reclaimed pane are both `.detached`, and a
+  /// pane whose daemon is gone is `.stopped`.
+  @Test(arguments: [(true, PaneTerminalState.detached), (false, .stopped)])
+  func aPaneWithoutASurfaceIsDetachedOnlyWhileItsDaemonAnswers(
+    daemonAlive: Bool, expected: PaneTerminalState
+  ) {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    let probed = ProbeLog()
+    engine.isDaemonAlive = { id in
+      probed.ids.append(id)
+      return daemonAlive
+    }
+
+    let state = engine.terminalState(for: paneID)
+
+    #expect(state == expected)
+    #expect(state.isLive == daemonAlive)
+    #expect(!state.isAttached)
+    #expect(probed.ids == [paneID])
+  }
+
+  // MARK: - Program status
+
+  @Test
+  func programStatusPublishesOnlyChangedSummaries() async {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    let stream = engine.events()
+    let working = ProgramStatusReport(state: .working, app: "claude-code")
+    engine.ingestProgramStatus(working, for: paneID)
+    engine.ingestProgramStatus(working, for: paneID)
+    engine.ingestProgramStatus(ProgramStatusReport(state: .clear), for: paneID)
+    engine.finishEventStream()
+
+    var summaries: [ProgramStatusSummary?] = []
+    for await event in stream {
+      if case .paneProgramStatusChanged(let id, let summary) = event, id == paneID {
+        summaries.append(summary)
+      }
+    }
+    #expect(summaries.count == 2)
+    #expect(summaries.first??.root?.state == .working)
+    #expect(summaries.last! == nil)
+  }
+
+  @Test
+  func programStatusOfAnUnboundPaneGovernsNothing() {
+    let (engine, _, _, _) = makeEngine()
+    let paneID = PaneID()
+    engine.ingestProgramStatus(ProgramStatusReport(state: .working, app: "claude-code"), for: paneID)
+    #expect(!engine.programStatusGoverns(paneID))
+  }
+
   // MARK: - Fan-out
 
   @Test

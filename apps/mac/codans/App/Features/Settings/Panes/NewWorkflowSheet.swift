@@ -167,7 +167,7 @@ struct NewWorkflowSheet: View {
     guard problem == nil, let location, let starter else { return }
     do {
       if let root = location.worktreeRoot {
-        try WorkflowRunStore.ensureIgnoreFile(worktreeRoot: root)
+        try WorkflowRunStore.permitWorkflowDefinitions(worktreeRoot: root)
       }
       let url = try WorkflowScaffold.create(
         id: id, name: trimmedName, source: starter.source, in: location.directory)

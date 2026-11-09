@@ -25,6 +25,7 @@ struct HierarchyHandlersAddProjectTests {
     let result: HierarchyHandlers.AddProjectResult = try Self.decodeUnary(outcome)
 
     #expect(result.gitRoot == "/discovered")
+    #expect(result.host == .thisMac)
     #expect(result.rootPath == HierarchyManager.canonicalPath(directory.path))
     #expect(fixture.manager.catalog.projects.first?.gitRoot == "/discovered")
     #expect(reconciled == [result.id])
@@ -75,6 +76,28 @@ struct HierarchyHandlersAddProjectTests {
       return
     }
     #expect(fixture.manager.catalog.projects.count == 1)
+  }
+
+  /// Project identity is `(hostID, rootPath)` (ADR 0006): a Remote Project
+  /// with the same path string is on another Host and does not block a
+  /// local Project.
+  @Test
+  func addProjectSucceedsBesideARemoteProjectWithTheSamePath() async throws {
+    let directory = Self.tempDirectory()
+    let canonical = HierarchyManager.canonicalPath(directory.path)
+    let fixture = Fixture()
+    let serverID = fixture.manager.addRemoteProject(
+      name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    let params = try JSONValue.encoded(
+      AddProjectRequest(name: "repo", rootPath: directory.path, gitRoot: nil))
+
+    let outcome = await fixture.handlers.addProject(params)
+    let result: HierarchyHandlers.AddProjectResult = try Self.decodeUnary(outcome)
+
+    #expect(result.id != serverID)
+    #expect(fixture.manager.catalog.projects.count == 2)
+    let added = fixture.manager.catalog.projects.first { $0.id == result.id }
+    #expect(added?.isOnThisMac == true)
   }
 
   /// Mirrors `HierarchyHandlers.AddProjectParams`.

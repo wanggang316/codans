@@ -16,20 +16,26 @@ import SwiftUI
 struct WorktreeHeaderInfoLabel: View {
   let worktree: Worktree
   let project: Project
-  let gitHubStore: StoreOf<GitHubFeature>
+  let gitPlatformStore: StoreOf<GitPlatformFeature>
   let branchSwitcherStore: StoreOf<BranchSwitcherFeature>
 
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
   @State private var isBranchRowHovered = false
 
   var body: some View {
-    let snapshot = gitHubStore.snapshots[worktree.id]
+    let snapshot = gitPlatformStore.snapshots[worktree.id]
     let rollup: PullRequestBadge.CheckRollup = {
       guard let snapshot else { return .noChecks }
       return PullRequestBadge.CheckRollup.from(checks: snapshot.checkRollup)
     }()
     let isSynthetic = isMainCheckout && project.gitRoot == nil
-    let glyph: WorktreeRowIcon.LeadingGlyph = isSynthetic ? .folder : .gitAnchor
+    // A group's folder draws what its sidebar row draws: the star for
+    // `default`, a folder for a named group.
+    let glyph: WorktreeRowIcon.LeadingGlyph =
+      if let workspaceGroup { workspaceGroup.kind == .default ? .gitAnchor : .folder } else {
+        isSynthetic ? .folder : .gitAnchor
+      }
+    let isDefaultGlyph = workspaceGroup.map { $0.kind == .default } ?? (isMainCheckout && !isSynthetic)
     let hasUnread = notificationRollup?.current.unreadWorktrees.contains(worktree.id) == true
 
     HStack(spacing: 8) {
@@ -49,7 +55,8 @@ struct WorktreeHeaderInfoLabel: View {
           isSelected: false,
           glyph: glyph,
           hasUnreadNotification: hasUnread,
-          isDefaultBranch: isMainCheckout && !isSynthetic
+          isDefaultBranch: isDefaultGlyph,
+          gitPlatformKind: gitPlatformStore.state.gitPlatformKind(for: worktree.id)
         )
       }
       VStack(alignment: .leading, spacing: 0) {
@@ -79,6 +86,10 @@ struct WorktreeHeaderInfoLabel: View {
   /// repository to list branches from, so the headline names the Project, as
   /// its sidebar row does, and is not a popover target.
   private var isFolderRoot: Bool { project.rowWorktree?.id == worktree.id }
+
+  /// The Workspace group whose folder this row is. Like a folder root it has
+  /// no branch, so the headline names the group and is not a popover target.
+  private var workspaceGroup: WorkspaceGroupRecord? { project.workspaceGroup(standingFor: worktree) }
 
   /// Leading icon for such a folder: the Project's own icon, sized to the
   /// slot `WorktreeRowIcon` uses so the headline sits at the same offset
@@ -115,7 +126,7 @@ struct WorktreeHeaderInfoLabel: View {
 
   @ViewBuilder
   private var branchRowButton: some View {
-    if isFolderRoot {
+    if isFolderRoot || workspaceGroup != nil {
       branchRowContent
         .accessibilityIdentifier("worktree_header.branch_text")
         .accessibilityLabel(branchTitle)
@@ -195,6 +206,10 @@ struct WorktreeHeaderInfoLabel: View {
         // The headline already names the Project; say what kind of folder it
         // is. A path would be wider than the toolbar item can give it.
         Text(project.isWorkspace ? "Workspace" : "Folder")
+      } else if workspaceGroup != nil {
+        Text("Group")
+        Text("· \(project.name)")
+          .foregroundStyle(projectNameColor)
       } else if !folderRestatesBranch {
         Text(worktree.name)
         Text("· \(project.name)")
@@ -203,17 +218,14 @@ struct WorktreeHeaderInfoLabel: View {
         Text(project.name)
           .foregroundStyle(projectNameColor)
       }
-      // Server-project marker — same glyph + tooltip as the sidebar
+      // Remote Project marker — same glyph + tooltip as the sidebar
       // project row, so the header names the host the worktree lives on.
-      // `.small` image scale keeps the wide glyph proportionate to the
-      // caption-sized neighbor text.
       if let host = project.remoteHost {
-        Image(systemName: "tv.badge.wifi")
+        Image(systemName: RemoteProjectMarker.symbol)
           .font(.caption2)
-          .imageScale(.small)
           .foregroundStyle(.secondary)
           .help(host.displayAuthority)
-          .accessibilityLabel("Remote server \(host.displayAuthority)")
+          .accessibilityLabel("Remote host \(host.displayAuthority)")
       }
     }
     .font(.caption)
@@ -231,6 +243,7 @@ struct WorktreeHeaderInfoLabel: View {
   /// unknown (synthetic non-git worktree).
   private var branchTitle: String {
     if isFolderRoot { return project.name }
+    if let workspaceGroup { return workspaceGroup.name }
     return worktree.branch ?? worktree.detachedHeadTitle ?? "(detached)"
   }
 }

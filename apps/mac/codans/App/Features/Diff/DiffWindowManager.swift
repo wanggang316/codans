@@ -18,12 +18,16 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
   static let windowIdentifier = NSUserInterfaceItemIdentifier("diff")
 
   private var session: Session?
+  /// Live shortcut map source for the window's sidebar-toggle tooltip. Set once at app
+  /// bring-up; nil in tests, where the tooltip shows the title only.
+  var shortcutsStore: ShortcutsStore?
   private var preferences: [WorktreeID: DiffFeature.Preference] = [:]
 
   func open(
     projectID: ProjectID,
     worktreeID: WorktreeID,
     path: String,
+    hostID: HostID? = nil,
     title: String,
     prBase: String?,
     prRepository: URL?,
@@ -32,7 +36,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     if let session {
       session.window.title = title
       // The feature saves the previous worktree's preference and restores the next one's.
-      session.store.send(.contextChanged(projectID, worktreeID, path))
+      session.store.send(.contextChanged(projectID, worktreeID, path, hostID))
       session.store.send(.prBaseChanged(worktreeID, prBase, prRepository))
       if let scope { session.store.send(.scopeChanged(scope)) }
       present(session.window)
@@ -42,7 +46,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     var state = DiffFeature.State()
     state.preferences = preferences
     let store = Store(initialState: state) { DiffFeature() }
-    store.send(.contextChanged(projectID, worktreeID, path))
+    store.send(.contextChanged(projectID, worktreeID, path, hostID))
     store.send(.prBaseChanged(worktreeID, prBase, prRepository))
     // An explicit scope (sidebar "Show Uncommitted" / "Show Outgoing") wins over the remembered one.
     if let scope { store.send(.scopeChanged(scope)) }
@@ -60,7 +64,7 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
     window.isReleasedWhenClosed = false
     window.tabbingMode = .disallowed
     window.delegate = self
-    let controller = NSHostingController(rootView: DiffPanelView(store: store))
+    let controller = NSHostingController(rootView: DiffPanelView(store: store, shortcutsStore: shortcutsStore))
     // The window owns its initial and restored frame, not SwiftUI's fitting size.
     controller.sizingOptions = []
     window.contentViewController = controller

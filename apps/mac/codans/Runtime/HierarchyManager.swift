@@ -64,10 +64,30 @@ enum WorktreePromotionMode: Sendable, Equatable {
   case moveToFrontWithinUnpinned
 }
 
+/// One in-flight worktree creation in a Project. See
+/// `HierarchyManager.beginWorktreeCreation(in:)`.
+nonisolated struct WorktreeCreationLease: Hashable, Sendable {
+  let projectID: ProjectID
+  /// Unique per creation attempt. A caller with a stable id for the
+  /// attempt (the sidebar's pending row + retry count) derives it from
+  /// that id.
+  let token: String
+
+  init(projectID: ProjectID, token: String = UUID().uuidString) {
+    self.projectID = projectID
+    self.token = token
+  }
+}
+
 @MainActor
 @Observable
 final class HierarchyManager {
-  private(set) var catalog: Catalog
+  private(set) var catalog: Catalog {
+    didSet { refreshWorkspaceMemberships() }
+  }
+  @ObservationIgnored private var workspaceMembershipIndex = WorkspaceMembershipIndex()
+  private(set) var workspaceMemberships: [WorktreeID: WorkspaceMembership] = [:]
+
   private let store: CatalogStore
   var processRegistry = WorktreeProcessRegistry()
   private let runtime: HierarchyRuntime
@@ -103,6 +123,18 @@ final class HierarchyManager {
   /// Runtime layer keeps its Settings independence.
   var onProjectRemoved: (@MainActor (ProjectID) -> Void)?
 
+  /// Fired when the last creation lease of a Project is released, with its
+  /// id. The app runs one reconcile of that Project here: a worktree made
+  /// outside the app while the lease held back appends would otherwise wait
+  /// for the next reconcile pulse. Settable for the same reason as
+  /// `onProjectRemoved`.
+  var onCreationLeasesReleased: (@MainActor (ProjectID) -> Void)?
+
+  /// Open creation leases, by Project. A set of tokens, not a counter, so a
+  /// second release of the same lease is a no-op and cannot drop a lease
+  /// that a concurrent creation still holds.
+  @ObservationIgnored private var creationLeases: [ProjectID: Set<String>] = [:]
+
   init(catalog: Catalog, store: CatalogStore, runtime: HierarchyRuntime) {
     self.catalog = catalog
     self.store = store
@@ -110,8 +142,13 @@ final class HierarchyManager {
     Self.normalizeArchivedSelection(in: &self.catalog)
     let didStampLegacyTimestamps = Self.backfillLegacyAddedAt(in: &self.catalog)
     let didClearAgentBindings = Self.clearAgentBindings(in: &self.catalog)
+    // `CatalogStore.load` already attaches every Remote Project to a Host;
+    // this covers catalogs built in memory, so every write below starts
+    // from Projects that refer to a Host by id.
+    let didAdoptHosts = self.catalog.adoptHostReferences()
     rebuildRunScriptPanes()
-    if didStampLegacyTimestamps || didClearAgentBindings {
+    refreshWorkspaceMemberships()
+    if didStampLegacyTimestamps || didClearAgentBindings || didAdoptHosts {
       // Persist the migration so successive launches start from the
       // backfilled timestamps rather than re-deriving them on every
       // open (and so the user-visible order is deterministic the
@@ -185,6 +222,46 @@ final class HierarchyManager {
       else { continue }
       catalog.projects[projectIndex].selectedWorktreeID =
         project.worktrees.first(where: { !$0.archived })?.id
+    }
+  }
+
+  // MARK: - Host list
+
+  /// Append a Host record. Throws `HostRecordError` for invalid fields or a
+  /// duplicate (Host, Username, Port).
+  func addHost(_ record: HostRecord) throws {
+    try catalog.addHost(record)
+    store.scheduleSave(catalog)
+  }
+
+  /// Edit a Host record in place. Every Project on the Host gets the new
+  /// connection; open terminals keep their current SSH session.
+  func updateHost(_ record: HostRecord) throws {
+    guard catalog.host(id: record.id) != record else { return }
+    try catalog.updateHost(record)
+    store.scheduleSave(catalog)
+  }
+
+  /// Delete a Host record. Throws `HostRecordError.inUse` while a Project
+  /// refers to it.
+  func removeHost(_ id: HostID) throws {
+    try catalog.removeHost(id: id)
+    store.scheduleSave(catalog)
+  }
+
+  /// Point the Remote Project at `index` to the Host for `endpoint`: an
+  /// existing record with the same fields, else a new one. The callers
+  /// validate the fields first; if they still do not make a valid record,
+  /// the Project keeps the fields without a Host id, and the next load
+  /// attaches it.
+  private func attachRemoteProject(at index: Int, to endpoint: RemoteHost) {
+    do {
+      let hostID = try catalog.hostID(for: endpoint)
+      catalog.attachProject(at: index, toHost: hostID)
+    } catch {
+      reconcileLogger.error("remote project host not recorded: \(error.localizedDescription, privacy: .public)")
+      catalog.projects[index].hostID = nil
+      catalog.projects[index].remoteHost = endpoint
     }
   }
 
@@ -267,13 +344,18 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  func setSidebarFilter(_ filter: SidebarFilter) {
+    guard catalog.sidebarFilter != filter else { return }
+    catalog.sidebarFilter = filter
+    store.scheduleSave(catalog)
+  }
+
   // MARK: - Project mutations
 
   /// Registers a local project. `isWorkspace` marks a workspace root: a plain
-  /// folder of child checkouts — it never carries a `gitRoot`, and the
-  /// synthetic row seeded below doubles as the workspace's main row (the
-  /// folder agents run in). Child rows are appended by the workspace
-  /// reconcile from the manifest, not here.
+  /// folder of checkout groups — it never carries a `gitRoot` and gets no
+  /// seeded row, because its header is not a terminal. The workspace
+  /// reconcile adds every group row from the manifest.
   func addProject(
     name: String, rootPath: String, gitRoot: String? = nil, isWorkspace: Bool = false
   ) -> ProjectID {
@@ -282,7 +364,7 @@ final class HierarchyManager {
     var selectedWorktreeID: WorktreeID?
     let gitRoot = isWorkspace ? nil : gitRoot
 
-    if gitRoot == nil {
+    if gitRoot == nil, !isWorkspace {
       let synthetic = Worktree(
         id: WorktreeID(),
         name: (rootPath as NSString).lastPathComponent,
@@ -295,10 +377,6 @@ final class HierarchyManager {
       selectedWorktreeID = synthetic.id
     }
 
-    // Manual-order auto-increment: new projects land at the end of the
-    // manual list. `max + 1` works on a sparse field too — legacy zeros
-    // simply get bumped past as users add new entries.
-    let nextManualOrder = (catalog.projects.map(\.manualOrder).max() ?? -1) + 1
     let project = Project(
       id: projectID,
       name: name,
@@ -307,22 +385,23 @@ final class HierarchyManager {
       worktrees: worktrees,
       selectedWorktreeID: selectedWorktreeID,
       addedAt: Date(),
-      manualOrder: nextManualOrder,
       isWorkspace: isWorkspace
     )
+    // New Projects go to the end of the Project order (ADR 0001).
     catalog.projects.append(project)
     store.scheduleSave(catalog)
     return projectID
   }
 
-  /// Add a Server (remote SSH) project. Mirrors `addProject` but stamps
-  /// `remoteHost` so the project is `.server`-kind, and `rootPath` / `gitRoot`
+  /// Add a Server (remote SSH) project. Mirrors `addProject` but attaches the
+  /// Project to the Host for `remoteHost` (an existing record with the same
+  /// fields, else a new one) so the project is `.remote`-kind, and `rootPath` / `gitRoot`
   /// hold **remote** path strings. When `gitRoot` is nil a synthetic worktree
   /// seeds the row (same as a local folder project) so the sidebar has
   /// something to show before the first SSH reconcile discovers the real
   /// worktrees. `rootPath` is stored verbatim — remote paths must never pass
   /// through the local symlink canonicalizer.
-  func addServerProject(
+  func addRemoteProject(
     name: String,
     remoteHost: RemoteHost,
     rootPath: String,
@@ -343,7 +422,6 @@ final class HierarchyManager {
       worktrees = [synthetic]
       selectedWorktreeID = synthetic.id
     }
-    let nextManualOrder = (catalog.projects.map(\.manualOrder).max() ?? -1) + 1
     let project = Project(
       id: projectID,
       name: name,
@@ -352,21 +430,23 @@ final class HierarchyManager {
       remoteHost: remoteHost,
       worktrees: worktrees,
       selectedWorktreeID: selectedWorktreeID,
-      addedAt: Date(),
-      manualOrder: nextManualOrder
+      addedAt: Date()
     )
     catalog.projects.append(project)
+    attachRemoteProject(at: catalog.projects.count - 1, to: remoteHost)
     store.scheduleSave(catalog)
     return projectID
   }
 
-  /// Apply an edited Server-project connection in place. Host-only changes
+  /// Apply an edited Remote Project connection in place. The entered host
+  /// fields select the Host the same way `addRemoteProject` does; the Host
+  /// it leaves stays in the Host list. Host-only changes
   /// (alias / user / port to the same machine) keep the worktree rows — their
   /// remote paths are still valid. A `rootPath` change re-points the project
   /// at a different remote directory, so every existing row's path is stale:
   /// tear down their surfaces and reseed (synthetic row for a folder, empty
   /// for a git root — the next reconcile discovers the real worktrees).
-  func updateServerProject(
+  func updateRemoteProject(
     projectID: ProjectID,
     remoteHost: RemoteHost,
     rootPath: String,
@@ -378,7 +458,7 @@ final class HierarchyManager {
     let pathChanged =
       Self.normalizeRemotePath(catalog.projects[index].rootPath)
       != Self.normalizeRemotePath(rootPath)
-    catalog.projects[index].remoteHost = remoteHost
+    attachRemoteProject(at: index, to: remoteHost)
     catalog.projects[index].rootPath = rootPath
     catalog.projects[index].gitRoot = gitRoot
     if pathChanged {
@@ -401,55 +481,6 @@ final class HierarchyManager {
         catalog.projects[index].selectedWorktreeID = nil
       }
     }
-    store.scheduleSave(catalog)
-  }
-
-  // MARK: - Project sort mode (sidebar bottom bar)
-
-  /// Replaces the catalog-wide `projectSortMode`. Unchanged values are
-  /// silent no-ops. Switching modes never reorders `catalog.projects` —
-  /// the array stays the manual order; non-manual modes derive their
-  /// display order at render time.
-  func setProjectSortMode(_ mode: ProjectSortMode) {
-    guard catalog.projectSortMode != mode else { return }
-    catalog.projectSortMode = mode
-    store.scheduleSave(catalog)
-  }
-
-  /// Commit the result of the manual-sort sheet. Stamps each
-  /// project's `manualOrder` to match its position in `orderedIDs`,
-  /// rewrites `catalog.projects` in the same order so the on-disk
-  /// array stays aligned with the field (cheap consistency for code
-  /// that iterates `catalog.projects` directly), and flips
-  /// `projectSortMode` to `.manual`. Unknown ids in the input are
-  /// dropped; projects missing from the input keep their existing
-  /// `manualOrder` and are appended at the end of the array so a
-  /// partial / stale list can't lose data.
-  func applyManualProjectOrder(_ orderedIDs: [ProjectID]) {
-    guard !catalog.projects.isEmpty else {
-      if catalog.projectSortMode != .manual {
-        catalog.projectSortMode = .manual
-        store.scheduleSave(catalog)
-      }
-      return
-    }
-    let byID = Dictionary(uniqueKeysWithValues: catalog.projects.map { ($0.id, $0) })
-    var seen: Set<ProjectID> = []
-    var rebuilt: [Project] = []
-    rebuilt.reserveCapacity(catalog.projects.count)
-    for id in orderedIDs {
-      guard var project = byID[id], !seen.contains(id) else { continue }
-      project.manualOrder = rebuilt.count
-      rebuilt.append(project)
-      seen.insert(id)
-    }
-    for project in catalog.projects where !seen.contains(project.id) {
-      var copy = project
-      copy.manualOrder = rebuilt.count
-      rebuilt.append(copy)
-    }
-    catalog.projects = rebuilt
-    catalog.projectSortMode = .manual
     store.scheduleSave(catalog)
   }
 
@@ -604,7 +635,7 @@ final class HierarchyManager {
   /// Tab or Pane is created that cannot start. A missing project root also
   /// flags the Project failed: reconcile runs on focus changes only, so a
   /// root folder moved from inside a pane would otherwise stay "ready".
-  /// Server projects always pass: their paths are remote.
+  /// Remote Projects always pass: their paths are remote.
   func requireLocalDirectory(_ path: String, in projectID: ProjectID) throws {
     let project = catalog.projects.first(where: { $0.id == projectID })
     guard project?.isRemote != true else { return }
@@ -629,61 +660,65 @@ final class HierarchyManager {
     // No scheduleSave — transient.
   }
 
-  /// Reorder Projects at the catalog top level. Mirrors SwiftUI
-  /// `ForEach.onMove`'s `(IndexSet, Int)` signature so the sidebar can
-  /// forward directly. Array's `move(fromOffsets:toOffset:)` already handles
-  /// out-of-range destinations by trapping — callers must pass a valid
-  /// index. Persists.
-  func reorderProjects(
-    from source: IndexSet,
-    to destination: Int
-  ) {
-    guard !source.isEmpty else { return }
-    catalog.projects.move(fromOffsets: source, toOffset: destination)
-    // Inline drag is also a manual-ordering gesture; stamp
-    // `manualOrder` to match the new array layout so the user-curated
-    // sequence survives a switch to a non-manual mode and back.
-    for index in catalog.projects.indices {
-      catalog.projects[index].manualOrder = index
-    }
+  /// Moves one Project in the Project order (the sidebar block drag).
+  /// Resolved by `ProjectID`, so Projects hidden by a filter keep their
+  /// relative positions. Persists only when the order changed.
+  func moveProject(_ projectID: ProjectID, to placement: ProjectPlacement) {
+    guard catalog.moveProject(projectID, to: placement) else { return }
     store.scheduleSave(catalog)
   }
 
-  /// Resolves a canonical path to its registered `ProjectID` if any
-  /// Project's `rootPath` canonicalizes to the same form. Caller canonicalizes
-  /// its input via `HierarchyManager.canonicalPath(_:)` before querying.
-  /// Linear in total Project count — acceptable at the low cardinality we
-  /// support (Projects per user, not per repo).
+  /// The Project on This Mac whose root is `path` (ADR 0006). Server
+  /// projects never match, also when their remote path is the same string.
+  /// When existing duplicates match, the first in Project order wins.
   func isPathRegistered(canonical path: String) -> ProjectID? {
-    for project in catalog.projects where Self.canonicalPath(project.rootPath) == path {
-      return project.id
-    }
-    return nil
+    catalog.localProject(rootPath: path, canonicalize: Self.canonicalPath)?.id
   }
 
-  /// Resolves a canonical path to the `ProjectID` whose `rootPath`
-  /// **contains** `path` — i.e. the path is the root itself or a descendant.
-  /// Used by the `editor.open` IPC so `codans open` inside a subdirectory of a
-  /// registered Project still honors the Project's `defaultEditor` override;
-  /// `isPathRegistered` only matches the exact root.
-  ///
-  /// Matching is on path-segment boundaries: `/repo` matches `/repo` and
-  /// `/repo/src/` but not `/repository`. When Projects nest (rare but legal —
-  /// a monorepo Project with a sub-repo Project under it), the deepest match
-  /// wins so the closest override is applied.
-  ///
-  /// Caller canonicalizes via `HierarchyManager.canonicalPath(_:)` before
-  /// querying. Linear in total Project count like `isPathRegistered`.
+  /// The Project on This Mac whose root **contains** `path` — the root
+  /// itself or a descendant, on path-segment boundaries. Used by the
+  /// `editor.open` IPC so `codans open` inside a subdirectory of a
+  /// registered Project still honors the Project's `defaultEditor`
+  /// override. When Projects nest, the deepest match wins.
   func project(containing path: String) -> ProjectID? {
-    var best: (ProjectID, Int)?  // (project, root length)
-    for project in catalog.projects {
-      let root = Self.canonicalPath(project.rootPath)
-      guard path == root || path.hasPrefix(root + "/") else { continue }
-      if best == nil || root.count > best!.1 {
-        best = (project.id, root.count)
-      }
-    }
-    return best.map { $0.0 }
+    catalog.localProject(containing: path, canonicalize: Self.canonicalPath)?.id
+  }
+
+  // MARK: - Worktree creation lease
+
+  /// Holds back reconcile appends for `projectID` while a creation runs.
+  ///
+  /// Creation runs `git worktree add` first and writes the catalog row only
+  /// after its stream ends. A reconcile in that window sees the new path in
+  /// `git worktree list` and appends it at the list tail, and the create
+  /// path then adopts that row through `reuseExisting` instead of inserting
+  /// at the unpinned boundary. Leases stack: concurrent creations in one
+  /// Project each hold their own. Every lease must reach
+  /// `endWorktreeCreation`, on every exit path of the creation.
+  func beginWorktreeCreation(in projectID: ProjectID) -> WorktreeCreationLease {
+    let lease = WorktreeCreationLease(projectID: projectID)
+    beginWorktreeCreation(lease)
+    return lease
+  }
+
+  /// Takes `lease` with a token the caller chose, so a caller that already
+  /// has a stable id for the creation (the sidebar's pending row) can
+  /// release it without storing the lease. Idempotent.
+  func beginWorktreeCreation(_ lease: WorktreeCreationLease) {
+    creationLeases[lease.projectID, default: []].insert(lease.token)
+  }
+
+  /// Releases `lease`. Idempotent. Releasing the last lease of a Project
+  /// fires `onCreationLeasesReleased`.
+  func endWorktreeCreation(_ lease: WorktreeCreationLease) {
+    guard creationLeases[lease.projectID]?.remove(lease.token) != nil else { return }
+    guard creationLeases[lease.projectID]?.isEmpty == true else { return }
+    creationLeases[lease.projectID] = nil
+    onCreationLeasesReleased?(lease.projectID)
+  }
+
+  func holdsCreationLease(_ projectID: ProjectID) -> Bool {
+    creationLeases[projectID] != nil
   }
 
   // MARK: - Worktree mutations
@@ -693,7 +728,8 @@ final class HierarchyManager {
     name: String,
     path: String,
     branch: String?,
-    reuseExisting: Bool = false
+    reuseExisting: Bool = false,
+    select: Bool = true
   ) throws -> WorktreeID {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else {
       throw HierarchyError.notFound("Project \(projectID)")
@@ -762,7 +798,9 @@ final class HierarchyManager {
       rootPath: catalog.projects[projectIndex].rootPath
     )
     catalog.projects[projectIndex].worktrees.insert(worktree, at: boundary)
-    catalog.projects[projectIndex].selectedWorktreeID = worktreeID
+    if select {
+      catalog.projects[projectIndex].selectedWorktreeID = worktreeID
+    }
     store.scheduleSave(catalog)
     return worktreeID
   }
@@ -916,6 +954,18 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
+  /// Opens or closes a sidebar Host row (ADR 0003, decision 7). Persists so
+  /// the choice survives restart. Silent no-op for unchanged values.
+  func setSidebarHostExpanded(_ host: SidebarHost, isExpanded: Bool) {
+    guard catalog.collapsedSidebarHosts.contains(host) == isExpanded else { return }
+    if isExpanded {
+      catalog.collapsedSidebarHosts.remove(host)
+    } else {
+      catalog.collapsedSidebarHosts.insert(host)
+    }
+    store.scheduleSave(catalog)
+  }
+
   /// Updates the Project's resolved git root. Called by the reconciler when a
   /// folder Project becomes a git repo (`git init` / `git clone` from the
   /// terminal) — flipping `gitRoot` from nil → discovered path lights up the
@@ -927,6 +977,102 @@ final class HierarchyManager {
     guard catalog.projects[projectIndex].gitRoot != gitRoot else { return }
     catalog.projects[projectIndex].gitRoot = gitRoot
     store.scheduleSave(catalog)
+  }
+
+  /// Re-keys a Remote Project onto the host git's form of its root
+  /// (`RemoteGitService.canonicalWorkTreeRoot`). A root entered through a
+  /// symlink stays a different string from the paths `git worktree list`
+  /// reports, so reconcile appended the main checkout a second time (#402).
+  /// Rewrites `rootPath`, a `gitRoot` equal to the old root, and the rows at
+  /// the old root. A row that then shares its path with an earlier row (the
+  /// duplicate an earlier reconcile appended) is merged into the earlier row:
+  /// its tabs move over, so no Pane is lost, and the row is removed. When the
+  /// removed row was the selected one, its active tab stays active.
+  ///
+  /// A root that another Project on the same Host already has is not
+  /// adopted: two Projects never share `(hostID, rootPath)` (ADR 0006). The
+  /// Project keeps its root, rows at either form still merge under it, and
+  /// the caller gets the owner back.
+  @discardableResult
+  func adoptCanonicalRemoteRoot(projectID: ProjectID, canonicalRoot: String) -> RemoteRootAdoption {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[projectIndex].remoteHost != nil
+    else { return .unchanged }
+    let canonical = Self.normalizeRemotePath(canonicalRoot)
+    let oldRoot = Self.normalizeRemotePath(catalog.projects[projectIndex].rootPath)
+    guard canonical != oldRoot else { return .unchanged }
+    var owner: ProjectID?
+    if let hostID = catalog.projects[projectIndex].hostID {
+      owner =
+        catalog.projectConflicting(
+          withEditOf: projectID, onHost: hostID, rootPath: canonical,
+          canonicalizeLocal: { Self.canonicalPath($0) }
+        )?.id
+    }
+    var project = catalog.projects[projectIndex]
+    // On a conflict the Project keeps its root, but rows at either form are
+    // still one folder: they merge under the kept root.
+    let rowRoot = owner == nil ? canonical : project.rootPath
+    if owner == nil {
+      project.rootPath = canonical
+      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == oldRoot {
+        project.gitRoot = canonical
+      }
+    }
+    for index in project.worktrees.indices {
+      let path = Self.normalizeRemotePath(project.worktrees[index].path)
+      if path == oldRoot || path == canonical {
+        project.worktrees[index].path = rowRoot
+      }
+    }
+    var merged: [Worktree] = []
+    for worktree in project.worktrees {
+      let path = Self.normalizeRemotePath(worktree.path)
+      guard let keeperIndex = merged.firstIndex(where: { Self.normalizeRemotePath($0.path) == path })
+      else {
+        merged.append(worktree)
+        continue
+      }
+      merged[keeperIndex].tabs += worktree.tabs
+      if merged[keeperIndex].selectedTabID == nil {
+        merged[keeperIndex].selectedTabID = worktree.selectedTabID
+      }
+      merged[keeperIndex].isPinned = merged[keeperIndex].isPinned || worktree.isPinned
+      if !worktree.archived {
+        merged[keeperIndex].archived = false
+        merged[keeperIndex].archivedAt = nil
+      }
+      if project.selectedWorktreeID == worktree.id {
+        project.selectedWorktreeID = merged[keeperIndex].id
+        if let selectedTabID = worktree.selectedTabID {
+          merged[keeperIndex].selectedTabID = selectedTabID
+        }
+      }
+    }
+    let removedRows = project.worktrees.count - merged.count
+    project.worktrees = merged
+    guard project != catalog.projects[projectIndex] else { return owner.map { .conflict($0) } ?? .unchanged }
+    catalog.projects[projectIndex] = project
+    reconcileLogger.notice(
+      "host root form: project=\(projectID.raw.uuidString, privacy: .public) adopted=\(owner == nil, privacy: .public) mergedRows=\(removedRows, privacy: .public)"
+    )
+    store.scheduleSave(catalog)
+    if removedRows > 0 {
+      // Run-script Panes moved to the kept row; re-key them by its id.
+      rebuildRunScriptPanes()
+      runtime.announceHierarchyMutated()
+    }
+    return owner.map { .conflict($0) } ?? .adopted
+  }
+
+  /// Outcome of `adoptCanonicalRemoteRoot`.
+  enum RemoteRootAdoption: Equatable, Sendable {
+    /// The root already has the host form, or the Project is not remote.
+    case unchanged
+    /// The Project now uses the host form of its root.
+    case adopted
+    /// Another Project on the same Host already has the host form as its root.
+    case conflict(ProjectID)
   }
 
   /// Flips the Worktree's pinned flag and repositions the row in the catalog
@@ -1197,7 +1343,9 @@ final class HierarchyManager {
   /// stale rows are surfaced in the view layer and only deleted by the
   /// user-initiated Prune action. Idempotent across repeated calls
   /// with the same entries. Returns the count of appended rows so the
-  /// caller can surface a toast.
+  /// caller can surface a toast. While the Project holds a creation lease
+  /// (`beginWorktreeCreation`), new paths are not appended; existing rows
+  /// still sync and the stale sweep still runs.
   ///
   /// - Parameters:
   ///   - projectID: target Project.
@@ -1241,7 +1389,7 @@ final class HierarchyManager {
         // 2. In-place branch change — user ran `git checkout` /
         //    `git switch` inside the worktree pane. The row's `branch`
         //    must follow HEAD so the sidebar subtitle, WorktreeHeader
-        //    label, and GitHubFeature's PR fetch all see the new value.
+        //    label, and GitPlatformFeature's PR fetch all see the new value.
         // 3. Unchanged — no-op.
         //
         // Tabs, panes, pin/archive flags, and the row id are preserved
@@ -1265,6 +1413,10 @@ final class HierarchyManager {
         }
         continue
       }
+      // A creation in flight owns the placement of its own row (top of the
+      // unpinned segment). The path reappears on the reconcile that runs
+      // when the last lease is released, if no creation claimed it.
+      guard !holdsCreationLease(projectID) else { continue }
       let name = entryBranch ?? (canonical as NSString).lastPathComponent
       let worktree = Worktree(
         id: WorktreeID(),
@@ -1358,129 +1510,302 @@ final class HierarchyManager {
 
   // MARK: - Workspace
 
-  /// What the workspace reconcile observed for one manifest entry.
-  struct WorkspaceChildObservation: Equatable, Sendable {
-    /// Manifest entry name — the row's display name.
+  /// What the workspace reconcile observed for one row a manifest group
+  /// expects: the group directory itself, a `default` reference, or a
+  /// checkout a named group owns.
+  struct WorkspaceRowObservation: Equatable, Sendable {
+    /// Display name for a new row: the group name for a group row, the
+    /// source or member name otherwise. Existing rows are never renamed.
     let name: String
-    /// Canonical absolute path of the child folder.
+    /// Canonical absolute path. Never a path through a default link.
     let path: String
-    /// Whether the folder exists on disk.
+    let role: WorkspaceSlot.Role
+    /// Whether the directory exists on disk.
     let exists: Bool
     /// Live branch from git; nil when detached, missing, or not a repo.
     let branch: String?
     /// Root of the repository the checkout belongs to, from git.
     let sourceGitRoot: String?
+
+    init(
+      name: String,
+      path: String,
+      role: WorkspaceSlot.Role,
+      exists: Bool,
+      branch: String? = nil,
+      sourceGitRoot: String? = nil
+    ) {
+      self.name = name
+      self.path = path
+      self.role = role
+      self.exists = exists
+      self.branch = branch
+      self.sourceGitRoot = sourceGitRoot
+    }
+  }
+
+  /// One manifest group and the rows it expects, in manifest order.
+  struct WorkspaceGroupObservation: Equatable, Sendable {
+    let id: WorkspaceGroupID
+    let name: String
+    let kind: WorkspaceGroupKind
+    /// The manifest's deletion state; used only for a group the catalog
+    /// does not know yet.
+    let deletion: GroupDeletionState?
+    let rows: [WorkspaceRowObservation]
+  }
+
+  struct WorkspaceReconcileResult: Equatable, Sendable {
+    var appended = 0
+    var updated = 0
+    var archived = 0
   }
 
   /// Transient decoded manifest for display. Never persisted, equal-value
   /// writes dropped — same contract as `setProjectLoadState`.
-  func setProjectWorkspaceManifest(projectID: ProjectID, manifest: WorkspaceManifest?) {
+  func setProjectWorkspaceManifest(projectID: ProjectID, manifest: WorkspaceGroupsManifest?) {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }) else { return }
     guard catalog.projects[projectIndex].workspace != manifest else { return }
     catalog.projects[projectIndex].workspace = manifest
   }
 
-  /// Workspace counterpart of `reconcileDiscoveredWorktrees`. The manifest,
-  /// not `git worktree list`, is the membership source: every observation is
-  /// one manifest entry, resolved and probed on disk by the caller.
+  /// Workspace counterpart of `reconcileDiscoveredWorktrees`. The group
+  /// manifest, not `git worktree list`, is the membership source; the caller
+  /// resolves and probes every expected row on disk.
   ///
-  /// - An observed folder with no row: append a child row (name = entry
-  ///   name, branch / sourceGitRoot from git).
-  /// - An observed folder with a row: refresh `branch` and `sourceGitRoot`
-  ///   in place. The name is never re-synced — it tracks the folder, not the
-  ///   branch — so tabs, panes, and flags survive as they do for worktrees.
-  /// - A missing folder with a live row: soft-archive it, exactly as the
-  ///   stale sweep does for a worktree removed outside the app. The
-  ///   manifest entry is left alone; only an explicit removal edits it.
-  /// - A row no observation names (an entry the user deleted from the
-  ///   manifest by hand): left untouched and logged. Reconcile never deletes.
-  ///
-  /// The root row is never touched, and an empty observation set — a
-  /// manifest that names nothing — never archives anything, mirroring the
-  /// empty-discovery guard on the git path.
+  /// - `workspaceGroups` follows the manifest order; `isExpanded` and
+  ///   `deletion` are kept by group ID.
+  /// - An expected row is matched to a catalog row by canonical path (unique
+  ///   inside one Workspace). A match gets its slot set and its `branch` /
+  ///   `sourceGitRoot` refreshed in place; it is never renamed, so tabs,
+  ///   panes, and sessions survive.
+  /// - An expected row with no match is appended when its directory exists.
+  /// - A `member` whose directory is gone is soft-archived, as the stale
+  ///   sweep does for a worktree removed outside the app. A `reference`
+  ///   whose source is gone is kept and listed in
+  ///   `unavailableWorkspaceRows`: the source is not the Workspace's to
+  ///   archive.
+  /// - Rows no group expects are left unchanged and logged. Reconcile never
+  ///   deletes rows.
   @discardableResult
-  func reconcileWorkspaceChildren(
+  func reconcileWorkspaceGroups(
     projectID: ProjectID,
-    observations: [WorkspaceChildObservation]
-  ) -> (appended: Int, updated: Int, archived: Int) {
+    groups: [WorkspaceGroupObservation]
+  ) -> WorkspaceReconcileResult {
     guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
       catalog.projects[projectIndex].isWorkspace
-    else { return (0, 0, 0) }
-    let rootCanonical = Self.canonicalPath(catalog.projects[projectIndex].rootPath)
-    var appended = 0
-    var updated = 0
-    var archived = 0
-    var observedPaths = Set<String>()
-    for observation in observations {
-      let canonical = Self.canonicalPath(observation.path)
-      guard canonical != rootCanonical else { continue }
-      observedPaths.insert(canonical)
-      let existingIndex = catalog.projects[projectIndex].worktrees
-        .firstIndex { Self.canonicalPath($0.path) == canonical }
-      if let existingIndex {
-        let existing = catalog.projects[projectIndex].worktrees[existingIndex]
-        if observation.exists {
-          if existing.branch != observation.branch {
-            catalog.projects[projectIndex].worktrees[existingIndex].branch = observation.branch
-            updated += 1
-          }
-          if let sourceGitRoot = observation.sourceGitRoot,
-            existing.sourceGitRoot != sourceGitRoot
-          {
-            catalog.projects[projectIndex].worktrees[existingIndex].sourceGitRoot = sourceGitRoot
-            updated += 1
-          }
-        } else if !existing.archived, !existing.isPinned {
-          for pane in existing.tabs.flatMap({ $0.panes }) {
-            runtime.suspendSurface(for: pane.id)
-          }
-          purgeRuntimeState(forTabs: existing.tabs)
-          catalog.projects[projectIndex].worktrees[existingIndex].archived = true
-          catalog.projects[projectIndex].worktrees[existingIndex].archivedAt = Date()
-          archived += 1
+    else { return WorkspaceReconcileResult() }
+    var project = catalog.projects[projectIndex]
+    var result = WorkspaceReconcileResult()
+    let records = Self.workspaceGroupRecords(groups, keeping: project.workspaceGroups)
+    let groupsChanged = records != project.workspaceGroups
+    project.workspaceGroups = records
+
+    var indexByPath: [String: Int] = [:]
+    for (index, row) in project.worktrees.enumerated() {
+      let canonical = Self.canonicalPath(row.path)
+      if indexByPath[canonical] == nil { indexByPath[canonical] = index }
+    }
+    var expectedPaths = Set<String>()
+    var unavailable = Set<WorktreeID>()
+    for group in groups {
+      for observation in group.rows {
+        let canonical = Self.canonicalPath(observation.path)
+        expectedPaths.insert(canonical)
+        let slot = WorkspaceSlot(groupID: group.id, role: observation.role)
+        if let index = indexByPath[canonical] {
+          applyWorkspaceRow(
+            observation, slot: slot, to: &project.worktrees[index], result: &result, unavailable: &unavailable)
+        } else if observation.exists {
+          project.worktrees.append(
+            Worktree(
+              name: observation.name,
+              path: canonical,
+              branch: observation.branch,
+              sourceGitRoot: observation.sourceGitRoot,
+              workspaceSlot: slot))
+          indexByPath[canonical] = project.worktrees.count - 1
+          result.appended += 1
         }
-        continue
       }
-      guard observation.exists else { continue }
-      catalog.projects[projectIndex].worktrees.append(
-        Worktree(
-          id: WorktreeID(),
-          name: observation.name,
-          path: canonical,
-          branch: observation.branch,
-          tabs: [],
-          selectedTabID: nil,
-          sourceGitRoot: observation.sourceGitRoot
-        )
-      )
-      appended += 1
     }
-    let unmanaged = catalog.projects[projectIndex].worktrees.filter {
-      let canonical = Self.canonicalPath($0.path)
-      return canonical != rootCanonical && !observedPaths.contains(canonical)
-    }
+    project.unavailableWorkspaceRows = unavailable
+
+    let unmanaged = project.worktrees.filter { !expectedPaths.contains(Self.canonicalPath($0.path)) }
     if !unmanaged.isEmpty {
       reconcileLogger.notice(
-        "workspace has \(unmanaged.count, privacy: .public) row(s) the manifest no longer names; left as-is: project=\(projectID.raw.uuidString, privacy: .public)"
+        "workspace has \(unmanaged.count, privacy: .public) row(s) no group names; left as-is: project=\(projectID.raw.uuidString, privacy: .public)"
       )
     }
-    if archived > 0 {
+    if result.archived > 0 {
       reconcileLogger.notice(
-        "auto-archived \(archived, privacy: .public) workspace child(ren) whose folder is gone: project=\(projectID.raw.uuidString, privacy: .public)"
+        "auto-archived \(result.archived, privacy: .public) workspace member(s) whose folder is gone: project=\(projectID.raw.uuidString, privacy: .public)"
       )
     }
-    if appended > 0 || updated > 0 || archived > 0 {
+    if project != catalog.projects[projectIndex] {
+      catalog.projects[projectIndex] = project
+    }
+    if groupsChanged || result != WorkspaceReconcileResult() {
       store.scheduleSave(catalog)
     }
-    if archived > 0 {
+    if result.archived > 0 {
       runtime.announceHierarchyMutated()
     }
-    return (appended, updated, archived)
+    return result
   }
 
-  /// The workspace child row at `path`, if any Project's child checkout lives
-  /// there. Answers from the catalog alone — no manifest read, no I/O — so
-  /// the sidebar and the reconcile can ask on every pass.
+  /// Manifest groups in manifest order, with the sidebar state of groups
+  /// the catalog already knows.
+  private static func workspaceGroupRecords(
+    _ groups: [WorkspaceGroupObservation], keeping current: [WorkspaceGroupRecord]
+  ) -> [WorkspaceGroupRecord] {
+    let known = Dictionary(current.map { ($0.id, $0) }) { first, _ in first }
+    return groups.map { group in
+      let previous = known[group.id]
+      return WorkspaceGroupRecord(
+        id: group.id,
+        name: group.name,
+        kind: group.kind,
+        isExpanded: previous?.isExpanded ?? false,
+        deletion: previous == nil ? group.deletion : previous?.deletion)
+    }
+  }
+
+  /// Places one existing row and refreshes it from what the reconcile saw.
+  private func applyWorkspaceRow(
+    _ observation: WorkspaceRowObservation,
+    slot: WorkspaceSlot,
+    to row: inout Worktree,
+    result: inout WorkspaceReconcileResult,
+    unavailable: inout Set<WorktreeID>
+  ) {
+    if row.workspaceSlot != slot {
+      row.workspaceSlot = slot
+      result.updated += 1
+    }
+    if observation.exists {
+      if row.branch != observation.branch {
+        row.branch = observation.branch
+        result.updated += 1
+      }
+      if let sourceGitRoot = observation.sourceGitRoot, row.sourceGitRoot != sourceGitRoot {
+        row.sourceGitRoot = sourceGitRoot
+        result.updated += 1
+      }
+      return
+    }
+    switch observation.role {
+    case .reference:
+      unavailable.insert(row.id)
+    case .member:
+      guard !row.archived, !row.isPinned else { return }
+      for pane in row.tabs.flatMap({ $0.panes }) {
+        runtime.suspendSurface(for: pane.id)
+      }
+      purgeRuntimeState(forTabs: row.tabs)
+      row.archived = true
+      row.archivedAt = Date()
+      result.archived += 1
+    case .groupTerminal:
+      break
+    }
+  }
+
+  /// Flips one group's sidebar disclosure flag. Persists; silent no-op for
+  /// unchanged values and unknown ids.
+  func setWorkspaceGroupExpanded(projectID: ProjectID, groupID: WorkspaceGroupID, isExpanded: Bool) {
+    updateWorkspaceGroup(projectID: projectID, groupID: groupID) { $0.isExpanded = isExpanded }
+  }
+
+  /// Records (or clears with `nil`) an unfinished destructive delete of one
+  /// group. Persists; silent no-op for unchanged values and unknown ids.
+  func setWorkspaceGroupDeletion(
+    projectID: ProjectID, groupID: WorkspaceGroupID, deletion: GroupDeletionState?
+  ) {
+    updateWorkspaceGroup(projectID: projectID, groupID: groupID) { $0.deletion = deletion }
+  }
+
+  private func updateWorkspaceGroup(
+    projectID: ProjectID,
+    groupID: WorkspaceGroupID,
+    _ change: (inout WorkspaceGroupRecord) -> Void
+  ) {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      let groupIndex = catalog.projects[projectIndex].workspaceGroups.firstIndex(where: { $0.id == groupID })
+    else { return }
+    var record = catalog.projects[projectIndex].workspaceGroups[groupIndex]
+    change(&record)
+    guard record != catalog.projects[projectIndex].workspaceGroups[groupIndex] else { return }
+    catalog.projects[projectIndex].workspaceGroups[groupIndex] = record
+    store.scheduleSave(catalog)
+  }
+
+  /// Removes Workspace rows from the catalog after closing their surfaces.
+  /// Never touches disk. Unlike `removeWorktree` it also removes a group
+  /// row at the Workspace root: that row is a group terminal, not a main
+  /// checkout the Project needs. Unknown ids are skipped.
+  func removeWorkspaceRows(projectID: ProjectID, worktreeIDs: [WorktreeID]) {
+    guard let projectIndex = catalog.projects.firstIndex(where: { $0.id == projectID }),
+      catalog.projects[projectIndex].isWorkspace
+    else { return }
+    let ids = Set(worktreeIDs)
+    let removed = catalog.projects[projectIndex].worktrees.filter { ids.contains($0.id) }
+    guard !removed.isEmpty else { return }
+    for worktree in removed {
+      for pane in worktree.tabs.flatMap({ $0.panes }) {
+        runtime.closeSurface(for: pane.id)
+      }
+      purgeRuntimeState(forTabs: worktree.tabs)
+    }
+    catalog.projects[projectIndex].worktrees.removeAll { ids.contains($0.id) }
+    catalog.projects[projectIndex].unavailableWorkspaceRows.subtract(ids)
+    if let selected = catalog.projects[projectIndex].selectedWorktreeID, ids.contains(selected) {
+      catalog.projects[projectIndex].selectedWorktreeID =
+        catalog.projects[projectIndex].worktrees.first { !$0.archived }?.id
+    }
+    store.scheduleSave(catalog)
+    runtime.announceHierarchyMutated()
+  }
+
+  /// Panes of every row of the group (group row, members, and for
+  /// `default` its reference rows) that are running something
+  /// (`paneIsBusy`), run-script panes included: deleting the group or the
+  /// Workspace stops all of them.
+  func workspaceGroupBusyPanes(projectID: ProjectID, groupID: WorkspaceGroupID) -> [PaneID] {
+    guard let project = catalog.projects.first(where: { $0.id == projectID }) else { return [] }
+    return project.worktrees
+      .filter { $0.workspaceSlot?.groupID == groupID }
+      .flatMap { $0.tabs.flatMap(\.panes) }
+      .map(\.id)
+      .filter(paneIsBusy)
+  }
+
+  /// Group name and canonical group directory for a Workspace row's panes:
+  /// the group of the row's slot, with the directory of that group's row.
+  /// `nil` outside a Workspace, for a row without a slot, or before the
+  /// group row exists.
+  private func workspaceGroupEnvironment(
+    project: Project, worktree: Worktree
+  ) -> (name: String, directory: String)? {
+    guard project.isWorkspace, let slot = worktree.workspaceSlot,
+      let record = project.workspaceGroups.first(where: { $0.id == slot.groupID }),
+      let groupRow = project.worktrees.first(where: {
+        $0.workspaceSlot == WorkspaceSlot(groupID: slot.groupID, role: .groupTerminal)
+      })
+    else { return nil }
+    return (record.name, groupRow.path)
+  }
+
+  private func refreshWorkspaceMemberships() {
+    workspaceMembershipIndex.update(catalog: catalog, canonicalize: Self.canonicalPath)
+    let memberships = workspaceMembershipIndex.memberships
+    if workspaceMemberships != memberships { workspaceMemberships = memberships }
+  }
+
+  /// The workspace member row at `path`, if any Workspace group owns a
+  /// checkout there. References and group rows never match. Resolves live
+  /// filesystem aliases for command guards. Views use `workspaceMemberships`,
+  /// refreshed when catalog identity, paths, or slots change.
   func workspaceMembership(forPath path: String) -> WorkspaceMembership? {
     catalog.workspaceMembership(
       forCanonicalPath: Self.canonicalPath(path),
@@ -1514,7 +1839,7 @@ final class HierarchyManager {
       .path
   }
 
-  /// String-only canonicalization for **remote** (Server-project) paths. Unlike
+  /// String-only canonicalization for **remote** (Remote Project) paths. Unlike
   /// `canonicalPath`, it never touches the local filesystem — `git rev-parse
   /// --show-toplevel` and `git worktree list --porcelain` already emit absolute
   /// canonical paths on the host, so the only normalization needed is trimming
@@ -1523,35 +1848,21 @@ final class HierarchyManager {
   /// path through `canonicalPath` would resolve it against *this* machine's
   /// symlink table (`/tmp` → `/private/tmp`, etc.), corrupting the identity.
   nonisolated static func normalizeRemotePath(_ path: String) -> String {
-    var trimmed = path
-    while trimmed.count > 1, trimmed.hasSuffix("/") {
-      trimmed.removeLast()
-    }
-    return trimmed
+    Project.normalizeRemotePath(path)
   }
 
-  /// The SSH host owning `path`, or `nil` for a local path. Backs the
-  /// `GitService` transport seam: a path that matches a Server project's
-  /// rootPath / gitRoot / any worktree path (exact match after string-only
-  /// normalization — remote paths never go through the local symlink
-  /// resolver) routes that git invocation over SSH. Every `GitService`
-  /// consumer — the sidebar diff chip, the PR badge's remote-URL probe, the
-  /// branch switcher, the diff inspector — receives worktree-level paths, so
-  /// exact matching is sufficient; subpaths inside a worktree are not
-  /// resolved (none of those callers pass one today).
+  /// The SSH host a git call on `url` runs on, or `nil` for This Mac.
+  /// Backs the `GitService` / `GitWorktreeClient` transport seam. A
+  /// Host-form URL (`Project.gitURL`) runs on its Host; a plain path runs on
+  /// This Mac when a Project on This Mac owns it, else on the Remote Project
+  /// that owns it (ADR 0006, `Catalog.gitRemoteHost(for:canonicalizeLocal:)`).
+  func remoteHost(forGitURL url: URL) -> RemoteHost? {
+    catalog.gitRemoteHost(for: url, canonicalizeLocal: Self.canonicalPath)
+  }
+
+  /// `remoteHost(forGitURL:)` for a plain path.
   func remoteHost(forPath path: String) -> RemoteHost? {
-    let normalized = Self.normalizeRemotePath(path)
-    for project in catalog.projects {
-      guard let host = project.remoteHost else { continue }
-      if Self.normalizeRemotePath(project.rootPath) == normalized { return host }
-      if let gitRoot = project.gitRoot, Self.normalizeRemotePath(gitRoot) == normalized {
-        return host
-      }
-      if project.worktrees.contains(where: { Self.normalizeRemotePath($0.path) == normalized }) {
-        return host
-      }
-    }
-    return nil
+    remoteHost(forGitURL: URL(fileURLWithPath: path))
   }
 
   /// Tears down every terminal surface attached to the Worktree without
@@ -1597,6 +1908,7 @@ final class HierarchyManager {
     in worktreeID: WorktreeID,
     in projectID: ProjectID,
     name: String?,
+    initialTitle: String? = nil,
     select: Bool = true
   ) throws -> TabID {
     guard
@@ -1609,7 +1921,11 @@ final class HierarchyManager {
     }
 
     let tabID = TabID()
-    let tab = Tab(id: tabID, name: name, splitTree: SplitTree(), panes: [])
+    // `initialTitle` seeds the cached title, not `name`: `name` is the
+    // sticky manual rename, and a command-spawned tab must keep following
+    // the live title its pane reports.
+    let tab = Tab(
+      id: tabID, name: name, cachedDisplayTitle: initialTitle, splitTree: SplitTree(), panes: [])
     catalog.projects[projectIndex].worktrees[worktreeIndex].tabs.append(tab)
     // Background-script support: when `select == false` the new tab is
     // appended without stealing the worktree's selectedTabID, so a script
@@ -1765,72 +2081,6 @@ final class HierarchyManager {
     store.scheduleSave(catalog)
   }
 
-  func setTabColor(
-    _ id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    color: TabColor?
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
-    else {
-      throw HierarchyError.notFound("Tab \(id)")
-    }
-    guard
-      catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs[tabIndex].color != color
-    else { return }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex].color = color
-    store.scheduleSave(catalog)
-  }
-
-  /// Update the tab's SF Symbol icon, subject to the lock precedence in
-  /// `TabIconLock` (`.auto` ≤ `.script` ≤ `.user`). A lower-priority write
-  /// against a higher lock is a silent no-op; a `.user` write with `nil`
-  /// drops the lock back to `.auto` so the runtime fallback takes over
-  /// again. Persists through the same debounced save path as the other
-  /// tab mutators.
-  func setTabIcon(
-    _ id: TabID,
-    in worktreeID: WorktreeID,
-    in projectID: ProjectID,
-    icon: String?,
-    lock: TabIconLock
-  ) throws {
-    guard
-      let (projectIndex, worktreeIndex) = findWorktreeIndices(
-        worktreeID: worktreeID,
-        projectID: projectID
-      )
-    else {
-      throw HierarchyError.notFound("Worktree \(worktreeID)")
-    }
-    guard
-      let tabIndex = catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == id })
-    else {
-      throw HierarchyError.notFound("Tab \(id)")
-    }
-    let current = catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex]
-    guard let updated = current.applyingIcon(icon, lock: lock),
-      updated != current
-    else { return }
-    catalog.projects[projectIndex]
-      .worktrees[worktreeIndex].tabs[tabIndex] = updated
-    store.scheduleSave(catalog)
-  }
-
   /// Persists the most recently resolved live tab title so the chip can
   /// fall back to it on the next launch (before the surface respawns and
   /// the shell re-pushes OSC titles). No-op when the cache is unchanged
@@ -1839,6 +2089,7 @@ final class HierarchyManager {
   /// are silent — the cache is best-effort, never load-bearing.
   func setCachedTabTitle(
     _ title: String?,
+    paneID: PaneID?,
     for tabID: TabID,
     in worktreeID: WorktreeID,
     in projectID: ProjectID
@@ -1852,12 +2103,12 @@ final class HierarchyManager {
       let tabIndex = catalog.projects[projectIndex]
         .worktrees[worktreeIndex].tabs.firstIndex(where: { $0.id == tabID })
     else { return }
-    guard
-      catalog.projects[projectIndex]
-        .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitle != title
-    else { return }
+    let tab = catalog.projects[projectIndex].worktrees[worktreeIndex].tabs[tabIndex]
+    guard tab.cachedDisplayTitle != title || tab.cachedDisplayTitlePaneID != paneID else { return }
     catalog.projects[projectIndex]
       .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitle = title
+    catalog.projects[projectIndex]
+      .worktrees[worktreeIndex].tabs[tabIndex].cachedDisplayTitlePaneID = paneID
     store.scheduleSave(catalog)
   }
 
@@ -2096,6 +2347,13 @@ final class HierarchyManager {
     runningPanes.contains(paneID) || commandBusyPanes.contains(paneID)
   }
 
+  /// True when the latest foreground-job sample of `paneID` holds only the
+  /// shell. The pane title is then the working directory (ADR 0009).
+  func paneIsAtShellPrompt(_ paneID: PaneID) -> Bool {
+    processRegistry.foregroundJobs[paneID].map(ForegroundJobClassifier.indicatesShellPrompt)
+      ?? false
+  }
+
   /// True when any pane inside `worktreeID` (any tab, any leaf) is
   /// currently marked running. Sidebar uses this to surface a busy
   /// glyph on the worktree row even when its tab is unfocused.
@@ -2107,13 +2365,18 @@ final class HierarchyManager {
     for project in catalog.projects {
       guard let worktree = project.worktrees.first(where: { $0.id == worktreeID })
       else { continue }
-      return worktree.tabs.contains { tab in
-        tab.panes.contains {
-          $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
-        }
-      }
+      return worktreeIsDirty(worktree)
     }
     return false
+  }
+
+  /// Rows already hold the worktree; avoid another catalog search per icon.
+  func worktreeIsDirty(_ worktree: Worktree) -> Bool {
+    worktree.tabs.contains { tab in
+      tab.panes.contains {
+        $0.runScriptID == nil && (runningPanes.contains($0.id) || commandBusyPanes.contains($0.id))
+      }
+    }
   }
 
   // MARK: - Run-script panes
@@ -2346,12 +2609,9 @@ final class HierarchyManager {
     try tab.validateInvariants()
 
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: newPane, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
+      env: builtinEnvironment(env, project: catalog.projects[projectIndex], worktree: worktree)
     )
 
     store.scheduleSave(catalog)
@@ -2477,12 +2737,9 @@ final class HierarchyManager {
       throw HierarchyError.notFound("Pane \(paneID)")
     }
     let worktree = catalog.projects[projectIndex].worktrees[worktreeIndex]
-    let rootPath = catalog.projects[projectIndex].rootPath
-    let workspaceRoot = catalog.projects[projectIndex].isWorkspace ? rootPath : nil
     try await runtime.ensureSurface(
       for: pane, in: worktree,
-      env: Self.injectingBuiltins(
-        env, worktreePath: worktree.path, rootPath: rootPath, workspaceRoot: workspaceRoot)
+      env: builtinEnvironment(env, project: catalog.projects[projectIndex], worktree: worktree)
     )
   }
 
@@ -2919,21 +3176,40 @@ final class HierarchyManager {
     _ env: [String: String],
     worktreePath: String,
     rootPath: String,
-    workspaceRoot: String? = nil
+    workspaceRoot: String? = nil,
+    workspaceGroup: (name: String, directory: String)? = nil
   ) -> [String: String] {
     var merged = env
     merged[BuiltinEnvVar.worktreePath.key] = worktreePath
     merged[BuiltinEnvVar.rootPath.key] = rootPath
-    // Present only inside a workspace, so its absence is itself a signal.
+    // Present only inside a workspace, so their absence is itself a signal.
     // A user-defined entry of the same name is dropped either way: the
     // editor refuses the key, and a stale value from a project's envVars
     // must not leak into a non-workspace pane.
-    if let workspaceRoot {
-      merged[BuiltinEnvVar.workspaceRoot.key] = workspaceRoot
-    } else {
-      merged.removeValue(forKey: BuiltinEnvVar.workspaceRoot.key)
+    func set(_ variable: BuiltinEnvVar, _ value: String?) {
+      if let value {
+        merged[variable.key] = value
+      } else {
+        merged.removeValue(forKey: variable.key)
+      }
     }
+    set(.workspaceRoot, workspaceRoot)
+    set(.workspaceGroup, workspaceRoot == nil ? nil : workspaceGroup?.name)
+    set(.workspaceGroupDirectory, workspaceRoot == nil ? nil : workspaceGroup?.directory)
     return merged
+  }
+
+  /// `injectingBuiltins` for a row of `project`: Workspace rows also get
+  /// the root and the group of their slot.
+  private func builtinEnvironment(
+    _ env: [String: String], project: Project, worktree: Worktree
+  ) -> [String: String] {
+    Self.injectingBuiltins(
+      env,
+      worktreePath: worktree.path,
+      rootPath: project.rootPath,
+      workspaceRoot: project.isWorkspace ? project.rootPath : nil,
+      workspaceGroup: workspaceGroupEnvironment(project: project, worktree: worktree))
   }
 
   // MARK: - Helpers

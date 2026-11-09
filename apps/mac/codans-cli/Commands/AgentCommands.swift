@@ -34,10 +34,21 @@ struct AgentStatus: AsyncParsableCommand {
     abstract: "List every pane running an agent with its runtime state.",
     discussion: """
       What the sidebar's Agents View shows: for each pane the app recognises
-      as running an agent, the agent, its derived state (idle, working,
-      blocked, finished), when it last changed, and where the pane lives.
-      The state is derived from the pane's screen and foreground process, so
-      it can lag a moment behind the agent; `agent wait` blocks on it.
+      as running an agent, the agent, its state (idle, working, blocked,
+      done, error), when it last changed, and where the pane lives. An agent
+      that reports OSC 7501 program status (source: programStatus) decides
+      its own state; for the others the state is derived from the pane's
+      screen (source: screen), so it can lag a moment behind the agent.
+      `agent wait` blocks on it.
+
+      A sleeping pane (restored and not opened yet, or idle long enough to
+      have its terminal view released) still runs, but no terminal view
+      renders it: isAttached: false (text: "(sleeping)"). Its program status
+      still arrives (source: programStatus); a screen-derived state is the
+      last one seen (source: cached). If its terminal exits while sleeping,
+      the row goes away. Terminal commands attach it first. A pane whose
+      terminal no longer runs has isLive: false (text: "(not live)"), and
+      terminal commands on it fail with PANE_NOT_LIVE.
       """
   )
 
@@ -69,9 +80,19 @@ struct AgentStatusRenderable: Encodable, CustomStringConvertible {
       let since = formatter.date(from: row.since).map { Self.age(from: $0, to: now) } ?? "-"
       let focus = row.isFocused ? "*" : " "
       let tab = row.tabTitle.map { "  \"\($0)\"" } ?? ""
+      let state = row.state + (row.blockedKind.map { ":\($0)" } ?? "") + Self.lifecycleMark(row)
       return
-        "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(row.state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
+        "\(focus) \(row.handle ?? row.paneID)  \(row.agent)  \(state)  \(since)  \(row.projectName)/\(row.worktreeName)\(tab)"
     }.joined(separator: "\n")
+  }
+
+  /// Marks a row whose state is not observed live: the terminal no longer
+  /// runs, or it runs with no surface to watch it. Rows from older apps
+  /// carry neither field and get no mark.
+  static func lifecycleMark(_ row: IPC.AgentStateEntry) -> String {
+    if row.isLive == false { return " (not live)" }
+    if row.isAttached == false { return " (sleeping)" }
+    return ""
   }
 
   static func age(from: Date, to: Date) -> String {
@@ -88,7 +109,7 @@ struct AgentWait: AsyncParsableCommand {
     abstract: "Block until a pane's agent reaches a state.",
     discussion: """
       Waits server-side, so no polling loop is needed. Conditions: idle,
-      working, blocked, finished (the states `agent status` reports),
+      working, blocked, done, error (the states `agent status` reports),
       changed (any transition from the state seen when the wait started,
       including the agent appearing or leaving), and exit (no agent bound to
       the pane any more). A wait that does not resolve before --wait-timeout
@@ -101,7 +122,7 @@ struct AgentWait: AsyncParsableCommand {
   @OptionGroup var globals: GlobalOptions
   @Argument(help: "Pane id, p<n> handle, @label, or 'current'.")
   var pane: String = "current"
-  @Option(name: .long, help: "Condition: idle, working, blocked, finished, changed, or exit.")
+  @Option(name: .long, help: "Condition: idle, working, blocked, done, error, changed, or exit.")
   var until: IPC.AgentWaitCondition
   @Option(name: .long, help: "Seconds to wait before giving up (1 through 600, default 60).")
   var waitTimeout: Double = 60
@@ -198,6 +219,7 @@ struct AgentLaunch: AsyncParsableCommand {
   }
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(help: "Profile name or id. Omit with --agent to use that agent's first enabled profile.")
   var profile: String?
   @Option(name: .long, help: "Agent token (claude, codex, gemini, …) when no profile is named.")
@@ -226,7 +248,8 @@ struct AgentLaunch: AsyncParsableCommand {
       let resolvedPrompt = try Self.resolvePrompt(prompt)
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.worktree(project: project, worktree: worktree, client: client)
+      let scope = try await ScopeResolver.worktree(
+        project: project, worktree: worktree, host: hostOptions.selector(), client: client)
       let response: IPC.AgentLaunchResponse = try await client.call(
         .agentLaunch,
         params: IPC.AgentLaunchRequest(

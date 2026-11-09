@@ -5,19 +5,14 @@ import SwiftUI
 /// AgentState panel anchored at the sidebar's bottom safe-area inset.
 ///
 /// Visual brief (per design pass):
-/// - Rounded top corners (10pt) — system glass background drawn inside
-///   the rounded shape. The background is a bridged
-///   `NSVisualEffectView` (`.popover` material with `.behindWindow`
-///   blending) rather than a SwiftUI `Material`, so the panel actually
-///   samples the desktop / window beneath it the way native macOS
-///   chrome (popovers, HUD panels, sidebars) does. SwiftUI's
-///   `Material` is a layer-based blur that cannot reach past the
-///   hosting window.
-/// - Header carries no chrome by default: the title sits on top of the
-///   panel directly. A capsule resize handle fades in only when the
-///   cursor enters a narrow strip at the very top (16pt tall) — that
-///   strip is also the sole drag-to-resize hit region. Cursor swaps to
-///   `resizeUpDown` on hover.
+/// - A rounded card inset from the sidebar edges. Its fill is the
+///   system quinary fill over the sidebar's own glass, so the card reads
+///   as a lighter well of the sidebar rather than a separate surface.
+/// - Header carries no chrome: the title sits on top of the card
+///   directly. A faint capsule resize handle sits at the top; it
+///   strengthens when the cursor enters the narrow strip at the very
+///   top, which is also the sole drag-to-resize hit region. Cursor swaps
+///   to `resizeUpDown` on hover.
 /// - The close button has been removed; the footer toggle is the only
 ///   open/close affordance.
 ///
@@ -80,6 +75,9 @@ struct AgentStateSidebarPanel: View {
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(WorkflowCatalogStore.self) private var workflowCatalog
 
+  /// Drives the `⌥N` row hints and the row hotkeys (`focusAgentAtN`).
+  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+
   /// Suppresses the reorder animation for users who opt out of motion.
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -106,31 +104,29 @@ struct AgentStateSidebarPanel: View {
   /// Height of the resize hit region. Kept narrow so the drag affordance
   /// is purely on the top edge — the title row beneath stays inert and
   /// the user can scroll the list without accidentally resizing.
-  private let resizeStripHeight: CGFloat = 8
+  private let resizeStripHeight: CGFloat = 12
 
+  private let cornerRadius: CGFloat = 14
+  /// Gap between the card and the sidebar's side and bottom edges. The
+  /// card's own height is `height` minus the bottom gap, so the host's
+  /// list inset (`height`) still clears the whole panel. In an active
+  /// window the sidebar is its own glass panel with a visible edge, so the
+  /// card is centered in it rather than against the pane cards.
+  static let edgeInset: CGFloat = 8
   var body: some View {
-    let shape = UnevenRoundedRectangle(
-      topLeadingRadius: 10,
-      bottomLeadingRadius: 0,
-      bottomTrailingRadius: 0,
-      topTrailingRadius: 10,
-      style: .continuous
-    )
+    let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     return VStack(spacing: 0) {
       resizeStrip
       titleBar
       content
     }
-    .frame(height: clampedHeight)
+    .frame(height: max(0, clampedHeight - Self.edgeInset))
     .frame(maxWidth: .infinity)
-    .background(
-      VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-        .clipShape(shape)
-    )
-    .overlay(
-      shape.stroke(Color.primary.opacity(0.08), lineWidth: 1)
-    )
+    .background(shape.fill(.quinary))
+    .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
     .clipShape(shape)
+    .localHotkeys(rowHotkeys)
+    .padding([.horizontal, .bottom], Self.edgeInset)
     // Seed + keep the display order in sync with the registry. Membership
     // (add / remove) lands immediately; status-driven reordering is
     // debounced inside the coordinator so the list doesn't flicker as
@@ -156,7 +152,7 @@ struct AgentStateSidebarPanel: View {
       Capsule()
         .fill(.tertiary)
         .frame(width: 36, height: 4)
-        .opacity(strokeHovering ? 1 : 0)
+        .opacity(strokeHovering ? 1 : 0.5)
         .animation(.easeOut(duration: 0.12), value: strokeHovering)
     }
     .frame(maxWidth: .infinity)
@@ -255,7 +251,7 @@ struct AgentStateSidebarPanel: View {
     if !rows.isEmpty {
       Group {
         LazyVStack(spacing: 0) {
-          ForEach(rows, id: \.paneID) { item in
+          ForEach(Array(rows.enumerated()), id: \.element.paneID) { offset, item in
             let resolved = resolveSourcePath(item.paneID)
             AgentStateRowView(
               paneID: item.paneID,
@@ -265,10 +261,10 @@ struct AgentStateSidebarPanel: View {
               projectColor: resolved?.projectColor,
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
+              isSleeping: registry.isSleeping(item.paneID),
               displayMode: settingsStore.settings.general.agentsViewDisplayMode,
-              paneTitle: { registry.title(for: item.paneID) },
-              worktreePath: resolved?.worktreePath,
-              remoteHost: resolved?.remoteHost,
+              agentTitle: { registry.agentTitle(for: item.paneID) },
+              hotkeyHint: hotkeyHint(forRowAt: offset + 1),
               onTap: { onTapRow(item.paneID) },
               onHandOff: { onHandOffRow(item.paneID) },
               workflows: workflowRows(worktreePath: resolved?.remoteHost == nil ? resolved?.worktreePath : nil),
@@ -283,6 +279,26 @@ struct AgentStateSidebarPanel: View {
         // users get the reorder with no animation.
         .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: order.orderedIDs)
       }
+    }
+  }
+
+  /// The focus chord bound to the row at 1-based `index`. Read from the registry so a
+  /// rebind or a disabled binding shows as such. The row shows it only while ⌘ is held.
+  private func hotkeyHint(forRowAt index: Int) -> String? {
+    guard let id = CommandID.focusAgentAt(index: index)
+    else { return nil }
+    return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
+  }
+
+  /// One hotkey per listed agent, up to 9, bound to `focusAgentAtN`. Active only while the
+  /// panel is mounted, so `⌥N` reaches the terminal when the panel is closed.
+  private var rowHotkeys: [LocalHotkey] {
+    orderedRows.prefix(9).enumerated().compactMap { offset, row in
+      guard let id = CommandID.focusAgentAt(index: offset + 1),
+        let resolved = resolvedShortcuts[id], let binding = resolved.binding
+      else { return nil }
+      let paneID = row.paneID
+      return LocalHotkey(binding: binding) { onTapRow(paneID) }
     }
   }
 

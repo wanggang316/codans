@@ -33,7 +33,6 @@ struct HeaderRunScriptSplitButton: View {
   /// `body` re-render the button when a run pane starts/stops executing —
   /// same source the tab busy spinner reads.
   @Environment(HierarchyManager.self) private var hierarchyManager
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
 
   var body: some View {
     // Read in body so Observation re-renders the button when the primary
@@ -58,23 +57,21 @@ struct HeaderRunScriptSplitButton: View {
       isRunning
       ? ScriptTintColorPalette.color(for: .red)
       : ScriptTintColorPalette.color(for: primary?.resolvedTintColor ?? .green)
-    let primaryHelp =
-      primary == nil
-      ? "Manage Scripts…" : (isRunning ? "Stop \(primaryName)" : "Run \(primaryName)")
-    // While ⌘ is held the button surfaces its chord (the macOS menu
-    // convention). Idle → the primary script's configured shortcut; running →
-    // the fixed ⌘. stop chord. `commandKeyHint` gates the actual display on ⌘.
+    // The chord lives in the tooltip only, like Open In: a ⌘-held label would
+    // widen the segment and shift every other toolbar item. Idle → the primary
+    // script's configured shortcut; running → the fixed ⌘. stop chord.
     let primaryChord: String? =
       isRunning
       ? "⌘."
       : primary?.keyboardShortcut.flatMap {
         $0.isEnabled && $0.keyCode != 0 ? ShortcutDisplay.chord(for: $0) : nil
       }
+    let primaryHelp =
+      primary == nil
+      ? "Manage Scripts…"
+      : ShortcutDisplay.tooltip(isRunning ? "Stop \(primaryName)" : "Run \(primaryName)", chord: primaryChord)
     RunSplitButton(
       image: CommandIconImage.tinted(primaryIcon, color: NSColor(primaryTint), pointSize: RunMenuMetrics.iconPointSize),
-      // Beside the glyph while ⌘ is held (the macOS menu convention): the
-      // primary script's shortcut, or the fixed ⌘. while it runs.
-      chordHint: commandKeyObserver.isCommandHeld ? primaryChord : nil,
       toolTip: primaryHelp,
       accessibilityLabel: isRunning ? "Stop \(primaryName)" : primaryName,
       onPrimary: {

@@ -151,20 +151,26 @@ actor GitWorktreeCLI {
     process.arguments = arguments
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)
 
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
+    let stdoutPipe = Pipe.closeOnExec()
+    let stderrPipe = Pipe.closeOnExec()
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
+    let stdoutCollector = PipeCollector(pipe: stdoutPipe)
+    let stderrCollector = PipeCollector(pipe: stderrPipe)
 
     do {
       try process.run()
     } catch {
+      try? stdoutPipe.fileHandleForWriting.close()
+      try? stderrPipe.fileHandleForWriting.close()
+      _ = stdoutCollector.finishBlocking()
+      _ = stderrCollector.finishBlocking()
       throw GitCLIError.executableNotFound
     }
 
-    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
+    let stdoutData = stdoutCollector.finishBlocking().data
+    let stderrData = stderrCollector.finishBlocking().data
 
     guard let stdout = String(data: stdoutData, encoding: .utf8),
       let stderr = String(data: stderrData, encoding: .utf8)

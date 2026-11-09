@@ -1,34 +1,40 @@
 import Foundation
 
-/// Host / owner / repo triple parsed from a git remote URL. The GitHub integration's batched
-/// GraphQL fetcher needs these three strings to target the right `gh api graphql --hostname`
-/// host + `(owner, repo)` variables — and it needs them without taking a dependency on any
-/// remote API. A pure parser with fixture-backed tests is the cheapest way to satisfy both.
+/// Host and full repository path parsed from a git remote URL. The Git Platform layer turns
+/// it into a `GitPlatformRepository` once the resolver knows which Git Platform serves `host`.
+/// A pure parser with fixture-backed tests keeps this free of any remote API.
 ///
-/// Recognised URL shapes (all three are emitted by `git remote get-url origin` depending on
+/// Recognised URL shapes (all are emitted by `git remote get-url origin` depending on
 /// how the remote was added):
 ///
 ///   git@github.com:owner/repo.git
 ///   https://github.com/owner/repo.git
 ///   ssh://git@github.com/owner/repo.git
 ///   https://github.com/owner/repo          (no .git suffix)
-///   git@github.com:owner/repo              (no .git suffix)
+///   git@gitlab.com:group/sub/repo.git      (nested groups)
 ///
-/// Non-GitHub hostnames are accepted — the parser does not filter on `github.com`, because a
-/// GHES (GitHub Enterprise Server) install exposes the same schemes at an alternate host. The
-/// caller decides whether the host is one it supports.
+/// `path` keeps every segment (`group/sub/repo`), because GitLab projects can live in
+/// nested groups (ADR 0004 item 12). A trailing `.git` is removed.
+///
+/// The parser does not filter on the host: GitHub Enterprise Server and self-managed
+/// GitLab expose the same schemes at other hosts. The Git Platform resolver decides whether
+/// the host is one codans supports.
 ///
 /// `nonisolated` because the type + parser are pure value-construction work with no actor
 /// concerns.
 public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
   public let host: String
-  public let owner: String
-  public let repo: String
+  /// Full repository path without a leading slash or a `.git` suffix, for example
+  /// `owner/repo` or `group/sub/repo`. Always has at least two segments.
+  public let path: String
+  /// `true` for SCP-style (`git@host:path`) and `ssh://` remotes. Their `host` is an SSH
+  /// host, which can be an alias from `~/.ssh/config`, and their port is the SSH port.
+  public let isSSH: Bool
 
-  public init(host: String, owner: String, repo: String) {
+  public init(host: String, path: String, isSSH: Bool = false) {
     self.host = host
-    self.owner = owner
-    self.repo = repo
+    self.path = path
+    self.isSSH = isSSH
   }
 
   /// Parses a git remote URL into a `RemoteInfo`. Throws `RemoteInfo.ParseError.malformed` on
@@ -42,9 +48,9 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
       throw ParseError.malformed(urlString)
     }
 
-    // Dispatch on URL shape. The SCP-style (`git@host:owner/repo`) case must be handled
+    // Dispatch on URL shape. The SCP-style (`git@host:path`) case must be handled
     // before the generic URL parser: `URL(string:)` accepts `git@host:owner/repo` but
-    // decodes `host:owner/repo` as "scheme=git@host, path=owner/repo" which is not useful.
+    // decodes `host:path` as "scheme=git@host" which is not useful.
     if let info = try Self.parseSCPStyle(trimmed) { return info }
     if let info = try Self.parseSchemeStyle(trimmed) { return info }
     throw ParseError.malformed(urlString)
@@ -58,9 +64,9 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
 
   // MARK: - Private parsers
 
-  /// Parses `git@<host>:<owner>/<repo>[.git]`. Returns nil if the input does not start with a
+  /// Parses `git@<host>:<path>[.git]`. Returns nil if the input does not start with a
   /// user-at-host SCP shape so the caller can try the URL-scheme parser. Throws for SCP-shaped
-  /// inputs whose body is malformed (e.g. missing owner, missing repo).
+  /// inputs whose body is malformed (fewer than two path segments).
   private static func parseSCPStyle(_ input: String) throws -> RemoteInfo? {
     // Detect the SCP shape: "<user>@<host>:<path>". The colon cannot follow a slash, and the
     // whole input must not contain "://" (that's the scheme-URL form).
@@ -74,10 +80,10 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
       throw ParseError.malformed(input)
     }
     let host = String(head[head.index(after: atIndex)...])
-    return try Self.makeInfo(host: host, path: String(afterColon), original: input)
+    return try Self.makeInfo(host: host, path: String(afterColon), isSSH: true, original: input)
   }
 
-  /// Parses `<scheme>://[user@]<host>/<owner>/<repo>[.git]` where scheme is https, http, or
+  /// Parses `<scheme>://[user@]<host>/<path>[.git]` where scheme is https, http, or
   /// ssh. Returns nil when no recognised scheme is present (for the SCP-style fallback).
   private static func parseSchemeStyle(_ input: String) throws -> RemoteInfo? {
     let lower = input.lowercased()
@@ -96,27 +102,27 @@ public nonisolated struct RemoteInfo: Equatable, Hashable, Sendable {
       remainder = String(remainder[remainder.index(after: atIndex)...])
     }
 
-    // Split `<host>/<owner>/<repo>...` on the first `/`.
+    // Split `<host>/<path>` on the first `/`.
     guard let firstSlash = remainder.firstIndex(of: "/") else {
       throw ParseError.malformed(input)
     }
     let host = String(remainder[..<firstSlash])
     let path = String(remainder[remainder.index(after: firstSlash)...])
-    return try Self.makeInfo(host: host, path: path, original: input)
+    return try Self.makeInfo(host: host, path: path, isSSH: lower.hasPrefix("ssh://"), original: input)
   }
 
   /// Builds a `RemoteInfo` from a separated `host` and remainder `path` string. Trims a
   /// trailing `.git`; rejects any remainder that does not have at least two path segments.
-  private static func makeInfo(host: String, path: String, original: String) throws -> RemoteInfo {
+  private static func makeInfo(host: String, path: String, isSSH: Bool, original: String) throws -> RemoteInfo {
     guard !host.isEmpty else { throw ParseError.malformed(original) }
-    let components = path.split(separator: "/", omittingEmptySubsequences: true)
+    var components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     guard components.count >= 2 else { throw ParseError.malformed(original) }
-    let owner = String(components[0])
-    var repo = String(components[1])
-    if repo.hasSuffix(".git") { repo.removeLast(4) }
-    guard !owner.isEmpty, !repo.isEmpty else {
+    if components[components.count - 1].hasSuffix(".git") {
+      components[components.count - 1].removeLast(4)
+    }
+    guard components.allSatisfy({ !$0.isEmpty }) else {
       throw ParseError.malformed(original)
     }
-    return RemoteInfo(host: host, owner: owner, repo: repo)
+    return RemoteInfo(host: host, path: components.joined(separator: "/"), isSSH: isSSH)
   }
 }

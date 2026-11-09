@@ -102,4 +102,35 @@ struct SessionCatalogCodableTests {
     #expect(record.kindRaw == "future-agent-not-in-this-build")
     #expect(record.stateRaw == "waitingForUnknownThing")
   }
+
+  /// ADR 0009: the snapshot carries the agent's titles, and a record written
+  /// before that decodes with no titles.
+  @Test
+  func agentTitlesRoundTripAndOldRecordsDecodeWithoutThem() throws {
+    let paneID = PaneID()
+    let record = PersistedAgentRecord(
+      paneID: paneID,
+      kindRaw: "claude-code",
+      stateRaw: "idle",
+      pid: 0,
+      capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+      programStatusTitle: "Fix the login flow",
+      terminalTitle: "✳ Claude task"
+    )
+    let encoded = try JSONEncoder.touchCodeDefault.encode(record)
+    let decoded = try JSONDecoder.touchCodeDefault.decode(PersistedAgentRecord.self, from: encoded)
+    #expect(decoded == record)
+
+    let old = PersistedAgentRecord(
+      paneID: paneID, kindRaw: "claude-code", stateRaw: "idle", pid: 0,
+      capturedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    var object = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder.touchCodeDefault.encode(old)) as? [String: Any])
+    object.removeValue(forKey: "programStatusTitle")
+    object.removeValue(forKey: "terminalTitle")
+    let oldData = try JSONSerialization.data(withJSONObject: object)
+    let oldDecoded = try JSONDecoder.touchCodeDefault.decode(PersistedAgentRecord.self, from: oldData)
+    #expect(oldDecoded.programStatusTitle == nil)
+    #expect(oldDecoded.terminalTitle == nil)
+  }
 }

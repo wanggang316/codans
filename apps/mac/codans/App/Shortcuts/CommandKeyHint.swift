@@ -30,40 +30,31 @@ extension View {
   /// `commandKeyHint(_:spacing:)` convention. The observer dependency lives in
   /// the modifier, so the hint appears/disappears live even inside a toolbar
   /// Menu label (where reads in the `label:` closure itself would escape
-  /// tracking).
-  func commandKeyHint(chord: String?, spacing: CGFloat = 6) -> some View {
-    modifier(CommandKeyChordHintModifier(chord: chord, spacing: spacing))
-  }
-}
-
-/// The chord glyphs themselves, shared by both modifiers so every ⌘-hint in
-/// the app has the same size and tracking. 12pt sits beside the 13–16pt icons
-/// these decorate without shrinking into a footnote; the extra tracking is
-/// there because SF Mono packs ⌘⇧D into tight cells and the symbols touch.
-private struct CommandKeyHintText: View {
-  let chord: String
-
-  var body: some View {
-    Text(chord)
-      .font(.callout.monospaced())
-      .tracking(1)
-      .foregroundStyle(.secondary)
-      .accessibilityHidden(true)
+  /// tracking). A sidebar or Agents View row passes `.caption` to append its
+  /// chord (`⌃N`, `⌥N`) after its trailing accessories.
+  func commandKeyHint(chord: String?, spacing: CGFloat = 6, font: Font = .callout) -> some View {
+    modifier(CommandKeyChordHintModifier(chord: chord, spacing: spacing, font: font))
   }
 }
 
 private struct CommandKeyChordHintModifier: ViewModifier {
   let chord: String?
   let spacing: CGFloat
+  let font: Font
   @Environment(CommandKeyObserver.self) private var observer
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
+    let isShown = observer.isCommandHeld && chord != nil
     HStack(spacing: spacing) {
       content
-      if observer.isCommandHeld, let chord {
-        CommandKeyHintText(chord: chord)
+      if isShown, let chord {
+        ShortcutHintLabel(chord: chord, font: font)
       }
     }
+    // Explicit, so the chord fades with the shared timing even when the
+    // update does not run inside the observer's `withAnimation` transaction.
+    .animation(reduceMotion ? nil : .shortcutHint, value: isShown)
   }
 }
 
@@ -72,21 +63,21 @@ private struct CommandKeyHintModifier: ViewModifier {
   let spacing: CGFloat
   @Environment(CommandKeyObserver.self) private var observer
   @Environment(\.resolvedShortcuts) private var shortcuts
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
+    let chord = chordText
     HStack(spacing: spacing) {
       content
-      if let chord = chordText {
-        CommandKeyHintText(chord: chord)
+      if let chord {
+        ShortcutHintLabel(chord: chord, font: .callout)
       }
     }
+    .animation(reduceMotion ? nil : .shortcutHint, value: chord != nil)
   }
 
   private var chordText: String? {
-    guard observer.isCommandHeld,
-      let resolved = shortcuts[id], resolved.isEnabled,
-      let binding = resolved.binding
-    else { return nil }
-    return ShortcutDisplay.chord(for: binding)
+    guard observer.isCommandHeld else { return nil }
+    return ShortcutDisplay.chord(for: id, in: shortcuts)
   }
 }

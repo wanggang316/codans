@@ -16,8 +16,9 @@ struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this ty
     #expect(visible.contains(.general))
     #expect(visible.contains(.editor))
     #expect(visible.contains(.environment))
+    #expect(visible.contains(.commands))
     #expect(!visible.contains(.worktree))
-    #expect(!visible.contains(.github))
+    #expect(!visible.contains(.gitPlatform))
     #expect(!visible.contains(.lifecycle))
     #expect(!visible.contains(.workspace))
   }
@@ -28,14 +29,14 @@ struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this ty
     // read `Project.gitRoot`, which is nil by construction. It lists its
     // checkouts instead.
     let visible = ProjectGeneralSettingsView.visibleSections(for: .workspace)
-    #expect(visible == [.general, .workspace, .editor, .environment])
+    #expect(visible == [.general, .workspace, .editor, .environment, .commands])
   }
 
   @Test
   func gitRepoShowsEverySectionButTheWorkspaceOne() {
     let visible = ProjectGeneralSettingsView.visibleSections(for: .gitRepo)
     #expect(visible == Set(ProjectGeneralSettingsView.SectionID.allCases).subtracting([.workspace]))
-    #expect(visible.count == 6)
+    #expect(visible.count == 7)
     // Worktree-lifecycle script editors live at the bottom of this pane and
     // are git-only.
     #expect(visible.contains(.lifecycle))
@@ -45,9 +46,9 @@ struct ProjectGeneralSettingsViewKindRenderTests {  // swiftlint:disable:this ty
   func sectionOrderingIsStableAcrossKinds() {
     // The Form renders Sections in declaration order, not Set order; this
     // test pins the canonical order so a future refactor cannot silently
-    // shuffle sections. Lifecycle scripts render last.
+    // shuffle sections. Commands render last, below the lifecycle scripts.
     let canonical: [ProjectGeneralSettingsView.SectionID] = [
-      .general, .workspace, .editor, .worktree, .github, .environment, .lifecycle,
+      .general, .workspace, .editor, .worktree, .gitPlatform, .environment, .lifecycle, .commands,
     ]
     #expect(ProjectGeneralSettingsView.SectionID.allCases == canonical)
   }

@@ -8,7 +8,7 @@ import Testing
 @MainActor
 struct AgentStateStoreTests {
   @Test
-  func piBorderLoaderTransitionsFromIdleThroughWorkingToFinished() {
+  func piBorderLoaderTransitionsFromIdleThroughWorkingToDone() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .pi, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
@@ -18,7 +18,7 @@ struct AgentStateStoreTests {
     #expect(f.registry.entries[f.paneID]?.state == .working)
     f.advancePastWorkingHold()
     f.viewport("─────────────────────\n\n─────────────────────")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
@@ -77,17 +77,35 @@ struct AgentStateStoreTests {
     // and fires `onAgentBound`; it must not collapse the seeded state to
     // `.idle` before any live viewport classification arrives.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
     #expect(f.registry.entries[f.paneID]?.state == .working)
   }
 
+  /// A restored agent runs with no surface until its tab is shown, so its
+  /// row sleeps; an attach wakes it, and a reclaim puts it back to sleep.
+  /// A pane with no agent row never sleeps.
+  @Test
+  func anAgentRowSleepsWhileNoSurfaceRendersItsPane() {
+    let f = Fixture(attached: false)
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .idle)])
+    #expect(f.registry.isSleeping(f.paneID))
+
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: true)
+    #expect(!f.registry.isSleeping(f.paneID))
+
+    f.registry.onSurfaceAttachmentChanged(f.paneID, attached: false)
+    #expect(f.registry.isSleeping(f.paneID))
+  }
+
   @Test
   func seededBlockedSurvivesLaunchRebind() {
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .blocked)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .blocked)])
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
     #expect(f.registry.entries[f.paneID]?.state == .blocked)
   }
@@ -98,7 +116,7 @@ struct AgentStateStoreTests {
     // viewport classification lands it governs — here the restored agent
     // has finished, so its idle prompt drives the badge back to idle.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
 
     f.viewport("codex> ")
@@ -110,7 +128,7 @@ struct AgentStateStoreTests {
     // A genuinely still-working restored agent keeps `.working` once its
     // live working cue re-renders.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: "s1")
 
     f.viewport("• Working (10s)")
@@ -118,7 +136,7 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func activeToIdleInBackgroundDrivesFinished() {
+  func activeToIdleInBackgroundDrivesDone() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
@@ -129,7 +147,7 @@ struct AgentStateStoreTests {
     // only settles once the hold window has lapsed.
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
@@ -148,21 +166,21 @@ struct AgentStateStoreTests {
     f.viewport("codex> ")
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
-    // Past the hold, a follow-up idle derivation settles it to finished.
+    // Past the hold, a follow-up idle derivation settles it to done.
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
-  func claudePaneIdleFlushesHeldWorkingToFinished() {
+  func claudePaneIdleFlushesHeldWorkingToDone() {
     // Regression (fix/agents-view-done-wrong): the `agentWorkingHold`
     // debounces the finishing `working`→`idle` transition. The trailing edge
     // only flips on a follow-up derivation, but once the rendered region
     // settles no further `paneViewportChanged` fires — so the held `working`
     // was getting pinned forever. The engine's quiet `.paneIdle` nudge now
     // supplies that post-hold derivation; here it must flip a backgrounded,
-    // finished Claude agent to `.finished`.
+    // finished Claude agent to `.done`.
     let clock = LockIsolated<Date>(Date(timeIntervalSince1970: 1_000))
     let paneID = PaneID()
     let registry = AgentStateStore(focusedPane: { nil }, now: { clock.value })
@@ -177,10 +195,10 @@ struct AgentStateStoreTests {
     registry.onTerminalEvent(.paneViewportChanged(paneID, text: "❯ "))
     #expect(registry.entries[paneID]?.state == .working)
 
-    // Screen settled; the quiet nudge arrives past the hold window → finished.
+    // Screen settled; the quiet nudge arrives past the hold window → done.
     clock.setValue(Date(timeIntervalSince1970: 1_002))
     registry.onTerminalEvent(.paneIdle(paneID, duration: 1.7))
-    #expect(registry.entries[paneID]?.state == .finished)
+    #expect(registry.entries[paneID]?.state == .done)
   }
 
   @Test
@@ -198,45 +216,45 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func keyboardActivityClearsFinishedBackToIdle() {
+  func keyboardActivityClearsDoneBackToIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
 
     f.registry.onPaneKeyboardActivity(f.paneID)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @Test
-  func focusClearsFinishedBackToIdle() {
+  func focusClearsDoneBackToIdle() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
 
     f.registry.onPaneFocused(f.paneID)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
   }
 
   @Test
-  func paneOutputDoesNotChangeFinishedState() {
+  func paneOutputDoesNotChangeDoneState() {
     let f = Fixture()
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
     f.registry.onPaneKeyboardActivity(f.paneID)
     f.viewport("• Working (10s)")
     f.advancePastWorkingHold()
     f.viewport("codex> ")
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
 
     f.registry.onTerminalEvent(.paneOutput(f.paneID, Data()))
-    #expect(f.registry.entries[f.paneID]?.state == .finished)
+    #expect(f.registry.entries[f.paneID]?.state == .done)
   }
 
   @Test
@@ -410,7 +428,7 @@ struct AgentStateStoreTests {
     // a late viewport for the dropped pane must not resurrect a row, proving
     // the scratch was dropped alongside the entry.
     let f = Fixture()
-    f.registry.seedRestored([(paneID: f.paneID, kind: .codex, state: .working)])
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .codex, state: .working)])
     #expect(f.registry.entries[f.paneID]?.state == .working)
 
     f.registry.reconcileMembership(livePaneIDs: [])
@@ -441,28 +459,312 @@ struct AgentStateStoreTests {
   }
 
   @Test
-  func titleObservedBeforeBindSurvivesTheBind() {
+  func titleIsStoredWithoutBidiOverridesOrInvisibleFormatting() {
     let f = Fixture()
-    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("early title")))
     f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
-    #expect(f.registry.title(for: f.paneID) == "early title")
+    let entry = f.registry.entries[f.paneID]
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("\u{202E}gnidaeR\u{202C} a\u{200B}b\u{FEFF}")))
+    #expect(f.registry.title(for: f.paneID) == "gnidaeR ab")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "gnidaeR ab")
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("\u{2066}\u{200F}")))
+    #expect(f.registry.title(for: f.paneID) == nil)
+    // Titles are display-only: no state, transition time, or source change.
+    #expect(f.registry.entries[f.paneID] == entry)
+  }
+
+  @Test
+  func titleSetBeforeTheAgentStartsIsNotActivity() {
+    let f = Fixture()
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.title(for: f.paneID) == nil)
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
     #expect(f.registry.entries[f.paneID]?.state == .idle)
+
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Reading files")))
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "Reading files")
+  }
+
+  @Test
+  func titleOfThePreviousAgentDoesNotCarryToTheNextAgent() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.registry.onAgentUnbound(f.paneID)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("~/dev/codans")))
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+  }
+
+  @Test
+  func rebindToAnotherKindDropsTheTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+  }
+
+  @Test
+  func restoredAgentShowsTitlesBeforeItsBind() {
+    let f = Fixture()
+    f.registry.seedRestored([.init(paneID: f.paneID, kind: .claudeCode, state: .working)])
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+    // A restored pane without a surface is never bound, because the binder
+    // reads the foreground job from the surface. Its titles come from the
+    // passive watcher, and the agent survived the quit with its daemon.
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Running tests")
+    // The binder identifies the restored agent when its surface attaches.
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Running tests")
+  }
+
+  @Test
+  func rebindOfTheSameAgentKeepsItsTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Running tests")))
+    // The binder materializes the same agent again, for example after the
+    // pane was archived and unarchived.
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil, assumeUserInputSeen: true)
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Running tests")
+  }
+
+  @Test
+  func programStatusTitleHasPriorityOverTheTerminalTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Fix the login flow")
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Fix the login flow", isRestored: false))
+    f.report(.working)
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Claude task")
+  }
+
+  @Test
+  func programStatusMessageIsNeverTheAgentTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.report(.working, message: "Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Fix the login flow", message: "Running tests")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "Fix the login flow")
+  }
+
+  @Test
+  func redundantProgramStatusTitleFallsBackToTheTerminalTitle() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Claude Code")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Claude task")
+    f.report(.working, title: "   ")
+    #expect(f.registry.agentTitle(for: f.paneID)?.text == "✳ Claude task")
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude Code")))
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+  }
+
+  @Test
+  func programStatusTitleOfAnotherProgramIsIgnored() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.apply([ProgramStatusReport(state: .working, app: "codex", title: "Other task")])
+    #expect(f.registry.agentTitle(for: f.paneID) == nil)
+  }
+
+  @Test
+  func restoredTitlesShowDimmedUntilTheAgentReportsAgain() {
+    let f = Fixture()
+    f.registry.seedRestored([
+      .init(
+        paneID: f.paneID, kind: .claudeCode, state: .idle,
+        programStatusTitle: "Fix the login flow", terminalTitle: "✳ Claude task")
+    ])
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Fix the login flow", isRestored: true))
+    // The zmx daemon replays the OSC 0/2 title on attach: that title is
+    // live, but the OSC 7501 title still waits for the next report.
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Fix the login flow", isRestored: true))
+    f.report(.working, title: "Write the tests")
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Write the tests", isRestored: false))
+  }
+
+  @Test
+  func restoredTerminalTitleShowsDimmedUntilTheNextTitle() {
+    let f = Fixture()
+    f.registry.seedRestored([
+      .init(paneID: f.paneID, kind: .codex, state: .idle, terminalTitle: "\u{202E}Reading files")
+    ])
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Reading files", isRestored: true))
+    f.report(.working)
+    #expect(f.registry.agentTitle(for: f.paneID)?.isRestored == true)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("Editing files")))
+    #expect(f.registry.agentTitle(for: f.paneID) == .init(text: "Editing files", isRestored: false))
+  }
+
+  @Test
+  func snapshotTitlesCarryTheLiveTitles() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .claudeCode, sessionID: nil)
+    f.registry.onTerminalEvent(.paneInfoChanged(f.paneID, .title("✳ Claude task")))
+    f.report(.working, title: "Fix the login flow", message: "Running tests")
+    let titles = f.registry.snapshotTitles(for: f.paneID)
+    #expect(titles.programStatusTitle == "Fix the login flow")
+    #expect(titles.terminalTitle == "✳ Claude task")
+  }
+
+  // MARK: - Attention observation (notification suppression)
+
+  @Test
+  func focusAfterBlockedCountsAsObserved() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+
+    f.inView.setValue(true)
+    f.registry.onPaneFocused(f.paneID)
+    f.inView.setValue(false)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    // The prompt re-renders after the optimistic clear. Still the same stop.
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
+    f.viewport("Allow command?\n[y/n]")
+    #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func finishWhileInViewCountsAsObserved() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.inView.setValue(true)
+    f.finishTurn()
+    f.inView.setValue(false)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func finishInBackgroundIsNotObservedUntilFocused() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.finishTurn()
+    #expect(f.registry.entries[f.paneID]?.state == .done)
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+
+    f.inView.setValue(true)
+    f.registry.markObserved(f.paneID)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func focusWhileThePaneIsNotInViewIsNotObserved() {
+    // A CLI `pane focus` selects the pane while another app is in front.
+    // The badge clears, but the user has not seen the prompt.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+
+    f.registry.onPaneFocused(f.paneID)
+    f.registry.markObserved(f.paneID)
+    #expect(f.registry.entries[f.paneID]?.state != .blocked)
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func focusBeforeTheStopDoesNotCount() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (10s)")
+    f.registry.onPaneFocused(f.paneID)
+    f.advancePastWorkingHold()
+    f.viewport("codex> ")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func newTurnResetsObservation() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.inView.setValue(true)
+    f.finishTurn()
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.inView.setValue(false)
+    f.registry.onPaneKeyboardActivity(f.paneID)
+    f.viewport("• Working (10s)")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+    f.advancePastWorkingHold()
+    f.viewport("codex> ")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func resolvedPromptEndsTheStop() {
+    // The user looked at a prompt; it was then answered through the CLI (no
+    // keystroke, so no `working`). The next prompt is a new stop.
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    f.inView.setValue(true)
+    f.registry.markObserved(f.paneID)
+    f.inView.setValue(false)
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.viewport("codex> ")
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
+  }
+
+  @Test
+  func promptAfterClearedAndResolvedPromptIsANewStop() {
+    let f = Fixture()
+    f.registry.onAgentBound(f.paneID, kind: .codex, sessionID: nil)
+    f.viewport("Allow command?\n[y/n]")
+    f.inView.setValue(true)
+    f.registry.onPaneFocused(f.paneID)
+    f.inView.setValue(false)
+    // Idle ticks before the next snapshot keep the same stop.
+    f.registry.onTerminalEvent(.paneIdle(f.paneID, duration: 1))
+    f.viewport("codex> ")
+    #expect(f.registry.hasObservedAttention(f.paneID))
+
+    f.viewport("Allow command?\n[y/n]")
+    #expect(!f.registry.hasObservedAttention(f.paneID))
   }
 
   @MainActor
   final class Fixture {
     let paneID = PaneID()
     let focused = LockIsolated<PaneID?>(nil)
+    let inView = LockIsolated(false)
     let nowBox = LockIsolated<Date>(Date(timeIntervalSince1970: 0))
     let registry: AgentStateStore
 
-    init() {
+    /// `attached`: a surface renders the pane, as for any agent the binder
+    /// identified. Pass false for a restored or reclaimed pane.
+    init(attached: Bool = true) {
       let focused = self.focused
       let nowBox = self.nowBox
+      let inView = self.inView
       self.registry = AgentStateStore(
         focusedPane: { focused.value },
+        isPaneInView: { _ in inView.value },
         now: { nowBox.value }
       )
+      if attached { registry.onSurfaceAttachmentChanged(paneID, attached: true) }
+    }
+
+    /// One user turn that the agent finishes: input, working, then idle.
+    func finishTurn() {
+      registry.onPaneKeyboardActivity(paneID)
+      viewport("• Working (10s)")
+      advancePastWorkingHold()
+      viewport("codex> ")
     }
 
     func viewport(_ text: String) {

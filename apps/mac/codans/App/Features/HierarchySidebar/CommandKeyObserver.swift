@@ -8,14 +8,12 @@ import SwiftUI
 /// Installs an `NSEvent` local monitor for `.flagsChanged` at init. The monitor fires on
 /// the main thread, so `isCommandHeld` is mutated on the same thread SwiftUI reads from.
 ///
-/// **Press-debounce.** Hints widen the chrome of every button they decorate (chord text
-/// laid out inline with the label), so toggling them on every transient ⌘ tap — quick
-/// chord triggers, finger glances, modifier-only chord prefixes — produces a lot of
-/// distracting layout churn. We delay flipping `isCommandHeld → true` by
-/// `pressActivationDelay` (default 1 s): only a sustained "hold ⌘ to discover" gesture
-/// lights up the hints. The delay is one-way; releases flip back to `false` immediately
-/// so a chord that fires and briefly grabs focus doesn't leave hints lingering after the
-/// user has let go.
+/// **Hold of ⌘ alone.** Hints widen the chrome of every button they decorate, so they show
+/// only for a deliberate "hold ⌘ to discover" gesture: ⌘ held alone for
+/// `pressActivationDelay`. Any other key or modifier during the press is a chord, not a
+/// discovery gesture: it hides the hints and keeps them hidden until ⌘ goes up
+/// (`CommandHoldGesture`). Because a chord ends the hold, the delay only has to cover the
+/// pause before the second key, not the whole chord. Releases hide the hints immediately.
 ///
 /// **Active-state coupling.** When a chord like ⌘O fires a menu action that opens an
 /// external editor, the OS hands focus to that editor. Any `flagsChanged` event that fires
@@ -32,29 +30,49 @@ import SwiftUI
 @Observable
 @MainActor
 final class CommandKeyObserver {
-  /// `true` once the `.command` modifier has been continuously held for `pressActivationDelay`.
-  private(set) var isCommandHeld: Bool = false
+  /// `true` once ⌘ has been held alone for `pressActivationDelay`.
+  ///
+  /// Hand-rolled instead of a stored property: Observation notifies before a stored property
+  /// changes, and a hint that re-renders inside that notification (a view in a geometry
+  /// reader or a lazy stack, when another reader lays the window out synchronously) reads
+  /// the old state. It then keeps it until the next change, so it shows while ⌘ is up and hides
+  /// while ⌘ is held. `setCommandHeld(_:)` stores the state first and notifies after.
+  var isCommandHeld: Bool {
+    access(keyPath: \.isCommandHeld)
+    return heldState
+  }
+
+  @ObservationIgnored
+  private var heldState = false
+
+  @ObservationIgnored
+  private var gesture = CommandHoldGesture()
 
   @ObservationIgnored
   private let storage = MonitorStorage()
-  /// Pending "promote ⌘ to held after delay" task. Cancelled if the user releases ⌘
-  /// before the delay elapses, or if the app loses focus.
+  /// Pending "promote ⌘ to held after delay" task. Cancelled when the hold ends before the
+  /// delay elapses.
   @ObservationIgnored
   private var activationTask: Task<Void, Never>?
 
-  /// Sustained-hold threshold before hints render. Tuned long (1 s) deliberately:
-  /// shorter values still flickered every ⌘+key chord because the ⌘ key sits depressed
-  /// during the natural pause between modifier-down and the second key. 1 s is past the
-  /// average chord duration, so only a clear "hold ⌘ to discover bindings" gesture lights
-  /// up the hint chrome. Configurable per-instance for tests.
+  /// Hold threshold before hints render. Long enough to pass the pause between ⌘-down and
+  /// the second key of a chord, short enough that discovery does not feel slow.
+  /// Configurable per-instance for tests.
   let pressActivationDelay: Duration
 
-  init(pressActivationDelay: Duration = .seconds(1)) {
+  init(pressActivationDelay: Duration = .milliseconds(500)) {
     self.pressActivationDelay = pressActivationDelay
-    storage.monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-      let down = event.modifierFlags.contains(.command)
-      Task { @MainActor in
-        self?.handleCommandFlag(down: down)
+    // Local monitors run on the main thread, in event order.
+    storage.monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) {
+      [weak self] event in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        if event.type == .flagsChanged {
+          self.gesture.modifiersChanged(event.modifierFlags)
+        } else {
+          self.gesture.keyPressed()
+        }
+        self.applyGesture()
       }
       return event
     }
@@ -67,7 +85,9 @@ final class CommandKeyObserver {
       // releases its modifier in *that* app, so `flagsChanged` never reaches us. Clear
       // the held flag now so the hint chrome doesn't get stuck on.
       MainActor.assumeIsolated {
-        self?.handleCommandFlag(down: false)
+        guard let self else { return }
+        self.gesture.reset()
+        self.applyGesture()
       }
     }
   }
@@ -77,28 +97,73 @@ final class CommandKeyObserver {
     storage.teardown()
   }
 
-  /// Routes a raw `.command`-down boolean through the press-debounce. Down transitions
-  /// schedule a delayed promotion to `isCommandHeld == true`; up transitions cancel any
-  /// pending promotion and flip the flag false synchronously.
-  private func handleCommandFlag(down: Bool) {
-    if down {
-      // Already held (e.g. flagsChanged fired again with command still set) — no need
-      // to re-arm. The earlier task either already promoted or is still pending.
-      guard !isCommandHeld else { return }
-      activationTask?.cancel()
+  /// Arms the delayed promotion when a hold starts; hides the hints when it ends.
+  private func applyGesture() {
+    if gesture.isHolding {
+      // Already shown or pending: a repeated flagsChanged does not restart the delay.
+      guard !isCommandHeld, activationTask == nil else { return }
       let delay = pressActivationDelay
       activationTask = Task { @MainActor [weak self] in
         try? await Task.sleep(for: delay)
-        guard !Task.isCancelled else { return }
-        self?.isCommandHeld = true
+        guard !Task.isCancelled, let self else { return }
+        self.activationTask = nil
+        self.setCommandHeld(true)
       }
     } else {
       activationTask?.cancel()
       activationTask = nil
       if isCommandHeld {
-        isCommandHeld = false
+        setCommandHeld(false)
       }
     }
+  }
+
+  /// Every hint keyed on this flag inserts or removes itself in the same transaction, so
+  /// one animation here drives all of their transitions (`ShortcutHintLabel`).
+  func setCommandHeld(_ held: Bool) {
+    guard held != heldState else { return }
+    heldState = held
+    let animation: Animation? =
+      NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .shortcutHint
+    withAnimation(animation) {
+      // Notify only after the store, so a reader in the notification sees the new state.
+      withMutation(keyPath: \.isCommandHeld) {}
+    }
+  }
+}
+
+/// Tells a hold of ⌘ alone from a chord. A press of ⌘ is a hold until any other key or
+/// modifier joins it; after that it stays a chord until ⌘ goes up.
+struct CommandHoldGesture {
+  private enum Phase {
+    case idle
+    case holding
+    case chord
+  }
+
+  private var phase = Phase.idle
+
+  var isHolding: Bool { phase == .holding }
+
+  mutating func modifiersChanged(_ flags: NSEvent.ModifierFlags) {
+    let modifiers = flags.intersection([.command, .shift, .option, .control, .function])
+    if !modifiers.contains(.command) {
+      phase = .idle
+    } else if modifiers != .command {
+      phase = .chord
+    } else if phase == .idle {
+      phase = .holding
+    }
+  }
+
+  mutating func keyPressed() {
+    if phase == .holding {
+      phase = .chord
+    }
+  }
+
+  mutating func reset() {
+    phase = .idle
   }
 }
 

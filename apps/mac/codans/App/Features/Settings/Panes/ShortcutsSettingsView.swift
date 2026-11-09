@@ -471,6 +471,7 @@ extension ShortcutSchema.Category {
     case .projectAndWorktree: return "Project & Worktree"
     case .terminal: return "Terminal"
     case .actions: return "Actions"
+    case .agents: return "Agents"
     }
   }
 }

@@ -31,8 +31,8 @@ struct AgentHandlersStateTests {
     let catalog = Catalog(projects: [project])
     let store = AgentStateStore(focusedPane: { focused })
     store.seedRestored([
-      (paneID: pane.id, kind: .claudeCode, state: .working),
-      (paneID: idlePane.id, kind: .amp, state: .idle),
+      .init(paneID: pane.id, kind: .claudeCode, state: .working),
+      .init(paneID: idlePane.id, kind: .amp, state: .idle),
     ])
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
       "AgentHandlersStateTests-\(UUID().uuidString).json")
@@ -42,6 +42,38 @@ struct AgentHandlersStateTests {
       settings: SettingsStore(fileURL: url), hierarchy: hierarchy, installation: nil,
       stateStore: { store }, focusedPane: { focused }, waitPollMillis: waitPollMillis)
     return Fixture(handlers: handlers, store: store, pane: pane, idlePane: idlePane, catalog: catalog)
+  }
+
+  /// The Agents View keeps rows for panes the app does not observe; the
+  /// rows say so. A detached pane (restored and not opened yet, or
+  /// reclaimed) runs with no surface; a stopped pane runs nothing.
+  @Test(arguments: [
+    (PaneTerminalState.detached, true, false),
+    (.stopped, false, false),
+  ])
+  func listStatesReportsTheTerminalStateOfEachRow(
+    other: PaneTerminalState, isLive: Bool, isAttached: Bool
+  ) throws {
+    let base = makeFixture()
+    var hierarchy = HierarchyClient.testValue
+    hierarchy.snapshot = { base.catalog }
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "AgentHandlersStateTests-\(UUID().uuidString).json")
+    let attachedPane = base.pane.id
+    let handlers = AgentHandlers(
+      settings: SettingsStore(fileURL: url), hierarchy: hierarchy, installation: nil,
+      stateStore: { base.store },
+      paneTerminalState: { $0 == attachedPane ? .attached : other })
+
+    let response = try handlers.listStates()
+
+    #expect(response.count == 2)
+    #expect(response.agents[0].isLive == true)
+    #expect(response.agents[0].isAttached == true)
+    #expect(response.agents[1].paneID == base.idlePane.id.description)
+    #expect(response.agents[1].state == "idle")
+    #expect(response.agents[1].isLive == isLive)
+    #expect(response.agents[1].isAttached == isAttached)
   }
 
   @Test
@@ -96,7 +128,7 @@ struct AgentHandlersStateTests {
     let store = fixture.store
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(60))
-      store.seedRestored([(paneID: pane.id, kind: .claudeCode, state: .idle)])
+      store.seedRestored([.init(paneID: pane.id, kind: .claudeCode, state: .idle)])
     }
 
     let response = try await fixture.handlers.wait(
@@ -110,11 +142,20 @@ struct AgentHandlersStateTests {
   }
 
   @Test
+  func waitConditionAcceptsTheFormerFinishedName() throws {
+    #expect(IPC.AgentWaitCondition(rawValue: "finished") == .done)
+    let decoded = try JSONDecoder().decode(
+      IPC.AgentWaitCondition.self, from: Data(#""finished""#.utf8))
+    #expect(decoded == .done)
+    #expect(IPC.AgentWaitCondition(rawValue: "bogus") == nil)
+  }
+
+  @Test
   func waitReportsTheDeadlineWithTheLastState() async throws {
     let fixture = makeFixture()
 
     let response = try await fixture.handlers.wait(
-      IPC.AgentWaitRequest(paneID: fixture.pane.id, until: .finished, timeoutMillis: 120))
+      IPC.AgentWaitRequest(paneID: fixture.pane.id, until: .done, timeoutMillis: 120))
 
     #expect(!response.satisfied)
     #expect(response.state == "working")
@@ -128,7 +169,7 @@ struct AgentHandlersStateTests {
     let store = fixture.store
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(40))
-      store.seedRestored([(paneID: pane.id, kind: .claudeCode, state: .blocked)])
+      store.seedRestored([.init(paneID: pane.id, kind: .claudeCode, state: .blocked)])
     }
     let changed = try await fixture.handlers.wait(
       IPC.AgentWaitRequest(paneID: pane.id, until: .changed, timeoutMillis: 3000))

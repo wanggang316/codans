@@ -22,6 +22,7 @@ struct RootFeatureCommandPaletteRoutingTests {
       $0.terminalClient.events = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.selectionChanges = { AsyncStream { $0.finish() } }
       $0.hierarchyClient.snapshot = { Catalog() }
+      $0.hierarchyClient.setSidebarFilter = { _ in }
       $0.editorClient = EditorClient.testValue
       $0.gitService = GitServiceClient.testValue
       $0.updatesClient.checkNow = {}
@@ -47,6 +48,24 @@ struct RootFeatureCommandPaletteRoutingTests {
       .commandPalette(.presented(.delegate(.activate(.showUnreadNotifications))))
     )
     await store.receive(\.showUnreadRequested)
+  }
+
+  @Test
+  func showUnreadShowsTheSidebarWithTheNotificationFilter() async {
+    let selected = LockIsolated<[SidebarFilter]>([])
+    var state = RootFeature.State()
+    state.sidebarVisible = false
+    let store = TestStore(initialState: state) {
+      RootFeature()
+    } withDependencies: {
+      $0.hierarchyClient.setSidebarFilter = { filter in selected.withValue { $0.append(filter) } }
+    }
+    store.exhaustivity = .off
+    await store.send(.showUnreadRequested) {
+      $0.sidebarVisible = true
+    }
+    await store.receive(\.sidebar.sidebarFilterSelected)
+    #expect(selected.value == [.notifications])
   }
 
   @Test

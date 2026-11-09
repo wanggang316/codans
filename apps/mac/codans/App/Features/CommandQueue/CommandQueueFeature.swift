@@ -2,14 +2,10 @@ import CodansCore
 import ComposableArchitecture
 import Foundation
 
-/// Editor state for the Command Queue panel (⌘⌥L).
+/// Editor state for the Command Queue panel (⌘L).
 ///
-/// Only the *draft* lives here. The queue itself is catalog state
-/// (`Pane.commandQueue`) and the panel reads it straight off the
-/// `@Observable` `HierarchyManager`, so a command draining while the panel is
-/// open disappears from the list without a reducer round-trip. That split is
-/// the documented hybrid boundary: terminal / hierarchy state is
-/// `@Observable`, app flow state is TCA.
+/// Only the draft lives here. The pane overlay reads the queue from the live
+/// catalog. This keeps editor state separate from commands managed by the runner.
 @Reducer
 struct CommandQueueFeature {
   @ObservableState
@@ -102,6 +98,9 @@ struct CommandQueueFeature {
 
   enum Action: Equatable {
     case draftChanged(String)
+    /// Picked files, and the editor's caret or selection as UTF-16 offsets
+    /// (`nil` appends to the end).
+    case filesSelected([URL], selection: Range<Int>?)
     case modeChanged(State.Mode)
     case scheduledAtChanged(Date)
     case repeatEnabledChanged(Bool)
@@ -109,8 +108,13 @@ struct CommandQueueFeature {
     case repeatUnitChanged(IntervalUnit)
     /// Commit the draft under the selected mode.
     case submitted
+    case delegate(Delegate)
     case removeTapped(QueuedCommand.ID)
     case clearAllTapped
+
+    enum Delegate: Equatable {
+      case submitted
+    }
   }
 
   @Dependency(HierarchyClient.self) private var hierarchyClient
@@ -122,6 +126,12 @@ struct CommandQueueFeature {
       switch action {
       case .draftChanged(let text):
         state.draft = text
+        return .none
+
+      case .filesSelected(let urls, let selection):
+        if let result = ComposerPathInsertion.insert(urls, into: state.draft, selection: selection) {
+          state.draft = result.text
+        }
         return .none
 
       case .modeChanged(let mode):
@@ -168,12 +178,15 @@ struct CommandQueueFeature {
             .init(
               text: text,
               timing: .scheduled(at: state.scheduledAt, repeatEvery: state.repeatInterval),
-              createdAt: date.now
+              createdAt: date.now,
             ),
-            to: paneID
+            to: paneID,
           )
         }
         state.draft = ""
+        return .send(.delegate(.submitted))
+
+      case .delegate:
         return .none
 
       case .removeTapped(let id):

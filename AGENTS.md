@@ -25,7 +25,7 @@ Multi-worktree tip: `ln -s <main>/apps/mac/.build/ghostty apps/mac/.build/ghostt
 
 Requires Xcode **26 or 27** (pinned via `apps/mac/Tuist.swift: compatibleXcodeVersions`; builds are checked on Xcode 27). Xcode 27 needs Tuist 4.210+, which floors package deployment targets at what the SDK accepts.
 
-On Xcode 26.4+ (27 included), zig 0.15.2 cannot link against the stock macOS SDK; `build-ghostty.sh` / `build-zmx.sh` detect this and point zig at an older installed SDK via `apps/mac/scripts/xcode-compat/`. That needs an SDK whose `libSystem.tbd` still lists `arm64-macos` (e.g. the Command Line Tools' `MacOSX15.4.sdk`). Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-4-and-later.md).
+On Xcode 26.4+ (27 included), zig 0.15.2 cannot link against the stock macOS SDK; `build-ghostty.sh` / `build-zmx.sh` detect this and point zig at a view of the same SDK whose `.tbd` stubs also list `arm64-macos` (`apps/mac/scripts/xcode-compat/`, cached under `apps/mac/.build/xcode-compat/`). No older SDK is needed. Details: [lessons-learned](docs/lessons-learned/2026-09-17-zig-builds-broke-on-xcode-26-4-and-later.md).
 
 ## Architecture Overview
 
@@ -99,3 +99,9 @@ See [Quick Start](#quick-start). Top-level Makefile delegates every `mac-*` targ
 - **Subprocess:** always go through the shared `CommandRunner` in `apps/mac/codans/Process/`. Do not spawn `Process` directly inside feature modules.
 - **Naming:** Swift API Design Guidelines. Filenames match the primary type. TCA reducers end with `Feature`, views with `View`.
 - **Comments:** explain *why*, not *what*. Cite design-doc IDs when a non-obvious decision is encoded in code.
+
+## Agent skills
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.

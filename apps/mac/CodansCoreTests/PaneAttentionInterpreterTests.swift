@@ -534,6 +534,23 @@ struct PaneAttentionInterpreterTests {
   }
 
   @Test
+  func codexInterruptedTranscriptIsIdle() {
+    let screen = """
+      {"endpoint": "skills?limit=1&sort_by=heat_score&sort_order=desc"}
+      ■ Conversation interrupted - use /feedback if something went wrong
+      › Ask Codex to do anything
+      GPT-6-Astra medium · ~/project
+      ← for agents · ? for shortcuts
+      """
+    #expect(activity(.codex, screen) == .idle)
+  }
+
+  @Test(arguments: ["esc to interrupt", "ctrl+c to interrupt"])
+  func codexInterruptHintIsWorking(_ hint: String) {
+    #expect(activity(.codex, "• Running tests (\(hint))\n› Ask Codex to do anything") == .working)
+  }
+
+  @Test
   func agentActivityUsesRecentNonBlankLines() {
     let oldWorking = Array(repeating: "• Working (1s)", count: 30).joined(separator: "\n")
     let recentIdle = oldWorking + "\n\ncodex> "

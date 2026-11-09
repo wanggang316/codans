@@ -61,22 +61,18 @@ struct TabBarRowView: View {
   let onCloseOthers: (TabID) -> Void
   let onCloseToRight: (TabID) -> Void
   let onCloseAll: () -> Void
-  let onRenameRequested: (TabID) -> Void
-  let onChangeColorRequested: (TabID) -> Void
-  let onChangeIconRequested: (TabID) -> Void
   let onCopyID: (TabID) -> Void
   let onReorder: @MainActor @Sendable ([TabID]) -> Void
   /// Title for a tab that has no pane yet — the worktree directory's name,
   /// which is where its first pane will start.
   var emptyTabTitle: String = ""
-  /// Fires whenever a chip resolves a non-empty live title (OSC tabTitle
-  /// / title / pwd basename). The parent persists this onto the tab so
-  /// the chip can fall back to it across app launches before the
-  /// surface respawns. Default no-op keeps previews / call sites that
+  /// Fires whenever a chip resolves the live pane title of its selected
+  /// pane. The parent persists this onto the tab so the chip can fall back
+  /// to it across app launches before the surface respawns. The pane ID
+  /// says whose title it is. Default no-op keeps previews / call sites that
   /// don't care about cross-launch titles compiling without changes.
-  var onCacheLiveTitle: (TabID, String) -> Void = { _, _ in }
+  var onCacheLiveTitle: (TabID, String, PaneID) -> Void = { _, _, _ in }
 
-  @Environment(CommandKeyObserver.self) private var commandKeyObserver
   @Environment(\.resolvedShortcuts) private var resolvedShortcuts
 
   /// Name of the row's coordinate space — drag location, chip frames, and
@@ -96,10 +92,17 @@ struct TabBarRowView: View {
   /// `Tab` values) so chip content — title / color / dirty — always reads
   /// fresh from the `tabs` prop while only the order is owned locally.
   @State private var orderIDs: [TabID] = []
-  /// The chip currently being dragged, or nil when idle.
+  /// The chip currently being dragged, or nil when idle. Stays set while
+  /// the lifted copy settles into its slot after the drop.
   @State private var draggingID: TabID?
+  /// The drop has happened and the lifted copy is animating into its slot.
+  @State private var isSettling = false
   /// Live cursor X in the row space, driving the floating chip.
   @State private var dragCursorX: CGFloat = 0
+  /// Cursor X minus the dragged chip's center X at the start of the drag.
+  /// The lifted copy keeps it, so the chip stays where it was grabbed
+  /// instead of jumping to center on the cursor.
+  @State private var dragGrabOffset: CGFloat = 0
   /// Per-chip layout rects (row space) reported via `ChipFrameKey`. Read
   /// for neighbor-midpoint hit testing and to size the floating copy.
   @State private var chipFrames: [TabID: CGRect] = [:]
@@ -186,6 +189,10 @@ struct TabBarRowView: View {
     }
     .coordinateSpace(name: Self.rowSpace)
     .onPreferenceChange(ChipFrameKey.self) { chipFrames = $0 }
+    // Cut the in-flow chips out under the lifted copy, so their titles do
+    // not show through it. The copy then needs no plate of its own and
+    // keeps the selected chip's translucent fill over the track.
+    .mask { dragMask }
     .overlay(alignment: .topLeading) { floatingChip(in: rendered) }
     .animation(Self.addRemoveAnimation, value: rendered.map(\.id))
     .onAppear {
@@ -238,17 +245,12 @@ struct TabBarRowView: View {
       onCloseOthers: { onCloseOthers(tab.id) },
       onCloseToRight: { onCloseToRight(tab.id) },
       onCloseAll: onCloseAll,
-      onRenameRequested: { onRenameRequested(tab.id) },
-      onChangeColor: { onChangeColorRequested(tab.id) },
-      onChangeIcon: { onChangeIconRequested(tab.id) },
       onCopyID: { onCopyID(tab.id) },
-      tabColor: tab.color,
-      icon: tab.resolvedIcon(autoFallback: nil),
       sliceWidth: slice?.width,
       contentShift: slice?.shift ?? 0,
       onStackClick: slice?.onClick,
       emptyTabTitle: emptyTabTitle,
-      onCacheLiveTitle: { title in onCacheLiveTitle(tab.id, title) }
+      onCacheLiveTitle: { title, paneID in onCacheLiveTitle(tab.id, title, paneID) }
     )
     .id(tab.id)
   }
@@ -265,6 +267,37 @@ struct TabBarRowView: View {
     }
   }
 
+  /// How far the row mask and the lifted copy's clip reach past the chip
+  /// frames. The selected chip's glass draws its dark outer rim just past
+  /// its bounds; a clip at the bounds cuts it off and the chip reads as
+  /// missing an edge.
+  private static let glassRimOutset: CGFloat = 3
+
+  /// Everything but the lifted copy's footprint while a drag is in
+  /// progress; the whole row otherwise.
+  private var dragMask: some View {
+    GeometryReader { geo in
+      if let id = draggingID, let frame = chipFrames[id] {
+        // A little wider than the copy, so no sliver of the chip under it
+        // shows past its antialiased edge.
+        let width = frame.width + 2
+        let cutout = CGRect(
+          x: liftedCenterX(width: frame.width) - width / 2, y: 0, width: width,
+          height: TabBarMetrics.chipHeight)
+        Path { path in
+          path.addRect(
+            CGRect(origin: .zero, size: geo.size).insetBy(
+              dx: -Self.glassRimOutset, dy: -Self.glassRimOutset))
+          path.addRoundedRect(
+            in: cutout, cornerSize: CGSize(width: cutout.height / 2, height: cutout.height / 2))
+        }
+        .fill(style: FillStyle(eoFill: true))
+      } else {
+        Rectangle().padding(-Self.glassRimOutset)
+      }
+    }
+  }
+
   /// The lifted chip that tracks the cursor during a drag, rendered above
   /// the row. Non-interactive — the gesture lives on the in-flow chip,
   /// which continues to receive drag events even at zero opacity.
@@ -276,22 +309,24 @@ struct TabBarRowView: View {
     {
       chipView(for: rendered[index], index: index, count: rendered.count)
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        // Opaque plate so the lifted copy occludes the chips it floats
-        // over — the chip's own idle fill is `.clear`, which would let
-        // their titles bleed through and overlap.
-        .background(Capsule().fill(TabBarColors.draggingBackground))
+        // A lifted idle chip takes the selected chip's raised capsule, so
+        // every lifted copy reads the same; a selected chip has its own.
+        .background {
+          if id != selectedID {
+            TabChipBackground(isActive: true, isHovering: false)
+          }
+        }
         // Hard-clip the lifted copy to its own chip frame. On macOS 26 the
-        // copy's opaque background otherwise paints a tall white column up to
-        // the titlebar during a drag (a SwiftUI host/overlay regression — the
-        // drag code itself is unchanged from when this shipped clean). Clipping
-        // bounds the copy to `chipHeight` regardless of why it overflows; the
-        // shadow is applied after, so it still feathers outside the clip.
+        // copy's background otherwise paints a tall column up to the
+        // titlebar during a drag (a SwiftUI host/overlay regression — the
+        // drag code itself is unchanged from when this shipped clean). The
+        // clip reaches a little past the chip so the glass keeps its own
+        // shadow. Like Safari, the lifted copy keeps the chip's size and
+        // look: no scale, no extra shadow.
         .frame(width: frame.width, height: TabBarMetrics.chipHeight)
-        .clipped()
-        .scaleEffect(1.03)
-        .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
+        .clipShape(Rectangle().inset(by: -Self.glassRimOutset))
         .allowsHitTesting(false)
-        .position(x: dragCursorX, y: TabBarMetrics.chipHeight / 2)
+        .position(x: liftedCenterX(width: frame.width), y: TabBarMetrics.chipHeight / 2)
         .zIndex(10)
     }
   }
@@ -302,24 +337,61 @@ struct TabBarRowView: View {
       coordinateSpace: .named(Self.rowSpace)
     )
     .onChanged { value in
-      if draggingID != tab.id {
+      if draggingID != tab.id || isSettling {
         // First tick of a new drag — snapshot the current order as the
         // mutable baseline, then claim this chip as the dragged one.
+        isSettling = false
         orderIDs = tabs.map(\.id)
         draggingID = tab.id
+        let grabbedMidX = chipFrames[tab.id]?.midX ?? value.startLocation.x
+        dragGrabOffset = value.startLocation.x - grabbedMidX
       }
       dragCursorX = value.location.x
       updateOrder()
     }
     .onEnded { _ in
       let final = orderIDs
-      draggingID = nil
-      dragCursorX = 0
       // Single absolute-order commit; skip the no-op when nothing moved.
       if final != tabs.map(\.id) {
         onReorder(final)
       }
+      settleDrop()
     }
+  }
+
+  /// Slides the lifted copy from where it was released into its slot, then
+  /// ends the drag, as Safari does; the chip never jumps on release.
+  private func settleDrop() {
+    guard let id = draggingID, let slot = chipFrames[id] else {
+      endDrag()
+      return
+    }
+    isSettling = true
+    withAnimation(Self.addRemoveAnimation) {
+      dragCursorX = slot.midX + dragGrabOffset
+    } completion: {
+      // A new drag that started mid-settle owns the state now.
+      guard isSettling, draggingID == id else { return }
+      endDrag()
+    }
+  }
+
+  private func endDrag() {
+    isSettling = false
+    draggingID = nil
+    dragCursorX = 0
+    dragGrabOffset = 0
+  }
+
+  /// Center X of the lifted copy: the cursor less the grab offset, held
+  /// inside the row the way the system bar keeps a dragged tab in the bar.
+  private func liftedCenterX(width: CGFloat) -> CGFloat {
+    let x = dragCursorX - dragGrabOffset
+    let frames = chipFrames.values
+    guard let minX = frames.map(\.minX).min(), let maxX = frames.map(\.maxX).max(),
+      maxX - minX >= width
+    else { return x }
+    return min(max(x, minX + width / 2), maxX - width / 2)
   }
 
   /// Steps the dragged chip past an adjacent neighbor once it overlaps that
@@ -339,15 +411,16 @@ struct TabBarRowView: View {
       let current = orderIDs.firstIndex(of: id),
       let dragged = chipFrames[id]
     else { return }
+    let centerX = liftedCenterX(width: dragged.width)
     var target = current
     if current < orderIDs.count - 1,
       let next = chipFrames[orderIDs[current + 1]],
-      dragCursorX > (dragged.midX + next.midX) / 2
+      centerX > (dragged.midX + next.midX) / 2
     {
       target = current + 1
     } else if current > 0,
       let prev = chipFrames[orderIDs[current - 1]],
-      dragCursorX < (dragged.midX + prev.midX) / 2
+      centerX < (dragged.midX + prev.midX) / 2
     {
       target = current - 1
     }
@@ -480,17 +553,13 @@ struct TabBarRowView: View {
     DispatchQueue.main.async { scroller?.scroll(to: target, animated: false) }
   }
 
-  /// Resolves the registry chord (`switchToTabN`) to a display string while ⌘ is held.
-  /// Returned to `TabChipView.chordHint` so the chord renders inside the chip's trailing
-  /// slot (replacing the close button while held). Beyond ten tabs the schema has no
-  /// chord; returns nil and the chip keeps its close-button slot.
+  /// Resolves the registry chord (`switchToTabN`) to a display string for
+  /// `TabChipView.chordHint`, which shows it in the chip's trailing slot while ⌘ is held.
+  /// Beyond ten tabs the schema has no chord; returns nil.
   private func chordHint(for tabIndex: Int) -> String? {
-    guard commandKeyObserver.isCommandHeld,
-      let id = CommandID.switchToTab(index: tabIndex),
-      let resolved = resolvedShortcuts[id], resolved.isEnabled,
-      let binding = resolved.binding
+    guard let id = CommandID.switchToTab(index: tabIndex)
     else { return nil }
-    return ShortcutDisplay.chord(for: binding)
+    return ShortcutDisplay.chord(for: id, in: resolvedShortcuts)
   }
 }
 
@@ -503,25 +572,23 @@ struct TabBarRowView: View {
 /// being dropped because the access happened inside a `ForEach` builder
 /// of an upstream view that didn't establish its own tracking context.
 ///
-/// Title priority:
+/// Title priority (ADR 0009):
 /// 1. `tab.name` (manual rename — sticky, ignores OSC).
-/// 2. focused pane's `info.tabTitle` (OSC 2 / set_tab_title).
-/// 3. focused pane's `info.title` (OSC 0 / set_title).
-/// 4. focused pane's `info.pwd` basename.
-/// 5. `tab.cachedDisplayTitle` (last live value persisted to the catalog).
-/// 6. focused (or first) pane's `workingDirectory` basename — always
-///    present on the persisted catalog, so even cold-launched chips
-///    have a meaningful label before the surface respawns.
-/// 7. `emptyTabTitle` (the worktree directory's name) for a tab whose first
+/// 2. the pane title of the selected pane while it has a surface — the same
+///    text as that pane's header (`PaneTitleReader`).
+/// 3. `tab.cachedDisplayTitle` (the last pane title, persisted to the
+///    catalog) while the selected pane has no surface, and only when the
+///    cache holds that pane's title (`PaneTitleReader.cachedTitle`).
+/// 4. the selected pane's persisted working directory, as its header shows
+///    it without a surface.
+/// 5. `emptyTabTitle` (the worktree directory's name) for a tab whose first
 ///    pane is not open yet — a tab added from the UI opens it only after
 ///    its insertion animation, and must not show up untitled meanwhile.
-/// 8. Empty string as a last-resort defensive default.
 ///
 /// The cache exists because surfaces are spawned lazily — on cold launch
 /// inactive tabs have no live `SurfaceInfo` yet, so without the cache
-/// every previously-named tab would briefly read as the workingDirectory
-/// basename until the shell re-emits an OSC title (and stay there, for
-/// tabs the user does not re-open during the session).
+/// every previously-titled tab would read as its directory until the user
+/// opens it.
 private struct ResolvingTabChipView: View {
   let tab: CodansCore.Tab
   let isActive: Bool
@@ -546,17 +613,12 @@ private struct ResolvingTabChipView: View {
   let onCloseOthers: () -> Void
   let onCloseToRight: () -> Void
   let onCloseAll: () -> Void
-  let onRenameRequested: () -> Void
-  let onChangeColor: () -> Void
-  let onChangeIcon: () -> Void
   let onCopyID: () -> Void
-  let tabColor: TabColor?
-  let icon: String?
   var sliceWidth: CGFloat?
   var contentShift: CGFloat = 0
   var onStackClick: (() -> Void)?
   let emptyTabTitle: String
-  let onCacheLiveTitle: (String) -> Void
+  let onCacheLiveTitle: (String, PaneID) -> Void
 
   @Environment(HierarchyManager.self) private var hierarchyManager
   @Environment(RollupIndexProvider.self) private var notificationRollup: RollupIndexProvider?
@@ -565,6 +627,9 @@ private struct ResolvingTabChipView: View {
 
   var body: some View {
     let live = liveResolvedTitle
+    let glyph = PaneGlyph.resolve(
+      pane: selectedPane, settings: settingsStore?.settings ?? .default,
+      isBusy: selectedPane.map { hierarchyManager.paneIsBusy($0.id) } ?? false)
     TabChipView(
       title: resolvedTitle(live: live),
       isActive: isActive,
@@ -580,13 +645,9 @@ private struct ResolvingTabChipView: View {
       onCloseOthers: onCloseOthers,
       onCloseToRight: onCloseToRight,
       onCloseAll: onCloseAll,
-      onRenameRequested: onRenameRequested,
-      onChangeColor: onChangeColor,
-      onChangeIcon: onChangeIcon,
       onCopyID: onCopyID,
-      tabColor: tabColor,
-      icon: icon,
-      iconTint: runningScriptIconTint,
+      icon: glyph.icon,
+      iconTint: glyph.tint.map(ScriptTintColorPalette.color(for:)),
       sliceWidth: sliceWidth,
       contentShift: contentShift,
       onStackClick: onStackClick,
@@ -599,29 +660,19 @@ private struct ResolvingTabChipView: View {
       // title — never overwrite the cache with `nil` (e.g. surface not
       // yet spawned on cold launch), otherwise a freshly-loaded catalog
       // would clobber its own cache before the shell pushes anything.
-      guard let newLive, newLive != tab.cachedDisplayTitle else { return }
-      onCacheLiveTitle(newLive)
+      guard let newLive, let paneID = selectedPane?.id,
+        newLive != tab.cachedDisplayTitle || paneID != tab.cachedDisplayTitlePaneID
+      else { return }
+      onCacheLiveTitle(newLive, paneID)
     }
   }
 
-  /// Script tint for the chip's icon while this tab's dedicated run pane is
-  /// executing. Run panes are skipped by `tabIsDirty`, so a running script
-  /// never swaps the chip's glyph for the spinner — the glyph picking up the
-  /// script's colour is the running affordance instead. `nil` when no run
-  /// pane in this tab is busy, or its script no longer exists in Settings.
-  /// Reads `HierarchyManager.paneIsBusy` (@Observable) so the tint tracks
-  /// start/stop automatically.
-  private var runningScriptIconTint: Color? {
-    guard let settings = settingsStore?.settings else { return nil }
-    for pane in tab.panes {
-      guard let scriptID = pane.runScriptID, hierarchyManager.paneIsBusy(pane.id) else { continue }
-      let script =
-        settings.general.globalScripts.first(where: { $0.id == scriptID })
-        ?? settings.projects.values.lazy.flatMap(\.scripts).first(where: { $0.id == scriptID })
-      guard let script else { return nil }
-      return ScriptTintColorPalette.color(for: script.resolvedTintColor)
-    }
-    return nil
+  /// The pane whose header the chip mirrors: the tab's focused pane, or its
+  /// first pane before any pane took focus. The chip shows this pane's
+  /// `PaneGlyph` and live title, so glyph and title describe one pane.
+  private var selectedPane: Pane? {
+    let focusedID = hierarchyManager.lastFocusedPane(in: tab.id)
+    return tab.panes.first { $0.id == focusedID } ?? tab.panes.first
   }
 
   /// Whether to render the chip's running spinner. A working coding agent
@@ -642,41 +693,19 @@ private struct ResolvingTabChipView: View {
     return terminalBusy || agentWorking
   }
 
-  /// Title sourced strictly from the live focused-pane `SurfaceInfo`.
-  /// Returns `nil` when the surface hasn't been spawned yet or the shell
-  /// hasn't pushed any of OSC 2 / OSC 0 / OSC 7 — letting the caller
-  /// decide whether to fall back to the persisted cache or "Tab N".
+  /// The pane title of the selected pane, or `nil` while it has no surface
+  /// — letting the caller fall back to the persisted cache.
   private var liveResolvedTitle: String? {
-    let paneID = hierarchyManager.lastFocusedPane(in: tab.id) ?? tab.panes.first?.id
-    guard let paneID, let surface = terminalClient.surface(paneID) else { return nil }
-    let info = surface.info
-    // Read all observable properties up-front so SwiftUI registers
-    // observation on every one — `if let` short-circuits would skip
-    // subsequent reads and miss future updates on those keypaths.
-    let tabTitleValue = info.tabTitle
-    let titleValue = info.title
-    let pwdValue = info.pwd
-    if let t = tabTitleValue, !t.isEmpty { return t }
-    if let t = titleValue, !t.isEmpty { return t }
-    if let pwd = pwdValue {
-      let basename = (pwd as NSString).lastPathComponent
-      if !basename.isEmpty { return basename }
-    }
-    return nil
+    guard let paneID = selectedPane?.id else { return nil }
+    return PaneTitleReader.liveTitle(
+      paneID: paneID, hierarchyManager: hierarchyManager, terminalClient: terminalClient)
   }
 
   private func resolvedTitle(live: String?) -> String {
-    if let name = tab.name, !name.isEmpty { return name }
-    if let live { return live }
-    if let cached = tab.cachedDisplayTitle, !cached.isEmpty { return cached }
-    let pane =
-      tab.panes.first { $0.id == hierarchyManager.lastFocusedPane(in: tab.id) }
-      ?? tab.panes.first
-    if let pane {
-      let basename = (pane.workingDirectory as NSString).lastPathComponent
-      if !basename.isEmpty { return basename }
-    }
-    return emptyTabTitle
+    PaneTitleReader.chipTitle(
+      tabName: tab.name, live: live,
+      cached: PaneTitleReader.cachedTitle(of: tab, selectedPaneID: selectedPane?.id),
+      stored: PaneTitleReader.storedTitle(pane: selectedPane), emptyTabTitle: emptyTabTitle)
   }
 }
 

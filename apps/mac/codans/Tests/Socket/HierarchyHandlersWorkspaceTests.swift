@@ -45,17 +45,47 @@ struct HierarchyHandlersWorkspaceTests {
       Issue.record("expected failure, got \(outcome)")
       return
     }
-    guard case .invalidParams = error else {
+    guard case .invalidParams(let message, _) = error else {
       Issue.record("expected invalidParams, got \(error)")
       return
     }
-    #expect(manager.catalog.projects[0].worktrees.count == 1)
+    #expect(message.contains("workspace group create"))
+    #expect(manager.catalog.projects[0].worktrees.isEmpty)
+  }
+
+  @Test
+  func describeWorktreeReportsTheGroupAndRole() async throws {
+    let (handlers, manager) = Self.makeFixture()
+    let workspaceID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
+    Self.reconcile(manager, workspaceID, member: "/tmp/ws/app")
+    let project = manager.catalog.projects[0]
+    let group = try #require(project.workspaceGroups.first)
+    let sourceID = manager.addProject(name: "app", rootPath: "/src/app", gitRoot: "/src/app")
+
+    var refs: [IPC.WorkspaceGroupRef?] = []
+    for id in project.worktrees.map(\.id)
+      + (manager.catalog.projects.first { $0.id == sourceID }?.worktrees.map(\.id) ?? [])
+    {
+      let outcome = await handlers.describeWorktree(try JSONValue.encoded(IPC.DescribeRequest(id: id.raw)))
+      guard case .unary(let value) = outcome else {
+        Issue.record("expected unary, got \(outcome)")
+        return
+      }
+      refs.append(try value.decoded(as: IPC.WorktreeDescription.self).workspaceGroup)
+    }
+    #expect(
+      Array(refs.prefix(2)) == [
+        IPC.WorkspaceGroupRef(id: group.id, name: "existing", role: .groupTerminal),
+        IPC.WorkspaceGroupRef(id: group.id, name: "existing", role: .member),
+      ])
+    #expect(refs.dropFirst(2).allSatisfy { $0 == nil })
   }
 
   @Test
   func removeWorktreeRefusesTheWorkspaceRoot() async throws {
     let (handlers, manager) = Self.makeFixture()
     let projectID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
+    Self.reconcile(manager, projectID, member: nil)
     let rootID = manager.catalog.projects[0].worktrees[0].id
 
     let params = try JSONValue.encoded(
@@ -76,12 +106,7 @@ struct HierarchyHandlersWorkspaceTests {
   func removeWorktreeRefusesWorkspaceChildrenAndTheirMirrorRows() async throws {
     let (handlers, manager) = Self.makeFixture()
     let workspaceID = manager.addProject(name: "ws", rootPath: "/tmp/ws", isWorkspace: true)
-    _ = manager.reconcileWorkspaceChildren(
-      projectID: workspaceID,
-      observations: [
-        HierarchyManager.WorkspaceChildObservation(
-          name: "app", path: "/tmp/ws/app", exists: true, branch: "feat", sourceGitRoot: "/src/app")
-      ])
+    Self.reconcile(manager, workspaceID, member: "/tmp/ws/app")
     let childID = manager.catalog.projects[0].worktrees[1].id
     let sourceID = manager.addProject(name: "app", rootPath: "/src/app", gitRoot: "/src/app")
     let mirrorID = try manager.createWorktree(in: sourceID, name: "feat", path: "/tmp/ws/app", branch: "feat")
@@ -99,6 +124,24 @@ struct HierarchyHandlersWorkspaceTests {
     #expect(manager.catalog.projects[1].worktrees.count == 1)
   }
 
+  /// The migrated layout: a group row at the root, plus one member.
+  private static func reconcile(_ manager: HierarchyManager, _ projectID: ProjectID, member: String?) {
+    var rows = [
+      HierarchyManager.WorkspaceRowObservation(name: "existing", path: "/tmp/ws", role: .groupTerminal, exists: true)
+    ]
+    if let member {
+      rows.append(
+        HierarchyManager.WorkspaceRowObservation(
+          name: "app", path: member, role: .member, exists: true, branch: "feat", sourceGitRoot: "/src/app"))
+    }
+    manager.reconcileWorkspaceGroups(
+      projectID: projectID,
+      groups: [
+        HierarchyManager.WorkspaceGroupObservation(
+          id: WorkspaceGroupID(), name: "existing", kind: .named, deletion: nil, rows: rows)
+      ])
+  }
+
   private static func makeWorkspaceRoot() throws -> URL {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent("codans-ws-handlers-\(UUID().uuidString)", isDirectory: true)
@@ -109,13 +152,7 @@ struct HierarchyHandlersWorkspaceTests {
   }
 
   private static func makeFixture() -> (HierarchyHandlers, HierarchyManager) {
-    let manager = HierarchyManager(
-      catalog: Catalog(),
-      store: CatalogStore(
-        fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
-          .appendingPathComponent("codans-ws-handlers-\(UUID().uuidString).json")),
-      runtime: FakeHierarchyRuntime()
-    )
+    let manager = HierarchyManager(catalog: Catalog(), store: .detached(), runtime: FakeHierarchyRuntime())
     let handlers = HierarchyHandlers(manager: manager, settingsProvider: { Settings() })
     return (handlers, manager)
   }

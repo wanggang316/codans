@@ -221,8 +221,7 @@ counts. Runtime Pane muting uses the `notifications:muted` label and drops
 candidates in the detector before any delivery path. The stored mute sets
 are not consulted by the detector or coordinator.
 
-`statusBarBellEnabled`, `projectBellEnabled`, `worktreeBellEnabled`, and
-`tabBellEnabled` control indicator visibility without changing inbox collection.
+`projectBellEnabled`, `worktreeBellEnabled`, and `tabBellEnabled` control indicator visibility without changing inbox collection.
 The full notification pipeline (detector → coordinator → sinks,
 roll-up badges, command-finished suppression) is its own subsystem — see
 [notifications.md](./notifications.md). This doc owns only the *settings* that
@@ -240,8 +239,11 @@ Durable shell decisions:
 - **Sidebar `selection` is transient, never persisted.** Closing the window
   resets it; reopening defaults to General so each Settings session starts
   from the global preferences.
-- **The sidebar group of Projects, and per-Project sub-rows, are driven by the
-  live catalog**, not stored on the window — the catalog is the single source of
+- **Global sidebar rows form three untitled groups** (`SettingsSection.globalGroups`):
+  app preferences; agent tooling (Agents, Integrations, Workflows); Remote
+  Hosts. Each group is a headerless `Section`, so only the section gap
+  separates them.
+- **The sidebar's Project rows are driven by the live catalog**, not stored on the window — the catalog is the single source of
   truth for "what exists". `HierarchyClient.kind(of:)` returns `nil` for a gone
   Project; callers treat that as "this pane will be pruned next
   `.projectsChanged`".
@@ -252,13 +254,57 @@ Durable shell decisions:
   `setProjectLifecycleScript`), whose live implementations chain into
   `SettingsStore.mutateProject(pid) { … }`. Per-Project writes do **not** route
   through `HierarchyClient` / the catalog (the storage-unification core).
-- **Kind-specific content.** Project sidebar sub-rows are **General** and
-  **Commands**. General, Editor, and Environment sections apply to every kind.
-  Git projects and Servers also expose Worktree, GitHub, and Lifecycle sections;
+- **One page per Project.** A Project's sidebar row opens a single page
+  (`SettingsSection.project`); its custom commands are a Commands section on
+  that page, at its bottom below the lifecycle scripts. "Manage Project Commands…" opens the page
+  scrolled to that section.
+- **Kind-specific content.** General, Editor, Environment, and Commands
+  sections apply to every kind.
+  Git projects and Servers also expose Worktree, Git Platform, and Lifecycle sections;
   Workspaces instead expose their member Projects. Default icons reflect the
   Project kind and can be replaced by user-selected symbols, emoji, or images.
 
+## Git Platforms pane
+
+Settings › Git Platforms (`GitPlatformsSettingsView`) tells which Git Platforms
+codans can use and what each one can do. It is a native grouped `Form` with no
+custom chrome and no per-platform enable switch.
+
+- **Introduction.** One short sentence: codans reads Pull Requests through the
+  CLI of each Git Platform. Other explanations live where they apply (below).
+- **One section per Git Platform.** The official mark (`github-mark` from the
+  GitHub logos package, `gitlab-mark` from the one-color tanuki of the GitLab
+  press kit; template images, so they follow light and dark mode), the name, and
+  the CLI status. Re-check and a `HelpLink` to the CLI docs stay on the row. The
+  status has one form per `GitPlatformAvailability` case: checking, connected
+  (host and `@user`), not installed (with the `brew install` command), not logged
+  in (with the `auth login` command, `--hostname` when the host is known), and
+  any other failure as its message. Commands show on their own row with a copy
+  button.
+- **Capability list.** `GitPlatformKind.capabilities` (`CodansCore`) is static
+  data per kind, in the Git Platform's own terms (PR / MR, checks / pipeline
+  jobs): Pull Request badges, CI status, each merge strategy, mark ready, rerun
+  failed checks, review status. An unsupported item is dimmed with its reason
+  (GitLab rebase: "The project's merge method applies").
+  `GitPlatformCapabilityAgreementTests` checks the list against the merge options
+  and the rerun support that each implementation's decoding layer produces, so
+  the list cannot drift from the code.
+- **Aliases.** The footer explains that a Project uses the Git Platform of its
+  origin remote and when to add an alias.
+- **Defaults.** The merge strategy and post-merge pickers carry their
+  explanations as subtitles (GitLab applies the project's merge method, and
+  Rebase and merge uses Merge there). The section footer is a short note that
+  machines that run Projects are in Remote Hosts.
+
 ## General defaults and agent launch preferences
+
+`general.gitPlatformAliases` lists the Git Platform aliases of Settings › Git Platforms
+(remote host, kind, API host; [ADR 0005](../adr/0005-git-platform-aliases.md)).
+It is omitted when empty; an entry that does not decode (an unknown kind) is
+dropped and the rest load. Writes go through `saveGitPlatformAlias` /
+`removeGitPlatformAlias`, which keep the remote host unique. The Project "Git
+Platform" section has only the merge strategy and post-merge overrides: an older
+`projects[pid].git.gitPlatform` key loads, is ignored, and is not written again.
 
 `general.defaultGitViewerID` defaults to `"built-in"`, including when the JSON
 key is missing or null. This value opens the app-owned diff window and is not
@@ -278,22 +324,33 @@ registration; a launch failure does not undo worktree creation. CLI creation
 uses the profile explicitly requested by that command, not this remembered
 sheet preference.
 
-## Developer pane
+## Integrations pane
 
-Two sections use `DeveloperPaneDependencies` (`@Environment`): the `codans`
-CLI symlink (`CLIInstallerClient`, privileged) and **Agent skills**. App version
-information belongs to the About pane.
+The pane uses `DeveloperPaneDependencies` (`@Environment`). Its grouped form
+has a **CLI** section for the `codans` CLI symlink (`CLIInstallerClient`,
+privileged) and, as peers, one section per bundled skill, ordered by skill id
+(`codans-cli`, `codans-workflow`). App version information belongs to the
+About pane.
 
-Both sections render through `InstallTargetRow`: the target's mark (24pt,
+A skill section's title is the skill id, the folder name it is linked as in
+an agent's skill directory. Its first line is a one-sentence description from
+`SkillInstallModel.descriptions`, a static map keyed by skill id; SKILL.md
+frontmatter is written for agent triggering and is too long for this caption.
+A skill with no entry shows only its title and rows. Then come the skill's
+three target rows, and the section ends with a Reveal in Finder button for
+that skill's own bundled folder. An install or uninstall error shows in the
+section of the skill that caused it; an empty bundle, or a bundle that cannot
+be read, shows one untitled section with the message.
+
+All rows render through `InstallTargetRow`: the target's mark (24pt,
 `AgentLogoView` — brand SVG for Claude Code / Codex, an SF Symbol for the
 shared folder; the CLI row has none), its name, the path it lands at, a
 status dot (green linked, grey absent, orange needs attention, no text),
 and an Install / Uninstall button. A link to another build is offered
-Install again in both sections; there is no separate Reinstall. Agent
-skills ends with a Reveal in Finder button for the bundled skill; the CLI
+Install again in every section; there is no separate Reinstall. The CLI
 card's status wording lives in button tooltips rather than a caption.
 
-Agent skills is opt-in per agent. `SkillInstallModel` wraps the same
+Skills are opt-in per skill and agent. `SkillInstallModel` wraps the same
 `SkillInstaller` (`CodansKit/Skills`) that `codans skill` uses, over the
 bundle's `Resources/skills` (embedded from the repo's `skills/` at build
 time); it offers every bundled skill × every target (Claude Code
@@ -346,7 +403,7 @@ creation phases are documented in [worktree.md](./worktree.md).
 | Reader bypasses per-Project preferences. | Resolve editor and worktrees-directory values via `settings.projects[pid]`. |
 | Migration failure leaves the original settings at risk of overwrite. | Preserve the source/backup and disable persistence on migration or backup failure. |
 | Catalog-only overrides are expected to appear in settings. | Bootstrap does not supply `catalogOverrides`; the loader parameter is not an automatic catalog migration. |
-| `kind` drift (stale `gitRoot` snapshot shows wrong sub-rows). | Re-derived on `.projectsChanged`; acceptable to show wrong rows for one catalog-refresh tick. |
+| `kind` drift (stale `gitRoot` snapshot shows wrong sections). | Re-derived on `.projectsChanged`; acceptable to show wrong rows for one catalog-refresh tick. |
 
 ## References
 

@@ -4,7 +4,7 @@ import Testing
 @testable import CodansCore
 
 /// Filesystem contract of `.codans/workflow-runs/`: layout, atomic
-/// writes, path containment, the index, and the `.gitignore` upgrade.
+/// writes, path containment, the index, and the `.gitignore` forms.
 /// Every test runs in a fresh temporary worktree root.
 struct WorkflowRunStoreTests {
   private static let stamp = Date(timeIntervalSince1970: 1_700_000_000)
@@ -22,6 +22,27 @@ struct WorkflowRunStoreTests {
 
   private static func exists(_ url: URL) -> Bool {
     FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+  }
+
+  private static func ignoreURL(_ root: URL) -> URL {
+    root.appending(path: ".codans/.gitignore")
+  }
+
+  @discardableResult
+  private static func git(_ arguments: [String], cwd: URL) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = cwd
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    try process.run()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    let output = String(bytes: data, encoding: .utf8) ?? ""
+    #expect(process.terminationStatus == 0, "git \(arguments.joined(separator: " ")): \(output)")
+    return output
   }
 
   private static func record(id: UUID = UUID(), status: WorkflowRunStatus = .running, startedAt: Date = stamp)
@@ -47,25 +68,83 @@ struct WorkflowRunStoreTests {
   // MARK: - Worktree layout
 
   @Test
-  func ensureWorktreeLayoutWritesTheWorkflowAwareIgnoreFile() throws {
+  func runLayoutWithoutRepositoryWorkflowsWritesTheSelfIgnoringFile() throws {
     let root = try Self.makeRoot()
     try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
-    let ignore = root.appending(path: ".codans/.gitignore")
-    #expect(try Self.read(ignore) == "*\n!.gitignore\n!workflows/\n")
+    #expect(try Self.read(Self.ignoreURL(root)) == "*\n")
     #expect(Self.exists(WorkflowRunLayout.runsDirectory(worktreeRoot: root)))
+    // A second run start keeps it.
+    try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
+    #expect(try Self.read(Self.ignoreURL(root)) == WorkflowRunStore.selfIgnoringFileContents)
   }
 
   @Test
-  func ensureWorktreeLayoutUpgradesTheLegacyIgnoreFileOnly() throws {
+  func runLayoutWithoutRepositoryWorkflowsRevertsTheLegacyPermittingFile() throws {
     let root = try Self.makeRoot()
-    let ignore = root.appending(path: ".codans/.gitignore")
-    try FileManager.default.createDirectory(
-      at: root.appending(path: ".codans"), withIntermediateDirectories: true)
-    try "*\n".write(to: ignore, atomically: true, encoding: .utf8)
+    try Self.git(["init", "--quiet"], cwd: root)
+    try FileManager.default.createDirectory(at: root.appending(path: ".codans"), withIntermediateDirectories: true)
+    try "*\n!.gitignore\n!workflows/\n".write(to: Self.ignoreURL(root), atomically: true, encoding: .utf8)
     try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
-    #expect(try Self.read(ignore) == WorkflowRunStore.ignoreFileContents)
+    #expect(try Self.read(Self.ignoreURL(root)) == WorkflowRunStore.selfIgnoringFileContents)
+    #expect(try Self.git(["status", "--porcelain", "--untracked-files=all"], cwd: root) == "")
+  }
 
+  @Test
+  func runLayoutWithoutRepositoryWorkflowsLeavesGitStatusClean() throws {
+    let root = try Self.makeRoot()
+    try Self.git(["init", "--quiet"], cwd: root)
+    try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
+    try WorkflowRunStore(worktreeRoot: root, runID: UUID()).writeDefinitionCopy(yaml: "name: Review Loop\n")
+    #expect(try Self.git(["status", "--porcelain", "--untracked-files=all"], cwd: root) == "")
+  }
+
+  @Test
+  func runLayoutWithRepositoryWorkflowsProducesThePermittingFile() throws {
+    let root = try Self.makeRoot()
+    try FileManager.default.createDirectory(
+      at: WorkflowDiscovery.repositoryDirectory(worktreeRoot: root), withIntermediateDirectories: true)
+    try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
+    #expect(try Self.read(Self.ignoreURL(root)) == "/*\n!/.gitignore\n!/workflows/\n")
+
+    // The forms an earlier run, handoff, or build wrote are upgraded.
+    for earlier in ["*\n", "*\n!.gitignore\n!workflows/\n"] {
+      try earlier.write(to: Self.ignoreURL(root), atomically: true, encoding: .utf8)
+      try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
+      #expect(try Self.read(Self.ignoreURL(root)) == WorkflowRunStore.permittingIgnoreFileContents)
+    }
+  }
+
+  @Test
+  func permitWorkflowDefinitionsMakesANewDefinitionCommittable() throws {
+    let root = try Self.makeRoot()
+    try Self.git(["init", "--quiet"], cwd: root)
+    try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
+    try WorkflowRunStore(worktreeRoot: root, runID: UUID()).writeDefinitionCopy(yaml: "name: Review Loop\n")
+    try WorkflowRunStore.permitWorkflowDefinitions(worktreeRoot: root)
+    #expect(try Self.read(Self.ignoreURL(root)) == WorkflowRunStore.permittingIgnoreFileContents)
+    _ = try WorkflowScaffold.create(
+      id: "ci", name: "CI", source: .blank, in: WorkflowDiscovery.repositoryDirectory(worktreeRoot: root))
+    let status = try Self.git(["status", "--porcelain", "--untracked-files=all"], cwd: root)
+    // Run artifacts stay ignored; only the ignore file and the definition show.
+    #expect(
+      status.split(separator: "\n").sorted() == [
+        "?? .codans/.gitignore", "?? .codans/workflows/ci.workflow.yaml",
+      ])
+  }
+
+  @Test
+  func userEditedIgnoreContentIsNeverOverwritten() throws {
+    let root = try Self.makeRoot()
+    let ignore = Self.ignoreURL(root)
+    try FileManager.default.createDirectory(
+      at: ignore.deletingLastPathComponent(), withIntermediateDirectories: true)
     try "*\n!keep-me\n".write(to: ignore, atomically: true, encoding: .utf8)
+    try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
+    #expect(try Self.read(ignore) == "*\n!keep-me\n")
+    try WorkflowRunStore.permitWorkflowDefinitions(worktreeRoot: root)
+    #expect(try Self.read(ignore) == "*\n!keep-me\n")
+    try FileManager.default.createDirectory(
+      at: WorkflowDiscovery.repositoryDirectory(worktreeRoot: root), withIntermediateDirectories: true)
     try WorkflowRunStore.ensureWorktreeLayout(worktreeRoot: root)
     #expect(try Self.read(ignore) == "*\n!keep-me\n")
   }

@@ -11,8 +11,8 @@ import CodansCore
 ///    Each parent toggle has an action-oriented label ("Show in this app",
 ///    "Show macOS banners", "Notify when a command finishes") rather than
 ///    a noun phrase that would duplicate the section title.
-///    - In-app section gates every surface inside the app: bell popover,
-///      Dock badge, and the unread roll-up counts on projects, worktrees,
+///    - In-app section gates every surface inside the app: the sidebar
+///      notification filter, Dock badge, and the unread roll-up counts on projects, worktrees,
 ///      tabs, and panes. Implementation: when off, no entries reach the
 ///      inbox, so RollupIndex naturally reports 0 across the hierarchy.
 ///      The Dock badge child auto-disables when the parent is off; it
@@ -56,7 +56,6 @@ struct NotificationsSettingsView: View {
   var body: some View {
     Form {
       Section("In-app") {
-        Toggle("Show status-bar bell", isOn: statusBarBellBinding)
         Toggle("Show project-level bell", isOn: projectBellBinding)
         Toggle("Show worktree-level bell", isOn: worktreeBellBinding)
         Toggle("Show tab-level bell", isOn: tabBellBinding)
@@ -169,15 +168,6 @@ struct NotificationsSettingsView: View {
       get: { settingsStore.settings.notifications.dockBadgeEnabled },
       set: { newValue in
         settingsStore.mutateNotifications { $0.dockBadgeEnabled = newValue }
-      }
-    )
-  }
-
-  private var statusBarBellBinding: Binding<Bool> {
-    Binding(
-      get: { settingsStore.settings.notifications.statusBarBellEnabled },
-      set: { newValue in
-        settingsStore.mutateNotifications { $0.statusBarBellEnabled = newValue }
       }
     )
   }

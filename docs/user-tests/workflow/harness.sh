@@ -231,7 +231,7 @@ phase_review_loop() {
   t R05 0 "deliveries on disk under the worktree" -- bash -c "test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.md' && test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.1.md' && test -f '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/fixes.2.md' && grep -q '## Findings' '$WTPATH/.codans/workflow-runs/$RUN1/deliveries/review.md'"
   t R06 0 "log.md records the loop" -- bash -c "grep -q 'accepted' '$WTPATH/.codans/workflow-runs/$RUN1/log.md' && grep -c 'step' '$WTPATH/.codans/workflow-runs/$RUN1/log.md' >/dev/null"
   t R07 0 "the author's instruction was materialized and delivered" -- bash -c "test -f '$WTPATH/.codans/workflow-runs/$RUN1/instructions/fix.2.md' && grep -q 'injecting into author' '$WTPATH/.codans/workflow-runs/$RUN1/log.md'"
-  t R08 0 ".codans/.gitignore lets workflows/ through" -- bash -c "grep -qx '!workflows/' '$WTPATH/.codans/.gitignore'"
+  t R08 0 "a run without repository workflows keeps .codans/ out of git status" -- bash -c "grep -qxF '*' '$WTPATH/.codans/.gitignore' && test -z \"\$(git -C '$WTPATH' status --porcelain .codans)\""
   t R09 2 "deliver against the finished run -> RUN_NOT_FOUND" -- bash -c "out=\$(echo body | $CLI workflow deliver - --run $RUN1 --step kickoff --json); rc=\$?; jq -e '.error.code==\"RUN_NOT_FOUND\"' <<<\"\$out\" >/dev/null && exit \$rc; echo \"\$out\"; exit 99"
 }
 

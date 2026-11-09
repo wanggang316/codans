@@ -11,6 +11,7 @@ struct PaneList: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Option(name: .long, help: "Project id, name, or 'current'.")
   var project: String = "current"
   @Option(name: .long, help: "Worktree id, name, branch, or 'current'.")
@@ -22,7 +23,8 @@ struct PaneList: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      let scope = try await ScopeResolver.tab(
+        project: project, worktree: worktree, tab: tab, host: hostOptions.selector(), client: client)
       struct Params: Codable {
         let tabID: TabID
         let worktreeID: WorktreeID
@@ -67,6 +69,7 @@ struct PaneNew: AsyncParsableCommand {
   )
 
   @OptionGroup var globals: GlobalOptions
+  @OptionGroup var hostOptions: HostOptions
   @Argument(parsing: .remaining, help: "Initial command. Omit for the default shell.")
   var command: [String] = []
   @Option(name: .long, help: "Project id, name, or 'current'.")
@@ -84,7 +87,8 @@ struct PaneNew: AsyncParsableCommand {
     await CommandRunner.run(self, globals: globals) {
       let client = CLISession.connect(globals: globals)
       defer { Task { await client.shutdown() } }
-      let scope = try await ScopeResolver.tab(project: project, worktree: worktree, tab: tab, client: client)
+      let scope = try await ScopeResolver.tab(
+        project: project, worktree: worktree, tab: tab, host: hostOptions.selector(), client: client)
       let initialCommand = command.isEmpty ? nil : command.joined(separator: " ")
       struct Params: Codable {
         let projectID: ProjectID
@@ -240,6 +244,11 @@ struct PaneLocatorArgs: ParsableArguments {
   var worktree: String = "current"
   @Option(name: .long, help: "Tab id, t<n> handle, title, or 'current'. Usually inferred from the pane id.")
   var tab: String = "current"
+  @OptionGroup var hostOptions: HostOptions
+
+  var namesContainers: Bool {
+    project != "current" || worktree != "current" || tab != "current" || hostOptions.host != nil
+  }
 }
 
 struct PaneFocus: AsyncParsableCommand {
@@ -290,7 +299,7 @@ struct PaneClose: AsyncParsableCommand {
       // handler walk the catalog server-side. Saves a round-trip on the
       // common `codans pane close <id>` shape.
       let request: IPC.PaneCloseRequest
-      if args.project != "current" || args.worktree != "current" || args.tab != "current" {
+      if args.namesContainers {
         let path = try await PaneLocatorFlow.resolvePanePath(
           paneUUID: paneUUID,
           args: args,
@@ -451,6 +460,7 @@ enum PaneLocatorFlow {
       project: args.project,
       worktree: args.worktree,
       tab: args.tab,
+      host: args.hostOptions.selector(),
       client: client
     )
   }
@@ -460,10 +470,11 @@ enum PaneLocatorFlow {
     project: String,
     worktree: String,
     tab: String,
+    host: IPC.HostSelector? = nil,
     client: RPCClient
   ) async throws -> PanePath {
     if project != "current" || worktree != "current" || tab != "current" {
-      let projectUUID = try await AliasResolver.resolve(project, kind: .project, client: client)
+      let projectUUID = try await AliasResolver.resolve(project, kind: .project, host: host, client: client)
       let worktreeUUID = try await AliasResolver.resolve(worktree, kind: .worktree, client: client)
       let tabUUID = try await AliasResolver.resolve(tab, kind: .tab, client: client)
       return PanePath(
@@ -481,6 +492,7 @@ enum PaneLocatorFlow {
         code: .notFound, message: "pane \(paneUUID.uuidString) not found",
         details: ["kind": "pane", "id": paneUUID.uuidString])
     }
+    try await ScopeResolver.checkHost(of: path.projectID, host: host, client: client)
     return path
   }
 }

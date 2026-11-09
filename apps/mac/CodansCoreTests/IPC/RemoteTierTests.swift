@@ -96,6 +96,9 @@ struct RemoteTierTests {
     .workspaceAdd: .localOnly,
     .workspaceDrop: .localOnly,
     .workspaceRemove: .localOnly,
+    .workspaceCreateGroup: .localOnly,
+    .workspaceDeleteGroup: .localOnly,
+    .workspaceCheckGroupDeletion: .localOnly,
 
     // Workflows run agents and inject text on the Mac; not remote in v1.
     .workflowList: .localOnly,
@@ -114,7 +117,7 @@ struct RemoteTierTests {
     .editorDescribe, .editorOpen, .editorSetGlobalDefault, .editorSetProjectDefault,
     .hierarchyRemoveProject, .hierarchyRemoveWorktree, .hierarchyPruneWorktrees,
     .projectAddScript, .projectUpdateScript, .projectRemoveScript,
-    .workspaceRemove,
+    .workspaceRemove, .workspaceDeleteGroup,
     .terminalBroadcastInput, .terminalSendRawBytes,
   ]
 

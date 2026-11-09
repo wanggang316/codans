@@ -7,10 +7,9 @@ import SwiftUI
 /// individual chip views.
 ///
 /// Chip / track tokens reproduce AppKit's macOS 26 window-tabbing tab bar,
-/// sampled per appearance. The system draws the track and the selected tab
-/// with private Liquid Glass variants that public API cannot select
-/// (`.glassEffect` renders visibly different), so they are expressed as
-/// translucent fills that land on the same pixels over the window backdrop.
+/// sampled per appearance. The selected chip is the system's own glass (see
+/// `TabChipBackground`); the remaining tokens are translucent fills that
+/// land on the system's pixels over the window backdrop.
 enum TabBarColors {
   /// Recessed capsule track behind the chips.
   static let trackBackground: Color = adaptive(
@@ -24,7 +23,18 @@ enum TabBarColors {
     dark: .white.withAlphaComponent(0.048)
   )
 
-  /// Raised capsule of the selected chip. Opaque in light mode: its drop
+  /// Laid over the selected chip's glass while the pointer is over it — a
+  /// codans addition (the system bar keeps the selected tab unchanged on
+  /// hover). Safari's selected tab darkens on hover in light mode (#F5F5F6
+  /// to #EFEFF1) and lightens in dark mode, keeping its tone: the label
+  /// color at a low opacity.
+  static let activeHoverOverlay: Color = adaptive(
+    light: .black.withAlphaComponent(0.025),
+    dark: .white.withAlphaComponent(0.04)
+  )
+
+  /// Before macOS 26, which has no system glass to draw the selected chip
+  /// with: raised capsule of the selected chip. Opaque in light mode: its drop
   /// shadow would otherwise show through a translucent fill and grey it.
   static let activeBackground: Color = adaptive(
     light: NSColor(srgbRed: 248 / 255, green: 248 / 255, blue: 248 / 255, alpha: 1),
@@ -74,11 +84,6 @@ enum TabBarColors {
     light: .black.withAlphaComponent(0.087),
     dark: .black.withAlphaComponent(0.17)
   )
-
-  /// Opaque surface stamped under a chip while it is lifted in a drag, so
-  /// the floating copy fully occludes the chips it passes over instead of
-  /// letting their text bleed through the otherwise-transparent idle chip.
-  static let draggingBackground: Color = Color(nsColor: .windowBackgroundColor)
 
   /// Round hover affordance of the trailing accessory buttons (+, history,
   /// splits) — the bar's generic icon-button hover, not a chip state.

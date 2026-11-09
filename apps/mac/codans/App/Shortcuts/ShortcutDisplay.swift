@@ -43,22 +43,29 @@ public enum ShortcutDisplay {
     modifiersDisplay(binding.modifiers) + keycap(for: binding.keyCode)
   }
 
+  /// The display chord bound to `id`, or `nil` when the command has no binding or the user
+  /// disabled it.
+  public static func chord(for id: CommandID, in shortcuts: ResolvedShortcutMap) -> String? {
+    guard let resolved = shortcuts[id], resolved.isEnabled, let binding = resolved.binding
+    else { return nil }
+    return chord(for: binding)
+  }
+
   /// Tooltip text for a control that triggers `id`: `description` followed by the resolved
-  /// chord with a space between its glyphs, e.g. `Back ⌘ [`. Plain `description` when the
-  /// command has no binding or the user disabled it.
+  /// chord in parentheses, e.g. `Back (⌘[)`. Plain `description` when the command has no
+  /// binding or the user disabled it. Every tooltip that names a chord uses this form; a
+  /// system tooltip draws plain text only, so the chord cannot take its own color.
   public static func tooltip(
     _ description: String, for id: CommandID, in shortcuts: ResolvedShortcutMap
   ) -> String {
-    guard let resolved = shortcuts[id], resolved.isEnabled, let binding = resolved.binding
-    else { return description }
-    return "\(description) \(spacedChord(for: binding))"
+    tooltip(description, chord: chord(for: id, in: shortcuts))
   }
 
-  /// `chord(for:)` with a space between each modifier glyph and the keycap (`⇧ ⌘ O`). A
-  /// tooltip's small font runs the glyphs together; the menu bar keeps the packed form.
-  public static func spacedChord(for binding: ShortcutBinding) -> String {
-    let modifiers = modifiersDisplay(binding.modifiers).map(String.init)
-    return (modifiers + [keycap(for: binding.keyCode)]).joined(separator: " ")
+  /// `tooltip(_:for:in:)` for a chord that no `CommandID` holds (a script's own binding, a
+  /// fixed `⌘↩`). Plain `description` when `chord` is `nil`.
+  public static func tooltip(_ description: String, chord: String?) -> String {
+    guard let chord else { return description }
+    return "\(description) (\(chord))"
   }
 
   /// Modifier-only glyph string in canonical macOS order.

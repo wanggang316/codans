@@ -7,13 +7,15 @@ import SwiftUI
 /// name and options as grouped rows below, and the prompt box with its agent
 /// menu and send button at the bottom.
 ///
-/// The worktree rows reuse the Create Worktree sheet's fields and copy so
-/// the two dialogs read the same; only the layout differs.
+/// The worktree rows are the New Worktree sheet's shared rows and branch
+/// note, so the two dialogs read the same; only the layout differs.
 struct NewAgentView: View {
   @Bindable var store: StoreOf<NewAgentFeature>
   @Environment(SettingsStore.self) private var settingsStore
   @Environment(AgentInstallationStore.self) private var installation
   @FocusState private var focus: Field?
+  @State private var showsFilePicker = false
+  @State private var promptSelection = ComposerSelection()
 
   private enum Field: Hashable {
     case branchName
@@ -51,6 +53,10 @@ struct NewAgentView: View {
     // the profile list doubles as the task identity.
     .task(id: profiles) { store.send(.agentProfilesChanged(profiles)) }
     .onExitCommand { store.send(.cancelTapped) }
+    .composerFilePicker(isPresented: $showsFilePicker) { urls in
+      promptSelection.insertPaths(urls, into: store.prompt) { store.send(.filesSelected(urls, selection: $0)) }
+      focus = .prompt
+    }
   }
 
   /// Enabled profiles whose CLI the shell can resolve — the same set the
@@ -130,9 +136,9 @@ struct NewAgentView: View {
           Label("Clone Repository…", systemImage: "square.and.arrow.down.on.square")
         }
         Button {
-          store.send(.addProjectTapped(.connectServer))
+          store.send(.addProjectTapped(.openRemoteProject))
         } label: {
-          Label("Connect to Server…", systemImage: "tv.badge.wifi")
+          Label("Open Remote Project…", systemImage: RemoteProjectMarker.symbol)
         }
         Button {
           store.send(.addProjectTapped(.newWorkspace))
@@ -228,74 +234,14 @@ struct NewAgentView: View {
     } header: {
       selectorRow
     } footer: {
-      if let note = Self.branchNote(form) {
-        Text(note.text)
-          .font(.caption)
-          .foregroundStyle(note.isError ? .red : .orange)
-          .fixedSize(horizontal: false, vertical: true)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
+      WorktreeBranchNoteFooter(note: form.branchNote)
     }
 
     if store.showsWorktreeOptions {
       Section {
-        if form.loadingOptions {
-          LabeledContent("Base ref") {
-            ProgressView().controlSize(.small)
-          }
-        } else {
-          Picker(
-            "Base ref",
-            selection: Binding(
-              get: { form.selectedBaseRef ?? "" },
-              set: { form.send(.baseRefSelected($0.isEmpty ? nil : $0)) }
-            )
-          ) {
-            ForEach(form.baseRefOptions, id: \.self) { ref in
-              Text(ref).tag(ref)
-            }
-          }
-        }
-        Toggle(
-          "Fetch origin before creating worktree",
-          isOn: Binding(
-            get: { form.fetchOrigin },
-            set: { form.send(.fetchOriginToggled($0)) }
-          )
-        )
-        // Copying is a local streaming-create capability; a server project
-        // runs plain `git worktree add` on the host.
-        if !form.isRemote {
-          Toggle(
-            "Copy ignored files",
-            isOn: Binding(
-              get: { form.copyIgnored },
-              set: { form.send(.copyIgnoredToggled($0)) }
-            )
-          )
-          Toggle(
-            "Copy untracked files",
-            isOn: Binding(
-              get: { form.copyUntracked },
-              set: { form.send(.copyUntrackedToggled($0)) }
-            )
-          )
-        }
+        WorktreeOptionRows(form: form)
       }
     }
-  }
-
-  /// The form's validation, collision, cap, or submit message — at most one,
-  /// most specific first. Collisions are warnings: the user can pick another
-  /// name, so they read orange like the Create Worktree sheet's note.
-  private static func branchNote(_ form: StoreOf<CreateWorktreeFeature>) -> (text: String, isError: Bool)? {
-    if let error = form.validationError { return (error, true) }
-    if form.branchCollisionKind != .none {
-      return (CreateWorktreeSheet.collisionNote(for: form.state), false)
-    }
-    if form.currentPendingCountForProject >= 8 { return (CreateWorktreeFeature.capMessage, false) }
-    if let error = form.submitError { return (error, true) }
-    return nil
   }
 
   // MARK: - Composer
@@ -305,6 +251,7 @@ struct NewAgentView: View {
       VStack(alignment: .leading, spacing: 4) {
         editor
         HStack(spacing: 8) {
+          ComposerFilePickerButton { showsFilePicker = true }
           Spacer()
           agentMenu
           sendButton
@@ -327,7 +274,7 @@ struct NewAgentView: View {
   }
 
   private var editor: some View {
-    TextEditor(text: $store.prompt.sending(\.promptChanged))
+    ComposerTextEditor(text: $store.prompt.sending(\.promptChanged), selection: promptSelection)
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()
@@ -435,6 +382,6 @@ struct NewAgentView: View {
     {
       return "Name the new worktree's branch"
     }
-    return "Send (⌘↩)"
+    return ShortcutDisplay.tooltip("Send", chord: "⌘↩")
   }
 }

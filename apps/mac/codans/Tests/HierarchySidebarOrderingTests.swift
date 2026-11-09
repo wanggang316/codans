@@ -119,17 +119,12 @@ struct HierarchySidebarOrderingTests {
 
   @Test
   func aFolderProjectListsNoRowForItsRoot() {
-    // The Project row itself stands for a folder's root; a workspace lists
-    // only its checkouts under it.
-    let root = Self.worktree(name: "ws", path: "/ws")
-    let checkout = Self.worktree(name: "app", path: "/ws/app")
-    let folder = Project(name: "notes", rootPath: "/ws", worktrees: [root])
-    let workspace = Project(name: "ws", rootPath: "/ws", worktrees: [root, checkout], isWorkspace: true)
+    // The Project row itself stands for a folder's root. (A workspace lists
+    // its groups instead: `Project.workspaceSidebarRows`.)
+    let root = Self.worktree(name: "notes", path: "/notes")
+    let folder = Project(name: "notes", rootPath: "/notes", worktrees: [root])
 
     #expect(HierarchySidebarView.orderedSidebarRows(project: folder, pendings: []).isEmpty)
-    #expect(
-      HierarchySidebarView.orderedSidebarRows(project: workspace, pendings: []).map(\.id)
-        == ["wt:\(checkout.id.raw)"])
   }
 
   @Test
@@ -174,5 +169,70 @@ struct HierarchySidebarOrderingTests {
         "wt:\(pinKept.id.raw)",
         "wt:\(unKept.id.raw)",
       ])
+  }
+}
+
+@MainActor
+struct SidebarFilterLayoutTests {
+  @Test
+  func transitionsKeepEveryGapAndBothOuterEdges() {
+    for width: CGFloat in [220, 260, 320] {
+      for from in SidebarFilter.allCases {
+        for to in SidebarFilter.allCases {
+          let start = SidebarFilterExpansion(selection: from)
+          let end = SidebarFilterExpansion(selection: to)
+          for step in 0...100 {
+            checkFrames(blend(start, end, Double(step) / 100), width: width)
+          }
+          let interrupted = blend(start, end, 0.37)
+          for next in SidebarFilter.allCases {
+            for step in 0...20 {
+              checkFrames(
+                blend(interrupted, SidebarFilterExpansion(selection: next), Double(step) / 20),
+                width: width
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @Test
+  func collapsedCapsulesStayRoundWhenNarrow() {
+    let count = CGFloat(SidebarFilter.allCases.count)
+    for width: CGFloat in [120, 160, 200, 240] {
+      let layout = SidebarFilterLayout(expansion: SidebarFilterExpansion(selection: .workspace), height: 34)
+      let frames = layout.frames(width: width)
+      let diameter = min(34, (width - 6 * (count - 1)) / count)
+      for (filter, frame) in zip(SidebarFilter.allCases, frames) {
+        #expect(abs(frame.height - diameter) < 0.000001)
+        #expect(abs(frame.midY - 17) < 0.000001)
+        if filter != .workspace {
+          #expect(abs(frame.width - diameter) < 0.000001)
+        } else {
+          #expect(frame.width >= diameter - 0.000001)
+        }
+      }
+    }
+  }
+
+  private func blend(
+    _ from: SidebarFilterExpansion, _ to: SidebarFilterExpansion, _ progress: Double
+  ) -> SidebarFilterExpansion {
+    var delta = to - from
+    delta.scale(by: progress)
+    return from + delta
+  }
+
+  private func checkFrames(_ expansion: SidebarFilterExpansion, width: CGFloat) {
+    let frames = SidebarFilterLayout(expansion: expansion, height: 28).frames(width: width)
+    #expect(frames.count == SidebarFilter.allCases.count)
+    #expect(frames.first?.minX == 0)
+    #expect(abs((frames.last?.maxX ?? 0) - width) < 0.000001)
+    for (left, right) in zip(frames, frames.dropFirst()) {
+      #expect(abs(right.minX - left.maxX - 6) < 0.000001)
+      #expect(left.width > 0)
+    }
   }
 }

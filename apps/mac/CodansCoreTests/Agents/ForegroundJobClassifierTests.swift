@@ -54,6 +54,22 @@ struct ForegroundJobClassifierTests {
     #expect(ForegroundJobClassifier.indicatesRunningCommand(job))
   }
 
+  // MARK: - indicatesShellPrompt
+
+  @Test
+  func shellOnlyGroupIsAtThePrompt() {
+    #expect(ForegroundJobClassifier.indicatesShellPrompt(Self.job("zsh")))
+    #expect(ForegroundJobClassifier.indicatesShellPrompt(Self.job("-zsh")))
+  }
+
+  @Test
+  func runningProgramOrPollMissIsNotThePrompt() {
+    #expect(!ForegroundJobClassifier.indicatesShellPrompt(Self.job("make")))
+    #expect(!ForegroundJobClassifier.indicatesShellPrompt(Self.job("claude")))
+    #expect(
+      !ForegroundJobClassifier.indicatesShellPrompt(ForegroundJob(processGroupID: 0, processes: [])))
+  }
+
   // MARK: - indicatesBusyCommand
 
   @Test
@@ -141,6 +157,24 @@ struct ForegroundJobClassifierTests {
     #expect(
       ForegroundJobClassifier.indicatesGitCommand(
         Self.job("/usr/bin/git", commandLine: "git push")))
+  }
+
+  @Test
+  func glabIsAGitCommand() {
+    #expect(ForegroundJobClassifier.indicatesGitCommand(Self.job("glab")))
+  }
+
+  @Test
+  func ghAndGlabAreGitPlatformCLIs() {
+    #expect(ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("gh")))
+    #expect(ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("glab")))
+    #expect(!ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("git")))
+    #expect(!ForegroundJobClassifier.indicatesGitPlatformCLI(Self.job("zsh")))
+    let agent = ForegroundJob(
+      processGroupID: 300,
+      processes: [Self.process("claude", pid: 300), Self.process("glab", pid: 301)]
+    )
+    #expect(!ForegroundJobClassifier.indicatesGitPlatformCLI(agent))
   }
 
   @Test

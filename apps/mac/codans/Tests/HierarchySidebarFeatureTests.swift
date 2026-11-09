@@ -27,10 +27,142 @@ struct HierarchySidebarFeatureTests {
       }
     }
 
-    await store.send(.toggleProjectExpansion(projectID))
+    await store.send(.toggleProjectExpansion(projectID)) {
+      $0.expansionToggle = SidebarExpansionToggle(target: .project(projectID), sequence: 1)
+    }
     #expect(received.value.count == 1)
     #expect(received.value[0].0 == projectID)
     #expect(received.value[0].1 == false)
+  }
+
+  // MARK: - Add Project identity (ADR 0006)
+
+  private func makeAddProjectFixture() throws -> (HierarchyManager, URL) {
+    let folder = FileManager.default.temporaryDirectory
+      .appendingPathComponent("codans-sidebar-add-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let manager = HierarchyManager(
+      catalog: Catalog(),
+      store: CatalogStore(fileURL: folder.appendingPathComponent("catalog.json")),
+      runtime: FakeHierarchyRuntime()
+    )
+    return (manager, folder)
+  }
+
+  @Test
+  func addProjectAddsLocalProjectBesideRemoteProjectWithSamePath() async throws {
+    let (manager, folder) = try makeAddProjectFixture()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let canonical = HierarchyManager.canonicalPath(folder.path)
+    let serverID = manager.addRemoteProject(
+      name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.live(manager: manager)
+      $0[GitWorktreeCLI.self] = GitWorktreeCLI()
+    }
+    store.exhaustivity = .off
+
+    await store.send(.addProjectFolderPicked(folder))
+    await store.receive(\.addProjectGitRootResolved)
+    await store.finish()
+
+    #expect(manager.catalog.projects.count == 2)
+    let added = manager.catalog.projects.first { $0.id != serverID }
+    #expect(added?.isOnThisMac == true)
+    #expect(added?.rootPath == canonical)
+  }
+
+  @Test
+  func addProjectRevealsExistingLocalProjectAndAddsNothing() async throws {
+    let (manager, folder) = try makeAddProjectFixture()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let canonical = HierarchyManager.canonicalPath(folder.path)
+    _ = manager.addRemoteProject(name: "repo", remoteHost: RemoteHost(alias: "mini"), rootPath: canonical)
+    let localID = manager.addProject(name: "repo", rootPath: canonical)
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient = HierarchyClient.live(manager: manager)
+    }
+
+    await store.send(.addProjectFolderPicked(folder))
+    await store.receive(\.delegate.revealExistingProject, localID)
+    #expect(manager.catalog.projects.count == 2)
+  }
+
+  @Test
+  func toggleHostExpansionFlipsTheCollapsedSet() async {
+    let host = HostRecord(address: "box")
+    var catalog = Catalog(hosts: [host])
+    catalog.collapsedSidebarHosts = [.thisMac]
+    let received = LockIsolated<[(SidebarHost, Bool)]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0.hierarchyClient.setSidebarHostExpanded = { host, expanded in
+        received.withValue { $0.append((host, expanded)) }
+      }
+    }
+
+    await store.send(.toggleHostExpansion(.thisMac)) {
+      $0.expansionToggle = SidebarExpansionToggle(target: .host(.thisMac), sequence: 1)
+    }
+    await store.send(.toggleHostExpansion(.host(host.id))) {
+      $0.expansionToggle = SidebarExpansionToggle(target: .host(.host(host.id)), sequence: 2)
+    }
+    #expect(received.value.map(\.0) == [.thisMac, .host(host.id)])
+    #expect(received.value.map(\.1) == [true, false])
+  }
+
+  @Test
+  func connectProjectOnAHostOpensTheSheetWithTheHostChosen() async {
+    let first = HostRecord(address: "box")
+    let second = HostRecord(address: "mini")
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.hosts = { [first, second] }
+    }
+
+    await store.send(.hostConnectProjectTapped(second.id)) {
+      $0.remoteProjectSheet = RemoteProjectFeature.State(
+        hosts: [first, second], hostChoice: .existing(second.id))
+    }
+  }
+
+  @Test
+  func editHostOpensSettingsOnTheHost() async {
+    let host = HostRecord(address: "box")
+    let opened = LockIsolated<[HostID]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.settingsWindowPresenter.editHost = { id in opened.withValue { $0.append(id) } }
+    }
+
+    await store.send(.hostEditTapped(host.id))
+    await store.finish()
+    #expect(opened.value == [host.id])
+  }
+
+  @Test
+  func settingsWindowOpensTheHostEditor() async {
+    let host = HostRecord(address: "box", username: "dev")
+    let store = TestStore(initialState: SettingsWindowFeature.State()) {
+      SettingsWindowFeature()
+    } withDependencies: {
+      $0.hierarchyClient.hosts = { [host] }
+    }
+
+    await store.send(.editHostRequested(host.id)) {
+      $0.selection = .hosts
+    }
+    await store.receive(.hosts(.editButtonTapped(host))) {
+      $0.hosts.editor = .init(mode: .edit(host.id), draft: HostDraft(record: host))
+    }
   }
 
   @Test
@@ -961,5 +1093,211 @@ struct HierarchySidebarFeatureTests {
     await store.send(.projectRemoveAllMergedCancelled) {
       $0.pendingRemoveAllMerged = nil
     }
+  }
+}
+
+// MARK: - Workspace groups
+
+/// A Workspace migrated from the old layout: its root row is the `existing`
+/// group's row; `default` lists one reference.
+private struct WorkspaceFixture {
+  let defaultGroup = WorkspaceGroupID()
+  let existingGroup = WorkspaceGroupID()
+  let defaultRow: Worktree
+  let reference: Worktree
+  let rootRow: Worktree
+  let member: Worktree
+  let project: Project
+
+  init() {
+    defaultRow = Worktree(
+      name: "default", path: "/ws/default",
+      workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .groupTerminal))
+    reference = Worktree(
+      name: "app", path: "/src/app", branch: "main", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: defaultGroup, role: .reference))
+    rootRow = Worktree(
+      name: "ws", path: "/ws", workspaceSlot: WorkspaceSlot(groupID: existingGroup, role: .groupTerminal))
+    member = Worktree(
+      name: "app", path: "/ws/app", branch: "feat", sourceGitRoot: "/src/app",
+      workspaceSlot: WorkspaceSlot(groupID: existingGroup, role: .member))
+    project = Project(
+      name: "ws", rootPath: "/ws", worktrees: [defaultRow, reference, rootRow, member], isWorkspace: true,
+      workspaceGroups: [
+        WorkspaceGroupRecord(id: defaultGroup, name: "default", kind: .default),
+        WorkspaceGroupRecord(id: existingGroup, name: "existing", kind: .named, isExpanded: true),
+      ])
+  }
+}
+
+extension HierarchySidebarFeatureTests {
+  @Test
+  func workspaceGroupsToggleIndependently() async {
+    let f = WorkspaceFixture()
+    let received = LockIsolated<[(WorkspaceGroupID, Bool)]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+      $0.hierarchyClient.setWorkspaceGroupExpanded = { projectID, groupID, isExpanded in
+        #expect(projectID == f.project.id)
+        received.withValue { $0.append((groupID, isExpanded)) }
+      }
+    }
+
+    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.defaultGroup)) {
+      $0.expansionToggle = SidebarExpansionToggle(
+        target: .workspaceGroup(projectID: f.project.id, groupID: f.defaultGroup), sequence: 1)
+    }
+    await store.send(.toggleWorkspaceGroupExpansion(projectID: f.project.id, groupID: f.existingGroup)) {
+      $0.expansionToggle = SidebarExpansionToggle(
+        target: .workspaceGroup(projectID: f.project.id, groupID: f.existingGroup), sequence: 2)
+    }
+    #expect(received.value.map(\.0) == [f.defaultGroup, f.existingGroup])
+    #expect(received.value.map(\.1) == [true, false])
+  }
+
+  @Test
+  func selectingARowInACollapsedGroupRevealsTheGroup() async {
+    let f = WorkspaceFixture()
+    let received = LockIsolated<[(WorkspaceGroupID, Bool)]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+      $0.hierarchyClient.setWorkspaceGroupExpanded = { _, groupID, isExpanded in
+        received.withValue { $0.append((groupID, isExpanded)) }
+      }
+    }
+
+    // Group rows and rows of an open group are on screen already.
+    await store.send(.revealWorkspaceRow(f.defaultRow.id, inProject: f.project.id))
+    await store.send(.revealWorkspaceRow(f.member.id, inProject: f.project.id))
+    #expect(received.value.isEmpty)
+    await store.send(.revealWorkspaceRow(f.reference.id, inProject: f.project.id))
+    #expect(received.value.map(\.0) == [f.defaultGroup])
+    #expect(received.value.map(\.1) == [true])
+  }
+
+  /// A reveal opens the group for the program, not the user: the last user
+  /// toggle stays as it was, so the outline opens the group at once (ADR 0007).
+  @Test
+  func revealingARowDoesNotMarkAnExpansionToggle() async {
+    let f = WorkspaceFixture()
+    var initial = HierarchySidebarFeature.State()
+    initial.expansionToggle = SidebarExpansionToggle(target: .project(f.project.id), sequence: 3)
+    let received = LockIsolated<[(WorkspaceGroupID, Bool)]>([])
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+      $0.hierarchyClient.setWorkspaceGroupExpanded = { _, groupID, isExpanded in
+        received.withValue { $0.append((groupID, isExpanded)) }
+      }
+    }
+
+    await store.send(.revealWorkspaceRow(f.reference.id, inProject: f.project.id))
+    #expect(received.value.map(\.0) == [f.defaultGroup])
+  }
+
+  @Test
+  func archiveAndRemoveRejectEveryWorkspaceRow() async {
+    let f = WorkspaceFixture()
+    var initial = HierarchySidebarFeature.State()
+    initial.hasShownArchiveExplainer = true
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+    }
+
+    // No state change and no effect: an archive or remove would set a
+    // pending dialog or start a lifecycle on unimplemented client closures.
+    for row in [f.defaultRow, f.reference, f.rootRow, f.member] {
+      await store.send(.worktreeArchiveTapped(worktreeID: row.id, inProject: f.project.id, name: row.name))
+      await store.send(.worktreeRemoveTapped(worktreeID: row.id, inProject: f.project.id, name: row.name))
+    }
+  }
+
+  @Test
+  func onlyAReferenceCanLeaveTheWorkspaceOnItsOwn() async {
+    let f = WorkspaceFixture()
+    let busyTab = Tab(name: "dev server")
+    let idleTab = Tab(name: "shell")
+    var project = f.project
+    project.worktrees[1].tabs = [busyTab, idleTab]
+    let removed = LockIsolated<[String]>([])
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: { [project] in
+      $0.hierarchyClient.snapshot = { Catalog(projects: [project]) }
+      $0.hierarchyClient.tabIsDirty = { $0 == busyTab.id }
+      $0.workspaceClient.removeSource = { _, sourceGitRoot in
+        removed.withValue { $0.append(sourceGitRoot) }
+      }
+    }
+
+    await store.send(.removeSourceTapped(worktreeID: f.member.id, inProject: f.project.id))
+    await store.send(.removeSourceTapped(worktreeID: f.rootRow.id, inProject: f.project.id))
+    await store.send(.removeSourceTapped(worktreeID: f.reference.id, inProject: f.project.id)) {
+      $0.pendingWorkspaceSourceRemoval = PendingWorkspaceSourceRemoval(
+        worktreeID: f.reference.id, in: project, tabIsDirty: { $0 == busyTab.id })
+    }
+    // The confirmation names the terminals the removal stops.
+    #expect(store.state.pendingWorkspaceSourceRemoval?.runningTerminals == ["app › dev server"])
+    #expect(store.state.pendingWorkspaceSourceRemoval?.message.contains("app › dev server") == true)
+
+    // Only the reference goes: `removeSource` with the source path, nothing else.
+    await store.send(.workspaceMemberRemoveConfirmed) { $0.pendingWorkspaceSourceRemoval = nil }
+    await store.receive(\.workspaceMemberRemoveFinished)
+    #expect(removed.value == ["/src/app"])
+  }
+
+  @Test
+  func headerEntriesOpenTheWorkspaceSheetInTheirModes() async {
+    let f = WorkspaceFixture()
+    let store = TestStore(initialState: HierarchySidebarFeature.State()) {
+      HierarchySidebarFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { Catalog(projects: [f.project]) }
+    }
+
+    await store.send(.workspaceNewGroupTapped(projectID: f.project.id)) {
+      $0.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: [], mode: .newGroup(projectID: f.project.id, title: "ws", rootPath: "/ws"))
+    }
+    await store.send(.createWorkspaceSheet(.delegate(.dismissed))) {
+      $0.createWorkspaceSheet = nil
+    }
+    await store.send(.workspaceAddProjectTapped(projectID: f.project.id)) {
+      $0.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: [],
+        mode: .addSource(projectID: f.project.id, title: "ws", rootPath: "/ws", existingSourceRoots: ["/src/app"]))
+    }
+  }
+
+  /// A created group goes up for its agents either way; the sheet stays
+  /// only to show a failed setup script.
+  @Test
+  func aCreatedGroupGoesUpAndClosesTheSheetUnlessSetupFailed() async {
+    let f = WorkspaceFixture()
+    let mode = CreateWorkspaceFeature.Mode.newGroup(projectID: f.project.id, title: "ws", rootPath: "/ws")
+    var initial = HierarchySidebarFeature.State()
+    initial.createWorkspaceSheet = CreateWorkspaceFeature.State(candidates: [], mode: mode)
+    let store = TestStore(initialState: initial) {
+      HierarchySidebarFeature()
+    }
+    let clean = GroupCreationResult(
+      projectID: f.project.id, groupID: WorkspaceGroupID(), groupWorktreeID: WorktreeID(), members: [])
+    var failed = clean
+    failed.setupFailures = [.init(name: "app", reason: "exit 1")]
+
+    await store.send(.createWorkspaceSheet(.delegate(.groupCreated(failed))))
+    await store.receive(\.delegate.workspaceGroupCreated, failed)
+    #expect(store.state.createWorkspaceSheet != nil)
+    await store.send(.createWorkspaceSheet(.delegate(.groupCreated(clean)))) {
+      $0.createWorkspaceSheet = nil
+    }
+    await store.receive(\.delegate.workspaceGroupCreated, clean)
   }
 }

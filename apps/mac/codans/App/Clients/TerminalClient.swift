@@ -35,6 +35,8 @@ nonisolated struct TerminalClient: Sendable {
   /// resolve inside the current catalog. The client takes the full address
   /// so the engine's `ensureSurface(for:in:)` can hand the `Worktree`
   /// struct to ghostty as the surface config's working directory source.
+  /// `initialSize` is the size in points of the slot that will show the
+  /// pane, when known; see `TerminalEngine.ensureSurface`.
   ///
   /// `async throws` because bring-up spawns the `zmx serve` daemon and
   /// completes a control-socket handshake before libghostty wires the
@@ -42,7 +44,7 @@ nonisolated struct TerminalClient: Sendable {
   var ensureSurface:
     @MainActor @Sendable (
       _ paneID: PaneID, _ inTab: TabID, _ inWorktree: WorktreeID,
-      _ inProject: ProjectID
+      _ inProject: ProjectID, _ initialSize: CGSize?
     ) async throws -> Void
   var closeSurface: @MainActor @Sendable (_ paneID: PaneID) -> Void
 
@@ -104,7 +106,7 @@ extension TerminalClient {
         engine.ghosttyRuntime?.surface(for: paneID)?.setFocus(focused)
       },
       retryPane: { paneID in engine.retryPane(paneID) },
-      ensureSurface: { paneID, tabID, worktreeID, projectID in
+      ensureSurface: { paneID, tabID, worktreeID, projectID, initialSize in
         let catalog = engine.hierarchy.catalog
         guard
           let project = catalog.projects.first(where: { $0.id == projectID }),
@@ -114,7 +116,7 @@ extension TerminalClient {
         else {
           throw TerminalClient.Error.worktreeNotFound(worktreeID)
         }
-        _ = try await engine.ensureSurface(for: pane, in: worktree)
+        _ = try await engine.ensureSurface(for: pane, in: worktree, initialSize: initialSize)
       },
       closeSurface: { paneID in engine.closeSurface(for: paneID) },
       surface: { paneID in engine.ghosttyRuntime?.surface(for: paneID) },
@@ -134,7 +136,7 @@ extension TerminalClient: DependencyKey {
     interrupt: { _ in fatalError("TerminalClient.liveValue not configured") },
     setFocus: { _, _ in fatalError("TerminalClient.liveValue not configured") },
     retryPane: { _ in fatalError("TerminalClient.liveValue not configured") },
-    ensureSurface: { _, _, _, _ in fatalError("TerminalClient.liveValue not configured") },
+    ensureSurface: { _, _, _, _, _ in fatalError("TerminalClient.liveValue not configured") },
     closeSurface: { _ in fatalError("TerminalClient.liveValue not configured") },
     surface: { _ in nil },
     events: { AsyncStream { $0.finish() } }

@@ -13,8 +13,6 @@ import SwiftUI
 struct RunSplitButton: NSViewRepresentable {
   /// Tinted, non-template glyph for the primary segment.
   let image: NSImage?
-  /// Shortcut shown beside the glyph while ⌘ is held (`⌘R`, `⌘.`).
-  let chordHint: String?
   let toolTip: String
   let accessibilityLabel: String
   let onPrimary: () -> Void
@@ -44,7 +42,6 @@ struct RunSplitButton: NSViewRepresentable {
     context.coordinator.onPrimary = onPrimary
     context.coordinator.makeMenu = makeMenu
     control.setImage(image, forSegment: 0)
-    control.setLabel(chordHint ?? "", forSegment: 0)
     control.setImageScaling(.scaleNone, forSegment: 0)
     control.setToolTip(toolTip, forSegment: 0)
     control.setToolTip("More Commands", forSegment: 1)

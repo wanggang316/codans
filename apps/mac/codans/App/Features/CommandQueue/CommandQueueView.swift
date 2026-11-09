@@ -2,144 +2,44 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Sheet-hosted editor for a Pane's Command Queue (⌘⌥L, or the pane's
-/// actions menu).
-///
-/// Laid out like a chat box: the queue reads top-down as the history — a
-/// native list, present only while something is queued — and the composer
-/// sits under it, carrying its own controls inside the box — the
-/// send timing at the bottom-left, the send button at the bottom-right, and
-/// the schedule fields on a row of their own when that timing is chosen.
-/// Return sends and ⇧Return breaks a line. The composer is multi-line
-/// because a prompt to an agent often is, and `TerminalClient.sendCommand`
-/// delivers the body as one paste, so those line breaks arrive as line
-/// breaks rather than as submissions.
-///
-/// Presented with `.sheet(item:)` like the app's other dialogs. There is no
-/// Cancel button: Escape closes it, and the composer claims that key itself
-/// because `NSTextView` would otherwise spend it on word completion.
-///
-/// The queued list is read from the live catalog rather than from reducer
-/// state: an entry that drains while the sheet is open should vanish from the
-/// list on the same frame it is typed into the terminal.
+/// Sheet-hosted command composer. Queued commands appear in the pane overlay.
+/// Return submits; Shift-Return inserts a line break; Escape closes the sheet.
 struct CommandQueueView: View {
   @Bindable var store: StoreOf<CommandQueueFeature>
   /// Sent when Escape lands in the composer. Dismissal is "parent nils the
   /// `@Presents` slot".
   let onDismiss: () -> Void
 
-  @Environment(HierarchyManager.self) private var hierarchyManager
   @FocusState private var draftFocused: Bool
+  @State private var showsScheduleEditor = false
+  @State private var showsFilePicker = false
+  @State private var draftSelection = ComposerSelection()
 
   private static let width: CGFloat = 560
-  private static let boxCornerRadius: CGFloat = 6
-  /// Rows are uniform — one line of command, one caption — so the list's
-  /// height is arithmetic rather than measured; `List` cannot size itself
-  /// to its content.
-  private static let rowHeight: CGFloat = 44
-  private static let rowInsets = EdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 10)
-  private static let maxVisibleRows = 7
-  /// About five lines of the composer's monospaced 12pt.
-  private static let editorHeight: CGFloat = 88
-  private static let composerFont = Font.system(size: 12, design: .monospaced)
+  private static let editorHeight: CGFloat = 110
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      header
-      if !entries.isEmpty {
-        queuedList
-      }
-      composer
-    }
-    .padding(24)
-    .frame(width: Self.width)
-    .onAppear { draftFocused = true }
-  }
-
-  // MARK: - Header
-
-  private var header: some View {
-    HStack(alignment: .firstTextBaseline) {
-      Text(entries.isEmpty ? "Command Queue" : "Command Queue (\(entries.count))")
+    VStack(spacing: 0) {
+      Text("Command Queue")
         .font(.headline)
-        .monospacedDigit()
-      Spacer()
-      if !entries.isEmpty {
-        Button("Clear All") { store.send(.clearAllTapped) }
-          .buttonStyle(.link)
-          .font(.caption)
-      }
-    }
-  }
-
-  // MARK: - Queued list
-
-  /// A native bordered list, shown only while something is queued: an empty
-  /// queue needs no box, and the composer moves up under the title.
-  private var queuedList: some View {
-    ScrollViewReader { proxy in
-      List {
-        ForEach(entries) { entry in
-          row(entry)
-            .id(entry.id)
-            .listRowInsets(Self.rowInsets)
-            .listRowSeparator(.hidden)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+      Form {
+        Section {
+          composer
         }
       }
-      .listStyle(.bordered)
-      .alternatingRowBackgrounds(.enabled)
-      .frame(height: Self.listHeight(for: entries.count))
-      // Newest at the bottom, like a transcript: follow it as entries land.
-      .onChange(of: entries.count) { _, _ in
-        guard let last = entries.last else { return }
-        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-      }
+      .formStyle(.grouped)
+      .scrollBounceBehavior(.basedOnSize)
     }
-  }
-
-  /// One row per entry up to `maxVisibleRows`, plus the bordered style's
-  /// top and bottom hairlines.
-  private static func listHeight(for count: Int) -> CGFloat {
-    CGFloat(min(count, maxVisibleRows)) * rowHeight + 2
-  }
-
-  private func row(_ entry: QueuedCommand) -> some View {
-    HStack(spacing: 10) {
-      Image(systemName: entry.timing.fireDate == nil ? "arrow.turn.down.right" : "clock")
-        .font(.system(size: 12))
-        .frame(width: 16)
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(Self.oneLine(entry.text))
-          .font(Self.composerFont)
-          .lineLimit(1)
-          .truncationMode(.tail)
-        Text(CommandQueueStyle.description(of: entry.timing))
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      .frame(height: Self.rowHeight - Self.rowInsets.top - Self.rowInsets.bottom)
-      Spacer(minLength: 8)
-      Button {
-        store.send(.removeTapped(entry.id))
-      } label: {
-        Image(systemName: "xmark.circle.fill")
-          .foregroundStyle(.secondary)
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Remove queued command")
+    .frame(width: Self.width)
+    .onAppear { draftFocused = true }
+    .onExitCommand(perform: onDismiss)
+    .composerFilePicker(isPresented: $showsFilePicker) { urls in
+      draftSelection.insertPaths(urls, into: store.draft) { store.send(.filesSelected(urls, selection: $0)) }
+      draftFocused = true
     }
-    // Rows are one line; the full body is a hover away.
-    .help(entry.text)
-  }
-
-  /// A multi-line body on one line, with its breaks kept visible so
-  /// `echo hi ⏎ date` does not read as one command.
-  private static func oneLine(_ text: String) -> String {
-    text
-      .split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
-      .joined(separator: " ⏎ ")
   }
 
   // MARK: - Composer
@@ -149,39 +49,52 @@ struct CommandQueueView: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 4) {
       editor
-      if store.mode == .scheduled {
-        scheduleRow
-          .padding(.horizontal, 10)
-      }
       HStack(spacing: 8) {
-        modeMenu
+        ComposerFilePickerButton { showsFilePicker = true }
         Spacer()
+        HStack(spacing: 8) {
+          if store.mode == .scheduled {
+            Button {
+              showsScheduleEditor = true
+            } label: {
+              Text(scheduleSummary)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            }
+            .buttonStyle(.borderless)
+            .help(scheduleSummary)
+            .accessibilityLabel("Edit schedule: \(scheduleSummary)")
+          }
+          modeMenu
+            // The summary changes width while editing. Anchor to the fixed
+            // trailing control so those changes cannot move the popover.
+            .popover(isPresented: $showsScheduleEditor, arrowEdge: .bottom) {
+              scheduleEditor
+            }
+        }
+        .onChange(of: store.mode) { _, mode in
+          showsScheduleEditor = mode == .scheduled
+        }
         sendButton
       }
-      .padding(.horizontal, 8)
-      .padding(.bottom, 6)
     }
-    .background(box)
-    .overlay(boxEdge(focused: draftFocused))
   }
 
   private var editor: some View {
-    TextEditor(text: $store.draft.sending(\.draftChanged))
-      .font(Self.composerFont)
+    ComposerTextEditor(text: $store.draft.sending(\.draftChanged), selection: draftSelection)
+      .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()
-      .padding(.horizontal, 4)
-      .padding(.top, 6)
       .frame(height: Self.editorHeight)
       .overlay(alignment: .topLeading) {
         if store.draft.isEmpty {
           // `TextEditor` has no placeholder of its own; this sits where the
           // first line of text will, matching the text container's inset.
           Text("Command or prompt… (⇧↩ for a new line)")
-            .font(Self.composerFont)
+            .font(.body)
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 9)
-            .padding(.top, 6)
+            .padding(.leading, 5)
             .allowsHitTesting(false)
         }
       }
@@ -205,50 +118,59 @@ struct CommandQueueView: View {
       .accessibilityLabel("Command")
   }
 
-  /// "At <date>   Repeat every <n> <unit>" on one line; the sheet is wide
-  /// enough for the sentence to read left to right without wrapping.
-  private var scheduleRow: some View {
-    HStack(spacing: 8) {
-      Text("At")
-        .font(.callout)
-        .foregroundStyle(.secondary)
+  private var scheduleSummary: String {
+    CommandQueueStyle.description(of: .scheduled(at: store.scheduledAt, repeatEvery: store.repeatInterval))
+  }
+
+  private var scheduleEditor: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Schedule message")
+        .font(.headline)
       DatePicker(
-        "",
+        "Send at",
         selection: $store.scheduledAt.sending(\.scheduledAtChanged),
         displayedComponents: [.date, .hourAndMinute]
       )
-      .labelsHidden()
-      // `.field`, not `.compact`: a stepper field is typeable, needs no
-      // popover, and matches the Date & Time idiom this reads as.
       .datePickerStyle(.field)
-
-      Toggle(
-        "Repeat every",
-        isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged)
-      )
-      .font(.callout)
-      .padding(.leading, 12)
-      TextField(
-        "",
-        value: $store.repeatAmount.sending(\.repeatAmountChanged),
-        format: .number
-      )
-      .textFieldStyle(.roundedBorder)
-      .frame(width: 52)
-      .disabled(!store.repeatEnabled)
-      Picker("", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
-        ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
-          Text(unit.title).tag(unit)
+      HStack(spacing: 8) {
+        Toggle("Repeat", isOn: $store.repeatEnabled.sending(\.repeatEnabledChanged))
+          .toggleStyle(.checkbox)
+          .fixedSize()
+        if store.repeatEnabled {
+          TextField("Interval", value: $store.repeatAmount.sending(\.repeatAmountChanged), format: .number)
+            .labelsHidden()
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 56)
+          Picker("Unit", selection: $store.repeatUnit.sending(\.repeatUnitChanged)) {
+            ForEach(CommandQueueFeature.IntervalUnit.allCases, id: \.self) { unit in
+              Text(unit.title).tag(unit)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .fixedSize()
         }
+        Spacer(minLength: 0)
       }
-      .labelsHidden()
-      .frame(width: 96)
-      .disabled(!store.repeatEnabled)
+      .frame(height: 28)
+      HStack {
+        Spacer()
+        Button("Done") {
+          showsScheduleEditor = false
+          draftFocused = true
+        }
+        .keyboardShortcut(.defaultAction)
+      }
+      .frame(height: 28)
     }
+    .padding(20)
+    // Keep the native popover size stable when repeat controls appear.
+    .frame(width: 340, height: 208)
+    .onExitCommand { showsScheduleEditor = false }
   }
 
   /// Send timing, as the small labelled menu a chat composer keeps at its
-  /// bottom-left. The inline picker gives the menu its checkmarks.
+  /// bottom-right. The inline picker gives the menu its checkmarks.
   private var modeMenu: some View {
     Menu {
       Picker("Send", selection: $store.mode.sending(\.modeChanged)) {
@@ -260,7 +182,7 @@ struct CommandQueueView: View {
       .labelsHidden()
     } label: {
       Label(store.mode.title, systemImage: store.mode.symbol)
-        .font(.system(size: 11))
+        .font(.callout)
         .foregroundStyle(.secondary)
     }
     .menuStyle(.borderlessButton)
@@ -282,8 +204,8 @@ struct CommandQueueView: View {
     // ⌘↩ as well as the composer's plain Return, so sending works from the
     // schedule fields too.
     .keyboardShortcut(.return, modifiers: .command)
-    .disabled(!store.canSubmit)
-    .help("\(sendTitle) (⌘↩)")
+    .disabled(!store.canSubmit || showsScheduleEditor)
+    .help(ShortcutDisplay.tooltip(sendTitle, chord: "⌘↩"))
     .accessibilityLabel(sendTitle)
   }
 
@@ -308,31 +230,6 @@ struct CommandQueueView: View {
     }
   }
 
-  // MARK: - Chrome
-
-  /// The composer's box. Its edge takes the accent colour while the editor
-  /// has focus, standing in for the focus ring the editor itself no longer
-  /// draws.
-  private var box: some View {
-    RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
-      .fill(Color(nsColor: .textBackgroundColor))
-  }
-
-  private func boxEdge(focused: Bool) -> some View {
-    RoundedRectangle(cornerRadius: Self.boxCornerRadius, style: .continuous)
-      .stroke(
-        focused ? Color.accentColor : Color(nsColor: .separatorColor),
-        lineWidth: 1
-      )
-  }
-
-  // MARK: - Catalog reads
-
-  /// Live queue for the edited pane. Read inside `body`'s tracking scope so
-  /// `@Observable` re-renders the list when the runner drains an entry.
-  private var entries: [QueuedCommand] {
-    hierarchyManager.catalog.pane(store.paneID)?.commandQueue ?? []
-  }
 }
 
 extension CommandQueueFeature.State.Mode {

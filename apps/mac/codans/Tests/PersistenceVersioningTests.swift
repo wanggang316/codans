@@ -39,59 +39,239 @@ struct PersistenceVersioningTests {
   }
 
   @Test
-  func savedServerHostsReadsLegacyArrayAndWritesEnvelope() throws {
-    let directory = try tempDirectory()
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let url = directory.appendingPathComponent("saved-server-hosts.json")
-    let old = RemoteHost(alias: "old.local")
-    try AtomicFileStore.write([old], to: url)
-
-    let new = RemoteHost(alias: "new.local")
-    SavedServerHosts.record(new, at: url)
-
-    #expect(try jsonObject(at: url)?["version"] as? Int == SavedServerHosts.currentVersion)
-    #expect(SavedServerHosts.read(at: url) == [new, old])
-  }
-
-  @Test
   func githubSnapshotsUseStringKeysAndDropTheOldShape() throws {
     let directory = try tempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("github-snapshots.json")
     try Data(#"[{"raw":"00000000-0000-0000-0000-000000000001"},null]"#.utf8).write(to: url)
 
-    let cache = GitHubSnapshotCache(fileURL: url)
+    let cache = PullRequestSnapshotCache(fileURL: url)
     #expect(cache.load().isEmpty)
     #expect(!FileManager.default.fileExists(atPath: url.path))
 
     let id = ProjectID()
     let snapshot = BatchedPullRequests(
-      host: "github.com", owner: "w", repo: "r",
+      repository: GitPlatformRepository(kind: .github, host: "github.com", path: "w/r"),
       byBranch: [:], seenBranches: ["main"], fetchedAt: Date(timeIntervalSince1970: 1)
     )
     cache.save([id: snapshot], sequence: 1)
     let object = try jsonObject(at: url)
-    #expect(object?["version"] as? Int == GitHubSnapshotCache.currentVersion)
+    #expect(object?["version"] as? Int == PullRequestSnapshotCache.currentVersion)
     #expect((object?["entries"] as? [String: Any])?.keys.contains(id.raw.uuidString) == true)
     #expect(cache.load().keys.contains(id))
   }
 
   @Test
-  func unreadableCatalogIsBackedUpBeforeAnythingCanOverwriteIt() throws {
+  func pullRequestSnapshotEntryThatDoesNotDecodeIsDropped() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("github-snapshots.json")
+    let current = ProjectID()
+    let cache = PullRequestSnapshotCache(fileURL: url)
+    cache.save(
+      [
+        current: BatchedPullRequests(
+          repository: GitPlatformRepository(kind: .github, host: "github.com", path: "w/r"),
+          byBranch: [:], seenBranches: ["main"], fetchedAt: Date(timeIntervalSince1970: 1))
+      ], sequence: 1)
+    // Add a v1-shaped entry (owner/repo, no repository) next to the current one.
+    var object = try #require(try jsonObject(at: url))
+    var entries = try #require(object["entries"] as? [String: Any])
+    let stale = ProjectID()
+    entries[stale.raw.uuidString] = [
+      "host": "github.com", "owner": "w", "repo": "r", "byBranch": [:], "seenBranches": ["main"],
+      "fetchedAt": 1,
+    ]
+    object["entries"] = entries
+    try JSONSerialization.data(withJSONObject: object).write(to: url)
+
+    let loaded = PullRequestSnapshotCache(fileURL: url).load()
+    #expect(loaded.keys.contains(current))
+    #expect(loaded[stale] == nil)
+  }
+
+  @Test
+  func retiredCatalogVersionIsMovedAsideAndLoadStartsEmpty() throws {
     let directory = try tempDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("catalog.json")
-    let future = Data(#"{"version": 99, "projects": []}"#.utf8)
-    try future.write(to: url)
+    let retired = Data(#"{"version": 2, "spaces": []}"#.utf8)
+    try retired.write(to: url)
 
     let store = CatalogStore(fileURL: url)
     let loaded = try store.load()
 
     #expect(loaded.projects.isEmpty)
     #expect(store.persistenceEnabled)
-    let backups = try FileManager.default.contentsOfDirectory(
-      at: StoreBackup.directory(for: url), includingPropertiesForKeys: nil)
-    #expect(backups.map(\.lastPathComponent).contains { $0.hasPrefix("catalog.unsupported-v99-") })
-    #expect(try Data(contentsOf: backups[0]) == future)
+    #expect(store.loadIssue == nil)
+    let backups = try backupNames(for: url)
+    #expect(backups.contains { $0.hasPrefix("catalog.unsupported-v2-") })
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+  }
+
+  // MARK: - Catalog 3 → 4
+
+  private func workspaceCatalogV3() -> Catalog {
+    let pane = Pane(workingDirectory: "/tmp/ws")
+    let tab = Tab(splitTree: SplitTree(leaf: pane.id), panes: [pane])
+    let root = Worktree(name: "ws", path: "/tmp/ws", tabs: [tab], selectedTabID: tab.id)
+    let child = Worktree(name: "app", path: "/tmp/ws/app", branch: "feat/x", sourceGitRoot: "/src/app")
+    let project = Project(
+      name: "ws", rootPath: "/tmp/ws", worktrees: [root, child], selectedWorktreeID: root.id,
+      isWorkspace: true)
+    return Catalog(version: 3, projects: [project], selectedProjectID: project.id)
+  }
+
+  private func backupNames(for url: URL) throws -> [String] {
+    let directory = StoreBackup.directory(for: url)
+    guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+    return try FileManager.default.contentsOfDirectory(atPath: directory.path)
+  }
+
+  @Test
+  func versionThreeCatalogMigratesWritesCurrentVersionAndKeepsACopy() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    let legacy = workspaceCatalogV3()
+    try AtomicFileStore.write(legacy, to: url)
+    let original = try Data(contentsOf: url)
+
+    let store = CatalogStore(fileURL: url)
+    let loaded = try store.load()
+
+    #expect(loaded.version == Catalog.currentVersion)
+    #expect(store.persistenceEnabled)
+    #expect(store.loadIssue == nil)
+    let project = try #require(loaded.projects.first)
+    #expect(project.worktrees.map(\.id) == legacy.projects[0].worktrees.map(\.id))
+    #expect(project.worktrees[0].tabs == legacy.projects[0].worktrees[0].tabs)
+    #expect(project.selectedWorktreeID == legacy.projects[0].selectedWorktreeID)
+    #expect(loaded.selectedProjectID == legacy.selectedProjectID)
+    #expect(project.worktrees[0].workspaceSlot?.role == .groupTerminal)
+    #expect(project.workspaceGroups.map(\.name) == ["default", "existing"])
+
+    let onDisk = try #require(try jsonObject(at: url))
+    #expect(onDisk["version"] as? Int == Catalog.currentVersion)
+    let backups = try backupNames(for: url)
+    #expect(backups.count == 1)
+    let backup = StoreBackup.directory(for: url).appendingPathComponent(try #require(backups.first))
+    #expect(backup.lastPathComponent.hasPrefix("catalog.migrated-v3-"))
+    #expect(try Data(contentsOf: backup) == original)
+  }
+
+  @Test
+  func secondLoadOfAMigratedCatalogChangesNothing() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    try AtomicFileStore.write(workspaceCatalogV3(), to: url)
+    let first = try CatalogStore(fileURL: url).load()
+    let afterFirst = try Data(contentsOf: url)
+
+    let second = try CatalogStore(fileURL: url).load()
+
+    #expect(second == first)
+    #expect(second.projects[0].workspaceGroups.count == 2)
+    #expect(try Data(contentsOf: url) == afterFirst)
+    #expect(try backupNames(for: url).count == 1)
+  }
+
+  // MARK: - Catalog 4 → 5 (Host list)
+
+  @Test
+  func versionFourRemoteProjectsMigrateToHostRecordsThatSurviveReload() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    let ci = RemoteHost(alias: "build.example.com", username: "ci")
+    let root = RemoteHost(alias: "build.example.com", username: "root")
+    let gpu = RemoteHost(alias: "gpu-box", port: 2222)
+    let legacy = Catalog(
+      version: 4,
+      projects: [
+        Project(name: "a", rootPath: "/srv/a", remoteHost: ci),
+        Project(name: "b", rootPath: "/srv/b", remoteHost: ci),
+        Project(name: "etc", rootPath: "/etc/x", remoteHost: root),
+        Project(name: "train", rootPath: "/home/train", remoteHost: gpu),
+        Project(name: "local", rootPath: "/src/local"),
+      ])
+    try AtomicFileStore.write(legacy, to: url)
+
+    let loaded = try CatalogStore(fileURL: url).load()
+
+    #expect(loaded.version == Catalog.currentVersion)
+    #expect(loaded.hosts.map(\.endpoint) == [ci, root, gpu])
+    #expect(loaded.projects.map(\.remoteHost) == legacy.projects.map(\.remoteHost))
+    #expect(loaded.projects[0].hostID == loaded.projects[1].hostID)
+    #expect(loaded.projects[4].hostID == nil)
+    #expect(try backupNames(for: url).contains { $0.hasPrefix("catalog.migrated-v4-") })
+
+    let reloaded = try CatalogStore(fileURL: url).load()
+    #expect(reloaded == loaded)
+  }
+
+  @Test
+  func connectionRestoredFromSidecarGetsAHostRecord() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    let host = RemoteHost(alias: "mini.local", username: "alice")
+    // An older build stripped the Host id; the sidecar still has the
+    // connection.
+    let stripped = Project(name: "srv", rootPath: "/data/app")
+    try AtomicFileStore.write(Catalog(projects: [stripped]), to: url)
+    try VersionedFile.write(
+      [stripped.id.raw.uuidString: host], to: RemoteHostSidecar.url(alongsideCatalogAt: url),
+      version: RemoteHostSidecar.currentVersion)
+
+    let loaded = try CatalogStore(fileURL: url).load()
+
+    #expect(loaded.hosts.map(\.endpoint) == [host])
+    #expect(loaded.projects[0].hostID == loaded.hosts[0].id)
+    #expect(loaded.projects[0].remoteHost == host)
+    #expect(try CatalogStore(fileURL: url).load() == loaded)
+  }
+
+  @Test
+  func newerCatalogStaysInPlaceWithSavingOffAndAnIssue() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    let future = Data(#"{"version": 6, "projects": [], "futureField": true}"#.utf8)
+    try future.write(to: url)
+
+    let store = CatalogStore(fileURL: url)
+    let loaded = try store.load()
+
+    #expect(loaded.projects.isEmpty)
+    #expect(!store.persistenceEnabled)
+    #expect(store.loadIssue == .newerVersion(6))
+    try store.saveNow(Catalog(projects: [Project(name: "p", rootPath: "/p")]))
+    store.scheduleSave(Catalog())
+    store.flushPending()
+    #expect(try Data(contentsOf: url) == future)
+    let backups = try backupNames(for: url)
+    #expect(backups.contains { $0.hasPrefix("catalog.unsupported-v6-") })
+  }
+
+  @Test
+  func failedMigrationBackupDisablesSaving() throws {
+    let directory = try tempDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("catalog.json")
+    try AtomicFileStore.write(workspaceCatalogV3(), to: url)
+    let original = try Data(contentsOf: url)
+    // A regular file where `backups/` must go makes the copy fail.
+    try Data().write(to: StoreBackup.directory(for: url))
+
+    let store = CatalogStore(fileURL: url)
+    let loaded = try store.load()
+
+    #expect(loaded.version == Catalog.currentVersion)
+    #expect(loaded.projects[0].workspaceGroups.count == 2)
+    #expect(!store.persistenceEnabled)
+    #expect(store.loadIssue == .migrationBackupFailed)
+    #expect(try Data(contentsOf: url) == original)
   }
 }

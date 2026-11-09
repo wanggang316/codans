@@ -78,10 +78,10 @@ struct WorktreeLifecycleProgress: Equatable {
 
 /// Batch confirmation payload for the Project ⋯ menu's "Archive / Remove All
 /// Merged Worktrees" items. The set of merged worktrees is resolved in the
-/// view (which holds the GitHub PR snapshots the sidebar reducer does not),
+/// view (which holds the Pull Request snapshots the sidebar reducer does not),
 /// so the IDs are captured here at tap-time and the confirmed handler fans
 /// them out to the per-worktree archive / remove lifecycle without re-walking
-/// GitHub state.
+/// Git Platform state.
 struct PendingMergedBatch: Equatable {
   var projectID: ProjectID
   var worktreeIDs: [WorktreeID]
@@ -108,6 +108,9 @@ struct HierarchySidebarFeature {
     // directly from the catalog, mirroring how `Worktree.isPinned` is
     // consumed.
 
+    /// The last row the user opened or closed. The outline animates that
+    /// row once; other changes of the open state are instant (ADR 0007).
+    var expansionToggle: SidebarExpansionToggle?
     var addWorktreeSheet: AddWorktreeSheet?
     var createWorktreeSheet: CreateWorktreeFeature.State?
     /// "Clone Repository" sheet reached from the Add Project menu. Drives
@@ -118,18 +121,24 @@ struct HierarchySidebarFeature {
     /// palette. `WorkspaceClient` registers and reconciles the result, so
     /// the parent only selects it on success.
     var createWorkspaceSheet: CreateWorkspaceFeature.State?
-    /// "Connect to Server" sheet reached from the Add Project menu. Validates
+    /// "Open Remote Project" sheet reached from the Add Project menu. Validates
     /// an SSH connection and, on success, routes the destination back through
-    /// `addServerProject` + reconcile.
-    var remoteConnectionSheet: RemoteConnectionFeature.State?
+    /// `addRemoteProject` + reconcile.
+    var remoteProjectSheet: RemoteProjectFeature.State?
     var archivedWorktreesSheet: ArchivedWorktreesFeature.State?
     var pendingWorktreeRemoval: PendingWorktreeRemoval?
     var pendingProjectRemoval: PendingProjectRemoval?
-    /// "Remove from Workspace" confirmation for one member checkout.
-    var pendingWorkspaceMemberRemoval: PendingWorktreeRemoval?
-    /// "Remove Workspace" confirmation; the dialog offers entry-only or
-    /// delete-checkouts.
+    /// "Remove from Workspace" confirmation for one source project.
+    var pendingWorkspaceSourceRemoval: PendingWorkspaceSourceRemoval?
+    /// "Remove Workspace" confirmation; the dialog offers sidebar-only or
+    /// the delete sheet.
     var pendingWorkspaceRemoval: PendingProjectRemoval?
+    /// Delete sheet for a named group or for every file a Workspace owns.
+    var groupDeletionSheet: WorkspaceGroupDeletionFeature.State?
+    /// Items the last delete of a group could not remove, by group. The
+    /// group row lists them next to its Retry; a restart forgets them and
+    /// only the group's persisted `deletion` state remains.
+    var workspaceGroupDeletionFailures: [WorkspaceGroupID: [GroupDeletionOutcome.Failure]] = [:]
     /// Pending "Archive All Merged Worktrees" batch awaiting its confirm
     /// dialog. Non-nil → dialog visible.
     var pendingArchiveAllMerged: PendingMergedBatch?
@@ -165,14 +174,6 @@ struct HierarchySidebarFeature {
     /// existing reconcile path picks up any worktree that did make it to
     /// disk before the crash.
     var pendingWorktrees: IdentifiedArrayOf<PendingWorktree> = []
-    /// Transient "reorder projects inline" editing session. When `true`,
-    /// the sidebar collapses every Project to a header-only row, prefixes
-    /// each with a drag handle, and enables `ForEach.onMove` so Projects
-    /// can be dragged directly in the list. Session-scoped — never
-    /// persisted; the resulting order is saved live through
-    /// `reorderProjects`. Entered from the footer sort menu's
-    /// "Manual Order…" item, dismissed by the inline "Done" control.
-    var isReorderingProjects: Bool = false
     /// Machine-wide `git` availability, filled by the probe on first appear.
     /// `nil` until the probe answers — the banner stays hidden meanwhile so a
     /// healthy launch never flashes a warning. Only `.blocked` renders.
@@ -195,6 +196,11 @@ struct HierarchySidebarFeature {
 
     // Expansion
     case toggleProjectExpansion(ProjectID)
+    /// Group row chevron. Each group keeps its own persisted disclosure.
+    case toggleWorkspaceGroupExpansion(projectID: ProjectID, groupID: WorkspaceGroupID)
+    /// The selection moved to a Workspace row (from any source): open its
+    /// group when it is collapsed, so the selected row is on screen.
+    case revealWorkspaceRow(WorktreeID, inProject: ProjectID)
 
     // Toolbar — Add Project flow. The toolbar button drives the folder
     // picker directly (no intermediate sheet); the picked folder is then
@@ -209,14 +215,22 @@ struct HierarchySidebarFeature {
     case addWorkspaceFolderResolved(canonicalPath: String)
     /// Add Project menu → "Clone Repository…". Opens the clone sheet.
     case cloneRepoTapped
-    /// Add Project menu → "Connect to Server…". Opens the remote-connection sheet.
-    case connectServerTapped
-    /// Server project's options menu → "Edit Connection…". Opens the
-    /// remote-connection sheet seeded from the project, in edit mode.
-    case projectEditConnectionTapped(projectID: ProjectID)
+    /// Add Project menu → "Open Remote Project…". Opens the Remote Project sheet.
+    case openRemoteProjectTapped
+    /// Remote Project's options menu → "Edit Remote Project…". Opens the
+    /// Remote Project sheet seeded from the project, in edit mode.
+    case editRemoteProjectTapped(projectID: ProjectID)
+    /// Host row click or chevron. Opens or closes the Host's Projects.
+    case toggleHostExpansion(SidebarHost)
+    /// Host row menu → "Open Remote Project on This Host…". Opens the
+    /// Remote Project sheet with the Host chosen.
+    case hostConnectProjectTapped(HostID)
+    /// Host row menu → "Edit Host…". Opens Settings › Remote Hosts on the Host.
+    case hostEditTapped(HostID)
 
-    // Reorder Projects (ForEach.onMove forwarder).
-    case reorderProjects(from: IndexSet, to: Int)
+    /// A Project block was dropped in the sidebar. The view resolves the
+    /// drop to a placement relative to a visible Project (ADR 0001).
+    case moveProject(ProjectID, to: ProjectPlacement)
 
     // Reorder Worktrees within a single sidebar segment under a Project
     // (ForEach.onMove forwarder for the pinned / unpinned segments).
@@ -248,8 +262,8 @@ struct HierarchySidebarFeature {
     // Project section hover chrome
     case projectAddWorktreeTapped(projectID: ProjectID)
     /// `⋯` menu → "Project Settings…". Opens the Settings window and lands
-    /// the selection on this Project's General pane via
-    /// `SettingsWindowPresenter.openAt(.projectGeneral(_))`.
+    /// the selection on this Project's page via
+    /// `SettingsWindowPresenter.openAt(.project(_))`.
     case projectSettingsTapped(projectID: ProjectID)
     case projectRemoveTapped(projectID: ProjectID, name: String)
     case projectRemoveConfirmed
@@ -293,7 +307,7 @@ struct HierarchySidebarFeature {
     case projectPruneCompleted(pruned: Int, error: String?)
     case pruneToastDismissed
     /// Project ⋯ menu: batch archive every merged Worktree. The view
-    /// resolves the merged set from GitHub PR snapshots and passes the IDs.
+    /// resolves the merged set from Pull Request snapshots and passes the IDs.
     case projectArchiveAllMergedTapped(projectID: ProjectID, worktreeIDs: [WorktreeID])
     case projectArchiveAllMergedConfirmed
     case projectArchiveAllMergedCancelled
@@ -350,26 +364,13 @@ struct HierarchySidebarFeature {
     /// owns the loading-overlay focus); a no-op at this level.
     case pendingWorktreeRowTapped(PendingWorktreeID)
 
-    // Sidebar bottom-bar sort mode.
-    /// User picked a non-manual sort from the sort popover. Persists and
-    /// keeps `catalog.projects` (the manual order) untouched.
-    case projectSortModeChanged(ProjectSortMode)
-    /// User picked "Manual Order…" — enter the inline reorder session.
-    /// Seeds `manualOrder` from the currently displayed order (so the
-    /// list doesn't reshuffle), flips `projectSortMode` to `.manual`,
-    /// and sets `isReorderingProjects`.
-    case beginProjectReorder
-    /// User tapped the inline "Done" control — leaves the reorder
-    /// session. The order is already persisted, so this only clears the
-    /// transient UI flag.
-    case endProjectReorder
-
     // Tag chip footer at the sidebar's safe-area bottom.
     /// Toggle membership of `id` in `Catalog.activeTagFilter`. If filter is
     /// `.all` or `.untagged` it becomes `.tags([id])`. Within `.tags(set)`,
     /// `id` toggles in/out; an empty result resets to `.all`.
     case tagChipTapped(TagID)
-    /// Resets the filter to `.all`.
+    case sidebarFilterSelected(SidebarFilter)
+    /// Resets the tag filter to `.all`.
     case allChipTapped
     /// Sets filter to `.untagged`. Mutually exclusive with `.tags(...)`.
     case untaggedChipTapped
@@ -396,23 +397,30 @@ struct HierarchySidebarFeature {
     /// Badge on a source Project's mirror row: jump to the workspace child
     /// row that owns the same checkout.
     case workspaceMembershipBadgeTapped(WorkspaceMembership)
-    /// Workspace header `+`: pick a local repository and check it out into
-    /// the workspace on a branch named after the workspace.
-    case workspaceAddRepositoryTapped(projectID: ProjectID)
-    /// Child-row context menu: unregister the member's checkout and drop it
-    /// from the manifest (its branch goes too, like Delete Worktree).
-    case workspaceMemberRemoveTapped(worktreeID: WorktreeID, inProject: ProjectID, name: String)
+    /// Workspace header `+`: open the New Group sheet.
+    case workspaceNewGroupTapped(projectID: ProjectID)
+    /// Workspace header `⋯` → Add Project…: add a source project, which
+    /// joins `default` as a reference.
+    case workspaceAddProjectTapped(projectID: ProjectID)
+    /// Group row context menu → Delete Group… (named groups only), and
+    /// Retry on a group whose deletion is incomplete.
+    case deleteGroupTapped(projectID: ProjectID, groupID: WorkspaceGroupID)
+    /// Child-feature actions for the Workspace delete sheet.
+    case groupDeletionSheet(WorkspaceGroupDeletionFeature.Action)
+    /// Reference row context menu → Remove from Workspace…: the source
+    /// project leaves the Workspace; its checkout stays untouched.
+    case removeSourceTapped(worktreeID: WorktreeID, inProject: ProjectID)
     case workspaceMemberRemoveConfirmed
     case workspaceMemberRemoveCancelled
     case workspaceMemberRemoveFinished(message: String?)
-    /// Project ⋯ menu on a workspace: entry-only, or delete every checkout
-    /// and the folder.
+    /// Workspace header ⋯ → Remove Workspace…: sidebar only, or on to the
+    /// delete sheet for every file the Workspace owns.
     case workspaceRemoveTapped(projectID: ProjectID, name: String)
     case workspaceRemoveConfirmed(deleteFiles: Bool)
     case workspaceRemoveCancelled
     case workspaceRemoveFinished(message: String?)
-    /// Child-feature actions for the Connect to Server sheet.
-    case remoteConnectionSheet(RemoteConnectionFeature.Action)
+    /// Child-feature actions for the Open Remote Project sheet.
+    case remoteProjectSheet(RemoteProjectFeature.Action)
 
     // Delegate up to RootFeature for effects that cross feature boundaries.
     case delegate(Delegate)
@@ -422,7 +430,7 @@ struct HierarchySidebarFeature {
       /// Context-menu "Open in GitHub" — RootFeature resolves the row's
       /// repository the same way as the ⌘⇧G command, but for the
       /// right-clicked row instead of the selection.
-      case openOnGitHub(projectID: ProjectID, worktreeID: WorktreeID)
+      case openOnGitPlatform(projectID: ProjectID, worktreeID: WorktreeID)
       case openInDefaultEditor(worktreePath: String, projectID: ProjectID?)
       /// Sidebar's "Open in <Editor>" submenu — RootFeature dispatches
       /// `.editor(.openRequested)` directly with the explicit editor ID
@@ -446,9 +454,9 @@ struct HierarchySidebarFeature {
       /// A pending creation finished and its catalog row now exists. The
       /// sidebar has already written the catalog and removed the pending
       /// row; it delegates the post-completion "switch to the new worktree"
-      /// decision UP to `RootFeature`, which gates it on the auto-switch
-      /// setting and on whether the user is still viewing this pending
-      /// creation (`activePendingWorktreeID`, which only RootFeature owns).
+      /// decision UP to `RootFeature`, which gates it on whether the user
+      /// still follows this pending creation (`activePendingWorktreeID`,
+      /// which only RootFeature owns).
       /// The sidebar no longer selects or seeds panes itself.
       ///
       /// `agentProfileID` is the sheet's "Launch agent" pick (or the New
@@ -458,6 +466,9 @@ struct HierarchySidebarFeature {
       case worktreeMaterialized(
         worktreeID: WorktreeID, projectID: ProjectID, pendingID: PendingWorktreeID,
         agentProfileID: UUID? = nil, agentPrompt: String? = nil)
+      /// A new Workspace group exists with every checkout. `RootFeature`
+      /// starts each member's agent and selects the group.
+      case workspaceGroupCreated(GroupCreationResult)
     }
   }
 
@@ -528,6 +539,17 @@ struct HierarchySidebarFeature {
         return .send(.addProjectFolderPicked(URL(fileURLWithPath: localPath)))
       case .cloneRepoSheet:
         return .none
+      case .groupDeletionSheet(.delegate(.dismissed)):
+        state.groupDeletionSheet = nil
+        return .none
+
+      case .groupDeletionSheet(.delegate(.completed(let completion))):
+        state.groupDeletionSheet = nil
+        return groupDeletionCompleted(completion, state: &state)
+
+      case .groupDeletionSheet:
+        return .none
+
       case .createWorkspaceSheet(.delegate(.dismissed)):
         state.createWorkspaceSheet = nil
         return .none
@@ -542,30 +564,64 @@ struct HierarchySidebarFeature {
         hierarchyClient.selectProject(projectID)
         try? hierarchyClient.selectWorktree(worktreeID, projectID)
         return .none
+      case .createWorkspaceSheet(.delegate(.groupCreated(let result))):
+        // A failed setup script keeps the sheet open to say which; the
+        // agents start either way, now that every checkout exists.
+        if result.setupFailures.isEmpty {
+          state.createWorkspaceSheet = nil
+        }
+        return .send(.delegate(.workspaceGroupCreated(result)))
       case .createWorkspaceSheet:
         return .none
-      case .remoteConnectionSheet(.delegate(.dismissed)):
-        state.remoteConnectionSheet = nil
+      case .remoteProjectSheet(.delegate(.dismissed)):
+        state.remoteProjectSheet = nil
         return .none
-      case .remoteConnectionSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
+      case .remoteProjectSheet(.delegate(.connected(let host, let remotePath, let gitRoot))):
         // Connection validated. Read the mode BEFORE dismissing: edit applies
-        // the change to the existing project in place; add registers a new
-        // one, named by the remote path's leaf (falling back to the host) so
+        // the change to the existing project in place; add selects the
+        // Project that already has this Host + path, or registers a new
+        // one, named by the remote path's leaf (falling back to the Host) so
         // the sidebar reads a recognizable label before the first SSH
         // reconcile fills in worktrees. Both re-reconcile.
-        let mode = state.remoteConnectionSheet?.mode ?? .add
-        state.remoteConnectionSheet = nil
-        switch mode {
+        guard let sheet = state.remoteProjectSheet else { return .none }
+        guard let endpoint = registerHost(host, isNewHost: sheet.isNewHost) else {
+          state.remoteProjectSheet?.hostChangedWhileConnecting(currentHosts: hierarchyClient.hosts())
+          return .none
+        }
+        // ADR 0006: a Host cannot have two Projects with the same root path.
+        // The Project write attaches to the Host whose fields equal
+        // `endpoint`. That is not always `host.id`: a "New Host…" record
+        // equal to a Host added in Settings while the SSH check ran is not
+        // added, so look up by the Host the write will use.
+        let catalog = hierarchyClient.snapshot()
+        let hostID = catalog.host(matching: endpoint)?.id ?? host.id
+        switch sheet.mode {
         case .edit(let projectID):
-          hierarchyClient.updateServerProject(projectID, host, remotePath, gitRoot)
+          if let conflict = catalog.projectConflicting(
+            withEditOf: projectID, onHost: hostID, rootPath: remotePath,
+            canonicalizeLocal: HierarchyManager.canonicalPath)
+          {
+            state.remoteProjectSheet?.errorMessage =
+              RemoteProjectFeature.State.duplicateProjectMessage(name: conflict.name, host: host)
+            return .none
+          }
+          state.remoteProjectSheet = nil
+          hierarchyClient.updateRemoteProject(projectID, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         case .add:
+          state.remoteProjectSheet = nil
+          // Like Add Project on This Mac: reveal the existing Project.
+          if let existing = catalog.project(
+            onHost: hostID, rootPath: remotePath, canonicalizeLocal: HierarchyManager.canonicalPath)
+          {
+            return .send(.delegate(.revealExistingProject(existing.id)))
+          }
           let leaf = (remotePath as NSString).lastPathComponent
-          let name = leaf.isEmpty ? host.displayAuthority : leaf
-          let projectID = hierarchyClient.addServerProject(name, host, remotePath, gitRoot)
+          let name = leaf.isEmpty ? host.displayName : leaf
+          let projectID = hierarchyClient.addRemoteProject(name, endpoint, remotePath, gitRoot)
           return .send(.delegate(.reconcileProjectRequested(projectID)))
         }
-      case .remoteConnectionSheet:
+      case .remoteProjectSheet:
         return .none
       case .archivedWorktreesSheet(.delegate(.dismissed)):
         state.archivedWorktreesSheet = nil
@@ -582,15 +638,35 @@ struct HierarchySidebarFeature {
     .ifLet(\.cloneRepoSheet, action: \.cloneRepoSheet) {
       CloneRepoFeature()
     }
+    .ifLet(\.groupDeletionSheet, action: \.groupDeletionSheet) {
+      WorkspaceGroupDeletionFeature()
+    }
     .ifLet(\.createWorkspaceSheet, action: \.createWorkspaceSheet) {
       CreateWorkspaceFeature()
     }
-    .ifLet(\.remoteConnectionSheet, action: \.remoteConnectionSheet) {
-      RemoteConnectionFeature()
+    .ifLet(\.remoteProjectSheet, action: \.remoteProjectSheet) {
+      RemoteProjectFeature()
     }
     .ifLet(\.archivedWorktreesSheet, action: \.archivedWorktreesSheet) {
       ArchivedWorktreesFeature()
     }
+  }
+
+  /// Put the Host of a validated connection in the Host list and return the
+  /// endpoint to save. A record from "New Host…" is added with its Name
+  /// (ADR 0003: no temporary Host). Returns `nil` when the picked Host was
+  /// edited or deleted in Settings while the SSH check ran: the check proved
+  /// the old address only, so the Project must not get the new one unchecked.
+  private func registerHost(_ host: HostRecord, isNewHost: Bool) -> RemoteHost? {
+    if let current = hierarchyClient.hosts().first(where: { $0.id == host.id }) {
+      return current.endpoint == host.endpoint ? host.endpoint : nil
+    }
+    guard isNewHost else { return nil }
+    // A failure (a record with the same fields was added meanwhile) is not
+    // fatal: the manager reuses or adds the record by fields, which are the
+    // validated ones.
+    try? hierarchyClient.addHost(host)
+    return host.endpoint
   }
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length
@@ -623,6 +699,25 @@ struct HierarchySidebarFeature {
         .first(where: { $0.id == projectID })?
         .isExpanded ?? true
       hierarchyClient.setProjectExpanded(projectID, !current)
+      state.expansionToggle = .next(.project(projectID), after: state.expansionToggle)
+      return .none
+
+    case .toggleWorkspaceGroupExpansion(let projectID, let groupID):
+      guard
+        let group = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .workspaceGroups.first(where: { $0.id == groupID })
+      else { return .none }
+      hierarchyClient.setWorkspaceGroupExpanded(projectID, groupID, !group.isExpanded)
+      state.expansionToggle = .next(
+        .workspaceGroup(projectID: projectID, groupID: groupID), after: state.expansionToggle)
+      return .none
+
+    case .revealWorkspaceRow(let worktreeID, let projectID):
+      guard
+        let groupID = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .collapsedWorkspaceGroup(revealing: worktreeID)
+      else { return .none }
+      hierarchyClient.setWorkspaceGroupExpanded(projectID, groupID, true)
       return .none
 
     // MARK: Toolbar
@@ -684,41 +779,72 @@ struct HierarchySidebarFeature {
       try? hierarchyClient.selectWorktree(membership.worktreeID, membership.projectID)
       return .none
 
-    case .workspaceAddRepositoryTapped(let projectID):
-      // Same sheet as New Workspace, with the workspace fixed and one member
-      // enough; names already in the manifest are refused up front.
+    case .workspaceNewGroupTapped(let projectID):
       let snapshot = hierarchyClient.snapshot()
       guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
         return .none
       }
-      let existingNames = Set(
-        project.worktrees.filter { $0.path != project.rootPath }.map(\.name)
-          + (project.workspace?.repositories.map(\.name) ?? []))
       state.createWorkspaceSheet = CreateWorkspaceFeature.State(
         candidates: Self.workspaceCandidates(in: snapshot),
-        mode: .add(projectID: projectID, title: project.name, rootPath: project.rootPath, existingNames: existingNames))
+        mode: .newGroup(projectID: projectID, title: project.name, rootPath: project.rootPath))
       return .none
 
-    case .workspaceMemberRemoveTapped(let worktreeID, let projectID, let name):
-      guard isWorkspaceChild(worktreeID: worktreeID, projectID: projectID) else { return .none }
-      state.pendingWorkspaceMemberRemoval = PendingWorktreeRemoval(
-        worktreeID: worktreeID, projectID: projectID, displayName: name)
+    case .workspaceAddProjectTapped(let projectID):
+      // Same sheet as New Workspace, with the workspace fixed and one project
+      // enough; source names already in the Workspace are refused up front.
+      let snapshot = hierarchyClient.snapshot()
+      guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
+        return .none
+      }
+      let existingSourceRoots = Set(
+        project.worktrees.filter { $0.workspaceSlot?.role == .reference }.compactMap(\.sourceGitRoot)
+          + (project.workspace?.projects.map(\.sourceGitRoot) ?? []))
+      state.createWorkspaceSheet = CreateWorkspaceFeature.State(
+        candidates: Self.workspaceCandidates(in: snapshot),
+        mode: .addSource(
+          projectID: projectID, title: project.name, rootPath: project.rootPath,
+          existingSourceRoots: existingSourceRoots))
+      return .none
+
+    case .deleteGroupTapped(let projectID, let groupID):
+      // `default` is never deleted; the view offers the entry on named
+      // groups only, and this guard covers every other route.
+      guard
+        let group = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID })?
+          .workspaceGroups.first(where: { $0.id == groupID }),
+        group.kind == .named,
+        state.groupDeletionSheet == nil
+      else { return .none }
+      // A retry keeps the branch choice the interrupted delete was made with.
+      state.groupDeletionSheet = WorkspaceGroupDeletionFeature.State(
+        target: .group(projectID: projectID, groupID: groupID, name: group.name),
+        deleteBranches: group.deletion?.deleteBranches ?? false,
+        previousFailures: state.workspaceGroupDeletionFailures[groupID] ?? [])
+      return .send(.groupDeletionSheet(.checkRequested))
+
+    case .removeSourceTapped(let worktreeID, let projectID):
+      guard
+        let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
+        let pending = PendingWorkspaceSourceRemoval(
+          worktreeID: worktreeID, in: project, tabIsDirty: hierarchyClient.tabIsDirty)
+      else { return .none }
+      state.pendingWorkspaceSourceRemoval = pending
       return .none
 
     case .workspaceMemberRemoveConfirmed:
-      guard let pending = state.pendingWorkspaceMemberRemoval else { return .none }
-      state.pendingWorkspaceMemberRemoval = nil
+      guard let pending = state.pendingWorkspaceSourceRemoval else { return .none }
+      state.pendingWorkspaceSourceRemoval = nil
       return .run { [client = workspaceClient] send in
         do {
-          let warning = try await client.drop(pending.projectID, pending.worktreeID, true)
-          await send(.workspaceMemberRemoveFinished(message: warning))
+          try await client.removeSource(pending.projectID, pending.sourceGitRoot)
+          await send(.workspaceMemberRemoveFinished(message: nil))
         } catch {
           await send(.workspaceMemberRemoveFinished(message: error.localizedDescription))
         }
       }
 
     case .workspaceMemberRemoveCancelled:
-      state.pendingWorkspaceMemberRemoval = nil
+      state.pendingWorkspaceSourceRemoval = nil
       return .none
 
     case .workspaceMemberRemoveFinished(let message):
@@ -733,17 +859,18 @@ struct HierarchySidebarFeature {
     case .workspaceRemoveConfirmed(let deleteFiles):
       guard let pending = state.pendingWorkspaceRemoval else { return .none }
       state.pendingWorkspaceRemoval = nil
+      if deleteFiles {
+        // Deleting files goes through the same check and acknowledgment as
+        // Delete Group…, over every named group.
+        guard state.groupDeletionSheet == nil else { return .none }
+        state.groupDeletionSheet = WorkspaceGroupDeletionFeature.State(
+          target: .workspace(projectID: pending.projectID, name: pending.displayName))
+        return .send(.groupDeletionSheet(.checkRequested))
+      }
       return .run { [client = workspaceClient] send in
         do {
-          let outcome = try await client.remove(
-            pending.projectID, WorkspaceCleanup(deleteFiles: deleteFiles))
-          var notes: [String] = []
-          if !outcome.failures.isEmpty {
-            notes.append(
-              "Could not unregister \(outcome.failures.joined(separator: ", ")); the folder was kept.")
-          }
-          notes.append(contentsOf: outcome.keptBranches)
-          await send(.workspaceRemoveFinished(message: notes.isEmpty ? nil : notes.joined(separator: " ")))
+          _ = try await client.removeWorkspace(pending.projectID, .sidebarOnly)
+          await send(.workspaceRemoveFinished(message: nil))
         } catch {
           await send(.workspaceRemoveFinished(message: error.localizedDescription))
         }
@@ -757,16 +884,35 @@ struct HierarchySidebarFeature {
       if let message { state.lifecycleErrorToast = message }
       return .none
 
-    case .connectServerTapped:
-      state.remoteConnectionSheet = RemoteConnectionFeature.State()
+    case .openRemoteProjectTapped:
+      state.remoteProjectSheet = RemoteProjectFeature.State(hosts: hierarchyClient.hosts())
       return .none
 
-    case .projectEditConnectionTapped(let projectID):
+    case .toggleHostExpansion(let host):
+      let collapsed = hierarchyClient.snapshot().collapsedSidebarHosts.contains(host)
+      hierarchyClient.setSidebarHostExpanded(host, collapsed)
+      state.expansionToggle = .next(.host(host), after: state.expansionToggle)
+      return .none
+
+    case .hostConnectProjectTapped(let hostID):
+      let hosts = hierarchyClient.hosts()
+      guard hosts.contains(where: { $0.id == hostID }) else { return .none }
+      state.remoteProjectSheet = RemoteProjectFeature.State(hosts: hosts, hostChoice: .existing(hostID))
+      return .none
+
+    case .hostEditTapped(let hostID):
+      let presenter = settingsWindowPresenter
+      return .run { _ in
+        await MainActor.run { presenter.editHost(hostID) }
+      }
+
+    case .editRemoteProjectTapped(let projectID):
       guard
         let project = hierarchyClient.snapshot().projects.first(where: { $0.id == projectID }),
-        let seeded = RemoteConnectionFeature.State.editing(project: project)
+        let seeded = RemoteProjectFeature.State.editing(
+          project: project, hosts: hierarchyClient.hosts())
       else { return .none }
-      state.remoteConnectionSheet = seeded
+      state.remoteProjectSheet = seeded
       return .none
 
     // MARK: Tag filter chip footer
@@ -789,6 +935,10 @@ struct HierarchySidebarFeature {
         }
       }
       hierarchyClient.setActiveTagFilter(next)
+      return .none
+
+    case .sidebarFilterSelected(let filter):
+      hierarchyClient.setSidebarFilter(filter)
       return .none
 
     case .allChipTapped:
@@ -819,8 +969,8 @@ struct HierarchySidebarFeature {
 
     // MARK: Project hover chrome
 
-    case .reorderProjects(let source, let destination):
-      hierarchyClient.reorderProjects(source, destination)
+    case .moveProject(let projectID, let placement):
+      hierarchyClient.moveProject(projectID, placement)
       return .none
 
     case .reorderWorktrees(let projectID, let segment, let source, let destination):
@@ -849,28 +999,6 @@ struct HierarchySidebarFeature {
     case .refreshAllProjectsTapped:
       return .send(.delegate(.refreshAllProjectsRequested))
 
-    // MARK: Project sort mode
-
-    case .projectSortModeChanged(let mode):
-      hierarchyClient.setProjectSortMode(mode)
-      // Switching to a computed order leaves no manual session to edit.
-      if mode != .manual { state.isReorderingProjects = false }
-      return .none
-
-    case .beginProjectReorder:
-      // Seed `manualOrder` from the order the user currently sees (the
-      // full, unfiltered list under the active mode) and flip to
-      // `.manual` in one step, so entering the session doesn't reshuffle
-      // rows. The inline `.onMove` then maps 1:1 onto `catalog.projects`.
-      let catalog = hierarchyClient.snapshot()
-      hierarchyClient.applyManualProjectOrder(catalog.sorted(catalog.projects).map(\.id))
-      state.isReorderingProjects = true
-      return .none
-
-    case .endProjectReorder:
-      state.isReorderingProjects = false
-      return .none
-
     case .projectAddWorktreeTapped(let projectID):
       // The Add-Worktree "+" row is hidden for non-git Projects, so a
       // Project without a gitRoot silently no-ops here.
@@ -890,7 +1018,7 @@ struct HierarchySidebarFeature {
       let presenter = settingsWindowPresenter
       return .run { _ in
         await MainActor.run {
-          presenter.openAt(.projectGeneral(projectID))
+          presenter.openAt(.project(projectID))
         }
       }
 
@@ -922,7 +1050,7 @@ struct HierarchySidebarFeature {
       // protection. Guard at the lifecycle entry point so every dispatch path
       // is covered by a single check.
       if isMainCheckout(worktreeID: worktreeID, projectID: projectID)
-        || isWorkspaceChild(worktreeID: worktreeID, projectID: projectID)
+        || isWorkspaceRow(worktreeID: worktreeID, projectID: projectID)
         || isWorkspaceMember(worktreeID: worktreeID, projectID: projectID)
       {
         return .none
@@ -953,7 +1081,7 @@ struct HierarchySidebarFeature {
       // this would hide the project's root from the sidebar with no way back
       // short of editing the catalog file by hand.
       if isMainCheckout(worktreeID: wid, projectID: pid)
-        || isWorkspaceChild(worktreeID: wid, projectID: pid)
+        || isWorkspaceRow(worktreeID: wid, projectID: pid)
         || isWorkspaceMember(worktreeID: wid, projectID: pid)
       {
         return .none
@@ -1005,7 +1133,7 @@ struct HierarchySidebarFeature {
       guard let project = snapshot.projects.first(where: { $0.id == projectID }),
         let gitRoot = project.gitRoot
       else { return .none }
-      let gitRootURL = URL(fileURLWithPath: gitRoot)
+      let gitRootURL = project.gitURL(gitRoot)
       @Dependency(GitWorktreeClient.self) var gitClient
       let client = gitClient
       return .run { send in
@@ -1156,6 +1284,9 @@ struct HierarchySidebarFeature {
         .readSnapshotSync()
         .projects[pending.projectID]?.git?.createScript?.command
       state.pendingWorktrees.append(pending)
+      // Held until the catalog write (or the row's discard), so a reconcile
+      // racing the stream cannot append the new path at the list tail.
+      hierarchyClient.beginWorktreeCreation(Self.creationLease(for: pending))
       return runPendingStream(pending)
 
     case .pendingWorktreeProgress(let id, let line):
@@ -1185,6 +1316,9 @@ struct HierarchySidebarFeature {
 
     case .pendingWorktreeFinished(let id, let path):
       guard let pending = state.pendingWorktrees[id: id] else { return .none }
+      // Released after the catalog write on every exit, success or failure.
+      // A failed write moves the row to a new lease first (see `failCatalogWrite`).
+      defer { hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending)) }
       let pid = pending.projectID
       let displayName = pending.displayName
       let branch = pending.spec.name
@@ -1199,11 +1333,12 @@ struct HierarchySidebarFeature {
         worktreeID = try hierarchyClient.createWorktreeWithGit(
           pid, displayName, branch, pathString)
       } catch let err as GitWorktreeError {
-        state.pendingWorktrees[id: id]?.status = .failed(err)
+        failCatalogWrite(&state, id: id, path: path, error: err)
         return .none
       } catch {
-        state.pendingWorktrees[id: id]?.status = .failed(
-          .commandFailed(command: "catalog", stderr: error.localizedDescription))
+        failCatalogWrite(
+          &state, id: id, path: path,
+          error: .commandFailed(command: "catalog", stderr: error.localizedDescription))
         return .none
       }
 
@@ -1229,13 +1364,19 @@ struct HierarchySidebarFeature {
       // Race guard symmetric with progress / finished arms: a Cancel
       // that lands before the stream's failure event drains drops the
       // late .failed without spuriously logging or mutating state.
-      guard state.pendingWorktrees[id: id] != nil else { return .none }
+      guard let pending = state.pendingWorktrees[id: id] else { return .none }
       state.pendingWorktrees[id: id]?.status = .failed(err)
+      hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
       return .none
 
     case .pendingWorktreeRetryTapped(let id):
       guard let pending = state.pendingWorktrees[id: id] else { return .none }
       guard case .failed = pending.status else { return .none }
+      // The worktree is already on disk: retry only the catalog write, under
+      // the lease the row still holds.
+      if let path = pending.catalogWriteFailedPath {
+        return .send(.pendingWorktreeFinished(id, path))
+      }
       state.pendingWorktrees[id: id]?.status = .running
       state.pendingWorktrees[id: id]?.lastProgressLine = nil
       // Streaming tail is rebuilt from the new attempt's stdout/stderr;
@@ -1243,12 +1384,20 @@ struct HierarchySidebarFeature {
       // detail-pane WorktreeLoadingView (the user is looking at the
       // *current* attempt, not the failed one).
       state.pendingWorktrees[id: id]?.progressLines = []
+      state.pendingWorktrees[id: id]?.attempt += 1
       // Re-read the (now-updated) row so the effect sees `status == .running`.
       guard let restarted = state.pendingWorktrees[id: id] else { return .none }
+      hierarchyClient.beginWorktreeCreation(Self.creationLease(for: restarted))
       return runPendingStream(restarted)
 
     case .pendingWorktreeDiscardTapped(let id):
-      state.pendingWorktrees.remove(id: id)
+      // A row whose catalog write failed still holds its lease; the release
+      // lets the reconcile that follows adopt the on-disk worktree as one
+      // row. Discard never deletes it. Other failed rows already released
+      // their lease, and releasing again is a no-op.
+      if let pending = state.pendingWorktrees.remove(id: id) {
+        hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
+      }
       return .none
 
     case .pendingWorktreeRowTapped:
@@ -1265,19 +1414,24 @@ struct HierarchySidebarFeature {
       // Cancel during the setup phase: `git worktree add` already
       // SUCCEEDED (we hold the materialized path), so discarding now would
       // orphan an on-disk worktree dir that never reaches the catalog.
-      // Kill the running setup script via the stream's cancel token, then
-      // materialize from the stashed path through the SAME finish path
-      // (`pendingWorktreeFinished` writes the catalog + removes the row).
+      // Materialize from the stashed path through the SAME finish path
+      // (`pendingWorktreeFinished` writes the catalog + removes the row),
+      // then kill the running setup script via the stream's cancel token.
       if pending.phase == .runningSetupScript, let path = pending.materializedPath {
-        return .merge(
-          .cancel(id: CancelID.pending(id)),
-          .send(.pendingWorktreeFinished(id, path))
+        // Finish first, cancel second, in this order by contract: canceling
+        // the effect releases this attempt's lease (`runCreationAttempt`),
+        // and a release before the catalog write would let the reconcile it
+        // triggers append the new path at the list tail.
+        return .concatenate(
+          .send(.pendingWorktreeFinished(id, path)),
+          .cancel(id: CancelID.pending(id))
         )
       }
       // Cancel during git-add (not yet materialized): discard cleanly —
       // remove the row and cancel the stream, whose `onTermination`
       // terminates the spawned git child. Nothing reaches the catalog.
       state.pendingWorktrees.remove(id: id)
+      hierarchyClient.endWorktreeCreation(Self.creationLease(for: pending))
       return .cancel(id: CancelID.pending(id))
 
     // MARK: Delegate
@@ -1290,14 +1444,65 @@ struct HierarchySidebarFeature {
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
-    case .cloneRepoSheet, .createWorkspaceSheet:
+    case .cloneRepoSheet, .createWorkspaceSheet, .groupDeletionSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
 
-    case .remoteConnectionSheet:
+    case .remoteProjectSheet:
       // Routed through the top-level Reducer; unreachable here.
       return .none
     }
+  }
+
+  /// The creation lease of a pending row's current attempt. Derived from
+  /// the row id and retry count, so every lifecycle arm and the effect can
+  /// release it without storing it in state.
+  static func creationLease(for pending: PendingWorktree) -> WorktreeCreationLease {
+    WorktreeCreationLease(
+      projectID: pending.projectID, token: "\(pending.id.raw.uuidString)/\(pending.attempt)")
+  }
+
+  /// Marks a row whose catalog write failed after `git worktree add`
+  /// succeeded. The row keeps the project's creation lease until Retry or
+  /// Discard, so a reconcile cannot adopt the path as a second row.
+  ///
+  /// The lease moves to a new attempt token that no effect owns: the caller
+  /// then releases the old token, and a later teardown of this attempt's
+  /// effect (Cancel during the setup script) releases nothing. The new
+  /// token is taken before the old one is released, so the project never
+  /// has zero leases in between.
+  private func failCatalogWrite(
+    _ state: inout State, id: PendingWorktreeID, path: URL, error: GitWorktreeError
+  ) {
+    guard var pending = state.pendingWorktrees[id: id] else { return }
+    pending.status = .failed(error)
+    pending.catalogWriteFailedPath = path
+    pending.attempt += 1
+    state.pendingWorktrees[id: id] = pending
+    hierarchyClient.beginWorktreeCreation(Self.creationLease(for: pending))
+  }
+
+  /// Runs one creation attempt as the cancellable pending effect.
+  ///
+  /// The reducer releases the lease on the action that ends the attempt
+  /// (finished, failed, Cancel, Discard). A canceled effect sends no
+  /// actions (`Send` is a no-op after cancellation), so when the effect is
+  /// torn down by anything else — store or parent teardown — it releases
+  /// the lease itself. Release is idempotent, so a cancel the reducer
+  /// already handled is harmless.
+  private func runCreationAttempt(
+    _ pending: PendingWorktree,
+    _ operation: @escaping @Sendable (Send<Action>) async -> Void
+  ) -> Effect<Action> {
+    let hierarchy = hierarchyClient
+    let lease = Self.creationLease(for: pending)
+    return .run { send in
+      await operation(send)
+      if Task.isCancelled {
+        await hierarchy.endWorktreeCreation(lease)
+      }
+    }
+    .cancellable(id: CancelID.pending(pending.id), cancelInFlight: true)
   }
 
   /// Cancellable streaming effect that consumes `createWorktreeStream`
@@ -1315,7 +1520,7 @@ struct HierarchySidebarFeature {
     }
     let client = gitWorktreeClient
     let id = pending.id
-    return .run { send in
+    return runCreationAttempt(pending) { send in
       do {
         for try await event in client.createWorktreeStream(pending.spec) {
           switch event {
@@ -1345,7 +1550,6 @@ struct HierarchySidebarFeature {
             id, .commandFailed(command: "wt sw", stderr: error.localizedDescription)))
       }
     }
-    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
   }
 
   /// Remote counterpart of `runPendingStream`: create the worktree on the
@@ -1357,7 +1561,7 @@ struct HierarchySidebarFeature {
   private func runRemoteCreate(_ pending: PendingWorktree, host: RemoteHost) -> Effect<Action> {
     let id = pending.id
     let spec = pending.spec
-    return .run { send in
+    return runCreationAttempt(pending) { send in
       let service = RemoteGitService(host: host)
       let gitRoot = spec.repoRoot.path
       let path = spec.baseDirectory.appending(path: spec.name).path
@@ -1389,13 +1593,39 @@ struct HierarchySidebarFeature {
             id, .commandFailed(command: "git worktree add", stderr: error.localizedDescription)))
       }
     }
-    .cancellable(id: CancelID.pending(id), cancelInFlight: true)
+  }
+
+  /// After the delete sheet closed: a group that kept items lists them on
+  /// its row (its persisted `deletion` state shows the Retry); kept
+  /// branches and Workspace-level failures go to the lifecycle toast.
+  private func groupDeletionCompleted(
+    _ completion: WorkspaceGroupDeletionFeature.Completion, state: inout State
+  ) -> Effect<Action> {
+    var notes: [String] = []
+    switch completion {
+    case .group(_, let groupID, let outcome):
+      state.workspaceGroupDeletionFailures[groupID] = outcome.deletedGroup ? nil : outcome.failures
+      if !outcome.keptBranches.isEmpty {
+        notes.append("Kept branches: \(outcome.keptBranches.joined(separator: "; ")).")
+      }
+    case .workspace(_, let outcome):
+      if !outcome.failures.isEmpty {
+        notes.append(
+          "Could not delete \(outcome.failures.joined(separator: "; ")). The workspace stays in the sidebar; retry from each group."
+        )
+      }
+      if !outcome.keptBranches.isEmpty {
+        notes.append("Kept branches: \(outcome.keptBranches.joined(separator: "; ")).")
+      }
+    }
+    if !notes.isEmpty { state.lifecycleErrorToast = notes.joined(separator: " ") }
+    return .none
   }
 
   /// Local git Projects a workspace can check out from.
   private static func workspaceCandidates(in snapshot: Catalog) -> [CreateWorkspaceFeature.Candidate] {
     snapshot.projects.compactMap { project -> CreateWorkspaceFeature.Candidate? in
-      guard project.remoteHost == nil, !project.isWorkspace, let gitRoot = project.gitRoot else {
+      guard project.isOnThisMac, !project.isWorkspace, let gitRoot = project.gitRoot else {
         return nil
       }
       return CreateWorkspaceFeature.Candidate(
@@ -1415,20 +1645,18 @@ struct HierarchySidebarFeature {
     return worktree.path == project.rootPath
   }
 
-  /// `true` when the Worktree is a child checkout of a workspace Project.
-  /// Archive and Remove are worktree-of-this-repo operations — a child's
-  /// repository is elsewhere, and removing it edits the workspace manifest —
-  /// so the plain worktree lifecycle refuses them; the workspace flow owns
-  /// membership changes. The view trims the menu items; this guard covers the
-  /// chords.
-  private func isWorkspaceChild(worktreeID: WorktreeID, projectID: ProjectID) -> Bool {
+  /// `true` for every row of a workspace Project: group rows, references,
+  /// and members. Archive and Remove are worktree-of-this-repo operations —
+  /// a reference is the source's main checkout, a member goes with its
+  /// group, a group row is the group directory — so the plain worktree
+  /// lifecycle refuses them; the workspace flow owns them. The view trims the
+  /// menu items; this guard covers the chords.
+  private func isWorkspaceRow(worktreeID: WorktreeID, projectID: ProjectID) -> Bool {
     let snapshot = hierarchyClient.snapshot()
-    guard
-      let project = snapshot.projects.first(where: { $0.id == projectID }),
-      project.isWorkspace,
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
-    else { return false }
-    return worktree.path != project.rootPath
+    guard let project = snapshot.projects.first(where: { $0.id == projectID }), project.isWorkspace else {
+      return false
+    }
+    return project.worktrees.contains { $0.id == worktreeID }
   }
 
   /// `true` when a source Project's row is the same checkout a workspace
@@ -1439,7 +1667,7 @@ struct HierarchySidebarFeature {
     let snapshot = hierarchyClient.snapshot()
     guard
       let project = snapshot.projects.first(where: { $0.id == projectID }),
-      !project.isWorkspace,
+      !project.isWorkspace, project.isOnThisMac,
       let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else { return false }
     // Answered from the snapshot the reducer already holds, so every

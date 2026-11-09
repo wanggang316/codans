@@ -1,0 +1,410 @@
+{
+  "data": {
+    "currentUser": {
+      "username": "codans-dev"
+    },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMyAxNjo0OTozNC42NDE1MDcwMDAgKzAwMDAiLCJpZCI6IjEifQ"
+        },
+        "nodes": [
+          {
+            "iid": "6",
+            "title": "Allowed failure",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-allow-failure",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/6",
+            "updatedAt": "2026-11-03T16:49:36Z",
+            "detailedMergeStatus": "MERGEABLE",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjEwIn0"
+                },
+                "nodes": [
+                  {
+                    "name": "optional",
+                    "status": "FAILED",
+                    "allowFailure": true,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:35Z",
+                    "finishedAt": "2026-11-03T16:49:36Z",
+                    "webPath": "/codans-e2e/app/-/jobs/11"
+                  },
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:35Z",
+                    "finishedAt": "2026-11-03T16:49:36Z",
+                    "webPath": "/codans-e2e/app/-/jobs/10"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "5",
+            "title": "Running pipeline",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-ci-running",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/5",
+            "updatedAt": "2026-11-03T16:49:36Z",
+            "detailedMergeStatus": "CI_STILL_RUNNING",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "RUNNING",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjgifQ"
+                },
+                "nodes": [
+                  {
+                    "name": "slow",
+                    "status": "RUNNING",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T18:49:44Z",
+                    "finishedAt": null,
+                    "webPath": "/codans-e2e/app/-/jobs/34"
+                  },
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:34Z",
+                    "finishedAt": "2026-11-03T16:49:35Z",
+                    "webPath": "/codans-e2e/app/-/jobs/8"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "4",
+            "title": "Failing pipeline",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-ci-fail",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/4",
+            "updatedAt": "2026-11-03T16:49:35Z",
+            "detailedMergeStatus": "CI_MUST_PASS",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "FAILED",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjYifQ"
+                },
+                "nodes": [
+                  {
+                    "name": "fail",
+                    "status": "FAILED",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T19:20:11Z",
+                    "finishedAt": "2026-11-03T19:20:11Z",
+                    "webPath": "/codans-e2e/app/-/jobs/43"
+                  },
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:33Z",
+                    "finishedAt": "2026-11-03T16:49:34Z",
+                    "webPath": "/codans-e2e/app/-/jobs/6"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "2",
+            "title": "Conflicting MR",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-conflict",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/2",
+            "updatedAt": "2026-11-03T16:49:35Z",
+            "detailedMergeStatus": "CONFLICT",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 1
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjQifQ"
+                },
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:32Z",
+                    "finishedAt": "2026-11-03T16:49:33Z",
+                    "webPath": "/codans-e2e/app/-/jobs/4"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "3",
+            "title": "MR with an open thread",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-discussion",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/3",
+            "updatedAt": "2026-11-03T16:49:35Z",
+            "detailedMergeStatus": "DISCUSSIONS_NOT_RESOLVED",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjUifQ"
+                },
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:32Z",
+                    "finishedAt": "2026-11-03T16:49:33Z",
+                    "webPath": "/codans-e2e/app/-/jobs/5"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "1",
+            "title": "Open MR",
+            "state": "opened",
+            "draft": false,
+            "sourceBranch": "feat-open",
+            "targetBranch": "main",
+            "webUrl": "http://192.168.2.158:8929/codans-e2e/app/-/merge_requests/1",
+            "updatedAt": "2026-11-03T16:49:34Z",
+            "detailedMergeStatus": "MERGEABLE",
+            "squashReadOnly": false,
+            "squashOnMerge": false,
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": []
+            },
+            "diffStats": [
+              {
+                "additions": 1,
+                "deletions": 0
+              }
+            ],
+            "commitCount": 1,
+            "author": {
+              "username": "codans-dev"
+            },
+            "sourceProject": {
+              "fullPath": "codans-e2e/app"
+            },
+            "targetProject": {
+              "fullPath": "codans-e2e/app",
+              "webUrl": "http://192.168.2.158:8929/codans-e2e/app"
+            },
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": {
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": "eyJpZCI6IjEifQ"
+                },
+                "nodes": [
+                  {
+                    "name": "pass",
+                    "status": "SUCCESS",
+                    "allowFailure": false,
+                    "manualJob": false,
+                    "startedAt": "2026-11-03T16:49:31Z",
+                    "finishedAt": "2026-11-03T16:49:32Z",
+                    "webPath": "/codans-e2e/app/-/jobs/1"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

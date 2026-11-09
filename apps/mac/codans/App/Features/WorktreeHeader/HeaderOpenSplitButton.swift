@@ -40,11 +40,8 @@ struct HeaderOpenSplitButton: View {
       openInMenu
     } label: {
       // Icon only; the editor name lives in the tooltip and accessibility
-      // label. The chord hint hangs off the icon itself so it sits right
-      // after the glyph, well left of the system chevron, and reads as the
-      // primary "Open in <Editor>" action's chord rather than the dropdown's.
+      // label, which also carries the chord. Holding ⌘ shows no hint here.
       primaryIcon
-        .commandKeyHint(.openInEditor)
     } primaryAction: {
       store.send(
         .openDefaultEditorTapped(
@@ -57,7 +54,7 @@ struct HeaderOpenSplitButton: View {
     .task { editorStore.send(.onAppear) }
   }
 
-  // MARK: - Remote (Server-project) variant
+  // MARK: - Remote Project variant
 
   /// The editor a remote open will land on, mirroring the service cascade so
   /// the label matches the primary tap. nil = no SSH-capable editor installed.
@@ -79,7 +76,6 @@ struct HeaderOpenSplitButton: View {
         bundleIdentifier: primary.bundleIdentifier,
         fallbackSystemName: "arrow.up.right.square"
       )
-      .commandKeyHint(.openInEditor)
     } primaryAction: {
       store.send(
         .openDefaultEditorTapped(

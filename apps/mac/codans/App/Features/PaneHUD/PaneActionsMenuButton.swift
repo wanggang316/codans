@@ -1,0 +1,153 @@
+import AppKit
+import CodansCore
+import SwiftUI
+
+/// Per-pane actions menu. Its button sits in the pane card header, left of
+/// the close button (`PaneCommandQueueChrome` places it there).
+///
+/// The menu is a native `NSMenu`, pulled down under the button and built
+/// when it opens, so every row reflects the pane as it is at that moment
+/// (Copy needs a live selection). The first rows are the pane's own affairs:
+/// handing its agent's task off and opening its command queue. Under them sits
+/// every action the terminal surface offers, added by the surface itself
+/// (`GhosttySurfaceView.addPaneActionItems(to:)`), so this menu and the
+/// right-click menu can never offer different surface actions. The header
+/// button is how the actions are found; right-click is how they are reached
+/// quickly once known.
+struct PaneActionsMenuButton: View {
+  let paneID: PaneID
+  /// The pane's live terminal surface, which services the surface rows.
+  /// Without one (a pane still starting) the menu offers only the pane's
+  /// own rows.
+  let surface: PaneSurface?
+  /// Called when the button is pressed, before the menu opens.
+  var onMenuPressed: () -> Void = {}
+
+  @Environment(HierarchyManager.self) private var hierarchyManager
+  @Environment(AgentStateStore.self) private var agentStateStore: AgentStateStore?
+  @Environment(\.paneHUDActions) private var actions
+  @Environment(\.resolvedShortcuts) private var resolvedShortcuts
+
+  @State private var isHovered = false
+  @State private var isMenuOpen = false
+  @State private var anchor = PaneMenuAnchor()
+
+  var body: some View {
+    Button(action: openMenu) {
+      Image(systemName: "ellipsis")
+        .font(.system(size: PaneCardMetrics.actionGlyphSize, weight: .regular))
+        .foregroundStyle(isHovered || isMenuOpen ? Color.primary : Color.secondary)
+        .frame(width: PaneCardMetrics.actionButtonSize, height: PaneCardMetrics.actionButtonSize)
+        // Same hover fill as the other header buttons. It stays while the
+        // menu is open, as a pressed toolbar button does.
+        .background(
+          Capsule()
+            .fill(
+              Color.primary.opacity(isHovered || isMenuOpen ? PaneCardMetrics.hoverFillOpacity : 0))
+        )
+        .contentShape(.capsule)
+    }
+    .buttonStyle(.plain)
+    .background(PaneMenuAnchorView(anchor: anchor))
+    .onHover { isHovered = $0 }
+    .help("Pane Actions")
+    .accessibilityIdentifier("pane_hud.toggle")
+    .accessibilityLabel("Pane Actions")
+  }
+
+  private func openMenu() {
+    onMenuPressed()
+    guard
+      let view = anchor.view,
+      let model = PaneHUDModel.resolve(
+        paneID: paneID, in: hierarchyManager.catalog,
+        agent: agentStateStore?.entries[paneID]?.kind)
+    else { return }
+    let menu = makeMenu(model)
+    // A pull-down: the menu's top-trailing corner under the button's
+    // bottom-trailing corner, so it opens inward from the card edge.
+    let x = view.bounds.maxX - menu.size.width
+    let y = view.isFlipped ? view.bounds.maxY + 4 : view.bounds.minY - 4
+    isMenuOpen = true
+    menu.popUp(positioning: nil, at: NSPoint(x: x, y: y), in: view)
+    isMenuOpen = false
+  }
+
+  private func makeMenu(_ model: PaneHUDModel) -> NSMenu {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+
+    let handOff = NSMenuItem.closure(title: "Hand Off…") { [actions, paneID] in
+      actions.handOff(paneID)
+    }
+    handOff.image = NSImage(systemSymbolName: "arrow.left.arrow.right", accessibilityDescription: nil)
+    handOff.isEnabled = model.canHandOff
+    handOff.toolTip = model.handOffBlockedReason
+    handOff.setAccessibilityIdentifier("pane_hud.hand_off")
+    menu.addItem(handOff)
+
+    let queue = NSMenuItem.closure(title: "Command Queue…") { [actions, paneID] in
+      actions.commandQueue(paneID)
+    }
+    queue.image = NSImage(systemSymbolName: CommandQueueStyle.symbol, accessibilityDescription: nil)
+    showShortcut(.toggleCommandQueue, on: queue)
+    queue.setAccessibilityIdentifier("pane_hud.command_queue")
+    menu.addItem(queue)
+
+    if let surfaceView = surface?.view {
+      menu.addItem(.separator())
+      surfaceView.addPaneActionItems(to: menu)
+    }
+    return menu
+  }
+
+  /// Display only: an item of a pop-up menu answers its key equivalent
+  /// only while the menu is open. The main menu's item does the work.
+  private func showShortcut(_ command: CommandID, on item: NSMenuItem) {
+    guard let shortcut = resolvedShortcuts[command], shortcut.isEnabled,
+      let binding = shortcut.binding,
+      let key = ShortcutDisplay.keyEquivalent(for: binding.keyCode)
+    else { return }
+    item.keyEquivalent = String(key.character)
+    item.keyEquivalentModifierMask = Self.modifierFlags(binding.modifiers)
+  }
+
+  private static func modifierFlags(_ mask: ModifierMask) -> NSEvent.ModifierFlags {
+    var flags: NSEvent.ModifierFlags = []
+    if mask.contains(.command) { flags.insert(.command) }
+    if mask.contains(.option) { flags.insert(.option) }
+    if mask.contains(.control) { flags.insert(.control) }
+    if mask.contains(.shift) { flags.insert(.shift) }
+    return flags
+  }
+}
+
+/// Holds the AppKit view the actions menu is positioned against.
+@MainActor
+final class PaneMenuAnchor {
+  weak var view: NSView?
+
+  // Explicit (nonisolated) deinit: SwiftUI releases this `@State` object
+  // inside a view-tree teardown, where a synthesized isolated deinit
+  // double-frees (see `PaneMoveSession`).
+  deinit {}
+}
+
+private struct PaneMenuAnchorView: NSViewRepresentable {
+  let anchor: PaneMenuAnchor
+
+  func makeNSView(context: Context) -> NSView {
+    let view = PassThroughView()
+    anchor.view = view
+    return view
+  }
+
+  func updateNSView(_ nsView: NSView, context: Context) {
+    anchor.view = nsView
+  }
+
+  /// Takes no clicks: the SwiftUI button above it owns them.
+  private final class PassThroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+  }
+}

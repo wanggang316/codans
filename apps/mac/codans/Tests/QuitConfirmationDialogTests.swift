@@ -25,6 +25,7 @@ struct QuitConfirmationDialogTests {
     #expect(State.working.isMidTask)
     #expect(State.blocked.isMidTask)
     #expect(!State.idle.isMidTask)
-    #expect(!State.finished.isMidTask)
+    #expect(!State.done.isMidTask)
+    #expect(!State.error.isMidTask)
   }
 }

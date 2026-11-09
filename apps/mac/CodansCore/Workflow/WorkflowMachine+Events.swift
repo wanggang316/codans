@@ -55,7 +55,7 @@ extension WorkflowMachine {
   private mutating func handleRoleState(
     _ role: String, observed: WorkflowWaitCondition, _ transition: inout Transition
   ) {
-    run.roleStates[role] = observed == .exit ? "finished" : observed.rawValue
+    run.roleStates[role] = observed == .exit ? "gone" : observed.rawValue
     guard run.status == .running, isWaiting(on: role), let step = run.currentStep else { return }
     switch run.phase {
     case .waitingForRole(_, let ordinal):
@@ -126,14 +126,16 @@ extension WorkflowMachine {
       &transition)
   }
 
-  private mutating func raiseRoleGone(_ role: String, _ transition: inout Transition) {
+  private mutating func raiseRoleGone(
+    _ role: String, message: String? = nil, _ transition: inout Transition
+  ) {
     stopWaiting(&transition)
     var actions: [WorkflowUserAction] = [.skip, .cancel]
     if run.bindings[role]?.isLaunch == true {
       actions.insert(.relaunch, at: 0)
     }
     raiseAttention(
-      attention(.roleGone, message: "the pane for \(role) is gone", actions: actions), &transition)
+      attention(.roleGone, message: message ?? "the pane for \(role) is gone", actions: actions), &transition)
   }
 
   // MARK: - Injection
@@ -320,6 +322,10 @@ extension WorkflowMachine {
         log("step \(activation.stepID): delivery timed out (on-timeout: cancel)", &transition)
         performCancel(&transition)
       }
+    case .agentExited:
+      raiseRoleGone(
+        activation.role, message: "the agent for \(activation.role) exited without delivering \(activation.delivery)",
+        &transition)
     }
   }
 

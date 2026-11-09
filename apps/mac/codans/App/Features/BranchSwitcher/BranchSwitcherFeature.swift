@@ -27,7 +27,14 @@ struct BranchSwitcherFeature {
   struct State: Equatable {
     var worktreeID: WorktreeID?
     var worktreePath: String?
+    /// Host of the worktree's Project; `nil` = This Mac. Git calls name it so
+    /// they run on that machine, also when another Host has the same path
+    /// (ADR 0006).
+    var hostID: HostID?
     var projectID: ProjectID?
+
+    /// The URL for a git call on `path` in this worktree's Project.
+    func gitURL(_ path: String) -> URL { GitLocation.url(path: path, hostID: hostID) }
     var inventory: BranchInventory?
     var inventoryLoading: Bool = false
     var inventoryError: GitError?
@@ -78,6 +85,7 @@ struct BranchSwitcherFeature {
       projectID: ProjectID?,
       worktreeID: WorktreeID?,
       path: String?,
+      hostID: HostID? = nil,
       blockedBranches: [String: String]
     )
     case popoverTapped
@@ -125,7 +133,7 @@ struct BranchSwitcherFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       switch action {
-      case .worktreeChanged(let projectID, let worktreeID, let path, let blockedBranches):
+      case .worktreeChanged(let projectID, let worktreeID, let path, let hostID, let blockedBranches):
         // Replace identifiers; drop every cache so the next popover open
         // re-fetches against the new worktree. Cancel every in-flight
         // effect — a stale switch in particular must not paint a banner
@@ -133,6 +141,7 @@ struct BranchSwitcherFeature {
         state.projectID = projectID
         state.worktreeID = worktreeID
         state.worktreePath = path
+        state.hostID = hostID
         state.inventory = nil
         state.inventoryLoading = false
         state.inventoryError = nil
@@ -183,12 +192,12 @@ struct BranchSwitcherFeature {
           // close + reopen always renders a fresh load, never the stale
           // empty-state-with-error copy.
           state.inventoryError = nil
-          effects.append(loadInventory(at: path))
+          effects.append(loadInventory(at: state.gitURL(path)))
         }
         if state.recentCommits == nil, !state.commitsLoading {
           state.commitsLoading = true
           state.commitsError = nil
-          effects.append(loadRecentCommits(at: path))
+          effects.append(loadRecentCommits(at: state.gitURL(path)))
         }
         return effects.isEmpty ? .none : .merge(effects)
 
@@ -215,7 +224,7 @@ struct BranchSwitcherFeature {
         return .merge(
           .cancel(id: CancelID.inventory),
           .cancel(id: CancelID.commits),
-          switchTo(target, at: path)
+          switchTo(target, at: state.gitURL(path))
         )
 
       case .renameButtonTapped(let branchName):
@@ -246,7 +255,7 @@ struct BranchSwitcherFeature {
           return .send(.renameCancelled)
         }
         state.renameInFlight = true
-        return renameBranchEffect(from: original, to: trimmed, worktreePath: path)
+        return renameBranchEffect(from: original, to: trimmed, worktreeURL: state.gitURL(path))
 
       case .renameCancelled:
         state.renamingBranch = nil
@@ -268,7 +277,7 @@ struct BranchSwitcherFeature {
           state.inventory = nil
           state.inventoryError = nil
           state.inventoryLoading = true
-          return loadInventory(at: path)
+          return loadInventory(at: state.gitURL(path))
         }
         return .none
 
@@ -302,7 +311,7 @@ struct BranchSwitcherFeature {
           return .send(.newBranchCancelled)
         }
         state.newBranchInFlight = true
-        return createAndSwitchBranchEffect(name: trimmed, baseName: baseName, worktreePath: path)
+        return createAndSwitchBranchEffect(name: trimmed, baseName: baseName, worktreeURL: state.gitURL(path))
 
       case .newBranchCancelled:
         state.creatingBranchFrom = nil
@@ -392,10 +401,10 @@ struct BranchSwitcherFeature {
 
   // MARK: - Effect builders
 
-  private func loadInventory(at worktreePath: String) -> Effect<Action> {
+  private func loadInventory(at worktreeURL: URL) -> Effect<Action> {
     .run { [gitService] send in
       do {
-        let inventory = try await gitService.listAllBranches(URL(fileURLWithPath: worktreePath))
+        let inventory = try await gitService.listAllBranches(worktreeURL)
         await send(.inventoryLoaded(.success(inventory)))
       } catch let error as GitError {
         await send(.inventoryLoaded(.failure(error)))
@@ -406,11 +415,11 @@ struct BranchSwitcherFeature {
     .cancellable(id: CancelID.inventory, cancelInFlight: true)
   }
 
-  private func loadRecentCommits(at worktreePath: String) -> Effect<Action> {
+  private func loadRecentCommits(at worktreeURL: URL) -> Effect<Action> {
     .run { [gitService] send in
       do {
         let page = try await gitService.log(
-          URL(fileURLWithPath: worktreePath),
+          worktreeURL,
           LogPage.Cursor(offset: 0, limit: 10)
         )
         await send(.commitsLoaded(.success(page.commits)))
@@ -423,10 +432,10 @@ struct BranchSwitcherFeature {
     .cancellable(id: CancelID.commits, cancelInFlight: true)
   }
 
-  private func switchTo(_ target: BranchSwitchTarget, at worktreePath: String) -> Effect<Action> {
+  private func switchTo(_ target: BranchSwitchTarget, at worktreeURL: URL) -> Effect<Action> {
     .run { [gitService] send in
       do {
-        try await gitService.switchBranch(target, URL(fileURLWithPath: worktreePath))
+        try await gitService.switchBranch(target, worktreeURL)
         // Success path emits nothing — RootFeature forwards
         // `headChangedForCurrentWorktree` from the head watcher, which
         // clears the spinner and resets the caches.
@@ -442,14 +451,14 @@ struct BranchSwitcherFeature {
   private func renameBranchEffect(
     from oldName: String,
     to newName: String,
-    worktreePath: String
+    worktreeURL: URL
   ) -> Effect<Action> {
     .run { [gitService] send in
       do {
         try await gitService.renameBranch(
           oldName,
           newName,
-          URL(fileURLWithPath: worktreePath)
+          worktreeURL
         )
         await send(.renameSucceeded)
       } catch let error as GitError {
@@ -464,14 +473,14 @@ struct BranchSwitcherFeature {
   private func createAndSwitchBranchEffect(
     name newName: String,
     baseName: String,
-    worktreePath: String
+    worktreeURL: URL
   ) -> Effect<Action> {
     .run { [gitService] send in
       do {
         try await gitService.createAndSwitchBranch(
           newName,
           baseName,
-          URL(fileURLWithPath: worktreePath)
+          worktreeURL
         )
         await send(.newBranchSucceeded)
       } catch let error as GitError {

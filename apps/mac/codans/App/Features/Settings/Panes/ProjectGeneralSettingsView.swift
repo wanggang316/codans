@@ -3,10 +3,11 @@ import CodansCore
 import ComposableArchitecture
 import SwiftUI
 
-/// Project General detail pane.
+/// A Project's Settings page.
 ///
-/// Sibling Sections rendered in fixed order: Editor, Worktree, GitHub,
-/// Environment. Worktree and GitHub render only when
+/// Sibling Sections rendered in fixed order: General, Workspace, Editor,
+/// Worktree, Git Platform, Environment, the lifecycle scripts, then Commands.
+/// Worktree, Git Platform, and the lifecycle scripts render only when
 /// `ProjectKind == .gitRepo`; the design doc's "kind drives sections, not
 /// labels" rule means we never paint a "this is a git repo" affordance —
 /// the sections simply appear or don't.
@@ -46,25 +47,26 @@ struct ProjectGeneralSettingsView: View {
     case workspace
     case editor
     case worktree
-    case github
+    case gitPlatform
     case environment
     case lifecycle
+    case commands
   }
 
-  /// Pure visibility logic. Worktree / GitHub / Lifecycle gate
+  /// Pure visibility logic. Worktree / Git Platform / Lifecycle gate
   /// on `kind == .gitRepo`, Workspace on `kind == .workspace`; everything
   /// else is always visible.
   nonisolated static func visibleSections(for kind: ProjectKind) -> Set<SectionID> {
     switch kind {
     case .dir:
-      return [.general, .editor, .environment]
+      return [.general, .editor, .environment, .commands]
     case .workspace:
-      // A workspace root has no repository of its own: the worktree, GitHub,
+      // A workspace root has no repository of its own: the worktree, Git Platform,
       // and lifecycle sections all read `Project.gitRoot`, which is nil by
-      // construction. Its own section lists the checkouts it holds.
-      return [.general, .workspace, .editor, .environment]
-    case .gitRepo, .server:
-      // Server projects manage worktrees over SSH just like a local git repo,
+      // construction. Its own section lists its source projects.
+      return [.general, .workspace, .editor, .environment, .commands]
+    case .gitRepo, .remote:
+      // Remote Projects manage worktrees over SSH just like a local git repo,
       // so they surface the full section set — keeping remote management
       // consistent with local.
       return Set(SectionID.allCases).subtracting([.workspace])
@@ -149,6 +151,20 @@ struct ProjectGeneralSettingsView: View {
   }
 
   var body: some View {
+    ScrollViewReader { proxy in
+      form
+        .onChange(of: store.revealsCommands, initial: true) { _, reveals in
+          guard reveals else { return }
+          // Next runloop tick, so the Form has laid out the section first.
+          Task { @MainActor in
+            proxy.scrollTo(SectionID.commands, anchor: .top)
+            store.send(.commandsRevealed)
+          }
+        }
+    }
+  }
+
+  private var form: some View {
     Form {
       if visible.contains(.general) {
         generalSection
@@ -162,14 +178,18 @@ struct ProjectGeneralSettingsView: View {
       if visible.contains(.worktree) {
         worktreeSection
       }
-      if visible.contains(.github) {
-        githubSection
+      if visible.contains(.gitPlatform) {
+        gitPlatformSection
       }
       if visible.contains(.environment) {
         environmentSection
       }
       if visible.contains(.lifecycle) {
         lifecycleSections
+      }
+      if visible.contains(.commands) {
+        ProjectCommandsSection(projectID: projectID, store: store)
+          .id(SectionID.commands)
       }
 
       if let error = store.state.lastWriteFailure, !error.isEmpty {
@@ -180,6 +200,24 @@ struct ProjectGeneralSettingsView: View {
       }
     }
     .formStyle(.grouped)
+    // Remove… on a Workspace source row; on the Form, not on its Section.
+    .confirmationDialog(
+      store.pendingSourceRemoval?.title ?? "Remove from workspace?",
+      isPresented: Binding(
+        get: { store.pendingSourceRemoval != nil },
+        set: { if !$0 { store.send(.workspaceSourceRemoveCancelled) } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Remove from Workspace", role: .destructive) {
+        store.send(.workspaceSourceRemoveConfirmed)
+      }
+      Button("Cancel", role: .cancel) {
+        store.send(.workspaceSourceRemoveCancelled)
+      }
+    } message: {
+      Text(store.pendingSourceRemoval?.message ?? "")
+    }
     .task(id: projectID) { await loadBaseRefOptionsIfNeeded() }
   }
 
@@ -188,10 +226,10 @@ struct ProjectGeneralSettingsView: View {
   /// on dir Projects keeps non-git Projects from shelling out.
   private func loadBaseRefOptionsIfNeeded() async {
     guard visible.contains(.worktree),
-      let gitRoot = hierarchyManager.catalog.projects
-        .first(where: { $0.id == projectID })?.gitRoot
+      let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }),
+      let gitRoot = project.gitRoot
     else { return }
-    let repoRoot = URL(fileURLWithPath: gitRoot)
+    let repoRoot = project.gitURL(gitRoot)
     async let refs = (try? gitWorktreeClient.branchRefs(repoRoot)) ?? []
     async let auto = (try? gitWorktreeClient.defaultRemoteBranchRef(repoRoot)) ?? nil
     let loadedRefs = await refs
@@ -236,23 +274,23 @@ struct ProjectGeneralSettingsView: View {
     }
 
     // Server (remote) connection facts, read-only: the connection is edited
-    // through the sidebar's "Edit Connection…" (which re-validates over SSH),
+    // through the sidebar's "Edit Remote Project…" (which re-validates over SSH),
     // not through free-form fields here.
     if let host = projectRemoteHost {
-      Section("Server") {
+      Section("Remote") {
         LabeledContent("Host", value: host.alias)
         LabeledContent("User", value: host.username ?? "default")
         LabeledContent("Port", value: host.port.map(String.init) ?? "22")
         LabeledContent("Remote path", value: projectRemotePath)
           .truncationMode(.middle)
-        Text("Edit via the project's ⋯ menu → Edit Connection…. Authentication uses your SSH config and agent.")
+        Text("Edit via the project's ⋯ menu → Edit Remote Project…. Authentication uses your SSH config and agent.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
   }
 
-  /// The SSH host for a Server project, `nil` for local ones — gates the
+  /// The SSH host for a Remote Project, `nil` for local ones — gates the
   /// read-only Server section above.
   private var projectRemoteHost: RemoteHost? {
     hierarchyManager.catalog.projects.first(where: { $0.id == projectID })?.remoteHost
@@ -307,58 +345,126 @@ struct ProjectGeneralSettingsView: View {
 
   // MARK: - Workspace
 
-  /// The checkouts inside a workspace, one row each in the shape the New
-  /// Workspace sheet uses: the source's icon, the folder, the repository it
-  /// is a checkout of, and its branch. Read from the catalog rows the
-  /// sidebar shows, so it follows adds and drops as they happen.
+  /// The source projects of a workspace, one row each: the source's icon,
+  /// its name, the live branch of its main checkout, and its path, with
+  /// Remove… on the trailing side. Read from the reference rows of the
+  /// `default` group, so it follows adds and removes as they happen. Group
+  /// checkouts are not listed: a group is deleted from the sidebar as a
+  /// whole.
   private var workspaceSection: some View {
-    Section("Projects") {
-      let checkouts = workspaceCheckouts
-      if checkouts.isEmpty {
-        Text("No projects yet. Add one from the workspace's + in the sidebar.")
+    Section {
+      let sources = workspaceSources
+      if sources.isEmpty {
+        Text("No projects yet.")
           .foregroundStyle(.secondary)
       }
-      ForEach(checkouts, id: \.id) { checkout in
-        HStack(spacing: 10) {
-          let source = checkout.sourceGitRoot.flatMap { sourceProject(for: $0) }
-          ProjectIconView(icon: source?.icon, color: source?.color, size: 16)
-            .frame(width: 18)
-          VStack(alignment: .leading, spacing: 3) {
-            // Folder and branch together on top, source path beneath: the
-            // pair names the checkout, while the path is the long,
-            // middle-truncated line you only read when you need it.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-              Text(checkout.name)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .layoutPriority(1)
-              WorkspaceCheckoutLine(checkout: .checkedOut(branch: checkout.branch))
-            }
-            if let root = checkout.sourceGitRoot {
-              Text((root as NSString).abbreviatingWithTildeInPath)
+      ForEach(sources, id: \.id) { reference in
+        workspaceSourceRow(reference)
+      }
+    } header: {
+      Text("Projects")
+      Text("Their main checkouts make up the default group. New groups check out every project listed here.")
+    } footer: {
+      workspaceAddSourceButtons
+    }
+  }
+
+  private func workspaceSourceRow(_ reference: Worktree) -> some View {
+    LabeledContent {
+      Button("Remove…") {
+        store.send(.workspaceSourceRemoveTapped(reference.id))
+      }
+    } label: {
+      HStack(spacing: 10) {
+        let source = sourceProject(for: reference.sourceGitRoot ?? reference.path)
+        ProjectIconView(icon: source?.icon, color: source?.color, size: 16)
+          .frame(width: 18)
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(reference.name)
+              .fontWeight(.medium)
+              .lineLimit(1)
+              .layoutPriority(1)
+            if isUnavailable(reference) {
+              Text("Missing")
+                .foregroundStyle(.orange)
+                .help("The source folder is not on disk.")
+            } else {
+              Label(reference.branch ?? "detached", systemImage: "arrow.triangle.branch")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .help(root)
+            }
+          }
+          Text(((reference.sourceGitRoot ?? reference.path) as NSString).abbreviatingWithTildeInPath)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(reference.sourceGitRoot ?? reference.path)
+        }
+      }
+      .padding(.vertical, 2)
+    }
+  }
+
+  /// Add Project lists the open local repositories that are not in the
+  /// workspace yet; Add Folder… takes any repository folder on this Mac.
+  private var workspaceAddSourceButtons: some View {
+    let candidates = workspaceSourceCandidates
+    return HStack(spacing: 8) {
+      Menu {
+        ForEach(candidates, id: \.id) { candidate in
+          Button(candidate.name) {
+            if let gitRoot = candidate.gitRoot {
+              store.send(.workspaceAddSourceTapped(path: gitRoot))
             }
           }
         }
-        .padding(.vertical, 2)
+      } label: {
+        Text("Add Project")
       }
+      .fixedSize()
+      .disabled(candidates.isEmpty)
+      .help(
+        candidates.isEmpty
+          ? "Every local repository open in codans is already in the workspace"
+          : "Add a project that is open in codans")
+      Button("Add Folder…") {
+        store.send(.workspaceAddFolderTapped)
+      }
+      .help("Add a repository folder from this Mac")
     }
+    .foregroundStyle(.primary)
   }
 
-  /// The open project a checkout comes from, when its repository is one.
+  /// The open project on This Mac a reference points at, when its
+  /// repository is one. A Remote Project with the same path never matches.
   private func sourceProject(for gitRoot: String) -> Project? {
-    hierarchyManager.catalog.projects.first { $0.gitRoot == gitRoot }
+    hierarchyManager.catalog.localProject(gitRoot: gitRoot, canonicalize: HierarchyManager.canonicalPath)
   }
 
-  private var workspaceCheckouts: [Worktree] {
-    guard let project = hierarchyManager.catalog.projects.first(where: { $0.id == projectID }) else {
-      return []
+  private var workspaceProject: Project? {
+    hierarchyManager.catalog.projects.first { $0.id == projectID }
+  }
+
+  private var workspaceSources: [Worktree] {
+    workspaceProject?.worktrees.filter { !$0.archived && $0.workspaceSlot?.role == .reference } ?? []
+  }
+
+  private func isUnavailable(_ reference: Worktree) -> Bool {
+    workspaceProject?.unavailableWorkspaceRows.contains(reference.id) ?? false
+  }
+
+  /// Local repositories a workspace can take as sources: not remote, not a
+  /// workspace, and not listed already.
+  private var workspaceSourceCandidates: [Project] {
+    let listed = Set(workspaceSources.map { $0.sourceGitRoot ?? $0.path })
+    return hierarchyManager.catalog.projects.filter { project in
+      guard project.isOnThisMac, !project.isWorkspace, let gitRoot = project.gitRoot else { return false }
+      return !listed.contains(gitRoot)
     }
-    return project.worktrees.filter { !$0.archived && $0.path != project.rootPath }
   }
 
   // MARK: - Editor
@@ -571,11 +677,11 @@ struct ProjectGeneralSettingsView: View {
     )
   }
 
-  // MARK: - GitHub
+  // MARK: - Git Platform
 
   @ViewBuilder
-  private var githubSection: some View {
-    Section("GitHub") {
+  private var gitPlatformSection: some View {
+    Section {
       OptionalOverridePicker<MergeStrategy>(
         title: "Merge strategy",
         selection: mergeStrategyBinding,
@@ -589,7 +695,7 @@ struct ProjectGeneralSettingsView: View {
       )
 
       OptionalOverridePicker<MergedWorktreeAction>(
-        title: "After merging a PR",
+        title: "After merging",
         selection: postMergeActionBinding,
         inheritedValue: general.postMergeAction,
         options: MergedWorktreeAction.allCases.map {
@@ -601,6 +707,15 @@ struct ProjectGeneralSettingsView: View {
       )
 
       Toggle("Disable GitHub integration for this Project", isOn: githubDisabledBinding)
+    } header: {
+      Text("Git Platform")
+    } footer: {
+      Text(
+        "codans finds the Git Platform from the origin remote. For a host that neither gh nor glab "
+          + "knows, add a Git Platform alias in Settings › Git Platforms."
+      )
+      .font(.footnote)
+      .foregroundStyle(.secondary)
     }
   }
 

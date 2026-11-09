@@ -44,6 +44,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.mode = .now }
     await store.send(.draftChanged("ls -la")) { $0.draft = "ls -la" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     // No trailing newline — `sendCommand` owns the Return keypress.
     #expect(recorder.sent == ["ls -la"])
@@ -56,6 +57,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
     await store.send(.draftChanged("make test")) { $0.draft = "make test" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.sent.isEmpty)
     #expect(recorder.queue.map(\.text) == ["make test"])
@@ -75,6 +77,7 @@ struct CommandQueueFeatureTests {
     }
     await store.send(.draftChanged("/compact")) { $0.draft = "/compact" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.queue.first?.timing == .scheduled(at: fireAt, repeatEvery: 1800))
   }
@@ -90,6 +93,7 @@ struct CommandQueueFeatureTests {
     }
     await store.send(.draftChanged("/compact")) { $0.draft = "/compact" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.queue.first?.timing == .scheduled(at: fireAt, repeatEvery: nil))
   }
@@ -114,6 +118,7 @@ struct CommandQueueFeatureTests {
     let draft = "\nRefactor the parser.\n\nKeep the public API.\n"
     await store.send(.draftChanged(draft)) { $0.draft = draft }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     // Only the ends are trimmed. The blank line is part of the prompt, and
     // `sendCommand` delivers the body as one paste.
@@ -127,6 +132,7 @@ struct CommandQueueFeatureTests {
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
     await store.send(.draftChanged("next")) { $0.draft = "next" }
     await store.send(.submitted) { $0.draft = "" }
+    await store.receive(.delegate(.submitted))
 
     #expect(recorder.queue.map(\.text) == ["already there", "next"])
   }
@@ -180,5 +186,48 @@ struct CommandQueueFeatureTests {
     let recorder = Recorder()
     let store = Self.makeStore(paneID: PaneID(), recorder: recorder)
     await store.send(.repeatAmountChanged(0)) { $0.repeatAmount = 1 }
+  }
+
+  @Test
+  func selectedFilesAppendQuotedPathsWithoutSending() async {
+    let recorder = Recorder()
+    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review" }
+    await store.send(
+      .filesSelected(
+        [
+          URL(fileURLWithPath: "/tmp/my file.txt"),
+          URL(fileURLWithPath: "/tmp/it's.txt"),
+        ],
+        selection: nil
+      )
+    ) {
+      $0.draft = "Review '/tmp/my file.txt' '/tmp/it'\\''s.txt'"
+    }
+    #expect(recorder.sent.isEmpty)
+    #expect(recorder.queue.isEmpty)
+  }
+
+  @Test
+  func fileSelectionPreservesTrailingNewline() async {
+    let recorder = Recorder()
+    let store = Self.makeStore(paneID: PaneID(), recorder: recorder) { $0.draft = "Review\n" }
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/报告.txt")], selection: nil)) {
+      $0.draft = "Review\n'/tmp/报告.txt'"
+    }
+  }
+
+  @Test
+  func emptyAndNonFileSelectionsDoNotChangeDraft() async {
+    let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Keep this" }
+    await store.send(.filesSelected([], selection: 0..<0))
+    await store.send(.filesSelected([URL(string: "https://example.com/file")!], selection: nil))
+  }
+
+  @Test
+  func selectedFilesReplaceTheSelection() async {
+    let store = Self.makeStore(paneID: PaneID(), recorder: Recorder()) { $0.draft = "Open FILE now" }
+    await store.send(.filesSelected([URL(fileURLWithPath: "/tmp/a.txt")], selection: 5..<9)) {
+      $0.draft = "Open '/tmp/a.txt' now"
+    }
   }
 }

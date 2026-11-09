@@ -56,6 +56,22 @@ nonisolated struct HierarchyClient: Sendable {
     @MainActor @Sendable (
       _ projectID: ProjectID, _ tags: Set<TagID>
     ) -> Void
+  var setSidebarFilter: @MainActor @Sendable (SidebarFilter) -> Void
+
+  // MARK: - Host list (ADR 0003)
+
+  /// The Host list, in the order of addition. This Mac is not in it.
+  var hosts: @MainActor @Sendable () -> [HostRecord]
+  /// Appends a Host record. Throws `HostRecordError` for invalid fields or a
+  /// duplicate (Host, Username, Port).
+  var addHost: @MainActor @Sendable (_ record: HostRecord) throws -> Void
+  /// Replaces the Host record with the same id; every Project on it gets
+  /// the new connection. Throws `HostRecordError` like `addHost`.
+  var updateHost: @MainActor @Sendable (_ record: HostRecord) throws -> Void
+  /// Deletes a Host record. Throws `HostRecordError.inUse` while a Project
+  /// refers to it.
+  var removeHost: @MainActor @Sendable (_ id: HostID) throws -> Void
+
   /// Replaces the catalog-wide active tag filter. Empty `.tags(set)` is
   /// normalized to `.all`.
   var setActiveTagFilter: @MainActor @Sendable (_ filter: TagFilter) -> Void
@@ -67,32 +83,59 @@ nonisolated struct HierarchyClient: Sendable {
       _ name: String, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
   /// Add a Server (remote SSH) project. `rootPath` / `gitRoot` are remote
-  /// path strings; `remoteHost` marks the project `.server`-kind. Forwards to
-  /// `HierarchyManager.addServerProject`.
-  var addServerProject:
+  /// path strings; `remoteHost` marks the project `.remote`-kind. Forwards to
+  /// `HierarchyManager.addRemoteProject`.
+  var addRemoteProject:
     @MainActor @Sendable (
       _ name: String, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
     ) -> ProjectID
-  /// Apply an edited Server-project connection in place. A rootPath change
+  /// Apply an edited Remote Project connection in place. A rootPath change
   /// reseeds the worktree rows (the old remote paths are stale). Forwards to
-  /// `HierarchyManager.updateServerProject`.
-  var updateServerProject:
+  /// `HierarchyManager.updateRemoteProject`.
+  var updateRemoteProject:
     @MainActor @Sendable (
       _ projectID: ProjectID, _ remoteHost: RemoteHost, _ rootPath: String, _ gitRoot: String?
     ) -> Void
-  /// Register a workspace root — a plain folder carrying
-  /// `.codans/workspace.json`. Child rows are appended by the next reconcile
+  /// Register a workspace root — a plain folder carrying a workspace
+  /// manifest. No row is seeded; the next reconcile adds every group row
   /// from the manifest. Forwards to `HierarchyManager.addProject(isWorkspace:)`.
   var addWorkspaceProject:
     @MainActor @Sendable (
       _ name: String, _ rootPath: String
     ) -> ProjectID
-  /// The workspace child row whose directory is `path`, if any. Answers from
-  /// the catalog alone. Forwards to `HierarchyManager.workspaceMembership`.
+  /// The workspace member row whose directory is `path`, if any. References
+  /// and group rows never match. Answers from the catalog alone. Forwards to
+  /// `HierarchyManager.workspaceMembership`.
   var workspaceMembership:
     @MainActor @Sendable (
       _ path: String
     ) -> WorkspaceMembership?
+  /// Persisted sidebar disclosure of one Workspace group. Forwards to
+  /// `HierarchyManager.setWorkspaceGroupExpanded`.
+  var setWorkspaceGroupExpanded:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID, _ isExpanded: Bool
+    ) -> Void
+  /// Records or clears (`nil`) an unfinished destructive delete of one
+  /// group in the catalog. Forwards to
+  /// `HierarchyManager.setWorkspaceGroupDeletion`.
+  var setWorkspaceGroupDeletion:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID, _ deletion: GroupDeletionState?
+    ) -> Void
+  /// Closes the surfaces of Workspace rows and removes the rows from the
+  /// catalog, a group row at the root included. Never touches disk.
+  /// Forwards to `HierarchyManager.removeWorkspaceRows`.
+  var removeWorkspaceRows:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ worktreeIDs: [WorktreeID]
+    ) -> Void
+  /// Busy panes of every row of a group, run-script panes included.
+  /// Forwards to `HierarchyManager.workspaceGroupBusyPanes`.
+  var workspaceGroupBusyPanes:
+    @MainActor @Sendable (
+      _ projectID: ProjectID, _ groupID: WorkspaceGroupID
+    ) -> [PaneID]
   /// Close every surface of the Worktree without touching the catalog —
   /// the step before a directory is moved out from under its terminals.
   /// Forwards to `HierarchyManager.tearDownWorktreeSurfaces`.
@@ -148,29 +191,6 @@ nonisolated struct HierarchyClient: Sendable {
 
   // MARK: - Tab mutations
 
-  var renameTab:
-    @MainActor @Sendable (
-      _ id: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ name: String?
-    ) throws -> Void
-  var setTabColor:
-    @MainActor @Sendable (
-      _ id: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ color: TabColor?
-    ) throws -> Void
-  /// Updates the tab's SF Symbol icon under the `TabIconLock` rules
-  /// (`.auto` ≤ `.script` ≤ `.user`). A write whose `lock` cannot
-  /// override the tab's current lock is a silent no-op — UI consumers
-  /// re-read the tab afterwards if they need to confirm the result.
-  var setTabIcon:
-    @MainActor @Sendable (
-      _ id: TabID,
-      _ inWorktree: WorktreeID, _ inProject: ProjectID,
-      _ icon: String?,
-      _ lock: TabIconLock
-    ) throws -> Void
   var reorderTabs:
     @MainActor @Sendable (
       _ inWorktree: WorktreeID, _ inProject: ProjectID,
@@ -282,6 +302,13 @@ nonisolated struct HierarchyClient: Sendable {
   /// `HierarchyManager`. The stream finishes only when the engine shuts down.
   var selectionChanges: @MainActor @Sendable () -> AsyncStream<HierarchySelection>
 
+  /// Emits the set of every pane in the catalog (archived worktrees
+  /// included), first at once and then whenever it changes. Panes leave
+  /// the catalog on many paths (pane or tab close, worktree or project
+  /// removal) and not all of them emit an engine event, so state kept per
+  /// pane outside the catalog prunes against this.
+  var paneMembershipChanges: @MainActor @Sendable () -> AsyncStream<Set<PaneID>>
+
   // MARK: - Worktree Management additions
 
   /// Flips `Worktree.archived` for the given Worktree.
@@ -312,6 +339,9 @@ nonisolated struct HierarchyClient: Sendable {
       _ projectID: ProjectID, _ isExpanded: Bool
     ) -> Void
 
+  /// Opens or closes a sidebar Host row. Persists like `setProjectExpanded`.
+  var setSidebarHostExpanded: @MainActor @Sendable (_ host: SidebarHost, _ isExpanded: Bool) -> Void
+
   /// Reads the Project's git root, calls `GitWorktreeClient.lsWorktrees`
   /// off the main actor, and merges on-disk worktrees into the catalog.
   /// Append-only — never removes catalog rows. Swallows errors. Consumed
@@ -323,12 +353,23 @@ nonisolated struct HierarchyClient: Sendable {
 
   /// Catalog-append step for Create Worktree. Idempotent on path: when a
   /// reconcile pulse already adopted the materialized worktree mid-stream,
-  /// this returns the adopted row's id instead of throwing.
+  /// this returns the adopted row's id instead of throwing. Leaves the
+  /// selection alone.
   var createWorktreeWithGit:
     @MainActor @Sendable (
       _ projectID: ProjectID,
       _ name: String, _ branch: String, _ path: String
     ) throws -> WorktreeID
+
+  /// Holds back reconcile appends for the lease's Project while a sidebar
+  /// creation runs, so the create path inserts the new row at the top of
+  /// the unpinned segment (`HierarchyManager.beginWorktreeCreation`).
+  /// Idempotent per token.
+  var beginWorktreeCreation: @MainActor @Sendable (_ lease: WorktreeCreationLease) -> Void
+
+  /// Releases a lease taken through `beginWorktreeCreation`. Idempotent.
+  /// The last release of a Project triggers one reconcile of it.
+  var endWorktreeCreation: @MainActor @Sendable (_ lease: WorktreeCreationLease) -> Void
 
   /// End-to-end Remove Worktree. Tears down all surfaces (panes /
   /// notifications) for the worktree, runs the git client's
@@ -357,30 +398,24 @@ nonisolated struct HierarchyClient: Sendable {
       _ projectID: ProjectID, _ state: ProjectLoadState
     ) -> Void
 
-  /// Reorder Projects at the catalog top level. Mirrors `ForEach.onMove`'s signature.
-  var reorderProjects:
+  /// Move one Project in the Project order (sidebar block drag).
+  var moveProject:
     @MainActor @Sendable (
-      _ from: IndexSet, _ to: Int
+      _ projectID: ProjectID, _ placement: ProjectPlacement
     ) -> Void
-
-  /// Sidebar bottom-bar sort-mode write. Persisted on the catalog;
-  /// the manual array is left intact.
-  var setProjectSortMode: @MainActor @Sendable (_ mode: ProjectSortMode) -> Void
-
-  /// Commit the manual-sort sheet result: rewrites `catalog.projects`
-  /// to match `orderedIDs` and switches `projectSortMode` to `.manual`.
-  var applyManualProjectOrder: @MainActor @Sendable (_ orderedIDs: [ProjectID]) -> Void
 
   /// Record an activity tick on a Project. Invoked by the notification
   /// pipeline (new inbox entry → host project) and the input pipeline
   /// (`TerminalInputSink.sendInput` → pane's host project).
   var bumpProjectActivity: @MainActor @Sendable (_ projectID: ProjectID) -> Void
 
-  /// Duplicate-add guard. Caller canonicalizes before querying.
+  /// Duplicate-add guard: the Project on This Mac at a local path. Server
+  /// projects never match (ADR 0006). Caller canonicalizes before querying.
   var isPathRegistered: @MainActor @Sendable (_ canonicalPath: String) -> ProjectID?
 
   /// Containing-project lookup (subdirectory-aware). Returns the deepest
-  /// Project whose `rootPath` contains the canonical path (root or descendant).
+  /// Project on This Mac whose `rootPath` contains the canonical path (root
+  /// or descendant); Remote Projects never match (ADR 0006).
   /// Used by the `editor.open` IPC so `codans open` inside a subdirectory still
   /// resolves the parent Project's default editor. Caller canonicalizes.
   var projectContaining: @MainActor @Sendable (_ canonicalPath: String) -> ProjectID?
@@ -477,6 +512,16 @@ nonisolated struct HierarchyClient: Sendable {
   /// tracking), so callers pass a stable id to reuse the pane on a rerun.
   /// Throws `RunScriptError.missingWorktree` when the worktree is gone.
   var runCommand:
+    @MainActor @Sendable (
+      _ script: ScriptDefinition, _ projectID: ProjectID, _ worktreeID: WorktreeID
+    ) async throws -> Void
+
+  /// Runs an agent command that is not a saved profile — a recorded session's
+  /// resume invocation. Same pipeline as `runCommand` (new tab / focused /
+  /// split with its fallbacks), but like an agent launch it is never tracked
+  /// as a run pane, so every call starts a fresh session surface. Throws
+  /// `RunScriptError.missingWorktree` when the worktree is gone.
+  var runAgentCommand:
     @MainActor @Sendable (
       _ script: ScriptDefinition, _ projectID: ProjectID, _ worktreeID: WorktreeID
     ) async throws -> Void
@@ -768,17 +813,22 @@ extension HierarchyClient {
       setProjectTags: { projectID, tags in
         manager.setProjectTags(projectID, tags: tags)
       },
+      setSidebarFilter: { manager.setSidebarFilter($0) },
+      hosts: { manager.catalog.hosts },
+      addHost: { try manager.addHost($0) },
+      updateHost: { try manager.updateHost($0) },
+      removeHost: { try manager.removeHost($0) },
       setActiveTagFilter: { filter in manager.setActiveTagFilter(filter) },
       addProject: { name, rootPath, gitRoot in
         manager.addProject(name: name, rootPath: rootPath, gitRoot: gitRoot)
       },
-      addServerProject: { name, remoteHost, rootPath, gitRoot in
-        manager.addServerProject(
+      addRemoteProject: { name, remoteHost, rootPath, gitRoot in
+        manager.addRemoteProject(
           name: name, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
         )
       },
-      updateServerProject: { projectID, remoteHost, rootPath, gitRoot in
-        manager.updateServerProject(
+      updateRemoteProject: { projectID, remoteHost, rootPath, gitRoot in
+        manager.updateRemoteProject(
           projectID: projectID, remoteHost: remoteHost, rootPath: rootPath, gitRoot: gitRoot
         )
       },
@@ -786,6 +836,18 @@ extension HierarchyClient {
         manager.addProject(name: name, rootPath: rootPath, gitRoot: nil, isWorkspace: true)
       },
       workspaceMembership: { path in manager.workspaceMembership(forPath: path) },
+      setWorkspaceGroupExpanded: { projectID, groupID, isExpanded in
+        manager.setWorkspaceGroupExpanded(projectID: projectID, groupID: groupID, isExpanded: isExpanded)
+      },
+      setWorkspaceGroupDeletion: { projectID, groupID, deletion in
+        manager.setWorkspaceGroupDeletion(projectID: projectID, groupID: groupID, deletion: deletion)
+      },
+      removeWorkspaceRows: { projectID, worktreeIDs in
+        manager.removeWorkspaceRows(projectID: projectID, worktreeIDs: worktreeIDs)
+      },
+      workspaceGroupBusyPanes: { projectID, groupID in
+        manager.workspaceGroupBusyPanes(projectID: projectID, groupID: groupID)
+      },
       tearDownWorktreeSurfaces: { worktreeID in
         manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
       },
@@ -827,17 +889,6 @@ extension HierarchyClient {
       },
       selectTab: { tabID, worktreeID, projectID in
         try manager.selectTab(tabID, in: worktreeID, in: projectID)
-      },
-      renameTab: { tabID, worktreeID, projectID, name in
-        try manager.renameTab(tabID, in: worktreeID, in: projectID, name: name)
-      },
-      setTabColor: { tabID, worktreeID, projectID, color in
-        try manager.setTabColor(tabID, in: worktreeID, in: projectID, color: color)
-      },
-      setTabIcon: { tabID, worktreeID, projectID, icon, lock in
-        try manager.setTabIcon(
-          tabID, in: worktreeID, in: projectID, icon: icon, lock: lock
-        )
       },
       reorderTabs: { worktreeID, projectID, orderedIDs in
         try manager.reorderTabs(
@@ -946,6 +997,7 @@ extension HierarchyClient {
       },
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
+      paneMembershipChanges: { makeObservedStream(manager: manager) { $0.catalog.allPaneIDs() } },
       setWorktreeArchived: { worktreeID, archived in
         try manager.setWorktreeArchived(worktreeID: worktreeID, archived: archived)
       },
@@ -958,6 +1010,9 @@ extension HierarchyClient {
       setProjectExpanded: { projectID, isExpanded in
         manager.setProjectExpanded(projectID: projectID, isExpanded: isExpanded)
       },
+      setSidebarHostExpanded: { host, isExpanded in
+        manager.setSidebarHostExpanded(host, isExpanded: isExpanded)
+      },
       reconcileDiscoveredWorktrees: { [weak settings] projectID in
         await reconcile(
           projectID: projectID,
@@ -968,17 +1023,21 @@ extension HierarchyClient {
         )
       },
       createWorktreeWithGit: { projectID, name, branch, path in
-        // reuseExisting heals the create-vs-reconcile race: a window-focus
-        // reconcile pulse can adopt the freshly materialized worktree into
-        // the catalog while the creation stream is still running its setup
-        // phase. Without it the finish path throws invariantViolation
-        // ("worktree with path … already exists") against its own worktree.
+        // The sidebar's creation lease keeps a reconcile pulse from adopting
+        // the freshly materialized worktree mid-stream, so this normally
+        // inserts at the unpinned boundary. reuseExisting stays as the
+        // fallback when a row for the path already exists: without it the
+        // finish path throws invariantViolation ("worktree with path …
+        // already exists") against its own worktree.
+        // `select: false`: RootFeature decides whether the user lands on it.
         try manager.createWorktree(
           in: projectID,
           name: name, path: path, branch: branch,
-          reuseExisting: true
+          reuseExisting: true, select: false
         )
       },
+      beginWorktreeCreation: { lease in manager.beginWorktreeCreation(lease) },
+      endWorktreeCreation: { lease in manager.endWorktreeCreation(lease) },
       removeWorktreeWithGit: { [weak settings] worktreeID, projectID in
         let deleteRemote = (settings?.settings ?? .default).worktree.deleteRemoteBranchWithWorktree
         return try await removeWorktreeWithGit(
@@ -995,14 +1054,8 @@ extension HierarchyClient {
       setProjectLoadState: { projectID, state in
         manager.setProjectLoadState(state, projectID: projectID)
       },
-      reorderProjects: { from, to in
-        manager.reorderProjects(from: from, to: to)
-      },
-      setProjectSortMode: { mode in
-        manager.setProjectSortMode(mode)
-      },
-      applyManualProjectOrder: { orderedIDs in
-        manager.applyManualProjectOrder(orderedIDs)
+      moveProject: { projectID, placement in
+        manager.moveProject(projectID, to: placement)
       },
       bumpProjectActivity: { projectID in
         manager.bumpProjectActivity(projectID)
@@ -1074,6 +1127,17 @@ extension HierarchyClient {
           manager: manager,
           snapshot: settings?.settings ?? .default,
           terminalClient: terminalClient
+        )
+      },
+      runAgentCommand: { [weak settings] script, projectID, worktreeID in
+        _ = try await runResolvedScript(
+          script: script,
+          projectID: projectID,
+          worktreeID: worktreeID,
+          manager: manager,
+          snapshot: settings?.settings ?? .default,
+          terminalClient: terminalClient,
+          tracksRunPane: false
         )
       },
       launchAgentProfile: { [weak settings] profileID, projectID, worktreeID, prompt in
@@ -1250,9 +1314,6 @@ extension HierarchyClient {
       kind: .custom,
       name: spec.tabName ?? profile.displayName,
       command: command,
-      // Brand mark rather than a generic glyph: the tab chip resolves the
-      // `agent:` reference to the same asset the Agents pane and the
-      // toolbar menu show, so one agent reads the same across surfaces.
       systemImage: profile.tabIcon,
       target: spec.target ?? profile.target,
       direction: spec.direction ?? profile.direction,
@@ -1565,17 +1626,9 @@ extension HierarchyClient {
       try manager.requireLocalDirectory(cwd, in: projectID)
       let tabID = try manager.createTab(
         in: worktreeID, in: projectID,
-        name: script.displayName,
+        name: nil,
+        initialTitle: script.displayName,
         select: script.focus
-      )
-      // Carry the script's resolved SF Symbol onto the spawned tab under
-      // the .script lock. A later auto re-derivation cannot displace it;
-      // a user pick still can. Failures are non-fatal — the tab keeps
-      // running with its default icon.
-      try? manager.setTabIcon(
-        tabID, in: worktreeID, in: projectID,
-        icon: script.resolvedSystemImage,
-        lock: .script
       )
       return try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
@@ -1821,7 +1874,7 @@ extension HierarchyClient {
     let tabID: TabID
     do {
       tabID = try manager.createTab(
-        in: worktreeID, in: projectID, name: tabName
+        in: worktreeID, in: projectID, name: nil, initialTitle: tabName
       )
       paneID = try await manager.openPane(
         in: tabID, in: worktreeID, in: projectID,
@@ -1872,7 +1925,7 @@ extension HierarchyClient {
   ) async {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID })
     else { return }
-    // Server projects discover + reconcile entirely over SSH (no bundled `wt`,
+    // Remote Projects discover + reconcile entirely over SSH (no bundled `wt`,
     // no local `wt ls`, no local symlink canonicalization). Branch off before
     // any local-filesystem git path runs.
     if project.isRemote {
@@ -1941,13 +1994,15 @@ extension HierarchyClient {
     }
   }
 
-  /// Workspace counterpart of `reconcile`. Membership comes from the manifest
-  /// under the root; live facts (branch, owning repository) come from git in
-  /// each child folder. Feeds `HierarchyManager.reconcileWorkspaceChildren`,
-  /// which appends, refreshes in place, and soft-archives children whose
-  /// folder is gone — and never touches the root row. Swallows and logs
-  /// errors like its siblings; the manifest's own health is reported on the
-  /// project row by `ProjectReconciler` before this runs.
+  /// Workspace counterpart of `reconcile`. Membership comes from the group
+  /// manifest under the root (migrated from version 1 on first sight); the
+  /// default links are brought in step with its source list; live facts
+  /// (branch, owning repository) come from git in each checkout. Feeds
+  /// `HierarchyManager.reconcileWorkspaceGroups`, which places rows into
+  /// groups, appends, refreshes in place, and soft-archives members whose
+  /// folder is gone. Swallows and logs errors like its siblings; the
+  /// manifest's own health is reported on the project row by
+  /// `ProjectReconciler` before this runs.
   @MainActor
   private static func reconcileWorkspace(
     project: Project,
@@ -1956,56 +2011,98 @@ extension HierarchyClient {
   ) async {
     let projectID = project.id
     let rootPath = project.rootPath
-    let manifest: WorkspaceManifest
+    let manifest: WorkspaceGroupsManifest
     do {
-      manifest = try WorkspaceManifestStore.load(rootPath: rootPath)
+      manifest = try WorkspaceManifestStore.loadOrMigrate(rootPath: rootPath)
     } catch {
       reconcileLogger.error(
-        "workspace reconcile skipped, manifest unreadable: project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .private(mask: .hash))"
+        "workspace reconcile skipped, manifest unusable: project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .private(mask: .hash))"
       )
       return
     }
-    manager.setProjectWorkspaceManifest(projectID: projectID, manifest: manifest)
-    var observations: [HierarchyManager.WorkspaceChildObservation] = []
-    for entry in manifest.repositories {
-      let canonical = HierarchyManager.canonicalPath(entry.resolvedPath(rootPath: rootPath))
-      var isDirectory = ObjCBool(false)
-      let exists =
-        FileManager.default.fileExists(atPath: canonical, isDirectory: &isDirectory)
-        && isDirectory.boolValue
-      var branch: String?
-      var sourceGitRoot: String?
-      if exists {
-        branch = try? await gitCLI.currentBranch(path: canonical)
-        sourceGitRoot = (try? await gitCLI.repositoryRoot(forCheckoutAt: canonical))
-          .map(HierarchyManager.canonicalPath)
-        if let declared = entry.sourceGitRoot, let sourceGitRoot,
-          HierarchyManager.canonicalPath(declared) != sourceGitRoot
-        {
-          reconcileLogger.notice(
-            "workspace child belongs to a different repository than its manifest declares: project=\(projectID.raw.uuidString, privacy: .public) child=\(entry.name, privacy: .public)"
-          )
-        }
-      }
-      observations.append(
-        HierarchyManager.WorkspaceChildObservation(
-          name: entry.name,
-          path: canonical,
-          exists: exists,
-          branch: branch,
-          sourceGitRoot: sourceGitRoot
+    do {
+      let report = try WorkspaceDefaultLinks.sync(rootPath: rootPath, manifest: manifest)
+      for note in report.notes {
+        reconcileLogger.notice(
+          "workspace default link left as-is: project=\(projectID.raw.uuidString, privacy: .public) note=\(String(describing: note), privacy: .private(mask: .hash))"
         )
+      }
+    } catch {
+      reconcileLogger.error(
+        "workspace default links not synced: project=\(projectID.raw.uuidString, privacy: .public) error=\(String(describing: error), privacy: .private(mask: .hash))"
       )
     }
-    _ = manager.reconcileWorkspaceChildren(projectID: projectID, observations: observations)
+    manager.setProjectWorkspaceManifest(projectID: projectID, manifest: manifest)
+
+    var groups: [HierarchyManager.WorkspaceGroupObservation] = []
+    for group in manifest.groups {
+      let groupPath = HierarchyManager.canonicalPath(
+        (rootPath as NSString).appendingPathComponent(group.path))
+      var rows = [
+        HierarchyManager.WorkspaceRowObservation(
+          name: group.name, path: groupPath, role: .groupTerminal, exists: isDirectory(groupPath))
+      ]
+      switch group.kind {
+      case .default:
+        for source in manifest.projects {
+          let path = HierarchyManager.canonicalPath(source.sourceGitRoot)
+          rows.append(
+            await observeCheckout(
+              name: source.name, path: path, role: .reference, declaredSource: path, gitCLI: gitCLI))
+        }
+      case .named:
+        for member in group.members {
+          let path = HierarchyManager.canonicalPath(
+            (rootPath as NSString).appendingPathComponent(member.path))
+          rows.append(
+            await observeCheckout(
+              name: member.name, path: path, role: .member,
+              declaredSource: member.sourceGitRoot.map(HierarchyManager.canonicalPath), gitCLI: gitCLI))
+        }
+      }
+      groups.append(
+        HierarchyManager.WorkspaceGroupObservation(
+          id: group.id, name: group.name, kind: group.kind, deletion: group.deletion, rows: rows))
+    }
+    manager.reconcileWorkspaceGroups(projectID: projectID, groups: groups)
   }
 
-  /// Server-project counterpart of `reconcile`: discovers the remote git root
+  /// Probes one checkout a Workspace row expects. The repository root comes
+  /// from git; the manifest's record is the fallback when git cannot answer.
+  @MainActor
+  private static func observeCheckout(
+    name: String,
+    path: String,
+    role: WorkspaceSlot.Role,
+    declaredSource: String?,
+    gitCLI: GitWorktreeCLI
+  ) async -> HierarchyManager.WorkspaceRowObservation {
+    guard isDirectory(path) else {
+      return HierarchyManager.WorkspaceRowObservation(name: name, path: path, role: role, exists: false)
+    }
+    let branch = try? await gitCLI.currentBranch(path: path)
+    let probed = (try? await gitCLI.repositoryRoot(forCheckoutAt: path)).map(HierarchyManager.canonicalPath)
+    if let declaredSource, let probed, declaredSource != probed {
+      reconcileLogger.notice(
+        "workspace checkout belongs to a different repository than its manifest declares: checkout=\(name, privacy: .public)"
+      )
+    }
+    return HierarchyManager.WorkspaceRowObservation(
+      name: name, path: path, role: role, exists: true, branch: branch,
+      sourceGitRoot: probed ?? declaredSource)
+  }
+
+  private static func isDirectory(_ path: String) -> Bool {
+    var isDirectory = ObjCBool(false)
+    return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+  }
+
+  /// Remote Project counterpart of `reconcile`: discovers the remote git root
   /// and worktree list over SSH via `RemoteGitService`, normalizes each path
   /// string-only (`normalizeRemotePath` — never the local symlink resolver),
   /// and hands the result to the shared append-only merge. Mirrors the local
   /// path's "re-detect gitRoot when nil" auto-promotion so a plain remote
-  /// folder becomes a git Server project once the user runs `git init` on the
+  /// folder becomes a git Remote Project once the user runs `git init` on the
   /// host. Swallows and logs errors — reconcile is idempotent and must never
   /// crash, and a transient SSH failure must not archive live worktree rows
   /// (the merge only appends / upgrades; the stale-sweep runs against the
@@ -2019,6 +2116,27 @@ extension HierarchyClient {
     guard let host = project.remoteHost else { return }
     let projectID = project.id
     let service = RemoteGitService(host: host)
+    // The host decides which string names the root (#402): a root entered
+    // through a symlink is re-keyed onto git's form before discovery, so the
+    // main checkout git reports matches the existing row.
+    var adopted: Project?
+    if let canonicalRoot = await service.canonicalWorkTreeRoot(of: project.rootPath) {
+      switch manager.adoptCanonicalRemoteRoot(projectID: projectID, canonicalRoot: canonicalRoot) {
+      case .unchanged:
+        break
+      case .adopted:
+        adopted = manager.catalog.projects.first { $0.id == projectID }
+      case .conflict(let owner):
+        // Another Project on this Host owns the same folder (ADR 0006).
+        // The adopt step already merged this Project's rows for that folder;
+        // discovery here would only add the owner's worktrees a second time.
+        reconcileLogger.error(
+          "remote root owned by another project: project=\(projectID.raw.uuidString, privacy: .public) owner=\(owner.raw.uuidString, privacy: .public)"
+        )
+        return
+      }
+    }
+    let project = adopted ?? project
     let gitRoot: String? = await {
       if let existing = project.gitRoot { return existing }
       if let discovered = await service.discoverGitRoot(candidatePath: project.rootPath),
@@ -2070,13 +2188,16 @@ extension HierarchyClient {
     let ttl = TimeInterval(worktreeSettings.autoDeletePeriod.rawValue) * 86_400
     let deleteRemoteBranch = worktreeSettings.deleteRemoteBranchWithWorktree
     let due = manager.archivedWorktreesDue(in: projectID, now: Date(), ttl: ttl)
-    let rows = manager.catalog.projects.first(where: { $0.id == projectID })?.worktrees ?? []
+    let project = manager.catalog.projects.first(where: { $0.id == projectID })
+    let rows = project?.worktrees ?? []
     for worktreeID in due {
       // A row that is also a workspace member's checkout belongs to that
       // workspace: removing it here would pull the folder out from under
       // the workspace's own row. Membership changes go through the
-      // workspace flow, never the sweep.
-      if let path = rows.first(where: { $0.id == worktreeID })?.path,
+      // workspace flow, never the sweep. Membership is keyed by a path on
+      // This Mac, so a Remote Project's rows are never members (ADR 0006).
+      if project?.isOnThisMac == true,
+        let path = rows.first(where: { $0.id == worktreeID })?.path,
         manager.workspaceMembership(forPath: path) != nil
       {
         continue
@@ -2114,13 +2235,26 @@ extension HierarchyClient {
     deleteRemoteBranch: Bool
   ) async throws -> String? {
     guard let project = manager.catalog.projects.first(where: { $0.id == projectID }),
-      let worktree = project.worktrees.first(where: { $0.id == worktreeID }),
-      let gitRoot = project.gitRoot
+      let worktree = project.worktrees.first(where: { $0.id == worktreeID })
     else {
       throw HierarchyError.notFound("Worktree \(worktreeID)")
     }
+    // Workspace rows and the source-side mirrors of member checkouts belong
+    // to the workspace flow, which removes them through its own checks.
+    // Every caller of this path is refused here, not only the sidebar.
+    if project.isWorkspace
+      || (project.isOnThisMac && manager.workspaceMembership(forPath: worktree.path) != nil)
+    {
+      throw HierarchyError.invariantViolation(
+        "\(worktree.path) belongs to a workspace; remove it through the workspace")
+    }
+    guard let gitRoot = project.gitRoot else {
+      throw HierarchyError.notFound("Worktree \(worktreeID)")
+    }
     manager.tearDownWorktreeSurfaces(worktreeID: worktreeID)
-    let gitRootURL = URL(fileURLWithPath: gitRoot)
+    // The URL names the Project's Host, so git runs on the machine that
+    // owns this Project even when another Host has the same path.
+    let gitRootURL = project.gitURL(gitRoot)
     // Resolve the branch authoritatively from git BEFORE removal —
     // `worktree.branch` can be empty/stale (reconciled rows, legacy
     // catalog entries), and a missed branch deletion is exactly what
@@ -2142,7 +2276,7 @@ extension HierarchyClient {
 
     try await gitWorktreeClient.removeWorktree(
       gitRootURL,
-      URL(fileURLWithPath: worktree.path)
+      project.gitURL(worktree.path)
     )
     // Drop the branch the worktree was tracking. `git worktree remove`
     // intentionally leaves the ref behind, so re-creating a worktree
@@ -2174,35 +2308,44 @@ extension HierarchyClient {
     return keptWarning
   }
 
-  /// AsyncStream backed by Swift Observation — samples `manager.catalog`'s
-  /// selection chain and yields a new `HierarchySelection` whenever any of
-  /// the IDs changes. Closes the re-arm race window by sampling
-  /// `currentSelection` BEFORE arming the next `withObservationTracking`
-  /// block: any mutation that landed between the prior yield and the next
-  /// arm is caught on the pre-arm compare; `withObservationTracking` then
-  /// only waits for mutations that land after the new snapshot.
+  /// Yields a new `HierarchySelection` whenever the catalog's selection
+  /// chain changes.
   @MainActor
   private static func makeSelectionStream(manager: HierarchyManager) -> AsyncStream<HierarchySelection> {
+    makeObservedStream(manager: manager, sample: currentSelection(for:))
+  }
+
+  /// AsyncStream backed by Swift Observation — yields `sample(manager)` at
+  /// once and again whenever it changes. Closes the re-arm race window by
+  /// sampling BEFORE arming the next `withObservationTracking` block: any
+  /// mutation that landed between the prior yield and the next arm is
+  /// caught on the pre-arm compare; `withObservationTracking` then only
+  /// waits for mutations that land after the new snapshot.
+  @MainActor
+  private static func makeObservedStream<Value: Equatable & Sendable>(
+    manager: HierarchyManager,
+    sample: @escaping @MainActor (HierarchyManager) -> Value
+  ) -> AsyncStream<Value> {
     AsyncStream { continuation in
       let task = Task { @MainActor in
-        var last = currentSelection(for: manager)
+        var last = sample(manager)
         continuation.yield(last)
         while !Task.isCancelled {
           // Sample FIRST — catches any mutation that landed during the
           // gap between yield and re-arm.
-          let preArm = currentSelection(for: manager)
+          let preArm = sample(manager)
           if preArm != last {
             continuation.yield(preArm)
             last = preArm
           }
           await withCheckedContinuation { (observationContinuation: CheckedContinuation<Void, Never>) in
             withObservationTracking {
-              _ = currentSelection(for: manager)
+              _ = sample(manager)
             } onChange: {
               observationContinuation.resume()
             }
           }
-          let current = currentSelection(for: manager)
+          let current = sample(manager)
           if current != last {
             continuation.yield(current)
             last = current
@@ -2239,12 +2382,21 @@ extension HierarchyClient: DependencyKey {
     recolorTag: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     removeTag: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectTags: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setSidebarFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    hosts: { fatalError("HierarchyClient.liveValue not configured") },
+    addHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    updateHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    removeHost: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setActiveTagFilter: { _ in fatalError("HierarchyClient.liveValue not configured") },
     addProject: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    addServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    updateServerProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    addRemoteProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    updateRemoteProject: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     addWorkspaceProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     workspaceMembership: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    setWorkspaceGroupExpanded: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setWorkspaceGroupDeletion: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    removeWorkspaceRows: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    workspaceGroupBusyPanes: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     tearDownWorktreeSurfaces: { _ in fatalError("HierarchyClient.liveValue not configured") },
     removeProject: { _ in fatalError("HierarchyClient.liveValue not configured") },
     renameProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2257,9 +2409,6 @@ extension HierarchyClient: DependencyKey {
     createTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     selectTab: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    renameTab: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setTabColor: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setTabIcon: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reorderTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeOtherTabs: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     closeTabsToRight: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2281,18 +2430,20 @@ extension HierarchyClient: DependencyKey {
     resizeSplit: { _, _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     snapshot: { fatalError("HierarchyClient.liveValue not configured") },
     selectionChanges: { AsyncStream { $0.finish() } },
+    paneMembershipChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreePinned: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeIsNew: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    setSidebarHostExpanded: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     reconcileDiscoveredWorktrees: { _ in fatalError("HierarchyClient.liveValue not configured") },
     createWorktreeWithGit: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    beginWorktreeCreation: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    endWorktreeCreation: { _ in fatalError("HierarchyClient.liveValue not configured") },
     removeWorktreeWithGit: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runningPaneCount: { _ in fatalError("HierarchyClient.liveValue not configured") },
     setProjectLoadState: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    reorderProjects: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
-    setProjectSortMode: { _ in fatalError("HierarchyClient.liveValue not configured") },
-    applyManualProjectOrder: { _ in fatalError("HierarchyClient.liveValue not configured") },
+    moveProject: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     bumpProjectActivity: { _ in fatalError("HierarchyClient.liveValue not configured") },
     isPathRegistered: { _ in fatalError("HierarchyClient.liveValue not configured") },
     projectContaining: { _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2306,6 +2457,7 @@ extension HierarchyClient: DependencyKey {
     runScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runGlobalScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     runCommand: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
+    runAgentCommand: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     launchAgentProfile: { _, _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
     launchAgent: { _ in fatalError("HierarchyClient.liveValue not configured") },
     stopScript: { _, _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2343,12 +2495,21 @@ extension HierarchyClient: DependencyKey {
     recolorTag: unimplemented("HierarchyClient.recolorTag"),
     removeTag: unimplemented("HierarchyClient.removeTag"),
     setProjectTags: unimplemented("HierarchyClient.setProjectTags"),
+    setSidebarFilter: unimplemented("HierarchyClient.setSidebarFilter"),
+    hosts: unimplemented("HierarchyClient.hosts", placeholder: []),
+    addHost: unimplemented("HierarchyClient.addHost"),
+    updateHost: unimplemented("HierarchyClient.updateHost"),
+    removeHost: unimplemented("HierarchyClient.removeHost"),
     setActiveTagFilter: unimplemented("HierarchyClient.setActiveTagFilter"),
     addProject: unimplemented("HierarchyClient.addProject", placeholder: ProjectID()),
-    addServerProject: unimplemented("HierarchyClient.addServerProject", placeholder: ProjectID()),
-    updateServerProject: unimplemented("HierarchyClient.updateServerProject"),
+    addRemoteProject: unimplemented("HierarchyClient.addRemoteProject", placeholder: ProjectID()),
+    updateRemoteProject: unimplemented("HierarchyClient.updateRemoteProject"),
     addWorkspaceProject: unimplemented("HierarchyClient.addWorkspaceProject", placeholder: ProjectID()),
     workspaceMembership: unimplemented("HierarchyClient.workspaceMembership", placeholder: nil),
+    setWorkspaceGroupExpanded: unimplemented("HierarchyClient.setWorkspaceGroupExpanded"),
+    setWorkspaceGroupDeletion: unimplemented("HierarchyClient.setWorkspaceGroupDeletion"),
+    removeWorkspaceRows: unimplemented("HierarchyClient.removeWorkspaceRows"),
+    workspaceGroupBusyPanes: unimplemented("HierarchyClient.workspaceGroupBusyPanes", placeholder: []),
     tearDownWorktreeSurfaces: unimplemented("HierarchyClient.tearDownWorktreeSurfaces"),
     removeProject: unimplemented("HierarchyClient.removeProject"),
     renameProject: unimplemented("HierarchyClient.renameProject"),
@@ -2361,9 +2522,6 @@ extension HierarchyClient: DependencyKey {
     createTab: unimplemented("HierarchyClient.createTab", placeholder: TabID()),
     closeTab: unimplemented("HierarchyClient.closeTab"),
     selectTab: unimplemented("HierarchyClient.selectTab"),
-    renameTab: unimplemented("HierarchyClient.renameTab"),
-    setTabColor: unimplemented("HierarchyClient.setTabColor"),
-    setTabIcon: unimplemented("HierarchyClient.setTabIcon"),
     reorderTabs: unimplemented("HierarchyClient.reorderTabs"),
     closeOtherTabs: unimplemented("HierarchyClient.closeOtherTabs"),
     closeTabsToRight: unimplemented("HierarchyClient.closeTabsToRight"),
@@ -2394,22 +2552,29 @@ extension HierarchyClient: DependencyKey {
       "HierarchyClient.selectionChanges",
       placeholder: AsyncStream { $0.finish() }
     ),
+    // Only pruning listens to it, and `onLaunch` subscribes in every root
+    // test; an `unimplemented` here would turn those into stub farms.
+    paneMembershipChanges: { AsyncStream { $0.finish() } },
     setWorktreeArchived: unimplemented("HierarchyClient.setWorktreeArchived"),
     setWorktreePinned: unimplemented("HierarchyClient.setWorktreePinned"),
     setWorktreeIsNew: unimplemented("HierarchyClient.setWorktreeIsNew"),
     setProjectExpanded: unimplemented("HierarchyClient.setProjectExpanded"),
+    setSidebarHostExpanded: unimplemented("HierarchyClient.setSidebarHostExpanded"),
     reconcileDiscoveredWorktrees: unimplemented("HierarchyClient.reconcileDiscoveredWorktrees"),
     createWorktreeWithGit: unimplemented(
       "HierarchyClient.createWorktreeWithGit", placeholder: WorktreeID()
     ),
+    // Every sidebar creation path takes and releases a lease; no-ops here
+    // keep the many creation tests free of lease stubs. Lease tests
+    // override both.
+    beginWorktreeCreation: { _ in },
+    endWorktreeCreation: { _ in },
     removeWorktreeWithGit: unimplemented(
       "HierarchyClient.removeWorktreeWithGit", placeholder: nil
     ),
     runningPaneCount: unimplemented("HierarchyClient.runningPaneCount", placeholder: 0),
     setProjectLoadState: unimplemented("HierarchyClient.setProjectLoadState"),
-    reorderProjects: unimplemented("HierarchyClient.reorderProjects"),
-    setProjectSortMode: unimplemented("HierarchyClient.setProjectSortMode"),
-    applyManualProjectOrder: unimplemented("HierarchyClient.applyManualProjectOrder"),
+    moveProject: unimplemented("HierarchyClient.moveProject"),
     bumpProjectActivity: unimplemented("HierarchyClient.bumpProjectActivity"),
     isPathRegistered: unimplemented("HierarchyClient.isPathRegistered", placeholder: nil),
     projectContaining: unimplemented("HierarchyClient.projectContaining", placeholder: nil),
@@ -2423,6 +2588,7 @@ extension HierarchyClient: DependencyKey {
     runScript: unimplemented("HierarchyClient.runScript"),
     runGlobalScript: unimplemented("HierarchyClient.runGlobalScript"),
     runCommand: unimplemented("HierarchyClient.runCommand"),
+    runAgentCommand: unimplemented("HierarchyClient.runAgentCommand"),
     launchAgentProfile: unimplemented("HierarchyClient.launchAgentProfile"),
     launchAgent: unimplemented(
       "HierarchyClient.launchAgent",

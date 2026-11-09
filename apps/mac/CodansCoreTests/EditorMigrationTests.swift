@@ -106,6 +106,14 @@ struct EditorMigrationTests {
     }
   }
 
+  @Test func externalGitViewerIDIsNilOnlyForBuiltIn() {
+    #expect(GeneralSettings().externalGitViewerID == nil)
+    var general = GeneralSettings(defaultGitViewerID: "fork")
+    #expect(general.externalGitViewerID == "fork")
+    general.defaultGitViewerID = nil
+    #expect(general.externalGitViewerID == nil)
+  }
+
   @Test func gitViewerNormalizationPreservesBuiltInOutsideRegistry() {
     var settings = Settings()
     let initialMutated = settings.garbageCollectEditors(knownIDs: [])

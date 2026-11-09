@@ -32,6 +32,9 @@ struct CommandPaletteFeature {
     /// `.appeared` payload so `RootFeature.route` can target the right
     /// pane without re-reading the catalog.
     var focusedPaneID: PaneID?
+    /// Git Platform of the selected Worktree, set by the parent on open. Picks the labels of
+    /// the "Open PR on GitHub" / "Open MR on GitLab" items; `nil` keeps the GitHub labels.
+    var gitPlatform: GitPlatformKind?
   }
 
   enum Action: Equatable {
@@ -69,6 +72,7 @@ struct CommandPaletteFeature {
       switch action {
       case .appeared(let selection, let catalog, let descriptors, let recency, let paneID, let precise):
         state.focusedPaneID = paneID
+        let gitPlatform = state.gitPlatform
         state.recency = recency
         state.isIndexed = false
         state.items = []
@@ -86,7 +90,8 @@ struct CommandPaletteFeature {
               catalog: catalog,
               editorDescriptors: descriptors,
               focusedPaneID: paneID,
-              paneFocusPrecise: precise
+              paneFocusPrecise: precise,
+              gitPlatform: gitPlatform
             )
           }
           await send(.indexed(items))
@@ -148,7 +153,14 @@ struct CommandPaletteFeature {
       scored
       .sorted { lhs, rhs in
         if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
-        return lhs.0.title < rhs.0.title
+        // Same score: items without a sidebar position first (by title),
+        // then the others in sidebar order so each Project stays grouped.
+        switch (lhs.0.sidebarOrder, rhs.0.sidebarOrder) {
+        case (let l?, let r?) where l != r: return l < r
+        case (nil, _?): return true
+        case (_?, nil): return false
+        default: return lhs.0.title < rhs.0.title
+        }
       }
       .map(\.0)
   }
