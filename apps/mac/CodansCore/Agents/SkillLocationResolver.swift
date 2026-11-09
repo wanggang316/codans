@@ -54,9 +54,10 @@ public nonisolated enum SkillLocationResolver {
 
   /// Skill directories of the plugins that `profile`'s agent, launched in
   /// `projectDirectory`, has enabled. The registry lives under its config
-  /// root; the user, project, local, and managed settings decide which
-  /// plugins are on. A file that is missing or cannot be read gives no
-  /// plugins (registry) or no say (settings).
+  /// root; the user, project, local, `--settings`, and managed settings
+  /// decide which plugins are on. A file that is missing or cannot be read
+  /// gives no plugins (registry) or no say (settings). Settings flags in the
+  /// profile's extra arguments that cannot be read give no plugins.
   static func pluginDirectories(
     for profile: AgentProfile,
     projectDirectory: URL?,
@@ -70,10 +71,18 @@ public nonisolated enum SkillLocationResolver {
     else { return [] }
     switch plugins {
     case .claudeCode:
+      let launchSettings: URL?
+      switch ClaudePluginRegistry.launchSettings(
+        extraArguments: profile.extraArguments, projectDirectory: projectDirectory, userHome: userHome)
+      {
+      case .none: launchSettings = nil
+      case .file(let url): launchSettings = url
+      case .unknown: return []
+      }
       let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       return ClaudePluginRegistry.skillDirectories(
         configRoot: root, home: home, projectDirectory: projectDirectory,
-        managedSettings: managedSettings)
+        launchSettings: launchSettings, managedSettings: managedSettings)
     }
   }
 

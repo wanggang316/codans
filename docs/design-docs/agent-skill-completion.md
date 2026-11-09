@@ -84,15 +84,16 @@ struct SkillLocation {
 
 - **有效 HOME**：`usesDedicatedHome` 时为 `AgentLaunchCommand.dedicatedHomeURL(for:)`，否则为用户 HOME。
 - **配置根变量**：profile 的 `envVars` 含该 agent 的 `configRootEnvVar` 时，以其值替换对应的默认配置根（例如 `CLAUDE_CONFIG_DIR` 替换 `~/.claude`）。
-- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录；选 New Worktree 时目录尚不存在，用项目主仓库根；Folder 或 Workspace 项目用其唯一工作目录。查找范围按 `projectSearch`。
+- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录（分支名与发送时同一规则：本地分支名优先，否则按 `<remote>/<branch>` 解析）；选 New Worktree 时目录尚不存在，用项目主仓库根；Folder 或 Workspace 项目用其唯一工作目录。查找范围按 `projectSearch`。
 - **远程项目**：不解析，补全关闭。
 
 ### 插件 Skill
 
-- **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `enabledPlugins` 合并结果为 true 的插件。合并顺序同 Claude Code 的 settings 优先级（后者覆盖前者）：`<config root>/settings.json`、项目起点下的 `.claude/settings.json`、`.claude/settings.local.json`、`/Library/Application Support/ClaudeCode/managed-settings.json`。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
+- **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `enabledPlugins` 合并结果为 true 的插件。合并顺序同 Claude Code 的 settings 优先级（后者覆盖前者）：`<config root>/settings.json`、项目起点下的 `.claude/settings.json`、`.claude/settings.local.json`、profile 额外参数里的 `--settings <file>`、`/Library/Application Support/ClaudeCode/managed-settings.json`。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
   - Config root 与用户级目录同一规则：有效 HOME 下的 `.claude`，或 `CLAUDE_CONFIG_DIR` 的值（相对路径时不列插件）。
   - 插件清单 `.claude-plugin/plugin.json` 的 `skills` 字段声明了路径时，扫 `skills/` 与声明的路径（路径本身含 `SKILL.md` 则为单个 Skill），不再整体扫 `.claude/skills`：Claude Code 只加载声明的 Skill（例：ui-ux-pro-max 2.5.0 的 `.claude/skills` 有 7 个 Skill，只声明 1 个）。离开 install path 的路径丢弃。
   - 注册表 key 为 `<plugin>@<marketplace>`，`<plugin>` 取 `@` 之前部分。`installPath` 只接受绝对路径或 `~/` 开头的路径。
+  - 额外参数是原样拼接的 shell 片段。只解析未加引号的 `--settings <path>`（绝对路径、`~/`、或相对项目起点）；内联 JSON、带引号或变量的值、重复的 `--settings`、`--setting-sources`、`--plugin-dir` 读不准，此时不列插件 Skill（ADR 0010）。
   - 项目起点见"目录解析"。切换目标（分支）会改变起点，因此重新扫描。
   - 注册表缺失、不是 JSON、结构不符时，不列插件 Skill；某个 settings 文件缺失或无法解析时跳过该文件（Claude Code 也忽略无效的 settings 文件）。用户级与项目级 Skill 不受影响。
   - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。

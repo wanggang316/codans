@@ -233,6 +233,50 @@ struct ClaudePluginSkillTests {
   }
 
   @Test
+  func settingsFlagFileWinsOverProjectSettingsButNotManagedSettings() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    let flagFile = home.appending(path: "flag-settings.json")
+    try enable(#""docs@market": true"#, in: project.appending(path: ".claude/settings.local.json"))
+    try enable(#""docs@market": false, "off@market": true, "pro@other": true"#, in: flagFile)
+    try enable(#""pro@other": false"#, in: managed)
+    let profile = AgentProfile(
+      kind: .claudeCode, extraArguments: "--verbose --settings \(flagFile.path(percentEncoded: false))")
+    #expect(scan(profile, in: project).map(\.name) == ["mine", "off:hidden"])
+  }
+
+  @Test
+  func settingsFlagPathFormsResolve() {
+    let user = URL(fileURLWithPath: "/Users/me", isDirectory: true)
+    func read(_ arguments: String, in directory: URL? = project) -> ClaudePluginRegistry.LaunchSettings {
+      ClaudePluginRegistry.launchSettings(
+        extraArguments: arguments, projectDirectory: directory, userHome: user)
+    }
+    #expect(read("") == .none)
+    #expect(read("--model opus --verbose") == .none)
+    #expect(read("--settings /etc/claude.json") == .file(URL(fileURLWithPath: "/etc/claude.json")))
+    #expect(read("--settings=/etc/claude.json") == .file(URL(fileURLWithPath: "/etc/claude.json")))
+    #expect(read("--settings ~/c.json") == .file(URL(fileURLWithPath: "/Users/me/c.json")))
+    #expect(
+      read("--settings conf/c.json")
+        == .file(project.appending(path: "conf/c.json").standardizedFileURL))
+    #expect(read("--settings conf/c.json", in: nil) == .unknown)
+  }
+
+  @Test
+  func unreadableSettingsFlagsOfferNoPluginSkills() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    let unknown = [
+      #"--settings '{"enabledPlugins":{}}'"#, "--settings \"/tmp/a b.json\"", "--settings $CONF",
+      "--settings", "--settings /a.json --settings /b.json", "--setting-sources user",
+      "--setting-sources=user,project", "--plugin-dir ./dev-plugin", "--settings ~other/c.json",
+    ]
+    for arguments in unknown {
+      let profile = AgentProfile(kind: .claudeCode, extraArguments: arguments)
+      #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(arguments)")
+    }
+  }
+
+  @Test
   func agentWithoutPluginSourceReadsNoRegistry() throws {
     try fixture(root: home.appending(path: ".claude"))
     #expect(plugins(AgentProfile(kind: .codex)).isEmpty)

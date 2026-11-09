@@ -393,7 +393,10 @@ struct NewAgentFeature {
     let path: String
     if state.worktree == nil {
       path = (live.first { $0.id == project.selectedWorktreeID } ?? live.first)?.path ?? project.rootPath
-    } else if case .branch(let ref) = state.target, let worktree = Self.worktree(holding: ref, in: live) {
+    } else if case .branch(let ref) = state.target, let form = state.worktree,
+      let (branch, _) = Self.branch(for: ref, form: form),
+      let worktree = live.first(where: { $0.branch == branch })
+    {
       path = worktree.path
     } else {
       path = project.gitRoot ?? project.rootPath
@@ -401,13 +404,18 @@ struct NewAgentFeature {
     return URL(fileURLWithPath: path, isDirectory: true)
   }
 
-  /// The worktree on `ref`, or on the branch of the remote-tracking ref
-  /// `ref` (`origin/feature` → `feature`).
-  private static func worktree(holding ref: String, in worktrees: [Worktree]) -> Worktree? {
-    if let worktree = worktrees.first(where: { $0.branch == ref }) { return worktree }
+  /// The local branch a target `ref` sends the agent to, and the
+  /// remote-tracking ref to create it from when it has no local copy. A
+  /// local branch name wins over reading `ref` as `<remote>/<branch>`, so
+  /// `feature/foo` stays `feature/foo`. `nil` when `ref` is neither.
+  private static func branch(
+    for ref: String, form: CreateWorktreeFeature.State
+  ) -> (branch: String, remoteRef: String?)? {
+    let locals = Set(form.localBranchNamesByLower.values)
+    if locals.contains(ref) { return (ref, nil) }
     guard let slash = ref.firstIndex(of: "/") else { return nil }
     let branch = String(ref[ref.index(after: slash)...])
-    return worktrees.first { $0.branch == branch }
+    return (branch, locals.contains(branch) ? nil : ref)
   }
 
   /// Puts back what `onAppear` can set at once. The form is seeded fresh, so
@@ -486,15 +494,7 @@ struct NewAgentFeature {
     _ ref: String, in project: Project, form: CreateWorktreeFeature.State,
     profileID: UUID, prompt: String?, state: inout State
   ) -> Effect<Action> {
-    let locals = Set(form.localBranchNamesByLower.values)
-    let branch: String
-    var remoteRef: String?
-    if locals.contains(ref) {
-      branch = ref
-    } else if let slash = ref.firstIndex(of: "/") {
-      branch = String(ref[ref.index(after: slash)...])
-      if !locals.contains(branch) { remoteRef = ref }
-    } else {
+    guard let (branch, remoteRef) = Self.branch(for: ref, form: form) else {
       state.submitError = "\"\(ref)\" is not a branch of this project."
       return .none
     }

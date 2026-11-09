@@ -10,25 +10,74 @@ nonisolated enum ClaudePluginRegistry {
   static let managedSettings = URL(
     fileURLWithPath: "/Library/Application Support/ClaudeCode/managed-settings.json")
 
+  /// What the profile's extra arguments do to the settings Claude Code loads.
+  enum LaunchSettings: Equatable {
+    /// No settings flag.
+    case none
+    /// `--settings <file>`: one more settings layer.
+    case file(URL)
+    /// A flag whose effect codans cannot read: inline JSON, a quoted or
+    /// shell-expanded value, a repeated flag, `--setting-sources`, or
+    /// `--plugin-dir`. Then no plugin skill is offered (ADR 0010).
+    case unknown
+  }
+
+  /// Reads the settings flags from a profile's extra arguments, a raw shell
+  /// fragment that the launch command appends as it is. `~` expands against
+  /// `userHome` (the shell does it, before `env` sets the agent's `HOME`);
+  /// a relative path against the directory the agent starts in.
+  static func launchSettings(
+    extraArguments: String, projectDirectory: URL?, userHome: URL
+  ) -> LaunchSettings {
+    let tokens = extraArguments.split(whereSeparator: \.isWhitespace).map(String.init)
+    var values: [String?] = []
+    for (index, token) in tokens.enumerated() {
+      if token == "--setting-sources" || token.hasPrefix("--setting-sources=")
+        || token == "--plugin-dir" || token.hasPrefix("--plugin-dir=")
+      {
+        return .unknown
+      }
+      if token == "--settings" {
+        values.append(index + 1 < tokens.count ? tokens[index + 1] : nil)
+      } else if token.hasPrefix("--settings=") {
+        values.append(String(token.dropFirst("--settings=".count)))
+      }
+    }
+    guard !values.isEmpty else { return .none }
+    guard values.count == 1, let value = values[0], !value.isEmpty,
+      !value.contains(where: { "\"'\\$`{}()*?".contains($0) })
+    else { return .unknown }
+    if value.hasPrefix("/") { return .file(URL(fileURLWithPath: value).standardizedFileURL) }
+    if value.hasPrefix("~/") {
+      return .file(userHome.appending(path: String(value.dropFirst(2))).standardizedFileURL)
+    }
+    if value.hasPrefix("~") { return .unknown }
+    guard let projectDirectory else { return .unknown }
+    return .file(projectDirectory.appending(path: value).standardizedFileURL)
+  }
+
   /// The settings files that can set `enabledPlugins`, lowest precedence
-  /// first: user, project, local project, managed. Claude Code reads the
-  /// project files in the directory it starts in.
+  /// first: user, project, local project, `--settings`, managed. Claude Code
+  /// reads the project files in the directory it starts in.
   static func settingsFiles(
-    configRoot: URL, projectDirectory: URL?, managedSettings: URL
+    configRoot: URL, projectDirectory: URL?, launchSettings: URL?, managedSettings: URL
   ) -> [URL] {
     var files = [configRoot.appending(path: "settings.json", directoryHint: .notDirectory)]
     if let projectDirectory {
       files.append(projectDirectory.appending(path: ".claude/settings.json", directoryHint: .notDirectory))
       files.append(projectDirectory.appending(path: ".claude/settings.local.json", directoryHint: .notDirectory))
     }
+    if let launchSettings { files.append(launchSettings) }
     files.append(managedSettings)
     return files
   }
 
   /// The skill directories of every enabled plugin under `configRoot`, as
-  /// enabled for an agent that starts in `projectDirectory`.
+  /// enabled for an agent that starts in `projectDirectory` with the
+  /// `--settings` file `launchSettings`.
   static func skillDirectories(
-    configRoot: URL, home: URL, projectDirectory: URL?, managedSettings: URL = managedSettings
+    configRoot: URL, home: URL, projectDirectory: URL?, launchSettings: URL? = nil,
+    managedSettings: URL = managedSettings
   ) -> [SkillDirectory] {
     let registry = configRoot.appending(path: "plugins/installed_plugins.json", directoryHint: .notDirectory)
     let fileManager = FileManager.default
@@ -36,7 +85,8 @@ nonisolated enum ClaudePluginRegistry {
       return []
     }
     let settings = settingsFiles(
-      configRoot: configRoot, projectDirectory: projectDirectory, managedSettings: managedSettings
+      configRoot: configRoot, projectDirectory: projectDirectory, launchSettings: launchSettings,
+      managedSettings: managedSettings
     ).compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
     return enabledPlugins(registry: registryData, settings: settings, home: home).flatMap { plugin in
       skillDirectories(of: plugin).map { url, layout in

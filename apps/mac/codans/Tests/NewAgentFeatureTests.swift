@@ -454,4 +454,28 @@ struct NewAgentFeatureTests {
           projectDirectory: URL(fileURLWithPath: "/tmp/new-agent/dangling", isDirectory: true))))
     #expect(store.state.skills == [Self.reviewSkill])
   }
+
+  /// A local branch with a slash is not read as `<remote>/<branch>`: the
+  /// agent starts in a new worktree for `feature/dangling`, not in the
+  /// worktree of an unrelated `dangling` branch.
+  @Test
+  func localBranchWithASlashDoesNotScanAnotherBranchesWorktree() async {
+    let requested = LockIsolated<[String?]>([])
+    var catalog = catalog
+    catalog.projects[0].worktrees.append(
+      Worktree(name: "dangling", path: "/tmp/new-agent/other", branch: "dangling"))
+    let store = makeStore(
+      preferredProjectID: gitProjectID, catalog: catalog,
+      loadSkills: { _, directory in
+        requested.withValue { $0.append(directory?.path(percentEncoded: false)) }
+        return []
+      })
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.targetSelected(.branch("feature/dangling")))
+    await store.receive(\.skillsLoaded)
+    #expect(requested.value == ["/tmp/new-agent/repo/", "/tmp/new-agent/repo/"])
+  }
 }
