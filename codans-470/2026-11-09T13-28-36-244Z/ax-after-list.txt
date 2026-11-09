@@ -1,0 +1,99 @@
+AXWindow (AXStandardWindow) "Agents" #settings [focused] {Raise}
+  AXSplitGroup #settings, SidebarNavigationSplitView
+    AXScrollArea {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage}
+      AXOutline "Sidebar" {ShowMenu}
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "General"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Git Platforms"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Worktrees"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Terminal"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Notifications"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Global Commands"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Shortcuts"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Updates"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "About"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow) [selected]
+          AXCell [selected,focused]
+            AXStaticText = "Agents"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Integrations"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Workflows"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Remote Hosts"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXHeading "Projects" {Press}
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "No open projects"
+        AXColumn #ListColumn
+      AXScrollBar = "0"
+        AXValueIndicator = "0"
+        AXButton (AXIncrementArrow) {Press}
+        AXButton (AXDecrementArrow) {Press}
+        AXButton (AXIncrementPage) {Press}
+        AXButton (AXDecrementPage) {Press}
+    AXSplitter = "189" [disabled]
+    AXScrollArea {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage}
+      AXCheckBox "Enable Claude Code" = "1" {Press}
+      AXButton "Claude Code" {Press}
+      AXCheckBox "Enable Codex" = "1" {Press}
+      AXButton "Codex" {Press}
+      AXCheckBox "Enable Gemini CLI" = "1" {Press}
+      AXButton "Gemini CLI" {Press}
+      AXCheckBox "Enable Cursor Agent" = "1" {Press}
+      AXButton "Cursor Agent" {Press}
+      AXCheckBox "Enable OpenCode" = "1" {Press}
+      AXButton "OpenCode" {Press}
+      AXCheckBox "Enable GitHub Copilot" = "1" {Press}
+      AXButton "GitHub Copilot" {Press}
+      AXCheckBox "Enable Droid" = "1" {Press}
+      AXButton "Droid" {Press}
+      AXCheckBox "Enable Amp" = "1" {Press}
+      AXButton "Amp" {Press}
+      AXCheckBox "Enable Grok Build" = "1" {Press}
+      AXButton "Grok Build" {Press}
+      AXCheckBox "Enable Pi" = "1" {Press}
+      AXButton "Pi" {Press}
+      AXCheckBox "Enable omp" = "1" {Press}
+      AXButton "omp" {Press}
+      AXButton "Add Profile" {Press}
+      AXMenuButton "Add profile for a specific agent" {Press}
+      AXStaticText = "Named launch presets available from the New Agent dialog. A "
+      AXScrollBar = "0"
+        AXValueIndicator = "0"
+        AXButton (AXIncrementArrow) {Press}
+        AXButton (AXDecrementArrow) {Press}
+        AXButton (AXIncrementPage) {Press}
+        AXButton (AXDecrementPage) {Press}
+  AXButton (AXCloseButton) {Press}
+  AXButton (AXZoomButton) {Press,ShowMenu}
+  AXButton (AXMinimizeButton) {Press}
+  AXStaticText = "Agents" {Press}

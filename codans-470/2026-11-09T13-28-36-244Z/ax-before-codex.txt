@@ -1,0 +1,87 @@
+AXWindow (AXStandardWindow) "Agents" #settings [focused] {Raise}
+  AXSplitGroup #settings, SidebarNavigationSplitView
+    AXScrollArea {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage}
+      AXOutline "Sidebar" {ShowMenu}
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "General"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Git Platforms"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Worktrees"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Terminal"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Notifications"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Global Commands"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Shortcuts"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Updates"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "About"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow) [selected]
+          AXCell [selected,focused]
+            AXStaticText = "Agents"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Integrations"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Workflows"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Remote Hosts"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXHeading "Projects" {Press}
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "No open projects"
+        AXColumn #ListColumn
+      AXScrollBar = "0"
+        AXValueIndicator = "0"
+        AXButton (AXIncrementArrow) {Press}
+        AXButton (AXDecrementArrow) {Press}
+        AXButton (AXIncrementPage) {Press}
+        AXButton (AXDecrementPage) {Press}
+    AXSplitter = "189" [disabled]
+    AXScrollArea {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage}
+      AXHeading "Profile"
+      AXStaticText = "Name"
+      AXTextField "Codex" {ShowMenu,Confirm}
+      AXStaticText
+      AXStaticText = "Agent"
+      AXPopUpButton = "Codex" {Press}
+      AXStaticText = "Icon"
+      AXStaticText = "Codex brand icon"
+      AXButton "Change…" {Press}
+      AXHeading "Launch Preview"
+      AXStaticText = "codans types this command into the pane it opens. Environmen"
+      AXStaticText
+      
+      
+      
+      
+      
+      
+  
+  
+  
+  
+  

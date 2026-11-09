@@ -1,0 +1,108 @@
+AXWindow (AXStandardWindow) "Agents" #settings [focused] {Raise}
+  AXSplitGroup #settings, SidebarNavigationSplitView
+    AXScrollArea {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage}
+      AXOutline "Sidebar" {ShowMenu}
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "General"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Git Platforms"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Worktrees"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Terminal"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Notifications"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Global Commands"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Shortcuts"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Updates"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "About"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow) [selected]
+          AXCell [selected,focused]
+            AXStaticText = "Agents"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Integrations"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Workflows"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "Remote Hosts"
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXHeading "Projects" {Press}
+        AXRow (AXOutlineRow)
+          AXCell [focused]
+            AXStaticText = "No open projects"
+        AXColumn #ListColumn
+      AXScrollBar = "0"
+        AXValueIndicator = "0"
+        AXButton (AXIncrementArrow) {Press}
+        AXButton (AXDecrementArrow) {Press}
+        AXButton (AXIncrementPage) {Press}
+        AXButton (AXDecrementPage) {Press}
+    AXSplitter = "189" [disabled]
+    AXScrollArea {ScrollLeftByPage,ScrollRightByPage,ScrollUpByPage,ScrollDownByPage}
+      AXStaticText = "gemini was not found on your PATH. Install the agent to laun"
+      AXHeading "Profile"
+      AXStaticText = "Name"
+      AXTextField "Gemini CLI" {ShowMenu,Confirm}
+      AXStaticText
+      AXStaticText = "Agent"
+      AXPopUpButton = "Gemini CLI" {Press}
+      AXStaticText = "Icon"
+      AXStaticText = "Gemini brand icon"
+      AXButton "Change…" {Press}
+      AXHeading "Launch Preview"
+      AXStaticText = "codans types this command into the pane it opens. Environmen"
+      AXGroup "Launch command"
+        AXStaticText = "gemini"
+          AXStaticText = "gemini"
+      AXHeading "Details"
+      AXStaticText = "Model"
+      AXPopUpButton = "Runtime default" {Press}
+      AXStaticText = "Execution Mode"
+      AXPopUpButton = "Standard" {Press}
+      AXStaticText = "Open In"
+      AXPopUpButton = "New Tab" {Press}
+      AXHeading "Advanced"
+      AXStaticText = "Extra Arguments"
+      AXTextField "--flag value" {ShowMenu,Confirm}
+      AXStaticText
+      AXStaticText = "Environment Variables"
+      AXStaticText = "Applied only to the launched agent — the pane's shell keeps "
+      AXButton "Add Variable" {Press}
+      AXStaticText = "Use Dedicated Home"
+      AXCheckBox (AXSwitch) = "0" {Press}
+      AXButton "Remove Profile…" {Press}
+      AXScrollBar = "0"
+        AXValueIndicator = "0"
+        AXButton (AXIncrementArrow) {Press}
+        AXButton (AXDecrementArrow) {Press}
+        AXButton (AXIncrementPage) {Press}
+        AXButton (AXDecrementPage) {Press}
+  AXToolbar {ShowMenu}
+    AXButton "Back to Agents" #chevron.backward {Increment,Decrement,Delete,ShowMenu,Cancel,Press,Move previous,Remove from toolbar}
+  AXButton (AXCloseButton) {Press}
+  AXButton (AXZoomButton) {Press,ShowMenu}
+  AXButton (AXMinimizeButton) {Press}
+  AXStaticText = "Agents" {Press}

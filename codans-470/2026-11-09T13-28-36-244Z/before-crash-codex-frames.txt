@@ -1,0 +1,32 @@
+EXC_BAD_ACCESS SIGSEGV Could not determine thread index for stack guard region
+frames: 96
+CoreFoundation ___CFBasicHashFindBucket_Linear
+CoreFoundation CFDictionaryGetValue
+AppKit _accessibilityFindRoleFromProtocol
+AppKit NSAccessibilityGetObjectValueForAttribute
+AppKit _NSAccessibilityOverrideValueForAttribute
+AppKit ___NSAccessibilityEntryPointValueForAttribute_block_invoke.772
+AppKit NSAccessibilityPerformEntryPointObject
+AppKit _NSAccessibilityEntryPointValueForAttribute
+SwiftUI PlatformAccessibilityElementProtocol<>.valueForAttribute<A>(_:asType:)
+SwiftUI AccessibilityNode.resolvedRole(forPlatformElement:)
+SwiftUI AccessibilityNode.labelExposedAs.getter
+SwiftUI AccessibilityNode.labelsToResolve.getter
+SwiftUI AccessibilityNode.accessibilityLabel()
+SwiftUI @objc AccessibilityNode.accessibilityLabel()
+SwiftUI closure #4 in AccessibilityNode.applyProperties(to:)
+SwiftUI partial apply for closure #4 in AccessibilityNode.applyProperties(to:)
+SwiftUI thunk for @escaping @callee_guaranteed () -> (@out Any?)
+AppKit _accessibilityGetAssociatedObjectForAttribute
+AppKit NSAccessibilityGetObjectValueForAttribute
+AppKit _NSAccessibilityOverrideValueForAttribute
+AppKit ___NSAccessibilityEntryPointValueForAttribute_block_invoke.772
+AppKit NSAccessibilityPerformEntryPointObject
+AppKit _NSAccessibilityEntryPointValueForAttribute
+SwiftUI PlatformAccessibilityElementProtocol<>.valueForAttribute<A>(_:asType:)
+SwiftUI AccessibilityNode.accessibilityLabel()
+SwiftUI @objc AccessibilityNode.accessibilityLabel()
+SwiftUI closure #4 in AccessibilityNode.applyProperties(to:)
+SwiftUI partial apply for closure #4 in AccessibilityNode.applyProperties(to:)
+SwiftUI thunk for @escaping @callee_guaranteed () -> (@out Any?)
+AppKit _accessibilityGetAssociatedObjectForAttribute
