@@ -194,6 +194,53 @@ check "number is restored with its type" test "$(defaults read-type "$test_domai
 check "array is restored" test "$(defaults read "$test_domain" "NSSplitView Subview Frames main" | tr -d ' \n')" = '("0,0,266,1050","0,0,192,1050")'
 check "array keeps its type" test "$(defaults read-type "$test_domain" "NSSplitView Subview Frames main")" = "Type is array"
 
+# ---------- crash mark and check ----------
+# check writes $scratch/out, so a later grep reads a copy.
+# Synthetic .ips reports: a JSON header line, then a JSON body with the PID
+# and the crashed thread, as ReportCrash writes them.
+export SELF_VERIFY_CRASH_DIR="$scratch/reports"
+export SELF_VERIFY_CRASH_SETTLE=0
+export SELF_VERIFY_CRASH_WAIT=1
+mkdir -p "$SELF_VERIFY_CRASH_DIR"
+write_ips() { # write_ips <name> <pid>
+  printf '%s\n%s\n' '{"app_name":"Codans","bug_type":"309"}' \
+    "{\"pid\":$2,\"procName\":\"Codans\",\"faultingThread\":1,\"exception\":{\"type\":\"EXC_BAD_ACCESS\",\"signal\":\"SIGSEGV\"},
+     \"usedImages\":[{\"name\":\"Codans\"},{\"name\":\"SwiftUI\"}],
+     \"threads\":[{\"frames\":[{\"imageIndex\":0,\"imageOffset\":16,\"symbol\":\"idleThreadFrame\"}]},
+       {\"triggered\":true,\"frames\":[{\"imageIndex\":1,\"imageOffset\":64,\"symbol\":\"AccessibilityNode.accessibilityLabel()\",\"symbolLocation\":12},
+         {\"imageIndex\":0,\"imageOffset\":4096}]}]}" >"$SELF_VERIFY_CRASH_DIR/$1"
+}
+check_not "crash check refuses without a mark" sv_crash_check
+check_not "crash mark refuses without an instance" sv_crash_mark
+check "launches the fake instance for crash checks" sv_launch
+pid="$(sv_pid)"
+write_ips Codans-before.ips "$pid"
+check "crash mark records the instance" sv_crash_mark
+check "crash check passes on a live instance" sv_crash_check
+cp "$scratch/out" "$scratch/crash.out"
+check "pass message names the pid" grep -q "pid $pid" "$scratch/crash.out"
+check "a report written before the mark does not fail the check" sv_crash_check
+write_ips Codans-other.ips 1
+write_ips Other-new.ips "$pid"
+check "a report of another process does not fail the check" sv_crash_check
+write_ips Codans-new.ips "$pid"
+check_not "a new report for the instance fails the check" sv_crash_check
+cp "$scratch/out" "$scratch/crash.out"
+check "the failure names the new report" grep -q "$SELF_VERIFY_CRASH_DIR/Codans-new.ips" "$scratch/crash.out"
+check "the failure prints the crashed-thread frames" grep -q 'SwiftUI.*AccessibilityNode.accessibilityLabel() + 12' "$scratch/crash.out"
+check "the failure prints unsymbolicated frames by offset" grep -q 'Codans.*0x1000' "$scratch/crash.out"
+check_not "the failure skips threads that did not crash" grep -q idleThreadFrame "$scratch/crash.out"
+check_not "the failure does not name the old report" grep -q Codans-before.ips "$scratch/crash.out"
+check "crash mark again forgets the reported crash" sv_crash_mark
+check "crash check passes after a new mark" sv_crash_check
+kill -KILL "$pid"
+check_not "a dead instance fails the check" sv_crash_check
+cp "$scratch/out" "$scratch/crash.out"
+check "the failure says the pid is gone" grep -q "pid $pid is gone" "$scratch/crash.out"
+check "the failure says no report appeared" grep -q 'no new Codans-\*.ips report' "$scratch/crash.out"
+sv_cleanup >/dev/null 2>&1
+unset SELF_VERIFY_CRASH_DIR SELF_VERIFY_CRASH_SETTLE SELF_VERIFY_CRASH_WAIT
+
 # ---------- per-session defaults ----------
 # Run a command with no session variable and no explicit path variable.
 no_session_env() {
