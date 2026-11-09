@@ -240,6 +240,11 @@ nonisolated enum SSHReconnectLoop {
       "\u{1B}[?1005l", "\u{1B}[?1006l", "\u{1B}[?1015l", "\u{1B}[?1016l",
       // Focus reporting, bracketed paste, synchronized output.
       "\u{1B}[?1004l", "\u{1B}[?2004l", "\u{1B}[?2026l",
+      // Ghostty keeps one kitty keyboard stack per screen, and the alternate
+      // screen keeps its stack after 1049l, so the next program to enter it
+      // would inherit the flags. Pop the stack of the current screen before
+      // leaving it; the primary screen's stack is popped below.
+      "\u{1B}[<99u",
       // Primary screen, visible cursor, normal cursor keys (DECCKM), normal keypad.
       // Leaving 1049 restores the primary screen's saved cursor, which is the
       // top-left corner when none was saved, so the output would be written
@@ -247,7 +252,7 @@ nonisolated enum SSHReconnectLoop {
       // keeps it in place; on the alternate screen the save goes to that
       // screen and the primary one gets its own cursor back.
       "\u{1B}7", "\u{1B}[?1049l", "\u{1B}[?25h", "\u{1B}[?1l", "\u{1B}>",
-      // Pop the whole kitty keyboard stack; modifyOtherKeys off.
+      // Pop the primary screen's kitty keyboard stack; modifyOtherKeys off.
       "\u{1B}[<99u", "\u{1B}[>4;0m",
       // SGR reset.
       "\u{1B}[0m",
