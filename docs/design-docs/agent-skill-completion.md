@@ -1,8 +1,8 @@
 # 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
 
-**Availability:** Planned
+**Availability:** Partly available: New Agent completion of Claude Code user-level skills. Project-level skills, plugin skills, other agents, and the Skills button are planned.
 **Author:** Gump（与 Claude）
-**Implementation:** none
+**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
 
 ## 背景与范围
 
@@ -114,6 +114,17 @@ struct SkillLocation {
 ### 探针实测
 
 对本机已装的 Claude Code、Codex、Pi、Gemini、OpenCode：在隔离实例的临时项目里放一个探针 Skill（执行时输出固定标记），用 New Agent 的实际启动路径带调用 token 作为首条 prompt 启动，检查标记是否出现，分别测 prompt 开头和中间两种位置。结果写入 Skill Location 表的 `invocationStyle` / `invocationPosition` 及本节。未通过或未安装的 agent 保持 `none`。
+
+结果（2026-11-09，Claude Code 2.1.319）：
+
+| Agent | 写法 | prompt 开头 | prompt 中间 | 结论 |
+|---|---|---|---|---|
+| Claude Code | `/name` | 通过：CLI 直接展开 Skill，输出标记 | 通过：模型调用 `Skill(name)` 加载后输出标记 | `.slash`，`.anywhere` |
+| 其余 agent | — | 未测 | 未测 | `none` |
+
+- 探针：`~/.claude/skills/codans-probe-455/SKILL.md`，正文要求只回复 `PROBE-MARKER-7F3A`（标记只在正文，描述里没有）。
+- 实测两次：直接运行 `claude '/codans-probe-455'` 与 `claude 'Run this for me: /codans-probe-455 and nothing more'`；再在隔离 Debug 实例里经 New Agent 对话框（New Worktree 目标）发送同样两条 prompt，pane 中均出现标记。
+- 中间位置靠模型调用 Skill 工具，所以 frontmatter 含 `disable-model-invocation: true` 的 Skill 只在开头生效。v1 不区分，保持 `.anywhere`。
 
 ## 备选方案
 

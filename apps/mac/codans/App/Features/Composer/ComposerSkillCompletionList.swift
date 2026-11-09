@@ -18,13 +18,16 @@ struct ComposerSkillCompletionList: View {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(Array(completion.matches.enumerated()), id: \.element.id) { index, skill in
-            row(skill, isHighlighted: index == completion.highlightedIndex)
-              .id(skill.id)
-              .contentShape(Rectangle())
-              .onTapGesture {
-                _ = selection.apply(completion.select(skill, text: text), onInsert: onInsert)
-              }
-              .accessibilityAddTraits(.isButton)
+            Button {
+              _ = selection.apply(completion.select(skill, text: text), onInsert: onInsert)
+            } label: {
+              row(skill, isHighlighted: index == completion.highlightedIndex)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            // The editor keeps focus, so keys keep going to the list.
+            .focusable(false)
+            .id(skill.id)
           }
         }
         .padding(4)
