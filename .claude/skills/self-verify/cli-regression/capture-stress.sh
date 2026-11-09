@@ -7,7 +7,8 @@
 # Each round sends one command, then a second one at once, while the first
 # command's prompt is still being drawn. Before the #444 fix, the second
 # capture came back empty with exit 0. Every round must print the output or
-# fail with an error; an empty success counts as EMPTY and fails the run.
+# fail with an error; an empty success counts as EMPTY. The run passes only
+# when every first send succeeds and every capture prints its output.
 set -uo pipefail
 
 APP="$1"
@@ -38,7 +39,9 @@ RESULTS="$CODANS_CLI_REGRESSION_DIR/capture-stress.tsv"
 : >"$RESULTS"
 ok=0 empty=0 error=0 other=0
 for i in $(seq 1 "$N"); do
-  "$CLI" pane send "$PANE" "echo PRE-$i" --capture --json >/dev/null 2>&1
+  if ! "$CLI" pane send "$PANE" "echo PRE-$i" --capture --json >/dev/null 2>&1; then
+    echo "round $i: the first send failed"; exit 1
+  fi
   res=$("$CLI" pane send "$PANE" "echo CAP-$i" --capture --json 2>&1)
   rc=$?
   out=$(jq -r '.data.output // empty' <<<"$res" 2>/dev/null)
@@ -51,4 +54,4 @@ for i in $(seq 1 "$N"); do
   sleep $((PROMPT_SECS * 2 + 1))
 done
 echo "ok=$ok empty=$empty error=$error other=$other  (results: $RESULTS)"
-[[ $empty -eq 0 && $other -eq 0 ]]
+[[ $ok -eq $N ]]
