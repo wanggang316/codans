@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Two self-verify sessions with default paths in one worktree, run at once.
+# Only the session id differs (as with two agent sessions).
+cd "$1" || exit 1
+out="$2"
+sess() { (export SELF_VERIFY_SESSION="$1"; shift; unset SELF_VERIFY_DIR SELF_VERIFY_SOCKET SELF_VERIFY_CACHE
+  . .claude/skills/self-verify/scripts/helpers.sh && "$@"); }
+paths() { printf 'dir=%s\nsocket=%s (%s bytes)\ncache=%s (%s bytes, zmx socket %s bytes)\n' "$SELF_VERIFY_DIR" \
+  "$SELF_VERIFY_SOCKET" "${#SELF_VERIFY_SOCKET}" "$SELF_VERIFY_CACHE" "${#SELF_VERIFY_CACHE}" $((${#SELF_VERIFY_CACHE} + 41)); }
+fixture_pane() { local f p w t
+  f="$(sv_fixture_repo)"; p="$(codans_debug project add "$f" --json | jq -r '.data.id')"
+  w="$(codans_debug tree --json | jq -r '.data.projects[0].worktrees[0].id')"
+  t="$(codans_debug tab new sv --project "$p" --worktree "$w" --json | jq -r '.data.id')"
+  codans_debug pane new --project "$p" --worktree "$w" --tab "$t" --cwd "$f" --json | jq -r '.data.id'; }
+for s in A B; do echo "== session $s defaults"; sess "sv-438-$s" paths; done
+echo "== launch A and B at the same time"
+sess sv-438-A sv_launch & a=$!; sess sv-438-B sv_launch & b=$!
+wait $a; echo "A launch exit=$?"; wait $b; echo "B launch exit=$?"
+for s in A B; do
+  echo "== session $s: pid $(sess "sv-438-$s" sv_pid), executable $(ps -p "$(sess "sv-438-$s" sv_pid)" -o comm=)"
+  pane="$(sess "sv-438-$s" fixture_pane)"
+  sess "sv-438-$s" codans_debug pane send "$pane" "printf 'SESSION-$s:%s\n' \"\$CODANS_SOCKET_PATH\"" --capture --json | jq -r '.data.output' | grep "SESSION-$s:/"
+  sess "sv-438-$s" eval 'find "$SELF_VERIFY_CACHE" -type s | while read -r z; do echo "  zmx socket $z (${#z} bytes)"; done'
+  sess "sv-438-$s" sv_screenshot "$out/session-$s.png" && echo "  screenshot session-$s.png"
+done
+echo "== cleanup in session A"
+sess sv-438-A sv_cleanup
+echo "== after A cleanup"
+sess sv-438-A eval 'for p in "$SELF_VERIFY_DIR" "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"; do [ -e "$p" ] && echo "A still has $p" || echo "A removed $p"; done; sv_pid || echo "A: no instance"'
+sess sv-438-B eval 'pid=$(sv_pid) && echo "B instance pid $pid still runs (kill -0: $(kill -0 $pid && echo alive))";
+  for p in "$SELF_VERIFY_DIR/conf/settings.json" "$SELF_VERIFY_DIR/app.log" "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"; do [ -e "$p" ] && echo "B keeps $p"; done;
+  codans_debug status --json | jq -c "{bStatusUptimeSeconds: .data.uptimeSeconds}"; codans_debug tree --json | jq -r ".data.projects[] | \"B tree: project \(.name), panes \([.worktrees[].tabs[].panes[]] | length)\""'
+echo "== cleanup in session B"
+sess sv-438-B sv_cleanup

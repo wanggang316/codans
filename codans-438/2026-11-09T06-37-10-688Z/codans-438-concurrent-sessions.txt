@@ -1,0 +1,37 @@
+== session A defaults
+dir=/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-09a288b0
+socket=/tmp/cdv-sv-501-09a288b0.sock (29 bytes)
+cache=/tmp/cdv-sv-cache-501-09a288b0 (30 bytes, zmx socket 71 bytes)
+== session B defaults
+dir=/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-1adbf864
+socket=/tmp/cdv-sv-501-1adbf864.sock (29 bytes)
+cache=/tmp/cdv-sv-cache-501-1adbf864 (30 bytes, zmx socket 71 bytes)
+== launch A and B at the same time
+self-verify: instance pid 54075 on /tmp/cdv-sv-501-1adbf864.sock
+self-verify: instance pid 54081 on /tmp/cdv-sv-501-09a288b0.sock
+A launch exit=0
+B launch exit=0
+== session A: pid 54081, executable /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-dmugigupokzcvjayywjrrerbpbok/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+SESSION-A:/tmp/cdv-sv-501-09a288b0.sock
+  zmx socket /tmp/cdv-sv-cache-501-09a288b0/run/EA1B3D49-4013-49AF-A8A7-093A45429740 (71 bytes)
+  screenshot session-A.png
+== session B: pid 54075, executable /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-dmugigupokzcvjayywjrrerbpbok/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+SESSION-B:/tmp/cdv-sv-501-1adbf864.sock
+  zmx socket /tmp/cdv-sv-cache-501-1adbf864/run/0CD3A9D8-D6EB-4AA5-9F3E-3729CB70E20D (71 bytes)
+  screenshot session-B.png
+== cleanup in session A
+self-verify: cleanup done
+== after A cleanup
+A removed /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-09a288b0
+A removed /tmp/cdv-sv-501-09a288b0.sock
+A removed /tmp/cdv-sv-cache-501-09a288b0
+A: no instance
+B instance pid 54075 still runs (kill -0: alive)
+B keeps /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-1adbf864/conf/settings.json
+B keeps /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-1adbf864/app.log
+B keeps /tmp/cdv-sv-501-1adbf864.sock
+B keeps /tmp/cdv-sv-cache-501-1adbf864
+{"bStatusUptimeSeconds":5.947875022888184}
+B tree: project fixture, panes 1
+== cleanup in session B
+self-verify: cleanup done
