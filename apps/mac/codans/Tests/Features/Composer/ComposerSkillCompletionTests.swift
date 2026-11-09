@@ -191,4 +191,77 @@ struct ComposerSkillCompletionTests {
     completion.location = .none
     #expect(!completion.isOpen)
   }
+
+  // MARK: - Skills button
+
+  @Test
+  func prefixGoesAtTheCaretAndOpensTheList() {
+    let result = ComposerSkillCompletion.insertingPrefix(
+      "/", into: "fix  now", selection: 4..<4, position: .anywhere)
+    #expect(result?.text == "fix / now")
+    #expect(result?.caret == 5)
+    let completion = completion()
+    completion.update(text: result!.text, caret: result!.caret)
+    #expect(completion.isOpen)
+    #expect(completion.matches == Self.skills)
+    #expect(
+      completion.handle(.accept, text: result!.text)
+        == .insert(text: "fix /code-review now", caret: 17))
+  }
+
+  @Test
+  func prefixAfterAWordGetsASpaceFirst() {
+    let result = ComposerSkillCompletion.insertingPrefix(
+      "/", into: "fix", selection: nil, position: .anywhere)
+    #expect(result?.text == "fix /")
+    #expect(result?.caret == 5)
+  }
+
+  @Test
+  func prefixReplacesTheSelection() {
+    let result = ComposerSkillCompletion.insertingPrefix(
+      "/", into: "run tests", selection: 4..<9, position: .anywhere)
+    #expect(result?.text == "run /")
+    #expect(result?.caret == 5)
+  }
+
+  @Test
+  func leadingPrefixGoesAtThePromptStart() {
+    let result = ComposerSkillCompletion.insertingPrefix(
+      "/", into: "fix it", selection: 6..<6, position: .leading)
+    #expect(result?.text == "/fix it")
+    #expect(result?.caret == 1)
+    let empty = ComposerSkillCompletion.insertingPrefix(
+      "/", into: "", selection: nil, position: .leading)
+    #expect(empty?.text == "/")
+    #expect(empty?.caret == 1)
+  }
+
+  // MARK: - Model invocation
+
+  private static let skillsWithManualOnly =
+    skills + [
+      AgentSkillEntry(
+        name: "deploy", summary: "Deploy", source: .user,
+        url: URL(fileURLWithPath: "/tmp/skills/deploy"), disablesModelInvocation: true)
+    ]
+
+  @Test
+  func skillWithoutModelInvocationIsListedAtThePromptStart() {
+    let completion = completion(skills: Self.skillsWithManualOnly)
+    completion.update(text: "  /deploy", caret: 9)
+    #expect(completion.matches.map(\.name) == ["deploy"])
+    completion.update(text: "/", caret: 1)
+    #expect(completion.matches.contains { $0.name == "deploy" })
+  }
+
+  @Test
+  func skillWithoutModelInvocationIsLeftOutMidPrompt() {
+    let completion = completion(skills: Self.skillsWithManualOnly)
+    completion.update(text: "then /deploy", caret: 12)
+    #expect(completion.matches.isEmpty)
+    #expect(!completion.isOpen)
+    completion.update(text: "then /", caret: 6)
+    #expect(completion.matches == Self.skills)
+  }
 }

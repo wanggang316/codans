@@ -490,4 +490,64 @@ struct NewAgentFeatureTests {
         "/tmp/new-agent/repo", "/tmp/new-agent/live", "/tmp/new-agent/repo"
       ])
   }
+
+  // MARK: - Skills button
+
+  @Test
+  func skillsButtonInsertsThePrefixWhenSkillsAreAvailable() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skillsUnavailableReason == nil)
+
+    await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
+    await store.send(.skillsButtonTapped(selection: 3..<3)) { $0.prompt = "fix /" }
+  }
+
+  @Test
+  func skillsButtonIsOffForAnAgentWithoutInvocationStyle() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let codex = AgentProfile(kind: .codex, name: "Work Codex")
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([codex]))
+    #expect(store.state.skillLocation == .none)
+    #expect(store.state.skillsUnavailableReason == "Skill suggestions are not available for Codex")
+
+    await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
+    await store.send(.skillsButtonTapped(selection: 3..<3))
+    #expect(store.state.prompt == "fix")
+    #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func skillsButtonIsOffForARemoteProject() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let remote = Project(
+      name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
+      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    #expect(store.state.skillLocation == .none)
+    #expect(
+      store.state.skillsUnavailableReason == "Skill suggestions are not available for remote projects")
+
+    await store.send(.skillsButtonTapped(selection: nil))
+    #expect(store.state.prompt.isEmpty)
+    #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func skillsButtonIsOffWithoutAnAgent() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    #expect(store.state.skillsUnavailableReason == "Choose an agent to see its skills")
+  }
 }

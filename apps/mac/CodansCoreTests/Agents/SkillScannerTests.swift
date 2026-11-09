@@ -116,4 +116,15 @@ struct SkillScannerTests {
       precedence: SkillLocation.claudeCode.precedence)
     #expect(entries.map(\.source) == [.user])
   }
+
+  @Test
+  func recordsWhetherModelInvocationIsDisabled() async throws {
+    try write("manual", "---\nname: manual\ndisable-model-invocation: true\n---\n")
+    try write("allowed", "---\nname: allowed\ndisable-model-invocation: false\n---\n")
+    try write("absent", "---\nname: absent\n---\n")
+    try write("broken", "---\nname: [broken\ndisable-model-invocation: true\n---\n")
+    let entries = await SkillScanner.scan([directory()])
+    let flags = Dictionary(uniqueKeysWithValues: entries.map { ($0.name, $0.disablesModelInvocation) })
+    #expect(flags == ["manual": true, "allowed": false, "absent": false, "broken": false])
+  }
 }
