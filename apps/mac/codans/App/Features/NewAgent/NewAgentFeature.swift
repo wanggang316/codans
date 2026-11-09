@@ -56,6 +56,10 @@ struct NewAgentFeature {
     let profile: AgentProfile
     /// Where the agent starts, for its project-level skills.
     let projectStart: URL?
+    /// The copy options of the worktree the agent starts in, when the
+    /// target creates one. `projectStart` is then the main checkout, and
+    /// only the project files the options copy count (ADR 0010).
+    var newWorktree: WorktreeCopyOptions?
   }
 
   /// The sidebar's Add Project menu, offered while no project exists.
@@ -340,6 +344,12 @@ struct NewAgentFeature {
         pending.launchAgentPrompt = Self.normalizedPrompt(state.prompt)
         return .send(.delegate(.createWorktree(pending)))
 
+      case .worktree(.copyIgnoredToggled), .worktree(.copyUntrackedToggled):
+        // The copy options decide which project files the new worktree
+        // has. A target in an existing worktree keeps its scope and list.
+        guard skillScope(state: state) != state.skillsScope else { return .none }
+        return loadSkills(state: &state)
+
       case .worktree(.optionsLoaded):
         guard let draft = state.restoring else { return .none }
         state.restoring = nil
@@ -396,7 +406,9 @@ struct NewAgentFeature {
     }
     let client = agentSkillClient
     return .run { send in
-      await send(.skillsLoaded(client.load(scope.profile, scope.projectStart), for: scope))
+      await send(
+        .skillsLoaded(
+          client.load(scope.profile, scope.projectStart, scope.newWorktree), for: scope))
     }
     .cancellable(id: CancelID.skills, cancelInFlight: true)
   }
@@ -410,11 +422,18 @@ struct NewAgentFeature {
     if case .branch(let ref) = state.target, let form = state.worktree {
       branch = Self.branch(for: ref, locals: Set(form.localBranchNamesByLower.values))?.name
     }
+    var newWorktree: WorktreeCopyOptions?
+    if let project, let form = state.worktree,
+      SkillLocationResolver.createsWorktree(in: project, branch: branch)
+    {
+      newWorktree = WorktreeCopyOptions(copyIgnored: form.copyIgnored, copyUntracked: form.copyUntracked)
+    }
     return SkillScope(
       profile: profile,
       projectStart: project.flatMap {
         SkillLocationResolver.projectStartDirectory(in: $0, branch: branch)
-      })
+      },
+      newWorktree: newWorktree)
   }
 
   /// Puts back what `onAppear` can set at once. The form is seeded fresh, so

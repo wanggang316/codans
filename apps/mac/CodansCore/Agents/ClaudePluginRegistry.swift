@@ -75,10 +75,12 @@ nonisolated enum ClaudePluginRegistry {
 
   /// The skill directories of every enabled plugin under `configRoot`, as
   /// enabled for an agent that starts in `projectStart` with the
-  /// `--settings` file `launchSettings`.
+  /// `--settings` file `launchSettings`. A settings file that `exclusion`
+  /// excludes is not read: the new worktree the agent starts in will not
+  /// have it.
   static func skillDirectories(
     configRoot: URL, home: URL, projectStart: URL?, launchSettings: URL? = nil,
-    managedSettings: URL = managedSettings
+    managedSettings: URL = managedSettings, excluding exclusion: ProjectFileExclusion? = nil
   ) -> [SkillDirectory] {
     let registry = configRoot.appending(path: "plugins/installed_plugins.json", directoryHint: .notDirectory)
     let fileManager = FileManager.default
@@ -88,7 +90,9 @@ nonisolated enum ClaudePluginRegistry {
     let settings = settingsFiles(
       configRoot: configRoot, projectStart: projectStart, launchSettings: launchSettings,
       managedSettings: managedSettings
-    ).compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
+    )
+    .filter { exclusion?.excludes($0) != true }
+    .compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
     return enabledPlugins(registry: registryData, settings: settings, home: home).flatMap { plugin in
       skillDirectories(of: plugin).map { url, layout in
         SkillDirectory(url: url, source: .plugin, namespace: plugin.name, layout: layout)

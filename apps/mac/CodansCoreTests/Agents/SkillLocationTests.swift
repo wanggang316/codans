@@ -165,6 +165,17 @@ struct SkillLocationTests {
   }
 
   @Test
+  func onlyABranchWithoutALiveWorktreeCreatesOne() {
+    #expect(SkillLocationResolver.createsWorktree(in: Self.gitProject, branch: nil))
+    #expect(SkillLocationResolver.createsWorktree(in: Self.gitProject, branch: "old"))
+    #expect(SkillLocationResolver.createsWorktree(in: Self.gitProject, branch: "other"))
+    #expect(!SkillLocationResolver.createsWorktree(in: Self.gitProject, branch: "main"))
+    let folder = Project(
+      name: "notes", rootPath: "/code/notes", worktrees: [Worktree(name: "notes", path: "/code/notes")])
+    #expect(!SkillLocationResolver.createsWorktree(in: folder, branch: nil))
+  }
+
+  @Test
   func folderProjectStartsInItsFolder() {
     let folder = Project(
       name: "notes", rootPath: "/code/notes", worktrees: [Worktree(name: "notes", path: "/code/notes")])

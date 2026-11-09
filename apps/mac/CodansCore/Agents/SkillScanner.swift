@@ -36,16 +36,20 @@ public nonisolated enum SkillScanner {
   /// Scans `directories` off the caller's actor. A missing directory
   /// contributes nothing. For one name the source that comes first in
   /// `precedence` wins, then the earlier directory; a source not in
-  /// `precedence` comes last. The result is sorted by name.
+  /// `precedence` comes last. The result is sorted by name. A `SKILL.md`
+  /// that `exclusion` excludes is skipped: the new worktree the agent
+  /// starts in will not have it.
   @concurrent
   public static func scan(
-    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = [],
+    excluding exclusion: ProjectFileExclusion? = nil
   ) async -> [AgentSkillEntry] {
-    scanSync(directories, precedence: precedence)
+    scanSync(directories, precedence: precedence, excluding: exclusion)
   }
 
   static func scanSync(
-    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = [],
+    excluding exclusion: ProjectFileExclusion? = nil
   ) -> [AgentSkillEntry] {
     let rank = { (source: AgentSkillSource) in precedence.firstIndex(of: source) ?? precedence.count }
     let ordered = directories.enumerated()
@@ -54,14 +58,16 @@ public nonisolated enum SkillScanner {
     var seen = Set<String>()
     var entries: [AgentSkillEntry] = []
     for directory in ordered {
-      for entry in skills(in: directory) where seen.insert(entry.name).inserted {
+      for entry in skills(in: directory, excluding: exclusion) where seen.insert(entry.name).inserted {
         entries.append(entry)
       }
     }
     return entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
 
-  private static func skills(in directory: SkillDirectory) -> [AgentSkillEntry] {
+  private static func skills(
+    in directory: SkillDirectory, excluding exclusion: ProjectFileExclusion?
+  ) -> [AgentSkillEntry] {
     let fileManager = FileManager.default
     // Skill folders are often symlinks into a skill source tree, so the
     // listing resolves each child rather than trusting its own type.
@@ -77,7 +83,8 @@ public nonisolated enum SkillScanner {
     }
     return folders.compactMap { folder in
       let file = folder.appending(path: "SKILL.md", directoryHint: .notDirectory)
-      guard let data = fileManager.contents(atPath: file.path(percentEncoded: false)) else {
+      guard exclusion?.excludes(file) != true,
+        let data = fileManager.contents(atPath: file.path(percentEncoded: false)) else {
         return nil
       }
       let folderName = folder.lastPathComponent

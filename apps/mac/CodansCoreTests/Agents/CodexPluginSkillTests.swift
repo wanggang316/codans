@@ -218,6 +218,18 @@ struct CodexPluginSkillTests {
   }
 
   @Test
+  func projectConfigANewWorktreeWillNotHaveHasNoSay() throws {
+    _ = try codexHome()
+    let repo = home.appending(path: "repo")
+    try write("[features]\nplugins = false\n", to: repo.appending(path: ".codex/config.toml"))
+    let exclusion = ProjectFileExclusion(root: repo, paths: [".codex/"])
+    let directories = SkillLocationResolver.pluginDirectories(
+      for: AgentProfile(kind: .codex), projectStart: repo, userHome: home, stateDirectory: stateRoot,
+      excluding: exclusion, isRepositoryRoot: { Self.trimmedPath($0) == Self.trimmedPath(repo) })
+    #expect(SkillScanner.scanSync(directories).map(\.name) == ["docs:pdf"])
+  }
+
+  @Test
   func launchConfigReadsOnlyPlainArguments() {
     #expect(CodexPluginRegistry.launchConfig(extraArguments: "") == .known(profile: nil, plugins: nil))
     #expect(

@@ -85,6 +85,7 @@ struct SkillLocation {
 - **有效 HOME**：`usesDedicatedHome` 时为 `AgentLaunchCommand.dedicatedHomeURL(for:)`，否则为用户 HOME。
 - **配置根变量**：profile 的 `envVars` 含该 agent 的 `configRootEnvVar` 时，以其值替换对应的默认配置根（例如 `CLAUDE_CONFIG_DIR` 替换 `~/.claude`）。
 - **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录（分支名与发送时同一规则：本地分支名优先，否则按 `<remote>/<branch>` 解析）；选 New Worktree 时目录尚不存在，用项目主仓库根（选中的分支没有 worktree 持有时同样会新建 worktree，也用主仓库根）；Folder 或 Workspace 项目用其唯一工作目录（与启动时一致：选中的行，否则第一个未归档的行）。查找范围按每个项目目录各自的 `search`（例如 Pi 的 `.pi/skills` 只读起点，`.agents/skills` 向上查找）；同一层的目录列完再到上一层。
+- **新 worktree 的文件**：目标会新建 worktree 时（New Worktree，或选中的分支没有 worktree 持有），新 worktree 只有已跟踪文件，加上复制选项要复制的文件：勾选 Copy ignored files 时有被忽略的文件，勾选 Copy untracked files 时有未跟踪的文件。主仓库根下其他文件（如被忽略的 `.claude/settings.local.json`、未跟踪的 Skill 目录）不读：项目级 `SKILL.md`、项目 settings 文件、相对项目起点的 `--settings` 文件与 Codex 的项目 `.codex/config.toml` 都按此过滤（`ProjectFileExclusion`）。列出这些文件用与 `wt` 相同的命令：被忽略的文件用 `git ls-files --others --ignored --exclude-standard --directory`，未跟踪的文件用 `git ls-files --others --exclude-standard` 逐个列出（加 `--directory` 时，同时含被忽略与未跟踪文件的目录会整体列为未跟踪，误排除要复制的被忽略文件）。git 把指向目录的符号链接列为文件（不带 `/`），经它读到的文件随它一起排除；git 失败时主仓库根下的文件一律不读，宁可少列（ADR 0010）。已跟踪文件不受复制选项影响。修改复制选项会重新扫描；目标为已有 worktree 时复制选项不影响扫描。
 - **向上查找**：`walkUpToRepoRoot` 从起点逐级向上，到第一个含 `.git`（目录或 worktree 的 `.git` 文件）的目录为止，近的在前；一路找不到仓库根时只读起点目录。
 - **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill），Plugin 最后（插件 Skill 名带 `<plugin>:` 前缀，不与其他来源同名）；Pi 先找到的保留（Project 优先于 User），Codex 同为 Project、User、Plugin；同一来源内近的目录优先。
 - **远程项目**：不解析，补全关闭。
@@ -117,7 +118,7 @@ struct SkillLocation {
 
 `AgentSkillEntry`：调用名、描述首行、来源（Project / User / Plugin）、路径、是否禁止模型调用（`disablesModelInvocation`）。同名条目按该 agent 的 `precedence` 去重。
 
-扫描时机：对话框打开、切换 agent、切换项目、切换目标。结果按（profile，项目起点）对应，起点变化时先清空旧结果。结果存在 `NewAgentFeature.State`；不监听文件，不跨会话缓存。
+扫描时机：对话框打开、切换 agent、切换项目、切换目标，以及目标会新建 worktree 时修改复制选项。结果按（profile，项目起点，新 worktree 的复制选项）对应，三者之一变化时先清空旧结果。结果存在 `NewAgentFeature.State`；不监听文件，不跨会话缓存。
 
 ### 交互
 
@@ -174,4 +175,4 @@ struct SkillLocation {
 - Command Queue 输入框接入 `ComposerSkillCompletion`。
 - `SkillInstaller.Target` 改为从 Skill Location 表推导。
 - OpenCode：交互式启动能带首条 prompt 并发送后，重跑探针。
-- Gemini CLI：在已登录的机器上跑探针。
+- Gemini CLI：在有可用凭据的机器上重跑探针（[#490](https://github.com/wanggang316/codans/issues/490)）。
