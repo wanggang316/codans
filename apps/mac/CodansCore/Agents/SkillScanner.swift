@@ -11,14 +11,22 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
   public let source: AgentSkillSource
   /// The skill folder.
   public let url: URL
+  /// The frontmatter sets `disable-model-invocation: true`: the model may
+  /// not call the skill, so only a call the agent itself expands runs it.
+  /// `false` when the frontmatter cannot be read.
+  public let disablesModelInvocation: Bool
 
   public var id: String { name }
 
-  public init(name: String, summary: String?, source: AgentSkillSource, url: URL) {
+  public init(
+    name: String, summary: String?, source: AgentSkillSource, url: URL,
+    disablesModelInvocation: Bool = false
+  ) {
     self.name = name
     self.summary = summary
     self.source = source
     self.url = url
+    self.disablesModelInvocation = disablesModelInvocation
   }
 }
 
@@ -62,16 +70,19 @@ public nonisolated enum SkillScanner {
         name: frontmatter?.name ?? folderName,
         summary: frontmatter?.summary,
         source: directory.source,
-        url: folder
+        url: folder,
+        disablesModelInvocation: frontmatter?.disablesModelInvocation ?? false
       )
     }
   }
 }
 
-/// `name` and `description` from the YAML frontmatter of a `SKILL.md`.
+/// `name`, `description`, and `disable-model-invocation` from the YAML
+/// frontmatter of a `SKILL.md`.
 nonisolated struct SkillFrontmatter: Equatable {
   var name: String?
   var summary: String?
+  var disablesModelInvocation = false
 
   /// `nil` when the file has no frontmatter block or the block is not a
   /// YAML mapping. Then the skill is listed by its folder name alone.
@@ -84,7 +95,9 @@ nonisolated struct SkillFrontmatter: Equatable {
     let summary = mapping["description"]?.string.flatMap { description in
       description.split(whereSeparator: { $0.isNewline }).lazy.map(trimmed).first { !$0.isEmpty }
     }
-    return SkillFrontmatter(name: name, summary: summary)
+    let disablesModelInvocation = mapping["disable-model-invocation"]?.bool ?? false
+    return SkillFrontmatter(
+      name: name, summary: summary, disablesModelInvocation: disablesModelInvocation)
   }
 
   /// The text between a leading `---` line and the next `---` line.

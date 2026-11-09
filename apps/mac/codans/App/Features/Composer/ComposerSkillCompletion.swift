@@ -46,6 +46,8 @@ final class ComposerSkillCompletion {
   private(set) var query: Query?
   private(set) var matches: [AgentSkillEntry] = []
   private(set) var highlightedIndex = 0
+  /// Only whitespace comes before the call being typed.
+  private var callIsAtPromptStart = false
   /// Start of the call the user closed with Escape. The list stays closed
   /// for that call until the caret leaves it.
   private var dismissedStart: Int?
@@ -75,6 +77,7 @@ final class ComposerSkillCompletion {
       highlightedIndex = 0
     }
     query = found
+    callIsAtPromptStart = Self.isAtPromptStart(found.range.lowerBound, in: text)
     refilter()
   }
 
@@ -133,7 +136,11 @@ final class ComposerSkillCompletion {
   /// load later can still match the call being typed.
   private func refilter() {
     guard let query else { return }
-    matches = Self.filter(skills, query: query.text)
+    // A call after other text runs only when the model calls the skill
+    // (Claude Code's Skill tool), so a skill the model may not call is
+    // offered only at the prompt start (ADR 0010).
+    let callable = callIsAtPromptStart ? skills : skills.filter { !$0.disablesModelInvocation }
+    matches = Self.filter(callable, query: query.text)
     if highlightedIndex >= matches.count {
       highlightedIndex = 0
     }
@@ -162,6 +169,13 @@ final class ComposerSkillCompletion {
     let lower = utf16.distance(from: utf16.startIndex, to: tokenStart)
     let queryText = String(head[head.index(after: tokenStart)...])
     return Query(range: lower..<caret, text: queryText)
+  }
+
+  /// Whether only whitespace comes before the UTF-16 `offset`.
+  nonisolated static func isAtPromptStart(_ offset: Int, in text: String) -> Bool {
+    text.utf16.prefix(offset).allSatisfy { unit in
+      Unicode.Scalar(unit).map(Character.init)?.isWhitespace ?? false
+    }
   }
 
   /// Fuzzy match on name and description. Order: name prefix, name

@@ -236,4 +236,32 @@ struct ComposerSkillCompletionTests {
     #expect(empty?.text == "/")
     #expect(empty?.caret == 1)
   }
+
+  // MARK: - Model invocation
+
+  private static let skillsWithManualOnly =
+    skills + [
+      AgentSkillEntry(
+        name: "deploy", summary: "Deploy", source: .user,
+        url: URL(fileURLWithPath: "/tmp/skills/deploy"), disablesModelInvocation: true)
+    ]
+
+  @Test
+  func skillWithoutModelInvocationIsListedAtThePromptStart() {
+    let completion = completion(skills: Self.skillsWithManualOnly)
+    completion.update(text: "  /deploy", caret: 9)
+    #expect(completion.matches.map(\.name) == ["deploy"])
+    completion.update(text: "/", caret: 1)
+    #expect(completion.matches.contains { $0.name == "deploy" })
+  }
+
+  @Test
+  func skillWithoutModelInvocationIsLeftOutMidPrompt() {
+    let completion = completion(skills: Self.skillsWithManualOnly)
+    completion.update(text: "then /deploy", caret: 12)
+    #expect(completion.matches.isEmpty)
+    #expect(!completion.isOpen)
+    completion.update(text: "then /", caret: 6)
+    #expect(completion.matches == Self.skills)
+  }
 }
