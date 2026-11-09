@@ -7,13 +7,38 @@
 # sockets), and RPC socket. Gump's release and dev apps are never addressed
 # by name, by default socket, or by default directory.
 
-# The session id that scopes the default paths: the first one set of
-# SELF_VERIFY_SESSION, the agent session (CLAUDE_CODE_SESSION_ID), the codans
-# pane the agent runs in (CODANS_PANE_ID), and the terminal session
-# (TERM_SESSION_ID). All are inherited, so every shell and script of one
-# session gets the same paths. Empty when none is set.
+# The process that outlives every shell of this session: the nearest
+# ancestor that is not a shell or a command wrapper. For an agent it is the
+# agent process (each Bash call of Claude Code or Codex is a child shell of
+# it); for a person it is the terminal's login process. Prints
+# "<pid> <start time>" so a reused PID is not the same session. Prints
+# nothing when only launchd is left (a reparented daemon).
+sv_session_anchor() {
+  local pid=$$ name
+  while [ "${pid:-1}" -gt 1 ]; do
+    name="$(ps -o comm= -p "$pid" 2>/dev/null)"
+    name="${name##*/}"
+    case "${name#-}" in
+      "") return 0 ;;
+      sh | bash | zsh | dash | ksh | fish | env | nohup | timeout | gtimeout | sandbox-exec | xargs | make | gmake)
+        pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+        ;;
+      *)
+        printf '%s %s\n' "$pid" "$(ps -o lstart= -p "$pid" | tr -s ' ')"
+        return 0
+        ;;
+    esac
+  done
+}
+
+# The session id that scopes the default paths: SELF_VERIFY_SESSION, else
+# the Claude Code session, else the session's anchor process. Terminal and
+# pane ids (TERM_SESSION_ID, CODANS_PANE_ID) are not used: every agent that
+# an engine starts from one pane inherits them.
 sv_session_id() {
-  printf '%s\n' "${SELF_VERIFY_SESSION:-${CLAUDE_CODE_SESSION_ID:-${CODANS_PANE_ID:-${TERM_SESSION_ID:-}}}}"
+  local id="${SELF_VERIFY_SESSION:-${CLAUDE_CODE_SESSION_ID:-}}"
+  [ -n "$id" ] || id="anchor $(sv_session_anchor)"
+  printf '%s\n' "$id"
 }
 
 # Short token for <worktree root> and <session id>. Pure: no environment.
@@ -24,8 +49,7 @@ sv_session_token() {
 # Parallel sessions on one machine must not share an instance: a shared
 # socket refuses the second launch, and a shared dir lets one session's
 # sv_cleanup delete the other's config and pid file. So the defaults are
-# scoped to the worktree and the session. Without a session id, sessions in
-# one worktree share paths, and the second launch refuses the busy socket.
+# scoped to the worktree and the session.
 sv_token="$(sv_session_token "$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)" "$(sv_session_id)")"
 SELF_VERIFY_DIR="${SELF_VERIFY_DIR:-${TMPDIR%/}/codans-self-verify-$(id -u)-$sv_token}"
 # AF_UNIX paths are capped at 104 bytes. The RPC socket and the cache dir
