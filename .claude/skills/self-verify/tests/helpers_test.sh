@@ -227,7 +227,7 @@ check "SELF_VERIFY_SESSION wins over CLAUDE_CODE_SESSION_ID" cmp -s "$scratch/pa
 check "the default dir is under TMPDIR" grep -q "^SELF_VERIFY_DIR=$scratch/tmp/codans-self-verify-$uid-" "$scratch/paths-a1"
 check "the default paths pass validation" sh -c '. "$1" && . "$2" && sv_validate_paths "$SELF_VERIFY_SOCKET" "$SELF_VERIFY_CACHE"' \
   _ "$scratch/paths-a1" "$scripts_dir/helpers.sh"
-check "a zmx socket in the default cache fits in 104 bytes" sh -c '. "$1" && test $((${#SELF_VERIFY_CACHE} + 37)) -lt 104' \
+check "a zmx socket (<cache>/run/<uuid>) fits in 104 bytes" sh -c '. "$1" && test $((${#SELF_VERIFY_CACHE} + 41)) -lt 104' \
   _ "$scratch/paths-a1"
 check "explicit path variables override the defaults" test "$(cd "$wt_a" && SELF_VERIFY_SESSION=x \
   SELF_VERIFY_DIR=/x/d SELF_VERIFY_SOCKET=/tmp/x.sock SELF_VERIFY_CACHE=/tmp/x-c bash -c \
