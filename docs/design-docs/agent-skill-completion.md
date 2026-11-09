@@ -103,7 +103,11 @@ struct SkillLocation {
   - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。
 - **Codex**：`<config root>/plugins/cache/<marketplace>/<plugin>/<version>/skills/*/SKILL.md`，以 `<config root>/config.toml` 的 `[plugins."<plugin>@<marketplace>"] enabled = true` 过滤。调用名为 `<plugin>:<skill>`，插入 `$<plugin>:<skill> `。
   - Config root 为有效 HOME 下的 `.codex`，或 `CODEX_HOME` 的值（相对路径时不列插件）。
-  - 只认表头形式 `[plugins."<key>"]` 下的 `enabled = true`；没有 `enabled`、值不是 `true`、或 key 中的插件名或 marketplace 不是单个目录名的，不列。`config.toml` 缺失或不可读时不列插件 Skill，用户级与项目级不受影响。
+  - 配置层（后者覆盖前者）：`config.toml`，再加 profile 额外参数里 `-p` / `--profile <name>` 指定的 `<config root>/<name>.config.toml`。每个插件取最后一个显式的 `enabled`；没有 `true` 的不列。
+  - `[features] plugins = false`（最后一层说了算）关闭全部插件；额外参数里最后一个 `--enable plugins` / `--disable plugins` 覆盖它。
+  - 额外参数与 Claude Code 同一规则：只有整个额外参数都是普通词（`PlainShellWords`）时才解析。`-c` / `--config`、`--remote`、`-C` / `--cd`、重复或名字不是单个目录名的 `--profile`、profile 文件缺失，都视为读不准，不列插件 Skill。
+  - 项目层：已信任项目的 `.codex/config.toml` 也是一层。codans 读不到 Codex 的信任状态，所以从项目起点到仓库根，任一 `.codex/config.toml` 提到 plugins（`[plugins.*]` 或 `[features] plugins`）时不列插件 Skill。
+  - 只认表头形式 `[plugins."<key>"]` 与 `[features] plugins`。`[plugins]` 表、顶层 `plugins.` / `features.` 点分键、值不是 `true` / `false`、key 中的插件名或 marketplace 不是单个目录名，都视为读不准，不列插件 Skill。`config.toml` 缺失或不可读时同样不列。用户级与项目级不受影响。
   - 同一插件缓存了多个版本时都扫，版本号大的在前，同名时保留新版本。
   - 远程安装的插件（`.codex-remote-plugin-install.json`）如果 `config.toml` 中没有对应表，同样不列：codans 读不到它们是否启用（ADR 0010）。
 
@@ -140,14 +144,15 @@ struct SkillLocation {
 | Claude Code | 2.1.319 | `/name` | 通过：CLI 直接展开 Skill，输出标记 | 通过：模型调用 `Skill(name)` 加载后输出标记 | `.slash`，`.anywhere` |
 | Codex | codex-cli 0.167.0 | `$name` | 通过：输出标记 | 通过：输出标记 | `.dollar`，`.anywhere` |
 | Pi | 1.5.0 | `/skill:name` | 通过：Pi 展开 `[skill] codans-probe-459` 后输出标记 | 通过（项目已信任时）：模型读取 Skill 后输出标记 | `.slashSkill`，`.anywhere` |
-| OpenCode | 1.18.15 | `@name` | 未通过：`opencode --prompt` 只填入输入框，不发送 | 同左 | `none` |
-| Gemini CLI | — | `/name` | 未测：本机未安装；临时安装的 0.67.0 首次运行要求浏览器 OAuth 登录，无人值守会话无法完成 | 未测 | `none` |
+| OpenCode | 1.18.15 | `@name` | 未通过：`opencode --prompt` 只填入输入框，不发送 | 未通过：New Agent 不给 OpenCode 传首条 prompt，TUI 以空输入框启动 | `none` |
+| Gemini CLI | 0.67.0 | `/name` | 无法完成：经 New Agent 启动，Gemini 发现了探针（"1 skill"），但模型请求返回 403（API key 所属项目已被停用） | 同左 | `none` |
 
 - 探针：项目内 `.agents/skills/codans-probe-459/SKILL.md`（Codex、Pi、OpenCode 共用的目录），正文要求只回复 `PROBE-MARKER-9C2E`（标记只在正文）。
 - 两种实测：先直接运行 CLI（`codex exec`、`pi -p`、`opencode run`）；再在隔离 Debug 实例里经 New Agent 对话框（选中已有 worktree）用补全列表插入调用 token 后发送，读 pane 内容找标记。
-- Codex：首次进入目录时 TUI 先询问是否信任该目录，信任后执行首条 prompt。另用临时 `CODEX_HOME` 验证 `$CODEX_HOME/skills` 可用、已启用插件的 `$probeplug:hello` 输出标记、`enabled = false` 的插件不可用。
+- Codex：首次进入目录时 TUI 先询问是否信任该目录，信任后执行首条 prompt。另用临时 `CODEX_HOME` 验证 `$CODEX_HOME/skills` 可用、已启用插件的 `$probeplug:hello` 输出标记、`enabled = false` 的插件不可用。覆盖项实测（2026-11-10，`codex exec`，插件在 `config.toml` 中已启用）：`-p off`（`off.config.toml` 设 `enabled = false`）、`--disable plugins`、`[features] plugins = false`、已信任项目的 `.codex/config.toml` 设 `enabled = false`，四者都使插件不可用；`-c 'plugins."probeplug@probe-market".enabled=false'` 未生效，但 `-c` 能改任意配置，仍视为读不准。
 - Pi：TUI 启动时先询问是否信任项目目录；只有信任后才加载项目级 Skill（`pi -p` 在未信任目录中，中间位置的调用失败，因为模型的 Skill 列表里没有项目 Skill；开头的 `/skill:name` 仍由 Pi 直接展开）。中间位置靠模型读取 Skill，所以 `disable-model-invocation: true` 的 Skill 只在开头生效，由补全过滤（见"交互"）。
 - OpenCode：`opencode run` 中 `@name` 与 `/name` 在开头和中间都由模型调用 Skill 工具后输出标记；但 OpenCode 的交互式 TUI 没有带首条 prompt 并发送的参数（`--prompt` 只预填输入框），New Agent 因此无法给 OpenCode 发首条 prompt（`AgentDescriptor.promptStyle` 为 `nil`）。等有可发送的启动参数后再启用。调研值保留在上表：用户级 `.config/opencode/skills`、`.claude/skills`、`.agents/skills`，项目级 `.opencode/skills`、`.claude/skills`、`.agents/skills`（向上到仓库根）。
+- Gemini CLI：本机未安装，临时装到私有目录并在登录 `PATH` 上临时放一个链接（New Agent 只列登录 `PATH` 上能找到的 agent）。可用的凭据都不可用：OAuth 要浏览器登录，`~/.config/secrets.env` 的 API key 返回 `CONSUMER_SUSPENDED`，其代理地址返回 404。在有可用凭据的机器上重跑后才能决定写法。
 - 切换 agent：同一草稿中从 Codex 切到 Pi，`$` 不再弹出，`/` 弹出 Pi 的列表，插入 `/skill:codans-probe-459`。
 
 ## 备选方案
