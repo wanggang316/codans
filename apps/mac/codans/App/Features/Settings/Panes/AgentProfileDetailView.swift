@@ -185,11 +185,20 @@ struct AgentProfileDetailView: View {
       .font(.callout)
       .foregroundStyle(.secondary)
 
-      Text(AgentLaunchCommand.render(profile: profile))
-        .font(.system(.callout, design: .monospaced))
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Launch command")
+      // Keep accessibility modifiers off the selectable text. On a
+      // `.textSelection(.enabled)` Text, SwiftUI resolves the node's label
+      // through the AppKit text element, which asks the node for its label
+      // again until the stack overflows (#470). The wrapper is a plain
+      // SwiftUI container, so its label has no platform element to recurse
+      // through.
+      HStack {
+        Text(AgentLaunchCommand.render(profile: profile))
+          .font(.system(.callout, design: .monospaced))
+          .textSelection(.enabled)
+        Spacer(minLength: 0)
+      }
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("Launch command")
     }
   }
 
