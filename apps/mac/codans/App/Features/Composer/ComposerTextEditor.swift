@@ -1,3 +1,4 @@
+import CodansCore
 import Observation
 import SwiftUI
 
@@ -42,6 +43,23 @@ final class ComposerSelection {
     guard let result = ComposerPathInsertion.insert(urls, into: text, selection: range) else { return }
     send(range)
     moveCaret(toUTF16Offset: result.selection.upperBound, in: result.text)
+  }
+
+  /// Puts the skill call `prefix` at the caret or selection of `text` by
+  /// the Skills button's rule. `send` gets the caret or selection as UTF-16
+  /// offsets and makes the reducer apply the same rule; the caret then goes
+  /// after the prefix, so skill completion opens there.
+  func insertSkillPrefix(
+    _ prefix: Character, position: SkillInvocationPosition, into text: String,
+    send: (Range<Int>?) -> Void
+  ) {
+    let range = utf16Range(in: text)
+    guard
+      let result = ComposerSkillCompletion.insertingPrefix(
+        prefix, into: text, selection: range, position: position)
+    else { return }
+    send(range)
+    moveCaret(toUTF16Offset: result.caret, in: result.text)
   }
 
   /// The caret in `text` as a UTF-16 offset for skill completion: the end
