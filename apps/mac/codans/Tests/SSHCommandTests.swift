@@ -58,7 +58,8 @@ struct SSHCommandTests {
       workingDirectory: "/srv/app",
       extraOptions: SSHCommand.backgroundProbeOptions
     )
-    #expect(executable.path == "/usr/bin/ssh")
+    #expect(executable.path == SSHCommand.guardShellPath)
+    #expect(arguments.contains(SSHCommand.sshExecutablePath))
     #expect(arguments.contains("BatchMode=yes"))
     #expect(arguments.contains("-p"))
     #expect(arguments.contains("2222"))
@@ -90,7 +91,7 @@ struct SSHCommandTests {
   @Test
   func commandLineDoubleQuotesForLocalShell() {
     let line = SSHCommand.commandLine(host: host, remoteCommand: "exec \"$SHELL\" -l")
-    #expect(line.hasPrefix("/usr/bin/ssh "))
+    #expect(line.contains("; /usr/bin/ssh "))
     #expect(line.contains("ConnectTimeout=30"))
     #expect(line.contains("-tt"))
     #expect(line.contains("alice@example.com"))

@@ -30,7 +30,7 @@ struct RemoteGitRoutingTests {
     #expect(calls.count == 2)
     for call in calls {
       // Both the repo probe and the status read ride /usr/bin/ssh to the host…
-      #expect(call.executable.path == "/usr/bin/ssh")
+      #expect(call.arguments.contains(SSHCommand.sshExecutablePath))
       #expect(call.arguments.contains("alice@example.com"))
       #expect(call.arguments.contains("2222"))
       // …with a *local* cwd — the remote `cd` owns the directory, and the
@@ -175,9 +175,9 @@ struct RemoteGitRoutingTests {
       _ = try? await service.status(at: server.gitURL("/srv/app"))
       let calls = await runner.calls
       #expect(calls.count == 4)
-      #expect(calls.prefix(2).allSatisfy { $0.executable.path != "/usr/bin/ssh" })
+      #expect(calls.prefix(2).allSatisfy { !$0.arguments.contains(SSHCommand.sshExecutablePath) })
       #expect(calls.prefix(2).allSatisfy { $0.cwd.path == "/srv/app" })
-      #expect(calls.suffix(2).allSatisfy { $0.executable.path == "/usr/bin/ssh" })
+      #expect(calls.suffix(2).allSatisfy { $0.arguments.contains(SSHCommand.sshExecutablePath) })
       #expect(calls.suffix(2).allSatisfy { $0.arguments.last?.contains("/srv/app") == true })
     }
   }

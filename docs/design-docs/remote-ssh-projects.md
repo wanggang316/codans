@@ -147,10 +147,14 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
     master, so every path that can create one carries them).
   - `backgroundProbeOptions` (`BatchMode`, `ConnectTimeout=10`) for git probes;
     `interactiveOptions` (`ConnectTimeout=30`) for the terminal.
+  - `sharedMasterGuard(host,…)` — a POSIX `sh` fragment that runs before
+    every ssh line: if `ssh -O check` finds no master, it creates one with a
+    no-op `true` while it holds a `lockf` lock at `<ControlPath>.lock`.
   - `invocation(host,executable,arguments,workingDirectory,…)` → argv for
-    `Process`/`CommandRunner` (one remote-shell quoting level).
+    `Process`/`CommandRunner` (one remote-shell quoting level): `/bin/sh -c`
+    runs the guard, then execs the ssh argv.
   - `commandLine(host,remoteCommand,…)` → a single string for libghostty's
-    `/bin/sh -c` surface command (two quoting levels).
+    `/bin/sh -c` surface command (two quoting levels), guard first.
   - `loginShellWrapped` runs the remote command under `exec "$SHELL" -l -c …`
     so a macOS host's Homebrew-augmented PATH is restored.
 
@@ -318,6 +322,16 @@ whenever one is installed; the header button hides when none is.
   interactive terminal allows a first-connect prompt (no BatchMode).
 - **Connection reuse.** A shared `ControlMaster` multiplexes N git probes plus
   the terminal onto one connection — one auth per host, no per-call handshake.
+  `ControlMaster=auto` alone does not coordinate the creation of the master:
+  when none listens (it ended, or a killed one left a socket that ssh unlinks
+  as stale), every line that starts in that window connects and authenticates
+  on its own, the first one takes the `ControlPath`, and each other one prints
+  `ControlSocket … already exists, disabling multiplexing` and keeps a private
+  connection (a terminal keeps it for the whole session). This occurs on each
+  reconnect, when panes and probes start together. `sharedMasterGuard`
+  serializes the creation per `ControlPath`, so one line creates the master and
+  the others wait and then multiplex. The guard never removes a socket, so a
+  live master is never touched.
 - **Testing.** `SSHCommand`, `RemoteSurfaceCommand`, and `RemoteGitService`'s
   parser/normalization are pure and unit-tested; `RemoteProjectFeature`'s
   validation paths are covered by reducer tests. The live SSH path requires a

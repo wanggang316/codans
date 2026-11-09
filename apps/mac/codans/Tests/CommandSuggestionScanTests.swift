@@ -147,7 +147,7 @@ struct RemoteManifestReaderTests {
     #expect(snapshot == ManifestSnapshot())
     let calls = await runner.calls
     #expect(calls.count == 1)
-    #expect(calls.first?.executable.path == "/usr/bin/ssh")
+    #expect(calls.first?.arguments.contains(SSHCommand.sshExecutablePath) == true)
     #expect(calls.first?.arguments.last?.contains("/srv/app") == true)
   }
 }
