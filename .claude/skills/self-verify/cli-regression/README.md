@@ -24,8 +24,14 @@ bash .claude/skills/self-verify/cli-regression/harness.sh "$APP" all
 ## Isolation
 
 - The app is launched from its binary with `CODANS_CONFIG_DIR` set to a
-  scratch directory, `CODANS_CACHE_DIR=/tmp/codans-t-cache-<uid>`, and
-  `CODANS_SOCKET_PATH=/tmp/codans-t-<uid>.sock`; the
+  scratch directory, `CODANS_CACHE_DIR=/tmp/cdv-rg-cache-<uid>-<token>`, and
+  `CODANS_SOCKET_PATH=/tmp/cdv-rg-<uid>-<token>.sock`. `<token>` is the
+  self-verify `sv_session_token` of the work directory and `sv_session_id`,
+  so runs in parallel (same or other worktree, same or other session) do
+  not share a socket or a cache. `harness.sh <app> paths` prints them.
+  `setup` and a later `quit` must use the same
+  `CODANS_CLI_REGRESSION_DIR`. The instance PID is kept in `app.pid` in the
+  work directory; `quit` stops only that PID. The
   calling pane's own `CODANS_*` / `ZMX_*` / `TERM_PROGRAM` variables are
   unset first, so neither the instance nor the CLI can reach a real app.
   `CODANS_STATE_DIR` is unset too: it would win over `CODANS_CONFIG_DIR`,
