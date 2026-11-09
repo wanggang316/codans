@@ -218,7 +218,7 @@
 - `--stdin` 从标准输入读到 EOF。
 - `--raw <hex>` 发原始字节（如 CSI 序列）——文本路径会丢弃这些；hex 以空白分词，每个词可各自带 `0x`（`"0x15 0x0d"` 与 `"150d"` 等价，`TerminalHandlers.decodeHex`）。控制字节（ESC/Tab/BS/CR/LF/Ctrl-A..Z）作为 key event 派发以确保 PTY 真正收到，可打印字节走文本通道。`--raw` 与位置文本 / `--stdin` / `--no-enter` 互斥。
 - `--focus` 发送后聚焦目标 pane。
-- `--wait`：发送后在服务端轮询，直到 pane 的前台任务结束（`HierarchyManager.paneIsBusy`，即前台进程组轮询器的 busy 位）且屏幕在 `--stable-ms`（默认 500）内无变化；轮询器最快 500 ms 才看得到 busy，所以短命令在 1.5 s 的 grace 静默后也算完成。屏幕静止本身不算完成，还要有命令已运行的证据（`TerminalHandlers.screenShowsTheSendRan`）：屏幕与发送前不同，且文本以回车结尾时，最后一个非空行不以发送的最后一行结尾。负载下提示符画得慢时，终端只回显了键入行而命令尚未运行；旧逻辑此时判定完成，`--capture` 返回空输出且 exit 0（#444）。现在会继续等，等不到则 exit 11 / `WAIT_TIMEOUT`。`--capture` 读不到发送前的 surface 屏幕时返回 `INTERNAL`，不发送。`--capture` 蕴含 `--wait`，并回带命令新增的屏幕行（`TerminalHandlers.capturedOutput`：去掉发送前后屏幕的公共前缀、回显的命令行、重绘的提示行；终端只暴露渲染文本而非命令边界，故为 best effort）。超过 `--wait-timeout`（默认 30 s，上限 600）→ exit 11 / `WAIT_TIMEOUT`。响应多出 `completed`、`waitedMs`、`busyObserved`、`output`。
+- `--wait`：发送后在服务端轮询，直到 pane 的前台任务结束（`HierarchyManager.paneIsBusy`，即前台进程组轮询器的 busy 位）且屏幕在 `--stable-ms`（默认 500）内无变化；轮询器最快 500 ms 才看得到 busy，所以短命令在 1.5 s 的 grace 静默后也算完成。屏幕静止本身不算完成，还要有命令已运行的证据（`TerminalHandlers.screenShowsTheSendRan`）：屏幕与发送前不同，且文本以回车结尾时，最后一个非空行不以发送的最后一行结尾。若 surface 由本次调用挂载，回放的旧行在发送后仍会落到 surface 上，不能作为证据，此时改为比较 daemon 屏幕的发送前后（只在其余条件都满足后才读）。负载下提示符画得慢时，终端只回显了键入行而命令尚未运行；旧逻辑此时判定完成，`--capture` 返回空输出且 exit 0（#444）。现在会继续等，等不到则 exit 11 / `WAIT_TIMEOUT`。`--capture` 读不到发送前的 surface 屏幕时返回 `INTERNAL`，不发送。`--capture` 蕴含 `--wait`，并回带命令新增的屏幕行（`TerminalHandlers.capturedOutput`：去掉发送前后屏幕的公共前缀、回显的命令行、重绘的提示行；终端只暴露渲染文本而非命令边界，故为 best effort）。超过 `--wait-timeout`（默认 30 s，上限 600）→ exit 11 / `WAIT_TIMEOUT`。响应多出 `completed`、`waitedMs`、`busyObserved`、`output`。
 
 #### `codans pane send` / `codans broadcast`
 
