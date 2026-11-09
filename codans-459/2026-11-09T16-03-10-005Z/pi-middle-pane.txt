@@ -1,0 +1,65 @@
+
+ ▀▀█  v1.5.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Skills]
+  claw-trans, codans-probe-459, code-review, code-review-ticket, dev-with-worktree, domain-modeling, feishu-notify, find-skills, fireworks-tech-graph, full-output-enforcement, git, gpt-taste,
+grill-me, grill-with-docs, grilling, high-end-visual-design, image-to-code, imagegen-frontend-mobile, imagegen-frontend-web, implement, implement-spec, inboxlm, industrial-brutalist-ui,
+minimalist-ui, nanops-vm, note, nutcrack-cli, pr, pr-land, pr-open, redesign-existing-projects, s3, screen-record, screenshot, setup-matt-pocock-skills, show-me, skill-creator, tdd, to-spec,
+to-tickets, triage, typesafe-ai, web-design-guidelines, write-workflow
+
+[Skill warnings]
+  ~/.agents/skills/setup-harness-stack/SKILL.md
+    Nested mappings are not allowed in compact mappings at line 2, column 14:
+
+description: Configure this project's ticket tracker (GitHub, GitLab, or Linear…
+             ^
+
+
+
+ Please run /skill:codans-probe-459 for me and nothing more
+
+
+ The user is asking me to run a skill called "codans-probe-459". Let me read the skill file first.
+
+
+ [skill] codans-probe-459 (ctrl+o to expand)
+
+
+ PROBE-MARKER-9C2E
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-2c821e7f/fixture (feat/header-redesign)
+↑166 ↓172 R13k CH98.0% $0.001 0.7%/1.0M (auto)                                                                                                                 (deepseek) deepseek-v4-pro • high
