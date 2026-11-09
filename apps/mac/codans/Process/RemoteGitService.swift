@@ -4,7 +4,7 @@ import Foundation
 /// Git-over-SSH for Remote Projects. Mirrors the local `GitWorktreeCLI` +
 /// reconcile discovery surface, but every `git` invocation is wrapped by
 /// `SSHCommand.invocation` and runs through the shared `CommandRunner`
-/// (executable = `/usr/bin/ssh`). A Server host has no bundled `wt` script, so
+/// (`/usr/bin/ssh` behind `SSHCommand.sharedMasterGuard`). A Server host has no bundled `wt` script, so
 /// discovery and worktree mutation use plain `git worktree` porcelain.
 ///
 /// Path handling rule: remote paths are opaque strings — never routed through

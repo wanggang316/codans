@@ -12,12 +12,17 @@ import Foundation
 ///     (libghostty's surface command), so the remote command is additionally
 ///     quoted for the *local* shell (two quoting levels). Used by the terminal.
 ///
-/// Every call shares `controlOptions`, so N git probes plus the terminal reuse
-/// one multiplexed SSH connection: one auth / prompt, and no per-call
+/// Every call shares `controlOptions` and runs behind `sharedMasterGuard`, so
+/// N git probes plus the terminal reuse one multiplexed SSH connection that
+/// exactly one of them creates: one auth / prompt, and no per-call
 /// TCP+handshake round-trip that would otherwise make a many-worktree sidebar
 /// crawl. Authentication is delegated entirely to the user's ssh config + agent.
 nonisolated enum SSHCommand {
   static let sshExecutablePath = "/usr/bin/ssh"
+  /// `invocation` runs ssh through this shell so `sharedMasterGuard` runs first.
+  static let guardShellPath = "/bin/sh"
+  /// `$0` of that shell; the ssh argv follows it as `$@`.
+  static let guardShellName = "codans-ssh"
 
   /// `%C` is ssh's hash of (local host, remote host, port, user): stable per
   /// connection and short, keeping the control socket well under the
@@ -58,6 +63,56 @@ nonisolated enum SSHCommand {
     "-o", "ConnectTimeout=30",
   ]
 
+  /// How long an ssh line waits for another codans line that is creating the
+  /// shared master. Past it the line runs anyway and ssh's own `auto` fallback
+  /// applies, so a stuck creator never blocks a pane or a probe for good.
+  static let masterLockTimeoutSeconds = 30
+
+  /// POSIX `sh` fragment that runs before an ssh line so that one shared
+  /// ControlMaster serves the host. `ControlMaster=auto` alone cannot do this:
+  /// when no master listens (it ended, or a killed one left a socket that ssh
+  /// unlinks as stale), every line that starts in that window connects and
+  /// authenticates on its own, the first to finish takes the ControlPath, and
+  /// each other one prints "ControlSocket … already exists, disabling
+  /// multiplexing" and keeps a private connection — for a terminal, for the
+  /// whole session. This happens on every reconnect, when panes and probes
+  /// start together.
+  ///
+  /// The fragment checks the master (`-O check`, local only). If none answers,
+  /// it creates one with a no-op `true` while it holds an exclusive `lockf`
+  /// lock next to the ControlPath (`ssh -G` gives the expanded path, so the
+  /// lock is exactly per master). A line that waited on the lock finds the new
+  /// master and only multiplexes `true` through it. The fragment never removes
+  /// a socket: a live master is never touched, and ssh itself unlinks a socket
+  /// whose master is gone.
+  ///
+  /// `quiet` sends the creator's output to `/dev/null` (background probes);
+  /// a terminal keeps it, so auth prompts and errors stay visible.
+  static func sharedMasterGuard(
+    host: RemoteHost,
+    extraOptions: [String],
+    quiet: Bool,
+    controlPath: String = defaultControlPath,
+    sshPath: String = sshExecutablePath
+  ) -> String {
+    let ssh = shellQuote(sshPath)
+    let control = controlOptions(controlPath: controlPath).map(shellQuote).joined(separator: " ")
+    let target = (host.sshOptionArguments + [host.sshDestination]).map(shellQuote)
+      .joined(separator: " ")
+    var create =
+      "/usr/bin/lockf -k -t \(masterLockTimeoutSeconds) \"$codans_cp.lock\" \(ssh) \(control)"
+    for option in extraOptions {
+      create += " " + shellQuote(option)
+    }
+    create += " -n \(target) true"
+    if quiet {
+      create += " >/dev/null 2>&1"
+    }
+    return "if ! \(ssh) \(control) -O check \(target) >/dev/null 2>&1; then "
+      + "codans_cp=$(\(ssh) -G \(control) \(target) 2>/dev/null | /usr/bin/sed -n 's/^controlpath //p'); "
+      + "[ -n \"$codans_cp\" ] && \(create); fi; "
+  }
+
   /// POSIX single-quote a token so a parent shell passes it through literally.
   static func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -93,8 +148,10 @@ nonisolated enum SSHCommand {
     "exec \"$SHELL\" -l -c " + shellQuote(remoteScript)
   }
 
-  /// Full local `ssh` argv for `Process` / `CommandRunner`. The remote command is
-  /// a single argument; ssh hands it to the remote login shell verbatim.
+  /// Local argv for `Process` / `CommandRunner`. `/bin/sh` runs
+  /// `sharedMasterGuard` and then execs `ssh` with the remaining arguments, so
+  /// the ssh argv stays one token per element: the remote command is the last
+  /// argument, and ssh hands it to the remote login shell verbatim.
   static func invocation(
     host: RemoteHost,
     executable: String,
@@ -118,19 +175,30 @@ nonisolated enum SSHCommand {
         )
       )
     )
-    return (URL(fileURLWithPath: sshExecutablePath), sshArguments)
+    let guardScript = sharedMasterGuard(
+      host: host, extraOptions: extraOptions, quiet: true, controlPath: controlPath
+    )
+    return (
+      URL(fileURLWithPath: guardShellPath),
+      ["-c", guardScript + "exec \"$@\"", guardShellName, sshExecutablePath] + sshArguments
+    )
   }
 
   /// Full `ssh` line as a single string for a parent `/bin/sh -c` (libghostty's
   /// surface command). The fixed option tokens are shell-safe and stay unquoted
   /// (so ssh still expands `~` / `%C` in `ControlPath`); the login-shell-wrapped
-  /// remote command is quoted for the local shell.
+  /// remote command is quoted for the local shell. `sharedMasterGuard` comes
+  /// first on the same line, so a reconnect waits for (or creates) the shared
+  /// master instead of racing the probes for it.
   static func commandLine(
     host: RemoteHost,
     remoteCommand: String,
     allocateTTY: Bool = true,
     controlPath: String = defaultControlPath
   ) -> String {
+    let guardScript = sharedMasterGuard(
+      host: host, extraOptions: interactiveOptions, quiet: false, controlPath: controlPath
+    )
     var tokens = [sshExecutablePath]
     tokens += controlOptions(controlPath: controlPath)
     tokens += interactiveOptions
@@ -140,6 +208,6 @@ nonisolated enum SSHCommand {
     tokens += host.sshOptionArguments
     tokens.append(host.sshDestination)
     tokens.append(shellQuote(loginShellWrapped(remoteCommand)))
-    return tokens.joined(separator: " ")
+    return guardScript + tokens.joined(separator: " ")
   }
 }
