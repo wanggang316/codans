@@ -1,0 +1,95 @@
+# slow prompt, pre-fix (ad hoc, 5 rounds)
+1	EMPTY	0	{   "data" : {     "busyObserved" : false,     "bytes" : 11,     "completed" : true,     "output" : "",     "paneID" : "5E3B5E58-0190-432D-ACD5-5D0F915AC14A",     "waitedMs" : 1519   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+2	EMPTY	0	{   "data" : {     "busyObserved" : false,     "bytes" : 11,     "completed" : true,     "output" : "",     "paneID" : "5E3B5E58-0190-432D-ACD5-5D0F915AC14A",     "waitedMs" : 1591   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+3	EMPTY	0	{   "data" : {     "busyObserved" : false,     "bytes" : 11,     "completed" : true,     "output" : "",     "paneID" : "5E3B5E58-0190-432D-ACD5-5D0F915AC14A",     "waitedMs" : 1504   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+4	EMPTY	0	{   "data" : {     "busyObserved" : false,     "bytes" : 11,     "completed" : true,     "output" : "",     "paneID" : "5E3B5E58-0190-432D-ACD5-5D0F915AC14A",     "waitedMs" : 1505   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+5	EMPTY	0	{   "data" : {     "busyObserved" : false,     "bytes" : 11,     "completed" : true,     "output" : "",     "paneID" : "5E3B5E58-0190-432D-ACD5-5D0F915AC14A",     "waitedMs" : 1633   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+
+# slow prompt, post-fix (20 rounds)
+1	ok	0
+2	ok	0
+3	ok	0
+4	ok	0
+5	ok	0
+6	ok	0
+7	ok	0
+8	ok	0
+9	ok	0
+10	ok	0
+11	ok	0
+12	ok	0
+13	ok	0
+14	ok	0
+15	ok	0
+16	ok	0
+17	ok	0
+18	ok	0
+19	ok	0
+20	ok	0
+
+# CPU 40 burners, post-fix (60 rounds)
+1	ok	0
+2	ok	0
+3	ok	0
+4	ok	0
+5	ok	0
+6	ok	0
+7	ok	0
+8	ok	0
+9	ok	0
+10	ok	0
+11	ok	0
+12	ok	0
+13	ok	0
+14	ok	0
+15	ok	0
+16	ok	0
+17	ok	0
+18	ok	0
+19	ok	0
+20	ok	0
+21	ok	0
+22	ok	0
+23	ok	0
+24	ok	0
+25	ok	0
+26	ok	0
+27	ok	0
+28	ok	0
+29	ok	0
+30	ok	0
+31	ok	0
+32	ok	0
+33	ok	0
+34	ok	0
+35	ok	0
+36	ok	0
+37	ok	0
+38	ok	0
+39	ok	0
+40	ok	0
+41	ok	0
+42	ok	0
+43	ok	0
+44	ok	0
+45	ok	0
+46	ok	0
+47	ok	0
+48	ok	0
+49	ok	0
+50	ok	0
+51	ok	0
+52	ok	0
+53	ok	0
+54	ok	0
+55	ok	0
+56	ok	0
+57	ok	0
+58	ok	0
+59	ok	0
+60	ok	0
+
+# --wait-timeout 2 against a 5 s prompt, post-fix
+1	error	11	{   "error" : {     "code" : "WAIT_TIMEOUT",     "details" : {       "paneID" : "0CCA3DA0-6B84-4FF7-94E3-515249D76D8A",       "waitedMs" : "2005"     },     "hint" : "raise --wait-timeout, or read the pane with `pane capture` later",     "message" : "command in pane 0CCA3DA0-6B84-4FF7-94E3-515249D76D8A still running after 2s"   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+2	error	11	{   "error" : {     "code" : "WAIT_TIMEOUT",     "details" : {       "paneID" : "0CCA3DA0-6B84-4FF7-94E3-515249D76D8A",       "waitedMs" : "2053"     },     "hint" : "raise --wait-timeout, or read the pane with `pane capture` later",     "message" : "command in pane 0CCA3DA0-6B84-4FF7-94E3-515249D76D8A still running after 2s"   },   "schemaVersion" : "codans.cli.pane.send.v1" } 
+3	error	11	{   "error" : {     "code" : "WAIT_TIMEOUT",     "details" : {       "paneID" : "0CCA3DA0-6B84-4FF7-94E3-515249D76D8A",       "waitedMs" : "2007"     },     "hint" : "raise --wait-timeout, or read the pane with `pane capture` later",     "message" : "command in pane 0CCA3DA0-6B84-4FF7-94E3-515249D76D8A still running after 2s"   },   "schemaVersion" : "codans.cli.pane.send.v1" } 

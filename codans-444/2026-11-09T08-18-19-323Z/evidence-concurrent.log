@@ -1,0 +1,6 @@
+J01      PASS want=0   got=0   every --json output matches the CLI output schema
+PASS=291 FAIL=0  (results: /tmp/c444/full-a/results.tsv)
+J01      PASS want=0   got=0   every --json output matches the CLI output schema
+PASS=291 FAIL=0  (results: /tmp/c444/full-b/results.tsv)
+S33b     PASS want=0   got=0   pane send --capture text mode prints the output only
+S33b     PASS want=0   got=0   pane send --capture text mode prints the output only
