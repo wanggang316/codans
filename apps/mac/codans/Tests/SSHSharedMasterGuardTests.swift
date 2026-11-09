@@ -111,6 +111,14 @@ struct SSHSharedMasterGuardTests {
     let terminal = try Self.runLines(count: 1, host: host, state: state, quiet: false)
 
     #expect(try Self.lines(state, "runs") == ["own", "own"])
+    // The own connection is its own transport: it needs the keepalives a
+    // master would carry, or a dead network never ends the terminal line.
+    let ownCalls = try Self.lines(state, "calls").filter { $0.contains("ControlPath=none") }
+    #expect(ownCalls.count == 2)
+    #expect(
+      ownCalls.allSatisfy {
+        $0.contains("-o ServerAliveInterval=5 -o ServerAliveCountMax=3")
+      })
     #expect(try Self.lines(state, "creates").isEmpty)
     #expect(quiet.stderr.isEmpty)
     #expect(terminal.stderr.contains("All shared SSH connections to this host are full"))

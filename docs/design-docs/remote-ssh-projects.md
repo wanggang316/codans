@@ -348,7 +348,8 @@ whenever one is installed; the header button hides when none is.
   the line moves to the next shared master (created by the guard, one auth);
   when no master could be created, the line runs with `ControlMaster=auto` as
   before, so auth prompts and errors stay visible. When all 4 masters are
-  full, the line uses its own connection (`ControlPath=none`) and a terminal
+  full, the line uses its own connection (`ControlPath=none`, with the
+  `ServerAlive*` keepalives, because it owns its transport) and a terminal
   prints a notice. Trade-off: each overflow master costs one auth, and a
   probe that holds a session for a moment can make a new pane open the next
   master instead of waiting.
