@@ -535,10 +535,10 @@ struct TerminalHandlersTests {
         capture: true))
   }
 
-  /// A pane that was attached before the call keeps the surface as its
-  /// capture source; the daemon is not read.
+  /// A pane attached before the call with no daemon screen to read (a
+  /// remote pane without a local zmx) captures from the surface.
   @Test
-  func sendWithCaptureOnAnAttachedPaneReadsTheSurface() async throws {
+  func sendWithCaptureOnAnAttachedPaneReadsTheSurfaceWhenNoDaemonScreen() async throws {
     let sink = FakeSink()
     let pane = PaneID()
     sink.registered.insert(pane.raw)
@@ -564,7 +564,78 @@ struct TerminalHandlersTests {
 
     #expect(response.error == nil)
     #expect(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self).output == "ok")
-    #expect(daemonReads.value == 0)
+    #expect(daemonReads.value > 0)
+  }
+
+  /// Another request or the UI attached the pane just before this call, so
+  /// the surface is still replaying, but this call did not attach it. The
+  /// daemon screen is still the only source: replayed rows are neither
+  /// progress nor output (#444).
+  @Test
+  func sendWithCaptureOnAReplayingPaneThisCallDidNotAttachUsesTheDaemon() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    let rowsA = Array(repeating: "A", count: 20)
+    let oldScreen = (rowsA + Array(repeating: "B", count: 5) + rowsA).joined(separator: "\n")
+    let partial = rowsA.joined(separator: "\n")
+    sink.textScript[pane.raw] = [partial, partial, oldScreen]
+    // The shell runs only the second send's text.
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      daemonScreen: { _ in sink.delivered.count >= 2 ? oldScreen + "\ntrue\nok\n$ " : oldScreen })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    // The shell has not run the text: the replay alone must not complete.
+    try server.send(IPC.Request(id: "r1", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let first = try await server.awaitResponse()
+    #expect(first.error == nil)
+    let pending = try #require(try first.result?.decoded(as: TerminalHandlers.SendInputResult.self))
+    #expect(pending.completed == false)
+
+    // Once the daemon shows the run, the output comes from the daemon only.
+    try server.send(IPC.Request(id: "r2", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let second = try await server.awaitResponse()
+    let done = try #require(try second.result?.decoded(as: TerminalHandlers.SendInputResult.self))
+    #expect(done.completed == true)
+    let rows = done.output?.split(separator: "\n").map(String.init) ?? []
+    #expect(rows.contains("ok"))
+    #expect(!rows.contains("A") && !rows.contains("B"))
+  }
+
+  /// `--wait` on a pane this call attached needs the daemon screen as well:
+  /// without it, nothing is sent.
+  @Test
+  func sendWithWaitAfterAnAttachFailsBeforeSendingWhenTheDaemonCannotBeRead() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.textScript[pane.raw] = ["A\nA"]
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      attachDetached: { paneID in
+        sink.registered.insert(paneID.raw)
+        return true
+      },
+      daemonScreen: { _ in nil })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    let params = try JSONValue.encoded(
+      TerminalHandlers.SendInputParams(
+        paneID: pane, text: "true\n",
+        wait: TerminalHandlers.SendWaitParams(timeoutMillis: 2000, stableMillis: 50, graceMillis: 50)))
+    try server.send(IPC.Request(id: "wn", method: .terminalSendInput, params: params))
+    let response = try await server.awaitResponse()
+
+    guard case .internal(let message) = response.error else {
+      Issue.record("expected internal, got \(String(describing: response.error))")
+      return
+    }
+    #expect(message.contains("nothing was sent"))
+    #expect(sink.delivered.isEmpty)
   }
 
   @Test

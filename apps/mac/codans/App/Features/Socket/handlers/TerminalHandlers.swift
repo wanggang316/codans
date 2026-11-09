@@ -127,37 +127,24 @@ public final class TerminalHandlers {
       return .failed(.invalidParams(message: "sendInput requires {paneID, text}", path: nil))
     }
     let attached = await attachIfDetached(req.paneID, sink: sink)
-    // A surface attached by this call may still be replaying the daemon's
-    // screen, so its text is no capture baseline: rows that land later would
-    // read as the command's output. The daemon does not replay, so both ends
-    // of the capture come from its dump, and only from it: falling back to
-    // the surface, or mixing the two, would bring the replay back. When the
-    // daemon cannot be read before the send, nothing is sent.
-    var before: String?
-    let captureFromDaemon = req.capture == true && attached
-    // On a surface this call attached, replayed rows keep landing after the
-    // send, so a surface change proves nothing: the wait takes its evidence
-    // that the shell ran the text from the daemon screen instead.
-    var daemonBefore: String?
-    if attached, req.wait != nil {
-      daemonBefore = await readDaemonScreen(req.paneID)
-      if captureFromDaemon {
-        guard let daemonBefore else {
-          return .failed(
-            .internal("pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry"))
-        }
-        before = daemonBefore
-      }
+    // A surface may still be replaying the daemon's screen: one this call
+    // attached, and also one that another request or the UI attached just
+    // before. Replayed rows that land after the send would read as progress
+    // and as output. The daemon does not replay, so whenever its screen can
+    // be read, the wait takes both its evidence that the shell ran the text
+    // and the capture's before / after screens from the daemon only; mixing
+    // in the surface would bring the replay back. The surface is the source
+    // only when no daemon screen can be read (a remote pane without a local
+    // zmx), and never for a surface this call attached: then nothing is sent.
+    let daemonBefore = req.wait != nil ? await readDaemonScreen(req.paneID) : nil
+    if attached, req.wait != nil, daemonBefore == nil {
+      return .failed(
+        .internal("pane.send --wait: cannot read the pane daemon's screen; nothing was sent, retry"))
     }
-    // Without a daemon baseline the wait compares the surface with this
-    // pre-send screen: only a change after the send is evidence that the
-    // shell took the text.
-    let surfaceBefore = req.wait != nil ? sink.readText(paneID: req.paneID, extent: .screen) : nil
-    if req.capture == true, !captureFromDaemon {
-      guard let surfaceBefore else {
-        return .failed(.internal("pane.send --capture: cannot read the pane's screen; nothing was sent, retry"))
-      }
-      before = surfaceBefore
+    let surfaceBefore =
+      req.wait != nil && daemonBefore == nil ? sink.readText(paneID: req.paneID, extent: .screen) : nil
+    if req.capture == true, daemonBefore == nil, surfaceBefore == nil {
+      return .failed(.internal("pane.send --capture: cannot read the pane's screen; nothing was sent, retry"))
     }
     let ok = sink.sendInput(paneID: req.paneID, text: req.text)
     if !ok {
@@ -170,13 +157,14 @@ public final class TerminalHandlers {
       let outcome = await waitForCompletion(
         paneID: req.paneID, wait: wait, sink: sink, evidence: evidence, sent: req.text)
       var after = outcome.text
-      if captureFromDaemon {
+      if req.capture == true, daemonBefore != nil {
         guard let dump = await readDaemonScreen(req.paneID) else {
           return .failed(
             .internal("pane.send --capture: the text was sent, but the pane daemon's screen could not be read to capture its output"))
         }
         after = dump
       }
+      let before = daemonBefore ?? surfaceBefore
       let output = req.capture == true
         ? Self.capturedOutput(before: before ?? "", after: after, sent: req.text) : nil
       result = SendInputResult(
