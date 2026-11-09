@@ -1,0 +1,23 @@
+### Before the fix (main 93876116 helpers.sh)
+== worktree: /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-434
+cache before: <none>
+launched pid 12908: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+cache after:  /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app 
+self-verify: cleanup done
+== worktree: /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-436
+cache before: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app 
+launched pid 13367: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+cache after:  /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app 
+self-verify: cleanup done
+
+### After the fix (b313dddc helpers.sh)
+== worktree: /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-434
+cache before: <none>
+launched pid 13925: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+cache after:  /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-434 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app 
+self-verify: cleanup done
+== worktree: /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-436
+cache before: /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-434 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-cvzllbkjigwivlgzbtfoxfpzabqa/Build/Products/Debug/Codans.app 
+launched pid 14527: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-evpodudqwvfviagqqazbeglfvquz/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+cache after:  /Users/wanggang/.agent-workflow/projects/codans/workspace/codans-436 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-evpodudqwvfviagqqazbeglfvquz/Build/Products/Debug/Codans.app 
+self-verify: cleanup done
