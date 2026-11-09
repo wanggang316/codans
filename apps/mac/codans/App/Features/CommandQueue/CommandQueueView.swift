@@ -184,11 +184,15 @@ struct CommandQueueView: View {
       Label(store.mode.title, systemImage: store.mode.symbol)
         .font(.callout)
         .foregroundStyle(.secondary)
+        // On the label content, not the `Menu`: AppKit reads the menu
+        // button's AX attributes from the label content on every update, so
+        // the mode symbol's description would replace a label on the `Menu`.
+        .accessibilityLabel("Send timing")
     }
     .menuStyle(.borderlessButton)
     .fixedSize()
     .help(modeHint)
-    .accessibilityLabel("Send timing")
+    .accessibilityValue(store.mode.title)
   }
 
   private var sendButton: some View {
