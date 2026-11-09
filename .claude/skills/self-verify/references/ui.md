@@ -107,6 +107,14 @@ codans_debug tree --json | jq -r '.data.projects[0].worktrees[0].branch'   # ass
 
 - Close: press the branch button again and wait for the field to be gone.
 
+### New Agent Dialog
+
+- Open: `sv_menu File "New Agent…"`; the dialog is an `AXSheet`.
+- The selectors are `AXMenuButton "Project"`, `"Worktree"`, and `"Agent"` in every state. The selection is the
+  `AXValue` (project name, `New Worktree` or the branch ref, agent name); assert it after a pick.
+- A SwiftUI `Menu` takes its AX title from its label content on every update. Put `.accessibilityLabel` on the
+  label content, not on the `Menu`, or the title becomes the visible text after the first selection.
+
 ### Settings
 
 - Navigate with `sv_select_row <pane name>` (it sets `AXSelectedRows`; a press on the row text does nothing).
