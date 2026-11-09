@@ -1,0 +1,25 @@
+pane=B272749C-AA88-4D88-90B7-DCDADE4A2C3C socket=/tmp/cdv-rg-cache-501-750cccad/run/B272749C-AA88-4D88-90B7-DCDADE4A2C3C daemon pid=38108 (/Users/wanggang/Library/Developer/Xcode/DerivedData/codans-enothigqbidqcoejcigwtceyktbe/Build/Products/Debug/Codans.app/Contents/Resources/bin/zmx attach B272749C-AA88-4D88-90B7-DCDADE4A2C3C /usr/bin/login -flp wanggang /bin/bash --noprofile --norc -c exec -l /bin/zsh)
+== daemon stopped
+{
+  "error" : {
+    "code" : "INTERNAL",
+    "message" : "pane.send --capture: cannot read the pane daemon's screen; nothing was sent, retry"
+  },
+  "schemaVersion" : "codans.cli.pane.send.v1"
+}
+exit=20
+== daemon resumed
+{
+  "data" : {
+    "busyObserved" : false,
+    "bytes" : 14,
+    "completed" : true,
+    "output" : "THAWED-1",
+    "paneID" : "B272749C-AA88-4D88-90B7-DCDADE4A2C3C",
+    "waitedMs" : 1566
+  },
+  "schemaVersion" : "codans.cli.pane.send.v1"
+}
+exit=0
+== screen (FROZEN-1 must not appear: it was not sent)
+0
