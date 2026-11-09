@@ -41,10 +41,16 @@ nonisolated enum SSHCommand {
       "-o", "ControlMaster=auto",
       "-o", "ControlPath=\(controlPath)",
       "-o", "ControlPersist=10m",
-      "-o", "ServerAliveInterval=5",
-      "-o", "ServerAliveCountMax=3",
-    ]
+    ] + keepaliveOptions
   }
+
+  /// Keepalives for whichever ssh process owns the connection: a master, or
+  /// a line on its own connection. A dead connection then ends within ~15s,
+  /// so the terminal's reconnect loop can run again.
+  static let keepaliveOptions: [String] = [
+    "-o", "ServerAliveInterval=5",
+    "-o", "ServerAliveCountMax=3",
+  ]
 
   /// Options for a non-interactive background probe (resolving a remote repo,
   /// listing worktrees at reconcile). `BatchMode` so it fails fast instead of
@@ -111,8 +117,8 @@ nonisolated enum SSHCommand {
   ///      errors stay visible.
   ///
   /// When every master refused, the line runs on its own connection
-  /// (`ControlPath=none`): no warning, and a terminal prints
-  /// `mastersFullNotice`. No master is ever removed or replaced.
+  /// (`ControlPath=none`, with `keepaliveOptions`): no warning, and a terminal
+  /// prints `mastersFullNotice`. No master is ever removed or replaced.
   ///
   /// The statement is a subshell, so it composes in a terminal's reconnect
   /// loop and `$?` is the status of ssh.
@@ -133,7 +139,9 @@ nonisolated enum SSHCommand {
       "\(ssh) -o ControlMaster=no -o \"ControlPath=$codans_cpath\" -o LogLevel=FATAL "
       + "-o \"ProxyCommand=/usr/bin/touch '$codans_refused'\" \(sshArguments)"
     let shared = "\(ssh) \(controlArguments) \(sshArguments)"
-    let own = "\(ssh) -o ControlMaster=no -o ControlPath=none \(sshArguments)"
+    let own =
+      "\(ssh) -o ControlMaster=no -o ControlPath=none "
+      + "\(keepaliveOptions.joined(separator: " ")) \(sshArguments)"
     return "( codans_refused=\"${TMPDIR:-/tmp}/codans-ssh-refused.$$\"; "
       + "for codans_cpath in \(paths); do "
       + sharedMasterGuard(host: host, extraOptions: extraOptions, quiet: quiet, sshPath: sshPath)
