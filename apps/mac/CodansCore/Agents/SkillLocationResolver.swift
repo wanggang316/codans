@@ -138,6 +138,7 @@ public nonisolated enum SkillLocationResolver {
     stateDirectory: URL = AppDirectories.stateDirectory(),
     isRepositoryRoot: (URL) -> Bool = hasGitEntry
   ) -> [SkillDirectory] {
+    guard loadsSkills(profile) else { return [] }
     let project: [SkillDirectory] =
       projectStart.map { start in
         guard
@@ -151,6 +152,15 @@ public nonisolated enum SkillLocationResolver {
       + pluginDirectories(
         for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory,
         excluding: exclusion, isRepositoryRoot: isRepositoryRoot)
+  }
+
+  /// `false` when the profile's launch flags turn skills off: Pi's
+  /// `--no-skills` loads none and expands no `/skill:name` call.
+  static func loadsSkills(_ profile: AgentProfile) -> Bool {
+    switch profile.descriptor.skillLocation.projectTrust {
+    case nil: return true
+    case .pi: return PiLaunchArguments(profile.extraArguments)?.noSkills != true
+    }
   }
 
   /// `true` when the agent of `profile` reads project skills in `start`.

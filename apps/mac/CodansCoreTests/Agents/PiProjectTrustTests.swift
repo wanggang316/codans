@@ -83,7 +83,8 @@ struct PiProjectTrustTests {
   func extensionsThatCanDecideTrustTurnProjectSkillsOff() throws {
     try trust([(project, true)])
     #expect(!trusts("-e ./review.ts"))
-    #expect(!trusts("--extension=./review.ts"))
+    // Pi has no `--extension=<path>` form: it is an unknown flag.
+    #expect(trusts("--extension=./review.ts"))
     try write("export default {}", to: agent.appending(path: "extensions/review.ts"))
     #expect(!trusts())
     #expect(trusts("--no-extensions"))
@@ -108,6 +109,40 @@ struct PiProjectTrustTests {
     try trust([(project, true)])
     try write("not json", to: agent.appending(path: "settings.json"))
     #expect(!trusts())
+  }
+
+  @Test
+  func argumentsAreReadAsPiParsesThem() throws {
+    // After `--` every word is a message, and a value flag takes the next
+    // word even when it looks like a flag.
+    #expect(!trusts("-- --approve"))
+    #expect(!trusts("--theme -a"))
+    #expect(!trusts("--model -a"))
+    #expect(trusts("--model gpt-5 --approve"))
+    #expect(trusts("--mode -a"))
+    #expect(trusts("--approve -e ./review.ts"))
+    #expect(PiLaunchArguments("-ns")?.noSkills == true)
+    #expect(PiLaunchArguments("--no-skills")?.noSkills == true)
+    #expect(PiLaunchArguments("-- -ns")?.noSkills == false)
+    #expect(PiLaunchArguments("--skill -ns")?.noSkills == false)
+    #expect(PiLaunchArguments("'-ns'") == nil)
+  }
+
+  @Test
+  func noSkillsFlagOffersNoPiSkills() throws {
+    try trust([(project, true)])
+    let home = root.appending(path: "home")
+    try write("---\nname: mine\n---\n", to: home.appending(path: ".agents/skills/mine/SKILL.md"))
+    func names(_ arguments: String) -> [String] {
+      SkillScanner.scanSync(
+        SkillLocationResolver.directories(
+          for: AgentProfile(kind: .pi, extraArguments: arguments), projectStart: project, userHome: home,
+          stateDirectory: root.appending(path: "state"))
+      ).map(\.name)
+    }
+    #expect(names("") == ["mine"])
+    #expect(names("-ns").isEmpty)
+    #expect(names("--approve --no-skills").isEmpty)
   }
 
   @Test

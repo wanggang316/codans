@@ -19,21 +19,11 @@ nonisolated enum PiProjectTrust {
   static func trusts(
     agentDirectory: URL, extraArguments: String, start: URL, startExists: Bool
   ) -> Bool {
-    guard let words = PlainShellWords.split(extraArguments) else { return false }
-    var approve: Bool?
-    var noExtensions = false
-    for word in words {
-      switch word {
-      case "-a", "--approve": approve = true
-      case "-na", "--no-approve": approve = false
-      case "-ne", "--no-extensions": noExtensions = true
-      case "-e", "--extension": return false
-      default: if word.hasPrefix("--extension=") { return false }
-      }
-    }
-    if let approve { return approve }
+    guard let launch = PiLaunchArguments(extraArguments) else { return false }
+    if let approve = launch.approve { return approve }
+    if launch.loadsExtensionFile { return false }
     guard let settings = readSettings(agentDirectory) else { return false }
-    if !noExtensions, hasUserExtensions(agentDirectory, settings: settings) { return false }
+    if !launch.noExtensions, hasUserExtensions(agentDirectory, settings: settings) { return false }
     guard startExists else { return false }
     switch savedDecision(agentDirectory, start: start) {
     case .trusted: return true
@@ -110,5 +100,72 @@ nonisolated enum PiProjectTrust {
     var path = path
     while path.count > 1, path.hasSuffix("/") { path.removeLast() }
     return path
+  }
+}
+
+/// The flags in a Pi profile's extra arguments that decide which skills Pi
+/// loads, read the way Pi 1.5.0's `parseArgs` reads them: `--` ends the
+/// options, and a flag that takes a value takes the next word even when it
+/// looks like a flag (`--theme -a`).
+nonisolated struct PiLaunchArguments: Equatable {
+  /// The last `--approve` (`true`) or `--no-approve` (`false`).
+  var approve: Bool?
+  var noExtensions = false
+  /// `-e` / `--extension` loads an extension that can decide trust.
+  var loadsExtensionFile = false
+  /// `-ns` / `--no-skills`: Pi loads no skills and expands no
+  /// `/skill:name` call.
+  var noSkills = false
+
+  /// Flags that always take the next word.
+  private static let valueFlags: Set<String> = [
+    "--provider", "--model", "--api-key", "--system-prompt", "--append-system-prompt", "--name", "-n",
+    "--session", "--session-id", "--fork", "--session-dir", "--models", "--tools", "-t", "--exclude-tools",
+    "-xt", "--thinking", "--export", "--skill", "--prompt-template", "--theme",
+  ]
+  /// Flags that take the next word unless it starts with `-`.
+  private static let optionalValueFlags: Set<String> = ["--mode", "--use-theme", "--tui-mode"]
+
+  /// `nil` when the arguments are not plain words (`PlainShellWords`).
+  init?(_ extraArguments: String) {
+    guard let words = PlainShellWords.split(extraArguments) else { return nil }
+    var index = 0
+    while index < words.count, words[index] != "--" {
+      let next = index + 1 < words.count ? words[index + 1] : nil
+      apply(words[index], hasValue: next != nil)
+      index += 1 + Self.valueWords(after: words[index], next: next)
+    }
+  }
+
+  private mutating func apply(_ flag: String, hasValue: Bool) {
+    switch flag {
+    case "-a", "--approve": approve = true
+    case "-na", "--no-approve": approve = false
+    case "-ne", "--no-extensions": noExtensions = true
+    case "-ns", "--no-skills": noSkills = true
+    case "-e", "--extension": if hasValue { loadsExtensionFile = true }
+    default: break
+    }
+  }
+
+  /// How many of the following words `word` takes as its value: 0 or 1.
+  private static func valueWords(after word: String, next: String?) -> Int {
+    guard let next else { return 0 }
+    let takes: Bool
+    if word == "-e" || word == "--extension" || valueFlags.contains(word) {
+      takes = true
+    } else if word == "-p" || word == "--print" {
+      takes = !next.hasPrefix("@") && (!next.hasPrefix("-") || next.hasPrefix("---"))
+    } else if optionalValueFlags.contains(word) {
+      takes = !next.hasPrefix("-")
+    } else if word.hasPrefix("--"), !word.contains("=") {
+      // `--list-models` and unknown flags, perhaps an extension's, take a
+      // plain value. A known flag without a value taking a message word
+      // here changes nothing: only words that start with `-` matter.
+      takes = !next.hasPrefix("-") && !next.hasPrefix("@")
+    } else {
+      takes = false
+    }
+    return takes ? 1 : 0
   }
 }
