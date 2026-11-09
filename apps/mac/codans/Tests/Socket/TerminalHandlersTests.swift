@@ -605,6 +605,67 @@ struct TerminalHandlersTests {
     #expect(!rows.contains("A") && !rows.contains("B"))
   }
 
+  /// An attached local pane whose daemon screen cannot be read (a read that
+  /// times out while another request or the UI attaches it) may be
+  /// replaying, so the surface does not stand in: nothing is sent (#444).
+  @Test
+  func sendWithCaptureOnAPaneWithADaemonFailsBeforeSendingWhenItCannotBeRead() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    let rowsA = Array(repeating: "A", count: 20).joined(separator: "\n")
+    sink.textScript[pane.raw] = [rowsA, rowsA + "\nB\nB"]
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      daemonScreen: { _ in nil },
+      paneHasDaemon: { _ in true })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(IPC.Request(id: "dh", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let response = try await server.awaitResponse()
+
+    guard case .internal(let message) = response.error else {
+      Issue.record("expected internal, got \(String(describing: response.error))")
+      return
+    }
+    #expect(message.contains("nothing was sent"))
+    #expect(sink.delivered.isEmpty)
+  }
+
+  /// A daemon read that fails once and then recovers within the retries
+  /// keeps the daemon as the source.
+  @Test
+  func sendWithCaptureRetriesATransientDaemonReadFailure() async throws {
+    let sink = FakeSink()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    sink.textScript[pane.raw] = ["surface only"]
+    let reads = CallCounter()
+    let server = Self.makeHarness(
+      sink: sink, clock: TerminalStabilityWaiterTests.VirtualClock(),
+      daemonScreen: { _ in
+        reads.value += 1
+        if reads.value == 1 { return nil }
+        return sink.delivered.isEmpty ? "old" : "old\ntrue\nok\n$ "
+      },
+      paneHasDaemon: { _ in true })
+    defer { server.stop() }
+    try InMemoryIPCServerTests.sendHello(server)
+    _ = try await server.awaitResponse()
+
+    try server.send(IPC.Request(id: "tr", method: .terminalSendInput, params: try Self.captureParams(pane)))
+    let response = try await server.awaitResponse()
+
+    #expect(response.error == nil)
+    let result = try #require(try response.result?.decoded(as: TerminalHandlers.SendInputResult.self))
+    #expect(result.completed == true)
+    let rows = result.output?.split(separator: "\n").map(String.init) ?? []
+    #expect(rows.contains("ok"))
+    #expect(!rows.contains("surface only"))
+  }
+
   /// `--wait` on a pane this call attached needs the daemon screen as well:
   /// without it, nothing is sent.
   @Test
@@ -692,7 +753,8 @@ struct TerminalHandlersTests {
     clock: StabilityClock = SystemStabilityClock(),
     catalog seed: Catalog? = nil,
     attachDetached: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
-    daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil }
+    daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil },
+    paneHasDaemon: @escaping @MainActor (PaneID) -> Bool = { _ in false }
   ) -> InMemoryIPCServer {
     let systemHandlers = SystemHandlers(
       versions: .init(server: "0.4.0", appBundle: "0.4.0+test")
@@ -707,7 +769,7 @@ struct TerminalHandlersTests {
     let hierarchyHandlers = HierarchyHandlers(manager: hierarchy)
     let terminalHandlers = TerminalHandlers(
       sink: sink, catalog: { hierarchy.catalog }, clock: clock, attachDetached: attachDetached,
-      daemonScreen: daemonScreen)
+      daemonScreen: daemonScreen, paneHasDaemon: paneHasDaemon)
     let router = MethodRouter(
       systemHandlers: systemHandlers,
       hierarchyHandlers: hierarchyHandlers,
