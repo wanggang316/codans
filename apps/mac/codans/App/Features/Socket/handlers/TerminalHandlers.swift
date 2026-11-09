@@ -47,6 +47,10 @@ public final class TerminalHandlers {
   /// when it cannot be read. The daemon does not replay, so this is the
   /// source of truth while a new surface fills in.
   private let daemonScreen: @MainActor (PaneID) async -> String?
+  /// Whether the pane has a local daemon (its control socket exists). A
+  /// pane with one whose screen cannot be read is a read failure, not a
+  /// pane the surface may stand in for.
+  private let paneHasDaemon: @MainActor (PaneID) -> Bool
   private let logger = Logger(subsystem: "com.gumpw.codans.ipc", category: "terminal")
 
   public init(
@@ -55,7 +59,8 @@ public final class TerminalHandlers {
     clock: StabilityClock = SystemStabilityClock(),
     paneIsBusy: @escaping @MainActor (PaneID) -> Bool = { _ in false },
     attachDetached: @escaping @MainActor (PaneID) async -> Bool = { _ in false },
-    daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil }
+    daemonScreen: @escaping @MainActor (PaneID) async -> String? = { _ in nil },
+    paneHasDaemon: @escaping @MainActor (PaneID) -> Bool = { _ in false }
   ) {
     self.sink = sink
     self.catalog = catalog
@@ -63,6 +68,7 @@ public final class TerminalHandlers {
     self.paneIsBusy = paneIsBusy
     self.attachDetached = attachDetached
     self.daemonScreen = daemonScreen
+    self.paneHasDaemon = paneHasDaemon
   }
 
   /// Optional completion wait on `sendInput`: poll until the pane is not
@@ -134,12 +140,15 @@ public final class TerminalHandlers {
     // be read, the wait takes both its evidence that the shell ran the text
     // and the capture's before / after screens from the daemon only; mixing
     // in the surface would bring the replay back. The surface is the source
-    // only when no daemon screen can be read (a remote pane without a local
-    // zmx), and never for a surface this call attached: then nothing is sent.
+    // only for a pane with no local daemon (a remote pane without a local
+    // zmx). A pane with a daemon whose screen cannot be read may be
+    // replaying, so nothing is sent.
     let daemonBefore = req.wait != nil ? await readDaemonScreen(req.paneID) : nil
-    if attached, req.wait != nil, daemonBefore == nil {
+    if req.wait != nil, daemonBefore == nil, attached || paneHasDaemon(req.paneID) {
       return .failed(
-        .internal("pane.send --wait: cannot read the pane daemon's screen; nothing was sent, retry"))
+        .internal(
+          "pane.send \(req.capture == true ? "--capture" : "--wait"): cannot read the pane daemon's screen; nothing was sent, retry"
+        ))
     }
     let surfaceBefore =
       req.wait != nil && daemonBefore == nil ? sink.readText(paneID: req.paneID, extent: .screen) : nil

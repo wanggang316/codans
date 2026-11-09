@@ -1284,6 +1284,9 @@ final class AppState {
         guard let data = try? await ZmxControlClient.history(for: paneID, format: .plain, timeout: .seconds(1))
         else { return nil }
         return String(bytes: data, encoding: .utf8)
+      },
+      paneHasDaemon: { paneID in
+        FileManager.default.fileExists(atPath: ZmxControlClient.socketPath(for: paneID))
       }
     )
   }
