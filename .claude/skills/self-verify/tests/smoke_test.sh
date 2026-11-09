@@ -59,7 +59,9 @@ pane="$(codans_debug pane new --project "$project" --worktree "$worktree" --tab 
 check "project, tab, and pane ids are returned" test -n "$project" -a -n "$tab" -a -n "$pane"
 codans_debug pane send "$pane" 'printf "SMOKE:%s\n" "$(basename "$PWD")"' --capture --json >"$SELF_VERIFY_DIR/send.json"
 check "a command runs in the pane and its output comes back" grep -q 'SMOKE:fixture' "$SELF_VERIFY_DIR/send.json"
-check "the pane runs under the private cache dir" test -S "$SELF_VERIFY_CACHE/$pane"
+# zmx binds each pane socket at <ZMX_DIR>/<pane id>; with CODANS_CACHE_DIR set,
+# ZMX_DIR is <cache>/run (AppDirectories.runtimeDirectory).
+check "the pane runs under the private cache dir" test -S "$SELF_VERIFY_CACHE/run/$pane"
 codans_debug pane focus "$pane" >/dev/null
 
 # ---------- AX: main window ----------
