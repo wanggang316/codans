@@ -8,9 +8,11 @@ import CodansCore
 /// the shortcut registry and falls back to the schema default before the
 /// registry has finished loading.
 ///
-/// The "New Tab" and "Resume Session" buttons mirror the tab-bar `+` and
+/// The "New Terminal" and "Resume Session" buttons mirror the tab-bar `+` and
 /// session-history accessories, so the empty page offers the same two ways
-/// to get a terminal back without a trip to the tab bar.
+/// to get a terminal back without a trip to the tab bar. The button says
+/// "New Terminal", not "New Tab": with a single tab the tab bar is hidden, so
+/// the user sees the terminal it creates, not a tab.
 struct EmptyTerminalPaneView: View {
   let message: String
   /// Path of the active worktree, scanned by the session-history popover.
@@ -51,9 +53,9 @@ struct EmptyTerminalPaneView: View {
   private var actions: some View {
     HStack(spacing: 8) {
       Button(action: onNewTab) {
-        Label("New Tab", systemImage: "plus")
+        Label("New Terminal", systemImage: "plus")
       }
-      .helpWithShortcut("New Tab", .newTab)
+      .helpWithShortcut("New Terminal", .newTab)
 
       if let worktreePath {
         Button {
@@ -76,13 +78,13 @@ struct EmptyTerminalPaneView: View {
   }
 
   /// The tab bar (and its `+`) is hidden while there is no tab, so the hint
-  /// points at the chord and the New Tab button below.
+  /// points at the chord and the New Terminal button below.
   @ViewBuilder
   private var hint: some View {
     if let chord = newTabChord {
-      Text("Press \(Text(chord).monospaced()) or click New Tab to open a new terminal.")
+      Text("Press \(Text(chord).monospaced()) or click New Terminal to open one.")
     } else {
-      Text("Click New Tab to open a new terminal.")
+      Text("Click New Terminal to open one.")
     }
   }
 
