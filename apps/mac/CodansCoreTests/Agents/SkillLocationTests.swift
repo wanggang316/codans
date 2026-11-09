@@ -24,7 +24,7 @@ struct SkillLocationTests {
         #expect(location.configRoot?.environmentVariable == "CLAUDE_CONFIG_DIR")
         #expect(location.projectDirectories == [".claude/skills"])
         #expect(location.projectSearch == .walkUpToRepositoryRoot)
-        #expect(location.precedence == [.user, .project])
+        #expect(location.precedence == [.user, .project, .plugin])
         #expect(location.invocationStyle == .slash)
         #expect(location.invocationPosition == .anywhere)
       } else {

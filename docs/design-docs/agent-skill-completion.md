@@ -1,8 +1,8 @@
 # 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
 
-**Availability:** Partly available: New Agent completion of Claude Code user-level and project-level skills, and the Skills button. Plugin skills and other agents are planned.
+**Availability:** Partly available: New Agent completion of Claude Code user-level, project-level, and enabled plugin skills, and the Skills button. Codex plugin skills and other agents are planned.
 **Author:** Gump（与 Claude）
-**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
+**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
 
 ## 背景与范围
 
@@ -84,14 +84,23 @@ struct SkillLocation {
 
 - **有效 HOME**：`usesDedicatedHome` 时为 `AgentLaunchCommand.dedicatedHomeURL(for:)`，否则为用户 HOME。
 - **配置根变量**：profile 的 `envVars` 含该 agent 的 `configRootEnvVar` 时，以其值替换对应的默认配置根（例如 `CLAUDE_CONFIG_DIR` 替换 `~/.claude`）。
-- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录；选 New Worktree 时目录尚不存在，用项目主仓库根（选中的分支没有 worktree 持有时同样会新建 worktree，也用主仓库根）；Folder 或 Workspace 项目用其唯一工作目录（与启动时一致：选中的行，否则第一个未归档的行）。查找范围按 `projectSearch`。
+- **项目级起点**：选中已有分支或 worktree 时，用 agent 启动所在的 worktree 目录（分支名与发送时同一规则：本地分支名优先，否则按 `<remote>/<branch>` 解析）；选 New Worktree 时目录尚不存在，用项目主仓库根（选中的分支没有 worktree 持有时同样会新建 worktree，也用主仓库根）；Folder 或 Workspace 项目用其唯一工作目录（与启动时一致：选中的行，否则第一个未归档的行）。查找范围按 `projectSearch`。
 - **向上查找**：`walkUpToRepoRoot` 从起点逐级向上，到第一个含 `.git`（目录或 worktree 的 `.git` 文件）的目录为止，近的在前；一路找不到仓库根时只读起点目录。
-- **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill）；同一来源内近的目录优先。
+- **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill），Plugin 最后（插件 Skill 名带 `<plugin>:` 前缀，不与其他来源同名）；同一来源内近的目录优先。
 - **远程项目**：不解析，补全关闭。
 
 ### 插件 Skill
 
-- **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `<config root>/settings.json` 中 `enabledPlugins` 为 true 的插件。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
+- **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `enabledPlugins` 合并结果为 true 的插件。合并顺序同 Claude Code 的 settings 优先级（后者覆盖前者）：`<config root>/settings.json`、项目起点下的 `.claude/settings.json`、`.claude/settings.local.json`、profile 额外参数里的 `--settings <file>`、`/Library/Application Support/ClaudeCode/managed-settings.json`。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
+  - Config root 与用户级目录同一规则：有效 HOME 下的 `.claude`，或 `CLAUDE_CONFIG_DIR` 的值（相对路径时不列插件）。
+  - 插件清单 `.claude-plugin/plugin.json` 的 `skills` 字段声明了路径时，扫 `skills/` 与声明的路径（路径本身含 `SKILL.md` 则为单个 Skill），不再整体扫 `.claude/skills`：Claude Code 只加载声明的 Skill（例：ui-ux-pro-max 2.5.0 的 `.claude/skills` 有 7 个 Skill，只声明 1 个）。离开 install path 的路径丢弃。
+  - 注册表 key 为 `<plugin>@<marketplace>`，`<plugin>` 取 `@` 之前部分。`installPath` 只接受绝对路径或 `~/` 开头的路径。
+  - 额外参数是原样拼接的 shell 片段，由 shell 而非 codans 解析。codans 不解读 shell 语法：只有整个额外参数都是普通词时才解析，即每个字符是字母、数字、空格/Tab 或 `/._-+,@:%=~`，且没有词以 `=` 开头、没有词以 `~` 开头（`~/` 除外，按用户 HOME 展开）。其余一律视为读不准，不列插件 Skill；用户级与项目级 Skill 不受影响（ADR 0010）。
+  - 普通词中只解析 `--settings <path>`（绝对路径、`~/`、或相对项目起点）与 `--settings=<path>`（值不以 `~` 或 `=` 开头）；重复的 `--settings`、`--setting-sources`、`--plugin-dir` 同样视为读不准。
+  - 取舍：额外参数里用了任何 shell 语法（引号、转义、`$`、重定向、`;` 等）的 profile 看不到插件 Skill，即使它没有设置相关参数。按 ADR 0010 宁可少列，不列 agent 解析不到的 Skill。
+  - 项目起点见"目录解析"。切换目标（分支）会改变起点，因此重新扫描。
+  - 注册表缺失、不是 JSON、结构不符时，不列插件 Skill；某个 settings 文件缺失或无法解析时跳过该文件（Claude Code 也忽略无效的 settings 文件）。用户级与项目级 Skill 不受影响。
+  - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。
 - **Codex**：`<config root>/plugins/cache/<marketplace>/<plugin>/<version>/skills/*/SKILL.md`，以 `config.toml` 的 `[plugins."<plugin>@<marketplace>"] enabled = true` 过滤。调用名为 `<plugin>:<skill>`。
 
 ### 扫描与条目
@@ -100,7 +109,7 @@ struct SkillLocation {
 
 `AgentSkillEntry`：调用名、描述首行、来源（Project / User / Plugin）、路径、是否禁止模型调用（`disablesModelInvocation`）。同名条目按该 agent 的 `precedence` 去重。
 
-扫描时机：对话框打开、切换 agent、切换项目、切换目标。结果存在 `NewAgentFeature.State`；不监听文件，不跨会话缓存。
+扫描时机：对话框打开、切换 agent、切换项目、切换目标。结果按（profile，项目起点）对应，起点变化时先清空旧结果。结果存在 `NewAgentFeature.State`；不监听文件，不跨会话缓存。
 
 ### 交互
 

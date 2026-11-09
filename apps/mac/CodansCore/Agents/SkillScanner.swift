@@ -3,7 +3,8 @@ import Yams
 
 /// One Agent Skill the completion list offers.
 public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identifiable {
-  /// The name the agent calls the skill by.
+  /// The name the agent calls the skill by, `<plugin>:<skill>` for a
+  /// plugin skill.
   public let name: String
   /// First line of the frontmatter `description`, or `nil` when the
   /// frontmatter has none or cannot be read.
@@ -64,19 +65,26 @@ public nonisolated enum SkillScanner {
     let fileManager = FileManager.default
     // Skill folders are often symlinks into a skill source tree, so the
     // listing resolves each child rather than trusting its own type.
-    guard
-      let children = try? fileManager.contentsOfDirectory(
-        at: directory.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-    else { return [] }
-    return children.compactMap { folder in
+    let folders: [URL]
+    switch directory.layout {
+    case .skill: folders = [directory.url]
+    case .skillFolders:
+      guard
+        let children = try? fileManager.contentsOfDirectory(
+          at: directory.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+      else { return [] }
+      folders = children
+    }
+    return folders.compactMap { folder in
       let file = folder.appending(path: "SKILL.md", directoryHint: .notDirectory)
       guard let data = fileManager.contents(atPath: file.path(percentEncoded: false)) else {
         return nil
       }
       let folderName = folder.lastPathComponent
       let frontmatter = String(data: data, encoding: .utf8).flatMap(SkillFrontmatter.parse)
+      let name = frontmatter?.name ?? folderName
       return AgentSkillEntry(
-        name: frontmatter?.name ?? folderName,
+        name: directory.namespace.map { "\($0):\(name)" } ?? name,
         summary: frontmatter?.summary,
         source: directory.source,
         url: folder,

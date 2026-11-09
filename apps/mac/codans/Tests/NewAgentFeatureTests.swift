@@ -491,6 +491,27 @@ struct NewAgentFeatureTests {
       ])
   }
 
+  /// A local branch with a slash is not read as `<remote>/<branch>`: the
+  /// agent starts in a new worktree for `feature/live`, so the scan reads
+  /// the main checkout, not the worktree of an unrelated `live` branch.
+  @Test
+  func localBranchWithASlashDoesNotScanAnotherBranchesWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let starts = LockIsolated<[String?]>([])
+    var catalog = catalog
+    catalog.projects[0].worktrees.append(
+      Worktree(name: "other", path: "/tmp/new-agent/other", branch: "live"))
+    let store = makeSkillStore(
+      catalog: catalog, loaded: loaded, starts: starts, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.targetSelected(.branch("feature/live")))
+    await store.receive(\.skillsLoaded)
+    #expect(starts.value == ["/tmp/new-agent/repo", "/tmp/new-agent/repo"])
+  }
+
   // MARK: - Skills button
 
   @Test
