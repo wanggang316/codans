@@ -65,15 +65,24 @@ sv_launch                        # private paths; refuses a busy socket; checks 
 
 Source the helpers again in every new shell. In a scenario script, add `trap sv_cleanup EXIT` right after
 `sv_launch`, and do not pipe the script into `head`: SIGPIPE ends it before cleanup and leaves the instance
-running. Defaults: `SELF_VERIFY_DIR` under `$TMPDIR`, socket
-`/tmp/cdv-sv-<uid>.sock`, cache `/tmp/cdv-sv-cache-<uid>`. Socket and cache paths stay short: zmx puts one
-socket per pane in the cache dir and AF_UNIX paths are capped at 104 bytes. Override the variables before sourcing
-to run two instances.
+running.
+
+Default paths are private to the session, so parallel sessions in the same or different worktrees each run their
+own instance, and one session's `sv_cleanup` never touches another session's files or processes:
+`SELF_VERIFY_DIR` is `$TMPDIR/codans-self-verify-<uid>-<token>`, the socket is `/tmp/cdv-sv-<uid>-<token>.sock`,
+and the cache is `/tmp/cdv-sv-cache-<uid>-<token>`. The token is a hash of the worktree root and the session id,
+which is the first one set of `SELF_VERIFY_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CODANS_PANE_ID`, and
+`TERM_SESSION_ID`. These variables are inherited, so every shell and script of one session sources the helpers to
+the same paths. If none is set (an agent that exports no session id), export a unique `SELF_VERIFY_SESSION` before
+you source the helpers; otherwise sessions in one worktree share paths and the second `sv_launch` refuses the busy
+socket. Socket and cache paths stay short: zmx puts one socket per pane in the cache dir and AF_UNIX paths are
+capped at 104 bytes. Explicit `SELF_VERIFY_DIR`, `SELF_VERIFY_SOCKET`, and `SELF_VERIFY_CACHE` override the
+defaults; set them before sourcing.
 
 The helpers launch the Debug `Codans.app` of the worktree you source them in. `sv_app` asks
 `xcodebuild -showBuildSettings` (Debug, scheme `Codans`) for the app path from `git rev-parse --show-toplevel`, and
 caches the worktree root and the app path in `$SELF_VERIFY_DIR/app-path`. It reuses the cache only for the same
-worktree root and only while the app exists, so worktrees that share the default `SELF_VERIFY_DIR` each launch their
+worktree root and only while the app exists, so worktrees that share an explicit `SELF_VERIFY_DIR` each launch their
 own build. Set `SELF_VERIFY_APP` to launch a different bundle; it skips resolution and the cache.
 
 `sv_launch` records the front app and gives focus back if the instance took it. It snapshots the shared
