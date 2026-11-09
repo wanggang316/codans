@@ -9,11 +9,6 @@ import CodansCore
 /// `WindowActionRouterFeature`. The reducer is a pure fan-out over
 /// `WindowService`, `AppLifecycleClient`, and `UpdatesClient`, so each test
 /// stubs the relevant closure and asserts the matching call.
-///
-/// `.openConfig` hits `NSWorkspace.shared.open(_:)` directly — there's no
-/// observable seam to stub, so the assertion is limited to "send does not
-/// crash and does not route into any client under test". Recorded as a
-/// deliberate simplification (see Decision Log note in milestone report).
 @MainActor
 struct WindowActionRouterFeatureTests {
   // MARK: - new / close / closeAll
@@ -201,21 +196,20 @@ struct WindowActionRouterFeatureTests {
     #expect(called.value == 1)
   }
 
-  // MARK: - openConfig (no observable seam — smoke-test only)
+  // MARK: - openConfig
 
-  /// `openConfig` hands off to `NSWorkspace.shared.open(_:)` and logs if the
-  /// call returns `false`. There is no injected client to intercept, so the
-  /// assertion is limited to "reducer runs without crashing and does not
-  /// touch the other clients". This is a deliberate simplification recorded
-  /// in the Decision Log.
   @Test
-  func openConfigDoesNotRouteThroughOtherClients() async {
+  func openConfigOpensResolvedConfigPathOnce() async {
+    let configURL = URL(fileURLWithPath: "/tmp/codans-tests/xdg/ghostty/config")
+    let opened = LockIsolated<[URL]>([])
     let windowCalls = LockIsolated(0)
     let lifecycleCalls = LockIsolated(0)
     let updatesCalls = LockIsolated(0)
     let store = TestStore(initialState: WindowActionRouterFeature.State()) {
       WindowActionRouterFeature()
     } withDependencies: {
+      $0.ghosttyConfigOpener.configURL = { configURL }
+      $0.ghosttyConfigOpener.open = { url in opened.withValue { $0.append(url) } }
       $0.windowService = WindowService.testValue
       $0.windowService.openNewWindow = { _ in windowCalls.withValue { $0 += 1 } }
       $0.windowService.closeWindow = { _ in windowCalls.withValue { $0 += 1 } }
@@ -232,6 +226,7 @@ struct WindowActionRouterFeatureTests {
     }
 
     await store.send(.requested(.openConfig))
+    #expect(opened.value == [configURL])
     #expect(windowCalls.value == 0)
     #expect(lifecycleCalls.value == 0)
     #expect(updatesCalls.value == 0)

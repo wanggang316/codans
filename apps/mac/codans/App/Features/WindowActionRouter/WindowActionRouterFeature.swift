@@ -1,8 +1,6 @@
-import AppKit
 import ComposableArchitecture
 import Foundation
 import CodansCore
-import os.log
 
 /// Pure router reducer for `TerminalEvent.windowActionRequested`. Keeps the
 /// dispatch table in one place so every window/app-level ghostty action
@@ -26,11 +24,7 @@ struct WindowActionRouterFeature {
   @Dependency(WindowService.self) private var windowService
   @Dependency(AppLifecycleClient.self) private var appLifecycleClient
   @Dependency(UpdatesClient.self) private var updatesClient
-  @Dependency(EditorClient.self) private var editorClient
-
-  private static let logger = Logger(
-    subsystem: "com.gumpw.codans.ui", category: "window-router"
-  )
+  @Dependency(GhosttyConfigOpenerClient.self) private var ghosttyConfigOpener
 
   var body: some Reducer<State, Action> {
     Reduce { _, action in
@@ -74,23 +68,7 @@ struct WindowActionRouterFeature {
       updatesClient.checkNow()
       return .none
     case .openConfig:
-      // `EditorClient.open(directory:...)` takes a directory, not a file,
-      // so routing the ghostty config file through it is impedance-
-      // mismatched. Hand off to LaunchServices instead — this respects
-      // the user's file-level default app for plain-text files, which is
-      // the closest single-step approximation of "open in user's default
-      // editor" until `EditorClient` grows a file-level overload. The
-      // design doc's `EditorClient.openFile("~/.config/ghostty/config")`
-      // call site does not exist yet; recorded as a deliberate deviation
-      // in the milestone report.
-      let expanded = (("~/.config/ghostty/config") as NSString).expandingTildeInPath
-      let url = URL(fileURLWithPath: expanded)
-      let opened = NSWorkspace.shared.open(url)
-      if !opened {
-        Self.logger.info(
-          "openConfig: NSWorkspace.open returned false for \(expanded, privacy: .public)"
-        )
-      }
+      ghosttyConfigOpener.open(ghosttyConfigOpener.configURL())
       return .none
     }
   }
