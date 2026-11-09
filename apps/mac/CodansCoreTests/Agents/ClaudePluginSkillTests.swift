@@ -144,6 +144,31 @@ struct ClaudePluginSkillTests {
   }
 
   @Test
+  func manifestSkillPathsReplaceTheWholeClaudeSkillsFolder() throws {
+    let root = home.appending(path: ".claude")
+    try fixture(root: root)
+    let pro = root.appending(path: "plugins/cache/other/pro/2.0.0")
+    try skill("extra", in: pro.appending(path: ".claude/skills"))
+    try skill("bundled", in: pro.appending(path: "more"))
+    try skill("outside", in: home.appending(path: "elsewhere"))
+    try write(
+      #"{"name": "pro", "skills": ["./.claude/skills/design", "./more", "../../../../../../elsewhere", "/abs"]}"#,
+      to: pro.appending(path: ".claude-plugin/plugin.json"))
+    let names = scan(AgentProfile(kind: .claudeCode)).map(\.name)
+    #expect(names == ["docs:pdf", "mine", "pro:bundled", "pro:design"])
+  }
+
+  @Test
+  func manifestWithoutSkillsKeepsBothLayouts() throws {
+    let root = home.appending(path: ".claude")
+    try fixture(root: root)
+    try write(
+      #"{"name": "pro"}"#,
+      to: root.appending(path: "plugins/cache/other/pro/2.0.0/.claude-plugin/plugin.json"))
+    #expect(scan(AgentProfile(kind: .claudeCode)).map(\.name) == ["docs:pdf", "mine", "pro:design"])
+  }
+
+  @Test
   func agentWithoutPluginSourceReadsNoRegistry() throws {
     try fixture(root: home.appending(path: ".claude"))
     #expect(

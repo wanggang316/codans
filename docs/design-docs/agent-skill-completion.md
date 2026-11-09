@@ -91,6 +91,7 @@ struct SkillLocation {
 
 - **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `<config root>/settings.json` 中 `enabledPlugins` 为 true 的插件。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
   - Config root 与用户级目录同一规则：有效 HOME 下的 `.claude`，或 `CLAUDE_CONFIG_DIR` 的值（相对路径时不列插件）。
+  - 插件清单 `.claude-plugin/plugin.json` 的 `skills` 字段声明了路径时，扫 `skills/` 与声明的路径（路径本身含 `SKILL.md` 则为单个 Skill），不再整体扫 `.claude/skills`：Claude Code 只加载声明的 Skill（例：ui-ux-pro-max 2.5.0 的 `.claude/skills` 有 7 个 Skill，只声明 1 个）。离开 install path 的路径丢弃。
   - 注册表 key 为 `<plugin>@<marketplace>`，`<plugin>` 取 `@` 之前部分。`installPath` 只接受绝对路径或 `~/` 开头的路径。
   - 注册表或 settings 缺失、不是 JSON、结构不符时，不列插件 Skill；用户级与项目级 Skill 不受影响。
   - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。

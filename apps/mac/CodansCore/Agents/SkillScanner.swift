@@ -55,11 +55,17 @@ public nonisolated enum SkillScanner {
     let fileManager = FileManager.default
     // Skill folders are often symlinks into a skill source tree, so the
     // listing resolves each child rather than trusting its own type.
-    guard
-      let children = try? fileManager.contentsOfDirectory(
-        at: directory.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-    else { return [] }
-    return children.compactMap { folder in
+    let folders: [URL]
+    switch directory.layout {
+    case .skill: folders = [directory.url]
+    case .skillFolders:
+      guard
+        let children = try? fileManager.contentsOfDirectory(
+          at: directory.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+      else { return [] }
+      folders = children
+    }
+    return folders.compactMap { folder in
       let file = folder.appending(path: "SKILL.md", directoryHint: .notDirectory)
       guard let data = fileManager.contents(atPath: file.path(percentEncoded: false)) else {
         return nil

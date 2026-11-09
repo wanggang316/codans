@@ -13,11 +13,23 @@ public nonisolated struct SkillDirectory: Equatable, Sendable, Hashable {
   /// Plugin name the agent puts before each skill name here, as in
   /// `<plugin>:<skill>`. `nil` for skills called by their bare name.
   public let namespace: String?
+  public let layout: Layout
 
-  public init(url: URL, source: AgentSkillSource, namespace: String? = nil) {
+  /// What `url` holds.
+  public enum Layout: Equatable, Sendable, Hashable {
+    /// Skill folders, each with a `SKILL.md`.
+    case skillFolders
+    /// One skill: `url` is the skill folder.
+    case skill
+  }
+
+  public init(
+    url: URL, source: AgentSkillSource, namespace: String? = nil, layout: Layout = .skillFolders
+  ) {
     self.url = url
     self.source = source
     self.namespace = namespace
+    self.layout = layout
   }
 }
 
