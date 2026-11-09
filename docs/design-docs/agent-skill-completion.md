@@ -1,8 +1,8 @@
 # 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
 
-**Availability:** Partly available: New Agent completion of Claude Code user-level skills. Project-level skills, plugin skills, other agents, and the Skills button are planned.
+**Availability:** Partly available: New Agent completion of Claude Code user-level skills and skills of enabled Claude Code plugins. Project-level skills, Codex plugin skills, other agents, and the Skills button are planned.
 **Author:** Gump（与 Claude）
-**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
+**Implementation:** [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift)
 
 ## 背景与范围
 
@@ -90,6 +90,10 @@ struct SkillLocation {
 ### 插件 Skill
 
 - **Claude Code**：读 `<config root>/plugins/installed_plugins.json` 得到每个插件的 `installPath`，只保留 `<config root>/settings.json` 中 `enabledPlugins` 为 true 的插件。Skill 在 `<installPath>/skills/*/SKILL.md`；个别插件放在 `<installPath>/.claude/skills`，两处都要扫。调用名为 `<plugin>:<skill>`。
+  - Config root 与用户级目录同一规则：有效 HOME 下的 `.claude`，或 `CLAUDE_CONFIG_DIR` 的值（相对路径时不列插件）。
+  - 注册表 key 为 `<plugin>@<marketplace>`，`<plugin>` 取 `@` 之前部分。`installPath` 只接受绝对路径或 `~/` 开头的路径。
+  - 注册表或 settings 缺失、不是 JSON、结构不符时，不列插件 Skill；用户级与项目级 Skill 不受影响。
+  - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。
 - **Codex**：`<config root>/plugins/cache/<marketplace>/<plugin>/<version>/skills/*/SKILL.md`，以 `config.toml` 的 `[plugins."<plugin>@<marketplace>"] enabled = true` 过滤。调用名为 `<plugin>:<skill>`。
 
 ### 扫描与条目
