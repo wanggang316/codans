@@ -66,6 +66,9 @@ nonisolated enum SSHCommand {
   /// How long an ssh line waits for another codans line that is creating the
   /// shared master. Past it the line runs anyway and ssh's own `auto` fallback
   /// applies, so a stuck creator never blocks a pane or a probe for good.
+  /// A probe's `CommandRunner` timeout can be shorter. That is safe: `Process`
+  /// makes the shell a process-group leader and `terminate()` signals the
+  /// whole group, so `lockf` and the creating `ssh` stop with the probe.
   static let masterLockTimeoutSeconds = 30
 
   /// POSIX `sh` fragment that runs before an ssh line so that one shared

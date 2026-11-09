@@ -54,6 +54,38 @@ struct SSHSharedMasterGuardTests {
   }
 
   @Test
+  func runnerTimeoutAlsoStopsTheCreator() async throws {
+    let state = try Self.makeState()
+    try Data().write(to: state.appending(path: "hang"))
+    let script = SSHCommand.sharedMasterGuard(
+      host: host,
+      extraOptions: SSHCommand.backgroundProbeOptions,
+      quiet: true,
+      sshPath: state.appending(path: "ssh").path
+    )
+
+    // The lock wait can outlast a probe's timeout. `Process` makes the shell
+    // a process-group leader and `terminate()` signals that whole group, so
+    // `lockf` and the creating `ssh` stop with the probe.
+    let outcome = await FoundationCommandRunner().run(
+      executable: URL(fileURLWithPath: "/bin/sh"),
+      arguments: ["-c", script + "exit 0"],
+      env: [:],
+      cwd: state,
+      timeout: .seconds(1),
+      maxOutputBytes: 1024
+    )
+
+    guard case .timedOut = outcome else {
+      Issue.record("expected a timeout, got \(outcome)")
+      return
+    }
+    let pidText = try String(contentsOf: state.appending(path: "creator.pid"), encoding: .utf8)
+    let creator = try #require(pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
+    #expect(await Self.eventually { kill(creator, 0) != 0 })
+  }
+
+  @Test
   func invocationRunsTheGuardBeforeExecingSSH() {
     let (executable, arguments) = SSHCommand.invocation(
       host: host,
@@ -95,6 +127,7 @@ struct SSHSharedMasterGuardTests {
       *" -G "*) echo "controlpath $state/cm"; exit 0 ;;
       esac
       [ -f "$state/alive" ] && exit 0
+      if [ -f "$state/hang" ]; then echo $$ > "$state/creator.pid"; exec sleep 30; fi
       sleep 0.3
       echo "$*" >> "$state/creates"
       : > "$state/alive"
@@ -123,6 +156,14 @@ struct SSHSharedMasterGuardTests {
       proc.waitUntilExit()
       #expect(proc.terminationStatus == 0)
     }
+  }
+
+  private static func eventually(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<100 {
+      if condition() { return true }
+      try? await Task.sleep(for: .milliseconds(50))
+    }
+    return condition()
   }
 
   private static func lines(_ state: URL, _ name: String) throws -> [String] {
