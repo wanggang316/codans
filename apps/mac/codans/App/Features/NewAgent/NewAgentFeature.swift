@@ -97,6 +97,9 @@ struct NewAgentFeature {
     var prompt = ""
     /// Agent Skills the selected agent can call, for prompt completion.
     var skills: [AgentSkillEntry] = []
+    /// The profile `skills` were read for. Its home and environment decide
+    /// which skills exist, so the skills of another profile are never shown.
+    var skillsProfile: AgentProfile?
     var submitError: String?
     /// Draft to restore on appear. The worktree part waits until the form's
     /// options load: the base ref, the branch-name checks, and the branch
@@ -195,7 +198,7 @@ struct NewAgentFeature {
     /// Picked files, and the prompt's caret or selection as UTF-16 offsets
     /// (`nil` appends to the end).
     case filesSelected([URL], selection: Range<Int>?)
-    case skillsLoaded([AgentSkillEntry])
+    case skillsLoaded([AgentSkillEntry], for: AgentProfile)
     case sendTapped
     case addProjectTapped(AddProjectKind)
     case manageAgentsTapped
@@ -273,8 +276,13 @@ struct NewAgentFeature {
         }
         return .none
 
-      case .skillsLoaded(let skills):
+      case .skillsLoaded(let skills, let profile):
+        // A scan that finished after the agent changed is dropped.
+        guard state.skillLocation.supportsCompletion, state.selectedAgent == profile else {
+          return .none
+        }
         state.skills = skills
+        state.skillsProfile = profile
         return .none
 
       case .sendTapped:
@@ -338,15 +346,22 @@ struct NewAgentFeature {
   private nonisolated enum CancelID { case skills }
 
   /// Reads the selected agent's skills again. The agent's home and
-  /// environment come from the profile, so a profile edit reloads too.
+  /// environment come from the profile, so a profile edit reloads too, and
+  /// the skills of the previous profile go at once instead of when the
+  /// scan ends (ADR 0010).
   private func loadSkills(state: inout State) -> Effect<Action> {
     guard state.skillLocation.supportsCompletion, let profile = state.selectedAgent else {
       state.skills = []
+      state.skillsProfile = nil
       return .cancel(id: CancelID.skills)
+    }
+    if state.skillsProfile != profile {
+      state.skills = []
+      state.skillsProfile = nil
     }
     let client = agentSkillClient
     return .run { send in
-      await send(.skillsLoaded(client.load(profile)))
+      await send(.skillsLoaded(client.load(profile), for: profile))
     }
     .cancellable(id: CancelID.skills, cancelInFlight: true)
   }

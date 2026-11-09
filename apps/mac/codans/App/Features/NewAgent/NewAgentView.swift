@@ -287,11 +287,6 @@ struct NewAgentView: View {
 
   private var editor: some View {
     ComposerTextEditor(text: $store.prompt.sending(\.promptChanged), selection: promptSelection)
-      // Innermost, so an open skill list takes Return, Tab, the arrows,
-      // and Escape before the handlers below send or close the dialog.
-      .composerSkillCompletion(skillCompletion, text: store.prompt, selection: promptSelection) {
-        store.send(.promptChanged($0))
-      }
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()
@@ -307,20 +302,15 @@ struct NewAgentView: View {
         }
       }
       .focused($focus, equals: .prompt)
-      .onKeyPress(.return, phases: .down) { press in
-        // Return sends; ⇧Return and ⌥Return break a line, as in the
-        // Command Queue composer.
-        if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
-          return .ignored
-        }
-        if store.canSend { store.send(.sendTapped) }
-        return .handled
-      }
-      .onKeyPress(.escape) {
-        // `NSTextView` would spend Escape on word completion.
-        store.send(.cancelTapped)
-        return .handled
-      }
+      // Owns Return and Escape too, so an open skill list gets them before
+      // they send or close the dialog. ⇧Return and ⌥Return break a line, as
+      // in the Command Queue composer.
+      .composerSkillCompletion(
+        skillCompletion, text: store.prompt, selection: promptSelection,
+        onInsert: { store.send(.promptChanged($0)) },
+        onSubmit: { if store.canSend { store.send(.sendTapped) } },
+        onCancel: { store.send(.cancelTapped) }
+      )
       .accessibilityLabel("Prompt")
   }
 

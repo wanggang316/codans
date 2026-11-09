@@ -74,52 +74,84 @@ struct ComposerSkillCompletionList: View {
 }
 
 extension View {
-  /// Drives `completion` from a composer editor: recomputes the list when
-  /// the text changes and routes Return, Tab, the arrows, and Escape to the
-  /// open list. With the list closed every key passes through, so the
-  /// owner's own key handlers keep working. Apply it directly on the
-  /// editor, before the owner's `onKeyPress` handlers, so it sees keys first.
+  /// Drives `completion` from a composer editor and owns the editor's
+  /// Return and Escape. The open list takes Return, Tab, the arrows, and
+  /// Escape. With it closed, Return calls `onSubmit` (⇧Return and ⌥Return
+  /// break a line) and Escape calls `onCancel`.
+  ///
+  /// The owner's Return and Escape live here, not in its own `onKeyPress`
+  /// handlers: SwiftUI offers a key press to the outermost handler first,
+  /// so a separate handler could take Return from an open list.
   func composerSkillCompletion(
     _ completion: ComposerSkillCompletion,
     text: String,
     selection: ComposerSelection,
-    onInsert: @escaping (String) -> Void
+    onInsert: @escaping (String) -> Void,
+    onSubmit: @escaping () -> Void,
+    onCancel: @escaping () -> Void
   ) -> some View {
     modifier(
       ComposerSkillCompletionKeys(
-        completion: completion, text: text, selection: selection, onInsert: onInsert))
+        completion: completion, text: text, selection: selection, onInsert: onInsert,
+        onSubmit: onSubmit, onCancel: onCancel))
   }
 }
 
 private struct ComposerSkillCompletionKeys: ViewModifier {
+  private struct Input: Equatable {
+    var text: String
+    var caretRevision: Int
+  }
+
   let completion: ComposerSkillCompletion
   let text: String
   let selection: ComposerSelection
   let onInsert: (String) -> Void
+  let onSubmit: () -> Void
+  let onCancel: () -> Void
 
   func body(content: Content) -> some View {
     content
-      .onChange(of: text) { _, newText in
-        completion.update(text: newText, caret: selection.caret(in: newText))
+      // Text and caret together: SwiftUI reports the caret before it writes
+      // the text, and both are current only when the view updates. A caret
+      // move without a text change (a click) also recomputes the call.
+      .onChange(of: Input(text: text, caretRevision: selection.revision)) { _, input in
+        completion.update(text: input.text, caret: selection.completionCaret(in: input.text))
       }
       .onKeyPress(keys: [.return, .tab, .upArrow, .downArrow, .escape], phases: .down) { press in
-        guard press.modifiers.isEmpty || press.key == .upArrow || press.key == .downArrow else {
+        if let key = Self.listKey(for: press),
+          selection.apply(completion.handle(key, text: text), onInsert: onInsert) == .handled
+        {
+          return .handled
+        }
+        switch press.key {
+        case .return:
+          if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
+            return .ignored
+          }
+          onSubmit()
+          return .handled
+        case .escape:
+          // `NSTextView` would spend Escape on word completion.
+          onCancel()
+          return .handled
+        default:
           return .ignored
         }
-        let key: ComposerSkillCompletion.Key
-        switch press.key {
-        case .upArrow: key = .up
-        case .downArrow: key = .down
-        case .escape: key = .dismiss
-        default: key = .accept
-        }
-        return selection.apply(completion.handle(key, text: text), onInsert: onInsert)
       }
-      .onKeyPress(keys: [.leftArrow, .rightArrow], phases: .down) { _ in
-        // The caret leaves the typed call; the list would go stale.
-        completion.close()
-        return .ignored
-      }
+  }
+
+  /// The list key for a press, or `nil` when the list does not take it.
+  /// Arrow keys carry the function and numeric-pad flags, so only Return,
+  /// Tab, and Escape need to be plain.
+  private static func listKey(for press: KeyPress) -> ComposerSkillCompletion.Key? {
+    switch press.key {
+    case .upArrow: return .up
+    case .downArrow: return .down
+    case .escape where press.modifiers.isEmpty: return .dismiss
+    case .return where press.modifiers.isEmpty, .tab where press.modifiers.isEmpty: return .accept
+    default: return nil
+    }
   }
 }
 

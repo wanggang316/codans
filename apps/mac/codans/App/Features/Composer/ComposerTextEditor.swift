@@ -14,6 +14,9 @@ import SwiftUI
 final class ComposerSelection {
   /// Stored untyped because `TextSelection` needs macOS 15.
   private var value: Any?
+  /// Counts reported carets, so a view can react to a caret move that does
+  /// not change the text (a click, the arrow keys).
+  private(set) var revision = 0
 
   /// `nil` until the editor reports a caret. Setting `nil` keeps the last
   /// one: focus leaving the editor (to open a file picker, for example)
@@ -21,7 +24,12 @@ final class ComposerSelection {
   @available(macOS 15, *)
   var textSelection: TextSelection? {
     get { value as? TextSelection }
-    set { if let newValue { value = newValue } }
+    set {
+      if let newValue {
+        value = newValue
+        revision &+= 1
+      }
+    }
   }
 
   /// Inserts picked file paths at the caret or selection of `text` by the
@@ -36,12 +44,13 @@ final class ComposerSelection {
     moveCaret(toUTF16Offset: result.selection.upperBound, in: result.text)
   }
 
-  /// The caret in `text` as a UTF-16 offset, or `nil` when the editor
-  /// reports none or a range is selected. Read it after the text changed,
-  /// so both describe the same string.
-  func caret(in text: String) -> Int? {
-    guard let range = utf16Range(in: text), range.isEmpty else { return nil }
-    return range.lowerBound
+  /// The caret in `text` as a UTF-16 offset for skill completion: the end
+  /// of the text when the editor reports no caret (macOS 14), `nil` when a
+  /// range is selected. Read it after the text changed, so both describe
+  /// the same string.
+  func completionCaret(in text: String) -> Int? {
+    guard let range = utf16Range(in: text) else { return text.utf16.count }
+    return range.isEmpty ? range.lowerBound : nil
   }
 
   private func utf16Range(in text: String) -> Range<Int>? {

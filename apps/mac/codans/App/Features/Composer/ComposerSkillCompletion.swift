@@ -57,12 +57,12 @@ final class ComposerSkillCompletion {
   }
 
   /// Recomputes the list after the text or the caret changed. `caret` is
-  /// `nil` when the editor reports none; the end of the text is used.
+  /// `nil` when a range is selected: no call is being typed then.
   func update(text: String, caret: Int?) {
-    let found = location.invocationStyle.prefix.flatMap { prefix in
-      Self.query(
-        in: text, caret: caret ?? text.utf16.count, prefix: prefix,
-        position: location.invocationPosition)
+    let found = caret.flatMap { caret in
+      location.invocationStyle.prefix.flatMap { prefix in
+        Self.query(in: text, caret: caret, prefix: prefix, position: location.invocationPosition)
+      }
     }
     if let dismissedStart, found?.range.lowerBound != dismissedStart {
       self.dismissedStart = nil
@@ -100,15 +100,23 @@ final class ComposerSkillCompletion {
   }
 
   /// Replaces the typed call with the skill's call token and a space. When
-  /// whitespace already follows, the caret goes after it instead.
+  /// whitespace already follows, the caret goes after it instead. A call
+  /// that `text` no longer holds at the same place closes the list and
+  /// changes nothing.
   func select(_ skill: AgentSkillEntry, text: String) -> KeyOutcome {
-    guard let query, let token = location.invocationStyle.token(for: skill.name) else {
-      return .ignored
+    guard let query, let prefix = location.invocationStyle.prefix,
+      let token = location.invocationStyle.token(for: skill.name)
+    else { return .ignored }
+    let current = Self.query(
+      in: text, caret: query.range.upperBound, prefix: prefix,
+      position: location.invocationPosition)
+    guard current == query else {
+      close()
+      return .handled
     }
     let rest = text.utf16.dropFirst(query.range.upperBound)
-    let followedBySpace = rest.first.flatMap(Unicode.Scalar.init).map {
-      Character($0).isWhitespace
-    } ?? false
+    let next = rest.first.flatMap(Unicode.Scalar.init).map(Character.init)
+    let followedBySpace = next?.isWhitespace ?? false
     let result = Self.replacing(query.range, in: text, with: followedBySpace ? token : token + " ")
     close()
     return .insert(text: result.text, caret: result.caret + (followedBySpace ? 1 : 0))
@@ -121,12 +129,12 @@ final class ComposerSkillCompletion {
     highlightedIndex = 0
   }
 
+  /// An empty result hides the list but keeps the query, so skills that
+  /// load later can still match the call being typed.
   private func refilter() {
     guard let query else { return }
     matches = Self.filter(skills, query: query.text)
-    if matches.isEmpty {
-      close()
-    } else if highlightedIndex >= matches.count {
+    if highlightedIndex >= matches.count {
       highlightedIndex = 0
     }
   }
