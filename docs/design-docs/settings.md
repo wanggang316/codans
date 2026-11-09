@@ -272,9 +272,9 @@ custom chrome and no per-platform enable switch.
 - **Introduction.** One short sentence: codans reads Pull Requests through the
   CLI of each Git Platform. Other explanations live where they apply (below).
 - **One section per Git Platform.** The official mark (`github-mark` from the
-  GitHub logos package, `gitlab-mark` from the one-color tanuki of the GitLab
-  press kit; template images, so they follow light and dark mode), the name, and
-  the CLI status. Re-check and a `HelpLink` to the CLI docs stay on the row. The
+  GitHub logos package, a template image that follows light and dark mode;
+  `gitlab-mark`, the full-color tanuki of the GitLab press kit, kept in its own
+  colors), the name, and the CLI status. Re-check and a `HelpLink` to the CLI docs stay on the row. The
   status has one form per `GitPlatformAvailability` case: checking, connected
   (host and `@user`), not installed (with the `brew install` command), not logged
   in (with the `auth login` command, `--hostname` when the host is known), and
