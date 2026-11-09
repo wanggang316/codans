@@ -8,9 +8,10 @@
 ## Summary
 
 The Debug app crashed with SIGSEGV (stack guard) when an accessibility
-client walked the detail screen of any agent profile, new or existing. A
-Release build with VoiceOver on can crash the same way. The crash happens
-when the client reaches the Launch Preview command text.
+client walked the detail screen of any agent profile, new or existing. The
+crash happens when the client reaches the Launch Preview command text.
+VoiceOver is also an AX client, so a Release build with VoiceOver on is
+expected to crash the same way. This was not reproduced with VoiceOver.
 
 ## Root cause
 
@@ -66,8 +67,9 @@ HStack {
 .accessibilityLabel("Launch command")
 ```
 
-VoiceOver reads an `AXGroup "Launch command"` that contains the command
-text. All other labels on the pane are unchanged.
+An AX tree walk on an isolated Debug instance shows an `AXGroup` with the
+label "Launch command" that contains the selectable command text. All other
+labels on the pane are unchanged.
 
 ## Recurrence checks
 
