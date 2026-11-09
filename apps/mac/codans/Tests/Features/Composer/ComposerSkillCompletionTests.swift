@@ -67,6 +67,36 @@ struct ComposerSkillCompletionTests {
   }
 
   @Test
+  func eachStyleOpensOnItsPrefixAndInsertsItsToken() {
+    let cases: [(SkillLocation, String, String)] = [
+      (.codex, "$no", "$note "),
+      (.opencode, "@no", "@note "),
+      (.pi, "/no", "/skill:note "),
+    ]
+    for (location, typed, inserted) in cases {
+      let completion = completion(location)
+      completion.update(text: typed, caret: typed.utf16.count)
+      #expect(completion.matches.first?.name == "note", "\(typed)")
+      #expect(completion.handle(.accept, text: typed) == .insert(text: inserted, caret: inserted.utf16.count))
+    }
+  }
+
+  @Test
+  func typedSkillMarkerIsNotPartOfTheQuery() {
+    let completion = completion(.pi)
+    completion.update(text: "/skill:no", caret: 9)
+    #expect(completion.matches.first?.name == "note")
+    #expect(completion.handle(.accept, text: "/skill:no") == .insert(text: "/skill:note ", caret: 12))
+  }
+
+  @Test
+  func otherPrefixesDoNotOpen() {
+    let completion = completion(.codex)
+    completion.update(text: "/no", caret: 3)
+    #expect(!completion.isOpen)
+  }
+
+  @Test
   func agentWithoutInvocationStyleNeverOpens() {
     let completion = completion(.none)
     completion.update(text: "/", caret: 1)

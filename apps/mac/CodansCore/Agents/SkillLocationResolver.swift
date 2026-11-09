@@ -41,8 +41,8 @@ public nonisolated struct SkillDirectory: Equatable, Sendable, Hashable {
 public nonisolated enum SkillLocationResolver {
   /// Skill directories of the plugins that `profile`'s agent, launched in
   /// `projectStart`, has enabled. The registry lives under its config
-  /// root; the user, project, local, `--settings`, and managed settings
-  /// decide which plugins are on. A file that is missing or cannot be read
+  /// root. For Claude Code the user, project, local, `--settings`, and
+  /// managed settings decide which plugins are on; for Codex `config.toml`. A file that is missing or cannot be read
   /// gives no plugins (registry) or no say (settings). Settings flags in the
   /// profile's extra arguments that cannot be read give no plugins.
   static func pluginDirectories(
@@ -70,6 +70,8 @@ public nonisolated enum SkillLocationResolver {
       return ClaudePluginRegistry.skillDirectories(
         configRoot: root, home: home, projectStart: projectStart,
         launchSettings: launchSettings, managedSettings: managedSettings)
+    case .codex:
+      return CodexPluginRegistry.skillDirectories(configRoot: root)
     }
   }
 
@@ -157,7 +159,7 @@ public nonisolated enum SkillLocationResolver {
   }
 
   /// Project-level skill directories for `profile`, searched from
-  /// `startDirectory` by the agent's `projectSearch`, nearest first. A walk
+  /// `startDirectory` by the search of each directory, nearest first. A walk
   /// that finds no repository root reads the start directory only.
   public static func projectDirectories(
     for profile: AgentProfile,
@@ -175,15 +177,17 @@ public nonisolated enum SkillLocationResolver {
     guard location.supportsCompletion, !location.projectDirectories.isEmpty else { return [] }
     let start = startDirectory.standardizedFileURL
     var searched = [start]
-    if location.projectSearch == .walkUpToRepositoryRoot {
+    if location.projectDirectories.contains(where: { $0.search == .walkUpToRepositoryRoot }) {
       searched = walkUp(from: start, isRepositoryRoot: isRepositoryRoot) ?? [start]
     }
-    return searched.flatMap { directory in
-      location.projectDirectories.map { relative in
-        SkillDirectory(
-          url: directory.appending(path: relative, directoryHint: .isDirectory).standardizedFileURL,
-          source: .project)
-      }
+    return searched.enumerated().flatMap { depth, directory in
+      location.projectDirectories
+        .filter { depth == 0 || $0.search == .walkUpToRepositoryRoot }
+        .map { relative in
+          SkillDirectory(
+            url: directory.appending(path: relative.path, directoryHint: .isDirectory).standardizedFileURL,
+            source: .project)
+        }
     }
   }
 

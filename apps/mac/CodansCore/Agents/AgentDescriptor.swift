@@ -191,8 +191,11 @@ public nonisolated enum AgentCatalog {
   public static func skillLocation(for kind: AgentKind) -> SkillLocation {
     switch kind {
     case .claudeCode: return .claudeCode
-    case .codex, .gemini, .cursorAgent, .opencode, .copilot, .droid, .amp, .grok, .pi, .omp,
-      .cline, .kimi:
+    case .codex: return .codex
+    case .pi: return .pi
+    case .opencode: return .opencode
+    // Gemini: no probe has run, see the design doc.
+    case .gemini, .cursorAgent, .copilot, .droid, .amp, .grok, .omp, .cline, .kimi:
       return .none
     }
   }
@@ -297,7 +300,9 @@ public nonisolated enum AgentCatalog {
     kind: .opencode,
     executable: "opencode",
     iconAssetName: "opencode",
-    iconSummary: "OpenCode brand icon"
+    iconSummary: "OpenCode brand icon",
+    // `opencode --prompt 'prompt'` starts the TUI and sends the prompt.
+    promptStyle: .flag("--prompt")
   )
 
   private static let copilot = AgentDescriptor(

@@ -356,22 +356,58 @@ struct NewAgentFeatureTests {
   }
 
   @Test
-  func claudeCodeProfileLoadsItsSkillsAndOtherAgentsLoadNone() async {
+  func claudeCodeProfileLoadsItsSkillsAndAnAgentWithoutStyleLoadsNone() async {
     let loaded = LockIsolated<[AgentKind]>([])
-    let codex = AgentProfile(kind: .codex, name: "Codex")
+    let gemini = AgentProfile(kind: .gemini, name: "Gemini")
     let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
     let store = makeSkillStore(catalog: catalog, loaded: loaded)
     await store.send(.onAppear)
-    await store.send(.agentProfilesChanged([profile, codex]))
+    await store.send(.agentProfilesChanged([profile, gemini]))
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.reviewSkill]
       $0.skillsScope = Self.notesScope(profile)
     }
     #expect(store.state.skillLocation == .claudeCode)
 
-    await store.send(.agentSelected(codex.id)) { $0.skills = [] }
+    await store.send(.agentSelected(gemini.id)) { $0.skills = [] }
     #expect(store.state.skillLocation == .none)
     #expect(loaded.value == [.claudeCode])
+  }
+
+  @Test
+  func changingTheAgentRescansAndUsesTheNewInvocationStyle() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let codex = AgentProfile(kind: .codex, name: "Codex")
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, codex]))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skillLocation.invocationStyle == .slash)
+
+    await store.send(.agentSelected(codex.id)) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsScope = Self.notesScope(codex)
+    }
+    #expect(loaded.value == [.claudeCode, .codex])
+    #expect(store.state.skillLocation == .codex)
+
+    // The list and the token the composer inserts follow Codex.
+    let completion = ComposerSkillCompletion()
+    completion.location = store.state.skillLocation
+    completion.skills = store.state.skills
+    completion.update(text: "/re", caret: 3)
+    #expect(!completion.isOpen)
+    completion.update(text: "$re", caret: 3)
+    #expect(completion.matches == [Self.reviewSkill])
+    #expect(completion.handle(.accept, text: "$re") == .insert(text: "$review ", caret: 8))
+
+    await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
+    await store.send(.skillsButtonTapped(selection: 3..<3)) { $0.prompt = "fix $" }
   }
 
   @Test
@@ -531,13 +567,13 @@ struct NewAgentFeatureTests {
   @Test
   func skillsButtonIsOffForAnAgentWithoutInvocationStyle() async {
     let loaded = LockIsolated<[AgentKind]>([])
-    let codex = AgentProfile(kind: .codex, name: "Work Codex")
+    let gemini = AgentProfile(kind: .gemini, name: "Work Gemini")
     let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
     let store = makeSkillStore(catalog: catalog, loaded: loaded)
     await store.send(.onAppear)
-    await store.send(.agentProfilesChanged([codex]))
+    await store.send(.agentProfilesChanged([gemini]))
     #expect(store.state.skillLocation == .none)
-    #expect(store.state.skillsUnavailableReason == "Skill suggestions are not available for Codex")
+    #expect(store.state.skillsUnavailableReason == "Skill suggestions are not available for Gemini CLI")
 
     await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
     await store.send(.skillsButtonTapped(selection: 3..<3))
