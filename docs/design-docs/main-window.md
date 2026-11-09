@@ -61,6 +61,10 @@ Header 不显示前台进程计数与进程列表 popover（已移除）。`Hier
 New Agent 按钮（`HeaderNewAgentButton`，`plus.bubble` 加彩色渐变，无下拉）、⌘⇧N（`CommandID.newAgent`，File 菜单 “New Agent…”）和命令面板的 “New Agent…” 都发送 `RootFeature.newAgentRequested`，以 sheet 打开 `NewAgentView`（`NewAgentFeature`，`@Presents` 于 `RootFeature.newAgent`，由独立的 `newAgentReducer` 处理）。布局自上而下：
 
 - **Project › Worktree** 选择器与右侧的 Worktree Options 开关（`switch.2`）。Project 默认为当前选中项目；没有项目时换成与侧栏 `+` 相同的 Add Project 菜单。文件夹和 workspace 项目只有一个工作位置，不显示 Worktree 选择器。Git 项目的 Worktree 选择器默认 “New Worktree”，也可选本地或远程分支。
+- **Project 菜单**的行和收起时的按钮都显示项目在侧栏中的图标，规则与侧栏的 `ProjectIconView` 相同：SF Symbol 和矢量自定义图标用项目颜色着色，位图自定义图标保持原色；没有图标时用默认图标（文件夹，workspace 用 stack）；自定义图标文件丢失时也用默认图标；没有颜色时用 secondary 灰色。原生菜单行只画一张普通图片，所以图标由 `ProjectIconView.menuImage` 预渲染为菜单行大小、非 template、已带颜色的 `NSImage`（复用 `ProjectIconImageCache`）。分组由 `NewAgentFeature.ProjectMenu` 计算：
+  - **Recent**：`lastActiveAt` 最新的 3 个项目，新的在前；从未活动的项目不进入。项目总数大于 3 时才显示。远程项目的名称后带 wifi 标记（`RemoteProjectMarker`）。
+  - Recent 下方：目录中没有远程项目时，是一个 “Projects” 分组，按目录顺序；有远程项目时，每个 Host 一个分组，顺序与侧栏 Host 层相同（This Mac 在前，再按 Host 列表顺序），标题为 Host 的显示名，分组内按目录顺序，行内不带 wifi 标记。
+  - 菜单总是列出全部项目：侧栏过滤和折叠的 Host 不影响它。Recent 中的项目也出现在下方分组中，两行都选中同一个项目，选中的项目在两处都打勾。
 - **Branch name** 与 **Worktree Options**（Base ref、Fetch origin、Copy ignored / untracked），只在 “New Worktree” 时出现，Options 默认收起。这部分就是内嵌的 `CreateWorktreeFeature`，默认值（`CreateWorktreeFeature.State.seeded`）、校验和分支冲突提示与 Create Worktree sheet 共用一份实现。
 - **Prompt** 输入框，底部为 Agent 菜单（默认第一个可用 profile，过滤规则同 `AgentInstallationStore.offeredProfiles`）和发送按钮（Return / ⌘↩）。
 
