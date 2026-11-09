@@ -58,7 +58,13 @@ struct RemoteSurfaceCommandTests {
     #expect(sequence.contains("\u{1B}7\u{1B}[?1049l"))
     #expect(sequence.contains("\u{1B}[?25h"))  // show cursor
     #expect(sequence.contains("\u{1B}>"))  // normal keypad
-    #expect(sequence.contains("\u{1B}[<99u"))  // pop the kitty keyboard stack
+    // Ghostty keeps one kitty keyboard stack per screen, and the alternate
+    // screen keeps its stack after 1049l: pop it before leaving, then pop
+    // the primary screen's stack.
+    let pop = "\u{1B}[<99u"
+    #expect(sequence.contains(pop + "\u{1B}7\u{1B}[?1049l"))
+    let afterLeave = sequence.components(separatedBy: "\u{1B}[?1049l").last ?? ""
+    #expect(afterLeave.contains(pop))
     #expect(sequence.contains("\u{1B}[>4;0m"))  // modifyOtherKeys off
     #expect(sequence.hasSuffix("\u{1B}[0m"))  // SGR reset
     // No RIS: the screen, the scrollback, and the notices must stay.
