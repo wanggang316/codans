@@ -1,0 +1,4 @@
+PASS=291 FAIL=0  (results: /tmp/c444/r2-full-a/results.tsv)
+PASS=291 FAIL=0  (results: /tmp/c444/r2-full-b/results.tsv)
+S33b     PASS want=0   got=0   pane send --capture text mode prints the output only
+S33b     PASS want=0   got=0   pane send --capture text mode prints the output only
