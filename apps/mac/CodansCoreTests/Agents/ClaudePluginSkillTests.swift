@@ -301,9 +301,45 @@ struct ClaudePluginSkillTests {
       let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
       #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(fragment)")
     }
-    // Shell syntax with no settings flag leaves plugins as they are.
-    let plain = AgentProfile(kind: .claudeCode, extraArguments: "--verbose 2>/dev/null")
-    #expect(scan(plain, in: project).map(\.name) == ["docs:pdf", "mine", "pro:design"])
+  }
+
+  /// codans reads only plain arguments. Shell syntax anywhere, even with no
+  /// literal settings flag, can build one (`--set\tings` is `--settings`
+  /// in zsh) or change a path (`=name` is a command path in zsh), so it
+  /// gives no plugin skills. User skills stay.
+  @Test
+  func anyShellSyntaxInExtraArgumentsOffersNoPluginSkills() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    let flagFile = home.appending(path: "flags.json")
+    try enable(#""docs@market": false"#, in: flagFile)
+    let path = flagFile.path(percentEncoded: false)
+    let fragments = [
+      #"--set\tings \#(path)"#, #"--set''tings \#(path)"#, #"--se"tt"ings \#(path)"#,
+      "--settings =flags", "--settings ==flags", "--settings=", "--settings==flags",
+      "--settings ~other/flags.json", "--settings ~", "--verbose 2>/dev/null", "--model $MODEL",
+      "--verbose\n--settings \(path)",
+    ]
+    for fragment in fragments {
+      #expect(
+        ClaudePluginRegistry.launchSettings(
+          extraArguments: fragment, projectDirectory: project, userHome: home) == .unknown,
+        "\(fragment)")
+      let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
+      #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(fragment)")
+    }
+  }
+
+  @Test
+  func plainArgumentsWithoutASettingsFlagKeepPlugins() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    for fragment in ["", "--verbose", "--model opus --permission-mode=plan", "--add-dir ~/notes a=b"] {
+      #expect(
+        ClaudePluginRegistry.launchSettings(
+          extraArguments: fragment, projectDirectory: project, userHome: home) == .none,
+        "\(fragment)")
+      let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
+      #expect(scan(profile, in: project).map(\.name) == ["docs:pdf", "mine", "pro:design"], "\(fragment)")
+    }
   }
 
   @Test

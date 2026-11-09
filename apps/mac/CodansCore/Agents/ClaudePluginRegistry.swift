@@ -12,14 +12,13 @@ nonisolated enum ClaudePluginRegistry {
 
   /// What the profile's extra arguments do to the settings Claude Code loads.
   enum LaunchSettings: Equatable {
-    /// No settings flag.
+    /// Plain arguments without a settings flag.
     case none
     /// `--settings <file>`: one more settings layer.
     case file(URL)
-    /// A flag whose effect codans cannot read: shell syntax in the fragment
-    /// (inline JSON, quotes, expansions, control operators, redirections), a
-    /// repeated flag, `--setting-sources`, or `--plugin-dir`. Then no plugin
-    /// skill is offered (ADR 0010).
+    /// Arguments whose effect codans cannot be sure of: any shell syntax,
+    /// a repeated `--settings`, `--setting-sources`, or `--plugin-dir`.
+    /// Then no plugin skill is offered (ADR 0010).
     case unknown
   }
 
@@ -28,19 +27,20 @@ nonisolated enum ClaudePluginRegistry {
   /// `userHome` (the shell does it, before `env` sets the agent's `HOME`);
   /// a relative path against the directory the agent starts in.
   ///
-  /// The shell splits the fragment, so codans reads it only when the shell
-  /// would pass each word as it is: plain words and blanks. Any other
-  /// character (`;`, `&`, `|`, `<`, `>`, quotes, `$`, globs, `#`, a line
-  /// break) can change which words reach Claude Code, or whether the flag
-  /// reaches it at all.
+  /// The shell, not codans, turns the fragment into arguments, and every
+  /// shell construct (quotes, escapes, expansions, operators, a word that
+  /// starts with `=` or `~`) can change what reaches Claude Code. codans
+  /// does not try to read shell syntax: it reads the fragment only when the
+  /// whole of it is plain words, and anything else is `.unknown`. So a
+  /// profile with any shell syntax in its extra arguments gets no plugin
+  /// skills; user and project skills stay (ADR 0010).
   static func launchSettings(
     extraArguments: String, projectDirectory: URL?, userHome: URL
   ) -> LaunchSettings {
-    guard extraArguments.contains("--setting") || extraArguments.contains("--plugin-dir") else {
-      return .none
+    let tokens = extraArguments.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+    guard extraArguments.allSatisfy(isPlainShellCharacter), tokens.allSatisfy(isPlainWord) else {
+      return .unknown
     }
-    guard extraArguments.allSatisfy(isPlainShellCharacter) else { return .unknown }
-    let tokens = extraArguments.split(whereSeparator: \.isWhitespace).map(String.init)
     var values: [String?] = []
     for (index, token) in tokens.enumerated() {
       if token == "--setting-sources" || token.hasPrefix("--setting-sources=")
@@ -53,7 +53,7 @@ nonisolated enum ClaudePluginRegistry {
       } else if token.hasPrefix("--settings=") {
         // Whether `~` after `=` expands depends on the shell and its options.
         let value = String(token.dropFirst("--settings=".count))
-        values.append(value.hasPrefix("~") ? nil : value)
+        values.append(value.hasPrefix("~") || value.hasPrefix("=") ? nil : value)
       }
     }
     guard !values.isEmpty else { return .none }
@@ -62,16 +62,24 @@ nonisolated enum ClaudePluginRegistry {
     if value.hasPrefix("~/") {
       return .file(userHome.appending(path: String(value.dropFirst(2))).standardizedFileURL)
     }
-    if value.hasPrefix("~") { return .unknown }
     guard let projectDirectory else { return .unknown }
     return .file(projectDirectory.appending(path: value).standardizedFileURL)
   }
 
   /// A character the shell keeps as it is inside a word, or a blank between
-  /// words. `~` matters only at the start of a word and is handled there.
+  /// words. `=` and `~` are plain only inside a word (`isPlainWord`).
   private static func isPlainShellCharacter(_ character: Character) -> Bool {
     character.isLetter || character.isNumber || character == " " || character == "\t"
       || "/._-+,@:%=~".contains(character)
+  }
+
+  /// A word the shell passes as it is: zsh expands a leading `=` to a
+  /// command path, and a leading `~` is a home directory. The one leading
+  /// `~` codans reads is `~/`, expanded against the user's home.
+  private static func isPlainWord(_ word: String) -> Bool {
+    if word.hasPrefix("=") { return false }
+    if word.hasPrefix("~") { return word.hasPrefix("~/") }
+    return true
   }
 
   /// The settings files that can set `enabledPlugins`, lowest precedence
