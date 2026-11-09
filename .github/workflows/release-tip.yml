@@ -417,6 +417,28 @@ jobs:
             || { echo "::error::Tip channel item missing from canonical feed at $URL"; echo "$BODY"; exit 1; }
           echo "Canonical feed confirms tip channel item is live."
 
+      # Upload --clobber replaces only same-named assets, so each new
+      # MARKETING_VERSION left its DMG on the tip release. Prune after the
+      # merge step: until then the canonical feed still points at the
+      # previous tip DMG.
+      - name: Prune stale tip assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          KEEP_DMG: Codans-${{ steps.meta.outputs.marketing }}.dmg
+        run: |
+          set -euo pipefail
+          gh release view tip -R "$REPO" --json assets --jq '.assets[].name' \
+            | while IFS= read -r asset; do
+                case "$asset" in
+                  "$KEEP_DMG" | "$KEEP_DMG.sha256" | appcast-tip.xml) ;;
+                  *)
+                    echo "Deleting $asset"
+                    gh release delete-asset tip "$asset" -R "$REPO" --yes
+                    ;;
+                esac
+              done
+
       - name: Cleanup keychain
         if: always()
         run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
