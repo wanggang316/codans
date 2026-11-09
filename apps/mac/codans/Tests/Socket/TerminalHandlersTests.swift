@@ -641,6 +641,8 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   private(set) var keys: [(paneID: UUID, key: IPC.TerminalNamedKey)] = []
   private(set) var rawBytes: [(paneID: UUID, bytes: [UInt8])] = []
   var textByPane: [UUID: String] = [:]
+  /// Panes whose `readText` returns nil: the surface cannot be read.
+  var unreadable: Set<UUID> = []
   /// A sequence of successive `readText` returns per pane — models output
   /// that changes across polls then holds steady. Clamps to the last
   /// element once exhausted. Takes precedence over `textByPane`.
@@ -682,7 +684,7 @@ final class FakeSink: TerminalHandlers.InputSink, @unchecked Sendable {
   func readText(paneID: PaneID, extent: TerminalHandlers.ReadExtent) -> String? {
     lock.lock()
     defer { lock.unlock() }
-    guard registered.contains(paneID.raw) else { return nil }
+    guard registered.contains(paneID.raw), !unreadable.contains(paneID.raw) else { return nil }
     if let script = textScript[paneID.raw], !script.isEmpty {
       let cursor = scriptCursor[paneID.raw] ?? 0
       scriptCursor[paneID.raw] = cursor + 1

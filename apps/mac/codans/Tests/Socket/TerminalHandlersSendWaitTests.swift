@@ -107,6 +107,114 @@ struct TerminalHandlersSendWaitTests {
     #expect((result.waitedMillis ?? 0) >= 700)
   }
 
+  /// The shell has not drawn its prompt yet (a slow prompt under load), so
+  /// the terminal echoes the typed line and nothing runs. A still screen
+  /// that shows only that echo is no completion: the old code returned
+  /// `completed` with an empty capture here (#444).
+  @Test
+  func typeaheadEchoBeforeThePromptIsNotCompletion() async throws {
+    let sink = FakeSink()
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    sink.textScript[pane.raw] = ["PRE", "PRE\necho hi"]
+    let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([false]))
+
+    let result = try await send(
+      handlers, pane: pane, text: "echo hi\r",
+      wait: .init(timeoutMillis: 4000, stableMillis: 500, graceMillis: 1500), capture: true)
+
+    #expect(result.completed == false)
+    #expect((result.waitedMillis ?? 0) >= 4000)
+  }
+
+  @Test
+  func completesOnceThePromptRunsTheTypedLine() async throws {
+    let sink = FakeSink()
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    let typed = "PRE\necho hi"
+    sink.textScript[pane.raw] =
+      ["PRE"] + Array(repeating: typed, count: 25) + [typed + "\n$ echo hi\nhi\n$ "]
+    let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([false]))
+
+    let result = try await send(
+      handlers, pane: pane, text: "echo hi\r",
+      wait: .init(timeoutMillis: 10000, stableMillis: 500, graceMillis: 1500), capture: true)
+
+    #expect(result.completed == true)
+    #expect((result.waitedMillis ?? 0) >= 2500)
+    #expect(result.output?.split(separator: "\n").contains("hi") == true)
+  }
+
+  /// No change on screen at all (the send has not reached the shell) is no
+  /// completion either, even past the grace.
+  @Test
+  func anUnchangedScreenIsNotCompletion() async throws {
+    let sink = FakeSink()
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    sink.textScript[pane.raw] = ["$ "]
+    let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([false]))
+
+    let result = try await send(
+      handlers, pane: pane, text: "echo hi\r",
+      wait: .init(timeoutMillis: 3000, stableMillis: 500, graceMillis: 1500), capture: true)
+
+    #expect(result.completed == false)
+  }
+
+  /// Text sent without Enter only types the line; the echo is the result.
+  @Test
+  func textWithoutEnterCompletesOnItsEcho() async throws {
+    let sink = FakeSink()
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    sink.textScript[pane.raw] = ["$ ", "$ echo hi"]
+    let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([false]))
+
+    let result = try await send(
+      handlers, pane: pane, text: "echo hi",
+      wait: .init(timeoutMillis: 5000, stableMillis: 500, graceMillis: 1500), capture: false)
+
+    #expect(result.completed == true)
+  }
+
+  /// A capture whose baseline cannot be read fails before anything is sent,
+  /// instead of diffing against an empty screen.
+  @Test
+  func captureFailsBeforeSendingWhenTheSurfaceCannotBeRead() async throws {
+    let sink = FakeSink()
+    let clock = TerminalStabilityWaiterTests.VirtualClock()
+    let pane = PaneID()
+    sink.registered.insert(pane.raw)
+    sink.unreadable.insert(pane.raw)
+    let handlers = makeHandlers(sink: sink, clock: clock, busy: BusyScript([false]))
+    let params = try JSONValue.encoded(
+      TerminalHandlers.SendInputParams(
+        paneID: pane, text: "echo hi\r",
+        wait: .init(timeoutMillis: 3000, stableMillis: 500, graceMillis: 1500), capture: true))
+
+    let outcome = await handlers.sendInput(params)
+
+    guard case .failed(.internal(let message)) = outcome else {
+      Issue.record("expected internal failure, got \(outcome)")
+      return
+    }
+    #expect(message.contains("nothing was sent"))
+    #expect(sink.delivered.isEmpty)
+  }
+
+  @Test
+  func lastSentLineIgnoresLineEndingsAndBlankLines() {
+    #expect(TerminalHandlers.lastSentLine("echo hi\r") == "echo hi")
+    #expect(TerminalHandlers.lastSentLine("cat <<E\nx\nE\n\n") == "E")
+    #expect(TerminalHandlers.lastSentLine(" \r") == nil)
+  }
+
   @Test
   func capturedOutputDropsTheEchoAndTheRedrawnPrompt() {
     let before = "old line\nrepo on main\n❯ "
