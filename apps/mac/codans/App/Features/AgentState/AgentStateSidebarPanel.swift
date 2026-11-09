@@ -18,7 +18,8 @@ import SwiftUI
 ///
 /// Layout (top → bottom):
 /// - Resize strip (16pt; capsule fades in on hover).
-/// - Title row: "Agents View" + optional `(N)` count chip when N > 4.
+/// - Title row: "Agents View" + optional `(N)` count chip when N > 4, and a
+///   trailing display-mode toggle button.
 /// - Divider.
 /// - Scrollable list of `AgentStateRowView`s ordered by
 ///   `SortedEntriesProvider`.
@@ -193,10 +194,32 @@ struct AgentStateSidebarPanel: View {
           .accessibilityHidden(true)
       }
       Spacer()
+      displayModeButton
     }
     .padding(.horizontal, 10)
     .padding(.top, 2)
     .padding(.bottom, 6)
+  }
+
+  /// Flips `agentsViewDisplayMode` without a trip to Settings. Sized to the
+  /// title's `.caption` line so the title row keeps its height.
+  private var displayModeButton: some View {
+    let toggle = AgentsViewDisplayModeToggle(current: displayMode)
+    return Button {
+      AgentsViewDisplayModeToggle.apply(to: settingsStore)
+    } label: {
+      Image(systemName: toggle.systemImage)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .buttonStyle(.borderless)
+    .help(toggle.label)
+    .accessibilityLabel(toggle.label)
+    .accessibilityIdentifier("agentState.sidebarPanel.displayModeToggle")
+  }
+
+  private var displayMode: AgentsViewDisplayMode {
+    settingsStore.settings.general.agentsViewDisplayMode
   }
 
   /// Rows in the coordinator's stable display order, dropping any id whose
@@ -262,7 +285,7 @@ struct AgentStateSidebarPanel: View {
               projectRemoteAuthority: resolved?.remoteHost?.displayAuthority,
               isSelected: item.paneID == focusedPaneID,
               isSleeping: registry.isSleeping(item.paneID),
-              displayMode: settingsStore.settings.general.agentsViewDisplayMode,
+              displayMode: displayMode,
               agentTitle: { registry.agentTitle(for: item.paneID) },
               hotkeyHint: hotkeyHint(forRowAt: offset + 1),
               onTap: { onTapRow(item.paneID) },
@@ -278,6 +301,9 @@ struct AgentStateSidebarPanel: View {
         // re-sort and from immediate membership changes alike; reduce-motion
         // users get the reorder with no animation.
         .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: order.orderedIDs)
+        // Row height change on a display-mode flip, from the title-row button
+        // or the Settings picker alike.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: displayMode)
       }
     }
   }
