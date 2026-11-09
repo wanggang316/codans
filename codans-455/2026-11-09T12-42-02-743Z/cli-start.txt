@@ -1,0 +1,11 @@
+ ▐▛███▛█   Claude Code v2.1.319
+▝▜██████▀  Opus 5.5 · Claude API
+ ▝▝   ▝▝   /private/tmp/c455-probe/proj
+❯ /codans-probe-455
+⏺ PROBE-MARKER-7F3A
+✻ Worked for 4s · done 8:24 PM
+❯ 
+  [Opus 5.5] │ proj +proj │ ⏱️  <1m
+  Context ░░░░░░░░░░ 4% │ Usage ███░░░░░░░ 32% (resets in 1h 6m) | Weekly █████░░░░░ 49% (resets in 3d 5h)
+  1 CLAUDE.md | 1 hooks
+  ⏵⏵ auto mode on (shift+tab to cycle)
