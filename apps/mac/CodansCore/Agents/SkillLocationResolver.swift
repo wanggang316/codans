@@ -128,6 +128,8 @@ public nonisolated enum SkillLocationResolver {
   /// is none. `exclusion` lists the project files a new worktree will not
   /// have; the plugin settings skip them, and so must the scan of the
   /// project directories (`SkillScanner.scan(_:precedence:excluding:)`).
+  /// An agent with a project trust check (Pi) gets project directories only
+  /// in a project it trusts.
   public static func directories(
     for profile: AgentProfile,
     projectStart: URL?,
@@ -136,14 +138,38 @@ public nonisolated enum SkillLocationResolver {
     stateDirectory: URL = AppDirectories.stateDirectory(),
     isRepositoryRoot: (URL) -> Bool = hasGitEntry
   ) -> [SkillDirectory] {
-    let project =
-      projectStart.map {
-        projectDirectories(for: profile, startDirectory: $0, isRepositoryRoot: isRepositoryRoot)
+    let project: [SkillDirectory] =
+      projectStart.map { start in
+        guard
+          trustsProject(
+            profile, start: start, startExists: exclusion == nil, userHome: userHome,
+            stateDirectory: stateDirectory)
+        else { return [] }
+        return projectDirectories(for: profile, startDirectory: start, isRepositoryRoot: isRepositoryRoot)
       } ?? []
     return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
         for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory,
         excluding: exclusion, isRepositoryRoot: isRepositoryRoot)
+  }
+
+  /// `true` when the agent of `profile` reads project skills in `start`.
+  /// `startExists` is `false` when `start` (the main checkout) stands in
+  /// for a new worktree, which is when `directories` gets an exclusion.
+  static func trustsProject(
+    _ profile: AgentProfile, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL
+  ) -> Bool {
+    switch profile.descriptor.skillLocation.projectTrust {
+    case nil: return true
+    case .pi:
+      guard
+        let agentDirectory = configRootDirectory(
+          for: profile, userHome: userHome, stateDirectory: stateDirectory)
+      else { return false }
+      return PiProjectTrust.trusts(
+        agentDirectory: agentDirectory, extraArguments: profile.extraArguments, start: start,
+        startExists: startExists)
+    }
   }
 
   /// The directory an agent launched in `project` starts in, from which it

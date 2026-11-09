@@ -67,6 +67,13 @@ public nonisolated enum SkillPluginSource: Equatable, Sendable, Hashable {
   case codex
 }
 
+/// A trust check that gates an agent's project-level skills.
+public nonisolated enum SkillProjectTrust: Equatable, Sendable, Hashable {
+  /// Pi: `--approve`, extensions, `trust.json`, `defaultProjectTrust`
+  /// (`PiProjectTrust`).
+  case pi
+}
+
 /// How far an agent searches for project-level skill directories.
 public nonisolated enum SkillProjectSearch: Equatable, Sendable, Hashable {
   /// The working directory and each parent up to the repository root.
@@ -98,6 +105,9 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
   /// Project-level skill directories. The resolver lists every directory
   /// of one searched project directory before the next one up.
   public let projectDirectories: [SkillProjectDirectory]
+  /// The agent reads `projectDirectories` only in a project it trusts.
+  /// `nil` when it reads them in every project.
+  public let projectTrust: SkillProjectTrust?
   /// Which source keeps a name that more than one source has, first wins.
   public let precedence: [AgentSkillSource]
   /// Plugins resolve under `configRoot`, so a source needs one.
@@ -109,6 +119,7 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
     userDirectories: [String] = [],
     configRoot: SkillConfigRoot? = nil,
     projectDirectories: [SkillProjectDirectory] = [],
+    projectTrust: SkillProjectTrust? = nil,
     precedence: [AgentSkillSource] = [.project, .user],
     plugins: SkillPluginSource? = nil,
     invocationStyle: SkillInvocationStyle = .none,
@@ -117,6 +128,7 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
     self.userDirectories = userDirectories
     self.configRoot = configRoot
     self.projectDirectories = projectDirectories
+    self.projectTrust = projectTrust
     self.precedence = precedence
     self.plugins = plugins
     self.invocationStyle = invocationStyle
@@ -166,7 +178,8 @@ extension SkillLocation {
   /// `.pi/skills` in the working directory and `.agents/skills` from there
   /// up to the repository root. The first skill found keeps a name:
   /// project before user. The probe showed that `/skill:name` runs at the
-  /// prompt start (Pi expands it) and in the middle (the model loads it).
+  /// prompt start (Pi expands it) and in the middle (the model loads it);
+  /// project skills only when Pi trusts the project.
   public static let pi = SkillLocation(
     userDirectories: [".pi/agent/skills", ".agents/skills"],
     configRoot: SkillConfigRoot(environmentVariable: "PI_CODING_AGENT_DIR", defaultDirectory: ".pi/agent"),
@@ -174,6 +187,7 @@ extension SkillLocation {
       SkillProjectDirectory(".pi/skills", search: .workingDirectoryOnly),
       SkillProjectDirectory(".agents/skills", search: .walkUpToRepositoryRoot),
     ],
+    projectTrust: .pi,
     precedence: [.project, .user],
     invocationStyle: .slashSkill,
     invocationPosition: .anywhere

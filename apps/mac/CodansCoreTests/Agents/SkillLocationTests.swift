@@ -257,7 +257,8 @@ struct SkillLocationTests {
 
   @Test
   func agentWithoutInvocationStyleHasNoProjectDirectories() {
-    #expect(Self.projectPaths(AgentProfile(kind: .gemini), from: "/code/repo", repositoryRoots: ["/code/repo"]).isEmpty)
+    #expect(
+      Self.projectPaths(AgentProfile(kind: .gemini), from: "/code/repo", repositoryRoots: ["/code/repo"]).isEmpty)
   }
 
   @Test
@@ -288,9 +289,11 @@ struct SkillLocationTests {
     try FileManager.default.createDirectory(
       at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
     try "---\nname: shared\ndescription: Shared.\n---\n".write(to: skill, atomically: true, encoding: .utf8)
-    for kind in [AgentKind.codex, .pi] {
+    // `--approve`: Pi reads project skills only in a trusted project.
+    for profile in [AgentProfile(kind: .codex), AgentProfile(kind: .pi, extraArguments: "--approve")] {
+      let kind = profile.kind
       let directories = SkillLocationResolver.directories(
-        for: AgentProfile(kind: kind), projectStart: repo,
+        for: profile, projectStart: repo,
         userHome: root.appending(path: "home"), stateDirectory: root.appending(path: "state"),
         isRepositoryRoot: { Self.path($0) == Self.path(repo) })
       #expect(SkillScanner.scanSync(directories).map(\.name) == ["shared"], "\(kind)")
