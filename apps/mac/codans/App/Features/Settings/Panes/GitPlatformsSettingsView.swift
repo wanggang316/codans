@@ -97,7 +97,8 @@ struct GitPlatformsSettingsView: View {
     }
   }
 
-  /// Asset name of the official mark of the Git Platform, a template image.
+  /// Asset name of the official mark of the Git Platform. The asset sets its rendering:
+  /// GitHub's one-color mark is a template image; GitLab's tanuki keeps its own colors.
   static func markImageName(_ kind: GitPlatformKind) -> String {
     switch kind {
     case .github: return "github-mark"
@@ -121,7 +122,6 @@ struct GitPlatformsSettingsView: View {
   private func platformRow(_ kind: GitPlatformKind) -> some View {
     HStack(alignment: .top, spacing: 10) {
       Image(Self.markImageName(kind))
-        .renderingMode(.template)
         .resizable()
         .scaledToFit()
         .frame(width: 24, height: 24)
