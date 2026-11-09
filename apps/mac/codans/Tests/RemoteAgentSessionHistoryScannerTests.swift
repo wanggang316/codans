@@ -96,7 +96,7 @@ struct RemoteAgentSessionHistoryScannerTests {
     // as a positional argument.
     let calls = await runner.calls
     #expect(calls.count == 3)
-    #expect(calls.allSatisfy { $0.arguments.contains(SSHCommand.sshExecutablePath) })
+    #expect(calls.allSatisfy { $0.arguments.contains(SSHCommand.guardShellName) })
     #expect(calls[1].arguments.last?.contains(#""cwd":"/srv/app""#) == true)
     #expect(calls[2].arguments.last?.contains(#""cwd":"/srv/app""#) == true)
   }
