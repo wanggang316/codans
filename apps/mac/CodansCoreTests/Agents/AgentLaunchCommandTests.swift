@@ -123,11 +123,6 @@ struct AgentLaunchCommandPromptTests {
     #expect(
       AgentLaunchCommand.render(profile: gemini, prompt: "it's go", stateDirectory: Self.stateRoot)
         == "gemini --model 'gemini-2.5-pro' -i 'it'\\''s go'")
-
-    let opencode = AgentProfile(kind: .opencode)
-    #expect(
-      AgentLaunchCommand.render(profile: opencode, prompt: "@review now", stateDirectory: Self.stateRoot)
-        == "opencode --prompt '@review now'")
   }
 
   @Test
@@ -135,8 +130,7 @@ struct AgentLaunchCommandPromptTests {
     let amp = AgentProfile(kind: .amp)
     #expect(AgentLaunchCommand.render(profile: amp, prompt: "x", stateDirectory: Self.stateRoot) == "amp")
     #expect(!AgentCatalog.descriptor(for: .amp).supportsInitialPrompt)
-    #expect(
-      AgentCatalog.handoffReceivers == [.claudeCode, .codex, .pi, .opencode, .gemini, .cursorAgent, .grok, .omp])
+    #expect(AgentCatalog.handoffReceivers == [.claudeCode, .codex, .pi, .gemini, .cursorAgent, .grok, .omp])
   }
 
   @Test

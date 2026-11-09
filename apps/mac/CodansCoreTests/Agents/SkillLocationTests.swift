@@ -18,7 +18,7 @@ struct SkillLocationTests {
   @Test
   func everyAgentKindHasOneEntryAndOnlyProbedAgentsCallSkills() {
     let enabled: [AgentKind: SkillLocation] = [
-      .claudeCode: .claudeCode, .codex: .codex, .pi: .pi, .opencode: .opencode,
+      .claudeCode: .claudeCode, .codex: .codex, .pi: .pi,
     ]
     for kind in AgentKind.allCases {
       let location = AgentCatalog.descriptor(for: kind).skillLocation
@@ -40,9 +40,7 @@ struct SkillLocationTests {
     #expect(SkillLocation.codex.invocationStyle == .dollar)
     #expect(SkillLocation.codex.invocationPosition == .anywhere)
     #expect(SkillLocation.pi.invocationStyle == .slashSkill)
-    #expect(SkillLocation.pi.invocationPosition == .leading)
-    #expect(SkillLocation.opencode.invocationStyle == .at)
-    #expect(SkillLocation.opencode.invocationPosition == .anywhere)
+    #expect(SkillLocation.pi.invocationPosition == .anywhere)
   }
 
   @Test
@@ -50,7 +48,6 @@ struct SkillLocationTests {
     #expect(SkillInvocationStyle.slash.token(for: "review") == "/review")
     #expect(SkillInvocationStyle.slashSkill.token(for: "review") == "/skill:review")
     #expect(SkillInvocationStyle.dollar.token(for: "docs:pdf") == "$docs:pdf")
-    #expect(SkillInvocationStyle.at.token(for: "review") == "@review")
     #expect(SkillInvocationStyle.none.token(for: "review") == nil)
   }
 
@@ -102,6 +99,7 @@ struct SkillLocationTests {
   @Test
   func agentWithoutInvocationStyleResolvesNothing() {
     #expect(Self.paths(AgentProfile(kind: .gemini)).isEmpty)
+    #expect(Self.paths(AgentProfile(kind: .opencode)).isEmpty)
   }
 
   @Test
@@ -116,14 +114,6 @@ struct SkillLocationTests {
     #expect(Self.paths(AgentProfile(kind: .pi)) == ["/Users/me/.pi/agent/skills", "/Users/me/.agents/skills"])
     let moved = AgentProfile(kind: .pi, envVars: ["PI_CODING_AGENT_DIR": "~/pi-work"])
     #expect(Self.paths(moved) == ["/Users/me/pi-work/skills", "/Users/me/.agents/skills"])
-  }
-
-  @Test
-  func openCodeReadsItsConfigAndTheClaudeAndSharedFolders() {
-    #expect(
-      Self.paths(AgentProfile(kind: .opencode)) == [
-        "/Users/me/.config/opencode/skills", "/Users/me/.claude/skills", "/Users/me/.agents/skills",
-      ])
   }
 
   // MARK: - Project directories
@@ -279,19 +269,6 @@ struct SkillLocationTests {
   }
 
   @Test
-  func openCodeWalksAllThreeFoldersUpToTheRepositoryRoot() {
-    #expect(
-      Self.projectPaths(AgentProfile(kind: .opencode), from: "/code/repo/apps", repositoryRoots: ["/code/repo"]) == [
-        "/code/repo/apps/.opencode/skills",
-        "/code/repo/apps/.claude/skills",
-        "/code/repo/apps/.agents/skills",
-        "/code/repo/.opencode/skills",
-        "/code/repo/.claude/skills",
-        "/code/repo/.agents/skills",
-      ])
-  }
-
-  @Test
   func sharedFolderSkillGoesToEveryAgentThatReadsIt() throws {
     let root = FileManager.default.temporaryDirectory
       .appending(path: "shared-skills-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -300,7 +277,7 @@ struct SkillLocationTests {
     try FileManager.default.createDirectory(
       at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
     try "---\nname: shared\ndescription: Shared.\n---\n".write(to: skill, atomically: true, encoding: .utf8)
-    for kind in [AgentKind.codex, .pi, .opencode] {
+    for kind in [AgentKind.codex, .pi] {
       let directories = SkillLocationResolver.directories(
         for: AgentProfile(kind: kind), projectStart: repo,
         userHome: root.appending(path: "home"), stateDirectory: root.appending(path: "state"),

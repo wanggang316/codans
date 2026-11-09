@@ -136,9 +136,9 @@ final class ComposerSkillCompletion {
   /// load later can still match the call being typed.
   private func refilter() {
     guard let query else { return }
-    // A call after other text runs only when the model calls the skill
-    // (Claude Code's Skill tool), so a skill the model may not call is
-    // offered only at the prompt start (ADR 0010).
+    // A call after other text runs only when the model loads the skill
+    // (Claude Code's Skill tool, Pi's model), so a skill the model may not
+    // call is offered only at the prompt start (ADR 0010).
     let callable = callIsAtPromptStart ? skills : skills.filter { !$0.disablesModelInvocation }
     // `/skill:` is part of the Pi call, not of the name to match.
     let marker = location.invocationStyle.marker

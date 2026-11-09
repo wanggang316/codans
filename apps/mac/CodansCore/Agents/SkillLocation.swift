@@ -12,8 +12,6 @@ public nonisolated enum SkillInvocationStyle: Equatable, Sendable, Hashable {
   case slashSkill
   /// `$name`, the Codex spelling.
   case dollar
-  /// `@name`, the OpenCode spelling.
-  case at
 
   /// Character that opens the completion list, or `nil` for `none`.
   public var prefix: Character? {
@@ -21,7 +19,6 @@ public nonisolated enum SkillInvocationStyle: Equatable, Sendable, Hashable {
     case .none: return nil
     case .slash, .slashSkill: return "/"
     case .dollar: return "$"
-    case .at: return "@"
     }
   }
 
@@ -165,11 +162,11 @@ extension SkillLocation {
   )
 
   /// Pi reads `~/.pi/agent/skills` (`PI_CODING_AGENT_DIR` replaces
-  /// `~/.pi/agent`) and `~/.agents/skills`; in a project `.pi/skills` in
-  /// the working directory and `.agents/skills` from there up to the
-  /// repository root. The first skill found keeps a name: project before
-  /// user. The probe showed that `/skill:name` runs only at the prompt
-  /// start: in the middle the model does not load the skill.
+  /// `~/.pi/agent`) and `~/.agents/skills`; in a trusted project
+  /// `.pi/skills` in the working directory and `.agents/skills` from there
+  /// up to the repository root. The first skill found keeps a name:
+  /// project before user. The probe showed that `/skill:name` runs at the
+  /// prompt start (Pi expands it) and in the middle (the model loads it).
   public static let pi = SkillLocation(
     userDirectories: [".pi/agent/skills", ".agents/skills"],
     configRoot: SkillConfigRoot(environmentVariable: "PI_CODING_AGENT_DIR", defaultDirectory: ".pi/agent"),
@@ -179,23 +176,6 @@ extension SkillLocation {
     ],
     precedence: [.project, .user],
     invocationStyle: .slashSkill,
-    invocationPosition: .leading
-  )
-
-  /// OpenCode reads `~/.config/opencode/skills`, `~/.claude/skills`, and
-  /// `~/.agents/skills`, and the `.opencode`, `.claude`, and `.agents`
-  /// skill directories from the working directory up to the repository
-  /// root. The probe showed that the model loads an `@name` skill at the
-  /// prompt start and in the middle.
-  public static let opencode = SkillLocation(
-    userDirectories: [".config/opencode/skills", ".claude/skills", ".agents/skills"],
-    projectDirectories: [
-      SkillProjectDirectory(".opencode/skills", search: .walkUpToRepositoryRoot),
-      SkillProjectDirectory(".claude/skills", search: .walkUpToRepositoryRoot),
-      SkillProjectDirectory(".agents/skills", search: .walkUpToRepositoryRoot),
-    ],
-    precedence: [.project, .user],
-    invocationStyle: .at,
     invocationPosition: .anywhere
   )
 }

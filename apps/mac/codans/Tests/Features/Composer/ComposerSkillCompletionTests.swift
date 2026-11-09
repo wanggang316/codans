@@ -70,7 +70,6 @@ struct ComposerSkillCompletionTests {
   func eachStyleOpensOnItsPrefixAndInsertsItsToken() {
     let cases: [(SkillLocation, String, String)] = [
       (.codex, "$no", "$note "),
-      (.opencode, "@no", "@note "),
       (.pi, "/no", "/skill:note "),
     ]
     for (location, typed, inserted) in cases {
