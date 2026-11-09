@@ -1,0 +1,67 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                    Update Available                                     esc
+
+                                                                    A new release v1.19.5 is available. Would you like to
+                                                                    update now?
+
+
+                                                                                                              Skip  Confirm
+
+
+                                                                                                              ▄
+                                                                             █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+                                                                             █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+                                                                             ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+
+                                                           ┃
+                                                           ┃  Ask anything... "What is the tech stack of this project?"
+                                                           ┃
+                                                           ┃  Build · GLM-5.3 Zhipu AI Coding Plan
+                                                           ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                           tab agents  ctrl+p commands
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  /private/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-2c821e7f/fixture:feat/header-redesign                                                                1.18.15
+

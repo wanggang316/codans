@@ -1,0 +1,40 @@
+env GEMINI_API_KEY='<REDACTED>' GEMINI_CLI_TRUST_WORKSPACE='true' HOME='/Users/wanggang/dev/data/gemini-home-459' PATH='/Users/wanggang/dev/data/gemini-cli-459/nod
+e_modules/.bin:/opt/homebrew/bin:/usr/bin:/bin:/Users/wanggang/.nvm/versions/node/v24.3.0/bin' gemini -i '/codans-probe-459'
+Last login: Tue Nov 10 00:51:10 on ttys008
+
+fixture on  feat/header-redesign on 
+❯ env GEMINI_API_KEY='<REDACTED>' GEMINI_CLI_TRUST_WORKSPACE='true' HOME='/Users/wanggang/dev/data/gemini-home-459' PATH='/Users/wanggang/dev/data/gemini-cli-459/n
+ode_modules/.bin:/opt/homebrew/bin:/usr/bin:/bin:/Users/wanggang/.nvm/versions/node/v24.3.0/bin' gemini -i '/codans-probe-459'
+
+ ▝▜▄     Gemini CLI v0.67.0
+   ▝▜▄
+  ▗▟▀    Authenticated with gemini-api-key /auth
+ ▝▀
+
+
+Tips for getting started:
+1. Create GEMINI.md files to customize your interactions
+2. /help for more information
+3. Ask coding questions, edit code or run commands
+4. Be specific for the best results
+
+> /codans-probe-459
+
+✕ [API Error: {"error":{"message":"{\n  \"error\": {\n    \"code\": 403,\n    \"message\": \"Permission denied: Consumer 'projects/201451606477' has been suspended.\",\n    \"status\":
+  \"PERMISSION_DENIED\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"CONSUMER_SUSPENDED\",\n        \"domain\":
+  \"googleapis.com\",\n        \"metadata\": {\n          \"containerInfo\": \"projects/201451606477\",\n          \"consumer\": \"projects/201451606477\",\n          \"service\":
+  \"generativelanguage.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n
+  \"message\": \"Permission denied: Consumer 'projects/201451606477' has been suspended.\"\n      }\n    ]\n  }\n}\n","code":403,"status":"Forbidden"}}]
+
+
+ℹ This request failed. Press F12 for diagnostics, or run /settings and change "Error Verbosity" to full for full details.
+
+
+                                                                                                                                                                                ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Shift+Tab to accept edits                                                                                                                                                              1 skill
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ >   Type your message or @path/to/file
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ workspace (/directory)                                                                                             branch                                  sandbox                      /model
+ /private/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-2c821e7f/fixture                   feat/header-redesign                    no sandbox                     Auto
