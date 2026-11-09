@@ -18,6 +18,14 @@ struct ProjectFileExclusionTests {
     #expect(excludes("/tmp/repo/scratch/a/SKILL.md"))
   }
 
+  /// Git lists a symlink as a file, without `/`, also when it points to a
+  /// directory. The files reached through it go with it.
+  @Test
+  func filesThroughAListedSymlinkAreExcluded() {
+    #expect(excludes("/tmp/repo/.claude/skills/linked/SKILL.md", paths: [".claude/skills/linked"]))
+    #expect(!excludes("/tmp/repo/.claude/skills/linked2/SKILL.md", paths: [".claude/skills/linked"]))
+  }
+
   @Test
   func otherFilesAreKept() {
     #expect(!excludes("/tmp/repo/.claude/settings.json"))

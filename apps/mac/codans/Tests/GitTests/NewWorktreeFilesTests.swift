@@ -128,6 +128,19 @@ struct NewWorktreeFilesTests {
     #expect(await names(copyIgnored: false, copyUntracked: false) == [])
   }
 
+  /// An untracked symlink to a skill folder is one file to git. The new
+  /// worktree gets it, and the skill through it, only with Copy untracked.
+  @Test
+  func skillThroughAnUntrackedSymlinkCountsOnlyWhenUntrackedFilesAreCopied() async throws {
+    try await fixture(local: "{}")
+    let source = home.appending(path: "skill-source", directoryHint: .isDirectory)
+    try skill("linked", in: source)
+    try FileManager.default.createSymbolicLink(
+      at: repo.appending(path: ".claude/skills/linked"), withDestinationURL: source.appending(path: "linked"))
+    #expect(!(await names(copyIgnored: true, copyUntracked: false)).contains("linked"))
+    #expect(await names(copyIgnored: false, copyUntracked: true).contains("linked"))
+  }
+
   /// A tracked settings file is in every new worktree. Here the local file
   /// turns the tracked plugin off, which counts only when it is copied.
   @Test
