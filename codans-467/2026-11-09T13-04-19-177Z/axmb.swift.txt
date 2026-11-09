@@ -1,0 +1,29 @@
+import ApplicationServices
+import Foundation
+// Prints role, AXTitle, AXDescription, AXValue for every AXMenuButton and AXPopUpButton in the app's windows.
+let pid = pid_t(CommandLine.arguments[1])!
+let app = AXUIElementCreateApplication(pid)
+func attr(_ e: AXUIElement, _ n: String) -> String? {
+  var v: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(e, n as CFString, &v) == .success, let v else { return nil }
+  if let s = v as? String { return s }
+  return "\(v)"
+}
+func kids(_ e: AXUIElement) -> [AXUIElement] {
+  var v: CFTypeRef?
+  guard AXUIElementCopyAttributeValue(e, kAXChildrenAttribute as CFString, &v) == .success else { return [] }
+  return (v as? [AXUIElement]) ?? []
+}
+func walk(_ e: AXUIElement, _ d: Int) {
+  if d > 80 { return }
+  let role = attr(e, kAXRoleAttribute) ?? ""
+  if role == "AXMenuButton" || role == "AXPopUpButton", attr(e, kAXSubroleAttribute) != "AXSegment" {
+    let t = attr(e, kAXTitleAttribute) ?? "nil", ds = attr(e, kAXDescriptionAttribute) ?? "nil"
+    let v = attr(e, kAXValueAttribute) ?? "nil", id = attr(e, "AXIdentifier") ?? ""
+    print("\(role) title=\"\(t)\" description=\"\(ds)\" value=\"\(v)\" id=\"\(id)\"")
+  }
+  kids(e).forEach { walk($0, d + 1) }
+}
+var w: CFTypeRef?
+AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &w)
+for win in (w as? [AXUIElement]) ?? [] { walk(win, 0) }

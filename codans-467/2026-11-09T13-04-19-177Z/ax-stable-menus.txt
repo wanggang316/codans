@@ -1,0 +1,30 @@
+codans-467 AX audit: menus that stay stable (base c17f2e95, isolated Debug instance)
+Probe: axmb (AXTitle | AXDescription | AXValue of each AXMenuButton / AXPopUpButton)
+
+== Open in split button (toolbar), before a pick
+AXPopUpButton title="nil" description="Open in Cursor" value="nil"
+== picked Open in > Finder (persists the per-project default)
+AXPopUpButton title="nil" description="Open in Finder" value="nil"
+-> label follows the action on purpose ("Open in <editor>"); not a selector, no drift
+
+== Help (sidebar footer), before and after open + cancel
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+-> label already on the label content; static content
+
+== Add Project (sidebar toolbar), every state
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+-> no explicit label; the visible Label text is static
+
+== Branch actions (branch popover row, hover menu)
+before:              AXMenuButton "Branch actions" "More" #branch_switcher.branch_row.menu_button
+after open + cancel: AXMenuButton "Branch actions" "More" #branch_switcher.branch_row.menu_button
+after Switch:        branch = bugfix/menu (codans-dev tree), row menu label unchanged until the popover closed
+-> static, hidden glyph label content
+
+== Agents settings pane, Add profile chevron
+AXMenuButton title="Add profile for a specific agent" description="nil" value="nil"
+-> label already on the label content (static chevron); a pick navigates to the new profile's detail
+
+== Workflow group (HeaderWorkflowGroup), not mounted on main (WorktreeDetailView.swift workflowSlot is unused)
+== AgentState row "Run Workflow": a submenu inside .contextMenu (NSMenuItem), no accessibility label

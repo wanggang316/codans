@@ -1,0 +1,21 @@
+build after (c17f2e95 + fix, committed as bac3533b)
+== command queue open
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Cursor" value="nil" id=""
+AXMenuButton title="Send timing" description="nil" value="After task" id=""
+== picked Send timing > Send now
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Cursor" value="nil" id=""
+AXMenuButton title="Send timing" description="nil" value="Send now" id=""
+== picked Send timing > Schedule
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Cursor" value="nil" id=""
+AXMenuButton title="Send timing" description="nil" value="Schedule" id=""
+== picked Send timing > After task
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Cursor" value="nil" id=""
+AXMenuButton title="Send timing" description="nil" value="After task" id=""

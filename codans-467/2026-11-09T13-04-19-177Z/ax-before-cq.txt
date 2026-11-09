@@ -1,0 +1,21 @@
+build before (c17f2e95)
+== command queue open
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Finder" value="nil" id=""
+AXMenuButton title="Send timing" description="Arrow turning down then right" value="nil" id=""
+== picked Send timing > Send now
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Finder" value="nil" id=""
+AXMenuButton title="Send timing" description="send" value="nil" id=""
+== picked Send timing > Schedule
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Finder" value="nil" id=""
+AXMenuButton title="Send timing" description="clock" value="nil" id=""
+== picked Send timing > After task
+AXMenuButton title="Help" description="nil" value="nil" id="sidebar.helpMenu"
+AXMenuButton title="Add Project" description="Add Project" value="nil" id="plus"
+AXPopUpButton title="nil" description="Open in Finder" value="nil" id=""
+AXMenuButton title="Send timing" description="Arrow turning down then right" value="nil" id=""

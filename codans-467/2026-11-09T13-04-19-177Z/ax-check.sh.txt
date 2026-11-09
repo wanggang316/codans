@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# AX check for codans-467: menus' AX title/description/value before and after picks.
+# Usage: ax-check.sh <label>   (run from the repo root with an instance launched by sv_launch)
+set -u
+. .claude/skills/self-verify/scripts/helpers.sh
+pid="$(sv_pid)"
+ax() { echo "== $1"; /tmp/codans-467-tools/axmb "$pid" | grep -vE 'title="nil" description="nil"'; }
+read -r project worktree tab pane < "$SELF_VERIFY_DIR/ids"
+echo "build $1 ($(git rev-parse --short HEAD))"
+codans_debug pane focus "$pane" >/dev/null
+if ! sv_find AXMenuButton "Send timing" >/dev/null 2>&1; then
+  sv_menu Tab "Command Queue…" >/dev/null; sv_wait AXMenuButton "Send timing" --timeout 3000 >/dev/null
+fi
+ax "command queue open"
+for mode in "Send now" "Schedule" "After task"; do
+  sv_press AXMenuButton "Send timing" >/dev/null 2>&1
+  sv_wait AXMenuItem "$mode" --timeout 3000 >/dev/null
+  sv_press AXMenuItem "$mode" >/dev/null
+  sv_wait AXMenuItem "$mode" --gone --timeout 3000 >/dev/null
+  sleep 0.5
+  ax "picked Send timing > $mode"
+done
