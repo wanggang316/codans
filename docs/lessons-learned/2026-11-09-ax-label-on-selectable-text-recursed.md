@@ -72,10 +72,10 @@ text. All other labels on the pane are unchanged.
 ## Recurrence checks
 
 - Do not put accessibility modifiers (`.accessibilityLabel`,
-  `.accessibilityElement`, `.accessibilityValue`, ...) on a view that has
-  `.textSelection(.enabled)`. Put them on a container.
-  `grep -rn -A4 'textSelection(.enabled)' apps/mac/codans | grep accessibility`
-  must print nothing.
+  `.accessibilityElement`, `.accessibilityValue`, ...) in the same modifier
+  chain as `.textSelection(.enabled)`. Put them on a container. To find
+  candidates, run `grep -rn 'textSelection(.enabled)' apps/mac/codans` and
+  read each modifier chain.
 - To check a pane, walk its full AX tree on an isolated Debug instance
   (`sv_tree` in the self-verify skill), wait a few seconds, then confirm
   that the instance is still alive and that no new
