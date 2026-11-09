@@ -18,8 +18,10 @@ struct SkillScannerTests {
     try text.write(to: url.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
   }
 
-  private func directory(_ name: String = "skills") -> SkillDirectory {
-    SkillDirectory(url: root.appending(path: name, directoryHint: .isDirectory), source: .user)
+  private func directory(
+    _ name: String = "skills", source: AgentSkillSource = .user
+  ) -> SkillDirectory {
+    SkillDirectory(url: root.appending(path: name, directoryHint: .isDirectory), source: source)
   }
 
   @Test
@@ -86,5 +88,32 @@ struct SkillScannerTests {
     try write("dup", in: "b", "---\nname: dup\ndescription: from b\n---\n")
     let entries = await SkillScanner.scan([directory("a"), directory("b")])
     #expect(entries.map(\.summary) == ["from a"])
+  }
+
+  @Test
+  func precedenceKeepsOneEntryForANameInProjectAndUserFolders() async throws {
+    try write("dup", in: "project", "---\nname: dup\ndescription: from project\n---\n")
+    try write("dup", in: "user", "---\nname: dup\ndescription: from user\n---\n")
+    try write("only", in: "project", "---\nname: only\n---\n")
+    let directories = [directory("project", source: .project), directory("user", source: .user)]
+
+    let userFirst = await SkillScanner.scan(directories, precedence: [.user, .project])
+    #expect(userFirst.map(\.name) == ["dup", "only"])
+    #expect(userFirst.map(\.source) == [.user, .project])
+    #expect(userFirst.first?.summary == "from user")
+
+    let projectFirst = await SkillScanner.scan(directories, precedence: [.project, .user])
+    #expect(projectFirst.map(\.source) == [.project, .project])
+    #expect(projectFirst.first?.summary == "from project")
+  }
+
+  @Test
+  func claudeCodePrecedenceKeepsTheUserSkill() async throws {
+    try write("dup", in: "project", "---\nname: dup\n---\n")
+    try write("dup", in: "user", "---\nname: dup\n---\n")
+    let entries = await SkillScanner.scan(
+      [directory("project", source: .project), directory("user", source: .user)],
+      precedence: SkillLocation.claudeCode.precedence)
+    #expect(entries.map(\.source) == [.user])
   }
 }

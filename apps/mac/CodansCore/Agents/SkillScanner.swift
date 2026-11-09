@@ -24,18 +24,27 @@ public nonisolated struct AgentSkillEntry: Equatable, Sendable, Hashable, Identi
 
 /// Reads the `*/SKILL.md` files in skill directories.
 public nonisolated enum SkillScanner {
-  /// Scans `directories` in order, off the caller's actor. A missing
-  /// directory contributes nothing. For one name the first directory wins,
-  /// and the result is sorted by name.
+  /// Scans `directories` off the caller's actor. A missing directory
+  /// contributes nothing. For one name the source that comes first in
+  /// `precedence` wins, then the earlier directory; a source not in
+  /// `precedence` comes last. The result is sorted by name.
   @concurrent
-  public static func scan(_ directories: [SkillDirectory]) async -> [AgentSkillEntry] {
-    scanSync(directories)
+  public static func scan(
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+  ) async -> [AgentSkillEntry] {
+    scanSync(directories, precedence: precedence)
   }
 
-  static func scanSync(_ directories: [SkillDirectory]) -> [AgentSkillEntry] {
+  static func scanSync(
+    _ directories: [SkillDirectory], precedence: [AgentSkillSource] = []
+  ) -> [AgentSkillEntry] {
+    let rank = { (source: AgentSkillSource) in precedence.firstIndex(of: source) ?? precedence.count }
+    let ordered = directories.enumerated()
+      .sorted { (rank($0.element.source), $0.offset) < (rank($1.element.source), $1.offset) }
+      .map(\.element)
     var seen = Set<String>()
     var entries: [AgentSkillEntry] = []
-    for directory in directories {
+    for directory in ordered {
       for entry in skills(in: directory) where seen.insert(entry.name).inserted {
         entries.append(entry)
       }
