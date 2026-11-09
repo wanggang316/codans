@@ -16,6 +16,7 @@ struct NewAgentView: View {
   @FocusState private var focus: Field?
   @State private var showsFilePicker = false
   @State private var promptSelection = ComposerSelection()
+  @State private var skillCompletion = ComposerSkillCompletion()
 
   private enum Field: Hashable {
     case branchName
@@ -52,6 +53,12 @@ struct NewAgentView: View {
     // Settings edits and CLI installs change what the agent menu offers;
     // the profile list doubles as the task identity.
     .task(id: profiles) { store.send(.agentProfilesChanged(profiles)) }
+    .onChange(of: store.skillLocation, initial: true) { _, location in
+      skillCompletion.location = location
+    }
+    .onChange(of: store.skills, initial: true) { _, skills in
+      skillCompletion.skills = skills
+    }
     .onExitCommand { store.send(.cancelTapped) }
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
       promptSelection.insertPaths(urls, into: store.prompt) { store.send(.filesSelected(urls, selection: $0)) }
@@ -250,6 +257,11 @@ struct NewAgentView: View {
     Section {
       VStack(alignment: .leading, spacing: 4) {
         editor
+        if skillCompletion.isOpen {
+          ComposerSkillCompletionList(
+            completion: skillCompletion, text: store.prompt, selection: promptSelection
+          ) { store.send(.promptChanged($0)) }
+        }
         HStack(spacing: 8) {
           ComposerFilePickerButton { showsFilePicker = true }
           Spacer()
@@ -275,6 +287,11 @@ struct NewAgentView: View {
 
   private var editor: some View {
     ComposerTextEditor(text: $store.prompt.sending(\.promptChanged), selection: promptSelection)
+      // Innermost, so an open skill list takes Return, Tab, the arrows,
+      // and Escape before the handlers below send or close the dialog.
+      .composerSkillCompletion(skillCompletion, text: store.prompt, selection: promptSelection) {
+        store.send(.promptChanged($0))
+      }
       .font(.body)
       .scrollContentBackground(.hidden)
       .focusEffectDisabled()

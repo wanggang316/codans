@@ -36,6 +36,14 @@ final class ComposerSelection {
     moveCaret(toUTF16Offset: result.selection.upperBound, in: result.text)
   }
 
+  /// The caret in `text` as a UTF-16 offset, or `nil` when the editor
+  /// reports none or a range is selected. Read it after the text changed,
+  /// so both describe the same string.
+  func caret(in text: String) -> Int? {
+    guard let range = utf16Range(in: text), range.isEmpty else { return nil }
+    return range.lowerBound
+  }
+
   private func utf16Range(in text: String) -> Range<Int>? {
     guard #available(macOS 15, *), let selection = textSelection else { return nil }
     let range: Range<String.Index>?
@@ -52,7 +60,7 @@ final class ComposerSelection {
     return lower..<upper
   }
 
-  private func moveCaret(toUTF16Offset offset: Int, in text: String) {
+  func moveCaret(toUTF16Offset offset: Int, in text: String) {
     guard #available(macOS 15, *) else { return }
     let utf16 = text.utf16
     let index = utf16.index(utf16.startIndex, offsetBy: min(max(offset, 0), utf16.count))
