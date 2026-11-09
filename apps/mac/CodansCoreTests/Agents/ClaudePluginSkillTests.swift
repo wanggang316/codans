@@ -256,6 +256,7 @@ struct ClaudePluginSkillTests {
     #expect(read("--settings /etc/claude.json") == .file(URL(fileURLWithPath: "/etc/claude.json")))
     #expect(read("--settings=/etc/claude.json") == .file(URL(fileURLWithPath: "/etc/claude.json")))
     #expect(read("--settings ~/c.json") == .file(URL(fileURLWithPath: "/Users/me/c.json")))
+    #expect(read("--settings=~/c.json") == .unknown)
     #expect(
       read("--settings conf/c.json")
         == .file(project.appending(path: "conf/c.json").standardizedFileURL))
@@ -274,6 +275,35 @@ struct ClaudePluginSkillTests {
       let profile = AgentProfile(kind: .claudeCode, extraArguments: arguments)
       #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(arguments)")
     }
+  }
+
+  /// The shell, not codans, splits the fragment. A control operator or
+  /// other shell syntax anywhere near a settings flag changes what Claude
+  /// Code gets (`/a.json;` passes `/a.json`; `x; --settings …` passes the
+  /// flag to another command), so such a profile gets no plugin skills.
+  @Test
+  func shellSyntaxNearSettingsFlagsOffersNoPluginSkills() throws {
+    try fixture(root: home.appending(path: ".claude"))
+    let flagFile = home.appending(path: "flags.json")
+    try enable(#""off@market": true"#, in: flagFile)
+    let path = flagFile.path(percentEncoded: false)
+    let fragments = [
+      "--settings=\(path);", "--settings \(path);", "--settings \(path)&", "--settings \(path)|cat",
+      "--settings \(path)>out", "--settings <\(path)", "--settings \(path)#x", "--settings \(path)!",
+      "--settings \(path)[1]", "--verbose; --settings \(path)", "--verbose && --settings=\(path)",
+      "x;--settings=\(path)", "--settings \(path) | tee log",
+    ]
+    for fragment in fragments {
+      #expect(
+        ClaudePluginRegistry.launchSettings(
+          extraArguments: fragment, projectDirectory: project, userHome: home) == .unknown,
+        "\(fragment)")
+      let profile = AgentProfile(kind: .claudeCode, extraArguments: fragment)
+      #expect(scan(profile, in: project).map(\.name) == ["mine"], "\(fragment)")
+    }
+    // Shell syntax with no settings flag leaves plugins as they are.
+    let plain = AgentProfile(kind: .claudeCode, extraArguments: "--verbose 2>/dev/null")
+    #expect(scan(plain, in: project).map(\.name) == ["docs:pdf", "mine", "pro:design"])
   }
 
   @Test

@@ -16,9 +16,10 @@ nonisolated enum ClaudePluginRegistry {
     case none
     /// `--settings <file>`: one more settings layer.
     case file(URL)
-    /// A flag whose effect codans cannot read: inline JSON, a quoted or
-    /// shell-expanded value, a repeated flag, `--setting-sources`, or
-    /// `--plugin-dir`. Then no plugin skill is offered (ADR 0010).
+    /// A flag whose effect codans cannot read: shell syntax in the fragment
+    /// (inline JSON, quotes, expansions, control operators, redirections), a
+    /// repeated flag, `--setting-sources`, or `--plugin-dir`. Then no plugin
+    /// skill is offered (ADR 0010).
     case unknown
   }
 
@@ -26,9 +27,19 @@ nonisolated enum ClaudePluginRegistry {
   /// fragment that the launch command appends as it is. `~` expands against
   /// `userHome` (the shell does it, before `env` sets the agent's `HOME`);
   /// a relative path against the directory the agent starts in.
+  ///
+  /// The shell splits the fragment, so codans reads it only when the shell
+  /// would pass each word as it is: plain words and blanks. Any other
+  /// character (`;`, `&`, `|`, `<`, `>`, quotes, `$`, globs, `#`, a line
+  /// break) can change which words reach Claude Code, or whether the flag
+  /// reaches it at all.
   static func launchSettings(
     extraArguments: String, projectDirectory: URL?, userHome: URL
   ) -> LaunchSettings {
+    guard extraArguments.contains("--setting") || extraArguments.contains("--plugin-dir") else {
+      return .none
+    }
+    guard extraArguments.allSatisfy(isPlainShellCharacter) else { return .unknown }
     let tokens = extraArguments.split(whereSeparator: \.isWhitespace).map(String.init)
     var values: [String?] = []
     for (index, token) in tokens.enumerated() {
@@ -40,13 +51,13 @@ nonisolated enum ClaudePluginRegistry {
       if token == "--settings" {
         values.append(index + 1 < tokens.count ? tokens[index + 1] : nil)
       } else if token.hasPrefix("--settings=") {
-        values.append(String(token.dropFirst("--settings=".count)))
+        // Whether `~` after `=` expands depends on the shell and its options.
+        let value = String(token.dropFirst("--settings=".count))
+        values.append(value.hasPrefix("~") ? nil : value)
       }
     }
     guard !values.isEmpty else { return .none }
-    guard values.count == 1, let value = values[0], !value.isEmpty,
-      !value.contains(where: { "\"'\\$`{}()*?".contains($0) })
-    else { return .unknown }
+    guard values.count == 1, let value = values[0], !value.isEmpty else { return .unknown }
     if value.hasPrefix("/") { return .file(URL(fileURLWithPath: value).standardizedFileURL) }
     if value.hasPrefix("~/") {
       return .file(userHome.appending(path: String(value.dropFirst(2))).standardizedFileURL)
@@ -54,6 +65,13 @@ nonisolated enum ClaudePluginRegistry {
     if value.hasPrefix("~") { return .unknown }
     guard let projectDirectory else { return .unknown }
     return .file(projectDirectory.appending(path: value).standardizedFileURL)
+  }
+
+  /// A character the shell keeps as it is inside a word, or a blank between
+  /// words. `~` matters only at the start of a word and is handled there.
+  private static func isPlainShellCharacter(_ character: Character) -> Bool {
+    character.isLetter || character.isNumber || character == " " || character == "\t"
+      || "/._-+,@:%=~".contains(character)
   }
 
   /// The settings files that can set `enabledPlugins`, lowest precedence

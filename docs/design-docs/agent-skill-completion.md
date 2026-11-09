@@ -93,7 +93,7 @@ struct SkillLocation {
   - Config root 与用户级目录同一规则：有效 HOME 下的 `.claude`，或 `CLAUDE_CONFIG_DIR` 的值（相对路径时不列插件）。
   - 插件清单 `.claude-plugin/plugin.json` 的 `skills` 字段声明了路径时，扫 `skills/` 与声明的路径（路径本身含 `SKILL.md` 则为单个 Skill），不再整体扫 `.claude/skills`：Claude Code 只加载声明的 Skill（例：ui-ux-pro-max 2.5.0 的 `.claude/skills` 有 7 个 Skill，只声明 1 个）。离开 install path 的路径丢弃。
   - 注册表 key 为 `<plugin>@<marketplace>`，`<plugin>` 取 `@` 之前部分。`installPath` 只接受绝对路径或 `~/` 开头的路径。
-  - 额外参数是原样拼接的 shell 片段。只解析未加引号的 `--settings <path>`（绝对路径、`~/`、或相对项目起点）；内联 JSON、带引号或变量的值、重复的 `--settings`、`--setting-sources`、`--plugin-dir` 读不准，此时不列插件 Skill（ADR 0010）。
+  - 额外参数是原样拼接的 shell 片段。含 `--setting` 或 `--plugin-dir` 时，整个片段只由普通字符（字母、数字、`/._-+,@:%=~`）和空格组成才解析，否则 shell 可能改变传给 Claude Code 的参数（`;`、`&`、`|`、重定向、引号、`$`、通配符、`#`、换行）。只解析 `--settings <path>`（绝对路径、`~/`、或相对项目起点）与 `--settings=<path>`（不含 `~`）；读不准时（含上述 shell 语法、重复的 `--settings`、`--setting-sources`、`--plugin-dir`）不列插件 Skill（ADR 0010）。
   - 项目起点见"目录解析"。切换目标（分支）会改变起点，因此重新扫描。
   - 注册表缺失、不是 JSON、结构不符时，不列插件 Skill；某个 settings 文件缺失或无法解析时跳过该文件（Claude Code 也忽略无效的 settings 文件）。用户级与项目级 Skill 不受影响。
   - 列表行的来源标记为 Plugin，插入 `/<plugin>:<skill> `。
