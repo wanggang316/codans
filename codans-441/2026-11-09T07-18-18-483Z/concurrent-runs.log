@@ -1,0 +1,65 @@
+# Scenario 1: two concurrent `harness.sh <app> all` runs, default settings (started 15:13:55, done 15:14:56)
+--- live instances during the overlap (15 s after start)
+28711 .../Debug/Codans.app/Contents/MacOS/Codans
+28712 .../Debug/Codans.app/Contents/MacOS/Codans
+/tmp/cdv-rg-501-77f27802.sock
+/tmp/cdv-rg-501-d5a673c6.sock
+/tmp/cdv-rg-cache-501-77f27802
+/tmp/cdv-rg-cache-501-d5a673c6
+/tmp/cdv-rg-501-77f27802.sock held by 28712
+/tmp/cdv-rg-501-d5a673c6.sock held by 28711
+run A exit=0
+run B exit=0
+after both: no /tmp/cdv-rg-* left
+--- run-a.log (summary lines)
+launched test app pid=28711
+quit test app
+PASS=290 FAIL=1  (results: /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-cli-regression.YgnmFyCkhm/results.tsv)
+--- run-b.log (summary lines)
+launched test app pid=28712
+quit test app
+PASS=291 FAIL=0  (results: /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-cli-regression.fExoZALYoD/results.tsv)
+run A S33b FAIL: 'pane send --capture' text mode printed nothing (timing under load; passes in the other 3 runs)
+
+# Scenario 2: B kept running with a zmx pane while A runs 'all' and quits
+== B setup (kept running), work dir /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-cli-regression.ooDqLEKiuc
+socket=/tmp/cdv-rg-501-49841508.sock
+cache=/tmp/cdv-rg-cache-501-49841508
+launched test app pid=65214
+{"id":"7AC75B94-07AC-4D96-A7C6-EF6404CE603D"}
+[{"id":"50F46807-5ED6-4D15-B102-48C235FB5B3A","branch":"feat/header-redesign"}]
+{"id":"8721E6A6-B364-42AA-82C3-7A2DD17F35EF","name":""}
+B pid=65214 socket=/tmp/cdv-rg-501-49841508.sock cache=/tmp/cdv-rg-cache-501-49841508 zmx daemons=[]
+bfs: error: /tmp/cdv-rg-cache-501-49841508: No such file or directory.
+B pane=2A46D921-C0E0-4C40-BD1F-ADB83FCBB6C3
+{"completed":true}
+B zmx sockets:
+/tmp/cdv-rg-cache-501-49841508/run/2A46D921-C0E0-4C40-BD1F-ADB83FCBB6C3
+B cache holders:
+66132 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-apvisawlfrumvqhjffdlofdzvfse/Build/Products/Debug/Codans.app/Contents/Resources/bin/zmx
+66136 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-apvisawlfrumvqhjffdlofdzvfse/Build/Products/Debug/Codans.app/Contents/Resources/bin/zmx
+== A all (default work dir) while B runs
+A exit=0
+launched test app pid=66687
+quit test app
+PASS=291 FAIL=0  (results: /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-cli-regression.kRBHrCsy31/results.tsv)
+A socket/cache after A quit:
+/tmp/cdv-rg-501-49841508.sock
+/tmp/cdv-rg-cache-501-49841508
+== B after A quit
+65214 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-apvisawlfrumvqhjffdlofdzvfse/Build/Products/Debug/Codans.app/Contents/MacOS/Codans
+B socket holders: 65214 
+{"uptimeSeconds":89.11433100700378}
+66132 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-apvisawlfrumvqhjffdlofdzvfse/Build/Products/Debug/Codans.app/Contents/Resources/bin/zmx
+66136 /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-apvisawlfrumvqhjffdlofdzvfse/Build/Products/Debug/Codans.app/Contents/Resources/bin/zmx
+/tmp/cdv-rg-cache-501-49841508/run/2A46D921-C0E0-4C40-BD1F-ADB83FCBB6C3
+{"completed":true}
+echo B-ALIVE-1
+❯ echo B-ALIVE-1
+B-ALIVE-1
+❯ echo B-ALIVE-2
+B-ALIVE-2
+== B quit
+quit test app
+B instance stopped
+(eval):16: no matches found: /tmp/cdv-rg-*

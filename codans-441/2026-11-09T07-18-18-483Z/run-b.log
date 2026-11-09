@@ -1,0 +1,321 @@
+launched test app pid=28712
+server             0.11.0
+uptime             0.2s
+connectedClients   0
+== app & diagnostics
+A01      PASS want=0   got=0   status
+A02      PASS want=0   got=0   status --json
+A03      PASS want=0   got=0   doctor
+A04      PASS want=0   got=0   doctor --json has socketStatus ok
+A05      PASS want=0   got=0   --version
+A06      PASS want=0   got=0   --help
+A07      PASS want=0   got=0   launch while running (idempotent)
+A08      PASS want=10  got=10  status --socket /nonexistent -> 10
+A09      PASS want=0   got=0   doctor --socket nonexistent reports socket-missing
+A10      PASS want=14  got=14  status --socket <regular file> -> 14
+A11      PASS want=0   got=0   help-json prints the subcommand tree
+A12      PASS want=0   got=0   open --help
+A16      PASS want=*   got=0   open --in no-such-editor (strict, must fail, no side effect)
+A13      PASS want=64  got=64  unknown subcommand -> 64 (EX_USAGE)
+A15      PASS want=0   got=0   completion script zsh
+A17      PASS want=0   got=0   status --json is an envelope with schemaVersion + data
+A18      PASS want=0   got=0   --json error is an envelope on stdout with a stable code (exit 2)
+A18b     PASS want=0   got=0   --json NO_CURRENT_CONTEXT outside a pane
+== skill
+K01      PASS want=0   got=0   skill path codans-cli points into the bundle
+K02      PASS want=0   got=0   skill list --json lists codans-cli with detected targets
+K03      PASS want=0   got=0   skill install --target claude links the skill
+K03b     PASS want=0   got=0   skill list reports installed / missing per target
+K04      PASS want=0   got=0   skill install again is a no-op
+K05      PASS want=2   got=2   skill install unknown id -> 2
+K06      PASS want=3   got=3   skill install over a foreign directory -> 3 conflict
+K06b     PASS want=0   got=0   skill install --force replaces it
+K07      PASS want=0   got=0   skill uninstall removes the links
+K08      PASS want=0   got=0   skill install --scope project links under the repo
+A14      PASS want=11  got=11  --timeout against a socket that never answers -> 11
+== project
+P01      PASS want=0   got=0   project add (abs path)
+  project id: DC277F04-CE91-468C-8848-88A9EC8EA679
+P02      PASS want=0   got=0   tree
+P03      PASS want=0   got=0   tree --json
+P04      PASS want=0   got=0   tree --project <id>
+P05      PASS want=2   got=2   tree --project <random uuid> -> 2
+P06      PASS want=0   got=0   tree --project <name> resolves by name
+P06b     PASS want=0   got=0   project add detected the git root
+P06c     PASS want=0   got=0   tree shows the real branch, not (no branch)
+P07      PASS want=2   got=2   tree --project current outside a pane -> 2 with hint
+P08      PASS want=3   got=3   project add same path again -> 3 conflict
+P09      PASS want=0   got=0   project add relative path + --name
+P10      PASS want=0   got=0   project rm <id> (RelProj)
+P11      PASS want=2   got=2   project rm <same id> again -> 2
+P12      PASS want=1   got=1   project add nonexistent dir -> 1
+P13      PASS want=0   got=0   project list
+P14      PASS want=0   got=0   project list --json has 1 project
+P15      PASS want=2   got=2   tree --project unknown-name -> 2
+P16      PASS want=0   got=0   project show <id>
+P16b     PASS want=0   got=0   project show --json carries gitRoot + worktreeCount
+P16c     PASS want=2   got=2   project show random uuid -> 2
+P17      PASS want=0   got=0   project rename <id> Renamed
+P17b     PASS want=0   got=0   tree --project Renamed resolves the new name
+P17c     PASS want=0   got=0   project rename '' clears the override
+== project commands
+C01      PASS want=0   got=0   commands list (empty)
+C02      PASS want=0   got=0   commands add
+C03      PASS want=1   got=1   commands add empty command -> 1
+C04      PASS want=0   got=0   commands list shows one
+C05      PASS want=0   got=0   commands edit --kind test
+C06      PASS want=1   got=1   commands edit nothing -> 1
+C07      PASS want=1   got=1   commands edit bad id -> 1
+C08      PASS want=2   got=2   commands edit unknown id -> 2
+C09      PASS want=64  got=64  commands add bad --kind -> 64
+C10      PASS want=0   got=0   commands rm
+C11      PASS want=2   got=2   commands rm again -> 2
+C12      PASS want=2   got=2   commands list --project current outside pane -> 2
+C13      PASS want=0   got=0   commands list --project <name>
+== worktree
+W01      PASS want=0   got=0   worktree new bugfix/menu (default path)
+  wt1=97F1885A-2485-40AC-AF13-07AE8A0D5693 path=/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-cli-regression.fExoZALYoD/run/wts/fixture/bugfix/menu
+W02      PASS want=0   got=0   default path lands under scratch wts
+W02b     PASS want=0   got=0   worktree new materialised the directory
+W02c     PASS want=0   got=0   git knows the worktree
+W02d     PASS want=0   got=0   --json reports created=true
+W03      PASS want=0   got=0   worktree new main --path explicit --name
+W04      PASS want=3   got=3   worktree new same branch/path again -> 3 conflict
+W05      PASS want=0   got=0   worktree new --reuse-existing returns same id
+W06      PASS want=0   got=0   worktree switch <id>
+W07      PASS want=2   got=2   worktree switch random uuid -> 2
+W08      PASS want=2   got=2   worktree switch current outside pane -> 2
+W08b     PASS want=0   got=0   worktree switch by branch name
+W08c     PASS want=0   got=0   worktree switch by display name
+W09      PASS want=0   got=0   tree shows 3 worktrees
+W10      PASS want=1   got=1   worktree rm both id and --by-path -> 1
+W11      PASS want=1   got=1   worktree rm no args -> 1
+W12      PASS want=2   got=2   worktree rm --by-path nonexistent -> 2
+W13      PASS want=0   got=0   worktree rm --by-path --delete (git worktree removed)
+W13a     PASS want=1   got=1   wt-main directory is gone
+W13b     PASS want=0   got=0   worktree new --path adopts an existing dir (created=false)
+W13c     PASS want=0   got=0   worktree rm --by-path (register-only entry)
+W14      PASS want=0   got=0   worktree new brand-new branch --base origin/main
+W15      PASS want=0   got=0   git branch exists for the new worktree
+W16      PASS want=0   got=0   worktree dir exists on disk
+W16b     PASS want=3   got=3   worktree new same branch again -> 3
+W16c     PASS want=1   got=1   worktree new bad --base -> 1
+W17      PASS want=0   got=0   worktree list --project <id>
+W17b     PASS want=0   got=0   worktree list --json has 3
+W18      PASS want=0   got=0   worktree rm <id> --delete without --project (inferred)
+W19      PASS want=1   got=1   dir gone after rm --delete
+W19b     PASS want=128 got=128 branch gone after rm --delete (git exits 128)
+W20      PASS want=0   got=0   worktree show <id> --json has branch + projectName
+W20b     PASS want=0   got=0   worktree show by branch (text)
+W21      PASS want=0   got=0   worktree rename <id> Menu (project inferred)
+W21b     PASS want=0   got=0   worktree switch by the new name
+W21c     PASS want=0   got=0   worktree show reports the new name, same path
+W22      PASS want=1   got=1   worktree rename blank -> 1
+W23      PASS want=0   got=0   worktree prune reports the stale registration
+W23b     PASS want=0   got=0   git no longer lists the stale worktree
+W24      PASS want=2   got=2   worktree prune --project current outside pane -> 2
+W25      PASS want=0   got=0   worktree switch by absolute path
+W25b     PASS want=0   got=0   worktree show by a subdirectory path
+W25c     PASS want=0   got=0   worktree show by a relative path (resolved against $PWD)
+W25d     PASS want=2   got=2   worktree show unregistered path -> 2
+== tab
+T01      PASS want=0   got=0   tab new (unnamed)
+T02      PASS want=0   got=0   tab new named
+T03      PASS want=0   got=0   tab switch <id>
+T04      PASS want=0   got=0   tree prints t<n> handle
+  tab2 handle: t6
+T05      PASS want=0   got=0   tab switch by handle t6
+T06      PASS want=2   got=2   tab switch random uuid -> 2
+T07      PASS want=2   got=2   tab switch t999 -> 2
+T08      PASS want=2   got=2   tab new --worktree current outside pane -> 2
+T08b     PASS want=0   got=0   tab new --worktree <branch name> (project inferred)
+T09      PASS want=0   got=0   tab list
+T09b     PASS want=0   got=0   tab list --worktree <id> only (project inferred)
+T10      PASS want=0   got=0   tab close <id> with explicit locator
+T11      PASS want=2   got=2   tab close again -> 2
+T12      PASS want=0   got=0   tab close <id> without --project/--worktree (inferred)
+T13      PASS want=0   got=0   tab new again for the pane phase
+T14      PASS want=0   got=0   tab switch by title
+T15      PASS want=0   got=0   tab show <id> --json has handle + title + worktree
+T15b     PASS want=0   got=0   tab show by title (text)
+T16      PASS want=0   got=0   tab rename <id> renamed-tab (containers inferred)
+T16b     PASS want=0   got=0   tab switch by the new title
+T17      PASS want=0   got=0   tab rename <id> (no name) clears the title
+T17b     PASS want=0   got=0   tab show after clear has name null
+== pane
+N01      PASS want=0   got=0   pane new default shell
+  pane1=F6E156AC-0069-4931-B5DC-CC44ACA97AEA
+N02      PASS want=0   got=0   pane new with labels + cmd (-- sh)
+  pane2=BE7F9ED7-1713-4A76-A496-366F85C37283
+N03      PASS want=0   got=0   pane new cwd default ($PWD)
+  tab1 handle: t8
+N04      PASS want=0   got=0   pane new --tab by handle (containers inferred)
+N05      PASS want=0   got=0   pane list
+N05b     PASS want=0   got=0   pane list --tab <handle> only has 4 panes
+N05c     PASS want=0   got=0   tree --json carries handles
+N06      PASS want=0   got=0   tree shows labels @agent,@worker + p<n>
+  pane1 handle: p5
+N07      PASS want=0   got=0   pane focus <id>
+N08      PASS want=0   got=0   pane focus <handle>
+N09      PASS want=0   got=0   pane focus @label
+N10      PASS want=2   got=2   pane focus random uuid -> 2
+N11      PASS want=2   got=2   pane focus @nolabel -> 2
+N12      PASS want=0   got=0   pane label add
+N13      PASS want=0   got=0   pane label --replace
+N14      PASS want=0   got=0   labels after replace == [solo]
+N15      PASS want=64  got=64  pane label no labels -> 64
+N16      PASS want=0   got=0   pane label second pane 'agent' (dup label)
+N17      PASS want=3   got=3   pane focus @agent ambiguous -> 3
+N18      PASS want=0   got=0   pane info
+N19      PASS want=0   got=0   pane info --json has shellPid+pwd
+N20      PASS want=0   got=0   pane reset
+N21      PASS want=*   got=2   pane info on closed/unknown pane
+N22      PASS want=0   got=0   pane split <id> --direction down
+  split pane=01A86264-A59E-4DDD-950B-58495CAD99AA
+N22b     PASS want=0   got=0   split pane runs a shell with the project env
+N23      PASS want=0   got=0   pane show <split> --json sits in tab1 with the anchor's cwd
+N24      PASS want=0   got=0   pane show <id> text
+N24b     PASS want=0   got=0   pane show by handle
+N25      PASS want=0   got=0   pane resize <id> down
+N25b     PASS want=0   got=0   pane resize --amount 80 left
+N26      PASS want=2   got=2   pane resize random uuid -> 2
+N27      PASS want=1   got=1   pane resize --amount 0 -> 1
+N28      PASS want=2   got=2   pane split random uuid -> 2
+N29      PASS want=0   got=0   pane close the split pane
+N30      PASS want=0   got=0   pane split --command runs it
+N30b     PASS want=0   got=0   split command output appears
+== terminal io
+S01      PASS want=0   got=0   pane send <id> text (Enter)
+S02      PASS want=0   got=0   readback shows MARK-S01
+S03      PASS want=1   got=1   pane send -p solo (no @) -> 1 usage error
+S04      PASS want=0   got=0   pane send -p @solo
+S05      PASS want=0   got=0   readback MARK-S04
+S06      PASS want=0   got=0   pane send --no-enter then send-key enter
+S07      PASS want=0   got=0   readback MARK-S06
+S08      PASS want=0   got=0   pane send --stdin
+S09      PASS want=0   got=0   readback MARK-S08
+S10      PASS want=0   got=0   pane send multi-word unquoted (target parse?)
+S11      PASS want=0   got=0   readback MARK-S10
+S12      PASS want=1   got=1   pane send echo hi (unquoted) -> 1
+S12b     PASS want=0   got=0   S12 error names the stray word
+S13      PASS want=1   got=1   pane send no text -> 1
+S14      PASS want=1   got=1   pane send --stdin with empty stdin -> 1
+S15      PASS want=0   got=0   pane send --raw hex (ESC [ A)
+S16      PASS want=1   got=1   pane send --raw + --no-enter -> 1
+S17      PASS want=1   got=1   pane send --raw + text -> 1
+S18      PASS want=*   got=1   pane send --raw bad hex
+S19      PASS want=0   got=0   pane send --raw with 0x and spaces
+S20      PASS want=0   got=0   pane send --focus
+S21      PASS want=0   got=0   send-key all named keys (throwaway pane)
+S22      PASS want=0   got=0   send-key ctrl-c dashed form
+S23      PASS want=0   got=0   send-key -p
+S24      PASS want=1   got=1   send-key bogus -> 1
+S25      PASS want=1   got=1   send-key none -> 1
+S26      PASS want=0   got=0   pane read (zmx dump)
+S27      PASS want=0   got=0   pane read contains LINE-80
+S28      PASS want=0   got=0   pane read --tail 3 -> 3 lines
+S29      PASS want=1   got=1   pane read --tail 0 -> 1
+S30      PASS want=0   got=0   pane read --raw has ESC
+S31      PASS want=0   got=0   pane read --range visible
+S32      PASS want=0   got=0   pane send --wait returns once the command finished
+S33      PASS want=0   got=0   pane send --capture returns the command's output
+S33b     PASS want=0   got=0   pane send --capture text mode prints the output only
+S34      PASS want=11  got=11  pane send --wait past --wait-timeout -> 11 WAIT_TIMEOUT
+S35      PASS want=1   got=1   pane send --raw with --wait -> 1
+S32      PASS want=0   got=0   pane read --json
+S33      PASS want=64  got=64  pane read --screen is not an option -> 64
+S34      PASS want=0   got=0   pane capture
+S35      PASS want=0   got=0   pane capture --lines 5 -> 5 lines
+S36      PASS want=0   got=0   pane capture --scope screen
+S37      PASS want=1   got=1   pane capture --lines 0 -> 1
+S38      PASS want=0   got=0   pane capture --wait-stable --json
+S39      PASS want=1   got=1   pane capture --wait-stable --timeout-ms >= --timeout -> 1
+S40      PASS want=64  got=64  pane capture -p is not an option -> 64
+S41      PASS want=0   got=0   pane capture --scope bogus -> usage(1)?
+== broadcast
+B01      PASS want=0   got=0   broadcast --tab
+B02      PASS want=0   got=0   readback in pane1
+B03      PASS want=0   got=0   broadcast --tab delivered==4
+B04      PASS want=0   got=0   broadcast --worktree
+B05      PASS want=0   got=0   broadcast --label
+B06      PASS want=0   got=0   broadcast --label unknown delivered==0
+B07      PASS want=1   got=1   broadcast no scope -> 1
+B08      PASS want=1   got=1   broadcast two scopes -> 1
+B09      PASS want=0   got=0   broadcast --stdin --no-enter
+B10      PASS want=1   got=1   broadcast --stdin + text -> 1
+B11      PASS want=2   got=2   broadcast --tab current outside pane -> 2
+== in-pane context (commands run inside pane1 through pane send)
+X01      PASS want=0   got=0   in-pane: codans-dev tree --project current
+X02      PASS want=0   got=0   in-pane: codans-dev pane send 'echo CTX-INNER'
+X03      PASS want=0   got=0   in-pane: codans-dev pane read
+X04      PASS want=0   got=0   in-pane: codans-dev pane capture --lines 3
+X05      PASS want=0   got=0   in-pane: codans-dev pane info
+X06      PASS want=0   got=0   in-pane: codans-dev project commands list
+X07      PASS want=0   got=0   in-pane: codans-dev tab new ctxtab --json
+X08      PASS want=0   got=0   in-pane: codans-dev pane new --json
+X09      PASS want=0   got=0   in-pane: codans-dev broadcast --tab current 'echo CTX-BC'
+X10      PASS want=0   got=0   in-pane: codans-dev worktree new test/ctx-wt --json
+X11      PASS want=0   got=0   in-pane: codans-dev pane focus current
+X12      PASS want=0   got=0   in-pane: codans-dev pane label current ctxlabel
+X13      PASS want=0   got=0   in-pane: codans-dev agent list
+X14      PASS want=0   got=0   in-pane: codans-dev doctor --json
+X16      PASS want=0   got=0   in-pane: codans-dev tab switch current
+X17      PASS want=0   got=0   in-pane: codans-dev worktree switch current
+X15      PASS want=0   got=0   in-pane: codans-dev pane send-key escape
+  note: pane env CODANS_* keys: CODANS_CACHE_DIR CODANS_CLI CODANS_CONFIG_DIR CODANS_PANE_ID CODANS_ROOT_PATH CODANS_SOCKET_PATH CODANS_WORKTREE_PATH 
+== agent
+G01      PASS want=0   got=0   agent list
+G02      PASS want=0   got=0   agent list --json has 3 profiles
+G03      PASS want=1   got=1   agent launch no args -> 1
+G04      PASS want=1   got=1   agent launch --tab --split -> 1
+G05      PASS want=2   got=2   agent launch unknown profile -> 2
+G06      PASS want=3   got=3   agent launch disabled profile -> 3
+G07      PASS want=0   got=0   agent launch 'Fake Amp' --background --json
+G08      PASS want=0   got=0   fake amp started in new pane
+G09      PASS want=4   got=4   agent launch amp --prompt -> 4 unsupported
+G10      PASS want=0   got=0   agent launch --agent claude --prompt - (stdin) --split right
+G11      PASS want=0   got=0   fake claude got prompt on argv
+G12      PASS want=1   got=1   agent launch --prompt '' -> 1
+G13      PASS want=2   got=2   agent launch --worktree current outside pane -> 2
+G14      PASS want=0   got=0   agent launch --worktree <branch> --background
+== agent status / wait
+G15      PASS want=0   got=0   agent status
+G15b     PASS want=0   got=0   agent status --json lists the launched fake amp pane (classifier may take a while)
+G15c     PASS want=0   got=0   agent status entries carry handle + containers
+G16      PASS want=0   got=0   agent wait --until exit on a plain shell pane resolves at once
+G17      PASS want=11  got=11  agent wait --until working on a plain shell pane -> 11 WAIT_TIMEOUT
+G18      PASS want=2   got=2   agent wait random uuid -> 2
+G19      PASS want=1   got=1   agent wait --timeout 0 -> 1
+G20      PASS want=64  got=64  agent wait --until bogus -> 64
+== handoff
+H01      PASS want=1   got=1   handoff to bogus agent -> 1
+H02      PASS want=1   got=1   handoff to amp neither brief nor no-brief -> 1
+H03      PASS want=1   got=1   handoff --brief + --no-brief -> 1
+H04      PASS want=1   got=1   handoff --brief '' -> 1
+H05      PASS want=1   got=1   handoff to amp --brief missing sections -> 1
+H06      PASS want=0   got=0   handoff save --brief - (heredoc)
+H07      PASS want=0   got=0   current.md written in worktree
+H08      PASS want=0   got=0   handoff save --no-brief (context only)
+H09      PASS want=0   got=0   handoff to amp --no-brief --no-launch --json
+H10      PASS want=0   got=0   handoff to amp --profile 'Fake Amp' --split down --no-brief (launches fake)
+H10b     PASS want=0   got=0   handoff --json prints launchedPane ids as strings
+H11      PASS want=0   got=0   receiver fake amp came up
+H12      PASS want=0   got=0   typed kickoff reached fake amp (RECEIVED:)
+H13      PASS want=1   got=1   handoff to amp --tab --split -> 1
+H14      PASS want=2   got=2   handoff to claude --pane current outside pane -> 2
+== close & teardown
+Z01      PASS want=0   got=0   pane close <id>
+Z02      PASS want=2   got=2   pane close again -> 2
+Z03      PASS want=0   got=0   pane close with explicit locator
+Z04      PASS want=0   got=0   pane close @worker
+Z05      PASS want=0   got=0   pane close by handle
+Z06      PASS want=0   got=0   tab close <id> explicit
+Z07      PASS want=0   got=0   worktree rm wt1 --delete (project inferred)
+Z08      PASS want=0   got=0   project rm by name
+Z09      PASS want=0   got=0   tree empty
+quit test app
+Z10      PASS want=10  got=10  status after quit -> 10
+Z11      PASS want=0   got=0   doctor after quit reports app-not-running/socket-missing
+== json contract
+J01      PASS want=0   got=0   every --json output matches the CLI output schema
+PASS=291 FAIL=0  (results: /var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-cli-regression.fExoZALYoD/results.tsv)
