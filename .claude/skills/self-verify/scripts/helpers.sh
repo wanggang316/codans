@@ -19,18 +19,23 @@ sv_conf_dir() { printf '%s\n' "$SELF_VERIFY_DIR/conf"; }
 sv_pid_file() { printf '%s\n' "$SELF_VERIFY_DIR/app.pid"; }
 
 # Resolve the Debug Codans.app built from this worktree. Cache the answer:
-# `xcodebuild -showBuildSettings` takes several seconds.
+# `xcodebuild -showBuildSettings` takes several seconds. The default
+# SELF_VERIFY_DIR is shared by every worktree, so the cache holds the worktree
+# root on line 1 and the app on line 2, and only that worktree reuses it.
 sv_app() {
   if [ -n "${SELF_VERIFY_APP:-}" ]; then
     printf '%s\n' "$SELF_VERIFY_APP"
     return
   fi
   local cache="$SELF_VERIFY_DIR/app-path" root app
-  if [ -s "$cache" ] && [ -d "$(cat "$cache")" ]; then
-    cat "$cache"
-    return
-  fi
   root="$(git rev-parse --show-toplevel)" || return 1
+  if [ -s "$cache" ] && [ "$(sed -n 1p "$cache")" = "$root" ]; then
+    app="$(sed -n 2p "$cache")"
+    if [ -n "$app" ] && [ -d "$app" ]; then
+      printf '%s\n' "$app"
+      return
+    fi
+  fi
   app="$(cd "$root/apps/mac" && xcodebuild -workspace codans.xcworkspace -scheme Codans \
     -configuration Debug -showBuildSettings 2>/dev/null |
     awk '$1=="BUILT_PRODUCTS_DIR"{d=$3} $1=="FULL_PRODUCT_NAME"{p=$3} END{print d "/" p}')"
@@ -39,7 +44,7 @@ sv_app() {
     return 1
   }
   mkdir -p "$SELF_VERIFY_DIR"
-  printf '%s\n' "$app" >"$cache"
+  printf '%s\n%s\n' "$root" "$app" >"$cache"
   printf '%s\n' "$app"
 }
 

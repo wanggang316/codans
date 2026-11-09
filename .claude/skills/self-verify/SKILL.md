@@ -70,6 +70,12 @@ running. Defaults: `SELF_VERIFY_DIR` under `$TMPDIR`, socket
 socket per pane in the cache dir and AF_UNIX paths are capped at 104 bytes. Override the variables before sourcing
 to run two instances.
 
+The helpers launch the Debug `Codans.app` of the worktree you source them in. `sv_app` asks
+`xcodebuild -showBuildSettings` (Debug, scheme `Codans`) for the app path from `git rev-parse --show-toplevel`, and
+caches the worktree root and the app path in `$SELF_VERIFY_DIR/app-path`. It reuses the cache only for the same
+worktree root and only while the app exists, so worktrees that share the default `SELF_VERIFY_DIR` each launch their
+own build. Set `SELF_VERIFY_APP` to launch a different bundle; it skips resolution and the cache.
+
 `sv_launch` records the front app and gives focus back if the instance took it. It snapshots the shared
 `com.gumpw.codans` defaults domain; `sv_cleanup` restores only the keys that changed.
 
