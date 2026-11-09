@@ -92,7 +92,7 @@ relative positions (see
 [main-window.md](main-window.md)).
 
 The footer's Tag filter control and the Project context menu's `ProjectTagsMenu`
-are hidden. The footer exposes the Agents View and refresh controls. It has no sort control.
+are hidden. The footer exposes the help menu, the Agents View control, and the refresh control. It has no sort control.
 Stored filters still affect Project visibility even though the filter button
 is hidden.
 
