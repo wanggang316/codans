@@ -145,6 +145,25 @@ The app log is `$SELF_VERIFY_DIR/app.log` (stdout and stderr only). For unified 
 `log` is a function) with a predicate on a marker specific to the change. Default-level messages are not
 persisted, so use `log stream` during the action, not `log show` after it.
 
+## Crash Check
+
+A UI step that returns, or an AX walk that prints a complete tree, does not prove that the instance did not crash:
+the app can crash a moment later. Bracket any step that can crash (an AX walk, a new pane, a Settings screen):
+
+```bash
+sv_crash_mark                    # records the instance PID and the existing Codans-*.ips reports
+sv_tree --window Settings >"$SELF_VERIFY_DIR/tree.txt"
+sv_crash_check                   # waits 3 s, then exits 1 when the instance is gone or a new report names its PID
+```
+
+On failure, `sv_crash_check` prints the new report path from `~/Library/Logs/DiagnosticReports`, the exception,
+and the top crashed-thread frames to stderr. When the instance is gone, it waits for ReportCrash up to 15 s more;
+"no new Codans-*.ips report" then means it died without a report (for example SIGKILL). Release, dev, and test
+instances all write `Codans-*.ips`, so reports from before the mark and reports of other PIDs do not count.
+Settings: `SELF_VERIFY_CRASH_SETTLE` (seconds before the check, default 3), `SELF_VERIFY_CRASH_WAIT` (default 15),
+`SELF_VERIFY_CRASH_FRAMES` (default 15), `SELF_VERIFY_CRASH_DIR` (report dir). Call `sv_crash_mark` again before
+the next step: a check compares with the last mark.
+
 ## Cleanup
 
 ```bash
