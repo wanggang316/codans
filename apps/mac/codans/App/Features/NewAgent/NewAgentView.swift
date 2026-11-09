@@ -155,6 +155,7 @@ struct NewAgentView: View {
           Text(selected?.name ?? "Project")
         } icon: {
           Image(nsImage: Self.projectIcon(selected))
+            .accessibilityHidden(true)
         }
       }
       .menuStyle(.borderlessButton)
@@ -204,6 +205,7 @@ struct NewAgentView: View {
       }
     } icon: {
       Image(nsImage: Self.projectIcon(project))
+        .accessibilityHidden(true)
     }
     .tag(ProjectID?.some(project.id))
   }
