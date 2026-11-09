@@ -115,6 +115,13 @@ codans_debug tree --json | jq -r '.data.projects[0].worktrees[0].branch'   # ass
 - A SwiftUI `Menu` takes its AX title from its label content on every update. Put `.accessibilityLabel` on the
   label content, not on the `Menu`, or the title becomes the visible text after the first selection.
 
+### Command Queue
+
+- Open: `sv_menu Tab "Command Queue…"` with a pane focused; the menu item toggles, so check that
+  `AXMenuButton "Send timing"` is absent before you open it.
+- The send mode is `AXMenuButton "Send timing"`; its `AXValue` is the mode (`Send now`, `After task`, `Schedule`).
+  Pick with `sv_press AXMenuButton "Send timing"`, then `sv_press AXMenuItem <mode>`.
+
 ### Settings
 
 - Navigate with `sv_select_row <pane name>` (it sets `AXSelectedRows`; a press on the row text does nothing).
