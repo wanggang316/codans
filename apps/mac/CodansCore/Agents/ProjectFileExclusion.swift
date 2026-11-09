@@ -11,8 +11,10 @@ public nonisolated struct ProjectFileExclusion: Equatable, Sendable {
   /// The main checkout the paths are relative to.
   public let root: URL
   /// Paths relative to `root`. A path that ends with `/` is a directory and
-  /// excludes everything in it. `nil` excludes every file under `root`:
-  /// codans could not list the files, so it does not guess.
+  /// excludes everything in it. A path without `/` excludes what is under it
+  /// too: git lists a symlink to a directory as a file, and the new worktree
+  /// does not have the files reached through it. `nil` excludes every file
+  /// under `root`: codans could not list the files, so it does not guess.
   public let paths: Set<String>?
 
   public init(root: URL, paths: Set<String>?) {
@@ -30,11 +32,14 @@ public nonisolated struct ProjectFileExclusion: Equatable, Sendable {
     guard let paths else { return true }
     let relative = Substring(path.dropFirst(base.count))
     if paths.contains(String(relative)) { return true }
-    // A listed directory covers the files below it.
+    // A listed directory, or a listed symlink to one, covers the files
+    // below it.
     var index = relative.startIndex
     while let slash = relative[index...].firstIndex(of: "/") {
       let next = relative.index(after: slash)
-      if paths.contains(String(relative[..<next])) { return true }
+      if paths.contains(String(relative[..<next])) || paths.contains(String(relative[..<slash])) {
+        return true
+      }
       index = next
     }
     return false
