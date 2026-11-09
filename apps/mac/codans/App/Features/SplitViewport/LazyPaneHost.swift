@@ -26,16 +26,13 @@ struct LazyPaneHost: View {
   /// False until `loadingChromeDelay` has elapsed on the current
   /// `loadingPlaceholder` — see there for why the chrome waits.
   @State private var showsLoadingChrome = false
-  /// Opacity of the live surface. Drops to 0 once a bring-up outlasts
-  /// `fadeInThreshold`, so the surface fades in over the placeholder instead
-  /// of cutting in.
+  /// Opacity of the live surface. Drops to 0 when this host shows the
+  /// loading placeholder, so a surface that had to be created or re-attached
+  /// fades in instead of cutting in. A warm pane is seeded `.ready` and never
+  /// shows the placeholder, so it still appears in the first frame.
   @State private var surfaceOpacity: Double = 1
   @Environment(\.colorScheme) private var colorScheme
 
-  /// A bring-up shorter than this is a registry hit on a warm pane: it
-  /// lands within a frame, and a fade there would only delay the content.
-  /// A re-attach (a reclaimed pane) or a cold spawn takes longer.
-  private static let fadeInThreshold: Duration = .milliseconds(50)
   private static let fadeInAnimation: Animation = .easeOut(duration: 0.18)
 
   /// How long a spawn runs before the placeholder admits to being one.
@@ -133,11 +130,9 @@ struct LazyPaneHost: View {
     .opacity(showsLoadingChrome ? 1 : 0)
     .animation(.easeIn(duration: 0.2), value: showsLoadingChrome)
     .modifier(terminalBackdrop)
+    .onAppear { surfaceOpacity = 0 }
     .task {
-      try? await Task.sleep(for: Self.fadeInThreshold)
-      guard !Task.isCancelled else { return }
-      surfaceOpacity = 0
-      try? await Task.sleep(for: Self.loadingChromeDelay - Self.fadeInThreshold)
+      try? await Task.sleep(for: Self.loadingChromeDelay)
       guard !Task.isCancelled else { return }
       showsLoadingChrome = true
     }
