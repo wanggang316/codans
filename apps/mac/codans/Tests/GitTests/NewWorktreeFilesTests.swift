@@ -116,6 +116,18 @@ struct NewWorktreeFilesTests {
       ])
   }
 
+  /// `.claude/` holds an ignored and untracked files, no tracked one. Git
+  /// lists such a directory as one `dir/` entry for the untracked files, but
+  /// `wt` still copies its ignored files.
+  @Test
+  func ignoredFilesInADirectoryWithUntrackedFilesCountWhenCopied() async throws {
+    try await fixture(local: #"{"enabledPlugins": {"ignored@market": true}}"#)
+    try await git(["rm", "-rq", "--cached", ".claude"])
+    try await git(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "untrack"])
+    #expect(await names(copyIgnored: true, copyUntracked: false) == ["ignored:run", "scratch"])
+    #expect(await names(copyIgnored: false, copyUntracked: false) == [])
+  }
+
   /// A tracked settings file is in every new worktree. Here the local file
   /// turns the tracked plugin off, which counts only when it is copied.
   @Test
