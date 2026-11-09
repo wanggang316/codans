@@ -8,8 +8,12 @@
 #   setup  launch the instance and leave it running (manual probing)
 #   quit   stop a running instance
 #
+#   paths  print the socket and cache paths of this run, start nothing
+#
 # Work files land in $CODANS_CLI_REGRESSION_DIR (default: a fresh mktemp dir);
-# results.tsv there lists every case with wanted / got exit codes.
+# results.tsv there lists every case with wanted / got exit codes. The socket
+# and cache paths derive from that dir, so `setup` and a later `quit` must
+# share it.
 set -uo pipefail
 
 APP="$1"
@@ -19,12 +23,27 @@ REPO_ROOT="$(git -C "$HERE" rev-parse --show-toplevel)"
 SCRATCH="${CODANS_CLI_REGRESSION_DIR:-$(mktemp -d -t codans-cli-regression)}"
 mkdir -p "$SCRATCH"
 CLI="$APP/Contents/Resources/bin/codans-dev"
+# Parallel runs (other worktrees, other agents, or two runs of one session)
+# must not share a socket or a cache: a shared socket answers the wrong
+# instance, and one run's quit would delete the other's cache and stop its
+# zmx sessions. So the paths are scoped to the self-verify session and to
+# this run's work dir. Sourcing helpers.sh defines functions and defaults
+# only; it reads TMPDIR, so `set -u` is off while it runs.
+set +u
+# shellcheck source=../scripts/helpers.sh
+. "$HERE/../scripts/helpers.sh"
+set -u
+TOKEN="$(sv_session_token "$SCRATCH" "$(sv_session_id)")"
 # AF_UNIX paths are capped near 104 bytes, so the socket stays out of $SCRATCH.
-SOCK="/tmp/codans-t-$(id -u).sock"
+SOCK="/tmp/cdv-rg-$(id -u)-$TOKEN.sock"
 # The cache dir holds one zmx socket per pane, so it stays short too. Without
 # it the instance shares the dev cache and its launch sweep kills the dev
 # app's pane sessions.
-CACHE="/tmp/codans-t-cache-$(id -u)"
+CACHE="/tmp/cdv-rg-cache-$(id -u)-$TOKEN"
+sv_validate_paths "$SOCK" "$CACHE" || exit 2
+# The PID of this run's instance. Every run launches the same executable,
+# so the instance is found by this file, never by its path or name.
+APP_PID_FILE="$SCRATCH/app.pid"
 CONF="$SCRATCH/conf"
 RUN="$SCRATCH/run"
 FIX="$RUN/fixture"
@@ -99,13 +118,27 @@ EOF
 EOF
 }
 
+# This run's instance PID, only while that PID is still the Debug executable.
+app_pid() {
+  local pid exe
+  [[ -s "$APP_PID_FILE" ]] || return 1
+  pid=$(cat "$APP_PID_FILE")
+  exe=$(ps -p "$pid" -o comm= 2>/dev/null | sed 's/^[[:space:]]*//')
+  sv_is_instance_executable "$exe" "$APP/Contents/MacOS/Codans" || return 1
+  echo "$pid"
+}
+
 launch_app() {
-  if pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null; then
+  if app_pid >/dev/null; then
     echo "test app already running"; return
+  fi
+  if [[ -S "$SOCK" ]] && lsof -t "$SOCK" >/dev/null 2>&1; then
+    echo "REFUSING: $SOCK is held by another process"; exit 1
   fi
   rm -f "$SOCK"
   nohup "$APP/Contents/MacOS/Codans" >"$SCRATCH/app.log" 2>&1 &
   APP_PID=$!
+  echo "$APP_PID" >"$APP_PID_FILE"
   echo "launched test app pid=$APP_PID"
   for _ in $(seq 1 100); do
     if cli doctor --json 2>/dev/null | jq -e '.data | .socketStatus == "ok"' >/dev/null 2>&1; then break; fi
@@ -119,9 +152,10 @@ launch_app() {
 }
 
 quit_app() {
-  local pid; pid=$(pgrep -f "$APP/Contents/MacOS/Codans" | head -1)
+  local pid; pid=$(app_pid)
   [[ -n "$pid" ]] && kill -TERM "$pid" && sleep 2
-  pgrep -f "$APP/Contents/MacOS/Codans" >/dev/null && kill -KILL "$pid"
+  [[ -n "$pid" ]] && app_pid >/dev/null && kill -KILL "$pid"
+  rm -f "$APP_PID_FILE"
   # zmx daemons of panes the run did not close hold files in the cache dir.
   local holders; holders=$(lsof -t +D "$CACHE" 2>/dev/null | sort -u)
   [[ -n "$holders" ]] && kill -TERM $holders 2>/dev/null
@@ -576,6 +610,7 @@ case "$PHASE" in
     ;;
   setup) setup; launch_app ;;
   quit) quit_app ;;
+  paths) printf 'socket=%s\ncache=%s\n' "$SOCK" "$CACHE"; exit 0 ;;
   *) echo "unknown phase $PHASE"; exit 2 ;;
 esac
 if [[ "$PHASE" == all ]]; then
