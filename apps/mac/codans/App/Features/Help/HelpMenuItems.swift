@@ -27,7 +27,7 @@ struct SidebarHelpMenuButton: View {
         .foregroundStyle(.secondary)
         .frame(width: 22, height: 22)
         .contentShape(Rectangle())
-        .accessibilityHidden(true)
+        .accessibilityLabel("Help")
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
