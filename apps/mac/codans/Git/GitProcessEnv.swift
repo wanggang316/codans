@@ -5,7 +5,8 @@ import Foundation
 /// redirect the invocation (to a different config file, a different working tree, an external
 /// diff tool, an interactive prompter) is explicitly stripped even if present in the parent.
 ///
-/// Git is the only subprocess boundary applying this allowlist-plus-strip discipline.
+/// `build` is for local reads (`LiveGitService`). `inheriting` is for git that may reach a
+/// remote, which needs more of the parent environment.
 ///
 /// Declared `nonisolated` because the app target defaults to `@MainActor` — these members are
 /// pure and safe to call from any context.
@@ -43,6 +44,22 @@ nonisolated enum GitProcessEnv {
         precondition(env[key] == nil, "GitProcessEnv: forbidden key '\(key)' leaked into child env")
       }
     #endif
+    return env
+  }
+
+  /// Values always set on a child built by `inheriting`.
+  static let inheritedForced: [String: String] = ["LC_ALL": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0"]
+
+  /// The child env for git that may reach a remote, and for the bundled `wt`
+  /// (worktree, clone, fetch, push): the parent environment, so `ssh` keeps
+  /// `SSH_AUTH_SOCK` and proxies keep their variables, without **any**
+  /// `GIT_*` key (a superset of `forbidden`), plus `inheritedForced`. A
+  /// missing credential then fails the command instead of waiting on a
+  /// prompt nobody can answer. The login-shell launch keeps this env after
+  /// the rc ran (`LoginShellLaunch`).
+  static func inheriting(from parent: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    var env = parent.filter { !$0.key.hasPrefix("GIT_") }
+    for (key, value) in inheritedForced { env[key] = value }
     return env
   }
 }

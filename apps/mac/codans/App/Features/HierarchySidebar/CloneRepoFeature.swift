@@ -158,6 +158,8 @@ extension CloneRepoFeature {
       return "Could not find the git executable."
     case .invalidUTF8:
       return "git produced output that could not be decoded."
+    case .timedOut:
+      return "git clone did not finish in time."
     }
   }
 }

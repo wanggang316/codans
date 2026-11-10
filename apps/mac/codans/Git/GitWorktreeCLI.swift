@@ -20,45 +20,63 @@ enum GitCLIError: Error, Equatable, Sendable {
   case exitCode(Int32, stderr: String)
   case executableNotFound
   case invalidUTF8
+  /// git ran past its deadline, or the calling task was cancelled; the
+  /// runner stopped it and what it started.
+  case timedOut
 }
 
 actor GitWorktreeCLI {
-  private let gitExecutable: URL
+  /// Local commands answer at once; a hung one must not block its caller.
+  static let defaultTimeout: Duration = .seconds(60)
+  /// A clone transfers the whole repository and may wait on a credential
+  /// helper; bounded so a hung rc or network cannot wait forever.
+  static let cloneTimeout: Duration = .seconds(30 * 60)
+  static let maxOutputBytes = 4 * 1024 * 1024
 
-  init(gitExecutable: URL = URL(fileURLWithPath: "/usr/bin/git")) {
+  private let gitExecutable: URL
+  private let runner: any CommandRunner
+  private let parentEnvironment: [String: String]
+
+  init(
+    gitExecutable: URL = URL(fileURLWithPath: "/usr/bin/git"),
+    runner: any CommandRunner = FoundationCommandRunner(),
+    parentEnvironment: [String: String] = ProcessInfo.processInfo.environment
+  ) {
     self.gitExecutable = gitExecutable
+    self.runner = runner
+    self.parentEnvironment = parentEnvironment
   }
 
-  func listWorktrees(repoPath: String) throws -> [GitWorktreeEntry] {
-    let output = try run(arguments: ["worktree", "list", "--porcelain"], cwd: repoPath)
+  func listWorktrees(repoPath: String) async throws -> [GitWorktreeEntry] {
+    let output = try await run(arguments: ["worktree", "list", "--porcelain"], cwd: repoPath)
     return parseWorktreeList(output)
   }
 
-  func createWorktree(repoPath: String, branch: String, path: String) throws {
-    _ = try run(
+  func createWorktree(repoPath: String, branch: String, path: String) async throws {
+    _ = try await run(
       arguments: ["worktree", "add", "-b", branch, path],
       cwd: repoPath
     )
   }
 
-  func removeWorktree(repoPath: String, path: String, force: Bool) throws {
+  func removeWorktree(repoPath: String, path: String, force: Bool) async throws {
     var args = ["worktree", "remove"]
     if force { args.append("--force") }
     args.append(path)
-    _ = try run(arguments: args, cwd: repoPath)
+    _ = try await run(arguments: args, cwd: repoPath)
   }
 
-  func listBranches(repoPath: String) throws -> [String] {
-    let output = try run(
+  func listBranches(repoPath: String) async throws -> [String] {
+    let output = try await run(
       arguments: ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
       cwd: repoPath
     )
     return output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
   }
 
-  func discoverGitRoot(candidatePath: String) throws -> String? {
+  func discoverGitRoot(candidatePath: String) async throws -> String? {
     do {
-      let output = try run(arguments: ["rev-parse", "--show-toplevel"], cwd: candidatePath)
+      let output = try await run(arguments: ["rev-parse", "--show-toplevel"], cwd: candidatePath)
       let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmed.isEmpty ? nil : trimmed
     } catch GitCLIError.exitCode {
@@ -68,9 +86,9 @@ actor GitWorktreeCLI {
 
   /// Short name of the branch checked out at `path`; nil on a detached HEAD
   /// or when `path` is not inside a repository (both are non-zero exits).
-  func currentBranch(path: String) throws -> String? {
+  func currentBranch(path: String) async throws -> String? {
     do {
-      let output = try run(arguments: ["symbolic-ref", "--short", "HEAD"], cwd: path)
+      let output = try await run(arguments: ["symbolic-ref", "--short", "HEAD"], cwd: path)
       let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmed.isEmpty ? nil : trimmed
     } catch GitCLIError.exitCode {
@@ -83,9 +101,9 @@ actor GitWorktreeCLI {
   /// is what `--show-toplevel` would report. Read from the common git dir:
   /// `<source>/.git` for a normal repository, the directory itself for a bare
   /// one. Nil when `path` is not inside a repository.
-  func repositoryRoot(forCheckoutAt path: String) throws -> String? {
+  func repositoryRoot(forCheckoutAt path: String) async throws -> String? {
     do {
-      let output = try run(
+      let output = try await run(
         arguments: ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd: path)
       let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !trimmed.isEmpty else { return nil }
@@ -104,10 +122,10 @@ actor GitWorktreeCLI {
   /// is bare. Nil when `path` is not inside any repository.
   /// `discoverGitRoot` cannot answer this for a bare repository, whose
   /// `--show-toplevel` has no working tree to report.
-  func inspectRepository(at path: String) throws -> RepositoryProbe? {
-    guard let root = try repositoryRoot(forCheckoutAt: path) else { return nil }
+  func inspectRepository(at path: String) async throws -> RepositoryProbe? {
+    guard let root = try await repositoryRoot(forCheckoutAt: path) else { return nil }
     do {
-      let output = try run(arguments: ["rev-parse", "--is-bare-repository"], cwd: path)
+      let output = try await run(arguments: ["rev-parse", "--is-bare-repository"], cwd: path)
       let isBare = output.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
       return RepositoryProbe(root: root, isBare: isBare)
     } catch GitCLIError.exitCode {
@@ -117,9 +135,9 @@ actor GitWorktreeCLI {
 
   /// Fetch URL of `remote` in the repository at `repoPath`; nil when the
   /// remote is not configured or `repoPath` is not a repository.
-  func remoteURL(repoPath: String, remote: String = "origin") throws -> String? {
+  func remoteURL(repoPath: String, remote: String = "origin") async throws -> String? {
     do {
-      let output = try run(arguments: ["remote", "get-url", remote], cwd: repoPath)
+      let output = try await run(arguments: ["remote", "get-url", remote], cwd: repoPath)
       let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmed.isEmpty ? nil : trimmed
     } catch GitCLIError.exitCode {
@@ -133,77 +151,51 @@ actor GitWorktreeCLI {
   /// leaf. Throws `GitCLIError.exitCode` carrying git's stderr on failure
   /// (bad URL, auth, existing non-empty dir) so callers can surface the
   /// reason verbatim.
-  func clone(remoteURL: String, destinationPath: String) throws {
+  func clone(remoteURL: String, destinationPath: String) async throws {
     let destination = URL(fileURLWithPath: destinationPath)
     let parent = destination.deletingLastPathComponent()
     try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-    _ = try run(
+    _ = try await run(
       arguments: ["clone", remoteURL, destinationPath],
-      cwd: parent.path
+      cwd: parent.path,
+      timeout: Self.cloneTimeout
     )
   }
 
   // MARK: - Private
 
-  /// Starts git as `GitLaunch` chooses: `clone` through the user's login
-  /// shell, so a credential helper given by bare name resolves as it does
-  /// in a terminal; local commands directly, retried once in the login shell
-  /// when they report a missing command.
-  private func run(arguments: [String], cwd: String) throws -> String {
-    var result: (status: Int32, stdout: String, stderr: String) = (-1, "", "")
-    for viaLoginShell in GitLaunch.mode(for: arguments).attemptsViaLoginShell {
-      let launch: ProcessLaunch
-      do {
-        launch = try ProcessLaunch.make(
-          executable: gitExecutable, arguments: arguments, env: ProcessInfo.processInfo.environment,
-          cwd: URL(fileURLWithPath: cwd), loginShell: viaLoginShell ? .current() : nil)
-      } catch {
-        throw GitCLIError.executableNotFound
+  /// Runs git through the shared `CommandRunner`, started as `GitLaunch`
+  /// chooses: `clone` through the user's login shell, so a credential helper
+  /// given by bare name resolves as it does in a terminal; local commands
+  /// directly, retried once in the login shell when they report a missing
+  /// command. The environment is `GitProcessEnv.inheriting`. A timeout or a
+  /// cancelled caller stops git and what it started.
+  private func run(
+    arguments: [String], cwd: String, timeout: Duration = GitWorktreeCLI.defaultTimeout
+  ) async throws -> String {
+    let outcome = await runner.run(
+      executable: gitExecutable,
+      arguments: arguments,
+      env: GitProcessEnv.inheriting(from: parentEnvironment),
+      cwd: URL(fileURLWithPath: cwd, isDirectory: true),
+      timeout: timeout,
+      maxOutputBytes: Self.maxOutputBytes,
+      launch: GitLaunch.mode(for: arguments)
+    )
+    switch outcome {
+    case .exited(let code, let stdoutData, let stderrData, _):
+      guard let stdout = String(data: stdoutData, encoding: .utf8),
+        let stderr = String(data: stderrData, encoding: .utf8)
+      else {
+        throw GitCLIError.invalidUTF8
       }
-      result = try runOnce(launch)
-      guard LoginShellLaunch.reportsMissingCommand(exitCode: result.status, stderr: result.stderr) else { break }
-    }
-    if result.status != 0 {
-      throw GitCLIError.exitCode(result.status, stderr: result.stderr)
-    }
-    return result.stdout
-  }
-
-  private func runOnce(_ launch: ProcessLaunch) throws -> (status: Int32, stdout: String, stderr: String) {
-    let process = Process()
-    process.executableURL = launch.executable
-    process.arguments = launch.arguments
-    process.currentDirectoryURL = launch.currentDirectory
-    process.environment = launch.environment
-
-    let stdoutPipe = Pipe.closeOnExec()
-    let stderrPipe = Pipe.closeOnExec()
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-    let stdoutCollector = PipeCollector(pipe: stdoutPipe)
-    let stderrCollector = PipeCollector(pipe: stderrPipe)
-
-    do {
-      try process.run()
-    } catch {
-      try? stdoutPipe.fileHandleForWriting.close()
-      try? stderrPipe.fileHandleForWriting.close()
-      _ = stdoutCollector.finishBlocking()
-      _ = stderrCollector.finishBlocking()
+      guard code == 0 else { throw GitCLIError.exitCode(code, stderr: stderr) }
+      return stdout
+    case .timedOut:
+      throw GitCLIError.timedOut
+    case .spawnFailed:
       throw GitCLIError.executableNotFound
     }
-
-    process.waitUntilExit()
-    let stdoutData = stdoutCollector.finishBlocking().data
-    let stderrData = stderrCollector.finishBlocking().data
-
-    guard let stdout = String(data: stdoutData, encoding: .utf8),
-      let stderr = String(data: stderrData, encoding: .utf8)
-    else {
-      throw GitCLIError.invalidUTF8
-    }
-
-    return (process.terminationStatus, stdout, stderr)
   }
 
   private func parseWorktreeList(_ output: String) -> [GitWorktreeEntry] {
@@ -246,8 +238,8 @@ actor GitWorktreeCLI {
 
 extension GitWorktreeCLI: DependencyKey {
   /// Single shared actor instance; `GitWorktreeCLI` wraps the system `git`
-  /// binary with no per-instance state (the actor just serializes subprocess
-  /// invocations). Used today by `HierarchySidebarFeature`'s Add Project
+  /// binary with no per-instance state (the shared runner bounds concurrent
+  /// subprocesses). Used today by `HierarchySidebarFeature`'s Add Project
   /// flow for add-time gitRoot classification — reconcile-time worktree
   /// enumeration is owned by `HierarchyClient.reconcileDiscoveredWorktrees`
   /// and does not go through this dependency.
