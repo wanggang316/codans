@@ -510,13 +510,12 @@ nonisolated enum GitWorktreeShell {
   static let defaultTimeout: Duration = .seconds(60)
   static let maxOutputBytes = 4 * 1024 * 1024
 
-  /// The process environment with credential prompts disabled, for git
-  /// commands that talk to a remote: a missing credential must fail the
-  /// command, not hang it on a prompt nobody can answer.
+  /// The environment of every git and `wt` command here
+  /// (`GitProcessEnv.inheriting`): no parent `GIT_*` key, `LC_ALL` and
+  /// `GIT_TERMINAL_PROMPT=0` forced, so a missing credential fails the
+  /// command instead of hanging it on a prompt nobody can answer.
   static var nonInteractiveEnvironment: [String: String] {
-    var env = ProcessInfo.processInfo.environment
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    return env
+    GitProcessEnv.inheriting()
   }
 
   /// One-shot invocation returning captured stdout/stderr.
@@ -526,7 +525,7 @@ nonisolated enum GitWorktreeShell {
     await runner.run(
       executable: executable,
       arguments: arguments,
-      env: ProcessInfo.processInfo.environment,
+      env: nonInteractiveEnvironment,
       cwd: cwd,
       timeout: defaultTimeout,
       maxOutputBytes: maxOutputBytes,
@@ -601,7 +600,7 @@ nonisolated enum GitWorktreeShell {
     executable: URL,
     arguments: [String],
     cwd: URL,
-    environment: [String: String] = ProcessInfo.processInfo.environment,
+    environment: [String: String],
     launch mode: CommandLaunch,
     loginShell: LoginShell? = nil,
     splitOnCarriageReturn: Bool = false,
@@ -1080,6 +1079,8 @@ nonisolated extension GitWorktreeClient {
       executable: URL(fileURLWithPath: "/bin/bash"),
       arguments: ["-lc", command],
       cwd: directory,
+      // The user's script, not git: it keeps the app's environment.
+      environment: ProcessInfo.processInfo.environment,
       // A user script that starts its own login bash.
       launch: .direct,
       onSpawn: onSpawn,
@@ -1273,6 +1274,7 @@ nonisolated extension GitWorktreeClient {
             executable: wt,
             arguments: args,
             cwd: spec.repoRoot,
+            environment: GitWorktreeShell.nonInteractiveEnvironment,
             launch: GitWorktreeShell.launch(executable: wt, arguments: args),
             onSpawn: { process in
               processBox.set(process)

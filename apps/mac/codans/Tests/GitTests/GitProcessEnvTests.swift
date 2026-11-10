@@ -64,4 +64,22 @@ struct GitProcessEnvTests {
     #expect(env["HOME"] == nil)
     #expect(env["LC_ALL"] == "C.UTF-8")
   }
+
+  @Test
+  func inheritingDropsEveryGitKeyKeepsTheRestAndForcesPromptAndLocale() {
+    var parent = Dictionary(uniqueKeysWithValues: GitProcessEnv.forbidden.map { ($0, "/parent") })
+    parent["GIT_INDEX_FILE"] = "/parent/index"
+    parent["GIT_TERMINAL_PROMPT"] = "1"
+    parent["LC_ALL"] = "fr_FR.UTF-8"
+    parent["SSH_AUTH_SOCK"] = "/tmp/agent.sock"
+    parent["HTTPS_PROXY"] = "http://proxy:8080"
+    parent["HOME"] = "/Users/test"
+    let env = GitProcessEnv.inheriting(from: parent)
+    #expect(env.keys.filter { $0.hasPrefix("GIT_") } == ["GIT_TERMINAL_PROMPT"])
+    #expect(env["GIT_TERMINAL_PROMPT"] == "0")
+    #expect(env["LC_ALL"] == "C.UTF-8")
+    #expect(env["SSH_AUTH_SOCK"] == "/tmp/agent.sock")
+    #expect(env["HTTPS_PROXY"] == "http://proxy:8080")
+    #expect(env["HOME"] == "/Users/test")
+  }
 }
