@@ -12,7 +12,7 @@ New Agent 对话框（⌘⇧N，`NewAgentFeature` / `NewAgentView`）让用户�
 
 现有相关代码：
 
-- `CodansKit/Skills/SkillInstaller.Target`：只有 claude / codex / agents 三项，用于把 codans 的 Bundled Skill 链接出去，语义是"装到哪"，与本设计的"agent 从哪读"不同。
+- `CodansKit/Skills/SkillInstaller.Target`：只有 claude / codex / agents 三项，用于把 codans 的 Bundled Skill 链接出去，语义是"装到哪"，与本设计的"agent 从哪读"不同。它的目录从 Skill Location 表推导：claude、codex 取该 agent 配置根下的用户级目录（`configRootUserDirectory`），agents 取 Codex 在配置根外的共享目录（`sharedUserDirectories`）；项目范围沿用同名目录。
 - `AgentProfile.usesDedicatedHome` 与 `AgentLaunchCommand.dedicatedHomeURL`：专属 HOME 为 `<state>/agent-homes/<profile id>`。
 
 ## 目标与非目标
@@ -190,11 +190,9 @@ Command Queue（⌘L）的输入框用同一个组件、同一个修饰符和 Sk
 
 - 各 agent 的目录与语法会随版本变化。表格的出处与核对日期写在本文，变更时更新。
 - 插件注册表格式未公开、可能变化。解析失败时只丢弃插件来源，不影响其他来源。
-- `SkillInstaller.Target` 与 Skill Location 表重复描述部分目录。后续改为从本表推导。
 
 ## 后续
 
 - 远程项目：经 SSH 读取远端 Skill 目录。
-- `SkillInstaller.Target` 改为从 Skill Location 表推导。
 - OpenCode：交互式启动能带首条 prompt 并发送后，重跑探针。
 - Gemini CLI：在有可用凭据的机器上重跑探针（[#490](https://github.com/wanggang316/codans/issues/490)）。
