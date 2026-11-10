@@ -99,6 +99,8 @@ case openInEditor = "openInDefaultEditor"
 
 「Toggle Git Viewer」的默认和弦为 **⌘G**，使用 `CommandID.toggleDiffInspector` / `"toggleGitViewer"`。它通过 `RootFeature.diffInspectorToggledForCurrentWorktree` 读取 Settings → General 的 Default Git Viewer：默认首项 Built-in 派发 `.openDiffRequested`，打开当前 Worktree 的独立 Changes / Outgoing 窗口；已安装的外部选择打开对应 git 客户端。下拉不提供 None；设置缺省或 `null` 归一为 Built-in，未知 ID 归一为 Built-in。既有注册表内的外部选择保留；已知但未安装的外部目标不执行打开。
 
+「Pin / Unpin Worktree」的默认和弦为 **⌘⌥P**，使用 `CommandID.toggleCurrentWorktreePinned`，归入 Project & Worktree 分类。它切换当前 Worktree 的置顶状态，效果与侧栏行右键菜单的 Pin Worktree / Unpin Worktree 相同（`RootFeature.toggleCurrentWorktreePinnedRequested`）。主菜单 Worktree 菜单项按当前状态显示 Pin Worktree 或 Unpin Worktree；没有当前 Worktree 或当前 Worktree 是 Project 的 main checkout（`Project.canPin(_:)` 为 `false`）时菜单项禁用，和弦不改变任何置顶状态。与 Archive / Delete 不同，它不要求侧栏持有焦点：终端 Pane 聚焦时菜单项照常截获 ⌘⌥P。主菜单项、侧栏行右键菜单项和 Command Palette 的 Pin / Unpin 项都显示有效绑定。
+
 主窗口工具栏 不提供 View Changes 入口；Worktree 右键菜单的 **Show Changes** 直接打开所点击 Worktree 的内置 Diff 窗口，不读取 Default Git Viewer，也不改变此快捷键的持久化标识。
 
 ### `ShortcutBinding` 与三态模型
