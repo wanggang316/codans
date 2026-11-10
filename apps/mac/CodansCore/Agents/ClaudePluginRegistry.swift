@@ -31,6 +31,35 @@ nonisolated enum ClaudePluginRegistry {
   static func launchSettings(
     extraArguments: String, projectStart: URL?, userHome: URL
   ) -> LaunchSettings {
+    switch settingsFlag(extraArguments) {
+    case .none: return .none
+    case .unknown: return .unknown
+    case .value(let value):
+      if value.hasPrefix("/") { return .file(URL(fileURLWithPath: value).standardizedFileURL) }
+      if value.hasPrefix("~/") {
+        return .file(userHome.appending(path: String(value.dropFirst(2))).standardizedFileURL)
+      }
+      guard let projectStart else { return .unknown }
+      return .file(projectStart.appending(path: value).standardizedFileURL)
+    }
+  }
+
+  /// The `--settings` path when it is relative to the directory the agent
+  /// starts in, else `nil`.
+  static func relativeLaunchSettingsPath(extraArguments: String) -> String? {
+    guard case .value(let value) = settingsFlag(extraArguments),
+      !value.hasPrefix("/"), !value.hasPrefix("~/")
+    else { return nil }
+    return value
+  }
+
+  private enum SettingsFlag {
+    case none
+    case unknown
+    case value(String)
+  }
+
+  private static func settingsFlag(_ extraArguments: String) -> SettingsFlag {
     guard let tokens = PlainShellWords.split(extraArguments) else { return .unknown }
     var values: [String?] = []
     for (index, token) in tokens.enumerated() {
@@ -49,12 +78,7 @@ nonisolated enum ClaudePluginRegistry {
     }
     guard !values.isEmpty else { return .none }
     guard values.count == 1, let value = values[0], !value.isEmpty else { return .unknown }
-    if value.hasPrefix("/") { return .file(URL(fileURLWithPath: value).standardizedFileURL) }
-    if value.hasPrefix("~/") {
-      return .file(userHome.appending(path: String(value.dropFirst(2))).standardizedFileURL)
-    }
-    guard let projectStart else { return .unknown }
-    return .file(projectStart.appending(path: value).standardizedFileURL)
+    return .value(value)
   }
 
   /// The settings files that can set `enabledPlugins`, lowest precedence
@@ -75,12 +99,10 @@ nonisolated enum ClaudePluginRegistry {
 
   /// The skill directories of every enabled plugin under `configRoot`, as
   /// enabled for an agent that starts in `projectStart` with the
-  /// `--settings` file `launchSettings`. A settings file that `exclusion`
-  /// excludes is not read: the new worktree the agent starts in will not
-  /// have it.
+  /// `--settings` file `launchSettings`.
   static func skillDirectories(
     configRoot: URL, home: URL, projectStart: URL?, launchSettings: URL? = nil,
-    managedSettings: URL = managedSettings, excluding exclusion: ProjectFileExclusion? = nil
+    managedSettings: URL = managedSettings
   ) -> [SkillDirectory] {
     let registry = configRoot.appending(path: "plugins/installed_plugins.json", directoryHint: .notDirectory)
     let fileManager = FileManager.default
@@ -91,7 +113,6 @@ nonisolated enum ClaudePluginRegistry {
       configRoot: configRoot, projectStart: projectStart, launchSettings: launchSettings,
       managedSettings: managedSettings
     )
-    .filter { exclusion?.excludes($0) != true }
     .compactMap { fileManager.contents(atPath: $0.path(percentEncoded: false)) }
     return enabledPlugins(registry: registryData, settings: settings, home: home).flatMap { plugin in
       skillDirectories(of: plugin).map { url, layout in

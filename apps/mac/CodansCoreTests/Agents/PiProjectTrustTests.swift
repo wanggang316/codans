@@ -170,8 +170,10 @@ struct PiProjectTrustTests {
     #expect(projectSources().isEmpty)
     try trust([(project, true)])
     #expect(projectSources().count == 2)
+    // A new worktree with every file copied: the agent starts in another
+    // directory, so the main checkout's saved decision does not count.
     let newWorktree = SkillLocationResolver.directories(
-      for: profile, projectStart: project, excluding: ProjectFileExclusion(root: project, paths: []),
+      for: profile, projectStart: project, projectStartExists: false,
       userHome: home, stateDirectory: root.appending(path: "state"))
     #expect(!newWorktree.contains { $0.source == .project })
   }

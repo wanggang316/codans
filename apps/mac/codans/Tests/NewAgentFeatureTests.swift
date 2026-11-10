@@ -324,7 +324,7 @@ struct NewAgentFeatureTests {
   private func makeSkillStore(
     catalog: Catalog, loaded: LockIsolated<[AgentKind]>,
     starts: LockIsolated<[String?]> = LockIsolated([]),
-    copies: LockIsolated<[WorktreeCopyOptions?]> = LockIsolated([]),
+    copies: LockIsolated<[NewWorktreeSource?]> = LockIsolated([]),
     preferredProjectID: ProjectID? = nil
   ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
     let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: preferredProjectID)) {
@@ -494,7 +494,10 @@ struct NewAgentFeatureTests {
     await store.receive(\.skillsLoaded) {
       $0.skills = [Self.projectSkill(at: "/tmp/new-agent/repo")]
     }
-    #expect(starts.value == ["/tmp/new-agent/notes", "/tmp/new-agent/repo"])
+    // The git project's options load next and pick the base ref of the
+    // new worktree, which scans the main checkout again with that ref.
+    await store.skipReceivedActions()
+    #expect(starts.value == ["/tmp/new-agent/notes", "/tmp/new-agent/repo", "/tmp/new-agent/repo"])
   }
 
   @Test
@@ -532,7 +535,7 @@ struct NewAgentFeatureTests {
   @Test
   func changingACopyOptionRescansForANewWorktree() async {
     let loaded = LockIsolated<[AgentKind]>([])
-    let copies = LockIsolated<[WorktreeCopyOptions?]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
     let store = makeSkillStore(
       catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
     await store.send(.onAppear)
@@ -553,17 +556,17 @@ struct NewAgentFeatureTests {
     await store.receive(\.skillsLoaded)
     #expect(
       copies.value == [
-        WorktreeCopyOptions(copyIgnored: false, copyUntracked: false),
-        WorktreeCopyOptions(copyIgnored: true, copyUntracked: false),
-        WorktreeCopyOptions(copyIgnored: true, copyUntracked: true),
+        NewWorktreeSource(ref: "origin/main", copyIgnored: false, copyUntracked: false),
+        NewWorktreeSource(ref: "origin/main", copyIgnored: true, copyUntracked: false),
+        NewWorktreeSource(ref: "origin/main", copyIgnored: true, copyUntracked: true),
       ])
-    #expect(store.state.skillsScope?.newWorktree == WorktreeCopyOptions(copyIgnored: true, copyUntracked: true))
+    #expect(store.state.skillsScope?.newWorktree == NewWorktreeSource(ref: "origin/main", copyIgnored: true, copyUntracked: true))
   }
 
   @Test
   func changingACopyOptionKeepsTheSkillsOfAnExistingWorktree() async {
     let loaded = LockIsolated<[AgentKind]>([])
-    let copies = LockIsolated<[WorktreeCopyOptions?]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
     let store = makeSkillStore(
       catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
     await store.send(.onAppear)
@@ -577,7 +580,42 @@ struct NewAgentFeatureTests {
     await store.send(.worktree(.copyIgnoredToggled(true)))
     await store.send(.worktree(.copyUntrackedToggled(true)))
     #expect(store.state.skills == [Self.projectSkill(at: "/tmp/new-agent/live")])
-    #expect(copies.value == [WorktreeCopyOptions(copyIgnored: false, copyUntracked: false), nil])
+    #expect(copies.value == [NewWorktreeSource(ref: "origin/main", copyIgnored: false, copyUntracked: false), nil])
+  }
+
+  /// A new worktree gets its tracked files from the base ref, so another
+  /// base ref rescans with it.
+  @Test
+  func changingTheBaseRefRescansForANewWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.worktree(.baseRefSelected("main"))) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded)
+    #expect(copies.value.map { $0?.ref } == ["origin/main", "main"])
+  }
+
+  /// The agent can be known before the worktree options load. The first
+  /// scan has no base ref yet; the loaded options scan again with it.
+  @Test
+  func loadedOptionsRescanWithTheBaseRef() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.send(.onAppear)
+    await store.skipReceivedActions()
+    #expect(copies.value.last??.ref == "origin/main")
+    #expect(store.state.skillsScope?.newWorktree?.ref == "origin/main")
   }
 
   /// A branch that no worktree holds is checked out into a new worktree
@@ -585,7 +623,7 @@ struct NewAgentFeatureTests {
   @Test
   func branchWithoutAWorktreeScansWithTheCopyOptions() async {
     let loaded = LockIsolated<[AgentKind]>([])
-    let copies = LockIsolated<[WorktreeCopyOptions?]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
     let store = makeSkillStore(
       catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
     await store.send(.onAppear)
@@ -596,7 +634,7 @@ struct NewAgentFeatureTests {
     await store.receive(\.skillsLoaded)
     await store.send(.targetSelected(.branch("origin/next")))
     await store.receive(\.skillsLoaded)
-    #expect(copies.value.last == WorktreeCopyOptions(copyIgnored: false, copyUntracked: true))
+    #expect(copies.value.last == NewWorktreeSource(ref: "origin/next", copyIgnored: false, copyUntracked: true))
   }
 
   /// A local branch with a slash is not read as `<remote>/<branch>`: the

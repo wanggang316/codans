@@ -75,16 +75,29 @@ struct NewWorktreeFilesTests {
     try skill("draft", in: repo.appending(path: ".claude/skills"))
   }
 
-  private func names(copyIgnored: Bool, copyUntracked: Bool) async -> [String] {
-    let exclusion = await NewWorktreeFiles.exclusion(
-      repoRoot: repo, copyIgnored: copyIgnored, copyUntracked: copyUntracked)
-    let profile = AgentProfile(kind: .claudeCode)
+  private func commit(_ message: String, _ paths: [String]) async throws {
+    try await git(["add", "--"] + paths)
+    try await git(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", message])
+  }
+
+  /// The skills an agent in a new worktree from `ref` gets: the project
+  /// files come from a view of that worktree.
+  private func names(
+    ref: String = "HEAD", copyIgnored: Bool, copyUntracked: Bool,
+    profile: AgentProfile = AgentProfile(kind: .claudeCode)
+  ) async -> [String] {
+    guard
+      let view = await NewWorktreeFiles.makeView(
+        repoRoot: repo, ref: ref, copyIgnored: copyIgnored, copyUntracked: copyUntracked,
+        paths: SkillLocationResolver.projectFilePaths(for: profile))
+    else { return ["<no view>"] }
+    defer { try? FileManager.default.removeItem(at: view) }
     let directories =
-      SkillLocationResolver.projectDirectories(for: profile, startDirectory: repo)
+      SkillLocationResolver.projectDirectories(for: profile, startDirectory: view)
       + SkillLocationResolver.pluginDirectories(
-        for: profile, projectStart: repo, userHome: home, stateDirectory: stateRoot,
-        managedSettings: managed, excluding: exclusion)
-    return SkillScanner.scanSync(directories, excluding: exclusion).map(\.name)
+        for: profile, projectStart: view, userHome: home, stateDirectory: stateRoot,
+        managedSettings: managed)
+    return SkillScanner.scanSync(directories).map(\.name)
   }
 
   @Test
@@ -170,16 +183,55 @@ struct NewWorktreeFilesTests {
   }
 
   @Test
-  func bothCopyOptionsOnExcludeNothing() async {
-    #expect(await NewWorktreeFiles.exclusion(repoRoot: repo, copyIgnored: true, copyUntracked: true) == nil)
+  func bothCopyOptionsCopyEveryFile() async throws {
+    try await fixture(local: #"{"enabledPlugins": {"ignored@market": true}}"#)
+    #expect(
+      await names(copyIgnored: true, copyUntracked: true) == [
+        "draft", "ignored:run", "scratch", "shared", "tracked:run",
+      ])
+  }
+
+  /// The tracked files come from the ref the worktree is created from, not
+  /// from the main checkout: a skill only on the ref is offered, a skill
+  /// only in the checkout is not, and the ref's settings decide plugins.
+  @Test
+  func trackedFilesComeFromTheRef() async throws {
+    try await fixture(local: "{}")
+    try await git(["switch", "-q", "-c", "next"])
+    try skill("next-only", in: repo.appending(path: ".claude/skills"))
+    try write(#"{"enabledPlugins": {}}"#, to: repo.appending(path: ".claude/settings.json"))
+    try await commit("next", [".claude/skills/next-only", ".claude/settings.json"])
+    try await git(["switch", "-q", "main"])
+    #expect(await names(ref: "main", copyIgnored: false, copyUntracked: false) == ["shared", "tracked:run"])
+    #expect(await names(ref: "next", copyIgnored: false, copyUntracked: false) == ["next-only", "shared"])
+
+    // An uncommitted change in the checkout is not in the new worktree.
+    try FileManager.default.removeItem(at: repo.appending(path: ".claude/skills/shared"))
+    #expect(await names(ref: "main", copyIgnored: false, copyUntracked: false) == ["shared", "tracked:run"])
+  }
+
+  /// A tracked symlink to a tracked folder outside the skill directory is
+  /// followed: the new worktree has both.
+  @Test
+  func skillThroughATrackedSymlinkToATrackedTargetIsOffered() async throws {
+    try await fixture(local: "{}")
+    try skill("vendored", in: repo.appending(path: "vendor"))
+    try FileManager.default.createSymbolicLink(
+      atPath: repo.appending(path: ".claude/skills/vendored").path(percentEncoded: false),
+      withDestinationPath: "../../vendor/vendored")
+    try await git(["add", "vendor", ".claude/skills/vendored"])
+    try await git(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "vendored"])
+    #expect(await names(copyIgnored: false, copyUntracked: false).contains("vendored"))
   }
 
   @Test
-  func failedListingExcludesEveryProjectFile() async {
-    // Not a repository: git fails.
-    let exclusion = await NewWorktreeFiles.exclusion(
-      repoRoot: repo, copyIgnored: false, copyUntracked: true)
-    #expect(exclusion?.paths == nil)
-    #expect(exclusion?.excludes(repo.appending(path: ".claude/settings.json")) == true)
+  func unknownRefGivesNoView() async throws {
+    try await fixture(local: "{}")
+    #expect(await names(ref: "no-such-ref", copyIgnored: true, copyUntracked: true) == ["<no view>"])
+  }
+
+  @Test
+  func notARepositoryGivesNoView() async {
+    #expect(await names(copyIgnored: false, copyUntracked: true) == ["<no view>"])
   }
 }

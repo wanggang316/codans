@@ -104,10 +104,11 @@ struct NewAgentFeature {
     let profile: AgentProfile
     /// Where the agent starts, for its project-level skills.
     let projectStart: URL?
-    /// The copy options of the worktree the agent starts in, when the
-    /// target creates one. `projectStart` is then the main checkout, and
-    /// only the project files the options copy count (ADR 0010).
-    var newWorktree: WorktreeCopyOptions?
+    /// Where the files of the worktree the agent starts in come from, when
+    /// the target creates one. `projectStart` is then the main checkout,
+    /// and the project files are read from a view of the new worktree
+    /// (ADR 0010).
+    var newWorktree: NewWorktreeSource?
   }
 
   /// The sidebar's Add Project menu, offered while no project exists.
@@ -395,14 +396,19 @@ struct NewAgentFeature {
         pending.launchAgentPrompt = Self.normalizedPrompt(state.prompt)
         return .send(.delegate(.createWorktree(pending)))
 
-      case .worktree(.copyIgnoredToggled), .worktree(.copyUntrackedToggled):
-        // The copy options decide which project files the new worktree
-        // has. A target in an existing worktree keeps its scope and list.
+      case .worktree(.copyIgnoredToggled), .worktree(.copyUntrackedToggled), .worktree(.baseRefSelected):
+        // The base ref and the copy options decide which project files the
+        // new worktree has. A target in an existing worktree keeps its scope
+        // and list.
         guard skillScope(state: state) != state.skillsScope else { return .none }
         return loadSkills(state: &state)
 
       case .worktree(.optionsLoaded):
-        guard let draft = state.restoring else { return .none }
+        guard let draft = state.restoring else {
+          // The loaded options pick the base ref a new worktree starts from.
+          guard skillScope(state: state) != state.skillsScope else { return .none }
+          return loadSkills(state: &state)
+        }
         state.restoring = nil
         return .merge(restoreWorktree(draft, state: &state), loadSkills(state: &state))
 
@@ -470,14 +476,21 @@ struct NewAgentFeature {
     guard let profile = state.selectedAgent else { return nil }
     let project = hierarchyClient.snapshot().projects.first { $0.id == state.projectID }
     var branch: String?
+    // The ref a new worktree gets its tracked files from: the base ref for
+    // New Worktree; for a branch no worktree holds, the local branch, else
+    // the remote ref a new local branch is made from.
+    var sourceRef = state.worktree?.selectedBaseRef
     if case .branch(let ref) = state.target, let form = state.worktree {
-      branch = Self.branch(for: ref, locals: Set(form.localBranchNamesByLower.values))?.name
+      let resolved = Self.branch(for: ref, locals: Set(form.localBranchNamesByLower.values))
+      branch = resolved?.name
+      sourceRef = resolved.map { $0.remoteRef ?? $0.name }
     }
-    var newWorktree: WorktreeCopyOptions?
+    var newWorktree: NewWorktreeSource?
     if let project, let form = state.worktree,
       SkillLocationResolver.createsWorktree(in: project, branch: branch)
     {
-      newWorktree = WorktreeCopyOptions(copyIgnored: form.copyIgnored, copyUntracked: form.copyUntracked)
+      newWorktree = NewWorktreeSource(
+        ref: sourceRef, copyIgnored: form.copyIgnored, copyUntracked: form.copyUntracked)
     }
     return SkillScope(
       profile: profile,

@@ -65,11 +65,9 @@ nonisolated enum CodexPluginRegistry {
   /// `extraArguments` in each of `projectDirectories` (the working
   /// directory and its parents up to the repository root), has enabled,
   /// called as `<plugin>:<skill>`. Each cached version is listed, newest
-  /// first, so the newest copy keeps a name. A project config that
-  /// `exclusion` excludes (a new worktree will not have it) has no say.
+  /// first, so the newest copy keeps a name.
   static func skillDirectories(
-    configRoot: URL, extraArguments: String, projectDirectories: [URL],
-    excluding exclusion: ProjectFileExclusion? = nil
+    configRoot: URL, extraArguments: String, projectDirectories: [URL]
   ) -> [SkillDirectory] {
     guard case .known(let profile, let launchPlugins) = launchConfig(extraArguments: extraArguments),
       launchPlugins != false
@@ -79,7 +77,7 @@ nonisolated enum CodexPluginRegistry {
     // says anything about plugins gives no plugin skills.
     for directory in projectDirectories {
       let file = directory.appending(path: ".codex/config.toml", directoryHint: .notDirectory)
-      if exclusion?.excludes(file) != true, let text = read(file), Layer(text).mentionsPlugins { return [] }
+      if let text = read(file), Layer(text).mentionsPlugins { return [] }
     }
     guard let base = read(configRoot.appending(path: "config.toml", directoryHint: .notDirectory))
     else { return [] }

@@ -46,15 +46,13 @@ public nonisolated enum SkillLocationResolver {
   /// the `--profile` layer, and the plugin flags (`CodexPluginRegistry`). A
   /// file that is missing or cannot be read gives no plugins (registry) or
   /// no say (settings). Settings flags in the
-  /// profile's extra arguments that cannot be read give no plugins. A
-  /// settings or project config file that `exclusion` excludes has no say.
+  /// profile's extra arguments that cannot be read give no plugins.
   static func pluginDirectories(
     for profile: AgentProfile,
     projectStart: URL?,
     userHome: URL,
     stateDirectory: URL,
     managedSettings: URL = ClaudePluginRegistry.managedSettings,
-    excluding exclusion: ProjectFileExclusion? = nil,
     isRepositoryRoot: (URL) -> Bool = hasGitEntry
   ) -> [SkillDirectory] {
     let location = profile.descriptor.skillLocation
@@ -74,12 +72,11 @@ public nonisolated enum SkillLocationResolver {
       let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       return ClaudePluginRegistry.skillDirectories(
         configRoot: root, home: home, projectStart: projectStart,
-        launchSettings: launchSettings, managedSettings: managedSettings, excluding: exclusion)
+        launchSettings: launchSettings, managedSettings: managedSettings)
     case .codex:
       let searched = projectStart.map { searchedDirectories(from: $0, isRepositoryRoot: isRepositoryRoot) } ?? []
       return CodexPluginRegistry.skillDirectories(
-        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched,
-        excluding: exclusion)
+        configRoot: root, extraArguments: profile.extraArguments, projectDirectories: searched)
     }
   }
 
@@ -125,15 +122,15 @@ public nonisolated enum SkillLocationResolver {
   /// Project-level, user-level, and enabled plugin skill directories for
   /// `profile`, in that order. `projectStart` is the directory the agent
   /// starts in (see `projectStartDirectory(in:branch:)`), `nil` when there
-  /// is none. `exclusion` lists the project files a new worktree will not
-  /// have; the plugin settings skip them, and so must the scan of the
-  /// project directories (`SkillScanner.scan(_:precedence:excluding:)`).
-  /// An agent with a project trust check (Pi) gets project directories only
-  /// in a project it trusts.
+  /// is none. `projectStartExists` is `false` when `projectStart` stands in
+  /// for a new worktree (`NewWorktreeFiles`): the agent will start in
+  /// another directory, so a decision saved for `projectStart` does not
+  /// apply to it. An agent with a project trust check (Pi) gets project
+  /// directories only in a project it trusts.
   public static func directories(
     for profile: AgentProfile,
     projectStart: URL?,
-    excluding exclusion: ProjectFileExclusion? = nil,
+    projectStartExists: Bool = true,
     userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
     stateDirectory: URL = AppDirectories.stateDirectory(),
     isRepositoryRoot: (URL) -> Bool = hasGitEntry
@@ -143,7 +140,7 @@ public nonisolated enum SkillLocationResolver {
       projectStart.map { start in
         guard
           trustsProject(
-            profile, start: start, startExists: exclusion == nil, userHome: userHome,
+            profile, start: start, startExists: projectStartExists, userHome: userHome,
             stateDirectory: stateDirectory)
         else { return [] }
         return projectDirectories(for: profile, startDirectory: start, isRepositoryRoot: isRepositoryRoot)
@@ -151,7 +148,7 @@ public nonisolated enum SkillLocationResolver {
     return project + userDirectories(for: profile, userHome: userHome, stateDirectory: stateDirectory)
       + pluginDirectories(
         for: profile, projectStart: projectStart, userHome: userHome, stateDirectory: stateDirectory,
-        excluding: exclusion, isRepositoryRoot: isRepositoryRoot)
+        isRepositoryRoot: isRepositoryRoot)
   }
 
   /// `false` when the profile's launch flags turn skills off: Pi's
@@ -168,8 +165,7 @@ public nonisolated enum SkillLocationResolver {
   }
 
   /// `true` when the agent of `profile` reads project skills in `start`.
-  /// `startExists` is `false` when `start` (the main checkout) stands in
-  /// for a new worktree, which is when `directories` gets an exclusion.
+  /// `startExists` is `false` when `start` stands in for a new worktree.
   static func trustsProject(
     _ profile: AgentProfile, start: URL, startExists: Bool, userHome: URL, stateDirectory: URL
   ) -> Bool {
@@ -192,7 +188,9 @@ public nonisolated enum SkillLocationResolver {
   ///
   /// - An existing worktree that holds `branch`: that worktree.
   /// - A new worktree, or a branch no worktree holds: the worktree does not
-  ///   exist yet, so the project's main checkout stands in for it.
+  ///   exist yet, so the project's main checkout stands in for it. Its
+  ///   files are not the new worktree's: read a `NewWorktreeFiles` view
+  ///   built from it instead.
   /// - A folder or a workspace project: its one working directory.
   /// - A remote project: `nil`. codans cannot read the other host.
   public static func projectStartDirectory(in project: Project, branch: String?) -> URL? {
@@ -211,13 +209,35 @@ public nonisolated enum SkillLocationResolver {
   }
 
   /// `true` when an agent launched in `project` on `branch` (`nil` for a
-  /// new worktree) gets a new worktree first. Then the main checkout stands
-  /// in for it, less the files the copy options leave out
-  /// (`ProjectFileExclusion`).
+  /// new worktree) gets a new worktree first. Its project files are then
+  /// read from a view of the new worktree (`projectFilePaths(for:)`).
   public static func createsWorktree(in project: Project, branch: String?) -> Bool {
     guard project.supportsWorktrees, !project.isWorkspace else { return false }
     guard let branch else { return true }
     return !project.worktrees.contains { !$0.archived && $0.branch == branch }
+  }
+
+  /// The project files skill completion reads for `profile`, relative to
+  /// the directory the agent starts in: its project skill directories and
+  /// the project settings that turn its plugins on or off. A view of a new
+  /// worktree holds these paths (`NewWorktreeFiles`).
+  public static func projectFilePaths(for profile: AgentProfile) -> [String] {
+    let location = profile.descriptor.skillLocation
+    guard location.supportsCompletion else { return [] }
+    var paths = location.projectDirectories.map(\.path)
+    switch location.plugins {
+    case .claudeCode?:
+      paths += [".claude/settings.json", ".claude/settings.local.json"]
+      if let settings = ClaudePluginRegistry.relativeLaunchSettingsPath(extraArguments: profile.extraArguments) {
+        paths.append(settings)
+      }
+    case .codex?:
+      paths.append(".codex/config.toml")
+    case nil:
+      break
+    }
+    var seen = Set<String>()
+    return paths.filter { seen.insert($0).inserted }
   }
 
   /// Project-level skill directories for `profile`, searched from

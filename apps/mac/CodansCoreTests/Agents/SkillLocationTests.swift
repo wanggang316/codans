@@ -304,4 +304,23 @@ struct SkillLocationTests {
       isRepositoryRoot: { Self.path($0) == Self.path(repo) })
     #expect(SkillScanner.scanSync(claude).isEmpty)
   }
+
+  @Test
+  func projectFilePathsAreTheProjectSkillsAndPluginSettingsTheAgentReads() {
+    #expect(
+      SkillLocationResolver.projectFilePaths(for: AgentProfile(kind: .claudeCode))
+        == [".claude/skills", ".claude/settings.json", ".claude/settings.local.json"])
+    #expect(
+      SkillLocationResolver.projectFilePaths(
+        for: AgentProfile(kind: .claudeCode, extraArguments: "--settings conf/agent.json"))
+        == [".claude/skills", ".claude/settings.json", ".claude/settings.local.json", "conf/agent.json"])
+    #expect(
+      SkillLocationResolver.projectFilePaths(
+        for: AgentProfile(kind: .claudeCode, extraArguments: "--settings /etc/agent.json")).count == 3)
+    #expect(
+      SkillLocationResolver.projectFilePaths(for: AgentProfile(kind: .codex))
+        == [".agents/skills", ".codex/config.toml"])
+    #expect(SkillLocationResolver.projectFilePaths(for: AgentProfile(kind: .pi)) == [".pi/skills", ".agents/skills"])
+    #expect(SkillLocationResolver.projectFilePaths(for: AgentProfile(kind: .gemini)).isEmpty)
+  }
 }
