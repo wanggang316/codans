@@ -322,7 +322,8 @@ struct NewAgentFeatureTests {
   }
 
   private typealias RemoteLoad =
-    @Sendable (AgentProfile, RemoteHost, String?, Bool) async -> Result<[AgentSkillEntry], RemoteSkillReadError>
+    @Sendable (AgentProfile, RemoteHost, String?, NewWorktreeSource?) async
+    -> Result<[AgentSkillEntry], RemoteSkillReadError>
 
   private func makeSkillStore(
     catalog: Catalog, loaded: LockIsolated<[AgentKind]>,
@@ -427,7 +428,7 @@ struct NewAgentFeatureTests {
       worktrees: [Worktree(name: "repo", path: "/srv/repo")])
     let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded) {
       profile, readHost, start, creates in
-      reads.withValue { $0.append("\(profile.kind.rawValue) \(readHost.alias) \(start ?? "-") \(creates)") }
+      reads.withValue { $0.append("\(profile.kind.rawValue) \(readHost.alias) \(start ?? "-") \(creates != nil)") }
       return .success([Self.projectSkill(at: "/srv/repo")])
     }
     await store.send(.onAppear)

@@ -24,7 +24,10 @@ private actor LocalHostRunner: CommandRunner {
     return await FoundationCommandRunner().run(
       executable: URL(fileURLWithPath: "/bin/sh"),
       arguments: ["-c", arguments.last ?? ""],
-      env: ["HOME": home.path(percentEncoded: false), "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"],
+      env: [
+        "HOME": home.path(percentEncoded: false), "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
+        "TMPDIR": home.deletingLastPathComponent().appending(path: "tmp").path(percentEncoded: false),
+      ],
       cwd: home, timeout: timeout, maxOutputBytes: maxOutputBytes)
   }
 
@@ -87,7 +90,7 @@ struct RemoteSkillReaderTests {
     let runner = LocalHostRunner(home: home)
     let entries = try await reader(runner).load(
       profile: AgentProfile(kind: .claudeCode), projectStart: repo.path(percentEncoded: false),
-      createsWorktree: false, stateDirectory: root.appending(path: "state"))
+      newWorktree: nil, stateDirectory: root.appending(path: "state"))
 
     #expect(entries.map(\.name) == ["docs:pdf", "mine", "team"])
     #expect(entries.map(\.source) == [.plugin, .user, .project])
@@ -105,20 +108,80 @@ struct RemoteSkillReaderTests {
     profile.envVars = ["CLAUDE_CONFIG_DIR": moved.path(percentEncoded: false)]
 
     let entries = try await reader(LocalHostRunner(home: home)).load(
-      profile: profile, projectStart: repo.path(percentEncoded: false), createsWorktree: false,
+      profile: profile, projectStart: repo.path(percentEncoded: false), newWorktree: nil,
       stateDirectory: root.appending(path: "state"))
 
     #expect(entries.map(\.name) == ["relocated", "team"])
   }
 
+  private func git(_ arguments: String...) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", repo.path(percentEncoded: false)] + arguments
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    try #require(process.terminationStatus == 0)
+  }
+
+  /// The tmp directory of the fixture host, where views are made.
+  private var hostTemp: URL { root.appending(path: "tmp", directoryHint: .isDirectory) }
+
   @Test
-  func aNewWorktreeListsUserSkillsOnly() async throws {
+  func aNewWorktreeListsTheProjectSkillsOfItsRef() async throws {
     try claudeFixture()
+    try FileManager.default.removeItem(at: repo.appending(path: ".git"))
+    try FileManager.default.createDirectory(at: hostTemp, withIntermediateDirectories: true)
+    try git("init", "-q", "-b", "main")
+    try skill("shared", in: repo.appending(path: "tools"))
+    try FileManager.default.createSymbolicLink(
+      atPath: repo.appending(path: ".claude/skills/linked").path(percentEncoded: false),
+      withDestinationPath: "../../tools/shared")
+    try git("add", ".")
+    try git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    // Not in the ref: the new worktree does not get it.
+    try skill("wip", in: repo.appending(path: ".claude/skills"))
+
+    let runner = LocalHostRunner(home: home)
+    let entries = try await reader(runner).load(
+      profile: AgentProfile(kind: .claudeCode), projectStart: repo.path(percentEncoded: false),
+      newWorktree: NewWorktreeSource(ref: "main", copyIgnored: true, copyUntracked: true),
+      stateDirectory: root.appending(path: "state"))
+
+    #expect(entries.map(\.name) == ["docs:pdf", "mine", "shared", "team"])
+    let team = entries.first { $0.name == "team" }?.url.path(percentEncoded: false)
+    #expect(team?.contains("codans-new-worktree.") == true)
+    // The view is gone after the load.
+    #expect(try FileManager.default.contentsOfDirectory(atPath: hostTemp.path(percentEncoded: false)).isEmpty)
+  }
+
+  @Test
+  func aNewWorktreeWithAnUnknownRefListsUserSkillsOnly() async throws {
+    try claudeFixture()
+    try FileManager.default.createDirectory(at: hostTemp, withIntermediateDirectories: true)
     let entries = try await reader(LocalHostRunner(home: home)).load(
       profile: AgentProfile(kind: .claudeCode), projectStart: repo.path(percentEncoded: false),
-      createsWorktree: true, stateDirectory: root.appending(path: "state"))
+      newWorktree: NewWorktreeSource(ref: "no-such-ref", copyIgnored: false, copyUntracked: false),
+      stateDirectory: root.appending(path: "state"))
 
     #expect(entries.map(\.name) == ["mine"])
+    #expect(try FileManager.default.contentsOfDirectory(atPath: hostTemp.path(percentEncoded: false)).isEmpty)
+  }
+
+  @Test
+  func aDanglingTargetStaysInsideTheView() {
+    #expect(RemoteNewWorktreeFiles.danglingTarget(link: ".claude/skills/a", target: "../../tools/a") == "tools/a")
+    #expect(RemoteNewWorktreeFiles.danglingTarget(link: ".claude/skills/a", target: "../../../outside") == nil)
+    #expect(RemoteNewWorktreeFiles.danglingTarget(link: ".claude/skills/a", target: "/abs/a") == nil)
+  }
+
+  @Test
+  func theViewIsRemovedOnlyByItsName() async throws {
+    let runner = RecordingCommandRunner()
+    await RemoteNewWorktreeFiles(reader: reader(runner)).removeView("/tmp/codans-new-worktree.abc")
+    let call = try #require(await runner.calls.first)
+    #expect(call.arguments.last?.contains("codans-new-worktree.*) rm -rf") == true)
   }
 
   @Test
@@ -133,7 +196,7 @@ struct RemoteSkillReaderTests {
         reason: "Could not connect to alice@devbox: ssh: connect to host devbox port 22: Connection refused")
     ) {
       try await reader(runner).load(
-        profile: AgentProfile(kind: .claudeCode), projectStart: "/srv/app", createsWorktree: false)
+        profile: AgentProfile(kind: .claudeCode), projectStart: "/srv/app", newWorktree: nil)
     }
   }
 
@@ -142,7 +205,7 @@ struct RemoteSkillReaderTests {
     let runner = RecordingCommandRunner(outcomes: [.timedOut])
     await #expect(throws: RemoteSkillReadError(reason: "alice@devbox did not answer in time")) {
       try await reader(runner).load(
-        profile: AgentProfile(kind: .claudeCode), projectStart: "/srv/app", createsWorktree: false)
+        profile: AgentProfile(kind: .claudeCode), projectStart: "/srv/app", newWorktree: nil)
     }
   }
 
@@ -153,7 +216,7 @@ struct RemoteSkillReaderTests {
       .exited(code: 0, stdout: Data(reply.utf8), stderr: Data(), stdoutOverflow: false)
     ])
     _ = try? await reader(runner).load(
-      profile: AgentProfile(kind: .claudeCode), projectStart: "/srv/app", createsWorktree: false)
+      profile: AgentProfile(kind: .claudeCode), projectStart: "/srv/app", newWorktree: nil)
 
     let call = try #require(await runner.calls.first)
     #expect(call.timeout == RemoteSkillReader.timeout)

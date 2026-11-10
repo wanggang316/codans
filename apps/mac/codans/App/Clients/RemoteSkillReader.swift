@@ -31,25 +31,59 @@ nonisolated struct RemoteSkillReader: Sendable {
   var runner: any CommandRunner = FoundationCommandRunner()
 
   /// The skills `profile`'s agent can call when it starts in the remote
-  /// directory `projectStart`. `createsWorktree` is `true` when the agent
-  /// starts in a worktree that does not exist yet: its project files are
-  /// unknown, so only user skills are listed (ADR 0010).
+  /// directory `projectStart`. `newWorktree` is set when the agent starts
+  /// in a worktree that does not exist yet: `projectStart` is then the main
+  /// checkout, and the project files are read from a view of the new
+  /// worktree on the host (`RemoteNewWorktreeFiles`). Without its ref, or
+  /// when git on the host fails, only user skills are listed (ADR 0010).
   func load(
-    profile: AgentProfile, projectStart: String?, createsWorktree: Bool,
+    profile: AgentProfile, projectStart: String?, newWorktree: NewWorktreeSource?,
     stateDirectory: URL = AppDirectories.stateDirectory()
   ) async throws(RemoteSkillReadError) -> [AgentSkillEntry] {
     let snapshot = SkillFileSnapshot()
     let system = try await fetch([], into: snapshot)
+    guard let newWorktree else {
+      return try await resolve(
+        profile, start: projectStart, startExists: true, system: system, stateDirectory: stateDirectory,
+        snapshot: snapshot)
+    }
+    guard let root = projectStart, let ref = newWorktree.ref,
+      let view = try await RemoteNewWorktreeFiles(reader: self).makeView(
+        repoRoot: root, ref: ref, paths: SkillLocationResolver.projectFilePaths(for: profile))
+    else {
+      return try await resolve(
+        profile, start: nil, startExists: true, system: system, stateDirectory: stateDirectory,
+        snapshot: snapshot, userOnly: true)
+    }
+    do {
+      let entries = try await resolve(
+        profile, start: view, startExists: false, system: system, stateDirectory: stateDirectory,
+        snapshot: snapshot)
+      await RemoteNewWorktreeFiles(reader: self).removeView(view)
+      return entries
+    } catch {
+      await RemoteNewWorktreeFiles(reader: self).removeView(view)
+      throw error
+    }
+  }
+
+  /// Resolves and scans against `snapshot` until the host has answered
+  /// every read. `userOnly` lists the user skills alone.
+  private func resolve(
+    _ profile: AgentProfile, start: String?, startExists: Bool, system: System, stateDirectory: URL,
+    snapshot: SkillFileSnapshot, userOnly: Bool = false
+  ) async throws(RemoteSkillReadError) -> [AgentSkillEntry] {
     let home = URL(fileURLWithPath: system.home, isDirectory: true)
+    let start = start.map { URL(fileURLWithPath: $0, isDirectory: true) }
     let precedence = profile.descriptor.skillLocation.precedence
-    let start = createsWorktree ? nil : projectStart.map { URL(fileURLWithPath: $0, isDirectory: true) }
     do {
       let entries = try await snapshot.settle(maxRounds: Self.maxRounds) {
         let directories =
-          createsWorktree
+          userOnly
           ? SkillLocationResolver.userDirectories(for: profile, userHome: home, stateDirectory: stateDirectory)
           : SkillLocationResolver.directories(
-            for: profile, projectStart: start, userHome: home, stateDirectory: stateDirectory,
+            for: profile, projectStart: start, projectStartExists: startExists, userHome: home,
+            stateDirectory: stateDirectory,
             managedSettings: SkillLocationResolver.claudeManagedSettings(kernel: system.kernel),
             fileSystem: snapshot)
         return SkillScanner.scanSync(directories, precedence: precedence, fileSystem: snapshot)
@@ -78,17 +112,28 @@ nonisolated struct RemoteSkillReader: Sendable {
   private func fetch(
     _ requests: [SkillFileSnapshot.Request], into snapshot: SkillFileSnapshot
   ) async throws(RemoteSkillReadError) -> System {
-    let (executable, arguments) = SSHCommand.invocation(
+    let reply = try await run(
+      Self.script,
+      arguments: [String(Self.fileLimit), String(Self.skillPrefixBytes)] + Self.arguments(for: requests))
+    guard let system = Self.apply(reply, requests: requests, to: snapshot) else {
+      throw RemoteSkillReadError(reason: "\(host.authority) sent a reply codans cannot read")
+    }
+    return system
+  }
+
+  /// Runs `script` under `/bin/sh` on the host, with `arguments` as its
+  /// positional parameters, and returns its output.
+  func run(_ script: String, arguments: [String]) async throws(RemoteSkillReadError) -> Data {
+    let (executable, sshArguments) = SSHCommand.invocation(
       host: host,
       executable: "/bin/sh",
-      arguments: ["-c", Self.script, "sh", String(Self.fileLimit), String(Self.skillPrefixBytes)]
-        + Self.arguments(for: requests),
+      arguments: ["-c", script, "sh"] + arguments,
       workingDirectory: nil,
       extraOptions: SSHCommand.backgroundProbeOptions
     )
     let outcome = await runner.run(
       executable: executable,
-      arguments: arguments,
+      arguments: sshArguments,
       env: ProcessInfo.processInfo.environment,
       cwd: URL(fileURLWithPath: NSHomeDirectory()),
       timeout: Self.timeout,
@@ -96,10 +141,7 @@ nonisolated struct RemoteSkillReader: Sendable {
     )
     switch outcome {
     case .exited(0, let stdout, _, false):
-      guard let system = Self.apply(stdout, requests: requests, to: snapshot) else {
-        throw RemoteSkillReadError(reason: "\(host.authority) sent a reply codans cannot read")
-      }
-      return system
+      return stdout
     case .exited(0, _, _, true):
       throw RemoteSkillReadError(reason: "The skills on \(host.authority) are too large to list")
     case .exited(let code, _, let stderr, _):
@@ -127,6 +169,19 @@ nonisolated struct RemoteSkillReader: Sendable {
 
   static let replyMarker = "===CODANS-SKILL-FILES==="
 
+  /// The record writers every script here shares, then `replyMarker`:
+  /// `put <kind> <index> <count>` writes a header, `none` an empty record,
+  /// `str` a string, `bytes <kind> <index> <file> <count>` the first bytes
+  /// of a file.
+  static let prelude = #"""
+    put() { printf '%s %s %s\n' "$1" "$2" "$3"; }
+    none() { put "$1" "$2" 0; printf '\n'; }
+    str() { n=$(printf '%s' "$3" | wc -c | tr -d ' \t'); put "$1" "$2" "$n"; printf '%s\n' "$3"; }
+    bytes() { put "$1" "$2" "$4"; head -c "$4" "$3" 2>/dev/null; printf '\n'; }
+    printf '%s\n' '===CODANS-SKILL-FILES==='
+
+    """#
+
   /// POSIX `sh`. `$1` is the file size limit, `$2` the `SKILL.md` prefix
   /// size, then one `<op> <path>` pair per request (paths travel as
   /// arguments, never as script text). After `replyMarker` each answer is a
@@ -136,13 +191,10 @@ nonisolated struct RemoteSkillReader: Sendable {
   /// directory `d`, then `c` per child name and `s` for that child's
   /// `SKILL.md`; a real path `r`. Lines before the marker are login-shell
   /// banners. `wc -c` and `head -c` are byte exact, so any byte can cross.
-  static let script = #"""
+  static let script = prelude + scriptBody
+
+  private static let scriptBody = #"""
     limit=$1; prefix=$2; shift 2
-    put() { printf '%s %s %s\n' "$1" "$2" "$3"; }
-    none() { put "$1" "$2" 0; printf '\n'; }
-    str() { n=$(printf '%s' "$3" | wc -c | tr -d ' \t'); put "$1" "$2" "$n"; printf '%s\n' "$3"; }
-    bytes() { put "$1" "$2" "$4"; head -c "$4" "$3" 2>/dev/null; printf '\n'; }
-    printf '%s\n' '===CODANS-SKILL-FILES==='
     str h 0 "$HOME"
     str k 0 "$(uname -s 2>/dev/null)"
     i=0
