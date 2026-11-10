@@ -82,7 +82,7 @@ sleep 0.5
 check "focus is on the original app before the commands" test "$("$tool" front)" = "$front_before"
 
 # ---------- observation ----------
-check "tree shows the toggle with its identifier and action" sh -c "'$tool' tree $p | grep -q 'AXButton \"Toggle\" #fixture.toggle {Press}'"
+check "tree shows the toggle with its identifier and action" sh -c "'$tool' tree $p | grep -Eq 'AXButton \"Toggle\" #fixture.toggle( \[[a-z,]+\])? {Press}'"
 check "tree --window limits the dump to one window" sh -c "! '$tool' tree $p --window 'Fixture Second' | grep -q Toggle"
 check "find matches an identifier" ax find any fixture.toggle
 check_exit "find exits 1 when nothing matches" 1 ax find AXButton "No such button"
