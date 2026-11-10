@@ -145,11 +145,22 @@ actor GitWorktreeCLI {
 
   // MARK: - Private
 
+  /// Runs git through the user's login shell (`LoginShellLaunch`), so a
+  /// credential helper given by bare name resolves as it does in a terminal.
   private func run(arguments: [String], cwd: String) throws -> String {
+    let launch: ProcessLaunch
+    do {
+      launch = try LoginShellLaunch.prepare(
+        executable: gitExecutable, arguments: arguments,
+        env: ProcessInfo.processInfo.environment, cwd: URL(fileURLWithPath: cwd))
+    } catch {
+      throw GitCLIError.executableNotFound
+    }
     let process = Process()
-    process.executableURL = gitExecutable
-    process.arguments = arguments
-    process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    process.executableURL = launch.executable
+    process.arguments = launch.arguments
+    process.currentDirectoryURL = launch.currentDirectory
+    process.environment = launch.environment
 
     let stdoutPipe = Pipe.closeOnExec()
     let stderrPipe = Pipe.closeOnExec()

@@ -24,7 +24,7 @@ codans 有两种构建同时存在于一台机器上：从 `/Applications` 运�
 
 - 按分支或 worktree 隔离。所有 Debug 构建共用 `codans-dev`；需要时用 `CODANS_CONFIG_DIR` 手动隔离。
 - 给两个通道不同的 bundle id。这会拆开通知中心身份、Sparkle 状态和 URL scheme 注册，代价大于收益。
-- 子进程环境的白名单卫生（git、gh 的 env 转发）。它有自己的机制（`GitProcessEnv`），不属于 Pane 环境组装契约。
+- 子进程环境的白名单卫生（git、gh、glab 的 env 转发）。它有自己的机制（`GitProcessEnv`、各平台的 `makeEnv`），不属于 Pane 环境组装契约；本文只记录这些命令经 login shell 启动的方式（见「后台命令经 login shell 启动」）。
 
 ## 设计
 
@@ -126,6 +126,43 @@ pane 里 agent 或脚本执行的 codans 命令，必须落到**生成这个 pan
 
 agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守一道（上一节）：release 的 `codans` 发现所在 pane 属于 dev 构建就拒绝并指出该用 `codans-dev`。需要确定二进制身份的脚本使用 `"$CODANS_CLI"`；裸命令的结果仍取决于调用方的 PATH。
 
+### 后台命令经 login shell 启动
+
+从 Dock 或 Finder 打开的 app 由 launchd 启动，`PATH` 只有 `/usr/bin:/bin:/usr/sbin:/sbin`。app 直接启动的 git 找不到 Homebrew、mise 一类工具装的程序，也就找不到 git 再启动的程序：仓库本地配置的 `credential.<url>.helper = !glab auth git-credential` 报 `glab: command not found`，随后 `could not read Username`。同一条命令在 codans 终端里能成功，因为 Ghostty 把每个终端作为 login shell 启动。
+
+所以后台的 git、内置 `wt`、`gh`、`glab` **每次**都经用户的 login shell 启动，不在启动时读一次 `PATH`：shell 配置的改动对下一条命令生效，不需要重启 app。一次调用的形状（`LoginShellLaunch`，`codans/Process/`）：
+
+```
+<shell> -l -c '<script>' -- <cwd> KEY=VALUE… <executable> <arguments…>
+
+script:
+  save "$@" (cwd, then argv); set --        rc cannot see or change the command
+  source rc  </dev/null >/dev/null 2>&1      banners do not reach captured output
+  builtin cd -- <cwd> || exit 125            after the rc, which may cd
+  exec /usr/bin/env -i "PATH=$PATH" KEY=VALUE… <executable> <arguments…>
+```
+
+- **shell**：用户数据库里的 login shell（`getpwuid`），是 zsh、bash、fish 之一时用它，其他一律 `/bin/zsh`。每次调用都重新读。
+- **rc**：`-l` 读 profile（`/etc/zprofile` 的 `path_helper`、`brew shellenv`）；`-c` 不是交互式，不读 rc，所以显式 source：zsh `${ZDOTDIR:-$HOME}/.zshrc`，bash `~/.bashrc`。fish 例外：fish 对每个 `-c` 都自己加载 `config.fish` 与 `conf.d`（在脚本之前，且看不到 `$argv`），再 source 一次会执行两遍，所以不再 source；它的输出也就无法重定向，靠 fish 的惯例 `status is-interactive` 守住。
+- **环境**：rc 执行完后，命令拿到的**恰好**是调用方给的环境，只有 `PATH` 取自 login shell（`env -i` 加上逐个 `KEY=VALUE`）。所以每个调用方的环境契约在 rc 之后依然成立：`GitProcessEnv` 的白名单与剥掉的 `GIT_*`、强制的 `LC_ALL`、`GIT_TERMINAL_PROMPT=0`、`gh` / `glab` 剥掉的 token 变量。rc 导出的被剥键（例如 `GIT_DIR`、`GITLAB_TOKEN`）到不了命令。
+- **工作目录**：`Process` 以 `/` 启动 shell，由脚本在 rc 之后 `builtin cd`。目录不存在时退出码 125（`LoginShellLaunch.directoryFailureStatus`），表示「命令没有启动」，不与 git 自己的失败混淆。
+- **进程**：`exec` 让命令替换 shell，pid 不变，runner 的超时与取消直接杀到真实进程。`Process` 把子进程放进独立进程组，超时或取消时 runner 向整个进程组发 SIGTERM、1 秒后 SIGKILL，rc 里还没结束的命令和 git 启动的 helper 也一起结束。
+- **前置检查**：可执行文件不存在时，不启动 shell，直接返回 `binary not found`，与直接启动时相同。路径含 `=` 时报错（`env` 会把它当作赋值）。
+
+入口只有一个：`CommandRunner.run(…, launch:)` 的 `CommandLaunch.loginShell`。`GitWorktreeShell.runStream`（`wt sw`、clone、fetch 的流式输出）和 `GitWorktreeCLI`（同步 git）自己持有 `Process`，二者调用同一个 `LoginShellLaunch.prepare`，不另写一套。
+
+| 命令 | 启动方式 | 原因 |
+|---|---|---|
+| 本地 git（`LiveGitService`、`GitEnvironmentProbe`、`GitWorktreeShell`、`GitWorktreeCLI`） | login shell | git 会再启动 credential helper、`ext::` 命令、hook，它们要用户的 `PATH` |
+| 内置 `wt` | login shell | 它调用 git 和用户工具 |
+| `gh`、`glab`（`GitHubGitPlatform`、`GitLabGitPlatform`） | login shell | 同上；可执行文件本身仍由 `CLIExecutableResolver` 解析为绝对路径 |
+| 终端 | 不包装 | Ghostty 已经以 login shell 启动 |
+| 内置二进制（`zmx`、编辑器 CLI 等） | 直接 | 路径是绝对的，不依赖用户 `PATH` |
+| 远程命令（`ssh`，含远程 git、`ssh -G`） | 直接 | 远端已在远程 login shell 里执行；本地 ssh 需要的是 launchd 的 `SSH_AUTH_SOCK` |
+| 自己启动 shell 的命令（Agent 安装探测、workflow 的 `/bin/sh -c`） | 直接 | 由调用方决定 shell |
+
+**代价**：每条命令多一次 shell 启动和一次 rc 执行，耗时取决于用户的 rc。空 rc 时 `git --version` 的中位数增加约 5 ms；加载 oh-my-zsh、pyenv、starship、nvm 的 rc 增加约 2 秒（Apple Silicon Mac mini 上 11 次的中位数）。rc 越重，后台 git 越慢。
+
 ### 覆盖点（隔离缝）
 
 | 变量 | 作用 | 典型用法 |
@@ -159,7 +196,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 ## Cross-Cutting
 
-- **测试**：`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
+- **测试**：`LoginShellLaunchTests`（调用构造）、`LoginShellRunnerIntegrationTests`（临时 `HOME` 下的真实 zsh / bash：rc 加的 `PATH`、banner、`set --`、`cd /`、125、超时与取消不留子进程、rc 导出的 `GIT_*` 到不了 git）；`BuildChannelTests`、`CodansEnvironmentTests`、`HandoffLayoutTests`（CodansCore）；`SocketDiscoveryTests`（CodansKit）；`SocketPathsTests`、`PaneEnvironmentTests`、`HierarchyManagerResolvedEnvTests`（app）。`CodansEnvironmentTests` 把类型化持有者钉在目录上，任何一处拼写漂移都会在这里失败。
 - **可观测性**：`codans doctor` 打印它解析到的 socket 与 `socketFromEnvironment`；「命令跑到别的 app」先看这个。
 - **调用方身份**：pane 导出 `CODANS_PANE_ID`；服务端由该 Pane 推导所属 Tab、Worktree 和 Project。
 
@@ -170,6 +207,7 @@ agent 按 skill 敲裸 `codans` 的情况仍会发生，所以 CLI 自己再守�
 
 - **`/usr/local/bin` 之外的同名二进制。** `CLIInvocation.command` 只检查安装目录，`/opt/homebrew/bin/codans` 一类不会被察觉。两个通道都可能遇到 PATH 中同名二进制遮蔽；需要确定身份时使用 `CODANS_CLI` 的绝对路径。
 - **`CODANS_CLI_NAME` 与 `BuildChannel.slug` 分叉。** 两处各写一份；`CLIBundleLocator` 在真实 bundle 上找不到二进制时安装器会报 bundleMissing，是最早的信号。
+- **重 rc 拖慢后台 git。** 每条后台命令都执行一次 rc，状态刷新、diff 一类高频命令的耗时随 rc 增长。缓解方向：按 rc 与 profile 文件的修改时间缓存 login `PATH`；当前未做，因为它对 rc 间接引用的文件（`source` 的其他文件、版本管理器的配置）不敏感。
 - **第三方键的语义漂移。** `ZMX_*`、`GHOSTTY_*` 由外部工具定义；目录里登记的是 codans 对它们的用法，不是它们的规范。
 
 ## 参考

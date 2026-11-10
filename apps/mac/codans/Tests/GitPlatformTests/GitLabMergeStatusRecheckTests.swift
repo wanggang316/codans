@@ -247,7 +247,8 @@ private actor SlowRecheckRunner: CommandRunner {
   }
 
   nonisolated func run(
-    executable: URL, arguments: [String], env: [String: String], cwd: URL, timeout: Duration, maxOutputBytes: Int
+    executable: URL, arguments: [String], env: [String: String], cwd: URL, timeout: Duration, maxOutputBytes: Int,
+    launch: CommandLaunch
   ) async -> CommandOutcome {
     if arguments == ["version"] { return .exited(code: 0, stdout: Data("glab 1.128.0 (x)\n".utf8), stderr: Data(), stdoutOverflow: false) }
     if arguments.contains(where: { $0.contains("with_merge_status_recheck=true") }) {

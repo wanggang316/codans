@@ -46,7 +46,7 @@ struct LoginShellRunnerIntegrationTests {
   }
 
   private func runner(_ shell: LoginShell) -> FoundationCommandRunner {
-    FoundationCommandRunner(eofGrace: .milliseconds(200), usesLoginShell: true, loginShell: shell)
+    FoundationCommandRunner(eofGrace: .milliseconds(200), loginShell: shell)
   }
 
   private func text(_ data: Data) -> String { String(data: data, encoding: .utf8) ?? "" }
@@ -77,7 +77,7 @@ struct LoginShellRunnerIntegrationTests {
 
     let wrapped = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/usr/bin/git"), arguments: arguments, env: sandbox.gitEnv,
-      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16)
+      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
     guard case .exited(0, let stdout, _, _) = wrapped else {
       Issue.record("expected exit 0, got \(wrapped)")
       return
@@ -100,7 +100,7 @@ struct LoginShellRunnerIntegrationTests {
     let sandbox = try Sandbox(rcName: shellCase.rcName, rc: "echo BANNER\necho BANNER-ERR >&2\n")
     let outcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["hello"], env: sandbox.gitEnv,
-      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16)
+      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
     guard case .exited(0, let stdout, let stderr, _) = outcome else {
       Issue.record("expected exit 0, got \(outcome)")
       return
@@ -117,7 +117,7 @@ struct LoginShellRunnerIntegrationTests {
     let outcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/bin/sh"),
       arguments: ["-c", "/bin/pwd -P; printf '[%s]' \"$@\"", "sh", "a b", "it's", "$HOME", "\"q\""],
-      env: sandbox.gitEnv, cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16)
+      env: sandbox.gitEnv, cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
     guard case .exited(0, let stdout, _, _) = outcome else {
       Issue.record("expected exit 0, got \(outcome)")
       return
@@ -133,7 +133,7 @@ struct LoginShellRunnerIntegrationTests {
     let outcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [], env: sandbox.gitEnv,
       cwd: sandbox.work.appendingPathComponent("gone", isDirectory: true),
-      timeout: .seconds(30), maxOutputBytes: 1 << 16)
+      timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
     guard case .exited(let code, _, _, _) = outcome else {
       Issue.record("expected .exited, got \(outcome)")
       return
@@ -161,7 +161,7 @@ struct LoginShellRunnerIntegrationTests {
 
     let gitDir = await runner(shellCase.shell).run(
       executable: git, arguments: ["rev-parse", "--absolute-git-dir"], env: sandbox.gitEnv,
-      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16)
+      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
     guard case .exited(0, let stdout, _, _) = gitDir else {
       Issue.record("expected exit 0, got \(gitDir)")
       return
@@ -172,7 +172,7 @@ struct LoginShellRunnerIntegrationTests {
     env["GIT_TERMINAL_PROMPT"] = "0"
     let printed = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/usr/bin/env"), arguments: [], env: env,
-      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16)
+      cwd: sandbox.work, timeout: .seconds(30), maxOutputBytes: 1 << 16, launch: .loginShell)
     guard case .exited(0, let envOut, _, _) = printed else {
       Issue.record("expected exit 0, got \(printed)")
       return
@@ -191,7 +191,7 @@ struct LoginShellRunnerIntegrationTests {
     let sandbox = try Sandbox(rcName: shellCase.rcName, rc: "")
     let outcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/bin/sleep"), arguments: [commandSleep], env: sandbox.gitEnv,
-      cwd: sandbox.work, timeout: .milliseconds(500), maxOutputBytes: 1 << 16)
+      cwd: sandbox.work, timeout: .milliseconds(500), maxOutputBytes: 1 << 16, launch: .loginShell)
     #expect(outcome == .timedOut)
     #expect(processes(matching: "sleep \(commandSleep)") == "")
 
@@ -199,7 +199,7 @@ struct LoginShellRunnerIntegrationTests {
     let hangingRc = try Sandbox(rcName: shellCase.rcName, rc: "/bin/sleep \(rcSleep)\n")
     let rcOutcome = await runner(shellCase.shell).run(
       executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [], env: hangingRc.gitEnv,
-      cwd: hangingRc.work, timeout: .milliseconds(500), maxOutputBytes: 1 << 16)
+      cwd: hangingRc.work, timeout: .milliseconds(500), maxOutputBytes: 1 << 16, launch: .loginShell)
     #expect(rcOutcome == .timedOut)
     #expect(processes(matching: "sleep \(rcSleep)") == "")
   }
@@ -214,7 +214,7 @@ struct LoginShellRunnerIntegrationTests {
     let task = Task {
       await runner.run(
         executable: URL(fileURLWithPath: "/bin/sleep"), arguments: [seconds], env: env,
-        cwd: work, timeout: .seconds(60), maxOutputBytes: 1 << 16)
+        cwd: work, timeout: .seconds(60), maxOutputBytes: 1 << 16, launch: .loginShell)
     }
     // Wait until the command runs, so the cancel hits the real process.
     for _ in 0..<100 where processes(matching: "sleep \(seconds)").isEmpty {
