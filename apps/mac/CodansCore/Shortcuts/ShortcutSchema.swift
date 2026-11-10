@@ -184,6 +184,13 @@ extension ShortcutSchema {
       defaultBinding: .init(keyCode: UInt16(kVK_ANSI_C), modifiers: [.command, .shift])
     ),
     .init(
+      id: .toggleCurrentWorktreePinned,
+      title: "Pin / Unpin Worktree",
+      category: .projectAndWorktree,
+      scope: .configurable,
+      defaultBinding: .init(keyCode: UInt16(kVK_ANSI_P), modifiers: [.command, .option])
+    ),
+    .init(
       id: .revealCurrentWorktreeInSidebar,
       title: "Reveal in Sidebar",
       category: .projectAndWorktree,

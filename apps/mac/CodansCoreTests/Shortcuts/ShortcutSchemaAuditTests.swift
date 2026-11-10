@@ -57,6 +57,30 @@ struct ShortcutSchemaAuditTests {
   }
 
   @Test
+  func pinWorktreeIsListedUnderProjectAndWorktree() {
+    #expect(ShortcutSchema.app.entry(for: .toggleCurrentWorktreePinned)?.category == .projectAndWorktree)
+  }
+
+  @Test
+  func noTwoDefaultBindingsClash() {
+    let bound = ShortcutSchema.app.entries.compactMap { entry in
+      entry.defaultBinding.map { (entry.id, $0.keyCode, $0.modifiers) }
+    }
+    for (index, lhs) in bound.enumerated() {
+      for rhs in bound[(index + 1)...] where lhs.1 == rhs.1 && lhs.2 == rhs.2 {
+        Issue.record("Default chord of \(lhs.0) clashes with \(rhs.0).")
+      }
+    }
+  }
+
+  /// ⌘⌥P must stay off AppKit's reserved list so the menu item, not the system, owns it.
+  @Test
+  func pinWorktreeDefaultIsNotReserved() throws {
+    let binding = try #require(ShortcutSchema.app.entry(for: .toggleCurrentWorktreePinned)?.defaultBinding)
+    #expect(!AppKitReservedDetector.isReserved(keyCode: binding.keyCode, modifiers: binding.modifiers))
+  }
+
+  @Test
   func goldenCoversEveryCommandID() {
     let coveredIDs = Set(Self.golden.map(\.0))
     for id in CommandID.allCases {
@@ -116,6 +140,7 @@ struct ShortcutSchemaAuditTests {
     (.deleteCurrentWorktree, (0x33, [.command, .shift])),  // ⌘⇧⌫
     (.showArchivedWorktrees, (0x00, [.command, .control])),  // ⌃A
     (.copyCurrentWorktreePath, (0x08, [.command, .shift])),  // ⌘⇧C
+    (.toggleCurrentWorktreePinned, (0x23, [.command, .option])),  // ⌘⌥P
     (.revealCurrentWorktreeInSidebar, (0x26, [.command, .shift])),  // ⌘⇧J
     (.selectPreviousWorktree, (0x7E, [.command, .control])),  // ⌘⌃↑
     (.selectNextWorktree, (0x7D, [.command, .control])),  // ⌘⌃↓
