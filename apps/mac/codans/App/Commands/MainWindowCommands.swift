@@ -269,17 +269,12 @@ struct MainWindowCommands: Commands {
       .disabled(!hasActiveWorktree)
 
       Button("Close Tab") {
-        // ⌘W is a global menu chord; SwiftUI Commands aren't scene-scoped, so the
-        // same accelerator fires regardless of which window is key. Route on the
-        // current key window: Diff, Settings (or any future SwiftUI utility window
-        // tagged via `SettingsWindowTagger`) closes itself; the main `codans`
-        // window forwards to TabFeature. Without this dispatch the chord pressed
-        // inside Settings would close the foreground worktree's tab.
-        if let key = NSApp.keyWindow,
-          SettingsWindowTagger.matches(key) || key.identifier?.rawValue.hasPrefix("diff-") == true
-        {
-          key.performClose(nil)
-        } else {
+        // SwiftUI Commands aren't scene-scoped, so Close Tab fires whichever window
+        // is key. See `closeTabTarget(keyWindow:)`.
+        switch Self.closeTabTarget(keyWindow: NSApp.keyWindow) {
+        case .keyWindow(let window):
+          window.performClose(nil)
+        case .activeTab:
           store()?.send(.closeActiveTabForCurrentWorktree)
         }
       }
@@ -494,6 +489,25 @@ struct MainWindowCommands: Commands {
     hasSelectedWorktree: Bool, isMainWindowKey: Bool
   ) -> Bool {
     hasSelectedWorktree && isMainWindowKey
+  }
+
+  enum CloseTabTarget: Equatable {
+    /// Close this window itself (Settings, the Diff window).
+    case keyWindow(NSWindow)
+    /// Close the active Tab of the selected Worktree in the main window.
+    case activeTab
+  }
+
+  /// Routing rule for Close Tab. Settings and the Diff window close themselves;
+  /// any other key window (the main window) closes the active Tab. Without this
+  /// rule, Close Tab in Settings or the Diff window closes a main-window Tab.
+  static func closeTabTarget(keyWindow: NSWindow?) -> CloseTabTarget {
+    if let keyWindow,
+      SettingsWindowTagger.matches(keyWindow) || DiffWindowManager.isDiffWindow(keyWindow)
+    {
+      return .keyWindow(keyWindow)
+    }
+    return .activeTab
   }
 
   /// `true` when the current Worktree has a PR snapshot in the GitHub feature's

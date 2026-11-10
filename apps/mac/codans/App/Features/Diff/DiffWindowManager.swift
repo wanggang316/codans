@@ -17,6 +17,12 @@ final class DiffWindowManager: NSObject, NSWindowDelegate {
 
   static let windowIdentifier = NSUserInterfaceItemIdentifier("diff")
 
+  /// The one test for "is this the Diff window". Window routing (for example Close Tab)
+  /// calls it, so it cannot drift from the identifier that `open` sets.
+  static func isDiffWindow(_ window: NSWindow) -> Bool {
+    window.identifier == windowIdentifier
+  }
+
   private var session: Session?
   /// Live shortcut map source for the window's sidebar-toggle tooltip. Set once at app
   /// bring-up; nil in tests, where the tooltip shows the title only.

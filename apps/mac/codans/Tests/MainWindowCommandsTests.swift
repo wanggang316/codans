@@ -300,4 +300,26 @@ struct MainWindowCommandsTests {
     await store.finish()
   }
 
+  // MARK: - ⌘W (Close Tab routing)
+
+  @Test
+  func closeTabInDiffWindowClosesTheDiffWindow() {
+    let diff = Self.makeWindow()
+    diff.identifier = DiffWindowManager.windowIdentifier
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: diff) == .keyWindow(diff))
+  }
+
+  @Test
+  func closeTabInSettingsWindowClosesSettings() {
+    let settings = Self.makeWindow()
+    SettingsWindowTagger.register(settings)
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: settings) == .keyWindow(settings))
+  }
+
+  @Test
+  func closeTabInMainWindowClosesTheActiveTab() {
+    let main = Self.makeWindow()
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: main) == .activeTab)
+    #expect(MainWindowCommands.closeTabTarget(keyWindow: nil) == .activeTab)
+  }
 }

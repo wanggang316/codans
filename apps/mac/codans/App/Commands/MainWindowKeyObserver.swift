@@ -71,7 +71,7 @@ final class MainWindowKeyObserver {
   static func isMainWindow(_ window: NSWindow?) -> Bool {
     guard let window else { return false }
     if SettingsWindowTagger.matches(window) { return false }
-    if window.identifier == DiffWindowManager.windowIdentifier { return false }
+    if DiffWindowManager.isDiffWindow(window) { return false }
     if window.parent != nil || window.sheetParent != nil { return false }
     if window is NSPanel { return false }
     return true
