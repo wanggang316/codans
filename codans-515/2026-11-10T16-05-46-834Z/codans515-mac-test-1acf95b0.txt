@@ -1,0 +1,14 @@
+head: 1acf95b0a9e869ff831a8882a61edc9805481b78 clean=0
+Wed Nov 11 00:01:05 CST 2026
+command: TEST_RUNNER_CODANS_TEST_FISH=<fish 4.9.3> make mac-test
+==> testing Codans
+Test Succeeded
+==> testing CodansCore
+Test Succeeded
+==> testing CodansKit
+Test Succeeded
+TEST_EXIT=0
+Codans: 2560 total, 2548 passed, 0 failed, 12 skipped
+CodansCore: 1136 total, 1136 passed, 0 failed
+CodansKit: 126 total, 126 passed, 0 failed
+Wed Nov 11 00:05:29 CST 2026
