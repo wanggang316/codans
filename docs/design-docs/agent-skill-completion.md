@@ -136,7 +136,8 @@ struct SkillLocation {
 - **按键**：弹出时 Return / Tab 插入、↑↓ 移动、Esc 只关弹窗。收起后 Return 发送、Esc 关对话框，与现在一致。
 - **插入**：把已输入的前缀和查询替换为 `<调用 token> `（末尾带空格）。点击某一行同样插入。
 - **呈现**：列表浮在对话框之上，不占对话框布局，打开和关闭时对话框大小不变。它是输入框所在窗口的子窗口（`ComposerSkillCompletionPanel`：borderless、non-activating、不能成为 key），与 `NSTextView` 的补全相同；不用 `.overlay`（会被分组 `Form` 的滚动视图和 sheet 边界裁掉），也不用 `.popover`（会从输入框拿走焦点）。面板与输入框同宽，贴着输入框上沿向上打开，上方屏幕空间不够时在输入框下方打开。焦点留在输入框，按键仍由修饰符处理。面板随窗口移动；列表关闭、窗口关闭或窗口失去 key 时面板关闭（失去 key 时按 Esc 处理，同一调用不再自动弹出）。外观为原生菜单卡片：菜单材质、圆角、系统阴影；每行只有来源图标（User、Project、Plugin 各不相同）与名称，来源写在行的辅助功能标签里；高亮行用系统选中色；最多显示 9 行，其余滚动。面板宽度取当前匹配项中最宽的行（图标、名称与内边距），不小于 180 pt，不大于输入框宽度，超出时名称中间截断；左边与输入框左边对齐，过滤改变匹配项时宽度随之变化，对话框大小不变。
-- **描述提示**：指针下的行（否则高亮行）的完整描述显示在列表旁的另一个子窗口（`ComposerSkillCompletionTooltipPanel`）中：放在面板右侧，右侧放不下时放左侧，顶边与该行对齐；系统提示材质与字体，自动换行，最宽约 320 pt，不截断；高亮行一变就立即跟随；没有描述的 Skill 不显示；不接收鼠标、不成为 key，随列表一起关闭。
+- **当前行**：列表只有一个当前行（高亮行），与原生菜单一致：↑↓ 移动它；指针移到某一行上时该行成为高亮行，之后 ↑↓ 从它继续。只有指针真的移动才改变高亮：列表在静止的指针下打开、滚动或重新过滤时，高亮仍归键盘（`ComposerSkillCompletionPointer`）；指针离开列表时保留当前高亮。Return / Tab 与点击都插入高亮行。
+- **描述提示**：高亮行的完整描述显示在列表旁的另一个子窗口（`ComposerSkillCompletionTooltipPanel`）中：放在面板右侧，右侧放不下时放左侧，顶边与该行对齐；系统提示材质与字体，自动换行，最宽约 320 pt，不截断；高亮每次变化（按键或指针）都立即跟随；没有描述的 Skill 不显示；不接收鼠标、不成为 key，随列表一起关闭。
 - **Skills 按钮**：在光标处插入前缀（替换选中文本；光标前紧跟非空白字符时先补一个空格，`invocationPosition == .leading` 时插在 prompt 开头），并把光标移到前缀后，于是弹出同一个弹窗。
 - **不可用**：agent 的 `invocationStyle == .none` 或项目为远程时，不弹出，Skills 按钮置灰，tooltip 说明原因（`NewAgentFeature.State.skillsUnavailableReason`）：远程项目为 "Skill suggestions are not available for remote projects"，不支持的 agent 为 "Skill suggestions are not available for <agent>"；未选项目或 agent 时提示先选择。
 

@@ -305,4 +305,50 @@ struct ComposerSkillCompletionTests {
     completion.update(text: "then /", caret: 6)
     #expect(completion.matches == Self.skills)
   }
+
+  // MARK: - Pointer
+
+  @Test
+  func highlightMovesToAMatchAndIgnoresOtherSkills() {
+    let completion = completion()
+    completion.update(text: "/", caret: 1)
+    completion.highlight(Self.skills[2])
+    #expect(completion.highlighted == Self.skills[2])
+    // Up and Down continue from the row the pointer picked.
+    _ = completion.handle(.down, text: "/")
+    #expect(completion.highlighted == Self.skills[3])
+    completion.highlight(Self.skill("other"))
+    #expect(completion.highlighted == Self.skills[3])
+  }
+
+  @Test
+  func pointerMovingOntoARowHighlightsIt() {
+    let completion = completion()
+    completion.update(text: "/", caret: 1)
+    var pointer = ComposerSkillCompletionPointer(at: CGPoint(x: 10, y: 10))
+    pointer.hovered(Self.skills[1], at: CGPoint(x: 10, y: 34), in: completion)
+    #expect(completion.highlighted == Self.skills[1])
+  }
+
+  /// A row can come under a pointer that does not move: the list opens
+  /// under it, scrolls, or refilters. That row does not take the highlight
+  /// from the keyboard.
+  @Test
+  func listRefiltersUnderAStationaryPointerHighlightUnchanged() {
+    let completion = completion()
+    let resting = CGPoint(x: 10, y: 34)
+    completion.update(text: "/", caret: 1)
+    var pointer = ComposerSkillCompletionPointer(at: resting)
+    pointer.hovered(Self.skills[1], at: resting, in: completion)
+    #expect(completion.highlighted == Self.skills[0])
+
+    _ = completion.handle(.down, text: "/")
+    _ = completion.handle(.down, text: "/")
+    #expect(completion.highlighted == Self.skills[2])
+    // Refilter: another row is now under the same point.
+    completion.update(text: "/re", caret: 3)
+    let highlighted = completion.highlighted
+    pointer.hovered(Self.skills[0], at: resting, in: completion)
+    #expect(completion.highlighted == highlighted)
+  }
 }

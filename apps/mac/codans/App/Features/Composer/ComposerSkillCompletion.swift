@@ -125,6 +125,12 @@ final class ComposerSkillCompletion {
     return .insert(text: result.text, caret: result.caret + (followedBySpace ? 1 : 0))
   }
 
+  /// Makes `skill` the highlighted row, as the pointer does in a menu.
+  /// Does nothing when `skill` is not a match.
+  func highlight(_ skill: AgentSkillEntry) {
+    if let index = matches.firstIndex(of: skill) { highlightedIndex = index }
+  }
+
   /// Closes the list without blocking it from opening again.
   func close() {
     query = nil

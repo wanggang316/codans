@@ -3,10 +3,11 @@ import SwiftUI
 
 /// The open skill list of a `ComposerSkillCompletion`, drawn as a menu card
 /// in `ComposerSkillCompletionPanel`: one row per match with an icon for its
-/// source and its name. The highlighted row has the system selection color
-/// and follows the arrow keys; a click picks a row. The description of the
-/// row under the pointer, else of the highlighted row, goes to
-/// `onTooltipTarget`, which shows it beside the list.
+/// source and its name. One row is current, as in a menu: the highlighted
+/// row has the system selection color and follows the arrow keys and the
+/// pointer (`ComposerSkillCompletionPointer`); Return, Tab, and a click
+/// insert it. Its description goes to `onTooltipTarget`, which shows it
+/// beside the list.
 struct ComposerSkillCompletionList: View {
   private typealias Layout = ComposerSkillCompletionPanelLayout
 
@@ -24,7 +25,7 @@ struct ComposerSkillCompletionList: View {
   /// Set by the presenter that shows the tooltip.
   var onTooltipTarget: (TooltipTarget?) -> Void = { _ in }
 
-  @State private var hoveredID: String?
+  @State private var pointer = ComposerSkillCompletionPointer(at: NSEvent.mouseLocation)
   @State private var rowFrames: [String: CGRect] = [:]
 
   var body: some View {
@@ -33,6 +34,7 @@ struct ComposerSkillCompletionList: View {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(Array(completion.matches.enumerated()), id: \.element.id) { index, skill in
             Button {
+              completion.highlight(skill)
               _ = selection.apply(completion.select(skill, text: text), onInsert: onInsert)
             } label: {
               row(skill, isHighlighted: index == completion.highlightedIndex)
@@ -41,11 +43,9 @@ struct ComposerSkillCompletionList: View {
             .buttonStyle(.plain)
             .focusable(false)
             .id(skill.id)
-            .onHover { hovering in
-              if hovering {
-                hoveredID = skill.id
-              } else if hoveredID == skill.id {
-                hoveredID = nil
+            .onContinuousHover { phase in
+              if case .active = phase {
+                pointer.hovered(skill, at: NSEvent.mouseLocation, in: completion)
               }
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
@@ -60,18 +60,19 @@ struct ComposerSkillCompletionList: View {
       .onChange(of: completion.highlighted?.id) { _, id in
         if let id { proxy.scrollTo(id) }
       }
+      // New rows under a resting pointer do not take the highlight: the
+      // list opened, or refiltered, where the pointer already was.
+      .onChange(of: completion.matches) { pointer = ComposerSkillCompletionPointer(at: NSEvent.mouseLocation) }
     }
     .onChange(of: tooltipTarget, initial: true) { _, target in onTooltipTarget(target) }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Skills")
   }
 
-  /// The hovered row wins over the highlighted one. No tooltip for a skill
-  /// without a description or a row out of view.
+  /// The highlighted row's description. None for a skill without one or a
+  /// row out of view.
   private var tooltipTarget: TooltipTarget? {
-    let id = hoveredID ?? completion.highlighted?.id
-    guard let skill = completion.matches.first(where: { $0.id == id }), let details = skill.details,
-      let frame = rowFrames[skill.id]
+    guard let skill = completion.highlighted, let details = skill.details, let frame = rowFrames[skill.id]
     else { return nil }
     return TooltipTarget(text: details, rowFrame: frame)
   }
@@ -108,6 +109,28 @@ struct ComposerSkillCompletionList: View {
     case .project: "folder"
     case .plugin: "puzzlepiece.extension"
     }
+  }
+}
+
+/// Where the pointer was over the skill list, in screen coordinates. As in
+/// `NSMenu`, the row under the pointer takes the highlight only when the
+/// pointer itself moves: a row that comes under a resting pointer (the list
+/// opens, scrolls, or refilters there) leaves the highlight to the keyboard.
+/// The pointer leaving the list keeps the highlight.
+@MainActor
+struct ComposerSkillCompletionPointer {
+  private var location: CGPoint
+
+  init(at location: CGPoint) {
+    self.location = location
+  }
+
+  mutating func hovered(
+    _ skill: AgentSkillEntry, at location: CGPoint, in completion: ComposerSkillCompletion
+  ) {
+    guard location != self.location else { return }
+    self.location = location
+    completion.highlight(skill)
   }
 }
 
