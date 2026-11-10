@@ -1,0 +1,17 @@
+app: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-comrigrlijeuecaomjxegybkzaqn/Build/Products/Debug/Codans.app
+commit: 475d3d94 fix(composer): hide the placeholder while an input method composes
+instance pid: 31679
+parent: 1 (/sbin/launchd)
+app PATH: PATH=/usr/bin:/bin:/usr/sbin:/sbin
+repo credential.helper (local): |!glab auth git-credential|
+global credential.helper: <none>
+project: DF04582B-0A04-4DB1-9E22-80E8886BBED7
+$ codans-dev worktree new sv-515-before-28848 --project DF04582B-0A04-4DB1-9E22-80E8886BBED7 --json   (fetchRemoteOnCreate=true -> git fetch origin)
+exit: 20  (0 s)
+{
+  "error": {
+    "code": "INTERNAL",
+    "message": "git fetch failed: glab auth git-credential get: glab: command not found\nfatal: could not read Username for 'http://192.168.2.158:8929': Device not configured"
+  },
+  "schemaVersion": "codans.cli.worktree.new.v1"
+}

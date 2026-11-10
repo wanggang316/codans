@@ -1,0 +1,19 @@
+app: /Users/wanggang/Library/Developer/Xcode/DerivedData/codans-comrigrlijeuecaomjxegybkzaqn/Build/Products/Debug/Codans.app
+commit: 2e2fab98 feat(git): start git, wt, gh, and glab through the login shell
+instance pid: 11289
+parent: 1 (/sbin/launchd)
+app PATH: PATH=/usr/bin:/bin:/usr/sbin:/sbin
+repo credential.helper (local): |!glab auth git-credential|
+global credential.helper: <none>
+project: 6AB5D3B5-DB1A-4B41-B3C8-AE5262CF2892
+$ codans-dev worktree new sv-515-after-29857 --project 6AB5D3B5-DB1A-4B41-B3C8-AE5262CF2892 --json   (fetchRemoteOnCreate=true -> git fetch origin)
+exit: 0  (5 s)
+{
+  "data": {
+    "created": true,
+    "id": "C4DB1760-86F5-4F3A-9895-39D16E878FF9",
+    "name": "sv-515-after-29857",
+    "path": "/var/folders/24/xybqlpf54c11r2nnntcsv3140000gn/T/codans-self-verify-501-9d9eaa42/worktrees/app-e2e/sv-515-after-29857"
+  },
+  "schemaVersion": "codans.cli.worktree.new.v1"
+}
