@@ -185,9 +185,12 @@ Two pure, stateless SSH command builders (fully unit-tested, no side effects):
   - On a macOS host, an SSH session cannot read the login keychain (git's
     `osxkeychain` helper fails with -25308; `gh` and `claude` lose their
     tokens). When the keychain is locked for the SSH session and the host
-    session does not exist yet, the connect script creates it with
-    `launchctl submit … zmx serve`, so the daemon and its shell run in the
-    user's GUI login session, which has the unlocked keychain. This needs
+    session does not exist yet, the connect script creates it from a
+    `launchctl submit` job, so the daemon and its shell run in the user's
+    GUI login session, which has the unlocked keychain. The job runs a
+    throwaway `zmx attach` on a terminal from `script`; the script removes
+    the job when the session is listed, and the daemon stays. Only `attach`
+    and `list --short` are used, so any `zmx` release works. This needs
     host-side `zmx` and a console login on the host (checked with
     `launchctl print gui/<uid>`); otherwise the shell starts under sshd and
     prints a locked-keychain notice.

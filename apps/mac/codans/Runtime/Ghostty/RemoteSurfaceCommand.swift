@@ -175,27 +175,39 @@ nonisolated enum RemoteSurfaceCommand {
   /// `zmx attach` below would give the shell no keychain access: git's
   /// `osxkeychain` helper fails with -25308 and `gh` / `claude` lose their
   /// tokens. `launchctl submit` from an SSH session runs the job in the GUI
-  /// session when the user is logged in at the console; `zmx serve` forks the
-  /// daemon and exits, so the job is removed once the session is listed. The
-  /// `attach` that follows then joins that daemon. The `gui/<uid>` domain
-  /// check skips launchd when nobody is logged in at the console: the legacy
-  /// `submit` would then pick a background domain, which has no keychain
-  /// either. Without that domain, a failed submit, or a timeout, the `attach`
-  /// creates the daemon as before.
+  /// session when the user is logged in at the console. The job runs a
+  /// throwaway `zmx attach`, which creates the daemon there; the job is
+  /// removed once the session is listed, which stops that client and leaves
+  /// the daemon. The `attach` that follows then joins the daemon. Only
+  /// `attach` and `list --short` are used, so any `zmx` release works.
+  ///
+  /// `attach` needs a terminal, which a launchd job does not have: `script`
+  /// supplies one. `script` writes an end-of-file character to that terminal
+  /// when its own input ends, which would stop the new shell, so its input is
+  /// a `tail -f /dev/null` that never ends.
+  ///
+  /// The `gui/<uid>` domain check skips launchd when nobody is logged in at
+  /// the console: the legacy `submit` would then pick a background domain,
+  /// which has no keychain either. Without that domain, a failed submit, or a
+  /// timeout, the `attach` creates the daemon as before.
   /// `TMPDIR` / `XDG_RUNTIME_DIR` / `ZMX_DIR` are forwarded only when set,
   /// because they select the socket directory both sides must agree on.
   static func guiSessionSpawn(hostSession: String, sessionCommand: String) -> String {
     let listed = "zmx list --short 2>/dev/null | grep -qx \(hostSession)"
-    let label = "com.codans.zmx-serve.\(hostSession)"
+    let label = "com.codans.zmx-spawn.\(hostSession)"
     let forwardedEnvironment = ["TMPDIR", "XDG_RUNTIME_DIR", "ZMX_DIR", "LANG", "TERM"]
       .map { "${\($0)+\"\($0)=$\($0)\"}" }
       .joined(separator: " ")
+    // `$0` is the zmx path and `$@` the session command, so neither is quoted again.
+    let throwawayAttach =
+      #"/bin/sh -c 'tail -f /dev/null | script -q /dev/null "$0" attach "#
+      + hostSession + #" "$@"' "$(command -v zmx)" "# + sessionCommand
     return
       #"if [ "$(uname)" = Darwin ] && ! security show-keychain-info >/dev/null 2>&1 "#
       + #"&& launchctl print "gui/$(id -u)" >/dev/null 2>&1 && ! "# + listed + "; then\n"
       + "launchctl remove \(label) 2>/dev/null\n"
       + "if launchctl submit -l \(label) -- /usr/bin/env \(forwardedEnvironment) PATH=\"$PATH\" "
-      + "\"$(command -v zmx)\" serve \(hostSession) --command \(sessionCommand) 2>/dev/null; then\n"
+      + throwawayAttach + " 2>/dev/null; then\n"
       + "codans_n=0\n"
       + "while [ \"$codans_n\" -lt 30 ] && ! \(listed); do sleep 0.1; codans_n=$((codans_n + 1)); done\n"
       + "launchctl remove \(label) 2>/dev/null\n"
