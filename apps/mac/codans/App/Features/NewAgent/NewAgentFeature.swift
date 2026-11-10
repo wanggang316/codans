@@ -14,81 +14,6 @@ import Foundation
 /// agent in an existing worktree.
 @Reducer
 struct NewAgentFeature {
-  /// A project the dialog can target, snapshotted from the catalog when it
-  /// opens.
-  struct ProjectOption: Equatable, Identifiable {
-    let id: ProjectID
-    let name: String
-    /// The project's icon and color, drawn with the sidebar's rules
-    /// (`ProjectIconView`).
-    let icon: ProjectIcon?
-    let color: ProjectColor?
-    /// Glyph for a project with no icon, or whose custom icon file is gone.
-    let defaultSymbol: String
-    /// A git project offers a new worktree or a branch. A folder or a
-    /// workspace has one place to work, so the dialog offers neither.
-    let isGit: Bool
-    /// Lives on a Host, not on This Mac. A Recent row marks it.
-    let isRemote: Bool
-
-    init(_ project: Project) {
-      id = project.id
-      name = project.name
-      icon = project.icon
-      color = project.color
-      defaultSymbol = ProjectIconView.defaultSymbol(for: project.kind)
-      isGit = project.supportsWorktrees && !project.isWorkspace
-      isRemote = project.hostID != nil
-    }
-  }
-
-  /// The project menu's sections. Every project is in a group section;
-  /// a recently active one is also in Recent.
-  struct ProjectMenu: Equatable {
-    struct Section: Equatable, Identifiable {
-      let id: String
-      let title: String
-      let projects: [ProjectOption]
-    }
-
-    /// Recent shows only above this many projects; it holds this many.
-    static let recentLimit = 3
-
-    /// The projects with the latest activity, newest first. Empty when the
-    /// catalog has `recentLimit` projects or fewer.
-    let recent: [ProjectOption]
-    /// One "Projects" section, or one section per Host in sidebar Host order
-    /// when the sidebar shows the Host level. Filters and collapsed Hosts do
-    /// not apply: the dialog lists every project.
-    let sections: [Section]
-
-    init(_ catalog: Catalog) {
-      let projects = catalog.projects
-      if projects.count > Self.recentLimit {
-        recent =
-          projects
-          .compactMap { project in project.lastActiveAt.map { (project, $0) } }
-          .sorted { $0.1 > $1.1 }
-          .prefix(Self.recentLimit)
-          .map { ProjectOption($0.0) }
-      } else {
-        recent = []
-      }
-      guard catalog.sidebarHostLevel != nil else {
-        sections = [Section(id: "projects", title: "Projects", projects: projects.map(ProjectOption.init))]
-        return
-      }
-      let level = SidebarHostLevel(records: catalog.hosts, collapsed: [])
-      sections = level.groups(projects).map { group in
-        Section(
-          id: SidebarOutlineModel.hostNodeID(group.host), title: group.displayName,
-          projects: group.projects.map(ProjectOption.init))
-      }
-    }
-
-    static let empty = ProjectMenu(Catalog())
-  }
-
   /// Where the agent works in a git project.
   enum Target: Hashable {
     /// A worktree created from the dialog's branch name and options.
@@ -131,7 +56,7 @@ struct NewAgentFeature {
     let pendingCounts: [ProjectID: Int]
 
     /// Every project, in catalog order.
-    var projects: [ProjectOption] = []
+    var projects: [ProjectMenuOption] = []
     var projectMenu = ProjectMenu.empty
     var projectID: ProjectID?
     var target: Target = .newWorktree
@@ -178,7 +103,7 @@ struct NewAgentFeature {
       )
     }
 
-    var selectedProject: ProjectOption? {
+    var selectedProject: ProjectMenuOption? {
       projects.first { $0.id == projectID }
     }
 
@@ -266,7 +191,7 @@ struct NewAgentFeature {
       switch action {
       case .onAppear:
         let catalog = hierarchyClient.snapshot()
-        state.projects = catalog.projects.map(ProjectOption.init)
+        state.projects = catalog.projects.map(ProjectMenuOption.init)
         state.projectMenu = ProjectMenu(catalog)
         if let draft = state.restoring,
           state.projects.contains(where: { $0.id == draft.projectID })

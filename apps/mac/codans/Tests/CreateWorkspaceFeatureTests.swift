@@ -499,4 +499,85 @@ struct CreateWorkspaceFeatureTests {
     #expect(AddEntryClassifier.normalizedRemoteKey("git@github.com:o/r.git") == "github.com/o/r")
     #expect(AddEntryClassifier.normalizedRemoteKey("ssh://git@github.com:22/o/r") == "github.com/o/r")
   }
+
+  // MARK: - Add Project menu
+
+  private static func candidate(_ name: String, active: TimeInterval? = nil) -> Feature.Candidate {
+    Feature.Candidate(
+      id: ProjectID(), name: name, gitRoot: "/src/\(name)",
+      lastActiveAt: active.map { Date(timeIntervalSince1970: $0) })
+  }
+
+  @Test
+  func addProjectMenuHidesRecentUpToThreeCandidates() {
+    let state = Feature.State(candidates: [
+      Self.candidate("a", active: 3), Self.candidate("b", active: 1), Self.candidate("c", active: 2),
+    ])
+    let menu = state.addProjectMenu
+    #expect(menu.recent.isEmpty)
+    #expect(menu.sections.map(\.title) == ["Projects"])
+    #expect(menu.sections.first?.projects.map(\.name) == ["a", "b", "c"])
+  }
+
+  @Test
+  func addProjectMenuListsThreeNewestCandidatesAboveThree() {
+    let state = Feature.State(candidates: [
+      Self.candidate("never"), Self.candidate("old", active: 1), Self.candidate("newest", active: 9),
+      Self.candidate("mid", active: 5), Self.candidate("newer", active: 7),
+    ])
+    let menu = state.addProjectMenu
+    #expect(menu.recent.map(\.name) == ["newest", "newer", "mid"])
+    #expect(menu.sections.map(\.title) == ["Projects"])
+    #expect(menu.sections.first?.projects.map(\.name) == ["never", "old", "newest", "mid", "newer"])
+  }
+
+  @Test
+  func addProjectMenuComputesRecentOverCandidatesNotYetListed() async {
+    let listed = Self.candidate("listed", active: 10)
+    let added = Self.candidate("added", active: 9)
+    let others = [
+      Self.candidate("a", active: 1), Self.candidate("b", active: 2), Self.candidate("c", active: 3),
+      Self.candidate("d", active: 4),
+    ]
+    let mode = Feature.Mode.addSource(
+      projectID: workspaceID, title: "ws", rootPath: "/ws", existingSourceRoots: [listed.gitRoot])
+    let store = makeStore(Feature.State(candidates: [listed, added] + others, mode: mode))
+    store.exhaustivity = .off(showSkippedAssertions: false)
+
+    // The Workspace already lists `listed`: it is in no section.
+    var menu = store.state.addProjectMenu
+    #expect(menu.recent.map(\.name) == ["added", "d", "c"])
+    #expect(menu.sections.first?.projects.map(\.name) == ["added", "a", "b", "c", "d"])
+
+    await store.send(.addProjectTapped(added.id))
+    menu = store.state.addProjectMenu
+    #expect(menu.recent.map(\.name) == ["d", "c", "b"])
+    #expect(menu.sections.first?.projects.map(\.name) == ["a", "b", "c", "d"])
+  }
+
+  @Test
+  func addProjectMenuHidesRecentWhenFilteringLeavesThree() async {
+    let candidates = [
+      Self.candidate("a", active: 1), Self.candidate("b", active: 2), Self.candidate("c", active: 3),
+      Self.candidate("d", active: 4),
+    ]
+    let store = makeStore(Feature.State(candidates: candidates, locationPath: "/ws"))
+    store.exhaustivity = .off(showSkippedAssertions: false)
+    #expect(store.state.addProjectMenu.recent.map(\.name) == ["d", "c", "b"])
+
+    await store.send(.addProjectTapped(candidates[3].id))
+    #expect(store.state.addProjectMenu.recent.isEmpty)
+    #expect(store.state.addProjectMenu.sections.first?.projects.map(\.name) == ["a", "b", "c"])
+  }
+
+  @Test
+  func candidateMenuOptionCarriesIconColorAndDefaultGlyph() {
+    let candidate = Feature.Candidate(
+      id: ProjectID(), name: "app", gitRoot: "/src/app", icon: .symbol("hammer"), color: .red)
+    let option = candidate.menuOption
+    #expect(option.icon == .symbol("hammer"))
+    #expect(option.color == .red)
+    #expect(option.defaultSymbol == ProjectIconView.folderSymbol)
+    #expect(option.isGit && !option.isRemote)
+  }
 }
