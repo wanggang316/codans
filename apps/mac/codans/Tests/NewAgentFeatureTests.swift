@@ -321,13 +321,15 @@ struct NewAgentFeatureTests {
       url: URL(fileURLWithPath: "\(path)/.claude/skills/local"))
   }
 
+  private typealias RemoteLoad =
+    @Sendable (AgentProfile, RemoteHost, String?, Bool) async -> Result<[AgentSkillEntry], RemoteSkillReadError>
+
   private func makeSkillStore(
     catalog: Catalog, loaded: LockIsolated<[AgentKind]>,
     starts: LockIsolated<[String?]> = LockIsolated([]),
     copies: LockIsolated<[NewWorktreeSource?]> = LockIsolated([]),
     preferredProjectID: ProjectID? = nil,
-    remote: (@Sendable (AgentProfile, RemoteHost, String?, Bool) async -> Result<[AgentSkillEntry], RemoteSkillReadError>)? =
-      nil
+    remote: RemoteLoad? = nil
   ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
     let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: preferredProjectID)) {
       NewAgentFeature()
@@ -423,7 +425,8 @@ struct NewAgentFeatureTests {
     let remote = Project(
       name: "server", rootPath: "/srv/repo", remoteHost: host,
       worktrees: [Worktree(name: "repo", path: "/srv/repo")])
-    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded) { profile, readHost, start, creates in
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded) {
+      profile, readHost, start, creates in
       reads.withValue { $0.append("\(profile.kind.rawValue) \(readHost.alias) \(start ?? "-") \(creates)") }
       return .success([Self.projectSkill(at: "/srv/repo")])
     }

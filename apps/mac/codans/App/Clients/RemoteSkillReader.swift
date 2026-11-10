@@ -103,7 +103,7 @@ nonisolated struct RemoteSkillReader: Sendable {
     case .exited(0, _, _, true):
       throw RemoteSkillReadError(reason: "The skills on \(host.authority) are too large to list")
     case .exited(let code, _, let stderr, _):
-      let message = RemoteGitService.lastNonEmptyLine(of: String(decoding: stderr, as: UTF8.self))
+      let message = RemoteGitService.lastNonEmptyLine(of: String(data: stderr, encoding: .utf8) ?? "")
       let reason = code == 255 ? "Could not connect to \(host.authority)" : "Reading skills on \(host.authority) failed"
       throw RemoteSkillReadError(reason: message.isEmpty ? reason : "\(reason): \(message)")
     case .timedOut:
@@ -183,25 +183,44 @@ nonisolated struct RemoteSkillReader: Sendable {
     _ reply: Data, requests: [SkillFileSnapshot.Request], to snapshot: SkillFileSnapshot
   ) -> System? {
     guard let records = records(in: reply) else { return nil }
+    var answers = Answers()
+    for record in records {
+      guard answers.add(record) else { return nil }
+    }
+    guard let home = answers.home, home.hasPrefix("/"), answers.store(requests, into: snapshot) else {
+      return nil
+    }
+    return System(home: home, kernel: answers.kernel)
+  }
+
+  /// The answers of one reply by request index.
+  private struct Answers {
     var home: String?
     var kernel = ""
     var files: [Int: SkillFileSnapshot.FileAnswer] = [:]
     var directories: [Int: [SkillFileSnapshot.Child]?] = [:]
     var realPaths: [Int: String?] = [:]
-    for record in records {
-      let text = String(decoding: record.bytes, as: UTF8.self)
+    /// The last child name was not UTF-8, so it and its `SKILL.md` are
+    /// left out: no path codans builds can name it.
+    var skipsChild = false
+
+    mutating func add(_ record: Record) -> Bool {
+      let text = String(data: record.bytes, encoding: .utf8)
       switch record.kind {
       case "h": home = text
-      case "k": kernel = text
+      case "k": kernel = text ?? ""
       case "f": files[record.index] = .data(record.bytes)
       case "x": files[record.index] = .unreadable
       case "d": directories[record.index] = .some([])
       case "c":
-        guard case .some(.some(var children)) = directories[record.index] else { return nil }
-        children.append(SkillFileSnapshot.Child(name: text))
+        guard case .some(.some(var children)) = directories[record.index] else { return false }
+        skipsChild = text == nil
+        if let text { children.append(SkillFileSnapshot.Child(name: text)) }
         directories[record.index] = .some(children)
       case "s":
-        guard case .some(.some(var children)) = directories[record.index], !children.isEmpty else { return nil }
+        guard case .some(.some(var children)) = directories[record.index] else { return false }
+        guard !skipsChild else { return true }
+        guard !children.isEmpty else { return false }
         children[children.count - 1].skill = record.bytes
         directories[record.index] = .some(children)
       case "r": realPaths[record.index] = .some(text)
@@ -209,24 +228,28 @@ nonisolated struct RemoteSkillReader: Sendable {
         files[record.index] = .missing
         directories[record.index] = .some(nil)
         realPaths[record.index] = .some(nil)
-      default: return nil
+      default: return false
       }
+      return true
     }
-    guard let home, home.hasPrefix("/") else { return nil }
-    for (index, request) in requests.enumerated() {
-      switch request {
-      case .file(let path):
-        guard let answer = files[index] else { return nil }
-        snapshot.setFile(path, answer)
-      case .directory(let path):
-        guard let answer = directories[index] else { return nil }
-        snapshot.setDirectory(path, answer)
-      case .realPath(let path):
-        guard let answer = realPaths[index] else { return nil }
-        snapshot.setRealPath(path, answer)
+
+    /// `false` when a request has no answer.
+    func store(_ requests: [SkillFileSnapshot.Request], into snapshot: SkillFileSnapshot) -> Bool {
+      for (index, request) in requests.enumerated() {
+        switch request {
+        case .file(let path):
+          guard let answer = files[index] else { return false }
+          snapshot.setFile(path, answer)
+        case .directory(let path):
+          guard let answer = directories[index] else { return false }
+          snapshot.setDirectory(path, answer)
+        case .realPath(let path):
+          guard let answer = realPaths[index] else { return false }
+          snapshot.setRealPath(path, answer)
+        }
       }
+      return true
     }
-    return System(home: home, kernel: kernel)
   }
 
   struct Record: Equatable {
@@ -244,7 +267,7 @@ nonisolated struct RemoteSkillReader: Sendable {
     var cursor = marker.upperBound
     while cursor < reply.endIndex {
       guard let end = reply[cursor...].firstIndex(of: newline) else { return nil }
-      let fields = String(decoding: reply[cursor..<end], as: UTF8.self).split(separator: " ")
+      let fields = (String(data: reply[cursor..<end], encoding: .utf8) ?? "").split(separator: " ")
       guard fields.count == 3, let index = Int(fields[1]), let count = Int(fields[2]), count >= 0,
         reply.distance(from: end, to: reply.endIndex) > count + 1
       else { return nil }
