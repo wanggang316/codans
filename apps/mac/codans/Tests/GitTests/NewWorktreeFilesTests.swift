@@ -174,6 +174,16 @@ struct NewWorktreeFilesTests {
 
   /// A tracked settings file is in every new worktree. Here the local file
   /// turns the tracked plugin off, which counts only when it is copied.
+  /// `export-ignore` changes what `git archive` writes, not what
+  /// `git worktree add` checks out.
+  @Test
+  func exportIgnoredTrackedFilesAreInTheView() async throws {
+    try await fixture(local: "{}")
+    try write(".claude export-ignore\n", to: repo.appending(path: ".gitattributes"))
+    try await commit("export-ignore", [".gitattributes"])
+    #expect(await names(copyIgnored: false, copyUntracked: false) == ["shared", "tracked:run"])
+  }
+
   @Test
   func trackedSettingsAreReadWhateverTheCopyOptions() async throws {
     try await fixture(local: #"{"enabledPlugins": {"tracked@market": false}}"#)
