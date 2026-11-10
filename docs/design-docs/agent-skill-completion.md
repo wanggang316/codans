@@ -1,8 +1,8 @@
 # 设计文档：Agent Skill Completion（New Agent 对话框的 Skill 补全）
 
-**Availability:** Available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button. Other agents and remote projects get no completion; the Skills button is disabled with the reason (see "探针实测").
+**Availability:** Available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button. Remote projects read the same sources on the host over SSH. Other agents get no completion, and a remote read that fails gives none; the Skills button is disabled with the reason (see "探针实测", "远程项目").
 **Author:** Gump（与 Claude）
-**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift) (list and description panels), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [NewWorktreeFiles](../../apps/mac/codans/Git/NewWorktreeFiles.swift)
+**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan), [RemoteSkillReader](../../apps/mac/codans/App/Clients/RemoteSkillReader.swift) (remote scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift) (list and description panels), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [SkillFileSystem](../../apps/mac/CodansCore/Agents/SkillFileSystem.swift), [SkillFileSnapshot](../../apps/mac/CodansCore/Agents/SkillFileSnapshot.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [NewWorktreeFiles](../../apps/mac/codans/Git/NewWorktreeFiles.swift)
 
 ## 背景与范围
 
@@ -25,7 +25,6 @@ New Agent 对话框（⌘⇧N，`NewAgentFeature` / `NewAgentView`）让用户�
 
 非目标（v1）：
 
-- 远程 SSH 项目的 Skill 扫描（后续单独做）。
 - Command Queue 输入框等其他 prompt 输入处接入（组件可复用，后续单独做）。
 - 文件监听与跨会话缓存。
 - 用户自定义 Skill Location。`AgentKind` 是封闭集合。
@@ -96,7 +95,7 @@ struct SkillLocation {
   - `-ns` / `--no-skills`：Pi 不加载任何 Skill，也不展开 `/skill:name`（实测：调用未展开，模型自己去磁盘找文件），所以用户级与项目级都不列。额外参数不全是普通词时（如 `--no-skills --theme 'dark'`、`--no-skills 2>/dev/null`），shell 仍会把 `--no-skills` 传给 Pi 而 codans 读不准，所以 Pi 的 Skill 一律不列。`enableSkillCommands: false` 只去掉交互模式里 `/skill:` 的自动补全项，首条 prompt 仍会展开（实测：输出标记，会话记录中为展开后的 `<skill>` 块），不影响列表。
 - **向上查找**：`walkUpToRepoRoot` 从起点逐级向上，到第一个含 `.git`（目录或 worktree 的 `.git` 文件）的目录为止，近的在前；一路找不到仓库根时只读起点目录。
 - **去重**：同名条目按 `precedence` 保留一个。Claude Code 为 User 优先于 Project（个人 Skill 覆盖项目 Skill），Plugin 最后（插件 Skill 名带 `<plugin>:` 前缀，不与其他来源同名）；Pi 先找到的保留（Project 优先于 User），Codex 同为 Project、User、Plugin；同一来源内近的目录优先。
-- **远程项目**：不解析，补全关闭。
+- **远程项目**：同样的规则在远端主机上解析，见"远程项目"。
 
 ### 插件 Skill
 
@@ -139,7 +138,7 @@ struct SkillLocation {
 - **当前行**：列表只有一个当前行（高亮行），与原生菜单一致：↑↓ 移动它；指针移到某一行上时该行成为高亮行，之后 ↑↓ 从它继续。只有指针真的移动才改变高亮：列表在静止的指针下打开、滚动或重新过滤时，高亮仍归键盘（`ComposerSkillCompletionPointer`）；指针离开列表时保留当前高亮。Return / Tab 与点击都插入高亮行。
 - **描述提示**：高亮行的完整描述显示在列表旁的另一个子窗口（`ComposerSkillCompletionTooltipPanel`）中：放在面板右侧，右侧放不下时放左侧，顶边与该行对齐；系统提示材质与字体，自动换行，最宽约 320 pt，不截断；高亮每次变化（按键或指针）都立即跟随；没有描述的 Skill 不显示；不接收鼠标、不成为 key，随列表一起关闭。
 - **Skills 按钮**：在光标处插入前缀（替换选中文本；光标前紧跟非空白字符时先补一个空格，`invocationPosition == .leading` 时插在 prompt 开头），并把光标移到前缀后，于是弹出同一个弹窗。
-- **不可用**：agent 的 `invocationStyle == .none` 或项目为远程时，不弹出，Skills 按钮置灰，tooltip 说明原因（`NewAgentFeature.State.skillsUnavailableReason`）：远程项目为 "Skill suggestions are not available for remote projects"，不支持的 agent 为 "Skill suggestions are not available for <agent>"；未选项目或 agent 时提示先选择。
+- **不可用**：agent 的 `invocationStyle == .none` 或远程读取失败时，不弹出，Skills 按钮置灰，tooltip 说明原因（`NewAgentFeature.State.skillsUnavailableReason`）：不支持的 agent 为 "Skill suggestions are not available for <agent>"，远程读取失败为失败原因（见"远程项目"）；未选项目或 agent 时提示先选择。
 
 组件 `ComposerSkillCompletion`、列表面板与 `ComposerTextEditor` 并列放在 `App/Features/Composer/`，不依赖 New Agent，便于后续接入其他输入处。
 
@@ -167,6 +166,17 @@ struct SkillLocation {
 - Gemini CLI：本机未安装，临时装到私有目录并在登录 `PATH` 上临时放一个链接（New Agent 只列登录 `PATH` 上能找到的 agent）。可用的凭据都不可用：OAuth 要浏览器登录，`~/.config/secrets.env` 的 API key 返回 `CONSUMER_SUSPENDED`，其代理地址返回 404。在有可用凭据的机器上重跑后才能决定写法。
 - 切换 agent：同一草稿中从 Codex 切到 Pi，`$` 不再弹出，`/` 弹出 Pi 的列表，插入 `/skill:codans-probe-459`。
 
+### 远程项目
+
+远程项目的 agent 在远端主机上运行，所以用户级目录、插件缓存、项目目录都在远端。解析与扫描的代码不变，只是文件读取换成远端：
+
+- **文件读取**：`SkillLocationResolver`、两个插件注册表、`PiProjectTrust` 与 `SkillScanner` 都经 `SkillFileSystem` 读文件（读内容、是否存在、列目录、真实路径）。本地项目用 `LocalSkillFileSystem`。
+- **分轮读取**：远程项目用 `SkillFileSnapshot`：它用已读到的结果回答，答不了的读取记下来、本轮当作不存在。`RemoteSkillReader` 每轮运行一次解析与扫描，把记下的读取一次性发到远端，再运行，直到没有新的读取（最多 8 轮）。每一次读取只取决于之前的结果，所以最后一轮与在远端本地运行的结果相同。为减少轮数：缺少的 `.git` 同时询问所有父目录的 `.git`（向上查找）；目录的结果带上每个子目录的 `SKILL.md`（扫描）。Claude Code 一般 4 次往返：`HOME`，配置文件与向上查找，插件，插件 Skill。
+- **传输**：每轮是一条 POSIX `sh` 脚本，经 `SSHCommand.invocation` 走项目已有的共享 ControlMaster（`BatchMode`，不弹认证）。路径作为参数传，不进脚本文本。回复以标记行开始（登录 shell 的 banner 在其前），之后每条记录为 `<种类> <请求序号> <字节数>` 一行加字节，`wc -c` 与 `head -c` 按字节，任何字节都能传。单个配置文件超过 1 MiB 视为不可读；每个 `SKILL.md` 只取前 64 KiB（frontmatter 在开头）；整个回复上限 16 MiB；每轮 20 秒超时。
+- **HOME 与配置根**：用户级目录按远端 `$HOME` 解析；profile 的 `envVars`（`HOME`、`CLAUDE_CONFIG_DIR` 等）与本地同一规则。专属 HOME 的路径与启动命令一致（`AgentLaunchCommand` 写入的是本机 state 目录的路径，远端通常没有，于是没有用户级 Skill）。Claude Code 的 managed settings 按远端 `uname -s`：`Darwin` 为 macOS 路径，否则 `/etc/claude-code/managed-settings.json`。
+- **项目起点**：已有 worktree 时为其远端路径；目标会新建 worktree 时，新 worktree 的文件未知，只列用户级 Skill（与本地无法建视图时相同）。远程项目不建 `NewWorktreeFiles` 视图。
+- **不阻塞**：读取在后台进行，对话框照常可用；已输入的前缀保留，结果到达后弹出。读取失败（连不上、超时、回复无法解析、轮数用尽）时列表为空，Skills 按钮置灰，tooltip 为原因（`NewAgentFeature.State.skillsFailure`，例如 "Could not connect to <host>: …"）。换 agent、项目或目标会重新读取。
+
 ## 备选方案
 
 - **静态菜单列 Skill**：Skill 上百个时长菜单不可搜索，且与输入补全形成两套交互。
@@ -182,7 +192,7 @@ struct SkillLocation {
 
 ## 后续
 
-- 远程项目：经 SSH 读取远端 Skill 目录。
+- 远程项目新建 worktree：在远端建新 worktree 的视图，列出其项目 Skill 与插件 Skill。
 - Command Queue 输入框接入 `ComposerSkillCompletion`。
 - `SkillInstaller.Target` 改为从 Skill Location 表推导。
 - OpenCode：交互式启动能带首条 prompt 并发送后，重跑探针。
