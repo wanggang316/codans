@@ -139,6 +139,24 @@ public nonisolated struct SkillLocation: Equatable, Sendable, Hashable {
   public static let none = SkillLocation()
 
   public var supportsCompletion: Bool { invocationStyle != .none }
+
+  /// The user directory under the config root (`.claude/skills`): the
+  /// folder only this agent reads. `nil` without a config root.
+  public var configRootUserDirectory: String? {
+    guard let root = configRoot else { return nil }
+    return userDirectories.first { Self.isDirectory($0, under: root) }
+  }
+
+  /// User directories outside the config root (`.agents/skills`), which
+  /// other agents can read too.
+  public var sharedUserDirectories: [String] {
+    guard let root = configRoot else { return userDirectories }
+    return userDirectories.filter { !Self.isDirectory($0, under: root) }
+  }
+
+  private static func isDirectory(_ path: String, under root: SkillConfigRoot) -> Bool {
+    path.hasPrefix(root.defaultDirectory + "/")
+  }
 }
 
 extension SkillLocation {

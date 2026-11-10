@@ -33,6 +33,20 @@ struct SkillLocationTests {
   }
 
   @Test
+  func userDirectoriesSplitIntoTheConfigRootOneAndSharedOnes() {
+    #expect(SkillLocation.claudeCode.configRootUserDirectory == ".claude/skills")
+    #expect(SkillLocation.claudeCode.sharedUserDirectories.isEmpty)
+    #expect(SkillLocation.codex.configRootUserDirectory == ".codex/skills")
+    #expect(SkillLocation.codex.sharedUserDirectories == [".agents/skills"])
+    #expect(SkillLocation.pi.configRootUserDirectory == ".pi/agent/skills")
+    #expect(SkillLocation.pi.sharedUserDirectories == [".agents/skills"])
+    #expect(SkillLocation.none.configRootUserDirectory == nil)
+    let rootless = SkillLocation(userDirectories: [".gemini/skills"])
+    #expect(rootless.configRootUserDirectory == nil)
+    #expect(rootless.sharedUserDirectories == [".gemini/skills"])
+  }
+
+  @Test
   func probedAgentsUseTheirInvocationStyleAndPosition() {
     #expect(SkillLocation.claudeCode.invocationStyle == .slash)
     #expect(SkillLocation.claudeCode.invocationPosition == .anywhere)
