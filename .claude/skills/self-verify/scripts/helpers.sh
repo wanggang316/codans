@@ -354,6 +354,10 @@ sv_wait() { sv_ax wait "$@"; }
 # AXPress one element: sv_press AXMenuItem Always. Refuses an element without
 # an AXPress action, because AX reports success for those and nothing happens.
 sv_press() { sv_ax press "$@"; }
+# Perform one named action: a standard one by AX name, a custom one by the
+# display name the tree shows: sv_action AXButton Workspace "Add Project".
+# Refuses an action the element does not offer and lists the ones it does.
+sv_action() { sv_ax action "$@"; }
 # Focus a text field and set its value: sv_set_value AXTextField "Filter branches" main
 sv_set_value() { sv_ax set-value "$@"; }
 # Select an outline or table row by its text (Settings sidebar).

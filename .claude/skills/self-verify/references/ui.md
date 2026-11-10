@@ -16,7 +16,7 @@ Settings or ask for permission during a run.
 ## Observe, Act, Observe Again
 
 1. Find the target in a fresh tree: `sv_tree | grep -n <word>`, or `sv_tree --window <title>` for one window.
-2. Act once: `sv_press`, `sv_set_value`, `sv_select_row`, or `sv_menu`.
+2. Act once: `sv_press`, `sv_action`, `sv_set_value`, `sv_select_row`, or `sv_menu`.
 3. Wait for a concrete result: `sv_wait <role> <label> [--gone]`.
 4. Assert the new label, value, selection, window title, or `codans_debug` JSON.
 
@@ -34,6 +34,12 @@ wait on the wrong role times out as if the control never appeared.
 
 `sv_press` refuses an element without an `AXPress` action. AX returns success for a press on a static text or an
 `onTapGesture` view and nothing happens, so a press that "worked" without a state change is a known trap.
+
+Use `sv_action <role> <label> <action>` instead of `sv_press` when the control is reachable only through a named
+action: a custom action (the tree shows it by display name, for example `{Add Project}`) or a standard action other
+than `AXPress` (`AXShowMenu`, `AXIncrement`). Give a custom action by its display name and a standard action by its
+full AX name. It refuses an action the element does not offer and lists the ones it does, and like `sv_press` it
+exits 3 when AX times out.
 
 ## Windows
 
@@ -83,6 +89,9 @@ real agent or editor.
 - The project tree is an `AXOutline "Sidebar"`; worktree rows hold an `AXStaticText` with the branch name. Select a
   worktree with `codans_debug pane focus <pane>`, not with AX: text in a row has no press. (`worktree switch`
   only records the selection; it does not move the sidebar.)
+- A Workspace header row offers its hover-only `+` and `⋯` entries as custom actions ("New Group", "Add Project",
+  "Workspace Settings", "Remove Workspace"); a group row offers "Expand Group" or "Collapse Group". Find the row
+  with `sv_find any <workspace name>`, then run, for example, `sv_action <role> <workspace name> "Add Project"`.
 - The Agents View toggle is `#agentState.sidebarToggle`. Its label flips between "Hide agents view" and "Show agents
   view"; assert the flip.
 
