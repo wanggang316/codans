@@ -16,6 +16,8 @@ final class Model: ObservableObject {
   @Published var split = "none"
   @Published var alpha = false
   @Published var beta = false
+  @Published var customs = 0
+  @Published var steps = 0
 }
 
 struct FixtureView: View {
@@ -72,6 +74,13 @@ struct FixtureView: View {
       .contentShape(Rectangle())
       .onHover { hovering = $0 }
       Text("hover presses: \(model.hoverPresses)")
+      // A custom action is reachable only by its name, like a sidebar row's
+      // "Add Project": the element has no AXPress.
+      Text("Custom target")
+        .accessibilityAction(named: "Bump Custom") { model.customs += 1 }
+      Text("customs: \(model.customs)")
+      Stepper("Steps", value: $model.steps)
+      Text("steps: \(model.steps)")
     }
     .padding(16)
     .frame(width: 320)

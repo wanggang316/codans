@@ -22,6 +22,8 @@
 //   get <pid> <role> <label> [scope]        one element as JSON
 //   wait <pid> <role> <label> [scope] [--gone] [--timeout MS]
 //   press <pid> <role> <label> [scope]      AXPress; refused without an AXPress action
+//   action <pid> <role> <label> <action> [scope]  perform a named action: a standard
+//                                      one by AX name (AXIncrement), a custom one by display name
 //   set-value <pid> <role> <label> <value> [scope]  focus, then set AXValue
 //   select-row <pid> <label>           select the outline/table row whose text is <label>
 //   menu <pid> [<bar item> <item>...]  press a menu-bar item by title path; no path lists bar items
@@ -36,7 +38,7 @@
 //
 // Positions are global with a top-left origin (AX, CGEvent, and CGWindowList
 // agree). Exit codes: 0 ok, 1 not found or refused, 2 preflight skipped or
-// wait timeout, 3 press delivery uncertain (AX timed out), 64 usage.
+// wait timeout, 3 press or action delivery uncertain (AX timed out), 64 usage.
 
 import AppKit
 import ApplicationServices
@@ -183,6 +185,26 @@ func findOne(_ args: Arguments, usage: String) -> AXUIElement {
   return matches[0]
 }
 
+// A custom action reports "Name:<display name>\nTarget:...\nSelector:...";
+// it is addressed by its display name only.
+func displayName(_ action: String) -> String {
+  action.hasPrefix("Name:") ? String(action.dropFirst(5).prefix { $0 != "\n" }) : action
+}
+
+// Performs one action. AX timing out means the action may still have run.
+func perform(_ action: String, on element: AXUIElement, verb: String) {
+  let label = describe(element)
+  let result = AXUIElementPerformAction(element, action as CFString)
+  if result == .cannotComplete {
+    // A press that opens a menu returns only after the menu closes, so AX
+    // times out while the menu is open. Delivery is uncertain: observe.
+    print("uncertain \(verb) \(label): AX timed out (-25204); observe the result before you act again")
+    exit(3)
+  }
+  guard result == .success else { fail("\(displayName(action)) failed: \(result.rawValue)") }
+  print("ok \(verb) \(label)")
+}
+
 func describe(_ element: AXUIElement) -> String {
   var parts = [role(element)]
   if let subrole = string(element, kAXSubroleAttribute) { parts.append("(\(subrole))") }
@@ -200,7 +222,7 @@ func describe(_ element: AXUIElement) -> String {
   if bool(element, kAXExpandedAttribute) == true { state.append("expanded") }
   if !state.isEmpty { parts.append("[\(state.joined(separator: ","))]") }
   let shown = actions(element).filter { !["AXScrollToVisible", "AXShowDefaultUI", "AXShowAlternateUI"].contains($0) }
-    .map { $0.hasPrefix("Name:") ? String($0.dropFirst(5).prefix { $0 != "\n" }) : $0.replacingOccurrences(of: "AX", with: "") }
+    .map { $0.hasPrefix("Name:") ? displayName($0) : $0.replacingOccurrences(of: "AX", with: "") }
   if !shown.isEmpty { parts.append("{\(shown.joined(separator: ","))}") }
   if let rect = frame(element) {
     parts.append("@\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))x\(Int(rect.height))")
@@ -424,16 +446,21 @@ case "press":
   guard actions(element).contains(kAXPressAction) else {
     fail("\(describe(element)) has no AXPress action; a press would only report success")
   }
-  let label = describe(element)
-  let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
-  if result == .cannotComplete {
-    // A press that opens a menu returns only after the menu closes, so AX
-    // times out while the menu is open. Delivery is uncertain: observe.
-    print("uncertain press \(label): AX timed out (-25204); observe the result before you act again")
-    exit(3)
+  perform(kAXPressAction, on: element, verb: "press")
+
+case "action":
+  let usage = "action <pid> <role> <label> <action> [scope]"
+  let element = findOne(args, usage: usage)
+  let wanted = args.string(at: 3, usage: usage)
+  let offered = actions(element)
+  // Exact match only: the raw "Name:..." string of a custom action is not
+  // accepted, so one spelling names one action.
+  let matches = offered.filter { $0.hasPrefix("Name:") ? displayName($0) == wanted : $0 == wanted }
+  guard let action = matches.first else {
+    let names = offered.map(displayName).map { "\"\($0)\"" }.joined(separator: ", ")
+    fail("\(describe(element)) has no action \"\(wanted)\"; it offers: \(names.isEmpty ? "none" : names)")
   }
-  guard result == .success else { fail("AXPress failed: \(result.rawValue)") }
-  print("ok press \(label)")
+  perform(action, on: element, verb: "action \(wanted)")
 
 case "set-value":
   let usage = "set-value <pid> <role> <label> <value> [scope]"

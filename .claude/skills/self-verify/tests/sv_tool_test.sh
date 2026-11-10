@@ -121,6 +121,15 @@ check_exit "menu reports a missing item" 1 ax menu Fixture Nope
 check "main-window targets a window by title" ax main-window "Fixture Second"
 check "close-window closes it" ax close-window "Fixture Second"
 check "the closed window is off screen" window_gone "Fixture Second"
+check "action performs a custom action by its display name" ax action AXStaticText "Custom target" "Bump Custom"
+check "the custom action ran" ax wait AXStaticText "customs: 1" --timeout 2000
+check "action performs a standard action by its AX name" ax action AXIncrementor "*" AXIncrement --after "Steps"
+check "the standard action ran" ax wait AXStaticText "steps: 1" --timeout 2000
+check_exit "action refuses an unknown action name" 1 ax action AXStaticText "Custom target" "Bump Custm"
+cp "$scratch/out" "$scratch/refusal"
+check "the refusal lists the element's actions" grep -q 'offers: "Bump Custom"' "$scratch/refusal"
+check "the refused action did nothing" ax find AXStaticText "customs: 1"
+check_exit "action does not match a custom action by its raw AX string" 1 ax action AXStaticText "Custom target" "Name:Bump Custom"
 check "center prints a point inside the element" sh -c "'$tool' center $p AXButton Toggle | grep -Eq '^[0-9]+ [0-9]+$'"
 check "no semantic command took focus" test "$("$tool" front)" = "$front_before"
 
