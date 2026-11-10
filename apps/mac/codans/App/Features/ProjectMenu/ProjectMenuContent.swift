@@ -47,6 +47,9 @@ struct ProjectMenuRowLabel: View {
       Image(nsImage: Self.icon(project))
         .accessibilityHidden(true)
     }
+    // A menu inside a grouped Form drops a row's icon by default; the
+    // project icon is how the rows tell projects apart.
+    .labelStyle(.titleAndIcon)
   }
 
   /// The project's sidebar icon, pre-rendered for a menu row: a menu draws
