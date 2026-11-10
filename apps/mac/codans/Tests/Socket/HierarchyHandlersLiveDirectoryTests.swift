@@ -81,8 +81,8 @@ struct HierarchyHandlersLiveDirectoryTests {
     let params = try JSONValue.encoded(HierarchyHandlers.ActivateParams(id: fixture.tabID.raw))
 
     let outcome = await fixture.handlers.activateTab(params)
-    guard case .failed = outcome else {
-      Issue.record("expected failure, got \(outcome)")
+    guard case .failed(.conflict) = outcome else {
+      Issue.record("expected conflict, got \(outcome)")
       return
     }
   }
