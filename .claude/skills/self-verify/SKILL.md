@@ -97,7 +97,7 @@ Use the smallest surface that can prove the assertion:
 1. `codans_debug`: projects, worktrees, tabs, panes, terminal input and output, agent state. It is the Debug
    bundle's `codans-dev` on the private socket, with the calling pane's context removed. Read
    `skills/codans-cli/SKILL.md` before you write commands; it owns flags, JSON fields, and exit codes.
-2. Semantic AX (`sv_tree`, `sv_find`, `sv_press`, ...): native UI labels, values, selection, popovers, menus,
+2. Semantic AX (`sv_tree`, `sv_find`, `sv_press`, `sv_action`, ...): native UI labels, values, selection, popovers, menus,
    Settings. Read [references/ui.md](references/ui.md) before a UI scenario.
 3. Guarded physical input (`sv_click`, `sv_hover`): only for tap gestures and hover-revealed controls.
 4. Window screenshot (`sv_screenshot`): only for geometry, clipping, or visual hierarchy.
