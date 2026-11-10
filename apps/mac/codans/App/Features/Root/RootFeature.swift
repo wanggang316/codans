@@ -2668,6 +2668,8 @@ struct RootFeature {
       return .send(.toggleSidebarRequested)
     case .openGhosttyConfig:
       return .send(.windowActionRouter(.requested(.openConfig)))
+    case .refreshAllProjects:
+      return .send(.sidebar(.refreshAllProjectsTapped))
 
     // Worktree
     case .selectWorktree(let projectID, let worktreeID):
