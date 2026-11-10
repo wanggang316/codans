@@ -98,3 +98,23 @@ GitLab merge request are both Pull Requests. The UI shows the Git Platform's own
 label: "PR" for GitHub and "MR" for GitLab.
 _Avoid_: Merge Request, MR, and Change Request as domain terms. Use Merge
 Request and MR only in GitLab UI text and GitLab API code.
+
+## Agent Skills
+
+These terms define how codans finds the skills an agent can use. See the
+[Agent Skill Completion design](docs/design-docs/agent-skill-completion.md).
+
+**Agent Skill**: A folder with a `SKILL.md` file that an agent loads by
+itself. It is not a **Bundled Skill**: a skill that the codans app ships
+(`codans-cli`, `codans-workflow`) and `SkillInstaller` links into agent
+folders.
+_Avoid_: plugin, command.
+
+**Skill Location**: The rule by which one `AgentKind` finds Agent Skills: its
+user-level directories, project-level directories and how far it searches
+them, the environment variable that moves its config root, its Invocation
+Style, and its invocation position.
+_Avoid_: registry, skill dir.
+
+**Invocation Style**: How a prompt calls one Agent Skill explicitly: `/name`,
+`/skill:name`, `$name`, `@id`, or none.

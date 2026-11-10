@@ -16,6 +16,7 @@ struct NewAgentView: View {
   @FocusState private var focus: Field?
   @State private var showsFilePicker = false
   @State private var promptSelection = ComposerSelection()
+  @State private var skillCompletion = ComposerSkillCompletion()
 
   private enum Field: Hashable {
     case branchName
@@ -52,6 +53,12 @@ struct NewAgentView: View {
     // Settings edits and CLI installs change what the agent menu offers;
     // the profile list doubles as the task identity.
     .task(id: profiles) { store.send(.agentProfilesChanged(profiles)) }
+    .onChange(of: store.skillLocation, initial: true) { _, location in
+      skillCompletion.location = location
+    }
+    .onChange(of: store.skills, initial: true) { _, skills in
+      skillCompletion.skills = skills
+    }
     .onExitCommand { store.send(.cancelTapped) }
     .composerFilePicker(isPresented: $showsFilePicker) { urls in
       promptSelection.insertPaths(urls, into: store.prompt) { store.send(.filesSelected(urls, selection: $0)) }
@@ -273,6 +280,9 @@ struct NewAgentView: View {
         editor
         HStack(spacing: 8) {
           ComposerFilePickerButton { showsFilePicker = true }
+          ComposerSkillsButton(unavailableReason: store.skillsUnavailableReason) {
+            insertSkillPrefix()
+          }
           Spacer()
           agentMenu
           sendButton
@@ -294,6 +304,17 @@ struct NewAgentView: View {
     }
   }
 
+  /// Puts the agent's call prefix at the caret and gives the editor focus,
+  /// so the skill list opens as if the user typed the prefix.
+  private func insertSkillPrefix() {
+    let location = store.skillLocation
+    guard let prefix = location.invocationStyle.prefix else { return }
+    promptSelection.insertSkillPrefix(
+      prefix, position: location.invocationPosition, into: store.prompt
+    ) { store.send(.skillsButtonTapped(selection: $0)) }
+    focus = .prompt
+  }
+
   private var editor: some View {
     ComposerTextEditor(
       text: $store.prompt.sending(\.promptChanged),
@@ -305,25 +326,16 @@ struct NewAgentView: View {
     .focusEffectDisabled()
     .frame(height: Self.editorHeight)
     .focused($focus, equals: .prompt)
-    .onKeyPress(.return, phases: .down) { press in
-      // Return sends; ⇧Return and ⌥Return break a line, as in the
-      // Command Queue composer. During composition Return confirms the
-      // input method's text.
-      if press.modifiers.contains(.shift) || press.modifiers.contains(.option)
-        || promptSelection.hasMarkedText
-      {
-        return .ignored
-      }
-      if store.canSend { store.send(.sendTapped) }
-      return .handled
-    }
-    .onKeyPress(.escape) {
-      // During composition Escape cancels the input method's text.
-      if promptSelection.hasMarkedText { return .ignored }
-      // `NSTextView` would spend Escape on word completion.
-      store.send(.cancelTapped)
-      return .handled
-    }
+    // Owns Return and Escape too, so an open skill list gets them before
+    // they send or close the dialog. ⇧Return and ⌥Return break a line, as
+    // in the Command Queue composer; during composition the keys belong to
+    // the input method.
+    .composerSkillCompletion(
+      skillCompletion, text: store.prompt, selection: promptSelection,
+      onInsert: { store.send(.promptChanged($0)) },
+      onSubmit: { if store.canSend { store.send(.sendTapped) } },
+      onCancel: { store.send(.cancelTapped) }
+    )
     .accessibilityLabel("Prompt")
   }
 

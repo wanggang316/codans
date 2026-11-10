@@ -15,7 +15,8 @@ struct ProjectMenuOption: Equatable, Identifiable {
   /// A git project offers a new worktree or a branch. A folder or a
   /// workspace has one place to work.
   let isGit: Bool
-  /// Lives on a Host, not on This Mac. A Recent row marks it.
+  /// Lives on a Host, not on This Mac. A Recent row marks it, and the New
+  /// Agent dialog reads no skills from it (codans cannot read that host).
   let isRemote: Bool
   /// Orders Recent. `nil` keeps the project out of Recent.
   let lastActiveAt: Date?
@@ -37,7 +38,10 @@ struct ProjectMenuOption: Equatable, Identifiable {
   init(_ project: Project) {
     self.init(
       id: project.id, name: project.name, icon: project.icon, color: project.color, kind: project.kind,
-      isGit: project.supportsWorktrees && !project.isWorkspace, isRemote: project.hostID != nil,
+      isGit: project.supportsWorktrees && !project.isWorkspace,
+      // Either field marks a remote project: a Host reference whose record is
+      // missing, or a resolved connection.
+      isRemote: project.hostID != nil || project.isRemote,
       lastActiveAt: project.lastActiveAt)
   }
 }

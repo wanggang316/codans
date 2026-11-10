@@ -301,6 +301,423 @@ struct NewAgentFeatureTests {
     }
   }
 
+  // MARK: - Skills
+
+  private nonisolated static func notesScope(_ profile: AgentProfile) -> NewAgentFeature.SkillScope {
+    NewAgentFeature.SkillScope(
+      profile: profile, projectStart: URL(fileURLWithPath: "/tmp/new-agent/notes", isDirectory: true))
+  }
+
+  private nonisolated static let reviewSkill = AgentSkillEntry(
+    name: "review", summary: "Review a change", source: .user,
+    url: URL(fileURLWithPath: "/tmp/skills/review"))
+  private nonisolated static let workSkill = AgentSkillEntry(
+    name: "deploy", summary: nil, source: .user,
+    url: URL(fileURLWithPath: "/srv/work-claude/skills/deploy"))
+
+  private nonisolated static func projectSkill(at path: String) -> AgentSkillEntry {
+    AgentSkillEntry(
+      name: "local", summary: path, source: .project,
+      url: URL(fileURLWithPath: "\(path)/.claude/skills/local"))
+  }
+
+  private func makeSkillStore(
+    catalog: Catalog, loaded: LockIsolated<[AgentKind]>,
+    starts: LockIsolated<[String?]> = LockIsolated([]),
+    copies: LockIsolated<[NewWorktreeSource?]> = LockIsolated([]),
+    preferredProjectID: ProjectID? = nil
+  ) -> TestStore<NewAgentFeature.State, NewAgentFeature.Action> {
+    let store = TestStore(initialState: NewAgentFeature.State(preferredProjectID: preferredProjectID)) {
+      NewAgentFeature()
+    } withDependencies: {
+      $0.hierarchyClient.snapshot = { catalog }
+      $0[SettingsWriter.self].readSnapshotSync = { Settings() }
+      $0.gitWorktreeClient.branchRefs = { _ in ["feature/live", "main", "origin/main"] }
+      $0.gitWorktreeClient.localBranchNames = { _ in ["feature/live", "main"] }
+      $0.gitWorktreeClient.lsWorktrees = { _ in
+        [
+          GitWtEntry(branch: "main", path: "/tmp/new-agent/repo", head: "abc", isBare: false),
+          GitWtEntry(branch: "feature/live", path: "/tmp/new-agent/live", head: "def", isBare: false)
+        ]
+      }
+      $0.gitWorktreeClient.defaultRemoteBranchRef = { _ in "origin/main" }
+      $0[AgentSkillClient.self].load = { profile, start, newWorktree in
+        loaded.withValue { $0.append(profile.kind) }
+        copies.withValue { $0.append(newWorktree) }
+        let path = start.map { url in
+          let path = url.path(percentEncoded: false)
+          return path.hasSuffix("/") ? String(path.dropLast()) : path
+        }
+        starts.withValue { $0.append(path) }
+        if let path, path != "/tmp/new-agent/notes" { return [Self.projectSkill(at: path)] }
+        return profile.envVars.isEmpty ? [Self.reviewSkill] : [Self.workSkill]
+      }
+    }
+    store.exhaustivity = .off
+    return store
+  }
+
+  @Test
+  func claudeCodeProfileLoadsItsSkillsAndAnAgentWithoutStyleLoadsNone() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let gemini = AgentProfile(kind: .gemini, name: "Gemini")
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, gemini]))
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsScope = Self.notesScope(profile)
+    }
+    #expect(store.state.skillLocation == .claudeCode)
+
+    await store.send(.agentSelected(gemini.id)) { $0.skills = [] }
+    #expect(store.state.skillLocation == .none)
+    #expect(loaded.value == [.claudeCode])
+  }
+
+  @Test
+  func changingTheAgentRescansAndUsesTheNewInvocationStyle() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let codex = AgentProfile(kind: .codex, name: "Codex")
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, codex]))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skillLocation.invocationStyle == .slash)
+
+    await store.send(.agentSelected(codex.id)) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsScope = Self.notesScope(codex)
+    }
+    #expect(loaded.value == [.claudeCode, .codex])
+    #expect(store.state.skillLocation == .codex)
+
+    // The list and the token the composer inserts follow Codex.
+    let completion = ComposerSkillCompletion()
+    completion.location = store.state.skillLocation
+    completion.skills = store.state.skills
+    completion.update(text: "/re", caret: 3)
+    #expect(!completion.isOpen)
+    completion.update(text: "$re", caret: 3)
+    #expect(completion.matches == [Self.reviewSkill])
+    #expect(completion.handle(.accept, text: "$re") == .insert(text: "$review ", caret: 8))
+
+    await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
+    await store.send(.skillsButtonTapped(selection: 3..<3)) { $0.prompt = "fix $" }
+  }
+
+  @Test
+  func remoteProjectOffersNoSkills() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let remote = Project(
+      name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
+      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    #expect(store.state.skillLocation == .none)
+    #expect(store.state.skills.isEmpty)
+    #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func switchingClaudeProfilesDropsThePreviousSkillsAtOnce() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let work = AgentProfile(
+      kind: .claudeCode, name: "Work", envVars: ["CLAUDE_CONFIG_DIR": "/srv/work-claude"])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile, work]))
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.reviewSkill]
+      $0.skillsScope = Self.notesScope(profile)
+    }
+
+    // Same Skill Location, other home: nothing is offered until the scan
+    // for the new profile ends.
+    await store.send(.agentSelected(work.id)) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.workSkill]
+      $0.skillsScope = Self.notesScope(work)
+    }
+    // A late result for the old profile is dropped.
+    await store.send(.skillsLoaded([Self.reviewSkill], for: Self.notesScope(profile)))
+    #expect(store.state.skills == [Self.workSkill])
+    #expect(store.state.skillsScope == Self.notesScope(work))
+  }
+
+  @Test
+  func reloadingTheSameProfileKeepsItsSkillsUntilTheScanEnds() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.agentSelected(profile.id))
+    #expect(store.state.skills == [Self.reviewSkill])
+    await store.receive(\.skillsLoaded)
+  }
+
+  private var skillCatalog: Catalog {
+    var catalog = catalog
+    catalog.projects[0].worktrees.append(
+      Worktree(name: "live", path: "/tmp/new-agent/live", branch: "feature/live"))
+    return catalog
+  }
+
+  @Test
+  func selectingAnotherProjectRescansAndReplacesTheList() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let starts = LockIsolated<[String?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, starts: starts, preferredProjectID: folderProjectID)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded) { $0.skills = [Self.reviewSkill] }
+
+    // Another project, another start directory: the old list goes at once.
+    await store.send(.projectSelected(gitProjectID)) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/repo")]
+    }
+    // The git project's options load next and pick the base ref of the
+    // new worktree, which scans the main checkout again with that ref.
+    await store.skipReceivedActions()
+    #expect(starts.value == ["/tmp/new-agent/notes", "/tmp/new-agent/repo", "/tmp/new-agent/repo"])
+  }
+
+  @Test
+  func selectingAnotherTargetRescansFromItsWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let starts = LockIsolated<[String?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, starts: starts, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    // A new worktree does not exist yet: the main checkout stands in.
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/repo")]
+    }
+
+    await store.send(.targetSelected(.branch("feature/live"))) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/live")]
+    }
+
+    // Back to a new worktree: the main checkout again.
+    await store.send(.targetSelected(.newWorktree))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skills == [Self.projectSkill(at: "/tmp/new-agent/repo")])
+    #expect(
+      starts.value == [
+        "/tmp/new-agent/repo", "/tmp/new-agent/live", "/tmp/new-agent/repo"
+      ])
+  }
+
+  @Test
+  func changingACopyOptionRescansForANewWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+
+    // Other options, other files in the new worktree: the old list goes at
+    // once.
+    await store.send(.worktree(.copyIgnoredToggled(true))) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded) {
+      $0.skills = [Self.projectSkill(at: "/tmp/new-agent/repo")]
+    }
+    await store.send(.worktree(.copyUntrackedToggled(true)))
+    await store.receive(\.skillsLoaded)
+    #expect(
+      copies.value == [
+        NewWorktreeSource(ref: "origin/main", copyIgnored: false, copyUntracked: false),
+        NewWorktreeSource(ref: "origin/main", copyIgnored: true, copyUntracked: false),
+        NewWorktreeSource(ref: "origin/main", copyIgnored: true, copyUntracked: true),
+      ])
+    #expect(store.state.skillsScope?.newWorktree == NewWorktreeSource(ref: "origin/main", copyIgnored: true, copyUntracked: true))
+  }
+
+  @Test
+  func changingACopyOptionKeepsTheSkillsOfAnExistingWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.targetSelected(.branch("feature/live")))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skillsScope?.newWorktree == nil)
+
+    await store.send(.worktree(.copyIgnoredToggled(true)))
+    await store.send(.worktree(.copyUntrackedToggled(true)))
+    #expect(store.state.skills == [Self.projectSkill(at: "/tmp/new-agent/live")])
+    #expect(copies.value == [NewWorktreeSource(ref: "origin/main", copyIgnored: false, copyUntracked: false), nil])
+  }
+
+  /// A new worktree gets its tracked files from the base ref, so another
+  /// base ref rescans with it.
+  @Test
+  func changingTheBaseRefRescansForANewWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.worktree(.baseRefSelected("main"))) {
+      $0.skills = []
+      $0.skillsScope = nil
+    }
+    await store.receive(\.skillsLoaded)
+    #expect(copies.value.map { $0?.ref } == ["origin/main", "main"])
+  }
+
+  /// The agent can be known before the worktree options load. The first
+  /// scan has no base ref yet; the loaded options scan again with it.
+  @Test
+  func loadedOptionsRescanWithTheBaseRef() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.send(.onAppear)
+    await store.skipReceivedActions()
+    #expect(copies.value.last??.ref == "origin/main")
+    #expect(store.state.skillsScope?.newWorktree?.ref == "origin/main")
+  }
+
+  /// A branch that no worktree holds is checked out into a new worktree
+  /// with the dialog's copy options, so the scan follows them too.
+  @Test
+  func branchWithoutAWorktreeScansWithTheCopyOptions() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let copies = LockIsolated<[NewWorktreeSource?]>([])
+    let store = makeSkillStore(
+      catalog: skillCatalog, loaded: loaded, copies: copies, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.worktree(.copyUntrackedToggled(true)))
+    await store.receive(\.skillsLoaded)
+    await store.send(.targetSelected(.branch("origin/next")))
+    await store.receive(\.skillsLoaded)
+    #expect(copies.value.last == NewWorktreeSource(ref: "origin/next", copyIgnored: false, copyUntracked: true))
+  }
+
+  /// A local branch with a slash is not read as `<remote>/<branch>`: the
+  /// agent starts in a new worktree for `feature/live`, so the scan reads
+  /// the main checkout, not the worktree of an unrelated `live` branch.
+  @Test
+  func localBranchWithASlashDoesNotScanAnotherBranchesWorktree() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let starts = LockIsolated<[String?]>([])
+    var catalog = catalog
+    catalog.projects[0].worktrees.append(
+      Worktree(name: "other", path: "/tmp/new-agent/other", branch: "live"))
+    let store = makeSkillStore(
+      catalog: catalog, loaded: loaded, starts: starts, preferredProjectID: gitProjectID)
+    await store.send(.onAppear)
+    await store.receive(\.worktree.optionsLoaded)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    await store.send(.targetSelected(.branch("feature/live")))
+    await store.receive(\.skillsLoaded)
+    #expect(starts.value == ["/tmp/new-agent/repo", "/tmp/new-agent/repo"])
+  }
+
+  // MARK: - Skills button
+
+  @Test
+  func skillsButtonInsertsThePrefixWhenSkillsAreAvailable() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skillsUnavailableReason == nil)
+
+    await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
+    await store.send(.skillsButtonTapped(selection: 3..<3)) { $0.prompt = "fix /" }
+  }
+
+  @Test
+  func skillsButtonIsOffForAnAgentWithoutInvocationStyle() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let gemini = AgentProfile(kind: .gemini, name: "Work Gemini")
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([gemini]))
+    #expect(store.state.skillLocation == .none)
+    #expect(store.state.skillsUnavailableReason == "Skill suggestions are not available for Gemini CLI")
+
+    await store.send(.promptChanged("fix")) { $0.prompt = "fix" }
+    await store.send(.skillsButtonTapped(selection: 3..<3))
+    #expect(store.state.prompt == "fix")
+    #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func skillsButtonIsOffForARemoteProject() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let remote = Project(
+      name: "server", rootPath: "/srv/repo", remoteHost: RemoteHost(alias: "devbox"),
+      worktrees: [Worktree(name: "repo", path: "/srv/repo")])
+    let store = makeSkillStore(catalog: Catalog(projects: [remote]), loaded: loaded)
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    #expect(store.state.skillLocation == .none)
+    #expect(
+      store.state.skillsUnavailableReason == "Skill suggestions are not available for remote projects")
+
+    await store.send(.skillsButtonTapped(selection: nil))
+    #expect(store.state.prompt.isEmpty)
+    #expect(loaded.value.isEmpty)
+  }
+
+  @Test
+  func skillsButtonIsOffWithoutAnAgent() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let catalog = Catalog(projects: catalog.projects.filter { $0.id == folderProjectID })
+    let store = makeSkillStore(catalog: catalog, loaded: loaded)
+    await store.send(.onAppear)
+    #expect(store.state.skillsUnavailableReason == "Choose an agent to see its skills")
+  }
+
   // MARK: - Project menu
 
   private static func folder(
@@ -327,6 +744,21 @@ struct NewAgentFeatureTests {
     #expect(remote.isRemote)
     #expect(remote.defaultSymbol == ProjectIconView.folderSymbol)
     #expect(remote.icon == nil && remote.color == nil)
+  }
+
+  /// A Host reference whose record is gone, or a connection without a Host
+  /// reference, still marks the project remote: the dialog must not read
+  /// its skills from This Mac.
+  @Test
+  func eitherHostFieldMarksTheOptionRemote() {
+    var orphan = Self.folder("orphan")
+    orphan.hostID = HostID()
+    #expect(orphan.remoteHost == nil)
+    #expect(ProjectMenuOption(orphan).isRemote)
+    let connection = Project(
+      name: "legacy", rootPath: "/srv/legacy", remoteHost: RemoteHost(alias: "box"))
+    #expect(connection.hostID == nil)
+    #expect(ProjectMenuOption(connection).isRemote)
   }
 
   @Test

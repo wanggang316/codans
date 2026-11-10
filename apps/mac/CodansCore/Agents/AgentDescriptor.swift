@@ -102,6 +102,10 @@ public nonisolated struct AgentDescriptor: Equatable, Sendable {
   /// How this CLI takes a kickoff prompt, or `nil` when it cannot start
   /// interactively with one.
   public let promptStyle: AgentPromptStyle?
+  /// Where this agent finds its Agent Skills and how a prompt calls one.
+  public var skillLocation: SkillLocation {
+    AgentCatalog.skillLocation(for: kind)
+  }
 
   public var displayName: String {
     AgentRuntimeAdapters.adapter(for: kind).displayName
@@ -178,6 +182,21 @@ public nonisolated enum AgentCatalog {
     case .omp: return omp
     case .cline: return cline
     case .kimi: return kimi
+    }
+  }
+
+  /// The Skill Location table: one entry per agent, exhaustive so a new
+  /// agent case must decide. Only agents whose Invocation Style a probe on
+  /// the real CLI confirmed get a non-`none` entry (ADR 0010).
+  public static func skillLocation(for kind: AgentKind) -> SkillLocation {
+    switch kind {
+    case .claudeCode: return .claudeCode
+    case .codex: return .codex
+    case .pi: return .pi
+    // Gemini and OpenCode: the probe could not run or failed, see the
+    // design doc.
+    case .gemini, .opencode, .cursorAgent, .copilot, .droid, .amp, .grok, .omp, .cline, .kimi:
+      return .none
     }
   }
 
