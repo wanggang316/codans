@@ -107,14 +107,15 @@ public nonisolated enum SkillLocationResolver {
   }
 
   /// User-level skill directories for `profile`, resolved against the home
-  /// the agent runs with and the config root its environment sets.
+  /// the agent runs with and the config root its environment sets. None
+  /// when the launch flags turn skills off (`loadsSkills`).
   public static func userDirectories(
     for profile: AgentProfile,
     userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
     stateDirectory: URL = AppDirectories.stateDirectory()
   ) -> [SkillDirectory] {
     let location = profile.descriptor.skillLocation
-    guard location.supportsCompletion else { return [] }
+    guard location.supportsCompletion, loadsSkills(profile) else { return [] }
     let home = effectiveHome(for: profile, userHome: userHome, stateDirectory: stateDirectory)
     return location.userDirectories.compactMap { relative in
       var base = home
