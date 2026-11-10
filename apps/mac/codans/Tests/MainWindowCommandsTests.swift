@@ -137,6 +137,44 @@ struct MainWindowCommandsTests {
     #expect(!MainWindowKeyObserver.isMainWindow(panel))
   }
 
+  /// Regression: `NSApp.keyWindow` is still `nil` while `didBecomeKey` is
+  /// delivered, so the observer must take the window from the notification.
+  @Test
+  func observerFollowsTheWindowThatBecameKey() {
+    let observer = MainWindowKeyObserver()
+    let main = Self.makeWindow()
+    let child = Self.makeWindow()
+    main.addChildWindow(child, ordered: .above)
+    defer { main.removeChildWindow(child) }
+
+    observer.windowDidBecomeKey(main)
+    #expect(observer.isMainWindowKey)
+
+    // A popover (child window) takes key: resign of main, then become of child.
+    observer.windowDidResignKey(main)
+    observer.windowDidBecomeKey(child)
+    #expect(!observer.isMainWindowKey)
+
+    // Back to main; a late resign of the popover must not clear it.
+    observer.windowDidBecomeKey(main)
+    observer.windowDidResignKey(child)
+    #expect(observer.isMainWindowKey)
+
+    // The app deactivates: main resigns and nothing becomes key.
+    observer.windowDidResignKey(main)
+    #expect(!observer.isMainWindowKey)
+  }
+
+  @Test
+  func observerPostsFromNotifications() {
+    let observer = MainWindowKeyObserver()
+    let main = Self.makeWindow()
+    NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: main)
+    #expect(observer.isMainWindowKey)
+    NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: main)
+    #expect(!observer.isMainWindowKey)
+  }
+
   private static func makeWindow() -> NSWindow {
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
