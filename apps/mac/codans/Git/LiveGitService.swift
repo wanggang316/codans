@@ -45,7 +45,7 @@ nonisolated final class LiveGitService: GitService {
   /// here so the local-vs-SSH routing decision is made in exactly one place.
   ///
   /// Local: `gitExecutable` with the hardened `GitProcessEnv` allowlist, cwd
-  /// at the repo. SSH: `/usr/bin/ssh` wrapping `git` (bare name — the login
+  /// at the repo, started through the user's login shell for its `PATH`. SSH: `/usr/bin/ssh` wrapping `git` (bare name — the login
   /// shell restores the host's PATH, so a Homebrew-only git still resolves),
   /// `cd`'d into the remote repo path; the local process env is passed whole
   /// because ssh itself needs `SSH_AUTH_SOCK` / `HOME` / `PATH`, and the
@@ -78,7 +78,8 @@ nonisolated final class LiveGitService: GitService {
       env: GitProcessEnv.build(),
       cwd: cwd,
       timeout: Self.defaultTimeout,
-      maxOutputBytes: maxOutputBytes
+      maxOutputBytes: maxOutputBytes,
+      launch: .loginShell
     )
   }
 

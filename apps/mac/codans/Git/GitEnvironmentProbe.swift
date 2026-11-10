@@ -55,7 +55,8 @@ actor GitEnvironmentProbe {
       // exist and to be readable by the user running the app.
       cwd: FileManager.default.homeDirectoryForCurrentUser,
       timeout: .seconds(5),
-      maxOutputBytes: 4096
+      maxOutputBytes: 4096,
+      launch: .loginShell
     )
     return GitEnvironmentStatus.classify(outcome)
   }

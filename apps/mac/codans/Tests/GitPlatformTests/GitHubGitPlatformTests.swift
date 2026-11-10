@@ -74,6 +74,7 @@ struct GitHubGitPlatformTests {
       ])
     // The repository comes from the reference, never from a working directory.
     #expect(calls.first?.cwd == GitHubGitPlatform.homeDirectory)
+    #expect(calls.first?.launch == .loginShell)
   }
 
   @Test

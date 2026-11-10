@@ -52,7 +52,8 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
       // resolution is not affected by whatever the current directory happens to be.
       cwd: Self.homeDirectory,
       timeout: timeout,
-      maxOutputBytes: maxOutputBytes
+      maxOutputBytes: maxOutputBytes,
+      launch: .loginShell
     )
     switch outcome {
     case .exited(let code, let stdout, _, _) where cmd.expectedExitCodes.contains(code):
@@ -84,7 +85,8 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
       env: Self.makeEnv(),
       cwd: Self.homeDirectory,
       timeout: timeout,
-      maxOutputBytes: maxOutputBytes
+      maxOutputBytes: maxOutputBytes,
+      launch: .loginShell
     )
     guard case .exited(let code, let stdout, _, _) = outcome, cmd.expectedExitCodes.contains(code)
     else { return [] }
@@ -225,7 +227,8 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
       env: Self.makeEnv(),
       cwd: Self.homeDirectory,
       timeout: timeout,
-      maxOutputBytes: chunkMaxBytes
+      maxOutputBytes: chunkMaxBytes,
+      launch: .loginShell
     )
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):
@@ -273,7 +276,8 @@ nonisolated struct GitHubGitPlatform: GitPlatform {
       env: Self.makeEnv(),
       cwd: Self.homeDirectory,
       timeout: timeout,
-      maxOutputBytes: maxOutputBytes
+      maxOutputBytes: maxOutputBytes,
+      launch: .loginShell
     )
     switch outcome {
     case .exited(let code, let stdout, let stderr, let overflow):

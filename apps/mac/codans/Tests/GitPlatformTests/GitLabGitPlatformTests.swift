@@ -71,6 +71,7 @@ struct GitLabGitPlatformTests {
     // The version is checked once per executable.
     #expect(calls.filter { $0.arguments == ["version"] }.count == 1)
     #expect(calls.allSatisfy { $0.cwd == GitLabGitPlatform.homeDirectory })
+    #expect(calls.allSatisfy { $0.launch == .loginShell })
   }
 
   // MARK: - batched read

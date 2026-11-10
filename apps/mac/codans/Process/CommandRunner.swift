@@ -15,8 +15,37 @@ nonisolated protocol CommandRunner: Sendable {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch: CommandLaunch
   ) async -> CommandOutcome
+}
+
+extension CommandRunner {
+  /// Starts `executable` directly (`.direct`).
+  func run(
+    executable: URL,
+    arguments: [String],
+    env: [String: String],
+    cwd: URL,
+    timeout: Duration,
+    maxOutputBytes: Int
+  ) async -> CommandOutcome {
+    await run(
+      executable: executable, arguments: arguments, env: env, cwd: cwd,
+      timeout: timeout, maxOutputBytes: maxOutputBytes, launch: .direct)
+  }
+}
+
+/// How the runner starts a command. See `docs/design-docs/environment.md`.
+nonisolated enum CommandLaunch: Equatable, Sendable {
+  /// Start the executable with exactly `env`. For `ssh` (the remote login
+  /// shell sets the environment), bundled internal binaries, and commands
+  /// that start their own shell.
+  case direct
+  /// Start it through the user's login shell (`LoginShellLaunch`), so the
+  /// command and what it starts get the login `PATH`. For git, the bundled
+  /// `wt`, `gh`, and `glab`.
+  case loginShell
 }
 
 nonisolated enum CommandOutcome: Equatable, Sendable {
@@ -81,11 +110,8 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
   /// How long to keep reading output after the child exits.
   var eofGrace: Duration = PipeCollector.defaultGrace
 
-  /// Runs each command through the user's login shell (`LoginShellLaunch`).
-  /// Set for git, the bundled `wt`, `gh`, and `glab`; not for `ssh`, bundled
-  /// internal binaries, or scripts that start their own shell.
-  var usesLoginShell = false
-  /// The wrapping shell; `nil` reads the user's login shell on every run.
+  /// The shell for `.loginShell` launches; `nil` reads the user's login shell
+  /// on every run.
   var loginShell: LoginShell?
 
   func run(
@@ -94,7 +120,8 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch mode: CommandLaunch
   ) async -> CommandOutcome {
     // `Process.currentDirectoryURL` raises an Objective-C exception for a
     // non-file URL (a Remote Project's `codans-host://` location). Return an
@@ -102,7 +129,7 @@ nonisolated struct FoundationCommandRunner: CommandRunner {
     // routing bug, not a reason to stop the app.
     guard cwd.isFileURL else { return .spawnFailed(reason: Self.nonLocalDirectoryReason(cwd)) }
     var launch = ProcessLaunch(executable: executable, arguments: arguments, environment: env, currentDirectory: cwd)
-    if usesLoginShell {
+    if mode == .loginShell {
       do {
         launch = try LoginShellLaunch.prepare(
           executable: executable, arguments: arguments, env: env, cwd: cwd,
@@ -238,6 +265,7 @@ actor RecordingCommandRunner: CommandRunner {
     var cwd: URL
     var timeout: Duration
     var maxOutputBytes: Int
+    var launch: CommandLaunch
   }
 
   private var _calls: [Recorded] = []
@@ -255,11 +283,12 @@ actor RecordingCommandRunner: CommandRunner {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch: CommandLaunch
   ) async -> CommandOutcome {
     await record(
       executable: executable, arguments: arguments, env: env,
-      cwd: cwd, timeout: timeout, maxOutputBytes: maxOutputBytes
+      cwd: cwd, timeout: timeout, maxOutputBytes: maxOutputBytes, launch: launch
     )
   }
 
@@ -269,7 +298,8 @@ actor RecordingCommandRunner: CommandRunner {
     env: [String: String],
     cwd: URL,
     timeout: Duration,
-    maxOutputBytes: Int
+    maxOutputBytes: Int,
+    launch: CommandLaunch
   ) -> CommandOutcome {
     _calls.append(
       Recorded(
@@ -278,7 +308,8 @@ actor RecordingCommandRunner: CommandRunner {
         env: env,
         cwd: cwd,
         timeout: timeout,
-        maxOutputBytes: maxOutputBytes
+        maxOutputBytes: maxOutputBytes,
+        launch: launch
       ))
     if let outcome = outcomes.first {
       if outcomes.count > 1 { outcomes.removeFirst() }
