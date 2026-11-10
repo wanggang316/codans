@@ -69,18 +69,20 @@ nonisolated struct RemoteNewWorktreeFiles: Sendable {
     if ! git -C "$root" rev-parse --verify -q "$ref^{commit}" >/dev/null 2>&1; then none g 0; exit 0; fi
     if [ -z "$view" ]; then
       base=${TMPDIR:-/tmp}; base=${base%/}
-      find "$base" -maxdepth 1 -type d -name 'codans-new-worktree.*' -mmin +60 \
+      find "$base" -maxdepth 1 -name 'codans-new-worktree.*' -mmin +60 \
         -exec rm -rf {} + 2>/dev/null
       view=$(mktemp -d "$base/codans-new-worktree.XXXXXX") || { none g 0; exit 0; }
     fi
-    count=$#
-    while [ "$count" -gt 0 ]; do
-      p=$1; shift; count=$((count - 1))
-      if git -C "$root" cat-file -e "$ref:$p" 2>/dev/null; then set -- "$@" "$p"; fi
-    done
+    # Check the files out of the ref through a private index, as
+    # `git worktree add` does: `git archive` would apply export-ignore.
+    index=$view.index
+    fail() { rm -rf -- "$view" "$index"; none g 0; exit 0; }
+    if [ ! -f "$index" ]; then
+      GIT_INDEX_FILE=$index git -C "$root" read-tree "$ref" 2>/dev/null || fail
+    fi
     if [ "$#" -gt 0 ]; then
-      git -C "$root" --literal-pathspecs archive --format=tar "$ref" -- "$@" | tar -xf - -C "$view" \
-        || { none g 0; exit 0; }
+      GIT_INDEX_FILE=$index git -C "$root" --literal-pathspecs ls-files -z -- "$@" \
+        | GIT_INDEX_FILE=$index git -C "$root" checkout-index -f -z --stdin --prefix="$view/" || fail
     fi
     str v 0 "$view"
     find "$view" -type l | while IFS= read -r link; do
@@ -94,7 +96,7 @@ nonisolated struct RemoteNewWorktreeFiles: Sendable {
   /// removes anything else.
   static let removeScript = #"""
     case "${1##*/}" in
-      codans-new-worktree.*) rm -rf -- "$1" ;;
+      codans-new-worktree.*) rm -rf -- "$1" "$1.index" ;;
     esac
     """#
 

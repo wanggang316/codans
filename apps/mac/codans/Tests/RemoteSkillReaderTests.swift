@@ -138,6 +138,8 @@ struct RemoteSkillReaderTests {
     try FileManager.default.createSymbolicLink(
       atPath: repo.appending(path: ".claude/skills/linked").path(percentEncoded: false),
       withDestinationPath: "../../tools/shared")
+    // `git archive` leaves these out; `git worktree add` does not.
+    try write(".claude export-ignore\ntools export-ignore\n", to: repo.appending(path: ".gitattributes"))
     try git("add", ".")
     try git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
     // Not in the ref: the new worktree does not get it.
@@ -167,6 +169,21 @@ struct RemoteSkillReaderTests {
 
     #expect(entries.map(\.name) == ["mine"])
     #expect(try FileManager.default.contentsOfDirectory(atPath: hostTemp.path(percentEncoded: false)).isEmpty)
+  }
+
+  @Test
+  func piWithoutSkillsListsNoUserSkillOnTheFallback() async throws {
+    try skill("pi-user", in: home.appending(path: ".pi/agent/skills"))
+    try FileManager.default.createDirectory(at: hostTemp, withIntermediateDirectories: true)
+    func names(_ arguments: String) async throws -> [String] {
+      try await reader(LocalHostRunner(home: home)).load(
+        profile: AgentProfile(kind: .pi, extraArguments: arguments), projectStart: repo.path(percentEncoded: false),
+        newWorktree: NewWorktreeSource(ref: "no-such-ref", copyIgnored: false, copyUntracked: false),
+        stateDirectory: root.appending(path: "state")
+      ).map(\.name)
+    }
+    #expect(try await names("") == ["pi-user"])
+    #expect(try await names("--no-skills").isEmpty)
   }
 
   @Test

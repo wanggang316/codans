@@ -59,16 +59,17 @@ nonisolated enum NewWorktreeFiles {
       }
       let files = NewWorktreeFiles.parse(tracked)
       if !files.isEmpty {
-        let archive = view.deletingLastPathComponent()
-          .appending(path: "\(view.lastPathComponent).tar", directoryHint: .notDirectory)
-        defer { try? FileManager.default.removeItem(at: archive) }
-        guard
+        // Check the files out of the ref through a private index, as
+        // `git worktree add` does. `git archive` would apply the
+        // `export-ignore` and `export-subst` attributes.
+        let index = view.deletingLastPathComponent()
+          .appending(path: "\(view.lastPathComponent).index", directoryHint: .notDirectory)
+        defer { try? FileManager.default.removeItem(at: index) }
+        let indexEnvironment = "GIT_INDEX_FILE=\(index.path(percentEncoded: false))"
+        guard await git(["read-tree", ref], environment: indexEnvironment) != nil,
           await git(
-            ["archive", "--format=tar", "-o", archive.path(percentEncoded: false), ref, "--"]
-              + files.sorted()) != nil,
-          await run(
-            URL(fileURLWithPath: "/usr/bin/tar"),
-            ["-xf", archive.path(percentEncoded: false), "-C", view.path(percentEncoded: false)], ) != nil
+            ["checkout-index", "-f", "--prefix=\(view.path(percentEncoded: false))/", "--"] + files.sorted(),
+            environment: indexEnvironment) != nil
         else { return false }
       }
       if copyIgnored {
@@ -109,10 +110,12 @@ nonisolated enum NewWorktreeFiles {
     }
 
     /// Paths are literal, not patterns: a file name may hold `*` or `[`.
-    private func git(_ arguments: [String]) async -> Data? {
-      await run(
-        GitWorktreeShell.gitURL,
-        ["--literal-pathspecs", "-C", repoRoot.path(percentEncoded: false)] + arguments, )
+    /// `environment` is one `NAME=value` for git alone.
+    private func git(_ arguments: [String], environment: String? = nil) async -> Data? {
+      let git = ["--literal-pathspecs", "-C", repoRoot.path(percentEncoded: false)] + arguments
+      guard let environment else { return await run(GitWorktreeShell.gitURL, git) }
+      return await run(
+        URL(fileURLWithPath: "/usr/bin/env"), [environment, GitWorktreeShell.gitURL.path(percentEncoded: false)] + git)
     }
 
     private func run(_ executable: URL, _ arguments: [String]) async -> Data? {
