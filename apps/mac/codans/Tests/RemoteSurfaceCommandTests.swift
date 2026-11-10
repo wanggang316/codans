@@ -209,12 +209,15 @@ struct RemoteSurfaceCommandTests {
   }
 
   @Test
-  func guiSessionSpawnServesTheSessionThroughLaunchdWhenKeychainIsLocked() throws {
+  func guiSessionSpawnCreatesTheSessionThroughLaunchdWhenKeychainIsLocked() throws {
     let run = try Self.runGUISessionSpawn(uname: "Darwin", keychainLocked: true)
-    #expect(run.log.contains("submit -l com.codans.zmx-serve.codans-x --"))
-    #expect(run.log.contains("serve codans-x --command /bin/sh -l -c cd -- /srv/app"))
+    #expect(run.log.contains("submit -l com.codans.zmx-spawn.codans-x --"))
+    // Through a terminal from `script`, whose input never ends.
+    #expect(run.log.contains("tail -f /dev/null\n"))
+    #expect(run.log.contains("script -q /dev/null\n"))
+    #expect(run.log.contains("zmx attach codans-x /bin/sh -l -c cd -- /srv/app"))
     #expect(run.log.contains("TMPDIR=/tmp/codans-test-tmp"))
-    #expect(run.log.hasSuffix("remove com.codans.zmx-serve.codans-x\n"))
+    #expect(run.log.hasSuffix("remove com.codans.zmx-spawn.codans-x\n"))
     #expect(run.sessions == "codans-x\n")
   }
 
@@ -244,9 +247,9 @@ struct RemoteSurfaceCommandTests {
   }
 
   /// Run `guiSessionSpawn` under `/bin/sh` with fake `uname` / `security` /
-  /// `launchctl` / `zmx`. The fake `launchctl submit` runs its command at
-  /// once, as launchd would in the GUI session; the fake `zmx serve` records
-  /// the session so `zmx list --short` reports it.
+  /// `launchctl` / `tail` / `script` / `zmx`. The fake `launchctl submit`
+  /// runs its command at once, as launchd would in the GUI session; the fake
+  /// `zmx attach` records the session so `zmx list --short` reports it.
   private static func runGUISessionSpawn(
     uname: String, keychainLocked: Bool, guiDomain: Bool = true, sessionExists: Bool = false,
     submitFails: Bool = false
@@ -268,10 +271,15 @@ struct RemoteSurfaceCommandTests {
       \(submitFails ? "exit 1" : "")
       shift 4; "$@"
       """,
+      "tail": "echo \"tail $*\" >> '\(log.path)'",
+      "script": """
+      echo "script $1 $2" >> '\(log.path)'
+      shift 2; "$@"
+      """,
       "zmx": """
       case "$1" in
       list) cat '\(sessions.path)' ;;
-      serve) echo "$2" >> '\(sessions.path)' ;;
+      attach) echo "zmx $*" >> '\(log.path)'; echo "$2" >> '\(sessions.path)' ;;
       esac
       """,
     ]
