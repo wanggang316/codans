@@ -144,6 +144,9 @@ struct RemoteSkillReaderTests {
     try git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
     // Not in the ref: the new worktree does not get it.
     try skill("wip", in: repo.appending(path: ".claude/skills"))
+    // Attributes only in the main checkout do not apply to the new worktree.
+    try git("config", "filter.upper.smudge", "tr a-z A-Z")
+    try write("*.md filter=upper\n", to: repo.appending(path: ".claude/skills/.gitattributes"))
 
     let runner = LocalHostRunner(home: home)
     let entries = try await reader(runner).load(
@@ -154,6 +157,7 @@ struct RemoteSkillReaderTests {
     #expect(entries.map(\.name) == ["docs:pdf", "mine", "shared", "team"])
     let team = entries.first { $0.name == "team" }?.url.path(percentEncoded: false)
     #expect(team?.contains("codans-new-worktree.") == true)
+    #expect(entries.first { $0.name == "team" }?.summary == "team skill.")
     // The view is gone after the load.
     #expect(try FileManager.default.contentsOfDirectory(atPath: hostTemp.path(percentEncoded: false)).isEmpty)
   }
