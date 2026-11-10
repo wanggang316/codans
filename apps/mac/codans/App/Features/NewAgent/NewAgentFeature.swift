@@ -34,8 +34,11 @@ struct NewAgentFeature {
     /// and the project files are read from a view of the new worktree
     /// (ADR 0010).
     var newWorktree: NewWorktreeSource?
-    /// The host of a remote project. `projectStart` is then a path on that
-    /// host, and the skills are read over SSH (`RemoteSkillReader`).
+    /// The project is on another host. `projectStart` is then a path on
+    /// that host, and the skills are read over SSH (`RemoteSkillReader`).
+    var isRemote = false
+    /// The connection of a remote project, `nil` when its Host record is
+    /// missing: then no skills are read (never this Mac's files).
     var host: RemoteHost?
   }
 
@@ -405,10 +408,14 @@ struct NewAgentFeature {
     }
     let client = agentSkillClient
     return .run { send in
-      guard let host = scope.host else {
+      guard scope.isRemote else {
         await send(
           .skillsLoaded(
             client.load(scope.profile, scope.projectStart, scope.newWorktree), for: scope))
+        return
+      }
+      guard let host = scope.host else {
+        await send(.skillsFailed("The host of this remote project is not available", for: scope))
         return
       }
       // The dialog stays usable while the host answers; the list fills in
@@ -451,6 +458,7 @@ struct NewAgentFeature {
         SkillLocationResolver.projectStartDirectory(in: $0, branch: branch)
       },
       newWorktree: newWorktree,
+      isRemote: project.map { !$0.isOnThisMac } ?? false,
       host: project?.remoteHost)
   }
 

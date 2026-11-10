@@ -465,6 +465,31 @@ struct NewAgentFeatureTests {
   }
 
   @Test
+  func aRemoteProjectWithoutItsHostReadsNothing() async {
+    let loaded = LockIsolated<[AgentKind]>([])
+    let remoteReads = LockIsolated(0)
+    // The Host record is gone, so the catalog resolved no connection.
+    var orphan = Project(
+      name: "server", rootPath: "/tmp/new-agent/notes",
+      worktrees: [Worktree(name: "notes", path: "/tmp/new-agent/notes")])
+    orphan.hostID = HostID(raw: UUID())
+    let store = makeSkillStore(catalog: Catalog(projects: [orphan]), loaded: loaded) { _, _, _, _ in
+      remoteReads.withValue { $0 += 1 }
+      return .success([Self.reviewSkill])
+    }
+    await store.send(.onAppear)
+    await store.send(.agentProfilesChanged([profile]))
+    await store.receive(\.skillsFailed) {
+      $0.skillsFailure = "The host of this remote project is not available"
+    }
+    #expect(store.state.skills.isEmpty)
+    #expect(store.state.skillsUnavailableReason == "The host of this remote project is not available")
+    // Neither this Mac's files at the same path nor a remote read.
+    #expect(loaded.value.isEmpty)
+    #expect(remoteReads.value == 0)
+  }
+
+  @Test
   func anotherAgentClearsARemoteFailure() async {
     let codex = AgentProfile(kind: .codex, name: "Codex")
     let remote = Project(
@@ -789,7 +814,7 @@ struct NewAgentFeatureTests {
   @Test
   func eitherHostFieldMarksTheOptionRemote() {
     var orphan = Self.folder("orphan")
-    orphan.hostID = HostID()
+    orphan.hostID = HostID(raw: UUID())
     #expect(orphan.remoteHost == nil)
     #expect(ProjectMenuOption(orphan).isRemote)
     let connection = Project(

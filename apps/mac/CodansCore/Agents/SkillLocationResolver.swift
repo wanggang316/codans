@@ -226,7 +226,7 @@ public nonisolated enum SkillLocationResolver {
     }
     return path.map {
       let url = URL(fileURLWithPath: $0, isDirectory: true)
-      return project.isRemote ? url : url.standardizedFileURL
+      return project.isOnThisMac ? url.standardizedFileURL : url
     }
   }
 
