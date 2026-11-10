@@ -329,37 +329,36 @@ struct NewAgentView: View {
   }
 
   private var editor: some View {
-    ComposerTextEditor(text: $store.prompt.sending(\.promptChanged), selection: promptSelection)
-      .font(.body)
-      .scrollContentBackground(.hidden)
-      .focusEffectDisabled()
-      .frame(height: Self.editorHeight)
-      .overlay(alignment: .topLeading) {
-        if store.prompt.isEmpty {
-          // `TextEditor` has no placeholder of its own; this sits where the
-          // first line of text will, matching the text container's inset.
-          Text("What should the agent do? (⇧↩ for a new line)")
-            .foregroundStyle(.tertiary)
-            .padding(.leading, 5)
-            .allowsHitTesting(false)
-        }
+    ComposerTextEditor(
+      text: $store.prompt.sending(\.promptChanged),
+      selection: promptSelection,
+      placeholder: "What should the agent do? (⇧↩ for a new line)"
+    )
+    .font(.body)
+    .scrollContentBackground(.hidden)
+    .focusEffectDisabled()
+    .frame(height: Self.editorHeight)
+    .focused($focus, equals: .prompt)
+    .onKeyPress(.return, phases: .down) { press in
+      // Return sends; ⇧Return and ⌥Return break a line, as in the
+      // Command Queue composer. During composition Return confirms the
+      // input method's text.
+      if press.modifiers.contains(.shift) || press.modifiers.contains(.option)
+        || promptSelection.hasMarkedText
+      {
+        return .ignored
       }
-      .focused($focus, equals: .prompt)
-      .onKeyPress(.return, phases: .down) { press in
-        // Return sends; ⇧Return and ⌥Return break a line, as in the
-        // Command Queue composer.
-        if press.modifiers.contains(.shift) || press.modifiers.contains(.option) {
-          return .ignored
-        }
-        if store.canSend { store.send(.sendTapped) }
-        return .handled
-      }
-      .onKeyPress(.escape) {
-        // `NSTextView` would spend Escape on word completion.
-        store.send(.cancelTapped)
-        return .handled
-      }
-      .accessibilityLabel("Prompt")
+      if store.canSend { store.send(.sendTapped) }
+      return .handled
+    }
+    .onKeyPress(.escape) {
+      // During composition Escape cancels the input method's text.
+      if promptSelection.hasMarkedText { return .ignored }
+      // `NSTextView` would spend Escape on word completion.
+      store.send(.cancelTapped)
+      return .handled
+    }
+    .accessibilityLabel("Prompt")
   }
 
   /// The agent to send to, as the small borderless menu a chat composer

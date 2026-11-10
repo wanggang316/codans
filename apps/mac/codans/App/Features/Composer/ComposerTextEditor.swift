@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftUI
 
@@ -14,6 +15,17 @@ import SwiftUI
 final class ComposerSelection {
   /// Stored untyped because `TextSelection` needs macOS 15.
   private var value: Any?
+
+  /// `true` while an input method composes text in the editor (Pinyin
+  /// letters before a candidate is chosen, for example). The editor shows
+  /// that text but keeps it out of its binding, so the bound string does
+  /// not tell that the editor has content. Return and Escape belong to the
+  /// input method during this time.
+  private(set) var hasMarkedText = false
+
+  fileprivate func markedTextChanged(_ marked: Bool) {
+    if hasMarkedText != marked { hasMarkedText = marked }
+  }
 
   /// `nil` until the editor reports a caret. Setting `nil` keeps the last
   /// one: focus leaving the editor (to open a file picker, for example)
@@ -61,12 +73,24 @@ final class ComposerSelection {
 }
 
 /// `TextEditor` that records its caret or selection in a `ComposerSelection`,
-/// so picked file paths can go where the user is typing.
+/// so picked file paths can go where the user is typing, and shows a
+/// placeholder while it has no text.
 struct ComposerTextEditor: View {
   @Binding var text: String
   let selection: ComposerSelection
+  let placeholder: LocalizedStringKey
 
   var body: some View {
+    editor
+      .background { MarkedTextProbe(onChange: selection.markedTextChanged) }
+      .overlay(alignment: .topLeading) {
+        if text.isEmpty {
+          ComposerPlaceholder(text: placeholder, selection: selection)
+        }
+      }
+  }
+
+  @ViewBuilder private var editor: some View {
     if #available(macOS 15, *) {
       TextEditor(text: $text, selection: textSelection)
     } else {
@@ -80,5 +104,84 @@ struct ComposerTextEditor: View {
       get: { selection.textSelection },
       set: { selection.textSelection = $0 },
     )
+  }
+}
+
+/// `TextEditor` has no placeholder of its own; this sits where the first
+/// line of text will, matching the text container's inset.
+///
+/// Text an input method composes is on screen but not in the bound string,
+/// so the placeholder also hides while the editor has marked text. This view
+/// reads that state in a body of its own: a new `ComposerTextEditor` body
+/// makes `TextEditor` write the bound string to its text view, and that
+/// removes the text under composition.
+private struct ComposerPlaceholder: View {
+  let text: LocalizedStringKey
+  let selection: ComposerSelection
+
+  var body: some View {
+    if !selection.hasMarkedText {
+      Text(text)
+        .foregroundStyle(.tertiary)
+        .padding(.leading, 5)
+        .allowsHitTesting(false)
+    }
+  }
+}
+
+/// Reports whether the `NSTextView` of the `TextEditor` in front of it has
+/// marked text. `TextEditor` does not expose this, and its binding does not
+/// change while an input method composes.
+private struct MarkedTextProbe: NSViewRepresentable {
+  let onChange: (Bool) -> Void
+
+  func makeNSView(context: Context) -> MarkedTextProbeView { MarkedTextProbeView() }
+
+  func updateNSView(_ view: MarkedTextProbeView, context: Context) {
+    view.onChange = onChange
+  }
+}
+
+private final class MarkedTextProbeView: NSView {
+  var onChange: ((Bool) -> Void)?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    let center = NotificationCenter.default
+    center.removeObserver(self)
+    guard window != nil else { return }
+    // Marked text changes the text or the selection of the text view;
+    // the end of editing clears it.
+    let names = [
+      NSText.didChangeNotification,
+      NSTextView.didChangeSelectionNotification,
+      NSText.didEndEditingNotification
+    ]
+    for name in names {
+      center.addObserver(self, selector: #selector(textInputChanged(_:)), name: name, object: nil)
+    }
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  @objc private func textInputChanged(_ notification: Notification) {
+    guard let textView = notification.object as? NSTextView, isBehind(textView) else { return }
+    onChange?(textView.hasMarkedText())
+    // The text view can post its last notification before it clears the
+    // marked range (a cancelled composition), so read the state again
+    // after the current event.
+    DispatchQueue.main.async { [weak self, weak textView] in
+      guard let self, let textView else { return }
+      self.onChange?(textView.hasMarkedText())
+    }
+  }
+
+  /// The probe is the background of its editor, so the two share a frame.
+  private func isBehind(_ textView: NSTextView) -> Bool {
+    guard let window, textView.window === window else { return false }
+    // The scroll view has the frame of the editor. The text view is as
+    // tall as its text, and its `visibleRect` can be larger than its frame.
+    let editor = textView.enclosingScrollView ?? textView
+    return convert(bounds, to: nil).intersects(editor.convert(editor.bounds, to: nil))
   }
 }
