@@ -199,10 +199,12 @@ struct SkillLocationTests {
   }
 
   @Test
-  func remoteProjectHasNoStartDirectory() {
+  func remoteProjectStartsInAPathOnItsHost() {
     var remote = Self.gitProject
     remote.remoteHost = RemoteHost(alias: "devbox")
-    #expect(SkillLocationResolver.projectStartDirectory(in: remote, branch: nil) == nil)
+    #expect(Self.path(SkillLocationResolver.projectStartDirectory(in: remote, branch: "feature"))
+      == "/code/repo-worktrees/feature")
+    #expect(Self.path(SkillLocationResolver.projectStartDirectory(in: remote, branch: nil)) == "/code/repo")
   }
 
   @Test

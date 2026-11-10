@@ -210,9 +210,10 @@ public nonisolated enum SkillLocationResolver {
   ///   files are not the new worktree's: read a `NewWorktreeFiles` view
   ///   built from it instead.
   /// - A folder or a workspace project: its one working directory.
-  /// - A remote project: `nil`. codans cannot read the other host.
+  ///
+  /// For a remote project the URL holds a path on its host, read over SSH;
+  /// it is not standardized, which would consult this Mac's file system.
   public static func projectStartDirectory(in project: Project, branch: String?) -> URL? {
-    guard !project.isRemote else { return nil }
     let path: String?
     if !project.supportsWorktrees || project.isWorkspace {
       path = project.soleWorkingWorktree?.path
@@ -223,7 +224,10 @@ public nonisolated enum SkillLocationResolver {
     } else {
       path = project.gitRoot ?? project.rootPath
     }
-    return path.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+    return path.map {
+      let url = URL(fileURLWithPath: $0, isDirectory: true)
+      return project.isRemote ? url : url.standardizedFileURL
+    }
   }
 
   /// `true` when an agent launched in `project` on `branch` (`nil` for a
