@@ -393,11 +393,11 @@ struct HierarchySidebarView: View {
     } message: {
       Text(projectRemovalMessage)
     }
-    // First-archive explainer (once per session).
+    // Archive confirmation, shown for every interactive archive (ADR 0010).
     .confirmationDialog(
       "Archive this Worktree?",
       isPresented: Binding(
-        get: { store.pendingArchiveExplainer != nil },
+        get: { store.pendingWorktreeArchive != nil },
         set: { if !$0 { store.send(.worktreeArchiveCancelled) } }
       ),
       titleVisibility: .visible
@@ -410,7 +410,8 @@ struct HierarchySidebarView: View {
       }
     } message: {
       Text(
-        "Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu.")
+        "Its terminal sessions stop. Files and branch are kept. Find it later under “Archived Worktrees” in the Project menu."
+      )
     }
     // Batch "Archive All Merged Worktrees" confirmation (Project ⋯ menu).
     .confirmationDialog(
