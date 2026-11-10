@@ -25,10 +25,13 @@ nonisolated struct AgentSkillClient: Sendable {
     @Sendable (_ profile: AgentProfile, _ projectStart: URL?, _ newWorktree: NewWorktreeSource?)
       async -> [AgentSkillEntry]
   /// The skills in a remote project on `host`: `projectStart` is a path on
-  /// the host, `createsWorktree` is `true` when the agent starts in a
-  /// worktree that does not exist yet. Fails when the host cannot be read.
+  /// the host, `newWorktree` is set as for `load`; its copy options do not
+  /// apply, because a remote project copies no files into a new worktree.
+  /// Fails when the host cannot be read.
   var loadRemote:
-    @Sendable (_ profile: AgentProfile, _ host: RemoteHost, _ projectStart: String?, _ createsWorktree: Bool)
+    @Sendable (
+      _ profile: AgentProfile, _ host: RemoteHost, _ projectStart: String?, _ newWorktree: NewWorktreeSource?
+    )
       async -> Result<[AgentSkillEntry], RemoteSkillReadError>
 }
 
@@ -58,11 +61,11 @@ extension AgentSkillClient: DependencyKey {
         SkillLocationResolver.directories(for: profile, projectStart: view, projectStartExists: false),
         precedence: precedence)
     },
-    loadRemote: { profile, host, projectStart, createsWorktree in
+    loadRemote: { profile, host, projectStart, newWorktree in
       do throws(RemoteSkillReadError) {
         return .success(
           try await RemoteSkillReader(host: host).load(
-            profile: profile, projectStart: projectStart, createsWorktree: createsWorktree))
+            profile: profile, projectStart: projectStart, newWorktree: newWorktree))
       } catch {
         return .failure(error)
       }
