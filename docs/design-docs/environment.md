@@ -161,7 +161,7 @@ script:
 | 远程命令（`ssh`，含远程 git、`ssh -G`） | 直接 | 远端已在远程 login shell 里执行；本地 ssh 需要的是 launchd 的 `SSH_AUTH_SOCK` |
 | 自己启动 shell 的命令（Agent 安装探测、workflow 的 `/bin/sh -c`） | 直接 | 由调用方决定 shell |
 
-**代价**：每条命令多一次 shell 启动和一次 rc 执行，耗时取决于用户的 rc。空 rc 时 `git --version` 的中位数增加约 5 ms；加载 oh-my-zsh、pyenv、starship、nvm 的 rc 增加约 2 秒（Apple Silicon Mac mini 上 11 次的中位数）。rc 越重，后台 git 越慢。
+**代价**：每条命令多一次 shell 启动和一次 rc 执行，耗时取决于用户的 rc。在一台 Apple Silicon Mac mini 上，`git --version` 21 次的中位数：直接启动 7.9 ms，空 rc 14.0 ms（约 +6 ms），加载 oh-my-zsh、pyenv、starship、nvm 的 rc 687.8 ms（约 +680 ms；机器繁忙时约 2 秒）。rc 越重，后台 git 越慢。
 
 ### 覆盖点（隔离缝）
 
