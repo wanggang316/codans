@@ -65,7 +65,8 @@ struct RemoteGitRoutingTests {
     let calls = await runner.calls
     #expect(calls.allSatisfy { $0.executable.path == "/usr/bin/git" })
     #expect(calls.allSatisfy { $0.cwd.path == "/tmp" })
-    #expect(calls.allSatisfy { $0.launch == .loginShell })
+    // A status refresh is local: direct, no rc cost (retry only on a missing command).
+    #expect(calls.allSatisfy { $0.launch == .directThenLoginShell })
   }
 
   @Test
