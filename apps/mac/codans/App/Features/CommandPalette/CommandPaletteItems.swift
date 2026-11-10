@@ -195,6 +195,13 @@ enum CommandPaletteItems {
         kind: .showUnreadNotifications
       ),
       CommandPaletteItem(
+        id: "app.refresh-all-projects",
+        title: "Refresh All Projects",
+        searchText: "app project refresh reload reconcile",
+        icon: "arrow.clockwise",
+        kind: .refreshAllProjects
+      ),
+      CommandPaletteItem(
         id: "app.open-ghostty-config",
         title: "Open Ghostty Config",
         searchText: "app config settings",

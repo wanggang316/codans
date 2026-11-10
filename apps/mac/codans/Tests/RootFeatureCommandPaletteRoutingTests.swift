@@ -69,6 +69,18 @@ struct RootFeatureCommandPaletteRoutingTests {
   }
 
   @Test
+  func activateRefreshAllProjectsStartsTheProjectReconcile() async {
+    // Same path as the former sidebar footer button: the sidebar delegate
+    // runs `reconcileAll(force: true)`, then refreshes the Git Platform.
+    let store = Self.stubbedStore()
+    await store.send(.commandPaletteToggle(nil))
+    await store.send(.commandPalette(.presented(.delegate(.activate(.refreshAllProjects)))))
+    await store.receive(\.sidebar.refreshAllProjectsTapped)
+    await store.receive(\.sidebar.delegate.refreshAllProjectsRequested)
+    await store.receive(\.gitPlatform.refreshAllRequested)
+  }
+
+  @Test
   func activateWindowActionRoutesToWindowRouter() async {
     let store = Self.stubbedStore()
     await store.send(.commandPaletteToggle(nil))

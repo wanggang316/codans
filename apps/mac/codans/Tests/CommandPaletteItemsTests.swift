@@ -36,10 +36,22 @@ struct CommandPaletteItemsTests {
     #expect(ids.contains("app.open-settings"))
     #expect(ids.contains("app.check-for-updates"))
     #expect(ids.contains("app.quit"))
+    #expect(ids.contains("app.refresh-all-projects"))
     #expect(!ids.contains("git.toggle-viewer"))
     #expect(!ids.contains("editor.open-default"))
     #expect(!ids.contains { $0.hasPrefix("pane.") })
     #expect(!ids.contains { $0.hasPrefix("window.") })
+  }
+
+  @Test
+  func refreshAllProjectsItemIsListedWithoutASelection() throws {
+    let items = Self.withEmptySettings {
+      CommandPaletteItems.build(selection: Self.emptySelection, catalog: Self.emptyCatalog)
+    }
+    let item = try #require(items.first { $0.id == "app.refresh-all-projects" })
+    #expect(item.title == "Refresh All Projects")
+    #expect(item.kind == .refreshAllProjects)
+    #expect(!item.hiddenWhenQueryEmpty)
   }
 
   // MARK: - Worktree context
