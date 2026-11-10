@@ -466,11 +466,14 @@ struct ProjectGeneralSettingsView: View {
 
   /// The Add Project menu over the local repositories a workspace can take
   /// as sources: not remote, not a workspace, and not listed already.
-  /// Recent is computed over these candidates only.
+  /// Recent is computed over these candidates only. Paths compare
+  /// canonical: a source recorded as `/var/...` is the project at
+  /// `/private/var/...`.
   static func workspaceAddProjectMenu(catalog: Catalog, listedGitRoots: Set<String>) -> ProjectMenu {
+    let listed = Set(listedGitRoots.map(HierarchyManager.canonicalPath))
     let candidates = catalog.projects.filter { project in
       guard project.isOnThisMac, !project.isWorkspace, let gitRoot = project.gitRoot else { return false }
-      return !listedGitRoots.contains(gitRoot)
+      return !listed.contains(HierarchyManager.canonicalPath(gitRoot))
     }
     return ProjectMenu(projects: candidates.map(ProjectMenuOption.init))
   }
