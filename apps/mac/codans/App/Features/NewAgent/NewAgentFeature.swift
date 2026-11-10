@@ -385,7 +385,7 @@ struct NewAgentFeature {
     return .run { send in
       await send(
         .skillsLoaded(
-          client.load(scope.profile, scope.projectStart, scope.newWorktree), for: scope))
+          client.load(SkillLaunch(profile: scope.profile), scope.projectStart, scope.newWorktree), for: scope))
     }
     .cancellable(id: CancelID.skills, cancelInFlight: true)
   }

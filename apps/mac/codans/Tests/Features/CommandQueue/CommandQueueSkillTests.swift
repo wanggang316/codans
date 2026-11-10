@@ -7,8 +7,8 @@ import Testing
 
 @testable import Codans
 
-/// Agent Skill completion in the Command Queue composer: the reducer reads
-/// the agent and the working directory of the target pane, and the real
+/// Agent Skill completion in the Command Queue composer: the reducer follows
+/// the agent that runs in the target pane and its directory, and the real
 /// composer view routes Return, Tab, and Escape through the shared
 /// completion modifier.
 @MainActor
@@ -29,63 +29,102 @@ struct CommandQueueSkillTests {
     return Catalog(projects: [project])
   }
 
-  /// What a skill scan was asked for: the agent and the start directory.
+  /// A Claude Code process with its own home, run in the pane's subfolder.
+  private nonisolated static func claude(
+    pid: Int32 = 41, arguments: [String] = ["--settings", "/srv/s.json"],
+    cwd: String? = "/tmp/queue/repo/sub/agent"
+  ) -> RunningAgent {
+    RunningAgent(
+      pid: pid,
+      launch: SkillLaunch(kind: .claudeCode, arguments: arguments, environment: ["HOME": "/srv/agent-home"]),
+      workingDirectory: cwd.map { URL(fileURLWithPath: $0, isDirectory: true) })
+  }
+
+  /// What a skill scan was asked for: the launch and the start directory.
   private struct Load: Equatable, Sendable {
-    var kind: AgentKind
-    var usesDefaults: Bool
+    var launch: SkillLaunch
     var start: String?
     var newWorktree: NewWorktreeSource?
   }
 
   private static func makeStore(
-    catalog: Catalog, paneID: PaneID, loads: LockIsolated<[Load]>
+    catalog: Catalog, paneID: PaneID, loads: LockIsolated<[Load]>,
+    running: LockIsolated<RunningAgent?> = LockIsolated(claude())
   ) -> TestStoreOf<CommandQueueFeature> {
     TestStore(initialState: CommandQueueFeature.State(paneID: paneID)) {
       CommandQueueFeature()
     } withDependencies: {
       $0.hierarchyClient.snapshot = { catalog }
-      $0[AgentSkillClient.self].load = { profile, start, newWorktree in
+      $0.hierarchyClient.paneChanges = { paneID in
+        AsyncStream { continuation in
+          continuation.yield(catalog.pane(paneID))
+          continuation.finish()
+        }
+      }
+      $0.terminalClient.runningAgent = { _, _ in running.value }
+      $0[AgentSkillClient.self].load = { launch, start, newWorktree in
         loads.withValue {
-          $0.append(
-            Load(
-              kind: profile.kind, usesDefaults: profile == AgentProfile(id: profile.id, kind: profile.kind),
-              start: start?.path(percentEncoded: false), newWorktree: newWorktree))
+          $0.append(Load(launch: launch, start: start?.path(percentEncoded: false), newWorktree: newWorktree))
         }
         return skills
       }
     }
   }
 
+  private static func scope(_ agent: RunningAgent) -> CommandQueueFeature.SkillScope {
+    CommandQueueFeature.SkillScope(
+      pid: agent.pid, launch: agent.launch!, projectStart: agent.workingDirectory)
+  }
+
   // MARK: - Reducer
 
   @Test
-  func paneAgentSkillsLoadForItsWorkingDirectory() async {
+  func runningAgentSkillsLoadWithItsLaunchAndDirectory() async {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
-    let store = Self.makeStore(
-      catalog: Self.catalog(paneID: paneID, agent: .claudeCode), paneID: paneID, loads: loads)
-    await store.send(.onAppear) {
+    let catalog = Self.catalog(paneID: paneID, agent: .claudeCode)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads)
+    await store.send(.onAppear)
+    await store.receive(.paneChanged(catalog.pane(paneID))) {
       $0.skillLocation = .claudeCode
       $0.skillsUnavailableReason = nil
+      $0.skillsScope = Self.scope(Self.claude())
     }
-    await store.receive(.skillsLoaded(Self.skills)) { $0.skills = Self.skills }
-    #expect(loads.value == [Load(kind: .claudeCode, usesDefaults: true, start: "/tmp/queue/repo/sub/")])
+    await store.receive(.skillsLoaded(Self.skills, for: Self.scope(Self.claude()))) { $0.skills = Self.skills }
+    #expect(
+      loads.value == [Load(launch: Self.claude().launch!, start: "/tmp/queue/repo/sub/agent/")])
+    #expect(loads.value.first?.launch.profile.envVars["HOME"] == "/srv/agent-home")
+    #expect(loads.value.first?.launch.arguments == ["--settings", "/srv/s.json"])
 
     await store.send(.draftChanged("fix")) { $0.draft = "fix" }
     await store.send(.skillsButtonTapped(selection: 3..<3)) { $0.draft = "fix /" }
   }
 
   @Test
+  func unreadableAgentDirectoryFallsBackToThePaneDirectory() async {
+    let paneID = PaneID()
+    let loads = LockIsolated<[Load]>([])
+    let catalog = Self.catalog(paneID: paneID, agent: .claudeCode)
+    let store = Self.makeStore(
+      catalog: catalog, paneID: paneID, loads: loads, running: LockIsolated(Self.claude(cwd: nil)))
+    store.exhaustivity = .off
+    await store.send(.paneChanged(catalog.pane(paneID)))
+    await store.receive(\.skillsLoaded)
+    #expect(loads.value.map(\.start) == ["/tmp/queue/repo/sub/"])
+  }
+
+  @Test
   func codexPaneUsesItsOwnCallPrefix() async {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
-    let store = Self.makeStore(
-      catalog: Self.catalog(paneID: paneID, agent: .codex), paneID: paneID, loads: loads)
-    await store.send(.onAppear) {
-      $0.skillLocation = .codex
-      $0.skillsUnavailableReason = nil
-    }
-    await store.receive(.skillsLoaded(Self.skills)) { $0.skills = Self.skills }
+    let catalog = Self.catalog(paneID: paneID, agent: .codex)
+    let codex = RunningAgent(
+      pid: 7, launch: SkillLaunch(kind: .codex, arguments: [], environment: [:]), workingDirectory: nil)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: LockIsolated(codex))
+    store.exhaustivity = .off
+    await store.send(.paneChanged(catalog.pane(paneID)))
+    await store.receive(\.skillsLoaded)
+    #expect(store.state.skillLocation == .codex)
     await store.send(.skillsButtonTapped(selection: nil)) { $0.draft = "$" }
   }
 
@@ -93,9 +132,9 @@ struct CommandQueueSkillTests {
   func paneWithoutAnAgentOffersNoSkills() async {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
-    let store = Self.makeStore(
-      catalog: Self.catalog(paneID: paneID, agent: nil), paneID: paneID, loads: loads)
-    await store.send(.onAppear)
+    let catalog = Self.catalog(paneID: paneID, agent: nil)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads)
+    await store.send(.paneChanged(catalog.pane(paneID)))
     #expect(store.state.skillLocation == .none)
     #expect(store.state.skillsUnavailableReason == CommandQueueFeature.State.noAgentReason)
     await store.send(.skillsButtonTapped(selection: nil))
@@ -106,9 +145,9 @@ struct CommandQueueSkillTests {
   func unsupportedAgentOffersNoSkills() async {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
-    let store = Self.makeStore(
-      catalog: Self.catalog(paneID: paneID, agent: .gemini), paneID: paneID, loads: loads)
-    await store.send(.onAppear) {
+    let catalog = Self.catalog(paneID: paneID, agent: .gemini)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads)
+    await store.send(.paneChanged(catalog.pane(paneID))) {
       $0.skillsUnavailableReason =
         "Skill suggestions are not available for \(AgentKind.gemini.displayName)"
     }
@@ -120,14 +159,76 @@ struct CommandQueueSkillTests {
   func remoteProjectOffersNoSkills() async {
     let paneID = PaneID()
     let loads = LockIsolated<[Load]>([])
-    let store = Self.makeStore(
-      catalog: Self.catalog(paneID: paneID, agent: .claudeCode, remote: true), paneID: paneID,
-      loads: loads)
-    await store.send(.onAppear) {
+    let catalog = Self.catalog(paneID: paneID, agent: .claudeCode, remote: true)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads)
+    await store.send(.paneChanged(catalog.pane(paneID))) {
       $0.skillsUnavailableReason = "Skill suggestions are not available for remote projects"
     }
     #expect(store.state.skillLocation == .none)
     #expect(loads.value.isEmpty)
+  }
+
+  /// An agent whose process or environment codans cannot read may run with
+  /// another home or other flags, so it gets no list (ADR 0010).
+  @Test
+  func unreadableLaunchOffersNoSkills() async {
+    let paneID = PaneID()
+    let loads = LockIsolated<[Load]>([])
+    let catalog = Self.catalog(paneID: paneID, agent: .claudeCode)
+    let running = LockIsolated<RunningAgent?>(nil)
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: running)
+    await store.send(.paneChanged(catalog.pane(paneID))) {
+      $0.skillsUnavailableReason = CommandQueueFeature.State.unreadableLaunchReason
+    }
+    running.setValue(RunningAgent(pid: 9, launch: nil, workingDirectory: nil))
+    await store.send(.paneChanged(catalog.pane(paneID)))
+    #expect(store.state.skillLocation == .none)
+    #expect(loads.value.isEmpty)
+  }
+
+  /// The pane's agent changes while the panel is open: the old skills go
+  /// at once, the new agent's load, and a late result for the old agent is
+  /// dropped.
+  @Test
+  func agentChangeWhileOpenReloadsAndDropsTheOldResult() async {
+    let paneID = PaneID()
+    let loads = LockIsolated<[Load]>([])
+    let catalog = Self.catalog(paneID: paneID, agent: .claudeCode)
+    let running = LockIsolated<RunningAgent?>(Self.claude())
+    let store = Self.makeStore(catalog: catalog, paneID: paneID, loads: loads, running: running)
+    let pane = catalog.pane(paneID)
+    let first = Self.scope(Self.claude())
+    await store.send(.paneChanged(pane)) {
+      $0.skillLocation = .claudeCode
+      $0.skillsUnavailableReason = nil
+      $0.skillsScope = first
+    }
+    await store.receive(.skillsLoaded(Self.skills, for: first)) { $0.skills = Self.skills }
+
+    // The same agent again (another pane field changed): nothing reloads.
+    await store.send(.paneChanged(pane))
+
+    // A new agent process with other flags.
+    let restarted = Self.claude(pid: 42, arguments: [])
+    running.setValue(restarted)
+    await store.send(.paneChanged(pane)) {
+      $0.skills = []
+      $0.skillsScope = Self.scope(restarted)
+    }
+    await store.receive(.skillsLoaded(Self.skills, for: Self.scope(restarted))) { $0.skills = Self.skills }
+    // A late result for the old agent changes nothing.
+    await store.send(.skillsLoaded([Self.skills[0]], for: first))
+
+    // The agent exits.
+    var exited = pane
+    exited?.agentKind = nil
+    await store.send(.paneChanged(exited)) {
+      $0.skillLocation = .none
+      $0.skills = []
+      $0.skillsScope = nil
+      $0.skillsUnavailableReason = CommandQueueFeature.State.noAgentReason
+    }
+    #expect(loads.value.count == 2)
   }
 
   // MARK: - Composer keys
@@ -160,6 +261,13 @@ struct CommandQueueSkillTests {
       $0[HierarchyClient.self].commandQueue = { _ in recorder.queue }
       $0[HierarchyClient.self].setCommandQueue = { _, queue in recorder.queue = queue }
       $0.date = .constant(Date(timeIntervalSinceReferenceDate: 1_000_000))
+      $0.hierarchyClient.paneChanges = { paneID in
+        AsyncStream { continuation in
+          continuation.yield(catalog.pane(paneID))
+          continuation.finish()
+        }
+      }
+      $0.terminalClient.runningAgent = { _, _ in claude() }
       $0[AgentSkillClient.self].load = { _, _, _ in skills }
     }
     let window = NSWindow(

@@ -309,6 +309,11 @@ nonisolated struct HierarchyClient: Sendable {
   /// pane outside the catalog prunes against this.
   var paneMembershipChanges: @MainActor @Sendable () -> AsyncStream<Set<PaneID>>
 
+  /// Emits `paneID`'s pane, first at once and then whenever it changes
+  /// (its agent binding, its working directory, ...). `nil` once the pane
+  /// leaves the catalog.
+  var paneChanges: @MainActor @Sendable (_ paneID: PaneID) -> AsyncStream<Pane?>
+
   // MARK: - Worktree Management additions
 
   /// Flips `Worktree.archived` for the given Worktree.
@@ -998,6 +1003,7 @@ extension HierarchyClient {
       snapshot: { manager.catalog },
       selectionChanges: { makeSelectionStream(manager: manager) },
       paneMembershipChanges: { makeObservedStream(manager: manager) { $0.catalog.allPaneIDs() } },
+      paneChanges: { paneID in makeObservedStream(manager: manager) { $0.catalog.pane(paneID) } },
       setWorktreeArchived: { worktreeID, archived in
         try manager.setWorktreeArchived(worktreeID: worktreeID, archived: archived)
       },
@@ -2431,6 +2437,7 @@ extension HierarchyClient: DependencyKey {
     snapshot: { fatalError("HierarchyClient.liveValue not configured") },
     selectionChanges: { AsyncStream { $0.finish() } },
     paneMembershipChanges: { AsyncStream { $0.finish() } },
+    paneChanges: { _ in AsyncStream { $0.finish() } },
     setWorktreeArchived: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreePinned: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
     setWorktreeIsNew: { _, _ in fatalError("HierarchyClient.liveValue not configured") },
@@ -2555,6 +2562,10 @@ extension HierarchyClient: DependencyKey {
     // Only pruning listens to it, and `onLaunch` subscribes in every root
     // test; an `unimplemented` here would turn those into stub farms.
     paneMembershipChanges: { AsyncStream { $0.finish() } },
+    paneChanges: unimplemented(
+      "HierarchyClient.paneChanges",
+      placeholder: AsyncStream { $0.finish() }
+    ),
     setWorktreeArchived: unimplemented("HierarchyClient.setWorktreeArchived"),
     setWorktreePinned: unimplemented("HierarchyClient.setWorktreePinned"),
     setWorktreeIsNew: unimplemented("HierarchyClient.setWorktreeIsNew"),

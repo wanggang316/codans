@@ -341,7 +341,8 @@ struct NewAgentFeatureTests {
         ]
       }
       $0.gitWorktreeClient.defaultRemoteBranchRef = { _ in "origin/main" }
-      $0[AgentSkillClient.self].load = { profile, start, newWorktree in
+      $0[AgentSkillClient.self].load = { launch, start, newWorktree in
+        let profile = launch.profile
         loaded.withValue { $0.append(profile.kind) }
         copies.withValue { $0.append(newWorktree) }
         let path = start.map { url in

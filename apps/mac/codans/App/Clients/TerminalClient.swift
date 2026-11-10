@@ -59,6 +59,10 @@ nonisolated struct TerminalClient: Sendable {
   /// events drop under per-subscriber backpressure.
   var events: @MainActor @Sendable () -> AsyncStream<TerminalEvent>
 
+  /// The `kind` agent that runs in the pane's foreground job now, read
+  /// from the kernel. `nil` when no such process is found.
+  var runningAgent: @MainActor @Sendable (_ paneID: PaneID, _ kind: AgentKind) -> RunningAgent?
+
   nonisolated enum Error: LocalizedError, Equatable, Sendable {
     case worktreeNotFound(WorktreeID)
     case paneNotFound(PaneID)
@@ -120,7 +124,21 @@ extension TerminalClient {
       },
       closeSurface: { paneID in engine.closeSurface(for: paneID) },
       surface: { paneID in engine.ghosttyRuntime?.surface(for: paneID) },
-      events: { engine.events() }
+      events: { engine.events() },
+      runningAgent: { paneID, kind in
+        guard let group = engine.foregroundProcessGroupID(for: paneID),
+          let job = ForegroundJobReader.foregroundJob(processGroupID: group),
+          let agent = AgentKindPatterns.agentLaunch(of: kind, in: job)
+        else { return nil }
+        return RunningAgent(
+          pid: agent.pid,
+          launch: ForegroundJobReader.processEnvironment(pid: agent.pid).flatMap {
+            SkillLaunch(kind: kind, arguments: agent.arguments, environment: $0)
+          },
+          workingDirectory: ForegroundJobReader.processWorkingDirectory(pid: agent.pid).map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+          })
+      }
     )
   }
 }
@@ -139,7 +157,8 @@ extension TerminalClient: DependencyKey {
     ensureSurface: { _, _, _, _, _ in fatalError("TerminalClient.liveValue not configured") },
     closeSurface: { _ in fatalError("TerminalClient.liveValue not configured") },
     surface: { _ in nil },
-    events: { AsyncStream { $0.finish() } }
+    events: { AsyncStream { $0.finish() } },
+    runningAgent: { _, _ in nil }
   )
 
   static let testValue: TerminalClient = TerminalClient(
@@ -159,7 +178,8 @@ extension TerminalClient: DependencyKey {
     events: unimplemented(
       "TerminalClient.events",
       placeholder: AsyncStream { $0.finish() }
-    )
+    ),
+    runningAgent: unimplemented("TerminalClient.runningAgent", placeholder: nil)
   )
 }
 
