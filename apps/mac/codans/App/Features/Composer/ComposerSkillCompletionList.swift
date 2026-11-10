@@ -1,17 +1,18 @@
 import CodansCore
 import SwiftUI
 
-/// The open skill list of a `ComposerSkillCompletion`: one row per match
-/// with its name, the first line of its description, and its source. The
-/// highlighted row follows the arrow keys; a click picks a row.
+/// The open skill list of a `ComposerSkillCompletion`, drawn as a menu card
+/// in `ComposerSkillCompletionPanel`: one row per match with an icon for its
+/// source, its name, and, quieter, the first line of its description and
+/// its source. The highlighted row has the system selection color and
+/// follows the arrow keys; a click picks a row.
 struct ComposerSkillCompletionList: View {
+  private typealias Layout = ComposerSkillCompletionPanelLayout
+
   let completion: ComposerSkillCompletion
   let text: String
   let selection: ComposerSelection
   let onInsert: (String) -> Void
-
-  /// About five rows.
-  private static let maxHeight: CGFloat = 170
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -25,51 +26,64 @@ struct ComposerSkillCompletionList: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            // The editor keeps focus, so keys keep going to the list.
             .focusable(false)
             .id(skill.id)
           }
         }
-        .padding(4)
+        .padding(.vertical, Layout.verticalPadding)
+        .padding(.horizontal, Layout.horizontalPadding)
       }
-      .frame(maxHeight: Self.maxHeight)
-      .fixedSize(horizontal: false, vertical: true)
+      .scrollIndicators(.automatic)
       .onChange(of: completion.highlighted?.id) { _, id in
         if let id { proxy.scrollTo(id) }
       }
     }
-    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Skills")
   }
 
   private func row(_ skill: AgentSkillEntry, isHighlighted: Bool) -> some View {
-    HStack(spacing: 8) {
+    let secondary: AnyShapeStyle = isHighlighted ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary)
+    return HStack(spacing: 6) {
+      Image(systemName: Self.symbol(for: skill.source))
+        .frame(width: 16)
+        .foregroundStyle(secondary)
+        // The source text says the same.
+        .accessibilityHidden(true)
       Text(skill.name)
-        .font(.callout.weight(.medium))
+        .foregroundStyle(isHighlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .lineLimit(1)
         .layoutPriority(1)
       if let summary = skill.summary {
         Text(summary)
-          .font(.callout)
-          .foregroundStyle(isHighlighted ? .primary : .secondary)
+          .foregroundStyle(secondary)
           .lineLimit(1)
           .truncationMode(.tail)
       }
       Spacer(minLength: 8)
       Text(skill.source.rawValue)
         .font(.caption)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(secondary)
     }
-    .padding(.horizontal, 8)
-    .padding(.vertical, 5)
+    .font(.system(size: NSFont.systemFontSize))
+    .padding(.horizontal, 6)
+    .frame(height: Layout.rowHeight)
     .background(
-      isHighlighted ? AnyShapeStyle(Color.accentColor.opacity(0.22)) : AnyShapeStyle(.clear),
-      in: RoundedRectangle(cornerRadius: 5)
+      isHighlighted
+        ? AnyShapeStyle(Color(nsColor: .selectedContentBackgroundColor)) : AnyShapeStyle(.clear),
+      in: RoundedRectangle(cornerRadius: 4)
     )
+    .help(skill.summary ?? "")
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+  }
+
+  private static func symbol(for source: AgentSkillSource) -> String {
+    switch source {
+    case .user: "person"
+    case .project: "folder"
+    case .plugin: "puzzlepiece.extension"
+    }
   }
 }
 
@@ -134,6 +148,16 @@ private struct ComposerSkillCompletionKeys: ViewModifier {
 
   func body(content: Content) -> some View {
     content
+      // The open list floats in a child panel, so it never moves the
+      // owner's layout.
+      .background(
+        ComposerSkillCompletionPanelAnchor(
+          content: ComposerSkillCompletionList(
+            completion: completion, text: text, selection: selection, onInsert: onInsert),
+          rowCount: completion.isOpen ? completion.matches.count : 0,
+          onResignKey: { [completion, text] in _ = completion.handle(.dismiss, text: text) }
+        )
+      )
       // Text and caret together: SwiftUI reports the caret before it writes
       // the text, and both are current only when the view updates. A caret
       // move without a text change (a click) also recomputes the call.

@@ -312,11 +312,6 @@ struct NewAgentView: View {
     Section {
       VStack(alignment: .leading, spacing: 4) {
         editor
-        if skillCompletion.isOpen {
-          ComposerSkillCompletionList(
-            completion: skillCompletion, text: store.prompt, selection: promptSelection
-          ) { store.send(.promptChanged($0)) }
-        }
         HStack(spacing: 8) {
           ComposerFilePickerButton { showsFilePicker = true }
           ComposerSkillsButton(unavailableReason: store.skillsUnavailableReason) {

@@ -232,7 +232,7 @@ private final class TabHoverCardPanel: NSPanel {
     glass.material = .popover
     glass.blendingMode = .behindWindow
     glass.state = .active
-    glass.maskImage = Self.mask(cornerRadius: TabHoverCardView.cornerRadius)
+    glass.maskImage = .roundedMask(cornerRadius: TabHoverCardView.cornerRadius)
     contentView = glass
     isOpaque = false
     backgroundColor = .clear
@@ -242,19 +242,6 @@ private final class TabHoverCardPanel: NSPanel {
     isReleasedWhenClosed = false
     animationBehavior = .none
     collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
-  }
-
-  /// Stretchable rounded-rect mask: only the corners keep their shape.
-  private static func mask(cornerRadius radius: CGFloat) -> NSImage {
-    let edge = radius * 2 + 1
-    let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
-      NSColor.black.setFill()
-      NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-      return true
-    }
-    image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
-    image.resizingMode = .stretch
-    return image
   }
 
   override var canBecomeKey: Bool { false }

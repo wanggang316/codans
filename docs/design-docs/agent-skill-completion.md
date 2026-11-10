@@ -2,7 +2,7 @@
 
 **Availability:** Available: New Agent completion of user-level and project-level skills for Claude Code, Codex, and Pi, of enabled Claude Code and Codex plugin skills, and the Skills button. Other agents and remote projects get no completion; the Skills button is disabled with the reason (see "探针实测").
 **Author:** Gump（与 Claude）
-**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [ProjectFileExclusion](../../apps/mac/CodansCore/Agents/ProjectFileExclusion.swift)
+**Implementation:** Entry points: [NewAgentView](../../apps/mac/codans/App/Features/NewAgent/NewAgentView.swift) (Skills button, prompt editor), [NewAgentFeature](../../apps/mac/codans/App/Features/NewAgent/NewAgentFeature.swift) (scan scope, `skillsUnavailableReason`), [ComposerTextEditor](../../apps/mac/codans/App/Features/Composer/ComposerTextEditor.swift) (prefix and keys), [AgentSkillClient](../../apps/mac/codans/App/Clients/AgentSkillClient.swift) (scan). Supporting: [ComposerSkillCompletion](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletion.swift), [ComposerSkillCompletionList](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionList.swift), [ComposerSkillCompletionPanel](../../apps/mac/codans/App/Features/Composer/ComposerSkillCompletionPanel.swift), [SkillLocation](../../apps/mac/CodansCore/Agents/SkillLocation.swift), [SkillLocationResolver](../../apps/mac/CodansCore/Agents/SkillLocationResolver.swift), [SkillScanner](../../apps/mac/CodansCore/Agents/SkillScanner.swift), [ClaudePluginRegistry](../../apps/mac/CodansCore/Agents/ClaudePluginRegistry.swift), [CodexPluginRegistry](../../apps/mac/CodansCore/Agents/CodexPluginRegistry.swift), [PiProjectTrust](../../apps/mac/CodansCore/Agents/PiProjectTrust.swift), [ProjectFileExclusion](../../apps/mac/CodansCore/Agents/ProjectFileExclusion.swift)
 
 ## 背景与范围
 
@@ -134,11 +134,12 @@ struct SkillLocation {
 - **过滤**：对名称与描述做模糊匹配，名称前缀匹配优先。过滤结果为空时自动收起。
 - **禁止模型调用的 Skill**：调用 token 之前只有空白时（prompt 开头）列出；之前有其他文本时（prompt 中间）不列出。Claude Code 只在 prompt 开头由 CLI 直接展开 Skill；中间的调用靠模型的 Skill 工具，而 frontmatter 含 `disable-model-invocation: true` 的 Skill 模型不能调用，插入后不生效（ADR 0010）。
 - **按键**：弹出时 Return / Tab 插入、↑↓ 移动、Esc 只关弹窗。收起后 Return 发送、Esc 关对话框，与现在一致。
-- **插入**：把已输入的前缀和查询替换为 `<调用 token> `（末尾带空格）。
+- **插入**：把已输入的前缀和查询替换为 `<调用 token> `（末尾带空格）。点击某一行同样插入。
+- **呈现**：列表浮在对话框之上，不占对话框布局，打开和关闭时对话框大小不变。它是输入框所在窗口的子窗口（`ComposerSkillCompletionPanel`：borderless、non-activating、不能成为 key），与 `NSTextView` 的补全相同；不用 `.overlay`（会被分组 `Form` 的滚动视图和 sheet 边界裁掉），也不用 `.popover`（会从输入框拿走焦点）。面板与输入框同宽，贴着输入框上沿向上打开，上方屏幕空间不够时在输入框下方打开。焦点留在输入框，按键仍由修饰符处理。面板随窗口移动；列表关闭、窗口关闭或窗口失去 key 时面板关闭（失去 key 时按 Esc 处理，同一调用不再自动弹出）。外观为原生菜单卡片：菜单材质、圆角、系统阴影；每行有来源图标与名称，描述首行与来源用次要颜色，悬停显示完整描述；高亮行用系统选中色；最多显示 9 行，其余滚动。
 - **Skills 按钮**：在光标处插入前缀（替换选中文本；光标前紧跟非空白字符时先补一个空格，`invocationPosition == .leading` 时插在 prompt 开头），并把光标移到前缀后，于是弹出同一个弹窗。
 - **不可用**：agent 的 `invocationStyle == .none` 或项目为远程时，不弹出，Skills 按钮置灰，tooltip 说明原因（`NewAgentFeature.State.skillsUnavailableReason`）：远程项目为 "Skill suggestions are not available for remote projects"，不支持的 agent 为 "Skill suggestions are not available for <agent>"；未选项目或 agent 时提示先选择。
 
-组件 `ComposerSkillCompletion` 与 `ComposerTextEditor` 并列放在 `App/Features/Composer/`，不依赖 New Agent，便于后续接入其他输入处。
+组件 `ComposerSkillCompletion`、列表面板与 `ComposerTextEditor` 并列放在 `App/Features/Composer/`，不依赖 New Agent，便于后续接入其他输入处。
 
 `.composerSkillCompletion` 修饰符同时接管输入框的 Return 和 Esc（`onSubmit` / `onCancel`）：SwiftUI 先把按键交给最外层的 `onKeyPress`，宿主另写的处理器会在弹窗之前拿走 Return。弹窗跟随文本与光标一起更新，光标移出调用 token（点击、方向键）即收起；扫描未完成时已输入的前缀保留，结果到达后弹出。切换 profile 时先清空旧结果，只接受属于当前 profile 的扫描结果。
 
