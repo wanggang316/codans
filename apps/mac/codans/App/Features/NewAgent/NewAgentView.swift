@@ -168,7 +168,7 @@ struct NewAgentView: View {
         Label {
           Text(selected?.name ?? "Project")
         } icon: {
-          Image(nsImage: Self.projectIcon(selected))
+          Image(nsImage: ProjectMenuRowLabel.icon(selected))
             .accessibilityHidden(true)
         }
         // On the label content, not the `Menu`: see `selectorMenu`.
@@ -183,54 +183,20 @@ struct NewAgentView: View {
   /// Recent, then the project groups. A project in Recent is in its group
   /// too; both rows carry its tag, so both select it and both show checked.
   private var projectPicker: some View {
-    let menu = store.projectMenu
-    return Picker(
+    Picker(
       "Project",
       selection: Binding(
         get: { store.projectID },
         set: { if let id = $0 { store.send(.projectSelected(id)) } }
       )
     ) {
-      if !menu.recent.isEmpty {
-        Section("Recent") {
-          ForEach(menu.recent) { project in
-            projectRow(project, marksRemote: true)
-          }
-        }
-      }
-      ForEach(menu.sections) { section in
-        Section(section.title) {
-          ForEach(section.projects) { project in
-            // The section title already names the Host.
-            projectRow(project, marksRemote: false)
-          }
-        }
+      ProjectMenuContent(menu: store.projectMenu) { project, marksRemote in
+        ProjectMenuRowLabel(project: project, marksRemote: marksRemote)
+          .tag(ProjectID?.some(project.id))
       }
     }
     .pickerStyle(.inline)
     .labelsHidden()
-  }
-
-  private func projectRow(_ project: NewAgentFeature.ProjectOption, marksRemote: Bool) -> some View {
-    Label {
-      if marksRemote && project.isRemote {
-        Text("\(project.name) \(Image(systemName: RemoteProjectMarker.symbol))")
-          .accessibilityLabel("\(project.name), remote")
-      } else {
-        Text(project.name)
-      }
-    } icon: {
-      Image(nsImage: Self.projectIcon(project))
-        .accessibilityHidden(true)
-    }
-    .tag(ProjectID?.some(project.id))
-  }
-
-  /// The project's sidebar icon, pre-rendered for a menu row.
-  private static func projectIcon(_ project: NewAgentFeature.ProjectOption?) -> NSImage {
-    ProjectIconView.menuImage(
-      icon: project?.icon, color: project?.color,
-      defaultSymbol: project?.defaultSymbol ?? ProjectIconView.folderSymbol)
   }
 
   /// "New Worktree", then the project's local and remote branches.

@@ -1621,7 +1621,8 @@ struct HierarchySidebarFeature {
         return nil
       }
       return CreateWorkspaceFeature.Candidate(
-        id: project.id, name: project.name, gitRoot: gitRoot, icon: project.icon, color: project.color)
+        id: project.id, name: project.name, gitRoot: gitRoot, icon: project.icon, color: project.color,
+        kind: project.kind, lastActiveAt: project.lastActiveAt)
     }
   }
 
